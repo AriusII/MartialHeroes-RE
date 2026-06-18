@@ -25,24 +25,23 @@ namespace MartialHeroes.Assets.Parsers;
 /// <item><term>[3]</term><description>col3 — rate_src_x → float field @ 0x08</description></item>
 /// <item><term>[4]</term><description>col4 — divisor_x → int field @ 0x28 (interleaved early in stream)</description></item>
 /// <item><term>[5]</term><description>col5 — rate_src_y → float field @ 0x0C</description></item>
-/// <item><term>[6]</term><description>col6 — int_b → int field @ 0x10</description></item>
-/// <item><term>[7]</term><description>col7 — float_c → float @ 0x14</description></item>
-/// <item><term>[8]</term><description>col8 — float_d → float @ 0x18</description></item>
-/// <item><term>[9]</term><description>col9 — float_e → float @ 0x1C</description></item>
-/// <item><term>[10]</term><description>col10 — float_f → float @ 0x20</description></item>
-/// <item><term>[11]</term><description>col11 — float_g → float @ 0x24</description></item>
-/// <item><term>[12]</term><description>col12 — float_h → float @ 0x38</description></item>
-/// <item><term>[13]</term><description>col13 — float_i → float @ 0x3C</description></item>
-/// <item><term>[14]</term><description>(paired) — divisor_y → int field @ 0x2C</description></item>
-/// <item><term>[15..23]</term><description>dir_array_1[0..8] → i32[9] @ 0x40</description></item>
-/// <item><term>[24..32]</term><description>dir_array_2[0..8] → i32[9] @ 0x64</description></item>
+/// <item><term>[6]</term><description>col6 — divisor_y → int field @ 0x2C (interleaved early)</description></item>
+/// <item><term>[7]</term><description>col7 — int_b → int field @ 0x10</description></item>
+/// <item><term>[8]</term><description>col8 — float_c → float @ 0x14</description></item>
+/// <item><term>[9]</term><description>col9 — float_d → float @ 0x18</description></item>
+/// <item><term>[10]</term><description>col10 — float_e → float @ 0x1C</description></item>
+/// <item><term>[11]</term><description>col11 — float_f → float @ 0x20</description></item>
+/// <item><term>[12]</term><description>col12 — float_g → float @ 0x24</description></item>
+/// <item><term>[13]</term><description>col13 — float_h → float @ 0x38</description></item>
+/// <item><term>[14]</term><description>col14 — float_i → float @ 0x3C</description></item>
+/// <item><term>[15..23]</term><description>motion_ids_a[0..8] → i32[9] @ 0x40</description></item>
+/// <item><term>[24..32]</term><description>motion_ids_b[0..8] → i32[9] @ 0x64</description></item>
 /// </list>
 /// </para>
 /// <para>
 /// spec: Docs/RE/formats/actormotion.md §Per-record layout — "the read order interleaves two fields
 /// (the two divisors at +0x28 / +0x2C) earlier in the column stream than their record-offset position."
-/// Divisor_x is col4 in the spec notation (text position [4]); divisor_y is "(paired)" — observed
-/// at text position [14], directly before the two directional sub-arrays.
+/// Divisor_x is col4 in the spec notation (text position [4]); divisor_y is col6.
 /// </para>
 /// <para>
 /// The computed <c>motion_key = col1 + base_table[(uint8)(col0 + 1)]</c> requires an external
@@ -65,25 +64,25 @@ public static class ActormotionParser
     private const int ColRateSrcX = 3; // col3 → 0x08 (f32)
     private const int ColDivisorX = 4; // col4 → 0x28 (i32, interleaved early) spec: §Per-record layout
     private const int ColRateSrcY = 5; // col5 → 0x0C (f32)
-    private const int ColIntB = 6; // col6 → 0x10
-    private const int ColFloatC = 7; // col7 → 0x14
-    private const int ColFloatD = 8; // col8 → 0x18
-    private const int ColFloatE = 9; // col9 → 0x1C
-    private const int ColFloatF = 10; // col10 → 0x20
-    private const int ColFloatG = 11; // col11 → 0x24
-    private const int ColFloatH = 12; // col12 → 0x38
-    private const int ColFloatI = 13; // col13 → 0x3C
-    private const int ColDivisorY = 14; // (paired) → 0x2C spec: §Per-record layout — observed at text col 14
-    private const int ColDirArray1Start = 15; // dir_array_1[0..8] → 0x40
-    private const int ColDirArray2Start = 24; // dir_array_2[0..8] → 0x64
+    private const int ColDivisorY = 6; // col6 → 0x2C (i32, interleaved early) spec: §Per-record layout
+    private const int ColIntB = 7; // col7 → 0x10
+    private const int ColFloatC = 8; // col8 → 0x14
+    private const int ColFloatD = 9; // col9 → 0x18
+    private const int ColFloatE = 10; // col10 → 0x1C
+    private const int ColFloatF = 11; // col11 → 0x20
+    private const int ColFloatG = 12; // col12 → 0x24
+    private const int ColFloatH = 13; // col13 → 0x38
+    private const int ColFloatI = 14; // col14 → 0x3C
+    private const int ColMotionIdsAStart = 15; // motion_ids_a[0..8] → 0x40
+    private const int ColMotionIdsBStart = 24; // motion_ids_b[0..8] → 0x64
     private const int TotalColumns = 33; // total text columns per record
 
     /// <summary>
-    /// Number of elements in each directional sub-array.
-    /// 8 compass directions + 1 neutral/centre = 9.
-    /// spec: Docs/RE/formats/actormotion.md §The two 9-element directional sub-arrays (0x40, 0x64).
+    /// Number of elements in each motion-id sub-array.
+    /// The per-direction interpretation of the 9 slots is proposed, not proven.
+    /// spec: Docs/RE/formats/actormotion.md §The two 9-element motion-id sub-arrays (0x40, 0x64).
     /// </summary>
-    private const int DirArrayCount = 9; // spec: Docs/RE/formats/actormotion.md §dir sub-arrays
+    private const int MotionIdArrayCount = 9; // spec: Docs/RE/formats/actormotion.md §motion-id sub-arrays
 
     /// <summary>
     /// Per-frame rate base constant (frames per second).
@@ -211,7 +210,7 @@ public static class ActormotionParser
             int.TryParse(cols[ColDivisorX].Trim(), out int divisorX); // col4 → 0x28 (interleaved)
             float.TryParse(cols[ColRateSrcY].Trim(), NumberStyles.Float,
                 CultureInfo.InvariantCulture, out float rateSrcY); // col5 → 0x0C
-            int.TryParse(cols[ColIntB].Trim(), out int intB); // col6 → 0x10
+            int.TryParse(cols[ColIntB].Trim(), out int intB); // col7 → 0x10
             float.TryParse(cols[ColFloatC].Trim(), NumberStyles.Float,
                 CultureInfo.InvariantCulture, out float floatC); // col7 → 0x14
             float.TryParse(cols[ColFloatD].Trim(), NumberStyles.Float,
@@ -226,7 +225,7 @@ public static class ActormotionParser
                 CultureInfo.InvariantCulture, out float floatH); // col12 → 0x38
             float.TryParse(cols[ColFloatI].Trim(), NumberStyles.Float,
                 CultureInfo.InvariantCulture, out float floatI); // col13 → 0x3C
-            int.TryParse(cols[ColDivisorY].Trim(), out int divisorY); // (paired) col14 → 0x2C
+            int.TryParse(cols[ColDivisorY].Trim(), out int divisorY); // col6 → 0x2C
 
             // Divide-by-zero guard: force divisors to 1 when parsed as 0.
             // spec: Docs/RE/formats/actormotion.md — divisor_x / divisor_y forced to 1 if read as 0.
@@ -240,14 +239,14 @@ public static class ActormotionParser
             float rateX = FpsBase * rateSrcX / divisorX; // spec: Docs/RE/formats/actormotion.md §rate_x @ 0x30
             float rateY = FpsBase * rateSrcY / divisorY; // spec: Docs/RE/formats/actormotion.md §rate_y @ 0x34
 
-            // Directional sub-arrays: 9 consecutive integer columns each.
-            // spec: Docs/RE/formats/actormotion.md §The two 9-element directional sub-arrays (0x40, 0x64)
-            var dirArray1 = new int[DirArrayCount]; // → record 0x40
-            var dirArray2 = new int[DirArrayCount]; // → record 0x64
-            for (int d = 0; d < DirArrayCount; d++)
+            // Motion-id sub-arrays: 9 consecutive integer columns each.
+            // spec: Docs/RE/formats/actormotion.md §The two 9-element motion-id sub-arrays (0x40, 0x64)
+            var dirArray1 = new int[MotionIdArrayCount]; // motion_ids_a → record 0x40
+            var dirArray2 = new int[MotionIdArrayCount]; // motion_ids_b → record 0x64
+            for (int d = 0; d < MotionIdArrayCount; d++)
             {
-                int.TryParse(cols[ColDirArray1Start + d].Trim(), out dirArray1[d]); // col[15+d] → 0x40+d*4
-                int.TryParse(cols[ColDirArray2Start + d].Trim(), out dirArray2[d]); // col[24+d] → 0x64+d*4
+                int.TryParse(cols[ColMotionIdsAStart + d].Trim(), out dirArray1[d]); // col[15+d] → 0x40+d*4
+                int.TryParse(cols[ColMotionIdsBStart + d].Trim(), out dirArray2[d]); // col[24+d] → 0x64+d*4
             }
 
             var entry = new ActormotionEntry

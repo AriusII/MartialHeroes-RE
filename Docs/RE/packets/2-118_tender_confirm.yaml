@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: header-only (0-byte body, total frame size 8). capture_verified: false.
+#
+# NEW opcode (HUD-II Wave 2): TenderInfoPanel buy/confirm request, not previously catalogued.
+
+name: CmsgTenderConfirm
+opcode: 0x20076           # major 2 (GameAction), minor 118 -> (2 << 16) | 118
+direction: C2S
+size: 0                   # HEADER-ONLY: zero payload (the builder appends NO bytes; total frame = 8)
+spec: packets/2-118_tender_confirm.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client tender / consignment purchase-or-register confirm. A send-only HEADER-ONLY message -- the builder appends no payload, so the whole frame is just the 8-byte wire header (major 2 / minor 118). Emitted from the TenderInfoPanel's confirm button, gold-gated: the panel checks the local player's gold against the listed cost before sending. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+
+# HEADER-ONLY: no payload bytes. There are no fields; size: 0 == the (empty) sum of field widths.
+# All state the server needs (which item / listing) is held server-side or was conveyed by a prior
+# message; the confirm itself carries nothing on the wire.
+fields: []
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the send builder appends ZERO body bytes -- the frame is header-only, total
+  on-wire size 8 (the 8-byte frame header alone). This is the same header-only shape as other
+  header-only sends in the catalogue (e.g. CmsgLogout 1/0).
+
+  The confirm is emitted from the TenderInfoPanel's confirm button and is GOLD-GATED: the panel
+  compares the local player's gold against the listed tender cost and only sends when affordable
+  (otherwise it shows a "not enough gold" notice and sends nothing). The over-limit guard on the
+  detail/info action (a 30-entry cap) is panel-internal and does not appear on the wire.
+
+  ROLE (semantics MED): the best static read is a purchase / registration confirm for a consignment
+  or tender item (a fixed catalogue with a 3D preview, a cost, and a buy button), rather than a
+  player-to-player auction bid. Whether the panel is an NPC consignment buy or a live auction board
+  is capture/debugger-pending.
+
+  RELATIONSHIP: the tender info panel's stat fields are filled by a shared client-side info builder
+  from already-resident client state; a dedicated S2C tender-listing POPULATE opcode (if any) is NOT
+  isolated this lane (debugger/capture-pending).
+
+  RESIDUAL: the S2C tender-listing / tender-info populate opcode + its record layout are NOT yet
+  pinned (debugger/capture-pending). The open opcode / NPC kind that shows the panel is likewise not
+  pinned this lane.
+
+  UNBLOCKS: the Client.Application tender-confirm use-case (send-only, header-only) can be wired now;
+  the populate side waits on a capture.

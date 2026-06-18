@@ -99,32 +99,37 @@ public readonly struct LobbyServerEntry
     public const int WireSize = 8;
 
     /// <summary>
-    /// 0x00 — server id / select-key (i16). Feeds the client-local server-name lookup, draws the
-    /// remembered-default highlight, and the value <c>== 100</c> is the "available" gate that unlocks
-    /// the per-row select buttons. CODE-CONFIRMED. spec: Docs/RE/packets/lobby.yaml.
+    /// 0x00 — server id / select-key (i16, range 1..40). Read by BOTH consumers (the painter and the
+    /// plate-pick commit) as the server id, sign-extended; feeds the client-local server-name lookup
+    /// and draws the remembered-default highlight. The <c>== 100</c> literal is display-only (the
+    /// "new server" label reposition), NOT a selectability gate. CODE-CONFIRMED.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
     public readonly short Id;
 
     /// <summary>
-    /// 0x02 — status / kind (i16): the per-row caption / branch selector (0 = derive a population
-    /// label, 3 = special latency/24 branch, 1..39 = per-value caption array, else = fallback).
-    /// CODE-CONFIRMED ids. spec: Docs/RE/packets/lobby.yaml.
+    /// 0x02 — status code (i16): availability / caption selector. <c>== 0</c> is the active/selectable
+    /// state (the commit gate equality-tests this field for 0); <c>== 3</c> is the scheduled-open branch
+    /// that builds the HH:MM caption (see <see cref="Load"/> / <see cref="OpenTime"/>). CODE-CONFIRMED.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
-    public readonly short Status;
+    public readonly short StatusCode;
 
     /// <summary>
-    /// 0x04 — population / count value (i16); thresholded in the status==0 numeric mode and reused as
-    /// the 6005 latency numerator / the ==24 special test. CODE-CONFIRMED.
-    /// spec: Docs/RE/packets/lobby.yaml.
+    /// 0x04 — load / population gauge (i16). The commit gate requires <c>load &lt; 2400</c> (0x960,
+    /// signed strict less-than). When <see cref="StatusCode"/> == 3 the painter reuses this field as the
+    /// scheduled-open HOUR (combined with <see cref="OpenTime"/> for an HH:MM caption). CODE-CONFIRMED.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
-    public readonly short Population;
+    public readonly short Load;
 
     /// <summary>
-    /// 0x06 — mode flag (i16): nonzero ⇒ treat <see cref="Population"/> as a NUMERIC population
-    /// (500/800/1200 thresholds); zero ⇒ treat it as a DISCRETE load level. CODE-CONFIRMED.
-    /// spec: Docs/RE/packets/lobby.yaml.
+    /// 0x06 — open time (i16): the scheduled-open MINUTE value (a time component, NOT a flag/bitfield).
+    /// Read ONLY in the <see cref="StatusCode"/> == 3 branch, where it supplies the minute digits of an
+    /// HH:MM caption (hour from <see cref="Load"/>). CODE-CONFIRMED.
+    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
-    public readonly short Flag;
+    public readonly short OpenTime;
 }
 
 /// <summary>

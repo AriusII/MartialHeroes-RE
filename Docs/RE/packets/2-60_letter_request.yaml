@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: the body SIZE (8 bytes) is control-flow CONFIRMED from the send builder;
+# the intra-field split and all VALUE semantics are capture/debugger-pending. capture_verified: false.
+#
+# NEW opcode (HUD-II Wave 2): the LetterPanel request, not previously catalogued.
+
+name: CmsgLetterRequest
+opcode: 0x2003c           # major 2 (GameAction), minor 60 -> (2 << 16) | 60
+direction: C2S
+size: 8                   # FIXED 8-byte body: the send builder appends exactly 8 bytes
+spec: packets/2-60_letter_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client request raised by the compact LetterPanel (a small letter-view window). A send-only message carrying an 8-byte fixed body, most likely a letter-id plus a mode/flag -- the open / read / acknowledge round-trip for a single letter. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 8.
+# CONTROL-FLOW CONFIRMED: the send builder appends a fixed 8-byte body. The split into two 4-byte
+# values below is the LEADING HYPOTHESIS (letter-id + mode), NOT a captured fact.
+fields:
+  - { name: LetterId, type: u32 }   # 0x00  the target letter's id/key (hypothesis)
+  - { name: Mode,     type: u32 }   # 0x04  a mode/flag selector (open vs acknowledge vs reply) (hypothesis)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (8 bytes); the field split and VALUE semantics are
+  capture/debugger-pending. The send is emitted from the LetterPanel's confirm/action path.
+
+    0x00 (4B) LetterId : the addressed letter's id/key. HYPOTHESIS.
+    0x04 (4B) Mode     : a mode/flag selector for the round-trip. HYPOTHESIS.
+
+  The two-u32 split is the most likely shape for an 8-byte letter round-trip but is NOT pinned; a
+  debugger read of the 8-byte frame is the clean way to confirm the offsets. Treat the field model as
+  provisional and resolve it from a capture.
+
+  RELATIONSHIP: part of the mail / carrier-pigeon family. Mail-arrival notification rides S2C 1/20
+  SmsgSrvLetterReceived. The mail COMPOSE-SEND is the distinct C2S 2/70 CmsgCarrierPigeonSend
+  (packets/2-70_carrier_pigeon_send.yaml); the delivery-box claim is C2S 2/71 CmsgDeliveryClaim
+  (packets/2-71_delivery_claim.yaml). The LetterPanel itself is a compact letter view distinct from
+  the larger send/read carrier-pigeon panels.
+
+  RESIDUAL: the S2C mailbox-list and delivery-box POPULATE opcodes + record layouts are NOT yet
+  pinned (debugger/capture-pending) -- the inbound mail-list / delivery-list dispatch slot was not
+  walked to the dispatch table this lane.
+
+  UNKNOWNS (capture-pending): the LetterId vs Mode split; the full mode enum; the matching S2C reply.
+
+  UNBLOCKS: the Client.Application letter-request use-case (send-only), pending a capture to pin the
+  8-byte body's two fields.

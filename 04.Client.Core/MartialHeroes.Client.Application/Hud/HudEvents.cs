@@ -110,6 +110,72 @@ public sealed record BuffStateEvent(ImmutableArray<BuffSlot> Slots) : IHudEvent
 }
 
 /// <summary>
+/// The local player's current vitals (HP / MP / stamina) changed. Immutable snapshot driving the
+/// right-edge gauge panel. Published by the <c>5/53 SmsgActorVitalsAndPairState</c> handler whenever
+/// the incoming actor key matches the local player, and by the <c>5/32 SmsgLevelUp</c> handler when
+/// that message also refreshes vitals.
+/// </summary>
+/// <remarks>
+/// The server sends absolute current values; the client clamps them against its locally-computed
+/// maxima (from the stat pipeline in <c>Client.Domain</c>). The gauge panel reads the pre-clamped
+/// current values and the Domain-resolved maxima via this snapshot — it never reads live Domain
+/// objects across the channel seam.
+/// spec: Docs/RE/specs/combat.md §12.2 (5/53 is the canonical HP-bar source — absolute current HP);
+/// Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentHp@0x10 / CurrentMp@0x14 /
+/// Stamina@0x18 are the three local-player vitals mirrored to client globals and clamped to the
+/// client-computed maxima).
+/// </remarks>
+/// <param name="CurrentHp">Clamped current hit points (server-authoritative absolute, floored at 0). spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentHp@0x10).</param>
+/// <param name="MaxHp">Client-computed maximum HP (from the stat pipeline). spec: Docs/RE/specs/combat.md §12.2 (HP-bar reads current vs. locally-computed max).</param>
+/// <param name="CurrentMp">Clamped current MP / ki. spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentMp@0x14).</param>
+/// <param name="MaxMp">Client-computed maximum MP.</param>
+/// <param name="CurrentStamina">Clamped current stamina. spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (Stamina@0x18).</param>
+/// <param name="MaxStamina">Client-computed maximum stamina. spec: Docs/RE/specs/combat.md §1 (MaxStamina field in the derived-stat aggregate).</param>
+public sealed record HudVitalsEvent(
+    uint CurrentHp,
+    uint MaxHp,
+    uint CurrentMp,
+    uint MaxMp,
+    uint CurrentStamina,
+    uint MaxStamina) : IHudEvent
+{
+    /// <summary>
+    /// The "no vitals / uninitialized" sentinel — all zeroes. Published on world exit or before the
+    /// first 5/53 arrives. spec: Docs/RE/specs/combat.md §12.2 (HP reaching 0 = death condition;
+    /// gauge must handle a zero max gracefully).
+    /// </summary>
+    public static HudVitalsEvent None { get; } = new(0u, 0u, 0u, 0u, 0u, 0u);
+
+    /// <summary>
+    /// HP fill fraction in <c>[0, 1]</c>. Returns 0 when <see cref="MaxHp"/> is 0 (unknown / dead)
+    /// so the gauge never divides by zero.
+    /// spec: Docs/RE/specs/combat.md §12.2 (HP-bar reads the absolute current HP against the
+    /// locally-computed maximum).
+    /// </summary>
+    public float HpRatio =>
+        MaxHp == 0u ? 0f : Math.Clamp((float)CurrentHp / MaxHp, 0f, 1f);
+
+    /// <summary>
+    /// MP fill fraction in <c>[0, 1]</c>. Returns 0 when <see cref="MaxMp"/> is 0.
+    /// spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentMp@0x14).
+    /// </summary>
+    public float MpRatio =>
+        MaxMp == 0u ? 0f : Math.Clamp((float)CurrentMp / MaxMp, 0f, 1f);
+
+    /// <summary>
+    /// Stamina fill fraction in <c>[0, 1]</c>. Returns 0 when <see cref="MaxStamina"/> is 0.
+    /// spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (Stamina@0x18).
+    /// </summary>
+    public float StaminaRatio =>
+        MaxStamina == 0u ? 0f : Math.Clamp((float)CurrentStamina / MaxStamina, 0f, 1f);
+
+    /// <summary>True when this snapshot is the "no vitals" sentinel (all fields are zero).</summary>
+    public bool IsEmpty =>
+        CurrentHp == 0u && MaxHp == 0u && CurrentMp == 0u && MaxMp == 0u
+        && CurrentStamina == 0u && MaxStamina == 0u;
+}
+
+/// <summary>
 /// One floating combat number to spawn above a target actor. Immutable snapshot. The HUD selects the
 /// number's motion curve and colour family from <see cref="Kind"/> and <see cref="IsCrit"/>.
 /// </summary>

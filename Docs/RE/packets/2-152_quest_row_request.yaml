@@ -1,0 +1,57 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; routing (major 2 / minor 152) and the two-u32 arg shape are
+# control-flow CONFIRMED from the generic sender. capture_verified: false.
+#
+# OVERLOAD RESOLVED (HUD-II Wave 2): 2/152 belongs SOLELY to the QuestPanel per-row request. The
+# earlier "2/152 also = ProductPanel paging" reading is WITHDRAWN -- the ProductPanel recovery proved
+# that panel sends only 2/151 (1-byte selector) and never 2/152. See the RESOLUTION note below.
+
+name: CmsgQuestRowRequest
+opcode: 0x20098           # major 2 (GameAction), minor 152 (0x98) -> (2 << 16) | 152
+direction: C2S
+size: 8                   # two u32 args appended by the generic sender (8-byte payload)
+spec: packets/2-152_quest_row_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client per-row request raised by the quest-log window's list rows -- the "request detail / claim" round-trip for a quest row. Built by a generic two-u32 sender (major 2 / minor 152) that writes the header and appends exactly two u32 args. The QuestPanel is the sole consumer (the prior ProductPanel-paging overload is resolved away). Send-only; the quest result returns on the 5/68 / 5/73 push channels.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the two u32 args sum to size: 8.
+# CONTROL-FLOW CONFIRMED: the generic sender writes the frame header (major 2, minor 152) and appends
+# exactly two u32 values. The QuestPanel supplies a per-quest record value as Arg1 and a per-row
+# scratch value as Arg2.
+fields:
+  - { name: Arg1, type: u32 }   # 0x00  first arg -- the per-quest record value (quest id / key)
+  - { name: Arg2, type: u32 }   # 0x04  second arg -- a per-row scratch value
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing (major 2 / minor 152) and the two-u32 arg shape; CAPTURE-UNVERIFIED
+  in VALUE meaning. The sender is a generic builder that writes the 2/152 header and appends two
+  4-byte arguments; it is invoked by the QuestPanel's row action band for the per-row
+  "request detail / claim" round-trip.
+
+    0x00 (4B) Arg1 : the per-quest record value (the row's quest id / key).
+    0x04 (4B) Arg2 : a per-row scratch value (the row's slot-derived value).
+
+  The exact VALUE meaning of the two args is capture-pending; only the arg COUNT (two u32) and the
+  routing are control-flow facts.
+
+  OVERLOAD RESOLVED (load-bearing -- binary wins). The prior reading flagged 2/152 as OVERLOADED
+  across two consumers (the QuestPanel row request AND a ProductPanel paging send), pending human
+  arbitration. That overload is now RESOLVED: the HUD-II Wave 2 ProductPanel recovery proved the
+  product/crafting panel's ONLY network send is 2/151 with a 1-byte selector body, and that the panel
+  emits NO 2/152 (its tab/page navigation is a local repaint over a server-pushed recipe list). The
+  "2/152 = ProductPanel paging" attribution was therefore a mis-attribution. 2/152 belongs SOLELY to
+  the QuestPanel, and the opcodes.md 2/152 row is renamed to this canonical name (CmsgQuestRowRequest).
+
+  RELATIONSHIP: the QuestPanel's accept / proceed / give-up VERBS go through the DISTINCT 2/28
+  CmsgQuestAction (packets/2-28_quest_action.yaml, a fixed 12-byte body) -- 2/152 is ONLY the per-row
+  list request, not the quest-flow verbs. The quest result / log refresh returns on the push channels
+  5/68 SmsgQuestList (packets/5-68_quest_list.yaml) and 5/73 SmsgQuestComplete
+  (packets/5-73_quest_complete.yaml). The product/crafting panel is unrelated to this opcode and uses
+  packets/2-151_product_buy.yaml.
+
+  UNKNOWNS to resolve (the arg count + routing are settled; these are VALUE questions):
+    - the VALUE meaning of Arg1 / Arg2 (quest id vs row scratch).
+
+  UNBLOCKS: the Client.Application quest-row request use-case (send-only).

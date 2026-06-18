@@ -1,0 +1,11 @@
+[gd_scene format=3 uid="uid://ftdqt2j1mmt8"]
+
+; CAMPAIGN-15 scene-spine root. SceneHost owns the faithful 8-state engine machine and swaps one
+; ISceneController node at a time (the dispatch half of the legacy WinMain switch).
+; spec: Docs/RE/specs/client_runtime.md §7.
+; NOTE (Godot pitfall): `script` is a PROPERTY line BELOW the [node] header, NOT an inline header
+; attribute — an inline script= is silently ignored (gray screen). See CLAUDE.md.
+[ext_resource type="Script" path="res://Scene/SceneHost.cs" id="1"]
+
+[node name="SceneHost" type="Node"]
+script = ExtResource("1")

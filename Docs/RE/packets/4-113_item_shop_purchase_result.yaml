@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgItemShopPurchaseResult
+opcode: 0x40071           # major 4 (Response), minor 113 -> (4 << 16) | 113
+direction: S2C
+size: 12                  # 0xC-byte handler read
+spec: packets/4-113_item_shop_purchase_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Item-shop purchase result (the gold item-shop). On the success flag the handler shows the purchase-success notice; otherwise it maps the result code to one of several item-shop error strings. The notice is surfaced through the global notice sink (ErrorPanel slot 168).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 12.
+fields:
+  - { name: Leading,    type: "bytes[8]" }   # 0x00  leading block (unconsumed by this handler)
+  - { name: Success,    type: u8 }           # 0x08  1 = purchase-success notice
+  - { name: ResultCode, type: u8 }           # 0x09  failure code 0..4 -> item-shop error strings
+  - { name: Reserved,   type: "bytes[2]" }   # 0x0a  remainder of the 0xC read
+
+notes: |
+  Static only; no capture this pass. The handler reads a 0xC (12)-byte block. The 12-byte read size
+  and the consumed offsets (Success @0x08, ResultCode @0x09) are control-flow-confirmed; the field
+  VALUE meanings are capture-pending.
+
+    0x00 (8B) Leading    : a leading block not consumed by this handler. Modelled as reserved.
+    0x08 (1B) Success    : 1 selects the purchase-success notice (preset string id 65008).
+    0x09 (1B) ResultCode : on failure, a code 0..4 maps to one of five item-shop error strings
+                           (the 65006 / 65007 / 65010 / 65011 / 65012 family). The exact
+                           code->string mapping is a UI concern; the bytes themselves are
+                           capture-unverified.
+    0x0a (2B) Reserved   : the rest of the 12-byte read.
+
+  RELATIONSHIP: result for the item-shop buy path (paired with the storefront 2/115 / 2/19 buys).
+  DISTINCT from the CASH-shop result 4/114 (which is a separate billing-currency shop). The vendor
+  money refresh rides 4/115.
+
+  UNKNOWNS to resolve with a capture: the contents of Leading, and the full result-code enum.
+
+  UNBLOCKS: Client.Application item-shop purchase-result handling.

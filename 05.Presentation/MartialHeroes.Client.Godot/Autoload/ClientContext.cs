@@ -1,5 +1,7 @@
+using System.Net;
 using Godot;
 using MartialHeroes.Assets.Vfs;
+using MartialHeroes.Client.Application.Assets;
 using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.Events;
@@ -8,6 +10,7 @@ using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -17,8 +20,12 @@ using MartialHeroes.Client.Godot.Audio;
 using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Infrastructure.Catalog;
+using MartialHeroes.Client.Infrastructure.Lobby;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
+using MartialHeroes.Network.Abstractions.Transport;
+using MartialHeroes.Network.Crypto;
+using MartialHeroes.Network.Transport.Pipelines;
 
 namespace MartialHeroes.Client.Godot.Autoload;
 
@@ -71,6 +78,22 @@ public sealed partial class ClientContext : Node
 
     /// <summary>The FSM (exposed so the HUD can read the current lifecycle state).</summary>
     public ClientStateMachine StateMachine { get; private set; } = null!;
+
+    /// <summary>
+    /// The faithful 8-state scene machine (CAMPAIGN 15 spine). Owns the live
+    /// <see cref="MartialHeroes.Shared.Kernel.State.GameState"/>; the <see cref="SceneHost"/> listens
+    /// for <see cref="MartialHeroes.Client.Application.Scene.SceneStateChangedEvent"/> and swaps the
+    /// live scene to match. Runs in parallel with the legacy <see cref="StateMachine"/> during the
+    /// scene-by-scene rebuild. spec: Docs/RE/specs/client_runtime.md §7.
+    /// </summary>
+    public SceneStateMachine SceneMachine { get; private set; } = null!;
+
+    /// <summary>
+    /// Engine-free state-2 load worker/orchestrator. Godot renders its progress and calls into the
+    /// scene spine only after this worker completes; transition policy remains in Application.
+    /// spec: Docs/RE/specs/resource_pipeline.md §2; Docs/RE/specs/client_runtime.md §7.3.
+    /// </summary>
+    public LoadOrchestrator LoadOrchestrator { get; private set; } = null!;
 
     /// <summary>
     /// The input bus: UI handlers first, then world handler.
@@ -199,6 +222,33 @@ public sealed partial class ClientContext : Node
     public ZoneCatalog ZoneCatalog { get; private set; } = null!;
 
     /// <summary>
+    /// Shared HUD atlas library for the new Ui/Scenes substrate.
+    /// Maps VFS paths and uitex.txt tex_ids → Godot <see cref="Godot.Texture2D"/> objects,
+    /// with AtlasTexture sub-rect slicing.
+    ///
+    /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
+    /// no additional VFS archive is opened.
+    /// Degrades gracefully when VFS is unavailable (all methods return null).
+    ///
+    /// spec: Docs/RE/formats/ui_manifests.md §1 — uitex.txt grammar.
+    /// spec: Docs/RE/specs/ui_system.md §1.3 — "atlas pixels map 1:1 to screen pixels".
+    /// </summary>
+    public MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary HudAtlas { get; private set; } = null!;
+
+    /// <summary>
+    /// Shared HUD text library for the new Ui/Scenes substrate.
+    /// Loads data/script/msg.xdb and provides CP949-decoded caption lookup by integer id.
+    ///
+    /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
+    /// no additional VFS archive is opened.
+    /// Degrades gracefully when VFS is unavailable (all lookups return the caller-supplied fallback).
+    ///
+    /// spec: Docs/RE/formats/msg_xdb.md — 516-byte records, ascending unsigned id order.
+    /// spec: Docs/RE/specs/ui_system.md §8 — notice column msg ids 4001–4022.
+    /// </summary>
+    public MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary HudText { get; private set; } = null!;
+
+    /// <summary>
     /// The region service: resolves the local player's world position to a
     /// <see cref="MartialHeroes.Shared.Kernel.Enums.ZoneType"/> and publishes
     /// <see cref="MartialHeroes.Client.Application.Hud.ZoneChangedEvent"/> when the zone changes.
@@ -213,6 +263,15 @@ public sealed partial class ClientContext : Node
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
 
+    // The late-binding outbound sink shared between ApplicationUseCases and LoginHandshakeDriver.
+    // SetTarget is called in OpenGameConnectionAsync once the game TCP connection is established.
+    private RelayOutboundPacketSink? _relaySink;
+
+    // The live game connection session.  null until OpenGameConnectionAsync succeeds.
+    // Guarded by a volatile bool to prevent double-open without taking a lock on the hot path.
+    private IConnectionSession? _gameConnection;
+    private volatile int _gameConnectionOpened; // 0 = not open, 1 = open (Interlocked flag)
+
     // VfsCatalogueLoader owns the VFS archive lifecycle for catalogue loading.
     // It is disposed in _ExitTree alongside the loop cancellation.
     private VfsCatalogueLoader? _catalogueLoader;
@@ -226,6 +285,10 @@ public sealed partial class ClientContext : Node
     // does NOT dispose the archive — ownership stays here. Disposed in _ExitTree.
     // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
     private MappedVfsArchive? _terrainVfs;
+
+    // VFS resource pipeline used by the state-2 LoadOrchestrator. Disposed in _ExitTree.
+    // spec: Docs/RE/specs/resource_pipeline.md §1 / §2.
+    private VfsResourcePipeline? _loadVfsPipeline;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -281,14 +344,33 @@ public sealed partial class ClientContext : Node
         // 2. FSM — starts at Login.
         var fsm = new ClientStateMachine(bus, ClientState.Login);
 
+        // 2b. Faithful 8-state scene machine (CAMPAIGN 15). Boots at state 0 (Init).
+        //     spec: Docs/RE/specs/client_runtime.md §7.1.
+        var sceneMachine = new SceneStateMachine(bus);
+
+        // 2c. State-2 load orchestrator: engine-free load worker, OPENNING/SKIP reader, and
+        //     loading cue sink. The presentation only observes progress/completion.
+        //     spec: Docs/RE/specs/resource_pipeline.md §2; client_runtime.md §7.3.
+        _loadVfsPipeline = TryMountLoadResourcePipeline();
+        var loadOrchestrator = new LoadOrchestrator(
+            sceneMachine,
+            new VfsLoadResourceSource(_loadVfsPipeline),
+            new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+            new GodotLoadingSoundSink());
+
         // 3. Domain world registry.
         var world = new ClientWorld();
 
         // 4. Unhandled opcode sink — count-only for now.
         IUnhandledOpcodeSink opcodeSink = new CountingUnhandledOpcodeSink();
 
-        // 5. No-op outbound sink: no live transport this session.
-        IOutboundPacketSink noopSink = new NoOpOutboundPacketSink();
+        // 5. Relay outbound sink: initially no-op; SetTarget wires the live crypto sink in
+        //    OpenGameConnectionAsync once the TCP game connection is established.
+        //    Both ApplicationUseCases and LoginHandshakeDriver share the SAME instance so the
+        //    secure 1/4 reply goes to the real socket once the connection is open.
+        var relaySink = new RelayOutboundPacketSink();
+        _relaySink = relaySink;
+        IOutboundPacketSink noopSink = relaySink; // alias — ApplicationUseCases receives the relay
 
         // 6. Session id — fixed/default for offline composition.
         SessionId sessionId = SessionId.None;
@@ -297,8 +379,16 @@ public sealed partial class ClientContext : Node
         //    spec: Docs/RE/specs/crypto.md §6.1.
         var credentialStore = new LoginCredentialStore();
 
-        // 8. Login handshake driver — null for offline/synthetic-feed mode.
-        ILoginHandshakeDriver? loginDriver = null;
+        // 8. Login handshake driver — answers the inbound 0/0 KeyExchange with the secure 1/4 Auth
+        //    reply carrying the staged credential (account + optional PIN pre-image + RSA(M)). It shares
+        //    the SAME relay sink as ApplicationUseCases, so the reply reaches the live socket once
+        //    OpenGameConnectionAsync installs the crypto sink. Offline-safe: with no game connection the
+        //    relay sink drops the send, and no 0/0 ever arrives. The credential store and session id are
+        //    the same instances handed to ApplicationUseCases; stateMachine nudges the (idempotent) coarse
+        //    lifecycle FSM on handshake completion.
+        //    spec: Docs/RE/specs/crypto.md §6.1/§6.6; packets/login.yaml (CmsgLoginCredential).
+        ILoginHandshakeDriver loginDriver =
+            new LoginHandshakeDriver(relaySink, credentialStore, sessionId, stateMachine: fsm);
 
         // 9. InputBus — UI handler first, world handler wired after InputRouter is created.
         //    The HudInputHandler starts as a pass-through (hitTest: null); the live GameHud.HitTest
@@ -380,6 +470,23 @@ public sealed partial class ClientContext : Node
             GD.PrintErr($"[ClientContext] UiCatalogs load failed: {ex.Message} — using empty UI catalogs.");
             _uiAssets = null;
             UiCatalogs ??= new UiCatalogs(null);
+        }
+
+        // 13-B. HUD atlas + text libraries for the new Ui/Scenes substrate.
+        //     Reuse the same _uiAssets handle; no additional VFS archive opened.
+        //     spec: Docs/RE/formats/ui_manifests.md §1 (HudAtlasLibrary — uitex.txt).
+        //     spec: Docs/RE/formats/msg_xdb.md (HudTextLibrary — msg.xdb).
+        try
+        {
+            HudAtlas = new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(_uiAssets);
+            HudText = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
+            GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] HudAtlas/HudText init failed: {ex.Message} — Ui/Scenes will run offline.");
+            HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+            HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
         }
 
         // 14. Skill icon catalog: skillicon.txt + musajung.do stance table.
@@ -496,7 +603,7 @@ public sealed partial class ClientContext : Node
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
-        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver)
+        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver, sceneStateMachine: sceneMachine)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -504,7 +611,19 @@ public sealed partial class ClientContext : Node
         // 18. Inbound frame dispatcher — channel-backed; synthetic feeder uses this.
         var dispatcher = new InboundFrameDispatcher(handler);
 
-        // 19. Version token — pass `default` (empty span) so ApplicationUseCases derives it via
+        // 19. Lobby stack: host resolver → lobby client + last-server store.
+        //     These are constructed here (online mode) so that FetchServerListAsync / SelectServerAsync
+        //     work in ApplicationUseCases.  All three degrade gracefully when the client dir is absent.
+        //     spec: Docs/RE/specs/login_flow.md §2.0 — three-tier host resolution (ip.txt → list.dat → fallback).
+        string? clientDirForLobby = ClientPathResolver.ResolveClientDir();
+        var lobbyHostResolver = new LobbyHostResolver(clientDirForLobby);
+        string lobbyHost = lobbyHostResolver.Resolve();
+        GD.Print($"[ClientContext] Lobby host resolved to '{lobbyHost}'. spec: login_flow.md §2.0.");
+
+        var lobbyClient = new LobbyClient(lobbyHost, PayloadCompression.DecompressPayload);
+        var lastServerStore = new RegistryLastServerStore();
+
+        // 19b. Version token — pass `default` (empty span) so ApplicationUseCases derives it via
         //     DefaultClientVersionSource.Instance: token = 10 × 2114 + 9 = 21149 (sample_verified).
         //     An explicit zero-filled span would OVERRIDE the derivation to all-zeros. Passing default
         //     activates the branch that calls ClientVersionToken.Derive() and stamps "21149\0" into the
@@ -515,8 +634,11 @@ public sealed partial class ClientContext : Node
         // 20. Use-case facade — presentation calls these for input intents.
         //     versionSource = null → DefaultClientVersionSource.Instance → field 2114 → token 21149.
         //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
+        //     eventBus, lobbyClient, lastServerStore wired so FetchServerListAsync / SelectServerAsync
+        //     publish ServerListReceivedEvent and persist Lastserver.
         var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
-            versionToken: versionToken, versionSource: null);
+            versionToken: versionToken, versionSource: null, sceneStateMachine: sceneMachine,
+            eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore);
         GD.Print(
             $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
             " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
@@ -530,6 +652,8 @@ public sealed partial class ClientContext : Node
         UseCases = useCases;
         Dispatcher = dispatcher;
         StateMachine = fsm;
+        SceneMachine = sceneMachine;
+        LoadOrchestrator = loadOrchestrator;
         InputBus = inputBus;
         EngineLoop = engineLoop;
         StreamingService = streamingService;
@@ -569,6 +693,12 @@ public sealed partial class ClientContext : Node
         {
             var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
             var fsm = new ClientStateMachine(bus, ClientState.Login);
+            var sceneMachine = new SceneStateMachine(bus);
+            var loadOrchestrator = new LoadOrchestrator(
+                sceneMachine,
+                new VfsLoadResourceSource(null),
+                new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+                new GodotLoadingSoundSink());
             var world = new ClientWorld();
             var noopSink = new NoOpOutboundPacketSink();
             var hudHandler = new HudInputHandler(hitTest: null);
@@ -580,9 +710,9 @@ public sealed partial class ClientContext : Node
             // Pass default (empty span) so the derivation via DefaultClientVersionSource runs.
             // spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × 2114 + 9 = 21149).
             var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
-                versionToken: default, versionSource: null);
+                versionToken: default, versionSource: null, sceneStateMachine: sceneMachine);
             var opcodeSink = new CountingUnhandledOpcodeSink();
-            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null);
+            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null, sceneStateMachine: sceneMachine);
             var dispatcher = new InboundFrameDispatcher(handler);
             var terrainSource = new VfsTerrainSectorSource(null, areaId: 0);
             // spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
@@ -593,6 +723,8 @@ public sealed partial class ClientContext : Node
             UseCases = useCases;
             Dispatcher = dispatcher;
             StateMachine = fsm;
+            SceneMachine = sceneMachine;
+            LoadOrchestrator = loadOrchestrator;
             InputBus = inputBus;
             EngineLoop = engineLoop;
             StreamingService = streamingService;
@@ -621,6 +753,11 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
         IconCatalogs ??= new IconCatalogs(null);
 
+        // HudAtlas + HudText — null-safe offline fallback (no VFS).
+        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
+        HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
+        HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+
         // ItemIconCatalog — null-safe offline fallback (no VFS).
         // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
         ItemIconCatalog ??= new ItemIconCatalog(null);
@@ -641,6 +778,12 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/specs/world_systems.md Ch. 16.
         RegionService ??= new MartialHeroes.Client.Application.World.RegionService(
             new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), HudEventHub);
+
+        LoadOrchestrator ??= new LoadOrchestrator(
+            SceneMachine,
+            new VfsLoadResourceSource(null),
+            new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
+            new GodotLoadingSoundSink());
 
         GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
@@ -674,6 +817,89 @@ public sealed partial class ClientContext : Node
         _hudInputHandler?.SetHitTest(hitTest);
     }
 
+    /// <summary>
+    /// Opens the TCP game connection, installs a <see cref="CryptoOutboundPacketSink"/> over it,
+    /// and activates the relay sink so subsequent <see cref="IOutboundPacketSink.SendAsync"/> calls
+    /// go to the real wire.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Idempotent: a second call while the connection is already open is a no-op.
+    /// </para>
+    /// <para>
+    /// Called by <c>LoginScene.SelectServerAsync</c> (online mode only — not in DEV_OFFLINE_FLOW)
+    /// once the lobby has resolved the game-server host:port via <c>SelectServerAsync</c>.
+    /// </para>
+    /// <para>
+    /// The inbound path: <c>TcpTransport</c> is constructed with a <see cref="DispatcherFrameSink"/>
+    /// adapter that enqueues each decoded frame into the existing <see cref="Dispatcher"/> channel,
+    /// which the engine loop already drains.  No second reader is added to the event bus.
+    /// </para>
+    /// <para>
+    /// Decompression: <see cref="PayloadCompression.DecompressPayload"/> is injected as the
+    /// <c>InboundDecompressDelegate</c>.
+    /// spec: Docs/RE/specs/crypto.md §5 — inbound is LZ4-decompress only (no inverse cipher).
+    /// </para>
+    /// </remarks>
+    /// <param name="host">Dotted IPv4 literal or DNS hostname returned by the lobby.</param>
+    /// <param name="port">Game-server port returned by the lobby.</param>
+    public async Task OpenGameConnectionAsync(string host, int port)
+    {
+        // Idempotency guard — only the first caller proceeds.
+        if (Interlocked.CompareExchange(ref _gameConnectionOpened, 1, 0) != 0)
+        {
+            GD.Print($"[ClientContext] OpenGameConnectionAsync({host}:{port}): connection already open — skipped.");
+            return;
+        }
+
+        try
+        {
+            // Resolve host (may be a name or dotted quad).
+            IPAddress[] addresses = await Dns.GetHostAddressesAsync(host).ConfigureAwait(false);
+            if (addresses.Length == 0)
+            {
+                GD.PrintErr(
+                    $"[ClientContext] OpenGameConnectionAsync: DNS resolution returned no addresses for '{host}'.");
+                Interlocked.Exchange(ref _gameConnectionOpened, 0); // allow a retry
+                return;
+            }
+
+            var endpoint = new EndpointDescriptor(
+                new IPEndPoint(addresses[0], port),
+                DisplayName: $"game-server({host}:{port})");
+
+            // Build the inbound frame sink that feeds the existing Dispatcher channel.
+            // DispatcherFrameSink is a file-local adapter defined at the bottom of this file.
+            var frameSink = new DispatcherFrameSink(Dispatcher);
+
+            // TcpTransport → ConnectAsync → SocketConnection (receive + frame loops start immediately).
+            // spec: Docs/RE/specs/crypto.md §5 — inbound = LZ4 decompress only; no inverse cipher.
+            var transport = new TcpTransport(frameSink, PayloadCompression.DecompressPayload);
+            IConnectionSession session = await transport
+                .ConnectAsync(endpoint, CancellationToken.None)
+                .ConfigureAwait(false);
+
+            _gameConnection = session;
+
+            // Install the crypto outbound sink and activate the relay.
+            // spec: Docs/RE/specs/crypto.md §3.1 / §3.2 — outbound: cipher in-place then LZ4 compress.
+            var cryptoSink = new CryptoOutboundPacketSink(
+                session,
+                WireCipher.EncryptInPlace,
+                PayloadCompression.CompressPayload);
+
+            _relaySink?.SetTarget(cryptoSink);
+
+            GD.Print($"[ClientContext] Game connection OPEN to {endpoint}. Outbound relay active. " +
+                     "spec: crypto.md §3.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] OpenGameConnectionAsync({host}:{port}) FAILED: {ex.Message}");
+            Interlocked.Exchange(ref _gameConnectionOpened, 0); // allow a retry on the next server select
+        }
+    }
+
     public override void _ExitTree()
     {
         // Signal the event channel so any async drainers stop cleanly.
@@ -682,6 +908,13 @@ public sealed partial class ClientContext : Node
         // Complete the HUD event hub so all widget channel-readers finish cleanly.
         // spec: MartialHeroes.Client.Application.Hud — IHudEventHub.Complete().
         HudEventHub?.Complete();
+
+        // Tear down the live game connection (if one was opened).
+        if (_gameConnection is { } conn)
+        {
+            _gameConnection = null;
+            conn.DisconnectAsync().AsTask().Wait(TimeSpan.FromSeconds(2));
+        }
 
         // Cancel and DRAIN the engine loop task BEFORE disposing the cancellation source.
         // Disposing _loopCts while the loop task is still observing its token is a use-after-free
@@ -710,6 +943,10 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §1 (UiTex.txt loaded via this handle).
         // spec: Docs/RE/formats/misc_data.md §6 (msg.xdb loaded via this handle).
         UiCatalogs?.Dispose();
+        // Dispose the Ui/Scenes substrate libraries (share _uiAssets handle — dispose before it).
+        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
+        HudAtlas?.Dispose();
+        HudText?.Dispose();
         // Dispose the skill icon catalog (no archive owned — just clears internal state).
         // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
         IconCatalogs?.Dispose();
@@ -728,6 +965,11 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
         _terrainVfs?.Dispose();
         _terrainVfs = null;
+
+        // Dispose the state-2 load resource pipeline (separate archive handle).
+        // spec: Docs/RE/specs/resource_pipeline.md §1 / §2.
+        _loadVfsPipeline?.Dispose();
+        _loadVfsPipeline = null;
 
         GD.Print(
             "[ClientContext] EventBus completed. EngineLoop drained + stopped. CatalogueLoader + UiCatalogs + TerrainVfs disposed.");
@@ -793,6 +1035,46 @@ public sealed partial class ClientContext : Node
             return null;
         }
     }
+
+    private static VfsResourcePipeline? TryMountLoadResourcePipeline()
+    {
+        string? clientDir = ClientPathResolver.ResolveClientDir();
+        if (clientDir is null)
+        {
+            GD.Print("[ClientContext] Load VFS pipeline not mounted — state-2 worker runs in offline zero-byte mode.");
+            return null;
+        }
+
+        string infPath = Path.Combine(clientDir, "data.inf");
+        string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+        try
+        {
+            VfsResourcePipeline pipeline = VfsResourcePipeline.Mount(infPath, vfsPath);
+            pipeline.TrackingEnabled = true;
+            GD.Print($"[ClientContext] Load VFS pipeline mounted from '{clientDir}'. spec: resource_pipeline.md §2.");
+            return pipeline;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] Load VFS pipeline mount failed from '{clientDir}': {ex.Message}");
+            return null;
+        }
+    }
+
+    private static string ResolveOpeningSkipCfgPath()
+    {
+        try
+        {
+            // spec: Docs/RE/specs/resource_pipeline.md §2.5 — OPENNING/SKIP is read from the
+            // per-account/config-singleton INI path, not the dev VFS locator client_dir.cfg.
+            return ProjectSettings.GlobalizePath(MartialHeroes.Client.Godot.Ui.Scenes.Opening.OpeningWindow
+                .SkipCfgPath);
+        }
+        catch
+        {
+            return "options.cfg";
+        }
+    }
 }
 
 // -------------------------------------------------------------------------
@@ -832,4 +1114,102 @@ file sealed class RelayInputHandler : IInputHandler
     /// <inheritdoc />
     public bool TryHandle(in MartialHeroes.Client.Application.Input.InputEvent e)
         => _target?.TryHandle(in e) ?? false;
+}
+
+/// <summary>
+/// Adapter that bridges the transport-layer <see cref="IFrameSink"/> contract to the
+/// application-layer <see cref="InboundFrameDispatcher.Enqueue"/> method.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <see cref="InboundFrameDispatcher"/> does not implement <see cref="IFrameSink"/> directly
+/// because it operates on a full frame (header + payload) while <see cref="IFrameSink.OnFrame"/>
+/// receives only the payload with the opcode separated. This adapter packs the opcode back into an
+/// 8-byte wire header ahead of the payload before enqueuing, which is what
+/// <see cref="InboundFrameDispatcher.Enqueue"/> expects (the channel contains full frames).
+/// </para>
+/// <para>
+/// The packed header written here is the same 8-byte layout the FrameSplitter already parsed:
+///   +0 u32 LE totalSize, +4 u16 LE major, +6 u16 LE minor.
+/// spec: Docs/RE/specs/crypto.md §2 — wire frame header layout.
+/// </para>
+/// </remarks>
+file sealed class DispatcherFrameSink : IFrameSink
+{
+    private readonly InboundFrameDispatcher _dispatcher;
+
+    public DispatcherFrameSink(InboundFrameDispatcher dispatcher)
+    {
+        ArgumentNullException.ThrowIfNull(dispatcher);
+        _dispatcher = dispatcher;
+    }
+
+    public void OnFrame(SessionId sessionId, uint packedOpcode, ReadOnlySpan<byte> payload)
+    {
+        // Reconstruct the 8-byte header + payload frame that InboundFrameDispatcher.Enqueue expects.
+        // spec: Docs/RE/specs/crypto.md §2 — +0 u32 LE size (total incl. header), +4 u16 major, +6 u16 minor.
+        int totalSize = 8 + payload.Length; // spec: crypto.md §2 — size includes the 8-byte header
+        Span<byte> frame = stackalloc byte[totalSize <= 256 ? totalSize : 0]; // stack for small frames
+        byte[]? heapFrame = totalSize > 256 ? new byte[totalSize] : null;
+        Span<byte> dest = heapFrame is not null ? heapFrame.AsSpan() : frame;
+
+        // +0: u32 LE total size. spec: Docs/RE/specs/crypto.md §2 [CODE-CONFIRMED u32].
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(dest[0..], (uint)totalSize);
+        // +4: u16 LE major opcode. spec: Docs/RE/opcodes.md.
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(dest[4..], (ushort)(packedOpcode >> 16));
+        // +6: u16 LE minor opcode. spec: Docs/RE/opcodes.md.
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(dest[6..], (ushort)(packedOpcode & 0xFFFF));
+        if (!payload.IsEmpty)
+            payload.CopyTo(dest[8..]);
+
+        _dispatcher.Enqueue(dest);
+    }
+}
+
+file sealed class VfsLoadResourceSource : ILoadResourceSource
+{
+    private readonly VfsResourcePipeline? _pipeline;
+
+    public VfsLoadResourceSource(VfsResourcePipeline? pipeline)
+    {
+        _pipeline = pipeline;
+    }
+
+    public ValueTask<long> LoadAsync(string logicalPath, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_pipeline is null)
+        {
+            return ValueTask.FromResult(0L);
+        }
+
+        try
+        {
+            ReadOnlyMemory<byte> bytes = _pipeline.OpenRead(logicalPath);
+            return ValueTask.FromResult((long)bytes.Length);
+        }
+        catch (Exception ex)
+        {
+            GD.Print($"[ClientContext] Load resource skipped '{logicalPath}': {ex.Message}");
+            return ValueTask.FromResult(0L);
+        }
+    }
+}
+
+file sealed class GodotLoadingSoundSink : ILoadingSoundSink
+{
+    public void PlayLooping(int soundCueId)
+    {
+        // Loading cue 920100100 is a category-0 looping BGM. Route through AudioService's BGM slot
+        // so the next front-end BGM replaces it cleanly.
+        // spec: Docs/RE/specs/sound.md §15.6a; frontend_scenes.md §9.1.
+        if (AudioService.Instance is { } audio)
+        {
+            audio.CallDeferred(AudioService.MethodName.StartBgm, (uint)soundCueId);
+            GD.Print($"[ClientContext] Loading sound sink requested looping cue {soundCueId}.");
+            return;
+        }
+
+        GD.Print($"[ClientContext] Loading sound sink: AudioService unavailable; cue {soundCueId} skipped.");
+    }
 }

@@ -1,0 +1,53 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 32-byte body size and the flag + name-filter layout
+# are control-flow CONFIRMED from the stall-list request/search send path. capture_verified: false.
+
+name: CmsgStallListRequest
+opcode: 0x2004a           # major 2 (GameAction), minor 74 -> (2 << 16) | 74
+direction: C2S
+size: 32                  # fixed 32-byte (0x20) body built by the stall-list request/search sender
+spec: packets/2-74_stall_list_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client request / search of the personal-stall (player-vendor) market list. A fixed 32-byte body carrying a leading flag/mode byte, a 30-character CP949 name-filter string, and one trailing byte. Issued by the StallListPanel's search-submit and refresh actions; an empty filter requests the full ("all") list.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 32.
+# CONTROL-FLOW CONFIRMED: the stall-list panel copies the search textbox (max 30 CP949 chars,
+# NUL-padded) into a 32-byte send buffer behind a 10-second client rate gate, then appends it after the
+# 8-byte frame header. Both the search-submit and the open/refresh paths use this same 32-byte send.
+fields:
+  - { name: Flag, type: u8 }             # 0x00  leading flag / mode byte (=1 observed at the builder; mode meaning capture-pending)
+  - { name: Name, type: "bytes[30]" }    # 0x01  CP949 name-filter string, NUL-padded to 30 (empty = list all)
+  - { name: Tail, type: u8 }             # 0x1F  trailing / version byte (purpose capture-pending)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 32-byte / 0x20 send) and the flag + 30-byte name-filter +
+  trailing-byte layout; CAPTURE-UNVERIFIED in exact VALUE meaning.
+
+    0x00 (1B)  Flag : a leading flag / mode byte. The builder writes a constant 1 in the recovered
+                      path; whether other values select a different list scope (own vs all vs by-name)
+                      is capture-pending. Surface as a raw byte; do NOT hardcode a mode constant.
+    0x01 (30B) Name : the search/name filter, CP949-encoded, NUL-padded to 30 bytes. The panel's search
+                      textbox caps input at 30 characters; an empty (all-NUL) filter requests the full
+                      market list ("all"). The name-filter semantics are a strong static inference.
+    0x1F (1B)  Tail : a single trailing byte after the name filter (a version / reserved byte). Value
+                      meaning capture-pending; believed constant. Modelled as a raw byte.
+
+  PANEL PATH (engineer's mental model, not extra wire fields): the StallListPanel's search-submit
+  action validates the textbox against its placeholder, enforces a ~10-second client-side rate gate,
+  then emits this 32-byte body; the reset/all action clears the filter and re-issues a default
+  (empty-filter) request through the same builder. The panel's open path shows the last/empty store
+  until a fresh request round-trips.
+
+  RELATIONSHIP: the SERVER REPLY is S2C 4/74 SmsgStallListRefill (packets/4-74_stall_list_refill.yaml),
+  which rebuilds the StallListPanel's row list. The companion enter/open action is C2S 2/56
+  CmsgStallEnter (packets/2-56_stall_enter.yaml), sent when a stall row is chosen.
+
+  UNKNOWNS to resolve with a stall list/search capture (body size is settled at 32; these are VALUE
+  questions):
+    - the exact Flag mode enum (own-list vs all vs by-name);
+    - the meaning / constant value of the trailing Tail byte;
+    - confirm the name filter is CP949 NUL-padded and that empty = list-all on the wire.
+
+  UNBLOCKS: the Client.Application stall-list request/search use-case (send-only).

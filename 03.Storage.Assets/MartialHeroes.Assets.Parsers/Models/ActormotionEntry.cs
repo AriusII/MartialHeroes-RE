@@ -23,7 +23,7 @@ namespace MartialHeroes.Assets.Parsers.Models;
 ///   <see cref="IntA"/> carries the associated animation / motion base-id for the actor.
 /// </description></item>
 /// <item><description>
-///   The two 9-element directional arrays expose per-direction animation indices.
+///   The two 9-element motion-id arrays expose flat <c>.mot</c> ids; their per-direction meaning is proposed.
 /// </description></item>
 /// </list>
 /// </para>
@@ -123,13 +123,12 @@ public sealed class ActormotionEntry
     public int DivisorX { get; init; }
 
     /// <summary>
-    /// Frame / loop count divisor for the Y rate, at record offset 0x2C (text col14 — paired,
-    /// placed after float_i in the column stream).
+    /// Frame / loop count divisor for the Y rate, at record offset 0x2C (text col6 — paired,
+    /// interleaved early in the column stream).
     /// Forced to 1 when the source column parses as 0 (divide-by-zero guard).
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/actormotion.md — divisor_y @ 0x2C, (paired); forced to 1 if 0.
-    /// Observed at text column index 14 (0-based), directly before the two directional sub-arrays.
+    /// spec: Docs/RE/formats/actormotion.md — divisor_y @ 0x2C, col6; forced to 1 if 0.
     /// </remarks>
     public int DivisorY { get; init; }
 
@@ -158,24 +157,24 @@ public sealed class ActormotionEntry
     public float FloatI { get; init; }
 
     /// <summary>
-    /// Per-direction primary motion / animation index array at record offset 0x40.
-    /// 9 elements: 8 compass directions + 1 neutral/centre slot (3×3 directional grid).
+    /// Primary motion-id array at record offset 0x40.
+    /// 9 elements; per-direction interpretation is proposed, not proven.
     /// Sourced from text columns 15..23 (0-based).
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/actormotion.md — dir_array_1 @ 0x40, 9 i32 elements.
-    /// Direction-slot ordering (which index is which compass direction) is LOW confidence —
+    /// spec: Docs/RE/formats/actormotion.md — motion_ids_a @ 0x40, 9 i32 elements.
+    /// Direction-slot ordering (which index is which compass direction) is PROPOSED —
     /// treat as opaque until runtime confirmation.
     /// </remarks>
     public int[] DirArray1 { get; init; } = [];
 
     /// <summary>
-    /// Per-direction secondary / transition motion index array at record offset 0x64.
-    /// 9 elements: same directional grid as <see cref="DirArray1"/>.
+    /// Secondary motion-id array at record offset 0x64.
+    /// 9 elements; same flat <c>.mot</c>-id encoding as <see cref="DirArray1"/>.
     /// Sourced from text columns 24..32 (0-based).
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/actormotion.md — dir_array_2 @ 0x64, 9 i32 elements.
+    /// spec: Docs/RE/formats/actormotion.md — motion_ids_b @ 0x64, 9 i32 elements.
     /// Which array is "primary" vs "secondary/transition" is LOW confidence.
     /// </remarks>
     public int[] DirArray2 { get; init; } = [];
@@ -231,9 +230,9 @@ public sealed class ActormotionEntry
     /// </summary>
     /// <remarks>
     /// Compatibility alias. The original parser captured cols 15..21 as MotionIds[0..6].
-    /// In the full spec layout these are dir_array_1[0..6]; the last two array slots (7, 8)
+    /// In the full spec layout these are motion_ids_a[0..6]; the last two array slots (7, 8)
     /// are unused (typically 0) for most mob entries.
-    /// spec: Docs/RE/formats/actormotion.md — dir_array_1 @ 0x40, 9 i32 elements.
+    /// spec: Docs/RE/formats/actormotion.md — motion_ids_a @ 0x40, 9 i32 elements.
     /// </remarks>
     public int[] MotionIds => DirArray1.Length >= 7
         ? DirArray1[..7]

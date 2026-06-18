@@ -1,0 +1,47 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgItemShopBalanceUpdate
+opcode: 0x40073           # major 4 (Response), minor 115 -> (4 << 16) | 115
+direction: S2C
+size: 24                  # 0x18-byte handler read
+spec: packets/4-115_item_shop_balance_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: The NPC vendor MONEY / balance refresh. On success the handler commits the carried balance fields onto the local player and refreshes the item-shop panel money label; on failure it surfaces a shop failure notice. This is the vendor's money channel -- the analog of the crafting product panel's 3/8 but a DIFFERENT opcode (the vendor uses 4/115, NOT 3/8).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 24.
+fields:
+  - { name: BalanceA, type: u32 }           # 0x00  balance field A
+  - { name: BalanceB, type: u32 }           # 0x04  balance field B
+  - { name: Success,  type: u8 }            # 0x08  1 = commit balances + refresh the money label
+  - { name: FailCode, type: u8 }            # 0x09  on failure, selects a shop failure notice
+  - { name: Reserved, type: "bytes[2]" }    # 0x0a  gap to the next field
+  - { name: BalanceC, type: u32 }           # 0x0c  third balance value (and a money-label argument)
+  - { name: Trailer,  type: "bytes[8]" }    # 0x10  remainder of the 0x18 read
+
+notes: |
+  Static only; no capture this pass. The handler reads a fixed 0x18 (24)-byte block. The 24-byte
+  read size and the consumed offsets (Success @0x08, FailCode @0x09, BalanceC @0x0c, the two leading
+  balances @0x00/@0x04) are control-flow-confirmed; the field VALUE meanings are capture-pending.
+
+    0x00 (4B) BalanceA : balance field A, committed onto the local-player balance fields on success.
+    0x04 (4B) BalanceB : balance field B (committed alongside BalanceA).
+    0x08 (1B) Success  : 1 commits the balances and refreshes the item-shop money label.
+    0x09 (1B) FailCode : on failure, selects a shop failure notice (the 45020 generic +
+                         45021..45024 specific reason strings).
+    0x0a (2B) Reserved : a 2-byte gap up to the third balance word.
+    0x0c (4B) BalanceC : a third balance value, also passed as a money-label argument.
+    0x10 (8B) Trailer  : the rest of the 0x18 read. Modelled as one reserved blob so the struct
+                         totals the 24-byte read.
+
+  RELATIONSHIP: the money push for the item-shop vendor, following a 2/115 / 2/19 buy. DISTINCT from
+  the crafting product panel money refresh 3/8 (4-byte gold) -- they are different opcodes/panels.
+  The two balance fields A/B and the third value C map onto two/three player balance fields; which
+  is gold vs cash vs a points balance is capture-pending.
+
+  UNKNOWNS to resolve with a capture: which of BalanceA / BalanceB / BalanceC is gold vs cash vs a
+  points balance, and the contents of Trailer.
+
+  UNBLOCKS: Client.Application item-shop money-refresh handling.

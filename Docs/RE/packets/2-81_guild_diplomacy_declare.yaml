@@ -1,0 +1,54 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 18-byte body size and the action + target-name layout
+# are control-flow CONFIRMED from the guild-diplomacy send path. capture_verified: false.
+
+name: CmsgGuildDiplomacyDeclare
+opcode: 0x20051           # major 2 (GameAction), minor 81 -> (2 << 16) | 81
+direction: C2S
+size: 18                  # fixed 18-byte (0x12) body built by the guild-diplomacy sender
+spec: packets/2-81_guild_diplomacy_declare.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client guild-diplomacy / brood-war declaration request, sent from the guild-relations list window (BroodWarListPanel). A fixed 18-byte body carrying a leading action/state byte and a 17-byte CP949 target guild name. The same body shape also serves the open / relation-list request on this panel; which numeric action value is declare-war vs declare-ally vs list-request is capture-pending.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 18.
+# CONTROL-FLOW CONFIRMED: the panel stages an 18-byte source buffer (action byte + 17-byte name, name
+# copied with a 17-byte fixed copy) through a client precheck and then the sender appends exactly 18
+# bytes after the frame header. The actual network send fires from the confirm-dialog's OK callback.
+fields:
+  - { name: Action, type: u8 }           # 0x00  action / state byte (declare-war vs declare-ally vs list-request; value map capture-pending)
+  - { name: GuildName, type: "bytes[17]" } # 0x01  target guild name, CP949, NUL-padded to 17
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 18-byte / 0x12 send) and the action + 17-byte target-name
+  layout; CAPTURE-UNVERIFIED in exact VALUE meaning.
+
+    0x00 (1B)  Action    : an action / state byte. The panel stages different leading values for the
+                           different relation actions (declare-war, declare-ally, and an open/refresh
+                           list-request path that reuses the same 18-byte shape with the local player
+                           name). WHICH numeric value means declare-war vs declare-ally vs list-request
+                           is capture-pending -- surface it as a raw byte; do NOT hardcode a constant.
+    0x01 (17B) GuildName : the target guild name, CP949-encoded, NUL-padded to 17 bytes (fixed 17-byte
+                           copy). On the open/list-request path this field carries the local player's
+                           name instead of a target guild; the field width is the same.
+
+  PANEL PATH (engineer's mental model, not extra wire fields): the guild-relations list window
+  (BroodWarListPanel) gates its declare actions on a global brood-war phase value and on level / gold /
+  name / time-window prechecks, then opens a sibling confirmation dialog; the dialog's OK callback runs
+  the validated 18-byte buffer through the sender. The panel's open path stages the same 18-byte buffer
+  with the list-request action and the local player name. Whether the pure list-fetch uses a distinct
+  minor from the declaration (both observed on the shared 18-byte / 2/81 path) is capture-pending.
+
+  RELATIONSHIP: the SERVER REPLY is S2C 4/81 SmsgGuildDiplomacyResult
+  (packets/4-81_guild_diplomacy_result.yaml), which carries the result / error code and (on success)
+  the relation roster body that the panel re-applies. The static-display guild-WAR info window is a
+  separate panel fed by S2C 5/73 SmsgGuildWarInfoUpdate.
+
+  UNKNOWNS to resolve with a guild-diplomacy capture (body size is settled at 18; these are VALUE
+  questions):
+    - the Action value map (declare-war vs declare-ally vs cancel vs list-request);
+    - whether a pure list-fetch uses a distinct minor or the shared 2/81 path with a list action byte;
+    - confirm the 17-byte name is CP949 NUL-padded on the wire.
+
+  UNBLOCKS: the Client.Application guild-diplomacy declare use-case (send-only).

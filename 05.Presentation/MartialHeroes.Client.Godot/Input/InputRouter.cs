@@ -49,11 +49,13 @@ public sealed partial class InputRouter : Node
     // Click-synthesis latch state: records the press position and button so that on release at the
     // same-ish position we can emit a MouseButtonClick (type 6) event.
     // spec: Docs/RE/specs/input_ui.md §2b — "latch widget on press, synthesise click on same-widget release".
-    // The 2-px drag tolerance is byte-confirmed at IDA dword_79651C=2. spec: input_ui.md §2b.
+    // The 2-px drag tolerance is byte-confirmed in input_ui.md §2b.
     private int _pressX = -1;
     private int _pressY = -1;
     private int _pressButton = -1;
-    private const int ClickDragTolerance = 2; // spec: Docs/RE/specs/input_ui.md §2b — dword_79651C=2 BYTE-CONFIRMED.
+
+    private const int
+        ClickDragTolerance = 2; // spec: Docs/RE/specs/input_ui.md §2b (drag tolerance = 2, byte-confirmed).
 
     // Modifier flag constants — recovered bit positions.
     // spec: Docs/RE/specs/input_ui.md §2c — "Modifier-flag encoding (recovered bit positions)".
@@ -205,7 +207,7 @@ public sealed partial class InputRouter : Node
 
                         // Click synthesis: if release is within 2 px of the press, emit type 6 (Click).
                         // spec: Docs/RE/specs/input_ui.md §2b — "synthesise click on same-widget release".
-                        // spec: dword_79651C = 2 (drag tolerance). BYTE-CONFIRMED.
+                        // spec: input_ui.md §2b — drag tolerance = 2, byte-confirmed.
                         if (_pressButton == button &&
                             Math.Abs(x - _pressX) <= ClickDragTolerance &&
                             Math.Abs(y - _pressY) <= ClickDragTolerance)

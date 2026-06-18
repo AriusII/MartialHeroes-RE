@@ -50,6 +50,14 @@ public interface IHudEventHub
     /// </summary>
     bool PublishZoneChanged(ZoneChangedEvent zoneChanged);
 
+    /// <summary>
+    /// Publishes a local-player vitals refresh (latest-wins). Returns false only if dropped under
+    /// backpressure.
+    /// spec: Docs/RE/specs/combat.md §12.2 (5/53 = canonical HP-bar source);
+    /// Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml (CurrentHp@0x10 / CurrentMp@0x14 / Stamina@0x18).
+    /// </summary>
+    bool PublishVitals(HudVitalsEvent v);
+
     // ---- Subscribe side (HUD widgets) ----------------------------------------------------------
 
     /// <summary>The chat-log stream. Drain with <see cref="ChannelReader{T}.ReadAllAsync(System.Threading.CancellationToken)"/>.</summary>
@@ -75,6 +83,13 @@ public interface IHudEventHub
     /// spec: Docs/RE/specs/world_systems.md Ch. 16 §16.3.
     /// </summary>
     ChannelReader<ZoneChangedEvent> ZoneChanges { get; }
+
+    /// <summary>
+    /// The local-player vitals stream (latest-wins). Drain with
+    /// <see cref="ChannelReader{T}.ReadAllAsync(System.Threading.CancellationToken)"/> on each frame tick.
+    /// spec: Docs/RE/specs/combat.md §12.2; Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
+    /// </summary>
+    ChannelReader<HudVitalsEvent> Vitals { get; }
 
     /// <summary>Signals that no further HUD events will be published, completing every stream's reader for clean shutdown.</summary>
     void Complete();

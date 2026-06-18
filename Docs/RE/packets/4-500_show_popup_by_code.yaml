@@ -1,0 +1,33 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: the code->string mapping is a static inference. capture_verified: false.
+
+name: SmsgShowPopupByCode
+opcode: 0x401f4           # major 4 (Response), minor 500 -> (4 << 16) | 500
+direction: S2C
+size: 4                   # the handler reads a single u32 selector
+spec: packets/4-500_show_popup_by_code.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Show a preset popup notice selected by a numeric code. Routed OUTSIDE the major-4 Response table (a special-cased dispatch arm). The handler reads one u32 selector and shows one of seven preset popup strings as a timed on-screen notice (ErrorPanel slot 168, default 5000 ms).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
+fields:
+  - { name: PopupCode, type: u32 }       # 0x00  popup selector; values 1..7 each map to a preset string
+
+notes: |
+  Static only; no capture this pass. The handler reads a single 4-byte selector. The 4-byte read and
+  the routing (directly to the timed notice widget) are control-flow-confirmed; the VALUE meaning of
+  each code is capture-pending.
+
+    0x00 (4B) PopupCode : a u32 selector. Codes 1..7 each select one of seven preset popup strings,
+                          shown as a timed on-screen notice. The string contents/ids behind codes
+                          1..7 were NOT decoded this pass.
+
+  ROUTING: shown directly via the multi-line notice show path on ErrorPanel (the timed floating
+  notice widget, slot 168), which delegates to the scrolling AnnouncePanel (slot 221) when that
+  slot exists. Routed outside the Response table (special dispatch).
+
+  UNKNOWNS to resolve with a capture: the seven popup strings behind codes 1..7.
+
+  UNBLOCKS: Client.Application popup-by-code handling.

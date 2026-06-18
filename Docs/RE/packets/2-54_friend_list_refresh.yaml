@@ -1,0 +1,39 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the 1-byte body size is control-flow CONFIRMED from the
+# friend-list refresh send path. capture_verified: false.
+
+name: CmsgFriendListRefresh
+opcode: 0x20036           # major 2 (GameAction), minor 54 -> (2 << 16) | 54
+direction: C2S
+size: 1                   # fixed 1-byte body built by the friend-list refresh sender
+spec: packets/2-54_friend_list_refresh.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client request to refresh the friend list / online-status. A 1-byte send raised by the friend window's refresh control. The send path is rate-limited client-side (a 3-minute throttle) so it cannot be spammed.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the single field equals size: 1.
+fields:
+  - { name: Flag, type: u8 }            # 0x00  single request byte (a small constant selector; exact value capture-pending)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 1-byte send); CAPTURE-UNVERIFIED in VALUE meaning. The
+  friend window's refresh control raises this message to ask the server for the current friend roster
+  / online-status. The client gates the send behind a 3-minute (180000 ms) throttle, so a fresh
+  implementation should reproduce the throttle to match the original's traffic rather than send on
+  every click.
+
+    0x00 (1B) Flag : a single request selector byte. Its exact value / meaning was not pinned on a
+                     send path this pass; modelled as one u8.
+
+  RELATIONSHIP: companion of C2S 2/49 CmsgFriendAddRemove
+  (packets/2-49_friend_add_remove.yaml). The server reply that repopulates the friend rows was not
+  isolated statically; the best inbound candidate is 5/26 SmsgLocalPlayerRelationSlot (28-byte
+  relation-slot update) -- recorded as a CANDIDATE only, UNVERIFIED, debugger/capture-pending. Do NOT
+  treat 5/26 as the confirmed reply until a capture or a dispatch cross-check confirms it.
+
+  UNKNOWNS to resolve with a capture (body size is settled at 1):
+    - the actual Flag byte value;
+    - the server reply opcode(s) that deliver the refreshed roster / online status.
+
+  UNBLOCKS: the Client.Application friend-list refresh use-case (send-only, throttled).

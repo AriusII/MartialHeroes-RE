@@ -11,6 +11,7 @@
 #                        per-verb meaning of the two trailing ids)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
 #   conflicts: RESOLVED -- 2/28 size corrected from `var` to a FIXED 12 (also reconcile the opcodes.md 2/28 row).
+#   list-row path RESOLVED -- the QuestPanel's per-row request is 2/152, NOT 2/28 (see RELATED note below).
 
 name: CmsgQuestAction
 opcode: 0x2001c           # major 2 (GameAction), minor 28 -> (2 << 16) | 28
@@ -70,10 +71,14 @@ notes: |
                           12 bytes); whether a given verb populates it is a value question, not a
                           length one.
 
-  RELATED, NOT THIS OPCODE: the quest-log window also drives a SECOND, distinct C2S quest channel for
-  per-row "request detail / claim" round-trips (the list-row request path). That sender's opcode tuple
-  and body were not traced and are NOT 2/28; do not fold it into this spec. A future protocol pass
-  must trace it separately.
+  RELATED, NOT THIS OPCODE -- the list-row path is 2/152: the QUEST-LOG WINDOW's own per-row
+  "request detail / claim" round-trip does NOT use 2/28. It uses a SEPARATE generic two-u32 sender
+  that builds major 2 / minor 152 (0x98) and appends two u32 args (a per-quest record value and a
+  per-row scratch value). OVERLOAD RESOLVED (HUD-II Wave 2): 2/152 belongs SOLELY to the QuestPanel.
+  The earlier reading that the same 2/152 sender ALSO served a ProductPanel paging send is WITHDRAWN
+  -- the ProductPanel recovery proved that panel sends only 2/151 (a 1-byte selector body) and never
+  2/152. The opcodes.md 2/152 row is renamed to CmsgQuestRowRequest accordingly. See
+  packets/2-152_quest_row_request.yaml. Do NOT fold the list-row path into THIS spec.
 
   UNKNOWNS to resolve with a quest-flow capture (wire VALUE semantics; the body length is settled at 12):
     - the full SubAction enum (accept / proceed values; only give-up == 4 is named);

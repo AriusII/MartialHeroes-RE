@@ -96,8 +96,9 @@ public sealed class LobbyClient : ILobbyClient
     /// Initialises a lobby client that will connect to <paramref name="lobbyHost"/>.
     /// </summary>
     /// <param name="lobbyHost">
-    /// Resolved lobby host IP string. Use <see cref="ResolveHost"/> to obtain it from
-    /// the ip.txt / list.dat / fallback resolution order.
+    /// Resolved lobby host IP string. The composition root resolves it via the full 3-tier
+    /// <c>LobbyHostResolver</c> (ip.txt → list.dat/registry → fallback) and passes it in here.
+    /// spec: Docs/RE/specs/login_flow.md §2.0.
     /// </param>
     /// <param name="decompress">
     /// LZ4 raw-block decompression delegate (e.g. <c>PayloadCompression.DecompressPayload</c>).
@@ -111,48 +112,9 @@ public sealed class LobbyClient : ILobbyClient
         _decompress = decompress;
     }
 
-    // -----------------------------------------------------------------------
-    // Host resolution
-    // -----------------------------------------------------------------------
-
-    /// <summary>
-    /// Resolves the lobby host string using the spec-mandated priority order:
-    /// <list type="number">
-    ///   <item>If <c>ip.txt</c> exists at <paramref name="workingDirectory"/>, read the first
-    ///   whitespace-free token truncated to 19 characters.</item>
-    ///   <item>Otherwise return <paramref name="fallbackHost"/> (defaults to
-    ///   <see cref="FallbackHost"/>).</item>
-    /// </list>
-    /// spec: Docs/RE/specs/login_flow.md §2.0 / §7 — host resolution order.
-    /// </summary>
-    /// <remarks>
-    /// The <c>list.dat</c> step (spec: Docs/RE/packets/lobby.yaml RECORD SHAPE C) is intentionally
-    /// excluded from this clean-room implementation: <c>list.dat</c> is a Windows-registry-keyed
-    /// binary file that requires access to the real client installation. The implementer should
-    /// extend this method when a list.dat reader is available.
-    /// </remarks>
-    public static string ResolveHost(
-        string workingDirectory,
-        string fallbackHost = FallbackHost)
-    {
-        string ipTxtPath = Path.Combine(workingDirectory, "ip.txt");
-        if (File.Exists(ipTxtPath))
-        {
-            string raw = File.ReadAllText(ipTxtPath).Trim();
-            // Split on whitespace, take first token, truncate to 19 chars.
-            // spec: Docs/RE/specs/login_flow.md §7 — "ip.txt: single whitespace-free token, ≤ 19 chars".
-            string token = raw.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)[0];
-            if (token.Length > IpTextMaxLength)
-            {
-                token = token[..IpTextMaxLength];
-            }
-
-            return token;
-        }
-
-        // list.dat step omitted — not implementable without client installation and registry access.
-        return fallbackHost;
-    }
+    // Host resolution is owned by the composition root's 3-tier LobbyHostResolver
+    // (04.Client.Core/.../Infrastructure/Lobby), which performs ip.txt → list.dat/registry → fallback
+    // and passes the resolved host into this client's constructor. spec: Docs/RE/specs/login_flow.md §2.0.
 
     // -----------------------------------------------------------------------
     // ILobbyClient implementation
@@ -224,13 +186,13 @@ public sealed class LobbyClient : ILobbyClient
         for (int i = 0; i < count; i++)
         {
             ReadOnlySpan<byte> rec = data.Slice(i * ServerRecordSize, ServerRecordSize);
-            // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A:
-            //   +0 u16 id_selectkey, +2 i16 status_kind, +4 i16 population, +6 i16 flag
+            // spec: Docs/RE/packets/lobby.yaml Record Shape A:
+            //   +0 u16 server_id, +2 i16 status_code, +4 i16 load, +6 i16 open_time
             records[i] = new LobbyServerRecord(
                 ServerId: BinaryPrimitives.ReadUInt16LittleEndian(rec[0..]),
-                Status: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                Population: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
-                Flag: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
+                StatusCode: BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
+                Load: BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
+                OpenTime: BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
         }
 
         return records;

@@ -1,0 +1,51 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: the body SIZE (132 bytes) is control-flow CONFIRMED from the send builder;
+# the intra-buffer field offsets are NOT pinned this lane. capture_verified: false.
+#
+# NEW opcode (HUD-II Wave 2): carrier-pigeon mail SEND, not previously catalogued.
+
+name: CmsgCarrierPigeonSend
+opcode: 0x20046           # major 2 (GameAction), minor 70 -> (2 << 16) | 70
+direction: C2S
+size: 132                 # FIXED 132-byte (0x84) body, staged in a client buffer before send
+spec: packets/2-70_carrier_pigeon_send.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client carrier-pigeon mail SEND. A send-only message carrying a 132-byte fixed body composed by the mail send panel -- a CP949 recipient name (max 16 chars), the subject/message text region, an attached-item record array (up to 5 staged item records), and a money/postage field. Emitted from the send-confirm dialog's accept path. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 132.
+# CONTROL-FLOW CONFIRMED: the send builder appends a fixed 132-byte body. The INTRA-BUFFER offsets
+# (where recipient / subject / body / item array / money sit inside the 132 bytes) are NOT pinned
+# this lane. The body is therefore modelled as a single fixed 132-byte blob so the wire SIZE is exact
+# without inventing offsets; the engineer must NOT assume internal offsets until a capture pins them.
+fields:
+  - { name: Body, type: bytes[132] }   # 0x00  the full 132-byte fixed mail-compose buffer (internal layout capture-pending)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (132 bytes / 0x84); the intra-buffer field offsets are
+  capture/debugger-pending. The send is emitted from the mail compose panel's send-confirm accept
+  path. The 132-byte buffer is staged across the compose panel before send.
+
+  KNOWN CONTENTS (from the compose panel and a debug format string), but their byte OFFSETS inside
+  the 132-byte buffer are NOT pinned this lane:
+    - a CP949 recipient name, max 16 characters;
+    - the subject / message body text region (the body textbox allows up to 199 characters);
+    - an attached-item record array (the panel stages up to 5 item records);
+    - a money / postage field (the send is gated client-side by a 200000-gold postage requirement).
+
+  The intra-buffer split is the only honest residual: the staging is scattered across the panel, so a
+  debugger read of the assembled 132-byte frame (or a capture) is the clean way to pin the recipient /
+  subject / body / item-array / money offsets. Until then this spec models the confirmed wire SIZE as
+  one fixed blob and lists the contents without fabricating offsets.
+
+  RELATIONSHIP: part of the mail / carrier-pigeon family. Mail-arrival notification rides S2C 1/20
+  SmsgSrvLetterReceived. The LetterPanel request is C2S 2/60 CmsgLetterRequest
+  (packets/2-60_letter_request.yaml); the delivery-box claim is C2S 2/71 CmsgDeliveryClaim
+  (packets/2-71_delivery_claim.yaml).
+
+  RESIDUAL: the S2C mailbox-list and delivery-box POPULATE opcodes + record layouts are NOT yet
+  pinned (debugger/capture-pending).
+
+  UNBLOCKS: the Client.Application mail-send use-case can wire the opcode and the fixed 132-byte frame
+  length; the internal field decode must wait on a capture.

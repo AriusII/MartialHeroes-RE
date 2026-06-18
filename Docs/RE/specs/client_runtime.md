@@ -1289,7 +1289,7 @@ and `return` from `WinMain`; otherwise clear the per-iteration scene pointer and
 | 2 → 4 Select | (opening skipped; next case handles construction) | `LoadHandler` |
 | 3 → 4 Select | `SelectWindow` (see below) | `COpeningWindow` |
 | → 4 Select | `SelectWindow` (~6280 B): character-list UI, preview actor, **Select camera** (own multi-waypoint preview path, distinct from the in-world five manipulators) | previous Opening or `LoadHandler` window |
-| 4 → 5 In-game | `MainHandler` (~200 B) + **`BuildGameWorld`**: `GPerspectiveCamera` (FOV 65°/near 5/far 15000), 5 `GViewPlatform` slots (+reserved sixth, allocated but never assigned), `GScene` (root, labelled "charater scene"), `GSwitch`, 5 camera manipulators; HUD panel tree activated; networking enabled | `SelectWindow` + Select camera + preview actor |
+| 4 → 5 In-game | `MainHandler` (~200 B) + **`BuildGameWorld`**: `GPerspectiveCamera` (FOV 65°/near 5/far 15000), **exactly 5** `GViewPlatform` slots (no sixth — CAMPAIGN 16 confirmed), `GScene` (root, labelled "charater scene"), `GSwitch`, 5 camera manipulators, 4 layer nodes {2004,2005,2006,2148}; HUD panel tree activated; networking enabled | `SelectWindow` + Select camera + preview actor |
 | 5 → 4 | (rebuild `SelectWindow`) | `MainHandler`, full scene graph, all 5 manipulators, local player actor |
 | → 6/7 | error string / modal dialog | net connection dropped; engine shutdown |
 | → 8 | — | final teardown: scheduler, crash logger, OS |
@@ -1323,17 +1323,25 @@ field allocated elsewhere, not in this builder. (static-hypothesis / capture-deb
 
 Written by the network-receive path; each also clears the run-flag.
 
+> **The table-driven engine-state transition handler is `CharActionResult` (3/100), NOT 3/7.**
+> Re-confirmed CAMPAIGN 16. `SmsgCharActionResult` (major 3 / minor **100**) is the handler that reads
+> a result/action code and writes the engine state (rows below). The separate `SmsgCharManageResult`
+> (major 3 / minor **7**) is a **Character-Select UI result only** (char delete / rename / select slot
+> face/refresh; delete-confirm decrements the account char count and clears the slot, then resets the
+> select scene) and **writes NO engine-state field** — it must not be wired to any scene transition.
+> The "result code" rows below are `CharActionResult` (3/100) codes. See `opcodes.md` (3/7, 3/100).
+
 | Live scene | Trigger | Next state | Sub-state | Notes |
 |---|---|---:|---:|---|
-| 1 Login | **EnterGameAck (3/5)** received | 2 | — | auth OK → begin load |
+| 1 Login | **EnterGameAck (3/5)** received | 2 | — | auth OK → begin load. **State-agnostic:** the handler forces state 2 unconditionally; "from Login" is just where it is observed to arrive |
 | 4/2 Select/Load | **CharacterList (3/1)** received | 4 | 8 | (re)enter select with fresh character list |
-| 5 In-game (bootstrap) | **GameStateTick (4/1)**, no local player | 4 | — | world-state pre-spawn fallback; actor creation failed |
-| 4 Select | **CharMgmt result = 0**, no local player | 6 | 8 | char op succeeded → quit/return path |
-| 4 Select | **CharMgmt result 1..4 or 7** | 7 | 5 | char operation failed → error |
-| 4 Select | **CharMgmt result 202/203/232** | 2 | — | create/rename accepted → reload |
-| 4 Select | **CharMgmt result out-of-range** | 7 | 8 | hard char-op error; error-detail = result code |
-| 5 In-game | **CharMgmt result ≠ 0**, local player present | 7 | 8 | in-game char error; error-detail = result code |
-| 5 In-game | **CharMgmt result = 0**, local player present | 6 | 8 | in-game char op succeeded |
+| 5 In-game (bootstrap) | **GameStateTick (4/1)**, no local player **and re-spawn from the descriptor FAILED** | 4 | — | world-state pre-spawn fallback; reached only when the local-player object is absent *and* descriptor spawn returns null (on success it builds the world and does not change state) |
+| 4 Select | **CharActionResult (3/100) code = 0**, no local player | 6 | 8 | char op succeeded → quit/return path |
+| 4 Select | **CharActionResult (3/100) code 1..4 or 7** | 7 | 5 | char operation failed → error |
+| 4 Select | **CharActionResult (3/100) code 202/203/232** | 2 | — | create/rename/billing accepted → reload |
+| 4 Select | **CharActionResult (3/100) code out-of-range** | 7 | 8 | hard char-op error; error-detail = result code |
+| 5 In-game | **CharActionResult (3/100) code ≠ 0**, local player present | 7 | 8 | in-game char error; error-detail = result code |
+| 5 In-game | **CharActionResult (3/100) code = 0**, local player present | 6 | 8 | in-game char op succeeded |
 | any (state 2) | connection/handshake error during load | 7 | 2 | load-time disconnect |
 | any (state 4/5/6/other) | disconnect | 7 | 8 (or 6) | generic disconnect → error / quit |
 
@@ -1344,7 +1352,8 @@ Written by the network-receive path; each also clears the run-flag.
 | 1 Login | quit button / `game.ver` VFS mismatch confirmed | 6 | 2 | SFX **861010106** |
 | 1 Login | enter-load / continue (login network machine completes) | (loop-break only) | — | Login case already wrote state 2; loop-break re-dispatches |
 | 1 Login | login network-machine fatal | 6 | 8 or 7 | depends on failure type |
-| 4 Select | confirm character slot (enter world) | 5 | 8 | `SelectWindow_End` writes 5 when confirm flag is set |
+| 4 Select | confirm an **occupied** slot (enter world) | 2 (via 3/5) | — | Sends the **EnterGame request (1/9)**; the server's **3/5 EnterGameAck → state 2 (Load)** drives the transition (then Load → … → InGame 5). The case-4 entry **pre-writes 5** as the *no-network default* only — with a live server the 3/5 overwrites it with 2. So the live enter-world path is **4 → 2 → … → 5**, NOT a direct 4 → 5 (§7.9.5 happy path). *(CAMPAIGN 16 correction.)* |
+| 4 Select | confirm a **blank** (`@BLANK@`) slot | (no state write) | — | opens the in-place character-create modal; create result comes back via 3/100 / 3/23 |
 | 4 Select | quit / exit command | 6 | 8 | character-select command handler |
 | 4 Select | "back/leave" command | (net request) | — | sends network leave; server reply drives state change |
 | 2 Load | quit hotkey | 6 | 2 | scene-aware quit dispatcher |
@@ -1354,20 +1363,31 @@ Written by the network-receive path; each also clears the run-flag.
 picks the appropriate teardown — state 2 → quit (state 6 / sub 2); state 5 → logout (state 6 /
 sub 8); state 4 → sends a network leave message (no direct state write).
 
-## 7.6 The two LoginWindow sub-state machines — (CODE-CONFIRMED)
+## 7.6 The LoginWindow handshake sub-state machine — (CODE-CONFIRMED — corrected CAMPAIGN 16)
 
-The `LoginWindow` object contains **two independent internal counters** that are distinct from the
-engine state. They were previously misread as engine sub-states.
+The `LoginWindow` drives an internal handshake/UI sub-state counter, distinct from the engine state.
+(Earlier text here paired this with a *separate* "UI page index" at `+0x17C`; re-confrontation proved
+`+0x17C` and `+0x238` are the **same physical field** — the `+0x17C` accesses are made through the
+embedded CommonLoginWindow sub-object pointer at base `+0xBC`, and `0xBC + 0x17C = 0x238`. So the
+old "`+0x17C` UI-page vs `+0x238` network-machine" split is not two offsets. The fuller behavioural
+model — whether the input/action router writes a distinct MAIN form/page state that gates widget
+interactivity alongside this tick-driven drive state — is owned by `specs/frontend_scenes.md §1.5`;
+this section covers the tick/drive field.)
 
-- **UI page index** (object field `+0x17C`): which form/option panel is displayed.
-- **Network/handshake machine** (object field `+0x238`): a dedicated tick function advances
-  through sub-states 2..41 covering lobby connection, server-list fetch, server selection, and
-  login packet handshake. The value "8" seen in some older notes is a value of this field, not
-  an engine sub-state.
+- **Handshake/UI drive sub-state** (object field `+0x238`): a dedicated tick function advances through
+  sub-states **1..41** covering the intro stinger, curtain, the resting credential form, the PIN
+  modal, the server-list fetch/pick, and the channel-join hand-off. Key values:
+  - **1** intro stinger → **2/3** curtain → **4..6** form idle (6 = the plain resting credential form)
+  - **30** quit
+  - **31** raise the PIN modal, **32** poll the PIN keypad (the modal older notes called "EULA")
+  - **33/34/35** server-list fetch → **37** server-list interactive plate-pick → **38** select
+  - **39/40** channel-endpoint fetch → **41** build the join key + secure context (hand-off to Load)
 
-When the handshake machine completes successfully it triggers the loop-break that causes `WinMain`
-to re-dispatch into state 2 (Load). Fatal handshake errors write engine state 6/8 or 7 and clear
-the run-flag. Full detail lives in `specs/frontend_scenes.md`.
+On submit (~sub-state 40) the window **pre-arms engine state 7** (Error) and schedules a 30 000 ms
+connect-timeout, then starts the real net engine. The **server** drives the success path — the 3/1
+`SmsgCharacterList` handler clears the run-flag and writes engine state **4** (Select), overwriting
+the pre-armed 7. A failure/timeout leaves 7 → the WinMain error path. An explicit quit writes engine
+state 6 (sub 2) with SFX 861010106. Full per-widget detail lives in `specs/frontend_scenes.md §11`.
 
 ## 7.7 Dead / hidden states — (CODE-CONFIRMED)
 
@@ -1501,10 +1521,11 @@ quitting the world returns the player toward the select/quit path rather than st
 1. **LoginWindow sub-states 2..41 full enumeration.** The network/handshake machine transitions
    are partially traced; the exact action at each sub-state needs a focused pass or a live lobby
    capture.
-2. **`OPENNING/SKIP` INI file path** — (partly closed). The `GetPrivateProfileIntA` call reads the
-   path from the **settings/config object's path-buffer field** (an internal char buffer on that
-   object). The buffer-field location is pinned (it is the same per-object path field used elsewhere
-   for INI access); the *literal filename* stored in that buffer was not resolved in this pass.
+2. **`OPENNING/SKIP` INI file path** — **RESOLVED (CAMPAIGN 16).** The `GetPrivateProfileIntA` call
+   reads section `[OPENNING]` key `SKIP` from **`<exe-dir>\option.ini`**, whose path is held by the
+   **DoOption settings singleton** (populated by the option-path builder) — not the per-account /
+   network-config singleton. The reload (3/100 codes 202/203/232 → state 2) re-reads this key
+   unconditionally; there is no reload-specific skip. spec: `resource_pipeline.md §2.5`.
 3. **Opening (state 3) exit trigger.** Whether the intro ends on a movie-complete event, the
    loading-done event (type 13, id 10001), or a timer is not confirmed.
 4. **Disconnect routing for states 0/1/3.** The scene-aware disconnect router handles states 2/4/5/6
@@ -1823,7 +1844,9 @@ environment/day-night setup → sky/star/cloud dome → ground-shadow + actor sh
    confirmed. Other values (instanced dungeon, PvP, event) are not enumerated.
 6. **Local player actor world-position struct.** The full actor-position field layout belongs to
    the struct/cartographer lane.
-7. **Reserved sixth view-platform slot** (capture/debugger-pending). Earlier notes claimed a sixth
-   `GViewPlatform` slot was allocated-but-never-assigned; this pass found only **five** allocations
-   in the world scene-graph builder. Whether a sixth slot exists as a field allocated elsewhere needs
-   the struct/cartographer lane or a live confirmation.
+7. **Reserved sixth view-platform slot** — **RESOLVED (CAMPAIGN 16): there is no sixth.** A
+   re-confrontation of the world scene-graph builder confirmed exactly **five** `GViewPlatform`
+   allocations (Third/First/Static/Gamble/Event) plus one `GSwitch`. The earlier "allocated-but-never-
+   assigned sixth slot" claim is dropped. (The five camera manipulators are labelled from the four
+   distinct layer-node msg ids {2004, 2005, 2006, 2148} — id 2148 is reused for the fifth, which is
+   what produced the "2148/2148" duplicate in §9.1 step 2; it is real reuse, not a typo.)

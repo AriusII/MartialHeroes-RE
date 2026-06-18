@@ -1394,3 +1394,413 @@ Binary: doida.exe @ 63fcaf8e. Phased fleet: 1 re-cleanroom-orchestrator (6 READ-
 - VERIFIED rendering (windowed screenshots `%TEMP%\mh-*.png`): Login = stone bezel + warrior painting + form bar (≈015528); PIN = centred framed modal + aligned 2×5 keypad + dimmed login (≈015544); ServerList = 2 calligraphy parchment scrolls (≈015642); Char-select = bright temple + 2 braziers + blue water + 3 standing characters (≈015759).
 - gates: full-solution build **0/0**, `dotnet test` **1848/0**, clean-room firewall PASS.
 - notes: dirty under `_dirty/campaign9d/` (gitignored); the 4 framework/pipeline manifests promoted to specs; the 5 per-window `*_construct.md` NOT yet promoted (next sub-wave) — their corrections are relayed but should land in `frontend_scenes.md`/`intro_sequence.md`. DEBUGGER-PENDING (maintainer F9): the login single-substate confirmation + ~10 other items in the dossier §4. THE LESSON: the maintainer was right — fidelity work must START from the true entry point (`WinMain`) and cover EVERY scene with a real on-screen render, not just the one being iterated. Uncommitted on campaign3.
+
+## 2026-06-16 — CAMPAIGN 14 Phase-W/P: ground-truth research + promotion (3 residuals + UI/HUD)
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static) + black-box VFS harness (Assets.Vfs). NOTE: the IDA MCP server CRASHED mid-pass (a `server_warmup{build_caches:true}` call + several heavy parallel decompiles of large functions stalled then killed the plugin) — several lanes returned PARTIAL with honest IDA-pending gaps; nothing past the drop was fabricated. Lesson recorded: never `server_warmup{build_caches}` in one shot on this DB; decompile large functions singly, not 8 in parallel.
+- analyzed (by canonical name / behaviour, confirmed before the drop): Display_LoadDisplayLua (the `data/script/display.lua` config loader) + Diamond_LuaConfig_GetFloat/GetString — the world display-config layer (DISPLAY_BASE_BRIGHT_MULTI/GLOW_BRIGHT_MULTI/LIGHT_RATIO, POWER→powerNdx8.psh, GLOW_RANGE, the 9-state DISPLAY_CHAR_BRIGHT tint table); the actor anim sampler/clip-advance (floor(t*10) @10fps, 28-byte keyframe stride, slerp, cycle vs sync layer advance) and the col15 idle-selection chain; the WinMain scene-state machine refined (case 5 = in-game world; GPerspectiveCamera off-centre RH, 60° FOV) and the create/zoom-preview camera family (SelectWindow_BuildZoomPreviewActor, anchor (2048,0,−6144), actor (511.5,0,−9682) scale 81) — camera follow math + boom-rig EYE formula NOT recovered (IDA-pending after the crash).
+- VFS sample-verified (no IDA): display.lua scalar VALUES (BASE 1.05 ≈ neutral, GLOW 0.3, LIGHT_RATIO 0.5, POWER 2→power2dx8.psh, GLOW_RANGE 1×1, full CHAR_BRIGHT 9-state table); the col15 human idle `g101100001.mot` is genuinely STATIC (3f/84 tracks, 0/84 animate) while mob clips + other human slots animate; uitex registry = 37 DDS (not 35), key atlas dims (blacksheet/stateicon 512²), NO dedicated char-select atlas, and an arithmetic-certain close-button overflow (src (941,910,23,23) on the 512² blacksheet.dds).
+- specs produced/updated (firewall PASS, neutral prose, no addresses):
+  - Docs/RE/specs/environment.md (new §9 display.lua world-brightness layer; apply-path IDA-pending; records BASE=1.05 is NOT the near-black cause)
+  - Docs/RE/specs/rendering.md (§6.3–6.7 glow config 0.3/range 1×1; the power1-vs-power2 conflict FLAGGED IDA-pending; DISPLAY_CHAR_BRIGHT 9-state tint table)
+  - Docs/RE/formats/animation.md (per-frame dt advance CONFIRMED; static-idle clip section)
+  - Docs/RE/specs/skinning.md (§10 — col15 idle is static DATA = faithful; mesh-explosion debt RETIRED; runtime standing-idle slot debugger-pending)
+  - Docs/RE/formats/ui_manifests.md (§1.4a 37-atlas re-inventory + dims; §5.1a shared-atlas char-select; §5.1b close-button overflow mis-binding, correct atlas IDA-pending)
+- notes: dirty under `_dirty/campaign14/` (gitignored). KEY zero-trust outcome: the assumed "world-black = a missing brightness scalar" was REFUTED by ground truth — DISPLAY_BASE_BRIGHT_MULTI is a neutral +5%; the near-black world is camera/state (the port never drives GameState→world case 5 + spawns no local actor) and/or material ambient reception, recovery IDA-pending. The "flat idle" was settled as faithful static col15 data, not a port bug. IDA-PENDING (needs MCP restart + live debugger, maintainer F9): display.lua render-stage reads, world camera follow math, boom-rig eye formula, HUD pop-up/overlay construct() walks, runtime idle-slot selection. names.yaml candidates flagged (Display_LoadDisplayLua, Diamond_LuaConfig_Get*, the DISPLAY_* keys, uitex_registry) — staged for maintainer hand-merge, not auto-merged. Uncommitted on campaign12.
+
+## 2026-06-17 — CAMPAIGN 16 Phase A: zero-trust re-confrontation of the scene state machine (spine)
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static). Goal: scene-by-scene clean rebuild of the front-end (C# core + Godot); Phase A re-derives the 8-state spine from ground truth before any code is trusted. Dirty note `_dirty/scene16/spine.md`.
+- analyzed (by canonical name / behaviour): WinMain_SceneStateMachine (the `while(1) switch(GameState){0..7}` entry loop), GameState_ctor (3-int record + debug byte), Engine_RunSceneLoop / Engine_FrameRateLimiter / FrameTickScheduler_TickAll (the 4-phase per-frame loop), and the inbound scene-edge handlers SmsgEnterGameAck (3/5), SmsgCharacterList (3/1), SmsgGameStateTick (4/1), SmsgCharManageResult (3/7), SmsgCharActionResult (3/100), Scene_LeaveWorldToLogout.
+- CONFIRMED as-spec: the 8 cases 0..7 (no case 8; 8 = shared-exit sentinel); operator-new byte sizes LoginWindow 0x558=1368, SelectWindow 0x1888=6280, MainHandler 0xC8=200; the 3-int state record (field0 state / field1 sub default 8 / field2 detail) + a +0x0C debug byte; the 4-phase loop (pump → device step+present → amortised tick → frame throttle) with a HARDCODED 60.0f cap (engine ctor +0x30; DISPLAY_FRAMERATE feeds only a display-config object the limiter never reads).
+- DRIFT corrected (binary wins): **D1 (HIGH)** the table-driven GameState transition handler is **3/100 `SmsgCharActionResult`** (codes 0→Quit, 1..4/7→Error/5, 202/203/232→Load, out-of-range→Error/8), NOT 3/7 — the real **3/7 `SmsgCharManageResult`** is a Character-Select delete/rename/select UI result that writes NO scene state. **D2 (MED)** in-world logout drives 5→6 (Quit) via Scene_LeaveWorldToLogout, distinct from the case-5 default re-entry edge 5→4. **D3 (LOW)** EnterGameAck (3/5) forces state 2 unconditionally (state-agnostic). **D4 (LOW)** the 4/1→Select edge is specifically the local-player-absent + descriptor-spawn-failed fallback.
+- specs produced/updated (firewall PASS, neutral prose, no addresses): `Docs/RE/opcodes.md` (rows 3/7 re-scoped, 3/100 promoted to the engine-state transitioner); `Docs/RE/packets/3-100_char_action_result.yaml` (new; routing + GameState targets confirmed, byte VALUE semantics capture-pending); `Docs/RE/specs/client_runtime.md §7.5.2` (CharActionResult-3/100-not-3/7 banner + D3/D4 nuances).
+- C# (clean room, measured against the corrected spec — provenance pointer, not RE): rewrote Kernel `EngineSceneState`/`GameState` (build 0/0); re-derived + corrected `SceneStateMachine` (`OnCharManagementResult`→`OnCharActionResult` pinned to 3/100; `OnEnterGameAck` made state-agnostic; 4/1 doc clarified) and REMOVED the latent D1 bug in `GamePacketHandler.HandleCharManageResult` (3/7 was wrongly driving the spine) — 3/100 `HandleCharActionResult` is the sole scene driver. Tests updated; Application.Tests 38/38 green.
+- confidence: routing + control flow + struct sizes CODE-CONFIRMED; wire byte VALUE semantics capture/debugger-pending (no live capture this cycle). names.yaml already carries SmsgCharManageResult (3/7) + SmsgCharActionResult (3/100) — no rename; direction/role rows reconciled. Uncommitted on campaign15.
+
+## 2026-06-17 — CAMPAIGN 16 Phase B: State-1 LOGIN re-confrontation + verify-and-fix
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static). Two parallel analysts: window-construction lane + login-network lane; one reconciliation follow-up. Dirty notes `_dirty/scene16/login_construct.md` (+ a RECONCILE section) and `_dirty/scene16/login_net.md`.
+- analyzed (by canonical name / behaviour): the LoginWindow construction + its tick/drive sub-state field (+0x238), the click/action router (LoginWindow_OnEvent on the +0xBC CommonLoginWindow subobject), the 0/0→1/4 session handshake (54-byte key blob + XOR 0x29 whitening; does not key the wire cipher), the 1/4 credential blob (sub-opcode 0x2B, length-prefixed account + optional PIN, password staged as RSA M), the server-list / channel-endpoint blocking-worker fetches (lobby port 10000(+offset)), and the 3/5 EnterGameAck.
+- CONFIRMED as-spec: no EULA (the modal is the PIN/second-password keypad); PIN raise=31 / poll=32 / server-list interactive pick=37; sub-state range 1..41; font slot 0 DotumChe 12pt + msg.xdb captions + 1024×768 hardcoded-pixel Diamond layout; 4-token TAB join key (account/password/PIN/host port); submit pre-arms GameState 7 + 30000ms timeout, 3/1 overwrites to 4 on success; quit → 6/2 + SFX 861010106; field caps account<20 / password<17 / PIN<5.
+- DRIFT corrected (binary wins): **the login window has ONE sub-state field at +0x238, not two** — the `+0x17C`/`+0x238` pair is the same cell (`0xBC+0x17C=0x238` via the CommonLoginWindow subobject), and the "MAIN written-only-by-router / TICK written-only-by-tick" partition is false (one field, three writer classes: tick 1..41, action router {29,34,38}+computed, two lobby workers {35,39}). Also: server-list sub-state is 37 (older "32=server-list" was the PIN-poll mis-attributed); login_flow.md §1 TAB string was a vague 3-slot shape → corrected to the confirmed 4 tokens; game.ver gate is server-enforced (no client compare-quit branch on the login path — field-5 only derives the outbound 1/9 token).
+- specs updated (firewall PASS, neutral prose, no addresses): `client_runtime.md §7.6` (one +0x238 field; sub-state map; supersedes the +0x17C/+0x238 split), `frontend_scenes.md §1.5` (ONE-field headline correction + the RESOLVED-31/32 blockquote made consistent; value semantics kept), `login_flow.md §1` (4-token TAB string). opcodes.md + login/enter packet YAMLs needed NO change (match the binary).
+- C# (verify-and-fix, measured against the corrected specs): Godot login UI (LoginScene/LoginScreen/PinModal/ServerSelectScreen) verified FAITHFUL on all 7 load-bearing facts — ZERO behavioural fixes needed (PIN 2×5 scrambled keypad tags 11/12/13 + window actions 111/112; server plates 400/401 + pagers 115..124 + refresh 105; no EULA; no login BGM; quit→RequestQuit). Application login orchestration verified faithful — only comment/doc drift fixed (3/5 state-agnostic comment; CP949-not-UTF-8 chat docstrings). LoginCredentialStore 3-input staging + PIN cap<5 correct; the 4-token join is assembled at the join handoff, not in the credential store (faithful separation).
+- gates: clean full-solution build **0/0**; Application.Tests 192/192; headless boot CLEAN (Login scene builds, no script errors). FLAGGED follow-ups (not blockers): quit SFX 861010106 fires with no fade-delay before GetTree().Quit() (timed-quit debt); spec conflict frontend_scenes.md §2.3 (status==3 = HH:MM open-clock) vs lobby.yaml (latency digit-split) — server-record display, reconcile later. Uncommitted on campaign15.
+
+## 2026-06-17 — CAMPAIGN 16 Phases C+D: State-2 LOAD + State-3 OPENING re-confrontation + verify-and-fix
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static). Two parallel analysts (Load + Opening). Dirty notes `_dirty/scene16/load.md`, `_dirty/scene16/opening.md`.
+- analyzed (by canonical name / behaviour): the LoadHandler + Boot_LoadDataTableCorpus worker (ABOVE_NORMAL, ~50 loads), the OPENNING/SKIP gate (GetPrivateProfileIntA over the DoOption settings singleton's path), the progress meter (denom 9,395,240, 500ms trailing Sleep), the LoadingScreen (rand()%3 bg, looping cue 920100100); the OpeningWindow slideshow FSM (4 panels, 17500ms dwell, alpha seeded 250 / first phase fade-out), the skip dispatch (Enter/ESC/Space + click action 100), BGM 910061000.
+- CONFIRMED as-spec: Load boot-worker + ABOVE_NORMAL; progress denom 9,395,240 (decorative — completion gated on worker done-flag + 500ms grace, not the bar); LoadingScreen bg rand()%3 (loading.dds/06/08) + cue 920100100 loop; Opening BGM 910061000, skip button top-right, action 100, SKIP persisted.
+- DRIFT corrected (binary wins): **(Load) the OPENNING/SKIP INI file is `<exe-dir>\option.ini` via the DoOption settings singleton** (NOT the per-account/net-config singleton — resolves the long-open INI-path item); **there is NO "LoadIsReload forces Select / reload skips the INI read" rule** — a char-management reload (3/100 codes 202/203/232 → state 2) re-enters case 2 and re-reads OPENNING/SKIP unconditionally; the ONLY reload difference is msg.xdb (case-1-only, not re-loaded); boot corpus is ~50 not ~10. **(Opening) the slideshow does NOT auto-finish** — it loops panel 4 indefinitely; the finish flag is written only by the skip handler (two sites); the SOLE exit is an explicit skip (settles the old movie-complete-vs-loading-done-vs-timer question = none of those).
+- specs updated (firewall PASS, neutral prose): `resource_pipeline.md §2.5` (option.ini + reload re-reads SKIP + msg.xdb-only difference), `client_runtime.md §7.10 item 2` (RESOLVED = option.ini), `intro_sequence.md §3.1` (no auto-finish; skip is the sole exit).
+- C# (verify-and-fix): **Load** — `SceneStateMachine.AdvanceLoadScene` reload short-circuit REMOVED (reload re-reads SkipOpening); `LoadOrchestrator` drops the reload-forces-Select + INI-read-skip (re-reads OPENNING/SKIP every state-2 entry; `LoadIsReload` now only skips the msg.xdb reload). **Opening** — `OpeningScene`/`OpeningWindow` auto-finish REMOVED (panel 4 loops; skip is the sole exit; SceneHost auto-walk drives headless). Load Godot scene verified faithful (no change). Dead code removed (`_openingDecisionApplied`, `_sequenceDone`, headless self-advance timer).
+- gates: clean full-solution build **0/0**, `dotnet test --no-build` **2049 green** (Application.Tests 192→194: +2 faithful reload tests, −1 drift test, net new reload coverage), headless boot CLEAN (spine walks Init→Login→Load→Opening→Select, no script errors, the old "IntroFinished → advance" log gone). Uncommitted on campaign15.
+
+## 2026-06-17 — CAMPAIGN 16 Phase E: State-4 CHARACTER-SELECT re-confrontation + verify-and-fix
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static). Two parallel analysts (construct/camera/preview + SelectWindow/SpawnDescriptor struct). Dirty notes `_dirty/scene16/select_construct.md`, `_dirty/scene16/select_struct.md`.
+- analyzed (by canonical name / behaviour): SelectWindow build (operator new 0x1888=6280B) + the camera path rig (KF apply has exactly 2 callers: rig ctor arms KF0, ResetScene arms KF1; KF2-5 dead), the 3D preview actor row (5 slots, absolute X={488,500,512,524,536}, scale 70, idle×3, facing byte), the 3D ray-pick (unproject→AABB ±6 X/Z, Y band [70,92]), the area-0 environment, the create-form trigger (@BLANK@ slot→create modal), and the enter-world ACK path; the embedded 5×880 SpawnDescriptor array (NetHandler roster +0x3C master / SelectWindow copy +0x238) + the 880-byte descriptor layout.
+- CONFIRMED as-spec: entry dolly KF0→KF1 then hold (not static, not orbit; KF1=(512,87,−9652)); **FOV literally 50.0°/aspect, near 5, far 15000 (NOT 60/65 — the port's FOV 50 is CORRECT)**; preview row + scale 70 + ray-pick; area-0 frozen 14:30, fog OFF, zero point-lights, ambient xeff 380003000 @ (508.483,69.887,−9758.569); SelectWindow 6280B + 5×880 descriptor (stride 0x370); 3/1 slot record 880+96+1+4=981; descriptor name char[17]@0 CP949 / internal_class@0x34 / variant@0x2C / level@0x3A / world_x,z@0x4C,0x50 / equip@0x58; IdB = 5·(class+4·variant)−24 ∈ {1,11,16,26}.
+- DRIFT corrected (binary wins): **the live enter-world path is Select(4) → Load(2) → … → InGame(5), NOT a direct 4→5.** Confirming an OCCUPIED slot sends the EnterGame request (1/9); the server's 3/5 EnterGameAck → state 2 (Load) drives the transition; the case-4 entry pre-writes 5 only as the no-network DEFAULT. The C# `SelectCharacterAsync` was driving a direct `OnSelectConfirmCharacter` 4→5 jump (bypassing Load) — removed. Also flagged: a char-select PREVIEW occupied gate read at descriptor +0x2E (vs the spec's +0x36 gate) — debugger-pending discrepancy, C# unaffected.
+- specs updated (firewall PASS): `client_runtime.md §7.5.3` (enter-world = 4→2→…→5 via 3/5; +a @BLANK@ create-modal row), `structs/spawn_descriptor.md` (+0x2E discrepancy flag on the +0x36 gate row). frontend_scenes.md §3 camera/preview/env confirmed accurate (no change).
+- C# (verify-and-fix): `ApplicationUseCases.SelectCharacterAsync` no longer side-effects a direct 4→5 (the 3/5 EnterGameAck drives 4→2); `SceneStateMachine.OnSelectConfirmCharacter` kept as the documented no-network default (case-4 pre-write); dev-offline path preserved (synthetic seed / guarded SceneHost.Advance = the faithful no-network 4→5 default). SpawnDescriptorReader verified matching the struct (stride 880, all offsets). Godot select scene (camera/preview/env/create-form + enter-world via SelectCharacterAsync) VERIFIED FAITHFUL — no Godot changes needed (the dev fallback uses the faithful no-network 4→5). Legacy BootFlow/ScreenHost double-subscription noted as dead-in-active-flow cruft (Phase G delete).
+- gates: clean full-solution build 0/0; Application.Tests 194 green (+1 enter-world-via-Load test, −1 drift test); headless select-scene boot CLEAN (roster + 3D preview at X={488,500,512} + camera dolly FOV 50 + white-ambient/fog-off/no-point-lights + backdrop + water; no script errors). Uncommitted on campaign15.
+
+## 2026-06-17 — CAMPAIGN 16 Phase F: State-5 IN-GAME WORLD structure re-confrontation + verify (first faithful pass)
+- binary: doida.exe @ 263bd994, IDA Pro 9.3 via MCP (READONLY static). One structure-scoped analyst (NOT the 16 gameplay subsystems — a later campaign). Dirty note `_dirty/scene16/ingame.md`. SCOPE = scene-graph structure + entry + per-frame loop + exit edges only.
+- analyzed (by canonical name / behaviour): WinMain case 5 → MainHandler (operator new 0xC8=200B) + BuildGameWorld → the scene-graph builder (1 GPerspectiveCamera + exactly 5 GViewPlatform + GScene root "charater scene" + GSwitch + terrain-manager singleton + 4 layer nodes {2004,2005,2006,2148}); g_LocalPlayer singleton (seeded by 4/1, X@+0x2374/Z@+0x2378, Y forced 0); the MainWindow HUD master singleton (handler @+0x500, one notice sink); the per-frame world-update callback (installed @ MainHandler+444); the two exit edges (case-5 pre-write 5→4 vs explicit logout Scene_LeaveWorldToLogout 5→6).
+- CONFIRMED as-spec: 5 view-platforms (no sixth), 4 layer nodes, world camera FOV **65**/near 5/far 15000 (distinct from select's 50, same shared ctor), cell 1024 / 3×3 ring (+5×5 cold-start), the 4-phase loop @ 60 FPS, the two exit edges. The CAMPAIGN-10 world specs are essentially correct.
+- DRIFT corrected (minor, binary wins): `client_runtime.md §9.5 item 7` "reserved sixth view-platform" → **RESOLVED: there is no sixth** (exactly 5 confirmed); §9.1 step-2 + the §7.5.1 transition-table row updated (5 platforms, 4 layer nodes; the "2148/2148" is real id reuse across the 5 manipulators, not a typo). World FOV is 65 (specs already correct).
+- C# (verify-and-fix): the InGame scene-machine edges (5→4 default via AdvanceScene / OnGameStateTickNoLocalPlayer spawn-failure; 5→6 logout via RequestQuit) were already CONFIRMED correct in Phase A — no change. Godot world structure VERIFIED FAITHFUL by read (subagent path was API-overloaded; verified via direct read): `InGameScene.BuildGameWorld` = "charater scene" root + 5 GViewPlatform slots {Third,First,Static,Gamble,Event} + GameHud shell + TerrainNode + camera FOV 65/near 5/far 15000; **exit edges correct** — `OnWorldExitRequested(logout)` → logout ⇒ SceneMachine.RequestQuit() (5→6), else ⇒ SceneHost.Advance() (5→4). No structural drift; no code change needed.
+- FLAGGED for a follow-on WORLD campaign (out of first-pass scope): the 5 camera VIEW MODES — only Third/First/Static (+dev FreeFly) implemented; Gamble/Event not built; the 16 gameplay subsystems (combat/quest/inventory/trade/…); the character skinning debt; the NPC fallback-Y-before-terrain race.
+- gates: build 0/0 (unchanged C#); headless world-entry boot CLEAN — RealWorldRenderer enters area 2, resolves cell (10009,10006), 5×5 terrain ring (25 sectors), bgtexture pool 1222 slots, BUD scene 244 objects via ArrayMesh (no GltfDocument), npc.scr 4/4 CP949, env wired; NO script errors. Uncommitted on campaign15.
+
+## 2026-06-17 — CAMPAIGN 16 Phase G: States 6/7/8 (Quit/Error) + consolidation
+- No new RE (states 6/7/8 were CODE-CONFIRMED in Phase A.1: case 6 = engine shutdown → writes field-0 8; case 7 = build error string from sub/detail + error.log + MessageBoxA → writes 8; 8 = shared exit-tail, no case). The SceneStateMachine already models these (RequestQuit→6, ToError→7, ExitTail→8) — confirmed, no change.
+- C# (verify-and-fix): filled the two stub Godot controllers faithfully — `QuitScene` (state 6): graceful engine-shutdown → deferred `SceneTree.Quit()` (the exit-tail return); `ErrorScene` (state 7): reads the scene-machine error detail (sub = reason, detail = result code), writes the error to the engine log (the error.log analogue, §7.7), shows a centred modal, then exits after a readable beat (the modal→exit of §7.5.1). Both cite client_runtime.md §7.3/§7.5.1/§7.7.
+- cleanup: identified that `ScreenHost` is ACTIVE infrastructure (every CAMPAIGN-15 scene controller does `new ScreenHost` as its 2D canvas host — NOT cruft, KEEP). The genuine legacy/superseded cruft is `Screens/BootFlow.cs` + `Scenes/Boot.tscn` (the pre-CAMPAIGN-15 ScreenHost-driven entry; the active main scene is `SceneHostBoot.tscn`; BootFlow is never `new`-ed by code) — FLAGGED for removal (not deleted this session; needs a maintainer confirm + careful ref check, since deletion is destructive and verify-and-fix did not quarantine).
+- firewall: committed C# (Scene + Controllers) carries NO `_dirty/` cites and NO decompiler artifacts (sub_/loc_/_DWORD/__thiscall/raw addresses); spec `<!-- source: _dirty/… -->` provenance comments are the pre-existing allowed convention; every changed spec is journalled in this campaign's entries (A/B/C+D/E/F/G). PASS.
+- FINAL GATE: clean full-solution `dotnet build --no-incremental` **0/0**; `dotnet test --no-build` **2049 green** (12 suites); headless full-spine walk Init→Login→Load→Opening→Select→InGame CLEAN.
+
+## CAMPAIGN 16 — summary (scene-by-scene clean rebuild, C# core + Godot, zero-trust vs IDA)
+Re-derived the 8-state scene layer from doida.exe scene-by-scene in engine order (0→7), verify-and-fix (keep what is faithful, correct only real drift), NO screenshot oracle — IDA + specs the sole truth. Real drift caught + fixed: the 3/7-vs-**3/100** table-driven transition mislabel (+ a latent bug feeding the spine from 3/7); the LoginWindow **one +0x238** field (not two) + server-list sub-state **37**; the OPENNING/SKIP file = **option.ini** + reload **re-reads** SKIP (no reload-forces-Select); the Opening has **no auto-finish** (skip-only exit); the enter-world path is **4→Load(2)→…→5** (not a direct 4→5); the world has exactly **5** view-platforms (no sixth). Select camera **FOV 50** and world camera **FOV 65** both CONFIRMED correct. Specs corrected + journalled across client_runtime/frontend_scenes/login_flow/resource_pipeline/intro_sequence/opcodes + structs/spawn_descriptor + a new packets/3-100 yaml. C# fixes in Kernel (EngineSceneState/GameState), Application (SceneStateMachine/GamePacketHandler/LoadOrchestrator/ApplicationUseCases), Godot (Opening/Quit/Error controllers). build 0/0, 2049 tests, headless clean, firewall PASS. Minted agents: application-engineer, godot-presentation-engineer, godot-input-engineer. Deferred to a follow-on WORLD campaign: the 16 gameplay subsystems, the 5 camera view modes (Gamble/Event), skinning, NPC fallback-Y race, BootFlow/Boot.tscn legacy removal, the quit-SFX fade-delay, the §2.3-vs-lobby.yaml server-status reconcile, the +0x2E-vs-+0x36 preview-gate discrepancy. Uncommitted on campaign15 (commit on maintainer request).
+
+## CAMPAIGN 17 — HUD/UI total rebuild (scene by scene, from scratch, IDA-faithful) (launched 2026-06-17)
+Mandate: rebuild the ENTIRE HUD/UI layer from scratch, zero-trust, scene by scene in engine order (Foundation→Login→Load→Opening→Select→In-game core→Quit/Error), each element re-derived from doida.exe (IDA) + Docs/RE HUD specs — NO screenshot oracle this cycle (IDA + specs the sole truth). In-game scope = core HUD + main windows (the ~100-panel long tail = a named HUD-II follow-on).
+- 2026-06-17  specs/ui_system.md — Phase A HUD re-confront: corrected the GU primary vtable layout
+  (§2, §1, §15) from a phantom flat shared 16-slot table to the binary-true LAYERED shape that grows
+  by inheritance — GUComponent 13 slots (0..12), GUPanel 14 (adds slot 13 = marked-removed-children
+  sweep), GUWindow 15 (adds slot 14 = auxiliary-view (GView) init helper, per structs/guwindow.md
+  §3.1). Deleted the non-existent slot 15 "SetShown alias" and the Campaign-9D 16-slot assertion;
+  relabelled "BuildScene" as each window's per-class build routine (the hardcoded constructor-call
+  path), not a universal vtable slot. Closed the open item on the in-game GUButton caption font-slot:
+  pinned at +0xE8 (i32, ctor zero-init -> default slot 0; §6.3, §12), removed from the header
+  conflicts line. doida.exe 263bd994 wins; gucomponent.md / guwindow.md were already correct and were
+  the reconciliation reference.
+- 2026-06-17  Phase A also VINDICATED (no change): structs/gucomponent.md (all offsets),
+  structs/guwindow.md, formats/ui_manifests.md (uitex ids, skillicon 12 entries, .do icon record
+  116-byte stride + iconSrcX@+0x18/iconSrcY@+0x1C, texturelist), formats/msg_xdb.md (516-byte
+  records). buff_icon_position.xdb = 12-byte stride {u32 id, i32 srcX, i32 srcY} (the "12+8=20"
+  premise REFUTED; spec already correct, HIGH confidence). Flagged for later lanes (not Phase A's
+  five specs): .do stride 116 vs config_tables.md's 166 (config-tables re-confront should resolve —
+  Phase A witnesses + VFS sample both say 116); buff draw-cell footprint 23×23 vs 25×25 (live-draw,
+  MEDIUM); GUList reverse hit-test + IME per-keystroke composition (runtime/debugger-only).
+- 2026-06-17  Phase B Login(1) re-confront — specs ~90% PASS, 7 surgical drifts corrected (binary wins):
+  ui_system.md §11.3 = login sub-state is ONE +0x238 field (re-affirms CAMPAIGN 16; +0x17C is the same
+  cell via the +0xBC sub-object base; +0x554 is an unrelated page counter); §8.1 action ids — server
+  PLATES 400/401 commit a selection, pagers 115..124 select nothing, 101=quit; §7.6 lower-panel atlas =
+  loginwindow_02; §10/§11.3 caption ids. structs/guwindow.md §2.1 (+0x554 = page counter, not a 2nd
+  sub-state), §6 (CommonLoginWindow size pinned EXACT 0x558 = 1368 B). frontend_scenes.md §1.4a (PIN
+  keypad confirm/cancel = keypad tags 12/13, reset 11, NOT window 111/112), §1.4c (msg.xdb 4001-4022 = a
+  static stacked notice column, NOT server-list captions; 4025-4028 softened — cached-notice sourced,
+  only 2204 confirmed inline). Curtain CONFIRMED (+5/tick, accumulator thresholds 200/222, SFX 861010105
+  on sub-state 1→2). Also reworded a pre-existing firewall leak in frontend_scenes.md §1.5 (a disassembly
+  fragment → neutral prose). Capture/debugger-pending (flagged, not guessed): PIN keypad scramble
+  seed+permutation; substate-31 account/save gating; account-vs-password TAB token order; server-record
+  +6 open_time packing; curtain ms-per-tick.
+- 2026-06-17  Phase C Load(2) re-confront — ALL PASS, no drift. LoadingWindow: one rand()%3 picks
+  loading.dds/loading06.dds/loading08.dds; progress bar = 223*progress/100 px, a horizontal U sub-rect of
+  the SAME loading DDS (U clamp 0.21777 = 223/1024), left→right, NO text/percent (caption baked into art);
+  progress = boot-thread VFS cumulative-bytes getter (not a timer; barely advances — a faithful property);
+  loading cue 920100100 (cat-0 music, loop 1 — the double-music handoff with char-select BGM 920100200);
+  exit on worker completion (run-flag byte cleared) → WinMain reads [OPENNING]SKIP → state 3 Opening or
+  state 4 Select. No spec change (frontend_scenes §2L / resource_pipeline §2 already faithful). Asset-side
+  pending (not a spec error): exact bar pixel rect depends on loading*.dds dims (UV constants 0.75/0.21777
+  confirmed).
+- 2026-06-17  Phase D Opening(3) re-confront — ALL PASS, no drift. OpeningWindow: 4 panels openning_001..004
+  dwell 17500 ms each, alpha cross-fade ±1/frame [0,250], panel 4 LOOPS (no auto-finish — CAMPAIGN-16 holds);
+  scenario crawl = 1024×2048 quad centred X, base Y=field−200, 1000 ms start gate, pos += dt×30 u/s, clamp
+  1843, no wrap (positional translate; "upward" = port read of +Y increment), manual nudge actions
+  1004/1005; skip = keyboard 10/27/32 (Enter/ESC/Space) or click action 100 → WritePrivateProfileString
+  [OPENNING]SKIP=1 → WinMain case-3 pre-set GameState=4 Select (NO timed/movie/loading auto-advance);
+  intro BGM 910061000 loop (distinct from login 861010105). No spec change (intro_sequence + frontend_scenes
+  §1.0 already faithful). Residual capture-only: realized fade wall-clock; .ogg form of 910061000.
+- 2026-06-17  Phase E Select(4) 2D-chrome re-confront — 11 PASS, 4 DRIFT corrected in ui_system.md
+  §8.2/§8.4 (binary wins): (1) Create/Delete/Enter (act 4/5/6) at dst-Y 112; the former y=325 widgets are
+  create Confirm/Cancel (act 35/36), 413/531 = their HOVER src-X (NOT action ids); (2) NO "5 roster 2D
+  plates" — one shared left info panel + 3D ray-pick, per-slot occupancy from the record class/state word
+  at +0x66 (0=empty), count caption msg 2209; (3) stat-icon grid = 10-cell (2×5) with build-time-literal
+  column origins (col-1 500,770 / col-2 524,770; HOVER 548/572) doubling as the point-buy ± cells (NOT
+  18-cell/runtime/debugger-pending — that earlier claim was a spec error, now fixed); (4) corner-close
+  re-flagged base GUWindow chrome / debugger-pending (close action type 13 / id 10001 → quit confirmed).
+  Confirmed unchanged: tabs Server/Channel/Back act 1/2/3; class buttons 10-13 → Monk4/Musa1/Dosa3/Salsu2;
+  point-buy ± 25-34 (class floor 10); face ± 21/22 (1-7); name textbox (60,80,274,18) min-2 / a-z·0-9·CP949
+  pairs / 16 payload bytes, err msg 2190/2075/12012; captions modal-title 14003-14007 + npc.scr keys 1-4 +
+  count 2209; 8 atlases; 3D preview REUSED unchanged. Debugger-pending: corner-close geometry/src origin.
+- 2026-06-17  Phase F In-game(5) HUD core re-confront — 9/10 core panels byte-confirmed (binary wins).
+  Open items resolved: skill-bar per-slot registry (base X +0x10, Y +0x14 biased −92, slot +0x04, action
+  +0x08, icon texset +0x0C, overlay flags +0x28..+0x2A, overlay rects +0x2C..+0x70; layout variant by the
+  looked-up entity KIND word: 5→146×49, {0,6,7,11,18}→297×50, else→58×58; overlay-rect VALUES data-driven
+  = debugger-pending); stat sibling A/B/C = ActorStatePassivePanel / ActorStateCashPanel / ActorStateSkillPanel
+  (TEXT read-outs, NOT gauges — HP/MP is the separate §5.6 right-edge composite); inventory item-grid =
+  8×5=40-cell bag (38×38 cells, +38px flush pitch, actions 0..39) + 20-cell equip sub-grid (actions 50..69)
+  + hand-placed paperdoll (closes campaign-12 "PLAUSIBLE grid" + open-item 16). Identity drifts: the §5.5
+  "target/close-up frame" slot 135 is UpgradeProcessPanel (weapon-enhance: progress-% + 3D item preview),
+  NOT the target plate — the real selected-target frame (OtherInfo/MopGagePanel/GagePanel) was NOT recovered
+  → HUD-II follow-up; in-game bag = ItemPanel (not GatherSlotPanel = gather/craft progress); minimap =
+  MapPanel (slot 0x284) vs TotalMapPanel (slot 0x288); MainWindow +0x500 = a ~0xC8-byte state-5 command
+  handler (not the 16-byte hub). Buff payload = +4 i32 atlas_x / +8 i32 atlas_y into stateicon.dds (matches
+  misc_data.md §1.3; ui_hud_layout §2 was stale). Chat geometry: chat.md's 448×324 output + 330×20 input is
+  truth (ui_hud_layout §1.2's 268×462/290×18 were mis-reads); chat.md §6.2 field order transposed (+0x1C
+  channel / +0x20 colour). mainwindow.dds is a FRONT-END atlas, not in-game status chrome. Specs corrected:
+  ui_hud_layout.md (9), chat.md (2), ui_system.md (§8.6.1/§8.7/§8.8/§8.10), structs/runtime_singletons.md
+  (§3.10/§6/§9); formats/misc_data.md unchanged. names.yaml candidates (Phase-G sync): MapPanel, TotalMapPanel,
+  ItemPanel, GatherSlotPanel, UpgradeProcessPanel, ActorState{Passive,Cash,Skill}Panel, StatusPanel, the
+  state-5 cmd handler @MainWindow+0x500, g_StatNameMsgIdTable (60001-60022). Debugger-pending: skill-hotbar
+  overlay-rect values; the real target plate (HUD-II); absolute pixels of screen-relative panels.
+
+## CAMPAIGN 17 — summary (HUD/UI total rebuild, scene by scene, from scratch, IDA-faithful)
+Rebuilt the ENTIRE HUD/UI layer from scratch on a fresh `Ui/` substrate (layer 05), scene by scene in engine
+order, each re-derived zero-trust from doida.exe 263bd994 + Docs/RE specs — NO screenshot oracle this cycle.
+**Phase A (foundation):** fresh Ui/Widgets (HudWidget/button/label/panel/list/textbox/scrollbar/checkbox +
+AlphaFade ±64/tick + factory) + Ui/Assets (atlas/icon/text libraries) + HudFont; corrected ui_system.md §2
+vtable to the LAYERED 13/14/15 shape (was a phantom flat-16) + pinned GUButton font-slot +0xE8. **Phases B–E
+(front-end, from scratch, controllers re-pointed):** Login (LoginWindow + PinSubView + ServerSelectSubView;
+7 drifts — one +0x238 sub-state, plates 400/401 vs pagers 115-124, PIN tags 12/13/11, 1368 B, curtain +5/tick
+200/222, notice column 4001-4022), Load (LoadingWindow; fill = U[0,223/1024] sub-rect of the same DDS — fixed
+an old speculative UV), Opening (OpeningWindow; 4-panel loop + crawl +30u/s/1843 + skip→SKIP=1; no drift),
+Select (CharSelectWindow + CharSelectEventDrainer over the REUSED 3D preview; 4 drifts — Create/Delete/Enter
+dst-Y 112, no "5 plates", stat grid 10-cell, corner-close base-chrome). **Phase F (in-game core):** fresh
+Ui/Hud (HudMaster + right-edge gauges + chat + minimap + buff + hotbar + inventory[I] + skill[K] + char-stats);
+9/10 core panels byte-confirmed (skill-bar registry, stat siblings A/B/C = text, inventory 8×5+20-cell, buff
++4/+8, chat 448×324+330×20); the "target frame" (slot 135 = UpgradeProcessPanel) proved mis-identified — the
+real target plate not recovered → HUD-II. IHudEventHub verified-faithful (NOT rewritten — engine-free tested
+plumbing). Specs corrected across ui_system.md / structs/guwindow.md / frontend_scenes.md / ui_hud_layout.md /
+chat.md / structs/runtime_singletons.md; firewall PASS. Each scene gated (build 0/0 · headless clean · firewall
+· diff-oracle vs the in-place old code). **FINAL GATE:** clean slnx build 0/0 · 2049 tests green (12 suites) ·
+Godot build 0/0 · headless full-spine 0→5 with HUD + world clean · DAG clean. **Deferred:** physical removal
+of the now-dead legacy front-end (BootFlow + old Screens/HUD; entangled via ServerEntry / OpeningWindow.SkipCfgPath,
+needs maintainer confirm); names.yaml hand-merge; the HUD-II long tail (real target plate + ~100 secondary
+panels); HP/MP Vitals hub channel + hotbar overlay values + minimap per-area DDS naming (world-campaign /
+debugger). Uncommitted on campaign15 (commit on maintainer request).
+
+## CAMPAIGN 17 → HUD-II + legacy removal (2026-06-17 continuation, post-commit)
+After the CAMPAIGN-17 core rebuild was committed, removed the now-dead legacy and pushed the in-game HUD to functional.
+- LEGACY REMOVAL: deleted the dead front-end (BootFlow.cs + Boot.tscn + Screens/{LoginScreen,PinModal,
+  ServerSelectScreen,ServerListDrainer,OpeningWindow,LoadingScreen,CharacterSelectScreen,CharListEventDrainer})
+  after extracting ServerEntry → Screens/ServerEntry.cs and re-pointing ClientContext's SkipCfgPath to the new
+  Ui Opening window; deleted the old in-game HUD (16 HUD/* files = GameHud + panels) once consolidated; deleted
+  the old toolkit (Screens/Widgets/{StateButton,WidgetFactory,AlphaFadeDriver}, Screens/UiAssetLoader,
+  Screens/Layout/CharacterSelectLayout). Screens/ now holds only active files (3D preview, ScreenHost,
+  FrontEndAudio, NpcScrDescriptions, ServerEntry, LoginLayout); HUD/ folder empty.
+- IN-GAME HUD CONSOLIDATION (the crux): Phase F had added Ui/Hud/HudMaster ALONGSIDE the old GameHud (GameLoop
+  still drove GameHud, BYPASSING IHudEventHub → the new HUD drained empty channels). Fixed: GameLoop now PUBLISHES
+  its world events into IHudEventHub (instead of GameHud.OnXxx), HudMaster is the SOLE HUD (old GameHud removed
+  from InGameScene/World.tscn), HudRightEdgeGauge drains the new Vitals channel, InputRouter's HUD-gate →
+  HudMaster.HitTest, AudioService's UI-click SFX → the new HudButton (meta is_hud_button) not StateButton.
+- LAYER-04: added a VitalsChanged channel + HudVitalsEvent (HP/MP/stamina current+max, clamped ratios) to
+  IHudEventHub (the gauges' missing feed). slnx 0/0, 2068 tests (+19).
+- HUD-II W (IDA recovery, doida.exe 263bd994): the REAL selected-target plate = MopGagePanel (HUD slot 177),
+  full geometry (screen-centred W=226; HP bar (35,5) 172×6 src(40,517) uitex 1; 3D portrait (13,55) 200×200;
+  close/nav actions 3/1/2; msg 16001; client-side target-driven). Vitals = current/max poll model (5/52 delta,
+  5/32·4/13·4/1 absolute; max computed; no 4/2 push). Minimap corner radar = RUNTIME BMP-tile mosaic
+  data/effect/map/d<area3>x<X>z<Z>.bmp (3×3 128px ring) — NOT map%d.dds (the dead per-area-DDS panel = the
+  campaign-17 map2.dds-bug root cause). Hotbar overlay = 3 hardcoded 29×29 frames (src-X 763/792/821, src-Y 655,
+  uitex 3); per-skill values from .do. Specs promoted: ui_hud_layout §5.4a/§5.5b/§5.6/§5.10a, ui_system §1.7.1,
+  combat §13. names.yaml candidates: MopGagePanel(177)/GagePanel(157)/OtherInfo/MapPanel/TotalMapPanel/map-marker
+  keys 52,29 + hotbar builder roles. Firewall PASS.
+- HUD-II E: built HudTargetFrame (MopGagePanel, drains hub.TargetChanges — HudMaster now 10 panels), rewrote
+  HudMinimapPanel to the BMP-tile mosaic (map%d.dds path retired), added HudSkillHotbar cooldown/charge/ready
+  overlay. Build 0/0, headless clean (10 panels). TODO(world-campaign): live player-tile feed for the BMP mosaic;
+  TargetChangedEvent.Level field; msg 10037/10038 relation tag; MopGagePanel dstY (debugger). Uncommitted.
+- 2026-06-17  HUD-II Wave 1 W+P — recovered 6 secondary in-game windows (doida.exe 263bd994), all build-ready.
+  OptionPanel (4 tabs + Character/Sound/Graphic/Other; centered 215×204; checkboxes act 2-13 msg 8009-8039
+  non-monotonic; CLIENT-LOCAL, persists option.ini CHAR_* + DoOption.ini OPTION_*; uiconfig.lua NOT used in-game).
+  PartyPanel (screenW+318×318 right-dock — RESOLVES ui_hud_layout §3.3; 8 members 54px stride, 124×5 HP/MP/EXP
+  bars; invite 2/35 / accept 2/36 / leave-kick 2/37; populate 5/21+5/38). KeepPanel/TradeKeepWindow (318×732;
+  single 60-cell 10×6 grid TOGGLED my/their side, NOT two grids; uitex 4; cells 200-259, commit 260, toggle
+  261/262, money 263/264; populate 4/24 44B their-side + 4/25 full-refresh, opened 4/23 phase=3). FriendPanel
+  (TWO-TAB add/cut NOT add/search; add act 2 "friend %s %s" / cut act 3 "cut %s"; 30 slots/tab; uitex 9; outbound
+  2/49+2/54; inbound 5/26 candidate UNVERIFIED). GuildAPanel (50-member, paged 4600/4601; action map 4501-4623;
+  populate 4/65 1812B = ~60B header + 17B name×50 + parallel arrays, NOT 50×36). QuestPanel (3 tabs+detail;
+  uitex 8; accept 85 / proceed 86 / giveup 91 / track 94; populate 5/68 452B + 5/73 344B = opaque blobs,
+  capture-pending). Specs: ui_system §8.6.1/§8.9.1/§8.12-8.16, ui_hud_layout §3.3/§5.3, opcodes.md
+  (+2/49,2/54,4/24,4/25,4/65,2/152), new packets 2-49/2-54/4-24/4-25/4-65/2-152. Firewall PASS (221 opcode rows,
+  0 warn). **ARBITRATION (Tier-1): opcode 2/152 = ONE generic two-u32 C2S sender with MULTIPLE consumers**
+  (QuestPanel row-request + ProductPanel paging) — modeled as one generic opcode, both alias names kept
+  (CmsgQuestRowRequest / CmsgProductPage). Residuals (stub w/ documented fallback, NO fake data): OptionPanel
+  Sound/Graphic/Other widget tables (sweep-pending; 31 OPTION_* keys known so audio wires); FriendPanel inbound
+  feed (5/26 candidate); Quest/Trade/Guild record-value bodies (opaque → pcap-pending). names.yaml candidates:
+  OptionPanel(+4 sub), PartyPanel/MiniParty/PartyReqPanel, KeepPanel(C# TradeKeepWindow), FriendPanel, GuildAPanel,
+  QuestPanel/QuestInfoListPanel, CmsgFriendAddRemove(2/49), CmsgFriendListRefresh(2/54).
+- 2026-06-17  HUD-II Wave 1 E — built the 6 secondary windows on the Ui/Hud substrate as TOGGLE windows
+  (HudOptionsWindow / HudPartyWindow / HudTradeWindow / HudFriendWindow / HudGuildWindow / HudQuestWindow);
+  HudMaster 10→16 panels (Build + Toggle*/ShowTrade + HitTest auto-covers all 16 children). Each fully built
+  (chrome/tabs/lists/actions/captions per ui_system §8.9.1/§8.12-8.16) with DOCUMENTED stubs (NO fake data) for
+  the inbound populate feeds (world-campaign: party 5/21+5/38; capture-pending: friend 5/26 candidate, guild 4/65
+  value fields, quest 5/68+5/73 opaque, trade 4/24+4/25) and the unrecovered toggle hotkeys (spec-pending;
+  GuildAPanel CONFIRMED no-hotkey = context-action open). Build 0/0, headless 16-panel clean. Uncommitted.
+- 2026-06-17  HUD-II Wave 2 W+P — recovered 5 more windows + the window-open mechanism (doida.exe 263bd994).
+  **TOOLBAR: there is NO dedicated toolbar class** — window-open is a GLOBAL action-id dispatcher on the main HUD
+  window where action ids ARE ASCII keycodes (button == hotkey by construction), remappable via per-account INI
+  [<account>_KEYSET] — this RESOLVES the Wave-1 toggle-hotkey residuals. Button→slot→key: inventory ItemPanel 158
+  (i/b), skill SkillPanel 159 (s), status StatusPanel 146, quest QuestPanel 206 (q), party PartyPanel 220 (k),
+  DefaultMenu radial 191 (g), help HelpPanel 322 (h/Space), guild-war 224 (j), stall 228 (l), broodwar 235 (u);
+  close-all p, esc-collapse Esc. The DefaultMenu radial has a SEPARATE id space 4000-4024 → SAME MainWindow slots
+  (wire open-buttons to the SLOT, not one id space). ProductPanel (slot 230) = NPC PRODUCTION/CRAFTING (NOT a
+  vendor — that's the KeepNpcPanel family); 4×2 recipe grid; sends C2S 2/151 (1-byte selector). EmoticonPanel
+  (right-dock rail, MainWindow +0x370): page0 text-macros send via chat 2/7, page1 graphical balloons send NO
+  packet (client-local overhead balloon slot 327 + sfx 862030103). MessagePanel (slot 190) = screen-centered
+  dual-mode modal (mode0 OK / mode1 OK+Yes/No; uitex 2+8, NOT messagewindow.dds; peer of Confirm/BigAlarm/Announce/
+  ErrorPanel). Tender/mail family: TenderInfoPanel(118)→2/118 (header-only); CarrierPigeon mailbox(96/98)→send 2/70
+  (132B) + letter-req 2/60 (8B); DeliveryPanel(40, 5×8)→claim 2/71 (4B); arrival on existing 1/20. **2/152 CONFLICT
+  RE-RESOLVED BY THE BINARY (SUPERSEDES the Wave-1 Tier-1 arbitration): 2/152 = QuestPanel-ONLY (CmsgQuestRowRequest);
+  ProductPanel never emits it; 3/8 = a 4-byte money-refresh repaint.** Specs: ui_system §8.17-8.21, ui_hud_layout
+  §5.13, opcodes.md (2/152 QuestPanel-only, 2/151 1-byte, 3/8 refined, +4 new C2S 2/60·2/70·2/71·2/118), new packets
+  2-60/2-70/2-71/2-118/3-8 + rewritten 2-151/2-152. names.yaml candidates: ProductPanel/EmoticonPanel/MessagePanel/
+  TenderInfoPanel/CarrierPigeonPanal[sic]/DeliveryPanel + the HUD-slot→window/key map; CmsgLetterRequest(2/60)/
+  CmsgCarrierPigeonSend(2/70)/CmsgDeliveryClaim(2/71)/CmsgTenderConfirm(2/118)/CmsgQuestRowRequest(2/152). Residuals:
+  Pet-window slot (NOT 230); MessagePanel S2C notice opcode; mailbox/delivery/tender POPULATE opcodes + record
+  layouts (capture-pending); new format specs warranted msginfo.do(128B)/emoticon.do(40B). Firewall PASS.
+  **INCIDENT (no permanent loss):** a correction worker ran `git checkout --` and reverted the uncommitted
+  §8.17-8.21 spec content; orchestrator detected (empty git diff) + re-promoted from the dirty notes. LESSON:
+  spec/code edits are Edit-only — sub-agents must NEVER run git checkout/restore/reset (working-tree verified intact:
+  61 deletions + 24 mods + new files all present, build 0/0).
+- 2026-06-17  HUD-II Wave 2 E — built 6 windows + wired the ASCII-key window-open dispatch. HudMessagePanel
+  (slot 190 dual-mode modal, ShowNotice/ShowConfirm — the faithful replacement for the deleted ConfirmDialog/
+  CenteredModal), HudProductWindow (crafting 230, 4×2 recipe, C2S 2/151), HudEmoticonWindow (rail +0x370; page0
+  macros → chat 2/7, page1 balloons client-local), HudTenderWindow (118, 2/118), HudMailWindow (CarrierPigeon
+  96/98, 2/70+2/60), HudDeliveryWindow (40, 5×8, 2/71). HudMaster 16→21 panels. Key dispatch (§8.17) wired in
+  _Input: i/b→inventory, s→skill, k→party, q→quest, c→stats, g→DefaultMenu(TODO), h/Space→Help(TODO), Esc→close-top
+  — BACKFILLS the Wave-1 toggle hotkeys. Build 0/0, headless 21-panel clean. Stubs (NO fake data): all outbound
+  use-cases (no IApplicationUseCases method yet → world-campaign), all inbound populate (capture-pending), emoticon
+  graphical grid (emoticon.do 40B format-pending), INI [<account>_KEYSET] remap (defaults hardcoded). Uncommitted.
+- 2026-06-17  HUD-II Wave 3 W+P — recovered 5 more windows; zero-trust corrected 4 mis-IDs (binary won).
+  VENDOR ≠ KeepNpcPanel: the buy/sell shop is the IDB-mislabeled SubscriptionPanel @ slot 259 (itemshop.dds),
+  opened by NPC-interaction KIND 32 (no hotkey); C2S 2/19 buy(12B)/2/20 sell(12B)/2/115 shop-buy(8B), S2C acks
+  4/19/4/20/4/21/4/113/4/114 + 4/115 (vendor money refresh — NOT 3/8). KeepNpcPanel = the NPC dialog menu (no
+  wire). DefaultMenu ≠ radial/≠191: slot 148, a horizontal BOTTOM command strip (1024×45, expandable, action
+  4000); full entry→action→slot map 4000-4024 resolved (opens Inv 158/Skill 159/Quest 206/Party 220/Help 322/
+  Product 230/stance 146/relation 193/…); slot 191 = KeepPanel (unrecovered, future lane). HelpPanel (322) ≠
+  panel: a full-screen data/ui/help.dds overlay (member of MainWindow), key h only (Space refuted). AnnouncePanel
+  = slot 221 (scrolling banner), ErrorPanel = slot 168 (timed floating notice, msg.xdb-101, auto-dismiss); S2C
+  routing RESOLVED (Wave-2 residual): server notice/error → global sink → ErrorPanel+AnnouncePanel+chat;
+  SmsgShowPopupByCode 4/500 (4B, codes 1-7) + result-with-message 4/132/138/140/146; MessagePanel(190) is NOT a
+  wire destination (client-side level-milestone only). Pet window RESOLVED: slot 194 PetPanel = the COUPLE/pair-
+  relation window (no tamed-pet feature in this build; zero pet assets), fed by SmsgActorPairRelation 5/53 (32B)
+  + 5/42/5/64, auto-show on pair push (not a hotkey). Specs: ui_system §8.22-8.26, ui_hud_layout §5.13 corrected
+  (148=DefaultMenu + 191=KeepPanel; 322 overlay; +168/221/194/259), opcodes.md (225 rows, 0 warn; 2/19 re-attributed
+  CmsgNpcBuyOrAcquire, 2/115 8B, 4/500 4B), 8 new + 2 rewritten packets. names.yaml candidates: SubscriptionPanel
+  (vendor 259, IDB-mislabeled), PetPanel(194), AnnouncePanel(221)/ErrorPanel(168), KeepPanel(191), rename
+  2/19→CmsgNpcBuyOrAcquire. Orphan packets/2-19_npc_interact.yaml left intact (Tier-1 tidy). Residuals: opcode
+  field VALUE semantics (12B vendor bodies, 4/500 popup strings) capture-pending. Firewall PASS. Edit-only (no git).
+- 2026-06-17  HUD-II Wave 3 E — built 6 windows + the bottom command strip. HudCommandBar (DefaultMenu slot 148,
+  bottom strip, 11 entry buttons wired entry→HudMaster.Toggle* per §8.23: Inv 4001/Skill 4003/Quest 4004/Status
+  4005/Help 4011/Party 4012/Product 4013 — makes the HUD MOUSE-navigable), HudVendorWindow (SubscriptionPanel 259,
+  buy/sell, C2S 2/19/2/20/2/115), HudHelpOverlay (help.dds full-screen overlay, key h — backfills the Wave-2 Help
+  TODO), HudAnnouncePanel (221 banner, ShowAnnounce), HudErrorPanel (168 timed notice, ShowError + auto-dismiss),
+  HudPetPanel (194 couple/pair window, ShowPartner/ClearPartner). HudMaster 21→~27 panels. Build 0/0, headless
+  ~27-panel clean. Stubs (NO fake data): vendor stock + all outbound use-cases (world-campaign); the 4/500 popup-
+  by-code S2C sink → Error/Announce (world-campaign); pet 5/53 feed (world-campaign); command-bar slot 161/164/185/
+  240 entries (TODO). Uncommitted.
+- 2026-06-17  HUD-II Wave 4 W+P — recovered the last 6 toolbar/NPC windows + resolved identities. KeepNpcPanel
+  (slot 152) = the NPC keep/storage DIALOG MENU (option list; emits nothing on wire); full 35-case KIND→target-window
+  router (KIND 9→storage KeepPanel 191, 0x20→vendor 259, 0xE→repair 150, 0xF→guild 153, default→quest-giver 287;
+  descriptor KIND@+0x22). KeepPanel (191) RESOLVED = the player STORAGE/WAREHOUSE — a 60-cell 10×6 item grid (actions
+  200-259, money 263/264); opened ONLY via KIND-9 NPC → KeepNpcPanel (not a hotkey); item move C2S 2/46 / quick-move
+  2/44, storage open/money 2/142. RelationPanel = slot 193; BuddyRelation = slot 185 (social window opened by
+  DefaultMenu 4002, emits chat-command friend/cut — likely the SAME social surface as the Wave-1 FriendPanel; reconcile,
+  do not duplicate). StallListPanel (228, key l) = player market list; populate S2C 4/74; emits 2/74/2/56.
+  BroodWarListPanel (235, key u) SCOPE-CORRECTED = the guild-DIPLOMACY relations list (declare-war/ally), NOT events;
+  emits 2/81, result 4/81. GuildWarInfoPanel (224, key j) = read-only war info; populated by S2C 5/73 (344B).
+  **CONFLICTS resolved (binary wins): 5/73 = SmsgGuildWarInfoUpdate, NOT quest-complete (corrected opcodes.md, fixed
+  the false 2/28+2/152 cross-refs, 5-73_quest_complete.yaml → deprecation redirect; quest results = 5/68 ONLY); slot
+  185 BuddyRelation ≠ 193 RelationPanel; storage 2/142 vs item-move 2/46/2/44.** Specs: ui_system §8.27-8.32,
+  ui_hud_layout §5.13 (+152/185/193/191/224/228/235), npc_interaction §7, opcodes.md (+5 C2S 2/44·2/46·2/56·2/74·2/81;
+  renames 4/74→SmsgStallListRefill, 4/81→SmsgGuildDiplomacyResult, 5/73→SmsgGuildWarInfoUpdate), new packets + 5-73
+  redirect. validator 230 rows 0 warnings. Firewall PASS. Edit-only (no git).
+- 2026-06-17  HUD-II Wave 4 E — built the final 6 windows. HudKeepNpcDialog (152, NPC menu — routes sel→storage/
+  vendor), HudStorageWindow (KeepPanel 191, 60-cell storage grid, 2/46/2/44/2/142), HudStallListWindow (228, key l,
+  2/74/2/56), HudGuildDiplomacyWindow (235, key u, 2/81), HudGuildWarInfoWindow (224, key j, 5/73 stub), HudRelationPanel
+  (193). HudMaster ~27→~33 panels. KeepNpcDialog wired to the existing Vendor/Storage; l/u/j keys + DefaultMenu 4002→
+  Relation wired. BuddyRelation (185) NOT built (layout unrecovered — separate lane; 4002 interim → Relation/Friend).
+  FriendPanel(§8.14)/RelationPanel(193)/BuddyRelation(185) = 3 distinct social classes (no duplicate built). Build 0/0,
+  headless ~33-panel clean. Stubs (NO fake data): all inbound populate + outbound use-cases (world-campaign), atlases
+  via literal paths (uitex-pending). **HUD-II window set ≈ COMPLETE (~33 panels: 10 core + 23 windows across 4 waves
+  + command bar + key/mouse navigation). Residual = world-campaign live data-wiring + a few unrecovered/niche panels
+  (BuddyRelation 185, the deep ctor-tail).** Uncommitted.
+
+## 2026-06-18 — re-static-analyst + protocol-spec-author (front-end scene rebuild, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, static only)
+- analyzed (by canonical name): WinMain scene state machine (states 0..3 spine), Diamond GUComponent/
+  GUPanel/GUButton/GULabel/GUTextbox/GUCheckBox framework + AddChildWithAction dispatch, LuaConfig
+  (uiconfig.lua scalar loader), LoginWindow build/OnEvent/per-frame sub-state driver (flowSubState),
+  LoginSecondPassword keypad (PIN), GameVer index-5 gate, LoadingScreen render tick + VFS progress +
+  boot worker, COpeningWindow slideshow/crawl/skip-gate, lobby host resolution (ip.txt/list.dat/
+  servername registry), server-list + channel-endpoint queries, secure-context key-string builder +
+  login packet 0x2B, 0/0 key-exchange parse.
+- specs produced/updated:
+  - Docs/RE/specs/frontend_layout_tables.md (NEW — the build oracle: full login widget table, sub-state
+    machine + per-sub-state visibility, curtain, gates, Save-ID, credential hand-off; PIN keypad;
+    server-list display model; loading immediate-mode quads; opening cinematic; audio cues)
+  - Docs/RE/specs/login_flow.md (server-address resolution chain, 62-byte 0/0, dynamic game endpoint)
+  - Docs/RE/packets/login.yaml (1/4 credential reply, M pad parameter-driven), Docs/RE/packets/lobby.yaml
+    (8-byte wrapper + LZ4, 8-byte records, channel-endpoint 30-byte "host port")
+  - Docs/RE/opcodes.md (0/0, 1/4 re-confirmed; frame header two u16 words)
+- notes: PIVOTAL — login/select/opening UI geometry is HARD-CODED (uiconfig.lua read for a single int
+  NEW_SERVER_INDEX only); retired the "uiconfig.lua ~340 widgets" claim. Corrections: single login
+  sub-state field; no ±64 alpha fade (curtain is +5/tick Y-offset only); game.ver = single u32 index-5
+  equality; SKIP gate read in load case 2 (not init); loading screen = immediate-mode 2-quad renderer
+  (random loading.dds/loading06.dds/loading08.dds); opening alpha ceiling 250, crawl +Y must invert for
+  Y-up; PIN keypad = 100 stacked buttons (10/cell), time-seeded Fisher–Yates scramble (seed DEBUGGER-
+  PENDING). capture_verified: false (no .pcapng present). names.yaml sync owed (orchestrator/maintainer).
+
+## 2026-06-18 — re-static-analyst ×5 + Tier-1 (front-end scene re-confirmation + C#/Godot fix, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, static only — no debugger per maintainer)
+- re-confirmed (by canonical name): WinMain scene spine (states 0..7 + 8 terminal sentinel; Init
+  auto-advance; OPENNING/SKIP gate non-zero→Select / zero→Opening; reload 202/203/232; GameState
+  {state, subState=8, errorDetail, debugMode}); LoginWindow_OnEvent action map; LoginSecondPassword
+  keypad tags + scramble; lobby server-list 8-byte record + commit guard; LoadingScreen + COpeningWindow
+  render constants.
+- KEY CORRECTIONS to frontend_layout_tables.md (binary overrides a prior CODE-CONFIRMED reading):
+  - §2.2 action map: **102 = open quit-confirm ExitPanel (a distinct child object), NOT "show server-list"**;
+    **105 = throttled restart server-list fetch (→34, ~10s)**; 101 = app quit (Engine run-flag clear);
+    112 = same as 102; 113/114 = hide re-fetch popup + restart fetch (→34). The server-list is reached
+    ONLY via the sub-state machine after PIN (33→…→37) — no form action opens it. Idle = state 6;
+    real hand-off = state 40 (41 = post-hand-off idle). Verified by reading LoginWindow_OnEvent.
+  - §3 PIN keypad tags: **Reset=11 (ScrambleKeypad: wipe+re-roll), OK=12 (SubmitOk), Cancel=13** — no
+    separate clear/backspace verb.
+  - §4 server-list colors (ARGB): red 0xFFFF0000 / orange 0xFFED6806 / yellow 0xFFFFFF00 /
+    green 0xFFB5FF7A (≤500: numeric text, no msg id); status 3 → 6004 only when load(+4)==24 else 6005
+    from +4/+6. Record fields +0 id / +2 status / +4 load / +6 open_time (no swap).
+  - §5 progress-bar depth literal = 0.5859375f (not 0.108; irrelevant to the 2D port).
+- C#/Godot fixes (layer 05) measured against the corrected oracle: PinSubView tag swap fixed +
+  dragon-frame chrome (InventWindow 318,647,340×190) + transparent modal capture (removed invented
+  0.6 black dim); LoadingWindow TextureRect ExpandMode.IgnoreSize (bg 1024×768, fill 223×223 — was
+  ballooning to 1024×1024); ServerSelectSubView exact colors + dead BuildBackControl/BackRequested
+  removed; LoginWindow action handler re-aligned (102/112→ExitConfirm, 105→restart-fetch, 101→quit).
+  Application layer (SceneStateMachine / LoadOrchestrator / LobbyServerRecord) re-verified faithful — no
+  change. Verified via headless LayoutDump (numeric oracle, no screenshots) before/after.
+- notes: dirty findings in Docs/RE/_dirty/campaign-frontend/. capture_verified: false. names.yaml sync
+  owed (orchestrator/maintainer): LoginWindow_OnEvent, GameVer_CompareIndex5, Lobby_FetchServerList,
+  Diamond_LoginSecondPassword_* (builder / OnEvent / ScrambleKeypad / SubmitOk),
+  Diamond_OpeningWindow_BannerSlideshowFSM/ScenarioCrawlUpdate, Boot_LoadDataTableCorpus.
+
+## 2026-06-18 — CYCLE 18 Phase A+B: re-cleanroom-orchestrator (6 static-IDA lanes) + spec-authors (front-end scenes, campaign15)
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*, **static only — no debugger** per maintainer)
+- scope: pre-character-select scenes (Init/Login/Load/Opening) + login sub-flows (PIN, server-list). Char-select and world out of scope.
+- dirty findings (gitignored): Docs/RE/_dirty/frontend18/{pin-scramble, serverlist-record, saveid-ini, load-bar-rect, login-substates, opening-fade}.md
+- promoted to clean specs:
+  - frontend_layout_tables.md (author: asset-spec-author): §3 PIN scramble — seed = whole-second time()
+    (CRT srand; NOT GetTickCount/ms), ASCENDING uniform shuffle (j=rand()%i, i=2..10; MSVC random_shuffle
+    shape), reproduce-by-mechanism; §2.5/§7.10 INI split — Save-ID = DoOption.ini [DO_OPTION] OPTION_ID,
+    [OPENNING] SKIP = option.ini (five distinct EXE-relative inis); §5 load-bar — rect X −499/−170,
+    Y −363/−140 (329×223) + fill clamp(223·pct/100,0,223)/1024 CONFIRMED, depth → Z=1.0 (ortho near/far
+    0/1; irrelevant to the 2D port); §2.1/§2.2 visibility — set IMPERATIVELY on edges (no declarative
+    table); CORRECTED bands: Background from state 2 (was ≥3); curtains = always-present Y-animated host
+    panels; interactive credential group ≈ 5..33 (was 3..32, shown on 5→6 edge); server-list CONTENT
+    panel 35..37 (was 33..37; 33 only starts the worker); PIN keypad 31/32 CONFIRMED; §6 Opening — WinMain
+    state-3 pre-sets next=4, fade only governs when the blocking loop returns; residual = armed-flag site.
+  - lobby.yaml (author: protocol-spec-author): Record Shape A static-CONFIRMED — 8B LE
+    {+0 server_id i16 (1..40), +2 status_code, +4 load, +6 open_time}; commit/selectability gate
+    status_code==0 && load<2400 (0x960). DENIED the ServerId==100 gate (==100 is a display-only
+    NEW_SERVER_INDEX label reposition, commits nothing); +6 = open_time (status==3 → HH:MM from +4/+6),
+    NOT a Flag. On-wire byte VALUES remain capture-pending.
+- C#/Godot fixes (Phase C, layers 05/04/02) measured against the corrected oracle: ClientContext wires
+  LoginHandshakeDriver (was null → 0/0 never answered with 1/4); LoginWindow single-source visibility
+  (structural _pinKeypadRoot mirroring _serverListRoot, 8 direct .Visible writes removed) + bands
+  Background≥2 / server-list 35..37; PinSubView scramble seed→whole-second time() + ascending shuffle;
+  LobbyServerRecord/LobbyServerEntry/ServerListEntryView field rename {Status,Population,Flag}→
+  {StatusCode,Load,OpenTime} + gate fix. Verified via headless LayoutDump (numeric oracle, no screenshots).
+- notes: capture_verified: false. names.yaml sync owed (orchestrator/maintainer): the PIN-scramble /
+  server-list-parse / Save-ID-ini / load-bar-draw / login-substate routines by canonical name.

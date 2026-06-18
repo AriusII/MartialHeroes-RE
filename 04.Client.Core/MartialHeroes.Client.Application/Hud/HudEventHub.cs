@@ -60,6 +60,7 @@ public sealed class HudEventHub : IHudEventHub
     private readonly Channel<ExpLevelEvent> _expLevels;
     private readonly Channel<StatAllocationView> _statAllocations;
     private readonly Channel<ZoneChangedEvent> _zoneChanges;
+    private readonly Channel<HudVitalsEvent> _vitals;
 
     /// <summary>Creates a hub with one channel per event family sized per the documented policy.</summary>
     public HudEventHub()
@@ -71,6 +72,8 @@ public sealed class HudEventHub : IHudEventHub
         _expLevels = CreateBounded<ExpLevelEvent>(LatestWinsCapacity);
         _statAllocations = CreateBounded<StatAllocationView>(LatestWinsCapacity);
         _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
+        // spec: Docs/RE/specs/combat.md §12.2 — latest-wins: only the freshest absolute vitals matter.
+        _vitals = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
     }
 
     private static Channel<T> CreateBounded<T>(int capacity) =>
@@ -132,6 +135,13 @@ public sealed class HudEventHub : IHudEventHub
         return _zoneChanges.Writer.TryWrite(zoneChanged);
     }
 
+    /// <inheritdoc />
+    public bool PublishVitals(HudVitalsEvent v)
+    {
+        ArgumentNullException.ThrowIfNull(v);
+        return _vitals.Writer.TryWrite(v);
+    }
+
     // ---- Subscribe side ------------------------------------------------------------------------
 
     /// <inheritdoc />
@@ -156,6 +166,9 @@ public sealed class HudEventHub : IHudEventHub
     public ChannelReader<ZoneChangedEvent> ZoneChanges => _zoneChanges.Reader;
 
     /// <inheritdoc />
+    public ChannelReader<HudVitalsEvent> Vitals => _vitals.Reader;
+
+    /// <inheritdoc />
     public void Complete()
     {
         _chatLines.Writer.TryComplete();
@@ -165,5 +178,6 @@ public sealed class HudEventHub : IHudEventHub
         _expLevels.Writer.TryComplete();
         _statAllocations.Writer.TryComplete();
         _zoneChanges.Writer.TryComplete();
+        _vitals.Writer.TryComplete();
     }
 }

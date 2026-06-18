@@ -343,10 +343,10 @@ public readonly record struct CharacterListSlot(
 // =====================================================================================================
 
 /// <summary>
-/// Published when the local player materializes into the world (3/14 SmsgCharSpawnResponse, Result != 0).
-/// Immutable snapshot of the freshly-spawned local player, sourced from the slot descriptor cached at
-/// select time. This is the load-bearing "you are in the world" event the presentation acts on. spec:
-/// Docs/RE/specs/login_flow.md §3.5 / §5.3.
+/// Published when the local player materializes into the world. The state-5 core path is the 4/1
+/// GameStateTick world-entry seed, sourced from the slot descriptor cached at select time; the older
+/// 3/14 bridge still emits the same surface for keep-green compatibility. spec: Docs/RE/opcodes.md
+/// (4/1 row); Docs/RE/specs/client_runtime.md §9.1.
 /// </summary>
 /// <param name="Key">The local player's composite actor identity (raw id + sort).</param>
 /// <param name="SlotIndex">The character slot that spawned (echoed by the 3/14 result).</param>
@@ -365,6 +365,19 @@ public sealed record LocalPlayerSpawnedEvent(
     uint CurrentHp,
     uint MaxHp,
     ushort ServerClass) : IClientEvent;
+
+/// <summary>
+/// Published when the 4/1 world-entry tick bootstraps or repositions the local player. Carries only
+/// engine-free values for the presentation world scene. spec: Docs/RE/specs/client_runtime.md
+/// §9.1/§9.4 (spawn X/Z at +0x2374/+0x2378; Y forced to 0; scenario code at +0x00C).
+/// </summary>
+/// <param name="Key">The local player's composite actor identity.</param>
+/// <param name="Position">World-entry position (Q16.16, with Y forced to 0).</param>
+/// <param name="ScenarioMode">Scenario/map-mode code from the 4/1 body.</param>
+public sealed record InGameWorldBootstrappedEvent(
+    ActorKey Key,
+    Vector3Fixed Position,
+    int ScenarioMode) : IClientEvent;
 
 /// <summary>
 /// Published when the enter-game spawn fails (3/14 SmsgCharSpawnResponse, Result == 0). The presentation

@@ -56,8 +56,9 @@ using Godot;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Dev;
-using MartialHeroes.Client.Godot.Screens.Widgets;
+using MartialHeroes.Client.Godot.World;
 
 namespace MartialHeroes.Client.Godot.Audio;
 
@@ -177,11 +178,10 @@ public sealed partial class AudioService : Node
     // -------------------------------------------------------------------------
 
     // Stored so we can find the bus reader in _Process.
-    private MartialHeroes.Client.Application.Events.IClientEventBus? _eventBus;
+    private IClientEventBus? _eventBus;
 
     // Tracks the last ClientState we processed so world-entry fires exactly once.
-    private MartialHeroes.Client.Application.Events.ClientState _lastState =
-        MartialHeroes.Client.Application.Events.ClientState.Login;
+    private ClientState _lastState = ClientState.Login;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -218,7 +218,7 @@ public sealed partial class AudioService : Node
         // ClientContext is the autoload that owns the EventBus; we find it via the autoload path.
         try
         {
-            var ctx = GetNode<MartialHeroes.Client.Godot.Autoload.ClientContext>("/root/ClientContext");
+            var ctx = GetNode<Autoload.ClientContext>("/root/ClientContext");
             _eventBus = ctx.EventBus;
             GD.Print("[AudioService] Subscribed to ClientContext.EventBus.");
         }
@@ -280,7 +280,7 @@ public sealed partial class AudioService : Node
     // StateMachine polling for world-entry and char-select SFX
     // -------------------------------------------------------------------------
 
-    private MartialHeroes.Client.Godot.Autoload.ClientContext? _clientContextRef;
+    private Autoload.ClientContext? _clientContextRef;
 
     private void PollStateMachineForAudio()
     {
@@ -289,7 +289,7 @@ public sealed partial class AudioService : Node
         {
             try
             {
-                _clientContextRef = GetNode<MartialHeroes.Client.Godot.Autoload.ClientContext>("/root/ClientContext");
+                _clientContextRef = GetNode<ClientContext>("/root/ClientContext");
             }
             catch
             {
@@ -306,7 +306,7 @@ public sealed partial class AudioService : Node
 
         switch (currentState)
         {
-            case MartialHeroes.Client.Application.Events.ClientState.CharacterSelection:
+            case ClientState.CharacterSelection:
                 // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — char-select BGM 920100200 is started
                 // by the select-window constructor (state-4 enter); the looping front-end BGM from
                 // FrontEndAudio.PlayBgm() is ALREADY playing this same cue when the state transition fires.
@@ -333,12 +333,12 @@ public sealed partial class AudioService : Node
 
                 break;
 
-            case MartialHeroes.Client.Application.Events.ClientState.World:
+            case ClientState.World:
                 // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (862010105) — 3D directional
                 //       spawn sound, kind 5; 200-unit audible radius. CODE-CONFIRMED.
                 // NOTE: 910066000 (former "WorldEntryBgmId") is UNVERIFIED per sound.md §15.6c and is
                 //       NOT played here. Per-area BGM comes from TryStartAreaBgmAsync below.
-                GD.Print($"[AudioService] State→World: entering game world. " +
+                GD.Print("[AudioService] State→World: entering game world. " +
                          "Spawn SFX is 3D actor-routed (kind 5); area BGM via .bgm table.");
 
                 // Attempt to load the area BGM from the .bgm sound table.
@@ -543,7 +543,7 @@ public sealed partial class AudioService : Node
             //    or /root/World/RealWorldRenderer (boot_flow=world)
             // We search by node type rather than a fixed path for robustness.
             var renderer = GetTree().Root.FindChild("RealWorldRenderer", recursive: true, owned: false)
-                as MartialHeroes.Client.Godot.World.RealWorldRenderer;
+                as RealWorldRenderer;
             return renderer?.TargetAreaId ?? 0;
         }
         catch
@@ -553,36 +553,25 @@ public sealed partial class AudioService : Node
     }
 
     // -------------------------------------------------------------------------
-    // StateButton UI-click hook via scene tree NodeAdded
+    // HudButton UI-click hook via scene tree NodeAdded
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Called whenever any node is added to the scene tree.
-    /// Hooks <see cref="MartialHeroes.Client.Godot.Screens.Widgets.StateButton.ActionFired"/>
-    /// so every button press plays the UI click SFX without modifying the Widgets kit.
+    /// Called whenever any node is added to the scene tree. Hooks the Ui/ <c>HudButton</c> substrate
+    /// so every button press plays the UI click SFX without coupling AudioService to the widget type:
+    /// a HudButton tags its backing <see cref="global::Godot.TextureButton"/> with the meta key
+    /// "is_hud_button" at construction, and we wire its Pressed signal here.
     ///
-    /// Uses a named local method and the unsubscribe-then-subscribe pattern to guarantee
-    /// exactly one subscription even when a StateButton re-enters the tree (scene re-use,
-    /// reparenting). A lambda captures a NEW delegate each time, so a raw
-    /// <c>button.ActionFired += lambda</c> would accumulate subscriptions on re-entry.
+    /// HudButtons are allocated once per HUD/scene session (never re-parented), so a direct C# event
+    /// subscription is safe — they enter the tree exactly once.
     ///
-    /// spec: Docs/RE/specs/sound.md — UI click SFX 861010101 on StateButton presses; central subscription.
+    /// spec: Docs/RE/specs/sound.md — UI click SFX 861010101 on button presses; central subscription.
     /// </summary>
     private void OnNodeAddedToTree(Node node)
     {
-        if (node is StateButton button)
-        {
-            // Idempotent: remove before adding so re-entering buttons are never double-subscribed.
-            button.ActionFired -= OnButtonActionFired;
-            button.ActionFired += OnButtonActionFired;
-        }
+        if (node is TextureButton texBtn && texBtn.HasMeta("is_hud_button"))
+            texBtn.Pressed += PlayUiClick;
     }
-
-    /// <summary>
-    /// Named handler for <see cref="StateButton.ActionFired"/> (signature: Action&lt;int&gt;).
-    /// A stable method reference is required for idempotent subscribe/unsubscribe.
-    /// </summary>
-    private void OnButtonActionFired(int _) => PlayUiClick();
 
     // -------------------------------------------------------------------------
     // Public audio API
@@ -612,7 +601,7 @@ public sealed partial class AudioService : Node
 
         // Music-exempt IDs always play at full amplitude regardless of Music bus gain.
         // spec: Docs/RE/specs/sound.md §10.6 (exempt IDs 861010109/861010110). CODE-CONFIRMED.
-        float volumeLinear = (id == MusicExemptIdA || id == MusicExemptIdB)
+        float volumeLinear = id is MusicExemptIdA or MusicExemptIdB
             ? 1.0f
             : DefaultSfxVolume;
 

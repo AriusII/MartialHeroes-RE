@@ -28,7 +28,8 @@ public static class Opcodes
     /// spec: packets/cmsg_char_create.yaml. The prior "1/6 login-or-create collision" is RESOLVED:
     /// 1/6 is character-create ONLY (single emitter). The login credential is a separate sub-opcode
     /// 0x2B on the secure 1/4 frame (packets/login.yaml), NOT here. The 52-byte body's intra-payload
-    /// field map is capture-unverified, so the struct models it as one opaque buffer. spec: opcodes.md.
+    /// field offsets are promoted in cmsg_char_create.yaml; exact sex/hair/stat VALUE semantics remain
+    /// capture-unverified. spec: opcodes.md.
     /// </summary>
     public const uint CmsgCreateCharacter = 0x10006;
 

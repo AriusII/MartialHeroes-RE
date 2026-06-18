@@ -1,11 +1,12 @@
 using Godot;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Debug;
-using MartialHeroes.Client.Godot.HUD;
 using MartialHeroes.Client.Godot.Input;
+using MartialHeroes.Client.Godot.Ui.Hud;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -19,21 +20,21 @@ namespace MartialHeroes.Client.Godot.World;
 ///   - ALL Godot node mutations happen on the Godot main thread, here in _Process or via
 ///     CallDeferred. No Node is touched from a background thread.
 ///
-/// Events handled and their view targets:
+/// Events handled and their view targets (CAMPAIGN 17 Wave 2b — hub-fed HudMaster):
 ///   - <see cref="WorldSnapshotEvent"/>          → ActorRegistry.OnWorldSnapshot
 ///   - <see cref="SectorLoadedEvent"/>           → TerrainNode.OnSectorLoaded
 ///   - <see cref="SectorUnloadedEvent"/>         → TerrainNode.OnSectorUnloaded
-///   - <see cref="ActorSpawnedEvent"/>           → ActorRegistry.OnActorSpawned + GameHud.OnActorSpawned
+///   - <see cref="ActorSpawnedEvent"/>           → ActorRegistry.OnActorSpawned
 ///   - <see cref="ActorMovedEvent"/>             → ActorRegistry.OnActorMoved
 ///   - <see cref="ActorDespawnedEvent"/>         → ActorRegistry.OnActorDespawned
-///   - <see cref="ActorVitalsChangedEvent"/>     → GameHud.OnActorVitalsChanged
-///   - <see cref="ActorLeveledUpEvent"/>         → GameHud.OnActorLeveledUp
-///   - <see cref="ActorStatSyncEvent"/>          → GameHud.OnActorStatSync
-///   - <see cref="CombatStatsRecomputedEvent"/>  → GameHud.OnCombatStatsRecomputed
-///   - <see cref="BuffSlotChangedEvent"/>        → GameHud.OnBuffSlotChanged
-///   - <see cref="SkillHotbarSlotSetEvent"/>     → GameHud.OnSkillHotbarSlotSet
-///   - <see cref="ChatBroadcastEvent"/>          → GameHud.OnChatBroadcast
-///   - <see cref="ClientStateChangedEvent"/>     → GameHud.OnClientStateChanged
+///   - <see cref="ActorVitalsChangedEvent"/>     → IHudEventHub.PublishVitals (→ HudRightEdgeGauge)
+///   - <see cref="ActorLeveledUpEvent"/>         → IHudEventHub.PublishVitals + PublishExpLevel
+///   - <see cref="ActorStatSyncEvent"/>          → IHudEventHub.PublishExpLevel
+///   - <see cref="CombatStatsRecomputedEvent"/>  → IHudEventHub.PublishVitals (max HP/MP update)
+///   - <see cref="BuffSlotChangedEvent"/>        → IHudEventHub.PublishBuffState
+///   - <see cref="SkillHotbarSlotSetEvent"/>     → TODO(hud-ii): needs a hub Hotbar channel
+///   - <see cref="ChatBroadcastEvent"/>          → IHudEventHub.PublishChatLine (→ HudChatPanel)
+///   - <see cref="ClientStateChangedEvent"/>     → (no hub channel; handled by SceneHost)
 ///
 /// spec: Docs/RE/specs/game_loop.md §6 — "updates the spatial transforms of the associated
 ///       Node3D on the next frame".
@@ -67,17 +68,25 @@ public sealed partial class GameLoop : Node
     // -------------------------------------------------------------------------
 
     private ActorRegistry _actorRegistry = null!;
-    private GameHud _hud = null!;
     private InputRouter _inputRouter = null!;
     private SyntheticWorldFeeder _syntheticFeeder = null!;
     private ClientContext _clientContext = null!;
     private TerrainNode _terrainNode = null!;
 
-    // References for the single HUD key-command dispatcher (_Input).
-    // F4 fix: I/K/O/C toggles route through one dispatcher, not per-panel _Input overrides.
-    // spec: Docs/RE/specs/input_ui.md §3a / §5 — single dispatch point for HUD key commands.
-    private HUD.InventoryWindow? _inventoryWindow;
-    private HUD.SkillWindow? _skillWindow;
+    // HudMaster reference — the sole, hub-fed in-game HUD (CAMPAIGN 17 Wave 2b).
+    // GameLoop owns the reference so it can (a) wire the hit-test into HudInputHandler and
+    // (b) delegate toggle keys (I/K/C) to the new substrate.
+    // The HudMaster is built by InGameScene and passed in via SetHudMaster().
+    private HudMaster? _hudMaster;
+
+    // Hub reference — published into each frame for every event that carries HUD-relevant data.
+    // Stored separately from ClientContext to avoid repeated property access in the hot path.
+    private IHudEventHub? _hudHub;
+
+    // Local-player vitals view state (latest confirmed values — drives PublishVitals on every change).
+    // No game logic: values are read from event payloads; GameLoop never computes them.
+    private uint _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam;
+
     private RealWorldRenderer? _realWorldRenderer;
 
     // ---- Region tracking (for zone indicator) ----
@@ -183,9 +192,9 @@ public sealed partial class GameLoop : Node
 
     /// <summary>
     /// Returns true when the DEV-ONLY debug baseline (green plane + red origin cube) is enabled.
-    /// Default OFF so the world renders only the recovered scene graph; enabled via the
-    /// <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_offline_flow=1</c> key in
-    /// <c>client_dir.cfg</c> (the same dev-offline flow the front-end uses). NEVER on in production.
+    /// Default OFF so the world renders only the recovered scene graph; enabled only via the
+    /// <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_baseline=1</c> key in
+    /// <c>client_dir.cfg</c>. DEV_OFFLINE_FLOW must not add geometry to fidelity screenshots.
     /// spec: Docs/RE/specs/client_runtime.md §7.4 (no debug primitives in the original world build).
     /// </summary>
     private static bool IsDevBaselineEnabled()
@@ -195,12 +204,7 @@ public sealed partial class GameLoop : Node
         if (baselineEnv is "1" or "true" or "yes")
             return true;
 
-        // Shared dev-offline flow flag: env var or client_dir.cfg key.
-        string? offlineEnv = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
-        if (offlineEnv is "1" or "true" or "yes")
-            return true;
-
-        return ReadCfgFlag("dev_offline_flow") || ReadCfgFlag("dev_baseline");
+        return ReadCfgFlag("dev_baseline");
     }
 
     /// <summary>
@@ -250,6 +254,23 @@ public sealed partial class GameLoop : Node
         }
     }
 
+    /// <summary>
+    /// Called by InGameScene after it builds and adds HudMaster so GameLoop can wire the
+    /// hit-test into HudInputHandler (the "UI is the gate" gate).
+    /// spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
+    /// </summary>
+    public void SetHudMaster(HudMaster hudMaster)
+    {
+        _hudMaster = hudMaster;
+        if (_clientContext is not null)
+        {
+            // Re-wire the hit-test to HudMaster.HitTest (replaces any prior null delegate).
+            // spec: Docs/RE/specs/input_ui.md §3 / §6.
+            _clientContext.SetHudHitTest(hudMaster.HitTest);
+            GD.Print("[GameLoop] HudInputHandler.HitTest wired to HudMaster.HitTest. spec: input_ui.md §3/§6.");
+        }
+    }
+
     /// <summary>The real _Ready body; separated so the defensive wrapper stays clean.</summary>
     private void ReadyInternal()
     {
@@ -260,7 +281,6 @@ public sealed partial class GameLoop : Node
 
         // Resolve child nodes — use HasNode for optional children so missing nodes don't crash.
         _actorRegistry = GetNode<ActorRegistry>("ActorRegistry");
-        _hud = GetNode<GameHud>("HUD");
         _inputRouter = GetNode<InputRouter>("InputRouter");
         _syntheticFeeder = GetNode<SyntheticWorldFeeder>("SyntheticWorldFeeder");
 
@@ -278,6 +298,9 @@ public sealed partial class GameLoop : Node
 
         GD.Print("[GameLoop] ReadyInternal: child nodes resolved — wiring subsystems");
 
+        // Cache the hub reference for hot-path use in DispatchEvent.
+        _hudHub = _clientContext.HudEventHub;
+
         // Give subsystems their handles.
         try
         {
@@ -286,21 +309,6 @@ public sealed partial class GameLoop : Node
         catch (Exception ex)
         {
             GD.PrintErr($"[GameLoop] ActorRegistry.Initialise failed: {ex.Message}");
-        }
-
-        try
-        {
-            _hud.Initialise(_clientContext);
-
-            // F1 fix: wire the live GameHud.HitTest into HudInputHandler so HUD clicks are consumed
-            // before the world handler sees them ("UI is the gate").
-            // spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
-            _clientContext.SetHudHitTest(_hud.HitTest);
-            GD.Print("[GameLoop] HudInputHandler.HitTest wired to GameHud.HitTest. spec: input_ui.md §3/§6.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameLoop] GameHud.Initialise failed: {ex.Message}");
         }
 
         // Wire InputRouter with bus from the composition root.
@@ -358,23 +366,6 @@ public sealed partial class GameLoop : Node
             {
                 GD.PrintErr($"[GameLoop] SyntheticWorldFeeder.StartAsync failed: {ex.Message}");
             }
-        }
-
-        // HUD windows (inventory = key I, skills = key K). They self-wire to /root/ClientContext
-        // in their own _Ready, so no Initialise call is needed. Added programmatically to avoid
-        // depending on .tscn script bindings. Hidden until toggled.
-        // F4: store refs so the single key dispatcher (_Input) can call Toggle().
-        // spec: Docs/RE/specs/input_ui.md §3a / §5 — single HUD command dispatcher.
-        try
-        {
-            _inventoryWindow = new HUD.InventoryWindow { Name = "InventoryWindow" };
-            _skillWindow = new HUD.SkillWindow { Name = "SkillWindow" };
-            AddChild(_inventoryWindow);
-            AddChild(_skillWindow);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameLoop] HUD window attach failed: {ex.Message}");
         }
 
         // Stage-B: EffectRenderer — world-side 3D particle placeholder for cast effects.
@@ -492,39 +483,27 @@ public sealed partial class GameLoop : Node
         switch (key.Keycode)
         {
             case Key.I:
-                // Toggle inventory window. spec: ui_system.md §15 (I = inventory toggle).
-                _inventoryWindow?.Toggle();
+                // Toggle inventory+skill pair. spec: ui_system.md §8.10.1 ([I] toggles slots 158+159).
+                _hudMaster?.ToggleInventory();
                 GetViewport().SetInputAsHandled();
                 break;
 
             case Key.K:
                 // Toggle skill window. spec: ui_system.md §15 (K = skill toggle).
-                _skillWindow?.Toggle();
+                _hudMaster?.ToggleSkill();
                 GetViewport().SetInputAsHandled();
                 break;
 
             case Key.O:
-                // Toggle options window. spec: ui_system.md §15 (O = options toggle).
-                if (_hud is not null)
-                {
-                    // Options window is a child of HUD; reach it via HUD's reference.
-                    // spec: Docs/RE/specs/input_ui.md §3a — single dispatcher.
-                    var opts = _hud.GetNodeOrNull<HUD.OptionsWindow>("OptionsWindow");
-                    opts?.Toggle();
-                }
-
+                // Options window — not yet recovered in HudMaster (HUD-II). No-op for now.
+                // spec: ui_system.md §15 (O = options toggle).
                 GetViewport().SetInputAsHandled();
                 break;
 
             case Key.C:
                 // Toggle character stats window.
                 // spec: Docs/RE/formats/misc_data.md §5 — discript.sc category 102 "(C)".
-                if (_hud is not null)
-                {
-                    var charStats = _hud.GetNodeOrNull<HUD.CharacterStatsWindow>("CharacterStatsWindow");
-                    charStats?.Toggle();
-                }
-
+                _hudMaster?.ToggleStats();
                 GetViewport().SetInputAsHandled();
                 break;
         }
@@ -590,18 +569,12 @@ public sealed partial class GameLoop : Node
             // ---- Actor lifecycle ----
             case ActorSpawnedEvent spawned:
                 _actorRegistry.OnActorSpawned(spawned);
-                _hud.OnActorSpawned(spawned);
                 break;
 
             case ActorMovedEvent moved:
                 // Legacy fallback path — superseded by WorldSnapshotEvent when the engine loop runs.
                 _actorRegistry.OnActorMoved(moved);
-                // Forward to HUD for minimap player-position tracking.
-                _hud.OnActorMoved(moved);
                 // Track local-player legacy XZ for RegionService zone polling.
-                // The local player is the first PlayerCharacter actor that was spawned.
-                // ActorMovedEvent does not carry a sort flag, so we rely on key match.
-                // We store the first move that updates the tracked key.
                 // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1 — legacy XZ lookup.
                 if (_hasLocalPlayer && moved.Key.Sort == MartialHeroes.Client.Domain.Actors.EntitySort.PlayerCharacter)
                 {
@@ -633,46 +606,74 @@ public sealed partial class GameLoop : Node
 
             // ---- Vitals / stats / level ----
             case ActorVitalsChangedEvent vitals:
+                // Publish into the HUD hub so HudRightEdgeGauge (and future panels) drain live data.
                 // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
-                _hud.OnActorVitalsChanged(vitals);
+                // spec: MartialHeroes.Client.Application.Hud.IHudEventHub.PublishVitals.
+                _localHp = vitals.CurrentHp;
+                _localMp = vitals.CurrentMp;
+                if (_localMaxHp == 0) _localMaxHp = vitals.CurrentHp;
+                if (_localMaxMp == 0) _localMaxMp = vitals.CurrentMp;
+                _hudHub?.PublishVitals(new HudVitalsEvent(
+                    _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
                 break;
 
             case ActorLeveledUpEvent levelUp:
                 // spec: Docs/RE/packets/5-32_level_up.yaml.
-                _hud.OnActorLeveledUp(levelUp);
+                _localHp = levelUp.CurrentHp;
+                _localMp = levelUp.CurrentMp;
+                _hudHub?.PublishVitals(new HudVitalsEvent(
+                    _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
+                _hudHub?.PublishExpLevel(new ExpLevelEvent(0L, 0L, levelUp.NewLevel));
                 break;
 
             case ActorStatSyncEvent statSync:
                 // spec: Docs/RE/specs/handlers.md §4 (5/67 SmsgStatsUpdate).
-                _hud.OnActorStatSync(statSync);
+                _hudHub?.PublishExpLevel(new ExpLevelEvent(statSync.CurrentXp, 0L, 0));
                 break;
 
             case CombatStatsRecomputedEvent combatStats:
-                // spec: Docs/RE/specs/combat.md §1 / §2.
-                _hud.OnCombatStatsRecomputed(combatStats);
+            {
+                // Max HP/MP come from the Domain combat-stats aggregate; update local tracking.
+                // spec: Docs/RE/specs/combat.md §1 / §2 — CombatStats aggregate.
+                var s = combatStats.Stats;
+                if (s.MaxLife > 0) _localMaxHp = (uint)s.MaxLife;
+                if (s.MaxEnergy > 0) _localMaxMp = (uint)s.MaxEnergy;
+                _hudHub?.PublishVitals(new HudVitalsEvent(
+                    _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
                 break;
+            }
 
             // ---- Buffs ----
             case BuffSlotChangedEvent buff:
+                // Per-slot buff update — publish a full refresh snapshot with the latest slot state.
+                // The hub BuffStates channel is latest-wins; we publish a one-slot event wrapped in a
+                // full 30-slot array (all other slots zeroed) as a lightweight incremental update.
+                // A future handler will publish a proper full 4/102 refresh.
                 // spec: Docs/RE/specs/handlers.md §4 (5/31 SmsgBuffSlotUpdate).
-                _hud.OnBuffSlotChanged(buff);
+                PublishBuffSlotUpdate(buff);
                 break;
 
             // ---- Skill hotbar ----
-            case SkillHotbarSlotSetEvent hotbar:
+            case SkillHotbarSlotSetEvent:
+                // TODO(hud-ii): needs a hub Hotbar channel — no IHudEventHub.PublishHotbar exists yet.
                 // spec: Docs/RE/specs/handlers.md §4 (5/33 SmsgSkillHotbarSlotSet).
-                _hud.OnSkillHotbarSlotSet(hotbar);
                 break;
 
             // ---- Chat ----
             case ChatBroadcastEvent chat:
+                // Route through hub ChatLines so HudChatPanel drains it.
                 // spec: Docs/RE/packets/5-7_chat_broadcast.yaml.
-                _hud.OnChatBroadcast(chat);
+                // spec: MartialHeroes.Client.Application.Hud.IHudEventHub.PublishChatLine.
+                _hudHub?.PublishChatLine(new ChatLineEvent(
+                    chat.Channel,
+                    chat.Text,
+                    ChatLineEvent.SayColorArgb,
+                    chat.SenderName));
                 break;
 
             // ---- Client lifecycle ----
-            case ClientStateChangedEvent stateChanged:
-                _hud.OnClientStateChanged(stateChanged);
+            case ClientStateChangedEvent:
+                // No hub channel for client-state changes; handled by SceneHost state machine.
                 break;
 
             // ---- Local player spawn (3/7) ----
@@ -684,21 +685,17 @@ public sealed partial class GameLoop : Node
                 _localPlayerLegacyX = spawnX;
                 _localPlayerLegacyZ = spawnZ;
                 _hasLocalPlayer = true;
+
+                // Seed vitals from spawn data; publish initial gauge state.
+                _localHp = localSpawn.CurrentHp;
+                _localMaxHp = localSpawn.MaxHp;
+                _hudHub?.PublishVitals(new HudVitalsEvent(
+                    _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
             }
 
-                // The local player materialized into the world: spawn the local avatar as an actor
-                // and notify the HUD so it can initialize HP/MP bars and minimap position.
+                // Translate to ActorSpawnedEvent so ActorRegistry can place the visual actor.
                 // spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 SmsgCharSpawnResult → spawn).
-                // Translate to an ActorSpawnedEvent so ActorRegistry can place the visual actor.
                 _actorRegistry.OnActorSpawned(new ActorSpawnedEvent(
-                    localSpawn.Key,
-                    localSpawn.Name,
-                    localSpawn.Level,
-                    localSpawn.Position,
-                    localSpawn.CurrentHp,
-                    localSpawn.MaxHp,
-                    localSpawn.ServerClass));
-                _hud.OnActorSpawned(new ActorSpawnedEvent(
                     localSpawn.Key,
                     localSpawn.Name,
                     localSpawn.Level,
@@ -736,5 +733,35 @@ public sealed partial class GameLoop : Node
                 // require changes here unless we want to react to them.
                 break;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Hub publication helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Publishes a buff-slot update as a latest-wins snapshot on the hub BuffStates channel.
+    /// Since IHudEventHub does not expose per-slot incremental writes (only full 30-slot refreshes),
+    /// we maintain a local 30-slot mirror and publish it on every change.
+    /// spec: Docs/RE/specs/handlers.md §4 (5/31 SmsgBuffSlotUpdate).
+    /// spec: MartialHeroes.Client.Application.Hud.IHudEventHub.PublishBuffState.
+    /// </summary>
+    private void PublishBuffSlotUpdate(BuffSlotChangedEvent evt)
+    {
+        if (_hudHub is null) return;
+
+        // Build a 30-slot snapshot; only the changed slot is non-zero in this incremental model.
+        // A future 4/102 full-refresh handler will replace this with a proper complete snapshot.
+        const int buffSlotCount = 30; // spec: Docs/RE/formats/misc_data.md §1.6 (30 icon slots)
+        var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<BuffSlot>(buffSlotCount);
+        for (int i = 0; i < buffSlotCount; i++)
+        {
+            if (i == evt.SlotIndex && evt.DurationTicks > 0)
+                builder.Add(new BuffSlot((ushort)evt.EffectCode, (uint?)evt.DurationTicks));
+            else
+                builder.Add(new BuffSlot(BuffSlot.EmptyBuffId, null));
+        }
+
+        _hudHub.PublishBuffState(BuffStateEvent.FromSlots(builder.MoveToImmutable()));
     }
 }

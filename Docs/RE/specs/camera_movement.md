@@ -31,6 +31,16 @@ conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = Us
 >    highlight texture manager." It is actually a **ground click-marker effect (a user-effect spawn,
 >    effect id 380000000)** at the click XZ with Y from the terrain sampler, after clearing the prior
 >    marker. Corrected in §B.2 step 4 and §B.4.
+>
+> **C14 re-confirmation (world-camera follow-up).** The fixed-radius orbit follow math in
+> §A.4 / §A.5 was independently **re-confirmed [confirmed]** by a later gentle re-walk: eye-offset
+> seed **(−750, 0, +500)** (radius ≈ **901.39**), focus-Z **−40** (Third), default pitch **−π/6**
+> clamped **[−90°, −12°]**, yaw seed **0** (Third) — no change to the numbers, only added confidence.
+> (The follow-up note also observed a 60° FOV on the projection it sampled; per §A.7 the in-world
+> gameplay FOV is **65°** and the 60° belongs to the separate generic projection initializer, so the
+> authoritative gameplay value stays **65°** — see §A.7. Not load-bearing for Godot.) The same pass added **§A.4.1** (how the follow target is *selected*
+> — a network-staged target/selection slot) and a one-line note that the world camera carries **no**
+> brightness/gamma input (near-black world is an environment/ambient matter, not a camera one).
 
 > Neutral, rewritten behavioural specification. No legacy symbols, no addresses,
 > no pseudo-code, no decompiler identifiers. Describes the *observed behaviour*,
@@ -207,7 +217,10 @@ only mouse rotate gesture.** (CODE-CONFIRMED)
 
 Each enabled manipulator runs this skeleton per frame (Third/First/Static/Gamble):
 
-1. Resolve the follow target (the local player), lazily cached once per mode.
+1. Resolve the follow target (the local player), lazily cached once per mode. The *identity* of
+   that target is not hard-wired — it is the actor the world handler published from the
+   network-staged target/selection slot when the world scene was built (see §A.4.1). With no
+   actor staged in that slot the camera resolves nothing and follows nothing. [confirmed]
 2. Read the elapsed time since the previous frame in milliseconds and convert to
    seconds by multiplying by **1e-3**; a secondary smoothing path for the distance
    integrator uses **1e-4**. (CODE-CONFIRMED)
@@ -228,6 +241,59 @@ is **never scaled by any distance scalar**; its magnitude is the constant follow
 radius. There is **no minimum or maximum distance clamp and no zoom-changes-radius
 behaviour.** "Zoom" keys feed the elevation/orbit-step integrator, changing the
 vertical angle of the orbit, not the distance to the player. (CODE-CONFIRMED)
+
+### A.4.1 Follow-target binding — how the camera's target actor is selected
+
+The follow math above (§A.4 / §A.5) describes *how* the eye orbits a focus point; this subsection
+describes *which actor* becomes that focus. The world camera does **not** pick the local player by a
+hard-coded handle — it follows whatever actor is staged in a small **target/selection slot**, which
+the world handler resolves to an actor object and publishes as the camera's selection at scene build.
+
+**The target/selection slot (neutral description).** The client keeps a small table of fixed-stride
+target/selection slots in static data. Each slot holds a 32-bit actor **id** at its start; an active
+target slot is paired with a 16-byte (four-float) **world position** (XYZ plus a flag/pad). One
+slot is the active world/camera target: it carries the id of the actor the camera should frame, and
+the paired position carries that actor's last known world XYZ. A slot id value of `0xFF` is treated
+as 'no entry' and is ignored by the slot setters. [confirmed]
+
+**Where the world handler binds the camera target.** When the in-game scene is set up (the same path
+that builds the world scene graph and the five manipulators), the handler reads the active target
+slot's id. If it is non-zero it resolves that id through the actor manager to a live actor object,
+copies the three position floats from the paired 16-byte target position into a local vector, and
+calls the publish-selection routine with that actor plus position. The publish routine writes the
+selection into the world window's target block and, when its flag is set, copies the position into
+the global target position (otherwise it zeroes it). This is the single site that 'sets the local
+actor as the camera target' at world entry. [confirmed]
+
+**Where the id is staged (network).** The actor id reaches that slot from the server world-state
+snapshot — the S2C game-state-tick / world-snapshot handler (the `SmsgGameStateTick` family). On
+each snapshot that handler sweeps both the actor mirror table and the target/selection table,
+prunes stale entries, and — when the active target slot id is non-zero — runs the target-update
+path on the world/actor manager and refreshes the paired target position. So the camera's follow
+target is **(re-)bound from the server world-state packet** on entry and refreshed on each snapshot.
+With nothing ever staged (the port never receiving/synthesising a world-state tick that names a
+local actor), the slot stays empty, the bind resolves nothing, and the actor count stays 0 — the
+port's observed 'Actors: 0, camera frames nothing' symptom. [confirmed]
+
+> The **per-snapshot re-bind** (the slot being refreshed on every world-state tick rather than only
+> once at entry) is a runtime detail the dirty-room note flags as derived from static control-flow
+> only — treat the once-per-snapshot refresh cadence as **[static-hypothesis]** pending a live
+> debugger confirmation; the *existence* of the entry bind and the slot→actor→camera path is
+> **[confirmed]**.
+
+**Brightness is not a camera input.** The world camera object is pure projection + orbit geometry
+(FOV / aspect / near / far / the off-centre perspective matrix and the fixed-radius orbit transform).
+It carries **no** brightness or gamma input on the camera or any manipulator. A near-black world is
+therefore an **ambient / environment-lighting** matter, to be fixed independently of the follow
+camera (see `specs/environment.md §6.2b`; the `DISPLAY_BASE_BRIGHT_MULTI = 1.05` display factor is
+neutral and is **not** the cause). [confirmed]
+
+**Port guidance.** To render the world the port must do *both*: (a) drive the scene state to the
+in-game value so the world handler is constructed (see `specs/client_workflow.md §4` / §5.4), **and**
+(b) spawn and register a local player actor into the camera's follow-target slot (id + position)
+before/while the world scene builds. State alone is not enough — with no actor in the slot the camera
+frames nothing and the actor count stays 0. Fix near-black on the environment/ambient side, not the
+camera side.
 
 ### Shared smoothing / clamp constants (CODE-CONFIRMED as code immediates; INFERRED as runtime feel)
 
@@ -786,7 +852,15 @@ mode and OPTION_VIEW_CHAR persistence documented, Select camera model re-correct
 enter-world camera placement clarified.
 
 Re-verified **2026-06-16** against build anchor **`263bd994`** (CAMPAIGN 10, Block F,
-lane F10 static re-walk). Surgical corrections applied this pass: (1) §A.7 FOV
+lane F10 static re-walk). Extended **2026-06-16 (CAMPAIGN 14, world-render lane)** with the
+camera follow-target binding (§A.4 step 1 + new §A.4.1): the follow target is the actor staged in a
+network-fed target/selection slot, resolved by the world handler and published as the camera
+selection at scene build; the slot id is staged from the S2C game-state-tick world-snapshot family
+and (per static control-flow) re-bound each snapshot (the per-snapshot cadence carried as
+[static-hypothesis], the bind itself [confirmed]). The same pass added the one-line note that the
+world camera carries no brightness/gamma input (near-black is an environment/ambient matter — see
+`environment.md §6.2b`) and re-confirmed the §A.4/§A.5 fixed-radius follow orbit with no numeric
+change. World scene-state entry itself is owned by `specs/client_workflow.md §4/§5.4`. Surgical corrections applied this pass: (1) §A.7 FOV
 **internal storage is the full vertical FOV ÷ aspect, NOT half-angle** — the `/2` only
 appears later in the `tan(fovY/2)` frustum derivation (conflict reconciled); (2) §B.2/§B.4
 the click ground-marker is a **user-effect spawn (effect id 380000000)** at the click XZ

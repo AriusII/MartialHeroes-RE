@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 4-byte body size is control-flow CONFIRMED from the
+# stall-enter send path. capture_verified: false.
+
+name: CmsgStallEnter
+opcode: 0x20038           # major 2 (GameAction), minor 56 -> (2 << 16) | 56
+direction: C2S
+size: 4                   # fixed 4-byte body built by the stall-enter sender
+spec: packets/2-56_stall_enter.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Client request to enter / open a selected stall from the personal-stall market list. A fixed 4-byte body carrying the selected stall row's stored id. Issued by the StallListPanel's ENTER action and the row double-click, with the id taken from the selected row record.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 4.
+# CONTROL-FLOW CONFIRMED: both the ENTER button and the row double-click set the panel's selected-id
+# field from the chosen row's stored id, then the sender appends exactly 4 bytes after the frame header.
+fields:
+  - { name: StallId, type: u32 }         # 0x00  selected stall row id (copied from the selected row record)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 4-byte send) and that the single field is the selected
+  row's stored id; CAPTURE-UNVERIFIED in exact VALUE meaning.
+
+    0x00 (4B) StallId : the id of the selected stall row, as a u32. It is the per-row identifier stored
+                        at the front of the matching list record (the same id refilled by 4/74). Whether
+                        this id is the stall's own primary key or the owner actor id is capture-pending;
+                        the row record carries it at its leading word and the panel copies it verbatim
+                        into the send.
+
+  PANEL PATH (engineer's mental model): selecting a row stores its id into the panel's selected-id
+  field; the ENTER action (and a row double-click) then sends this 4-byte body and leaves the list view
+  to open the stall-contents view. An ENTER with no selection plays a "nothing selected" notice and
+  sends nothing.
+
+  RELATIONSHIP: the list is requested/searched via C2S 2/74 CmsgStallListRequest
+  (packets/2-74_stall_list_request.yaml) and refilled by S2C 4/74 SmsgStallListRefill
+  (packets/4-74_stall_list_refill.yaml). The stall-contents view that opens after entering belongs to a
+  separate panel and is out of scope here.
+
+  UNKNOWNS to resolve with a stall-enter capture (body size is settled at 4; these are VALUE questions):
+    - whether StallId is the stall primary key or the owner actor id;
+    - the server response that opens the stall-contents view.
+
+  UNBLOCKS: the Client.Application stall-enter use-case (send-only).

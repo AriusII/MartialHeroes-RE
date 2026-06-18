@@ -1,0 +1,42 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: field VALUE meanings are static inferences. capture_verified: false.
+
+name: SmsgNpcBuyOrAcquireAck
+opcode: 0x40013           # major 4 (Response), minor 19 -> (4 << 16) | 19
+direction: S2C
+size: 56                  # 0x38-byte handler read
+spec: packets/4-19_npc_buy_or_acquire_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Acknowledgement to the NPC buy/acquire request (C2S 2/19, and the storefront 2/115). On success the handler applies the acquired item to the NPC shop panel; on the alternate result it formats item duration / time-remaining notices from preset string templates. The notice text is also surfaced through the global notice sink (ErrorPanel slot 168).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 56.
+fields:
+  - { name: Record,    type: "bytes[16]" }   # 0x00  acquired-item record applied to the panel on success
+  - { name: Result,    type: u8 }            # 0x10  1 = apply acquired item; 0 = failure branch
+  - { name: SubFlag,   type: u8 }            # 0x11  on failure, selects the duration/time-remaining text path
+  - { name: Trailer,   type: "bytes[38]" }   # 0x12  remainder of the 0x38 read (time/duration fields)
+
+notes: |
+  Static only; no capture this pass. The handler reads a fixed 0x38 (56)-byte block. The 56-byte
+  read size and the consumed offsets (Result @0x10, SubFlag @0x11) are control-flow-confirmed; the
+  field VALUE meanings are capture-pending.
+
+    0x00 (16B) Record  : the acquired-item record passed to the NPC-panel applier when Result == 1.
+    0x10 (1B)  Result  : 1 = apply the acquired item to the panel; 0 = failure branch.
+    0x11 (1B)  SubFlag : on failure with this flag set, the handler formats item duration /
+                         time-remaining notices (the 36003..36028 string range) using a per-NPC
+                         product script record.
+    0x12 (38B) Trailer : the rest of the 0x38 read. The handler consumes time/duration fields out of
+                         this region via a script lookup; their exact positions are capture-pending.
+                         Modelled as one reserved blob so the struct totals the 56-byte read.
+
+  RELATIONSHIP: reply to C2S 2/19 CmsgNpcBuyOrAcquire (and the storefront 2/115 CmsgShopBuy). The
+  vendor MONEY refresh arrives separately on 4/115; the item-shop purchase result on 4/113.
+
+  UNKNOWNS to resolve with a capture of an NPC buy/acquire ack:
+    - the layout of the time/duration fields inside Trailer;
+    - whether the trailing bytes beyond the consumed fields carry meaningful data on the wire.
+
+  UNBLOCKS: Client.Application NpcBuyOrAcquire ack handling.
