@@ -74,11 +74,6 @@ public sealed partial class LoginWindow : Control
     // Bottom curtain base Y (= 326). spec §2.3 "bottom Y = offset + 326".
     private const int CurtainBotBaseY = 326; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
 
-    // Dialog fade ±64/frame. spec: frontend_layout_tables.md §2.
-    private const int DialogFadeStep = LoginLayout.DialogFadeStep; // 64
-    private const int DialogAlphaVisible = LoginLayout.DialogAlphaVisible; // 255
-    private const int DialogAlphaHidden = LoginLayout.DialogAlphaHidden; // 0
-
     // -------------------------------------------------------------------------
     // Signals (same contract as old LoginScreen)
     // -------------------------------------------------------------------------
@@ -115,6 +110,11 @@ public sealed partial class LoginWindow : Control
 
     // flowSubState: single field, init=1. spec §2.2.
     private int _flowSubState;
+
+    // Server-list re-fetch throttle (action 105): the IDA handler skips the re-fetch while a fetch is
+    // already in flight (sub-state 35) or within 10 s of the last one. spec §2.2.
+    private const ulong ServerFetchThrottleMs = 10000;
+    private ulong _lastServerFetchMs;
 
     // Curtain state.
     private float _curtainAcc;
@@ -162,11 +162,12 @@ public sealed partial class LoginWindow : Control
     private Control? _serverListStrip;
     private Control? _serverListStripDeco;
 
-    // Re-fetch popups (msg 4023/4024, OK action 113/114 → restart fetch). spec §2.2.
+    // Re-fetch confirm popups (msg 4023/4024), built init-hidden exactly as the IDA login build
+    // creates them. Their OK buttons fire action 113/114 (→ hide + restart server-list fetch). The
+    // SHOW trigger lives in the server-list fetch-result path (network layer, not yet ported), so
+    // offline they remain hidden — faithful to the real client offline. spec §2.2.
     private Control? _quitModal;
     private Control? _quitModal2;
-    private float _quitModalAlpha;
-    private bool _quitModalVisible;
 
     // Quit-confirm ExitPanel (msg 2007), opened by action 102/112; "yes" (101) quits. spec §2.2.
     private Control? _exitConfirm;
@@ -266,7 +267,6 @@ public sealed partial class LoginWindow : Control
     public override void _Process(double delta)
     {
         if (_flowSubState == 2) TickCurtain();
-        if (_quitModal is not null) TickQuitModalFade();
     }
 
     public override void _Notification(int what)
@@ -958,9 +958,6 @@ public sealed partial class LoginWindow : Control
 
         _exitConfirm = BuildExitConfirmPanel();
         AddChild(_exitConfirm);
-
-        _quitModalAlpha = 0f;
-        _quitModalVisible = false;
     }
 
     // Quit-confirm ExitPanel (msg 2007): chrome + prompt + Yes(101 → quit) + No(51 → close).
@@ -1092,37 +1089,10 @@ public sealed partial class LoginWindow : Control
         return panel;
     }
 
-    private void ShowQuitModal()
-    {
-        _quitModalVisible = true;
-        if (_quitModal is not null) _quitModal.Visible = true;
-        if (_quitModal2 is not null) _quitModal2.Visible = false;
-    }
-
     private void HideQuitModal()
     {
-        _quitModalVisible = false;
-        if (_quitModal is not null)
-        {
-            _quitModalAlpha = 0f;
-            _quitModal.Visible = false;
-        }
-
+        if (_quitModal is not null) _quitModal.Visible = false;
         if (_quitModal2 is not null) _quitModal2.Visible = false;
-    }
-
-    private void TickQuitModalFade()
-    {
-        if (_quitModal is null) return;
-        if (_quitModalVisible)
-            _quitModalAlpha = Math.Min(_quitModalAlpha + DialogFadeStep, DialogAlphaVisible);
-        else
-        {
-            _quitModalAlpha = Math.Max(_quitModalAlpha - DialogFadeStep, DialogAlphaHidden);
-            if (_quitModalAlpha <= 0) _quitModal.Visible = false;
-        }
-
-        _quitModal.Modulate = new Color(1f, 1f, 1f, _quitModalAlpha / 255f);
     }
 
     // -------------------------------------------------------------------------
@@ -1154,8 +1124,15 @@ public sealed partial class LoginWindow : Control
                 ShowExitConfirm();
                 break;
 
-            case 105: // throttled restart of the server-list fetch (→ 34). spec §2.2.
-                RestartServerFetch();
+            case 105: // server-list re-fetch — throttled to 1/10 s, skipped while a fetch is in flight
+                // (sub-state 35). spec §2.2.
+                if (_flowSubState != 35
+                    && global::Godot.Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
+                {
+                    _lastServerFetchMs = global::Godot.Time.GetTicksMsec();
+                    RestartServerFetch();
+                }
+
                 break;
 
             case LoginLayout.ActionSaveId: // 104 — save-ID toggle (handled by checkbox).
@@ -1242,11 +1219,6 @@ public sealed partial class LoginWindow : Control
     {
         DoEnsureServerSelect();
         RunState(33); // ApplyVisibility(33) shows _serverListRoot — the sole gate. spec §2.2.
-    }
-
-    private void DoCloseServerSelect()
-    {
-        RunState(4); // ApplyVisibility(4) hides _serverListRoot — the sole gate. spec §2.2.
     }
 
     private void DoEnsureServerSelect()

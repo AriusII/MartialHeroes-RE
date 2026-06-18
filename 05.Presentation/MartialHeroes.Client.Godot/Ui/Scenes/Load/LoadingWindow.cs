@@ -69,10 +69,8 @@ public sealed partial class LoadingWindow : Control
     //   Y span −363..−140 → 223 px tall.
     // spec: Docs/RE/specs/frontend_layout_tables.md §5.
     private const float TrackDesignX1 = -499f; // left edge.  spec §5.
-    private const float TrackDesignX2 = -170f; // right edge. spec §5.
     private const float TrackDesignY1 = -363f; // bottom (in centre-origin, +Y up). spec §5.
     private const float TrackDesignY2 = -140f; // top.        spec §5.
-    private const float TrackDesignWidth = TrackDesignX2 - TrackDesignX1; // 329 px. spec §5.
     private const float TrackDesignHeight = TrackDesignY2 - TrackDesignY1; // 223 px. spec §5.
 
     // Centre-origin → canvas (top-left +Y down) for track top-left corner:

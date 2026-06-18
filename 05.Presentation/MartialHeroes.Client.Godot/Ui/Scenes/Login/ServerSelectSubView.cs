@@ -287,7 +287,6 @@ public sealed partial class ServerSelectSubView : Control
         // spec: §11.4 "pager buttons B src(596,985,47,18); actions 115..124". CODE-CONFIRMED.
         for (int i = 0; i < PagerCount; i++)
         {
-            // spec: §11.2a "ServerRowBtnX0=13, ServerRowBtnXStep=47". CODE-CONFIRMED.
             int x = 13 + i * 47; // spec §11.2a. CODE-CONFIRMED.
 
             Texture2D? normal = _atlas.SliceByPath(AtlasB, PagerSrcX, PagerSrcY, PagerW, PagerH);

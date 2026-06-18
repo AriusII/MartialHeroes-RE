@@ -64,13 +64,6 @@ public static class LoginLayout
     // spec §11.1 "InventWindow.dds". CODE-CONFIRMED.
     public const string AtlasInventWindow = "data/ui/inventwindow.dds";
 
-    // D — server-list parchment scroll panel + channel-selector tab blocks.
-    // Format: DXT2. spec §11.1 "loginwindow_02.dds, 1024×1024, DXT2". CODE-CONFIRMED.
-    public const string AtlasLoginWindow02 = "data/ui/loginwindow_02.dds";
-
-    // Cursor atlas. spec §11.1 "data/cursor/stand.dds, 32×32, DXT2". CODE-CONFIRMED.
-    public const string AtlasCursor = "data/cursor/stand.dds";
-
     // =========================================================================
     // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
     // Source: frontend_scenes.md §11.2a.
@@ -113,41 +106,12 @@ public static class LoginLayout
     public static readonly WidgetRect BackgroundPanel = new(0, 0, 1024, 398, 0, 0);
 
     // =========================================================================
-    // §11.2c Decoration sprites + server-row select buttons. CODE-CONFIRMED.
-    // NOTE: SmallBadges, ServerRow* family, ServerRowActionBase, LargeActionBtn/Hover/FacePlate
-    //   are RECOVERED BUT NOT YET WIRED in the current LoginScreen. Retained as IDA-confirmed
-    //   interop facts for future widget work.
+    // §11.2c Decoration sprites. CODE-CONFIRMED.
     // =========================================================================
 
     // B@(0,0,60,39) src(500,786) — 3x small badges / arrows.
     // spec §11.2c "3 x small badges / arrows". CODE-CONFIRMED.
     public static readonly WidgetRect SmallBadges = new(0, 0, 60, 39, 500, 786);
-
-    // B server-row select buttons: 8 × (47×18) starting at X=13, Y=66, X-step=+47.
-    // NORMAL src (596,985), HOVER/PRESSED src (643,985). Actions 115..122.
-    // spec §11.2c "8 x server-row select". CODE-CONFIRMED.
-    public const int ServerRowBtnX0 = 13; // starting X
-    public const int ServerRowBtnY = 66; // Y for all 8 rows
-    public const int ServerRowBtnW = 47; // width
-    public const int ServerRowBtnH = 18; // height
-    public const int ServerRowBtnXStep = 47; // X step between rows
-    public const int ServerRowBtnNormalSrcX = 596; // NORMAL src X
-    public const int ServerRowBtnNormalSrcY = 985; // NORMAL src Y
-    public const int ServerRowBtnHoverSrcX = 643; // HOVER/PRESSED src X
-    public const int ServerRowBtnHoverSrcY = 985; // HOVER/PRESSED src Y
-    public const int ServerRowActionBase = 115; // action id for first row
-
-    // Large action button (the "확인" confirm/gold button in the upper right).
-    // A@(456,-3,111,38) NORMAL src(792,398), HOVER/PRESSED src(602,416).
-    // spec §11.2c "Large action button". CODE-CONFIRMED.
-    public static readonly WidgetRect LargeActionBtn = new(456, -3, 111, 38, 792, 398);
-    public const int LargeActionHoverSrcX = 602; // HOVER/PRESSED src X
-    public const int LargeActionHoverSrcY = 416; // HOVER/PRESSED src Y
-
-    // Large action button caption face plate.
-    // A@(407,-3,210,70) src(743,398) — image (gold plate baked art).
-    // spec §11.2c "Its caption/face image". CODE-CONFIRMED.
-    public static readonly WidgetRect LargeActionFacePlate = new(407, -3, 210, 70, 743, 398);
 
     // =========================================================================
     // §11.2d Notice / error dialogs. CODE-CONFIRMED.
@@ -233,8 +197,6 @@ public static class LoginLayout
     public const string EditFieldFrameAtlas = AtlasLoginSlice1; // A — spec §11.2e atlas correction. CODE-CONFIRMED.
     public const int EditFieldFrameSrcX = 615; // shared source U in atlas A. spec §11.2e. CODE-CONFIRMED.
     public const int EditFieldFrameSrcY = 404; // shared source V in atlas A. spec §11.2e. CODE-CONFIRMED.
-    public const int EditFieldFrameW = 102; // spec §11.2e. CODE-CONFIRMED.
-    public const int EditFieldFrameH = 13; // spec §11.2e. CODE-CONFIRMED.
 
     // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 6. action 109.
     // NOTE: SrcX/SrcY on this WidgetRect are intentionally set to the shared edit-field frame source,
@@ -242,7 +204,6 @@ public static class LoginLayout
     // spec §11.2e "ID input field atlas correction". CODE-CONFIRMED.
     // NOTE: §1.3 table has TWO columns: "IME composition slot = 16" and "Max length = 6". The cap is 6.
     public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
-    public const int ActionFocusId = 109; // spec §1.2. CODE-CONFIRMED.
 
     public const int
         IdMaxLength =
@@ -252,7 +213,6 @@ public static class LoginLayout
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
     // NOTE: §1.3 table has TWO columns: "IME composition slot = 12" and "Max length = 129". The cap is 129.
     public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
-    public const int ActionFocusPw = 110; // spec §1.2. CODE-CONFIRMED.
 
     public const int
         PwMaxLength =
@@ -297,13 +257,6 @@ public static class LoginLayout
     // §11.2f Trailing controls + quit/error dialogs. CODE-CONFIRMED.
     // Source: frontend_scenes.md §11.2.
     // =========================================================================
-
-    // Option-tabs recovered panel container — dst(356,531,313,132); hidden at rest by LoginWindow.
-    // spec: frontend_scenes.md §11.2. CODE-CONFIRMED.
-    public const int OptionTabsPanelX = 356;
-    public const int OptionTabsPanelY = 531;
-    public const int OptionTabsPanelW = 313;
-    public const int OptionTabsPanelH = 132;
 
     // Option/tab button 1 — B@(40,82,110,38). NORMAL src(520,492). HOVER src(635,492). action 111.
     // spec: frontend_scenes.md §11.2 action 111. CODE-CONFIRMED.
@@ -373,7 +326,6 @@ public static class LoginLayout
     public const int PinResetHSrcY = 88; // hover.  spec §11.3d.
     public const int PinResetPSrcX = 663;
     public const int PinResetPSrcY = 48; // pressed.spec §11.3d.
-    public const int PinTagReset = 11; // spec §11.3d. CODE-CONFIRMED.
 
     // OK button (tag 12): panel-local (90,290,154,58). spec §11.3d. CODE-CONFIRMED.
     // password.dds src: normal(330,0), hover(330,116), pressed(330,58).
@@ -387,7 +339,6 @@ public static class LoginLayout
     public const int PinOkHSrcY = 116; // hover.  spec §11.3d.
     public const int PinOkPSrcX = 330;
     public const int PinOkPSrcY = 58; // pressed.spec §11.3d.
-    public const int PinTagOk = 12; // spec §11.3d. CODE-CONFIRMED.
 
     // Cancel button (tag 13): panel-local (90,350,154,58). spec §11.3d. CODE-CONFIRMED.
     // password.dds src: normal(486,0), hover(486,116), pressed(486,58).
@@ -401,59 +352,9 @@ public static class LoginLayout
     public const int PinCancelHSrcY = 116; // hover.  spec §11.3d.
     public const int PinCancelPSrcX = 486;
     public const int PinCancelPSrcY = 58; // pressed.spec §11.3d.
-    public const int PinTagCancel = 13; // spec §11.3d. CODE-CONFIRMED.
 
     // PIN capacity. spec §1.4a / login_flow.md §4.2. RUNTIME-CONFIRMED.
     public const int PinMaxLength = 4;
-
-    // =========================================================================
-    // §11.5b Char-select slot tab buttons (from loginwindow.dds). CODE-CONFIRMED.
-    // NOTE: CharSlot1/2/3Tab + CharCreate/Delete/Enter are RECOVERED BUT NOT YET WIRED from
-    //   LoginLayout. The active char-select screen uses CharacterSelectLayout for these.
-    //   Retained here as IDA-confirmed interop facts for cross-reference.
-    // =========================================================================
-
-    // Slot 1 tab — (67,17,113,40). N src(675,795). P src(483,883). action 1.
-    public static readonly WidgetRect CharSlot1Tab = new(67, 17, 113, 40, 675, 795);
-    public const int CharSlot1PressedSrcX = 483;
-    public const int CharSlot1PressedSrcY = 883;
-    public const int ActionCharSlot1 = 1;
-
-    // Slot 2 tab — (232,7,113,40). N src(640,742). P src(483,923). action 2.
-    public static readonly WidgetRect CharSlot2Tab = new(232, 7, 113, 40, 640, 742);
-    public const int CharSlot2PressedSrcX = 483;
-    public const int CharSlot2PressedSrcY = 923;
-    public const int ActionCharSlot2 = 2;
-
-    // Slot 3 tab — (393,17,113,40). N src(625,691). P src(483,963). action 3.
-    public static readonly WidgetRect CharSlot3Tab = new(393, 17, 113, 40, 625, 691);
-    public const int CharSlot3PressedSrcX = 483;
-    public const int CharSlot3PressedSrcY = 963;
-    public const int ActionCharSlot3 = 3;
-
-    // =========================================================================
-    // §11.5c Char-select Create/Delete/Enter buttons (from loginwindow.dds). CODE-CONFIRMED.
-    // NOTE: RECOVERED BUT NOT YET WIRED from LoginLayout — see §11.5b note above.
-    // All buttons are 59×20.
-    // =========================================================================
-
-    // Create — (130,112,59,20). N src(0,1004). P src(59,1004). action 4.
-    public static readonly WidgetRect CharCreateBtn = new(130, 112, 59, 20, 0, 1004);
-    public const int CharCreatePressedSrcX = 59;
-    public const int CharCreatePressedSrcY = 1004;
-    public const int ActionCharCreate = 4; // spec §4 / §11.5c. CODE-CONFIRMED.
-
-    // Delete — (42,112,59,20). N src(118,1004). P src(177,1004). action 5.
-    public static readonly WidgetRect CharDeleteBtn = new(42, 112, 59, 20, 118, 1004);
-    public const int CharDeletePressedSrcX = 177;
-    public const int CharDeletePressedSrcY = 1004;
-    public const int ActionCharDelete = 5; // spec §5 / §11.5c. CODE-CONFIRMED.
-
-    // Enter — (112,112,59,20). N src(236,1004). P src(295,1004). action 6.
-    public static readonly WidgetRect CharEnterBtn = new(112, 112, 59, 20, 236, 1004);
-    public const int CharEnterPressedSrcX = 295;
-    public const int CharEnterPressedSrcY = 1004;
-    public const int ActionCharEnter = 6; // spec §7 / §11.5c. CODE-CONFIRMED.
 
     // =========================================================================
     // msg.xdb caption ids (§1.9 / §9). CODE-CONFIRMED ids; captions VFS-only.
@@ -513,17 +414,6 @@ public static class LoginLayout
     public const string SaveIdNullSentinel = "(null)"; // sentinel = no saved id. spec §1.6. CODE-CONFIRMED.
 
     // =========================================================================
-    // Dialog fade-in / fade-out alpha ramp (§11.2g, CODE-CONFIRMED).
-    // The dialog overlays ramp ±64 alpha per frame toward 255 (show) or 0 (hide).
-    // At 60 fps, 64/frame means 4 frames to full opacity — ≈67 ms.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.2g. CODE-CONFIRMED.
-    // =========================================================================
-
-    public const int DialogFadeStep = 64; // alpha step per frame. spec §11.2g. CODE-CONFIRMED.
-    public const int DialogAlphaVisible = 255; // target alpha when shown. spec §11.2g.
-    public const int DialogAlphaHidden = 0; // target alpha when hidden. spec §11.2g.
-
-    // =========================================================================
     // Validation thresholds. spec §1.4. CODE-CONFIRMED.
     // =========================================================================
 
@@ -531,14 +421,7 @@ public static class LoginLayout
     public const int MinPwLength = 1; // PW length < 1 → msg 4026. spec §1.4. CODE-CONFIRMED.
 
     // =========================================================================
-    // Font pixel heights (approximate — Korean system font substitution).
-    // The legacy client used DotumChe 12px / 16px. We use the same pt sizes.
-    // =========================================================================
-
-    public const int FontBodyHeight = 12; // body / caption labels
-    public const int FontTitleHeight = 16; // section title
-    public const int FontLabelHeight = 12; // button captions
-
     // TextBox render height override (spec says 13px but Godot LineEdit needs ≥18px to render).
+    // =========================================================================
     public const int TextboxRenderH = 22;
 }
