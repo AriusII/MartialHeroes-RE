@@ -13,8 +13,7 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/re_intent_primer.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_render_state_primer.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/prompt_primer.py\"", "timeout": 6 }
         ]
       }
     ],
@@ -22,23 +21,20 @@
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/clean_room_guard.py\"", "timeout": 8 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/layer_dependency_guard.py\"", "timeout": 8 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect_artifacts.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/firewall_guard.py\"", "timeout": 8 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/layer_dependency_guard.py\"", "timeout": 8 }
         ]
       },
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/protect_artifacts.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/git_commit_guard.py\"", "timeout": 8 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/git_add_dirty_guard.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/firewall_guard.py\"", "timeout": 8 }
         ]
       },
       {
         "matcher": "mcp__ida__.*",
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/ida_provenance_guard.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/firewall_guard.py\"", "timeout": 6 }
         ]
       }
     ],
@@ -47,19 +43,9 @@
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cs_post_edit.py\"", "timeout": 70 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_tscn_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_namespace_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/gltf_crash_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/coordinate_convention_nudge.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_uid_nudge.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/spec_citation_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cp949_nudge.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/unsafe_alloc_nudge.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/test_after_core_edit.py\"", "timeout": 8 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/agent_md_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/skill_md_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/hook_advisory_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/settings_wiring_nudge.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/csharp_guard.py\"", "timeout": 8 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_guard.py\"", "timeout": 6 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/kit_guard.py\"", "timeout": 6 }
         ]
       },
       {
@@ -72,22 +58,21 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_loose_ends.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/memory_persist_nudge.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session_end.py\"", "timeout": 6 }
         ]
       }
     ],
     "SubagentStop": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/stop_loose_ends.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session_end.py\"", "timeout": 6 }
         ]
       }
     ],
     "PreCompact": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/memory_persist_nudge.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/session_end.py\"", "timeout": 6 }
         ]
       }
     ]

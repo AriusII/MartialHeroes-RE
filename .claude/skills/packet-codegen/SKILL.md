@@ -1,29 +1,38 @@
 ---
 name: packet-codegen
-description: Use to generate a C# packet struct skeleton from a Docs/RE/packets/*.yaml field spec. Emits a [StructLayout(LayoutKind.Sequential, Pack=1)] struct into 02.Network.Layer/MartialHeroes.Network.Protocol/, fixed byte buffers as C# [InlineArray] types, enum fields resolved to Shared.Kernel enums, and a header comment citing the source spec path. REFUSES to read anything under _dirty/ — clean-room only, never calls IDA.
-allowed-tools: Read Write Bash(dotnet build *)
+description: Use to author the clean-room wire layer from committed specs — two modes. PACKET-STRUCT generates a C# packet struct skeleton from a Docs/RE/packets/*.yaml field spec ([StructLayout(LayoutKind.Sequential, Pack=1)] into Network.Protocol, fixed byte buffers as [InlineArray], enum fields resolved to Shared.Kernel enums, header comment citing the source spec). OPCODE-CATALOG curates the authoritative Docs/RE/opcodes.md catalog (no IDA addresses) — add/curate entries (opcode + name + direction + size + packet-yaml link + status), schema-validate the table, detect duplicate opcode ids, scan for address leakage, and flag opcodes seen in captures but missing from the catalog. Both REFUSE to read anything under _dirty/ and never call IDA — clean-room only; the committed spec is the only oracle.
+allowed-tools: Read Write Bash(dotnet build *) Bash(python *)
 model: sonnet
 effort: high
 ---
 
 # packet-codegen
 
-Generate a zero-allocation C# packet struct from a committed `Docs/RE/packets/*.yaml` spec.
-This is the clean-room bridge from the documented wire layout to `Network.Protocol`: the spec
-(neutral prose/table promoted across the firewall) is the *only* input; the generated struct
-re-implements it fresh, with every magic offset traceable back to the citing spec.
+Author the clean-room wire layer from committed specs — **two modes** that share one firewall stance
+(read only `Docs/RE/` specs + the C# tree; never `_dirty/`, never IDA):
 
-**Ground-truth doctrine.** The original's wire format inside `doida.exe` (corroborated by the
-Wireshark capture) is the absolute truth; the `packets/*.yaml` spec is the **derived truth** that
-captured it across the firewall, and that spec is the *only* oracle this generator reads. The C# it
-emits is measured against the spec, never the reverse — so if a field looks wrong, the fix is in the
-spec (escalate to a spec-author), never a guess here. This skill stays clean-side and **never** reads
-`_dirty/` or calls IDA.
+- **Mode A — PACKET-STRUCT codegen:** generate a zero-allocation C# packet struct from a
+  `Docs/RE/packets/*.yaml` spec into `Network.Protocol`.
+- **Mode B — OPCODE-CATALOG curation:** maintain `Docs/RE/opcodes.md`, the authoritative opcode table
+  (no addresses), and validate it.
 
-> CLEAN ROOM. This skill reads ONLY `Docs/RE/packets/*.yaml` (and `Docs/RE/opcodes.md`,
-> `Docs/RE/structs/*.md`, `Docs/RE/specs/*.md` for context) plus the C# source tree. It is
-> FORBIDDEN to read any path containing `_dirty/` and it never calls IDA. If a spec field is
-> missing or ambiguous, ask a spec-author to fix the YAML — do NOT consult the decompiler.
+**Ground-truth doctrine.** The original's wire format + opcode dispatch table inside `doida.exe`
+(corroborated by the Wireshark capture oracle) is the absolute truth; the `packets/*.yaml` specs and
+`opcodes.md` are the **derived truth** that captured it across the firewall, and they are the *only*
+oracle these modes read. The C# / catalog rows are measured against the spec, never the reverse — if a
+field or id looks wrong, the fix is in the spec (escalate to a spec-author / `re-promote`), never a
+guess here.
+
+> CLEAN ROOM. These modes read ONLY `Docs/RE/packets/*.yaml`, `Docs/RE/opcodes.md`,
+> `Docs/RE/structs/*.md`, `Docs/RE/specs/*.md`, `Docs/RE/names.yaml`, plus the C# source tree. It is
+> FORBIDDEN to read any path containing `_dirty/` and they never call IDA. If a spec field is missing
+> or ambiguous, ask a spec-author to fix the YAML — do NOT consult the decompiler.
+
+# Mode A — PACKET-STRUCT codegen
+
+Generate a zero-allocation C# packet struct from a committed `Docs/RE/packets/*.yaml` spec — the
+clean-room bridge from the documented wire layout to `Network.Protocol`, with every magic offset
+traceable back to the citing spec.
 
 ## Where output goes
 
@@ -112,10 +121,77 @@ No managed `string` fields are ever emitted in a wire struct — fixed text is `
    ```
 
 6. **Hand off.** The generated `.g.cs` is a *skeleton*. Serialization helpers, opcode→handler
-   routing (source-generated), and validation are the `network-protocol-engineer`'s job — this
-   skill only lays down the layout-correct struct.
+   routing (source-generated), and validation are the `network-engineer`'s job — this skill only
+   lays down the layout-correct struct.
 
-## Decision points
+# Mode B — OPCODE-CATALOG curation
+
+Curate `Docs/RE/opcodes.md` — the clean-room source of truth for the wire protocol's message opcodes.
+This catalog carries **only promoted, neutral facts**: address-level discovery stays in
+`_dirty/opcodes.raw.md` (gitignored) and never crosses into this file. It is consumed by the
+`network-engineer` and by Mode A.
+
+## The catalog schema (must not drift)
+
+`Docs/RE/opcodes.md` holds one Markdown table. Every data row has exactly these columns:
+
+| Column | Rule |
+|---|---|
+| `Opcode` | Hex, lowercase `0x` form, e.g. `0x42`. **No IDA addresses, ever.** Unique. |
+| `Name` | Canonical message name. Convention: `Cmsg*`/`Smsg*` (client→/server→) e.g. `SmsgMovePlayer`. Must agree with `Docs/RE/names.yaml` `opcodes:`. |
+| `Direction` | `C2S` or `S2C`, from the **client's** point of view. |
+| `Size (bytes)` | Fixed integer (e.g. `12`) or `var` for variable-length payloads. |
+| `Packet spec` | Link to the field spec, e.g. `packets/move.yaml`, or `—` if none yet. |
+| `Status` | `draft` · `observed` · `confirmed` · `implemented` (legend kept in the file). |
+| `Notes` | Short neutral prose. No pseudo-code, no addresses. |
+
+Status legend: `draft` (hypothesized) · `observed` (seen in a capture) · `confirmed` (cross-checked
+against the binary's dispatch table — the neutral fact crosses via `re-promote`, never an address) ·
+`implemented` (C# struct + handler exist).
+
+## Workflow (Mode B)
+
+1. **Read the current catalog.** Open `Docs/RE/opcodes.md`; preserve its header prose, column order,
+   and the status legend exactly.
+2. **Add or update an entry**, keeping the table sorted by opcode ascending: newly seen in a capture →
+   `Status = observed`, `Packet spec = —`; a written field spec exists → link `packets/<name>.yaml`,
+   bump to `draft`+; confirmed against the binary's dispatch table (by an analyst, in `_dirty/`) →
+   `confirmed` (copy only the neutral fact — it exists, its size — never the address); C# struct +
+   handler exist → `implemented`.
+3. **Validate before saving/committing:**
+   ```powershell
+   python ${CLAUDE_SKILL_DIR}/scripts/validate_opcodes.py Docs/RE/opcodes.md
+   ```
+   The validator parses the table and checks every row has all 7 columns; normalizes + validates each
+   opcode is a unique hex literal (**fails on duplicate ids**); checks `Direction in {C2S,S2C}`,
+   `Status in {draft,observed,confirmed,implemented}`, `Size` is an int or `var`; **scans for address
+   leakage** — any `sub_`, `loc_`, `0x004…`-style absolute address, or `.text:` token is a hard error;
+   and confirms each non-`—` `Packet spec` link points under `packets/`.
+4. **Cross-check against captures (recommended).** Pass an opcode inventory from `pcap-extract` so the
+   validator flags opcodes **seen in captures but missing from the catalog**:
+   ```powershell
+   python ${CLAUDE_SKILL_DIR}/scripts/validate_opcodes.py Docs/RE/opcodes.md --seen 0x01,0x02,0x42
+   python ${CLAUDE_SKILL_DIR}/scripts/validate_opcodes.py Docs/RE/opcodes.md --seen-file _dirty/captures/seen_opcodes.txt
+   ```
+   Missing-from-catalog opcodes are reported as warnings to add as `observed` rows.
+5. **Keep `names.yaml` in sync.** When you add/rename an opcode, mirror it in `Docs/RE/names.yaml`
+   under `opcodes:` (same id, name, direction) — the catalog is the human-facing table, `names.yaml`
+   is the machine glossary `ida-annotate`'s names-sync mode uses.
+6. **Journal it.** Any committed change to `opcodes.md` gets a one-line entry in `Docs/RE/journal.md`
+   (which specs changed, by whom, no pseudo-code) — via the `preservation` session-log mode.
+
+**Mode B notes:** this protocol's opcodes are `(major<<16)|minor` — a message is a `(major, minor)`
+pair (melee `2/52`, chat `2/7`, storage `2/142`, buff `4/102`); record the catalog id in the file's
+existing single-hex convention but keep the pair legible in `Name`/`Notes` so it round-trips to the
+wire frame `[u16 major][u16 minor]`. The `OnUnhandled` fallback set (0/0, 3/1, 3/7, 3/4, 3/6, 3/23) is
+`implemented`. A validator failure on an address token means dirty material leaked in — strip it; the
+catalog never carries `sub_`/`loc_`/absolute addresses.
+
+**Mode B — Verify / Done when:** `validate_opcodes.py` passes (all 7 columns, unique ids, valid
+direction/status/size, **zero address tokens**, every `Packet spec` link resolves under `packets/`);
+capture-`--seen` warnings are triaged; `names.yaml` `opcodes:` mirrors the row; the change is journaled.
+
+## Decision points (Mode A)
 
 - **`size:` disagrees with Σ field widths?** STOP — do not pad or truncate to make it fit. A
   mismatch means the spec is wrong or a field is missing; the byte total must equal the sum of
@@ -135,21 +211,27 @@ citation, `[InlineArray]` buffers for every `bytes[N]`, and (optionally) the pro
 
 ## Pitfalls (anti-patterns)
 
-- **Never** read anything under `_dirty/` or call IDA — the `packets/*.yaml` spec is the only oracle.
+- **Never** read anything under `_dirty/` or call IDA — the committed spec is the only oracle (both modes).
 - **Never** emit a managed `string` in a wire struct, drop `Pack = 1`, or reorder fields — any of
-  these breaks blittability and wire parity.
+  these breaks blittability and wire parity (Mode A).
 - **Never** guess a missing/ambiguous field — bounce it to the spec-author.
-- Don't add project references beyond the mandated `Protocol → Kernel`.
+- **Never** store an address, `sub_`/`loc_`, or any decompiler output in `opcodes.md` — the validator
+  fails the file and the firewall is breached (Mode B).
+- **Never** duplicate an opcode id — duplicates are a hard validation failure (Mode B).
+- Don't add project references beyond the mandated `Protocol → Kernel`; don't reformat `opcodes.md`'s
+  prose, legend, or column order — edit table rows only.
 
 North star: serves **N2** — every generated struct is a byte-exact, citation-traced
 re-implementation of the original wire layout.
 
 ## Hard rules
 
-- **Never read `_dirty/`. Never call IDA.** The spec YAML is the only oracle.
-- Every emitted offset/constant is traceable: the header comment cites the spec path, and the
-  opcode const mirrors `opcode:`.
-- Hot-path correctness: `Pack = 1`, no managed strings, `bytes[N]` → `[InlineArray]`. The
-  struct must be blittable.
-- Output only under `02.Network.Layer/MartialHeroes.Network.Protocol/Packets/`. Files end in
-  `.g.cs` to mark them generated.
+- **Never read `_dirty/`. Never call IDA.** The spec YAML / `opcodes.md` are the only oracles (both modes).
+- Every emitted offset/constant is traceable: the Mode A header comment cites the spec path and the
+  opcode const mirrors `opcode:`; Mode B carries **no addresses, ever** — only *what* a message is,
+  never *where* it lives (the validator fails the file on an address-shaped token).
+- Hot-path correctness (Mode A): `Pack = 1`, no managed strings, `bytes[N]` → `[InlineArray]`. The
+  struct must be blittable. Output only under
+  `02.Network.Layer/MartialHeroes.Network.Protocol/Packets/`; files end in `.g.cs`.
+- Catalog discipline (Mode B): one opcode id appears at most once; neutral prose only; do not reformat
+  the file's prose, legend, or column order — edit table rows only.

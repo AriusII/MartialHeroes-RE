@@ -1,6 +1,6 @@
 ---
 name: ida-py
-description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (Main.exe) and capture its result — the escape hatch for any one-off analysis the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-xref-map, ida-callgraph-map, ida-data-flow, ida-batch-analyze, ida-string-hunt, ida-struct-apply, ida-vtable-recover) do not cover. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
+description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (Main.exe / doida.exe) and capture its result — the escape hatch for any one-off RE query the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-explore, ida-struct-recovery, ida-annotate) do not cover. Either fill the RESULT_JSON harness template for a freeform probe, or pick one of the bundled parameterized snippets ("who calls X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced") and set its CONFIG. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
 allowed-tools: Read Write
 model: sonnet
 effort: medium
@@ -9,20 +9,22 @@ effort: medium
 # ida-py — run an arbitrary IDAPython snippet via the IDA MCP
 
 This is the **general escape hatch**: when a question about the legacy client has no dedicated RE
-skill, write a small IDAPython snippet, run it inside IDA through the MCP exec tool, and capture a
-single machine-readable result line. Everything it touches is **dirty** (derived directly from the
-copyrighted binary) and lands under `Docs/RE/_dirty/queries/`.
+skill, run IDAPython inside IDA through the MCP exec tool and capture a single machine-readable result
+line. Two ways in — a **freeform harness template** for a one-off probe, and a **library of bundled
+parameterized snippets** for the most common ad-hoc queries (callers-of, touches-global, crypto-shaped
+bit-op loops, S-box-like const tables, string xrefs). Everything it touches is **dirty** (derived
+directly from the copyrighted binary) and lands under `Docs/RE/_dirty/queries/`.
 
 **Ground truth:** the result is authoritative **only** when the snippet ran against the correct,
 populated Martial Heroes IDB (confirmed by `/ida-mcp-connect`). A snippet answers an open question
-**from the binary** — never patch a gap from memory or analogy. If the MCP is down, the DB is wrong/
-empty, or a call returns partial data, **STOP and report exactly what you got — never invent an
-address, name, or byte value to keep moving.**
+**from the binary** — never patch a gap from memory or analogy; a static hit is a **hypothesis** the
+debugger confirms. If the MCP is down, the DB is wrong/empty, or a call returns partial data, **STOP
+and report exactly what you got — never invent an address, name, or byte value to keep moving.**
 
-Prefer a fixed skill when one fits — `ida-recon` (census), `ida-opcode-map` (dispatcher),
-`ida-crypto-hunt` (cipher), `ida-xref-map` / `ida-callgraph-map` / `ida-data-flow` (graph + flow),
-`ida-batch-analyze` (subsystem), `ida-string-hunt` (strings), `ida-struct-apply` /
-`ida-vtable-recover` (objects). Reach for `ida-py` only for the long tail those do not cover.
+Prefer a fixed skill when one fits — `ida-recon` (census + strings), `ida-opcode-map` (dispatcher),
+`ida-crypto-hunt` (cipher), `ida-explore` (xref / callgraph / data-flow / subsystem-batch),
+`ida-struct-recovery` (structs / vtables), `ida-annotate` (IDB writes — rename / comment / type).
+Reach for `ida-py` only for the long tail those do not cover.
 
 ## Preconditions (do these first, in order)
 
@@ -59,12 +61,35 @@ Prefer a fixed skill when one fits — `ida-recon` (census), `ida-opcode-map` (d
    JSON there yourself, plus a short `.md` sibling summarizing the finding in plain English.
 5. **Interpret, neutrally.** In your reply, summarize what was found in words (counts, candidate
    addresses, observed shapes). Addresses are allowed only inside `_dirty/`. Flag any `sub_…` name
-   you resolved as a proposed canonical name for `ida-naming-sync` — do not rename here. *Decision: if
-   the question is really one of the named subsystems (dispatcher, cipher, xref graph, strings, struct,
-   vtable), STOP and use that fixed skill — `ida-py` is only for the long tail. If the snippet needs to
-   write into the IDB, it doesn't belong here (use the rename/annotate skills — which now run unbridled/parallel). If a fact
-   needs live confirmation, hand the candidate EA to the debugger (`dbg_add_bp`/`dbg_read`; never
-   `dbg_start`).*
+   you resolved as a proposed canonical name for `ida-annotate`'s names-sync mode — do not rename
+   here. *Decision: if the question is really one of the named subsystems (dispatcher, cipher, xref
+   graph, strings, struct, vtable), STOP and use that fixed skill — `ida-py` is only for the long tail.
+   If the snippet needs to write into the IDB, it doesn't belong here (use `ida-annotate` — which now
+   runs unbridled/parallel). If a fact needs live confirmation, hand the candidate EA to the debugger
+   (`dbg_add_bp`/`dbg_read`; never `dbg_start`).*
+
+## Bundled snippet library (the common ad-hoc probes)
+
+For the recurring "no fixed skill, but a standard shape" questions, a small library of real,
+parameterized IDAPython snippets lives under `${CLAUDE_SKILL_DIR}/scripts/snippets/`. Pick the closest,
+set **only** its `# === CONFIG ===` block (never hand-edit the analysis logic below it — divergent
+logic makes results unreviewable and irreproducible), and run it through the MCP exec tool. Each prints
+a Markdown result block and best-effort-writes to `Docs/RE/_dirty/queries/<snippet>.<slug>.md`.
+
+| Question | Snippet |
+|---|---|
+| Who calls function X (by name or address)? | `snippets/callers_of.py` |
+| What functions read/write global/static G? | `snippets/touches_global.py` |
+| Where are the crypto-shaped bit-twiddling loops (XOR/ROL/ROR/shift)? | `snippets/find_bitops_loops.py` |
+| Where are the S-box / lookup-table-like constant byte/dword arrays? | `snippets/find_const_tables.py` |
+| Where is string "..." used, and from what function? | `snippets/string_xref.py` |
+
+Additional cartography/RTTI sweep snippets ship alongside (`snippets/module_cartography.py`,
+`snippets/open_caller_census.py`, `snippets/cg_propagate_matcher.py`, `snippets/rtti_audit_wave.py`,
+`snippets/rtti_place_wave.py`) for wider one-off surveys. **Escalation:** a `find_bitops_loops` /
+`find_const_tables` hit that looks like the real cipher/S-box → `ida-crypto-hunt` (it fuses the
+evidence); a probe that fans across a wide subsystem → `ida-explore`'s batch mode; a hot static hit
+that needs proof → the debugger (`dbg_add_bp` at the EA, `dbg_read`/`dbg_gpregs`; never `dbg_start`).
 
 ## Verify / Done when
 

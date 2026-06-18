@@ -1,6 +1,6 @@
 ---
 name: ida-struct-recovery
-description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes Main.exe — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote.
+description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes client (Main.exe / doida.exe) — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote. Includes a dedicated VTABLE-WALK mode that resolves a C++ vtable from its data EA or its installing constructor, role-tags each function-pointer slot (ctor/dtor, per-frame virtual, getter, serialize), and harvests RTTI — the way to recover a polymorphic interface (an actor or asset-loader class hierarchy) before the clean struct is written.
 allowed-tools: Read Write
 model: sonnet
 effort: high
@@ -17,6 +17,15 @@ Every offset, size, and slot dumped must **reflect what the binary proves** — 
 the IDB, never inferred to look tidy. The IDB is the single absolute truth for the object's shape; a
 static layout is the hypothesis, a live debugger read confirms field meaning. If the MCP is down or a
 target won't resolve, **STOP and report the exact error — never invent an offset or a slot.**
+
+This skill works in **two modes**:
+
+- **Mode A — struct/vtable dump** (`struct_dump.py`): resolve a type / vtable / instance and dump
+  members (offset/size/type/name) and vtable slots, producing both a dirty detail file and a neutral
+  promotable `.offsets.h`.
+- **Mode B — dedicated vtable walk + RTTI** (`vtable_recover.py` + RTTI harvest): walk a vtable from
+  its data EA or its installing constructor, role-tag each slot, and harvest RTTI — the richer path
+  for recovering a polymorphic class interface and hierarchy.
 
 This skill produces **two** kinds of output:
 
@@ -45,7 +54,7 @@ This skill produces **two** kinds of output:
   - a **vtable address** (e.g. `0x006C1A40`) to recover a class by its method table, or
   - a **global instance address** whose first DWORD is a vtable pointer (the snippet follows it).
 
-## Steps
+## Mode A — struct/vtable dump (steps)
 
 1. Read the bundled snippet `${CLAUDE_SKILL_DIR}/scripts/struct_dump.py` (also
    `scripts/struct_dump.py`). It is real, runnable IDAPython using `ida_typeinf` / `ida_struct` /
@@ -75,6 +84,40 @@ This skill produces **two** kinds of output:
    clearly that `.offsets.h` is the promotion candidate but a spec-author must still review and
    rewrite it into `Docs/RE/structs/` (and log it in `journal.md`).
 
+## Mode B — dedicated vtable walk + RTTI
+
+For a polymorphic class, the dedicated walker recovers the virtual interface more richly than Mode A's
+slot dump: it discovers the table from the constructor, role-tags each slot, and bounds the walk at the
+natural table boundary. It pairs with `ida-annotate`'s struct-apply mode (data-field offsets) —
+together they give the whole object: fields + virtual interface.
+
+1. **Locate the vtable.** Either you already have its data EA, or you start from the
+   constructor/object: the vtable address is the value moved into `[this+0]` near the top of the
+   constructor (`mov dword ptr [ecx], offset ??_7Class@@…`). Note the data EA and a working class name
+   (e.g. `CActor`). *If only the object instance is in hand (e.g. caught live in the debugger), read
+   the dword at `[obj+0]` to get the vtable EA — `dbg_read` reads through `PAGE_NOACCESS` against the
+   running client; never `dbg_start` (the maintainer F9-launches).* If the constructor moves several
+   offsets into `[this+N]`, the one at `+0` is the primary vtable; secondary ones at `+N` are
+   multiple-inheritance/base-subobject vtables — recover each as its own table.
+2. **Walk the slots.** Read `${CLAUDE_SKILL_DIR}/scripts/vtable_recover.py`, set CONFIG (`VTABLE_EA` =
+   the table's data EA, OR `CTOR` = the constructor name/address to auto-find the table; `CLASS_NAME`;
+   `MAX_SLOTS`). Run it via the exec tool. It reads consecutive pointer-sized slots from `VTABLE_EA`,
+   stops at the first non-code / cross-referenced boundary, and for each slot records: slot index, slot
+   EA, target function EA + name, the target's in-degree, and a heuristic role tag (destructor for the
+   `~`/`vector deleting destructor` pattern, getter if tiny, virtual handler otherwise).
+3. **Describe each slot, neutrally.** Turn the heuristic tags into a one-line conceptual description
+   per slot ("slot 0: destructor", "slot 3: per-frame update", "slot 7: serialize-to-buffer"). These
+   are hypotheses; confirm the important ones by reading the single slot's behavior
+   (`ida-decompile-export`) before a spec-author promotes them.
+4. **(Optional) harvest RTTI / class hierarchy.** For a wider sweep across many classes, the bundled
+   `${CLAUDE_SKILL_DIR}/scripts/rtti_harvest.py` enumerates RTTI complete-object-locators / type
+   descriptors / base-class arrays, and `${CLAUDE_SKILL_DIR}/scripts/c01_manifest_gen.py` builds a
+   class/vtable manifest from that harvest — both for cartography passes over the object model.
+5. **Save it.** The walker best-effort-writes `Docs/RE/_dirty/structs/<class>.vtable.md` (SHA-256 tag
+   + `> DIRTY` banner); confirm the path or save it yourself. It stays in `_dirty/` — promotion to a
+   clean `Docs/RE/structs/*.md` is a spec-author's deliberate rewrite. Resolve `sub_…` slot targets to
+   proposed canonical names for `ida-annotate`'s names-sync mode; never rename here.
+
 ## Decision points
 
 - **If the target is a polymorphic class** (`__thiscall`, `this` in `ECX`), vtable recovery is the way
@@ -85,6 +128,9 @@ This skill produces **two** kinds of output:
   question: hand off to `ida-debugger-drive` — breakpoint a method in the maintainer's F9 session and
   `dbg_read` the live instance to read the actual field values. Static gives the layout; the debugger
   confirms the meaning.
+- **If a Mode B vtable walk hits `MAX_SLOTS`** rather than a natural boundary (next named vtable / data
+  label / non-code slot), the table is likely longer — raise the cap and re-walk; never report phantom
+  slots run off into adjacent RTTI/data. Don't confuse a base-subobject vtable (`+N`) with the primary (`+0`).
 
 ## Verify / Done when
 

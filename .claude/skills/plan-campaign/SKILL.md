@@ -91,15 +91,13 @@ and does not dispatch the captains.
 ## Routing decision map (the russian-doll)
 
 Pre-wire each phase to an **existing** Tier-2 captain (no new lane orchestrators — flag a missing
-specialist as an open item, minted later via `agent-author`). "Route a phase here when…" heuristics:
+specialist as an open item, minted later via `kit-author`). "Route a phase here when…" heuristics:
 
-| Lane | Tier-2 captain(s) | Representative Tier-3 workers | Key skills | Route here when… |
+| Domain | Tier-2 captain | Representative Tier-3 workers | Key skills | Route here when… |
 |---|---|---|---|---|
-| **RE (dirty→spec)** | `re-cleanroom-orchestrator` | `re-static/protocol/crypto-analyst`, `re-struct-cartographer`, `re-asset-format/animation-analyst`, `re-analyst`, `ida-script-author`, `vfs-data-analyst` → bridge `protocol-spec-author`, `asset-spec-author` | `ida-mcp-connect`, `ida-*`, `re-promote` | a behavior/format/opcode/struct is **not yet in the committed specs** and must be recovered from the binary then promoted |
-| **IDA (IDB legibility)** | `re-comprehension-orchestrator` (READONLY) + `re-annotation-orchestrator` (parallel IDB write) | `re-ida-annotator` | `ida-annotate-batch`, `ida-naming-sync` | the goal is making the **IDB itself** legible (names/comments/types), not producing a spec |
-| **C#** | `network-stack-orchestrator` (02) · `assets-pipeline-orchestrator` (03) · `client-core-orchestrator` (04) | `network-*`, `assets-*`, `domain-`, `application-`, `client-infrastructure-`, `data-tables-`, `dotnet-engineer`, `csharp-modernizer/reviewer`, `test-engineer` | `dotnet-build-test`, `packet-codegen`, `vfs-inspect` | the deliverable is **engine-free core code** (layers 01–04) read from committed specs |
-| **Godot** | `godot-client-orchestrator` (05) | `godot-presentation/ui/input-engineer`, `godot-skinning/shader-specialist`, `godot-render-reviewer`, `godot-mcp-operator` | `godot-run-headless`, `godot-screenshot`, `godot-fidelity-check`, `asset-chain-trace` | the deliverable is **layer-05 presentation/fidelity** (verify via the headless + screenshot oracle) |
-| **Quality / Kit** | `quality-gate-orchestrator` (pre-commit) · `tooling-orchestrator` (the `.claude/` kit) | reviewers / meta-authors | `clean-room-firewall-check` | the phase is a **gate** (build/test/firewall/DAG) or it changes the **`.claude/` kit** itself |
+| **RE (dirty→spec + IDB legibility)** | `re-orchestrator` | `re-function/protocol/crypto/struct/asset-format-analyst`, `ida-toolsmith` (IDB annotate) → bridge `spec-author`; confirm `re-validator` | `ida-mcp-connect`, `ida-explore`, `ida-annotate`, `re-promote` | a behavior/format/opcode/struct is **not yet in the committed specs** and must be recovered from the binary then promoted, OR the **IDB itself** needs legible names/comments/types |
+| **C#/Godot Porting** | `port-orchestrator` | `network-engineer` (02), `assets-engineer` (03), `core-engineer` (04), `dotnet-foundation-engineer` (01+cross), `godot-world/ui-engineer`, `godot-character-specialist`, `code-reviewer`, `test-engineer`, `render-reviewer` | `dotnet-build-test`, `packet-codegen`, `pak-explore`, `godot-run-headless`, `godot-fidelity-check`, `clean-room-check` | the deliverable is **engine-free core code** (layers 01–04) or **layer-05 presentation/fidelity**, read from committed specs |
+| **Planning / Kit** | `planning-orchestrator` | `requirement-analyst`, `todo-architect`, `knowledge-gap-detector`, `plan-reviewer`, `kit-author`, `tooling-auditor` | `plan-campaign`, `clean-room-check` | the phase is **planning/decomposition**, a **knowledge-gap** sweep, a **gate** (build/test/firewall/DAG via `code-reviewer`/`tooling-auditor`), or it changes the **`.claude/` kit** itself |
 
 **Two-levels-max (hard).** Tier-1 → Tier-2 → Tier-3; a Tier-2 never spawns another Tier-2
 (`CAMPAIGN_TEMPLATE` §2.2). The plan **names** the lane captains for **Tier-1 to invoke after
@@ -144,7 +142,7 @@ Fill every `<placeholder>`; drop phases the campaign doesn't need (e.g. W/P for 
 - Known gaps this cycle closes: <list>.
 - Tool baseline verified: IDA MCP <UP/DOWN> · build <0/0> · tests <green> · VFS <reachable>.
 
-## Phase <N>-W1 — GIGA RESEARCH (dirty room, <K> lanes) — driven by re-cleanroom-orchestrator
+## Phase <N>-W1 — GIGA RESEARCH (dirty room, <K> lanes) — driven by re-orchestrator
 Output: `Docs/RE/_dirty/<area>/*.md` ONLY. Ledger: one writer per `_dirty/<area>/<lane>.md`.
 | # | Lane (sub-objective) | Type | Agent | Question | Deliverable | Conf |
 |---|----------------------|------|-------|----------|-------------|------|
@@ -201,12 +199,12 @@ ROADMAP statuses in place · journal.md · names.yaml · memory · preservation.
 ## Hard rules
 
 - **Clean-side only.** Never call IDA, never open the debugger, **never read `Docs/RE/_dirty/`**.
-  Binary/VFS reality-checks are delegated to READONLY scouts (`re-analyst` / `vfs-data-analyst`); a
+  Binary/VFS reality-checks are delegated to READONLY scouts (`re-function-analyst` / `re-asset-format-analyst`); a
   fact a scout can't confirm is an **open risk**, never fabricated (MCP down / wrong DB ⇒ STOP-don't-invent).
 - **Plan, don't dispatch.** Emit routing; **Tier-1 invokes the lane captains after approval**. Spawn
   **only READONLY Tier-3 scouts** — never a Tier-2/lane orchestrator (two-levels-max, `CAMPAIGN_TEMPLATE` §2.2).
 - **Reuse, don't duplicate.** No new lane orchestrators; a missing specialist is **flagged as an open
-  item** (minted later via `agent-author`), not invented in the plan.
+  item** (minted later via `kit-author`), not invented in the plan.
 - **Reference, don't copy.** Point at `CAMPAIGN_TEMPLATE.md` / `PLAN.md` / `ROADMAP.md` rather than
   duplicating them. No Hex-Rays pseudo-C, no addresses, no copyrighted data in the plan.
 - **No repo writes here.** This skill reads and reasons; it returns the plan as its report. The

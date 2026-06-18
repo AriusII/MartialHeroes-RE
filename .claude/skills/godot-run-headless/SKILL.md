@@ -1,23 +1,25 @@
 ---
 name: godot-run-headless
-description: Use to verify the Martial Heroes Godot client's scripts and asset wiring WITHOUT the user driving the editor — runs the Godot 4.6.3 console exe headless against the project, lets it tick a few seconds, then captures all GD.Print output and engine errors from stdout. The fast inner loop for "does this scene/script/asset load cleanly?".
-allowed-tools: Bash(pwsh *) Bash(powershell *) Read
+description: Use to VERIFY the Martial Heroes Godot client without the user driving the editor — two modes. HEADLESS runs the Godot 4.6.3 console exe headless against the project, ticks a few frames, and captures all GD.Print output and engine errors from stdout (the fast inner loop for "does this scene/script/asset load cleanly?"). SCREENSHOT runs the client WINDOWED with a temporary GDScript autoload that grabs the viewport after a few frames, saves a PNG, and quits, so you can SEE what renders (is the terrain textured / town populated / character upright or mirrored?). Headless can't capture pixels; screenshot is the visual half of the verify loop.
+allowed-tools: Bash(pwsh *) Bash(powershell *) Read Write Edit
 model: sonnet
 effort: medium
 ---
 
 # godot-run-headless — verify scripts/assets without the user
 
-The single most useful capability for iterating on the Godot presentation layer: run the
-project **headless** (no window, no GPU surface) so the engine boots, parses the main scene,
-instantiates every node's C# script, runs `_Ready`/`_Process` for a few frames, and then quits —
-streaming every `GD.Print`, `GD.PrintErr`, and engine diagnostic to stdout where this skill can
-read it. No human has to open the editor or watch a window.
+The two halves of the Godot verify loop, in one skill:
 
-Use it to answer questions like: *does `World.tscn` load without a parse error? Did the autoload
-crash? Did the terrain/asset resolver find the VFS? Are there `SCRIPT ERROR` / `Failed to load`
-lines?* It is the headless half of the verify loop — pair it with `/godot-screenshot` when you
-need to confirm something **visually**.
+- **Mode A — HEADLESS** (no window, no GPU surface): boot the engine, parse the main scene,
+  instantiate every node's C# script, tick a few frames, quit — streaming every `GD.Print` /
+  `GD.PrintErr` / engine diagnostic to stdout. Answers *does it LOAD cleanly?*.
+- **Mode B — SCREENSHOT** (windowed, real GPU frames): boot the client windowed with a temporary
+  GDScript autoload that grabs the viewport after a warmup and saves a PNG. Answers *what does it
+  RENDER?* — the pixels headless cannot capture.
+
+Use Mode A for *does `World.tscn` load without a parse error? did the autoload crash? did the asset
+resolver find the VFS?*; use Mode B for *is the terrain textured? are buildings placed? is the
+character upright or exploded?*.
 
 ## Key facts (this project)
 
@@ -38,7 +40,7 @@ need to confirm something **visually**.
    A stale/missing build manifests as `Failed to load assembly` or missing script behaviour.
 2. Nothing else should hold the project's `.godot/mono` build lock (close a running editor game).
 
-## Steps
+## Mode A — HEADLESS (steps)
 
 1. Run the bundled helper, which wraps the exact invocation and tees stdout+stderr to a log:
 
@@ -68,6 +70,40 @@ need to confirm something **visually**.
 4. Report: the exit code, the log path, and the salient lines (errors first, then the
    confirming breadcrumbs). Keep it tight — quote the load-bearing lines, don't dump the whole log.
 
+## Mode B — SCREENSHOT (windowed, capture a real frame)
+
+Headless has no GPU surface, so to actually **see** the world the client must run **windowed** long
+enough to render real frames, then save the viewport to a PNG. The most reliable in-engine probe is a
+**temporary GDScript autoload** (`_shot.gd`): it waits a few frames (so async terrain/asset streaming
+populates the scene), grabs `get_viewport().get_texture().get_image()`, saves a PNG, and quits. A
+GDScript autoload beats a C# capture node here — it loads before any scene script and needs no rebuild.
+
+1. **Stage the autoload script.** Copy the bundled `${CLAUDE_SKILL_DIR}/scripts/_shot.gd` into the
+   project as `res://Dev/_shot.gd` (create `Dev/` if needed). It reads the output path + warmup frame
+   count from `MH_SHOT_PNG` / `MH_SHOT_FRAMES` (sane defaults), waits, saves the PNG, and calls
+   `get_tree().quit()`.
+2. **Register it as a temporary autoload** by adding ONE line under `[autoload]` in `project.godot`,
+   AFTER the existing autoloads (so it runs last): `ShotCapture="*res://Dev/_shot.gd"`. Do not disturb
+   `ClientContext` / `McpBridgeGame`.
+3. **Run windowed and wait for the PNG** with the bundled helper (sets the env vars, launches windowed
+   — NOT headless — and blocks until the file appears or a timeout trips):
+   ```
+   pwsh -File ${CLAUDE_SKILL_DIR}/scripts/screenshot.ps1 -Frames 180
+   ```
+   Flags: `-Out <png>` (default a timestamped temp file), `-Frames <N>` (warmup, default 180 — bump it
+   if terrain streams in late), `-Project`/`-Godot` overrides, `-TimeoutSec <s>` (default 90). A
+   windowed run still needs the GPU (D3D12 on Windows) — do **not** pass `--headless` (blank viewport).
+4. **Read the PNG back** with the Read tool to inspect the frame: is the expected subject present and
+   correctly placed (textured terrain, walled town, upright character)? A gray/empty frame usually means
+   a scene-script attachment bug (`/godot-scene-author`) or too-short warmup (retry with more `-Frames`).
+5. **CLEANUP — mandatory.** Remove the `ShotCapture="*res://Dev/_shot.gd"` line from `project.godot` and
+   delete `res://Dev/_shot.gd` (+ its `.uid`). The autoload calls `quit()` on every run; leaving it in
+   makes every future editor/game launch self-quit after a few frames. Do this before reporting done.
+
+Capturing requires a desktop session the window can open in; on a locked/headless host the windowed run
+may fail — fall back to Mode A for non-visual checks. One PNG per run; for several angles drive the
+camera via the `godot` MCP game tools (`/godot-mcp-connect`) instead of re-running.
+
 ## Decision points
 
 - **If C# was just edited** → `/godot-build` first, else you verify a stale DLL (a green load that
@@ -76,8 +112,10 @@ need to confirm something **visually**.
   re-run with a `-Scene` override on a minimal scene to isolate the offending loader.
 - **If no errors but your expected `GD.Print`s are absent** → suspect the silent gray-screen
   (`.tscn` script in the header, not a property line) → confirm with `/godot-scene-author`'s DIAG dump.
-- **If you need pixels** (is it textured? upright? mirrored?) → hand to `/godot-screenshot`; headless
-  cannot. For a 1:1 fidelity comparison against the original, hand to `/godot-fidelity-check`.
+- **If you need pixels** (is it textured? upright? mirrored?) → use Mode B (screenshot) above; headless
+  cannot. A mirrored / ~1000+ units-off world is a coordinate bug → `/godot-scene-author`'s
+  coordinate-check mode (global-AABB diagnosis). For a 1:1 fidelity comparison against the original,
+  hand to `/godot-fidelity-check`.
 
 ## Verify / Done when
 
@@ -89,17 +127,24 @@ need to confirm something **visually**.
 
 - Never trust a `0` exit code alone — gray-screen scenes load clean with no error.
 - Never use the non-console `.exe` (detaches, no stdout) or pass `--headless` when you actually need
-  an image.
-- Never copy any asset filename/byte the log mentions out of temp; the VFS is bring-your-own.
+  an image (Mode B requires the GPU — `--headless` gives a blank viewport).
+- **Mode B: ALWAYS clean up the temporary `ShotCapture` autoload + `_shot.gd` afterwards** — every
+  future launch would self-quit after a few frames (this skill's single worst failure mode).
+- Never declare a Mode B defect from a too-short warmup — rule out late streaming (`-Frames`) before blaming geometry.
+- Never copy any asset filename/byte the log mentions, or the captured PNG, out of temp; the VFS is
+  bring-your-own and client `*.png` are gitignored.
 
-*North star: N2 — this is the fast inner loop that keeps the Godot client's 1:1 re-creation honest.*
+*North star: N2 — this is the fast inner loop that keeps the Godot client's 1:1 re-creation honest;
+pixels are the verdict on the visual re-creation.*
 
 ## Hard rules
 
 - Always use the **console** exe; the non-console `Godot_v4.6.3-stable_mono_win64.exe` returns
   immediately without surfacing stdout, so you would capture nothing.
-- Headless cannot capture a screenshot of the rendered frame (no GPU surface). For pixels, use
-  `/godot-screenshot` (windowed) — do not try to coax an image out of a headless run.
-- This skill is **read-only verification**: it never edits the project, the scene, or `project.godot`.
-- Treat any path under the real client VFS (`D:/MartialHeroesClient`) as bring-your-own-assets:
-  the log may mention asset filenames, but never copy asset bytes anywhere.
+- Mode A (headless) cannot capture a screenshot (no GPU surface); use Mode B (windowed) for pixels —
+  do not try to coax an image out of a headless run, and never `--headless` in Mode B.
+- Mode A is **read-only verification** (never edits the project/scene/`project.godot`). Mode B writes
+  ONLY the temporary `_shot.gd` + the one `[autoload]` line, both of which it **removes afterward**.
+- Treat any path under the real client VFS (`D:/MartialHeroesClient`) as bring-your-own-assets: the log
+  or PNG may depict asset filenames/bytes, but never copy asset bytes or the PNG anywhere (client `*.png`
+  are gitignored for exactly this reason).

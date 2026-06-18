@@ -26,7 +26,7 @@ def main():
         "Captures: {} .pcapng / {} .tsv present locally (protocol oracle; never read raw bytes into context, never commit).".format(pcap, tsv),
         "Skeleton: {} Class1.cs placeholder(s) still present (12 = nothing implemented yet).".format(placeholders),
         h.CLEAN_ROOM_BLURB,
-        "RE knowledge lives in Docs/RE/ (firewall: _dirty/ is tainted & gitignored; specs are clean). Skills: /re-workspace-init, /ida-mcp-connect, /pcap-extract. Agents via @ (re-*, *-engineer, *-author, *-guardian).",
+        "RE knowledge lives in Docs/RE/ (firewall: _dirty/ is tainted & gitignored; specs are clean). Skills: /re-promote, /ida-mcp-connect, /pcap-extract. Agents via @ (3 orchestrators planning-/re-/port-; workers re-*-analyst, spec-author, *-engineer, code-reviewer).",
         "User prefers French for conversation; repo artifacts stay in English.",
     ]
     h.additional_context("SessionStart", "\n".join(lines))

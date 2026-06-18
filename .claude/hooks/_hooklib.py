@@ -372,6 +372,14 @@ _GLTF_CRASH = re.compile(r"\bAppendFromBuffer\s*\(")
 _MAGIC = re.compile(r"\b0x[0-9A-Fa-f]{2,}\b|\b\d+\.\d+f?\b|(?<![\w.])\d{3,}\b")
 _SPEC_CITE = re.compile(r"//\s*spec\s*:", re.I)
 
+# Small/common ints and shift counts that are self-evident from context and not worth a
+# citation; the spec-citation nudge subtracts these from the magic-hit set before warning.
+_BENIGN_MAGIC = re.compile(
+    r"\b0x0+\b"           # 0x0, 0x00 …
+    r"|\b0x0*1\b"         # 0x01 …
+    r"|\b0x0*[Ff][Ff]\b"  # 0xFF is borderline but extremely common as a byte mask — let it pass
+)
+
 # CP949 / Korean-text decoding signals.
 _CP949_NEEDED = re.compile(r"GetEncoding\s*\(\s*949\s*\)|RegisterProvider")
 
@@ -400,6 +408,33 @@ def has_uncited_magic(text):
     Best-effort: text should already be comment/string-stripped for the magic scan, but the
     citation check runs on the RAW text (comments included)."""
     return bool(_MAGIC.search(text or "")) and not _SPEC_CITE.search(text or "")
+
+
+def uncited_magic_hits(raw_text):
+    """Distinct genuinely-magic numeric literals in C# `raw_text` that lack a nearby
+    `// spec:` citation — the list the clean-room spec-citation nudge interpolates into its
+    message. Returns [] when the hunk is already cited or has no magic constants. The magic
+    scan runs on comment/string-stripped text (so a literal quoted in a comment/string never
+    trips it); the citation check runs on the RAW text (so an adjacent `// spec:` counts).
+    Small/common ints (0x0/0x01/0xFF) are treated as benign. Order-preserving + de-duplicated;
+    advisory helper, fail-open."""
+    raw = raw_text or ""
+    if not raw.strip():
+        return []
+    # An already-cited edit is fine — a single nearby `// spec:` vouches for the whole hunk.
+    if _SPEC_CITE.search(raw):
+        return []
+    out = []
+    seen = set()
+    for m in _MAGIC.finditer(strip_comments_strings(raw)):
+        tok = m.group(0)
+        if _BENIGN_MAGIC.fullmatch(tok):
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+    return out
 
 
 def mentions_korean_or_txt_read(text):

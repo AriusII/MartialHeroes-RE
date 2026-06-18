@@ -77,7 +77,7 @@ byte = plain XOR k_i; key schedule seeds S from a 16-byte session key delivered 
    stream, state size, how the key is derived (key schedule), where the key enters (which
    packet/opcode or handshake), endianness, and whether encrypt and decrypt are the same
    routine. If you need callers of the key-setter or what touches the key global, use the
-   **ida-script-runner** snippets (`callers_of.py`, `touches_global.py`).
+   **ida-py** snippets (`callers_of.py`, `touches_global.py`).
 
 6. **Optional: behavioral verification.** If a Wireshark capture's first encrypted bytes are
    known, you can sanity-check the recovered algorithm against them out-of-band — but never

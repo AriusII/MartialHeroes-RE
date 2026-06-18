@@ -1,7 +1,7 @@
 ---
 name: godot-fidelity-check
-description: Use when you need to VERIFY the Martial Heroes Godot client renders and behaves 1:1 vs the original — "does the world look right?", "is the terrain textured / the town populated / the player upright?", "is the world mirrored?", a fidelity / visual-regression / render-parity pass on an area or scene. Builds layer 05, runs headless + a windowed screenshot, then scores the frame against the recovered-fact oracle (asset chains + coordinate conventions) and REPORTS fidelity gaps by class (visual, coordinate, material, missing-asset, behavior). Read-only — it reports; the godot engineers fix.
-allowed-tools: Read, Grep, Glob, Bash(dotnet *), Bash(godot *)
+description: Use when you need to VERIFY the Martial Heroes Godot client renders 1:1 vs the original — "does the world look right?", "is the terrain textured / the town populated / the player upright?", "is the world mirrored?", a fidelity / visual-regression / render-parity pass on an area or scene. FIDELITY mode builds layer 05, runs headless + a windowed screenshot, then scores the frame against the recovered-fact oracle (asset chains + coordinate conventions) and REPORTS fidelity gaps by class (visual, coordinate, material, missing-asset, behavior) — read-only, it reports and the godot engineers fix. ASSET-PREVIEW mode visually previews ONE real asset (.bud building scene, .skn skinned mesh, .ted/.map terrain cell) from the VFS as a Godot ArrayMesh (NEVER GltfDocument, which crashes) and screenshots it — the way to eyeball a parser's output against its format spec.
+allowed-tools: Read Write Edit Grep Glob Bash(dotnet *) Bash(godot *) Bash(pwsh *) Bash(powershell *)
 model: sonnet
 effort: high
 ---
@@ -9,14 +9,20 @@ effort: high
 # godot-fidelity-check — verify the client renders 1:1 vs the original
 
 **North star N2.** Fidelity to the original — its visuals, asset chains, coordinate conventions, and
-behavior — *is the measure of success* for the re-creation. This skill is how we MEASURE that on the
-Godot client: it boots the client, captures what it actually renders, and scores it point-by-point
-against the recovered facts (the oracle). It does **not** fix anything — it produces a precise,
-class-tagged gap report that the godot engineers then act on. A clean report = the client matches the
-original for that area; gaps = exactly where and how it diverges, with the likely fix and the owner.
+behavior — *is the measure of success* for the re-creation. This skill MEASURES that on the Godot
+client in two modes:
 
-This is **read-only verification.** Never edit a node, transform, scene, or shader "to make it look
-right" — that is the engineers' job and editing here destroys the measurement.
+- **Mode A — FIDELITY** (read-only): boot the client, capture what it actually renders, and score it
+  point-by-point against the recovered facts (the oracle), producing a precise, class-tagged gap report
+  the godot engineers act on. It does **not** fix anything.
+- **Mode B — ASSET-PREVIEW** (temp scratch only): load ONE real asset from the VFS, build Godot
+  geometry from the *parsed* data with the project's own mesh builders, isolate it in a tiny preview
+  scene, and screenshot it — the fast way to eyeball a parser's output against its format spec.
+
+**Mode A is read-only verification.** Never edit a node, transform, scene, or shader "to make it look
+right" — that is the engineers' job and editing there destroys the measurement. (Mode B is the one
+exception: it stages a *temporary* preview harness it **removes afterward**, the same posture as the
+screenshot autoload — it still never edits production scenes/world code to flatter a result.)
 
 ## The two oracles (Ground-Truth Doctrine — read first)
 
@@ -51,7 +57,7 @@ Fidelity is graded against **two** ground truths, and they govern different thin
 3. **The Godot client must compile.** A headless/windowed run uses the compiled managed DLL, not
    source, so build layer 05 first (Step 1). A stale build silently renders old behavior.
 
-## Steps
+## Mode A — FIDELITY (steps)
 
 1. **Build layer 05.** Build the client assembly so the run reflects current source:
    ```
@@ -75,10 +81,11 @@ Fidelity is graded against **two** ground truths, and they govern different thin
 3. **Windowed screenshot — capture a real frame.** Headless has no GPU surface, so to SEE pixels run
    **windowed** with a temporary GDScript screenshot autoload that, after a warmup, does
    `get_viewport().get_texture().get_image().save_png(...)` then quits. A GDScript autoload is the most
-   reliable in-engine probe (it loads before any scene script, needs no rebuild). Use `/godot-screenshot`
-   (`-Frames 180`, bump it if terrain streams in late), then **Read the PNG back** to inspect it. The
-   PNG is a scratch artifact in temp — never commit it. **The autoload is temporary: it MUST be removed
-   and the `_shot.gd` deleted afterward** (`/godot-screenshot` Step 5 does this — do not skip it).
+   reliable in-engine probe (it loads before any scene script, needs no rebuild). Use
+   `/godot-run-headless`'s screenshot mode (`-Frames 180`, bump it if terrain streams in late), then
+   **Read the PNG back** to inspect it. The PNG is a scratch artifact in temp — never commit it. **The
+   autoload is temporary: it MUST be removed and the `_shot.gd` deleted afterward** (that mode's cleanup
+   step does this — do not skip it).
 
 4. **Compare against EXPECTED, point by point.** Grade structure/placement/data against the
    **spec oracle** (the chains + coordinates below); grade *appearance* (color, lighting, atmosphere,
@@ -95,8 +102,8 @@ Fidelity is graded against **two** ground truths, and they govern different thin
    - **Coordinate conventions honored:** world geometry negates Z `(x,y,z)->(x,y,-z)`; mesh-local
      `.skn` negates X; cells **1024** units on a **65x65** grid, spacing **16**. A world that
      **MIRRORS** (geometry flipped across an axis, or buildings ~1000+ units off) is a Z/X **sign
-     bug** — confirm the axis with `/godot-coordinate-check` (it dumps a node's global AABB vs its
-     expected cell position).
+     bug** — confirm the axis with `/godot-scene-author`'s coordinate-check mode (it dumps a node's
+     global AABB vs its expected cell position).
 
 5. **Enumerate gaps by CLASS.** Tag every divergence so the report is actionable:
    - **visual** — missing / blank / wrong texture, missing geometry.
@@ -124,36 +131,92 @@ Fidelity is graded against **two** ground truths, and they govern different thin
    If a gap you see IS one of these, note it as a known debt, not a new finding.
 
 7. **Report.** For each NEW gap give: class, `file:line` / node path, the likely fix, and the owning
-   engineer (`godot-presentation-engineer` for placement/world, `godot-skinning-specialist` for the
-   avatar, `godot-shader-specialist` for material/lighting/water, `godot-input-engineer` for behavior).
-   State whether the area is **at fidelity** (clean) or list the divergences. Hand the report to
-   `@godot-render-reviewer`; the named engineer fixes; re-run this skill to confirm the fix closed the
-   gap.
+   engineer (`godot-world-engineer` for placement/world + material/lighting/water, `godot-character-specialist`
+   for the avatar, `godot-ui-engineer` for input/behavior). State whether the area is **at fidelity**
+   (clean) or list the divergences. Hand the report to `@render-reviewer`; the named engineer fixes;
+   re-run this mode to confirm the fix closed the gap.
+
+## Mode B — ASSET-PREVIEW (eyeball one parsed asset as a mesh)
+
+When you have changed (or are validating) an asset parser, the fastest sanity check is to **see one
+asset rendered**: is the building scene the right shape, is the character mesh inside-out, does the
+terrain cell tile correctly? This mode loads a single real asset from the VFS, builds Godot geometry
+from the *parsed* data with the project's own mesh builders, isolates it in a tiny preview scene, and
+captures a screenshot. You are **eyeballing the parser's output against the IDA-derived format spec**
+(`Docs/RE/formats/`) — "right shape" means *the shape the spec predicts*; a divergence is a
+parser-vs-spec defect to name, not an excuse to tweak the preview until it looks plausible.
+
+### The two iron rules
+
+1. **NEVER use `GltfDocument.AppendFromBuffer`** — it crashes natively on this project's generated GLBs.
+   Build a Godot `ArrayMesh` directly with the existing builders: `World/BudMeshBuilder.cs`
+   (`BudMeshBuilder.Build(BudScene, textureResolver?)` → a `Node3D`), `World/SknMeshBuilder.cs`
+   (`SknMeshBuilder.Build(SkinnedMesh, albedoTexture?)` → a static-bind-pose `MeshInstance3D`; runtime
+   skinning is a known TODO — the mesh renders static), or the `World/TerrainNode` per-patch ArrayMesh
+   pattern (16×16 patches, 65×65 grid) for `.ted`/`.map`.
+2. **Match the coordinate conventions exactly:** WORLD geometry negates Z (`.bud` vertices are pre-baked
+   absolute world-space, terrain is world-space — use `Helpers/WorldCoordinates.ToGodot`; `BudMeshBuilder`
+   already does this); MESH-LOCAL `.skn` geometry negates X (model-local, inside `SknMeshBuilder`, with
+   the CW→CCW winding swap + UV v-flip — do not also negate Z on a `.skn`). Cell = 1024 units; grid 65×65;
+   spacing 16.
+
+### Steps
+
+1. **Pick and confirm the asset.** Use `/pak-explore`'s vfs-inspect mode to find the exact VFS path of
+   the `.bud`, `.skn`, or `.ted` (e.g. a building from `map000`, a character `.skn`); note its size.
+2. **Stage the preview harness.** Copy `${CLAUDE_SKILL_DIR}/scripts/AssetPreviewNode.cs` into the project
+   as `res://Dev/AssetPreviewNode.cs`. It reads the VFS path + asset kind from env vars
+   (`MH_PREVIEW_PATH`, `MH_PREVIEW_KIND`), opens the VFS, parses the asset via `Assets.Parsers`, builds
+   geometry with the matching builder (Bud/Skn — **never GltfDocument**), and adds a camera framing the
+   mesh's AABB + a key light. Adjust the parser/builder calls to the current parser API as needed.
+3. **Wire a one-node preview scene.** Either author a tiny `res://Dev/AssetPreview.tscn` with a single
+   root carrying `AssetPreviewNode.cs` (attach the script as a PROPERTY LINE — Mode A above), or register
+   it as a temporary autoload. Set the env vars to the chosen asset.
+4. **Build, then screenshot.** Run `/godot-build`, then `/godot-run-headless`'s screenshot mode (windowed)
+   against the preview scene; Read the PNG back.
+5. **Inspect.** Is the shape sane and right-side-out? Buildings near origin (not mirrored ~1000+ units
+   away — a Z/X negate mix-up)? Character upright (the known skinning-explosion debt renders it static,
+   which is expected)? UVs tiling rather than smeared?
+6. **CLEANUP.** Remove the temporary preview scene/autoload + `AssetPreviewNode.cs` (+ `.uid`) and the
+   `_shot.gd` artifacts. Report the asset previewed, the PNG path, and what you observed.
+
+**Decide:** mesh mirrored or ~1000+ units off → a Z/X negate mix-up (world negates Z, mesh `.skn`
+negates X — never both, never swapped) → quantify with `/godot-scene-author`'s coordinate-check mode.
+Character exploded/static → the known skinning debt (expected for a `.skn`). Empty frame → warmup too
+short (bump `-Frames`) or the parser threw (check the headless output first). Reaching for
+`GltfDocument.AppendFromBuffer` → STOP; use the ArrayMesh builders. For a 1:1 verdict vs the original
+asset (not just "shape is sane") → use Mode A.
 
 ## Hard rules
 
-- **Read-only.** Never edit a scene, node, transform, material, or C# to "make it look right" — that
-  destroys the measurement and is the engineers' job. The only thing you write is the temporary
-  screenshot autoload, which you **remove afterward** (Step 3).
+- **Mode A is read-only.** Never edit a scene, node, transform, material, or C# to "make it look
+  right" — that destroys the measurement and is the engineers' job. The only things written are the
+  *temporary* screenshot autoload (removed afterward) and, in **Mode B**, the temporary preview harness
+  (`AssetPreviewNode.cs` + a one-node scene/autoload), which you **remove afterward** — never edit
+  production scenes/world code to flatter a result.
+- **Build `ArrayMesh` directly** in Mode B via `BudMeshBuilder` / `SknMeshBuilder` / the TerrainNode
+  pattern; `GltfDocument.AppendFromBuffer` is BANNED (native crash). WORLD assets negate Z; MESH-LOCAL
+  `.skn` negates X — never swap them.
 - **Passive-rendering rule.** The client holds **zero game-rule authority**; a fidelity gap is a
   *rendering/placement* divergence, not a reason to add game logic to layer 05. If correctness depends
   on a rule, the fix belongs below 05 (Application/Domain), not in the Godot project.
 - **Heed the Godot pitfalls** when diagnosing: a gray/blank scene is usually a `.tscn` `script` written
-  as a header attribute instead of a property line (silently ignored -> no `_Ready`); inside
+  as a header attribute instead of a property line (silently ignored → no `_Ready`); inside
   `MartialHeroes.Client.Godot.*` a bare `Input.`/`Environment.`/`Time.` collides with a sibling
-  namespace (use `global::Godot.*`); never `GltfDocument.AppendFromBuffer` (native crash — meshes are
-  built as `ArrayMesh`). Do not propose a "fix" that reintroduces one of these.
+  namespace (use `global::Godot.*`); never `GltfDocument.AppendFromBuffer` (native crash). Do not propose
+  a "fix" that reintroduces one of these.
 - **Clean-side firewall.** This skill never reads `Docs/RE/_dirty/`, never calls IDA, and never
   transcribes decompiler output. Forbidden tokens — `sub_`, `loc_`, `_DWORD`, `__thiscall`, raw image
-  addresses, Hex-Rays pseudo-C — must NOT appear in this skill's report (this list exists only to
-  prohibit them). The oracle is the committed clean specs + `CLAUDE.md`, nothing dirty.
-- **Never commit originals.** The screenshot may depict copyrighted, user-supplied assets — it stays a
-  scratch artifact in temp (client `*.png` are gitignored for exactly this reason). Never copy asset
-  bytes, `.pak`/`.vfs`/`.dds`/`.mot`/`.skn` payloads, or the PNG into the repo. The bundled scorer
-  reads only the text stdout log, never asset bytes.
+  addresses, Hex-Rays pseudo-C — must NOT appear in this skill's report. The oracle is the committed
+  clean specs + `CLAUDE.md`, nothing dirty.
+- **Never commit originals.** A screenshot or previewed asset may depict copyrighted, user-supplied
+  material — it stays a scratch artifact in temp (client `*.png` are gitignored). Never copy asset bytes,
+  `.pak`/`.vfs`/`.dds`/`.mot`/`.skn` payloads, or the PNG into the repo. The bundled scorer reads only
+  the text stdout log, never asset bytes.
 
 ## Pairs with
 
-`godot-run-headless` (Step 2 capture) · `godot-screenshot` (Step 3 frame) ·
-`godot-coordinate-check` (Step 4 axis confirmation) · `asset-chain-trace` (resolve a failed chain hop
-to its on-disk VFS file) · the `@godot-render-reviewer` agent (receives this report and routes the fix).
+`godot-run-headless` (Mode A capture + the windowed screenshot mode) · `godot-scene-author`
+(coordinate-check mode for axis confirmation; the `.tscn` script-binding trap) · `pak-explore`
+(vfs-inspect mode to confirm an asset path) · `asset-chain-trace` (resolve a failed chain hop to its
+on-disk VFS file) · the `@render-reviewer` agent (receives this report and routes the fix).
