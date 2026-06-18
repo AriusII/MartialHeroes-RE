@@ -104,7 +104,7 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 
 | Widget | type | x | y | w | h | srcX | srcY | atlas | action | notes |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Server-list submit button | button3 | 456 | 166 | 112 | 39 | N154,398 / H378,398 | A1 | 102 | reveals server-list |
+| Quit/exit-confirm button | button3 | 456 | 166 | 112 | 39 | N154,398 / H378,398 | A1 | 102 | opens the quit/exit-confirm panel (NOT the server-list); always visible at rest |
 | Server-list plate | image | 265 | 0 | 494 | 113 | 0 | 469 | A1 | — | shown |
 | ID label plate | image | 340 | 30 | 38 | 13 | 0 | 398 | A1 | — | |
 | PW label plate | image | 507 | 30 | 49 | 13 | 38 | 398 | A1 | — | |
@@ -113,8 +113,19 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; maxlen 129; masked |
 | **Save-ID checkbox** | checkbox | 694 | 86 | 13 | 13 | off 717,398 / on 730,398 | A1 | 104 | |
 | **OK / Login button** | button3 | 456 | 64 | 112 | 39 | N266,398 / H490,398 | A1 | 103 | |
-| Help/Quit strip | button3 | 456 | −3 | 111 | 38 | N792,398 / H602,416 | A1 | 105 | on the form strip |
-| Help plate | image | 407 | −3 | 210 | 70 | 743 | 398 | A1 | — | |
+| Server-list open/refresh strip | button3 | 456 | −3 | 111 | 38 | N792,398 / H602,416 | A1 | 105 | opens/refreshes the server-list (→ sub-state 34); HIDDEN at rest, shown only with the server-list (states 35..37) |
+| Server-list strip deco plate | image | 407 | −3 | 210 | 70 | 743 | 398 | A1 | — | hidden at rest; shown with the server-list strip |
+
+> **Action semantics (CORRECTED vs the binary dispatch — the buttons are mislabelled by appearance):**
+> action **102** = quit/exit-confirm (opens the exit panel; does NOT open the server-list; always visible at rest);
+> action **105** = server-list open/refresh (sets sub-state 34 → the FSM shows the server-list 34→35→37; the 105
+> strip + its deco are HIDDEN at rest and shown only with the server-list). The server-list is also reached
+> automatically in the login flow after credential validation (state 33→34→…→37), not only by the 105 strip.
+> Action 101 = immediate quit; 103 = login submit (→29); 104 = save-ID; 109/110 = ID/PW focus; 111 = continue (→5);
+> 112/113/114 = exit-confirm / re-fetch popups; 115..124 = server-list paging (state 37); 400/401 = select left/right
+> server plate (→38). The genuine quit closes via the exit panel's Yes (close event 10001 / engine run-flag clear).
+> The login **form host strip + credential group RIDE the bottom curtain to canvas Y=548** (the closed build Y is
+> 326); freezing them at 326 puts the whole form ~222 px too high (the "piled-up" disorder). Oracle-verified.
 
 **PIN yes/no panel children** (the "use second password?" prompt):
 

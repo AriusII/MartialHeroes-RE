@@ -71,6 +71,7 @@ public sealed partial class SceneHost : Node
     public void Advance()
     {
         EngineSceneState before = _machine.Current.State;
+
         if (!_machine.AdvanceScene())
         {
             GD.Print($"[SceneHost] state {(int)before} {before} — no further advance (spine settled).");
@@ -114,8 +115,7 @@ public sealed partial class SceneHost : Node
             return;
         }
 
-        // In layout-dump mode, hold each scene much longer so its async layout dump completes before
-        // the walk advances (the login dump snaps the curtain + opens the server-list & PIN sub-views).
+        // In layout-dump mode, hold each scene longer so its async layout dump completes before advancing.
         double delay = Dev.LayoutDump.Enabled ? 6.0 : 0.2;
         SceneTreeTimer timer = GetTree().CreateTimer(delay);
         timer.Timeout += Advance;

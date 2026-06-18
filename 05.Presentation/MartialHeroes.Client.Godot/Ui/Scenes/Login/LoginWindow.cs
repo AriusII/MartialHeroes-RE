@@ -8,7 +8,7 @@
 // Sub-state machine (§2.2):
 //   1  intro one-shot: SFX 861010105; reset curtain offset; hide all groups.         → 2
 //   2  curtain opening: offset+=5/tick; top Y=−offset; bot Y=offset+326;
-//      offset>200 snap submit plate to (494,469); offset>222                         → 3
+//      offset>222                                                                    → 3
 //   3  curtain done; host strip already present; credential group still hidden.       → 4
 //   4  form idle; Enter → 5                                                       (event)
 //   5  commit form.                                                                   → 6
@@ -71,15 +71,8 @@ public sealed partial class LoginWindow : Control
     // Stop (→ state 3) when offset > 222. spec §2.2.
     private const float CurtainCompleteThresh = 222f; // spec: frontend_layout_tables.md §2.2. CODE-CONFIRMED.
 
-    // Snap submit plate when offset > 200. spec §2.3.
-    private const float CurtainSnapThresh = 200f; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
-
     // Bottom curtain base Y (= 326). spec §2.3 "bottom Y = offset + 326".
     private const int CurtainBotBaseY = 326; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
-
-    // Submit plate snaps to canvas (494,469). spec §2.3.
-    private const int SubmitPlateSnapX = 494; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
-    private const int SubmitPlateSnapY = 469; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
 
     // Dialog fade ±64/frame. spec: frontend_layout_tables.md §2.
     private const int DialogFadeStep = LoginLayout.DialogFadeStep; // 64
@@ -126,7 +119,6 @@ public sealed partial class LoginWindow : Control
     // Curtain state.
     private float _curtainAcc;
     private bool _curtainDone;
-    private bool _submitPlateSnapped;
 
     // --- Layer containers (visibility gated per sub-state) ---
 
@@ -162,8 +154,13 @@ public sealed partial class LoginWindow : Control
     private TextureRect? _curtainTop; // Y = −offset
     private TextureRect? _curtainBot; // Y = offset + 326
 
-    // Server-list submit plate button (snaps position on curtain>200). spec §2.3.
-    private Control? _submitPlateCont;
+    // Form backing children ride with the bottom curtain panel. spec §2.3.
+    private Control? _formPanel;
+    private Control? _credPanel;
+
+    // Server-list strip and deco are visible only while the server list is open. spec §2.2.
+    private Control? _serverListStrip;
+    private Control? _serverListStripDeco;
 
     // Re-fetch popups (msg 4023/4024, OK action 113/114 → restart fetch). spec §2.2.
     private Control? _quitModal;
@@ -256,6 +253,9 @@ public sealed partial class LoginWindow : Control
             RunState(31); // raise PIN via the real path: ApplyVisibility shows _pinKeypadRoot, DispatchState opens it.
             for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
             Dev.LayoutDump.Dump(this, "LOGIN-PIN");
+
+            // Return to rest so the scene auto-walk can cleanly advance Login→Load→Opening for their dumps.
+            RunState(4);
         }
         catch (Exception ex)
         {
@@ -349,6 +349,10 @@ public sealed partial class LoginWindow : Control
         if (_serverListRoot is not null)
             _serverListRoot.Visible = state is >= 35 and <= 37;
 
+        bool serverListOpen = state is >= 35 and <= 37;
+        if (_serverListStrip is not null) _serverListStrip.Visible = serverListOpen;
+        if (_serverListStripDeco is not null) _serverListStripDeco.Visible = serverListOpen;
+
         // PIN yes/no: hidden (init hidden, separate prompt not in active flow). spec §2.1.
         if (_pinYesNoPanel is not null)
             _pinYesNoPanel.Visible = false;
@@ -369,7 +373,6 @@ public sealed partial class LoginWindow : Control
                 // spec: §2.2 "1 intro one-shot: play curtain SFX 861010105 (cat 2); reset curtain offset 0".
                 _curtainAcc = 0f;
                 _curtainDone = false;
-                _submitPlateSnapped = false;
                 Audio?.PlayLoginCurtainSfx();
                 GD.Print("[LoginWindow] State 1: SFX 861010105. spec: §2.2/§7.");
                 RunState(2);
@@ -493,19 +496,9 @@ public sealed partial class LoginWindow : Control
         if (_curtainBot is not null)
             _curtainBot.Position = new Vector2(0f, CurtainBotBaseY + _curtainAcc);
 
-        // At offset > 200: snap submit plate to (494,469). spec §2.3. CODE-CONFIRMED.
-        if (!_submitPlateSnapped && _curtainAcc > CurtainSnapThresh)
-        {
-            _submitPlateSnapped = true;
-            if (_submitPlateCont is not null)
-            {
-                // The snap is canvas-absolute; the button is parented to formPanel at Y=326.
-                // So form-panel-local snapped pos = (494, 469−326) = (494, 143).
-                _submitPlateCont.Position = new Vector2(SubmitPlateSnapX, SubmitPlateSnapY - CurtainBotBaseY);
-            }
-
-            GD.Print("[LoginWindow] Curtain offset>200: submit plate snapped. spec: §2.3.");
-        }
+        float formRideY = CurtainBotBaseY + _curtainAcc;
+        if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formRideY);
+        if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formRideY);
 
         if (_curtainAcc >= CurtainCompleteThresh)
         {
@@ -521,12 +514,9 @@ public sealed partial class LoginWindow : Control
         _curtainAcc = CurtainCompleteThresh;
         if (_curtainTop is not null) _curtainTop.Position = new Vector2(0f, -CurtainCompleteThresh);
         if (_curtainBot is not null) _curtainBot.Position = new Vector2(0f, CurtainBotBaseY + CurtainCompleteThresh);
-        if (!_submitPlateSnapped)
-        {
-            _submitPlateSnapped = true;
-            if (_submitPlateCont is not null)
-                _submitPlateCont.Position = new Vector2(SubmitPlateSnapX, SubmitPlateSnapY - CurtainBotBaseY);
-        }
+        float formOpenY = CurtainBotBaseY + CurtainCompleteThresh; // 548
+        if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formOpenY);
+        if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formOpenY);
 
         _curtainDone = true;
         if (_flowSubState < 3) RunState(3);
@@ -682,7 +672,7 @@ public sealed partial class LoginWindow : Control
         _formGroup.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         AddChild(_formGroup);
 
-        // Form panel at fixed canvas Y=326 (NOT animated). spec §2.1.
+        // Form panel starts at closed Y=326 and rides the bottom curtain to open Y=548. spec §2.3.
         var formPanel = new Control
         {
             Name = "FormPanel",
@@ -691,6 +681,7 @@ public sealed partial class LoginWindow : Control
             MouseFilter = MouseFilterEnum.Pass,
         };
         _formGroup.AddChild(formPanel);
+        _formPanel = formPanel;
 
         // Confirm face-plate: A1 dst(265,0,494,113) src(0,469). spec §2.1 "Server-list plate".
         AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
@@ -698,9 +689,8 @@ public sealed partial class LoginWindow : Control
             LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H,
             LoginLayout.ConfirmFacePlate.SrcX, LoginLayout.ConfirmFacePlate.SrcY);
 
-        // Server-list submit button — action 102. A1 N(154,398) H(378,398). spec §2.1.
-        // Starts at form-local (456,166); snaps to canvas (494,469) when curtain>200.
-        // spec: §2.3 "at offset>200 snap the server-list submit plate to (494,469)".
+        // Quit-confirm button — action 102. A1 N(154,398) H(378,398). spec §2.1.
+        // Rides with the form panel to its open resting canvas position. spec §2.3.
         HudButton serverBtn = HudWidgetFactory.MakeButton3(_atlas,
             LoginLayout.AtlasLoginSlice1,
             LoginLayout.ConfirmButton.X, LoginLayout.ConfirmButton.Y,
@@ -713,12 +703,11 @@ public sealed partial class LoginWindow : Control
         if (serverCtrl is not null)
         {
             serverCtrl.Name = "ServerSubmitButton";
-            _submitPlateCont = serverCtrl; // tracked for snap. spec §2.3.
             formPanel.AddChild(serverCtrl);
         }
 
         // Quit/help strip deco: A1 dst(407,-3,210,70) src(743,398). spec §2.1 "Help plate".
-        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
+        _serverListStripDeco = AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
             LoginLayout.QuitDecoPlate.X, LoginLayout.QuitDecoPlate.Y,
             LoginLayout.QuitDecoPlate.W, LoginLayout.QuitDecoPlate.H,
             LoginLayout.QuitDecoPlate.SrcX, LoginLayout.QuitDecoPlate.SrcY);
@@ -736,6 +725,7 @@ public sealed partial class LoginWindow : Control
         if (quitCtrl is not null)
         {
             quitCtrl.Name = "HelpQuitButton";
+            _serverListStrip = quitCtrl;
             formPanel.AddChild(quitCtrl);
         }
     }
@@ -749,7 +739,7 @@ public sealed partial class LoginWindow : Control
 
     private void BuildCredentialGroup()
     {
-        // Full-canvas container at the same Y=326 origin (matching formPanel's canvas origin).
+        // Full-canvas container with an inner panel that rides with the bottom curtain.
         // Built hidden; shown only by ApplyVisibility on the 5→6 edge. No direct .Visible elsewhere.
         // spec: §2.2 bands "Interactive credential group | state ≈ 5..33" (CORRECTED, CYCLE 18 C5b).
         _credentialGroup = new Control
@@ -770,6 +760,7 @@ public sealed partial class LoginWindow : Control
             MouseFilter = MouseFilterEnum.Pass,
         };
         _credentialGroup.AddChild(credPanel);
+        _credPanel = credPanel;
 
         // ID label plate: A1 (340,30,38,13) src(0,398). spec §2.1 "ID label plate".
         AddRect(credPanel, LoginLayout.AtlasLoginSlice1,
@@ -880,10 +871,11 @@ public sealed partial class LoginWindow : Control
     }
 
     // Helper: add an atlas TextureRect as a child of parent.
-    private void AddRect(Control parent, string atlas, int x, int y, int w, int h, int srcX, int srcY)
+    private TextureRect? AddRect(Control parent, string atlas, int x, int y, int w, int h, int srcX, int srcY)
     {
         TextureRect? r = HudWidgetFactory.MakeAtlasRect(_atlas, atlas, x, y, w, h, srcX, srcY);
         if (r is not null) parent.AddChild(r);
+        return r;
     }
 
     // -------------------------------------------------------------------------
