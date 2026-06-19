@@ -1,0 +1,62 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgAutoInteract
+opcode: 0x2008b           # major 2 (GameAction), minor 139 -> (2 << 16) | 139
+direction: C2S
+size: 28                  # fixed 28-byte payload (4-byte header + 24-byte context)
+spec: packets/2-139_auto_interact.yaml
+status: confirmed
+capture_verified: false
+
+summary: Proximity-based auto-interaction with nearby NPC. Sent when the client triggers an automatic interaction based on proximity to an NPC actor.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 28.
+fields:
+  - { name: InteractionType, type: u8  }          # 0x00  always 1 (proximity/auto)
+  - { name: SlotIndex,       type: u8  }          # 0x01  slot index
+  - { name: ChannelByte,     type: u8  }          # 0x02  local player channel flag
+  - { name: Reserved0,       type: u8  }          # 0x03  reserved / alignment
+  - { name: TargetActorId,   type: u32 }          # 0x04  target NPC actor id
+  - { name: Context,         type: "u8[24]" }     # 0x08  zeroed for auto-interact
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (28 bytes),
+  CAPTURE-UNVERIFIED meaning.
+
+    0x00 (1B)  InteractionType : interaction type; always 1 for proximity/auto (le u8).
+    0x01 (1B)  SlotIndex       : slot index within the interaction UI (le u8).
+    0x02 (1B)  ChannelByte     : local player channel flag (le u8).
+    0x03 (1B)  Reserved0       : reserved alignment byte (le u8).
+    0x04 (4B)  TargetActorId   : target NPC actor id (le u32).
+    0x08 (24B) Context         : context buffer; zeroed for auto-interact.
+
+  CONTEXT: the auto-interact fires when the player walks within proximity range of
+  an interactable NPC. The 24-byte Context region is zeroed in the auto-interact path;
+  manual interaction variants may populate it differently.
+
+  [UNVERIFIED] REFINED READING: a later actor-interaction pass reads the 28-byte body as a
+  caller-prepared interaction struct (leading flag byte = 1 in the observed caller, an interaction/
+  target index byte, two local-player fields, then a mostly-zero 20-byte tail):
+    0x00 (1B)  Flag           : 1 (constant in the observed caller).
+    0x01 (1B)  InteractIndex  : interaction / target index. [capture/debugger-pending]
+    0x02 (1B)  LocalField0    : a local-player byte field. [capture/debugger-pending]
+    0x03 (1B)  pad
+    0x04 (4B)  LocalField1    : a local-player u32 field (id/position?). [capture/debugger-pending]
+    0x08 (20B) Tail           : zero-filled scratch (mostly pad). [capture/debugger-pending]
+  Both readings agree the body is 28 bytes (a small-byte header + a u32 + a 20/24-byte mostly-zero
+  tail) and that the caller resolves an actor (checking an NPC type) before sending; they differ on
+  whether the leading bytes are an InteractionType/SlotIndex pair or a Flag/InteractIndex pair. The
+  precise field roles are capture/debugger-pending; the file keeps its existing name.
+
+  [UNVERIFIED] NAME COLLISION: 2/139 and 2/16 were both staged under the working name
+  "CmsgActorInteract" in the dirty-room notes. They are DISTINCT opcodes (2/139 = 28-byte actor/NPC
+  interaction; 2/16 = 12-byte mode-100 family, see packets/2-16_actor_interact_mode100.yaml). This
+  file is keyed by major-minor (2/139); the collision is left for the names lane to settle.
+
+  UNKNOWNS to resolve with a capture:
+    - what InteractionType / Flag values exist and the leading-byte field roles;
+    - whether the 20/24-byte tail is ever non-zero;
+    - the meaning of the local-player fields.
+
+  UNBLOCKS: Client.Application NPC interaction handling.

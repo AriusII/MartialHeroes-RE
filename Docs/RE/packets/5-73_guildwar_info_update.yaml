@@ -35,12 +35,27 @@ notes: |
     - the handler forwards the block to the guild-war info window (GuildWarInfoPanel) and drives a
       sibling war-alarm banner; a success subtype byte plays/stops a war-state sound.
 
-  BODY SHAPE (static, value meaning capture-pending -- do NOT guess offsets): the panel reads, out of
-  the copied block, an array of up to 10 per-entry records (each entry = an item/icon id + a 17-byte
-  CP949 name + a numeric value), plus an overall active/state byte that gates the banner. The exact
-  in-block offsets of the record array vs the name array are NOT cleanly static (the panel interleaves
-  them into its object fields) and MUST be confirmed against a real 5/73 capture before any field is
-  parsed. Reserved as opaque.
+  BODY SHAPE (static, value meaning capture-pending -- do NOT guess offsets): the handler reads a
+  verdict header then forwards the whole block into a mirror struct that the panel walks. The body is:
+    +8  (4B) verdict selector (u32) : the handler tests == 1 to gate the whole success path.
+    +12 (1B) sub-verdict (u8)       : tested == 1 / == 2 (success vs cancel-sound).
+    +13 .. (331 bytes)              : copied VERBATIM into the panel/state mirror; the panel then
+                                      walks the MIRROR (not the raw wire), rendering a 10-row table
+                                      where each row carries a CP949 name (17-byte cell) plus a number.
+  Because the 331-byte body is copied verbatim into the mirror, the EXACT wire offset of the 10-row
+  name+number array inside the 344 bytes is NOT pinned by a wire-side loop (it is pinned only relative
+  to the mirror base). So the body is reserved opaque here: the verdict header (+8 u32, +12 u8) is the
+  only wire-pinned part; the 10-row table's wire offset is capture-pending. Do NOT guess offsets
+  inside the verbatim region.
+
+  NAME-DISPUTE PROVENANCE [UNVERIFIED from body shape]: the static body shape -- a verdict header
+  followed by a 10-row name+number table -- fits EITHER a quest-completion summary OR a guild-war
+  info/ranking board equally well; a mild, non-decisive lean toward an info/ranking-table reading
+  (slightly favouring GuildWarInfo) does NOT refute QuestComplete from shape alone. The dispute
+  (SmsgQuestComplete vs SmsgGuildWarInfoUpdate) is therefore [UNVERIFIED] on body-shape evidence.
+  The name SmsgGuildWarInfoUpdate carried in this file rests on a SEPARATE binary re-confirmation
+  (the handler forwards to the guild-war info window and drives a war-alarm banner -- a behaviour
+  read, not a shape read), which is why it stands; the body-shape lane alone could not settle it.
 
   WHICH VALUE IS WHAT (capture/debugger-pending): which numeric is a score vs a timer vs a wager,
   which name is "our guild" vs "opposing guild", and the war-status enum are all unknown from static

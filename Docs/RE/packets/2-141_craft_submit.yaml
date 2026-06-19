@@ -1,0 +1,56 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgCraftSubmit
+opcode: 0x2008d           # major 2 (GameAction), minor 141 -> (2 << 16) | 141
+direction: C2S
+size: 76                  # fixed 76-byte payload (56 + 16 + 4)
+spec: packets/2-141_craft_submit.yaml
+status: confirmed
+capture_verified: false
+
+summary: Crafting/production recipe submission. Carries 14 material slot values, 4 extra parameter dwords, and the NPC actor index.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 76.
+fields:
+  - { name: MaterialSlots, type: "u32[14]" }      # 0x00  56 bytes: 14 material slot values
+  - { name: ExtraParams,   type: "u32[4]" }       # 0x38  16 bytes: 4 extra parameters
+  - { name: NpcActorIndex, type: u8 }              # 0x48  NPC actor index
+  - { name: Padding,       type: "u8[3]" }        # 0x49  padding to 76 bytes
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (76 bytes),
+  CAPTURE-UNVERIFIED meaning.
+
+    0x00 (56B) MaterialSlots : 14 little-endian u32 values, one per material slot in the
+                               crafting grid. Each slot holds either a material item id or
+                               zero if the slot is empty.
+    0x38 (16B) ExtraParams   : 4 little-endian u32 values for extra crafting parameters.
+                               Their individual meanings are not yet enumerated.
+    0x48 (1B)  NpcActorIndex : the NPC actor index the player is interacting with for
+                               crafting (le u8).
+    0x49 (3B)  Padding       : padding to bring total to 76 bytes.
+
+  CONTEXT: sent when the player confirms a crafting recipe at a crafting NPC.
+  The MaterialSlots array corresponds to the 14-slot crafting panel grid in the UI.
+
+  UNKNOWNS to resolve with a capture:
+    - the meaning of each ExtraParams dword;
+    - whether MaterialSlots holds item ids, slot indices, or quantity-packed values;
+    - whether NpcActorIndex is an index or a truncated actor id.
+
+  UNBLOCKS: Client.Application crafting/production submission flow.
+
+  ALTERNATE-ROLE NOTE (B9 unknown-sweep, source c2s_unknown_sweep_band5.md §2/141): a separate static
+  lane reads opcode 2/141 as a CHARACTER STATUS / STAT-PANEL SNAPSHOT SUBMIT (proposed name
+  CmsgCharStatusSubmit), NOT a crafting submit. Both readings agree on the 76-byte fixed size; they
+  DISAGREE on the internal field split:
+    - this file's craft reading: u32[14] material slots (0x00) + u32[4] params (0x38) + u8 npc index
+      (0x48) + 3B pad.
+    - the status-submit reading: a 56-byte status/stat block A (0x00), a 16-byte status/stat block B
+      (0x38), a 1-byte local-player flag (0x48), + 3B pad. Its trigger is a character status/vitals
+      panel refresh+submit gated by a "changed/dirty" flag (it also rewrites the panel's vitals labels).
+  The two are CONFLICTING interpretations of the same minor [collision -- pending Tier-1 arbitration].
+  The 56+16+1 split is itself a candidate for re-struct-analyst (inner field layout pending). Both
+  readings are flagged here; neither is silently dropped. The canonical 2/141 role/name (CmsgCraftSubmit
+  vs CmsgCharStatusSubmit) is a Tier-1 reconciliation. capture/debugger-pending either way.

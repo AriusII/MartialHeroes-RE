@@ -1,0 +1,20 @@
+name: CmsgLeaveWorld
+opcode: 0x20000           # major 2, minor 0 -> (2 << 16) | 0
+direction: C2S
+size: 0                   # header-only; no payload
+spec: packets/2-0_leave_world.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Leave world / logout to lobby request. A header-only frame with no payload.
+  Emitted from the leave-world-to-logout scene path.
+
+fields: []
+
+notes: |
+  Static analysis only; no capture. Frame = the 8-byte header alone (major=2, minor=0), no payload.
+  The builder allocates a packet, writes the major/minor header words, and sends -- it makes no
+  payload-write call.
+  
+  ROLE: leave world / logout to lobby, reached from the leave-world-to-logout scene path.

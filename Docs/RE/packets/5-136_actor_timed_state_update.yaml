@@ -1,0 +1,31 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-136).
+# size: 16 bytes (0x10) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorTimedStateUpdate
+opcode: 0x50088           # major 5 (Push), minor 136 -> (5 << 16) | 136
+direction: S2C
+size: 16                  # fixed 16-byte payload (0x10)
+spec: packets/5-136_actor_timed_state_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor timed state update. Sets a temporary or periodic state flag and value on an actor,
+  optionally propagating it to a linked companion actor.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: TimedStateValue, type: u32, offset: 8 } # timed state duration or value (stored to offset 1416)
+  - { name: StateFlag, type: u8, offset: 12 }       # state flag byte (stored to offset 1412)
+  - { name: Padding, type: "u8[3]", offset: 13 }    # alignment padding to 16 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the actor via (ActorSort, ActorId), checking local player first before falling back to the manager.
+    - Writes TimedStateValue to actor offset 1416, and StateFlag to actor offset 1412.
+    - If the actor has a linked partner/companion (offset 1780), propagates the TimedStateValue to the partner.
+    - Triggers a UI interface update on the HUD state bar.

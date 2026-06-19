@@ -1,0 +1,50 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: fixed 204-byte (0xCC) copy + four explicit fixed-offset CP949 string reads
+# that exactly fill the body. VALUE semantics of the text are the strings themselves. capture_verified: false.
+# spec: Docs/RE/packets/4-103_guild_panel_text_update.yaml
+
+name: SmsgGuildPanelTextUpdate
+opcode: 0x40067           # major 4 (Response), minor 103 -> (4 << 16) | 103
+direction: S2C
+size: 204                # fixed 204-byte payload block (0xCC)
+spec: packets/4-103_guild_panel_text_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Server pushes the four free-text lines of the guild panel. A fixed 204-byte block whose body
+  carries four fixed-width CP949 text cells (49-byte stride) that the consumer assigns to four guild
+  panel label slots. The leading 8 bytes are an unread header region; the four cells then fill the
+  rest of the body exactly.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 204. The text cells are
+# modelled as fixed CP949 byte cells (49-byte stride each); the engineer decodes each cell as a
+# NUL-terminated CP949 string.
+fields:
+  - { name: HeaderPad0, type: "bytes[8]" }    # +0    leading header region; not read as text (possibly subtype/flags). Semantics PENDING.
+  - { name: TextCell1,  type: "bytes[49]" }   # +8    guild text line 1, CP949 (49-byte cell)
+  - { name: TextCell2,  type: "bytes[49]" }   # +57   guild text line 2, CP949 (49-byte cell)
+  - { name: TextCell3,  type: "bytes[49]" }   # +106  guild text line 3, CP949 (49-byte cell)
+  - { name: TextCell4,  type: "bytes[49]" }   # +155  guild text line 4, CP949 (49-byte cell) -- ends exactly at +204
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing + size + cell layout (a fixed 0xCC bulk copy followed by four
+  explicit fixed-offset string reads). The four cells are a fixed 49-byte stride (+8 -> +57 -> +106
+  -> +155) and +155 + 49 = +204 = the exact body end; there are NO trailing bytes. The field widths
+  sum to exactly 204 (verified).
+
+  THE FOUR TEXT CELLS:
+    +8   (49B) TextCell1 : guild panel text line 1 (CP949, NUL-terminated within the cell).
+    +57  (49B) TextCell2 : guild panel text line 2 (CP949).
+    +106 (49B) TextCell3 : guild panel text line 3 (CP949).
+    +155 (49B) TextCell4 : guild panel text line 4 (CP949).
+
+  Before assigning these four, the consumer first clears four OTHER labels to empty -- that is a UI
+  reset, not a wire field. The leading 8 bytes (HeaderPad0) are not read as text by the consumer;
+  whether they carry a subtype / flags is PENDING (capture-pending).
+
+  RELATIONSHIP: the guild window's full roster/identity sync is 4/65 SmsgGuildInfoFullSync
+  (packets/4-65_guild_info_full_sync.yaml). This message updates only the panel's free-text lines.
+
+  UNBLOCKS: the Client.Application guild-panel text handler (4/103) and the four guild text labels in
+  the Godot guild window.

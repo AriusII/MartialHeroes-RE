@@ -50,4 +50,14 @@ notes: |
     - the meaning / constant value of the trailing Tail byte;
     - confirm the name filter is CP949 NUL-padded and that empty = list-all on the wire.
 
+  ALTERNATE-LAYOUT NOTE (B6 market/mail lane, source c2s_market_mail.md §5): a separate static lane
+  reads the same fixed 32-byte body as a FLAT 8 x u32 search/filter criteria block (the caller copies an
+  8-dword struct and blits the criteria buffer whole), with the per-field meanings (category / price-min
+  / price-max / page / sort) all pending. That reading and this file's [u8 Flag][char[30] Name][u8 Tail]
+  reading are two interpretations of the same 32-byte send -- they agree on the 32-byte SIZE but differ
+  on whether the body is a name-filter string or an 8-dword numeric criteria block
+  [conflict -- pending capture/Tier-1 arbitration]. A captured stall search with a known query would
+  settle which structure is on the wire; until then the size is firm and the internal split is the only
+  residual.
+
   UNBLOCKS: the Client.Application stall-list request/search use-case (send-only).

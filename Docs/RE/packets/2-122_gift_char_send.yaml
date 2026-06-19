@@ -1,0 +1,59 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band5.md §2/122 (gift-character SEND with second password).
+# Role: the "gift character" feature's send -- offer a character to another account, second-password gated.
+#
+# CAPTURE-UNVERIFIED: the 12-byte size and the {u32, u8, char[4]} shape are control-flow CONFIRMED from
+# the builder; the field VALUE meanings (recipient id identity, the 4-char field, the group byte) are
+# capture/debugger-pending. capture_verified: false.
+
+name: CmsgGiftCharSend
+opcode: 0x2007a           # major 2 (GameAction), minor 122 (0x7a) -> (2 << 16) | 122
+direction: C2S
+size: 12                  # FIXED 12-byte body
+spec: packets/2-122_gift_char_send.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The "gift character" feature's SEND. Offers a character to a recipient, gated by a second-password
+  (PIN-style) keypad confirm. A fixed 12-byte body carrying a recipient/target id, a group/role byte,
+  and a short 4-character ASCII field (a PIN / short code), NUL-terminated and zero-padded. Companion to
+  2/123 (the receive-confirm). Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+# CONTROL-FLOW CONFIRMED: the builder zero-fills a 12-byte scratch, stores a u32 and a u8, then copies a
+# 4-char field (NUL-terminated), and blits 12 bytes.
+fields:
+  - { name: TargetId,  type: u32 }            # 0x00  recipient / target id [exact identity capture/debugger-pending]
+  - { name: GroupByte, type: u8 }             # 0x04  group / role byte (caller resolves a party member by group id) [pending]
+  - { name: Code,      type: "bytes[4]" }     # 0x05  4-char ASCII field (PIN / short code), strncpy'd [pending]
+  - { name: CodeNul,   type: u8 }             # 0x09  NUL terminator of the Code field (always 0)
+  - { name: Pad0A,     type: "bytes[2]" }     # 0x0a  zero padding to 12 bytes
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (12 bytes) and the {u32, u8, 4-char + NUL, pad} shape; the field
+  VALUE meanings are capture/debugger-pending.
+
+    0x00 (4B) TargetId  : the recipient / target id (the account/character being gifted to). The exact
+                          identity (account id vs character id) is [pending].
+    0x04 (1B) GroupByte : a group / role byte. The caller resolves a party member by a group id before
+                          send; the byte's meaning is [pending].
+    0x05 (4B) Code      : a 4-character ASCII field copied via a bounded string copy, NUL-terminated at
+                          0x09. Most likely a PIN / short confirmation code (the feature is a
+                          second-password keypad confirm). [pending]
+    0x09 (1B) CodeNul   : the NUL terminator of the Code field (always 0).
+    0x0a (2B) Pad0A     : zero padding to bring the body to 12 bytes.
+
+  TRIGGER: the gift-character second-password keypad confirm. The handler reads a numeric field, finds
+  the party member by group id, reads a source string, then sends.
+
+  EXPECTED S2C REPLY: a gift-offer-sent acknowledgement / result (plausibly a major-2/3 gift result);
+  not statically linked this lane. [pending]
+
+  CROSS-REF: 2/123 CmsgGiftCharReceiveConfirm (packets/2-123_gift_char_receive.yaml) is the recipient's
+  accept/decline of an incoming gift-character offer.
+
+  UNKNOWNS (capture-pending): the TargetId identity; the GroupByte meaning; whether Code is a PIN/short
+  code; the S2C reply.
+
+  UNBLOCKS: the Client.Application gift-character send use-case (a fixed 12-byte send).

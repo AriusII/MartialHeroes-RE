@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONFIRMED offsets/sizes (control-flow; the consumer's stack-frame gives a 1:1 body-offset -> field
+# mapping). Field VALUE MEANINGS likely. capture_verified: false.
+# spec: Docs/RE/packets/5-38_party_member_stats.yaml
+
+name: SmsgPartyMemberStats
+opcode: 0x50026           # major 5 (Push), minor 38 -> (5 << 16) | 38
+direction: S2C
+size: 100                # fixed 100-byte payload block (0x64)
+spec: packets/5-38_party_member_stats.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes one party member's stats. A fixed 100-byte block: an 8-byte prefix/echo, a member
+  actor id, an 18-byte CP949 name, two i16 state words, eight u32 stat scalars, then a 30-byte
+  status-id array, with a 2-byte trailing pad. The client locates the matching party-member slot by
+  id and writes the name, the stat scalars, and the status array; three of the stats also mirror onto
+  the member's actor object (live HP/MP-class fields).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 100.
+fields:
+  - { name: Prefix,      type: "bytes[8]" }    # +0x00  leading prefix/echo (likely a (sort,id) pair the applier ignores) -- opaque
+  - { name: MemberId,    type: u32 }           # +0x08  member actor id key (the lookup key for the party slot)
+  - { name: MemberName,  type: "bytes[18]" }   # +0x0C  member name, CP949 (18 read; 16 used)
+  - { name: StatA,       type: i16 }           # +0x1E  stat A (-> slot+42)
+  - { name: StatBState,  type: i16 }           # +0x20  stat B / state (a transition: old vs new -> slot+44)
+  - { name: GapA,        type: "bytes[2]" }    # +0x22  alignment filler before the u32 stat block -- opaque
+  - { name: StatC,       type: u32 }           # +0x24  stat C (HP cur?) -- also mirrored to the actor object
+  - { name: StatD,       type: u32 }           # +0x28  stat D (HP max?) -- also mirrored to the actor object
+  - { name: StatE,       type: u32 }           # +0x2C  stat E (MP cur?) -- also mirrored to the actor object
+  - { name: StatF,       type: u32 }           # +0x30  stat F (MP max?)
+  - { name: StatG,       type: u32 }           # +0x34  stat G
+  - { name: StatH,       type: u32 }           # +0x38  stat H
+  - { name: StatI,       type: u32 }           # +0x3C  stat I
+  - { name: StatJ,       type: u32 }           # +0x40  stat J
+  - { name: StatusArray, type: "bytes[30]" }   # +0x44  30 x u8 status-id array (1-byte stride; band-filtered, see notes)
+  - { name: TailPad,     type: "bytes[2]" }    # +0x62  trailing remainder (not consumed) -- opaque, pad to 100
+  # widths: 8 + 4 + 18 + 2 + 2 + 2 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 4 + 30 + 2 = 100
+
+notes: |
+  CONFIRMED routing + size + a 1:1 body-offset -> field mapping (the consumer's stack frame gives the
+  exact offset for every field). Field VALUE meanings are LIKELY where named; the stat identities
+  (HP/MP-class) are inferred from the actor mirror but stay capture-pending.
+  [capture/debugger-pending] for the exact stat identities. The field widths sum to exactly 100
+  (verified).
+
+  LOOKUP KEY: the leading 8-byte prefix (+0x00..+0x07) is read into the buffer but NOT forwarded to
+  the applier; the applier's lookup key is MemberId at +0x08. So +0x00/+0x04 are a likely (sort,id)
+  echo the handler ignores in favour of the +0x08 id. Boundary; which dword is sort is capture-pending.
+
+  ACTOR MIRROR: StatC/StatD/StatE (+0x24/+0x28/+0x2C) are mirrored onto the member's actor object
+  (live combat scalars, HP/MP class), with the prior values snapshotted -- this confirms they are the
+  live combat scalars, but the exact stat identity (which is HP cur vs max vs MP) is capture-pending,
+  kept neutral here (stat C/D/E).
+
+  STATUS ARRAY (+0x44..+0x61, 30 bytes): 30 raw status-id bytes copied one per slot, but ONLY when a
+  byte is <= 0x50 or >= 0x82 (the 0x51..0x81 band is filtered out). This same value-band filter
+  appears in the party/roster name-decode family -- it looks like a shared status-id encoding
+  convention. The status-array stride here is 1 byte x 30 (distinct from the 4/102 buff array's
+  12-byte records).
+
+  UNBLOCKS: the Client.Application party-member-stats handler (5/38) -- offsets are solid; the exact
+  stat identities and the status-id encoding are capture-pending.

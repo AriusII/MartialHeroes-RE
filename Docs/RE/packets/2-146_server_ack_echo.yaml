@@ -1,0 +1,41 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgServerAckEcho
+opcode: 0x20092           # major 2 (GameAction), minor 146 -> (2 << 16) | 146
+direction: C2S
+size: 8                   # fixed 8-byte payload (two dwords)
+spec: packets/2-146_server_ack_echo.yaml
+status: confirmed
+capture_verified: false
+
+summary: Reactive echo-reply to S2C 5/146 for PvP zone detection. Echoes back the server-supplied token and a local server/channel identifier.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Token,    type: u32 }          # 0x00  echoed from S2C 5/146 SmsgAckRequest
+  - { name: ServerId, type: u32 }          # 0x04  local server/channel identifier
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (8 bytes = two
+  little-endian dwords), CAPTURE-UNVERIFIED meaning.
+
+    0x00 (4B) Token    : the request token originally sent by the server in S2C 5/146
+                         (SmsgAckRequest). The client echoes it back verbatim (le u32).
+    0x04 (4B) ServerId : a local server or channel identifier maintained by the client,
+                         sent alongside the echoed token (le u32).
+
+  CONTEXT: this is the client-side reply half of the PvP zone presence detection
+  handshake. When the server pushes SmsgAckRequest (5/146), the client must respond
+  with this echo within a reasonable time window. Failure to reply may result in the
+  server treating the client as absent from the PvP zone.
+
+  RELATED: SmsgAckRequest (5/146, opcode 0x50092) -- the server-side push that this
+  packet replies to.
+
+  UNKNOWNS to resolve with a capture:
+    - exact source of ServerId (login-assigned channel id? zone server id?);
+    - the timeout window the server enforces for the echo reply;
+    - whether Token is ever transformed before echoing or is always verbatim.
+
+  UNBLOCKS: Client.Application PvP zone echo-reply / keep-alive mechanism.

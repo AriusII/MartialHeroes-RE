@@ -1,0 +1,35 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Response table-driven (major-4 / minor-2).
+# size: 52 bytes (0x34) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgGameTickConfig
+opcode: 0x40002           # major 4 (Response), minor 2 -> (4 << 16) | 2
+direction: S2C
+size: 52                  # fixed 52-byte payload (0x34)
+spec: packets/4-2_game_tick_config.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Game-tick configuration. Updates timing parameters, registers the local player's
+  re-spawn coordinates in the active area, and adjusts trade-panel tick cadences.
+
+fields:
+  - { name: Opaque1, type: "u8[8]", offset: 0 }      # leading timing/config block
+  - { name: AreaId, type: u32, offset: 8 }           # target area / map ID
+  - { name: SpawnX, type: f32, offset: 12 }          # spawn/teleport X coordinate (world)
+  - { name: SpawnZ, type: f32, offset: 16 }          # spawn/teleport Z coordinate (world)
+  - { name: Opaque2, type: "u8[20]", offset: 20 }    # timing configuration parameters
+  - { name: TradeTick, type: u16, offset: 40 }       # trade-panel tick count limits / config
+  - { name: Opaque3, type: "u8[6]", offset: 42 }     # padding / timing parameters
+  - { name: BattleState, type: u32, offset: 48 }     # battle state flag / timer stored to LocalPlayer +1848
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - If the AreaId matches the current environment area ID, the local player is repositioned to
+      (SpawnX, 0, SpawnZ), weapon/joint visual effects are refreshed, and terrain manager starts
+      rendering around the new coords.
+    - Updates TradePanel's background tick rate and closes trade window/bgm if TradeTick is zero.
+    - Toggles local player's combat/battle state flags on BattleState transition.

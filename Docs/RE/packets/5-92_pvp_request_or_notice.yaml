@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONFIRMED offsets/sizes (control-flow; copy-out widths are literal). Field VALUE MEANINGS likely /
+# opaque. capture_verified: false.
+# spec: Docs/RE/packets/5-92_pvp_request_or_notice.yaml
+
+name: SmsgPvpRequestOrNotice
+opcode: 0x5005c           # major 5 (Push), minor 92 -> (5 << 16) | 92
+direction: S2C
+size: 40                 # fixed 40-byte payload block (0x28)
+spec: packets/5-92_pvp_request_or_notice.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a PvP request / notice (e.g. a revenge target). A fixed 40-byte block: a 20-byte
+  header (a sort byte, then four u32s incl. an actor id and a target id) then a single CP949 name.
+  20 + 17 = 37; +3 trailing pad = 40. Forwarded to the PvP request/notice subsystem; the target id
+  is compared against the local player to gate a local UI panel.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 40.
+fields:
+  - { name: Sort,     type: u8 }            # +0x00  actor sort (composite-key sub-key)
+  - { name: GapA,     type: "bytes[3]" }    # +0x01  gap (not copied) -- opaque
+  - { name: ActorId,  type: u32 }           # +0x04  actor id
+  - { name: DwordB,   type: u32 }           # +0x08  dword B (copied to a UI slot on a state==0 branch)
+  - { name: DwordC,   type: u32 }           # +0x0C  dword C (opaque)
+  - { name: TargetId, type: u32 }           # +0x10  target actor key (compared == local player to gate a local UI panel)
+  - { name: Name,     type: "bytes[17]" }   # +0x14  CP949 name (17-byte cell) -- the revenge/notice target name
+  - { name: TailPad,  type: "bytes[3]" }    # +0x25  trailing pad (not read) -- opaque, pad to 40
+  # widths: 1 + 3 + 4 + 4 + 4 + 4 + 17 + 3 = 40
+
+notes: |
+  CONFIRMED routing + size + section boundaries (the header scalars and the single name are confirmed
+  copy sites; the name is a 17-byte CP949 cell copied with a 16-byte bound). Field VALUE meanings are
+  LIKELY where named (sort / actor id / target id) and opaque otherwise.
+  [capture/debugger-pending] for value meanings. The field widths sum to exactly 40 (verified).
+
+  ACTOR KEY ORDER: sort @+0 (u8) then id @+4 (u32) with a 3-byte gap -- the standard PvP actor-key
+  family layout.
+
+  Section map: { u8 sort, gap[3], u32 id, u32 B, u32 C, u32 D(target), name[17], pad[3] }. The target
+  id (+0x10) is compared against the local-player id key to gate a local UI panel.
+
+  UNBLOCKS: the Client.Application PvP request/notice handler (5/92) -- offsets are solid; the byte
+  meanings are capture-pending.

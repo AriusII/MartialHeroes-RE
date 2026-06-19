@@ -1,0 +1,35 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgFateInteraction
+opcode: 0x2004c           # major 2 (GameAction), minor 76 -> (2 << 16) | 76
+direction: C2S
+size: 20                  # fixed 20-byte payload
+spec: packets/2-76_fate_interaction.yaml
+status: confirmed
+capture_verified: false
+
+summary: Fate/destiny NPC interaction. Carries a fate state selector, a slot index, a 17-byte CP949 target name, and an item list index.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 20.
+fields:
+  - { name: FateState,      type: u8 }          # 0x00  fate state selector
+  - { name: SlotIndex,      type: u8 }          # 0x01  slot index
+  - { name: ActorName,      type: "char[17]" }  # 0x02  CP949 target name, NUL-padded
+  - { name: ItemListIndex,  type: u8 }          # 0x13  item list index
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (20 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (1B)  FateState     : selects the fate/destiny action state (le u8).
+    0x01 (1B)  SlotIndex     : slot index within the fate interaction context (le u8).
+    0x02 (17B) ActorName     : the target actor name, encoded CP949, NUL-padded to 17 bytes.
+    0x13 (1B)  ItemListIndex : index into an item list associated with the fate interaction (le u8).
+
+  UNKNOWNS to resolve with a capture:
+    - the full enumeration of FateState values and their meanings;
+    - the relationship between SlotIndex and the fate NPC dialog state;
+    - what items the ItemListIndex references.
+
+  UNBLOCKS: Client.Application fate/destiny NPC interaction use-case.

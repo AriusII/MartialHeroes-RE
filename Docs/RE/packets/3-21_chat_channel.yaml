@@ -6,7 +6,7 @@ opcode: 0x30015           # major 3 (CharacterMgmt), minor 21 -> (3 << 16) | 21
 direction: C2S
 size: var                 # 56-byte fixed-size context header + length-prefixed text body
 spec: packets/3-21_chat_channel.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client general / channel chat. A 56-byte context header (sender + channel/scope metadata), followed by a length-prefixed text body. Channel routing is selected inside the header.

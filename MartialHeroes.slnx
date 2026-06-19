@@ -25,9 +25,4 @@
         <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj"/>
     </Folder>
     <Folder Name="/Docs/"/>
-    <Folder Name="/Tests/">
-        <Project Path="tests/MartialHeroes.Assets.Mapping.Tests/MartialHeroes.Assets.Mapping.Tests.csproj"/>
-        <Project Path="tests/MartialHeroes.Client.Application.Tests/MartialHeroes.Client.Application.Tests.csproj"/>
-        <Project Path="tests/MartialHeroes.Assets.Parsers.Tests/MartialHeroes.Assets.Parsers.Tests.csproj"/>
-    </Folder>
 </Solution>

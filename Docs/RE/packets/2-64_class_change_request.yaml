@@ -1,0 +1,38 @@
+# spec: Docs/RE/packets/2-64_class_change_request.yaml
+# Role: C2S class-change / promotion request — two u32 (class selector + param), level/exp/gold gated.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgClassChangeRequest
+opcode: 0x20040           # major 2 (GameAction), minor 64 -> (2 << 16) | 64
+direction: C2S
+size: 8                   # fixed 8-byte body
+spec: packets/2-64_class_change_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Class change / promotion request (select target class + confirm), gated by level/exp/gold tables. Two u32 — a class selector and a param.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: ClassSelector, type: u32 }   # 0x00  selector / job-class id (validator reads byte0 as class 3..7) [capture/debugger-pending]
+  - { name: Param,         type: u32 }   # 0x04  param validated by a cost/level check [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 8-byte blit = two u32); the field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (4B) ClassSelector : a selector / job-class id; the validator reads its low byte as a class
+                              in the 3..7 range and maps it onto a promotion ladder (7->6->5->4->3).
+                              [capture/debugger-pending]
+    0x04 (4B) Param         : a parameter validated by a per-class cost/level check. [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): the class/promotion confirm panel. The validator maps
+  ClassSelector to a class-promotion ladder, checks a per-class exp/level requirement table and a
+  free-slot flag — a class-change / promotion request.
+
+  UNKNOWNS to resolve with a capture:
+    - the ClassSelector / Param value semantics;
+    - the inbound reply opcode (a class-change result S2C) — pending.
+
+  UNBLOCKS: Client.Application class-change / promotion use-case.

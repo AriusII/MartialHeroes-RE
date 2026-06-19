@@ -1,0 +1,25 @@
+name: SmsgTrackedPanelSlotUpdate
+opcode: 0x50039           # major 5, minor 57
+direction: S2C
+size: 24                  # fixed 24-byte body
+spec: packets/5-57_tracked_panel_slot_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server push that updates or clears a single slot in a tracked HUD panel.
+
+fields:
+  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque header/echo region
+  - { name: Action,      type: u8 }           # 0x08 1 = set/update slot, 0 = clear slot
+  - { name: SlotIndex,   type: u8 }           # 0x09 Target slot index in tracked panel
+  - { name: FlagsA,      type: u8 }           # 0x0a Special slot property or category flag A
+  - { name: FlagsB,      type: u8 }           # 0x0b Special slot property or category flag B
+  - { name: ItemId,      type: u16 }          # 0x0c Tracked item type / model id (16-bit)
+  - { name: Pad0,        type: "bytes[2]" }   # 0x0e Alignment padding
+  - { name: Quantity,    type: i32 }          # 0x10 Stack quantity of the tracked item
+  - { name: ActorId,     type: u32 }          # 0x14 Actor unique id key of the tracked object
+
+notes: |
+  The handler reads a fixed 24-byte body. Frame = 8-byte header + 24 = 32 bytes on the wire.
+  If Action == 1, updates slot values on tracked panel and triggers a UI update.
+  If Action == 0, clears slot values via the tracked-panel slot-clear routine.

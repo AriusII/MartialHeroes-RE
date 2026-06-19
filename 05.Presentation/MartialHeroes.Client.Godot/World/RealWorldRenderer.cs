@@ -116,6 +116,40 @@ public sealed partial class RealWorldRenderer : Node3D
     }
 
     // -------------------------------------------------------------------------
+    // Composer-driven rendering (CYCLE 2 Phase 2-A)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// When true, terrain and buildings are rendered FROM the assembled cell produced by the
+    /// CYCLE-1 AreaComposer pipeline, rather than the legacy direct-from-VFS path.
+    ///
+    /// Default: false — the legacy path is byte-identical to the pre-2-A build (zero regression).
+    /// Set to true via client_dir.cfg key "compose_render=1" or env "MH_COMPOSE_RENDER=1".
+    ///
+    /// This flag is the only gate between the old and new path; no code is removed while both
+    /// paths coexist. spec: Docs/RE/specs/assembly_graph.md §1 — AreaComposer owns the assembled cell.
+    /// </summary>
+    private bool _composeRender;
+
+    /// <summary>
+    /// Assembled cell cache keyed by biased cell coordinates (MapX, MapZ).
+    /// Populated when <see cref="_composeRender"/> is on via <see cref="OnCellAssembled"/>.
+    /// Used by the composer-driven TextureResolver (A.2) and SlotRenderer (A.3).
+    ///
+    /// All mutations happen on the Godot main thread (inside <see cref="OnCellAssembled"/> which
+    /// is called from <see cref="GameLoop.DispatchEvent"/> → <see cref="GameLoop._Process"/>).
+    /// spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell carries 9 slots + ResolvedTexturePaths.
+    /// </summary>
+    private readonly Dictionary<(int MapX, int MapZ), global::MartialHeroes.Assets.Mapping.AssembledCell>
+        _composedCells = new();
+
+    /// <summary>
+    /// Loaded texture cache for the composer path (A.2): maps VFS DDS path → Godot ImageTexture.
+    /// All mutations on the main thread.
+    /// </summary>
+    private readonly Dictionary<string, ImageTexture?> _composerTexCache = new();
+
+    // -------------------------------------------------------------------------
     // Internal state
     // -------------------------------------------------------------------------
 
@@ -197,6 +231,12 @@ public sealed partial class RealWorldRenderer : Node3D
 
         _ctx = ctx;
         _terrainNode = terrainNode;
+
+        // Read the compose_render flag BEFORE any asset loading so derived paths can gate on it.
+        // Default OFF: the legacy direct-from-VFS path runs unchanged (zero regression).
+        _composeRender = ReadComposeRenderFlag();
+        GD.Print($"[RealWorldRenderer] compose_render={_composeRender} " +
+                 "(set compose_render=1 in client_dir.cfg or MH_COMPOSE_RENDER=1 to enable composer path).");
 
         // Open the VFS — falls back gracefully to null if absent.
         GD.Print("[RealWorldRenderer] Initialise: opening VFS");
@@ -293,17 +333,32 @@ public sealed partial class RealWorldRenderer : Node3D
         if (loadModels)
         {
             // Load BUD scene and create MeshInstance3D children via ArrayMesh (no GltfDocument).
-            GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene start");
-            try
+            // FLAG-GATE (CYCLE 2 Phase 2-A): when compose_render is ON, buildings are placed from
+            // CellAssembledEvent → OnCellAssembled → SlotRenderer.RenderSlot1Buildings for each
+            // streamed cell. Suppress the legacy single-cell LoadAndSpawnBudScene to avoid double-
+            // spawning the target cell's buildings (legacy once + compose once = 2×).
+            // The legacy path runs unchanged when compose_render is OFF (zero regression).
+            // spec: Docs/RE/specs/assembly_graph.md §1 — slot 1 buildings come from the assembled cell.
+            if (_composeRender)
             {
-                LoadAndSpawnBudScene();
+                GD.Print("[RealWorldRenderer] Initialise: compose_render=ON — LoadAndSpawnBudScene " +
+                         "SUPPRESSED (buildings placed per-cell from CellAssembledEvent via OnCellAssembled). " +
+                         "spec: assembly_graph.md §1.");
             }
-            catch (Exception ex)
+            else
             {
-                GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}");
-            }
+                GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene start");
+                try
+                {
+                    LoadAndSpawnBudScene();
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}");
+                }
 
-            GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene done");
+                GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene done");
+            }
 
             // Spawn skinned character static pose (if available) via ArrayMesh (no GltfDocument).
             GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnCharacter start");
@@ -320,39 +375,54 @@ public sealed partial class RealWorldRenderer : Node3D
 
             // Populate the area with monsters/NPCs from mob*.arr + npc*.arr (static characters,
             // resolved via the mob_id -> actormotion -> skin chain). Areas with no spawns are no-ops.
-            GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea start");
-            try
+            //
+            // FLAG-GATE (CYCLE 2 Phase 2-A.5): when compose_render is ON, actor placement is driven
+            // by the AreaAssembledEvent → OnAreaAssembled composer path (see below). In that case,
+            // NpcRenderer.PopulateFromArea is SUPPRESSED to avoid double-spawning the same actors.
+            // When compose_render is OFF, the legacy NpcRenderer path runs unchanged (zero regression).
+            // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — spawns reach layer-05 via event bus).
+            if (_composeRender)
             {
-                var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
-                // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
-                npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
-                // TryGroundYFunc returns false (not just a fallback constant) when the sector is absent —
-                // used by the pending-snap mechanism to snap only when real data is available.
-                // spec: TerrainNode.TryGetGroundHeight — returns false when cell absent: CONFIRMED.
-                if (_terrainNode is not null)
+                GD.Print("[RealWorldRenderer] Initialise: compose_render=ON — NpcRenderer.PopulateFromArea " +
+                         "SUPPRESSED (actors placed from AreaAssembledEvent.Spawns via OnAreaAssembled). " +
+                         "spec: assembly_graph.md §1/§4.");
+            }
+            else
+            {
+                GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea start");
+                try
                 {
-                    TerrainNode terrainCapture = _terrainNode;
-                    npcRenderer.TryGroundYFunc = (float lx, float lz, out float hy) =>
-                        terrainCapture.TryGetGroundHeight(lx, lz, out hy);
+                    var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
+                    // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
+                    npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
+                    // TryGroundYFunc returns false (not just a fallback constant) when the sector is absent —
+                    // used by the pending-snap mechanism to snap only when real data is available.
+                    // spec: TerrainNode.TryGetGroundHeight — returns false when cell absent: CONFIRMED.
+                    if (_terrainNode is not null)
+                    {
+                        TerrainNode terrainCapture = _terrainNode;
+                        npcRenderer.TryGroundYFunc = (float lx, float lz, out float hy) =>
+                            terrainCapture.TryGetGroundHeight(lx, lz, out hy);
+                    }
+
+                    AddChild(npcRenderer);
+                    npcRenderer.PopulateFromArea(_assets, TargetAreaId);
+
+                    // Wire the sector-resident notification so actors are re-grounded as soon as each
+                    // cell's heightmap arrives — eliminates the fallback-Y race (D2).
+                    // TerrainNode fires SectorBecameResident on the Godot main thread (GameLoop._Process)
+                    // after the cell enters its height-lookup cache.
+                    // spec: TerrainNode.SectorBecameResident — fired after _cellCache updated: CONFIRMED.
+                    if (_terrainNode is not null)
+                        _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[RealWorldRenderer] NpcRenderer.PopulateFromArea failed: {ex.Message}");
                 }
 
-                AddChild(npcRenderer);
-                npcRenderer.PopulateFromArea(_assets, TargetAreaId);
-
-                // Wire the sector-resident notification so actors are re-grounded as soon as each
-                // cell's heightmap arrives — eliminates the fallback-Y race (D2).
-                // TerrainNode fires SectorBecameResident on the Godot main thread (GameLoop._Process)
-                // after the cell enters its height-lookup cache.
-                // spec: TerrainNode.SectorBecameResident — fired after _cellCache updated: CONFIRMED.
-                if (_terrainNode is not null)
-                    _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
+                GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea done");
             }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[RealWorldRenderer] NpcRenderer.PopulateFromArea failed: {ex.Message}");
-            }
-
-            GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea done");
         }
         else
         {
@@ -781,11 +851,24 @@ public sealed partial class RealWorldRenderer : Node3D
     /// </summary>
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
-        // Point the streaming source at the resolved area BEFORE streaming. The composition root
-        // constructs the source bound to area 0; ResolveTargetCell may have picked another area, so
-        // we rebind (reloads the area .lst manifest) — otherwise non-zero areas stream empty.
+        // Point BOTH streaming sources at the resolved area BEFORE streaming starts:
+        //   (a) StreamingService.SetArea — rebinds VfsTerrainSectorSource to the correct .ted paths.
+        //   (b) AreaAssemblySource.SetArea — rebinds RebindableAreaAssemblySource so the
+        //       CellAssemblyHandoff bake lambda calls AreaComposer.ComposeCell with the correct
+        //       data/map<NNN>/dat/... paths (Phase 2-B.1 fix: was hard-coded to area 0 → .map open
+        //       failed for every non-zero area → ComposeCell early-exit → zero geometry).
+        // Both must be rebound before UpdateCenterAsync fires SectorLoadedEvent callbacks.
         // spec: Docs/RE/formats/terrain.md §1.1 (per-area path tag) + §1.2 (per-area manifest).
+        // spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives AreaComposer paths.
         ctx.StreamingService.SetArea(TargetAreaId);
+        ctx.AreaAssemblySource?.SetArea(TargetAreaId);
+
+        // CYCLE 2 Phase 2-A.5: compose + publish the area ONCE per area-enter.
+        // OnAreaBound is idempotent (no-op if called again with the same area id).
+        // This closes the gap where AreaAssembledEvent was never published and
+        // RealWorldRenderer.OnAreaAssembled never fired.
+        // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load → spawns) / §4.
+        ctx.AreaAssemblyHandoff?.OnAreaBound(TargetAreaId);
 
         // Initialise the streaming anchor to the resolved spawn-density peak.
         // _Process will update this as the player moves.
@@ -1165,6 +1248,337 @@ public sealed partial class RealWorldRenderer : Node3D
 
         GD.Print("[RealWorldRenderer] None of the known .skn candidates found in VFS.");
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // CYCLE 2 Phase 2-A — composer-driven event handlers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Called by <see cref="GameLoop.DispatchEvent"/> on the main thread each frame when a
+    /// <see cref="CellAssembledEvent"/> arrives. When <see cref="_composeRender"/> is off this
+    /// is a no-op (zero regression). When on, logs the cell key and slot counts for headless
+    /// verification (A.1); future increments extend to actual rendering (A.2+).
+    ///
+    /// The concrete <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/> is reached by
+    /// casting to <see cref="global::MartialHeroes.Client.Godot.Adapters.AssembledCellViewAdapter"/>
+    /// (the public adapter the composition root uses). Layer 05 owns Assets.Mapping and may use
+    /// the concrete type directly.
+    /// spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell carries the 9 slot model.
+    /// </summary>
+    public void OnCellAssembled(IAssembledCellView cellView)
+    {
+        if (!_composeRender) return;
+
+        // Reach the concrete AssembledCell via the layer-05 public adapter.
+        // AssembledCellViewAdapter is in Adapters/ (same layer-05 project) and is not file-local.
+        global::MartialHeroes.Assets.Mapping.AssembledCell? cell =
+            (cellView as global::MartialHeroes.Client.Godot.Adapters.AssembledCellViewAdapter)?.ConcreteCell;
+
+        int slot1Count = cell?.Slot1BuildingObjectGrid?.Objects.Length ?? -1;
+        int hasSlot0 = cell?.Slot0GroundTexGrid is not null ? 1 : 0;
+        int fxSlots = 0;
+        if (cell is not null)
+        {
+            if (cell.Slot2Fx1 is not null) fxSlots++;
+            if (cell.Slot3Fx2 is not null) fxSlots++;
+            if (cell.Slot4Fx3 is not null) fxSlots++;
+            if (cell.Slot5Fx4 is not null) fxSlots++;
+            if (cell.Slot6Fx5 is not null) fxSlots++;
+            if (cell.Slot7Fx6 is not null) fxSlots++;
+            if (cell.Slot8Fx7 is not null) fxSlots++;
+        }
+
+        GD.Print($"[RealWorldRenderer][ComposeRender] CellAssembled: cell=({cellView.MapX},{cellView.MapZ}) " +
+                 $"resolved={cellView.IsResolved} slot0={hasSlot0} slot1Buildings={slot1Count} fxSlots={fxSlots}. " +
+                 "spec: assembly_graph.md §1.");
+
+        // A.2: store the assembled cell and wire the composer-driven terrain texture resolver.
+        if (cell is not null)
+        {
+            _composedCells[(cellView.MapX, cellView.MapZ)] = cell;
+            GD.Print($"[RealWorldRenderer][ComposeRender] Cell ({cellView.MapX},{cellView.MapZ}) cached " +
+                     $"({_composedCells.Count} total). spec: assembly_graph.md §1.");
+
+            // A.2: wire the terrain texture resolver from the assembled cell's pre-baked path array.
+            // Only wire for the target cell (the one that matches the loaded streaming anchor) — the
+            // TerrainNode resolver is shared across all sectors, so we use the cell whose texByte→path
+            // mapping covers the visible streaming ring. The pre-baked ResolvedTexturePaths array
+            // is indexed by patch position (0..255), where each entry is the resolved DDS path for that
+            // patch. Since all patches sharing the same texByte resolve to the same path, we scan the
+            // array to find the canonical path for each distinct texByte value.
+            // spec: Docs/RE/specs/assembly_graph.md §1 — ResolvedTexturePaths baked by AreaComposer.
+            // spec: Docs/RE/formats/terrain.md §5.6 — texByte is 1-based, clamp [1,count].
+            if (_terrainNode is not null && cell.ResolvedTexturePaths is not null
+                                         && cell.Slot0GroundTexGrid is not null)
+            {
+                WireComposerTerrainResolver(cell);
+            }
+
+            // A.4: render slots 2-8 (FX overlays) from the assembled cell.
+            // Missing FX slots are silently skipped (no crash). Effect sub-offsets negate Z port-side.
+            // spec: Docs/RE/structs/terrain-manager.md slots 2-8 — FX overlays: CONFIRMED.
+            // spec: WorldCoordinates.ToGodot — world geometry negates Z (port-side): CONFIRMED.
+            {
+                // SW corner of the cell in Godot space (Z negated from legacy).
+                // spec: terrain.md §1.4 — worldX_min = (mapX-10000)×1024; cell size 1024 wu: CONFIRMED.
+                float cellLegacyX = (cellView.MapX - 10000) * 1024f; // spec: terrain.md §1.4
+                float cellLegacyZ = (cellView.MapZ - 10000) * 1024f; // spec: terrain.md §1.4
+                // spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z): CONFIRMED.
+                var cellOriginGodot = new Vector3(cellLegacyX, 0f, -cellLegacyZ);
+
+                SlotRenderer.RenderFxSlots(
+                    parent: this,
+                    cell: cell,
+                    cellWorldOriginGodot: cellOriginGodot,
+                    cellMapXZ: (cellView.MapX, cellView.MapZ));
+            }
+
+            // A.3: render slot 1 buildings from the assembled cell using SlotRenderer.
+            // The building texture resolver uses the legacy _cellMap+_bgTextures two-hop chain
+            // (same as LoadAndSpawnBudScene) so buildings get their correct textures.
+            // For non-target cells (streaming ring), _cellMap may belong to the target cell;
+            // this is acceptable for A.3 (single-cell demo parity). A per-cell .map cache
+            // is a follow-on improvement.
+            // spec: Docs/RE/structs/terrain-manager.md slot 1 — "mass/building-object placement grid (.bud)": CONFIRMED.
+            if (cell.Slot1BuildingObjectGrid is not null)
+            {
+                // Guard against duplicate spawning (the same cell may arrive multiple times if the
+                // streaming ring reloads it; track by cell key).
+                var cellKey = (cellView.MapX, cellView.MapZ);
+                if (!_composedBuildingsSpawned.Contains(cellKey))
+                {
+                    _composedBuildingsSpawned.Add(cellKey);
+
+                    // Use cached building texture resolver (same lambda as legacy path).
+                    var budTexCache = new Dictionary<uint, ImageTexture?>();
+                    Func<uint, ImageTexture?> budTexResolver = texId =>
+                    {
+                        if (budTexCache.TryGetValue(texId, out ImageTexture? cached)) return cached;
+                        ImageTexture? tex = ResolveSectionTexture("BUILDING", (int)texId);
+                        budTexCache[texId] = tex;
+                        return tex;
+                    };
+
+                    SlotRenderer.RenderSlot1Buildings(
+                        parent: this,
+                        cell: cell,
+                        budTexResolver: budTexResolver,
+                        cellMapXZ: (cellView.MapX, cellView.MapZ));
+                }
+                else
+                {
+                    GD.Print($"[RealWorldRenderer][ComposeRender] Cell ({cellView.MapX},{cellView.MapZ}) " +
+                             "slot 1 buildings already spawned — skipping duplicate.");
+                }
+            }
+        }
+    }
+
+    // Set tracking which cells have already had their composed buildings spawned (avoids duplicate nodes).
+    private readonly HashSet<(int MapX, int MapZ)> _composedBuildingsSpawned = new();
+
+    /// <summary>
+    /// Wires <see cref="TerrainNode.TextureResolver"/> using the assembled cell's pre-baked
+    /// <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell.ResolvedTexturePaths"/> array.
+    ///
+    /// For each distinct raw texByte value in the <c>.ted</c> TextureIndexGrid, the resolver
+    /// scans the pre-baked path array to find the canonical resolved DDS path (the path baked by
+    /// <see cref="global::MartialHeroes.Assets.Mapping.AreaComposer.ComposeCell"/> via the same
+    /// idx-1 finalize + bgtexture.lst chain), then loads it as a Godot ImageTexture.
+    ///
+    /// All patches with the same texByte value share the same resolved path (the resolution is a
+    /// function of texByte only, not position), so the scan terminates on the first match.
+    ///
+    /// spec: Docs/RE/specs/assembly_graph.md §1 — ResolvedTexturePaths[256] baked by AreaComposer.
+    /// spec: Docs/RE/formats/terrain.md §CORRECTED CYCLE 1 — idx-1 finalize on texByte only: CONFIRMED.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS the 0-based pool slot, NO −1: CONFIRMED.
+    /// </summary>
+    private void WireComposerTerrainResolver(
+        global::MartialHeroes.Assets.Mapping.AssembledCell cell)
+    {
+        if (_assets is null || _terrainNode is null) return;
+        if (cell.ResolvedTexturePaths is null || cell.Slot0GroundTexGrid is null) return;
+
+        string?[] resolvedPaths = cell.ResolvedTexturePaths;
+        byte[] textureIndexGrid = cell.Slot0GroundTexGrid.TextureIndexGrid;
+
+        // Build a texByte → (patchIndex of first patch with that byte) map to allow O(1) lookup.
+        // spec: terrain.md §5.6 — texByte 1-based; all patches with same byte share same resolved path.
+        var byteToFirstPatchIndex = new Dictionary<byte, int>(256);
+        for (int i = 0; i < textureIndexGrid.Length; i++)
+        {
+            byte b = textureIndexGrid[i];
+            if (!byteToFirstPatchIndex.ContainsKey(b))
+                byteToFirstPatchIndex[b] = i;
+        }
+
+        RealClientAssets assetsCapture = _assets;
+
+        _terrainNode.TextureResolver = texByte =>
+        {
+            if (_composerTexCache.TryGetValue($"tb:{texByte}", out ImageTexture? cached))
+                return cached;
+
+            // Clamp texByte to [1, count] then apply the idx-1 finalize.
+            // spec: terrain.md §5.6 — clamp <1 to 1; >count to count: CONFIRMED.
+            int gridLen = textureIndexGrid.Length;
+            byte clamped = texByte < 1 ? (byte)1 : (byte)Math.Min(texByte, 255);
+
+            // Find the first patch index whose texByte (after clamping) matches.
+            // Since all patches with the same byte resolve to the same path, any match works.
+            if (!byteToFirstPatchIndex.TryGetValue(clamped, out int patchIdx))
+            {
+                // Byte not found in this cell — fall back to legacy resolver if available.
+                _composerTexCache[$"tb:{texByte}"] = null;
+                return null;
+            }
+
+            // Guard patch index bounds.
+            if (patchIdx < 0 || patchIdx >= resolvedPaths.Length)
+            {
+                _composerTexCache[$"tb:{texByte}"] = null;
+                return null;
+            }
+
+            string? ddsPath = resolvedPaths[patchIdx];
+            ImageTexture? tex = null;
+            if (ddsPath is not null)
+            {
+                // Cache by VFS path to share instances across texByte values that resolve to the same DDS.
+                if (!_composerTexCache.TryGetValue(ddsPath, out tex))
+                {
+                    tex = assetsCapture.Contains(ddsPath) ? assetsCapture.LoadTexture(ddsPath) : null;
+                    _composerTexCache[ddsPath] = tex;
+                }
+            }
+
+            _composerTexCache[$"tb:{texByte}"] = tex;
+            return tex;
+        };
+
+        GD.Print($"[RealWorldRenderer][ComposeRender] Terrain TextureResolver wired from assembled cell " +
+                 $"({cell.MapX},{cell.MapZ}) pre-baked paths ({resolvedPaths.Length} slots). " +
+                 "spec: assembly_graph.md §1 — ResolvedTexturePaths baked by AreaComposer.");
+    }
+
+    /// <summary>
+    /// Called by <see cref="GameLoop.DispatchEvent"/> on the main thread each frame when an
+    /// <see cref="AreaAssembledEvent"/> arrives. No-op when <see cref="_composeRender"/> is off.
+    ///
+    /// When <see cref="_composeRender"/> is ON: places actors from <paramref name="areaView"/>.Spawns
+    /// via <see cref="NpcRenderer.PopulateFromSpawns"/>. No-double-spawn: the composer path was
+    /// already guarded in <see cref="Initialise"/> so <see cref="NpcRenderer.PopulateFromArea"/>
+    /// was skipped; this handler places actors exactly once.
+    ///
+    /// Actor Y is snapped to terrain after each sector loads (TerrainNode.SectorBecameResident → the
+    /// NpcRenderer's pending-snap mechanism) — same deferred grounding as the legacy path.
+    ///
+    /// spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load → spawns).
+    /// spec: Helpers/WorldCoordinates.cs — ToGodot negate Z. CONFIRMED.
+    /// </summary>
+    public void OnAreaAssembled(IAssembledAreaView areaView)
+    {
+        if (!_composeRender) return;
+
+        GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: area={areaView.AreaId} " +
+                 $"cellCount={areaView.CellKeyCount} spawns={areaView.Spawns.Count}. " +
+                 "spec: assembly_graph.md §1.");
+
+        // Avoid double-spawn: guard with a flag so a re-fire of AreaAssembledEvent for the same
+        // area is a no-op. (AreaAssemblyHandoff guarantees exactly-once publish per distinct area id,
+        // but an additional defence is cheap.) spec: assembly_graph.md §1 (idempotent).
+        if (_composerActorsAreaId == areaView.AreaId)
+        {
+            GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: area={areaView.AreaId} " +
+                     "actors already placed — skipping duplicate.");
+            return;
+        }
+
+        _composerActorsAreaId = areaView.AreaId;
+
+        if (_assets is null)
+        {
+            GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: assets null — cannot place actors.");
+            return;
+        }
+
+        // Build and add a NpcRenderer to the scene, then drive it from the composer spawn list.
+        // This reuses all of NpcRenderer's skin-lookup, TryBuildFromMobId, and pending-snap machinery.
+        // NpcRenderer.PopulateFromArea is suppressed in Initialise when _composeRender is ON, so
+        // this is the only placement call — no double-spawn possible.
+        // spec: Docs/RE/specs/assembly_graph.md §1 — spawns placed via PopulateFromSpawns.
+        try
+        {
+            var npcRenderer = new NpcRenderer { Name = "NpcRendererComposer" };
+
+            // Inject the same ground-Y delegates as the legacy path (fallback 26 until terrain loads).
+            npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
+            if (_terrainNode is not null)
+            {
+                TerrainNode terrainCapture = _terrainNode;
+                npcRenderer.TryGroundYFunc = (float lx, float lz, out float hy) =>
+                    terrainCapture.TryGetGroundHeight(lx, lz, out hy);
+            }
+
+            AddChild(npcRenderer);
+
+            // Drive placement from the composer spawn list (not from the VFS .arr files directly).
+            // spec: assembly_graph.md §1 — "spawns: npc.arr / mob.arr (position/facing/static metadata)".
+            npcRenderer.PopulateFromSpawns(_assets, areaView.Spawns);
+
+            // Wire pending-snap so actors snap to real terrain as cells stream in.
+            // spec: TerrainNode.SectorBecameResident — fired on the main thread after heightmap cached.
+            if (_terrainNode is not null)
+                _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
+
+            GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: NpcRendererComposer placed " +
+                     $"from {areaView.Spawns.Count} composer spawns for area={areaView.AreaId}. " +
+                     "spec: assembly_graph.md §1/§4.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer][ComposeRender] AreaAssembled actor placement failed: {ex.Message}");
+        }
+    }
+
+    // Tracks the area id for which composer actors have been placed (anti-double-spawn guard).
+    // -1 = not yet placed. spec: assembly_graph.md §1 (AreaAssemblyHandoff is idempotent once per area).
+    private int _composerActorsAreaId = -1;
+
+    /// <summary>
+    /// Reads the "compose_render" bool flag from <c>client_dir.cfg</c> or the env
+    /// variable <c>MH_COMPOSE_RENDER</c>. Default OFF so the legacy path is unchanged.
+    /// </summary>
+    private static bool ReadComposeRenderFlag()
+    {
+        string? envVal = System.Environment.GetEnvironmentVariable("MH_COMPOSE_RENDER");
+        if (envVal is "1" or "true" or "yes")
+            return true;
+
+        try
+        {
+            string absPath = global::Godot.ProjectSettings.GlobalizePath("res://client_dir.cfg");
+            if (!File.Exists(absPath)) return false;
+
+            foreach (string rawLine in File.ReadLines(absPath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+                int eq = line.IndexOf('=');
+                if (eq < 0) continue;
+                string k = line[..eq].Trim();
+                string v = line[(eq + 1)..].Trim();
+                if (k.Equals("compose_render", StringComparison.OrdinalIgnoreCase))
+                    return v is "1" or "true" or "yes";
+            }
+        }
+        catch
+        {
+            // I/O error → default false.
+        }
+
+        return false;
     }
 
     // -------------------------------------------------------------------------

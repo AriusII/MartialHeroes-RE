@@ -621,23 +621,25 @@ public sealed partial class GameLoop : Node
                 _terrainNode.OnSectorUnloaded(unloaded);
                 break;
 
-            // ---- Phase 6a: assembled cell/area events ----
+            // ---- Phase 6a / CYCLE 2 Phase 2-A: assembled cell/area events ----
             case CellAssembledEvent cellEvt:
                 // A fully assembled cell (all 9 slots: .ted/.bud/.fx1-7) is now available.
-                // Phase 6a: log the event for headless verification; future phases extend rendering.
-                // The existing TerrainNode + BudMeshBuilder path (driven by SectorLoadedEvent above)
-                // already renders terrain/buildings. CellAssembledEvent provides the richer model
-                // (all 9 slots + texture-path cache) for future slot rendering.
+                // Phase 6a: log for headless verification.
+                // CYCLE 2 Phase 2-A: when compose_render is on, forward to RealWorldRenderer
+                // which renders terrain/buildings FROM the composer output (not the direct VFS path).
                 // spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell ready for presentation.
                 GD.Print($"[GameLoop] CellAssembledEvent: cell=({cellEvt.Cell.MapX},{cellEvt.Cell.MapZ}) " +
                          $"resolved={cellEvt.Cell.IsResolved}. spec: assembly_graph.md §1.");
+                _realWorldRenderer?.OnCellAssembled(cellEvt.Cell);
                 break;
 
             case AreaAssembledEvent areaEvt:
                 // Phase 6a: full area assembled. Log for headless verification.
+                // CYCLE 2 Phase 2-A: forward to RealWorldRenderer for composer-path rendering.
                 // spec: Docs/RE/specs/assembly_graph.md §1 — area load (Phase A).
                 GD.Print($"[GameLoop] AreaAssembledEvent: area={areaEvt.Area.AreaId} " +
                          $"cellCount={areaEvt.Area.CellKeyCount}. spec: assembly_graph.md §1.");
+                _realWorldRenderer?.OnAreaAssembled(areaEvt.Area);
                 break;
 
             // ---- Vitals / stats / level ----

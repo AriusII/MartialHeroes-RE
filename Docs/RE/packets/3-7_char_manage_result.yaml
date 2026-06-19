@@ -1,0 +1,32 @@
+name: SmsgCharManageResult
+opcode: 0x30007           # major 3, minor 7 -> (3 << 16) | 7
+direction: S2C
+size: 8                  # 8-byte fixed payload
+spec: packets/3-7_char_manage_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Lobby character management result (delete, select, rename). Opcode (3:7).
+  This is a character-select UI update message only; it writes no engine GameState fields.
+  The subtype field controls the slots' facial alignment and deletion countdown UI logic.
+
+fields:
+  - { name: Result,     type: u8 }          # 0x00  result code (e.g., success vs fail)
+  - { name: Pad1,       type: u8 }          # 0x01  reserved / padding byte
+  - { name: Subtype,    type: u8 }          # 0x02  action type: 0 = generic refresh, 1 = rename applied, 2 = delete confirmed
+  - { name: Pad2,       type: u8 }          # 0x03  reserved / padding byte
+  - { name: ReadyTime,  type: u32 }         # 0x04  same-day character delete cooldown time in seconds/ticks
+
+notes: |
+  Statically confirmed from the 3/7 handler.
+  The handler reads a fixed 8-byte block:
+    Result @0, Subtype @2, ReadyTime @4.
+    
+  Behavior:
+    The Subtype block mutates the UI slot state:
+      - 0 -> refresh / face the slot back
+      - 1 -> rename applied / face slot front
+      - 2 -> delete confirmed (decrements count and clears character slot)
+    If Result is failure/refresh, a delete-cooldown warning is formatted using ReadyTime.
+    It writes NO engine scene-state fields (no GameState mutation); top-level state machine transitions ride 3/100 instead.

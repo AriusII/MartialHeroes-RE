@@ -10,10 +10,17 @@
 #   ida_reverified: 2026-06-16
 #   ida_anchor: 263bd994
 #   evidence: [static-ida]
-#   conflicts: CORRECTED a real offset conflict -- ActionCode is payload @0x10 (NOT @0x14) and
-#              TargetCount is payload @0x14 (NOT conflated into a 0x14..0x17 dword with ActionCode).
-#              There is NO separate "SkillArg" dword between SkillId (@0x0C) and ActionCode (@0x10);
-#              the prior "SkillArg@0x10" was actually ActionCode.
+#   conflicts: CORRECTED two real offset conflicts.
+#              (1) HEADER: ActionCode is payload @0x10 (NOT @0x14) and TargetCount is payload @0x14
+#              (NOT conflated into a 0x14..0x17 dword with ActionCode). There is NO separate
+#              "SkillArg" dword between SkillId (@0x0C) and ActionCode (@0x10); the prior
+#              "SkillArg@0x10" was actually ActionCode.
+#              (2) RECORD (W-C4 disasm verdict, supersedes the prior record reading): the visible
+#              damage is ONE 64-bit sum read together as record+0x14 (low) / record+0x18 (high) via
+#              an add/adc accumulator -- NOT a 32-bit damage at record+0x0C and NOT an HP pair at
+#              record+0x14/+0x1C. There is NO ActionCode at record+0x10; record +0x08/+0x0C/+0x10
+#              and the +0x1C..+0x23 tail are OPAQUE (copied but not field-read by this handler). The
+#              "ActionCode" concept maps to the HEADER payload @0x10 byte, not to any record field.
 
 name: SmsgActorSkillAction
 opcode: 0x50034           # major 5 (Push), minor 52 -> (5 << 16) | 52
@@ -69,26 +76,38 @@ notes: |
     @0x15..0x17 (3B) : UNRESOLVED -- true padding or sub-fields. Capture-pending.
     @0x18 : the first 36-byte target record begins here.
 
-  TARGET RECORD (36 bytes each, repeated target_count times). CODE-CONFIRMED stride 36; each record is
-  forwarded to the target actor's per-actor animation/FX queue (the hit-animation / hit-FX driver) and
-  feeds a floating damage number over that target:
-    +0x00 (1B)  u8    target actor sort        (actor lookup key, with CasterId-style {sort,id})
-    +0x04 (4B)  u32   target actor id          (actor lookup key)
-    +0x08 (4B)  i32   anim/hit state           (1 = a hit landed; selects the hit animation)
-    +0x0c (4B)  i32   visible damage applied   (the number rendered as a floating damage figure)
-    +0x10 (4B)  --    reserved
-    +0x14 (8B)  i64   remaining HP after hit    (signed; negative on overkill; feeds the HP bar)
-    +0x1c (4B)  i32   max HP                     (feeds the HP bar)
-    +0x20 (4B)  --    tail / reserved
+  TARGET RECORD (36 bytes each, repeated target_count times). CODE/DISASM-CONFIRMED stride 36 (the
+  loop advances by 0x24 per iteration). RECORD LAYOUT CORRECTED in W-C4 from two independent record
+  loops (a damage-total loop and an effect loop) that share the identical record geometry -- this is
+  the decisive evidence. Each record is forwarded to the target actor's per-actor animation/FX queue:
+    +0x00 (1B)  u8    target actor composite sub-key byte   (actor lookup key, with the key dword below)
+    +0x04 (4B)  u32   target actor composite key dword       (actor lookup key)
+    +0x08 (4B)  --    OPAQUE (copied wholesale, not field-read by this handler)
+    +0x0c (4B)  --    OPAQUE (not read by this handler)
+    +0x10 (4B)  --    OPAQUE (not read; NOT part of the damage sum; NOT an ActionCode)
+    +0x14 (4B)  u32   visible-damage sum LOW dword           (read into an add accumulator)
+    +0x18 (4B)  u32   visible-damage sum HIGH dword          (read into an adc carry accumulator)
+    +0x1c (8B)  --    OPAQUE record tail (within the 36-byte stride)
+
+  THE DAMAGE FIELD IS ONE 64-BIT QUANTITY at record +0x14 (low) / +0x18 (high): the handler does
+  `add accumulatorLow, [record+0x14]` then `adc accumulatorHigh, [record+0x18]`, proving the two
+  adjacent dwords are read together as a single signed 64-bit value. The displayed figure is the
+  negated 64-bit sum, formatted with thousands grouping into the on-screen damage-total notice.
 
   CLIENT BEHAVIOUR (CODE-CONFIRMED, for the engineer's context -- not extra wire fields):
     - Each record is pushed onto the target actor's animation/FX queue, which plays the per-target hit
       animation and hit effect. This is THE driver for "the victim reacts to being hit".
-    - The visible-damage field (record +0x0c) is rendered as a floating damage number anchored over
-      the target's head (subject to the player's damage-message display option).
-    - The remaining-HP (record +0x14) and max-HP (record +0x1c) keep each actor's overhead HP bar
-      current; together with 5/53 they track every actor's HP.
+    - The 64-bit visible-damage sum (record +0x14/+0x18) is rendered as a floating / total damage
+      figure (subject to the player's damage-message display option).
     - On the cast itself the local player's own stamina/HP cost is drained client-side.
+
+  RECORD OFFSET CORRECTION (binary wins): the earlier record reading placed an anim/hit state at
+  +0x08, a 32-bit visible damage at +0x0c, and an HP pair at +0x14/+0x1c. That is REFUTED by the
+  add/adc disasm: record +0x08/+0x0C/+0x10 are OPAQUE (copied, never field-read), the visible damage
+  is the 64-bit add/adc pair at +0x14/+0x18, and +0x1c..+0x23 is an opaque tail. Absolute HP is NOT
+  carried per record here -- it arrives via 5/53 SmsgActorVitalsAndPairState. This is settled by
+  static disasm alone; only the VALUE semantics (literal damage vs another magnitude, and the
+  +0x08..+0x10 opaque bytes) stay capture-pending.
 
   SPECIAL: when ActionCode == 0xCC the handler treats the first record as an AoE origin and
   procedurally fans out sub-actors around it (no extra wire fields). ActionCode values 0xC8..0xCB are
@@ -97,8 +116,8 @@ notes: |
   UNKNOWNS to resolve with a capture (single-target hit, multi-hit combo, and an AoE cast):
     - whether the header bytes @0x11..0x13 and @0x15..0x17 are true padding or carry sub-fields
       (e.g. a secondary skill argument, hit flags);
-    - the meaning of the two reserved record words (record +0x10, +0x20);
-    - the exact wire types of the per-record fields.
+    - the meaning of the opaque record bytes (record +0x08, +0x0C, +0x10, and the +0x1C tail);
+    - whether the 64-bit value at record +0x14/+0x18 is literal damage vs another signed magnitude.
 
   RELATED: paired request C2S 2/52 CmsgUseSkill (packets/2-52_use_skill.yaml); absolute HP also
   arrives via S2C 5/53 SmsgActorVitalsAndPairState (packets/5-53_actor_vitals_and_pair_state.yaml).

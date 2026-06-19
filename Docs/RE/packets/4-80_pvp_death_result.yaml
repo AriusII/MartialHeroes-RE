@@ -1,0 +1,62 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONFIRMED offsets/sizes (control-flow; copy-out widths are literal) for the header decode; the
+# 40-byte tail is opaque (boundary only). Field VALUE MEANINGS likely. capture_verified: false.
+# spec: Docs/RE/packets/4-80_pvp_death_result.yaml
+
+name: SmsgPvpDeathResult
+opcode: 0x40050           # major 4 (Response), minor 80 -> (4 << 16) | 80
+direction: S2C
+size: 80                 # fixed 80-byte payload block (0x50)
+spec: packets/4-80_pvp_death_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a PvP death result. A fixed 80-byte block decoded inline: an 8-byte echo head, a
+  self-vs-remote branch gate byte, a reason/notice code byte (selects a localized PvP death/kill
+  notice string), a subtype byte (a value of 6 runs a local death effect), then a target actor id;
+  the remaining 40-byte tail is opaque. On the self branch it runs a local death path; on the remote
+  branch it updates the slain actor and posts the notice string.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 80. Only the header through
+# the target id is decoded by the handler; the 40-byte tail is reserved opaque.
+fields:
+  - { name: EchoHead,    type: "bytes[8]" }    # +0x00  echo / leading dwords (forwarded on the self branch) -- opaque
+  - { name: SelfGate,    type: u8 }            # +0x08  branch gate: == 1 -> self-death local path; else remote path
+  - { name: ReasonCode,  type: u8 }            # +0x09  reason / notice code; selects a localized PvP death/kill string (see map)
+  - { name: Subtype,     type: u8 }            # +0x0A  subtype; == 6 -> run a local death effect on the local player
+  - { name: GapA,        type: "bytes[9]" }    # +0x0B  gap (not read) -- opaque
+  - { name: TargetId,    type: u32 }           # +0x14  target actor id (by-key actor lookup; also keys an effect deactivation)
+  - { name: OpaqueTail,  type: "bytes[56]" }   # +0x18  opaque tail (0x18..0x4F) not read by this handler -- opaque section boundary, inner shape PENDING
+  # widths: 8 + 1 + 1 + 1 + 9 + 4 + 56 = 80 (decoded header +0x00..+0x17 = 24 bytes; opaque tail
+  # +0x18..+0x4F = 56 bytes).
+
+notes: |
+  CONFIRMED routing + size (a fixed 0x50 = 80-byte read) + the decoded header region (the self gate,
+  the reason code, the subtype, and the target id are confirmed reads). The remainder of the 80-byte
+  block is OPAQUE (the handler does not sub-index it). Field VALUE meanings are LIKELY where named.
+  [capture/debugger-pending] for value meanings. The field widths sum to exactly 80 (verified):
+  a 24-byte decoded header (+0x00..+0x17) + a 56-byte opaque tail (+0x18..+0x4F).
+
+  REASON-CODE -> NOTICE-STRING MAP (the +0x09 reason byte selects a localized message-string id;
+  ids are message-database keys, NOT addresses): 0, 1, 2, 3, 4, 5, 6, 13, 14, 15 each select a
+  distinct PvP death/kill notice string, with a default fallback for other values. The exact wording
+  is in the client message database; only the code -> id mapping is recovered.
+
+  BRANCHES:
+    +0x08 SelfGate == 1 -> the self-death local path (forwards the echo head, runs the local death
+                           handling, returns).
+    +0x08 SelfGate != 1 -> the remote path: resolve the target actor and post the reason notice.
+    +0x0A Subtype  == 6 -> additionally run a local death effect on the local player.
+
+  TARGET ID (+0x14): a u32 actor id resolved by the by-key actor lookup (with a fixed NPC sort);
+  also used to deactivate a death/finisher visual effect keyed on that actor.
+
+  OPAQUE TAIL (+0x18..+0x4F): reserved as one OPAQUE SECTION BOUNDARY -- not read by this handler. Do
+  NOT invent byte meanings inside it. Inner shape PENDING (capture/debugger).
+
+  RELATED: 5/80 SmsgPvpDeathFx spawns the death/finisher visual effects (a separate push). This 4/80
+  result drives the notice string and the slain-actor update.
+
+  UNBLOCKS: the Client.Application PvP death-result handler (4/80) -- the header decode is solid; the
+  56-byte opaque tail and the reason-string wording are capture-pending.

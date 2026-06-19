@@ -1,0 +1,41 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgStanceSwap
+opcode: 0x20006           # major 2 (GameAction), minor 6 -> (2 << 16) | 6
+direction: C2S
+size: 8                   # fixed 8-byte payload
+spec: packets/2-6_stance_swap.yaml
+status: confirmed
+capture_verified: false
+
+summary: Combat stance/weapon mode toggle. Client-side throttled at 2000ms. Carries the desired stance id, a flag byte, padding, and an optional target actor id used for duel-forced transitions.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: StanceId,      type: u8 }     # 0x00  0=peace, 1=battle; 7/12=duel forced
+  - { name: Flag,          type: u8 }     # 0x01  0=normal, 1=duel forced
+  - { name: Reserved0,     type: u16 }    # 0x02  padding
+  - { name: TargetActorId, type: u32 }    # 0x04  0 for toggle, opponent id for duel
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (8 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (1B) StanceId      : the desired stance. 0 = peace/sheathed, 1 = battle/drawn.
+                              Values 7 and 12 are duel-forced stances (le u8).
+    0x01 (1B) Flag          : modifier flag. 0 = normal voluntary toggle,
+                              1 = duel-forced transition (le u8).
+    0x02 (2B) Reserved0     : padding, expected zero (le u16).
+    0x04 (4B) TargetActorId : zero for a simple stance toggle; set to the opposing actor id
+                              when the transition is forced by a duel (le u32).
+
+  CLIENT-SIDE GATE: the sender enforces a 2000ms cooldown between consecutive stance swap
+  sends. This throttle is purely client-side and is not a wire field.
+
+  UNKNOWNS to resolve with a capture:
+    - the full enumeration of StanceId values beyond 0, 1, 7, 12;
+    - whether Flag carries additional bits beyond the duel-forced indicator;
+    - the exact server-side validation of the cooldown.
+
+  UNBLOCKS: Client.Application stance toggle and duel-initiation use-cases.

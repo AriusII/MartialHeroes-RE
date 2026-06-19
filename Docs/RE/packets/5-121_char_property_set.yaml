@@ -1,0 +1,26 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-121).
+# size: 8 bytes fixed-size payload read as two 4-byte integers.
+
+name: SmsgCharPropertySet
+opcode: 0x50079           # major 5 (Push), minor 121 -> (5 << 16) | 121
+direction: S2C
+size: 8                   # fixed 8-byte payload (2 * u32)
+spec: packets/5-121_char_property_set.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Character property set. Updates a specific integer property/field on the local player
+  or target actor.
+
+fields:
+  - { name: ActorId, type: u32, offset: 0 }         # target actor ID (assumes Player sort 1)
+  - { name: PropertyValue, type: u32, offset: 4 }   # property value to assign to actor field 1852
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the target actor using ActorId and hardcoded Sort 1.
+    - Writes PropertyValue into the actor structure property offset 1852.

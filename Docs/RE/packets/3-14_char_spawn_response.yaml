@@ -1,0 +1,31 @@
+name: SmsgCharSpawnResponse
+opcode: 0x3000e           # major 3, minor 14 -> (3 << 16) | 14
+direction: S2C
+size: 16                  # 16-byte fixed payload
+spec: packets/3-14_char_spawn_response.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Lobby enter-game spawn confirmation / bridge message. Emitted by the server in response to the
+  C2S 1/9 enter world request. This is the lobby bridge confirmation, NOT the actual local player
+  spawn (which is driven by 4/1 SmsgGameStateTick). If successful, it passes arguments to transition
+  the select window state; on failure, it triggers a fallback error notice.
+
+fields:
+  - { name: Result,     type: u8 }          # 0x00  result status: 1 = success, 0 = failure
+  - { name: Subtype,    type: u8 }          # 0x01  transition subtype / flag
+  - { name: Pad,        type: "bytes[2]" }  # 0x02  alignment padding
+  - { name: ValA,       type: u32 }         # 0x04  unverified dword argument
+  - { name: ValB,       type: u32 }         # 0x08  unverified dword argument
+  - { name: ValC,       type: u32 }         # 0x0c  unverified dword argument
+
+notes: |
+  Statically confirmed from the 3/14 handler.
+  The handler reads a fixed 16-byte block.
+
+  Success path (Result == 1):
+    Forwards (Subtype, ValA, ValB, ValC) to the select window (the select-window singleton, sub-object 13) to advance its state.
+
+  Failure path (Result == 0):
+    Shows the default error message (UI message bucket A) on the status line.

@@ -1,0 +1,55 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band2.md §2/39 (HUD context action).
+# Role: a HUD-panel context action gated by a cost/limit check and a two-stage target resolution.
+#
+# CAPTURE-UNVERIFIED: the 12-byte size is control-flow CONFIRMED; only 3 of the 12 bytes have a
+# recovered source and the field roles are low confidence. capture_verified: false.
+
+name: CmsgHudContextAction39
+opcode: 0x20027           # major 2 (GameAction), minor 39 (0x27) -> (2 << 16) | 39
+direction: C2S
+size: 12                  # FIXED 12-byte body
+spec: packets/2-39_hud_context_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  A HUD-panel context action raised by a HUD double-click, gated by a cost/limit (affordability) check
+  and a two-stage target resolution. A fixed 12-byte body; only three bytes (a resolved option/target
+  triple at 0x06..0x08) have a recovered source -- the rest are zero-init / pending. Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+# CONTROL-FLOW CONFIRMED: a fixed 12-byte blit. The builder explicitly writes only three resolved bytes
+# (0x06..0x08); the surrounding bytes are left from the zero-init frame -- modelled as reserved/pending.
+fields:
+  - { name: Prefix,   type: "bytes[6]" }   # 0x00  header / target prefix; not explicitly written (zero-init) [pending]
+  - { name: CodeA,    type: u8 }           # 0x06  resolved option/target byte A (from a resolver lookup) [confirmed source]
+  - { name: CodeB,    type: u8 }           # 0x07  resolved option/target byte B [confirmed source]
+  - { name: CodeC,    type: u8 }           # 0x08  resolved option/target byte C [confirmed source]
+  - { name: Tail,     type: "bytes[3]" }   # 0x09  tail / pad; not explicitly written (zero-init) [pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (12 bytes); only the three resolved bytes at 0x06..0x08 have a
+  recovered source, so the field roles are LOW confidence overall.
+
+    0x00 (6B) Prefix : a header / target prefix region. The builder does not explicitly write these
+                       bytes -- they carry whatever the zero-init frame / prior stack held (likely a
+                       target/coordinate triple or zero-padding). [pending]
+    0x06 (1B) CodeA  : a resolved option/target byte from a target-resolver lookup. [source confirmed]
+    0x07 (1B) CodeB  : a second resolved byte. [source confirmed]
+    0x08 (1B) CodeC  : a third resolved byte. [source confirmed]
+    0x09 (3B) Tail   : a tail / pad region, not explicitly written. [pending]
+
+  TRIGGER: a HUD double-click action. Before sending it runs two target-resolver lookups that each emit
+  three bytes; if both fail it shows a UI list-feedback toast instead of sending. The enclosing routine
+  applies an up-front affordability / limit guard (a 64-bit accumulate vs the player's gold against a
+  cap). Neutral role: a HUD panel context action gated by a cost/limit check and a two-stage target
+  resolution.
+
+  EXPECTED S2C REPLY: [pending].
+
+  UNKNOWNS (capture-pending): the meaning of the prefix/tail bytes (9 of 12 are unwritten by the
+  builder); the roles of CodeA/CodeB/CodeC; the action's subsystem; the S2C reply.
+
+  UNBLOCKS: provisional only -- a fixed 12-byte HUD context-action send; the field model should be
+  confirmed against a capture before relying on it.

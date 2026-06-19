@@ -1,0 +1,70 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: fixed 1092-byte (0x444) copy (twice) + two 8-trip arrays. VALUE semantics
+# PENDING; sub-records past +52 are static-hypothesis. capture_verified: false.
+# spec: Docs/RE/packets/4-71_structured_panel_snapshot.yaml
+#
+# RECLASSIFICATION (CYCLE 2 lane W-C3): opcode 4/71 was previously lumped with the "thin UI-slot
+# updater" family. THAT IS WRONG. 4/71 is a STRUCTURED ~1092-byte panel snapshot -- a subtype byte +
+# an 8-entry id array + an 8-entry status array + further fixed-stride sub-records. This file removes
+# it from the thin-slot family. (opcodes.md already flags it "Structured panel snapshot (NOT a thin slot)".)
+
+name: SmsgResponseSlot71   # neutral name (names.yaml / opcodes.md); a structured panel snapshot, not a thin slot
+opcode: 0x40047            # major 4 (Response), minor 71 -> (4 << 16) | 71
+direction: S2C
+size: 1092                # fixed 1092-byte payload block (0x444)
+spec: packets/4-71_structured_panel_snapshot.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a structured ~1092-byte panel snapshot. The body opens with a subtype byte, then an
+  8-entry id array and a parallel 8-entry status-byte array, then further fixed-stride sub-records
+  (80-byte slot records and 17-byte CP949 name cells) past +52. On the structured subtype the
+  consumer walks the 8-slot record panel.
+
+# Wire order, offset 0 = first payload byte. Pack=1. The 8-entry arrays are modelled as fixed
+# bytes[N] blobs; the engineer slices each into 8 entries of the stated stride. The region past +52
+# (80-byte slot records, 17-byte name cells) is reserved opaque -- its precise wire offsets are a
+# static-hypothesis (the consumer indexes its own copied struct), so it is NOT field-modelled here.
+fields:
+  - { name: HeaderPad0,  type: "bytes[8]" }     # +0    leading header region (subtype gate is the next byte)
+  - { name: Subtype,     type: u8 }             # +8    subtype gate: 1 = structured panel apply
+  - { name: ReservedA,   type: "bytes[3]" }     # +9    filler to the id array
+  - { name: IdArray,     type: "bytes[32]" }    # +12   8 x u32 per-slot id (4-byte stride); non-zero = active slot
+  - { name: StatusArray, type: "bytes[8]" }     # +44   8 x u8 per-slot status byte (1-byte stride); value 2 is checked
+  - { name: BodyOpaque,  type: "bytes[1040]" }  # +52   further fixed-stride sub-records (80-byte slot records, 17-byte CP949 name cells) -- opaque section boundary, inner shape PENDING
+  # widths: 8 + 1 + 3 + 32 + 8 + 1040 = 1092
+
+notes: |
+  CONTROL-FLOW CONFIRMED total size (a fixed 0x444 bulk copy, independently re-confirmed by a second
+  whole-block copy in the consumer), the +8 subtype gate, the 8-entry id array @+12, and the 8-entry
+  status array @+44. The sub-records past +52 are STATIC-HYPOTHESIS / opaque. The field widths sum to
+  exactly 1092 (verified).
+
+  RECLASSIFICATION VERDICT: this is NOT a thin slot. It is a structured ~1092-byte panel snapshot
+  (subtype byte @+8 + an 8-entry id array @+12 + an 8-entry status array @+44 + further fixed-stride
+  sub-records).
+
+  HEADER + ARRAYS (offsets +0..+51):
+    +8  (1B)  Subtype     : apply gate (the structured consumer runs when set). Branch on it first.
+    +12 (32B) IdArray     : 8 x u32 per-slot id, 4-byte stride. A non-zero entry marks an active slot;
+                            entries are compared to a panel id table and to the local-player id.
+                            Control-flow-confirmed by two `< 8` loops reading exactly this base.
+    +44 (8B)  StatusArray : 8 x u8 per-slot status byte, 1-byte stride (e.g. ready/applied; value 2
+                            is tested). Control-flow-confirmed (`< 8` loop at this base).
+
+  BodyOpaque (+52..+1091, 1040 bytes): reserved as one OPAQUE SECTION BOUNDARY. The consumer feeds
+  this region into further fixed-stride sub-tables in its destination struct -- 80-byte slot records
+  and 17-byte CP949 name cells -- but because the consumer indexes its own COPIED struct, the
+  wire-vs-struct offset mapping past +52 is NOT 1:1 proven. Do NOT invent byte meanings inside this
+  block. Inner shape PENDING (capture/debugger).
+
+  WHAT IS PROVEN: total = 1092, subtype @+8, id array @+12 (x8, stride 4), status array @+44 (x8,
+  stride 1). The sub-record offsets past +52 are static-hypothesis.
+
+  UNKNOWNS to resolve with a capture / live read:
+    - the exact wire offsets and counts of the 80-byte slot records and the 17-byte name cells past +52;
+    - the per-slot id/status value meanings.
+
+  UNBLOCKS: reserving the correct frame length in Client.Application; the sub-records past +52 need a
+  live read before full parsing.

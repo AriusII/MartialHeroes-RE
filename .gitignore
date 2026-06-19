@@ -488,3 +488,4 @@ screenshot_probe.gd.uid
 
 # Scratch screenshots/probes (never committed)
 _scratch/
+.agents/

@@ -1,0 +1,35 @@
+# spec: Docs/RE/packets/2-95_trigger_action.yaml
+# Role: C2S fire-once confirm/trigger button (single flag byte) with a client cooldown stamp.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgTriggerAction
+opcode: 0x2005f           # major 2 (GameAction), minor 95 -> (2 << 16) | 95
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-95_trigger_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Fire-once confirm/trigger button action. A single flag byte (the caller sets the constant 1, a "do it" signal). After sending, the client stamps a last-use timestamp into a UI slot (a client-side cooldown).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Flag, type: u8 }   # 0x00  trigger flag; caller sets constant 1 ("do it") [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 1-byte blit); the action this triggers is a
+  static inference (capture-pending).
+
+    0x00 (1B) Flag : a confirm/trigger byte set to the constant 1 by the caller — a "do it" signal,
+                     not a state value. [capture/debugger-pending]
+
+  TRIGGER: raised from a UI command dispatcher case that sets the byte to 1, sends, then records a
+  client-side last-use timestamp into a UI slot (a fire-once cooldown stamp). The specific action
+  the trigger performs is capture-pending.
+
+  UNKNOWNS to resolve with a capture:
+    - the specific action this trigger performs;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application fire-once trigger/confirm use-case.

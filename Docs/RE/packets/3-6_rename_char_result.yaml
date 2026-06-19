@@ -1,0 +1,34 @@
+name: SmsgRenameCharResult
+opcode: 0x30006           # major 3, minor 6 -> (3 << 16) | 6
+direction: S2C
+size: 12                  # 12-byte fixed payload
+spec: packets/3-6_rename_char_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Character rename result message. Emitted by the server in response to C2S 1/13 rename request.
+  On success, it carries the target slot and applies the new name in the select lobby.
+  On failure, it carries the error code which drives the error status line.
+
+fields:
+  - { name: Result,     type: u8 }          # 0x00  result status: 1 = success, 0 = failure
+  - { name: ErrorCode,  type: u8 }          # 0x01  error sub-code (e.g., name already exists, invalid characters)
+  - { name: Pad,        type: "bytes[2]" }  # 0x02  alignment padding
+  - { name: SlotIndex,  type: u32 }         # 0x04  slot index of the renamed character
+  - { name: Unk,        type: u32 }         # 0x08  unverified dword field
+
+notes: |
+  Statically confirmed from the 3/6 handler.
+  The handler reads a fixed 12-byte block.
+
+  Success path (Result == 1):
+    Increments a local counter, reads SlotIndex and Unk, and writes the slot record into the select window.
+
+  Failure path (Result == 0):
+    Inspects ErrorCode and maps it to one of four UI message-string buckets:
+      - 0xC8 / 0xC9 -> message bucket A
+      - 0xCC / 0xCD / 0xCF / 0xD0 / 0xD1 / 0xD2 -> message bucket B
+      - 0xCE -> message bucket C
+      - 0xD4 -> message bucket D
+    Displays the selected error message on the status line.

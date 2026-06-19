@@ -1,0 +1,41 @@
+# spec: Docs/RE/packets/2-17_service_action.yaml
+# Role: C2S HUD-panel actor service action (relink-stateful) — sub-byte header + u32 arg.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgServiceAction
+opcode: 0x20011           # major 2 (GameAction), minor 17 -> (2 << 16) | 17
+direction: C2S
+size: 8                   # fixed 8-byte body
+spec: packets/2-17_service_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: HUD-panel actor service request (same NPC/actor interaction family as 2/16, a different action selector). Carries a sub-mode byte, an action-mode byte, and a u32 actor id / argument. The caller keeps a per-instance relink counter, so it is a stateful service interaction.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: B0,   type: u8 }        # 0x00  sub-mode / index [capture/debugger-pending]
+  - { name: Mode, type: u8 }        # 0x01  action mode (0/1/other) [capture/debugger-pending]
+  - { name: Pad0, type: "u8[2]" }   # 0x02  alignment gap to the u32
+  - { name: Arg,  type: u32 }       # 0x04  actor id / numeric argument [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 8-byte blit); the field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (1B) B0   : a sub-mode / index byte. [capture/debugger-pending]
+    0x01 (1B) Mode : an action-mode byte (mode 1 bumps a relink counter; other modes run a list
+                     guard). [capture/debugger-pending]
+    0x02 (2B) Pad0 : alignment gap before the u32.
+    0x04 (4B) Arg  : an actor id or numeric argument. [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): gated by a HUD-panel-close check and a list selection
+  feedback; the action mode selects the branch (mode 1 bumps the per-instance relink counter) before
+  sending. Same actor-service family as 2/16.
+
+  UNKNOWNS to resolve with a capture:
+    - the mode value space and the meaning of Arg;
+    - the inbound reply opcode (service result) — pending.
+
+  UNBLOCKS: Client.Application HUD-panel actor service action use-case.

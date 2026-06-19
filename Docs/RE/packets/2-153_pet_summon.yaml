@@ -1,0 +1,41 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgPetSummon
+opcode: 0x20099           # major 2 (GameAction), minor 153 -> (2 << 16) | 153
+direction: C2S
+size: 4                   # fixed 4-byte payload (size corrected from variable)
+spec: packets/2-153_pet_summon.yaml
+status: confirmed
+capture_verified: false
+
+summary: Pet/mount summon or dismiss. Client-side 60-second cooldown between summon attempts.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 4.
+fields:
+  - { name: Mode,     type: u8 }          # 0x00  summon/dismiss mode
+  - { name: Param1,   type: u8 }          # 0x01  parameter 1
+  - { name: SlotFlag, type: u8 }          # 0x02  from panel widget
+  - { name: NpcSlot,  type: u8 }          # 0x03  0xFF if not applicable; 40*slot index otherwise
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (4 bytes),
+  CAPTURE-UNVERIFIED meaning. Size corrected from variable to fixed 4 bytes.
+
+    0x00 (1B) Mode     : summon/dismiss mode selector (le u8). The specific mode values
+                         are not yet enumerated.
+    0x01 (1B) Param1   : additional parameter; meaning varies by mode (le u8).
+    0x02 (1B) SlotFlag : derived from the pet panel widget selection (le u8).
+    0x03 (1B) NpcSlot  : NPC slot value; 0xFF if not applicable. When applicable, the
+                         value is 40 * slot_index (le u8).
+
+  CONTEXT: the client enforces a 60-second cooldown between pet summon attempts.
+  This cooldown is client-side only and is not reflected in the wire protocol.
+
+  UNKNOWNS to resolve with a capture:
+    - enumerated Mode values (summon vs dismiss vs switch?);
+    - the relationship between Param1, SlotFlag, and the pet panel UI;
+    - whether the 40*slot_index formula for NpcSlot is exact or approximate;
+    - whether the original was truly variable-length (corrected to 4 here).
+
+  UNBLOCKS: Client.Application pet/mount summon and dismiss flow.

@@ -1,0 +1,32 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-124).
+# size: 12 bytes (0x0C) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorVisualFlagsSet
+opcode: 0x5007c           # major 5 (Push), minor 124 -> (5 << 16) | 124
+direction: S2C
+size: 12                  # fixed 12-byte payload (0x0C)
+spec: packets/5-124_actor_visual_flags_set.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor visual flags set. Sets visual state flags (e.g. stealth visual indicators, active glow effects,
+  or special conditions) on the addressed actor.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: VisualFlags, type: u8, offset: 8 }      # visual flag byte value
+  - { name: Padding, type: "u8[3]", offset: 9 }     # alignment padding to 12 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - If the ActorId matches the local player:
+      - Writes VisualFlags to local player offset 888 and to a global visual-state byte.
+      - Triggers local player visual refresh and updates HUD state panel.
+    - Otherwise, resolves the remote actor via (ActorSort, ActorId) and:
+      - Writes VisualFlags to actor offset 888.
+      - Triggers remote actor visual refresh.

@@ -1,0 +1,48 @@
+# spec: Docs/RE/packets/2-80_guild_request_union.yaml
+# Role: C2S guild / clan + map-territory request — a 48-byte discriminated union keyed by a subcode.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgGuildRequest
+opcode: 0x20050           # major 2 (GameAction), minor 80 -> (2 << 16) | 80
+direction: C2S
+size: 48                  # fixed 48-byte body (discriminated union keyed by byte 0)
+spec: packets/2-80_guild_request_union.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Guild / clan operations request — create, join, leave, disband, accept, reject, fame-donate, plus a map/territory object-pick variant. A fixed 48-byte discriminated union keyed by a leading action subcode. Driven by guild fame/management panels and a world-map region click.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 48. Union keyed by Subcode.
+fields:
+  - { name: Subcode, type: u8 }          # 0x00  action subcode (union discriminator; 0..0xA observed) [capture/debugger-pending]
+  - { name: Pad0,    type: "u8[3]" }     # 0x01  alignment gap
+  - { name: ContextId, type: u32 }       # 0x04  self name-hash / context id, or map-object id (subcode 0) [capture/debugger-pending]
+  - { name: AmountQ, type: "u8[8]" }     # 0x08  amount / object-data qword region [capture/debugger-pending]
+  - { name: Union,   type: "u8[32]" }    # 0x10  per-subcode union: name strings (CP949 NUL-padded), counts, list refs; NUL pad to 48 [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 48-byte blit of a memset-zeroed buffer); the layout
+  is a discriminated union keyed by byte 0, so the 0x10..0x2F region's content varies by Subcode. The
+  field VALUES are static inferences (capture-pending).
+
+    0x00 (1B)  Subcode   : the action subcode (union discriminator). Observed values across the many
+                           callers: 0 = map/territory object-pick, 1 = create, 2 = join, 4 = leave,
+                           5 = disband, 7 = accept, 8 = reject (fame-donate is another). [capture/debugger-pending]
+    0x01 (3B)  Pad0      : alignment gap.
+    0x04 (4B)  ContextId : a self name-hash / context id, OR (subcode 0) a map-object id. [capture/debugger-pending]
+    0x08 (8B)  AmountQ   : an amount / object-data qword region (subcode 2: a taxed amount; donate:
+                           a fame amount). [capture/debugger-pending]
+    0x10 (32B) Union     : the per-subcode union region — CP949 NUL-padded name strings, counts, or
+                           list references, NUL-padded out to the 48-byte body. [capture/debugger-pending]
+
+  TRIGGER: guild fame/management panel buttons (create / join / leave / disband / accept / reject /
+  donate) and a world-map region click panel (the map/territory object-pick, subcode 0). The validator
+  gates on party-exists and a party member-count, and for join/leave-style subcodes string-compares an
+  input name against the player's clan/party name.
+
+  UNKNOWNS to resolve with a capture:
+    - the full Subcode enum and the per-subcode union member map;
+    - the inbound reply opcode (a guild state-update / territory-info S2C) — pending.
+
+  UNBLOCKS: Client.Application guild / clan / territory request use-case.

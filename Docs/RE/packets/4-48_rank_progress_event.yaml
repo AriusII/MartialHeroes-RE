@@ -1,0 +1,77 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: routing + fixed 236-byte (0xEC) size + the two routing bytes + the 28-byte
+# record stride and 8-count. UNVERIFIED: the 8 x 28-byte record array overruns the 236-byte body by
+# 12 bytes (see notes). VALUE semantics PENDING. capture_verified: false.
+# spec: Docs/RE/packets/4-48_rank_progress_event.yaml
+
+name: SmsgRankProgressEvent
+opcode: 0x40030           # major 4 (Response), minor 48 -> (4 << 16) | 48
+direction: S2C
+size: 236                # fixed 236-byte payload block (0xEC) -- this is the handler's bulk-read length
+spec: packets/4-48_rank_progress_event.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a rank-progress event panel. The handler reads a fixed 236-byte block: a route byte
+  and a sub-select byte in the leading header, then (handed to the panel parser at body +12) an array
+  of 8 interleaved 28-byte records, each carrying an id key, an 18-byte CP949 name, and two i16
+  numbers. [UNVERIFIED] the 8 x 28-byte array does NOT fit inside the 236-byte read (see notes).
+
+# Wire order, offset 0 = first payload byte. Pack=1. The record array is modelled as a fixed bytes[N]
+# blob; the engineer slices it into entries of the stated 28-byte stride. NOTE: the modelled record
+# region is the 224 bytes the panel walk reads (8 x 28); together with the 12-byte header that is 248,
+# which OVERRUNS the 236-byte read by 12 bytes -- carried [UNVERIFIED] (see notes).
+fields:
+  - { name: HeaderPad0,  type: "bytes[8]" }     # +0    leading header region before the route bytes
+  - { name: RouteByte,   type: u8 }             # +8    route / branch byte; non-zero -> detail path
+  - { name: SubSelect,   type: u8 }             # +9    sub-select byte (0 / 1) -> picks a UI list entry
+  - { name: ReservedA,   type: "bytes[2]" }     # +10   filler to the record array base (+12)
+  - { name: RecordArray, type: "bytes[224]" }   # +12   record array: 8 x 28-byte record (see per-record table) -- [UNVERIFIED] overruns the 236-byte read by 12B
+  # widths as modelled: 8 + 1 + 1 + 2 + 224 = 236 (record array base +12; the panel walk advances the
+  # record cursor from body+24, so the first record sits 12 bytes into this 224-byte region -- see notes).
+
+# PER-RECORD layout (28-byte stride; offsets RECORD-RELATIVE to each record base):
+#   +0  (4B)  u32   presence/id key  (zero => empty slot -> blank labels)
+#   +4  (18B) char  CP949 name string
+#   +22 (2B)  i16   numeric field A
+#   +24 (2B)  i16   numeric field B
+#   (record total = 28 bytes)
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing + size (the handler bulk-reads 0xEC = 236 bytes) + the two leading
+  routing bytes (route @+8, sub-select @+9) + the 28-byte record stride and 8-entry count (an
+  explicit `< 8` loop advancing the record cursor by 28 bytes). VALUE semantics of individual bytes
+  PENDING.
+
+  THE +12 SKIP: the panel record parser is handed the body at +12, so the first 12 bytes are a header
+  consumed by the routing layer (which reads the route byte @+8 and the sub-select byte @+9). The
+  panel walk then advances its record cursor from body+24 (the records begin 12 bytes past the +12
+  hand-off pointer).
+
+  PER-RECORD (28-byte stride, record-relative):
+    +0  (4B)  presence/id key : zero marks an empty slot (the panel blanks that row's labels).
+    +4  (18B) CP949 name      : a name string (wider than the 17-byte cells used elsewhere in the
+                                quest/rank family -- 18 bytes inside the 28-byte record).
+    +22 (2B)  i16 numeric A    : passed to a numeric formatter.
+    +24 (2B)  i16 numeric B    : passed to a second numeric formatter.
+
+  [UNVERIFIED] SIZE OVERRUN -- FLAGGED, NOT RESOLVED: the record array as walked is 8 x 28 = 224
+  bytes starting at body+24, so it ends at body+248 -- which OVERRUNS the 236-byte (0xEC) bulk-read by
+  12 bytes. The 28-byte stride and the 8-entry count are both explicit in the consumer loop (HIGH
+  confidence), but the array-vs-body-size arithmetic does NOT close. Candidate explanations (none
+  confirmed):
+    (a) the routed frame for 4/48 actually carries more than 236 bytes and the panel reads beyond the
+        handler's bulk-read window;
+    (b) fewer than 8 records are actually populated (the loop stops early on a zero id);
+    (c) the in-wire record stride differs from the in-memory walk stride.
+  This is carried as [UNVERIFIED]; a 4/48 capture is REQUIRED to settle whether the body is 236 or
+  larger and how the 8 x 28 array fits. The modelled 224-byte RecordArray + 12-byte header sums to
+  236 here ONLY to keep a valid Pack=1 layout; the true on-wire array extent is the open question.
+
+  UNKNOWNS to resolve with a 4/48 capture:
+    - the body-vs-array fit (236 vs >236; how many records are actually present);
+    - the route / sub-select byte meanings and the per-record numeric field meanings.
+
+  UNBLOCKS: reserving a frame length in Client.Application -- but the size overrun MUST be resolved by
+  capture before parsing the record array.

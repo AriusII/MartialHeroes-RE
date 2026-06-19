@@ -1,0 +1,41 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads 28 bytes from the payload cursor)
+#   offsets:
+#     has_custom_text @ 0x00: confirmed (checked to branch custom name vs code)
+#     status_code @ 0x01: confirmed (switch for status codes)
+#     character_name @ 0x02: confirmed (string-compared against the slot name)
+#     status_value @ 0x19 (25): confirmed (updates character descriptor +206 high byte)
+#     level @ 0x1A (26): confirmed (updates player level descriptor +207 low byte / local player level)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: SmsgCharSelectStatusUpdate
+opcode: 0x30017           # major 3, minor 23 -> (3 << 16) | 23
+direction: S2C
+size: 28                  # fixed 28-byte payload
+spec: packets/3-23_char_select_status_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Select-screen character level and status update. Sent by the server to update a character's level 
+  and custom status byte by matching the CP949 name string inside the lobby character slots.
+
+fields:
+  - { name: HasCustomText, type: u8 }        # 0x00  1 if name-based status is updated, 0 for code-based status
+  - { name: StatusCode, type: u8 }           # 0x01  status reason code used if HasCustomText is 0
+  - { name: Pad0, type: "u8[6]" }            # 0x02  alignment padding
+  - { name: CharacterName, type: "char[17]" } # 0x08  CP949 NUL-terminated character name to update
+  - { name: StatusValue, type: u8 }          # 0x19  updates character status / PK / faction byte (staged in the global client status flag)
+  - { name: Level, type: u8 }                # 0x1A  updates character level (staged in the local player level global)
+  - { name: Padding, type: u8 }              # 0x1B  1 byte padding/reserved (unused)
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 28 = 36 bytes on the wire.
+
+  When received:
+  - If HasCustomText is non-zero, it performs a character slot lookup matching CharacterName in the net-handler lobby scratch area.
+    It updates the matched character's StatusValue and Level fields.
+  - If HasCustomText is 0, it switches on StatusCode to display a timed status notice (e.g. timeout / lock notice) on the lobby UI.
+  - If the local player is already instantiated (in-game), it directly updates the global client status flag and the local player level global.

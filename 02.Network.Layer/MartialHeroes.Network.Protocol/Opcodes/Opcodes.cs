@@ -146,6 +146,9 @@ public static class Opcodes
     /// <summary>3:23 — character create result. status: confirmed.</summary>
     public const uint SmsgCharCreateResult = 0x30017;
 
+    /// <summary>3:23 — character select status update (alias for SmsgCharCreateResult). status: confirmed.</summary>
+    public const uint SmsgCharSelectStatusUpdate = 0x30017;
+
     /// <summary>3:100 — generic character action result. status: confirmed.</summary>
     public const uint SmsgCharActionResult = 0x30064;
 

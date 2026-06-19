@@ -1,0 +1,37 @@
+# spec: Docs/RE/packets/2-21_list_select.yaml
+# Role: C2S short HUD-list / actor selection action (mode + index).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgListSelect
+opcode: 0x20015           # major 2 (GameAction), minor 21 -> (2 << 16) | 21
+direction: C2S
+size: 2                   # fixed 2-byte body
+spec: packets/2-21_list_select.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Short HUD-list / actor selection action (mode + index). The smallest member of the service-menu family — likely an "open/select" with no extra payload.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 2.
+fields:
+  - { name: Mode,  type: u8 }   # 0x00  selection mode (0/1/2 dispatch) [capture/debugger-pending]
+  - { name: Index, type: u8 }   # 0x01  actor / list index [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 2-byte blit); the field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (1B) Mode  : selection mode; the resolver branches on it (mode 1 looks up an actor via a
+                      hotbar array, mode 2 via a fixed actor global). [capture/debugger-pending]
+    0x01 (1B) Index : an actor / list index. [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): gated by a HUD-panel-close check and a list-feedback
+  guard; the list slot to highlight is resolved by mode before the 2-byte send. Same service-menu
+  family as 2/5 / 2/16 / 2/17 / 2/22.
+
+  UNKNOWNS to resolve with a capture:
+    - the Mode value space and the role (open vs select);
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application HUD-list select use-case.

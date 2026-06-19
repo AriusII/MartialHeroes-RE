@@ -1,0 +1,49 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONFIRMED offsets/sizes/strides (control-flow; copy-out widths are literal). Field VALUE MEANINGS
+# largely opaque (the consumer emits scores from cross-object state, not directly from these bytes).
+# capture_verified: false.
+# spec: Docs/RE/packets/5-91_pvp_score_update.yaml
+
+name: SmsgPvpScoreUpdate
+opcode: 0x5005b           # major 5 (Push), minor 91 -> (5 << 16) | 91
+direction: S2C
+size: 124                # fixed 124-byte payload block (0x7C)
+spec: packets/5-91_pvp_score_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a PvP score update. A fixed 124-byte block: a 20-byte scalar header (a byte, two
+  flag bytes, and three u32s) then a 6-entry CP949 name array (one primary name + five entries,
+  17-byte cells). 20 + 6 x 17 = 122; +2 trailing pad = 124. Forwarded to the PvP score/ranking
+  subsystem.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 124. The name array is
+# modelled as fixed bytes[N] cells (17-byte stride). The header scalars' VALUE meanings are opaque.
+fields:
+  - { name: ByteA,       type: u8 }            # +0x00  scalar byte A (opaque)
+  - { name: GapA,        type: "bytes[3]" }    # +0x01  gap (not copied) -- opaque
+  - { name: DwordB,      type: u32 }           # +0x04  dword B (opaque)
+  - { name: ByteC,       type: u8 }            # +0x08  byte C (opaque; used % 10 as a team/index selector)
+  - { name: ByteD,       type: u8 }            # +0x09  byte D (opaque)
+  - { name: GapB,        type: "bytes[2]" }    # +0x0A  gap (not copied) -- opaque
+  - { name: DwordE,      type: u32 }           # +0x0C  dword E (opaque)
+  - { name: DwordF,      type: u32 }           # +0x10  dword F (opaque)
+  - { name: NamePrimary, type: "bytes[17]" }   # +0x14  primary CP949 name (17-byte cell)
+  - { name: NameArray,   type: "bytes[85]" }   # +0x25  5 x 17-byte CP949 name cell (17-byte stride)
+  - { name: TailPad,     type: "bytes[2]" }    # +0x7A  trailing pad (not read) -- opaque, pad to 124
+  # widths: 1 + 3 + 4 + 1 + 1 + 2 + 4 + 4 + 17 + 85 + 2 = 124
+
+notes: |
+  CONFIRMED routing + size + section boundaries + the 6-entry name layout (a primary name + a 5-entry
+  array, both 17-byte CP949 cells; the 5-entry array stride is confirmed by an explicit loop). The
+  leading scalar header offsets (0, 4, 8, 9, 12, 16) are confirmed copy sites. Field VALUE meanings
+  are largely OPAQUE -- the consumer emits the score lines from cross-object state values, not
+  directly from this buffer's bytes; only the offsets are pinned. [capture/debugger-pending] for the
+  scalar meanings. The field widths sum to exactly 124 (verified).
+
+  Section map: { u8 A, gap[3], u32 B, u8 C, u8 D, gap[2], u32 E, u32 F, name[17] primary,
+  name[17] x 5, pad[2] }. Byte C (+0x08) is used modulo 10 as a team/index selector.
+
+  UNBLOCKS: the Client.Application PvP-score handler (5/91) -- offsets are solid; the scalar meanings
+  are capture-pending (the rendered scores derive from cross-object state).

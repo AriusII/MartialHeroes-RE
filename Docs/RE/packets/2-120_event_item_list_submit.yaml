@@ -1,0 +1,50 @@
+# spec: Docs/RE/packets/2-120_event_item_list_submit.yaml
+# Role: C2S event-item list submit — count-prefixed [u8 flag][u32 N][12B record x N].
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgEventItemListSubmit
+opcode: 0x20078           # major 2 (GameAction), minor 120 -> (2 << 16) | 120
+direction: C2S
+size: var                 # [u8 flag][u32 count][12-byte record x count] (variable)
+spec: packets/2-120_event_item_list_submit.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Event-item list submit. Raised when the user confirms an event-item panel holding a list of selected event items. A one-byte flag, a u32 record count, then that many fixed 12-byte records.
+
+# Wire order, offset 0 = first payload byte. Pack=1. VARIABLE: fixed prefix + count-prefixed records.
+fields:
+  # --- fixed prefix (5 bytes) ---
+  - { name: Flag,  type: u8 }    # 0x00  flag / mode byte [capture/debugger-pending]
+  - { name: Count, type: u32 }   # 0x01  record count N (number of 12-byte records that follow)
+  # --- repeated record (12 bytes), Count times, starting at 0x05 ---
+  - { name: RecordId,  type: u32 }       # +0x00 (within record)  record id / key [capture/debugger-pending]
+  - { name: RecordA,   type: u8 }        # +0x04  sub-byte a [capture/debugger-pending]
+  - { name: RecordB,   type: u8 }        # +0x05  sub-byte b [capture/debugger-pending]
+  - { name: RecordPad, type: "u8[6]" }   # +0x06  zero pad to the 12-byte record stride
+
+notes: |
+  CONTROL-FLOW CONFIRMED variable shape: a leading u8 flag, a u32 count, then Count fixed 12-byte
+  records appended in a loop. NOT a fixed body. The field VALUES are static inferences
+  (capture-pending).
+
+  FIXED PREFIX (5 bytes):
+    0x00 (1B) Flag  : a flag / mode byte. [capture/debugger-pending]
+    0x01 (4B) Count : the number of 12-byte records that follow (N).
+
+  REPEATED RECORD (12 bytes each, Count times, base 0x05):
+    +0x00 (4B) RecordId  : a record id / key sourced from an 8-byte-stride array.
+                           [capture/debugger-pending]
+    +0x04 (1B) RecordA   : a sub-byte (low byte of the source's second dword). [capture/debugger-pending]
+    +0x05 (1B) RecordB   : a sub-byte (next byte of the source's second dword). [capture/debugger-pending]
+    +0x06 (6B) RecordPad : zero pad filling the 12-byte wire stride.
+
+  TRIGGER: the event-item confirm panel — the user confirms a list of selected event items; the
+  builder reads a flag, a count, and loops emitting one 12-byte record per selected element.
+
+  UNKNOWNS to resolve with a capture:
+    - the per-record field meanings and the Flag value;
+    - the inbound reply opcode (likely an event-item grant/result) — pending.
+
+  UNBLOCKS: Client.Application event-item list submit use-case (variable-length send).

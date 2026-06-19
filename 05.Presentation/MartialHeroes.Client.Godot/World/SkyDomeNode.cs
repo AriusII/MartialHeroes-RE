@@ -331,6 +331,19 @@ public sealed partial class SkyDomeNode : Node3D
         Color tintB = BgraToColor(layerColors[kfNext][0]);
         Color tint = tintA.Lerp(tintB, frac);
 
+        // PORT-SIDE LEGIBILITY GATE (aesthetic, not spec-dictated):
+        // If the cloud tint is near-black (luminance < 0.015), hide the dome so it doesn't render as an
+        // opaque black hemisphere over the WorldEnvironment background. This is observed with area-2
+        // cloud-dome bins where the BGRA vertex colours are effectively zero at several keyframes,
+        // producing a black sky cap. When official captures are available, calibrate/remove this gate.
+        // Aesthetic threshold 0.015 — engineering choice for port-side legibility.
+        float tintLum = 0.2126f * tint.R + 0.7152f * tint.G + 0.0722f * tint.B;
+        if (tintLum < 0.015f)
+        {
+            mesh.Visible = false;
+            return;
+        }
+
         mat.SetShaderParameter("albedo_color", new Color(tint.R, tint.G, tint.B, alpha));
         // uv_offset removed: dome shader is colour-only, no texture to scroll.
 
@@ -363,6 +376,9 @@ public sealed partial class SkyDomeNode : Node3D
         // Use VisualInstance3D.Layers to assign sky layer (bit 20 = Godot sky/background convention).
         // This is an engineering choice — Godot does not mandate a specific sky layer number.
         mi.Layers = 1; // visible to camera layer 1 (the default 3D camera layer)
+        // Start hidden — UpdateDomes sets visibility each frame. Avoids a one-frame white flash
+        // before the first UpdateDomes call evaluates the tint + luminance gate.
+        mi.Visible = false;
         AddChild(mi);
         _starDomeMesh = mi;
     }
@@ -383,6 +399,8 @@ public sealed partial class SkyDomeNode : Node3D
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1,
+            // Start hidden — UpdateDomes sets visibility each frame (avoids a one-frame white flash).
+            Visible = false,
         };
         AddChild(mi1);
         _cloudDomeMesh1 = mi1;
@@ -399,6 +417,8 @@ public sealed partial class SkyDomeNode : Node3D
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1,
+            // Start hidden — UpdateDomes sets visibility each frame (avoids a one-frame white flash).
+            Visible = false,
         };
         AddChild(mi2);
         _cloudDomeMesh2 = mi2;

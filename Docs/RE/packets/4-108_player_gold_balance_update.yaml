@@ -1,0 +1,17 @@
+name: SmsgPlayerGoldBalanceUpdate
+opcode: 0x4006c           # major 4, minor 108
+direction: S2C
+size: 16                  # fixed 16-byte body
+spec: packets/4-108_player_gold_balance_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: Updates the local player's gold balance directly and refreshes money HUD labels.
+
+fields:
+  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque header/echo region
+  - { name: Gold,        type: i64 }          # 0x08 New gold balance (64-bit integer)
+
+notes: |
+  The handler reads a fixed 16-byte body. Frame = 8-byte header + 16 = 24 bytes on the wire.
+  Gold is represented as a 64-bit integer spanning offsets 0x08 to 0x0F.

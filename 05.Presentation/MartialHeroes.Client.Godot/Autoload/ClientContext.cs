@@ -257,6 +257,41 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public CellAssemblyHandoff? CellAssemblyHandoff { get; private set; }
 
+    /// <summary>
+    /// The area-assembly handoff: composes the full area ONCE per area-enter and publishes it as an
+    /// <see cref="AreaAssembledEvent"/> (carrying the spawn list so the composer-driven actor
+    /// placement reaches layer-05). The layer-05 root (here) binds the area bake to
+    /// <c>AreaComposer.ComposeArea</c>, projected onto the layer-04 <see cref="IAssembledAreaView"/>
+    /// via <see cref="MartialHeroes.Client.Godot.Adapters.AssembledAreaViewAdapter"/>.
+    ///
+    /// CYCLE 2 Phase 2-A.5: closes the gap where <see cref="AreaAssembledEvent"/> was never
+    /// published — the spawn list never reached layer-05 and <c>OnAreaAssembled</c> never fired.
+    ///
+    /// Call <see cref="AreaAssemblyHandoff.OnAreaBound"/> from
+    /// <see cref="World.RealWorldRenderer.TriggerTerrainStreaming"/> alongside the existing
+    /// <c>StreamingService.SetArea</c> + <c>AreaAssemblySource.SetArea</c> calls.
+    ///
+    /// Null when the terrain VFS could not be opened (offline mode).
+    /// spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load → spawns) / §4.
+    /// </summary>
+    public AreaAssemblyHandoff? AreaAssemblyHandoff { get; private set; }
+
+    /// <summary>
+    /// The rebindable area assembly source used by the <see cref="CellAssemblyHandoff"/> bake callback.
+    /// Call <see cref="MartialHeroes.Client.Godot.Adapters.RebindableAreaAssemblySource.SetArea"/>
+    /// before triggering terrain streaming to ensure the AreaComposer builds paths for the correct area.
+    ///
+    /// Phase 2-B.1 fix: the original code hard-coded <c>areaId: 0</c> at construction time. This
+    /// property exposes the rebindable wrapper so <see cref="World.RealWorldRenderer"/> can call
+    /// <c>SetArea(TargetAreaId)</c> alongside <see cref="SectorStreamingService.SetArea"/> — both must
+    /// be rebound to the same area before streaming starts.
+    ///
+    /// Null when the terrain VFS could not be opened (offline mode).
+    /// spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives AreaComposer paths.
+    /// spec: Docs/RE/formats/terrain.md §1.1 — areaId digit decomposition.
+    /// </summary>
+    public MartialHeroes.Client.Godot.Adapters.RebindableAreaAssemblySource? AreaAssemblySource { get; private set; }
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
@@ -460,7 +495,17 @@ public sealed partial class ClientContext : Node
         //   spec: Docs/RE/specs/assembly_graph.md §1/§4 — AreaComposer + CellAssemblyHandoff contract.
         try
         {
-            var areaSource = new MartialHeroes.Client.Godot.Adapters.VfsAreaAssemblySource(vfs, areaId: 0);
+            // Phase 2-B.1 fix: use RebindableAreaAssemblySource (starts at area 0; rebound to
+            // the configured area by RealWorldRenderer.TriggerTerrainStreaming via
+            // ctx.AreaAssemblySource.SetArea(TargetAreaId) before streaming starts).
+            // This ensures AreaComposer.ComposeCell builds data/map<NNN>/dat/... paths for the
+            // ACTIVE area rather than always using area 0 (map000).
+            // spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives cell paths.
+            // spec: Docs/RE/formats/terrain.md §1.1 — areaId digit decomposition.
+            var areaSource =
+                new MartialHeroes.Client.Godot.Adapters.RebindableAreaAssemblySource(vfs, initialAreaId: 0);
+            AreaAssemblySource = areaSource; // expose for RealWorldRenderer to call SetArea.
+
             var areaComposer = new global::MartialHeroes.Assets.Mapping.AreaComposer();
 
             CellAssemblyHandoff = new CellAssemblyHandoff(bus,
@@ -468,7 +513,8 @@ public sealed partial class ClientContext : Node
                 {
                     // Payload bytes from SectorLoadedEvent are the .ted bytes already loaded by
                     // VfsTerrainSectorSource. The AreaComposer re-reads all cell files via the
-                    // VfsAreaAssemblySource (which has full VFS access), so the payload is unused here.
+                    // RebindableAreaAssemblySource (which has full VFS access and is rebound to the
+                    // active area before streaming starts). The payload is unused here.
                     // spec: Docs/RE/specs/assembly_graph.md §4 — bake callback is pure/deterministic.
                     try
                     {
@@ -482,12 +528,45 @@ public sealed partial class ClientContext : Node
                     }
                 });
 
-            GD.Print("[ClientContext] AreaComposer + CellAssemblyHandoff wired. spec: assembly_graph.md §1/§4.");
+            GD.Print(
+                "[ClientContext] AreaComposer + CellAssemblyHandoff wired (RebindableAreaAssemblySource). spec: assembly_graph.md §1/§4.");
+
+            // CYCLE 2 Phase 2-A.5 — AreaAssemblyHandoff.
+            // Binds the area bake to AreaComposer.ComposeArea(areaSource) and wraps the result in
+            // AssembledAreaViewAdapter so the layer-04 seam never references Assets.Mapping.
+            // AreaAssemblyHandoff.OnAreaBound is called from RealWorldRenderer.TriggerTerrainStreaming
+            // alongside SetArea() — exactly once per area-enter (idempotent on re-bind).
+            // The bake callback re-uses the SAME areaComposer + areaSource instances already captured
+            // by the CellBake delegate above, so no second VFS handle is opened.
+            // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load → spawns) / §4.
+            AreaAssemblyHandoff = new AreaAssemblyHandoff(bus,
+                areaId =>
+                {
+                    try
+                    {
+                        // Ensure the assembly source is bound to this area before composing.
+                        // RealWorldRenderer.TriggerTerrainStreaming also calls areaSource.SetArea,
+                        // but we defensively call it here too so the bake is always area-coherent.
+                        // spec: Docs/RE/formats/terrain.md §1.1 (per-area path tag). CONFIRMED.
+                        areaSource.SetArea(areaId);
+                        var area = areaComposer.ComposeArea(areaSource);
+                        return new MartialHeroes.Client.Godot.Adapters.AssembledAreaViewAdapter(area);
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[ClientContext] AreaComposer.ComposeArea(area={areaId}) failed: {ex.Message}");
+                        return null; // unresolved area → nothing published. spec: assembly_graph.md §1.
+                    }
+                });
+
+            GD.Print("[ClientContext] AreaAssemblyHandoff wired (CYCLE 2 Phase 2-A.5). spec: assembly_graph.md §1/§4.");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[ClientContext] CellAssemblyHandoff wiring failed (non-fatal): {ex.Message}");
             CellAssemblyHandoff = null;
+            AreaAssemblySource = null;
+            AreaAssemblyHandoff = null;
         }
 
         // 17. Terrain sector source — backed by VFS.
@@ -949,37 +1028,10 @@ file sealed class VfsLoadResourceSource : ILoadResourceSource
     }
 }
 
-/// <summary>
-/// Thin layer-05 adapter that wraps the layer-03 <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/>
-/// as the layer-04 <see cref="IAssembledCellView"/> abstraction. Used in the <c>CellBake</c> delegate
-/// wired by <c>ClientContext.BuildApplicationGraph</c>.
-///
-/// The layer-04 bus contract requires <see cref="IAssembledCellView"/> (not the concrete layer-03 type)
-/// so that the Application layer's <see cref="CellAssemblyHandoff"/> never references
-/// <c>Assets.Mapping</c> — the layer-05 composition root adapts it here.
-///
-/// spec: Docs/RE/specs/assembly_graph.md §4 — "the layer-05 composition root adapts the assembled cell
-///   as an IAssembledCellView so the layer-04 CellAssemblyHandoff can publish it."
-/// </summary>
-file sealed class AssembledCellViewAdapter : IAssembledCellView
-{
-    private readonly global::MartialHeroes.Assets.Mapping.AssembledCell _cell;
-
-    public AssembledCellViewAdapter(global::MartialHeroes.Assets.Mapping.AssembledCell cell)
-        => _cell = cell ?? throw new ArgumentNullException(nameof(cell));
-
-    /// <summary>The wrapped <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/>.</summary>
-    public global::MartialHeroes.Assets.Mapping.AssembledCell Cell => _cell;
-
-    /// <inheritdoc/>
-    public int MapX => _cell.MapX; // spec: assembly_graph.md §1 (cell key mapX part)
-
-    /// <inheritdoc/>
-    public int MapZ => _cell.MapZ; // spec: assembly_graph.md §1 (cell key mapZ part)
-
-    /// <inheritdoc/>
-    public bool IsResolved => _cell.Slot0GroundTexGrid is not null || _cell.Slot1BuildingObjectGrid is not null;
-}
+// Note: AssembledCellViewAdapter (the public layer-05 adapter used by the bake delegate below) is
+// defined in Adapters/AssembledCellViewAdapter.cs. It was moved out of this file in CYCLE 2 Phase 2-A
+// so that RealWorldRenderer can down-cast to the concrete type for 9-slot access without reflection.
+// spec: Docs/RE/specs/assembly_graph.md §4 — layer-05 composition root adapts AssembledCell as IAssembledCellView.
 
 file sealed class GodotLoadingSoundSink : ILoadingSoundSink
 {

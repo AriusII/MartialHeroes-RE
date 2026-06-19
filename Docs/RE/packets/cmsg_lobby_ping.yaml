@@ -1,0 +1,24 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: builder writes header 1/2, payload size 0)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: CmsgLobbyPing
+opcode: 0x10002           # major 1, minor 2 -> (1 << 16) | 2
+direction: C2S
+size: 0                   # header-only, 0-byte payload
+spec: packets/cmsg_lobby_ping.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Lobby ping / heartbeat request sent from the front-end login/lobby screen to verify connection liveness.
+  Stamps no payload bytes. The client updates its lobby timer latch on send.
+
+fields: []
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header on the wire.
+  
+  Triggered by the lobby heartbeat tick timer or during connection establishment to ensure the socket connection is alive.

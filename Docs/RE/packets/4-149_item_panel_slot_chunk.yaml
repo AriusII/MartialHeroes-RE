@@ -1,0 +1,24 @@
+name: SmsgItemPanelSlotChunk
+opcode: 0x40095           # major 4, minor 149
+direction: S2C
+size: variable            # 12 + 16 * Count
+spec: packets/4-149_item_panel_slot_chunk.yaml
+status: confirmed
+capture_verified: false
+
+summary: Bulk server push containing a chunk of ItemSlotRecords. Rewrites contiguous slots of either the bag/inventory or equipment container.
+
+fields:
+  - { name: Guard,       type: u8 }           # 0x00 Must be 1 to process
+  - { name: Pad0,        type: "bytes[3]" }   # 0x01 Alignment padding
+  - { name: PlayerId,    type: u32 }          # 0x04 Target player actor id
+  - { name: ChunkType,   type: u8 }           # 0x08 0 = Equipment table, 1 = Bag/Inventory table
+  - { name: StartIndex,  type: u8 }           # 0x09 Destination index to begin copying records into
+  - { name: Count,       type: u8 }           # 0x0a Number of 16-byte ItemSlotRecord entries in the payload
+  - { name: Pad1,        type: "bytes[1]" }   # 0x0b Alignment padding
+  - { name: Records,     type: "ItemSlotRecord[Count]" } # 0x0c contiguously packed 16-byte slot records
+
+notes: |
+  Frame = 8-byte header + (12 + 16 * Count) bytes on the wire.
+  If ChunkType == 0, writes to EquipTable (bound checked against 20).
+  If ChunkType == 1, writes to BagTable (bound checked against active soft cap).

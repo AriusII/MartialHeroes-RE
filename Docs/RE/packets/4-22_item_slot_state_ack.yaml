@@ -1,0 +1,22 @@
+name: SmsgItemSlotStateAck
+opcode: 0x40016           # major 4, minor 22
+direction: S2C
+size: 36                  # fixed 36-byte body
+spec: packets/4-22_item_slot_state_ack.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server acknowledgement of single-item slot movements/updates. Applies the detailed transaction state directly to inventory slots.
+
+fields:
+  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque header/echo region
+  - { name: Result,      type: u8 }           # 0x08 1 = Success, 0 = Error
+  - { name: Pad0,        type: "bytes[1]" }   # 0x09 Alignment padding
+  - { name: FromSlot,    type: u8 }           # 0x0a Source slot index
+  - { name: ToSlot,      type: u8 }           # 0x0b Destination slot index
+  - { name: Flags,       type: u32 }          # 0x0c Transaction flags / status word
+  - { name: Trailer,     type: "bytes[20]" }  # 0x10 Remainder of the 36-byte payload (includes enchant/stat updates)
+
+notes: |
+  The handler reads a fixed 36-byte body. Frame = 8-byte header + 36 = 44 bytes on the wire.
+  Used to synchronise single slot swaps or splits directly without pushing a full chunk.

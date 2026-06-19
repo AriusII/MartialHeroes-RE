@@ -1,0 +1,28 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Response table-driven (major-4 / minor-46).
+# size: 16 bytes (0x10) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorTickTableOpC
+opcode: 0x4002e           # major 4 (Response), minor 46 -> (4 << 16) | 46
+direction: S2C
+size: 16                  # fixed 16-byte payload (0x10)
+spec: packets/4-46_actor_tick_table_op_c.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor tick-table operation C. Resets or executes a specific tick-table update for the
+  addressed actor.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # composite key: actor sort
+  - { name: ActorId, type: u32, offset: 4 }         # composite key: actor ID
+  - { name: Op, type: u8, offset: 8 }               # operation code (0 = close panel/reset, 1 = execute)
+  - { name: Padding, type: "u8[7]", offset: 9 }     # alignment padding to 16 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - If Op == 0: retrieves the Diamond MainHandler singleton and invokes its panel-close/reset method.
+    - If Op == 1: invokes the tick-table subsystem's scheduled-event method to run the scheduled tick event.

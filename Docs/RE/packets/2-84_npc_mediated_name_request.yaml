@@ -1,0 +1,44 @@
+# spec: Docs/RE/packets/2-84_npc_mediated_name_request.yaml
+# Role: C2S NPC-mediated, name-targeted service request (30s-throttled; requires a type-1028 NPC nearby).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgNpcMediatedNameRequest
+opcode: 0x20054           # major 2 (GameAction), minor 84 -> (2 << 16) | 84
+direction: C2S
+size: 19                  # fixed 19-byte body
+spec: packets/2-84_npc_mediated_name_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A throttled, name-targeted service request that requires a specific NPC (world-type 1028) in range — consistent with a petition / report / guard-or-official interaction against a named player. A category byte, a nearby-NPC index, and a 17-byte CP949 name. Client-throttled to once per 30 seconds.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 19.
+fields:
+  - { name: Kind,         type: u8 }          # 0x00  request-kind selector (case 58={1,2,3,4}, 59=5, 60=0) [capture/debugger-pending]
+  - { name: NearbyNpcIdx, type: u8 }          # 0x01  slot index of a nearby world-type-1028 NPC, or 0xFF if none [capture/debugger-pending]
+  - { name: Name,         type: "char[17]" }  # 0x02  CP949 NUL-padded target name [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 19-byte blit: 1 + 1 + 17, no padding); the field
+  VALUES are static inferences (capture-pending).
+
+    0x00 (1B)  Kind         : a request-kind selector chosen by the firing UI sub-panel (one panel
+                              sets {1,2,3,4}, another sets 5, another sets 0). [capture/debugger-pending]
+    0x01 (1B)  NearbyNpcIdx : the slot index of a nearby actor of world-type 1028 (the required
+                              mediating NPC), or 0xFF when none is found. [capture/debugger-pending]
+    0x02 (17B) Name         : a CP949 NUL-padded target name (the dominant 17-byte short-name cell).
+                              [capture/debugger-pending]
+
+  CLIENT-SIDE THROTTLE (informational, not a wire field): the builder enforces a 30000 ms (30 s)
+  cooldown — a second call inside 30 s returns without sending, and the caller then shows a
+  "please wait" notice.
+
+  TRIGGER: a UI dispatcher (cases 58/59/60) — each case selects a name source from a different
+  sub-panel, sets the Kind byte, scans for the required type-1028 NPC nearby, then sends.
+
+  UNKNOWNS to resolve with a capture:
+    - the exact service (petition / report / guard interaction) and the Kind value semantics;
+    - the inbound reply opcode (an ack/result is plausible given the cooldown + notice) — pending.
+
+  UNBLOCKS: Client.Application NPC-mediated name request use-case.

@@ -1,0 +1,66 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: routing + fixed 400-byte (0x190) size + the consumer's wire walk (an actor
+# key, two CP949 record arrays of 8 and 12 entries with parallel flag vectors, a title string).
+# VALUE semantics of individual bytes PENDING. capture_verified: false.
+# spec: Docs/RE/packets/5-77_rank_progress_panel_bulk.yaml
+
+name: SmsgRankProgressPanelBulk
+opcode: 0x5004d           # major 5 (Push), minor 77 -> (5 << 16) | 77
+direction: S2C
+size: 400                # fixed 400-byte payload block (0x190)
+spec: packets/5-77_rank_progress_panel_bulk.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes the rank-progress panel in bulk. A fixed 400-byte block addressed to an actor by
+  composite key; it is applied only when the addressed actor is the local player. The body is a
+  leading actor key, then an 8-entry CP949 name array with a parallel 8-byte flag vector, a title
+  string, then a 12-entry CP949 name array with a parallel 12-byte flag vector, and a trailing
+  region.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 400. The name arrays and
+# flag vectors are modelled as fixed bytes[N] blobs; the engineer slices each into its entries of the
+# stated stride.
+fields:
+  - { name: HeaderPad0,  type: "bytes[4]" }     # +0    leading region before the actor key (not consumed; opaque)
+  - { name: ActorKey,    type: u32 }            # +4    addressed actor composite key (cached by-key lookup; applied only if == local player)
+  - { name: NameArrayA,  type: "bytes[136]" }   # +8    record array A: 8 x 17-byte CP949 name cell (17-byte stride)
+  - { name: FlagsA,      type: "bytes[8]" }     # +144  8 x u8 per-entry flag for array A (1-byte stride)
+  - { name: TitleString, type: "bytes[17]" }    # +152  title / name string (CP949, 17-byte cell)
+  - { name: TitleFlag,   type: u8 }             # +169  flag byte -> a label state
+  - { name: NameArrayB,  type: "bytes[204]" }   # +170  record array B: 12 x 17-byte CP949 name cell (17-byte stride)
+  - { name: FlagsB,      type: "bytes[12]" }    # +374  12 x u8 per-entry flag for array B (1-byte stride)
+  - { name: TailPending, type: "bytes[14]" }    # +386  trailing region (386..399) not touched by the consumer -- pad or extra fields PENDING
+  # widths: 4 + 4 + 136 + 8 + 17 + 1 + 204 + 12 + 14 = 400
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing + size + the consumer's explicit wire walk (the < 8 and < 12 loops
+  with constant 17-byte strides, the parallel per-entry flag byte-vectors, and the title string).
+  VALUE semantics of individual bytes PENDING. The field widths sum to exactly 400 (verified).
+
+  LOCAL-PLAYER GATE: the handler resolves the addressed actor from the composite key at +4 and only
+  forwards the block to the rank-progress panel when that actor is the LOCAL PLAYER; otherwise it
+  drops the packet. This is a self-targeted bulk panel refresh.
+
+  SECTIONS:
+    +4   (4B)   ActorKey    : the addressed actor composite key (lookup; local-only gate).
+    +8   (136B) NameArrayA  : 8 x 17-byte CP949 name cell (16 usable + NUL). Record array A.
+    +144 (8B)   FlagsA      : 8 x u8, one per array-A entry. Parallel flag vector.
+    +152 (17B)  TitleString : a single title / name string (CP949), also formatted via a message-string id.
+    +169 (1B)   TitleFlag   : a flag byte that selects a label state.
+    +170 (204B) NameArrayB  : 12 x 17-byte CP949 name cell. Record array B.
+    +374 (12B)  FlagsB      : 12 x u8, one per array-B entry. Parallel flag vector.
+
+  Both name arrays are PARALLEL-array style: the name block precedes its per-entry flag byte-vector.
+  17-byte CP949 name cells are the recurring quest/rank panel convention.
+
+  TAIL (+386..+399, 14 bytes): NOT touched by the consumer -- possible trailing pad or additional
+  fields. Reserved opaque; inner shape PENDING (capture/debugger). Do NOT invent byte meanings here.
+
+  UNKNOWNS to resolve with a capture:
+    - the per-entry flag-vector meanings (FlagsA / FlagsB) and the TitleFlag;
+    - whether the 14-byte tail carries data or is pad.
+
+  UNBLOCKS: the Client.Application rank-progress panel bulk handler (5/77) -- the actor key, name
+  arrays, and title are layout-solid (local-player-gated); the flag meanings are capture-pending.

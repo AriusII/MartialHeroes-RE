@@ -17,7 +17,7 @@ opcode: 0x30064           # major 3 (CharacterMgmt), minor 100 -> (3 << 16) | 10
 direction: S2C
 size: var                 # leading 4-byte action code is fixed; full frame length not proven
 spec: packets/3-100_char_action_result.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

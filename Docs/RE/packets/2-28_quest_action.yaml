@@ -18,7 +18,7 @@ opcode: 0x2001c           # major 2 (GameAction), minor 28 -> (2 << 16) | 28
 direction: C2S
 size: 12                  # FIXED 12-byte (0xC) body: selector slot @0x00 + two 4-byte values @0x04/@0x08
 spec: packets/2-28_quest_action.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client quest action request. A single send-only message that carries the player's quest-flow command (accept / proceed / give-up), chosen by a sub-action selector. The body is a FIXED 12 bytes (the send site always appends 0xC), NOT variable. Major 2 is C2S-only, so this message has no inbound dispatch slot by design and the server answers through unrelated push channels (5/68 quest list, 5/73 quest complete).

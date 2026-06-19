@@ -1,0 +1,38 @@
+# spec: Docs/RE/packets/2-41_hud_select.yaml
+# Role: C2S HUD list confirm — three u32 keys.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgHudSelect
+opcode: 0x20029           # major 2 (GameAction), minor 41 -> (2 << 16) | 41
+direction: C2S
+size: 12                  # fixed 12-byte body
+spec: packets/2-41_hud_select.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Confirm / submit a three-key selection from a HUD list. Three contiguous u32 keys, gated by a slot-bound check and a resolver+sentinel gate.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 12.
+fields:
+  - { name: KeyA, type: u32 }   # 0x00  key A [capture/debugger-pending]
+  - { name: KeyB, type: u32 }   # 0x04  key B [capture/debugger-pending]
+  - { name: KeyC, type: u32 }   # 0x08  key C [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 12-byte blit = three u32); the field VALUES are
+  static inferences (capture-pending).
+
+    0x00 (4B) KeyA : the first selection key. [capture/debugger-pending]
+    0x04 (4B) KeyB : the second selection key. [capture/debugger-pending]
+    0x08 (4B) KeyC : the third selection key. [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): a HUD list double-click; gated on a slot/index bound
+  and a resolver + OK-sentinel check before sending; the failure path shows list-click feedback. Same
+  resolver family as 2/42.
+
+  UNKNOWNS to resolve with a capture:
+    - the meaning of the three keys;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application HUD three-key select use-case.

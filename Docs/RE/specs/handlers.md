@@ -40,6 +40,13 @@ conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at
 > opcode in both table-driven families plus the inline switches), and §17 records the
 > field-layout tightenings the second recon pass derived for the already-specced wire
 > packets. Together these document every installed handler slot.
+> **§19–§24 (Part III)** fold in the CYCLE 2 netcode-interior pass: the **consumer-parse
+> shapes** (section boundaries / record strides / array counts) for the handlers whose bodies
+> were read all the way into their consumers, the **result/action code clusters** and their
+> structural roles, and three settled items — the **5/52 record verdict** (§20.3, conflict
+> RESOLVED by static disasm; Reading 2 refuted), the **4/4 892-byte framing** (§21), and the
+> **4/56 / 4/71 reclassify out of the thin-slot family** (§22.3/§22.4). It also records the
+> **REFUTED phantom 5000/10000/10001 string-id class** (§23.4).
 >
 > // spec: corrections in §1, §2, §7, §12 and §16 reconciled against the Campaign-10 IDB
 > re-verification (`Net_DispatchInboundByMajorMinor`, the major-4/major-5 install routines,
@@ -1386,3 +1393,408 @@ length-prefixed block (matching the C2S chat senders), NOT "rest of frame". CP94
   enumerated (no hidden minors); each major-4/major-5 table is bounded at 154 slots with inert
   no-op fill for unset minors and no dispatch at or above 154; the install routines installed
   98 Response and 65 Push handlers.
+
+---
+
+# Part III — Handler interiors & consumer-parse maps (CYCLE 2 netcode pass)
+
+> §19–§24 fold in the CYCLE 2 netcode-interior research: for the handlers whose **bodies were
+> read all the way into their consumers**, this part records the **consumer-parse shape** — the
+> section boundaries, record strides, array counts, and the result/action **code clusters** —
+> i.e. *what the handler does with the bytes it receives* once they reach the routine that walks
+> them. It is the behaviour/consumer layer; it deliberately does **not** restate per-opcode
+> routing (`opcodes.md`), the per-opcode bulk-read **sizes** (already in §8/§16 above), or the
+> wire **field tables** (`packets/*.yaml`). Where a body shape would feed a `packets/*.yaml`, the
+> shape is a **design hint** for that YAML's author, not a committed wire layout.
+>
+> **Confidence in Part III.** Section boundaries / record strides / array counts / loop bounds are
+> **`STRUCTURE-HIGH`** (the read/copy widths and trip counts are control-flow / disassembly facts —
+> equivalent to `[confirmed]` for the *layout*). The **VALUE meaning of every byte** inside those
+> sections remains **`[capture/debugger-pending]`** — a confirmed stride says where a record sits,
+> not what its fields mean. Two facts are settled by **static disassembly alone** and are tagged
+> as such: the **5/52 record verdict** (§20.3) and the **4/4 892-byte framing math** (§21).
+
+## 19. Common consumer idiom (context for §20–§24)
+
+Most structured handlers above do not parse their own body — they bulk-read a fixed block and
+forward it to a **consumer** routine (a panel/state object's apply-method) that walks it. So the
+**section layout is recovered from the consumer's walk, not the handler**: a consumer loop's
+**trip count = element count** and its **per-iteration pointer advance = element stride**. Two
+practical consequences for the spec author:
+
+- **A "verbatim copy then walk the copy" consumer** (the handler copies the whole body into a
+  mirror struct, then a separate panel routine reads the *mirror*) pins each array's offset
+  **relative to the mirror base**, not always to the wire. Where that happens it is flagged: the
+  wire offset of an inner array is then `STRUCTURE-MEDIUM` (mirror-relative), even though the
+  array's count and stride stay `STRUCTURE-HIGH`.
+- **The recurring short-name cell is 17 bytes** (16 usable CP949 bytes + a forced/leading NUL) —
+  this is the standard short-name field width across the quest/rank/guild/PvP panel family
+  (§20, §22, §24). Two departures are noted where they occur: the rank-progress *event* record
+  (§20.4) uses an **18-byte** name inside a 28-byte record, and the party-member-stats record
+  (§23) uses an **18-byte** name inside its 100-byte block.
+
+The **leading actor key** carried by most actor-bearing handlers resolves through one shared
+cached lookup helper whose argument order is **`find(manager, id, sort)`** — the manager node
+stores the **id as a 32-bit value** and the **sort as a single byte**. The on-wire consequence
+(the dominant `sort@+0, id@+4` layout, the `id-first` 4/4 per-tag record, and the id-only
+local-gated handlers) is consolidated in §24; §5 above remains the per-handler order table.
+
+## 20. Combat & quest/rank interiors (consumer-parse maps)
+
+### 20.1 — 4/100 `SmsgCombatAttackUpdate` interior
+- **Shape (STRUCTURE-HIGH): one fixed 188-byte record** — *not* an array (no count and no stride
+  are read), confirming the §3/§9 reading. The handler interprets only a short prefix and forwards
+  the whole block to a combat-apply sink.
+  - **8-byte opaque head** (`+0..+7`) — not read before the forward.
+  - **8-byte interpreted prefix** (`+8..+0x0F`): phase `u8` at `+8` (compared `== 3` / `== 5`),
+    sub-kind `i8` at `+0x0A` (compared `== 0xFF`), value `u32` at `+0x0C`.
+  - **172-byte opaque tail** (`+0x10..+0xBB`) forwarded **as one block** to the combat-apply
+    consumer; this handler never sub-indexes it.
+- **Prefix behaviour (roles control-flow-confirmed; values pending):** sub-kind `== 0xFF` pokes
+  one actor sub-slot; phase `== 3` stamps the current time and stores `value` into the
+  local-player combat-charge slots and clears a flag; phase `== 5` ends the charge and sets the
+  flag. The 172-byte tail's internal shape (sub-records? fields keyed by phase/sub-kind?) is
+  **not decidable from this handler** — it would need the combat-apply consumer decompiled.
+  `[capture/debugger-pending]` on every value; the single-record (non-array) structure is the
+  load-bearing structural fact.
+
+### 20.2 — 5/14 `SmsgCombatEffectInstanceSpawn` interior
+- **Shape (STRUCTURE-HIGH): one fixed 48-byte record** (no loop, no stride) — spawns a single
+  world effect/item instance. Section map (roles control-flow-confirmed; values pending):
+  - **composite key (8)** — low dword at `+0` (its low byte gates a constant), high dword at
+    `+4`; the pair resolves an actor through the cached lookup.
+  - **flag + slot (2)** — flag `i8` at `+8` (`== -1` substitutes a fixed item id; `0` clears an
+    actor visual slot), visual-slot index `u8` at `+9` (used as a **16-byte stride** into the
+    actor's visual array).
+  - **item/effect id (4)** at `+0x0C` — drives SFX-by-id-range selection and the inventory-full
+    path.
+  - **spawn-arg block** (`~+0x14..+0x23`) carrying **two position floats** (`+0x1C`, `+0x20`) fed
+    to the coordinate transform and the spawn consumer.
+  - **trailing flag** `i8` at `+0x2C` (`== 1` triggers the inventory-full notice).
+  - Small copied-but-unread gaps at `+0x10` and `+0x24..+0x2B` are **bounded opaque** (their
+    meaning lives in the spawn consumer).
+
+### 20.3 — 5/52 `SmsgActorSkillAction` record interior — **CONFLICT SETTLED (static-only)**
+This **settles the prior 36-byte-record conflict** that §17.11 flagged ("keep both readings"):
+the contest is decided by **static disassembly alone — no capture needed to choose** (a capture
+is needed only for the field's value semantics, by doctrine).
+
+- **Body framing (STRUCTURE-HIGH):** a **24-byte header** then **N × 36-byte target records**,
+  where **N is a header byte** (`payload +0x14`, the target count, capped at 40). Records begin at
+  `payload +0x18`. Total body `= 24 + 36·N`. (Matches `packets/5-52_actor_skill_action.yaml`.)
+- **Header role bytes (payload-relative):** the **action-kind byte is at `payload +0x10`** (a
+  switch over a small high-value set selects dash/skill/AoE sub-paths), and the **target count is
+  a distinct byte at `payload +0x14`**. These are **two different bytes** — the header ends cleanly
+  at `+0x18` and records start there with no overlap.
+- **The 36-byte target record (record-relative) — corrected layout:**
+
+  | rec off | size | role (PENDING value) | evidence |
+  |---|---|---|---|
+  | +0x00 | 1 | target actor sort sub-key byte | both record loops |
+  | +0x04 | 4 | target actor id (composite key) | both record loops |
+  | +0x08 | 12 | opaque (copied, not field-read here) | bounded opaque |
+  | +0x14 | 4 | **damage-sum LOW dword** | damage-total loop |
+  | +0x18 | 4 | **damage-sum HIGH dword** (one 64-bit qty with `+0x14`) | damage-total loop |
+  | +0x1C | 8 | opaque record tail (within the 36 stride) | bounded opaque |
+
+- **The verdict (control-flow / disasm confirmed):**
+  - **Reading 2 is REFUTED.** There is **no per-record count and no `ActionCode` at record
+    `+0x10`**. Record `+0x10` is never read by this handler; the loop's count comes from the
+    **header** byte at `payload +0x14`, not from any record field.
+  - **Reading 1 is CONFIRMED in substance, with the offsets shifted by 4:** a single visible
+    damage value is summed as **one 64-bit quantity across two adjacent dwords at record `+0x14`
+    (low) / `+0x18` (high)** — proven by an explicit low/high add-with-carry accumulation across
+    the loop — **not** at `+0x10/+0x14` as an older record map had it. The accumulated total feeds
+    the on-screen thousands-grouped damage notice.
+  - Two independent record loops (a damage-total loop and an effect loop) share the **identical**
+    record geometry (sort sub-key `@+0`, id `@+4`, **stride 36**), which is the decisive evidence;
+    a third sub-path copies the whole `36·N` block wholesale into a per-actor queue, confirming the
+    records are forwarded as opaque 36-byte units.
+- **Net corrected record:** `{ +0x00 sub-key(1) | +0x04 key(4) | +0x08 opaque(12) | +0x14
+  damage-sum LOW(4) | +0x18 damage-sum HIGH(4) | +0x1C opaque tail(8) }`, stride 36. The
+  "ActionCode" concept maps to the **header** action-kind byte at `payload +0x10`, **not** to a
+  record field. `[capture/debugger-pending]` remains only on the *value* meaning (whether the
+  64-bit field is literal damage vs another signed magnitude, and what the opaque record bytes
+  carry per target).
+
+### 20.4 — Quest / rank panel interiors (5/68, 5/73, 5/77, 4/48)
+
+These four forward their body to a panel consumer that walks it; the section maps come from those
+walks. The recurring shape is **parallel arrays** (id/flag vectors fully precede the name block,
+with per-entry flag byte-vectors after it), except 4/48 which uses **interleaved records**.
+
+- **5/68 `SmsgQuestList` (452-byte body) — parallel-arrays, STRUCTURE-HIGH.** The body is **not**
+  one id-array + one name-array; the consumer parses **three header flag bytes**, then **two
+  10-element state/flag byte-vectors**, then a **20-element `u32` quest-id array**, then a
+  **20-entry CP949 name array at a 17-byte stride** (NUL forced at byte 16). Section order
+  (payload-relative): 3 header flags at `+8..+0x0A`; vector A `byte[10]` at `+0x0B`; vector B
+  `byte[10]` at `+0x15`; quest ids `u32[20]` at `+0x20`; names `char[20][17]` at `+0x70` — ending
+  exactly at 452 (clean fit). **Correction to §4 (5/68):** the name stride is **17**, not the
+  "~32" the first pass carried — the 32 is the *destination* mirror struct's per-entry stride, not
+  the wire. ids and names are parallel blocks (ids fully precede names), not interleaved.
+
+- **5/73 `SmsgQuestComplete` / (name-dispute) `SmsgGuildWarInfoUpdate` (344-byte body) — verdict
+  header + 10-row table; name UNRESOLVED.** The handler reads a **4-byte branch selector at `+8`**
+  (gates the whole success path on `== 1`) and a **sub-verdict byte at `+0x0C`** (`== 1` / `== 2`
+  success vs cancel-sound), then **copies the whole 344-byte block verbatim** into a quest-state
+  mirror; the panel then walks the **mirror** (a 10-row UI group and a **10-element record array of
+  `(CP949 17-byte name + integer)`**). Because the inner array is pinned **mirror-relative** (a
+  verbatim copy), its exact **wire** offset inside the 344 bytes is `STRUCTURE-MEDIUM`; the array
+  **count (10)** and the **17-byte name stride** are `STRUCTURE-HIGH`. **`[UNVERIFIED]` — the
+  QuestComplete-vs-GuildWarInfoUpdate name dispute is *not* settled by body shape:** a 10-row
+  name+number table fits a quest-completion summary and a guild-war info/ranking board equally
+  well (a mild, non-decisive lean toward an info/ranking-table reading). Carry the dispute; do not
+  resolve it here.
+
+- **5/77 `SmsgRankProgressPanelBulk` (400-byte body) — two parallel name arrays, STRUCTURE-HIGH.**
+  Forwarded to the rank-progress panel **only when the addressed actor is the local player** (the
+  composite key is at `+4`). Section map (payload-relative): actor key `u32` at `+4`; **record
+  array A** = **8 entries × 17-byte CP949 name stride** at `+8`; an 8-byte per-entry flag vector
+  for A at `+0x90`; a **title/name string** (~17 bytes) at `+0x98`; a label flag byte at `+0xA9`;
+  **record array B** = **12 entries × 17-byte CP949 name stride** at `+0xAA`; a 12-byte per-entry
+  flag vector for B at `+0x176`. Array B names end at `+374`, its flags at `+386`; **tail bytes
+  `+386..+399` (14 bytes) are untouched** by this consumer — trailing pad or extra fields,
+  `[capture/debugger-pending]`.
+
+- **4/48 `SmsgRankProgressEvent` (236-byte body) — interleaved records, with a flagged overrun.**
+  The handler forwards `body + 12` to the panel parser, so the **first 12 bytes are a header
+  consumed upstream** (a route/branch byte at `+8`, a sub-select byte at `+9`). The panel then
+  walks an **8-entry record array at a 28-byte stride** beginning at `+0x18`. Per record (record
+  base `E = +0x18 + i·28`): presence/id key `u32` at `E+0` (zero ⇒ empty slot → blank labels);
+  CP949 name `char[18]` at `E+4`; numeric field A `i16` at `E+22`; numeric field B `i16` at
+  `E+24`. **`[UNVERIFIED]` discrepancy to carry:** the record array spans `+0x18 + 8·28 = +248`,
+  which **overruns the 236-byte read by 12 bytes**. The 28-byte stride and 8-count are
+  `STRUCTURE-HIGH`, but the body-vs-array arithmetic does **not** close — either the routed frame
+  carries more than 236 bytes, or fewer than 8 records actually populate, or the wire stride
+  differs from the in-memory walk. Do not commit a `packets/*.yaml` for 4/48 until this is
+  reconciled.
+
+## 21. 4/4 `SmsgAreaEntitySnapshot` — 892-byte actor-record framing (binary-confirmed)
+
+This **binary-confirms and tightens §10's 4/4 entry and resolves its 892-vs-880 cross-ref flag.**
+The recovery is **control-flow** (no capture needed for the *framing*; only the prefix/trailer
+byte *meanings* stay pending).
+
+- **The on-wire actor record for tags 1/2/3 is 892 bytes**, read as a single bulk copy, and splits
+  as **`892 = 8 (prefix) + 880 (descriptor core) + 4 (trailer)`**:
+  - **8-byte prefix:** entity id-key `u32` at `+0` (the actor lookup key, also stamped into the
+    live actor); a variant/kind byte at `+4` (gates a `== 5` visual path); a byte at `+5` stamped
+    into an actor field; 2 padding bytes at `+6..+7`.
+  - **880-byte descriptor core** at on-wire offset **`+8`** — the `structs/spawn_descriptor.md`
+    body, **not re-derived here**. The split is proven decisively because the descriptor's
+    `world_x` / `world_z` (`CROSS-REF` `structs/spawn_descriptor.md` `+0x4C`/`+0x50`) land exactly
+    at on-wire `+0x54`/`+0x58` = descriptor `+8 +0x4C` / `+8 +0x50`.
+  - **4-byte trailer** (`+0x378..+0x37B`): a byte at `+0x378` stamped into an actor field; a byte
+    at `+0x37A` that, when set, drives an actor state value; 2 padding bytes.
+- **Reconciliation (do not re-open):** **880 is the descriptor core, not the on-wire 4/4 record
+  size.** The same 880-byte descriptor is also the core of **5/3 `CharSpawn` (908)** and **5/1
+  `ActorSpawnExtended` (912)** — those are *different handlers* with their *own* prefix/trailer
+  framing around the same core (see §17.2/§17.3). Do **not** treat 892/908/912 as conflicting
+  descriptor sizes; the descriptor is 880 in every case and only the surrounding frame differs per
+  handler. The per-tag record key is therefore **id-first** (id `@+0`, variant byte `@+4`) because
+  the **sort is carried by the preceding tag byte** (tag 1 = player character, 2 = mob, 3 = NPC) —
+  see §24.
+- The §10 tag-loop, the tag → record-size table (1/2/3 = 892, 4 = 24, 6 = 36, 9 = 24, 0 =
+  terminator), and the 17-byte area header are unchanged and remain `STRUCTURE-HIGH`; the only new
+  facts here are the **8/880/4 split** and the **descriptor-base alignment** that proves it.
+  Prefix/trailer byte *meanings* are `[capture/debugger-pending]`.
+
+## 22. Guild & structured-panel interiors — incl. the 4/56 / 4/71 reclassify
+
+### 22.1 — 4/65 `SmsgGuildInfoFullSync` interior (1812-byte body) — STRUCTURE-HIGH
+A subtype byte at `+8` selects a **full-sync path** (`== 1`) vs a guild-leave path. The full-sync
+consumer copies the whole 1812-byte block, then a single **50-iteration loop** walks **seven
+parallel 50-entry member arrays** with independent per-array advances — confirming §3's array
+table. Section shape: a header/scalar region in `+0..+57` (guild title CP949 from `+10`, guild id
+`i16` at `+28`, a rank/grade byte at `+30`, count/level `u32` at `+32`, a points pair at `+36`/`+40`,
+guild funds `i64` at `+44`, a flag byte at `+52`), then the seven arrays from `+60`: member ids
+`u32[50]` (`+60`), online-flag bytes A `u8[50]` (`+260`), name cells **CP949 `char[17][50]`**
+(`+310`), online-flag bytes B `u8[50]` (`+1160`), points/contribution `u32[50]` (`+1212`, read
+32-bit then host-widened to 64-bit), array F `u32[50]` (`+1412`), array G `u32[50]` (`+1612`) —
+ending exactly at 1812. The **17-byte name cell** is the surest array-boundary signal. A tail
+fixup copies the matching member's record into the local player (a "find me in the roster" step,
+not an extra array).
+
+### 22.2 — 4/103 `SmsgGuildPanelTextUpdate` interior (204-byte body) — STRUCTURE-HIGH
+The 204-byte block is **four fixed-width CP949 text cells** at a **49-byte stride** assigned to
+four guild-panel label slots: leading 8 reserved bytes, then text cell 1 at `+8`, cell 2 at `+57`,
+cell 3 at `+106`, cell 4 at `+155` — `+155 + 49 = +204`, exact fit, no trailing bytes.
+
+### 22.3 — 4/56 `SmsgResponseSlot56` — **RECLASSIFY (NOT a thin slot)** — STRUCTURE-HIGH
+**This is not a thin UI-notice slot — it is a structured ~1552-byte panel/spawn snapshot** and
+must be reclassified out of the thin-slot family (§6/§13 Group H). A subtype byte at `+8` selects
+the structured path (`== 1`) vs a UI teardown; the structured consumer copies the full 1552 bytes
+and walks a **64-entry dual-array transform table**: **transform array A** = **64 × 16-byte
+records** (4 × `u32`, e.g. a per-slot position/transform) with a **solid byte base at `+16`**;
+**transform array B** = **64 × 8-byte records** (2 × `u32`, e.g. rotation/state) in the **`+1040`
+region**. The loop is unambiguously **64 iterations** (a 3072-byte span over a 48-byte combined
+advance). A leading scalar block carries the subtype at `+8` and an actor id at `+12`. The total
+size (1552), the `+8` subtype, the actor id at `+12`, and the 64-trip arrays are
+`STRUCTURE-HIGH`; **the array-B byte base (`+1040` region) is a static hypothesis** (a
+dword-vs-byte pointer ambiguity, debugger-confirmable) and array A's `+16` base is solid. This is
+effectively a scene/spawn-population block routed through a guild-family slot. The `1552`/`1556`
+immediates near the read are the **read size**, not a string id.
+
+### 22.4 — 4/71 `SmsgResponseSlot71` — **RECLASSIFY (NOT a thin slot)** — STRUCTURE-HIGH
+**Also not a thin slot — it is a structured ~1092-byte panel snapshot.** A subtype byte at `+8`
+selects the structured consumer (`== 1`), which copies the full 1092 bytes and walks an **8-slot
+record panel**: an **8-entry id array** (`u32`) at **`+12`** (stride 4; non-zero = active slot,
+compared against a panel id table and the local-player id) and an **8-entry status array** (`u8`)
+at **`+44`** (stride 1; value `== 2` checked). The remainder past `+52` feeds **further
+fixed-stride sub-tables** inside the consumer's destination struct (80-byte slot records and
+17-byte name cells), but those are indexed in the *copied struct*, so their wire offsets past `+52`
+are a **static hypothesis**. `STRUCTURE-HIGH`: total 1092, subtype at `+8`, id array `×8 @+12`,
+status array `×8 @+44`. The `1092`/`1096` immediates near the read are the **read size**, not a
+string id.
+
+### 22.5 — Other structured "thin-slot-looking" payloads (4/102, 4/75, 4/135, 5/38)
+The sizes match §13/§14/§16 exactly (binary == doc); these are their consumer-parse shapes.
+
+- **4/102 `SmsgSkillWindowStateUpdate` (476) — STRUCTURE-HIGH.** A scalar stat/level/XP header
+  (`+0..~+0x5F`: class/level/mount bytes, six `i16` stats, several `i64`/`u32` counters, an actor
+  id key region around `+0x58`/`+0x5C`), a **reserved gap `+0x60..+0x73`** (not read), then a
+  **fixed 30 × 12-byte active-buff/status record array** at `+0x74` (record fields: icon id `u16`
+  at `+0`, value `u32` at `+4`, sub-value `u16` at `+8`, stack/level `u8` at `+0x0A`). `116 + 30·12
+  = 476`, the array exactly fills the tail.
+- **4/75 `SmsgResponseSlot75` (184) — STRUCTURE-HIGH; keep neutral name.** An 8-byte opaque prefix,
+  a result byte at `+8` and a subtype byte at `+9` (failure side-codes 101/102), a **10-byte
+  record-index map** at `+0x0A`, a **10 × 16-byte item/result record array** at `+0x14` (each
+  record's `u32` at `+4` is a presence word; zero terminates the loop), and a **trailing `u32`
+  handle** at `+0xB4`. `8 + 12 + 160 + 4 = 184`. A candidate gameplay name is *unjustified* on
+  static evidence — keep `SmsgResponseSlot75`.
+- **4/135 `SmsgResponseSlot135` (80) — boundaries STRUCTURE-HIGH, interior opaque; local-gated.**
+  Accepted **only when the id at `+4` equals the local player** (so it is a self-targeted
+  party/roster name+grade refresh, **richer than "thin slot"** — flag the §6/§13-Group-H
+  understatement to the `opcodes.md` curator). Shape: echo `u32` at `+0`, local-gate id `u32` at
+  `+4`, a delimiter/control byte at `+8`, **two delimiter-encoded CP949 strings** (`char[33]` at
+  `+9`, `char[38]` at `+0x2A`), and a class/mode selector `u32` at `+0x4C` (a `{1,2,3,4}` class-tag
+  switch). The encoded-string interior is the encoding scheme, not a fixed field grid — boundary
+  only. Keep the neutral name.
+- **5/38 `SmsgPartyMemberStats` (100) — STRUCTURE-HIGH.** An 8-byte leading prefix/echo (`+0..+7`,
+  read but **not** forwarded — a likely `(sort,id)` echo the applier ignores), the real member id
+  key `u32` at `+8`, a CP949 name `char[18]` at `+0x0C` (only 16 bytes used), two `i16` state
+  fields at `+0x1E`/`+0x20`, **eight `u32` stat scalars** at `+0x24..+0x40` (the three at
+  `+0x24/+0x28/+0x2C` mirror to live actor HP/MP-class fields), and a **30-byte status-id array**
+  at `+0x44` copied with a **value-band filter** (bytes in a mid-range band are skipped — the same
+  filter idiom seen in 4/135), then 2 pad bytes to 100.
+
+## 23. Result / action code clusters (structural roles; meanings pending)
+
+> These tabulate the integer **code sets** several handlers switch on, and each code's
+> **structural role** (which branch / publish path / scene transition it drives) — **not** the
+> human meaning of the code, which is `[capture/debugger-pending]` throughout. Where a code primes
+> a state the **connection-state machine** later resolves, that is a **cross-reference** to
+> `network_dispatch.md` (which owns the conn-state machine and the connection-state code
+> semantics) — recorded here, not duplicated.
+
+### 23.1 — 3/100 `SmsgCharActionResult` code set & dual-mode behaviour `[confirmed]` (control-flow)
+3/100 reads a single 4-byte action/result code (§12) and runs a large switch with **two top-level
+modes**, keyed on whether the local player exists yet:
+- **lobby / select-screen mode** (no local player): the big numeric switch below — the
+  connection / char-action-result path that drives the select screen and primes the connect state.
+- **in-world mode** (local player present): a small set `{1,2,3,4,5,7,22}` each selects its own
+  in-game tooltip popup, then arms a deferred timer.
+
+The complete code set is **`{0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227, 202/203/232}`** —
+**there is NO `case 32`** (the first recon pass's "32" was spurious). Grouped by structural role:
+
+| code(s) | structural role (lobby path unless noted) | meaning |
+|---|---|---|
+| **0** | return-to-prior-scene outcome (drives the scene back to its prior state); arms the deferred timer | pending |
+| **1, 2, 3, 4, 7** | advance the select scene to the next state; **in-world mode** instead maps each to a distinct tooltip popup — same number, two behaviours keyed by local-player presence | pending |
+| **5** | in-world mode: a tooltip popup (no lobby advance) | pending |
+| **9, 10, 11, 16** | **smaller publish set** — published outward via the **select-screen handler's publish-code method** (the same publish method the conn-state machine uses) | pending |
+| **23** | shows a status string on the select-screen status line; **explicitly excluded** from the deferred-timer arm | pending |
+| **22** | in-world mode: a tooltip popup; lobby mode: falls into the scene-advance | pending |
+| **200, 201, 204-211, 220-227** | **the biggest cluster** — all publish outward via the same select-screen publish-code method, with no other side effect (the connect/char-action outcome class) | pending |
+| **202, 203, 232** | publish outward via the publish method **AND** set the game state to the loading/connecting state (prime the connect-progress state) | pending |
+
+- **The single biggest cluster `{200/201/204-211/220-227}` all do the same thing** — call the
+  select-screen handler's publish-code method with no other side effect. `{202,203,232}` are a
+  deliberate gap in that fan: they additionally **prime the connecting state**.
+- **`{9,10,11,16}`** publish via the **same** method as the 200/220 block — a smaller mid-range
+  publish set.
+- **Tail:** any non-zero code that is not `23` and not in `{202,203,232}` also arms the deferred
+  retry/timeout timer and stores the code into the pending slot the connection-state machine
+  watches.
+- **Cross-reference (not duplicated):** the codes `{202,203,232}` that 3/100 *primes* are exactly
+  the codes the **connection-state machine consumes/clears** from its pending slot on the next
+  connection event; and `201` is also published by that machine. They **share the numbers, not the
+  code path** — 3/100 (the packet path) **posts/publishes**, the connection-state machine (the
+  connection-event path) **consumes/resolves**, and the select-screen **publish-code method** is
+  the shared boundary. The connection-state machine, its connection-state code semantics
+  (`201/202/203/232`), and the GameState transitions are owned by **`network_dispatch.md`** (its
+  connection-state-machine section) — see there; this catalogue records only that **3/100 primes**
+  and that the publish method is the bridge. Confidence: code set + every structural role
+  `[confirmed]` (full decompile); every human meaning `[capture/debugger-pending]`.
+
+### 23.2 — major-3 char-management fail-code class (3/6, 3/13) `[confirmed]` (control-flow)
+The **3/6 `SmsgRenameCharResult`** and **3/13 `SmsgCharStatusUpdate`** handlers share an
+**identical sub-code → message-string switch**: the body's fail sub-code selects one of four
+select-screen message-string slots, shown for a fixed display duration. Structural clustering of
+the codes: `{204,205,207,208,209,210}` all collapse to **one** message slot (a contiguous "generic
+char-mgmt rejection" block); `{200,201}` share a **second** slot; **206** and **212** each get
+their **own** distinct slot; the subtype-1 success branch applies the new name/status with no error
+message; codes outside the switch fall through silently. The four message-string slots are
+message-DB handles whose string values (and therefore the human text) are `[capture/debugger-pending]`.
+
+### 23.3 — 4/80 `SmsgPvpDeathResult` reason-code map (80-byte body) — header decode confirmed
+4/80 decodes a short header inline and forwards/uses only a few fields; the rest of the 80-byte
+block is opaque. **Refinement to §3** (binary wins): the byte at `+8` is the **self-vs-remote
+branch gate** (`== 1` → self-death local path, returns early); the **reason/notice code is at
+`+9`** (a switch selecting a localized PvP death/kill notice string); there is an **additional
+subtype byte at `+0x0A`** (`== 6` → run a local death effect on the local player) that §3 folded
+into the reason. The **target actor id is at `+0x14`** (looked up with sort = NPC; also deactivates
+a keyed effect). Section map: `{ 8-byte echo head | self-gate @+8 | reason @+9 | subtype @+0x0A |
+9-byte gap | target id @+0x14 | 40-byte opaque tail }`. The reason byte maps through a switch to a
+set of localized notice string ids (`[capture/debugger-pending]` values). Roles control-flow
+confirmed; meanings pending.
+
+### 23.4 — the 300/301 pair and the 5000/10000/10001 integers — **phantom string-id class REFUTED**
+- **300/301** is **not** a shared cross-handler success/fail family — it is a **single-handler
+  end-of-handler gate on 4/1 `SmsgGameStateTick` only** (a trailing 4-byte code that gates the
+  handler's final UI branch); `300` and `301` take the **same alternate branch**, distinguished by
+  value but not by code path. The structural reading is `{0 = default apply} vs {300/301 =
+  alternate}`. This is the only place the pair appears across the handler corpus.
+- **PHANTOM REFUTED — there is NO `5000 / 10000 / 10001` message-string-id class.** A prior framing
+  treated these three integers as a single "select-screen string-id" family; the binary disproves
+  it — they are **three different things, none a string id**:
+  - **5000** is a **UI display-duration in milliseconds** (the "show this popup/status line for 5 s"
+    timeout passed to the popup/status-line setters), and in the connection path the same value is
+    a **timer delay in milliseconds**. It is not a coded outcome.
+  - **10000** is **(a)** the opcode *minor* of the keepalive frame and **(b)** the longer (10 s)
+    timer delay — not a string id.
+  - **10001** is the **timed-event tag (event id)** for the connection/scene retry-or-timeout tick
+    — not a string id.
+
+  The select-screen popups/status lines are driven by **message-string-id globals**, *shown for*
+  5000 ms; the integers 10000/10001 are the keepalive minor / timer delay / timed-event tag (their
+  keepalive and timer roles are owned by `network_dispatch.md` and the crypto/framing specs).
+  **Do not describe any 5000/10000/10001 string-id family.**
+
+## 24. Actor-key idiom — consolidated dword order
+
+The leading actor key resolves through one shared **cached composite-key lookup** whose argument
+order is **`find(manager, id, sort)`** — the manager node stores the **id as a 32-bit value** and
+the **sort as a single byte**. The on-wire consequence:
+
+- **Dominant layout: `sort-first`** — a leading dword at `+0` whose **low byte is the sort/type
+  discriminator** (1 = player character, 2 = mob, 3 = NPC), immediately followed by the **id `u32`
+  at `+4`**. This is disassembly-confirmed at 5/6, 5/31, 5/52 (header and per-target records), 5/14
+  and 5/79, and consolidated across the rest of the actor-key handler family (§5).
+- **Two genuine departures:**
+  - **id-first / id-only** for the **local-player-gated Response handlers** (4/109, 4/139, 4/149,
+    4/135) and the **player-char-fixed Push handlers** (5/28, 5/147): these carry a single key dword
+    (the id) and either no sort dword or a sort fixed in code.
+  - **4/4 `SmsgAreaEntitySnapshot` per-tag record is genuinely `id-first`** (id-key `@+0`, variant
+    byte `@+4`) because the **sort is carried by the preceding tag byte** (tag 1/2/3 = PC/mob/NPC),
+    not by the record (§21).
+- **5/76 `PartyMemberJoined`** is the lone case where id (`+4`) and sort (`+9`) are **non-adjacent**.
+- In every "wire sort ignored" handler the `+0` dword is still positionally the sort slot of a
+  sort-first frame; its **value is simply not consumed on receive** (the handler passes a hardcoded
+  sort). Whether the server actually populates that `+0` sort slot on the wire is
+  `[capture/debugger-pending]` — the receive path never reads it.
+
+These dword-order facts are settled by static argument-order analysis (the *positions* and the
+lookup helper's arg order); the on-wire *value set* of the sort byte beyond the `{1,2,3}` constants
+seen in code is `[capture/debugger-pending]`.

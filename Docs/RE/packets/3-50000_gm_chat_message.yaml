@@ -1,0 +1,29 @@
+name: SmsgGmChatMessage
+opcode: 0x3c350           # major 3, minor 50000 -> (3 << 16) | 50000
+direction: S2C
+size: var                 # variable-length
+spec: packets/3-50000_gm_chat_message.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  GM / system chat message broadcast. Emitted by the server to send GM chat or special system notices.
+  Routes the carried string to the active chat log windows under the GM color tint, or to a fallback
+  lobby dialog if the player is not yet in the game world.
+
+fields:
+  - { name: ChatType,   type: u8 }          # 0x00  chat tint/channel code (GM color or channel subtype)
+  # followed by length-prefixed string:
+  - { name: TextLength, type: u32 }         # 0x01  length of the chat string (LE u32)
+  - { name: Text,       type: "char[TextLength]" } # 0x05  GM chat/notice text bytes (not NUL-terminated on wire)
+
+notes: |
+  Statically confirmed from the 3/50000 handler.
+  The handler reads a single byte (ChatType) from the payload cursor, then reads a length-prefixed string.
+
+  Behavior:
+    If the local player is non-null (in-game):
+      - If ChatLog window slot 222 is active, enqueues the string on channel 13 (GM).
+      - If ChatLog window slot 163 is active, routes the string by code on channel 13.
+    Else (out of game, e.g., login/select screen):
+      - Forwards the string to the out-of-game fallback sink (the select-window singleton, sub-object 13).

@@ -16,7 +16,7 @@ opcode: 0x30001           # major 3 (CharacterMgmt), minor 1 -> (3 << 16) | 1
 direction: S2C
 size: var                 # 3-byte header + N x 981-byte slot records
 spec: packets/3-1_character_list.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. The handler loops EXACTLY 5 slot indices (the account character-slot count) and reads a record per set bit. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp. The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.

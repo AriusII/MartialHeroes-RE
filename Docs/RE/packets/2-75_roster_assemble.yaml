@@ -1,0 +1,44 @@
+# spec: Docs/RE/packets/2-75_roster_assemble.yaml
+# Role: C2S multi-actor roster assemble — fixed 80-byte body with a 10-id actor list (cap 20).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgRosterAssemble
+opcode: 0x2004b           # major 2 (GameAction), minor 75 -> (2 << 16) | 75
+direction: C2S
+size: 80                  # fixed 80-byte body
+spec: packets/2-75_roster_assemble.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A roster / party / pet-group assemble request carrying up to 10 actor ids (validated to exist and not exceed a 20-member cap). A fixed 80-byte body: an 8-byte header, a 10-entry actor-id list, and a 32-byte trailing block. Driven by a Goods/roster panel commit.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 80.
+fields:
+  - { name: Header,    type: "u8[8]" }     # 0x00  leading id + flags [capture/debugger-pending]
+  - { name: ActorIds,  type: "u32[10]" }   # 0x08  actor-id list (validated against ActorManager; cap 20) [capture/debugger-pending]
+  - { name: Tail,      type: "u8[32]" }    # 0x30  trailing block (8 x u32) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 80-byte blit = 20 x u32); the validator confirms
+  the 10-entry actor-id list at offset 0x08 and the 20-member cap. The field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (8B)  Header   : a leading id + flags region. [capture/debugger-pending]
+    0x08 (40B) ActorIds : a list of up to 10 actor ids; the validator iterates these, counts living
+                          actors via the actor manager, and rejects if the count plus an existing
+                          roster would exceed 20. [capture/debugger-pending]
+    0x30 (32B) Tail     : a trailing block (8 x u32). [capture/debugger-pending]
+
+  ACTOR-KEY ORDER NOTE: the dominant C2S actor composite-key order is sort-byte @+0 then id u32 @+4;
+  here the list is a flat array of resolved actor ids (10 x u32), each validated against the actor
+  manager.
+
+  TRIGGER: a Goods/roster panel commit (and the social re-ask panel) — raised by confirming a
+  roster/group panel with a selected set of actors.
+
+  UNKNOWNS to resolve with a capture:
+    - the Header and Tail field breakdown and the exact roster type (party / pet-group / other);
+    - the inbound reply opcode (roster/group state S2C) — pending.
+
+  UNBLOCKS: Client.Application multi-actor roster assemble use-case.

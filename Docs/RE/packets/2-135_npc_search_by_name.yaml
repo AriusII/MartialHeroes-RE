@@ -1,0 +1,35 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgNpcSearchByName
+opcode: 0x20087           # major 2 (GameAction), minor 135 -> (2 << 16) | 135
+direction: C2S
+size: 21                  # fixed 21-byte payload
+spec: packets/2-135_npc_search_by_name.yaml
+status: confirmed
+capture_verified: false
+
+summary: Name-only NPC search request. Carries a 20-byte CP949 search name and a trailing pad byte.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 21.
+fields:
+  - { name: SearchName, type: "char[20]" }  # 0x00  CP949 search name, NUL-padded
+  - { name: Pad,        type: u8 }          # 0x14  padding byte
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (21 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (20B) SearchName : the NPC name to search for, encoded CP949, NUL-padded to 20 bytes.
+    0x14 (1B)  Pad        : trailing padding byte, expected zero.
+
+  RELATION TO 0x20086: this opcode is the name-only counterpart to CmsgNpcSearchById (0x20086).
+  Where 0x20086 supports dual-mode search (by id or by name), this opcode always searches by
+  name and carries a wider 20-byte name field (vs 17 bytes in the dual-mode packet).
+
+  UNKNOWNS to resolve with a capture:
+    - whether partial name matches or wildcard searches are supported;
+    - the server response format for name search results;
+    - why a separate name-only opcode exists alongside the dual-mode 0x20086.
+
+  UNBLOCKS: Client.Application NPC name search UI.

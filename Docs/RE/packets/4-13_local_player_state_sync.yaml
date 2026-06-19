@@ -1,0 +1,43 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Response table-driven (major-4 / minor-13).
+# size: 56 bytes (0x38) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgLocalPlayerStateSync
+opcode: 0x4000d           # major 4 (Response), minor 13 -> (4 << 16) | 13
+direction: S2C
+size: 56                  # fixed 56-byte payload (0x38)
+spec: packets/4-13_local_player_state_sync.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Local player state synchronization. Broadcasts movement coords, orientation/heading,
+  current player stance/mode, and portal check updates. Only processed if it references
+  the local player actor.
+
+fields:
+  - { name: TargetSort, type: u32, offset: 0 }      # target actor sort key (must be 1 for player)
+  - { name: TargetId, type: u32, offset: 4 }        # target actor ID (must match local player ID)
+  - { name: Y, type: f32, offset: 8 }               # world Y coordinate (ignored by client)
+  - { name: Heading, type: f32, offset: 12 }         # heading / yaw orientation
+  - { name: X, type: f32, offset: 16 }              # world X coordinate
+  - { name: Z, type: f32, offset: 20 }              # world Z coordinate
+  - { name: Unused1, type: u32, offset: 24 }        # padding / unused slot
+  - { name: Unused2, type: u32, offset: 28 }        # padding / unused slot
+  - { name: Mode, type: u8, offset: 32 }            # sync mode (e.g. 1 = BattleController sync, 5 = no state write)
+  - { name: Padding, type: "u8[3]", offset: 33 }    # struct alignment padding
+  - { name: QwordValue, type: i64, offset: 36 }     # sync timeline / budget value stored to LocalPlayer +176
+  - { name: DwordValue1, type: u32, offset: 44 }    # sync value stored to LocalPlayer +184
+  - { name: DwordValue2, type: u32, offset: 48 }    # sync value stored to a global sync-state dword
+  - { name: ArgValue, type: u32, offset: 52 }       # passed to the post-sync update helper if Mode is nonzero
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Verifies that the composite key (TargetSort, TargetId) matches the local player.
+    - Resolves the new cell coordinates from (X, Z).
+    - If the client's current location delta is greater than 40000 (distance squared, i.e., > 200 units),
+      it snaps/teleports the player to (X, 0, Z) immediately and resets visual animations.
+    - If Mode is 1, updates BattleController battle/stance state indicators.
+    - Checks for nearby portal triggers and sends a teleport/portal activation request if within range.

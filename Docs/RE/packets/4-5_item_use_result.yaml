@@ -1,0 +1,25 @@
+name: SmsgItemUseResult
+opcode: 0x40005           # major 4, minor 5
+direction: S2C
+size: 44                  # fixed 44-byte body
+spec: packets/4-5_item_use_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server response to an item use request. Reports whether the item use succeeded and triggers local client animations and sounds, or surfaces failure cooldowns and error logs.
+
+fields:
+  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque / Header region
+  - { name: ActorId,     type: u32 }          # 0x08 Target / Actor Composite Key
+  - { name: Success,     type: u8 }           # 0x0c 1 = success, 0 = failure / cooldown
+  - { name: ResultCode,  type: u8 }           # 0x0d Failure reason / Message DB code index
+  - { name: Mode,        type: u8 }           # 0x0e Mode / visual context flag
+  - { name: SlotIndex,   type: u8 }           # 0x0f Inventory slot index of the item used
+  - { name: ItemActorId, type: u32 }          # 0x10 Id of the item actor template
+  - { name: Cooldown,    type: u32 }          # 0x14 Cooldown remaining time in seconds / ms
+  - { name: Trailer,     type: "bytes[20]" }  # 0x18 Opaque trailer
+
+notes: |
+  The handler reads a fixed 44-byte body. Frame = 8-byte header + 44 = 52 bytes on the wire.
+  On success (Success == 1), it plays the item use SFX and spawns anchors based on the ItemId.
+  On failure (Success == 0), it reads ResultCode and prints category-specific error formatting (e.g. cooldown time remaining) from Message DB.

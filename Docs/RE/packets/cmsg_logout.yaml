@@ -13,7 +13,7 @@ opcode: 0x10000           # major 1, minor 0 -> (1 << 16) | 0
 direction: C2S
 size: 0                   # header-only; no payload
 spec: packets/cmsg_logout.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

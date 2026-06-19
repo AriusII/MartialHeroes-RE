@@ -16,11 +16,13 @@
 //   spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
 //
 // Winding order:
-//   The on-disk index array is passed through as-is (no swap). The CW-vs-CCW winding is not
-//   independently sample-confirmed, so the material is rendered double-sided (CullMode.Disabled)
-//   as a safety net — faces show from either side. Shading uses the explicit per-vertex normals
-//   (negated on Z to match positions), so it is correct regardless of winding.
-//   spec: Docs/RE/formats/terrain_scene.md §Index array — u16 triangle list (winding UNVERIFIED).
+//   The spec confirms CCW front faces (terrain_scene.md §3.2.4). Negating Z (the world handedness
+//   flip applied to both positions and normals) inverts the triangle winding: CCW legacy → CW
+//   Godot. We correct this by swapping indices[1] ↔ indices[2] per triangle (re-establishes CCW
+//   in Godot space). The material is also rendered double-sided (CullMode.Disabled) because thin
+//   architectural props are often viewed from both sides.
+//   spec: Docs/RE/formats/terrain_scene.md §Index array — "CONFIRMED CCW front faces."
+//   spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) → (x, y, -z). CONFIRMED.
 //
 // Per-vertex colour:
 //   BudVertex is exactly 8 × f32 (pos XYZ, normal XYZ, uv UV = 32 bytes on disk).
@@ -59,7 +61,8 @@ namespace MartialHeroes.Client.Godot.World;
 /// with a small emission boost is applied so placeholder geometry is never near-black.
 ///
 /// spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
-/// spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW: CONFIRMED.
+/// spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW front faces: CONFIRMED.
+/// spec: Helpers/WorldCoordinates.ToGodot — Z-flip inverts winding; corrected by swapping indices[1]↔indices[2]: CONFIRMED.
 /// </summary>
 public static class BudMeshBuilder
 {
@@ -140,24 +143,43 @@ public static class BudMeshBuilder
             uvs[v] = new Vector2(bv.UvU, bv.UvV);
         }
 
-        // Build index array — on-disk order copied as-is (no winding swap).
+        // Build index array — swap indices 1 and 2 per triangle to correct winding after the Z-flip.
         //
-        // The triangle winding (CW vs CCW on disk) is NOT independently re-verified here, so the
-        // material below is rendered DOUBLE-SIDED (CullMode.Disabled): faces are visible from
-        // either side regardless of winding. Lighting uses the explicit per-vertex normals (which
-        // are negated on Z to match the positions), not face winding, so building shading is
-        // correct either way. spec: Docs/RE/formats/terrain_scene.md §Index array — u16 triangle
-        // list (winding convention not yet sample-confirmed; double-sided material is the safety net).
+        // The spec confirms CCW winding for front faces (terrain_scene.md §3.2.4 "CONFIRMED CCW").
+        // In legacy D3D9 (left-handed), CCW is front-facing; Godot (right-handed) also treats CCW
+        // as front-facing. HOWEVER, negating Z (the world handedness flip applied to positions and
+        // normals) inverts the triangle winding: a CCW legacy triangle becomes CW in Godot.
+        //
+        // Without a winding correction the "front" and "back" faces swap. With CullMode.Disabled
+        // the geometry still renders from both sides, but Godot's Forward Plus renderer computes the
+        // geometric face normal from the winding for shading (normal-map, shadow, deferred G-buffer
+        // face direction checks). If the geometric face normal is inverted relative to the stored
+        // vertex normal, per-pixel shading on top faces (normals pointing +Y) can produce near-zero
+        // irradiance for a sun coming from above (the geometric normal shadow test fires negatively
+        // for the "back" winding). This causes top/roof faces to render near-black even though
+        // CullMode.Disabled keeps them geometrically visible.
+        //
+        // FIX: swap the two latter indices of each triangle (indices[1] ↔ indices[2]) to re-invert
+        // the winding back to CCW in Godot space. This realigns the geometric face normal with the
+        // stored per-vertex normal and restores correct irradiance on top faces.
+        //
+        // spec: Docs/RE/formats/terrain_scene.md §Index array — "CONFIRMED counter-clockwise (CCW)
+        //   for front faces." §Vertex record — Z negation (world convention, port-side): CONFIRMED.
+        // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) → (x, y, -z): CONFIRMED.
         int triCount = obj.Indices.Length / 3;
         var indices = new int[triCount * 3];
         for (int t = 0; t < triCount; t++)
         {
             int src = t * 3;
             int dst = t * 3;
-            // No swap: on-disk CCW is Godot CCW — copy directly.
+            // Swap indices 1 and 2 to correct CCW winding after the Z-flip.
+            // Before flip-Z: CCW in legacy (D3D9 left-handed) = front face.
+            // After flip-Z:  CCW becomes CW in Godot (right-handed) = back face.
+            // Swap re-establishes CCW = front face in Godot space.
+            // spec: terrain_scene.md §3.2.4 — CCW front faces; WorldCoordinates — negate Z. CONFIRMED.
             indices[dst + 0] = obj.Indices[src + 0];
-            indices[dst + 1] = obj.Indices[src + 1];
-            indices[dst + 2] = obj.Indices[src + 2];
+            indices[dst + 1] = obj.Indices[src + 2]; // swap: was [1]
+            indices[dst + 2] = obj.Indices[src + 1]; // swap: was [2]
         }
 
         // Assemble ArrayMesh.

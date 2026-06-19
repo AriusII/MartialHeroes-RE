@@ -85,6 +85,43 @@ public static class PacketWireSizes
                 size = SmsgCharActionResult.WireSize;
                 isVariableLength = false;
                 return true;
+            case Opcodes.Opcodes.SmsgSrvBillingDeactivated: // spec: packets/1-16_srv_billing_deactivated.yaml
+                size = 0;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgSrvBillingActivated: // spec: packets/1-17_srv_billing_activated.yaml
+                size = 0;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgSrvBillingExpiryNotice: // spec: packets/1-19_srv_billing_expiry_notice.yaml
+                size = SmsgSrvBillingExpiryNotice.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgRenameCharResult: // spec: packets/3-6_rename_char_result.yaml
+                size = SmsgRenameCharResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgCharManageResult: // spec: packets/3-7_char_manage_result.yaml
+                size = SmsgCharManageResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgShopPageUpdate: // spec: packets/3-8_shop_page_update.yaml
+                size = SmsgShopPageUpdate.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgCharStatusUpdate: // spec: packets/3-13_char_status_update.yaml
+                size = SmsgCharStatusUpdate.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgCharSpawnResult
+                : // spec: packets/3-14_char_spawn_response.yaml (mapped to SmsgCharSpawnResult in Opcodes)
+                size = SmsgCharSpawnResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.Opcodes.SmsgCharSelectStatusUpdate: // spec: packets/3-23_char_select_status_update.yaml
+                size = SmsgCharSelectStatusUpdate.Size;
+                isVariableLength = false;
+                return true;
 
             // --- variable-length packets: only the fixed header is modelled ---
             case Opcodes.Opcodes.SmsgGameStateTick: // spec: handlers.md §4/1; client_runtime.md §9.4
@@ -101,6 +138,18 @@ public static class PacketWireSizes
                 return true;
             case Opcodes.Opcodes.SmsgSkillPointUpdate: // spec: Docs/RE/structs/skill.md (SkillPointUpdate, 4/150)
                 size = SmsgSkillPointUpdateHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.Opcodes.SmsgSrvLetterReceived: // spec: packets/1-20_srv_letter_received.yaml
+                size = 76;
+                isVariableLength = true;
+                return true;
+            case Opcodes.Opcodes.SmsgSceneEntityUpdate: // spec: packets/3-4_scene_entity_update.yaml
+                size = 3;
+                isVariableLength = true;
+                return true;
+            case Opcodes.Opcodes.SmsgGmChatMessage: // spec: packets/3-50000_gm_chat_message.yaml
+                size = 5;
                 isVariableLength = true;
                 return true;
 

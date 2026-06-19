@@ -637,14 +637,17 @@ public sealed class AreaComposer
 
             // Apply the idx-1 finalize: clamp to [1, count], then subtract 1 to get
             // a 0-based index into the per-cell TEXTURES list.
+            // Spec rule: BOTH < 1 AND > count → floor to 1 (NOT clamp-to-count; no sentinel).
             // spec: Docs/RE/formats/terrain.md §CORRECTED CYCLE 1 —
             //   "clamped to [1, count], then indexed as perCellTexList[byte - 1]": CONFIRMED.
-            // spec: Docs/RE/formats/terrain.md §5.6 — "Ted_ResolvePatchTextures (IDA 0x44b296)": CONFIRMED.
-            if (rawByte < 1)
-                rawByte = 1; // clamp below spec: terrain.md §5.6 — "< 1 → 1": CONFIRMED
-            if (rawByte > count)
-                rawByte = (byte)Math.Min(count,
-                    255); // clamp above spec: terrain.md §5.6 — "> count → count": CONFIRMED
+            // spec: Docs/RE/formats/terrain.md §5.6 —
+            //   "a byte < 1 or > count floors to slot 1" (both out-of-range → 1): CONFIRMED.
+            // spec: Docs/RE/formats/terrain.md §5.9 —
+            //   "a byte < 1 or > count floors to slot 1; NOT a no-texture sentinel": CONFIRMED.
+            // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join —
+            //   "both <1 and >count → 1": CONFIRMED.
+            if (rawByte < 1 || rawByte > count)
+                rawByte = 1; // spec: terrain.md §5.6/§5.9 — BOTH under AND over floor to 1: CONFIRMED
 
             // 0-based list index after −1 finalize.
             int listIdx = rawByte - 1; // spec: terrain.md §CORRECTED CYCLE 1 — idx-1 finalize: CONFIRMED

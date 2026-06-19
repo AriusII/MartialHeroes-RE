@@ -4,9 +4,9 @@
 name: SmsgKeyExchange
 opcode: 0x0               # major 0 (KeyExchange), minor 0 -> (0 << 16) | 0
 direction: S2C
-size: var                # ~62 bytes total observed by a prior analyst; treat as variable until captured
+size: 62                  # 54-byte key blob + two trailing u32s (62 bytes total)
 spec: packets/0-0_key_exchange.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Handshake; the first frame of the secure session. Carries the server's asymmetric key material.

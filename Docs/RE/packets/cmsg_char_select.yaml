@@ -16,7 +16,7 @@ opcode: 0x10007           # major 1, minor 7 -> (1 << 16) | 7
 direction: C2S
 size: 2                   # fixed 2-byte payload
 spec: packets/cmsg_char_select.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

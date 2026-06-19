@@ -1,0 +1,43 @@
+# spec: Docs/RE/packets/2-47_hud_code_value.yaml
+# Role: C2S simple HUD (code, value) action — one mode byte + a u32, panel-modal gated only.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgHudCodeValue
+opcode: 0x2002f           # major 2 (GameAction), minor 47 -> (2 << 16) | 47
+direction: C2S
+size: 8                   # fixed 8-byte body
+spec: packets/2-47_hud_code_value.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Simple (code, value) HUD action. A leading mode/sub-action byte, a 3-byte alignment gap, then a target/amount u32. Gated only by the panel-modal guard (no list lookup). Sibling shape to 2/48.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Code,  type: u8 }        # 0x00  mode / sub-action byte [capture/debugger-pending]
+  - { name: Pad0,  type: "u8[3]" }   # 0x01  alignment gap (unfilled stack)
+  - { name: Value, type: u32 }       # 0x04  target / amount [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 8-byte blit). The source is a stack block whose
+  leading byte is the Code arg and whose +4 dword is the Value arg; the 3 interior bytes are
+  alignment (stack remnant). The field VALUES are static inferences (capture-pending).
+
+    0x00 (1B) Code  : a mode / sub-action byte. [capture/debugger-pending]
+    0x01 (3B) Pad0  : alignment gap before Value (unfilled stack — expected zero/garbage).
+    0x04 (4B) Value : a target id or amount. [capture/debugger-pending]
+
+  [UNVERIFIED] the exact 8-byte stack packing depends on the caller's stack layout; the
+  {u8 code @0, u32 value @4} reading with a 3-byte gap is the static best fit — confirm offsets
+  against a capture.
+
+  TRIGGER: a HUD action gated only by the panel-modal guard (no list lookup). Sibling of 2/48
+  (which submits a single u32 id).
+
+  UNKNOWNS to resolve with a capture:
+    - the Code value space and the meaning of Value;
+    - the exact interior byte layout (offset confirmation);
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application simple HUD (code, value) action use-case.

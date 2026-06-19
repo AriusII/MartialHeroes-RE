@@ -1,0 +1,42 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band5.md §2/126 (single-byte confirm-dialog commit).
+# Role: a confirm / two-state dialog's selected-state commit (a 1-byte selector).
+#
+# CAPTURE-UNVERIFIED: the 1-byte size and the state-selector shape are control-flow CONFIRMED; the
+# dialog's domain is undetermined. capture_verified: false.
+
+name: CmsgConfirmDialogState
+opcode: 0x2007e           # major 2 (GameAction), minor 126 (0x7e) -> (2 << 16) | 126
+direction: C2S
+size: 1                   # FIXED 1-byte body: one state selector
+spec: packets/2-126_confirm_dialog_state.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  A confirm / two-state dialog's commit. A fixed 1-byte body carrying the dialog's selected state
+  (observed 1 or 2). Sent from a two-state dialog's onEvent commit path. Major 2 is C2S-only. Grouped
+  here as its own file per the trivial-selector convention.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 1.
+# CONTROL-FLOW CONFIRMED: a fixed 1-byte blit of the dialog's confirm-state byte.
+fields:
+  - { name: State, type: u8 }   # 0x00  confirm state (caller passes 1 or 2; a yes/state selector) [domain capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (1 byte) and the state-selector shape; the dialog's domain is
+  undetermined.
+
+    0x00 (1B) State : the dialog's selected state. The dialog toggles its state between 1 and 2 before
+                      committing; that value is sent. The exact meaning (which subsystem's confirm) is
+                      [pending].
+
+  TRIGGER: a confirm / two-state dialog onEvent commit path. The byte carries the dialog's currently
+  selected state (1 vs 2).
+
+  EXPECTED S2C REPLY: [pending].
+
+  UNKNOWNS (capture-pending): the dialog's subsystem / domain; the meaning of state 1 vs 2; the S2C
+  reply.
+
+  UNBLOCKS: provisional only -- a fixed 1-byte confirm-dialog state send.

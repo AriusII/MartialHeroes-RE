@@ -1,0 +1,37 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads 1 byte then 20 bytes from the payload cursor)
+#   offsets:
+#     notice_type @ 0x00: confirmed
+#     subscription_code @ 0x01: confirmed (the code-classifier compares the leading 2 chars against "DB"/"HB"/"TB")
+#     time_left @ 0x11 (17): confirmed (printed as %d in expired warning)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: SmsgSrvBillingExpiryNotice
+opcode: 0x10013           # major 1, minor 19 -> (1 << 16) | 19
+direction: S2C
+size: 22                  # fixed 22-byte payload (1 byte dummy + 1 byte type + 20 bytes body block)
+spec: packets/1-19_srv_billing_expiry_notice.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Server billing expiry warning notice. Formats a warning string indicating the number of
+  days, hours, or minutes left on the subscription, or displays an expiration message.
+
+fields:
+  - { name: Dummy, type: u8 }                     # 0x00  discarded/padding prefix byte
+  - { name: NoticeType, type: u8 }                # 0x01  if 33 (0x21), formats standard units based on type; otherwise forces minutes
+  - { name: SubscriptionCode, type: "char[16]" }  # 0x02  subscription code string ("DB" for Day-Block, "HB" for Hour-Block, "TB" for Time-Block)
+  - { name: TimeLeft, type: u32 }                 # 0x12  time quantity remaining (days, hours, or minutes based on code and NoticeType)
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 22 = 30 bytes on the wire.
+
+  When received:
+  - Depending on NoticeType and SubscriptionCode, it generates a formatted message:
+    - DB (Day-Block): "Your Day-Block subscription will expire in %d days / minutes" or "expired... logged out"
+    - HB (Hour-Block): "Your Hour-Block subscription will expire in %d hours / minutes" or "expired... logged out"
+    - TB (Time-Block): "Your Time-Block subscription will expire in %d minutes" or "expired... logged out"
+  - The formatted message is logged to the in-game chat panel (channel 13) or the lobby status line.

@@ -62,6 +62,15 @@ public interface IAssembledCellView
 /// per area load. Surfaced through this abstraction for the same reference-graph reason as
 /// <see cref="IAssembledCellView"/>. spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load).
 /// </summary>
+/// <remarks>
+/// Carries the area-level <c>.arr</c>-derived <see cref="Spawns"/> list so the composer-driven actor
+/// placement reaches layer-05 next-frame (the CYCLE-1 gap: <see cref="AreaAssembledEvent"/> was never
+/// published, so this list never crossed the seam). The spawn descriptors are the neutral, layer-04
+/// <see cref="AreaSpawnDescriptor"/> (a copy of the layer-03 <c>SpawnDescriptor</c> — Application does
+/// not reference <c>Assets.Mapping</c>, so the layer-05 root projects the concrete model onto this
+/// abstraction when it binds the area bake). spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area
+/// load → spawns) / §4 (offline-port synthesis from <c>.arr</c>).
+/// </remarks>
 public interface IAssembledAreaView
 {
     /// <summary>The area identifier this assembled area was built for. spec: assembly_graph.md §1 (area id → cell-key set).</summary>
@@ -69,7 +78,37 @@ public interface IAssembledAreaView
 
     /// <summary>The number of cell keys in the area's <c>d&lt;NNN&gt;.lst</c> set. spec: assembly_graph.md §1.</summary>
     int CellKeyCount { get; }
+
+    /// <summary>
+    /// The area's spawn descriptors (built from <c>npc&lt;NNN&gt;.arr</c> + the offline <c>mob&lt;NNN&gt;.arr</c>),
+    /// already carrying the applied <c>Yaw = π/2 − facing</c> and NO baked Y (re-sampled per frame by
+    /// layer-05). Faithfully empty when the area has no <c>.arr</c> spawns — never synthesised. spec:
+    /// Docs/RE/specs/assembly_graph.md §1 (spawns; ground-Y re-sampled per frame) / §4 (offline synthesis);
+    /// Docs/RE/formats/npc_spawns.md (yaw = π/2 − value; Y re-sampled).
+    /// </summary>
+    IReadOnlyList<AreaSpawnDescriptor> Spawns { get; }
 }
+
+/// <summary>
+/// The neutral, engine-free, layer-04 spawn descriptor carried on <see cref="AreaAssembledEvent"/>.
+/// A 1:1 mirror of the layer-03 <c>Assets.Mapping.SpawnDescriptor</c> — Application cannot reference
+/// <c>Assets.Mapping</c> (see the reference-graph decision in this file's header), so the layer-05
+/// composition root copies the concrete fields onto this immutable snapshot when it binds the area
+/// bake. spec: Docs/RE/specs/assembly_graph.md §1 (spawns) / §4 (offline synthesis from <c>.arr</c>);
+/// Docs/RE/formats/npc_spawns.md (record layout: world_x/world_z/facing/mob_id; yaw = π/2 − facing;
+/// Ground-Y re-sampled from terrain every frame, NOT baked here).
+/// </summary>
+/// <param name="WorldX">World-space X spawn origin. spec: Docs/RE/formats/npc_spawns.md (+0x04 world_x).</param>
+/// <param name="WorldZ">World-space Z spawn origin (Y is re-sampled per frame). spec: npc_spawns.md (+0x08 world_z).</param>
+/// <param name="Yaw">Applied facing in radians (<c>π/2 − rawFacing</c>). spec: npc_spawns.md (+0x12 facing; runtime π/2 − value).</param>
+/// <param name="VisualId">The <c>mob_id</c> / NPC template id (the visual-chain primary key). spec: npc_spawns.md (+0x00 mob_id).</param>
+/// <param name="IsNpc"><see langword="true"/> for an <c>npc.arr</c> spawn; <see langword="false"/> for a <c>mob.arr</c> spawn. spec: assembly_graph.md §4.</param>
+public readonly record struct AreaSpawnDescriptor(
+    float WorldX,
+    float WorldZ,
+    float Yaw,
+    int VisualId,
+    bool IsNpc);
 
 /// <summary>
 /// Published when the layer-03 <c>AreaComposer</c> has assembled an AREA (its <c>d&lt;NNN&gt;.lst</c>

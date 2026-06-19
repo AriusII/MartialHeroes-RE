@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band4.md §2/114 (requirement-gated self-action).
+# Role: a requirement-gated self-action carrying a local-player field (id or current target).
+#
+# CAPTURE-UNVERIFIED: the 4-byte size and the single-u32 shape are control-flow CONFIRMED; the field's
+# exact identity and the action are capture/debugger-pending. capture_verified: false.
+
+name: CmsgGatedSelfAction114
+opcode: 0x20072           # major 2 (GameAction), minor 114 (0x72) -> (2 << 16) | 114
+direction: C2S
+size: 4                   # FIXED 4-byte body: one local-player field value
+spec: packets/2-114_gated_self_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  A requirement-gated self-action. A fixed 4-byte body carrying a local-player field value (a player id
+  or current-target / object-id field). Sent only when a level/value precondition passes; otherwise the
+  client shows a requirement-not-met notice. Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
+# CONTROL-FLOW CONFIRMED: a fixed 4-byte blit; the builder takes the u32 as its argument.
+fields:
+  - { name: PlayerField, type: u32 }   # 0x00  a local-player field (player id / current target / object id) [identity capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (4 bytes) and the single-u32 shape; the field's identity and the
+  action are capture/debugger-pending.
+
+    0x00 (4B) PlayerField : a local-player field value. The caller passes a fixed-offset field from the
+                            local-player object (a player id, current-target, or object-id field). Which
+                            one is [pending].
+
+  TRIGGER: a gated action routine that sends 2/114 only when a level / value precondition passes (a
+  minimum level or a window condition flag); otherwise it shows a requirement-not-met notice and does
+  not send. After a successful send it closes the window. Best static read: a requirement-gated
+  self-action that needs a minimum level or condition.
+
+  EXPECTED S2C REPLY: [pending].
+
+  UNKNOWNS (capture-pending): the local-player field identity; the specific action / subsystem; the S2C
+  reply.
+
+  UNBLOCKS: provisional only -- a fixed 4-byte gated self-action send; resolve the field meaning from a
+  capture before relying on it.

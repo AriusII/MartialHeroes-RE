@@ -1,0 +1,39 @@
+# spec: Docs/RE/packets/2-2_portal_travel.yaml
+# Role: C2S portal / map-transition (teleport) travel request. Auto-emitted on arrival at a portal.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgPortalTravel
+opcode: 0x20002           # major 2 (GameAction), minor 2 -> (2 << 16) | 2
+direction: C2S
+size: 4                   # fixed 4-byte body
+spec: packets/2-2_portal_travel.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Portal / map-transition (teleport) travel request. A single u32 destination/portal selector. Auto-emitted (not from a button) when the local-player state-sync path detects the player is standing on a portal trigger and a cooldown has elapsed.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 4.
+fields:
+  - { name: TargetId, type: u32 }   # 0x00  destination / portal identifier [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 4-byte append); the field VALUE meaning is a
+  static inference (capture-pending).
+
+    0x00 (4B) TargetId : a u32 selector for the destination/portal. [capture/debugger-pending]
+
+  TRIGGER (reactive, not a button): emitted from the inbound local-player state-sync path when it
+  detects the local player is near a portal/warp trigger AND a ~3000 ms travel cooldown has elapsed
+  AND a one-shot guard byte is clear. So 2/2 is the "use this portal" request auto-raised on arrival,
+  not a UI action.
+
+  CLIENT-SIDE LATCH (informational, not a wire field): the builder sets a net-client "travel in
+  progress" gate latch before sending; the server's teleport/zone-change response presumably clears
+  it. This is client bookkeeping, not part of the body.
+
+  UNKNOWNS to resolve with a capture:
+    - whether TargetId is a portal id, a destination map id, or an actor handle;
+    - the inbound reply opcode (a teleport / zone-change / new state-sync) — reply opcode pending.
+
+  UNBLOCKS: Client.Application portal-travel use-case (send-only, reactive).

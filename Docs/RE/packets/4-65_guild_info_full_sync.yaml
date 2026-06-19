@@ -1,107 +1,135 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED VALUE semantics; the 1812-byte block size and the header + parallel-array
-# layout are control-flow CONFIRMED from the full-sync apply routine's read order. capture_verified: false.
+# layout are control-flow CONFIRMED from the full-sync apply routine's read order (a single literal
+# 50-trip loop with disasm-pinned per-array strides + two independent fixed 0x714 copies).
+# capture_verified: false.
+#
+# BINARY-WINS CORRECTION (CYCLE 2 netcode lane W-C3): the per-member data is striped across
+# SEVEN parallel 50-entry arrays, NOT five. The earlier five-array reading (and the opcodes.md
+# summary that mirrored it) under-counted the per-member byte/dword vectors; the binary's single
+# fused 50-iteration loop walks seven independent per-array cursors. The seven-array layout is the
+# control-flow ground truth and supersedes the five-array model.
+# spec: Docs/RE/packets/4-65_guild_info_full_sync.yaml
 
 name: SmsgGuildInfoFullSync
-opcode: 0x40041             # major 4 (Response), minor 65 -> (4 << 16) | 65
+opcode: 0x40041            # major 4 (Response), minor 65 -> (4 << 16) | 65
 direction: S2C
-size: 1812                 # fixed 1812-byte (0x714) block read by the guild full-sync handler
+size: 1812                # fixed 1812-byte (0x714) block read by the guild full-sync handler
 spec: packets/4-65_guild_info_full_sync.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server full synchronisation of the guild window. A fixed 1812-byte block carrying the guild identity (name, id, rank byte, two header quantities, fame/points) followed by FIVE parallel 50-entry per-member arrays (member ids, status bytes, 17-byte CP949 names, class bytes, and three dword arrays). The layout REFUTES any "50 x 36-byte contiguous member record" model -- the per-member data is striped across parallel arrays, not packed per member.
+summary: >
+  Server full synchronisation of the guild window. A fixed 1812-byte block carrying the guild
+  identity (title, id, rank byte, header quantities, points/funds) followed by SEVEN parallel
+  50-entry per-member arrays: member ids, an online/state flag-A vector, 17-byte CP949 names, a
+  second online/state flag-B vector, a per-member points/contribution dword array, and two further
+  per-member dword arrays. The layout REFUTES any "50 x 36-byte contiguous member record" model --
+  per-member data is striped across the seven parallel arrays, not packed per member. The seven
+  arrays are dense from +60 to +1812 with the header interleaved into the low region (+8..+57).
 
 # Wire order, offset 0 = first payload byte. Pack=1; padding bytes modelled explicitly so the summed
 # widths equal size: 1812. The 50-element per-member arrays are modelled as fixed bytes[N] blobs (the
 # only fixed-buffer wire type); each array's per-member stride is given in the notes. The engineer
 # slices each blob into 50 entries of the stated stride.
 fields:
-  - { name: HeaderPad0,    type: "bytes[8]" }     # 0x000  leading ack-header region (subtype gate is the next byte)
-  - { name: Subtype,       type: u8 }           # 0x008  apply gate: 1 = full-sync apply; other = guild-leave path
-  - { name: ReservedA,     type: "bytes[1]" }     # 0x009  filler to the guild-name field
-  - { name: GuildName,     type: "bytes[18]" }    # 0x00a  guild name / title, CP949 (char[18])
-  - { name: GuildId,       type: i16 }          # 0x01c  guild id
-  - { name: RankByte,      type: u8 }           # 0x01e  guild rank / level byte (mirrored to each member)
-  - { name: ReservedB,     type: "bytes[1]" }     # 0x01f  filler to the first header quantity
-  - { name: HeaderQtyA,    type: i32 }          # 0x020  header quantity A (capacity vs current -- UNVERIFIED)
-  - { name: HeaderQtyB,    type: i64 }          # 0x024  header quantity B (feeds a rank/tier table -- UNVERIFIED)
-  - { name: GuildFame,     type: i64 }          # 0x02c  guild fame / points (feeds the tier table; shown grouped)
-  - { name: WarStateFlag,  type: u8 }           # 0x034  guild war / state flag
-  - { name: ReservedC,     type: "bytes[7]" }     # 0x035  filler to the member-id array
-  - { name: MemberIds,     type: "bytes[200]" }   # 0x03c  50 x i32 member ids (4-byte stride)
-  - { name: MemberStatus,  type: "bytes[50]" }    # 0x104  50 x u8 per-member status byte (online / state)
-  - { name: MemberNames,   type: "bytes[850]" }   # 0x136  50 x 17-byte CP949 member-name records (17-byte stride)
-  - { name: MemberClass,   type: "bytes[50]" }    # 0x47c  50 x u8 per-member class / level byte
-  - { name: ReservedD,     type: "bytes[2]" }     # 0x4ae  filler to the first member dword array
-  - { name: MemberDwordC,  type: "bytes[200]" }   # 0x4bc  50 x i32 per-member dword C (4-byte stride; semantic UNVERIFIED)
-  - { name: MemberDwordA,  type: "bytes[200]" }   # 0x584  50 x i32 per-member dword A (4-byte stride; nonzero => active member)
-  - { name: MemberDwordB,  type: "bytes[200]" }   # 0x64c  50 x i32 per-member dword B (4-byte stride; semantic UNVERIFIED)
+  - { name: HeaderPad0,    type: "bytes[8]" }     # +0    leading ack-header region (subtype gate is the next byte)
+  - { name: Subtype,       type: u8 }             # +8    apply gate: 1 = full-sync apply; other = guild-leave path
+  - { name: ReservedA,     type: "bytes[1]" }     # +9    filler to the title field
+  - { name: GuildTitle,    type: "bytes[18]" }    # +10   guild title / name, CP949 (NUL-terminated char[18]); region ends by +28
+  - { name: GuildId,       type: i16 }            # +28   guild id
+  - { name: RankByte,      type: u8 }             # +30   guild rank / grade byte (mirrored onto each member's actor field)
+  - { name: ReservedB,     type: "bytes[1]" }     # +31   filler to the count field
+  - { name: CountField,    type: u32 }            # +32   guild count / level field shown as a label (UNVERIFIED which quantity)
+  - { name: PointsLow,     type: u32 }            # +36   points/rank low dword (tier compare with +40)
+  - { name: PointsHigh,    type: u32 }            # +40   points/rank high dword (hi-pair with +36)
+  - { name: GuildFunds,    type: u64 }            # +44   guild funds / gold (64-bit, thousands-grouped on screen)
+  - { name: FlagByte,      type: u8 }             # +52   guild flag / notice byte (mirrored onto the local player)
+  - { name: ReservedC,     type: "bytes[7]" }     # +53   filler to the member-id array (+53..+59)
+  - { name: MemberIds,     type: "bytes[200]" }   # +60   array #1: 50 x i32 member ids (4-byte stride)
+  - { name: OnlineFlagsA,  type: "bytes[50]" }    # +260  array #2: 50 x u8 online/state flag-A (1-byte stride)
+  - { name: MemberNames,   type: "bytes[850]" }   # +310  array #4: 50 x 17-byte CP949 name records (17-byte stride)
+  - { name: OnlineFlagsB,  type: "bytes[50]" }    # +1160 array #3: 50 x u8 online/state flag-B (1-byte stride)
+  - { name: ReservedD,     type: "bytes[2]" }     # +1210 filler between flag-B and the points array -- opaque
+  - { name: PointsContrib, type: "bytes[200]" }   # +1212 array #5: 50 x i32 per-member points/contribution (4-byte stride; widened to i64 host-side)
+  - { name: DwordF,        type: "bytes[200]" }   # +1412 array #6: 50 x i32 per-member dword F (4-byte stride; semantic UNVERIFIED)
+  - { name: DwordG,        type: "bytes[200]" }   # +1612 array #7: 50 x i32 per-member dword G (4-byte stride; semantic UNVERIFIED) -- ends exactly at +1812
 
 notes: |
-  CODE-CONFIRMED block size (a fixed 1812-byte / 0x714 read) and the header + parallel-array layout
-  (control-flow-confirmed from the full-sync apply routine's read order); CAPTURE-UNVERIFIED in the
-  VALUE meaning of several header quantities and the per-member dword arrays. The field WIDTHS sum to
-  exactly 1812 (verified). The five 50-entry arrays end precisely at the 1812 boundary.
+  CODE-CONFIRMED block size (a fixed 1812-byte / 0x714 read, re-confirmed by a second whole-block
+  copy) and the header + SEVEN-parallel-array layout (control-flow-confirmed from the full-sync
+  apply routine: a single literal 50-iteration loop advancing seven independent per-array cursors).
+  CAPTURE-UNVERIFIED in the VALUE meaning of several header quantities and the per-member dword
+  arrays. The field WIDTHS sum to exactly 1812 (verified). Array #7 ends precisely at +1812 + 0 =
+  the 0x714 body end; there are NO trailing bytes.
 
   THE "50 x 36-byte RECORD" MODEL IS REFUTED. 1812 is NOT 50 x 36. The per-member data is striped
-  across FIVE parallel 50-entry arrays (one value per member in each array), not packed into one
-  contiguous record per member. The guild supports a 50-member cap (the apply loops run 50 iterations).
+  across SEVEN parallel 50-entry arrays (one value per member in each array), not packed into one
+  contiguous record per member. The guild supports a 50-member cap (the apply loop runs 50 trips).
+  The member at row r is assembled by reading index r from every array.
 
-  HEADER (offsets 0x000..0x03b):
-    0x008 (1B)  Subtype      : apply gate. 1 = apply the full guild sync; any other value selects the
-                               guild-LEAVE path (the handler clears the local guild fields, applies the
-                               carried leave-cost gold delta with a notice, and shows the 'left guild'
-                               message). Implementers MUST branch on this byte before applying.
-    0x00a (18B) GuildName    : the guild name / title, CP949-encoded -> the guild window's header label.
-    0x01c (2B)  GuildId      : the guild id (i16).
-    0x01e (1B)  RankByte     : a guild rank / level byte, mirrored onto each member's actor field.
-    0x020 (4B)  HeaderQtyA   : a header quantity shown as a count label. WHICH quantity (capacity vs
-                               current member count vs an accumulator) is UNVERIFIED -- capture-pending.
-    0x024 (8B)  HeaderQtyB   : a 64-bit header quantity feeding a rank / tier table and a label. Its
-                               exact role (points vs contribution vs another accumulator) is UNVERIFIED.
-    0x02c (8B)  GuildFame    : the guild fame / points value (i64), feeds the tier table and is shown
-                               thousands-grouped.
-    0x034 (1B)  WarStateFlag : a guild war / state flag mirrored onto the local player.
+  HEADER (offsets +0..+59):
+    +8  (1B)  Subtype     : apply gate. 1 = apply the full guild sync; any other value selects the
+                            guild-LEAVE path (clears local guild fields, applies the carried
+                            leave-cost gold delta with a notice, shows the 'left guild' message).
+                            Implementers MUST branch on this byte before applying.
+    +10 (18B) GuildTitle  : the guild title / name, CP949-encoded, NUL-terminated -> the guild
+                            window's header label (also rendered as "TITLE [%s]").
+    +28 (2B)  GuildId     : the guild id (i16).
+    +30 (1B)  RankByte    : a guild rank / grade byte, mirrored onto each member's actor field.
+    +32 (4B)  CountField  : a header count / level field shown as a label. WHICH quantity (capacity
+                            vs current member count vs level) is UNVERIFIED -- capture-pending.
+    +36 (4B)  PointsLow   : guild points/rank low dword (compared as a hi/lo pair with +40 for a
+                            tier table). UNVERIFIED which exact quantity.
+    +40 (4B)  PointsHigh  : guild points/rank high dword (the hi half of the +36 pair).
+    +44 (8B)  GuildFunds  : the guild funds / gold value (u64), thousands-grouped on screen.
+    +52 (1B)  FlagByte    : a guild flag / notice byte mirrored onto the local player.
 
-  PARALLEL PER-MEMBER ARRAYS (50 entries each; offsets below). Each array is one value per member; the
-  member at row r is assembled by reading index r from every array:
-    0x03c  MemberIds    : 50 x i32 member (composite-key) actor ids, 4-byte stride.
-    0x104  MemberStatus : 50 x u8 per-member status byte (online / state).
-    0x136  MemberNames  : 50 x 17-byte CP949 name record (17-byte stride; the first record also doubles
-                          as the guild master / notice string for the header label).
-    0x47c  MemberClass  : 50 x u8 per-member class / level byte -> the class column.
-    0x4bc  MemberDwordC : 50 x i32, 4-byte stride. Per-member dword; semantic UNVERIFIED (candidate:
-                          contribution / last-login epoch / map id -- capture-pending).
-    0x584  MemberDwordA : 50 x i32, 4-byte stride. A nonzero entry marks the row as an ACTIVE member
-                          (the apply loop counts it and colours it online); the rest of its meaning
-                          (contribution flag) is UNVERIFIED.
-    0x64c  MemberDwordB : 50 x i32, 4-byte stride. Per-member dword; semantic UNVERIFIED.
+  THE SEVEN PARALLEL PER-MEMBER ARRAYS (50 entries each; the single 50-trip apply loop walks all
+  seven simultaneously with independent per-array advance 4 / 1 / 1 / 17 / 4 / 4 / 4). Listed in
+  WIRE-OFFSET order (the dirty-note array numbering is kept in the per-line comments above):
+    +60   (200B) MemberIds     : 50 x i32 member (composite-key) actor ids, 4-byte stride. (array #1)
+                                 Each id is passed to the cached by-key actor lookup in the fixup pass.
+    +260  (50B)  OnlineFlagsA  : 50 x u8 online/state flag-A, 1-byte stride. (array #2) Written to a
+                                 per-member actor field.
+    +310  (850B) MemberNames   : 50 x 17-byte CP949 name record, 17-byte stride. (array #4) Each cell
+                                 is a fixed 17-byte NUL-padded short name (16 usable + forced NUL).
+                                 The first record also doubles as a header-ish label.
+    +1160 (50B)  OnlineFlagsB  : 50 x u8 online/state flag-B, 1-byte stride. (array #3) A second
+                                 per-member byte flag.
+    +1212 (200B) PointsContrib : 50 x i32 per-member points/contribution, 4-byte stride. (array #5)
+                                 The wire element is 32-bit; the host sign-extends it to a 64-bit slot
+                                 (a host-side widening only, NOT a wire field width).
+    +1412 (200B) DwordF        : 50 x i32 per-member dword, 4-byte stride. (array #6) Re-scanned by a
+                                 second sub-block consumer; candidate rank / login flag. Semantic
+                                 UNVERIFIED.
+    +1612 (200B) DwordG        : 50 x i32 per-member dword, 4-byte stride. (array #7) Candidate login
+                                 time / second contribution. Semantic UNVERIFIED. Ends exactly at +1812.
 
   WHY bytes[N] FOR THE ARRAYS: the supported wire types have no "array of N" form, so each 50-entry
-  array is modelled as a fixed byte blob of (50 x stride) bytes. The engineer slices each blob into 50
-  entries of the stated stride (4 for the dword/id arrays, 1 for the status/class arrays, 17 for the
-  name records). The byte totals are chosen so the whole block sums to 1812.
+  array is modelled as a fixed byte blob of (50 x stride) bytes. The engineer slices each blob into
+  50 entries of the stated stride (4 for the dword/id arrays, 1 for the flag arrays, 17 for the name
+  records). The byte totals are chosen so the whole block sums to 1812.
 
-  RESERVED REGIONS: ReservedA (0x009), ReservedB (0x01f), ReservedC (0x035..0x03b), ReservedD
-  (0x4ae..0x4bb), and HeaderPad0 (0x000..0x007) are bytes the apply routine does not consume; they are
-  modelled only to make the widths sum to 1812. Whether any reserved byte carries meaning is
-  capture-pending.
+  RESERVED REGIONS: ReservedA (+9), ReservedB (+31), ReservedC (+53..+59), and HeaderPad0 (+0..+7)
+  are bytes the apply routine does not consume directly; they are modelled only to make the widths
+  sum to 1812. Whether any reserved byte carries meaning is capture-pending.
+
+  THE LOCAL-PLAYER FIXUP: a tail pass copies the matching member's name / rank / points into the
+  local-player object (a normal "find me in the roster" step) -- this is host behaviour, not an extra
+  wire array.
 
   RELATIONSHIP: this is the GUILD full sync. The guild window also receives narrower S2C updates
-  (guild rank slot 4/54, info update 4/55, state change 4/61, invite/join 4/62, member-remove 4/63,
-  position change 4/64, panel text 4/67, name display 5/55, member roster 5/65). The outbound guild
-  action primitive is C2S 2/30 CmsgGuildOp (packets/2-30_guild_op.yaml) -- an 8-byte {op, id}; the
-  binding of a window action (invite / kick / promote / demote / leave / disband) to a specific 2/30
-  op-code value is UNVERIFIED and capture/debugger-pending.
+  (state change 4/61, invite/join 4/62, member-remove 4/63, position change 4/64, panel text 4/103).
+  The guild-war INFO window receives 5/73 SmsgGuildWarInfoUpdate.
 
-  UNKNOWNS to resolve with a guild full-sync capture (the block size + array layout are settled; these
-  are VALUE questions):
-    - which header quantity is capacity vs current count vs points (HeaderQtyA @0x020 / HeaderQtyB @0x024);
-    - the per-member dword semantics (MemberDwordC @0x4bc, MemberDwordB @0x64c -- contribution /
-      last-login / map id);
-    - the action -> 2/30 op-byte binding for guild operations.
+  UNKNOWNS to resolve with a guild full-sync capture (the block size + array layout are settled;
+  these are VALUE questions):
+    - which header quantity is capacity vs current count vs level/points (CountField +32 /
+      PointsLow+High +36/+40);
+    - the per-member dword semantics (DwordF +1412, DwordG +1612 -- contribution / last-login / map id);
+    - which flag vector (OnlineFlagsA +260 vs OnlineFlagsB +1160) drives the online colour.
 
   UNBLOCKS: the Client.Application guild-window full-sync handler (4/65) -- the roster, identity, and
-  fame fields are layout-solid; the flagged header / dword semantics should be confirmed against a
+  funds fields are layout-solid; the flagged header / dword semantics should be confirmed against a
   capture before relying on them.

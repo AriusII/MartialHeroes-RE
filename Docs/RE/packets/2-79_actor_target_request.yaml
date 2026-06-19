@@ -1,0 +1,41 @@
+# spec: Docs/RE/packets/2-79_actor_target_request.yaml
+# Role: C2S actor-target / context-selection request — table index resolved to a live actor.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgActorTargetRequest
+opcode: 0x2004f           # major 2 (GameAction), minor 79 -> (2 << 16) | 79
+direction: C2S
+size: 16                  # fixed 16-byte body
+spec: packets/2-79_actor_target_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: An actor-targeted interaction request — select an entry from a context table, resolve it to a live actor, and send. A leading selector, a table index that maps to an actor id, and resolved-record bytes.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 16.
+fields:
+  - { name: Selector,   type: u8 }        # 0x00  leading selector (validator requires ==0) [capture/debugger-pending]
+  - { name: Reserved0,  type: "u8[7]" }   # 0x01  reserved / sub-fields [capture/debugger-pending]
+  - { name: TableIndex, type: u8 }        # 0x08  index into a 16-byte-record table resolving an actor id [capture/debugger-pending]
+  - { name: RecordTail, type: "u8[7]" }   # 0x09  resolved record / actor key bytes [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 16-byte blit); part of the layout is opaque, the
+  index->actor resolution is the firm part. The field VALUES are static inferences (capture-pending).
+
+    0x00 (1B) Selector   : a leading selector; the validator requires it to be 0. [capture/debugger-pending]
+    0x01 (7B) Reserved0  : reserved / sub-fields. [capture/debugger-pending]
+    0x08 (1B) TableIndex : an index into a 16-byte-per-entry table that maps to an actor id (the
+                           validator confirms the actor exists via the actor manager).
+                           [capture/debugger-pending]
+    0x09 (7B) RecordTail : resolved record / actor-key bytes. [capture/debugger-pending]
+
+  TRIGGER: a context/target panel — raised by selecting an entry and confirming; the success path
+  also resets the local player target and a main-window slot.
+
+  UNKNOWNS to resolve with a capture:
+    - the Reserved0 / RecordTail breakdown and the Selector value space;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application actor-target / context-selection use-case.

@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band4.md §2/93 (revenge-vote yes/no response).
+# Role: the revenge / vengeance subsystem's voting-prompt yes/no response (a 1-byte selector).
+#
+# CAPTURE-UNVERIFIED: the 1-byte size and the boolean-style flag are control-flow CONFIRMED; the
+# yes/no value mapping is caller-derived. capture_verified: false.
+
+name: CmsgRevengeVote
+opcode: 0x2005d           # major 2 (GameAction), minor 93 (0x5d) -> (2 << 16) | 93
+direction: C2S
+size: 1                   # FIXED 1-byte body: one vote flag
+spec: packets/2-93_revenge_vote.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The revenge / vengeance subsystem's voting-prompt response. A fixed 1-byte body: a yes/no vote flag
+  (accept vs decline). Sent from the revenge-vote window's confirm branch. Major 2 is C2S-only. Grouped
+  here as its own file per the trivial-selector convention.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 1.
+# CONTROL-FLOW CONFIRMED: a fixed 1-byte blit of a vote flag chosen by the active window option.
+fields:
+  - { name: VoteFlag, type: u8 }   # 0x00  vote selection: 1 = accept (sub-state 0), 0 = decline (sub-state 1)
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (1 byte) and the boolean-style flag.
+
+    0x00 (1B) VoteFlag : the vote selection. The caller sets 1 when the window sub-state is 0 and 0 when
+                         the sub-state is 1 -- a yes/no (accept / decline) choice in the revenge-vote
+                         prompt.
+
+  TRIGGER: the revenge-vote window's confirm branch. It sets the flag from which option button is
+  active, sends, then closes the window. Best static read: the player's vote in the revenge / vengeance
+  subsystem's voting prompt.
+
+  EXPECTED S2C REPLY: a vote-tally / result broadcast is plausible; not statically linked this lane.
+  [pending]
+
+  CROSS-REF: 2/92 CmsgRevengeSummon (packets/2-92_revenge_summon.yaml) is the revenge-target summon
+  confirm of the same subsystem.
+
+  UNKNOWNS (capture-pending): the S2C vote-result; whether the flag carries more than two values.
+
+  UNBLOCKS: the Client.Application revenge-vote use-case (a fixed 1-byte send).

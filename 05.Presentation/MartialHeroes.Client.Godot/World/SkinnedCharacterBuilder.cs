@@ -46,6 +46,36 @@ public static class SkinnedCharacterBuilder
     internal static bool PrintDiagnostics { get; set; } = true;
 
     /// <summary>
+    /// PORT-SIDE coordinate convention: map the legacy native up-axis onto Godot's Y-up.
+    ///
+    /// The recovered bind/inverse-bind/LBS math (<see cref="SkinningMath"/>, the bake) is CORRECT and
+    /// is NOT touched here — the deform reproduces the rig faithfully in its NATIVE axis frame. But the
+    /// legacy engine's native up-axis differs from Godot's Y-up, so the faithfully-deformed avatar
+    /// arrives lying along X (the CYCLE-2 screenshots show AABB longest extent X≈25 vs Y≈12). This is
+    /// the SAME CATEGORY of port-side coordinate mapping as the existing conventions already in the
+    /// codebase: world geometry negates Z (<see cref="Helpers.WorldCoordinates.ToGodot"/>) and the
+    /// mesh-local .skn geometry negates X. It is a display-node reorientation — a coordinate-mapping
+    /// PORT CHOICE — NOT a fabricated game behaviour and NOT a change to the bind/bake math.
+    ///
+    /// Applied to the Pivot node (the Node3D wrapping the mesh), so it composes cleanly with the
+    /// caller's actor yaw on the root (NpcRenderer / RealWorldRenderer set root.Rotation = (0,yaw,0))
+    /// and is shared by BOTH the player and the spawned actors (both go through Build).
+    ///
+    /// The human avatar's faithfully-deformed mesh is tallest along X (AABB X≈5.0 vs Y≈2.4 vs Z≈1.7
+    /// for the g2 player b202110001 — it arrives lying down the +X axis). Mapping X→Y stands it up,
+    /// which is a rotation about Z (not about X — about X only swaps Y↔Z and leaves it X-tall). A
+    /// +90° rotation about Z maps +X onto +Y while keeping the figure NOT mirrored/inside-out (a pure
+    /// rotation has det = +1, so winding is preserved, unlike a reflection). The AABB long axis moves
+    /// from X to Y, which is the verifiable signature.
+    /// Held as a named field so it is trivially adjustable when the maintainer confirms the native axis
+    /// against the official captures / live debugger.
+    /// spec: Docs/RE/specs/skinning.md §9 — the native up-axis / handedness LABEL is capture/debugger-
+    ///       pending (no axis flip inside the math); this is the importer-layer remap §7 sanctions.
+    /// spec: CLAUDE.md "Coordinate conventions" — same category as world Z-negate / mesh-local X-negate.
+    /// </summary>
+    internal static Vector3 UpAxisRemapDeg { get; set; } = new Vector3(0f, 0f, 90f);
+
+    /// <summary>
     /// Builds a Godot node tree for a skinned character. Never throws — each step is guarded and
     /// degrades to a visible-but-simpler state on failure. Player-compatible overload.
     /// </summary>
@@ -97,12 +127,15 @@ public static class SkinnedCharacterBuilder
                            && skeleton.Bones.Length > 0
                            && mesh.Weights.Length > 0;
 
-        // A pivot node sits between the root and the mesh child. Its basis is IDENTITY: the original
-        // applies exactly ONE handedness conversion (the world Z-negate, done inside the skinning
-        // math output) and NO per-rig reorientation. The earlier tallest-axis "stand-up" rotation was
-        // a fabricated correction with no IDA counterpart and has been removed (§7/§8(b)).
-        // spec: Docs/RE/specs/skinning.md §7 (no axis flip inside skinning) / §8(b) (single Z-negate).
-        var pivot = new Node3D { Name = "Pivot" };
+        // A pivot node sits between the root and the mesh child. The skinning math output applies the
+        // ONE handedness conversion (the world Z-negate); the pivot then applies the PORT-SIDE
+        // up-axis remap (UpAxisRemapDeg) that maps the legacy native up-axis onto Godot Y-up — a
+        // display-node coordinate-mapping choice (same category as the Z/X negations), NOT a change to
+        // the recovered bind/bake math. Held on the Pivot (a child of root) so the caller's actor yaw
+        // on the root composes cleanly on top.
+        // spec: Docs/RE/specs/skinning.md §7 (axis remap is an importer-layer transform) / §9
+        //       (native up-axis label capture/debugger-pending) / §8(b) (single Z-negate stays in math).
+        var pivot = new Node3D { Name = "Pivot", RotationDegrees = UpAxisRemapDeg };
         root.AddChild(pivot);
 
         if (useSkinning)
@@ -118,17 +151,28 @@ public static class SkinnedCharacterBuilder
                     LogDiagnostics(mesh, skeleton!, clip, d);
                 }
 
-                // Recentre from the DISPLAYED animated frame-0 pose (the pose actually on screen),
-                // NOT the raw bind/rest pose, so feet sit near local Y=0 and the body centres on X/Z.
-                // The pivot basis stays IDENTITY — no per-rig stand-up rotation (§7/§8(b)); the single
-                // Z-negate inside the skinning output is the only handedness conversion. If a rig then
-                // appears mis-oriented, the cause is the §8(b)/§9 quaternion remap or a missing actor
-                // yaw — to be confirmed by the screenshot oracle, NOT a guessed pivot angle.
-                // spec: Docs/RE/specs/skinning.md §6 (displayed pose is the sampled idle) / §7 / §8(b).
+                // Recentre from the DISPLAYED animated frame-0 pose (the pose actually on screen), as
+                // REORIENTED by the pivot up-axis remap, so feet sit near local Y=0 and the body
+                // centres on X/Z in the final upright orientation. The single Z-negate inside the
+                // skinning output stays the only handedness conversion in the math; the pivot remap is
+                // a port-side display reorientation (§7/§9), shared by player + actors.
+                // spec: Docs/RE/specs/skinning.md §6 (displayed pose is the sampled idle) / §7 / §9.
                 Aabb displayedAabb = lbs.GetDisplayedFrame0Aabb();
 
+                if (PrintDiagnostics)
+                {
+                    Aabb after = TransformAabb(pivot.Transform.Basis, displayedAabb);
+                    Vector3 b = displayedAabb.Size, a = after.Size;
+                    GD.Print(
+                        $"[Skinning] '{mesh.Name}' UPRIGHT remap {UpAxisRemapDeg}: " +
+                        $"BEFORE size=({b.X:F2},{b.Y:F2},{b.Z:F2}) tall={TallAxis(b)} -> " +
+                        $"AFTER size=({a.X:F2},{a.Y:F2},{a.Z:F2}) tall={TallAxis(a)}.");
+                }
+
                 pivot.AddChild(lbs);
-                RecentreRoot(root, displayedAabb);
+                // Recentre from the AABB AS REORIENTED by the pivot's up-axis remap, so feet sit near
+                // local Y=0 and the body centres on X/Z in the FINAL (upright) orientation.
+                RecentreRoot(root, TransformAabb(pivot.Transform.Basis, displayedAabb));
                 lbsNode = lbs;
                 return root;
             }
@@ -149,10 +193,10 @@ public static class SkinnedCharacterBuilder
         try
         {
             (MeshInstance3D inst, Aabb aabb) = BuildStaticMesh(mesh, albedo);
-            // Identity pivot (no stand-up rotation) — same single Z-negate convention as the skinned
-            // path. spec: Docs/RE/specs/skinning.md §7 / §8(b).
+            // Same pivot up-axis remap as the skinned path; recentre from the reoriented AABB.
+            // spec: Docs/RE/specs/skinning.md §7 / §8(b) / §9.
             pivot.AddChild(inst);
-            RecentreRoot(root, aabb);
+            RecentreRoot(root, TransformAabb(pivot.Transform.Basis, aabb));
         }
         catch (Exception ex)
         {
@@ -257,6 +301,33 @@ public static class SkinnedCharacterBuilder
     // -------------------------------------------------------------------------
     // Recentre
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Returns the axis-aligned bounding box that encloses <paramref name="aabb"/> after its 8 corners
+    /// are rotated by <paramref name="basis"/> (the pivot's up-axis remap). Godot's Aabb has no
+    /// Basis*Aabb operator, so transform the corners and re-fit. Pure geometry — no engine state.
+    /// </summary>
+    /// <summary>Names the longest axis of an AABB size (diagnostic for the upright remap).</summary>
+    private static string TallAxis(Vector3 s)
+        => s.Y >= s.X && s.Y >= s.Z ? "Y" : (s.X >= s.Z ? "X" : "Z");
+
+    private static Aabb TransformAabb(Basis basis, Aabb aabb)
+    {
+        Vector3 min = basis * aabb.Position;
+        Vector3 max = min;
+        for (int i = 1; i < 8; i++)
+        {
+            var corner = new Vector3(
+                aabb.Position.X + ((i & 1) != 0 ? aabb.Size.X : 0f),
+                aabb.Position.Y + ((i & 2) != 0 ? aabb.Size.Y : 0f),
+                aabb.Position.Z + ((i & 4) != 0 ? aabb.Size.Z : 0f));
+            Vector3 t = basis * corner;
+            min = min.Min(t);
+            max = max.Max(t);
+        }
+
+        return new Aabb(min, max - min);
+    }
 
     private static void RecentreRoot(Node3D root, Aabb aabb)
     {

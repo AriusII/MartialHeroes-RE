@@ -47,6 +47,7 @@
 using Godot;
 using MartialHeroes.Assets.Parsers;
 using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Dev;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -372,6 +373,99 @@ public sealed partial class NpcRenderer : Node3D
 
         // One mob AABB sanity line so headless runs can confirm "plausible, not exploded".
         // spec: MISSION VERIFY — "print one mob AABB sanity line".
+        PrintMobAabbSanity();
+    }
+
+    /// <summary>
+    /// Composer-driven actor placement path (CYCLE 2 Phase 2-A.5).
+    ///
+    /// Places actors from the area's pre-composed <see cref="AreaSpawnDescriptor"/> list (sourced
+    /// from <c>AreaAssembledEvent.Spawns</c>) instead of re-reading the raw <c>.arr</c> files.
+    /// Shares all of the same internal machinery as <see cref="PopulateFromArea"/> (actormotion lookup,
+    /// skin-class map, <see cref="TryBuildFromMobId"/>, pending-snap Y-defer).
+    ///
+    /// Must be called on the Godot main thread. The <paramref name="assets"/> handle must be the same
+    /// live handle used by the rest of the renderer (for skin loading).
+    ///
+    /// spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — spawns reach layer-05 via AreaAssembledEvent).
+    /// spec: Docs/RE/formats/npc_spawns.md (world_x @4, world_z @8, facing → yaw=π/2−value: already applied).
+    /// spec: Helpers/WorldCoordinates.cs — ToGodot: (x,y,z) → (x,y,−z): CONFIRMED.
+    /// </summary>
+    /// <param name="assets">Open VFS assets handle — shared with the rest of the renderer.</param>
+    /// <param name="spawns">
+    /// Pre-composed spawn list from <c>AreaAssembledEvent.Spawns</c>. Faithfully empty for area 0
+    /// or when no <c>.arr</c> data was present — never synthesised.
+    /// </param>
+    public void PopulateFromSpawns(
+        RealClientAssets assets,
+        IReadOnlyList<AreaSpawnDescriptor> spawns)
+    {
+        // Remove previously spawned children and reset tracking state.
+        ClearChildren();
+        _pendingSnaps.Clear();
+        _skinnedActors.Clear();
+        Array.Clear(_bucketAccum);
+        _tickCursor = 0;
+        _totalSpawned = 0;
+        _totalGrounded = 0;
+        _totalSkinned = 0;
+        _totalStaticFallback = 0;
+
+        if (spawns.Count == 0)
+        {
+            GD.Print("[NpcRenderer][Composer] spawn list empty (area has no .arr spawns or area 0).");
+            return;
+        }
+
+        // Ensure the shared lookup tables are built (lazy, per-assets-instance).
+        EnsureActorMotionLoaded(assets);
+        EnsureSkinClassMapLoaded(assets);
+
+        int spawned = 0;
+
+        foreach (AreaSpawnDescriptor desc in spawns)
+        {
+            if (spawned >= MaxSpawns) break;
+
+            // VisualId maps to MobId in the actormotion/skin chain.
+            // spec: assembly_graph.md §4 — VisualId is the mob_id / NPC template id.
+            int visualId = desc.VisualId;
+            if (visualId == 0) continue;
+
+            // Reuse TryBuildFromMobId (the actormotion→skin chain), identical to PopulateFromArea.
+            // For NPCs (desc.IsNpc true) we also try the direct-skin probe as fallback.
+            Node3D? node = TryBuildFromMobId(assets, (ushort)visualId);
+            if (node is null && desc.IsNpc)
+                node = TryBuildDirectSkinProbe(assets, (ushort)visualId);
+            if (node is null) continue;
+
+            // Place at Godot (worldX, groundY, -worldZ).
+            // spec: Helpers/WorldCoordinates.cs — ToGodot: (x,y,z) → (x,y,-z). CONFIRMED.
+            // spec: Docs/RE/formats/npc_spawns.md — world_x @4, world_z @8. CONFIRMED.
+            float gy = ResolveGroundY(desc.WorldX, desc.WorldZ);
+            node.Position = new Vector3(desc.WorldX, gy, -desc.WorldZ);
+            // Yaw from AreaSpawnDescriptor already has π/2 − rawFacing applied by AreaComposer.
+            // spec: Docs/RE/formats/npc_spawns.md §facing — "runtime applies π/2 − value". CONFIRMED.
+            node.Rotation = new Vector3(0f, desc.Yaw, 0f);
+            node.Scale = Vector3.One * CharacterScale;
+            string kind = desc.IsNpc ? "Npc" : "Mob";
+            node.Name = $"{kind}_{visualId}_{spawned}";
+            AddChild(node);
+            spawned++;
+
+            // Register for deferred Y-correction once the cell's heightmap loads.
+            // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024: CONFIRMED.
+            RegisterPendingSnap(node, desc.WorldX, desc.WorldZ);
+        }
+
+        _totalSpawned = spawned;
+
+        GD.Print($"[NpcRenderer][Composer] PopulateFromSpawns summary: {_totalSkinned} skinned / " +
+                 $"{_totalStaticFallback} static-fallback / {_totalGrounded} grounded " +
+                 $"({spawned} spawned from {spawns.Count} composer descriptors, cap={MaxSpawns}, " +
+                 $"{_pendingSnaps.Count} pending terrain arrival). " +
+                 "spec: assembly_graph.md §1 (Phase A — spawns from AreaAssembledEvent).");
+
         PrintMobAabbSanity();
     }
 

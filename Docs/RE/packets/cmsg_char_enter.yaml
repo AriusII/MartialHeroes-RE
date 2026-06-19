@@ -17,7 +17,7 @@ opcode: 0x10009           # major 1, minor 9 -> (1 << 16) | 9
 direction: C2S
 size: 40                  # fixed 40-byte (0x28) payload
 spec: packets/cmsg_char_enter.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

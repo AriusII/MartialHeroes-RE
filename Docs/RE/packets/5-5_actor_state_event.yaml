@@ -1,0 +1,33 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-5).
+# size: 32 bytes (0x20) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorStateEvent
+opcode: 0x50005           # major 5 (Push), minor 5 -> (5 << 16) | 5
+direction: S2C
+size: 32                  # fixed 32-byte payload (0x20)
+spec: packets/5-5_actor_state_event.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor state event. Triggers visual effects, custom name updates, stance changes,
+  and 3D audio cues for the target actor.
+
+fields:
+  - { name: TargetSort, type: u32, offset: 0 }      # target actor sort key
+  - { name: TargetId, type: u32, offset: 4 }        # target actor ID
+  - { name: ActorId, type: u32, offset: 8 }         # event source/actor ID
+  - { name: Name, type: "char[20]", offset: 12 }    # target custom title or name string (CP949)
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the actor corresponding to ActorId.
+    - If the actor's state code (derived client-side) falls into special ranges, it spawns specific
+      visual effects (e.g. effect 350000026 or 350000021) and plays positional 3D sound effects
+      (e.g. 800000007 or 800000009).
+    - If the actor stance type is 1011, updates local player interface vitals and UI message bars.
+    - If the actor stance type is 1020, copies Name into the target's overlay name field.
+    - If the actor stance type is 1021, overrides the target's visual motion ID and applies the update.

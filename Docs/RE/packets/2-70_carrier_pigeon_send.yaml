@@ -1,51 +1,86 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: the body SIZE (132 bytes) is control-flow CONFIRMED from the send builder;
-# the intra-buffer field offsets are NOT pinned this lane. capture_verified: false.
+# Source spec: c2s_market_mail.md §3 (carrier-pigeon SEND, layout DERIVED from the compose-buffer
+# validator). Role: client carrier-pigeon (mail) SEND -- a fixed 132-byte compose body.
 #
-# NEW opcode (HUD-II Wave 2): carrier-pigeon mail SEND, not previously catalogued.
+# CAPTURE-UNVERIFIED: the body SIZE (132 bytes) is control-flow CONFIRMED from the send builder
+# (a fixed 0x84-byte blit of the compose buffer). The intra-buffer layout below is DERIVED from the
+# client's own compose-buffer validator: the first 48 bytes are HIGH confidence; the ~84-byte message
+# tail boundary is INFERRED. capture_verified: false.
 
 name: CmsgCarrierPigeonSend
 opcode: 0x20046           # major 2 (GameAction), minor 70 -> (2 << 16) | 70
 direction: C2S
-size: 132                 # FIXED 132-byte (0x84) body, staged in a client buffer before send
+size: 132                 # FIXED 132-byte (0x84) body, staged in the mail-compose window before send
 spec: packets/2-70_carrier_pigeon_send.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
-summary: Client carrier-pigeon mail SEND. A send-only message carrying a 132-byte fixed body composed by the mail send panel -- a CP949 recipient name (max 16 chars), the subject/message text region, an attached-item record array (up to 5 staged item records), and a money/postage field. Emitted from the send-confirm dialog's accept path. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+summary: >
+  Client carrier-pigeon mail SEND. A send-only message carrying a 132-byte fixed body composed by the
+  mail send panel: a send-mode byte, a CP949 recipient name (17-byte cell), a 64-bit attached-money
+  value, an attached-item handle array (up to 5 slots), and the message body text region. Emitted from
+  the send-confirm accept path. Major 2 is C2S-only, so there is no inbound dispatch slot for this
+  opcode by design.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 132.
-# CONTROL-FLOW CONFIRMED: the send builder appends a fixed 132-byte body. The INTRA-BUFFER offsets
-# (where recipient / subject / body / item array / money sit inside the 132 bytes) are NOT pinned
-# this lane. The body is therefore modelled as a single fixed 132-byte blob so the wire SIZE is exact
-# without inventing offsets; the engineer must NOT assume internal offsets until a capture pins them.
+# DERIVED from the compose-buffer validator. The first 48 bytes (mode + recipient + pad + money +
+# item array) are HIGH confidence; the message tail boundary @0x48 is INFERRED.
 fields:
-  - { name: Body, type: bytes[132] }   # 0x00  the full 132-byte fixed mail-compose buffer (internal layout capture-pending)
+  - { name: SendMode,    type: u8 }            # 0x00  send-mode / category selector (values 0/1/4 observed) [confirmed]
+  - { name: Recipient,   type: "bytes[17]" }   # 0x01  CP949 recipient name, NUL-padded in a 17-byte cell [confirmed]
+  - { name: Pad12,       type: "bytes[2]" }    # 0x12  alignment gap before the money value [inferred]
+  - { name: MoneyLow,    type: u32 }           # 0x14  attached money -- low dword of the 64-bit value [confirmed]
+  - { name: MoneyHigh,   type: u32 }           # 0x18  attached money -- high dword of the 64-bit value [confirmed]
+  - { name: ItemHandles, type: "u32[5]" }      # 0x1C  5 attached-item slot handles; entry == -1 means empty [confirmed]
+  - { name: MessageBody, type: "bytes[84]" }   # 0x48  CP949 message body text region, NUL-terminated [INFERRED tail]
 
 notes: |
-  CONTROL-FLOW CONFIRMED body size (132 bytes / 0x84); the intra-buffer field offsets are
-  capture/debugger-pending. The send is emitted from the mail compose panel's send-confirm accept
-  path. The 132-byte buffer is staged across the compose panel before send.
+  CONTROL-FLOW CONFIRMED body size (132 bytes / 0x84): the send builder blits the entire 132-byte
+  compose buffer verbatim. The intra-buffer field layout is DERIVED from the client's own compose-buffer
+  validator -- the first 48 bytes are HIGH confidence; the message tail boundary at 0x48 is INFERRED.
 
-  KNOWN CONTENTS (from the compose panel and a debug format string), but their byte OFFSETS inside
-  the 132-byte buffer are NOT pinned this lane:
-    - a CP949 recipient name, max 16 characters;
-    - the subject / message body text region (the body textbox allows up to 199 characters);
-    - an attached-item record array (the panel stages up to 5 item records);
-    - a money / postage field (the send is gated client-side by a 200000-gold postage requirement).
+  FIELD NOTES:
+    0x00 (1B)   SendMode    : the send-mode / category selector. The validator branches on values
+                              0, 1, and 4 (different attachment / cost rules). [confirmed offset+role;
+                              full enum capture/debugger-pending]
+                                - mode 0/1: a non-empty recipient is required, and at least one of the
+                                  five item handles must be present OR money attached;
+                                - mode 4: an attachment-less variant (the money fields are zeroed).
+    0x01 (17B)  Recipient   : the recipient name, CP949-encoded, NUL-padded inside a 17-byte cell
+                              (the standard short-name convention). The validator does a length-bounded
+                              name compare and requires a non-empty name. NUL is inside the 17-byte
+                              width. [confirmed]
+    0x12 (2B)   Pad12       : a 2-byte alignment gap so the money value starts dword-aligned at 0x14.
+                              [inferred]
+    0x14 (4B)   MoneyLow    : the attached money, low dword. The validator forms a 64-bit value from
+                              the 0x14 / 0x18 pair and checks it against the player money cap. [confirmed]
+    0x18 (4B)   MoneyHigh   : the attached money, high dword. [confirmed]
+    0x1C (20B)  ItemHandles : five attached-item slot handles (u32 each). The validator loops the five
+                              entries testing each for the empty sentinel -1 ("any attachment present?").
+                              Each entry is an item / inventory slot reference; -1 = empty slot. [confirmed]
+    0x48 (84B)  MessageBody : the letter body text region, CP949, NUL-terminated. The boundary at 0x48
+                              is DERIVED from the validated header span (132 - 48 = 84 bytes). The body
+                              textbox accepts up to ~199 characters in the panel, but the on-wire region
+                              is the fixed 84-byte tail. Whether the tail further splits into a subject
+                              cell plus a body cell is [INFERRED] -- capture/debugger-pending.
 
-  The intra-buffer split is the only honest residual: the staging is scattered across the panel, so a
-  debugger read of the assembled 132-byte frame (or a capture) is the clean way to pin the recipient /
-  subject / body / item-array / money offsets. Until then this spec models the confirmed wire SIZE as
-  one fixed blob and lists the contents without fabricating offsets.
+  CP949: the recipient is the standard 17-byte NUL-padded short-name cell; the message body is a
+  fixed-width CP949 region with the NUL inside the declared width (decode as a fixed [InlineArray]
+  blob, trim at the first NUL, then decode CP949 -- never a managed string on the wire).
+  spec: Docs/RE/_dirty/netcode/cp949_text_fields.md (recipient 17 + body ~84, tail boundary inferred).
+
+  CLIENT-SIDE SEND GATE (informational, not wire fields): a non-empty recipient name is required; the
+  total of the player's funds plus the attached money must not exceed the money cap; the send is gated
+  by a postage requirement. Mode 4 zeroes the money fields. Standard modal-busy guards apply before send.
 
   RELATIONSHIP: part of the mail / carrier-pigeon family. Mail-arrival notification rides S2C 1/20
   SmsgSrvLetterReceived. The LetterPanel request is C2S 2/60 CmsgLetterRequest
   (packets/2-60_letter_request.yaml); the delivery-box claim is C2S 2/71 CmsgDeliveryClaim
   (packets/2-71_delivery_claim.yaml).
 
-  RESIDUAL: the S2C mailbox-list and delivery-box POPULATE opcodes + record layouts are NOT yet
-  pinned (debugger/capture-pending).
+  RESIDUAL: the S2C mailbox-list and delivery-box POPULATE opcodes + record layouts are NOT yet pinned
+  (debugger/capture-pending). The exact subject-vs-body split inside the 84-byte tail is INFERRED.
 
-  UNBLOCKS: the Client.Application mail-send use-case can wire the opcode and the fixed 132-byte frame
-  length; the internal field decode must wait on a capture.
+  UNBLOCKS: the Client.Application mail-send use-case can wire the opcode, the fixed 132-byte frame
+  length, and the validator-derived header (mode / recipient / money / item array). The message-tail
+  split should be confirmed against a capture before relying on a subject field.

@@ -1,0 +1,45 @@
+# spec: Docs/RE/packets/2-58_priced_commit.yaml
+# Role: C2S priced HUD commit on a slot (amount x unit-price vs gold affordability check).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgPricedCommit
+opcode: 0x2003a           # major 2 (GameAction), minor 58 -> (2 << 16) | 58
+direction: C2S
+size: 24                  # fixed 24-byte body
+spec: packets/2-58_priced_commit.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Priced HUD purchase/commit on a slot. The sender first runs an affordability check (amount x unit-price vs the player's gold) using a slot-indexed unit-price table, then blits a 24-byte record. Sibling of the 16/32-byte HUD record submits (2/50, 2/55) in the same panel cluster — this one is the priced variant.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 24.
+fields:
+  - { name: Header,    type: "u8[4]" }   # 0x00  opaque header [capture/debugger-pending]
+  - { name: SlotIndex, type: u8 }        # 0x04  indexes a slot table to fetch a unit price [capture/debugger-pending]
+  - { name: Pad0,      type: "u8[3]" }   # 0x05  alignment gap
+  - { name: Amount,    type: u32 }       # 0x08  amount; multiplied by unit price for affordability [capture/debugger-pending]
+  - { name: RecordTail, type: "u8[12]" } # 0x0c  opaque 12-byte record tail [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 24-byte blit of a caller-staged record); two
+  fields are anchored by the affordability check; the remainder is opaque (capture-pending).
+
+    0x00 (4B)  Header     : opaque header bytes. [capture/debugger-pending]
+    0x04 (1B)  SlotIndex  : indexes a 48-byte-stride slot table (offset by a fixed base) to fetch
+                            a unit price for the affordability check. [capture/debugger-pending]
+    0x05 (3B)  Pad0       : alignment gap before Amount.
+    0x08 (4B)  Amount     : the quantity; multiplied by the slot's unit price and compared to the
+                            player's gold before the send. [capture/debugger-pending]
+    0x0c (12B) RecordTail : opaque 12-byte tail. [capture/debugger-pending]
+
+  TRIGGER: a HUD list action with an up-front gold-affordability check (Amount x unit-price vs player
+  gold). Same caller cluster as the 16/32-byte HUD record submits (2/50, 2/55); 2/58 is the priced
+  variant.
+
+  UNKNOWNS to resolve with a capture:
+    - the Header and RecordTail field breakdown;
+    - the exact slot-table base for the unit price;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application priced HUD commit use-case.

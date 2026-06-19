@@ -1,0 +1,27 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-126).
+# size: 12 bytes (0x0C) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorStanceSet
+opcode: 0x5007e           # major 5 (Push), minor 126 -> (5 << 16) | 126
+direction: S2C
+size: 12                  # fixed 12-byte payload (0x0C)
+spec: packets/5-126_actor_stance_set.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor combat/movement stance set. Updates the active stance/mode of the target actor.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: Stance, type: u8, offset: 8 }           # stance / combat pose byte index
+  - { name: Padding, type: "u8[3]", offset: 9 }     # alignment padding to 12 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the actor via (ActorSort, ActorId).
+    - Writes the Stance byte to actor structure offset 150.

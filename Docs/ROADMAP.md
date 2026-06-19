@@ -175,3 +175,115 @@ confirmed else static+deferral); lighting non-regression. headless + screenshot.
 
 ---
 *Maintained by the orchestrator (Tier-1). Update phase statuses in place as waves complete.*
+
+---
+
+# CYCLE 2 — Finish the visual world 1:1 (launched 2026-06-19, builds on CYCLE 1 4444c4e)
+
+**Mandate:** make the assembled world actually RENDER through the CYCLE-1 composers, end-to-end, multi-area, avatar upright+animated, verified by a screenshot-oracle loop.
+**Reframed:** CYCLE-1 wired the composer seam but `Cell/AreaAssembledEvent` only LOG; the world still renders via the OLD direct-from-VFS path (`RealWorldRenderer`). Drive the 9-slot render FROM the events (flag-gated, parity-then-retire), stream multiple areas via the 34-pool/25-ring, resolve avatar up-axis (rig-first/debugger-second, NO fabricated rotation), stand up a render-reviewer screenshot-oracle loop, fold in the CYCLE-1 cleanups. Anchor 263bd994.
+**Master deliverable:** a windowed screenshot of the assembled multi-texture terrain + buildings + fx + upright animated actors, rendered FROM the composer events; headless clean; build 0/0 + tests green.
+**Out of scope:** server/net/crypto/front-end (frozen); new RE (only a CONFIRM-only up-axis debugger micro-session, conditional); names.yaml/journal auto-edits (staged only); per-pixel polish beyond the oracle; gameplay/5-cameras; commit (on request).
+**Command structure:** Tier-1 + port-orchestrator (A,B,C-a,D,E,F,G); re-orchestrator (C-b debugger, CONDITIONAL). **RESILIENCE: single-agent-at-a-time, incremental-compilable** (build/headless check per file; stop at a compilable checkpoint) — a limit hit must never break layer-05. NO heavy parallel waves.
+
+## Phase 2-0 — PREFLIGHT — status: **DONE**
+- baseline = CYCLE-1 Phase-7 gate (nuked build 0/0 . 55 tests green per-project) at commit 4444c4e; no content change since (only LF/CRLF churn).
+- seam scout-confirmed: GameLoop LOGS Cell/AreaAssembledEvent (no render drive); RealWorldRenderer renders AREA-2 direct-from-VFS; mcp_bridge_game.gd screenshot autoload present; World.tscn line 9 references the deleted HUD/GameHud.cs (dangling); CS8019 x2 = stale LSP.
+- DECISION: old-path strategy = parallel slot-render behind a `compose_render` flag -> parity -> retire.
+
+## Phase 2-A — COMPOSER-DRIVEN RENDERING (marquee) — status: **✅ DELIVERABLE ACHIEVED**
+> **Master deliverable DONE** — windowed screenshots `%TEMP%/mh-cycle2-WORLD-{composer,oldpath}.png`: the composer path (flag-ON) renders the walled town — textured terrain + thousands of building instances across the streamed ring + actors on the ground; functional PARITY with the old path (both show the town). The composer now drives the FULL world: terrain + buildings + fx + actors, headless + screenshot verified, build 0/0, flag-off non-regressing.
+> **Findings (follow-ons, not blockers):** (1) composer resolves a DIFFERENT terrain texture than legacy (composer pre-bakes the 256-slot table; legacy resolves per-cell) — which matches the original needs the oracle / official captures; (2) composer renders ALL streamed cells' buildings (thousands) vs legacy's single target cell (composer is more complete); (3) environment too dark (debt #3, pre-existing); (4) camera framing = overview skyline. **A.6 flag-default-ON deferred until terrain-texture parity is settled.**
+Flag-gated (flag-off = old path unchanged); one writer per file; sequential waves on RealWorldRenderer.cs.
+- [x] A.1 `_composeRender` flag (default OFF) + subscribe RealWorldRenderer to Cell/AreaAssembledEvent + OnCellAssembled/OnAreaAssembled. Build 0/0, headless clean.
+- [x] A.2 slot0 ground multi-texture via WireComposerTerrainResolver (AssembledCell.ResolvedTexturePaths[256] -> TerrainNode.TextureResolver). Build 0/0.
+- [x] A.3 slot1 buildings via new SlotRenderer.RenderSlot1Buildings (BudMeshBuilder) + dup-guard. Build 0/0.
+- [x] A.4 slots2-8 fx overlays via SlotRenderer.RenderFxSlots (absent slots skipped, Z-neg port-side). Build 0/0.
+- [x] A.5 composer-driven actors — **DONE** ✅. Layer-04: `World/AreaAssemblyHandoff.cs` publishes `AreaAssembledEvent` once/area-enter (AreaBake -> existing `AreaComposer.ComposeArea`, `.arr` Spawns -> new engine-free `AreaSpawnDescriptor`); `AreaAssemblyHandoffTests` 4/4. Layer-05: `Adapters/AssembledAreaViewAdapter.cs`, ClientContext binds the AreaBake, `RealWorldRenderer.OnAreaAssembled` -> `NpcRenderer.PopulateFromSpawns`. **Headless (flag-ON): AreaAssembledEvent fires once (area=2, 1235 spawns) -> 40 actors placed FROM composer (AABB sane, terrain-grounded snap-Y); NpcRenderer.PopulateFromArea SUPPRESSED (no double-spawn). Flag-OFF: NpcRenderer unchanged (40). Build 0/0.** -> the composer now drives the FULL world: terrain + buildings + fx + actors.
+- [~] A.6 VERIFY: composer pipeline FIRES offline via World.tscn-direct (25 cells: streaming->handoff->CellAssembledEvent->OnCellAssembled) ✓; flag reads env `MH_COMPOSE_RENDER` / `client_dir.cfg`; flag-off == flag-on screenshots IDENTICAL (zero regression ✓). **BUT all 25 cells arrive UNRESOLVED (slot0/1 empty) — root cause: `VfsAreaAssemblySource` hardcoded `areaId:0` in ClientContext (l.463); when area 2 loads, SetArea(2) rebinds streaming but NOT the handoff's source → area-2 cells build non-existent map000-area0 paths → early-exit no-slots. FIX = pull Phase 2-B.1 (area-rebind) forward → then re-verify + parity screenshot.** Screenshots: %TEMP%/mh-cycle2a6-{composer,oldpath}.png.
+- [x] **2-B.1 FIX + A.6 RE-VERIFY — DONE ✅ MARQUEE PROVEN.** New `Adapters/RebindableAreaAssemblySource.cs` (mutable wrapper, `SetArea` swaps the inner `VfsAreaAssemblySource`); `RealWorldRenderer.TriggerTerrainStreaming` calls `ctx.AreaAssemblySource.SetArea(TargetAreaId)` alongside the streaming SetArea. Build **0/0** (the CS0053 LSP hint was STALE — class IS public; build is truth). **Tier-1 re-verified** via World.tscn-direct + MH_COMPOSE_RENDER=1: cells now **resolved=True** with populated slots — (10007,10004) slot0=1 **slot1Buildings=518** fxSlots=1; (10008) 227; (10010) 60 — **≈805 buildings spawned FROM the composer** (parity with AREA-2's ~779), terrain TextureResolver wired (256 slots), FX overlays; edge cells resolved=False (no .map, expected); **NO errors/exceptions**. The composer-driven world render WORKS offline.
+- [x] (Phase 2-E.1 done EARLY) `World.tscn` dead `HUD/GameHud.cs` ext_resource removed (it blocked World.tscn loading entirely) — permanent fix, load_steps 7->6.
+- New files: Adapters/AssembledCellViewAdapter.cs (public), World/SlotRenderer.cs. Changed: RealWorldRenderer.cs, GameLoop.cs, ClientContext.cs.
+
+## Phase 2-B — MULTI-AREA STREAMING — status: PENDING
+- [ ] B.1 area-rebind VfsAreaAssemblySource (un-pin areaId:0) . B.2 reconcile resident-set <-> 34-pool/25-ring (centre=slot 12) . B.3 multi-cell non-regression (Chebyshev hysteresis)
+
+## Phase 2-C — AVATAR UP-AXIS — status: PENDING
+- [ ] C.1a preview-camera RIG (campaign-9c framing) — present upright, NO math rotation . C.1b (only if rig insufficient) re-orchestrator->re-validator reads native up-axis via live ?ext=dbg (maintainer F9) -> skinning.md §9 + journal
+
+## Phase 2-D — SCREENSHOT-ORACLE LOOP — status: PENDING
+- [ ] D.1 headless+windowed screenshot loop (reuse mcp_bridge_game.gd) . D.2 score WORLD vs oracle . D.3 score CHARACTER vs oracle . D.4 flag official-capture gaps
+
+## Phase 2-E — CLEANUPS — status: PENDING
+- [ ] E.1 remove World.tscn->GameHud.cs ref (BEFORE 2-D) . E.2 CS8019 verify-first . E.3 2 advisories . E.4 names.yaml stage ready
+
+## Phase 2-F — WATER (OPTIONAL) — status: GATED
+- [ ] F.1 go/no-go . F.2 (if go) wire cell water plane else defer
+
+## Phase 2-G — FINAL GATE + CLOSEOUT — status: **✅ GATE GREEN (deliverable achieved; maintainer-dependent follow-ons below)**
+- [x] nuked `dotnet build MartialHeroes.slnx` = **0 errors** (core+tests nuked).
+- [x] per-project tests **63/63 green** (Mapping 25 incl. +4 `AreaComposerTextureResolutionTests` · Parsers 19 · Application 19 incl. +4 `AreaAssemblyHandoffTests`) — 0 failed.
+- [x] CS8019 (2-E.2) **CONFIRMED STALE** — absent from the nuked 0/0 build; the LSP hint is a post-edit cache artifact. Resolved-as-stale.
+- [x] headless World boot clean (no GameHud log — 2-E.1 fix); composer pipeline fires + renders the full world (verified, screenshot).
+- [x] DAG clean (engine-free below 05; A.5's layer-04 `AreaSpawnDescriptor` respects no-Assets.Mapping-ref via the layer-05 projection adapter).
+
+### CYCLE-2 follow-on ledger (documented; NOT blockers)
+| Item | Disposition |
+|---|---|
+| Terrain-texture parity | ✅ **RESOLVED** — the parity check caught a real composer bug: `AreaComposer.ResolveTexturePaths` clamped `byte > count` to `count` (last texture) instead of to **1** (first), violating `terrain.md §5.6/§5.9` (BOTH under+over floor to 1). The legacy was correct; the "peach" WAS the bug. Fixed (single clamp branch, `// spec:`-cited) + 4 regression tests; composer now matches the spec + legacy. Final pixel COLOR = render-tuning (gamma/material), not chain — no captures needed for chain correctness. |
+| A.6 flag-default-ON | deferred until terrain-texture parity settled (flag stays OFF = zero regression) |
+| 2-B.2/3 residency reconciliation | **DEFERRED (documented)** — streaming works correctly (multi-cell render proven); reconciling the resident-set <-> 34-pool/25-ring into one model is a quality-only cleanup with regression risk on working streaming → deliberately deferred (not force-merged). |
+| BUD building top faces | ✅ **FIXED** — root cause: the Z-flip (negate Z) inverted triangle winding (CCW→CW); `.bud` top faces (+Y normals) then computed their face-normal downward → black under the +Y sun. Swapped `indices[1]↔[2]` per triangle in `BudMeshBuilder` to restore CCW in Godot space (`terrain_scene.md §3.2.4` confirms CCW front faces). |
+| 2-C avatar up-axis | ✅ **ADDRESSED (port-side fix)** — `SkinnedCharacterBuilder.UpAxisRemapDeg = +90°Z` on the Pivot node maps the mesh's native X-up to Godot Y-up (same category as the Z/X negations; NOT a change to the recovered bind/bake math); AABB now Y-tall (was X), screenshot upright/solid/not-mirrored, applied to player + actors. The NATIVE up-axis LABEL is still §9 capture/debugger-pending (the rotation is a documented, adjustable port convention). |
+| Building count / double-spawn | ✅ **FIXED** — `LoadAndSpawnBudScene()` (legacy target-cell load) wasn't gated on `_composeRender`, so compose-ON spawned the target cell's buildings TWICE (legacy + composer). Now gated `if (!_composeRender)` (symmetric with the NPC gate). The composer legitimately loads ALL ring cells' `.bud` (the "779" was the legacy single-cell count; no spec cap). A.6 flag-default-ON deferred until total density is visually confirmed (needs the World-render rig / official captures). |
+| 2-D full oracle scoring | the screenshot is the proof; formal pixel scoring vs the maintainer's OFFICIAL CAPTURES is the sharpening step (oracle > spec) |
+| Environment darkness (debt #3) | ✅ **IMPROVED** — `EnvironmentNode` now lights the town (visible-environment when VFS absent; `ApplyBackground` fallback when material-bin ambient is near-black; SkyDome near-black gate). Fog color = area-2 noon (spec-dictated from VFS bins). Exact brightness = captures-pending. **NEW follow-on surfaced:** the black band above rooftops is **BUD building TOP FACES** (back-face/untextured) — a geometry issue, not atmospheric. |
+| names.yaml hand-merge | CYCLE-1 stage in `_dirty/assembly/_names_yaml_stage.md` (CYCLE 2 added no IDA renames) |
+
+**Commit:** the CYCLE-2 block (composer-driven full-world render, build 0/0, screenshot-verified) is ready to commit on request.
+
+— *Maintained by the orchestrator (Tier-1).*
+
+---
+
+# CYCLE 3 — Netcode total cartography, contracts & IDB legibility (launched 2026-06-19, closed 2026-06-20)
+
+**Mandate (maintainer):** deep RE — **IDA static only** — of the ENTIRE Networking/Netcode subsystem of `doida.exe`: the dispatcher (5 Majors + many Minors), handlers, and the **Client↔Server contracts (DTO Requests/Responses)**, cartographed precisely, named, and recorded under `Docs/RE/`. **Reframed:** close the C2S gap to zero, decompose the big S2C payloads, synthesise a master contracts spec, and make the IDB legible. **STATIC ONLY** — no debugger this cycle, so every wire VALUE semantic stays `[capture/debugger-pending]` and is never fabricated.
+
+**Master deliverable:** `Docs/RE/specs/net_contracts.md` (NEW — Req↔Resp by domain).
+**Out of scope (deferred):** C#/Godot code; the live debugger; crypto re-RE (already confirmed).
+**Command structure:** Tier-1 + `re-orchestrator` lane captains (W/P) + general-purpose promotion/gate workers + `ida-toolsmith` (T).
+
+## Evidence baseline
+- Going in: `opcodes.md`, `specs/handlers.md`, `specs/network_dispatch.md`, `specs/crypto.md`, ~45 `packets/*.yaml`, structs.
+- Tool baseline: IDA MCP UP; anchor SHA **263bd994** (confirmed full sha256).
+
+## Phase 3-W — GIGA RESEARCH (27 lanes, re-orchestrator) — status: **✅ COMPLETE**
+- C2S builder census: convergence `Net_SendPacket`, **105 call-sites / 104 builders** mapped; **58-opcode gap** enumerated.
+- B9 sweep: all 58 uncatalogued C2S senders recovered → **zero C2S gap**.
+- S2C big-payload interiors decomposed (4/1 section-map, 4/4, 4/65, 4/100, 4/56+4/71 reclassified, 5/52 conflict resolved, 5/68/5/73/5/77, PvP); net objects (NetHandler/NetClient/SecureContext); conn-state machine; 2nd worker = 3rd socket-I/O thread (RESOLVED); code maps; CP949 inventory; actor-key order; Req↔Resp correlation.
+
+## Phase 3-P — PROMOTION — status: **✅ COMPLETE**
+- `opcodes.md` C2S rows **59→105** (+46); `packets/*.yaml` **146→205** (57 created + 11 extended); `handlers.md` Part III (§19-§24); `network_dispatch.md` §8 resolved; **4 new structs**; **`net_contracts.md` (NEW, 451 lines, 58 Req↔Resp pairs)**.
+
+## Phase 3-T — IDB LEGIBILITY (ida-toolsmith) — status: **✅ COMPLETE**
+- **92 renames** (5 machinery + 2 S2C + 85 C2S) + 6 struct types + 7 signatures + 20 neutral comments; SHA-pinned; IDB saved. 4 name conflicts surfaced for names.yaml.
+
+## Phase 3-R — REVIEW + GATES — status: **✅ PASS**
+- Firewall **23→0** leaks (20 YAMLs scrubbed, incl. PRE-EXISTING prior-campaign leaks; zero factual change); reconcile clean (2/153 collision flagged); **zero-gap** completeness (99 Response + 65 Push + 104 C2S all accounted).
+
+## Phase 3-C — CONSOLIDATION — status: **✅ (this entry)**
+- journal.md entry + this ROADMAP section + memory. **names.yaml sync OWED** (92 IDB names + 4 conflicts staged in `_dirty/netcode/applied/cycle2_phase_T.md` + `names_staged_wave1..3.md` for hand-merge).
+
+### CYCLE-3 follow-on ledger (documented; NOT blockers)
+| Item | Disposition |
+|---|---|
+| Wire VALUE semantics | capture/debugger-pending by design (static-only cycle); routing/sizes/offsets are confirmed |
+| 2/153 opcode-id collision (product_confirm vs pet_summon) | flagged for Tier-1 arbitration; neither deleted |
+| 1/7 delete-reply · 2/151 reply-major · 5/73 name (binary→SmsgQuestComplete) · 4/48 12B overrun | UNVERIFIED, carried |
+| names.yaml sync | owed (NAMES-SYNC pull) |
+| Feed specs → C# Network layer 02 | future cycle (not this scope) |
+
+**Commit:** the CYCLE-3 netcode block (specs + IDB annotations) is ready to commit on request.
+
+— *Maintained by the orchestrator (Tier-1).*

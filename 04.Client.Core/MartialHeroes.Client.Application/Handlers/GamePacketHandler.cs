@@ -523,7 +523,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgRenameCharResult: // 3/6 — rename result (19-byte block)
+            case Opcodes.SmsgRenameCharResult: // 3/6 — rename result (12-byte block)
                 if (payload.Length >= SmsgRenameCharResult.WireSize)
                 {
                     HandleRenameCharResult(payload);
@@ -1300,26 +1300,23 @@ public sealed class GamePacketHandler : IPacketHandler
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 3/6 — rename-character result. On success the 18-byte overlay holds the new CP949 character name
-    /// (decoded to a managed string at this boundary); on failure its first byte is an error code
-    /// (0xC8..0xD4). spec: Docs/RE/specs/login_flow.md §5.6; Docs/RE/packets/SmsgRenameCharResult.
+    /// 3/6 — rename-character result. A 12-byte block: result code, error code, padding, slot index, and an unverified dword.
+    /// spec: Docs/RE/packets/3-6_rename_char_result.yaml.
     /// </summary>
     private void HandleRenameCharResult(ReadOnlySpan<byte> payload)
     {
-        // Result @0x00: nonzero = success. The 18-byte NameOrError overlay starts at +1. spec: §5.6.
-        byte result = payload[0x00];
-        bool ok = result != 0;
-        ReadOnlySpan<byte> nameOrError = payload.Slice(0x01, SmsgRenameCharResult.WireSize - 1); // 18 bytes
+        var packet = MemoryMarshal.AsRef<SmsgRenameCharResult>(payload);
+        bool ok = packet.Result != 0;
 
         if (ok)
         {
-            // Success: the overlay is the new name as CP949 ASCIIZ (up to 18 bytes incl. NUL). spec: §5.6.
-            _eventBus.Publish(new CharRenameResultEvent(true, DecodeFixedText(nameOrError), ErrorCode: 0));
+            // The packet doesn't carry the name; the client updates via 3/4 refresh
+            _eventBus.Publish(new CharRenameResultEvent(true, string.Empty, ErrorCode: 0));
             return;
         }
 
-        // Failure: NameOrError[0] is the error code (0xC8..0xD4, mapped to a UI string). spec: §5.6.
-        _eventBus.Publish(new CharRenameResultEvent(false, string.Empty, nameOrError[0]));
+        // Failure: ErrorCode maps to a UI error string by the presentation.
+        _eventBus.Publish(new CharRenameResultEvent(false, string.Empty, packet.ErrorCode));
     }
 
     // -------------------------------------------------------------------------

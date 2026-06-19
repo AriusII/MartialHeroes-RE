@@ -186,7 +186,31 @@ public sealed partial class EnvironmentNode : Node3D
 
         if (assets is null)
         {
-            GD.Print("[Environment] No VFS — leaving default scene environment.");
+            // No VFS data — _environment is now a freshly-allocated empty Environment that replaced
+            // the .tscn sub-resource. Configure it with a sensible fallback so the scene is visible:
+            //   white ambient at full energy (matches the OPTION_BRIGHT=100 default floor),
+            //   neutral mid-grey sky (matching the .tscn background_color fallback),
+            //   linear tonemap (no original tonemap pass — spec: rendering.md §6),
+            //   directional light left as-is (already configured in World.tscn).
+            // Aesthetic: these values are engineering choices for a legible fallback, not spec-dictated.
+            if (_environment is not null)
+            {
+                _environment.BackgroundMode = global::Godot.Environment.BGMode.Color;
+                _environment.BackgroundColor = new Color(0.45f, 0.55f, 0.70f, 1f); // neutral sky — aesthetic
+                _environment.AmbientLightSource = global::Godot.Environment.AmbientSource.Color;
+                _environment.AmbientLightColor = Colors.White;
+                _environment.AmbientLightEnergy = 1.0f; // OPTION_BRIGHT=100 floor — spec: environment.md §6.2a
+                _environment.TonemapMode = global::Godot.Environment.ToneMapper.Linear;
+                _environment.TonemapExposure = 1.0f;
+                _environment.SsaoEnabled = false;
+                _environment.SsilEnabled = false;
+                _environment.SdfgiEnabled = false;
+                _environment.GlowEnabled = false;
+                _environment.FogEnabled = false;
+            }
+
+            GD.Print(
+                "[Environment] No VFS — applied visible fallback environment (white ambient 1.0, neutral sky, linear tonemap).");
             return;
         }
 
@@ -206,6 +230,17 @@ public sealed partial class EnvironmentNode : Node3D
         // Seed at noon and apply once immediately so the first rendered frame is daylight.
         _clockMs = NoonKeyframe * KeyframeMs;
         _appliedKeyframe = -1;
+
+        // MH_ENV_FREEZE=1 → freeze the cycle at noon (for screenshot captures / dev inspection).
+        // Aesthetic / dev utility: not spec-dictated. The original always runs the day/night cycle.
+        string? freezeEnv = System.Environment.GetEnvironmentVariable("MH_ENV_FREEZE");
+        if (freezeEnv is "1" or "true")
+        {
+            CycleEnabled = false;
+            GD.Print(
+                "[Environment] MH_ENV_FREEZE=1 — day/night cycle frozen at noon (keyframe 24). Aesthetic/dev mode.");
+        }
+
         ApplyKeyframe(NoonKeyframe, 0f);
 
         PrintSummary(NoonKeyframe);
@@ -311,6 +346,17 @@ public sealed partial class EnvironmentNode : Node3D
     /// <summary>
     /// Background colour: noon sky-ambient tint from material{id}.bin when present, else a fog-tinted
     /// neutral sky. spec: environment.md §6.1 — Sky colour from material ambient_sky_color [29..32].
+    ///
+    /// Legibility note: when the spec-dictated ambient_sky_color [29..32] is very dark (near black —
+    /// observed in area 2 keyframe 24 where those material floats are zero), the raw value yields a
+    /// black sky patch that reads as a render defect. In that case we fall through to the sky_haze
+    /// tint [0..3] which is the other primary sky descriptor in the material table, then to the fog
+    /// colour, then to the neutral fallback.
+    /// This luminance gate is a PORT-SIDE AESTHETIC DECISION (not spec-dictated). The luminance
+    /// threshold (0.025) and the fallback chain are engineering choices for a readable world view;
+    /// they are declared aesthetic. When the official captures become available, calibrate against them.
+    /// spec: environment_bins.md §3.2 — ambient_sky_color at [29..32]; sky_haze at [0..3].
+    /// spec: environment.md §7 — fallback when data absent.
     /// </summary>
     private void ApplyBackground(global::Godot.Environment env, int kf, int kfNext, float frac)
     {
@@ -323,19 +369,63 @@ public sealed partial class EnvironmentNode : Node3D
             // Material colours are float32 RGBA (may exceed 1.0 — HDR; clamp). spec: environment.md §6.2.
             Color a = MaterialSkyColor(mat.ColorTable[kf]);
             Color b = MaterialSkyColor(mat.ColorTable[kfNext]);
-            env.BackgroundColor = a.Lerp(b, frac);
-            return;
+            Color skyColor = a.Lerp(b, frac);
+
+            // Legibility gate — PORT-SIDE AESTHETIC: if the spec-dictated ambient_sky_color is near-black
+            // (observed in real area-2 material bins where indices [29..32] are effectively zero), fall
+            // through to the sky_haze [0..3] descriptor which tends to carry a visible tint.
+            // Threshold 0.025 ≈ "below 2.5% luminance" — empirically chosen; declared aesthetic.
+            // When official captures are available, remove/calibrate this gate.
+            float lum = 0.2126f * skyColor.R + 0.7152f * skyColor.G + 0.0722f * skyColor.B;
+            if (lum >= 0.025f)
+            {
+                env.BackgroundColor = skyColor;
+                return;
+            }
+
+            // Fallback to sky_haze [0..3] when ambient_sky_color is too dark.
+            // spec: environment_bins.md §3.2 — sky_haze RGBA at indices [0..3].
+            // Aesthetic: prefer a visible tint from the same material bin over a hard-coded constant.
+            Color hazeA = SkyHazeColor(mat.ColorTable[kf]);
+            Color hazeB = SkyHazeColor(mat.ColorTable[kfNext]);
+            Color hazeColor = hazeA.Lerp(hazeB, frac);
+            float hazeLum = 0.2126f * hazeColor.R + 0.7152f * hazeColor.G + 0.0722f * hazeColor.B;
+            if (hazeLum >= 0.025f)
+            {
+                // Attenuate haze slightly so it reads as sky, not harsh. Aesthetic multiplier: 0.6.
+                env.BackgroundColor = new Color(hazeColor.R * 0.6f, hazeColor.G * 0.6f, hazeColor.B * 0.6f, 1f);
+                return;
+            }
+
+            // Both material colours are near-black → fall through.
         }
 
-        // No material → derive a muted sky from the fog colour (keeps the horizon coherent).
+        // No material or both material colours near-black → derive a muted sky from the fog colour
+        // (keeps the horizon coherent with the fog-saturated terrain).
+        // Aesthetic: attenuate the fog colour slightly for the sky so it reads brighter/lighter
+        // than the fog-blanketed ground plane. Declared aesthetic — not spec-dictated.
         if (_env?.Fog is { } fog)
         {
-            env.BackgroundColor = LerpFogColor(fog, kf, kfNext, frac);
-            return;
+            Color fogColor = LerpFogColor(fog, kf, kfNext, frac);
+            float fogLum = 0.2126f * fogColor.R + 0.7152f * fogColor.G + 0.0722f * fogColor.B;
+            if (fogLum >= 0.025f)
+            {
+                // Brighten slightly: fog-as-sky should read lighter than fog-on-terrain. Aesthetic multiplier.
+                env.BackgroundColor = new Color(
+                    Math.Min(fogColor.R * 1.3f, 1f),
+                    Math.Min(fogColor.G * 1.3f, 1f),
+                    Math.Min(fogColor.B * 1.3f, 1f),
+                    1f);
+                return;
+            }
         }
 
-        // spec: Docs/RE/specs/environment.md §7 — no data → neutral grey sky.
-        env.BackgroundColor = new Color(0.45f, 0.55f, 0.70f, 1f);
+        // Last resort: all data-driven colours are near-black (e.g. night-time keyframe or absent bins).
+        // Use a neutral daytime blue-grey sky so the world always reads as inhabitable.
+        // Aesthetic: this is a port-side choice for world legibility. Not spec-dictated.
+        // The original client's sky in darkness conditions is not known without the official captures.
+        // Calibrate against captures when available.
+        env.BackgroundColor = new Color(0.45f, 0.55f, 0.70f, 1f); // neutral sky — aesthetic
     }
 
     private void ApplyFog(global::Godot.Environment env, int kf, int kfNext, float frac)
@@ -651,6 +741,18 @@ public sealed partial class EnvironmentNode : Node3D
         // spec: environment_bins.md §3.2 — ambient_sky_color RGBA at indices [29..32].
         // spec: environment.md §6.2 — material colours are float RGBA; clamp >1 to non-HDR.
         return ClampColor(new Color(SafeF(row, 29), SafeF(row, 30), SafeF(row, 31), 1f));
+    }
+
+    /// <summary>
+    /// material sky_haze [0..3] (RGBA f32) → clamped Godot Color.
+    /// Used as a legibility fallback when ambient_sky_color [29..32] is near-black.
+    /// spec: environment_bins.md §3.2 — sky_haze RGBA at indices [0..3].
+    /// Aesthetic: this fallback path is a port-side legibility choice (not spec-dictated behaviour).
+    /// </summary>
+    private static Color SkyHazeColor(float[] row)
+    {
+        // spec: environment_bins.md §3.2 — sky_haze RGBA at indices [0..3].
+        return ClampColor(new Color(SafeF(row, 0), SafeF(row, 1), SafeF(row, 2), 1f));
     }
 
     /// <summary>Fog colour for fractional position between kf and kfNext (BGRA → RGB).</summary>
