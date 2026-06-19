@@ -3,6 +3,36 @@ namespace MartialHeroes.Assets.Parsers.Models;
 // spec: Docs/RE/formats/bgtexture_lst.md §Enumerations
 
 /// <summary>
+/// Loader dispatch bucket derived from the <c>bgtexture.lst</c> <c>kind</c> byte.
+/// The loader makes a SINGLE binary branch: <c>kind == 0x01</c> → static render-object;
+/// <c>kind != 0x01</c> → scroll/animated render-object. The six-value <see cref="BgTextureKind"/>
+/// enum is data-only (no per-value jump table in the loader).
+/// </summary>
+/// <remarks>
+/// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind byte gates a single binary branch:
+///   ==0x01 STATIC render-object, !=0x01 NON-STATIC (scroll/animated)". CODE-CONFIRMED, CYCLE 1.
+/// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "the 6-value enum is DATA-ONLY and is
+///   never re-branched in the loader (CONFIRMED, CYCLE 1)". Every pool entry joins the shared texture
+///   scheduler pool regardless of kind.
+/// </remarks>
+public enum BgTextureRenderBucket
+{
+    /// <summary>
+    /// <c>kind == 0x01</c> — STATIC render-object type (plain static ground-texture object,
+    /// the default and majority).
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind==0x01 wires the STATIC render-object type".
+    /// </summary>
+    Static,   // spec: bgtexture_lst.md §Enumerations — kind==0x01: STATIC render-object. CODE-CONFIRMED CYCLE 1.
+
+    /// <summary>
+    /// <c>kind != 0x01</c> — NON-STATIC (scroll / animated) render-object type.
+    /// Covers all other kind values (0x02, 0x0A, 0x0B, 0x0C, 0x14, …).
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind!=0x01 wires the NON-STATIC render-object type".
+    /// </summary>
+    ScrollAnimated, // spec: bgtexture_lst.md §Enumerations — kind!=0x01: NON-STATIC render-object. CODE-CONFIRMED CYCLE 1.
+}
+
+/// <summary>
 /// Material render-mode tag from the <c>bgtexture.lst</c> <c>kind</c> byte (record +0).
 /// </summary>
 /// <remarks>
@@ -99,6 +129,22 @@ public sealed class BgtextureLstRecord
     public required byte KindRaw { get; init; }
 
     /// <summary>
+    /// Loader dispatch bucket for this record: <see cref="BgTextureRenderBucket.Static"/> when
+    /// <see cref="KindRaw"/> == <c>0x01</c>; <see cref="BgTextureRenderBucket.ScrollAnimated"/> otherwise.
+    /// This is the actual binary branch the loader makes — the only pool-init dispatch.
+    /// The six-value <see cref="KindEnum"/> is data-only and is never re-branched in the loader.
+    /// Every entry joins the shared texture scheduler pool regardless of bucket.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind byte gates a single binary branch:
+    ///   ==0x01 STATIC render-object, !=0x01 NON-STATIC (scroll/animated)". CODE-CONFIRMED, CYCLE 1.
+    /// </remarks>
+    public BgTextureRenderBucket RenderBucket =>
+        KindRaw == 0x01 // spec: bgtexture_lst.md §Enumerations — ==0x01 STATIC, !=0x01 NON-STATIC. CODE-CONFIRMED CYCLE 1.
+            ? BgTextureRenderBucket.Static
+            : BgTextureRenderBucket.ScrollAnimated;
+
+    /// <summary>
     /// Decoded material render-mode tag for this record.
     /// Maps the raw kind byte to <see cref="BgTextureKind"/>; returns <see cref="BgTextureKind.Unknown"/>
     /// when the byte value is not in the six-value observed set.
@@ -108,6 +154,9 @@ public sealed class BgtextureLstRecord
     /// The earlier "animated vs. static flag" interpretation is SUPERSEDED — the byte is a
     /// render-mode selector with six distinct observed values, not a boolean.
     /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "earlier boolean reading is retired".
+    /// The 6-value enum is DATA-ONLY (no per-value loader branch/jump-table). Use <see cref="RenderBucket"/>
+    /// for the loader's actual dispatch; use this property only for data-side render-mode categorisation.
+    /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "6-value enum is DATA-ONLY, CYCLE 1 CONFIRMED".
     /// </remarks>
     public BgTextureKind KindEnum => KindRaw switch
     {

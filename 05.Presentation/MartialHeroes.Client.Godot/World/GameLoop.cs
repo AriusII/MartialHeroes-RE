@@ -598,11 +598,45 @@ public sealed partial class GameLoop : Node
 
             // ---- Terrain streaming ----
             case SectorLoadedEvent loaded:
+                // Primary path: drive TerrainNode heightmap for terrain geometry.
+                // spec: Docs/RE/formats/terrain.md §9 (cell streaming policy).
                 _terrainNode.OnSectorLoaded(loaded);
+
+                // Phase 6a: also route through CellAssemblyHandoff to compose the full cell
+                // (slots 0-8: .ted/.bud/.fx1-7) and publish CellAssembledEvent next-frame.
+                // The handoff is null when the terrain VFS is unavailable (offline mode).
+                // spec: Docs/RE/specs/assembly_graph.md §1/§4 — AreaComposer + CellAssemblyHandoff.
+                try
+                {
+                    _clientContext.CellAssemblyHandoff?.OnSectorLoaded(loaded);
+                }
+                catch (Exception handoffEx)
+                {
+                    GD.PrintErr($"[GameLoop] CellAssemblyHandoff.OnSectorLoaded error: {handoffEx.Message}");
+                }
                 break;
 
             case SectorUnloadedEvent unloaded:
                 _terrainNode.OnSectorUnloaded(unloaded);
+                break;
+
+            // ---- Phase 6a: assembled cell/area events ----
+            case CellAssembledEvent cellEvt:
+                // A fully assembled cell (all 9 slots: .ted/.bud/.fx1-7) is now available.
+                // Phase 6a: log the event for headless verification; future phases extend rendering.
+                // The existing TerrainNode + BudMeshBuilder path (driven by SectorLoadedEvent above)
+                // already renders terrain/buildings. CellAssembledEvent provides the richer model
+                // (all 9 slots + texture-path cache) for future slot rendering.
+                // spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell ready for presentation.
+                GD.Print($"[GameLoop] CellAssembledEvent: cell=({cellEvt.Cell.MapX},{cellEvt.Cell.MapZ}) " +
+                         $"resolved={cellEvt.Cell.IsResolved}. spec: assembly_graph.md §1.");
+                break;
+
+            case AreaAssembledEvent areaEvt:
+                // Phase 6a: full area assembled. Log for headless verification.
+                // spec: Docs/RE/specs/assembly_graph.md §1 — area load (Phase A).
+                GD.Print($"[GameLoop] AreaAssembledEvent: area={areaEvt.Area.AreaId} " +
+                         $"cellCount={areaEvt.Area.CellKeyCount}. spec: assembly_graph.md §1.");
                 break;
 
             // ---- Vitals / stats / level ----

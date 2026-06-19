@@ -14,6 +14,10 @@ conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the rec
                        (2) F1 attack-in-progress flag: on build 263bd994 the clear/re-arm is observed in
                            SmsgLocalPlayerStateSync (4/13), NOT a 4/2 handler. Which push arms-vs-releases the swing
                            window is capture/debugger-pending (Chapter 1).
+CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): §17 "indoor BGM override" RELABELLED = trade/exchange-busy
+                       override (per-local-player actor flag set by the trade state-toggle handler forces a fixed
+                       BGM over the .mud→.bgm table and suppresses .bge); no map/region "indoor" attribute is on
+                       this path.
 -->
 
 > Clean-room neutral spec — a navigable **overview / index** of the in-world ("World scene")
@@ -619,7 +623,7 @@ tail). **Routing and sizes are CODE-CONFIRMED; every body field is CAPTURE-UNVER
 | `specs/minimap.md` | HUD radar projection, tile streaming, blip table; full-screen world map. |
 | `specs/ui_system.md` | The `Diamond::GU*` widget toolkit hosting every World-scene window. |
 | `world_systems.md` Ch. 16 | The 256-unit region grid, the **zone-type enum (safe/PvP/closed), CONFIRMED-COMPLETE at 3 values**, the `regiontable` record (zoneName + zoneType + tail), the PvP/movement gates, the **server-authoritative quest/event verdict**, the gather-anchor table, and `.mud` as a per-cell audio-zone grid. |
-| `world_systems.md` Ch. 17 | **Per-area background-music selection** — the five per-map sound tables, the `.mud +2` music-zone byte driver, the indoor override, and the cross-fade play path. |
+| `world_systems.md` Ch. 17 | **Per-area background-music selection** — the five per-map sound tables, the `.mud +2` music-zone byte driver, the trade/exchange-busy BGM override (§17.2 — formerly mislabelled "indoor override"), and the cross-fade play path. |
 | `formats/region_grid.md` | The `region<area>.bin` grid + the `regiontable<area>.bin` record (zoneName/zoneType/tail) byte layouts that Ch. 16 reads. |
 | `formats/config_tables.md` | `.scr` / `.do` / `.csv` catalogues (items, skills, NPCs, stat curves, quests, `msg.xdb`). |
 | `formats/misc_data.md` | `.xdb` / `.mi` / `.tol` / `.ion` / `.sc` small data files (incl. `actor_size.xdb`). |
@@ -887,13 +891,29 @@ Each frame the sound manager picks the active music from the player's **current 
 3. Read the **music-zone id = `.mud` cell byte +2**.
 4. On a **music-zone change** (the +2 id under the player differs from the current one), or when a
    **forced periodic re-pick** fires (~600 s), select and **cross-fade** to the new track:
-   - **Indoor override:** when the player is in the indoor state, music is forced to a **fixed indoor
-     BGM id** (a constant, not a table lookup). [CONFIRMED]
-   - **Outdoor:** the music-zone id indexes the per-map `.bgm` table (entry = `12 dwords × zone_id`,
-     i.e. the first dword of the 48-byte `.bgm` record is the track id), and that track is played via
-     the cross-fade path. [CONFIRMED]
+   - **Trade/exchange-busy override (formerly mislabelled "indoor override"):** when the local player
+     is in an **active player-to-player trade (exchange in progress)**, music is forced to a **fixed
+     constant BGM id** (a constant, not a table lookup) — a trade-ambience / exchange-mode track — and
+     the looped-ambient (`.bge`) slots are **suppressed** for the duration; the event/3D-point (`.eff`)
+     slots are **unaffected**. The gate is a **per-local-player actor trade/exchange-busy flag**, set
+     while a trade is open and cleared when it ends; it is written by the trade state-toggle handler
+     (and propagated to the trade partner), **not** by any map cell, map-header, area-id, or region
+     attribute. When the trade ends, the normal per-map table music + ambience resume. [CONFIRMED for
+     the mechanism — fixed constant over the table, `.bge` suppressed, `.eff` untouched; HIGH for the
+     trade-busy semantic label]
+   - **Normal (not trading):** the music-zone id indexes the per-map `.bgm` table (entry = `12 dwords ×
+     zone_id`, i.e. the first dword of the 48-byte `.bgm` record is the track id), and that track is
+     played via the cross-fade path. [CONFIRMED]
 5. The looped-ambient (`.bge`, bytes +3/+4) and event/3D SFX (`.eff`, bytes +5/+6/+7) zones are
-   handled in the same per-cell-change loop.
+   handled in the same per-cell-change loop. (During the trade-busy override above, the `.bge` slot
+   start is skipped; the `.eff` slots still run.)
+
+> **OPEN-RISK (semantic label only — the wiring is pinned):** a writer-scan found only the trade /
+> interaction-state handlers setting this actor flag; **no distinct map/area/region "indoor" attribute
+> was found feeding this override branch**. The absence of a separate map-indoor flag is carried at
+> MEDIUM confidence (negative result); the gate wiring (this per-player actor flag forces the constant
+> id and suppresses `.bge`) is HIGH/CONFIRMED. If a true map-indoor override exists elsewhere, it is
+> not on this code path.
 
 - **Movement throttle:** the driver early-outs unless the player has moved at least a small threshold
   since the last evaluation (or the ~600 s timer fired) — music is re-evaluated on movement, not every
@@ -920,6 +940,11 @@ To keep the regions story (Ch. 16) and the audio story separate:
 - A "music zone" in the loose sense (a contiguous run of cells sharing the same `.mud +2` id) is what
   changes the track — but the mechanism is the per-cell `.mud` byte and the per-map `.bgm` table, not
   the region grid. A single map can therefore contain many music zones.
+- **Nor does any map/area/region "indoor" attribute drive an override.** The only thing that bypasses
+  the per-cell `.mud +2` → `.bgm` table is the per-local-player **trade/exchange-busy** actor flag of
+  §17.2 — there is no map-indoor attribute on this path. This reinforces the negative result above:
+  neither regions nor a map-indoor flag select music; only the cell driver and the trade-busy override
+  do. [CONFIRMED-NEGATIVE for a map-indoor attribute, MED on the absence]
 
 ### 17.5 Known unknowns
 

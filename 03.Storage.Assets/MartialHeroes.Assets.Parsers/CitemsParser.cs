@@ -20,7 +20,11 @@ namespace MartialHeroes.Assets.Parsers;
 /// - +0x00 is item_id (non-monotonic dense-array lookup key), NOT a sequential slot_index.
 /// - item_name is at +0x04 (48 bytes), NOT at +0x08 (40 bytes).
 /// - There is NO item_ref field at +0x04 — those bytes ARE the item_name.
-/// - Description is >= 6 × 81-byte paragraphs from 0x0E4 (count 6 vs 10 is an OPEN conflict — see §2.4).
+/// - Description is 10 × 81-byte paragraphs from 0x0E4; '#'-sentinel early-terminates the consumer.
+/// The former 6-vs-10 OPEN conflict is RESOLVED in favour of 10. CONFIRMED.
+/// spec: Docs/RE/formats/items_scr.md §2.4 — desc_para_count = 10, '#'-sentinel CONFIRMED.
+/// - Record tail is 0x40E..0x41B (14 bytes), NOT 0x2CA (338 bytes).
+/// spec: Docs/RE/formats/items_scr.md §2.4 — "block ends at 0x40E; 14-byte tail".
 /// </para>
 /// <para>
 /// Text encoding: CP949 (EUC-KR), null-padded inside fixed buffers.
@@ -71,19 +75,21 @@ public static class CitemsParser
     // spec: Docs/RE/formats/items_scr.md §2.2 — flag_4C u32LE @ 0x4C: CONFIRMED.
     private const int OffFlag4C = 0x4C;
 
-    // Description block: >= 6 paragraphs × 81 bytes each, starting at 0x0E4.
-    // desc_para[i] start = 0x0E4 + i * 81 (i = 0..DescParaCount-1). CONFIRMED (512/512).
-    // OPEN CONFLICT (§2.4): count is 6 vs 10 UNRESOLVED; remainder at 0x2CA may hold paras 6-9.
-    // RemainderRaw retains the trailing bytes so a future spec update can decode them without re-parsing.
-    // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para[i] = 0x0E4 + i*81; count >= 6; 6-vs-10 OPEN.
+    // Description block: 10 paragraphs × 81 bytes each, starting at 0x0E4. CONFIRMED (§2.4).
+    // desc_para[i] start = 0x0E4 + i * 81 (i = 0..9). The consumer bounds index < 10; a '#'-sentinel
+    // paragraph (first byte == '#') early-terminates iteration.
+    // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para_count = 10 structural capacity, CONFIRMED.
+    // spec: Docs/RE/formats/items_scr.md §2.4 — stop at the first '#'-sentinel paragraph (first byte '#').
     private const int OffDescBlock = 0x0E4; // first paragraph start — CONFIRMED
-    private const int DescParaWidth = 81; // 0x51 bytes per paragraph — CONFIRMED
-    private const int DescParaCount = 6; // >= 6 confirmed; remainder may hold paras 6-9 (§2.4 OPEN)
+    private const int DescParaWidth = 81;   // 0x51 bytes per paragraph — CONFIRMED
+    private const int DescParaCount = 10;   // structural capacity; CONFIRMED (§2.4). DO NOT change to 6.
 
-    // Record remainder @ 0x2CA (338 bytes). UNVERIFIED.
-    // spec: Docs/RE/formats/items_scr.md §2.2 — remainder 0x2CA..0x41B: UNVERIFIED.
-    private const int OffRemainder = 0x2CA;
-    private const int RemainderLen = RecordStride - OffRemainder; // 338
+    // Record tail @ 0x40E (14 bytes) — the non-paragraph tail after the 10-paragraph description block.
+    // 0x0E4 + 10*81 = 0x40E; tail ends at 0x41B inside the 1052-byte (0x41C) record.
+    // spec: Docs/RE/formats/items_scr.md §2.2 — "record tail 0x40E..0x41B (14 bytes)": UNVERIFIED.
+    // spec: Docs/RE/formats/items_scr.md §2.4 — "block ends at 0x40E; 14-byte tail at 0x40E..0x41B".
+    private const int OffRemainder = 0x40E;
+    private const int RemainderLen = 14; // 0x41B - 0x40E + 1 = 14 bytes
 
     /// <summary>
     /// Parses <c>data/script/citems.scr</c> into a <see cref="CitemsCatalog"/>.
@@ -156,25 +162,32 @@ public static class CitemsParser
             // spec: Docs/RE/formats/items_scr.md §2.2 — flag_4C u32LE @ 0x4C: CONFIRMED.
             uint flag4C = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffFlag4C..]);
 
-            // >= 6 × 81-byte description paragraphs from 0x0E4. CONFIRMED (512/512).
-            // desc_para[i] start = 0x0E4 + i * 81. OPEN CONFLICT: count 6 vs 10 — see §2.4.
-            // RemainderRaw (0x2CA..0x41B) retains trailing bytes in case paras 6-9 are discovered later.
-            // spec: Docs/RE/formats/items_scr.md §2.4 — >= 6 paragraphs from 0x0E4; count 6-vs-10 OPEN.
+            // 10 × 81-byte description paragraphs from 0x0E4. CONFIRMED (§2.4).
+            // desc_para[i] start = 0x0E4 + i * 81 (i = 0..9). Consumer accessor bounds index < 10.
+            // '#'-sentinel: stop at the first paragraph whose first byte is '#' (0x23).
+            // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para_count = 10 structural capacity, CONFIRMED.
+            // spec: Docs/RE/formats/items_scr.md §2.4 — stop at the first '#'-sentinel paragraph (first byte '#').
             // spec: Docs/RE/formats/items_scr.md §2.5 — correction: NOT a single buffer near 0xDC.
-            var descParagraphs = new string[DescParaCount];
+            var descParaList = new List<string>(DescParaCount);
             for (int p = 0; p < DescParaCount; p++)
             {
                 int paraOff = OffDescBlock + p * DescParaWidth;
                 // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para[i] start = 0x0E4 + i * 81: CONFIRMED.
                 ReadOnlySpan<byte> paraBytes = rec.Slice(paraOff, DescParaWidth);
+                // '#'-sentinel early-termination: if the first byte is '#' (0x23), stop.
+                // spec: Docs/RE/formats/items_scr.md §2.4 — stop at the first '#'-sentinel paragraph.
+                if (paraBytes[0] == 0x23) // '#' sentinel
+                    break;
                 int paraNul = paraBytes.IndexOf((byte)0);
-                descParagraphs[p] = paraNul >= 0
+                descParaList.Add(paraNul >= 0
                     ? cp949.GetString(paraBytes[..paraNul])
-                    : cp949.GetString(paraBytes);
+                    : cp949.GetString(paraBytes));
             }
+            string[] descParagraphs = descParaList.ToArray();
 
-            // Record remainder @ 0x2CA (338 bytes). UNVERIFIED.
-            // spec: Docs/RE/formats/items_scr.md §2.2 — remainder 0x2CA..0x41B: UNVERIFIED.
+            // Record tail @ 0x40E..0x41B (14 bytes). UNVERIFIED — likely duration/equip requirements/icon id.
+            // spec: Docs/RE/formats/items_scr.md §2.2 — "record tail 0x40E..0x41B (14 bytes)": UNVERIFIED.
+            // spec: Docs/RE/formats/items_scr.md §2.4 — "block ends at 0x40E; 14-byte tail at 0x40E..0x41B".
             ReadOnlyMemory<byte> remainderRaw = data.Slice(recBase + OffRemainder, RemainderLen);
 
             records[i] = new CitemsRecord

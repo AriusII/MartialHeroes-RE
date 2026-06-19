@@ -667,8 +667,9 @@ two separate fields: an `i32` mob-level at +244 and a `u32` spawn timer at +248.
 | +2 | ≤17 | char[] | Primary mob name | CP949/EUC-KR, null-terminated; buffer ≤17 bytes (16 chars + NUL); longest observed null at offset +18 | CONFIRMED |
 | +19 | <=19 | char[] | Secondary name = SPAWN-ZONE / AREA LABEL | CP949, null-terminated. Full-record pass: 214 distinct values across 3,997 records; values are recognisable game location names (most-frequent non-event value is a starting-zone place name; low-ID mobs 11-141 all carry the same starting-zone tag) plus event tags ('event', '이벤트 몹', seasonal-event strings) and dungeon-floor tags. PROPOSED: a spawn-area descriptor, NOT a monster category | CONFIRMED (presence); PROPOSED meaning: spawn-zone label (HIGH) |
 | +2..+51 | 50 | mixed | Additional name/tag fields | Region between primary name end and +52; mixed zero and text; UNVERIFIED | UNVERIFIED |
-| +52 | 2 | u16 | Unknown field | Observed value 379 (0x017B) in first record; other records UNVERIFIED | UNVERIFIED |
+| +52 | 2 | i16 | Appearance / skin-class value | The mob's per-category appearance value. At spawn the runtime combines this value with a per-category base figure to form the animation-catalogue (actormotion) lookup key, which in turn selects the mob's skeleton and skinned visual — it plays the same role for a mob that the actormotion category-2 column plays for a player. (Observed value 379 (0x017B) in the first record.) See the cross-reference note below: the full mob → appearance-key → animation-catalogue → skeleton chain is owned by `Docs/RE/specs/skinning.md`; this row owns only the field's semantic role. | Byte offset CONFIRMED (read at spawn); label "appearance/skin-class value" CONFIRMED-by-mechanism (keys the anim catalogue exactly like the actormotion category column) / PLAUSIBLE-named |
 | +60 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 31 distinct float values (modal 3.0 in 1046 records; range 0.5..400). The field is real and varies per mob. The field SEMANTIC is DBG-pending — the small integer-ish spread is consistent with a per-mob distance/scale figure (aggro radius or movement-speed base) but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
+| +104 | 2 | i16 | Has-weapon / special flag | A boolean-style flag routed into the actor's appearance-resolution output during spawn (non-zero ⇒ the flag is raised on the resolved appearance). Sits alongside the +52 appearance value in the same resolution path described in `Docs/RE/specs/skinning.md` | Byte offset CONFIRMED (read at spawn); label "has-weapon/special flag" PLAUSIBLE-by-role |
 | +188 | 4 | f32 | **CONFIRMED-variable** (was misread as a constant) | Two-witness CONFIRMED-variable: the value sits inside a verbatim-copied record body with no branch, and a full-record pass found 41 distinct values (modal 1.0 at 3081/3997 = 77%; outliers up to 6000). The field is real and varies per mob. The field SEMANTIC is DBG-pending — consistent with an HP / combat-stat multiplier relative to baseline, but no meaning is asserted from bytes alone | CONFIRMED-variable (values vary, field is real); semantic DBG-pending |
 | +244 | 4 | i32 | Mob level | −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009; regular mobs 87..249 for high-ID range | CONFIRMED (boss validation path) |
 | +248 | 4 | u32 | Spawn timer in seconds | Range 33..41,006 in sample; boss default ≈ 40 s | CONFIRMED (plausible range) |
@@ -708,6 +709,17 @@ CONFIRMED-variable; their SEMANTICS remain **DBG-pending** — the loader stores
 interpreting them, so the proposed meanings (aggro/scale at +60, HP/combat multiplier at +188, and
 the +272 group) are honest hypotheses pending a live debugger witness on the consumer, not
 asserted from bytes.
+
+**Cross-reference (skeleton/skinning chain).** This spec owns only the *semantic role* of the
+`mobs.scr` record fields. The full runtime resolution — mob ID → record → appearance / skin-class
+value (+52) → per-category appearance key → animation-catalogue (actormotion) lookup → skin/bind
+registry → `.bnd` skeleton handle and skinned visual — lives in `Docs/RE/specs/skinning.md`. The
++104 has-weapon/special flag feeds the same appearance-resolution output. Read `skinning.md` for the
+wiring; read this section for what the two record fields mean.
+
+**§2.9 provenance.** evidence: [static-ida]; ida_anchor: 263bd994.
+REFINED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): mobs.scr +52 = appearance/skin-class value
+(keys the anim catalog → skeleton); +104 = has-weapon/special flag.
 
 ---
 
@@ -2062,7 +2074,7 @@ feeds this formula; the remaining six `u32` are not used by it.
 22. **skills.scr +1296/+1300** — prerequisite or successor chain IDs?
 23. **skills.scr motion index +1304 / constant 7 at +1306** — meaning.
 24. **skills.scr tail fields** +1496..+1503.
-25. **mobs.scr gap fields** — +52..+243, +253..+271, +325..+395, +401..+443, +449..+487 UNVERIFIED.
+25. **mobs.scr gap fields** — +54..+103, +106..+243, +253..+271, +325..+395, +401..+443, +449..+487 UNVERIFIED. (+52 = appearance/skin-class value and +104 = has-weapon/special flag are now resolved-by-role — see §2.9.)
 26. **mobs.scr secondary name at +19** — zone/region name or sub-type label?
 27. **mobs.scr level field −1** — special scripted mobs or data anomalies?
 28. **npcs.scr** — character encoding (UCS-2 vs CP949) and all field names.

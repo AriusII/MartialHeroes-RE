@@ -663,16 +663,31 @@ whole file (no per-line variation).
 | 14 | f32 | +0x3C | `speed_override_b` | Playback speed override B (e.g. 1.0). PROPOSED meaning. |
 | 15 | u32 | +0x40 | `idle_motion_id` (`motion_ids_a[0]`) | **Idle / stand motion** — the first of 9 primary motion IDs. A 9-digit clip ID equal to a `.mot` `id_a`; maps to `data/char/mot/g{id}.mot`. Zero = empty slot. **SAMPLE-VERIFIED** (see §col15). |
 | 16–23 | u32 ×8 | +0x44 … +0x60 | `motion_ids_a[1..8]` | Remaining primary motion-ID array. Same encoding; zero = empty slot. |
-| 24–32 | u32 ×9 | +0x64 … +0x84 | `motion_ids_b[9]` | Secondary motion-ID array, same encoding as the primary array. |
+| 24–32 | u32 ×9 | +0x64 … +0x84 | `motion_ids_b[9]` | **SFX / EFFECT-event id array — NOT motion-clip ids** (CORRECTED — binary-won reversal; see §motion_ids_b note below). Lifecycle-keyed event ids fed only to the sound/effect routers, never the animation mixer/sampler. Known slots: b[1] = spawn sound/event id, b[2] = walk footstep SFX id, b[3] = run footstep SFX id, b[5] = death effect/sound id; remaining slots OPEN-RISK. |
 
-> **Naming reconciliation (see also `formats/actormotion.md`).** These two 9-slot integer runs at
-> `+0x40` and `+0x64` are the **same bytes** that `formats/actormotion.md` calls `motion_ids_a[9]` /
-> `motion_ids_b[9]`. Both docs now use the **`motion_ids_a` / `motion_ids_b`** names. The slots
-> demonstrably hold real `.mot` `id_a` values (74.5% of the non-zero slots across the whole file
-> resolve to an existing clip; a random mapping would resolve ≈0%), so they ARE motion-id arrays.
-> An alternative reading — that the 9-slot count corresponds to the game's eight compass directions
-> plus a neutral/centre slot, making each array a **per-direction** motion table — is a plausible but
-> **PROPOSED** interpretation of the slot index only; it is not proven and must not be relied on.
+> **§motion_ids_b — the two arrays are DIFFERENT KINDS (see also `formats/actormotion.md`).**
+> These two 9-slot integer runs at `+0x40` and `+0x64` are the **same bytes** that
+> `formats/actormotion.md` calls `motion_ids_a[9]` / `motion_ids_b[9]`, and both docs use those names.
+> But the two arrays do **not** carry the same kind of value:
+>
+> - **`motion_ids_a` (+0x40) IS the `.mot`-clip array** — action-keyed (a[1] = idle, a[2] = walk,
+>   a[3] = run, a[4] = death, a[5] = mount-idle, a[6] = combat-idle). Its non-zero slots demonstrably
+>   hold real `.mot` `id_a` values (the idle slot a[0]/col15 alone resolves to an existing clip 89.1%
+>   of the time; a random mapping would resolve ≈0%). Confirmed motion ids.
+> - **`motion_ids_b` (+0x64) does NOT hold motion ids.** It is a lifecycle-keyed **SFX / EFFECT-event
+>   id** array: every runtime consumer feeds its slots to the SOUND / EFFECT routers, and **no b-slot
+>   ever reaches the animation mixer or sampler**. The decisive fact is the consumer — the b-slots are
+>   read on the audio/effect path, not the deform path. Known slot meanings: b[1] = spawn sound/event
+>   id, b[2] = walk footstep SFX id, b[3] = run footstep SFX id, b[5] = death effect/sound id; the
+>   other slots are OPEN-RISK (no static consumer identified).
+>
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): `motion_ids_b` = SFX/FX event ids, NOT
+> secondary motion (spec reversal, binary-won — confirmed by use-site; see `formats/actormotion.md`).**
+> This OVERRIDES the prior "secondary motion-ID array, same encoding as the primary array" reading and
+> the earlier "9 compass directions plus a neutral slot" / per-direction interpretation of these
+> arrays — both are dropped. The slots are action/lifecycle-keyed, never direction-keyed.
+>
+> *evidence: [static-ida]; ida_anchor: 263bd994.*
 
 ### col2 → `.bnd` coverage (sample-verified)
 
@@ -728,8 +743,9 @@ so different groups can reuse small `row_id` values without collision.
 For reference (sample-derived, illustrative): `group_type = 0`, `row_id = 1`, `skin_class_id = 1`,
 `cycle_duration_a = 7.402`, `frame_count_a = 16`, `cycle_duration_b = 16.282`, `frame_count_b = 11`,
 `flags = 0`, `phase_a/b/c = 4 / 5 / 3`, `weight_a/b = 1 / 8`, `speed_override_a/b = 4 / 1`,
-`motion_ids_a` = several non-zero 9-digit IDs followed by zeros, `motion_ids_b` = a few non-zero
-9-digit IDs followed by zeros.
+`motion_ids_a` = several non-zero 9-digit `.mot`-clip IDs followed by zeros, `motion_ids_b` = a few
+non-zero 9-digit SFX/effect-event IDs followed by zeros (event ids, not `.mot` clips — see
+§motion_ids_b).
 
 > A sibling table, `data/char/skin.txt`, uses a related but different 6-column key-and-identity
 > layout and belongs to the skin / bind catalogue, not the motion catalogue. It is out of scope

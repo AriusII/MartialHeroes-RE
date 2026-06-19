@@ -1,5 +1,6 @@
 using System.Net;
 using Godot;
+using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Vfs;
 using MartialHeroes.Client.Application.Assets;
 using MartialHeroes.Client.Application.Diagnostics;
@@ -245,6 +246,17 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public MartialHeroes.Client.Application.World.RegionService RegionService { get; private set; } = null!;
 
+    /// <summary>
+    /// The cell-assembly handoff: subscribes to <see cref="SectorLoadedEvent"/> and re-publishes
+    /// assembled cells as <see cref="CellAssembledEvent"/>. The <see cref="GameLoop"/> drains this
+    /// each frame via <see cref="CellAssemblyHandoff.OnSectorLoaded"/> on every received sector.
+    ///
+    /// Null when the terrain VFS could not be opened (offline mode).
+    /// spec: Docs/RE/specs/assembly_graph.md §1/§4 — the handoff wires the AreaComposer byte→cell bake
+    ///   into the streaming pipeline; the bake callback is bound here in the composition root.
+    /// </summary>
+    public CellAssemblyHandoff? CellAssemblyHandoff { get; private set; }
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
@@ -438,6 +450,45 @@ public sealed partial class ClientContext : Node
         var regionSource = new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(vfs);
         RegionService = new MartialHeroes.Client.Application.World.RegionService(regionSource, hudHub);
         GD.Print("[ClientContext] RegionService constructed. spec: Docs/RE/specs/world_systems.md Ch. 16.");
+
+        // 16-E. AreaComposer + CellAssemblyHandoff — Phase 6a composition seam.
+        //   The AreaComposer lives in layer-03 (Assets.Mapping); the CellAssemblyHandoff is the
+        //   layer-04 seam that bridges SectorLoadedEvent → CellAssembledEvent. The bake callback
+        //   captures the VfsAreaAssemblySource (a layer-05 adapter) and calls AreaComposer.ComposeCell.
+        //   The resulting AssembledCell is wrapped in a thin IAssembledCellView adapter so the layer-04
+        //   CellAssemblyHandoff can publish it without importing Assets.Mapping.
+        //   spec: Docs/RE/specs/assembly_graph.md §1/§4 — AreaComposer + CellAssemblyHandoff contract.
+        try
+        {
+            var areaSource = new MartialHeroes.Client.Godot.Adapters.VfsAreaAssemblySource(vfs, areaId: 0);
+            var areaComposer = new global::MartialHeroes.Assets.Mapping.AreaComposer();
+
+            CellAssemblyHandoff = new CellAssemblyHandoff(bus,
+                (mapX, mapZ, _) =>
+                {
+                    // Payload bytes from SectorLoadedEvent are the .ted bytes already loaded by
+                    // VfsTerrainSectorSource. The AreaComposer re-reads all cell files via the
+                    // VfsAreaAssemblySource (which has full VFS access), so the payload is unused here.
+                    // spec: Docs/RE/specs/assembly_graph.md §4 — bake callback is pure/deterministic.
+                    try
+                    {
+                        var cell = areaComposer.ComposeCell(areaSource, mapX, mapZ);
+                        return new AssembledCellViewAdapter(cell);
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[ClientContext] AreaComposer.ComposeCell({mapX},{mapZ}) failed: {ex.Message}");
+                        return null;
+                    }
+                });
+
+            GD.Print("[ClientContext] AreaComposer + CellAssemblyHandoff wired. spec: assembly_graph.md §1/§4.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] CellAssemblyHandoff wiring failed (non-fatal): {ex.Message}");
+            CellAssemblyHandoff = null;
+        }
 
         // 17. Terrain sector source — backed by VFS.
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
@@ -896,6 +947,38 @@ file sealed class VfsLoadResourceSource : ILoadResourceSource
             return ValueTask.FromResult(0L);
         }
     }
+}
+
+/// <summary>
+/// Thin layer-05 adapter that wraps the layer-03 <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/>
+/// as the layer-04 <see cref="IAssembledCellView"/> abstraction. Used in the <c>CellBake</c> delegate
+/// wired by <c>ClientContext.BuildApplicationGraph</c>.
+///
+/// The layer-04 bus contract requires <see cref="IAssembledCellView"/> (not the concrete layer-03 type)
+/// so that the Application layer's <see cref="CellAssemblyHandoff"/> never references
+/// <c>Assets.Mapping</c> — the layer-05 composition root adapts it here.
+///
+/// spec: Docs/RE/specs/assembly_graph.md §4 — "the layer-05 composition root adapts the assembled cell
+///   as an IAssembledCellView so the layer-04 CellAssemblyHandoff can publish it."
+/// </summary>
+file sealed class AssembledCellViewAdapter : IAssembledCellView
+{
+    private readonly global::MartialHeroes.Assets.Mapping.AssembledCell _cell;
+
+    public AssembledCellViewAdapter(global::MartialHeroes.Assets.Mapping.AssembledCell cell)
+        => _cell = cell ?? throw new ArgumentNullException(nameof(cell));
+
+    /// <summary>The wrapped <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/>.</summary>
+    public global::MartialHeroes.Assets.Mapping.AssembledCell Cell => _cell;
+
+    /// <inheritdoc/>
+    public int MapX => _cell.MapX; // spec: assembly_graph.md §1 (cell key mapX part)
+
+    /// <inheritdoc/>
+    public int MapZ => _cell.MapZ; // spec: assembly_graph.md §1 (cell key mapZ part)
+
+    /// <inheritdoc/>
+    public bool IsResolved => _cell.Slot0GroundTexGrid is not null || _cell.Slot1BuildingObjectGrid is not null;
 }
 
 file sealed class GodotLoadingSoundSink : ILoadingSoundSink

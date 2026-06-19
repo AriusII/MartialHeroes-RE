@@ -295,11 +295,24 @@ public static class XdbParser
     // spec: Docs/RE/formats/xdb_tables.md §5 — "six floats = three XZ offset pairs in facing frame, Y forced 0: CONFIRMED two-witness".
 
     /// <summary>
-    /// Parses <c>data/script/creature_item.xdb</c>.
+    /// Parses <c>data/script/creature_item.xdb</c> — the creature HELD-ITEM VISUAL attachment table.
     /// Record count = file_size / 48 (must be exact multiple).
+    /// This is NOT a loot/drop table.
     /// </summary>
     /// <remarks>
     /// spec: Docs/RE/formats/xdb_tables.md §5 creature_item.xdb: sample_verified true.
+    /// <para>
+    /// <b>Resolved role (CYCLE 1, STATIC-CONFIRMED):</b> <c>creature_item.xdb</c> is a creature
+    /// held/worn-item VISUAL attachment table — it places a visual item ON the creature at spawn.
+    /// Keyed by <c>creature_key</c> (record +0, from the creature actor's appearance/visual-key field).
+    /// Two consumers: (1) spawn-attach — spawns and attaches <c>item_id</c> (+4) as a visual, placed by
+    /// the three XZ offset pairs (+8..+31) rotated into world-space by the creature's facing (Y forced 0),
+    /// with <c>visual_scale</c> (+36) carried into the spawned descriptor; (2) per-tick gate — validates
+    /// pickup/effect cadence using flag bytes (+40, +43) and the millisecond <c>tick_interval</c> (+44).
+    /// The earlier "drop / loot / 100%-probability" framing is WITHDRAWN.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — CYCLE 1 RELABEL: creature held-item VISUAL attachment, NOT loot table.
+    /// spec: Docs/RE/specs/assembly_graph.md §3 — "creature_item.xdb → held-item visual, not a loot table".
+    /// </para>
     /// <para>
     /// The six attachment floats (+8..+28) encode three XZ offset pairs in the creature's facing
     /// frame: <c>(off0X, off0Z), (off1X, off1Z), (off2X, off2Z)</c>. Y is forced to 0 by the
@@ -354,8 +367,11 @@ public static class XdbParser
             byte flag2 = rec[42];
             byte flag3 = rec[43];
 
-            // probability u32LE @ +44. Value 100 in head records; likely integer percent. Semantic UNVERIFIED.
-            // spec: Docs/RE/formats/xdb_tables.md §5 — probability u32LE @ +44: CONFIRMED (value=100 in head); semantic UNVERIFIED.
+            // tick_interval u32LE @ +44. Constant 100 (0x64) in all 921 records.
+            // Consumer-confirmed as a millisecond tick-interval value — the cadence at which the attachment
+            // re-validates pickup/effect. NOT an integer-percent drop probability.
+            // spec: Docs/RE/formats/xdb_tables.md §5 — tick_interval u32LE @ +44: CONFIRMED (constant 100; cadence interval).
+            // spec: Docs/RE/formats/xdb_tables.md §5 — "the earlier 'probability' framing is withdrawn".
             uint probability = BinaryPrimitives.ReadUInt32LittleEndian(rec[44..]);
 
             results[i] = new CreatureItemXdbRecord

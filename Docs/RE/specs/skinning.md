@@ -5,16 +5,21 @@
 >   inverse-bind cancellation property, both bind/animated world walks, the `.mot` keyframe sampler,
 >   the major/minor split + per-vertex normalization, the per-mesh and per-node scale sources, and the
 >   quaternion conventions (XYZW / Hamilton / active-rotation / parent-on-left) — all re-read from the
->   function bodies this pass and reproduced exactly. *static-hypothesis* for the inverse-bind **bake
->   routine** (its existence is forced by the data — the deform consumes a zero-initialised bone-local
->   rest position, so a bake must run between load and first deform — but the routine itself was not
->   pinned statically this pass) and for the `(−x,−y,−z,w)` conjugate / subtract-then-rotate bake
->   order. *capture/debugger-pending* for the matrix major-order, the native up-axis / handedness
->   *label* (no axis flip exists inside the math, but whether native is literally left-handed D3D9
->   Y-up needs a runtime read), the exact Godot quaternion remap under Z-negation, and whether the
->   three epsilon tests are an absolute-value clamp (their disassembly surfaced as a log-shaped
->   logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an absolute-value epsilon
->   clamp at 0.001).
+>   function bodies this pass and reproduced exactly. *confirmed (static)* — as of CYCLE 1 — for the
+>   inverse-bind **bake** itself: the bake pass is now pinned statically (a separate skin-attach pass
+>   that runs after the bind world transforms exist and before any deform), and its `(−x,−y,−z,w)`
+>   conjugate / subtract-then-rotate order is read directly from the routine — see §4 and the
+>   corrected status row below. *capture/debugger-pending* for the matrix major-order, the native
+>   up-axis / handedness *label* (no axis flip exists inside the math, but whether native is literally
+>   left-handed D3D9 Y-up needs a runtime read), the exact Godot quaternion remap under Z-negation,
+>   and whether the three epsilon tests are an absolute-value clamp (their disassembly surfaced as a
+>   log-shaped logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an
+>   absolute-value epsilon clamp at 0.001).
+> - **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** inverse-bind bake pinned static
+>   (no longer a hypothesis); a `.skn` weight's bone index is a base-relative bone-ID
+>   (`bone_array[id − base_id]`), NOT an array slot / palette / track index; skeleton selection is the
+>   `.skn` header `id_b` used VERBATIM as the pose-pool key. These three corrections jointly **retire
+>   the skinning-explosion debt** — the avatar can now be animated from the static recovery.
 > - **Idle-animation lane (added 2026-06-16):** *confirmed* (control-flow) that the engine feeds the
 >   anim mixer real per-frame elapsed time (`dt = ms × 0.001`) and advances each active layer's clock
 >   every frame, so the keyframe sampler is never pinned at `t = 0` (`formats/animation.md`
@@ -64,20 +69,30 @@ documented in the container spec.
 > explodes the mesh. The fix is to reproduce the cancellation, applying ONE handedness conversion
 > uniformly to bones + vertices + keyframes. See §8 (Godot import guidance).
 >
-> **Mesh-explosion status (RETIRED).** The earlier Godot mesh-explosion debt is **retired**: the port
-> renders the skinned character correctly via quaternion LBS that preserves the §0 cancellation. The
-> remaining character-animation observation — a standing human looks static — is a **separate and
-> faithful** matter: the standing-idle clip the recovered chain resolves is genuinely static data
-> (§10), so a frozen standing human is correct for that asset, not a skinning/animation defect. The
-> only open animation question is which idle slot the live engine selects at runtime (§10, DEBUGGER-PENDING).
+> **Mesh-explosion status (RETIRED — now from a complete static recovery).** The earlier Godot
+> mesh-explosion debt is **retired**, and as of CYCLE 1 the three facts that retire it are all
+> **CONFIRMED static** — the avatar can be animated entirely from the static recovery, with no live
+> read required: (1) the inverse-bind **bake** is pinned (§4: subtract bind-world translation then
+> rotate by the conjugate bind-world quaternion); (2) a `.skn` weight's bone index is a **base-relative
+> bone-ID** resolved as `bone_array[id − base_id]` — NOT an array slot, palette index, or track index,
+> and the weight id-space is the **same** base-relative space the bind skeleton and `.mot` tracks use
+> (§3.2); (3) the deform skeleton is selected by the skin's `id_b` used **verbatim** as the pose-pool
+> key (§8(e)). Feeding array positions instead of base-relative IDs, OR pairing the skin with a
+> wrong-`id_b` skeleton, is exactly what reproduces the explosion. The port already renders correctly
+> via quaternion LBS that preserves the §0 cancellation. The remaining character-animation observation
+> — a standing human looks static — is a **separate and faithful** matter: the standing-idle clip the
+> recovered chain resolves is genuinely static data (§10), so a frozen standing human is correct for
+> that asset, not a skinning/animation defect. The only open animation question is which idle slot the
+> live engine selects at runtime (§10, DEBUGGER-PENDING).
 
 | Area | Confidence |
 |---|---|
 | CPU LBS, no GPU bone palette, no 4×4 matrices in the skinning math | HIGH (re-confirmed CAMPAIGN 10) |
 | Inverse-bind **baked into** per-influence bone-local rest position/normal; consumed by the deform with no per-frame inverse | HIGH (deform consumes bone-local rest; the load fields start zeroed → a bake pass populates them) |
-| Inverse-bind **bake routine** (its exact address / conjugate-and-order) | STATIC-HYPOTHESIS — existence forced by the data; routine not pinned statically (debugger follow-up) |
+| Inverse-bind **bake** (its existence, conjugate form, and subtract-then-rotate order) | **CONFIRMED (static), CYCLE 1** — pinned as a separate skin-attach pass; conjugate `(−x,−y,−z,w)`, subtract bind-world translation then rotate by the inverse bind-world quaternion (supersedes the prior STATIC-HYPOTHESIS) |
 | Bind-pose world transform accumulated from parent-relative `.bnd` locals | HIGH (re-confirmed CAMPAIGN 10) |
-| Bones addressed by **bone ID** (`id − base_id`), not array position, by both `.skn` weights and `.mot` tracks | HIGH (re-confirmed) |
+| Bones addressed by **bone ID** in base-relative ID space (`bone_array[id − base_id]`), NOT an array slot / palette index / track index, by both `.skn` weights and `.mot` tracks | **CONFIRMED (static), CYCLE 1** (the explosion root cause — weight id-space == bind/`.mot` id-space) |
+| Skeleton selection: `.skn` header `id_b` passed VERBATIM as the pose-pool key (no `g{N}.bnd` formatting, no slot transform at the resolve site) | **CONFIRMED (static), CYCLE 1** (§8(e)) |
 | Runtime pose bone stride **88 bytes**; in-memory bind bone **72 bytes**; bone count is a single **u8** (≤ 255 bones) | HIGH (recovered CAMPAIGN 10 — see §3.4) |
 | Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
 | LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | HIGH (re-confirmed) |
@@ -265,10 +280,18 @@ is the bone with `self_id == parent_id == 0`. An unmatched `parent_id` is a fata
 client.
 
 **Bone lookup is by ID offset, `bone_array[ id − base_id ]`**, where `base_id` is the first bone's
-`self_id`. This is the single most important indexing fact for the importer:
+`self_id`. This is the single most important indexing fact for the importer — and the **root cause of
+the skinning explosion** (CONFIRMED static, CYCLE 1):
 
-- A **`.skn` weight's `bone_index` is a bone ID**, not a palette slot or array position.
-- A **`.mot` track's `bone_id`** (low byte of the track descriptor) is the same bone ID.
+- A **`.skn` weight's `bone_index` is a bone ID in base-relative bone-ID space**, resolved as
+  `bone_array[id − base_id]` — NOT an array slot, NOT a palette index, and NOT a track index.
+- A **`.mot` track's `bone_id`** (low byte of the track descriptor) is the same bone ID, in the
+  **same** base-relative space; the weight id-space, the bind-skeleton id-space, and the `.mot`-track
+  id-space are one and the same (all three resolve through the `id − base_id` resolver).
+- Feeding **array positions** instead of base-relative bone-IDs, OR pairing the skin with a
+  **wrong-`id_b` skeleton** (§8(e)), reproduces the explosion. This retires the skinning-explosion
+  debt: with the correct base-relative resolve and the correct `id_b`-selected skeleton, the avatar
+  deforms and animates correctly from the static recovery.
 
 For the recovered sample skeletons `base_id == 0`, so ID equals array index — but the importer **must
 not assume** `base_id == 0` in general. Always resolve `bone_array[id − base_id]`.
@@ -362,7 +385,9 @@ model_class_id = 5 * (class + 4 * variant) - 24            in {1, 11, 16, 26}
 - `class` is the internal class index (1..4); `variant` is the appearance variant.
 - `variant == 3` resolves to `0`, which means an **invisible actor** (no mesh) — a reserved sentinel.
 - `model_class_id` selects the visual record in the appearance catalogue, whose bound bind-pose
-  handle is the actor's skeleton (§3, §8(e)).
+  handle is the actor's skeleton (§3, §8(e)). Note this slot transform is an **upstream** appearance
+  decision (it chooses *which* `.skn`/`id_b` an actor uses); it is **not** re-applied at the
+  skin-load / skeleton-resolve site, where the skin's `id_b` is the verbatim pool key (§8(e)).
 
 ### 3.5.3 The appearance catalogue is populated from skin.txt (CODE-CONFIRMED)
 
@@ -433,18 +458,44 @@ in the bone's local frame, so the animated bone world transform can re-place it.
 into `localPos`, the per-frame deform never touches the bind pose again — it needs only the animated
 bone world transform. The cancellation in §0 is the direct consequence.
 
-> **The bake is a SEPARATE pass, not part of the `.skn` load (STATIC-HYPOTHESIS on the routine).**
+> **The bake is a SEPARATE pass, not part of the `.skn` load — PINNED STATIC (CONFIRMED, CYCLE 1).**
 > At the end of `.skn` parsing the influence records' `localPos` (+12) and `localNormal` (+24) fields
 > are **zero-initialised** — the load builds the 9-float influence (bone id, vertex index, weight) and
-> memsets the rest to zero. Therefore the inverse-bind bake of this section is a distinct pass that
-> must run **after** the skeleton is resolved and its bind **world** transforms exist (§3.1), and
-> **before** the first deform (which reads `localPos`/`localNormal` as already bone-local, with no
-> per-frame inverse). The bake's **existence is forced by the data** and its **result matches** the
-> equations above; the static re-verification pass did **not** pin the exact bake routine (it is not
-> in the load path nor the attach path). The conjugate form `(−x,−y,−z,w)` and the subtract-then-rotate
-> order are the consistent reconstruction — a debugger breakpoint on the first deform, watching the
-> major-influence `localPos` slot, would catch the writing routine and confirm both. (CAMPAIGN 10,
-> static.)
+> the influence-record default constructor sets the bone id and vertex index to a sentinel and zeroes
+> the seven floats, so the bake's target fields are provably zero at skin-load. The inverse-bind bake
+> is a **distinct pass invoked at skin-attach**, immediately after the `.skn` is parsed and its
+> matching bind pose is resolved by the skin's `id_b` (§8(e)). It runs **after** the skeleton's bind
+> **world** transforms exist (built at `.bnd` load by the bind-world walk, §3.1) and **before** the
+> first deform (which reads `localPos`/`localNormal` as already bone-local, with no per-frame inverse).
+>
+> This pass — its existence, location, and math — is now **CONFIRMED static** (no longer a hypothesis,
+> no debugger needed). It loops the MAJOR influence array first then the MINOR array (same body),
+> stride 36 bytes per record, and per influence reads the bone id (byte) and vertex index, resolves
+> the bind bone via the base-relative ID resolver (§3.2), reads the 32-byte render vertex's position
+> (first three floats) and normal (next three floats), and writes the two baked fields exactly as the
+> equations above:
+> - `localPos` = subtract the bind-world translation from the rest position **first**, then rotate by
+>   the inverse (conjugate) bind-world quaternion — `invQ ⊗ (restPos − bindWorldTrans)`;
+> - `localNormal` = rotate the rest normal by the same inverse quaternion only — `invQ ⊗ restNorm`
+>   (no translation term).
+> The inverse is the **unit-quaternion conjugate** `(−x,−y,−z,w)` (the routine divides all four
+> components by the squared magnitude — unity for a unit quaternion — then negates X/Y/Z and keeps W).
+> The whole bake is quaternion-based: only 3-vector subtract, unit-quat inverse, and active
+> quaternion-rotate primitives are called — **no 4×4 matrices anywhere**. The bind-world source is the
+> static bind-world walk (parent-on-left: `worldTrans = parentQuat ⊗ localTrans + parentTrans`,
+> `worldQuat = parentQuat ⊗ localQuat`) with **no animation term**, so the bake is taken against the
+> rest/bind pose directly (see the frame-0 cross-check below). This is the textbook offset transform
+> `B⁻¹`, and it produces exactly the §0 cancellation. The only residual is the absolute native
+> handedness / up-axis **label** (no axis flip exists inside the math — OPEN-RISK on the label only;
+> it does not affect the cancellation, and a single live bone read settles it). (CYCLE 1, static.)
+
+> **Frame-0 vs rest cross-check (CONFIRMED static).** The skin-matrix bake reads the **bind/rest** pose
+> directly — there is **no** mixer / animation-sample / clip-advance step on the skin-attach path
+> before the bake, and the bone world transforms it reads are the bind-world slots written by the
+> animation-free bind-world walk. The campaign-9c finding that a **pivot/AABB** is computed from an
+> *animated frame-0* is a **separate, port-side preview-centering** concern (the char-create / Godot
+> preview pivot), operating on a different quantity entirely — **no contradiction**: the *skin-matrix
+> bake* uses the rest pose; the *preview pivot* reads an animated frame-0 AABB.
 
 ---
 
@@ -756,6 +807,43 @@ three of the following are the same `id_b` rig:
 - the **inverse-bind bake** that produced each influence's `localPos` / `localNormal`, and
 - the **played clip**, whose track `bone_id`s address that same skeleton.
 
+#### How the engine actually selects the skeleton: verbatim `id_b` against an eager-preloaded pool (CONFIRMED static, CYCLE 1)
+
+The runtime resolves the deform skeleton through a single, transform-free lookup, populated once at
+boot:
+
+- **Eager preload at boot.** Every `.bnd` named in `bindlist.txt` is physically opened, parsed into a
+  pose object, and inserted into a shared **pose pool** during the boot data-table corpus load — not
+  lazily on actor spawn, not registered by name for deferred load. (All ~349 listed skeletons are
+  parsed up front; only the four `g1..g4.bnd` players plus mob/NPC rigs are listed.) Each pose is
+  filed in the pool under the **`actor_id` parsed from that `.bnd`'s header** (its offset-0 field).
+- **Verbatim `id_b` key.** When a `.skn` loads, the loader reads the header's second identity field
+  (`id_b`) and passes it **verbatim** as the pool key. There is **no** arithmetic between the read and
+  the lookup at this site: no `g{N}.bnd` path formatting, no `5·(class + 4·variant) − 24` appearance
+  slot transform, no use of the header `SkinClassId` as the lookup key. The selected skeleton is simply
+  the registered pose whose **`actor_id == id_b`**; an `id_b` of `0` (or any unregistered value)
+  resolves to **no skeleton** (the deform then runs without a rig — the reserved invisible/no-mesh
+  case).
+
+So the operative runtime rule is: `selected_skeleton(skn) = pose_pool[ skn.header.id_b ]`, where the
+pool key is each preloaded `.bnd`'s parsed `actor_id`. The familiar `g{SkinClassId}.bnd`-for-`{1,2,3,4}`
+convenience rule and the `{1,11,16,26}` appearance-slot encoding both remain correct as **chain
+documentation**, but they live one level **upstream** (they decide *which* `.skn`/`id_b` an actor
+wears); they are **not** re-applied as a second remap inside the pool lookup. The four player rigs
+resolve cleanly precisely because each class's `.skn` `id_b` already equals the `actor_id` of its
+intended `g{n}.bnd` (`g1.bnd` parses to `actor_id 1`, and so on) — so the verbatim-key rule and the
+`g{id_b}.bnd` convenience rule agree for players.
+
+**Mobs reach the same pool indirectly.** A mob is NOT a literal `g{skin_class}.bnd`. The mob's record
+carries an appearance value that is combined with a per-category base offset into an **appearance key**;
+that key indexes the animation catalogue (the actormotion map); the catalogue record yields a
+model-class-id key; that key resolves a visual/skin record in the same character visual registry the
+preloaded skeletons live in; and the visual record holds the **bind-pose handle** from which the
+runtime pose is built. The skeleton a mob ends up with is therefore still one of the bind poses
+preloaded **by name** from `bindlist.txt`, reached through the catalogue indirection rather than a
+filename. (The concrete `model_class_id → loaded `.bnd`` value-edges and the per-category base-offset
+table contents remain value-edges pending a live read — do not invent them; see §3.5.5.)
+
 Concretely the engine-intended matched trio per class is:
 
 | Skin `id_b` | Skeleton | Idle clip (actormotion col2 == `id_b` → col16) | Tracks = bones |
@@ -804,8 +892,14 @@ class renders correctly purely because its shared default choice coincided with 
 
 #### Importer invariant (implementers MUST follow)
 
-1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton as
-   `data/char/bind/g{id_b}.bnd`, **per class** — never a single shared rig hard-coded across all classes.
+1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton by
+   **looking the `id_b` up verbatim** in the skeleton pool keyed by each `.bnd`'s parsed `actor_id`
+   (CONFIRMED static, CYCLE 1 — see "How the engine actually selects the skeleton" above) — **per
+   class**, never a single shared rig hard-coded across all classes. For the four players this pool
+   lookup is equivalent to loading `data/char/bind/g{id_b}.bnd` (each `g{n}.bnd` parses to
+   `actor_id n`), so an importer may use that filename convenience for `id_b ∈ {1,2,3,4}`; for mobs the
+   skeleton is reached through the animation-catalogue indirection onto the same preloaded pool, NOT a
+   literal `g{skin_class}.bnd` filename.
 2. Select the idle clip from `actormotion.txt` keyed by `skin_class == id_b` (col2 → col16), **per
    class** — never a single shared idle clip. Each clip's track count equals its rig's bone count.
 3. Skin **every** overlay part onto that **same** `id_b`-selected skeleton (all of a class's overlays
@@ -842,7 +936,8 @@ shared default. This is the recovered cause of the char-create preview shatter c
 
 | Item | Status | Impact |
 |---|---|---|
-| Inverse-bind **bake routine** address + exact conjugate/order (§4) | STATIC-HYPOTHESIS — the bake's *existence* is forced by the data (load leaves `localPos`/`localNormal` zeroed; the deform consumes them as bone-local with no per-frame inverse) and its result matches §4, but the routine was not pinned statically | Pin via a debugger breakpoint on the first deform watching the major-influence `localPos` slot; confirm `(−x,−y,−z,w)` + subtract-then-rotate. Does not block the importer (the math is known) |
+| Inverse-bind **bake** existence + conjugate/order (§4) | RESOLVED (CONFIRMED static, CYCLE 1) — the bake is pinned as a separate skin-attach pass: conjugate `(−x,−y,−z,w)`, subtract bind-world translation then rotate by the inverse bind-world quaternion, against the rest/bind world pose, normal rotation-only, quaternion-based (no matrices). No longer a hypothesis and no debugger needed | None — the math is settled; importers implement §4 directly |
+| Skeleton-selection key + skeleton preload (§8(e)) | RESOLVED (CONFIRMED static, CYCLE 1) — the `.skn` `id_b` is the verbatim pose-pool key (no `g{N}.bnd` formatting / slot transform at the resolve site); all listed `.bnd` are eager-preloaded at boot keyed by parsed `actor_id`; mobs reach the same pool via the animation-catalogue indirection | None for the resolve mechanism; the concrete `model_class_id → loaded `.bnd`` value-edge + the per-category base-offset table remain value-edges (§3.5.5) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
 | Native up-axis / handedness *label* | CAPTURE/DEBUGGER-PENDING — no axis flip exists inside the math (confirmed), but whether native is literally left-handed D3D9 Y-up needs a runtime read of one live bone transform | Determines the §8(b) handedness conversion; the *uniformity* requirement holds regardless |
 | Log-shaped epsilon tests (dedup §2.1; accumulate / commit floors §6.2) | CAPTURE/DEBUGGER-PENDING — the three tests disassemble as a logarithm-shaped intrinsic compared against 0.001, almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp; behaviourally treated as a 0.001 clamp | A debugger step over one site confirms the intrinsic; no importer impact (treat as a 0.001 clamp) |

@@ -6,6 +6,12 @@
 > not a binary format specification. It is the authoritative source for which assets
 > are present (or absent) per area, and is the first reference an engineer should consult
 > before writing area-load or streaming logic.
+>
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, evidence [static-ida]):** added the area→cell fan-out,
+> the `d<NNN>.lst` cell-key set, and the synchronous per-cell open order `.mud` → `.gad` (stub) →
+> `.map` with the sub-assets (`.ted`/`.up`/`.bud`/`.sod`/`.fx1`..`.fx7`/`.exd`) loaded INSIDE the
+> `.map` parse via DATAFILE tokens; recorded that the `d<NNN>x..z..` `.sod`/`.ted`/`.ted.post`
+> printf patterns are a dev exporter, NOT the streaming loader. See §1A. [2026-06-19]
 
 ---
 
@@ -13,13 +19,13 @@
 
 | Attribute          | Value |
 |--------------------|-------|
-| `verification`     | `sample-verified` — census performed by direct VFS file enumeration and byte-confirmed cell counts against `.lst` binary records; the `d<NNN>.lst` loader control flow was independently re-confirmed in the IDB |
-| `ida_reverified`   | `2026-06-16` |
+| `verification`     | `sample-verified` — census performed by direct VFS file enumeration and byte-confirmed cell counts against `.lst` binary records; the `d<NNN>.lst` loader control flow was independently re-confirmed in the IDB. The §1A area→cell fan-out / per-cell open order is `code-confirmed` from static IDA (`evidence: [static-ida]`). |
+| `ida_reverified`   | `2026-06-16`; §1A fan-out re-confirmed `2026-06-19` |
 | `ida_anchor`       | `263bd994` |
-| `evidence`         | `[static-ida, vfs-sample]` — `d<NNN>.lst` loader (count + cell-key-array control flow) corroborated by static IDA; all per-area presence/absence and cell counts corroborated against the live VFS (60 `.lst` files, 43,347-entry archive) |
+| `evidence`         | `[static-ida, vfs-sample]` — `d<NNN>.lst` loader (count + cell-key-array control flow) corroborated by static IDA; all per-area presence/absence and cell counts corroborated against the live VFS (60 `.lst` files, 43,347-entry archive); the §1A fan-out / open order from static IDA |
 | `conflicts`        | none unresolved — the former "63 registered areas" prose count is corrected to **60** (the range table, per-area census table, and VFS enumeration all agree on 60); total cells corrected from "~2,505" to the exact formula sum **2,503** |
 | `sample_verified`  | `true` — file counts cross-checked against live VFS; `.lst` cell counts independently verified via the formula `cells = (file_size - 4) / 4` (see `terrain.md §1.2`); 0 mismatches across all 60 files |
-| `confidence`       | `SAMPLE-VERIFIED` = count confirmed directly from VFS. `PLAUSIBLE` = count or absence inferred by analogy without direct per-file inspection. `CODE-CONFIRMED` = presence/absence confirmed by client load-path logic documented in a related spec. |
+| `confidence`       | `SAMPLE-VERIFIED` = count confirmed directly from VFS. `PLAUSIBLE` = count or absence inferred by analogy without direct per-file inspection. `CODE-CONFIRMED` = presence/absence (or load order) confirmed by client load-path logic documented in a related spec or §1A. |
 
 ---
 
@@ -70,6 +76,87 @@ for a well-formed area.
 **Total registered cells across all 60 areas: exactly 2,503** (the sum of the per-area cell
 counts in §2, equal to the sum of `(file_size - 4) / 4` across all 60 `.lst` files). The earlier
 "approximately 2,505" was a rounding/estimate error. **SAMPLE-VERIFIED.**
+
+---
+
+## 1A. Area → cell fan-out, keying, and per-cell open order (CYCLE 1)
+
+This section gives the **linkage vocabulary** the census otherwise lacks — how an area's data and its
+cells are wired together at load time. It is the wiring an engineer needs before writing the
+area-load / streaming path; the byte layouts themselves live in their own format specs, and the
+streaming lifecycle behaviour is in `specs/terrain-streaming.md`.
+
+### 1A.1 The area → cell fan-out
+
+On **area-enter** the area orchestrator loads the per-area data and the area's **cell-key membership
+set**; then the world-enter path resolves the player's spawn cell and kicks the **cold-start ring**,
+which streams cells one at a time on demand (the center cell plus its neighbourhood, expanding as the
+player moves). Each registered area owns a cell-key membership set loaded from its `d<NNN>.lst` file —
+the authoritative set of valid cell keys for the area. **A cell may only be loaded if its key is in
+that set.** Cells outside the set are never streamed.
+
+### 1A.2 The cell key
+
+Each cell is identified by a key derived from its grid indices:
+
+```
+cell_key = mapZ + 100000 * mapX
+```
+
+(`mapX`, `mapZ` are the cell's X / Z grid indices.) The `d<NNN>.lst` file holds a 4-byte count
+followed by that many 32-bit cell keys — exactly the set tested by the membership gate. This is the
+same key used by the per-cell find-or-load path (see `structs/terrain-manager.md`,
+`specs/terrain-streaming.md §3`). **CODE-CONFIRMED.**
+
+### 1A.3 The 4 per-area binaries (opened before any cell streams)
+
+Before any cell is streamed, the area orchestrator opens four per-area binaries, in this fixed order
+(each via the VFS disk-file wrapper; the prior area's data is freed first):
+
+| # | File | Size / shape | Role |
+|---|------|--------------|------|
+| 1 | `map<NNN>.bin` | fixed 520-byte virtual read | per-area map block |
+| 2 | `regiontable<NNN>.bin` | 1,536 bytes (32 × 48) | region table; expanded into a region origin/spawn-point list |
+| 3 | `region<NNN>.bin` | width(4) + height(4) + `width·height` grid bytes + originX(4) + originZ(4) | region grid |
+| 4 | `npc<NNN>.arr` | 28-byte spawn records; record count = `file_size / 28 + 1`, slot 0 zeroed | npc spawn array (see `npc_spawns.md`) |
+
+Full byte layouts are in the respective format specs; this is the per-area open inventory and order
+only. **CODE-CONFIRMED (open order + sizes).**
+
+### 1A.4 The per-cell open order (synchronous, on a cache miss)
+
+When a cell is streamed (a **cache miss** against the 34-cell loader pool — see
+`structs/terrain-manager.md`), the per-cell loader opens, in fixed code order:
+
+1. **`.mud`** — a per-cell grid blob — first.
+2. **`.gad`** — second, but this is a **STUB in this build**: the call always succeeds without ever
+   opening a file (dead / disabled scaffolding). Treat it as effectively a no-op; no `.gad` files
+   exist in the census.
+3. **`.map`** — the per-cell text descriptor — third / last. The `.map` is a **CP949 whitespace-
+   delimited keyword text file**.
+
+The per-cell **sub-asset** files — `.ted` (terrain geometry), `.up` (up-terrain), `.bud` (building),
+`.sod` (collision), `.fx1`..`.fx7` (effect layers), `.exd` (extended detail) — are **NOT opened
+directly by the per-cell loader.** They are opened **inside the `.map` parse**: each `.map` section
+(`TERRAIN` / `EXTRA_TERRAIN` / `UP_TERRAIN` / `BUILDING` / `FX1`..`FX7` / `SOLID`) carries a
+`DATAFILE` token naming the blob to open, and the parser opens + decodes that blob via the VFS open
+router as it scans the section. So the per-cell sub-asset filenames are **data-driven** — read as
+literal `DATAFILE` tokens from the `.map` text — **not derived from a cell-key → filename rule.**
+Their relative open order is the section order within the `.map` text, not a code-fixed order.
+
+**Every open in this whole fan-out is SYNCHRONOUS on the calling (main) thread.** Actual cell loads
+are serialized under a global load lock; the streaming worker thread is dormant in this build (see
+`specs/terrain-streaming.md §2`). **CODE-CONFIRMED.**
+
+### 1A.5 Correction — the `d<NNN>x..z..` printf patterns are a dev exporter, NOT the loader
+
+There exist `data/map<NNN>/dat/d<NNN>x<mapX>z<mapZ>.sod` / `.ted` / `.ted.post` printf-style path
+patterns in the binary. These are a **dev exporter / baker tool path** — they **WRITE** `.ted` /
+`.ted.post` from in-memory tables — and are **NOT** part of the streaming loader's open list. The
+streaming loader's only cell-key → filename rule produces the `.mud` / `.gad` / `.map` names; the
+sub-assets come from `DATAFILE` tokens embedded in the `.map`. An engineer must **not** mistake the
+exporter pattern for the runtime load path. **CODE-CONFIRMED (the exporter pattern is reached only
+from a dev/tool entry, outside the streaming fan-out).**
 
 ---
 
@@ -333,6 +420,11 @@ Areas without mob.arr: 0 (hub), 6 (single-cell), 100 (tutorial),
 All mob records use a 28-byte stride; record count is `floor(file_size / 28)`.
 See `npc_spawns.md` for the complete field layout.
 
+> Note: `mob<NNN>.arr` is a **content census** signal only. There is **no runtime `mob.arr`
+> loader** in the client — the runtime mob-data source is `mobs.scr`, and live mob actors arrive
+> via the server area-entity snapshot. The `mob<NNN>.arr` files describe authored spawn metadata,
+> not the client's live-actor path. See `npc_spawns.md`.
+
 Mob spawn density highlights (SAMPLE-VERIFIED):
 
 | Area | Mob records | Cell count | Records per cell (approx.) |
@@ -459,7 +551,8 @@ the only area in the VFS with a second `.bge` file. **SAMPLE-VERIFIED.**
 ## 8. Special-effect layer file coverage
 
 FX layer blobs (`.fx1`–`.fx7`) are referenced per-cell from `.map` FX section `DATAFILE`
-entries. Not every cell has all seven FX layers.
+entries (see §1A.4 — the FX blob is opened during the `.map` parse via the section's `DATAFILE`
+token). Not every cell has all seven FX layers.
 
 | Extension | Total files in VFS | Notes |
 |-----------|-----------:|-------|
@@ -498,13 +591,15 @@ content-loading code. All entries reference a committed spec or this document by
 | Decision | Guidance | Evidence |
 |----------|----------|----------|
 | Is an area registered? | Check for `data/map<NNN>/dat/d<NNN>.lst`. If absent, the area does not exist. | §1.1 |
-| Enumerate cells for an area | Read the `.lst` binary; cell count = `(file_size - 4) / 4`. Deduplicate keys before use (area 0 has a duplicate). | §1.2, §4.1 |
+| Enumerate cells for an area | Read the `.lst` binary; cell count = `(file_size - 4) / 4`. The `.lst` is the cell-key membership set — a cell only streams if its key (`mapZ + 100000·mapX`) is in it. Deduplicate keys before use (area 0 has a duplicate). | §1.2, §1A.1, §1A.2, §4.1 |
+| Open order for a cell | Open `.mud` → `.gad` (a no-op stub) → `.map`; the `.ted`/`.up`/`.bud`/`.sod`/`.fx*`/`.exd` sub-assets are opened from `DATAFILE` tokens inside the `.map` parse, in section order. All synchronous. | §1A.4 |
+| Cell sub-asset filenames | Read them as `DATAFILE` tokens from the `.map` text; do NOT derive them from a cell-key printf. The `d<NNN>x..z..` `.sod`/`.ted` patterns are a dev exporter, not the loader. | §1A.4, §1A.5 |
 | Missing `.bud` for a cell | Treat as terrain-only; do not raise an error. | §3.2, §9 |
 | Missing `.mud` for a cell or area | Default to silence (music_group = 0, all ambient indices = 0). 20 areas carry no `.mud` at all. | §3.4 |
 | Missing `.sod` for a cell | Treat as no collision geometry for that cell. 5 areas each have one cell without `.sod`. | §3.1 |
 | Missing `.up` for an area | No multi-level floor geometry; skip the upper-terrain load path. All 43 areas without `.up` (the 60 areas minus the 17 with `.up`) are `.up`-free. | §3.5 |
 | Missing dome bins | Not an error for indoor (`indoor_flag = 1`) or water+indoor areas; an outdoor area missing dome bins would be anomalous. | §6.2 |
-| Missing `mob.arr` | Zero mob spawns; do not raise an error. 8 areas have no mob spawns. | §5.1 |
+| Missing `mob.arr` | Zero mob spawns; do not raise an error. 8 areas have no mob spawns. (No runtime `mob.arr` loader — see §5.1.) | §5.1 |
 | Missing `npc.arr` | Zero NPC spawns; do not raise an error. Areas 11 and 14 have no NPC spawns. | §5.2 |
 | Parsing `.arr` files with trailing bytes | Use `floor(file_size / 28)` as the record count; ignore any partial trailing record. Areas 0 and 207 have 16-byte tails. | §4.4, npc_spawns.md |
 | Walkability | Only areas 9, 13, 100 have `.tol` bitmaps. All others must use `.sod` collision geometry. | §3.6 |
@@ -567,6 +662,8 @@ content-loading code. All entries reference a committed spec or this document by
 
 - **Per-cell binary formats:** `Docs/RE/formats/terrain.md` (`.lst`, `.map`, `.ted`, `.mud`,
   `.bud`, `.up`, `.exd`, `.sod`, `.fx1`–`.fx7`)
+- **Per-cell streaming wiring + ring/pool:** `Docs/RE/specs/terrain-streaming.md`,
+  `Docs/RE/structs/terrain-manager.md`
 - **Environment / sky bins:** `Docs/RE/formats/environment_bins.md` (`map_option`, `fog`,
   `material`, `stardome`, `clouddome`, `cloud_cycle`, `weather`)
 - **Directional light, point-light, wind bins:** `Docs/RE/formats/terrain_layers.md §6–8`

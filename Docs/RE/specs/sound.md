@@ -54,7 +54,8 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | 512 KiB scratch / 1 MiB streaming ring; 3D over-size reject | CODE-CONFIRMED |
 | Volume curve: −10000 at X=0, nested-log form ×3000+0.5 otherwise | CODE-CONFIRMED (exact expression) |
 | Per-area table loader reads **FIVE** files (`.wlk .run .bgm .bge .eff`, `data/map<area>/soundtable<area>.<ext>`, 0x3000 each); 3 read at runtime, 2 (`.wlk`/`.run`) dead | CODE-CONFIRMED |
-| Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume, indoor id 863500002 | CODE-CONFIRMED |
+| Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume | CODE-CONFIRMED |
+| Trade/exchange-busy override (RELABELLED from "indoor", §6.6): per-local-player actor busy flag forces fixed BGM **863500002** over the `.mud +2` → `.bgm` table AND suppresses `.bge`; `.eff` un-gated; NO map/region "indoor" attribute on this path | CODE-CONFIRMED (wiring HIGH) / MEDIUM (the "indoor"→"trade-busy" label) |
 | Ambient 3D-point (`.eff`) play uses **kind 6** via a separate play helper (not the SFX router) | CODE-CONFIRMED |
 | Deferred/scheduled actor-event SFX dispatcher (time-gated list feeding the router) | CODE-CONFIRMED |
 | Footstep id source: actor-visual fields (+108 walk, +112 run), NOT mud cells | CODE-CONFIRMED |
@@ -419,22 +420,57 @@ are re-picked only when the relevant mud-cell byte actually changes. This preven
 
 ### 6.6 BGM zone change
 
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** the "indoor/instanced BGM override"
+> documented in earlier passes is **RELABELLED = trade/exchange-busy override**. The gate is a
+> **per-local-player actor busy flag** (set by the trade state-toggle handler, propagated to the
+> linked trade-partner actor), **not** any map/area/region "indoor" attribute. While the flag is
+> set, the ambient driver forces fixed BGM **863500002** over the `.mud +2` → `.bgm` table entry and
+> **additionally suppresses the `.bge` looped-ambient slots**; the `.eff` 3D-point slots are **not**
+> gated. No map-cell "indoor" attribute is on this path. The §11 `+0x8C` latch is a *separate*
+> SoundManager-object cache byte (do not conflate the two).
+
 When the BGM slot changes (mud+0x02 byte differs from the cached value):
 
 1. Stop and release the current BGM sound (`stopMusicZone`).
-2. **Indoor/instanced override:** if the local player's indoor flag is set (a flag on the player
-   actor signalling an instanced area), the BGM is forced to ID **863500002** instead of the table
-   entry's `sound_entry_id`.
-3. Otherwise use the table entry's `sound_entry_id`.
+2. **Trade/exchange-busy override:** if the **per-local-player actor trade/exchange-busy flag** is
+   set — i.e. the local player is currently inside an active player-to-player trade/exchange — the
+   BGM is forced to the constant ID **863500002** (a trade-ambience / exchange-mode track) instead of
+   the table entry's `sound_entry_id`, AND the `.bge` looped-ambient slots are **suppressed** for the
+   duration (§6.7). The `.eff` 3D-point slots are **not** affected — they continue to play (§6.8).
+   This flag is **not** a map/area/region "indoor" classifier: it is set/cleared on the local-player
+   actor object by the trade state-toggle S2C handler (and a small group of interaction-state actor
+   handlers), and the same value is propagated to the linked trade-partner actor. The same id
+   **863500002** is additionally reused as a one-shot 2D UI cue when the trade window opens.
+   *(Corroboration, neutral: the same per-actor busy flag also forces a frozen "trading"
+   animation/render state in the actor's per-frame update — confirming it is a trade-busy state
+   across BOTH audio and animation, never a map attribute.)*
+3. Otherwise (not trading) use the table entry's `sound_entry_id` — the normal `.mud +2` → `.bgm`
+   table music (and `.bge` ambience) plays.
 4. Start the new BGM (`playMusicZone`), which calls `createSound` with the music-volume bus gain.
 
 `playMusicZone` deduplicates: if the requested BGM ID is already playing, it does not restart.
+
+**Confidence (this override path):** the decision function being the per-frame ambient driver (the
+sole `.mud`-tile consumer), the gating flag being the per-local-player actor busy byte, the override
+forcing 863500002 over the `.bgm` table, the `.bge` suppression, and `.eff` being un-gated are ALL
+**CODE-CONFIRMED (HIGH)**. The *semantic label* "trade/exchange-busy" (vs the earlier "indoor")
+is **HIGH** (the writer is the trade state-toggle handler, propagated to the partner, and the same
+byte freezes the trading pose). Two residual **OPEN-RISK** items, carried on the *label* only (the
+wiring is pinned): (a) that no distinct map/area/region "indoor" attribute exists on this path is a
+**MEDIUM** negative-scan result; (b) that 863500002 is specifically a trade-mode track (rather than a
+generic track reused for trade) is **MEDIUM**, inferred from the trade-only writer and the UI-open
+cue reuse.
 
 ### 6.7 Looped ambient slot change (`.bge`)
 
 When either of the two ambient slots changes (mud+0x03 / mud+0x04), the old clip for that slot is
 stopped and the new one started via `playMusicZone` / `stopMusicZone`, gated by the hour-active
 byte for the new entry.
+
+**Trade/exchange-busy suppression:** when the per-local-player actor trade/exchange-busy flag is set
+(§6.6 item 2), the looped-ambient slot **start is skipped entirely** — the `.bge` ambience is
+silenced for the duration of the trade, alongside the forced BGM 863500002. When the flag clears
+(trade ends), the normal `.bge` ambience resumes on the next evaluation. (CODE-CONFIRMED, HIGH.)
 
 ### 6.8 3D point source slot change (`.eff`)
 
@@ -757,7 +793,7 @@ They are engine-internal C++ heap offsets — not wire offsets, not file offsets
 | +0x85 | 1 | u8 | Terrain enabled | `OPTION_SOUND_TERRAIN` |
 | +0x86 | 1 | u8 | Char/mob enabled | `OPTION_SOUND_CHAR` || `OPTION_SOUND_MOB` |
 | +0x88 | 4 | u32 | Mixer channel count = **10** | Set at init |
-| +0x8C | 1 | u8 | Indoor/global BGM toggle latch | Flipped on indoor-flag transition |
+| +0x8C | 1 | u8 | SoundManager global-BGM toggle latch (cache byte) | A SoundManager-object cache byte, flipped on a BGM-toggle transition. **SEPARATE from** the per-local-player actor trade/exchange-busy flag that drives the §6.6 BGM override — do **not** conflate the two (the actor busy flag lives on the actor object, not here) |
 | +0x90 | 4 | u32 | Ambient-driver last-eval time (ms) | Throttle anchor for 600 000 ms cadence |
 
 ---
@@ -785,7 +821,7 @@ specific C# API.
 | 3D SFX always one-shot (all under 250 KB, well within 512 KiB limit) | Confirmed by VFS census |
 | Volume = 0.0 maps to full silence (−10 000 mB equivalent) | Audio drop must be hard, not a near-silent bleed |
 | Footstep ID comes from actor-visual fields (+108/+112), NOT from `.wlk`/`.run` tables | Those tables are all-null; reading them returns silence |
-| BGM indoor override = **863500002** | Must be applied before `playMusicZone` dedup check |
+| BGM trade/exchange-busy override = **863500002** (forced over the `.bgm` table when the per-local-player actor trade-busy flag is set; also suppresses `.bge`, leaves `.eff` alone) | Must be applied before `playMusicZone` dedup check; NOT a map/region "indoor" attribute (§6.6) |
 | Music-exempt IDs **861010109** / **861010110** bypass the music bus gain | Play at amplitude 1.0 regardless of the music slider |
 
 ### 12.3 Ambient driver re-implementation checklist
@@ -794,8 +830,12 @@ specific C# API.
 2. Gate on player existence; skip if no movement (< 2.0 unit threshold).
 3. Update 3D listener position.
 4. Look up the MUD cell at player (X, Z); read bytes at offsets +2 through +7.
-5. For BGM (byte +2): on change, stop old → apply indoor override if needed → start new (dedup).
+5. For BGM (byte +2): on change, stop old → if the per-local-player actor trade/exchange-busy flag
+   is set, force BGM 863500002 (and suppress `.bge`, step 6) → else use the table entry → start new
+   (dedup).
 6. For ambient (bytes +3, +4): on change per slot, stop old → check hour → start new if hour-active.
+   **If the trade/exchange-busy flag is set, skip the `.bge` slot start entirely** (suppressed for
+   the trade's duration; §6.7).
 7. For 3D point (bytes +5, +6, +7): on change per slot, stop old → check hour → play new at
    (entry.pos_x, playerY, entry.pos_z) with volume `entry.volume_factor × 0.7`.
 8. Honour 600 000 ms forced-re-eval cadence.
@@ -1126,6 +1166,7 @@ must source the auth endpoint from its own configuration, not from the asset arc
   `specs/intro_sequence.md`.
 - **Front-end scene flow** (login state machine, char-select chrome): `specs/frontend_scenes.md`.
 - **Canonical names**: see `Docs/RE/names.yaml` (`SoundManager`, `GSound`, `GSoundOGG`,
-  `GSoundThread`, `SoundKind`, `SoundEvent`, `IndoorBgmOverrideId`, `MusicSliderExemptIds`,
-  `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).
+  `GSoundThread`, `SoundKind`, `SoundEvent`, the trade/exchange-busy BGM override id (863500002 —
+  formerly catalogued as an "indoor" override id; relabelled this cycle, see §6.6),
+  `MusicSliderExemptIds`, `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).
 - **Provenance**: see `Docs/RE/journal.md`.

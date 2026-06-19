@@ -22,6 +22,16 @@ loader_resolved: true              # two-witness gate (IDB loader read-set + rea
                                    #   mob.arr (20-byte record) + mobinfo.mi: NO CLIENT LOADER (tool/editor formats)
 ```
 
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, evidence [static-ida]):** the `.arr` is **NOT the
+> live-actor source.** Live actors arrive via the **server area-entity snapshot** (a network packet)
+> → an 880-byte spawn descriptor → the actor-spawn routine; the `.arr` supplies **position / facing /
+> static metadata ONLY** (its facing field feeds the actor yaw as `π/2 − value`), and the actor's
+> visual id resolves from the mob/npc id through the `mobs.scr` / `npc.scr` template maps + the
+> boot-loaded character-table catalogue — not from the disk record. An **offline port** (no server)
+> must synthesize actors from `.arr` + the visual catalogue. Ground-Y is **re-sampled from terrain
+> every frame** (sentinel when the cell is not yet streamed; a later frame re-snaps). See §Runtime
+> role below. [2026-06-19]
+
 > **Two-witness re-verification (build 263bd994, 2026-06-16).** This spec was re-confronted against
 > THIS build's loader (witness 1 — the area-binary loader read-set + every field consumer) AND the
 > real VFS sample (witness 2 — all 58 `npc*.arr` + 52 `mob*.arr` entries read straight from the
@@ -61,15 +71,71 @@ At load time the runtime prepends one **sentinel null-record** (all bytes zero) 
 
 ---
 
+## Runtime role — the `.arr` is NOT the live-actor source (CYCLE 1)
+
+**Confidence: CODE-CONFIRMED.** This is a major correction that kills a wrong assumption ("iterate
+`npc<NNN>.arr` to spawn the world's actors").
+
+### The live-actor path is the SERVER snapshot
+
+The shipped client does **not** iterate `npc<NNN>.arr` to build actors. Live actors arrive from the
+**server**: an **area-entity snapshot** network message is parsed **per record** into an **880-byte
+spawn descriptor** on the stack, and that descriptor is handed to the **actor-spawn routine**, which
+constructs the actor and resolves its visual (skin / skeleton / motion). So the live-actor chain is:
+
+```
+server area-entity snapshot (network)  →  880-byte spawn descriptor  →  actor-spawn routine  →  actor + visual
+```
+
+### What the disk `.arr` actually supplies
+
+The disk spawn array is consumed only as a **small lookup table** for position / facing / static
+metadata. The **single** place the disk array reaches actor construction is the **facing field**: in
+the area-snapshot handler, for the **npc record-kind**, the handler fetches the matching disk record
+by index and feeds its facing float into the actor's yaw as **`π/2 − facing`**. That is the **only**
+actor-construction consumer of the disk array; the remaining disk-array consumers are id / region
+lookups and tools. The actor's **visual id** (which skin / skeleton / motion) is resolved from the
+**mob/npc id** through the `mobs.scr` / `npc.scr` template maps and then the **boot-loaded
+character-table catalogue** (actormotion / skin / bind / mot) — **not** from the disk record.
+
+### Offline-port consequence (faithful behaviour)
+
+Because the real client gets its live actors from the server snapshot, a port running **offline**
+(no server) has **no snapshot** to drive spawns. The faithful offline behaviour is to **synthesize
+actors from the `.arr`** records (position / facing / static metadata) combined with the **visual
+catalogue** (resolve the visual id from the mob/npc id the same way the server path would). State of
+play:
+
+- **With a server:** the area-entity snapshot is authoritative; the `.arr` contributes **facing only**
+  (npc kind), the rest of the descriptor coming from the network.
+- **Offline (no server):** the `.arr` becomes the **fallback spawn source** — the only way to populate
+  the world with actors — paired with the visual catalogue for appearance. This is a port-side
+  accommodation, not original client behaviour, and applies only when there is no snapshot.
+
+### Ground-Y is re-sampled from terrain every frame
+
+The actor's Y is resolved by **sampling the terrain manager at the actor's X/Z**, and this re-snap
+happens **repeatedly** — at every position-set, at every motion-apply, and per-frame for the local
+player — **not once at spawn**. When the actor's terrain cell is **not yet resident** in the loaded
+streaming window, the sampler returns a **sentinel / false** and the Y is simply **not applied** that
+frame; a later frame fixes it once the cell streams in. This is the mechanism behind the known port
+debt *"NPCs spawn at a fallback Y before async terrain finishes loading."* Whether the actor's cell is
+resident at the **instant the snapshot constructs the actor** depends on the area's terrain-cell
+**streaming order relative to inbound-packet processing** — a runtime property **not settleable
+statically**; the original masks it via the repeated per-frame re-snap. **The sample-or-sentinel +
+repeated re-snap mechanism is CONFIRMED; the spawn-vs-cell-load timing is OPEN / debugger-pending.**
+
+---
+
 ## Record layout — 28 bytes per record
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0 | 2 | u16 | `mob_id` | NPC / mob template identifier; primary key used to resolve the mob template from `data/script/mobs.scr` (or `data/script/npc.scr`). See cross-references. Decodes as a plausible u16 in all 559 sampled records (distinct ids observed in the 10..10458 range). | sample-verified |
+| 0 | 2 | u16 | `mob_id` | NPC / mob template identifier; primary key used to resolve the mob template from `data/script/mobs.scr` (or `data/script/npc.scr`), and through it the actor's visual id (see §Runtime role and cross-references). Decodes as a plausible u16 in all 559 sampled records (distinct ids observed in the 10..10458 range). | sample-verified |
 | 2 | 2 | u16 | `field_02` | **INERT — present but unconsumed.** The spawn loader never reads this offset as a distinct field; no runtime consumer accesses it. It is retained in the on-disk record for stride/layout purposes only. A parser must read past it but must not attach behaviour to it. (Earlier mob-level / sub-type / faction guesses are withdrawn — they were never confirmed and the field is established as unconsumed.) **Drift note:** despite being loader-inert, this slot is **non-zero on disk in the majority of records (409 of 559; 52 of 56 files)** — it actively carries content-tool data. The loader-inert verdict is unaffected (control-flow confirms no consumer reads `+2`); only the prior impression that the slot is near-empty is corrected. | sample-verified inert |
 | 4 | 4 | f32 | `world_x` | World-space X coordinate (horizontal plane). Decodes as a plausible f32 in all 559 sampled records. | sample-verified |
-| 8 | 4 | f32 | `world_z` | World-space Z coordinate (horizontal plane). Y (height) is not stored; the terrain system snaps spawned entities to ground level. Decodes as a plausible f32 in all 559 sampled records. | sample-verified |
-| 12 | 4 | f32 | `facing` | Facing / orientation value (radians). **The runtime applies `π/2 − stored_value` as the entity's facing** — the stored value is *subtracted from* a quarter-turn, NOT added to it. The on-disk number is therefore a base orientation that the runtime reflects through a fixed quarter-turn at use time; do not apply the value raw and do not simply add π/2. (This supersedes the earlier sample-only "yaw clusters near π/2" reading and the earlier "+π/2" phrasing: the runtime operation is exactly `π/2 − value`, confirmed against the snapshot/spawn consume site, which then builds a yaw quaternion from the result.) **Sampled range:** the observed disk values span `[−1.5708 .. ≈6.20]` rad — the floor is exactly `−π/2`, consistent with a stored base-orientation the runtime reflects via `π/2 − value`. | sample-verified |
+| 8 | 4 | f32 | `world_z` | World-space Z coordinate (horizontal plane). Y (height) is not stored; the terrain system snaps spawned entities to ground level, re-sampled every frame (see §Runtime role). Decodes as a plausible f32 in all 559 sampled records. | sample-verified |
+| 12 | 4 | f32 | `facing` | Facing / orientation value (radians). **The runtime applies `π/2 − stored_value` as the entity's facing** — the stored value is *subtracted from* a quarter-turn, NOT added to it. This is the one disk field that reaches live actor construction (the area-snapshot handler feeds it into the npc actor's yaw quaternion). The on-disk number is therefore a base orientation that the runtime reflects through a fixed quarter-turn at use time; do not apply the value raw and do not simply add π/2. (This supersedes the earlier sample-only "yaw clusters near π/2" reading and the earlier "+π/2" phrasing: the runtime operation is exactly `π/2 − value`, confirmed against the snapshot/spawn consume site, which then builds a yaw quaternion from the result.) **Sampled range:** the observed disk values span `[−1.5708 .. ≈6.20]` rad — the floor is exactly `−π/2`, consistent with a stored base-orientation the runtime reflects via `π/2 − value`. | sample-verified |
 | 16 | 4 | u32 | `spawn_type` | Spawn-group link ID and spawn-type modifier. The value **7** is treated specially by the spawn-matching code: it triggers an elite / boss modifier branch (returns a 10 % bonus multiplier — 110 vs. baseline 100 — under an additional area/state guard in one site, and an additive elite bonus in another). This field is also compared against an actor's own spawn-group ID during in-scene lookup. **Enumeration drift (CONFLICT C1):** the on-disk value is NOT limited to `{0, 7}` — the real sample shows **at least 12 distinct values spanning `{0..11}`**. Value 7 is the loader-special elite/boss value and is common, but it is one of many spawn-group/type ids, not the only non-zero value. The offset/type/role re-confirm; only the prior observed-values enumeration was too narrow. | confirmed (offset/role); sample-verified (enumeration) |
 | 20 | 4 | u32 | `field_20` | **INERT — present but unconsumed.** The spawn loader never reads this offset; no runtime consumer accesses it. Retained for stride only. (Earlier respawn-delay / max-live-count guesses are withdrawn.) Non-zero in only 1 of 559 sampled records (effectively always zero). | sample-verified inert |
 | 24 | 4 | u32 | `field_24` | **INERT — present but unconsumed.** The spawn loader never reads this offset; no runtime consumer accesses it. Retained for stride only. (Earlier spawn-radius / group-size / padding guesses are withdrawn.) Zero in all 559 sampled records. | sample-verified inert |
@@ -87,10 +153,12 @@ At load time the runtime prepends one **sentinel null-record** (all bytes zero) 
 
 > **Facing field (`+12`).** The stored radian value is a **base orientation**; the runtime applies
 > **`π/2 − stored_value`** as the entity's facing (the value is subtracted from a quarter-turn, NOT
-> added) and builds a yaw quaternion from the result. A faithful port must compute `π/2 − file_value`
-> at use time to match the original's on-screen facing — simply adding π/2 would mirror the orientation.
-> This is a two-witness result; the sampled disk range is `[−1.5708 .. ≈6.20]` rad (floor = exactly
-> `−π/2`), consistent with that reflect-through-a-quarter-turn convention.
+> added) and builds a yaw quaternion from the result. This is the only disk field that reaches live
+> actor construction (npc kind, via the area-snapshot handler — see §Runtime role). A faithful port
+> must compute `π/2 − file_value` at use time to match the original's on-screen facing — simply adding
+> π/2 would mirror the orientation. This is a two-witness result; the sampled disk range is
+> `[−1.5708 .. ≈6.20]` rad (floor = exactly `−π/2`), consistent with that reflect-through-a-quarter-turn
+> convention.
 
 ---
 
@@ -113,7 +181,7 @@ slot 2 : second record from file
 slot N : N-th record from file
 ```
 
-A parallel index array of `(record_count + 1) × 4` bytes is allocated alongside. Each slot's index entry is set to its own slot number (identity mapping) upon successful file read.
+A parallel index array of `(record_count + 1) × 4` bytes is allocated alongside. Each slot's index entry is set to its own slot number (identity mapping) upon successful file read. (This array is the lookup table the area-snapshot handler indexes for the npc facing override — see §Runtime role.)
 
 ---
 
@@ -148,12 +216,13 @@ treated as **tool / editor formats**, not runtime asset formats:
   client reads this 20-byte format** — the only `mob…arr` path literal in the binary is the
   unreferenced `tool/mob/mob%s.arr` (no code cross-reference); there is no `data/map%s/mob%s.arr`
   runtime string and no runtime mob.arr loader. At runtime the client sources its mob data through
-  `data/script/mobs.scr` instead, routing `mob_id` lookups through a template-map lookup. The 20-byte
-  `mob.arr` files are therefore content-tool / editor artefacts. The **20-byte stride is itself
-  sample-verified** — all 52 `mob*.arr` entries on disk are exact multiples of 20 (a 28-byte stride
-  leaves non-zero remainders). A faithful port should **not** implement a runtime parser for them;
-  their field layout is out of client scope and remains capture/debugger-pending (no client loader
-  exists to read the field semantics).
+  `data/script/mobs.scr` instead, routing `mob_id` lookups through a template-map lookup (and through
+  it the actor's visual id — see §Runtime role). The 20-byte `mob.arr` files are therefore
+  content-tool / editor artefacts. The **20-byte stride is itself sample-verified** — all 52
+  `mob*.arr` entries on disk are exact multiples of 20 (a 28-byte stride leaves non-zero remainders).
+  A faithful port should **not** implement a runtime parser for them; their field layout is out of
+  client scope and remains capture/debugger-pending (no client loader exists to read the field
+  semantics).
 
 - **`mobinfo.mi`.** Likewise has **no client loader** — see `Docs/RE/formats/mi.md`. It is a
   tool / editor format only.
@@ -206,28 +275,32 @@ partial / mis-aligned record set rather than meaningful spawns. A faithful port 
 
 ## Cross-references
 
-### mobs.scr linkage
+### mobs.scr / npc.scr linkage and the visual catalogue
 
 The `mob_id` field is the primary key that links each spawn record to the mob / NPC template database stored in `data/script/mobs.scr` (or `data/script/npc.scr`). The runtime passes `mob_id` to a lookup function that returns a template struct pointer; from that struct the client reads:
 
 - A 17-byte name string at a known struct offset — CP949 / EUC-KR encoded.
 - A 17-byte map-class string at a separate struct offset — CP949 / EUC-KR encoded.
 - Combat stats and display parameters at further offsets.
+- The **visual catalogue id** used to select the actor's skin / skeleton / idle motion (the visual id
+  is resolved from the mob/npc id via these template maps, then through the boot-loaded
+  character-table catalogue — see §Runtime role; the disk `.arr` record does NOT carry the visual id).
 
 The `mobs.scr` format is a separate analysis target (see `Docs/RE/formats/config_tables.md`).
 Note that `mobs.scr` — **not** the on-disk `mob.arr` — is the client's actual runtime source of mob data.
 
 ### Coordinate system
 
-World coordinates use X (east/west) and Z (north/south) as the horizontal plane; Y (vertical) is absent from spawn records and is resolved at runtime by the terrain system. Observed coordinate magnitudes (approximately 25 000–65 000 world units) are consistent with a world extent of approximately 65 536 × 65 536 units, common for client-server MMORPGs of this generation.
+World coordinates use X (east/west) and Z (north/south) as the horizontal plane; Y (vertical) is absent from spawn records and is resolved at runtime by the terrain system (re-sampled every frame — see §Runtime role). Observed coordinate magnitudes (approximately 25 000–65 000 world units) are consistent with a world extent of approximately 65 536 × 65 536 units, common for client-server MMORPGs of this generation.
 
 ### Related formats
 
 | Format | File | Relationship |
 |--------|------|--------------|
-| `config_tables.md` | `data/script/mobs.scr` | Template database resolved by `mob_id`; the client's actual runtime mob-data source |
+| `config_tables.md` | `data/script/mobs.scr` | Template database resolved by `mob_id`; the client's actual runtime mob-data source; supplies the actor visual id |
 | `mi.md` | `data/ui/mobinfo.mi` | Companion mob-info file — NO client loader (tool/editor format) |
-| `terrain.md` | `data/map<NNN>/*.ted` etc. | Y-coordinate (ground snap) source for spawned entities |
+| `terrain.md` | `data/map<NNN>/*.ted` etc. | Y-coordinate (ground snap) source for spawned entities; sampled every frame |
+| `world_systems.md` | — | The area-entity snapshot → spawn-descriptor → actor-spawn wiring (the live-actor path) |
 | `pak.md` | `data.inf` / `data/data.vfs` | VFS container that holds `.arr` files |
 
 - **Glossary:** see `Docs/RE/names.yaml`
@@ -244,6 +317,7 @@ The following fields and questions remain unresolved and must not be guessed at 
 3. **16-byte tool variant (map 000)** — Whether a tool-side reader exists, and the precise field layout of the 16-byte record, remains unverified. No tool loader was identified in the shipped client.
 4. **240-byte mob-shaped variant (map 207)** — `npc207.arr` (240 bytes = 12 × 20) is a 20-byte-stride file under an npc name; the intended interpretation (mis-named mob file vs. tool artefact) and its field layout are unverified.
 5. **`mob.arr` (20-byte) and `mobinfo.mi` field semantics** — Out-of-client-scope: the shipped client has no loader for either, so their field meanings cannot be recovered from the client and are capture/debugger-pending (likely permanent). The 20-byte `mob.arr` stride is itself sample-verified; only the field layout is unrecoverable. See `mi.md`.
+6. **Spawn-vs-cell-load timing (Y re-snap, CYCLE 1)** — whether the actor's terrain cell is resident at the instant the server snapshot constructs the actor is a runtime property not settleable statically; the original masks any miss via the per-frame re-snap. Confirming the exact timing on a real area-enter is debugger-pending (the sample-or-sentinel + repeated re-snap mechanism itself is CONFIRMED — see §Runtime role).
 
 > The previously-listed unknowns for `field_02` (+2), `rotation_y`/`facing` (+12), `field_20` (+20),
 > and `field_24` (+24) are now **resolved** by the two-witness pass: `+2`, `+20`, `+24` are confirmed
@@ -268,4 +342,5 @@ The following fields and questions remain unresolved and must not be guessed at 
 No conflict exists on any **structural** claim: record size 28, headerless, sentinel slot 0, identity
 index, field offsets (+0 id / +4 x / +8 z / +12 facing / +16 spawn_type), the facing math `π/2 − value`,
 the 20-byte `mob.arr` stride, and the no-mob-loader verdict all re-confirm against build 263bd994 plus
-the real VFS sample.
+the real VFS sample. The CYCLE 1 runtime-role correction (server snapshot is the live-actor source;
+`.arr` is facing/metadata only) is a runtime-wiring clarification, not a layout change.

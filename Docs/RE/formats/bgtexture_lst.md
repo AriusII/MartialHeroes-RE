@@ -16,6 +16,14 @@
 >                  against the matching `bgtexture.txt` text mirror. A full-file scan of every
 >                  record in both instances (not just the head window) corrected the earlier
 >                  "kind is always 0x01" reading — see §Enumerations.
+>
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, evidence [static-ida]):** the kind byte drives a single
+> `==1` (static render-object) vs `!=1` (scroll/animated render-object) dispatch at load time; the
+> 6-value enum is **data-only and is never re-branched in the loader** (CONFIRMED — a full scan of the
+> loader found exactly one kind-byte comparison, no per-value branch and no jump table). Every pool
+> entry joins the shared texture scheduler pool regardless of kind. The §Cross-file join `-1`
+> inventory is re-confirmed exactly (no drift) — and the IDA addresses that had leaked into that note
+> are removed (functions are now named by role). [2026-06-19]
 
 ---
 
@@ -142,14 +150,18 @@ The record index is the global pool slot that terrain and building geometry refe
 
 - The `.dds` extension and the `data/map000/texture/` (or `data/effect/texture/`) prefix are
   added at runtime; they are **not** stored in the record.
-- **IDA-corrected (263bd994):** the `.map` `intTexId` **IS** the 0-based `.lst` record index, used
-  **directly** — the pool accessor reads `pool[0] + stride*intTexId` with **NO** subtraction (IDA
-  `0x445833` / `0x44a46d`; the raw `intTexId` is stored into `perCellTexList` at `0x44b267`). The **only**
-  `-1` in the whole chain is on the `.ted` per-cell byte: the byte is clamped to `[1, count]` (both `<1`
-  and `>count` → 1) and then indexes the cell texture list as `perCellTexList[byte-1]` (IDA `0x44b296`).
-  The earlier "1-based `intTexId` minus 1" reading was **WRONG** and is **REFUTED** — it disagreed with
-  `terrain.md §3.5`/`§5.6` (which were correct); this off-by-one rendered `intTexId=0` cells as missing
-  textures (black world) until corrected.
+- **IDA-corrected (anchor 263bd994); re-confirmed CYCLE 1, no drift:** the `.map` `intTexId` **IS**
+  the 0-based `.lst` record index, used **directly** — the global texture-pool accessor reads
+  `pool_base + stride * intTexId` with **NO** subtraction, and the raw `intTexId` is stored into the
+  per-cell texture list with **NO** subtraction by the per-cell terrain-id register routine. The
+  **only** `-1` in the whole chain is on the `.ted` per-cell byte: the per-cell texture finalize
+  routine clamps the byte to `[1, count]` (both `<1` and `>count` → 1) and then indexes the cell
+  texture list as `perCellTexList[byte-1]`. That `-1` is purely the difference between the resolve
+  base and the write base (the list is written from one slot higher than it is read), with the clamped
+  index ranging 1..count; it is a fixed, statically isolable code site. The earlier "1-based
+  `intTexId` minus 1" reading was **WRONG** and is **REFUTED** — it disagreed with `terrain.md §3.5`/
+  `§5.6` (which were correct); this off-by-one rendered `intTexId=0` cells as missing textures (black
+  world) until corrected. (See also `terrain.md`, which states this `-1` resolution as RESOLVED.)
 
 ---
 
@@ -172,15 +184,28 @@ static ground).
 | 0x0C |  12 | `KIND_TREE_BARK`  | Tree-bark / trunk patch                                          |
 | 0x14 |  20 | `KIND_FOLIAGE`    | Dense tree foliage, branches, canopy                            |
 
-- **Runtime pool dispatch (binary, CODE-CONFIRMED).** At load time the `kind` byte gates a binary
-  branch that decides which of **two** texture-pool initialization paths each record's in-memory
-  entry is wired to: `kind == 0x01` selects one pool; **any** `kind != 0x01` selects the other. The
-  byte therefore does more than label a render mode — it **selects a texture-pool init path** at
-  parse time. The loader's branch only distinguishes "is it 1 or not"; the finer 6-value
-  enumeration above is the observed *data* spread, while the runtime *code* split is just the
-  `==1` / `!=1` dichotomy. An engineer wiring the kind byte should treat `0x01` as the default
-  (static-ground) pool and route every other value to the alternate pool, then layer the
-  render-mode bucket on top.
+- **Runtime pool dispatch (binary, CODE-CONFIRMED; CYCLE 1).** At load time the `kind` byte gates a
+  **single binary branch** that decides which of **two** engine-wide render-object descriptor types
+  each record's in-memory pool entry carries: **`kind == 0x01`** wires the **STATIC** render-object
+  type (a plain static ground-texture object — the default and majority); **any** `kind != 0x01`
+  wires the **NON-STATIC** render-object type (the scroll / animated material family). The loader's
+  branch only distinguishes "is it 1 or not".
+- **The 6-value enum is DATA-ONLY and is never re-branched in the loader (CONFIRMED, CYCLE 1).** A
+  full scan of the loader found **exactly one** comparison against the kind byte (the `==1` test);
+  there is **no** per-value branch (nothing tests 2 / 0x0A / 0x0B / 0x0C / 0x14) and **no jump table**
+  on the kind byte anywhere in the loader. The finer six-value enumeration exists **only as data** —
+  and the raw kind byte is additionally preserved verbatim in a parallel per-slot byte array, leaving
+  open that a *downstream* renderer could re-read it per value; but within the load/dispatch path the
+  distinction is strictly **static (==1) vs non-static (!=1)**. So any per-value render nuance (scroll
+  speed, sway, foliage billboarding) must be reconstructed by the engineer from the relpath family —
+  the original loader does not switch on it.
+- **Shared scheduler pool (CODE-CONFIRMED).** Every pool entry — **both** kinds — is registered into
+  the engine's shared texture effect/scheduler pool with a fixed non-zero lifetime parameter at
+  per-entry init. The kind byte only changes **which** of the two render-object descriptor types the
+  entry carries, **not** whether it joins the pool. Even the static (`==1`) entries talk to that
+  shared pool for their per-frame texture handle. An engineer wiring the kind byte should treat
+  `0x01` as the default (static-ground) render-object type and route every other value to the
+  alternate (scroll/animated) type, then layer the render-mode bucket on top.
 - The render-mode **categories** are HIGH confidence (the value→relpath-family correlation holds
   across the full scan of both files). The **exact rendering behaviour** behind each mode
   (scroll speed, sway parameters, alpha-test vs. billboard) is INFERRED from the relpath families
@@ -200,6 +225,8 @@ static ground).
   vertex-sway parameters, alpha-test threshold, billboarding) — the value→render-mode buckets are
   HIGH, but the per-bucket behaviour is INFERRED from relpath families, not read from the engine's
   material table.
+- Whether a downstream renderer re-reads the preserved per-slot kind byte to distinguish the six
+  values per-value (the loader itself does not — see §Enumerations); not investigated, low priority.
 - Whether `kind` values beyond the six observed (`0x01`, `0x02`, `0x0A`, `0x0B`, `0x0C`, `0x14`)
   exist in other VFS revisions; only these two shipped instances were scanned.
 - Whether the relpath buffer is exactly 47 bytes or a smaller logical cap zero-padded into 47
@@ -210,8 +237,9 @@ static ground).
 
 ## Cross-references
 
-- Related formats: `terrain.md` (the `.ted` → `.map` → pool → `.dds` chain; this spec replaces
-  the inferred 76-byte record layout in `terrain.md §4.1`), `texture.md` (the `.dds` payload).
+- Related formats: `terrain.md` (the `.ted` → `.map` → pool → `.dds` chain, incl. the RESOLVED `-1`
+  on the `.ted` byte; this spec replaces the inferred 76-byte record layout in `terrain.md §4.1`),
+  `texture.md` (the `.dds` payload).
 - Glossary: see `Docs/RE/names.yaml` (proposed: `BgtextureLst`, `BgtextureLstRecord.kind`,
   `BgtextureLstRecord.relPath`, `BgtextureTxt`; render-mode labels `KIND_STATIC`, `KIND_SCROLL`,
   `KIND_GRASS`, `KIND_PLANT`, `KIND_TREE_BARK`, `KIND_FOLIAGE`).
@@ -225,3 +253,8 @@ static ground).
   behaviour remain as previously tiered (enumeration sample-verified from the prior full-file scan;
   per-bucket behaviour INFERRED). No addresses, decompiler output, or sample bytes crossed the
   firewall.
+- **CYCLE 1 re-verification (2026-06-19, IDB anchor 263bd994):** sharpened the kind-byte dispatch to
+  CONFIRMED single `==1`/`!=1` branch with the 6-value enum as data-only (no per-value branch / jump
+  table); recorded that every entry joins the shared texture scheduler pool regardless of kind;
+  re-confirmed the `-1` inventory and removed the IDA addresses that had leaked into the §Cross-file
+  join note (functions named by role). No addresses or decompiler output crossed the firewall.

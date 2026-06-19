@@ -10,6 +10,10 @@ verification: confirmed   # control-flow-confirmed across the streaming spine; t
                           # matrix-major / up-axis) remain capture/debugger-pending — see §9
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
+# CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
+# stream-radius pick) in the area orchestrator, Phase B (spawn-cell set + cold-start ring kick) one
+# call frame UP in the world-enter caller; the membership gate is the d<NNN>.lst cell-key set keyed by
+# mapZ + 100000*mapX; the 34-pool cache/recycle is confirmed; singleton init order recorded. [2026-06-19]
 ---
 
 # Spec: Terrain Streaming — Player-Centered Cell Ring & Per-Frame Load/Cull
@@ -53,10 +57,10 @@ conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +1000
 | Cell-index origin offset `+10000` in the world→cell snap (`index = 10000 + floor(coord/1024)`) | CODE-CONFIRMED |
 | Four-function ring set: {3×3, 5×5} × {cold-start, per-frame}; the 3×3 fn is the entry that forwards to 5×5 when radius > 1000 | CODE-CONFIRMED |
 | Stream radius by quality mode (1800 / 1000 / 600) with a literal per-area override and a 15000→1000 upper clamp | CODE-CONFIRMED |
-| Area bootstrap sequence (active-area → cell-list → spawn-init → cold-start ring) | CODE-CONFIRMED |
+| Two-phase area bootstrap: Phase A (area load + radius pick) in the area orchestrator, Phase B (spawn-cell set + cold-start kick) one call frame up in the world-enter caller | CODE-CONFIRMED |
 | **Streaming is SYNCHRONOUS per-frame on the main thread** | CODE-CONFIRMED |
 | The async worker thread + request FIFO is **dormant scaffolding (never runs)** | CODE-CONFIRMED |
-| Cell holds a fixed 9-sub-manager array (terrain/grid vs env/water/FX) | CODE-CONFIRMED |
+| Cell holds a fixed 9-sub-manager array (slot0 ground texture, slot1 building/object, slots2-8 = fx1..fx7) | CODE-CONFIRMED |
 
 ---
 
@@ -153,7 +157,8 @@ see §8 cross-references.)
 > the **`.lst` on-disk shape and the `d<NNN>.lst` path are owned by the asset-format / VFS lane** and
 > were **not re-walked in this behaviour pass** (the table above is preserved prior content). Treat
 > the on-disk shape as the format lane's authority, not this spec's. The runtime *use* of the
-> populated set — the membership gate in §3.3 — is the part this spec confirms.
+> populated set — the membership gate in §3.3 — is the part this spec confirms. The area→cell fan-out
+> and the per-cell open order are documented in `formats/area_inventory.md §1A`.
 
 ### 3.3 The membership gate
 
@@ -162,7 +167,8 @@ The per-cell loader **first** looks the requested `cellKey` up in the area cell-
 the set's end node (i.e. the key is **not present**), the loader returns "not loadable" immediately —
 *this `(mapX, mapZ)` is not part of the active area, do not load it.* Only when the key is a member
 does it proceed to the cache lookup or the actual load. This gate is what keeps the ring from loading
-cells outside the area's footprint.
+cells outside the area's footprint. The set itself is populated in **Phase A** of the bootstrap (§7)
+**before** any cell could ever be requested.
 
 ---
 
@@ -186,7 +192,9 @@ The per-cell loader takes `(streamer, mapX, mapZ, areaId)` and proceeds:
 
 The per-cell asset fan-out (the function that actually reads the cell's files) is **owned by the
 asset-format / collision / building lanes** and is out of scope here; this spec documents only that
-the loader invokes it under the load lock and keys the result by `(mapX, mapZ, areaId)`.
+the loader invokes it under the load lock and keys the result by `(mapX, mapZ, areaId)`. Its open
+order (`.mud` → `.gad` stub → `.map`, with the sub-assets pulled from `DATAFILE` tokens inside the
+`.map` parse) is documented in `formats/area_inventory.md §1A.4`.
 
 ---
 
@@ -203,11 +211,12 @@ path thereafter only scans and reuses those objects.
 > grid capacity"). Two distinct arrays exist on the two singletons:
 > - **Cell loader → 34-object cell pool.** The loader's resident-slot **count is 34**, set at
 >   loader-init. The cache lookup (§4) and the slot recycler (below) both iterate `< 34`. This is the
->   array that backs all actual cell storage.
+>   array that backs all actual cell storage — **the single authoritative OWNER of live cells.**
 > - **Terrain manager → 25-slot spatial ring.** The manager holds a **25-entry pointer ring** (the
->   5×5 spatial index) that the shift functions rotate and clear. These 25 entries are *pointers
->   into the 34-cell pool* — the spatial grid is at most 25 cells, but the pool keeps **34** so there
->   is recycle headroom for in-flight loads while the previous edge is still being culled.
+>   5×5 spatial index) that the shift functions rotate and clear. These 25 entries are *borrowed
+>   pointers into the 34-cell pool* — the spatial grid is at most 25 cells, but the pool keeps **34**
+>   so there is recycle headroom for in-flight loads while the previous edge is still being culled.
+>   The ring is a **view**, not an owner; the live centre cell is ring slot 12.
 >
 > **Engineering consequence:** size the cell pool at **34**, not 25. A pool sized at 25 will hit the
 > "terrain empty" failure path under a full 5×5 ring plus in-flight recycle headroom. The spatial
@@ -333,25 +342,55 @@ and clamped by the setter:
 
 ---
 
-## 7. Area bootstrap and cold-start ring
+## 7. Area bootstrap and cold-start ring — the two-phase sequence
 
 **Confidence: CODE-CONFIRMED.**
 
-On entering an area, the active-area switch performs this streaming-relevant sequence:
+The area-enter bootstrap is split across **two distinct call frames**. **Phase A** (in the area
+orchestrator) loads the area's data and picks the stream radius but does **not** set the spawn cell
+or kick the ring. **Phase B** (one call frame **up**, in the world-enter local-map init caller that
+invokes the orchestrator) runs **after** Phase A returns, once the local player's spawn world-XZ is
+known, and is what **sets the spawn cell and kicks the cold-start ring**. The earlier draft folded
+both into the orchestrator's "step 4"; the behaviour is identical, but the **kick lives in the
+caller, not inside the orchestrator** — corrected here.
 
-1. Store the active area id; resolve the area descriptor; format the 3-digit area folder code.
+### 7.1 Phase A — area load + stream-radius pick (the area orchestrator)
+
+In order, the area orchestrator:
+
+1. Store the active area id; resolve the area-setting descriptor record; format the 3-digit area
+   folder code.
 2. Get the loader and **load the area cell-list manifest** (`.lst`, §3) — populating the area
    cell-key set that gates all loads.
-3. Set area time-of-day and option flags; load region/sound/option tables. (The env/FX sub-manager
-   reset here is out of scope.)
-4. Get the terrain-world singleton and **set the spawn cell + kick the cold-start ring**: store the
-   spawn cell coords and pick the stream radius (the quality-mode default, or the per-area literal
-   override — see §6.6), which selects the ring size and triggers the cold-start ring fill.
-5. Initialise weather / sky / wind (owned by the env lane).
+3. Set area time-of-day and option/dome flags; load the map-option binary.
+4. **Open the 4 per-area binaries** — `map<NNN>.bin`, `regiontable<NNN>.bin`, `region<NNN>.bin`,
+   `npc<NNN>.arr` (see `formats/area_inventory.md §1A.3`).
+5. Load the 5 sound tables for the area.
+6. Get the terrain manager and write its **map-option + region words**, then **PICK the stream
+   radius** (the quality-mode default, or the per-area literal override — see §6.6), which selects
+   the ring size.
+7. Initialise weather / sky / wind (owned by the env lane).
 
-*(The active-area orchestrator sequence above was not re-walked end-to-end this pass — the
-streaming-relevant kick (set spawn cell + pick radius + cold-start) is confirmed; the surrounding
-orchestrator order is a static hypothesis.)*
+> **Ordering fact (load-bearing):** the `.lst` cell-key set (step 2) is loaded **before** the area
+> binaries (step 4) and **before** the radius pick (step 6) — so the membership gate (§3.3) is fully
+> populated before any cell could ever be requested. Phase A does **not** set the spawn cell and does
+> **not** kick the ring. *(Note: the area orchestrator has other callers — e.g. the character-select
+> scene preview builder — that load an area for a preview scene and may not run the Phase-B kick.)*
+
+### 7.2 Phase B — spawn-cell set + cold-start ring kick (the world-enter caller)
+
+After Phase A returns, the **world-enter local-map init caller** (one call frame up) runs, in order:
+
+1. Look up the map-local record for this area id.
+2. Call Phase A (the whole area orchestrator above). On failure, return.
+3. Write the local player's spawn world position from the map-local record.
+4. **Resolve the player's spawn cell from the spawn world-XZ** (snap world `(X, Z)` to a cell index).
+5. Get the terrain manager and **kick the cold-start ring** with `(spawnX, spawnZ, areaId)`.
+6. **Sample the ground height** at the spawn position and write it to the player.
+
+So the spawn-cell set + cold-start kick is owned by the **caller**, not the area orchestrator.
+
+### 7.3 The cold-start ring fill
 
 The **cold-start ring fill** does a first-time population at the spawn world position. Like the
 per-frame shift (§6.0), the **3×3 cold-start is the entry point** and **forwards to the 5×5
@@ -369,21 +408,40 @@ cell** fails to load it reports a "first terrain init" error and aborts. It then
 post-shift fan-out as the per-frame shift (§6.5): visible-cell list rebuild, sub-manager rebuild
 chain, and the center-cell height feed.
 
+### 7.4 Singleton init dependency order (what must exist before the first cell streams)
+
+Both terrain singletons are lazy one-shot singletons (constructed on first access). The hard ordering:
+
+- **The TerrainLoader is constructed and init'd before the TerrainManager finishes constructing.**
+  The manager's construction forces the loader first and stores a pointer to it; the loader's init is
+  what allocates the **34-cell pool** (and clears the dormant-worker flag, §2). So accessing the
+  manager guarantees the pool exists.
+- **The texture-preload pool (from `bgtexture.lst`) is built during manager construction.**
+- **Then Phase A** loads the `.lst` membership set and picks the radius; **then Phase B** sets the
+  spawn cell and kicks the cold-start ring — the first point any cell is actually loaded.
+
+By the time the cold-start kick runs, the pool + the cell-key gate + the texture-preload pool + the
+ring + the radius are all live.
+
 ---
 
 ## 8. The per-cell 9-sub-manager array (scope boundary)
 
-**Confidence: CODE-CONFIRMED** (that there are 9; their internals are out of scope).
+**Confidence: CODE-CONFIRMED** (the 9 slot roles are now named — see below).
 
 Each streamed cell object holds a **fixed array of 9 sub-manager pointers** (see
 `structs/terrain-manager.md`). The cell load attaches all 9 into the live scene; the cull detaches
-all 9. Roughly two of the nine are terrain-proper (the collision/grid manager family and the
-terrain-texture manager); the remaining ~7 are env / water / weather / FX managers.
+all 9. The slot roles (named in CYCLE 1, proven by the per-slot build-function order + literal error
+strings) are: **slot 0 = the ground texture-patch grid; slot 1 = the building/object placement grid;
+slots 2..8 = the seven FX overlay texture layers (fx1..fx7).** All nine are per-cell texture-index /
+object-placement grids driven by the cell `.map` descriptor.
 
 > **Scope boundary (coordination point):** the streaming lane documents only that the cell holds 9
-> opaque sub-managers and that load/cull attaches/detaches them symmetrically. The *identity and
-> internals* of these 9 are split between the collision/grid lane and the env/water/weather/FX lane;
-> the streaming spec leaves all 9 as opaque. Do not infer sub-manager behaviour from this file.
+> sub-managers and that load/cull attaches/detaches them symmetrically, plus their slot roles. The
+> per-layer *byte layouts* and the FX-attach wiring (which `.map` section feeds which slot, during
+> the `.map` parse) are owned by the asset-format / env-FX lane — see `formats/terrain.md` and
+> `structs/terrain-manager.md`. Collision and region are NOT in this 9-slot array (§5,
+> `structs/terrain-manager.md`).
 
 ---
 
@@ -395,6 +453,10 @@ terrain-texture manager); the remaining ~7 are env / water / weather / FX manage
   between the resident-slot count view and the 5×5 ring pointer array) is settled: the **loader owns a
   34-cell pool** and the **manager owns a 25-slot spatial ring** that points into it (§5). Two arrays
   on two objects, both indexing the same 34 cells. No longer open. See `structs/terrain-manager.md`.
+- **Area bootstrap ownership — RESOLVED (CYCLE 1).** The active-area orchestrator end-to-end sequence
+  (§7) is now confirmed as a **two-phase** sequence: Phase A (area load + radius pick) in the area
+  orchestrator, Phase B (spawn-cell set + cold-start kick) one call frame up in the world-enter
+  caller. The streaming-relevant kick is in the caller, not the orchestrator.
 
 **Static hypotheses (recovered from control flow, not isolated to a single site this pass):**
 
@@ -402,7 +464,6 @@ terrain-texture manager); the remaining ~7 are env / water / weather / FX manage
   clear-on-recycle behaviour itself is confirmed.
 - The **`.lst` on-disk shape and path** (`d<NNN>.lst`) — a format concern owned by the asset-format /
   VFS lane; the streaming spine only *consumes* the already-populated cell-key set.
-- The **active-area orchestrator end-to-end sequence** (§7) — the streaming-relevant kick is confirmed.
 - The claim that the request-FIFO constructor is invoked from exactly one site (the loader ctor).
 
 **Capture/debugger-pending (genuinely needs a live run):**
@@ -417,14 +478,16 @@ terrain-texture manager); the remaining ~7 are env / water / weather / FX manage
 **Out of scope (other lanes):**
 
 - The per-cell asset fan-out (`.ted`/`.map`/`.mud`/`.sod`/`.bud` decode) — see the asset-format /
-  collision / building specs.
-- **The 9 sub-manager identities** — deferred to the collision and env/FX lanes (§8).
+  collision / building specs and `formats/area_inventory.md §1A`.
+- **The 9 sub-manager byte layouts and FX-attach wiring** — see `formats/terrain.md` (§8 names only
+  the slot roles).
 
 ---
 
 ## 10. Cross-references
 
 - Streamer struct field table: `structs/terrain-manager.md`.
+- Area cell census + per-cell fan-out / open order: `formats/area_inventory.md` (§1A).
 - Terrain heightmap / cell-blob formats: `formats/terrain.md` (and the asset-format lane).
 - World / scene lifecycle: `specs/world_systems.md`, `specs/resource_pipeline.md`.
 - Collision (`.sod`) and building (`.bud`) cell objects: the collision/building specs.

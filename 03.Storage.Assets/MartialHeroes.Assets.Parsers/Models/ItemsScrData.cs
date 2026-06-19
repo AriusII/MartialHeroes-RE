@@ -60,22 +60,55 @@ public sealed class ItemsScrRecord
     /// <summary>Item description string; CP949, NUL-terminated from offset 0x038 within the fixed block.</summary>
     public required string ItemDesc { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved as model-reference key.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: .skn mesh selector, HIGH.
+    // spec: Docs/RE/formats/items_scr.md §1.4.2 — +0x080 = data/char/skin/g<ModelRefKey>.skn (printf selector).
     // spec: Docs/RE/formats/items_scr.md §1.7 — "free numeric stat at +0x080" REFUTED; this is an asset-lookup key.
     /// <summary>
-    /// Model-reference key at +0x080. Loader-resolved against the model/asset-lookup path.
+    /// <c>.skn</c> mesh selector at +0x080. Resolved at actor-spawn via the shared actor-visual catalogue
+    /// to the file path <c>data/char/skin/g&lt;ModelRefKey&gt;.skn</c> (printf-formatted numeric selector).
     /// Non-zero for item families that carry a visual model; identical across enchant variants.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
+    /// spec: Docs/RE/formats/items_scr.md §1.4.2 — "+0x080 is the .skn MESH SELECTOR resolving to
+    ///   data/char/skin/g&lt;model_ref_key&gt;.skn (printf selector, HIGH)": CONFIRMED.
     /// </summary>
     public required uint ModelRefKey { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved as animation-reference key.
+    // spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: bind-pose/skeleton POOL id.
+    // spec: Docs/RE/formats/items_scr.md §1.4.2 — +0x084 is a POOL id, NOT a direct printf.
+    //   It indexes the pre-loaded g{id}.bnd / g{id}.mot pool seeded from bindlist.txt.
+    //   Exact item-side g{id}.bnd file is OPEN-RISK A3-2 (not byte-pinned).
     /// <summary>
-    /// Animation-reference key at +0x084. Loader-resolved against the animation/asset-lookup path.
-    /// Identical across enchant variants of one base item; varies by item template/category.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
+    /// Bind-pose/skeleton-pool id at +0x084. Resolved at actor-spawn by id-lookup into the pre-loaded
+    /// bind-pose/skeleton pool (the <c>data/char/bind/g{id}.bnd</c> skeletons +
+    /// <c>data/char/mot/g{id}.mot</c> motions seeded at boot from <c>bindlist.txt</c>).
+    /// This is NOT a direct printf — it is a pool id. Identical across enchant variants; varies by template.
+    /// OPEN-RISK A3-2: the exact item-side <c>g{id}.bnd</c>/<c>.mot</c> file is NOT byte-pinned.
+    /// spec: Docs/RE/formats/items_scr.md §1.4.2 — "+0x084 is a BIND-POSE/SKELETON-POOL ID
+    ///   (NOT a direct printf); HIGH that it is a pool id; MEDIUM that the exact item-side g{id} file
+    ///   is the 1:1 member": CONFIRMED (pool id HIGH).
     /// </summary>
     public required uint AnimRefKey { get; init; }
+
+    /// <summary>
+    /// Convenience helper: the VFS path of the <c>.skn</c> mesh for this item, derived from
+    /// <see cref="ModelRefKey"/> as the printf selector.
+    /// Format: <c>data/char/skin/g{ModelRefKey}.skn</c>.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/items_scr.md §1.4.2 — the +0x080 printf selector resolves to
+    ///   <c>data/char/skin/g%d.skn</c> at actor spawn. HIGH confidence.
+    /// </remarks>
+    public string SknVfsPath => $"data/char/skin/g{ModelRefKey}.skn"; // spec: Docs/RE/formats/items_scr.md §1.4.2
+
+    /// <summary>
+    /// The bind-pose/skeleton-pool id for this item record — a direct alias for <see cref="AnimRefKey"/>.
+    /// This is a pool id, NOT a file path (OPEN-RISK A3-2: the exact <c>g{id}.bnd</c>/<c>.mot</c>
+    /// file is not byte-pinned; do NOT format a file path from this value).
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/items_scr.md §1.4.2 — "+0x084 is the pool id; do NOT format a file path
+    ///   for it — OPEN-RISK A3-2". HIGH that it is a pool id.
+    /// </remarks>
+    public uint BindPosePoolId => AnimRefKey; // spec: Docs/RE/formats/items_scr.md §1.4.2 — pool id, NOT a printf
 
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
     /// <summary>
@@ -85,13 +118,17 @@ public sealed class ItemsScrRecord
     /// </summary>
     public required ReadOnlyMemory<byte> Opaque0A4 { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4.1 — record_discriminator u8 @+0xBA: loader-resolved (tested != 14).
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — record_discriminator u8 @on-disk +0xD2: tested != 14.
+    // The loader expresses this internally as +0xBA against its working buffer whose base sits 0x18 ahead
+    // of the record start (+0xBA + 0x18 = +0xD2 on-disk). CONFIRMED.
     // CORRECTED CAMPAIGN VFS-MASTERY: prior "+0xB8 item_type_tag" is REFUTED (see §1.7).
     /// <summary>
-    /// Record discriminator byte at +0x0BA. The loader branches on this value != 14.
+    /// Record discriminator byte at on-disk offset +0xD2. The loader branches on this value != 14.
+    /// (The loader's internal notation is +0xBA relative to a working buffer 0x18 ahead of the record start:
+    /// +0xBA + 0x18 = +0xD2 on-disk. Engineers reading from disk MUST use +0xD2.)
     /// Full discriminator value enumeration is DBG-pending.
     /// DO NOT confuse with +0x0B8 (REFUTED — see items_scr.md §1.7).
-    /// spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator @+0xBA tested != 14: loader-resolved.
+    /// spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
     /// </summary>
     public required byte RecordDiscriminator { get; init; }
 

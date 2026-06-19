@@ -9,8 +9,15 @@
 > ida_reverified: 2026-06-16
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
-> conflicts: helps_1.scr per-entry 4-byte prefix UNRESOLVED (sample-probe-pending); helps.scr
->   two-level body layout WITHIN the confirmed 48-byte frame still UNVERIFIED.
+> CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): citems.scr description paragraph count
+>   RESOLVED = 10 (capacity, '#'-sentinel terminated; consumer accessor bounds index < 10).
+> conflicts: citems.scr description-paragraph count 6-vs-10 — RESOLVED in favour of 10 (capacity;
+>   each paragraph 81 bytes at block base +0xE4; runtime early-terminated by a '#'-first-byte
+>   sentinel paragraph; the loader copies the record verbatim and so carries no count constant,
+>   while the consumer paragraph accessor hard-bounds the index < 10). "6" was merely the typically
+>   populated count in VFS samples. helps_1.scr per-entry 4-byte prefix UNRESOLVED
+>   (sample-probe-pending); helps.scr two-level body layout WITHIN the confirmed 48-byte frame
+>   still UNVERIFIED.
 > Provenance: two-witness pass — neutral static-loader control-flow notes (build 263bd994) plus
 >   black-box harness observation of the maintainer's legally-owned client VFS (43,347 entries).
 
@@ -202,7 +209,23 @@ not mis-size records or mis-decode the strings.
   distinct from a key; the one field plays both roles. Confidence: **loader-resolved** (settled by
   observed loader behaviour, not a static guess).
 
-See `formats/items_scr.md` for the remaining `citems.scr` body fields.
+- **Description block = 10 fixed-offset paragraphs (capacity).** The trailing description region is
+  a block of **10** fixed-width paragraphs, each **81 bytes (0x51)** wide, beginning at record block
+  base **+0xE4 (228)**; paragraph *i* sits at `+0xE4 + 81·i`. The block fits cleanly inside the
+  record: `+0xE4 + 10·81 = 228 + 810 = 1038 (0x40E)`, leaving a 14-byte tail inside the 1052-byte
+  (0x41C) stride — there is **no overflow** (the earlier "+0x41E / 2-bytes-past" worry was a
+  hex-arithmetic slip). At runtime a `'#'`-first-byte sentinel paragraph (also 81 bytes)
+  **early-terminates** the consumer, which is why VFS samples populate only the first few paragraphs;
+  "6" was the typically-populated count, not the structural capacity. The count is **not** exposed by
+  the loader (it copies the whole record verbatim, with no per-paragraph loop) — it lives in the
+  consumer's paragraph accessor, which hard-bounds the index `< 10` (returning null for index ≥ 10)
+  and in the cash-shop description-builder loop (`i < 10`). This **RESOLVES** the prior 6-vs-10
+  ambiguity in favour of **10** and agrees with `config_tables.md §2.11`. Confidence: **HIGH**
+  (code-confirmed, static; capacity is 10, populated count is data-dependent and sentinel-terminated).
+
+See `formats/items_scr.md §2.4` for the full `citems.scr` body field layout (the authority for the
+description-paragraph body; this section resolves only the paragraph count and is not a duplicate of
+that table).
 
 ---
 

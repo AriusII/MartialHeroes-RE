@@ -20,10 +20,13 @@ namespace MartialHeroes.Assets.Parsers.Models;
 ///   mob entries).
 /// </description></item>
 /// <item><description>
-///   <see cref="IntA"/> carries the associated animation / motion base-id for the actor.
+///   <see cref="IntA"/> (<c>skin_class</c> / SkinClassId, SAMPLE-VERIFIED) is the actor-to-skeleton key
+///   joining to <c>data/char/bind/g&lt;skin_class&gt;.bnd</c> via the bindlist membership test.
 /// </description></item>
 /// <item><description>
-///   The two 9-element motion-id arrays expose flat <c>.mot</c> ids; their per-direction meaning is proposed.
+///   <see cref="DirArray1"/> (<c>motion_ids_a</c>) holds action → <c>.mot</c> clip ids;
+///   <see cref="DirArray2"/> (<c>motion_ids_b</c>) holds action → SOUND/EFFECT event ids —
+///   NOT secondary motion. The "9-direction" reading is REFUTED (action/lifecycle-keyed by use-site).
 /// </description></item>
 /// </list>
 /// </para>
@@ -71,10 +74,14 @@ public sealed class ActormotionEntry
     // ----------------------------------------------------------------
 
     /// <summary>
-    /// Integer field at record offset 0x04 (text col2).
-    /// Likely the base motion / animation id — meaning MED (unconfirmed).
+    /// <c>skin_class</c> (SkinClassId) at record offset 0x04 (text col2). SAMPLE-VERIFIED.
+    /// The actor-to-skeleton key: joins to <c>data/char/bind/g&lt;skin_class&gt;.bnd</c> via the
+    /// bindlist membership test. A value of 0 is a null skeleton (login/camera/special actors).
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — int_a @ 0x04, col2.</remarks>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class: SAMPLE-VERIFIED.
+    /// spec: Docs/RE/formats/actormotion.md §Cross-references — "col2 = skin_class joins to data/char/bind/g&lt;skin_class&gt;.bnd via bindlist".
+    /// </remarks>
     public int IntA { get; init; }
 
     /// <summary>
@@ -133,66 +140,116 @@ public sealed class ActormotionEntry
     public int DivisorY { get; init; }
 
     /// <summary>
-    /// Computed per-frame X rate at record offset 0x30.
+    /// Per-frame MOVEMENT SPEED (default locomotion) at record offset 0x30.
     /// <c>= 15.0f × RateSrcX / DivisorX</c> (15 fps base, CONFIRMED).
-    /// Physical meaning (movement displacement vs. animation advance) is MED.
+    /// This is the ground displacement per frame — NOT an animation playback rate.
+    /// (<c>rate_x</c> = default locomotion; <c>rate_y</c> = alternate / mounted locomotion.)
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — rate_x @ 0x30, 15 fps base CONFIRMED.</remarks>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §Per-frame rate fields — rate_x @ 0x30: per-frame MOVEMENT SPEED, CONFIRMED.
+    /// spec: Docs/RE/formats/actormotion.md — "rate_x/rate_y = per-frame MOVEMENT SPEED, NOT animation advance".
+    /// </remarks>
     public float RateX { get; init; }
 
     /// <summary>
-    /// Computed per-frame Y rate at record offset 0x34.
+    /// Per-frame MOVEMENT SPEED (alternate / mounted locomotion) at record offset 0x34.
     /// <c>= 15.0f × RateSrcY / DivisorY</c> (15 fps base, CONFIRMED).
-    /// Physical meaning is MED.
+    /// This is the ground displacement per frame for the alt-locomotion path.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — rate_y @ 0x34, 15 fps base CONFIRMED.</remarks>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §Per-frame rate fields — rate_y @ 0x34: per-frame MOVEMENT SPEED alt, CONFIRMED.
+    /// spec: Docs/RE/formats/actormotion.md — "rate_x/rate_y = per-frame MOVEMENT SPEED, NOT animation advance".
+    /// </remarks>
     public float RateY { get; init; }
 
-    /// <summary>Float field at record offset 0x38 (text col12). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_h @ 0x38, col12.</remarks>
+    /// <summary>
+    /// Locomotion-dust FX descriptor / id at record offset 0x38 (text col13).
+    /// Passed as the FX descriptor to the footfall-dust particle spawn.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §Per-record layout — float_h @ 0x38, col13:
+    ///   locomotion-dust FX descriptor/id. HIGH layout / MED meaning.
+    /// </remarks>
     public float FloatH { get; init; }
 
-    /// <summary>Float field at record offset 0x3C (text col13). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_i @ 0x3C, col13.</remarks>
+    /// <summary>
+    /// Locomotion-dust FX SCALE / magnitude at record offset 0x3C (text col14).
+    /// Multiplied by 1.0 (walk) or 0.18 (run) before being passed as the FX scale.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §Per-record layout — float_i @ 0x3C, col14:
+    ///   locomotion-dust FX scale/magnitude. HIGH layout / MED-HIGH meaning.
+    /// </remarks>
     public float FloatI { get; init; }
 
     /// <summary>
-    /// Primary motion-id array at record offset 0x40.
-    /// 9 elements; per-direction interpretation is proposed, not proven.
-    /// Sourced from text columns 15..23 (0-based).
+    /// <c>motion_ids_a</c> — action → <c>.mot</c> clip-id lookup at record offset 0x40.
+    /// 9 elements; each slot is keyed by the actor's action/lifecycle state (idle, walk, run,
+    /// death, mount-idle, combat-idle) — NOT by direction.
+    /// <para>Slot table: a[0]=file-source idle ref; a[1]=default idle; a[2]=walk; a[3]=run;
+    /// a[4]=death; a[5]=mount-follow idle; a[6]=combat-idle/alt; a[7..8]=no static consumer.</para>
+    /// The "9 directions" reading is REFUTED — there is no direction-indexed access site.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/actormotion.md — motion_ids_a @ 0x40, 9 i32 elements.
-    /// Direction-slot ordering (which index is which compass direction) is PROPOSED —
-    /// treat as opaque until runtime confirmation.
+    /// spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_a @ 0x40:
+    ///   action → .mot CLIP ids (animation layer); action/lifecycle-keyed, NOT direction-indexed.
+    ///   "The 9-direction reading is REFUTED." HIGH layout / HIGH meaning (by use-site).
     /// </remarks>
     public int[] DirArray1 { get; init; } = [];
 
     /// <summary>
-    /// Secondary motion-id array at record offset 0x64.
-    /// 9 elements; same flat <c>.mot</c>-id encoding as <see cref="DirArray1"/>.
-    /// Sourced from text columns 24..32 (0-based).
+    /// <c>motion_ids_b</c> — action → SOUND/EFFECT event-id lookup at record offset 0x64.
+    /// 9 elements; feeds the sound/effect routers, NEVER the animation mixer.
+    /// NOT secondary motion — this is a binary-won spec reversal.
+    /// <para>Slot table: b[0]=no consumer; b[1]=spawn sound (cat 11); b[2]=walk footstep SFX (cat 7);
+    /// b[3]=run footstep SFX (cat 8); b[5]=death effect/sound; b[6..8]=no consumer.</para>
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/formats/actormotion.md — motion_ids_b @ 0x64, 9 i32 elements.
-    /// Which array is "primary" vs "secondary/transition" is LOW confidence.
+    /// spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_b @ 0x64:
+    ///   SOUND/EFFECT event ids — fed to the sound/effect routers, NEVER the animation mixer
+    ///   (binary-won correction vs the old 'secondary motion' reading). HIGH layout / HIGH meaning (by use-site).
     /// </remarks>
     public int[] DirArray2 { get; init; } = [];
 
     // ----------------------------------------------------------------
-    // Convenience helpers (asset-chain wiring)
+    // Convenience helpers and aliases (asset-chain wiring)
     // ----------------------------------------------------------------
 
     /// <summary>
-    /// Convenience: the virtual path of the skeleton file for this actor,
-    /// derived from <c>IntA</c> which is the likely skin/skeleton class id.
-    /// Format: <c>data/char/bind/g{IntA}.bnd</c>.
+    /// Alias for <see cref="DirArray1"/>: the 9-element action → <c>.mot</c> clip-id array
+    /// (<c>motion_ids_a</c> @ record offset 0x40, cols 15..23).
+    /// Use this alias for clarity when the caller works with animation clip ids.
     /// </summary>
     /// <remarks>
-    /// The exact semantics of IntA (base motion id vs. skeleton class id) are MED.
-    /// Callers should validate the path exists in the VFS before use.
+    /// spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_a @ 0x40:
+    ///   action → .mot CLIP ids. The "9-direction interpretation is REFUTED".
     /// </remarks>
-    public string BndVfsPath => $"data/char/bind/g{IntA}.bnd";
+    public int[] MotionClipIds => DirArray1; // spec: actormotion.md — motion_ids_a: action→.mot clip ids
+
+    /// <summary>
+    /// Alias for <see cref="DirArray2"/>: the 9-element action → SOUND/EFFECT event-id array
+    /// (<c>motion_ids_b</c> @ record offset 0x64, cols 24..32).
+    /// Slots feed the sound/effect routers — NEVER the animation mixer.
+    /// </summary>
+    /// <remarks>
+    /// spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_b @ 0x64:
+    ///   SOUND/EFFECT event ids, NOT secondary motion. Binary-won correction.
+    /// </remarks>
+    public int[] SfxEventIds => DirArray2; // spec: actormotion.md — motion_ids_b: SFX/FX event ids, NOT motion
+
+    /// <summary>
+    /// Convenience join: the VFS path of the skeleton file for this actor via the
+    /// <c>skin_class</c> direct player-path rule. Format: <c>data/char/bind/g{IntA}.bnd</c>.
+    /// </summary>
+    /// <remarks>
+    /// This convenience join is valid for the <b>player skin_class direct path only</b>.
+    /// Mobs resolve the skeleton through the actormotion/appearance-catalogue indirection,
+    /// NOT a literal <c>g{skin_class}.bnd</c>.
+    /// spec: Docs/RE/formats/actormotion.md §Cross-references — "There is NO computed g{N}.bnd
+    ///   numeric rule; registration is by explicit list / IdB join". The mob skeleton is reached
+    ///   INDIRECTLY via the catalogue — NOT as a literal g{skin_class}.bnd printf.
+    /// </remarks>
+    public string BndVfsPath => $"data/char/bind/g{IntA}.bnd"; // spec: actormotion.md — player skin_class direct path only; mobs use catalogue indirection
 
     // ----------------------------------------------------------------
     // Compatibility shims — preserve pre-refactor API surface
@@ -212,15 +269,15 @@ public sealed class ActormotionEntry
     public int ActorClassId => Col1RawOffset;
 
     /// <summary>
-    /// Skin-class identifier — equals the g-id of the skeleton file
-    /// <c>data/char/bind/g{SkinClassId}.bnd</c>.
-    /// Alias for <see cref="IntA"/> (text col2, record offset 0x04).
+    /// Skin-class identifier (<c>skin_class</c>) — the actor-to-skeleton key.
+    /// Joins to <c>data/char/bind/g&lt;SkinClassId&gt;.bnd</c> via the bindlist membership test.
+    /// Alias for <see cref="IntA"/> (text col2, record offset 0x04). SAMPLE-VERIFIED.
     /// </summary>
     /// <remarks>
-    /// Compatibility alias. The skin/skeleton class is stored in the first non-key column.
-    /// spec: Docs/RE/formats/actormotion.md — int_a @ 0x04, col2.
-    /// The precise semantics (skeleton class id vs. base motion id) are MED confidence;
-    /// observed usage confirms it is the skeleton g-id for mob entries.
+    /// spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class: SAMPLE-VERIFIED.
+    /// spec: Docs/RE/formats/actormotion.md §Cross-references — "col2 = skin_class; joins to data/char/bind/g&lt;skin_class&gt;.bnd via bindlist."
+    /// There is NO computed g{N}.bnd numeric rule for mobs — mobs resolve via the catalogue/IdB join.
+    /// spec: Docs/RE/formats/actormotion.md §Cross-references — "NO computed g{N}.bnd numeric rule; registration by explicit list / IdB join".
     /// </remarks>
     public int SkinClassId => IntA;
 

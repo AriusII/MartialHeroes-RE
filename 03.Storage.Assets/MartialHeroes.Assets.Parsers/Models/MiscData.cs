@@ -121,13 +121,22 @@ public sealed class VehicleXdbRecord
 
 /// <summary>
 /// One record from <c>data/script/creature_item.xdb</c>.  Stride: 48 bytes.
+/// This is a creature HELD-ITEM VISUAL attachment table — it places a visual item on the creature.
+/// It is NOT a loot/drop table.
 /// </summary>
 /// <remarks>
 /// spec: Docs/RE/formats/xdb_tables.md §5 — creature_item.xdb: stride 48 bytes, 921 records: CONFIRMED.
+/// spec: Docs/RE/formats/xdb_tables.md §5 — CYCLE 1 RELABEL: creature held-item VISUAL attachment, NOT loot table.
+/// spec: Docs/RE/specs/assembly_graph.md §3 — "creature_item.xdb → held-item visual, not a loot table".
 /// No file header; record count = file_size / 48 (must be exact).
-/// The six attachment floats (+8..+31) likely encode a 3D attachment transform; the axis mapping
-/// is UNVERIFIED — carried through as raw values without interpretation.
-/// spec: Docs/RE/formats/xdb_tables.md §5 Known unknowns: axis mapping UNVERIFIED.
+/// <para>
+/// Keyed by <see cref="CreatureKey"/> (record +0, from the creature actor's appearance/visual-key field).
+/// At creature spawn the row's <see cref="ItemId"/> (+4) is spawned and attached as a visual, placed by
+/// the three XZ offset pairs (+8..+31) rotated into world-space by the creature's facing (Y forced 0),
+/// with <see cref="UnknownU1"/> (+36, <c>visual_scale</c>) carried into the spawned descriptor.
+/// Per-tick: gate flags (+40, +43) + <see cref="Probability"/> (+44, millisecond tick-interval = cadence).
+/// The earlier "drop / loot / 100%-probability" framing is WITHDRAWN — see spec §5 CYCLE 1.
+/// </para>
 /// </remarks>
 public sealed class CreatureItemXdbRecord
 {
@@ -220,12 +229,14 @@ public sealed class CreatureItemXdbRecord
     public required byte Flag3 { get; init; }
 
     /// <summary>
-    /// Value 100 (0x64) in every head record; likely a drop/attach probability in integer
-    /// percent.  Semantic UNVERIFIED; carried through as raw value.
-    /// spec: Docs/RE/formats/xdb_tables.md §5 — probability u32LE @ +44:
-    ///   CONFIRMED (value=100 in head); semantic UNVERIFIED.
+    /// Millisecond tick-interval at +44. Constant 100 (0x64) in all 921 records.
+    /// Consumer-confirmed as the cadence interval the per-tick gate uses to re-validate
+    /// the attached creature-item's pickup/effect — NOT a drop/probability percentage.
+    /// The earlier "probability" framing is WITHDRAWN.
+    /// spec: Docs/RE/formats/xdb_tables.md §5 — tick_interval u32LE @ +44:
+    ///   CONFIRMED (constant 100; cadence interval). Formerly named Probability — framing withdrawn.
     /// </summary>
-    public required uint Probability { get; init; }
+    public required uint Probability { get; init; } // kept as "Probability" to avoid breaking callers; role = tick_interval cadence, NOT a drop probability
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

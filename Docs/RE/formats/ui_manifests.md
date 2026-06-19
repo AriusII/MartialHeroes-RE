@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B here vs 166B in config_tables.md (config-table-lane fix, open); char-select corner close-button atlas (overflow on blacksheet 512x512 SAMPLE-VERIFIED; correct 1024-square atlas IDA-pending, CAMPAIGN 14)
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED
 ---
 
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
@@ -816,33 +816,64 @@ atlases** already documented above — drawing their chrome with literal source 
 > these **shared** atlases. **Any port code that binds a `select.dds` (or similar dedicated
 > char-select atlas) would be wrong** — no such file exists in the VFS. — SAMPLE-VERIFIED.
 
-### 5.1b FLAGGED MIS-BINDING — char-select corner close button overflows `blacksheet.dds` (SAMPLE-VERIFIED overflow; correct atlas IDA-PENDING)
+### 5.1b RESOLVED — char-select corner close button binds `tradekeepwindow.dds` (CYCLE 1 A3-7; was a mis-binding to `blacksheet.dds`)
 
-The port's char-select layout declares the corner close button with source rect
-**`(srcX = 941, srcY = 910, w = 23, h = 23)` on `data/ui/blacksheet.dds`**. But `blacksheet.dds` is
-**512×512** (header-confirmed, §1.4a). The arithmetic is decisive:
+> **RESOLVED — CYCLE 1 A3-7 (2026-06-19), static-ida + sample-verified.** The earlier FLAGGED
+> MIS-BINDING (port bound the close button to `data/ui/blacksheet.dds`, which overflows; correct
+> 1024-square atlas IDA-pending) is now settled from the char-select window construct witness.
+> **The button binds `data/ui/tradekeepwindow.dds` (uitex.txt id `0004`, 1024×1024 DXT3, §1.4).**
 
-- `srcX + w = 941 + 23 = 964` → exceeds 512.
-- `srcY + h = 910 + 23 = 933` → exceeds 512.
+The char-select (state-4) window construct builds the corner close button as a **3-state button**
+(normal / hover / pressed). The texture handle handed to that button is the one loaded from
+**`data/ui/tradekeepwindow.dds`**; that handle is consumed unchanged by the button build (no
+intervening reassignment between the load and the build), so the binding is unambiguous.
 
-Both right and bottom edges fall **outside** the 512×512 atlas, so the rect samples empty/garbage UV.
-A `(941, 910)` origin only fits a **1024×1024** atlas. **The overflow is arithmetic-certain
-(SAMPLE-VERIFIED); the binding to `blacksheet.dds` is therefore a mis-binding.** — SAMPLE-VERIFIED.
+**Source rect — read directly from the construct (CONFIRMED):**
 
-> **Correct atlas — IDA-PENDING.** The same physical close glyph at `(941, 910)` would land in-bounds
-> on a 1024² atlas; the most plausible candidates are `loginwindow.dds` or `mainwindow.dds` (both
-> 1024×1024, both already among the char-select shared atlases, §5.1a). **Which atlas the original
-> actually binds for this close button is NOT settled here** — it requires the char-select window
-> construct (`BuildScene`) witness in IDA / the running loader to confirm both the bound texture path
-> and the real `(srcX, srcY, w, h)`. Do **not** guess the atlas; reconcile this flag once the
-> construct witness lands, and do not ship `(941, 910)` against a 512² texture. — [IDA-PENDING].
+| Field | Value | Note |
+|---|---:|---|
+| srcX  | 941 | computed at build time as `910 + 0x1F` (so a literal "941" never appears in the image — see below) |
+| srcY  | 910 | |
+| w     | 23  | |
+| h     | 23  | |
+| dstX  | 971 | on-screen destination X |
+| dstY  | 610 | on-screen destination Y |
+| color | 0   | |
 
-> **Action for the port lane.** Treat the close button as a flagged defect: it must be re-bound to a
-> 1024² atlas (correct one IDA-pending) before it can render. This is the **only** char-select
-> source-rect overflow found in the CAMPAIGN 14 bounds sweep; all other char-select / login / PIN
-> rects fit their bound atlas (the tightest fit is the create-form class strip at `srcY = 1005`,
-> which sits exactly at the 1024 bottom edge for a height up to 19px — worth a runtime height check
-> but in-bounds).
+All **three** button states (normal / hover / pressed) sample the **same** atlas origin `(941, 910)`
+on the **same** texture handle — the glyph does not move between states; only the interaction flags
+change.
+
+> **Why a literal "941" search returns nothing.** The `srcX = 941` value is a **computed** quantity
+> (`910 + 0x1F`), not a stored literal, which is why a whole-binary search for the literal `941`
+> finds no hit while `910` is present. The port's rect was therefore **correct** — record this so the
+> rect `(941, 910, 23, 23)` is not re-doubted on the basis of a missing literal. Only the *atlas* was
+> wrong.
+
+**Refuted candidates.** The previously proposed candidates are all **REFUTED**:
+- `data/ui/blacksheet.dds` (512×512) — the original mis-binding; the rect overflows it
+  (`941 + 23 = 964 > 512`, `910 + 23 = 933 > 512`), so the overflow diagnosis below was correct in
+  spirit, but the fix is a different file.
+- `data/ui/loginwindow.dds` and `data/ui/mainwindow.dds` (the two 1024² guesses) — neither is the
+  bound atlas. The witnessed atlas is a **third** file, `tradekeepwindow.dds`.
+
+**Bounds check on the bound atlas (`tradekeepwindow.dds`, 1024×1024) — fits with margin:**
+- `srcX + w = 941 + 23 = 964 ≤ 1024` → OK.
+- `srcY + h = 910 + 23 = 933 ≤ 1024` → OK.
+
+> **Port fix (implied).** Re-bind the char-select corner close button to
+> **`data/ui/tradekeepwindow.dds`** (1024×1024), keep the source rect **`(941, 910, 23, 23)`** and the
+> destination **`(971, 610)`**, with all three states sharing origin `(941, 910)`. This was the
+> **only** char-select source-rect overflow found in the CAMPAIGN 14 bounds sweep; all other
+> char-select / login / PIN rects fit their bound atlas (the tightest fit is the create-form class
+> strip at `srcY = 1005`, which sits at the 1024 bottom edge for a height up to 19px — worth a runtime
+> height check but in-bounds).
+
+> **Confidence: PARSER-CONFIRMED / HIGH.** Single decisive construct site; the texture-handle
+> dataflow from the `tradekeepwindow.dds` load to the close-button texture argument is direct and
+> uninterrupted; the rect is read straight from the construct; the atlas dimension (1024×1024) is
+> cross-referenced from the sample-verified UiTex registry (§1.4). Static-only caveat: the on-screen
+> pixel result was not visually verified — that is presentation, not the binding.
 
 ### 5.2 Loading screens
 
@@ -1605,10 +1636,10 @@ gets the event. [confirmed]
 - Binary configuration tables (`.scr`, `.do`, `.ini`): `formats/config_tables.md`
 - Per-class stance `.do` skill tables (on-disk source of `iconSrcX`/`iconSrcY`): §2.7 above;
   see also `formats/config_tables.md` for the general `.do` loader pattern. Note: the stride
-  for the class-stance skill `.do` files is **116 bytes (0x74)** — this CONTRADICTS the
-  `config_tables.md` entry for `monkma.do` and class-stance variants which states 166 bytes
-  (0xA6). The 116-byte stride is CODE-CONFIRMED + SAMPLE-VERIFIED here; the `config_tables.md`
-  entry should be corrected by the config-table analyst.
+  for the class-stance skill `.do` files is **116 bytes (0x74)** — this now AGREES with
+  `formats/config_tables.md` (§2.2 / §2.16 / §3.5), which also CONFIRMS 116 bytes (0x74) and
+  REFUTES the earlier 166-byte (0xA6) estimate (166 divides none of the 12 files). The 116-byte
+  stride is CODE-CONFIRMED + SAMPLE-VERIFIED across both specs (CYCLE 1 A3-6, resolved).
 - `skillcategory.scr` (17-record × 564-byte category-banner file): see `formats/config_tables.md`
 - Character class IDs and skill IDs: `formats/config_tables.md` §2.6 (users.scr classes),
   §2.8 (skills.scr — skill catalog carrying name, cost, cooldown, motion data; does NOT carry
