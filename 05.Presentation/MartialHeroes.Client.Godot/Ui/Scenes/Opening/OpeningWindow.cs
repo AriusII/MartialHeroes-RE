@@ -65,6 +65,7 @@ public sealed partial class OpeningWindow : Control
 
     // ── View state — NO domain state ─────────────────────────────────────────
 
+    private ColorRect? _blackBackdrop; // full-screen black behind slideshow. spec: frontend_layout_tables.md §6 "alpha-over-(black-cleared)-back-buffer".
     private TextureRect? _scenarioRect;
     private float _scrollOffset;
     private float _scrollStartWait;
@@ -74,9 +75,14 @@ public sealed partial class OpeningWindow : Control
     private int _slideshowState = 1; // 1..4 (1-based). spec §6.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
     private double _dwellAccumMs;
-    private int _alpha;
-    private int _alphaDir = 1;
-    private bool _panelFadedIn;
+    // spec: intro_sequence.md §3.4 — alpha seeded at 250 (max); first direction = fade-OUT (−1).
+    // The spec seeds the constructor alpha field to 250; the port mirrors this.
+    // spec: intro_sequence.md §3.2 — direction byte selects fade-in vs fade-out; field initialised to 250.
+    private int _alpha = AlphaMax;   // spec: intro_sequence.md §3.4 "alpha byte = 250 (maximum)".
+    private int _alphaDir = -1;      // spec: intro_sequence.md §3.2 "first phase is a fade-OUT".
+    // _panelAtMax: true when alpha has reached its upper extreme (250). Dwell transition requires this AND dwell elapsed.
+    // spec: intro_sequence.md §3.1 "when the dwell expires AND the panel has reached its alpha extreme (alpha at its maximum, 250)".
+    private bool _panelAtMax = true; // initialised true because _alpha starts at 250. spec: intro_sequence.md §3.4.
 
     // Wheel scrub: a second independent crawl-Y, ±30/event, clamped 30..1833.
     // spec: frontend_layout_tables.md §6 "mouse-wheel/drag scrub path".
@@ -99,10 +105,11 @@ public sealed partial class OpeningWindow : Control
         _scrollStartWait = ScrollStartDelayMs;
         _scrollOffset = 0f;
         _wheelScrubOffset = 0f;
-        _alpha = 0;
-        _alphaDir = 1;
+        // spec: intro_sequence.md §3.4 — alpha seeded at 250 (max), first direction = fade-OUT (−1).
+        _alpha = AlphaMax;
+        _alphaDir = -1;
         _dwellAccumMs = 0.0;
-        _panelFadedIn = false;
+        _panelAtMax = true; // alpha starts at max; dwell can tick immediately. spec: intro_sequence.md §3.4.
         _slideshowState = 1;
 
         // Fire the intro BGM once at scene start. spec: frontend_layout_tables.md §6/§7.
@@ -139,12 +146,19 @@ public sealed partial class OpeningWindow : Control
     {
         if (_finished) return;
 
-        // Skip keys.
+        // Skip keys: Enter(10) / ESC(27) / Space(32).
+        // spec: frontend_layout_tables.md §6 "Enter(10)/ESC(27)/Space(32)".
+        // Use Keycode (not KeyLabel) — these are non-printable physical keys; KeyLabel is layout-dependent
+        // and may not match for Enter/ESC on non-QWERTY layouts. Keycode is the reliable match.
+        // spec: intro_sequence.md §2.5 "key codes 10 / 27 / 32 (Enter / ESC / Space)".
         bool skip = ev switch
         {
-            InputEventKey { Pressed: true, KeyLabel: Key.Enter } => true,
-            InputEventKey { Pressed: true, KeyLabel: Key.Escape } => true,
-            InputEventKey { Pressed: true, KeyLabel: Key.Space } => true,
+            InputEventKey { Pressed: true } k when
+                k.Keycode == Key.Enter || k.PhysicalKeycode == Key.Enter => true,
+            InputEventKey { Pressed: true } k when
+                k.Keycode == Key.Escape || k.PhysicalKeycode == Key.Escape => true,
+            InputEventKey { Pressed: true } k when
+                k.Keycode == Key.Space || k.PhysicalKeycode == Key.Space => true,
             _ => false,
         };
 
@@ -160,12 +174,21 @@ public sealed partial class OpeningWindow : Control
         // action 1004 (Page Up) → rewind −30·dt, floor 0.
         // action 1005 (Page Down) → forward +30·dt, ceil 1843.
         // spec: frontend_layout_tables.md §6 "Manual scrub … Page Up (DIK_PRIOR) / Page Down (DIK_NEXT)".
+        // These are FIXED keyboard bindings (DirectInput DIK table — not layout-configurable).
+        // DIK_PRIOR / DIK_NEXT are physical scan codes → use Keycode (not KeyLabel, which is
+        // layout-dependent and unreliable for non-printable keys on non-QWERTY layouts).
+        // spec: frontend_layout_tables.md §6 "FIXED keyboard bindings via the DirectInput DIK→app-code table".
         if (_scrollDone && ev is InputEventKey { Pressed: true } pageKey)
         {
             float dt = (float)GetProcessDeltaTime();
             float step = PageScrubSpeed * dt; // spec: frontend_layout_tables.md §6 "−30·dt_s / +30·dt_s"
 
-            if (pageKey.KeyLabel == Key.Pageup)
+            // Use Keycode for physical-key match (DIK_PRIOR/DIK_NEXT are scan-code bindings).
+            // PhysicalKeycode fallback covers keyboards where Keycode resolves differently.
+            // spec: frontend_layout_tables.md §6 "FIXED keyboard bindings via the DirectInput DIK→app-code table".
+            Key physKey = pageKey.Keycode != Key.None ? pageKey.Keycode : pageKey.PhysicalKeycode;
+
+            if (physKey == Key.Pageup)
             {
                 // action 1004: rewind, floor 0. spec: frontend_layout_tables.md §6.
                 _scrollOffset = Mathf.Max(_scrollOffset - step, PageScrubFloor);
@@ -174,7 +197,7 @@ public sealed partial class OpeningWindow : Control
                 return;
             }
 
-            if (pageKey.KeyLabel == Key.Pagedown)
+            if (physKey == Key.Pagedown)
             {
                 // action 1005: forward, ceil 1843. spec: frontend_layout_tables.md §6.
                 _scrollOffset = Mathf.Min(_scrollOffset + step, PageScrubCeil);
@@ -233,14 +256,30 @@ public sealed partial class OpeningWindow : Control
 
     private void BuildUi()
     {
+        // Layer 0: full-screen black backdrop (behind the slideshow).
+        // spec: frontend_layout_tables.md §6 "single-texture alpha-over-(black-cleared)-back-buffer".
+        // Without a black rect behind the panel, a partially-faded quad exposes whatever was rendered below it
+        // rather than black — the original D3D clear filled the back-buffer with black each frame.
+        _blackBackdrop = new ColorRect
+        {
+            Name = "BlackBackdrop",
+            Position = Vector2.Zero,
+            Size = new Vector2(CanvasW, CanvasH),
+            Color = new Color(0f, 0f, 0f, 1f), // spec: §6 "alpha-over-(black-cleared)-back-buffer".
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        AddChild(_blackBackdrop);
+
         // Layer 1: splash slideshow (full-screen quads). spec: frontend_layout_tables.md §6.
+        // Modulate alpha starts at AlphaMax/AlphaMax = 1.0 (fully visible) because spec seeds alpha = 250.
+        // spec: intro_sequence.md §3.4 "alpha byte = 250 (maximum)".
         _slideshowRect = new TextureRect
         {
             Name = "SlideshowRect",
             Position = Vector2.Zero,
             Size = new Vector2(CanvasW, CanvasH),
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            Modulate = new Color(1f, 1f, 1f, 0f),
+            Modulate = new Color(1f, 1f, 1f, 1f), // alpha = 250/250 = 1.0. spec: intro_sequence.md §3.4.
             MouseFilter = MouseFilterEnum.Ignore,
         };
         AddChild(_slideshowRect);
@@ -358,30 +397,42 @@ public sealed partial class OpeningWindow : Control
     // ── Slideshow logic ───────────────────────────────────────────────────────
     // Phase 4 holds indefinitely; NO auto-finish. Skip is the sole exit.
     // spec: intro_sequence.md §3.1.
+    //
+    // Alpha model (spec: intro_sequence.md §3.2):
+    //   - Single alpha byte, bounds 0..250, ±1 per frame via a direction-toggle.
+    //   - Seeded at 250 (max); first direction is −1 (fade-OUT). spec: intro_sequence.md §3.4.
+    //   - Phase transition requires BOTH: dwell elapsed AND alpha == 250 (upper extreme).
+    //     spec: intro_sequence.md §3.1 "when the dwell expires AND the panel has reached its alpha extreme (250)".
+    //   - Dwell accumulator runs concurrently every frame (not gated on alpha state).
 
     private void UpdateSlideshow(float dtMs)
     {
         if (_slideshowRect is null) return;
 
-        // Alpha ramp: 0→250 per frame on fade-in. spec §6 "±1 per frame".
-        if (!_panelFadedIn)
-        {
-            _alpha += _alphaDir;
-            if (_alpha >= AlphaMax)
-            {
-                _alpha = AlphaMax;
-                _panelFadedIn = true;
-            }
+        // Step alpha ±1 per frame (frame-gated). spec: intro_sequence.md §3.2/§3.3 "±1 per rendered frame".
+        _alpha += _alphaDir;
 
-            _slideshowRect.Modulate = new Color(1f, 1f, 1f, _alpha / (float)AlphaMax);
-            return;
+        if (_alpha >= AlphaMax)
+        {
+            _alpha = AlphaMax;
+            _alphaDir = -1; // reverse direction: fade out. spec: intro_sequence.md §3.2 "direction-toggle".
+            _panelAtMax = true; // reached upper extreme → dwell transition is now eligible.
+        }
+        else if (_alpha <= 0)
+        {
+            _alpha = 0;
+            _alphaDir = 1; // reverse direction: fade in. spec: intro_sequence.md §3.2.
+            _panelAtMax = false;
         }
 
         _slideshowRect.Modulate = new Color(1f, 1f, 1f, _alpha / (float)AlphaMax);
 
+        // Dwell accumulates every frame concurrently with the alpha ramp. spec: intro_sequence.md §3.1.
         _dwellAccumMs += dtMs;
 
-        if (!(_dwellAccumMs >= DwellMs)) return;
+        // Transition condition: dwell elapsed AND alpha at upper extreme (250).
+        // spec: intro_sequence.md §3.1 "when the dwell expires AND the panel has reached its alpha extreme".
+        if (!(_dwellAccumMs >= DwellMs && _panelAtMax)) return;
 
         // Dwell expired — advance only if not yet at phase 4.
         // Phase 4 holds indefinitely (no auto-finish). spec: intro_sequence.md §3.1.
@@ -390,20 +441,19 @@ public sealed partial class OpeningWindow : Control
             _slideshowState++;
             _slideshowRect.Texture = _slideshowTextures[_slideshowState - 1];
             _dwellAccumMs = 0.0;
-            _panelFadedIn = false;
-            _alpha = 0;
-            _alphaDir = 1;
-            _slideshowRect.Modulate = new Color(1f, 1f, 1f, 0f);
+            // Next phase seeds at 250 (max), direction −1 (fade-out). spec: intro_sequence.md §3.4.
+            _alpha = AlphaMax;
+            _alphaDir = -1;
+            _panelAtMax = true;
+            _slideshowRect.Modulate = new Color(1f, 1f, 1f, 1f); // alpha 250/250.
             GD.Print($"[OpeningWindow] Slideshow → phase {_slideshowState}. spec §6.");
         }
-        // Phase 4: reset dwell accumulator so it loops the alpha fade without advancing.
+        // Phase 4: reset dwell accumulator so it holds without advancing. alpha ramp continues.
+        // spec: intro_sequence.md §3.1 "phase 4 holds and loops its alpha fade indefinitely".
         else
         {
             _dwellAccumMs = 0.0;
-            _panelFadedIn = false;
-            _alpha = 0;
-            _alphaDir = 1;
-            _slideshowRect.Modulate = new Color(1f, 1f, 1f, 0f);
+            // alpha continues its bidirectional ramp — do not reset it here.
         }
     }
 

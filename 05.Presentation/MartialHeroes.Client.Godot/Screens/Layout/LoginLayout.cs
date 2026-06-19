@@ -143,10 +143,19 @@ public static class LoginLayout
     public const int ModalChromeH = 190;
     public const int ModalChromeSrcX = 318;
     public const int ModalChromeSrcY = 647;
+
+    // ExitPanel prompt area (not spec-confirmed; retained for the ExitPanel only).
     public const int ModalPromptX = 32;
     public const int ModalPromptY = 42;
     public const int ModalPromptW = 276;
     public const int ModalPromptH = 70;
+
+    // Confirm-A/B label position: panel-local (10,100,330,20) per §2.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 "Confirm-A label (msg 4023) | label center | 10 | 100 | 330 | 20"
+    public const int ConfirmLabelX = 10;  // spec: frontend_layout_tables.md §2.1
+    public const int ConfirmLabelY = 100; // spec: frontend_layout_tables.md §2.1
+    public const int ConfirmLabelW = 330; // spec: frontend_layout_tables.md §2.1
+    public const int ConfirmLabelH = 20;  // spec: frontend_layout_tables.md §2.1
 
     // Dialog #1 OK button — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
     // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.

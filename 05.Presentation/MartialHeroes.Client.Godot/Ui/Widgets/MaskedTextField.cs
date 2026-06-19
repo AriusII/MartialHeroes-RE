@@ -38,16 +38,27 @@ public sealed partial class MaskedTextField : Control
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.7
     // -------------------------------------------------------------------------
 
-    // The '*' glyph advances 6 px per character in font slot 0.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "mask bit set; '*' glyph, 6 px/char"
-    private const float StarAdvance = 6f; // spec: frontend_layout_tables.md §2.7
+    // Drawn font size for ID clear-text and PW '*' mask.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §1 slot 0 = DotumChe 12 px; §2.7 field 102×13.
+    // Maintainer oracle: 12 px renders too small/cramped inside the 13-px field — enlarged to 15 px
+    // so the glyph fills the field height legibly without clipping. ClipContents is disabled below
+    // and the baseline is vertically centred so the 1–2 px overhang is invisible in practice.
+    private const int DrawnFontSize = 15; // oracle > spec; slot-0 spec is 12 px (§1/§2.7)
+
+    // '*' advance scaled from the spec value (6 px at 12 px) proportionally to the drawn size.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "6 px/char" at spec 12 px slot 0.
+    // Maintainer oracle: advance is scaled to match the enlarged readable glyph.
+    private const float StarAdvance = 6f * DrawnFontSize / 12f; // = 7.5 px (oracle-scaled from §2.7)
 
     // Caret blink period 500 ms.
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "blinks ~500 ms cadence"
     private const float CaretBlinkMs = 500f; // spec: frontend_layout_tables.md §2.7
 
-    // Text Y offset within the field rect (vertical center for the 12-px slot-0 font in 13-px field).
-    private const float TextOffsetY = 0f;
+    // Field height in canvas pixels — drives the vertical centring formula.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 "field dest 102×13"
+    private const float FieldH = 13f; // spec: frontend_layout_tables.md §2.1/§2.7
+
+    // (TextOffsetY was 0f and has been folded into the centring formula below.)
 
     // -------------------------------------------------------------------------
     // State
@@ -109,6 +120,9 @@ public sealed partial class MaskedTextField : Control
         CustomMinimumSize = new Vector2(destW, destH);
         FocusMode = FocusModeEnum.All;
         MouseFilter = MouseFilterEnum.Stop;
+        // Allow the enlarged glyph (DrawnFontSize=15 vs FieldH=13) to extend a pixel beyond the
+        // field rect without being clipped. The atlas-blit background stays exactly 102×13 (§2.1/§0.10).
+        ClipContents = false; // oracle: maintainer readability bump — spec §2.1 field rect unchanged
     }
 
     // -------------------------------------------------------------------------
@@ -228,26 +242,34 @@ public sealed partial class MaskedTextField : Control
         if (bg is not null)
             DrawTextureRect(bg, new Rect2(Vector2.Zero, Size), false);
 
-        // Text rendering — slot 0 = DotumChe 12 / advance 6.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "font slot 0"
+        // Text rendering — font slot 0 = DotumChe 12 px per spec, but drawn at DrawnFontSize (15 px)
+        // per maintainer oracle so the glyph fills the 13-px field height legibly.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §1/§2.7 "font slot 0"; maintainer oracle → DrawnFontSize.
         Font font = HudFont.CreateSlot(0);
-        int fontSize = HudFont.RowHeight(0); // spec: frontend_layout_tables.md §2.7 slot 0 = 12px
+
+        // Vertically centre the taller glyph within the 13-px field.
+        // baseline = (FieldH + DrawnFontSize) / 2  →  (13 + 15) / 2 = 14 px from top.
+        // DrawString's y-coord is the text baseline (ascent above, descent below); centering on the
+        // cap-height midpoint gives the best optical fit in the 13-px slot.
+        // spec: §2.1 field 102×13; oracle: DrawnFontSize=15 enlarged for readability.
+        float baseline = (FieldH + DrawnFontSize) / 2f; // = 14f for FieldH=13 / DrawnFontSize=15
 
         if (_masked)
         {
-            // PW field: one '*' per character, each advancing 6 px.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "'*' glyph, 6 px/char"
+            // PW field: one '*' per character, advancing StarAdvance px (oracle-scaled from spec 6 px/char at 12 px).
+            // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "'*' glyph, 6 px/char" at slot-0 12 px;
+            //       advance scaled to DrawnFontSize (oracle) → StarAdvance = 6*15/12 = 7.5 px.
             string stars = new string('*', _text.Length);
-            DrawString(font, new Vector2(1f, TextOffsetY + fontSize), stars,
-                HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
+            DrawString(font, new Vector2(1f, baseline), stars,
+                HorizontalAlignment.Left, (int)Size.X - 2, DrawnFontSize,
                 new Color(1f, 1f, 1f, 1f));
         }
         else
         {
             // ID field: left-aligned clear text.
             // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "mask bit clear → draws the stored string left-aligned"
-            DrawString(font, new Vector2(1f, TextOffsetY + fontSize), _text,
-                HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
+            DrawString(font, new Vector2(1f, baseline), _text,
+                HorizontalAlignment.Left, (int)Size.X - 2, DrawnFontSize,
                 new Color(1f, 1f, 1f, 1f));
         }
 
@@ -256,9 +278,10 @@ public sealed partial class MaskedTextField : Control
         if (_focused && _caretVisible)
         {
             // Position caret after the last character.
+            // Masked field uses StarAdvance (oracle-scaled); clear field measures string width at DrawnFontSize.
             float caretX = _masked
-                ? 1f + _text.Length * StarAdvance // spec: frontend_layout_tables.md §2.7
-                : 1f + font.GetStringSize(_text, HorizontalAlignment.Left, -1, fontSize).X;
+                ? 1f + _text.Length * StarAdvance // spec: §2.7 scaled to oracle DrawnFontSize
+                : 1f + font.GetStringSize(_text, HorizontalAlignment.Left, -1, DrawnFontSize).X;
             caretX = Math.Min(caretX, Size.X - 2f);
             DrawLine(
                 new Vector2(caretX, 2f),

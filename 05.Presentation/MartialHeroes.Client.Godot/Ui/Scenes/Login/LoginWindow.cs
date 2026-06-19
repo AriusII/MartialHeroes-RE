@@ -149,9 +149,16 @@ public sealed partial class LoginWindow : Control
     private Control? _formPanel;
     private Control? _credPanel;
 
-    // Server-list strip and deco are visible only while the server list is open. spec §2.2.
+    // Server-list strip and deco are visible only while the server list is open (state 35 onward).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 "Quit/help strip + help plate | state 35 onward"
     private Control? _serverListStrip;
     private Control? _serverListStripDeco;
+
+    // Server-list submit plate (the decoration banner on the form strip: A1 dst(265,0,494,113) src(0,469)).
+    // At curtain offset > 200 this plate is snapped to panel-local (494,469).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.3 "at offset>200 snap the server-list submit plate to (494,469)"
+    private TextureRect? _serverSubmitPlate;
+    private bool _submitPlateSnapped;
 
     // Re-fetch confirm popups (msg 4023/4024), built init-hidden exactly as the IDA login build
     // creates them. Their OK buttons fire action 113/114 (→ hide + restart server-list fetch). The
@@ -348,7 +355,10 @@ public sealed partial class LoginWindow : Control
         if (_serverListRoot is not null)
             _serverListRoot.Visible = state is >= 35 and <= 37;
 
-        bool serverListOpen = state is >= 35 and <= 37;
+        // Quit/help strip + help plate: shown on the 34→35 edge and remain visible from state 35 onward.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 "Quit/help strip + help plate | state 35 onward"
+        // (Not limited to 35..37 — states 38+ are transient connection states and the spec keeps the strip shown.)
+        bool serverListOpen = state >= 35;
         if (_serverListStrip is not null) _serverListStrip.Visible = serverListOpen;
         if (_serverListStripDeco is not null) _serverListStripDeco.Visible = serverListOpen;
 
@@ -372,6 +382,10 @@ public sealed partial class LoginWindow : Control
                 // spec: §2.2 "1 intro one-shot: play curtain SFX 861010105 (cat 2); reset curtain offset 0".
                 _curtainAcc = 0f;
                 _curtainDone = false;
+                _submitPlateSnapped = false; // re-arm the offset>200 snap. spec: frontend_layout_tables.md §2.3.
+                // Reset submit plate to its initial panel-local position (265,0). spec §2.1 "Server-list plate | dst(265,0)".
+                if (_serverSubmitPlate is not null)
+                    _serverSubmitPlate.Position = new Vector2(LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y);
                 Audio?.PlayLoginCurtainSfx();
                 GD.Print("[LoginWindow] State 1: SFX 861010105. spec: §2.2/§7.");
                 RunState(2);
@@ -523,6 +537,22 @@ public sealed partial class LoginWindow : Control
         if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formRideY);
         if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formRideY);
 
+        // At offset>200 snap the server-list submit plate to canvas-absolute (494,469).
+        // The plate is a child of _formPanel (which is at canvas Y = 326+offset), so we compute
+        // the panel-local position that yields canvas (494,469) at this moment.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.3 "at offset>200 snap the server-list submit plate to (494,469)"
+        if (!_submitPlateSnapped && _curtainAcc > 200f)
+        {
+            _submitPlateSnapped = true;
+            if (_serverSubmitPlate is not null)
+            {
+                float panelY = CurtainBotBaseY + _curtainAcc; // current canvas Y of formPanel
+                float localY = 469f - panelY; // panel-local Y for canvas target 469
+                _serverSubmitPlate.Position = new Vector2(494f, localY); // spec: frontend_layout_tables.md §2.3
+            }
+            GD.Print("[LoginWindow] Curtain offset>200: submit plate snapped to canvas (494,469). spec: §2.3.");
+        }
+
         if (_curtainAcc >= CurtainCompleteThresh)
         {
             // spec: §2.2 "at offset>222 → 3". CODE-CONFIRMED.
@@ -544,6 +574,19 @@ public sealed partial class LoginWindow : Control
         float formOpenY = CurtainBotBaseY + CurtainCompleteThresh; // 548 spec: frontend_layout_tables.md §2.3
         if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formOpenY);
         if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formOpenY);
+
+        // Instant snap also triggers the offset>200 submit-plate reposition. spec §2.3.
+        if (!_submitPlateSnapped)
+        {
+            _submitPlateSnapped = true;
+            if (_serverSubmitPlate is not null)
+            {
+                // Instant snap: formPanel is at canvas Y = CurtainBotBaseY + CurtainCompleteThresh = 548.
+                float panelY = CurtainBotBaseY + CurtainCompleteThresh; // 548
+                float localY = 469f - panelY; // panel-local Y for canvas target 469: 469-548 = -79
+                _serverSubmitPlate.Position = new Vector2(494f, localY); // spec: frontend_layout_tables.md §2.3
+            }
+        }
 
         _curtainDone = true;
         if (_flowSubState < 3) RunState(3);
@@ -711,10 +754,12 @@ public sealed partial class LoginWindow : Control
         _formPanel = formPanel;
 
         // Confirm face-plate: A1 dst(265,0,494,113) src(0,469). spec §2.1 "Server-list plate".
-        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
+        // Captured for the offset>200 curtain snap to (494,469). spec §2.3.
+        _serverSubmitPlate = AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
             LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y,
             LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H,
             LoginLayout.ConfirmFacePlate.SrcX, LoginLayout.ConfirmFacePlate.SrcY);
+        _submitPlateSnapped = false; // reset on every build. spec §2.3.
 
         // Quit-confirm button — action 102. A1 N(154,398) H(378,398). spec §2.1.
         // Rides with the form panel to its open resting canvas position. spec §2.3.
@@ -1067,18 +1112,19 @@ public sealed partial class LoginWindow : Control
             LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY);
         if (chrome is not null) panel.AddChild(chrome);
 
-        // Prompt label: msg.xdb 4023/4024. spec §2.1 "Confirm-A label (msg 4023)".
+        // Prompt label: msg.xdb 4023/4024 — panel-local (10,100,330,20), center-aligned.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 "Confirm-A label (msg 4023) | label center | 10 | 100 | 330 | 20"
         // Fallback = empty — real client only shows CP949 from msg.xdb.
         string prompt = _text.GetCaption(promptMsgId, "");
         var promptLabel = new Label
         {
             Name = "PromptLabel",
             Text = prompt,
-            Position = new Vector2(LoginLayout.ModalPromptX, LoginLayout.ModalPromptY),
-            Size = new Vector2(LoginLayout.ModalPromptW, LoginLayout.ModalPromptH),
+            Position = new Vector2(LoginLayout.ConfirmLabelX, LoginLayout.ConfirmLabelY), // spec §2.1 (10,100)
+            Size = new Vector2(LoginLayout.ConfirmLabelW, LoginLayout.ConfirmLabelH),     // spec §2.1 (330,20)
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            AutowrapMode = TextServer.AutowrapMode.Off,
             MouseFilter = MouseFilterEnum.Ignore,
         };
         promptLabel.AddThemeColorOverride("font_color", Colors.White);
