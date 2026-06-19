@@ -643,7 +643,8 @@ public sealed class AreaComposer
             if (rawByte < 1)
                 rawByte = 1; // clamp below spec: terrain.md §5.6 — "< 1 → 1": CONFIRMED
             if (rawByte > count)
-                rawByte = (byte)Math.Min(count, 255); // clamp above spec: terrain.md §5.6 — "> count → count": CONFIRMED
+                rawByte = (byte)Math.Min(count,
+                    255); // clamp above spec: terrain.md §5.6 — "> count → count": CONFIRMED
 
             // 0-based list index after −1 finalize.
             int listIdx = rawByte - 1; // spec: terrain.md §CORRECTED CYCLE 1 — idx-1 finalize: CONFIRMED

@@ -205,7 +205,7 @@ public sealed class ActorComposer
         {
             if (spawn.AppearanceVariant == InvisibleVariant)
             {
-                modelClassId = 0;       // spec: skinning.md §3.5.2 (variant 3 ⇒ 0 = invisible)
+                modelClassId = 0; // spec: skinning.md §3.5.2 (variant 3 ⇒ 0 = invisible)
                 invisible = true;
             }
             else
@@ -404,8 +404,8 @@ public sealed class ActorComposer
                 EquipmentGid = equipGid,
                 MeshGid = part.MeshGid,
                 TextureId = part.TextureId,
-                IsHandWeapon = isWeapon,         // weapon attaches to a hand bone (spec: equipment_visuals.md §5)
-                IsOffHand = false,               // main-hand node; dual-hand off-hand is a second node (§5.1)
+                IsHandWeapon = isWeapon, // weapon attaches to a hand bone (spec: equipment_visuals.md §5)
+                IsOffHand = false, // main-hand node; dual-hand off-hand is a second node (§5.1)
             });
         }
     }

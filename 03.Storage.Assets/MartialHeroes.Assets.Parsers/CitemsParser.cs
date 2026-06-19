@@ -81,8 +81,8 @@ public static class CitemsParser
     // spec: Docs/RE/formats/items_scr.md §2.4 — desc_para_count = 10 structural capacity, CONFIRMED.
     // spec: Docs/RE/formats/items_scr.md §2.4 — stop at the first '#'-sentinel paragraph (first byte '#').
     private const int OffDescBlock = 0x0E4; // first paragraph start — CONFIRMED
-    private const int DescParaWidth = 81;   // 0x51 bytes per paragraph — CONFIRMED
-    private const int DescParaCount = 10;   // structural capacity; CONFIRMED (§2.4). DO NOT change to 6.
+    private const int DescParaWidth = 81; // 0x51 bytes per paragraph — CONFIRMED
+    private const int DescParaCount = 10; // structural capacity; CONFIRMED (§2.4). DO NOT change to 6.
 
     // Record tail @ 0x40E (14 bytes) — the non-paragraph tail after the 10-paragraph description block.
     // 0x0E4 + 10*81 = 0x40E; tail ends at 0x41B inside the 1052-byte (0x41C) record.
@@ -183,6 +183,7 @@ public static class CitemsParser
                     ? cp949.GetString(paraBytes[..paraNul])
                     : cp949.GetString(paraBytes));
             }
+
             string[] descParagraphs = descParaList.ToArray();
 
             // Record tail @ 0x40E..0x41B (14 bytes). UNVERIFIED — likely duration/equip requirements/icon id.

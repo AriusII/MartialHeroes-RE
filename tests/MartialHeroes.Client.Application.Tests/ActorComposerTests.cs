@@ -31,10 +31,10 @@ public sealed class ActorComposerTests
     //   class=3,var=1: 5*(3+4)−24 = 35−24 = 11  ✓
     //   class=4,var=1: 5*(4+4)−24 = 40−24 = 16  ✓
     // spec: Docs/RE/specs/skinning.md §3.5.2 — model_class_id = 5*(class+4*variant)−24
-    [InlineData(1, 1, 1)]   // Musa: 5*(1+4)−24=1
-    [InlineData(3, 1, 11)]  // Dosa: 5*(3+4)−24=11
-    [InlineData(4, 1, 16)]  // Monk: 5*(4+4)−24=16
-    [InlineData(2, 2, 26)]  // Salsu v2: 5*(2+8)−24=26
+    [InlineData(1, 1, 1)] // Musa: 5*(1+4)−24=1
+    [InlineData(3, 1, 11)] // Dosa: 5*(3+4)−24=11
+    [InlineData(4, 1, 16)] // Monk: 5*(4+4)−24=16
+    [InlineData(2, 2, 26)] // Salsu v2: 5*(2+8)−24=26
     public void Compose_PlayerModelClassId_Formula(int playerClass, int variant, int expectedModelClassId)
     {
         // spec: Docs/RE/specs/skinning.md §3.5.2 — model_class_id = 5*(class+4*variant)−24: CONFIRMED

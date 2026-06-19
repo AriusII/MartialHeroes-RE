@@ -249,7 +249,8 @@ public sealed class ActormotionEntry
     ///   numeric rule; registration is by explicit list / IdB join". The mob skeleton is reached
     ///   INDIRECTLY via the catalogue — NOT as a literal g{skin_class}.bnd printf.
     /// </remarks>
-    public string BndVfsPath => $"data/char/bind/g{IntA}.bnd"; // spec: actormotion.md — player skin_class direct path only; mobs use catalogue indirection
+    public string BndVfsPath =>
+        $"data/char/bind/g{IntA}.bnd"; // spec: actormotion.md — player skin_class direct path only; mobs use catalogue indirection
 
     // ----------------------------------------------------------------
     // Compatibility shims — preserve pre-refactor API surface

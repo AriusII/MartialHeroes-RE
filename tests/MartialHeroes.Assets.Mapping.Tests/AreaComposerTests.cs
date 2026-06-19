@@ -23,9 +23,9 @@ public sealed class AreaComposerTests
 
     [Theory]
     [InlineData(0, 0, 0L)]
-    [InlineData(1, 0, 100000L)]         // mapX=1, mapZ=0 → 0 + 100000·1 = 100000
-    [InlineData(0, 1, 1L)]              // mapX=0, mapZ=1 → 1 + 100000·0 = 1
-    [InlineData(3, 7, 300007L)]         // mapX=3, mapZ=7 → 7 + 100000·3 = 300007
+    [InlineData(1, 0, 100000L)] // mapX=1, mapZ=0 → 0 + 100000·1 = 100000
+    [InlineData(0, 1, 1L)] // mapX=0, mapZ=1 → 1 + 100000·0 = 1
+    [InlineData(3, 7, 300007L)] // mapX=3, mapZ=7 → 7 + 100000·3 = 300007
     [InlineData(10, 5, 1000005L)]
     public void CellKey_Formula_IsMapZPlus100000TimesMapX(int mapX, int mapZ, long expectedKey)
     {
@@ -265,6 +265,7 @@ public sealed class AreaComposerTests
                 break;
             }
         }
+
         Assert.True(found, "Cell from overlap region must remain resident after a one-step recenter");
     }
 

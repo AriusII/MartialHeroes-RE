@@ -236,7 +236,12 @@ public sealed class CreatureItemXdbRecord
     /// spec: Docs/RE/formats/xdb_tables.md §5 — tick_interval u32LE @ +44:
     ///   CONFIRMED (constant 100; cadence interval). Formerly named Probability — framing withdrawn.
     /// </summary>
-    public required uint Probability { get; init; } // kept as "Probability" to avoid breaking callers; role = tick_interval cadence, NOT a drop probability
+    public required uint
+        Probability
+    {
+        get;
+        init;
+    } // kept as "Probability" to avoid breaking callers; role = tick_interval cadence, NOT a drop probability
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

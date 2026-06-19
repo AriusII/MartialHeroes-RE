@@ -457,16 +457,16 @@ public sealed class ParserRegressionTests
         int[] b = motionIdsB ?? [0, 0, 0, 0, 0, 0, 0, 0, 0];
 
         var cols = new string[33];
-        cols[0] = "0";  // category
-        cols[1] = "0";  // intra-offset (motion_key = 0)
+        cols[0] = "0"; // category
+        cols[1] = "0"; // intra-offset (motion_key = 0)
         cols[2] = col2_skinClass.ToString(); // col2 = skin_class
-        cols[3] = "0";  // rate_src_x
-        cols[4] = "1";  // divisor_x (non-zero to avoid forced-to-1 guard making tests trivial)
-        cols[5] = "0";  // rate_src_y
-        cols[6] = "1";  // divisor_y
-        cols[7] = "0";  // int_b
-        cols[8] = "0";  // float_c
-        cols[9] = "0";  // float_d
+        cols[3] = "0"; // rate_src_x
+        cols[4] = "1"; // divisor_x (non-zero to avoid forced-to-1 guard making tests trivial)
+        cols[5] = "0"; // rate_src_y
+        cols[6] = "1"; // divisor_y
+        cols[7] = "0"; // int_b
+        cols[8] = "0"; // float_c
+        cols[9] = "0"; // float_d
         cols[10] = "0"; // float_e
         cols[11] = "0"; // float_f
         cols[12] = "0"; // float_g

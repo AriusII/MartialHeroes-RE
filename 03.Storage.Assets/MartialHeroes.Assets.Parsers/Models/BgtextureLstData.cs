@@ -22,7 +22,7 @@ public enum BgTextureRenderBucket
     /// the default and majority).
     /// spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — "kind==0x01 wires the STATIC render-object type".
     /// </summary>
-    Static,   // spec: bgtexture_lst.md §Enumerations — kind==0x01: STATIC render-object. CODE-CONFIRMED CYCLE 1.
+    Static, // spec: bgtexture_lst.md §Enumerations — kind==0x01: STATIC render-object. CODE-CONFIRMED CYCLE 1.
 
     /// <summary>
     /// <c>kind != 0x01</c> — NON-STATIC (scroll / animated) render-object type.

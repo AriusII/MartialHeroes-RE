@@ -197,9 +197,9 @@ public sealed class AssembledCell
 
         // Bilinear interpolation.
         return h00 * (1f - fx) * (1f - fz)
-             + h10 * fx * (1f - fz)
-             + h01 * (1f - fx) * fz
-             + h11 * fx * fz;
+               + h10 * fx * (1f - fz)
+               + h01 * (1f - fx) * fz
+               + h11 * fx * fz;
     }
 }
 

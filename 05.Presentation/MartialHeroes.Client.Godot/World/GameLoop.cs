@@ -614,6 +614,7 @@ public sealed partial class GameLoop : Node
                 {
                     GD.PrintErr($"[GameLoop] CellAssemblyHandoff.OnSectorLoaded error: {handoffEx.Message}");
                 }
+
                 break;
 
             case SectorUnloadedEvent unloaded:
