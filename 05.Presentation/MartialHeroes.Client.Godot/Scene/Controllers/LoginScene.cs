@@ -25,6 +25,11 @@ public sealed partial class LoginScene : StubSceneController
     private string _password = "";
     private bool _syncingScene;
 
+    // CancellationTokenSource for the in-flight SelectServer/OpenGameConnection attempt.
+    // Cancelled when the user presses Cancel (action 113) on the connecting popup.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join"
+    private CancellationTokenSource? _connectCts;
+
     /// <inheritdoc/>
     public override EngineSceneState State => EngineSceneState.Login;
 
@@ -50,11 +55,17 @@ public sealed partial class LoginScene : StubSceneController
 
     public override void _ExitTree()
     {
+        _connectCts?.Cancel();
+        _connectCts?.Dispose();
+        _connectCts = null;
+
         if (_login is not null)
         {
             _login.LoginAccepted -= OnLoginAccepted;
             _login.QuitRequested -= OnQuitRequested;
             _login.LoginFlowCompleted -= OnLoginFlowCompleted;
+            _login.ConnectRequested -= OnConnectRequested;
+            _login.ConnectCancelled -= OnConnectCancelled;
         }
     }
 
@@ -98,6 +109,8 @@ public sealed partial class LoginScene : StubSceneController
         login.LoginAccepted += OnLoginAccepted;
         login.QuitRequested += OnQuitRequested;
         login.LoginFlowCompleted += OnLoginFlowCompleted;
+        login.ConnectRequested += OnConnectRequested;
+        login.ConnectCancelled += OnConnectCancelled;
         return login;
     }
 
@@ -176,39 +189,98 @@ public sealed partial class LoginScene : StubSceneController
                  "spec: login_flow.md §2.1.");
     }
 
+    // LoginFlowCompleted is now emitted by LoginWindow.NotifyConnectSuccess → state 41.
+    // It means the scene should tear down and advance to Load.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 41 / §4 "SUCCESS = char-list → state 4"
     private void OnLoginFlowCompleted(int serverId, string pin)
     {
-        GD.Print($"[LoginScene] Login chain complete (server_id={serverId}, pin_len={pin.Length}). " +
+        GD.Print($"[LoginScene] LoginFlowCompleted (server_id={serverId}, pin_len={pin.Length}). " +
                  "Advancing state 1→2 Load. spec: client_runtime.md §7.5.1 / §7.9.5.");
 
+        // Re-login with collected pin for the full credential string. spec: login_flow.md §4.2.
         if (_ctx?.UseCases is { } useCases)
-        {
             _ = useCases.LoginAsync(_account, _password, pin, CancellationToken.None);
-            _ = SelectServerAsync((ushort)serverId);
-        }
 
         if (_ctx?.SceneMachine.Current.State == EngineSceneState.Login)
             _host?.Advance();
     }
 
-    private async Task SelectServerAsync(ushort serverId)
+    // Called when LoginWindow reaches sub-state 39 (connecting popup shown).
+    // Starts the real connect; on success calls NotifyConnectSuccess; on failure calls NotifyConnectFailed.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 39 / §4
+    private void OnConnectRequested(int serverId, string pin)
     {
-        if (_ctx?.UseCases is not { } useCases) return;
+        GD.Print($"[LoginScene] ConnectRequested (server_id={serverId}). Spawning SelectServerAsync. spec: §2.2/§4.");
+        // Cancel any previous in-flight attempt.
+        _connectCts?.Cancel();
+        _connectCts?.Dispose();
+        _connectCts = new CancellationTokenSource();
+        _ = SelectServerAsync((ushort)serverId, pin, _connectCts.Token);
+    }
+
+    // Called when the user cancels the connecting popup (action 113).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join"
+    private void OnConnectCancelled()
+    {
+        GD.Print("[LoginScene] ConnectCancelled: cancelling in-flight connect. spec: §4.");
+        _connectCts?.Cancel();
+        _connectCts?.Dispose();
+        _connectCts = null;
+    }
+
+    private async Task SelectServerAsync(ushort serverId, string pin, CancellationToken ct)
+    {
+        if (_ctx?.UseCases is not { } useCases)
+        {
+            // Offline / no UseCases: fail immediately so the popup doesn't hang.
+            // spec: §4 "offline-safe: popup shows briefly then failure path shows error box"
+            GD.PrintErr($"[LoginScene] SelectServerAsync({serverId}): no UseCases (offline). Reporting failure. spec: §4.");
+            CallDeferred(MethodName.ReportConnectFailed);
+            return;
+        }
 
         try
         {
             MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
-                await useCases.SelectServerAsync(serverId, CancellationToken.None)
-                    .ConfigureAwait(false);
+                await useCases.SelectServerAsync(serverId, ct).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
 
             // spec: Docs/RE/specs/login_flow.md §2.2 — lobby resolves the game-server host:port.
             if (_ctx is not null)
                 await _ctx.OpenGameConnectionAsync(endpoint.Host, endpoint.Port).ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+
+            // Success: notify LoginWindow to advance to state 41 (LoginFlowCompleted).
+            // spec: frontend_layout_tables.md §4 "successful handshake → char-list → advance scene"
+            GD.Print($"[LoginScene] SelectServerAsync({serverId}): connect SUCCESS. Notifying LoginWindow. spec: §4.");
+            CallDeferred(MethodName.ReportConnectSuccess);
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancelled by the user via action 113 — already handled by OnConnectCancelled.
+            GD.Print($"[LoginScene] SelectServerAsync({serverId}): cancelled by user. spec: §4.");
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[LoginScene] SelectServerAsync({serverId}) skipped/failed: {ex.Message}");
+            GD.PrintErr($"[LoginScene] SelectServerAsync({serverId}) failed: {ex.Message}");
+            // Connect failure: notify LoginWindow to show the §2.1a countdown error box (msg 4028).
+            // spec: frontend_layout_tables.md §2.1a "connect failure → msg 4028 countdown error → return to list"
+            CallDeferred(MethodName.ReportConnectFailed);
         }
+    }
+
+    // Must run on the main thread (Control mutation via LoginWindow). Called via CallDeferred.
+    private void ReportConnectSuccess()
+    {
+        _login?.NotifyConnectSuccess(); // → state 41 → LoginFlowCompleted. spec: §2.2/§4.
+    }
+
+    // Must run on the main thread (Control mutation via LoginWindow). Called via CallDeferred.
+    private void ReportConnectFailed()
+    {
+        _login?.NotifyConnectFailed(); // → hide popup → msg 4028 countdown → state 34/37. spec: §2.1a/§4.
     }
 
     private void OnQuitRequested()

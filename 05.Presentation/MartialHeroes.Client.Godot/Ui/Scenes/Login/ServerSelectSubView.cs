@@ -109,10 +109,15 @@ public sealed partial class ServerSelectSubView : Control
     private const int PagerActionBase = 115;
     private const int PagerCount = 10;
 
-    // Population colour thresholds. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int PopRedThreshold = 1200;
-    private const int PopOrangeThreshold = 800;
-    private const int PopYellowThreshold = 500;
+    // Load thresholds for status-caption coloring. spec: Docs/RE/specs/frontend_layout_tables.md §4
+    // "status_code==0 with load-valid: load>1200 → red; >800 → orange; >500 → yellow; ≤500 → green"
+    private const int PopRedThreshold = 1200;    // spec: frontend_layout_tables.md §4
+    private const int PopOrangeThreshold = 800;  // spec: frontend_layout_tables.md §4
+    private const int PopYellowThreshold = 500;  // spec: frontend_layout_tables.md §4
+
+    // Status caption msg base: 4029 + status_code → caption text. spec: frontend_layout_tables.md §4
+    // "msg 4029/4030/4031/4032 are the STATUS CAPTIONS (keyed by status_code)"
+    private const int StatusCaptionMsgBase = 4029; // spec: frontend_layout_tables.md §4
 
     // Population colour DWORDs (ARGB). spec: Docs/RE/specs/frontend_layout_tables.md §4
     private static readonly Color PopColorRed = Color.Color8(255, 0, 0);
@@ -292,19 +297,17 @@ public sealed partial class ServerSelectSubView : Control
 
     private void BuildPlate(int x, int y, int actionId, int serverIndex, int statusSrcX)
     {
-        Texture2D? status = _atlas.SliceByPath(AtlasD, statusSrcX, StatusIconSrcY, StatusIconW, StatusIconH);
-        if (status is not null)
-        {
-            AddChild(new TextureRect
-            {
-                Position = PanelPoint(x + StatusIconOffsetX, y),
-                Size = new Vector2(StatusIconW, StatusIconH),
-                Texture = status,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
-            });
-        }
+        ServerEntry e = _servers[serverIndex];
 
+        // Per-plate build/draw order is the binary's (CONFIRMED, element-level pass 2026-06-19):
+        //   (1) parchment select BUTTON → (2) NAME label → (3) calligraphy FACE → (4) STATUS caption →
+        //   (5) COUNT label. Insertion order IS paint order, so the FACE (added 3rd) draws ON TOP of the
+        //   parchment button (added 1st) — that is what makes the scroll calligraphy visible (the prior
+        //   order drew the opaque parchment over the face, hiding it → empty scroll).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4 (the on-scroll calligraphy is the per-column
+        //   FACE quad src(448+124·i, 6) drawn over the parchment; the server name is small slot-0 text).
+
+        // (1) Parchment select button (clickable). Drawn FIRST = bottom of the plate stack.
         Texture2D? normal = _atlas.SliceByPath(AtlasD, PlateSrcX, PlateSrcY, PlateW, PlateH);
         Texture2D? hover = _atlas.SliceByPath(AtlasD, PlateHoverSrcX, PlateHoverSrcY, PlateW, PlateH);
 
@@ -320,11 +323,30 @@ public sealed partial class ServerSelectSubView : Control
             TexturePressed = hover,
             TextureDisabled = normal,
         };
-
         btn.Pressed += () => OnPlateClicked(actionId);
         AddChild(btn);
 
-        AddPlateCaption(x, _servers[serverIndex]);
+        // (2) NAME label (behind the face). spec: §4 build order.
+        AddPlateName(x, e);
+
+        // (3) Calligraphy FACE image (100×372 per-column quad, src(448+124·i, 6)), drawn ON TOP of the
+        // parchment button. spec: §4 (z-order CONFIRMED 2026-06-19 — face inserted after the button).
+        Texture2D? face = _atlas.SliceByPath(AtlasD, statusSrcX, StatusIconSrcY, StatusIconW, StatusIconH);
+        if (face is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = PanelPoint(x + StatusIconOffsetX, y),
+                Size = new Vector2(StatusIconW, StatusIconH),
+                Texture = face,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore, // decoration: never blocks the button hit. spec §4.
+            });
+        }
+
+        // (4) STATUS caption + (5) COUNT label, drawn on top of the face. spec: §4.
+        AddPlateStatus(x, e);
+        AddPlateCount(x);
     }
 
     private void OnPlateClicked(int actionId)
@@ -460,27 +482,96 @@ public sealed partial class ServerSelectSubView : Control
         RebuildLayout();
     }
 
-    private void AddPlateCaption(int plateX, ServerEntry e)
+    // NAME label @ (x, 390, 174×21): font slot 0, center-aligned, horizontal.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4
+    //   "name label (30+233·i, 390, 174×21) … font slot 0 … center-aligned (align mode 2)"
+    private void AddPlateName(int plateX, ServerEntry e)
     {
-        bool available = e.IsSelectable;
-        Color popColor = PopColorForLoad(e.Load);
         string name = ResolveServerName(e);
-        string loadText = ResolveLoadText(e);
-        string statusText = ResolveStatusText(e);
-
-        // Name label (left-aligned per §4 "prefer left"). Font slot 0 (default).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4
         AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White, fontSlot: 0,
-            align: HorizontalAlignment.Left);
+            align: HorizontalAlignment.Center);
+    }
 
-        // Status/info label. Font slot 0.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4
-        AddRowLabel(statusText, plateX, RowLabelY1, RowLabelH,
-            available ? Colors.White : PopColorRed, fontSlot: 0);
+    // STATUS CAPTION label @ (x, 410, 174×20): font slot 4, center-aligned, colored per §4 branch.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4
+    //   "status caption label (30+233·i, 410, 174×20) font slot 4 center-aligned colored per branch"
+    //   "status_code==0 + load-valid: >1200→msg 6001 red; >800→msg 6002 orange; >500→msg 6003 yellow;
+    //    ≤500→msg(4029+status_code) green (0xFFB5FF7A) — the available/사용가능 case"
+    //   "status_code==3: load==24→msg 6004; else msg 6005 HH:MM"
+    //   "other status_code: caption msg(4029+status_code), no color override"
+    private void AddPlateStatus(int plateX, ServerEntry e)
+    {
+        string statusCaption = ResolveStatusCaption(e, out Color statusColor);
+        AddRowLabel(statusCaption, plateX, RowLabelY1, RowLabelH, statusColor, fontSlot: 4,
+            align: HorizontalAlignment.Center);
+    }
 
-        // Population/count label: font slot 4, formatted "%4d / %4d".
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "population/count label … font slot 4, formatted %4d / %4d"
-        AddRowLabel(loadText, plateX, RowLabelY2, RowLabelH, popColor, fontSlot: 4);
+    // COUNT label @ (x, 430, 174×20): set to EMPTY STRING per spec §4 CORRECTION 2026-06-19.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4
+    //   "count label (30+233·i, 430, 174×20) … set to an EMPTY STRING by the painter.
+    //    CORRECTION 2026-06-19: the prior '%4d / %4d population count, font slot 4 at +430' was wrong —
+    //    the slot-4 label is the STATUS caption at +410; +430 is left blank."
+    private void AddPlateCount(int plateX)
+    {
+        AddRowLabel(string.Empty, plateX, RowLabelY2, RowLabelH, Colors.White, fontSlot: 0,
+            align: HorizontalAlignment.Center);
+    }
+
+    /// <summary>
+    /// Resolves the status-caption text and color for the +410 slot-4 label.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §4
+    ///   "Status / load coloring … slot-4 status caption at +410; ARGB re-confirmed 2026-06-18/2026-06-19"
+    /// </summary>
+    private string ResolveStatusCaption(ServerEntry e, out Color color)
+    {
+        // Load-valid flag = OpenTime/+6 nonzero. spec: §4 "status_code==0 with the load-valid flag (+6) set".
+        bool loadValid = e.OpenTime != 0;
+
+        if (e.StatusCode == 0 && loadValid)
+        {
+            // Load > 1200 → msg 6001, red (0xFFFF0000). spec: frontend_layout_tables.md §4.
+            if (e.Load > PopRedThreshold)
+            {
+                color = PopColorRed;
+                return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
+            }
+
+            // Load > 800 → msg 6002, orange (0xFFED6806). spec: frontend_layout_tables.md §4.
+            if (e.Load > PopOrangeThreshold)
+            {
+                color = PopColorOrange;
+                return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
+            }
+
+            // Load > 500 → msg 6003, yellow (0xFFFFFF00). spec: frontend_layout_tables.md §4.
+            if (e.Load > PopYellowThreshold)
+            {
+                color = PopColorYellow;
+                return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
+            }
+
+            // Load ≤ 500 → status caption msg (4029 + status_code), GREEN (0xFFB5FF7A) — "available/사용가능".
+            // spec: frontend_layout_tables.md §4 "≤500 → the status caption msg(4029+status_code) 0xFFB5FF7A (green)"
+            color = PopColorGreen;
+            return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // spec: §4 (4029+status_code)
+        }
+
+        if (e.StatusCode == 3)
+        {
+            // Scheduled-open: load==24 → msg 6004 (preparing); else msg 6005 HH:MM.
+            // spec: frontend_layout_tables.md §4 "status_code==3: msg 6004 only when load==24, else 6005 HH:MM"
+            color = Colors.White;
+            if (e.Load == 24)
+                return _text.GetCaption((int)LoginLayout.MsgServerPreparing, string.Empty);
+
+            string template = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
+            return FormatCaption(template, e.Load, e.OpenTime, $"{e.Load:00}:{e.OpenTime:00}");
+        }
+
+        // Other status codes → caption msg (4029 + status_code), no color override.
+        // spec: frontend_layout_tables.md §4 "other status_code → caption msg(4029+status_code), no color override"
+        color = Colors.White;
+        return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // spec: §4 (4029+status_code)
     }
 
     private void AddRowLabel(string text, int x, int y, int h, Color color,
@@ -537,50 +628,6 @@ public sealed partial class ServerSelectSubView : Control
         return FormatCaption(template, e.ServerId, string.Empty);
     }
 
-    private string ResolveLoadText(ServerEntry e)
-    {
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 — load-bucket captions 6001/6002/6003
-        if (e.StatusCode != 0)
-            return e.Load.ToString();
-
-        uint? msgId = e.Load > PopRedThreshold
-            ? LoginLayout.MsgServerLoadRed
-            : e.Load > PopOrangeThreshold
-                ? LoginLayout.MsgServerLoadOrange
-                : e.Load > PopYellowThreshold
-                    ? LoginLayout.MsgServerLoadYellow
-                    : null;
-
-        return msgId is { } id
-            ? _text.GetCaption(id, e.Load.ToString())
-            : e.Load.ToString();
-    }
-
-    private string ResolveStatusText(ServerEntry e)
-    {
-        // spec: Docs/RE/packets/lobby.yaml Record Shape A — status_code == 3 is scheduled-open.
-        if (e.StatusCode == 0)
-            return e.IsSelectable ? string.Empty : _text.GetCaption(LoginLayout.MsgServerLoadRed, string.Empty);
-
-        if (e.StatusCode == 3)
-        {
-            // Load == 24 is the "preparing" sentinel; any other Load is a valid hour.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4
-            if (e.Load == 24)
-                return _text.GetCaption(LoginLayout.MsgServerPreparing, string.Empty);
-
-            string template = _text.GetCaption(LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
-            return FormatCaption(template, e.Load, e.OpenTime, $"{e.Load:00}:{e.OpenTime:00}");
-        }
-
-        if (e.StatusCode is >= 1 and <= 4)
-        {
-            uint msgId = LoginLayout.MsgServerHeaderFirst + (uint)e.StatusCode - 1;
-            return _text.GetCaption(msgId, string.Empty);
-        }
-
-        return string.Empty;
-    }
 
     // Formats a caption template from msg.xdb that may use {0}/{0:00} or %02d placeholders.
     // Only used for status_code==3 HH:MM (MsgServerClockFormat) and the out-of-range server name fallback.
@@ -624,15 +671,4 @@ public sealed partial class ServerSelectSubView : Control
         return idx < 0 ? value : value[..idx] + newValue + value[(idx + oldValue.Length)..];
     }
 
-    // -------------------------------------------------------------------------
-    // Load colour. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    // -------------------------------------------------------------------------
-
-    private static Color PopColorForLoad(int load)
-    {
-        if (load > PopRedThreshold) return PopColorRed;
-        if (load > PopOrangeThreshold) return PopColorOrange;
-        if (load > PopYellowThreshold) return PopColorYellow;
-        return PopColorGreen;
-    }
 }

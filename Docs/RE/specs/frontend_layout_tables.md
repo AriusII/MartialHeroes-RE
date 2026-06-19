@@ -265,10 +265,11 @@ origin `(342,289)` + local `(125,151)`. The four spare labels are pre-built empt
 37 server list shown: user picks a plate (400/401) or pages (115..124). Plate commit guard:
    record.status==0 && record.load<2400 → persist Lastserver → 38
 38 channel-endpoint fetch (TCP port 10000 + server_id)                            → 39
-39 start join worker                                                              → 40
+39 show the connecting popup (Confirm-A, msg 4023, single button action 113 = Cancel→34) + start join worker → 40
 40 hand-off: build the TAB credential string, build secure context + login packet 0x2B, set the global
    game-state to the connect phase, arm 30 s connect timeout, leave the login scene.  → 41
-41 post-hand-off idle (connect/SMSG path).
+41 post-hand-off idle (connect/SMSG path). SUCCESS = inbound 3/1 char-list tears the scene down → char-
+   select (state 4); the connecting-popup button (113) or a fetch failure (msg 4027/4028) returns to the list.
 ```
 
 > **CORRECTION (2026-06-19 — maintainer end-of-curtain capture oracle + IDA re-exam of `BuildScene`/
@@ -496,13 +497,23 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 > in the construct routine and re-laid each repaint by the list painter (a vtable method invoked by the
 > pager). All plate/strip art is a 1:1 atlas blit; names/captions are msg.xdb text.
 
-> **Server name = `msg.xdb` TEXT, NOT a per-server calligraphy image (DEFINITIVE, element-level pass,
-> 2026-06-19).** The painter fetches each server's name as a **string** (id **5000 + server_id**, fallback
-> caption **5901**) and feeds it to a text setter that measures + lays it out; it never re-points an atlas
-> source rect per server. The calligraphic look on screen is a **fixed decorative scroll-plate IMAGE** (the
-> 100×372 plate face on atlas **A4**, identical for every server) with the CP949 hanja+hangul name string
-> (e.g. "羽化登仙 / 우화등선") **rendered on top in the game font**. A port must render the `msg.xdb` text on
-> the fixed plate — there is **no** per-server `server_<id>.dds`; do not look for one.
+> **Server name = small `msg.xdb` TEXT (slot-0 12 px); the big on-scroll calligraphy is BAKED decorative
+> atlas art, NOT engine-rendered name text (CORRECTION, element-level pass 2026-06-19).** The painter
+> resolves each server's name to a **string** (record name-id `+0` → resolver over msg banks 5301-5440,
+> fallback **5901**) and feeds it to the **name label** (font slot 0, DotumChe 12 px, dst (…,390,174×21),
+> centered, horizontal + ellipsis). It does **not** render a large or vertical font and does **not**
+> re-point a source rect per server. Therefore the large black brush hanja/hangul (e.g. "羽化登仙") that
+> fills the parchment scroll in the official client is **baked into the plate art on atlas A4
+> (`loginwindow_02.dds`)** — a fixed **per-column** decoration (the 100×372 plate-face sub-rect
+> `src (448 + 124·i, 6)`, i = 0/1), **not** a per-server image (there is **no** `server_<id>.dds`).
+> **Z-order CONFIRMED (element-level pass 2026-06-19):** per-plate insertion order = paint order =
+> (1) parchment select button → (2) name label → (3) **the 100×372 face quad** → (4) status caption →
+> (5) count label, so the face is drawn **ON TOP** of the parchment (every plate widget is built with full
+> alpha `0xFFFFFFFF`, no per-widget blend; insertion is a plain append). A port must draw the face
+> **after/over** the parchment button (drawing it behind hides it under the opaque parchment — the observed
+> "empty scroll" bug). **GAP (remaining):** only the .dds pixel content — whether the face crop at
+> `src (448,6)/(572,6)` actually holds the brush calligraphy — cannot be read from the static binary;
+> confirm against the atlas / visual oracle. The small slot-0 name text renders regardless.
 
 > **Outer construction — the parchment/title/badge layers (element-level pass, 2026-06-19):**
 > - **Backdrop is TWO layers:** a **full-screen** A2 (`loginwindow.dds`) image at **(0, 110) 1024 × 490**,
@@ -518,8 +529,18 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 >   source N **(792, 398)** / H **(602, 416)**; **10-second-debounced** re-fetch (→ sub-state 34). The
 >   back-to-login control is action **102** (the quit-confirm).
 > - **Connecting popup "서버에 접속중입니다…"** = the Confirm-A modal (atlas **A3** `InventWindow.dds`,
->   src **(318, 647)**, dst **(342, 289) 340 × 190**, caption msg **4023**), raised at **sub-state 40** — the
->   instant before the join hand-off (see §2.1 and §2.2).
+>   panel src **(318, 647)**, dst **(342, 289) 340 × 190**, caption msg **4023** centered), raised at
+>   **sub-state 39** (CORRECTION 2026-06-19: 39, not 40 — when the join/connect worker is spawned). It has a
+>   **single 3-state button** (atlas-skinned, src y = 900, **caption baked into the .dds**) added with
+>   **action 113**; clicking it **aborts the join and returns to the server list (sub-state 34)** — it is
+>   **NOT** an OK button and **NOT** the credential-result feedback. The popup is never explicitly closed:
+>   on a **successful** handshake the server sends the **3/1 character-list**, which tears the login scene
+>   down and advances to **char-select (state 4)** (the popup dies with the scene). The **connect /
+>   credential feedback** is the SEPARATE auto-counting-down message box (§2.1a): channel-fetch failures
+>   raise msg **4027** (result 0) / **4028** (result −1) → back to the server list; a stale list raises msg
+>   **4025** / **4026** → back to the credential form; a game.ver mismatch is a native MessageBox (msg
+>   **2204**); a post-handshake rejection arrives over the wire (code-15 disconnect / 30 s timeout / server
+>   popup opcode 4/500).
 
 - **Outer list panel** (the page backdrop): dst **(270, 85)**, size **483 × 490**, atlas A2 source
   origin **(0, 490)**. A header/title image (atlas A1, dst (265,0) 494×113, source (0,469)) and a
@@ -531,20 +552,29 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
   index 1 → N`(690,985)`/H`(737,985)`, index 2 → N`(784,985)`/H`(831,985)`.)
 - **Two detail plates** (the two servers on the current page — **2 visible per page, NOT 5**), built by
   a 2-column loop (i = 0,1) with X base 30, step 233, action base **400** (LEFT = 400, RIGHT = 401):
-  - name label `(30 + 233·i, 390, 174 × 21)`, action 400+i, **left-aligned** (the authoritative list
-    painter aligns the server-name label left; a duplicate painter variant centers it — prefer left).
-  - icon / plate face image `(30 + 233·i + 47, 97, 100 × 372)`, atlas A4 src `(448 + 124·i, 6)`
-  - select button3 `(30 + 233·i − 6, 97, 202 × 372)`, atlas A4 N`(9,6)`/H`(220,6)`, action 400+i
-  - status/info label `(30 + 233·i, 410, 174 × 20)`
-  - population/count label `(30 + 233·i, 430, 174 × 20)`, font slot 4, formatted `%4d / %4d`
+  - **name label** `(30 + 233·i, 390, 174 × 21)`, action 400+i, **font slot 0** (DotumChe 12 px, weight 0),
+    **center-aligned** (align mode 2), horizontal with mid-string ellipsis — **NOT** a large or vertical
+    font (CORRECTION 2026-06-19: the authoritative painter centers; the earlier "left-aligned" reading is
+    superseded, and the on-scroll calligraphy is baked atlas art, not this label — see the name note above).
+  - **plate face image** `(30 + 233·i + 47, 97, 100 × 372)`, atlas A4 src `(448 + 124·i, 6)` — fixed
+    **per-column** (i = 0,1), never re-pointed per server (candidate carrier of the baked calligraphy).
+  - **select button3 (clickable parchment)** `(30 + 233·i − 6, 97, 202 × 372)`, atlas A4 N`(9,6)`/H`(220,6)`, action 400+i
+  - **status caption label** `(30 + 233·i, 410, 174 × 20)`, **font slot 4** (DotumChe 12 px, weight 800),
+    center-aligned, **colored per branch** (the "사용가능 / 준비중 / …" status text — see coloring below).
+  - **count label** `(30 + 233·i, 430, 174 × 20)`, font slot 0, **set to an EMPTY string** by the painter.
+    (CORRECTION 2026-06-19: the prior "%4d / %4d population count, font slot 4 at +430" was wrong — the
+    slot-4 label is the STATUS caption at +410; +430 is left blank; the `%4d / %4d` and `i %d status %d
+    count %d` lines are dead-debug stubs, never drawn.)
 - **Selection highlight strip** (drawn behind the selected plate): atlas A4, source origin `(700,18)`,
   46 × 168. **Status-color indicator quads ×3:** atlas A2, source origin `(500,786)`, 60 × 39, hidden by
   default and re-anchored around a special row (see the status==100 gate).
-- **Server-name source (CONFIRMED, element-level pass):** server names come from `msg.xdb` via a
-  table builder. **Name id = `5000 + server_id`** (server ids 1..40 → ids 5001..5040). Out-of-range
-  ids fall back to caption id **5901** (formatted with the raw id). Column headers = msg **4029/4030/
-  4031/4032**. (The msg table also pre-fetches parallel name banks 5101-5120 / 5201-5220 / 5301-5320 /
-  5401-5440, but the server-list path returns from the 5001-5040 bank.)
+- **Server-name source (CORRECTION, element-level pass 2026-06-19):** the painter passes the record's
+  name id (`+0`, u16) to a **name resolver** that returns the string from `msg.xdb` name banks in the
+  **5301-5440** range (range guard id ∈ 1..40, else fallback `snprintf(msg 5901, id)`). It is **NOT** a
+  flat `5000 + server_id` (that earlier reading is superseded). The **exact id→bank index math inside the
+  resolver is a GAP** (the resolver is large and banked by class/region; not fully unrolled) — for a port,
+  resolve by the record name-id with the 5901 fallback. **msg 4029/4030/4031/4032 are the STATUS
+  CAPTIONS** (keyed by `status_code`, see coloring above), not column headers.
 - **Record decode** (8-byte LE record, in-memory list; see `packets/lobby.yaml`):
   `{server_id (+0), status_code (+2), load (+4), open_time/flags (+6)}`. Display index from a page =
   `record = (action − 400) + 2·page`. **On-screen row order is shuffled each repaint** (a per-render
@@ -554,13 +584,17 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 - **Commit guard:** `status_code == 0 && load < 2400` → write selected server_id, persist Lastserver,
   advance to channel-endpoint fetch (port 10000 + server_id). Selection is a **2D button hit**
   (OnEvent action 400/401), **not** a 3D ray-pick (that belongs to character-select — do not conflate).
-- **Status / load coloring** (UI only; ARGB DWORDs re-confirmed 2026-06-18 and 2026-06-19): load > 1200
-  → red (msg 6001, `0xFFFF0000`) · > 800 → orange (msg 6002, `0xFFED6806`) · > 500 → yellow (msg 6003,
-  `0xFFFFFF00`) · **≤ 500 → green (`0xFFB5FF7A`), with NO msg id — the load is rendered as numeric
-  `%4d / %4d` text, not a caption.** status_code 3 = scheduled-open: msg **6004 "preparing" only when
-  `load (+4) == 24`**, otherwise msg **6005 HH:MM** built from `+4` (hour: /10, %10) and `+6`
-  (minute: /10, %10). Record fields (re-confirmed, no swap): `+0` server_id, `+2` status, `+4` load,
-  `+6` open_time.
+- **Status / load coloring** (the slot-4 status caption at +410; ARGB DWORDs re-confirmed 2026-06-18 and
+  2026-06-19). For `status_code == 0` with the load-valid flag (`+6`) set: load > 1200 → caption msg
+  **6001**, `0xFFFF0000` (red) · > 800 → msg **6002**, `0xFFED6806` (orange) · > 500 → msg **6003**,
+  `0xFFFFFF00` (yellow) · **≤ 500 → the status caption msg `4029..4032` (keyed by `status_code`),
+  `0xFFB5FF7A` (green) — this is the "available" (사용가능) case.** (CORRECTION 2026-06-19: the prior
+  "≤500 renders numeric `%4d / %4d`, no caption" was wrong — the available row draws the green status
+  caption; the `%4d / %4d` count is dead debug.) `status_code == 3` = scheduled-open: msg **6004** only
+  when `load (+4) == 24`, otherwise `snprintf(msg 6005, …)` = **HH:MM** from `+4`/`+6`. Other status codes
+  draw the status-keyed caption `4029..4032` with no color override (color written to the GULabel color
+  field +0x0C). Record fields (no swap): `+0` server_id (also the name-resolver key), `+2` status,
+  `+4` load, `+6` open_time/load-valid flag.
 - **status_code == 100 gate (CONFIRMED, element-level pass):** a record whose status is 100 is a
   **display-only special row** — the painter shows the 3 status-color indicator quads re-anchored around
   it (when a "show special" flag is set) instead of lighting the normal plate faces, and the commit

@@ -82,6 +82,22 @@ public sealed partial class LoginWindow : Control
     [Signal]
     public delegate void LoginFlowCompletedEventHandler(int serverId, string pin);
 
+    /// <summary>
+    /// Fired when the user picks a server and the connecting popup is up.
+    /// LoginScene begins the real connect in response.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 39 / §4
+    /// </summary>
+    [Signal]
+    public delegate void ConnectRequestedEventHandler(int serverId, string pin);
+
+    /// <summary>
+    /// Fired when the user presses Cancel (action 113) on the connecting popup.
+    /// LoginScene cancels the in-flight connect attempt.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join → state 34"
+    /// </summary>
+    [Signal]
+    public delegate void ConnectCancelledEventHandler();
+
     // -------------------------------------------------------------------------
     // Injectable factories (set by LoginScene before AddChild)
     // -------------------------------------------------------------------------
@@ -449,16 +465,26 @@ public sealed partial class LoginWindow : Control
                 break;
 
             case 38:
+                // Channel-endpoint fetch. spec: frontend_layout_tables.md §2.2 "38 channel-endpoint fetch → 39".
+                GD.Print("[LoginWindow] State 38: channel-endpoint fetch. spec: §2.2.");
+                break;
+
             case 39:
-                GD.Print($"[LoginWindow] State {state}: endpoint/handoff. spec: §2.2.");
+                // Show the connecting popup (Confirm-A, msg 4023) + start join worker.
+                // spec: frontend_layout_tables.md §2.2 state 39 / §4
+                //   "39 show connecting popup (Confirm-A, msg 4023, single button action 113 = Cancel→34) + start join worker"
+                //   CORRECTION 2026-06-19: popup is raised at sub-state 39, not 40.
+                GD.Print("[LoginWindow] State 39: raise connecting popup (Confirm-A, msg 4023). spec: §2.1/§2.2/§4.");
+                ShowConnectingPopup();
+                // Ask LoginScene to begin the real connect. spec: §4 "connecting popup shown → join worker started".
+                EmitSignal(SignalName.ConnectRequested, _collectedServerId, _collectedPin);
                 break;
 
             case 40:
-                // Hand-off: raise the "connecting" popup (Confirm-A, msg 4023) immediately before
-                // the join packet build. spec: frontend_layout_tables.md §2.1 / §2.2 / §4
-                //   "Connecting popup … raised at sub-state 40".
-                GD.Print("[LoginWindow] State 40: raise connecting popup (Confirm-A). spec: §2.1/§4.");
-                ShowConnectingPopup();
+                // Hand-off: post-connect idle (TAB credential string, secure-context, login packet 0x2B).
+                // LoginScene drives this via the connect result path, not the FSM auto-advance.
+                // spec: frontend_layout_tables.md §2.2 state 40 / §2.6.
+                GD.Print("[LoginWindow] State 40: hand-off (post-connect). spec: §2.2/§2.6.");
                 break;
 
             case 41:
@@ -1114,14 +1140,44 @@ public sealed partial class LoginWindow : Control
         if (_quitModal2 is not null) _quitModal2.Visible = false;
     }
 
-    // Raise Confirm-A (msg 4023) as the "connecting" popup at sub-state 40.
+    // Raise Confirm-A (msg 4023) as the "connecting" popup at sub-state 39.
     // Confirm-A is the same panel as the server-list re-fetch popup; "the connecting popup"
     // and "Confirm-A" are the same object.
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §4
-    //   "Confirm-A is the connecting popup … raised at sub-state 40".
+    //   "Confirm-A is the connecting popup … raised at sub-state 39 (CORRECTION 2026-06-19: 39 not 40)".
     private void ShowConnectingPopup()
     {
         if (_quitModal is not null) _quitModal.Visible = true;
+    }
+
+    /// <summary>
+    /// Called by LoginScene when the connect attempt fails.
+    /// Hides the connecting popup, shows the §2.1a countdown error box (msg 4028), and returns to
+    /// the server list (sub-state 34/37 per spec §4).
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §2.1a / §2.2 / §4
+    ///   "connect failure → msg 4028 countdown error box → return to server list (state 34)"
+    /// </summary>
+    public void NotifyConnectFailed()
+    {
+        HideQuitModal(); // hide the connecting popup. spec: §2.2 / §4.
+        // spec: frontend_layout_tables.md §2.1a "fetch result −1 → msg 4028".
+        // Re-use existing RaiseServerListError path for the §2.1a countdown box. spec: §2.1a.
+        GD.PrintErr("[LoginWindow] Connect failed → showing error (msg 4028) + returning to server list. " +
+                    "spec: frontend_layout_tables.md §2.1a/§4.");
+        RaiseServerListError(fetchFailed: true); // msg 4028 + state 37. spec: §2.1a.
+    }
+
+    /// <summary>
+    /// Called by LoginScene when the connect succeeds (char-list arriving → advance to char-select).
+    /// Emits LoginFlowCompleted to advance the scene; the popup dies with the scene teardown.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 41 / §4
+    ///   "SUCCESS = inbound 3/1 char-list tears the scene down → char-select (state 4)"
+    /// </summary>
+    public void NotifyConnectSuccess()
+    {
+        // Popup stays visible (it dies with the scene on teardown). spec: §4 "never explicitly closed on success".
+        GD.Print("[LoginWindow] Connect succeeded → LoginFlowCompleted (state 41). spec: §2.2/§2.6.");
+        RunState(41); // emits LoginFlowCompleted. spec: §2.2.
     }
 
     // -------------------------------------------------------------------------
@@ -1323,9 +1379,14 @@ public sealed partial class LoginWindow : Control
                 RunState(5);
                 break;
 
-            case LoginLayout.ActionQuitConfirmYes1: // 113 — re-fetch popup OK → restart fetch (→34).
+            case LoginLayout.ActionQuitConfirmYes1: // 113 — Cancel connecting popup OR re-fetch popup → restart fetch (→34).
             case LoginLayout.ActionQuitConfirmYes2: // 114 — re-fetch popup OK → restart fetch (→34).
+                // When state is 38/39 (connecting in progress), action 113 is the Cancel button of the
+                // connecting popup: abort the join worker and return to the server list (state 34).
+                // spec: frontend_layout_tables.md §2.2 "113/114 = hide confirm popup, restart fetch → 34";
+                //        §4 "clicking [Cancel] aborts the join and returns to the server list (sub-state 34)".
                 HideQuitModal();
+                EmitSignal(SignalName.ConnectCancelled); // let LoginScene cancel the in-flight connect.
                 RestartServerFetch();
                 break;
 
@@ -1436,9 +1497,12 @@ public sealed partial class LoginWindow : Control
     {
         _collectedServerId = serverId;
         GD.Print($"[LoginWindow] Server selected (id={serverId}). spec: login_flow.md §2.1.");
-        // Begin hand-off; RunState(38) leaves the 33..37 band so ApplyVisibility hides _serverListRoot.
+        // Channel-endpoint fetch (38), then show the connecting popup (39).
+        // State 39 raises Confirm-A + emits ConnectRequested so LoginScene starts the join worker.
+        // Do NOT auto-advance to 41 — success arrives from LoginScene via NotifyConnectSuccess.
+        // spec: frontend_layout_tables.md §2.2 "37→38 commit guard → 38 channel-endpoint fetch → 39 connecting popup".
         RunState(38);
-        RunState(41); // hand-off.
+        RunState(39); // raises popup + fires ConnectRequested. spec: §2.2/§4.
     }
 
     // -------------------------------------------------------------------------
