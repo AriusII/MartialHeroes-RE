@@ -65,7 +65,9 @@ public sealed partial class OpeningWindow : Control
 
     // ── View state — NO domain state ─────────────────────────────────────────
 
-    private ColorRect? _blackBackdrop; // full-screen black behind slideshow. spec: frontend_layout_tables.md §6 "alpha-over-(black-cleared)-back-buffer".
+    private ColorRect?
+        _blackBackdrop; // full-screen black behind slideshow. spec: frontend_layout_tables.md §6 "alpha-over-(black-cleared)-back-buffer".
+
     private TextureRect? _scenarioRect;
     private float _scrollOffset;
     private float _scrollStartWait;
@@ -74,12 +76,16 @@ public sealed partial class OpeningWindow : Control
     private TextureRect? _slideshowRect;
     private int _slideshowState = 1; // 1..4 (1-based). spec §6.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
+
     private double _dwellAccumMs;
+
     // spec: intro_sequence.md §3.4 — alpha seeded at 250 (max); first direction = fade-OUT (−1).
     // The spec seeds the constructor alpha field to 250; the port mirrors this.
     // spec: intro_sequence.md §3.2 — direction byte selects fade-in vs fade-out; field initialised to 250.
-    private int _alpha = AlphaMax;   // spec: intro_sequence.md §3.4 "alpha byte = 250 (maximum)".
-    private int _alphaDir = -1;      // spec: intro_sequence.md §3.2 "first phase is a fade-OUT".
+    private int _alpha = AlphaMax; // spec: intro_sequence.md §3.4 "alpha byte = 250 (maximum)".
+
+    private int _alphaDir = -1; // spec: intro_sequence.md §3.2 "first phase is a fade-OUT".
+
     // _panelAtMax: true when alpha has reached its upper extreme (250). Dwell transition requires this AND dwell elapsed.
     // spec: intro_sequence.md §3.1 "when the dwell expires AND the panel has reached its alpha extreme (alpha at its maximum, 250)".
     private bool _panelAtMax = true; // initialised true because _alpha starts at 250. spec: intro_sequence.md §3.4.
@@ -139,8 +145,8 @@ public sealed partial class OpeningWindow : Control
 
     // Page Up/Down scrub constants. spec: frontend_layout_tables.md §6 "action 1004/1005 … ±30·dt_s".
     private const float PageScrubSpeed = 30.0f; // design-px/second. spec: frontend_layout_tables.md §6.
-    private const float PageScrubFloor = 0f;    // floor 0. spec: frontend_layout_tables.md §6 action 1004.
-    private const float PageScrubCeil = 1843f;  // ceil 1843. spec: frontend_layout_tables.md §6 action 1005.
+    private const float PageScrubFloor = 0f; // floor 0. spec: frontend_layout_tables.md §6 action 1004.
+    private const float PageScrubCeil = 1843f; // ceil 1843. spec: frontend_layout_tables.md §6 action 1005.
 
     public override void _Input(InputEvent ev)
     {

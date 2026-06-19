@@ -234,7 +234,8 @@ public sealed partial class LoginScene : StubSceneController
         {
             // Offline / no UseCases: fail immediately so the popup doesn't hang.
             // spec: §4 "offline-safe: popup shows briefly then failure path shows error box"
-            GD.PrintErr($"[LoginScene] SelectServerAsync({serverId}): no UseCases (offline). Reporting failure. spec: §4.");
+            GD.PrintErr(
+                $"[LoginScene] SelectServerAsync({serverId}): no UseCases (offline). Reporting failure. spec: §4.");
             CallDeferred(MethodName.ReportConnectFailed);
             return;
         }

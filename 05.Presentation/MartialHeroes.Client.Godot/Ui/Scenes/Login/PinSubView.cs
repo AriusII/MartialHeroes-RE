@@ -224,8 +224,8 @@ public sealed partial class PinSubView : Control
         // spec: Docs/RE/specs/frontend_layout_tables.md §3 (chrome re-trace 2026-06-19).
         Texture2D? backdrop = _atlas.SliceByPath(
             AtlasPassword,
-            0, 0,           // srcX=0, srcY=0 — top-left corner of password.dds
-            ModalW, ModalH  // 329×422 — exact panel size = exact source region
+            0, 0, // srcX=0, srcY=0 — top-left corner of password.dds
+            ModalW, ModalH // 329×422 — exact panel size = exact source region
         );
         if (backdrop is not null)
         {

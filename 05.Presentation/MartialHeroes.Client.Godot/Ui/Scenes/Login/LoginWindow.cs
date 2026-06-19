@@ -1379,7 +1379,8 @@ public sealed partial class LoginWindow : Control
                 RunState(5);
                 break;
 
-            case LoginLayout.ActionQuitConfirmYes1: // 113 — Cancel connecting popup OR re-fetch popup → restart fetch (→34).
+            case LoginLayout.ActionQuitConfirmYes1
+                : // 113 — Cancel connecting popup OR re-fetch popup → restart fetch (→34).
             case LoginLayout.ActionQuitConfirmYes2: // 114 — re-fetch popup OK → restart fetch (→34).
                 // When state is 38/39 (connecting in progress), action 113 is the Cancel button of the
                 // connecting popup: abort the join worker and return to the server list (state 34).

@@ -44,23 +44,23 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 public sealed partial class ServerSelectSubView : Control
 {
     // Atlas paths. spec: Docs/RE/specs/frontend_layout_tables.md §1 / §4
-    private const string AtlasD = "data/ui/loginwindow_02.dds";   // A4 = loginwindow_02.dds
-    private const string AtlasB = "data/ui/loginwindow.dds";      // A2 = loginwindow.dds
-    private const string AtlasA1 = "data/ui/login_slice1.dds";    // A1 = login_slice1.dds
+    private const string AtlasD = "data/ui/loginwindow_02.dds"; // A4 = loginwindow_02.dds
+    private const string AtlasB = "data/ui/loginwindow.dds"; // A2 = loginwindow.dds
+    private const string AtlasA1 = "data/ui/login_slice1.dds"; // A1 = login_slice1.dds
 
     // Full-screen A2 backdrop behind the list-box: dst(0,110,1024,490) src(0,0). spec §4.
     // "Backdrop is TWO layers: a full-screen A2 image at (0,110) 1024×490, source (0,0), drawn FIRST"
-    private const int BackdropX = 0;    // spec: frontend_layout_tables.md §4
-    private const int BackdropY = 110;  // spec: frontend_layout_tables.md §4
+    private const int BackdropX = 0; // spec: frontend_layout_tables.md §4
+    private const int BackdropY = 110; // spec: frontend_layout_tables.md §4
     private const int BackdropW = 1024; // spec: frontend_layout_tables.md §4
-    private const int BackdropH = 490;  // spec: frontend_layout_tables.md §4
+    private const int BackdropH = 490; // spec: frontend_layout_tables.md §4
 
     // Title "서버선택" image: A2 dst(207,44) 70×17 src(0,980). spec §4.
     // Absolute canvas coords. "Title '서버선택' = baked A2 IMAGE … src(0,980)"
-    private const int TitleAbsX = 207;  // spec: frontend_layout_tables.md §4
-    private const int TitleAbsY = 44;   // spec: frontend_layout_tables.md §4
-    private const int TitleSrcX = 0;    // spec: frontend_layout_tables.md §4 "source(0,980)"
-    private const int TitleSrcY = 980;  // spec: frontend_layout_tables.md §4
+    private const int TitleAbsX = 207; // spec: frontend_layout_tables.md §4
+    private const int TitleAbsY = 44; // spec: frontend_layout_tables.md §4
+    private const int TitleSrcX = 0; // spec: frontend_layout_tables.md §4 "source(0,980)"
+    private const int TitleSrcY = 980; // spec: frontend_layout_tables.md §4
 
     // Server-list panel shares the central notice/listbox area.
     private const int PanelX = 270;
@@ -111,9 +111,9 @@ public sealed partial class ServerSelectSubView : Control
 
     // Load thresholds for status-caption coloring. spec: Docs/RE/specs/frontend_layout_tables.md §4
     // "status_code==0 with load-valid: load>1200 → red; >800 → orange; >500 → yellow; ≤500 → green"
-    private const int PopRedThreshold = 1200;    // spec: frontend_layout_tables.md §4
-    private const int PopOrangeThreshold = 800;  // spec: frontend_layout_tables.md §4
-    private const int PopYellowThreshold = 500;  // spec: frontend_layout_tables.md §4
+    private const int PopRedThreshold = 1200; // spec: frontend_layout_tables.md §4
+    private const int PopOrangeThreshold = 800; // spec: frontend_layout_tables.md §4
+    private const int PopYellowThreshold = 500; // spec: frontend_layout_tables.md §4
 
     // Status caption msg base: 4029 + status_code → caption text. spec: frontend_layout_tables.md §4
     // "msg 4029/4030/4031/4032 are the STATUS CAPTIONS (keyed by status_code)"
@@ -410,7 +410,7 @@ public sealed partial class ServerSelectSubView : Control
             AddChild(new TextureRect
             {
                 Position = new Vector2(BackdropX, BackdropY), // abs (0,110) spec §4
-                Size = new Vector2(BackdropW, BackdropH),     // 1024×490 spec §4
+                Size = new Vector2(BackdropW, BackdropH), // 1024×490 spec §4
                 Texture = backdrop,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
@@ -466,7 +466,7 @@ public sealed partial class ServerSelectSubView : Control
         AddChild(new TextureRect
         {
             Position = new Vector2(r.X, r.Y), // abs (407,-3) spec §4
-            Size = new Vector2(r.W, r.H),     // 210×70 spec §4
+            Size = new Vector2(r.W, r.H), // 210×70 spec §4
             Texture = tex,
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,
@@ -670,5 +670,4 @@ public sealed partial class ServerSelectSubView : Control
         int idx = value.IndexOf(oldValue, StringComparison.Ordinal);
         return idx < 0 ? value : value[..idx] + newValue + value[(idx + oldValue.Length)..];
     }
-
 }
