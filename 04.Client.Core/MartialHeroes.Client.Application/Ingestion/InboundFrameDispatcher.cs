@@ -67,18 +67,7 @@ public sealed class InboundFrameDispatcher
     {
         await foreach (byte[] frame in _frames.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
-            // One logical owner mutates Domain here; exceptions from a single malformed frame must
-            // not kill the whole reader loop.
-            try
-            {
-                PacketRouter.Route(frame, _handler);
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                // Payload too small for the declared struct: drop the frame and keep reading.
-                // The router already surfaced unspecced opcodes via OnUnhandled; this guards the
-                // specced-but-truncated case. spec: PacketRouter.Reinterpret length check.
-            }
+            PacketRouter.Route(frame, _handler);
         }
     }
 }

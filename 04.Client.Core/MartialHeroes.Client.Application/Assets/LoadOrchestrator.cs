@@ -111,9 +111,8 @@ public sealed class LoadOrchestrator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // msg.xdb is a case-1-only synchronous pre-load (main thread, state-1 → state-2 transition).
-            // It is NOT re-loaded on a reload (state-2 re-entry from 3/100 codes 202/203/232).
-            // spec: Docs/RE/specs/resource_pipeline.md §2.2 / §2.5 (CAMPAIGN 16).
+            // msg.xdb is a case-1-only synchronous pre-load; NOT re-loaded on a reload (3/100 codes
+            // 202/203/232). spec: Docs/RE/specs/resource_pipeline.md §2.2 / §2.5.
             if (!_startedAsReload)
                 await LoadAndTrackAsync(LoadResourcePlan.MessageCataloguePath, cancellationToken).ConfigureAwait(false);
 
@@ -125,12 +124,6 @@ public sealed class LoadOrchestrator
         catch (OperationCanceledException)
         {
             State = LoadOrchestratorState.Cancelled;
-            throw;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Fault = ex;
-            State = LoadOrchestratorState.Faulted;
             throw;
         }
     }

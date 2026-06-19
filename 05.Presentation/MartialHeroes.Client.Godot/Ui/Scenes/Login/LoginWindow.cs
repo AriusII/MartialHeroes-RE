@@ -65,14 +65,9 @@ public sealed partial class LoginWindow : Control
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 / §2.3
     // -------------------------------------------------------------------------
 
-    // Curtain: +5 per tick. spec §2.2.
-    private const float CurtainSpeed = 5f; // spec: frontend_layout_tables.md §2.2. CODE-CONFIRMED.
-
-    // Stop (→ state 3) when offset > 222. spec §2.2.
-    private const float CurtainCompleteThresh = 222f; // spec: frontend_layout_tables.md §2.2. CODE-CONFIRMED.
-
-    // Bottom curtain base Y (= 326). spec §2.3 "bottom Y = offset + 326".
-    private const int CurtainBotBaseY = 326; // spec: frontend_layout_tables.md §2.3. CODE-CONFIRMED.
+    private const float CurtainSpeed = 5f; // spec: frontend_layout_tables.md §2.2
+    private const float CurtainCompleteThresh = 222f; // spec: frontend_layout_tables.md §2.2
+    private const int CurtainBotBaseY = 326; // spec: frontend_layout_tables.md §2.3 "bottom Y = offset + 326"
 
     // -------------------------------------------------------------------------
     // Signals (same contract as old LoginScreen)
@@ -93,10 +88,6 @@ public sealed partial class LoginWindow : Control
 
     public Func<PinSubView>? PinFactory { get; set; }
     public Func<ServerSelectSubView>? ServerSelectFactory { get; set; }
-
-    // DEV-only prefill (offline replay).
-    public string? DevPrefillId { private get; set; }
-    public string? DevPrefillPw { private get; set; }
 
     // Optional audio.
     public FrontEndAudio? Audio { get; set; }
@@ -172,9 +163,13 @@ public sealed partial class LoginWindow : Control
     // Quit-confirm ExitPanel (msg 2007), opened by action 102/112; "yes" (101) quits. spec §2.2.
     private Control? _exitConfirm;
 
-    // Credential textboxes.
-    private HudTextbox? _idBox;
-    private HudTextbox? _pwBox;
+    // Credential textboxes — 1:1 atlas-blit MaskedTextField (no Godot LineEdit chrome).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 / §0.11
+    private MaskedTextField? _idBox;
+    private MaskedTextField? _pwBox;
+
+    // Save-ID: persisted account id loaded before the textbox is built.
+    private string _savedId = "";
 
     // Save-ID checkbox.
     private HudCheckbox? _saveIdCheck;
@@ -220,48 +215,6 @@ public sealed partial class LoginWindow : Control
         RunState(1);
 
         GD.Print("[LoginWindow] Login(1) built. flowSubState=1. spec: frontend_layout_tables.md §2.");
-
-        if (Dev.LayoutDump.Enabled)
-            RunLayoutDump();
-    }
-
-    // Headless layout oracle (MH_DUMP_LAYOUT=1).
-    // Proves the credential-group split: at LOGIN-REST (state 4) CredentialGroup must be hidden
-    // while FormGroup (host strip) is visible; at LOGIN-CREDS (state 6) CredentialGroup must be visible.
-    // spec: §2.2 bands "Interactive credential group | state ≈ 5..33" (CORRECTED, CYCLE 18 C5b).
-    private async void RunLayoutDump()
-    {
-        SceneTree? tree = GetTree();
-        if (tree is null) return;
-        for (int i = 0; i < 3; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
-        try
-        {
-            // LOGIN-REST: state 4 after snap. CredentialGroup=hidden, FormGroup(host strip)=visible.
-            SnapCurtainOpen();
-            await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
-            Dev.LayoutDump.Dump(this, "LOGIN-REST");
-
-            // LOGIN-CREDS: advance to state 6 (5→6 edge shows credential group).
-            // spec: §2.2 "entering 6 shows the inner credential group".
-            RunState(6);
-            for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
-            Dev.LayoutDump.Dump(this, "LOGIN-CREDS");
-
-            DoOpenServerSelect();
-            for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
-            Dev.LayoutDump.Dump(this, "LOGIN-SERVER");
-
-            RunState(31); // raise PIN via the real path: ApplyVisibility shows _pinKeypadRoot, DispatchState opens it.
-            for (int i = 0; i < 2; i++) await ToSignal(tree, SceneTree.SignalName.ProcessFrame);
-            Dev.LayoutDump.Dump(this, "LOGIN-PIN");
-
-            // Return to rest so the scene auto-walk can cleanly advance Login→Load→Opening for their dumps.
-            RunState(4);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[LAYOUTDUMP] {ex.Message}");
-        }
     }
 
     public override void _Process(double delta)
@@ -278,10 +231,11 @@ public sealed partial class LoginWindow : Control
         }
     }
 
-    // Window-level Enter key handler. The credential textboxes are hidden at state 4 so their
-    // TextSubmitted cannot fire. This handler covers Enter at ALL states, including 4→5 (before
-    // the credential group appears) and 6→29 (while the credential group is shown). No per-textbox
-    // TextSubmitted wiring — this is the single Enter path. spec: §2.2 "ENTER(10) → state6→OK, state4→5".
+    // Window-level key handler. Covers Enter at ALL states (MaskedTextField fires TextSubmitted
+    // AND AcceptEvent on Enter, so _UnhandledKeyInput will only see Enter when neither field is
+    // focused — state 4). Also handles TAB to toggle ID/PW focus.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 "ENTER(10) → state6→OK, state4→5"
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 "TAB(9) toggles ID/PW focus"
     public override void _UnhandledKeyInput(InputEvent @event)
     {
         if (@event is InputEventKey key && key.Pressed && !key.Echo)
@@ -289,6 +243,16 @@ public sealed partial class LoginWindow : Control
             if (key.Keycode == Key.Enter || key.Keycode == Key.KpEnter)
             {
                 OnEnterKey();
+                AcceptEvent();
+            }
+            else if (key.Keycode == Key.Tab && _credentialGroup?.Visible == true)
+            {
+                // TAB: toggle focus between ID and PW boxes.
+                // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 "TAB(9) toggles ID/PW focus"
+                if (_idBox?.HasFocus() == true)
+                    _pwBox?.GrabFocus();
+                else
+                    _idBox?.GrabFocus();
                 AcceptEvent();
             }
         }
@@ -398,6 +362,10 @@ public sealed partial class LoginWindow : Control
 
             case 6:
                 // Validate-armed idle. spec §2.2 "6 validate-armed idle: OK button (103) or Enter → 29".
+                // Focus the ID textbox at show time, or PW if a saved ID is present.
+                // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "construct routine focuses the ID textbox at show time"
+                // spec: Docs/RE/specs/frontend_layout_tables.md §2.5 "move focus to the PW box" when saved ID pre-filled
+                CallDeferred(MethodName.FocusCredentialField);
                 break;
 
             case 29:
@@ -450,6 +418,16 @@ public sealed partial class LoginWindow : Control
                 EmitSignal(SignalName.LoginFlowCompleted, _collectedServerId, _collectedPin);
                 break;
         }
+    }
+
+    // Focus the appropriate credential field when entering state 6.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.5 "pre-fill → focus PW box; else focus ID box"
+    private void FocusCredentialField()
+    {
+        if (_savedId.Length > 0 && _pwBox is not null)
+            _pwBox.GrabFocus(); // PW box when ID is pre-filled. spec: §2.5.
+        else
+            _idBox?.GrabFocus(); // ID box by default. spec: §2.7.
     }
 
     // -------------------------------------------------------------------------
@@ -511,10 +489,14 @@ public sealed partial class LoginWindow : Control
 
     private void SnapCurtainOpen()
     {
-        _curtainAcc = CurtainCompleteThresh;
-        if (_curtainTop is not null) _curtainTop.Position = new Vector2(0f, -CurtainCompleteThresh);
-        if (_curtainBot is not null) _curtainBot.Position = new Vector2(0f, CurtainBotBaseY + CurtainCompleteThresh);
-        float formOpenY = CurtainBotBaseY + CurtainCompleteThresh; // 548
+        // Snap to end positions: top Y = −222, bottom Y = 548 (= 222 + 326), extent 222.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.3
+        //   "end positions: top Y = −222, bottom Y = 548 (= 222 + 326); extent = 222 px each way"
+        _curtainAcc = CurtainCompleteThresh; // 222 spec: frontend_layout_tables.md §2.3
+        if (_curtainTop is not null) _curtainTop.Position = new Vector2(0f, -CurtainCompleteThresh); // top Y = −222
+        if (_curtainBot is not null)
+            _curtainBot.Position = new Vector2(0f, CurtainBotBaseY + CurtainCompleteThresh); // bottom Y = 548
+        float formOpenY = CurtainBotBaseY + CurtainCompleteThresh; // 548 spec: frontend_layout_tables.md §2.3
         if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formOpenY);
         if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formOpenY);
 
@@ -780,51 +762,37 @@ public sealed partial class LoginWindow : Control
             LoginLayout.SmallDecorPlate.W, LoginLayout.SmallDecorPlate.H,
             LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY);
 
-        // Edit-field frame art for ID box. A1 src(615,404,102,13). spec §2.1 "ID textbox".
-        AddRect(credPanel, LoginLayout.EditFieldFrameAtlas,
+        // ID textbox — MaskedTextField: 1:1 atlas blit + slot-0 text; mask bit CLEAR.
+        // dest (390,32,102,13); src A1 (615,404,102,13). action 109, maxlen 6.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "ID textbox | maxlen 6; unmasked"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §0.10 "every front-end widget is a 1:1 atlas blit"
+        _idBox = new MaskedTextField(
+            _atlas,
+            LoginLayout.EditFieldFrameAtlas,
             LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
-            LoginLayout.AccountBox.W, LoginLayout.AccountBox.H,
-            LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY);
+            LoginLayout.AccountBox.W, LoginLayout.AccountBox.H, // field rect (102×13)
+            LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY, // A1 src (615,404)
+            masked: false, // spec: frontend_layout_tables.md §2.7 "mask bit clear → clear text"
+            maxLen: LoginLayout.IdMaxLength); // spec: frontend_layout_tables.md §2.1 "maxlen 6"
+        _idBox.Name = "IdTextbox";
+        _idBox.TextSubmitted += OnEnterKey;
+        credPanel.AddChild(_idBox);
 
-        // Edit-field frame art for PW box. spec §2.1 "PW textbox".
-        AddRect(credPanel, LoginLayout.EditFieldFrameAtlas,
+        // PW textbox — MaskedTextField: 1:1 atlas blit + slot-0 masked '*' at 6 px/char.
+        // dest (568,32,102,13); src A1 (615,404,102,13). action 110, maxlen 17.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "PW textbox | masked; '*' glyph, 6 px/char"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.6 "password = 17"
+        _pwBox = new MaskedTextField(
+            _atlas,
+            LoginLayout.EditFieldFrameAtlas,
             LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
-            LoginLayout.PasswordBox.W, LoginLayout.PasswordBox.H,
-            LoginLayout.PasswordBox.SrcX, LoginLayout.PasswordBox.SrcY);
-
-        // ID textbox — action 109, max 6, IME mode 16. spec §2.1 "ID textbox | maxlen 6".
-        _idBox = HudWidgetFactory.MakeTextbox(
-            LoginLayout.AccountBox.X, LoginLayout.AccountBox.Y,
-            LoginLayout.AccountBox.W, LoginLayout.TextboxRenderH,
-            password: false, maxLength: LoginLayout.IdMaxLength, fontSlot: 0);
-        Control? idCtrl = _idBox.GetControl();
-        if (idCtrl is not null)
-        {
-            idCtrl.Name = "IdTextbox";
-            credPanel.AddChild(idCtrl);
-        }
-
-        // PW textbox — action 110, max 129, masked. spec §2.1 "PW textbox | maxlen 129; masked".
-        _pwBox = HudWidgetFactory.MakeTextbox(
-            LoginLayout.PasswordBox.X, LoginLayout.PasswordBox.Y,
-            LoginLayout.PasswordBox.W, LoginLayout.TextboxRenderH,
-            password: true, maxLength: LoginLayout.PwMaxLength, fontSlot: 0);
-        Control? pwCtrl = _pwBox.GetControl();
-        if (pwCtrl is not null)
-        {
-            pwCtrl.Name = "PwTextbox";
-            credPanel.AddChild(pwCtrl);
-        }
-
-        // Enter in a focused credential field advances the flow. A focused Godot LineEdit CONSUMES the
-        // Enter key (emits text_submitted + marks it handled), so the window-level _UnhandledKeyInput
-        // does NOT see it at state 6 where a field has focus. These TextSubmitted handlers cover state 6
-        // (field focused); the window handler covers state 4 (credential group hidden → no field focus).
-        // They are complementary — never both at the same state — and OnEnterKey is a no-op outside
-        // states 4/6, so any stray double-call is harmless.
-        // spec: §2.2 "ENTER (10) → if state 6 run OK path, if state 4 → 5".
-        _idBox.TextSubmitted += _ => OnEnterKey();
-        _pwBox.TextSubmitted += _ => OnEnterKey();
+            LoginLayout.PasswordBox.W, LoginLayout.PasswordBox.H, // field rect (102×13)
+            LoginLayout.PasswordBox.SrcX, LoginLayout.PasswordBox.SrcY, // A1 src (615,404)
+            masked: true, // spec: frontend_layout_tables.md §2.7 "mask bit set → '*' glyph, 6 px/char"
+            maxLen: LoginLayout.PwMaxLength); // spec: frontend_layout_tables.md §2.6 "password = 17"
+        _pwBox.Name = "PwTextbox";
+        _pwBox.TextSubmitted += OnEnterKey;
+        credPanel.AddChild(_pwBox);
 
         // OK / Login button — action 103. A1 N(266,398) H(490,398). spec §2.1 "OK / Login button".
         HudButton okBtn = HudWidgetFactory.MakeButton3(_atlas,
@@ -863,11 +831,10 @@ public sealed partial class LoginWindow : Control
             credPanel.AddChild(chkCtrl);
         }
 
-        // DEV prefill.
-        if (DevPrefillId is { Length: > 0 } devId)
-            (_idBox?.GetControl() as LineEdit)!.Text = devId;
-        if (DevPrefillPw is { Length: > 0 } devPw)
-            (_pwBox?.GetControl() as LineEdit)!.Text = devPw;
+        // Restore saved account id and move focus to PW box if a saved id exists.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.5 "pre-fill the ID textbox and move focus to the PW box"
+        if (_savedId.Length > 0 && _idBox is not null)
+            _idBox.Text = _savedId;
     }
 
     // Helper: add an atlas TextureRect as a child of parent.
@@ -1160,7 +1127,7 @@ public sealed partial class LoginWindow : Control
     private void RestartServerFetch()
     {
         DoEnsureServerSelect();
-        RunState(34); // ApplyVisibility(34) keeps _serverListRoot shown (33..37 band) — the sole gate. spec §2.2.
+        RunState(34); // ApplyVisibility(34..37) keeps _serverListRoot shown — the sole gate. spec: frontend_layout_tables.md §2.2.
     }
 
     private void OnEnterKey()
@@ -1218,7 +1185,7 @@ public sealed partial class LoginWindow : Control
     private void DoOpenServerSelect()
     {
         DoEnsureServerSelect();
-        RunState(33); // ApplyVisibility(33) shows _serverListRoot — the sole gate. spec §2.2.
+        RunState(33); // ApplyVisibility(35..37) shows _serverListRoot — the sole gate. spec: frontend_layout_tables.md §2.2.
     }
 
     private void DoEnsureServerSelect()
@@ -1257,7 +1224,6 @@ public sealed partial class LoginWindow : Control
             if (PinFactory is null || _pinKeypadRoot is null) return;
             _pinView = PinFactory();
             _pinView.Name = "PinSubView";
-            _pinView.HostInReferenceSpace = true;
             _pinView.PinSubmitted += OnPinSubmitted;
             _pinView.Cancelled += OnPinCancelled;
             _pinView.Visible = true; // one-time enable; _pinKeypadRoot gates show/hide.
@@ -1305,7 +1271,7 @@ public sealed partial class LoginWindow : Control
         string saved = savedId.AsString();
         if (saved.Length > 0 && saved != LoginLayout.SaveIdNullSentinel)
         {
-            DevPrefillId ??= saved;
+            _savedId = saved;
             _saveIdChecked = true;
         }
     }

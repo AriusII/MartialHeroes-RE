@@ -7,6 +7,7 @@ using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Debug;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Hud;
+using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -34,7 +35,7 @@ namespace MartialHeroes.Client.Godot.World;
 ///   - <see cref="BuffSlotChangedEvent"/>        → IHudEventHub.PublishBuffState
 ///   - <see cref="SkillHotbarSlotSetEvent"/>     → TODO(hud-ii): needs a hub Hotbar channel
 ///   - <see cref="ChatBroadcastEvent"/>          → IHudEventHub.PublishChatLine (→ HudChatPanel)
-///   - <see cref="ClientStateChangedEvent"/>     → (no hub channel; handled by SceneHost)
+///   - <see cref="MartialHeroes.Client.Application.Scene.SceneStateChangedEvent"/> → (no hub channel; handled by SceneHost)
 ///
 /// spec: Docs/RE/specs/game_loop.md §6 — "updates the spatial transforms of the associated
 ///       Node3D on the next frame".
@@ -468,13 +469,13 @@ public sealed partial class GameLoop : Node
     /// Single HUD key-command dispatcher. Routes I/K/O/C key presses to the correct window
     /// Toggle() rather than having each panel install a competing top-level _Input grab.
     /// Also routes Enter to the ChatWindow for focus (ChatWindow owns chat input exclusively).
-    /// Only active in ClientState.World.
+    /// Only active in-game (EngineSceneState.InGame).
     /// spec: Docs/RE/specs/input_ui.md §3a / §5 — single dispatcher, panels are passive.
     /// spec: Docs/RE/specs/ui_system.md §15 — in-game HUD key command dispatch.
     /// </summary>
     public override void _Input(global::Godot.InputEvent evt)
     {
-        if (_clientContext?.StateMachine.Current != ClientState.World)
+        if (_clientContext?.SceneMachine.Current.State != EngineSceneState.InGame)
             return;
 
         if (evt is not InputEventKey key || !key.Pressed || key.Echo)
@@ -671,9 +672,9 @@ public sealed partial class GameLoop : Node
                     chat.SenderName));
                 break;
 
-            // ---- Client lifecycle ----
-            case ClientStateChangedEvent:
-                // No hub channel for client-state changes; handled by SceneHost state machine.
+            // ---- Scene lifecycle ----
+            case MartialHeroes.Client.Application.Scene.SceneStateChangedEvent:
+                // No hub channel for scene-state changes; handled by SceneHost.
                 break;
 
             // ---- Local player spawn (3/7) ----

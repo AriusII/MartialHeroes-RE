@@ -5,7 +5,7 @@ verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/
   structure, and the game-server DNS connect are all static-control-flow-confirmed against the
   binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
   (every on-wire byte VALUE -- no .pcapng present).
-ida_reverified: 2026-06-18
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false

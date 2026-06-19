@@ -64,6 +64,24 @@ public static class LoginLayout
     // spec §11.1 "InventWindow.dds". CODE-CONFIRMED.
     public const string AtlasInventWindow = "data/ui/inventwindow.dds";
 
+    // D — server-select plate icons + select buttons.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "A4 = loginwindow_02.dds". CODE-CONFIRMED.
+    public const string AtlasLoginWindow02 = "data/ui/loginwindow_02.dds";
+
+    // =========================================================================
+    // §4 Server-list status-color indicator quads
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4
+    // =========================================================================
+
+    // Three status-color indicator quads: A2 (loginwindow.dds) src(500,786) 60×39.
+    // Hidden by default; re-anchored around a status==100 special row when present.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3"
+    public const int StatusIndicatorSrcX = 500; // spec: frontend_layout_tables.md §4
+    public const int StatusIndicatorSrcY = 786; // spec: frontend_layout_tables.md §4
+    public const int StatusIndicatorW = 60; // spec: frontend_layout_tables.md §4
+    public const int StatusIndicatorH = 39; // spec: frontend_layout_tables.md §4
+    public const int StatusIndicatorCount = 3; // spec: frontend_layout_tables.md §4
+
     // =========================================================================
     // §11.2a Upper window — main panel, server listbox, scroll controls. CODE-CONFIRMED.
     // Source: frontend_scenes.md §11.2a.
@@ -209,14 +227,14 @@ public static class LoginLayout
         IdMaxLength =
             6; // spec §1.3 "Max length = 6" (the 16 is the IME composition slot, not the cap). CODE-CONFIRMED.
 
-    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 129, masked. action 110.
+    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 17, masked. action 110.
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
-    // NOTE: §1.3 table has TWO columns: "IME composition slot = 12" and "Max length = 129". The cap is 129.
+    // NOTE: §1.3 lists IME composition slot 12 for PW; the effective cap is 17 (credential hand-off, §2.6).
     public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
 
     public const int
         PwMaxLength =
-            129; // spec §1.3 "Max length = 129" (the 12 is the IME composition slot, not the cap). CODE-CONFIRMED.
+            17; // spec: frontend_layout_tables.md §2.6 "password = 17". CORRECTED from 129 (was wrong). CODE-CONFIRMED.
 
     // Save-ID checkbox — A@(694,86,13,13). NORMAL src(717,398), PRESSED/checked src(730,398). action 104.
     // spec §11.2e "Save-ID checkbox". CODE-CONFIRMED.
@@ -310,9 +328,17 @@ public static class LoginLayout
     // "digit d's normal-state glyph is password.dds source rect (d*52, 560, 52, 52)".
     // spec §11.3b. CODE-CONFIRMED. Previous revision had axes swapped; corrected.
     public const int PinDigitColWidth = 52; // per-digit X stride: srcU = d*52. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitNormalSrcY = 560; // state normal  → srcV=560. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitHoverSrcY = 664; // state hover   → srcV=664. spec §11.3b. CODE-CONFIRMED.
-    public const int PinDigitPressedSrcY = 612; // state pressed → srcV=612. spec §11.3b. CODE-CONFIRMED.
+
+    public const int
+        PinDigitNormalSrcY = 560; // state normal  → srcV=560. spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+
+    public const int
+        PinDigitHoverSrcY =
+            612; // state hover   → srcV=612. spec: frontend_layout_tables.md §3 (CORRECTED — construct call order: NORMAL=560, PRESSED=664, HOVER=612).
+
+    public const int
+        PinDigitPressedSrcY =
+            664; // state pressed → srcV=664. spec: frontend_layout_tables.md §3 (CORRECTED — was 612, which was the hover band).
 
     // Reset button (tag 11): panel-local (243,133,58,30). spec §11.3d. CODE-CONFIRMED.
     // password.dds src: normal(663,8), hover(663,88), pressed(663,48).
@@ -420,8 +446,4 @@ public static class LoginLayout
     public const int MinIdLength = 4; // ID length < 4 → msg 4025. spec §1.4. CODE-CONFIRMED.
     public const int MinPwLength = 1; // PW length < 1 → msg 4026. spec §1.4. CODE-CONFIRMED.
 
-    // =========================================================================
-    // TextBox render height override (spec says 13px but Godot LineEdit needs ≥18px to render).
-    // =========================================================================
-    public const int TextboxRenderH = 22;
 }

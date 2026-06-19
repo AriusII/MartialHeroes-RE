@@ -3,49 +3,10 @@ using MartialHeroes.Shared.Kernel.Enums;
 namespace MartialHeroes.Shared.Kernel.State;
 
 /// <summary>
-/// The legacy client's engine-state struct — the sole source of truth for which scene is active.
-/// A faithful model of the 3-contiguous-integer + 1-byte record the application entry-point's
-/// <c>switch</c> dispatches on.
+/// The legacy engine-state struct — a pure value model of the 3-int + 1-byte record (field 0 = scene
+/// 0..7, field 1 = sub-state/error, field 2 = error detail, +0x0C = debug byte) the entry-point's
+/// <c>switch</c> dispatches on. spec: Docs/RE/specs/client_runtime.md §7.1.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Field layout (derived from the binary's struct layout):
-/// <list type="table">
-///   <item>
-///     <term>field 0 (+0x00 i32)</term>
-///     <description><see cref="State"/> — the engine scene value 0..7 the switch dispatches on;
-///     value 8 (<see cref="EngineSceneState.Exit"/>) is the terminal sentinel, not a case.</description>
-///   </item>
-///   <item>
-///     <term>field 1 (+0x04 i32)</term>
-///     <description><see cref="SubState"/> — sub-state or error code; constructor default is
-///     <see cref="SubStateNone"/> (8). Reused for exit-tail keying: states 6/7 set sub to 8
-///     before converging on the shared exit tail.</description>
-///   </item>
-///   <item>
-///     <term>field 2 (+0x08 i32)</term>
-///     <description><see cref="ErrorDetail"/> — the offending result code when
-///     <see cref="State"/> is <see cref="EngineSceneState.Error"/>.</description>
-///   </item>
-///   <item>
-///     <term>+0x0C u8</term>
-///     <description><see cref="DebugMode"/> — set once at startup from the <c>game.lua</c>
-///     <c>debugmode</c> global; gates developer overlays; never drives scene transitions.</description>
-///   </item>
-/// </list>
-/// spec: Docs/RE/specs/client_runtime.md §7.1 (engine-state struct layout + constructor defaults).
-/// </para>
-/// <para>
-/// The constructor initialises to <c>{ Init, SubState = 8, ErrorDetail = 0, DebugMode = false }</c>.
-/// spec: Docs/RE/specs/client_runtime.md §7.1 (sub-state default = 8), §7.3 (8 is not a switch case).
-/// </para>
-/// <para>
-/// This is a pure value record: it carries no I/O and no transition policy. The commit mechanism
-/// (write next state → clear run-flag → re-dispatch) lives in the application scene machine,
-/// not here.
-/// spec: Docs/RE/specs/client_runtime.md §7.2.
-/// </para>
-/// </remarks>
 public readonly record struct GameState
 {
     /// <summary>

@@ -1,28 +1,21 @@
 // Screens/FrontEndAudio.cs
 //
-// Front-end audio manager: BGM loop + UI-click SFX for the pre-world screens
-// (intro / login / server-select / PIN / char-select).
+// Per-scene audio node: loads and plays exactly the cue(s) required by its owning scene.
+// Each scene creates its own instance and calls only the play method(s) it needs;
+// streams are loaded lazily on first play so no scene touches another scene's cues.
 //
-// SPEC:
-//   BGM:      data/sound/2d/920100200.ogg — looped while on any front-end screen.
-//             spec: Docs/RE/specs/sound.md §front-end cue map. CODE-CONFIRMED.
-//   UI click: data/sound/2d/861010101.ogg — one-shot on each button activation.
-//             spec: Docs/RE/specs/sound.md §front-end cue map. CODE-CONFIRMED.
-//   Intro BGM: data/sound/2d/910061000.ogg — looped opening BGM at OpeningWindow scene start.
-//             Distinct from the one-shot login curtain SFX 861010105.
-//             spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
-//   Login curtain SFX: data/sound/2d/861010105.ogg — one-shot at login-curtain sub-state 1→2.
-//             spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
-//   Sound path rule: category < 5 → data/sound/2d/<id>.ogg.
-//             spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/. CODE-CONFIRMED.
+// Scene cue assignments (spec: Docs/RE/specs/sound.md §15.2 / §15.6c):
+//   Login  (state 1): 861010105 login curtain SFX only — no BGM, no lobby cue.
+//   Opening(state 3): 910061000 opening BGM (looped) only.
+//   Select (state 4): 920100200 lobby BGM (looped) — PlayBgm().
 //
-// CURSOR:
-//   data/cursor/stand.dds — the front-end sword/arrow cursor image.
-//   Loaded from the VFS once and set via global::Godot.Input.SetCustomMouseCursor.
-//   spec: Docs/RE/specs/frontend_scenes.md §11 (cursor asset). CODE-CONFIRMED.
+// Sound path rule: category < 5 → data/sound/2d/<id>.ogg.
+//   spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/. CODE-CONFIRMED.
 //
-// THREADING: all Godot node mutation on the main thread.
-// PASSIVE: reads VFS, plays audio. Zero game logic.
+// Cursor: data/cursor/stand.dds — set in _Ready for all front-end scenes.
+//   spec: Docs/RE/specs/frontend_scenes.md §11. CODE-CONFIRMED.
+//
+// THREADING: all Godot node mutation on the main thread. PASSIVE: reads VFS, plays audio.
 
 using Godot;
 using MartialHeroes.Client.Godot.Dev;
@@ -30,103 +23,51 @@ using MartialHeroes.Client.Godot.Dev;
 namespace MartialHeroes.Client.Godot.Screens;
 
 /// <summary>
-/// Node that manages the front-end BGM, UI-click SFX, and custom mouse cursor.
-/// Add it as a child of the BootFlow node; call <see cref="PlayClickSfx"/> from any
-/// button handler on the front-end screens.
-///
-/// <para>BGM <c>920100200</c> loops until <see cref="StopBgm"/> is called (called when the world
-/// scene starts). Opening BGM <c>910061000</c> loops from <see cref="PlayIntroBgm"/>;
-/// distinct from the one-shot login curtain SFX <c>861010105</c>.</para>
+/// Node that manages per-scene front-end audio and the custom mouse cursor.
+/// Each consuming scene creates one instance and calls only its required cue(s).
+/// Streams are loaded lazily on first play — no scene loads another scene's cue.
 /// </summary>
 public sealed partial class FrontEndAudio : Node
 {
-    // -------------------------------------------------------------------------
-    // Sound-file VFS paths. spec: sound.md §BGM in data/sound/2d/. CODE-CONFIRMED.
-    // -------------------------------------------------------------------------
+    // VFS paths. spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/.
+    private const string BgmPath = "data/sound/2d/920100200.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
+    private const string IntroBgmPath = "data/sound/2d/910061000.ogg"; // spec: sound.md §15.6c. CODE-CONFIRMED.
+    private const string LoginCurtainPath = "data/sound/2d/861010105.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
+    private const string CursorPath = "data/cursor/stand.dds"; // spec: frontend_scenes.md §11.
 
-    // Front-end BGM (lobby loop). spec: sound.md front-end cue map. CODE-CONFIRMED.
-    private const string BgmPath = "data/sound/2d/920100200.ogg"; // spec: sound.md. CODE-CONFIRMED.
-
-    // Opening BGM (OpeningWindow, looped). spec: sound.md §15.6c/§16. CODE-CONFIRMED.
-    private const string IntroBgmPath = "data/sound/2d/910061000.ogg"; // spec: sound.md §15.6c/§16. CODE-CONFIRMED.
-
-    // UI click SFX. spec: sound.md front-end cue map. CODE-CONFIRMED.
-    private const string ClickSfxPath = "data/sound/2d/861010101.ogg"; // spec: sound.md. CODE-CONFIRMED.
-
-    // Login curtain SFX — fired at login sub-state 1→2 (letterbox open starts).
-    // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
-    private const string LoginCurtainSfxPath = "data/sound/2d/861010105.ogg"; // spec §1.5. CODE-CONFIRMED.
-
-    // Front-end cursor. spec: frontend_scenes.md §11. CODE-CONFIRMED.
-    private const string CursorPath = "data/cursor/stand.dds"; // spec: frontend_scenes.md §11. CODE-CONFIRMED.
-
-    // -------------------------------------------------------------------------
-    // AudioStreamPlayer nodes (created in _Ready)
-    // -------------------------------------------------------------------------
-
+    // Players are created lazily on first play call.
     private AudioStreamPlayer? _bgmPlayer;
-    private AudioStreamPlayer? _clickPlayer;
     private AudioStreamPlayer? _introPlayer;
     private AudioStreamPlayer? _curtainPlayer;
 
-    // -------------------------------------------------------------------------
-    // Godot lifecycle
-    // -------------------------------------------------------------------------
-
     public override void _Ready()
     {
-        // Create the AudioStreamPlayer nodes on the main thread.
-        _bgmPlayer = new AudioStreamPlayer { Name = "BgmPlayer", VolumeDb = 0f };
-        _clickPlayer = new AudioStreamPlayer { Name = "ClickPlayer", VolumeDb = 0f };
-        _introPlayer = new AudioStreamPlayer { Name = "IntroPlayer", VolumeDb = 0f };
-        _curtainPlayer = new AudioStreamPlayer { Name = "CurtainPlayer", VolumeDb = 0f };
-        AddChild(_bgmPlayer);
-        AddChild(_clickPlayer);
-        AddChild(_introPlayer);
-        AddChild(_curtainPlayer);
-
-        // Open a thin VFS handle for sound/cursor assets. Disposed immediately after load.
+        // Cursor is scene-global; set it immediately.
         using RealClientAssets? ra = RealClientAssets.TryOpen();
         if (ra is not null)
-        {
-            LoadBgm(ra);
-            LoadClickSfx(ra);
-            LoadIntroBgm(ra);
-            LoadLoginCurtainSfx(ra);
             LoadCursor(ra);
-        }
-        else
-        {
-            GD.Print("[FrontEndAudio] VFS unavailable — audio/cursor will be silent.");
-        }
     }
 
     // -------------------------------------------------------------------------
-    // Public API
+    // Public API — call only the method(s) your scene requires.
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Starts the front-end lobby BGM loop (<c>920100200.ogg</c>).
-    /// Safe to call multiple times — already-looping music is not restarted.
-    /// spec: Docs/RE/specs/sound.md front-end cue map. CODE-CONFIRMED.
+    /// Starts the lobby BGM loop (920100200). Select (state 4) only.
+    /// spec: Docs/RE/specs/sound.md §15.2. CODE-CONFIRMED.
     /// </summary>
     public void PlayBgm()
     {
-        if (_bgmPlayer is null) return;
+        EnsureBgmPlayer();
+        if (_bgmPlayer is null || _bgmPlayer.Stream is null) return;
         if (_bgmPlayer.Playing) return;
-        if (_bgmPlayer.Stream is null)
-        {
-            GD.Print("[FrontEndAudio] BGM stream not loaded — skip play.");
-            return;
-        }
-
         _bgmPlayer.Play();
-        GD.Print("[FrontEndAudio] BGM 920100200 started (loop).");
+        GD.Print("[FrontEndAudio] Lobby BGM 920100200 started (loop).");
     }
 
     /// <summary>
-    /// Stops the front-end BGM. Called when the world scene is entered.
-    /// spec: Docs/RE/specs/sound.md front-end cue map.
+    /// Stops the lobby BGM. Called when the world scene is entered.
+    /// spec: Docs/RE/specs/sound.md §15.2.
     /// </summary>
     public void StopBgm()
     {
@@ -136,11 +77,12 @@ public sealed partial class FrontEndAudio : Node
     }
 
     /// <summary>
-    /// Starts the looped opening BGM (<c>910061000.ogg</c>) at OpeningWindow scene start.
-    /// spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
+    /// Starts the looped opening BGM (910061000). Opening (state 3) only.
+    /// spec: Docs/RE/specs/sound.md §15.6c. CODE-CONFIRMED.
     /// </summary>
     public void PlayIntroBgm()
     {
+        EnsureIntroPlayer();
         if (_introPlayer is null || _introPlayer.Stream is null) return;
         _introPlayer.Stop();
         _introPlayer.Play();
@@ -148,12 +90,13 @@ public sealed partial class FrontEndAudio : Node
     }
 
     /// <summary>
-    /// Plays the login-curtain intro SFX (<c>861010105.ogg</c>) as a one-shot.
-    /// Fired at login sub-state 1→2 (the letterbox/two-edge curtain open begins).
+    /// Plays the login curtain SFX (861010105) as a one-shot. Login (state 1) only.
+    /// Fired at login sub-state 1→2.
     /// spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
     /// </summary>
     public void PlayLoginCurtainSfx()
     {
+        EnsureCurtainPlayer();
         if (_curtainPlayer is null || _curtainPlayer.Stream is null) return;
         if (_curtainPlayer.Playing) _curtainPlayer.Stop();
         _curtainPlayer.Play();
@@ -161,65 +104,40 @@ public sealed partial class FrontEndAudio : Node
     }
 
     // -------------------------------------------------------------------------
-    // Private loaders
+    // Lazy player initialisation
     // -------------------------------------------------------------------------
 
-    private void LoadBgm(RealClientAssets ra)
+    private void EnsureBgmPlayer()
     {
-        AudioStream? stream = LoadOgg(ra, BgmPath, looping: true);
-        if (stream is not null && _bgmPlayer is not null)
-        {
-            _bgmPlayer.Stream = stream;
-            GD.Print($"[FrontEndAudio] BGM loaded: {BgmPath}");
-        }
-        else
-        {
-            GD.Print($"[FrontEndAudio] BGM not found in VFS: {BgmPath}");
-        }
+        if (_bgmPlayer is not null) return;
+        _bgmPlayer = new AudioStreamPlayer { Name = "BgmPlayer", VolumeDb = 0f };
+        AddChild(_bgmPlayer);
+        using RealClientAssets? ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        AudioStream? s = LoadOgg(ra, BgmPath, looping: true);
+        if (s is not null) _bgmPlayer.Stream = s;
     }
 
-    private void LoadClickSfx(RealClientAssets ra)
+    private void EnsureIntroPlayer()
     {
-        AudioStream? stream = LoadOgg(ra, ClickSfxPath, looping: false);
-        if (stream is not null && _clickPlayer is not null)
-        {
-            _clickPlayer.Stream = stream;
-            GD.Print($"[FrontEndAudio] Click SFX loaded: {ClickSfxPath}");
-        }
-        else
-        {
-            GD.Print($"[FrontEndAudio] Click SFX not found in VFS: {ClickSfxPath}");
-        }
+        if (_introPlayer is not null) return;
+        _introPlayer = new AudioStreamPlayer { Name = "IntroPlayer", VolumeDb = 0f };
+        AddChild(_introPlayer);
+        using RealClientAssets? ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        AudioStream? s = LoadOgg(ra, IntroBgmPath, looping: true);
+        if (s is not null) _introPlayer.Stream = s;
     }
 
-    private void LoadIntroBgm(RealClientAssets ra)
+    private void EnsureCurtainPlayer()
     {
-        // Opening BGM is looped. spec: Docs/RE/specs/sound.md §15.6c/§16. CODE-CONFIRMED.
-        AudioStream? stream = LoadOgg(ra, IntroBgmPath, looping: true);
-        if (stream is not null && _introPlayer is not null)
-        {
-            _introPlayer.Stream = stream;
-            GD.Print($"[FrontEndAudio] Opening BGM loaded (looped): {IntroBgmPath}");
-        }
-        else
-        {
-            GD.Print($"[FrontEndAudio] Opening BGM not found in VFS: {IntroBgmPath}");
-        }
-    }
-
-    private void LoadLoginCurtainSfx(RealClientAssets ra)
-    {
-        // spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1 "play login-enter SFX 861010105". CODE-CONFIRMED.
-        AudioStream? stream = LoadOgg(ra, LoginCurtainSfxPath, looping: false);
-        if (stream is not null && _curtainPlayer is not null)
-        {
-            _curtainPlayer.Stream = stream;
-            GD.Print($"[FrontEndAudio] Login curtain SFX loaded: {LoginCurtainSfxPath}");
-        }
-        else
-        {
-            GD.Print($"[FrontEndAudio] Login curtain SFX not found in VFS: {LoginCurtainSfxPath}");
-        }
+        if (_curtainPlayer is not null) return;
+        _curtainPlayer = new AudioStreamPlayer { Name = "CurtainPlayer", VolumeDb = 0f };
+        AddChild(_curtainPlayer);
+        using RealClientAssets? ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        AudioStream? s = LoadOgg(ra, LoginCurtainPath, looping: false);
+        if (s is not null) _curtainPlayer.Stream = s;
     }
 
     private static AudioStream? LoadOgg(RealClientAssets ra, string vfsPath, bool looping)
@@ -227,16 +145,9 @@ public sealed partial class FrontEndAudio : Node
         try
         {
             ReadOnlyMemory<byte> raw = ra.GetRaw(vfsPath);
-            if (raw.IsEmpty)
-            {
-                return null;
-            }
-
-            // Load OGG Vorbis from memory via Godot's AudioStreamOggVorbis.
-            byte[] bytes = raw.ToArray();
-            var stream = AudioStreamOggVorbis.LoadFromBuffer(bytes);
+            if (raw.IsEmpty) return null;
+            var stream = AudioStreamOggVorbis.LoadFromBuffer(raw.ToArray());
             if (stream is null) return null;
-
             stream.Loop = looping;
             return stream;
         }
@@ -249,24 +160,13 @@ public sealed partial class FrontEndAudio : Node
 
     private static void LoadCursor(RealClientAssets ra)
     {
-        // spec: frontend_scenes.md §11 — data/cursor/stand.dds loaded from VFS.
-        // CODE-CONFIRMED. Set via global::Godot.Input.SetCustomMouseCursor.
+        // spec: Docs/RE/specs/frontend_scenes.md §11 — data/cursor/stand.dds. CODE-CONFIRMED.
         try
         {
             Texture2D? cursor = ra.LoadTexture(CursorPath);
             if (cursor is not null)
-            {
-                // Set as the default system cursor (arrow shape).
-                // hotspot = (0,0) — top-left of the cursor image.
                 global::Godot.Input.SetCustomMouseCursor(cursor,
-                    global::Godot.Input.CursorShape.Arrow,
-                    hotspot: Vector2.Zero);
-                GD.Print($"[FrontEndAudio] Custom cursor set: {CursorPath}");
-            }
-            else
-            {
-                GD.Print($"[FrontEndAudio] Cursor not found in VFS: {CursorPath}");
-            }
+                    global::Godot.Input.CursorShape.Arrow, hotspot: Vector2.Zero);
         }
         catch (Exception ex)
         {

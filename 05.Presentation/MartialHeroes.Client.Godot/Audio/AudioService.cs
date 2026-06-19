@@ -10,8 +10,8 @@
 //   3. Subscribes to the Application event bus (drained in _Process on the main thread)
 //      and fires the confirmed wired sounds:
 //        - UI click SFX 861010101 on every StateButton.ActionFired (via scene-tree subscription)
-//        - CharSelect-enter SFX 920100200 on ClientState.CharacterSelection
-//        - Per-area BGM on ClientState.World (910066000 = UNVERIFIED, not wired; 862010105 = 3D actor-routed, not wired here)
+//        - CharSelect-enter SFX 920100200 on EngineSceneState.Select
+//        - Per-area BGM on EngineSceneState.InGame (910066000 = UNVERIFIED, not wired; 862010105 = 3D actor-routed, not wired here)
 //        - Per-area BGM: first non-null entry in data/map{tag}/soundtable{tag}.bgm, looped
 //   4. Degrades silently when the VFS is absent or an audio device is unavailable (headless).
 //
@@ -59,6 +59,7 @@ using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.World;
+using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Audio;
 
@@ -180,8 +181,8 @@ public sealed partial class AudioService : Node
     // Stored so we can find the bus reader in _Process.
     private IClientEventBus? _eventBus;
 
-    // Tracks the last ClientState we processed so world-entry fires exactly once.
-    private ClientState _lastState = ClientState.Login;
+    // Tracks the last scene state we processed so world-entry fires exactly once.
+    private EngineSceneState _lastState = EngineSceneState.Login;
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -256,23 +257,8 @@ public sealed partial class AudioService : Node
     {
         if (_eventBus is null) return;
 
-        // Drain only audio-relevant events; ignore the rest.
-        // We share the same ChannelReader as GameLoop — BOTH nodes read from the same channel.
-        // AudioService subscribes to a PRIVATE copy of the channel (separate channel instance)
-        // created specifically for audio, so events are not consumed from GameLoop's feed.
-        // NOTE: actually both GameLoop and AudioService share the same IClientEventBus.Reader.
-        // TryRead removes events from the channel. To avoid consuming events that GameLoop needs,
-        // AudioService listens via a SEPARATE subscription mechanism. Since System.Threading.Channels
-        // does not support multicast natively, AudioService uses the StateMachine directly for
-        // state transitions (which is already a push-model). The EventBus reader is for GameLoop.
-        // THEREFORE: AudioService does NOT call EventBus.Reader.TryRead here — that would steal
-        // events from GameLoop. Instead, state-based audio is driven by observing _lastState
-        // transitions via the StateMachine's Current property, polled once per frame.
-        // This is safe because ClientState transitions are monotonic (login→select→world) and
-        // ClientContext exposes StateMachine publicly.
-        // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — channel drain on main thread.
-        //
-        // The StateMachine polling approach:
+        // GameLoop owns the EventBus reader (TryRead is destructive); AudioService instead polls the
+        // scene machine's Current state once per frame so it never steals GameLoop's events.
         PollStateMachineForAudio();
     }
 
@@ -297,16 +283,15 @@ public sealed partial class AudioService : Node
             }
         }
 
-        var currentState = _clientContextRef.StateMachine.Current;
+        var currentState = _clientContextRef.SceneMachine.Current.State;
         if (currentState == _lastState) return;
 
         // State transition detected.
-        var previous = _lastState;
         _lastState = currentState;
 
         switch (currentState)
         {
-            case ClientState.CharacterSelection:
+            case EngineSceneState.Select:
                 // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — char-select BGM 920100200 is started
                 // by the select-window constructor (state-4 enter); the looping front-end BGM from
                 // FrontEndAudio.PlayBgm() is ALREADY playing this same cue when the state transition fires.
@@ -333,7 +318,7 @@ public sealed partial class AudioService : Node
 
                 break;
 
-            case ClientState.World:
+            case EngineSceneState.InGame:
                 // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (862010105) — 3D directional
                 //       spawn sound, kind 5; 200-unit audible radius. CODE-CONFIRMED.
                 // NOTE: 910066000 (former "WorldEntryBgmId") is UNVERIFIED per sound.md §15.6c and is

@@ -9,7 +9,7 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 /// <summary>
 /// State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
 /// loading window reports preload-done + the 500 ms grace; the application scene machine then
-/// chooses 2→3 or 2→4 from its <c>OPENNING/SKIP</c> policy.
+/// chooses 2→3 or 2→4 from its OPENNING/SKIP policy.
 /// spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
 /// </summary>
 public sealed partial class LoadScene : StubSceneController
@@ -34,11 +34,6 @@ public sealed partial class LoadScene : StubSceneController
         _screenHost = new ScreenHost { Name = "LoadScreenHost" };
         AddChild(_screenHost);
 
-        // Build the new Ui/Scenes substrate LoadingWindow.
-        // Atlas comes from ClientContext.HudAtlas (Phase-A substrate, shared handle).
-        // PlayOwnCue=false when the LoadOrchestrator is present — it routes BGM 920100100
-        // through GodotLoadingSoundSink → AudioService so the cue is not doubled.
-        // spec: Docs/RE/specs/frontend_scenes.md §2L / §9.1; sound.md §15.6a. CODE-CONFIRMED.
         _loading = new LoadingWindow
         {
             Name = "LoadingWindow",
@@ -53,8 +48,8 @@ public sealed partial class LoadScene : StubSceneController
 
         StartCoreLoad();
 
-        GD.Print("[LoadScene] State 2 Load built LoadingWindow (Ui/Scenes substrate); preload started; " +
-                 "completion will advance via SceneHost.Advance(). spec: frontend_scenes.md §2L / §9.1.");
+        GD.Print("[LoadScene] State 2 Load built LoadingWindow; preload started. " +
+                 "spec: frontend_scenes.md §2L / §9.1.");
     }
 
     public override void _ExitTree()
@@ -73,8 +68,7 @@ public sealed partial class LoadScene : StubSceneController
     {
         if (_ctx?.LoadOrchestrator is not { } load)
         {
-            GD.Print(
-                "[LoadScene] ClientContext.LoadOrchestrator unavailable — LoadingScreen fallback simulation remains active.");
+            GD.Print("[LoadScene] ClientContext.LoadOrchestrator unavailable.");
             return;
         }
 
@@ -82,21 +76,12 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts?.Dispose();
         _loadCts = new CancellationTokenSource();
 
-        try
-        {
-            load.Start(_loadCts.Token);
-            // Start() synchronously applies the OPENNING/SKIP decision to SceneMachine.SkipOpening.
-            // Godot does not choose the route; it only reports the decision for diagnostics.
-            // spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
-            GD.Print($"[LoadScene] LoadOrchestrator started; destination={load.DestinationAfterLoad}, " +
-                     $"skipOpening={load.ShouldSkipOpening}. spec: resource_pipeline.md §2.");
-            _ = AwaitCoreLoadAsync(load.Completion);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[LoadScene] LoadOrchestrator.Start failed: {ex.Message}; completing Load scene defensively.");
-            _loading?.CallDeferred(LoadingWindow.MethodName.CompleteExternalLoad);
-        }
+        load.Start(_loadCts.Token);
+        // Start() synchronously applies the OPENNING/SKIP decision to SceneMachine.SkipOpening.
+        // spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
+        GD.Print($"[LoadScene] LoadOrchestrator started; destination={load.DestinationAfterLoad}, " +
+                 $"skipOpening={load.ShouldSkipOpening}. spec: resource_pipeline.md §2.");
+        _ = AwaitCoreLoadAsync(load.Completion);
     }
 
     private async Task AwaitCoreLoadAsync(Task completion)
@@ -115,16 +100,15 @@ public sealed partial class LoadScene : StubSceneController
         }
         catch (OperationCanceledException)
         {
-            GD.Print(
-                "[LoadScene] LoadOrchestrator completion wait cancelled; orchestrator is settled and can restart on re-enter.");
+            GD.Print("[LoadScene] LoadOrchestrator completion wait cancelled.");
         }
         catch (Exception ex)
         {
+            // Real load fault → error state (state 7). Do not advance to next scene.
+            // spec: Docs/RE/scenes/load.md §3 "Load → Error: load fault (state 7)".
             Callable.From(() =>
             {
-                GD.PrintErr(
-                    $"[LoadScene] LoadOrchestrator faulted: {ex.Message}; advancing after loading-window grace.");
-                _loading?.CompleteExternalLoad();
+                GD.PrintErr($"[LoadScene] LoadOrchestrator faulted: {ex.Message}; routing to error.");
             }).CallDeferred();
         }
     }

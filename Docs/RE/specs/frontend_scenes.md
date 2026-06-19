@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: KF2..5 camera-keyframe arming (camera dolly) and the digit→slot PIN scramble seed/permutation remain debugger-pending; the EXE-window-close quit edge at Login is debugger-pending; which physical credential box is account vs password (join-string field #1 vs #2) is a static-hypothesis pending a capture

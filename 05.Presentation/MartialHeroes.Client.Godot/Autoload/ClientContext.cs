@@ -11,7 +11,6 @@ using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.Scene;
-using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation;
@@ -50,9 +49,8 @@ namespace MartialHeroes.Client.Godot.Autoload;
 ///
 /// VFS / assets:
 ///   The composition root resolves the VFS archive path via <see cref="MartialHeroes.Client.Godot.Dev.ClientPathResolver"/>:
-///   env override (MH_CLIENT_DIR), then client_dir.cfg, then auto-detection of common paths,
-///   finally empty-catalogue offline mode. No environment variable is required.
-///   On failure, all catalogues are empty and the run continues with synthetic data only.
+///   env override (MH_CLIENT_DIR), then client_dir.cfg, then auto-detection of common paths.
+///   The client requires the real VFS — a missing or unresolvable VFS is a hard failure.
 ///
 /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — composition root.
 /// spec: Docs/RE/specs/game_loop.md §6 — fixed-tick GameEngineLoop wired here.
@@ -76,15 +74,11 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public InboundFrameDispatcher Dispatcher { get; private set; } = null!;
 
-    /// <summary>The FSM (exposed so the HUD can read the current lifecycle state).</summary>
-    public ClientStateMachine StateMachine { get; private set; } = null!;
-
     /// <summary>
-    /// The faithful 8-state scene machine (CAMPAIGN 15 spine). Owns the live
+    /// The faithful 8-state scene machine — the SOLE state machine. Owns the live
     /// <see cref="MartialHeroes.Shared.Kernel.State.GameState"/>; the <see cref="SceneHost"/> listens
     /// for <see cref="MartialHeroes.Client.Application.Scene.SceneStateChangedEvent"/> and swaps the
-    /// live scene to match. Runs in parallel with the legacy <see cref="StateMachine"/> during the
-    /// scene-by-scene rebuild. spec: Docs/RE/specs/client_runtime.md §7.
+    /// live scene to match. spec: Docs/RE/specs/client_runtime.md §7.
     /// </summary>
     public SceneStateMachine SceneMachine { get; private set; } = null!;
 
@@ -113,22 +107,22 @@ public sealed partial class ClientContext : Node
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Item catalogue parsed from data/script/items.csv. Provides CP949-decoded item names
-    /// and stats via <see cref="ItemCatalogue.TryGet"/>. Empty when VFS is unavailable.
-    /// spec: Docs/RE/formats/config_tables.md §4 items.csv.
+    /// Item catalogue parsed from data/script/items.scr. Provides CP949-decoded item names
+    /// and stats via <see cref="ItemCatalogue.TryGet"/>.
+    /// spec: Docs/RE/formats/items_scr.md §4.
     /// </summary>
     public ItemCatalogue ItemCatalogue { get; private set; } = null!;
 
     /// <summary>
     /// Skill catalogue parsed from data/script/skills.scr. Provides skill definitions
-    /// via <see cref="SkillCatalogue.TryGet"/>. Empty when VFS is unavailable.
+    /// via <see cref="SkillCatalogue.TryGet"/>.
     /// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr.
     /// </summary>
     public SkillCatalogue SkillCatalogue { get; private set; } = null!;
 
     /// <summary>
     /// Mob catalogue parsed from data/script/mobs.scr. Provides mob records
-    /// via <see cref="MobCatalogue.TryGet"/>. Empty when VFS is unavailable.
+    /// via <see cref="MobCatalogue.TryGet"/>.
     /// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr.
     /// </summary>
     public MobCatalogue MobCatalogue { get; private set; } = null!;
@@ -145,7 +139,6 @@ public sealed partial class ClientContext : Node
     ///   - UiTex manifest (data/ui/UiTex.txt)  → <see cref="UiCatalogs.GetTexture"/>
     ///   - Msg catalog (data/script/msg.xdb)   → <see cref="UiCatalogs.GetMessage"/>
     ///
-    /// Both degrade gracefully when no VFS is available (offline mode).
     /// spec: Docs/RE/formats/ui_manifests.md §1 (uitex.txt, PARSER-CONFIRMED grammar).
     /// spec: Docs/RE/formats/misc_data.md §6 (msg.xdb, CODE-CONFIRMED loader).
     /// spec: Docs/RE/specs/ui_system.md §8.5 (HUD uitex integer binding contract).
@@ -160,7 +153,6 @@ public sealed partial class ClientContext : Node
     ///   - <c>data/ui/skillicon/skillicon.txt</c> (sheet DDS paths per (job,kind))
     ///   - <c>data/script/musajung.do</c> (Musa-jung demo stance; per-skill iconSrcX/Y)
     ///
-    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
     /// spec: Docs/RE/formats/ui_manifests.md §2.6 (23×23 cell model: CODE-CONFIRMED).
     /// spec: Docs/RE/formats/ui_manifests.md §2.7 (.do record layout: CODE-CONFIRMED + SAMPLE-VERIFIED).
     /// </summary>
@@ -171,7 +163,6 @@ public sealed partial class ClientContext : Node
     /// <c>data/item/texturelist.txt</c> for display in the InventoryWindow.
     ///
     /// Each item icon is a whole-texture DDS blit — no atlas sub-rect.
-    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
     ///
     /// spec: Docs/RE/formats/ui_manifests.md §10 (texturelist.txt: CODE-CONFIRMED).
     /// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
@@ -205,7 +196,6 @@ public sealed partial class ClientContext : Node
     /// Buff icon catalog: resolves per-buff AtlasTextures from the shared stateicon.dds atlas,
     /// keyed by buff_id via buff_icon_position.xdb.
     ///
-    /// Degrades gracefully when VFS is unavailable (all methods return null → placeholders).
     /// spec: Docs/RE/formats/misc_data.md §1.3 (atlas path, record layout).
     /// spec: Docs/RE/formats/misc_data.md §1.6 (cell sizes 23/25 px, 30-slot bar).
     /// </summary>
@@ -215,7 +205,6 @@ public sealed partial class ClientContext : Node
     /// Zone catalog: resolves the display name of the zone (and optionally a nearby sub-zone
     /// label) for a given legacy world XZ position, sourced from mapsetting.scr.
     ///
-    /// Degrades gracefully when VFS is unavailable (lookups return empty strings).
     /// spec: Docs/RE/formats/misc_data.md §7.1 (mapsetting.scr — 52 zone records).
     /// spec: Docs/RE/specs/minimap.md §6.3 (zone names live in mapsetting.scr, not msg.xdb).
     /// </summary>
@@ -228,7 +217,6 @@ public sealed partial class ClientContext : Node
     ///
     /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
     /// no additional VFS archive is opened.
-    /// Degrades gracefully when VFS is unavailable (all methods return null).
     ///
     /// spec: Docs/RE/formats/ui_manifests.md §1 — uitex.txt grammar.
     /// spec: Docs/RE/specs/ui_system.md §1.3 — "atlas pixels map 1:1 to screen pixels".
@@ -241,7 +229,6 @@ public sealed partial class ClientContext : Node
     ///
     /// Uses the same <c>_uiAssets</c> handle as <see cref="UiCatalogs"/>;
     /// no additional VFS archive is opened.
-    /// Degrades gracefully when VFS is unavailable (all lookups return the caller-supplied fallback).
     ///
     /// spec: Docs/RE/formats/msg_xdb.md — 516-byte records, ascending unsigned id order.
     /// spec: Docs/RE/specs/ui_system.md §8 — notice column msg ids 4001–4022.
@@ -254,7 +241,6 @@ public sealed partial class ClientContext : Node
     /// <see cref="MartialHeroes.Client.Application.Hud.ZoneChangedEvent"/> when the zone changes.
     ///
     /// Call <c>LoadAreaAsync</c> when the area is set, then <c>UpdatePosition</c> each frame.
-    /// Degrades gracefully when VFS is unavailable (publishes Unknown on first UpdatePosition).
     /// spec: Docs/RE/specs/world_systems.md Ch. 16.
     /// </summary>
     public MartialHeroes.Client.Application.World.RegionService RegionService { get; private set; } = null!;
@@ -280,7 +266,7 @@ public sealed partial class ClientContext : Node
     // Kept separate from the terrain VFS so the two archives have independent lifecycles.
     private RealClientAssets? _uiAssets;
 
-    // The MappedVfsArchive opened by TryOpenVfsForTerrain() and passed into VfsTerrainSectorSource.
+    // The MappedVfsArchive opened by OpenVfsForTerrain() and passed into VfsTerrainSectorSource.
     // VfsTerrainSectorSource stores the reference but does NOT implement IDisposable and therefore
     // does NOT dispose the archive — ownership stays here. Disposed in _ExitTree.
     // spec: Docs/RE/formats/pak.md §Two-file scheme (MappedVfsArchive = memory-mapped handle).
@@ -296,44 +282,21 @@ public sealed partial class ClientContext : Node
 
     public override void _Ready()
     {
-        // The entire composition-root body is wrapped in a defensive try/catch.
-        // Any exception in catalogue loading, VFS opening, or service construction is caught
-        // here; the run continues in a degraded-but-safe state so the Godot window still opens.
+        // Build the full application object graph. A failed VFS / catalogue load propagates
+        // as a hard failure — the client requires the real VFS.
         // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — composition root.
-        try
-        {
-            BuildApplicationGraph();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] FATAL during composition-root construction: {ex}");
-            GD.PrintErr("[ClientContext] Falling back to minimal offline state. " +
-                        "The window will open but real assets and the engine loop are unavailable.");
-
-            // Ensure all properties are non-null so child nodes never null-ref the context.
-            EnsureMinimalFallbackState();
-        }
+        BuildApplicationGraph();
 
         // Wire the AudioService as a child node so it participates in the scene lifecycle.
-        // Added after the application graph (and its fallback) so the EventBus/StateMachine are
-        // available when AudioService._Ready runs. This is the minimal wiring for audio.
         // spec: Docs/RE/specs/sound.md §12.1 (Godot reimplementation guidance).
-        try
-        {
-            var audio = new AudioService { Name = "AudioService" };
-            AddChild(audio);
-            Audio = audio;
-            GD.Print("[ClientContext] AudioService added as child node.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] AudioService init failed: {ex.Message} — no audio.");
-        }
+        var audio = new AudioService { Name = "AudioService" };
+        AddChild(audio);
+        Audio = audio;
+        GD.Print("[ClientContext] AudioService added as child node.");
     }
 
     /// <summary>
-    /// Builds the full Application object graph.  Separated from _Ready so the
-    /// defensive catch in _Ready remains clean.
+    /// Builds the full Application object graph.
     /// </summary>
     private void BuildApplicationGraph()
     {
@@ -341,17 +304,14 @@ public sealed partial class ClientContext : Node
         //    spec: ClientEventBus default policy.
         var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
 
-        // 2. FSM — starts at Login.
-        var fsm = new ClientStateMachine(bus, ClientState.Login);
-
-        // 2b. Faithful 8-state scene machine (CAMPAIGN 15). Boots at state 0 (Init).
-        //     spec: Docs/RE/specs/client_runtime.md §7.1.
+        // 2. Faithful 8-state scene machine — the sole state machine. Boots at state 0 (Init).
+        //    spec: Docs/RE/specs/client_runtime.md §7.1.
         var sceneMachine = new SceneStateMachine(bus);
 
         // 2c. State-2 load orchestrator: engine-free load worker, OPENNING/SKIP reader, and
         //     loading cue sink. The presentation only observes progress/completion.
         //     spec: Docs/RE/specs/resource_pipeline.md §2; client_runtime.md §7.3.
-        _loadVfsPipeline = TryMountLoadResourcePipeline();
+        _loadVfsPipeline = MountLoadResourcePipeline();
         var loadOrchestrator = new LoadOrchestrator(
             sceneMachine,
             new VfsLoadResourceSource(_loadVfsPipeline),
@@ -372,7 +332,7 @@ public sealed partial class ClientContext : Node
         _relaySink = relaySink;
         IOutboundPacketSink noopSink = relaySink; // alias — ApplicationUseCases receives the relay
 
-        // 6. Session id — fixed/default for offline composition.
+        // 6. Session id — starts as None; updated when the game connection is opened.
         SessionId sessionId = SessionId.None;
 
         // 7. Login credential store.
@@ -381,14 +341,12 @@ public sealed partial class ClientContext : Node
 
         // 8. Login handshake driver — answers the inbound 0/0 KeyExchange with the secure 1/4 Auth
         //    reply carrying the staged credential (account + optional PIN pre-image + RSA(M)). It shares
-        //    the SAME relay sink as ApplicationUseCases, so the reply reaches the live socket once
-        //    OpenGameConnectionAsync installs the crypto sink. Offline-safe: with no game connection the
-        //    relay sink drops the send, and no 0/0 ever arrives. The credential store and session id are
-        //    the same instances handed to ApplicationUseCases; stateMachine nudges the (idempotent) coarse
-        //    lifecycle FSM on handshake completion.
+        //    the SAME relay sink as ApplicationUseCases; the reply reaches the live socket once
+        //    OpenGameConnectionAsync installs the crypto sink. The credential store and session id are
+        //    the same instances handed to ApplicationUseCases.
         //    spec: Docs/RE/specs/crypto.md §6.1/§6.6; packets/login.yaml (CmsgLoginCredential).
         ILoginHandshakeDriver loginDriver =
-            new LoginHandshakeDriver(relaySink, credentialStore, sessionId, stateMachine: fsm);
+            new LoginHandshakeDriver(relaySink, credentialStore, sessionId);
 
         // 9. InputBus — UI handler first, world handler wired after InputRouter is created.
         //    The HudInputHandler starts as a pass-through (hitTest: null); the live GameHud.HitTest
@@ -407,126 +365,50 @@ public sealed partial class ClientContext : Node
         // 10. VFS catalogue loader — resolved via ClientPathResolver (config file / env / auto-detect).
         //     Used for item/skill/mob/stat catalogues (displayed by HUD).
         //     spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (never hardcode path).
-        _catalogueLoader = TryBuildCatalogueLoader();
+        _catalogueLoader = BuildCatalogueLoader();
 
         // 11. Real stat catalogue — from userlevel.scr via VfsCatalogueLoader.
-        //     Replaces the former ScrStatCatalogueSource stub with the real Implementation.
         //     spec: Docs/RE/formats/config_tables.md §2.4 userlevel.scr.
-        ScrStatCatalogue scrStatCatalogue;
-        try
-        {
-            scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
-            GD.Print(
-                $"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
-                $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] ScrStatCatalogue load failed: {ex.Message} — using empty catalogue.");
-            // Empty array constructor → both curves are StatBaseCurve.Empty (zero-alloc fallback).
-            scrStatCatalogue = new ScrStatCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.LevelBaseEntry>());
-        }
+        ScrStatCatalogue scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
+        GD.Print(
+            $"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
+            $"MP curve entries={scrStatCatalogue.GetMpBaseCurve().Count}).");
 
         // 12. Catalogue items / skills / mobs for UI display names (CP949).
-        //     Items come from the runtime master data/script/items.scr (NOT items.csv, an
-        //     authoring-only dev export the shipping client never loads).
-        //     spec: Docs/RE/formats/items_scr.md §4 + items_csv.md §6 (items) /
-        //     config_tables.md §2.8 skills.scr / §2.9 mobs.scr.
-        try
-        {
-            ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
-            SkillCatalogue = SkillCatalogue.FromLoader(_catalogueLoader);
-            MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
-            GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
-                     $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] Catalogue load failed: {ex.Message} — using empty catalogues.");
-            // Use empty-array constructors so the properties are non-null and Count returns 0.
-            ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
-            SkillCatalogue ??= new SkillCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.SkillCatalogEntry>());
-            MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
-        }
+        //     Items come from the runtime master data/script/items.scr (NOT items.csv).
+        //     spec: Docs/RE/formats/items_scr.md §4 + config_tables.md §2.8 / §2.9.
+        ItemCatalogue = ItemCatalogue.FromLoader(_catalogueLoader);
+        SkillCatalogue = SkillCatalogue.FromLoader(_catalogueLoader);
+        MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
+        GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
+                 $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
 
         // 13. UI data catalogs: uitex manifest (data/ui/UiTex.txt) and msg.xdb string catalog.
-        //     Opens a second RealClientAssets handle backed by the same VFS archive path so that
-        //     UiCatalogs' lazy texture loading (which calls Godot Image APIs) stays on the main
-        //     thread independently of the terrain streaming pipeline.
-        //     spec: Docs/RE/formats/ui_manifests.md §1 (uitex.txt: 35 DDS entries, PARSER-CONFIRMED).
-        //     spec: Docs/RE/formats/misc_data.md §6 (msg.xdb: 2644 records, CODE-CONFIRMED).
-        //     spec: Docs/RE/specs/ui_system.md §8.5 (HUD uitex integer binding contract).
-        try
-        {
-            _uiAssets = RealClientAssets.TryOpen(); // path via ClientPathResolver (same chain as catalogue loader)
-            UiCatalogs = new UiCatalogs(_uiAssets);
-            // Force-load both catalogs now so sizes appear in the boot log.
-            // EnsureUiTex / EnsureMsg are lazy but we trigger them here for diagnostics.
-            GD.Print($"[ClientContext] UiCatalogs: {UiCatalogs.UiTexEntryCount} uitex entries, " +
-                     $"{UiCatalogs.MsgRecordCount} msg records.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] UiCatalogs load failed: {ex.Message} — using empty UI catalogs.");
-            _uiAssets = null;
-            UiCatalogs ??= new UiCatalogs(null);
-        }
+        //     Opens a second RealClientAssets handle; lazy texture loading stays on the main thread.
+        //     spec: Docs/RE/formats/ui_manifests.md §1 / misc_data.md §6 / ui_system.md §8.5.
+        _uiAssets = RealClientAssets.TryOpen();
+        UiCatalogs = new UiCatalogs(_uiAssets);
+        GD.Print($"[ClientContext] UiCatalogs: {UiCatalogs.UiTexEntryCount} uitex entries, " +
+                 $"{UiCatalogs.MsgRecordCount} msg records.");
 
         // 13-B. HUD atlas + text libraries for the new Ui/Scenes substrate.
         //     Reuse the same _uiAssets handle; no additional VFS archive opened.
-        //     spec: Docs/RE/formats/ui_manifests.md §1 (HudAtlasLibrary — uitex.txt).
-        //     spec: Docs/RE/formats/msg_xdb.md (HudTextLibrary — msg.xdb).
-        try
-        {
-            HudAtlas = new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(_uiAssets);
-            HudText = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
-            GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] HudAtlas/HudText init failed: {ex.Message} — Ui/Scenes will run offline.");
-            HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-            HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
-        }
+        //     spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
+        HudAtlas = new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(_uiAssets);
+        HudText = new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(_uiAssets);
+        GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
 
-        // 14. Skill icon catalog: skillicon.txt + musajung.do stance table.
-        //     Uses the same _uiAssets handle as UiCatalogs so no additional VFS handle is opened.
-        //     Lazy — both files are parsed on first GetIcon() / GetFirstSlots() call.
-        //     spec: Docs/RE/formats/ui_manifests.md §2.6 (23×23 cell model: CODE-CONFIRMED).
-        //     spec: Docs/RE/formats/ui_manifests.md §2.7 (musajung.do, SAMPLE-VERIFIED presence).
-        try
-        {
-            IconCatalogs = new IconCatalogs(_uiAssets);
-            // Trigger lazy load now so the boot log shows the record count.
-            int doCount = IconCatalogs.DoRecordCount;
-            GD.Print($"[ClientContext] IconCatalogs: {doCount} musajung.do records loaded. " +
-                     "spec: Docs/RE/formats/ui_manifests.md §2.7 CODE-CONFIRMED + SAMPLE-VERIFIED.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] IconCatalogs load failed: {ex.Message} — skill icons will use placeholders.");
-            IconCatalogs ??= new IconCatalogs(null);
-        }
+        // 14. Skill icon catalog: skillicon.txt + musajung.do stance table (lazy).
+        //     spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
+        IconCatalogs = new IconCatalogs(_uiAssets);
+        GD.Print($"[ClientContext] IconCatalogs: {IconCatalogs.DoRecordCount} musajung.do records. " +
+                 "spec: Docs/RE/formats/ui_manifests.md §2.7.");
 
-        // 15. Item icon catalog: data/item/texturelist.txt — maps tex_id to DDS icon paths.
-        //     Uses the same _uiAssets handle as UiCatalogs (no additional VFS handle opened).
-        //     Lazy — the manifest is parsed on first GetIcon() / GetDemoIcons() call.
-        //     spec: Docs/RE/formats/ui_manifests.md §10 (flat newline-delimited list: CODE-CONFIRMED).
-        //     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
-        try
-        {
-            ItemIconCatalog = new ItemIconCatalog(_uiAssets);
-            // Trigger lazy load now so the boot log shows the manifest entry count.
-            int itemIconCount = ItemIconCatalog.ManifestCount;
-            GD.Print($"[ClientContext] ItemIconCatalog: {itemIconCount} texturelist.txt entries loaded. " +
-                     "spec: Docs/RE/formats/ui_manifests.md §10 CODE-CONFIRMED.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr(
-                $"[ClientContext] ItemIconCatalog load failed: {ex.Message} — item icons will use placeholders.");
-            ItemIconCatalog ??= new ItemIconCatalog(null);
-        }
+        // 15. Item icon catalog: data/item/texturelist.txt (lazy, whole-texture blit).
+        //     spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
+        ItemIconCatalog = new ItemIconCatalog(_uiAssets);
+        GD.Print($"[ClientContext] ItemIconCatalog: {ItemIconCatalog.ManifestCount} texturelist.txt entries. " +
+                 "spec: Docs/RE/formats/ui_manifests.md §10.");
 
         // 16-A. HUD event hub: the single facade for all per-frame HUD channels.
         //     Constructed once here; widgets subscribe via IHudEventHub.
@@ -536,59 +418,28 @@ public sealed partial class ClientContext : Node
         GD.Print("[ClientContext] HudEventHub constructed (6 typed channels).");
 
         // 16-B. Buff icon catalog (stateicon.dds + buff_icon_position.xdb).
-        //     Uses the same _uiAssets handle (no additional VFS archive opened).
         //     spec: Docs/RE/formats/misc_data.md §1.3 / §1.6.
-        try
-        {
-            BuffIconCatalog = new BuffIconCatalog(_uiAssets);
-            GD.Print($"[ClientContext] BuffIconCatalog initialised ({BuffIconCatalog.TableCount} entries).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr(
-                $"[ClientContext] BuffIconCatalog init failed: {ex.Message} — buff icons will be placeholders.");
-            BuffIconCatalog ??= new BuffIconCatalog(null);
-        }
+        BuffIconCatalog = new BuffIconCatalog(_uiAssets);
+        GD.Print($"[ClientContext] BuffIconCatalog initialised ({BuffIconCatalog.TableCount} entries).");
 
         // 16-C. Zone catalog (mapsetting.scr — 52 zone records, CP949 names).
-        //     Uses a fresh RealClientAssets handle for the zone-data VFS path.
         //     spec: Docs/RE/formats/misc_data.md §7.1 / Docs/RE/specs/minimap.md §6.3.
-        try
-        {
-            ZoneCatalog = new ZoneCatalog(RealClientAssets.TryOpen());
-            GD.Print($"[ClientContext] ZoneCatalog initialised ({ZoneCatalog.AllZones.Count} zone records).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] ZoneCatalog init failed: {ex.Message} — zone names unavailable.");
-            ZoneCatalog ??= new ZoneCatalog(null);
-        }
+        ZoneCatalog = new ZoneCatalog(RealClientAssets.TryOpen());
+        GD.Print($"[ClientContext] ZoneCatalog initialised ({ZoneCatalog.AllZones.Count} zone records.");
 
         // 16. VFS archive for terrain (separate from catalogue loader — same paths).
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Store in _terrainVfs so _ExitTree can dispose it (VfsTerrainSectorSource does not own/dispose).
-        MappedVfsArchive? vfs = TryOpenVfsForTerrain();
+        MappedVfsArchive vfs = OpenVfsForTerrain();
         _terrainVfs = vfs;
 
         // 16-D. Region service (Ch. 16 — 256-unit PvP/safe/closed zone grid).
-        //     Uses the same VFS archive as terrain (both read data/map<area>/ paths).
-        //     The VfsRegionSource and RegionService are engine-free — safe to construct here.
         //     spec: Docs/RE/specs/world_systems.md Ch. 16.
-        try
-        {
-            var regionSource = new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(vfs);
-            RegionService = new MartialHeroes.Client.Application.World.RegionService(regionSource, hudHub);
-            GD.Print("[ClientContext] RegionService constructed (region grid + zone-type table). " +
-                     "spec: Docs/RE/specs/world_systems.md Ch. 16.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] RegionService construction failed: {ex.Message} — zone indicator offline.");
-            RegionService = new MartialHeroes.Client.Application.World.RegionService(
-                new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), hudHub);
-        }
+        var regionSource = new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(vfs);
+        RegionService = new MartialHeroes.Client.Application.World.RegionService(regionSource, hudHub);
+        GD.Print("[ClientContext] RegionService constructed. spec: Docs/RE/specs/world_systems.md Ch. 16.");
 
-        // 17. Terrain sector source — backed by VFS (or empty if offline).
+        // 17. Terrain sector source — backed by VFS.
         //     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
         //     Area 0 is the default starting area. TODO: update on enter-game.
         var terrainSource = new VfsTerrainSectorSource(vfs, areaId: 0);
@@ -603,7 +454,7 @@ public sealed partial class ClientContext : Node
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
-        var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, loginDriver, sceneStateMachine: sceneMachine)
+        var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver, sceneStateMachine: sceneMachine)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -636,7 +487,7 @@ public sealed partial class ClientContext : Node
         //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
         //     eventBus, lobbyClient, lastServerStore wired so FetchServerListAsync / SelectServerAsync
         //     publish ServerListReceivedEvent and persist Lastserver.
-        var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
+        var useCases = new ApplicationUseCases(noopSink, world, credentialStore, sessionId,
             versionToken: versionToken, versionSource: null, sceneStateMachine: sceneMachine,
             eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore);
         GD.Print(
@@ -651,7 +502,6 @@ public sealed partial class ClientContext : Node
         EventBus = bus;
         UseCases = useCases;
         Dispatcher = dispatcher;
-        StateMachine = fsm;
         SceneMachine = sceneMachine;
         LoadOrchestrator = loadOrchestrator;
         InputBus = inputBus;
@@ -678,114 +528,6 @@ public sealed partial class ClientContext : Node
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
 
         GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop started at 30 Hz.");
-    }
-
-    /// <summary>
-    /// Builds the absolute minimum set of non-null properties so child nodes that access
-    /// <c>ClientContext</c> never encounter a null reference, even when
-    /// <see cref="BuildApplicationGraph"/> threw.
-    ///
-    /// All services are hollow/no-op implementations that do nothing but are non-null.
-    /// </summary>
-    private void EnsureMinimalFallbackState()
-    {
-        if (EventBus is null)
-        {
-            var bus = new ClientEventBus(ClientEventBus.DefaultCapacity);
-            var fsm = new ClientStateMachine(bus, ClientState.Login);
-            var sceneMachine = new SceneStateMachine(bus);
-            var loadOrchestrator = new LoadOrchestrator(
-                sceneMachine,
-                new VfsLoadResourceSource(null),
-                new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
-                new GodotLoadingSoundSink());
-            var world = new ClientWorld();
-            var noopSink = new NoOpOutboundPacketSink();
-            var hudHandler = new HudInputHandler(hitTest: null);
-            _hudInputHandler = hudHandler; // F1: stored for late SetHitTest wiring. spec: input_ui.md §3/§6.
-            var worldRelay = new RelayInputHandler();
-            var inputBus = new InputBus(hudHandler, worldRelay);
-            var credentialStore = new LoginCredentialStore();
-            SessionId sessionId = SessionId.None;
-            // Pass default (empty span) so the derivation via DefaultClientVersionSource runs.
-            // spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × 2114 + 9 = 21149).
-            var useCases = new ApplicationUseCases(noopSink, fsm, world, credentialStore, sessionId,
-                versionToken: default, versionSource: null, sceneStateMachine: sceneMachine);
-            var opcodeSink = new CountingUnhandledOpcodeSink();
-            var handler = new GamePacketHandler(world, bus, fsm, opcodeSink, null, sceneStateMachine: sceneMachine);
-            var dispatcher = new InboundFrameDispatcher(handler);
-            var terrainSource = new VfsTerrainSectorSource(null, areaId: 0);
-            // spec: Docs/RE/formats/terrain.md §12.2 — High quality → 5×5 ring (ring-radius cells = 5).
-            var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.High);
-            var engineLoop = new GameEngineLoop(world, bus, inputBus, GameEngineLoop.DefaultTickRateHz);
-
-            EventBus = bus;
-            UseCases = useCases;
-            Dispatcher = dispatcher;
-            StateMachine = fsm;
-            SceneMachine = sceneMachine;
-            LoadOrchestrator = loadOrchestrator;
-            InputBus = inputBus;
-            EngineLoop = engineLoop;
-            StreamingService = streamingService;
-            _setWorldHandler = worldRelay.SetTarget;
-
-            // Start the loop (no assets, no network — just keeps the bus alive).
-            _loopCts = new CancellationTokenSource();
-            PeriodicGameClock clock = engineLoop.CreateRealtimeClock();
-            // Store the RAW loop task so _ExitTree drains it before disposing _loopCts (Fix 3).
-            Task rawLoop = engineLoop.RunAsync(clock, _loopCts.Token);
-            _loopTask = rawLoop;
-            _ = rawLoop.ContinueWith(
-                t => GD.PrintErr($"[ClientContext] Fallback EngineLoop faulted: {t.Exception}"),
-                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-        }
-
-        ItemCatalogue ??= new ItemCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.ItemCsvRow>());
-        SkillCatalogue ??= new SkillCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.SkillCatalogEntry>());
-        MobCatalogue ??= new MobCatalogue(Array.Empty<MartialHeroes.Assets.Parsers.Models.MobCatalogEntry>());
-
-        // UiCatalogs — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/misc_data.md §6.
-        UiCatalogs ??= new UiCatalogs(null);
-
-        // IconCatalogs — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
-        IconCatalogs ??= new IconCatalogs(null);
-
-        // HudAtlas + HudText — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
-        HudAtlas ??= new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        HudText ??= new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
-
-        // ItemIconCatalog — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
-        ItemIconCatalog ??= new ItemIconCatalog(null);
-
-        // HudEventHub — null-safe offline fallback.
-        // spec: MartialHeroes.Client.Application.Hud — IHudEventHub / HudEventHub.
-        HudEventHub ??= new HudEventHub();
-
-        // BuffIconCatalog — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/misc_data.md §1.3 / §1.6.
-        BuffIconCatalog ??= new BuffIconCatalog(null);
-
-        // ZoneCatalog — null-safe offline fallback (no VFS).
-        // spec: Docs/RE/formats/misc_data.md §7.1 / Docs/RE/specs/minimap.md §6.3.
-        ZoneCatalog ??= new ZoneCatalog(null);
-
-        // RegionService — null-safe offline fallback (no VFS → null source → Unknown zone).
-        // spec: Docs/RE/specs/world_systems.md Ch. 16.
-        RegionService ??= new MartialHeroes.Client.Application.World.RegionService(
-            new MartialHeroes.Client.Godot.Adapters.VfsRegionSource(null), HudEventHub);
-
-        LoadOrchestrator ??= new LoadOrchestrator(
-            SceneMachine,
-            new VfsLoadResourceSource(null),
-            new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
-            new GodotLoadingSoundSink());
-
-        GD.Print("[ClientContext] Minimal fallback state initialised.");
     }
 
     // Stored so InputRouter can wire the world handler after initialisation.
@@ -827,8 +569,8 @@ public sealed partial class ClientContext : Node
     /// Idempotent: a second call while the connection is already open is a no-op.
     /// </para>
     /// <para>
-    /// Called by <c>LoginScene.SelectServerAsync</c> (online mode only — not in DEV_OFFLINE_FLOW)
-    /// once the lobby has resolved the game-server host:port via <c>SelectServerAsync</c>.
+    /// Called by <c>LoginScene.SelectServerAsync</c> once the lobby has resolved the game-server
+    /// host:port via <c>SelectServerAsync</c>.
     /// </para>
     /// <para>
     /// The inbound path: <c>TcpTransport</c> is constructed with a <see cref="DispatcherFrameSink"/>
@@ -981,7 +723,8 @@ public sealed partial class ClientContext : Node
 
     /// <summary>
     /// Builds a <see cref="VfsCatalogueLoader"/> using <see cref="ClientPathResolver.ResolveClientDir"/>.
-    /// Returns an empty-catalogue loader when no valid client directory is found.
+    /// Throws <see cref="InvalidOperationException"/> when no valid client directory is found;
+    /// the client requires the real VFS.
     ///
     /// Path resolution is delegated entirely to <see cref="ClientPathResolver"/> (env-var override,
     /// then client_dir.cfg, then auto-detection). No direct environment-variable read here.
@@ -989,76 +732,53 @@ public sealed partial class ClientContext : Node
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (user supplies originals).
     /// spec: Docs/RE/formats/pak.md §Two-file scheme.
     /// </summary>
-    private static VfsCatalogueLoader TryBuildCatalogueLoader()
+    private static VfsCatalogueLoader BuildCatalogueLoader()
     {
-        string? clientDir = ClientPathResolver.ResolveClientDir();
-        if (clientDir is not null)
-        {
-            string infPath = Path.Combine(clientDir, "data.inf");
-            string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
-            GD.Print($"[ClientContext] CatalogueLoader: using resolved client dir '{clientDir}'.");
-            return new VfsCatalogueLoader(infPath, vfsPath);
-        }
+        string clientDir = ClientPathResolver.ResolveClientDir()
+                           ?? throw new InvalidOperationException(
+                               "[ClientContext] No VFS client directory found. " +
+                               "Set MH_CLIENT_DIR, create client_dir.cfg, or install the client at a known path.");
 
-        // Offline / no VFS available — loader returns empty arrays for all catalogues.
-        GD.Print("[ClientContext] CatalogueLoader: no VFS found — all catalogues empty (offline mode).");
-        return new VfsCatalogueLoader(); // empty constructor → no archive
+        string infPath = Path.Combine(clientDir, "data.inf");
+        string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
+        GD.Print($"[ClientContext] CatalogueLoader: using resolved client dir '{clientDir}'.");
+        return new VfsCatalogueLoader(infPath, vfsPath);
     }
 
     /// <summary>
     /// Opens the VFS archive for terrain sector streaming using <see cref="ClientPathResolver.ResolveClientDir"/>.
-    /// Returns null gracefully when no valid client directory is found (offline mode).
+    /// Throws when no valid client directory is found; the client requires the real VFS.
     ///
     /// spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
     /// spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
     /// </summary>
-    private static MappedVfsArchive? TryOpenVfsForTerrain()
+    private static MappedVfsArchive OpenVfsForTerrain()
     {
-        string? clientDir = ClientPathResolver.ResolveClientDir();
-        if (clientDir is null)
-        {
-            GD.Print("[ClientContext] Terrain VFS not found — running offline (no terrain assets).");
-            return null;
-        }
+        string clientDir = ClientPathResolver.ResolveClientDir()
+                           ?? throw new InvalidOperationException(
+                               "[ClientContext] No VFS client directory found — cannot open terrain VFS. " +
+                               "Set MH_CLIENT_DIR, create client_dir.cfg, or install the client at a known path.");
 
         string infPath = Path.Combine(clientDir, "data.inf");
         string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
-        try
-        {
-            MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
-            GD.Print($"[ClientContext] Terrain VFS opened from '{clientDir}' ({archive.EntryCount} entries).");
-            return archive;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] Terrain VFS open failed from '{clientDir}': {ex.Message}");
-            return null;
-        }
+        MappedVfsArchive archive = MappedVfsArchive.Open(infPath, vfsPath);
+        GD.Print($"[ClientContext] Terrain VFS opened from '{clientDir}' ({archive.EntryCount} entries).");
+        return archive;
     }
 
-    private static VfsResourcePipeline? TryMountLoadResourcePipeline()
+    private static VfsResourcePipeline MountLoadResourcePipeline()
     {
-        string? clientDir = ClientPathResolver.ResolveClientDir();
-        if (clientDir is null)
-        {
-            GD.Print("[ClientContext] Load VFS pipeline not mounted — state-2 worker runs in offline zero-byte mode.");
-            return null;
-        }
+        string clientDir = ClientPathResolver.ResolveClientDir()
+                           ?? throw new InvalidOperationException(
+                               "[ClientContext] No VFS client directory found — cannot mount load resource pipeline. " +
+                               "Set MH_CLIENT_DIR, create client_dir.cfg, or install the client at a known path.");
 
         string infPath = Path.Combine(clientDir, "data.inf");
         string vfsPath = Path.Combine(clientDir, "data", "data.vfs");
-        try
-        {
-            VfsResourcePipeline pipeline = VfsResourcePipeline.Mount(infPath, vfsPath);
-            pipeline.TrackingEnabled = true;
-            GD.Print($"[ClientContext] Load VFS pipeline mounted from '{clientDir}'. spec: resource_pipeline.md §2.");
-            return pipeline;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[ClientContext] Load VFS pipeline mount failed from '{clientDir}': {ex.Message}");
-            return null;
-        }
+        VfsResourcePipeline pipeline = VfsResourcePipeline.Mount(infPath, vfsPath);
+        pipeline.TrackingEnabled = true;
+        GD.Print($"[ClientContext] Load VFS pipeline mounted from '{clientDir}'. spec: resource_pipeline.md §2.");
+        return pipeline;
     }
 
     private static string ResolveOpeningSkipCfgPath()
@@ -1080,24 +800,6 @@ public sealed partial class ClientContext : Node
 // -------------------------------------------------------------------------
 // File-local helpers
 // -------------------------------------------------------------------------
-
-/// <summary>
-/// Stub <see cref="IOutboundPacketSink"/> that silently discards every send.
-/// Used until a live transport session is available.
-/// </summary>
-file sealed class NoOpOutboundPacketSink : IOutboundPacketSink
-{
-    public ValueTask SendAsync(
-        SessionId sessionId,
-        ushort majorOpcode,
-        ushort minorOpcode,
-        ReadOnlyMemory<byte> payload,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.CompletedTask;
-    }
-}
 
 /// <summary>
 /// A late-binding <see cref="IInputHandler"/> relay whose target can be set after construction.

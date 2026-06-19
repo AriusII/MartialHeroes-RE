@@ -17,8 +17,7 @@
 //   Cancel button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
 //     → closes the modal (Cancelled).
 //   There is NO separate clear/backspace tag — the only edit verbs are digit / Reset / OK / Cancel.
-//   spec: Docs/RE/specs/frontend_layout_tables.md §3 (re-confirmed vs binary 2026-06-18:
-//   Reset=11 → ScrambleKeypad, OK=12 → SubmitOk, Cancel=13 → Cancel).
+//   spec: Docs/RE/specs/frontend_layout_tables.md §3 — Reset=11, OK=12, Cancel=13.
 //
 // Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
@@ -46,12 +45,12 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 ///
 /// <para>Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary"/>.
 /// Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
-/// OK (tag 11), Clear (tag 12), third/cancel (tag 13) buttons.</para>
+/// Reset (tag 11), OK (tag 12), Cancel (tag 13) buttons.</para>
 ///
 /// <para>Subscribe to <see cref="PinSubmitted"/> and <see cref="Cancelled"/> to receive
 /// the outcome and emit the appropriate use-case call. Never mutate domain state here.</para>
 ///
-/// spec: Docs/RE/specs/frontend_scenes.md §11.3 — CODE-CONFIRMED PIN modal.
+/// spec: Docs/RE/specs/frontend_scenes.md §11.3
 /// </summary>
 public sealed partial class PinSubView : Control
 {
@@ -83,10 +82,12 @@ public sealed partial class PinSubView : Control
     private const int Row1Y = LoginLayout.PinKeypadRow1Y; // 230
 
     // Digit glyph source V rows in password.dds.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.3b. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 — Normal=560, Pressed=664, Hover=612 (CORRECTED).
+    // The prior "Pressed 612 / Hover 664" reading was INVERTED — the construct call's argument order
+    // (NORMAL,PRESSED,HOVER per §0.12) resolves 664 as PRESSED and 612 as HOVER unambiguously.
     private const int DigitNormalV = LoginLayout.PinDigitNormalSrcY; // 560
-    private const int DigitHoverV = LoginLayout.PinDigitHoverSrcY; // 664
-    private const int DigitPressedV = LoginLayout.PinDigitPressedSrcY; // 612
+    private const int DigitHoverV = LoginLayout.PinDigitHoverSrcY; // 612 (CORRECTED from 664)
+    private const int DigitPressedV = LoginLayout.PinDigitPressedSrcY; // 664 (CORRECTED from 612)
     private const int DigitColW = LoginLayout.PinDigitColWidth; // 52
 
     // PIN capacity.
@@ -131,16 +132,6 @@ public sealed partial class PinSubView : Control
 
     // PIN display label.
     private Label? _pinDisplay;
-
-    // DEV: prefill PIN for offline replay (skip keypad interaction).
-    // This is the only departure from the pure-passive contract — it is a DEV-only
-    // convenience that skips the visual scrambled keypad and auto-submits.
-    // guarded by IsDevPrefillActive.
-    public string? DevPrefillPin { private get; set; }
-
-    // Retained for LoginWindow/LoginScene factory compatibility; the recovered rect is absolute either way.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.3 "panel rect (347,173,329,422)". CODE-CONFIRMED.
-    public bool HostInReferenceSpace { get; set; }
 
     // -------------------------------------------------------------------------
     // Construction
@@ -193,20 +184,6 @@ public sealed partial class PinSubView : Control
 
         // Reset(11) / OK(12) / Cancel(13) control buttons.
         BuildControlButtons();
-
-        // DEV: auto-submit prefilled PIN if provided.
-        if (DevPrefillPin is { Length: > 0 } pre)
-        {
-            GD.Print($"[PinSubView] DEV prefill: auto-submitting PIN (len={pre.Length}).");
-            _pin = pre.Length > PinMaxLength ? pre[..PinMaxLength] : pre;
-            UpdatePinDisplay();
-            CallDeferred(MethodName.AutoSubmitPin);
-        }
-    }
-
-    private void AutoSubmitPin()
-    {
-        OnButtonAction(TagOk);
     }
 
     // -------------------------------------------------------------------------

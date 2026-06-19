@@ -15,9 +15,6 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 /// </summary>
 public sealed partial class LoginScene : StubSceneController
 {
-    private const string ConfigResPath = "res://client_dir.cfg";
-    private const string DevOfflineKey = "dev_offline_flow";
-
     private ClientContext? _ctx;
     private SceneHost? _host;
     private ScreenHost? _screenHost;
@@ -65,9 +62,6 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_ctx is null || _syncingScene) return;
 
-        // State 1 is the sole presentation event consumer while Login is live. Route only the login
-        // scene's events here, then state-2+ controllers take over after the host re-dispatches.
-        // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — drain Application channels on _Process.
         while (_ctx.EventBus.Reader.TryRead(out IClientEvent? evt))
         {
             switch (evt)
@@ -89,12 +83,9 @@ public sealed partial class LoginScene : StubSceneController
 
     private LoginWindow BuildLoginWindow()
     {
-        // Resolve the HudAtlasLibrary and HudTextLibrary from the composition root.
-        // Both degrade gracefully when the VFS is offline (null-backed).
-        var atlas = _ctx?.HudAtlas
-                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        var text = _ctx?.HudText
-                   ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
+        if (_ctx is null) throw new InvalidOperationException("ClientContext not found — VFS required.");
+        var atlas = _ctx.HudAtlas;
+        var text = _ctx.HudText;
 
         var login = new LoginWindow(atlas, text)
         {
@@ -103,12 +94,6 @@ public sealed partial class LoginScene : StubSceneController
             PinFactory = CreateInLoginPin,
             ServerSelectFactory = CreateInLoginServerSelect,
         };
-
-        if (IsDevOfflineMode())
-        {
-            login.DevPrefillId = DevAccountId();
-            login.DevPrefillPw = DevAccountPw();
-        }
 
         login.LoginAccepted += OnLoginAccepted;
         login.QuitRequested += OnQuitRequested;
@@ -121,7 +106,6 @@ public sealed partial class LoginScene : StubSceneController
         _account = account;
         _password = password;
 
-        // Stage credentials immediately, before the optional PIN re-stage at chain completion.
         // spec: Docs/RE/specs/login_flow.md §4.2; Docs/RE/specs/crypto.md §6.1.
         if (_ctx?.UseCases is { } useCases)
             _ = useCases.LoginAsync(account, password, cancellationToken: CancellationToken.None);
@@ -132,19 +116,10 @@ public sealed partial class LoginScene : StubSceneController
 
     private PinSubView CreateInLoginPin()
     {
-        var atlas = _ctx?.HudAtlas
-                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-
-        var pin = new PinSubView(atlas)
+        var pin = new PinSubView(_ctx?.HudAtlas ?? throw new InvalidOperationException("ClientContext lost."))
         {
             Name = "PinSubView",
-            HostInReferenceSpace = true,
         };
-
-        // Skip the offline PIN auto-submit while dumping layout, so the login dump can open the PIN
-        // sub-view and capture its rects without immediately submitting + advancing the scene.
-        if (IsDevOfflineMode() && !Dev.LayoutDump.Enabled)
-            pin.DevPrefillPin = DevAccountPin();
 
         GD.Print("[LoginScene] Created in-login PinSubView (sub-states 31/32) on HudAtlasLibrary. " +
                  "spec: frontend_scenes.md §11.3.");
@@ -153,21 +128,13 @@ public sealed partial class LoginScene : StubSceneController
 
     private ServerSelectSubView CreateInLoginServerSelect()
     {
-        var atlas = _ctx?.HudAtlas
-                    ?? new MartialHeroes.Client.Godot.Ui.Assets.HudAtlasLibrary(null);
-        var text = _ctx?.HudText
-                   ?? new MartialHeroes.Client.Godot.Ui.Assets.HudTextLibrary(null);
-
-        _serverSelect = new ServerSelectSubView(atlas, text)
+        if (_ctx is null) throw new InvalidOperationException("ClientContext lost.");
+        _serverSelect = new ServerSelectSubView(_ctx.HudAtlas, _ctx.HudText)
         {
             Name = "ServerSelectSubView",
         };
 
-        // No synthetic server data: in DEV-offline the server-list is faithfully EMPTY (the original
-        // shows nothing without a real lobby — no invented servers); online we fetch the real list from
-        // the lobby (TCP port 10000). spec: Docs/RE/specs/login_flow.md §2.1; lobby.yaml.
-        if (!IsDevOfflineMode())
-            _ = FetchServerListAsync();
+        _ = FetchServerListAsync();
 
         GD.Print(
             "[LoginScene] Created in-login ServerSelectSubView (sub-states 34..41) on HudAtlasLibrary. " +
@@ -216,8 +183,6 @@ public sealed partial class LoginScene : StubSceneController
 
         if (_ctx?.UseCases is { } useCases)
         {
-            // Re-stage with the collected PIN and resolve the selected channel through the Application
-            // facade. Both are passive intents; failures leave the dev/offline visual flow walkable.
             _ = useCases.LoginAsync(_account, _password, pin, CancellationToken.None);
             _ = SelectServerAsync((ushort)serverId);
         }
@@ -230,18 +195,12 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_ctx?.UseCases is not { } useCases) return;
 
-        // In DEV offline mode we never call the real lobby or open a game connection.
-        // The offline auto-walk relies on SelectServerAsync being a no-op here.
-        if (IsDevOfflineMode()) return;
-
         try
         {
             MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
                 await useCases.SelectServerAsync(serverId, CancellationToken.None)
                     .ConfigureAwait(false);
 
-            // Open the game TCP connection with the resolved endpoint. This wires the real
-            // outbound sink through the relay so the 1/4 handshake goes to the real server.
             // spec: Docs/RE/specs/login_flow.md §2.2 — lobby resolves the game-server host:port.
             if (_ctx is not null)
                 await _ctx.OpenGameConnectionAsync(endpoint.Host, endpoint.Port).ConfigureAwait(false);
@@ -257,67 +216,5 @@ public sealed partial class LoginScene : StubSceneController
         GD.Print("[LoginScene] Quit requested from LoginWindow.");
         _ctx?.SceneMachine.RequestQuit();
         GetTree().Quit();
-    }
-
-    private static string DevAccountId() => ReadCfgKey("dev_account_id", "xwdvg26");
-    private static string DevAccountPw() => ReadCfgKey("dev_account_pw", "crfgb727*");
-    private static string DevAccountPin() => ReadCfgKey("dev_account_pin", "1472");
-
-    private static bool IsDevOfflineMode()
-    {
-        string? envVal = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
-        if (envVal is "1" or "true" or "yes")
-        {
-            GD.Print("[LoginScene] DEV_OFFLINE_FLOW env var is set → offline replay active.");
-            return true;
-        }
-
-        string val = ReadCfgKey(DevOfflineKey, "0");
-        bool enabled = val is "1" or "true" or "yes";
-        if (enabled)
-            GD.Print("[LoginScene] dev_offline_flow=1 in client_dir.cfg → offline replay active.");
-        return enabled;
-    }
-
-    private static string ReadCfgKey(string key, string defaultValue)
-    {
-        string? path = ResolveCfgPath();
-        if (path is null) return defaultValue;
-
-        try
-        {
-            foreach (string rawLine in File.ReadLines(path))
-            {
-                string line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-
-                int eq = line.IndexOf('=');
-                if (eq < 0) continue;
-
-                string k = line[..eq].Trim();
-                string v = line[(eq + 1)..].Trim();
-                if (k.Equals(key, StringComparison.OrdinalIgnoreCase) && v.Length > 0)
-                    return v;
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[LoginScene] ReadCfgKey('{key}'): {ex.Message}");
-        }
-
-        return defaultValue;
-    }
-
-    private static string? ResolveCfgPath()
-    {
-        try
-        {
-            string abs = ProjectSettings.GlobalizePath(ConfigResPath);
-            return File.Exists(abs) ? abs : null;
-        }
-        catch
-        {
-            return File.Exists("client_dir.cfg") ? "client_dir.cfg" : null;
-        }
     }
 }

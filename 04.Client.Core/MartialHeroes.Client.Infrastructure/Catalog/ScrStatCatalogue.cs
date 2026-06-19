@@ -1,3 +1,4 @@
+using System;
 using MartialHeroes.Assets.Parsers.Models;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Domain.Stats;

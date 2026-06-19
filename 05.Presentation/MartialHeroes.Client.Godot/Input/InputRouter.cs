@@ -3,6 +3,7 @@ using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Helpers;
+using MartialHeroes.Shared.Kernel.Enums;
 using MartialHeroes.Shared.Kernel.Numerics;
 using GodotInputMap = Godot.InputMap;
 using GodotInput = Godot.Input;
@@ -147,10 +148,10 @@ public sealed partial class InputRouter : Node
             return;
         }
 
-        // Only route inputs when we are in World state (non-world states use their own UI).
-        if (_clientContext?.StateMachine.Current != ClientState.World)
+        // Only route inputs when we are in-game (other scenes use their own UI).
+        if (_clientContext?.SceneMachine.Current.State != EngineSceneState.InGame)
         {
-            // Still handle hotbar in World state check below — done in _UnhandledInput.
+            // Still handle hotbar in the in-game check below — done in _UnhandledInput.
             return;
         }
 
@@ -251,7 +252,7 @@ public sealed partial class InputRouter : Node
     /// </summary>
     public override void _UnhandledInput(global::Godot.InputEvent evt)
     {
-        if (_clientContext?.StateMachine.Current != ClientState.World)
+        if (_clientContext?.SceneMachine.Current.State != EngineSceneState.InGame)
         {
             return;
         }

@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using MartialHeroes.Assets.Parsers.Models;
 
 namespace MartialHeroes.Client.Infrastructure.Catalog;

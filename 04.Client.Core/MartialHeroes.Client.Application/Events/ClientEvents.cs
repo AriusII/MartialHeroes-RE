@@ -51,14 +51,6 @@ public sealed record ActorMovedEvent(
 public sealed record ActorDespawnedEvent(ActorKey Key, bool PlayLeaveEffect) : IClientEvent;
 
 /// <summary>
-/// Published whenever the client lifecycle state changes. Immutable snapshot. spec:
-/// Docs/RE/opcodes.md (3/5 drives Loading -> World).
-/// </summary>
-/// <param name="Previous">The state the client left.</param>
-/// <param name="Current">The state the client entered.</param>
-public sealed record ClientStateChangedEvent(ClientState Previous, ClientState Current) : IClientEvent;
-
-/// <summary>
 /// Published when an actor's current vitals change (5/53). Immutable snapshot. spec:
 /// Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
 /// </summary>

@@ -10,8 +10,7 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 /// from the engine-state error fields (sub-state = reason, error-detail = result code), surfaces it
 /// in a modal, writes the error to the log, then converges on the shared exit tail (field-0 → 8) that
 /// returns from <c>WinMain</c>. The <see cref="SceneStateMachine"/> routes here via ToError /
-/// OnDisconnected / OnLoginWindowConfigFailed (sub 1) / OnLoginDeviceInitFailed (sub 3) / the 3/100
-/// error codes.
+/// OnDisconnected / the 3/100 error codes.
 /// spec: Docs/RE/specs/client_runtime.md §7.3 (state 7 = error string + error.log + modal → exit),
 /// §7.5.1 (7 → 8 exit tail), §7.7 (state-7 writes error.log before the dialog).
 /// </summary>

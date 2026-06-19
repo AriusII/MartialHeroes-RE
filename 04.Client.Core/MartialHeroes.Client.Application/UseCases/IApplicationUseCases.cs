@@ -80,9 +80,9 @@ public interface IApplicationUseCases
     /// <see cref="Events.CreateCharacterRequestedEvent"/>, sends NO 1/9), an unoccupied/unknown slot
     /// sends nothing, and a real character is cached as the chosen descriptor (consumed by the 3/7
     /// spawn). For a real character it builds and sends 1/9 CmsgEnterGameRequest (slot index + the
-    /// derived version token, <c>10 × versionField + 9</c> = 21149 for the sampled game.ver) and drives
-    /// the FSM toward <see cref="Events.ClientState.Loading"/>; the 3/5 ack later completes the
-    /// transition to World, and the 3/7 result spawns the local player. spec:
+    /// derived version token, <c>10 × versionField + 9</c> = 21149 for the sampled game.ver); the 3/5
+    /// EnterGameAck later drives the scene machine to Load (state 2), and the 3/7 result spawns the
+    /// local player. spec:
     /// Docs/RE/specs/login_flow.md §3.3 / §3.5 / §7; Docs/RE/packets/1-9_enter_game_request.yaml.
     /// </summary>
     /// <param name="slotIndex">The chosen character slot (0..4; out-of-range throws).</param>

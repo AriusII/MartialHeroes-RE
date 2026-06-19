@@ -1,4 +1,3 @@
-using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
@@ -37,7 +36,6 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
     private readonly IOutboundPacketSink _outbound;
     private readonly LoginCredentialStore _credentials;
     private readonly IPaddingRandom _paddingRandom;
-    private readonly ClientStateMachine? _stateMachine;
     private readonly SessionId _sessionId;
 
     /// <summary>Auth reply opcode major. spec: Docs/RE/specs/crypto.md §6 (1/4 out).</summary>
@@ -50,15 +48,13 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
         IOutboundPacketSink outbound,
         LoginCredentialStore credentials,
         SessionId sessionId,
-        IPaddingRandom? paddingRandom = null,
-        ClientStateMachine? stateMachine = null)
+        IPaddingRandom? paddingRandom = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _sessionId = sessionId;
         // Production default is the cryptographic RNG; tests inject a deterministic one. spec: crypto.md §6.3.
         _paddingRandom = paddingRandom ?? CryptoPaddingRandom.Shared;
-        _stateMachine = stateMachine;
     }
 
     /// <inheritdoc />
@@ -89,9 +85,6 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
         // Wipe all staged credential buffers (account, M, PIN). spec: crypto.md §6.1 (the staged M
         // is zeroed and freed after the reply is built); §6a (secure-context teardown zeros M).
         _credentials.Clear();
-
-        // Advance the lifecycle out of Login if a state machine was supplied.
-        _stateMachine?.OnAuthenticated();
 
         // NOTE: this driver does NOT publish LoginHandshakeCompletedEvent. The event is published by the
         // SINGLE owner — GamePacketHandler.HandleKeyExchange, which always has a non-null event bus and

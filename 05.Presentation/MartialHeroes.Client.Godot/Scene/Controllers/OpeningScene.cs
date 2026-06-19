@@ -10,7 +10,6 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 /// State 3 — Opening. Builds the post-login intro window (Ui/Scenes substrate). There is NO
 /// auto-finish: the slideshow holds panel 4 indefinitely and the ONLY exit is an explicit skip
 /// (Enter/ESC/Space or the skip button), which persists OPENNING/SKIP=1 and advances to Select.
-/// In headless the SceneHost developer auto-walk advances it (no user present).
 ///
 /// <para>Uses <see cref="NewOpeningWindow"/> on the Ui/Scenes substrate.</para>
 ///
@@ -56,13 +55,8 @@ public sealed partial class OpeningScene : StubSceneController
         _opening.IntroFinished += OnIntroFinished;
         _screenHost.SetScreen(_opening);
 
-        GD.Print("[OpeningScene] State 3 Opening built Ui/Scenes OpeningWindow: " +
-                 "openning_001..004 slideshow, openning_scenario crawl, skip action 100, BGM 910061000. " +
-                 "spec: intro_sequence.md §1–§4.");
-        // NO headless auto-finish here. The SceneHost developer auto-walk (MaybeAutoWalk) advances
-        // non-interactive states including Opening when running headless. The Opening scene has NO
-        // self-advance — the ONLY exit is an explicit skip (keyboard Enter/ESC/Space or click on
-        // action-100 skip button). spec: Docs/RE/specs/intro_sequence.md §3.1 (CAMPAIGN 16 correction).
+        GD.Print("[OpeningScene] State 3 built.");
+        // Opening has NO self-advance: the only exit is an explicit skip. spec: Docs/RE/specs/intro_sequence.md §2.4.
     }
 
     public override void _ExitTree()

@@ -2,11 +2,11 @@
 
 ```
 verification: confirmed
-ida_reverified: 2026-06-18
+ida_reverified: 2026-06-19
 anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA); residual = opening final-fade armed-flag producer site only
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); residual = opening final-fade armed-flag producer site only
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -27,6 +27,8 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
    alpha ramping. (The ±64 fade belonged to a mis-attributed earlier note.)
 4. **Version gate = single u32 equality.** `game.ver` field index-5 of `data/cursor/game.ver` must
    equal field index-5 of `game.ver`; mismatch shows msg 2204 and quits. Not a 7×u32 struct compare.
+   The OK / Login submit (action 103) is **gated on this version check** before it advances to the
+   credential-validation sub-state (element-level pass, 2026-06-19).
 5. **The Loading screen is NOT a widget tree.** It is an immediate-mode renderer of two textured quads
    (full-screen background + progress bar) under an ortho projection — see §5.
 6. **Opening alpha ceiling is 250 (0xFA), not 255**, and the credit crawl increments in +Y (DirectX
@@ -44,6 +46,20 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
    `[DO_OPTION]` options block (display, sound, brightness, saved login id) lives in **`DoOption.ini`**;
    the Opening-skip `[OPENNING] SKIP` flag lives in a **different** file, **`option.ini`**. Do not
    conflate the two. (Static IDA, CYCLE 18 Phase A — see §2.5, §5, §6.)
+10. **Every front-end widget is a 1:1 atlas blit** (element-level pass, 2026-06-19). The widget builder
+    stores a destination rect and a source origin sharing the SAME width/height — there is **no UV
+    scaling** anywhere in the login/PIN/server-list/opening construction. The source rect right/bottom
+    are `(srcX+w, srcY+h)`. A port may treat every table row below as "copy a `(w×h)` region from
+    `(srcX,srcY)` in the named atlas to `(x,y)` on canvas."
+11. **Password masking is a field-flag, not an IME mode** (element-level pass, 2026-06-19). The PW
+    textbox is masked because the high bit (mask bit) of its length/flags field is set; the mask is
+    rendered as the literal `*` glyph advancing 6 px per character, in font slot 0. The IME-mode value
+    (16 for ID, 12 for PW) is unrelated to masking — it only selects the IME conversion mode. See §2.7.
+12. **Front-end 3-state buttons take source origins in NORMAL, PRESSED, HOVER order** (the documented
+    builder convention — see `ui_system.md §1.5`). When a construct call passes three `(srcX,srcY)`
+    pairs, the 1st is the displayed/normal face, the 2nd is the PRESSED frame, the 3rd is the HOVER
+    frame. On most front-end buttons PRESSED equals NORMAL, so the only distinct extra frame is HOVER;
+    the PIN digit faces are an exception that use all three bands (see §3).
 
 ## 1. Conventions
 
@@ -52,14 +68,19 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
   center-or-screen space (noted per-scene).
 - **Widget rect contract:** `(x, y, w, h, srcX, srcY)` → destination rect `(x, y, w, h)` on canvas;
   source rect in the atlas = `(srcX, srcY, w, h)` (right = srcX+w, bottom = srcY+h). 3-state buttons
-  carry separate Normal / Hover / Pressed source origins (same w,h).
+  carry separate source origins for normal / pressed / hover (in that argument order — §0.12), all
+  sharing the same w,h. Text-only labels and solid panels pass no atlas (`tex = 0`).
 - **Login atlases** (from `data/ui/`, loaded in this order):
   - **A1 = `login_slice1.dds`**, **A2 = `loginwindow.dds`**, **A3 = `InventWindow.dds`**,
-    **A4 = `loginwindow_02.dds`**. `tex=0` = solid panel / text-only label.
+    **A4 = `loginwindow_02.dds`**. `tex=0` = solid panel / text-only label. The asset→file mapping is
+    the path string literal itself; the loader's numeric flag argument is a constant color-key/format
+    cookie shared by all four loads, **not** a per-texture id.
 - **Font slots** (15 hard-coded CP949 slots, index → face/size/weight): 0 DotumChe 12 · 1 Dotum 10 ·
   2 DotumChe 32 w800 · 3 DotumChe 18 w800 · 4 DotumChe 12 w800 · 5 BatangChe 12 · 6 BatangChe 18 w700 ·
   7 BatangChe 12 w700 · 8 BatangChe 12 w700 · 9 DotumChe 12 w700 · 10 Dotum 16 w800 · 11 DotumChe 10 ·
-  12 DotumChe 12 · 13 DotumChe 14 · 14 DotumChe 16. Default label/textbox slot = 0.
+  12 DotumChe 12 · 13 DotumChe 14 · 14 DotumChe 16. Default label/textbox slot = 0. The credential
+  textboxes and the PIN masked-entry label use slot 0; the server-list population (count) label uses
+  slot 4.
 - **Text** comes from `data/script/msg.xdb` by id (CP949). All text is CP949.
 
 ## 2. Login window (scene state 1)
@@ -97,6 +118,8 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 
 - Notice text = msg ids **4001..4022** (built empty then text-assigned). Role is governed by msg.xdb
   content; treat as the notice/agreement body column, **not** an EULA gate (there is no accept gate).
+  The 22-label loop lays the labels at x = 50, y = 100 + 18·i (stride 18), w = 383, h = 50, while
+  y < 496 (element-level pass: built into the separate notice panel, hidden in the credential view).
 
 **SERVER-LIST panel tree** — see §4 (it has its own display model).
 
@@ -105,16 +128,22 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | Widget | type | x | y | w | h | srcX | srcY | atlas | action | notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Quit/exit-confirm button | button3 | 456 | 166 | 112 | 39 | N154,398 / H378,398 | A1 | 102 | opens the quit/exit-confirm panel (NOT the server-list); always visible at rest |
-| Server-list plate | image | 265 | 0 | 494 | 113 | 0 | 469 | A1 | — | shown |
-| ID label plate | image | 340 | 30 | 38 | 13 | 0 | 398 | A1 | — | |
-| PW label plate | image | 507 | 30 | 49 | 13 | 38 | 398 | A1 | — | |
-| Save-ID label plate | image | 619 | 86 | 67 | 13 | 87 | 398 | A1 | — | |
-| **ID textbox** | textbox | 390 | 32 | 102 | 13 | 615 | 404 | A1 | 109 | IME mode 16; maxlen 6 |
-| **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; maxlen 129; masked |
-| **Save-ID checkbox** | checkbox | 694 | 86 | 13 | 13 | off 717,398 / on 730,398 | A1 | 104 | |
-| **OK / Login button** | button3 | 456 | 64 | 112 | 39 | N266,398 / H490,398 | A1 | 103 | |
+| Server-list plate | image | 265 | 0 | 494 | 113 | 0 | 469 | A1 | — | shown (decoration banner of the form strip) |
+| ID label plate | image | 340 | 30 | 38 | 13 | 0 | 398 | A1 | — | "ID" caption graphic |
+| PW label plate | image | 507 | 30 | 49 | 13 | 38 | 398 | A1 | — | "Password" caption graphic |
+| Save-ID label plate | image | 619 | 86 | 67 | 13 | 87 | 398 | A1 | — | small notice/caption strip |
+| **ID textbox** | textbox | 390 | 32 | 102 | 13 | 615 | 404 | A1 | 109 | IME mode 16; maxlen 6; **unmasked** (mask bit clear); font slot 0 |
+| **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; **masked** (mask bit set; `*` glyph, 6 px/char); font slot 0 — see §2.7 |
+| **Save-ID checkbox** | checkbox | 694 | 86 | 13 | 13 | off 717,398 / on 730,398 | A1 | 104 | 13×13; initial state seeded from saved-id (see §2.5) |
+| **OK / Login button** | button3 | 456 | 64 | 112 | 39 | N266,398 / H490,398 | A1 | 103 | gated on the game.ver index-5 check before advancing to validate (§2.4) |
 | Server-list open/refresh strip | button3 | 456 | −3 | 111 | 38 | N792,398 / H602,416 | A1 | 105 | opens/refreshes the server-list (→ sub-state 34); HIDDEN at rest, shown only with the server-list (states 35..37) |
 | Server-list strip deco plate | image | 407 | −3 | 210 | 70 | 743 | 398 | A1 | — | hidden at rest; shown with the server-list strip |
+
+> **Source-rect note (element-level pass):** the N/H pairs above are the NORMAL and HOVER source
+> origins; per §0.12 the construct call's middle pair is the PRESSED frame. At the login button call
+> sites the pressed and hover origins are passed identical (or pressed == normal), so the pressed face
+> is not separately distinguished for these buttons — the distinct face is HOVER. The N/H pairs are
+> confirmed; treat pressed = normal unless a separate pressed origin is later observed.
 
 > **Action semantics (CORRECTED vs the binary dispatch — the buttons are mislabelled by appearance):**
 > action **102** = quit/exit-confirm (opens the exit panel; does NOT open the server-list; always visible at rest);
@@ -237,13 +266,17 @@ of sub-states across which the group is continuously visible:
 Two full-width host panels driven by one offset (start 0, +5/tick): **top** curtain Y = −offset;
 **bottom** curtain Y = offset + 326. At offset > 200 snap the server-list submit plate to **(494, 469)**.
 Stop at offset > 222 (→ sub-state 3). No alpha animation. These are not hideable curtain widgets — they
-are always-present panels whose Y animates (see §2.2 bands). Curtain start SFX = 2D cue **861010105**
-(category 2).
+are always-present panels whose Y animates (see §2.2 bands). **Start positions: top Y = 0, bottom
+Y = 326; end positions: top Y = −222, bottom Y = 548 (= 222 + 326); per-tick step = +5; total
+extent = 222 px each way; direction = top up, bottom down** (element-level pass, 2026-06-19). The two
+animated panels are the front curtain panel and the body strip panel. Curtain start SFX = 2D cue
+**861010105** (category 2).
 
 ### 2.4 Version & length gates
 
 - **game.ver:** parse `data/cursor/game.ver` and `game.ver`, compare **field index 5** (u32) for
-  equality; mismatch → msg **2204** + quit. Runs only when the VFS is mounted.
+  equality; mismatch → msg **2204** + quit. Runs only when the VFS is mounted. The OK / Login button
+  (action 103) runs this gate **before** advancing to the validation sub-state (29).
 - ID length **≥ 4** else msg **4025**; PW length **≠ 0** else msg **4026**; no servers → msg **4027**;
   fetch failed → msg **4028**.
 
@@ -251,7 +284,10 @@ are always-present panels whose Y animates (see §2.2 bands). Curtain start SFX 
 
 On build, read the saved account from the options store; if present and ≠ `"(null)"`, pre-fill the ID
 textbox and move focus to the PW box (else focus stays on ID). On checkbox toggle (104): if checked,
-store the current ID text; if unchecked, clear it. On validate success, store the ID text.
+store the current ID text; if unchecked, clear it. On validate success, store the ID text. The Save-ID
+checkbox's initial checked/unchecked frame is seeded from this saved value: empty/null → unchecked
+(off frame), otherwise checked (on frame). (Element-level pass: checkbox off/on source origins
+`(717,398)` / `(730,398)`, 13×13, atlas A1.)
 
 **Persistence target (CONFIRMED, static IDA, CYCLE 18 Phase A):** the saved login id is read/written via
 the Win32 private-profile APIs (`GetPrivateProfileStringA` / `WritePrivateProfileStringA`) to:
@@ -276,21 +312,62 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 (≤4 digits). This feeds the secure-context builder → login packet **0x2B** (see `packets/login.yaml`,
 `login_flow.md`). A 30 s connect timeout is armed.
 
+### 2.7 Credential textbox construction & masking (element-level pass, 2026-06-19)
+
+Both credential textboxes are built in the login-window construct routine (not in the later secondary
+init), as 102 × 13 fields on atlas A1 sampling the same source origin `(615, 404)`. They differ only by
+their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
+
+- **Render is by a length/flags field.** Each textbox carries a length/flags byte. When its **mask bit
+  (the high bit) is set**, the field draws the literal glyph `*` once per entered character, advancing
+  **6 px per character**, in font slot 0. When the mask bit is clear, the field draws the stored string
+  left-aligned (with horizontal scroll once the character count overflows the visible width).
+  - **ID field:** mask bit clear → shown in clear; IME mode 16; the low bits of the length/flags field
+    encode a small in-field length seed (the effective max length is enforced by the input handler, not
+    by construction — **UNVERIFIED** exact cap).
+  - **PW field:** mask bit set → masked; IME mode 12. Mask glyph = `*`, 6 px advance.
+- **The IME mode (16 / 12) is NOT the mask switch.** Masking is purely the length/flags high bit; the
+  IME mode only selects the IME conversion behavior of the field. (DIFF vs any reading that ties the PW
+  mask to its IME mode — the binary masks on the field flag.)
+- **Caret:** blinks on a ~500 ms cadence and is drawn only while the field has input focus.
+- **Focus:** the construct routine focuses the ID textbox at show time (IME enabled on it).
+
 ## 3. PIN keypad (second password) — sub-states 31/32
 
-- **Container panel:** screen dst **(347, 173)**, size **329 × 422**; children textured from
-  **`data/ui/password.dds`**. All child coords below are panel-relative.
+> Element-level pass (2026-06-19): the keypad is a reusable scrambled-PIN widget (also used by the
+> in-game gift/second-password modal); all coordinates below are panel-relative, the panel itself sited
+> per §2.1 (dst ~(347,173)). Every key is a 1:1 atlas blit from `data/ui/password.dds`; the modal
+> backdrop frame samples `data/ui/InventWindow.dds`.
+
+- **Container panel:** screen dst **(347, 173)**, size **329 × 422**; digit keys + control buttons
+  textured from **`data/ui/password.dds`**; the backdrop frame from **`data/ui/InventWindow.dds`**.
 - **Digit positions: 10 cells, 5 columns × 2 rows, each cell 52 × 52.** Column X ∈ {28, 83, 138, 193,
-  248} (= 55·col + 28); row Y ∈ {170, 230}.
-- **Each cell is a stack of 10 digit-buttons (digits 0..9), 100 buttons total.** Per-digit atlas
-  source origins: Normal `(d·52, 560)`, Pressed `(d·52, 612)`, Hover `(d·52, 664)` for digit `d`. The
-  scramble makes exactly **one** digit-button visible per cell. Each digit-button's action id = the
-  digit value `d` (0..9).
-- **Reset** button `(243, 133, 58, 30)` tag **11**; **OK** `(90, 290, 154, 58)` tag **12**; **Cancel**
-  `(90, 350, 154, 58)` tag **13**.
-- **Masked input field:** a label at panel-relative `(81, 138, 150, 22)`, rendered as N `*` characters
-  (digits never drawn). **Max length 4.**
-- **Dragon frame** decoration: size **340 × 190**, atlas source origin `(318, 647)`, centered.
+  248} (= 55·col + 28); row Y ∈ {170, 230} (top row cells 0..4 at Y 170, bottom row cells 5..9 at Y 230).
+- **Each cell is a stack of 10 digit-buttons (digits 0..9), 100 buttons total** — confirmed by the
+  100-pointer button array zeroed at construction. The face of digit `d` samples the atlas at
+  **source X = `d·52`** (columns 0,52,…,468); the **button state** selects the source **Y band**
+  (per the NORMAL,PRESSED,HOVER builder order — §0.12):
+  - **Normal (idle): srcY = 560.**
+  - **Pressed: srcY = 664** (the 2nd source pair of the construct call).
+  - **Hover: srcY = 612** (the 3rd source pair).
+  - (This **corrects** the earlier "Pressed 612 / Hover 664" reading — the construct call passes the
+    664 band as the PRESSED frame and the 612 band as HOVER, which the documented front-end 3-state
+    argument order resolves unambiguously.) The scramble makes exactly **one** digit-button visible per
+    cell. Each digit-button's action id = the digit value `d` (0..9).
+- **Reset** button `(243, 133, 58, 30)` tag **11** (source origins on `password.dds` near X 663);
+  **OK** `(90, 290, 154, 58)` tag **12** (source origins near X 330); **Cancel** `(90, 350, 154, 58)`
+  tag **13** (source origins near X 486). **Tag roles (CONFIRMED, element-level pass): 11 = Reset/Clear
+  (re-scramble + blank entry), 12 = OK / submit, 13 = Cancel.** Digit tags are **0..9** (not 1..10);
+  tag 10 is unused.
+- **Masked input field:** a text-only label (no atlas, font slot 0) at panel-relative
+  `(81, 138, 150, 22)`, rendered as N literal `*` characters, one per entered digit (digits never
+  drawn; no dot-sprite asset). **Max length 4.**
+- **Backdrop / dragon frame** decoration: an `InventWindow.dds` panel sized **340 × 190**, source origin
+  `(318, 647)`, **centered** in the parent; built then initially hidden (a structural backdrop element
+  rather than a visible border in the shipped modal). No separate screen-dim quad is created by the
+  keypad itself.
+- **Draw order:** masked-entry label first, then the 100 digit-face buttons (cell 0 → cell 9), then
+  Reset (11), OK (12), Cancel (13), then the (hidden) backdrop frame.
 - **Scramble (CONFIRMED, static IDA, CYCLE 18 Phase A):**
   - **Seed:** `srand(time())` — the whole-second CRT wall-clock (`time()` family). Explicitly **NOT**
     `GetTickCount`, `timeGetTime`, `QueryPerformanceCounter`, or `GetSystemTimeAsFileTime` (those are
@@ -304,7 +381,8 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
     10-element array the MSVC large-range RAND_MAX guard never triggers; one `rand()` per step.)
   - **One digit per cell:** the 10-element permutation is mapped 1:1 onto the 10 cells; per cell, the
     single digit-button matching that cell's permuted value is shown and the other nine are hidden — so
-    each of the ten digits 0..9 appears exactly once across the ten cells.
+    each of the ten digits 0..9 appears exactly once across the ten cells. Pressing a cell appends the
+    digit of the face currently shown there (the visible button's tag IS its digit).
   - **Re-roll:** the scramble re-seeds and re-shuffles on **open (SetVisible-show)**, **Reset**, **OK**,
     and **Cancel**. On show the window also clears the typed-entry string and the submitted flag before
     scrambling.
@@ -312,34 +390,69 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
     shuffle on each open — do not hard-code a permutation. (The runtime permutation value is emergent
     from the seed; only the *mechanism* is specified here, not a fixed sequence.)
 - **Raise:** on the 29→31 edge (immediately when state becomes 31), after credential validation.
-  **Submit:** OK (tag 12) copies up to 4 digits to the login singleton (becomes field #3 of the
-  credential string).
+  **Submit:** OK (tag 12) copies up to 4 digits (formatted as ASCII, NUL-terminated, buffer of 5) to the
+  login singleton (becomes field #3 of the credential string), sets the submitted flag, then re-scrambles.
 
 ## 4. Server-list display model — sub-states 35..37
 
+> Element-level pass (2026-06-19): the server-list is a sub-view of the single LoginWindow, built once
+> in the construct routine and re-laid each repaint by the list painter (a vtable method invoked by the
+> pager). All plate/strip art is a 1:1 atlas blit; names/captions are msg.xdb text.
+
+- **Outer list panel** (the page backdrop): dst **(270, 85)**, size **483 × 490**, atlas A2 source
+  origin **(0, 490)**. A header/title image (atlas A1, dst (265,0) 494×113, source (0,469)) and a
+  footer/agree caption strip (atlas A2, 70×17, source (0,980)) sit with it.
 - **Page tabs:** 10 small 3-state strips across the top, each `(13 + 47·i, 66, 47 × 18)`, atlas A2,
   Normal `(596, 985)` / Hover `(643, 985)`, action **115 + i** (i = 0..9). These are **page selectors**
-  (page = action − 115), not servers. (Two strips are re-skinned: index 1 → N`(690,985)`/H`(737,985)`,
-  index 2 → N`(784,985)`/H`(831,985)`.)
-- **Two detail plates** (the two servers on the current page), built by a 2-column loop (i = 0,1) with
-  X base 30, step 233, action base **400** (LEFT = 400, RIGHT = 401):
-  - name label `(30 + 233·i, 390, 174 × 21)`, action 400+i
-  - icon image `(30 + 233·i + 47, 97, 100 × 372)`, atlas A4 src `(448 + 124·i, 6)`
+  (page = action − 115), not servers, and are re-skinned to a hidden source origin each repaint (they
+  are a hidden hit-strip in the shipped list). (Two are also given alternate active faces in the build:
+  index 1 → N`(690,985)`/H`(737,985)`, index 2 → N`(784,985)`/H`(831,985)`.)
+- **Two detail plates** (the two servers on the current page — **2 visible per page, NOT 5**), built by
+  a 2-column loop (i = 0,1) with X base 30, step 233, action base **400** (LEFT = 400, RIGHT = 401):
+  - name label `(30 + 233·i, 390, 174 × 21)`, action 400+i, **left-aligned** (the authoritative list
+    painter aligns the server-name label left; a duplicate painter variant centers it — prefer left).
+  - icon / plate face image `(30 + 233·i + 47, 97, 100 × 372)`, atlas A4 src `(448 + 124·i, 6)`
   - select button3 `(30 + 233·i − 6, 97, 202 × 372)`, atlas A4 N`(9,6)`/H`(220,6)`, action 400+i
-  - info label `(30 + 233·i, 410, 174 × 20)`
-  - info label `(30 + 233·i, 430, 174 × 20)`, font slot 4
-- **Record decode** (8-byte LE, see `packets/lobby.yaml`): `{server_id, status_code, load, open_time}`
-  (in-record order of server_id vs open_time is capture-pending). Display index from a page =
-  `record = (action − 400) + 2·page`.
+  - status/info label `(30 + 233·i, 410, 174 × 20)`
+  - population/count label `(30 + 233·i, 430, 174 × 20)`, font slot 4, formatted `%4d / %4d`
+- **Selection highlight strip** (drawn behind the selected plate): atlas A4, source origin `(700,18)`,
+  46 × 168. **Status-color indicator quads ×3:** atlas A2, source origin `(500,786)`, 60 × 39, hidden by
+  default and re-anchored around a special row (see the status==100 gate).
+- **Server-name source (CONFIRMED, element-level pass):** server names come from `msg.xdb` via a
+  table builder. **Name id = `5000 + server_id`** (server ids 1..40 → ids 5001..5040). Out-of-range
+  ids fall back to caption id **5901** (formatted with the raw id). Column headers = msg **4029/4030/
+  4031/4032**. (The msg table also pre-fetches parallel name banks 5101-5120 / 5201-5220 / 5301-5320 /
+  5401-5440, but the server-list path returns from the 5001-5040 bank.)
+- **Record decode** (8-byte LE record, in-memory list; see `packets/lobby.yaml`):
+  `{server_id (+0), status_code (+2), load (+4), open_time/flags (+6)}`. Display index from a page =
+  `record = (action − 400) + 2·page`. **On-screen row order is shuffled each repaint** (a per-render
+  permutation is applied), so the visible row → record-byte-position mapping is **not** stable across
+  renders (do not assume row 0 = the first record). The page stride is 2 records; page-jump via the
+  115..124 strip is absolute (button i → page i), not relative ±1.
 - **Commit guard:** `status_code == 0 && load < 2400` → write selected server_id, persist Lastserver,
-  advance to channel-endpoint fetch (port 10000 + server_id).
-- **Status / load coloring** (UI only; ARGB DWORDs re-confirmed 2026-06-18): load > 1200 → red
-  (msg 6001, `0xFFFF0000`) · > 800 → orange (msg 6002, `0xFFED6806`) · > 500 → yellow (msg 6003,
+  advance to channel-endpoint fetch (port 10000 + server_id). Selection is a **2D button hit**
+  (OnEvent action 400/401), **not** a 3D ray-pick (that belongs to character-select — do not conflate).
+- **Status / load coloring** (UI only; ARGB DWORDs re-confirmed 2026-06-18 and 2026-06-19): load > 1200
+  → red (msg 6001, `0xFFFF0000`) · > 800 → orange (msg 6002, `0xFFED6806`) · > 500 → yellow (msg 6003,
   `0xFFFFFF00`) · **≤ 500 → green (`0xFFB5FF7A`), with NO msg id — the load is rendered as numeric
   `%4d / %4d` text, not a caption.** status_code 3 = scheduled-open: msg **6004 "preparing" only when
   `load (+4) == 24`**, otherwise msg **6005 HH:MM** built from `+4` (hour: /10, %10) and `+6`
   (minute: /10, %10). Record fields (re-confirmed, no swap): `+0` server_id, `+2` status, `+4` load,
   `+6` open_time.
+- **status_code == 100 gate (CONFIRMED, element-level pass):** a record whose status is 100 is a
+  **display-only special row** — the painter shows the 3 status-color indicator quads re-anchored around
+  it (when a "show special" flag is set) instead of lighting the normal plate faces, and the commit
+  guard's `status == 0` requirement makes the row **non-selectable**. **Quad anchoring (element-level
+  pass, 2026-06-19):** the 3 quads are built at dst (0,0), 60×39, src (500,786), parked hidden; at repaint
+  (gated by a one-byte "show special" flag) they are re-anchored to the special row's own plate-widget
+  destination corner `(anchorX, anchorY)` (the plate's dst-X/dst-Y fields): quad 0 → `(anchorX−30,
+  anchorY−13)`; quads 1 and 2 → `(anchorX+139, anchorY+13)` (the two right quads overlap exactly — a
+  faithful duplicate, not a third distinct slot). Only the dst-X/Y are rewritten; size/source unchanged.
+- **Default-selection highlight:** the painter compares each record's id against the remembered last
+  server (registry `Lastserver`, read at boot) to draw the default highlight; the `NEW_SERVER_INDEX`
+  value (the only `uiconfig.lua`-sourced number) marks the "new server" badge slot.
+- **Persist:** committing a server writes registry `HKLM\SOFTWARE\crspace\do : Lastserver` (REG_DWORD
+  = server id); the next launch reads it back to pre-highlight the previously selected server.
 
 ## 5. Loading window (scene state 2) — immediate-mode, NOT a widget tree
 
@@ -388,21 +501,37 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
 
 ## 6. Opening scene (scene state 3) — ortho quads
 
+> Element-level pass (2026-06-19): the slideshow background and the credit crawl are **concurrent
+> layers** (the crawl scrolls over the crossfading backdrop), with the skip button on top throughout —
+> not sequential states. Each TickStep advances the crawl first, then the slideshow FSM (or the
+> finish-fade).
+
 - **Backdrops:** 4 full-screen quads `openning_001.dds` .. `openning_004.dds` (1024 × 768). One phase
-  index selects the active backdrop. The phase counter (init = 1 at window-build) is stepped 1→2→3→4 by a
-  banner slideshow FSM; each phase dwells **~17 500 ms** (timed off a shared millisecond timestamp) and
-  ramps a single alpha byte **0 → 250 (0xFA)** (a global direction byte selects fade-in vs fade-out). On
-  each phase's dwell expiry, once that phase's crossfade alpha has reached 250, the FSM bumps the phase
+  index selects the active backdrop, drawn as a single full-screen textured quad (centered verts
+  ±W/2, ±H/2) — **not** a child widget. The phase counter (init = 1 at window-build) is stepped 1→2→3→4
+  by a banner slideshow FSM; each phase dwells **~17 500 ms** (timed off a shared millisecond timestamp)
+  and ramps a single alpha byte **0 → 250 (0xFA)** by **+1 per tick**. The crossfade is a
+  **single-texture alpha-over-(black-cleared)-back-buffer** modulation via the D3D texture-factor render
+  state — **not** a two-texture blend; the next frame simply fades in from 0 as it replaces the prior.
+  On each phase's dwell expiry, once that phase's alpha has reached 250, the FSM bumps the phase
   (1→2, 2→3, 3→4). Phase 4 is the last case — it does not bump further; it keeps running its own
-  alpha ramp / dwell.
+  alpha ramp / dwell, and the scene is ended by SKIP or the finish-fade path.
 - **Credit crawl:** texture `openning_scenario.dds`, built **1024 × 2048**, centered at
   X = `screenW/2 − 512`, starting Y = `screenH − 200`. After a **1000 ms** delay it translates the
-  quad's destination Y at **30 units/second** (wall-clock) up to a bound of **~1843**. It is a
-  positional translate (not a UV offset). The code increments **+Y (DirectX Y-down)**; a **Godot Y-up
-  port must invert the sign** so the crawl reads upward. Manual scroll actions 1004/1005.
+  quad's destination Y at **30 units/second** (wall-clock, `dt_s · 30`) up to a bound of **~1843**, then
+  sets a "crawl done" flag. It is a positional translate (not a UV offset). The code increments
+  **+Y (DirectX Y-down)**; a **Godot Y-up port must invert the sign** so the crawl reads upward. The
+  on-screen upward read is a property of the component's vertical-offset setter convention plus the
+  bottom-anchored 2048-tall texture, NOT a negation inside the crawl math (the raw value increases
+  0 → 1843). **Manual scrub (after the auto-crawl finishes):** action **1004** = rewind
+  (−30·dt_s, floor 0), bound to **Page Up** (DIK_PRIOR); action **1005** = forward (+30·dt_s, ceil 1843),
+  bound to **Page Down** (DIK_NEXT). These are FIXED keyboard bindings via the DirectInput DIK→app-code
+  table (not configurable, not buttons/wheel-only — element-level pass, 2026-06-19). A separate mouse-wheel/drag scrub
+  path steps a second crawl-Y by ±30 per event, clamped 30..1833.
 - **Skip:** keyboard Enter (10) / ESC (27) / Space (32), or the 3-state skip button (action **100**) at
   dst `(screenW − 120, 10, 110 × 32)` on `mainwindow.dds`, source Normal/Hover `(761, 165)` / Pressed
-  `(634, 165)`. Skipping persists `[OPENNING] SKIP = 1` to **`option.ini`** (the same file the Load scene
+  `(634, 165)`. Skipping persists `[OPENNING] SKIP = 1` (via `WritePrivateProfileStringA`, section
+  spelled **OPENNING**, key **SKIP**, value **"1"**) to **`option.ini`** (the same file the Load scene
   reads; Opening then permanently skipped) and closes the window early, which unwinds the scene loop and
   advances to Select (4).
 - **Auto-exit (CORRECTED — confirmed NOT load-bearing; static IDA, CYCLE 18 Phase A).** The WinMain
@@ -421,7 +550,9 @@ the channel-endpoint fetch, space-separated). Field caps: account < 20, password
     the run-flag clear that performs the exit) is fully confirmed. The port already advances Opening →
     Select on skip / completion and does not need this byte-exact arming site. **PENDING:** producer site
     only.
-- **Audio:** looped 2D BGM **910061000**, started at scene build, stopped on teardown.
+- **Audio:** looped 2D BGM **910061000**, started at scene build, stopped on teardown. (Distinct from the
+  Loading-screen BGM 920100100 — the two scenes use different cues; do not assume a shared
+  opening/loading track.)
 
 ## 7. Front-end audio cues (2D, category < 5 → `data/sound/2d/<id>.ogg`)
 

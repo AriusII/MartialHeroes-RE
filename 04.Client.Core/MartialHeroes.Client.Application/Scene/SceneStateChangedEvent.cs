@@ -5,9 +5,7 @@ namespace MartialHeroes.Client.Application.Scene;
 
 /// <summary>
 /// Immutable snapshot published whenever the engine scene state changes — the application-layer
-/// signal the presentation host drains to swap the live scene. This is the faithful 8-state
-/// counterpart to the legacy <see cref="MartialHeroes.Client.Application.Events.ClientStateChangedEvent"/>
-/// (which models a coarser 5-value lifecycle).
+/// signal the presentation host drains to swap the live scene. spec: client_runtime.md §7.2.
 /// </summary>
 /// <param name="Previous">The engine-state struct before the transition.</param>
 /// <param name="Next">The engine-state struct after the transition (the scene now live).</param>

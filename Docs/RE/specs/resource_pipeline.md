@@ -1,6 +1,6 @@
 ---
 verification: confirmed    # the boot/loading orchestration load-bearing facts are recovered from control-flow; runtime replay & exact INI string remain capture/debugger-pending
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # control-flow recovery + real-VFS file-coverage counts (§6) corroborated against the shipped archive
 conflicts: world-entry state-2 full-corpus replay vs cached short-circuit (§2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
@@ -282,6 +282,85 @@ The boot set consists of approximately **50 entries** in a fixed global pointer 
   period), then clears the thread-running flag (stored at a fixed offset from the handler object),
   and exits.
 
+The §2.1 summary lists the boot set by category; the **exact ordered corpus** the worker registers
+in sequence is enumerated authoritatively in §2.1a.
+
+## 2.1a Boot data-table corpus — the authoritative registration ORDER — (CODE-CONFIRMED)
+
+The boot worker registers the global data tables and catalogues **in a fixed, compiled sequence**.
+The order is **load-bearing**: it is the exact sequence in which the loader installs each table into
+its module-global registry, and a clean-room boot should mirror it unless a per-table dependency
+audit proves the order non-load-bearing (§7.2, §8 item 2). The list below transcribes the **48
+explicit on-disk file paths** the worker opens, in registration order. (All listed files carry
+**CP949** contents.)
+
+A handful of **filename quirks** in this corpus are *intentional spellings in the shipped data set*
+and must be preserved verbatim by a faithful port: the descript table is **`discript.sc`** (extension
+`.sc`, **not** `.scr`); the tutor table is **`Tutor.scr`** (capital **T**); the stance/"do" table is
+**`musajung.do`**; and the extra-items table is **`items_extra.do`**. (The post-load destination gate
+also reads INI section **`OPENNING`** with a double **N** — §2.5.)
+
+| # | File path | What it is |
+|---|---|---|
+| 1 | `data/script/events.scr` | scripted-events table |
+| 2 | `data/script/system_control.scr` | system-control table |
+| 3 | `data/script/mapsetting.scr` | map-setting table |
+| 4 | `data/script/playtime_reward.scr` | playtime-reward table |
+| 5 | `data/script/items.scr` | item definitions |
+| 6 | `data/script/skills.scr` | skill definitions |
+| 7 | `data/script/musajung.do` | stance/"do" table (streaming load) |
+| 8 | `data/script/skillcategory.scr` | skill-category table |
+| 9 | `data/script/users.scr` | stat-curves / user table |
+| 10 | `data/script/products.scr` | product (cash-shop) table |
+| 11 | `data/script/productcollect.scr` | product-collect table |
+| 12 | `data/script/productrandname.scr` | product random-name table |
+| 13 | `data/script/helps.scr` | help table |
+| 14 | `data/script/npc.scr` | NPC dialog/description table (also class descriptions) |
+| 15 | `data/script/npcs.scr` | NPC spawn/definition table |
+| 16 | `data/item/items_extra.do` | extra-items "do" table |
+| 17 | `data/script/mobs.scr` | mob definitions |
+| 18 | `data/script/repair.scr` | repair table |
+| 19 | `data/script/upgradeitems.scr` | upgrade-items table |
+| 20 | `data/script/quests.scr` | quest table |
+| 21 | `data/script/emoticon.do` | emoticon "do" table |
+| 22 | `data/script/textcommand.do` | text-command "do" table |
+| 23 | `data/script/chivalry.scr` | chivalry table |
+| 24 | `data/script/letters.scr` | letters table |
+| 25 | `data/script/nicktofame.scr` | nick-to-fame table |
+| 26 | `data/script/guildcrest.scr` | guild-crest table |
+| 27 | `data/script/discript.sc` | menu-label / descript table (extension `.sc`, not `.scr`) |
+| 28 | `data/script/tiphelp.scr` | tip-help table |
+| 29 | `data/script/setitemname.scr` | set-item-name table |
+| 30 | `data/script/oblist.scr` | ob-list table |
+| 31 | `data/script/citems.scr` | cash-item table |
+| 32 | `data/script/Tutor.scr` | tutor table (capital `T`) |
+| 33 | `data/script/warstoneinfo.scr` | war-stone-info table |
+| 34 | `data/script/statue.scr` | statue table |
+| 35 | `data/script/skillneedset.scr` | skill-need-set table |
+| 36 | `data/script/viplevels.scr` | VIP-levels table |
+| 37 | `data/script/itemscale.scr` | item-scale table |
+| 38 | `data/script/itemeffect.scr` | item-effect table |
+| 39 | `data/ui/UiTex.txt` | UI-texture manifest (the UI id pool, §3A.2(a)) |
+| 40 | `data/item/skinlist.txt` | item skin-list table |
+| 41 | `data/char/sameemoticon.txt` | same-emoticon table |
+| 42 | `data/ui/guildicon/crestlist.txt` | guild-crest icon list (paired with the `data/ui/guildicon/pool/` directory; 23×23 icons) |
+| 43 | `data/script/effectscale.xdb` | effect-scale table |
+| 44 | `data/script/creature_item.xdb` | creature-item table |
+| 45 | `data/script/vehicle.xdb` | vehicle table |
+| 46 | `data/script/buff_icon_position.xdb` | buff-icon-position table |
+| 47 | `data/effect/bmplist.lst` | effect texture pool list (§3A.2(b)) |
+| 48 | (effect-manifest chain) | the remaining effect manifests loaded after `bmplist.lst` — `xobj.lst`, `xeffect.lst` (+ effect-cache prime), `totalmugong.txt`, the joint/sword-light tables (see `specs/effects.md §3`) |
+
+Interleaved with these explicit file paths are roughly a dozen **subsystem-init / manifest steps**
+that resolve their own paths internally (a skill-icon manifest parse, a banned-word table init,
+the shadow-manager init, the effect-manager init, the terrain-manager singleton first-touch, the
+character-visual manifest load, and a few generic subsystem inits). They are not data-table files
+per se and are not numbered above; the total worker step count is approximately 57. The 48 entries
+above are the **file-registration spine** a port must reproduce in order.
+
+After the last entry the worker performs the completion handshake (`Sleep(500)`, clear the
+thread-running flag, exit — §2.1).
+
 ## 2.2 State-1-to-state-2 synchronous pre-load — (CODE-CONFIRMED)
 
 **Before** the worker thread starts, during the state-1 → state-2 transition, the UI message
@@ -383,6 +462,13 @@ already-loaded / cached entries** (the subsystem caches of §3 would make re-reg
 not be determined statically** — it depends on runtime control flow. Treat both passes as potentially
 running the full sequence and confirm against a live world-entry transition. *(capture/debugger-pending
 — see §8 open item 5; this is what determines whether the second loading screen is fast or full-length.)*
+
+> **Pending / to confirm (Phase 5).** Whether the **second** load pass — the in-world reload
+> triggered via opcode **3/100** (the char-management reload path of §2.5) — **replays the full
+> 48-file boot corpus (§2.1a)** or **short-circuits to the already-cached subsystem tables (§3)**
+> remains open. The case-2 body is byte-for-byte identical between the two entries, but individual
+> table loaders may early-out when their registry is already populated, which would make the second
+> loading screen near-instant. Confirm against a live world-entry / reload transition (debugger).
 
 ---
 

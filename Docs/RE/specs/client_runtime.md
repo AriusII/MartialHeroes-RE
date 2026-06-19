@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # sound tables, toonramp LUT, npc.arr, .sod/.ted byte-samples corroborate; the boot/loop/scene-machine/world-scene backbone is static-IDA CODE-CONFIRMED
 conflicts: frame-limiter target-FPS source (display FRAMERATE config is statically inert — is it truly unused?); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — all (capture/debugger-pending)
@@ -74,8 +74,9 @@ The ordered sequence from process start to the first interactive frame:
    registered here is a **billing/anti-cheat scheduler proxy** that gates engine entry (see §0.5). There
    is **no `setlocale` or CP949 locale call anywhere in the boot path** — see §0.6.
 
-2. **Power/termination setup.** `SetThreadExecutionState` keeps the display awake; two `terminate`
-   handler installs follow.
+2. **Power/termination setup.** The very first init step is a `SetThreadExecutionState` call with
+   `ES_DISPLAY_REQUIRED | ES_CONTINUOUS` — it keeps the display awake for the duration of the
+   process. The second init step installs a **C++ terminate-handler** (two handler installs follow).
 
 3. **Bootstrap config (`game.lua`).** A Lua config singleton loads `game.lua` and reads three boolean
    globals that control fundamental engine behaviour. All three **default to `true`** if `game.lua`
@@ -90,8 +91,12 @@ The ordered sequence from process start to the first interactive frame:
 4. **VFS mount flag.** A global "mounted" byte is set from the `vfsmode` value. The VFS archive
    itself is opened just before the state loop (step 7).
 
-5. **Crash reporter.** The BugTrap crash logger is initialised with the application name `"do"`;
-   a `"winmain start"` entry is written to its log.
+5. **Crash reporter.** A **third-party crash-reporting SDK** is initialised: it installs an
+   unhandled-exception (SEH) filter, opens a crash log, and is configured with an application
+   identity and a remote crash-submission endpoint (see §0.10). It is a **crash-reporting** facility,
+   **not** a frame profiler. An initial start entry is written to its log, and it loads a DirectX
+   symbol-index file (an on-disk `symindex_dx9`-style index) used to resolve symbols for the client
+   executable and its PDB.
 
 6. **Launcher gate.** If `launcher` is `true` **and** the command line is **not** exactly `-Start`,
    the engine does **not** boot itself — it launches the external updater/launcher program
@@ -110,8 +115,14 @@ The ordered sequence from process start to the first interactive frame:
 
 ## 0.2 `DoOption.ini` — persistent settings — (CODE-CONFIRMED)
 
-The settings object default-constructs to **1024 × 768 × 32-bpp**, every visual-quality slider = 1,
-every sound volume = 100, and is then immediately overwritten from INI.
+The settings object default-constructs to **1024 × 768**, with a colour-depth field defaulting to
+32-bpp, every visual-quality slider = 1, every sound volume = 100, and is then immediately overwritten
+from INI.
+
+> **Active colour depth is forced to 16-bit (CODE-CONFIRMED).** Despite the 32-bpp value in the
+> settings object's colour-depth field, the engine **forces the active colour depth to 16-bit** during
+> Init (§0.8 step 4), and the D3D9 device-creation path uses 16-bit. Do not assume 32-bit colour from
+> the settings default; the device runs 16-bit.
 
 **Five INI files** are located in the EXE directory at startup and their paths are stored for later
 access. All five are marked hidden via `SetFileAttributesA`:
@@ -158,12 +169,16 @@ a per-key family), then range-clamped. `OPTION_ID` is the only string key.
 | `OPTION_FORCE_NOTIFY` | 0 | 0..1 | 27 | force/PvP notify |
 | `OPTION_EFFECT` | 100 | 1..100 | 28 | effect intensity |
 | `OPTION_BRIGHT` | 100 | 1..100 | 29 | brightness |
-| `OPTION_SCREENMODE` | 0 | 0..2 | 30 | **display/screen mode** (drives window style and device path) |
+| `OPTION_SCREENMODE` | 0 | 0..2 | 30 (byte offset +120) | **display/screen mode** (drives window style and device path) |
 | `OPTION_ID` | `"(null)"` | ≤16 chars | 124 (string) | last-used account id (Save-ID) |
 
 **`OPTION_SCREENMODE` values:** `1` = windowed (sized), `2` = fullscreen/borderless. Value `0` is
 valid but its exact rendering behaviour was not byte-confirmed (see §0.9 open item 1). The Save-ID
 field (`OPTION_ID`) is also written by the login scene — see `specs/frontend_scenes.md` §1.6.
+
+> **`option.ini` path buffer (CODE-CONFIRMED).** The runtime-built path to `option.ini` is held in a
+> character buffer at **settings-object offset +1165**. This is the buffer the state-2 opening-decision
+> step reads when it fetches the `[OPENNING]`/`SKIP` key (§7.3, §7.9, `resource_pipeline.md §2.5`).
 
 ## 0.3 Window class and creation — (CODE-CONFIRMED)
 
@@ -204,8 +219,8 @@ switched via `ChangeDisplaySettingsA` (the matching device path in §0.4). Windo
 width/height. The exact behaviour of value `0` is not byte-pinned (see §0.9 open item 1).
 
 > The window class name `"diamond engine application"` and title `"Do"` are the actual string literals
-> in the code. "Martial Heroes" appears only in the BugTrap application name and in the window
-> title text string. Trust the code over any comment.
+> in the code. The marketing name "Martial Heroes" is **not** the window title; the crash reporter
+> carries its own separate application-identity string (§0.10). Trust the code over any comment.
 
 ## 0.4 Direct3D 9 device — (CODE-CONFIRMED)
 
@@ -323,7 +338,7 @@ The observed first-touch order during a normal boot:
 |---:|---|---|---|
 | 1 | Lua config | `WinMain` top | reads `game.lua` |
 | 2 | Engine-state struct | `WinMain` top | holds the engine-state int + debug flag |
-| 3 | Crash reporter (BugTrap) | `WinMain` | crash logger |
+| 3 | Crash reporter | `WinMain` | third-party crash-reporting SDK (SEH filter + crash log; see §0.10) |
 | 4 | Settings object (DO_OPTION) | state 0 | loads `DoOption.ini` (window/device dims) |
 | 5 | Engine/App object | state 0 | wires InputManager and renderer |
 | 6 | Network handler | state 0 | network handler object |
@@ -340,9 +355,17 @@ The observed first-touch order during a normal boot:
 
 1. Writes engine state → 1.
 2. Constructs the Engine/App and NetHandler singletons.
-3. Reads `OPTION_SCREENMODE` (field idx 30): if `== 2` (fullscreen), computes the screen width
-   via `GetSystemMetrics`, capped at **1920 px**; otherwise copies `OPTION_WIDTH`/`OPTION_HEIGHT`
-   into the renderer.
+3. Reads the display-mode setting (settings index [30], byte offset +120 — see §0.2): if `== 2`
+   (full-desktop), the renderer width is taken from `GetSystemMetrics` and the height is left to
+   auto; otherwise the configured `OPTION_WIDTH`/`OPTION_HEIGHT` values are copied into the renderer.
+   Two distinct width values are involved and **must not be conflated** (see §0.8.2):
+   - the **per-renderer width setter** caps width at **1920** and the **per-renderer height setter**
+     caps height at **1200** — these write the renderer's own width/height fields;
+   - the **separate global width value** is written **only** in the full-desktop (display-mode == 2)
+     branch and is *not* a height-setter width cap.
+4. **Forces the active colour depth to 16-bit.** Although the settings object's constructor leaves a
+   32-bit colour-depth default in field index [2], state 0 overwrites the engine's *active* colour
+   depth to **16-bit**, and the device-creation path (§0.4) uses 16-bit, not the 32-bit default.
 
 **State 1 (LoginWindow)** — the first real screen; built immediately after state 0 returns:
 
@@ -366,6 +389,34 @@ to get milliseconds, and stores the result into a field of the billing/scheduler
 the period of the mandated Korean play-time/health-warning prompt (a legal requirement for Korean
 online games of the era). It is not a rendering or loop-pacing value — purely a billing-side timer.
 
+### 0.8.2 Resolution setters and the display-mode promotion — (CODE-CONFIRMED — corrected)
+
+> **Resolution-setter correction (the binary wins).** The client has two distinct per-renderer
+> setters and one separate global width value:
+> - **Width setter** — writes the renderer's width field (object offset +44465) and clamps the
+>   maximum to **1920**.
+> - **Height setter** — writes the renderer's height field (object offset +44466) and clamps the
+>   maximum to **1200**.
+> - **Separate global width value** — a width quantity used **only** in the full-desktop
+>   (display-mode == 2) branch; it is **not** a width cap belonging to the height setter.
+>
+> An earlier note read the height setter as "caps width at 1920 via the separate global". That was
+> wrong: the width/height caps live on the two per-renderer setters (1920 / 1200), and the separate
+> global is the full-desktop-only width. The two must not be conflated.
+
+**Display-mode 1 → 2 promotion.** Before the OS window and the D3D9 device are created in state 1,
+the display-mode setting is re-read and a value of `1` is **promoted to `2`**, and that promoted mode
+is the argument fed to both the window-creation and device-creation steps.
+
+**Engine bring-up order (state 1, before the per-frame loop).** The fixed order is:
+
+1. **Start the task scheduler** (the engine fails into error state 7 — see §0.9 open items — if the
+   scheduler cannot start).
+2. **Create the OS window** (window class named `"diamond engine application"` — §0.3).
+3. **Create the Direct3D 9 device** (§0.4).
+4. **Register the 15 font slots** (the table in §0.6).
+5. **Reset the effect subsystem.**
+
 ## 0.9 Boot — open items
 
 1. **`OPTION_SCREENMODE == 0` semantics.** Values 1 (windowed) and 2 (fullscreen) are proven by
@@ -380,6 +431,37 @@ online games of the era). It is not a rendering or loop-pacing value — purely 
    engine object; its exact body was not traced in this pass.
 6. **First DirectSound touch.** SoundManager is a lazy singleton first observed near state 2 (Load),
    but the precise first-call site in the boot sequence was not byte-pinned.
+
+## 0.10 Crash-reporting SDK — (CODE-CONFIRMED — corrected)
+
+The init component previously characterised as a "logger" / "profiler" is in fact a **third-party
+crash-reporting SDK** — a commercial SEH crash-dump library, **not** a frame profiler. During boot it:
+
+- installs an **unhandled-exception (SEH) filter** so that an unhandled fault is intercepted and
+  reported rather than silently terminating the process;
+- opens a **crash log file** and writes log entries (an initial start entry is written during boot);
+- is configured with an **application-identity string** and a **remote crash-submission endpoint**
+  (a support host/port) to which crash reports can be sent;
+- loads a **DirectX symbol-index file** (an on-disk `symindex_dx9`-style index) used to resolve
+  symbols for **the client executable and its PDB** when formatting a crash report.
+
+> **Non-distribution note.** The SDK's hard-coded application-identity string, its version string,
+> its support contact, and its crash-submission host/port are deliberately **omitted** from this
+> committed spec. They are recorded only in the gitignored dirty-room ledger and must never be
+> reproduced in committed text or in code. Describe the component only in neutral terms, as above.
+
+### 0.10.1 Pending / to confirm (Phase 5)
+
+- **The literal on-disk INI filename behind the `[OPENNING]` section.** The path is built at runtime
+  into the settings-object path buffer (offset +1165) and read by the state-2 opening-decision step;
+  prior campaigns identify it as `option.ini` (§7.10 item 2), but the exact filename string at the
+  +1165 buffer was not statically pinned this pass and remains debugger-pending.
+- **Which Init failure transitions to error state 7.** The candidate failure codes are 1 (config /
+  first init fail) and 3 (device / secondary init fail); confirming which Init failure raises which is
+  debugger-pending.
+- **The live display-mode value and the live resolution.** Static analysis gives the selection logic;
+  the effective display-mode value (settings index [30]) and the resulting width × height depend on
+  the user's `option.ini` and are debugger-pending.
 
 ---
 

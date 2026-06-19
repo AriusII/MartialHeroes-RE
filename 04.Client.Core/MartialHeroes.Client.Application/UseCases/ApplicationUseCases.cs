@@ -3,7 +3,6 @@ using System.Text;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.Scene;
-using MartialHeroes.Client.Application.StateMachine;
 using MartialHeroes.Client.Application.World;
 using System.Collections.Immutable;
 using MartialHeroes.Client.Domain.Actors;
@@ -47,7 +46,6 @@ namespace MartialHeroes.Client.Application.UseCases;
 public sealed class ApplicationUseCases : IApplicationUseCases
 {
     private readonly IOutboundPacketSink _outbound;
-    private readonly ClientStateMachine _stateMachine;
     private readonly ClientWorld _world;
     private readonly LoginCredentialStore _credentials;
     private readonly SessionId _sessionId;
@@ -129,7 +127,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// </param>
     public ApplicationUseCases(
         IOutboundPacketSink outbound,
-        ClientStateMachine stateMachine,
         ClientWorld world,
         LoginCredentialStore credentials,
         SessionId sessionId,
@@ -143,7 +140,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         ILastServerStore? lastServerStore = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
-        _stateMachine = stateMachine ?? throw new ArgumentNullException(nameof(stateMachine));
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _sessionId = sessionId;
@@ -186,12 +182,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // packets/login.yaml (CmsgLoginCredential).
         _credentials.Stage(username, password, pin);
 
-        // Drive the FSM from Login toward handshaking. CharacterSelection is the application-state
-        // analogue of "secure session established / awaiting auth result".
-        _stateMachine.OnAuthenticated();
-
         // No outbound frame here: the handshake proceeds from the inbound 0/0 KeyExchange, which the
-        // driver answers with the secure 1/4 reply carrying the staged credential. spec: login_flow.md §4.2.
+        // driver answers with the secure 1/4 reply carrying the staged credential. The Login→Load (1→2)
+        // scene transition is driven later by the 3/5 EnterGameAck. spec: login_flow.md §4.2.
         return ValueTask.CompletedTask;
     }
 
@@ -326,15 +319,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
         BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
 
-        // Drive the deterministic lifecycle toward Loading; the 3/5 ack later transitions to World
-        // (handled by GamePacketHandler). spec: Docs/RE/opcodes.md (3/5 SmsgEnterGameAck).
-        _stateMachine.OnCharacterSelected();
-        // NOTE: do NOT call _sceneStateMachine?.OnSelectConfirmCharacter() here.
-        // The faithful online path is 4 (Select) → 2 (Load, via 3/5 EnterGameAck) → … → 5 (InGame),
-        // NOT a direct 4 → 5. The case-4 pre-write of 5 in the original is the no-network default
-        // overwritten immediately by the 3/5 handler. The SceneStateMachine stays on Select until
-        // OnEnterGameAck() drives it to Load(2). spec: client_runtime.md §7.5.3 / §7.9.5 (CAMPAIGN 16).
-
+        // Online enter-world path is 4 (Select) → 2 (Load, via 3/5 EnterGameAck) → … → 5; the use-case
+        // only sends 1/9 and waits for 3/5. spec: client_runtime.md §7.5.3 / §7.9.5.
         return SendAsync(major: 1, minor: 9, payload, cancellationToken);
     }
 
