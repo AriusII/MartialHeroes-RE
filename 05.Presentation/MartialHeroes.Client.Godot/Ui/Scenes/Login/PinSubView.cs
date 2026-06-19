@@ -4,12 +4,18 @@
 //
 // Backed entirely by HudAtlasLibrary — no UiAssetLoader dependency.
 // Faithfully reimplements GU PIN modal behaviour from:
+//   spec: Docs/RE/specs/frontend_layout_tables.md §3 (chrome re-trace 2026-06-19, CODE-CONFIRMED).
 //   spec: Docs/RE/specs/frontend_scenes.md §11.3 (CODE-CONFIRMED layout).
 //
 // Layout (panel-local coordinates inside the 329×422 modal panel):
+//   BACKDROP (drawn first, behind everything):
+//     password.dds source (0,0,329,422) → panel-local (0,0) size 329×422.
+//     This region contains the ornate window frame, carved title "2차 비밀번호 입력",
+//     red multi-line warning, "번호입력" caption and input-field box — all baked art.
+//     Do NOT synthesize these as Godot labels or color rects; they are pixels in the texture.
 //   Keypad:  2 × 5 tiles, each 52×52. Column spacing 55. Col0 X=28.
 //            Row 0 Y=170 (digits 0..4), Row 1 Y=230 (digits 5..9).
-//   Digit d glyph: password.dds src(d*52, 560/612/664, 52,52).
+//   Digit d glyph: password.dds src(d*52, 560/664/612, 52,52) Normal/Pressed/Hover.
 //   Reset button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
 //     → wipes the entered digits AND re-scrambles the keypad (NOT a single-digit backspace).
 //   OK button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
@@ -17,6 +23,8 @@
 //   Cancel button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
 //     → closes the modal (Cancelled).
 //   There is NO separate clear/backspace tag — the only edit verbs are digit / Reset / OK / Cancel.
+//   The InventWindow.dds ExitPanel (340×190 src(318,647)) IS built in the original but kept HIDDEN
+//   (SetVisible(false)) — it is NOT drawn and NOT added here.
 //   spec: Docs/RE/specs/frontend_layout_tables.md §3 — Reset=11, OK=12, Cancel=13.
 //
 // Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
@@ -187,15 +195,21 @@ public sealed partial class PinSubView : Control
     }
 
     // -------------------------------------------------------------------------
-    // Modal chrome: transparent click-capture + dragon-frame plate
-    // spec: Docs/RE/specs/frontend_layout_tables.md §3 (dragon frame 340×190 src(318,647), centered);
-    //       ui_system.md §1.6 (GUPanel_ShowModalAndFocus — focus-capturing modal eats outside clicks).
+    // Modal chrome: transparent click-capture + password.dds backdrop blit
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3
+    //   "the keypad constructor assigns data/ui/password.dds as the panel's own backdrop texture …
+    //    blits that backdrop BEFORE the children, source (0,0)-(329,422) → destination (347,173)
+    //    size 329×422. The ornate chrome IS this backdrop region — frame, title '2차 비밀번호 입력',
+    //    red warning, '번호입력' caption, input-field box — all painted into the texture."
+    //   "The reused ExitPanel child (InventWindow.dds 340×190 src(318,647)) is built then kept
+    //    HIDDEN (SetVisible(false)). Do not draw it." (§3 "Hidden reused ExitPanel child".)
     // -------------------------------------------------------------------------
 
     private void BuildModalChrome()
     {
         // Transparent full-canvas capture rect: a focus-capturing modal eats clicks outside the panel
         // so they do NOT fall through to the login form. No invented dim tint (not in the binary).
+        // Must be first child so it sits behind the backdrop.
         AddChild(new ColorRect
         {
             Color = new Color(0f, 0f, 0f, 0f),
@@ -204,25 +218,32 @@ public sealed partial class PinSubView : Control
             MouseFilter = MouseFilterEnum.Stop,
         });
 
-        // Dragon-frame chrome (same InventWindow.dds plate as the confirm dialogs), centered in the
-        // 329×422 panel. spec §3 "Dragon frame 340×190, src(318,647), centered".
-        int frameX = (ModalW - LoginLayout.ModalChromeW) / 2;
-        int frameY = (ModalH - LoginLayout.ModalChromeH) / 2;
-        Texture2D? frame = _atlas.SliceByPath(LoginLayout.AtlasInventWindow,
-            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
-            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH);
-        if (frame is not null)
+        // password.dds backdrop blit: source (0,0,329,422) → panel-local (0,0) size 329×422.
+        // This IS the entire ornate window chrome — frame, title, warning text, input-field box
+        // are all baked into this region of the texture. Drawn BEFORE the keypad children.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 (chrome re-trace 2026-06-19).
+        Texture2D? backdrop = _atlas.SliceByPath(
+            AtlasPassword,
+            0, 0,           // srcX=0, srcY=0 — top-left corner of password.dds
+            ModalW, ModalH  // 329×422 — exact panel size = exact source region
+        );
+        if (backdrop is not null)
         {
             AddChild(new TextureRect
             {
-                Position = new Vector2(frameX, frameY),
-                Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
-                Texture = frame,
+                Position = Vector2.Zero, // panel-local (0,0)
+                Size = new Vector2(ModalW, ModalH),
+                Texture = backdrop,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore, // transparent to input; buttons above handle it
             });
         }
+
+        // NOTE: the InventWindow.dds dragon-frame (ExitPanel clone 340×190 src(318,647)) IS built
+        // by the original constructor but is immediately kept hidden (SetVisible(false)) and never
+        // drawn. We do NOT add it here — it is explicitly absent from the visible draw order.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 "Hidden reused ExitPanel child".
     }
 
     // -------------------------------------------------------------------------

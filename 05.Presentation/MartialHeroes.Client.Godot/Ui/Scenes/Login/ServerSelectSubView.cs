@@ -44,8 +44,23 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 public sealed partial class ServerSelectSubView : Control
 {
     // Atlas paths. spec: Docs/RE/specs/frontend_layout_tables.md §1 / §4
-    private const string AtlasD = "data/ui/loginwindow_02.dds";
-    private const string AtlasB = "data/ui/loginwindow.dds";
+    private const string AtlasD = "data/ui/loginwindow_02.dds";   // A4 = loginwindow_02.dds
+    private const string AtlasB = "data/ui/loginwindow.dds";      // A2 = loginwindow.dds
+    private const string AtlasA1 = "data/ui/login_slice1.dds";    // A1 = login_slice1.dds
+
+    // Full-screen A2 backdrop behind the list-box: dst(0,110,1024,490) src(0,0). spec §4.
+    // "Backdrop is TWO layers: a full-screen A2 image at (0,110) 1024×490, source (0,0), drawn FIRST"
+    private const int BackdropX = 0;    // spec: frontend_layout_tables.md §4
+    private const int BackdropY = 110;  // spec: frontend_layout_tables.md §4
+    private const int BackdropW = 1024; // spec: frontend_layout_tables.md §4
+    private const int BackdropH = 490;  // spec: frontend_layout_tables.md §4
+
+    // Title "서버선택" image: A2 dst(207,44) 70×17 src(0,980). spec §4.
+    // Absolute canvas coords. "Title '서버선택' = baked A2 IMAGE … src(0,980)"
+    private const int TitleAbsX = 207;  // spec: frontend_layout_tables.md §4
+    private const int TitleAbsY = 44;   // spec: frontend_layout_tables.md §4
+    private const int TitleSrcX = 0;    // spec: frontend_layout_tables.md §4 "source(0,980)"
+    private const int TitleSrcY = 980;  // spec: frontend_layout_tables.md §4
 
     // Server-list panel shares the central notice/listbox area.
     private const int PanelX = 270;
@@ -333,12 +348,15 @@ public sealed partial class ServerSelectSubView : Control
 
     private void BuildPagers()
     {
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "pager tabs (13+47·i,66,47,18); actions 115..124"
+        // The 10 (115+i) page-jump buttons are a HIDDEN pager strip — re-parked to blank UV on each
+        // repaint. They must NOT be rendered as visible "하왕관" tabs.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4
+        //   "'Tabs' clarification: the ten 115+i buttons are a HIDDEN page-jump strip re-parked to a
+        //    blank UV on each repaint. Do NOT render them as visible tabs."
+        // The hit regions are still present (for action dispatch); they are just hidden.
         for (int i = 0; i < PagerCount; i++)
         {
-            int x = 13 + i * 47; // spec: Docs/RE/specs/frontend_layout_tables.md §4 "pager (13+47·i, 66)"
-
-            Texture2D? normal = _atlas.SliceByPath(AtlasB, PagerSrcX, PagerSrcY, PagerW, PagerH);
+            int x = 13 + i * 47; // spec: frontend_layout_tables.md §4 "pager (13+47·i, 66)"
             int actionId = PagerActionBase + i;
 
             var btn = new TextureButton
@@ -348,10 +366,8 @@ public sealed partial class ServerSelectSubView : Control
                 CustomMinimumSize = new Vector2(PagerW, PagerH),
                 IgnoreTextureSize = true,
                 StretchMode = TextureButton.StretchModeEnum.Scale,
-                TextureNormal = normal,
-                TextureHover = normal,
-                TexturePressed = normal,
-                TextureDisabled = normal,
+                // No textures — blank UV per spec (hidden pager). spec §4.
+                Visible = false, // hidden: the shipped server-list shows no visible tab strip. spec §4.
             };
 
             int capturedAction = actionId;
@@ -362,6 +378,24 @@ public sealed partial class ServerSelectSubView : Control
 
     private void BuildPanelFrame()
     {
+        // BACKDROP LAYER 1 (drawn first): full-screen A2 (loginwindow.dds) dst(0,110,1024,490) src(0,0).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4
+        //   "Backdrop is TWO layers: a full-screen A2 image at (0,110) 1024×490, source (0,0), drawn FIRST"
+        // Absolute canvas coords — not panel-relative. spec §4.
+        Texture2D? backdrop = _atlas.SliceByPath(AtlasB, 0, 0, BackdropW, BackdropH); // src(0,0)
+        if (backdrop is not null)
+        {
+            AddChild(new TextureRect
+            {
+                Position = new Vector2(BackdropX, BackdropY), // abs (0,110) spec §4
+                Size = new Vector2(BackdropW, BackdropH),     // 1024×490 spec §4
+                Texture = backdrop,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore,
+            });
+        }
+
+        // BACKDROP LAYER 2: list-box scroll panel (270,85,483,490) src(0,490). spec §4.
         Texture2D? frame = _atlas.SliceByPath(AtlasB,
             LoginLayout.ServerListbox.SrcX, LoginLayout.ServerListbox.SrcY,
             LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
@@ -377,15 +411,18 @@ public sealed partial class ServerSelectSubView : Control
             });
         }
 
-        Texture2D? header = _atlas.SliceByPath(AtlasB, 0, 980,
+        // Title "서버선택": baked A2 image dst(207,44) 70×17 src(0,980). spec §4.
+        // "Title '서버선택' = a baked atlas image (not a msg string): atlas A2, dst(207,44) 70×17, source(0,980)"
+        // Absolute canvas coords — not panel-relative. spec §4.
+        Texture2D? title = _atlas.SliceByPath(AtlasB, TitleSrcX, TitleSrcY,
             LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H);
-        if (header is not null)
+        if (title is not null)
         {
             AddChild(new TextureRect
             {
-                Position = PanelPoint(LoginLayout.ListboxHeader.X, LoginLayout.ListboxHeader.Y),
+                Position = new Vector2(TitleAbsX, TitleAbsY), // abs (207,44) spec §4
                 Size = new Vector2(LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H),
-                Texture = header,
+                Texture = title,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
             });
@@ -394,15 +431,20 @@ public sealed partial class ServerSelectSubView : Control
 
     private void BuildFlagImage()
     {
-        WidgetRect r = LoginLayout.SmallBadges;
-        Texture2D? tex = _atlas.SliceByPath(AtlasB, r.SrcX, r.SrcY, r.W, r.H);
+        // EVENT badge: baked A1 (login_slice1.dds) dst(407,−3) 210×70 src(743,398).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4
+        //   "EVENT badge = a baked image: atlas A1, dst(407,−3) 210×70, source(743,398)"
+        // Uses LoginLayout.QuitDecoPlate which captures exactly this rect (A1 src 743,398 210×70 dst 407,−3).
+        // Absolute canvas coords — not panel-relative. spec §4.
+        WidgetRect r = LoginLayout.QuitDecoPlate; // A1 dst(407,-3,210,70) src(743,398). spec §4.
+        Texture2D? tex = _atlas.SliceByPath(AtlasA1, r.SrcX, r.SrcY, r.W, r.H);
         if (tex is null)
             return;
 
         AddChild(new TextureRect
         {
-            Position = PanelPoint(r.X, r.Y),
-            Size = new Vector2(r.W, r.H),
+            Position = new Vector2(r.X, r.Y), // abs (407,-3) spec §4
+            Size = new Vector2(r.W, r.H),     // 210×70 spec §4
             Texture = tex,
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore,

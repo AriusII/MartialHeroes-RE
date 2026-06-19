@@ -6,7 +6,7 @@ ida_reverified: 2026-06-19
 anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); residual = opening final-fade armed-flag producer site only
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending)
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -33,8 +33,16 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
    (full-screen background + progress bar) under an ortho projection — see §5.
 6. **Opening alpha ceiling is 250 (0xFA), not 255**, and the credit crawl increments in +Y (DirectX
    Y-down) so a Godot Y-up port must invert the sign to scroll upward — see §6.
-7. **The PIN keypad is 100 stacked buttons** (10 digit-buttons per position × 10 positions); the
-   scramble shows exactly one per position — see §3.
+7. **The PIN (second-password) window DOES have chrome — it is BAKED INTO `data/ui/password.dds`,
+   not code-drawn** (chrome re-trace, 2026-06-19, supersedes the prior "no chrome" reading). The
+   second-password container panel blits `password.dds` from source `(0,0)` sized `329×422` as its own
+   full-panel **backdrop**, and that backdrop region of the texture contains the ornate frame, the title
+   "2차 비밀번호 입력", the red multi-line warning, the "번호입력" caption and the input-field box. The
+   keypad is 100 stacked digit-buttons (10 per position × 10 positions; scramble shows exactly one per
+   position), drawn OVER that backdrop. The earlier conclusion missed that the keypad constructor
+   overwrites the panel's backdrop-texture field with `password.dds` after the (texture-less) container
+   ctor. There is no `msg.xdb` id and no ARGB color for the title/warning because they are pixels in the
+   atlas, not labels — see §3.
 8. **Login visibility is set IMPERATIVELY on transition edges, not by a declarative per-state table.**
    The binary has no per-state ApplyVisibility lookup; the render callback never recomputes visibility
    from the sub-state. The visible set at any state is the cumulative result of the show/hide calls
@@ -101,7 +109,7 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | Notice panel | panel | — | — | — | — | 0 | 490 | A2 | — | hidden |
 | Server-list root | panel (opaque) | 0 | 0 | 1024 | 398 | 0 | 0 | A1 | — | hidden |
 | Login-form host strip | panel | 0 | 326 / 768 | 1024 | 442 | 0 | 582 | A1 | — | — |
-| PIN keypad panel | panel | 347 | 173 | 329 | 422 | — | — | password.dds | — | hidden |
+| PIN keypad panel | panel | 347 | 173 | 329 | 422 | 0 | 0 | password.dds | — | hidden | backdrop blits password.dds (0,0)-(329,422) = the ornate frame+title+warning+번호입력+field (baked); see §3 |
 | PIN yes/no panel | panel | 0 | 356 | 531 | 313 | 132 | 0 | — | — | hidden |
 | Exit (quit) modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
 | Error modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
@@ -176,6 +184,54 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | Confirm-B label (msg 4024) | label | 10 | 100 | 330 | 20 | — | — | text | — |
 | Confirm-B OK | button3 | 120 | 136 | 113 | 40 | N302,860 / P415,860 | A3 | 114 |
 
+> **Confirm-A is the "connecting" popup.** The same Confirm-A object (the login-window's connecting-popup
+> field) is what shows the **"서버에 접속중입니다…" (connecting to server)** caption (msg **4023**) during the
+> server-join hand-off — it is raised at sub-state **40**, the instant before the secure-context/login-packet
+> build (see §2.2). It is not a distinct object; "Confirm-A" and "the connecting popup" are the same panel.
+
+### 2.1a Validation-error message box (the "확인 - N" countdown modal) — CONFIRMED (static IDA, 2026-06-19)
+
+On a failed login submit the client shows a **dedicated error message-box panel** — a **distinct object**
+from the Confirm-A/B popups above (it does **not** reuse action 113/114). It carries a single OK button
+whose caption counts **down** ("확인 - 3" → "확인 - 2" → "확인 - 1") and the panel **auto-closes** when the
+count reaches zero. Geometry matches the other login modals (atlas **A3** = `InventWindow.dds`).
+
+| Widget | type | x | y | w | h | srcX | srcY | atlas | action |
+|---|---|---|---|---|---|---|---|---|---|
+| Error-msgbox panel | panel (modal) | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — |
+| Error message label | label center | 0 | 89 | 340 | 20 | — | — | text | 670 |
+| Error OK (countdown) | button3 | 467 | 440 | 90 | 25 | N417,943 / H507,943 | A3 | 671 |
+| (4 spare label lines) | label | — | — | — | — | — | — | text | — |
+
+(The OK button rect is built panel-relative `(125, 151) 90×25`; the absolute dst shown above = panel
+origin `(342,289)` + local `(125,151)`. The four spare labels are pre-built empty for multi-line bodies.)
+
+- **Draw order:** panel frame → centered message label (action 670) → OK button (action 671) → four spare
+  label lines.
+- **Message id per failure edge** (each failure first resets the login flow back to sub-state **6**, then
+  raises this modal — see §2.2 sub-state 29; the connect-result cases raise it from sub-state 35):
+  - **ID empty OR ID length < 4 → msg 4025** (a single id covers both the "must enter an ID" and the
+    "too short" cases; there is **no** separate empty-ID id).
+  - **PW empty → msg 4026.**
+  - **No servers returned → msg 4027** (generic); **fetch result −1 → msg 4028.**
+- **Countdown behavior (CONFIRMED, the load-bearing fact):**
+  - **Start N = 3.** The Show call passes a **3000 ms** budget; the displayed seconds = budget / 1000 = 3.
+    (A screenshot catching "2" is mid-countdown; the true start is 3.)
+  - **Tick source = a per-frame millisecond wall-clock delta** sampled while the panel draws, **throttled
+    to at most one decrement per 1000 ms** (it subtracts a whole second only once ≥ 1000 ms have elapsed
+    since the last decrement).
+  - **Caption format = "<OK-caption> - <N>"**, where the OK caption is **msg 101** ("확인") and `N` is the
+    remaining whole seconds — rebuilt on every decrement.
+  - **Auto-close:** when the remaining budget expires (and the panel's no-auto-close flag is clear, which
+    it is for validation errors), the panel **hides itself**. The login flow is already at sub-state 6
+    (idle), so the screen simply returns to credential entry.
+  - **Early dismiss:** clicking OK (action **671**) hides the panel immediately as well.
+- **Confidence:** the panel geometry, the OK/message actions (670/671), the per-failure msg-id map, and
+  the countdown timer logic (start 3000 ms, 1 Hz, "%s - %d", auto-close) are **CONFIRMED** (static IDA).
+  The literal CP949 text of msg ids 101 / 4025 / 4026 / 4027 / 4028 lives in runtime `msg.xdb`, not in the
+  binary → **UNVERIFIED** (debugger-confirmable). This **supersedes** any prior assumption that the
+  validation error reused the Confirm-A/B popup: it is its own message-box object with a live countdown.
+
 ### 2.2 Sub-state machine (`flowSubState`, init = 1)
 
 > **Single 32-bit integer field, written = 1 at construction (CONFIRMED, static IDA, CYCLE 18 Phase A).**
@@ -214,6 +270,19 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
    game-state to the connect phase, arm 30 s connect timeout, leave the login scene.  → 41
 41 post-hand-off idle (connect/SMSG path).
 ```
+
+> **CORRECTION (2026-06-19 — maintainer end-of-curtain capture oracle + IDA re-exam of `BuildScene`/
+> `TickSubStateMachine`):** the curtain-settle is **auto-advancing** — `3 → 4 → 5 → 6` chains with **no
+> user-input wait** — and the window **rests at sub-state 6** with the credential form (ID/PW label plates
+> + textboxes, OK/확인 button, save-ID checkbox) **VISIBLE**. The earlier "4 = form idle that waits for
+> Enter; credential hidden until the user advances 4→5→6" reading is superseded: the real client shows the
+> credential form at end-of-curtain. Also: the two **curtain stone panels are ALWAYS PRESENT** (never
+> hidden) and rest at **top Y = −222 / bottom Y = +548**, carrying the **frame + banner baked art**
+> (디오 logo / `www.doonline.co.kr` URL / dragon ornament / 2 rings on the top panel; lower stone + the
+> credential form host on the bottom panel). A port that hides them after the raise loses the entire
+> frame/banner (the observed end-of-curtain bug). Rest-visible set: background + top frame + bottom curtain
+> + curtain-header ornament + the credential form; only OK/Enter (→ 29) needs input. Dirty source:
+> `_dirty/scenes/login_complete_widgets.md`.
 
 - **Edge confidence:** all edges 1..41 and their numeric boundaries are **CONFIRMED (HIGH, static IDA,
   CYCLE 18 Phase A)**, except the **35 → 36 → 37 worker-completion timing**, which is a background-thread
@@ -334,13 +403,39 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 
 ## 3. PIN keypad (second password) — sub-states 31/32
 
-> Element-level pass (2026-06-19): the keypad is a reusable scrambled-PIN widget (also used by the
-> in-game gift/second-password modal); all coordinates below are panel-relative, the panel itself sited
-> per §2.1 (dst ~(347,173)). Every key is a 1:1 atlas blit from `data/ui/password.dds`; the modal
-> backdrop frame samples `data/ui/InventWindow.dds`.
+> Chrome re-trace (2026-06-19) — **CORRECTS the prior "no chrome" conclusion.** The login second-password
+> window IS a full ornate window (frame, carved top, title "2차 비밀번호 입력", red multi-line warning,
+> "번호입력" caption, masked input box, scrambled keypad, 확인/취소), exactly as the official client capture
+> shows. The chrome is supplied by a **full-panel backdrop blit of `data/ui/password.dds`** (the prior pass
+> traced only the keypad's child buttons and the container ctor's `tex = 0`, and missed that the keypad
+> constructor then sets the panel's backdrop-texture field to `password.dds`). All coordinates below are
+> panel-relative; the panel is sited per §2.1 at dst (347,173) size 329×422.
 
-- **Container panel:** screen dst **(347, 173)**, size **329 × 422**; digit keys + control buttons
-  textured from **`data/ui/password.dds`**; the backdrop frame from **`data/ui/InventWindow.dds`**.
+- **Container panel + chrome backdrop:** screen dst **(347, 173)**, size **329 × 422**. The container ctor
+  builds it with `tex = 0`, but the keypad constructor then **assigns `data/ui/password.dds` as the panel's
+  own backdrop texture** (writes it into the panel's backdrop-texture field). The panel draw step (the shared
+  GUPanel onDraw → the alpha-fade image submit) blits that backdrop **before** the children, using the
+  panel's own source rect — which the ctor left at source `(0,0)` extending to the panel size, i.e.
+  **source `(0,0)-(329,422)` → destination `(347,173)` size `329×422`.**
+- **The ornate chrome IS this backdrop region of `password.dds`** — the top-left `329×422` of the atlas
+  contains the carved frame, the title **"2차 비밀번호 입력"**, the **red multi-line warning**
+  ("잘못된 (2차 비밀번호)를 5회 이상 입력하게 되면 사용이 제한됩니다."), the **"번호입력"** caption, and the
+  **input-field box** — all painted into the texture. They are therefore **not** a `msg.xdb` id and **not**
+  a code-drawn label with an ARGB color: the keypad constructor makes **zero** message lookups and sets **no**
+  color constant, precisely because this text is pixels in the art. The keypad's digit/control buttons and
+  the masked-entry echo are drawn **over** this backdrop, sampled from other regions of the same atlas (the
+  1:1 blit contract still holds per element — the backdrop's own element is `329×422`, the digit faces are
+  `52×52`). **Consequence for the port:** blit `password.dds` `(0,0)-(329,422)` to `(347,173)` as the window
+  background first, then draw the keypad children over it. Do not synthesize a frame or look up a title /
+  warning string — render the texture region. (Extracting `data/ui/password.dds` from the VFS will show the
+  exact pixel layout of title vs warning vs field within that 329×422 region; the code proves the whole
+  region is the backdrop.)
+- **Disambiguation:** the engine's `CountInputPanel` (a numeric *quantity* pad, e.g. split/drop count) is
+  the widget that draws code labels with color constants (≈`0xFFFF15C0` / `0xFFFF0900`) and references the
+  literal "초기화"/"+"/"-"/"00"; it is **not** the second-password window and the earlier "warning drawn as
+  code labels, color 0xFFFFFF00" note conflated the two. The in-game/gift `GiftCharSecondPassword` is a
+  *sibling* that reuses this same scrambled-keypad mechanism and submits the PIN over the network; it is not
+  the login open path.
 - **Digit positions: 10 cells, 5 columns × 2 rows, each cell 52 × 52.** Column X ∈ {28, 83, 138, 193,
   248} (= 55·col + 28); row Y ∈ {170, 230} (top row cells 0..4 at Y 170, bottom row cells 5..9 at Y 230).
 - **Each cell is a stack of 10 digit-buttons (digits 0..9), 100 buttons total** — confirmed by the
@@ -362,12 +457,14 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 - **Masked input field:** a text-only label (no atlas, font slot 0) at panel-relative
   `(81, 138, 150, 22)`, rendered as N literal `*` characters, one per entered digit (digits never
   drawn; no dot-sprite asset). **Max length 4.**
-- **Backdrop / dragon frame** decoration: an `InventWindow.dds` panel sized **340 × 190**, source origin
-  `(318, 647)`, **centered** in the parent; built then initially hidden (a structural backdrop element
-  rather than a visible border in the shipped modal). No separate screen-dim quad is created by the
-  keypad itself.
-- **Draw order:** masked-entry label first, then the 100 digit-face buttons (cell 0 → cell 9), then
-  Reset (11), OK (12), Cancel (13), then the (hidden) backdrop frame.
+- **Hidden reused ExitPanel child:** the keypad constructor also builds an `InventWindow.dds` panel sized
+  **340 × 190**, source origin `(318, 647)`, **centered** in the parent — but this is a **reused
+  quit-confirm ExitPanel** (its caption is msg **2007**), built then **kept hidden** (`SetVisible(false)`).
+  It is genuinely hidden in the shipped modal; it is not drawn. This is distinct from the **visible**
+  `password.dds` window backdrop described above — do not confuse the two.
+- **Draw order:** the `password.dds` window backdrop (the chrome, `(0,0)-(329,422)` → `(347,173)`) first,
+  then the masked-entry echo label, then the 100 digit-face buttons (cell 0 → cell 9), then Reset (11),
+  OK (12), Cancel (13). (The reused ExitPanel child stays hidden.)
 - **Scramble (CONFIRMED, static IDA, CYCLE 18 Phase A):**
   - **Seed:** `srand(time())` — the whole-second CRT wall-clock (`time()` family). Explicitly **NOT**
     `GetTickCount`, `timeGetTime`, `QueryPerformanceCounter`, or `GetSystemTimeAsFileTime` (those are
@@ -398,6 +495,31 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 > Element-level pass (2026-06-19): the server-list is a sub-view of the single LoginWindow, built once
 > in the construct routine and re-laid each repaint by the list painter (a vtable method invoked by the
 > pager). All plate/strip art is a 1:1 atlas blit; names/captions are msg.xdb text.
+
+> **Server name = `msg.xdb` TEXT, NOT a per-server calligraphy image (DEFINITIVE, element-level pass,
+> 2026-06-19).** The painter fetches each server's name as a **string** (id **5000 + server_id**, fallback
+> caption **5901**) and feeds it to a text setter that measures + lays it out; it never re-points an atlas
+> source rect per server. The calligraphic look on screen is a **fixed decorative scroll-plate IMAGE** (the
+> 100×372 plate face on atlas **A4**, identical for every server) with the CP949 hanja+hangul name string
+> (e.g. "羽化登仙 / 우화등선") **rendered on top in the game font**. A port must render the `msg.xdb` text on
+> the fixed plate — there is **no** per-server `server_<id>.dds`; do not look for one.
+
+> **Outer construction — the parchment/title/badge layers (element-level pass, 2026-06-19):**
+> - **Backdrop is TWO layers:** a **full-screen** A2 (`loginwindow.dds`) image at **(0, 110) 1024 × 490**,
+>   source **(0, 0)**, drawn **first**; then the list-box scroll panel (the next bullet) on top.
+> - **Title "서버선택"** = a **baked atlas image** (not a msg string): atlas **A2**, dst **(207, 44) 70 × 17**,
+>   source **(0, 980)**.
+> - **EVENT badge** = a **baked image**: atlas **A1** (`login_slice1.dds`), dst **(407, −3) 210 × 70**,
+>   source **(743, 398)**, sitting behind the refresh button.
+> - **"Tabs" clarification:** the visible 하왕관 rows are the **two server PLATES per page** (actions
+>   400 / 401) whose name labels carry the server-name text — they are **not** a tab strip. The ten
+>   `115 + i` buttons are a **hidden page-jump strip** re-parked to a blank UV on each repaint.
+> - **새로고침 (refresh)** = action **105** (the §2.1 "105 strip"): atlas **A1**, dst **(456, −3) 111 × 38**,
+>   source N **(792, 398)** / H **(602, 416)**; **10-second-debounced** re-fetch (→ sub-state 34). The
+>   back-to-login control is action **102** (the quit-confirm).
+> - **Connecting popup "서버에 접속중입니다…"** = the Confirm-A modal (atlas **A3** `InventWindow.dds`,
+>   src **(318, 647)**, dst **(342, 289) 340 × 190**, caption msg **4023**), raised at **sub-state 40** — the
+>   instant before the join hand-off (see §2.1 and §2.2).
 
 - **Outer list panel** (the page backdrop): dst **(270, 85)**, size **483 × 490**, atlas A2 source
   origin **(0, 490)**. A header/title image (atlas A1, dst (265,0) 494×113, source (0,469)) and a

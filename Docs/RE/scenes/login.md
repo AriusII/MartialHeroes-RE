@@ -287,22 +287,26 @@ never by a form button.**
 
 ### 5.2 PIN keypad (2×5, 100 stacked buttons)
 
-Container panel at screen dst **(347, 173)**, size **329 × 422**; children textured from
-`data/ui/password.dds`; child coords panel-relative. Backdrop frame from `data/ui/InventWindow.dds`.
+Container panel at screen dst **(347, 173)**, size **329 × 422** — **textureless (`tex = 0`)**; only the
+child digit/control button **faces** are textured from `data/ui/password.dds`; child coords panel-relative.
+**The ornate visible frame, the title "2차 비밀번호 입력", the red warning line, and the "번호입력" caption
+are BAKED INTO `data/ui/password.dds` art — not widgets, not `msg.xdb` text** (the constructor makes zero
+message lookups and writes no color constant). A port must **blit the `password.dds` chrome** behind the
+keypad children; it must NOT add Korean text labels for the title/warning/caption.
 
 - **10 digit cells** in **5 columns × 2 rows**, each **52 × 52**: column X ∈ {28, 83, 138, 193, 248}
   (= 55·col + 28); row Y ∈ {170, 230}.
 - **Each cell is a stack of 10 digit-buttons (0..9) → 100 buttons total.** The face of digit `d`
-  samples atlas source **X = `d·52`**; the **button state** selects the source **Y band**: **Normal
-  (idle) = 560**, with two alternate state bands at **612** and **664** (one hover, one pressed —
-  **UNVERIFIED** which is which; the construct call does not disambiguate, and the earlier
-  "Pressed 612 / Hover 664" assignment is not confirmed by the binary). The scramble shows **exactly
-  one** digit per cell; each digit-button's tag = its digit value.
+  samples atlas source **X = `d·52`**; the **button state** selects the source **Y band** (NORMAL,
+  PRESSED, HOVER builder order): **Normal (idle) = 560 · Pressed = 664 · Hover = 612** (CONFIRMED,
+  element-level pass: the construct call passes the 664 band as the PRESSED frame and 612 as HOVER). The
+  scramble shows **exactly one** digit per cell; each digit-button's tag = its digit value.
 - **Controls:** **Reset** `(243, 133, 58, 30)` tag **11** · **OK/submit** `(90, 290, 154, 58)` tag
   **12** · **Cancel** `(90, 350, 154, 58)` tag **13**. Masked field label `(81, 138, 150, 22)`,
-  rendered as N `*` (no dot-sprite; literal `*` text in font slot 0). **Max length 4.** Backdrop /
-  dragon-frame decoration `340 × 190`, source `(318, 647)` on InventWindow.dds, centred, built then
-  hidden (a structural backdrop). The keypad is routed **only** by its own internal tags {11/12/13}
+  rendered as N `*` (no dot-sprite; literal `*` text in font slot 0). **Max length 4.** A separate
+  `InventWindow.dds` panel `340 × 190`, source `(318, 647)`, centred, is also built but **kept hidden** —
+  it is a **reused quit-confirm ExitPanel** (caption msg 2007), NOT the visible PIN frame (which is the
+  baked `password.dds` chrome above). The keypad is routed **only** by its own internal tags {11/12/13}
   (+0-9 append).
 - **Scramble (mechanism CODE-CONFIRMED):** on every show/Reset/OK/Cancel, `srand(time())`
   (whole-second CRT wall clock — *not* `GetTickCount`/`QueryPerformanceCounter`), then an
@@ -349,6 +353,22 @@ graph TD
 ```
 
 ### 5.3 Server-list display model (states 35..37)
+
+**Server name = `msg.xdb` TEXT, not a per-server calligraphy image (DEFINITIVE).** The painter fetches the
+name as a string (id **5000 + server_id**, fallback **5901**) and lays it out with a text setter — it never
+re-points an atlas rect per server. The calligraphic look = a **fixed** A4 scroll-plate face (identical for
+every server) with the CP949 hanja+hangul name rendered on top in the game font. There is **no**
+per-server `server_<id>.dds`.
+
+**Outer chrome (element-level pass):** the backdrop is **two layers** — a full-screen A2 image at
+`(0, 110) 1024 × 490` src `(0, 0)` drawn first, then the list-box scroll below. **Title "서버선택"** = a baked
+A2 image `(207, 44) 70 × 17` src `(0, 980)` (not a msg string). **EVENT badge** = a baked A1 image
+`(407, −3) 210 × 70` src `(743, 398)`. **새로고침 (refresh)** = action **105** (A1 `(456, −3) 111 × 38`
+N `(792,398)`/H `(602,416)`, 10-s-debounced re-fetch → state 34; back-to-login = action **102**). The ten
+`115 + i` "tabs" are a **hidden page-jump strip** (re-parked to a blank UV each repaint) — the visible
+하왕관 rows are the two server **plates**, not tabs. **Connecting popup "서버에 접속중입니다…"** = the Confirm-A
+modal (A3 `InventWindow.dds`, src `(318,647)`, dst `(342,289) 340×190`, caption msg **4023**), raised at
+**state 40** just before the join hand-off.
 
 Outer list panel (page backdrop) at dst `(270, 85)`, `483 × 490`, A2 source `(0, 490)`. Two detail
 plates per page (X base 30, step 233, action base 400) — each plate = one server; LEFT plate = record
@@ -556,6 +576,18 @@ all **CONFIRMED to match** the implementation. Each constant in the C# should ca
   button-draw state read would settle it (non-blocking; idle band 560 is confirmed).
 - **PIN-token storage slot width** — the login window's PIN-token slot (asserted ≤ 4 chars + NUL); a
   single live read would byte-confirm it. (Does not change the wire layout, which §7 pins.)
+
+**Validation-error message box (RESOLVED, static IDA, 2026-06-19):**
+
+- On a failed login submit a **dedicated error message-box panel** is raised (a distinct object from the
+  Confirm-A/B popups; A3 `InventWindow.dds`, dst `(342,289) 340×190`, src `(318,647)`; centered message
+  label action 670; OK button local `(125,151) 90×25` src N `(417,943)`/H `(507,943)` action 671). Its OK
+  caption shows a **live countdown**: caption = "<확인 (msg 101)> - <N>" starting at **N = 3** (a 3000 ms
+  budget), decremented **at most once per 1000 ms** off a millisecond wall-clock delta, and the panel
+  **auto-closes** at 0 (returning to the credential idle, sub-state 6); clicking OK dismisses early. Failure
+  → msg map: ID empty or < 4 → **4025**; PW empty → **4026**; no servers → **4027**; fetch −1 → **4028**.
+  Geometry/actions/timer = CONFIRMED; the literal CP949 strings (msg 101/4025/4026/4027/4028) live in
+  runtime `msg.xdb` → UNVERIFIED. See `frontend_layout_tables.md §2.1a`.
 
 **Other (debugger-pending, non-blocking):**
 

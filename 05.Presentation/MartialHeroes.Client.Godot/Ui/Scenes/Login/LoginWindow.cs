@@ -157,11 +157,23 @@ public sealed partial class LoginWindow : Control
     // creates them. Their OK buttons fire action 113/114 (→ hide + restart server-list fetch). The
     // SHOW trigger lives in the server-list fetch-result path (network layer, not yet ported), so
     // offline they remain hidden — faithful to the real client offline. spec §2.2.
+    // Confirm-A (msg 4023) also serves as the "connecting" popup raised at sub-state 40. spec §2.1.
     private Control? _quitModal;
     private Control? _quitModal2;
 
     // Quit-confirm ExitPanel (msg 2007), opened by action 102/112; "yes" (101) quits. spec §2.2.
     private Control? _exitConfirm;
+
+    // Validation-error message box: distinct panel (not Confirm-A/B), shown on validation failure.
+    // Carries a 3 s countdown OK button; auto-closes at N=0; early-dismiss via OK (action 671).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1a
+    private Control? _errorPanel;
+    private Label? _errorMsgLabel;
+    private TextureButton? _errorOkBtnNode;
+    private Label? _errorOkBtnLabel;
+    private double _errorBudgetMs;          // remaining countdown budget in ms (starts 3000)
+    private ulong _errorLastDecrementMs;    // last wall-clock ms at which N was decremented
+    private int _errorN;                    // displayed countdown seconds
 
     // Credential textboxes — 1:1 atlas-blit MaskedTextField (no Godot LineEdit chrome).
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 / §0.11
@@ -210,6 +222,7 @@ public sealed partial class LoginWindow : Control
         BuildPinKeypadRoot(); // PIN keypad host (hidden until 31/32) — above the form, below modals
         BuildPinYesNoPanel(); // PIN yes/no prompt (hidden per spec)
         BuildQuitModals(); // confirm modals (hidden per spec)
+        BuildErrorPanel(); // validation-error countdown modal (hidden per spec §2.1a)
 
         // Enter state 1 — intro one-shot. spec §2.2.
         RunState(1);
@@ -220,6 +233,27 @@ public sealed partial class LoginWindow : Control
     public override void _Process(double delta)
     {
         if (_flowSubState == 2) TickCurtain();
+        if (_errorPanel?.Visible == true) TickErrorCountdown();
+    }
+
+    // Per-frame tick for the validation-error countdown button.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1a
+    //   "Tick source = per-frame ms wall-clock delta, throttled ≥1000 ms per decrement"
+    private void TickErrorCountdown()
+    {
+        ulong nowMs = global::Godot.Time.GetTicksMsec();
+        // spec §2.1a: "throttled to at most one decrement per 1000 ms"
+        if (nowMs >= _errorLastDecrementMs + 1000u && _errorBudgetMs > 0)
+        {
+            _errorBudgetMs -= 1000.0;
+            _errorN = (int)(_errorBudgetMs / 1000.0);
+            _errorLastDecrementMs = nowMs;
+            RebuildErrorOkCaption();
+        }
+
+        // Auto-close when budget expires. spec §2.1a "auto-close: hide at N=0".
+        if (_errorBudgetMs <= 0 && _errorPanel?.Visible == true)
+            HideErrorPanel();
     }
 
     public override void _Notification(int what)
@@ -280,13 +314,14 @@ public sealed partial class LoginWindow : Control
         if (_backgroundLayer is not null)
             _backgroundLayer.Visible = state >= 2;
 
-        // Curtain panels: the binary models them as always-present Y-animated host panels that slide
-        // off-canvas (their visible flag stays set). Port hides them after state 2 which is visually
-        // equivalent (they are off-canvas). No partial-occlusion regression.
-        // spec: §2.2 bands "Curtains | not a hideable widget | always-present Y-animated panels".
-        bool curtainOn = state <= 2;
-        if (_curtainTop is not null) _curtainTop.Visible = curtainOn;
-        if (_curtainBot is not null) _curtainBot.Visible = curtainOn;
+        // Curtain panels are ALWAYS-PRESENT Y-animated panels — they carry the frame + banner baked art
+        // (top panel: 디오 logo / URL / dragon / rings + upper & side stone, rests Y=-222; bottom panel:
+        // lower & side stone + the credential form host, rests Y=+548) and are NEVER hidden. Hiding them
+        // after the raise (the old `state <= 2`) erased the whole frame/banner — the end-of-curtain bug.
+        // spec: frontend_layout_tables.md §2.2 "Curtains | not a hideable widget" / §2.3 (re-confirmed
+        // from the binary 2026-06-19).
+        if (_curtainTop is not null) _curtainTop.Visible = true;
+        if (_curtainBot is not null) _curtainBot.Visible = true;
 
         // Form group (host strip: server-submit[102], help/quit[105], confirm face-plate, help deco):
         // ALWAYS PRESENT from state 2. Distinct from the credential group.
@@ -352,7 +387,10 @@ public sealed partial class LoginWindow : Control
                 break;
 
             case 4:
-                // Form idle — waits for user action (Enter/OK). spec §2.2 "4 form idle; Enter → 5".
+                // Settle step (auto): the curtain-settle auto-advances 3→4→5→6 to the resting login
+                // (rest = 6, credential form visible). No user-input wait here. spec: frontend_layout_tables.md
+                // §2.2 CORRECTION 2026-06-19 (the real client shows the credential form at end-of-curtain).
+                RunState(5);
                 break;
 
             case 5:
@@ -408,8 +446,15 @@ public sealed partial class LoginWindow : Control
 
             case 38:
             case 39:
-            case 40:
                 GD.Print($"[LoginWindow] State {state}: endpoint/handoff. spec: §2.2.");
+                break;
+
+            case 40:
+                // Hand-off: raise the "connecting" popup (Confirm-A, msg 4023) immediately before
+                // the join packet build. spec: frontend_layout_tables.md §2.1 / §2.2 / §4
+                //   "Connecting popup … raised at sub-state 40".
+                GD.Print("[LoginWindow] State 40: raise connecting popup (Confirm-A). spec: §2.1/§4.");
+                ShowConnectingPopup();
                 break;
 
             case 41:
@@ -1062,6 +1107,169 @@ public sealed partial class LoginWindow : Control
         if (_quitModal2 is not null) _quitModal2.Visible = false;
     }
 
+    // Raise Confirm-A (msg 4023) as the "connecting" popup at sub-state 40.
+    // Confirm-A is the same panel as the server-list re-fetch popup; "the connecting popup"
+    // and "Confirm-A" are the same object.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §4
+    //   "Confirm-A is the connecting popup … raised at sub-state 40".
+    private void ShowConnectingPopup()
+    {
+        if (_quitModal is not null) _quitModal.Visible = true;
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation-error message box (§2.1a)
+    // Geometry: A3 (InventWindow.dds) panel dst(342,289,340,190) src(318,647).
+    // Centered message label dst panel+(0,89) 340×20 (action 670).
+    // OK button: dst panel+(125,151) = abs (467,440) 90×25, A3 N(417,943)/H(507,943), action 671.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1a
+    // -------------------------------------------------------------------------
+
+    private const int ErrorMsgAction = 670;
+    private const int ErrorOkAction = 671;
+
+    // Panel-relative coords for the message label (center-aligned).
+    // spec: §2.1a "centered message label: dst panel+(0,89) 340×20"
+    private const int ErrorMsgRelX = 0;
+    private const int ErrorMsgRelY = 89;
+    private const int ErrorMsgW = 340;
+    private const int ErrorMsgH = 20;
+
+    // OK button panel-relative and absolute coords.
+    // spec: §2.1a "dst panel+(125,151) = abs(467,440) 90×25; A3 N(417,943)/H(507,943)"
+    private const int ErrorOkRelX = 125;
+    private const int ErrorOkRelY = 151;
+    private const int ErrorOkW = 90;
+    private const int ErrorOkH = 25;
+    private const int ErrorOkNormSrcX = 417; // spec §2.1a N(417,943)
+    private const int ErrorOkNormSrcY = 943;
+    private const int ErrorOkHoverSrcX = 507; // spec §2.1a H(507,943)
+    private const int ErrorOkHoverSrcY = 943;
+
+    // Caption: msg 101 ("확인") then " - N". spec §2.1a "caption = '<msg 101> - <N>'".
+    private const uint MsgOkCaption = 101; // spec §2.1a
+
+    // Start budget: 3000 ms → N=3. spec §2.1a "Start N=3. The Show call passes a 3000 ms budget."
+    private const double ErrorBudgetStartMs = 3000.0;
+
+    private void BuildErrorPanel()
+    {
+        // Panel chrome: A3 (InventWindow.dds) dst(342,289,340,190) src(318,647). spec §2.1a.
+        // Same geometry as the other login modals (Exit / Confirm-A/B). init hidden.
+        var panel = new Control
+        {
+            Name = "ErrorPanel",
+            Position = new Vector2(LoginLayout.ModalChromeX, LoginLayout.ModalChromeY),
+            Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
+            Visible = false, // init hidden; shown by ShowErrorPanel only. spec §2.1a.
+            MouseFilter = MouseFilterEnum.Pass,
+        };
+
+        // Atlas chrome frame (same A3 src rect as other modals). spec §2.1a.
+        TextureRect? chrome = HudWidgetFactory.MakeAtlasRect(_atlas,
+            LoginLayout.AtlasInventWindow,
+            0, 0, LoginLayout.ModalChromeW, LoginLayout.ModalChromeH,
+            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY);
+        if (chrome is not null) panel.AddChild(chrome);
+
+        // Error message label (action 670): center-aligned. spec §2.1a.
+        var msgLabel = new Label
+        {
+            Name = "ErrorMsgLabel",
+            Position = new Vector2(ErrorMsgRelX, ErrorMsgRelY),
+            Size = new Vector2(ErrorMsgW, ErrorMsgH),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        msgLabel.AddThemeColorOverride("font_color", Colors.White);
+        panel.AddChild(msgLabel);
+        _errorMsgLabel = msgLabel;
+
+        // OK (countdown) button: A3 dst panel+(125,151) 90×25 N(417,943) H(507,943). spec §2.1a.
+        Texture2D? okNorm = _atlas.SliceByPath(LoginLayout.AtlasInventWindow,
+            ErrorOkNormSrcX, ErrorOkNormSrcY, ErrorOkW, ErrorOkH);
+        Texture2D? okHover = _atlas.SliceByPath(LoginLayout.AtlasInventWindow,
+            ErrorOkHoverSrcX, ErrorOkHoverSrcY, ErrorOkW, ErrorOkH);
+
+        var okBtn = new TextureButton
+        {
+            Name = "ErrorOkButton",
+            Position = new Vector2(ErrorOkRelX, ErrorOkRelY),
+            Size = new Vector2(ErrorOkW, ErrorOkH),
+            CustomMinimumSize = new Vector2(ErrorOkW, ErrorOkH),
+            IgnoreTextureSize = true,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = okNorm,
+            TextureHover = okHover,
+            TexturePressed = okNorm, // PRESSED = NORMAL per §0.12 convention
+            TextureDisabled = okNorm,
+        };
+        okBtn.Pressed += OnErrorOkPressed;
+        panel.AddChild(okBtn);
+        _errorOkBtnNode = okBtn;
+
+        // Caption label overlaid on the button. spec §2.1a "caption = '<msg 101> - <N>'".
+        var okLabel = new Label
+        {
+            Name = "ErrorOkBtnLabel",
+            Position = new Vector2(ErrorOkRelX, ErrorOkRelY),
+            Size = new Vector2(ErrorOkW, ErrorOkH),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            AutowrapMode = TextServer.AutowrapMode.Off,
+            MouseFilter = MouseFilterEnum.Ignore,
+        };
+        okLabel.AddThemeColorOverride("font_color", Colors.White);
+        panel.AddChild(okLabel);
+        _errorOkBtnLabel = okLabel;
+
+        AddChild(panel);
+        _errorPanel = panel;
+    }
+
+    // Show the error panel with the given msg.xdb id and start the 3 s countdown.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1a
+    private void ShowErrorPanel(int msgId)
+    {
+        if (_errorPanel is null) return;
+
+        // Set error message text. spec §2.1a "text from msg.xdb, action 670".
+        if (_errorMsgLabel is not null)
+            _errorMsgLabel.Text = _text.GetCaption(msgId, "");
+
+        // Start countdown: N=3, budget=3000 ms. spec §2.1a "Start N=3; 3000 ms budget".
+        _errorN = 3;
+        _errorBudgetMs = ErrorBudgetStartMs;
+        _errorLastDecrementMs = global::Godot.Time.GetTicksMsec();
+        RebuildErrorOkCaption();
+
+        _errorPanel.Visible = true;
+        GD.Print($"[LoginWindow] ErrorPanel shown (msgId={msgId}, N=3). spec: §2.1a.");
+    }
+
+    // Rebuild the OK button caption: "<msg 101> - <N>". spec §2.1a.
+    private void RebuildErrorOkCaption()
+    {
+        if (_errorOkBtnLabel is null) return;
+        string okText = _text.GetCaption((int)MsgOkCaption, "확인"); // spec §2.1a "msg 101 = 확인"
+        _errorOkBtnLabel.Text = $"{okText} - {_errorN}";
+    }
+
+    // Hide the error panel (early dismiss via OK, or auto-close at N=0). spec §2.1a.
+    private void HideErrorPanel()
+    {
+        if (_errorPanel is not null) _errorPanel.Visible = false;
+        GD.Print("[LoginWindow] ErrorPanel hidden. spec: §2.1a.");
+    }
+
+    private void OnErrorOkPressed()
+    {
+        // Early dismiss on OK click (action 671). spec §2.1a "clicking OK (671) hides immediately".
+        HideErrorPanel();
+    }
+
     // -------------------------------------------------------------------------
     // Action handler
     // spec: §2.2 "OnEvent action map"
@@ -1081,9 +1289,8 @@ public sealed partial class LoginWindow : Control
                 break;
 
             case LoginLayout.ActionOk: // 103 — OK / Login button
-                // spec: §2.2 "103 OK/login … requires flowSubState==6, runs the game.ver gate → 29".
+                // spec: §2.2 "103 OK/login requires flowSubState==6, runs the game.ver gate → 29".
                 if (_flowSubState == 6) RunState(29);
-                else if (_flowSubState == 4) RunState(5);
                 break;
 
             case LoginLayout.ActionConfirm: // 102 — open quit-confirm ExitPanel (NOT server-list).
@@ -1132,9 +1339,8 @@ public sealed partial class LoginWindow : Control
 
     private void OnEnterKey()
     {
-        // spec: §2.2 "ENTER (10) → if state 6 run OK path, if state 4 → 5".
+        // spec: §2.2 "ENTER (10) at the rest (6) runs the OK path → 29" (state 4 is a transient auto-settle step).
         if (_flowSubState == 6) RunState(29);
-        else if (_flowSubState == 4) RunState(5);
     }
 
     // -------------------------------------------------------------------------
@@ -1147,23 +1353,23 @@ public sealed partial class LoginWindow : Control
         string account = _idBox?.Text ?? "";
         string password = _pwBox?.Text ?? "";
 
-        // ID length ≥ 4. spec §2.4.
+        // ID length ≥ 4 (else msg 4025). spec §2.4 / §2.1a.
+        // spec: frontend_layout_tables.md §2.1a "ID empty OR ID length<4 → msg 4025"
         if (account.Length < LoginLayout.MinIdLength)
         {
-            // Fallback = empty — real client only shows CP949 from msg.xdb.
-            string msg = _text.GetCaption((int)LoginLayout.MsgErrShortId, "");
-            GD.PrintErr($"[LoginWindow] ID too short. msg {LoginLayout.MsgErrShortId}: '{msg}'");
-            RunState(6);
+            GD.PrintErr($"[LoginWindow] ID too short (len={account.Length}). Raising ErrorPanel msg 4025. spec: §2.1a/§2.4.");
+            RunState(6); // reset to idle before showing error. spec §2.1a "first reset to sub-state 6"
+            ShowErrorPanel((int)LoginLayout.MsgErrShortId); // spec §2.1a
             return;
         }
 
-        // PW length ≠ 0. spec §2.4.
+        // PW length ≠ 0 (else msg 4026). spec §2.4 / §2.1a.
+        // spec: frontend_layout_tables.md §2.1a "PW empty → msg 4026"
         if (password.Length < LoginLayout.MinPwLength)
         {
-            // Fallback = empty — real client only shows CP949 from msg.xdb.
-            string msg = _text.GetCaption((int)LoginLayout.MsgErrEmptyPassword, "");
-            GD.PrintErr($"[LoginWindow] PW empty. msg {LoginLayout.MsgErrEmptyPassword}: '{msg}'");
-            RunState(6);
+            GD.PrintErr($"[LoginWindow] PW empty. Raising ErrorPanel msg 4026. spec: §2.1a/§2.4.");
+            RunState(6); // reset to idle before showing error. spec §2.1a
+            ShowErrorPanel((int)LoginLayout.MsgErrEmptyPassword); // spec §2.1a
             return;
         }
 
@@ -1199,6 +1405,23 @@ public sealed partial class LoginWindow : Control
         _serverSelect.ServerSelected += OnServerSelected;
         _serverSelect.Visible = true; // one-time enable; _serverListRoot gates show/hide. spec §2.1.
         _serverListRoot.AddChild(_serverSelect);
+    }
+
+    /// <summary>
+    /// Raises the validation-error message box with the server-list fetch error message.
+    /// Called by the fetch-result path at sub-state 36 when the server list is empty (msg 4027)
+    /// or the fetch failed (msg 4028). First resets to sub-state 6 per spec §2.2 (state 36 → 37,
+    /// then the error panel rides over the idle credential form).
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §2.1a / §2.2 state 36
+    /// </summary>
+    public void RaiseServerListError(bool fetchFailed)
+    {
+        // spec §2.1a: "no servers returned → msg 4027; fetch result −1 → msg 4028".
+        int msgId = fetchFailed
+            ? (int)LoginLayout.MsgErrConnectFail   // 4028 — fetch error (−1)
+            : (int)LoginLayout.MsgErrNoServers;     // 4027 — zero records returned
+        RunState(37); // advance to the "list shown" idle (credential form shows). spec §2.2.
+        ShowErrorPanel(msgId);
     }
 
     private void OnServerSelected(int serverId)
