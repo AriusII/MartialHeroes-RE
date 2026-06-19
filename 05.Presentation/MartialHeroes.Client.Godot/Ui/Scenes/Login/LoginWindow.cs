@@ -154,12 +154,6 @@ public sealed partial class LoginWindow : Control
     private Control? _serverListStrip;
     private Control? _serverListStripDeco;
 
-    // Server-list submit plate (the decoration banner on the form strip: A1 dst(265,0,494,113) src(0,469)).
-    // At curtain offset > 200 this plate is snapped to panel-local (494,469).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §2.3 "at offset>200 snap the server-list submit plate to (494,469)"
-    private TextureRect? _serverSubmitPlate;
-    private bool _submitPlateSnapped;
-
     // Re-fetch confirm popups (msg 4023/4024), built init-hidden exactly as the IDA login build
     // creates them. Their OK buttons fire action 113/114 (→ hide + restart server-list fetch). The
     // SHOW trigger lives in the server-list fetch-result path (network layer, not yet ported), so
@@ -178,9 +172,9 @@ public sealed partial class LoginWindow : Control
     private Label? _errorMsgLabel;
     private TextureButton? _errorOkBtnNode;
     private Label? _errorOkBtnLabel;
-    private double _errorBudgetMs;          // remaining countdown budget in ms (starts 3000)
-    private ulong _errorLastDecrementMs;    // last wall-clock ms at which N was decremented
-    private int _errorN;                    // displayed countdown seconds
+    private double _errorBudgetMs; // remaining countdown budget in ms (starts 3000)
+    private ulong _errorLastDecrementMs; // last wall-clock ms at which N was decremented
+    private int _errorN; // displayed countdown seconds
 
     // Credential textboxes — 1:1 atlas-blit MaskedTextField (no Godot LineEdit chrome).
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 / §0.11
@@ -382,10 +376,6 @@ public sealed partial class LoginWindow : Control
                 // spec: §2.2 "1 intro one-shot: play curtain SFX 861010105 (cat 2); reset curtain offset 0".
                 _curtainAcc = 0f;
                 _curtainDone = false;
-                _submitPlateSnapped = false; // re-arm the offset>200 snap. spec: frontend_layout_tables.md §2.3.
-                // Reset submit plate to its initial panel-local position (265,0). spec §2.1 "Server-list plate | dst(265,0)".
-                if (_serverSubmitPlate is not null)
-                    _serverSubmitPlate.Position = new Vector2(LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y);
                 Audio?.PlayLoginCurtainSfx();
                 GD.Print("[LoginWindow] State 1: SFX 861010105. spec: §2.2/§7.");
                 RunState(2);
@@ -537,22 +527,6 @@ public sealed partial class LoginWindow : Control
         if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formRideY);
         if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formRideY);
 
-        // At offset>200 snap the server-list submit plate to canvas-absolute (494,469).
-        // The plate is a child of _formPanel (which is at canvas Y = 326+offset), so we compute
-        // the panel-local position that yields canvas (494,469) at this moment.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §2.3 "at offset>200 snap the server-list submit plate to (494,469)"
-        if (!_submitPlateSnapped && _curtainAcc > 200f)
-        {
-            _submitPlateSnapped = true;
-            if (_serverSubmitPlate is not null)
-            {
-                float panelY = CurtainBotBaseY + _curtainAcc; // current canvas Y of formPanel
-                float localY = 469f - panelY; // panel-local Y for canvas target 469
-                _serverSubmitPlate.Position = new Vector2(494f, localY); // spec: frontend_layout_tables.md §2.3
-            }
-            GD.Print("[LoginWindow] Curtain offset>200: submit plate snapped to canvas (494,469). spec: §2.3.");
-        }
-
         if (_curtainAcc >= CurtainCompleteThresh)
         {
             // spec: §2.2 "at offset>222 → 3". CODE-CONFIRMED.
@@ -574,19 +548,6 @@ public sealed partial class LoginWindow : Control
         float formOpenY = CurtainBotBaseY + CurtainCompleteThresh; // 548 spec: frontend_layout_tables.md §2.3
         if (_formPanel is not null) _formPanel.Position = new Vector2(0f, formOpenY);
         if (_credPanel is not null) _credPanel.Position = new Vector2(0f, formOpenY);
-
-        // Instant snap also triggers the offset>200 submit-plate reposition. spec §2.3.
-        if (!_submitPlateSnapped)
-        {
-            _submitPlateSnapped = true;
-            if (_serverSubmitPlate is not null)
-            {
-                // Instant snap: formPanel is at canvas Y = CurtainBotBaseY + CurtainCompleteThresh = 548.
-                float panelY = CurtainBotBaseY + CurtainCompleteThresh; // 548
-                float localY = 469f - panelY; // panel-local Y for canvas target 469: 469-548 = -79
-                _serverSubmitPlate.Position = new Vector2(494f, localY); // spec: frontend_layout_tables.md §2.3
-            }
-        }
 
         _curtainDone = true;
         if (_flowSubState < 3) RunState(3);
@@ -754,12 +715,11 @@ public sealed partial class LoginWindow : Control
         _formPanel = formPanel;
 
         // Confirm face-plate: A1 dst(265,0,494,113) src(0,469). spec §2.1 "Server-list plate".
-        // Captured for the offset>200 curtain snap to (494,469). spec §2.3.
-        _serverSubmitPlate = AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
+        // Plain decoration blit — stays at its faithful (265,0) on the form panel.
+        AddRect(formPanel, LoginLayout.AtlasLoginSlice1,
             LoginLayout.ConfirmFacePlate.X, LoginLayout.ConfirmFacePlate.Y,
             LoginLayout.ConfirmFacePlate.W, LoginLayout.ConfirmFacePlate.H,
             LoginLayout.ConfirmFacePlate.SrcX, LoginLayout.ConfirmFacePlate.SrcY);
-        _submitPlateSnapped = false; // reset on every build. spec §2.3.
 
         // Quit-confirm button — action 102. A1 N(154,398) H(378,398). spec §2.1.
         // Rides with the form panel to its open resting canvas position. spec §2.3.
@@ -853,8 +813,9 @@ public sealed partial class LoginWindow : Control
             LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY);
 
         // ID textbox — MaskedTextField: 1:1 atlas blit + slot-0 text; mask bit CLEAR.
-        // dest (390,32,102,13); src A1 (615,404,102,13). action 109, maxlen 6.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "ID textbox | maxlen 6; unmasked"
+        // dest (390,32,102,13); src A1 (615,404,102,13). action 109, maxlen 19.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "ID textbox | unmasked"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.6 "account < 20 → max typed chars = 19"
         // spec: Docs/RE/specs/frontend_layout_tables.md §0.10 "every front-end widget is a 1:1 atlas blit"
         _idBox = new MaskedTextField(
             _atlas,
@@ -863,7 +824,7 @@ public sealed partial class LoginWindow : Control
             LoginLayout.AccountBox.W, LoginLayout.AccountBox.H, // field rect (102×13)
             LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY, // A1 src (615,404)
             masked: false, // spec: frontend_layout_tables.md §2.7 "mask bit clear → clear text"
-            maxLen: LoginLayout.IdMaxLength); // spec: frontend_layout_tables.md §2.1 "maxlen 6"
+            maxLen: LoginLayout.IdMaxLength); // spec: frontend_layout_tables.md §2.6 "account < 20 → 19"
         _idBox.Name = "IdTextbox";
         _idBox.TextSubmitted += OnEnterKey;
         credPanel.AddChild(_idBox);
@@ -1121,7 +1082,7 @@ public sealed partial class LoginWindow : Control
             Name = "PromptLabel",
             Text = prompt,
             Position = new Vector2(LoginLayout.ConfirmLabelX, LoginLayout.ConfirmLabelY), // spec §2.1 (10,100)
-            Size = new Vector2(LoginLayout.ConfirmLabelW, LoginLayout.ConfirmLabelH),     // spec §2.1 (330,20)
+            Size = new Vector2(LoginLayout.ConfirmLabelW, LoginLayout.ConfirmLabelH), // spec §2.1 (330,20)
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             AutowrapMode = TextServer.AutowrapMode.Off,
@@ -1403,7 +1364,8 @@ public sealed partial class LoginWindow : Control
         // spec: frontend_layout_tables.md §2.1a "ID empty OR ID length<4 → msg 4025"
         if (account.Length < LoginLayout.MinIdLength)
         {
-            GD.PrintErr($"[LoginWindow] ID too short (len={account.Length}). Raising ErrorPanel msg 4025. spec: §2.1a/§2.4.");
+            GD.PrintErr(
+                $"[LoginWindow] ID too short (len={account.Length}). Raising ErrorPanel msg 4025. spec: §2.1a/§2.4.");
             RunState(6); // reset to idle before showing error. spec §2.1a "first reset to sub-state 6"
             ShowErrorPanel((int)LoginLayout.MsgErrShortId); // spec §2.1a
             return;
@@ -1464,8 +1426,8 @@ public sealed partial class LoginWindow : Control
     {
         // spec §2.1a: "no servers returned → msg 4027; fetch result −1 → msg 4028".
         int msgId = fetchFailed
-            ? (int)LoginLayout.MsgErrConnectFail   // 4028 — fetch error (−1)
-            : (int)LoginLayout.MsgErrNoServers;     // 4027 — zero records returned
+            ? (int)LoginLayout.MsgErrConnectFail // 4028 — fetch error (−1)
+            : (int)LoginLayout.MsgErrNoServers; // 4027 — zero records returned
         RunState(37); // advance to the "list shown" idle (credential form shows). spec §2.2.
         ShowErrorPanel(msgId);
     }

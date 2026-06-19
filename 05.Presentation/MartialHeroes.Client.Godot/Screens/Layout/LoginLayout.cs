@@ -152,10 +152,10 @@ public static class LoginLayout
 
     // Confirm-A/B label position: panel-local (10,100,330,20) per §2.1.
     // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 "Confirm-A label (msg 4023) | label center | 10 | 100 | 330 | 20"
-    public const int ConfirmLabelX = 10;  // spec: frontend_layout_tables.md §2.1
+    public const int ConfirmLabelX = 10; // spec: frontend_layout_tables.md §2.1
     public const int ConfirmLabelY = 100; // spec: frontend_layout_tables.md §2.1
     public const int ConfirmLabelW = 330; // spec: frontend_layout_tables.md §2.1
-    public const int ConfirmLabelH = 20;  // spec: frontend_layout_tables.md §2.1
+    public const int ConfirmLabelH = 20; // spec: frontend_layout_tables.md §2.1
 
     // Dialog #1 OK button — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
     // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
@@ -225,16 +225,16 @@ public static class LoginLayout
     public const int EditFieldFrameSrcX = 615; // shared source U in atlas A. spec §11.2e. CODE-CONFIRMED.
     public const int EditFieldFrameSrcY = 404; // shared source V in atlas A. spec §11.2e. CODE-CONFIRMED.
 
-    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 6. action 109.
+    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 19. action 109.
     // NOTE: SrcX/SrcY on this WidgetRect are intentionally set to the shared edit-field frame source,
     // NOT to the dest origin; and the atlas is EditFieldFrameAtlas (A), not AtlasLoginWindow (B).
     // spec §11.2e "ID input field atlas correction". CODE-CONFIRMED.
-    // NOTE: §1.3 table has TWO columns: "IME composition slot = 16" and "Max length = 6". The cap is 6.
+    // NOTE: §2.6 "account < 20" — the binary caps at 19 typed chars at the input-handler hand-off.
     public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
 
     public const int
         IdMaxLength =
-            6; // spec §1.3 "Max length = 6" (the 16 is the IME composition slot, not the cap). CODE-CONFIRMED.
+            19; // spec §2.6 "account < 20" — the input handler enforces account length < 20, so max typed chars = 19. CODE-CONFIRMED.
 
     // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 17, masked. action 110.
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
@@ -454,5 +454,4 @@ public static class LoginLayout
 
     public const int MinIdLength = 4; // ID length < 4 → msg 4025. spec §1.4. CODE-CONFIRMED.
     public const int MinPwLength = 1; // PW length < 1 → msg 4026. spec §1.4. CODE-CONFIRMED.
-
 }
