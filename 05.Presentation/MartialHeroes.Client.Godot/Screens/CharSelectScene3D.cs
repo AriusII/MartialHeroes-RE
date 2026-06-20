@@ -207,37 +207,6 @@ public sealed partial class CharSelectScene3D : Node3D
     private static readonly Vector3 XeffAnchorGodot = ToGodotVec(508.483f, 69.887f, -9758.569f);
 
     // =========================================================================
-    // Water layer (§3.7.3 / §3.6.5) — the cell's BLUE terrain water sheet (.fx3/.fx5), the bright blue
-    // surface behind the row. This is the cell water LAYER (a scrolling flat plane), NOT the xeff
-    // waterfall spray (white sprites, owned by the xeff). spec: §3.6.5 (water = cell water layer, "blue
-    // surface behind the row", gated by the water option) / §3.7.3 (FX3/FX5, textures _water_new01/03/04).
-    // =========================================================================
-
-    // The cell footprint = a 1024-unit square at cell world origin (0, −10240) (§3.7.1 cell addressing:
-    // origin (cx·1024, cz·1024) = (0, −10240); X ∈ [0,1024], Z ∈ [−10240,−9216]). The water sheet spans
-    // the cell footprint. spec: §3.7.1 (cell origin (0,−10240), 1024 units/side). CODE-CONFIRMED.
-    private const float CellOriginLegacyX = 0.0f; // spec: §3.7.1 cell origin X
-    private const float CellOriginLegacyZ = -10240.0f; // spec: §3.7.1 cell origin Z
-    private const float CellSizeUnits = 1024.0f; // spec: §3.7.1 1024 units/side
-
-    // Water-surface Y (HORIZONTAL plane). The exact water level is a per-cell .fx3/.fx5 field (parse
-    // TODO — the .fx3/.fx5 binary format is terrain-side and not yet decoded). The platform/row sits at
-    // Y≈70 (§3.6.5); the cell water reads as a flat blue sheet at/below the platform floor, so the
-    // horizontal plane is placed just below the platform. PLAUSIBLE level (not asset-exact — .fx3/.fx5
-    // water level not yet harvested). spec: §3.6.5 (cell water layer) / §3.7.3 (FX3/FX5 parse TODO).
-    private const float WaterSurfaceLegacyY = 68.0f; // PLAUSIBLE — just below the Y≈70 platform floor
-
-    // The blue water texture (§3.7.3: rel "terrain/_water_new01"); resolves to data/map000/texture/
-    // terrain/_water_new01.dds (DXT-compressed, animated-texture flag). spec: §3.7.3 CODE-CONFIRMED present.
-    private const string WaterTextureRel = "terrain/_water_new01";
-    private const string WaterTextureDds = "data/map000/texture/terrain/_water_new01.dds";
-
-    // UV-scroll speed (the §3.7.3 animated-texture flag → scrolling-UV blue sheet). The exact scroll
-    // rate is the .fx3/.fx5 animated-texture field (parse TODO); a slow drift reproduces the moving-water
-    // read. spec: §3.7.3 (animated-texture flag) / §3.6.5 (scrolling water illusion) — rate is parse TODO.
-    private const float WaterUvScrollPerSecond = 0.03f; // spec: §3.7 water-layer (parse TODO)
-
-    // =========================================================================
     // Preview-character assets (§3.7.5) — the four starter classes (IdA=1).
     // =========================================================================
 
@@ -245,10 +214,19 @@ public sealed partial class CharSelectScene3D : Node3D
     // ClassAppearanceResolver so the select and create screens show the IDENTICAL body per class.
     // Each mesh carries a DISTINCT id_b that drives its OWN rig + idle clip (resolved per slot in
     // TryBuildSlotActor). The four §3.7.5 starter meshes (all default appearance IdA=1;
-    // CONFIRMED-present in the VFS) live in ClassAppearanceResolver. The skinClassId→mesh binding is
-    // the spec-grounded STOPGAP for the full skin.txt appearance chain (skinning.md §3.5.2/§3.5.3);
-    // an id outside 1..4 yields an empty candidate list → logged + skipped (no synthetic fallback).
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / Docs/RE/specs/skinning.md §3.5.2/§3.5.3.
+    // CONFIRMED-present in the VFS) live in ClassAppearanceResolver.
+    //
+    // §3.3.7 OVERLAY BUILD — BLOCKED ON HOST-API PLUMBING (CYCLE 6b D6). The full per-part appearance
+    // build (equipment overlays {3,4,6,2,11} + non-starter slot-14 body + the rigid weapon) is RE-
+    // recovered and the resolver math is IMPLEMENTED in ClassAppearanceResolver, but it is driven by the
+    // server 880-byte spawn descriptor (equip table +0x58, appearance bytes +0x2C/+0x34, slot-14 +0x22).
+    // CharSelectScene3D.SlotDescriptors only carries (bool IsOccupied, uint SkinClassId) — the raw
+    // descriptor is NOT plumbed in by the host (CharSelectWindow, a DIFFERENT lane). Widening that tuple
+    // is a host-API change owned by the follow-up wave. So this lineup KEEPS the §3.7.5 starter-mesh
+    // fallback (class → base .skn at variant 0); an id outside 1..4 yields an empty candidate list →
+    // logged + skipped (no synthetic fallback, no fabricated equip ids).
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter fallback) / §3.3.7 (overlay build — host-API
+    //       plumbing pending) / Docs/RE/specs/skinning.md §3.5.2.
     private static string[] SknCandidatesForClass(uint skinClassId)
         => ClassAppearanceResolver.SknCandidatesForClass((int)skinClassId);
 
@@ -267,10 +245,6 @@ public sealed partial class CharSelectScene3D : Node3D
     // to Initialise are retained so a later refresh can rebuild the actor row from the same VFS.
     private bool _initialised;
     private RealClientAssets? _assets;
-
-    // The blue water sheet's material — its UV offset is scrolled in _Process (the §3.7.3 animated flag).
-    private StandardMaterial3D? _waterMaterial;
-    private float _waterScrollPhase;
 
     // =========================================================================
     // Public host API — DO NOT change these signatures (CharacterSelectScreen calls them).
@@ -304,7 +278,8 @@ public sealed partial class CharSelectScene3D : Node3D
                 // later refresh — only the character actors rebuild). spec: §3.7.1 (single backdrop cell).
                 BuildBackdropTerrain(assets);
                 BuildBackdropProps(assets);
-                BuildWaterLayer(assets);
+                // Water plane removed — environment.md §4 RESOLVED-NEGATIVE: the original has no water
+                // renderer; char-select is a stone temple. spec: environment.md §4.
                 BuildAmbientEffect(assets);
             }
             else
@@ -657,115 +632,9 @@ public sealed partial class CharSelectScene3D : Node3D
         XeffSceneEffect.LoadAndAttach(this, anchorGodotPos: XeffAnchorGodot, assets: assets);
     }
 
-    // =========================================================================
-    // Water layer — the cell's BLUE water sheet (.fx3/.fx5), a flat scrolling-UV plane.
-    // =========================================================================
-
-    private void BuildWaterLayer(RealClientAssets assets)
-    {
-        // The blue water surface behind the row is the cell's terrain WATER LAYER (.fx3/.fx5), rendered
-        // by the terrain system, NOT a spawned xeff (the xeff carries the WHITE waterfall spray sprites;
-        // this is the blue sheet). spec: §3.6.5 (water = cell water layer, "blue surface behind the row")
-        // / §3.7.3 (FX3/FX5, textures _water_new01/03/04, animated). The .fx3/.fx5 binary format is
-        // terrain-side and not yet decoded, so the exact water plane extent / level / scroll come from the
-        // recovered cell footprint + a parse-TODO placeholder. spec: §3.7 water-layer (parse TODO).
-        try
-        {
-            // Resolve the blue water texture. Prefer the bgtexture chain (rel "terrain/_water_new01");
-            // fall back to the direct VFS path. spec: §3.7.3 (water rel paths under data/map000/texture).
-            ImageTexture? waterTex = null;
-            global::MartialHeroes.Assets.Mapping.BgTextureCatalog? bgPool = TryLoadBgPool(assets);
-            string ddsPath = bgPool is not null
-                ? $"data/map000/texture/{WaterTextureRel}.dds"
-                : WaterTextureDds;
-            if (assets.Contains(ddsPath))
-                waterTex = assets.LoadTexture(ddsPath);
-            else if (assets.Contains(WaterTextureDds))
-                waterTex = assets.LoadTexture(WaterTextureDds);
-
-            if (waterTex is null)
-            {
-                GD.Print(
-                    $"[CharSelectScene3D] Water texture absent ({WaterTextureDds}) — water sheet skipped. spec: §3.7.3.");
-                return;
-            }
-
-            // HORIZONTAL water plane = the cell's terrain WATER LAYER (§3.6.5: "the cell's own terrain
-            // water layer (.fx3/.fx5; textures _water_new01/03/04), rendered by the terrain system …
-            // not a spawned .xeff"). The VERTICAL waterfall spray is the XeffSceneEffect (white additive
-            // sprites), owned by BuildAmbientEffect — NOT this layer. This layer is the flat blue surface
-            // over the cell footprint at the cell water level. A prior pass modelled this as a VERTICAL
-            // "cascade curtain", which is the xeff's job, not the cell water layer's — corrected to a
-            // horizontal flat plane. spec: §3.6.5 (cell water layer = flat blue surface) / §3.7.3.
-            //
-            // Extent = the cell footprint (1024-unit square at cell origin (0, −10240); §3.7.1). The
-            // plane lies in the XZ plane (default PlaneMesh orientation = Y-up) at the water-surface Y.
-            var plane = new PlaneMesh
-            {
-                Size = new Vector2(CellSizeUnits, CellSizeUnits), // cell footprint 1024×1024 (§3.7.1)
-                Orientation = PlaneMesh.OrientationEnum.Y, // horizontal (face up) — the flat water surface
-            };
-
-            // Flat blue water material with a tiled, scrolling UV. The .fx3/.fx5 animated flag (§3.7.3) →
-            // scrolling-UV; the bright blue read = the _water_new texture under a blue albedo tint,
-            // alpha-blended over the cell floor. The blue/alpha tint is PLAUSIBLE (the exact .fx3/.fx5
-            // diffuse/alpha is parse-TODO). spec: §3.7.3 (animated) / §3.6.5 (blue cell water surface).
-            _waterMaterial = new StandardMaterial3D
-            {
-                AlbedoTexture = waterTex,
-                AlbedoColor = new Color(0.30f, 0.60f, 1.0f, 0.75f), // PLAUSIBLE blue tint (parse-TODO)
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled, // visible from above and below
-                // Unshaded so the white ambient floor / near-zero directional do not darken the water —
-                // the legacy water layer is a flat textured sheet, not a lit PBR surface. spec: §3.6.1.
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                // Tile the 256² water texture ~8× across the 1024-unit plane.
-                Uv1Scale = new Vector3(8.0f, 8.0f, 1.0f),
-                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            };
-
-            var waterMeshInstance = new MeshInstance3D
-            {
-                Name = "BackdropWater",
-                Mesh = plane,
-                MaterialOverride = _waterMaterial,
-                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            };
-
-            // Centre the horizontal plane on the cell footprint centre (cell origin + half a cell side).
-            // Cell origin (0, −10240), 1024 units/side (§3.7.1) → centre legacy (512, y, −9728). The plane
-            // spans the whole cell, so the blue surface sits under/behind the row exactly as the cell water
-            // layer does in the original. The footprint extent is asset-exact (§3.7.1); the water LEVEL is
-            // PLAUSIBLE (parse-TODO). spec: §3.7.1 (cell origin/size) / §3.6.5 (cell water layer).
-            float centreLegacyX = CellOriginLegacyX + CellSizeUnits * 0.5f; // 0 + 512 = 512
-            float centreLegacyZ = CellOriginLegacyZ + CellSizeUnits * 0.5f; // −10240 + 512 = −9728
-            waterMeshInstance.Position = ToGodotVec(centreLegacyX, WaterSurfaceLegacyY, centreLegacyZ);
-            AddChild(waterMeshInstance);
-
-            GD.Print($"[CharSelectScene3D] Water layer: horizontal blue _water_new01 plane over the cell " +
-                     $"footprint (centre Godot {waterMeshInstance.Position}, {CellSizeUnits}u/side, Y={WaterSurfaceLegacyY}), " +
-                     "scrolling UV, alpha-blended. The vertical spray is the xeff, not this layer. " +
-                     "spec: §3.6.5 (cell water layer) / §3.7.3 (.fx3/.fx5 parse TODO; level/tint PLAUSIBLE).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] Water layer failed: {ex.Message}");
-        }
-    }
-
     /// <inheritdoc/>
     public override void _Process(double delta)
     {
-        // Scroll the water UV so the blue sheet reads as moving water (the §3.7.3 animated-texture flag).
-        // Exact scroll rate is the .fx3/.fx5 animated field (parse TODO). spec: §3.7.3 / §3.6.5.
-        if (_waterMaterial is not null)
-        {
-            _waterScrollPhase += (float)delta * WaterUvScrollPerSecond;
-            if (_waterScrollPhase > 1.0f) _waterScrollPhase -= 1.0f;
-            _waterMaterial.Uv1Offset = new Vector3(_waterScrollPhase, _waterScrollPhase * 0.5f, 0f);
-        }
-
         TickSelectedPreviewYaw((float)delta);
     }
 
@@ -843,6 +712,17 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private Node3D? TryBuildSlotActor(RealClientAssets assets, int slotIdx, uint skinClassId, float rowY)
     {
+        // §3.3.7 OVERLAY BUILD — host-API gap (CYCLE 6b D6). The faithful per-part build would, for this
+        // slot, read the descriptor equipment table (+0x58) and compose the {3,4,6,2,11,14} overlays via
+        // ClassAppearanceResolver (ResolvePartGid → DeformSkinPathForGid → g{gid}.skn) on the shared
+        // SkinnedCharacterBuilder factory (§3.3.6), plus the non-starter slot-14 body and the rigid hand
+        // weapon. That math is implemented in ClassAppearanceResolver, but SlotDescriptors only carries
+        // (IsOccupied, SkinClassId) — the raw 880-byte descriptor (equip table + appearance bytes +0x2C/
+        // +0x34 + slot-14 +0x22) is NOT plumbed into this node by the host (CharSelectWindow lane). We must
+        // NOT fabricate equip ids / appearance bytes (that would manufacture a missing fact), so this lane
+        // resolves only the spec-grounded §3.7.5 starter body per class. The overlay + non-starter-variant
+        // rendering is BLOCKED on a host-API change (widen SlotDescriptors) — a follow-up wave.
+        // spec: frontend_scenes.md §3.3.7 (overlay build) / §3.7.5 (starter fallback) / §3.3.6 (factory).
         string? sknPath = PickSknPath(assets, skinClassId);
         if (sknPath is null)
         {

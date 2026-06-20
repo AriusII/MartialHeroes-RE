@@ -4,6 +4,7 @@ using MartialHeroes.Client.Application.Diagnostics;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Hud;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
@@ -54,6 +55,8 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly AccountCharacterState? _accountCharacters;
     private readonly IHudEventHub? _hudEventHub;
+    private readonly InFlightLatch? _inFlightLatch;
+    private readonly WorldEntryState? _worldEntry;
 
     /// <summary>
     /// The combat-stat recompute seam: invoked whenever an equip / buff / level change should re-accumulate
@@ -140,7 +143,9 @@ public sealed class GamePacketHandler : IPacketHandler
         CharacterSelectionStore? characterSelection = null,
         AccountCharacterState? accountCharacters = null,
         SceneStateMachine? sceneStateMachine = null,
-        IHudEventHub? hudEventHub = null)
+        IHudEventHub? hudEventHub = null,
+        InFlightLatch? inFlightLatch = null,
+        WorldEntryState? worldEntry = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -151,6 +156,8 @@ public sealed class GamePacketHandler : IPacketHandler
         _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/14 spawn
         _accountCharacters = accountCharacters; // optional: tracks the create/delete char-count deltas
         _hudEventHub = hudEventHub; // optional: combat-text / buff HUD stream sink (5/52, 4/102)
+        _inFlightLatch = inFlightLatch; // optional: the single in-flight latch (cleared by 3/x results + 4/1)
+        _worldEntry = worldEntry; // optional: durable 4/1 world-entry holder the InGame scene recovers from
     }
 
     // -------------------------------------------------------------------------
@@ -204,6 +211,12 @@ public sealed class GamePacketHandler : IPacketHandler
 
         actor.SetYaw(yaw);
         actor.SetLifecycle(packet.RunFlag != 0 ? LifecycleState.Running : LifecycleState.Walking);
+
+        // Derive the pure motion intent from the wire MotionCode (@+0x24) and RunFlag (@+0x1C) and
+        // attach it WITHOUT changing the snap/move-target behaviour above (the existing SnapTo /
+        // SetMoveTarget calls are unchanged; this only adds the animation-classification intent).
+        // spec: Docs/RE/packets/5-13_actor_movement_update.yaml; Docs/RE/specs/skinning.md §10.
+        actor.SetMotionIntent(MotionIntentMap.Resolve(packet.MotionCode, packet.RunFlag));
 
         _eventBus.Publish(new ActorMovedEvent(
             key, actor.Position, actor.MoveTarget, actor.Yaw, packet.RunFlag != 0));
@@ -312,6 +325,12 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     private void HandleGameStateTick(ReadOnlySpan<byte> payload)
     {
+        // 4/1's very first action, before any form branch, is to CLEAR the single in-flight latch
+        // (this closes the 1/9 → 3/5 → 4/1 enter ladder; 3/5 leaves the latch armed). Unconditional.
+        // spec: Docs/RE/specs/world_entry.md §2.3 / §3.3; Docs/RE/specs/net_contracts.md §1.3;
+        // Docs/RE/specs/handlers.md §4/1 (latch clear is the first statement).
+        _inFlightLatch?.Clear();
+
         if (!SmsgGameStateTick.TryReadWorldEntrySeed(payload, out SmsgGameStateTickSeed seed))
         {
             if (_world.LocalActor is null)
@@ -327,7 +346,10 @@ public sealed class GamePacketHandler : IPacketHandler
         if (_world.LocalActor is { } existing)
         {
             existing.SnapTo(position);
-            _eventBus.Publish(new InGameWorldBootstrappedEvent(existing.Key, position, seed.ScenarioMode));
+            // spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — persist the world entry so the InGame scene
+            // can recover the cold-start after the SingleReader channel handoff.
+            _worldEntry?.Record(seed.AreaId, position);
+            _eventBus.Publish(new InGameWorldBootstrappedEvent(existing.Key, position, seed.AreaId));
             return;
         }
 
@@ -343,7 +365,10 @@ public sealed class GamePacketHandler : IPacketHandler
             localActor.Key, slotIndex, name, localActor.Level, localActor.Position, localActor.CurrentHp,
             localActor.MaxHp,
             serverClass));
-        _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.ScenarioMode));
+        // spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — persist the world entry so the InGame scene
+        // can recover the cold-start after the SingleReader channel handoff.
+        _worldEntry?.Record(seed.AreaId, position);
+        _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.AreaId));
     }
 
     // -------------------------------------------------------------------------
@@ -357,8 +382,10 @@ public sealed class GamePacketHandler : IPacketHandler
     /// record (= 8-byte prefix + 880-byte SpawnDescriptor core + 4-byte trailer per §21), with the sort
     /// carried by the tag (1 = PC, 2 = mob, 3 = NPC) and the actor lookup key at record +0; each spawns
     /// and registers an actor and publishes <see cref="ActorSpawnedEvent"/> exactly like 5/3. Tags 4/6/9
-    /// only advance the cursor by their record size (their semantics are live-pending — no fabricated
-    /// event). The loop is bounded and stops on any short read. spec: Docs/RE/specs/handlers.md §10 + §21.
+    /// raise the real engine-free overlay/ground-item events (tag 4 = ground item, tag 6 = guild
+    /// overlay, tag 9 = title/relation overlay). The loop is bounded and stops on any short read; on
+    /// drain it publishes <see cref="AreaPopulatedEvent"/>. spec: Docs/RE/specs/handlers.md §4/4 + §21;
+    /// Docs/RE/specs/world_entry.md §2.4; Docs/RE/packets/4-4_ground_item_tag4.yaml.
     /// </summary>
     private bool HandleAreaEntitySnapshot(ReadOnlySpan<byte> payload)
     {
@@ -369,8 +396,10 @@ public sealed class GamePacketHandler : IPacketHandler
 
         // Header is read for the area-centre recenter coords; only the two f32s are consumed. spec: §10.
         ref readonly SmsgAreaEntitySnapshot header = ref MemoryMarshal.AsRef<SmsgAreaEntitySnapshot>(payload);
-        _ = header.AreaCentreX; // recenter coords are presentation state; the actor spawns carry absolute XZ. spec: §10.
-        _ = header.AreaCentreZ;
+        float areaCentreX = header.AreaCentreX; // recenter coords; the actor spawns carry absolute XZ. spec: §10.
+        float areaCentreZ = header.AreaCentreZ;
+
+        int spawnedActorCount = 0; // tag-1/2/3 actors spawned this snapshot (carried by AreaPopulatedEvent).
 
         // The 892-byte actor record splits 8 (prefix) + 880 (descriptor core) + 4 (trailer). spec: §21.
         const int actorPrefixSize = 8; // entity id-key u32 at +0 within this prefix. spec: handlers.md §21.
@@ -434,43 +463,103 @@ public sealed class GamePacketHandler : IPacketHandler
 
                     _eventBus.Publish(new ActorSpawnedEvent(
                         key, name, level, actor.Position, actor.CurrentHp, actor.MaxHp, serverClass));
+                    spawnedActorCount++;
                     break;
 
-                case 4: // ground item — live-pending: advance the cursor, do not invent its event. spec: §10.
+                case 4: // ground item (24-byte record). spec: handlers.md §4/4 (tag-4); 4-4_ground_item_tag4.yaml.
                     if (cursor + SmsgAreaEntitySnapshot.GroundItemRecordSize > payload.Length)
                     {
-                        return true;
+                        return PublishAreaPopulated(areaCentreX, areaCentreZ, spawnedActorCount);
                     }
 
+                    PublishGroundItem(payload.Slice(cursor, SmsgAreaEntitySnapshot.GroundItemRecordSize));
                     cursor += SmsgAreaEntitySnapshot.GroundItemRecordSize;
                     break;
 
-                case 6: // guild overlay — live-pending: advance the cursor, do not invent its event. spec: §10.
+                case 6: // guild-name overlay (36-byte record). spec: handlers.md §4/4 (tag-6).
                     if (cursor + SmsgAreaEntitySnapshot.GuildRecordSize > payload.Length)
                     {
-                        return true;
+                        return PublishAreaPopulated(areaCentreX, areaCentreZ, spawnedActorCount);
                     }
 
+                    PublishGuildOverlay(payload.Slice(cursor, SmsgAreaEntitySnapshot.GuildRecordSize));
                     cursor += SmsgAreaEntitySnapshot.GuildRecordSize;
                     break;
 
-                case 9: // title overlay — live-pending: advance the cursor, do not invent its event. spec: §10.
+                case 9: // title / relation overlay (24-byte record). spec: handlers.md §4/4 (tag-9).
                     if (cursor + SmsgAreaEntitySnapshot.TitleRecordSize > payload.Length)
                     {
-                        return true;
+                        return PublishAreaPopulated(areaCentreX, areaCentreZ, spawnedActorCount);
                     }
 
+                    PublishTitleOverlay(payload.Slice(cursor, SmsgAreaEntitySnapshot.TitleRecordSize));
                     cursor += SmsgAreaEntitySnapshot.TitleRecordSize;
                     break;
 
                 default:
                     // An unknown tag has no recoverable record size; stop the loop to avoid mis-stepping.
                     // spec: handlers.md §10 (only tags 1/2/3/4/6/9 are enumerated).
-                    return true;
+                    return PublishAreaPopulated(areaCentreX, areaCentreZ, spawnedActorCount);
             }
         }
 
+        // The tag loop drained (zero terminator or the iteration bound) — the area is populated. spec: §4/4.
+        return PublishAreaPopulated(areaCentreX, areaCentreZ, spawnedActorCount);
+    }
+
+    /// <summary>
+    /// Publishes the <see cref="AreaPopulatedEvent"/> when the 4/4 tag loop drains, returning true so the
+    /// caller treats the snapshot as consumed. spec: Docs/RE/specs/handlers.md §4/4.
+    /// </summary>
+    private bool PublishAreaPopulated(float areaCentreX, float areaCentreZ, int spawnedActorCount)
+    {
+        _eventBus.Publish(new AreaPopulatedEvent(areaCentreX, areaCentreZ, spawnedActorCount));
         return true;
+    }
+
+    /// <summary>
+    /// 4/4 tag-4 ground-item sub-record (24 bytes): Key u32@+0, TemplateId u32@+4, WorldX f32@+0x10,
+    /// WorldZ f32@+0x14. Float -&gt; fixed at the boundary (Y forced 0). spec:
+    /// Docs/RE/packets/4-4_ground_item_tag4.yaml; Docs/RE/specs/handlers.md §4/4 (tag-4).
+    /// </summary>
+    private void PublishGroundItem(ReadOnlySpan<byte> record)
+    {
+        uint key = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint))); // +0x00 Key
+        uint templateId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x04, sizeof(uint))); // +0x04 TemplateId
+        float worldX = BinaryPrimitives.ReadSingleLittleEndian(record.Slice(0x10, sizeof(float))); // +0x10 WorldX
+        float worldZ = BinaryPrimitives.ReadSingleLittleEndian(record.Slice(0x14, sizeof(float))); // +0x14 WorldZ
+
+        // Float -> fixed at the network/application boundary; world Y forced to 0. spec: 4-4 yaml.
+        Vector3Fixed position = Vector3Fixed.FromFloat(worldX, 0f, worldZ);
+        _eventBus.Publish(new GroundItemSpawnedEvent(key, templateId, position));
+    }
+
+    /// <summary>
+    /// 4/4 tag-6 guild-name overlay sub-record (36 bytes): EntityId u32@+0, CP949 NUL-string @+0x05.
+    /// spec: Docs/RE/specs/handlers.md §4/4 (tag-6).
+    /// </summary>
+    private void PublishGuildOverlay(ReadOnlySpan<byte> record)
+    {
+        uint entityId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint))); // +0x00 EntityId
+        // Guild name occupies +0x05 up to 31 bytes (CP949, NUL-terminated). spec: handlers.md §4/4 (tag-6).
+        string guildName = Cp949Text.Decode(record[0x05..]);
+        _eventBus.Publish(new GuildOverlayEvent(entityId, guildName));
+    }
+
+    /// <summary>
+    /// 4/4 tag-9 title / relation overlay sub-record (24 bytes): EntityId u32@+0, RelationState u8@+4,
+    /// OverlaySubCode u8@+5, CP949 TitleName 17-byte cell @+6. RelationState / OverlaySubCode value
+    /// MEANINGS are live-pending (world_entry.md §4 / handlers.md §4/4) — the raw bytes are forwarded,
+    /// no enum meaning is invented. spec: Docs/RE/specs/handlers.md §4/4 (tag-9).
+    /// </summary>
+    private void PublishTitleOverlay(ReadOnlySpan<byte> record)
+    {
+        uint entityId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint))); // +0x00 EntityId
+        byte relationState = record[0x04]; // +0x04 — value meaning live-pending (world_entry.md §4 / handlers.md §4/4).
+        byte overlaySubCode =
+            record[0x05]; // +0x05 — value meaning live-pending (world_entry.md §4 / handlers.md §4/4).
+        string titleName = Cp949Text.Decode(record.Slice(0x06, 17)); // +0x06 TitleName (17-byte CP949 cell).
+        _eventBus.Publish(new TitleOverlayEvent(entityId, relationState, overlaySubCode, titleName));
     }
 
     // -------------------------------------------------------------------------
@@ -518,6 +607,7 @@ public sealed class GamePacketHandler : IPacketHandler
 
             // live-pending: damage offset ambiguous (handlers.md §17.11 +0x10/+0x14 vs 5-52.yaml +0x14/+0x18).
             // Read BOTH candidate i64s raw; do NOT pick a polarity or decode damage here.
+            // spec: handlers.md §17.11 (polarity live-pending).
             long damageCandidateA =
                 record.Length >= 0x10 + sizeof(long)
                     ? BinaryPrimitives.ReadInt64LittleEndian(record.Slice(0x10, sizeof(long)))
@@ -767,7 +857,13 @@ public sealed class GamePacketHandler : IPacketHandler
     /// Transport/session disconnect notification — drives the scene machine (load-time → 7/2, else 7/8).
     /// spec: Docs/RE/specs/client_runtime.md §7.5.2.
     /// </summary>
-    public void OnDisconnected() => _sceneStateMachine?.OnDisconnected();
+    public void OnDisconnected()
+    {
+        // Reset the durable 4/1 world-entry record so a later InGame _Ready cannot cold-start a stale
+        // area after a disconnect / back-to-select. spec: Docs/RE/specs/world_exit.md (world-leave reset).
+        _worldEntry?.Clear();
+        _sceneStateMachine?.OnDisconnected();
+    }
 
     // -------------------------------------------------------------------------
     // 5/53 — actor vitals and pair state
@@ -1302,6 +1398,10 @@ public sealed class GamePacketHandler : IPacketHandler
             return false;
         }
 
+        // 3/1 is a char-mgmt result handler: clear the single in-flight latch.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/1).
+        _inFlightLatch?.Clear();
+
         ref readonly SmsgCharacterListHeader header =
             ref MemoryMarshal.AsRef<SmsgCharacterListHeader>(payload);
 
@@ -1356,8 +1456,14 @@ public sealed class GamePacketHandler : IPacketHandler
 
             // The descriptor is the first 880 bytes of the record. spec: 3-1 / spawn_descriptor.md.
             var reader = new SpawnDescriptorReader(record[..SpawnDescriptorReader.Size]);
+            // CONFLICT (committed-spec disagreement, debugger-pending): frontend_scenes.md §3.2 lists the
+            // select-row position at +0xA0/+0xA4; structs/actor.md (this reader's source) pins
+            // world_x/world_z at +0x4C/+0x50. Reusing the actor.md offsets for decode consistency; the
+            // §3.2 offset is unconfirmed. The X/Z (vs X/Y) axis pairing is itself flagged debugger-pending
+            // in §3.2. spec: Docs/RE/structs/actor.md / frontend_scenes.md §3.2
             builder.Add(new CharacterListSlot(
-                slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp()));
+                slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp(),
+                reader.ReadWorldX(), reader.ReadWorldZ()));
 
             // Retain the RAW per-slot record (880 descriptor + 96 stats + 1 flag byte) so SelectCharacterAsync
             // can detect "@BLANK@", and the 3/14 handler can materialize the local player. spec: login_flow.md §3.5.
@@ -1393,6 +1499,10 @@ public sealed class GamePacketHandler : IPacketHandler
             return false;
         }
 
+        // 3/4 is a char-mgmt result handler: clear the single in-flight latch.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/4).
+        _inFlightLatch?.Clear();
+
         ref readonly SmsgCharacterListHeader header =
             ref MemoryMarshal.AsRef<SmsgCharacterListHeader>(payload);
 
@@ -1426,6 +1536,10 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     public void Handle(in SmsgCharSpawnResult packet)
     {
+        // 3/14 is a char-mgmt result handler: clear the single in-flight latch.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/14).
+        _inFlightLatch?.Clear();
+
         // Result 0 = failure (a timed message is shown). spec: login_flow.md §5.3.
         if (packet.Result == 0)
         {
@@ -1520,6 +1634,10 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     public void Handle(in SmsgCharManageResult packet)
     {
+        // 3/7 is a char-mgmt result handler: clear the single in-flight latch.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/7).
+        _inFlightLatch?.Clear();
+
         const byte success = 1; // result 1 = success path. spec: §5.5.
         const byte deleteConfirmSubtype = 2; // subtype 2 = delete-confirm. spec: §5.5.
         bool ok = packet.Result == success;
@@ -1555,6 +1673,10 @@ public sealed class GamePacketHandler : IPacketHandler
     /// </summary>
     public void Handle(in SmsgRenameCharResult packet)
     {
+        // 3/6 is a char-mgmt result handler: clear the single in-flight latch.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/6).
+        _inFlightLatch?.Clear();
+
         bool ok = packet.Result != 0;
 
         if (ok)

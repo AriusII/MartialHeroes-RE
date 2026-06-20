@@ -62,7 +62,11 @@ public sealed partial class CharSelectCameraRig : Node
     // spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
     private const float BoomZoomUnitsPerSecond = 10.0f; // the §3.5.3 manual-zoom input-rate scalar (10.0)
     private const float BoomMinZ = 0.0f; // spec: §3.5.4 CODE-CONFIRMED
-    private const float BoomMaxZ = 22.0f; // spec: §3.5.4 CODE-CONFIRMED
+    // CONFLICT (debugger-pending): boom-Z clamp literal 26.0 vs 22 per §3.5.4 C3; using 22.
+    // §3.5.4 C3 reads the static clamp literal as 26.0 (an earlier reading said 22); the realised cap
+    // on the running client is debugger-pending. Low impact — the boom seed is 0, so the resting eye
+    // sits on KF1 regardless; the clamp only bounds how far the player can manually wheel-zoom.
+    private const float BoomMaxZ = 22.0f; // spec: §3.5.4 (CONFLICT C3: 26.0 vs 22 — using 22; debugger-pending)
 
     // NOTE: slot selection and manual left/right yaw rotate the preview ACTOR in CharSelectScene3D;
     // this rig deliberately keeps the camera fixed. spec: Docs/RE/specs/frontend_scenes.md §3.3.2 /

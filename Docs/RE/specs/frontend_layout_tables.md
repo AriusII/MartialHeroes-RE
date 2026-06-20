@@ -6,7 +6,7 @@ ida_reverified: 2026-06-19
 anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending)
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending); SERVER-LIST NAME/STATUS/POPULATION RESOLVERS CORRECTED 2026-06-20 (see §4.1) — name bank is FLAT 5001+ServerId (the prior "5301-5440 banked resolver" is DROPPED; 5301/5101/5201/5401/5421 = discarded cache warm-up), status caption = 4029+StatusCode (4029..4032), population colour keyed on LoadCount (1200/800/500 → 6001 red / 6002 orange / 6003 yellow / green default, siblings 6004 maintenance + 6005 cur/max), 8-byte record {ServerId i16@+0, StatusCode i16@+2, LoadCount i16@+4, gate/flag i16@+6} with array ptr + count as OBJECT FIELDS (stale "+388" count offset DROPPED), StatusCode 100 = selectable sentinel (display-only); residual live-pending (6-D) = ServerId-vs-ServerId-1 off-by-one between call sites, runtime StatusCode value semantics, +6 gate nonzero meaning
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -499,8 +499,10 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 
 > **Server name = small `msg.xdb` TEXT (slot-0 12 px); the big on-scroll calligraphy is BAKED decorative
 > atlas art, NOT engine-rendered name text (CORRECTION, element-level pass 2026-06-19).** The painter
-> resolves each server's name to a **string** (record name-id `+0` → resolver over msg banks 5301-5440,
-> fallback **5901**) and feeds it to the **name label** (font slot 0, DotumChe 12 px, dst (…,390,174×21),
+> resolves each server's name to a **string** via the message database keyed by the **server id**
+> (`name_id = 5001 + ServerId`, flat base **5001**, no group/channel multiplier; out-of-range ServerId →
+> fallback **5901** "unknown server #n" template — see §4.1) and feeds it to the **name label**
+> (font slot 0, DotumChe 12 px, dst (…,390,174×21),
 > centered, horizontal + ellipsis). It does **not** render a large or vertical font and does **not**
 > re-point a source rect per server. Therefore the large black brush hanja/hangul (e.g. "羽化登仙") that
 > fills the parchment scroll in the official client is **baked into the plate art on atlas A4
@@ -542,6 +544,102 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 >   **2204**); a post-handshake rejection arrives over the wire (code-15 disconnect / 30 s timeout / server
 >   popup opcode 4/500).
 
+### 4.1 Server-record decode + name / status / population resolvers (CONFIRMED, static IDA, 2026-06-20)
+
+> This subsection consolidates how each visible server plate's **name**, **status caption** and
+> **population colour** are resolved from a packed in-memory record through the message database. All
+> three resolvers read message ids out of `data/script/msg.xdb` (CP949); the literal CP949 text of each
+> id lives in runtime `msg.xdb`, not in the binary, so the captions themselves are `live-pending (6-D)`.
+
+**Server record = 8-byte packed structure** (little-endian; one per server in the in-memory list):
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| +0 | i16 | `ServerId` | 1-based server id, valid 1..40; also the name/status resolver key |
+| +2 | i16 | `StatusCode` | server status code (drives the status caption + selectability) |
+| +4 | i16 | `LoadCount` | population / crowd count (drives the colour branch) |
+| +6 | i16 | load-valid flag / open-minute | **RESOLVED (static IDA, 2026-06-20):** when `StatusCode==0`, `+6 != 0` ⇒ `LoadCount` is a raw count read with the **threshold** ladder (1200/800/500); `+6 == 0` ⇒ `LoadCount` is a **discrete level** (4/3/2 → red/orange/yellow). When `StatusCode==3` it is the scheduled-open **minute** component. |
+
+> The **record-array pointer** and the **record count** are **object fields** of the login/server-list
+> object — they are read from named fields on that object, not from any fixed numeric offset. **DROP the
+> stale "+388" count-offset note**: the record count lives at a *different* object field than that note
+> claimed; do not cite a numeric address for it.
+
+> **`ServerId (+0) == 100` is the special-row sentinel (CORRECTION, static IDA, 2026-06-20 — supersedes
+> the earlier "StatusCode == 100" reading).** `Diamond_LoginWindow_PaintServerList` (0x5fcd09) reads the
+> sentinel from the **+0 server-id field** (`v52 = record[+0]`; the same value fed to the name resolver and
+> the `1..40` range guard), **not** from `+2` status. A record whose `+0` id is 100 is **out of the 1..40
+> name range** → its plate name falls back to msg **5901**, and the painter additionally lights the 3
+> status-color indicator quads around it (see §4 "server_id == 100 gate"). It is **display-only** — it is
+> NOT a selectability gate (the commit guard is `status (+2) == 0 && load (+4) < 2400`, confirmed in
+> `LoginWindow_OnEvent` 0x5fa86a).
+
+**Name resolver** — flat, no multiplier:
+
+| Input | Resolved message id |
+|---|---|
+| ServerId 1..40 (in range) | `name_id = 5000 + ServerId` (msg bank **5001..5040** for ids 1..40; NO group/channel multiplier) |
+| ServerId out of range | fallback **5901** ("unknown server #n" template, formatted with the id) |
+
+> **Off-by-one (RESOLVED, static IDA, 2026-06-20):** `Server_GetNameString` (0x436a94) builds `v2[1]=msg
+> 5001 … v2[40]=msg 5040` and returns `v2[ServerId]`, so the formula is **`5000 + ServerId`** (ServerId 1 →
+> 5001). The earlier "`5001 + ServerId`" wording was off by one; the C# painter already uses `5000 +
+> ServerId`. This closes the documented "5000-vs-5001" nit.
+
+> **DROP any "5301" base.** The 5301 block (and the sibling 5101 / 5201 / 5401 / 5421 blocks) are
+> **cache warm-up that is DISCARDED** — they are never the name bank. The operative name bank is the flat
+> **5001 + ServerId**.
+
+**Status caption resolver** — four contiguous entries:
+
+| StatusCode | Status-caption message id |
+|---|---|
+| 0 | 4029 |
+| 1 | 4030 |
+| 2 | 4031 |
+| 3 | 4032 |
+
+(i.e. `caption_id = 4029 + StatusCode`, StatusCode 0..3 → ids 4029..4032.)
+
+**Population colour + crowd caption (`StatusCode == 0` only)** — TWO sub-branches selected by the `+6`
+load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colour ladders, not one):
+
+*Branch A — `+6 != 0` (load-valid): `LoadCount` is a raw count, thresholded:*
+
+| LoadCount band | Message id | Label colour (ARGB) |
+|---|---|---|
+| `> 1200` | 6001 | red `0xFFFF0000` |
+| `801..1200` | 6002 | orange `0xFFED6806` |
+| `501..800` | 6003 | yellow `0xFFFFFF00` |
+| `<= 500` (default) | status caption `4029` reused | green `0xFFB5FF7A` |
+
+*Branch B — `+6 == 0` (load-invalid): `LoadCount` is a DISCRETE level (exact equality, not a threshold):*
+
+| LoadCount value | Message id | Label colour (ARGB) |
+|---|---|---|
+| `== 4` | 6001 | red `0xFFFF0000` |
+| `== 3` | 6002 | orange `0xFFED6806` |
+| `== 2` | 6003 | yellow `0xFFFFFF00` |
+| else (incl. 0/1) | status caption `4029` reused | green `0xFFB5FF7A` |
+
+- **Siblings of the crowd-caption bank:** message **6004** is a maintenance / check caption used for a
+  sentinel load value (see §4 "status_code == 3" handling, where 6004 appears for `load == 24`); message
+  **6005** is the current/max numeric caption (an `HH:MM`-style / `cur / max` formatted line). Both belong
+  to the same caption family as 6001..6003 but are not part of the simple `> 1200 / > 800 / > 500` colour
+  ladder above.
+
+**`live-pending (6-D)` items for the server-list resolvers** (debugger-confirmable, see §4.2):
+- The **ServerId vs ServerId-1 off-by-one** between call sites — a cell-helper passes `ServerId − 1`
+  while the full plate painters pass the raw 1-based `ServerId`. Which call site paints the **visible**
+  plate, and whether server #1's plate maps to the `5001` record, is `live-pending (6-D)`.
+- The **runtime `StatusCode` value semantics** — which integer means "available" vs "full" (beyond the
+  100 = selectable sentinel) — is `live-pending (6-D)`.
+- ~~**When the +6 gate / flag field is nonzero**~~ — **RESOLVED (static IDA, 2026-06-20):** `+6` is the
+  load-valid flag (nonzero → threshold colour ladder; zero → discrete 4/3/2 colour ladder) for
+  `StatusCode==0`, and the scheduled-open minute for `StatusCode==3`. No longer `live-pending`.
+
+### 4.2 Outer construction
+
 - **Outer list panel** (the page backdrop): dst **(270, 85)**, size **483 × 490**, atlas A2 source
   origin **(0, 490)**. A header/title image (atlas A1, dst (265,0) 494×113, source (0,469)) and a
   footer/agree caption strip (atlas A2, 70×17, source (0,980)) sit with it.
@@ -568,14 +666,16 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 - **Selection highlight strip** (drawn behind the selected plate): atlas A4, source origin `(700,18)`,
   46 × 168. **Status-color indicator quads ×3:** atlas A2, source origin `(500,786)`, 60 × 39, hidden by
   default and re-anchored around a special row (see the status==100 gate).
-- **Server-name source (CORRECTION, element-level pass 2026-06-19):** the painter passes the record's
-  name id (`+0`, u16) to a **name resolver** that returns the string from `msg.xdb` name banks in the
-  **5301-5440** range (range guard id ∈ 1..40, else fallback `snprintf(msg 5901, id)`). It is **NOT** a
-  flat `5000 + server_id` (that earlier reading is superseded). The **exact id→bank index math inside the
-  resolver is a GAP** (the resolver is large and banked by class/region; not fully unrolled) — for a port,
-  resolve by the record name-id with the 5901 fallback. **msg 4029/4030/4031/4032 are the STATUS
-  CAPTIONS** (keyed by `status_code`, see coloring above), not column headers.
-- **Record decode** (8-byte LE record, in-memory list; see `packets/lobby.yaml`):
+- **Server-name source (CORRECTION, 2026-06-20 — supersedes the earlier "5301-5440 banked resolver"):**
+  the painter resolves the display name from the message database with a **flat** base, `name_id = 5000 +
+  ServerId` (ServerId 1-based, valid 1..40; msg bank 5001..5040), with **NO group/channel multiplier**. An out-of-range
+  ServerId falls back to message id **5901** ("unknown server #n" template). **DROP the 5301 base** — the
+  5301 (and the sibling 5101 / 5201 / 5401 / 5421) blocks are **cache warm-up that is DISCARDED**, never
+  the name bank; the earlier "name resolver over banks 5301-5440" reading is superseded. (See §4.1 for
+  the full name / status / population resolver tables.) **msg 4029..4032 are the STATUS CAPTIONS** (keyed
+  by `status_code`, see coloring above), not column headers.
+- **Record decode** (8-byte LE record, in-memory list; field table + resolvers in §4.1; see also
+  `packets/lobby.yaml`):
   `{server_id (+0), status_code (+2), load (+4), open_time/flags (+6)}`. Display index from a page =
   `record = (action − 400) + 2·page`. **On-screen row order is shuffled each repaint** (a per-render
   permutation is applied), so the visible row → record-byte-position mapping is **not** stable across
@@ -590,15 +690,20 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
   `0xFFFFFF00` (yellow) · **≤ 500 → the status caption msg `4029..4032` (keyed by `status_code`),
   `0xFFB5FF7A` (green) — this is the "available" (사용가능) case.** (CORRECTION 2026-06-19: the prior
   "≤500 renders numeric `%4d / %4d`, no caption" was wrong — the available row draws the green status
-  caption; the `%4d / %4d` count is dead debug.) `status_code == 3` = scheduled-open: msg **6004** only
+  caption; the `%4d / %4d` count is dead debug.) **When the load-valid flag (`+6`) is ZERO (CORRECTION,
+  2026-06-20),** the same `status_code == 0` path instead reads `load (+4)` as a **discrete level by exact
+  equality**: `== 4` → msg 6001 red, `== 3` → msg 6002 orange, `== 2` → msg 6003 yellow, else → green
+  status caption (same msgs/colours as the threshold ladder). `status_code == 3` = scheduled-open: msg **6004** only
   when `load (+4) == 24`, otherwise `snprintf(msg 6005, …)` = **HH:MM** from `+4`/`+6`. Other status codes
   draw the status-keyed caption `4029..4032` with no color override (color written to the GULabel color
   field +0x0C). Record fields (no swap): `+0` server_id (also the name-resolver key), `+2` status,
   `+4` load, `+6` open_time/load-valid flag.
-- **status_code == 100 gate (CONFIRMED, element-level pass):** a record whose status is 100 is a
-  **display-only special row** — the painter shows the 3 status-color indicator quads re-anchored around
-  it (when a "show special" flag is set) instead of lighting the normal plate faces, and the commit
-  guard's `status == 0` requirement makes the row **non-selectable**. **Quad anchoring (element-level
+- **server_id == 100 gate (CORRECTION, static IDA, 2026-06-20 — was "status_code == 100"):** the painter's
+  sentinel test is on the **+0 server-id field** (`v52 = record[+0] == 100`), not `+2` status. A record whose
+  **id** is 100 is a **display-only special row** — its name resolves to the out-of-range fallback msg 5901
+  and the painter shows the 3 status-color indicator quads re-anchored around it (when a "show special"
+  flag at `this+0x425` is set), and the commit guard (`status == 0 && load < 2400`) governs selectability
+  independently (the special row is not made selectable by the id-100 test). **Quad anchoring (element-level
   pass, 2026-06-19):** the 3 quads are built at dst (0,0), 60×39, src (500,786), parked hidden; at repaint
   (gated by a one-byte "show special" flag) they are re-anchored to the special row's own plate-widget
   destination corner `(anchorX, anchorY)` (the plate's dst-X/dst-Y fields): quad 0 → `(anchorX−30,

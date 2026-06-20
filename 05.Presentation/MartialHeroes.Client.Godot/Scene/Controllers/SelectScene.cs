@@ -130,10 +130,15 @@ public sealed partial class SelectScene : StubSceneController
                 GD.Print($"[SelectScene] CharRenameResult success={rename.Success} newName='{rename.NewName}' " +
                          $"error={rename.ErrorCode}. spec: frontend_scenes.md §6.");
                 break;
-            case SceneStateChangedEvent { Next.State: EngineSceneState.InGame }:
+            case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
+                // Out-of-band committed transition (e.g. 3/5 Select→InGame, or 3/100 Select→Quit/Error).
+                // The Application scene machine already pre-committed the new state; converge the visible
+                // controller without re-advancing the machine (Advance() would jump past the target).
+                // spec: Docs/RE/specs/client_runtime.md §7.5.3.
                 GD.Print(
-                    "[SelectScene] Application scene machine observed Select→InGame; SceneHost will re-dispatch. " +
-                    "spec: client_runtime.md §7.5.3.");
+                    $"[SelectScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
+                    "out-of-band committed transition — calling SyncToCurrentState. spec: client_runtime.md §7.5.3.");
+                _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
                 break;
         }
     }
@@ -280,11 +285,14 @@ public sealed partial class SelectScene : StubSceneController
 
     private static ImmutableArray<CharacterListSlot> DevCharacterList() =>
         ImmutableArray.Create(
-            new CharacterListSlot(SlotIndex: 0, Name: "무사", Level: 25, ServerClass: 1, CurrentHp: 650),
-            new CharacterListSlot(SlotIndex: 1, Name: "격사", Level: 32, ServerClass: 3, CurrentHp: 520),
-            new CharacterListSlot(SlotIndex: 2, Name: "도사", Level: 18, ServerClass: 2, CurrentHp: 480),
-            new CharacterListSlot(SlotIndex: 3, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0),
-            new CharacterListSlot(SlotIndex: 4, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0));
+            // Dev/offline seed for headless + screenshot verification. PosX/PosZ are representative saved
+            // map coords (descriptor +644/+648) so the info-row "%d , %d" position line is exercised.
+            // spec: Docs/RE/specs/frontend_scenes.md §3.2 (descriptor position floats).
+            new CharacterListSlot(SlotIndex: 0, Name: "무사", Level: 25, ServerClass: 1, CurrentHp: 650, PosX: 2048f, PosZ: -6144f),
+            new CharacterListSlot(SlotIndex: 1, Name: "격사", Level: 32, ServerClass: 3, CurrentHp: 520, PosX: 1536f, PosZ: -3590f),
+            new CharacterListSlot(SlotIndex: 2, Name: "도사", Level: 18, ServerClass: 2, CurrentHp: 480, PosX: 1024f, PosZ: -512f),
+            new CharacterListSlot(SlotIndex: 3, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0, PosX: 0f, PosZ: 0f),
+            new CharacterListSlot(SlotIndex: 4, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0, PosX: 0f, PosZ: 0f));
 
     private static bool IsDevOfflineMode()
     {

@@ -105,16 +105,33 @@ Every C2S opcode falls into one of these contract shapes; the per-domain tables 
   identity — a local context/state global vs a "counter" — is `[capture/debugger-pending]`, register
   item R-30.) *spec:* `network_dispatch.md §4.5a`, `handlers.md §5/146`.
 
-### 1.3 The in-flight latch (the major-1/3/4 coupling mechanism)
+### 1.3 No request-id anywhere — the single in-flight latch is the only pending primitive
+
+**There is NO per-request request-id, sequence number, or transaction key anywhere in the playable
+slice.** A reply is never matched to its request by a correlation token on the wire — routing is purely
+by the `(major,minor)` dispatch tables (§1.1). The only generic pending primitive in the protocol is a
+**single global boolean in-flight latch** scoped to the char-management handshake. It does **not** route
+or match responses; it is a one-deep "a char-management request is outstanding" flag.
+
+- **It is one-deep.** Char-management is one-request-at-a-time, so a single boolean suffices — there is
+  no need for, and no evidence of, a per-request map.
+- **Its SOLE reader is the keepalive timer.** The latch's only consumer suppresses the 20-second idle
+  heartbeat while a char-management request is outstanding (so the keepalive does not fire on top of an
+  in-flight request). Nothing else reads it; it never selects a handler.
+- **Implementer guidance.** A C# `RequestTracker` MUST model this as **a single boolean pending flag
+  scoped to the char-management handshake, NOT a per-request id→request map.** Building a correlation map
+  would be inventing protocol structure the binary does not have.
 
 A single **outstanding-request guard** ("in-flight latch") byte on the net-client singleton is the
-request↔response coupling for the lifecycle/char-mgmt family — it is how a result handler knows which
-request it is completing. The full SET/CLEAR roster (CYCLE 4 netcode-deep, control-flow-confirmed):
+request↔response coupling for the lifecycle/char-mgmt family — it is how a result handler knows a
+char-management request is in flight while it completes. The full SET/CLEAR roster (CYCLE 4
+netcode-deep, control-flow-confirmed):
 
 - **SET** by the send builders **`1/6`, `1/7`, `1/9`, `1/13`, `1/14`, `2/2`** (CmsgPortalTravel), and
-  by the **`(0,0)→1/4`** handshake branch (the reactive credential reply sets it on send).
+  by the **`(0,0)→1/4`** inbound secure-auth branch (the reactive credential reply sets it on send).
 - **CLEARED** by the result handlers **`3/1`, `3/4`, `3/6`, `3/7`, `3/13`, `3/14`, `4/1`**.
-- **READ** by the keepalive thread (it consults the latch when deciding whether a request is pending).
+- **READ** only by the keepalive timer (it consults the latch to decide whether to suppress the
+  20-second idle heartbeat while a request is pending) — it does NOT route or match any response.
 - **`1/0 CmsgLogout` sets NO latch** (fire-and-forget — the one lifecycle builder that does not arm it).
 
 **The enter ladder.** Enter-world is the load-bearing chain `1/9 CmsgEnterGameRequest → 3/5
@@ -132,7 +149,7 @@ handshake (0/0) and the five majors: 0/0 ✓ · major-1 (4 S2C billing/letter + 
 0/0-paired 1/4) ✓ · major-2 (95 distinct C2S opcodes / 96 builders, set-equal to the send census) ✓ ·
 major-3 (11) ✓ · major-4 (100 installed slots + 2 specials {4/500, 4/50000}, 99 distinct handlers —
 143/144 share) ✓ · major-5 (65 installed Push slots) ✓. **There is no slot/builder lacking a complete
-structural DTO.** The single uniform residual is wire-byte **VALUE semantics** — the 42-item
+structural DTO.** The single uniform residual is wire-byte **VALUE semantics** — the 45-item
 `[capture/debugger-pending]` register in **Appendix C** — which by doctrine is NOT a DTO gap (sizes and
 field layouts are recovered; only the *meaning* of certain bytes is unsettled). *source:*
 `_dirty/netcode_deep/oq/completeness.md §1.6`.
@@ -229,6 +246,16 @@ attack-target / skill-cancel / auto-attack are all folded into 2/13 or 2/52; the
 send** for any of them, so no additional movement/combat pairings exist. *spec:* `handlers.md`,
 `opcodes.md` (2/13, 2/52 notes).
 
+**In-game pairs are fire-and-forget broadcasts — no latch, no request-id (the actor-id is the key).**
+The three in-game request→broadcast pairs — **2/13 → 5/13** (movement), **2/52 → 5/52** (skill action),
+**2/7 → 5/7** (chat broadcast, dispatched further by channel code) — set **no in-flight latch** and carry
+**no correlation token**. The server simply re-broadcasts the world event, and the client applies it by
+**resolving the actor id** carried in the Push (it locates the existing actor object and mutates it).
+This is the in-session counterpart to the char-management latch (§1.3): the latch governs the
+lobby/char-mgmt handshake only; in-session play is pure broadcast-and-resolve. The **actor-id field
+VALUE semantics** in 5/13 / 5/52 / 5/7 (exactly which on-wire field carries the actor id and how it
+keys the local actor table) are **live-pending (6-D)**. *spec:* `handlers.md`, `opcodes.md`.
+
 ### 2.4 Inventory / Item
 
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
@@ -237,8 +264,20 @@ send** for any of them, so no additional movement/combat pairings exist. *spec:*
 | **2/15** CmsgPickupItem | 12 | **4/15** SmsgItemWorldPickupAck | 36 | inferred/med — mirror-minor + `opcodes.md` "4/15 pickup ack"; 4/15 installed. | `2-15_pickup_item.yaml`, `4-15_item_world_pickup_ack.yaml` |
 | **2/44** CmsgItemQuickMove | 12 | inventory/slot push — **NOT 4/44** | — | pending — **REFUTED naive mirror:** 4/44 is installed but is `SmsgActorTickTableOpA`. The quick-move result rides the inventory-slot acks (4/16 EquipChangeResult / 4/22 ItemSlotStateAck / 4/149 ItemPanelSlotChunk / 4/153 ItemPanelSlotRefresh — all installed). | `2-44_item_quick_move.yaml` |
 | **2/46** CmsgItemMove | 12 | inventory/slot push — **NOT 4/46** | — | pending — same as 2/44: 4/46 is installed but is `SmsgActorTickTableOpC`. The drag-move result rides the inventory-slot acks. | `2-46_item_move.yaml` |
+| **2/16** CmsgActorInteract *(**NOT** an equip request — see note)* | var | actor-interaction push (**not an equip ack**) | — | pending — **CORRECTED:** 2/16 is `CmsgActorInteract`, not the equip request. The equip/item results below are reached by opcode, not as same-opcode replies to 2/16. | *(opcodes.md, 2/16)* |
 
-*Notes (load-bearing).* The canonical 12-byte item-model is shared by 2/44/2/46 (and partly 2/15), but
+*Notes (load-bearing).*
+
+**2/16 is CmsgActorInteract — NOT an equip request (prior "2/16 = equip family" framing CORRECTED).**
+2/16 is an actor-interaction send, not an item/equip request. The equip/item results — **4/12
+SmsgEquipItemResult**, **4/16 SmsgEquipChangeResult**, **4/22 SmsgItemSlotStateAck** — are
+**result-code-keyed responses reached BY OPCODE**: the response opcode *is* the category, and a leading
+result byte in the body selects success vs failure. They are **NOT same-opcode replies to 2/16**, and
+they are not paired off 2/16 at all. The **exact eliciting C2S send** for each (an item-panel /
+quick-equip / item-move send) is **live-pending (6-D)**, as are the **result-byte values beyond {0,1}**
+in those equip responses.
+
+The canonical 12-byte item-model is shared by 2/44/2/46 (and partly 2/15), but
 **its replies are NOT same-minor acks** — the item-move acks fold into the inventory-slot-update channel.
 **Do not auto-generate 4/44 / 4/46 reply structs.** Adjacent item-state Response slots in this channel:
 4/5 ItemUseResult, 4/12 EquipItemResult, 4/16 EquipChangeResult, 4/17 QuickEquipSlotAck, 4/22
@@ -496,7 +535,7 @@ CYCLE 4 settled the two pairing-conflict Open-Qs (guild-diplomacy 4/81→4/61; 2
 they are **RESOLVED** above and no longer carried here. The 5/73 catalog name is reconciled
 (`opcodes.md` now carries SmsgQuestComplete) and the 2/153 name is reconciled (CmsgProductConfirm). What
 remains open is genuinely-unsettled **VALUE semantics**, which by doctrine is `[capture/debugger-pending]`
-and is consolidated in **Appendix C — capture/debugger-pending register (R-01..R-42)**. The two
+and is consolidated in **Appendix C — capture/debugger-pending register (R-01..R-45)**. The two
 structural items still worth flagging here:
 
 1. **1/7 result-minor + the mode semantic.** `opcodes.md` now reads 1/7 as **CmsgSelectCharacterSlot**
@@ -513,7 +552,7 @@ structural items still worth flagging here:
 
 ---
 
-## Appendix C — capture/debugger-pending register (R-01..R-42)
+## Appendix C — capture/debugger-pending register (R-01..R-45)
 
 > **The honest residual.** Every item below is a wire-byte **VALUE-semantics** question (what a value
 > *means* / which code is success vs fail / unit / conditional presence / opaque interior / pairing not
@@ -538,6 +577,7 @@ structural items still worth flagging here:
 | R-11 | 4/100 | combat phase(3/5)/sub-kind(`0xFF` reset)/value byte meanings |
 | R-12 | 5/79, 5/80 | DeathOp/mode byte sets; effect-id selectors |
 | R-13 | 5/5 | actor-record visual-state codes (1001/1011/1020/1021/1023/1041) — server-driven vs purely local |
+| R-43 | 4/12, 4/16, 4/22 | the leading result-byte values **beyond {0,1}** in the equip/item-slot responses (which code is success vs each failure) — **live-pending (6-D)** |
 
 ### C.2 Flag-bit meanings
 
@@ -555,6 +595,7 @@ structural items still worth flagging here:
 | R | Opcode(s) | Pending VALUE |
 |---|---|---|
 | R-20 | 5/52 rec +0x14/+0x18 | whether the 64-bit accumulator is literal damage vs another signed magnitude |
+| R-44 | 5/13, 5/52, 5/7 | the **actor-id field VALUE semantics** in the in-game broadcasts (which field carries the actor id and how the client keys its local actor table) — **live-pending (6-D)** |
 | R-21 | 5/53, 5/32 | HP i64 vs MP/stamina split unit confirmation (structure agreed i64; semantics pending) |
 | R-22 | 4/108 / 4/115 | gold qword vs the three balance dwords (displayed total vs stored component) |
 | R-23 | 5/9, 5/11 | xp/rank-xp i64 sign + the server-config bonus/penalty split rates |
@@ -592,9 +633,12 @@ structural items still worth flagging here:
 | R-40 | 2/92/2/93 | PvP/revenge reply minors (5/89/5/92/5/94 static-inferred) |
 | R-41 | 1/2 CmsgLobbyPing | the server pong/ack minor (lobby socket — see §Open Conflicts C1) |
 | R-42 | 5/55/5/65/5/123 | confirm the selector-dependent async-answer relationship to 2/30 / gift flow |
+| R-45 | 4/12, 4/16, 4/22 (equip results) | the **exact equip/item C2S send** that elicits each result (an item-panel / quick-equip / item-move send — NOT 2/16 CmsgActorInteract) — **live-pending (6-D)** |
 
-**Register size: 42 distinct capture/debugger-pending VALUE-semantic items** (R-01..R-42), spanning all
-five majors. This is the single honest residual after CYCLE 4 — every item is a *value* question, not a
+**Register size: 45 distinct capture/debugger-pending VALUE-semantic items** (R-01..R-45), spanning all
+five majors — R-01..R-42 from CYCLE 4, plus three **live-pending (6-D)** additions this pass: R-43
+(equip result-byte values beyond {0,1}), R-44 (the in-game broadcast actor-id field semantics), and R-45
+(the exact equip/item C2S that elicits each 4/x equip result). Every item is a *value* question, not a
 *structure* gap. (Plus the standing **CP949 message-DB string-text** items — message ids such as
 10006/51027/36004-36028/45xxx/54xxx/65xxx/58xxx/74xxx — which are a **string-table/asset task**, not a
 netcode debugger task.) *source:* `_dirty/netcode_deep/oq/completeness.md §3`.

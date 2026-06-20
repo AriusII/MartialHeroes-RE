@@ -80,13 +80,18 @@ public sealed partial class LoginScene : StubSceneController
                 case ServerListReceivedEvent serverList:
                     ApplyServerList(serverList);
                     break;
-                case SceneStateChangedEvent { Next.State: EngineSceneState.Load } stateChange:
+                case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
+                    // Out-of-band committed transition: the Application scene machine (e.g. 3/5
+                    // OnEnterGameAck) already pre-committed a new state, so CurrentState ≠ Login.
+                    // Calling Advance() here would be WRONG (it would advance from the already-committed
+                    // state and skip intermediate scenes). Instead, converge the visible controller to
+                    // the committed state without re-advancing the machine.
+                    // spec: Docs/RE/specs/client_runtime.md §7.5.2 (3/5 forces Load state-agnostically).
                     GD.Print(
                         $"[LoginScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
-                        "Load transition observed. spec: client_runtime.md §7.5.2.");
+                        "out-of-band committed transition — calling SyncToCurrentState. spec: client_runtime.md §7.5.2.");
                     _syncingScene = true;
-                    if (_host?.CurrentState == EngineSceneState.Login)
-                        _host.CallDeferred(SceneHost.MethodName.Advance);
+                    _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
                     return;
             }
         }

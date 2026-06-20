@@ -71,29 +71,95 @@ public sealed partial class VisualActor : CharacterBody3D
     private const float RunGlideSpeed = 10.0f;
 
     // -------------------------------------------------------------------------
+    // Skinned-avatar attachment (replaces the placeholder capsule)
+    // -------------------------------------------------------------------------
+
+    // The placeholder cyan capsule MeshInstance3D built in _Ready. Held so it can be removed once a
+    // real skinned avatar is attached (the in-world local player). Null after AttachSkinnedAvatar.
+    private MeshInstance3D? _placeholderMesh;
+
+    // The attached skinned-avatar root (SkinnedCharacterBuilder.Build output), or null when this actor
+    // still shows the placeholder capsule. Display visual only — no game state.
+    private Node3D? _skinnedAvatar;
+
+    /// <summary>
+    /// Visual display scale applied to the attached skinned avatar (legacy unit → Godot). Matches
+    /// RealWorldRenderer/NpcRenderer's CharacterScale so the in-world player is the same size as the
+    /// demo avatar and the spawned mobs/NPCs.
+    /// spec: World/RealWorldRenderer.cs CharacterScale = 5.0f / World/NpcRenderer.cs CharacterScale.
+    /// </summary>
+    private const float SkinnedAvatarScale = 5.0f;
+
+    /// <summary>
+    /// Swaps the placeholder cyan capsule for a real skinned, idle-animated avatar (the in-world local
+    /// player). The <paramref name="skinnedRoot"/> is a <see cref="SkinnedCharacterBuilder.Build"/>
+    /// output — it already carries the single handedness conversion, the §7/§9 up-axis remap pivot, and
+    /// an auto-engaged looping standing idle (the contained <c>SkinnedCharacterNode</c> self-ticks via
+    /// <c>_Process</c>). This node only re-parents and scales it; it adds NO game-rule authority.
+    ///
+    /// Idempotent: a second call frees the prior avatar and attaches the new one. Safe to call before or
+    /// after <see cref="_Ready"/> (the placeholder is removed if present; otherwise just the avatar is
+    /// added). Main-thread only.
+    ///
+    /// spec: Docs/RE/specs/skinning.md §8(e) (the avatar resolves via the recovered skin/bind/idle chain),
+    ///       §10.5 (the col15 standing idle plays, looping); §8(b)/§7/§9 (handedness + up-axis remap done
+    ///       inside Build, identical to NPCs).
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive rendering.
+    /// </summary>
+    /// <param name="skinnedRoot">The skinned-avatar root from SkinnedCharacterBuilder.Build.</param>
+    public void AttachSkinnedAvatar(Node3D skinnedRoot)
+    {
+        // Replace any prior avatar (idempotent re-attach on a re-spawn).
+        if (_skinnedAvatar is not null && global::Godot.GodotObject.IsInstanceValid(_skinnedAvatar))
+        {
+            RemoveChild(_skinnedAvatar);
+            _skinnedAvatar.QueueFree();
+            _skinnedAvatar = null;
+        }
+
+        // Remove the placeholder capsule mesh (the collision shape + label stay).
+        if (_placeholderMesh is not null && global::Godot.GodotObject.IsInstanceValid(_placeholderMesh))
+        {
+            RemoveChild(_placeholderMesh);
+            _placeholderMesh.QueueFree();
+            _placeholderMesh = null;
+        }
+
+        skinnedRoot.Name = "SkinnedAvatar";
+        skinnedRoot.Scale = Vector3.One * SkinnedAvatarScale;
+        AddChild(skinnedRoot);
+        _skinnedAvatar = skinnedRoot;
+    }
+
+    // -------------------------------------------------------------------------
     // Godot lifecycle
     // -------------------------------------------------------------------------
 
     public override void _Ready()
     {
-        // Placeholder mesh: a capsule so the actor is visible without real assets.
-        // Replace with a scene instantiated from Assets.Mapping-produced glTF once available.
-        var mesh = new MeshInstance3D();
-        var capsule = new CapsuleMesh();
-        capsule.Radius = 0.4f;
-        capsule.Height = 1.8f;
+        // Placeholder mesh: a capsule so the actor is visible without real assets — built ONLY when no
+        // skinned avatar has already been attached (the in-world local player attaches one immediately
+        // after spawn via AttachSkinnedAvatar). For NPCs/remote actors the capsule remains the visual.
+        if (_skinnedAvatar is null)
+        {
+            var mesh = new MeshInstance3D();
+            var capsule = new CapsuleMesh();
+            capsule.Radius = 0.4f;
+            capsule.Height = 1.8f;
 
-        // Bright cyan material so the actor stands out clearly against the ground.
-        // EmissionEnabled ensures visibility even without a perfectly aimed light.
-        var actorMat = new StandardMaterial3D();
-        actorMat.AlbedoColor = new Color(0.1f, 0.85f, 1.0f);
-        actorMat.EmissionEnabled = true;
-        actorMat.Emission = new Color(0.0f, 0.5f, 0.8f);
-        actorMat.EmissionEnergyMultiplier = 1.2f;
-        capsule.Material = actorMat;
+            // Bright cyan material so the actor stands out clearly against the ground.
+            // EmissionEnabled ensures visibility even without a perfectly aimed light.
+            var actorMat = new StandardMaterial3D();
+            actorMat.AlbedoColor = new Color(0.1f, 0.85f, 1.0f);
+            actorMat.EmissionEnabled = true;
+            actorMat.Emission = new Color(0.0f, 0.5f, 0.8f);
+            actorMat.EmissionEnergyMultiplier = 1.2f;
+            capsule.Material = actorMat;
 
-        mesh.Mesh = capsule;
-        AddChild(mesh);
+            mesh.Mesh = capsule;
+            AddChild(mesh);
+            _placeholderMesh = mesh;
+        }
 
         // Collision shape required for CharacterBody3D.
         var col = new CollisionShape3D();

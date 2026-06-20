@@ -118,6 +118,20 @@ public sealed partial class EnvironmentNode : Node3D
     /// The per-keyframe section-B ambient is inert in the original (K_ambient = 0.0, zero writers).
     /// This is the ONLY live ambient the original device receives at default settings.
     /// spec: Docs/RE/specs/environment.md §6.2b — root-cause fix for the "too-dark" EnvironmentNode.
+    ///
+    /// DEBT #3 STATUS (un-darken atmosphere):
+    ///   The ambient floor is set to 1.0 (full white) here, which matches OPTION_BRIGHT=100 (the
+    ///   confirmed binary default). ApplyAmbient uses this as AmbientLightEnergy (never the
+    ///   per-keyframe §B table, which is gated by K_ambient=0 and contributes nothing in the
+    ///   original). This is the spec-dictated root-cause fix for the "too-dark" world.
+    ///   spec: Docs/RE/specs/environment.md §6.2a — K_ambient=0 CONFIRMED; §6.2b — floor=1.0 default.
+    ///
+    ///   ORACLE-PENDING: the exact on-screen brightness is a windowed-screenshot call that
+    ///   Tier-1 / render-reviewer must verify against the official captures. If the scene reads
+    ///   too bright, lower DoOption.ini OPTION_BRIGHT and read it at runtime (see §6.2b residual).
+    ///   The math here is spec-faithful; the aesthetic verdict is oracle-pending.
+    ///   Declared aesthetic for the Godot-side mapping (energy=1.0 vs D3D device_ambient=(255,255,255)):
+    ///   the principle is spec-dictated; the exact knob mapping is an engineering approximation.
     /// </summary>
     public float OptionBrightFloor { get; set; } =
         1.0f; // spec: Docs/RE/specs/environment.md §6.2a — default OPTION_BRIGHT=100 → 1.0

@@ -1142,6 +1142,43 @@ owned by a dedicated **select window** object. Its widget tree and the 5 live 3D
 **built only when the character-list packet (`3/1 SmsgCharacterList`) arrives** — the scene does not
 exist until then (a quirk also noted in `ui_system.md` §6.4 and `client_runtime.md` §7).
 
+> **CYCLE 6b CONFIRMATION (2026-06-20) -- zero-trust re-confront of the state-4 char-select.**
+> A fresh static re-walk of the select handler, info-row, appearance, camera, and action functions on
+> build `263bd994` re-confirmed section 3 in full and pins five precision facts a faithful port must
+> honour. `// confirmed: static IDA 2026-06-20`
+> 1. **The per-slot 96-byte stats block is NOT consumed on the char-select screen.** The info row
+>    reads name / level / position from the **descriptor only** (3.2). The 96-byte block is parsed by
+>    `3/1`, stored per slot, carried through, and copied wholesale into the in-game live-stat globals
+>    **only on Enter** -- it feeds the **in-game** character window, never a select-screen stat grid.
+>    A select-screen "stat grid (2x5)" populated from the stats block is a port fabrication; the only
+>    per-slot text on select is the three labels of 3.2. (The create form's 18-cell point-buy grid,
+>    4.1.1, is unrelated and uses keyed-string lookups, not the wire stats block.)
+> 2. **Info-row line 3 = world POSITION, never a class label.** The third label formats the literal
+>    string `"%d , %d"` (space-comma-space) over the two position floats (descriptor +0xA0 / +0xA4,
+>    here = X and Z) truncated to int. There is no class label on the row; the class value (descriptor
+>    +0x34) drives the 3D preview visual only. (Axis X/Z vs X/Y is a strong inference; value-axis is
+>    debugger-pending.)
+> 3. **Three info-row labels + four selectable-gated slot buttons are distinct widget blocks.** The
+>    select window holds a contiguous **3-pointer label block** (name / level / position) and, adjacent
+>    to it, **four 3-state buttons** with action ids **4 / 5 / 6 / 61**. Default after build: the locked
+>    base button (id 4) and the highlight art (id 61) shown; the two enter/confirm buttons (ids 5, 6)
+>    hidden. The per-slot selectable byte (the server-supplied per-slot flag array, 3.4) flips them:
+>    selectable => {id 61, 5, 6 shown; id 4 hidden}; not-selectable => inverse. A freshly created
+>    character forces its selectable byte clear until the server resolves location/spawn. (Role names --
+>    locked base / enter-confirm / highlight art -- are inferred from action-id + atlas + polarity; the
+>    show/hide behaviour is confirmed.)
+> 4. **The char-select preview renders the REAL account character through the full appearance chain,
+>    not a starter placeholder.** 3.1 / 3.3.6 already say this; CYCLE 6b additionally recovered the
+>    per-part resolution math the port still omits -- see the new **3.3.7**.
+> 5. **The action model is message-TYPE x widget-COMMAND, not a flat action table.** The handler
+>    decodes a message type (click / point-buy drag / system event) and a per-widget command id; the
+>    create/delete/enter/select/rename/move behaviours are command ids under the click type. The opcode
+>    pairings (Create `1/6`, Select/Delete `1/7 {slot,mode}`, Enter `1/9`, Rename `1/13`, Move `1/14`,
+>    result `3/7`) and the no-corner-X / system-close to state 6 rule (5 below, 11.5) are all
+>    re-confirmed. The local slot writers run **only** from S2C result handlers, never optimistically on
+>    the C2S send. `// confirmed: static IDA 2026-06-20`
+> <!-- source: _dirty/cycle6b/charselect_deltas.md (D1..D11), laneA..E -->
+
 > **The char-select scene is a full 3D world, not a 2D screen.** The select window does **not**
 > paint a flat backdrop behind a 2D character portrait; it **builds a named 3D scene ("select") on
 > the real game world `data/map000`, frozen at afternoon (14:30), with up to five live, animated 3D
@@ -1415,6 +1452,43 @@ with the **body as overlay slot 3** (the `202`/"b" family) — there is no separ
 
 <!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 
+### 3.3.7 Per-part appearance resolution math -- the edge the port still omits (CODE-CONFIRMED)
+
+The list-slot previews are descriptor-driven (3.3.6), but the port's resolver only reproduces the
+**starter classes at variant 0** for both screens. CYCLE 6b recovered, statically, the full per-part
+key composition the existing-character lineup uses, so the real (non-starter, equipped) character can
+be rendered. `// confirmed: static IDA 2026-06-20`
+
+- **Base body / skeleton key (already in the port):** `appearance_key = 5*(class + 4*variant) - 24`
+  with `class` = descriptor +0x34 and `variant` = descriptor +0x2C (the PC branch; `variant == 3`
+  yields the 0 sentinel = invisible). For players there is **no categoryBase term** -- the formula is
+  pure, so the port's "categoryBase[] pending" note is the **wrong blocker for the player path**. The
+  key selects the visual-catalog record (carrying the bind-pose / skeleton handle and the base skin).
+- **Per-part overlay build:** the factory builds parts for overlay slots **{3, 4, 6, 2, 11, 14}**. For
+  each slot it composes a single 64-bit catalogue key and looks it up to get the part's skin handle:
+  `key64 = gid + 1_000_000_000 * (slot + 100 * appearance_key)`.
+  - **Slot 14 (body / face / visible base):** the gid is rebuilt from the appearance bytes --
+    `gid = 1000 * (d + 10 * (a + 10 * (b + 10 * (partId / 1_000_000))))`, where `d` = descriptor +0x22
+    and `a`, `b` are the two appearance bytes (descriptor +0x2C / +0x34). The face/visible-base folds
+    into these digits. (The build-part routine labels the two bytes opposite to the key formula; the
+    byte SOURCES are pinned, the human label of which digit is "class" vs "variant" is debugger-pending.)
+  - **Other slots {3, 4, 6, 2, 11}:** `gid = 10000 * (partId / 10000) + partId % 100`, where `partId`
+    is the worn-item id taken from the descriptor's equipment table (descriptor +0x58, 20 entries x 16
+    bytes, each entry's leading dword = a worn-item id).
+- **Skin load:** each resolved part skin loads from **`data/char/skin/g{gid}.skn`** (inverse-bind baked,
+  per `specs/skinning.md`) and binds to the shared pose. **Weapons take a separate rigid path:** the
+  hand-weapon worn-item id resolves to a static item-skin attached to the hand bone (NOT a `g{gid}.skn`
+  deform skin), dual-weapon aware.
+
+> **Port gap (CharSelectScene3D / ClassAppearanceResolver).** The lineup must (a) read the equipment
+> table at descriptor +0x58 and attach the worn-gear overlays, (b) rebuild the slot-14 body gid for
+> non-starter / non-variant-0 appearances via the formula above, (c) compose the 64-bit per-part key
+> and do the multi-slot catalogue lookup (the port currently loads a single base `.skn`), and (d)
+> attach the rigid weapon skin. Face/head folds into the slot-14 gid digits; a distinct dye/color
+> channel and a distinct gender field were NOT isolated statically -- candidates (per-equip-entry tail
+> bytes; descriptor low byte at +0x14) are debugger-pending.
+<!-- source: _dirty/cycle6b/laneC_appearance_chain.md (section 3.5 per-part key + gid reduction; section 6 port gap) -->
+
 ## 3.4 Slot availability vs lock flags (CODE-CONFIRMED byte source)
 
 Two per-slot flag arrays gate enter/render, now pinned to their byte source on the select-window
@@ -1462,6 +1536,20 @@ rest of the screen, responding only to the player's manual boom/yaw input overla
 > - **Arming:** only index **0** (rig constructor) and index **1** (scene reset) are armed in char-select.
 >   **KF2..KF5 have no static arm site in this scene and are likely dead here (DEBUGGER-PENDING).**
 > - **Projection (EXACT):** vertical **FOV 50°**, **near 5.0**, **far 15000.0**.
+
+> **CYCLE 6b RECONCILIATION (2026-06-20) -- the manual boom is the input overlay, NOT a replacement
+> for the entry dolly.** A CYCLE 6b camera re-walk independently re-confirmed the projection (FOV 50,
+> near 5.0, far 15000) and the framed point near (508, 70, -9758), and found the per-frame **manual
+> boom**: two keys add/subtract a boom-distance scalar on the scene-graph node at +/-10.0 units per
+> second, no clamp, no easing. That pass did **not** chase the separate camera-PATH rig and therefore
+> could not see the KF0->KF1 dolly -- the same omission the HEADLINE CORRECTION above already warns
+> about (the prior "single static camera" reading made the identical mistake). So the boom is the
+> **manual zoom overlay** layered on top of the entry dolly's resting pose, exactly as this section
+> states ("responding only to the player's manual boom/yaw input overlay"); it does **not** refute the
+> keyframed entry dolly. The yaw turntable on the selected create/zoom preview is +/-2.0 rad/s on the
+> Y axis, input-driven while held, the accumulator zeroed on slot change -- consistent with 4.2.
+> `// confirmed: static IDA 2026-06-20`
+> <!-- source: _dirty/cycle6b/laneD_camera_preview.md (section 1b boom, section 2 yaw) -->
 
 > **CORRECTION — UN-REFUTE the camera path (CODE-CONFIRMED, exhaustive static re-walk).** A prior
 > reading concluded "single static camera; the orbit is REFUTED — no keyframes, no index, no

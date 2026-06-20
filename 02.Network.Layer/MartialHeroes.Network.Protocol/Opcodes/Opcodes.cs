@@ -69,6 +69,9 @@ public static class Opcodes
     public const uint SmsgSrvLetterReceived = 0x10014;
 
     // --- major 2: GameAction (C2S) ---
+    /// <summary>2:0 — leave-world / logout-to-lobby request (header-only, 0 B). status: confirmed. spec: packets/2-0_leave_world.yaml, Docs/RE/specs/world_exit.md §1.</summary>
+    public const uint CmsgLeaveWorld = 0x20000;
+
     /// <summary>2:7 — client whisper / named private message (19 B header + text). status: draft. spec: packets/2-7_whisper.yaml.</summary>
     public const uint CmsgWhisper = 0x20007;
 

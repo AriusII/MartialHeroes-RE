@@ -3345,6 +3345,9 @@ functions:
   "0x42f2ca": { name: "CoreMot_LoadHeader", note: ".mot header loader (was mislabeled opaque actor-pose) [anim-skinning] (CAMPAIGN VFS-MASTERY)" }
   "0x42f839": { name: "CoreMot_LoadFullData", note: ".mot full-data loader (was mislabeled opaque actor-pose) [anim-skinning] (CAMPAIGN VFS-MASTERY)" }
   "0x456a35": { name: "SoundTable_LoadFiveTables", note: "loads the 5 per-area sound tables (.bgm/.bge/.eff/.wlk/.run); distinct from SoundTable_LoadArea@0x5f9348 [sound] (CAMPAIGN VFS-MASTERY)" }
+  # CYCLE 6 (2026-06-20, 263bd994-anchored): function renames from Phase 6-L.
+  "0x546c5f": { name: "SelectWindow_RefreshSlotInfoRow", note: "char-select per-slot roster row: reads slot descriptor name/level/world-XZ; slot-occupied gate on appearance variant [frontend-scenes] (CYCLE 6)" }
+  "0x436a94": { name: "Server_GetNameString", note: "server-list name resolver: name_id = 5000 + ServerId (1-based 1..40) via msg.xdb; out-of-range -> 5901 unknown-server template [frontend-scenes] (CYCLE 6)" }
 
 # NOTE: globals below carry OLD-BUILD addresses — re-anchoring is pending.
 # They are preserved verbatim for continuity but SHOULD NOT be applied to the new IDB
@@ -3371,6 +3374,14 @@ globals:
   "0x8c3f90": { name: "g_FrameTickScheduler", note: "Per-frame round-robin tick scheduler object (ticked by TickAll); now-ms at +72020 ->... [scene-machine]" }
   "0x9fa348": { name: "g_FrameTickScheduler_cached", note: "Engine_MainLoop's cached pointer to FrameTickScheduler_GetSingleton() result [scene-machine]" }
   "0x9fa34c": { name: "g_MainLoopInitGuard", note: "One-shot init guard bit for Engine_MainLoop singleton caching [scene-machine]" }
+  # CYCLE 6 (2026-06-20): global renames from Phase 6-L — NEW-BUILD (263bd994) anchored (unlike the old-build globals above; these are live-applied).
+  "0x7ac0dc": { name: "g_LocalPlayerAreaId", note: "local player's current area/map id; mirror of AreaId from 4/1 body+0x0C (also at g_LocalPlayer+188) [world-entry] (CYCLE 6)" }
+  "0x7ac464": { name: "g_WorldEntryTableA", note: "WorldEntryTableA (3088B) memcpy'd from 4/1 body+0x18 [world-entry] (CYCLE 6)" }
+  "0x7ad074": { name: "g_WorldEntryTableB", note: "WorldEntryTableB (4044B) memcpy'd from 4/1 body+0xC28 [world-entry] (CYCLE 6)" }
+  "0x7ac0e0": { name: "g_SpawnPosX", note: "spawn world X (f32) from 4/1 body+0x2374 [world-entry] (CYCLE 6)" }
+  "0x7ac0e4": { name: "g_SpawnPosZ", note: "spawn world Z (f32) from 4/1 body+0x2378 [world-entry] (CYCLE 6)" }
+  "0x7aff98": { name: "g_LocalPlayerSpawnX", note: "local-player spawn X mirror (f32); reloaded for terrain cold-start + actor position [world-entry] (CYCLE 6)" }
+  "0x7aff9c": { name: "g_LocalPlayerSpawnZ", note: "local-player spawn Z mirror (f32); reloaded for terrain cold-start + actor position [world-entry] (CYCLE 6)" }
   # "0x<addr>": { name: "g_RollingKey", note: "packet cipher rolling key state" }
 
 crypto:

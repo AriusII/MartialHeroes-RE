@@ -1,6 +1,5 @@
 using System.Net;
 using Godot;
-using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Vfs;
 using MartialHeroes.Client.Application.Assets;
 using MartialHeroes.Client.Application.Diagnostics;
@@ -302,6 +301,55 @@ public sealed partial class ClientContext : Node
     /// </summary>
     public MartialHeroes.Client.Godot.Adapters.RebindableAreaAssemblySource? AreaAssemblySource { get; private set; }
 
+    /// <summary>
+    /// The area id the CellBake lambda is currently authorised to compose for.
+    ///
+    /// Stamped by <see cref="SetExpectedBakeArea"/> each time
+    /// <see cref="World.RealWorldRenderer.TriggerTerrainStreaming"/> rebinds the assembly source
+    /// to a new area (alongside <see cref="RebindableAreaAssemblySource.SetArea"/>).
+    ///
+    /// The CellBake lambda reads this value at drain-time (Godot main thread) and silently drops
+    /// any SectorLoadedEvent whose cell coordinates belong to a previously-bound area — i.e. events
+    /// that were published into the ClientEventBus by the OLD streaming task before the rebind, but
+    /// drained AFTER the rebind. Without this guard those stale events would call
+    /// AreaComposer.ComposeCell with the new (wrong) area source, building paths like
+    /// data/map&lt;newArea&gt;/dat/d&lt;newArea&gt;x&lt;oldCell&gt;... which do not exist → empty cell →
+    /// IsResolved=false → the ~36% cell miss.
+    ///
+    /// Threading: both writes (SetExpectedBakeArea) and reads (CellBake lambda) happen on the
+    /// Godot main thread (_Process drain loop). No lock needed.
+    ///
+    /// spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives AreaComposer paths.
+    /// spec: Docs/RE/formats/area_inventory.md §1A — membership gate before any cell streams.
+    /// </summary>
+    public int ExpectedBakeAreaId { get; private set; } = -1; // -1 = uninitialised (no area bound yet)
+
+    /// <summary>
+    /// Stamps the <see cref="ExpectedBakeAreaId"/> so the CellBake lambda rejects stale events
+    /// from the previous streaming session.
+    ///
+    /// Called by <see cref="World.RealWorldRenderer.TriggerTerrainStreaming"/> immediately after
+    /// <see cref="RebindableAreaAssemblySource.SetArea"/> so both the source rebind and the bake
+    /// guard advance atomically (both on the main thread).
+    ///
+    /// spec: Docs/RE/specs/assembly_graph.md §1 — area rebind before streaming starts.
+    /// </summary>
+    public void SetExpectedBakeArea(int areaId)
+    {
+        if (ExpectedBakeAreaId == areaId) return;
+        GD.Print($"[ClientContext] SetExpectedBakeArea: {ExpectedBakeAreaId} → {areaId}. " +
+                 "spec: assembly_graph.md §1/§4 (area rebind guard).");
+        ExpectedBakeAreaId = areaId;
+    }
+
+    /// <summary>
+    /// The durable 4/1 world-entry state (area id + spawn) — survives the SingleReader channel
+    /// handoff so the InGame scene can recover the area cold-start even when the transient
+    /// InGameWorldBootstrappedEvent was drained by an earlier front-end scene.
+    /// spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — durable world-entry seam.
+    /// </summary>
+    public MartialHeroes.Client.Application.World.WorldEntryState WorldEntry { get; private set; } = null!;
+
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
@@ -380,6 +428,13 @@ public sealed partial class ClientContext : Node
 
         // 3. Domain world registry.
         var world = new ClientWorld();
+
+        // 3a. Durable 4/1 world-entry state: survives the transient InGameWorldBootstrappedEvent
+        //     channel drain that happens while a front-end scene (LoginScene/LoadScene) is the active
+        //     drainer — before the InGame GameLoop exists. The InGame _Ready recovery step reads this
+        //     holder to cold-start the area even when the transient event was already consumed.
+        //     spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — durable world-entry seam.
+        var worldEntry = new MartialHeroes.Client.Application.World.WorldEntryState();
 
         // 4. Unhandled opcode sink — count-only for now.
         IUnhandledOpcodeSink opcodeSink = new CountingUnhandledOpcodeSink();
@@ -524,6 +579,48 @@ public sealed partial class ClientContext : Node
             CellAssemblyHandoff = new CellAssemblyHandoff(bus,
                 (mapX, mapZ, _) =>
                 {
+                    // AREA-REBIND STREAMING RACE GUARD (CYCLE 6 Lane D fix):
+                    //
+                    // SectorLoadedEvent can be published into the ClientEventBus by an OLD streaming
+                    // task (fired for the previous config-area in TriggerTerrainStreaming) while the
+                    // source has ALREADY been rebound to the NEW server area (by a second call to
+                    // TriggerTerrainStreaming from OnWorldEntered). When _Process drains those stale
+                    // events, areaSource.AreaId == newArea but the cell coordinates belong to the old
+                    // area → AreaComposer builds data/map<newArea>/dat/d<newArea>x<oldX>z<oldZ>.*
+                    // paths that do not exist → open fails → ComposeCell returns empty → IsResolved=false
+                    // → ~36% cell miss.
+                    //
+                    // Fix: compare areaSource.AreaId against ExpectedBakeAreaId at drain time.
+                    // ExpectedBakeAreaId is stamped by SetExpectedBakeArea(TargetAreaId) from
+                    // TriggerTerrainStreaming alongside areaSource.SetArea(TargetAreaId).
+                    // Both writes and reads are on the Godot main thread (no lock needed).
+                    //
+                    // A stale event (from the OLD streaming session) is identified by the fact that
+                    // its cell coordinates are NOT in the current area's .lst — but we cannot check
+                    // that cheaply here. Instead we gate on ExpectedBakeAreaId: if the source was
+                    // rebound (areaSource.AreaId == currentArea) but the event was produced BEFORE
+                    // the rebind, it is stale. The guard is conservative: it drops ANY bake call
+                    // whose source area does not match the expected area. Since SetExpectedBakeArea
+                    // and areaSource.SetArea are always called together (TriggerTerrainStreaming),
+                    // a valid event always has areaSource.AreaId == ExpectedBakeAreaId.
+                    //
+                    // spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives paths.
+                    // spec: Docs/RE/formats/area_inventory.md §1A — membership gate before cell stream.
+                    int currentBakeArea = ExpectedBakeAreaId;
+                    int sourceArea = areaSource.AreaId;
+                    if (currentBakeArea >= 0 && sourceArea != currentBakeArea)
+                    {
+                        // Stale event from a superseded streaming session — drop silently.
+                        // This can happen when: (a) OnWorldEntered rebinds the source to serverArea
+                        // while events from the configArea streaming task are still in the channel,
+                        // OR (b) the source was rebound but ExpectedBakeAreaId was not yet stamped
+                        // (impossible since both happen together in TriggerTerrainStreaming).
+                        GD.Print($"[ClientContext] CellBake({mapX},{mapZ}): source area {sourceArea} ≠ " +
+                                 $"expected {currentBakeArea} — stale streaming event dropped. " +
+                                 "spec: assembly_graph.md §1/§4 (area-rebind race guard).");
+                        return null;
+                    }
+
                     // Payload bytes from SectorLoadedEvent are the .ted bytes already loaded by
                     // VfsTerrainSectorSource. The AreaComposer re-reads all cell files via the
                     // RebindableAreaAssemblySource (which has full VFS access and is rebound to the
@@ -610,7 +707,8 @@ public sealed partial class ClientContext : Node
         var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver,
             characterSelection: characterSelection,
             accountCharacters: accountCharacters,
-            sceneStateMachine: sceneMachine)
+            sceneStateMachine: sceneMachine,
+            worldEntry: worldEntry)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -758,6 +856,7 @@ public sealed partial class ClientContext : Node
         InputBus = inputBus;
         EngineLoop = engineLoop;
         StreamingService = streamingService;
+        WorldEntry = worldEntry; // spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — durable seam.
 
         // Store the relay setter so InputRouter can set the real handler later.
         _setWorldHandler = worldRelay.SetTarget;

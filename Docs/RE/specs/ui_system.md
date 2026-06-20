@@ -767,7 +767,7 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 | `data/ui/mainwindow.dds` | Several slot-row action buttons + create-form widgets (steppers, confirm/cancel, name title) |
 | `data/ui/InventWindow.dds` | Detail / confirm sub-panels (647 × 340 dialog frames) shared with login |
 | `data/ui/CarrierPigeonPerson.dds` | Appearance selector accents; gender/class preview swatches |
-| `data/ui/CarrierPigeonAll.dds`, `data/ui/tradekeepwindow.dds`, `data/ui/blacksheet.dds` | Small create-form accents; a 23 × 23 corner close button (blacksheet) |
+| `data/ui/CarrierPigeonAll.dds`, `data/ui/tradekeepwindow.dds`, `data/ui/blacksheet.dds` | Small create-form accents. `blacksheet.dds` is loaded by the window builder but is used by a later create-form sub-panel — it is **not** a corner-X frame close (that prior claim is REFUTED; see the verified-facts note after the structural table). |
 
 > **§8.2 atlas correction.** The character-select chrome is **not** a single dedicated atlas. It
 > composites from at least three primary shared UI atlases (`loginwindow.dds` dominant, plus
@@ -796,8 +796,32 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 | Name-entry textbox | 60 | 80 | 274 | 18 | `GUTextbox`; CP949 character name | CODE-CONFIRMED |
 | Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
-| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds`; the select-window builder contains **no literal for this rect** — most likely base `GUWindow` title-bar chrome, so dst is base-window-chrome / debugger-pending and src origin is register-fed / debugger-pending. The close **action** is confirmed (close message type 13 / id 10001 → quit → GameState 6 sub-state 8). | base-window-chrome / debugger-pending (dst + src); close action CODE-CONFIRMED |
+| ~~Corner close (atlas-blit widget)~~ | — | — | — | — | **REFUTED — there is NO discrete corner-X close widget built from `blacksheet.dds` in the char-select window.** The select-window builder constructs no close-button rect (no atlas-blit "X"), and `blacksheet.dds`, while loaded by the window builder, is consumed by a later create-form sub-panel, **not** by a frame close. The close is a **message-handler branch**, not a clicked button: a system-close message (ESC / system close) drives the scene to **state 6, sub-state 8** (return to login). See the verified-facts note below. | REFUTED (no widget); close-as-message-branch CODE-CONFIRMED |
 | Detail / confirm dialog frames | 318 | 190 | 647 | 340 | `InventWindow.dds` (×5 near-identical panels) | CODE-CONFIRMED |
+
+> **Window close — NO corner-X widget (CODE-CONFIRMED; premise REFUTED, build 263bd994).** The
+> earlier rows asserting a discrete 23 × 23 corner-X close button blitted from `blacksheet.dds` are
+> **wrong and have been struck.** The select-window builder constructs **no close-button widget** —
+> there is no atlas-blit "X" rect for the frame, and no register-fed source for one. `blacksheet.dds`
+> *is* loaded by the window builder, but it is consumed by a **later create-form sub-panel**, not by a
+> frame close. The window close is instead a **message-handler branch**: a system-close message
+> (ESC / system close) is handled directly and drives the scene to **state 6, sub-state 8** (return to
+> login). It is **not** a clicked atlas-blit button.
+>
+> Verified about the char-select window chrome and its real buttons:
+> - The frame chrome is drawn from the **login-window / main-window chrome sheets**
+>   (`loginwindow.dds` dominant, plus `mainwindow.dds` / `InventWindow.dds`), **not** from
+>   `blacksheet.dds`.
+> - The window's real navigation is a **trio of action-bound buttons** — **new-character (action 4)**,
+>   **enter-game (action 6)**, and a **panel toggle** — these are the visible buttons; **none of them
+>   is a window-frame "X".**
+> - **Window origin = screen-center minus a fixed offset**, so the window's absolute screen position is
+>   resolution-dependent / runtime-fed. The window-local destination rects of the nav buttons are
+>   fixed (tabulated above), but their **absolute pixel positions** and the exact **hover / pressed
+>   atlas source rects** are **live-pending (6-D / visual-oracle)** — do not treat any concrete pixel
+>   rect as confirmed for those.
+> - Whether the official UI even displays a corner-X at all is a **visual-oracle question**
+>   (**live-pending (6-D)**), since the binary builds none.
 
 **Slot occupancy and the shared left panel (CODE-CONFIRMED).** The character-select screen does
 **not** build five distinct 2D "plate" widgets, one per roster slot. Slot selection is the 3D
@@ -873,6 +897,30 @@ panel tree shown/hidden as a unit by the scene-reset path:
 > **Create = 4 / Delete = 5 / Enter = 6** buttons at dst-Y **112**. Do not treat 413 / 531 as ids, and
 > do not bind the `(42, 325)` / `(112, 325)` widgets to the Create or Delete buttons — they are
 > Confirm (35) and Cancel (36).
+
+> **CYCLE 6b CORRECTION (2026-06-20) -- the per-slot info row + the four selectable-gated slot buttons
+> (CODE-CONFIRMED, build 263bd994).** `// confirmed: static IDA 2026-06-20`
+> - **Shared info row = exactly 3 labels.** The single shared left character-info panel's per-slot text
+>   is a contiguous **3-label block**, refreshed for the currently-selected slot: (1) name, (2) level,
+>   (3) **position**, formatted as the literal `"%d , %d"` over the two world-position floats (descriptor
+>   +0xA0 / +0xA4) truncated to int. **There is NO class label on the info row** -- earlier notes that
+>   implied a class line are corrected. The class value drives the 3D preview visual only.
+> - **The 10-cell stat grid is NOT fed from the wire 96-byte stats block.** On the select screen the
+>   grid is the create-form point-buy control (action ids 25..34, see above) and its glyphs are
+>   build-time literals; the per-slot 96-byte stats block parsed by `3/1` is carried through and only
+>   consumed by the **in-game** Character-info window (8.7) after Enter. Do not populate a select-screen
+>   stat readout from the wire stats block.
+> - **Four selectable-gated slot buttons (action ids 4 / 5 / 6 / 61).** Adjacent to the 3-label block,
+>   the window holds four 3-state buttons gated by a **per-slot selectable byte** (the server-supplied
+>   per-slot flag, `frontend_scenes.md §3.4`). Default after build: the locked base button (id 4) and the
+>   highlight art (id 61) shown; the two enter/confirm buttons (ids 5, 6) hidden. When the slot is
+>   selectable the polarity flips: {id 61, 5, 6 shown; id 4 hidden}; not-selectable shows {id 4} only.
+>   A freshly created character forces its selectable byte clear until the server resolves location, so a
+>   just-created slot first shows the locked state. (The "61..74 = per-slot / stat-grid actions" row in
+>   the action map above is refined by this: ids 4/5/6/61 are the per-slot button quartet; the role names
+>   -- locked base / enter-confirm / highlight art -- are inferred from action-id + atlas + show/hide
+>   polarity, the visibility behaviour is confirmed.)
+> <!-- source: _dirty/cycle6b/laneB_slotinforow.md (sections 1-3), laneA_smsg_charlist.md (section 4) -->
 
 **Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
 character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
@@ -3134,7 +3182,7 @@ object; its 2D chrome composites from **four atlases** (VFS-VERIFIED paths):
 | `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, slot-row plates, stat-icon grids, appearance ± steppers, tab buttons, Create/Delete | VFS-VERIFIED / CODE-CONFIRMED |
 | `data/ui/mainwindow.dds` | Slot-row plates + the **create name-plate** atlas (Create/Delete/Enter button strips at src V=1004) and other create-form widgets | VFS-VERIFIED / CODE-CONFIRMED |
 | `data/ui/InventWindow.dds` | Modal chrome (confirm / delete / name-entry dialog frames), shared with login | VFS-VERIFIED / CODE-CONFIRMED |
-| `data/ui/blacksheet.dds` | Corner-close button; dim/blackout overlay | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/blacksheet.dds` | Loaded by the window builder for a **later create-form sub-panel** (and the dim/blackout overlay). **NOT a corner-X frame close** — that prior claim is REFUTED (the close is a system-close message-handler branch → state 6 sub-state 8, not an atlas-blit widget; see §8.2 verified-facts note). | VFS-VERIFIED; close-as-widget REFUTED |
 | (GUCanvas3D live 3D viewports) | Character previews; not a 2D atlas | CODE-CONFIRMED |
 
 > **Correction.** Earlier versions of this section listed `carrierpigeonperson.dds`,

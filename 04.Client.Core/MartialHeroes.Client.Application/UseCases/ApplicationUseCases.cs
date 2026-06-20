@@ -2,10 +2,10 @@ using System.Buffers.Binary;
 using System.Text;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.Scene;
 using MartialHeroes.Client.Application.World;
 using System.Collections.Immutable;
-using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Client.Domain.Inventory;
 using MartialHeroes.Client.Domain.Skills;
 using MartialHeroes.Client.Domain.Social;
@@ -57,6 +57,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly ILobbyClient? _lobbyClient;
     private readonly ILastServerStore? _lastServerStore;
     private readonly SceneStateMachine? _sceneStateMachine;
+    private readonly InFlightLatch? _inFlightLatch;
+    private readonly KeepaliveDriver? _keepaliveDriver;
 
     /// <summary>The 1/9 launcher/session token length: a fixed 33-byte buffer. spec: cmsg_char_enter.yaml.</summary>
     public const int SessionTokenLength = 33;
@@ -137,7 +139,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         IClientEventBus? eventBus = null,
         ILobbyClient? lobbyClient = null,
         SceneStateMachine? sceneStateMachine = null,
-        ILastServerStore? lastServerStore = null)
+        ILastServerStore? lastServerStore = null,
+        InFlightLatch? inFlightLatch = null,
+        KeepaliveDriver? keepaliveDriver = null)
     {
         _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
         _world = world ?? throw new ArgumentNullException(nameof(world));
@@ -149,6 +153,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _lobbyClient = lobbyClient; // optional: only the lobby use-cases need it
         _lastServerStore = lastServerStore; // optional: persists Lastserver reg key on server select
         _sceneStateMachine = sceneStateMachine; // optional: Campaign-15 faithful 8-state scene spine
+        _inFlightLatch = inFlightLatch; // optional: the single in-flight latch (armed by char-mgmt sends)
+        _keepaliveDriver = keepaliveDriver; // optional: 2/112 toggle disarm on the guarded 2/0 leave path
 
         _sessionToken = new byte[SessionTokenLength];
         if (!versionToken.IsEmpty)
@@ -319,6 +325,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
         BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
 
+        // 1/9 is a char-mgmt send: arm the single in-flight latch (cleared by 4/1). spec: net_contracts.md §1.3.
+        _inFlightLatch?.Arm();
+
         // Online enter-world path is 4 (Select) → 2 (Load, via 3/5 EnterGameAck) → … → 5; the use-case
         // only sends 1/9 and waits for 3/5. spec: client_runtime.md §7.5.3 / §7.9.5.
         return SendAsync(major: 1, minor: 9, payload, cancellationToken);
@@ -346,6 +355,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
         payload[0x01] = 0; // spec: cmsg_char_select.yaml — Mode 0 = select/view.
 
+        // 1/7 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
+        _inFlightLatch?.Arm();
         return SendBoolAsync(major: 1, minor: 7, payload, result: true, cancellationToken);
     }
 
@@ -392,6 +403,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x2C, 4), request.Stat4);
         BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x30, 4), request.PointsRemaining);
 
+        // 1/6 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
+        _inFlightLatch?.Arm();
         return SendResultAsync(major: 1, minor: 6, payload, CharacterNameValidationResult.Valid, cancellationToken);
     }
 
@@ -413,6 +426,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
         payload[0x01] = 1; // spec: cmsg_char_select.yaml — Mode 1 = delete, code-confirmed.
 
+        // 1/7 (delete-overload) is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
+        _inFlightLatch?.Arm();
         return SendBoolAsync(major: 1, minor: 7, payload, result: true, cancellationToken);
     }
 
@@ -445,6 +460,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         p[0x00] = (byte)slotIndex; // spec: cmsg_char_rename.yaml — SlotIndex @0.
         WriteFixedCp949(newName, p.Slice(0x01, 17)); // spec: cmsg_char_rename.yaml — NewName @1.
 
+        // 1/13 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
+        _inFlightLatch?.Arm();
         return SendResultAsync(major: 1, minor: 13, payload, CharacterNameValidationResult.Valid, cancellationToken);
     }
 
@@ -702,6 +719,37 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendResultAsync(major: 2, minor: 35, payload, result: true, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public ValueTask LogoutAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // 1/0 CmsgLogout is header-only (no payload), fire-and-forget: arm NO latch, no keepalive disarm.
+        // spec: Docs/RE/specs/world_exit.md §1.1; Docs/RE/packets/cmsg_logout.yaml (size: 0).
+        return SendAsync(major: 1, minor: 0, ReadOnlyMemory<byte>.Empty, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask LeaveWorldAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Guarded leave-world: FIRST disarm the 2/112 keepalive toggle (the keepalive driver sends
+        // 2/112 body 0x00), THEN send 2/0. The disarm-before-send ordering is the structural difference
+        // from the logout path. spec: Docs/RE/specs/world_exit.md §1.2.
+        if (_keepaliveDriver is not null)
+        {
+            await _keepaliveDriver.OnWorldExitedAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        // 2/0 CmsgLeaveWorld is header-only (no payload). STRUCT GAP: there is no CmsgLeaveWorld struct
+        // in Network.Protocol (only CmsgLogout exists). Because 2/0 is header-only, no body is invented —
+        // the opcode is emitted with an empty payload via the sink (same shape as 1/0). The missing typed
+        // marker struct is flagged to network-engineer; do NOT synthesize a body here.
+        // spec: Docs/RE/specs/world_exit.md §1 / §1.2 (2/0 header-only, 8 bytes).
+        await SendAsync(major: 2, minor: 0, ReadOnlyMemory<byte>.Empty, cancellationToken).ConfigureAwait(false);
+    }
+
     // -------------------------------------------------------------------------
     // C2S payload sizes (spec-cited; no struct exists for these client-emitted minors)
     // -------------------------------------------------------------------------
@@ -742,17 +790,20 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
     /// <summary>
     /// Classifies a lobby server's caption branch for presentation from <paramref name="statusCode"/>
-    /// (wire +2): 0 = active (load band), 3 = scheduled-open (HH:MM caption), 1..39 = caption array,
-    /// else = fallback 5901. Presentation-only; not a wire decode. The selectability gate is
-    /// <c>StatusCode == 0 AND Load &lt; 2400</c>, not a <see cref="LobbyServerRecord.ServerId"/> value.
-    /// spec: Docs/RE/packets/lobby.yaml Record Shape A.
+    /// (wire +2). The status caption is message id <c>4029 + StatusCode</c> (StatusCode 0..3 → ids
+    /// 4029..4032): 0 = active (load band), 3 = scheduled-open (HH:MM caption). The 1..39 / out-of-range
+    /// branches are presentation hints only — the full status enum beyond 0 and 3 is unverified. The
+    /// selectability gate is <c>StatusCode == 0 AND Load &lt; 2400</c>, not a
+    /// <see cref="LobbyServerRecord.ServerId"/> value. Presentation-only; not a wire decode.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (status caption 4029 + StatusCode);
+    /// Docs/RE/packets/lobby.yaml Record Shape A.
     /// </summary>
     private static ServerStatusHint ClassifyStatus(short statusCode) => statusCode switch
     {
-        0 => ServerStatusHint.Normal, // spec: Record Shape A status_code == 0 (active/load branch)
-        3 => ServerStatusHint.Special, // spec: Record Shape A status_code == 3 (scheduled-open HH:MM)
-        >= 1 and <= 39 => ServerStatusHint.Caption, // spec: Record Shape A 1..39 caption array
-        _ => ServerStatusHint.Invalid, // spec: Record Shape A < 1 or > 39 -> 5901 fallback
+        0 => ServerStatusHint.Normal, // spec: §4.1 status_code == 0 -> caption 4029 (active/load branch)
+        3 => ServerStatusHint.Special, // spec: §4.1 status_code == 3 -> caption 4032 (scheduled-open HH:MM)
+        >= 1 and <= 39 => ServerStatusHint.Caption, // spec: §4.1 status caption family (1/2 -> 4030/4031)
+        _ => ServerStatusHint.Invalid, // out-of-range status (full enum unverified; lobby.yaml UNKNOWNS)
     };
 
     // -------------------------------------------------------------------------

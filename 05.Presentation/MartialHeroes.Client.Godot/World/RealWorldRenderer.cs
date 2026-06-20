@@ -157,9 +157,33 @@ public sealed partial class RealWorldRenderer : Node3D
     private TerrainNode? _terrainNode;
     private ClientContext? _ctx;
 
+    /// <summary>
+    /// Read-only access to the already-open VFS handle so sibling presentation nodes (e.g. the in-world
+    /// local-player avatar build) can resolve assets through the SAME handle instead of opening a second
+    /// memory-mapped archive. Null when offline / real assets disabled. Main-thread only.
+    /// spec: World/PlayerAvatarResolver.cs — local player skin/bind/idle resolution reuses this handle.
+    /// </summary>
+    public RealClientAssets? Assets => _assets;
+
     // Node-lifetime cancellation: cancelled in _ExitTree so the fire-and-forget streaming task
     // stops touching this node (and skips its completion prints) once the node leaves the tree.
     private readonly CancellationTokenSource _lifetimeCts = new();
+
+    // Per-streaming-call cancellation: cancelled by TriggerTerrainStreaming before it launches
+    // a new UpdateCenterAsync task. This prevents the OLD area's streaming task from continuing
+    // to publish SectorLoadedEvents AFTER the source has been rebound to a new area.
+    //
+    // Combined with the ExpectedBakeAreaId guard in ClientContext.CellBake, this is the two-pronged
+    // fix for the CYCLE 6 area-rebind streaming race (Lane D):
+    //   (a) CancelAndResetStreamingCts()  — stops future SectorLoadedEvent publishes from the old task.
+    //   (b) ctx.SetExpectedBakeArea(...)  — drops already-published stale events at drain time.
+    //
+    // _streamingCts is a LinkedTokenSource (linked to _lifetimeCts) so node tear-down (_ExitTree)
+    // still cancels any in-flight streaming task via _lifetimeCts alone (no double-cancel path needed).
+    // Main-thread only — never accessed from background tasks.
+    // spec: Docs/RE/formats/terrain.md §12.2 (5×5 ring streaming). CONFIRMED.
+    // spec: Docs/RE/specs/assembly_graph.md §1/§4 (area rebind before streaming starts). CONFIRMED.
+    private CancellationTokenSource? _streamingCts;
 
     // Player controller reference: used to push TargetForCamera → CameraController each frame.
     private PlayerController? _playerController;
@@ -444,10 +468,274 @@ public sealed partial class RealWorldRenderer : Node3D
         GD.Print($"[RealWorldRenderer] Initialise: complete for cell ({TargetMapX},{TargetMapZ}).");
     }
 
+    // -------------------------------------------------------------------------
+    // Server-driven area cold-start (called from GameLoop on InGameWorldBootstrappedEvent)
+    // -------------------------------------------------------------------------
+
+    // Re-entrance guard: prevents concurrent OnWorldEntered calls (e.g. duplicate 4/1 packets).
+    private volatile bool _worldEntryInProgress;
+
+    /// <summary>
+    /// Re-targets the renderer to <paramref name="areaId"/> and re-runs the area cold-start
+    /// (texture resolver, environment, terrain streaming) for the new area.
+    ///
+    /// Called by <see cref="GameLoop"/> when <c>InGameWorldBootstrappedEvent</c> arrives (the 4/1
+    /// world-entry carrier). This makes the area cold-start <b>server-driven</b>: the AreaId at
+    /// 4/1 body offset 12 selects the on-disk area, and the config "area=" key becomes an
+    /// OFFLINE-DEMO fallback only (Initialise still uses it when no live 4/1 supplies a different
+    /// id — preserving the demo path exactly as before).
+    ///
+    /// Behaviour:
+    /// <list type="bullet">
+    ///   <item><see cref="IClientEvent">areaId</see> ≤ 0 → no-op (spec: 4/1 AreaId checked ≠ 0).
+    ///     spec: Docs/RE/specs/world_entry.md §2.3.</item>
+    ///   <item><c>_assets</c> null (offline, Initialise bailed) → log and return; the offline
+    ///     demo area is preserved exactly as before.</item>
+    ///   <item><c>areaId == TargetAreaId</c> AND already initialised → no-op (avoid double-init /
+    ///     races; logs "already on area N").</item>
+    ///   <item>Otherwise → retarget, re-resolve the spawn-density cell for the new area, re-run
+    ///     texture resolver + environment + streaming for the new area. The camera is NOT
+    ///     re-spawned (it is already in the scene tree from Initialise). Actor placement for the
+    ///     new area's NPCs/mobs comes through the 4/4 ActorSpawnedEvent stream handled by
+    ///     ActorRegistry — NpcRenderer is NOT re-run here.</item>
+    /// </list>
+    ///
+    /// spec: Docs/RE/specs/world_entry.md §2.3 — 4/1 reads AreaId, cold-starts the area by its
+    ///        3-digit decimal directory; area cold-start happens INSIDE the 4/1 handler.
+    /// spec: Docs/RE/specs/world_entry.md §3.1 — AreaId → zero-padded 3-digit dir → &lt;id&gt;.lst.
+    /// </summary>
+    public void OnWorldEntered(int areaId, MartialHeroes.Shared.Kernel.Numerics.Vector3Fixed position)
+    {
+        // spec: Docs/RE/specs/world_entry.md §2.3 — AreaId is checked != 0 before use.
+        if (areaId <= 0)
+        {
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: areaId={areaId} ≤ 0 — no-op. " +
+                     "spec: Docs/RE/specs/world_entry.md §2.3.");
+            return;
+        }
+
+        if (_assets is null)
+        {
+            // Offline path (Initialise bailed with no VFS): the offline demo area is preserved.
+            // spec: Docs/RE/specs/world_entry.md §2.3 (server AreaId drives cold-start; config is fallback).
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: areaId={areaId} — no real assets (offline demo); " +
+                     "offline demo area kept. spec: Docs/RE/specs/world_entry.md §2.3.");
+            return;
+        }
+
+        if (areaId == TargetAreaId && _followAnchorArmed)
+        {
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: already on area {areaId} — no-op.");
+            return;
+        }
+
+        if (_worldEntryInProgress)
+        {
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: area={areaId} — re-entry while in-progress; skipped.");
+            return;
+        }
+
+        _worldEntryInProgress = true;
+        try
+        {
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: retargeting to server area {areaId}. " +
+                     "spec: Docs/RE/specs/world_entry.md §2.3/§3.1.");
+
+            // Override TargetAreaId with the server-supplied value BEFORE re-resolving the cell,
+            // so ResolveTargetCell reads the correct area instead of the config area.
+            // spec: Docs/RE/specs/world_entry.md §3.1 — AreaId → 3-digit dir → cold-start.
+            TargetAreaId = areaId;
+
+            // Derive the streaming anchor from the 4/1 spawn position.
+            // spec: Docs/RE/specs/world_entry.md §2.3 — SpawnX/SpawnZ read from the 4/1 body;
+            //       §3.1 — first-ring load CENTRED ON THE SPAWN POSITION from the same packet.
+            //
+            // Convention: position is a Vector3Fixed in LEGACY WORLD SPACE (not Godot-space).
+            // ToVector3Float() gives raw legacy floats (x, y, z); SectorGrid.WorldToSector expects
+            // legacy XZ directly — NO Z-negation here (the negate-Z convention only applies when
+            // converting TO Godot-space for node placement; spec: Helpers/WorldCoordinates.ToGodot).
+            // spec: Docs/RE/formats/terrain.md §1.4 — cell = floor(coord/1024) + 10000. CONFIRMED.
+            bool spawnCellApplied = false;
+            try
+            {
+                var (spawnLegacyX, _, spawnLegacyZ) = position.ToVector3Float();
+
+                // Compute the biased cell from the server spawn position.
+                // Reuses the same formula ResolveTargetCell / _Process streaming use for consistency.
+                // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu.
+                (int spawnCellX, int spawnCellZ) = SectorGrid.WorldToSector(spawnLegacyX, spawnLegacyZ);
+                // spec: Docs/RE/specs/world_entry.md §2.3/§3.1 — spawn position seeds terrain anchor.
+                // spec: Docs/RE/formats/terrain.md §1.4 — cell = floor(coord/1024)+10000. CONFIRMED.
+
+                // Prefer the spawn-derived cell only when it is a valid cell for the area on the VFS.
+                // Fall back to ResolveTargetCellForServerArea's VFS-enumeration pick otherwise.
+                List<(int MapX, int MapZ)>? areaCells = null;
+                if (_assets is not null)
+                    areaCells = _assets.EnumerateTerrainCells(areaId);
+
+                bool spawnCellValid = areaCells is not null &&
+                                      areaCells.Any(c => c.MapX == spawnCellX && c.MapZ == spawnCellZ);
+
+                if (spawnCellValid)
+                {
+                    TargetMapX = spawnCellX;
+                    TargetMapZ = spawnCellZ;
+                    spawnCellApplied = true;
+                    GD.Print(
+                        $"[RealWorldRenderer] OnWorldEntered area={areaId} spawn-cell=({TargetMapX},{TargetMapZ}) " +
+                        $"from 4/1 spawn (legacy XZ=({spawnLegacyX:F0},{spawnLegacyZ:F0})). " +
+                        "spec: world_entry.md §2.3/§3.1.");
+                }
+                else
+                {
+                    GD.Print($"[RealWorldRenderer] OnWorldEntered: spawn cell ({spawnCellX},{spawnCellZ}) " +
+                             $"not in VFS for area {areaId} (legacy XZ=({spawnLegacyX:F0},{spawnLegacyZ:F0})) " +
+                             "— falling back to VFS-enumeration anchor. " +
+                             "spec: world_entry.md §2.3/§3.1.");
+                }
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: spawn-cell derivation failed: {ex.Message} " +
+                            "— falling back to VFS-enumeration anchor.");
+            }
+
+            // Re-resolve the spawn-density cell for the new area (fallback when spawn cell is absent).
+            // When the spawn cell was valid and already applied above, this is still called to
+            // confirm/refresh the area's cell list state, but TargetMapX/Z has already been set.
+            // spec: Docs/RE/specs/world_entry.md §3.1 — AreaId → 3-digit dir; on-disk area must have cells.
+            if (!spawnCellApplied)
+            {
+                try
+                {
+                    ResolveTargetCellForServerArea(areaId);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: ResolveTargetCellForServerArea failed: " +
+                                $"{ex.Message} — keeping defaults ({TargetMapX},{TargetMapZ}).");
+                }
+            }
+
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: area={areaId} cell=({TargetMapX},{TargetMapZ}).");
+
+            // Re-load texture-resolution inputs for the new area.
+            // spec: Docs/RE/specs/asset_pipeline.md §3 chain B (runtime = bgtexture.lst).
+            try
+            {
+                LoadTextureResolutionInputs();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: LoadTextureResolutionInputs failed: {ex.Message}");
+            }
+
+            // Re-wire the environment (sky/fog/light) for the new area.
+            // spec: Docs/RE/specs/environment.md §3 (assembly).
+            try
+            {
+                WireEnvironmentAndWater();
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: WireEnvironmentAndWater failed: {ex.Message}");
+            }
+
+            // Re-wire terrain texture resolver for the new area.
+            // spec: Docs/RE/formats/terrain.md §5.6 — 1-based TextureIndexGrid → texture path.
+            if (_terrainNode is not null)
+            {
+                try
+                {
+                    WireTerrainTextureResolver(_terrainNode);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: WireTerrainTextureResolver failed: {ex.Message}");
+                }
+            }
+
+            // Kick off terrain streaming centred on the new area's spawn-density cell.
+            // spec: Docs/RE/formats/terrain.md §12.2 (5×5 ring streaming).
+            // spec: Docs/RE/specs/world_entry.md §3.1 — terrain first-ring load centred on spawn.
+            if (_ctx is not null)
+            {
+                try
+                {
+                    TriggerTerrainStreaming(_ctx);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[RealWorldRenderer] OnWorldEntered: TriggerTerrainStreaming failed: {ex.Message}");
+                }
+            }
+            else
+            {
+                GD.PrintErr("[RealWorldRenderer] OnWorldEntered: _ctx is null — terrain streaming not triggered.");
+            }
+
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: cold-start complete for area {areaId}. " +
+                     "spec: Docs/RE/specs/world_entry.md §2.3.");
+        }
+        finally
+        {
+            _worldEntryInProgress = false;
+        }
+    }
+
+    /// <summary>
+    /// Like <see cref="ResolveTargetCell"/> but uses the given <paramref name="serverAreaId"/>
+    /// directly instead of reading "area=" from config. Called by <see cref="OnWorldEntered"/>
+    /// so the server-supplied AreaId drives cell discovery rather than the config fallback.
+    ///
+    /// Resolution:
+    ///   1. Enumerate .ted entries for <paramref name="serverAreaId"/>.
+    ///   2. If cells found, compute spawn-density anchor + pick ring centre (same as Initialise).
+    ///   3. If no cells for that area, fall back to terrain centroid or default coordinates.
+    ///
+    /// spec: Docs/RE/specs/world_entry.md §3.1 — AreaId → 3-digit dir; on-disk area must have cells.
+    /// spec: Docs/RE/formats/terrain.md §1.3 — per-cell path pattern. CONFIRMED.
+    /// </summary>
+    private void ResolveTargetCellForServerArea(int serverAreaId)
+    {
+        if (_assets is null) return;
+
+        int ringRadius = ReadRingRadiusFromConfig();
+        List<(int MapX, int MapZ)> cells = _assets.EnumerateTerrainCells(serverAreaId);
+        if (cells.Count > 0)
+        {
+            const int DensityRadius = 1; // always 3×3 neighbourhood for anchor detection.
+            (double anchorX, double anchorZ) = ComputeSpawnAnchor(_assets, serverAreaId, cells, DensityRadius);
+            (int mx, int mz, bool fullRing) = PickRingCenter(cells, anchorX, anchorZ, ringRadius);
+            TargetAreaId = serverAreaId;
+            TargetMapX = mx;
+            TargetMapZ = mz;
+            GD.Print($"[RealWorldRenderer] Server area {serverAreaId}: {cells.Count} cells → " +
+                     $"cell ({TargetMapX},{TargetMapZ}) " +
+                     $"(anchor=({anchorX:F1},{anchorZ:F1}), fullRing={fullRing}). " +
+                     "spec: Docs/RE/specs/world_entry.md §3.1.");
+        }
+        else
+        {
+            // No cells on disk for this area — keep whatever Initialise resolved (or defaults).
+            // spec: Docs/RE/formats/terrain.md §12.3 — absent cells load empty without crash. CONFIRMED.
+            GD.PrintErr($"[RealWorldRenderer] Server area {serverAreaId} has no .ted cells in VFS. " +
+                        $"Keeping previous cell ({TargetMapX},{TargetMapZ}). " +
+                        "spec: Docs/RE/specs/world_entry.md §3.1.");
+        }
+    }
+
     public override void _ExitTree()
     {
-        // Cancel the node-lifetime token first so the background streaming task stops and skips its
-        // completion prints before we tear down the assets it reads. spec: terrain.md §12.3.
+        // Cancel the per-streaming-call CTS first (stops any in-flight streaming task immediately)
+        // then cancel the node-lifetime CTS (belt+suspenders). Both cancellations are safe to
+        // issue before Dispose.
+        // spec: Docs/RE/formats/terrain.md §12.3 (node exit cancels the streaming task).
+        try { _streamingCts?.Cancel(); } catch (ObjectDisposedException) { }
+        try { _streamingCts?.Dispose(); } catch (ObjectDisposedException) { }
+        _streamingCts = null;
+
+        // Cancel the node-lifetime token so any background task still referencing _lifetimeCts stops.
         try
         {
             _lifetimeCts.Cancel();
@@ -851,6 +1139,42 @@ public sealed partial class RealWorldRenderer : Node3D
     /// </summary>
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
+        // ── CYCLE 6 Lane D: area-rebind streaming race fix ──────────────────────
+        //
+        // Cancel the PREVIOUS streaming task before rebinding the sources.
+        //
+        // Problem: Initialise fires a Task.Run(UpdateCenterAsync(configArea)) then immediately
+        // returns. OnWorldEntered then calls TriggerTerrainStreaming again for the serverArea.
+        // The OLD task is still running on the thread pool; it has already published (or will
+        // publish) SectorLoadedEvents for configArea cells into the ClientEventBus channel.
+        // When _Process drains those events, areaSource.AreaId == serverArea → ComposeCell builds
+        // data/map<serverArea>/dat/d<serverArea>x<configArea_mapX>z<configArea_mapZ>... (missing)
+        // → empty cell → IsResolved=false → the ~36% cell miss.
+        //
+        // Fix part (a): cancel the old streaming task so it stops publishing NEW SectorLoadedEvents.
+        //   - _streamingCts is a LinkedTokenSource: cancelling it also cancels any UpdateCenterAsync
+        //     call using that token; the background thread-pool thread exits cleanly via
+        //     OperationCanceledException from _source.LoadSectorAsync.
+        //   - Already-published events may still be in the channel (see fix part b below).
+        //
+        // spec: Docs/RE/formats/terrain.md §12.2 (streaming ring). CONFIRMED.
+        // spec: Docs/RE/specs/assembly_graph.md §1/§4 (area rebind before streaming starts). CONFIRMED.
+        if (_streamingCts is not null)
+        {
+            try { _streamingCts.Cancel(); } catch (ObjectDisposedException) { }
+            try { _streamingCts.Dispose(); } catch (ObjectDisposedException) { }
+            _streamingCts = null;
+            GD.Print($"[RealWorldRenderer] TriggerTerrainStreaming: previous streaming task cancelled " +
+                     $"(area rebind to {TargetAreaId}). spec: assembly_graph.md §1 (race fix lane D).");
+        }
+
+        // Create a new per-call CTS linked to _lifetimeCts.
+        // This token is passed to UpdateCenterAsync AND the player-follow recenter tasks.
+        // Cancelling _streamingCts stops THIS area's streaming; cancelling _lifetimeCts (_ExitTree)
+        // stops ALL streaming regardless of which CTS the task holds.
+        _streamingCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+        CancellationToken streamingToken = _streamingCts.Token;
+
         // Point BOTH streaming sources at the resolved area BEFORE streaming starts:
         //   (a) StreamingService.SetArea — rebinds VfsTerrainSectorSource to the correct .ted paths.
         //   (b) AreaAssemblySource.SetArea — rebinds RebindableAreaAssemblySource so the
@@ -862,6 +1186,22 @@ public sealed partial class RealWorldRenderer : Node3D
         // spec: Docs/RE/specs/assembly_graph.md §1/§4 — IAreaAssemblySource drives AreaComposer paths.
         ctx.StreamingService.SetArea(TargetAreaId);
         ctx.AreaAssemblySource?.SetArea(TargetAreaId);
+
+        // ── CYCLE 6 Lane D: area-rebind streaming race fix part (b) ────────────
+        //
+        // Stamp ExpectedBakeAreaId so the CellBake lambda drops stale events that were already
+        // published into the ClientEventBus by the OLD streaming task before we cancelled it.
+        //
+        // Events already in the channel (produced by the configArea task) will be drained in _Process
+        // AFTER this rebind. At drain time areaSource.AreaId == serverArea (rebound just above).
+        // Without the guard, ComposeCell would use the server-area source with configArea coords →
+        // path miss. The guard reads ExpectedBakeAreaId vs areaSource.AreaId at drain time and
+        // drops any event where they differ — making the race observable only as a "stale event
+        // dropped" log line rather than an empty-cell silently written into the _composedCells cache.
+        //
+        // spec: Docs/RE/specs/assembly_graph.md §1/§4 (IAreaAssemblySource drives AreaComposer paths).
+        // spec: Docs/RE/formats/area_inventory.md §1A (membership gate before any cell streams).
+        ctx.SetExpectedBakeArea(TargetAreaId);
 
         // CYCLE 2 Phase 2-A.5: compose + publish the area ONCE per area-enter.
         // OnAreaBound is idempotent (no-op if called again with the same area id).
@@ -875,18 +1215,18 @@ public sealed partial class RealWorldRenderer : Node3D
         // spec: Docs/RE/formats/terrain.md §Overview — origin bias 10000, cell size 1024. CONFIRMED.
         _streamAnchor = (TargetMapX, TargetMapZ);
 
-        // Tie the streaming task to this node's lifetime (Fix 4): cancelled in _ExitTree so it stops
-        // and skips its completion prints once the node leaves the tree. spec: terrain.md §12.3.
-        CancellationToken lifetime = _lifetimeCts.Token;
+        // Launch the initial ring load on the thread pool using the per-call token.
+        // spec: Docs/RE/formats/terrain.md §12.2 — 5×5 ring (StreamQuality.High). CONFIRMED.
         _ = Task.Run(async () =>
         {
             try
             {
-                await ctx.StreamingService.UpdateCenterAsync(TargetMapX, TargetMapZ, lifetime)
+                await ctx.StreamingService.UpdateCenterAsync(TargetMapX, TargetMapZ, streamingToken)
                     .ConfigureAwait(false);
 
-                // Skip the completion print if the node was torn down while streaming.
-                if (lifetime.IsCancellationRequested) return;
+                // Skip the completion print if this streaming session was cancelled (superseded
+                // by a newer TriggerTerrainStreaming call) or the node left the tree.
+                if (streamingToken.IsCancellationRequested) return;
 
                 int residentCount = ctx.StreamingService.ResidentCount;
                 GD.Print($"[RealWorldRenderer] 5×5 terrain ring streaming complete " +
@@ -894,14 +1234,15 @@ public sealed partial class RealWorldRenderer : Node3D
             }
             catch (OperationCanceledException)
             {
-                // Expected when the node leaves the tree mid-stream — silent.
+                // Expected: (a) node left the tree (_lifetimeCts); (b) area was superseded
+                // (TriggerTerrainStreaming cancelled _streamingCts). Silent.
             }
             catch (Exception ex)
             {
-                if (!lifetime.IsCancellationRequested)
+                if (!streamingToken.IsCancellationRequested)
                     GD.PrintErr($"[RealWorldRenderer] Terrain streaming error: {ex.Message}");
             }
-        }, lifetime);
+        }, streamingToken);
 
         // Arm the follow-streaming loop (enables the _Process recenter checks).
         // Done AFTER _streamAnchor is set so _Process never sees a zero anchor.

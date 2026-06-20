@@ -13,44 +13,74 @@ capture_verified: false
 summary: >
   Periodic game-state tick and world-entry seed. The entire packet is read into a single
   9100-byte buffer. It branches on a leading FormSelector byte: Form 0 is a periodic
-  tick/drain that manages client-side keepalive timers, and Form 1 is the full world-entry
-  snapshot containing actor/world tables, hotbar slots, spawn positions, and scene gates.
+  tick/keepalive-drain path (no world load), Form 1 is the full world-entry snapshot
+  containing actor/world tables, hotbar slots, spawn positions, and the world-clock seed.
+  Any other FormSelector value early-returns / is ignored. The structural layout below is
+  confirmed by contiguity (24 + 3088 + 4044 + 1920 = 9076, then the two spawn floats);
+  value-only items are flagged live-pending (6-D).
 
 fields:
-  - { name: FormSelector, type: u8, offset: 0 }      # 0 = tick/drain, 1 = world-entry seed, other = ignore
-  - { name: HeaderOpaque, type: "u8[11]", offset: 1 } # leading header bytes (carried in block 1 copy)
-  - { name: AreaId, type: u32, offset: 12 }          # target area / map ID (validated < 13)
-  - { name: Month, type: u32, offset: 16 }           # month value for map selection
-  - { name: Day, type: u8, offset: 20 }              # day value for map selection
-  - { name: Hour, type: u8, offset: 21 }             # hour value for map selection
-  - { name: Minute, type: u8, offset: 22 }           # minute value for map selection
-  - { name: Second, type: u8, offset: 23 }           # second value for map selection
-  - { name: WorldEntryTableA, type: "u8[3088]", offset: 24 } # Sub-block 1 (0xC10 bytes) -> copied to world/actor table A global
-  - { name: WorldEntryTableB, type: "u8[4044]", offset: 3112 } # Sub-block 2 (0xFCC bytes) -> copied to world/actor table B global
-  - { name: HotbarSlots, type: "u8[1920]", offset: 7156 } # Sub-block 3 (0x780 bytes) -> copied to g_HotbarSlots
-  - { name: SpawnX, type: f32, offset: 9076 }        # local player spawn X coordinate
-  - { name: SpawnZ, type: f32, offset: 9080 }        # local player spawn Z coordinate (Y is forced to 0 client-side)
-  - { name: TrailingScalar1, type: u32, offset: 9084 } # passed to the post-tick update helper
-  - { name: TrailingScalar2, type: u32, offset: 9088 } # stored to local-player +1856
-  - { name: ActionResultCode, type: u32, offset: 9092 } # gate at end (0 = normal, 300/301 = alternate UI branch)
-  - { name: TrailingScalar3, type: u8, offset: 9096 }  # passed (with TrailingScalar4) to the scene-gate update helper
-  - { name: TrailingScalar4, type: u8, offset: 9097 }  # passed to the scene-gate update helper
-  - { name: Padding, type: "u8[2]", offset: 9098 }    # tail padding / reserved to align to 9100 bytes
+  - { name: FormSelector, type: u8, offset: 0 }      # 0 = tick/keepalive-drain (no world load), 1 = world-entry seed, any other value = early-return / ignore
+  - { name: HeaderOpaque, type: "u8[11]", offset: 1 } # leading header bytes (carried into the table-A block copy)
+  - { name: AreaId, type: u32, offset: 12 }          # absolute area index; checked only != 0. Its 3-digit decimal directory form (<id>.lst, e.g. id 6 -> "006", id 12 -> "012") selects the on-disk area. Date/time fields never participate in this directory selection.
+  - { name: Year, type: u32, offset: 16 }            # world-clock seed: calendar/year component. Feeds the calendar seed only; never the map directory.
+  - { name: Month, type: u8, offset: 20 }            # world-clock seed: month. Carries the 1..12 calendar guard. Feeds the calendar seed only; never the map directory.
+  - { name: Day, type: u8, offset: 21 }              # world-clock seed: day. Calendar-seed input only.
+  - { name: Hour, type: u8, offset: 22 }             # world-clock seed: hour. Time-seed input only.
+  - { name: Minute, type: u8, offset: 23 }           # world-clock seed: minute. Time-seed input only.
+  - { name: WorldEntryTableA, type: "u8[3088]", offset: 24 }   # 3088-byte interior block -> copied to world/actor table A global, then a stale-slot sweep runs.
+  - { name: WorldEntryTableB, type: "u8[4044]", offset: 3112 } # 4044-byte interior block -> copied to world/actor table B global, then a stale-slot sweep runs.
+  - { name: HotbarSlots, type: "u8[1920]", offset: 7156 }      # 1920-byte interior block -> copied verbatim to the hotbar global.
+  - { name: SpawnX, type: f32, offset: 9076 }        # local-player spawn X; feeds the local-player position set and terrain cold-start (world Y forced 0).
+  - { name: SpawnZ, type: f32, offset: 9080 }        # local-player spawn Z; feeds the local-player position set and terrain cold-start (world Y forced 0).
+  # --- The game-state-tick handler does NOT read past offset 9080. The fields below
+  # --- exist only because the body is a fixed 9100 bytes; their layout/roles are unverified
+  # --- by this code path. Listed for completeness, marked live-pending (6-D).
+  - { name: TrailingScalar1, type: u32, offset: 9084 }  # live-pending (6-D): not read by the game-state-tick handler; layout/role unverified by this code path.
+  - { name: TrailingScalar2, type: u32, offset: 9088 }  # live-pending (6-D): not read by the game-state-tick handler; layout/role unverified by this code path.
+  - { name: TrailingScalar3, type: u32, offset: 9092 }  # live-pending (6-D): not read by the game-state-tick handler; layout/role unverified by this code path.
+  - { name: TrailingScalar4, type: u8, offset: 9096 }   # live-pending (6-D): not read by the game-state-tick handler; layout/role unverified by this code path.
+  - { name: TrailingScalar5, type: u8, offset: 9097 }   # live-pending (6-D): not read by the game-state-tick handler; layout/role unverified by this code path.
+  - { name: Padding, type: "u8[2]", offset: 9098 }      # live-pending (6-D): tail bytes to align to 9100; not read by this code path; role unverified.
 
 notes: |
   Static analysis only; no capture available. The client reads the entire 9100-byte block
-  congruently.
+  into one buffer and branches on FormSelector.
 
-  FORM 0 (Periodic Tick):
+  FORM 0 (Periodic Tick / Keepalive Drain):
     - Branches when FormSelector == 0.
-    - Updates client timers, clears or triggers keepalive loops, and shuts down the main loop if
-      network state is lost.
+    - Pure tick/keepalive-drain path: no world load. Updates client timers and the keepalive
+      drain bookkeeping, and shuts down the main loop if network state is lost.
 
   FORM 1 (World Entry Seed):
     - Branches when FormSelector == 1.
-    - Extracts WorldEntryTableA (3088 bytes) and WorldEntryTableB (4044 bytes) to populate the
-      initial actor list and world objects.
-    - Overwrites HotbarSlots (1920 bytes) to restore the player's quick-slot configurations.
-    - Sets local player position to (SpawnX, 0, SpawnZ), cold-starts terrain generation, and
-      loads BGM cues based on the AreaId and date/time parameters.
-    - Triggers the runtime keepalive loop by enabling the CmsgKeepaliveToggle (2/112) sender.
+    - Copies WorldEntryTableA (3088 bytes @ 24) to the world/actor table A global, then runs a
+      stale-slot sweep over that table.
+    - Copies WorldEntryTableB (4044 bytes @ 3112) to the world/actor table B global, then runs a
+      stale-slot sweep over that table.
+    - Copies HotbarSlots (1920 bytes @ 7156) verbatim into the hotbar global, restoring the
+      player's quick-slot configuration.
+    - Sets the local player position from (SpawnX, 0, SpawnZ) and cold-starts terrain generation
+      (world Y forced to 0).
+    - Seeds the world clock from the date/time fields: the Year field feeds the calendar seed and
+      Hour/Minute feed the time seed (Month carries the 1..12 calendar guard, Day the calendar
+      seed). The AreaId selects the map directory; the date/time fields never do.
+    - CLEARS the periodic-heartbeat suppress flag, un-suppressing the independent idle heartbeat
+      sender (2/10000). It does NOT enable the 2/112 keepalive: the 2/112 keepalive ENABLE is
+      fired separately by the scene state machine just before the in-world loop, not by this packet.
+
+  AreaId vs date/time (corrected):
+    - The "< 13" bound is NOT on AreaId. It is a 1..12 calendar guard on the Month field
+      (offset 20). AreaId is checked only for != 0; its full u32 value is the absolute area index.
+
+  Interior-block layout (confirmed by contiguity):
+    - 24 + 3088 + 4044 + 1920 = 9076, then SpawnX @ 9076 and SpawnZ @ 9080.
+    - Ordering is table A (3088) @ 24, then table B (4044) @ 3112, then hotbar (1920) @ 7156.
+      The earlier inverted note (table A ~0xFCC / table B ~0xC10) is REFUTED.
+
+  live-pending (6-D) — value-only items not settled by static analysis:
+    - The concrete AreaId value the replica sends, and confirmation that its 3-digit directory
+      form resolves to a real <id>.lst on the VFS.
+    - Whether the Year field is a real calendar year or an epoch index.
+    - The trailing-scalar region (offsets 9084..9099): layout and roles. The game-state-tick
+      handler does not read past offset 9080, so these are unverified by this code path.

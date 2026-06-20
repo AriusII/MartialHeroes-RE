@@ -58,6 +58,17 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private float _time;
     private bool _ready;
 
+    // The resolved STANDING IDLE clip (motion_ids_a[0] = the actormotion col-15 idle id), supplied to
+    // Setup() and held so the node can (re)start looping idle playback on _Ready / when built. The
+    // upstream builder resolves this id via the §8(e) chain: data/char/actormotion.txt, the row whose
+    // col2 == skin_class (the .skn header id_b), motion_ids_a[0] = column 15, record +0x40 →
+    // data/char/mot/g{id}.mot. For the first human class this is the static stand g101100001.mot — a
+    // faithful held pose (§10.2), NOT a missing-animation defect. We do NOT resolve any other slot here.
+    // spec: Docs/RE/specs/skinning.md §8(e) (idle-clip resolution chain, col2==skin_class → col15 /
+    //       motion_ids_a[0] / record +0x40), §10 / §10.2 / §10.5 (the col15 stand idle is static DATA,
+    //       render it faithfully; do not synthesize a breathing idle).
+    private AnimationClip? _idleClip;
+
     // When true, the node does NOT self-drive from _Process; the owner pumps it via Tick(dt).
     // The player path leaves this false (per-frame _Process). The town's 40 mobs set it true so
     // NpcRenderer can throttle their skinning to ~10 Hz and stagger the ticks across frames.
@@ -142,6 +153,12 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // spec: Docs/RE/specs/skinning.md §8(e) item 4 — "SKIP (do not clamp) any clip track whose
         //       bone_id falls outside [base_id, base_id + bone_count)".
         // spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId.
+        // The supplied clip IS the resolved standing-idle slot (motion_ids_a[0] / col-15 idle, §8(e)).
+        // Retain it so SelectVisualStateClip() can hand it back as the played clip for every recovered
+        // visual-state case (only the idle slot is resolvable here; the others are live-pending, §10.3.1).
+        // spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[0] = col15), §10.3.1.
+        _idleClip = clip;
+
         _trackByBoneIndex = new AnimationTrack?[boneCount];
         if (clip is not null && clip.FrameCount > 0)
         {
@@ -272,7 +289,125 @@ public sealed partial class SkinnedCharacterNode : Node3D
                  $"clipDuration={_clipDuration:F2}s externalDrive={externalDrive}.");
 
         _ready = true;
+
+        // EW4: begin LOOPING STANDING-IDLE playback as soon as the skinned character is built. The
+        // standing visual state routes to the known idle slot (motion_ids_a[0] / col-15 idle, §8(e));
+        // the other 5 recovered visual-state cases are live-pending (§10.3.1) and default to this same
+        // idle clip — see SelectVisualStateClip(). Playback is gated on the clip being present, so an
+        // offline / no-VFS build with no resolvable idle still stands silently (no crash).
+        // spec: Docs/RE/specs/skinning.md §10.5 (drive the active clip's clock with real per-frame dt
+        //       and loop at clip end; the static look comes from the DATA, not from failing to advance t).
+        PlayStandingIdle();
     }
+
+    // =========================================================================
+    // EW4: Standing-idle playback + the 6-case visual-state selector (§10.3.1)
+    // =========================================================================
+
+    /// <summary>
+    /// The per-actor client visual-state word that §10.3.1 reports drives a 6-case idle-motion applier
+    /// (a 6-way jump table), each branch routing a standing actor to an <c>actormotion.txt</c> column.
+    /// The branch STRUCTURE is recovered; the concrete value → case → column mapping is
+    /// <c>live-pending (6-D)</c> and must be read off the live debugger — it must NOT be guessed from
+    /// the jump-table shape. We model the 6 cases here so the structure is faithful in code, but every
+    /// case currently resolves to the one slot we can statically resolve: the standing idle.
+    /// spec: Docs/RE/specs/skinning.md §10.3.1 (6-case visual-state idle applier; value mapping
+    ///       live-pending), §10.4 (selection mechanism recovered, value → column live-pending).
+    /// </summary>
+    public enum VisualState
+    {
+        Standing = 0, // the neutral standing case → known idle slot (motion_ids_a[0] / col15, §8(e)).
+
+        // The remaining five branches of the recovered 6-way idle applier. Which concrete visual-state
+        // VALUE lands on which case — and which actormotion column each case selects — is NOT settled
+        // statically (§10.3.1). Until a live debugger read confirms the value→clip mapping we do NOT
+        // guess a clip for these; SelectVisualStateClip() defaults them to the standing idle.
+        VisualState1 = 1, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState2 = 2, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState3 = 3, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState4 = 4, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState5 = 5, // live-pending (skinning.md §10) — column unconfirmed
+    }
+
+    /// <summary>
+    /// Maps a recovered visual-state case to the clip to play. ONLY the <see cref="VisualState.Standing"/>
+    /// case has a statically-resolvable clip (the col-15 standing idle = <c>motion_ids_a[0]</c>, §8(e));
+    /// the other five cases are <c>live-pending (6-D)</c> (§10.3.1) and intentionally default to the same
+    /// idle clip rather than guessing a clip the live engine has not been confirmed to select. This node
+    /// only ever holds the resolved idle clip, so the default is the faithful conservative choice.
+    /// spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[0] = col15), §10.3.1 / §10.4
+    ///       (value → column mapping live-pending — do not guess).
+    /// </summary>
+    private AnimationClip? SelectVisualStateClip(VisualState state) => state switch
+    {
+        // KNOWN: neutral standing → the col-15 standing idle (motion_ids_a[0]). spec: skinning.md §8(e).
+        VisualState.Standing => _idleClip,
+
+        // live-pending (skinning.md §10) — the value → column mapping for these five cases is not
+        // statically settled (§10.3.1); default to the standing idle until a live debugger read pins it.
+        VisualState.VisualState1 => _idleClip, // live-pending (skinning.md §10)
+        VisualState.VisualState2 => _idleClip, // live-pending (skinning.md §10)
+        VisualState.VisualState3 => _idleClip, // live-pending (skinning.md §10)
+        VisualState.VisualState4 => _idleClip, // live-pending (skinning.md §10)
+        VisualState.VisualState5 => _idleClip, // live-pending (skinning.md §10)
+
+        _ => _idleClip, // any other value → faithful default (standing idle). spec: skinning.md §10.5.
+    };
+
+    /// <summary>
+    /// Starts looping playback of the STANDING-IDLE clip (the default state; §10.5). Resolves the clip
+    /// through the 6-case visual-state selector for the <see cref="VisualState.Standing"/> case and
+    /// engages it; the per-frame <see cref="Advance"/> path (driven by <c>_Process</c> for the player,
+    /// or by the throttled owner via <see cref="Tick"/>) advances the clock with real elapsed time and
+    /// wraps at clip end (CycleLayer loop). Gated on a clip being present — with no resolvable idle
+    /// (offline / no VFS) the node simply stands in the rest pose (no crash, no playback).
+    ///
+    /// STRICTLY PASSIVE: which clip plays arrives as the visual state; this method only translates it
+    /// into AnimationPlayer-style playback. No game-rule authority, no clip synthesis.
+    /// spec: Docs/RE/specs/skinning.md §10.5 (render the col15 idle faithfully, advance with real dt and
+    ///       loop at clip end — the static look comes from the data), §8(e) (idle slot resolution).
+    /// </summary>
+    public void PlayStandingIdle() => PlayVisualState(VisualState.Standing);
+
+    /// <summary>
+    /// Selects the clip for <paramref name="state"/> (the standing idle, or its live-pending default per
+    /// §10.3.1) and begins looping playback. No-op (the node just stands) when no clip resolves.
+    ///
+    /// Note: the clip is the single resolved idle held since Setup, so engaging it is a matter of
+    /// confirming the playback gate — the per-frame <see cref="Advance"/> clock (real dt + modulo wrap,
+    /// §10.5) does the looping. The phase is left as Setup initialized it (0, or the per-actor stagger
+    /// from <c>startPhaseSeconds</c> so a town of mobs sharing one idle does not animate in lockstep);
+    /// this method does NOT clobber that stagger.
+    /// spec: Docs/RE/specs/skinning.md §10.3.1 / §10.5.
+    /// </summary>
+    public void PlayVisualState(VisualState state)
+    {
+        AnimationClip? selected = SelectVisualStateClip(state);
+
+        // Playback gate: only drive the clock when a clip is actually present. CycleLayer looping is
+        // handled in Advance() (modulo wrap at _clipDuration). With no resolvable idle (offline / no
+        // VFS) the node stands in the rest pose, faithfully (§10.2/§10.5) — no crash, no playback.
+        if (selected is null || !_hasClip || _clipDuration <= 0f)
+            return;
+
+        // The idle is now engaged: _Process (player) / Tick (throttled mobs) advances _time from its
+        // current phase each frame and DeformAndUpload re-samples the clip, looping at clip end. We do
+        // NOT reset _time here so Setup's per-actor stagger phase is preserved.
+        _idlePlaying = true;
+        GD.Print($"[Skinning] Idle playback engaged (state={state}, looping, " +
+                 $"duration={_clipDuration:F2}s). spec: skinning.md §10.5 (advance real dt + loop).");
+    }
+
+    // True once a visual-state clip has been engaged for looping playback (idle by default). Diagnostic
+    // affordance; the actual frame advance is the _Process / Tick → Advance path. Gated on a clip
+    // being present so an offline build leaves this false and the node simply stands. spec: §10.5.
+    private bool _idlePlaying;
+
+    /// <summary>
+    /// True when the standing-idle (or its live-pending default, §10.3.1) is engaged for looping
+    /// playback. False when no idle clip resolved (offline / no VFS) and the node merely stands.
+    /// </summary>
+    public bool IsIdlePlaying => _idlePlaying;
 
     /// <summary>Current ArrayMesh AABB (rest pose after Setup), for recentring.</summary>
     public Aabb GetMeshAabb() => _arrayMesh?.GetAabb() ?? new Aabb();

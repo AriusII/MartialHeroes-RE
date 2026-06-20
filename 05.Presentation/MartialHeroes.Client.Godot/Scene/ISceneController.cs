@@ -16,16 +16,16 @@ namespace MartialHeroes.Client.Godot.Scene;
 /// </remarks>
 public interface ISceneController
 {
-    /// <summary>The engine state this controller renders.</summary>
-    EngineSceneState State { get; }
+	/// <summary>The engine state this controller renders.</summary>
+	EngineSceneState State { get; }
 
-    /// <summary>The Godot node the host adds to / removes from the tree for this scene.</summary>
-    Node Node { get; }
+	/// <summary>The Godot node the host adds to / removes from the tree for this scene.</summary>
+	Node Node { get; }
 
-    /// <summary>
-    /// Called once when this scene becomes live, after its node is in the tree. The host is passed
-    /// so the scene can request the engine-internal advance (the case body's next-state write) when
-    /// it finishes. spec: Docs/RE/specs/client_runtime.md §7.2 (commit → re-dispatch).
-    /// </summary>
-    void OnEnter(SceneHost host);
+	/// <summary>
+	/// Called once when this scene becomes live, after its node is in the tree. The host is passed
+	/// so the scene can request the engine-internal advance (the case body's next-state write) when
+	/// it finishes. spec: Docs/RE/specs/client_runtime.md §7.2 (commit → re-dispatch).
+	/// </summary>
+	void OnEnter(SceneHost host);
 }

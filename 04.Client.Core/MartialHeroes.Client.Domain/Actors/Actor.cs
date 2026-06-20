@@ -89,6 +89,14 @@ public sealed class Actor
     /// <summary>Lifecycle / motion state. spec: actor.md (lifecycle_state +0x58C).</summary>
     public LifecycleState Lifecycle { get; private set; }
 
+    /// <summary>
+    /// The actor's current motion intent — the recovered movement classification the presentation
+    /// drives an animation clip from. Set from the 5/13 movement update via
+    /// <see cref="SetMotionIntent"/> alongside (not in place of) the existing snap/move-target
+    /// behaviour. spec: Docs/RE/packets/5-13_actor_movement_update.yaml; Docs/RE/specs/skinning.md §10.
+    /// </summary>
+    public MotionIntent Intent { get; private set; }
+
     /// <summary>Computed maximum hit points (base + equipment). spec: actor.md (computed maxima).</summary>
     public uint MaxHp => Vitals.MaxHp;
 
@@ -337,6 +345,13 @@ public sealed class Actor
 
         return true;
     }
+
+    /// <summary>
+    /// Sets the actor's motion intent (the animation classification). Total and unconditional: the
+    /// intent is a pure derived classification, not a lifecycle guard. spec:
+    /// Docs/RE/packets/5-13_actor_movement_update.yaml; Docs/RE/specs/skinning.md §10.
+    /// </summary>
+    public void SetMotionIntent(MotionIntent intent) => Intent = intent;
 
     /// <summary>Marks the actor dead: HP to 0, out of combat, lifecycle to <see cref="LifecycleState.Dead"/>.</summary>
     public void Kill()

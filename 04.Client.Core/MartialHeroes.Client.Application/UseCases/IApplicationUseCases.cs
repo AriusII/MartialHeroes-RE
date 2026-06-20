@@ -255,4 +255,22 @@ public interface IApplicationUseCases
         uint targetActorId,
         byte subOp = 0,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// In-world quit / logout: sends <c>1/0 CmsgLogout</c> — a header-only (8-byte) frame, NO payload.
+    /// This is the LIGHTER of the two world-exit paths: fire-and-forget, it arms NO in-flight latch and
+    /// does NOT disarm the keepalive toggle; the server is expected to drop the session. The scene side
+    /// (converge on state 6 / sub-state 8) is owned by the scene machine. spec:
+    /// Docs/RE/specs/world_exit.md §1 / §1.1; Docs/RE/packets/cmsg_logout.yaml.
+    /// </summary>
+    ValueTask LogoutAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Guarded leave-world: the HEAVIER world-exit path. It FIRST disarms the <c>2/112</c> keepalive
+    /// toggle (sends <c>2/112</c> body 0x00 via the keepalive driver), THEN sends <c>2/0 CmsgLeaveWorld</c>
+    /// — a header-only (8-byte) frame, NO payload. The disarm-before-send ordering is the defining
+    /// difference from <see cref="LogoutAsync"/>. Both exit paths converge on scene state 6 / sub-state 8.
+    /// spec: Docs/RE/specs/world_exit.md §1 / §1.2 / §2.
+    /// </summary>
+    ValueTask LeaveWorldAsync(CancellationToken cancellationToken = default);
 }

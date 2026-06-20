@@ -288,8 +288,8 @@ there is no direct jump to it. The relevant edges:
   the character-select scene loop. When the player confirms enter-game and that loop exits, the outer
   `while(1)` re-reads the now-armed state value **5** and dispatches into case 5.
 - **Case 5 (In-game) builds the world** — it constructs the world handler / main window, performs the
-  world-build sequence (§5.4.1), **sends the keepalive-toggle C2S `2/112` on entry** (the in-world
-  keepalive enable, mirrored by the leave/logout path that disables it — §4.4 / §6.4), and runs the
+  world-build sequence (§5.4.1), **sends the keepalive software-toggle C2S `2/112` ENABLE on entry**
+  (mechanism (b) of §6.4.1, mirrored by the leave/logout DISABLE — §4.4 / §6.4.1), and runs the
   blocking world loop.
 - **Case 5 in turn pre-arms state 4 on its own entry**, so that when the world loop exits (logout /
   disconnect) the switch returns to **Character Select (4)**, not to Login — consistent with the
@@ -374,8 +374,9 @@ A scene-aware quit dispatcher reads the current engine state and picks the appro
   event; tears down world UI / actor slots.
 - State 7 is the generic error path for unexpected disconnects from any state.
 
-The in-world leave/logout teardown additionally disables the keepalive (clears the master-enable
-global, see §6.4), emits SFX 861010106, and writes state 6 / sub-state 8.
+The in-world leave/logout teardown additionally sends the **2/112 software-toggle DISABLE**
+(mechanism (b), §6.4.1) — independent of the periodic idle-heartbeat suppress flag — emits SFX
+861010106, and writes state 6 / sub-state 8.
 
 Full network-driven transition table: `specs/client_runtime.md §7.5.2`.
 
@@ -684,9 +685,11 @@ part of leaving the character-select scene. (CODE-CONFIRMED)
 
 On entering State 5, the case body constructs `MainHandler` and calls `BuildGameWorld`:
 
-0. **On case-5 entry** the case body sends the in-world **keepalive-toggle C2S `2/112`** (enable),
-   then constructs the world handler / main window before the build steps below. The leave /
-   logout path disables the same keepalive (§4.4 / §6.4). (CODE-CONFIRMED)
+0. **On case-5 entry** the scene state machine sends the in-world **keepalive software-toggle
+   C2S `2/112`** (ENABLE, 1-byte body; mechanism (b) of §6.4.1), then constructs the world handler /
+   main window before the build steps below. The leave / logout path sends the matching DISABLE
+   (§4.4 / §6.4.1). This 2/112 toggle is **independent** of the periodic idle heartbeat C2S 2/10000
+   (mechanism (a)), whose suppress flag is cleared separately by the S2C 4/1 handler. (CODE-CONFIRMED)
 1. **`BuildGameWorld`** — allocates world-layer objects (physics grid, entity registry,
    cell-streaming queue). Approximately 17 world-manager singletons cached.
 2. **`BuildSceneGraph`** — creates:
@@ -988,15 +991,59 @@ Three cooperating threads (CODE-CONFIRMED):
 |--------|------|
 | IO-completion | `WSAWaitForMultipleEvents`, overlapped recv/send, raw frame enqueue |
 | Network worker | Recv-queue pop → message-bus hop → handler dispatch |
-| Keepalive | Sends C2S **2/112** ping (1-byte payload) every ~20 s; gated by a master-enable global (see below) |
+| Keepalive timer | Idle-heartbeat timer thread (mechanism **(a)** below): fires C2S **2/10000** after full outbound silence |
 
-**Keepalive opcode (CODE-CONFIRMED — corrected):** the keepalive is **C2S 2/112** (major 2,
-minor 112 = 0x70) with a **1-byte payload**, NOT 2/10000. It is governed by a dedicated
-**master-enable global**: the sender enables the keepalive on **World entry** (state 5 case body)
-and disables it on **world leave / logout**. This master-enable is a *distinct* mechanism from the
-per-send suppress byte at NetClient object offset +82364 (that byte is set by every C2S send and
-cleared at the start of the 4/1 and 3/1 handlers). (Wire-level: the 2/112 opcode is static-confirmed
-from the send path; an on-the-wire capture remains capture/debugger-pending.)
+A separate **send-proxy worker** thread (the outbound proxy that drains the C2S queue) also emits a
+header-only idle filler — mechanism **(c)** below.
+
+#### 6.4.1 Keepalive — THREE independent mechanisms (CODE-CONFIRMED — corrected)
+
+The connection is kept alive by **three independent mechanisms**, not one heartbeat. They are driven
+by *different* threads, carry *different* opcodes, and are gated by *different* flags. Treating them as
+a single "2/112 ping every 20 s" (as earlier drafts did) is wrong.
+
+| # | Opcode | Body | Driver | Cadence / gate |
+|---|--------|------|--------|---------------|
+| (a) | C2S **2/10000** | 4-byte zero body | dedicated keepalive timer thread | periodic idle heartbeat — fires after the connection has been outbound-idle longer than the idle interval |
+| (b) | C2S **2/112** | 1-byte body (value `0x01`) | scene state machine | one-shot software toggle — ENABLE just before the in-world loop, DISABLE on leave-world |
+| (c) | C2S **1/2** | header-only (size 8, no body) | send-proxy worker thread | idle filler — emitted roughly once per millisecond while the proxy is idle |
+
+**(a) 2/10000 — periodic idle heartbeat.** A C2S frame with a **4-byte zero body**, fired by a
+dedicated **timer thread**. The timer polls every **1000 ms**; when it observes that the connection
+has been outbound-idle longer than the **idle interval = 20000 ms (20 s)**, it emits the heartbeat.
+The frame is **pre-compressed once** and **enqueued directly**, bypassing the normal send path. It is
+suppressed by a **per-connection suppress flag**; the **S2C 4/1 world-state handler CLEARS
+(un-suppresses)** that flag. The idle clock is **reset by ANY outbound packet**, so the heartbeat only
+fires after a stretch of *full outbound silence* — it is a true idle keepalive, not a fixed-period
+ping. The 4/1 handler's role in un-suppressing this periodic heartbeat is documented in
+`handlers.md (§4/1)`.
+
+**(b) 2/112 — one-shot software toggle.** A C2S frame with a **1-byte body** (value `0x01`). The
+**ENABLE** is fired by the **scene state machine just before the in-world loop** (case-5 entry, §5.4.1);
+the **DISABLE** is fired on **leave-world** (§4.4). It flips an **independent software gate** — this is
+**NOT** the same flag as the 2/10000 suppress flag in (a). The two gates are distinct mechanisms that
+happen to bracket the same in-world lifetime.
+
+**(c) 1/2 — send-proxy-worker idle filler.** A **header-only** C2S frame (size 8, no body), emitted by
+the **send-proxy worker thread** (a thread separate from both the IO-completion thread and the keepalive
+timer) roughly **once per millisecond** while that proxy is idle.
+
+> **Corrections recorded explicitly (binary wins):**
+> 1. **"10000 = a 10-second delay" is WRONG.** `10000` is the **opcode minor** of the idle heartbeat
+>    (C2S 2/10000); it is *not* a delay value. The actual idle interval is **20 s** (timer polls every
+>    1 s). Any reading that treats the `10000` as "10 000 ms / 10 s delay" is a mis-attribution.
+> 2. **"4/1 enables 2/112" is WRONG.** The S2C 4/1 world-state handler **CLEARS the 2/10000 suppress
+>    flag** (un-suppresses the *periodic* heartbeat). The **2/112 ENABLE** lives in the **scene state
+>    machine, just before the in-world loop** — not in the 4/1 handler. The earlier text that bound
+>    4/1 to a single "2/112 master-enable" conflated mechanisms (a) and (b).
+
+> **(live-pending (6-D)):** the real-wire **cadence of 2/10000 vs 1/2** is not statically settled. The
+> static hypothesis is that the **1/2 proxy filler keeps the idle clock fresh**, so the **2/10000 idle
+> heartbeat rarely fires** and acts as a **full-silence fallback** rather than a regular tick. Confirm
+> the relative cadence (and whether 1/2 truly resets the 2/10000 idle clock) on a live capture.
+
+> **(live-pending (6-D)):** the on-the-wire byte forms of all three frames (2/10000, 2/112, 1/2) are
+> static-confirmed from the send path only; an actual capture of each on the wire remains pending.
 
 All handler dispatch happens on the **frame thread** (message-bus hop), not on the IO thread.
 (CODE-CONFIRMED — handlers may read/write game state without additional locks.)
@@ -1120,7 +1167,7 @@ interaction. Empty cells = no direct interaction observed.
 | Initiator ↓ \ Target → | UI/GU* | Effects | Sound | Network | Resource | Environment | Terrain | Actor/Skin | Anti-cheat |
 |------------------------|--------|---------|-------|---------|----------|-------------|---------|------------|------------|
 | **Scene machine** | Constructs scene handlers (Login/Select/World); widget trees via uiconfig.lua | — | Entry BGM trigger (910066000) | State transitions via S2C packets | BulkAssetLoader on states 2 → 4/5 | — | — | Preview in char-select | XTrap gate at state 1 |
-| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive thread (C2S 2/112, parallel; master-enable global) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
+| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive: 3 mechanisms — 2/10000 idle-heartbeat timer + 2/112 scene toggle + 1/2 proxy filler (§6.4.1) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
 | **UI/GU*** | — | Button hover FX (PLAUSIBLE) | Login SFX on sub-states (e.g. 861010105 at sub-state 2) | Login/select/chat packets sent on button actionId | msg.xdb string load | — | — | 3D preview render (GUCanvas3D) in char-select | — |
 | **Effects** | Damage number overlay draw | — | SFX trigger on effect events (totalmugong.txt) | — | Lazy-load xeffect.lst, bmplist.lst, xobj.lst | — | MapXEffect world-space placement | JointXEffect bone attachment (bone_source_enum) | — |
 | **Sound** | Volume slider UI binding | — | — | Clock sync via 5/18 (game-hour → ambient re-eval) | Load .bgm/.bge/.eff/.wlk/.run tables | Day/night hour gates ambient re-pick | Mud-cell ambient lookup (offsets +0x02–+0x07) | Footstep SFX from actor visual fields +108/+112 | — |
@@ -1185,11 +1232,16 @@ What remains open is the *runtime arrival ordering* on world entry — whether a
 a form-1 materialize or a form-0 update, and how the major-1 billing notices interleave with it.
 Needs a live capture. Owned by `specs/client_runtime.md §9.5` / `packets/s2c_billing.yaml` (pending).
 
-**OQ-PROTO-04 — Keepalive gating mechanism. (mostly resolved; residual capture-pending)**
-The keepalive opcode is C2S **2/112** (1-byte payload), gated by a **master-enable global** set on
-World entry and cleared on world leave (§6.4). A *separate* per-send suppress byte at NetClient
-object offset +82364 is set by every C2S send and cleared at the start of the 4/1 and 3/1 handlers.
-What is not statically settled is whether any server-side instruction also influences these flags.
+**OQ-PROTO-04 — Keepalive: three mechanisms, relative wire cadence. (mostly resolved; cadence live-pending (6-D))**
+The connection is kept alive by **three independent mechanisms** (§6.4.1), not one: (a) the periodic
+**idle heartbeat C2S 2/10000** (4-byte zero body) from a timer thread, fired after the idle interval
+(20 s) and suppressed by a per-connection suppress flag that the **4/1 handler clears**; (b) the
+one-shot **software toggle C2S 2/112** (1-byte body) ENABLED by the scene state machine just before the
+in-world loop and DISABLED on leave-world, flipping an *independent* gate; and (c) the **send-proxy
+idle filler C2S 1/2** (header-only) emitted ~once/ms while the proxy is idle. What is **not** statically
+settled and is **live-pending (6-D)**: the real-wire **cadence of 2/10000 vs 1/2** (static hypothesis:
+the 1/2 filler keeps the idle clock fresh so 2/10000 rarely fires and is a full-silence fallback), and
+whether any server-side instruction also influences the suppress / toggle gates.
 Owned by `specs/client_runtime.md §network`.
 
 ### 9.2 Scene machine / UI

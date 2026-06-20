@@ -175,6 +175,16 @@ public sealed partial class AudioService : Node
     private bool _vfsAvailable;
 
     // -------------------------------------------------------------------------
+    // Thread-safe cached area ID
+    // -------------------------------------------------------------------------
+
+    // Refreshed on the main thread in _Process; read by TryGetActiveAreaId on the thread-pool.
+    // volatile guarantees that the thread-pool worker always sees the latest value written
+    // by the main thread without needing a lock (single int, always 32-bit aligned).
+    // spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
+    private volatile int _cachedActiveAreaId;
+
+    // -------------------------------------------------------------------------
     // Event bus subscription
     // -------------------------------------------------------------------------
 
@@ -252,9 +262,29 @@ public sealed partial class AudioService : Node
     /// <summary>
     /// Drains the Application event bus for audio-relevant events each frame.
     /// Runs on the main thread; all audio calls here are main-thread safe.
+    /// Also refreshes <see cref="_cachedActiveAreaId"/> from the scene tree so that
+    /// <see cref="TryGetActiveAreaId"/> (called from the thread-pool) can read it safely.
+    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Node mutation on main thread.
+    /// spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
     /// </summary>
     public override void _Process(double delta)
     {
+        // Refresh the cached area id on the main thread.
+        // FindChild is legal here because _Process runs on the Godot main thread.
+        // The write is to a volatile int so the thread-pool TryStartAreaBgmAsync path
+        // sees the updated value without a lock.
+        // spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
+        try
+        {
+            var renderer = GetTree().Root.FindChild("RealWorldRenderer", recursive: true, owned: false)
+                as RealWorldRenderer;
+            _cachedActiveAreaId = renderer?.TargetAreaId ?? 0;
+        }
+        catch
+        {
+            // Tolerate headless / missing tree; cached value stays at last known good.
+        }
+
         if (_eventBus is null) return;
 
         // GameLoop owns the EventBus reader (TryRead is destructive); AudioService instead polls the
@@ -514,27 +544,22 @@ public sealed partial class AudioService : Node
     }
 
     /// <summary>
-    /// Attempts to resolve the current active area ID from the scene tree.
-    /// Looks for a RealWorldRenderer node and reads its TargetAreaId.
-    /// Returns 0 if unavailable.
+    /// Returns the current active area ID from the main-thread-cached value.
+    ///
+    /// The cache is refreshed every frame in <see cref="_Process"/> (main thread only) by
+    /// performing the <c>FindChild("RealWorldRenderer")</c> scene-tree lookup there. This method
+    /// is safe to call from any thread (including the thread-pool worker launched by
+    /// <c>Task.Run(TryStartAreaBgmAsync)</c>) because it reads only the volatile cached int —
+    /// no scene-tree access occurs here.
+    ///
+    /// Returns 0 when the renderer is not yet present or before the first main-thread frame.
     /// spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
     /// </summary>
     private int TryGetActiveAreaId()
     {
-        try
-        {
-            // RealWorldRenderer is added to the World scene's GameLoop node.
-            // Path: /root/Boot/World/RealWorldRenderer (boot_flow=login)
-            //    or /root/World/RealWorldRenderer (boot_flow=world)
-            // We search by node type rather than a fixed path for robustness.
-            var renderer = GetTree().Root.FindChild("RealWorldRenderer", recursive: true, owned: false)
-                as RealWorldRenderer;
-            return renderer?.TargetAreaId ?? 0;
-        }
-        catch
-        {
-            return 0;
-        }
+        // Volatile read: the compiler / JIT will not reorder this past any preceding write,
+        // and the hardware guarantees visibility of the value last written by _Process.
+        return _cachedActiveAreaId;
     }
 
     // -------------------------------------------------------------------------

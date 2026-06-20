@@ -10,12 +10,14 @@
 //   Select strips 400/401: loginwindow_02.dds src(9,6)/(220,6), dst(x-6,97,202,372).
 //   Status icons: loginwindow_02.dds dst(x+47,97,100,372), src(448+124·i,6).
 //   Pager/name-strip buttons: loginwindow.dds dst(13+47*i,66,47,18), src(596,985)/(643,985), actions 115..124.
-//   Population colour bands (from msg.xdb caption ids 6001/6002/6003):
-//     > 1200 → red (6001), > 800 → orange (6002), > 500 → yellow (6003), ≤500 → green (no msg, numeric).
-//   Load-guard: status==0 AND population < 2400 (not overloaded).
-//   Server display names: msg.xdb ids 5001..5040 (server_id N → id 5000+N).
-//   Population/count label: font slot 4. spec: §4 "population/count label … font slot 4, formatted %4d / %4d".
-//   Status-color indicator quads ×3: A2 src(500,786) 60×39, hidden by default. spec: §4.
+//   Population colour (status==0; CORRECTION 2026-06-20, TWO ladders selected by the +6 load-valid flag):
+//     +6!=0 (raw count): >1200 red(6001) / >800 orange(6002) / >500 yellow(6003) / ≤500 green(4029).
+//     +6==0 (discrete level): ==4 red(6001) / ==3 orange(6002) / ==2 yellow(6003) / else green(4029).
+//   Commit gate: status(+2)==0 AND load(+4) < 2400 (not overloaded). spec: LoginWindow_OnEvent 0x5fa86a.
+//   Server display names: msg bank 5001..5040 → name_id = 5000 + server_id (out-of-range → 5901).
+//   Count label (+430): EMPTY — the "%4d / %4d" line is dead-debug, never drawn.
+//   Special row: SERVER-ID(+0) == 100 (NOT status) → 3 indicator quads A2 src(500,786) 60×39.
+//   Selection highlight: A4 src(700,18) 46×168 on the plate whose id == remembered Lastserver.
 //
 // spec: Docs/RE/specs/frontend_layout_tables.md §4
 // spec: Docs/RE/specs/login_flow.md §2.1
@@ -25,7 +27,6 @@ using MartialHeroes.Client.Godot.Screens; // ServerEntry record defined in Serve
 using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Ui;
 using MartialHeroes.Client.Godot.Ui.Assets;
-using MartialHeroes.Client.Godot.Ui.Widgets;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
@@ -115,6 +116,28 @@ public sealed partial class ServerSelectSubView : Control
     private const int PopOrangeThreshold = 800; // spec: frontend_layout_tables.md §4
     private const int PopYellowThreshold = 500; // spec: frontend_layout_tables.md §4
 
+    // Discrete load levels (status==0, load-INVALID +6==0): exact-equality colour ladder.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 Branch B (CORRECTION 2026-06-20).
+    private const int PopLevelRed = 4; // == 4 → msg 6001 red
+    private const int PopLevelOrange = 3; // == 3 → msg 6002 orange
+    private const int PopLevelYellow = 2; // == 2 → msg 6003 yellow
+
+    // Special-row sentinel: a record whose SERVER-ID field (+0) == 100 is a display-only event row
+    // (out of the 1..40 name range → msg 5901; shows the 3 indicator quads). Tested on +0, NOT +2 status.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1/§4.2 "server_id == 100 gate" (CORRECTION 2026-06-20).
+    private const int SpecialRowServerId = 100;
+
+    // Default-selection highlight strip: atlas A4 (loginwindow_02.dds) src(700,18) 46×168, drawn on the
+    // plate whose ServerId matches the remembered last-server (registry Lastserver). The painter
+    // (0x5fcd09) compares record[+0] to the remembered id (object field this+0x554) and, on a match,
+    // repositions the strip to the plate's right edge (x = plate.dstX + plate.width − 48; y unchanged).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" / "Selection highlight strip".
+    private const int HighlightSrcX = 700;
+    private const int HighlightSrcY = 18;
+    private const int HighlightW = 46;
+    private const int HighlightH = 168;
+    private const int HighlightRightInset = 48; // plate-right − 48, per the painter
+
     // Status caption msg base: 4029 + status_code → caption text. spec: frontend_layout_tables.md §4
     // "msg 4029/4030/4031/4032 are the STATUS CAPTIONS (keyed by status_code)"
     private const int StatusCaptionMsgBase = 4029; // spec: frontend_layout_tables.md §4
@@ -136,6 +159,20 @@ public sealed partial class ServerSelectSubView : Control
     private readonly HudTextLibrary _text;
     private IReadOnlyList<ServerEntry> _servers = [];
     private int _page;
+
+    /// <summary>
+    /// Remembered last-selected server id (registry <c>Lastserver</c>), used to pre-highlight the plate on
+    /// re-entry. <c>-1</c> = none (no highlight) — the default offline, since no Lastserver is read.
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight".
+    /// </summary>
+    public int LastServerId { get; set; } = -1;
+
+    // Sub-state 35 loading sentinel: true from sub-view creation until SetServers() is called.
+    // Distinguishes the "fetching" state (35 — list not yet received) from the error state (36 —
+    // received zero records → msg 4027). Without this flag the empty-list breadcrumb would be
+    // incorrectly printed while the server-list worker is still running.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
+    private bool _loading = true;
 
     // Three status-color indicator quads (A2 src(500,786) 60×39), hidden by default.
     // Re-anchored around a status==100 special row when present.
@@ -171,11 +208,14 @@ public sealed partial class ServerSelectSubView : Control
 
     /// <summary>
     /// Populates the server list. Rebuilds the plate layout to match the count.
+    /// Clears the loading flag (transitions from sub-state 35 fetching to 36/37 resolved).
     /// Must be called on the main thread (Control mutation).
+    /// spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-states 35→36→37
     /// spec: Docs/RE/specs/login_flow.md §2.1
     /// </summary>
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
+        _loading = false; // spec: §4 sub-state 36 — fetch result received; transition from 35.
         _servers = servers;
         _page = 0;
         RebuildLayout();
@@ -240,10 +280,22 @@ public sealed partial class ServerSelectSubView : Control
             if (ind is not null)
                 ind.Visible = false;
 
+        if (_loading)
+        {
+            // Sub-state 35: server-list fetch worker is still running; no records yet.
+            // Render an empty list and wait for SetServers() to supply records.
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
+            GD.Print(
+                "[ServerSelectSubView] state 35 — loading server list (fetch worker running, waiting for SetServers).");
+            return;
+        }
+
         if (_servers.Count == 0)
         {
+            // Sub-state 36 error branch: worker returned zero records → msg 4027.
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 36 "0 records → msg 4027"
             string msg = _text.GetCaption(LoginLayout.MsgErrNoServers, string.Empty);
-            GD.Print($"[ServerSelectSubView] page 0: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
+            GD.Print($"[ServerSelectSubView] state 36 error: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
             return;
         }
 
@@ -257,11 +309,18 @@ public sealed partial class ServerSelectSubView : Control
         for (int slot = 0; slot < visibleCount; slot++)
         {
             int idx = firstIndex + slot;
+
+            // Default-selection highlight (drawn BEHIND the plate): only when this plate's server id
+            // matches the remembered last-server. spec: §4.2 "Default-selection highlight".
+            if (LastServerId >= 0 && _servers[idx].ServerId == LastServerId)
+                BuildSelectionHighlight(plateX[slot], PlateY);
+
             BuildPlate(plateX[slot], PlateY, actions[slot], idx, statusSrcX[slot]);
 
-            // Re-anchor the 3 status indicators around a status==100 special row.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status==100 gate … 3 quads re-anchored around it"
-            if (_servers[idx].StatusCode == 100)
+            // Re-anchor the 3 status indicators around the SERVER-ID==100 special row.
+            // The painter (0x5fcd09) tests record[+0] (server id), NOT record[+2] (status).
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4.1/§4.2 "server_id == 100 gate" (CORRECTION 2026-06-20)
+            if (_servers[idx].ServerId == SpecialRowServerId)
                 AnchorStatusIndicators(plateX[slot], PlateY);
         }
 
@@ -293,6 +352,27 @@ public sealed partial class ServerSelectSubView : Control
                 ind.Visible = true;
             }
         }
+    }
+
+    // Builds the default-selection highlight strip behind the plate at (x,y) whose server id matches the
+    // remembered last-server. atlas A4 src(700,18) 46×168, positioned at the plate's right edge
+    // (x = plate.dstX + plate.width − 48). spec: frontend_layout_tables.md §4.2 "Default-selection highlight".
+    private void BuildSelectionHighlight(int x, int y)
+    {
+        Texture2D? strip = _atlas.SliceByPath(AtlasD, HighlightSrcX, HighlightSrcY, HighlightW, HighlightH);
+        if (strip is null)
+            return;
+
+        int hx = x + PlateStripOffsetX + PlateW - HighlightRightInset; // plate-right − 48, per the painter
+        int hy = y + (PlateH - HighlightH) / 2; // y kept on the plate; strip is shorter than the plate
+        AddChild(new TextureRect
+        {
+            Position = PanelPoint(hx, hy),
+            Size = new Vector2(HighlightW, HighlightH),
+            Texture = strip,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = MouseFilterEnum.Ignore,
+        });
     }
 
     private void BuildPlate(int x, int y, int actionId, int serverIndex, int statusSrcX)
@@ -524,34 +604,62 @@ public sealed partial class ServerSelectSubView : Control
     /// </summary>
     private string ResolveStatusCaption(ServerEntry e, out Color color)
     {
-        // Load-valid flag = OpenTime/+6 nonzero. spec: §4 "status_code==0 with the load-valid flag (+6) set".
+        // Load-valid flag = OpenTime/+6 nonzero. spec: §4.1 "+6 load-valid flag" (RESOLVED 2026-06-20).
         bool loadValid = e.OpenTime != 0;
 
-        if (e.StatusCode == 0 && loadValid)
+        if (e.StatusCode == 0)
         {
-            // Load > 1200 → msg 6001, red (0xFFFF0000). spec: frontend_layout_tables.md §4.
-            if (e.Load > PopRedThreshold)
+            // Two colour ladders, selected by the +6 load-valid flag. The painter
+            // (Diamond_LoginWindow_PaintServerList 0x5fcd09) branches on *(record+6):
+            //   +6 != 0 → Load is a RAW count, thresholded 1200/800/500;
+            //   +6 == 0 → Load is a DISCRETE level, exact-equality 4/3/2.
+            // Both reuse the SAME caption msgs (6001/6002/6003) and ARGB colors.
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (two colour ladders, CORRECTION 2026-06-20).
+            if (loadValid)
             {
-                color = PopColorRed;
-                return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
+                // Threshold ladder (raw count, strict greater-than).
+                if (e.Load > PopRedThreshold) // > 1200 → msg 6001, red 0xFFFF0000
+                {
+                    color = PopColorRed;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
+                }
+
+                if (e.Load > PopOrangeThreshold) // > 800 → msg 6002, orange 0xFFED6806
+                {
+                    color = PopColorOrange;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
+                }
+
+                if (e.Load > PopYellowThreshold) // > 500 → msg 6003, yellow 0xFFFFFF00
+                {
+                    color = PopColorYellow;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
+                }
+            }
+            else
+            {
+                // Discrete ladder (load-invalid, exact equality). spec: §4.1 Branch B (2026-06-20).
+                if (e.Load == PopLevelRed) // == 4 → msg 6001, red
+                {
+                    color = PopColorRed;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
+                }
+
+                if (e.Load == PopLevelOrange) // == 3 → msg 6002, orange
+                {
+                    color = PopColorOrange;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
+                }
+
+                if (e.Load == PopLevelYellow) // == 2 → msg 6003, yellow
+                {
+                    color = PopColorYellow;
+                    return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
+                }
             }
 
-            // Load > 800 → msg 6002, orange (0xFFED6806). spec: frontend_layout_tables.md §4.
-            if (e.Load > PopOrangeThreshold)
-            {
-                color = PopColorOrange;
-                return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
-            }
-
-            // Load > 500 → msg 6003, yellow (0xFFFFFF00). spec: frontend_layout_tables.md §4.
-            if (e.Load > PopYellowThreshold)
-            {
-                color = PopColorYellow;
-                return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
-            }
-
-            // Load ≤ 500 → status caption msg (4029 + status_code), GREEN (0xFFB5FF7A) — "available/사용가능".
-            // spec: frontend_layout_tables.md §4 "≤500 → the status caption msg(4029+status_code) 0xFFB5FF7A (green)"
+            // Default (≤500 raw, or discrete 0/1/5+) → status caption msg(4029+status_code), GREEN
+            // 0xFFB5FF7A — the "available/사용가능" case. spec: frontend_layout_tables.md §4.1.
             color = PopColorGreen;
             return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // spec: §4 (4029+status_code)
         }
@@ -564,8 +672,11 @@ public sealed partial class ServerSelectSubView : Control
             if (e.Load == 24)
                 return _text.GetCaption((int)LoginLayout.MsgServerPreparing, string.Empty);
 
+            // Faithful to the painter: msg 6005 is snprintf'd with FOUR digit args in order
+            // (hourTens, hourOnes, minTens, minOnes), hour = Load(+4), minute = OpenTime(+6).
+            // spec: frontend_layout_tables.md §4 "status_code==3 … snprintf(msg 6005, …) = HH:MM from +4/+6".
             string template = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
-            return FormatCaption(template, e.Load, e.OpenTime, $"{e.Load:00}:{e.OpenTime:00}");
+            return FormatScheduledTime(template, e.Load, e.OpenTime);
         }
 
         // Other status codes → caption msg (4029 + status_code), no color override.
@@ -628,6 +739,44 @@ public sealed partial class ServerSelectSubView : Control
         return FormatCaption(template, e.ServerId, string.Empty);
     }
 
+
+    // Formats the status_code==3 scheduled-open caption (msg 6005). The painter snprintf's FOUR digit args
+    // in order (hourTens, hourOnes, minTens, minOnes). We honour whichever placeholder style the CP949
+    // msg uses: four single %d (the binary's exact form) → four digits; {0}/{0:00} or %02d → hour/minute;
+    // otherwise a plain HH:MM fallback. spec: frontend_layout_tables.md §4 (status_code==3 → msg 6005).
+    private static string FormatScheduledTime(string template, int hour, int minute)
+    {
+        int hourTens = (hour / 10) % 10, hourOnes = hour % 10;
+        int minTens = (minute / 10) % 10, minOnes = minute % 10;
+        string fallback = $"{hour:00}:{minute:00}";
+
+        if (template.Length == 0)
+            return fallback;
+
+        // Four single %d (the binary's snprintf form): substitute the four digits in order.
+        if (CountOccurrences(template, "%d") >= 4)
+        {
+            string s = template;
+            foreach (int d in (ReadOnlySpan<int>)[hourTens, hourOnes, minTens, minOnes])
+                s = ReplaceFirst(s, "%d", d.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return s;
+        }
+
+        // {0}/{0:00} or %02d styles take hour + minute as whole values.
+        return FormatCaption(template, hour, minute, fallback);
+    }
+
+    private static int CountOccurrences(string value, string token)
+    {
+        int count = 0, idx = 0;
+        while ((idx = value.IndexOf(token, idx, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            idx += token.Length;
+        }
+
+        return count;
+    }
 
     // Formats a caption template from msg.xdb that may use {0}/{0:00} or %02d placeholders.
     // Only used for status_code==3 HH:MM (MsgServerClockFormat) and the out-of-range server name fallback.

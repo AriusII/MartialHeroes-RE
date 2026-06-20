@@ -234,11 +234,18 @@ matching `opcodes.md` and `packets/*.yaml`.
 > `opcodes.md`. Behaviour at `LIKELY`; offsets `UNVERIFIED`.
 
 ### 4/12 — `SmsgEquipItemResult`
-- **Min fixed payload: 16 bytes.** `+0..+3` echo/valid dword; `+4` actor-key region;
-  `+8` result `u8` (`0` = error → UI error, `1` = ok); `+12` slot-type `u8`.
-- **Behaviour:** on success, applies an equipment-slot / visual update to the local player and
-  refreshes the rendered equipment. Slot-type value `15` additionally forces a title-slot
-  visual rebuild.
+- **Min fixed payload: 16 bytes.** A **result-code-keyed** response: the **result byte at `+0`**
+  selects the outcome (`0` = failure → show the equip-failure UI; `1` = apply the equip change
+  to the local player). The block additionally carries `+4` actor-key region and a slot-type
+  `u8` at `+12`.
+- **Behaviour:** on the success code, applies an equipment-slot / visual update to the local
+  player and refreshes the rendered equipment. Slot-type value `15` additionally forces a
+  title-slot visual rebuild.
+- **Family / eliciting C2S — `live-pending (6-D)`:** this is one of the **equip-family
+  result-code-keyed responses** (see the consolidated note in §13, Group B). It is reached by
+  **opcode**, not as a same-opcode reply to a single request; the response opcode is the
+  *category* and the result byte selects success vs failure. The specific C2S send that elicits
+  it (item-panel / quick-equip / item-move) is **`live-pending (6-D)`**.
 
 ### 4/14 — `SmsgGroundItemSlotAck`
 - **Min fixed payload: 20 bytes (fixed) `[confirmed]`.** **Corrected: the whole 20-byte block is a
@@ -676,17 +683,34 @@ in §16.
 
 ### 4/1 — `SmsgGameStateTick` (the master state-refresh packet)
 - **Fixed read: 9100 bytes (0x238C) — `[confirmed]` size** — the **largest Response payload**
-  in the table.
-- **Branch on body byte `+0` (`[confirmed]`, 3-way):** byte0 `== 0` → **form A**; byte0 `== 1`
-  → **form B** (the world-entry path); any other value → **form C**. The world-entry form B is
-  the load-bearing one: it bulk-copies two large sub-blocks (`0xFCC` and `0xC10` bytes) into
-  the world/actor tables, builds the local player, selects the area BGM, and sets the
-  enter-world-ready state. The byte-0 selector position is confirmed; the *meaning* of the
-  two copied sub-blocks is `[capture/debugger-pending]`.
+  in the table. The handler reads the **whole 9100-byte body once into a single buffer**, then
+  indexes named offsets inside it; it never re-reads from the socket.
+- **Read order (`[confirmed]`):** the handler's **very first action is to clear the in-flight
+  latch** (see below), and only *then* does it branch on the leading **FormSelector byte at
+  body `+0`**.
+- **Branch on the FormSelector byte `+0` (`[confirmed]`, 3-way):** byte0 `== 0` → **form 0**
+  (the periodic tick / drain path: a recurring full-state refresh that does **not** load a
+  world — no area is selected on this branch); byte0 `== 1` → **form 1** (the world-entry
+  path); any other value → **form C** (a residual fall-through). The byte-0 selector position
+  is confirmed; the *meaning* of the copied sub-blocks is `[capture/debugger-pending]`.
+- **Form 1 (world-entry) area selection (`[confirmed]` control-flow; AreaId VALUE
+  `[capture/debugger-pending]`):** form 1 reads an **AreaId at body offset `+12`** and passes
+  it to the area selector, which **loads the area by its 3-digit decimal directory** (the
+  AreaId formatted as a zero-padded 3-digit decimal names the area's data directory). It also
+  **mirrors the AreaId onto the local player** (stores it on the local-player state) and
+  **restreams the terrain from the area global** (re-points the terrain streamer at the
+  selected area). Form 1 additionally bulk-copies two large sub-blocks (`0xFCC` and `0xC10`
+  bytes) into the world/actor tables, builds the local player, selects the area BGM, and sets
+  the enter-world-ready state.
+- **Date / time fields:** any date/time values carried in the body **feed only the world-clock
+  seed** — they are **never** used to derive the map/area directory. (The map directory comes
+  solely from the AreaId at `+12`.)
 - **In-flight latch (load-bearing, `[confirmed]`):** 4/1's **very first statement, before the
-  form-A/form-B branch, clears the enter-game in-flight latch** (writes the NetClient latch byte to
+  form branch, clears the enter-game in-flight latch** (writes the NetClient latch byte to
   0, unconditionally). This closes the `1/9 → 3/5 → 4/1` enter ladder: 1/9 SETS the latch on send,
   3/5 `SmsgEnterGameAck` leaves it SET, and 4/1 CLEARS it. (3/5 does NOT clear it.)
+- **Cross-link:** field layout for the body lives in `packets/4-1_game_state_tick.yaml`; this
+  section records only handler behaviour.
 - **Behaviour (size `[confirmed]`; interior VALUE semantics `[capture/debugger-pending]`):** a
   periodic full world/game-state snapshot. The handler touches almost every subsystem — game
   state, billing state, rank/progress, the frame-tick scheduler, the net client, the actor
@@ -715,7 +739,12 @@ in §16.
   (`UNVERIFIED` — a capture should confirm they truly never matter).
 
 - **Tag loop (STRUCTURE-HIGH on the per-tag sizes):** read one `tag u8`; the loop ends when
-  `tag == 0`. Each non-zero tag selects a record size and an action:
+  `tag == 0`. Each non-zero tag selects a record size and an action. **The emitted tag set is
+  exactly `{0, 1, 2, 3, 4, 6, 9}`** (0 = terminator). There is **no skip path for an unknown
+  tag** — an unrecognised tag would desync the stream (the loop has no "read-and-discard
+  unknown record" branch), so the server only ever emits this set. **All three overlay tags
+  (4, 6, 9) are fully consumed** (the handler reads the whole record, then processes it) — none
+  is skip-only.
 
   | Tag | Record size | Action |
   |-----|-------------|--------|
@@ -723,15 +752,47 @@ in §16.
   | 2 | 892-byte descriptor | remove any existing actor with that key, then create with sort = mob (2) |
   | 3 | 892-byte descriptor | as tag 2 with sort = NPC (3); additionally orients the actor |
   | 4 | 24-byte ground-item record | spawn a ground item (record fields below) |
-  | 6 | 36-byte guild record | set the actor's guild-name string slot |
-  | 9 | 24-byte title record | set the actor's title / name overlay |
+  | 6 | 36-byte guild record | overlay a guild-name string onto an existing actor (fields below) |
+  | 9 | 24-byte title record | overlay a title / name relation onto an existing actor (fields below) |
 
-- **Tag-4 ground-item record (24 bytes, UNVERIFIED field meaning):** id-key `u32` at `+0`;
-  template `u32` at `+4`; unused `u32` at `+8`; opaque `i32` at `+12`; pos X `f32` at `+16`;
-  pos Z `f32` at `+20`. A zero body spawns a phantom default model (id 201011001) at origin.
-- **Tag-6 guild record (36 bytes):** entity key `u32` at `+0`; guild name CP949 asciiz at `+5`.
-- **Tag-9 title record (24 bytes):** entity key `u32` at `+0`; state `u8` at `+4`; sub-flag
-  `u8` at `+5`; name CP949 asciiz at `+6`. State values 2 and 4 are special.
+  Tags 1 / 2 / 3 are the **full spawn / refresh records**; tags 4 / 6 / 9 are the **overlay
+  records**. The three overlay records are detailed next (offsets `STRUCTURE-HIGH`; field VALUE
+  meanings `[capture/debugger-pending]`).
+
+- **Tag-4 — ground-item descriptor (24 bytes):**
+
+  | Off | Size | Field | Type | Notes |
+  |-----|------|-------|------|-------|
+  | +0x00 | 4 | EntityKey   | u32 | the pickup / remove target key |
+  | +0x04 | 4 | TemplateId  | u32 | item-template / table lookup |
+  | +0x08 | 4 | (reserved)  | —   | read but unused |
+  | +0x0C | 4 | Attribute   | i32 | likely quantity / flags; **stored on the materialized ground-item record** |
+  | +0x10 | 4 | WorldX      | f32 | world X |
+  | +0x14 | 4 | WorldZ      | f32 | world Z |
+
+  The materialized item is **placed 1.0 above terrain** (1.0 above the ground height at its
+  X/Z); when several drops share a cell they are **spiralled out** so stacked drops do not
+  overlap. A zero body spawns a phantom default model (id 201011001) at origin.
+
+- **Tag-6 — actor guild-name display marker (36 bytes):**
+
+  | Off | Size | Field | Type | Notes |
+  |-----|------|-------|------|-------|
+  | +0x00 | 4 | EntityId | u32 | composite-key actor lookup; **the record is dropped if the actor is not present** (this is an overlay onto an already-spawned actor) |
+  | +0x04 | 1 | (slot)   | u8  | role unconfirmed (possibly a length / type / pad byte) |
+  | +0x05 | up to 31 | GuildName | CP949 asciiz | NUL-terminated, occupying `+0x05` up to 31 bytes |
+
+  Assigns the guild name to the looked-up actor and triggers a **guild-display motion refresh**.
+
+- **Tag-9 — actor title / relation overlay (24 bytes):**
+
+  | Off | Size | Field | Type | Notes |
+  |-----|------|-------|------|-------|
+  | +0x00 | 4 | EntityId       | u32 | actor lookup; **the record is dropped if the actor is absent** |
+  | +0x04 | 1 | RelationState  | u8  | values `2` and `4` take the name-only / skip path; any other value takes the full overlay path |
+  | +0x05 | 1 | OverlaySubCode | u8  | fed to an overhead-label / relation-colour routine |
+  | +0x06 | 17 | TitleName     | CP949 cell | up to 16 chars + a forced NUL (17-byte cell) |
+  | +0x17 | 1 | (pad)          | u8  | trailing pad byte |
 - **The 892-byte (0x37C) actor body** is the SpawnDescriptor family. **`CROSS-REF`/FLAG:**
   reconcile this **892** figure with the **880-byte** `structs/spawn_descriptor.md`, the
   **908-byte** 5/3 block and the **912-byte** 5/1 block (the differences are
@@ -867,18 +928,31 @@ failure.
 |---|---|---|---|---|---|
 | 4/5  | `SmsgItemUseResult`        | 44 | result 1/7; item-id ranges 213060037.. / 213062504..; sound kind 90 | Item-use result for an actor; on success plays effect+sound chosen by **item-id range** and updates item/HUD. Shares the item-id range table with 4/139, 5/5, 5/139. | size HIGH |
 | 4/15 | `SmsgItemWorldPickupAck`   | **36** | success@+8; outcome@+9 (100/101 / fail 1..5 → ids 10001..10005) | World item-pickup ack; 36-byte block; success flag @+8, outcome/reason @+9; success inserts into the bag, failure surfaces the error string. **Corrected: fixed 36-byte read (was "var").** | size HIGH |
-| 4/16 | `SmsgEquipChangeResult`    | 20 | result@+8, gate@+0x0A, slot-type@+0x0B | Equip-change result; result @+8 (0/1); on apply, gate byte @+0x0A and slot-type @+0x0B (`== 15` = title-slot weapon-drawn rebuild, parallel to 4/12); rebuilds the local-player live equipment mirror. **The `{0,1,2,4,15,20}` set is not one discriminator — it spans the result/gate/slot-type bytes and the change-apply sub-handler.** | size HIGH |
+| 4/16 | `SmsgEquipChangeResult`    | 20 | result@+8, gate@+0x0A, slot-type@+0x0B | Equip-change result — a **result-code-keyed** response (reached by opcode; the result byte selects success vs failure). result @+8 (0/1); on apply, gate byte @+0x0A and slot-type @+0x0B (`== 15` = title-slot weapon-drawn rebuild, parallel to 4/12); rebuilds the local-player live equipment mirror. **The `{0,1,2,4,15,20}` set is not one discriminator — it spans the result/gate/slot-type bytes and the change-apply sub-handler.** Equip-family — eliciting C2S **`live-pending (6-D)`** (see Group B note). | size HIGH |
 | 4/17 | `SmsgQuickEquipSlotAck`    | 16 | result@+8; slot index@+0x0B (`>= 10`) | Quick-equip slot ack; result @+8; clears the inventory in-flight latch (see §13 census). | size HIGH |
 | 4/19 | `SmsgNpcBuyOrAcquireAck`   | **56** | gate@+16; result-sub@+17 | NPC buy / inventory-acquire ack. **Corrected: FIXED 56-byte read (was "var").** gate @+16: `1` forwards the whole block to the inventory-acquire sub-handler; `0` is the text path (the result-sub byte @+17 == 1 formats an item-duration / time-remaining notice from a script-table record). **Serves BOTH C2S 2/19 and 2/115** (dual-source confirmed). | size HIGH |
 | 4/20 | `SmsgNpcSellItemAck`       | 24 | gate@+8; apply-sub@+10 | NPC sell ack; actor id @+4; gate @+8 (`0` = dismiss, `1` = apply); on apply with the apply-sub byte @+10 == 0 and the seller = local player, rebuilds the 20-record × 16-byte local equip mirror. | size HIGH |
 | 4/21 | `SmsgNpcShopSlotClearAck`  | 12 | result@+8 | Clears an NPC shop slot; the thin twin of 4/14 — result @+8 (`0` = close panel, `1` = apply slot change), 12-byte source-slot descriptor. | size HIGH |
-| 4/22 | `SmsgItemSlotStateAck`     | **36** | result@+8 | Item-slot state ack. **Corrected: FIXED 36-byte (0x24) read (was "var").** result @+8 (`0` = modal clear, `1` = apply the slot-state update, other = no-op). | size HIGH |
+| 4/22 | `SmsgItemSlotStateAck`     | **36** | result@+8 | Item-slot state ack — a **result-code-keyed** response (reached by opcode; the result byte selects success vs failure). **Corrected: FIXED 36-byte (0x24) read (was "var").** result @+8 (`0` = dismiss a pending notice / modal clear, `1` = apply the item-slot state update, other = no-op). Equip-family — eliciting C2S **`live-pending (6-D)`** (see Group B note). | size HIGH |
 | 4/24 | `SmsgUserTradeSlotUpdate`  | **44** | result@+8; subtype@+1 (teardown); Category@+0x0A; OwnerId@+0x28 | Updates one trade-window slot. **Corrected: FIXED 44-byte (0x2C) read (was "var").** result @+8 (`1` apply / `0` teardown-notice via subtype @+1 = 1/2); Category @+0x0A (item/alt/money, `0xFF` = money); **own-vs-partner side = OwnerId @+0x28 == local-actor id** (NOT a literal "1/2 selector"). | size HIGH |
 | 4/25 | `SmsgUserTradeFullResponse`| 28 (+N×16) | Phase@+8 (0=cancel,1=ready,4=commit); Coin i64@+0x0C; OwnerId@+0x14; Count@+0x18 | Full trade response. 28-byte header, then on the commit phase a loop of `Count` × 16-byte records (cap 40). **Corrected: Count @+0x18 (NOT +0x09); add Coin `i64` @+0x0C and OwnerId @+0x14.** Phase byte @+8 runs the 5-way switch: `0` = cancel/close, `1` = ready (own vs partner via OwnerId@+0x14), 2/3 = notices, `4` = COMMIT (reads Coin i64@+0x0C, folds the record array, finalizes). Resolves the commit-vs-cancel mapping. | size HIGH |
 | 4/137| `SmsgGatheringResult`      | 24 | 0,1,2,4,255 | Gathering result; looks up actor; 255 = generic-fail code; updates gather UI. | size HIGH |
 | 4/138| `SmsgNoticeError`          | 12 | — | Generic notice/error; looks up actor; shows a message (~id 1014). | size HIGH |
 | 4/140| `SmsgColoredSystemText`    | 112| 11 | Colored system-text line; 112-byte block (color + text region); chat/system UI. CP949 text. | size HIGH |
 | 4/148| `SmsgPlaytimeRewardResult` | var (28 hdr) | — | Playtime-reward result; 28-byte header; reward/notice UI. | MED |
+
+> **Equip family — result-code-keyed responses (not same-opcode replies).** `4/12`
+> `SmsgEquipItemResult`, `4/16` `SmsgEquipChangeResult` and `4/22` `SmsgItemSlotStateAck`
+> form one family. Model all three as **result-code-keyed responses reached by opcode**: the
+> response **opcode IS the category**, and a **result byte selects success vs failure** — they
+> are *not* same-opcode replies to a single request. The result-byte positions (control-flow):
+> **4/12 → result `u8` at `+0`** (`0` = failure UI / `1` = apply the equip change to the local
+> player); **4/16 → result-code-keyed**, result `u8` at `+8` (`0` = failure / `1` = apply, with
+> the change-apply sub-handler consuming the gate/slot-type bytes); **4/22 → result `u8` at
+> `+8`** (`0` = dismiss a pending notice / `1` = apply the item-slot state update). **The
+> eliciting C2S send is `live-pending (6-D)`** — the specific item-panel / quick-equip /
+> item-move frame that triggers each is not settled by static analysis; confirm against a live
+> event before pairing a request with any of these responses.
 
 ### Group C — party / social / interaction (RankProgress-routed cluster)
 A large cluster forwards a fixed block to the rank/progress (social/party/rank panel)
@@ -1608,6 +1682,12 @@ is needed only for the field's value semantics, by doctrine).
   record field. `[capture/debugger-pending]` remains only on the *value* meaning (whether the
   64-bit field is literal damage vs another signed magnitude, and what the opaque record bytes
   carry per target).
+- **Damage / HP-delta polarity — `live-pending (6-D)`.** The per-target signed-quantity
+  fields (the 64-bit value summed at record `+0x14`/`+0x18`, and any per-target HP delta) have
+  **unconfirmed polarity, units and exact meaning** under static analysis: whether the value is
+  a damage amount, a heal (negative), or another signed magnitude, and what its units are,
+  cannot be settled from the disassembly. Confirm against a live event (`6-D`) before relying on
+  any sign convention; do not invent a polarity.
 
 ### 20.4 — Quest / rank panel interiors (5/68, 5/73, 5/77, 4/48)
 

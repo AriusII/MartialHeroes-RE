@@ -394,9 +394,12 @@ field shape mirrored in `packets/0-0_key_exchange.yaml`.
 `3/1 SmsgCharacterList` (S2C) is the message that **actually switches the client into the
 character-select scene**. Its shape:
 
-- a **3-byte header**: a server-id context byte, a channel-id context byte, and a **slot bitmask**
-  byte (bit *i* set ⇒ slot *i* is occupied);
-- for each set bit, one **per-slot record of 981 bytes**, read sequentially.
+- a **3-byte header**: two leading **context bytes** (a server-id context byte and a channel-id
+  context byte) followed by a **SlotMask** byte whose **bits 0..4** each indicate whether that slot's
+  981-byte record follows (bit *i* set ⇒ slot *i* is occupied; only bits 0..4 are meaningful — see the
+  hard 5-slot bound below);
+- for each set bit, one **per-slot record of 981 bytes**, read sequentially. The frame total is
+  therefore `3 + popcount(SlotMask) × 981`.
 
 Per-slot record (981 bytes total), as consumed by the handler:
 
@@ -409,6 +412,54 @@ Per-slot record (981 bytes total), as consumed by the handler:
 
 After parsing all occupied slots, the client derives a **CP949** display name (cleaned/truncated to
 **17 bytes**) per slot, then forces the **character-select scene**.
+
+#### 3.2.1 Per-slot record field map — char-select roster + appearance (consumer-confirmed)
+
+The character-select roster and the previewed avatar are built **entirely from the server's per-slot
+record**; there is no local appearance store. The fields below were re-confirmed from the **consumer
+side** (the select-scene render + the enter-game stage that read them). All offsets are **relative to
+the per-slot record / SpawnDescriptor start** (sub-offset 0 of the 981-byte record). The full
+descriptor + skeleton chain is **owned by `structs/actor.md` and `specs/skinning.md`** and is not
+restated here — only the slots this roster reads.
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| +0x00 | 17 | `name` | CP949, NUL-terminated cell (≤ 16 chars + NUL). Space-trimmed for display. Compared against the empty-slot sentinel `"@BLANK@"` (§3.5). |
+| +0x2C | 1 (u8) | `appearance_variant` | Doubles as the **row-occupancy gate** (whether the slot renders) **and** as the `variant` input to the appearance formula below. |
+| +0x34 | 2 (u16) | `internal_class` | Class id ∈ **{1,2,3,4}** = Musa / Salsu / Dosa / Monk. The `class` input to the appearance formula and the skeleton selector. |
+| +0x3A | 2 (u16) | `level` (display) | The level value the **char-select roster renders**. See the level-divergence note below. |
+| +0x4C | 4 (f32) | `world_x` | Position X (shown as an integer `"%d , %d"` position label). |
+| +0x50 | 4 (f32) | `world_z` | Position Z (the second number of the `"%d , %d"` label). World **Y is not present** in the record. |
+| +0x58 | 20 × 16 | `equip_ref_table` | Visible-gear table: 20 entries × 16 bytes; each entry's **leading dword** is a worn-item / part gid. The avatar preview overlays specific slots from this table. |
+
+> **Level display-vs-enter-game divergence (flagged).** The char-select roster reads the displayed
+> level from `level` @ **+0x3A**. The **enter-game path**, however, reads the local-player level from
+> a **different descriptor region** — approximately **+0x300**, inside the equip / buff block — **not**
+> from +0x3A. The two paths therefore source the player level from two distinct offsets. Which offset
+> is **authoritative** for the live player level is **live-pending (6-D)**.
+
+**Appearance preview construction.** The avatar shown for an existing list character is composed from
+the server descriptor alone:
+
+- **Skeleton selector.** The model identity is
+  `model_class_id = 5 × (internal_class + 4 × appearance_variant) − 24`, which for the four starter
+  classes yields an appearance-slot identity in **{1, 11, 16, 26}**. That identity selects the
+  **catalog skeleton** (the data-driven edge `{1→g1, 26→g2, 11→g3, 16→g4}`; the underlying skeleton
+  chain and the `SkinClassId → g{1..4}.bnd` rule are **owned by `specs/skinning.md`**).
+- **Outfit overlay.** The visible outfit is layered on top of that skeleton from the
+  `equip_ref_table` (+0x58) worn-item gids.
+
+(Cross-links: `structs/actor.md` owns the full SpawnDescriptor layout; `specs/skinning.md` owns the
+skeleton/appearance chain. This spec only records which descriptor slots the **char-select roster**
+consumes.)
+
+#### 3.2.2 StatBlock, SlotFlag, and Timing (record tail)
+
+| Record sub-offset | Size | Field | Meaning |
+|---|---|---|---|
+| 880 (0x370) | 96 (0x60) | `StatBlock` | The slot's **primary-stat record**. On enter-game the chosen slot's 96-byte StatBlock is **copied verbatim** into the local-player stat globals — it *is* the character's stat record. Layout owned by `structs/stats.md`. |
+| 976 | 1 | `SlotFlag` | Per-slot flag byte that **gates the slot button** (locked / second-password / restricted class). The exact relation/lock semantics are **live-pending (6-D)**. |
+| 977 | 4 (u32) | `Timing` | Per-slot timing value, likely a cooldown / relation timestamp (e.g. delete-cooldown / create-time class). Exact meaning **live-pending (6-D)**. |
 
 > **Slot count (now a hard constant).** The slot-parse loop is a **fixed, bounded iteration of
 > exactly 5** — it walks slot indices **0..4** and stops; it is not an open-ended scan driven only by
@@ -508,6 +559,32 @@ in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
 > operation is ever in flight. The full per-field byte tables live in those packet YAMLs — they are
 > the single source of truth; this spec does not restate them. The actual world-entry request is the
 > separate `1/9` enter-game message (§3.3).
+
+> **CYCLE 6b CORRECTION (2026-06-20) -- the full char-manage C2S/S2C family + the deferred-write rule
+> (CODE-CONFIRMED, build 263bd994).** `// confirmed: static IDA 2026-06-20` The select screen emits
+> five C2S messages, not two; delete has no dedicated opcode; and the local slot writers run only off
+> the server ack:
+> - **`1/7` carries a mode byte: `{slot, mode}` (2 bytes).** `mode = 0` = select / view; `mode = 1` =
+>   **delete request**. There is **no standalone delete opcode** -- delete is multiplexed onto `1/7`.
+> - **`1/9` enter-game** (40 bytes) -- as `section 3.3`.
+> - **`1/6` create character** (52 bytes) -- as above; class map UI{0,1,2,3} to internal {4,1,3,2}.
+> - **`1/13` rename character** (18 bytes).
+> - **`1/14` move/relocate slot** (1 byte: slot index).
+> - **Result: `3/7 SmsgCharManageResult` (8-byte body, subtype byte).** Subtype 2 = **delete confirmed**
+>   (decrements the account character count); other subtypes drive the create/rename slot-facing refresh
+>   and a same-day delete-cooldown notice. The select scene is then reset/refreshed (it does **not**
+>   re-transition; only `3/1` transitions into select -- `section 3.2`).
+> - **Deferred-write rule.** The client writes a new slot record and clears a deleted slot **only from
+>   the matching S2C result handler** (rename-result / `3/7` manage-result), **never** optimistically on
+>   the C2S send. So a create/delete is not reflected locally until the server acknowledges.
+> - **No corner-X close; window close = system-close to state 6 / sub-state 8.** The select window
+>   builds no frame-X widget; an OS/system-close message routes the scene to **state 6, sub-state 8**
+>   (back toward login). The "Back" tab does **not** transition to the server list -- in-window "back"
+>   controls only dismiss the create/rename/move sub-panels. (See `ui_system.md section 8.2`,
+>   `frontend_scenes.md section 3` / `section 5`.)
+> - **Byte-granular blob layouts** of the 40B enter / 52B create / 18B rename / 8B `3/7` bodies remain
+>   capture / debugger-pending; the opcode pairings and sizes above are static-confirmed.
+> <!-- source: _dirty/cycle6b/laneE_action_fsm.md (sections 1-5, opcode summary) -->
 
 ---
 
@@ -941,7 +1018,18 @@ The behavior-anchored opcode subset for this flow:
     submit → TAB-third-token → optional `1/4` blob path are static-confirmed (CAMPAIGN 9); the exact
     storage slot width/offset is **UNVERIFIED / debugger-pending** (a single live read would confirm
     it). This does not change the §4.2 wire layout.
-13. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
+13. **Char-list per-slot level offset — display vs enter-game (which is authoritative)** (§3.2.1). The
+    char-select roster reads the displayed level from `level` @ +0x3A; the enter-game path reads the
+    local-player level from a **different** descriptor region (≈ +0x300, inside the equip / buff block).
+    Which offset is the **authoritative** live player level is **live-pending (6-D)**.
+14. **Char-list per-slot `SlotFlag` (record +976) relation/lock semantics** (§3.2.2) — gates the slot
+    button (locked / second-password / restricted); exact relation semantics **live-pending (6-D)**.
+15. **Char-list per-slot `Timing` (record +977, u32) meaning** (§3.2.2) — likely a cooldown / relation
+    timestamp; exact meaning **live-pending (6-D)**.
+16. **Char-list 3-byte header context-byte VALUES** (§3.2) — the two leading context bytes (server-id /
+    channel-id context preceding the SlotMask byte) — their concrete on-wire values are **live-pending
+    (6-D)**.
+17. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
     **except** the login blob (carried by `1/4`) field layout, which is corroborated by a runtime read
     of the live client's assembled packet buffer (still not a network capture). The only on-disk
     real-byte corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3). The lobby

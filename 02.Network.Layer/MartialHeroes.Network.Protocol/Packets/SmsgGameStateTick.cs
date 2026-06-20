@@ -16,7 +16,8 @@ namespace MartialHeroes.Network.Protocol.Packets;
 /// </summary>
 /// <remarks>
 /// The handler branches on body byte +0; form <c>1</c> is the world-entry path. The only payload
-/// fields this clean slice consumes are scenario code at +0x00C and spawn X/Z at +0x2374/+0x2378.
+/// fields this clean slice consumes are area id at +0x00C (absolute area index; 3-digit decimal
+/// directory selects &lt;id&gt;.lst) and spawn X/Z at +0x2374/+0x2378.
 /// World Y is not on the wire and is forced to zero by Application.
 /// </remarks>
 [PacketOpcode(4, 1)]
@@ -38,8 +39,13 @@ public readonly struct SmsgGameStateTick
     /// <summary>Body byte +0 value for the world-entry branch. spec: handlers.md §4/1.</summary>
     public const byte WorldEntryForm = 1;
 
-    /// <summary>Scenario/map-mode code at body +0x00C. spec: client_runtime.md §9.1 step 5 / §9.4.</summary>
-    public const int ScenarioModeOffset = 0x000C;
+    /// <summary>
+    /// Area id at body +0x00C — absolute area index; its 3-digit decimal directory form
+    /// (&lt;id&gt;.lst, e.g. id 6 → "006", id 12 → "012") selects the on-disk area.
+    /// spec: Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12);
+    /// Docs/RE/specs/handlers.md §4/1.
+    /// </summary>
+    public const int AreaIdOffset = 0x000C;
 
     /// <summary>Spawn X at body +0x2374. spec: client_runtime.md §9.1 step 5 / §9.4.</summary>
     public const int SpawnXOffset = 0x2374;
@@ -65,7 +71,7 @@ public readonly struct SmsgGameStateTick
 
         seed = new SmsgGameStateTickSeed(
             payload[FormOffset],
-            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(ScenarioModeOffset, sizeof(int))),
+            BinaryPrimitives.ReadInt32LittleEndian(payload.Slice(AreaIdOffset, sizeof(int))),
             BinaryPrimitives.ReadSingleLittleEndian(payload.Slice(SpawnXOffset, sizeof(float))),
             BinaryPrimitives.ReadSingleLittleEndian(payload.Slice(SpawnZOffset, sizeof(float))));
         return true;
@@ -80,7 +86,16 @@ public readonly struct SmsgGameStateTick
 }
 
 /// <summary>
-/// The decoded 4/1 world-entry seed: form byte, scenario code, and X/Z spawn position. World Y is
-/// not on the wire. spec: Docs/RE/specs/client_runtime.md §9.1/§9.4.
+/// The decoded 4/1 world-entry seed: form byte, area id, and X/Z spawn position. World Y is
+/// not on the wire. spec: Docs/RE/specs/client_runtime.md §9.1/§9.4;
+/// Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12).
 /// </summary>
-public readonly record struct SmsgGameStateTickSeed(byte Form, int ScenarioMode, float SpawnX, float SpawnZ);
+/// <param name="Form">Leading form-selector byte (value 1 = world-entry path).</param>
+/// <param name="AreaId">
+/// Absolute area index at body +0x00C. Its 3-digit decimal directory form (&lt;id&gt;.lst,
+/// e.g. id 6 → "006", id 12 → "012") selects the on-disk area.
+/// spec: Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12).
+/// </param>
+/// <param name="SpawnX">Local-player spawn X; feeds position set and terrain cold-start.</param>
+/// <param name="SpawnZ">Local-player spawn Z; feeds position set and terrain cold-start.</param>
+public readonly record struct SmsgGameStateTickSeed(byte Form, int AreaId, float SpawnX, float SpawnZ);

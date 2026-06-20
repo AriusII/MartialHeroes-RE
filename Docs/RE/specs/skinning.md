@@ -1001,6 +1001,27 @@ content exists for the human rig; the col15 (`motion_ids_a[0]`) slot is specific
 stand snapshot**. A visible breathing idle in the port would require selecting a **different**,
 animated slot — a runtime motion-selection choice, not a parser or missing-animation fix.
 
+#### 10.3.1 Standing-idle slot selection — structure recovered, value mapping `live-pending (6-D)`
+
+> **STRUCTURE KNOWN, VALUE MAPPING UNCONFIRMED — `live-pending (6-D)`.** Statically we can see
+> *how* the engine picks the idle slot, but not *which* slot each input value yields. An actor
+> carries a client-side **visual-state word** (a small per-actor state field, distinct from the
+> motion-id registry), and that word drives a **6-case idle-motion applier** — a compact jump table
+> with six branches, each branch routing the standing actor to a specific catalogue column so that
+> column supplies the idle clip for the current visual state. So the selection *mechanism* is
+> recovered: a 6-way dispatch keyed on the visual-state word, choosing which `actormotion.txt`
+> column (col15/`motion_ids_a[0]` among them) feeds the idle.
+>
+> What is **not** statically settled is the **value → clip mapping**: which concrete visual-state
+> value lands on which of the six cases, and therefore which named idle/stand clip (the static col15
+> stand vs. an animated slot) the live engine actually plays for a plain standing human. The branch
+> structure does not by itself prove which value is the "neutral standing" input or which column each
+> case selects. That mapping must be confirmed against the **live debugger** (read the visual-state
+> word and the column it resolves for a known standing actor); it must **not** be guessed from the
+> jump-table shape alone. Until confirmed, treat the static col15 stand as the faithful default per
+> §10.2/§10.5 — the recovered 6-case structure tells us a swap is *possible*, not that one *occurs*
+> for a standing human.
+
 ### 10.4 What is settled vs. open
 
 | Question | Verdict |
@@ -1009,6 +1030,8 @@ animated slot — a runtime motion-selection choice, not a parser or missing-ani
 | Is the col15 human stand idle clip static data? | YES — 0/84 animated tracks, a fixed held pose (SAMPLE-VERIFIED). |
 | Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static col15 asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds); the mesh-explosion debt is **retired**. |
 | Which standing-idle slot does the **live engine** select at runtime (static col15 vs an animated slot)? | **DEBUGGER-PENDING** — needs a live debugger to read the slot the mixer actually plays for a standing human; no live server/debugger was available on this lane. |
+| How does the engine pick the idle slot at all (the selection *mechanism*)? | **STRUCTURE RECOVERED (§10.3.1)** — a per-actor visual-state word drives a 6-case idle-motion applier (a 6-way jump table) that routes the standing actor to a catalogue column. |
+| Which visual-state **value** maps to which case / column (the value → clip mapping)? | **`live-pending (6-D)`** (§10.3.1) — the branch structure does not settle which value selects which column; confirm against the live debugger, do not guess from the jump-table shape. |
 
 ### 10.5 Guidance for the port
 

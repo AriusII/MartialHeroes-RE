@@ -7,6 +7,7 @@ using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Debug;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Hud;
+using MartialHeroes.Client.Domain.Actors;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -312,6 +313,19 @@ public sealed partial class GameLoop : Node
             GD.PrintErr($"[GameLoop] ActorRegistry.Initialise failed: {ex.Message}");
         }
 
+        // Wire the terrain node into ActorRegistry so live actors from 4/4 are snapped to real
+        // ground height as sectors become resident (debt #2 — eliminate fallback-Y race).
+        // spec: Docs/RE/formats/terrain.md — TryGetGroundHeight bilinear ground height. CONFIRMED.
+        // spec: Docs/RE/specs/world_systems.md — actor placement deferred until terrain resident.
+        try
+        {
+            _actorRegistry.SetTerrainNode(_terrainNode);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[GameLoop] ActorRegistry.SetTerrainNode failed: {ex.Message}");
+        }
+
         // Wire InputRouter with bus from the composition root.
         try
         {
@@ -341,6 +355,22 @@ public sealed partial class GameLoop : Node
                 _realWorldRenderer.Initialise(_clientContext, _terrainNode);
                 realRendererStarted = true;
                 GD.Print("[GameLoop] RealWorldRenderer initialised successfully.");
+
+                // Recover the 4/1 world entry that may have been published BEFORE this InGame scene existed.
+                // The transient InGameWorldBootstrappedEvent is drained by whatever scene was active when 4/1
+                // arrived (live: LoginScene/LoadScene), so the durable WorldEntryState is the reliable source
+                // for the area cold-start on world-enter. The DispatchEvent InGameWorldBootstrappedEvent case
+                // is KEPT for the rarer order where 4/1 arrives after InGame is already up; OnWorldEntered is
+                // idempotent (guards against double area-load via _worldEntryInProgress / TargetAreaId), so
+                // both orderings are safe.
+                // spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — 4/1 AreaId cold-starts the area.
+                if (_clientContext.WorldEntry is { IsActive: true } entry)
+                {
+                    GD.Print($"[GameLoop] InGameWorldBootstrappedEvent: server AreaId={entry.AreaId} " +
+                             "(recovered from durable WorldEntryState — 3-digit dir → <id>.lst). " +
+                             "spec: world_entry.md §2.3/§3.1.");
+                    _realWorldRenderer.OnWorldEntered(entry.AreaId, entry.SpawnPosition);
+                }
             }
             catch (Exception ex)
             {
@@ -741,9 +771,22 @@ public sealed partial class GameLoop : Node
                     localSpawn.CurrentHp,
                     localSpawn.MaxHp,
                     localSpawn.ServerClass));
+
+                // Retire the static-capsule debt for the LOCAL PLAYER: build the skinned, idle-animated
+                // avatar from the player's class (ServerClass == .skn header SkinClassId / id_b ∈ {1..4})
+                // via the SAME recovered chain NpcRenderer uses (skin → bind → idle .mot), and swap it in
+                // for the placeholder capsule. Reuses the already-open VFS handle (no second mmap). When
+                // offline (RealWorldRenderer null / Assets null) the VisualActor keeps its capsule — no
+                // regression to the offline demo path. STRICTLY PASSIVE: which clip plays is the idle the
+                // chain resolves; PlayStandingIdle is auto-engaged inside Build.
+                // spec: Docs/RE/specs/skinning.md §8(e) (skin/bind/idle chain; g{SkinClassId}.bnd for {1..4}),
+                //       §10.5 (col15 standing idle plays looping; static look is faithful data).
+                // spec: World/PlayerAvatarResolver.cs / World/VisualActor.cs (AttachSkinnedAvatar swap).
+                TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass);
+
                 GD.Print($"[GameLoop] LocalPlayerSpawnedEvent: name='{localSpawn.Name}' " +
                          $"level={localSpawn.Level} pos=({localSpawn.Position.RawX},{localSpawn.Position.RawZ}) " +
-                         $"slot={localSpawn.SlotIndex}. spec: login_flow.md §3.5 / §5.3.");
+                         $"slot={localSpawn.SlotIndex} class={localSpawn.ServerClass}. spec: login_flow.md §3.5 / §5.3.");
                 break;
 
             case LocalPlayerSpawnFailedEvent spawnFailed:
@@ -751,6 +794,32 @@ public sealed partial class GameLoop : Node
                 // so we show the failure in-world (timed message). spec: login_flow.md §5.3.
                 GD.PrintErr($"[GameLoop] LocalPlayerSpawnFailedEvent: slot={spawnFailed.SlotIndex}. " +
                             "spec: Docs/RE/specs/login_flow.md §5.3 (Result 0 = failure).");
+                break;
+
+            // ---- World bootstrap (4/1 world-entry carrier) ----
+            case InGameWorldBootstrappedEvent worldBoot:
+                // The 4/1 SmsgGameStateTick world-entry form supplies AreaId at body offset 12.
+                // The AreaId rendered as a zero-padded 3-digit decimal selects the on-disk area
+                // directory (e.g. 6 → "006") and cold-starts the area.
+                // spec: Docs/RE/specs/world_entry.md §2.3 — 4/1 reads AreaId, cold-starts the area
+                //        by its 3-digit decimal directory.
+                // spec: Docs/RE/specs/world_entry.md §3.1 — AreaId → zero-padded 3-digit dir → <id>.lst.
+                GD.Print($"[GameLoop] InGameWorldBootstrappedEvent: server AreaId={worldBoot.AreaId} " +
+                         "(3-digit dir → <id>.lst). spec: world_entry.md §2.3/§3.1.");
+                if (_realWorldRenderer is not null)
+                {
+                    // Drive the server area cold-start. If offline (renderer disabled / _assets null),
+                    // OnWorldEntered logs and returns — the offline demo area is preserved exactly.
+                    _realWorldRenderer.OnWorldEntered(worldBoot.AreaId, worldBoot.Position);
+                }
+                else
+                {
+                    // RealWorldRenderer is null (real assets disabled / offline demo path):
+                    // log only, no area re-target. The synthetic feeder remains in control.
+                    GD.Print("[GameLoop] InGameWorldBootstrappedEvent: RealWorldRenderer is null " +
+                             "(offline demo path) — server AreaId noted but no area re-target performed.");
+                }
+
                 break;
 
             // Equip / inventory / skill-point results are received but not yet
@@ -801,5 +870,61 @@ public sealed partial class GameLoop : Node
         }
 
         _hudHub.PublishBuffState(BuffStateEvent.FromSlots(builder.MoveToImmutable()));
+    }
+
+    // -------------------------------------------------------------------------
+    // Local-player skinned-avatar attachment (retires the static-capsule debt)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds the in-world local player's skinned, idle-animated avatar from its class and swaps it in
+    /// for the placeholder capsule on the freshly-spawned <see cref="VisualActor"/>.
+    ///
+    /// Resolution: <paramref name="serverClass"/> is the wire character class == the .skn header
+    /// SkinClassId / id_b ∈ {1,2,3,4}; <see cref="PlayerAvatarResolver.TryBuild"/> walks the recovered
+    /// chain (skinlist .skn whose IdB == class → g{class}.bnd → actormotion col2 == class → col15 idle
+    /// .mot) and returns a <see cref="SkinnedCharacterBuilder.Build"/> root, which
+    /// <see cref="VisualActor.AttachSkinnedAvatar"/> re-parents over the capsule.
+    ///
+    /// Offline-safe: when <see cref="RealWorldRenderer"/> is null or its VFS handle is null (offline /
+    /// real assets disabled), this is a no-op and the VisualActor keeps its capsule — exactly the prior
+    /// behaviour. Never throws (the resolver guards every step).
+    ///
+    /// spec: Docs/RE/specs/skinning.md §8(e) (skin/bind/idle chain; g{SkinClassId}.bnd for {1,2,3,4}),
+    ///       §10.5 (the col15 standing idle plays, looping).
+    /// </summary>
+    /// <param name="key">The local player's composite actor identity (looks up its VisualActor).</param>
+    /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4}.</param>
+    private void TryAttachLocalPlayerAvatar(ActorKey key, ushort serverClass)
+    {
+        // Need the open VFS handle — reuse RealWorldRenderer's (no second mmap). Offline → keep capsule.
+        var assets = _realWorldRenderer?.Assets;
+        if (assets is null)
+        {
+            GD.Print("[GameLoop] Local-player avatar: VFS handle unavailable (offline / real assets " +
+                     "disabled) — keeping placeholder capsule. spec: skinning.md §8(e).");
+            return;
+        }
+
+        VisualActor? visual = _actorRegistry.TryGetActor(key);
+        if (visual is null)
+        {
+            GD.PrintErr("[GameLoop] Local-player avatar: VisualActor not found after spawn — " +
+                        "keeping placeholder. spec: login_flow.md §5.3.");
+            return;
+        }
+
+        Node3D? avatar = PlayerAvatarResolver.TryBuild(assets, serverClass);
+        if (avatar is null)
+        {
+            // The body .skn for this class did not resolve — VisualActor keeps the capsule (no crash).
+            GD.Print($"[GameLoop] Local-player avatar: class={serverClass} did not resolve a skinned " +
+                     "avatar — keeping placeholder capsule. spec: skinning.md §8(e).");
+            return;
+        }
+
+        visual.AttachSkinnedAvatar(avatar);
+        GD.Print($"[GameLoop] Local-player avatar attached (class={serverClass}, skinned+idle). " +
+                 "spec: skinning.md §8(e) / §10.5.");
     }
 }

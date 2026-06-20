@@ -188,7 +188,34 @@ public sealed partial class LiveLoginAutoload : Node
         if (!_enterTriggered)
         {
             _enterTriggered = true;
-            GD.Print($"[LiveLogin] entering slot {firstOccupiedIdx} ({firstOccupiedName}) … " +
+
+            // DEV no-enter gate (MH_LOGIN_NOENTER): validate login→server-list→char-list WITHOUT sending
+            // 1/9 enter-game. Used to exercise the roster/server-list flow live without ghosting the
+            // account in-world (a successful enter holds an account-level re-entry lock for a long time).
+            // Offline-safe: a strict no-op unless the env var is set.
+            string? noEnter = System.Environment.GetEnvironmentVariable("MH_LOGIN_NOENTER");
+            if (!string.IsNullOrEmpty(noEnter))
+            {
+                GD.Print("[LiveLogin] MH_LOGIN_NOENTER set — stopping after char-list (no 1/9 enter-game).");
+                _enabled = false;
+                return;
+            }
+
+            // DEV slot override (MH_LOGIN_SLOT): enter a specific occupied slot instead of the first
+            // occupied — used to sidestep a server re-entry lock on a recently-ghosted character.
+            int enterIdx = firstOccupiedIdx;
+            string enterName = firstOccupiedName;
+            string? slotEnv = System.Environment.GetEnvironmentVariable("MH_LOGIN_SLOT");
+            if (!string.IsNullOrEmpty(slotEnv) && int.TryParse(slotEnv, out int wantSlot) &&
+                wantSlot >= 0 && wantSlot < snapshot.Count && snapshot[wantSlot] is { } wantRec &&
+                !string.Equals(wantRec.Name, CharacterSelectionStore.BlankSlotSentinel,
+                    System.StringComparison.Ordinal))
+            {
+                enterIdx = wantSlot;
+                enterName = wantRec.Name;
+            }
+
+            GD.Print($"[LiveLogin] entering slot {enterIdx} ({enterName}) … " +
                      "spec: login_flow.md §3.3 / §3.5; cmsg_char_enter.yaml.");
 
             // SelectCharacterAsync is pure Application (no Godot node mutation) — safe to call from
@@ -198,7 +225,7 @@ public sealed partial class LiveLoginAutoload : Node
             // and GameLoop's "[GameLoop] LocalPlayerSpawnedEvent" — ClientContext exposes no public
             // "local player spawned" boolean that can be polled without draining IClientEventBus.
             ValueTask enterTask =
-                ctx.UseCases.SelectCharacterAsync(firstOccupiedIdx, System.Threading.CancellationToken.None);
+                ctx.UseCases.SelectCharacterAsync(enterIdx, System.Threading.CancellationToken.None);
             _ = enterTask.AsTask().ContinueWith(
                 t => GD.PrintErr($"[LiveLogin] SelectCharacterAsync faulted: {t.Exception}"),
                 System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |

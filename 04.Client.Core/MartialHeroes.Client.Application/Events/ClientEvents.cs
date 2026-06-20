@@ -323,12 +323,25 @@ public sealed record CharacterListEvent(
 /// <param name="Level">Character level.</param>
 /// <param name="ServerClass">Server-assigned class id.</param>
 /// <param name="CurrentHp">Current HP from the descriptor.</param>
+/// <param name="PosX">
+/// The character's last in-world X coordinate, shown on the slot info-row line 3 (formatted
+/// <c>"%d , %d"</c> over the two position floats). Decoded from the embedded SpawnDescriptor.
+/// Note: the axis pairing (X/Z vs X/Y) is itself debugger-pending in the spec. spec:
+/// Docs/RE/specs/frontend_scenes.md §3.2 (info-row line 3 = world POSITION); Docs/RE/structs/actor.md (world_x).
+/// </param>
+/// <param name="PosZ">
+/// The character's last in-world Z coordinate, paired with <see cref="PosX"/> on the slot info-row
+/// line 3. World Y is forced to 0, so the second float is the Z component. spec:
+/// Docs/RE/specs/frontend_scenes.md §3.2; Docs/RE/structs/actor.md (world_z).
+/// </param>
 public readonly record struct CharacterListSlot(
     int SlotIndex,
     string Name,
     ushort Level,
     ushort ServerClass,
-    uint CurrentHp);
+    uint CurrentHp,
+    float PosX = 0f,
+    float PosZ = 0f);
 
 // =====================================================================================================
 // Enter-game spawn (3/7) and character-creation routing
@@ -365,11 +378,70 @@ public sealed record LocalPlayerSpawnedEvent(
 /// </summary>
 /// <param name="Key">The local player's composite actor identity.</param>
 /// <param name="Position">World-entry position (Q16.16, with Y forced to 0).</param>
-/// <param name="ScenarioMode">Scenario/map-mode code from the 4/1 body.</param>
+/// <param name="AreaId">
+/// Absolute area index from the 4/1 body (offset 12) — its 3-digit decimal directory selects the
+/// on-disk area. spec: Docs/RE/packets/4-1_game_state_tick.yaml
+/// </param>
 public sealed record InGameWorldBootstrappedEvent(
     ActorKey Key,
     Vector3Fixed Position,
-    int ScenarioMode) : IClientEvent;
+    int AreaId) : IClientEvent;
+
+/// <summary>
+/// Published when the 4/4 area-snapshot tag loop delivers a tag-4 ground-item record. Immutable
+/// engine-free snapshot for the world-item spawner. The float XZ is converted to
+/// <see cref="Vector3Fixed"/> at the network/application boundary (world Y forced to 0). spec:
+/// Docs/RE/specs/handlers.md §4/4 (tag-4); Docs/RE/packets/4-4_ground_item_tag4.yaml.
+/// </summary>
+/// <param name="EntityKey">Ground-item entity key (the pickup / remove target — wire +0x00).</param>
+/// <param name="TemplateId">Item template id resolving the per-template 3D model (wire +0x04).</param>
+/// <param name="Position">World position (Q16.16, Y forced to 0; wire WorldX +0x10 / WorldZ +0x14).</param>
+public sealed record GroundItemSpawnedEvent(
+    uint EntityKey,
+    uint TemplateId,
+    Vector3Fixed Position) : IClientEvent;
+
+/// <summary>
+/// Published when the 4/4 area-snapshot tag loop delivers a tag-6 guild-name overlay record. The
+/// overlay attaches a guild name to an already-spawned actor. Immutable engine-free snapshot. spec:
+/// Docs/RE/specs/handlers.md §4/4 (tag-6, 36-byte record).
+/// </summary>
+/// <param name="EntityId">Composite-key actor lookup id (wire +0x00).</param>
+/// <param name="GuildName">Decoded CP949 guild name (NUL-terminated cell at wire +0x05).</param>
+public sealed record GuildOverlayEvent(
+    uint EntityId,
+    string GuildName) : IClientEvent;
+
+/// <summary>
+/// Published when the 4/4 area-snapshot tag loop delivers a tag-9 title / relation overlay record.
+/// The overlay attaches a title and a relation marker to an already-spawned actor. The
+/// <paramref name="RelationState"/> and <paramref name="OverlaySubCode"/> are forwarded RAW: their
+/// value meanings are live-pending (world_entry.md §4 / handlers.md §4/4). Immutable engine-free
+/// snapshot. spec: Docs/RE/specs/handlers.md §4/4 (tag-9, 24-byte record).
+/// </summary>
+/// <param name="EntityId">Actor lookup id (wire +0x00).</param>
+/// <param name="RelationState">Raw relation-state byte (wire +0x04) — value meaning live-pending.</param>
+/// <param name="OverlaySubCode">Raw overlay sub-code byte (wire +0x05) — value meaning live-pending.</param>
+/// <param name="TitleName">Decoded CP949 title name (17-byte cell at wire +0x06).</param>
+public sealed record TitleOverlayEvent(
+    uint EntityId,
+    byte RelationState,
+    byte OverlaySubCode,
+    string TitleName) : IClientEvent;
+
+/// <summary>
+/// Published once the 4/4 area-snapshot tag loop drains (the zero terminator or a short read ends
+/// it) — the area is "populated". Carries the area-centre recenter coordinates from the snapshot
+/// header and the count of actor records spawned this snapshot, for the render side. Immutable
+/// engine-free snapshot. spec: Docs/RE/specs/handlers.md §4/4.
+/// </summary>
+/// <param name="AreaCentreX">Area-centre X from the 17-byte header (wire +0x0D, f32).</param>
+/// <param name="AreaCentreZ">Area-centre Z from the 17-byte header (wire +0x09, f32).</param>
+/// <param name="SpawnedActorCount">Number of tag-1/2/3 actor records spawned this snapshot.</param>
+public sealed record AreaPopulatedEvent(
+    float AreaCentreX,
+    float AreaCentreZ,
+    int SpawnedActorCount) : IClientEvent;
 
 /// <summary>
 /// Published when the enter-game spawn fails (3/14 SmsgCharSpawnResponse, Result == 0). The presentation

@@ -16,15 +16,15 @@
 //   - Char-count caption msg 2209; orange; top-centre.
 //   - Top tabs: Server/Channel/Back = actions 1/2/3; loginwindow.dds.
 //     PRESSED src 483,883/923/963 per §11.5b. CODE-CONFIRMED.
-//   - Single shared left info panel + stat-icon grid (10 cells, 2×5).
-//     col1 x=154 NORMAL(500,770) HOVER(548,770); col2 x=178 NORMAL(524,770) HOVER(572,770).
-//     base-Y 191, stride 24, cell 24×16.
-//     spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-//   - Create/Delete/Enter actions 4/5/6 at dst-Y 112 (centred).
-//     spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-//   - Corner close: fallback rect (971,610) 23×23, blacksheet.dds src (941,910).
-//     spec: Docs/RE/specs/ui_system.md §8.2. CODE-CONFIRMED for close action (type 13/id 10001).
-//     dst + src are base-window-chrome; debugger-pending.
+//   - Left info panel shows name/level/position (3 labels only).
+//     The 96-byte stats block is NOT consumed on select; stat grid is a CREATE-form exclusive.
+//     spec: Docs/RE/specs/frontend_scenes.md §3.2 / CYCLE-6b fact 1. CODE-CONFIRMED.
+//   - Create/Delete/Enter actions 4/5/6 at dst-Y 112 (centred), visibility gated by slot occupancy.
+//     spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 / CYCLE-6b fact 3. CODE-CONFIRMED.
+//   - NO corner-X close widget. The select-window builder constructs no close-button widget;
+//     blacksheet.dds is NOT a corner-X frame close (REFUTED). Window close is a system-close
+//     message handler branch → scene state 6, sub-state 8 (return to login).
+//     spec: Docs/RE/specs/ui_system.md §8.2 ("Window close — NO corner-X widget; premise REFUTED").
 //
 // WIDGET CONTRACT (CREATE sub-form):
 //   - 4 class buttons actions 10-13; loginwindow.dds; NORMAL src-Y 1005.
@@ -67,7 +67,6 @@ using Godot;
 using MartialHeroes.Client.Application.Events;
 using MartialHeroes.Client.Godot.Dev;
 using MartialHeroes.Client.Godot.Screens;
-using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Widgets;
 
@@ -131,7 +130,6 @@ public sealed partial class CharSelectWindow : Control
     // spec: Docs/RE/specs/ui_system.md §8.2 atlas correction (CODE-CONFIRMED).
     private const string AtlasLoginWindow = "data/ui/loginwindow.dds";
     private const string AtlasInventWindow = "data/ui/inventwindow.dds";
-    private const string AtlasBlacksheet = "data/ui/blacksheet.dds";
     private const string AtlasMainWindow = "data/ui/mainwindow.dds";
 
     // Top tabs — actionIds 1/2/3.
@@ -163,19 +161,14 @@ public sealed partial class CharSelectWindow : Control
     private const int ActionConfirm = 35;
     private const int ActionCancel = 36;
 
-    // Stat grid — 10 cells (2×5), base-Y 191, stride 24, cell 24×16.
-    // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
+    // Stat grid — 10 cells (2×5), stride 24, cell 24×16.
+    // Used exclusively in the CREATE form point-buy grid (BuildCreateForm).
+    // The SELECT view has NO stat grid — the 96-byte stats block is not consumed on select.
+    // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 (create form); CYCLE-6b fact 1 (select view).
     private const int StatGridRows = 5;
-    private const int StatGridBaseY = 191; // spec §8.2+§8.4. CODE-CONFIRMED.
     private const int StatGridStride = 24; // spec §8.2+§8.4. CODE-CONFIRMED.
     private const int StatIconW = 24;
     private const int StatIconH = 16;
-    private const int StatCol1X = 154; // spec §8.2. CODE-CONFIRMED.
-    private const int StatCol2X = 178; // spec §8.2. CODE-CONFIRMED.
-    private const int StatValX = 51; // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatValBaseY = 193; // spec §8.2+§8.4. CODE-CONFIRMED.
-    private const int StatValW = 35;
-    private const int StatValH = 12;
 
     // Col-1 NORMAL/HOVER src. spec §8.2. CODE-CONFIRMED.
     private const int StatCol1NormX = 500;
@@ -208,15 +201,6 @@ public sealed partial class CharSelectWindow : Control
     private const int CancelNormSrcX = 472; // spec §8.4. CODE-CONFIRMED.
     private const int CancelHovSrcX = 531; // spec §8.4. CODE-CONFIRMED.
     private const int ConfirmCancelSrcY = 1004; // spec §8.4 "V=1004". CODE-CONFIRMED.
-
-    // Corner close — fallback dst (971,610) 23×23, blacksheet.dds src (941,910).
-    // spec: Docs/RE/specs/ui_system.md §8.2 close action CODE-CONFIRMED; dst+src debugger-pending.
-    // TODO(spec): corner-close dst and src are base-window-chrome / debugger-pending.
-    private const int CloseDstX = 971;
-    private const int CloseDstY = 610;
-    private const int CloseSrcX = 941;
-    private const int CloseSrcY = 910;
-    private const int CloseSz = 23;
 
     // Name modal — centred 340×190, chrome from inventwindow.dds src(318,647).
     // spec: Docs/RE/specs/ui_system.md §8.3. CODE-CONFIRMED.
@@ -283,7 +267,9 @@ public sealed partial class CharSelectWindow : Control
     private HudLabel? _charCountCaptionWidget;
     private HudLabel? _infoNameWidget;
     private HudLabel? _infoLevelWidget;
-    private HudLabel? _infoClassWidget;
+    // D2: third info-row label = world position "%d , %d", NOT a class label.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.2 / CYCLE-6b fact 2.
+    private HudLabel? _infoPositionWidget;
     private HudLabel? _createFaceLabelWidget;
     private HudLabel? _createDescLine0Widget;
     private HudLabel? _createDescLine1Widget;
@@ -293,13 +279,17 @@ public sealed partial class CharSelectWindow : Control
     private HudLabel? _nameToastWidget;
     private Control? _createForm;
     private Control? _nameModal;
-    private HudLabel[] _statValLabelWidgets = [];
+    // D5: roster button Controls for occupancy-gated visibility.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 / CYCLE-6b fact 3.
+    private Control? _btnCreate;
+    private Control? _btnDelete;
+    private Control? _btnEnter;
 
     // Convenience accessors — resolve the backing Label from HudLabel for HorizontalAlignment etc.
     private Label? _charCountCaption => (Label?)_charCountCaptionWidget?.GetControl();
     private Label? _infoName => (Label?)_infoNameWidget?.GetControl();
     private Label? _infoLevel => (Label?)_infoLevelWidget?.GetControl();
-    private Label? _infoClass => (Label?)_infoClassWidget?.GetControl();
+    private Label? _infoPosition => (Label?)_infoPositionWidget?.GetControl();
     private Label? _createFaceLabel => (Label?)_createFaceLabelWidget?.GetControl();
     private Label? _createDescLine0 => (Label?)_createDescLine0Widget?.GetControl();
     private Label? _createDescLine1 => (Label?)_createDescLine1Widget?.GetControl();
@@ -342,7 +332,9 @@ public sealed partial class CharSelectWindow : Control
                 Level: s.Level,
                 ServerClass: s.ServerClass,
                 CurrentHp: s.CurrentHp,
-                SlotIndex: idx);
+                SlotIndex: idx,
+                PosX: s.PosX,
+                PosZ: s.PosZ);
         }
 
         _selectedSlot = 0;
@@ -484,74 +476,37 @@ public sealed partial class CharSelectWindow : Control
         AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 376, (int)infoPanelY + 12, 201, 46, 608, 689);
         AddAtlasRect(AtlasLoginWindow, (int)infoPanelX + 215, (int)infoPanelY + 0, 29, 22, 556, 729);
 
-        // Info labels (name/level/class), refreshed on slot selection.
+        // Info labels (name / level / position) — 3 labels only, NO stat grid on select view.
+        // D1: The 96-byte stats block is NOT consumed on the char-select screen. A 2×5 stat-icon
+        // grid on the select view is a port fabrication — REMOVED. Spec §3.1 / CYCLE-6b fact 1.
+        // D2: Third label = world position, formatted "%d , %d" (PosX, PosZ truncated to int).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.2 / CYCLE-6b fact 2. CODE-CONFIRMED.
         float infoLX = infoPanelX + 46f;
         _infoNameWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 145f));
         _infoLevelWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 169f));
-        _infoClassWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 193f));
+        _infoPositionWidget = AddInfoLabel(new Vector2(infoLX, infoPanelY + 193f));
 
-        // Stat-icon grid (10 cells, 2×5) — in the char-info panel area.
-        // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-        _statValLabelWidgets = new HudLabel[StatGridRows];
-        for (int row = 0; row < StatGridRows; row++)
-        {
-            int y = StatGridBaseY + row * StatGridStride;
-
-            // Col 1 — NORMAL(500,770) HOVER(548,770). spec §8.2+§8.4. CODE-CONFIRMED.
-            BuildGridCell(
-                x: StatCol1X, y: y,
-                normSrcX: StatCol1NormX, normSrcY: StatCol1NormY,
-                hovSrcX: StatCol1HovX, hovSrcY: StatCol1NormY,
-                actionId: ActionPointBuyBase + row * 2);
-
-            // Col 2 — NORMAL(524,770) HOVER(572,770). spec §8.2+§8.4. CODE-CONFIRMED.
-            BuildGridCell(
-                x: StatCol2X, y: y,
-                normSrcX: StatCol2NormX, normSrcY: StatCol2NormY,
-                hovSrcX: StatCol2HovX, hovSrcY: StatCol2NormY,
-                actionId: ActionPointBuyBase + row * 2 + 1);
-
-            // Stat value label (x=51, base-Y 193, stride 24, 35×12).
-            // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
-            var valLabelWidget = HudWidgetFactory.MakeLabel(
-                StatValX,
-                StatValBaseY + row * StatGridStride,
-                StatValW, StatValH,
-                text: "–",
-                color: new Color(0.85f, 0.85f, 0.90f));
-            _statValLabelWidgets[row] = valLabelWidget;
-            Control? valCtrl = valLabelWidget.GetControl();
-            if (valCtrl is not null) AddChild(valCtrl);
-        }
-
-        // Roster action buttons: Create/Delete/Enter at dst-Y 112 (centred).
-        // spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.
+        // Roster action buttons: Create(4) / Delete(5) / Enter(6) at dst-Y 112 (centred).
+        // D5: visibility is slot-occupancy-gated (see RefreshSlotButtons).
+        // spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 / CYCLE-6b fact 3. CODE-CONFIRMED.
+        // NOTE: action id 61 (highlight art) is omitted — no atlas slice recovered for it.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.4 (id 61 = highlight button, atlas-pending).
         const float rosterBarCX = RefW / 2f;
         const float rosterBarLeft = rosterBarCX - (3f * RosterBtnW + 2f * 8f) / 2f;
 
-        BuildRosterButton((int)rosterBarLeft, (int)RosterBtnY,
+        _btnCreate = BuildRosterButton((int)rosterBarLeft, (int)RosterBtnY,
             normSrcX: 0, normSrcY: 1004, prsSrcX: 59, prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
             actionId: ActionCreate);
-        BuildRosterButton((int)(rosterBarLeft + RosterBtnW + 8f), (int)RosterBtnY,
+        _btnDelete = BuildRosterButton((int)(rosterBarLeft + RosterBtnW + 8f), (int)RosterBtnY,
             normSrcX: 118, normSrcY: 1004, prsSrcX: 177, prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
             actionId: ActionDelete);
-        BuildRosterButton((int)(rosterBarLeft + 2f * (RosterBtnW + 8f)), (int)RosterBtnY,
+        _btnEnter = BuildRosterButton((int)(rosterBarLeft + 2f * (RosterBtnW + 8f)), (int)RosterBtnY,
             normSrcX: 236, normSrcY: 1004, prsSrcX: 295, prsSrcY: 1004, // spec §8.4. CODE-CONFIRMED.
             actionId: ActionEnter);
 
-        // Corner close: fallback dst (971,610) 23×23, blacksheet.dds src (941,910).
-        // spec: Docs/RE/specs/ui_system.md §8.2 close action CODE-CONFIRMED; dst+src debugger-pending.
-        // TODO(spec): corner-close geometry is base-window-chrome / debugger-pending.
-        if (Atlas is not null)
-        {
-            var closeBtn = HudWidgetFactory.MakeButton2(
-                Atlas, AtlasBlacksheet,
-                CloseDstX, CloseDstY, CloseSz, CloseSz,
-                CloseSrcX, CloseSrcY,
-                actionId: -99); // internal close action (not a wire action)
-            closeBtn.ActionFired += _ => EmitSignal(SignalName.BackRequested);
-            AddChild(closeBtn.GetControl()!);
-        }
+        // No corner-X close widget — the select-window builder constructs none.
+        // Window close is the system-close message handler (ESC / system close → state 6 / sub-state 8).
+        // spec: Docs/RE/specs/ui_system.md §8.2 ("Window close — NO corner-X widget; premise REFUTED").
 
         // 3D ray-pick on the viewport container.
         // spec: Docs/RE/specs/frontend_scenes.md §3.3.3. CODE-CONFIRMED.
@@ -1016,8 +971,15 @@ public sealed partial class CharSelectWindow : Control
         switch (actionId)
         {
             case ActionBack:
-                GD.Print("[CharSelectWindow] Back tab (action 3).");
-                EmitSignal(SignalName.BackRequested);
+                // D11: Back tab (action 3) is a create-panel back/cancel, NOT a scene-level back.
+                // Server-list/login transition via Back tab is REFUTED by static IDA 2026-06-20.
+                // If the create form is open, close it; otherwise this is a no-op.
+                // spec: Docs/RE/specs/frontend_scenes.md §11.5 / CYCLE-6b fact 5 (Back tab =
+                //       create-cancel, NOT scene back; server-list transition REFUTED).
+                GD.Print("[CharSelectWindow] Back tab (action 3) — create-cancel / no-op. " +
+                         "BackRequested NOT emitted. spec: frontend_scenes.md §11.5 / CYCLE-6b fact 5.");
+                if (_createFormVisible)
+                    HideCreateForm();
                 break;
             default:
                 GD.Print($"[CharSelectWindow] Tab action {actionId} — stub (offline/server-select pending).");
@@ -1277,12 +1239,53 @@ public sealed partial class CharSelectWindow : Control
     private void RefreshInfo()
     {
         LiveSlot ls = _slots[_selectedSlot];
+
+        // Name: CP949 string @ descriptor +0x00 (17B cell, ≤16 chars + NUL, space-trimmed).
+        // Already decoded and space-trimmed by SpawnDescriptorReader.ReadName() / Cp949Text.Decode().
+        // spec: Docs/RE/specs/login_flow.md §3.2.1 (+0x00, 17B, CP949). CODE-CONFIRMED.
         if (_infoName is not null && IsInstanceValid(_infoName))
             _infoName.Text = ls.IsEmpty ? string.Empty : ls.Name;
+
+        // Level: u16 display field @ descriptor +0x3A (the char-select roster display level).
+        // The enter-game path uses a different region (~+0x300) — NOT this field.
+        // spec: Docs/RE/specs/login_flow.md §3.2.1 (+0x3A, u16 level display). CODE-CONFIRMED.
         if (_infoLevel is not null && IsInstanceValid(_infoLevel))
             _infoLevel.Text = ls.IsEmpty ? string.Empty : ls.Level.ToString();
-        if (_infoClass is not null && IsInstanceValid(_infoClass))
-            _infoClass.Text = ls.IsEmpty ? string.Empty : ls.ServerClass.ToString();
+
+        // D2: Info-row line 3 = world position, format exactly "%d , %d" (PosX, PosZ as int).
+        // The class value is NOT shown here; it drives the 3D preview only (other lane).
+        // Axis X/Z pairing is a strong static inference; value-axis is debugger-pending.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.2 (info-row line 3 = position "%d , %d";
+        //       axis X/Z debugger-pending). CODE-CONFIRMED: CYCLE-6b fact 2.
+        if (_infoPosition is not null && IsInstanceValid(_infoPosition))
+        {
+            _infoPosition.Text = ls.IsEmpty
+                ? string.Empty
+                : $"{(int)ls.PosX} , {(int)ls.PosZ}";
+        }
+
+        // D5: Gate slot action buttons by selected-slot occupancy.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 / CYCLE-6b fact 3.
+        RefreshSlotButtons(ls.IsEmpty);
+    }
+
+    /// <summary>
+    /// Shows/hides Create vs Delete+Enter based on whether the selected slot is occupied.
+    /// Occupied  → Delete(5) + Enter(6) shown; Create(4) hidden.
+    /// Empty     → Create(4) shown; Delete(5) + Enter(6) hidden.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 (slot buttons gated by selected-slot
+    ///       occupancy). CODE-CONFIRMED: CYCLE-6b fact 3.
+    /// NOTE: action id 61 (highlight art button) is omitted — no atlas slice recovered.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.4 (id 61 = highlight, atlas-pending).
+    /// </summary>
+    private void RefreshSlotButtons(bool isEmpty)
+    {
+        if (_btnCreate is not null && IsInstanceValid(_btnCreate))
+            _btnCreate.Visible = isEmpty;
+        if (_btnDelete is not null && IsInstanceValid(_btnDelete))
+            _btnDelete.Visible = !isEmpty;
+        if (_btnEnter is not null && IsInstanceValid(_btnEnter))
+            _btnEnter.Visible = !isEmpty;
     }
 
     // =========================================================================
@@ -1325,13 +1328,15 @@ public sealed partial class CharSelectWindow : Control
         AddChild(btn.GetControl()!);
     }
 
-    private void BuildRosterButton(
+    // D5: Returns the backing Control so the caller can store it for visibility gating.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 (slot buttons gated by occupancy).
+    private Control? BuildRosterButton(
         int x, int y,
         int normSrcX, int normSrcY,
         int prsSrcX, int prsSrcY,
         int actionId)
     {
-        if (Atlas is null) return;
+        if (Atlas is null) return null;
         var btn = HudWidgetFactory.MakeButton(
             Atlas, AtlasLoginWindow,
             x, y, (int)RosterBtnW, (int)RosterBtnH,
@@ -1340,16 +1345,9 @@ public sealed partial class CharSelectWindow : Control
             normSrcX, normSrcY, // HOVER = NORMAL (spec §1.5 2-state fallback)
             actionId);
         btn.ActionFired += OnRosterButtonFired;
-        AddChild(btn.GetControl()!);
-    }
-
-    private void BuildGridCell(
-        int x, int y,
-        int normSrcX, int normSrcY,
-        int hovSrcX, int hovSrcY,
-        int actionId)
-    {
-        BuildGridCellInto(this, x, y, normSrcX, normSrcY, hovSrcX, hovSrcY, actionId);
+        Control? ctrl = btn.GetControl();
+        if (ctrl is not null) AddChild(ctrl);
+        return ctrl;
     }
 
     private void BuildGridCellInto(
@@ -1403,6 +1401,9 @@ public sealed partial class CharSelectWindow : Control
     /// A resolved live slot driven by CharacterListEvent (opcode 3/1).
     /// IsEmpty=true = slot has no character. View state only.
     /// spec: Docs/RE/specs/frontend_scenes.md §3.1. CODE-CONFIRMED.
+    /// PosX/PosZ: the character's last in-world position floats, shown on info-row line 3
+    /// formatted as "%d , %d". Axis X/Z pairing is debugger-pending.
+    /// spec: Docs/RE/specs/frontend_scenes.md §3.2 / CYCLE-6b fact 2. CODE-CONFIRMED.
     /// </summary>
     private readonly record struct LiveSlot(
         bool IsEmpty,
@@ -1410,5 +1411,7 @@ public sealed partial class CharSelectWindow : Control
         ushort Level = 0,
         ushort ServerClass = 0,
         uint CurrentHp = 0,
-        int SlotIndex = 0);
+        int SlotIndex = 0,
+        float PosX = 0f,
+        float PosZ = 0f);
 }
