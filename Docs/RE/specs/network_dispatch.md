@@ -442,19 +442,23 @@ Starting the network engine performs the Windows sockets bring-up and arms the w
 | Set init-gate | On success, sets the init-gate byte (§4.1) so the rest of the client treats the engine as up. |
 | Spawn workers | Calls the worker-thread spawn routine (§4.3). |
 
-### 4.3 Thread model — THREE thread procedures (RESOLVES the old "second worker" open item)
+### 4.3 Thread model — FOUR thread procedures (RESOLVES the old "second worker" open item)
 
-There are **three distinct thread procedures**, owned by two distinct objects. The earlier wording
-counted only the two threads the network-client itself spawns at start-engine, and left the genuine
-socket I/O thread as an open "second worker" item (old §8). That item is now **resolved**: the
-real socket worker is a **third** thread owned by the *embedded connection sub-object* and spawned
-at connect time, not by the network-client's start-engine path. *([confirmed]; build 263bd994.)*
+There are **four distinct netcode thread procedures**, owned by two distinct objects. The
+network-client's **start-engine** spawn arms two of them (the receive consumer and the keepalive
+timer); the embedded connection sub-object's **connect** routine spawns the genuine socket I/O thread
+(thread #3 — this resolves the old "second worker" item, old §8); and a separate **send-proxy /
+heartbeat** thread (#4) is spawned by the network-client (from a routine distinct from the start-engine
+pair) to fire the periodic C2S heartbeats. *([confirmed]; build 263bd994. Thread #4 added CYCLE 5 —
+the earlier "three-thread" wording undercounted it; the start-engine path itself still spawns exactly
+two slots, so the §4.2/§4.3 start-engine description below is unchanged.)*
 
 | # | Thread procedure | Spawned by | Owner object | Duty |
 |---|---|---|---|---|
 | 1 | **Receive consumer** ("network worker") | network-client start-engine spawn (worker slot at client `+82312`) | network-client | Pops a *fully-reassembled* frame off the connection's receive queue and posts a dispatch event (§4.4). Pure producer → dispatch; never touches the socket. |
-| 2 | **Keepalive timer** ("network live") | network-client start-engine spawn (worker slot at client `+82328`) | network-client | A 1-second periodic timer loop; re-sends the cached `(2,10000)` keepalive frame when the link has been idle (§4.5a). Not a socket thread. |
+| 2 | **Keepalive timer** ("network live") | network-client start-engine spawn (worker slot at client `+82328`) | network-client | A 1-second periodic timer loop; re-sends the cached `(2,10000)` keepalive frame when the link has been idle (§4.5). Not a socket thread. |
 | 3 | **Connection I/O thread** (the real socket worker) | the connection's **connect routine**, via the C runtime thread-spawn call (`_beginthreadex`) | embedded connection sub-object | Overlapped `WSARecv`-completion → **frame reassembly** → push complete frames onto the receive queue → re-arm `WSARecv`; also services the **send-signal** event (→ `WSASend`) and the shutdown/close events (§4.4a). |
+| 4 | **Send-proxy / heartbeat thread** | the network-client, via a dedicated spawn routine **distinct from the start-engine pair** | network-client | A **~10 ms `Sleep` loop** with two independently-gated periodic sends: when the **keepalive gate** is set it emits the **`1/2` game-connection keepalive** if the link is idle; when the **world-enter gate** is set it emits the **`2/112` move-heartbeat**. It also logs a latency warning when a queued send stays pending past its budget (**400 ms** for the keepalive, **200 ms** for the move-heartbeat). This is the thread that **actually emits the `1/2` and `2/112` periodic sends** (the `(2,10000)` frame is the *other* thread, #2). *([confirmed]; CYCLE 5.)* |
 
 The **start-engine spawn** (called only by §4.2) arms the *network-client's* two threads:
 
@@ -546,10 +550,13 @@ connection's **receive queue**; the send path hands off through the connection's
 queue/buffer object offsets are the P5-lane struct deliverable — see `structs/` (the network-client /
 connection-sub-object layout) — and are **not** re-tabled here.
 
-### 4.5 Keepalive — TWO distinct mechanisms
+### 4.5 Keepalive / heartbeat — three periodic sends across TWO heartbeat threads
 
-There are **two separate keepalive mechanisms**, both real; which one is actually sent on-wire (and
-at what cadence) is `[capture/debugger-pending]`. Record both.
+There are **three periodic outbound sends**, driven by **two distinct heartbeat threads** (§4.3): the
+**keepalive-timer thread (#2)** owns mechanism (a); the **send-proxy thread (#4)** owns mechanisms
+(b) and (c). All three are real; the exact on-wire cadence is `[capture/debugger-pending]`. Record all
+three. *(CYCLE 5 refinement: the earlier "two mechanisms" framing missed the `1/2` send and treated
+the `2/112` send as a one-off toggle; both are periodic sends on the send-proxy thread #4.)*
 
 **(a) Ctor-armed compressed periodic frame.** *([confirmed]* it is armed; the period value, the body
 width and the timer-send predicate are all read from the routines).* The client arms a **periodic
@@ -580,16 +587,24 @@ ping. The timer re-sends the cached pre-compressed frame straight onto the send 
 send convergence so the cached bytes are not re-transformed). *([confirmed]* shape/predicate; the
 wall-clock cadence on the wire is `[capture/debugger-pending]`.)
 
-**(b) Runtime C2S `2/112` toggle.** *([confirmed]* it exists as a 1-byte C2S send gated by a master
-flag; its cadence is capture-pending.)* A separate **C2S `2/112` one-byte toggle** is gated by a
-**master-enable flag** that is *set on world-enter and cleared on leave*. This is the runtime,
-in-session keepalive path, distinct from the `(2,10000)` frame armed at construction.
+**(b) Runtime C2S `2/112` move-heartbeat (send-proxy thread #4).** *([confirmed]; CYCLE 5.)* The
+send-proxy thread (§4.3, thread #4) runs a ~10 ms loop and, while a **world-enter gate** is set (the
+flag *set on world-enter and cleared on leave*), periodically sends the **C2S `2/112`** move-heartbeat
+when no send is already pending. It logs a latency warning if a queued send stays pending past **200
+ms**. This is a *periodic heartbeat on thread #4*, not the one-off "toggle" the earlier wording implied.
 
-> These are **two distinct mechanisms**, not one read two ways: `(2,10000)@20 s` is the
-> construction-time armed periodic frame; `2/112` is the world-session 1-byte toggle. They are
-> **not reconciled to a single on-wire cadence** — the actual keepalive traffic and timing is
-> `[capture/debugger-pending]`. The `opcodes.md` catalogue carries **both** rows (`2/10000` and a
-> `2/112` keepalive-toggle row).
+**(c) Runtime C2S `1/2` game-connection keepalive (send-proxy thread #4).** *([confirmed]; CYCLE 5.)*
+The same send-proxy thread (#4), while a separate **keepalive gate** is set, periodically sends the
+**C2S `1/2`** game-connection keepalive when the link is idle (no send pending), with a **400 ms**
+pending-send latency budget. This `1/2` send rides the **persistent game socket** (not a lobby socket —
+see `connection_topology.md §5`); its builder is the one CYCLE 5 corrected from "lobby ping" to a
+game-connection keepalive.
+
+> **Reconciliation (CYCLE 5).** The keepalive/heartbeat surface is **three periodic sends on two
+> threads**: `(2,10000)@~20 s` on the keepalive-timer (thread #2); the `1/2` idle-keepalive and the
+> `2/112` world move-heartbeat on the send-proxy (thread #4). They are **not** reconciled to a single
+> on-wire cadence — the actual traffic/timing is `[capture/debugger-pending]`. The `opcodes.md`
+> catalogue carries the `2/10000`, `2/112` and `1/2` rows.
 
 ### 4.5a Link-health ack handshake — inbound `5/146` request → C2S `2/146` reply
 
