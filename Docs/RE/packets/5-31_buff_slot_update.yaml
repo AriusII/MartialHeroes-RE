@@ -1,0 +1,63 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 56-byte body, and the consumed fields
+#                 -- actor_key_a@0x00 / actor_key_b@0x04 / slot_index@0x08 / effect_code u16@0x0C /
+#                 effect_value@0x10 / effect_extra@0x14 -- are control-flow-confirmed; every wire-byte
+#                 VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. WIRE-vs-RUNTIME width note: on the wire effect_code is a u16 @0x0C (with a 2-byte
+#              pad to 0x10); the stored runtime buff entry widens it to a full u32, giving a clean
+#              12-byte {u32 code, u32 value, u32 extra} runtime stride. The runtime stride is NOT the wire.
+
+name: SmsgBuffSlotUpdate
+opcode: 0x5001f           # major 5 (Push), minor 31 -> (5 << 16) | 31
+direction: S2C
+size: 56                  # fixed 56-byte body (0x38), a single buff record
+spec: packets/5-31_buff_slot_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server adds or clears one active-buff record on the target actor's per-actor buff array (and, for the local player, mirrors it into the global HUD buff-bar tables). A fixed 56-byte body whose consumed front carries two entity keys, a slot index, and an {effect code, value, extra} triple.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 56.
+fields:
+  - { name: ActorKeyA,   type: u32 }          # 0x00  primary entity id
+  - { name: ActorKeyB,   type: u32 }          # 0x04  instance discriminator (composite-key second half)
+  - { name: SlotIndex,   type: i32 }          # 0x08  destination-table regime selector (see notes)
+  - { name: EffectCode,  type: u16 }          # 0x0c  effect code (u16 on the wire; widened to u32 on store)
+  - { name: Pad0,        type: "bytes[2]" }   # 0x0e  pad between the u16 code and the u32 value
+  - { name: EffectValue, type: u32 }          # 0x10  0 => CLEAR; non-zero => SET / active
+  - { name: EffectExtra, type: u32 }          # 0x14  duration / remaining
+  - { name: Trailer,     type: "bytes[32]" }  # 0x18  remainder of the 56-byte block, not consumed by this handler
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 56-byte body and the consumed fields. CAPTURE-UNVERIFIED for the
+  VALUE meanings. Total = 56 bytes (0x38).
+
+    0x00 (4B) ActorKeyA   : primary entity id (composite-key first half).
+    0x04 (4B) ActorKeyB   : instance discriminator (composite-key second half).
+    0x08 (4B) SlotIndex   : selects the destination buff table regime (a small slot index targets the
+                            per-actor table; a very large index targets a global high table; otherwise a
+                            mid table). The exact regime thresholds are runtime-table behaviour, not wire
+                            semantics -- value meaning capture-pending.
+    0x0c (2B) EffectCode  : the code of the {code, value, extra} triple. Widened to u32 on store. An
+                            effect code of 44 (0x2C) on a NON-local actor is treated as remove/despawn
+                            that actor (a despawn/untrack overload of this channel).
+    0x10 (4B) EffectValue : 0 => this is a CLEAR; non-zero => SET / active buff.
+    0x14 (4B) EffectExtra : the extra (duration / remaining).
+    0x18 (32B) Trailer    : the rest of the 56-byte block; not field-read by this handler. Reserved opaque.
+
+  WIRE vs RUNTIME (field-width detail): on the WIRE the triple is {u16 EffectCode @0x0C, 2-byte pad,
+  u32 EffectValue @0x10, u32 EffectExtra @0x14}. The stored RUNTIME buff entry is a clean 12-byte record
+  {u32 code (widened from the wire u16), u32 value, u32 extra} written into the destination buff table at
+  a 12-byte slot stride. The 12-byte runtime stride is NOT on the wire.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): the destination buff tables (per-actor / global-high /
+  mid) and their 12-byte slot stride are runtime structures, not wire fields. Only the 56-byte wire body
+  above is promotable.
+
+  UNKNOWNS to resolve with a capture: the EffectCode catalogue (which code is which buff), what
+  EffectExtra measures, and the SlotIndex regime thresholds.

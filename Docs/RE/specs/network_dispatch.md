@@ -4,11 +4,11 @@ sample_verified: false
 build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wave B)
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
-verification: confirmed (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed) · static-hypothesis (the blanket "every installed handler opens with a bounded read") · capture/debugger-pending (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types)
-ida_reverified: 2026-06-19
+verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read")
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) Response install count refined ~98 -> ~99 (101 stores - 2 zero-clears); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) the open "second worker" item is RESOLVED — there is a THREE-thread model (recv consumer + keepalive timer on the NetClient side, and a THIRD socket-I/O thread spawned by the connection's connect routine that does WSARecv-completion → frame reassembly → recv queue → re-arm, and also services the send-signal → WSASend); (e) the 2/10000 keepalive body is 4 bytes (one zero u32), NOT header-only; (f) the exhaustive Response/Push install slot maps are folded in (§2a/§2b), cross-referencing opcodes.md for handler NAMES; (g) the 5/146→C2S 2/146 ack-request handshake is recorded; (h) {202/203/232} 3/100 codes prime GameState=2 (cross-link to §5); (i) PHANTOM REFUTED — there is NO 5000/10000/10001 string-id class (5000=display-duration ms; 10000=keepalive minor + 10 s timer; 10001=timed-event tag)
+conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) the open "second worker" item is RESOLVED — there is a THREE-thread model (recv consumer + keepalive timer on the NetClient side, and a THIRD socket-I/O thread spawned by the connection's connect routine that does WSARecv-completion → frame reassembly → recv queue → re-arm, and also services the send-signal → WSASend); (e) the 2/10000 keepalive body is 4 bytes (one zero u32), NOT header-only; (f) the exhaustive Response/Push install slot maps are folded in (§2a/§2b), cross-referencing opcodes.md for handler NAMES; (g) the 5/146→C2S 2/146 ack-request handshake is recorded; (h) {202/203/232} 3/100 codes prime GameState=2 (cross-link to §5); (i) PHANTOM REFUTED — there is NO 5000/10000/10001 string-id class (5000=display-duration ms; 10000=keepalive minor + 10 s timer; 10001=timed-event tag)
 ---
 
 # Network Dispatch & Connection Lifecycle — Clean-Room Specification
@@ -187,9 +187,20 @@ handshake**. *([confirmed]* control flow; the *meaning* of each blob field is
 
 1. **Parses the inbound S2C key-exchange blob.** The parser reads, from the packet body in order: a
    **54-byte key blob** (imported as an RSA modulus/exponent), then **two trailing `u32` server
-   scalars**, and stamps a local time. On a parse failure it logs a "read packet version" style
-   diagnostic. So the **S2C `(0,0)` body read order is `[54-byte key blob][u32][u32]`**. *([confirmed]
-   read order / sizes; the field MEANINGS are `[capture/debugger-pending]`.)*
+   scalars**, and stamps a local time. So the **S2C `(0,0)` body read order is
+   `[54-byte key blob][u32][u32]`**. *([confirmed] read order / sizes; the field MEANINGS are
+   `[capture/debugger-pending]`.)*
+
+   > **Two distinct diagnostic log sites (corrected attribution — no wire impact).** The failure
+   > diagnostics on this branch come from **two different routines** and were previously conflated.
+   > The dispatcher-side **wrapper** (the routine that invokes the key-exchange parser) emits the
+   > single coarse **"read packet version"** style message, and only when the parser returns failure
+   > — it is a version/length-level diagnostic of the wrapper. The **parser itself** emits the
+   > finer-grained per-field key-recovery diagnostics (one message per failed field read or failed
+   > blob import — distinct messages for the 54-byte blob read, the blob import, and each of the two
+   > trailing `u32` reads). So the coarse "read packet version" message belongs to the *wrapper*; the
+   > granular key-recovery messages belong to the *parser*. This is a pure log-attribution correction
+   > with no effect on the wire layout or read order above. *([confirmed].)*
 2. **Builds and sends the C2S credential reply stamped opcode `(1, 4)`.** It constructs the secure
    auth reply (an RSA-encrypted credential, then a per-`u32` whitening pass) and hands it to the send
    convergence (§6.1). This is the structural link **dispatch `(0,0)` → emits the `1/4` login
@@ -216,17 +227,31 @@ Two boot-time routines populate the Response and Push handler tables inside the 
 They are the machinery that turns the empty 154-slot tables of §1.3 into the live routing surface
 that `handlers.md` enumerates. *(STRUCTURE-HIGH; build 263bd994.)*
 
-| Installer | Family | Recovered installed slots | Role |
-|---|---|---|---|
-| Response-family installer | major 4 | **~99 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
-| Push-family installer | major 5 | **65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
+| Installer | Family | Raw store count | Derived live handlers | Role |
+|---|---|---|---|---|
+| Response-family installer | major 4 | **102 stores** | **99 distinct / 100 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
+| Push-family installer | major 5 | **65 stores** | **65 distinct / 65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
 
-- The two install counts (**~99 Response / 65 Push**) are control-flow counts on this build.
-  *([confirmed].)* The Response figure is refined from the earlier `~98`: the installer issues 101
-  store instructions, of which **2 are zero-clears** (slots `0` and `27`) and **99 install handler
-  pointers** — and one of those handlers is written to **two adjacent slots** (`143` and `144`), so
-  the installer wires ~99 live Response handlers. The Push installer issues 66 stores (65 handler
-  installs + a final return). These are the same counts `handlers.md` §1 reports; they are
+- **Raw store counts (corrected — binary wins).** The Response installer emits **exactly 102 store
+  instructions**; the Push installer emits **exactly 65 store instructions**. Earlier wording put the
+  Response installer at 101 stores and the Push installer at 66; both were off by one and are
+  corrected here. The Push "+1" was a miscount of the function's `ret` epilogue (control flow, not a
+  table store); the Response figure rises to 102 because the handler shared between slots `143` and
+  `144` is **two distinct store instructions** in the actual code stream (the handler is loaded into
+  a register once, then stored twice), not the single store it was previously counted as. *([confirmed].)*
+- **Derived counts (unchanged — they reconcile with the raw counts).** The Response installer's 102
+  stores decompose as **2 zero-clears + 100 handler-pointer stores**:
+  - the **2 zero-clears** target minors **0** and **27** (each NULL-ed via an and-with-zero store, not
+    the no-op pointer) — leaving **2 NULL slots**;
+  - the **100 handler-pointer stores** land in 100 occupied slots, but minors **143** and **144**
+    receive the **same** handler (two stores into one shared handler), so the installer wires
+    **99 distinct live Response handlers across 100 slots**.
+  The Push installer's 65 stores are all live handler installs — **no zero-clears, no shared slots** —
+  giving **65 distinct live Push handlers across 65 slots** (Push minor `0` is a live handler, not a
+  zero-clear). The default-route slot is the single live default fill (the inert no-op handler) on
+  every uninstalled minor. So the derived picture is **100 Response slots / 99 distinct handlers /
+  2 NULL slots (minors 0 and 27) / one live default**, all reconciling with the **102** raw Response
+  stores and **65** raw Push stores. These are the same counts `handlers.md` §1 reports; they are
   reproduced here to characterise the installer routines, not to re-enumerate the handlers. Every
   minor not installed by these two routines keeps the inert no-op fill from §1.3.
 - **The two tables are physically adjacent** inside the handler object: the Response (major-4) table
@@ -331,10 +356,19 @@ umbrella), reads a **sub-code word at `+4`**:
 | (anything else) | — | ignored (returns without action) |
 
 So **type `15` is the umbrella; sub-code `100` vs `102` discriminates packet-dispatch from
-connection-state**. This is distinct from the close-event *factory* tag also numbered `15` in §4.6
-(that tag identifies the disconnect event the teardown path *builds*; the `+0` type byte here is the
-*umbrella* under which the `100`/`102` sub-codes live). Field value semantics carried inside a
-dispatched packet remain `[capture/debugger-pending]`.
+connection-state**.
+
+> **One shared event factory, two sub-codes (corrected — binary wins).** There is exactly **one**
+> type-`15` event factory, not two. The same factory and the same type-`15` type byte produce **both**
+> events on this branch: the **receive worker** posts a type-`15` event with **sub-code `100`** (a
+> reassembled inbound frame to dispatch), and the **disconnect / teardown path** (§4.6) posts a
+> type-`15` event with **sub-code `102`** (a connection-state transition / link gone). Both enter this
+> same gate and are routed by the same `100`-vs-`102` discriminator. The disconnect event is therefore
+> **not** a separate "close-event factory tag also numbered 15" — it is simply the umbrella's
+> sub-code-`102` case from the one shared factory. (The earlier wording that treated the §4.6 close
+> event as a distinct factory is dropped.)
+
+Field value semantics carried inside a dispatched packet remain `[capture/debugger-pending]`.
 
 ### 3.2 The handler object and its embedded sub-objects
 
@@ -343,12 +377,29 @@ A dedicated **network-handler object** carries the dispatch logic. At constructi
 
 | Sub-object | Role (LIKELY) |
 |---|---|
-| Guest sub-object | The pre-authenticated / lobby-side handling surface — constructed first and wired into the handler object's table. |
-| Member sub-object | The in-session handling surface — constructed second; on construction it also caches a pair of internal manager references (an actor manager and an animation catalog) into shared slots for the handlers to reach. |
+| Guest sub-object | The pre-authenticated / lobby-side handling surface — constructed first and wired into the handler object's table; its constructor only stamps its own vtable pointer (no manager caching). |
+| Member sub-object | The in-session handling surface — constructed second; on construction it caches a pair of internal manager references (an actor manager and an animation catalog) into shared slots for the handlers to reach. |
 
 The two sub-objects are constructed as part of the single handler-object construction; their exact
 runtime placement inside the handler object is an in-process layout detail with no wire effect and
 is not promoted here.
+
+**Two distinct actor-manager caches are taken at construction (corrected — binary wins).** *([confirmed].)*
+The actor-manager reference is cached **twice**, by two different routines, into two different places:
+
+| Cache | Cached by | Destination | Source singleton |
+|---|---|---|---|
+| Member-sub-object cache | the **member sub-object** constructor | a process-lifetime **shared global slot** | the actor-manager singleton |
+| Parent-handler cache | the **parent handler-object** constructor | the handler object's **own field** | the actor-manager singleton |
+
+Both reach the **same** actor-manager singleton; they are distinct caches (member→shared-global vs
+handler-object→own-field), and the parent's own-field cache was previously unrecorded. Alongside the
+member sub-object's actor-manager cache, the member constructor also caches an **animation catalog**
+reference into the adjacent shared slot — and that "anim catalog" is precisely the
+**actor-visual-global singleton** (the animation/visual catalog surface). So the member sub-object
+caches the **actor-manager + actor-visual-global (anim catalog)** pair into adjacent shared slots,
+while the parent handler separately caches the actor-manager into its own object field. These are
+in-process layout facts with no wire effect.
 
 ### 3.3 Singleton accessor pattern
 
@@ -461,6 +512,24 @@ The thread then loops on a wait over those events: *([confirmed]; build 263bd994
   sentinel onto the receive queue, and fire the notify callback.
 - On any receive error → connection shutdown + record the last-error string, and the loop exits.
 
+> **Why the reassembly loop is mandatory — Nagle coalescing (interop note).** TCP framing here is
+> **not** one-segment-per-message. The **server leaves Nagle's algorithm enabled** (it does **not** set
+> `TCP_NODELAY`) on its game connection — a maintainer-observed runtime fact, and most pronounced for
+> the **World Server** (the high-rate major-4 Response / major-5 Push traffic). Nagle batches small
+> writes, so the server can **coalesce several application frames into a single TCP segment**, and a
+> single frame can equally be **split across segments**. The client end is **symmetric**: the only
+> socket option the client sets on its connection is the **receive-buffer size (`SO_RCVBUF`, at
+> `SOL_SOCKET`)** — it **never sets `TCP_NODELAY`**, so the client's own send path is likewise
+> Nagle-subject and may batch its outbound frames. *([confirmed]* on the client side — the sole
+> `setsockopt` call sets `SO_RCVBUF`; there is **no** `TCP_NODELAY` call anywhere in the client. The
+> server-side Nagle posture is a **maintainer-observed runtime fact**, not a static claim derived from
+> the client.)* This is **precisely why** the inner loop is length-prefix-driven: it reads the 8-byte
+> header's `size` word and emits a frame only once `size` bytes are buffered, then advances by `size` —
+> tolerating **N frames per `recv`** and a **partial trailing frame**. A faithful re-implementation
+> **must** frame on the header `size`, never assume "one `recv` = one message", size its receive
+> reassembly buffer for coalesced bursts (the decode capacity is `0x2DA0` = 11680 bytes, §6.2), and
+> leave its own send path free to coalesce — otherwise it diverges from the original's on-wire batching.
+
 So thread #3 is the **socket-read + frame-reassembly + send-pump** thread; thread #1 (the receive
 consumer) only lifts *already-reassembled* frames into dispatch events. The two hand off through the
 connection's **receive queue**; the send path hands off through the connection's **send queue**
@@ -543,7 +612,7 @@ Disconnect is the connection-teardown path:
 | Step | Detail |
 |---|---|
 | Connection shutdown | Shuts down the embedded connection sub-object: signals its own stop event, waits its I/O thread, tears down and closes the socket, and closes its event/thread handles. |
-| Post disconnect event | Builds a **disconnect/close network event** (a code-`15` close event via the event factory) and pushes it onto the dispatch sink so the rest of the client learns the connection is gone. The same post-disconnect path is also used by the receive worker. |
+| Post disconnect event | Builds a **disconnect/close network event** through the **same shared type-`15` event factory** the receive worker uses, but stamped with **sub-code `102`** (vs the receive worker's sub-code `100`), and pushes it onto the dispatch sink so the rest of the client learns the connection is gone. It enters the §3.1 gate and is routed by the sub-code-`102` branch into the connection-state machine (§5). |
 | Clear init-gate | Clears the init-gate byte (§4.1), so the client no longer treats the engine as up. |
 
 ---
@@ -655,6 +724,14 @@ compressed buffer and freeing the original), then hands the frame to the queue/t
 **The order is cipher THEN compress.** **Header-only frames (`size == 8`) bypass both stages.**
 *([confirmed].)*
 
+> **Send fan-in (corrected count — binary wins).** The convergence is reached by **105 distinct
+> builder functions emitting 104 unique `(major, minor)` opcodes** — 105 call sites, each a distinct
+> caller, every opcode statically pinned. The **one opcode collision** is `2/52`: it is emitted by
+> **two** different builders — a **short-form** skill-use request and a **full-form** skill-use
+> request — so the 105 builders map onto 104 unique opcodes. (Earlier "~104 builders" wording is
+> corrected to **105 builders / 104 unique opcodes**.) The per-builder opcode census is owned by the
+> C2S catalogue in `opcodes.md`; what each builder's payload bytes *mean* is `[capture/debugger-pending]`.
+
 ### 6.2 Inbound (server → client), before dispatch
 
 An inbound packet is **LZ4-decompressed before dispatch** (the expand step of §1.2), then handed
@@ -713,8 +790,12 @@ SEND:     handler builds payload → send convergence (§6.1):
 - **Major-0 shape — RESOLVED (conflict).** Major-0 is a **hardwired `(0,0)` handshake branch, not an
   inline switch**; it parses the inbound key blob and emits the `1/4` reply (§1.4). The earlier
   "inline switch / small fixed set of minors" wording was an overstatement and is corrected.
-- **Response install count — RESOLVED (conflict).** Refined from `~98` to **~99** (101 stores − 2
-  zero-clears, one handler shared across slots `143`/`144`) (§2).
+- **Install raw-store counts — CORRECTED (binary wins).** The Response installer emits **102** store
+  instructions (2 zero-clears at minors `0`/`27` + 100 handler-pointer stores, one handler shared
+  across slots `143`/`144`); the Push installer emits **65** stores (all live, no zero-clears). Earlier
+  101/66 counts were off by one (the Push "+1" was the `ret` epilogue; the Response "+1" is the second
+  store of the shared `143`/`144` handler). Derived counts unchanged: **100 Response slots / 99 distinct
+  handlers / 2 NULL slots (0, 27) / one live default** (§2).
 - **Inbound cipher omission on the CLIENT side — RESOLVED (positive single-caller proof).** The byte
   cipher has exactly one cross-reference (the outbound send gate), so it is structurally unreachable
   on receive; client inbound is **decompress-only** (§6.2). Crypto OQ#1 is resolved for the client

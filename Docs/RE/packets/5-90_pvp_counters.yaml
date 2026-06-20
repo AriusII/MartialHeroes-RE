@@ -1,7 +1,15 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONFIRMED offsets/sizes (control-flow; the whole 32-byte block is fully decoded into 8 scalars).
-# Field VALUE MEANINGS likely. capture_verified: false.
-# spec: Docs/RE/packets/5-90_pvp_counters.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 32-byte body fully decoded into 8
+#                 scalars -- sort@0x00 / id@0x04 / six u32 counters @0x08..0x1C -- are
+#                 control-flow-confirmed; this body is NOT an opaque blit; every counter's VALUE meaning
+#                 is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. The deep struct pass confirmed 5/90 field-decodes its 32-byte block into the shared
+#              PvP-state object (8 fields) -- NOT opaque-forward. This file already reflects that.
 
 name: SmsgPvpCounters
 opcode: 0x5005a           # major 5 (Push), minor 90 -> (5 << 16) | 90

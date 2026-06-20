@@ -1,15 +1,27 @@
 # Net Contracts — Client↔Server Request/Response master pairing (authoritative)
 
 <!--
-verification: confirmed (opcode->handler ROUTING, the C2S send sizes, the S2C handler
-  read sizes/offsets, and the install-table slot occupancy are all control-flow-confirmed);
-  static-hypothesis (every request->response PAIRING that is not a named opcodes.md row is a
-  best-consumer / in-flight-latch inference, not a captured round-trip);
-  capture/debugger-pending (every wire VALUE semantic — what a reply byte MEANS, which result
-  code is success vs fail — has no live capture this campaign).
+verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send sizes, the S2C
+  handler read sizes/offsets, and the install-table slot occupancy are all control-flow-confirmed);
+  pairing [confirmed] where a request maps to a named/installed reply slot, otherwise
+  static-hypothesis (a best-consumer / in-flight-latch inference, not a captured round-trip);
+  value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
+  which result code is success vs fail — has no live capture this campaign).
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
+re-pairing (CYCLE 4 Netcode Deep-Cartography promotion, the binary wins): authored LAST in the
+  promotion wave, after the seven neighbour files (opcodes.md, handlers.md, network_dispatch.md, the
+  packets/*.yaml majors 0-5, the structs) were updated; every pairing re-derived against those
+  now-updated neighbours and cited. Pairing corrections applied: (1) 2/81 -> 4/61
+  SmsgGuildStateChangeResult (4/81 = generic SmsgActionErrorResult; the stale 4/81 diplomacy reply is
+  DROPPED) — resolves the old §2.9 Open-Q; (2) 2/151 selector 0 -> 3/8 SmsgShopPageUpdate, selector
+  200 -> 4/113/4/114/4/115 (the "1/20" tie is DROPPED) — resolves the old §Open-Q2; (3) 2/146 reply =
+  [u32 echoed req_id][u32 local state global] (8B), built inside the 5/146 handler; (4) 2/153
+  CmsgProductConfirm reply opcode [capture/debugger-pending]; (5) 5/73 = SmsgQuestComplete (vs the
+  stale SmsgGuildWarInfoUpdate). The §2.4/§2.9/§2.11 install-table refutations (4/44/4/46, 4/30,
+  4/143) HOLD.
 -->
 
 The clean-room **contracts** view of the Martial Heroes wire protocol: it pairs every client
@@ -53,6 +65,20 @@ hex used as a key is a catalog convention only). Payload offsets in this file ar
 (frame +8). The transform pipeline is asymmetric (outbound: timestamp→keyless cipher→LZ4; inbound:
 LZ4-decompress only, **no inverse cipher** — `opcodes.md §Wire frame header`).
 
+> **Framing-width note (carried for implementers).** The send builders write the frame `size` as a
+> **u32**, but the inbound reassembly path reads a **u16 frame-length** when framing. The two agree in
+> practice because every real frame is well under 64 KB (the high u16 of `size` is always zero), so the
+> u16 read is safe; an implementer must nonetheless not assume a single width on both paths. *spec:*
+> `network_dispatch.md`, `opcodes.md §Wire frame header`.
+
+> **Nagle coalescing (carried for implementers).** Neither end disables Nagle's algorithm: the server
+> leaves `TCP_NODELAY` unset (a maintainer-observed runtime fact, most pronounced for the **World
+> Server** major-4/major-5 traffic), and the client sets only `SO_RCVBUF` — **never** `TCP_NODELAY`
+> (`[confirmed]` from the client's sole `setsockopt` site). So **multiple framed messages may arrive
+> coalesced in a single TCP segment, and one message may be split across segments** — in both
+> directions. Always reassemble on the 8-byte header `size` word; never treat one `recv` (or one
+> `send`) as one message. Full discussion: `network_dispatch.md §4.4a`.
+
 ### 1.2 Contract categories
 
 Every C2S opcode falls into one of these contract shapes; the per-domain tables tag each row:
@@ -73,18 +99,62 @@ Every C2S opcode falls into one of these contract shapes; the per-domain tables 
 - **Fire-and-forget (C2S, no reply awaited).** Logout teardown, the two keepalives.
 - **Reactive C2S (a reply, not a request).** Three sends are *built inside an inbound handler* — they
   are the client's automatic answer to a server message, not user commands: **1/4** (answers 0/0),
-  **2/65** (answers a game-tick / guild-member-remove), **2/146** (answers 5/146 ack-request).
+  **2/65** (answers a game-tick / guild-member-remove), **2/146** (answers 5/146 ack-request). The
+  **2/146 reply** is built inside the 5/146 handler and carries an **8-byte body = `[u32 echoed req_id]
+  [u32 local state global]`** — NOT the inbound token. (field-0 = the echoed request id; the field-1
+  identity — a local context/state global vs a "counter" — is `[capture/debugger-pending]`, register
+  item R-30.) *spec:* `network_dispatch.md §4.5a`, `handlers.md §5/146`.
 
-### 1.3 The in-flight latch (the major-1/3 coupling mechanism)
+### 1.3 The in-flight latch (the major-1/3/4 coupling mechanism)
 
-The character-management request family (`1/6`, `1/7`, `1/9`, `1/13`, `1/14`) and several major-2
-requests (e.g. `2/2 CmsgPortalTravel`) set a single **outstanding-request guard** ("in-flight latch")
-on the net-client before sending; the matching **result handler clears it** when the reply lands. That
-latch IS the request↔response coupling for the char-mgmt family — it is how a select-screen result
-handler knows which request it is completing. `1/0 CmsgLogout` is the one char-mgmt builder that does
-**not** set the latch (fire-and-forget). The clear sites are noted per-handler in `handlers.md`; the
-latch field is described in `network_dispatch.md`.
-*spec:* `opcodes.md` (1/0 note, 2/2 note), `network_dispatch.md` (outstanding-request guard).
+A single **outstanding-request guard** ("in-flight latch") byte on the net-client singleton is the
+request↔response coupling for the lifecycle/char-mgmt family — it is how a result handler knows which
+request it is completing. The full SET/CLEAR roster (CYCLE 4 netcode-deep, control-flow-confirmed):
+
+- **SET** by the send builders **`1/6`, `1/7`, `1/9`, `1/13`, `1/14`, `2/2`** (CmsgPortalTravel), and
+  by the **`(0,0)→1/4`** handshake branch (the reactive credential reply sets it on send).
+- **CLEARED** by the result handlers **`3/1`, `3/4`, `3/6`, `3/7`, `3/13`, `3/14`, `4/1`**.
+- **READ** by the keepalive thread (it consults the latch when deciding whether a request is pending).
+- **`1/0 CmsgLogout` sets NO latch** (fire-and-forget — the one lifecycle builder that does not arm it).
+
+**The enter ladder.** Enter-world is the load-bearing chain `1/9 CmsgEnterGameRequest → 3/5
+SmsgEnterGameAck → 4/1 SmsgGameStateTick`. The 1/9 send SETS the enter-game latch; **`4/1` (not `3/5`)
+CLEARS it** — clearing the latch is `4/1`'s very first statement, before its form-A/form-B branch,
+unconditional. `3/5` advances the scene but does **not** clear the latch. *spec:* `handlers.md`
+(Group I — in-flight latch census; §4/1 latch note), `opcodes.md` (1/0, 1/9, 2/2 notes),
+`network_dispatch.md §4` (outstanding-request guard + keepalive read).
+
+### 1.4 Master coverage statement
+
+The in-scope netcode is **100% DTO-covered at the STRUCTURE level** — every opcode carries a complete
+DTO (size / offset / field-table / contract-class / canonical-name / pairing-status) across the
+handshake (0/0) and the five majors: 0/0 ✓ · major-1 (4 S2C billing/letter + 7 C2S lifecycle + the
+0/0-paired 1/4) ✓ · major-2 (95 distinct C2S opcodes / 96 builders, set-equal to the send census) ✓ ·
+major-3 (11) ✓ · major-4 (100 installed slots + 2 specials {4/500, 4/50000}, 99 distinct handlers —
+143/144 share) ✓ · major-5 (65 installed Push slots) ✓. **There is no slot/builder lacking a complete
+structural DTO.** The single uniform residual is wire-byte **VALUE semantics** — the 42-item
+`[capture/debugger-pending]` register in **Appendix C** — which by doctrine is NOT a DTO gap (sizes and
+field layouts are recovered; only the *meaning* of certain bytes is unsettled). *source:*
+`_dirty/netcode_deep/oq/completeness.md §1.6`.
+
+### 1.5 Contract-class tally (whole-netcode, rolled up)
+
+The per-domain tables tag every opcode with one contract shape (§1.2). Rolled up across all five majors
+(from `_dirty/netcode_deep/oq/completeness.md §4.3`; counts are **±2 approximate** because the same
+opcode can be classed F&F-at-builder / Req→Resp-by-intent — e.g. the quest submits):
+
+| Contract class | Count | Where |
+|---|---|---|
+| **Fire-and-Forget** (C2S, no reply awaited) | ≈ 22 | 1/0, 1/2, ~20 major-2 builders |
+| **Request → Response** (dedicated/installed reply, either direction) | ≈ 24 | 5 major-1 C2S, ~15 major-2, 4 major-3 (the result/ack S2C slots are the response half) |
+| **async-channel / Request → pending** (reply rides a push/panel channel, no dedicated same-minor ack) | ≈ 68 | ~58 major-2 + ~10 major-5 async-answer + 3 major-3 |
+| **pure Push** (S2C, server-initiated, no request) | ≈ 62 | 4 major-1 notices + 4 major-3 push + ~54 major-5 push + the major-4 notice/panel-push slots |
+| **reactive** (a reply built inside an inbound handler) | 4 | 1/4 (answers 0/0), 2/65, 2/146 (answers 5/146), 5/146 |
+| **out-of-table specials** | 2 | 4/500, 4/50000 |
+
+The **dominant client-side shape is async/pending** (the in-session HUD/panel submits whose result rides
+a shared channel); the **dominant server-side shape is pure Push** (the major-5 world/state broadcasts).
+Only **4 truly reactive** opcodes exist (1/4, 2/65, 2/146, 5/146).
 
 ---
 
@@ -116,6 +186,18 @@ collision" is resolved — 1/6 is character-create only). The connect/disconnect
 the conn-state machine and the 3/100 `SmsgCharActionResult` code set (§Appendix A, families 2 & 4), not
 by a dedicated login-result opcode. *spec:* `opcodes.md` (0x10004, 0x10006), `crypto.md §6`.
 
+**LIVE-CONFIRMED login-success sequence (CYCLE 4, replica `211.196.150.4`; IDA + live agree).** On a
+successful `1/4`, the server pushes — unsolicited, no client follow-up — the **character roster on
+`3/4`** (the in-place-refill form, header `form_byte0==1`), a `3 + popcount(slot_mask)×981` payload
+(same decode as `3/1`; §2.2 + `login_flow.md §5.1`), then **`3/5`** a 44-byte account-ack (name@0,
+billing@28, char_count@40). A live login returned `3/4` (2946B = 3 + 3×981, 3 characters, first name
+"jeonsa") → `3/5` ("xwdvg26") → later `3/100` code 21. ⟹ the success path is **`3/4` (roster) → `3/5`
+(account-ack) → `3/100`**, NOT a single `3/1`. (The `1/4` itself was the long-standing wall: a CYCLE-4
+fix to the reply whitening span + the header-B-as-`k` block size — `crypto.md §6.2.2/§6.4` — flipped a
+password-independent `3/100 code 10` rejection into this full success. Crypto/handshake now validated
+1:1 against the live server.) Wire VALUE semantics (code 21, billing field, descriptor internals) stay
+live-pending.
+
 ### 2.2 Character Management
 
 The major-3 reply minors use the campaign-10 de-swapped labels: **3/4 = SmsgSceneEntityUpdate**,
@@ -126,7 +208,7 @@ The major-3 reply minors use the campaign-10 de-swapped labels: **3/4 = SmsgScen
 | **1/0** CmsgLogout | 0 | none (server drops the session) | — | fire-and-forget — the only char-mgmt builder that does not set the in-flight latch. | `cmsg_logout.yaml` |
 | **1/6** CmsgCreateCharacter | 52 | **3/6** SmsgRenameCharResult *(create-result, shared handler)* + **3/4** SmsgSceneEntityUpdate refresh (+ possible **3/23** SmsgCharSelectStatusUpdate) | 12 / var / 28 | inferred/med — sets the latch; 3/4, 3/6, 3/23 all wired in the major-3 switch; the exact create-result minor is not capture-confirmed. | `cmsg_char_create.yaml`, `3-6_rename_char_result.yaml`, `3-4_scene_entity_update.yaml` |
 | **1/7** CmsgManageCharacter *(select; DELETE overloads mode=1)* | 2 | **3/4** SmsgSceneEntityUpdate *(manage result, subtype 2)* — committed; **UNVERIFIED 3/7** alternative | var / 8 | inferred/med + **CONFLICT** — `opcodes.md` attributes the manage/delete result to 3/4 subtype 2 (authoritative); a fresh static read suggests an UNVERIFIED 3/7. Do not re-point on static evidence. The mode=1==DELETE semantic itself is capture-pending. (§Open Questions Q1) | `cmsg_char_select.yaml`, `3-4_scene_entity_update.yaml`, `3-7_char_manage_result.yaml` |
-| **1/9** CmsgEnterGameRequest | 40 | **3/5** SmsgEnterGameAck → then **4/1** SmsgGameStateTick *(world snapshot, form B)* | 44 / var | confirmed/high — the documented enter ladder (3/5 wired in major-3; 4/1 installed Response slot 1, the form-B world-entry packet). | `cmsg_char_enter.yaml`, `3-5_enter_game_response.yaml`, `4-1_game_state_tick.yaml` |
+| **1/9** CmsgEnterGameRequest | 40 | **3/5** SmsgEnterGameAck → then **4/1** SmsgGameStateTick *(world snapshot, form B)* | 44 / var | confirmed/high — the documented enter ladder `1/9 → 3/5 → 4/1`. 1/9 SETS the enter-game latch; **`4/1` (not 3/5) CLEARS it** as its first statement (`handlers.md` Group I + §4/1). 4/1 = installed Response slot 1, the form-B world-entry packet. | `cmsg_char_enter.yaml`, `3-5_enter_game_response.yaml`, `4-1_game_state_tick.yaml` |
 | **1/13** CmsgRenameCharacter | 18 | **3/6** SmsgRenameCharResult (+ **3/4** subtype-1 slot refresh) | 12 / var | inferred/med — sets the latch; 3/6 clears the pending latch and applies the new name on success. | `cmsg_char_rename.yaml`, `3-6_rename_char_result.yaml` |
 | **1/14** CmsgMoveCharacter *(slot-move)* | 1 | **3/4** SmsgSceneEntityUpdate *(subtype refresh; exact subtype not pinned)* | var | inferred/med — slot-relocate rides the same 3/4 subtype-refresh family the other char-mgmt ops use; no dedicated 1/14 reply. | `cmsg_char_move.yaml`, `3-4_scene_entity_update.yaml` |
 
@@ -206,7 +288,7 @@ broadcast roster change for all three.
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
 | **2/30** CmsgGuildOp | 8 | **5/55** GuildNameDisplayUpdate / **5/65** GuildMemberRosterUpdate / **4/103** GuildPanelTextUpdate *(selector-dependent)* — **NO 4/30 ack** | var | pending — **REFUTED naive mirror:** 4/30 is installed but is `SmsgSocialPanelTarget`, not a guild-op ack. The guild updates ride 5/55/5/65/4/103 (all installed); which answers a given op is selector-dependent. | *(opcodes.md 0x2001e)* |
-| **2/81** CmsgGuildDiplomacyDeclare *(state 0/1)* | 18 | **4/81** SmsgGuildDiplomacyResult | var | confirmed/high — `opcodes.md` + `handlers.md` name 4/81 as the dedicated reply; installed. The state/target split is confirmed by the `submitDiplomacy STATE[%d] target_guild_name_[%s]` debug string. | `2-81_guild_diplomacy_declare.yaml`, `4-81_guild_diplomacy_result.yaml` |
+| **2/81** Cmsg_GuildDiplomacyDeclare *(state 0/1)* | 18 | **4/61** SmsgGuildStateChangeResult *(the diplomacy verdict)* | 52 | confirmed/high — **CORRECTED (binary wins, resolves the old §2.9 Open-Q):** the guild-diplomacy verdict lands on the major-4 guild state-change result at **response slot 61 (52-byte body: gate@+8, result@+9 ∈ 1..7, action@+10 ∈ 1..5, CP949 guild name @+11..+27, NUL@+28; action==5/result==2 → cooldown-in-DAYS = server-minutes/1440)**. The stale `4/81 = SmsgGuildDiplomacyResult` pairing is **DROPPED** — 4/81 is the generic `SmsgActionErrorResult` (status@+8, error@+9; 0xFF generic; 0x15 reads seconds@+10 mm:ss; 0x17 server-config percent), not a diplomacy reply. The `submitDiplomacy STATE[%d] target_guild_name_[%s]` string is **SEND-side only** — it stamps the 2/81 builder; it is NOT a receive handler. | `2-81_guild_diplomacy_declare.yaml`, `4-61_guild_state_change_result.yaml` |
 
 ### 2.10 Social / Friend
 
@@ -222,9 +304,9 @@ on the quest Push channels.
 
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
-| **2/28** CmsgQuestAction *(sub 2=proceed / 3=accept / 4=give-up; FIXED 12-byte body)* | 12 | **5/68** SmsgQuestList *(log refresh)*; on turn-in **5/73** *(quest turn-in verdict — name conflict, §Open Questions Q3)* | 452 / 344 | async-channel/high — 5/68 + 5/73 both installed (Push slots 68, 73). **CONFLICT** on the 5/73 name. | `2-28_quest_action.yaml`, `5-73_quest_complete.yaml` |
+| **2/28** CmsgQuestAction *(sub 2=proceed / 3=accept / 4=give-up; FIXED 12-byte body)* | 12 | **5/68** SmsgQuestList *(log refresh)*; on turn-in **5/73** SmsgQuestComplete *(quest turn-in verdict)* | 452 / 344 | async-channel/high — 5/68 + 5/73 both installed (Push slots 68, 73). **5/73 = SmsgQuestComplete (binary wins; the stale IDB autoname SmsgGuildWarInfoUpdate is dropped).** | `2-28_quest_action.yaml`, `5-73_quest_complete.yaml` |
 | **2/110** CmsgQuestNpcStep | 4 | **5/68** SmsgQuestList | 452 | async-channel/high — Tutorial/TutorTalk dialogue advance; 5/68 installed. | `2-110_quest_npc_step.yaml` |
-| **2/152** CmsgQuestRowRequest *(per-row detail / claim; two u32)* | 8 | **5/68** SmsgQuestList (on claim/turn-in **5/73**, §Open Questions Q3) | 452 / 344 | async-channel/high — sole caller is the QuestPanel list rows; 5/68 + 5/73 installed. (The 2/152 = ProductPanel paging reading is withdrawn — that panel sends only 2/151.) | `2-152_quest_row_request.yaml` |
+| **2/152** CmsgQuestRowRequest *(per-row detail / claim; two u32)* | 8 | **5/68** SmsgQuestList (on claim/turn-in **5/73** SmsgQuestComplete) | 452 / 344 | async-channel/high — sole caller is the QuestPanel list rows; 5/68 + 5/73 installed. (The 2/152 = ProductPanel paging reading is withdrawn — that panel sends only 2/151.) | `2-152_quest_row_request.yaml` |
 
 *Note.* `2/143 CmsgQuestItemKeep` (FIXED 4-byte body) folds its result into the quest channels; there
 is **NO dedicated 4/143 quest-keep ack** — 4/143 is installed but is the shared `SmsgTrackedItemPanelPair`
@@ -249,14 +331,15 @@ server/NPC-service driven (capture-pending). 2/41 and 2/145 are NEW finds — st
 | **2/118** CmsgTenderConfirm *(header-only)* | 0 | tender-listing push (no 4/118 ack) | — | pending — no dedicated 4/118; the server populates the tender listing on a separate channel. | `2-118_tender_confirm.yaml` |
 | **2/122** CmsgGiftCharSend *(gift-character send w/ 2nd-password)* | 12 | **5/123** SmsgGiftCharReceiveConfirm | var | inferred/med — 5/123 installed (gift-char flow). | *(opcodes.md 0x2007a)* |
 | **2/123** CmsgGiftCharReceiveConfirm | 12 | **5/123** SmsgGiftCharReceiveConfirm | var | inferred/med — 5/123 installed. | *(opcodes.md 0x2007b)* |
-| **2/151** CmsgProductBuy *(1-byte selector: 0 = open/refresh, 200 = confirm)* | 1 | **CONFLICT:** census ties to **1/20** (major-1 reply to a major-2 request — atypical); more likely a major-4 product result (4/113/4/114/4/115 family) | — | CONFLICT / pending — do not silently accept the 1/20 mapping. The list/money refresh arrives on S2C 3/8 SmsgShopPageUpdate. (§Open Questions Q2) | `2-151_product_buy.yaml`, `3-8_shop_page_update.yaml` |
-| **2/153** *(opcode-id COLLISION — see §Open Questions Q4)* | 4 | product result + balance (4/113 ItemShopPurchaseResult / 4/114 CashShopActionResult / 4/115 balance) OR — per `opcodes.md` — a pet/mount summon (no listed reply) | 12 / 12 / 24 | pending + **CONFLICT** — `opcodes.md` catalogs 2/153 as `CmsgPetSummon` (confirmed, 4-byte); the netcode census read it as `product_confirm`. Both carried; reply differs by reading. | `2-153_pet_summon.yaml` |
+| **2/151** CmsgProductBuy *(1-byte selector: 0 = open/refresh, 200 = confirm)* | 1 | **selector 0 → 3/8** SmsgShopPageUpdate *(list/money refresh)*; **selector 200 → 4/113/4/114/4/115** *(product/cash-shop result + balance)* | 4 / 12·12·24 | confirmed/high (selector-0 → 3/8) + inferred/med (selector-200 → 4/113-family) — **CORRECTED (binary wins, resolves the old §Open-Q2):** the refuted **"1/20" reply tie is DROPPED** (1/20 = unrelated mail/letter). The two selector branches answer on different channels. | `2-151_product_buy.yaml`, `3-8_shop_page_update.yaml`, `4-113_item_shop_purchase_result.yaml`, `4-115_item_shop_balance_update.yaml` |
+| **2/153** CmsgProductConfirm *(FIXED 4-byte; ONE builder; 60 s cooldown)* | 4 | **[capture/debugger-pending]** — reply opcode not stamped by the builder; best hypothesis = the product family **4/113 ItemShopPurchaseResult / 4/114 CashShopActionResult / 4/115 balance** | 12 / 12 / 24 | pending — **CORRECTED (binary wins):** `opcodes.md` now catalogs 2/153 as **CmsgProductConfirm** (the prior `CmsgPetSummon` reading is REFUTED). The builder stamps no reply opcode, so the answering minor stays **[capture/debugger-pending]** (register item R-38). | `2-153_product_confirm.yaml` |
 
 *Note.* Server-pushed billing/mail notifications are S2C-only major-1 pushes with no matching request:
 **1/16** SmsgSrvBillingDeactivated (0), **1/17** SmsgSrvBillingActivated (0), **1/19**
-SmsgSrvBillingExpiryNotice (21), **1/20** SmsgSrvLetterReceived (var). They appear here only because
-2/151 atypically pairs to 1/20 in the census (Q2). *spec:* `opcodes.md`, `1-19_srv_billing_expiry_notice.yaml`,
-`1-20_srv_letter_received.yaml`.
+SmsgSrvBillingExpiryNotice (**22 bytes**, corrected from 21/20 — `opcodes.md`), **1/20**
+SmsgSrvLetterReceived (var). **1/20 is mail only** — the prior "2/151 → 1/20" census tie has been
+DROPPED (it is unrelated to the product flow; see §2.13 2/151). *spec:* `opcodes.md`,
+`1-19_srv_billing_expiry_notice.yaml`, `1-20_srv_letter_received.yaml`.
 
 ### 2.14 PvP / Revenge
 
@@ -289,7 +372,7 @@ These C2S sends await **no reply**, or are themselves a reply (not a request):
 | **2/10000** | CmsgKeepalive | fire-and-forget | — | timer keepalive frame. |
 | **1/4** | CmsgAuthReply | **reactive** | answers **0/0** SmsgKeyExchange | built inside the inbound major-0 branch (the credential carrier). |
 | **2/65** | *(reactive context ack)* | **reactive** | answers a game-tick / guild-member-remove handler | a 1-byte ack built inside an inbound handler; not a player command. |
-| **2/146** | *(reactive packet ack)* | **reactive** | answers **5/146** `SmsgAckRequest` *(0x50092)* | the client's automatic ack to the server's ack-request. |
+| **2/146** | *(reactive packet ack)* | **reactive** | answers **5/146** `SmsgPacketResponseAckRequest` | the client's automatic ack to the server's ack-request, built inside the 5/146 handler. **8-byte body `[u32 echoed req_id][u32 local state global]`** (NOT the inbound token); field-1 identity `[capture/debugger-pending]` (R-30). *spec:* `network_dispatch.md §4.5a`. |
 
 \* `2/8 CmsgHotbarSync` (241-byte snapshot upload) and `2/106 CmsgCreatureItemTick106` (effect-tick)
 are likely fire-and-forget (no consumer-side wait found) but are marked **pending** — capture-required.
@@ -409,43 +492,156 @@ Engineers MUST NOT assume a single chat NUL convention — it is a real per-opco
 
 ## Open Questions / UNVERIFIED
 
-1. **1/7 delete reply.** `opcodes.md` attributes the char-manage/delete result to **3/4 subtype 2**
-   (committed/authoritative); a fresh static read suggests an **UNVERIFIED 3/7** alternative. Both
-   recorded; do NOT re-point on static evidence alone. Separately, the **mode=1==DELETE** semantic
-   itself is not statically corroborated (both 1/7 emitters are select/manage paths) — capture/debugger-pending.
-2. **2/151 reply-major atypical.** The census ties `2/151 CmsgProductBuy` (major 2) to a **1/20** reply
-   (major 1) — a major-1 reply to a major-2 request, which is atypical (major-2 requests normally reply
-   in major 2/4/5). Flagged conflict-to-verify; the conventional candidate is a major-4 product result
-   (4/113/4/114/4/115). Do not silently accept 1/20. (The list/money refresh does arrive on 3/8.)
-3. **5/73 name (quest vs guild-war).** The binary install table + the 344-byte turn-in handler prove
-   **5/73 = SmsgQuestComplete** (the quest reply for 2/28/2/152). `opcodes.md`/`handlers.md` carry the
-   "HUD-II Wave 4 correction" label **SmsgGuildWarInfoUpdate** (catalogued at `0x50049`, 344 bytes). The
-   install table refutes the guild-war label (no guild-war handler is wired at 5/73). Quest pairings in
-   §2.11 treat 5/73 as the quest turn-in verdict, with the conflict flagged. **Binary-wins doctrine →
-   SmsgQuestComplete; a spec-author must reconcile the catalog name.**
-4. **2/153 product_confirm vs pet_summon (opcode-id COLLISION).** `opcodes.md` catalogs `0x20099` /
-   minor 153 as **CmsgPetSummon** (confirmed, FIXED 4-byte, name re-attributed from CmsgProductConfirm,
-   60 s cooldown). The CYCLE-2 netcode census read 2/153 as a **product confirm / purchase commit**
-   (reply = the 4/113/4/114/4/115 product family). The two readings disagree on both the name and the
-   reply; both are carried (§2.13). Capture/debugger-pending.
-5. **Staged-name collisions (flagged for the names lane — do NOT apply here).** `5/73 = SmsgQuestComplete`
-   (currently mislabelled SmsgGuildWarInfoUpdate); `2/41 = CmsgSkillLearn` and `2/145 =
-   CmsgSkillHotbarRegister` (NEW C2S opcodes, not in `opcodes.md`); several §8-swept `Cmsg*` proposals
-   collide by role and must be disambiguated before any IDB rename. Owned by `ida-toolsmith` +
-   `names.yaml`; this file only records them.
+CYCLE 4 settled the two pairing-conflict Open-Qs (guild-diplomacy 4/81→4/61; 2/151 reply / "1/20" tie);
+they are **RESOLVED** above and no longer carried here. The 5/73 catalog name is reconciled
+(`opcodes.md` now carries SmsgQuestComplete) and the 2/153 name is reconciled (CmsgProductConfirm). What
+remains open is genuinely-unsettled **VALUE semantics**, which by doctrine is `[capture/debugger-pending]`
+and is consolidated in **Appendix C — capture/debugger-pending register (R-01..R-42)**. The two
+structural items still worth flagging here:
+
+1. **1/7 result-minor + the mode semantic.** `opcodes.md` now reads 1/7 as **CmsgSelectCharacterSlot**
+   `[u8 slot][u8 mode]` (mode 1 = select-and-play, mode 0 = slot-lock) — the prior "delete-mode" reading
+   is **REFUTED** (there is no major-1 char-delete opcode on this build; deletes ride the major-3 result
+   ladder). The exact result minor among the char-mgmt major-3 ladder (3/4 subtype-refresh vs 3/7
+   SmsgCharManageResult) is not capture-pinned; both are installed and clear the in-flight latch. The
+   mode-byte polarity (R-03 result/subtype polarity for 3/7) is `[capture/debugger-pending]`.
+2. **Staged-name collisions (flagged for the names lane — do NOT apply here).** `2/41 = CmsgSkillLearn`
+   and `2/145 = CmsgSkillHotbarRegister` (NEW C2S opcodes, not yet in `opcodes.md`); several §8-swept
+   `Cmsg*` proposals collide by role and must be disambiguated before any IDB rename. Owned by
+   `ida-toolsmith` + `names.yaml`; this file only records them. (`5/73 = SmsgQuestComplete` and
+   `2/153 = CmsgProductConfirm` are already applied in `opcodes.md` and are no longer name-collisions.)
+
+---
+
+## Appendix C — capture/debugger-pending register (R-01..R-42)
+
+> **The honest residual.** Every item below is a wire-byte **VALUE-semantics** question (what a value
+> *means* / which code is success vs fail / unit / conditional presence / opaque interior / pairing not
+> statically pinned), NOT a structure gap — sizes, offsets and field tables are recovered. This register
+> is the future-debugger (`?ext=dbg`) worklist; consolidated (never copied) from
+> `_dirty/netcode_deep/oq/completeness.md §3`. Grouped by kind.
+
+### C.1 Enumerations / code-meanings (which numeric value means what)
+
+| R | Opcode(s) | Pending VALUE |
+|---|---|---|
+| R-01 | 0/0 | meaning of the two trailing u32 server scalars A/B (handshake) |
+| R-02 | 3/100 | full action-result-code → user-meaning map (`{0,1-5,7,9-11,16,22,23,200-211,220-227,232}`) |
+| R-03 | 3/7 | Result(0/1) and Subtype(0=refresh/1=rename-applied/2=delete) polarity confirmation |
+| R-04 | 3/6 | ErrorCode bucket strings (`{0xC8/0xC9}/{0xCC..0xD2}/{0xCE}/{0xD4}`) |
+| R-05 | 3/5 | BillingFlag enum @+0x1C |
+| R-06 | 4/61 | guild action(1..5)×result(1..7) 2-D verdict map; cooldown-days arm |
+| R-07 | 4/81 | error-code byte map (`0xFF`/`1..0x18`/`0x15` mm:ss/`0x17` percent) |
+| R-08 | 4/15 | outcome selector `{100=shared,101=plain,else}` and failure 1..5→ids |
+| R-09 | 4/82 vs 4/108 | confirm billing-points vs gold field identity at runtime |
+| R-10 | 2/142 | Op enum (deposit/withdraw/move) = widget-action-id − 7 |
+| R-11 | 4/100 | combat phase(3/5)/sub-kind(`0xFF` reset)/value byte meanings |
+| R-12 | 5/79, 5/80 | DeathOp/mode byte sets; effect-id selectors |
+| R-13 | 5/5 | actor-record visual-state codes (1001/1011/1020/1021/1023/1041) — server-driven vs purely local |
+
+### C.2 Flag-bit meanings
+
+| R | Opcode(s) | Pending VALUE |
+|---|---|---|
+| R-14 | 2/112 / keepalive-enabled flag | the toggle byte arg cadence / who flips it |
+| R-15 | 1/16/1/17 | (none on wire — local billing latch; confirm the displayed text only) |
+| R-16 | 5/124, 5/1 trailer, 5/53 StateByteA/B | actor visual-flag / title / relation bit meanings |
+| R-17 | 4/12/4/16 slot-type==15 | confirm the title/weapon-drawn bit set beyond 15 |
+| R-18 | 5/127 | StealthFlag bit semantics |
+| R-19 | 2/23/2/35/2/36/2/37 mode bytes | invite/accept/decline/leave/kick mode-value meanings |
+
+### C.3 Unit / scale of a value
+
+| R | Opcode(s) | Pending VALUE |
+|---|---|---|
+| R-20 | 5/52 rec +0x14/+0x18 | whether the 64-bit accumulator is literal damage vs another signed magnitude |
+| R-21 | 5/53, 5/32 | HP i64 vs MP/stamina split unit confirmation (structure agreed i64; semantics pending) |
+| R-22 | 4/108 / 4/115 | gold qword vs the three balance dwords (displayed total vs stored component) |
+| R-23 | 5/9, 5/11 | xp/rank-xp i64 sign + the server-config bonus/penalty split rates |
+| R-24 | 3/7 ReadyTime, 4/61/4/63 cooldowns | epoch vs delta; minutes-vs-days divisor confirmation |
+| R-25 | 5/18 | clock field0/field1 (seconds vs packed date/time) |
+
+### C.4 Conditional field presence / which-builder discriminator
+
+| R | Opcode(s) | Pending VALUE |
+|---|---|---|
+| R-26 | 1/4 | PIN field present only when 2nd-password cap configured (confirm live) |
+| R-27 | 2/52 short vs full | whether server keys on count words / struct+4 float / struct+1 to branch |
+| R-28 | 2/7 vs 2/83 vs 3/21 | which UI action drives each chat path + exact channel/target prefix layout |
+| R-29 | 2/151 selector | confirm sel 0 (open→3/8) vs 200 (confirm→4/113-family) at runtime |
+| R-30 | 5/146 / 2/146 field-1 | confirm the echoed field-1 is the local context/state global, not the inbound token |
+
+### C.5 Opaque-forward interiors (size known; interior field split needs capture/struct)
+
+| R | Opcode(s) | Pending interior |
+|---|---|---|
+| R-31 | 4/1 | the ~9100-byte GameStateTick interior layout (deliberately not decomposed) |
+| R-32 | 4/56 / 4/71 | the deep mirror-relative sub-tables past the decoded front sections |
+| R-33 | 5/89/90/91/92 | PvP-state object blocks (roster/counters/score/request) — struct-lane |
+| R-34 | 5/59 / 5/77 | rank-progress 76B / 400B blobs (only one selector byte / +4 id decoded) |
+| R-35 | 2/40/2/50/2/55/2/141 | the panel-context HUD record blobs (72/16/32/76 bytes) |
+| R-36 | 2/8 | 241-byte hotbar snapshot per-slot layout |
+| R-37 | 2/75 (80B) / 2/80 (48B) | embedded fixed records → re-struct-analyst |
+
+### C.6 Pairing not statically pinned (which reply minor answers which request)
+
+| R | Opcode(s) | Pending pairing |
+|---|---|---|
+| R-38 | 2/153 CmsgProductConfirm | reply opcode (4/113/4/114/4/115 best hypothesis; the builder stamps none) |
+| R-39 | the ~16 major-2 "Request→pending" submits | exact answering minor per panel/push channel |
+| R-40 | 2/92/2/93 | PvP/revenge reply minors (5/89/5/92/5/94 static-inferred) |
+| R-41 | 1/2 CmsgLobbyPing | the server pong/ack minor (lobby socket — see §Open Conflicts C1) |
+| R-42 | 5/55/5/65/5/123 | confirm the selector-dependent async-answer relationship to 2/30 / gift flow |
+
+**Register size: 42 distinct capture/debugger-pending VALUE-semantic items** (R-01..R-42), spanning all
+five majors. This is the single honest residual after CYCLE 4 — every item is a *value* question, not a
+*structure* gap. (Plus the standing **CP949 message-DB string-text** items — message ids such as
+10006/51027/36004-36028/45xxx/54xxx/65xxx/58xxx/74xxx — which are a **string-table/asset task**, not a
+netcode debugger task.) *source:* `_dirty/netcode_deep/oq/completeness.md §3`.
+
+---
+
+## Open Conflicts (carried forward to a future lane)
+
+- **C1 — `1/2 CmsgLobbyPing` routing.** On this build the lobby ping rides the **shared NetClient send
+  convergence** (the same send path as the in-scope char-mgmt builders), in tension with the "separate
+  port-10000 lobby socket" doctrine that put the lobby out of scope. 1/2 is kept out of the char-mgmt
+  family and sets no in-flight latch. This is an **open arbitration item for a future lobby-socket
+  lane** — surfaced to the maintainer (it may mean the lobby ping genuinely shares the game send
+  convergence on this build). It is **NOT a netcode-DTO blocker**. *source:*
+  `_dirty/netcode_deep/_TIER1_LEDGER.md` (Open Conflicts C1).
 
 ---
 
 ## Provenance
 
-- Pairings synthesized (never copied) from `_dirty/netcode/req_resp_pairs.md` (the master C2S→S2C
-  correlation table, validated against the install tables), with the install-table refutations
-  respected: **no 4/44/4/46 item-move ack, no 4/30 guild-op ack, no 4/143 quest-keep ack**.
-- Result/status codes from `_dirty/netcode/result_code_maps.md` (phantom 5000/10000/10001 string-id
-  class refuted; real families = the 300/301 4/1 end-gate and the 3/100 code set).
-- CP949 rules from `_dirty/netcode/cp949_text_fields.md` (2/7 excludes NUL; 2/83 & 3/21 include; u32
-  length; char[17] dominant cell).
-- Opcode names/sizes/routing from committed `opcodes.md`; per-handler reads from `handlers.md`; the
-  in-flight latch + dispatch shape from `network_dispatch.md`; field specs under `packets/`.
+This master was authored **LAST** in the CYCLE 4 Netcode Deep-Cartography promotion wave — after the
+seven neighbour files had already been rewritten — and every pairing was re-derived against those
+now-updated neighbours and cited inline.
+
+- **Pairings** synthesized (never copied) from the CYCLE 4 `_dirty/netcode_deep/` corpus (the per-wave
+  req↔resp lanes + the install-table partition), validated against the install tables, with the
+  install-table refutations respected: **no 4/44/4/46 item-move ack** (4/44/4/46 = actor tick-table
+  ops), **no 4/30 guild-op ack** (4/30 = SmsgSocialPanelTarget), **no 4/143 quest-keep ack** (4/143/4/144
+  = one shared tracked-item-panel handler; the real quest replies are the 5/68/5/73 pushes).
+- **Binary-won pairing corrections** applied this pass (the binary wins): `2/81 → 4/61
+  SmsgGuildStateChangeResult` (the stale `4/81 = SmsgGuildDiplomacyResult` DROPPED; 4/81 = generic
+  SmsgActionErrorResult); `2/151` selector 0 → 3/8, selector 200 → 4/113/4/114/4/115 (the "1/20" tie
+  DROPPED); `2/146` reply = `[u32 echoed req_id][u32 local state global]` (8B); `2/153 =
+  CmsgProductConfirm` reply opcode `[capture/debugger-pending]` (R-38); `5/73 = SmsgQuestComplete` (vs
+  the stale SmsgGuildWarInfoUpdate). *source:* `_dirty/netcode_deep/_TIER1_LEDGER.md` (Major-2 / Major-4
+  worklists + the in-flight latch census + Open Conflicts).
+- **Result/status codes** (Appendix A) from the CYCLE 4 result-code maps (phantom 5000/10000/10001
+  string-id class refuted; real families = the 300/301 4/1 end-gate and the 3/100 code set).
+- **CP949 rules** (Appendix B): 2/7 excludes NUL; 2/83 & 3/21 include; u32 length; char[17] dominant cell.
+- **Opcode names/sizes/routing** from committed `opcodes.md`; **per-handler reads** (incl. the Group-I
+  in-flight latch census, 4/61, 4/81, 5/146) from `handlers.md`; the **in-flight latch + dispatch shape +
+  the 5/146→2/146 ack** from `network_dispatch.md`; field specs under `packets/` (incl.
+  `packets/2-81_guild_diplomacy_declare.yaml`, `packets/4-61_guild_state_change_result.yaml`,
+  `packets/2-151_product_buy.yaml`, `packets/3-8_shop_page_update.yaml`,
+  `packets/2-153_product_confirm.yaml`); struct layouts under `structs/` (incl.
+  `structs/spawn_descriptor.md`, `structs/net_client.md`, `structs/net_handler.md`).
+- **Capture/debugger register** (Appendix C, R-01..R-42) consolidated from
+  `_dirty/netcode_deep/oq/completeness.md §3`.
 - All facts STATIC on anchor **263bd994**. No debugger, no capture this campaign — every wire VALUE
   semantic and every result-code polarity is `[capture/debugger-pending]`.

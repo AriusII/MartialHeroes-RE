@@ -1,41 +1,43 @@
+# TOMBSTONE — this reading is REFUTED. Kept (not deleted) so cross-references resolve.
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# 2/153 IS NOT a pet/mount summon. The CmsgPetSummon reading is REFUTED by the binary:
+#   - there is exactly ONE builder that stamps (2,153) and exactly ONE payload shape (a fixed 4-byte
+#     record); no pet/mount-summon UI ever reaches it.
+#   - the four bytes are item-slot / occupancy / quantity selectors read from an inventory / item-process
+#     panel (driven from MainWindow slot 205, via a panel button click and the MainWindow dispatcher's
+#     case 87 menu route) — an item / PRODUCT process-confirm action, not a summon.
+#   - the only fact CmsgPetSummon carried over correctly is the 60-second cooldown number; that cooldown
+#     is the per-commit throttle of the product-confirm send (a `panel +236 = now + 60000` stamp), not a
+#     summon cooldown.
+#
+# The LIVE, authoritative 2/153 spec is packets/2-153_product_confirm.yaml (CmsgProductConfirm).
+# This file is retained only as a redirect; do not codegen from it.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida] · refutation control-flow CONFIRMED
+#   (single builder / 4-byte item-process payload / 60s cooldown). capture_verified: false.
 
-name: CmsgPetSummon
+name: CmsgProductConfirm
 opcode: 0x20099           # major 2 (GameAction), minor 153 -> (2 << 16) | 153
 direction: C2S
-size: 4                   # fixed 4-byte payload (size corrected from variable)
-spec: packets/2-153_pet_summon.yaml
+size: 4                   # fixed 4-byte body — see packets/2-153_product_confirm.yaml
+spec: packets/2-153_product_confirm.yaml
 status: confirmed
 capture_verified: false
 
-summary: Pet/mount summon or dismiss. Client-side 60-second cooldown between summon attempts.
+summary: >
+  REDIRECT / tombstone. Opcode 2/153 is CmsgProductConfirm (an item / product process-confirm), NOT a
+  pet/mount summon. The CmsgPetSummon reading is refuted on the UI-path and payload-source evidence;
+  the authoritative field spec lives in packets/2-153_product_confirm.yaml. The 60-second cooldown the
+  old pet reading observed is real but belongs to the product-confirm send.
 
-# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 4.
-fields:
-  - { name: Mode,     type: u8 }          # 0x00  summon/dismiss mode
-  - { name: Param1,   type: u8 }          # 0x01  parameter 1
-  - { name: SlotFlag, type: u8 }          # 0x02  from panel widget
-  - { name: NpcSlot,  type: u8 }          # 0x03  0xFF if not applicable; 40*slot index otherwise
+# No fields here — see packets/2-153_product_confirm.yaml for the authoritative 4-byte layout.
+fields: []
 
 notes: |
-  Static inference only; no capture available. CODE-CONFIRMED layout (4 bytes),
-  CAPTURE-UNVERIFIED meaning. Size corrected from variable to fixed 4 bytes.
+  This file previously modelled 2/153 as CmsgPetSummon (Mode / Param1 / SlotFlag / NpcSlot). That
+  attribution is REFUTED (binary wins): 2/153 is the item / product process-confirm. See
+  packets/2-153_product_confirm.yaml for the live spec and the per-byte field table.
 
-    0x00 (1B) Mode     : summon/dismiss mode selector (le u8). The specific mode values
-                         are not yet enumerated.
-    0x01 (1B) Param1   : additional parameter; meaning varies by mode (le u8).
-    0x02 (1B) SlotFlag : derived from the pet panel widget selection (le u8).
-    0x03 (1B) NpcSlot  : NPC slot value; 0xFF if not applicable. When applicable, the
-                         value is 40 * slot_index (le u8).
-
-  CONTEXT: the client enforces a 60-second cooldown between pet summon attempts.
-  This cooldown is client-side only and is not reflected in the wire protocol.
-
-  UNKNOWNS to resolve with a capture:
-    - enumerated Mode values (summon vs dismiss vs switch?);
-    - the relationship between Param1, SlotFlag, and the pet panel UI;
-    - whether the 40*slot_index formula for NpcSlot is exact or approximate;
-    - whether the original was truly variable-length (corrected to 4 here).
-
-  UNBLOCKS: Client.Application pet/mount summon and dismiss flow.
+  The reply pairing is capture/debugger-pending; the best-evidenced hypothesis (an item/product-result
+  family) is 4/113 / 4/114 / 4/115. The builder itself stamps no reply opcode.

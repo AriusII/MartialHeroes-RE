@@ -1,41 +1,56 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; the 8-byte (2x u32) echo body + the REACTIVE origin (built inside
+# the inbound 5/146 handler) are control-flow CONFIRMED. capture_verified: false.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size (8) + 2x u32 echo shape + reactive origin: control-flow CONFIRMED
+#   value identity (which word is the echoed server req-token vs the local running state/ack counter):
+#   capture/debugger-pending.
 
 name: CmsgServerAckEcho
 opcode: 0x20092           # major 2 (GameAction), minor 146 -> (2 << 16) | 146
 direction: C2S
-size: 8                   # fixed 8-byte payload (two dwords)
+size: 8                   # FIXED 8-byte payload (two u32 echo words)
 spec: packets/2-146_server_ack_echo.yaml
 status: confirmed
 capture_verified: false
 
-summary: Reactive echo-reply to S2C 5/146 for PvP zone detection. Echoes back the server-supplied token and a local server/channel identifier.
+summary: >
+  REACTIVE server-ack echo. Built INSIDE the inbound 5/146 handler (not a player command): that handler
+  reads the 8-byte 5/146 body, validates a request token against local window state, surfaces a preset
+  message-DB string into the chat log, then sends this answering 2/146. The 8-byte body echoes a request
+  id and a local running state/ack-counter value; which word is which is capture/debugger-pending.
 
-# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8. The two echoed words map
+# onto (a) the validated request id from the inbound 5/146 body and (b) a local running ack/state counter;
+# the exact identity of each word is capture/debugger-pending.
 fields:
-  - { name: Token,    type: u32 }          # 0x00  echoed from S2C 5/146 SmsgAckRequest
-  - { name: ServerId, type: u32 }          # 0x04  local server/channel identifier
+  - { name: ReqId,    type: u32 }          # 0x00  a NetHandler-derived context/request word (echoed) [value capture/debugger-pending]
+  - { name: StateVal, type: u32 }          # 0x04  a local running ack/sequence state value (the echoed counter) [value capture/debugger-pending]
 
 notes: |
-  Static inference only; no capture available. CODE-CONFIRMED layout (8 bytes = two
-  little-endian dwords), CAPTURE-UNVERIFIED meaning.
+  CONTROL-FLOW CONFIRMED layout (8 bytes = two little-endian dwords) and REACTIVE origin; the per-word
+  VALUE identity is capture/debugger-pending.
 
-    0x00 (4B) Token    : the request token originally sent by the server in S2C 5/146
-                         (SmsgAckRequest). The client echoes it back verbatim (le u32).
-    0x04 (4B) ServerId : a local server or channel identifier maintained by the client,
-                         sent alongside the echoed token (le u32).
+  REACTIVITY (confirmed): the 2/146 builder is NOT a player command — its sole invoker is the inbound
+  5/146 handler (SmsgAckRequest / SmsgPacketResponseAckRequest, Push slot 146). That handler reads an
+  8-byte body from the 5/146 frame, validates a request token against local window state, surfaces a
+  preset message-DB string (id 51027) into the chat log, then calls this builder to send the answering
+  2/146. So 2/146 is the client's automatic ack to the server's ack-request.
 
-  CONTEXT: this is the client-side reply half of the PvP zone presence detection
-  handshake. When the server pushes SmsgAckRequest (5/146), the client must respond
-  with this echo within a reasonable time window. Failure to reply may result in the
-  server treating the client as absent from the PvP zone.
+    0x00 (4B) ReqId    : a NetHandler-derived context/request word — maps onto the validated request id
+                         read from the inbound 5/146 body. Echoed (le u32). [value capture/debugger-pending]
+    0x04 (4B) StateVal : a local running ack/sequence state value (a running counter word). Echoed
+                         alongside the request id (le u32). [value capture/debugger-pending]
 
-  RELATED: SmsgAckRequest (5/146, opcode 0x50092) -- the server-side push that this
-  packet replies to.
+  Which of the two words is the echoed server token vs the local sequence/state value is
+  capture/debugger-pending; the 8-byte 2x u32 echo structure itself is CONFIRMED.
+
+  RELATED: SmsgAckRequest (5/146, opcode 0x50092) -- the inbound server push that triggers this reply.
 
   UNKNOWNS to resolve with a capture:
-    - exact source of ServerId (login-assigned channel id? zone server id?);
+    - which word is the echoed server req-id vs the local running counter;
     - the timeout window the server enforces for the echo reply;
-    - whether Token is ever transformed before echoing or is always verbatim.
+    - whether the req-id is ever transformed before echoing or is always verbatim.
 
   UNBLOCKS: Client.Application PvP zone echo-reply / keep-alive mechanism.

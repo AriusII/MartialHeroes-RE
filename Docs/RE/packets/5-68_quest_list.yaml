@@ -1,8 +1,19 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONTROL-FLOW CONFIRMED: routing + fixed 452-byte (0x1C4) size + the parser's section layout (three
-# header bytes, two 10-byte state vectors, a 20-entry u32 quest-id array, a 20-entry 17-byte CP949
-# name array). VALUE semantics of individual bytes PENDING. capture_verified: false.
-# spec: Docs/RE/packets/5-68_quest_list.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 452-byte body, and the COLUMNAR
+#                 (struct-of-arrays) parser layout -- panel flag @+0x08, mirror flags @+0x09/+0x0A,
+#                 per-quest byte-A column @+0x0B (u8x10), byte-B column @+0x15 (u8x10), value-word
+#                 column @+0x20 (u32x10), CP949 name column @+0x70 (char[17]x10) -- are
+#                 control-flow-confirmed; COUNT = 10; every byte's VALUE meaning is capture-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED two real layout conflicts. (1) COUNT is 10, NOT 20 -- the copier loops are
+#              count-10 (a prior note's "20-entry" arrays are refuted). (2) the wire body is COLUMNAR
+#              (struct-of-arrays): four parallel per-quest columns (byte-A, byte-B, value-word, name),
+#              NOT a flat ids-then-names pair of 20-entry arrays. The 17-byte name stride is the WIRE
+#              stride; the 32-byte slot is a RUNTIME mirror stride only (DO-NOT-PROMOTE-AS-WIRE).
 
 name: SmsgQuestList
 opcode: 0x50044           # major 5 (Push), minor 68 -> (5 << 16) | 68
@@ -13,67 +24,67 @@ status: hypothesis
 capture_verified: false
 
 summary: >
-  Server pushes the player's quest-log snapshot. A fixed 452-byte block the client parses field by
-  field into its quest mirror and uses to rebuild the quest-log tabs. The body is three header bytes,
-  then two 10-byte state/flag vectors, then a 20-entry u32 quest-id array, then a 20-entry CP949
-  name array (17-byte cells). ids and names are PARALLEL arrays (ids fully precede names), NOT
-  interleaved records. This is how a quest action (2/28) result reaches the client.
+  Server pushes the player's quest-log snapshot. A fixed 452-byte block laid out COLUMNAR
+  (struct-of-arrays) for 10 quest records -- a panel-open flag, two mirror flags, then four parallel
+  per-quest columns (a byte-A column, a byte-B column, a value-word column, and a CP949 name column at
+  17-byte stride). The client copies it into its quest mirror and rebuilds the quest-log tabs. This is
+  how a quest action (2/28) result reaches the client.
 
-# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 452. The arrays are modelled
-# as fixed bytes[N] blobs (the only fixed-buffer wire type); the engineer slices each into its entries
-# of the stated stride.
+# Wire order, offset 0 = first payload byte. Pack=1; the parser indexes the body with the 8-byte frame
+# header included, so the flags sit at body +8..+10 and the columns follow. The columns are modelled as
+# fixed bytes[N] blobs (the only fixed-buffer wire type); the engineer slices each into its 10 entries.
+# Widths sum to size: 452.
 fields:
-  - { name: LeadRegion,    type: "bytes[8]" }    # +0    leading framed-header region the parser skips past (body +0..+7) -- opaque
-  - { name: HeaderFlagA,   type: u8 }            # +8    header flag A
-  - { name: HeaderFlagB,   type: u8 }            # +9    header flag B
-  - { name: HeaderFlagC,   type: u8 }            # +10   header flag C
-  - { name: StateVectorA,  type: "bytes[10]" }   # +11   state/flag vector A: 10 x u8 (1-byte stride) -> quest mirror array A
-  - { name: StateVectorB,  type: "bytes[10]" }   # +21   state/flag vector B: 10 x u8 (1-byte stride) -> quest mirror array B
-  - { name: GapA,          type: "bytes[1]" }    # +31   alignment filler before the quest-id array -- opaque
-  - { name: QuestIds,      type: "bytes[80]" }   # +32   quest-id array: 20 x u32 (4-byte stride)
-  - { name: QuestNames,    type: "bytes[340]" }  # +112  CP949 name array: 20 x 17-byte cell (17-byte stride) -- ends exactly at +452
-  # widths: 8 + 1 + 1 + 1 + 10 + 10 + 1 + 80 + 340 = 452 (the on-wire body). The three header bytes
-  # sit at body +8..+10; vectors at +11/+21; a 1-byte filler at +31; ids +32..+111; names +112..+451.
-  # NOTE on offsets: this packet's parser indexes the body with the 8-byte frame header included in
-  # its addressing, so the three header bytes sit at body +8..+10 and the arrays follow.
+  - { name: LeadRegion,   type: "bytes[8]" }    # +0x00  leading framed-header region the parser skips past (body +0..+7) -- opaque
+  - { name: PanelFlag,    type: u8 }            # +0x08  quest-panel open flag (snapshotted before/after; a transition opens/closes the panel)
+  - { name: MirrorFlagA,  type: u8 }            # +0x09  mirror flag A (copied into the quest mirror)
+  - { name: MirrorFlagB,  type: u8 }            # +0x0a  mirror flag B (copied into the quest mirror)
+  - { name: ByteAColumn,  type: "bytes[10]" }   # +0x0b  per-quest byte-A column: u8 x 10 (1-byte stride) -- quest id / icon class
+  - { name: ByteBColumn,  type: "bytes[10]" }   # +0x15  per-quest byte-B column: u8 x 10 (1-byte stride) -- progress / state
+  - { name: Gap0,         type: "bytes[1]" }    # +0x1f  alignment filler before the value-word column -- opaque
+  - { name: ValueColumn,  type: "bytes[40]" }   # +0x20  per-quest value-word column: u32 x 10 (4-byte stride)
+  - { name: NameColumn,   type: "bytes[170]" }  # +0x70  per-quest CP949 name column: char[17] x 10 (17-byte WIRE stride)
+  - { name: Tail,         type: "bytes[202]" }  # +0x11a remainder of the 452-byte block past the name column -- opaque / trailing pad
+  # widths: 8 + 1 + 1 + 1 + 10 + 10 + 1 + 40 + 170 + 202 = 452. The four per-quest columns are PARALLEL
+  # (struct-of-arrays), each count 10. Name column ends at +0x70 + 170 = +0x11A; the rest to 452 is the
+  # tail/pad the copier does not field-read.
 
 notes: |
-  CONTROL-FLOW CONFIRMED routing + size + section layout (every bound below is an explicit
-  compare-against-constant loop in the quest-mirror parser). VALUE semantics of individual bytes
-  PENDING (which flag is "active", what each state byte means). The block parses cleanly to the 452
-  boundary.
+  CONTROL-FLOW CONFIRMED routing + fixed 452-byte size + the columnar section layout (every bound below
+  is an explicit compare-against-constant copier loop). CAPTURE-UNVERIFIED for every byte's VALUE
+  meaning. The block is COLUMNAR (struct-of-arrays), NOT array-of-structs, and the record COUNT is 10.
 
-  OFFSET CONVENTION: the parser addresses the body with the 8-byte frame header region in front, so
-  the three header flag bytes land at body +8/+9/+10, the two state vectors at +11 and +21, the
-  quest-id array at +32..+111 (80 bytes), and the CP949 name array at +112..+451 (340 bytes), ending
-  exactly at 452. The leading 8 bytes (+0..+7) are the framed header region the parser skips.
+  OFFSET CONVENTION: the parser addresses the body with the 8-byte frame header region in front, so the
+  flags land at body +8/+9/+0xA and the columns follow.
 
-  SECTIONS:
-    +8  (1B)  HeaderFlagA / +9 (1B) HeaderFlagB / +10 (1B) HeaderFlagC : three header bytes stored
-              into distinct quest-mirror scalar slots. Roles PENDING.
-    +11 (10B) StateVectorA : 10 x u8, written one byte per entry into quest-mirror array A (the
-              mirror's per-entry destination stride is 32 -- a HOST struct stride, NOT the wire
-              stride; the wire stride is 1). Likely a small summary/category set. Roles PENDING.
-    +21 (10B) StateVectorB : 10 x u8, same shape into quest-mirror array B.
-    +32 (80B) QuestIds   : 20 x u32, the quest-id array (4-byte stride). 20 quest slots.
-    +112 (340B) QuestNames : 20 x 17-byte CP949 name cell (16 usable + forced NUL at cell+16). The
-              17-byte stride is the standard short-name field width across this quest/rank panel
-              family (NOT the ~32 destination-struct stride a prior note mentioned).
+  WIRE LAYOUT (the 452-byte block):
+    +0x08 (1B)  PanelFlag    : quest-panel open flag; a transition opens/closes the quest-log panel.
+    +0x09 (1B)  MirrorFlagA / +0x0A (1B) MirrorFlagB : flags copied into the quest mirror (open/visible
+                               state). Roles capture-pending.
+    +0x0B (10B) ByteAColumn  : one byte per quest record (stride 1), count 10 -- a quest id / icon class.
+    +0x15 (10B) ByteBColumn  : one byte per quest record (stride 1), count 10 -- progress / state.
+    +0x20 (40B) ValueColumn  : one u32 per quest record (stride 4), count 10 -- a per-quest value word.
+    +0x70 (170B) NameColumn  : one CP949 name per quest record at a 17-byte WIRE stride, count 10
+                               (16 usable + forced NUL at cell+16). 10 x 17 = 170 bytes.
+  The four columns are PARALLEL arrays (struct-of-arrays), each count 10 -- NOT interleaved per-quest
+  records and NOT 20-entry arrays.
 
-  ids and names are PARALLEL arrays (the id block fully precedes the name block), NOT interleaved
-  per-quest records. The two 10-byte state vectors are 10 elements each (a smaller summary set than
-  the 20 quest slots).
+  RUNTIME-MIRROR vs WIRE (DO-NOT-PROMOTE-AS-WIRE): the client stores each quest as a 32-byte mirror slot
+  (the per-quest value word at slot+8, the CP949 name at slot+12), count 10. The 32-byte slot stride is
+  a RUNTIME host-struct stride, NOT the wire stride. On the WIRE the name stride is 17 bytes. Do not
+  conflate the two -- only the 17-byte wire stride and the columnar offsets above are promotable.
 
   HOW THE CLIENT USES IT: the quest-log window presents tabs (active / completable / available) and
-  resolves quest CAPTION text from the message-string database by numeric id and dialog BODY lines
-  from the npc.scr dialog records. Neither text source is carried here -- this packet carries quest
-  STATE (which quests, their flags), and the client renders text from local data.
+  resolves quest CAPTION text from the message-string database by numeric id, and dialog BODY lines from
+  the npc.scr dialog records. Neither text source is carried here -- this packet carries quest STATE
+  (which quests, their flags), and the client renders text from local data.
 
   UNKNOWNS to resolve with a quest-log capture:
-    - the per-byte meaning of HeaderFlagA/B/C and the two 10-byte state vectors;
-    - whether a quest-id of 0 marks an empty slot;
-    - the tab/status encoding (which vector byte selects active vs completable vs available).
+    - the per-byte meaning of PanelFlag / MirrorFlagA / MirrorFlagB and the two byte columns;
+    - whether a quest id of 0 (ByteAColumn entry) marks an empty slot;
+    - the tab/status encoding (which column byte selects active vs completable vs available).
 
-  RELATED: 2/28 CmsgQuestAction (packets/2-28_quest_action.yaml) is the C2S that causes this push.
-  There is NO separate "quest complete" opcode -- quest turn-in results ride this 5/68 list (5/73 is
-  the unrelated guild-war info window). UNBLOCKS the quest-log rebuild in Client.Application.
+  RELATED: 2/28 CmsgQuestAction (packets/2-28_quest_action.yaml) is the C2S that causes this push. The
+  quest turn-in VERDICT (the result panel + completion cue) rides 5/73 SmsgQuestComplete
+  (packets/5-73_quest_complete.yaml); this 5/68 list is the full quest-state snapshot. UNBLOCKS the
+  quest-log rebuild in Client.Application.

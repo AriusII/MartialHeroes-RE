@@ -1,26 +1,41 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# ROUTING: Push table-driven (major-5 / minor-121).
-# size: 8 bytes fixed-size payload read as two 4-byte integers.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the 8-byte body -- ActorId@0x00 / PropertyValue
+#                 @0x04 -- are control-flow-confirmed; the handler's runtime write destination is a
+#                 live-actor field, NOT a wire field; the wire-byte VALUE meaning is capture-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none (runtime-offset hygiene applied -- the live-actor property destination was dropped
+#              from the field table; it is not on the wire)
 
 name: SmsgCharPropertySet
 opcode: 0x50079           # major 5 (Push), minor 121 -> (5 << 16) | 121
 direction: S2C
-size: 8                   # fixed 8-byte payload (2 * u32)
+size: 8                   # fixed 8-byte body (two single-u32 reads)
 spec: packets/5-121_char_property_set.yaml
-status: confirmed
+status: hypothesis
 capture_verified: false
 
-summary: >
-  Character property set. Updates a specific integer property/field on the local player
-  or target actor.
+summary: Server sets a single integer property/field on the resolved actor. An 8-byte body carrying an actor id and one property value; the handler resolves the actor (assuming player sort 1) and writes the value into a runtime actor property field.
 
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 8.
 fields:
-  - { name: ActorId, type: u32, offset: 0 }         # target actor ID (assumes Player sort 1)
-  - { name: PropertyValue, type: u32, offset: 4 }   # property value to assign to actor field 1852
+  - { name: ActorId,       type: u32 }   # 0x00  target actor id (resolved with a fixed sort of 1)
+  - { name: PropertyValue, type: u32 }   # 0x04  property value to assign to the resolved actor
 
 notes: |
-  Static analysis only; no capture available.
+  CONTROL-FLOW CONFIRMED: the 8-byte body (two single-u32 cursor reads, not a bulk read) and the field
+  offsets. CAPTURE-UNVERIFIED for the property's VALUE meaning.
 
-  BEHAVIOUR:
-    - Resolves the target actor using ActorId and hardcoded Sort 1.
-    - Writes PropertyValue into the actor structure property offset 1852.
+    0x00 (4B) ActorId       : target actor id; resolved with a hardcoded sort of 1 (local player / a
+                              player-sort actor).
+    0x04 (4B) PropertyValue : the integer value written onto the resolved actor.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): PropertyValue is stored into a pure runtime field on
+  the live actor object (well outside the embedded-descriptor window, so it is unambiguously a runtime
+  field, never on the wire and never in the spawn descriptor). That destination offset is NOT a wire
+  field and is intentionally omitted. Only the two wire dwords above are promotable.
+
+  UNKNOWN to resolve with a capture: which character property this value sets.

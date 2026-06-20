@@ -1,0 +1,70 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 52-byte body, the gate@+0x08 /
+#                 result@+0x09 / action@+0x0A bytes, the CP949 guild-name @+0x0B..+0x1B (force-NUL at
+#                 +0x1C), and the action==5/result==2 cooldown-in-DAYS arm are control-flow-confirmed;
+#                 every VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: This is the guild state-change / diplomacy VERDICT (resolves net_contracts 2.9). The
+#              guild-diplomacy reply rides 4/61, NOT 4/81 (slot 81 = generic SmsgActionErrorResult). The
+#              C2S 2/81 CmsgGuildDiplomacyDeclare is answered HERE.
+
+name: SmsgGuildStateChangeResult
+opcode: 0x4003d           # major 4 (Response), minor 61 -> (4 << 16) | 61
+direction: S2C
+size: 52                  # fixed 52-byte body (0x34)
+spec: packets/4-61_guild_state_change_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The omnibus guild state-change / diplomacy result. A fixed 52-byte body carrying a gate/error byte,
+  a result code (1..7), an action/category code (1..5), and an embedded CP949 guild name. The
+  (action, result) pair selects a guild dialog/list anchor or posts a coloured guild notice; one arm
+  formats a cooldown-in-days notice. This is where the guild-diplomacy verdict (and every other guild
+  state change) lands. Reply to C2S 2/81 CmsgGuildDiplomacyDeclare.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 52.
+fields:
+  - { name: Head,      type: "bytes[8]" }    # 0x00  leading region read before the gate byte (opaque; not field-decoded)
+  - { name: Gate,      type: u8 }            # 0x08  gate / error: nonzero => guild error/dialog sub-handler, return
+  - { name: Result,    type: u8 }            # 0x09  result code (1..7); second switch axis
+  - { name: Action,    type: u8 }            # 0x0a  action / category (1..5); first switch axis (remapped 1->4 when already in a guild)
+  - { name: GuildName, type: "bytes[17]" }   # 0x0b  embedded CP949 guild name (<=17 chars; handler force-NULs at +0x1C)
+  - { name: Tail,      type: "bytes[24]" }   # 0x1c  trailing state fields (counts/ids); not all consumed on every arm
+  # widths: 8 + 1 + 1 + 1 + 17 + 24 = 52
+
+notes: |
+  CONTROL-FLOW CONFIRMED routing + fixed 52-byte (0x34) size + the gate/result/action bytes + the
+  embedded guild-name placement (force-NUL at +0x1C). CAPTURE-UNVERIFIED for VALUE meanings.
+
+    0x08 (1B) Gate      : a gate / error byte. Nonzero routes to a guild error/dialog sub-handler and
+                          returns.
+    0x09 (1B) Result    : a result code (values 1..7); the second axis of a 2-D switch.
+    0x0a (1B) Action    : an action / category code (values 1..5); the first switch axis. The handler
+                          remaps 1 -> 4 when the local player is already in a guild.
+    0x0b (17B) GuildName: an embedded CP949 guild-name string (up to ~17 chars). The handler forces a
+                          NUL at +0x1C to terminate it.
+    0x1c (24B) Tail     : trailing guild state fields (counts / ids); not all consumed on every arm.
+
+  ACTION x RESULT SWITCH (handler use, routing codes -- numeric meaning still value-pending):
+    - action == 5 / result == 2 : formats a cooldown-in-DAYS notice. The handler reads a server-config
+                                  MINUTES value and divides by 1440 (minutes per day). (UI strings
+                                  21147 / 21148 are message-DB ids, NOT wire data.)
+    - action == 4 / result == 3..7 : selects a guild-relation list anchor (ally / war dialog entries).
+    - action == 1..5 / result == 1..2 : selects guild dialog/list anchors (join/leave/promote feedback).
+
+  HANDLER USE: primes the guild subsystem, clears the request-busy latch on entry, then branches on the
+  gate and the (action, result) pair. Latch-clear: YES.
+
+  UNKNOWNS to resolve with a guild state-change / diplomacy capture:
+    - the full Result (1..7) and Action (1..5) enum meanings;
+    - the layout of the 24-byte trailing state region per arm.
+
+  RELATED: reply to C2S 2/81 CmsgGuildDiplomacyDeclare (packets/2-81_guild_diplomacy_declare.yaml).
+  Supporting guild text rides 4/103; the generic action-error result is 4/81 SmsgActionErrorResult
+  (packets/4-81_guild_diplomacy_result.yaml -- corrected to SmsgActionErrorResult). NOTE: there is NO
+  4/81 guild-diplomacy reply; the verdict is HERE on 4/61.

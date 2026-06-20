@@ -1,5 +1,12 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED and HEADER-NOT-DECODED: see notes. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics and HEADER-NOT-DECODED: see notes. The 24-byte opaque context
+# prefix, the length-prefix-INCLUDES-NUL rule, and the 0 < strlen < 200 gate are control-flow CONFIRMED
+# from the contextual-chat send path. capture_verified: false.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   prefix width (24) + text framing ([u32 len][text], len = strlen+1 INCLUDES NUL) + gate (0<strlen<200):
+#   control-flow CONFIRMED. The 24-byte prefix's internal layout + the driving UI action: capture/debugger-pending.
+#   NUL-rule contrast: 2/83 INCLUDES the NUL (len = strlen+1); 2/7 EXCLUDES it (the lone exclude-NUL outlier).
 
 name: CmsgChatContextual
 opcode: 0x20053           # major 2 (GameAction), minor 83 -> (2 << 16) | 83
@@ -9,7 +16,7 @@ spec: packets/2-83_chat_contextual.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client chat with a 24-byte context header (sender/target/channel metadata), followed by a length-prefixed text body. Used for contextual chat routing distinct from the 2/7 whisper and 3/21 channel forms.
+summary: Client chat with a 24-byte opaque context prefix (sender/target/channel metadata), followed by a length-prefixed CP949 text body whose u32 length INCLUDES the terminating NUL (len = strlen+1). Gated to 0 < strlen < 200 before send. A single large panel drives it. Distinct from the 2/7 whisper (19-byte prefix, length EXCLUDES NUL) and the 3/21 channel form.
 
 # The 24-byte header is a context/metadata struct whose internal field breakdown was NOT decoded
 # this pass. It is modelled as one opaque fixed buffer so the engineer can frame the packet and the
@@ -20,14 +27,18 @@ fields:
 notes: |
   Static inference only; no capture available. VARIABLE-LENGTH packet.
 
-  Header = 24 bytes (0x00..0x17): a context struct carrying sender / target / channel metadata.
-  Its internal field breakdown was NOT decoded in this analysis pass and is modelled here as a
-  single opaque 24-byte buffer. The text body is gated to a length greater than 0 and less than 200
-  before send.
+  Header = 24 bytes (0x00..0x17): an opaque context struct carrying sender / target / channel metadata,
+  appended verbatim (raw byte-run) from the caller. Its internal field breakdown was NOT decoded this
+  pass and is modelled here as a single opaque 24-byte buffer (a single panel caller builds it).
 
-  BODY (after the 24-byte header): a length-prefixed text block:
+  GATE (control-flow CONFIRMED): the builder reads strlen(text) first; it aborts (sends nothing) if
+  strlen >= 200, and also aborts if strlen == 0 — so the effective gate is 0 < strlen < 200, and the
+  appended length (incl-NUL) lands in 1 < len < 200.
+
+  BODY (after the 24-byte prefix): a length-prefixed CP949 text block:
     [u32 textLength][text bytes]
-  where textLength = string length + 1 (includes the terminating NUL).
+  where textLength = strlen(text) + 1 (INCLUDES the terminating NUL). CONFIRMED. (Contrast 2/7 CmsgChat,
+  whose u32 length EXCLUDES the NUL — 2/7 is the lone exclude-NUL outlier among the C2S chat sends.)
 
   UNKNOWNS to resolve with a follow-up send-site analysis and a capture:
     - the full field layout of the 24-byte context header (sender id / target id / channel selector

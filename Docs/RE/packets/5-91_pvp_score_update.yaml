@@ -1,8 +1,17 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONFIRMED offsets/sizes/strides (control-flow; copy-out widths are literal). Field VALUE MEANINGS
-# largely opaque (the consumer emits scores from cross-object state, not directly from these bytes).
-# capture_verified: false.
-# spec: Docs/RE/packets/5-91_pvp_score_update.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 124-byte body, the 20-byte scalar
+#                 header offsets, and the 6-entry CP949 name array (primary @0x14 + 5 entries @0x25,
+#                 17-byte stride) are control-flow-confirmed; this body is NOT an opaque blit -- the
+#                 setter field-decodes it into the shared PvP-state object; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. A deep struct pass names the header scalars (sort/id/byte-A/byte-B/value-A/value-B)
+#              at the same offsets recorded here; the offsets are pinned, the numeric meanings stay
+#              capture-pending. Retained.
 
 name: SmsgPvpScoreUpdate
 opcode: 0x5005b           # major 5 (Push), minor 91 -> (5 << 16) | 91

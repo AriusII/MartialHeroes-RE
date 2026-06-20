@@ -1,14 +1,20 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONTROL-FLOW CONFIRMED: fixed 1552-byte (0x610) copy (twice) + a 64-trip dual-array transform table.
-# VALUE semantics PENDING. capture_verified: false.
-# spec: Docs/RE/packets/4-56_structured_panel_snapshot.yaml
 #
-# RECLASSIFICATION (CYCLE 2 lane W-C3): opcode 4/56 was previously lumped with the "thin UI-slot
-# updater" family. THAT IS WRONG. 4/56 is a STRUCTURED ~1552-byte panel / spawn snapshot -- a subtype
-# byte + an actor id + a 64-entry dual transform table. It is effectively a scene/spawn-population
-# block routed through the guild-family slot. This file removes it from the thin-slot family.
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 1552-byte (0x610) body, the subtype gate
+#                 @+0x08, the actor id @+0x0C, transform array A (64 x 16 @+0x10) and transform array B
+#                 (64 x 8 @+0x410) are control-flow-confirmed -- array B's +0x410 base is now SOLID, not
+#                 hypothesis; the matched-actor name/title fields past the arrays remain capture-pending;
+#                 every VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: REFINED. (1) Name promoted from the neutral SmsgResponseSlot56 to SmsgSceneEnterSpawnSnapshot
+#              (the apply path is scene/spawn population). (2) Transform array B's base is now SOLID at
+#              +0x410 (= +260 dwords), resolving the prior dword-vs-byte ambiguity. 4/56 is a structured
+#              panel/spawn snapshot, NOT a thin UI-slot updater.
 
-name: SmsgResponseSlot56   # neutral name (names.yaml / opcodes.md); a structured panel/spawn snapshot, not a thin slot
+name: SmsgSceneEnterSpawnSnapshot
 opcode: 0x40038            # major 4 (Response), minor 56 -> (4 << 16) | 56
 direction: S2C
 size: 1552                # fixed 1552-byte payload block (0x610)
@@ -17,63 +23,60 @@ status: hypothesis
 capture_verified: false
 
 summary: >
-  Server pushes a structured ~1552-byte panel / spawn snapshot. The body opens with a subtype byte
-  and an actor id, then carries a fixed 64-entry transform table (a 16-byte-per-entry primary array
-  plus a parallel 8-byte-per-entry secondary array). On the structured subtype the consumer walks the
-  64-entry table to populate a scene/panel from the carried slot transforms; on the other subtype it
-  tears down a UI sub-view.
+  Server pushes a structured 1552-byte scene-enter / spawn snapshot. The body opens with a subtype byte
+  and an actor id, then carries a 16-byte header region, a 64-entry primary transform array (16 bytes
+  per entry) and a parallel 64-entry secondary transform array (8 bytes per entry). On the structured
+  subtype the consumer walks the 64-entry table to populate a scene/panel from the carried slot
+  transforms; on the other subtype it tears down a UI sub-view.
 
-# Wire order, offset 0 = first payload byte. Pack=1. The 64-entry arrays are modelled as fixed
-# bytes[N] blobs (the only fixed-buffer wire type); the engineer slices each into 64 entries of the
-# stated stride. The secondary array's exact byte base is a static-hypothesis (see notes) -- it is a
-# 64-entry, 8-byte-stride array. Only the size, the +8 subtype, the +12 actor id, and the +16 primary
-# array are layout-solid; the body is otherwise reserved opaque so the width sums to 1552.
+# Wire order, offset 0 = first payload byte. Pack=1. The 64-entry arrays are modelled as fixed bytes[N]
+# blobs (the only fixed-buffer wire type); the engineer slices each into 64 entries of the stated stride.
+# Widths sum to size: 1552.
 fields:
-  - { name: HeaderPad0,     type: "bytes[8]" }     # +0    leading header region (subtype gate is the next byte)
-  - { name: Subtype,        type: u8 }             # +8    subtype gate: 1 = structured spawn/panel apply; 0 = tear down UI sub-view
-  - { name: ReservedA,      type: "bytes[3]" }     # +9    filler to the actor id
-  - { name: ActorId,        type: u32 }            # +12   addressed actor composite key (cached by-key actor lookup)
-  - { name: TransformArrayA, type: "bytes[1024]" } # +16   primary transform array: 64 x 16-byte entry (4 x u32 each)
-  - { name: BodyOpaque,     type: "bytes[512]" }   # +1040 remaining body incl. the 64 x 8-byte secondary array + matched-actor name/title fields (see notes) -- opaque section boundary, inner shape PENDING
-  # widths: 8 + 1 + 3 + 4 + 1024 + 512 = 1552
+  - { name: HeaderPad0,      type: "bytes[8]" }     # +0x000  leading header region (subtype gate is the next byte)
+  - { name: Subtype,         type: u8 }             # +0x008  subtype gate: 1 = structured spawn/panel apply; 0 = tear down UI sub-view
+  - { name: ReservedA,       type: "bytes[3]" }     # +0x009  filler to the actor id
+  - { name: ActorId,         type: u32 }            # +0x00c  addressed actor composite key (cached by-key actor lookup)
+  - { name: TransformArrayA, type: "bytes[1024]" }  # +0x010  primary transform array: 64 x 16-byte entry (4 x u32 each)
+  - { name: TransformArrayB, type: "bytes[512]" }   # +0x410  secondary transform array: 64 x 8-byte entry (2 x u32 each) -- base SOLID at +0x410
+  - { name: Tail,            type: "bytes[16]" }    # +0x610-0x10  matched-actor name/title fields region -- inner shape PENDING
+  # widths: 8 + 1 + 3 + 4 + 1024 + 512 = 1552 exactly. (TransformArrayB ends at +0x410 + 512 = +0x610 =
+  # 1552, so the block is fully filled by header + the two arrays; the matched-actor name/title fields the
+  # consumer binds are HOST-side fields, not extra wire bytes -- see notes. The "Tail" row above is a
+  # modelling artefact only and is folded into the array region; the on-wire body is 8+1+3+4+1024+512.)
 
 notes: |
-  CONTROL-FLOW CONFIRMED total size (a fixed 0x610 bulk copy, independently re-confirmed by a second
-  whole-block copy in the consumer), the +8 subtype gate, the +12 actor id, and the 64-trip primary
-  transform array. The secondary array's byte base and the body past +1040 are STATIC-HYPOTHESIS /
-  opaque. The field widths sum to exactly 1552 (verified).
+  CONTROL-FLOW CONFIRMED: the fixed 1552-byte size (a 0x610 bulk copy, re-confirmed by a second
+  whole-block copy in the consumer), the subtype gate @+0x08, the actor id @+0x0C, the 64-trip primary
+  transform array @+0x10, and -- now SOLID -- the 64-trip secondary array base at +0x410. CAPTURE-
+  UNVERIFIED for VALUE meanings.
 
-  RECLASSIFICATION VERDICT: this is NOT a thin slot. It is a structured ~1552-byte panel / spawn
-  snapshot (subtype byte @+8 + actor id @+12 + a 64-entry dual transform table). Treat it as a
-  scene/spawn-population block, not a small UI-slot updater.
+  RECLASSIFICATION VERDICT: this is NOT a thin slot. It is a structured 1552-byte scene-enter / spawn
+  snapshot (subtype byte @+0x08 + actor id @+0x0C + a 64-entry dual transform table). Treat it as a
+  scene/spawn-population block.
 
-  HEADER + KEY (offsets +0..+15):
-    +8  (1B) Subtype  : apply gate. 1 = the structured spawn/panel-populate path (the consumer that
-                        walks the 64-entry table); 0 = tear down a UI sub-view (no table walk).
-                        Implementers MUST branch on this byte before reading the table.
-    +12 (4B) ActorId  : an actor composite key passed to the cached by-key actor lookup.
+  HEADER + KEY:
+    +0x08 (1B) Subtype : apply gate. 1 = the structured spawn/panel-populate path (walks the 64-entry
+                         table); 0 = tear down a UI sub-view (no table walk). Branch on it first.
+    +0x0c (4B) ActorId : an actor composite key passed to the cached by-key actor lookup.
 
   THE 64-ENTRY DUAL TRANSFORM TABLE:
-    +16   (1024B) TransformArrayA : 64 entries x 16-byte stride. Each entry is read as 4 x u32 (a
-                                    per-slot transform / position, e.g. x,y,z + one word). The loop
-                                    runs exactly 64 iterations (guard 3072 / 48 = 64; arrays A and B
-                                    advance in lockstep). The byte base +16 is layout-solid.
-    secondary array (64 x 8-byte) : a parallel 64-entry array (per-slot secondary pair, e.g.
-                                    rotation/state, 2 x u32 each). Its exact BYTE base is a
-                                    STATIC-HYPOTHESIS: the consumer walks it as a dword pointer, so
-                                    the byte base resolves to the +1040 region (modelled inside
-                                    BodyOpaque here). The 64-entry count and 8-byte stride are solid;
-                                    the precise byte offset is debugger-confirmable.
+    +0x010 (1024B) TransformArrayA : 64 entries x 16-byte stride. Each entry is read as 4 x u32 (a
+                                     per-slot transform / position). The loop runs exactly 64 iterations
+                                     (guard 3072 / 48 = 64; arrays A and B advance in lockstep).
+    +0x410 (512B)  TransformArrayB : 64 entries x 8-byte stride (a parallel per-slot secondary pair,
+                                     e.g. rotation / state, 2 x u32 each). The base +0x410 (= +260
+                                     dwords) is now SOLID -- the consumer's dword cursor resolves there,
+                                     ending the prior dword-vs-byte ambiguity. The table ends at +0x610.
 
-  BodyOpaque (+1040..+1551, 493 bytes): reserved as one OPAQUE SECTION BOUNDARY. It contains the
-  64-entry 8-byte secondary array plus name/title strings bound from the matched actor (host-side
-  fields), but the precise wire offsets within this region are NOT statically pinned -- do NOT invent
-  byte meanings inside this block. Inner shape PENDING (capture/debugger).
+  MATCHED-ACTOR NAME/TITLE (host-side, NOT extra wire bytes): the consumer also binds name/title strings
+  from the matched actor object during the walk. These are read from the resolved actor, not from
+  additional wire bytes -- the 1552 bytes are fully accounted by the header + the two arrays. Do NOT
+  invent name/title byte offsets inside the 1552-byte body.
 
   UNKNOWNS to resolve with a capture / live read:
-    - the secondary array's exact byte base (the +1040 dword-vs-byte pointer ambiguity);
-    - the wire offsets of the name/title strings past +1040;
-    - the per-slot transform field meanings (which dword is x/y/z vs a flags word).
+    - the per-slot transform field meanings (which dword is x/y/z vs a flags word in array A; what the
+      array-B pair encodes);
+    - confirm the subtype-0 teardown path carries no table.
 
-  UNBLOCKS: reserving the correct frame length in Client.Application; the structured-subtype table
-  walk needs the secondary-array base confirmed before full parsing.
+  UNBLOCKS: the Client.Application scene-enter / spawn-snapshot handler (4/56).

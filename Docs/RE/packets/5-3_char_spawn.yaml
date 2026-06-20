@@ -1,45 +1,64 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 908-byte body, the 8-byte prefix /
+#                 880-byte SpawnDescriptor @ frame +0x08 / 20-byte trailer split, and world_x/world_z at
+#                 WIRE +0x54 / +0x58 are control-flow-confirmed; descriptor interior member meanings are
+#                 a struct-cartographer task; VALUE semantics capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: RESOLVED the prior "+0x44/+0x48 vs +0x4c/+0x50" world-coordinate ambiguity. Within the
+#              SpawnDescriptor, world_x is at descriptor +0x4C and world_z at descriptor +0x50; with the
+#              descriptor at frame +0x08 they land at WIRE +0x54 / +0x58. CONFIRMED.
 
 name: SmsgCharSpawn
 opcode: 0x50003            # major 5 (Push), minor 3 -> (5 << 16) | 3
 direction: S2C
-size: 908                 # fixed 908-byte payload block
+size: 908                 # fixed 908-byte payload block (0x38C) = 8B prefix + 880B descriptor + 20B trailer
 spec: packets/5-3_char_spawn.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server spawns an actor into the world; the payload carries an embedded SpawnDescriptor record.
+summary: Server spawns an actor into the world; the payload carries an 8-byte prefix, an embedded 880-byte SpawnDescriptor record (at frame +0x08), and a 20-byte trailer.
 
-# Top-level layout. The 880-byte SpawnDescriptor is modelled as one fixed buffer here; its
-# internal fields are documented in Docs/RE/structs/actor.md (the SpawnDescriptor table).
+# Top-level layout. The 880-byte SpawnDescriptor is modelled as one fixed buffer here; its internal
+# member map is documented in structs/spawn_descriptor.md / structs/actor.md. Widths sum to size: 908.
 fields:
-  - { name: Sort,             type: u32 }        # 0x000  actor category (1=PC, 2=Mob/NPC); low byte is the real sort
-  - { name: ActorId,          type: u32 }        # 0x004  actor id
-  - { name: SpawnDescriptor,  type: "bytes[880]" } # 0x008  embedded SpawnDescriptor (0x370 bytes); see structs/actor.md
-  - { name: Trailer,          type: "bytes[20]" }  # 0x378  trailer; purpose unconfirmed (copied, not fully consumed)
+  - { name: Sort,            type: u32 }          # 0x000  actor category (1=PC, 2=Mob/NPC); low byte is the real sort
+  - { name: ActorId,         type: u32 }          # 0x004  actor id
+  - { name: SpawnDescriptor, type: "bytes[880]" } # 0x008  embedded 880-byte (0x370) SpawnDescriptor; see structs/spawn_descriptor.md
+  - { name: Trailer,         type: "bytes[20]" }  # 0x37c  trailer; visual/combat flag bytes (copied, partly consumed)
 
 notes: |
-  Static inference only; no capture available. Total = 908 bytes (matches the handler's single
-  0x38C-byte read). The handler removes any existing actor with the same (sort,id) key, builds a
-  new actor from the descriptor, inserts it, and sets its world position.
+  CONTROL-FLOW CONFIRMED: the fixed 908-byte body (single 0x38C read), the 8 + 880 + 20 split, and the
+  world-coordinate wire offsets. CAPTURE-UNVERIFIED for VALUE semantics. The handler removes any
+  existing actor with the same (Sort, ActorId) key, builds a new actor from the descriptor, inserts it,
+  and seeds its world position.
 
-  SpawnDescriptor is a large game struct; the network-protocol-engineer should treat it as an
-  880-byte block on the wire and decode its sub-fields per Docs/RE/structs/actor.md. The
-  spawn-relevant sub-fields (descriptor-relative offsets) are:
-    +0x00  asciiz   character/mob name (UTF-8, fixed buffer; up to 16 chars + NUL)
-    +0x24  int64    current xp
-    +0x34  u16      model id (for sort==2 mobs, selects the mesh)
-    +0x3a  u16      level  (UNVERIFIED exact byte boundary; see structs/actor.md caveat)
-    +0x3c  u32      current hp
-    +0x40  u32      current mp
-    +0x44  u32      current stamina
-    +0x4c  f32      world X  (CONFIRMED float; extracted into the actor's world position)
-    +0x50  f32      world Z  (CONFIRMED float; world Y forced to 0 on spawn)
-    +0x74  u16      server class id (martial-arts style)
-    +0x7c  u8       race / skin variant
-  UNKNOWN / TO RESOLVE WITH A CAPTURE:
-    - the analyst note records two views of the world coordinate offset (descriptor +0x44/+0x48
-      vs +0x4c/+0x50) from different base points; these MUST be reconciled against a capture
-      before an engineer hard-codes a position offset.
-    - the 20-byte trailer's contents.
+  PREFIX (8 bytes, 0x000..0x007): Sort u32 @0x000 (low byte is the real sort), ActorId u32 @0x004.
+
+  SPAWNDESCRIPTOR (880 bytes, frame 0x008..0x387): the same descriptor record shared with 5/1
+  SmsgActorSpawnExtended and the 4/4 area-entity snapshot records, and the 3/x character-list slot. Its
+  full member map is a struct-cartographer task (structs/spawn_descriptor.md). The promotable
+  spawn-relevant landmark this packet relies on:
+    - WORLD POSITION: world_x is at descriptor +0x4C and world_z at descriptor +0x50. With the
+      descriptor at frame +0x08, world_x lands at WIRE +0x54 and world_z at WIRE +0x58 (CONFIRMED). The
+      handler reads these floats to seed the live world position (world Y forced to 0 on spawn). This
+      resolves the prior "+0x44/+0x48 vs +0x4c/+0x50" ambiguity in favour of descriptor +0x4C/+0x50.
+    Other descriptor landmarks (name region, model id, vitals, class/race) belong to
+    structs/spawn_descriptor.md -- do not duplicate their interior offsets here.
+
+  TRAILER (20 bytes, frame 0x37c..0x38f): visual / combat flag bytes consumed individually toward the
+  trailer tail. Not all bytes decoded.
+
+  NOTE (per-opcode wire offset): the world-coordinate WIRE offset is +0x54/+0x58 for THIS opcode (8-byte
+  prefix) and for the 4/4 tag-1/2/3 records (also 8-byte prefix); it is +0x58/+0x5C for 5/1
+  SmsgActorSpawnExtended, whose 12-byte prefix shifts the descriptor. Do not apply a single rule across
+  all three.
+
+  UNKNOWNS to resolve with a capture / struct pass: the descriptor's full member map and the 20-byte
+  trailer's per-byte meaning.
+
+  RELATED: 5/1 SmsgActorSpawnExtended (packets/5-1_actor_spawn_extended.yaml) carries the same descriptor
+  with a 12-byte prefix; 4/4 carries it inside its tag-1/2/3 records.

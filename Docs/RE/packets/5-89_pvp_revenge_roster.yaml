@@ -1,7 +1,17 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONFIRMED offsets/sizes/strides (control-flow; copy-out widths are literal). Field VALUE MEANINGS
-# are likely (named from the binary's own debug-format strings) or opaque. capture_verified: false.
-# spec: Docs/RE/packets/5-89_pvp_revenge_roster.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 188-byte body, and the full field
+#                 decode -- sort@0x00 / id@0x04 / team@0x08 / team_guild@0x09 / 10x17-byte CP949 name
+#                 array @0x0A / default-property bytes @0xB4 / random-property bytes @0xB6 -- are
+#                 control-flow-confirmed; this body is NOT an opaque blit; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. A deep struct pass confirmed the five PvP setters (5/89/90/91/92/94) field-decode
+#              their wire blocks into a shared PvP-state object -- they are NOT opaque-forward blits.
+#              This file's per-field layout already reflects that and is retained.
 
 name: SmsgPvpRevengeRoster
 opcode: 0x50059           # major 5 (Push), minor 89 -> (5 << 16) | 89

@@ -5,7 +5,8 @@
 >   byte-copy; the char-select per-slot read uses a 0x370 field length; the preview lineup uses an
 >   880-byte stride; the 5-slot scratch is zero-cleared as 5×0x370 = 0x1130 bytes), the `name`
 >   char[17] layout, the `current_xp` int64, the model-class inputs (`appearance_variant` @ +0x2C,
->   `internal_class` @ +0x34), the world coordinate floats (+0x4C / +0x50), the `equip_ref_table`
+>   `internal_class` @ +0x34), the world coordinate floats (+0x4C / +0x50), the **HP qword** (+0x3C /
+>   +0x40 = ONE 64-bit HP, see the HP-qword note below), the `equip_ref_table`
 >   (20×16 @ +0x58, each leading dword = a worn-item id), and `motion_state_byte` (+0x2EE) are
 >   **control-flow confirmed**.
 > - **static-hypothesis** — single-site inferences (`level` as a clean u16 @ +0x3A — confirmed only
@@ -14,12 +15,15 @@
 > - **capture/debugger-pending** — every *wire VALUE meaning*; the `level`/state bytes at +0x38/+0x39
 >   (written by the runtime-table-dispatched 5/53 vitals handler, null at static time); the
 >   `scenario_state` dword (+0x48); and the `mob_pair_partner_id` (+0x354), not re-witnessed.
-> - **ida_reverified:** 2026-06-16  **ida_anchor:** 263bd994  **evidence:** [static-ida]
-> - **conflicts:** no hard conflicts. Two soft divergences carried as open items — (a) the `level`
->   byte boundary (clean u16 @ +0x3A for display vs. straddling +0x38/+0x39 on the wire), and
->   (b) the **equipment view**: the IDB exercised the **20×16 id table at SD +0x58**; the older
->   "8-slot 16-byte array at SD +0x54 (4/149 path)" was **not** re-confronted and remains
->   unreconciled.
+> - **ida_reverified:** 2026-06-20  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+>   **layout/offsets:** confirmed · **value-semantics:** capture/debugger-pending.
+> - **conflicts:** no hard conflicts. **One hard correction applied this pass (binary wins):** SD
+>   +0x3C/+0x40 are ONE 64-bit HP qword — what an earlier draft labelled `current_mp` @ SD +0x40 is
+>   the **HP-HIGH dword**, not MP (the MP/stamina-class vital is the separate dword at SD +0x44). See
+>   the HP-qword note. Two soft divergences carried as open items — (a) the `level` byte boundary
+>   (clean u16 @ +0x3A for display vs. straddling +0x38/+0x39 on the wire), and (b) the **equipment
+>   view**: the IDB exercised the **20×16 id table at SD +0x58**; the older "8-slot 16-byte array at
+>   SD +0x54 (4/149 path)" was **not** re-confronted and remains unreconciled.
 
 Neutral, offset-model extension of `actor.md`'s SpawnDescriptor section. Promoted from a dirty-room
 note; rewritten, no decompiler identifiers, no binary addresses. This document is the design input
@@ -86,9 +90,8 @@ copy into the live Actor at +0x74. The recovered wire shapes:
 | +0x38     | 1    | uint8    | `level_state`         | capture-pending | A level/state byte written by the runtime-table-dispatched 5/53 vitals handler (not statically reachable). Its relationship to the `level` u16 below is unresolved — `level` may straddle this byte. See caveat. |
 | +0x39     | 1    | uint8    | `secondary_level`     | capture-pending | Secondary level/state byte, written by the same 5/53 path. |
 | +0x3A     | 2    | uint16   | `level`               | LIKELY (display) | Character level (u16). **New IDB evidence:** the char-select **display** path reads a clean u16 at +0x3A and prints it as the level number — strongly supporting a clean u16 here for the display read. The *wire* boundary vs. +0x38/+0x39 is still capture-pending (the 5/53 writes are runtime-dispatched). See caveat. |
-| +0x3C     | 4    | uint32   | `current_hp`          | CONFIRMED  | Current hit points. Written by the 5/53 vitals path. |
-| +0x40     | 4    | uint32   | `current_mp`          | CONFIRMED  | Current mana / ki. |
-| +0x44     | 4    | uint32   | `current_stamina`     | CONFIRMED  | Current stamina. |
+| +0x3C     | 8    | int64    | `current_hp` (qword)  | CONFIRMED  | **Current hit points — a single 64-bit HP qword spanning +0x3C..+0x43.** +0x3C is the HP-low dword and +0x40 is the **HP-HIGH dword** (NOT MP — see the HP-qword note). Written and clamped as one qword by the 5/53 vitals path. |
+| +0x44     | 4    | uint32   | `vital_b`             | CONFIRMED  | The MP / stamina-class vital — the **separate** dword after the HP qword (lands at Actor +0xB8, clamped on its own). MP-vs-stamina meaning `[capture/debugger-pending]`. (Earlier drafts mislabelled +0x40 as `current_mp` and this as `current_stamina`; corrected — the qword pushes both vitals down one dword.) |
 | +0x48     | 4    | uint32   | `scenario_state`      | capture-pending | Four bytes immediately before the world coordinates; present in the wire data, meaning unverified. Not re-touched this pass. |
 | +0x4C     | 4    | float    | `world_x`             | CONFIRMED  | World X spawn origin (the spawn handler seeds the live position from this float). **Doubles as a move-speed override** for the special sorts 15/17 via a union overlay (the factory reuses Actor +0xC0 = SD +0x4C). |
 | +0x50     | 4    | float    | `world_z`             | CONFIRMED  | World Z spawn origin. World Y is forced to 0.0 on spawn. |
@@ -110,6 +113,21 @@ copy into the live Actor at +0x74. The recovered wire shapes:
 > coordinate floats and a 4-byte tail at +0x54). The older +0x44/+0x48 coordinate view from a
 > different base point is superseded.
 
+### Per-opcode WIRE offset of `world_x` / `world_z` (do NOT use one rule for all three)
+
+`world_x` @ SD +0x4C and `world_z` @ SD +0x50 are **descriptor-relative** and CONFIRMED. But the
+descriptor sits at a per-handler **prefix offset** inside the frame, so the on-the-wire offset of the
+world floats differs per opcode — there is **no single "+0x54/+0x58" rule** for all three:
+
+| Opcode | Frame size | Prefix | Descriptor base in frame | `world_x` WIRE offset | `world_z` WIRE offset |
+|--------|-----------|--------|--------------------------|-----------------------|-----------------------|
+| 5/3 SmsgCharSpawn | 908 (0x38C) | 8 (sort u32 @+0, id u32 @+4) | frame +0x08 | **+0x54** | **+0x58** |
+| 4/4 tag-1/2/3 record | 892 (0x37C) | 8 (id u32 @+0, kind/field bytes @+4/+5, 2 pad) | record +0x08 | **+0x54** | **+0x58** |
+| 5/1 SmsgActorSpawnExtended | 912 (0x390) | **12** (sort @+0, id @+4, title/relation bytes @+8/+9/+0xA, pad) | frame +0x0C | **+0x58** | **+0x5C** |
+
+The 4-byte-longer 5/1 prefix shifts its world floats to wire **+0x58 / +0x5C**. Promote the WIRE
+offset **per opcode** into the packet specs; promote SD +0x4C / +0x50 into this file.
+
 ### Caveat — `level` byte boundary (soft conflict, carried)
 
 Two read paths disagree on whether `level` is a clean u16 at +0x3A or a value straddling the state
@@ -122,6 +140,25 @@ character before hard-coding a 16-bit `level`. Until then treat +0x38..+0x3B as 
 level/state group on the wire.
 
 ---
+
+### HP-qword correction (hard layout fact — binary wins)
+
+The live HP is a **single 64-bit qword**, not two independent dwords:
+
+- SD **+0x3C** = HP-LOW dword, SD **+0x40** = HP-HIGH dword. Together they are one signed 64-bit HP
+  value spanning SD +0x3C .. +0x43 (Actor +0xB0 .. +0xB7 after the +0x74 copy).
+- The 5/53 vitals path **clamps the qword at the live-actor mirror**: the cap compares a 64-bit max
+  against the qword at Actor +0xB0 and, on overflow, sign-clamps both the low and high dwords to 0
+  together — proof the +0x40 dword is the HP upper half, not an independent value.
+- What an earlier draft labelled `current_mp` @ SD +0x40 is therefore the **HP-HIGH dword**. The
+  MP/stamina-class vital is the **separate** dword at SD **+0x44** (Actor +0xB8), clamped on its own.
+- Consistent with the 5/32 LevelUp packing of HP/MP into an i64.
+
+> **Note for the network / domain engineer.** Decode HP as one `int64` at SD +0x3C; do **not** split
+> it into `current_hp` (u32) + `current_mp` (u32). The next vital (MP / stamina) is the dword at SD
+> +0x44. 5/53 delivers these vitals through its OWN flat 32-byte body (HP-low @ body +0x10, HP-high @
+> body +0x14, VitalB @ body +0x18) — see `structs/net_packet_bodies.md` / the 5/53 packet spec; the
+> Actor +0xB0/+0xB4/+0xB8 destinations are runtime mirrors, not wire fields.
 
 ## Equipment table — two unreconciled views (soft conflict, carried)
 
@@ -196,6 +233,43 @@ Mostly unmapped. One confirmed sub-field:
 
 ---
 
+## Wire-descriptor vs runtime-Actor offsets — the DO-NOT-PROMOTE-AS-WIRE register
+
+Three coordinate spaces recur in the spawn / vitals family and **must stay separated** so a
+constructed-live-Actor offset is never stamped into a `packets/*.yaml` as if it were an on-the-wire
+field:
+
+1. **WIRE-frame offset** — an offset into the bytes a handler reads off the channel. Belongs in
+   `packets/*.yaml`.
+2. **SpawnDescriptor (SD) offset** — an offset into this 880-byte descriptor (the wire-frame's inner
+   body). Belongs in this file.
+3. **Runtime-Actor offset** — an offset into the long-lived Actor object the spawn factory builds.
+   The factory copies the 880-byte descriptor to **Actor +0x74**, so for descriptor fields
+   `actor_offset = SD_offset + 0x74`. These offsets **never appear on the wire** and must be marked
+   **DO-NOT-PROMOTE-AS-WIRE** (they belong in `actor.md`, not in a packet spec).
+
+> **The single hard rule.** `actor_offset = SD_offset + 0x74`. Any time a handler's write destination
+> sits in the Actor window **0x74 .. 0x3E3**, it numerically EQUALS a descriptor offset + 0x74 — that
+> coincidence is **the trap** that makes a runtime offset look like a wire field. Only the
+> descriptor-carrying pushes (4/4, 5/1, 5/3, and the respawn / game-state-tick descriptor form)
+> actually put the 880-byte block on the wire. The **flat-body pushes (4/109, 5/53, 5/147, 5/121,
+> 5/136) carry their fields in their OWN small bodies, not in a SpawnDescriptor** — their write
+> destinations are runtime-Actor offsets only.
+
+| Runtime / descriptor offset | Belongs to | Why it is NOT a wire field |
+|-----------------------------|-----------|----------------------------|
+| Actor **+0xC0 / +0xC4** | actor.md (live world-pos mirror) | Live copy of SD `world_x` / `world_z` (+0x4C / +0x50) after the +0x74 descriptor copy; the handler then overwrites them with the live interpolated position. The WIRE world floats are at the per-opcode offsets tabled above. |
+| Actor **+0x379** (4/109 dest) | actor.md (live local player) | 4/109's ONLY wire field is a **flag byte @ its 12-byte body +0x08**; it writes that byte to Actor +0x379 = SD +0x305 + 0x74. (4/109 delivers via its own flat body, not a descriptor; the byte's spawn-time descriptor position SD +0x305 is a *descriptor* offset, also not a 4/109 wire field.) |
+| Actor **+0xB0 / +0xB4 / +0xB8** (5/53 dest) | actor.md | 5/53 delivers vitals via its OWN flat 32-byte body (HP-low @ body +0x10, HP-high @ body +0x14, VitalB @ body +0x18). +0xB0/+0xB4 is the **HP qword** (the high dword is the upper half of HP, NOT MP); +0xB8 is the next vital. These Actor offsets are runtime mirrors of SD +0x3C (HP qword) / +0x44 (vital). |
+| Actor **+0x3A0** (5/147 dest) | actor.md | 5/147's combat flag in the live actor; `= SD +0x32C + 0x74`. The wire field is the **flag dword @ body +0x04** (8-byte body). Do NOT label SD +0x32C as the 5/147 wire field — the SD offset and the runtime offset are the same byte in two coordinate spaces. |
+| Actor **+0x73C** (5/121 dest) | actor.md | Pure runtime property field, **outside** the descriptor window (0x74..0x3E3), so unambiguously never on the wire and never in the descriptor. 5/121's wire field is `PropertyValue @ body +0x04` (8-byte body). |
+| Actor **+0x588 / +0x584** (5/136 dest) | actor.md | Runtime mixer / timer fields, outside the descriptor window. 5/136's wire fields are Sort @+0x00, ActorId @+0x04, TimedValue @+0x08, StateByte @+0x0C (16-byte body); the +0x588/+0x584 destinations are runtime side effects. |
+
+> All offsets / destinations above are **[confirmed]** (static-ida control flow); every wire-byte
+> VALUE meaning stays **[capture/debugger-pending]**.
+
+---
+
 ## Open questions
 
 - **`level` byte boundary** (+0x38/+0x39 vs +0x3A) — display path reads a clean u16 @ +0x3A
@@ -214,6 +288,16 @@ Mostly unmapped. One confirmed sub-field:
 - **Wire prefix/suffix order** of the 5/3 (908B) and 5/1 (912B) frames around the inner 0x370
   descriptor — the field order of the leading prefix and the trailing per-Actor bytes is
   capture-pending.
+- **HP qword — RESOLVED (layout).** SD +0x3C/+0x40 is ONE 64-bit HP; +0x40 is the HP-HIGH dword, not
+  MP; the MP/stamina vital is the separate dword at SD +0x44. Confirmed via the qword clamp on the
+  live-actor mirror (Actor +0xB0). The MP-vs-stamina meaning of `vital_b` stays [capture-pending].
+- **`world_x` / `world_z` WIRE offset — RESOLVED per opcode.** SD +0x4C/+0x50 (descriptor) ⇒ WIRE
+  +0x54/+0x58 for 5/3 & 4/4 (8-byte prefix) but WIRE +0x58/+0x5C for 5/1 (12-byte prefix). Do not use
+  one rule for all three.
+- **4/109 / 5/147 SD-vs-Actor rebasing — RESOLVED.** 4/109 writes Actor +0x379 (= SD +0x305 + 0x74),
+  wire field = flag byte @ body +0x08. 5/147 writes Actor +0x3A0 (= SD +0x32C + 0x74), wire field =
+  flag dword @ body +0x04. Neither SD offset is the respective wire field — see the
+  DO-NOT-PROMOTE-AS-WIRE register above.
 - All offsets are static control-flow inferences; no live capture was available to confirm any
   *wire VALUE meaning* — those stay capture/debugger-pending throughout.
 </content>

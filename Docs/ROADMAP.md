@@ -7,6 +7,86 @@
 
 ---
 
+# CYCLE 4 — Netcode Deep-Cartography & Contracts (DTO-grade) (launched 2026-06-20)
+
+**Mandate (maintainer):** "Très grosse campagne Networking/Netcode, EXCLUSIVEMENT IDA statique :
+contrats Client/Serveur (DTO Req/Resp), Dispatcher Major/Minor, Handlers, nommage précis, le moins
+de doute possible. 5 Majors (1/2/3 petits d'abord, 4/5 = Game/World server, plus gros). Fire&Forget
+vs requête/réponse. Pas de captures, pas de debugger. Tout dans RE/."
+**Reframed:** Porter le netcode de l'état squelette (CYCLE 3) à l'état zéro-doute DTO-grade — chaque
+`(major,minor)` re-confronté au binaire puis approfondi en table-de-champs complète + classe de
+contrat + call-graph aval + nom canonique ; promu aux specs + IDB intégralement lisible. La
+sémantique-valeur d'un octet reste `capture/debugger-pending` (jamais fabriquée).
+
+**Master deliverable:** `Docs/RE/specs/net_contracts.md` — le master DTO Req↔Resp (5 majors,
+F&F/ReqResp classifié), appuyé par `opcodes.md` / `handlers.md` / `network_dispatch.md` /
+`packets/*.yaml` / `structs/net_*.md`.
+**Out of scope (deferred):** code C#/Godot ; serveur Lobby/Login séparé (socket port 10000) ;
+debugger/captures ; ré-RE crypto/LZ4 ; sémantique-valeur on-wire.
+**Command structure:** Tier-1 + Tier-2 captain `re-orchestrator` (W0-W5, P, L). R + C Tier-1-direct.
+
+## Evidence baseline (recorded at cycle start, 2026-06-20)
+- **IDA MCP:** UP · IDB `D:\IDAPro\doida.exe.i64` · **SHA-256 `263bd994…fd8ee` ✓** · imagebase
+  `0x400000` · 25 792 fonctions (5 037 nommées / 1 901 lib / 18 854 `sub_`) · hexrays ready.
+- **Build/Tests/VFS:** N-A — cycle **RE-only** (aucun code C# touché).
+- **git:** branche `major-campaign` (changements préexistants non commités — commits CIBLÉS only en C).
+- **Specs going in (build ON):** net_contracts, network_dispatch, handlers, opcodes, packets/*.yaml
+  (205), structs/{net_handler,net_client,secure_context,net_packet_bodies}, crypto.
+- **Gaps this cycle closes:** ~200 handlers/builders sans DTO champ-par-champ ni call-graph aval ;
+  ~300 fns netcode non lisibles IDB ; `3/23` TBD ; collision `2/153` ; `1/7`·`2/151`·`4/48`
+  UNVERIFIED ; `names.yaml` sync owed.
+
+## Phase 4-0 — PREFLIGHT (Tier-1) — status: **COMPLETE**
+- [x] IDA MCP UP, DB open, anchor **263bd994** re-confirmé (SHA match) ✓
+- [x] `Docs/RE/_dirty/netcode_deep/{spine,m0,m1,m2,m3,m4,m5,oq}/` créés + gitignore-couverts ✓
+- [x] ROADMAP CYCLE 4 enregistré ✓ · structure de commandement décidée
+
+## Phase 4-W0 — SPINE re-confrontation (dirty, 6 lanes) — driven by re-orchestrator — status: **COMPLETE**
+Output: `spine/*.md` (6 files). Verdict: network_dispatch.md substantially faithful; 4 small corrections +
+count refinements (Response 102 stores / Push 65 ; **105 builders / 104 unique opcodes**, 2/52 collision).
+Send-census COMPLETE: 105 sites (major-2=96, major-1=8, major-3=1), 100% pinned → seeds W2.
+
+## Phase 4-W1 — MAJORS 0/1/3 (priority #1, dirty, 5 lanes) — driven by re-orchestrator — status: **COMPLETE**
+Output: `{m0,m1,m3}/*.md` (5 files). All DTO-mapped. 3/4↔3/7 anchor VERIFIED; 3/23=SmsgCharStatusBytesByName
+(by-name); 1/7=CmsgSelectCharacterSlot (delete-mode REFUTED). 5 binary-won divergences captured. CONFLICT
+flagged: 1/2 CmsgLobbyPing shares the NetClient convergence (arbitration queue). See _TIER1_LEDGER.md.
+
+## Phase 4-W2 — MAJOR 2 GameAction C2S (dirty, 6 lanes) — driven by re-orchestrator — status: **COMPLETE**
+96/96 builders DTO-mapped (m2/*.md, 6 files). Tally: ~15 ReqResp / ~7 async / ~50 pending / ~20 F&F / 2 reactive.
+2/153=CmsgProductConfirm (PetSummon refuted) · 2/151 resolved (0→3/8, 200→4/113/114/115) · 2/52 two-builder
+split · 2/81 reply re-pointed to slot 61 · 5/73=SmsgQuestComplete reaffirmed. See _TIER1_LEDGER.md.
+## Phase 4-W3 — MAJOR 4 Response S2C ~99 handlers (dirty, 10 lanes) — driven by re-orchestrator — status: **COMPLETE**
+100/100 installed slots + 4/500 + 4/50000 DTO-mapped (m4/*.md). 4/81=SmsgActionErrorResult; guild-diplomacy
+verdict=4/61 (52B), 2/81→4/61, drop 4/81=SmsgGuildDiplomacyResult. 4/4 892=8+880+4. 4/48 overrun REFUTED
+(236=12+8×28). 4/56/4/71 structured. 4/1 clears enter-game latch (not 3/5). ~20 size corrections.
+## Phase 4-W4 — MAJOR 5 Push S2C 65 handlers (dirty, 7 lanes) — driven by re-orchestrator — status: **COMPLETE**
+65/65 DTO-mapped (m5/*.md). 5/73=SmsgQuestComplete CONFIRMED (GuildWarInfoUpdate refuted). Tally ~10 async /
+1 reactive(5/146) / ~50 pure Push. 11 divergences (5/33 stride, 5/53 HP-i64, 5/146 reply=req_id+state-global,
+5/68 10-record, 5/7 NUL, 5/93=16). See m5/_LEDGER.md.
+## Phase 4-W5 — Open-questions + body-structs + completeness critic (dirty, 3 lanes) — driven by re-orchestrator — status: **COMPLETE**
+oq/*.md (3 files). 100% DTO-covered, 0 structural gaps, 0 contradictions. 42-item capture/debugger-pending
+register. Final tally: F&F≈22 / ReqResp≈24 / async-pending≈68 / pure-Push≈62 / reactive 4 / specials 2.
+## Phase 4-P — PROMOTION (spec-authors, 8 files) — driven by re-orchestrator — status: **COMPLETE**
+8 committed specs rewritten (network_dispatch, opcodes, handlers, net_contracts[master,LAST], packets 0/1/3 + 2 +
+4/5, structs). packets/*.yaml: 14 created / 33 updated. All binary-won corrections applied; firewall GREEN
+(0 VA / 0 Hex-Rays). 100% DTO coverage; 42-item capture/debugger-pending appendix in net_contracts.md.
+## Phase 4-L — IDB LEGIBILITY (ida-toolsmith) — driven by re-orchestrator — status: **COMPLETE**
+Netcode was already ~99% named (338 fns from prior cycles) → correction+comment+type pass: 5 renames + 101
+neutral comments + 4 struct types + NetConnStateCode enum neutralized (no invented {201/202/203/232} semantics).
+idb_save OK; names staged to _dirty/netcode_deep/applied/cycle4_idb_names.md.
+## Phase 4-R — REVIEW + GATES (firewall · zero-gap · over-claim audit) — status: **COMPLETE — PASS**
+Tier-1 firewall scan PASS (0 VA / 0 Hex-Rays in netcode specs) + plan-reviewer gate PASS-WITH-NITS; all nits
+fixed (2 stale yaml links re-pointed, coverage note CLOSED, 4/56 role sentence trimmed).
+## Phase 4-C — CONSOLIDATION — status: **COMPLETE**
+journal.md CYCLE 4 entry appended; names.yaml synced (SmsgResponseSlot56/71/74 renamed + 3/23 corrected);
+ROADMAP/ledger statuses closed; memory updated. **Commit ONLY on maintainer request** (targeted paths).
+
+> **CYCLE 4 CLOSED — 2026-06-20.** Netcode is 100% DTO-covered at the structure level (handshake + 5 majors),
+> firewall-clean, IDB-legible. Residual = 42-item capture/debugger-pending VALUE register (future ?ext=dbg
+> cycle) + the C1 lobby-ping arbitration. Uncommitted on branch major-campaign.
+
+---
+
 # CYCLE 1 — Runtime Inter-Format Assembly Graph (RE → core 03-04 → Godot 05 World un-freeze) (launched 2026-06-19)
 
 **Mandate (maintainer):** "Do a LOT of IDA static work to understand how the formats INSIDE

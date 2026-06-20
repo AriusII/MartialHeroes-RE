@@ -1,12 +1,17 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 8-byte body (two adjacent u32 words) is control-flow
+# CONFIRMED. capture_verified: false.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size: CORRECTED var -> FIXED 8 (the builder packs the two u32 args and blits exactly 8 bytes; nothing
+#   follows the two words). field VALUES: capture/debugger-pending.
 
 name: CmsgRepairCommit
 opcode: 0x20071           # major 2 (GameAction), minor 113 -> (2 << 16) | 113
 direction: C2S
-size: var                 # body bytes not yet pinned (see notes); modelled minimum below
+size: 8                   # FIXED 8-byte body: two adjacent u32 words (TargetId @0x00, SelIndex @0x04)
 spec: packets/2-113_repair_commit.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Item repair/refine commit sent at a repair NPC (descriptor KIND 0xE) after the player confirms a repair entry. The client runs a gold / eligibility / capacity pre-check before sending. The send arguments observed are the active target field and the selected list index.
@@ -17,25 +22,21 @@ fields:
   - { name: SelIndex, type: u32 }        # 0x04  selected repair-entry index within the list
 
 notes: |
-  Static inference only; no capture available. The repair confirm handler calls the 2/113 sender
-  with two arguments: the client's active-target field (the repair NPC id) and the selected entry
-  index in the repair list. The send-wrapper's exact body length was NOT re-read this pass, so the
-  on-wire body is recorded as 'var' rather than a hard size.
+  CONTROL-FLOW CONFIRMED body size: the repair confirm handler calls the 2/113 sender with two
+  arguments (the client's active-target field = the repair NPC id, and the selected entry index in the
+  repair list); the builder packs them as two adjacent 4-byte words into a local buffer and blits a
+  FIXED 8-byte body. There is nothing after the two words. (This resolves the prior 'var' — the two
+  u32 words the file modelled as its "minimum plausible" body ARE the whole body.)
 
     0x00 (4B) TargetId : the client's active-target field (the repair NPC the player is talking to).
-                         CODE-CONFIRMED as a send argument; treating it as a u32 id is the leading
-                         hypothesis.
+                         CODE-CONFIRMED as a send argument; u32 id.
     0x04 (4B) SelIndex : the index of the chosen repair entry. The repair list itself is read from
                          the NPC's npc.scr template (catalog region at template offset +128, as
                          16-byte records paged 6 per page), so SelIndex selects within that
-                         template-baked list, not a server-pushed one. CODE-CONFIRMED as a send
-                         argument; the on-wire width (u32 vs narrower) is not pinned.
+                         template-baked list, not a server-pushed one. CODE-CONFIRMED as a send argument.
 
-  fields not yet pinned — needs npc.scr sample / capture: the exact body length and whether the two
-  arguments are sent as the two u32 words modelled here, as narrower fields, or with an additional
-  mode/flag byte (e.g. a "use cash vs gold" selector that the client also evaluates locally). The
-  two u32 words above are the minimum plausible body; do NOT assume there is nothing after them
-  until a capture confirms the length.
+  CONTRACT CLASS: Request -> Response; the paired reply is the 4/113-family item-shop purchase/repair
+  result (handler installed). field VALUES remain capture/debugger-pending.
 
   CLIENT PRE-CHECK (does not change the wire body): before sending, the client compares the entry
   cost against the player's gold (or cash, when a "use cash" mode is active; the divisor between the

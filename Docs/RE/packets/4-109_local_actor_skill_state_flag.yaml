@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 12-byte body -- a leading dword, an
+#                 id u32@0x04 (gated == local player), and a flag byte@0x08 -- are control-flow-confirmed;
+#                 the handler's write destination is a live-actor runtime offset, NOT a wire field; the
+#                 flag's VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none new. Runtime-offset hygiene applied: the live local-player destination field is NOT
+#              a wire field and is omitted; the only 4/109 wire field is the flag byte @+0x08.
+
+name: SmsgLocalActorSkillStateFlag
+opcode: 0x4006d           # major 4 (Response), minor 109 -> (4 << 16) | 109
+direction: S2C
+size: 12                  # fixed 12-byte body
+spec: packets/4-109_local_actor_skill_state_flag.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server sets a single skill-state flag byte on the local player. A flat 12-byte body carrying a leading dword, an id (gated to the local player), and the flag byte; the handler accepts only when the id matches the local player, then writes the flag onto the live local-player object.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 12.
+fields:
+  - { name: Leading, type: u32 }   # 0x00  leading dword (carried with the body)
+  - { name: ActorId, type: u32 }   # 0x04  id; the handler proceeds only when this equals the local player
+  - { name: Flag,    type: u8 }    # 0x08  the skill-state flag byte (the only field written)
+  - { name: Pad0,    type: "bytes[3]" } # 0x09  alignment padding to 12 bytes
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the flat 12-byte body and the field offsets. CAPTURE-UNVERIFIED for the
+  flag's VALUE meaning.
+
+    0x00 (4B) Leading : a leading dword carried with the body.
+    0x04 (4B) ActorId : an id; the handler accepts the packet only when it equals the local player.
+    0x08 (1B) Flag    : the skill-state flag byte written onto the live local player.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): the flag is written into a live local-player runtime
+  field; that runtime offset is NOT a 4/109 wire field and is intentionally omitted. The only 4/109
+  wire field is the flag byte at body +0x08. (It happens to coincide with a spawn-descriptor byte
+  shifted by the standard descriptor->actor rebasing, but 4/109 delivers the flag through its own
+  12-byte body, NOT through a descriptor -- do not model a descriptor offset as the wire field.)
+
+  UNKNOWN to resolve with a capture: which skill-state the flag toggles.

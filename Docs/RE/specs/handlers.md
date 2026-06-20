@@ -1,12 +1,12 @@
 ---
 status: routing-confirmed
-verification: confirmed (routing/registration/sizes/offsets, control-flow proven); capture/debugger-pending (packet field VALUE semantics)
-ida_reverified: 2026-06-16
+verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 sample_verified: false
 struct_cross_ref_verified: true
-conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at SmsgCharManageResult, 3/100 "case 32" removed, 4/143+4/144 added (shared handler), major-0 (0,0) handshake branch added, keepalive 2/112 distinguished from the (2,10000) handshake-arm
+conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at SmsgCharManageResult, 3/100 "case 32" removed, 4/143+4/144 added (shared handler), major-0 (0,0) handshake branch added, keepalive 2/112 distinguished from the (2,10000) handshake-arm. CYCLE 4 netcode deep-cartography (W3/W4) folded the per-handler behaviour + read-map + latch-clear corrections: 3/6=12B (was 19), 3/13 summary row de-mislabelled (19B gate@0/subcode@1), 4/4 892-framing, 4/48 236B no-overrun, 4/56/4/71 structured panels, the major-4 size/role refinements, the in-flight-latch census, and the runtime-offset hygiene marks (4/109/5/53/5/147/5/121/5/136 destinations are live-Actor offsets, DO-NOT-PROMOTE-AS-WIRE)
 ---
 
 # Inbound Handler Behaviour Catalogue — Clean-Room Specification
@@ -183,14 +183,18 @@ matching `opcodes.md` and `packets/*.yaml`.
   a 0.8× price multiplier is applied to the displayed prices.
 
 ### 3/13 — `SmsgCharStatusUpdate`
-- **Min fixed payload: 28 bytes** (this read includes the 8-byte frame prefix; the effective
-  body fields are listed payload-relative below).
-- **Fields (UNVERIFIED offsets):** name CP949 `char[17]` at `+8`; status byte A at `+25`;
-  status byte B at `+26` (one pad byte to `+28`).
-- **Behaviour (LIKELY):** if the named actor is the local player, the two status bytes are
-  written into the local-player descriptor. Otherwise the matching roster entry is found **by
-  name** (roster stride ~220 bytes, up to 5 entries) and the two bytes are written there. This
-  is a character status-flag update for the roster panel.
+- **Min fixed payload: 19 bytes `[confirmed]`** (single read of 0x13). **Corrected: the earlier
+  "28-byte / name@+8 / status@+25/+26" reading was 3/23's shape mistakenly attached to this row;
+  3/13 reads 19 bytes and consumes only the leading gate/subcode.**
+- **Fields (offsets `[confirmed]`; meanings pending):** gate flag `u8` at `+0` (non-zero → a
+  reset/clear-status path; zero → a sub-code path); status sub-code `u8` at `+1` (selects a
+  status-text id); a 17-byte trailing blob (`+2..+18`) is read into the body but not consumed here.
+- **Behaviour (LIKELY; field VALUE meanings `[capture/debugger-pending]`):** clears the net-client
+  awaiting-status latch byte, resets a select-screen scratch field, then on `gate == 0` maps the
+  sub-code (the enumerated set `{0xC8,0xC9}`, `{0xCC,0xCD,0xCF,0xD0,0xD1,0xD2}`, `0xCE`, `0xD4`) to
+  one of four status-text id globals shown on the local-player status line (~5000 ms timeout); any
+  other sub-code is a no-op. A select-screen status-line update — **not** the by-name roster write
+  (that is 3/23 `SmsgCharStatusBytesByName`).
 
 ### 3/4 — `SmsgSceneEntityUpdate`
 - **Routing `[confirmed]`: this is minor 4** (corrected — the first recon pass mislabelled it
@@ -237,16 +241,29 @@ matching `opcodes.md` and `packets/*.yaml`.
   visual rebuild.
 
 ### 4/14 — `SmsgGroundItemSlotAck`
-- **Min fixed payload: 20 bytes.** A 12-byte item-slot record at `+0..+0x0B`, then result `u8`
-  at `+0x0C`.
-- **Behaviour:** `0` = error → UI error; `1` = ok → consume the 12-byte slot record into the
-  ground-item / inventory path.
+- **Min fixed payload: 20 bytes (fixed) `[confirmed]`.** **Corrected: the whole 20-byte block is a
+  single source-slot descriptor and the result/subtype byte is at `+8`, NOT a "12-byte record +
+  result@+0x0C".** Layout: descriptor head (`+0..+7`), result/subtype `u8` at `+8`, descriptor tail
+  (`+9..+0x13`).
+- **Behaviour:** `0` = error/close → clears the panel busy latch (writes the panel busy byte to
+  idle); `1` = apply-drop → plays the item-drop sound and forwards the whole 20-byte source-slot
+  descriptor to the world-item-drop applier (the subtype-1 path itself does not write the busy byte).
+- **In-flight latch:** clears the inventory panel busy latch on the result-0 path only (§13 latch
+  census).
 
 ### 4/23 — `SmsgUserTradeRequestResult`
-- **Min fixed payload: 20 bytes.** `+8` result `u8`; `+9` reason `u8` (values 1..5 each map to
-  a distinct decline-reason string id).
-- **Behaviour:** success opens the trade window and forwards the whole 20-byte block to the
-  trade-window opener; failure shows the reason string.
+- **Min fixed payload: 20 bytes `[confirmed]`.** `+8` result/selector `u8` (only two acted values:
+  `0` = decline, `1` = accept/open); `+9` reason `u8` (consulted on the decline path only — values
+  1..5 each map to a distinct decline-reason string id). **Corrected: the selector is at `+8` (NOT
+  `+0x0A`); there is no three-value phase enum {0/2/3} and no phase 2/3.**
+- **Behaviour:** `1` = accept → copies the whole 20-byte block into the trade-window controller and
+  opens the trade window; `0` = decline → resets a UI panel, selects the reason string, and clears
+  the pending trade-request-state singleton; `>= 2` does nothing.
+- **In-flight latch:** does NOT clear a network response latch — the decline path zeroes only a
+  trade-request-state field (a trade-state reset, not a per-opcode network await-latch).
+- **Note (downstream-only):** the YAML's `RequesterId`/`TargetId`/`ResponderId` actor-id offsets
+  live INSIDE the 20-byte block forwarded opaquely to the window opener; they are consumed by that
+  downstream routine, not by 4/23 — mark those id offsets as downstream/unconfirmed.
 
 ### 4/61 — `SmsgGuildStateChangeResult`
 - **Min fixed payload: 52 bytes.** `+8` gate `u8`; `+9` result `u8`; `+10` action `u8`
@@ -324,11 +341,18 @@ matching `opcodes.md` and `packets/*.yaml`.
   (`opcodes.md` 4/82 `SmsgBillingBalanceUpdate`); do not conflate them.
 
 ### 4/109 — `SmsgLocalActorSkillStateFlag`
-- **Min fixed payload: 12 bytes.** `+4` actor id-key (must equal the local player, else the
-  packet is ignored); `+8` flag `u8`.
-- **Behaviour:** stores the flag into the local-player descriptor flag byte that the inventory
-  path uses to bound the bag-slot count (`CROSS-REF` `structs/spawn_descriptor.md`
-  `bag_slots_count` at SD `+0x305`), then refreshes a UI panel.
+- **Min fixed payload: 12 bytes `[confirmed]`.** Flat 12-byte body (NOT a descriptor): leading dword
+  at `+0`, actor id-key `u32` at `+4` (must equal the local player, else the packet is ignored),
+  **flag `u8` at body `+8`** — this is the only wire field.
+- **Behaviour:** stores the flag byte, then refreshes the skill-state panel.
+- **RUNTIME-OFFSET HYGIENE (corrected, binary wins):** the flag is written to the **live local-player
+  Actor object at runtime offset `+0x379`** and the id-gate reads the live actor's id at `+0x5C`.
+  **Those are RUNTIME-OBJECT writes — DO-NOT-PROMOTE-AS-WIRE.** The 4/109 wire field is the flag
+  byte at **body `+0x08`** only. The runtime `+0x379` numerically equals SpawnDescriptor `+0x305`
+  (`bag_slots_count`) plus the fixed `0x74` descriptor→Actor rebase (`0x305 + 0x74 = 0x379`); 4/109
+  delivers the byte through its own flat body, not through a SpawnDescriptor. Do not present `+0x379`
+  or `+0x305` as a 4/109 wire offset. (Earlier prose tying this to SD `+0x305 bag_slots_count` is
+  corrected.)
 
 ### 4/122 — `SmsgResponseSlot122` (thin slot — representative)
 - **Min fixed payload: 16 bytes.** gate `u8` at `+0x0C`; notice code `u8` at `+0x0D`.
@@ -337,9 +361,11 @@ matching `opcodes.md` and `packets/*.yaml`.
   notice/panel handler carrying no gameplay state. See §6 for the wider thin-slot family.
 
 ### 4/139 — `SmsgItemUseEffect`
-- **Variable length; 24-byte header read.** `+4` actor id (must be the local player, else the
-  handler logs an error and returns); `+8` result `u8` (`0` = cancel/clear, `1` = play
-  effect); `+0x0A` use-flag `u8`; `+0x0B` slot index `u8`; `+0x0C/+0x10/+0x14` echoed dwords.
+- **Fixed read: 24 bytes (0x18) `[confirmed]`.** **Corrected: the whole bounded wire read is a fixed
+  24-byte block — the "variable" tail is the 28-byte ECHO record the handler builds and FORWARDS
+  downstream, not a wire field it reads.** `+4` actor id (must be the local player, else the handler
+  logs an error and returns); `+8` result `u8` (`0` = cancel/clear, `1` = play effect); `+0x0A`
+  use-flag `u8`; `+0x0B` slot index `u8`; `+0x0C/+0x10/+0x14` echoed dwords.
 - **Behaviour:** on success the slot index is resolved to an item id via the inventory slot
   (this resolution is the load-bearing step), then one of several effect/sound variants is
   chosen by **item-id ranges** (notably ids in 213060037..213060199 select equipment-use
@@ -391,8 +417,10 @@ matching `opcodes.md` and `packets/*.yaml`.
 ### 5/33 — `SmsgSkillHotbarSlotSet`
 - **Min fixed payload: 20 bytes (0x14).** `+0/+4` actor `(sort, id)` pair (must be the local
   player); `+8` slot `u8` (`< 240`); `+0x0C` value `u32`; `+0x10` points `i16`.
-- **Behaviour:** writes an 8-byte hotbar-slot entry `{value, points}` at offset `8 * slot` in
-  the skill hotbar table. An authoritative server overwrite of one hotbar slot.
+- **Behaviour:** writes the value/points into the skill hotbar table keyed by slot. **Corrected:
+  the destination is NOT one 8-byte entry at `8*slot` — it is a 4-byte (dword) VALUE table plus a
+  parallel word POINTS table, both indexed by slot** (the same global hotbar table whose entries
+  4/41's failure branch zeroes). An authoritative server overwrite of one hotbar slot.
 
 ### 5/67 — `SmsgStatsUpdate`
 - **Min fixed payload: 36 bytes (0x24).** `+0` sort `u8` (player character); `+4` actor id
@@ -404,12 +432,14 @@ matching `opcodes.md` and `packets/*.yaml`.
   pending a mapping to named stats (`UNVERIFIED`); cross-check against `structs/stats.md`.
 
 ### 5/68 — `SmsgQuestList`
-- **Min fixed payload: 452 bytes (0x1C4)** — a full quest-panel snapshot.
-- **Fields (UNVERIFIED):** header `u32` at `+0`; actor id `u32` at `+4`; panel byte C `u8` at
-  `+8`; active flag `u8` at `+9`; panel byte B `u8` at `+10`; slot array A `u8[10]` at `+11`;
-  slot array B `u8[10]` at `+21`; quest ids `u32[20]` at `+32`; names CP949 `char[17][20]` at
-  `+112`. (A 20-element quest-record table with a ~32-byte stride is implied; boundaries
-  unpinned.)
+- **Min fixed payload: 452 bytes (0x1C4)** — a full quest-panel snapshot. **The quest-record
+  COUNT is 10, NOT 20** (corrected); see the parallel-array section map in §20.4.
+- **Fields (UNVERIFIED values; section boundaries `STRUCTURE-HIGH`):** three header flag bytes at
+  `+8..+0x0A`; state/flag byte-vector A `u8[10]` at `+0x0B`; byte-vector B `u8[10]` at `+0x15`;
+  quest ids `u32[10]` at `+0x20`; quest names CP949 `char[10][17]` (17-byte stride, NUL forced) —
+  ids and names are PARALLEL blocks (ids fully precede names), not interleaved, and not a 20-element
+  ~32-byte-stride table (the 32 was the destination mirror's per-entry stride, not the wire). See
+  §20.4 for the exact byte layout.
 - **Behaviour:** active-flag transitions drive opening/closing the quest panel and an SFX.
 
 ### 5/76 — `SmsgPartyMemberJoined`
@@ -439,21 +469,27 @@ matching `opcodes.md` and `packets/*.yaml`.
   offset is **UNVERIFIED** and is not in `structs/spawn_descriptor.md` — do not promote it.
 
 ### 5/136 — `SmsgActorTimedStateUpdate`
-- **Min fixed payload: 16 bytes.** `+0` sort; `+4` id; `+8` timed value `u32`; `+12` state
-  `u8`.
+- **Min fixed payload: 16 bytes.** Wire fields: `+0` Sort; `+4` ActorId; `+8` TimedValue `u32`;
+  `+0x0C` StateByte `u8`.
 - **Behaviour:** writes the timed value and the state byte into two adjacent live-actor state
-  fields, mirrors through a linked-actor state when the actor is in combat, and refreshes a UI
-  panel. The exact panel identity is `UNVERIFIED` — keep the neutral label "timed state". The
-  recon note places the destinations in the live-actor runtime record (a timed-value slot and
-  an adjacent state-byte slot); those are runtime-object offsets, **not** wire offsets and
-  **not** SpawnDescriptor offsets — do not promote them to a struct spec.
+  fields, mirrors through a linked-partner actor when in combat, and pulses a UI panel. The exact
+  panel identity is `UNVERIFIED` — keep the neutral label "timed state".
+- **RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE):** the recon places the destinations at the
+  live-Actor runtime fields **`+0x588` (TimedValue) and `+0x584` (StateByte)** — runtime mixer/timer
+  fields, **not** wire offsets and **not** SpawnDescriptor offsets. The wire fields are
+  Sort/ActorId/TimedValue/StateByte in the 16-byte body above; do not promote `+0x588`/`+0x584`.
 
 ### 5/147 — `SmsgActorCombatFlagUpdate`
 - **Min fixed payload: 8 bytes** — the smallest non-trivial push. `+0` actor id `u32` (sort
-  fixed to player character for the lookup); `+4` combat flag `i32`.
-- **Behaviour:** writes the flag into the actor's `in_combat_flag` (`CROSS-REF`
-  `structs/spawn_descriptor.md` SD `+0x32C`, CONFIRMED). For the local player it also mirrors
-  to the local descriptor and shows an enter-combat or leave-combat message.
+  fixed to player character for the lookup); **`+4` combat flag `i32` — the only wire field.**
+- **Behaviour:** writes the flag into the resolved actor's runtime combat-flag field. For the local
+  player it also shows an enter-combat or leave-combat message.
+- **RUNTIME-OFFSET HYGIENE (corrected):** the destination is the **live-Actor runtime field at
+  `+0x3A0`** — **DO-NOT-PROMOTE-AS-WIRE.** The 5/147 wire field is the flag dword at **body `+0x04`**
+  (8-byte body). The runtime `+0x3A0` numerically equals SpawnDescriptor `+0x32C` (`in_combat_flag`)
+  plus the fixed `0x74` descriptor→Actor rebase; they are the same byte in two coordinate spaces.
+  Do not present SD `+0x32C` (or `+0x3A0`) as the 5/147 wire offset — earlier prose conflating the
+  two is corrected.
 
 ---
 
@@ -562,11 +598,11 @@ in §16.
 |--------|------|-----|-------------------|-----------|
 | 3/4   | `SmsgSceneEntityUpdate`        | S2C | var | 3B header + N × 981B char-slot record (corrected: minor 4, not 14) |
 | 3/8   | `SmsgShopPageUpdate`            | S2C | 4   | single `u32` page index |
-| 3/13  | `SmsgCharStatusUpdate`         | S2C | 28  | name@8 + status bytes@25/26 |
+| 3/13  | `SmsgCharStatusUpdate`         | S2C | 19  | gate@0 + subcode@1 (NOT 3/23's 28B/name@8 shape — that row was mislabeled; corrected) |
 | 3/14  | `SmsgCharSpawnResponse`        | S2C | 16  | gate byte@0 → re-enter enter-game builder (corrected: minor 14, not 3/7) |
 | 4/12  | `SmsgEquipItemResult`          | S2C | 16  | result@8, slot-type@12 |
-| 4/14  | `SmsgGroundItemSlotAck`        | S2C | 20  | 12B item record + result@12 |
-| 4/23  | `SmsgUserTradeRequestResult`   | S2C | 20  | result@8, reason@9 |
+| 4/14  | `SmsgGroundItemSlotAck`        | S2C | 20  | 20B source-slot descriptor; result/subtype@8 (corrected from "12B record + result@12") |
+| 4/23  | `SmsgUserTradeRequestResult`   | S2C | 20  | selector@8 (0=decline,1=accept), reason@9; no phase 2/3 |
 | 4/61  | `SmsgGuildStateChangeResult`   | S2C | 52  | gate@8, result@9, action@10, name..28 |
 | 4/65  | `SmsgGuildInfoFullSync`        | S2C | 1812| guild header + 7 × 50-entry member arrays |
 | 4/80  | `SmsgPvpDeathResult`           | S2C | 80  | status@8, reason@9, target-id@20 |
@@ -577,7 +613,7 @@ in §16.
 | 4/108 | `SmsgPlayerGoldBalanceUpdate`  | S2C | 16  | gold `qword`@8 |
 | 4/109 | `SmsgLocalActorSkillStateFlag` | S2C | 12  | actor@4 (local), flag@8 |
 | 4/122 | `SmsgResponseSlot122`          | S2C | 16  | gate@0x0C, notice@0x0D |
-| 4/139 | `SmsgItemUseEffect`            | S2C | 24 hdr | actor@4, result@8, slot@0x0B |
+| 4/139 | `SmsgItemUseEffect`            | S2C | 24 (fixed) | actor@4, result@8, slot@0x0B; the "var" tail is the 28B echo it forwards |
 | 4/149 | `SmsgItemPanelSlotChunk`       | S2C | var | type@8, start@9, count@10, 16B records@12 |
 | 5/6   | `SmsgActorAutotargetOrMotion`  | S2C | 16  | actor@0/4, motion@8 |
 | 5/28  | `SmsgRespawnAtPoint`           | S2C | 12  | actor id@4 (transform from client cache) |
@@ -647,6 +683,10 @@ in §16.
   the world/actor tables, builds the local player, selects the area BGM, and sets the
   enter-world-ready state. The byte-0 selector position is confirmed; the *meaning* of the
   two copied sub-blocks is `[capture/debugger-pending]`.
+- **In-flight latch (load-bearing, `[confirmed]`):** 4/1's **very first statement, before the
+  form-A/form-B branch, clears the enter-game in-flight latch** (writes the NetClient latch byte to
+  0, unconditionally). This closes the `1/9 → 3/5 → 4/1` enter ladder: 1/9 SETS the latch on send,
+  3/5 `SmsgEnterGameAck` leaves it SET, and 4/1 CLEARS it. (3/5 does NOT clear it.)
 - **Behaviour (size `[confirmed]`; interior VALUE semantics `[capture/debugger-pending]`):** a
   periodic full world/game-state snapshot. The handler touches almost every subsystem — game
   state, billing state, rank/progress, the frame-tick scheduler, the net client, the actor
@@ -757,9 +797,14 @@ note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
   `SmsgCharSpawnResponse`.
 
 ### 3/6 — `SmsgRenameCharResult`
-- **Fixed read: 19 bytes.** A 12-byte region + name/result tail (a length/slot bound compared
-  against `12`). Drives a rename sub-handler and a select-screen message; updates the slot name.
-  Size `[confirmed]`; field meaning `[capture/debugger-pending]`.
+- **Fixed read: 12 bytes `[confirmed]`** (single read of 0xC). **Corrected from the earlier
+  "19 bytes" — the handler's only read is 12 bytes; the `3-6_rename_char_result.yaml` 12 is right.**
+  Layout: `Result u8` at `+0` (1 = success → apply, 0 = failure → error string); `ErrorCode u8`
+  at `+1` (failure sub-code switch); 2 pad at `+2`; `SlotIndex u32` at `+4`; a second `u32` at `+8`
+  passed alongside the slot index to the slot writer. On success the account char count is
+  incremented and the renamed slot record is written; on failure the error code selects one of four
+  select-screen message-string slots (id 5000 family). Size `[confirmed]`; field meaning
+  `[capture/debugger-pending]`.
 
 ### 3/7 — `SmsgCharManageResult`
 - **Routing `[confirmed]`: this is minor 7** (corrected — the first recon pass put
@@ -775,13 +820,14 @@ note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
 - **Routing `[confirmed]`: this is minor 23** (the first recon pass left it as a "generic wired
   slot" / `SmsgCharCreateResult`; it is actually a status-bytes-by-name update closely
   paralleling 3/13).
-- **Fixed read: 28 bytes (0x1C) `[confirmed]`.** If a global gate flag is set, two trailing
-  status bytes are written to a global pair; otherwise the handler finds the matching roster
-  slot **by name** (byte-wise CP949 name comparison, roster stride 880 bytes, ≤ 5 slots) and
-  writes the two status bytes
-  there. Size/structure `[confirmed]`; the exact status-byte positions and their meaning are
-  `[capture/debugger-pending]`. (Name proposal flagged for the names.yaml curator — not
-  applied here.)
+- **Fixed read: 28 bytes (0x1C) `[confirmed]`.** Layout: 8-byte header (`+0..+7`, read but not
+  consumed); CP949 NUL-bounded name `char[17]` at `+8`; status byte A at `+25`; status byte B at
+  `+26`; trailing pad at `+27`. **In-world (local player present):** the two status bytes are written
+  to the global local-player status/level fields. **Select-screen (no local player):** the handler
+  finds the matching roster slot **by name** (byte-wise CP949 `strcmp` across the ≤ 5-slot roster,
+  **stride 220 bytes** — corrected from "880") and writes the two status bytes there; no match = no-op.
+  Size/structure `[confirmed]`; the exact status-byte meanings are `[capture/debugger-pending]`.
+  (Name proposal flagged for the names.yaml curator — not applied here.)
 
 ### 3/100 — `SmsgCharActionResult`
 - **Fixed read: 4 bytes `[confirmed]`** = a single action/result `u32` code. A large switch
@@ -820,15 +866,15 @@ failure.
 | Opcode | Name | Fixed read | Gates / codes | Behaviour (neutral) | Conf |
 |---|---|---|---|---|---|
 | 4/5  | `SmsgItemUseResult`        | 44 | result 1/7; item-id ranges 213060037.. / 213062504..; sound kind 90 | Item-use result for an actor; on success plays effect+sound chosen by **item-id range** and updates item/HUD. Shares the item-id range table with 4/139, 5/5, 5/139. | size HIGH |
-| 4/15 | `SmsgItemWorldPickupAck`   | var | 7, 100, 101 | World item-pickup ack; looks up the actor by id; codes 100/101 are pickup outcomes. | MED |
-| 4/16 | `SmsgEquipChangeResult`    | 20 | 0,1,2,4,15,20 | Equip-change result; looks up actor; applies an equipment-slot change; slot code 15 = title slot (as in 4/12). | size HIGH |
-| 4/17 | `SmsgQuickEquipSlotAck`    | 16 | 1,10 | Quick-equip slot ack; small result block; no actor lookup. | size HIGH |
-| 4/19 | `SmsgNpcBuyOrAcquireAck`   | var | 1 | NPC buy / inventory-acquire ack; looks up an NPC template; shows result message. | MED |
-| 4/20 | `SmsgNpcSellItemAck`       | 24 | 0 | NPC sell ack; looks up actor; 24-byte block (item + result). | size HIGH |
-| 4/21 | `SmsgNpcShopSlotClearAck`  | 12 | — | Clears an NPC shop slot; thin 12-byte block. | size HIGH |
-| 4/22 | `SmsgItemSlotStateAck`     | var | — | Item-slot state ack; per-field reads; updates a slot's state. | LOW |
-| 4/24 | `SmsgUserTradeSlotUpdate`  | var | 1,2 | Updates one trade-window slot (own/partner side via 1/2); pairs with 4/23, 4/25. | MED |
-| 4/25 | `SmsgUserTradeFullResponse`| 28 (+16) | 0,4,40 | Full trade response; 28-byte block + a 16-byte sub-record; drives the trade window. | size MED |
+| 4/15 | `SmsgItemWorldPickupAck`   | **36** | success@+8; outcome@+9 (100/101 / fail 1..5 → ids 10001..10005) | World item-pickup ack; 36-byte block; success flag @+8, outcome/reason @+9; success inserts into the bag, failure surfaces the error string. **Corrected: fixed 36-byte read (was "var").** | size HIGH |
+| 4/16 | `SmsgEquipChangeResult`    | 20 | result@+8, gate@+0x0A, slot-type@+0x0B | Equip-change result; result @+8 (0/1); on apply, gate byte @+0x0A and slot-type @+0x0B (`== 15` = title-slot weapon-drawn rebuild, parallel to 4/12); rebuilds the local-player live equipment mirror. **The `{0,1,2,4,15,20}` set is not one discriminator — it spans the result/gate/slot-type bytes and the change-apply sub-handler.** | size HIGH |
+| 4/17 | `SmsgQuickEquipSlotAck`    | 16 | result@+8; slot index@+0x0B (`>= 10`) | Quick-equip slot ack; result @+8; clears the inventory in-flight latch (see §13 census). | size HIGH |
+| 4/19 | `SmsgNpcBuyOrAcquireAck`   | **56** | gate@+16; result-sub@+17 | NPC buy / inventory-acquire ack. **Corrected: FIXED 56-byte read (was "var").** gate @+16: `1` forwards the whole block to the inventory-acquire sub-handler; `0` is the text path (the result-sub byte @+17 == 1 formats an item-duration / time-remaining notice from a script-table record). **Serves BOTH C2S 2/19 and 2/115** (dual-source confirmed). | size HIGH |
+| 4/20 | `SmsgNpcSellItemAck`       | 24 | gate@+8; apply-sub@+10 | NPC sell ack; actor id @+4; gate @+8 (`0` = dismiss, `1` = apply); on apply with the apply-sub byte @+10 == 0 and the seller = local player, rebuilds the 20-record × 16-byte local equip mirror. | size HIGH |
+| 4/21 | `SmsgNpcShopSlotClearAck`  | 12 | result@+8 | Clears an NPC shop slot; the thin twin of 4/14 — result @+8 (`0` = close panel, `1` = apply slot change), 12-byte source-slot descriptor. | size HIGH |
+| 4/22 | `SmsgItemSlotStateAck`     | **36** | result@+8 | Item-slot state ack. **Corrected: FIXED 36-byte (0x24) read (was "var").** result @+8 (`0` = modal clear, `1` = apply the slot-state update, other = no-op). | size HIGH |
+| 4/24 | `SmsgUserTradeSlotUpdate`  | **44** | result@+8; subtype@+1 (teardown); Category@+0x0A; OwnerId@+0x28 | Updates one trade-window slot. **Corrected: FIXED 44-byte (0x2C) read (was "var").** result @+8 (`1` apply / `0` teardown-notice via subtype @+1 = 1/2); Category @+0x0A (item/alt/money, `0xFF` = money); **own-vs-partner side = OwnerId @+0x28 == local-actor id** (NOT a literal "1/2 selector"). | size HIGH |
+| 4/25 | `SmsgUserTradeFullResponse`| 28 (+N×16) | Phase@+8 (0=cancel,1=ready,4=commit); Coin i64@+0x0C; OwnerId@+0x14; Count@+0x18 | Full trade response. 28-byte header, then on the commit phase a loop of `Count` × 16-byte records (cap 40). **Corrected: Count @+0x18 (NOT +0x09); add Coin `i64` @+0x0C and OwnerId @+0x14.** Phase byte @+8 runs the 5-way switch: `0` = cancel/close, `1` = ready (own vs partner via OwnerId@+0x14), 2/3 = notices, `4` = COMMIT (reads Coin i64@+0x0C, folds the record array, finalizes). Resolves the commit-vs-cancel mapping. | size HIGH |
 | 4/137| `SmsgGatheringResult`      | 24 | 0,1,2,4,255 | Gathering result; looks up actor; 255 = generic-fail code; updates gather UI. | size HIGH |
 | 4/138| `SmsgNoticeError`          | 12 | — | Generic notice/error; looks up actor; shows a message (~id 1014). | size HIGH |
 | 4/140| `SmsgColoredSystemText`    | 112| 11 | Colored system-text line; 112-byte block (color + text region); chat/system UI. CP949 text. | size HIGH |
@@ -845,11 +891,11 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/35 | `SmsgPartyInviteState`         | 56  | party-invite state panel. |
 | 4/36 | `SmsgPartyMemberRemoveResult`  | 56  | gate 1 = ok; party roster panel. |
 | 4/37 | `SmsgPartyLeaderActionResult`  | 56  | gate 1; leader-action panel. |
-| 4/41 | `SmsgSkillHotbarAssignResult`  | 24  | gates 1,7; skill-hotbar assign ack → rank/progress + skill panel. |
-| 4/42 | `SmsgPlayerInteractionState`   | 56  | interaction-state panel. |
-| 4/43 | `SmsgPlayerInteractionResult`  | 60  | gate 1; actor lookup + sound; interaction result. |
-| 4/47 | `SmsgSocialAckDrain`           | 16  | thin social-ack drain (see §6). |
-| 4/48 | `SmsgRankProgressEvent`        | 236 | 236-byte event record forwarded to the rank/progress response-event entry point. |
+| 4/41 | `SmsgSkillHotbarAssignResult`  | 24  | **gate is the result byte @+8 only (NOT "1,7")**; success forwards to the rank/progress aggregator; **failure MUTATES A HOTBAR QUICK-SLOT** (zeroes the global hotbar table at the slot index = `u32` @+0x10 — the same table 5/33 writes) and selects a reason string by `+9` (ids 3020..3026, and 3032 at reason 8). Distinct from 4/150 skill-point total. Reply to 2/145. |
+| 4/42 | `SmsgPlayerInteractionState`   | 56  | interaction-state panel; no gate, always applies via the shared aggregator. |
+| 4/43 | `SmsgPlayerInteractionResult`  | 60  | **richer than "gate 1"**: a global interaction-mode flag PLUS a payload subtype byte @+8 select branches; TWO actor lookups + motion/weapon swaps (motion ids 7/12) + SFX + an emote C2S echo + a coloured system message; tail-forwards the block to the aggregator. **Does NOT clear the latch at entry** (handles notices at its tail). |
+| 4/47 | `SmsgSocialAckDrain`           | 16  | **pure 16-byte latch+drain — does NOT forward to the rank/progress aggregator** (qualify the Group-C "RankProgress-routed" grouping); it only clears the social UI latch and drains. |
+| 4/48 | `SmsgRankProgressEvent`        | 236 | 12-byte header (route byte @+8, sub-select @+9) + **8 × 28-byte records at +0x0C** (id key @rec+0, CP949 name cell, two `i16` fields). `12 + 8×28 = 236` exact — **no overrun** (the prior §20.4 "+0x18 → overrun by 12" double-counted the header; record base = +0x0C). Clears the busy latch (byte +1) at entry. |
 | 4/49 | `SmsgRankProgressPanelUpdate`  | 32  | forwarded to the rank/progress panel-update entry point. |
 | 4/72 | `SmsgResponseSlot72`           | 40  | gate 1; rank/progress panel-slot. |
 | 4/76 | `SmsgPartyAcceptResult`        | 52  | gates 1,4,10; actor lookup + facing + sound; party-accept (event 4/10, like 5/76). |
@@ -876,20 +922,20 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/84 | `SmsgRecordSlotConsumeResult` | 12  | gates 0,1,7; consume/clear a record slot. |
 | 4/113| `SmsgItemShopPurchaseResult`  | 12  | gate 1; item-shop purchase ack. |
 | 4/114| `SmsgCashShopActionResult`    | 12  | cash-shop action ack. |
-| 4/115| `SmsgItemShopBalanceUpdate`   | var (24 hdr) | gate 0; item-shop balance update. |
+| 4/115| `SmsgItemShopBalanceUpdate`   | **24** | **Corrected: effectively FIXED 24-byte read (was "var (24 hdr)")** — no trailing variable region. gate @+8 (`0` = fail / `!= 0` = apply); on success writes three balance dwords at +12/+16/+20 to the local-player balance fields and refreshes the item-shop total. |
 
 ### Group F — miscellaneous Response acks
 
 | Opcode | Name | Fixed read | Notes |
 |---|---|---|---|
-| 4/13 | `SmsgLocalPlayerStateSync`  | 56  | gates 1,5; actor lookup (local); 56-byte local-player state block → frame-tick scheduler + main UI. Wired at Response minor 13 (the stale "5-100" autoname is a mislabel — see §7). |
+| 4/13 | `SmsgLocalPlayerStateSync`  | 56  | gates 1,5; actor lookup (local). **Far richer than "→ main UI": the authoritative local-player position/orientation/state applier** — writes PosX@+0x10 / PosZ@+0x14 into the local-player descriptor; StateByte@+0x2D (`== 1` battle-mode commit, `== 5` position-suppress); a full scene-node reposition on a large position delta (dist² > 40000); a nearby-portal travel probe. Wired at Response minor 13 (the stale "5-100" autoname is a mislabel — see §7). |
 | 4/28 | `SmsgRespawnConfirm`        | 20  | gates 0,1; removes + recreates an actor (despawn/respawn confirm). |
 | 4/39 | `SmsgDiscard39`             | 32  | reads 32 bytes and drops them (drain slot). |
 | 4/44/45/46 | `SmsgActorTickTableOpA/B/C` | 16 each | 16-byte actor tick-table ops; 4/44 gate 2; write into per-actor tick tables. |
-| 4/50 | `SmsgUpgradeItemResult`     | var | item-upgrade result (per-field reads). |
-| 4/74 | `SmsgResponseSlot74`        | 36  | gate 1; 36-byte block → main UI. |
-| 4/75 | `SmsgResponseSlot75`        | 184 | 184-byte block → main UI (large panel record). |
-| 4/78 | `SmsgServerTimeNotification`| 12  | server-time notification (12-byte time block). |
+| 4/50 | `SmsgUpgradeItemResult`     | **32** | **Corrected: FIXED 32-byte (0x20) read (was "var").** result @+8 picks the success-motion (id 8) vs fail-motion (id 9), then the whole block applies to the upgrade panel. |
+| 4/74 | `SmsgStallListRefill`       | **var** | **Corrected: VARIABLE stall-list refill (was "36-byte block → main UI").** Record count = `(frame_size − 14) / 36` (8B frame header + 6B list header), then N × 36-byte records `{u32 id; u8 kind; char name[31]}`. Destination is the stall-list window (panel art `data/ui/stalllist.dds`), NOT a generic "main UI". Rename from `SmsgResponseSlot74`. Clears the busy latch (byte +1, always). |
+| 4/75 | `SmsgProductPurchaseResultPanel` | 184 | **Corrected: a citems product-result panel, not opaque "main UI".** success forwards the 184-byte block; failure (gate @+0) drives the cash-item result view (`citems.scr`-backed) — fail-sub `101` shows an error string, **fail-sub `102` decrements the local-player character count** (a character-slot product). Clears the busy latch on the failure path. |
+| 4/78 | `SmsgServerTimeNotification`| 12  | **Corrected role: a rental-item expiry sweep, not a clock/UI panel** — the `u32` at +8 is a server time value fed into the inventory rental-item expiry sweep. (Size 12 confirmed.) |
 | 4/79 | `SmsgCraftingResult`        | var | gate 1; crafting result → main UI. |
 | 4/93 | `SmsgUserVoteTallyUpdate`   | 16  | 16-byte vote-tally block. |
 | 4/95 | `SmsgLocalPlayerBattleMode` | 12  | local-player battle-mode update. |
@@ -898,12 +944,13 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/105| `SmsgGagePanelProgressUpdate`| 12 | gate 0; gage/progress panel update. |
 | 4/107| `SmsgEventLotteryPickResult`| var (28 hdr) | event lottery number-pick result. |
 | 4/120| `SmsgActorTableBatchResult` | var | batch actor-table result → main UI. |
+| 4/125| `SmsgResponseSlot125`       | **none** | **Corrected: reads NOTHING (was "var")** — a pure UI refresh pulse on one main-window service-slot panel; no payload consumed. |
 | 4/132| `SmsgGMNoticeError`         | 12  | gate 16; GM notice/error → main UI. |
 | 4/134| `SmsgStatChangeNotify`      | var (12 hdr) | gate 7; stat-change notify. |
-| 4/143 + 4/144 | `SmsgTrackedItemPanelPair` | var | **both minors share ONE handler** (`[confirmed]` — added this pass; the first recon pass listed neither). A tracked-item / panel-pair update. This is why the Response table holds 96 distinct slots but 98 handler entry points. Behaviour `[capture/debugger-pending]`. |
-| 4/146| `SmsgShowMessage51027`      | var | shows message string id 51027 via main UI. |
-| 4/150| `SmsgSkillPointUpdate`      | var | gate 1; skill-point update → main UI. |
-| 4/153| `SmsgItemPanelSlotRefresh`  | var | code 255 sentinel; refreshes an item-panel slot. |
+| 4/143 + 4/144 | `SmsgTrackedItemPanelPair` | var | **both minors share ONE installed handler that self-dispatches on the frame minor** (`[confirmed]`): minor 143 reads a fixed 16-byte block (local-player-gated panel show/hide toggle + slot refresh); minor 144 reads a fixed 36-byte block (gate byte @+8; folds a 16-byte tracked-item record into a global table at `slot_index@+18`, composes an item-name notice via message id 10006, refreshes the panel). This is why the Response table holds 96 distinct slots but 98 entry points. **Neither clears a latch.** Behaviour values `[capture/debugger-pending]`. |
+| 4/146| `SmsgShowMessage51027`      | **none** | **Reads no payload** — shows the compile-time message string id 51027 (route code 13, colour 0xFFFFFF00) via main UI. |
+| 4/150| `SmsgSkillPointUpdate`      | var (16B prefix) | gates Success@+8 + local-player id@+12; Mode@+16: `1` = set the local player's skill-point TOTAL, `2` = skill level-up notice. Mutates the skill-point total — distinct from the 4/41 hotbar quick-slot. |
+| 4/153| `SmsgItemPanelSlotRefresh`  | var | **tri-branch on code @+8:** `255` = close item panel, `0` = run the slot refresh, **any other nonzero = no-op return**; refreshes the same bag slot array as 4/149 chunk-type 1; a second `0xFF` sentinel at start-index @+9 = full-bag clear. Clears the busy latch on both acting paths (255 and 0). |
 
 ### Group G — Response-table specials (routed outside the table)
 
@@ -916,18 +963,18 @@ social/party/rank panel from the block; show a result string on the failure bran
 
 | Opcode | Name | Fixed read | Gate/notes |
 |---|---|---|---|
-| 4/40 | `SmsgResponseSlot40` | var | thin slot. |
-| 4/56 | `SmsgResponseSlot56` | 1552| **NOT thin** — 1552-byte block + gate 1 → main UI / rank-progress (large structured panel snapshot; reclassify in `opcodes.md`). |
+| 4/40 | `SmsgResponseSlot40` | **164** | **Corrected: FIXED 164-byte (0xA4) read (was "var/thin")** — a medium record: result byte @+8 swaps the local-player motion/weapon-fx (kind 8 vs 9), then forwards the block to an NPC panel updater. Not thin. |
+| 4/56 | `SmsgResponseSlot56` | 1552| **NOT thin** — 1552-byte structured panel snapshot: 16B header (subtype@+8, actor-id@+0x0C) + transform array A (64×16 @+0x10) + transform array B (64×8 @+0x410). Apply path = scene/spawn population. Reclassify in `opcodes.md`. See §22.3. |
 | 4/57 | `SmsgResponseSlot57` | 28  | thin. |
 | 4/58 | `SmsgResponseSlot58` | 52  | thin → rank/progress. |
 | 4/60 | `SmsgResponseSlot60` | 16  | gate 1; thin → rank/progress. |
 | 4/66 | `SmsgResponseSlot66` | 24  | gate 1; thin → rank/progress. |
 | 4/70 | `SmsgResponseSlot70` | 140 | 140-byte block (medium panel record). |
-| 4/71 | `SmsgResponseSlot71` | 1092| **NOT thin** — 1092-byte block (large structured panel snapshot; reclassify in `opcodes.md`). |
+| 4/71 | `SmsgResponseSlot71` | 1092| **NOT thin** — 1092-byte structured 8-slot relation/party panel: header (subtype@+8) + id array (8×4 @+0x0C) + status array (8×1 @+0x2C) + mirror-relative 80B slot records + 17B name cells. Reclassify in `opcodes.md`. See §22.4. |
 | 4/123| `SmsgResponseSlot123`| 12  | thin → main UI. |
 | 4/125| `SmsgResponseSlot125`| var | thin → main UI. |
 | 4/126| `SmsgResponseSlot126`| 12  | gates 0,1; thin → main UI. |
-| 4/135| `SmsgResponseSlot135`| 80  | 80-byte block → main UI. |
+| 4/135| `SmsgResponseSlot135`| 80  | **Medium record, not thin** — accepted only when the id @+4 = local player; a self-targeted party/roster name+grade refresh (two delimiter-encoded CP949 strings + a `{1,2,3,4}` class selector @+0x4C). See §22.5. |
 | 4/142| `SmsgResponseSlot142`| 28  | thin → main UI. |
 | 4/151| `SmsgResponseSlot151`| var | thin → main UI. |
 | 4/152| `SmsgResponseSlot152`| var | gates 3,101; thin. |
@@ -935,6 +982,36 @@ social/party/rank panel from the block; show a result string on the failure bran
 > **String-id caution.** Some immediates near a large read (e.g. `1092`/`1096` by 4/71,
 > `1552`/`1556` by 4/56) are almost certainly the **read sizes**, not string ids; they are
 > excluded from string-id interpretation above.
+
+### Group I — in-flight latch census (which Response handlers clear the request<->response coupling)
+
+> The "in-flight latch" is the outstanding-request guard a handler clears when it answers a request.
+> It comes in several flavours, all `[confirmed]` (control-flow): the **NetClient enter-game latch**
+> (a byte on the net-client singleton, set on the 1/9 send), the **Diamond main-handler busy latch**
+> (a panel "request pending" byte, the inventory/shop/social/guild UI lock), and the
+> **inventory/item-manager modal-wait guard** (a byte on the item-manager). This census records
+> which handlers clear which; the unlisted handlers clear none.
+
+- **Enter ladder:** `4/1` clears the **NetClient enter-game latch** (first statement, unconditional)
+  — closes `1/9 → 3/5 → 4/1`. **3/5 does NOT clear it.**
+- **Item / equip:** only `4/17` clears the **inventory/item-manager modal-wait guard** (item-manager
+  byte index 2602, at entry). 4/5/4/12/4/16/4/22/4/139 clear only the Diamond modal-wait UI byte on
+  their failure path; 4/50 clears neither (always animates + applies).
+- **Inventory panel:** clear = `4/14` (result 0), `4/15` (failure), `4/21` (result 0), `4/153`
+  (code 255 AND code 0). Do NOT: 4/108, 4/149.
+- **NPC shop:** clear = `4/19` (gate 0), `4/20` (gate 0), `4/74` (always, byte +1), `4/75` (fail).
+  Do NOT: 4/113, 4/114, 4/115.
+- **Trade:** NONE of `4/23`, `4/24`, `4/25` clear a network latch (the trade-state singletons reset
+  only — not a per-opcode network await-latch).
+- **Party / social / interaction:** all nine of 4/30/35/36/37/41/42/43/47/76 clear/dismiss a UI
+  latch **EXCEPT `4/43`** (which handles notices at its tail rather than at entry).
+- **Guild:** clear = 4/54, 4/55, 4/61, 4/62, 4/63, 4/64, 4/65, 4/80, 4/81, 4/82, 4/96. Do NOT:
+  4/83 (arms a billing timer instead), 4/84, 4/103 (pure panel-text push).
+- **Stat:** `4/29` resolves the 2/29 stat-allocate latch via its `ResultOk == 1` gated apply (no
+  separate flag byte cleared inside the handler).
+- **Quest / tracked-item:** none of `4/143`, `4/144`, `4/146` clears a latch.
+- **Structured panels:** `4/48` clears byte +1; `4/56` clears byte +0 on teardown (and at the end of
+  the apply path); `4/71` clears byte +1 in its consumer. `4/4`, `4/500`, `4/50000` clear nothing.
 
 ---
 
@@ -946,9 +1023,9 @@ social/party/rank panel from the block; show a result string on the failure bran
 
 | Opcode | Name | Fixed read | Behaviour (neutral) | Conf |
 |---|---|---|---|---|
-| 5/9  | `SmsgExpGain`                | 32 | actor key; gates 1,2,3,5 + the 300/301 pair; updates experience and shows an exp/gain effect. | size HIGH |
-| 5/10 | `SmsgCharDeath`              | var (20 hdr) | actor key; many state/animation codes (13,16,19,36,80,130,134) + 300/301; plays death animation + sound, sets death state. | MED |
-| 5/11 | `SmsgRankXpGain`             | var (20 hdr) | actor key; gates 2,3,5,7 + 300; adds rank XP and shows the gain. | MED |
+| 5/9  | `SmsgExpGain`                | 32 | actor key; experience-gain gate + the 300/301 pair; updates experience and shows an exp/gain effect. **The exact gate constant is corrected in the m5/progression lane and is value-pending here** — treat the listed `{1,2,3,5}` as provisional until pinned. | size HIGH |
+| 5/10 | `SmsgCharDeath`              | var (20 hdr) | actor key; many state/animation codes (13,16,19,36,80,130,134) + 300/301; plays death animation + sound, sets death state. Gate-constant set corrected/value-pending. | MED |
+| 5/11 | `SmsgRankXpGain`             | var (20 hdr) | actor key; rank-XP gate + 300; adds rank XP and shows the gain. Gate-constant set corrected/value-pending (listed `{2,3,5,7}` provisional). | MED |
 | 5/12 | `SmsgActorVisualSlotSet`     | var (20 hdr) | actor key; gates 0,2,4,12,15 = visual slot ids (15 = title); sets a visual/equipment slot and rebuilds the actor visual. | MED |
 | 5/14 | `SmsgCombatEffectInstanceSpawn` | var (48 body) | actor key; spawns a combat effect instance; effect-id constants select the fx; sound; ground-item tag path. A combat-VFX spawn. | MED |
 | 5/15 | `SmsgTrackedWorldObjectRemove` | var (16 hdr) | actor key; removes a tracked world object / effect instance. | MED |
@@ -962,7 +1039,7 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 5/94 | `SmsgVoteResult`             | var (16 hdr) | vote-result push. | LOW |
 | 5/98 | `SmsgActorClassFormRefresh`  | var (20 hdr) | actor key; refreshes class/form → rank/progress. | MED |
 | 5/106| `SmsgTradeStateToggle`       | var (12 hdr) | actor key; gate 1; toggles trade state; sound + texture + main UI. | MED |
-| 5/121| `SmsgCharPropertySet`        | var | actor key; sets a character property field. | LOW |
+| 5/121| `SmsgCharPropertySet`        | var (8 body) | actor key (sort fixed); **wire field = PropertyValue @ body +0x04**. Write destination = the **live-Actor runtime field `+0x73C`** (a pure runtime property, outside the descriptor window) — **DO-NOT-PROMOTE-AS-WIRE.** | LOW |
 | 5/123| `SmsgGiftCharReceiveConfirm` | 16 | 16-byte gift-character receive confirm → main UI. | size HIGH |
 | 5/126| `SmsgActorStanceSet`         | var (12 hdr) | actor key; sets the actor's stance. | MED |
 | 5/127| `SmsgStealthToggle`          | var (12 hdr) | actor key; gate 0; toggles stealth and rebuilds the actor skin. | MED |
@@ -1046,7 +1123,7 @@ capture-unverified.**
 | 1/20 | `SrvLetterReceived`         | S2C | 76 + lp-string |
 | 3/4  | `SmsgSceneEntityUpdate`     | S2C | var (3B hdr + N×981B) — corrected (minor 4, not 14) |
 | 3/5  | `SmsgEnterGameAck`          | S2C | 44 (40 + 4) — sets GameState=LOADING |
-| 3/6  | `SmsgRenameCharResult`      | S2C | 19 |
+| 3/6  | `SmsgRenameCharResult`      | S2C | 12 — corrected (was 19; handler reads 0xC) |
 | 3/7  | `SmsgCharManageResult`      | S2C | 8 — corrected (minor 7, not 3/4) |
 | 3/14 | `SmsgCharSpawnResponse`     | S2C | 16 — corrected (minor 14, not 3/7) |
 | 3/23 | `SmsgCharStatusBytesByName` | S2C | 28 — corrected (status-bytes-by-name, not CharCreateResult) |
@@ -1058,22 +1135,22 @@ capture-unverified.**
 | 4/4  | `SmsgAreaEntitySnapshot`    | S2C | var (17B hdr + tag loop; bodies 892/24/36/24) |
 | 4/5  | `SmsgItemUseResult`         | S2C | 44 |
 | 4/13 | `SmsgLocalPlayerStateSync`  | S2C | 56 |
-| 4/15 | `SmsgItemWorldPickupAck`    | S2C | var |
+| 4/15 | `SmsgItemWorldPickupAck`    | S2C | 36 — corrected (was var) |
 | 4/16 | `SmsgEquipChangeResult`     | S2C | 20 |
 | 4/17 | `SmsgQuickEquipSlotAck`     | S2C | 16 |
-| 4/19 | `SmsgNpcBuyOrAcquireAck`    | S2C | var |
+| 4/19 | `SmsgNpcBuyOrAcquireAck`    | S2C | 56 — corrected (was var); serves 2/19 AND 2/115 |
 | 4/20 | `SmsgNpcSellItemAck`        | S2C | 24 |
 | 4/21 | `SmsgNpcShopSlotClearAck`   | S2C | 12 |
-| 4/22 | `SmsgItemSlotStateAck`      | S2C | var |
-| 4/24 | `SmsgUserTradeSlotUpdate`   | S2C | var |
-| 4/25 | `SmsgUserTradeFullResponse` | S2C | 28 (+16) |
+| 4/22 | `SmsgItemSlotStateAck`      | S2C | 36 — corrected (was var) |
+| 4/24 | `SmsgUserTradeSlotUpdate`   | S2C | 44 — corrected (was var) |
+| 4/25 | `SmsgUserTradeFullResponse` | S2C | 28 + N×16 (Count@+0x18) |
 | 4/28 | `SmsgRespawnConfirm`        | S2C | 20 |
 | 4/30 | `SmsgSocialPanelTarget`     | S2C | 20 |
 | 4/35 | `SmsgPartyInviteState`      | S2C | 56 |
 | 4/36 | `SmsgPartyMemberRemoveResult`| S2C | 56 |
 | 4/37 | `SmsgPartyLeaderActionResult`| S2C | 56 |
 | 4/39 | `SmsgDiscard39`             | S2C | 32 |
-| 4/40 | `SmsgResponseSlot40`        | S2C | var |
+| 4/40 | `SmsgResponseSlot40`        | S2C | 164 — corrected (was var) |
 | 4/41 | `SmsgSkillHotbarAssignResult`| S2C | 24 |
 | 4/42 | `SmsgPlayerInteractionState`| S2C | 56 |
 | 4/43 | `SmsgPlayerInteractionResult`| S2C | 60 |
@@ -1083,7 +1160,7 @@ capture-unverified.**
 | 4/47 | `SmsgSocialAckDrain`        | S2C | 16 |
 | 4/48 | `SmsgRankProgressEvent`     | S2C | 236 |
 | 4/49 | `SmsgRankProgressPanelUpdate`| S2C | 32 |
-| 4/50 | `SmsgUpgradeItemResult`     | S2C | var |
+| 4/50 | `SmsgUpgradeItemResult`     | S2C | 32 — corrected (was var) |
 | 4/54 | `SmsgGuildRankSlotUpdate`   | S2C | 44 |
 | 4/55 | `SmsgGuildInfoUpdateResult` | S2C | 44 |
 | 4/56 | `SmsgResponseSlot56`        | S2C | 1552 |
@@ -1097,8 +1174,8 @@ capture-unverified.**
 | 4/70 | `SmsgResponseSlot70`        | S2C | 140 |
 | 4/71 | `SmsgResponseSlot71`        | S2C | 1092 |
 | 4/72 | `SmsgResponseSlot72`        | S2C | 40 |
-| 4/74 | `SmsgResponseSlot74`        | S2C | 36 |
-| 4/75 | `SmsgResponseSlot75`        | S2C | 184 |
+| 4/74 | `SmsgStallListRefill`       | S2C | var — corrected (was 36; list of (size−14)/36 records) |
+| 4/75 | `SmsgProductPurchaseResultPanel` | S2C | 184 |
 | 4/76 | `SmsgPartyAcceptResult`     | S2C | 52 |
 | 4/78 | `SmsgServerTimeNotification`| S2C | 12 |
 | 4/79 | `SmsgCraftingResult`        | S2C | var |
@@ -1115,10 +1192,10 @@ capture-unverified.**
 | 4/107| `SmsgEventLotteryPickResult` | S2C | var (28 hdr) |
 | 4/113| `SmsgItemShopPurchaseResult` | S2C | 12 |
 | 4/114| `SmsgCashShopActionResult`   | S2C | 12 |
-| 4/115| `SmsgItemShopBalanceUpdate`  | S2C | var (24 hdr) |
+| 4/115| `SmsgItemShopBalanceUpdate`  | S2C | 24 — corrected (was var (24 hdr)) |
 | 4/120| `SmsgActorTableBatchResult`  | S2C | var |
 | 4/123| `SmsgResponseSlot123`        | S2C | 12 |
-| 4/125| `SmsgResponseSlot125`        | S2C | var |
+| 4/125| `SmsgResponseSlot125`        | S2C | none — corrected (reads nothing; was var) |
 | 4/126| `SmsgResponseSlot126`        | S2C | 12 |
 | 4/132| `SmsgGMNoticeError`          | S2C | 12 |
 | 4/133| `SmsgRankProgressUpdate`     | S2C | 12 |
@@ -1287,9 +1364,21 @@ byte. MED (only one builder traced). Server echoes via S2C 5/13.
 `+0x00` Sort `u8` (a wire value of 8 is normalised to 1), `+0x01..+0x03` pad, `+0x04` ActorId
 `u32`, **`+0x08/+0x09` = unused filler** (CORRECTION: the YAML's "Byte08/Byte09 record fields"
 overstates them — they are read but never consumed), `+0x0A` LevelOrState `u8`, `+0x0B`
-StateByte `u8`, `+0x0C` PartnerId `u32` (couple system, when Sort==2), `+0x10` CurrentHp `u32`,
-**`+0x14` CurrentMp `u32`** (CORRECTION: resolves "VitalB order unconfirmed" — this is MP),
-`+0x18` Stamina `u32`, `+0x1C` VitalC `u32`. Final order HP/MP/Stamina/VitalC is HIGH.
+StateByte `u8`, `+0x0C` PartnerId `u32` (couple system, when Sort==2), then the vitals:
+**`+0x10..+0x17` HP `i64`** (one 64-bit HP qword: HP-low dword @+0x10, HP-high dword @+0x14),
+**`+0x18` VitalB `u32`** (the MP/stamina-class vital), `+0x1C` VitalC `u32`.
+**CORRECTION (binary wins): `+0x10` and `+0x14` are the LOW and HIGH halves of ONE 64-bit HP value,
+NOT two independent HP/MP u32s.** The handler's clamp operates on the QWORD at the live actor's HP
+field and sign-clamps both dwords together on overflow, proving `+0x14` is HP-high. The separate
+vital (MP/stamina) is the next dword at `+0x18`, clamped on its own. Model 5/53 as
+`{ HP i64 @+0x10 | VitalB u32 @+0x18 | VitalC u32 @+0x1C }`. The MP-vs-stamina identity of VitalB
+stays `[capture/debugger-pending]`.
+
+**RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE):** the handler writes these to the live-Actor
+runtime fields HP-low → Actor `+0xB0`, HP-high → Actor `+0xB4`, VitalB → Actor `+0xB8` (VitalC goes
+to a global, not an actor field). **Those Actor offsets are runtime-object destinations — not 5/53
+wire fields.** 5/53 delivers the vitals through its own flat 32-byte body; the wire offsets are
+`+0x10/+0x18/+0x1C` above.
 
 ### 17.8 5/32 `SmsgLevelUp` — fixed read 48 — **correction (rank-XP tail)**
 `+0x00` Sort `u8`, `+0x01..+0x03` pad, `+0x04` ActorId `u32`, `+0x08` NewLevel `u16`
@@ -1337,6 +1426,9 @@ YAML's "SkillArg u32 @+0x10": +0x0C = SkillId, +0x10 low byte = ActionCode.
 (`==6`/`==7` ⇒ whisper), `+0x0F` reserved `u8`, `+0x10` SenderName CP949 `char[20]`
 (+0x10..+0x23), then **body = length-prefixed text** at `+0x24`. **REFINEMENT:** the body is a
 length-prefixed block (matching the C2S chat senders), NOT "rest of frame". CP949 (unverified).
+**Length convention (corrected): the prefix length EXCLUDES the NUL (length = strlen)** — 5/7 is
+the lone exclude-NUL chat outlier alongside C2S 2/7 (contrast 2/83 / 3/21 below, whose
+`len = strlen + 1` includes the NUL).
 
 ### 17.13 C2S chat framing (2/83, 3/21) — confirmations
 - **2/83 `CmsgChatContextual`:** 24-byte opaque ContextHeader + `[u32 len][text]` body
@@ -1525,13 +1617,15 @@ with per-entry flag byte-vectors after it), except 4/48 which uses **interleaved
 
 - **5/68 `SmsgQuestList` (452-byte body) — parallel-arrays, STRUCTURE-HIGH.** The body is **not**
   one id-array + one name-array; the consumer parses **three header flag bytes**, then **two
-  10-element state/flag byte-vectors**, then a **20-element `u32` quest-id array**, then a
-  **20-entry CP949 name array at a 17-byte stride** (NUL forced at byte 16). Section order
-  (payload-relative): 3 header flags at `+8..+0x0A`; vector A `byte[10]` at `+0x0B`; vector B
-  `byte[10]` at `+0x15`; quest ids `u32[20]` at `+0x20`; names `char[20][17]` at `+0x70` — ending
-  exactly at 452 (clean fit). **Correction to §4 (5/68):** the name stride is **17**, not the
-  "~32" the first pass carried — the 32 is the *destination* mirror struct's per-entry stride, not
-  the wire. ids and names are parallel blocks (ids fully precede names), not interleaved.
+  10-element state/flag byte-vectors**, then a **`u32` quest-id array**, then a **CP949 name array at
+  a 17-byte stride** (NUL forced at byte 16). **Quest-record COUNT is 10 (corrected from "20").**
+  Section order (payload-relative): 3 header flags at `+8..+0x0A`; vector A `byte[10]` at `+0x0B`;
+  vector B `byte[10]` at `+0x15`; quest ids `u32[10]` at `+0x20`; names `char[10][17]` after the id
+  block. **Correction to §4 (5/68):** the name stride is **17**, not the "~32" the first pass
+  carried — the 32 is the *destination* mirror struct's per-entry stride, not the wire; and the
+  element count is **10**, not 20. ids and names are parallel blocks (ids fully precede names), not
+  interleaved. (With count 10 the parsed arrays do not span the full 452-byte read; the trailing
+  bytes are the unread remainder of the snapshot — `[capture/debugger-pending]`.)
 
 - **5/73 `SmsgQuestComplete` / (name-dispute) `SmsgGuildWarInfoUpdate` (344-byte body) — verdict
   header + 10-row table; name UNRESOLVED.** The handler reads a **4-byte branch selector at `+8`**
@@ -1556,18 +1650,17 @@ with per-entry flag byte-vectors after it), except 4/48 which uses **interleaved
   `+386..+399` (14 bytes) are untouched** by this consumer — trailing pad or extra fields,
   `[capture/debugger-pending]`.
 
-- **4/48 `SmsgRankProgressEvent` (236-byte body) — interleaved records, with a flagged overrun.**
+- **4/48 `SmsgRankProgressEvent` (236-byte body) — interleaved records, NO overrun (RESOLVED).**
   The handler forwards `body + 12` to the panel parser, so the **first 12 bytes are a header
   consumed upstream** (a route/branch byte at `+8`, a sub-select byte at `+9`). The panel then
-  walks an **8-entry record array at a 28-byte stride** beginning at `+0x18`. Per record (record
-  base `E = +0x18 + i·28`): presence/id key `u32` at `E+0` (zero ⇒ empty slot → blank labels);
-  CP949 name `char[18]` at `E+4`; numeric field A `i16` at `E+22`; numeric field B `i16` at
-  `E+24`. **`[UNVERIFIED]` discrepancy to carry:** the record array spans `+0x18 + 8·28 = +248`,
-  which **overruns the 236-byte read by 12 bytes**. The 28-byte stride and 8-count are
-  `STRUCTURE-HIGH`, but the body-vs-array arithmetic does **not** close — either the routed frame
-  carries more than 236 bytes, or fewer than 8 records actually populate, or the wire stride
-  differs from the in-memory walk. Do not commit a `packets/*.yaml` for 4/48 until this is
-  reconciled.
+  walks an **8-entry record array at a 28-byte stride beginning at `+0x0C`** (the record base, NOT
+  `+0x18`). Per record (record base `E = +0x0C + i·28`): presence/id key `u32` at `E+0` (zero ⇒
+  empty slot → blank labels); CP949 name cell at `E+4`; numeric field A `i16` at `E+0x16`; numeric
+  field B `i16` at `E+0x18`. **The earlier flagged overrun is REFUTED:** `12 (header) + 8 × 28 (224)
+  = 236` closes EXACTLY. The prior "+0x18 → +248, overruns by 12" reading double-counted the 12-byte
+  header (once for the `block + 12` forward, again starting the array at +0x18); the record array
+  actually begins at +0x0C and the eight records fit precisely. 28-byte stride and 8-count are
+  `STRUCTURE-HIGH`; this resolves the §20.4 reconciliation that previously blocked a `packets/*.yaml`.
 
 ## 21. 4/4 `SmsgAreaEntitySnapshot` — 892-byte actor-record framing (binary-confirmed)
 
@@ -1625,15 +1718,15 @@ cell 3 at `+106`, cell 4 at `+155` — `+155 + 49 = +204`, exact fit, no trailin
 must be reclassified out of the thin-slot family (§6/§13 Group H). A subtype byte at `+8` selects
 the structured path (`== 1`) vs a UI teardown; the structured consumer copies the full 1552 bytes
 and walks a **64-entry dual-array transform table**: **transform array A** = **64 × 16-byte
-records** (4 × `u32`, e.g. a per-slot position/transform) with a **solid byte base at `+16`**;
-**transform array B** = **64 × 8-byte records** (2 × `u32`, e.g. rotation/state) in the **`+1040`
-region**. The loop is unambiguously **64 iterations** (a 3072-byte span over a 48-byte combined
-advance). A leading scalar block carries the subtype at `+8` and an actor id at `+12`. The total
-size (1552), the `+8` subtype, the actor id at `+12`, and the 64-trip arrays are
-`STRUCTURE-HIGH`; **the array-B byte base (`+1040` region) is a static hypothesis** (a
-dword-vs-byte pointer ambiguity, debugger-confirmable) and array A's `+16` base is solid. This is
-effectively a scene/spawn-population block routed through a guild-family slot. The `1552`/`1556`
-immediates near the read are the **read size**, not a string id.
+records** (4 × `u32`, e.g. a per-slot position/transform) with a **solid byte base at `+0x10`**;
+**transform array B** = **64 × 8-byte records** (2 × `u32`, e.g. rotation/state) at **`+0x410`**.
+The loop is unambiguously **64 iterations** (a 3072-byte span over a 48-byte combined advance);
+array A advances 16 bytes/record, array B advances 8. Layout closes exactly: A = `+0x10..+0x410`
+(1024), B = `+0x410..+0x610` (512) → `+0x610 = 1552`, no gap, no tail. A leading scalar block
+carries the subtype at `+8` and an actor id at `+0x0C`. **Array B's base is now SOLID:** it is a
+clean dword index `+260` = byte `+0x410` (the earlier dword-vs-byte "static hypothesis / debugger-
+confirmable" caveat is RESOLVED). This is effectively a scene/spawn-population block routed through
+a guild-family slot. The `1552`/`1556` immediates near the read are the **read size**, not a string id.
 
 ### 22.4 — 4/71 `SmsgResponseSlot71` — **RECLASSIFY (NOT a thin slot)** — STRUCTURE-HIGH
 **Also not a thin slot — it is a structured ~1092-byte panel snapshot.** A subtype byte at `+8`

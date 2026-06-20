@@ -41,7 +41,13 @@ notes: |
   SPAWNDESCRIPTOR (880 bytes, 0x0c..0x39b): the same descriptor record shared with 5/3 CharSpawn
   and the 3/1 character-list slot record. Known landmarks inside it (relative to the descriptor
   start) include a name region, a model id, and current vitals / position fields. Its full member
-  map is a struct-cartographer task; drive the decode from structs/actor.md once that lands.
+  map is a struct-cartographer task; drive the decode from structs/spawn_descriptor.md once that lands.
+
+  WORLD-POSITION WIRE OFFSET (per-opcode, CONFIRMED): world_x is at descriptor +0x4C and world_z at
+  descriptor +0x50. Because THIS opcode's descriptor sits at frame +0x0C (a 12-byte prefix), the world
+  floats land at WIRE +0x58 (world_x) and +0x5C (world_z) -- NOT +0x54/+0x58. The 4-byte-larger prefix
+  vs 5/3 / 4/4 (which use an 8-byte prefix, world at wire +0x54/+0x58) is exactly what shifts them. Do
+  not apply a single +0x54/+0x58 rule across all three spawn carriers.
 
   TRAILER (20 bytes, 0x37c..0x38f): visual / combat flag bytes consumed individually (a combat flag
   near the start of the trailer, then visual / stealth state bytes toward the tail).

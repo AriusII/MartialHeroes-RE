@@ -1,22 +1,24 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# Source spec: c2s_market_mail.md §8 (product CONFIRM -- the 4-byte purchase confirm, distinct from the
-# 1-byte 2/151). Role: the cash-shop / product (Goods) panel's purchase-confirm send.
+# Role: the cash-shop / product (Goods) panel's item / PRODUCT process-confirm send.
 #
-# DUPLICATE-OPCODE NOTE: a separate file packets/2-153_pet_summon.yaml also claims opcode 2/153 with a
-# different role (pet/mount summon, same 4-byte size + 60s cooldown). These are two readings of the SAME
-# minor; the product-confirm reading here is the B6 market/mail lane finding. The canonical 2/153
-# attribution (product-confirm vs pet-summon) is a Tier-1 reconciliation -- both are flagged, neither is
-# silently dropped. [collision -- pending Tier-1 arbitration]
+# THIS IS THE LIVE, AUTHORITATIVE 2/153 SPEC. The competing CmsgPetSummon reading is REFUTED (binary
+# wins): there is exactly ONE builder that stamps (2,153) and exactly ONE payload shape (this fixed
+# 4-byte record); the four bytes are item-slot / occupancy / quantity selectors read from an inventory
+# item-process panel (MainWindow slot 205, via a panel button click and the MainWindow dispatcher's
+# case 87 menu route) — an item / product process-confirm, not a summon. The 60-second cooldown the pet
+# reading observed is real, but it is this send's per-commit throttle. packets/2-153_pet_summon.yaml is
+# now a tombstone redirecting here.
 #
-# CAPTURE-UNVERIFIED: the 4-byte size, the 4x u8 shape, and the post-send 60-second client cooldown are
-# control-flow CONFIRMED; the per-byte VALUE meanings are capture/debugger-pending. capture_verified: false.
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size + 4x u8 shape + 60s post-send client cooldown: control-flow CONFIRMED
+#   per-byte VALUE meanings + reply opcode: capture/debugger-pending. capture_verified: false.
 
 name: CmsgProductConfirm
 opcode: 0x20099           # major 2 (GameAction), minor 153 (0x99) -> (2 << 16) | 153
 direction: C2S
 size: 4                   # FIXED 4-byte body: four distinct u8 selection bytes
 spec: packets/2-153_product_confirm.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >
@@ -54,16 +56,18 @@ notes: |
   CLIENT-SIDE GATE (informational, not wire fields): a modal-busy guard before send; a 60-second
   client cooldown stamped after send.
 
-  EXPECTED S2C REPLY: a purchase result + inventory / balance update (the product/billing result
-  family). The product-list / money refresh side rides S2C 3/8 SmsgShopPageUpdate (per the 2/151 pair).
-  The exact 2/153 reply minor is [pending].
+  EXPECTED S2C REPLY [capture/debugger-pending]: the builder stamps no reply opcode and installs no
+  await, so the answering minor cannot be settled statically. The best-evidenced hypothesis, given the
+  item-process UI path, is the item/product-result family 4/113 SmsgItemShopPurchaseResult /
+  4/114 SmsgCashShopActionResult / 4/115 SmsgItemShopBalanceUpdate. The product-list / money refresh
+  side rides S2C 3/8 SmsgShopPageUpdate (per the 2/151 pair).
 
-  CROSS-REF: 2/151 CmsgProductBuy (packets/2-151_product_buy.yaml). The competing pet-summon reading of
-  this same minor lives at packets/2-153_pet_summon.yaml (CmsgPetSummon) -- see the DUPLICATE-OPCODE
-  note in the header.
+  CROSS-REF: 2/151 CmsgProductBuy (packets/2-151_product_buy.yaml) is the 1-byte open/refresh + confirm
+  command on the same Goods panel. packets/2-153_pet_summon.yaml is a tombstone redirecting here (the
+  CmsgPetSummon reading of this minor is refuted).
 
   UNKNOWNS (capture-pending): the per-byte meanings (SelectA/SelectB/Checkbox/Quantity); the exact S2C
-  reply; final 2/153 canonical role (product-confirm vs pet-summon collision).
+  reply (4/113/4/114/4/115 is the working hypothesis).
 
-  UNBLOCKS: the Client.Application cash-shop purchase-confirm use-case (a fixed 4-byte send + a 60s
-  client cooldown), pending the collision arbitration.
+  UNBLOCKS: the Client.Application cash-shop / item process-confirm use-case (a fixed 4-byte send + a
+  60s client cooldown).

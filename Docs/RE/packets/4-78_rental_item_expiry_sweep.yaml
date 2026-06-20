@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 12-byte body (a server-time value
+#                 @+0x08 fed into the inventory rental-item expiry sweep) are control-flow-confirmed; the
+#                 time value's units / epoch are capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED ROLE. A prior catalogue read this as a ServerTimeNotification (a clock / UI
+#              panel). The binary shows the u32 @+0x08 is a server time value fed into the inventory
+#              RENTAL-ITEM EXPIRY SWEEP -- not a clock display. Size 12 confirmed.
+
+name: SmsgRentalItemExpirySweep
+opcode: 0x4004e           # major 4 (Response), minor 78 -> (4 << 16) | 78
+direction: S2C
+size: 12                  # fixed 12-byte body
+spec: packets/4-78_rental_item_expiry_sweep.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server delivers a current server-time value that the client feeds into an inventory rental-item expiry sweep (expiring time-limited / rental items whose deadline has passed). A flat 12-byte body; this is not a clock / UI-panel update.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 12.
+fields:
+  - { name: Head,       type: "bytes[8]" }   # 0x00  leading region read before the time value (opaque)
+  - { name: ServerTime, type: u32 }          # 0x08  server time value, fed into the rental-item expiry sweep
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 12-byte body and the ServerTime read at +0x08. CAPTURE-UNVERIFIED
+  for the time value's units / epoch.
+
+    0x08 (4B) ServerTime : a server time value. The handler feeds it into an inventory rental-item
+                           expiry sweep -- it walks the local player's time-limited / rental items and
+                           expires those whose deadline this time value has passed.
+
+  ROLE CORRECTION: this is NOT a clock / on-screen time panel. Its single decoded field drives the
+  rental-item expiry sweep.
+
+  UNKNOWN to resolve with a capture: the time value's units (seconds vs another tick) and epoch.

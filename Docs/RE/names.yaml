@@ -1529,7 +1529,7 @@ functions:
   "0x5ec52b": { name: "SmsgActorTickTableOpB", note: "" }
   "0x5ec573": { name: "SmsgActorTickTableOpC", note: "" }
   "0x5ec5bb": { name: "SmsgResponseSlot57", note: "" }
-  "0x5ec603": { name: "SmsgResponseSlot74", note: "" }
+  "0x5ec603": { name: "SmsgStallListRefill", note: "" }
   "0x5ec6b5": { name: "SmsgServerTimeNotification", note: "" }
   "0x5ec6da": { name: "SmsgLocalActorSkillStateFlag", note: "" }
   "0x5ec71c": { name: "SmsgActorTableBatchResult", note: "" }
@@ -1539,9 +1539,9 @@ functions:
   "0x5ec954": { name: "SmsgUserTradeFullResponse", note: "" }
   "0x5eca71": { name: "SmsgUpgradeItemResult", note: "" }
   "0x5ecac8": { name: "SmsgResponseSlot40", note: "" }
-  "0x5ecb35": { name: "SmsgResponseSlot71", note: "" }
+  "0x5ecb35": { name: "SmsgRelationPartyPanelSnapshot", note: "" }
   "0x5ecb90": { name: "SmsgUserTradeSlotUpdate", note: "" }
-  "0x5ecc1e": { name: "SmsgResponseSlot56", note: "" }
+  "0x5ecc1e": { name: "SmsgSceneEnterSpawnSnapshot", note: "" }
   "0x5eccb8": { name: "SmsgItemSlotStateAck", note: "" }
   "0x5ecd17": { name: "SmsgNpcSellItemAck", note: "" }
   "0x5ecda5": { name: "SmsgActorVisualSlotSet", note: "" }
@@ -3543,7 +3543,7 @@ opcodes:
   0x30008: { name: "SmsgShopPageUpdate", direction: "S2C", tuple: "3:8" }
   0x3000d: { name: "SmsgCharStatusUpdate", direction: "S2C", tuple: "3:13" }
   0x3000e: { name: "SmsgCharSpawnResponse", direction: "S2C", tuple: "3:14" }
-  0x30017: { name: "SmsgCharCreateResult", direction: "S2C", tuple: "3:23" }
+  0x30017: { name: "SmsgCharStatusBytesByName", direction: "S2C", tuple: "3:23" }
   0x30064: { name: "SmsgCharActionResult", direction: "S2C", tuple: "3:100" }
   0x3c350: { name: "SmsgGmChatMessage", direction: "S2C", tuple: "3:50000" }
   0x40001: { name: "SmsgGameStateTick", direction: "S2C", tuple: "4:1" }
@@ -3584,7 +3584,7 @@ opcodes:
   0x40032: { name: "SmsgUpgradeItemResult", direction: "S2C", tuple: "4:50" }
   0x40036: { name: "SmsgGuildRankSlotUpdate", direction: "S2C", tuple: "4:54" }
   0x40037: { name: "SmsgGuildInfoUpdateResult", direction: "S2C", tuple: "4:55" }
-  0x40038: { name: "SmsgResponseSlot56", direction: "S2C", tuple: "4:56" }
+  0x40038: { name: "SmsgSceneEnterSpawnSnapshot", direction: "S2C", tuple: "4:56" }
   0x40039: { name: "SmsgResponseSlot57", direction: "S2C", tuple: "4:57" }
   0x4003a: { name: "SmsgResponseSlot58", direction: "S2C", tuple: "4:58" }
   0x4003c: { name: "SmsgResponseSlot60", direction: "S2C", tuple: "4:60" }
@@ -3595,9 +3595,9 @@ opcodes:
   0x40041: { name: "SmsgGuildInfoFullSync", direction: "S2C", tuple: "4:65" }
   0x40042: { name: "SmsgResponseSlot66", direction: "S2C", tuple: "4:66" }
   0x40046: { name: "SmsgResponseSlot70", direction: "S2C", tuple: "4:70" }
-  0x40047: { name: "SmsgResponseSlot71", direction: "S2C", tuple: "4:71" }
+  0x40047: { name: "SmsgRelationPartyPanelSnapshot", direction: "S2C", tuple: "4:71" }
   0x40048: { name: "SmsgResponseSlot72", direction: "S2C", tuple: "4:72" }
-  0x4004a: { name: "SmsgResponseSlot74", direction: "S2C", tuple: "4:74" }
+  0x4004a: { name: "SmsgStallListRefill", direction: "S2C", tuple: "4:74" }
   0x4004b: { name: "SmsgResponseSlot75", direction: "S2C", tuple: "4:75" }
   0x4004c: { name: "SmsgPartyAcceptResult", direction: "S2C", tuple: "4:76" }
   0x4004e: { name: "SmsgServerTimeNotification", direction: "S2C", tuple: "4:78" }

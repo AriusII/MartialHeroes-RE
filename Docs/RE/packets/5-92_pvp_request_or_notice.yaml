@@ -1,7 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONFIRMED offsets/sizes (control-flow; copy-out widths are literal). Field VALUE MEANINGS likely /
-# opaque. capture_verified: false.
-# spec: Docs/RE/packets/5-92_pvp_request_or_notice.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 40-byte body, and the field decode --
+#                 sort@0x00 / id@0x04 / value-A@0x08 / value-B@0x0C / target-id@0x10 / CP949 name @0x14 --
+#                 are control-flow-confirmed; this body is NOT an opaque blit; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. The deep struct pass confirmed 5/92 field-decodes its 40-byte block into the shared
+#              PvP-state object (the target id @0x10 is compared against the local player) -- NOT
+#              opaque-forward. This file already reflects that.
 
 name: SmsgPvpRequestOrNotice
 opcode: 0x5005c           # major 5 (Push), minor 92 -> (5 << 16) | 92

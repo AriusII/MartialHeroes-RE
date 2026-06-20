@@ -1,44 +1,73 @@
 # spec: Docs/RE/packets/2-75_roster_assemble.yaml
-# Role: C2S multi-actor roster assemble — fixed 80-byte body with a 10-id actor list (cap 20).
+# Role: C2S resident-panel record submit — a fixed 80-byte body copied verbatim from a HUD panel buffer.
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the interior layout is largely opaque.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size + the +0x04 arm-flag write: control-flow CONFIRMED
+#   interior field split (beyond +0x05) + all VALUEs: capture/debugger-pending. capture_verified: false.
+#
+# CORRECTION (W5.1 body-struct recovery — binary wins): the earlier "8-byte header + 10-entry actor-id
+# list (cap 20) + 32-byte tail" model is WITHDRAWN. The 80-byte body is NOT field-assembled at the send
+# path — it is a resident 80-byte panel sub-struct copied VERBATIM (a 20-dword block copy) out of a HUD
+# panel object's live buffer. Only the +0x04 arm/status byte is field-confirmed (stamped to 1 just before
+# the copy); the remainder is interior-resident UI state (it mixes ids and width-17 CP949 name cells, but
+# the exact split is not recoverable from the send site).
 
 name: CmsgRosterAssemble
 opcode: 0x2004b           # major 2 (GameAction), minor 75 -> (2 << 16) | 75
 direction: C2S
-size: 80                  # fixed 80-byte body
+size: 80                  # fixed 80-byte body (0x50) — a verbatim resident-panel sub-struct
 spec: packets/2-75_roster_assemble.yaml
 status: hypothesis
 capture_verified: false
 
-summary: A roster / party / pet-group assemble request carrying up to 10 actor ids (validated to exist and not exceed a 20-member cap). A fixed 80-byte body: an 8-byte header, a 10-entry actor-id list, and a 32-byte trailing block. Driven by a Goods/roster panel commit.
+summary: >
+  A roster / social-panel "assemble" request. The builder appends exactly 80 bytes of a caller-supplied
+  record after the header. The record is a RESIDENT 80-byte sub-struct copied verbatim from a HUD panel
+  object's live buffer (the panel maintains it as UI state and snapshots it onto the stack just before
+  send). Only the +0x04 arm/status byte is field-confirmed at the send path; the rest is opaque interior
+  panel state (ids + CP949 width-17 name cells, exact split not recoverable statically). Driven by a
+  goods/roster panel commit (three reach sites). Contract class: Request -> async-channel (no installed
+  same-minor ack; the reply rides a roster/social push, capture-pending).
 
-# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 80.
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 80. The interior beyond the
+# +0x04 arm-flag is opaque at field level (it is a verbatim copy of a resident panel record, NOT an
+# assembled-at-send DTO), so it is modelled as one opaque remainder block.
 fields:
-  - { name: Header,    type: "u8[8]" }     # 0x00  leading id + flags [capture/debugger-pending]
-  - { name: ActorIds,  type: "u32[10]" }   # 0x08  actor-id list (validated against ActorManager; cap 20) [capture/debugger-pending]
-  - { name: Tail,      type: "u8[32]" }    # 0x30  trailing block (8 x u32) [capture/debugger-pending]
+  - { name: RecordHead,    type: u32 }          # 0x00  first dword of the resident record (snapshot start) [capture/debugger-pending]
+  - { name: ArmFlag,       type: u8 }           # 0x04  send-arm / status byte; stamped to 1 just before the verbatim copy (CONFIRMED write of 1) [value capture/debugger-pending]
+  - { name: RecordRemainder, type: "u8[75]" }   # 0x05  remainder of the 80-byte resident panel sub-struct: mixes ids + CP949 width-17 name cells; exact split not recoverable from the send path [capture/debugger-pending]
 
 notes: |
-  CONTROL-FLOW CONFIRMED body size (a single fixed 80-byte blit = 20 x u32); the validator confirms
-  the 10-entry actor-id list at offset 0x08 and the 20-member cap. The field VALUES are static
-  inferences (capture-pending).
+  CONTROL-FLOW CONFIRMED body size (a single fixed 80-byte / 0x50 verbatim blit = a 20-dword block copy
+  from a panel object's resident buffer). What is field-level confirmed at the send path:
 
-    0x00 (8B)  Header   : a leading id + flags region. [capture/debugger-pending]
-    0x08 (40B) ActorIds : a list of up to 10 actor ids; the validator iterates these, counts living
-                          actors via the actor manager, and rejects if the count plus an existing
-                          roster would exceed 20. [capture/debugger-pending]
-    0x30 (32B) Tail     : a trailing block (8 x u32). [capture/debugger-pending]
+    0x00 (4B)  RecordHead      : the first dword of the resident record (the snapshot start). Its meaning
+                                 is interior panel state. [capture/debugger-pending]
+    0x04 (1B)  ArmFlag         : a send-arm / status byte. One send path stamps this byte to 1
+                                 immediately before the verbatim copy — a "this record is now armed /
+                                 submitted" marker. CONFIRMED (write of 1); value semantics pending.
+    0x05 (75B) RecordRemainder : the rest of the resident 80-byte panel sub-struct. The surrounding panel
+                                 code performs width-17 CP949 name strncpy's and id resolves, so the
+                                 remainder mixes ids and CP949 name cells — but the EXACT split is not
+                                 recoverable from the send path: it is built incrementally by the panel's
+                                 many list-fill / name-entry paths, spread across a large panel handler.
+                                 [capture/debugger-pending]
 
-  ACTOR-KEY ORDER NOTE: the dominant C2S actor composite-key order is sort-byte @+0 then id u32 @+4;
-  here the list is a flat array of resolved actor ids (10 x u32), each validated against the actor
-  manager.
+  Byte-total reconciliation: 4 + 1 + 75 = 80. CONFIRMED.
 
-  TRIGGER: a Goods/roster panel commit (and the social re-ask panel) — raised by confirming a
-  roster/group panel with a selected set of actors.
+  WHY OPAQUE: the record is a resident panel struct living in the panel object's own buffer, not
+  assembled at the send site. Recovering each interior field requires tracing the panel's fill logic
+  (name-entry widgets, roster-row selects) or a live read of the panel's resident record window while
+  the panel is populated — an embedded-struct-on-a-UI-object question, not a wire-layout one.
 
-  UNKNOWNS to resolve with a capture:
-    - the Header and Tail field breakdown and the exact roster type (party / pet-group / other);
-    - the inbound reply opcode (roster/group state S2C) — pending.
+  TRIGGER: a goods/roster panel commit (three reach sites). Contract class Request -> async-channel; no
+  installed same-minor ack — the reply rides a roster/social push (capture-pending).
 
-  UNBLOCKS: Client.Application multi-actor roster assemble use-case.
+  UNKNOWNS to resolve with a capture / live panel-fill trace:
+    - the interior field split beyond the +0x04 arm-flag (ids vs CP949 name cells);
+    - the inbound reply opcode (roster/social state S2C) — pending.
+
+  UNBLOCKS: Client.Application roster-assemble use-case (frame the 80-byte verbatim record; stamp the
+  +0x04 arm byte to 1 on submit).

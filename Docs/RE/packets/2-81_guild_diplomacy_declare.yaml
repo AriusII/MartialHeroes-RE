@@ -1,6 +1,12 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED VALUE semantics; the fixed 18-byte body size and the action + target-name layout
 # are control-flow CONFIRMED from the guild-diplomacy send path. capture_verified: false.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size (18) + action/name split: control-flow CONFIRMED
+#   reply attribution: CORRECTED (binary wins) — the substantive verdict is 4/61 SmsgGuildStateChangeResult
+#   (52-byte body), NOT 4/81. Response slot 81 holds a generic action-error result, not a diplomacy reply.
+#   value semantics: capture/debugger-pending.
 
 name: CmsgGuildDiplomacyDeclare
 opcode: 0x20051           # major 2 (GameAction), minor 81 -> (2 << 16) | 81
@@ -40,10 +46,14 @@ notes: |
   with the list-request action and the local player name. Whether the pure list-fetch uses a distinct
   minor from the declaration (both observed on the shared 18-byte / 2/81 path) is capture-pending.
 
-  RELATIONSHIP: the SERVER REPLY is S2C 4/81 SmsgGuildDiplomacyResult
-  (packets/4-81_guild_diplomacy_result.yaml), which carries the result / error code and (on success)
-  the relation roster body that the panel re-applies. The static-display guild-WAR info window is a
-  separate panel fed by S2C 5/73 SmsgGuildWarInfoUpdate.
+  RELATIONSHIP (reply attribution CORRECTED — binary wins): the substantive SERVER REPLY is the guild
+  state-change verdict at S2C response slot 4/61 (SmsgGuildStateChangeResult, a 52-byte body: a CP949
+  guild-name cell, a result code, an action code, and an action==5/result==2 cooldown-in-days message).
+  The naive 2/81 -> 4/81 mirror is REFUTED: response slot 81 holds a GENERIC action-error result, NOT a
+  guild-diplomacy result (whether 4/81's generic error also fires on diplomacy failures is
+  capture-pending). The major-4 yaml carries that 4/61 layout — do not key off 4/81 for this reply.
+  (Also note: S2C 5/73 is SmsgQuestComplete by binary-wins, NOT a guild-war info update — the prior
+  "static-display guild-WAR window fed by 5/73 SmsgGuildWarInfoUpdate" note is withdrawn.)
 
   UNKNOWNS to resolve with a guild-diplomacy capture (body size is settled at 18; these are VALUE
   questions):

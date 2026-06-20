@@ -1,44 +1,56 @@
 # spec: Docs/RE/packets/2-120_event_item_list_submit.yaml
-# Role: C2S event-item list submit — count-prefixed [u8 flag][u32 N][12B record x N].
+# Role: C2S event-item list submit — count-prefixed [u32 flag][u32 N][12B record x N].
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   list shape + 8-byte prefix ([u32 flag][u32 count]) + 12-byte record stride: control-flow CONFIRMED.
+#   field VALUES: capture/debugger-pending.
+#
+# CORRECTION (W2.2 re-read — binary wins): the prefix is an 8-byte [u32 flag][u32 count] (each written
+# via the 4-byte word-append primitive), NOT a 5-byte [u8 flag][u32 count]. Only the low byte of Flag is
+# meaningful (it is packed from a u8 source), but the wire field is a full u32. Body = 8 + 12*count.
 
 name: CmsgEventItemListSubmit
 opcode: 0x20078           # major 2 (GameAction), minor 120 -> (2 << 16) | 120
 direction: C2S
-size: var                 # [u8 flag][u32 count][12-byte record x count] (variable)
+size: var                 # [u32 flag][u32 count][12-byte record x count] (variable; body = 8 + 12*count)
 spec: packets/2-120_event_item_list_submit.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Event-item list submit. Raised when the user confirms an event-item panel holding a list of selected event items. A one-byte flag, a u32 record count, then that many fixed 12-byte records.
+summary: Event-item list submit. Raised when the user confirms an event-item panel holding a list of selected event items. An 8-byte prefix (a u32 flag word, only its low byte meaningful, then a u32 record count), followed by that many fixed 12-byte records. If the count is zero, only the 8-byte prefix is sent.
 
-# Wire order, offset 0 = first payload byte. Pack=1. VARIABLE: fixed prefix + count-prefixed records.
+# Wire order, offset 0 = first payload byte. Pack=1. VARIABLE: 8-byte prefix + count-prefixed records.
 fields:
-  # --- fixed prefix (5 bytes) ---
-  - { name: Flag,  type: u8 }    # 0x00  flag / mode byte [capture/debugger-pending]
-  - { name: Count, type: u32 }   # 0x01  record count N (number of 12-byte records that follow)
-  # --- repeated record (12 bytes), Count times, starting at 0x05 ---
+  # --- fixed prefix (8 bytes) ---
+  - { name: Flag,  type: u32 }   # 0x00  flag word (only the low byte is meaningful; packed from a u8 source) [capture/debugger-pending]
+  - { name: Count, type: u32 }   # 0x04  record count N (number of 12-byte records that follow)
+  # --- repeated record (12 bytes), Count times, starting at 0x08 ---
   - { name: RecordId,  type: u32 }       # +0x00 (within record)  record id / key [capture/debugger-pending]
-  - { name: RecordA,   type: u8 }        # +0x04  sub-byte a [capture/debugger-pending]
-  - { name: RecordB,   type: u8 }        # +0x05  sub-byte b [capture/debugger-pending]
-  - { name: RecordPad, type: "u8[6]" }   # +0x06  zero pad to the 12-byte record stride
+  - { name: RecordA,   type: u8 }        # +0x04  sub-byte a (low byte of the source's second word) [capture/debugger-pending]
+  - { name: RecordPad0, type: u8 }       # +0x05  pad
+  - { name: RecordB,   type: u8 }        # +0x06  sub-byte b (byte 1 of the source's second word) [capture/debugger-pending]
+  - { name: RecordPad, type: "u8[5]" }   # +0x07  zero pad to the 12-byte record stride
 
 notes: |
-  CONTROL-FLOW CONFIRMED variable shape: a leading u8 flag, a u32 count, then Count fixed 12-byte
-  records appended in a loop. NOT a fixed body. The field VALUES are static inferences
-  (capture-pending).
+  CONTROL-FLOW CONFIRMED variable shape: an 8-byte prefix — a u32 flag word then a u32 count, each
+  written via the 4-byte word-append primitive — then Count fixed 12-byte records appended in a loop.
+  NOT a fixed body. If Count is zero, only the 8-byte prefix is sent. The field VALUES are static
+  inferences (capture-pending).
 
-  FIXED PREFIX (5 bytes):
-    0x00 (1B) Flag  : a flag / mode byte. [capture/debugger-pending]
-    0x01 (4B) Count : the number of 12-byte records that follow (N).
+  FIXED PREFIX (8 bytes):
+    0x00 (4B) Flag  : a flag / mode word. Only its low byte is meaningful (packed from a u8 source), but
+                      the wire field is a full u32. [capture/debugger-pending]
+    0x04 (4B) Count : the number of 12-byte records that follow (N); derived from a source-list span size.
 
-  REPEATED RECORD (12 bytes each, Count times, base 0x05):
-    +0x00 (4B) RecordId  : a record id / key sourced from an 8-byte-stride array.
+  REPEATED RECORD (12 bytes each, Count times, base 0x08):
+    +0x00 (4B) RecordId  : a record id / key (a u32 item id) sourced from an 8-byte-stride array.
                            [capture/debugger-pending]
-    +0x04 (1B) RecordA   : a sub-byte (low byte of the source's second dword). [capture/debugger-pending]
-    +0x05 (1B) RecordB   : a sub-byte (next byte of the source's second dword). [capture/debugger-pending]
-    +0x06 (6B) RecordPad : zero pad filling the 12-byte wire stride.
+    +0x04 (1B) RecordA   : a sub-byte (low byte of the source's second word). [capture/debugger-pending]
+    +0x05 (1B) RecordPad0: pad.
+    +0x06 (1B) RecordB   : a sub-byte (byte 1 of the source's second word). [capture/debugger-pending]
+    +0x07 (5B) RecordPad : zero pad filling the 12-byte wire stride.
 
   TRIGGER: the event-item confirm panel — the user confirms a list of selected event items; the
   builder reads a flag, a count, and loops emitting one 12-byte record per selected element.

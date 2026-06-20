@@ -75,9 +75,32 @@ notes: |
   IMPORTANT: the two counts are u16, but each array element is 4 bytes wide (a u32 actor id), so
   trailer length = (CountA + CountB) * 4 bytes. Both arrays are omitted when their count is 0.
 
-  Total wire payload = 24 + (CountA + CountB) * 4. There are two observed builder forms:
-    - full form: header + the two target arrays (single- or multi-target / AoE casts);
-    - short form: header only with both counts 0 (basic melee attack / fixed-form action).
+  Total wire payload = 24 + (CountA + CountB) * 4. There are two distinct builder ROUTINES that emit
+  2/52 (this is the one opcode-collision in the C2S table — two builders, one opcode):
+
+    - SHORT form  (CmsgUseSkillShort): a FIXED 32-byte frame (8 header + the 24-byte struct, both
+      counts 0, no trailing arrays). It is built REACTIVELY inside inbound S2C handlers (the local-player
+      state-sync handler and the world game-state-tick handler) plus two small helper subs — i.e. the
+      client's automatic re-issue of a basic skill / auto-attack action driven by a server tick, NOT a
+      fresh user command. Its @0x01 byte is the derived on/off discriminator ((a2 != 1) - 56 -> 0xC8 or
+      0xC9, an auto-attack toggle); its @0x04 float region stays zero. The SHORT form sets NO combat
+      latch.
+
+    - FULL form   (CmsgUseSkill): the variable header + the two target arrays (single- / multi-target /
+      AoE casts), and also the basic-attack form (SkillSlot 0xFF, both counts 0 -> exactly 32 bytes). It
+      is PLAYER-DRIVEN (called from the two basic-attack wrappers and the battle-action executor), runs a
+      pre-send target-validation gate (resolves the hovered/selected target, reads its level requirement,
+      aborts without sending if the local player level is 0 or below the requirement, or if a UI/list
+      guard mismatches). It writes a 1.0 float at @0x04. The calling basic-attack wrappers SET THE COMBAT
+      IN-FLIGHT LATCH (a process global, set to 1, with a sibling combat flag cleared) immediately before
+      this builder sends.
+
+  DISCRIMINATOR (load-bearing): when the FULL form carries trailing arrays (CountA/CountB > 0) the two
+  forms differ by total length. When the FULL form is a basic attack (both counts 0) BOTH forms are 32
+  bytes — length alone does NOT distinguish them. The on-wire distinction is then the struct CONTENT: the
+  SHORT form leaves @0x04 zero and writes the 0xC8/0xC9 discriminator at @0x01; the FULL form writes a
+  1.0 float at @0x04 and an invoke-form byte (0/1) at @0x01. Whether the server keys off the count words,
+  the @0x04 float, or @0x01 to branch is capture/debugger-pending; statically both reach the same 5/52.
 
   Server reply: S2C 5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
 

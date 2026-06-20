@@ -1,8 +1,10 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-19
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
+layout: confirmed
+value_semantics: capture/debugger-pending
 conflicts: the +0x141B4 reserved slot (zeroed in the constructor, paired with the send timestamp — possibly a last-receive stamp) is carried as UNVERIFIED; the inner field layout of the embedded connection sub-object (+0x48) is recovered at the construction sites but the exact span of the large socket slot is a span hypothesis
 ---
 
@@ -83,7 +85,7 @@ Offsets relative to the start of the object.
 | +0x141B0 | 82 352 | 4 | uint32 | `send_timestamp` | CONFIRMED | Millisecond send timestamp; the send path writes the current tick count here. Seeded to 0 in the constructor. |
 | +0x141B4 | 82 356 | 4 | uint32 | (reserved) | **UNVERIFIED** | Zeroed in the constructor; paired with the send timestamp — possibly a last-receive stamp. Role not proven statically. |
 | +0x141F8 | 82 360 | 4 | ptr | `secure_context_ptr` | CONFIRMED | Pointer to the separately-allocated `SecureContext` (see `structs/secure_context.md`). Passed to the secure-auth-reply builder and the inbound key-exchange parser. |
-| +0x141FC | 82 364 | 1 | uint8 | `init_gate` / `connected_flag` | CONFIRMED | The one-byte connected/initialised gate. Zeroed in the constructor; set to 1 by the dispatcher after the (0,0) handshake; cleared to 0 on enter-world by the char-spawn handler. |
+| +0x141FC | 82 364 | 1 | uint8 | `init_gate` / `connected_flag` / in-flight latch | CONFIRMED | The one-byte connected/initialised gate — also the **request-in-flight latch** read by the keepalive thread. Zeroed in the constructor; set to 1 by the dispatcher after the (0,0) handshake (and re-armed by several request builders). **Cleared to 0 unconditionally by the enter-game response (response slot 4/1) as its first statement** — this closes the enter ladder (request 1/9 → 3/5 → 4/1); the 3/5 char-spawn push does **not** clear it. Several major-3 results (3/1, 3/4, 3/6, 3/7, 3/13, 3/14) also clear it. See the in-flight-latch note below. |
 
 ---
 
@@ -116,6 +118,13 @@ slot is large and holds the recv buffer, which is why the enclosing `NetClient` 
 - **The connection state lives in the embedded sub-object; the link gate is a single byte.** Treat
   `init_gate` (+0x141FC) as the authoritative "connected" flag — it is set after the (0,0)
   handshake and cleared on enter-world.
+- **`init_gate` doubles as the request-in-flight latch** (the byte the keepalive thread reads). It is
+  SET by several request builders (e.g. 1/6, 1/7, 1/9, 1/13, 1/14, 2/2) and re-armed by the
+  (0,0)→1/4 reactive reply; it is CLEARED by the major-3 result family (3/1, 3/4, 3/6, 3/7, 3/13,
+  3/14) and — load-bearing for the enter ladder — **unconditionally by the enter-game response 4/1
+  as its first statement** (the 3/5 char-spawn push does NOT clear it). A managed re-implementation
+  models this as one "awaiting-server-response" flag, distinct from the transport-level connected
+  state if needed. (Fire-and-forget sends such as logout set no latch.)
 - **Keepalive is 20000 ms.** The interval field is seeded to 20000 and the arm path scales seconds
   by 1000 into it; the keepalive carries the (2,10000) frame.
 - **Three thread procs total.** Recv-completion I/O thread + the two connection workers
