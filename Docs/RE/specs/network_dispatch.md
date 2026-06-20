@@ -415,6 +415,15 @@ The network client is a single object that owns the connection sub-object, the w
 the init-gate. Its lifecycle is: **construct → start engine → spawn workers → run the receive loop
 → keepalive → disconnect**. *(STRUCTURE-HIGH; build 263bd994.)*
 
+> **Where this socket sits in the wider topology (cross-ref).** This lifecycle is the **single
+> persistent game/world opcode connection** — it carries **all** opcode majors `0–5` (login + char-mgmt
+> + game actions + the World Server Response/Push), connects **once** (after the lobby hands off the
+> game address) and does **not** reconnect for enter-world. The client also opens two **non-opcode**
+> socket families — the short-lived **login/lobby blocking queries** and the **XTrap** anti-cheat relay
+> — which are NOT this connection. The full socket inventory, the `1/2`-ping resolution (it rides
+> *this* socket, not a lobby socket), and the lobby→game address handoff live in
+> **`connection_topology.md`** — cited here, not duplicated.
+
 ### 4.1 Construction
 
 Constructing the network client creates an **embedded connection sub-object** (the connection /

@@ -7,6 +7,33 @@
 
 ---
 
+# CYCLE 5 — Connection Topology & login→game/world handoff (launched 2026-06-20)
+
+**Mandate (maintainer):** continue strongly with the necessary netcode work (after CYCLE 4 + the Nagle/World-Server
+framing note). **Reframed:** map the client's NETWORK CONNECTION TOPOLOGY in static IDA — how many distinct
+sockets/connections the client opens, which server each serves (login/lobby vs game/world), which opcode
+majors transit on which socket, the connection lifecycle vs the scene state machine, and the login→game/world
+**server-address handoff** — and RESOLVE C1 (does `1/2 CmsgLobbyPing` ride the game send-convergence or a
+separate lobby socket?). Static-IDA only; no debugger; no captures.
+**Out of scope / non-contested:** a concurrent session owns the layer-02 C# port + `crypto.md` / `login_flow.md`
+/ `lobby.yaml` — this cycle writes ONLY `_dirty/netcode_deep/topology/*.md` then a NEW `specs/connection_topology.md`
+(+ a cross-ref in `network_dispatch.md`); it does NOT edit the contested files.
+**Command structure:** Tier-1 + re-orchestrator (W) → promotion (Tier-1/spec-author) → gate.
+
+## Phase 5-W — TOPOLOGY recon (dirty, 4 lanes) — driven by re-orchestrator — status: **COMPLETE**
+T1 socket census · T2 C1 routing · T3 lifecycle-vs-scene · T4 address handoff. Firewall PASS.
+
+## Phase 5-P/C — PROMOTION + CONSOLIDATION (Tier-1) — status: **COMPLETE**
+NEW `specs/connection_topology.md` + `network_dispatch.md §4` cross-ref; journal + ROADMAP; committed (targeted).
+
+> **CYCLE 5 verdict.** 3 socket subsystems, ONE persistent opcode connection (A) carrying ALL majors
+> 0-5 (login + char-mgmt + game + World Server 4/5) — NO separate world socket, NO login→game reconnect,
+> only an ADDRESS handoff. B = login/lobby blocking queries (header-less, port 10000/10000+id → 30-byte
+> host:port token). C = XTrap anti-cheat (211.115.86.66:2424). **C1 RESOLVED**: 1/2 CmsgLobbyPing rides
+> socket A (game keepalive), not a lobby socket. Residual = runtime host/port VALUES (capture/debugger-pending).
+
+---
+
 # CYCLE 4 — Netcode Deep-Cartography & Contracts (DTO-grade) (launched 2026-06-20)
 
 **Mandate (maintainer):** "Très grosse campagne Networking/Netcode, EXCLUSIVEMENT IDA statique :
