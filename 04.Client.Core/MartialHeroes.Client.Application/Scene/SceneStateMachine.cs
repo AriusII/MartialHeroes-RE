@@ -13,12 +13,27 @@ public sealed class SceneStateMachine
     public GameState Current { get; private set; }
 
     private bool _loadIsReload;
+    private bool _enteringWorld;
 
     // spec: Docs/RE/specs/client_runtime.md §7.3 — OPENNING/SKIP gates Load: true → 2→4, false → 2→3.
     public bool SkipOpening { get; set; }
 
     // spec: resource_pipeline.md §2.5 — reload marker; only tells LoadOrchestrator to skip the msg.xdb pre-load.
     public bool LoadIsReload => _loadIsReload;
+
+    /// <summary>
+    /// The "enter-world confirmed" latch — the engine-free analogue of the original's
+    /// "already entering" guard / locally-cached character descriptor that distinguishes a BOOT
+    /// load (terminates at Opening/Select per OPENNING/SKIP) from an ENTER load (terminates at
+    /// InGame). Set when the 3/5 EnterGameAck arrives (an enter is in flight; the load that follows
+    /// is the world load), consumed when that Load completes and routes to InGame.
+    /// spec: Docs/RE/specs/client_runtime.md §7.5.3 (live enter path 4 → 2 → … → 5),
+    /// §7.9.4 (char-select post-tick promotes to 5 when the "enter world confirmed" flag is set),
+    /// §7.9.5 (happy path: enter-game-ack → 2 loading → … → 5);
+    /// Docs/RE/specs/login_flow.md §1 step 9 / §3.5 (the chosen slot's descriptor is cached locally
+    /// on enter, and the world load consumes it).
+    /// </summary>
+    public bool EnteringWorld => _enteringWorld;
 
     // spec: Docs/RE/specs/client_runtime.md §7.3 — true after Quit/Error fell through the field-0 == 8 exit tail.
     public bool HasExited { get; private set; }
@@ -44,13 +59,24 @@ public sealed class SceneStateMachine
     };
 
     // spec: Docs/RE/specs/client_runtime.md §7.5.2 — EnterGameAck (3/5) forces Load (state 2), state-agnostic.
-    public bool OnEnterGameAck() => Commit(Current.To(EngineSceneState.Load));
+    // Also arms the enter-world latch so the load that follows terminates at InGame (5), not
+    // Opening/Select — the engine-free analogue of caching the chosen slot's descriptor for the
+    // world load. spec: client_runtime.md §7.5.3 / §7.9.5; login_flow.md §1 step 9 / §3.5.
+    public bool OnEnterGameAck()
+    {
+        _enteringWorld = true;
+        return Commit(Current.To(EngineSceneState.Load));
+    }
 
     // spec: Docs/RE/specs/client_runtime.md §7.5.2 — CharacterList (3/1) on Load/Select forces a Select re-entry (sub 8).
     public bool OnCharacterListReceived()
     {
         if (Current.State is EngineSceneState.Load or EngineSceneState.Select)
         {
+            // A fresh roster re-enters char-select — any in-flight enter is abandoned, so disarm the
+            // latch (the cached descriptor is no longer the load destination).
+            // spec: Docs/RE/specs/client_runtime.md §7.5.2 (3/1 → Select), §7.9.5.
+            _enteringWorld = false;
             return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), forceReentry: true);
         }
 
@@ -121,6 +147,17 @@ public sealed class SceneStateMachine
     private bool AdvanceLoadScene()
     {
         _loadIsReload = false;
+
+        // ENTER load: the 3/5 EnterGameAck armed the latch, so this load is the world load —
+        // terminate at InGame (5) and consume the latch. spec: client_runtime.md §7.5.3 (live
+        // enter path 4 → 2 → … → 5), §7.9.5 (enter-game-ack → 2 loading → … → 5).
+        if (_enteringWorld)
+        {
+            _enteringWorld = false;
+            return Commit(Current.To(EngineSceneState.InGame));
+        }
+
+        // BOOT load: follow the OPENNING/SKIP gate unchanged. spec: client_runtime.md §7.5.1.
         return Commit(Current.To(SkipOpening ? EngineSceneState.Select : EngineSceneState.Opening));
     }
 
@@ -150,7 +187,14 @@ public sealed class SceneStateMachine
         }
 
         Current = next;
-        if (next.State is not (EngineSceneState.Quit or EngineSceneState.Error))
+        if (next.State is EngineSceneState.Quit or EngineSceneState.Error)
+        {
+            // A terminal transition (quit / disconnect / error) abandons any in-flight enter, so the
+            // enter-world latch must not survive to misroute a later recovery load.
+            // spec: Docs/RE/specs/client_runtime.md §7.5.2 (state-2 disconnect → 7/2), §7.5.3.
+            _enteringWorld = false;
+        }
+        else
         {
             HasExited = false;
         }

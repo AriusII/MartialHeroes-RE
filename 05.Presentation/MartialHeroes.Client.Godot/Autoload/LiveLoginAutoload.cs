@@ -3,14 +3,24 @@
 // DEV/DIAGNOSTIC autoload — headless live-login instrument.
 //
 // PURPOSE:
-//   Drives the full login → server-select → game-connect flow programmatically when
-//   three env vars are set:
+//   Drives the full login → server-select → game-connect → enter-game flow programmatically
+//   when three env vars are set:
 //       MH_LOGIN_USER   — account name
 //       MH_LOGIN_PASS   — account password
 //       MH_LOGIN_PIN    — (optional) second-password / PIN; may be empty
 //
 //   When ANY of USER/PASS is absent this autoload is a strict no-op so the normal
 //   headless boot is completely unaffected (no env-var = nothing happens).
+//
+// FLOW (when enabled):
+//   1. DriveLoginAsync: LoginAsync → FetchServerListAsync → SelectServerAsync →
+//      OpenGameConnectionAsync → roster arrives via 3/1 (GamePacketHandler fills the store).
+//   2. _Process poll: once a non-blank slot appears in CharacterSelection.Snapshot(), trigger
+//      SelectCharacterAsync(firstOccupiedSlotIndex) ONCE (_enterTriggered latch). This sends
+//      the 1/9 CmsgEnterGameRequest (slot + 33-byte SessionToken at payload +0x01 + u32 version
+//      token at payload +0x24). The server replies with 3/5 EnterGameAck, then 4/1 world snapshot.
+//      spec: Docs/RE/specs/login_flow.md §1 step 9 / §3.3 / §3.5.
+//      spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01; VersionToken @0x24).
 //
 // ROSTER LOGGING APPROACH (WHY WE DO NOT DRAIN IClientEventBus):
 //   IClientEventBus.Reader is a single-consumer System.Threading.Channels.ChannelReader<T>.
@@ -21,18 +31,29 @@
 //   fills on 3/1 and that ApplicationUseCases reads on SelectCharacterAsync — without
 //   consuming any bus events.
 //
+// 4/1 WORLD SNAPSHOT DETECTION:
+//   ClientContext does not expose a public "local player spawned" boolean that can be polled
+//   without draining the IClientEventBus. The arrival of 4/1 is therefore observed via the
+//   existing per-frame traces emitted by DispatcherFrameSink ("[Net←] 4/1 payload=NNNN B")
+//   and by GameLoop ("[GameLoop] LocalPlayerSpawnedEvent") in the headless log — NOT via a
+//   second poll in this autoload. We log the enter TRIGGER below and rely on those existing
+//   traces for the world-snapshot confirmation.
+//
 // SECURITY:
 //   Credentials come from OS env vars ONLY. NEVER hardcode them. NEVER commit them.
 //   This autoload ships into the project but is a pure NO-OP when the env vars are absent.
 //
 // THREADING:
 //   _Ready and _Process run on the Godot main thread.
-//   The async login task is fire-and-forget; all Godot node mutations use CallDeferred.
+//   The async login task and SelectCharacterAsync are fire-and-forget; all Godot node
+//   mutations use CallDeferred.
 //   spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Godot node mutation on main thread.
 //
+// spec: Docs/RE/specs/login_flow.md §1 step 9 (enter-game: slot + 1/9)
+// spec: Docs/RE/specs/login_flow.md §3.3 / §3.5 (SessionToken in 1/9; CharacterSelectionStore)
 // spec: Docs/RE/specs/login_flow.md §4.2 (LoginAsync stages the credential for the 0/0→1/4 exchange)
 // spec: Docs/RE/specs/login_flow.md §2.0 (FetchServerListAsync / SelectServerAsync lobby flow)
-// spec: Docs/RE/specs/login_flow.md §3.5 (CharacterSelectionStore — roster cache for polling)
+// spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes; VersionToken @0x24)
 
 using Godot;
 using MartialHeroes.Client.Application.UseCases;
@@ -62,10 +83,11 @@ public sealed partial class LiveLoginAutoload : Node
     // State
     // -------------------------------------------------------------------------
 
-    private bool  _enabled;         // true when USER+PASS are present
-    private bool  _rosterLogged;    // prevent double-log
-    private double _pollAccumSec;   // seconds since last roster poll
-    private double _pollTotalSec;   // total seconds waited for roster
+    private bool  _enabled;          // true when USER+PASS are present
+    private bool  _rosterLogged;     // prevent double roster-log
+    private bool  _enterTriggered;   // latch: SelectCharacterAsync fired ONCE after roster populates
+    private double _pollAccumSec;    // seconds since last roster poll
+    private double _pollTotalSec;    // total seconds waited for roster
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -105,7 +127,8 @@ public sealed partial class LiveLoginAutoload : Node
 
     public override void _Process(double delta)
     {
-        if (!_enabled || _rosterLogged) return;
+        // Stop polling once both the roster log AND the enter trigger are done.
+        if (!_enabled || (_rosterLogged && _enterTriggered)) return;
 
         // Poll the CharacterSelectionStore snapshot every PollIntervalSec for up to PollTimeoutSec.
         // We do NOT drain IClientEventBus.Reader (single-consumer channel — would steal events from
@@ -116,8 +139,9 @@ public sealed partial class LiveLoginAutoload : Node
         if (_pollTotalSec >= PollTimeoutSec)
         {
             GD.PrintErr("[LiveLogin] timed out waiting for 3/1 character roster (30 s elapsed).");
-            _enabled    = false; // stop polling
+            _enabled      = false; // stop polling
             _rosterLogged = true;
+            _enterTriggered = true;
             return;
         }
 
@@ -129,23 +153,60 @@ public sealed partial class LiveLoginAutoload : Node
 
         IReadOnlyList<CharacterSlotRecord?> snapshot = store.Snapshot();
 
-        // Collect occupied, non-blank slots.
+        // Find the first occupied, non-blank slot index.
+        int firstOccupiedIdx = -1;
+        string firstOccupiedName = string.Empty;
         var names = new System.Collections.Generic.List<string>();
-        foreach (CharacterSlotRecord? slot in snapshot)
+        for (int i = 0; i < snapshot.Count; i++)
         {
+            CharacterSlotRecord? slot = snapshot[i];
             if (slot is not null &&
                 !string.Equals(slot.Name, CharacterSelectionStore.BlankSlotSentinel,
                                System.StringComparison.Ordinal))
             {
                 names.Add(slot.Name);
+                if (firstOccupiedIdx < 0)
+                {
+                    firstOccupiedIdx   = i;
+                    firstOccupiedName  = slot.Name;
+                }
             }
         }
 
         if (names.Count == 0) return; // roster not yet populated
 
-        GD.Print($"[LiveLogin] char-select populated: {names.Count} [{string.Join(", ", names)}]");
-        _rosterLogged = true;
-        _enabled      = false; // stop polling — done
+        // Log the roster once.
+        if (!_rosterLogged)
+        {
+            GD.Print($"[LiveLogin] char-select populated: {names.Count} [{string.Join(", ", names)}]");
+            _rosterLogged = true;
+        }
+
+        // Trigger enter-game ONCE for the first occupied slot.
+        // spec: Docs/RE/specs/login_flow.md §1 step 9 / §3.3 / §3.5.
+        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
+        if (!_enterTriggered)
+        {
+            _enterTriggered = true;
+            GD.Print($"[LiveLogin] entering slot {firstOccupiedIdx} ({firstOccupiedName}) … " +
+                     "spec: login_flow.md §3.3 / §3.5; cmsg_char_enter.yaml.");
+
+            // SelectCharacterAsync is pure Application (no Godot node mutation) — safe to call from
+            // _Process. Fire-and-forget: observe faults via ContinueWith to avoid unobserved exceptions.
+            // 4/1 world-snapshot arrival is observed via the existing trace:
+            //   "[Net←] 4/1 payload=NNNN B"  (DispatcherFrameSink in ClientContext)
+            // and GameLoop's "[GameLoop] LocalPlayerSpawnedEvent" — ClientContext exposes no public
+            // "local player spawned" boolean that can be polled without draining IClientEventBus.
+            ValueTask enterTask = ctx.UseCases.SelectCharacterAsync(firstOccupiedIdx, System.Threading.CancellationToken.None);
+            _ = enterTask.AsTask().ContinueWith(
+                t => GD.PrintErr($"[LiveLogin] SelectCharacterAsync faulted: {t.Exception}"),
+                System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |
+                System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        // Both log and trigger are done; disable further polling.
+        if (_rosterLogged && _enterTriggered)
+            _enabled = false;
     }
 
     // -------------------------------------------------------------------------

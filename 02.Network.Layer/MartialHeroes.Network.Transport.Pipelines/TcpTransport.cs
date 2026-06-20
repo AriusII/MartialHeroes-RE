@@ -73,9 +73,17 @@ public sealed class TcpTransport : ITransport
             _ => AddressFamily.InterNetwork,
         };
 
+        // Nagle MUST stay ENABLED on the game connection (NoDelay = FALSE). CYCLE-4 LIVE-PROVEN
+        // (x32dbg + NetSmoke vs the live replica): with NoDelay = true the server REJECTS the enter-game
+        // 1/9 (replies 3/100, no world snapshot) even though the 1/9 is byte-identical to the real
+        // client's; with NoDelay = false (Nagle on) the same 1/9 is ACCEPTED and the server sends the
+        // 4/1 SmsgGameStateTick world snapshot. The original "disable Nagle, latency-sensitive" reading
+        // was wrong — the server requires the default Nagle behaviour. Override to true only via
+        // MH_TCP_NODELAY=1 (diagnostics). spec: Docs/RE/specs/network_dispatch.md (game-connection TCP).
+        bool noDelay = Environment.GetEnvironmentVariable("MH_TCP_NODELAY") == "1";
         var socket = new Socket(af, SocketType.Stream, ProtocolType.Tcp)
         {
-            NoDelay = true, // disable Nagle — game traffic is latency-sensitive
+            NoDelay = noDelay,
         };
 
         try

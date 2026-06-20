@@ -630,23 +630,114 @@ public sealed partial class ClientContext : Node
         var lobbyClient = new LobbyClient(lobbyHost, PayloadCompression.DecompressPayload);
         var lastServerStore = new RegistryLastServerStore();
 
-        // 19b. Version token — pass `default` (empty span) so ApplicationUseCases derives it via
-        //     DefaultClientVersionSource.Instance: token = 10 × 2114 + 9 = 21149 (sample_verified).
-        //     An explicit zero-filled span would OVERRIDE the derivation to all-zeros. Passing default
-        //     activates the branch that calls ClientVersionToken.Derive() and stamps "21149\0" into the
-        //     33-byte buffer. spec: Docs/RE/specs/login_flow.md §3.3 / §7.
-        //     spec: Docs/RE/packets/1-9_enter_game_request.yaml (VersionToken 0x01, 33 bytes).
-        ReadOnlySpan<byte> versionToken = default; // empty → derives via IClientVersionSource
+        // 19b. SessionToken — resolve the 33-byte launcher/session token for payload +0x01 of 1/9.
+        //
+        //     Priority (first non-empty string wins):
+        //       a) env MH_SESSION_TOKEN  — explicit override; use System.Environment (NOT Godot.OS —
+        //          project idiom: global::Godot.* for Godot statics; System.Environment for OS env).
+        //       b) clientdata/session_token.txt (first non-empty trimmed line) — gitignored by the
+        //          clientdata/ blanket .gitignore which already ignores everything except .gitignore
+        //          and README.md; no extra gitignore rule needed.
+        //       c) dev-fallback constant — the public MD5 hash of the legitimate binary, safe to
+        //          hardcode (it is a public build identity, not a credential).
+        //
+        //     The resolved string is ASCII-encoded (spec: SessionToken is an asciiz within 33 bytes),
+        //     copied up to 32 bytes into a zero-initialised 33-byte array (byte[32] stays NUL).
+        //     This 33-byte span is passed as `versionToken:` (back-compat param name) so
+        //     ApplicationUseCases stamps it at payload +0x01.
+        //     spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
+        //     spec: Docs/RE/specs/login_flow.md §3.3.
+        //
+        //     IMPORTANT: versionSource remains null (→ DefaultClientVersionSource) so the u32
+        //     VersionToken at payload +0x24 is ALWAYS derived independently as 10×2114+9 = 21149.
+        //     Passing a non-empty sessionToken span does NOT disturb the +0x24 derivation — see
+        //     ApplicationUseCases ctor: _versionToken is derived from versionSource unconditionally.
+        //     spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
+
+        // Dev-fallback: public MD5 of the legitimate doida.exe binary (public build identity).
+        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
+        const string DevFallbackSessionToken = "a1437026e6eefeba94702909cd9a33b9"; // spec: cmsg_char_enter.yaml
+
+        string sessionTokenStr;
+        string sessionTokenSource;
+
+        // a) env MH_SESSION_TOKEN — explicit override (System.Environment, not Godot.OS).
+        string? envToken = System.Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
+        if (!string.IsNullOrWhiteSpace(envToken))
+        {
+            sessionTokenStr    = envToken.Trim();
+            sessionTokenSource = "env:MH_SESSION_TOKEN";
+        }
+        else
+        {
+            // b) clientdata/session_token.txt — resolved via ClientPathResolver.ResolveClientDir().
+            //    The clientdata/ blanket .gitignore already ignores this file; no extra rule needed.
+            string? clientDirForToken = ClientPathResolver.ResolveClientDir();
+            string? fileToken         = null;
+            if (clientDirForToken is not null)
+            {
+                string tokenFilePath = Path.Combine(clientDirForToken, "session_token.txt");
+                try
+                {
+                    if (File.Exists(tokenFilePath))
+                    {
+                        foreach (string rawLine in File.ReadLines(tokenFilePath))
+                        {
+                            string trimmed = rawLine.Trim();
+                            if (trimmed.Length > 0)
+                            {
+                                fileToken = trimmed;
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[ClientContext] session_token.txt read failed: {ex.Message}");
+                }
+            }
+
+            if (fileToken is not null)
+            {
+                sessionTokenStr    = fileToken;
+                sessionTokenSource = "file:session_token.txt";
+            }
+            else
+            {
+                // c) dev-fallback — public binary hash; safe to print.
+                sessionTokenStr    = DevFallbackSessionToken;
+                sessionTokenSource = "dev-fallback";
+            }
+        }
+
+        // Build the 33-byte buffer: ASCII-encode (asciiz within the field), copy up to 32 bytes,
+        // leave byte[32] = NUL (the array is zero-initialised so the trailing NUL is automatic).
+        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes, asciiz).
+        var sessionTokenBytes = new byte[ApplicationUseCases.SessionTokenLength]; // 33 bytes, zero-init
+        byte[] encodedToken = System.Text.Encoding.ASCII.GetBytes(sessionTokenStr);
+        int copyLen = Math.Min(encodedToken.Length, ApplicationUseCases.SessionTokenLength - 1); // max 32; byte[32]=NUL
+        encodedToken.AsSpan(0, copyLen).CopyTo(sessionTokenBytes);
+
+        // Log source only (never print the raw token when it came from env or file).
+        if (sessionTokenSource == "dev-fallback")
+            GD.Print($"[ClientContext] SessionToken wired (source={sessionTokenSource}, token={DevFallbackSessionToken}, 33B). " +
+                     "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
+        else
+            GD.Print($"[ClientContext] SessionToken wired (source={sessionTokenSource}, 33B). " +
+                     "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
 
         // 20. Use-case facade — presentation calls these for input intents.
-        //     versionSource = null → DefaultClientVersionSource.Instance → field 2114 → token 21149.
-        //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
+        //     versionToken: the resolved 33-byte SessionToken span → ApplicationUseCases stamps it at
+        //     payload +0x01 of 1/9. spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01).
+        //     versionSource: null → DefaultClientVersionSource.Instance → field 2114 → token 21149
+        //     at payload +0x24. spec: Docs/RE/specs/login_flow.md §3.3 / §7.
         //     eventBus, lobbyClient, lastServerStore wired so FetchServerListAsync / SelectServerAsync
         //     publish ServerListReceivedEvent and persist Lastserver.
         //     characterSelection: same instance as the handler's store (shared cache).
         //     spec: Docs/RE/specs/login_flow.md §3.5 / §5.2.
         var useCases = new ApplicationUseCases(noopSink, world, credentialStore, sessionId,
-            versionToken: versionToken, versionSource: null, sceneStateMachine: sceneMachine,
+            versionToken: sessionTokenBytes.AsSpan(), versionSource: null, sceneStateMachine: sceneMachine,
             eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore,
             characterSelection: characterSelection);
         GD.Print(

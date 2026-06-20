@@ -394,3 +394,38 @@ Flag-gated (flag-off = old path unchanged); one writer per file; sequential wave
 **Commit:** the CYCLE-3 netcode block (specs + IDB annotations) is ready to commit on request.
 
 — *Maintained by the orchestrator (Tier-1).*
+
+---
+
+# LIVE INTEGRATION — networking 1:1 vs the live replica + x32dbg + Godot live-enter (launched 2026-06-20, closed 2026-06-20)
+
+**Mandate (maintainer):** implement ALL client networking **cleanly and faithfully 1:1**, pulling from IDA + **confirming against the live replica server**, in **C# AND Godot**, to make the client **"exploitable"** — a live playable slice login→world. Oracle = the **live replica** (`211.196.150.4`) + **static IDA** + the **x32dbg** live debugger (NO captures). **No xUnit this cycle** (maintainer directive) — verification via build + headless + the live loop.
+
+**Deliverable (ACHIEVED):** the clean-room C# client connects to the live replica and walks login→char-select→**enter-world** 1:1, and the **Godot client does it AUTONOMOUSLY** — `Init→Login→lobby→connect→0/0→1/4→3/4` roster→auto-select slot 0→`1/9`→**`4/1` world snapshot (9100B)**.
+
+## Phase 4-0 — Preflight — ✅
+## Phase 4-W — Targeted RE confirmation (static IDA + x32dbg) — ✅
+- x32dbg BP on `Net_SendPacket` proved the enter sequence `1/4→1/9` + the byte-identical `1/9` payload; SessionToken = MD5(doida.exe) = `a1437026…`.
+## Phase 4-P — Promotion to clean specs — ✅
+- `lobby.yaml` (endpoint copy-cap), `login_flow.md` step 7 (3/4 roster), `crypto.md` §6 (whitening span), `net_contracts.md` §2.1. **M4 needed NO spec change** (the spec was already right).
+## Phase 4-E — Foundation + breadth — ✅ (committed earlier this session: `PacketRouterGenerator` Roslyn source-gen, netcode cartography, connection topology, dispatcher + handlers + structs)
+## Phase 4-G — Godot wiring — ✅
+- login→char-select→enter-world live; SessionToken resolver + autoload auto-enter + `SceneStateMachine` `EnteringWorld` latch.
+## Phase 4-LIVE — Live integration vs the replica — ✅
+- M2 login · M3 char-select · M4 enter-world ALL 1:1 live; **3 live-caught fidelity bugs fixed** (lobby copy-cap · `1/4` whitening span · TCP NoDelay=false / Nagle ON) — each a code-vs-spec divergence where the spec was right.
+## Phase 4-R — Review + gates — ✅
+- nuke build **0/0** (14 projects incl. Godot); firewall PASS; DAG clean; no xUnit (directive).
+## Phase 4-C — Consolidation — ✅ (this entry)
+- journal entry + this ROADMAP section + memory; commit targeted.
+
+### LIVE-INTEGRATION follow-on ledger (documented; NOT blockers)
+| Item | Disposition |
+|---|---|
+| World RENDER from the live `4/1` | **DEFERRED to a dedicated follow-up cycle** — the `4/1` is received but the scene stays at "Load"; the post-login `3/5` fires Login→Load prematurely and the `4/1` must drive Load/select→InGame + local-player spawn. A FRONT-END scene-flow task (layer 04 `SceneStateMachine` + 05 scenes), distinct from the networking (complete). |
+| `SO_RCVBUF` socket option | deferred (fidelity detail; enter works without it; §4.4a) |
+| names.yaml hand-merge | carried from CYCLE 3/4/5 (static cartography); this live cycle added NO IDB renames |
+| NetSmoke harness | removed (throwaway diagnostic; recoverable from git history; the live loop now runs via the Godot `LiveLoginAutoload`) |
+
+**Commit:** the LIVE-INTEGRATION block (TcpTransport NoDelay fix + Godot live-enter wiring + x32dbg MCP) committed on request.
+
+— *Maintained by the orchestrator (Tier-1).*
