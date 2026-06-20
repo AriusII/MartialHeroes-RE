@@ -83,11 +83,11 @@ public sealed partial class LiveLoginAutoload : Node
     // State
     // -------------------------------------------------------------------------
 
-    private bool  _enabled;          // true when USER+PASS are present
-    private bool  _rosterLogged;     // prevent double roster-log
-    private bool  _enterTriggered;   // latch: SelectCharacterAsync fired ONCE after roster populates
-    private double _pollAccumSec;    // seconds since last roster poll
-    private double _pollTotalSec;    // total seconds waited for roster
+    private bool _enabled; // true when USER+PASS are present
+    private bool _rosterLogged; // prevent double roster-log
+    private bool _enterTriggered; // latch: SelectCharacterAsync fired ONCE after roster populates
+    private double _pollAccumSec; // seconds since last roster poll
+    private double _pollTotalSec; // total seconds waited for roster
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -102,7 +102,7 @@ public sealed partial class LiveLoginAutoload : Node
             // spec: CLAUDE.md "Namespace-collision pitfall".
             string? user = System.Environment.GetEnvironmentVariable("MH_LOGIN_USER");
             string? pass = System.Environment.GetEnvironmentVariable("MH_LOGIN_PASS");
-            string? pin  = System.Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
+            string? pin = System.Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
 
             if (string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pass))
             {
@@ -133,13 +133,13 @@ public sealed partial class LiveLoginAutoload : Node
         // Poll the CharacterSelectionStore snapshot every PollIntervalSec for up to PollTimeoutSec.
         // We do NOT drain IClientEventBus.Reader (single-consumer channel — would steal events from
         // CharSelectEventDrainer / GameLoop). Polling the shared store snapshot is safe and non-destructive.
-        _pollAccumSec  += delta;
-        _pollTotalSec  += delta;
+        _pollAccumSec += delta;
+        _pollTotalSec += delta;
 
         if (_pollTotalSec >= PollTimeoutSec)
         {
             GD.PrintErr("[LiveLogin] timed out waiting for 3/1 character roster (30 s elapsed).");
-            _enabled      = false; // stop polling
+            _enabled = false; // stop polling
             _rosterLogged = true;
             _enterTriggered = true;
             return;
@@ -162,13 +162,13 @@ public sealed partial class LiveLoginAutoload : Node
             CharacterSlotRecord? slot = snapshot[i];
             if (slot is not null &&
                 !string.Equals(slot.Name, CharacterSelectionStore.BlankSlotSentinel,
-                               System.StringComparison.Ordinal))
+                    System.StringComparison.Ordinal))
             {
                 names.Add(slot.Name);
                 if (firstOccupiedIdx < 0)
                 {
-                    firstOccupiedIdx   = i;
-                    firstOccupiedName  = slot.Name;
+                    firstOccupiedIdx = i;
+                    firstOccupiedName = slot.Name;
                 }
             }
         }
@@ -197,7 +197,8 @@ public sealed partial class LiveLoginAutoload : Node
             //   "[Net←] 4/1 payload=NNNN B"  (DispatcherFrameSink in ClientContext)
             // and GameLoop's "[GameLoop] LocalPlayerSpawnedEvent" — ClientContext exposes no public
             // "local player spawned" boolean that can be polled without draining IClientEventBus.
-            ValueTask enterTask = ctx.UseCases.SelectCharacterAsync(firstOccupiedIdx, System.Threading.CancellationToken.None);
+            ValueTask enterTask =
+                ctx.UseCases.SelectCharacterAsync(firstOccupiedIdx, System.Threading.CancellationToken.None);
             _ = enterTask.AsTask().ContinueWith(
                 t => GD.PrintErr($"[LiveLogin] SelectCharacterAsync faulted: {t.Exception}"),
                 System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |
@@ -243,7 +244,7 @@ public sealed partial class LiveLoginAutoload : Node
             // 0/0 KeyExchange with the secure 1/4 Auth reply.
             // spec: Docs/RE/specs/login_flow.md §4.2 (credential pre-staged; 1/4 built on 0/0 arrival).
             await ctx.UseCases.LoginAsync(user, pass, string.IsNullOrEmpty(pin) ? null : pin,
-                                          CancellationToken.None).ConfigureAwait(false);
+                CancellationToken.None).ConfigureAwait(false);
             GD.Print($"[LiveLogin] credentials staged for user '{user}'. spec: login_flow.md §4.2.");
 
             // Step 2: Fetch the server list from the lobby.
@@ -257,7 +258,8 @@ public sealed partial class LiveLoginAutoload : Node
                 // select. A fabricated id would produce a bogus endpoint and mislead Tier-1.
                 // Abort cleanly so the real situation is visible in the log.
                 // spec: Docs/RE/specs/login_flow.md §2.1
-                GD.PrintErr("[LiveLogin] lobby returned no servers — aborting live login (no server to select). spec: login_flow.md §2.1");
+                GD.PrintErr(
+                    "[LiveLogin] lobby returned no servers — aborting live login (no server to select). spec: login_flow.md §2.1");
                 _enabled = false;
                 return;
             }
@@ -269,7 +271,8 @@ public sealed partial class LiveLoginAutoload : Node
             // spec: Docs/RE/specs/login_flow.md §2.2 (channel-endpoint query: port 10000 + serverId).
             MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
                 await ctx.UseCases.SelectServerAsync(serverId, CancellationToken.None).ConfigureAwait(false);
-            GD.Print($"[LiveLogin] channel endpoint resolved: {endpoint.Host}:{endpoint.Port}. spec: login_flow.md §2.2.");
+            GD.Print(
+                $"[LiveLogin] channel endpoint resolved: {endpoint.Host}:{endpoint.Port}. spec: login_flow.md §2.2.");
 
             // Step 4: Open the TCP game connection. The staged credential + the inbound 0/0→1/4
             // handshake then drives the server to push the character roster (3/1).

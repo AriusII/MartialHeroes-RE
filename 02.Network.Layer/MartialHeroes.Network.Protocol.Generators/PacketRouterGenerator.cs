@@ -30,7 +30,7 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
         IncrementalValuesProvider<StructDeclarationSyntax> structs = context.SyntaxProvider
             .CreateSyntaxProvider(
                 predicate: static (node, _) => node is StructDeclarationSyntax s
-                    && s.AttributeLists.Count > 0,
+                                               && s.AttributeLists.Count > 0,
                 transform: static (ctx, _) => (StructDeclarationSyntax)ctx.Node)
             .Where(static s => s is not null);
 
@@ -88,7 +88,8 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
                 string fqn = typeSymbol.ToDisplayString(
                     new SymbolDisplayFormat(
                         globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
-                        typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces));
+                        typeQualificationStyle: SymbolDisplayTypeQualificationStyle
+                            .NameAndContainingTypesAndNamespaces));
                 string name = typeSymbol.Name;
 
                 // Detect the size constant: WireSize (fixed) > HeaderSize (var header) > Size (fallback).
@@ -128,7 +129,7 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
                 foreach (ISymbol member in handlerInterface.GetMembers())
                 {
                     if (member is IMethodSymbol method && method.Name == "Handle"
-                        && method.Parameters.Length == 1)
+                                                       && method.Parameters.Length == 1)
                     {
                         IParameterSymbol param = method.Parameters[0];
                         if (param.RefKind == RefKind.In)
@@ -137,7 +138,8 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
                             string typeFqn = param.Type.ToDisplayString(
                                 new SymbolDisplayFormat(
                                     globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
-                                    typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces));
+                                    typeQualificationStyle: SymbolDisplayTypeQualificationStyle
+                                        .NameAndContainingTypesAndNamespaces));
                             handleOverloadFqns.Add(typeFqn);
                         }
                     }
@@ -168,7 +170,8 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
             sb.AppendLine("    /// Arms are emitted only for structs with a Handle(in T) overload in IPacketHandler.");
             sb.AppendLine("    /// All other opcodes reach OnUnhandled via the default arm. spec: Docs/RE/opcodes.md.");
             sb.AppendLine("    /// </summary>");
-            sb.AppendLine("    private static bool RouteGenerated(uint packedOpcode, System.ReadOnlySpan<byte> payload, IPacketHandler handler)");
+            sb.AppendLine(
+                "    private static bool RouteGenerated(uint packedOpcode, System.ReadOnlySpan<byte> payload, IPacketHandler handler)");
             sb.AppendLine("    {");
             sb.AppendLine("        switch (packedOpcode)");
             sb.AppendLine("        {");
@@ -187,9 +190,11 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
                 sb.AppendLine("                {");
                 sb.AppendLine("                    throw new System.ArgumentOutOfRangeException(");
                 sb.AppendLine("                        nameof(payload), payload.Length,");
-                sb.AppendLine($"                        $\"Payload too small for {packet.Name}: need {{{packet.FullyQualifiedName}.{packet.SizeConst}}} bytes.\");");
+                sb.AppendLine(
+                    $"                        $\"Payload too small for {packet.Name}: need {{{packet.FullyQualifiedName}.{packet.SizeConst}}} bytes.\");");
                 sb.AppendLine("                }");
-                sb.AppendLine($"                handler.Handle(in MemoryMarshal.AsRef<{packet.FullyQualifiedName}>(payload));");
+                sb.AppendLine(
+                    $"                handler.Handle(in MemoryMarshal.AsRef<{packet.FullyQualifiedName}>(payload));");
                 sb.AppendLine("                return true;");
                 sb.AppendLine();
             }

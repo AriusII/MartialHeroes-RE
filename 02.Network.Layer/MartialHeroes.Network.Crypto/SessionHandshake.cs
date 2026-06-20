@@ -78,7 +78,8 @@ public static class SessionHandshake
     /// </summary>
     public readonly struct KeyExchange
     {
-        public KeyExchange(BigInteger modulus, BigInteger exponent, int modulusByteLength, int blockSizeK, uint scalar1, uint scalar2)
+        public KeyExchange(BigInteger modulus, BigInteger exponent, int modulusByteLength, int blockSizeK, uint scalar1,
+            uint scalar2)
         {
             Modulus = modulus;
             Exponent = exponent;

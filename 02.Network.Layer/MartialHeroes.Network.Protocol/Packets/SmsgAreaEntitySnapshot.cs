@@ -67,7 +67,8 @@ public readonly struct SmsgAreaEntitySnapshot
     /// Tag 4 ground-item record size (24 bytes).
     /// spec: Docs/RE/specs/handlers.md §10 + Docs/RE/packets/4-4_ground_item_tag4.yaml (size: 24).
     /// </summary>
-    public const int GroundItemRecordSize = 24; // spec: Docs/RE/specs/handlers.md §10 + Docs/RE/packets/4-4_ground_item_tag4.yaml
+    public const int
+        GroundItemRecordSize = 24; // spec: Docs/RE/specs/handlers.md §10 + Docs/RE/packets/4-4_ground_item_tag4.yaml
 
     /// <summary>
     /// Tag 6 guild record size (36 bytes): entity key u32 at +0; guild name CP949 asciiz at +5.

@@ -665,7 +665,7 @@ public sealed partial class ClientContext : Node
         string? envToken = System.Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
         if (!string.IsNullOrWhiteSpace(envToken))
         {
-            sessionTokenStr    = envToken.Trim();
+            sessionTokenStr = envToken.Trim();
             sessionTokenSource = "env:MH_SESSION_TOKEN";
         }
         else
@@ -673,7 +673,7 @@ public sealed partial class ClientContext : Node
             // b) clientdata/session_token.txt — resolved via ClientPathResolver.ResolveClientDir().
             //    The clientdata/ blanket .gitignore already ignores this file; no extra rule needed.
             string? clientDirForToken = ClientPathResolver.ResolveClientDir();
-            string? fileToken         = null;
+            string? fileToken = null;
             if (clientDirForToken is not null)
             {
                 string tokenFilePath = Path.Combine(clientDirForToken, "session_token.txt");
@@ -700,13 +700,13 @@ public sealed partial class ClientContext : Node
 
             if (fileToken is not null)
             {
-                sessionTokenStr    = fileToken;
+                sessionTokenStr = fileToken;
                 sessionTokenSource = "file:session_token.txt";
             }
             else
             {
                 // c) dev-fallback — public binary hash; safe to print.
-                sessionTokenStr    = DevFallbackSessionToken;
+                sessionTokenStr = DevFallbackSessionToken;
                 sessionTokenSource = "dev-fallback";
             }
         }
@@ -721,8 +721,9 @@ public sealed partial class ClientContext : Node
 
         // Log source only (never print the raw token when it came from env or file).
         if (sessionTokenSource == "dev-fallback")
-            GD.Print($"[ClientContext] SessionToken wired (source={sessionTokenSource}, token={DevFallbackSessionToken}, 33B). " +
-                     "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
+            GD.Print(
+                $"[ClientContext] SessionToken wired (source={sessionTokenSource}, token={DevFallbackSessionToken}, 33B). " +
+                "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
         else
             GD.Print($"[ClientContext] SessionToken wired (source={sessionTokenSource}, 33B). " +
                      "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
@@ -789,7 +790,8 @@ public sealed partial class ClientContext : Node
             t => GD.PrintErr($"[ClientContext] InboundDispatcher faulted: {t.Exception}"),
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
 
-        GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop + inbound dispatcher started.");
+        GD.Print(
+            "[ClientContext] Application graph constructed. EventBus ready. EngineLoop + inbound dispatcher started.");
     }
 
     // Stored so InputRouter can wire the world handler after initialisation.
