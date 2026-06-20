@@ -8,13 +8,16 @@
 >   `.scr`/`.do` corpus); loader control-flow facts (the items.scr dispatch discriminator/flags,
 >   the citems billing filter, the .do streaming stride, the class/stance/tier selector) are
 >   [confirmed]; field SEMANTICS that need a live consumer remain capture/debugger-pending.
-> ida_reverified: 2026-06-16
+> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
-> conflicts: OPEN — citems.scr description-paragraph count (6 vs 10) is UNRESOLVED (§2.11); the
->   6-paragraph reading fits the 1052-byte stride exactly and the 10-paragraph reading overflows it
->   by two paragraphs, but a multi-record probe of the later paragraph slots (+0x2CA..) is pending
->   to settle whether those bytes are ever text. Carried explicitly; not forced.
+> conflicts: RESOLVED — citems.scr description-paragraph count (6 vs 10) is settled in favour of **10**
+>   (§2.11; CYCLE 7, binary-won). The structural capacity is 10 fixed paragraphs (base +0xE4, width 81)
+>   and the runtime EARLY-TERMINATES at the first paragraph whose first byte is `#`; the consumer accessor
+>   hard-bounds the index `< 10`. The old "6" was a miscount (an adjacent 6-iteration UI-label-clearing
+>   loop in the same consumer, plus "6" = the typically-populated count in samples). The "10×81 overflows
+>   the record" worry was a hex-arithmetic slip: 10 paragraphs end at +0xE4 + 10·81 = +0x40E (1038),
+>   inside the 0x41C (1052) stride, leaving a 14-byte non-paragraph tail at +0x40E..+0x41B.
 >
 > status: sample_verified
 > sample_verified: true (exp.scr, userlevel.scr, userpoint.scr, users.scr, skills.scr,
@@ -63,7 +66,8 @@
 >     the +0x34 item UID are re-confirmed sample-verified.
 >   • citems.scr (§2.11) — the +0x00 field is **item_id, NOT a sequential slot index** (values are
 >     non-monotonic by position: billing ids > 100,000 appear mid-file). The description-paragraph
->     count (6 vs 10) is UNRESOLVED and carried as an open conflict.
+>     count (6 vs 10) is now **RESOLVED in favour of 10** (CYCLE 7, binary-won): 10 fixed paragraphs
+>     of capacity (base +0xE4, width 81), `#`-first-byte early termination, accessor index bound `< 10`.
 >   • the 12 per-class stance `.do` files (§2.16 / §3.5) — stride **116 (0x74) CONFIRMED** by both
 >     witnesses; the 166-byte estimate is REFUTED (no loader constant; 166 divides none of the 12
 >     files). The class/stance/tier file selector and its three runtime selection globals are now
@@ -213,6 +217,31 @@ Where this canonical order maps onto the specific float/group positions inside e
 most cases, still UNVERIFIED (the sample data does not vary enough per position to disambiguate).
 Those mapping gaps are listed per file.
 
+#### Boot load order (cross-reference, CONFIRMED — CYCLE 7)
+
+The whole `.scr` / `.do` / `.xdb` data-table corpus is loaded at boot by a single background worker
+thread that calls roughly **57 loaders/inits in a fixed sequential order**, taking each file path from
+one contiguous global path-pointer table. The player **stat-curve loader** — `StatCurves_LoadAll`,
+the loader that reads `users.scr` + `userlevel.scr` + `userpoint.scr` + `exp.scr` in one pass
+(Section 2.4) — is **loader #10** in that order.
+
+A neutral ordered summary of that sequence (not a transcription):
+
+- **#1..#9 (earlier):** `events.scr` → `system_control.scr` → `mapsetting.scr` →
+  `playtime_reward.scr` → `items.scr` → `skills.scr` → the skill-icon manifest →
+  `skillcategory.scr` (stance/`.do` streaming table) → `items_extra.do`.
+- **#10:** `StatCurves_LoadAll` (`users.scr` + `userlevel.scr` + `userpoint.scr` + `exp.scr`).
+- **#11..later:** the product tables (`products.scr` / `productcollect.scr` / `productrandname.scr`),
+  `helps.scr`, `npc.scr` and `npcs.scr`, `repair.scr`, `mobs.scr`, `upgradeitems.scr`, `quests.scr`,
+  the menu/label and command tables, `citems.scr` (Section 2.11), and — at the tail — the five small
+  `.xdb` tables (effect-scale / creature-item / vehicle / actor-size / buff-icon-position).
+
+The data-corpus worker is a one-shot boot load (no internal re-read loop). `mobs.scr` has a second
+load site outside this thread (a reload path; trigger not pinned). Note: a `SoundTester` debug log
+header (`"ID  TYPE  Load Size  Stream …"`) is a dead debug path and is **not** the boot corpus
+manifest. (The full ordered list may be promoted into a dedicated resource-pipeline spec; this
+cross-reference records the position of `StatCurves_LoadAll` relevant to the stat tables here.)
+
 ---
 
 ### 2.3 exp.scr — EXP per level (stride: 20 bytes, 300 records)
@@ -252,6 +281,28 @@ record aborts the load.
 server-supplied; see Section 2.2a). It stores **per-level scaling coefficients** consumed by a
 stat-tier formula together with `users.scr` and the `(10 / A) × B` grid (Section 2.6). The
 record is a 2-byte level index at +0 followed by a 58-byte body.
+
+**Boot loader (CONFIRMED, CYCLE 7):** the four stat-curve files — `users.scr`, `userlevel.scr`,
+`userpoint.scr`, and `exp.scr` — are loaded together in a single pass by one boot loader,
+**`StatCurves_LoadAll`** (the canonical loader name). After reading the four files it builds the
+`(10 / A) × B` scaling-coefficient grid (the `A` divisors come from the `userlevel.scr` tier
+counters; the `B` inputs come from `users.scr`; a zero divisor `A` skips that grid slot). The
+loader asserts the three record counts agree (`users` ⇔ `userpoint` last key ⇔ `exp` last key) or
+aborts the whole load. See the boot-load-order cross-reference in Section 2.2a (StatCurves_LoadAll is
+boot loader **#10**).
+
+**0-HP/MP is absent-by-design — NOT a parser bug (CONFIRMED, CYCLE 7):** these stat tables carry
+**only scaling ratios / coefficients, NOT raw HP/MP magnitudes** — there is **no client HP/MP base
+column** anywhere in `users.scr` / `userlevel.scr` / `userpoint.scr` / `exp.scr`. The per-stat base
+HP/MP values are **server-supplied at runtime**. Therefore a stat catalogue (the C# `ScrStatCatalogue`)
+returning a 0/empty HP and MP base curve is the **expected, absent-by-design** result, not a load
+defect: there is no HP/MP column to read. The real per-level HP/MP magnitude is produced at runtime
+from `(server-supplied base) × (the scaling-coefficient grid)`, and the float-position → named-stat
+mapping (which of the four positive/negative float positions is HP vs MP vs a primary stat) is
+**statically unverifiable** — every observed record carries the same value across all four positions,
+so the bytes cannot disambiguate it; resolving it needs a live debugger witness on the grid consumer
+and/or the server base-stat packet. This framing also applies to `users.scr` (Section 2.6) and
+`userpoint.scr` (Section 2.5).
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
@@ -779,38 +830,47 @@ have no text often contain a single `#` byte (0x23) as a placeholder sentinel.
 | +72 | 4 | u32 | Handle/pool reference | Incrementing value across sequential records; likely a runtime allocation tag | UNVERIFIED |
 | +76 | 4 | u32 | Stack quantity / lot size | Values 1, 5, 10, 12; consistent with typical MMO stack sizes | UNVERIFIED |
 | +77..+227 | 151 | ? | Fields between +76 and description blocks | UNVERIFIED | UNVERIFIED |
-| +228 (0xE4) | 81 | char[81] | Description block 0 (CP949) | Two-witness confirmed: CP949 text begins at +0xE4 (228) | CONFIRMED (sample-verified) |
-| +309 (0x135) | 81 | char[81] | Description block 1 (CP949) | Two-witness confirmed: second paragraph at +0x135 (309); spacing = 81 bytes | CONFIRMED (sample-verified) |
-| +390 | 81 | char[81] | Description block 2 (CP949) | Text in some records | CONFIRMED (structure) |
-| +471 | 81 | char[81] | Description block 3 (CP949) | Text in some records | CONFIRMED (structure) |
-| +552 | 81 | char[81] | Description block 4 (CP949) | Often contains `#` placeholder only | CONFIRMED (structure) |
-| +633 | 81 | char[81] | Description block 5 (CP949) | Often `#` or empty | CONFIRMED (structure) |
-| +714 (0x2CA) | 338 | — / char[81]×? | Record remainder — disputed paragraph region | This 338-byte tail (`+0x2CA..+0x41B`) is the **UNRESOLVED 6-vs-10 paragraph conflict** (see below). Under a 6-paragraph reading it is a 338-byte non-paragraph remainder (the last paragraph, block 5, ends at +714/0x2CA); under a 10-paragraph reading it holds description blocks 6–9 (at +714 / +795 / +876 / +957) which were "largely empty / `#` placeholder" in the small sample. A multi-record text-vs-zero probe of this region is pending | UNRESOLVED (paragraph count) |
-| +1040 | 4 | u32 | Tail field 0 | Values 0 or 1; many records = 1 | UNVERIFIED |
-| +1044 | 4 | u32 | Tail field 1 | Values 0 or 2; many records = 2 | UNVERIFIED |
-| +1048 | 4 | u32 | Always zero | All checked records | CONFIRMED (value=0) |
+| +228 (0xE4) | 81 | char[81] | Description paragraph 0 (CP949) | Two-witness confirmed: CP949 text begins at +0xE4 (228); paragraph-block base | CONFIRMED (sample-verified) |
+| +309 (0x135) | 81 | char[81] | Description paragraph 1 (CP949) | Two-witness confirmed: second paragraph at +0x135 (309); spacing = 81 bytes | CONFIRMED (sample-verified) |
+| +390 (0x186) | 81 | char[81] | Description paragraph 2 (CP949) | Text in some records | CONFIRMED (structure) |
+| +471 (0x1D7) | 81 | char[81] | Description paragraph 3 (CP949) | Text in some records | CONFIRMED (structure) |
+| +552 (0x228) | 81 | char[81] | Description paragraph 4 (CP949) | Often contains `#` placeholder only | CONFIRMED (structure) |
+| +633 (0x279) | 81 | char[81] | Description paragraph 5 (CP949) | Often `#` or empty | CONFIRMED (structure) |
+| +714 (0x2CA) | 81 | char[81] | Description paragraph 6 (CP949) | Real paragraph slot (was previously read as the start of a non-paragraph remainder); CYCLE 7 (binary-won): the consumer reads through paragraph 9 | CONFIRMED (structure) |
+| +795 (0x31B) | 81 | char[81] | Description paragraph 7 (CP949) | Real paragraph slot | CONFIRMED (structure) |
+| +876 (0x36C) | 81 | char[81] | Description paragraph 8 (CP949) | Real paragraph slot | CONFIRMED (structure) |
+| +957 (0x3BD) | 81 | char[81] | Description paragraph 9 (CP949) | Real paragraph slot — the 10th and last; the consumer forms this address explicitly with the `#` sentinel check (CYCLE 7) | CONFIRMED (structure) |
+| +1038 (0x40E) | 14 | bytes | Record tail (non-paragraph) | The 10-paragraph block ends at +0x40E; this 14-byte tail runs to +0x41B at the 1052-byte (0x41C) stride; content not yet identified (likely duration / equip requirements / icon-graphic id) | UNVERIFIED (semantic) |
+| +1040 | 4 | u32 | Tail field 0 (within the 14-byte tail) | Values 0 or 1; many records = 1 | UNVERIFIED |
+| +1044 | 4 | u32 | Tail field 1 (within the 14-byte tail) | Values 0 or 2; many records = 2 | UNVERIFIED |
+| +1048 | 4 | u32 | Always zero (within the 14-byte tail) | All checked records | CONFIRMED (value=0) |
 
-**UNRESOLVED CONFLICT — description-paragraph count (6 vs 10).** Two readings of the 81-byte
-description blocks coexist and are NOT reconciled:
-- **6 paragraphs** (blocks 0–5) cover `+228..+713` (6 × 81 = 486 bytes, ending at +714 / 0x2CA),
-  leaving a 338-byte record remainder `+0x2CA..+0x41B` to the 1052-byte (0x41C) stride. This is the
-  geometrically clean reading.
-- **10 paragraphs** (blocks 0–9) would cover `+228..+1037` (10 × 81 = 810 bytes). Block 9 would end
-  at +228 + 810 = +1038 (0x41E), which **exceeds the 1052-byte stride only if a further sub-block
-  follows**; the 10-block layout itself ends at 0x41E = 1054 > 1052 (0x41C) **by two bytes**, i.e.
-  the 10th block cannot fit a full 81 bytes inside the stride. Treated strictly, a full 10×81 layout
-  overflows the record by two bytes; blocks 6–9 were observed "largely empty / `#` placeholder" in
-  the small sample, which is also consistent with them being part of the 338-byte remainder rather
-  than real paragraphs.
+**RESOLVED — description-paragraph count = 10 (CYCLE 7, binary-won).** The conflict is closed in
+favour of **10 fixed paragraphs** (structural capacity). The block base is **+0xE4 (228)**, each
+paragraph is **81 bytes (0x51)** wide, and paragraph `i` lives at `+0xE4 + 81·i` for `i = 0..9`. The
+last paragraph (index 9) sits at **+0x3BD (957)**; the 10-paragraph block ends at **+0xE4 + 10·81 =
++0x40E (1038)**, comfortably inside the **0x41C (1052)** record stride, leaving a **14-byte
+non-paragraph tail** at **+0x40E..+0x41B**. The runtime is **data-driven**: it iterates `i = 0..9` and
+**early-terminates at the first paragraph whose first byte is `#`** (a one-byte sentinel checked over
+the full 81-byte width). The loader copies the whole 1052-byte record verbatim and carries no
+paragraph-count constant; the count lives in the consumer (an accessor that hard-bounds the index
+`< 10`, plus one rolled `i < 10` consumer loop and one unrolled consumer that explicitly reaches
+paragraph 9 at +0x3BD).
 
-Neither reading is forced. The first two paragraphs (+228, +309) are byte-confirmed; the disputed
-region is `+0x2CA..` onward. **Resolution requires probing the +714 / +795 / +876 / +957 slots for
-CP949 text vs zero/`#` across many records** — not decidable from a single short hexdump. Carry as
-OPEN.
+The earlier "6" was a **miscount**: an adjacent **6-iteration UI-label-clearing loop** sits
+immediately above the real paragraph loop in the same consumer, and "6" was also the count of
+*typically-populated* paragraphs in VFS samples (data-driven via the `#` terminator) — neither is the
+structural capacity. The "10×81 overflows the record (ends at 0x41E)" worry was a hex-arithmetic slip
+(`+0xE4 + 10·81 = +0x40E`, not 0x41E).
+
+> Authority for the full citems body layout (paragraph block, sentinel, tail): `formats/items_scr.md §2.4`.
+> spec: Docs/RE/formats/items_scr.md §2.4
+
+**Engineering guidance:** iterate `i = 0..9`; **stop at the first paragraph whose first byte is `#`**
+(the runtime early terminator). Do NOT hard-code a count of 6 — that would silently drop paragraphs
+6–9 of any long description.
 
 **Open questions:**
-- **Description-paragraph count (6 vs 10) — UNRESOLVED** (see conflict box above); probe later slots
-  for text-vs-zero across multiple records.
 - Names and semantics of fields +4 through +51
 - Meaning of the flag at +52
 - Semantics of cost field at +56 and category byte at +60

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <RootNamespace>MartialHeroes.Client.Presentation</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Engine-free layer-04.x presentation lib. NO `using Godot;` ever — this project is
+             unit-testable without the Godot runtime and is referenced DOWNWARD by Client.Godot (05).
+             Edges are strictly downward (layer 04.x -> 04 Application/Domain, 03 Assets, 01 Kernel). -->
+        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
+        <!-- 04.x -> 04: the assembly/region/input contracts the moved adapters + HUD-input handler
+             implement live in Application (Input/, World/) and Domain.Simulation (RegionCatalog). -->
+        <ProjectReference Include="..\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Simulation\MartialHeroes.Client.Domain.Simulation.csproj"/>
+        <!-- 04.x -> 03: the moved view-adapters / assembly sources read VFS slices, the split
+             parser read-models, and the Mapping AreaComposer / AssembledArea facade. -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Core\MartialHeroes.Assets.Parsers.Core.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Mesh\MartialHeroes.Assets.Parsers.Mesh.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Terrain\MartialHeroes.Assets.Parsers.Terrain.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.World\MartialHeroes.Assets.Parsers.World.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Texture\MartialHeroes.Assets.Parsers.Texture.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
+    </ItemGroup>
+
+</Project>

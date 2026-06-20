@@ -30,31 +30,31 @@
 // spec: CLAUDE.md "Recovered asset mappings" — skin (.skn IdA → skin.txt), skeleton (g{SkinClassId}.bnd),
 //       idle motion via actormotion.txt.
 
+using System.Text;
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.Character;
+using MartialHeroes.Assets.Parsers.Mesh;
+using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Builds the in-world local player avatar (skinned + idle-animated) from the player's class via the
-/// recovered .skn → .bnd → idle .mot chain. Pure build-time helper: it never holds game state and
-/// never throws (each step degrades to a simpler-but-visible result). Call on the Godot main thread.
-///
-/// spec: Docs/RE/specs/skinning.md §8(e) (idle-clip + skeleton resolution chain).
+///     Builds the in-world local player avatar (skinned + idle-animated) from the player's class via the
+///     recovered .skn → .bnd → idle .mot chain. Pure build-time helper: it never holds game state and
+///     never throws (each step degrades to a simpler-but-visible result). Call on the Godot main thread.
+///     spec: Docs/RE/specs/skinning.md §8(e) (idle-clip + skeleton resolution chain).
 /// </summary>
 internal static class PlayerAvatarResolver
 {
     /// <summary>
-    /// Resolves the player's class → SkinClassId and builds the skinned avatar root node, or returns
-    /// <see langword="null"/> when the body .skn cannot be resolved (the caller keeps the placeholder).
-    ///
-    /// <paramref name="serverClass"/> is the wire character class {1,2,3,4} = the .skn header
-    /// SkinClassId / id_b (Musa/Jagaek/Dosa/Seungnyeo). This identity (ServerClass == SkinClassId)
-    /// is the §8(e) skeleton-selection key used verbatim — no slot transform.
-    /// spec: Docs/RE/specs/skinning.md §8(e); CLAUDE.md "Recovered asset mappings".
-    /// spec: MartialHeroes.Shared.Kernel.Enums.CharacterClass — 1-based {1,2,3,4}.
+    ///     Resolves the player's class → SkinClassId and builds the skinned avatar root node, or returns
+    ///     <see langword="null" /> when the body .skn cannot be resolved (the caller keeps the placeholder).
+    ///     <paramref name="serverClass" /> is the wire character class {1,2,3,4} = the .skn header
+    ///     SkinClassId / id_b (Musa/Jagaek/Dosa/Seungnyeo). This identity (ServerClass == SkinClassId)
+    ///     is the §8(e) skeleton-selection key used verbatim — no slot transform.
+    ///     spec: Docs/RE/specs/skinning.md §8(e); CLAUDE.md "Recovered asset mappings".
+    ///     spec: MartialHeroes.Shared.Kernel.Enums.CharacterClass — 1-based {1,2,3,4}.
     /// </summary>
     /// <param name="assets">Open VFS handle (shared with the rest of the world renderer).</param>
     /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4}.</param>
@@ -72,7 +72,7 @@ internal static class PlayerAvatarResolver
 
         // ── Step 1: body .skn — skinlist.txt scan for the entry whose parsed IdB == SkinClassId ──
         // spec: skinning.md §8(e) — body .skn = the skinlist entry whose id_b == SkinClassId.
-        string? sknPath = ResolveBodySknPath(assets, skinClass);
+        var sknPath = ResolveBodySknPath(assets, skinClass);
         if (sknPath is null)
         {
             GD.Print($"[PlayerAvatar] No .skn with IdB=={skinClass} in skinlist.txt — keeping placeholder. " +
@@ -83,7 +83,7 @@ internal static class PlayerAvatarResolver
         SkinnedMesh mesh;
         try
         {
-            ReadOnlyMemory<byte> sknData = assets.GetRaw(sknPath);
+            var sknData = assets.GetRaw(sknPath);
             if (sknData.IsEmpty)
             {
                 GD.PrintErr($"[PlayerAvatar] .skn empty in VFS: {sknPath}");
@@ -112,12 +112,12 @@ internal static class PlayerAvatarResolver
 
         // ── Step 3: skeleton — data/char/bind/g{SkinClassId}.bnd ──
         // spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4} is the direct rule.
-        Skeleton? skeleton = TryLoadSkeleton(assets, skinClass);
+        var skeleton = TryLoadSkeleton(assets, skinClass);
 
         // ── Step 4: idle .mot — actormotion row col2 == skinClass → motion_ids_a[0] (col15) ──
         // spec: skinning.md §8(e); formats/actormotion.md — col2 = skin_class, motion_ids_a[0] = col15.
-        int idleMotId = (skeleton is not null) ? ResolveIdleMotionId(assets, skinClass) : 0;
-        AnimationClip? clip = (skeleton is not null && idleMotId > 0)
+        var idleMotId = skeleton is not null ? ResolveIdleMotionId(assets, skinClass) : 0;
+        var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, idleMotId)
             : null;
 
@@ -132,16 +132,16 @@ internal static class PlayerAvatarResolver
         // spec: CLAUDE.md "Known Godot Pitfalls" — NEVER GltfDocument; build ArrayMesh directly.
         try
         {
-            Node3D root = SkinnedCharacterBuilder.Build(
+            var root = SkinnedCharacterBuilder.Build(
                 mesh, skeleton, clip, albedo,
-                externalDrive: false,
-                startPhaseSeconds: 0f,
-                out SkinnedCharacterNode? lbs,
-                debugLabel: $"local-player class={skinClass}");
+                false,
+                0f,
+                out var lbs,
+                $"local-player class={skinClass}");
 
             GD.Print($"[PlayerAvatar] Built class={skinClass} from '{sknPath}' " +
-                     $"(skeleton={(skeleton is not null)}, idleMot={idleMotId}, " +
-                     $"skinned={(lbs is not null)}, idlePlaying={(lbs?.IsIdlePlaying ?? false)}). " +
+                     $"(skeleton={skeleton is not null}, idleMot={idleMotId}, " +
+                     $"skinned={lbs is not null}, idlePlaying={lbs?.IsIdlePlaying ?? false}). " +
                      "spec: skinning.md §8(e).");
             return root;
         }
@@ -157,10 +157,10 @@ internal static class PlayerAvatarResolver
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Scans <c>data/char/skinlist.txt</c> (CP949 bare filenames under <c>data/char/skin/</c>) for the
-    /// first <c>.skn</c> whose parsed header <c>IdB</c> == <paramref name="skinClass"/>.
-    /// spec: skinning.md §8(e) — body .skn = the skinlist entry whose id_b == SkinClassId.
-    /// spec: Docs/RE/formats/mesh.md §.skn header — id_b at +4. CONFIRMED.
+    ///     Scans <c>data/char/skinlist.txt</c> (CP949 bare filenames under <c>data/char/skin/</c>) for the
+    ///     first <c>.skn</c> whose parsed header <c>IdB</c> == <paramref name="skinClass" />.
+    ///     spec: skinning.md §8(e) — body .skn = the skinlist entry whose id_b == SkinClassId.
+    ///     spec: Docs/RE/formats/mesh.md §.skn header — id_b at +4. CONFIRMED.
     /// </summary>
     private static string? ResolveBodySknPath(RealClientAssets assets, int skinClass)
     {
@@ -170,25 +170,25 @@ internal static class PlayerAvatarResolver
         try
         {
             // spec: project brief — "ALL game text is CP949".
-            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-            string text = System.Text.Encoding.GetEncoding(949).GetString(assets.GetRaw(listPath).Span);
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var text = Encoding.GetEncoding(949).GetString(assets.GetRaw(listPath).Span);
 
             // skinlist.txt lines are bare filenames; the full path is "data/char/skin/" + filename.
             // spec: verified on real VFS (NpcRenderer.EnsureSkinClassMapLoaded) — bare filenames.
             const string skinDir = "data/char/skin/";
-            foreach (string rawLine in text.Split('\n'))
+            foreach (var rawLine in text.Split('\n'))
             {
-                string fname = rawLine.Trim('\r', '\n', ' ').ToLowerInvariant();
+                var fname = rawLine.Trim('\r', '\n', ' ').ToLowerInvariant();
                 if (fname.Length == 0 || !fname.EndsWith(".skn", StringComparison.Ordinal)) continue;
 
-                string sknPath = skinDir + fname;
+                var sknPath = skinDir + fname;
                 if (!assets.Contains(sknPath)) continue;
 
                 try
                 {
-                    ReadOnlyMemory<byte> sknData = assets.GetRaw(sknPath);
+                    var sknData = assets.GetRaw(sknPath);
                     if (sknData.IsEmpty) continue;
-                    SkinnedMesh mesh = SknParser.Parse(sknData);
+                    var mesh = SknParser.Parse(sknData);
                     if ((int)mesh.IdB == skinClass) return sknPath; // first match wins (§8(e))
                 }
                 catch
@@ -206,12 +206,12 @@ internal static class PlayerAvatarResolver
     }
 
     /// <summary>
-    /// Loads <c>data/char/bind/g{SkinClassId}.bnd</c>, or null (→ static rest pose) when absent.
-    /// spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4}. CONFIRMED.
+    ///     Loads <c>data/char/bind/g{SkinClassId}.bnd</c>, or null (→ static rest pose) when absent.
+    ///     spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4}. CONFIRMED.
     /// </summary>
     private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int skinClass)
     {
-        string bndPath = $"data/char/bind/g{skinClass}.bnd";
+        var bndPath = $"data/char/bind/g{skinClass}.bnd";
         if (!assets.Contains(bndPath))
         {
             GD.Print($"[PlayerAvatar] No skeleton g{skinClass}.bnd — static rest pose. spec: skinning.md §8(e).");
@@ -220,7 +220,7 @@ internal static class PlayerAvatarResolver
 
         try
         {
-            ReadOnlyMemory<byte> data = assets.GetRaw(bndPath);
+            var data = assets.GetRaw(bndPath);
             if (data.IsEmpty) return null;
             return BndParser.Parse(data);
         }
@@ -232,10 +232,10 @@ internal static class PlayerAvatarResolver
     }
 
     /// <summary>
-    /// Finds the <c>actormotion.txt</c> row whose <c>col2</c> (skin_class) == <paramref name="skinClass"/>
-    /// and returns its <c>motion_ids_a[0]</c> (col15, record +0x40) — the file-source idle reference.
-    /// Returns 0 when no row matches or the slot is empty.
-    /// spec: skinning.md §8(e); formats/actormotion.md — col2 = skin_class, motion_ids_a[0] = col15.
+    ///     Finds the <c>actormotion.txt</c> row whose <c>col2</c> (skin_class) == <paramref name="skinClass" />
+    ///     and returns its <c>motion_ids_a[0]</c> (col15, record +0x40) — the file-source idle reference.
+    ///     Returns 0 when no row matches or the slot is empty.
+    ///     spec: skinning.md §8(e); formats/actormotion.md — col2 = skin_class, motion_ids_a[0] = col15.
     /// </summary>
     private static int ResolveIdleMotionId(RealClientAssets assets, int skinClass)
     {
@@ -244,8 +244,8 @@ internal static class PlayerAvatarResolver
 
         try
         {
-            ActormotionCatalogue catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
-            foreach (ActormotionEntry entry in catalogue.AllEntries)
+            var catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
+            foreach (var entry in catalogue.AllEntries)
             {
                 // col2 == skin_class is the player idle key (the player IS a class, not a mob_id).
                 // spec: skinning.md §8(e) — actormotion col2 == id_b → motion_ids_a[0].
@@ -263,18 +263,18 @@ internal static class PlayerAvatarResolver
     }
 
     /// <summary>
-    /// Loads the idle <c>.mot</c> at <c>data/char/mot/g{idleMotId}.mot</c>, or null (→ rest pose) when
-    /// absent / unparseable. Never throws.
-    /// spec: skinning.md §8(e); formats/actormotion.md — motion_ids_a[0] → data/char/mot/g{id}.mot.
+    ///     Loads the idle <c>.mot</c> at <c>data/char/mot/g{idleMotId}.mot</c>, or null (→ rest pose) when
+    ///     absent / unparseable. Never throws.
+    ///     spec: skinning.md §8(e); formats/actormotion.md — motion_ids_a[0] → data/char/mot/g{id}.mot.
     /// </summary>
     private static AnimationClip? TryLoadAnimation(RealClientAssets assets, int idleMotId)
     {
-        string motPath = $"data/char/mot/g{idleMotId}.mot";
+        var motPath = $"data/char/mot/g{idleMotId}.mot";
         if (!assets.Contains(motPath)) return null;
 
         try
         {
-            ReadOnlyMemory<byte> data = assets.GetRaw(motPath);
+            var data = assets.GetRaw(motPath);
             if (data.IsEmpty) return null;
             return AnimationParser.Parse(data);
         }

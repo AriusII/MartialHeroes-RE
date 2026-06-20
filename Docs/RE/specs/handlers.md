@@ -1,6 +1,6 @@
 ---
 status: routing-confirmed
-verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]
+verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
@@ -67,9 +67,9 @@ conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at
   read-order inference until a capture (or the IDA debugger on a real event) pins it. Any
   "seen in N captures" remark that survives from a source recon is a pre-existing third-party
   annotation, reproduced only as a weak hint and **not** independently verified here.
-- **`sample_verified: false`** — no packet sample (`.tsv`/`.pcapng`) was decoded. The
-  `_dirty/samples/` tree contains extracted **asset** files only (meshes, scripts,
-  textures), never a network capture.
+- **`sample_verified: false`** — no packet sample (`.tsv`/`.pcapng`) was decoded. The only
+  extracted samples available were **asset** files (meshes, scripts, textures), never a network
+  capture.
 - **`struct_cross_ref_verified: true`** — the descriptor landmark offsets this catalogue
   relies on (world coordinates, level, combat flag, equipment-slot stride/bounds, bag-slot
   count) were cross-checked against the committed `structs/spawn_descriptor.md` and agree;
@@ -191,10 +191,24 @@ matching `opcodes.md` and `packets/*.yaml`.
   status-text id); a 17-byte trailing blob (`+2..+18`) is read into the body but not consumed here.
 - **Behaviour (LIKELY; field VALUE meanings `[capture/debugger-pending]`):** clears the net-client
   awaiting-status latch byte, resets a select-screen scratch field, then on `gate == 0` maps the
-  sub-code (the enumerated set `{0xC8,0xC9}`, `{0xCC,0xCD,0xCF,0xD0,0xD1,0xD2}`, `0xCE`, `0xD4`) to
-  one of four status-text id globals shown on the local-player status line (~5000 ms timeout); any
-  other sub-code is a no-op. A select-screen status-line update — **not** the by-name roster write
-  (that is 3/23 `SmsgCharStatusBytesByName`).
+  sub-code through the **shared char-management error-code bucket** to a status-text message id shown
+  on the local-player status line (~5000 ms display window); any other sub-code is a no-op. A
+  select-screen / in-game status-line update — **not** the by-name roster write (that is 3/23
+  `SmsgCharStatusBytesByName`).
+- **Error-code → message-id map (`STRUCTURE-HIGH` switch; the id values are `[capture/debugger-pending]`).**
+  The sub-code switch was read in full here in 3/13:
+
+  | sub-code (hex / dec) | message-string id |
+  |---|---|
+  | `0xC8` / 200, `0xC9` / 201 | **1106** |
+  | `0xCC` / 204, `0xCD` / 205, `0xCF` / 207, `0xD0` / 208, `0xD1` / 209, `0xD2` / 210 | **1107** |
+  | `0xCE` / 206 | **1105** |
+  | `0xD4` / 212 | **1113** |
+  | `0xCA` / 202, `0xCB` / 203, `0xD3` / 211 (and any value outside the bucket) | default — no message |
+
+  The full bucket is `{0xC8,0xC9,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,0xD2,0xD4}` (ten live cases; `0xD3`
+  is explicitly *not* a member — it falls to the default no-message arm). **This identical bucket
+  and the same id mapping are DUPLICATED — not relocated — in 3/6 `SmsgCharManageResult`; see §23.2.**
 
 ### 3/4 — `SmsgSceneEntityUpdate`
 - **Routing `[confirmed]`: this is minor 4** (corrected — the first recon pass mislabelled it
@@ -327,19 +341,29 @@ matching `opcodes.md` and `packets/*.yaml`.
 - **Behaviour:** the 44-byte block is forwarded verbatim to a result/rank panel and consumed
   downstream as an opaque panel-update record.
 
-### 4/99 — `SmsgCombatResultMessage`
+### 4/99 — `SmsgCubeGambleResultMessage`
 - **Min fixed payload: 16 bytes.** `+8` mode `u8`; `+9` result `u8` (values 1..8).
-- **Behaviour:** mode `== 1` forwards the 16-byte block to a combat-result sub-handler.
-  Otherwise the result byte selects a combat/resource result string; result cases `3` and `4`
+- **Behaviour:** mode `== 1` forwards the 16-byte block to the Cube-Gamble minigame sub-handler.
+  Otherwise the result byte selects a gamble/resource result string; result cases `3` and `4`
   read a server-config drop/penalty value and format it. Mostly UI messaging.
+- **De-labelled (binary wins, CYCLE 7):** this opcode was previously mis-tagged `SmsgCombatResultMessage`.
+  It is part of the **Cube-Gamble (cube-bet) minigame result panel**, not combat — the bank loads
+  `data/ui/cubegamble.dds`, diffs a wager quantity, plays reel sounds, and tracks a daily bet limit;
+  it is submitted via C2S 2/141. Real combat is server-authoritative (the client gathers target ids
+  → C2S 2/52 → the server resolves and pushes results); there is **no** client-side damage-apply path
+  here. Pairs with 4/100 below.
 
-### 4/100 — `SmsgCombatAttackUpdate`
+### 4/100 — `SmsgCubeGambleReelUpdate`
 - **Min fixed payload: 188 bytes (0xBC)** — a large fixed payload, **not** a thin ack.
   `+8` phase `u8`; `+10` sub-kind `i8` (`0xFF` = reset); `+12` value `u32`.
-- **Behaviour:** drives a combat-attack / charge UI state. phase `3` starts a timed charge
-  (stamps the current time and stores `value`); phase `5` ends it. The full 188-byte block is
-  then forwarded to a combat-state sink. **Only `+8/+10/+12` are decoded; the remaining ~176
-  bytes are opaque** and need a dedicated pass (`UNVERIFIED`).
+- **Behaviour:** drives the **Cube-Gamble reel** UI state. phase `3` starts a timed reel
+  (stamps the current time and stores `value`); phase `5` ends it; sub-kind `0xFF` is the reel
+  teardown / reset sentinel. The full 188-byte block is then forwarded to the gamble-state sink.
+  **Only `+8/+10/+12` are decoded; the remaining ~176 bytes are opaque** and need a dedicated pass
+  (`UNVERIFIED`).
+- **De-labelled (binary wins, CYCLE 7):** previously mis-tagged `SmsgCombatAttackUpdate`. The phase
+  byte (values 3/5) and the `0xFF` sub-kind/reset describe the **GAMBLE reel**, not combat. See the
+  4/99 note above — combat is server-authoritative via C2S 2/52; this bank is the gamble panel.
 
 ### 4/108 — `SmsgPlayerGoldBalanceUpdate`
 - **Min fixed payload: 16 bytes.** `+8` gold `qword` (low/high dwords at `+8`/`+0x0C`).
@@ -415,11 +439,15 @@ matching `opcodes.md` and `packets/*.yaml`.
 - **Min fixed payload: 56 bytes (0x38).** `+0/+4` actor `(sort, id)` pair; `+8` slot index
   `u32`; `+12` effect code `u32`; `+16` value `u32`; `+20` extra `u32`.
 - **Behaviour:** writes 12-byte status entries `{code, value, extra}` at a 12-byte stride into
-  per-actor buff tables (with a local-player mirror). Three index regimes by slot value
+  per-actor buff tables (with a local-player mirror). The per-actor buff table holds **30 slots**
+  (12-byte stride) and is refreshed on a **4000 ms** tick. Three index regimes by slot value
   (`UNVERIFIED` semantics): small slots (`<= 30`) also mirror onto the live actor object;
   very large slots (`>= 1,000,000`) target a separate global buff array; the remainder use
   the per-actor table. effect code `44` with a non-zero value on a non-local actor removes
   that actor. This is the buff/status-slot channel — **not** inventory sync.
+- **Label (binary wins, CYCLE 7):** the buff/status-slot channel is **S2C 5/31 `SmsgBuffSlotUpdate`**.
+  This **SUPERSEDES** the older "buff xdb → 4/102" label; 4/102 is the skill-window state block
+  (`SmsgSkillWindowStateUpdate`, 476-byte), not the buff channel.
 
 ### 5/33 — `SmsgSkillHotbarSlotSet`
 - **Min fixed payload: 20 bytes (0x14).** `+0/+4` actor `(sort, id)` pair (must be the local
@@ -615,8 +643,8 @@ in §16.
 | 4/80  | `SmsgPvpDeathResult`           | S2C | 80  | status@8, reason@9, target-id@20 |
 | 4/81  | `SmsgActionErrorResult`        | S2C | hdr+| status@8, error@9 (+10 seconds for 0x15) |
 | 4/97  | `SmsgAreaSkillEffectPanel`     | S2C | 44  | opaque panel record |
-| 4/99  | `SmsgCombatResultMessage`      | S2C | 16  | mode@8, result@9 |
-| 4/100 | `SmsgCombatAttackUpdate`       | S2C | 188 | phase@8, sub-kind@10, value@12 |
+| 4/99  | `SmsgCubeGambleResultMessage`  | S2C | 16  | mode@8, result@9 (Cube-Gamble minigame; de-labelled from "SmsgCombat*") |
+| 4/100 | `SmsgCubeGambleReelUpdate`     | S2C | 188 | phase@8, sub-kind@10, value@12 (Cube-Gamble reel; de-labelled from "SmsgCombat*") |
 | 4/108 | `SmsgPlayerGoldBalanceUpdate`  | S2C | 16  | gold `qword`@8 |
 | 4/109 | `SmsgLocalActorSkillStateFlag` | S2C | 12  | actor@4 (local), flag@8 |
 | 4/122 | `SmsgResponseSlot122`          | S2C | 16  | gate@0x0C, notice@0x0D |
@@ -927,7 +955,7 @@ failure.
 | Opcode | Name | Fixed read | Gates / codes | Behaviour (neutral) | Conf |
 |---|---|---|---|---|---|
 | 4/5  | `SmsgItemUseResult`        | 44 | result 1/7; item-id ranges 213060037.. / 213062504..; sound kind 90 | Item-use result for an actor; on success plays effect+sound chosen by **item-id range** and updates item/HUD. Shares the item-id range table with 4/139, 5/5, 5/139. | size HIGH |
-| 4/15 | `SmsgItemWorldPickupAck`   | **36** | success@+8; outcome@+9 (100/101 / fail 1..5 → ids 10001..10005) | World item-pickup ack; 36-byte block; success flag @+8, outcome/reason @+9; success inserts into the bag, failure surfaces the error string. **Corrected: fixed 36-byte read (was "var").** | size HIGH |
+| 4/15 | `SmsgItemWorldPickupAck`   | **36** | picked id `u32`@+0; success@+8; outcome@+9 | World item-pickup ack (reply to C2S 2/15); **fixed 36-byte (0x24) block**: picked item/actor id `u32` @+0, success flag `u8` @+8, outcome selector `u8` @+9. **On failure (flag == 0)** selector `1..5` → error notices, string-ids **10001..10005**. **On success (flag != 0)** the selector chooses the insert path: **`100` = shared-path** (split/share into an existing stack), **`101` = plain-path** (insert only), **else (default)** = insert + actor-manager add + main-handler echo/refresh. So `{100 = shared, 101 = plain, else = default}`. Special case: coin item id **217000501** plays coin sound id **862030105**. **Corrected: fixed 36-byte read (was "var").** | size HIGH |
 | 4/16 | `SmsgEquipChangeResult`    | 20 | result@+8, gate@+0x0A, slot-type@+0x0B | Equip-change result — a **result-code-keyed** response (reached by opcode; the result byte selects success vs failure). result @+8 (0/1); on apply, gate byte @+0x0A and slot-type @+0x0B (`== 15` = title-slot weapon-drawn rebuild, parallel to 4/12); rebuilds the local-player live equipment mirror. **The `{0,1,2,4,15,20}` set is not one discriminator — it spans the result/gate/slot-type bytes and the change-apply sub-handler.** Equip-family — eliciting C2S **`live-pending (6-D)`** (see Group B note). | size HIGH |
 | 4/17 | `SmsgQuickEquipSlotAck`    | 16 | result@+8; slot index@+0x0B (`>= 10`) | Quick-equip slot ack; result @+8; clears the inventory in-flight latch (see §13 census). | size HIGH |
 | 4/19 | `SmsgNpcBuyOrAcquireAck`   | **56** | gate@+16; result-sub@+17 | NPC buy / inventory-acquire ack. **Corrected: FIXED 56-byte read (was "var").** gate @+16: `1` forwards the whole block to the inventory-acquire sub-handler; `0` is the text path (the result-sub byte @+17 == 1 formats an item-duration / time-remaining notice from a script-table record). **Serves BOTH C2S 2/19 and 2/115** (dual-source confirmed). | size HIGH |
@@ -1010,7 +1038,7 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/74 | `SmsgStallListRefill`       | **var** | **Corrected: VARIABLE stall-list refill (was "36-byte block → main UI").** Record count = `(frame_size − 14) / 36` (8B frame header + 6B list header), then N × 36-byte records `{u32 id; u8 kind; char name[31]}`. Destination is the stall-list window (panel art `data/ui/stalllist.dds`), NOT a generic "main UI". Rename from `SmsgResponseSlot74`. Clears the busy latch (byte +1, always). |
 | 4/75 | `SmsgProductPurchaseResultPanel` | 184 | **Corrected: a citems product-result panel, not opaque "main UI".** success forwards the 184-byte block; failure (gate @+0) drives the cash-item result view (`citems.scr`-backed) — fail-sub `101` shows an error string, **fail-sub `102` decrements the local-player character count** (a character-slot product). Clears the busy latch on the failure path. |
 | 4/78 | `SmsgServerTimeNotification`| 12  | **Corrected role: a rental-item expiry sweep, not a clock/UI panel** — the `u32` at +8 is a server time value fed into the inventory rental-item expiry sweep. (Size 12 confirmed.) |
-| 4/79 | `SmsgCraftingResult`        | var | gate 1; crafting result → main UI. |
+| 4/79 | `SmsgCraftingResult`        | var | gate 1; crafting result → main UI. Answers the crafting COMMIT and arms a ~60 s timeout. **C2S chain (binary wins, CYCLE 7):** C2S **2/151** (product select/toggle, 1-byte) is a *sub-step*; the production COMMIT is C2S **2/153** (4-byte), which 4/79 replies to. 2/151 is **not** the commit. |
 | 4/93 | `SmsgUserVoteTallyUpdate`   | 16  | 16-byte vote-tally block. |
 | 4/95 | `SmsgLocalPlayerBattleMode` | 12  | local-player battle-mode update. |
 | 4/101| `SmsgGlobalScalarPairUpdate`| 16  | two scalar values (global pair) update. |
@@ -1475,6 +1503,12 @@ StatAllocate (5 absolute `u32` stats, 20-byte payload).
 `+0x08` AimScale `f32`, `+0x0C` AimX `f32`, `+0x10` AimZ `f32`, `+0x14` CountA `u16`,
 `+0x16` CountB `u16`, then `ArrayA u32[CountA]` at `+0x18` and `ArrayB u32[CountB]` after it.
 Total payload = `24 + (CountA + CountB) * 4`.
+**Combat melee / use-skill is C2S `2/52` (binary wins, CYCLE 7).** Any "5/52" *combat* label is a
+transposition typo — **there is no 5/52 combat opcode**. The action executor ends in this 2/52
+builder; the basic-attack (melee) form sets `SkillSlot = 0xFF`. Combat is server-authoritative: the
+client gathers target ids → emits 2/52 → the server resolves damage and pushes results (the inbound
+S2C **5/52 `SmsgActorSkillAction`** in §17.11/§20.3 is the *result* push, a different direction —
+not the C2S send).
 
 ### 17.11 5/52 `SmsgActorSkillAction` — variable (24-byte header + N × 36-byte records) — **correction**
 Header (payload-relative): `+0x00` CasterSort `u8`, `+0x01..+0x03` pad, `+0x04` CasterId `u32`,
@@ -1510,6 +1544,33 @@ the lone exclude-NUL chat outlier alongside C2S 2/7 (contrast 2/83 / 3/21 below,
 - **3/21 `CmsgChatChannel`:** 56-byte header (`ChannelSelector u32` at `+0x04`; the rest opaque)
   + `[u32 len][text]` body (`len = strlen + 1`). Gate: ordinary channels reject empty or
   `≥ 200`; `selector % 10 == 5` bypasses the gate. ChannelSelector HIGH; rest LOW.
+
+### 17.14 C2S 2/142 `CmsgStorageOp` — fixed 16-byte body (the `−7` op bias confirmed)
+A client→server storage operation, **16-byte (0x10) body** appended from a caller-built source
+struct. Layout: `+0` container/target id `u32`; **`+4` op `u8` = (widget-action-id − 7)**;
+`+5..+7` pad; `+8` quantity `i64`.
+- **The `−7` bias is uniform and confirmed (binary wins, CYCLE 7):** the storage-op byte at `+4` is
+  always `(action_id − 7)` for every caller. The button path proves ops **{0, 1}** (from
+  action ids 7 and 8); the **drag path** emits `(source-widget-action-id − 7)` for the full op set.
+- **Full op enumeration is UI-data-driven / runtime:** the complete set of widget action ids (and
+  hence the op codes beyond {0,1}) is assigned at UI-construction time, so only `{0,1}` are proven
+  statically — the `−7` transform itself is the settled fact, the value range is
+  `[capture/debugger-pending]`.
+
+### 17.15 Other C2S send-side opcodes touched this pass (CYCLE 7 cross-block)
+- **Learn-skill = C2S `2/145`** (`Cmsg_SkillListSubmit`): `u32 count` + `count × 12-byte` records;
+  the reply is 4/41 `SmsgSkillHotbarAssignResult`.
+- **Crafting (binary wins):** C2S **2/151** (product select/toggle, 1-byte) is a *sub-step* →
+  C2S **2/153** (production COMMIT, 4-byte) → S2C **4/79 `SmsgCraftingResult`** (arms a ~60 s
+  timeout). 2/151 is **not** the commit.
+- **Couple / marriage (binary wins): C2S `2/60`** is the couple/marriage **relation request** —
+  8-byte body `{ mode/action byte (0..4), partner actor id }` — with reply S2C **5/53**. **It is NOT
+  mail.** The real mail/delivery feature is C2S **2/71** (delivery claim) + S2C **4/70** (delivery
+  record), plus C2S **2/70** (carrier-pigeon send). Do not label 2/60 as `CmsgLetterRequest`.
+- **Party id-array base = local-player + 204** (20 slots × 16-byte stride) — used by the
+  friendly-fire / party guard the skill executor walks; the earlier "+200" reading is refuted.
+- **Death / respawn / ground-pickup flow:** death push = S2C **5/10**; respawn flow = C2S **2/3**
+  (respawn-choice) → S2C **4/28 + 5/28**; ground pickup = C2S **2/15** → S2C **4/15**.
 
 ---
 
@@ -1607,20 +1668,23 @@ local-gated handlers) is consolidated in §24; §5 above remains the per-handler
 
 ## 20. Combat & quest/rank interiors (consumer-parse maps)
 
-### 20.1 — 4/100 `SmsgCombatAttackUpdate` interior
+### 20.1 — 4/100 `SmsgCubeGambleReelUpdate` interior (de-labelled from "SmsgCombatAttackUpdate")
+- **De-labelled (binary wins, CYCLE 7): this is the Cube-Gamble reel bank, NOT combat.** The phase
+  byte (3/5) and the `0xFF` sub-kind/reset describe the **gamble reel**, not a combat attack — see
+  the 4/99/4/100 notes in §3. The structural facts below stand; only the gameplay attribution changes.
 - **Shape (STRUCTURE-HIGH): one fixed 188-byte record** — *not* an array (no count and no stride
   are read), confirming the §3/§9 reading. The handler interprets only a short prefix and forwards
-  the whole block to a combat-apply sink.
+  the whole block to the gamble-state sink.
   - **8-byte opaque head** (`+0..+7`) — not read before the forward.
   - **8-byte interpreted prefix** (`+8..+0x0F`): phase `u8` at `+8` (compared `== 3` / `== 5`),
-    sub-kind `i8` at `+0x0A` (compared `== 0xFF`), value `u32` at `+0x0C`.
-  - **172-byte opaque tail** (`+0x10..+0xBB`) forwarded **as one block** to the combat-apply
+    sub-kind `i8` at `+0x0A` (compared `== 0xFF` = reel teardown/reset), value `u32` at `+0x0C`.
+  - **172-byte opaque tail** (`+0x10..+0xBB`) forwarded **as one block** to the gamble-state
     consumer; this handler never sub-indexes it.
-- **Prefix behaviour (roles control-flow-confirmed; values pending):** sub-kind `== 0xFF` pokes
-  one actor sub-slot; phase `== 3` stamps the current time and stores `value` into the
-  local-player combat-charge slots and clears a flag; phase `== 5` ends the charge and sets the
+- **Prefix behaviour (roles control-flow-confirmed; values pending):** sub-kind `== 0xFF` is the
+  reel reset/teardown sentinel; phase `== 3` stamps the current time and stores `value` into the
+  reel-charge slots and clears a flag; phase `== 5` ends the reel and sets the
   flag. The 172-byte tail's internal shape (sub-records? fields keyed by phase/sub-kind?) is
-  **not decidable from this handler** — it would need the combat-apply consumer decompiled.
+  **not decidable from this handler** — it would need the gamble-apply consumer decompiled.
   `[capture/debugger-pending]` on every value; the single-record (non-array) structure is the
   load-bearing structural fact.
 
@@ -1707,18 +1771,18 @@ with per-entry flag byte-vectors after it), except 4/48 which uses **interleaved
   interleaved. (With count 10 the parsed arrays do not span the full 452-byte read; the trailing
   bytes are the unread remainder of the snapshot — `[capture/debugger-pending]`.)
 
-- **5/73 `SmsgQuestComplete` / (name-dispute) `SmsgGuildWarInfoUpdate` (344-byte body) — verdict
-  header + 10-row table; name UNRESOLVED.** The handler reads a **4-byte branch selector at `+8`**
-  (gates the whole success path on `== 1`) and a **sub-verdict byte at `+0x0C`** (`== 1` / `== 2`
-  success vs cancel-sound), then **copies the whole 344-byte block verbatim** into a quest-state
-  mirror; the panel then walks the **mirror** (a 10-row UI group and a **10-element record array of
-  `(CP949 17-byte name + integer)`**). Because the inner array is pinned **mirror-relative** (a
-  verbatim copy), its exact **wire** offset inside the 344 bytes is `STRUCTURE-MEDIUM`; the array
-  **count (10)** and the **17-byte name stride** are `STRUCTURE-HIGH`. **`[UNVERIFIED]` — the
-  QuestComplete-vs-GuildWarInfoUpdate name dispute is *not* settled by body shape:** a 10-row
-  name+number table fits a quest-completion summary and a guild-war info/ranking board equally
-  well (a mild, non-decisive lean toward an info/ranking-table reading). Carry the dispute; do not
-  resolve it here.
+- **5/73 `SmsgQuestComplete` (344-byte body) — verdict header + 10-row table. Name RESOLVED
+  (GuildWar REFUTED).** The handler reads a **4-byte branch selector at `+8`** (gates the whole
+  success path on `== 1`) and a **sub-verdict byte at `+0x0C`** (`== 1` / `== 2` success vs
+  cancel-sound), then **copies the whole 344-byte block verbatim** into a quest-state mirror; the
+  panel then walks the **mirror** (a 10-row UI group and a **10-element record array of
+  `(CP949 17-byte name + integer)`**). The destination is the **quest-completion panel** — the sole
+  writer of that panel, presenting a reward list (captions 309/618), with no guild-war state. Because
+  the inner array is pinned **mirror-relative** (a verbatim copy), its exact **wire** offset inside the
+  344 bytes is `STRUCTURE-MEDIUM`; the array **count (10)** and the **17-byte name stride** are
+  `STRUCTURE-HIGH`. **The earlier `SmsgGuildWarInfoUpdate` / "GuildWar" name candidate is REFUTED
+  (binary wins, CYCLE 7)** — delete any stale GuildWar comment on 5/73; it is `SmsgQuestComplete`. The
+  on-wire field *values* remain `[capture/debugger-pending]`.
 
 - **5/77 `SmsgRankProgressPanelBulk` (400-byte body) — two parallel name arrays, STRUCTURE-HIGH.**
   Forwarded to the rank-progress panel **only when the addressed actor is the local player** (the
@@ -1807,6 +1871,10 @@ carries the subtype at `+8` and an actor id at `+0x0C`. **Array B's base is now 
 clean dword index `+260` = byte `+0x410` (the earlier dword-vs-byte "static hypothesis / debugger-
 confirmable" caveat is RESOLVED). This is effectively a scene/spawn-population block routed through
 a guild-family slot. The `1552`/`1556` immediates near the read are the **read size**, not a string id.
+**Fixed size (binary wins, CYCLE 7): 4/56 is a FIXED 1552-byte body**; the full dual-array field
+table is in `structs/net_packet_bodies.md`. Likewise **4/48 is a FIXED 236-byte body** (12-byte
+header + 8 × 28-byte records, see §13 Group C / §20.4) — none of 4/48 / 4/56 / 4/71 carries a
+variable tail.
 
 ### 22.4 — 4/71 `SmsgResponseSlot71` — **RECLASSIFY (NOT a thin slot)** — STRUCTURE-HIGH
 **Also not a thin slot — it is a structured ~1092-byte panel snapshot.** A subtype byte at `+8`
@@ -1818,7 +1886,11 @@ fixed-stride sub-tables** inside the consumer's destination struct (80-byte slot
 17-byte name cells), but those are indexed in the *copied struct*, so their wire offsets past `+52`
 are a **static hypothesis**. `STRUCTURE-HIGH`: total 1092, subtype at `+8`, id array `×8 @+12`,
 status array `×8 @+44`. The `1092`/`1096` immediates near the read are the **read size**, not a
-string id.
+string id. **Fixed size (binary wins, CYCLE 7): 4/71 is a FIXED 1092-byte body — there is no
+variable tail.** The 8-slot sub-tables (the 80-byte slot records and 17-byte name cells past `+52`)
+are resolved into fixed-stride records; **the full body field table now lives in
+`structs/net_packet_bodies.md` and `packets/4-71_*.yaml`** — read those for the field grid rather
+than treating the tail as an opaque variable block.
 
 ### 22.5 — Other structured "thin-slot-looking" payloads (4/102, 4/75, 4/135, 5/38)
 The sizes match §13/§14/§16 exactly (binary == doc); these are their consumer-parse shapes.
@@ -1868,28 +1940,48 @@ modes**, keyed on whether the local player exists yet:
 - **in-world mode** (local player present): a small set `{1,2,3,4,5,7,22}` each selects its own
   in-game tooltip popup, then arms a deferred timer.
 
-The complete code set is **`{0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227, 202/203/232}`** —
-**there is NO `case 32`** (the first recon pass's "32" was spurious). Grouped by structural role:
+The complete code set is **`{0, 1-5, 7, 10, 11, 16, 22, 23, 200-211, 220-227, 202/203/232}`** —
+**there is NO `case 32`** (the first recon pass's "32" was spurious), and **there is NO `case 9`**:
+the guard is `code > 9` (so the value 9 hits no special arm and falls through), which means the
+former "9-11" must be read as **10, 11** only (plus the separate 16). Grouped by structural role:
 
-| code(s) | structural role (lobby path unless noted) | meaning |
+| code(s) | structural role (lobby / select-screen path unless noted) | meaning |
 |---|---|---|
-| **0** | return-to-prior-scene outcome (drives the scene back to its prior state); arms the deferred timer | pending |
-| **1, 2, 3, 4, 7** | advance the select scene to the next state; **in-world mode** instead maps each to a distinct tooltip popup — same number, two behaviours keyed by local-player presence | pending |
+| **0** | select-screen state ← 6 / sub-state ← 8; one path also enqueues the deferred timed event | pending |
+| **1-4, 7** | select-screen state ← 7 / sub-state ← 5; **in-world mode** instead maps each to a distinct tooltip popup — same number, two behaviours keyed by local-player presence | pending |
 | **5** | in-world mode: a tooltip popup (no lobby advance) | pending |
-| **9, 10, 11, 16** | **smaller publish set** — published outward via the **select-screen handler's publish-code method** (the same publish method the conn-state machine uses) | pending |
-| **23** | shows a status string on the select-screen status line; **explicitly excluded** from the deferred-timer arm | pending |
-| **22** | in-world mode: a tooltip popup; lobby mode: falls into the scene-advance | pending |
+| **10, 11, 16** | **smaller publish set** — call the **select-screen handler's publish-code method** with the code (the same publish method the conn-state machine uses) | pending |
+| **22, 23** | select-screen state ← 7 / sub-state ← 5; in-world mode: a tooltip popup. `23` additionally shows a status string on the status line (notice string-id **1604**) and is **explicitly excluded** from the deferred-timer arm | pending |
 | **200, 201, 204-211, 220-227** | **the biggest cluster** — all publish outward via the same select-screen publish-code method, with no other side effect (the connect/char-action outcome class) | pending |
 | **202, 203, 232** | publish outward via the publish method **AND** set the game state to the loading/connecting state (prime the connect-progress state) | pending |
+| **212-219, 228-231** | jumptable default — no publish-code call (falls through to the common tail) | pending |
 
 - **The single biggest cluster `{200/201/204-211/220-227}` all do the same thing** — call the
   select-screen handler's publish-code method with no other side effect. `{202,203,232}` are a
-  deliberate gap in that fan: they additionally **prime the connecting state**.
-- **`{9,10,11,16}`** publish via the **same** method as the 200/220 block — a smaller mid-range
-  publish set.
+  deliberate gap in that fan: they additionally **prime the connecting state**. `{212-219,228-231}`
+  exist only as the jumptable default (no publish-code action).
+- **`{10,11,16}`** publish via the **same** method as the 200/220 block — a smaller mid-range
+  publish set (the value 9 is **not** in this set — see the `> 9` guard above).
 - **Tail:** any non-zero code that is not `23` and not in `{202,203,232}` also arms the deferred
   retry/timeout timer and stores the code into the pending slot the connection-state machine
   watches.
+- **Common-tail notice (select-screen / lobby regime):** the generic notice shown after the
+  publish path uses string-id **1604** for code `23`, and string-id **1107** for the handler set
+  otherwise.
+- **In-game regime tooltip string-ids (`STRUCTURE-HIGH`; the id *values* are
+  `[capture/debugger-pending]`).** When a local player exists, each in-game code selects its own
+  tooltip popup id, arms a deferred timer, and stores the code into the game state:
+
+  | code | tooltip string-id |
+  |---|---|
+  | 1 | **1201** |
+  | 2 | **1202** |
+  | 3 | **1203** |
+  | 4 | **1204** |
+  | 5 | **1205** |
+  | 6 | **1206** |
+  | 7 | **1207** |
+  | 22 | **1208** |
 - **Cross-reference (not duplicated):** the codes `{202,203,232}` that 3/100 *primes* are exactly
   the codes the **connection-state machine consumes/clears** from its pending slot on the next
   connection event; and `201` is also published by that machine. They **share the numbers, not the
@@ -1902,12 +1994,23 @@ The complete code set is **`{0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227, 202/
   `[confirmed]` (full decompile); every human meaning `[capture/debugger-pending]`.
 
 ### 23.2 — major-3 char-management fail-code class (3/6, 3/13) `[confirmed]` (control-flow)
-The **3/6 `SmsgRenameCharResult`** and **3/13 `SmsgCharStatusUpdate`** handlers share an
-**identical sub-code → message-string switch**: the body's fail sub-code selects one of four
-select-screen message-string slots, shown for a fixed display duration. Structural clustering of
-the codes: `{204,205,207,208,209,210}` all collapse to **one** message slot (a contiguous "generic
-char-mgmt rejection" block); `{200,201}` share a **second** slot; **206** and **212** each get
-their **own** distinct slot; the subtype-1 success branch applies the new name/status with no error
+The **3/6 `SmsgCharManageResult`** (the rename/manage verdict — subtypes `0 = fail` /
+`1 = success rename`, etc.) and **3/13 `SmsgCharStatusUpdate`** (19-byte body, branches on body `+1`
+when body `+0 == 0`) handlers each surface a char-management verdict through **one and the same
+error-code bucket**: `{0xC8,0xC9,0xCC,0xCD,0xCE,0xCF,0xD0,0xD1,0xD2,0xD4}`, with the identical
+error-code → message-id mapping (`0xC8/0xC9 → 1106`; `0xCC,0xCD,0xCF,0xD0,0xD1,0xD2 → 1107`;
+`0xCE → 1105`; `0xD4 → 1113`; `0xCA,0xCB,0xD3 → default / no message`). **IMPORTANT — the bucket is
+DUPLICATED in BOTH handlers, not relocated.** The exact switch was *read in full* in the 3/13
+status-update handler (see the table under §3 "3/13"); 3/6 surfaces the rename/manage verdict via the
+**same** bucket and the **same** mapping. (Do **not** read this as "the bucket moved from 3/6 to 3/13"
+— it lives in both: 3/6 carries the rename/manage verdict, 3/13 the in-game status verdict.)
+*(Routing note: this file's confirmed major-3 routing keeps the rename-result surface at 3/6 and the
+8-byte char-manage result at 3/7 — the bucket-duplication fact above is independent of that
+labelling and does not re-route either minor.)* Structural clustering of the codes:
+`{204,205,207,208,209,210}` all collapse to **one** message slot (a contiguous "generic
+char-mgmt rejection" block, id 1107); `{200,201}` share a **second** slot (id 1106); **206** (id 1105)
+and **212** (id 1113) each get their **own** distinct slot; the subtype-1 success branch applies the
+new name/status with no error
 message; codes outside the switch fall through silently. The four message-string slots are
 message-DB handles whose string values (and therefore the human text) are `[capture/debugger-pending]`.
 

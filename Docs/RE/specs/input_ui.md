@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: Ctrl-vs-Shift identity of modifier slots 1012/1013, and the exact call site that registers a text field's HWND into the IME focused-field slot, remain capture/debugger-pending.
+conflicts: Ctrl-vs-Shift identity of modifier slots 1012/1013, and the exact call site that registers a text field's HWND into the IME focused-field slot, remain capture/debugger-pending. — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §3d behavioural note on the widget on-event dispatch (vtable slot 6) + hit-test slots (4 = vector/point-in, 5 = bool) and the click→action→click-cue path; struct vtable slot numbers are owned by `structs/gucomponent.md`.
 ---
 
 # Input & UI Tree — Clean-Room Specification
@@ -272,6 +272,35 @@ monster). A secondary NPC pick handles non-combat interaction targets. The ray t
 returns miss / hit / inside. (Exact entity field offsets are an implementation detail
 of the legacy scene; the *behaviour* — frontmost pickable entity by depth — is the
 contract.) [static-hypothesis] for the precise per-entity offsets.
+
+### 3d. Widget-level dispatch — on-event + hit-test (behavioural, CODE-CONFIRMED)
+
+At the per-widget level the tree dispatcher of §3a reaches each widget through a small fixed set of
+its vtable methods. Stated behaviourally (the exact vtable **slot numbers** are owned by
+`structs/gucomponent.md`; do not re-derive the slot table here):
+
+- **Hit-test (two forms).** Each widget exposes two hit-test entries the dispatcher calls before
+  offering a pointer event: a **vector / point-in form** and a plain **bool form**. The rectangular
+  rule is the §4 AABB test (`rectX ≤ x < rectX + w && rectY ≤ y < rectY + h`); on a hit the widget
+  sets its under-cursor byte and hover-latch and fires the mouse-enter / mouse-leave edges. A button's
+  hit-test additionally short-circuits to "no hit" when its disabled byte is set.
+
+- **On-event dispatch.** Each widget has a single **on-event handler** (the per-class event method the
+  dispatcher invokes once a child hit-tests). For a panel/window this handler walks its children
+  (the chain-of-responsibility of §3a); for a leaf button it toggles the pressed byte on press and,
+  on the synthesised type-6 click (§2b), **performs the widget's bound action** — it reads the
+  element's action / command id (set by the add-child-with-action helper) and routes it to the owning
+  window's action sink.
+
+- **Click → action → cue.** The common path for a button activation is therefore: press (type 4) sets
+  the pressed feedback → release on the same widget synthesises a click (type 6) → the on-event
+  handler runs the action and **commonly plays a UI click cue** (an audio feedback the front-end and
+  HUD both use on button activation). A release that drifts off the pressed widget produces no click
+  and no cue (it was a drag, §2b).
+
+This is the behavioural companion to §3a's "UI is the gate": the gate decides *which* widget gets the
+event; the on-event handler decides *what that widget does* with it (act + cue), keying off the
+type-6 synthesised click for activation.
 
 ## 4. UI / widget tree
 

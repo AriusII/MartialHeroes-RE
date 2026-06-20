@@ -30,15 +30,14 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game scrolling announce banner (AnnouncePanel, slot 221).
-///
-/// <para>Non-interactive text banner. Text arrives via <see cref="ShowAnnounce"/>
-/// (called by <see cref="HudErrorPanel"/> delegation). Rotates through up to 8 label slots.</para>
-///
-/// <para>PASSIVE: zero game logic; no domain mutation; no atlas.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 221.
+///     In-game scrolling announce banner (AnnouncePanel, slot 221).
+///     <para>
+///         Non-interactive text banner. Text arrives via <see cref="ShowAnnounce" />
+///         (called by <see cref="HudErrorPanel" /> delegation). Rotates through up to 8 label slots.
+///     </para>
+///     <para>PASSIVE: zero game logic; no domain mutation; no atlas.</para>
+///     spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 221.
 /// </summary>
 public sealed partial class HudAnnouncePanel : Control
 {
@@ -67,9 +66,8 @@ public sealed partial class HudAnnouncePanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 8 scrolling label slots.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED — "8 GULabels, 110×12, stacked".
+    ///     Geometry pass: builds the 8 scrolling label slots.
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED — "8 GULabels, 110×12, stacked".
     /// </summary>
     public void Build()
     {
@@ -94,7 +92,7 @@ public sealed partial class HudAnnouncePanel : Control
 
         // Build 8 label slots (two batches: 3 + 5)
         // spec: §8.25.1 — "8 GULabels (two batches: 3+5), each 110×12, stacked vertically"
-        for (int i = 0; i < LabelCount; i++)
+        for (var i = 0; i < LabelCount; i++)
         {
             _labels[i] = new Label
             {
@@ -104,7 +102,7 @@ public sealed partial class HudAnnouncePanel : Control
                 Position = new Vector2(0f, i * LabelSpacing),
                 Size = new Vector2(LabelW, LabelH), // spec: §8.25.1 — 110×12
                 MouseFilter = MouseFilterEnum.Ignore,
-                Visible = false,
+                Visible = false
             };
             // The two batches (3+5) correspond to the two GULabel-construction sequences:
             // batch A = labels 0..2, batch B = labels 3..7.
@@ -127,10 +125,9 @@ public sealed partial class HudAnnouncePanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows a scrolling announce text. Called by <see cref="HudErrorPanel"/> as the banner delegate,
-    /// and directly by <see cref="HudMaster.ShowAnnounce"/>.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.25.1 — "supplied by the caller (the notice sink)".
+    ///     Shows a scrolling announce text. Called by <see cref="HudErrorPanel" /> as the banner delegate,
+    ///     and directly by <see cref="HudMaster.ShowAnnounce" />.
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.1 — "supplied by the caller (the notice sink)".
     /// </summary>
     public void ShowAnnounce(string text)
     {
@@ -138,7 +135,7 @@ public sealed partial class HudAnnouncePanel : Control
 
         // Rotate through label slots.
         // spec: §8.25.1 — "custom animated text rotator keyed by a client game-state word"
-        int slot = _nextSlot % LabelCount;
+        var slot = _nextSlot % LabelCount;
         _nextSlot = (_nextSlot + 1) % LabelCount;
 
         if (_labels[slot] != null)
@@ -169,19 +166,17 @@ public sealed partial class HudAnnouncePanel : Control
         {
             _scrollTimer = 0.0;
             // Clear the oldest label slot in rolling fashion.
-            int oldest = _nextSlot % LabelCount;
+            var oldest = _nextSlot % LabelCount;
             if (_labels[oldest] != null) _labels[oldest].Visible = false;
 
             // Check if all labels are empty → hide the panel.
-            bool anyVisible = false;
+            var anyVisible = false;
             foreach (var lbl in _labels)
-            {
                 if (lbl.Visible)
                 {
                     anyVisible = true;
                     break;
                 }
-            }
 
             if (!anyVisible) Visible = false;
         }

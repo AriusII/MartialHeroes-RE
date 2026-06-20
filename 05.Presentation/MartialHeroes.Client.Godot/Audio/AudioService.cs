@@ -53,55 +53,41 @@
 // spec: CLAUDE.md Headless Verify Loop — "guard with try/catch and GD.Print evidence".
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Audio;
 
 /// <summary>
-/// Godot Node — the single audio façade for the presentation layer.
-///
-/// Added as a child of the ClientContext autoload in
-/// <see cref="MartialHeroes.Client.Godot.Autoload.ClientContext._Ready"/>.
-/// All public methods are main-thread safe (called from _Process or by audio hooks).
-///
-/// Usage:
-///   <c>AudioService.Instance?.PlayUiClick();</c>        — UI click SFX (called by StateButton hook)
-///   <c>AudioService.Instance?.Play2dById(id);</c>       — play any 2D SFX by ID
-///   <c>AudioService.Instance?.StartBgm(id);</c>         — start a BGM track (loops)
+///     Godot Node — the single audio façade for the presentation layer.
+///     Added as a child of the ClientContext autoload in
+///     <see cref="MartialHeroes.Client.Godot.Autoload.ClientContext._Ready" />.
+///     All public methods are main-thread safe (called from _Process or by audio hooks).
+///     Usage:
+///     <c>AudioService.Instance?.PlayUiClick();</c>        — UI click SFX (called by StateButton hook)
+///     <c>AudioService.Instance?.Play2dById(id);</c>       — play any 2D SFX by ID
+///     <c>AudioService.Instance?.StartBgm(id);</c>         — start a BGM track (loops)
 /// </summary>
 public sealed partial class AudioService : Node
 {
-    // -------------------------------------------------------------------------
-    // Static singleton accessor (main-thread only)
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// The live AudioService instance, or null if audio has not been initialised.
-    /// Set in _Ready, cleared in _ExitTree.
-    /// </summary>
-    public static AudioService? Instance { get; private set; }
-
     // -------------------------------------------------------------------------
     // Spec-sourced constants — ALL magic IDs cite their spec origin.
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Standard UI button click SFX.
-    /// spec: Docs/RE/names.yaml runtime_constants.UI_CLICK_SFX_ID (value=861010101).
-    /// spec: Docs/RE/specs/frontend_scenes.md — standard button click SFX. CODE-CONFIRMED.
+    ///     Standard UI button click SFX.
+    ///     spec: Docs/RE/names.yaml runtime_constants.UI_CLICK_SFX_ID (value=861010101).
+    ///     spec: Docs/RE/specs/frontend_scenes.md — standard button click SFX. CODE-CONFIRMED.
     /// </summary>
     private const uint UiClickSfxId = 861010101u;
     // spec: Docs/RE/names.yaml runtime_constants.UI_CLICK_SFX_ID
 
     /// <summary>
-    /// Character-select enter SFX (state 4 → "enter" action).
-    /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — sample ID 920100200. SAMPLE-VERIFIED.
+    ///     Character-select enter SFX (state 4 → "enter" action).
+    ///     spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — sample ID 920100200. SAMPLE-VERIFIED.
     /// </summary>
     private const uint CharSelectEnterSfxId = 920100200u;
     // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics (920100200 observed in real .bgm table)
@@ -120,9 +106,9 @@ public sealed partial class AudioService : Node
     // spec: Docs/RE/specs/sound.md §15.6c.
 
     /// <summary>
-    /// BGM override ID used when the local player indoor flag is set.
-    /// spec: Docs/RE/names.yaml runtime_constants.INDOOR_BGM_OVERRIDE_ID (value=863500002).
-    /// spec: Docs/RE/specs/sound.md §6.6 (indoor override). CODE-CONFIRMED.
+    ///     BGM override ID used when the local player indoor flag is set.
+    ///     spec: Docs/RE/names.yaml runtime_constants.INDOOR_BGM_OVERRIDE_ID (value=863500002).
+    ///     spec: Docs/RE/specs/sound.md §6.6 (indoor override). CODE-CONFIRMED.
     /// </summary>
     private const uint IndoorBgmOverrideId = 863500002u;
     // spec: Docs/RE/names.yaml runtime_constants.INDOOR_BGM_OVERRIDE_ID
@@ -144,17 +130,6 @@ public sealed partial class AudioService : Node
     private const float DefaultSfxVolume = 1.0f;
 
     // -------------------------------------------------------------------------
-    // Godot audio player nodes — one per logical role.
-    // -------------------------------------------------------------------------
-
-    private AudioStreamPlayer? _bgmPlayer; // Music bus: looping BGM
-    private AudioStreamPlayer? _sfxPlayer; // Sfx bus: one-shot 2D SFX (for UI + spawn sounds)
-
-    // The currently-playing BGM ID (for dedup per spec §6 "playMusicZone deduplicates").
-    // spec: Docs/RE/specs/sound.md §6.6 — "playMusicZone deduplicates: if the ID is already playing, not restarted".
-    private uint _activeBgmId;
-
-    // -------------------------------------------------------------------------
     // Stream cache — loaded on first play, reused on all subsequent plays.
     // spec: Docs/RE/specs/sound.md §12.1 (cache + Godot OggVorbisStream).
     // -------------------------------------------------------------------------
@@ -163,6 +138,10 @@ public sealed partial class AudioService : Node
     // repeated VFS lookups for sounds that are absent. The cache itself is always non-null.
     // Previously stored null! which defeats the Dictionary<TKey,TValue> nullability contract.
     private readonly Dictionary<uint, AudioStreamOggVorbis?> _streamCache2d = new();
+
+    // The currently-playing BGM ID (for dedup per spec §6 "playMusicZone deduplicates").
+    // spec: Docs/RE/specs/sound.md §6.6 — "playMusicZone deduplicates: if the ID is already playing, not restarted".
+    private uint _activeBgmId;
     // NOTE: _streamCache3d and GetOrLoadStream3d were removed — AudioService owns only 2D cues;
     // 3D positional SFX is a world/actor concern and had no callers here.
     // spec: Docs/RE/specs/sound.md §8.1 — 3D sounds are kind-routed from the actor layer.
@@ -172,7 +151,12 @@ public sealed partial class AudioService : Node
     // -------------------------------------------------------------------------
 
     private RealClientAssets? _assets;
-    private bool _vfsAvailable;
+
+    // -------------------------------------------------------------------------
+    // Godot audio player nodes — one per logical role.
+    // -------------------------------------------------------------------------
+
+    private AudioStreamPlayer? _bgmPlayer; // Music bus: looping BGM
 
     // -------------------------------------------------------------------------
     // Thread-safe cached area ID
@@ -193,6 +177,18 @@ public sealed partial class AudioService : Node
 
     // Tracks the last scene state we processed so world-entry fires exactly once.
     private EngineSceneState _lastState = EngineSceneState.Login;
+    private AudioStreamPlayer? _sfxPlayer; // Sfx bus: one-shot 2D SFX (for UI + spawn sounds)
+
+    private bool _vfsAvailable;
+    // -------------------------------------------------------------------------
+    // Static singleton accessor (main-thread only)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     The live AudioService instance, or null if audio has not been initialised.
+    ///     Set in _Ready, cleared in _ExitTree.
+    /// </summary>
+    public static AudioService? Instance { get; private set; }
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -229,7 +225,7 @@ public sealed partial class AudioService : Node
         // ClientContext is the autoload that owns the EventBus; we find it via the autoload path.
         try
         {
-            var ctx = GetNode<Autoload.ClientContext>("/root/ClientContext");
+            var ctx = GetNode<ClientContext>("/root/ClientContext");
             _eventBus = ctx.EventBus;
             GD.Print("[AudioService] Subscribed to ClientContext.EventBus.");
         }
@@ -260,12 +256,12 @@ public sealed partial class AudioService : Node
     }
 
     /// <summary>
-    /// Drains the Application event bus for audio-relevant events each frame.
-    /// Runs on the main thread; all audio calls here are main-thread safe.
-    /// Also refreshes <see cref="_cachedActiveAreaId"/> from the scene tree so that
-    /// <see cref="TryGetActiveAreaId"/> (called from the thread-pool) can read it safely.
-    /// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Node mutation on main thread.
-    /// spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
+    ///     Drains the Application event bus for audio-relevant events each frame.
+    ///     Runs on the main thread; all audio calls here are main-thread safe.
+    ///     Also refreshes <see cref="_cachedActiveAreaId" /> from the scene tree so that
+    ///     <see cref="TryGetActiveAreaId" /> (called from the thread-pool) can read it safely.
+    ///     spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — all Node mutation on main thread.
+    ///     spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
     /// </summary>
     public override void _Process(double delta)
     {
@@ -276,7 +272,7 @@ public sealed partial class AudioService : Node
         // spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
         try
         {
-            var renderer = GetTree().Root.FindChild("RealWorldRenderer", recursive: true, owned: false)
+            var renderer = GetTree().Root.FindChild("RealWorldRenderer", true, false)
                 as RealWorldRenderer;
             _cachedActiveAreaId = renderer?.TargetAreaId ?? 0;
         }
@@ -290,631 +286,5 @@ public sealed partial class AudioService : Node
         // GameLoop owns the EventBus reader (TryRead is destructive); AudioService instead polls the
         // scene machine's Current state once per frame so it never steals GameLoop's events.
         PollStateMachineForAudio();
-    }
-
-    // -------------------------------------------------------------------------
-    // StateMachine polling for world-entry and char-select SFX
-    // -------------------------------------------------------------------------
-
-    private Autoload.ClientContext? _clientContextRef;
-
-    private void PollStateMachineForAudio()
-    {
-        // Cache the ClientContext reference after first resolution.
-        if (_clientContextRef is null)
-        {
-            try
-            {
-                _clientContextRef = GetNode<ClientContext>("/root/ClientContext");
-            }
-            catch
-            {
-                return; // Not yet available.
-            }
-        }
-
-        var currentState = _clientContextRef.SceneMachine.Current.State;
-        if (currentState == _lastState) return;
-
-        // State transition detected.
-        _lastState = currentState;
-
-        switch (currentState)
-        {
-            case EngineSceneState.Select:
-                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — char-select BGM 920100200 is started
-                // by the select-window constructor (state-4 enter); the looping front-end BGM from
-                // FrontEndAudio.PlayBgm() is ALREADY playing this same cue when the state transition fires.
-                // The fix contract (§3.8.1): guard re-issue so entering the scene with the cue already
-                // playing on the music slot is IDEMPOTENT — do not start a second voice.
-                // FrontEndAudio has already started 920100200 looping via StartBgm-equivalent; the
-                // AudioService one-shot here would cause the double-music defect: two voices on the
-                // Music bus for the same cue. Drop the one-shot; the looping BGM continues seamlessly.
-                // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 (double-music defect + fix contract).
-                if (_activeBgmId == CharSelectEnterSfxId && _bgmPlayer is not null && _bgmPlayer.Playing)
-                {
-                    GD.Print($"[AudioService] State→CharacterSelection: BGM {CharSelectEnterSfxId} already " +
-                             "looping — idempotent skip (§3.8.1 fix contract). No second voice started.");
-                }
-                else
-                {
-                    // BGM is not yet playing (e.g. VFS absent / FrontEndAudio not initialised).
-                    // Start it now to fulfil the spec requirement that the cue plays on char-select entry.
-                    // spec: Docs/RE/specs/frontend_scenes.md §3.8.1 — 920100200 looped on state-4 enter.
-                    GD.Print($"[AudioService] State→CharacterSelection: BGM not yet playing — " +
-                             $"starting {CharSelectEnterSfxId} via StartBgm (dedup guard inside). §3.8.1.");
-                    StartBgm(CharSelectEnterSfxId);
-                }
-
-                break;
-
-            case EngineSceneState.InGame:
-                // spec: Docs/RE/names.yaml runtime_constants.SPAWN_SFX_ID (862010105) — 3D directional
-                //       spawn sound, kind 5; 200-unit audible radius. CODE-CONFIRMED.
-                // NOTE: 910066000 (former "WorldEntryBgmId") is UNVERIFIED per sound.md §15.6c and is
-                //       NOT played here. Per-area BGM comes from TryStartAreaBgmAsync below.
-                GD.Print("[AudioService] State→World: entering game world. " +
-                         "Spawn SFX is 3D actor-routed (kind 5); area BGM via .bgm table.");
-
-                // Attempt to load the area BGM from the .bgm sound table.
-                // The area ID is resolved from the RealWorldRenderer (if active) or defaults to 0.
-                // spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/.
-                _ = Task.Run(TryStartAreaBgmAsync);
-                break;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Area BGM from .bgm sound table
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Tries to select and start the per-area BGM looping on the Music bus.
-    ///
-    /// Sound table path: data/map{tag}/soundtable{tag}.bgm
-    /// The area ID is read from the resolved target area in the scene (defaults to 0 if unavailable).
-    /// This runs on a background task to avoid blocking the main thread while reading the VFS.
-    /// The actual StartBgm call is marshalled back to the main thread via CallDeferred.
-    ///
-    /// BGM selection (spec §6.6): the original picks the .bgm table entry whose index is the MUD cell
-    /// byte at offset +0x02 under the local player's (X,Z), and — if the player's indoor/instanced flag
-    /// is set — forces the override ID 863500002 instead of the table entry. The dedup in StartBgm
-    /// reproduces the original playMusicZone "already-playing → no restart" behaviour.
-    ///
-    /// PORTING GAP (DEFERRED — documented, not invented): AudioService is not fed the per-frame player
-    /// (X,Z) → MUD-cell byte index, nor the player-actor instanced-indoor flag. Both belong to the world
-    /// ambient driver (RealWorldRenderer / actor state) which this service does not own. Until that input
-    /// is plumbed in, we apply the parts that ARE resolvable from the VFS and from area-level state:
-    ///   1. The indoor override, gated on the AREA-level indoor flag from map_option{areaId}.bin (a
-    ///      legitimate VFS-readable approximation of the per-player instanced flag — see §6.6 note below).
-    ///   2. The deterministic per-area default entry (mud-cell index 0 → the table's first active entry)
-    ///      used until the live mud-cell byte is available.
-    ///   3. The StartBgm dedup.
-    /// spec: Docs/RE/specs/sound.md §6.2 (cell lookup at player X,Z), §6.6 (BGM zone change + indoor override).
-    /// spec: Docs/RE/formats/sound_tables.md §Sound ID semantics — .bgm → data/sound/2d/.
-    /// </summary>
-    private void TryStartAreaBgmAsync()
-    {
-        if (!_vfsAvailable || _assets is null) return;
-
-        try
-        {
-            // Resolve area ID: try to find the RealWorldRenderer to read its TargetAreaId.
-            // If unavailable, default to area 0.
-            // spec: Docs/RE/formats/terrain.md §1.1 — area id digit decomposition. CONFIRMED.
-            int areaId = TryGetActiveAreaId();
-            string tag = AreaTag(areaId);
-
-            // Indoor/instanced override (§6.6 step 2): when the player's indoor flag is set the BGM is
-            // forced to 863500002 instead of the table entry. The per-player instanced flag is not
-            // plumbed here (DEFERRED); we approximate it with the AREA-level indoor flag from
-            // map_option{areaId}.bin (bare-decimal area id, no zero-padding — VFS-confirmed path).
-            // spec: Docs/RE/specs/sound.md §6.6 — indoor override → 863500002.
-            // spec: Docs/RE/formats/environment_bins.md — data/sky/dat/<name><id>.bin path family.
-            if (IsAreaIndoor(areaId))
-            {
-                GD.Print($"[AudioService] Area {areaId} indoor flag set — forcing indoor BGM override " +
-                         $"{IndoorBgmOverrideId} (§6.6).");
-                uint indoorId = IndoorBgmOverrideId;
-                Callable.From(() => StartBgm(indoorId)).CallDeferred();
-                return;
-            }
-
-            // spec: Docs/RE/formats/sound_tables.md §Identification — found in data/map<id>/soundtable<id>.<ext>.
-            string bgmPath = $"data/map{tag}/soundtable{areaId}.bgm";
-            if (!_assets.Contains(bgmPath))
-            {
-                // Some areas use a zero-padded tag in the filename — try alternate naming.
-                // The path pattern "data/map{tag}/soundtable{tag}.bgm" is spec-confirmed;
-                // the number suffix may match the tag digits (e.g. soundtable002.bgm for area 2).
-                // spec: Docs/RE/formats/sound_tables.md §Identification — "data/map<id>/soundtable<id>.<ext>".
-                bgmPath = $"data/map{tag}/soundtable{tag}.bgm";
-            }
-
-            if (!_assets.Contains(bgmPath))
-            {
-                GD.Print($"[AudioService] No .bgm table for area {areaId} at '{bgmPath}' — no area BGM.");
-                return;
-            }
-
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(bgmPath);
-            if (raw.IsEmpty)
-            {
-                GD.Print($"[AudioService] .bgm table empty at '{bgmPath}'.");
-                return;
-            }
-
-            // Parse using the stage-1 SoundTableParser.
-            // spec: Docs/RE/formats/sound_tables.md §File layout — 256 × 48 bytes runtime region.
-            SoundTableData table = SoundTableParser.Parse(raw, SoundTableExtension.Bgm);
-
-            // DEFERRED: the correct entry is table[mud-cell byte +0x02] at the player's (X,Z). That live
-            // mud-cell byte is not plumbed to AudioService (see method-level PORTING GAP). Until it is,
-            // select the first ACTIVE entry as the per-area default (equivalent to a cell index that
-            // points at the first populated, hour-active slot). Entry index 0 is the null sentinel.
-            // spec: Docs/RE/specs/sound.md §6.6 — slot indexed by mud-cell +0x02; index 0 is the null sentinel.
-            uint bgmId = 0;
-            for (int i = 1; i < SoundTableData.EntryCount; i++)
-            {
-                SoundTableEntry entry = table.Entries[i];
-                if (!entry.IsAssigned) continue;
-
-                // Check hour schedule (all bytes must be non-zero for always-active).
-                // For simplicity: if any hour is active, play the track.
-                // spec: Docs/RE/formats/sound_tables.md §Per-entry layout — hour_schedule non-zero = active.
-                bool anyHourActive = false;
-                foreach (byte h in entry.HourSchedule)
-                {
-                    if (h != 0)
-                    {
-                        anyHourActive = true;
-                        break;
-                    }
-                }
-
-                if (anyHourActive)
-                {
-                    bgmId = entry.SoundEntryId;
-                    break;
-                }
-            }
-
-            if (bgmId == 0)
-            {
-                GD.Print($"[AudioService] .bgm table for area {areaId} has no active entries — no area BGM.");
-                return;
-            }
-
-            GD.Print(
-                $"[AudioService] Area {areaId} BGM entry found: id={bgmId} — scheduling area BGM via Callable.From.");
-
-            // Marshal StartBgm back to the main thread.
-            // spec: PRESERVATION_AND_ARCHITECTURE.md — all Godot node mutation on main thread.
-            //
-            // EMPIRICAL NOTE (verified in headless run 2026-06-13):
-            //   CallDeferred(MethodName.StartBgm, bgmIdCapture) invokes the method by name via
-            //   Godot's reflection bridge. For plain C# methods (not [GodotMethod] attributed or
-            //   virtual overrides) this dispatch is NOT guaranteed — the MethodName string may not
-            //   be registered in the Godot method table. Switched to Callable.From which wraps the
-            //   C# delegate directly and routes through Godot's deferred-call queue without any
-            //   name lookup, making the dispatch unambiguous regardless of Godot/C# reflection state.
-            uint bgmIdCapture = bgmId;
-            Callable.From(() => StartBgm(bgmIdCapture)).CallDeferred();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[AudioService] TryStartAreaBgmAsync failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Returns true when the given area's <c>map_option{areaId}.bin</c> indoor flag is set.
-    ///
-    /// This is the AREA-level indoor flag and is used here as a VFS-readable approximation of the
-    /// per-player instanced-indoor flag that §6.6 actually keys the BGM override on (the player-actor
-    /// flag is not plumbed to AudioService — see <see cref="TryStartAreaBgmAsync"/> PORTING GAP).
-    /// Returns false when the file is absent, malformed, or the VFS is unavailable.
-    /// spec: Docs/RE/specs/sound.md §6.6 — indoor override.
-    /// spec: Docs/RE/formats/environment_bins.md §1.1 — map_option indoor flag (MAPHIDE).
-    /// </summary>
-    private bool IsAreaIndoor(int areaId)
-    {
-        if (!_vfsAvailable || _assets is null) return false;
-
-        try
-        {
-            // Bare-decimal area id, no zero-padding — VFS-confirmed path family.
-            // spec: Docs/RE/formats/environment_bins.md — data/sky/dat/<name><id>.bin.
-            string path = $"data/sky/dat/map_option{areaId}.bin";
-            if (!_assets.Contains(path)) return false;
-
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
-            if (raw.IsEmpty) return false;
-
-            MapOptionBin mapOption = EnvironmentBinParsers.ParseMapOption(raw);
-            return mapOption.IndoorFlag != 0;
-        }
-        catch (Exception ex)
-        {
-            // Tolerant: a missing/malformed map_option just means "not known indoor".
-            // spec: Docs/RE/formats/environment_bins.md §Overview Sibling tolerance — skip-and-default.
-            GD.Print($"[AudioService] map_option read failed for area {areaId}: {ex.Message} — treating as outdoor.");
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Returns the current active area ID from the main-thread-cached value.
-    ///
-    /// The cache is refreshed every frame in <see cref="_Process"/> (main thread only) by
-    /// performing the <c>FindChild("RealWorldRenderer")</c> scene-tree lookup there. This method
-    /// is safe to call from any thread (including the thread-pool worker launched by
-    /// <c>Task.Run(TryStartAreaBgmAsync)</c>) because it reads only the volatile cached int —
-    /// no scene-tree access occurs here.
-    ///
-    /// Returns 0 when the renderer is not yet present or before the first main-thread frame.
-    /// spec: Docs/RE/formats/terrain.md §1.1 — area id used for path construction.
-    /// </summary>
-    private int TryGetActiveAreaId()
-    {
-        // Volatile read: the compiler / JIT will not reorder this past any preceding write,
-        // and the hardware guarantees visibility of the value last written by _Process.
-        return _cachedActiveAreaId;
-    }
-
-    // -------------------------------------------------------------------------
-    // HudButton UI-click hook via scene tree NodeAdded
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Called whenever any node is added to the scene tree. Hooks the Ui/ <c>HudButton</c> substrate
-    /// so every button press plays the UI click SFX without coupling AudioService to the widget type:
-    /// a HudButton tags its backing <see cref="global::Godot.TextureButton"/> with the meta key
-    /// "is_hud_button" at construction, and we wire its Pressed signal here.
-    ///
-    /// HudButtons are allocated once per HUD/scene session (never re-parented), so a direct C# event
-    /// subscription is safe — they enter the tree exactly once.
-    ///
-    /// spec: Docs/RE/specs/sound.md — UI click SFX 861010101 on button presses; central subscription.
-    /// </summary>
-    private void OnNodeAddedToTree(Node node)
-    {
-        if (node is TextureButton texBtn && texBtn.HasMeta("is_hud_button"))
-            texBtn.Pressed += PlayUiClick;
-    }
-
-    // -------------------------------------------------------------------------
-    // Public audio API
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Plays the standard UI click SFX (ID 861010101).
-    /// spec: Docs/RE/names.yaml runtime_constants.UI_CLICK_SFX_ID — value=861010101.
-    /// spec: Docs/RE/specs/frontend_scenes.md — standard button click SFX. CODE-CONFIRMED.
-    /// </summary>
-    public void PlayUiClick()
-        => Play2dById(UiClickSfxId, SfxBusName, loop: false);
-
-    /// <summary>
-    /// Plays a 2D (non-positional) sound by ID.
-    /// VFS path: data/sound/2d/{id}.ogg
-    /// spec: Docs/RE/specs/sound.md §3.2 (2D directory = data/sound/2d/). SAMPLE-VERIFIED.
-    /// spec: Docs/RE/specs/sound.md §2 (decimal stem, no zero-padding, .ogg unconditional). CODE-CONFIRMED.
-    /// </summary>
-    /// <param name="id">The 9-digit sound entry ID.</param>
-    /// <param name="busName">Audio bus name ("Music" or "Sfx").</param>
-    /// <param name="loop">Whether to loop the stream.</param>
-    public void Play2dById(uint id, string busName = SfxBusName, bool loop = false)
-    {
-        AudioStreamOggVorbis? stream = GetOrLoadStream2d(id);
-        if (stream is null) return;
-
-        // Music-exempt IDs always play at full amplitude regardless of Music bus gain.
-        // spec: Docs/RE/specs/sound.md §10.6 (exempt IDs 861010109/861010110). CODE-CONFIRMED.
-        float volumeLinear = id is MusicExemptIdA or MusicExemptIdB
-            ? 1.0f
-            : DefaultSfxVolume;
-
-        PlayStream(_sfxPlayer, stream, busName, loop, volumeLinear);
-    }
-
-    /// <summary>
-    /// Starts a BGM track looping on the Music bus.
-    /// Deduplicates: if the same ID is already playing, does not restart.
-    /// spec: Docs/RE/specs/sound.md §6.6 (playMusicZone dedup). CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/sound.md §4.2 (BGM always streams — 2D, > 512 KiB). CODE-CONFIRMED.
-    /// </summary>
-    /// <param name="id">The 9-digit BGM entry ID.</param>
-    public void StartBgm(uint id)
-    {
-        // Empirical dispatch probe: this GD.Print fires when StartBgm is successfully invoked on
-        // the main thread (either directly or via Callable.From(...).CallDeferred()).
-        // Used to verify that Callable.From dispatch works in the headless verify loop.
-        GD.Print($"[AudioService] StartBgm called: id={id} (main-thread dispatch confirmed).");
-
-        // Dedup: skip if already playing the same BGM.
-        // spec: Docs/RE/specs/sound.md §6.6 — "if the requested BGM ID is already playing, not restarted". CODE-CONFIRMED.
-        if (_activeBgmId == id && _bgmPlayer is not null && _bgmPlayer.Playing)
-        {
-            GD.Print($"[AudioService] BGM {id} already playing — dedup skip.");
-            return;
-        }
-
-        // Stop the current BGM.
-        if (_bgmPlayer is not null && _bgmPlayer.Playing)
-        {
-            GD.Print($"[AudioService] BGM {_activeBgmId} stopped.");
-            try
-            {
-                _bgmPlayer.Stop();
-            }
-            catch
-            {
-                /* headless guard */
-            }
-        }
-
-        _activeBgmId = id;
-
-        AudioStreamOggVorbis? stream = GetOrLoadStream2d(id);
-        if (stream is null)
-        {
-            GD.Print($"[AudioService] BGM {id}: stream not available — no playback.");
-            return;
-        }
-
-        PlayStream(_bgmPlayer, stream, MusicBusName, loop: true, volumeLinear: DefaultMusicVolume);
-    }
-
-    /// <summary>
-    /// Stops the currently playing BGM, if any.
-    /// spec: Docs/RE/specs/sound.md §6.6 (stopMusicZone). CODE-CONFIRMED.
-    /// </summary>
-    public void StopBgm()
-    {
-        _activeBgmId = 0;
-        try
-        {
-            _bgmPlayer?.Stop();
-        }
-        catch
-        {
-            /* headless guard */
-        }
-
-        GD.Print("[AudioService] BGM stopped.");
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal: stream loading
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns a cached <see cref="AudioStreamOggVorbis"/> for the given 2D sound ID,
-    /// loading it from the VFS on first access.
-    ///
-    /// VFS path: data/sound/2d/{id}.ogg
-    /// spec: Docs/RE/specs/sound.md §3.2 (2D directory). SAMPLE-VERIFIED.
-    /// spec: Docs/RE/specs/sound.md §2 (decimal stem, .ogg unconditional). CODE-CONFIRMED.
-    /// </summary>
-    private AudioStreamOggVorbis? GetOrLoadStream2d(uint id)
-    {
-        // ContainsKey check first: TryGetValue returns the cached null sentinel correctly.
-        if (_streamCache2d.TryGetValue(id, out AudioStreamOggVorbis? cached))
-            return cached; // may be null (absent-sentinel) — caller handles null
-
-        if (!_vfsAvailable || _assets is null)
-        {
-            // Headless / no-VFS proof: print the path that WOULD be loaded.
-            // spec: CLAUDE.md Headless Verify Loop — "GD.Print evidence of stream resolution".
-            GD.Print($"[AudioService] [headless-proof] 2D stream not loaded (no VFS): data/sound/2d/{id}.ogg");
-            return null;
-        }
-
-        // spec: Docs/RE/specs/sound.md §2 — "data/sound/2d/<sound_id>.ogg (decimal, no padding)". CODE-CONFIRMED.
-        string vfsPath = $"data/sound/2d/{id}.ogg";
-        AudioStreamOggVorbis? stream = LoadOggFromVfs(vfsPath);
-
-        if (stream is not null)
-        {
-            _streamCache2d[id] = stream;
-            GD.Print($"[AudioService] Cached 2D stream: id={id} vfs='{vfsPath}'.");
-        }
-        else
-        {
-            // Cache null (explicit absent-sentinel) to avoid repeated VFS lookups for missing files.
-            // The Dictionary is typed Dictionary<uint, AudioStreamOggVorbis?> so null is a valid value.
-            _streamCache2d[id] = null;
-            GD.Print($"[AudioService] 2D stream absent in VFS: '{vfsPath}'.");
-        }
-
-        return stream;
-    }
-
-    /// <summary>
-    /// Loads an .ogg file from the VFS and creates a Godot <see cref="AudioStreamOggVorbis"/>
-    /// via <see cref="AudioStreamOggVorbis.LoadFromBuffer"/>.
-    ///
-    /// Falls back to writing a temp file if LoadFromBuffer is unavailable (undocumented fallback —
-    /// verified available in Godot 4.6.3 via GodotSharp.dll introspection).
-    ///
-    /// spec: Docs/RE/formats/sound_tables.md §7.1 — "standard Ogg Vorbis, no proprietary header,
-    ///       no encryption, no additional framing". SAMPLE-VERIFIED.
-    /// spec: Docs/RE/specs/sound.md §2 — ".ogg extension unconditional". CODE-CONFIRMED.
-    /// </summary>
-    private AudioStreamOggVorbis? LoadOggFromVfs(string vfsPath)
-    {
-        try
-        {
-            ReadOnlyMemory<byte> raw = _assets!.GetRaw(vfsPath);
-            if (raw.IsEmpty) return null;
-
-            byte[] bytes = raw.ToArray();
-
-            // AudioStreamOggVorbis.LoadFromBuffer is the Godot 4.6 C# static API for in-memory
-            // OGG loading. Verified present in Godot_v4.6.3-stable_mono_win64 GodotSharp.dll.
-            // spec: Godot 4.6 C# API — AudioStreamOggVorbis.LoadFromBuffer(byte[]) → AudioStreamOggVorbis.
-            AudioStreamOggVorbis stream = AudioStreamOggVorbis.LoadFromBuffer(bytes);
-            return stream;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[AudioService] OGG load failed for '{vfsPath}': {ex.Message}");
-            return null;
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal: play stream via an AudioStreamPlayer
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Configures and plays a stream on the given <see cref="AudioStreamPlayer"/> node.
-    ///
-    /// Volume mapping: linear amplitude [0,1] → Godot VolumeDb.
-    /// Silence (0.0) maps to hard mute (player disabled or -80 dB).
-    /// spec: Docs/RE/specs/sound.md §5 (volume curve, CODE-CONFIRMED exact expression).
-    /// Here we use the simplified standard linear→dB conversion (documented above).
-    /// </summary>
-    private static void PlayStream(
-        AudioStreamPlayer? player,
-        AudioStreamOggVorbis stream,
-        string busName,
-        bool loop,
-        float volumeLinear)
-    {
-        if (player is null) return;
-
-        try
-        {
-            // Set loop mode on the stream resource.
-            // spec: Docs/RE/specs/sound.md §4.2 — BGM always streaming/looping; 3D SFX one-shot.
-            stream.Loop = loop;
-
-            player.Stream = stream;
-            player.Bus = busName;
-
-            // Volume: linear amplitude [0,1] → dB.
-            // spec: Docs/RE/specs/sound.md §5 — X=0 → full silence (−10000 mB equivalent; here -80 dB).
-            // We use a simplified linear→dB conversion: VolumeDb = 20 * log10(X).
-            // DOCUMENTED SIMPLIFICATION of the legacy nested-logf curve.
-            if (volumeLinear <= 0f)
-            {
-                player.VolumeDb = -80f; // near-silence equivalent of −10000 mB
-            }
-            else
-            {
-                player.VolumeDb = 20f * MathF.Log10(volumeLinear);
-            }
-
-            player.Play();
-        }
-        catch (Exception ex)
-        {
-            // Headless guard: audio device may be absent. Log and continue.
-            // spec: CLAUDE.md Headless Verify Loop — "guard with try/catch".
-            GD.PrintErr($"[AudioService] PlayStream failed (headless?): {ex.Message}");
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal: Godot audio bus layout
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Ensures Godot AudioServer has "Music" and "Sfx" buses in addition to the default Master bus.
-    ///
-    /// The legacy model has four buses: Music / Terrain+Ambient / Char / Mob.
-    /// We simplify to two additional buses (Music and Sfx) routed through Master.
-    /// spec: Docs/RE/specs/sound.md §10.1 (four buses), §12.1 (Godot mapping). DOCUMENTED SIMPLIFICATION.
-    /// </summary>
-    private static void EnsureAudioBusLayout()
-    {
-        try
-        {
-            // Create "Music" bus if absent.
-            if (!BusExists(MusicBusName))
-            {
-                int idx = AudioServer.BusCount;
-                AudioServer.AddBus(idx);
-                AudioServer.SetBusName(idx, MusicBusName);
-                AudioServer.SetBusSend(idx, "Master");
-                GD.Print($"[AudioService] Created audio bus '{MusicBusName}' at index {idx}.");
-            }
-
-            // Create "Sfx" bus if absent.
-            if (!BusExists(SfxBusName))
-            {
-                int idx = AudioServer.BusCount;
-                AudioServer.AddBus(idx);
-                AudioServer.SetBusName(idx, SfxBusName);
-                AudioServer.SetBusSend(idx, "Master");
-                GD.Print($"[AudioService] Created audio bus '{SfxBusName}' at index {idx}.");
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[AudioService] EnsureAudioBusLayout failed: {ex.Message}");
-        }
-    }
-
-    private static bool BusExists(string name)
-    {
-        for (int i = 0; i < AudioServer.BusCount; i++)
-        {
-            if (AudioServer.GetBusName(i) == name) return true;
-        }
-
-        return false;
-    }
-
-    // -------------------------------------------------------------------------
-    // Internal: build player nodes
-    // -------------------------------------------------------------------------
-
-    private void BuildPlayers()
-    {
-        try
-        {
-            // BGM player — Music bus, looping.
-            _bgmPlayer = new AudioStreamPlayer
-            {
-                Name = "BgmPlayer",
-                Bus = MusicBusName,
-                VolumeDb = 0f,
-            };
-            AddChild(_bgmPlayer);
-
-            // SFX player — Sfx bus, one-shot (reused for sequential SFX; previous stops on new play).
-            _sfxPlayer = new AudioStreamPlayer
-            {
-                Name = "SfxPlayer",
-                Bus = SfxBusName,
-                VolumeDb = 0f,
-            };
-            AddChild(_sfxPlayer);
-
-            GD.Print("[AudioService] AudioStreamPlayer nodes created (BgmPlayer, SfxPlayer).");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[AudioService] BuildPlayers failed: {ex.Message}");
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Path helper
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Converts an area ID to a 3-digit area tag string.
-    /// spec: Docs/RE/formats/terrain.md §1.1 — d0=areaId/100, d1=(areaId/10)%10, d2=areaId%10. CONFIRMED.
-    /// </summary>
-    private static string AreaTag(int areaId)
-    {
-        int d0 = areaId / 100;
-        int d1 = (areaId / 10) % 10;
-        int d2 = areaId % 10;
-        return $"{d0}{d1}{d2}";
     }
 }

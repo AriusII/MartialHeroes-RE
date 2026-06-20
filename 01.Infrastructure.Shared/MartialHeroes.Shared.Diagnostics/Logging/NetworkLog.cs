@@ -3,12 +3,12 @@ using Microsoft.Extensions.Logging;
 namespace MartialHeroes.Shared.Diagnostics.Logging;
 
 /// <summary>
-/// Source-generated, allocation-free log methods for the network layer.
+///     Source-generated, allocation-free log methods for the network layer.
 /// </summary>
 /// <remarks>
-/// All methods are generated at compile time by the <c>Microsoft.Extensions.Logging.Abstractions</c>
-/// <c>[LoggerMessage]</c> source generator. Never add interpolated-string log calls here — use
-/// structured placeholders so that hot-path logging incurs zero heap allocations.
+///     All methods are generated at compile time by the <c>Microsoft.Extensions.Logging.Abstractions</c>
+///     <c>[LoggerMessage]</c> source generator. Never add interpolated-string log calls here — use
+///     structured placeholders so that hot-path logging incurs zero heap allocations.
 /// </remarks>
 public static partial class NetworkLog
 {
@@ -20,7 +20,7 @@ public static partial class NetworkLog
     // Formatted as "major:minor" to match PacketOpcode.ToString().
 
     /// <summary>
-    /// Logged when a complete packet is received from the server.
+    ///     Logged when a complete packet is received from the server.
     /// </summary>
     /// <param name="logger">The logger instance.</param>
     /// <param name="major">The opcode major word from the wire frame header.</param>
@@ -33,7 +33,7 @@ public static partial class NetworkLog
     public static partial void PacketReceived(ILogger logger, ushort major, ushort minor, int length);
 
     /// <summary>
-    /// Logged when in-place decryption of a packet buffer fails.
+    ///     Logged when in-place decryption of a packet buffer fails.
     /// </summary>
     /// <param name="logger">The logger instance.</param>
     /// <param name="major">The opcode major word of the packet that failed decryption, if known.</param>
@@ -46,7 +46,7 @@ public static partial class NetworkLog
     public static partial void DecryptFailed(ILogger logger, ushort major, ushort minor, string reason);
 
     /// <summary>
-    /// Logged when the connection state changes (e.g. Connected, Disconnected, Reconnecting).
+    ///     Logged when the connection state changes (e.g. Connected, Disconnected, Reconnecting).
     /// </summary>
     /// <param name="logger">The logger instance.</param>
     /// <param name="previousState">The state before the transition.</param>
@@ -58,7 +58,7 @@ public static partial class NetworkLog
     public static partial void ConnectionStateChanged(ILogger logger, string previousState, string newState);
 
     /// <summary>
-    /// Logged when a packet with an unrecognised opcode is received and dropped.
+    ///     Logged when a packet with an unrecognised opcode is received and dropped.
     /// </summary>
     /// <param name="logger">The logger instance.</param>
     /// <param name="major">The unknown opcode major word.</param>
@@ -71,7 +71,7 @@ public static partial class NetworkLog
     public static partial void UnhandledOpcode(ILogger logger, ushort major, ushort minor, int length);
 
     /// <summary>
-    /// Logged when a send operation to the server fails.
+    ///     Logged when a send operation to the server fails.
     /// </summary>
     /// <param name="logger">The logger instance.</param>
     /// <param name="major">The opcode major word of the outbound packet.</param>

@@ -6,11 +6,18 @@
 > NUL convention, and the (2:84) header-only-plus-30 s-cooldown shape; capture/debugger-pending for
 > the absolute on-wire byte-order/endianness of each length prefix, the inner field meanings of the
 > larger context/blob headers, and the on-wire VALUE meanings (mode/op/selector enumerations,
-> auto-accept event codes). ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida].
+> auto-accept event codes). ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida].
+> (Re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20).)
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL — `(3:21)`/`(2:83)`
 > INCLUDE it (per-opcode, not the prior uniform "verify the off-by-one"); (b) `(2:84)` carries NO
 > text in its builder and is 30-second rate-limited (corrected from the prior "19 + text" catalog
-> entry); (c) a 2-byte `(2:21)` sender exists and is distinct from `(3:21)`.
+> entry); (c) a 2-byte `(2:21)` sender exists and is distinct from `(3:21)`;
+> (d) **CONFLICT-D-1 resolved (CYCLE 7, 2026-06-20)**: the bonded-relation byte was reported at two
+> offsets; IDA proves these are two distinct co-existing fields, not a measurement error —
+> **actor +96 (offset 0x60) = relation-TYPE byte** (the bond-category lookup/match key) and
+> **actor +172 (offset 0xAC) = relation-PAIR-STATE byte** (set by the 5/64 remote-pair handler).
+> The earlier note that +172 was a conflation is itself superseded — both offsets are genuine.
+> CONFIRMED via static IDA, CYCLE 7.
 
 Neutral, data-only model of the legacy *Martial Heroes* client's **social wire protocol** and the
 **membership state** it maintains locally: chat channels, whispers, party/group, guild, and the
@@ -55,6 +62,11 @@ payload @+8). **All field offsets in this document are payload-relative** (relat
 | C2S 2:35/36/37 are genuine party (not relation/FATE) | CONFIRMED — pinned to party-panel action handlers + "party healing actor ok" debug marker (corrected 2026-06-13, re-verified 2026-06-16) |
 | "Relation vs FATE" labelling of the remaining C2S 2:60–2:76 cluster | LOW — flagged UNVERIFIED #2 |
 | 2:122 short-name field width; auto-accept event codes | LOW — flagged UNVERIFIED #6/#7 |
+| Actor-relation fields: +92 composite id, +96 relation-TYPE byte, +116 name, +172 relation-PAIR-STATE byte (CONFLICT-D-1) | CONFIRMED — read from the roster-search routine and the 5/64 remote-pair handler (Section 7.5) |
+| FATE relation-type enum {0,1,3,4,5,6,7,9,10}; only `FATE_TYPE_TRAINING` is a literal name | CONFIRMED values, partial labels — labels other than training are behavioural inference (Section 7.6) |
+| 2:76 / 2:62 / 2:63 / 2:66 / 5:26 / 5:64 / 4:71 relation network surface sizes | CONFIRMED — literal builder/handler read sizes (Section 7.7) |
+| 4:76 / 5:76 party-pair fields (success @+8, relation-type @+10) | CONFIRMED — branch reads (Section 6.4 / 6.8) |
+| No client auto-accept (party/guild/trade/duel invites always interactive) | CONFIRMED — option table has no auto-accept index (Section 9a) |
 
 **UNVERIFIED list** is consolidated in Section 9. All Korean text fields referenced here are
 **CP949 / EUC-KR** encoded (no BOM), NUL-padded in fixed buffers; they are never sent as managed
@@ -129,7 +141,7 @@ suggestions for `names.yaml`; confirm before committing.
 | 4:35 | `SmsgPartyInviteState`        | S2C | 56  | Invite/roster state snapshot (Section 6.1). NOTE: catalog labels this "party"; see UNVERIFIED #2. |
 | 4:36 | `SmsgPartyMemberRemoveResult` | S2C | 56  | Result of a member-remove action; left/expelled (Section 6.6). MEDIUM. |
 | 4:37 | `SmsgPartyLeaderActionResult` | S2C | 56  | Result of a leader action. |
-| 4:76 | `SmsgPartyAcceptResult`       | S2C | —   | Result of accepting an invite. |
+| 4:76 | `SmsgPartyAcceptResult`       | S2C | 52  | Result of accepting an invite; success flag @+8, relation-type @+10 (Section 6.8). CONFIRMED. |
 | 5:21 | `SmsgPartyRosterEvent`        | S2C | 12  | Add/remove/update one member (Section 6.2). MEDIUM. |
 | 5:38 | `SmsgPartyMemberStats`        | S2C | 100 | Full per-member vitals/buffs snapshot (Section 6.3). MEDIUM. |
 | 5:76 | `SmsgPartyMemberJoined`       | S2C | 36  | Member-joined event with name + greeting mode (Section 6.4). MEDIUM. |
@@ -186,13 +198,13 @@ them to the party-panel action handler and its "party healing actor ok" debug ma
 | 2:49  | `CmsgRelationNamedOp`      | C2S | 19 | Relation op carrying a name field. |
 | 2:60  | `CmsgRelationOp60`         | C2S | 8  | Relation/FATE op. |
 | 2:61  | `CmsgRelationSubmit61`     | C2S | 36 | Nine dwords. |
-| 2:62  | `CmsgRelationSubmit62`     | C2S | 19 | Four dwords + `u16` + `u8`. |
-| 2:63  | `CmsgRelationSubmit63`     | C2S | 17 | Relation/FATE submit. |
+| 2:62  | `CmsgRelationNamedRequest` | C2S | 19 | Relation request by name: byte op + 17B CP949 name + pad (Section 7.7). CONFIRMED. |
+| 2:63  | `CmsgRelationNamedAction`  | C2S | 17 | Relation action by name: 17B CP949 name (Section 7.7). CONFIRMED. |
 | 2:64  | `CmsgRelationOp64`         | C2S | 8  | Relation/FATE op. |
 | 2:65  | `CmsgRelationToggle65`     | C2S | 1  | 1-byte toggle. |
-| 2:66  | `CmsgRelationToggle66`     | C2S | 1  | 1-byte toggle. |
+| 2:66  | `CmsgRelationToggle`       | C2S | 1  | 1-byte relation toggle (Section 7.7). CONFIRMED. |
 | 2:74  | `CmsgRelationOp74`         | C2S | 32 | Relation/FATE op (32-byte struct). |
-| 2:76  | `CmsgRelationSubmit76`     | C2S | 20 | Relation/FATE submit (the "FATE state / actor / item-list" path). |
+| 2:76  | `CmsgFateRelationRequest`  | C2S | 20 | FATE relation-request blob — the "FATE state / actor name / item-list count" path (Section 7.7). CONFIRMED. |
 | 2:122 | `CmsgFriendListSubmit`     | C2S | 12 | `[u32 selector][u8 sub-op][short name tag]` (Section 7.1, UNVERIFIED #6). |
 | 2:123 | `CmsgRelationAccept`       | C2S | 12 | `[u8 sub-op][u32 target id][u8 flag]`; used by the gift-receive confirm path. |
 | 2:124 | `CmsgRelationToggle124`    | C2S | 1  | 1-byte relation toggle. |
@@ -203,10 +215,11 @@ them to the party-panel action handler and its "party healing actor ok" debug ma
 
 | Opcode | Proposed name | Dir | Size | Notes |
 |--------|---------------|-----|------|-------|
-| 4:30 | `SmsgSocialPanelTarget`        | S2C | —  | Social-panel target update. |
-| 4:47 | `SmsgRelationAckDrain`         | S2C | —  | Pairs C2S 2:47. |
-| 5:26 | `SmsgLocalPlayerRelationSlot`  | S2C | 28 | Local-player relation-slot update (Section 7.2). MEDIUM. |
-| 5:64 | `SmsgRemoteActorRelationPair`  | S2C | —  | Remote-actor relation pair. |
+| 4:30 | `SmsgSocialPanelTarget`        | S2C | —    | Social-panel target update. |
+| 4:47 | `SmsgRelationAckDrain`         | S2C | —    | Pairs C2S 2:47. |
+| 4:71 | `SmsgRelationPartyPanelSnapshot`| S2C | 1092 | Big 8-slot relation / party panel snapshot (Section 7.7). CONFIRMED size. |
+| 5:26 | `SmsgLocalPlayerRelationSlot`  | S2C | 28   | Local-player relation-slot update (Section 7.2). CONFIRMED size. |
+| 5:64 | `SmsgRemoteActorRelationPair`  | S2C | 16   | Remote-actor relation pair; writes actor +172 on both sides (Section 7.8). CONFIRMED. |
 
 ---
 
@@ -412,44 +425,51 @@ Those string ids are display-only.
 ### 6.3 Party member stats — 5:38 (S2C, 100 bytes)
 
 A full per-member vitals/buffs snapshot, keyed by member id, that fills one party-panel entry. The
-wire fields mirror the panel-entry layout in order. Offsets below are the **panel-entry** offsets the
-recon captured; treat them as the wire field order and verify exact wire offsets against a capture
-(UNVERIFIED).
+handler matches a member slot by member id, then writes a fixed 100-byte slot record. The offsets
+below are the **slot-record** offsets read directly off the apply path (CYCLE 7); they are the wire
+field order and several are now offset-pinned (CONFIRMED). The absolute on-wire byte boundaries that
+remain un-pinned are flagged below.
 
-| Field           | Type      | Meaning |
-|-----------------|-----------|---------|
-| `MemberName`    | bytes[16] | Member name, CP949. |
-| `ClassOrPad`    | u16       | Class id or padding. |
-| `LevelOrState`  | u16       | Level or state. |
-| `HpCurrent`     | i32       | Current HP. |
-| `MpCurrent`     | i32       | Current MP. |
-| `Stamina`       | i32       | Current stamina / energy. |
-| `HpMax`         | i32       | Max HP. |
-| `MpMax`         | i32       | Max MP. |
-| `StaminaMax`    | i32       | Max stamina. |
-| `Extra1`        | i32       | Reserved / unknown. |
-| `Extra2`        | i32       | Reserved / unknown. |
-| `BuffCodes`     | u8[30]    | Up to 30 active buff codes (see filter note). |
+| Off | Size | Type      | Field         | Meaning |
+|-----|------|-----------|---------------|---------|
+| 8   | 16   | bytes[16] | `MemberName`  | Member name, CP949, copied 16 bytes. CONFIRMED offset. |
+| 42  | 2    | i16       | `LevelOrClass`| Member level (or class id — label UNVERIFIED). CONFIRMED offset. |
+| 44  | 2    | i16       | `HpCurrent`   | Current HP — the animated vital (the panel runs an old→new HP-bar tween off this field). CONFIRMED. |
+| 48  | 4    | i32       | `HpMaxOrVital`| Max HP / vital max (label UNVERIFIED). |
+| 52  | 4    | i32       | `MpCurrent`   | Current MP (UNVERIFIED label). |
+| 56  | 4    | i32       | `MpMax`       | Max MP (UNVERIFIED label). |
+| 60  | 20   | i32[5]    | `StatBlock`   | Five-dword additional stat block (individual labels UNVERIFIED). |
+| 80  | 30   | u8[30]    | `BuffCodes`   | Fixed 30-entry status/buff-icon array (see filter note). CONFIRMED offset + width. |
 
 Notes:
 - **Buff-code filter.** When ingesting `BuffCodes`, the client keeps a code only if it is
   `<= 0x50` **or** `>= 0x82`; codes in the range `0x51..0x81` are dropped. Re-implementations that
   mirror the client's buff display should apply the same filter; a server need not.
+- **Member map position carried too (CONFIRMED, CYCLE 7).** Beyond the panel record, the handler
+  also writes the member's live world position (x/y/z) onto the member's own actor object, saving the
+  prior position into a per-actor "previous position" pair first. So 5:38 doubles as a position
+  update for the member, not only a vitals snapshot. This is a local mirror step onto the actor, not
+  separate wire data.
 - If the member is also a visible player-character actor (`sort == 1`), the client additionally
   snapshots the member's current HP/MP/stamina into that actor's live vitals. This is a local mirror
   step, not extra wire data.
 
-### 6.4 Party member joined — 5:76 (S2C, 36 bytes)
+### 6.4 Party member joined / pair-interaction event — 5:76 (S2C, 36 bytes)
 
-| Off | Size | Type      | Field     | Meaning |
-|-----|------|-----------|-----------|---------|
-| 4   | 4    | i32       | `ActorId` | Joining member's actor id. |
-| 8   | 1    | u8        | `Event`   | Greeting mode: `4` = greet, `10` = combat/spar. |
-| 9   | 1    | u8        | `Sort`    | Actor category. |
-| 18  | 17   | bytes[17] | `Name`    | Member name, CP949. |
+A dual-purpose event: a party member-joined notice **and** the player-pair / relation-interaction
+event (couple ceremony / training duel). The relation TYPE code at record **+10** selects the pair
+animation, so this message is shared between the party and FATE subsystems.
 
-Bytes `0..3`, `5..7`, `10..17`, and `35` are header/padding. The handler plays a greeting or combat
-motion keyed by `Event` and may surface a rank-progress notice (display id).
+| Off | Size | Type      | Field          | Meaning |
+|-----|------|-----------|----------------|---------|
+| 4   | 4    | i32       | `ActorId`      | Joining / paired member's actor id. |
+| 8   | 1    | u8        | `Event`        | Greeting / interaction mode: `4` = greet, `10` = combat / spar. |
+| 9   | 1    | u8        | `Sort`         | Actor category. |
+| 10  | 1    | u8        | `RelationType` | Relation TYPE code (Section 7.6): `4` / `10` drive the couple / training pair ceremony (both actors face each other + motion swap + cue). CONFIRMED. |
+| 18  | 17   | bytes[17] | `Name`         | Member name, CP949. |
+
+Bytes `0..3`, `5..7`, `11..17`, and `35` are header/padding. The handler plays a greeting or combat
+motion keyed by `Event` / `RelationType` and may surface a rank-progress notice (display id).
 
 ### 6.5 Party membership state (local)
 
@@ -460,6 +480,18 @@ motion keyed by `Event` and may surface a rank-progress notice (display id).
   field on a removed member, and a global **party-active flag** plus a secondary party flag (the
   quickslot / auto-target relink gate) track whether the local player is currently grouped. These are
   local in-memory state, not wire fields. (added 2026-06-13)
+- **Local-player slot bases — two distinct stores (reconciled CYCLE 7).** Two nearby slot-array
+  bases on the local-player struct were measured in separate passes; they are **distinct stores**,
+  not one off-by-four measurement:
+  - **Local-player +204** is the **party-slot id array** base (the local player's party-slot id
+    array, indexed by party slot). This is the canonical party-roster base.
+  - **Local-player +200** is the **relation-slot store** (records of 16-byte stride) written by the
+    5:26 local relation-slot handler (Section 7.2), mirrored into a global slot table. It is the
+    relationship membership store, not the party id array.
+
+  Keep these separate in a re-implementation; the +200 store belongs to the relationship/FATE
+  subsystem and the +204 array belongs to the party subsystem. (CONFIRMED bases; the exact element
+  counts of each array are UNVERIFIED — see UNVERIFIED #9.)
 
 ### 6.6 Party member remove result — 4:36 (S2C, 56 bytes)
 
@@ -508,6 +540,20 @@ correct sender:
 This is a client-side input-flow detail (a deferred confirm), not a distinct wire message: the popup
 times out after 8000 ms or routes to the listed sender when confirmed. Added 2026-06-13.
 
+### 6.8 Party accept result — 4:76 (S2C, 52 bytes)
+
+The result of accepting a party invite (and the pair-interaction accept). Added CYCLE 7.
+
+| Off | Size | Type | Field          | Meaning |
+|-----|------|------|----------------|---------|
+| 8   | 1    | u8   | `SuccessFlag`  | `1` = accepted/ok; any other value surfaces a "cannot join" notice. CONFIRMED. |
+| 10  | 1    | u8   | `RelationType` | Relation TYPE byte (Section 7.6): values `4` / `10` select the couple / training pair ceremony (both actors face each other + motion swap + cue). CONFIRMED. |
+
+Bytes `0..7`, `9`, and `11..51` are header/padding not enumerated; read the named fields at the
+listed offsets within the 52-byte block. On success, 5:21 then maintains the roster and 5:38 streams
+each member's stats + position. The `RelationType` byte makes 4:76 a shared party / FATE result, the
+S2C counterpart of the 5:76 pair-interaction event (Section 6.4).
+
 ---
 
 ## 7. Friend / block / relation ("FATE") subsystem
@@ -531,22 +577,25 @@ implying a short tag rather than a full character name — **UNVERIFIED #6**, ve
 ### 7.2 Local-player relation slot — 5:26 (S2C, 28 bytes)
 
 The canonical client-side relationship membership update. It writes four payload dwords into a flat
-**relation-slot table** indexed by a slot byte.
+**relation-slot table** indexed by a slot byte that is the **relation TYPE** (see Section 7.6 for the
+type enum).
 
 | Off | Size | Type | Field       | Meaning |
 |-----|------|------|-------------|---------|
 | 0   | 4    | i32  | `Sort`      | Actor category. |
 | 4   | 4    | i32  | `ActorId`   | Actor id (gated == local player). |
-| 8   | 1    | u8   | `SlotIndex` | 0-based slot index (slot stride = 16 bytes). |
+| 8   | 1    | u8   | `SlotIndex` | 0-based slot index = the relation TYPE code; slot stride = 16 bytes. |
 | 12  | 4    | i32  | `Field0`    | Partner / target id. |
 | 16  | 4    | i32  | `Field1`    | Slot payload word 1. |
-| 20  | 4    | i32  | `Field2`    | Slot payload word 2. |
+| 20  | 4    | i32  | `Field2`    | Slot payload word 2 — read with a `< 100` check, a count/progress (e.g. intimacy / training level). |
 | 24  | 4    | i32  | `Field3`    | Slot payload word 3. |
 
 Behaviour: the handler gates on "resolved actor is the local player", then writes the four dwords
-(`Field0..Field3`, 16 bytes total) into the relation-slot table at index `16 * SlotIndex`, mirrored
-into the local-player relationship store at the same stride. This flat 16-byte-per-slot table is the
-**canonical client-side relationship membership store**. Bytes `9..11` are padding.
+(`Field0..Field3`, 16 bytes total) at slot index `16 * SlotIndex` into the **relation-slot store at
+local-player +200** (Section 6.5), mirrored into a global slot table at the same stride. Because
+`SlotIndex` is the relation type, the store is effectively one slot per relation type. This flat
+16-byte-per-slot store is the **canonical client-side relationship membership store** and is distinct
+from the party-slot id array at local-player +204. Bytes `9..11` are padding.
 
 ### 7.3 Other relation submits (C2S)
 
@@ -566,6 +615,116 @@ resolves a name and routes to the appropriate relation submit. The `/`-prefixed 
 (the same one used by whisper) handles the slash-prefixed entries. These are input-layer details;
 the wire messages are those in Sections 7.1–7.3.
 
+### 7.5 Actor relation fields (on-actor struct) — CONFLICT-D-1 resolution
+
+FATE is **D.O. Online's bonded-relationship system** (master/disciple, couple/spouse, rival,
+training/sparring), surfaced in the client as the **RelationPanel** ("relation" roster). It is not a
+generic friend list; it is the bond system that drives paired actor animations and a per-actor
+relation colour on the nameplate. These fields live on the **actor** object and are payload-independent
+struct offsets (not packet fields):
+
+| Actor offset | Size | Type | Field             | Meaning |
+|--------------|------|------|-------------------|---------|
+| +92  (0x5C)  | 4    | i32  | `ActorCompositeId`| Actor composite id / key. Used to compare a candidate against the local player. CONFIRMED. |
+| +96  (0x60)  | 1    | u8   | `RelationTypeByte`| Relation-TYPE byte — the bond-category lookup / match key (the type enum of Section 7.6). CONFIRMED. |
+| +116 (0x74)  | n    | str  | `ActorName`       | Actor display name, CP949. The relation-match name key. CONFIRMED. |
+| +172 (0xAC)  | 1    | u8   | `RelationPairState`| Relation PAIR-STATE byte — set per pair when two remote actors become bonded (the 5:64 handler). The nameplate / relation-colour read; also doubles as a no-guild / neutral state marker (value `2` = left / no guild). CONFIRMED. |
+
+> **CONFLICT-D-1 resolved (CYCLE 7, 2026-06-20).** The bonded-relation byte was reported at two
+> offsets in earlier passes. Static IDA proves **actor +96 (relation-type lookup key)** and
+> **actor +172 (relation pair-state, set by the 5/64 remote-pair handler)** are **two distinct
+> co-existing fields**, not a measurement error. The earlier D6 note that +172 was a conflation is
+> itself superseded — both offsets are genuine. CONFIRMED via static IDA, CYCLE 7.
+>
+> - Use **+96** to answer "which bond category does this actor hold with me" — the roster-search
+>   routine matches a candidate by testing this byte against the requested relation-type **and**
+>   comparing the actor's name (at +116).
+> - **+172** is the per-pair state the 5:64 handler writes when two actors bond (Section 7.8), and is
+>   the byte the nameplate / relation colour reads.
+
+### 7.6 FATE relation-type enum — CONFIRMED values, partial labels
+
+The relation type is a single byte (`RelationTypeByte` at actor +96; the same code rides packets as
+the relation-type field, e.g. 5:26 `SlotIndex`, the 5:76/4:76 relation-type byte, the relation panel
+record). The client switches on this code consistently across the relation-panel effect dispatcher,
+the local-slot apply path, and the pair-interaction events. Observed enum span: `{0,1,3,4,5,6,7,9,10}`.
+
+| Type | Proposed label | Confidence | Behaviour evidence |
+|------|----------------|------------|--------------------|
+| 0    | self / info             | label UNVERIFIED | self / own-name match path (record name == local player name); also drives a confirm-dialog category. |
+| 1    | master / disciple bond  | label UNVERIFIED | the "teacher" line; consumed via the roster-search routine with type 1. A money fee applies on form (Section 7.8). Master-vs-disciple split UNVERIFIED. |
+| 3    | dissolve / break        | label UNVERIFIED | clears the roster row and applies the same money fee as the bond-form path (Section 7.8). |
+| 4    | couple / spouse         | label UNVERIFIED | the marriage/couple bond: swaps the partner name with the local-player name and sets a paired-member flag; drives a couple ceremony (both actors face each other + motion swap + cue). A money fee applies on form. |
+| 5    | reject / fail           | label UNVERIFIED | surfaces a "refused" notice; no state mutation beyond clearing the pending-request flag. |
+| 6    | request notification    | label UNVERIFIED | shows an "X requests…" notice and looks up the actor via the roster-search routine (with type 1). |
+| 7    | rival                   | label UNVERIFIED | own switch case; also the **reciprocal/default pair code** the 5:64 handler writes onto the other side (Section 7.8). |
+| 9    | training-NO             | CONFIRMED name family | the refuse branch of the training relation; logged with the literal `FATE_TYPE_TRAINING` family name. |
+| 10   | training-YES            | CONFIRMED name family | the accept branch of the training/sparring relation (a training-duel pair: level-difference damage); logged with the literal `FATE_TYPE_TRAINING` family name. |
+
+The literal name **`FATE_TYPE_TRAINING`** is confirmed in the binary for the training relation (types
+9/10). All other type labels above are **inferred from behaviour and are UNVERIFIED**; a re-implementation
+must not hard-code the non-training labels as ground-truth names. (The training family is sometimes
+grouped behaviourally with types {1,6} in the apply path; that grouping is an implementation detail of
+the dispatcher, not a separate type.)
+
+### 7.7 FATE / relation network surface (C2S + S2C)
+
+Sizes are total payload byte counts (CONFIRMED — literal builder/handler read sizes). On-wire VALUE
+meanings stay capture/debugger-pending.
+
+| Opcode | Proposed name | Dir | Size | Shape / meaning |
+|--------|---------------|-----|------|-----------------|
+| 2:76 | `CmsgFateRelationRequest` | C2S | 20 | FATE relation-request blob; the developers' debug label is "FATE state / actor name / item-list count" (the request carries a FATE state code, a target actor name, and an item-list count). Gated by a connection-id check before send. |
+| 2:62 | `CmsgRelationNamedRequest` | C2S | 19 | Relation request by name: a byte op + a 17-byte CP949 name + pad. |
+| 2:63 | `CmsgRelationNamedAction`  | C2S | 17 | Relation action by name: a 17-byte CP949 name. |
+| 2:66 | `CmsgRelationToggle`       | C2S | 1  | 1-byte relation toggle. |
+| 5:26 | `SmsgLocalPlayerRelationSlot` | S2C | 28 | Local-player relation-slot update (Section 7.2): writes a 16-byte stride at local-player +200 indexed by the relation type. |
+| 5:64 | `SmsgRemoteActorRelationPair` | S2C | 16 | Remote-actor relation-pair (Section 7.8): two actor ids at body +4 / +8, a relation byte at body +12 (0xC); writes actor +172 on both sides. |
+| 4:71 | `SmsgRelationPartyPanelSnapshot` | S2C | 1092 | The big 8-slot relation / party panel snapshot. Inner field breakdown UNVERIFIED. |
+
+The relation/FATE record handed to the panel (and used by the 5:76 / 4:76 pair-interaction path) is a
+fixed struct; the field offsets below are record-relative (CONFIRMED):
+
+| Record off | Size | Type | Field | Meaning |
+|------------|------|------|-------|---------|
+| 0  | 1  | u8  | `SubAction`    | Relation sub-action / opcode echo. |
+| 10 | 1  | u8  | `RelationType` | Relation TYPE code (the enum of Section 7.6). |
+| 12 | 17 | str | `MemberName`   | Member name, CP949 (17 bytes). |
+| 29 | 1  | u8  | `SlotIndex`    | Tracked-slot index (`0xFF` = none; for type 4 a non-`0xFF` value releases a tracked slot). |
+| 32 | 4  | i32 | `MemberKey`    | Member actor composite key / id. |
+
+### 7.8 Remote-actor relation pair (5/64) and the FATE bond economy
+
+**Remote-pair handler (5/64, 16 bytes) — CONFIRMED.** When two remote actors become bonded, the
+handler reads two actor ids (body +4 and body +8) and a relation code (body +12). It **skips** when
+either actor is the local player or the pair is already bonded, then writes the payload's relation
+code onto one actor's relation-pair-state byte (**actor +172**) and a **fixed code (value 7)** onto
+the reciprocal actor's +172. This is the byte the nameplate / relation colour reads (Section 7.5);
+its value `2` also marks a left/no-guild neutral state.
+
+**Bond economy (CONFIRMED, value capture-pending).** Forming a couple (type 4) or master bond
+(type 1), and dissolving a bond (type 3), deduct a **money fee** computed as a percentage of the
+player's own wallet **plus** a draw on a **global currency pool** (a single client-side currency pool
+used for FATE bond fees). The exact fee percentages and pool semantics are server-authoritative and
+value-capture-pending. Couple (type 4) additionally swaps the partner/local names and sets a
+paired-member flag (the pairing record). These are local effects driven by the relation type; the
+authoritative charge is the server's.
+
+### 7.9 No client auto-accept (CONFIRMED)
+
+There is **no client-side party / guild / trade / duel auto-accept**: relation/FATE and party invites
+are always interactive — the invite/accept path always prompts (e.g. the 4:35 invite-state →
+4:76 accept-result flow for party, and the relation request flow for FATE). The client option table
+contains only graphics/sound/UI toggles plus a whisper-notify flag and a combat auto-target flag;
+none is a party/guild/trade auto-accept. A re-implementation must drive these through an interactive
+confirm, not an automatic accept. (Any server-side auto-accept behaviour is out of scope and
+capture-pending.)
+
+> **PvP / fame / public-peace cross-reference.** The FATE bond system documented here is distinct
+> from the PK / karma, fame, public-peace, and brood-war two-side faction subsystems, which are
+> documented in `pvp.md`. The per-actor relation-pair-state byte (+172) is the social-bond colour,
+> not a PK/karma score.
+
 ---
 
 ## 8. Membership-state model (summary)
@@ -573,8 +732,10 @@ the wire messages are those in Sections 7.1–7.3.
 | Store | What it holds | Updated by |
 |-------|---------------|------------|
 | Local player id sentinel | Local actor id; `0xFFFFFFFF` until enter-world. Drives the self-target guard. | enter-world |
-| Relation-slot table | Flat array of **16-byte slots** keyed by `SlotIndex`; mirrored on the local player. | 5:26 |
-| Party roster/stats | Single party-panel cache; party id, member ids (≤8), per-member vitals/buffs. Each actor also carries a party id at on-actor offset +968; a global party-active flag tracks whether the local player is grouped. | 4:35, 4:36, 5:21, 5:38, 5:76 |
+| Relation-slot store (local-player +200) | Flat array of **16-byte slots** keyed by relation type (`SlotIndex`); mirrored into a global slot table. Distinct from the party-slot id array. | 5:26 |
+| Party-slot id array (local-player +204) | The local player's party-slot id array. Distinct from the relation-slot store at +200. | party roster events |
+| Actor relation fields | Per-actor: composite id (+92), relation-type byte (+96), name (+116), relation-pair-state byte (+172). | 5:64 (pair state), roster population |
+| Party roster/stats | Single party-panel cache; party id, member ids (≤8), per-member vitals/buffs. Each actor also carries a party id at on-actor offset +968; a global party-active flag tracks whether the local player is grouped. | 4:35, 4:36, 4:76, 5:21, 5:38, 5:76 |
 | Guild roster/cache | Up to **50 members** (struct-of-arrays); per-actor guild rank/title/flags; local-player guild name/grade. | 4:65 (full), 5:65 (per-actor) |
 
 Caps and gates to model:
@@ -598,8 +759,10 @@ Caps and gates to model:
    "party healing actor ok" debug marker — and is documented as party in Sections 2.4 and 6. Only
    the separate **2:60–2:76** cluster remains relationship/FATE-flavoured and capture-unverified.)
    The 2:60–2:76 cluster is still relationship/FATE-flavoured at the submit layer; genuine party is
-   the C2S 2:35/2:36/2:37 plus the S2C 4:36 / 5:21 / 5:38 / 5:76 + party panel. Resolve the remaining
-   2:60–2:76 ambiguity with captures of couple/training vs friend-add.
+   the C2S 2:35/2:36/2:37 plus the S2C 4:36 / 5:21 / 5:38 / 5:76 + party panel. (CYCLE 7 refined the
+   FATE half: 2:76 = FATE relation request, 2:62 = relation-by-name request, 2:63 = relation-by-name
+   action, 2:66 = relation toggle — see Section 7.7. The non-training relation-type *labels* in the
+   enum of Section 7.6 still want a couple/training-vs-friend-add capture to settle.)
 3. **2:82 (28-byte chat variant) purpose** — party chat? guild chat? trade chat? The builder writes
    a 28-byte header and no text in the thunk itself; a caller may append text separately.
 4. **2:84 purpose (RESOLVED shape; capture-pending meaning).** Corrected this pass: 2:84 is a
@@ -615,12 +778,16 @@ Caps and gates to model:
    byte-order / endianness of the prefix — **capture-pending**.
 6. **2:122 name field width** — a 4-byte copy into a 5-byte buffer implies a short tag rather than a
    full 16/17-char character name; unusual, verify.
-7. **2:123 auto-accept event codes** — the inbound relation-event numbering that drives auto-accept
-   (the gift-receive path) is inferred from branch constants, not enumerated.
+7. **2:123 inbound relation-event codes (NO client auto-accept).** RESOLVED this pass: the client has
+   **no party/guild/trade/duel auto-accept** — invites are always interactive (Section 7.9). The
+   inbound relation-event numbering on the gift-receive confirm path is still inferred from branch
+   constants and is **value-capture-pending**.
 8. **2:8 (241-byte guild blob) field breakdown** — likely guild create / crest, but the internal
    layout is not decoded.
-9. **Relation-slot table length** — slot stride is 16 bytes; the maximum slot count (array length)
-   is not bounded by the apply path. Bound it from the UI or a capture.
+9. **Relation-slot store length** — the store lives at local-player +200 (distinct from the party-slot
+   id array at +204; see Section 6.5), is indexed by the relation type with a 16-byte slot stride; the
+   maximum slot count (array length) is not bounded by the apply path. Bound it from the UI or a
+   capture.
 10. **24-byte (2:83) and 56-byte (3:21) chat context headers** — only the channel selector dword
     (3:21 offset +4) and the text trailer are decoded; the remaining sender/target/scope header
     fields are not broken out field-by-field.

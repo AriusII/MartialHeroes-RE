@@ -6,9 +6,20 @@ verification: routing/teardown-control-flow [confirmed] (the existence of TWO di
   the concrete in-game UI control that fires each opcode, whether the SERVER closes the socket on the
   lighter path, and which agent issues the real socket close are static-hypothesis / live-pending (6-D);
   the "4/137" server message is flagged NEEDS-REVIEW (its label is suspect).
+  Death & respawn (§7): the death-notification opcode/size/cause-selector, the death actor-state field
+  values, the level>=36 modal split, the countdown timed-event id/duration, the respawn-request opcode,
+  and the two respawn-response opcodes/sizes are static-confirmed on build 263bd994;
+  the concrete meaning of each respawn-choice value (0/1/2/3) and the server-decided respawn location +
+  restored HP are RUNTIME-ONLY (server-authoritative / capture-debugger-pending).
 ida_anchor: 263bd994
+ida_reverified: 2026-06-20
 evidence: [static-ida]
 sample_verified: false
+note: |
+  IDB SHA 263bd994, CYCLE 7 (2026-06-20) — appended §7 "Local death & respawn" (death notification
+  5/10, respawn request 2/3, respawn responses 4/28 + 5/28, the level>=36 respawn-modal split, and the
+  timed-event 10003 death countdown). Death is NOT a world exit — the actor stays in the world session;
+  the section is recorded here because world_exit.md owns the death-and-respawn behavioural spec.
 -->
 
 # World Exit — Logout & Leave-World Teardown — Clean-Room Specification
@@ -22,8 +33,10 @@ sample_verified: false
 >
 > **Scope.** How the client leaves the in-world session and returns to the login screen: the **two
 > distinct world-exit opcodes**, the **two distinct teardown routines** that send them, why they are
-> never sent together, the shared exit tail, and where the actual session drop happens. The opcode
-> framing/dispatch and the connection lifecycle are owned by neighbours and cited, not duplicated:
+> never sent together, the shared exit tail, and where the actual session drop happens — **plus the
+> local death & respawn flow (§7)**, which this spec owns even though death does **not** leave the
+> world (the actor stays in the session and respawns into it). The opcode framing/dispatch and the
+> connection lifecycle are owned by neighbours and cited, not duplicated:
 > - `opcodes.md` — the 8-byte wire frame header + the opcode catalogue.
 > - `connection_topology.md` — the single persistent opcode socket A and why leave-world does **not**
 >   reconnect it (§6: "leave-world / logout-to-menu does NOT close A").
@@ -134,6 +147,101 @@ exit path.
 
 ---
 
+## 7. Local death & respawn
+
+Death is **not** a world exit: when the local player dies the actor **remains in the in-world session**
+and respawns back into it — no exit opcode is sent, the persistent opcode socket stays open, and the
+scene does **not** converge on the return-to-login state of §2. This section is recorded here because
+this spec owns the **death-and-respawn behavioural flow**; the wire identities are catalogued in
+`opcodes.md` and the field shapes in `packets/`.
+
+The single decisive fact for the whole flow: **the server is authoritative over where the actor
+respawns and with what restored HP.** The client only *requests a choice* of respawn option; the
+server decides the location and vitals and pushes them back. *([confirmed]* that the client computes
+no respawn position and no restored-HP value.)*
+
+### 7.1 Death state on the actor
+
+When death is processed, two fields on the actor object record the dead state, and both are read
+elsewhere as the canonical "is this actor dead" tests:
+
+| Actor field | Dead value | Alive/normal value | Role |
+|---|---|---|---|
+| **alive gate flag** (actor +1424) | **0** = dead | 1 = alive | generic "alive & interactable" guard — movement / targeting / pickup all early-return while it is `0` |
+| **action-state** (actor +1420) | **8** = death state | 1 = idle/normal | the canonical "is this actor dead" enum value |
+
+*([confirmed]* both field offsets and their dead values.)* The implicit input lockout follows from the
+alive gate: while it reads `0`, the movement / targeting / pickup paths refuse to act, and the respawn
+modal is shown — there is no separate "input disabled" boolean.
+
+### 7.2 Death notification — inbound `5/10`
+
+The server announces a death with **S2C `5/10`**, a **20-byte** body. The body carries a
+**death-cause** selector that branches the local death reaction:
+
+| death-cause value | Meaning |
+|---|---|
+| **0** | normal death |
+| **1** | player-kill (PK), variant A |
+| **2** | player-kill (PK), variant B |
+| **3** | special death (no town-respawn option) |
+
+*([confirmed]* opcode, 20-byte size, and the four-value cause selector.)*
+
+### 7.3 The local death modal — level-gated layout
+
+On the local player's death the client opens a respawn **modal**, and **the player's level selects
+which modal layout is shown**:
+
+- **level ≥ 36 → modal mode 1** (the higher-level respawn-option layout).
+- **otherwise → modal mode 3** (the lower-level / alternate respawn layout).
+
+*([confirmed]* the level-36 threshold and the mode-1-vs-mode-3 split.)* A special death (cause `3`)
+also resolves to the mode-3 layout (no town-respawn option).
+
+### 7.4 The death countdown — timed event `10003`
+
+A respawn **countdown** drives the wait-to-respawn. It is a **timed event, id `10003`**, with a
+**600-second** duration, and it is **region-gated** — it only runs where the region permits (some
+regions present a different/shorter countdown context). When the countdown elapses, the client issues
+the respawn request automatically (the default choice — §7.5). *([confirmed]* the event id, the
+600-second duration, and the region gate.)*
+
+### 7.5 Respawn request — outbound `2/3`
+
+The client sends its respawn decision with **C2S `2/3`**, carrying a single **respawn-choice** field
+(a 16-bit value). The choice takes one of **`0` / `1` / `2` / `3`**, each selecting a different respawn
+option; the same request is sent both from the modal buttons and automatically when the countdown of
+§7.4 reaches zero. *([confirmed]* opcode `2/3` and the single respawn-choice field.)*
+
+> **RUNTIME-ONLY:** the concrete meaning of each choice value (e.g. town vs nearest point vs accept-a-
+> revive vs respawn-in-place) is **not asserted** here — the exact value→option mapping is server-
+> contract-dependent and stays capture/debugger-pending.
+
+### 7.6 Respawn responses — inbound `4/28` and `5/28`
+
+The server answers a respawn with **two distinct messages**, depending on which actor respawns:
+
+| Opcode | Body | Role |
+|---|---|---|
+| **S2C `4/28`** | **20 bytes** | local-player respawn confirmation — relocates/recreates the local actor at the **server-chosen** position |
+| **S2C `5/28`** | **12 bytes** | remote-actor respawn — recreates another actor at its respawn point |
+
+*([confirmed]* both opcodes and both body sizes.)* The respawn **position and the restored HP** carried
+by / following these messages are **server-authoritative** — the client applies what the server sends;
+it does not choose the location and does not compute the restored HP (restored vitals arrive through
+the ordinary actor-vitals push, not from a client-side respawn formula).
+
+### 7.7 What the death flow does NOT do
+
+- **No world exit.** No `1/0` / `2/0` is sent on death; §1–§3 do not run.
+- **No client-side death-penalty arithmetic.** The client formats death **notice text only** — it
+  computes no XP-loss, no durability-loss, and no item-drop list. Any penalty magnitudes and any
+  dropped items are **server-authoritative (RUNTIME-ONLY)** and arrive as ordinary server-driven
+  updates.
+
+---
+
 ## 6. Cross-reference map
 
 | This spec covers | Owned elsewhere — cite, don't duplicate |
@@ -142,3 +250,5 @@ exit path.
 | Why leave-world does not reconnect / the persistent socket lifecycle (§3) | `connection_topology.md §6` |
 | The `2/112` keepalive toggle disarmed before `2/0` (§1.2) | `network_dispatch.md` (keepalives) |
 | The return scene state 6 / sub-state 8 (§2) | `scenes/scene_state_machine.md` |
+| Death/respawn opcodes `5/10`, `2/3`, `4/28`, `5/28` (§7) | `opcodes.md` (catalogue of record), `packets/` (field specs) |
+| Death-state actor fields, respawn modal, the `10003` countdown engine (§7.1–§7.4) | `specs/combat.md` (death-state convention), `specs/world_systems.md` (death/respawn timer + modal) |

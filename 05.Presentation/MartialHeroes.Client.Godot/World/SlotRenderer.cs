@@ -18,53 +18,49 @@
 // spec: Docs/RE/formats/terrain_scene.md — BUD scene coordinate system (absolute world-space).
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Mapping;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Static helpers that render individual cell slots from a pre-assembled
-/// <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell"/> onto a target <see cref="Node3D"/>.
-/// Used exclusively by <see cref="RealWorldRenderer"/> when the <c>compose_render</c> flag is on.
-///
-/// spec: Docs/RE/structs/terrain-manager.md §"The 9 per-cell render sub-manager slots" — CONFIRMED.
-/// spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell carries 9 slots.
+///     Static helpers that render individual cell slots from a pre-assembled
+///     <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell" /> onto a target <see cref="Node3D" />.
+///     Used exclusively by <see cref="RealWorldRenderer" /> when the <c>compose_render</c> flag is on.
+///     spec: Docs/RE/structs/terrain-manager.md §"The 9 per-cell render sub-manager slots" — CONFIRMED.
+///     spec: Docs/RE/specs/assembly_graph.md §1 — assembled cell carries 9 slots.
 /// </summary>
 internal static class SlotRenderer
 {
     // ─── Slot 1 — Buildings ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Renders slot 1 (mass/building-object placement grid) from the assembled cell's
-    /// <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell.Slot1BuildingObjectGrid"/>
-    /// (<c>.bud</c> scene) via <see cref="BudMeshBuilder"/>. The resulting <see cref="Node3D"/>
-    /// subtree is added as a child of <paramref name="parent"/>.
-    ///
-    /// Building coordinates are pre-baked into absolute world-space (no cell-relative offset needed).
-    /// spec: Docs/RE/formats/terrain_scene.md §Coordinate system — "positions are pre-baked into
-    ///   absolute world-space": CONFIRMED.
-    ///
-    /// The building texture resolver uses the same two-hop chain as the legacy path
-    /// (<c>.map</c> BUILDING TEXTURES → bgtexture.lst → DDS) via <paramref name="budTexResolver"/>.
-    ///
-    /// Returns true when buildings were spawned, false when the slot was absent or empty.
-    /// spec: Docs/RE/structs/terrain-manager.md slot 1 — "mass/building-object placement grid (.bud)": CONFIRMED.
-    /// spec: Docs/RE/formats/area_inventory.md §3.2 — absent .bud is NOT an error.
+    ///     Renders slot 1 (mass/building-object placement grid) from the assembled cell's
+    ///     <see cref="global::MartialHeroes.Assets.Mapping.AssembledCell.Slot1BuildingObjectGrid" />
+    ///     (<c>.bud</c> scene) via <see cref="BudMeshBuilder" />. The resulting <see cref="Node3D" />
+    ///     subtree is added as a child of <paramref name="parent" />.
+    ///     Building coordinates are pre-baked into absolute world-space (no cell-relative offset needed).
+    ///     spec: Docs/RE/formats/terrain_scene.md §Coordinate system — "positions are pre-baked into
+    ///     absolute world-space": CONFIRMED.
+    ///     The building texture resolver uses the same two-hop chain as the legacy path
+    ///     (<c>.map</c> BUILDING TEXTURES → bgtexture.lst → DDS) via <paramref name="budTexResolver" />.
+    ///     Returns true when buildings were spawned, false when the slot was absent or empty.
+    ///     spec: Docs/RE/structs/terrain-manager.md slot 1 — "mass/building-object placement grid (.bud)": CONFIRMED.
+    ///     spec: Docs/RE/formats/area_inventory.md §3.2 — absent .bud is NOT an error.
     /// </summary>
     /// <param name="parent">The parent node to attach the building subtree to.</param>
     /// <param name="cell">The fully assembled cell (slot 1 may be null — handled gracefully).</param>
     /// <param name="budTexResolver">
-    /// Texture resolver: given a 1-based .bud tex_id, returns a Godot ImageTexture or null.
-    /// Uses the cell's .map BUILDING TEXTURES section (same chain as the legacy BUD path).
+    ///     Texture resolver: given a 1-based .bud tex_id, returns a Godot ImageTexture or null.
+    ///     Uses the cell's .map BUILDING TEXTURES section (same chain as the legacy BUD path).
     /// </param>
     /// <param name="cellMapXZ">Biased cell coordinates for log messages.</param>
     public static bool RenderSlot1Buildings(
         Node3D parent,
-        global::MartialHeroes.Assets.Mapping.AssembledCell cell,
+        AssembledCell cell,
         Func<uint, ImageTexture?> budTexResolver,
         (int MapX, int MapZ) cellMapXZ)
     {
-        BudScene? budScene = cell.Slot1BuildingObjectGrid;
+        var budScene = cell.Slot1BuildingObjectGrid;
         if (budScene is null)
         {
             GD.Print($"[SlotRenderer] Cell ({cellMapXZ.MapX},{cellMapXZ.MapZ}) slot 1: absent (terrain-only cell). " +
@@ -106,32 +102,30 @@ internal static class SlotRenderer
     // ─── Slots 2-8 — FX Overlays ─────────────────────────────────────────────
 
     /// <summary>
-    /// Renders slots 2-8 (FX overlay texture layers .fx1-.fx7) from the assembled cell.
-    /// Missing FX slots are silently skipped — absent FX is not an error.
-    ///
-    /// The FX overlays are positioned at the cell's world-space origin with a world-plane mesh
-    /// spanning the cell (1024×1024 world units), textured with the FX layer's texture. Effect
-    /// sub-offsets use the Z-negation port-side convention.
-    ///
-    /// spec: Docs/RE/structs/terrain-manager.md slots 2-8 — FX overlay texture layers: CONFIRMED.
-    /// spec: Docs/RE/specs/assembly_graph.md §1 — slots 2..8 = fx1..fx7 overlays.
-    /// spec: WorldCoordinates.ToGodot — world geometry negates Z (port-side): CONFIRMED.
+    ///     Renders slots 2-8 (FX overlay texture layers .fx1-.fx7) from the assembled cell.
+    ///     Missing FX slots are silently skipped — absent FX is not an error.
+    ///     The FX overlays are positioned at the cell's world-space origin with a world-plane mesh
+    ///     spanning the cell (1024×1024 world units), textured with the FX layer's texture. Effect
+    ///     sub-offsets use the Z-negation port-side convention.
+    ///     spec: Docs/RE/structs/terrain-manager.md slots 2-8 — FX overlay texture layers: CONFIRMED.
+    ///     spec: Docs/RE/specs/assembly_graph.md §1 — slots 2..8 = fx1..fx7 overlays.
+    ///     spec: WorldCoordinates.ToGodot — world geometry negates Z (port-side): CONFIRMED.
     /// </summary>
     /// <param name="parent">Parent node (same RealWorldRenderer node).</param>
     /// <param name="cell">Assembled cell whose FX slots may carry overlay data.</param>
     /// <param name="cellWorldOriginGodot">
-    /// The Godot-space world origin of this cell (already with Z negated).
-    /// spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z): CONFIRMED.
+    ///     The Godot-space world origin of this cell (already with Z negated).
+    ///     spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z): CONFIRMED.
     /// </param>
     /// <param name="cellMapXZ">Biased cell coordinates for log messages.</param>
     /// <returns>Number of FX slots rendered (0 if all absent).</returns>
     public static int RenderFxSlots(
         Node3D parent,
-        global::MartialHeroes.Assets.Mapping.AssembledCell cell,
+        AssembledCell cell,
         Vector3 cellWorldOriginGodot,
         (int MapX, int MapZ) cellMapXZ)
     {
-        int rendered = 0;
+        var rendered = 0;
 
         // Slots 2-8 carry FX overlay layers. Each is an optional planar mesh over the cell.
         // Missing FX is not an error — most cells have no FX.
@@ -171,16 +165,14 @@ internal static class SlotRenderer
     // ─── FX plane helper ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// Spawns a 1024×1024 unit placeholder plane for one FX overlay slot at the cell world origin.
-    /// Port-side: the plane is laid flat (XZ plane, Y up), at a slight Y elevation so it does not
-    /// z-fight with the terrain surface.
-    ///
-    /// The FX plane is diagnostic only — it confirms the FX slot was present in the assembled cell.
-    /// A full FX rendering implementation (matching the original animated/blended overlays) is a
-    /// future work item outside the A.4 scope.
-    ///
-    /// spec: Docs/RE/structs/terrain-manager.md slots 2-8 — FX overlay: CONFIRMED.
-    /// spec: WorldCoordinates.ToGodot — port-side Z negation for effect sub-offsets: CONFIRMED.
+    ///     Spawns a 1024×1024 unit placeholder plane for one FX overlay slot at the cell world origin.
+    ///     Port-side: the plane is laid flat (XZ plane, Y up), at a slight Y elevation so it does not
+    ///     z-fight with the terrain surface.
+    ///     The FX plane is diagnostic only — it confirms the FX slot was present in the assembled cell.
+    ///     A full FX rendering implementation (matching the original animated/blended overlays) is a
+    ///     future work item outside the A.4 scope.
+    ///     spec: Docs/RE/structs/terrain-manager.md slots 2-8 — FX overlay: CONFIRMED.
+    ///     spec: WorldCoordinates.ToGodot — port-side Z negation for effect sub-offsets: CONFIRMED.
     /// </summary>
     private static bool SpawnFxPlane(
         Node3D parent,

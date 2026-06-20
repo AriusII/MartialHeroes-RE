@@ -17,67 +17,66 @@
 // NEVER uses GltfDocument.AppendFromBuffer (it crashes natively on this project's GLBs).
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Helpers;
+using MartialHeroes.Assets.Parsers.Core.Models;
+using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Presentation.Helpers;
+using MartialHeroes.Client.Presentation.World;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Builds a live Godot node from parsed <see cref="SkinnedMesh"/>, <see cref="Skeleton"/>, and
-/// <see cref="AnimationClip"/> data without <c>GltfDocument</c>.
-///
-/// Returns a <see cref="Node3D"/> root the orchestrator positions/scales in world space. The
-/// root is pre-recentred so feet are near local Y=0 and the body is centred on X=0, Z=0.
+///     Builds a live Godot node from parsed <see cref="SkinnedMesh" />, <see cref="Skeleton" />, and
+///     <see cref="AnimationClip" /> data without <c>GltfDocument</c>.
+///     Returns a <see cref="Node3D" /> root the orchestrator positions/scales in world space. The
+///     root is pre-recentred so feet are near local Y=0 and the body is centred on X=0, Z=0.
 /// </summary>
 public static class SkinnedCharacterBuilder
 {
     /// <summary>
-    /// When <c>false</c>, the skeleton/animation paths are bypassed and the mesh renders as a
-    /// static (unskinned) rest surface. Default <c>true</c> (full skinned + animated CPU LBS).
-    /// Internal so only this presentation assembly can toggle it (no public mutable global state).
+    ///     When <c>false</c>, the skeleton/animation paths are bypassed and the mesh renders as a
+    ///     static (unskinned) rest surface. Default <c>true</c> (full skinned + animated CPU LBS).
+    ///     Internal so only this presentation assembly can toggle it (no public mutable global state).
     /// </summary>
     internal static bool ForceSkinned { get; set; } = true;
 
     /// <summary>
-    /// When <c>true</c>, each skinned <see cref="Build"/> prints the mandatory invariant
-    /// diagnostics (max rest deviation, AABB, liveness). Default <c>true</c> so headless runs log them.
-    /// Internal so only this presentation assembly can toggle it (no public mutable global state).
+    ///     When <c>true</c>, each skinned <see cref="Build" /> prints the mandatory invariant
+    ///     diagnostics (max rest deviation, AABB, liveness). Default <c>true</c> so headless runs log them.
+    ///     Internal so only this presentation assembly can toggle it (no public mutable global state).
     /// </summary>
     internal static bool PrintDiagnostics { get; set; } = true;
 
     /// <summary>
-    /// PORT-SIDE coordinate convention: map the legacy native up-axis onto Godot's Y-up.
-    ///
-    /// The recovered bind/inverse-bind/LBS math (<see cref="SkinningMath"/>, the bake) is CORRECT and
-    /// is NOT touched here — the deform reproduces the rig faithfully in its NATIVE axis frame. But the
-    /// legacy engine's native up-axis differs from Godot's Y-up, so the faithfully-deformed avatar
-    /// arrives lying along X (the CYCLE-2 screenshots show AABB longest extent X≈25 vs Y≈12). This is
-    /// the SAME CATEGORY of port-side coordinate mapping as the existing conventions already in the
-    /// codebase: world geometry negates Z (<see cref="Helpers.WorldCoordinates.ToGodot"/>) and the
-    /// mesh-local .skn geometry negates X. It is a display-node reorientation — a coordinate-mapping
-    /// PORT CHOICE — NOT a fabricated game behaviour and NOT a change to the bind/bake math.
-    ///
-    /// Applied to the Pivot node (the Node3D wrapping the mesh), so it composes cleanly with the
-    /// caller's actor yaw on the root (NpcRenderer / RealWorldRenderer set root.Rotation = (0,yaw,0))
-    /// and is shared by BOTH the player and the spawned actors (both go through Build).
-    ///
-    /// The human avatar's faithfully-deformed mesh is tallest along X (AABB X≈5.0 vs Y≈2.4 vs Z≈1.7
-    /// for the g2 player b202110001 — it arrives lying down the +X axis). Mapping X→Y stands it up,
-    /// which is a rotation about Z (not about X — about X only swaps Y↔Z and leaves it X-tall). A
-    /// +90° rotation about Z maps +X onto +Y while keeping the figure NOT mirrored/inside-out (a pure
-    /// rotation has det = +1, so winding is preserved, unlike a reflection). The AABB long axis moves
-    /// from X to Y, which is the verifiable signature.
-    /// Held as a named field so it is trivially adjustable when the maintainer confirms the native axis
-    /// against the official captures / live debugger.
-    /// spec: Docs/RE/specs/skinning.md §9 — the native up-axis / handedness LABEL is capture/debugger-
-    ///       pending (no axis flip inside the math); this is the importer-layer remap §7 sanctions.
-    /// spec: CLAUDE.md "Coordinate conventions" — same category as world Z-negate / mesh-local X-negate.
+    ///     PORT-SIDE coordinate convention: map the legacy native up-axis onto Godot's Y-up.
+    ///     The recovered bind/inverse-bind/LBS math (<see cref="SkinningMath" />, the bake) is CORRECT and
+    ///     is NOT touched here — the deform reproduces the rig faithfully in its NATIVE axis frame. But the
+    ///     legacy engine's native up-axis differs from Godot's Y-up, so the faithfully-deformed avatar
+    ///     arrives lying along X (the CYCLE-2 screenshots show AABB longest extent X≈25 vs Y≈12). This is
+    ///     the SAME CATEGORY of port-side coordinate mapping as the existing conventions already in the
+    ///     codebase: world geometry negates Z (<see cref="Helpers.WorldCoordinates.ToGodot" />) and the
+    ///     mesh-local .skn geometry negates X. It is a display-node reorientation — a coordinate-mapping
+    ///     PORT CHOICE — NOT a fabricated game behaviour and NOT a change to the bind/bake math.
+    ///     Applied to the Pivot node (the Node3D wrapping the mesh), so it composes cleanly with the
+    ///     caller's actor yaw on the root (NpcRenderer / RealWorldRenderer set root.Rotation = (0,yaw,0))
+    ///     and is shared by BOTH the player and the spawned actors (both go through Build).
+    ///     The human avatar's faithfully-deformed mesh is tallest along X (AABB X≈5.0 vs Y≈2.4 vs Z≈1.7
+    ///     for the g2 player b202110001 — it arrives lying down the +X axis). Mapping X→Y stands it up,
+    ///     which is a rotation about Z (not about X — about X only swaps Y↔Z and leaves it X-tall). A
+    ///     +90° rotation about Z maps +X onto +Y while keeping the figure NOT mirrored/inside-out (a pure
+    ///     rotation has det = +1, so winding is preserved, unlike a reflection). The AABB long axis moves
+    ///     from X to Y, which is the verifiable signature.
+    ///     Held as a named field so it is trivially adjustable when the maintainer confirms the native axis
+    ///     against the official captures / live debugger.
+    ///     spec: Docs/RE/specs/skinning.md §9 — the native up-axis / handedness LABEL is capture/debugger-
+    ///     pending (no axis flip inside the math); this is the importer-layer remap §7 sanctions.
+    ///     spec: CLAUDE.md "Coordinate conventions" — same category as world Z-negate / mesh-local X-negate.
     /// </summary>
-    internal static Vector3 UpAxisRemapDeg { get; set; } = new Vector3(0f, 0f, 90f);
+    internal static Vector3 UpAxisRemapDeg { get; set; } = new(0f, 0f, 90f);
 
     /// <summary>
-    /// Builds a Godot node tree for a skinned character. Never throws — each step is guarded and
-    /// degrades to a visible-but-simpler state on failure. Player-compatible overload.
+    ///     Builds a Godot node tree for a skinned character. Never throws — each step is guarded and
+    ///     degrades to a visible-but-simpler state on failure. Player-compatible overload.
     /// </summary>
     /// <param name="mesh">Parsed .skn skinned mesh. Must not be null.</param>
     /// <param name="skeleton">Parsed .bnd skeleton, or null (→ static pose).</param>
@@ -88,23 +87,24 @@ public static class SkinnedCharacterBuilder
         Skeleton? skeleton,
         AnimationClip? clip,
         ImageTexture? albedo = null)
-        => Build(mesh, skeleton, clip, albedo, externalDrive: false, startPhaseSeconds: 0f,
-            out _, debugLabel: null);
+    {
+        return Build(mesh, skeleton, clip, albedo, false, 0f,
+            out _, null);
+    }
 
     /// <summary>
-    /// Builds a Godot node tree for a skinned character, returning the inner
-    /// <see cref="SkinnedCharacterNode"/> (when one was created) so a throttling owner can pump it
-    /// via <see cref="SkinnedCharacterNode.Tick"/>.
-    ///
-    /// Orientation is produced by the SINGLE handedness conversion (the world Z-negate) applied
-    /// inside the skinning math output — there is NO per-rig "stand-up" reorientation. The original
-    /// brings native bone space and rest-mesh space to screen with one conversion and no extra
-    /// tallest-axis rotation; any apparent lying-down/standing is the rig's authored rest/idle, which
-    /// the faithful pipeline reproduces. spec: Docs/RE/specs/skinning.md §7 / §8(b) / §9.
+    ///     Builds a Godot node tree for a skinned character, returning the inner
+    ///     <see cref="SkinnedCharacterNode" /> (when one was created) so a throttling owner can pump it
+    ///     via <see cref="SkinnedCharacterNode.Tick" />.
+    ///     Orientation is produced by the SINGLE handedness conversion (the world Z-negate) applied
+    ///     inside the skinning math output — there is NO per-rig "stand-up" reorientation. The original
+    ///     brings native bone space and rest-mesh space to screen with one conversion and no extra
+    ///     tallest-axis rotation; any apparent lying-down/standing is the rig's authored rest/idle, which
+    ///     the faithful pipeline reproduces. spec: Docs/RE/specs/skinning.md §7 / §8(b) / §9.
     /// </summary>
     /// <param name="externalDrive">
-    /// When true, the LBS node does not self-tick from <c>_Process</c>; the owner drives it via
-    /// <see cref="SkinnedCharacterNode.Tick"/> (used by NpcRenderer's ~10 Hz staggered scheduler).
+    ///     When true, the LBS node does not self-tick from <c>_Process</c>; the owner drives it via
+    ///     <see cref="SkinnedCharacterNode.Tick" /> (used by NpcRenderer's ~10 Hz staggered scheduler).
     /// </param>
     /// <param name="startPhaseSeconds">Initial clip phase offset so actors don't move in lockstep.</param>
     /// <param name="lbsNode">Out: the inner LBS node, or null if the static path was taken.</param>
@@ -122,10 +122,10 @@ public static class SkinnedCharacterBuilder
         lbsNode = null;
         var root = new Node3D { Name = $"SkinnedChar_{mesh.Name}" };
 
-        bool useSkinning = ForceSkinned
-                           && skeleton is not null
-                           && skeleton.Bones.Length > 0
-                           && mesh.Weights.Length > 0;
+        var useSkinning = ForceSkinned
+                          && skeleton is not null
+                          && skeleton.Bones.Length > 0
+                          && mesh.Weights.Length > 0;
 
         // A pivot node sits between the root and the mesh child. The skinning math output applies the
         // ONE handedness conversion (the world Z-negate); the pivot then applies the PORT-SIDE
@@ -139,7 +139,6 @@ public static class SkinnedCharacterBuilder
         root.AddChild(pivot);
 
         if (useSkinning)
-        {
             try
             {
                 var lbs = new SkinnedCharacterNode { Name = "Lbs" };
@@ -147,7 +146,7 @@ public static class SkinnedCharacterBuilder
 
                 if (PrintDiagnostics)
                 {
-                    SkinnedCharacterNode.SkinDiagnostics d = lbs.BuildDiagnostics(mesh);
+                    var d = lbs.BuildDiagnostics(mesh);
                     LogDiagnostics(mesh, skeleton!, clip, d);
                 }
 
@@ -157,11 +156,11 @@ public static class SkinnedCharacterBuilder
                 // skinning output stays the only handedness conversion in the math; the pivot remap is
                 // a port-side display reorientation (§7/§9), shared by player + actors.
                 // spec: Docs/RE/specs/skinning.md §6 (displayed pose is the sampled idle) / §7 / §9.
-                Aabb displayedAabb = lbs.GetDisplayedFrame0Aabb();
+                var displayedAabb = lbs.GetDisplayedFrame0Aabb();
 
                 if (PrintDiagnostics)
                 {
-                    Aabb after = TransformAabb(pivot.Transform.Basis, displayedAabb);
+                    var after = TransformAabb(pivot.Transform.Basis, displayedAabb);
                     Vector3 b = displayedAabb.Size, a = after.Size;
                     GD.Print(
                         $"[Skinning] '{mesh.Name}' UPRIGHT remap {UpAxisRemapDeg}: " +
@@ -181,18 +180,17 @@ public static class SkinnedCharacterBuilder
                 GD.PrintErr($"[Skinning] CPU LBS build failed for '{mesh.Name}': {ex.Message} — " +
                             "falling back to static rest pose.");
                 lbsNode = null;
-                foreach (Node c in pivot.GetChildren())
+                foreach (var c in pivot.GetChildren())
                 {
                     pivot.RemoveChild(c);
                     c.QueueFree();
                 }
             }
-        }
 
         // ---- Static path (no skeleton, ForceSkinned off, or LBS failure) ----
         try
         {
-            (MeshInstance3D inst, Aabb aabb) = BuildStaticMesh(mesh, albedo);
+            var (inst, aabb) = BuildStaticMesh(mesh, albedo);
             // Same pivot up-axis remap as the skinned path; recentre from the reoriented AABB.
             // spec: Docs/RE/specs/skinning.md §7 / §8(b) / §9.
             pivot.AddChild(inst);
@@ -211,35 +209,35 @@ public static class SkinnedCharacterBuilder
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds a flat unindexed static rest-pose <see cref="ArrayMesh"/>. Positions and normals use
-    /// the single handedness conversion (world Z-negate), identical to the skinned path's output.
-    /// spec: Docs/RE/specs/skinning.md §8(b) — one conversion, applied uniformly.
-    /// spec: Docs/RE/formats/mesh.md §Face table — D3D9 CW winding, swap [0,2,1] for Godot CCW.
+    ///     Builds a flat unindexed static rest-pose <see cref="ArrayMesh" />. Positions and normals use
+    ///     the single handedness conversion (world Z-negate), identical to the skinned path's output.
+    ///     spec: Docs/RE/specs/skinning.md §8(b) — one conversion, applied uniformly.
+    ///     spec: Docs/RE/formats/mesh.md §Face table — D3D9 CW winding, swap [0,2,1] for Godot CCW.
     /// </summary>
     private static (MeshInstance3D Inst, Aabb Aabb) BuildStaticMesh(SkinnedMesh skn, ImageTexture? albedo)
     {
-        int faceCount = (int)skn.FaceCount;
-        int totalVerts = faceCount * 3;
+        var faceCount = (int)skn.FaceCount;
+        var totalVerts = faceCount * 3;
         var positions = new Vector3[totalVerts];
         var normals = new Vector3[totalVerts];
         var uvs = new Vector2[totalVerts];
 
-        SknCorner[] corners = skn.Corners;
-        Vec3[] srcPos = skn.Positions;
-        Vec3[] srcNrm = skn.Normals;
+        var corners = skn.Corners;
+        var srcPos = skn.Positions;
+        var srcNrm = skn.Normals;
 
-        for (int f = 0; f < faceCount; f++)
+        for (var f = 0; f < faceCount; f++)
         {
-            int cBase = f * 3;
+            var cBase = f * 3;
             int[] order = [cBase + 0, cBase + 2, cBase + 1]; // CW→CCW
-            for (int j = 0; j < 3; j++)
+            for (var j = 0; j < 3; j++)
             {
-                SknCorner corner = corners[order[j]];
-                uint vi = corner.VertexIndex;
+                var corner = corners[order[j]];
+                var vi = corner.VertexIndex;
                 if (vi >= (uint)srcPos.Length) vi = 0;
 
-                Vec3 p = srcPos[vi];
-                Vec3 n = vi < (uint)srcNrm.Length ? srcNrm[vi] : new Vec3(0f, 1f, 0f);
+                var p = srcPos[vi];
+                var n = vi < (uint)srcNrm.Length ? srcNrm[vi] : new Vec3(0f, 1f, 0f);
 
                 var (gx, gy, gz) = WorldCoordinates.SkinToGodot(p.X, p.Y, p.Z);
                 var (nx, ny, nz) = WorldCoordinates.SkinToGodot(n.X, n.Y, n.Z);
@@ -249,7 +247,7 @@ public static class SkinnedCharacterBuilder
             }
         }
 
-        var arrays = new global::Godot.Collections.Array();
+        var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = positions;
         arrays[(int)Mesh.ArrayType.Normal] = normals;
@@ -273,10 +271,10 @@ public static class SkinnedCharacterBuilder
                 var std = new StandardMaterial3D
                 {
                     TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-                    CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                    CullMode = BaseMaterial3D.CullModeEnum.Disabled
                 };
                 if (albedo is not null) std.AlbedoTexture = albedo;
-                else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+                else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f);
                 mat = std;
             }
         }
@@ -285,10 +283,10 @@ public static class SkinnedCharacterBuilder
             var std = new StandardMaterial3D
             {
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled
             };
             if (albedo is not null) std.AlbedoTexture = albedo;
-            else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+            else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f);
             mat = std;
         }
 
@@ -303,25 +301,27 @@ public static class SkinnedCharacterBuilder
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the axis-aligned bounding box that encloses <paramref name="aabb"/> after its 8 corners
-    /// are rotated by <paramref name="basis"/> (the pivot's up-axis remap). Godot's Aabb has no
-    /// Basis*Aabb operator, so transform the corners and re-fit. Pure geometry — no engine state.
+    ///     Returns the axis-aligned bounding box that encloses <paramref name="aabb" /> after its 8 corners
+    ///     are rotated by <paramref name="basis" /> (the pivot's up-axis remap). Godot's Aabb has no
+    ///     Basis*Aabb operator, so transform the corners and re-fit. Pure geometry — no engine state.
     /// </summary>
     /// <summary>Names the longest axis of an AABB size (diagnostic for the upright remap).</summary>
     private static string TallAxis(Vector3 s)
-        => s.Y >= s.X && s.Y >= s.Z ? "Y" : (s.X >= s.Z ? "X" : "Z");
+    {
+        return s.Y >= s.X && s.Y >= s.Z ? "Y" : (s.X >= s.Z ? "X" : "Z");
+    }
 
     private static Aabb TransformAabb(Basis basis, Aabb aabb)
     {
-        Vector3 min = basis * aabb.Position;
-        Vector3 max = min;
-        for (int i = 1; i < 8; i++)
+        var min = basis * aabb.Position;
+        var max = min;
+        for (var i = 1; i < 8; i++)
         {
             var corner = new Vector3(
                 aabb.Position.X + ((i & 1) != 0 ? aabb.Size.X : 0f),
                 aabb.Position.Y + ((i & 2) != 0 ? aabb.Size.Y : 0f),
                 aabb.Position.Z + ((i & 4) != 0 ? aabb.Size.Z : 0f));
-            Vector3 t = basis * corner;
+            var t = basis * corner;
             min = min.Min(t);
             max = max.Max(t);
         }
@@ -332,9 +332,9 @@ public static class SkinnedCharacterBuilder
     private static void RecentreRoot(Node3D root, Aabb aabb)
     {
         if (aabb.Size == Vector3.Zero) return;
-        float yShift = -aabb.Position.Y;
-        float xShift = -(aabb.Position.X + aabb.Size.X * 0.5f);
-        float zShift = -(aabb.Position.Z + aabb.Size.Z * 0.5f);
+        var yShift = -aabb.Position.Y;
+        var xShift = -(aabb.Position.X + aabb.Size.X * 0.5f);
+        var zShift = -(aabb.Position.Z + aabb.Size.Z * 0.5f);
         root.Position = new Vector3(xShift, yShift, zShift);
     }
 
@@ -348,12 +348,12 @@ public static class SkinnedCharacterBuilder
         AnimationClip? clip,
         SkinnedCharacterNode.SkinDiagnostics d)
     {
-        bool restOk = d.MaxRestDeviation < 1e-3f;
-        bool aabbOk = d.AabbFinite && d.RestAabbSize.Length() > 0.001f && d.RestAabbSize.Length() < 1e4f;
-        bool liveOk = clip is null || clip.FrameCount == 0 || d.LivenessDelta > 1e-4f;
+        var restOk = d.MaxRestDeviation < 1e-3f;
+        var aabbOk = d.AabbFinite && d.RestAabbSize.Length() > 0.001f && d.RestAabbSize.Length() < 1e4f;
+        var liveOk = clip is null || clip.FrameCount == 0 || d.LivenessDelta > 1e-4f;
 
-        Vector3 sz = d.RestAabbSize;
-        Vector3 pos = d.RestAabbPos;
+        var sz = d.RestAabbSize;
+        var pos = d.RestAabbPos;
 
         GD.Print(
             $"[Skinning] '{mesh.Name}' skin={mesh.Positions.Length}v bones={skeleton.Bones.Length} " +

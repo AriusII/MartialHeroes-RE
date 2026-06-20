@@ -13,12 +13,15 @@
 >   field-consumption contract is established from neutral static control-flow notes). Genuinely
 >   ambiguous items (mode_flag's exact 0/1 semantics; the 5 anomalous records' @0x08 sub-block) stay
 >   capture/debugger-pending.
-> ida_reverified: 2026-06-16
+> ida_reverified: 2026-06-20
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): events.scr runtime linkage = event_id→record
 >   exact-match map, consumed by item/shop/exchange UI only (NOT timer/zone/captcha; captcha =
 >   autoquestion_cl.scr); see Runtime-linkage section (§1.9). Byte layout (§1.1–§1.8) unchanged.
+> CYCLE 7 note (verification: IDB SHA 263bd994, CYCLE 7 (2026-06-20)): disambiguated the table's `event_id` keys from the
+>   runtime timed-event ENGINE ids (e.g. 10003 = death-respawn countdown, 10001 = engine-quit); those
+>   engine ids are NOT events.scr records — see §1.10. No byte-layout change.
 > conflicts: none open in §1/§2. §3 is an estimate index only — its `userlevel.scr` stride estimate
 >   (120) is REFUTED (see §3); the authoritative value is 60 B / 300 records (scr.md / config_tables.md).
 >
@@ -297,6 +300,28 @@ Likewise, the record's day-window, level-bound, and sub-flag fields (§1.3) are 
 consumer** — only `event_id`, `mode_flag`, `rate_array`, and `actor_array` participate in the runtime
 linkage above.
 
+#### 1.10 NOT the runtime timed-event engine (id-namespace disambiguation)
+
+There is a SEPARATE runtime **timed-event engine** in the client — a generic enqueue/tick scheduler
+that the gameplay code arms with a numeric `event_id`, a tick interval, and a remaining-count, and
+which is unrelated to this VFS table. Its ids share the small-integer 5-digit shape of some
+`events.scr` keys, so it is easy to confuse the two. They are **distinct**: the timed-event engine
+keys are NOT looked up in the `events.scr` `event_id → record` map, and conversely no `events.scr`
+record drives a timer (the entire consumer surface is item / shop / exchange UI — §1.9.4).
+
+Two timed-event-engine ids surfaced while reverse-engineering the death/respawn flow; recorded here
+ONLY to fence them off from this table's key space:
+
+| Timed-event engine id | Role | Notes |
+|----------------------:|------|-------|
+| **10003** | **Death-respawn countdown** | Local-player respawn timer: a one-second tick that counts a remaining-seconds value down to zero (auto-respawn fires at zero). The countdown duration is **600 seconds** for a normal death (an alternate short **20-second** value is selected in a PvP-zone branch — **region-gated**, the same per-region zone-type that `region_grid.md` describes), and a short one-shot for the special no-modal death cause. The countdown also drives the visual revive of remote actors. CONFIRMED (static IDA). The behavioural death/respawn flow (state fields, the modal, the respawn opcode/choice) belongs to `world_exit.md` — see the cross-reference there; this table does not participate. |
+| **10001** | Engine-quit signal | Handled in the same timed-event tick path as a teardown/shutdown trigger; entirely unrelated to respawn. Recorded only to avoid mistaking it for an `events.scr` key. CONFIRMED (static IDA). |
+
+Operative takeaway for an engineer: **do NOT look up 10003 or 10001 in `events.scr`.** An `events.scr`
+record is reached only by a UI interaction that carries the record's own `event_id` (§1.9.5); the
+death-respawn countdown and the engine-quit signal are runtime timed-event-engine ids handled outside
+this table. CONFIRMED.
+
 ---
 
 ## Section 2 — `autoquestion_cl.scr` (NPC anti-bot captcha Q&A table)
@@ -429,6 +454,10 @@ Out of scope (owned elsewhere): `items.scr`, `citems.scr`, `npc.scr`, `quests.sc
   its values through the item-ID resolver.
 - **Mob / skill / NPC roles** in the §3 index feed the recovered actor chains; see
   `Docs/RE/formats/actormotion.md`, `Docs/RE/formats/npc_spawns.md`, and `Docs/RE/specs/`.
+- **Timed-event engine ids** (§1.10) — the death-respawn countdown (id 10003, 600 s, region-gated)
+  and its full behavioural flow are owned by `Docs/RE/specs/world_exit.md`; the per-region zone-type
+  that gates the 600 s ↔ 20 s choice is described in `Docs/RE/formats/region_grid.md`. These are NOT
+  `events.scr` records.
 - **CP949 handling** convention: see project notes (register `CodePagesEncodingProvider`, use code
   page 949) — same as `Docs/RE/formats/misc_data.md`.
 - Glossary: see `Docs/RE/names.yaml` (candidate names for `names.yaml`: `event_id`, `mode_flag`,

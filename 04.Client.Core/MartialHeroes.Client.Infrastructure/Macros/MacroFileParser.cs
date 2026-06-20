@@ -1,18 +1,19 @@
+using System.Text;
 using MartialHeroes.Client.Infrastructure.Exceptions;
 
 namespace MartialHeroes.Client.Infrastructure.Macros;
 
 /// <summary>
-/// Parses <c>.mhm</c> (Martial Heroes Macro) files into
-/// <see cref="MacroDefinition"/> objects.
-/// <para>
-/// Format spec: <c>Docs/RE/formats/macro_file.md</c>.
-/// This is the project's own format — no legacy reverse-engineering involved.
-/// </para>
+///     Parses <c>.mhm</c> (Martial Heroes Macro) files into
+///     <see cref="MacroDefinition" /> objects.
+///     <para>
+///         Format spec: <c>Docs/RE/formats/macro_file.md</c>.
+///         This is the project's own format — no legacy reverse-engineering involved.
+///     </para>
 /// </summary>
 public sealed class MacroFileParser : IMacroFileParser
 {
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<IReadOnlyList<MacroDefinition>> ParseFileAsync(
         string filePath,
         CancellationToken cancellationToken = default)
@@ -22,7 +23,7 @@ public sealed class MacroFileParser : IMacroFileParser
         string content;
         try
         {
-            content = await File.ReadAllTextAsync(filePath, System.Text.Encoding.UTF8, cancellationToken);
+            content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, cancellationToken);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -32,10 +33,10 @@ public sealed class MacroFileParser : IMacroFileParser
         return ParseContent(content);
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     /// <remarks>
-    /// Parsing rules are documented in <c>Docs/RE/formats/macro_file.md</c>.
-    /// No magic constants or offsets are derived from the legacy binary.
+    ///     Parsing rules are documented in <c>Docs/RE/formats/macro_file.md</c>.
+    ///     No magic constants or offsets are derived from the legacy binary.
     /// </remarks>
     public IReadOnlyList<MacroDefinition> ParseContent(string content)
     {
@@ -92,10 +93,8 @@ public sealed class MacroFileParser : IMacroFileParser
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var macros = new List<MacroDefinition>(result.Count);
         foreach (var name in order)
-        {
             if (seen.Add(name) && result.TryGetValue(name, out var m))
                 macros.Add(m);
-        }
 
         return macros;
     }
@@ -117,8 +116,8 @@ public sealed class MacroFileParser : IMacroFileParser
     }
 
     /// <summary>
-    /// Parses a header line of the form <c>[MacroName] OptionalKey</c>.
-    /// spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 5
+    ///     Parses a header line of the form <c>[MacroName] OptionalKey</c>.
+    ///     spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 5
     /// </summary>
     private static void ParseHeader(string line, out string name, out string? triggerKey)
     {
@@ -138,15 +137,14 @@ public sealed class MacroFileParser : IMacroFileParser
     }
 
     /// <summary>
-    /// Yields individual lines from <paramref name="content"/> honouring both
-    /// CR+LF and LF line endings.
-    /// spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 2
+    ///     Yields individual lines from <paramref name="content" /> honouring both
+    ///     CR+LF and LF line endings.
+    ///     spec: Docs/RE/formats/macro_file.md §"Parsing Rules" rule 2
     /// </summary>
     private static IEnumerable<string> EnumerateLines(string content)
     {
         var start = 0;
         for (var i = 0; i < content.Length; i++)
-        {
             if (content[i] == '\n')
             {
                 var end = i;
@@ -154,7 +152,6 @@ public sealed class MacroFileParser : IMacroFileParser
                 yield return content[start..end];
                 start = i + 1;
             }
-        }
 
         // Emit the last line if content does not end with '\n'.
         if (start < content.Length)

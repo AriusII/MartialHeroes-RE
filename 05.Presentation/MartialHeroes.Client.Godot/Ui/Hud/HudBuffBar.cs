@@ -25,19 +25,19 @@
 
 using System.Threading.Channels;
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// 30-slot HUD buff/state icon bar. Reads from <see cref="IHudEventHub.BuffStates"/>.
-///
-/// <para>PASSIVE: zero game logic. Drains the buff-state channel each frame; rebuilds slot visuals
-/// from the <see cref="HudIconLibrary"/>.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §2 / §5.10.
-/// spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED (slot count, cell sizes, reset policy).
+///     30-slot HUD buff/state icon bar. Reads from <see cref="IHudEventHub.BuffStates" />.
+///     <para>
+///         PASSIVE: zero game logic. Drains the buff-state channel each frame; rebuilds slot visuals
+///         from the <see cref="HudIconLibrary" />.
+///     </para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §2 / §5.10.
+///     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED (slot count, cell sizes, reset policy).
 /// </summary>
 public sealed partial class HudBuffBar : Control
 {
@@ -64,21 +64,21 @@ public sealed partial class HudBuffBar : Control
     // -------------------------------------------------------------------------
 
     private readonly TextureRect[] _slots = new TextureRect[SlotCount];
+    private ChannelReader<BuffStateEvent>? _buffStates;
 
     // -------------------------------------------------------------------------
     // Services
     // -------------------------------------------------------------------------
 
     private HudIconLibrary? _icons;
-    private ChannelReader<BuffStateEvent>? _buffStates;
 
     // -------------------------------------------------------------------------
     // Build (geometry pass)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: positions the buff-bar container and builds 30 icon slots.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.10 — container at X=545.
+    ///     Geometry pass: positions the buff-bar container and builds 30 icon slots.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.10 — container at X=545.
     /// </summary>
     public void Build(HudIconLibrary icons)
     {
@@ -101,7 +101,7 @@ public sealed partial class HudBuffBar : Control
         // Build 30 slot TextureRects in a horizontal flowing strip.
         // Fixed-position slots (buff_id > 80) are placed by the server assignment order.
         // TODO(world-campaign): per-slot position from buff_icon_position.xdb lookup for fixed slots.
-        for (int i = 0; i < SlotCount; i++)
+        for (var i = 0; i < SlotCount; i++)
         {
             float x = i * (FlowingIconSide + IconSpacing);
             var slot = new TextureRect
@@ -111,7 +111,7 @@ public sealed partial class HudBuffBar : Control
                 Position = new Vector2(x, 0f),
                 Size = new Vector2(FlowingIconSide, FlowingIconSide),
                 Visible = false, // hidden until a buff occupies this slot
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(slot);
             _slots[i] = slot;
@@ -141,7 +141,7 @@ public sealed partial class HudBuffBar : Control
         if (_buffStates is null) return;
 
         BuffStateEvent? latest = null;
-        while (_buffStates.TryRead(out BuffStateEvent? ev))
+        while (_buffStates.TryRead(out var ev))
             latest = ev;
 
         if (latest is null) return;
@@ -152,16 +152,16 @@ public sealed partial class HudBuffBar : Control
     {
         // Per-refresh reset: hide all 30 slots first.
         // spec: misc_data.md §1.6 CODE-CONFIRMED — "per-refresh reset"
-        for (int i = 0; i < SlotCount; i++)
+        for (var i = 0; i < SlotCount; i++)
             _slots[i].Visible = false;
 
-        int flowingIdx = 0;
-        for (int i = 0; i < SlotCount && i < ev.Slots.Length; i++)
+        var flowingIdx = 0;
+        for (var i = 0; i < SlotCount && i < ev.Slots.Length; i++)
         {
-            BuffSlot slot = ev.Slots[i];
+            var slot = ev.Slots[i];
             if (slot.IsEmpty) continue; // spec: misc_data.md §1.6 — buff_id==0 = skip
 
-            AtlasTexture? icon = _icons?.GetBuffIcon(slot.BuffId);
+            var icon = _icons?.GetBuffIcon(slot.BuffId);
             if (icon is null) continue;
 
             if (slot.BuffId <= FlowThreshold)

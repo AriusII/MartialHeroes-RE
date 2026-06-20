@@ -584,7 +584,6 @@ in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
 >   `frontend_scenes.md section 3` / `section 5`.)
 > - **Byte-granular blob layouts** of the 40B enter / 52B create / 18B rename / 8B `3/7` bodies remain
 >   capture / debugger-pending; the opcode pairings and sizes above are static-confirmed.
-> <!-- source: _dirty/cycle6b/laneE_action_fsm.md (sections 1-5, opcode summary) -->
 
 ---
 
@@ -776,20 +775,27 @@ field-layout-unspecced.
 > front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, places the 8-byte
 > manage result at `3/7` and the variable scene-entity update here at `3/4`.
 
-### 5.4 Character create result — `3/23 SmsgCharCreateResult`
+### 5.4 By-name character status patch — `3/23 SmsgCharStatusBytesByName`
 
-A **12-byte** payload:
+A **28-byte** payload — a by-name character status / level patch (NOT a create result; see the
+correction note below). The handler matches the CP949 character-name key against the lobby roster
+slots and writes two trailing status bytes (a status/flag byte and the character level byte) into the
+matched record (and into the local-player globals when the key is the local player).
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 (u8) | Result | 1 = success, 0 = failure. |
-| 1 | 1 (u8) | Code | On success: the assigned slot id. On failure: an error code (range `0xC8..0xD4`, mapped to UI strings; shared with rename, §5.6). |
-| 2 | 2 | Padding | Alignment. |
-| 4 | 4 (u32) | Value 1 | Passed to slot refresh on success. |
-| 8 | 4 (u32) | Value 2 | Passed to slot refresh on success. |
+| 0x00 | 17 | char[] (CP949) | Character-name key, matched against the roster names. |
+| (trailing) | 1 (u8) | Status flag byte | Written into the matched roster record (and the local flag global when it is the local player). |
+| (trailing) | 1 (u8) | Level byte | Written into the matched roster record (and the local-player level global when it is the local player). |
 
-On success the account character count is incremented. `opcodes.md` carries a **capture-verified**
-12-byte example for this message. Field internals beyond result/code are otherwise **UNVERIFIED**.
+> **There is NO dedicated `3/23` create-result message.** An earlier reading modelled `3/23` as a
+> 12-byte `SmsgCharCreateResult`; the binary refutes this — the inbound major-3 dispatcher routes `3/23`
+> to **`SmsgCharStatusBytesByName`** (28-byte by-name status/level patch). The character-create ack is
+> the manage-result latch + **`3/7`** + a refreshed `3/1` character list (which increments the account
+> character count) — there is no 12-byte create-result opcode at all. The full `3/23` field table is
+> owned by `character_creation.md` §5.1 (the exact interior offsets of the two trailing bytes within the
+> 28-byte read are static-partial). The error-string range `0xC8..0xD4` is the **create/rename UI
+> error** range surfaced through the create flow (§5.7), not fields of `3/23`.
 
 ### 5.5 Character manage / delete result — `3/7 SmsgCharManageResult`
 
@@ -868,8 +874,8 @@ sources of truth in the binary; only the **dispatch arithmetic + the byte-level 
   payload each handler reads), not to any legacy name.
 - This spec promotes opcodes **by behavior + `opcodes.md`** only. For example, the message whose
   handler reads the 44-byte enter-game block is **`3/5 SmsgEnterGameAck`** (regardless of any legacy
-  name suggesting otherwise), and the message whose handler reads the 12-byte create result is
-  **`3/23 SmsgCharCreateResult`**.
+  name suggesting otherwise), and the message whose handler reads the 28-byte by-name status patch is
+  **`3/23 SmsgCharStatusBytesByName`** (NOT a create result — §5.4).
 - **Do not** infer any minor→name mapping from legacy handler names. This inconsistency is flagged
   for the project glossary (`names.yaml`) review; it does not change any byte-level behavior in this
   spec.
@@ -891,7 +897,7 @@ The behavior-anchored opcode subset for this flow:
 | 3:6 | SmsgRenameCharResult | S2C | 19 | result + (error code \| new name ASCIIZ[18]) |
 | 3:7 | SmsgCharManageResult | S2C | 8 | result + subtype + ready_time (delete cooldown); decrements the account char-count on a delete-confirm |
 | 3:14 | SmsgCharSpawnResponse | S2C | 16 | enter-into-world bridge / spawn confirm (re-enters the enter-builder); NOT the local-player world spawn (that is `4/1`) |
-| 3:23 | SmsgCharCreateResult | S2C | 12 | result + code + 2×u32; capture-verified sample |
+| 3:23 | SmsgCharStatusBytesByName | S2C | 28 | by-name status/level patch (name key + status flag byte + level byte); NOT a create result (§5.4) |
 | 4:1 | SmsgGameStateTick | S2C | var | world-entry snapshot — drives the **local-player world spawn** from the cached descriptor |
 
 > **Note on the `1/4` / `1/6` rows above.** The login-blob structure (`[0x2B][u32len account\0]
@@ -935,7 +941,7 @@ The behavior-anchored opcode subset for this flow:
 | EnterGameRequest body (1/9) | **40 (0x28) bytes** | Slot index at offset 0. |
 | Version token | `10 × versionField + 9` = **21149** (this build) | Derived from `data/cursor/game.ver` (field index 5 = 2114). `sample_verified`. |
 | EnterGameAck (3/5) | **44 bytes** | 40-byte block + trailing char-count u32; billing u32 @ +28. |
-| CharCreateResult (3/23) | **12 bytes** | — |
+| CharStatusBytesByName (3/23) | **28 bytes** | By-name status/level patch; NOT a create result (create acked via 3/7 + 3/1 refresh). |
 | SceneEntityUpdate (3/4) | **var** | Scene / entity / char-slot scratch refill; not yet specced. |
 | CharManageResult (3/7) | **8 bytes** | Result + subtype + ready-time; decrements the account char-count on a delete-confirm. |
 | CharSpawnResponse (3/14) | **16 bytes** | Enter-into-world bridge / spawn confirm; NOT the local-player world spawn (that is 4/1). |

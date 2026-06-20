@@ -15,7 +15,7 @@ asset dump or copyrighted payload), and touch **no IDA and no `_dirty/` decompil
 | Mode | Target | Tool | Output |
 |---|---|---|---|
 | **PAK-INDEX** | a legacy `.pak` archive's directory | `scripts/pak_index.py` | `index offset size name` listing |
-| **VFS-INSPECT** | the real VFS (`data.inf` + `data/data.vfs`) | `scripts/vfsls/` net10.0 harness (+ sibling harnesses) | metadata / decode summary / census |
+| **VFS-INSPECT** | the real VFS (`data.inf` + `data/data.vfs`) | the `Tools/MartialHeroes.Tools.VfsExplorer` CLI | metadata / decode summary / census |
 | **DATA-FORMAT** | a CP949 text/tab data-file format | the `vfsls` harness (observe) | `Docs/RE/_dirty/formats/<name>.raw.md` |
 
 **Ground-truth doctrine.** An archive's/asset's real layout is the truth — proved in the original's
@@ -72,10 +72,10 @@ resolve on disk?" → that's `/asset-chain-trace`, not this mode.
 
 # Mode B — VFS-INSPECT (open the real VFS via the vfsls harness)
 
-The single home for the throwaway VFS browser that has been hand-rebuilt many times. It mounts the
-real client archive through the **production** VFS API and lets you list entries, count by extension,
-test a path, peek at head bytes, and drive the production `Assets.Parsers` decoders directly — so
-observations match what the shipping client sees.
+The `Tools/MartialHeroes.Tools.VfsExplorer` CLI (a first-class solution member, built on the
+**production** VFS API) lets you list entries, count by extension, test a path, peek at head bytes,
+and drive the production `Assets.Parsers` decoders directly — so observations match what the shipping
+client sees.
 
 It drives `MartialHeroes.Assets.Vfs.MappedVfsArchive.Open(infPath, vfsPath)` with
 `infPath = "D:/MartialHeroesClient/data.inf"`, `vfsPath = "D:/MartialHeroesClient/data/data.vfs"`.
@@ -84,24 +84,25 @@ It drives `MartialHeroes.Assets.Vfs.MappedVfsArchive.Open(infPath, vfsPath)` wit
 `Contains(path)` tests membership. The VFS holds ~43,347 entries; all text is **CP949** (Korean), so
 the harness registers the code-pages provider.
 
-**This is a THROWAWAY diagnostic harness** bundled under `scripts/vfsls/` — **never** added to
-`MartialHeroes.slnx`, never committed as a solution member, never `git add` its `bin/`/`obj/`. It is
-read-only over the VFS (never extracts/rewrites payloads in place) and **not** a clean-room concern:
-it reads the user's own legally-owned client files, the same bytes production reads. No IDA, no `_dirty/`.
+**This is a maintained solution tool** at `Tools/MartialHeroes.Tools.VfsExplorer` — it builds with
+`dotnet build MartialHeroes.slnx` and tracks the live parser API (its `bin/`/`obj/` stay gitignored —
+never `git add` them). It is read-only over the VFS (never extracts/rewrites payloads in place) and
+**not** a clean-room concern: it reads the user's own legally-owned client files, the same bytes
+production reads. No IDA, no `_dirty/`.
 
 ## Preconditions
 
 1. The real client present at `D:/MartialHeroesClient/` with `data.inf` + `data/data.vfs` (or pass
    `--inf`/`--vfs` overrides). If absent, STOP and tell the user the bring-your-own client must be mounted.
 2. A .NET 10 SDK (`dotnet --version` ≥ 10); the harness targets `net10.0`.
-3. The harness `ProjectReference`s `Assets.Vfs` + `Assets.Parsers` (+ `Assets.Mapping` for `convert`) by
-   absolute path, so it always tracks the live API — if the API drifted, it fails to compile (a feature:
+3. The tool `ProjectReference`s `Assets.Vfs`, the nine `Assets.Parsers.*` families, and `Assets.Mapping`
+   (for `convert`), so it always tracks the live API — if the API drifts it fails to compile (a feature:
    fix the call site, never patch the production library).
 
-## Run it in place
+## Run it
 
 ```powershell
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- <args>
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- <args>
 ```
 Use `-c Release` so the memory-mapped read path is not debug-throttled. With no args it prints a
 summary + extension census.
@@ -140,34 +141,28 @@ summary + extension census.
 
 Examples:
 ```powershell
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- decode data/char/skin/g200002620.skn
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- coverage
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- convert data/char/skin/g200002620.skn D:/dump
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --census
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --contains data/map000/bgtexture.txt
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-mot --id 170354502
-dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- scan-fx
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- decode data/char/skin/g200002620.skn
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- coverage
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- convert data/char/skin/g200002620.skn D:/dump
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- --census
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- --contains data/map000/bgtexture.txt
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- scan-mot --id 170354502
+dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- scan-fx
 ```
 
 Report findings as **metadata** (counts, names, sizes, and for `--head` the decoded preview); quote
 the exact virtual path strings so the next caller can re-query. Don't paste large dumps.
 
-## Sibling research harnesses (`scripts/`)
-
-Alongside `scripts/vfsls/`, this skill bundles ~35 **standalone single-purpose harnesses** — the
-original research probes that first recovered each format (e.g. `scripts/do-census`,
-`scripts/minimap-scan`, `scripts/quest-dialog-scan`, `scripts/msgxdb`, `scripts/skill-icon-scan`,
-`scripts/skillcat-scan`, `scripts/terrain-format-witness`, `scripts/dds-to-png`, `scripts/xeff-val`,
-…). Several `vfsls` subcommands are production mirrors of these — for routine work prefer the
-subcommand; reach for a standalone as the focused original or a cross-check when a census looks off.
-Each is its own `net10.0` exe (`dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/<name>" -- …`),
-carries the same hard rules, and is **never** registered in `MartialHeroes.slnx`.
-
 **Decide:** existence/size → `--contains` / `<substring>`; "what IS this file" → `decode`; inventory →
-`--census`; a whole family → the matching `scan-*`/`dump-*`; structural peek → `hexdump --header`;
-capability map → `coverage`. Tracing an id through a chain → `/asset-chain-trace` (use this harness to
-*confirm each hop* via `--contains` and `decode` the endpoint). A census looks off → cross-check the
-sibling harness. Need a real file on disk for `asset-format-doc` → `extract` to an EXTERNAL path.
+`--census`; a whole family → the matching `scan-*`/`dump-*` subcommand; structural peek →
+`hexdump --header`; capability map → `coverage`. Tracing an id through a chain → `/asset-chain-trace`
+(use this tool to *confirm each hop* via `--contains` and `decode` the endpoint). A census looks off →
+re-run under `-c Release` and cross-check the `coverage` registry. Need a real file on disk for
+`asset-format-doc` → `extract` to an EXTERNAL path.
+
+> The one-shot research probes that first recovered each format have been retired — their findings are
+> promoted into `Docs/RE/formats/*.md` and their routine capability now lives in the `scan-*`/`dump-*`
+> subcommands of the `VfsExplorer` tool above.
 
 # Mode C — DATA-FORMAT (recover a CP949 text table by observation)
 
@@ -190,12 +185,12 @@ real client text bytes (VFS) ──► [vfsls reads & previews] ──► observ
 
 1. **Confirm + size the entry** via the harness:
    ```powershell
-   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --contains data/char/skin.txt
-   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- data/char/skin.txt
+   dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- --contains data/char/skin.txt
+   dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- data/char/skin.txt
    ```
 2. **Read the head as CP949** (the harness decodes via code page 949 so Korean columns are legible):
    ```powershell
-   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/vfsls" -- --head data/char/skin.txt --head-bytes 1024
+   dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.VfsExplorer" -- --head data/char/skin.txt --head-bytes 1024
    ```
    ALL game text is CP949 (EUC-KR), never UTF-8.
 3. **Characterise the table by observation** (the recovery work): the **delimiter** (tab/comma/ws) and
@@ -240,10 +235,11 @@ meaning needs the loader code → mark it `UNVERIFIED` and stop (don't cross int
 
 - **Never** seek to a `.pak` entry `offset` and read `size` payload bytes, or hexdump/decompress/decode
   entry content — Mode A is a listing tool with no extract mode.
-- **Never** register the `vfsls`/sibling harness in `MartialHeroes.slnx` or `git add` its `bin/`/`obj/`.
+- The `Tools/MartialHeroes.Tools.VfsExplorer` CLI is a solution member, but its `bin/`/`obj/` are build
+  artifacts — **never** `git add` them, and never commit an extracted original.
 - **Never** print a full asset or dump an entire file's bytes — inspect, don't export (all modes).
-- **Never** patch the production `Assets.Vfs`/`Assets.Parsers`/`Assets.Mapping` to suit the harness —
-  if the API drifted, fix the harness call site (the compile failure is a feature).
+- **Never** patch the production `Assets.Vfs`/`Assets.Parsers.*`/`Assets.Mapping` to suit the tool — if
+  the API drifts, fix the tool's call site (the compile failure is a feature).
 - **Never** write Mode C findings into the committed `Docs/RE/formats/` tree — they go to
   `_dirty/formats/` only; promotion (rewrite, never copy) is `re-promote`'s job.
 - **Never** assume UTF-8 — all game text is CP949 (EUC-KR); a mojibake preview means binary or a wrong
@@ -263,5 +259,6 @@ meaning needs the loader code → mark it `UNVERIFIED` and stop (don't cross int
   C writes only under `Docs/RE/_dirty/formats/` and promotes via `re-promote` (rewrite, never copy).
 - Always decode text via the CP949 provider (`Encoding.RegisterProvider(CodePagesEncodingProvider.Instance)`
   then `Encoding.GetEncoding(949)`).
-- The `vfsls`/sibling harnesses are never `MartialHeroes.slnx` members; if one won't compile because the
-  VFS API changed, fix the harness call site, not the production library. No IDA, no `_dirty/` decompiler output.
+- The `Tools/MartialHeroes.Tools.VfsExplorer` CLI is a maintained solution member; if it won't compile
+  because the VFS API changed, fix the call site, not the production library. No IDA, no `_dirty/`
+  decompiler output.

@@ -25,37 +25,37 @@ namespace MartialHeroes.Assets.Vfs;
 //   functional-equivalence port choice, NOT a claim that the original is memory-mapped.
 
 /// <summary>
-/// Mounts a pair of VFS archive files (<c>data.inf</c> + <c>data/data.vfs</c>),
-/// parses the Table of Contents once at mount time, and exposes each contained file
-/// as a zero-copy <see cref="ReadOnlyMemory{T}"/> slice of the memory-mapped data blob.
+///     Mounts a pair of VFS archive files (<c>data.inf</c> + <c>data/data.vfs</c>),
+///     parses the Table of Contents once at mount time, and exposes each contained file
+///     as a zero-copy <see cref="ReadOnlyMemory{T}" /> slice of the memory-mapped data blob.
 /// </summary>
 /// <remarks>
-/// <para>
-/// The <c>data.inf</c> index file is fully read at construction and the file handle is
-/// immediately released.  The <c>data/data.vfs</c> data blob is opened as a
-/// <see cref="MemoryMappedFile"/> and the handle is kept alive until <see cref="Dispose"/>
-/// is called.
-/// </para>
-/// <para>
-/// <strong>Thread safety:</strong> concurrent calls to <see cref="GetFileContent"/> from
-/// multiple threads are safe.  The TOC index is read-only after construction.  The
-/// underlying OS memory mapping supports concurrent read-shared page access without locks.
-/// A single <see cref="MappedMemoryManager"/> wrapping the whole view is created once at open;
-/// each <see cref="GetFileContent"/> call merely returns a slice of its
-/// <see cref="MemoryManager{T}.Memory"/>, so no per-read allocation pins the view handle and the
-/// acquired pointer is released exactly once at <see cref="Dispose"/>.
-/// </para>
-/// <para>
-/// <strong>Lifetime:</strong> every <see cref="ReadOnlyMemory{byte}"/> returned by
-/// <see cref="GetFileContent"/> is backed by the memory-mapped view.  Callers must not
-/// retain those memory slices after <see cref="Dispose"/> is called.
-/// </para>
-/// <para>
-/// <strong>Empty VFS:</strong> if <c>data/data.vfs</c> is a zero-byte file (e.g. an archive
-/// with no entries or only zero-size entries), the memory-mapped file is not created, because
-/// the OS does not support mapping a zero-length file.  Any entry whose <c>dataSize</c> is
-/// non-zero in such an archive would be an error in the archive itself.
-/// </para>
+///     <para>
+///         The <c>data.inf</c> index file is fully read at construction and the file handle is
+///         immediately released.  The <c>data/data.vfs</c> data blob is opened as a
+///         <see cref="MemoryMappedFile" /> and the handle is kept alive until <see cref="Dispose" />
+///         is called.
+///     </para>
+///     <para>
+///         <strong>Thread safety:</strong> concurrent calls to <see cref="GetFileContent" /> from
+///         multiple threads are safe.  The TOC index is read-only after construction.  The
+///         underlying OS memory mapping supports concurrent read-shared page access without locks.
+///         A single <see cref="MappedMemoryManager" /> wrapping the whole view is created once at open;
+///         each <see cref="GetFileContent" /> call merely returns a slice of its
+///         <see cref="MemoryManager{T}.Memory" />, so no per-read allocation pins the view handle and the
+///         acquired pointer is released exactly once at <see cref="Dispose" />.
+///     </para>
+///     <para>
+///         <strong>Lifetime:</strong> every <see cref="ReadOnlyMemory{byte}" /> returned by
+///         <see cref="GetFileContent" /> is backed by the memory-mapped view.  Callers must not
+///         retain those memory slices after <see cref="Dispose" /> is called.
+///     </para>
+///     <para>
+///         <strong>Empty VFS:</strong> if <c>data/data.vfs</c> is a zero-byte file (e.g. an archive
+///         with no entries or only zero-size entries), the memory-mapped file is not created, because
+///         the OS does not support mapping a zero-length file.  Any entry whose <c>dataSize</c> is
+///         non-zero in such an archive would be an error in the archive itself.
+///     </para>
 /// </remarks>
 public sealed unsafe class MappedVfsArchive : IDisposable
 {
@@ -63,12 +63,12 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     private readonly MemoryMappedFile? _mappedFile; // null iff the .vfs is zero bytes
     private readonly MemoryMappedViewAccessor? _viewAccessor; // null iff the .vfs is zero bytes
 
+    private volatile bool _disposed;
+
     // Base pointer into the whole memory-mapped view, acquired ONCE at open via AcquirePointer and
     // released ONCE at Dispose. null iff the .vfs is zero bytes (no view). Each GetFileContent slices
     // this single long-lived acquisition — no per-read AcquirePointer/pin (the historic leak).
     private byte* _viewBasePointer;
-
-    private volatile bool _disposed;
 
     // Private constructor — use the static factory methods.
     private MappedVfsArchive(
@@ -81,30 +81,59 @@ public sealed unsafe class MappedVfsArchive : IDisposable
         _viewAccessor = viewAccessor;
 
         if (viewAccessor is not null)
-        {
             // Acquire the mapped-view pointer exactly once for the archive's whole lifetime. This pins
             // the OS mapping (increments the SafeMemoryMappedViewHandle ref-count) until Dispose calls
             // ReleasePointer, so the per-entry slices returned by GetFileContent stay valid and the
             // handle's ref-count returns to its baseline on Dispose (enabling a clean unmap).
             viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _viewBasePointer);
-        }
     }
 
     /// <summary>
-    /// Opens and mounts an archive from its two component files.
+    ///     Number of entries in the archive directory.
+    /// </summary>
+    public int EntryCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _directory.EntryCount;
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Release the single pointer acquired at open (balances the one AcquirePointer in the ctor),
+        // then the view accessor, then the mapped file. Releasing the pointer first returns the view
+        // handle's ref-count to its baseline so the accessor can actually unmap.
+        if (_viewBasePointer is not null)
+        {
+            _viewAccessor!.SafeMemoryMappedViewHandle.ReleasePointer();
+            _viewBasePointer = null;
+        }
+
+        _viewAccessor?.Dispose();
+        _mappedFile?.Dispose();
+    }
+
+    /// <summary>
+    ///     Opens and mounts an archive from its two component files.
     /// </summary>
     /// <param name="infPath">
-    /// Path to the index file (typically <c>data.inf</c>).
+    ///     Path to the index file (typically <c>data.inf</c>).
     /// </param>
     /// <param name="vfsPath">
-    /// Path to the data blob (typically <c>data/data.vfs</c>).
+    ///     Path to the data blob (typically <c>data/data.vfs</c>).
     /// </param>
-    /// <returns>A mounted <see cref="MappedVfsArchive"/> ready for reads.</returns>
+    /// <returns>A mounted <see cref="MappedVfsArchive" /> ready for reads.</returns>
     /// <exception cref="FileNotFoundException">
-    /// Thrown when either file does not exist.
+    ///     Thrown when either file does not exist.
     /// </exception>
     /// <exception cref="InvalidDataException">
-    /// Thrown when <c>data.inf</c> is malformed.
+    ///     Thrown when <c>data.inf</c> is malformed.
     /// </exception>
     public static MappedVfsArchive Open(string infPath, string vfsPath)
     {
@@ -119,8 +148,8 @@ public sealed unsafe class MappedVfsArchive : IDisposable
                    FileMode.Open,
                    FileAccess.Read,
                    FileShare.Read,
-                   bufferSize: 4096,
-                   useAsync: false))
+                   4096,
+                   false))
         {
             directory = VfsDirectory.Load(infStream);
         }
@@ -139,7 +168,7 @@ public sealed unsafe class MappedVfsArchive : IDisposable
             throw new FileNotFoundException($"VFS data file not found: \"{vfsPath}\".", vfsPath);
 
         if (vfsInfo.Length == 0)
-            return new MappedVfsArchive(directory, mappedFile: null, viewAccessor: null);
+            return new MappedVfsArchive(directory, null, null);
 
         MemoryMappedFile? mmf = null;
         MemoryMappedViewAccessor? view = null;
@@ -148,14 +177,14 @@ public sealed unsafe class MappedVfsArchive : IDisposable
             mmf = MemoryMappedFile.CreateFromFile(
                 vfsPath,
                 FileMode.Open,
-                mapName: null, // anonymous — no cross-process sharing needed
-                capacity: 0, // 0 = use actual file size
-                access: MemoryMappedFileAccess.Read);
+                null, // anonymous — no cross-process sharing needed
+                0, // 0 = use actual file size
+                MemoryMappedFileAccess.Read);
 
             view = mmf.CreateViewAccessor(
-                offset: 0,
-                size: 0, // 0 = map entire file
-                access: MemoryMappedFileAccess.Read);
+                0,
+                0, // 0 = map entire file
+                MemoryMappedFileAccess.Read);
         }
         catch
         {
@@ -177,20 +206,8 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     }
 
     /// <summary>
-    /// Number of entries in the archive directory.
-    /// </summary>
-    public int EntryCount
-    {
-        get
-        {
-            ThrowIfDisposed();
-            return _directory.EntryCount;
-        }
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> if the archive contains an entry whose name matches
-    /// <paramref name="virtualPath"/> (case-insensitive).
+    ///     Returns <see langword="true" /> if the archive contains an entry whose name matches
+    ///     <paramref name="virtualPath" /> (case-insensitive).
     /// </summary>
     public bool Contains(string virtualPath)
     {
@@ -206,38 +223,36 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1 — normalize (lower-case) before search.
     private static string NormalizeName(string virtualPath)
     {
-        foreach (char c in virtualPath)
-        {
+        foreach (var c in virtualPath)
             if (char.IsUpper(c))
                 return virtualPath.ToLowerInvariant();
-        }
 
         return virtualPath;
     }
 
     /// <summary>
-    /// Returns the raw bytes of the entry identified by <paramref name="virtualPath"/> as a
-    /// zero-copy <see cref="ReadOnlyMemory{T}"/> slice of the memory-mapped data blob.
+    ///     Returns the raw bytes of the entry identified by <paramref name="virtualPath" /> as a
+    ///     zero-copy <see cref="ReadOnlyMemory{T}" /> slice of the memory-mapped data blob.
     /// </summary>
     /// <param name="virtualPath">
-    /// Virtual path of the entry.  Case-insensitive; will be lower-cased before lookup.
+    ///     Virtual path of the entry.  Case-insensitive; will be lower-cased before lookup.
     /// </param>
     /// <returns>
-    /// A <see cref="ReadOnlyMemory{byte}"/> backed by the memory-mapped file.
-    /// <para>
-    /// <strong>No bytes are copied.</strong>  The returned memory refers directly to the
-    /// mapped pages of <c>data/data.vfs</c>.  The OS demand-pages the relevant region on
-    /// first access.
-    /// </para>
+    ///     A <see cref="ReadOnlyMemory{byte}" /> backed by the memory-mapped file.
+    ///     <para>
+    ///         <strong>No bytes are copied.</strong>  The returned memory refers directly to the
+    ///         mapped pages of <c>data/data.vfs</c>.  The OS demand-pages the relevant region on
+    ///         first access.
+    ///     </para>
     /// </returns>
     /// <exception cref="ObjectDisposedException">The archive has been disposed.</exception>
     /// <exception cref="FileNotFoundException">
-    /// No entry with the given name exists in the directory.
+    ///     No entry with the given name exists in the directory.
     /// </exception>
     /// <exception cref="InvalidDataException">
-    /// The entry's <c>dataSize</c> high dword is non-zero (oversized entry not supported).
-    /// spec: Docs/RE/formats/pak.md — "Only the low 32 bits are consumed; a non-zero high
-    /// dword causes the read to fail." CONFIRMED.
+    ///     The entry's <c>dataSize</c> high dword is non-zero (oversized entry not supported).
+    ///     spec: Docs/RE/formats/pak.md — "Only the low 32 bits are consumed; a non-zero high
+    ///     dword causes the read to fail." CONFIRMED.
     /// </exception>
     public ReadOnlyMemory<byte> GetFileContent(string virtualPath)
     {
@@ -247,25 +262,25 @@ public sealed unsafe class MappedVfsArchive : IDisposable
         // Step 1: normalize (lower-case). NormalizeName allocates only when the path actually contains
         // an upper-case char; an already-lower path (the common case) is searched with no allocation.
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 1. CONFIRMED.
-        string normalized = NormalizeName(virtualPath);
+        var normalized = NormalizeName(virtualPath);
 
         // Step 2: binary search.
         // spec: Docs/RE/formats/pak.md §"Lookup algorithm" step 2. CONFIRMED.
-        VfsEntry? entry = _directory.TryFind(normalized);
+        var entry = _directory.TryFind(normalized);
         if (entry is null)
             throw new FileNotFoundException(
                 $"VFS entry not found: \"{virtualPath}\".", virtualPath);
 
-        VfsEntry e = entry.Value;
+        var e = entry.Value;
 
         // Validate that the high dword of dataSize is zero.
         // spec: Docs/RE/formats/pak.md — dataSize high dword must be 0. CONFIRMED.
-        if ((e.DataSize >> 32) != 0)
+        if (e.DataSize >> 32 != 0)
             throw new InvalidDataException(
                 $"VFS entry \"{e.Name}\": dataSize high dword is non-zero " +
                 $"(value=0x{e.DataSize:X16}). Entry too large for this implementation.");
 
-        int length = (int)(e.DataSize & 0xFFFF_FFFF);
+        var length = (int)(e.DataSize & 0xFFFF_FFFF);
 
         if (length == 0)
             return ReadOnlyMemory<byte>.Empty;
@@ -292,32 +307,13 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     }
 
     /// <summary>
-    /// Returns a span over all directory entries in sorted order.
-    /// Intended for diagnostics and testing; not a hot path.
+    ///     Returns a span over all directory entries in sorted order.
+    ///     Intended for diagnostics and testing; not a hot path.
     /// </summary>
     public ReadOnlySpan<VfsEntry> GetEntries()
     {
         ThrowIfDisposed();
         return _directory.Entries;
-    }
-
-    /// <inheritdoc/>
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        // Release the single pointer acquired at open (balances the one AcquirePointer in the ctor),
-        // then the view accessor, then the mapped file. Releasing the pointer first returns the view
-        // handle's ref-count to its baseline so the accessor can actually unmap.
-        if (_viewBasePointer is not null)
-        {
-            _viewAccessor!.SafeMemoryMappedViewHandle.ReleasePointer();
-            _viewBasePointer = null;
-        }
-
-        _viewAccessor?.Dispose();
-        _mappedFile?.Dispose();
     }
 
     private void ThrowIfDisposed()

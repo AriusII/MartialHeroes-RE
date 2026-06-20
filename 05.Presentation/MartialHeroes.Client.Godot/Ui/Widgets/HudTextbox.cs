@@ -28,38 +28,48 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUTextbox-faithful CP949 text-input widget for the HUD.
-///
-/// <para>Backed by a Godot <see cref="LineEdit"/> which handles focus, IME composition,
-/// caret blink, and password masking natively.</para>
-///
-/// <para>Subscribe to <see cref="TextChanged"/> to receive text edits and emit the
-/// appropriate use-case call. Never mutate domain state in the handler.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §5 — GUTextbox.
+///     GUTextbox-faithful CP949 text-input widget for the HUD.
+///     <para>
+///         Backed by a Godot <see cref="LineEdit" /> which handles focus, IME composition,
+///         caret blink, and password masking natively.
+///     </para>
+///     <para>
+///         Subscribe to <see cref="TextChanged" /> to receive text edits and emit the
+///         appropriate use-case call. Never mutate domain state in the handler.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §5 — GUTextbox.
 /// </summary>
 public sealed class HudTextbox : HudWidget
 {
     private readonly Control _control;
     private readonly LineEdit _edit;
 
+    // Wire Godot's typed delegates to our Action<string> once, lazily.
+    private bool _eventsWired;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a HudTextbox.
+    ///     Creates a HudTextbox.
     /// </summary>
     /// <param name="x">Screen-local X on the 1024×768 canvas.</param>
     /// <param name="y">Screen-local Y.</param>
     /// <param name="w">Width in pixels.</param>
     /// <param name="h">Height in pixels.</param>
-    /// <param name="password">True for password mode (masking + 6px glyph advance via LineEdit.Secret).
-    ///   spec §5.2 — "password mode: 6 px/char advance": CONFIRMED.</param>
-    /// <param name="maxLength">Maximum character count (0 = unlimited).
-    ///   spec §8.1 — ID textbox maxlen 6, PW textbox maxlen 129: CODE-CONFIRMED.</param>
-    /// <param name="fontSlot">Font slot index 0..14 (default 0 = DotumChe 12/6/wt0).
-    ///   spec §6.3 — GUTextbox slot at +0xDC, default 0: CODE-CONFIRMED.</param>
+    /// <param name="password">
+    ///     True for password mode (masking + 6px glyph advance via LineEdit.Secret).
+    ///     spec §5.2 — "password mode: 6 px/char advance": CONFIRMED.
+    /// </param>
+    /// <param name="maxLength">
+    ///     Maximum character count (0 = unlimited).
+    ///     spec §8.1 — ID textbox maxlen 6, PW textbox maxlen 129: CODE-CONFIRMED.
+    /// </param>
+    /// <param name="fontSlot">
+    ///     Font slot index 0..14 (default 0 = DotumChe 12/6/wt0).
+    ///     spec §6.3 — GUTextbox slot at +0xDC, default 0: CODE-CONFIRMED.
+    /// </param>
     public HudTextbox(
         int x, int y, int w, int h,
         bool password = false,
@@ -67,7 +77,7 @@ public sealed class HudTextbox : HudWidget
         int fontSlot = 0,
         Texture2D? background = null) // spec: §6.3 GUTextbox font slot default 0: CODE-CONFIRMED
     {
-        bool hasBackground = background is not null;
+        var hasBackground = background is not null;
         Control? root = null;
         if (hasBackground)
         {
@@ -76,7 +86,7 @@ public sealed class HudTextbox : HudWidget
                 Position = new Vector2(x, y),
                 Size = new Vector2(w, h),
                 CustomMinimumSize = new Vector2(w, h),
-                MouseFilter = Control.MouseFilterEnum.Pass,
+                MouseFilter = Control.MouseFilterEnum.Pass
             };
             root.AddChild(new TextureRect
             {
@@ -85,7 +95,7 @@ public sealed class HudTextbox : HudWidget
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 // spec: Docs/RE/specs/frontend_scenes.md — GUTextbox atlas rect is W×H sampled 1:1.
                 StretchMode = TextureRect.StretchModeEnum.Keep,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
+                MouseFilter = Control.MouseFilterEnum.Ignore
             });
         }
 
@@ -106,7 +116,7 @@ public sealed class HudTextbox : HudWidget
             // Caret blink is handled by Godot's LineEdit; interval approximates 500 ms.
             // spec: §5.2 — "caret blink toggle ~500 ms": CONFIRMED.
             CaretBlink = true,
-            CaretBlinkInterval = 0.5f,
+            CaretBlinkInterval = 0.5f
         };
 
         if (root is not null)
@@ -129,15 +139,15 @@ public sealed class HudTextbox : HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Legacy IME mode selector recorded by the builder follow-up call.
-    /// Godot owns the actual IME context; the value is preserved for 1:1 scene wiring.
-    /// spec: Docs/RE/specs/frontend_scenes.md — GUTextbox IME mode is set separately from the ctor.
+    ///     Legacy IME mode selector recorded by the builder follow-up call.
+    ///     Godot owns the actual IME context; the value is preserved for 1:1 scene wiring.
+    ///     spec: Docs/RE/specs/frontend_scenes.md — GUTextbox IME mode is set separately from the ctor.
     /// </summary>
     public int ImeMode { get; set; }
 
     /// <summary>
-    /// Maximum character count; 0 means unlimited.
-    /// spec: Docs/RE/specs/frontend_scenes.md — GUTextbox max length is set separately from the ctor.
+    ///     Maximum character count; 0 means unlimited.
+    ///     spec: Docs/RE/specs/frontend_scenes.md — GUTextbox max length is set separately from the ctor.
     /// </summary>
     public int MaxLength
     {
@@ -156,9 +166,6 @@ public sealed class HudTextbox : HudWidget
     private event Action<string>? _textChanged;
     private event Action<string>? _textSubmitted;
 
-    // Wire Godot's typed delegates to our Action<string> once, lazily.
-    private bool _eventsWired;
-
     private void EnsureEventsWired()
     {
         if (_eventsWired) return;
@@ -168,8 +175,8 @@ public sealed class HudTextbox : HudWidget
     }
 
     /// <summary>
-    /// Fired when the text content changes. Subscribers must emit a use-case call;
-    /// never mutate domain state in a UI handler.
+    ///     Fired when the text content changes. Subscribers must emit a use-case call;
+    ///     never mutate domain state in a UI handler.
     /// </summary>
     public event Action<string>? TextChanged
     {
@@ -178,11 +185,11 @@ public sealed class HudTextbox : HudWidget
             EnsureEventsWired();
             _textChanged += value;
         }
-        remove { _textChanged -= value; }
+        remove => _textChanged -= value;
     }
 
     /// <summary>
-    /// Fired when the user presses Enter / submits the input.
+    ///     Fired when the user presses Enter / submits the input.
     /// </summary>
     public event Action<string>? TextSubmitted
     {
@@ -191,19 +198,28 @@ public sealed class HudTextbox : HudWidget
             EnsureEventsWired();
             _textSubmitted += value;
         }
-        remove { _textSubmitted -= value; }
+        remove => _textSubmitted -= value;
     }
 
     /// <summary>Clears the text field.</summary>
-    public void Clear() => _edit.Clear();
+    public void Clear()
+    {
+        _edit.Clear();
+    }
 
     /// <summary>Focuses this textbox, registering it as the IME target.</summary>
-    public void GrabFocus() => _edit.GrabFocus();
+    public void GrabFocus()
+    {
+        _edit.GrabFocus();
+    }
 
     // -------------------------------------------------------------------------
     // HudWidget
     // -------------------------------------------------------------------------
 
-    /// <inheritdoc/>
-    public override Control? GetControl() => _control;
+    /// <inheritdoc />
+    public override Control? GetControl()
+    {
+        return _control;
+    }
 }

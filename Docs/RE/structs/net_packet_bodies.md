@@ -5,7 +5,7 @@ ida_anchor: 263bd994
 evidence: [static-ida]
 layout: confirmed
 value_semantics: capture/debugger-pending
-conflicts: 4/48 record-array fit RESOLVED (no overrun — see §7); 4/56 secondary-array byte base (the +1040 region) is a dword-vs-byte-pointer static-hypothesis; 4/71 sub-records past +52 are mapped relative to the consumer's copied struct, not 1:1-proven against wire offsets; 5/73 (SmsgQuestComplete vs SmsgGuildWarInfoUpdate) name is INCONCLUSIVE from body shape — not tabled as a struct here; the 5/68 record COUNT was corrected from 20 to 10 and split into wire (columnar, name-stride 17) vs runtime-mirror (slot stride 32) — see §5 and §9; every field VALUE meaning across the embedded body-record structs (§9) is capture/debugger-pending while the LAYOUTS are static-confirmed
+conflicts: 4/48 record-array fit RESOLVED (no overrun — see §7), re-confirmed identical CYCLE 7; 4/56 1552-byte dual-transform shape re-confirmed identical CYCLE 7 (the +0x410 array-B base is now control-flow confirmed, not a static-hypothesis); 4/71 RESOLVED CYCLE 7 — the prior opaque tail past +52 is now broken into real fixed-stride sub-tables (id array, status array, two CP949 name-cell regions, 8-byte pair array, 8 × 80-byte slot records); 5/73 (SmsgQuestComplete vs SmsgGuildWarInfoUpdate) name is INCONCLUSIVE from body shape — not tabled as a struct here; the 5/68 record COUNT was corrected from 20 to 10 and split into wire (columnar, name-stride 17) vs runtime-mirror (slot stride 32) — see §5 and §9; every field VALUE meaning across the embedded body-record structs (§9) is capture/debugger-pending while the LAYOUTS are static-confirmed
 ---
 
 # Structured S2C packet-body DTOs (clean-room offset tables)
@@ -99,37 +99,94 @@ exactly (+155 + 49 = +204; no trailing bytes). Wire-level view: `packets/4-103_*
 
 ## 3. 4/56 — Structured panel / spawn snapshot (body = 1552 bytes / 0x610, CONFIRMED)
 
-Reclassified from a "thin slot" to a structured ~1552-byte snapshot: a leading scalar block (subtype
-byte at +8, actor id at +12) plus a **64-entry dual transform table**. Loop guard proves 64 entries
-(arrays A and B advance in lockstep). Wire-level view: `packets/4-56_*.yaml`.
+> **Re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20).** Body shape
+> **CONTROL-FLOW CONFIRMED**, fixed 1552 bytes, **no variable tail**. Re-confirmed identical to the
+> prior reading, with one upgrade: the secondary array's byte base (+0x410) is now control-flow
+> confirmed — the structured-apply path walks a single 64-trip loop whose cursor advances 48 bytes per
+> trip (16 from array A + 8 from array B), and the spawn-populate routine copies the whole 0x610 block
+> a second time, independently confirming 1552. The "dword-vs-byte-pointer static-hypothesis" caveat
+> on the +0x410 base is **retired**. VALUE meanings remain capture/debugger-pending.
+
+Reclassified from a "thin slot" to a structured 1552-byte snapshot: a leading scalar block (subtype
+byte at +8, actor key at +12) plus a **64-entry dual transform table** (arrays A and B advance in
+lockstep). The subtype byte gates the path: 1 = structured apply (walks the table); 0 = tear down a
+UI sub-view. Wire-level view: `packets/4-56_*.yaml`.
 
 | Offset | Size | Type | Field | Confidence | Notes |
 |--------|------|------|-------|------------|-------|
-| +0x08 | 1 | uint8 | `subtype` | CONFIRMED | 1 selects the structured population path. |
-| +0x0C | 4 | uint32 | `actor_key` | CONFIRMED | Actor id passed to the composite-key find. |
-| +0x10 | 1024 | record[64] | `transform_array_a` | CONFIRMED | 64 entries × 16 bytes: 4 × uint32 per slot (per-slot transform/position, x/y/z + 1 word). Byte base +16 is solid (walked as dwords). |
-| +0x410 | 512 | record[64] | `transform_array_b` | UNVERIFIED (base) | 64 entries × 8 bytes: 2 × uint32 per slot (secondary pair — rotation/state). Count 64 and stride 8 are CONFIRMED, but the **byte base is a dword-vs-byte-pointer static-hypothesis** (the +1040 region, shown here as +0x410); debugger-confirmable. |
+| +0x000 | 8 | bytes[8] | `header` | CONFIRMED (region) | Leading header region; the subtype gate is the next byte. |
+| +0x008 | 1 | uint8 | `subtype` | CONFIRMED | Subtype gate: 1 = structured apply; 0 = tear down a UI sub-view. |
+| +0x009 | 3 | bytes[3] | (filler) | CONFIRMED | Filler to the actor key. |
+| +0x00C | 4 | uint32 | `actor_key` | CONFIRMED | Actor composite key, passed to the cached by-key actor lookup. |
+| +0x010 | 1024 | record[64] | `transform_array_a` | CONFIRMED | 64 entries × 16-byte stride: 4 × uint32 each (per-slot transform/position). Base +0x010 walked as dwords. |
+| +0x410 | 512 | record[64] | `transform_array_b` | CONFIRMED | 64 entries × 8-byte stride: 2 × uint32 each (secondary pair, e.g. rotation/state), lockstep with A; ends at +0x610. Base now control-flow confirmed. |
 
-> After the two arrays + scalar tail the block fills to 1552; remaining bytes (name/title strings
-> bound from the matched actor) are host-side, not extra wire fields.
+> **Fit:** 8 + 1 + 3 + 4 + 1024 + 512 = **1552** (0x610), block closes exactly.
+>
+> **Matched-actor name/title are HOST-side, NOT wire bytes.** After the table walk the consumer
+> resolves the actor via the +0x0C key and binds name/title strings read from the resolved actor
+> object — they are not additional wire bytes. The 1552 bytes are fully accounted for by the header +
+> the two arrays; do not invent name/title byte offsets inside the body.
 
 ---
 
-## 4. 4/71 — Structured panel snapshot (body = 1092 bytes / 0x444, CONFIRMED)
+## 4. 4/71 — Structured 8-slot relation/party panel snapshot (body = 1092 bytes / 0x444, CONFIRMED)
 
-Reclassified from a "thin slot" to a structured ~1092-byte snapshot: a subtype byte at +8 plus an
-**8-entry id array** at +12 and an **8-entry status array** at +44, followed by further fixed-stride
-sub-records. Wire-level view: `packets/4-71_*.yaml`.
+> **Re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20).** Body shape
+> **CONTROL-FLOW CONFIRMED**, fixed 1092 bytes, **no variable tail** (every sub-table is 8-slot,
+> fixed-stride — no count-prefixed remainder). **This pass RESOLVES the prior +52 opaque blob into
+> real sub-tables.** The panel walker copies the whole 0x444 block verbatim into its destination
+> struct (273 contiguous dwords = 1092) and then reads its sub-tables from that copy; the wire layout
+> below is recovered by subtracting the constant copy-base offset from each struct read, so every
+> sub-table's wire placement is now pinned, not a struct-relative hypothesis. Each sub-table is
+> iterated by an 8-trip loop. VALUE meanings remain capture/debugger-pending.
+
+A subtype byte at +8 selects the structured path, then an **8-slot id array**, an **8-slot status
+array**, two **8-cell CP949 name-cell regions** (one chosen per slot by a self-vs-other test), an
+**8-entry 8-byte pair array**, and an **8-record array** of 80-byte slot records. Two 32-byte gaps
+sit between the status array and the name-cell regions; this consumer does not read them. Wire-level
+view: `packets/4-71_*.yaml`.
 
 | Offset | Size | Type | Field | Confidence | Notes |
 |--------|------|------|-------|------------|-------|
-| +0x08 | 1 | uint8 | `subtype` | CONFIRMED | Tested == 1 to select the structured path. |
-| +0x0C | 32 | uint32[8] | `id_array` | CONFIRMED | 8 entries × 4 bytes (+12 .. +44); non-zero = active slot; compared to a panel id table and to the local-player key. |
-| +0x2C | 8 | uint8[8] | `status_array` | CONFIRMED | 8 entries × 1 byte (+44 .. +52); a per-slot status byte (value == 2 checked). |
-| +0x34 | (rest) | bytes | `sub_records` | UNVERIFIED | The remainder past +52 feeds further fixed-stride sub-tables (80-byte slot records and 17-byte CP949 name cells) inside the consumer's destination struct. Their precise **wire** offsets are a static-hypothesis (the consumer indexes its own copied struct, so wire-vs-struct mapping past +52 is not 1:1-proven). |
+| +0x000 | 8 | bytes[8] | `header` | CONFIRMED (region) | Leading header region; the subtype gate is the next byte. |
+| +0x008 | 1 | uint8 | `subtype` | CONFIRMED | Subtype gate: tested == 1 to select the structured panel-apply path. |
+| +0x009 | 3 | bytes[3] | (filler) | CONFIRMED | Filler to the id array. |
+| +0x00C | 32 | uint32[8] | `id_array` | CONFIRMED | Per-slot id array, 8 × uint32 (4-byte stride), +0x0C .. +0x2C; non-zero = active slot; compared to a panel id table and to the local-player id. |
+| +0x02C | 8 | uint8[8] | `status_array` | CONFIRMED | Per-slot status byte array, 8 × uint8 (1-byte stride), +0x2C .. +0x34; a per-slot status byte (value == 2 tested). |
+| +0x034 | 32 | bytes[32] | (reserved gap 1) | CONFIRMED (region) | Reserved gap; not read by this consumer (no read site between +0x34 and +0x54). |
+| +0x054 | 136 | char[17][8] | `name_cells_other` | CONFIRMED | Name-cell region 1: 8 cells × 17-byte CP949 stride; selected when the slot id ≠ local-player id (other). |
+| +0x0DC | 32 | bytes[32] | (reserved gap 2) | CONFIRMED (region) | Reserved gap; not read by this consumer (no read site between +0xDC and +0xFC). |
+| +0x0FC | 136 | char[17][8] | `name_cells_self` | CONFIRMED | Name-cell region 2: 8 cells × 17-byte CP949 stride; selected when the slot id == local-player id (self). |
+| +0x184 | 64 | record[8] (stride 8) | `pair_array` | CONFIRMED | Per-slot 8-byte pair array: 8 entries × 8-byte stride (2 × uint32, read as a qword). |
+| +0x1C4 | 640 | record[8] (stride 80) | `slot_record_array` | CONFIRMED | Per-slot record array: 8 records × 80-byte stride (see below); ends at +0x444. |
 
-> What is proven: total = 1092, `subtype` @ +8, `id_array` @ +12 (×8, stride 4), `status_array` @
-> +44 (×8, stride 1). The sub-records past +52 are UNVERIFIED in their wire placement.
+> **Fit:** 8 + 1 + 3 + 32 + 8 + 32 + 136 + 32 + 136 + 64 + 640 = **1092** (0x444), block closes
+> exactly.
+
+### Per slot-record layout (80-byte stride = 5 sub-cells × 16 bytes; sub-cell offsets sub-cell-relative)
+
+Each 80-byte record is **5 sub-cells × 16 bytes**. A sub-cell is applied to the panel only when its
+`presence_guard` dword (sub-cell +4) is non-zero; when live, the full 16-byte sub-cell is copied.
+
+| Sub-cell offset | Size | Type | Field | Confidence | Notes |
+|-----------------|------|------|-------|------------|-------|
+| +0x00 | 4 | uint32 | `key_or_type` | CONFIRMED | Sub-cell key / type. |
+| +0x04 | 4 | uint32 | `presence_guard` | CONFIRMED | Non-zero ⇒ the sub-cell is live and gets applied. |
+| +0x08 | 4 | uint32 | `payload_a` | CONFIRMED | Payload dword A. |
+| +0x0C | 4 | uint32 | `payload_b` | CONFIRMED | Payload dword B. |
+
+> Sub-cell total = 16; 5 sub-cells = 80 per record; 8 records = 640.
+>
+> **Selection logic (no value invention).** For each of the 8 slots the walker resolves the slot's id
+> to a record index (≤ 8), then, depending on whether the slot id matches the local player's id, binds
+> either `name_cells_self` (+0x0FC) or `name_cells_other` (+0x054) plus the 8-byte pair, and copies
+> the live 16-byte sub-cells of that slot's 80-byte record into the panel.
+
+**VALUE meanings (capture/debugger-pending):** the per-slot id/status value meanings (status == 2 is a
+state test of unknown semantics); the sub-cell key/payload dword meanings; whether the two 32-byte
+reserved gaps (+0x34, +0xDC) carry server data unread by this particular consumer (no read site here —
+treated as reserved until a capture shows otherwise).
 
 ---
 
@@ -184,7 +241,14 @@ when the addressed actor is the local player. Wire-level view: `packets/5-77_*.y
 
 ## 7. 4/48 — Rank-progress event (body = 236 bytes / 0xEC, CONFIRMED) — fit RESOLVED (no overrun)
 
-> **Corrected this pass (binary wins, W3 ledger).** The earlier "12-byte overrun" is **REFUTED** —
+> **Re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20).** Body shape
+> **CONTROL-FLOW CONFIRMED**, fixed 236 bytes, **no variable tail, no overrun** — re-confirmed
+> **identical** to the prior reading: 12-byte header (8-byte leading region + route byte @ +8 +
+> sub-select byte @ +9 + 2-byte filler) then 8 × 28-byte records based at body +0x0C. The handler reads
+> exactly 0xEC and the record walker loops exactly 8 times over a 28-byte stride. VALUE meanings remain
+> capture/debugger-pending.
+
+> **Corrected (binary wins, W3 ledger).** The earlier "12-byte overrun" is **REFUTED** —
 > there is no overrun. The handler reads exactly 236 (0xEC). The consumer forwards `block + 12` to
 > the record walker, so the record base is **body +0x0C** (not +0x18), with stride 28 and count 8:
 > `12 + 8·28 = 236` exactly. The prior reading double-counted the 12-byte header. Corrected layout:
@@ -195,9 +259,11 @@ Each record is id + 18-byte CP949 name + two int16. Wire-level view: `packets/4-
 
 | Offset | Size | Type | Field | Confidence | Notes |
 |--------|------|------|-------|------------|-------|
-| +0x08 | 1 | uint8 | `route_byte` | CONFIRMED | Non-zero → detail path. |
-| +0x09 | 1 | uint8 | `subselect_byte` | CONFIRMED | 0/1 — picks UI list entry. |
-| +0x0C | 224 | record[8] (stride 28) | `record_array` | CONFIRMED (base/stride/count/fit) | Record base = body +0x0C; 8 records × 28 bytes. `12 + 8·28 = 236` — fills the body exactly, no overrun. |
+| +0x00 | 8 | bytes[8] | `header` | CONFIRMED (region) | Leading header region, precedes the route bytes. |
+| +0x08 | 1 | uint8 | `route_byte` | CONFIRMED | Non-zero → detail/record path. |
+| +0x09 | 1 | uint8 | `subselect_byte` | CONFIRMED | 0/1 — picks one of two UI-list targets. |
+| +0x0A | 2 | bytes[2] | (filler) | CONFIRMED | Filler to the record-array base. |
+| +0x0C | 224 | record[8] (stride 28) | `record_array` | CONFIRMED (base/stride/count/fit) | Record base = body +0x0C; 8 records × 28 bytes. `8 + 1 + 1 + 2 + 224 = 236` — fills the body exactly, no overrun. |
 
 ### Per-record layout (record-relative; record base E = body+0x0C + i·28)
 
@@ -491,11 +557,15 @@ Total 0x0C + 4 = 16, all fields consumed.
 1. **4/48 record fit — RESOLVED (no overrun).** The record base is body +0x0C (not +0x18); `12 +
    8·28 = 236` fills the 236-byte body exactly. The earlier "12-byte overrun" double-counted the
    12-byte header. Base/stride/count/fit all CONFIRMED — see §7.
-2. **4/56 secondary-array byte base (UNVERIFIED).** The 64-entry, 8-byte-stride `transform_array_b`
-   base is a dword-vs-byte-pointer static-hypothesis (the +1040 region); count and stride are
-   CONFIRMED.
-3. **4/71 sub-records past +52 (UNVERIFIED).** Mapped relative to the consumer's copied struct, not
-   1:1-proven against wire offsets.
+2. **4/56 secondary-array byte base — RESOLVED (CYCLE 7).** The 64-entry, 8-byte-stride
+   `transform_array_b` base at +0x410 is now control-flow confirmed (single 64-trip loop, cursor += 48
+   per trip; whole 0x610 block independently re-copied). The prior dword-vs-byte-pointer caveat is
+   retired. See §3.
+3. **4/71 sub-records past +52 — RESOLVED (CYCLE 7).** The prior opaque blob is broken into real
+   fixed-stride sub-tables (id array, status array, two CP949 name-cell regions, 8-byte pair array,
+   8 × 80-byte slot records of 5 × 16-byte sub-cells); the verbatim-copy base lets every wire offset be
+   pinned. See §4. (Two 32-byte reserved gaps at +0x34/+0xDC are unread by this consumer — reserved
+   until a capture shows otherwise.)
 4. **5/77 trailing 14 bytes (PENDING).** Bytes +386 .. +399 are untouched by the consumer — trailing
    pad or additional fields.
 5. **5/73 name — RESOLVED to `SmsgQuestComplete`** (binary-confirmed in W4; the committed

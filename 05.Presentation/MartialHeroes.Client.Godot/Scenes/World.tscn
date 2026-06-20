@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3 uid="uid://cn3q7w8xv2m4k0"]
+[gd_scene load_steps=5 format=3 uid="uid://cn3q7w8xv2m4k0"]
 
 ; Root orchestrator: GameLoop — drains the Application event bus each frame.
 ; NOTE: in Godot 4 the `script` is a PROPERTY assignment on its own line BELOW the
@@ -8,8 +8,6 @@
 [ext_resource type="Script" uid="uid://b40qcootw1kr6" path="res://World/GameLoop.cs" id="1"]
 [ext_resource type="Script" uid="uid://dion3hgcbj2l7" path="res://World/ActorRegistry.cs" id="2"]
 [ext_resource type="Script" uid="uid://b5d0wrs10eihb" path="res://Input/InputRouter.cs" id="4"]
-[ext_resource type="Script" uid="uid://dkbjb46randg2" path="res://Debug/SyntheticWorldFeeder.cs" id="5"]
-
 ; Environment: background_mode=Color, neutral grey — no ProceduralSkyMaterial at any frame.
 ; The ProceduralSkyMaterial + Sky sub-resources were removed: at frame-0 the sky was a visible
 ; procedural blue sky before EnvironmentNode.Configure replaces it at runtime. The original has
@@ -40,9 +38,6 @@ script = ExtResource("2")
 
 [node name="InputRouter" type="Node" parent="."]
 script = ExtResource("4")
-
-[node name="SyntheticWorldFeeder" type="Node" parent="."]
-script = ExtResource("5")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 50, 0)

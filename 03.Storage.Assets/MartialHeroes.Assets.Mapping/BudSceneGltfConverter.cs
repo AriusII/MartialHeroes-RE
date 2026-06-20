@@ -1,42 +1,38 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
 /// <summary>
-/// Converts a <see cref="BudScene"/> (.bud static-object cell) to a self-contained
-/// GLB (binary glTF 2.0) stream.
-///
-/// Each <see cref="BudObject"/> becomes one glTF mesh / primitive.
-/// A single glTF node references a multi-primitive mesh so all objects are in one file.
-///
-/// Coordinate-system conventions:
-///   The .bud format uses a left-handed Y-up world space (D3D9 Windows client convention).
-///   glTF 2.0 mandates right-handed Y-up.
-///   Conversion: negate the X component of every position and normal to flip handedness.
-///   spec: Docs/RE/formats/terrain_scene.md §Coordinate system —
+///     Converts a <see cref="BudScene" /> (.bud static-object cell) to a self-contained
+///     GLB (binary glTF 2.0) stream.
+///     Each <see cref="BudObject" /> becomes one glTF mesh / primitive.
+///     A single glTF node references a multi-primitive mesh so all objects are in one file.
+///     Coordinate-system conventions:
+///     The .bud format uses a left-handed Y-up world space (D3D9 Windows client convention).
+///     glTF 2.0 mandates right-handed Y-up.
+///     Conversion: negate the X component of every position and normal to flip handedness.
+///     spec: Docs/RE/formats/terrain_scene.md §Coordinate system —
 ///     "X and Z are horizontal plane axes; Y is the vertical/height axis": CONFIRMED.
-///   spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED (same D3D9 convention).
-///   glTF 2.0 spec §3.4: right-handed Y-up, −Z forward.
-///
-///   Winding order: negating X reverses the winding of every triangle (CW ↔ CCW).
-///   To restore counter-clockwise front faces in glTF we swap index[1] and index[2]
-///   within each triangle.
-///   spec: Docs/RE/formats/terrain_scene.md §Index array — triangle list, 0-based u16: CONFIRMED.
-///   glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines front faces.
-///
-///   UV coordinates:
-///   The .bud format stores UV as world-scale tiled values (observed range ~24–29).
-///   No top-left → bottom-left flip is needed because glTF stores UVs with V=0 at
-///   the top (same convention used by the .bud world-scale tiling).
-///   spec: Docs/RE/formats/terrain_scene.md §Vertex record — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
-///
-///   Normals:
-///   The .bud vertex record contains confirmed normal XYZ (unit-length float32).
-///   The X component is negated (same handedness flip as position).
-///   spec: Docs/RE/formats/terrain_scene.md §Vertex record — normal_x/y/z: CONFIRMED.
+///     spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED (same D3D9 convention).
+///     glTF 2.0 spec §3.4: right-handed Y-up, −Z forward.
+///     Winding order: negating X reverses the winding of every triangle (CW ↔ CCW).
+///     To restore counter-clockwise front faces in glTF we swap index[1] and index[2]
+///     within each triangle.
+///     spec: Docs/RE/formats/terrain_scene.md §Index array — triangle list, 0-based u16: CONFIRMED.
+///     glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines front faces.
+///     UV coordinates:
+///     The .bud format stores UV as world-scale tiled values (observed range ~24–29).
+///     No top-left → bottom-left flip is needed because glTF stores UVs with V=0 at
+///     the top (same convention used by the .bud world-scale tiling).
+///     spec: Docs/RE/formats/terrain_scene.md §Vertex record — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
+///     Normals:
+///     The .bud vertex record contains confirmed normal XYZ (unit-length float32).
+///     The X component is negated (same handedness flip as position).
+///     spec: Docs/RE/formats/terrain_scene.md §Vertex record — normal_x/y/z: CONFIRMED.
 /// </summary>
 public static class BudSceneGltfConverter
 {
@@ -70,9 +66,9 @@ public static class BudSceneGltfConverter
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Writes a GLB containing all <see cref="BudObject"/> entries from <paramref name="scene"/>
-    /// as separate mesh primitives (one primitive per object).
-    /// The stream does not need to be seekable.
+    ///     Writes a GLB containing all <see cref="BudObject" /> entries from <paramref name="scene" />
+    ///     as separate mesh primitives (one primitive per object).
+    ///     The stream does not need to be seekable.
     /// </summary>
     /// <param name="scene">Parsed .bud cell from <c>TerrainSceneParser</c>.</param>
     /// <param name="output">Destination stream (does not need to be seekable).</param>
@@ -91,48 +87,48 @@ public static class BudSceneGltfConverter
         // Each object gets its own contiguous region in the shared binary buffer:
         //   [positions VEC3 f32] [normals VEC3 f32] [uvs VEC2 f32] [indices u16]
         // Sections are 4-byte aligned.
-        int objectCount = scene.Objects.Length;
+        var objectCount = scene.Objects.Length;
         var sections = new ObjectSection[objectCount];
 
-        int bufferCursor = 0;
-        for (int i = 0; i < objectCount; i++)
+        var bufferCursor = 0;
+        for (var i = 0; i < objectCount; i++)
         {
-            BudObject obj = scene.Objects[i];
-            int vertexCount = obj.Vertices.Length;
-            int indexCount = obj.Indices.Length;
+            var obj = scene.Objects[i];
+            var vertexCount = obj.Vertices.Length;
+            var indexCount = obj.Indices.Length;
 
-            int posLen = vertexCount * 3 * sizeof(float); // VEC3 f32
-            int nrmLen = vertexCount * 3 * sizeof(float); // VEC3 f32
-            int uvLen = vertexCount * 2 * sizeof(float); // VEC2 f32
-            int idxLen = indexCount * sizeof(ushort); // u16
+            var posLen = vertexCount * 3 * sizeof(float); // VEC3 f32
+            var nrmLen = vertexCount * 3 * sizeof(float); // VEC3 f32
+            var uvLen = vertexCount * 2 * sizeof(float); // VEC2 f32
+            var idxLen = indexCount * sizeof(ushort); // u16
 
-            int posOff = bufferCursor;
-            int nrmOff = Align4(posOff + posLen);
-            int uvOff = Align4(nrmOff + nrmLen);
-            int idxOff = Align4(uvOff + uvLen);
+            var posOff = bufferCursor;
+            var nrmOff = Align4(posOff + posLen);
+            var uvOff = Align4(nrmOff + nrmLen);
+            var idxOff = Align4(uvOff + uvLen);
             bufferCursor = Align4(idxOff + idxLen);
 
             sections[i] = new ObjectSection(
-                VertexCount: vertexCount,
-                IndexCount: indexCount,
-                PosOff: posOff, PosLen: posLen,
-                NrmOff: nrmOff, NrmLen: nrmLen,
-                UvOff: uvOff, UvLen: uvLen,
-                IdxOff: idxOff, IdxLen: idxLen);
+                vertexCount,
+                indexCount,
+                posOff, posLen,
+                nrmOff, nrmLen,
+                uvOff, uvLen,
+                idxOff, idxLen);
         }
 
-        byte[] binaryBuffer = new byte[bufferCursor];
+        var binaryBuffer = new byte[bufferCursor];
 
         // ---- Step 2: Fill binary buffer ----
-        for (int i = 0; i < objectCount; i++)
+        for (var i = 0; i < objectCount; i++)
         {
-            BudObject obj = scene.Objects[i];
-            ObjectSection sec = sections[i];
+            var obj = scene.Objects[i];
+            var sec = sections[i];
             WriteObjectBinary(binaryBuffer, obj, sec);
         }
 
         // ---- Step 3: Build JSON ----
-        string json = BuildJson(scene, sections, binaryBuffer.Length);
+        var json = BuildJson(scene, sections, binaryBuffer.Length);
 
         // ---- Step 4: Write GLB ----
         WriteGlbChunks(output, json, binaryBuffer);
@@ -144,16 +140,16 @@ public static class BudSceneGltfConverter
 
     private static void WriteObjectBinary(byte[] buf, BudObject obj, ObjectSection sec)
     {
-        int vertexCount = obj.Vertices.Length;
-        int indexCount = obj.Indices.Length;
+        var vertexCount = obj.Vertices.Length;
+        var indexCount = obj.Indices.Length;
 
         // ---- Positions (X-flipped for left-handed → right-handed conversion) ----
         // spec: Docs/RE/formats/terrain_scene.md §Vertex record — pos_x/y/z: CONFIRMED.
         // glTF 2.0 spec §3.4: negate X to convert D3D9 LH to glTF RH.
-        int cursor = sec.PosOff;
-        for (int v = 0; v < vertexCount; v++)
+        var cursor = sec.PosOff;
+        for (var v = 0; v < vertexCount; v++)
         {
-            BudVertex vert = obj.Vertices[v];
+            var vert = obj.Vertices[v];
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.PosX); // X negated
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.PosY);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.PosZ);
@@ -164,9 +160,9 @@ public static class BudSceneGltfConverter
         // spec: Docs/RE/formats/terrain_scene.md §Vertex record — normal_x @ +0x0C: CONFIRMED.
         // Unit-length confirmed by spec.
         cursor = sec.NrmOff;
-        for (int v = 0; v < vertexCount; v++)
+        for (var v = 0; v < vertexCount; v++)
         {
-            BudVertex vert = obj.Vertices[v];
+            var vert = obj.Vertices[v];
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.NormalX); // X negated
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.NormalY);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.NormalZ);
@@ -178,9 +174,9 @@ public static class BudSceneGltfConverter
         // World-scale tiled values; no V-flip applied (no top-left/bottom-left mismatch documented
         // for terrain geometry UVs — the spec notes "tiled / world-scale mapping").
         cursor = sec.UvOff;
-        for (int v = 0; v < vertexCount; v++)
+        for (var v = 0; v < vertexCount; v++)
         {
-            BudVertex vert = obj.Vertices[v];
+            var vert = obj.Vertices[v];
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), vert.UvU);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.UvV);
             cursor += 8;
@@ -191,11 +187,11 @@ public static class BudSceneGltfConverter
         // glTF 2.0 spec §3.7.2.1: CCW front faces.
         // Negating X reverses winding CW↔CCW; swap i1↔i2 to restore CCW.
         cursor = sec.IdxOff;
-        for (int tri = 0; tri < indexCount / 3; tri++)
+        for (var tri = 0; tri < indexCount / 3; tri++)
         {
-            ushort i0 = obj.Indices[tri * 3 + 0];
-            ushort i1 = obj.Indices[tri * 3 + 1];
-            ushort i2 = obj.Indices[tri * 3 + 2];
+            var i0 = obj.Indices[tri * 3 + 0];
+            var i1 = obj.Indices[tri * 3 + 1];
+            var i2 = obj.Indices[tri * 3 + 2];
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), i0);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), i2); // swapped
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), i1); // swapped
@@ -209,7 +205,7 @@ public static class BudSceneGltfConverter
 
     private static string BuildJson(BudScene scene, ObjectSection[] sections, int bufferByteLength)
     {
-        int objectCount = scene.Objects.Length;
+        var objectCount = scene.Objects.Length;
 
         // Accessor and bufferView indices:
         // Per object: [pos acc, nrm acc, uv acc, idx acc] → 4 accessors × objectCount
@@ -229,10 +225,10 @@ public static class BudSceneGltfConverter
 
         // mesh — one primitive per BudObject
         sb.Append("\"meshes\":[{\"primitives\":[");
-        for (int i = 0; i < objectCount; i++)
+        for (var i = 0; i < objectCount; i++)
         {
             if (i > 0) sb.Append(',');
-            int accBase = i * 4; // 4 accessors per object: pos=0, nrm=1, uv=2, idx=3
+            var accBase = i * 4; // 4 accessors per object: pos=0, nrm=1, uv=2, idx=3
 
             sb.Append('{');
             sb.Append("\"attributes\":{");
@@ -245,7 +241,7 @@ public static class BudSceneGltfConverter
             // Attach extras: texId for material resolution by the consumer.
             // spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id @ +0x01: PARTIAL.
             // 1-based index into the TEXTURES list of the enclosing BUILDING section.
-            BudObject obj = scene.Objects[i];
+            var obj = scene.Objects[i];
             sb.Append($",\"extras\":{{\"texId\":{obj.TexId},\"typeByte\":{obj.TypeByte}}}");
             sb.Append('}');
         }
@@ -255,18 +251,18 @@ public static class BudSceneGltfConverter
         // accessors — 4 per object: POSITION(0), NORMAL(1), TEXCOORD_0(2), indices(3)
         // We track a global accessor separator flag to avoid leading/trailing commas.
         sb.Append("\"accessors\":[");
-        bool firstAcc = true;
-        for (int i = 0; i < objectCount; i++)
+        var firstAcc = true;
+        for (var i = 0; i < objectCount; i++)
         {
-            ObjectSection sec = sections[i];
-            BudObject obj = scene.Objects[i];
-            int bvBase = i * 4; // 4 buffer views per object
+            var sec = sections[i];
+            var obj = scene.Objects[i];
+            var bvBase = i * 4; // 4 buffer views per object
 
             // Compute position min/max (with X-flip) for the required accessor bounds.
             // glTF 2.0 spec §Accessor: min/max required for POSITION.
             ComputePosMinMax(obj.Vertices,
-                out float minX, out float minY, out float minZ,
-                out float maxX, out float maxY, out float maxZ);
+                out var minX, out var minY, out var minZ,
+                out var maxX, out var maxY, out var maxZ);
 
             // accessor: POSITION VEC3 f32
             if (!firstAcc) sb.Append(',');
@@ -316,10 +312,10 @@ public static class BudSceneGltfConverter
 
         // bufferViews — 4 per object: positions, normals, UVs, indices
         sb.Append("\"bufferViews\":[");
-        bool firstBv = true;
-        for (int i = 0; i < objectCount; i++)
+        var firstBv = true;
+        for (var i = 0; i < objectCount; i++)
         {
-            ObjectSection sec = sections[i];
+            var sec = sections[i];
 
             // bufferView: positions
             if (!firstBv) sb.Append(',');
@@ -375,11 +371,11 @@ public static class BudSceneGltfConverter
 
     private static void WriteGlbChunks(Stream output, string json, byte[] binaryBuffer)
     {
-        byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
-        int jsonPadded = Align4(jsonBytes.Length);
-        int binPadded = Align4(binaryBuffer.Length);
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+        var jsonPadded = Align4(jsonBytes.Length);
+        var binPadded = Align4(binaryBuffer.Length);
 
-        uint totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
+        var totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(hdr, GlbMagic);
@@ -419,7 +415,7 @@ public static class BudSceneGltfConverter
 
     private static void WritePadding(Stream output, int actual, int padded, byte padByte)
     {
-        int pad = padded - actual;
+        var pad = padded - actual;
         if (pad <= 0) return;
         Span<byte> p = stackalloc byte[pad];
         p.Fill(padByte);
@@ -427,10 +423,15 @@ public static class BudSceneGltfConverter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Align4(int v) => (v + 3) & ~3;
+    private static int Align4(int v)
+    {
+        return (v + 3) & ~3;
+    }
 
-    private static string F(float v) =>
-        v.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
+    private static string F(float v)
+    {
+        return v.ToString("G9", CultureInfo.InvariantCulture);
+    }
 
     private static void ComputePosMinMax(
         BudVertex[] vertices,
@@ -448,9 +449,9 @@ public static class BudSceneGltfConverter
         minY = maxY = vertices[0].PosY;
         minZ = maxZ = vertices[0].PosZ;
 
-        for (int i = 1; i < vertices.Length; i++)
+        for (var i = 1; i < vertices.Length; i++)
         {
-            BudVertex v = vertices[i];
+            var v = vertices[i];
             if (v.PosX < minX) minX = v.PosX;
             if (v.PosX > maxX) maxX = v.PosX;
             if (v.PosY < minY) minY = v.PosY;

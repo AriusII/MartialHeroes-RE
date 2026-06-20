@@ -1,32 +1,31 @@
-using System;
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Debug;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Hud;
 using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Shared.Kernel.Enums;
+using Environment = Godot.Environment;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 5 — In-game world. Builds the passive Godot world scene graph owned by the recovered
-/// BuildGameWorld case body: scene root, camera rig, terrain/building/NPC/player renderers, input,
-/// per-frame event drain, and HUD.
-/// spec: Docs/RE/specs/client_runtime.md §7.4 / §9; world_systems.md; terrain-streaming.md.
+///     State 5 — In-game world. Builds the passive Godot world scene graph owned by the recovered
+///     BuildGameWorld case body: scene root, camera rig, terrain/building/NPC/player renderers, input,
+///     per-frame event drain, and HUD.
+///     spec: Docs/RE/specs/client_runtime.md §7.4 / §9; world_systems.md; terrain-streaming.md.
 /// </summary>
 public sealed partial class InGameScene : StubSceneController
 {
     private ClientContext? _ctx;
     private SceneHost? _host;
-    private GameLoop? _worldLoop;
     private HudMaster? _hudMaster;
+    private GameLoop? _worldLoop;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.InGame;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -44,7 +43,6 @@ public sealed partial class InGameScene : StubSceneController
         // spec: Docs/RE/specs/ui_hud_layout.md §0 — HUD-build routine asset pipeline.
         // spec: Docs/RE/specs/input_ui.md §3 / §6 — "UI hit-test always before world interaction".
         if (_ctx is not null)
-        {
             try
             {
                 // Re-use the shared HudAtlasLibrary and HudTextLibrary already initialised
@@ -74,7 +72,6 @@ public sealed partial class InGameScene : StubSceneController
             {
                 GD.PrintErr($"[InGameScene] HudMaster build failed (degraded mode): {ex.Message}");
             }
-        }
 
         GD.Print("[InGameScene] State 5 BuildGameWorld built: charater scene root, five view-platform slots, " +
                  "terrain stream node, real-asset renderer (area from client_dir.cfg; area 2 town by default), " +
@@ -98,7 +95,7 @@ public sealed partial class InGameScene : StubSceneController
         {
             // The typo is authentic: the legacy GScene root is labelled "charater scene".
             // spec: Docs/RE/specs/client_runtime.md §9.1 / §9.4.
-            Name = "charater scene",
+            Name = "charater scene"
         };
 
         world.AddChild(BuildViewPlatformSlots());
@@ -106,7 +103,6 @@ public sealed partial class InGameScene : StubSceneController
         // GameHud { Name="HUD" } removed (CAMPAIGN 17 Wave 2b) — HudMaster is the sole HUD.
         // spec: Docs/RE/specs/ui_hud_layout.md §0.
         world.AddChild(new InputRouter { Name = "InputRouter" });
-        world.AddChild(new SyntheticWorldFeeder { Name = "SyntheticWorldFeeder" });
         world.AddChild(new TerrainNode { Name = "TerrainNode" });
         world.AddChild(BuildDirectionalLight());
         world.AddChild(BuildBootstrapCamera());
@@ -122,62 +118,68 @@ public sealed partial class InGameScene : StubSceneController
         // Gamble, Event. CameraController owns the active Godot camera and implements the playable
         // manipulators; these passive markers preserve the recovered scene-graph shape.
         // spec: Docs/RE/specs/client_runtime.md §9.1 / §9.5; camera_movement.md §A.
-        foreach (string name in new[] { "Third", "First", "Static", "Gamble", "Event" })
+        foreach (var name in new[] { "Third", "First", "Static", "Gamble", "Event" })
             slots.AddChild(new Node3D { Name = $"GViewPlatform_{name}" });
         return slots;
     }
 
-    private static DirectionalLight3D BuildDirectionalLight() => new()
+    private static DirectionalLight3D BuildDirectionalLight()
     {
-        Name = "DirectionalLight3D",
-        Transform = new Transform3D(
-            new Vector3(0.707107f, -0.5f, 0.5f),
-            new Vector3(0f, 0.707107f, 0.707107f),
-            new Vector3(-0.707107f, -0.5f, 0.5f),
-            new Vector3(0f, 50f, 0f)),
-        LightEnergy = 1.8f,
-        LightColor = new Color(1f, 0.96f, 0.88f),
-        ShadowEnabled = true,
-        DirectionalShadowMaxDistance = 2000f,
-    };
+        return new DirectionalLight3D
+        {
+            Name = "DirectionalLight3D",
+            Transform = new Transform3D(
+                new Vector3(0.707107f, -0.5f, 0.5f),
+                new Vector3(0f, 0.707107f, 0.707107f),
+                new Vector3(-0.707107f, -0.5f, 0.5f),
+                new Vector3(0f, 50f, 0f)),
+            LightEnergy = 1.8f,
+            LightColor = new Color(1f, 0.96f, 0.88f),
+            ShadowEnabled = true,
+            DirectionalShadowMaxDistance = 2000f
+        };
+    }
 
-    private static Camera3D BuildBootstrapCamera() => new()
+    private static Camera3D BuildBootstrapCamera()
     {
-        Name = "Camera3D",
-        Transform = new Transform3D(
-            Vector3.Right,
-            new Vector3(0f, 0.707107f, -0.707107f),
-            new Vector3(0f, 0.707107f, 0.707107f),
-            new Vector3(0f, 25f, 25f)),
-        Fov = 65f,
-        Near = 5f,
-        Far = 15000f,
-        Current = true,
-    };
+        return new Camera3D
+        {
+            Name = "Camera3D",
+            Transform = new Transform3D(
+                Vector3.Right,
+                new Vector3(0f, 0.707107f, -0.707107f),
+                new Vector3(0f, 0.707107f, 0.707107f),
+                new Vector3(0f, 25f, 25f)),
+            Fov = 65f,
+            Near = 5f,
+            Far = 15000f,
+            Current = true
+        };
+    }
 
     private static WorldEnvironment BuildWorldEnvironment()
     {
-        var env = new global::Godot.Environment
+        var env = new Environment
         {
-            BackgroundMode = global::Godot.Environment.BGMode.Color,
+            BackgroundMode = Environment.BGMode.Color,
             BackgroundColor = new Color(0.45f, 0.45f, 0.45f),
-            AmbientLightSource = global::Godot.Environment.AmbientSource.Color,
+            AmbientLightSource = Environment.AmbientSource.Color,
             AmbientLightColor = Colors.White,
             AmbientLightSkyContribution = 0.5f,
             AmbientLightEnergy = 1.0f,
-            TonemapMode = global::Godot.Environment.ToneMapper.Filmic,
+            TonemapMode = Environment.ToneMapper.Filmic,
             TonemapExposure = 1.1f,
             TonemapWhite = 6.0f,
             GlowEnabled = false,
             SsaoEnabled = false,
             SsilEnabled = false,
-            SdfgiEnabled = false,
+            SdfgiEnabled = false
         };
 
         return new WorldEnvironment
         {
             Name = "WorldEnvironment",
-            Environment = env,
+            Environment = env
         };
     }
 

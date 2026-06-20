@@ -2,6 +2,7 @@
 verification: confirmed
 ida_reverified: 2026-06-19
 ida_anchor: 263bd994
+ida_cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 evidence: [static-ida]
 conflicts: the modulus-vs-exponent argument order into the modular-exponentiation call is mildly ambiguous (resolved here from the assignment evidence — first-read bignum → +0x08 = modulus, second-read → +0x00 = exponent — but the exact modexp argument positions stay PENDING); the embedded packet-buffer internal header/body split is PENDING (only the major/minor header words are proven); the bignum digit encodings are PENDING
 ---
@@ -35,7 +36,9 @@ behaviour); `structs/net_client.md` (the owning connection object).
 | Embedded packet buffer | **CONFIRMED (presence) / split PENDING** — the object embeds a packet buffer at +0x00; the major/minor header words at +0x04/+0x06 are proven, but the buffer's internal header/body split is PENDING. The body extends up to the crypto region at +0x2DA8. |
 | Key object | **CONFIRMED** — at +0x2DA8: two inline arbitrary-precision-integer (bignum) structures (each a digit-buffer pointer + word-count pair, **not** a raw byte buffer) plus two 2-byte headers. |
 | Key-exchange blob | **CONFIRMED** — a 0x36-byte (54-byte) inline fixed buffer at +0x2DBC holding the inbound key-exchange value before import. |
-| Server scalars / staged credential | **CONFIRMED** — two 4-byte server scalars at +0x2E08/+0x2E0C, a recv-key timestamp at +0x2E10, and a staged-message pointer/size pair at +0x2E14/+0x2E18. |
+| Server scalars / staged credential | **CONFIRMED** — two 4-byte server scalars at +0x2E08/+0x2E0C, a recv-key timestamp at +0x2E10, and a staged-password pointer/pad-width pair at +0x2E14/+0x2E18 (pad width = 17 = 0x11). |
+| Object allocation | **CONFIRMED (CYCLE 7)** — a fresh 0x2E20-byte secure-context page is allocated per login attempt by the key-string→secure-context builder. |
+| Credential plaintext layout | **CONFIRMED (CYCLE 7)** — the 1/4 login-packet builder writes the plaintext region as `SubOpcode 0x2B` + `[u32 LE len] ACCOUNT(+NUL)` + optional `[u32 LE len] PIN(+NUL)`; PASSWORD is staged separately at +0x2E14 as the RSA plaintext M (appended later as ciphertext). |
 | Modexp argument order | **UNVERIFIED** — modulus-vs-exponent positions mildly ambiguous; resolved here from the assignment evidence but the exact modexp argument roles stay PENDING. |
 | Bignum digit encodings | **PENDING** — the on-the-wire digit encoding inside each bignum and inside the key-exchange blob is not byte-decoded here. |
 
@@ -75,8 +78,8 @@ Offsets relative to the start of the object.
 | +0x2E08 | 11 784 | 4 | uint32 | `server_scalar_1` | CONFIRMED | First server-supplied scalar, read off the recv-key packet. Value meaning PENDING. |
 | +0x2E0C | 11 788 | 4 | uint32 | `server_scalar_2` | CONFIRMED | Second server-supplied scalar. Value meaning PENDING. |
 | +0x2E10 | 11 792 | 4 | uint32 | `recvkey_timestamp` | CONFIRMED | Millisecond timestamp captured when the recv-key value is parsed. |
-| +0x2E14 | 11 796 | 4 | ptr | `staged_M_ptr` | CONFIRMED | Pointer to a separately-allocated staged (credential) message buffer; read/zeroed/freed by the credential-reply encryptor. |
-| +0x2E18 | 11 800 | 4 | uint32 | `staged_M_size` | CONFIRMED | Byte length of the staged message; passed as the length argument to the modular-exponentiation routine. Adjacent to `staged_M_ptr`. |
+| +0x2E14 | 11 796 | 4 | ptr | `staged_password_ptr` (`staged_M_ptr`) | CONFIRMED | Pointer to a separately-allocated, zero-padded staged-password buffer that holds the **RSA plaintext M**. The login-packet builder allocates it at the pad width below, zero-fills it, then `memcpy`s the PASSWORD into it **without a trailing NUL**. Read/zeroed/freed by the credential-reply encryptor. The PASSWORD is **NOT** placed in the plaintext region — it lives here and is appended later as the RSA ciphertext block. |
+| +0x2E18 | 11 800 | 4 | uint32 | `pad_width_latch` (`staged_M_size`) | CONFIRMED | Pad / capacity width of the staged-password buffer, latched to **17 (0x11)**; also the byte length passed as the length argument to the modular-exponentiation routine. Adjacent to `staged_password_ptr`. |
 
 ---
 
@@ -103,6 +106,42 @@ modulus word-count by the padder).
 
 ---
 
+## Credential staging — RSA plaintext M and the 1/4 plaintext region (CYCLE 7)
+
+The login-packet (1/4) builder fills the secure-context page from a single tab-delimited login-key
+string assembled by the login window. Field order in that key string is
+**ACCOUNT \t PASSWORD \t PIN \t HOST:PORT** (HOST:PORT is a side store, not part of the payload).
+
+**Password is staged separately from the plaintext region.** The builder allocates a small buffer at
+the pad width = **17 (0x11)**, zero-fills it, and `memcpy`s the PASSWORD into it **without a trailing
+NUL**. That zero-padded buffer is the RSA plaintext M; its pointer is `staged_password_ptr` (+0x2E14)
+and its width is `pad_width_latch` (+0x2E18). The PASSWORD never appears in the plaintext region — it
+is appended to the packet later as the RSA ciphertext block (`[u32 LE ciphertext-length][big-endian
+digit bytes]`) by the crypto stage (see `specs/crypto.md`).
+
+**Plaintext region layout (written by the 1/4 builder into the embedded packet buffer).** All length
+prefixes are u32 little-endian and **include** the trailing NUL byte they prefix:
+
+| Order | Width | Type | Field | Notes |
+|-------|-------|------|-------|-------|
+| 1 | 1 | uint8 | `SubOpcode` | Value **0x2B (43)** at payload offset 0. |
+| 2 | 4 | u32 LE | `AccountLength` | Length prefix; counts ACCOUNT bytes + the trailing NUL. |
+| 3 | N | bytes | `Account` (+NUL, CP949) | From key-string field 1. |
+| 4 | 4 | u32 LE | `PinLength` *(optional)* | Present only when a PIN is configured (PIN cap nonzero). |
+| 5 | N | bytes | `PIN` (+NUL) *(optional)* | From key-string field 3. |
+
+> **PASSWORD is NOT in the plaintext region** — it is the RSA plaintext M staged at +0x2E14 and
+> appended later as the ciphertext block.
+
+**Validation caps (login-key parse + 1/4 builder gate).** Account width < **20 (0x14)**, password
+width < **17 (0x11)**, PIN width < **5**; both account and password additionally require length
+**>= 2**. These caps are hard-coded immediates on the join path (the password cap 17 is the same
+value latched into `pad_width_latch` at +0x2E18 — it is a static literal, not merely a runtime
+observation). The UI password textbox `maxlen` (129) is unrelated to the wire cap (17) — do not
+mis-size the field from the UI control width.
+
+---
+
 ## Notes for the crypto / login engineer
 
 - **The object is page-guarded.** The whole 0x2E20-byte object lives on a memory page toggled
@@ -115,8 +154,11 @@ modulus word-count by the padder).
   bignum at +0x08 (modulus, confirmed via padded-block sizing) and the second-read at +0x00
   (exponent). The exact argument positions in the modular-exponentiation call are mildly ambiguous
   and stay PENDING.
-- **The staged credential is a separate allocation** referenced by `staged_M_ptr`/`staged_M_size`;
-  it is padded and modular-exponentiated, then used by the credential-reply encryptor.
+- **The staged credential is a separate allocation** referenced by
+  `staged_password_ptr`/`pad_width_latch` (+0x2E14/+0x2E18); it is the zero-padded RSA plaintext M
+  (pad width 17, password `memcpy`d with no trailing NUL), modular-exponentiated, then appended as
+  the ciphertext block by the credential-reply encryptor. The PASSWORD is **not** in the 1/4
+  plaintext region — see the credential-staging section above.
 - **The embedded packet buffer's internal split is PENDING** — only the major/minor header words at
   +0x04/+0x06 are proven; the rest of the buffer's header/body structure is not decoded here.
 

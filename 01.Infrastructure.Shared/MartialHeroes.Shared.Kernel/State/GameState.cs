@@ -3,47 +3,25 @@ using MartialHeroes.Shared.Kernel.Enums;
 namespace MartialHeroes.Shared.Kernel.State;
 
 /// <summary>
-/// The legacy engine-state struct — a pure value model of the 3-int + 1-byte record (field 0 = scene
-/// 0..7, field 1 = sub-state/error, field 2 = error detail, +0x0C = debug byte) the entry-point's
-/// <c>switch</c> dispatches on. spec: Docs/RE/specs/client_runtime.md §7.1.
+///     The legacy engine-state struct — a pure value model of the 3-int + 1-byte record (field 0 = scene
+///     0..7, field 1 = sub-state/error, field 2 = error detail, +0x0C = debug byte) the entry-point's
+///     <c>switch</c> dispatches on. spec: Docs/RE/specs/client_runtime.md §7.1.
 /// </summary>
 public readonly record struct GameState
 {
     /// <summary>
-    /// The "no specific sub-state" sentinel and the binary's constructor default for field 1.
-    /// The same value (8) is written to the sub-state field by states 6/7 before they converge
-    /// on the shared exit tail; it is also the value of <see cref="EngineSceneState.Exit"/> —
-    /// one numeric constant doing double duty in the original engine.
-    /// spec: Docs/RE/specs/client_runtime.md §7.1 (sub-state default = 8), §7.3 (exit tail keyed on sub 8).
+    ///     The "no specific sub-state" sentinel and the binary's constructor default for field 1.
+    ///     The same value (8) is written to the sub-state field by states 6/7 before they converge
+    ///     on the shared exit tail; it is also the value of <see cref="EngineSceneState.Exit" /> —
+    ///     one numeric constant doing double duty in the original engine.
+    ///     spec: Docs/RE/specs/client_runtime.md §7.1 (sub-state default = 8), §7.3 (exit tail keyed on sub 8).
     /// </summary>
     public const int SubStateNone = 8; // spec: Docs/RE/specs/client_runtime.md §7.1, §7.3
 
-    /// <summary>The live engine scene (field 0). spec: Docs/RE/specs/client_runtime.md §7.1.</summary>
-    public EngineSceneState State { get; init; }
-
     /// <summary>
-    /// Sub-state / error code (field 1). Default is <see cref="SubStateNone"/> (8) — the binary's
-    /// constructor default. spec: Docs/RE/specs/client_runtime.md §7.1.
-    /// </summary>
-    public int SubState { get; init; }
-
-    /// <summary>
-    /// The offending result code when <see cref="State"/> is <see cref="EngineSceneState.Error"/>
-    /// (field 2). spec: Docs/RE/specs/client_runtime.md §7.1.
-    /// </summary>
-    public int ErrorDetail { get; init; }
-
-    /// <summary>
-    /// The developer-mode flag (+0x0C byte). Read once from <c>game.lua</c> <c>debugmode</c> at
-    /// startup; gates developer overlays; never drives scene transitions.
-    /// spec: Docs/RE/specs/client_runtime.md §0.1 (game.lua debugmode), §7.1.
-    /// </summary>
-    public bool DebugMode { get; init; }
-
-    /// <summary>
-    /// Creates the engine-state struct in its binary constructor-default form:
-    /// <c>{ State = Init, SubState = 8, ErrorDetail = 0, DebugMode = false }</c>.
-    /// spec: Docs/RE/specs/client_runtime.md §7.1.
+    ///     Creates the engine-state struct in its binary constructor-default form:
+    ///     <c>{ State = Init, SubState = 8, ErrorDetail = 0, DebugMode = false }</c>.
+    ///     spec: Docs/RE/specs/client_runtime.md §7.1.
     /// </summary>
     public GameState()
     {
@@ -53,42 +31,72 @@ public readonly record struct GameState
         DebugMode = false;
     }
 
+    /// <summary>The live engine scene (field 0). spec: Docs/RE/specs/client_runtime.md §7.1.</summary>
+    public EngineSceneState State { get; init; }
+
     /// <summary>
-    /// The constructor-default engine-state struct (boot state). Equivalent to <c>new GameState()</c>.
-    /// spec: Docs/RE/specs/client_runtime.md §7.1.
+    ///     Sub-state / error code (field 1). Default is <see cref="SubStateNone" /> (8) — the binary's
+    ///     constructor default. spec: Docs/RE/specs/client_runtime.md §7.1.
+    /// </summary>
+    public int SubState { get; init; }
+
+    /// <summary>
+    ///     The offending result code when <see cref="State" /> is <see cref="EngineSceneState.Error" />
+    ///     (field 2). spec: Docs/RE/specs/client_runtime.md §7.1.
+    /// </summary>
+    public int ErrorDetail { get; init; }
+
+    /// <summary>
+    ///     The developer-mode flag (+0x0C byte). Read once from <c>game.lua</c> <c>debugmode</c> at
+    ///     startup; gates developer overlays; never drives scene transitions.
+    ///     spec: Docs/RE/specs/client_runtime.md §0.1 (game.lua debugmode), §7.1.
+    /// </summary>
+    public bool DebugMode { get; init; }
+
+    /// <summary>
+    ///     The constructor-default engine-state struct (boot state). Equivalent to <c>new GameState()</c>.
+    ///     spec: Docs/RE/specs/client_runtime.md §7.1.
     /// </summary>
     public static GameState Initial => new();
 
     /// <summary>
-    /// Returns a copy advanced to <paramref name="next"/> with the sub-state reset to
-    /// <see cref="SubStateNone"/> (8) and the error detail cleared — the common default-edge
-    /// engine-internal transition (e.g. 0 → 1, 3 → 4, 4 → 5).
-    /// spec: Docs/RE/specs/client_runtime.md §7.5.1.
+    ///     Returns a copy advanced to <paramref name="next" /> with the sub-state reset to
+    ///     <see cref="SubStateNone" /> (8) and the error detail cleared — the common default-edge
+    ///     engine-internal transition (e.g. 0 → 1, 3 → 4, 4 → 5).
+    ///     spec: Docs/RE/specs/client_runtime.md §7.5.1.
     /// </summary>
-    public GameState To(EngineSceneState next) =>
-        this with { State = next, SubState = SubStateNone, ErrorDetail = 0 };
+    public GameState To(EngineSceneState next)
+    {
+        return this with { State = next, SubState = SubStateNone, ErrorDetail = 0 };
+    }
 
     /// <summary>
-    /// Returns a copy advanced to <paramref name="next"/> carrying an explicit
-    /// <paramref name="subState"/> (e.g. network-driven re-entry, error sub-codes).
-    /// spec: Docs/RE/specs/client_runtime.md §7.5.2.
+    ///     Returns a copy advanced to <paramref name="next" /> carrying an explicit
+    ///     <paramref name="subState" /> (e.g. network-driven re-entry, error sub-codes).
+    ///     spec: Docs/RE/specs/client_runtime.md §7.5.2.
     /// </summary>
-    public GameState To(EngineSceneState next, int subState) =>
-        this with { State = next, SubState = subState, ErrorDetail = 0 };
+    public GameState To(EngineSceneState next, int subState)
+    {
+        return this with { State = next, SubState = subState, ErrorDetail = 0 };
+    }
 
     /// <summary>
-    /// Returns a copy in the <see cref="EngineSceneState.Error"/> state (7) carrying the
-    /// <paramref name="subState"/> and the offending <paramref name="errorDetail"/> result code.
-    /// spec: Docs/RE/specs/client_runtime.md §7.3 (state 7), §7.5.2.
+    ///     Returns a copy in the <see cref="EngineSceneState.Error" /> state (7) carrying the
+    ///     <paramref name="subState" /> and the offending <paramref name="errorDetail" /> result code.
+    ///     spec: Docs/RE/specs/client_runtime.md §7.3 (state 7), §7.5.2.
     /// </summary>
-    public GameState ToError(int subState, int errorDetail) =>
-        this with { State = EngineSceneState.Error, SubState = subState, ErrorDetail = errorDetail };
+    public GameState ToError(int subState, int errorDetail)
+    {
+        return this with { State = EngineSceneState.Error, SubState = subState, ErrorDetail = errorDetail };
+    }
 
     /// <summary>
-    /// Returns a copy with the <see cref="DebugMode"/> flag updated. All other fields are
-    /// preserved. Use once at startup when the <c>game.lua</c> <c>debugmode</c> value is known.
-    /// spec: Docs/RE/specs/client_runtime.md §0.1 (game.lua debugmode), §7.1.
+    ///     Returns a copy with the <see cref="DebugMode" /> flag updated. All other fields are
+    ///     preserved. Use once at startup when the <c>game.lua</c> <c>debugmode</c> value is known.
+    ///     spec: Docs/RE/specs/client_runtime.md §0.1 (game.lua debugmode), §7.1.
     /// </summary>
-    public GameState WithDebugMode(bool debugMode) =>
-        this with { DebugMode = debugMode };
+    public GameState WithDebugMode(bool debugMode)
+    {
+        return this with { DebugMode = debugMode };
+    }
 }

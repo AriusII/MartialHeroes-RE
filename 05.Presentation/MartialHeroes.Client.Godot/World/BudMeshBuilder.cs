@@ -47,44 +47,42 @@
 //   spec value.
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Builds Godot <see cref="ArrayMesh"/> geometry directly from a parsed <see cref="BudScene"/>,
-/// bypassing the native Godot GLB importer (<c>GltfDocument.AppendFromBuffer</c>).
-///
-/// Returns a <see cref="Node3D"/> root node whose children are one <see cref="MeshInstance3D"/>
-/// per <see cref="BudObject"/>. An optional <see cref="ImageTexture"/> resolver may be supplied
-/// to apply diffuse textures; if null or if the resolver returns null, a neutral grey material
-/// with a small emission boost is applied so placeholder geometry is never near-black.
-///
-/// spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
-/// spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW front faces: CONFIRMED.
-/// spec: Helpers/WorldCoordinates.ToGodot — Z-flip inverts winding; corrected by swapping indices[1]↔indices[2]: CONFIRMED.
+///     Builds Godot <see cref="ArrayMesh" /> geometry directly from a parsed <see cref="BudScene" />,
+///     bypassing the native Godot GLB importer (<c>GltfDocument.AppendFromBuffer</c>).
+///     Returns a <see cref="Node3D" /> root node whose children are one <see cref="MeshInstance3D" />
+///     per <see cref="BudObject" />. An optional <see cref="ImageTexture" /> resolver may be supplied
+///     to apply diffuse textures; if null or if the resolver returns null, a neutral grey material
+///     with a small emission boost is applied so placeholder geometry is never near-black.
+///     spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
+///     spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW front faces: CONFIRMED.
+///     spec: Helpers/WorldCoordinates.ToGodot — Z-flip inverts winding; corrected by swapping indices[1]↔indices[2]:
+///     CONFIRMED.
 /// </summary>
 public static class BudMeshBuilder
 {
     /// <summary>
-    /// Builds a scene graph from all objects in <paramref name="scene"/>.
-    ///
-    /// <paramref name="textureResolver"/> is called with a 1-based tex_id; it may return null,
-    /// in which case the mesh renders with a neutral untextured material (slightly emissive grey).
-    ///
-    /// spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: PARTIAL.
+    ///     Builds a scene graph from all objects in <paramref name="scene" />.
+    ///     <paramref name="textureResolver" /> is called with a 1-based tex_id; it may return null,
+    ///     in which case the mesh renders with a neutral untextured material (slightly emissive grey).
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: PARTIAL.
     /// </summary>
     public static Node3D Build(BudScene scene, Func<uint, ImageTexture?>? textureResolver = null)
     {
         var root = new Node3D { Name = "BudSceneNode" };
 
-        for (int i = 0; i < scene.Objects.Length; i++)
+        for (var i = 0; i < scene.Objects.Length; i++)
         {
-            BudObject obj = scene.Objects[i];
+            var obj = scene.Objects[i];
 
             try
             {
-                MeshInstance3D? inst = BuildObject(obj, i, textureResolver);
+                var inst = BuildObject(obj, i, textureResolver);
                 if (inst is not null)
                     root.AddChild(inst);
             }
@@ -113,14 +111,14 @@ public static class BudMeshBuilder
             return null;
         }
 
-        int vertCount = obj.Vertices.Length;
+        var vertCount = obj.Vertices.Length;
         var positions = new Vector3[vertCount];
         var normals = new Vector3[vertCount];
         var uvs = new Vector2[vertCount];
 
-        for (int v = 0; v < vertCount; v++)
+        for (var v = 0; v < vertCount; v++)
         {
-            BudVertex bv = obj.Vertices[v];
+            var bv = obj.Vertices[v];
 
             // Handedness flip for ABSOLUTE world-space geometry: negate Z (world convention).
             // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
@@ -166,12 +164,12 @@ public static class BudMeshBuilder
         // spec: Docs/RE/formats/terrain_scene.md §Index array — "CONFIRMED counter-clockwise (CCW)
         //   for front faces." §Vertex record — Z negation (world convention, port-side): CONFIRMED.
         // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) → (x, y, -z): CONFIRMED.
-        int triCount = obj.Indices.Length / 3;
+        var triCount = obj.Indices.Length / 3;
         var indices = new int[triCount * 3];
-        for (int t = 0; t < triCount; t++)
+        for (var t = 0; t < triCount; t++)
         {
-            int src = t * 3;
-            int dst = t * 3;
+            var src = t * 3;
+            var dst = t * 3;
             // Swap indices 1 and 2 to correct CCW winding after the Z-flip.
             // Before flip-Z: CCW in legacy (D3D9 left-handed) = front face.
             // After flip-Z:  CCW becomes CW in Godot (right-handed) = back face.
@@ -183,7 +181,7 @@ public static class BudMeshBuilder
         }
 
         // Assemble ArrayMesh.
-        var arrays = new global::Godot.Collections.Array();
+        var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = positions;
         arrays[(int)Mesh.ArrayType.Normal] = normals;
@@ -220,13 +218,12 @@ public static class BudMeshBuilder
         mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled; // double-sided — thin arch. surfaces
         mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
 
-        bool hasTexture = false;
+        var hasTexture = false;
 
         if (textureResolver is not null)
-        {
             try
             {
-                ImageTexture? tex = textureResolver(obj.TexId);
+                var tex = textureResolver(obj.TexId);
                 if (tex is not null)
                 {
                     mat.AlbedoTexture = tex;
@@ -237,16 +234,15 @@ public static class BudMeshBuilder
             {
                 GD.PrintErr($"[BudMeshBuilder] textureResolver threw for tex_id={obj.TexId}: {ex.Message}");
             }
-        }
 
         if (!hasTexture)
         {
             // Neutral grey placeholder: visible under dynamic lighting.
             // Add a small emission so it never goes near-black at grazing light angles.
             // Emission value is empirical (visual safety net, not a spec constant).
-            mat.AlbedoColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+            mat.AlbedoColor = new Color(0.6f, 0.6f, 0.6f);
             mat.EmissionEnabled = true;
-            mat.Emission = new Color(0.15f, 0.15f, 0.15f, 1f); // empirical: modest floor, ~0.25 effective
+            mat.Emission = new Color(0.15f, 0.15f, 0.15f); // empirical: modest floor, ~0.25 effective
         }
 
         mesh.SurfaceSetMaterial(0, mat);
@@ -254,7 +250,7 @@ public static class BudMeshBuilder
         return new MeshInstance3D
         {
             Mesh = mesh,
-            Name = $"BudObject_{objIndex}_tex{obj.TexId}",
+            Name = $"BudObject_{objIndex}_tex{obj.TexId}"
         };
     }
 }

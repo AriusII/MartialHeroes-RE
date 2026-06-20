@@ -1,13 +1,13 @@
 ---
 status: sample-verified
-verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; only the +0x08 dword role and the unexercised raw-seek branch remain [static-hypothesis]
+verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # real data.inf (6,241,992 B) + data/data.vfs (3,802,182,193 B) corroborate header, TOC stride/offsets, RAW 100%-tiling
 sample_verified: yes        # tree, counts and extension census come from a real archive enumeration (43,347 entries, 49 extensions)
 subsystems: [vfs_structure, vfs_io_subsystem, extension_census, manifest_linkage]
 networked: false
-conflicts: none   # header magic resolved to "VFS001" (the +0x08=39 dword is NOT the entry_count); all I/O-mechanics claims re-confirmed against the IDB + sample
+conflicts: none   # header magic resolved to "VFS001" present-on-disk-but-not-validated (the +0x08=39 dword is a read-and-discarded tag, NOT the entry_count, NOT a FILETIME); all I/O-mechanics claims re-confirmed against the IDB + sample
 encoding_note: All in-game text is CP949 (MS-949 code page), not UTF-8.
 ---
 
@@ -56,27 +56,37 @@ no encryption, and no per-entry codec.
 ### Container header — 24 bytes (the same header is echoed verbatim at `data.vfs` offset 0)
 
 The `data.inf` index opens with a 24-byte header. The mount routine reads the whole 24 bytes in one
-bulk call but consumes **only `entry_count`**; the other fields are read-and-discarded. Their on-disk
-content (resolved from a real sample) is:
+bulk call but consumes **only `entry_count`** (at +0x0C); every other field is read-and-discarded —
+none is stored, compared, or used to compute any count, allocation size, or offset. The header carries
+**no FILETIME** field. Its on-disk content (resolved from a real sample) is:
 
 | Offset | Size | Type | Field | Sample value | Role | Tier |
 |---:|---:|------|-------|---|------|------|
-| +0x00 | 8 | char[8] | `magic` | ASCII **`VFS001`** (null-padded) | archive signature | [sample-verified] |
-| +0x08 | 4 | u32 LE | `header_field_8` | 39 | role unknown (sub-version / build / area-group?); **NOT** the entry count | [static-hypothesis] |
-| +0x0C | 4 | u32 LE | `entry_count` | 43,347 | the **only consumed** field — drives the `144 × entry_count` alloc and the TOC bulk read | [sample-verified] |
-| +0x10 | 4 | u32 LE | `data_size` | 3,802,182,193 | total `data.vfs` blob size in bytes; equals the on-disk blob length exactly | [sample-verified] |
-| +0x14 | 4 | u32 LE | `data_size_high` | 0 | high dword of the blob size (the +0x10/+0x14 pair is a u64) | [sample-verified] |
+| +0x00 | 8 | char[8] | `magic` | ASCII **`VFS001`** (null-padded) | archive signature — **present on disk but read-and-discarded; the client does NOT validate it** | [sample-verified] (non-validation [parser-verified]) |
+| +0x08 | 4 | u32 LE | `header_field_8` | 39 | **READ-AND-DISCARDED tag** — never read out of the buffer, stored, compared, or used to derive the count/alloc/any offset; opaque build/region/sub-version/format-revision tag (the meaning of 39 is not derivable from the client). **NOT** the entry count, **NOT** a FILETIME | [parser-verified] (discarded) + [sample-verified] (value 39) |
+| +0x0C | 4 | u32 LE | `entry_count` | 43,347 | the **only consumed** field — drives the `144 × entry_count` alloc and the TOC bulk read | [parser-verified] + [sample-verified] |
+| +0x10 | 4 | u32 LE | `data_size` | 3,802,182,193 | total `data.vfs` blob size in bytes (low dword); equals the on-disk blob length exactly; not consumed by mount | [sample-verified] |
+| +0x14 | 4 | u32 LE | `data_size_high` | 0 | high dword of the blob size (the +0x10/+0x14 pair is a u64); not consumed by mount | [sample-verified] |
 
-> **Magic is `VFS001`, read as a single 8-byte null-padded ASCII field at +0x00.** Earlier readings
-> that split this into a 4-byte `"VFS0"` plus a 2-byte version `"01"` were mis-splits of these same 8
-> bytes — the authoritative direct byte-read is the one 8-byte field `VFS001`. **`entry_count` is at
-> +0x0C (the 4th dword), not +0x08** — sample-verified both ways: a stack-frame proof in the mount
-> routine (header buffer at one frame slot, the extracted dword 0x0C bytes in) **and** the byte
-> arithmetic `24 + 144 × 43,347 = 6,241,992` = the exact `data.inf` file size. The `header_field_8`
-> (=39) reading is therefore **refuted as the count**. The client asserts none of these fields (not
-> even the magic); a reimplementation may optionally assert `magic == "VFS001"` and use `data_size`
-> as a blob-length sanity check, but the original does neither. Because the 24-byte header is echoed
-> at `data.vfs` offset 0, every entry `dataOffset` begins at **>= 24** (entry-0 = 24).
+> **Magic is `VFS001`, read as a single 8-byte null-padded ASCII field at +0x00 — present on disk but
+> NOT validated by the client.** The 8 magic bytes ARE on disk (the sample header begins
+> `56 46 53 30 30 31 00 00` = `VFS001` null-padded), but the client carries no constant to check them
+> against: a byte search for the ASCII `VFS001` across the executable image returns zero hits, so the
+> mount routine reads the magic only to discard it — it never compares or asserts it. Earlier readings
+> that split this field into a 4-byte `"VFS0"` plus a 2-byte version `"01"` were mis-splits of these
+> same 8 bytes — the authoritative direct byte-read is the one 8-byte field `VFS001`.
+> **`entry_count` is at +0x0C (the 4th dword), not +0x08** — verified both ways: a stack-frame proof
+> in the mount routine (header buffer at one frame slot, the extracted dword 0x0C bytes in) **and** the
+> byte arithmetic `24 + 144 × 43,347 = 6,241,992` = the exact `data.inf` file size. The
+> `header_field_8` (=39) reading is therefore **refuted as the count** — and, parser-verified, it is a
+> read-and-discarded tag the loader never consults at all. **There is no FILETIME inside this 24-byte
+> index header:** the +0x08 dword is a single 4-byte value (not an 8-byte 100ns tick count), and the
+> +0x10/+0x14 pair is provably the `data_size` u64 — no FILETIME field is read by mount. (Per-entry TOC
+> records may carry their own timestamp fields; that is owned by `formats/pak.md` and is out of scope
+> here.) The client asserts none of these fields (not even the magic); a reimplementation **may**
+> optionally assert `magic == "VFS001"` and use `data_size` as a blob-length sanity check, but the
+> original does neither. Because the 24-byte header is echoed at `data.vfs` offset 0, every entry
+> `dataOffset` begins at **>= 24** (entry-0 = 24).
 
 ### Mount
 
@@ -196,9 +206,13 @@ toward 100%" is wrong; see `specs/resource_pipeline.md`.)
 > branches, RAW/no-decode, the bit-dispatch, the single-set-site `vfsmode` toggle, the progress
 > arithmetic) are **[confirmed]** from static analysis of the 263bd994 IDB. The header field values,
 > the TOC stride/offsets, the `entry_count` position, and the 100% RAW tiling of `data.vfs` are
-> additionally **[sample-verified]** against the real archive. The `header_field_8` (=39) role and the
-> bit2 = 1 raw-seek branch's use are **[static-hypothesis]** (single-sample / unexercised on the asset
-> path). No payload bytes were copied — only counts, offsets, sizes, and the header magic string.
+> additionally **[sample-verified]** against the real archive. The `header_field_8` (+0x08, =39) role
+> is now **[parser-verified] READ-AND-DISCARDED** (CYCLE 7): the mount routine reads the 24-byte header
+> into a stack-local and extracts only the +0x0C dword — +0x08 is never read out, stored, compared, or
+> used to compute any count/alloc/offset, and the magic is provably not validated either (the ASCII
+> `VFS001` is absent from the image). The only field whose role remains **[static-hypothesis]** is the
+> bit2 = 1 raw-seek branch's use (unexercised on the asset path). No payload bytes were copied — only
+> counts, offsets, sizes, and the header magic string.
 
 ---
 

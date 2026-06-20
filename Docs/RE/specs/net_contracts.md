@@ -7,10 +7,22 @@ verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send s
   static-hypothesis (a best-consumer / in-flight-latch inference, not a captured round-trip);
   value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
   which result code is success vs fail — has no live capture this campaign).
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-20 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 7)
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
+cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20). Gameplay/dark-subsystem
+  reconciliation folded in (the binary wins): combat melee/use-skill = C2S 2/52 (no "5/52" combat
+  opcode — that bank is the Cube-Gamble result panel 4/99+4/100, NOT combat); buff slot update = S2C
+  5/31 SmsgBuffSlotUpdate 56B (supersedes the older "4/102" label); 5/73 = SmsgQuestComplete (the
+  "GuildWar" label is REFUTED); 3/23 = SmsgCharStatusBytesByName 28B (NOT a 12B create-result; create
+  is acked via the in-flight latch cleared by 3/7 + a refreshed char list); 2/60 = couple/marriage
+  relation request (reply 5/53), NOT mail; crafting commit = 2/151 select -> 2/153 COMMIT -> 4/79
+  SmsgCraftingResult; death push 5/10, respawn 2/3 -> 4/28 + 5/28, ground pickup 2/15 -> 4/15. New
+  contract rows surfaced: mail/delivery (2/71 -> 4/70, 2/70), 2/106 creature-item tick, character
+  mgmt (1/6, 3/7, 3/23, 5/32), skills (2/145, 2/41), relations/faction (2/62, 2/66, 5/64, 4/126),
+  2/118 tender confirm. NO combat-pet/summon subsystem exists in this build (the dev class named
+  "PetPanel" is the COUPLE/PARTNER window, driven by 5/53).
 re-pairing (CYCLE 4 Netcode Deep-Cartography promotion, the binary wins): authored LAST in the
   promotion wave, after the seven neighbour files (opcodes.md, handlers.md, network_dispatch.md, the
   packets/*.yaml majors 0-5, the structs) were updated; every pairing re-derived against those
@@ -151,13 +163,13 @@ major-3 (11) ✓ · major-4 (100 installed slots + 2 specials {4/500, 4/50000}, 
 143/144 share) ✓ · major-5 (65 installed Push slots) ✓. **There is no slot/builder lacking a complete
 structural DTO.** The single uniform residual is wire-byte **VALUE semantics** — the 45-item
 `[capture/debugger-pending]` register in **Appendix C** — which by doctrine is NOT a DTO gap (sizes and
-field layouts are recovered; only the *meaning* of certain bytes is unsettled). *source:*
-`_dirty/netcode_deep/oq/completeness.md §1.6`.
+field layouts are recovered; only the *meaning* of certain bytes is unsettled). *source:* the CYCLE 4
+netcode-deep completeness roll-up (dirty-room).
 
 ### 1.5 Contract-class tally (whole-netcode, rolled up)
 
 The per-domain tables tag every opcode with one contract shape (§1.2). Rolled up across all five majors
-(from `_dirty/netcode_deep/oq/completeness.md §4.3`; counts are **±2 approximate** because the same
+(from the CYCLE 4 netcode-deep completeness roll-up; counts are **±2 approximate** because the same
 opcode can be classed F&F-at-builder / Req→Resp-by-intent — e.g. the quest submits):
 
 | Contract class | Count | Where |
@@ -223,7 +235,7 @@ The major-3 reply minors use the campaign-10 de-swapped labels: **3/4 = SmsgScen
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
 | **1/0** CmsgLogout | 0 | none (server drops the session) | — | fire-and-forget — the only char-mgmt builder that does not set the in-flight latch. | `cmsg_logout.yaml` |
-| **1/6** CmsgCreateCharacter | 52 | **3/6** SmsgRenameCharResult *(create-result, shared handler)* + **3/4** SmsgSceneEntityUpdate refresh (+ possible **3/23** SmsgCharSelectStatusUpdate) | 12 / var / 28 | inferred/med — sets the latch; 3/4, 3/6, 3/23 all wired in the major-3 switch; the exact create-result minor is not capture-confirmed. | `cmsg_char_create.yaml`, `3-6_rename_char_result.yaml`, `3-4_scene_entity_update.yaml` |
+| **1/6** CmsgCreateCharacter *(52-byte appearance blob)* | 52 | create-ack = the in-flight latch cleared by **3/7** SmsgCharManageResult (8B) + a refreshed char list (**3/4** SmsgSceneEntityUpdate) (+ **3/23** SmsgCharStatusBytesByName roster patch) | 8 / var / 28 | inferred/med — sets the latch; **CORRECTED (binary wins):** there is **no 12-byte create-result opcode** — the create round-trip is acked by the latch-clearing **3/7 SmsgCharManageResult (8B)** plus a refreshed char list; **3/23 = SmsgCharStatusBytesByName (28B)** (17B name key + status bytes; patches the roster BY NAME — NOT a create-result, prior "SmsgCharSelectStatusUpdate" label dropped). | `cmsg_char_create.yaml`, `3-7_char_manage_result.yaml`, `3-4_scene_entity_update.yaml` |
 | **1/7** CmsgManageCharacter *(select; DELETE overloads mode=1)* | 2 | **3/4** SmsgSceneEntityUpdate *(manage result, subtype 2)* — committed; **UNVERIFIED 3/7** alternative | var / 8 | inferred/med + **CONFLICT** — `opcodes.md` attributes the manage/delete result to 3/4 subtype 2 (authoritative); a fresh static read suggests an UNVERIFIED 3/7. Do not re-point on static evidence. The mode=1==DELETE semantic itself is capture-pending. (§Open Questions Q1) | `cmsg_char_select.yaml`, `3-4_scene_entity_update.yaml`, `3-7_char_manage_result.yaml` |
 | **1/9** CmsgEnterGameRequest | 40 | **3/5** SmsgEnterGameAck → then **4/1** SmsgGameStateTick *(world snapshot, form B)* | 44 / var | confirmed/high — the documented enter ladder `1/9 → 3/5 → 4/1`. 1/9 SETS the enter-game latch; **`4/1` (not 3/5) CLEARS it** as its first statement (`handlers.md` Group I + §4/1). 4/1 = installed Response slot 1, the form-B world-entry packet. | `cmsg_char_enter.yaml`, `3-5_enter_game_response.yaml`, `4-1_game_state_tick.yaml` |
 | **1/13** CmsgRenameCharacter | 18 | **3/6** SmsgRenameCharResult (+ **3/4** subtype-1 slot refresh) | 12 / var | inferred/med — sets the latch; 3/6 clears the pending latch and applies the new name on success. | `cmsg_char_rename.yaml`, `3-6_rename_char_result.yaml` |
@@ -245,6 +257,23 @@ result handlers share the char-mgmt fail-code class (§Appendix A, family 3). *s
 attack-target / skill-cancel / auto-attack are all folded into 2/13 or 2/52; there is **no dedicated
 send** for any of them, so no additional movement/combat pairings exist. *spec:* `handlers.md`,
 `opcodes.md` (2/13, 2/52 notes).
+
+**Combat is server-authoritative — the real path is `2/52 → server resolves → server pushes results`.**
+The client only **gathers target ids** (it walks the local party/friendly-fire guard array) and emits
+**C2S 2/52**; the server resolves damage and pushes the outcome inbound. There is **no client-side
+damage formula** (`base−defense`/crit) on the apply path — the applied magnitude is runtime-only.
+Move emitter = **C2S 2/13 (16-byte body)**, event-driven (arrival-stop + long-frame resync + gated
+heartbeat, **not** a fixed interval); server position push = **S2C 5/13 (40-byte body)**, reconciled by
+squared-distance bands (interp / catch-up / hard-teleport). NPC interact = **C2S 2/16** (§2.4).
+The 20-slot party / friendly-fire id array the skill executor walks is keyed off the **local-player
+record +204** (20 slots × 16-byte stride) — the per-member stat fields ride 5/38 (§2.8).
+
+**There is NO "5/52" combat opcode, and 4/99 + 4/100 are NOT combat (binary wins, CYCLE 7).** The brief's
+"5/52 melee" was a transposition for the **2/52** use-skill builder. Separately, the **4/99 + 4/100**
+slot bank is the **Cube-Gamble minigame result panel** (a wager/reel daily-bet minigame submitted via
+**C2S 2/141**, panel `data/ui/cubegamble.dds`), **not** combat — any "SmsgCombat*" label on 4/99/4/100,
+and the "phase byte 3/5 / 0xFF reset" reading, describe the **gamble reel**, not a combat result.
+*spec:* `combat.md`, `handlers.md`, `opcodes.md`.
 
 **In-game pairs are fire-and-forget broadcasts — no latch, no request-id (the actor-id is the key).**
 The three in-game request→broadcast pairs — **2/13 → 5/13** (movement), **2/52 → 5/52** (skill action),
@@ -329,12 +358,28 @@ broadcast roster change for all three.
 | **2/30** CmsgGuildOp | 8 | **5/55** GuildNameDisplayUpdate / **5/65** GuildMemberRosterUpdate / **4/103** GuildPanelTextUpdate *(selector-dependent)* — **NO 4/30 ack** | var | pending — **REFUTED naive mirror:** 4/30 is installed but is `SmsgSocialPanelTarget`, not a guild-op ack. The guild updates ride 5/55/5/65/4/103 (all installed); which answers a given op is selector-dependent. | *(opcodes.md 0x2001e)* |
 | **2/81** Cmsg_GuildDiplomacyDeclare *(state 0/1)* | 18 | **4/61** SmsgGuildStateChangeResult *(the diplomacy verdict)* | 52 | confirmed/high — **CORRECTED (binary wins, resolves the old §2.9 Open-Q):** the guild-diplomacy verdict lands on the major-4 guild state-change result at **response slot 61 (52-byte body: gate@+8, result@+9 ∈ 1..7, action@+10 ∈ 1..5, CP949 guild name @+11..+27, NUL@+28; action==5/result==2 → cooldown-in-DAYS = server-minutes/1440)**. The stale `4/81 = SmsgGuildDiplomacyResult` pairing is **DROPPED** — 4/81 is the generic `SmsgActionErrorResult` (status@+8, error@+9; 0xFF generic; 0x15 reads seconds@+10 mm:ss; 0x17 server-config percent), not a diplomacy reply. The `submitDiplomacy STATE[%d] target_guild_name_[%s]` string is **SEND-side only** — it stamps the 2/81 builder; it is NOT a receive handler. | `2-81_guild_diplomacy_declare.yaml`, `4-61_guild_state_change_result.yaml` |
 
-### 2.10 Social / Friend
+### 2.10 Social / Friend / Relations / Faction
 
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
 | **2/49** CmsgFriendAddRemove *(0=add / 1=cut)* | 19 | **5/26** SmsgLocalPlayerRelationSlot *(friend-slot populate)* | var | inferred/med — 5/26 installed; the populate role is flagged UNVERIFIED in `handlers.md §5/26` (best static match, not capture-confirmed). | *(opcodes.md 0x20031)* |
 | **2/54** CmsgFriendListRefresh | 1 | **5/26** SmsgLocalPlayerRelationSlot | var | inferred/med — same candidate as 2/49 (role UNVERIFIED); 180000 ms client throttle. | *(opcodes.md 0x20036)* |
+| **2/60** *(couple / marriage relation request — `{mode/action byte 0..4, partner actor id}`)* | 8 | **5/53** SmsgActorVitalsAndPairState *(partner vitals + pair-state)* | var | inferred/med — **CORRECTED (binary wins, CYCLE 7):** 2/60 is the **couple/marriage relation command** built from the couple UI (the dev `Cmsg_LetterRequest_Send` autoname is misleading — it is **NOT mail**). Its reply is **5/53**, which drives the couple/partner window. | *(opcodes.md 2/60)* |
+| **2/62** Cmsg_RelationNamedRequest *(19-byte body — relation op keyed by a target name)* | 19 | relation push (**5/64** SmsgRemoteActorRelationPair candidate) | 16 | inferred/med — NEW; named relation request; the remote-actor pair byte is set by 5/64 (16B). | *(opcodes.md 2/62)* |
+| **2/66** Cmsg_RelationToggle *(1-byte toggle)* | 1 | relation/pair push (**5/64** SmsgRemoteActorRelationPair candidate) | 16 | inferred/med — NEW; 1-byte relation toggle. | *(opcodes.md 2/66)* |
+
+*Relations / faction notes (CYCLE 7).* **5/64 SmsgRemoteActorRelationPair (16-byte body)** is the
+server Push that sets the relation pair-state byte on two remote actors (it is reactive to the relation
+sends above, not a per-request ack — pairing is selector/context-dependent). **4/126
+SmsgFactionSideAssign** is a server Push carrying a single faction/side byte (the brood-war side
+assignment); there is no matching C2S request.
+
+**No combat-pet / summon subsystem exists in this build (CYCLE 7 caveat).** The dev class literally
+named `PetPanel` is the **COUPLE / PARTNER window** — its bind function is driven by **5/53** and it
+displays a *partner player actor* (self + partner HP bars, couple/marriage notices). It is **not** a pet
+UI. There is **no creature-pet, companion, or summon** protocol surface: the only "creature" is the
+cosmetic attached-prop (the **2/106 Cmsg_CreatureItemTick** keepalive, §3), and the "summon" effect-ids
+are item-use particle ids (item-use effect pushes), not creature spawns.
 
 ### 2.11 Quest
 
@@ -360,14 +405,51 @@ is **NO dedicated 4/143 quest-keep ack** — 4/143 is installed but is the share
 | **2/145** CmsgSkillHotbarRegister *(NEW; not yet in opcodes.md)* | var *(`[u32 count][12B rec × count]`)* | **4/41** SmsgSkillHotbarAssignResult | var | inferred/med — SkillConfirmPanel commit (action 51); 4/41 mutates a hotbar slot (result @0x08, reason @0x09 → string ids 3020..3032). Distinguished from 4/150 by behaviour (4/41 = hotbar slot; 4/150 = skill-point total). | *(4/41 response slot)* |
 
 *Note.* No stat-reset / skill-reset / respec C2S sender exists statically; any respec is
-server/NPC-service driven (capture-pending). 2/41 and 2/145 are NEW finds — staged for `opcodes.md` +
-`names.yaml` (do not apply here).
+server/NPC-service driven (capture-pending). **2/41 = Cmsg_HudSelect41 (single 12-byte record)** and
+**2/145 = Cmsg_SkillListSubmit (`[u32 count][12B record × count]`)** are NEW finds — staged for
+`opcodes.md` + `names.yaml` (do not apply here). On a level threshold the server pushes **5/32
+SmsgLevelUp (48-byte body)** — levels 12 / 24 are the **class-evolution panel trigger** (no C2S
+request; pure server Push).
 
-### 2.13 Billing / Market / Mail / Product
+### 2.12b Buff / Status / Debuff
+
+The buff/status channel is a pure server Push — buffs are server-applied (item/skill use, area effects)
+and broadcast inbound; there is no dedicated C2S "request buff" send. *spec:* `buffs.md`, `structs/actor.md`.
 
 | Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
 |---|---|---|---|---|---|
-| **2/118** CmsgTenderConfirm *(header-only)* | 0 | tender-listing push (no 4/118 ack) | — | pending — no dedicated 4/118; the server populates the tender listing on a separate channel. | `2-118_tender_confirm.yaml` |
+| *(none — server-applied)* | — | **5/31** SmsgBuffSlotUpdate *(buff/status slot table delta)* | 56 | pure-Push/high — **CORRECTED (binary wins, CYCLE 7):** the buff/status update opcode is **S2C 5/31, 56-byte body** — this **SUPERSEDES the older "4/102" buff label**. The local buff table is a 30-slot array (12-byte slot stride), ticked client-side ~4000 ms. The eliciting cause (which item/skill/area applied a given slot) is push-only; CC-code VALUE meanings are `[capture/debugger-pending]`. | *(5/31 push)* |
+
+### 2.12c Death / Respawn / Ground pickup
+
+| Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
+|---|---|---|---|---|---|
+| *(none — server-detected)* | — | **5/10** *(death push)* | var | pure-Push/high — the server detects death (alive-gate cleared, action-state = death on the actor record) and pushes **5/10** inbound; there is no C2S "I died" send. | *(5/10 push)* |
+| **2/3** *(respawn choice)* | var | **4/28** + **5/28** *(respawn result + world re-place)* | var / var | inferred/med — the respawn-choice send answers with the 4/28 result and the 5/28 world re-placement push; both installed. | *(opcodes.md 2/3)* |
+| **2/15** CmsgPickupItem *(ground pickup)* | 12 | **4/15** SmsgItemWorldPickupAck | 36 | inferred/med — mirror-minor + `opcodes.md` "4/15 pickup ack"; 4/15 installed. (Also listed under §2.4 Inventory.) | `2-15_pickup_item.yaml`, `4-15_item_world_pickup_ack.yaml` |
+
+*spec:* `world_systems.md`, `combat.md`, `world_exit.md`.
+
+### 2.12d Crafting / Production
+
+The "production" minigame is a two-step C2S: a select/toggle sub-step then the commit; the commit (not
+the select) is what the server answers. *spec:* `crafting.md`.
+
+| Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
+|---|---|---|---|---|---|
+| **2/151** CmsgProductBuy *(production select/toggle, 1-byte selector — shared with the cash-shop selector form, §2.13)* | 1 | (sub-step — no terminal ack; UI/list refresh on a panel channel) | — | confirmed/high (routing) — 2/151 is a **select/toggle sub-step**, NOT the production commit. | `2-151_product_buy.yaml` |
+| **2/153** *(production COMMIT, 4-byte body; arms a 60 s timeout)* | 4 | **4/79** SmsgCraftingResult | var | confirmed/high — **CORRECTED (binary wins, CYCLE 7):** the production **commit is 2/153 (4B)** and the server answers **4/79 SmsgCraftingResult** (the commit arms a 60-second timeout). 2/153 also carries the cash-shop `CmsgProductConfirm` reading (§2.13) — the **same 4-byte builder** serves both the crafting commit and the product confirm; which path a given send drives is selector/context-dependent (`[capture/debugger-pending]`, R-38). | `2-153_product_confirm.yaml`, *(4/79 craft result)* |
+
+### 2.13 Billing / Market / Mail-Delivery / Product
+
+**Mail / delivery (CYCLE 7).** The real mail feature is the **delivery-inbox + carrier-pigeon**, not 2/60
+(2/60 is the couple/marriage request, §2.10). *spec:* `mail.md`.
+
+| Request (C2S) | size | Response(s) (S2C) | size | Evidence / confidence | packets/ |
+|---|---|---|---|---|---|
+| **2/71** Cmsg_DeliveryClaim *(4-byte claim index)* | 4 | **4/70** Smsg_DeliveryRecord *(inbox record)* | 140 | inferred/med — NEW; claims an inbox slot, server returns the 140-byte delivery record. | *(opcodes.md 2/71)* |
+| **2/70** Cmsg_CarrierPigeonSend *(132-byte body)* | 132 | delivery/inbox push (no dedicated same-minor ack) | — | inferred/med — NEW; carrier-pigeon send (the recipient name uses the char[17] short-name cell, the message body the ~84-byte buffer). | *(opcodes.md 2/70)* |
+| **2/118** CmsgTenderConfirm *(header-only, stall buy-confirm)* | 0 | tender-listing push (no 4/118 ack) | — | pending — no dedicated 4/118; the server populates the tender listing on a separate channel. | `2-118_tender_confirm.yaml` |
 | **2/122** CmsgGiftCharSend *(gift-character send w/ 2nd-password)* | 12 | **5/123** SmsgGiftCharReceiveConfirm | var | inferred/med — 5/123 installed (gift-char flow). | *(opcodes.md 0x2007a)* |
 | **2/123** CmsgGiftCharReceiveConfirm | 12 | **5/123** SmsgGiftCharReceiveConfirm | var | inferred/med — 5/123 installed. | *(opcodes.md 0x2007b)* |
 | **2/151** CmsgProductBuy *(1-byte selector: 0 = open/refresh, 200 = confirm)* | 1 | **selector 0 → 3/8** SmsgShopPageUpdate *(list/money refresh)*; **selector 200 → 4/113/4/114/4/115** *(product/cash-shop result + balance)* | 4 / 12·12·24 | confirmed/high (selector-0 → 3/8) + inferred/med (selector-200 → 4/113-family) — **CORRECTED (binary wins, resolves the old §Open-Q2):** the refuted **"1/20" reply tie is DROPPED** (1/20 = unrelated mail/letter). The two selector branches answer on different channels. | `2-151_product_buy.yaml`, `3-8_shop_page_update.yaml`, `4-113_item_shop_purchase_result.yaml`, `4-115_item_shop_balance_update.yaml` |
@@ -413,7 +495,8 @@ These C2S sends await **no reply**, or are themselves a reply (not a request):
 | **2/65** | *(reactive context ack)* | **reactive** | answers a game-tick / guild-member-remove handler | a 1-byte ack built inside an inbound handler; not a player command. |
 | **2/146** | *(reactive packet ack)* | **reactive** | answers **5/146** `SmsgPacketResponseAckRequest` | the client's automatic ack to the server's ack-request, built inside the 5/146 handler. **8-byte body `[u32 echoed req_id][u32 local state global]`** (NOT the inbound token); field-1 identity `[capture/debugger-pending]` (R-30). *spec:* `network_dispatch.md §4.5a`. |
 
-\* `2/8 CmsgHotbarSync` (241-byte snapshot upload) and `2/106 CmsgCreatureItemTick106` (effect-tick)
+\* `2/8 CmsgHotbarSync` (241-byte snapshot upload) and `2/106 Cmsg_CreatureItemTick` (1-byte keepalive
+for the cosmetic attached prop — the only "creature" surface in this build; see §2.10 PetPanel caveat)
 are likely fire-and-forget (no consumer-side wait found) but are marked **pending** — capture-required.
 
 ---
@@ -421,8 +504,8 @@ are likely fire-and-forget (no consumer-side wait found) but are marked **pendin
 ## Appendix A — Result / status code map
 
 > **All human MEANINGS of these codes are `[capture/debugger-pending]`.** The tables give each code's
-> **structural role** (what it does to control flow), not its message text. Source:
-> `_dirty/netcode/result_code_maps.md` (consolidated from the wave-1 handler reads). **Phantom
+> **structural role** (what it does to control flow), not its message text. Source: the CYCLE 4
+> result-code maps (consolidated from the wave-1 handler reads, dirty-room). **Phantom
 > refuted:** there is **no 5000 / 10000 / 10001 "string-id class"** — those three integers are a
 > display-duration, a keepalive minor + timer, and a timed-event tag respectively (family 2 below).
 
@@ -488,9 +571,9 @@ runtime "which code = connect / ok / lost / error" mapping is `[capture-pending]
 
 ## Appendix B — CP949 text-field rules
 
-All game text is CP949 (EUC-KR). Two on-wire forms — *source:* `_dirty/netcode/cp949_text_fields.md`,
-`packets/2-7_whisper.yaml`, `packets/2-83_chat_contextual.yaml`, `packets/3-21_chat_channel.yaml`,
-`handlers.md §17`.
+All game text is CP949 (EUC-KR). Two on-wire forms — *source:* the CYCLE 4 CP949 text-field study
+(dirty-room), `packets/2-7_whisper.yaml`, `packets/2-83_chat_contextual.yaml`,
+`packets/3-21_chat_channel.yaml`, `handlers.md §17`.
 
 ### B.1 The two forms
 
@@ -557,8 +640,8 @@ structural items still worth flagging here:
 > **The honest residual.** Every item below is a wire-byte **VALUE-semantics** question (what a value
 > *means* / which code is success vs fail / unit / conditional presence / opaque interior / pairing not
 > statically pinned), NOT a structure gap — sizes, offsets and field tables are recovered. This register
-> is the future-debugger (`?ext=dbg`) worklist; consolidated (never copied) from
-> `_dirty/netcode_deep/oq/completeness.md §3`. Grouped by kind.
+> is the future-debugger (`?ext=dbg`) worklist; consolidated (never copied) from the CYCLE 4
+> netcode-deep completeness study (dirty-room). Grouped by kind.
 
 ### C.1 Enumerations / code-meanings (which numeric value means what)
 
@@ -574,7 +657,7 @@ structural items still worth flagging here:
 | R-08 | 4/15 | outcome selector `{100=shared,101=plain,else}` and failure 1..5→ids |
 | R-09 | 4/82 vs 4/108 | confirm billing-points vs gold field identity at runtime |
 | R-10 | 2/142 | Op enum (deposit/withdraw/move) = widget-action-id − 7 |
-| R-11 | 4/100 | combat phase(3/5)/sub-kind(`0xFF` reset)/value byte meanings |
+| R-11 | 4/99 / 4/100 | **Cube-Gamble result panel** (NOT combat) — reel phase(3/5)/sub-kind(`0xFF` reset)/wager-value byte meanings |
 | R-12 | 5/79, 5/80 | DeathOp/mode byte sets; effect-id selectors |
 | R-13 | 5/5 | actor-record visual-state codes (1001/1011/1020/1021/1023/1041) — server-driven vs purely local |
 | R-43 | 4/12, 4/16, 4/22 | the leading result-byte values **beyond {0,1}** in the equip/item-slot responses (which code is success vs each failure) — **live-pending (6-D)** |
@@ -641,7 +724,7 @@ five majors — R-01..R-42 from CYCLE 4, plus three **live-pending (6-D)** addit
 (the exact equip/item C2S that elicits each 4/x equip result). Every item is a *value* question, not a
 *structure* gap. (Plus the standing **CP949 message-DB string-text** items — message ids such as
 10006/51027/36004-36028/45xxx/54xxx/65xxx/58xxx/74xxx — which are a **string-table/asset task**, not a
-netcode debugger task.) *source:* `_dirty/netcode_deep/oq/completeness.md §3`.
+netcode debugger task.) *source:* the CYCLE 4 netcode-deep completeness study (dirty-room).
 
 ---
 
@@ -652,8 +735,8 @@ netcode debugger task.) *source:* `_dirty/netcode_deep/oq/completeness.md §3`.
   port-10000 lobby socket" doctrine that put the lobby out of scope. 1/2 is kept out of the char-mgmt
   family and sets no in-flight latch. This is an **open arbitration item for a future lobby-socket
   lane** — surfaced to the maintainer (it may mean the lobby ping genuinely shares the game send
-  convergence on this build). It is **NOT a netcode-DTO blocker**. *source:*
-  `_dirty/netcode_deep/_TIER1_LEDGER.md` (Open Conflicts C1).
+  convergence on this build). It is **NOT a netcode-DTO blocker**. *source:* the CYCLE 4 netcode-deep
+  Tier-1 ledger (dirty-room, Open Conflicts C1).
 
 ---
 
@@ -661,9 +744,15 @@ netcode debugger task.) *source:* `_dirty/netcode_deep/oq/completeness.md §3`.
 
 This master was authored **LAST** in the CYCLE 4 Netcode Deep-Cartography promotion wave — after the
 seven neighbour files had already been rewritten — and every pairing was re-derived against those
-now-updated neighbours and cited inline.
+now-updated neighbours and cited inline. **CYCLE 7 (2026-06-20)** re-verified the file against the live
+`doida.exe` IDB SHA `263bd994` and folded in the gameplay (Block C) + dark-subsystem (Block D)
+reconciliations: combat melee = 2/52 (no 5/52; 4/99+4/100 = Cube-Gamble, not combat); buff = 5/31
+(supersedes 4/102); 5/73 = SmsgQuestComplete (GuildWar refuted); 3/23 = SmsgCharStatusBytesByName (not
+a create-result); 2/60 = couple/marriage (not mail); crafting commit 2/153 → 4/79; death 5/10, respawn
+2/3 → 4/28+5/28, pickup 2/15 → 4/15; new rows 2/71→4/70, 2/70, 2/106, 1/6/3/7/3/23/5/32, 2/145/2/41,
+2/62/2/66/5/64/4/126, 2/118; and the PetPanel = couple-window caveat (no combat-pet/summon subsystem).
 
-- **Pairings** synthesized (never copied) from the CYCLE 4 `_dirty/netcode_deep/` corpus (the per-wave
+- **Pairings** synthesized (never copied) from the CYCLE 4 netcode-deep corpus (dirty-room — the per-wave
   req↔resp lanes + the install-table partition), validated against the install tables, with the
   install-table refutations respected: **no 4/44/4/46 item-move ack** (4/44/4/46 = actor tick-table
   ops), **no 4/30 guild-op ack** (4/30 = SmsgSocialPanelTarget), **no 4/143 quest-keep ack** (4/143/4/144
@@ -673,8 +762,8 @@ now-updated neighbours and cited inline.
   SmsgActionErrorResult); `2/151` selector 0 → 3/8, selector 200 → 4/113/4/114/4/115 (the "1/20" tie
   DROPPED); `2/146` reply = `[u32 echoed req_id][u32 local state global]` (8B); `2/153 =
   CmsgProductConfirm` reply opcode `[capture/debugger-pending]` (R-38); `5/73 = SmsgQuestComplete` (vs
-  the stale SmsgGuildWarInfoUpdate). *source:* `_dirty/netcode_deep/_TIER1_LEDGER.md` (Major-2 / Major-4
-  worklists + the in-flight latch census + Open Conflicts).
+  the stale SmsgGuildWarInfoUpdate). *source:* the CYCLE 4 netcode-deep Tier-1 ledger (dirty-room —
+  Major-2 / Major-4 worklists + the in-flight latch census + Open Conflicts).
 - **Result/status codes** (Appendix A) from the CYCLE 4 result-code maps (phantom 5000/10000/10001
   string-id class refuted; real families = the 300/301 4/1 end-gate and the 3/100 code set).
 - **CP949 rules** (Appendix B): 2/7 excludes NUL; 2/83 & 3/21 include; u32 length; char[17] dominant cell.
@@ -685,7 +774,7 @@ now-updated neighbours and cited inline.
   `packets/2-151_product_buy.yaml`, `packets/3-8_shop_page_update.yaml`,
   `packets/2-153_product_confirm.yaml`); struct layouts under `structs/` (incl.
   `structs/spawn_descriptor.md`, `structs/net_client.md`, `structs/net_handler.md`).
-- **Capture/debugger register** (Appendix C, R-01..R-42) consolidated from
-  `_dirty/netcode_deep/oq/completeness.md §3`.
+- **Capture/debugger register** (Appendix C, R-01..R-45) consolidated from the CYCLE 4 netcode-deep
+  completeness study (dirty-room), extended with the CYCLE 7 gameplay/dark-subsystem reconciliation.
 - All facts STATIC on anchor **263bd994**. No debugger, no capture this campaign — every wire VALUE
   semantic and every result-code polarity is `[capture/debugger-pending]`.

@@ -5,7 +5,7 @@
 > per-opcode text-length-prefix NUL convention; capture/debugger-pending for the absolute on-wire
 > byte-order/endianness of every length prefix, the (5:7) text-body framing, and the channel-code
 > VALUE meanings (which routing/colour a given code drives on the live wire).
-> ida_reverified: 2026-06-17 · ida_anchor: 263bd994 · evidence: [static-ida].
+> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida].
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL (the earlier
 > "believed to include NUL" reading was wrong); (b) (3:21) is a genuine length-prefixed channel-chat
 > sender, not merely a "special announce" — the earlier "NOT a chat carrier" framing understated it;
@@ -15,6 +15,15 @@
 > the next-to-last field and colour into the last); (e) Open Question 6 RESOLVED — the wrapped-line
 > width derives from `CHAT_WINDOW_FONT_SIZE` and the background height from `CHAT_WINDOW_SIZE` +
 > `CHAT_WINDOW_FONT_SIZE`.
+> Re-verified against the live IDB SHA 263bd994, CYCLE 7 (2026-06-20): (f) the chat channel-code enum
+> carried by the first `(2:7)` payload byte was re-confirmed directly from the channel getter/setter,
+> the chat-tab selector, and the input-line dispatcher — the **CODE VALUES** are now CONFIRMED to be
+> `{0,1,2,3,4,6,7,9,13,15}`. This **corrects** three earlier channel LABELS: code `1` is **whisper**
+> (not "shout"), code `9` is **GM / system** (not "whisper"), and code `6` is the **Misia / world-shout**
+> family. It also **adds** two codes the prior table omitted: `4` (reserved — accepted as input but
+> emits no C2S send) and `13` (a secondary whisper/notice family that shares the log ring of code `7`).
+> Only the channel CODE values are confirmed by this pass; the per-code routing/colour VALUE meanings
+> stay capture-pending as before.
 
 Neutral, data-only model of the legacy *Martial Heroes* client's **chat subsystem**: the on-screen
 input panel, the scrollback log panel with per-channel filtering, the channel model that ties every
@@ -42,7 +51,8 @@ explicitly as such and are relative to the named object's base.
 > genuine channel-chat carrier driven by a separate dispatcher.**
 > The everyday channels typed into the chat **input box** — say, party, guild, shout, alliance, and
 > whisper — are **all the same C2S message `(2:7)`**, emitted by a **single chat sender**, distinguished
-> only by the **first payload byte = channel code** (`0`/`1`/`2`/`3`/`6`/`7`/`9`/`15`). The chat input
+> only by the **first payload byte = channel code** (`0`/`1`/`2`/`3`/`6`/`7`/`9`/`13`/`15`, plus `4`
+> accepted-but-not-sent). The chat input
 > editbox only ever emits `(2:7)` for normal typed text — that part is control-flow-confirmed.
 > The openers `(2:82)`, `(2:83)`, `(2:84)`, and `(3:21)` are **not** emitted by the say-box; they are
 > emitted by a **separate command/button dispatcher** (`Section 4.3`). But `(3:21)` is **not** a mere
@@ -71,6 +81,7 @@ explicitly as such and are relative to the named object's base.
 | Three-class decomposition (input / output-log / overhead-bubble) | CONFIRMED | Read from class layout + draw order |
 | Everyday say-box channels all ride `(2:7)`, first byte = channel code | CONFIRMED | From the input parser's single-sender calls |
 | Channel code → opcode / log colour / bubble slot table | CONFIRMED (routing) · CAPTURE-PENDING (wire VALUE meaning) | From parser branch constants |
+| Channel-code enum `{0,1,2,3,4,6,7,9,13,15}` (CYCLE 7) — code 1 = whisper, 9 = GM, 6 = Misia | CONFIRMED (code values) · CAPTURE-PENDING (per-code VALUE meaning) | Re-confirmed from the channel getter/setter, tab selector, and input dispatcher (263bd994) |
 | `(2:82)`/`(2:83)`/`(2:84)`/`(3:21)` are NOT emitted by the say-box (separate dispatcher) | CONFIRMED | The chat-command dispatcher emits them, not the input parser |
 | `(3:21)` is a genuine length-prefixed channel-chat carrier (56-byte hdr, selector `+4`) | CONFIRMED | Real chat builder; `mod 10 == 5` bypasses the gate |
 | `(2:7)` text-length prefix EXCLUDES the NUL; `(3:21)`/`(2:83)` INCLUDE it (per-opcode) | CONFIRMED | The `+1` is literally present/absent per builder |
@@ -153,11 +164,13 @@ handler by other editbox panels; the chat editbox is its primary caller.)
 
 ### 2.3 Whisper entry (CODE-CONFIRMED · routing) / (PLAUSIBLE · trigger)
 
-Whisper is channel **9**. It is reached when a whisper / GM mode is active and the text is entered in
-the whisper form (a slash-style prefix path). It carries a **target character name** and uses the
-whisper log colour. The whisper text cap is **119 characters** (distinct from the 100-char editbox
-cap that applies to the general say box). See `Docs/RE/packets/2-7_whisper.yaml` for the on-wire
-header layout already promoted for the named-target case.
+Whisper is channel **1** (CYCLE 7 correction — an earlier draft labelled whisper as code 9; code 9 is
+the GM / system path). It is reached when the input-line dispatcher **space-splits** the typed line
+into a leading **target character name** and the remaining text; the name fills the 17-byte
+target-name field of the `(2:7)` header and the line uses the whisper log colour. The whisper text cap
+is **119 characters** (distinct from the 100-char editbox cap that applies to the general say box). See
+`Docs/RE/packets/2-7_whisper.yaml` for the on-wire header layout already promoted for the named-target
+case.
 
 ---
 
@@ -172,16 +185,31 @@ overhead-bubble slot** the line fills. The active channel comes from the selecte
 > column is the multiplier applied to the actor's scale to lift the bubble above its head
 > (Section 7). Channel `9` (whisper) is **log-only** — no overhead bubble.
 
-| Code | Channel (proposed) | C2S | Log colour (ARGB) | Log colour name | Bubble slot (Section 7) | Bubble colour (ARGB) | World height × |
-|---|---|---|---|---|---|---|---|
-| 0  | say / normal      | (2:7) | `0xFFFFFFFF` | white    | say                | PC `0xFFFFFF00` / NPC white | scale × 10 |
-| 1  | shout             | (2:7) | `0xFFCC99FF` | lavender | shout-area         | `0xFFFF0055`               | scale × 7  |
-| 2  | party             | (2:7) | `0xFF00FFFF` | cyan     | party              | `0xFF00FFFF`               | scale × 12 |
-| 3  | guild             | (2:7) | `0xFF33FF66` | green    | guild / alliance   | `0xFF365C66` (green)        | scale × 9  |
-| 6  | event ("misia")   | (2:7) | `0xFFFFFF00` | yellow   | party-area         | `0xFFFF0055`               | scale × 7  |
-| 7  | special event     | (2:7) | `0xFFFF797C` | pink     | special            | `0xFFFFFF00` (yellow)       | scale × 9  |
-| 9  | whisper           | (2:7) | `0xFFFF797C` | pink     | — (log only)       | —                          | —          |
-| 15 | alliance          | (2:7) | `0xFF82C4FF` | blue     | guild / alliance   | `0xFF82C4FF` (blue)         | scale × 9  |
+> **CYCLE 7 (2026-06-20) channel-code re-confirmation.** The channel **CODE values** below were
+> re-confirmed directly from the channel getter/setter on the chat-log object, the chat-tab selector,
+> and the input-line dispatcher (which sends each code through the unified `(2:7)` sender with the code
+> as a literal token). The full confirmed code span is `{0, 1, 2, 3, 4, 6, 7, 9, 13, 15}`. This pass
+> **corrected three labels** versus the prior draft — code `1` is **whisper** (it space-splits a name
+> off the line and uses the 17-byte target-name field), code `9` is **GM / system** (the "/" GM-prefix
+> path), and code `6` is the **Misia / world-shout** broadcast family — and **added** codes `4`
+> (reserved: accepted as a valid input code but routes to no `(2:7)` send) and `13` (a secondary
+> whisper / notice family that shares the second log ring with code `7`). The CODE values are
+> **CONFIRMED**; the per-code log colour, bubble slot, and on-wire routing **VALUE meanings** remain
+> capture-pending (the colours/bubble columns below are the statically-read client behaviour, not the
+> server's wire semantics).
+
+| Code | Channel (label) | C2S | Log colour (ARGB) | Log colour name | Bubble slot (Section 7) | Bubble colour (ARGB) | World height × | Code status |
+|---|---|---|---|---|---|---|---|---|
+| 0  | say / normal           | (2:7) | `0xFFFFFFFF` | white    | say                | PC `0xFFFFFF00` / NPC white | scale × 10 | CONFIRMED |
+| 1  | whisper                | (2:7) | `0xFFCC99FF` | lavender | — (log only)       | —                          | —          | CONFIRMED (label corrected) |
+| 2  | party                  | (2:7) | `0xFF00FFFF` | cyan     | party              | `0xFF00FFFF`               | scale × 12 | CONFIRMED |
+| 3  | guild                  | (2:7) | `0xFF33FF66` | green    | guild / alliance   | `0xFF365C66` (green)        | scale × 9  | CONFIRMED |
+| 4  | reserved / local       | —     | —            | —        | —                  | —                          | —          | CONFIRMED (accepted, no send) |
+| 6  | Misia / world-shout    | (2:7) | `0xFFFFFF00` | yellow   | party-area         | `0xFFFF0055`               | scale × 7  | CONFIRMED (label refined) |
+| 7  | special Misia          | (2:7) | `0xFFFF797C` | pink     | special            | `0xFFFFFF00` (yellow)       | scale × 9  | CONFIRMED |
+| 9  | GM / system            | (2:7) | `0xFFFF797C` | pink     | — (log only)       | —                          | —          | CONFIRMED (label corrected) |
+| 13 | secondary whisper / notice | (2:7) | —        | —        | — (log only)       | —                          | —          | CONFIRMED (VALUE label capture-pending) |
+| 15 | alliance               | (2:7) | `0xFF82C4FF` | blue     | guild / alliance   | `0xFF82C4FF` (blue)         | scale × 9  | CONFIRMED |
 
 Notes:
 - **Guild vs alliance share one bubble slot** (the guild/alliance slot) and are distinguished by a
@@ -189,14 +217,22 @@ Notes:
 - The "world height ×" multipliers observed are `{7, 8, 9, 10, 12}`; the table above lists the value
   per channel. Mob/NPC say-bubbles do not use a flat multiplier — they anchor to the visual model's
   bounding-box top instead (Section 7).
-- **Channel-tag literal prefixes (CONFIRMED).** For the non-say channels the parser **prepends a
-  literal channel-key string** to the line text before sending: `"misia"` (event ch 6),
-  `"specialmisia"` (special ch 7), `"guild"` (ch 3), `"alliance"` (ch 15), and `"party"` (ch 2). A
-  re-implementation that builds the `(2:7)` text tail must reproduce these prefixes for those channels.
-- **Channel-code VALUE meanings are capture-pending.** The routing (which code drives which sender
-  call, log colour, and bubble slot) is control-flow-confirmed; what a given code means on the live
-  wire server-side — and whether the proposed channel labels (event "misia" vs special, alliance vs
-  guild) are the server's own naming — needs a capture to confirm.
+- **Channel-tag literal prefixes / send tokens (CONFIRMED).** For the non-say channels the
+  input-line dispatcher selects the sender by a **literal channel-key token** before the `(2:7)` send:
+  `"party"` (ch 2), `"guild"` (ch 3), `"misia"` (ch 6), `"specialmisia"` (ch 7), and `"alliance"`
+  (ch 15). **Whisper (ch 1)** is reached differently — the dispatcher **space-splits** the line into a
+  leading target name and the remaining text, and the name fills the 17-byte target-name field of the
+  `(2:7)` header (Section 4.2). A re-implementation that builds the `(2:7)` text tail must reproduce
+  these tokens for those channels and the name/text split for whisper.
+- **Codes 4 and 13 (CONFIRMED codes).** Code `4` is a **valid input code that produces no `(2:7)`
+  send** (a reserved / local-only slot). Code `13` is a **secondary whisper / notice family**: the log
+  enqueue routine routes codes `7` and `13` into the **same second log ring** (and code `10` into a
+  third), confirming `7`/`13` are a related whisper/notice group. The exact display label of code `13`
+  is capture-pending.
+- **Channel-code VALUE meanings are capture-pending.** The CODE values themselves are CONFIRMED
+  (CYCLE 7), but what a given code means on the live wire server-side — the per-code routing/colour and
+  whether the proposed channel labels (Misia vs special-Misia, GM vs system, the code-13 family) are
+  the server's own naming — needs a capture to confirm.
 
 ---
 
@@ -477,8 +513,12 @@ Inbound chat arrives as **`(5:7)` `SmsgChatBroadcast`**. The handler reads a **3
 - **writes the speaker actor's overhead-bubble slot** (same Actor field block as Section 7), stamping
   the **5000 ms** expiry relative to the local clock — so remote players' chat floats above their
   heads;
-- **routes whisper** (channel `6` / `7` on the inbound side) through a dedicated whisper-display path
-  (the inbound whisper / reply-target wiring was not decompiled in depth — Open Question 7).
+- **routes whisper** (the `6` / `7` branch of the inbound `+0x0E` channel byte) through a dedicated
+  whisper-display path (the inbound whisper / reply-target wiring was not decompiled in depth — Open
+  Question 7). Note: the inbound `+0x0E` switch is the **S2C handler's own** branch and is distinct
+  from the **C2S input channel enum** of Section 3 (where whisper is code `1` and `6`/`7` are the
+  Misia broadcast family) — the two are not the same code space; only a capture can confirm how the
+  server maps one to the other.
 
 ### 8.2 Header layout (CONFIRMED · header size + key offsets) / (CAPTURE-PENDING · body byte-order)
 

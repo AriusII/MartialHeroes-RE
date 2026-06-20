@@ -54,14 +54,13 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game guild-war info display window (GuildWarInfoPanel, master service slot 224, key `j`).
-///
-/// <para>A two-wide list of up to 10 guild-war info entries (icon + name + value). Read-only;
-/// emits NO C2S packet. Populated by S2C 5/73 (stubbed). Toggled by key `j` (ASCII 106).</para>
-///
-/// <para>PASSIVE: zero game logic. Row clicks are display-only selection. No game-state mutation.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.31 CODE-CONFIRMED.
+///     In-game guild-war info display window (GuildWarInfoPanel, master service slot 224, key `j`).
+///     <para>
+///         A two-wide list of up to 10 guild-war info entries (icon + name + value). Read-only;
+///         emits NO C2S packet. Populated by S2C 5/73 (stubbed). Toggled by key `j` (ASCII 106).
+///     </para>
+///     <para>PASSIVE: zero game logic. Row clicks are display-only selection. No game-state mutation.</para>
+///     spec: Docs/RE/specs/ui_system.md §8.31 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudGuildWarInfoWindow : Control
 {
@@ -120,23 +119,22 @@ public sealed partial class HudGuildWarInfoWindow : Control
     private const float NameH = 23f;
     private const float ValueW = 78f; // spec: ui_system.md §8.31.1 "78×23"
     private const float ValueH = 23f;
+    private readonly Label[] _nameLabels = new Label[MaxRows];
+    private readonly Label[] _valueLabels = new Label[MaxRows];
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private readonly Label[] _nameLabels = new Label[MaxRows];
-    private readonly Label[] _valueLabels = new Label[MaxRows];
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the guild-war info display panel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.31.1 CODE-CONFIRMED.
+    ///     Geometry pass: builds the guild-war info display panel.
+    ///     spec: Docs/RE/specs/ui_system.md §8.31.1 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -172,7 +170,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
             Text = "Guild War Info",
             Position = new Vector2(10f, 8f),
             Size = new Vector2(300f, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(titleLbl);
 
@@ -185,7 +183,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
             Text = "×",
             Position = new Vector2(CloseBtnX, CloseBtnY),
             Size = new Vector2(CloseBtnSize, CloseBtnSize),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += OnClose; // action 31
         AddChild(closeBtn);
@@ -203,18 +201,18 @@ public sealed partial class HudGuildWarInfoWindow : Control
         // Build 10 rows in two-wide layout
         // spec: ui_system.md §8.31.1 — "two-wide list: even rows left sub-col, odd rows right sub-col"
         // spec: ui_system.md §8.31.1 — "Row Y = 34·(r/2) + 49 (34-px pitch)"
-        for (int r = 0; r < MaxRows; r++)
+        for (var r = 0; r < MaxRows; r++)
         {
-            bool isRight = (r % 2) != 0; // spec: ui_system.md §8.31.1 — "even=left, odd=right"
-            float rowY = BodyY + RowBaseY + RowPitch * (r / 2); // spec: ui_system.md §8.31.1
+            var isRight = r % 2 != 0; // spec: ui_system.md §8.31.1 — "even=left, odd=right"
+            var rowY = BodyY + RowBaseY + RowPitch * (r / 2); // spec: ui_system.md §8.31.1
 
-            float iconX = isRight ? RightIconX : LeftIconX; // spec: ui_system.md §8.31.1
-            float nameX = isRight ? RightNameX : LeftNameX; // spec: ui_system.md §8.31.1
-            float valueX = isRight ? RightValueX : LeftValueX; // spec: ui_system.md §8.31.1
+            var iconX = isRight ? RightIconX : LeftIconX; // spec: ui_system.md §8.31.1
+            var nameX = isRight ? RightNameX : LeftNameX; // spec: ui_system.md §8.31.1
+            var valueX = isRight ? RightValueX : LeftValueX; // spec: ui_system.md §8.31.1
 
             // Icon button (action = r, 0..9)
             // spec: ui_system.md §8.31.3 — "0..9: row icon — selection/display only"
-            int capturedR = r;
+            var capturedR = r;
             var iconBtn = new Button
             {
                 Name = $"IconBtn{r}",
@@ -222,7 +220,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
                 Position = new Vector2(iconX, rowY),
                 Size = new Vector2(IconSz, IconSz),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             iconBtn.Pressed += () => OnRowIcon(capturedR); // action r
             AddChild(iconBtn);
@@ -237,7 +235,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
                 Size = new Vector2(NameW, NameH),
                 Flat = true,
                 Alignment = HorizontalAlignment.Left,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             nameBtn.Pressed += () => OnRowName(capturedR + 20); // action r+20
             AddChild(nameBtn);
@@ -248,7 +246,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
                 Text = "",
                 Position = new Vector2(nameX + 2f, rowY + 3f),
                 Size = new Vector2(NameW - 4f, NameH - 6f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(nameLbl);
             _nameLabels[r] = nameLbl;
@@ -262,7 +260,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
                 Position = new Vector2(valueX, rowY),
                 Size = new Vector2(ValueW, ValueH),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             valueBtn.Pressed += () => OnRowValue(capturedR + 10); // action r+10
             AddChild(valueBtn);
@@ -273,7 +271,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
                 Text = "",
                 Position = new Vector2(valueX + 2f, rowY + 3f),
                 Size = new Vector2(ValueW - 4f, ValueH - 6f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(valueLbl);
             _valueLabels[r] = valueLbl;
@@ -288,7 +286,7 @@ public sealed partial class HudGuildWarInfoWindow : Control
             Text = "OK",
             Position = new Vector2(OkBtnX, OkBtnY),
             Size = new Vector2(OkBtnW, OkBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         okBtn.Pressed += OnClose; // action 30 — close window
         AddChild(okBtn);
@@ -306,8 +304,8 @@ public sealed partial class HudGuildWarInfoWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the guild-war info window (key `j`, ASCII 106, slot 224).
-    /// spec: Docs/RE/specs/ui_system.md §8.31.6 CODE-CONFIRMED — key `j` toggle.
+    ///     Toggles the guild-war info window (key `j`, ASCII 106, slot 224).
+    ///     spec: Docs/RE/specs/ui_system.md §8.31.6 CODE-CONFIRMED — key `j` toggle.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

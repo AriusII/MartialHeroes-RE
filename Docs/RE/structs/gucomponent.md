@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: +0x8D dual semantics (setVisible co-writes it AND the panel child-removal sweep treats ==1 as remove); +0xB8 panel_kind (not written by the GUPanel base ctor — likely a subclass field) — both capture/debugger-pending
+conflicts: +0x8D dual semantics (setVisible co-writes it AND the panel child-removal sweep treats ==1 as remove) — still capture/debugger-pending; +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded)
 ---
 
 # GUComponent / GUPanel byte-offset layout (clean-room spec)
@@ -38,8 +38,10 @@ in `structs/guwindow.md`.
 | Auto-hide timer block (+0x95/+0x98/+0x9C/+0xA0) | **CODE-CONFIRMED** — `setVisible` arms it, the draw path evaluates it. Resolves the old +0x9C "z-order vs timeout" question to **TIMEOUT (ms)**. |
 | GUPanel child-vector region | **CODE-CONFIRMED** — a `std::vector<GUComponent*>` (begin/end/capacity) plus the active-child sentinel. |
 | Capability-flag bit masks | **CODE-CONFIRMED** — the per-class OR-set bits are read directly from the base + leaf constructors. |
-| +0x8D dual semantics | **capture/debugger-pending** — the panel removal-sweep reads `==1` to remove; `setVisible` also co-writes it with the visible argument. The interaction needs runtime confirmation. |
-| +0xB8 `panel_kind` | **capture/debugger-pending** — the GUPanel base ctor never writes +0xB8; it is owned by some subclass, not the base. |
+| +0x8D size + setter/getter pair | **CODE-CONFIRMED** (CYCLE 7) — a single 1-byte boolean with a dedicated setter/getter, compared `== 1` to gate a branch in the panel-build path and forced to `0` at one site. |
+| +0x8D exact semantic | **capture/debugger-pending** — the panel removal-sweep reads `== 1` to remove; `setVisible` also co-writes it with the visible argument. Whether the build-path toggle is "enable / clip" or "pending removal" needs runtime confirmation. |
+| +0xB8 = glyph/char-width step | **CODE-CONFIRMED** (CYCLE 7) — a 4-byte **signed integer** read predominantly as a dword and used as the per-character pixel width in the text-centering layout (`3 × value`, and `value × stanceScale × 3.0`, stanceScale ∈ {1.0, 2.7}). **Resolves the old `panel_kind` / pointer ambiguity: it is neither.** |
+| Class hierarchy (vtable-confirmed) | **CODE-CONFIRMED** (CYCLE 7) — `GUComponent` (13 vtable slots) → `GUPanel` (14) → `GUWindow` (15) → `MainWindow` (root HUD window-manager). Confirms the "LAYERED 13/14/15" reading. |
 | Packing / alignment | **CODE-CONFIRMED** — natural 4-byte alignment (legacy MSVC default), **not** byte-packed. |
 
 This struct cross-references the richer behavioural treatment of the same fields in
@@ -49,6 +51,15 @@ offset, treat them as one fact.
 ---
 
 ## 1. Object model overview
+
+**Class hierarchy (vtable-confirmed).** The widget family is a single linear inheritance chain, each
+level adding exactly one virtual slot to the one below it:
+
+`GUComponent` (base widget, **13** vtable slots) → `GUPanel` (container, **14** slots) → `GUWindow`
+(top-level window, **15** slots) → `MainWindow` (the root in-game HUD window-manager singleton). This
+is the load-bearing confirmation of the prior-cycle "vtable LAYERED 13/14/15" note: 13 = GUComponent,
+14 = GUPanel, 15 = GUWindow. `GUWindow`'s multiple-inheritance shape and `MainWindow`'s layout are
+documented in `structs/guwindow.md`.
 
 A `GUComponent` is a single object whose used fields span at least the first **0xA4 bytes** (the last
 base field is the parent pointer at +0xA0); a `GUPanel` extends it with the child-vector region from
@@ -102,12 +113,25 @@ ordering; the IDB control-flow does not support any such ctor, and that narrativ
 | +0x8A | 1 | u8 | `interactive` | Set to **1** at construction; the **interactive / clickable gate** — `onEvent` only captures press/release on a widget whose +0x8A is set. **(Role pinned: previously value-only `flag_8A`.)** |
 | +0x8B | 1 | u8 | `flag_8B` | Zero-initialised. Role unpinned. |
 | +0x8C | 1 | u8 | `show_target` | Set to **1** at construction; the show/hide alpha-fade target (1 = showing, 0 = hiding). The draw/fade path chases the +0x04 alpha toward it; `setVisible` writes it. |
-| +0x8D | 1 | u8 | `remove_mark` | Zero-initialised; the panel child-removal sweep removes children whose +0x8D **== 1** and clears it on survivors. **Note:** `setVisible` also co-writes +0x8D with its visible argument — see the dual-semantics flag in §7. |
+| +0x8D | 1 | u8 (bool) | `remove_mark` / build toggle | Zero-initialised; a **single 1-byte boolean** with a dedicated **setter/getter pair** (CYCLE 7). The panel-build path compares it **== 1** to gate a branch and one site forces it to **0**; the panel child-removal sweep removes children whose +0x8D **== 1** and clears it on survivors. **Note:** `setVisible` also co-writes +0x8D with its visible argument — see the dual-semantics item in §8. Size + accessor-pair are confirmed; the exact build-path semantic (enable/clip vs pending-removal) is the only residual. |
 | +0x90 | 4 | ptr | `draw_handle` | **Bound drawable / texture handle.** The draw path submits it as the sprite texture; if **0**, nothing is drawn. The ctor zeroes it. **(Refined from the generic `id_or_index`.)** |
 | +0x95 | 1 | u8 | `auto_hide_enabled` | Zero-initialised; the **auto-hide timer enable** gate. Both `setVisible` (arm) and the draw path (evaluate) gate the timer on it. |
 | +0x98 | 4 | u32 | `auto_hide_start_ms` | The auto-hide **start timestamp** (milliseconds). `setVisible` stores the current ms here when arming the timer. **(Refined from zero-filler `field_98`.)** |
 | +0x9C | 4 | u32 | `auto_hide_timeout_ms` | The auto-hide **timeout duration** in milliseconds. Set unconditionally to **3000** by the ctor (the default). The draw path fires when `(now − +0x98) >= +0x9C`. **(Resolved: the old z-order-vs-timeout PLAUSIBLE is now a CONFIRMED display-timeout.)** |
 | +0xA0 | 4 | ptr | `on_timeout_callback` | **Function pointer fired on auto-hide timeout.** The ctor zeroes it; the draw path calls it (when non-null) before hiding the component. Last GUComponent base field. **(Refined from zero-filler `field_A0`.)** |
+
+Two further base-widget fields beyond the GUPanel child region are confirmed on the concrete leaf
+widgets (CYCLE 7):
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0xE8 | 4 | int/ptr | `font_slot` | Font handle / index slot (matches the prior "font-slot +0xE8" finding). |
+| +0xEC | 4 | i32 | `computed_x` | Computed X position written by the alignment/centering helper. |
+| +0xF0 | 4 | i32 | `computed_y` | Computed Y position. **Last dword of the base object.** |
+
+**Leaf widget size.** The concrete leaf widgets (a base `GULabel` and a base image `GUComponent`) are
+allocated at **0xF0 = 240 bytes** in the HUD-build path; +0xF0 is the last dword, so the base object
+is **≈ 0xF4 (244) bytes** rounded. Confidence: high for the 0xF0 leaf allocation size.
 
 The first GUComponent field after +0xA0 is the GUPanel child-vector region at +0xA4.
 
@@ -133,13 +157,28 @@ its size is `(end − begin) >> 2` (4-byte pointers).
 | +0xAC | 4 | ptr | `children_end` | Vector `end` pointer. `AddChild` pushes here. |
 | +0xB0 | 4 | ptr | `children_capacity_end` | Vector capacity-end pointer. Zero-initialised. |
 | +0xB4 | 4 | i32 | `active_child` | OR-set to **−1** → "no child selected" sentinel (the active-child / tab-selection index — role is a static hypothesis; the −1 init is code-confirmed). |
-| +0xB8 | 1 | u8 | `panel_kind` | **Not written by the GUPanel base ctor.** Present in the layout but owned by some subclass, not base GUPanel. **(capture/debugger-pending — see §7.)** |
 | +0x08 | 4 | u32 | `flags` | OR-set with bit mask **0x0004** → "is a panel" (see §4). |
 | +0x84 | 4 | ptr | `parent` | `AddChild` writes the parent component into each child's +0x84 before pushing it into the vector. |
 
 The child region therefore spans **0xA4 .. 0xB7** as the `std::vector<GUComponent*>` object (base
-word + begin/end/capacity) plus the active-child sentinel at +0xB4; the +0xB8 `panel_kind` byte is a
-subclass field, not part of the base GUPanel layout.
+word + begin/end/capacity) plus the active-child sentinel at +0xB4. The **+0xB8 field is NOT part of
+the GUPanel child store** — see §3.1 below: it is a per-widget glyph-width step on the base widget,
+not the old "panel_kind" byte.
+
+### 3.1 +0xB8 — glyph / character pixel-width step (CODE-CONFIRMED — CYCLE 7)
+
++0xB8 is a **4-byte signed integer**, not a pointer and not a one-byte `panel_kind` tag. Although one
+accessor reads only its low byte, the field is dominated by dword reads (it is loaded as a 32-bit
+integer into the FPU and into general registers, and compared as a dword against 0). In the
+horizontal-alignment / centering layout it is used as the **per-character pixel width step**: the
+centering math takes `3 × value` (and `value × stanceScale × 3.0`, where `stanceScale ∈ {1.0, 2.7}`)
+to back off the half-width when centering text inside the parent. **This supersedes the earlier
+`panel_kind` / "subclass byte" reading** carried in prior revisions of this spec — that ambiguity is
+resolved: +0xB8 is the text-centering glyph-width step.
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0xB8 | 4 | i32 | `glyph_width_step` | Per-glyph / per-character pixel width used in the text-centering layout (`3 × value`; `value × stanceScale × 3.0`, `stanceScale ∈ {1.0, 2.7}`). Confidence: high (4-byte int + layout-centering role). |
 
 > **Implementation note.** A C# reimplementation can model the child store as a managed
 > `List<GUComponent>` (the three-pointer triple is just the MSVC vector internals) and the
@@ -180,8 +219,9 @@ round-tripping legacy state.
 
 ## 6. GUComponent primary vtable — 13 slots (CODE-CONFIRMED)
 
-The base class exposes exactly **13 virtual slots** (indices 0..12). Roles, described abstractly (no
-addresses):
+The base class exposes exactly **13 virtual slots** (indices 0..12) — re-confirmed CYCLE 7 (IDB SHA
+263bd994). `GUPanel` adds slot 13 (→ 14 total) and `GUWindow` adds slot 14 (→ 15 total), the
+"LAYERED 13/14/15" chain. Roles, described abstractly (no addresses):
 
 | Slot | Role (one line) |
 |-----:|-----------------|
@@ -208,9 +248,10 @@ survivors) lives in the GUPanel vtable. The full GUPanel vtable is out of this s
 ## 7. Packing / alignment (CODE-CONFIRMED)
 
 Natural **4-byte alignment** (legacy MSVC default). Every 4-byte field sits on a 4-aligned offset;
-the status/flag bytes are packed into the +0x88..+0x8D, +0x95 and +0xB8 ranges with no forced gap
-removal. A C# mirror should use `StructLayout(Sequential)` with **natural alignment** — **not**
-`Pack = 1` (unlike the wire/asset structs, which are byte-packed).
+the status/flag bytes are packed into the +0x88..+0x8D and +0x95 ranges with no forced gap removal,
+while +0xB8 is a 4-aligned 4-byte int (the glyph-width step, §3.1) — not a status byte. A C# mirror
+should use `StructLayout(Sequential)` with **natural alignment** — **not** `Pack = 1` (unlike the
+wire/asset structs, which are byte-packed).
 
 ---
 
@@ -219,14 +260,18 @@ removal. A C# mirror should use `StructLayout(Sequential)` with **natural alignm
 These are the only genuinely runtime-dependent items; the campaign is static-only and everything
 above is control-flow-confirmed.
 
-- **+0x8D dual semantics.** The panel child-removal sweep treats +0x8D **== 1** as "remove this
-  child" (and clears it on survivors), which supports the `remove_mark` reading. But `setVisible`
-  **also co-writes +0x8D with its visible argument**, so showing a widget would set +0x8D = 1. How
-  these two writers coexist (e.g. ordering, or +0x8D meaning "pending state change" rather than
-  strictly "remove") needs runtime confirmation on a live session.
-- **+0xB8 `panel_kind`.** The GUPanel **base** ctor never writes +0xB8. The byte is present in the
-  object layout but is set by some subclass, not by base GUPanel; which subclass and what values it
-  takes is unconfirmed without a debugger.
+- **+0x8D dual semantics.** The size (1 byte), the boolean nature, and the dedicated setter/getter
+  pair are **CODE-CONFIRMED (CYCLE 7)**; only the exact semantic is pending. The panel-build path
+  compares +0x8D **== 1** to gate a branch and forces it to **0** at one site; the panel
+  child-removal sweep treats +0x8D **== 1** as "remove this child" (and clears it on survivors),
+  which supports a `remove_mark` reading. But `setVisible` **also co-writes +0x8D with its visible
+  argument**, so showing a widget would set +0x8D = 1. Whether the build-path toggle means
+  enable/clip or "pending state change / removal", and how these writers coexist, needs runtime
+  confirmation on a live session.
+- **+0xB8 — RESOLVED (CYCLE 7), no longer pending.** Previously logged here as an unconfirmed
+  `panel_kind` subclass byte. It is now CODE-CONFIRMED as a **4-byte signed integer glyph/char-width
+  step** used by the text-centering layout (§3.1). It is neither a pointer nor a one-byte kind tag;
+  the prior reading is superseded.
 
 ---
 

@@ -1,11 +1,11 @@
 # Format: sky data files  (sky-dome geometry `.box` + sky `.bin` family — parser view)
 
 ```
-verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; orbit/day-cycle math carried [confirmed] from prior IDA
-ida_reverified: 2026-06-16
+verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; sun→screen→flare transform + lensflare.txt carried [confirmed] from CYCLE 7 static IDA; orbit/day-cycle math carried [confirmed] from prior IDA
+ida_reverified: 2026-06-20         # IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the sun→screen→lens-flare transform + lensflare.txt
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
-conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 bytes") RESOLVED into §B.2 below
+conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 bytes") RESOLVED into §B.2 below; CYCLE 7 refined the §D.2 sun-orbit model (log-curve, not sin) and resolved the §D.4 flare transform
 ```
 
 > Two-witness re-verification on build `263bd994` (fog loader read-sequence + VFS sample scans)
@@ -14,6 +14,13 @@ conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 byte
 > bytes" the earlier §B.2 quoted describes the loader's READ VOLUME when `data_load_flag = 0` (it reads
 > only the leading 12 bytes), not the on-disk file size. The authoring tool always writes the full
 > 204-byte record; the trailing 192 bytes are simply unread on the `flag = 0` branch.
+>
+> **CYCLE 7 (2026-06-20, IDB SHA `263bd994`, static-only) added/refined Section D:** the full
+> **sun → screen → lens-flare anchor transform** (§D.4, previously UNRESOLVED — now pinned in shape),
+> the **`data/sky/lensflare.txt`** config layout and the flare ghost-chain draw (§D.4), the **sun
+> billboard texture/size** facts (§D.5), and a refinement of the **sun/moon orbit model** (§D.2) from
+> the earlier `sin`-based reading to the client's actual **natural-log-curve** form (the X-sign
+> opposition stands; the position vector also doubles, negated, as the directional-light direction).
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary addresses. Consumed by `Assets.Parsers`. Every offset an engineer cites must
@@ -174,6 +181,46 @@ The environment object **is** the sky-colour-table singleton (it is not a separa
 manager" allocation); the sub-domes (star, cloud, sky-box, moon) are pointer members hung off it,
 and the fog parameters and colour table are stored inline on it.
 
+> **CYCLE 7 build-order confirmation (build `263bd994`).** The sky-system init constructs, in order:
+> **sun → star-dome → cloud-dome → moon → material → light → fog.** (The §B.1 list above is the wider
+> environment-hub sequence including the particle root, the detail-level read, the conditional sky-box
+> branch and the time-manager bind; this CYCLE 7 order is the sky-dome sub-object construction inside
+> it. The two are consistent: the dome objects come up first — sun, star, cloud, moon — then the
+> colour/shading data — material, light, fog — is loaded onto them.)
+
+### B.1a Sky data-file family (all `<n>` = active area id) — CONFIRMED (CYCLE 7)
+
+The sky system references the following per-area data files (`<n>` is the active integer area id) and
+shared textures. The byte layouts of the `.bin` files are canonical in `environment_bins.md`; this
+table is the **file-family enumeration** that belongs to `formats/sky.md`.
+
+| Data file (`data/sky/dat/`) | Role | Byte layout |
+|---|---|---|
+| `sky<n>.box` | sky-dome geometry (CONFIRMED-ABSENT in shipping VFS) | §A (UNVERIFIED) |
+| `wind<n>.bin` | wind | `environment_bins.md §9` |
+| `weather<n>.bin` | weather | `environment_bins.md` (weather) |
+| `point_light<n>.bin` | point lights | `environment_bins.md` |
+| `cloud_cycle<n>.bin` | per-step cloud texture-id table | §B.3 / `environment_bins.md §6` |
+| `material<n>.bin` | sun/colour material table | `environment_bins.md` (material) |
+| `light<n>.bin` | directional/ambient light table | `environment_bins.md §10` |
+| `fog<n>.bin` | fog near/far + colour table | §B.2 / `environment_bins.md §2` |
+| `clouddome<n>.bin` | two-tier cloud colour grid | §B.3 / `environment_bins.md §5` |
+| `stardome<n>.bin` | star colour grid | §B.4 / `environment_bins.md §4` |
+| `map_option<n>.bin` | per-area option flags (skybox, lens-flare, …) | `environment_bins.md §1` |
+| `map/map<n>.txt` | map text (referenced by the sky load) | — |
+
+Shared textures under `data/sky/texture/`:
+
+| Texture | Use |
+|---|---|
+| `cloud<n>.dds` | cloud-dome (ping-pong animated) |
+| `star.dds` | star-dome |
+| `sun.dds` | sun billboard (§D.5) |
+| `moon<n>.dds` | moon billboard, phase-selected `n = 0..14` (§D.3) |
+| `lensflare<n>.dds` | lens-flare ghost sprites, 1-based (§D.4) |
+| `wind<n>.dds` | wind effect |
+| `rain_drop.dds`, `rains.dds`, `snow.dds` | weather precipitation |
+
 ### B.2 `fog%d.bin` — parser view
 
 `fog%d.bin` is read as: two leading 4-byte values (`start_dist`, `end_dist`), then a 4-byte
@@ -288,28 +335,61 @@ angle_rad = angle_deg * DEG2RAD                 # DEG2RAD = pi/180 ≈ 0.0174533
 - `angle_deg` sweeps a full `0..360°` over one simulated day (the same 86400 s day length as the
   48-slot colour cycle, Section C). **CONFIRMED.**
 
-### D.2 Billboard position (sun vs moon, mirrored)
+### D.2 Billboard position (sun vs moon, mirrored) — REFINED (CYCLE 7)
 
-The billboard X coordinate is a sine of the orbit angle scaled by ±3200 world units; the **sun uses
-−3200** and the **moon uses +3200**, so the moon rides the **opposite side of the sky** from the sun:
+> **CYCLE 7 refinement.** A closer static re-walk of the sun-orbit update on build `263bd994` shows the
+> orbit is driven by a **natural-log curve of a time-of-day angle**, NOT a plain sine. The earlier
+> `sin`-based reading is superseded for the per-axis math; what survives unchanged is the **±3200
+> scaling and the sun/moon X-sign opposition** (the sun and moon ride opposite sides of the sky).
+
+The billboard position is computed from a finer time-of-day angle than the 86400 s second-of-day used
+for colour: a **millisecond-resolution** day angle, scaled by a day-speed factor:
+
+```
+dayAngle = time_ms × 360.0 × 0.00001157407405116828        # constant ≈ 360 / 86,400,000 = one revolution per 24 h (in ms)
+dayAngle = dayAngle × day_speed_factor                      # per-area / global day-speed scalar
+```
+
+The position is then a **log-curve of `dayAngle` scaled by ±3200 world units**; the **sun uses −3200**
+and the **moon uses +3200**:
 
 | Axis | Sun billboard | Moon billboard | Confidence |
 |------|---------------|----------------|------------|
-| X | `sin(angle_rad) × −3200` | `sin(angle_rad) × +3200` | **HIGH** (the ±3200·sin term and the sun/moon sign opposition) |
-| other two axes | a **natural-log-based** curve of the orbit angle scaled by ±3200 and a fixed 45°-derived tilt pair | the same log-based curve, scaled by +3200 | **MED** (an asymmetric arc, not a clean semicircle) |
+| X (horizontal) | `log_curve(dayAngle) × −3200.0` | `log_curve(dayAngle) × +3200.0` | **HIGH** (the ±3200 scale and the sun/moon −/+ sign opposition) |
+| vertical arc | `log_curve(dayAngle) × −3200.0`, further scaled by precomputed **log-trig seeds** | the same curve scaled by `+3200.0` | **MED** (an asymmetric arc, not a clean semicircle) |
 
-- The X term `±3200 · sin(angle_rad)` is **HIGH**: the sun and moon trace opposite horizontal arcs.
-- The **other two axes** use a `log`-based curve of the angle (a monotonic, asymmetric rising/falling
-  curve, not a `cos`), with a fixed tilt derived from a 45° constant pair — so the path is an
-  **asymmetric arc, not a perfect semicircle**. The per-axis exact math is **MED** (it may be a cheap
-  developer shortcut rather than true astronomy).
+- The horizontal term `±3200 · log_curve(dayAngle)` is **HIGH**: the sun and moon trace **opposite**
+  horizontal arcs (sun negative, moon positive).
+- The **vertical arc** uses the same `−3200.0`-scaled log curve, further multiplied by a pair of
+  **precomputed log-trig seeds**; those seeds are initialised **once** from `day_speed_factor × 45.0`
+  (the `45.0` is a fixed tilt-angle seed). So the path is an **asymmetric arc, not a perfect
+  semicircle**. The per-axis exact math is **MED** (it may be a cheap developer shortcut, not true
+  astronomy).
+- **Constants (HIGH, static immediates):** orbit radius/scale **±3200.0**; day-angle constant
+  **0.00001157407405116828** (≈ 360 / 86 400 000); seed tilt angle **45.0**.
 - The static default orientation the billboard is seeded with is overwritten by this per-frame orbit
   update each tick.
 
-> **Porting guidance.** A faithful port may reproduce the `±3200 · sin(angle)` horizontal arc with the
-> sun/moon sign opposition, and either reproduce the log-based vertical/depth curve or — given the MED
-> tag on the non-X axes — treat the vertical arc as a **free engineering choice** (a clean semicircle
-> is acceptable). Keep the directional shading light **fixed** at `(-7, 7, 20)` regardless (§10.6).
+#### D.2.1 The sun position doubles as the directional-light direction (CYCLE 7, HIGH)
+
+After the sun world position vector is computed, it is **negated** and stored in **two** places at once:
+
+1. the **directional shading-light direction** (on the light object, member offset **+184**), and
+2. the scene's **sun-direction global triple** (three consecutive floats).
+
+So the **sun billboard position IS the directional-light direction, negated** — they are not
+independent. This is a *deliberate* re-confirmation refining the earlier §D / §10.6 note: the visible
+billboard sprite and the shading light track the same orbit vector (one negated from the other), rather
+than the light being a fixed `(-7, 7, 20)` constant. The fixed `(-7, 7, 20)` value documented in
+`environment_bins.md §10.6` is the **synth fallback** used only when `light%d.bin` is absent and the
+sun-orbit path is not driving the light; when the sky/sun subsystem is live, the orbit vector above
+drives the light direction. (HIGH for the coupling and the negate; the precedence between the
+orbit-driven direction and the per-area `light%d.bin` direction is **MED** — sample/runtime-pending.)
+
+> **Porting guidance.** A faithful port reproduces the `±3200 · log_curve(dayAngle)` arc with the
+> sun/moon sign opposition, drives the **directional light direction from the negated sun position**,
+> and may treat the exact vertical-arc seeding as a tunable (a smooth asymmetric arc is acceptable
+> given the MED tag). The moon rides the opposite side on the same curve.
 
 ### D.3 Moon phase — 30-day, 15-texture lunar cycle (HIGH)
 
@@ -327,28 +407,115 @@ moon_texture = "data/sky/texture/moon{phase_index}.dds"
   angle has passed the half-way point and the day index has changed), so the swap happens while the
   moon is up rather than producing a visible texture pop. **HIGH** (gate), MED (intent).
 
-### D.4 Lens flare (screen-space, anchored to the sun) — MED
+### D.4 Lens flare (screen-space, anchored to the sun) — RESOLVED (CYCLE 7)
 
-Lens flare is a set of **screen-space layered sprites** driven by a lens-flare config file
-(`data/sky/lensflare.txt`) with **per-layer color / position / radius / texture-id** records; the
-per-layer textures expand to `data/sky/texture/lensflare<n>.dds`.
+Lens flare is a set of **screen-space layered sprites** ("ghosts") anchored to the sun's projected
+screen position. The flare draw is a singleton call **tail-called from the transparent/particle render
+pass**, so the flare composites after the world is drawn. CYCLE 7 pinned the full sun → screen → anchor
+transform (previously UNRESOLVED) and the config-file layout.
 
-- The "position" field is a **per-layer screen-space offset factor along the flare axis** (the flare
-  line runs screen-centre ↔ light source), not a world position — classic lens-flare layer placement.
-- The flare set is **anchored to the sun's screen position** (the Section D.2 sun billboard,
-  projected to screen).
-- Gating: lens flare renders only when **`map_option[LENSFLARE]`** (see `environment_bins.md §1.1`,
-  offset 0x08) is set **and** the global sky-detail tier permits it (the highest detail-off tier
-  suppresses it).
-- **UNRESOLVED:** the exact sun-screen-position → flare-anchor transform was not pinned. The record
-  field set (color/position/radius/texture-id), the gating, and the sun anchoring are HIGH; the exact
-  anchor projection math is MED.
+#### D.4.1 World → screen projection of the sun (transform SHAPE: HIGH)
 
-### D.5 Billboard sizes (sprite radii)
+The flare draw projects the sun world position through the current view-projection matrix and maps it
+to screen pixels. Algorithm in neutral terms:
+
+1. **Fetch sun world position** `S = (Sx, Sy, Sz)` from the sun object; store it on the flare object at
+   offsets **+68 / +72 / +76**.
+2. **Horizon cull:** if `Sy < 0.0` (sun below the world-up axis), **skip the flare entirely**.
+3. **Fetch the current view-projection matrix** `M` — 16 floats, **row-major** storage, with the
+   translation in `m[12..14]`.
+4. **Transform** `S` by `M` to clip space via a **row-vector × 4×4 affine multiply**. Using
+   matrix-index notation:
+   - `clip.x = m[0]·Sx + m[4]·Sy + m[8]·Sz  + m[12]`
+   - `clip.y = m[1]·Sx + m[5]·Sy + m[9]·Sz  + m[13]`
+   - `clip.w = m[2]·Sx + m[6]·Sy + m[10]·Sz + m[14]`
+   *(this engine uses the **3rd matrix row** as the `w`/depth term, not the 4th.)*
+5. **Clip cull:** if `clip.w >= 0.0`, **skip** — the engine's visible-side test is `clip.w < 0.0`.
+6. **Perspective divide + viewport map.** Note the **X axis divides by `−w`** (matching this engine's
+   X-negation convention), while **Y divides by `+w`**:
+   - `screen_x = (clip.x / −clip.w) · scaleX + biasX`   (scaleX = flare+48, biasX = flare+56)
+   - `screen_y = (clip.y /  clip.w) · scaleY + biasY`   (scaleY = flare+52, biasY = flare+60)
+   where `scaleX / scaleY` are the **half-viewport extents** and `biasX / biasY` are the
+   **viewport-centre pixel coordinates**.
+7. Hand `(screen_x, screen_y)` plus the world position `S` to the flare ghost-chain draw.
+
+> **Confidence:** the transform **shape** is HIGH (the row-vector multiply, the 3rd-row-as-`w` term,
+> the `Sy < 0` horizon cull, the `clip.w < 0` visible test, the X-by-`−w` / Y-by-`+w` divide). The
+> **exact `scaleX/Y` and `biasX/Y` values are DBG-pending** — they come from the runtime viewport
+> (half-extents and centre in pixels), not from a static immediate.
+
+#### D.4.2 Flare ghost-chain draw (HIGH)
+
+Given the sun screen anchor `(screen_x, screen_y)` and world position `S`:
+
+- **Brightness attenuation by screen-edge distance.** Compute the clamped screen distance `dist` of the
+  sun anchor from the viewport edges, then:
+  ```
+  brightness = 1.0 − (1.0 / INTENSITY_BORDER) × dist
+  ```
+  If `brightness ≤ 0` the whole flare is **skipped**. (`1.0 / INTENSITY_BORDER` is precomputed at
+  config-load time — see §D.4.3.)
+- **Terrain occlusion:** the terrain manager is queried with the **sun world position** `S`; if the sun
+  is **occluded by terrain**, the flare is suppressed.
+- **Ghost chain placement.** The flare sprites are spaced along the line **from the sun screen-anchor
+  toward the viewport centre**: the direction is `dir = (centre − anchor)` where `centre = (biasX,
+  biasY)`. Each flare sprite `i` is placed at:
+  ```
+  position_i = anchor + POSITION[i] × dir
+  ```
+  and drawn with its own `RADIUS[i]` and `TEXTURE_ID[i]`. So `POSITION[i]` is a **fraction along the
+  anchor → centre line** (0 = at the sun anchor, 1 = at screen centre), not a world coordinate.
+
+#### D.4.3 Lens-flare config file `data/sky/lensflare.txt` (HIGH)
+
+A key/value text script, parsed once at flare load. Header keys followed by a packed per-spot record
+array:
+
+| Field | Type | Meaning | Confidence |
+|---|---|---|---|
+| `SPOT_COUNT` | int | number of flare ghost sprites (**cap 16**) | HIGH |
+| `TEXTURE_COUNT` | int | number of flare textures (**cap 16**) | HIGH |
+| `INTENSITY_BORDER` | f32 | fade border; the reciprocal `1.0 / INTENSITY_BORDER` is **cached at load** (used in the §D.4.2 brightness formula) | HIGH |
+
+Then **`SPOT_COUNT` per-spot records of 20 bytes each**:
+
+| Sub-offset | Size | Type | Field | Notes | Confidence |
+|-----------:|-----:|------|-------|-------|------------|
+| +0x04 | 4 | int | `TEXTURE_ID` | 1-based flare-texture index → `data/sky/texture/lensflare<n>.dds` | HIGH |
+| — | 4 | f32 | `RADIUS` | sprite radius `RADIUS[i]` | HIGH |
+| — | 4 | f32 | `POSITION` | fraction along the anchor → centre line `POSITION[i]` | HIGH |
+| — | 4 | u32 | `colour` | per-spot tint (ARGB) | HIGH |
+
+- **Record stride: 20 bytes** (the parser allocates `20 × SPOT_COUNT` for the spot array). `TEXTURE_ID`
+  sits at sub-offset `+0x04`; the remaining `RADIUS` / `POSITION` / `colour` fields fill the record (the
+  field ordering after `+0x04` is HIGH; the precise sub-offset of each is parser-derived).
+- **Flare textures:** `data/sky/texture/lensflare<n>.dds`, **1-based** index.
+
+#### D.4.4 Gating
+
+- The flare **enable flag is set per map-option during area load** (a per-flare boolean, set to 0/1 from
+  the area's map-option). Lens flare renders only when this flag is set **and** the global sky-detail
+  tier permits it (the highest detail-off tier suppresses it). See `environment_bins.md §1.1`
+  (`map_option` `LENSFLARE` field, offset 0x08).
+- Combined with §D.4.1–§D.4.2: the flare also requires the sun above the horizon (`Sy ≥ 0`), on the
+  visible side (`clip.w < 0`), inside the screen-edge brightness band (`brightness > 0`), and not
+  terrain-occluded.
+
+### D.5 Sun billboard texture + sprite sizes (CYCLE 7)
 
 The sun and moon are particle billboards with fixed sprite sizes (a sprite radius / billboard-size
-scalar each); these are **sprite sizes, not dome geometry**. The numeric radii are not load-bearing
-for a faithful port (a port sizes the sprites to taste) and are not reproduced as field tables here.
+scalar each); these are **sprite sizes, not dome geometry**. CYCLE 7 pinned the sun billboard's texture
+and size constants:
+
+| Asset / constant | Value | Notes | Confidence |
+|---|---|---|---|
+| Sun billboard texture | `data/sky/texture/sun.dds` | the sun sprite face | HIGH |
+| Sun billboard size | `2048.0` | billboard-size scalar (world units) | HIGH (immediate) |
+| Sun particle buffer extents | `4096.0 × 512.0` | the particle/billboard buffer extents the sun draws into | HIGH (immediate) |
+
+The moon billboard texture is the phase-selected `data/sky/texture/moon<n>.dds` (§D.3). The numeric sun
+sizes above are static immediates; a port may keep them or size the sprites to taste, but the texture
+paths are load-bearing.
 
 ---
 
@@ -366,13 +533,24 @@ for a faithful port (a port sizes the sprites to taste) and are not reproduced a
    is MED.
 4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
-5. **Sun/moon billboard non-X axis math (§D.2)** — the X term `±3200·sin(angle)` is HIGH, but the
-   vertical/depth axes use a `log`-based asymmetric-arc curve with a 45°-derived tilt; the per-axis
-   exact math and the world/screen semantics of each written coordinate are MED. A port may treat
-   the vertical arc as a free choice (clean semicircle acceptable).
-6. **Lens-flare sun-anchor transform (§D.4)** — the exact sun-screen-position → flare-layer anchor
-   projection was not pinned (UNRESOLVED). The record fields, gating, and sun anchoring are HIGH.
-7. **Moon-phase day-counter source (§D.3)** — confirmed a day index distinct from the time-of-day
+5. **Sun/moon billboard vertical-arc math (§D.2, REFINED CYCLE 7)** — the orbit is a **natural-log
+   curve** of a millisecond day angle (`dayAngle = time_ms × 360 × 0.00001157407405116828 ×
+   day_speed`), scaled by **±3200.0** with the sun/moon X-sign opposition (HIGH). The vertical arc uses
+   the same `−3200.0` curve further scaled by precomputed log-trig seeds (seeds from `day_speed × 45.0`)
+   — an asymmetric arc, MED. A port may treat the vertical arc as a tunable (smooth asymmetric arc
+   acceptable). (Supersedes the earlier `sin`-based reading.)
+6. **Sun-position ↔ directional-light precedence (§D.2.1)** — the negated sun orbit vector is stored
+   both as the directional-light direction and the sun-direction global (coupling + negate are HIGH);
+   whether the orbit-driven direction or a per-area `light%d.bin` direction wins when both are present
+   is **MED — sample/runtime-pending**.
+7. **Lens-flare viewport scale/bias (§D.4.1)** — the sun → screen transform **shape** is now pinned
+   (HIGH): row-vector × 4×4 multiply, 3rd-row `w` term, `Sy < 0` horizon cull, `clip.w < 0` visible
+   test, X-by-`−w` / Y-by-`+w` divide. The exact `scaleX/Y` (half-viewport extents) and `biasX/Y`
+   (viewport-centre pixels) come from the runtime viewport — **DBG-pending** (no static immediate).
+8. **`lensflare.txt` per-spot sub-field offsets (§D.4.3)** — record stride 20 bytes and `TEXTURE_ID` at
+   `+0x04` are HIGH; the precise sub-offsets of `RADIUS` / `POSITION` / `colour` within the record are
+   parser-derived (a real `lensflare.txt` sample would pin them).
+9. **Moon-phase day-counter source (§D.3)** — confirmed a day index distinct from the time-of-day
    angle, and the `floor((day mod 30)/2)` 15-phase scheme is HIGH; the exact day-counter derivation
    is not fully pinned.
 
@@ -386,8 +564,10 @@ for a faithful port (a port sizes the sprites to taste) and are not reproduced a
 - **Textures:** `Docs/RE/formats/texture.md` (the `.dds` payloads the names resolve to).
 - **Glossary:** see `Docs/RE/names.yaml` (`SkySystem_Init`, `SkyBox_Load`, `Fog_Init`,
   `CloudDome_Init`, `StarDome_Init`, `SkyColorTable_GetSingleton`, `SkyColor_SampleByTime`;
-  Section D adds the sun/moon billboard-orbit, moon-phase-load, and lens-flare-host subsystems —
-  flag canonical names for the glossary, do not edit it here).
+  Section D adds the sun/moon billboard-orbit, moon-phase-load, and lens-flare-host subsystems.
+  CYCLE 7 adds the sun-orbit update, the lens-flare project-and-draw host, the flare ghost-chain
+  draw, the lens-flare config reader, and the negate-and-store light coupling — flag these canonical
+  names for the glossary, do not edit it here).
 - **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec). **CAMPAIGN 10 Block D6
   two-witness re-verification (build `263bd994`)** RE-CONFIRMED: `.box` absent (0 of 43,347 VFS
   entries); the fog colour-derivation loop (48 iterations, 192-byte per-slot stride, 0.75/0.25 blend);
@@ -396,3 +576,10 @@ for a faithful port (a port sizes the sprites to taste) and are not reproduced a
   on-disk size — and `data_load_flag = 1` is now witnessed in real data (`fog11.bin`). The day-cycle
   (§C) and sun/moon orbit (§D) facts were not re-traced this lane and are carried [confirmed] from the
   prior IDA reading.
+  **CYCLE 7 (2026-06-20, build `263bd994`, static-only)** added the sun → screen → lens-flare anchor
+  transform (§D.4.1, transform shape HIGH; viewport scale/bias DBG-pending), the flare ghost-chain
+  draw + terrain-occlusion + screen-edge brightness (§D.4.2), the `data/sky/lensflare.txt` config
+  layout (§D.4.3, 20-byte spot records, caps 16), the sun billboard texture/size constants
+  (§D.5: `sun.dds`, size 2048.0, buffer 4096.0×512.0), the sky data-file family enumeration (§B.1a),
+  the build order sun→star→cloud→moon→material→light→fog (§B.1), and refined the sun/moon orbit (§D.2)
+  to the natural-log-curve model with the negate-and-store directional-light coupling (§D.2.1).

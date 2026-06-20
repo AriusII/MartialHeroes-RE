@@ -20,9 +20,9 @@
 | Attribute | Value |
 |---|---|
 | `verification` | **confirmed** for both radar/big-map UI surfaces, the projection math, the per-cell tile-streaming model, blip selection, the per-area map-binary loader, the `region*.bin` grid layout, the `regiontable*.bin` 32×48 attribute-table layout, and the BroodWar full-screen-map texture/landmark chain (all control-flow-confirmed + operands byte-present). **sample-verified** for the on-disk map-art inventory and the `mapsetting.scr` zone table. **capture/debugger-pending** for: the precise semantics of the region-attribute enum values `{0,1,2}` (safe / PvP-open / closed are control-flow-inferred labels, not server-confirmed), whether actor world-pos `+1064` is exactly the last-packet value vs a post-integration value, the writers of the current-area / current-sub-region ids (world-state packet origin), and the player-arrow rotation handedness vs the world Z-negation. |
-| `ida_reverified` | 2026-06-16 |
+| `ida_reverified` | 2026-06-20 (IDB SHA 263bd994, CYCLE 7) |
 | `ida_anchor` | 263bd994 |
-| `evidence` | [static-ida] (IDA static control-flow + operand reading; no debugger, no live capture in this lane — the VFS §6 facts reuse the prior sample-verified census) |
+| `evidence` | [static-ida] (IDA static control-flow + operand reading; no debugger, no live capture in this lane — the VFS §6 facts reuse the prior sample-verified census. CYCLE 7 (2026-06-20) re-confirmed the corner-minimap / total-map world→pixel transform, the player-centred mosaic-scroll math, the total-map arrow-key pan, and the BroodWar authored-pixel marker records against build 263bd994, byte-present operands — see §2.2a, §3.1a, §5.6, §5.7) |
 | `conflicts` | RESOLVED against build 263bd994: (1) §6.4 `regiontable*.bin` is the **32×48 region-ATTRIBUTE table** loaded straight into the in-memory region table, NOT a 52×32 sub-zone label table — the old layout was a different/conflated file; (2) the **`region*.bin` region GRID** file (width/height/byte-grid/origin, 256-unit cells) was entirely undocumented and is now §6.4; (3) the radar footer-state colour order is **0=yellow, 1=white, 2=red(gated)**, not the prior "white/yellow/red for safe/contested/war"; (4) the "+96 class-byte bias" was a misreading — `+96` is the class-byte **offset**, no additive bias exists; (5) the party blip id is the set **{29,30,51,52}**, not a single `30`; (6) the tile-prefix token is a **`%s` string** (the area-tag), not a single `%c`; (7) open-question #8 RESOLVED — the in-memory region/attribute table is loaded from `regiontable*.bin`, independent of `mapsetting.scr`; (8) a **second** zoomable/scrolling tiled big-map surface (distinct from the BroodWar full-screen map) exists and is now §5.6. |
 
 > **Status legend.** Per-claim tags inline: **CONFIRMED** (IDA control-flow + operands on build
@@ -100,6 +100,30 @@ is used). The two constants `0.125` and `66.5` are byte-present in the binary's 
 (CONFIRMED; the *meaning* of the reference vec3 as "last packet" vs a post-integration value is
 CAPTURE/DEBUGGER-PENDING — see §2.4.)
 
+### 2.2a Panel-local absolute form of the transform (CYCLE 7 — CONFIRMED, operands byte-present)
+
+The projection helper of §2.2 can be read in its **absolute panel-local** form, which is how the
+binary actually computes it: a world point is mapped directly to a panel pixel without an explicit
+"subtract the player first" step — the player-centring is folded into the additive origin.
+
+```
+mapPixelX = worldX × 0.125 + 66.5        // panel-local pixel X
+mapPixelY = worldZ × 0.125 + 66.5        // panel-local pixel Y; uses world Z, drops world Y
+```
+
+This is the same `0.125` scale and `+66.5` origin as §2.2, now expressed as a direct
+world→panel-pixel map. It writes vector component **0 (X)** and component **2 (Z)** of the output;
+component 1 (the Y/height axis) is never written. The helper is invoked several times inside the
+radar's draw to place the player arrow, the actor dots, and the region captions. The two float
+literals `0.125` and `66.5` are byte-present immediates. (CONFIRMED.)
+
+- **Scale `0.125` = 1/8** ⇒ **8 world units per minimap pixel**.
+- **Origin `+66.5` px** = the panel half-size; it centres the local player in the body.
+
+> Both forms are equivalent: §2.2's `rel = actor − player` then `rel × 0.125 + 66.5` and the absolute
+> `world × 0.125 + 66.5` differ only by where the player-centring is applied. A reimplementation may
+> use either; the absolute form matches the binary's icon/marker placement most directly.
+
 ### 2.3 Visible window (derived)
 
 The visible half-extent in world units is `66.5 / 0.125 ≈ 532` units in each axis from the player —
@@ -120,6 +144,66 @@ of the movement-write site under traffic. The wire layout of the movement packet
 `Docs/RE/opcodes.md` / `packets/`, not this spec.)
 
 ---
+
+### 2.5 Constants table — corner minimap / total-map transform (CYCLE 7 — CONFIRMED)
+
+Every constant below is a byte-present immediate or decoded literal on build 263bd994. An engineer
+citing any of these must reference this spec.
+
+| Constant role | Value | Confidence |
+|---|---|---|
+| World→map pixel scale | `0.125` (= 1/8) ⇒ 8 world units per pixel | HIGH |
+| Map pixel origin / offset | `+66.5` px (icon/marker placement) / `−66` (mosaic scroll) | HIGH |
+| Cell size / tile-index divisor | `1024` (`>> 10`) | HIGH |
+| Tile-index world bias | `20480.0` (= `20 × 1024`) | HIGH |
+| Global cell-index filename origin | `9980` | HIGH |
+| Minimap pixels per cell tile | `128` (= `1024 × 0.125`) | HIGH |
+| Corner-minimap window | 2×2 tiles = `256 × 256` px | HIGH |
+| Total-map pan step | `±25` px/frame at panel `+0xD8` (X) / `+0xDC` (Y) | HIGH |
+| Total-map pan→world factor | `8 ×` pan (inverse of `0.125`) | HIGH |
+| Total-map viewport extent | render-target W ÷ 256, H ÷ 256 (`256 = 2 × 128`) | HIGH |
+| Player position source | local-player actor `+0x428` (X) / `+0x430` (Z) | HIGH |
+| Tile mosaic path template | `data/effect/map/d{prefix}x{cellX}z{cellZ}.bmp` | HIGH |
+
+### 2.6 Struct offsets touched by the map UIs (CYCLE 7 — CONFIRMED)
+
+**Corner minimap panel** (`this` base):
+
+| Offset | Field role |
+|---|---|
+| +0x8C | visible / enabled flag (early-out) |
+| +0xC0 | parent / owner panel reference |
+| +0xC4 | tile-texture pool head |
+| +0xD0 | default / fallback texture handle |
+| +0xF8 | render / draw-target object (quad blitter) |
+
+**Total-map panel** (`this` base):
+
+| Offset | Field role |
+|---|---|
+| +0x8C | visible flag |
+| +0xD8 | pan offset X (arrow-key scroll, ±25/frame) |
+| +0xDC | pan offset Y (arrow-key scroll, ±25/frame) |
+
+**Local-player actor** (position source for both panels):
+
+| Offset | Field role |
+|---|---|
+| +0x428 | world X (float) |
+| +0x430 | world Z (float, Vec3 index 2) |
+
+(The BroodWar 40-byte marker record layout is in §5.7. The +0x428/+0x430 actor offsets are consistent
+with the §2.4 / §3.7 actor-struct facts elsewhere in this spec.)
+
+### 2.7 Z-convention port note (CYCLE 7 — MEDIUM)
+
+The minimap math is computed in **engine-Z**: the binary reads the world **Z** component directly
+(Vec3 index 2) and applies no negation. The Godot port negates Z for world geometry
+(`Helpers/WorldCoordinates.ToGodot`, `(x,y,z) → (x,y,−z)`), so a faithful port must apply the **same
+Z convention it uses for actor positions** *before* this transform, then compute `0.125 · Z + 66.5`.
+The player-arrow rotation uses a Z-rotation matrix (compass-like); the exact rotation-angle source is
+not fully traced (likely the camera yaw) — **MEDIUM / DBG-pending** (see §3.5). (MEDIUM — static
+cannot show the camera frame.)
 
 ## 3. HUD radar — background streaming and live blips
 
@@ -160,6 +244,44 @@ string-keyed list, find-or-insert by path); a cache miss allocates a managed tex
 On bind failure the tile slot falls back to a default fill texture. Only the visible slice of each
 128 px tile inside the 133 px window is drawn — a scrolling tile window that keeps the player
 centred. (CONFIRMED.)
+
+### 3.1a Mosaic-scroll math and the 2×2 blit window (CYCLE 7 — CONFIRMED, operands byte-present)
+
+CYCLE 7 re-traced the background-mosaic addressing exactly. The local player position is read from
+the local-player actor struct at **`+0x428` (world X)** and **`+0x430` (world Z, Vec3 index 2)**;
+when there is no local player a global zero-vector fallback is used. From that position the radar
+computes **two quantities per axis**.
+
+**(i) Cell index — which tiles to load** (the `{cellX}`/`{cellZ}` of the §3.1 path template):
+
+```
+cellX = ((int)(worldX + 20480.0) >> 10) + 9980        // >>10 = ÷1024
+cellZ = ((int)(worldZ + 20480.0) >> 10) + 9980
+```
+
+- `>> 10` divides by **1024** — the world cell size.
+- `+20480.0` (= `20 × 1024`) is a bias so negative world coordinates still index a positive tile
+  range.
+- `+9980` is the **global cell-index origin** baked into the tile filenames.
+
+**(ii) Sub-cell pixel scroll offset — so the player stays centred between tiles:**
+
+```
+subPixX = worldX × 0.125 − 66        // integer-truncated; same 1/8 scale as §2.2a
+subPixZ = worldZ × 0.125 − 66
+```
+
+The `−66` centring constant is the same offset family as `+66.5` (integer-truncated); the two
+derivations agree. So the background mosaic **scrolls by `worldPos × 0.125` modulo the 128-px cell
+tile**, the tile grid is **indexed by `worldPos / 1024`**, and the player arrow is drawn at the panel
+centre (~`66.5, 66.5`) via the §2.2a transform.
+
+**On-screen tile blit — the corner-minimap window size.** After computing the cell indices and the
+sub-cell scroll, the radar runs a **2×2 nested tile loop**. Each tile is stepped by **128 px**
+(one 1024-unit cell = `1024 × 0.125 = 128` minimap pixels — internally consistent with the scale),
+loads `data/effect/map/d{prefix}x{cellX}z{cellZ}.bmp` for that cell, and blits it with a computed
+destination rect and clip. The result is a **256×256-px (2×2 × 128) drawable window**, clipped to the
+133-px panel body. The corner minimap is player-centred and **not** pannable. (CONFIRMED.)
 
 ### 3.2 On-disk reality of the tiles — they do NOT ship (SAMPLE-VERIFIED)
 
@@ -416,6 +538,65 @@ click-body handoff (§4). Its model differs from both the radar and the BroodWar
 
 Because it streams the same `data/effect/map/*.bmp` tiles, the "tiles absent → blank background"
 consequence (§3.2) applies here too. (CONFIRMED.)
+
+#### 5.6a Total-map transform with pan applied (CYCLE 7 — CONFIRMED, operands byte-present)
+
+The total map uses the **same** world→tile transform and scale as the corner minimap (`0.125`,
+`÷1024`, `+20480` bias, `+9980` cell-index origin) — it is **the same transform at a larger extent
+plus a user pan**, NOT a different zoom. The per-cell pixel size stays **128 px**. Two pan offsets
+are stored on the panel struct: **`+0xD8` (pan X)** and **`+0xDC` (pan Y)**, each adjusted **±25 per
+frame** by the four arrow-key input action codes (one code per direction, ±25 on the matching pan
+axis). The cell-index math with pan applied:
+
+```
+cellX = ((worldX − 8×panX + 20480) >> 10) + 9980          // >>10 = ÷1024
+cellZ = ((worldZ − 8×panY + 20480) / 1024) + 9980
+```
+
+- The pan term is **`8 × pan`** — the `8` is the inverse of the `0.125` scale, converting a map-pixel
+  pan back into world units so the pan accumulates in screen pixels but is applied in world space.
+- **Tile-count / viewport extent** is the render-target width ÷ 256 and height ÷ 256 (`256 = 2 × 128`,
+  two-tile granularity) — this governs how many cell tiles wide and tall the total map draws, versus
+  the fixed 2×2 window of the corner minimap.
+- The total map can also be **rotated** (Z-rotation / translation / multiply matrices are present),
+  the same matrix family the corner minimap uses for the player arrow.
+
+So the total map differs from the corner minimap only by (a) a viewport-sized tile window
+(render-target ÷ 256) instead of the fixed 2×2, and (b) the user pan offset at `+0xD8`/`+0xDC`. The
+zoom level (per-cell pixel size) is unchanged. (CONFIRMED.)
+
+### 5.7 BroodWar region map — authored-pixel marker records (CYCLE 7 — CONFIRMED)
+
+The BroodWar full-screen map (§5.1–§5.5) is a **discrete region-selection screen, NOT a scaled world
+map** — it has no world→pixel scale/offset transform of any kind. Per area it loads a single
+`data/ui/map/map{areaId}.dds` plus the shared `data/ui/broodwarmap.dds` frame, then overlays
+clickable **region markers** built as **15×15-px image components**.
+
+**Marker hit-test.** A click (in panel-local pixel space) iterates the marker list and returns the
+record whose **authored pixel box** `[markerX, markerX + 15] × [markerY, markerY + 15]` (16-px cells)
+contains the click **and** whose region-id field matches the current area. A matching click issues a
+move to that region (its destination/teleport target field).
+
+**Marker source — a 40-byte fixed-record table loaded at boot.** The markers are loaded at boot from
+a binary data table of **40-byte (`0x28`) fixed records**:
+
+| Offset | Size | Field | Notes |
+|---|---|---|---|
+| +0x00 | 4 | `id` / region id | matched against the current area in the hit-test |
+| +0x04 | 20 | `name[20]` (CP949) | region display name |
+| +0x08 | 4 | destination / teleport target | the move target on a marker click |
+| +0x10 | 4 | runtime extra-data pointer | allocated/freed at runtime; not on-disk content |
+| +0x20 | 4 | marker **pixel X** | authored screen X of the marker (already in map-pixel space) |
+| +0x24 | 4 | marker **pixel Y** | authored screen Y of the marker |
+
+The pixel positions at `+0x20`/`+0x24` are **authored directly in the data file** — they are **not**
+computed from any world→pixel scale. This map is a hand-placed region-selection screen, which is why
+it carries no `0.125`/`+66.5`-style transform. (CONFIRMED.)
+
+> **Corner-minimap caption table (CONFIRMED).** A separate **stride-48 region-name/caption table**
+> (max 32 entries, indexed by region id `< 32`) is read by the radar draw to label tiles — this is
+> the same in-memory region-attribute table loaded from `regiontable{tag}.bin` (§6.5), reused here
+> for the footer/tile caption. It is unrelated to the BroodWar 40-byte marker records above.
 
 ---
 

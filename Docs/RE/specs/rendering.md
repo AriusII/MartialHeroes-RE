@@ -24,9 +24,14 @@
 >   up-axis, and any on-screen colour verdict; the 18-slot render-state cache mechanism and the
 >   per-bucket blend/Z-write byte matrix are *re-confirm pending* (not re-walked this lane — see §4
 >   flag).
-> - **ida_reverified:** 2026-06-16
+> - **ida_reverified:** 2026-06-20    *(CYCLE 7, 2026-06-20 — static re-walk of the glow/toon post chain; IDB SHA 263bd994)*
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida, sample-vfs]
+> - **cycle7_additions:** glow blur uses a **fixed pass-loop count of 16** (single small 2×2 box blur,
+>   one power-shader pass — NOT a multi-tap pyramid) — §6.4; the **toon ramp light-direction constant
+>   is (−1.0, 0.0, 0.0)** — §5.1a / §6.5; cel **edge/outline REFUTED** (no outline/edge-detect shader
+>   in the full shader set — only a ramp-shade pipeline) — §6.5 (reaffirmed HIGH); background/fallback
+>   **clear colour 0xFF505050** dark-grey ARGB — §2.0.1 (reaffirmed).
 > - **conflicts:** four corrections vs. the prior text, now applied — (C1) Present runs *inside*
 >   the per-iteration device-step, not an "outer frame driver" (§2.1); (C2) the "four scene
 >   callbacks" abstraction hides ≥6 real callback slots (§2); (C3) the cel vertex shader receives
@@ -151,7 +156,8 @@ The frame is built from three nested routines, distinct from the scene-draw fork
 **Confidence: CONFIRMED.** Every frame, on **both** the direct and offscreen paths, the device is
 cleared with **TARGET | ZBUFFER** (the combined clear flag value `3`) and a depth-clear value of
 **1.0**. `BeginScene` / `EndScene` bracket each draw. The clear colour is the configured scene clear
-colour.
+colour; the **background / fallback clear colour is `0xFF505050`** (a dark-grey ARGB, set once at the
+init of the transparent/particle render pass). CONFIRMED (immediate).
 
 ### 2.0.2 Device-lost / reset / restore lifecycle
 
@@ -576,7 +582,18 @@ scalars (c0 / c1) and the external glow-shader's own multiply, **not** from a br
 **Power-chain depth: a single blur pass; only one glow shader runs.** Exactly **one blur pass** runs
 (CONFIRMED this lane: a single glow-blur routine binds the glow pixel-shader handle, draws one
 downscaled quad, then clears the pixel shader) — there is **no** `power2 → power4` multi-tap chain in
-the code path. The glow pixel shader is the single **editable-filename** shader, whose default
+the code path.
+
+> **Glow is a single small box blur with a fixed pass-loop count of 16 (CYCLE 7).** The post-process
+> engine constructor stores a fixed **pass-loop count of `16`** alongside the default glow blur
+> **range (2, 2)** (§6.3 downsample divisors). The shape recovered is therefore a **single small 2×2
+> box blur driven by a fixed 16-iteration loop and a single power-shader pass** (`power1dx8.psh` by
+> default, §6.5) — **not** a multi-level Gaussian pyramid and not a `power2/power4` tap escalation.
+> Confidence: the single-blur-pass structure and the stored `16` / range-`(2,2)` immediates are
+> CONFIRMED; the precise way the 16 loop count drives the box-blur taps inside the pass is MED-HIGH
+> (the loop count is an immediate; its exact per-tap consumption inside the bound `.psh` lives in the
+> external shader, `formats/shaders.md`). For a Godot port a single half-res box-ish blur is the
+> faithful equivalent — do not stack a multi-level pyramid (§8). The glow pixel shader is the single **editable-filename** shader, whose default
 filename slot is pre-filled with the `power1dx8` path and can be overwritten **only** by an external
 display-config string (a dedicated power-shader key). That a stock client only ever loads `power1dx8`,
 and that a byte-level search finds **zero** `power2` / `power4` literals, was established in a prior
@@ -628,12 +645,29 @@ shaders and loads the toon-ramp LUT:
 | Composite **pixel** shader | The glow/composite shader bound in pass 4 (the `finaldx8` composite — see `formats/shaders.md`). |
 | Editable **glow** pixel shader | The blur shader bound in pass 3; its filename is the editable slot defaulting to `power1dx8` (§6.4), overridable by the `display.lua` `DISPLAY_POWERSHADER` key (§6.4 conflict). |
 
+> **Cel EDGE / outline — REFUTED (CYCLE 7, HIGH, absence over the full set).** There is **no
+> outline / edge-detect shader and no edge pass** anywhere in the cel pipeline. The complete shader
+> set was enumerated (the cel VS, the two cel PS variants, the composite shader, and the editable glow
+> shader, plus the toon-ramp LUT) — **none** of them is an outline or edge-detect shader, and no
+> separate edge pass runs. Only a **toon RAMP shade** pipeline exists (the ramp LUT keyed by the
+> per-vertex luminance, §5.1a / §5.2). Any cel **outline** in a Godot port is therefore a **port-side
+> invention**, not a faithful reproduction — alongside the "ambient ×3" refutation in
+> `environment.md §6.2b`, this is the second of the two port-side embellishments to drop for fidelity.
+
 > **Correction / enrichment (MISSED #7).** The prior text described "the cel pixel shader" in the
 > singular; the binary assembles **two** cel pixel shaders (a primary and a `…2` variant), each in its
 > own handle slot. The actual on-disk shader **filenames** observed in the binary
 > (`dotoonshading.vsh` / `dotoonshading.psh` / `dotoonshading2.psh` / `finaldx8.psh`, plus the
 > editable glow shader) are documented and owned by **`formats/shaders.md`** (Block D) — this spec
 > describes only the count, roles, and binding; it defers the canonical filename list there.
+
+**Toon ramp light-direction constant (CYCLE 7, CONFIRMED immediate).** The post-process engine
+constructor seeds the toon-ramp **light direction** as the constant vector **`(−1.0, 0.0, 0.0)`**.
+This is the directional input that keys the toon ramp shade (the §5.1a register-4 light/sky direction
+the cel vertex shader consumes); it is a fixed shader-side constant, distinct from the scene's
+day/night directional-light direction (`environment.md §6.2a`, the static `(−7, 7, 20)` sun vector).
+For a Godot toon material, drive the ramp lookup from this `(−1, 0, 0)` light direction (plus the
+BT.601 luma weights of §5.1a), not from the scene sun direction. Confidence: MED-HIGH (immediate).
 
 **Shader load path — VFS-first, then disk (CONFIRMED, MISSED #8).** Each shader is loaded by name:
 if the client VFS is mounted, the shader source is opened **from the VFS** and assembled from the

@@ -8,10 +8,6 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
-    </ItemGroup>
-
-    <ItemGroup>
         <!--
           LZ4 raw-block codec. LZ4 is a public standard format (lz4.c LZ4_compress_default /
           LZ4_decompress_safe), NOT the bespoke wire cipher, so a vetted standard codec is appropriate

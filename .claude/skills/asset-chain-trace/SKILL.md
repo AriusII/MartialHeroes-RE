@@ -33,7 +33,7 @@ committed `Docs/RE/formats/` specs; this skill cites them, it does not duplicate
    `clientdata/` → external installs) or the legacy fallback `D:/MartialHeroesClient`. A dir is valid
    only when it contains BOTH `data.inf` AND `data/data.vfs`. If neither is present, STOP and tell the
    user the trace needs the bring-your-own client mounted — do not fabricate a resolution.
-2. **A .NET 10 SDK** (`dotnet --version` ≥ 10). The bundled harness targets `net10.0`.
+2. **A .NET 10 SDK** (`dotnet --version` ≥ 10). The tool targets `net10.0`.
 3. **The chain specs are available**: `CLAUDE.md` "Recovered asset mappings" (the canonical chain
    list) and the per-format docs under `Docs/RE/formats/` (`mesh.md`, `terrain.md`, `animation.md`,
    `misc_data.md`, …). Read the hop's spec before you cite it — you cite the spec, not your memory.
@@ -78,18 +78,18 @@ Each hop below ends in an on-disk VFS path. Cite the listed spec for that hop.
 3. **Read the hop's spec** in `Docs/RE/formats/` (and the chain summary in `CLAUDE.md`) so each hop
    you resolve is grounded and citable. Note the table column / record stride / 1-vs-0-based index
    convention for that hop.
-4. **Read the bundled harness** so you can re-parameterize it without touching the production library:
-   - `${CLAUDE_SKILL_DIR}/scripts/chaintrace/Program.cs` — the `# === CONFIG ===`-headed tracer.
-   - `${CLAUDE_SKILL_DIR}/scripts/chaintrace/chaintrace.csproj` — a `net10.0` exe that
-     `ProjectReference`s `Assets.Vfs` (and `Assets.Parsers` for table/header reads) by absolute path,
-     so it always tracks the live `MappedVfsArchive` surface.
+4. **Read the tool source** so you can re-parameterize it without touching the production library:
+   - `${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.AssetChainTrace/Program.cs` — the `# === CONFIG ===`-headed tracer.
+   - `${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.AssetChainTrace/MartialHeroes.Tools.AssetChainTrace.csproj` — a
+     `net10.0` exe (a solution member) that `ProjectReference`s `Assets.Vfs`, so it always tracks the
+     live `MappedVfsArchive` surface.
 5. **Resolve each hop** using the documented mapping, then **confirm the resolved file EXISTS in the
    VFS** through `Assets.Vfs` — reporting **only** `Contains(path)`, `DataSize` (bytes), and
    `DataOffset`. Run the harness from its own dir:
 
    ```powershell
-   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/chaintrace" -- exists data/map000/bgtexture.txt
-   dotnet run -c Release --project "${CLAUDE_SKILL_DIR}/scripts/chaintrace" -- exists-many data/char/bind/g3045.bnd data/char/mot/g170354502.mot
+   dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.AssetChainTrace" -- exists data/map000/bgtexture.txt
+   dotnet run -c Release --project "${CLAUDE_PROJECT_DIR}/Tools/MartialHeroes.Tools.AssetChainTrace" -- exists-many data/char/bind/g3045.bnd data/char/mot/g170354502.mot
    ```
 
    - `exists <vfs-path>` — print `true/false` + size + offset for one path.
@@ -130,10 +130,10 @@ Each hop below ends in an on-disk VFS path. Cite the listed spec for that hop.
   and never write a trace into a committed spec. This skill reads the user's own VFS, so it is not a
   clean-room concern, but the no-payload + no-commit-originals invariant always holds.
 - **Read-only over the VFS.** Open the archive read-only; never modify `data.inf` / `data/data.vfs`.
-- **The harness is a throwaway.** It lives under `scripts/`, is **never** added to `MartialHeroes.slnx`
-  and **never** committed as a solution member; its `bin/`/`obj/` are transient. If the live
-  `MappedVfsArchive` API drifts and the harness won't compile, fix the harness call site — never patch
-  the production library to suit it.
+- **The tool is a maintained solution member** at `Tools/MartialHeroes.Tools.AssetChainTrace`; it builds
+  with `dotnet build MartialHeroes.slnx` and its `bin/`/`obj/` stay gitignored. If the live
+  `MappedVfsArchive` API drifts and it won't compile, fix the call site — never patch the production
+  library to suit it.
 
 ## Pairs with
 

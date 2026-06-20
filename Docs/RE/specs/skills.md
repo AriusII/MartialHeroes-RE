@@ -26,7 +26,7 @@
 > field meanings; `capture/debugger-pending` for server-authored magnitudes (skill damage, cooldown
 > wall-clock, skill-point/XP rates, HP/stamina scale) and the actual on-wire VALUE bytes of 5/33, 4/41,
 > 4/150, 5/52, 5/31.
-> **ida_reverified:** 2026-06-16
+> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida]
 > **conflicts:** none — Campaign-10 Lane-F2 re-verification reproduced every framing constant
@@ -34,6 +34,19 @@
 > slot<240) from the loader and handler code. Refinements only (the hotbar "two parallel arrays" are
 > physically ONE 240×8-byte record array; new concrete string-id / message-id tables; 4/102 is a
 > 476-byte snapshot rebuild). All applied below.
+>
+> **CYCLE 7 (2026-06-20):** the entire cast pipeline was re-recovered from the *consumer* side (the
+> battle controller's cast gate, the AoE target resolver, the 2/52 builder), which consumer-confirms
+> the `skills.scr` combat-stat columns (see `structs/skill.md §A.2.5`). Corrections applied below:
+> the **+1332 field is the cast-CADENCE / cooldown gate** (blocked while elapsed `< 100 ms × (+1332)`),
+> NOT an MP-pool subtract; **+1368 / +1370 are timed-charge gates** (compared against running global
+> clocks), NOT a flat HP/MP/stamina pool subtract on the cast-gate path; the **event-boost flag is the
+> local-player record's boost flag**; the **default basic-attack skill id is 121100050**; the AoE cone
+> (mode 4) is a circular SECTOR whose half-angle is `+1316` in DEGREES (× π/180). The earlier "4/102 is
+> the buff opcode" framing is superseded: the canonical live buff-slot stream is **5/31
+> `SmsgBuffSlotUpdate`** (4/102 is a 476-byte skill-window snapshot rebuild — a different thing). The
+> 30-slot per-actor buff table is now owned by the dedicated `specs/buffs.md`; §6 here cross-references
+> it and is not the buff-model authority.
 
 Confidence tags used throughout:
 
@@ -60,12 +73,16 @@ decode accordingly.
 > its high word (record +6) is pad. See §1.5. The per-rank sub-row count byte was also pinned to
 > fixed-block **+1500** (see §1.2).
 
-1. **Cast cost field — HP or MP?** The cast-confirm path subtracts the skill-data "consumed cost"
-   field from the local player's **current-HP 64-bit vital**, yet the field is labelled a generic
-   cost and the *cast-gate* affordability check uses a **different** skill-data field (the MP-cost
-   factor). Two distinct cost fields exist. Whether the game truly has HP-cost skills, or whether
-   the consumed-cost field is an MP/ki value stored into the HP vital, **needs a capture of a known
-   MP-cost cast** (`CAPTURE-PENDING`). Do not collapse these into a single "cost" until confirmed.
+1. **Cast cost field — HP or MP? (REFRAMED, CYCLE 7.)** The cost magnitude is server-authored and
+   remains `CAPTURE-PENDING`, but the *client-side cast-gate* behavior is now understood: the gate
+   does **NOT** subtract MP, HP, or stamina from a pool. The two cost-region fields read by the gate
+   (skill-data +1368 and +1370) are **timed-charge gates** — each is compared against a running global
+   clock, and the cast is blocked while the clock delta is negative (a recharge / charge-timer that
+   has not yet elapsed), not affordability against a numeric pool. The cadence field +1332 (the cast
+   "cooldown" cadence) is `100 ms × (+1332)` elapsed-time gate, also not a pool subtract. **Do not
+   model +1368 / +1370 as a flat numeric pool cost** from this evidence. Whether the server applies a
+   real HP/MP/stamina subtract elsewhere still needs a capture of a known-cost cast (`CAPTURE-PENDING`).
+   (The §5.2 cast-confirm path subtracts a value into a vital — see that section's reframed caveat.)
 2. **`skills.scr` per-rank sub-rows.** Each skill record ends with a count-prefixed table of small
    fixed-width sub-rows (per-rank / per-level effect rows). Their individual fields were not decoded;
    they are most likely per-rank coefficients / durations. Needs the data file or a dedicated parser
@@ -77,9 +94,11 @@ decode accordingly.
 4. **Buff stacking.** Only refresh-by-slot was observed (one fixed slot per effect code, re-apply
    overwrites). Whether the server ever multiplexes the same effect code into multiple slot indices
    to stack it is unconfirmed.
-5. **"Boost doubling" trigger.** A world/event flag (an "event-outlet" boolean) doubles AoE hit
-   count and quadruples AoE area when set. The *source* of that flag (a world buff? a GM/event
-   toggle?) is unknown.
+5. **"Boost doubling" trigger. (LOCATION RESOLVED, CYCLE 7.)** The client flag that doubles AoE hit
+   count (×2) and quadruples AoE area (radius ×2) lives in the **local-player record (an event-boost
+   boolean)**: when it is set AND the base hit count is ≥ 2, the count doubles and the area
+   quadruples; the combined count is then clamped to **40**. The *origin* of that flag (a world buff?
+   a GM / event toggle that sets it?) is still unknown — only the consuming flag location is pinned.
 6. **Damage is server-authoritative.** The client never computes skill damage. It only renders the
    per-target damage / remaining-HP / max-HP values the server sends. Any damage-formula recovery
    must come from server-side data, not this client.
@@ -151,21 +170,21 @@ binary addresses. They are read directly by the cast / effect / cooldown logic.
 | +1292 | u16 | `skill_rank` | CONFIRMED | The skill rank; copied into the hotbar points array when a slot is applied (§1.5). |
 | +1306 | u16 | `category` (per-cast sort) | CONFIRMED | Per-cast skill category (the cast/effect discriminator, distinct from `global_category` at +4). Observed values: 1, 2, 3, 5, 6, 7, 11, 14, 17. **14 = REVIVE** (named by the game's own debug string). Category 1 = basic-attack class. Mirrors `structs/skill.md` `skill_category`. |
 | +1308 | u8 | `target_mode` (shape) | CONFIRMED | Selects target-resolution / area shape. Enumerated in §3. |
-| +1312 | f32 | `base_range` (cone length) | LIKELY | Base cast range; for cone/line shapes, the cone length. Combined with caster body radius for the range check. |
-| +1316 | f32 | `aoe_radius` (cast distance) | LIKELY | AoE radius / cast distance. Squared for distance gating. Doubled in area when the boost flag is set. |
-| +1330 | i16 | `max_targets` | LIKELY | Base maximum target hit count. Clamped to **40**; doubled when the boost flag is set. |
-| +1332 | i16 | `mp_cost_factor` | CONFIRMED | Cast-gate affordability factor. Gate fails when available MP `< 100 × mp_cost_factor`. **This is the MP gate, separate from the consumed cost at +1368.** |
-| +1334 | u16 | `cooldown_centiseconds` | CONFIRMED | Cooldown in 1/100 s. Multiplied by 100 → per-slot cooldown in ms in the recast table (§4). |
-| +1344 | u16 | `weapon_req_a` | LIKELY | Weapon / stance requirement A (weapon-class id). Observed values 53, 55. `0` = no requirement. |
-| +1348 | u32 | `weapon_req_b` | LIKELY | Secondary weapon / stance requirement id, matched against the worn-weapon field. |
-| +1352 | u8 | `weapon_req_active` | LIKELY | Flag enabling the weapon-requirement check. |
-| +1368 | i16 | `consumed_cost` | UNVERIFIED | Cost subtracted on cast-confirm (§5.2). **Subtracted from the current-HP 64-bit vital** in the observed path, but labelled a generic cost. See open question 1. Distinct from `mp_cost_factor`. |
-| +1370 | u16 | `stamina_cost` | LIKELY | Stamina cost per target; total = `stamina_cost × target_count × buff_factor`, floored at the base value (§5.2). |
+| +1312 | f32 | `base_range` (cone length) | CONFIRMED | Base cast range; effective range = `+1312 + caster body radius`. For cone/line shapes (mode 4) it is the cone length `L`. |
+| +1316 | f32 | `aoe_radius` **OR** `cone_half_angle_deg` | CONFIRMED | **Dual-purpose.** For shape modes 3/6/0xA it is an AoE **radius** in game units (squared for distance gating). For shape mode 4 (cone) it is a **cone half-angle in DEGREES**, × π/180 → radians. See §3. Radius doubles in extent (area ×4) when the boost flag is set. |
+| +1330 | i16 | `max_targets` | CONFIRMED | Base maximum target hit count. Clamped to **40**; doubled when the boost flag is set. |
+| +1332 | i16 | `cast_cadence_factor` | CONFIRMED | **Cast-cadence / cooldown gate.** The gate blocks while elapsed time since the last action is `< 100 ms × cast_cadence_factor`. **This is NOT an MP-pool subtract** (corrected CYCLE 7 — the earlier "MP gate" framing of this field is withdrawn). |
+| +1334 | u16 | `cooldown_centiseconds` | CONFIRMED | Recast-table duration in 1/100 s. Multiplied by 100 → per-slot cooldown in ms in the recast table (§4). |
+| +1344 | u16 | `weapon_req_a` | CONFIRMED | Weapon / stance requirement A (weapon-class id). Observed values 53, 55. `0` = no requirement. Also (with +1348) the shape-3 enemy-radius-halving trigger. |
+| +1348 | u32 | `weapon_req_b` | CONFIRMED | Secondary weapon / stance requirement id, matched against the worn-weapon field. |
+| +1352 | u8 | `weapon_req_active` | CONFIRMED | Flag enabling the +1344 special-weapon requirement check. |
+| +1368 | i16 | `cast_cost_timer_threshold` | CONFIRMED (structure); CAPTURE-PENDING (magnitude) | A **timed-charge gate**: the gate blocks when `> 0`, the running-clock delta is negative, and the value `< 30000`. **NOT a flat pool subtract on the cast-gate path** (corrected CYCLE 7). See open question 1. |
+| +1370 | u16 | `stamina_cost_timer_threshold` | CONFIRMED (structure); CAPTURE-PENDING (magnitude) | A **timed-charge gate** compared against a separate running global clock; blocks when `> 0` and the clock delta is negative. **NOT a flat pool subtract on the cast-gate path** (corrected CYCLE 7). |
 
-> Two cast-window timer values are also read from the +1368 / +1370 region and compared against
-> warm-up / valid-window globals; an out-of-window cast fails with the cast result code for "timing"
-> (see §2.3, code 11). Whether these reuse the cost fields or are separate adjacent values is
-> `UNVERIFIED`.
+> The +1368 / +1370 fields are the timed-charge gates described above: each is compared against a
+> running global clock, and an unelapsed charge blocks the cast (with the soft-fail behavior in §2.1
+> — the cast falls back to the basic attack rather than hard-erroring). They are NOT the cast-window
+> warm-up timers nor a numeric pool cost (CYCLE 7).
 
 ### 1.5 Skill hotbar — ONE 240×8-byte record array (was "two parallel arrays")
 
@@ -196,8 +215,9 @@ non-zero code to a localized error string (§2.3).
 
 ### 2.1 Ordered gate sequence
 
-Gates run in this order; the first failing gate returns its code and the request is **not** sent.
-Implement them as an ordered short-circuit chain.
+Gates run in this order; the first failing gate returns its code and the request is **not** sent
+(unless noted as a *soft-fail* that falls back to the basic attack). Implement them as an ordered
+short-circuit chain. The order and codes below are consumer-confirmed (CYCLE 7).
 
 1. **Party / relation gate** → code **17**. Walk the local player's relation/party slot table
    (20 entries); if any referenced actor's relation byte is not the "allied" value, block.
@@ -211,38 +231,47 @@ Implement them as an ordered short-circuit chain.
 7. **Alive gate** → code **2**. The local player's alive/can-act word must be set.
 8. **Action-lock gate** → code **20**. A generic action-lock flag must be clear.
 9. **Current-target hostile-state gate** → code **3**. The selected target must not be in the
-   blocking hostile state.
+   blocking hostile (dead-body) state.
 10. **Resolve the pending skill** → code **4** if unresolved. For a basic attack (no pending skill),
-    a per-class basic-attack alias skill is loaded; its category must be **1**.
-11. **Weapon / stance requirement** → code **18**. Reads `weapon_req_a/_b/_active`; the worn weapon
-    must satisfy them (or be covered by a class-link table).
-12. **Self-cast eligibility** → code **5**.
-13. **Cooldown gate** (§4). All cooldowns are ticked, then the skill's recast state is checked. If
-    still cooling **and** the skill is not in the exempt category (category 1), fall through to the
-    MP check / block.
-14. **MP affordability gate** → code **6**. Fails when available MP `< 100 × mp_cost_factor`
-    (skill-data +1332).
-15. **Resolve effective target** by `target_mode`. For self / ground modes the target becomes the
+    a per-class basic-attack alias skill is loaded (default skill id **121100050**); its category
+    must be **1**.
+11. **Special-weapon vs target** → code **18**. When `weapon_req_a` (+1344) and `weapon_req_active`
+    (+1352) gate a special-weapon branch (e.g. weapon-class 53 / 55), the target must wear that
+    weapon class or share the weapon group.
+12. **Weapon / stance requirement** → code **5**. Reads the weapon-req block (`weapon_req_a/_b/_active`
+    at +1344 / +1348 / +1352, walked in 12-byte steps); the worn weapon must satisfy it (or be covered
+    by a class-link table).
+13. **Cooldown / cast-cadence gate** → code **6**. Blocked while elapsed time since the last action is
+    `< 100 ms × cast_cadence_factor` (skill-data **+1332**). The per-slot recast table (§4) is also
+    ticked/checked here; category-1 (basic attack) is exempt. **This gate is a cadence/cooldown gate,
+    not an MP-pool affordability check** (corrected CYCLE 7 — there is no `available MP < 100 × factor`
+    subtract on this path).
+14. **Resolve effective target** by `target_mode`. For self / ground modes the target becomes the
     local player.
-16. **Range / line-of-sight** (§2.2).
-17. **Cast-window timing gate** → code **11**. The cast-window timers must be within the warm-up /
-    valid window.
-18. **Build target arrays** (§3) — fills the ally/PC id array and the enemy id array. If **neither**
+15. **Range / line-of-sight** (§2.2). Out of range → move-closer (code **8**) or code **21**; terrain
+    blocked → code **9**; invalid target-state → code **10**.
+16. **Cast-cost timer gates** (skill-data +1368 / +1370). Each is a **timed-charge gate** compared
+    against a running global clock; an unelapsed charge is a **soft-fail** — it does not hard-error but
+    falls the cast back to the basic attack (skill id 121100050). (Localized notices for these soft
+    states are issued from the message database.)
+17. **Build target arrays** (§3) — fills the ally/PC id array and the enemy id array. If **neither**
     is populated → code **12**.
-19. **Success.** Face the player toward the aim point, record the cast time, send `CmsgUseSkill`
+18. **Success.** Face the player toward the aim point, **record the cast time as "now"** (the
+    cast-cadence timestamp is stamped to now **only** on a successful send), send `CmsgUseSkill`
     (2/52), return code **0**.
 
 ### 2.2 Range and line-of-sight
 
 - **Effective range** = `base_range` (skill-data +1312) + the caster's body radius + a per-buff
-  range bonus (read from a buff slot). Clamp to a minimum of **1.0**.
+  range bonus (read from a buff slot). Clamp to a minimum of **1.0** game units. (Special-weapon
+  targets, e.g. weapon-class 53 / 55, override the range to a target-derived value.)
 - **Distance test.** Use the **squared planar (XZ) distance** from the player position to the aim
-  point, compared against `effective_range²`. If beyond range:
-  - This is **not** an error toast. Instead the client sets a "needs approach" state, issues a move
-    toward the aim point, and returns code **8** (move-closer).
-- **Terrain / LoS test** on the aim point → code **9** if blocked.
+  point, compared against `effective_range²`. If beyond range either the client sets a "needs
+  approach" state, issues a move toward the aim point, and returns code **8** (move-closer, no toast),
+  or it returns code **21** when auto-approach does not apply.
+- **Terrain / line-of-walk test** on the aim point → code **9** if the terrain blocks the path.
 - **Target-state test** (§3.1) → code **10** if the target is not valid. Skipped for the
-  ground/point target mode.
+  ground/point target mode (shape 5).
 
 ### 2.3 Result-code → localized-string-id map
 
@@ -288,8 +317,8 @@ is capped at **40**; the per-skill base cap comes from `max_targets` (+1330).
 | 0 | single (self / primary) | Uses the primary target only. |
 | 1 | single target | Faction + target-state check; team-id gate. Fail → string 3004. |
 | 2 | single enemy / heal | Target-state check; if the target is friendly, treat as a heal target, else an enemy. Fail → string 3002 / 3030. |
-| 3 | chain / nearby AoE | Radius from `aoe_radius` (+1316), squared; the enemy radius is **halved** when the weapon-requirement fields are set; iterate actors within radius². |
-| 4 | cone / forward-line AoE | Length from `base_range` (+1312) + caster radius; forward vector from the caster's last-known position; per-actor cone test; effective radius² = `2 × radius²`. |
+| 3 | chain / nearby AoE | Radius² from `aoe_radius` (+1316), squared; the enemy radius is **halved** (`(+1316 × 0.5)²`) when both weapon-req fields (+1344 and +1348) are set; iterate actors with squared XZ distance to the primary target `< radius²`. |
+| 4 | cone / forward-line AoE | A circular **sector**. Length `L = base_range (+1312) + caster radius`; the forward axis is the normalized vector from the primary target to the caster, scaled by `L / 5.0`, origin offset to the caster; effective squared range = `2 × L²`. The **half-angle = +1316 in DEGREES × π/180** (radians). Per actor: include iff squared XZ distance ≤ `2·L²` AND the bearing `atan2(actor.x − center.x, actor.z − center.z)` is inside the `facing ± half-angle` window. |
 | 5 | ground / point | No actor targets are resolved (returns immediately). Used for ground-targeted / blink casts. |
 | 6 | party AoE | Walks the party roster; radius from `aoe_radius` (+1316). |
 | 7 | faction / group-gated single | Style / team match against the target. Fail → string 3003. |
@@ -299,9 +328,10 @@ is capped at **40**; the per-skill base cap comes from `max_targets` (+1330).
 
 > Modes 8 and 12+ were not observed in this subsystem; treat any unseen mode value as `UNVERIFIED`.
 
-**Boost-doubling rule** (applies in every AoE branch): when the world/event boost flag is set **and**
-the base hit count ≥ 2, the **hit count doubles** and the **area radius² quadruples** (radius ×2).
-The combined count is then clamped to 40. The source of the boost flag is `UNVERIFIED` (open
+**Boost-doubling rule** (applies in every AoE branch): when the event-boost flag — a boolean in the
+**local-player record** — is set **and** the base hit count ≥ 2, the **hit count doubles** (×2) and
+the **area quadruples** (radius ×2, area ×4). The combined count is then clamped to **40**. The
+consuming flag location is pinned (CYCLE 7); the *origin* of the flag is still `UNVERIFIED` (open
 question 5).
 
 Distance math throughout uses **planar (XZ) squared distance**; radius squaring uses
@@ -397,11 +427,15 @@ When the caster is the **local player** and the action is a *real* cast (not a c
 
 - Set a UI cast time-out (≈ now + 550 ms).
 - **Resource consumption:**
-  - Subtract `consumed_cost` (skill-data +1368, i16) from the local player's **current-HP 64-bit
-    vital** (recorded as a 64-bit subtract). **See open question 1 — this may be an MP/ki cost; the
-    cast-gate affordability check uses the separate +1332 MP factor.** `UNVERIFIED`.
-  - Subtract a **stamina** cost = `stamina_cost` (+1370, u16) × `target_count` × a factor read from a
-    buff slot, floored at the base value; write the result to the current-stamina field.
+  - The 5/52 cast-confirm path applies a value read from the +1368 / +1370 region to a local vital
+    (the current-HP 64-bit vital was the observed sink). **See open question 1 (REFRAMED, CYCLE 7):**
+    on the separate *cast-gate* path, +1368 / +1370 act as **timed-charge gates** (not pool subtracts)
+    and +1332 is the cast-**cadence** gate (not an MP-affordability check) — do not conflate the two
+    code paths, and do not model +1368 / +1370 as a single flat numeric pool cost. The actual consumed
+    magnitude is server-authored — `CAPTURE-PENDING`.
+  - A **stamina** value derived from `stamina_cost_timer_threshold` (+1370) × `target_count` × a
+    factor read from a buff slot, floored at the base value, is written to the current-stamina field
+    on this confirm path; the magnitude is `CAPTURE-PENDING`.
   - Mirror current HP / MP / stamina into the local-player spawn descriptor.
 - **Arm the cooldown** (§4) — **unless** the skill's category is 5 (cooldown-exempt).
 
@@ -440,6 +474,15 @@ no extra wire fields. The handler:
 
 ## 6. Buff / debuff (status) model
 
+> **Authority cross-reference (CYCLE 7).** The full buff / status model — the **30-slot per-actor
+> buff table at actor+520 (12-byte stride)**, the canonical buff-slot push **5/31
+> `SmsgBuffSlotUpdate`**, and the **4000 ms** buff tick — is owned by the dedicated **`specs/buffs.md`**.
+> This section retains the skill-side view of buff slots and the effect-code applicator for
+> implementers of the cast / skill subsystem, but `buffs.md` is the authority and must be consulted
+> for the buff-table model. Note: the live buff-slot stream is **5/31**; the earlier framing that tied
+> buffs to **4/102** is superseded — 4/102 is a 476-byte skill-window *snapshot rebuild* (a different
+> thing; §6A.4), not the per-slot buff opcode.
+
 Statuses are surfaced as **state icons** (the state-icon UI panel; icon atlas
 `data/ui/skillicon/stateicon.dds`, layout `data/ui/buff_icon_position.xdb`). Status data arrives via
 three pushes:
@@ -459,10 +502,11 @@ The status push carries a sort, an actor id, a **slot index**, an **effect code*
 **param**. The slot index selects which table and which slot is written; status entries are **12 bytes**
 (`[u32 effect_code][u32 value/duration][u32 param]`):
 
-- **Per-actor buff table — 31 slots (index 0..30), 12-byte stride.** The primary status table on each
-  actor. A **parallel secondary table** (offset 44 slots further) holds a u16 magnitude/percent plus a
-  byte — this is the buff's **strength** (used by %-gated effects). A *set* writes all three dwords; a
-  *clear* (value == 0) zeros the effect-code dword and stashes the param tail.
+- **Per-actor buff table — 30-slot table at actor+520, 12-byte stride** (slot indices span 0..30; the
+  full slot-count / capacity model is owned by `buffs.md`). The primary status table on each actor. A
+  **parallel secondary table** holds a u16 magnitude/percent plus a byte — this is the buff's
+  **strength** (used by %-gated effects). A *set* writes all three dwords; a *clear* (value == 0) zeros
+  the effect-code dword and stashes the param tail. See `buffs.md` for the authoritative table model.
 - **Local-player spawn-descriptor mirror** (slot index < 1,000,000): the same 12-byte entry is mirrored
   into the local-player spawn descriptor, and two UI panels are refreshed.
 - **Global high-index table** (slot index ≥ 1,000,000, offset by 1,000,000): a separate 12-byte-stride
@@ -483,7 +527,7 @@ when its value/duration field is `> 0`. Recovered mappings:
 | 45 (0x2D) | Toggle a local control flag. | LIKELY |
 | 46 (0x2E) | Model / appearance swap (petrify / transform). Builds a numeric model token; mob-style → model mapping (style 1→11, 2→22, 3→13, 4→14). | LIKELY |
 | 47 (0x2F) | Movement / control restriction (root / snare). Sets a per-actor restriction flag; emits a per-tick floor/area visual stamp while active. | LIKELY |
-| 48 (0x30) | **Dispel / cleanse:** clears the effect-code-43, -46, and -47 slots across the 31-slot table; resets stance to the default. | LIKELY |
+| 48 (0x30) | **Dispel / cleanse:** clears the effect-code-43, -46, and -47 slots across the buff table; resets stance to the default. | LIKELY |
 | 50 (0x32) | Appearance / poison transform (variants). | LIKELY |
 | 57 (0x39) | Sets an AoE-active actor state; transform using the slot's secondary value. | LIKELY |
 | 64 (0x40) | Sets a flag **only when active AND the secondary magnitude < 100** (a %-gated flag). | LIKELY |
@@ -497,7 +541,7 @@ logic; it lives in `skills.scr` data (open question 3).
 
 ### 6.3 Duration, tick, and stacking
 
-A periodic **buff tick** walks the 31-slot per-actor status table:
+A periodic **buff tick** (the 4000 ms tick owned by `buffs.md`) walks the per-actor status table:
 
 - The **second dword of each slot is the remaining-duration counter.** While it is `> 1` and a global
   pause gate is not active, it **decrements by 1 per tick**.
@@ -636,15 +680,21 @@ feed the max-HP/MP multiplier, buff slots drive visual / control state).
   part of hotbar assignment.
 - **Cooldown table** → `Client.Domain`: a flat 240-slot cooldown model keyed by hotbar slot, with the
   category-1 / category-5 exemptions.
-- **Effect / buff model** → `Client.Domain`: a 31-slot per-actor status array with a parallel
-  magnitude array, a single-decrement tick, and refresh-by-slot semantics (no stack counter). The
-  effect-code applicator (§6.2) is a switch on the effect code.
+- **Effect / buff model** → `Client.Domain`: a per-actor status array (30-slot table at actor+520,
+  12-byte stride) with a parallel magnitude array, a single-decrement tick, and refresh-by-slot
+  semantics (no stack counter). The effect-code applicator (§6.2) is a switch on the effect code.
+  **`buffs.md` is the authority for the buff-table model (5/31 + the 4000 ms tick); build the buff
+  model from it.**
 - **Wire decoding** → `Network.Protocol` decodes `CmsgUseSkill` / `SmsgActorSkillAction` / the hotbar /
   skill-point / window pushes per their `packets/*.yaml`; cite `// spec: Docs/RE/packets/<name>.yaml`
   on each offset. The 4/41 reason→string-id table (§6A.2) and the 4/150 level-up message ids (§6A.3)
   map to the project's own message-DB / string table.
-- **Do not** implement the HP-vs-MP cost (§5.2) as a single value, the `skills.scr` per-rank rows
-  (§1.3), or any effect-code-> meaning beyond the table in §6.2 without first resolving the
-  corresponding UNVERIFIED item. The actual on-wire VALUE bytes (5/33, 4/41, 4/150, 5/52, 5/31) and
-  all server-authored magnitudes are `CAPTURE-PENDING` — gate any magnitude assumption on a capture.
-  Mark them as TODO with a pointer back to this spec.
+- **Do not** model the cast cost (§5.2 / +1368 / +1370) as a flat numeric pool subtract — on the
+  cast-gate path they are **timed-charge gates** and +1332 is the cast-**cadence** gate, not an MP
+  affordability check (CYCLE 7). Do not implement the `skills.scr` per-rank rows (§1.3) or any
+  effect-code meaning beyond the table in §6.2 without first resolving the corresponding UNVERIFIED
+  item. Implement the cast-cadence gate as `elapsed_ms < 100 × cast_cadence_factor (+1332)`, the range
+  floor as **1.0**, the default basic-attack skill id as **121100050**, and clamp the AoE hit count to
+  **40**. The actual on-wire VALUE bytes (5/33, 4/41, 4/150, 5/52, 5/31) and all server-authored
+  magnitudes are `CAPTURE-PENDING` — gate any magnitude assumption on a capture. Mark them as TODO with
+  a pointer back to this spec.

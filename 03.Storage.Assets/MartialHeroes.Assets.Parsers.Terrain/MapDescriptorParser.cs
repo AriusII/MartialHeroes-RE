@@ -1,0 +1,324 @@
+using System.Globalization;
+using System.Text;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
+
+namespace MartialHeroes.Assets.Parsers.Terrain;
+
+/// <summary>
+///     Parser for <c>.map</c> plain-text ASCII scene descriptor files.
+/// </summary>
+/// <remarks>
+///     spec: Docs/RE/formats/terrain.md §3. The .map scene descriptor (text format)
+///     <para>
+///         Grammar:
+///         - Lines beginning with '#' are comments and are ignored.
+///         - Section blocks are opened with the section keyword followed by '{' and closed with '}'.
+///         - Within a section, directives are: WIDTH, HEIGHT, GRID, MAX_HEIGHTFILED, MIN_HEIGHTFILED,
+///         ORIGIN, DATAFILE, and TEXTURES.
+///     </para>
+///     <para>
+///         Section keywords: TERRAIN, EXTRA_TERRAIN, UP_TERRAIN, BUILDING, FX1–FX7, SOLID.
+///         All CONFIRMED as present in the client string table.
+///         spec: Docs/RE/formats/terrain.md §3.1 Sections: CONFIRMED.
+///     </para>
+///     <para>
+///         ZERO rendering/engine dependencies.
+///     </para>
+/// </remarks>
+public static class MapDescriptorParser
+{
+    // Known section keywords, CONFIRMED by client string table.
+    // spec: Docs/RE/formats/terrain.md §3.1 Sections: CONFIRMED.
+    private static readonly HashSet<string> KnownSections = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "TERRAIN", "EXTRA_TERRAIN", "UP_TERRAIN", "BUILDING",
+        "FX1", "FX2", "FX3", "FX4", "FX5", "FX6", "FX7",
+        "SOLID"
+    };
+
+    /// <summary>
+    ///     Parses the raw ASCII bytes of a <c>.map</c> file into a <see cref="MapDescriptor" />.
+    /// </summary>
+    /// <param name="data">Raw file content (plain ASCII text) from the VFS.</param>
+    /// <returns>Decoded map descriptor.</returns>
+    /// <exception cref="InvalidDataException">
+    ///     Thrown on malformed input (unclosed brace, malformed TEXTURES entry, etc.).
+    /// </exception>
+    public static MapDescriptor Parse(ReadOnlyMemory<byte> data)
+    {
+        return ParseText(Encoding.ASCII.GetString(data.Span));
+    }
+
+    /// <summary>
+    ///     Parses a string representation of a <c>.map</c> file.
+    /// </summary>
+    public static MapDescriptor ParseText(string text)
+    {
+        // Tokenise to lines; strip comments and blank lines.
+        var lines = text.Split('\n');
+        var sections = new List<MapSection>();
+
+        var lineIndex = 0;
+
+        while (lineIndex < lines.Length)
+        {
+            var rawLine = lines[lineIndex].Trim();
+            lineIndex++;
+
+            // Skip comments and blank lines.
+            // spec: Docs/RE/formats/terrain.md §3 — "Lines beginning with '#' are comments": CONFIRMED.
+            if (rawLine.Length == 0 || rawLine.StartsWith('#'))
+                continue;
+
+            // Strip inline comments.
+            var commentPos = rawLine.IndexOf('#');
+            if (commentPos >= 0)
+                rawLine = rawLine[..commentPos].TrimEnd();
+            if (rawLine.Length == 0)
+                continue;
+
+            // Check for a section-opening line: "<KEYWORD> {" or "<KEYWORD>" followed by "{" on next token.
+            // The parser accepts the opening brace on the same line or as the next non-blank token.
+            var tokens = rawLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (tokens.Length == 0)
+                continue;
+
+            var keyword = tokens[0].ToUpperInvariant();
+
+            // Only process known section keywords.
+            // spec: Docs/RE/formats/terrain.md §3.1 Sections: CONFIRMED.
+            if (!KnownSections.Contains(keyword))
+                continue; // Unknown keyword — skip silently; section semantics only documented for known list.
+
+            // Find the opening brace (may be on same line after keyword, or on its own next line).
+            // Also detect if the closing brace appears on the same line as the opening brace
+            // (e.g. "FX1 { }" — empty section, inline).
+            var foundBrace = false;
+            var closedOnSameLine = false;
+            var openBraceTokenIndex = -1;
+            for (var ti = 1; ti < tokens.Length; ti++)
+                if (tokens[ti] == "{")
+                {
+                    foundBrace = true;
+                    openBraceTokenIndex = ti;
+                }
+                else if (foundBrace && tokens[ti] == "}")
+                {
+                    // Closing brace appears after opening brace on the same line.
+                    closedOnSameLine = true;
+                    break;
+                }
+
+            if (!foundBrace)
+                // Brace must appear as next non-blank non-comment token.
+                while (lineIndex < lines.Length)
+                {
+                    var next = lines[lineIndex].Trim();
+                    lineIndex++;
+                    if (next.Length == 0 || next.StartsWith('#'))
+                        continue;
+                    if (next.StartsWith('{'))
+                    {
+                        foundBrace = true;
+                        // Check if the closing brace is also on this line (e.g. "{ }").
+                        var nextTokens = next.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                        if (nextTokens.Length > 1 && nextTokens[1] == "}")
+                            closedOnSameLine = true;
+                        break;
+                    }
+
+                    // Unexpected token before '{'.
+                    throw new InvalidDataException(
+                        $".map parse error: expected '{{' after section keyword '{keyword}', " +
+                        $"got '{next}'.");
+                }
+
+            if (!foundBrace)
+                throw new InvalidDataException(
+                    $".map parse error: section '{keyword}' opened but no '{{' found before end of file.");
+
+            // Parse section body until '}' is found.
+            // If the closing brace appeared on the same line as the opening brace, skip body loop.
+            string? dataFile = null;
+            var textures = new List<(int Flag, int TexId)>();
+
+            // Geometry directives — TERRAIN section. All CONFIRMED.
+            // spec: Docs/RE/formats/terrain.md §3.4 Geometry directives.
+            int? sectionWidth = null;
+            int? sectionHeight = null;
+            int? sectionGrid = null;
+            float? sectionMaxHeightFiled = null;
+            float? sectionMinHeightFiled = null;
+            (float X, float Z)? sectionOrigin = null;
+
+            while (!closedOnSameLine && lineIndex < lines.Length)
+            {
+                var bodyLine = lines[lineIndex].Trim();
+                lineIndex++;
+
+                // Strip inline comments.
+                var bcp = bodyLine.IndexOf('#');
+                if (bcp >= 0) bodyLine = bodyLine[..bcp].TrimEnd();
+
+                if (bodyLine.Length == 0) continue;
+
+                if (bodyLine == "}")
+                    break; // End of this section.
+
+                var bt = bodyLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (bt.Length == 0) continue;
+
+                var directive = bt[0].ToUpperInvariant();
+
+                if (directive == "DATAFILE")
+                {
+                    // DATAFILE <path>
+                    // spec: Docs/RE/formats/terrain.md §3.2 DATAFILE directive: CONFIRMED.
+                    if (bt.Length < 2)
+                        throw new InvalidDataException(
+                            $".map parse error: DATAFILE directive in section '{keyword}' has no path argument.");
+                    dataFile = bt[1];
+                }
+                else if (directive == "WIDTH")
+                {
+                    // WIDTH <integer> — quad grid width (quads per row).
+                    // spec: Docs/RE/formats/terrain.md §3.4 — WIDTH integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out var w))
+                        throw new InvalidDataException(
+                            $".map parse error: WIDTH directive in section '{keyword}' requires an integer argument.");
+                    sectionWidth = w;
+                }
+                else if (directive == "HEIGHT")
+                {
+                    // HEIGHT <integer> — quad grid height (quads per column).
+                    // spec: Docs/RE/formats/terrain.md §3.4 — HEIGHT integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out var h))
+                        throw new InvalidDataException(
+                            $".map parse error: HEIGHT directive in section '{keyword}' requires an integer argument.");
+                    sectionHeight = h;
+                }
+                else if (directive == "GRID")
+                {
+                    // GRID <integer> — world-unit vertex spacing.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — GRID integer: CONFIRMED.
+                    if (bt.Length < 2 || !int.TryParse(bt[1], out var g))
+                        throw new InvalidDataException(
+                            $".map parse error: GRID directive in section '{keyword}' requires an integer argument.");
+                    sectionGrid = g;
+                }
+                else if (directive == "MAX_HEIGHTFILED")
+                {
+                    // MAX_HEIGHTFILED <float> — max world-Y; verbatim dropped-L spelling from original files.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — MAX_HEIGHTFILED float: CONFIRMED.
+                    // Note: "MAX_HEIGHTFILED" is the exact verbatim keyword from the data files.
+                    if (bt.Length < 2 || !float.TryParse(bt[1],
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var maxH))
+                        throw new InvalidDataException(
+                            $".map parse error: MAX_HEIGHTFILED directive in section '{keyword}' requires a float argument.");
+                    sectionMaxHeightFiled = maxH;
+                }
+                else if (directive == "MIN_HEIGHTFILED")
+                {
+                    // MIN_HEIGHTFILED <float> — min world-Y; verbatim dropped-L spelling from original files.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — MIN_HEIGHTFILED float: CONFIRMED.
+                    // Note: "MIN_HEIGHTFILED" is the exact verbatim keyword from the data files.
+                    if (bt.Length < 2 || !float.TryParse(bt[1],
+                            NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var minH))
+                        throw new InvalidDataException(
+                            $".map parse error: MIN_HEIGHTFILED directive in section '{keyword}' requires a float argument.");
+                    sectionMinHeightFiled = minH;
+                }
+                else if (directive == "ORIGIN")
+                {
+                    // ORIGIN <float>,<float> — world-space XZ cell origin.
+                    // spec: Docs/RE/formats/terrain.md §3.4 — ORIGIN float,float: CONFIRMED.
+                    // The comma may be attached to the first number ("0.000,-1024.000") or separated
+                    // by whitespace ("0.000, -1024.000"). Reconstruct by joining remaining tokens and
+                    // splitting on ','.
+                    var originStr = string.Join("", bt[1..]).Replace(" ", "");
+                    var originParts = originStr.Split(',');
+                    if (originParts.Length < 2
+                        || !float.TryParse(originParts[0], NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var ox)
+                        || !float.TryParse(originParts[1], NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out var oz))
+                        throw new InvalidDataException(
+                            $".map parse error: ORIGIN directive in section '{keyword}' requires two comma-separated floats.");
+                    sectionOrigin = (ox, oz);
+                }
+                else if (directive == "TEXTURES")
+                {
+                    // TEXTURES { <intFlag> <intTexId> ... }
+                    // spec: Docs/RE/formats/terrain.md §3.3 TEXTURES directive: CONFIRMED (structure).
+                    // intFlag semantics: UNVERIFIED.
+                    var texBraceOnSameLine = bt.Length > 1 && bt[1] == "{";
+                    if (!texBraceOnSameLine)
+                    {
+                        // Find opening brace.
+                        var texBraceFound = false;
+                        while (lineIndex < lines.Length)
+                        {
+                            var tl = lines[lineIndex].Trim();
+                            lineIndex++;
+                            if (tl.Length == 0 || tl.StartsWith('#')) continue;
+                            if (tl.StartsWith('{'))
+                            {
+                                texBraceFound = true;
+                                break;
+                            }
+
+                            throw new InvalidDataException(
+                                $".map parse error: expected '{{' after TEXTURES in section '{keyword}'.");
+                        }
+
+                        if (!texBraceFound)
+                            throw new InvalidDataException(
+                                $".map parse error: TEXTURES block in section '{keyword}' has no opening brace.");
+                    }
+
+                    // Read texture pairs until closing brace.
+                    while (lineIndex < lines.Length)
+                    {
+                        var tl = lines[lineIndex].Trim();
+                        lineIndex++;
+                        var tcp = tl.IndexOf('#');
+                        if (tcp >= 0) tl = tl[..tcp].TrimEnd();
+                        if (tl.Length == 0) continue;
+                        if (tl == "}") break;
+
+                        var tp = tl.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                        if (tp.Length < 2)
+                            throw new InvalidDataException(
+                                $".map parse error: TEXTURES entry in section '{keyword}' " +
+                                $"must have two integers, got '{tl}'.");
+
+                        if (!int.TryParse(tp[0], out var flag) || !int.TryParse(tp[1], out var texId))
+                            throw new InvalidDataException(
+                                $".map parse error: TEXTURES entry in section '{keyword}' " +
+                                $"could not parse integers from '{tl}'.");
+
+                        textures.Add((flag, texId));
+                    }
+                }
+                // Other unrecognised directives are silently skipped.
+            }
+
+            sections.Add(new MapSection
+            {
+                Keyword = keyword,
+                DataFile = dataFile,
+                Textures = textures.ToArray(),
+                Width = sectionWidth,
+                Height = sectionHeight,
+                Grid = sectionGrid,
+                MaxHeightFiled = sectionMaxHeightFiled,
+                MinHeightFiled = sectionMinHeightFiled,
+                Origin = sectionOrigin
+            });
+        }
+
+        return new MapDescriptor { Sections = sections.ToArray() };
+    }
+}

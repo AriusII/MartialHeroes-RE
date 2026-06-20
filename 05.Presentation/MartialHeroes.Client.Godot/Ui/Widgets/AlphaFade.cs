@@ -20,14 +20,14 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUComponent-faithful alpha-fade driver for HUD <see cref="Control"/> nodes.
-///
-/// <para>Attach one instance as a child of the control to be faded. Use
-/// <see cref="Show"/>, <see cref="Hide"/>, <see cref="ShowInstant"/>, or
-/// <see cref="HideInstant"/>. Do NOT instantiate directly; use
-/// <see cref="AlphaFade.For"/> to get-or-add an instance.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §7.1 — alpha-fade lifecycle.
+///     GUComponent-faithful alpha-fade driver for HUD <see cref="Control" /> nodes.
+///     <para>
+///         Attach one instance as a child of the control to be faded. Use
+///         <see cref="Show" />, <see cref="Hide" />, <see cref="ShowInstant" />, or
+///         <see cref="HideInstant" />. Do NOT instantiate directly; use
+///         <see cref="AlphaFade.For" /> to get-or-add an instance.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §7.1 — alpha-fade lifecycle.
 /// </summary>
 internal sealed partial class AlphaFade : Node
 {
@@ -39,21 +39,27 @@ internal sealed partial class AlphaFade : Node
     // spec: Docs/RE/specs/ui_system.md §7.1 — "GUComponentEx ±32 per tick".
     private const float StepSlow = 32f / 255f; // spec: Docs/RE/specs/ui_system.md §7.1
 
-    private float _target = 1f;
+    // -------------------------------------------------------------------------
+    // Factory
+    // -------------------------------------------------------------------------
+
+    private static readonly StringName DriverNodeName = new("__HudAlphaFade");
     private float _current = 1f;
     private float _step = StepFast;
+
+    private float _target = 1f;
 
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Begins a fade-in (alpha toward 1.0).
-    ///
-    /// <para>Sets Visible=true immediately so the control can receive input as alpha rises.
-    /// Alpha chases 1.0 at <see cref="StepFast"/> per tick.</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "showing → alpha climbs +64 per tick toward 255".
+    ///     Begins a fade-in (alpha toward 1.0).
+    ///     <para>
+    ///         Sets Visible=true immediately so the control can receive input as alpha rises.
+    ///         Alpha chases 1.0 at <see cref="StepFast" /> per tick.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "showing → alpha climbs +64 per tick toward 255".
     /// </summary>
     internal void Show()
     {
@@ -63,12 +69,12 @@ internal sealed partial class AlphaFade : Node
     }
 
     /// <summary>
-    /// Begins a fade-out (alpha toward 0.0).
-    ///
-    /// <para>When alpha reaches 0 the parent's Visible is set to false, releasing input
-    /// and hit-test resources.</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "hiding → alpha falls −64 toward 0".
+    ///     Begins a fade-out (alpha toward 0.0).
+    ///     <para>
+    ///         When alpha reaches 0 the parent's Visible is set to false, releasing input
+    ///         and hit-test resources.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "hiding → alpha falls −64 toward 0".
     /// </summary>
     internal void Hide()
     {
@@ -77,10 +83,9 @@ internal sealed partial class AlphaFade : Node
     }
 
     /// <summary>
-    /// Snaps alpha to 1.0 immediately (forced-alpha / SetShown=show equivalent).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps alpha to 255 immediately".
-    /// spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha override pins alpha immediately".
+    ///     Snaps alpha to 1.0 immediately (forced-alpha / SetShown=show equivalent).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps alpha to 255 immediately".
+    ///     spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha override pins alpha immediately".
     /// </summary>
     internal void ShowInstant()
     {
@@ -91,10 +96,9 @@ internal sealed partial class AlphaFade : Node
     }
 
     /// <summary>
-    /// Snaps alpha to 0.0 immediately and hides the parent (forced-alpha / SetShown=hide equivalent).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps alpha to 0 immediately".
-    /// spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha override pins alpha immediately".
+    ///     Snaps alpha to 0.0 immediately and hides the parent (forced-alpha / SetShown=hide equivalent).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps alpha to 0 immediately".
+    ///     spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha override pins alpha immediately".
     /// </summary>
     internal void HideInstant()
     {
@@ -105,11 +109,13 @@ internal sealed partial class AlphaFade : Node
     }
 
     /// <summary>
-    /// Switches to the slow ±32/tick fade rate (GUComponentEx path).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "GUComponentEx variant uses ±32 per tick".
+    ///     Switches to the slow ±32/tick fade rate (GUComponentEx path).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "GUComponentEx variant uses ±32 per tick".
     /// </summary>
-    internal void UseSlowFade() => _step = StepSlow;
+    internal void UseSlowFade()
+    {
+        _step = StepSlow;
+    }
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -134,19 +140,13 @@ internal sealed partial class AlphaFade : Node
             ctrl.Visible = false;
     }
 
-    // -------------------------------------------------------------------------
-    // Factory
-    // -------------------------------------------------------------------------
-
-    private static readonly StringName DriverNodeName = new("__HudAlphaFade");
-
     /// <summary>
-    /// Returns the <see cref="AlphaFade"/> driver attached to <paramref name="control"/>,
-    /// creating and adding it on the first call.
+    ///     Returns the <see cref="AlphaFade" /> driver attached to <paramref name="control" />,
+    ///     creating and adding it on the first call.
     /// </summary>
     internal static AlphaFade For(Control control)
     {
-        Node? existing = control.FindChild(DriverNodeName, owned: false);
+        var existing = control.FindChild(DriverNodeName, owned: false);
         if (existing is AlphaFade fade) return fade;
 
         var newFade = new AlphaFade { Name = DriverNodeName };
@@ -168,7 +168,7 @@ internal sealed partial class AlphaFade : Node
     private void ApplyAlpha(float alpha)
     {
         if (GetParent() is not CanvasItem item) return;
-        Color c = item.Modulate;
+        var c = item.Modulate;
         c.A = alpha;
         item.Modulate = c;
     }

@@ -7,4 +7,14 @@
         <LangVersion>14.0</LangVersion>
     </PropertyGroup>
 
+    <ItemGroup>
+        <!-- Source generator (00.SourcesGenerators): [StronglyTypedId] expands each id record struct
+             under Ids/ into its IComparable<T> + None sentinel + Prefix(Value) ToString() surface.
+             Imported as an ANALYZER: OutputItemType="Analyzer" makes Roslyn load it as a generator,
+             and ReferenceOutputAssembly="false" keeps the generator assembly out of Shared.Kernel's
+             output (and therefore off every project that references Shared.Kernel). -->
+        <ProjectReference Include="..\..\00.SourcesGenerators\MartialHeroes.Shared.Kernel.Generators\MartialHeroes.Shared.Kernel.Generators.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
 </Project>

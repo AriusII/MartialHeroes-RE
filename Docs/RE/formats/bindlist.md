@@ -6,14 +6,16 @@
 
 <!--
 verification: sample-verified
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: none
 note: PINNED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): preload-vs-lazy = EAGER boot preload (file opened+parsed in the boot loop); selection key = .skn id_b used verbatim (no g{N}.bnd formatting)
+note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimCatalog map key vs skin_class skeleton selector vs .skn id_b pool key) and added the motlist.txt-registry parallel for .mot (no g{id}.mot rule)
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` · `ida_anchor: 263bd994` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` (re-verified against
+> doida.exe IDB SHA `263bd994`, CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the bindlist load-and-register loop and the per-skeleton register-by-`actor_id` path) AND
 > the real `data/char/bindlist.txt` VFS sample. The 349-entry count, the 348-CRLF-plus-final-line-
@@ -145,6 +147,14 @@ path from an arbitrary integer and assume the file exists. It reads this explici
 is not a contract that any integer `N` maps to a valid skeleton. Engineers must treat membership in
 this list (or the join via `id_b` / `skin_class`) as the test of whether a skeleton is registered.
 
+> **The `.mot` motion clips follow the exact same registry pattern (CYCLE 7, `263bd994`).** Motion
+> clips are reached via the sibling **`data/char/motlist.txt`** registry — each listed line is prefixed
+> with the literal `data/char/mot/` and the parsed `.mot` clip is registered by its id — **NOT** by a
+> computed `g{id}.mot` path (the binary carries no such `g%d.mot` / `%d.mot` format string). This is
+> exactly parallel to `bindlist.txt`: `bindlist.txt` registers skeletons by parsed `actor_id`,
+> `motlist.txt` registers `.mot` clips by id; **neither uses a computed `g{N}.<ext>` path rule**. See
+> `formats/animation.md` for the `motlist.txt` motion-clip registry and the clip-id join.
+
 ## Cross-file join
 
 `bindlist.txt` is a registry (a set of valid skeleton names, each resolving to a parsed `actor_id`),
@@ -182,6 +192,26 @@ selected_skeleton(skn) = pose_pool[ skn.header.id_b ]        // pool key == pars
 - This re-confirms the "resolve by `actor_id` lookup; do not assume a `g{id_b}.bnd` filename" guidance
   above — now verified **at the call site**, not merely inferred. Confidence: **HIGH** (the value read
   into `id_b` is passed straight to the pool lookup with no intervening math; build `263bd994`).
+
+> **Three distinct keys — do not conflate them (sharpened, CYCLE 7, `263bd994`).** Three separate
+> integer keys travel through the bind / motion chain, and only one of them keys *this* registry:
+>
+> 1. **Appearance-slot key — `5·(class + 4·variant) − 24` ∈ {1, 11, 16, 26}.** This is the **KEY into
+>    the runtime AnimCatalog ordered map** (a red-black-tree lookup), **not** an array subscript and
+>    **not** a `g{IdB}.bnd` skeleton path. This is precisely why **no `g11.bnd` / `g16.bnd` skeleton
+>    file exists** — those values are map *keys*, never filenames, and the binary carries no path-format
+>    string that would turn them into one. The **runtime idle-motion clip lookup is keyed by this same
+>    appearance key**, not by `skin_class`.
+> 2. **`skin_class` (the per-actor skeleton class).** This is the **per-actor selector that joins to a
+>    registered skeleton in THIS registry** (resolve by parsed `actor_id`, validated against the 349
+>    entries). It additionally helps **compose** the AnimCatalog record's key at load time — but it is
+>    **not itself** the runtime idle lookup key.
+> 3. **`.skn` header `id_b`.** Used **verbatim** as the pose-pool key for **skeleton** selection
+>    (unchanged — see the pool-lookup rule above).
+>
+> Net: (a) appearance key → AnimCatalog map; (b) `skin_class` → registered skeleton (this registry);
+> (c) `.skn` `id_b` → pose pool. The appearance-slot transform is upstream of all three resolutions —
+> it decides which actor/skin is loaded, never remaps a pool or registry lookup.
 - `bindlist.txt` is the authoritative set of the 349 registered skeletons; it validates which
   `id_b` / `skin_class` values resolve to a real registered skeleton (a value resolves iff some
   listed `.bnd` parses to that `actor_id`). The on-disk filenames happen to follow `g<N>.bnd`, but

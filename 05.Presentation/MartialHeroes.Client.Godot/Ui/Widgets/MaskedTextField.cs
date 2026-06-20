@@ -20,16 +20,15 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// 1:1 atlas-blit credential text-input field.
-///
-/// <para>Renders the field background as a true atlas blit (no Godot control chrome),
-/// then draws text in font slot 0: ID field shows the typed string left-aligned; PW field
-/// shows N literal '*' glyphs at 6 px per character.</para>
-///
-/// <para>Captures keyboard input while focused. Caret blinks at ~500 ms.</para>
-///
-/// spec: Docs/RE/specs/frontend_layout_tables.md §2.7 — mask mechanism, 6 px/char, slot 0.
-/// spec: Docs/RE/specs/frontend_layout_tables.md §0.11 — password masking = field flag.
+///     1:1 atlas-blit credential text-input field.
+///     <para>
+///         Renders the field background as a true atlas blit (no Godot control chrome),
+///         then draws text in font slot 0: ID field shows the typed string left-aligned; PW field
+///         shows N literal '*' glyphs at 6 px per character.
+///     </para>
+///     <para>Captures keyboard input while focused. Caret blinks at ~500 ms.</para>
+///     spec: Docs/RE/specs/frontend_layout_tables.md §2.7 — mask mechanism, 6 px/char, slot 0.
+///     spec: Docs/RE/specs/frontend_layout_tables.md §0.11 — password masking = field flag.
 /// </summary>
 public sealed partial class MaskedTextField : Control
 {
@@ -55,22 +54,15 @@ public sealed partial class MaskedTextField : Control
 
     private readonly HudAtlasLibrary _atlas;
     private readonly string _atlasPath;
-    private readonly int _srcX;
-    private readonly int _srcY;
     private readonly bool _masked; // true = PW field; false = ID field
     private readonly int _maxLen;
-
-    private string _text = "";
-    private bool _focused;
+    private readonly int _srcX;
+    private readonly int _srcY;
     private float _caretPhaseMs; // accumulated ms for caret blink
     private bool _caretVisible = true;
+    private bool _focused;
 
-    // -------------------------------------------------------------------------
-    // Events
-    // -------------------------------------------------------------------------
-
-    /// <summary>Fired when the user presses Enter while this field is focused.</summary>
-    public event Action? TextSubmitted;
+    private string _text = "";
 
     // -------------------------------------------------------------------------
     // Construction
@@ -85,8 +77,8 @@ public sealed partial class MaskedTextField : Control
     /// <param name="srcX">Source X in atlas (top-left of the field-background sub-rect).</param>
     /// <param name="srcY">Source Y in atlas.</param>
     /// <param name="masked">
-    ///   True for PW field (renders '*' at 6 px/char, font slot 0).
-    ///   spec: Docs/RE/specs/frontend_layout_tables.md §2.7.
+    ///     True for PW field (renders '*' at 6 px/char, font slot 0).
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §2.7.
     /// </param>
     /// <param name="maxLen">Maximum character count (0 = unlimited).</param>
     public MaskedTextField(
@@ -126,9 +118,16 @@ public sealed partial class MaskedTextField : Control
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Events
+    // -------------------------------------------------------------------------
+
+    /// <summary>Fired when the user presses Enter while this field is focused.</summary>
+    public event Action? TextSubmitted;
+
     /// <summary>
-    /// Focuses this field, making it the active input target.
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "construct routine focuses the ID textbox at show time"
+    ///     Focuses this field, making it the active input target.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "construct routine focuses the ID textbox at show time"
     /// </summary>
     public new void GrabFocus()
     {
@@ -223,24 +222,24 @@ public sealed partial class MaskedTextField : Control
     {
         // Field background: 1:1 atlas blit. null offline → draw nothing.
         // spec: Docs/RE/specs/frontend_layout_tables.md §0.10 "every front-end widget is a 1:1 atlas blit"
-        AtlasTexture? bg = _atlas.SliceByPath(_atlasPath, _srcX, _srcY,
+        var bg = _atlas.SliceByPath(_atlasPath, _srcX, _srcY,
             (int)Size.X, (int)Size.Y);
         if (bg is not null)
             DrawTextureRect(bg, new Rect2(Vector2.Zero, Size), false);
 
         // Text rendering — font slot 0 = DotumChe 12 px.
         // spec: Docs/RE/specs/frontend_layout_tables.md §1/§2.7 "font slot 0".
-        int fontSize = HudFont.RowHeight(0); // slot 0 = 12 px. spec: frontend_layout_tables.md §1.
+        var fontSize = HudFont.RowHeight(0); // slot 0 = 12 px. spec: frontend_layout_tables.md §1.
         Font font = HudFont.CreateSlot(0);
 
         if (_masked)
         {
             // PW field: one '*' per character, advancing 6 px per char (spec: §2.7 "6 px/char, font slot 0").
             // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "'*' glyph, 6 px/char".
-            string stars = new string('*', _text.Length);
+            var stars = new string('*', _text.Length);
             DrawString(font, new Vector2(1f, TextOffsetY + fontSize), stars,
                 HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
-                new Color(1f, 1f, 1f, 1f));
+                new Color(1f, 1f, 1f));
         }
         else
         {
@@ -248,7 +247,7 @@ public sealed partial class MaskedTextField : Control
             // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "mask bit clear → draws the stored string left-aligned"
             DrawString(font, new Vector2(1f, TextOffsetY + fontSize), _text,
                 HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
-                new Color(1f, 1f, 1f, 1f));
+                new Color(1f, 1f, 1f));
         }
 
         // Caret — only while focused.
@@ -257,7 +256,7 @@ public sealed partial class MaskedTextField : Control
         {
             // Position caret after the last character.
             // Masked field uses StarAdvance (6 px/char); clear field measures string width at fontSize.
-            float caretX = _masked
+            var caretX = _masked
                 ? 1f + _text.Length * StarAdvance // spec: §2.7 "6 px/char"
                 : 1f + font.GetStringSize(_text, HorizontalAlignment.Left, -1, fontSize).X;
             caretX = Math.Min(caretX, Size.X - 2f);

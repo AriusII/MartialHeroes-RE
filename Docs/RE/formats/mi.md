@@ -14,11 +14,12 @@
 ```
 verification: sample-verified            # mobinfo.mi IS in the VFS at data/ui/mobinfo.mi; 592 B = 4 + 21 x 28 confirmed by stride arithmetic and the count-header byte
 ida_reverified: 2026-06-16
+re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
-conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED (no path literal in the executable).
+conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED and HARDENED (CYCLE 7: confirmed not read in build 263bd994).
 file_presence: PRESENT at data/ui/mobinfo.mi  # 592 bytes; the prior "ABSENT" verdict is WITHDRAWN/REVERTED
-loader: RESOLVED — NO CLIENT LOADER          # the shipped client has no .mi path literal; it never opens/parses this file by name
+loader: CONFIRMED NOT READ (build 263bd994)   # CYCLE 7 upgrade: no .mi path literal, not in the boot data-table corpus pointer table, not compiled in as a static array — proven by 4-way exhaustive static search (string index, case-insensitive regex, raw ASCII byte scan, UTF-16LE wide scan)
 container_layout: SAMPLE-VERIFIED            # 4-byte u32 count (=21) + 21 x 28-byte records; 7 u32 fields per record
 record_field_semantics: OUT-OF-CLIENT-SCOPE  # no client consumer => per-field meanings are not recoverable from the client (single-sample provisional reading only)
 ```
@@ -65,21 +66,54 @@ record_field_semantics: OUT-OF-CLIENT-SCOPE  # no client consumer => per-field m
 
 ---
 
-## Loader — RESOLVED: NO CLIENT LOADER (file present, but never opened by name)
+## Loader — CONFIRMED NOT READ in build 263bd994 (file present, but never opened by name)
 
-The shipped client has **no `.mi` loader** and **no `.mi` path literal**. This was re-confirmed on
-build 263bd994: there is no `mobinfo`, `mobinfo.mi`, `ui/mob…`, or `%s.mi` string in the executable,
-and no code path that opens, parses, or consumes a `.mi` file by name. The mob-info / target-info HUD
-panel the client renders is driven by other data and by hard-coded layout (hard-coded captions and
-screen positions), not by this file.
+The shipped client has **no `.mi` loader** and **no `.mi` path literal**. CYCLE 7 (2026-06-20)
+**hardens** the earlier "appears not read / no code to open it" verdict to a hard
+**"CONFIRMED not read in build 263bd994"**, established by an **exhaustive four-way static search** that
+returned **zero hits** every way:
 
-The correction this pass is **only** to the file's *presence*: the file **is** packed in the VFS at
-`data/ui/mobinfo.mi`, but the client has **no code to open it**. The two facts are not in tension — a
-VFS can carry an asset the shipped client never references. Net: the loader question is settled as
-**"file present in the VFS, but no client loader / no path literal."** The associated parser
-(`Assets.Parsers`) need implement nothing for a faithful 1:1 client port — the original consumes no
-`.mi` at runtime. The container layout below is documented for archival / interoperability
-completeness (it is a real, decodable VFS artefact), **not** because the shipped client reads it.
+1. **String-index search** for the name and its path variants (`mobinfo`, `mobinfo.mi`, `ui/mobinfo`,
+   `/mobinfo`, `%s.mi`) → 0 hits.
+2. **Case-insensitive regex** over the whole string store for `mobinfo` → 0 hits.
+3. **Raw ASCII byte scan** (segment-wide) for the literal bytes of `mobinfo` → 0 hits.
+4. **UTF-16LE wide-character scan** for a wide `mobinfo` → 0 hits.
+
+Beyond the absence of the name string, two further static checks confirm the file is genuinely unused:
+
+- **Not in the boot data-table corpus pointer table.** The small data tables and class files the
+  client loads at boot are reached through a shared boot-corpus loader that walks a filename-pointer
+  array (the `.do` class scripts, `mobs.scr`, the handful of `.xdb` tables, etc.). `mobinfo.mi` is
+  **not** an entry in that array — and could not be, since its name string does not exist in the image.
+- **Not compiled into the binary as a static array.** Byte scans of the data segments for the
+  on-disk record signature (the `count = 21` header followed by the first record, and the
+  28-byte-stride record pattern) returned 0 hits, so the table is **not** embedded in the executable
+  either. It lives only as a VFS file that nothing opens.
+
+The only superficial `.mi` substring anywhere in the image is an unrelated CRT runtime data fragment
+(a false positive), not a filename. The mob-info / target-info HUD panel the client renders is driven
+by other data and by hard-coded layout (hard-coded captions and screen positions), not by this file.
+
+The correction earlier passes made was **only** to the file's *presence*: the file **is** packed in the
+VFS at `data/ui/mobinfo.mi`, but the client has **no code to open it**. **"Present" ≠ "read"** — a VFS
+can carry an asset the shipped client never references (consistent with a tool / editor data file
+packed into the archive). Net: the loader question is settled as
+**"file present in the VFS, but CONFIRMED not read by the shipped client — no path literal, not in the
+boot corpus table, not compiled in."** The associated parser (`Assets.Parsers`) need implement nothing
+for a faithful 1:1 client port — the original consumes no `.mi` at runtime. The container layout below
+is documented for archival / interoperability completeness (it is a real, decodable VFS artefact),
+**not** because the shipped client reads it.
+
+### Where the client's mob data actually comes from (cross-ref)
+
+The mob data the client **does** read does not come from `mobinfo.mi`:
+
+- **`data/script/mobs.scr`** — the mob script/template table, loaded at boot through the boot-corpus
+  loader. This (not `mobinfo.mi`) is the runtime mob-template source.
+- **`msg.xdb`** — mob name / portrait **strings** (the displayed names and portrait references the
+  target-info panel shows) resolve through the message-string table, not through `.mi`.
+
+See **Cross-references** below.
 
 ---
 
@@ -111,7 +145,7 @@ the meanings cannot be confirmed from the client side.
 | +12 | 4 | u32 LE | sub-id or category code                                          | SINGLE-SAMPLE |
 | +16 | 4 | u32 LE | **paired field A** — large value; in every observed record this and the next field are **consecutive integers** (field[5] = field[4] + 1) | SINGLE-SAMPLE |
 | +20 | 4 | u32 LE | **paired field B** — `= field[4] + 1` across all observed records (a consecutive pair with +16) | SINGLE-SAMPLE |
-| +24 | 4 | u32 LE | secondary sub-id or link code                                    | SINGLE-SAMPLE |
+| +24 | 4 | u32 LE | **field6 (7th / last field)** — small optional id/index (`0xFFFFFFFF = -1 = none`; small values `99`/`103` observed). Role MOOT — no consumer read-site. | SINGLE-SAMPLE / HYPOTHESIS |
 
 - **Field[2] (+8)** frequently carries `0xFFFFFFFF`, consistent with an absent/optional reference
   (a null sentinel). SINGLE-SAMPLE.
@@ -119,6 +153,16 @@ the meanings cannot be confirmed from the client side.
   across the observed records — the signature of a `[start, end)` index pair into a separate resource
   array (e.g. a contiguous run of resource/text ids), though this cannot be confirmed without a
   consumer. SINGLE-SAMPLE.
+- **Field6 (+0x18 / +24, the 7th and last field) — role MOOT.** Because the file has **no consumer
+  read-site** (loader CONFIRMED not read, above), the meaning of this field cannot be pinned from
+  client behaviour, so its role is **moot, not merely unresolved**. On the on-disk shape only it is a
+  `u32`/`i32 LE` where **`0xFFFFFFFF = -1`** is the "none / not present" sentinel and the small
+  populated values (`99`, `103`) read as an **optional small id/index** (HYPOTHESIS — an icon/sprite
+  index, a secondary category key, or similar; the integer-with-`-1`-sentinel shape rules out a float
+  probability/scale and the small magnitude rules out the large adjacent portrait-resource IDs that
+  +16/+20 carry). Any earlier **"portrait_res_3"** labeling for this field is **withdrawn**: the small
+  `99`/`103` magnitudes are three orders of magnitude below the ~5.0e6-range portrait IDs and do not fit
+  that encoding. SINGLE-SAMPLE / HYPOTHESIS, unconfirmable without a reader.
 
 > All record-field roles are **SINGLE-SAMPLE and UNVERIFIED** (one file, no second instance, no client
 > consumer). They are recorded for interoperability/archival completeness only. A port must **not**
@@ -142,8 +186,10 @@ the meanings cannot be confirmed from the client side.
 
 - **Per-record field semantics.** With **no client consumer**, the meaning of each of the 7 `u32`
   fields is **OUT-OF-CLIENT-SCOPE / single-sample provisional** (the pointer/index-pair reading at
-  +16/+20 and the `0xFFFFFFFF` sentinel at +8 are inferences from one file). Likely un-recoverable
-  from the client; would need the original content tool to confirm.
+  +16/+20 and the `0xFFFFFFFF` sentinel at +8 are inferences from one file). This includes
+  **field6 (+0x18 / +24), whose role is MOOT** — there is no read-site to settle "small index" vs
+  "small id" vs "small category". Likely un-recoverable from the client; would need the original
+  content tool to confirm.
 - **Whether the 21-record count is stable** across any other VFS revision (only one instance exists in
   this build). The container shape itself is sample-verified for this build.
 
@@ -154,9 +200,11 @@ the meanings cannot be confirmed from the client side.
 - Container/VFS lookup: `Docs/RE/formats/pak.md`.
 - Companion spawn-data spec (also notes `mobinfo.mi` has no client loader and `mob.arr` is a
   present-but-dead tool format): `Docs/RE/formats/npc_spawns.md`.
-- The client's actual mob-data / mob-info path is data-driven from other sources (e.g.
-  `Docs/RE/formats/config_tables.md` for the mob template tables); `.mi` is not part of the runtime
-  path.
+- **The client's actual mob data comes from elsewhere, NOT from `mobinfo.mi`:**
+  - **`data/script/mobs.scr`** — the mob script/template table, loaded at boot (the runtime mob source).
+  - **`msg.xdb`** — mob name / portrait strings shown by the target-info HUD.
+  See also `Docs/RE/formats/config_tables.md` / `Docs/RE/formats/misc_data.md` for the mob template
+  tables; `.mi` is not part of the runtime path.
 - Glossary: see `Docs/RE/names.yaml`.
 - Provenance: see `Docs/RE/journal.md`.
 
@@ -168,3 +216,15 @@ the meanings cannot be confirmed from the client side.
 > build 263bd994 (no `.mi` path string in the executable). Per-record field meanings remain
 > OUT-OF-CLIENT-SCOPE (single-sample provisional). No addresses, no decompiler output, and no sample
 > payload bytes crossed the firewall.
+>
+> **Provenance — CYCLE 7 (build 263bd994, 2026-06-20; static IDA).** HARDENED the no-loader verdict
+> from "appears not read" to **"CONFIRMED not read in build 263bd994"** via an exhaustive **four-way
+> static search** (string index, case-insensitive regex, raw ASCII byte scan for `mobinfo`, UTF-16LE
+> wide scan) — all 0 hits — plus two corroborating checks: the file is **not in the boot data-table
+> corpus filename-pointer table**, and it is **not compiled into the binary as a static array**
+> (data-segment scans for the record signature returned 0 hits). Recorded the cross-ref that the mob
+> data the client DOES read comes from **`mobs.scr`** (boot-loaded) + **`msg.xdb`** (name/portrait
+> strings), not `mobinfo.mi`. Documented **field6 (+0x18 / +24)** as **MOOT** (no consumer read-site):
+> on-disk shape only — `u32`/`i32 LE`, `0xFFFFFFFF = -1 = none`, small values an optional small
+> id/index (HYPOTHESIS); any "portrait_res_3" labeling is WITHDRAWN. "Present" ≠ "read". No addresses,
+> no decompiler output, and no sample payload bytes crossed the firewall.

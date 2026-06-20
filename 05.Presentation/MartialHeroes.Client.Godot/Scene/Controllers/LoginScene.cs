@@ -1,39 +1,43 @@
 using Godot;
-using MartialHeroes.Client.Application.Events;
-using MartialHeroes.Client.Application.Scene;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens; // ServerEntry, UiAssetLoader, FrontEndAudio, ScreenHost
-using MartialHeroes.Client.Godot.Ui.Scenes.Login; // LoginWindow, PinSubView, ServerSelectSubView
+using MartialHeroes.Client.Godot.Ui.Scenes;
+using MartialHeroes.Client.Godot.Ui.Scenes.Login;
+using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Shared.Kernel.Enums;
+// FrontEndAudio, ScreenHost
+// ServerEntry (moved to engine-free layer)
+// LoginWindow, PinSubView, ServerSelectSubView
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 1 — LoginWindow. Builds the real 1024×768 login form and owns the in-login PIN/server-list
-/// sub-views (sub-states 31/32 and 34..41) before the scene advances to Load.
-/// spec: Docs/RE/specs/client_runtime.md §7.3 / §7.6; Docs/RE/specs/frontend_scenes.md §1 / §11.
+///     State 1 — LoginWindow. Builds the real 1024×768 login form and owns the in-login PIN/server-list
+///     sub-views (sub-states 31/32 and 34..41) before the scene advances to Load.
+///     spec: Docs/RE/specs/client_runtime.md §7.3 / §7.6; Docs/RE/specs/frontend_scenes.md §1 / §11.
 /// </summary>
 public sealed partial class LoginScene : StubSceneController
 {
-    private ClientContext? _ctx;
-    private SceneHost? _host;
-    private ScreenHost? _screenHost;
-    private FrontEndAudio? _audio;
-    private LoginWindow? _login;
-    private ServerSelectSubView? _serverSelect;
     private string _account = "";
-    private string _password = "";
-    private bool _syncingScene;
+    private FrontEndAudio? _audio;
 
     // CancellationTokenSource for the in-flight SelectServer/OpenGameConnection attempt.
     // Cancelled when the user presses Cancel (action 113) on the connecting popup.
     // spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join"
     private CancellationTokenSource? _connectCts;
+    private ClientContext? _ctx;
+    private SceneHost? _host;
+    private LoginWindow? _login;
+    private string _password = "";
+    private ScreenHost? _screenHost;
+    private ServerSelectSubView? _serverSelect;
+    private bool _syncingScene;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Login;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -73,8 +77,7 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_ctx is null || _syncingScene) return;
 
-        while (_ctx.EventBus.Reader.TryRead(out IClientEvent? evt))
-        {
+        while (_ctx.EventBus.Reader.TryRead(out var evt))
             switch (evt)
             {
                 case ServerListReceivedEvent serverList:
@@ -94,7 +97,6 @@ public sealed partial class LoginScene : StubSceneController
                     _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
                     return;
             }
-        }
     }
 
     private LoginWindow BuildLoginWindow()
@@ -108,7 +110,7 @@ public sealed partial class LoginScene : StubSceneController
             Name = "LoginWindow",
             Audio = _audio,
             PinFactory = CreateInLoginPin,
-            ServerSelectFactory = CreateInLoginServerSelect,
+            ServerSelectFactory = CreateInLoginServerSelect
         };
 
         login.LoginAccepted += OnLoginAccepted;
@@ -136,7 +138,7 @@ public sealed partial class LoginScene : StubSceneController
     {
         var pin = new PinSubView(_ctx?.HudAtlas ?? throw new InvalidOperationException("ClientContext lost."))
         {
-            Name = "PinSubView",
+            Name = "PinSubView"
         };
 
         GD.Print("[LoginScene] Created in-login PinSubView (sub-states 31/32) on HudAtlasLibrary. " +
@@ -149,7 +151,7 @@ public sealed partial class LoginScene : StubSceneController
         if (_ctx is null) throw new InvalidOperationException("ClientContext lost.");
         _serverSelect = new ServerSelectSubView(_ctx.HudAtlas, _ctx.HudText)
         {
-            Name = "ServerSelectSubView",
+            Name = "ServerSelectSubView"
         };
 
         _ = FetchServerListAsync();
@@ -179,15 +181,13 @@ public sealed partial class LoginScene : StubSceneController
         if (_serverSelect is null || !IsInstanceValid(_serverSelect)) return;
 
         var entries = new List<ServerEntry>(serverList.Servers.Length);
-        foreach (ServerListEntryView e in serverList.Servers)
-        {
+        foreach (var e in serverList.Servers)
             entries.Add(new ServerEntry(
-                ServerId: e.ServerId,
-                DisplayName: string.Empty,
-                StatusCode: e.StatusCode,
-                Load: e.Load,
-                OpenTime: e.OpenTime));
-        }
+                e.ServerId,
+                string.Empty,
+                e.StatusCode,
+                e.Load,
+                e.OpenTime));
 
         _serverSelect.SetServers(entries);
         GD.Print($"[LoginScene] Applied ServerListReceivedEvent ({entries.Count} entries) to state-1 server-list. " +
@@ -247,7 +247,7 @@ public sealed partial class LoginScene : StubSceneController
 
         try
         {
-            MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
+            var endpoint =
                 await useCases.SelectServerAsync(serverId, ct).ConfigureAwait(false);
 
             ct.ThrowIfCancellationRequested();

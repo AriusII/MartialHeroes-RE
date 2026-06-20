@@ -1438,10 +1438,10 @@ functions:
   "0x5e2aaa": { name: "SmsgSrvBillingExpiryNotice", note: "" }
   "0x5e2b9c": { name: "SmsgShopPageUpdate", note: "" }
   "0x5e2bcb": { name: "SmsgRenameCharResult", note: "" }
-  "0x5e2cf8": { name: "SmsgCharManageResult", note: "" }
+  "0x5e2cf8": { name: "SmsgCharManageResult_Handler", note: "" }
   "0x5e2e8b": { name: "SmsgCharStatusUpdate", note: "" }
   "0x5e2f74": { name: "SmsgCharSpawnResponse", note: "" }
-  "0x5e2fed": { name: "SmsgCharActionResult", note: "" }
+  "0x5e2fed": { name: "SmsgCharActionResult_Handler", note: "" }
   "0x5e32aa": { name: "SmsgGmChatMessage", note: "" }
   "0x5e3393": { name: "SmsgSrvLetterReceived", note: "" }
   "0x5e34ed": { name: "SmsgSceneEntityUpdate", note: "" }
@@ -1471,13 +1471,13 @@ functions:
   "0x5e5209": { name: "SmsgPvpRequestOrNotice", note: "" }
   "0x5e5245": { name: "SmsgActorMobIdChange", note: "" }
   "0x5e526d": { name: "SmsgVoteResult", note: "" }
-  "0x5e5588": { name: "SmsgBuffSlotUpdate", note: "" }
+  "0x5e5588": { name: "SmsgBuffSlotUpdate_Handler", note: "" }
   "0x5e571f": { name: "SmsgSkillHotbarSlotSet", note: "" }
   "0x5e5775": { name: "SmsgActorAutotargetOrMotion", note: "" }
   "0x5e57c7": { name: "SmsgStatsUpdate", note: "" }
   "0x5e590f": { name: "SmsgRankProgressPanelBulk", note: "" }
   "0x5e597b": { name: "SmsgActorDeathState", note: "" }
-  "0x5e5a80": { name: "SmsgTradeStateToggle", note: "" }
+  "0x5e5a80": { name: "SmsgTradeStateToggle_Handler", note: "" }
   "0x5e5bc1": { name: "SmsgCharPropertySet", note: "" }
   "0x5e5bf7": { name: "SmsgStealthToggle", note: "" }
   "0x5e5c62": { name: "SmsgRemoteActorRelationPair", note: "" }
@@ -1489,7 +1489,7 @@ functions:
   "0x5e6d1a": { name: "SmsgCharDeath", note: "" }
   "0x5e7201": { name: "SmsgRankXpGain", note: "" }
   "0x5e7460": { name: "SmsgExpGain", note: "" }
-  "0x5e78f4": { name: "SmsgLevelUp", note: "" }
+  "0x5e78f4": { name: "SmsgLevelUp_Handler", note: "" }
   "0x5e7b54": { name: "SmsgPlayerPairSystemNotice", note: "" }
   "0x5e7c16": { name: "SmsgActorSkillAction", note: "" }
   "0x5e821a": { name: "SmsgChatBroadcast", note: "" }
@@ -1553,7 +1553,7 @@ functions:
   "0x5ed4a5": { name: "SmsgActorVisualSlotClear", note: "" }
   "0x5ed5e8": { name: "SmsgGuildNameDisplayUpdate", note: "" }
   "0x5ed803": { name: "SmsgItemUseResult", note: "" }
-  "0x5edf1f": { name: "SmsgItemWorldPickupAck", note: "" }
+  "0x5edf1f": { name: "SmsgItemWorldPickupAck_Handler", note: "" }
   "0x5ee2b8": { name: "SmsgPlaytimeRewardResult", note: "" }
   "0x5ee38a": { name: "SmsgNpcBuyOrAcquireAck", note: "" }
   "0x5ee946": { name: "SmsgResponseSlot75", note: "" }
@@ -1587,7 +1587,7 @@ functions:
   "0x5f4324": { name: "SmsgGuildRankSlotUpdate", note: "" }
   "0x5f437c": { name: "SmsgResponseSlot66", note: "" }
   "0x5f43c5": { name: "SmsgResponseSlot72", note: "" }
-  "0x5f4415": { name: "SmsgCombatAttackUpdate", note: "" }
+  "0x5f4415": { name: "SmsgCubeGambleSpinUpdate_Handler", note: "" }
   "0x5f44ef": { name: "SmsgGlobalScalarPairUpdate", note: "" }
   "0x5f4527": { name: "SmsgSkillWindowStateUpdate", note: "" }
   "0x5f4583": { name: "SmsgGagePanelProgressUpdate", note: "" }
@@ -1607,7 +1607,7 @@ functions:
   "0x5f52b6": { name: "SmsgPartyAcceptResult", note: "" }
   "0x5f55ac": { name: "SmsgCraftingResult", note: "" }
   "0x5f5724": { name: "SmsgBillingBalanceUpdate", note: "" }
-  "0x5f5857": { name: "SmsgCombatResultMessage", note: "" }
+  "0x5f5857": { name: "SmsgCubeGambleResult_Handler", note: "" }
   "0x5f5a9f": { name: "SmsgItemShopPurchaseResult", note: "" }
   "0x5f5b4b": { name: "SmsgCashShopActionResult", note: "" }
   "0x5f5bcd": { name: "SmsgGmNoticeError", note: "" }
@@ -3353,6 +3353,42 @@ functions:
 # They are preserved verbatim for continuity but SHOULD NOT be applied to the new IDB
 # until a separate re-anchor pass is performed.
 
+  # CYCLE 7 Phase L (2026-06-20): new function renames from CYCLE-7 Phase-L applied report.
+  "0x5f3d30": { name: "Cmsg_UseSkill_Send", note: "emits C2S 2/52 (UseSkill); main melee/skill send path [netcode]" }
+  "0x5f6f79": { name: "Cmsg_MoveHeartbeat_Send_Alt", note: "secondary sender for C2S 2/13 (MoveHeartbeat); confirmed from dossier C9 [netcode]" }
+  "0x5e340e": { name: "SmsgCharStatusBytesByName_Handler", note: "opcode 3/23 S2C SmsgCharStatusBytesByName; 28B; NOT a char-create result [netcode]" }
+  "0x530d4c": { name: "BattleController_ExecuteAction", note: "AoE shapes at skill+1308 (0..0xB); cadence gate 100ms×skill[+1332]; max 40 targets [actor-combat]" }
+  "0x53033c": { name: "BattleController_CollectTargets", note: "collects targets for a combat action into the AoE candidate set [actor-combat]" }
+  "0x41dad8": { name: "Actor_TickMotionEndAndEmitMove", note: "ticks motion completion and emits move-heartbeat on end-of-motion [actor-combat]" }
+  "0x576cc5": { name: "Target_SelectAndEngageActor", note: "selects target actor and begins engage-lock [actor-combat]" }
+  "0x56fb80": { name: "Target_ConfirmListSelection", note: "confirms a selection from the tracked target list [actor-combat]" }
+  "0x56f7ea": { name: "Target_ResolveSelectedActorId", note: "resolves the actor-id of the currently selected target [actor-combat]" }
+  "0x56c79c": { name: "TargetDescriptor_FromTrackedSlotTable", note: "builds a TargetDescriptor from the tracked-slot table [actor-combat]" }
+  "0x56c786": { name: "TargetDescriptor_FromWorldTargetGlobal", note: "builds a TargetDescriptor from g_WorldTargetSelection [actor-combat]" }
+  "0x56d7dd": { name: "TargetDescriptor_FromSceneActorTable", note: "builds a TargetDescriptor from the scene actor table [actor-combat]" }
+  "0x428f9b": { name: "LocalPlayer_DestinationReachedTest", note: "tests if local player has reached its click-move destination [actor-combat]" }
+  "0x40249e": { name: "Heading_FromDeltaXZ", note: "converts (dX,dZ) delta to heading byte [render-pipeline]" }
+  "0x49c979": { name: "JointXEffectManagerB_ExpireForActor", note: "expires all JointXEffectManagerB slots for an actor (formerly _Tick - forced rename) [effects-render]" }
+  "0x53eb62": { name: "MainHud_BuildAndRegisterPanels", note: "builds all 178 MainWindow panel slots; PetPanel=slot52 (couple/partner window, NOT pet system); MopGagePanel=slot35; UpgradeProcessPanel=slot135 [scene-machine]" }
+  "0x41b59e": { name: "GGroup_VFunc11_InsertChild", note: "Diamond GGroup vtable slot 11 - insert child (formerly GGroup_VFunc_AddChild) [rtti-class-core]" }
+  "0x41b5e8": { name: "GGroup_VFunc12_DetachChild", note: "Diamond GGroup vtable slot 12 - detach child (formerly GGroup_VFunc_RemoveChild) [rtti-class-core]" }
+  "0x422631": { name: "Appearance_ResolveKey", note: "key = 5*(class + 4*variant) − 24; used by ActorVisual_ApplyIdleMotionByKind and idle dispatchers [anim-skinning]" }
+  "0x455ef0": { name: "SoundMgr_UpdateAmbientFromMudTile", note: "per-frame tile-driven BGM swap; trade-busy (player+1844==1) forces cue 863500002 [sound]" }
+  "0x5f9348": { name: "SoundTable_LoadArea", note: "loads per-area sound table (one-shot, complementary to SoundTable_LoadFiveTables@0x456a35) [sound]" }
+  "0x5f8712": { name: "SoundTable_DumpRecordToText", note: "SOUND_KIND switch 12 cases: BG/SYSTEM2D/WEATHER/NPC/SYSTEM3D/BG3D/WALK/RUN/DASH/ACTION/SKILL [sound]" }
+  "0x5369b7": { name: "Boot_LoadDataTableCorpus", note: "one-shot worker thread; loads ~57 files including stat/mob/item tables [vfs-assetio]" }
+  "0x47adce": { name: "MobsScr_LoadFile", note: "loads mobs.scr catalog into the mob-record table [vfs-assetio]" }
+  "0x601d2b": { name: "Diamond_GObject__unref", note: "Diamond::GObject unref: asserts ref_count != 0 (dGObject.h:58) then decrements [rtti-class-core]" }
+  "0x61b9d1": { name: "Engine_FrameRateLimiter", note: "seeds FPS cap = 60.0f (0x42700000); DISPLAY_FRAMERATE config is dead (parsed but zero readers) [scene-machine]" }
+  "0x605785": { name: "DisplayConfig_ParseFramerate", note: "parses DISPLAY_FRAMERATE into display-singleton +0x2BA48; value NEVER read at runtime [scene-machine]" }
+  "0x441c01": { name: "TerrainLoader_init", note: "clears keep_running (+12)=0; stream-worker apparatus is dormant - terrain streams synchronously on main thread [vfs-assetio]" }
+  "0x546256": { name: "SelectWindow_EnterGame", note: "CharSelect 'Enter Game' confirm; sends CmsgEnterGameRequest (1/9) [scene-machine]" }
+  "0x5e4436": { name: "Cmsg_MoveHeartbeat_Send", note: "emits C2S 2/13 (MoveHeartbeat); confirmed primary sender in heartbeat tick path [netcode]" }
+  "0x5e27f3": { name: "Cmsg_CreateCharacter_Send", note: "emits C2S 1/6 (CreateCharacter); [netcode]" }
+  "0x5f32a1": { name: "Cmsg_StorageOp_Send", note: "emits C2S 2/142 StorageOp; 16B body; op = widget_action_id - 7 [netcode]" }
+  "0x5f3a40": { name: "Cmsg_MoveRequest_Send", note: "emits C2S 2/13 MoveRequest; primary move send path [netcode]" }
+  "0x4902d6": { name: "StatCurves_LoadAll", note: "loads all stat-curve tables from the VFS [vfs-assetio]" }
+
 globals:
   # Campaign 2 (2026-06-13): 19 global/data labels synced from the IDB.
   "0x796248": { name: "g_TimeScale", note: "float time-scale for Time_GetMs (1.0=realtime, <1 slow, >1 fast) [scene-machine]" }
@@ -3382,6 +3418,14 @@ globals:
   "0x7ac0e4": { name: "g_SpawnPosZ", note: "spawn world Z (f32) from 4/1 body+0x2378 [world-entry] (CYCLE 6)" }
   "0x7aff98": { name: "g_LocalPlayerSpawnX", note: "local-player spawn X mirror (f32); reloaded for terrain cold-start + actor position [world-entry] (CYCLE 6)" }
   "0x7aff9c": { name: "g_LocalPlayerSpawnZ", note: "local-player spawn Z mirror (f32); reloaded for terrain cold-start + actor position [world-entry] (CYCLE 6)" }
+  # CYCLE 7 Phase L (2026-06-20): new global renames.
+  "0x7ac228": { name: "g_LocalBuffBarMirror", note: "30-slot × 12B array mirroring the local player's buff bar; updated by SmsgBuffSlotUpdate_Handler [actor-combat] (CYCLE 7)" }
+  "0x7ae030": { name: "g_WorldTargetSelection", note: "current world-target selection descriptor (actor-id + type); written by WorldTarget_SetAndPublishSelection [actor-combat] (CYCLE 7)" }
+  "0x84df78": { name: "g_MainWindow_Singleton", note: "singleton pointer to the MainWindow GUComponent; written once at startup [scene-machine] (CYCLE 7)" }
+  "0x78ec0c": { name: "g_XEffectPool_XEffect84", note: "pool for base XEffect (84B); alloc/free pair in XEffect84_PoolAlloc [effects-render] (CYCLE 7)" }
+  "0x78ec34": { name: "g_XEffectPool_UserXEffect104", note: "pool for UserXEffect (104B) [effects-render] (CYCLE 7)" }
+  "0x78ec5c": { name: "g_XEffectPool_JointXEffect104", note: "pool for JointXEffect (104B) [effects-render] (CYCLE 7)" }
+  "0x78ec84": { name: "g_XEffectPool_MapXEffect", note: "pool for MapXEffect [effects-render] (CYCLE 7)" }
   # "0x<addr>": { name: "g_RollingKey", note: "packet cipher rolling key state" }
 
 crypto:

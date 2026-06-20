@@ -1,12 +1,12 @@
 ---
-verification: confirmed
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
 ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # sound tables, toonramp LUT, npc.arr, .sod/.ted byte-samples corroborate; the boot/loop/scene-machine/world-scene backbone is static-IDA CODE-CONFIRMED
-conflicts: frame-limiter target-FPS source (display FRAMERATE config is statically inert — is it truly unused?); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — all (capture/debugger-pending)
+conflicts: frame-limiter target-FPS source RESOLVED (display FRAMERATE config is dead — two writers, zero readers — cap is hardcoded 60.0; CYCLE 7); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — remaining items (capture/debugger-pending)
 status: confirmed
 sample_verified: partial   # sound tables, toonramp LUT, npc.arr, .sod/.ted bytes verified; runtime logic IDA-derived; boot/loop/scene-machine/world-scene CODE-CONFIRMED
-subsystems: [boot_startup, frame_loop, sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle, world_scene]
+subsystems: [boot_startup, frame_loop, memory_allocator, sound_runtime, ui_system, render_pipeline, camera_constants, movement_constants, quest_data, scene_lifecycle, world_scene]
 networked: partial         # sound/UI/render/camera are client-only; movement uses 2/13 & 5/13; quest uses 2/28, 5/68, 5/73; scene-machine uses 3/5, 3/1, 4/1, 4/3 (cataloged elsewhere)
 encoding_note: Korean in-game/config/dialog text is CP949 (legacy MS949 code page), not UTF-8.
 ---
@@ -1706,21 +1706,43 @@ A **separate high-resolution (nanosecond-resolution) profiling timer** also exis
 path to accumulate average cull-time and draw-time readouts. That profiling timer does **not** feed
 simulation.
 
-## 8.3.1 Software frame-rate cap — (CODE-CONFIRMED; config source capture/debugger-pending)
+## 8.3.1 Software frame-rate cap — (CODE-CONFIRMED; config source RESOLVED dead, CYCLE 7)
 
 The per-frame limiter (§8.1 step 4) holds a **fixed target frame rate**. The target lives in the
-**engine-view object's framerate field**, which the engine constructor seeds to **60.0** and which
-no traced path overwrites — so the effective cap is a **hardcoded ~60 FPS**. Each frame the limiter
-sleeps `(1/60 − elapsedSeconds) × 1000` ms when the frame finished early. With `timeBeginPeriod(1)`
+**target-frame-rate field (offset +0x30) of the engine scene-machine driver object**, which that
+object's constructor seeds **once** to the float **60.0** and which no path overwrites — so the
+effective cap is a **hardcoded 60 FPS**. Each frame the limiter computes the target frame time as
+`1.0 / rate` seconds, measures the real elapsed delta from `QueryPerformanceCounter` /
+`QueryPerformanceFrequency`, stores that delta in a last-frame delta-time field (offset +0x34) on the
+same object, and when the frame finished early sleeps `(targetTime − elapsedSeconds) × 1000` ms (the
+`× 1000` is a seconds→milliseconds units conversion, not a second cap). With `timeBeginPeriod(1)`
 in effect the sleep resolves at ~1 ms granularity, so the loop holds close to 60 FPS regardless of
 how fast the GPU presents.
 
-> **Residual (capture/debugger-pending).** The display-configuration `FRAMERATE` value (a float
-> global in the renderer config, e.g. `display.lua`) was **not** found to reach the limiter's
-> framerate field on any static path — the framerate field stays at its constructor-seeded 60.0.
-> Whether the display `FRAMERATE` config is genuinely inert (dead) or is wired through a path this
-> static pass missed needs a live capture/debugger confirmation. Treat the cap as a hardcoded 60 FPS
-> and flag the display `FRAMERATE` config as **statically inert** until proven otherwise.
+**Upper cap only.** Busy frames whose measured delta already meets or exceeds `1/60` skip the
+`Sleep` and run uncapped — the limiter holds the ceiling, it does **not** pad slow frames. The
+load / opening / character-select / in-game scene loops all pace on this driver object's hardcoded
+60.0; the login scene runs the same loop on its own window-derived object's own +0x30 loop-rate
+field (a per-object loop rate, **not** the dead display config field).
+
+| Limiter constant | Meaning |
+|---|---|
+| the float **60.0** | hardcoded target frame rate, seeded once into the driver object's +0x30 field by its constructor |
+| **1.0** | numerator of the target frame time `1.0 / rate` |
+| **1000.0** | seconds→milliseconds conversion in the early-finish `Sleep` — units only, not a cap |
+| **1 ms** | `timeBeginPeriod(1)` timer resolution (§8.1) giving the `Sleep` its granularity |
+
+> **RESOLVED (CYCLE 7) — the display `FRAMERATE` config is dead.** The earlier residual ("is the
+> display `FRAMERATE` config genuinely inert?") is now **closed: it is inert/dead.** The
+> `DISPLAY_FRAMERATE` value (parsed from `data/script/display.lua` with the integer config getter) is
+> stored **raw, with no zero-default**, into a field of a **different** object — the renderer/display
+> singleton (the field is initialised to 0 in that singleton's constructor). An exhaustive static
+> search of that field's displacement finds **exactly two sites, both writes** (the constructor
+> zero-init and the config store) and **zero readers anywhere in the binary** — the stored value
+> never reaches the limiter. The limiter's framerate field stays at its constructor-seeded 60.0.
+> **Any port that treats the FPS cap as configurable is wrong; pace gameplay at a fixed 60 FPS upper
+> bound.** (A live runtime confirmation that 60.0 actually paces at 60 FPS would be RUNTIME-ONLY and
+> is not needed for the verdict.)
 
 ## 8.4 Day/night clock — location and mechanics — (CODE-CONFIRMED)
 
@@ -1787,10 +1809,56 @@ free-running local timer as the sole source of day/night time.
 6. **The `16` constant** stored in the engine struct during state-0 initialisation. Likely a
    default subscriber interval seed in ms, not a frame-rate cap; no proven per-frame reader found.
    (Confirmed not the frame cap — that is the constructor-seeded 60.0 framerate field, §8.3.1.)
-7. **Frame-limiter target-FPS config source** (capture/debugger-pending). The limiter reads the
-   engine-view object's framerate field, which the engine constructor seeds to **60.0** and which no
-   static path overwrites. Whether the display-config `FRAMERATE` value is wired in by some path this
-   pass missed, or is genuinely inert, needs a live capture/debugger pass (§8.3.1).
+7. **Frame-limiter target-FPS config source — RESOLVED (CYCLE 7).** The limiter reads the driver
+   object's target-frame-rate field (+0x30), seeded once to **60.0** by that object's constructor and
+   overwritten by nothing. The display-config `FRAMERATE` value is **dead**: stored into an unrelated
+   renderer/display-singleton field whose displacement has exactly two writers and **zero readers** in
+   the whole binary, so it never reaches the limiter. The cap is a fixed 60 FPS (§8.3.1). The only
+   residue is a RUNTIME-ONLY reconfirmation that 60.0 paces at 60 FPS live — not required for the
+   verdict.
+
+## 8.7 Memory / allocator model and per-frame object churn — (CODE-CONFIRMED)
+
+### 8.7.1 Allocator — plain CRT heap, no custom pool/arena
+
+The client allocates through the **standard MSVC C runtime**: `operator new` → `malloc` → Win32
+`HeapAlloc` on the process heap. There is **no custom game-authored pool, arena, or free-list
+allocator** anywhere in the binary. Key properties:
+
+- Allocation is **decentralised**: every class allocates its own members and children directly. The
+  dominant `operator new` entry point is invoked from **hundreds of distinct functions** rather than
+  funnelled through one central allocator — there is no single game-side memory broker.
+- **Placement-new exists but only as STL behaviour.** The trivial placement form is used for in-place
+  construction into pre-sized container storage (`std::vector<T>` growth), not for a custom
+  fixed-block pool.
+- The large statically-linked third-party libraries (the image/codec/scripting/compression/anti-cheat
+  libraries) carry their **own internal allocators**, tagged separately in prior cycles; those are not
+  the game's pattern. The game/engine path is the CRT one described here.
+
+> **Allocator model (raised from PARTIAL/NONE to definitive):** **plain CRT heap
+> (`new`/`delete`/`malloc`/`free`) on the Win32 process heap; placement-new only via STL containers;
+> no custom pool/arena/free-list.** Some subsystems own a long-lived buffer object they refill (see
+> §8.7.2), but that is buffer reuse inside an ordinary heap object, not a global allocator.
+
+### 8.7.2 Per-frame object churn — pooled / reset-and-reuse (the steady render loop is alloc-light)
+
+The steady per-frame render path (§8.1 step 2, §8.2) is **allocation-light**: transient render data is
+pooled in persistent containers, cleared and refilled rather than freed and re-allocated each frame.
+
+- The cull/draw pipeline accumulates drawables into **persistent containers** — a persistent vector /
+  linked render-bin whose backing capacity is **retained across frames** (cleared and refilled, not
+  freed).
+- The per-frame draw loop **walks the already-collected render bin** and issues draw calls; it does
+  **not** allocate per drawable inside the loop.
+- Transient draw records are constructed into those persistent draw/render-bin vectors via
+  placement-new growth, so their backing storage is **reused frame to frame**.
+- The particle buffer is a **single long-lived buffer object** holding N particles that are recycled
+  within it — particles are **not** `new`'d per frame or per particle.
+
+So the dominant heap activity is at **scene-mutation time** (spawn/despawn actors, load an area, build
+effects), **not** in the steady render loop. The exact reset-vs-reserve thresholds, and whether any
+pooled container ever grows mid-frame, are **RUNTIME-ONLY** (value semantics needing a live
+capture/debugger pass).
 
 ---
 

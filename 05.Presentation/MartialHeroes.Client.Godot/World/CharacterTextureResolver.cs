@@ -50,18 +50,18 @@
 // spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/
 // spec: Docs/RE/formats/mesh.md §.skn header (id_a/id_b).
 
+using System.Text;
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Pure static helper that resolves the diffuse <see cref="ImageTexture"/> for a character skin
-/// and provides a default humanoid player skin VFS path.
-///
-/// Thread safety: all public methods call into <see cref="RealClientAssets"/> which is
-/// main-thread-only — do NOT call from background tasks.
+///     Pure static helper that resolves the diffuse <see cref="ImageTexture" /> for a character skin
+///     and provides a default humanoid player skin VFS path.
+///     Thread safety: all public methods call into <see cref="RealClientAssets" /> which is
+///     main-thread-only — do NOT call from background tasks.
 /// </summary>
 public static class CharacterTextureResolver
 {
@@ -81,7 +81,7 @@ public static class CharacterTextureResolver
         "data/char/tex10241024/",
         "data/char/tex512512/",
         "data/char/tex256512/",
-        "data/char/tex256256/",
+        "data/char/tex256256/"
     ];
 
     // Extensions tried in order for each bucket.
@@ -101,35 +101,37 @@ public static class CharacterTextureResolver
     private static RealClientAssets? _cacheOwner;
 
     /// <summary>
-    /// Resolves the diffuse <see cref="ImageTexture"/> for a character skin given its parsed
-    /// <see cref="SkinnedMesh"/>.
-    ///
-    /// Returns <see langword="null"/> (rather than throwing) when the texture cannot be found —
-    /// the caller may then fall back to a neutral material colour.
-    ///
-    /// <para>Resolution order:</para>
-    /// <list type="number">
-    ///   <item>Look up IdA in <c>data/char/skin.txt</c> (authoritative texId).</item>
-    ///   <item>If not found, derive texId by replacing leading digit '2' with '4' in the IdA
-    ///         string (covers the majority of standard 9-digit character skins).</item>
-    ///   <item>Search all four tex buckets (1024² first) with both <c>.png</c> and <c>.dds</c>
-    ///         extensions; return the first match as a Godot <see cref="ImageTexture"/>.</item>
-    /// </list>
-    ///
-    /// spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/.
-    /// spec: Probed skin.txt format on real VFS — see CharacterTextureResolver.cs file header.
+    ///     Resolves the diffuse <see cref="ImageTexture" /> for a character skin given its parsed
+    ///     <see cref="SkinnedMesh" />.
+    ///     Returns <see langword="null" /> (rather than throwing) when the texture cannot be found —
+    ///     the caller may then fall back to a neutral material colour.
+    ///     <para>Resolution order:</para>
+    ///     <list type="number">
+    ///         <item>Look up IdA in <c>data/char/skin.txt</c> (authoritative texId).</item>
+    ///         <item>
+    ///             If not found, derive texId by replacing leading digit '2' with '4' in the IdA
+    ///             string (covers the majority of standard 9-digit character skins).
+    ///         </item>
+    ///         <item>
+    ///             Search all four tex buckets (1024² first) with both <c>.png</c> and <c>.dds</c>
+    ///             extensions; return the first match as a Godot <see cref="ImageTexture" />.
+    ///         </item>
+    ///     </list>
+    ///     spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/.
+    ///     spec: Probed skin.txt format on real VFS — see CharacterTextureResolver.cs file header.
     /// </summary>
     /// <param name="assets">Open VFS asset access. Must not be null.</param>
     /// <param name="mesh">Parsed skinned mesh whose <c>IdA</c> is used as the lookup key.</param>
     /// <returns>Resolved texture, or null when unresolvable.</returns>
     public static ImageTexture? Resolve(RealClientAssets assets, SkinnedMesh mesh)
-        => Resolve(assets, mesh.IdA);
+    {
+        return Resolve(assets, mesh.IdA);
+    }
 
     /// <summary>
-    /// Resolves the diffuse texture directly by skin <c>IdA</c> without needing the full
-    /// <see cref="SkinnedMesh"/> object.
-    ///
-    /// spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/.
+    ///     Resolves the diffuse texture directly by skin <c>IdA</c> without needing the full
+    ///     <see cref="SkinnedMesh" /> object.
+    ///     spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/.
     /// </summary>
     /// <param name="assets">Open VFS asset access. Must not be null.</param>
     /// <param name="skinIdA">The IdA field from the .skn header.</param>
@@ -145,17 +147,12 @@ public static class CharacterTextureResolver
         // spec: Probed skin.txt: 6-col format, col4=skinId, col5=texId. CONFIRMED.
         uint texId = 0;
         if (_cachedSkinToTex is not null &&
-            _cachedSkinToTex.TryGetValue(skinIdA, out uint fromTable))
-        {
+            _cachedSkinToTex.TryGetValue(skinIdA, out var fromTable))
             texId = fromTable;
-        }
 
         // Step 2 — derivation fallback: "2XXXXXXXX" → "4XXXXXXXX".
         // spec: Probed on real VFS — prefix-substitution confirmed for g202110001..g202130003.
-        if (texId == 0)
-        {
-            texId = DeriveFallbackTexId(skinIdA);
-        }
+        if (texId == 0) texId = DeriveFallbackTexId(skinIdA);
 
         if (texId == 0)
         {
@@ -167,28 +164,25 @@ public static class CharacterTextureResolver
     }
 
     /// <summary>
-    /// Searches all four character texture buckets for a texture matching <paramref name="texId"/>,
-    /// trying <c>.png</c> then <c>.dds</c> per bucket.
-    ///
-    /// Returns the loaded <see cref="ImageTexture"/> for the first match, or null.
-    /// spec: Docs/RE/formats/texture.md §Texture resolution buckets — 256×256, 256×512,
-    ///       512×512, 1024×1024.
+    ///     Searches all four character texture buckets for a texture matching <paramref name="texId" />,
+    ///     trying <c>.png</c> then <c>.dds</c> per bucket.
+    ///     Returns the loaded <see cref="ImageTexture" /> for the first match, or null.
+    ///     spec: Docs/RE/formats/texture.md §Texture resolution buckets — 256×256, 256×512,
+    ///     512×512, 1024×1024.
     /// </summary>
     private static ImageTexture? FindTextureInVfs(RealClientAssets assets, uint texId, uint skinIdA)
     {
-        foreach (string bucket in TexBuckets)
+        foreach (var bucket in TexBuckets)
+        foreach (var ext in TexExtensions)
         {
-            foreach (string ext in TexExtensions)
-            {
-                string path = $"{bucket}{texId}{ext}";
-                if (!assets.Contains(path)) continue;
+            var path = $"{bucket}{texId}{ext}";
+            if (!assets.Contains(path)) continue;
 
-                ImageTexture? tex = assets.LoadTexture(path);
-                if (tex is not null)
-                {
-                    GD.Print($"[CharacterTextureResolver] Resolved skinIdA={skinIdA} → texId={texId} → {path}");
-                    return tex;
-                }
+            var tex = assets.LoadTexture(path);
+            if (tex is not null)
+            {
+                GD.Print($"[CharacterTextureResolver] Resolved skinIdA={skinIdA} → texId={texId} → {path}");
+                return tex;
             }
         }
 
@@ -201,25 +195,24 @@ public static class CharacterTextureResolver
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the VFS path of a confirmed humanoid player-class skin to use as the default
-    /// player avatar: <c>data/char/skin/g202110001.skn</c>.
-    ///
-    /// <para>This skin is:</para>
-    /// <list type="bullet">
-    ///   <item>IdA = 202110001, IdB = 1 (Musa / Swordsman class)</item>
-    ///   <item>Confirmed present in the real VFS at D:\MartialHeroesClient</item>
-    ///   <item>Has a confirmed skeleton: <c>data/char/bind/g1.bnd</c></item>
-    ///   <item>Has a confirmed texture: <c>data/char/tex10241024/402110001.png</c>
-    ///         (via skin.txt authoritative mapping)</item>
-    ///   <item>Is a full humanoid mesh (410 faces, 263 vertices — not a spider/NPC proxy)</item>
-    /// </list>
-    ///
-    /// The method first checks that the path actually exists in the open VFS before returning it.
-    /// If the skin is absent, it falls back to the first <c>data/char/skin/g202110XXX.skn</c>
-    /// entry found by VFS scan. Returns <see langword="null"/> only when no g202110XXX skin
-    /// can be found at all.
-    ///
-    /// spec: Probed on real VFS — g202110001 confirmed present, IdB=1, bnd=EXISTS, tex=EXISTS.
+    ///     Returns the VFS path of a confirmed humanoid player-class skin to use as the default
+    ///     player avatar: <c>data/char/skin/g202110001.skn</c>.
+    ///     <para>This skin is:</para>
+    ///     <list type="bullet">
+    ///         <item>IdA = 202110001, IdB = 1 (Musa / Swordsman class)</item>
+    ///         <item>Confirmed present in the real VFS at D:\MartialHeroesClient</item>
+    ///         <item>Has a confirmed skeleton: <c>data/char/bind/g1.bnd</c></item>
+    ///         <item>
+    ///             Has a confirmed texture: <c>data/char/tex10241024/402110001.png</c>
+    ///             (via skin.txt authoritative mapping)
+    ///         </item>
+    ///         <item>Is a full humanoid mesh (410 faces, 263 vertices — not a spider/NPC proxy)</item>
+    ///     </list>
+    ///     The method first checks that the path actually exists in the open VFS before returning it.
+    ///     If the skin is absent, it falls back to the first <c>data/char/skin/g202110XXX.skn</c>
+    ///     entry found by VFS scan. Returns <see langword="null" /> only when no g202110XXX skin
+    ///     can be found at all.
+    ///     spec: Probed on real VFS — g202110001 confirmed present, IdB=1, bnd=EXISTS, tex=EXISTS.
     /// </summary>
     /// <param name="assets">Open VFS asset access. Must not be null.</param>
     /// <returns>VFS path of a humanoid player skin, or null when none is found.</returns>
@@ -241,9 +234,9 @@ public static class CharacterTextureResolver
         // that only fires when the primary candidate is absent.
         // spec: Probed real VFS — g202110001..g202110003 confirmed present, IdB=1.
         GD.Print("[CharacterTextureResolver] PickHumanoidPlayerSkin: primary candidate absent, probing fallbacks.");
-        for (int variant = 2; variant <= 20; variant++)
+        for (var variant = 2; variant <= 20; variant++)
         {
-            string candidate = $"data/char/skin/g202110{variant:D3}.skn";
+            var candidate = $"data/char/skin/g202110{variant:D3}.skn";
             if (assets.Contains(candidate))
             {
                 GD.Print($"[CharacterTextureResolver] PickHumanoidPlayerSkin: fallback to '{candidate}'.");
@@ -257,16 +250,14 @@ public static class CharacterTextureResolver
         [
             "data/char/skin/g202220001.skn", // IdB=2 (Tao class)
             "data/char/skin/g202130001.skn", // IdB=3 (Blader class)
-            "data/char/skin/g202140001.skn", // IdB=4 (Warrior class)
+            "data/char/skin/g202140001.skn" // IdB=4 (Warrior class)
         ];
-        foreach (string fallback in lastResort)
-        {
+        foreach (var fallback in lastResort)
             if (assets.Contains(fallback))
             {
                 GD.Print($"[CharacterTextureResolver] PickHumanoidPlayerSkin: last-resort fallback to '{fallback}'.");
                 return fallback;
             }
-        }
 
         GD.PrintErr("[CharacterTextureResolver] PickHumanoidPlayerSkin: no humanoid skin found in VFS.");
         return null;
@@ -277,25 +268,22 @@ public static class CharacterTextureResolver
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the in-memory skinId→texId dictionary from <c>data/char/skin.txt</c> on first
-    /// call and caches it. The cache is invalidated if a different <see cref="RealClientAssets"/>
-    /// instance is presented (guards against archive re-opens in the same process).
-    ///
-    /// skin.txt format (TAB-separated):
-    ///   Line 1:  integer count of subsequent data rows (discarded by the parser — not trusted)
-    ///   Lines 2+: 6-column data rows
+    ///     Builds the in-memory skinId→texId dictionary from <c>data/char/skin.txt</c> on first
+    ///     call and caches it. The cache is invalidated if a different <see cref="RealClientAssets" />
+    ///     instance is presented (guards against archive re-opens in the same process).
+    ///     skin.txt format (TAB-separated):
+    ///     Line 1:  integer count of subsequent data rows (discarded by the parser — not trusted)
+    ///     Lines 2+: 6-column data rows
     ///     col0  unused int
     ///     col1  slot index
     ///     col2  class ID
     ///     col3  0
     ///     col4  skinId  (= .skn IdA for this slot)
     ///     col5  texId   (= numeric texture ID; 0 = no texture for this slot)
-    ///
-    /// Rows with col4==0 or col5==0 are skipped (empty slot entries).
-    ///
-    /// spec: Probed real VFS skin.txt — 1351 6-column rows confirmed.
-    ///       Column semantics confirmed by cross-reference with g202110001 (skinId=202110001,
-    ///       texId=402110001 resolved to data/char/tex10241024/402110001.png).
+    ///     Rows with col4==0 or col5==0 are skipped (empty slot entries).
+    ///     spec: Probed real VFS skin.txt — 1351 6-column rows confirmed.
+    ///     Column semantics confirmed by cross-reference with g202110001 (skinId=202110001,
+    ///     texId=402110001 resolved to data/char/tex10241024/402110001.png).
     /// </summary>
     private static void EnsureSkinTxtLoaded(RealClientAssets assets)
     {
@@ -315,17 +303,17 @@ public static class CharacterTextureResolver
 
         try
         {
-            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
-            ReadOnlyMemory<byte> raw = assets.GetRaw(SkinTxtPath);
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var raw = assets.GetRaw(SkinTxtPath);
             // spec: All game text is CP949 (per project brief).
-            string text = System.Text.Encoding.GetEncoding(949).GetString(raw.Span);
+            var text = Encoding.GetEncoding(949).GetString(raw.Span);
 
             var map = new Dictionary<uint, uint>(1400);
-            bool firstLine = true;
+            var firstLine = true;
 
-            foreach (string rawLine in text.Split('\n'))
+            foreach (var rawLine in text.Split('\n'))
             {
-                string line = rawLine.Trim('\r', '\n', ' ');
+                var line = rawLine.Trim('\r', '\n', ' ');
                 if (line.Length == 0) continue;
 
                 // Skip the first non-empty line (the entry-count header).
@@ -337,13 +325,13 @@ public static class CharacterTextureResolver
 
                 // All data rows are TAB-separated with exactly 6 columns.
                 // spec: Probed real VFS — 1351 6-column rows, zero rows with other column counts.
-                string[] cols = line.Split('\t');
+                var cols = line.Split('\t');
                 if (cols.Length != 6) continue;
 
                 // col4 = skinId, col5 = texId.
                 // Skip zero entries (empty slot placeholders).
-                if (!uint.TryParse(cols[4], out uint skinId) || skinId == 0) continue;
-                if (!uint.TryParse(cols[5], out uint texId) || texId == 0) continue;
+                if (!uint.TryParse(cols[4], out var skinId) || skinId == 0) continue;
+                if (!uint.TryParse(cols[5], out var texId) || texId == 0) continue;
 
                 map[skinId] = texId;
             }
@@ -363,21 +351,19 @@ public static class CharacterTextureResolver
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Derives a candidate texture ID from a skin IdA by replacing the leading digit '2' with '4'.
-    /// This rule covers the majority of standard character body skins whose IdA starts with '2'
-    /// (9-digit format: 2XX_XXX_XXX → 4XX_XXX_XXX).
-    ///
-    /// Returns 0 when the rule is not applicable (IdA does not start with '2', or parsing fails).
-    ///
-    /// spec: Probed real VFS — prefix substitution confirmed for classes IdB=1 (202110001..003),
-    ///       IdB=2 (202220001..003), IdB=3 (202130001..003), IdB=4 (202140001..003).
-    ///       NOT universal: some skins map to shared textures via skin.txt (e.g. 210110XXX →
-    ///       410110000 not 41011XXXX); those are handled exclusively by the skin.txt path.
+    ///     Derives a candidate texture ID from a skin IdA by replacing the leading digit '2' with '4'.
+    ///     This rule covers the majority of standard character body skins whose IdA starts with '2'
+    ///     (9-digit format: 2XX_XXX_XXX → 4XX_XXX_XXX).
+    ///     Returns 0 when the rule is not applicable (IdA does not start with '2', or parsing fails).
+    ///     spec: Probed real VFS — prefix substitution confirmed for classes IdB=1 (202110001..003),
+    ///     IdB=2 (202220001..003), IdB=3 (202130001..003), IdB=4 (202140001..003).
+    ///     NOT universal: some skins map to shared textures via skin.txt (e.g. 210110XXX →
+    ///     410110000 not 41011XXXX); those are handled exclusively by the skin.txt path.
     /// </summary>
     private static uint DeriveFallbackTexId(uint skinIdA)
     {
-        string str = skinIdA.ToString();
+        var str = skinIdA.ToString();
         if (str.Length == 0 || str[0] != '2') return 0;
-        return uint.TryParse("4" + str[1..], out uint result) ? result : 0u;
+        return uint.TryParse("4" + str[1..], out var result) ? result : 0u;
     }
 }

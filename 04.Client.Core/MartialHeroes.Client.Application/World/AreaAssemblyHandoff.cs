@@ -1,4 +1,4 @@
-using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Contracts.Events;
 
 namespace MartialHeroes.Client.Application.World;
 
@@ -32,57 +32,57 @@ namespace MartialHeroes.Client.Application.World;
 // =============================================================================
 
 /// <summary>
-/// Composes an AREA once per area-enter and publishes it as an <see cref="AreaAssembledEvent"/>. The
-/// area compose itself is delegated to a caller-supplied callback (the layer-05 composition root binds
-/// it to the layer-03 <c>AreaComposer.ComposeArea</c>, projecting the concrete <c>AssembledArea</c> onto
-/// the layer-04 <see cref="IAssembledAreaView"/>), so this layer-04 seam never references
-/// <c>Assets.Mapping</c>. spec: Docs/RE/specs/assembly_graph.md §1/§4.
+///     Composes an AREA once per area-enter and publishes it as an <see cref="AreaAssembledEvent" />. The
+///     area compose itself is delegated to a caller-supplied callback (the layer-05 composition root binds
+///     it to the layer-03 <c>AreaComposer.ComposeArea</c>, projecting the concrete <c>AssembledArea</c> onto
+///     the layer-04 <see cref="IAssembledAreaView" />), so this layer-04 seam never references
+///     <c>Assets.Mapping</c>. spec: Docs/RE/specs/assembly_graph.md §1/§4.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Usage.</b> The layer-05 root calls <see cref="OnAreaBound"/> when an area is (re)bound for
-/// streaming — typically on the first streamed cell of a newly-entered area, or on an explicit
-/// enter-world transition. The handoff invokes the compose callback and publishes the resulting
-/// <see cref="AreaAssembledEvent"/> exactly once per distinct area id. A callback that returns
-/// <see langword="null"/> (an unresolved / absent area) publishes nothing — faithfully empty, never
-/// synthesised. spec: Docs/RE/specs/assembly_graph.md §1 (an absent area has no membership set).
-/// </para>
-/// <para>
-/// <b>Idempotence.</b> Re-binding the area id that is already the live published area is a no-op (the
-/// per-cell stream never re-publishes the area). Binding a DIFFERENT area id composes + publishes that
-/// new area and adopts it as the live area. spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — once
-/// per area load).
-/// </para>
-/// <para>
-/// <b>Threading.</b> Single-owner: invoked by the same logical owner that drains the bus (mirrors
-/// <see cref="CellAssemblyHandoff"/> / <see cref="SectorStreamingService"/>). The compose callback is
-/// expected to be pure/deterministic per the AreaComposer contract; this handoff is deliberately
-/// lock-free — do NOT call concurrently.
-/// </para>
+///     <para>
+///         <b>Usage.</b> The layer-05 root calls <see cref="OnAreaBound" /> when an area is (re)bound for
+///         streaming — typically on the first streamed cell of a newly-entered area, or on an explicit
+///         enter-world transition. The handoff invokes the compose callback and publishes the resulting
+///         <see cref="AreaAssembledEvent" /> exactly once per distinct area id. A callback that returns
+///         <see langword="null" /> (an unresolved / absent area) publishes nothing — faithfully empty, never
+///         synthesised. spec: Docs/RE/specs/assembly_graph.md §1 (an absent area has no membership set).
+///     </para>
+///     <para>
+///         <b>Idempotence.</b> Re-binding the area id that is already the live published area is a no-op (the
+///         per-cell stream never re-publishes the area). Binding a DIFFERENT area id composes + publishes that
+///         new area and adopts it as the live area. spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — once
+///         per area load).
+///     </para>
+///     <para>
+///         <b>Threading.</b> Single-owner: invoked by the same logical owner that drains the bus (mirrors
+///         <see cref="CellAssemblyHandoff" /> / <see cref="SectorStreamingService" />). The compose callback is
+///         expected to be pure/deterministic per the AreaComposer contract; this handoff is deliberately
+///         lock-free — do NOT call concurrently.
+///     </para>
 /// </remarks>
 public sealed class AreaAssemblyHandoff
 {
     /// <summary>
-    /// The area→assembled-area compose the layer-05 root binds to <c>AreaComposer.ComposeArea</c>,
-    /// projected onto the layer-04 <see cref="IAssembledAreaView"/> (the concrete <c>AssembledArea</c>
-    /// is a layer-03 type Application does not reference). Returns <see langword="null"/> for an
-    /// unresolved / absent area (nothing is published). spec: Docs/RE/specs/assembly_graph.md §1/§4.
+    ///     The area→assembled-area compose the layer-05 root binds to <c>AreaComposer.ComposeArea</c>,
+    ///     projected onto the layer-04 <see cref="IAssembledAreaView" /> (the concrete <c>AssembledArea</c>
+    ///     is a layer-03 type Application does not reference). Returns <see langword="null" /> for an
+    ///     unresolved / absent area (nothing is published). spec: Docs/RE/specs/assembly_graph.md §1/§4.
     /// </summary>
     /// <param name="AreaId">The area id being (re)bound for streaming.</param>
-    /// <returns>The assembled-area view, or <see langword="null"/> for an absent area.</returns>
+    /// <returns>The assembled-area view, or <see langword="null" /> for an absent area.</returns>
     public delegate IAssembledAreaView? AreaBake(int AreaId);
 
-    private readonly IClientEventBus _eventBus;
     private readonly AreaBake _bake;
+
+    private readonly IClientEventBus _eventBus;
 
     // The id of the live published area, or null when no area has been published yet. Tracks the
     // once-per-area-enter idempotence (a re-bind of this id is a no-op).
     // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A runs once per area load).
-    private int? _publishedAreaId;
 
     /// <summary>
-    /// Creates the handoff over the outbound bus and the caller-supplied area compose (bound by the
-    /// layer-05 root to <c>AreaComposer.ComposeArea</c>).
+    ///     Creates the handoff over the outbound bus and the caller-supplied area compose (bound by the
+    ///     layer-05 root to <c>AreaComposer.ComposeArea</c>).
     /// </summary>
     public AreaAssemblyHandoff(IClientEventBus eventBus, AreaBake bake)
     {
@@ -93,38 +93,33 @@ public sealed class AreaAssemblyHandoff
     }
 
     /// <summary>
-    /// The id of the area whose <see cref="AreaAssembledEvent"/> is currently live, or
-    /// <see langword="null"/> when none has been published. Exposed for the owner to reconcile the
-    /// streaming area against the published area.
+    ///     The id of the area whose <see cref="AreaAssembledEvent" /> is currently live, or
+    ///     <see langword="null" /> when none has been published. Exposed for the owner to reconcile the
+    ///     streaming area against the published area.
     /// </summary>
-    public int? PublishedAreaId => _publishedAreaId;
+    public int? PublishedAreaId { get; private set; }
 
     /// <summary>
-    /// Handles an area (re)bind: when <paramref name="areaId"/> is a NEW area (not the live published
-    /// one), invokes the compose callback and, when it yields a resolved area, publishes a single
-    /// <see cref="AreaAssembledEvent"/> and adopts <paramref name="areaId"/> as the live area. A re-bind
-    /// of the already-published area id is a no-op (idempotent — the per-cell stream never re-publishes
-    /// the area). An unresolved area (a <see langword="null"/> compose result) publishes nothing and does
-    /// NOT adopt the id. spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — once per area load) / §4.
+    ///     Handles an area (re)bind: when <paramref name="areaId" /> is a NEW area (not the live published
+    ///     one), invokes the compose callback and, when it yields a resolved area, publishes a single
+    ///     <see cref="AreaAssembledEvent" /> and adopts <paramref name="areaId" /> as the live area. A re-bind
+    ///     of the already-published area id is a no-op (idempotent — the per-cell stream never re-publishes
+    ///     the area). An unresolved area (a <see langword="null" /> compose result) publishes nothing and does
+    ///     NOT adopt the id. spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — once per area load) / §4.
     /// </summary>
     /// <param name="areaId">The area id being (re)bound for streaming.</param>
-    /// <returns><see langword="true"/> if an <see cref="AreaAssembledEvent"/> was published this call.</returns>
+    /// <returns><see langword="true" /> if an <see cref="AreaAssembledEvent" /> was published this call.</returns>
     public bool OnAreaBound(int areaId)
     {
         // Idempotent: the live area is already published — re-binds (incl. the per-cell stream) are no-ops.
         // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A runs once per area load).
-        if (_publishedAreaId == areaId)
-        {
-            return false;
-        }
+        if (PublishedAreaId == areaId) return false;
 
-        IAssembledAreaView? area = _bake(areaId);
+        var area = _bake(areaId);
         if (area is null)
-        {
             return false; // unresolved / absent area → faithfully nothing published. spec: assembly_graph.md §1
-        }
 
-        _publishedAreaId = areaId;
+        PublishedAreaId = areaId;
         return _eventBus.Publish(new AreaAssembledEvent(area));
     }
 }

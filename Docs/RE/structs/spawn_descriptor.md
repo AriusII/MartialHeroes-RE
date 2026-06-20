@@ -17,6 +17,10 @@
 >   `scenario_state` dword (+0x48); and the `mob_pair_partner_id` (+0x354), not re-witnessed.
 > - **ida_reverified:** 2026-06-20  **ida_anchor:** 263bd994  **evidence:** [static-ida]
 >   **layout/offsets:** confirmed · **value-semantics:** capture/debugger-pending.
+> - **re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)** — added the
+>   "3/1 per-slot tail (CYCLE 7)" cross-ref note below (the per-slot SlotFlag at record +0x3D0 and the
+>   per-slot flags word at record +0x3D1 with its single client-consumed billing bit); existing
+>   descriptor offsets and the level-boundary CONFLICT untouched.
 > - **conflicts:** no hard conflicts. **One hard correction applied this pass (binary wins):** SD
 >   +0x3C/+0x40 are ONE 64-bit HP qword — what an earlier draft labelled `current_mp` @ SD +0x40 is
 >   the **HP-HIGH dword**, not MP (the MP/stamina-class vital is the separate dword at SD +0x44). See
@@ -69,6 +73,28 @@ copy into the live Actor at +0x74. The recovered wire shapes:
 > descriptor — after each 880-byte descriptor comes a 96-byte stats block, a 1-byte selectable flag,
 > and a 4-byte timing word, before the next slot. Decode the slot mask first, then read each present
 > slot as that four-part record.
+
+### 3/1 per-slot tail — SlotFlag (+0x3D0) and the flags word (+0x3D1) (CYCLE 7)
+
+The two trailing fields of each 3/1 / 3/4 per-slot record (the "selectable flag" + "timing word"
+above) were resolved this pass. Offsets are **record-relative** (relative to the start of the
+four-part slot record, NOT SD-relative):
+
+| Record offset | Width | Type | Field | Conf | Meaning |
+|---------------|-------|------|-------|------|---------|
+| +0x3D0 | 1 | uint8 | `slot_flag` (occupied / UI-facing marker) | CONFIRMED | The per-slot occupied / availability marker. **Enter Game requires this byte == 0.** The same byte also multiplexes the per-slot UI front/back facing state (the char-select window sets distinct values for face-back / face-front / deletion-pending / freshly-created). It is wire-read at load time; it is **not** a rename or relation flag. |
+| +0x3D1 | 4 | uint32 (le) | `slot_flags` / `billing_state_flags` (flags word) | CONFIRMED (bit 0) / wire-reserved (bits 1..31) | Per-slot flags word — **not** a timestamp. The **only** client-consumed bit is **bit 0 (mask 0x1) = the character's billing / premium state bit**, copied verbatim into the in-game player panel at Enter Game. Bits 1..31 are received on the wire but never tested by the client (server-reserved). |
+
+> **No rename-cooldown field in the 3/1 record.** There is no dedicated client-side rename-cooldown
+> bit or byte anywhere in the per-slot record. The rename command is gated only by text validation
+> (banned-word check, unchanged-name compare, length >= 2, in-flight guard) plus the occupied marker;
+> the cooldown is **server-enforced** and surfaced only as an error code in the 3/6 rename result.
+>
+> **Caveat — the descriptor `state_byte` is separate.** The deletion-pending / locked state that
+> blocks Enter Game lives in the **descriptor** `state_byte` (descriptor +0x38, value 7), not in the
+> per-slot tail above. Do not confuse the descriptor-relative +0x38 with the record-relative +0x3D0.
+> The account-wide billing-active state is also separate (a single boolean in the account singleton,
+> set by 1/17 and read independently) — it is **not** a bit inside the 3/1 record.
 
 ---
 

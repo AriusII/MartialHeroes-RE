@@ -3,18 +3,19 @@
 # otherwise. capture_verified: false.
 #
 # verification:
-#   ida_reverified: 2026-06-18
+#   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]   # the 2026-06-18 re-walk was STATIC control-flow; the prior
-#                            #   debugger run (graded DEBUGGER-VERIFIED below) is a separate,
-#                            #   earlier observation, not re-run this pass.
+#   evidence: [static-ida]   # the CYCLE 7 re-walk was STATIC control-flow over the login
+#                            #   join-builder; the prior debugger run (graded DEBUGGER-VERIFIED
+#                            #   below) is a separate, earlier observation, not re-run this pass.
 #   capture_verified: false  # no .pcapng present; on-wire byte VALUES remain capture-pending.
 #   reconfirmed: the 1/4 credential payload shape (plaintext pre-image -> RSA half -> per-dword
 #     XOR 0x29 whitening BEFORE the byte-cipher + LZ4 send chain) and the field caps were
-#     re-walked from the dispatch glue on 2026-06-18 and found CONSISTENT. CORRECTION this pass:
-#     the RSA plaintext M pad width is PARAMETER-DRIVEN (the caller-supplied password-field cap),
-#     NOT a hard-coded 17-byte literal; 17 bytes is the RUNTIME-OBSERVED value from the earlier
-#     debugger session, recorded as such below.
+#     re-walked from the login join-builder on CYCLE 7 (2026-06-20) and found CONSISTENT.
+#     CORRECTION this pass (binary-won): the RSA plaintext M pad width / password cap 17 (0x11) is
+#     REGRADED static-confirmed = 17 -- it is a hard-coded literal on the join path (the cap pushed
+#     into the secure-context builder and consumed as the staging-buffer size), no longer
+#     "runtime-observed". The on-wire byte VALUES stay capture-pending.
 #
 # This file replaces the contested packets/1-4_auth_reply.yaml as the authoritative login
 # credential carrier. The "1/6 login-or-create collision" is RESOLVED: 1/6 is char-create
@@ -36,8 +37,8 @@ summary: >
   RSA ciphertext of the password (PKCS#1 v1.5 type-2), framed as [u32 LE length][big-endian
   digit bytes]. The whole 1/4 payload is then per-dword whitened (XOR 0x29, selector 0x40) and
   sent through the normal byte-cipher + LZ4 outbound pipeline. The password itself is NEVER in
-  the plaintext region -- it is the staged RSA plaintext M (a zero-padded buffer sized to the
-  password-field cap; the runtime-observed width is 17 bytes).
+  the plaintext region -- it is the staged RSA plaintext M (a zero-padded buffer of the
+  static-confirmed 17-byte password-cap width).
 
 # This is a VARIABLE-LENGTH, CRYPTO-DEPENDENT carrier, NOT a fixed Pack=1 struct. The fields
 # below document the pre-cipher payload shape for the engineer; do NOT codegen a Pack=1 struct.
@@ -60,6 +61,13 @@ notes: |
   FRAME: secure 1/4. At encrypt-entry the frame header reads major = 1, minor = 4, carried as TWO
   SEPARATE little-endian u16 words ([u32 size][u16 major][u16 minor]) -- not a packed dword. The
   credential is carried on the secure 1/4 frame (DEBUGGER-VERIFIED + re-confirmed static).
+
+  CREDENTIAL FIELD ORDER (binary-won, from the login join-builder argument order): the client first
+  assembles a tab-delimited login-key string in the order ACCOUNT, PASSWORD, PIN, HOST:PORT, then a
+  builder splits it on the tab. ACCOUNT/PASSWORD/PIN are the credentials; HOST:PORT is NOT a
+  credential -- it is split off and saved to a side store (game endpoint), NOT placed in the 1/4
+  payload. Within the 1/4 payload, ACCOUNT and (optional) PIN ride the plaintext pre-image below
+  while PASSWORD is staged as the RSA plaintext M (see STAGED RSA PLAINTEXT M).
 
   PLAINTEXT PRE-IMAGE (written first into the secure-context packet buffer payload, payload
   offset 0; all length prefixes are u32 little-endian and INCLUDE the trailing NUL):
@@ -100,16 +108,20 @@ notes: |
   the framing/size. DEBUGGER-VERIFIED.
 
   STAGED RSA PLAINTEXT M (the password): the password is NOT in the plaintext pre-image. At
-  login-form time the client allocates a zero-filled buffer SIZED TO THE PASSWORD-FIELD CAP (a
-  caller-supplied width, NOT a hard-coded literal), then copies the password bytes in (no NUL),
-  leaving the remainder as zero padding. So M = password bytes followed by zero padding out to the
-  cap width, and the encrypt step consumes the FULL cap-width buffer as M -- the trailing zeros
-  ARE part of M (the server expects a fixed-width password field).
-    - PAD WIDTH = the password-field cap (parameter-driven). RUNTIME-OBSERVED = 17 bytes in the
-      earlier debugger session (crypto.md section 6b); recorded as a runtime value, NOT promoted to
-      a static literal -- a fresh implementation should treat the pad width as the configured
-      password-cap and use 17 as the observed default until a capture pins it on the wire.
+  login-form time the client allocates a zero-filled buffer of the password-field cap width, then
+  copies the password bytes in (no NUL), leaving the remainder as zero padding. So M = password
+  bytes followed by zero padding out to the cap width, and the encrypt step consumes the FULL
+  cap-width buffer as M -- the trailing zeros ARE part of M (the server expects a fixed-width
+  password field).
+    - PAD WIDTH = 17 bytes (0x11), STATIC-CONFIRMED. This is a hard-coded literal on the login join
+      path (the password cap pushed into the secure-context builder, then consumed as the staging
+      buffer's allocation size). The earlier revision graded 17 as "runtime-observed, not a static
+      literal"; this is REGRADED static-confirmed = 17. The on-wire byte VALUES of M stay
+      capture-pending (only the width is settled).
     - Password capacity: length >= 2 and < 0x11 (17).
+    - UI MAXLEN vs WIRE CAP: the login form's password textbox allows up to 129 (0x81) typed
+      characters, but the ENFORCED WIRE cap is 17 (0x11). These are distinct -- do NOT misread a
+      129-wide password field; the wire/staging width is 17.
 
   WHITENING + SEND: after the ciphertext is appended, the whole 1/4 payload is per-dword XOR
   whitened with key 0x29 (41 decimal), selector 0x40, over the dword-aligned payload (size>>2

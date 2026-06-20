@@ -36,20 +36,20 @@
 
 using System.Threading.Channels;
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// Character statistics panel (StatusPanel + 3 sub-panels A/B/C).
-///
-/// <para>PASSIVE: drains IHudEventHub.StatAllocations to render stat values.
-/// Allocation buttons emit use-case calls; no game-rule math in this view.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.7 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED.
+///     Character statistics panel (StatusPanel + 3 sub-panels A/B/C).
+///     <para>
+///         PASSIVE: drains IHudEventHub.StatAllocations to render stat values.
+///         Allocation buttons emit use-case calls; no game-rule math in this view.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.7 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudCharacterStatsPanel : Control
 {
@@ -84,26 +84,25 @@ public sealed partial class HudCharacterStatsPanel : Control
 
     // Stat row labels (value portion) — up to 22 stat names
     private readonly Label[] _statValueLabels = new Label[StatNameMsgEnd - StatNameMsgStart + 1];
-    private Label _charNameLabel = null!;
     private Label _charLevelLabel = null!;
+    private Label _charNameLabel = null!;
+    private ClientContext? _ctx;
+    private ChannelReader<StatAllocationView>? _statAllocations;
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _visible;
-    private ChannelReader<StatAllocationView>? _statAllocations;
-    private ClientContext? _ctx;
 
     // -------------------------------------------------------------------------
     // Build (geometry pass)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: creates the StatusPanel at (180, 95) size 130×196, plus 3 sibling sub-panels A/B/C.
-    ///
-    /// spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_system.md §8.7 CODE-CONFIRMED.
+    ///     Geometry pass: creates the StatusPanel at (180, 95) size 130×196, plus 3 sibling sub-panels A/B/C.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §3.4 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_system.md §8.7 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text, ClientContext ctx)
     {
@@ -121,8 +120,8 @@ public sealed partial class HudCharacterStatsPanel : Control
 
         // Load chrome textures
         // spec: ui_system.md §8.7 — inventwindow.dds + tradekeepwindow.dds
-        Texture2D? mainChrome = atlas.GetById(InvTexId);
-        Texture2D? borderChrome = atlas.GetById(TradeTexId);
+        var mainChrome = atlas.GetById(InvTexId);
+        var borderChrome = atlas.GetById(TradeTexId);
         if (mainChrome is null)
             GD.PrintErr("[HudCharacterStatsPanel] inventwindow.dds (uitex 2) unavailable. " +
                         "spec: Docs/RE/specs/ui_system.md §8.7.");
@@ -148,7 +147,7 @@ public sealed partial class HudCharacterStatsPanel : Control
                 Name = "Chrome",
                 Texture = mainChrome,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspect,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             chromeTex.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(chromeTex);
@@ -162,7 +161,7 @@ public sealed partial class HudCharacterStatsPanel : Control
                 Name = "BorderStrip",
                 Texture = borderChrome,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspect,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
             borderTex.AnchorLeft = 0f;
@@ -180,7 +179,7 @@ public sealed partial class HudCharacterStatsPanel : Control
             Name = "CharName",
             Text = "",
             HorizontalAlignment = HorizontalAlignment.Left,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _charNameLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
         _charNameLabel.OffsetLeft = 6f;
@@ -194,7 +193,7 @@ public sealed partial class HudCharacterStatsPanel : Control
             Name = "CharLevel",
             Text = "",
             HorizontalAlignment = HorizontalAlignment.Right,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _charLevelLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopRight);
         _charLevelLabel.OffsetLeft = -60f;
@@ -228,28 +227,28 @@ public sealed partial class HudCharacterStatsPanel : Control
             Name = panelName,
             Position = new Vector2(x, y),
             Size = new Vector2(w, h),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(panel);
 
-        float rowH = 18f;
-        float startY = 4f;
-        int rowIdx = 0;
+        var rowH = 18f;
+        var startY = 4f;
+        var rowIdx = 0;
 
-        for (int msgId = msgStart; msgId <= msgEnd; msgId++)
+        for (var msgId = msgStart; msgId <= msgEnd; msgId++)
         {
-            int statIdx = msgId - StatNameMsgStart;
-            float rowY = startY + rowIdx * rowH;
+            var statIdx = msgId - StatNameMsgStart;
+            var rowY = startY + rowIdx * rowH;
 
             // Stat name label from msg.xdb
             // spec: ui_system.md §8.7 CODE-CONFIRMED — "stat names msg IDs 60001–60022"
-            string statName = text.GetCaption(msgId, $"stat{statIdx}");
+            var statName = text.GetCaption(msgId, $"stat{statIdx}");
             var nameLabel = new Label
             {
                 Name = $"StatName{msgId}",
                 Text = statName,
                 HorizontalAlignment = HorizontalAlignment.Left,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
             nameLabel.AnchorLeft = 0f;
@@ -268,7 +267,7 @@ public sealed partial class HudCharacterStatsPanel : Control
                 Name = $"StatValue{msgId}",
                 Text = "—",
                 HorizontalAlignment = HorizontalAlignment.Right,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             // Manual anchor+offset (LayoutPreset.Custom not available in Godot 4.6.3)
             valueLabel.AnchorLeft = 0f;
@@ -314,7 +313,7 @@ public sealed partial class HudCharacterStatsPanel : Control
         if (_statAllocations is null) return;
 
         StatAllocationView? latest = null;
-        while (_statAllocations.TryRead(out StatAllocationView? ev))
+        while (_statAllocations.TryRead(out var ev))
             latest = ev;
 
         if (latest is null) return;
@@ -342,7 +341,7 @@ public sealed partial class HudCharacterStatsPanel : Control
     private void SetStatLabel(int idx, uint baseVal, uint delta)
     {
         if ((uint)idx >= (uint)_statValueLabels.Length) return;
-        Label? lbl = _statValueLabels[idx];
+        var lbl = _statValueLabels[idx];
         if (lbl is null) return;
         lbl.Text = delta > 0 ? $"{baseVal}+{delta}" : $"{baseVal}";
     }
@@ -352,7 +351,7 @@ public sealed partial class HudCharacterStatsPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the stats panel visibility. Called by HudMaster on key-C press.
+    ///     Toggles the stats panel visibility. Called by HudMaster on key-C press.
     /// </summary>
     public void Toggle()
     {

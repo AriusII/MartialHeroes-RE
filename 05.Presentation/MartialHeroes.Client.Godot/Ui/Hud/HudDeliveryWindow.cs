@@ -47,14 +47,14 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game delivery/consignment retrieve box (DeliveryPanel, slot 40).
-///
-/// <para>PASSIVE: 5×8 item grid (40 cells, action 500..539). Claim flow (actions 565..572)
-/// stages items and fires C2S CmsgDeliveryClaim (2/71) via use-case (stub).
-/// Delivery list = TODO(capture).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 40.
+///     In-game delivery/consignment retrieve box (DeliveryPanel, slot 40).
+///     <para>
+///         PASSIVE: 5×8 item grid (40 cells, action 500..539). Claim flow (actions 565..572)
+///         stages items and fires C2S CmsgDeliveryClaim (2/71) via use-case (stub).
+///         Delivery list = TODO(capture).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 40.
 /// </summary>
 public sealed partial class HudDeliveryWindow : Control
 {
@@ -125,10 +125,9 @@ public sealed partial class HudDeliveryWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the DeliveryPanel with its 40-cell 5×8 item grid.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 40.
+    ///     Geometry pass: builds the DeliveryPanel with its 40-cell 5×8 item grid.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 40.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -166,22 +165,22 @@ public sealed partial class HudDeliveryWindow : Control
             Name = "Title",
             Text = "Delivery Box",
             Position = new Vector2(10f, 8f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Page tab buttons (actions 573..578 = 6 category tabs)
         // spec: ui_system.md §8.21.5 — "page tabs: actions 573..578 (own/others/sale categories)"
         string[] tabLabels = { "Own", "Others", "Sale", "Tab4", "Tab5", "Tab6" };
-        for (int i = 0; i < TabActionCount; i++)
+        for (var i = 0; i < TabActionCount; i++)
         {
-            int capturedAction = TabActionBase + i;
+            var capturedAction = TabActionBase + i;
             var tab = new Button
             {
                 Name = $"Tab{i}",
                 Text = tabLabels[i],
                 Position = new Vector2(10f + i * 58f, 30f),
                 Size = new Vector2(52f, 22f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             tab.Pressed += () => OnTabPressed(capturedAction);
             AddChild(tab);
@@ -194,25 +193,23 @@ public sealed partial class HudDeliveryWindow : Control
         const float gridX = 10f;
         const float gridY = 60f;
 
-        for (int row = 0; row < GridRows; row++)
+        for (var row = 0; row < GridRows; row++)
+        for (var col = 0; col < GridCols; col++)
         {
-            for (int col = 0; col < GridCols; col++)
-            {
-                int cellIdx = row * GridCols + col;
-                int actionId = CellActionBase + cellIdx; // spec: §8.21.5 — 500..539
-                int capturedIdx = cellIdx;
+            var cellIdx = row * GridCols + col;
+            var actionId = CellActionBase + cellIdx; // spec: §8.21.5 — 500..539
+            var capturedIdx = cellIdx;
 
-                var cell = new Button
-                {
-                    Name = $"Cell{actionId}",
-                    Text = string.Empty,
-                    Position = new Vector2(gridX + col * cellStride, gridY + row * cellStride),
-                    Size = new Vector2(cellSize, cellSize),
-                    MouseFilter = MouseFilterEnum.Stop,
-                };
-                cell.Pressed += () => OnCellPressed(capturedIdx);
-                AddChild(cell);
-            }
+            var cell = new Button
+            {
+                Name = $"Cell{actionId}",
+                Text = string.Empty,
+                Position = new Vector2(gridX + col * cellStride, gridY + row * cellStride),
+                Size = new Vector2(cellSize, cellSize),
+                MouseFilter = MouseFilterEnum.Stop
+            };
+            cell.Pressed += () => OnCellPressed(capturedIdx);
+            AddChild(cell);
         }
 
         // Scrollbar controls (thumb 583, down 584, up 585)
@@ -223,7 +220,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "▲",
             Position = new Vector2(PanelW - 26f, gridY),
             Size = new Vector2(18f, 18f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollUp.Pressed += () => OnScrollUp();
         AddChild(scrollUp);
@@ -234,7 +231,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "▼",
             Position = new Vector2(PanelW - 26f, gridY + GridRows * cellStride - 20f),
             Size = new Vector2(18f, 18f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollDown.Pressed += () => OnScrollDown();
         AddChild(scrollDown);
@@ -245,7 +242,7 @@ public sealed partial class HudDeliveryWindow : Control
         {
             Text = "Qty:",
             Position = new Vector2(10f, PanelH - 80f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
         var qtyDec = new Button
         {
@@ -253,7 +250,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "-",
             Position = new Vector2(40f, PanelH - 82f),
             Size = new Vector2(22f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         qtyDec.Pressed += () => OnQty(QtyDec);
         AddChild(qtyDec);
@@ -265,7 +262,7 @@ public sealed partial class HudDeliveryWindow : Control
             Position = new Vector2(66f, PanelH - 80f),
             Size = new Vector2(30f, 20f),
             HorizontalAlignment = HorizontalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(qtyDisplay);
 
@@ -275,7 +272,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "+",
             Position = new Vector2(100f, PanelH - 82f),
             Size = new Vector2(22f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         qtyInc.Pressed += () => OnQty(QtyInc);
         AddChild(qtyInc);
@@ -288,7 +285,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "Claim",
             Position = new Vector2(140f, PanelH - 82f),
             Size = new Vector2(100f, 30f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         claimBtn.Pressed += OnClaim;
         AddChild(claimBtn);
@@ -301,7 +298,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "Select All",
             Position = new Vector2(250f, PanelH - 82f),
             Size = new Vector2(80f, 30f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         selectAllBtn.Pressed += () =>
         {
@@ -316,7 +313,7 @@ public sealed partial class HudDeliveryWindow : Control
             Text = "×",
             Position = new Vector2(PanelW - 28f, 8f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
@@ -333,7 +330,7 @@ public sealed partial class HudDeliveryWindow : Control
             Size = new Vector2(PanelW - 20f, 40f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         GD.Print("[HudDeliveryWindow] Built — DeliveryPanel slot 40 (5×8 grid 40 cells, action 500..539). " +
@@ -402,18 +399,15 @@ public sealed partial class HudDeliveryWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows or hides the delivery window.
-    /// Opened from NPC service interaction; specific open opcode = debugger-pending.
-    /// spec: Docs/RE/specs/ui_system.md §8.21.7 — "open from NPC-service; opcode not isolated".
+    ///     Shows or hides the delivery window.
+    ///     Opened from NPC service interaction; specific open opcode = debugger-pending.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.7 — "open from NPC-service; opcode not isolated".
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
         _open = forceState ?? !_open;
         Visible = _open;
-        if (_open)
-        {
-            _selectedCell = -1;
-        }
+        if (_open) _selectedCell = -1;
     }
 
     public override void _Input(InputEvent @event)

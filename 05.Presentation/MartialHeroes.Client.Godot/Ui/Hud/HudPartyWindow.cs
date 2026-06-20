@@ -33,19 +33,19 @@
 // PASSIVE: zero game logic; emits invite/leave/kick as use-case calls (TODO world-campaign stubs).
 
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game Party window (PartyPanel). 318×732 right-docked.
-///
-/// <para>PASSIVE: renders member rows from Application events; emits party intents as use-case calls.
-/// Member rows are stubbed empty pending the world-campaign party feed.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
+///     In-game Party window (PartyPanel). 318×732 right-docked.
+///     <para>
+///         PASSIVE: renders member rows from Application events; emits party intents as use-case calls.
+///         Member rows are stubbed empty pending the world-campaign party feed.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudPartyWindow : Control
 {
@@ -77,6 +77,14 @@ public sealed partial class HudPartyWindow : Control
     // spec: ui_system.md §8.12 — uitex 8 = skillwindow.dds (primary), uitex 2 = inventwindow.dds
     private const int MainTexId = 8; // spec: ui_system.md §8.12
     private const int FooterTexId = 2; // spec: ui_system.md §8.12
+    private readonly Label[] _classLabels = new Label[MemberCount];
+    private readonly ProgressBar[] _expBars = new ProgressBar[MemberCount];
+
+    // Per-slot bar controls (HP/MP/EXP) for live update
+    private readonly ProgressBar[] _hpBars = new ProgressBar[MemberCount];
+    private readonly Label[] _levelLabels = new Label[MemberCount];
+    private readonly ProgressBar[] _mpBars = new ProgressBar[MemberCount];
+    private readonly Label[] _nameLabels = new Label[MemberCount];
 
     // -------------------------------------------------------------------------
     // View state
@@ -84,22 +92,13 @@ public sealed partial class HudPartyWindow : Control
 
     private bool _open;
 
-    // Per-slot bar controls (HP/MP/EXP) for live update
-    private readonly ProgressBar[] _hpBars = new ProgressBar[MemberCount];
-    private readonly ProgressBar[] _mpBars = new ProgressBar[MemberCount];
-    private readonly ProgressBar[] _expBars = new ProgressBar[MemberCount];
-    private readonly Label[] _nameLabels = new Label[MemberCount];
-    private readonly Label[] _levelLabels = new Label[MemberCount];
-    private readonly Label[] _classLabels = new Label[MemberCount];
-
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 318×732 right-anchored party window.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED.
+    ///     Geometry pass: builds the 318×732 right-anchored party window.
+    ///     spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -131,10 +130,10 @@ public sealed partial class HudPartyWindow : Control
 
         // Main backdrop image (uitex 8, dst 0,85,318,627, src 0,0)
         // spec: ui_system.md §8.12 — "Main backdrop image 0,85,318,627 src(0,0) atlas 8"
-        Texture2D? mainTex = atlas.GetById(MainTexId);
+        var mainTex = atlas.GetById(MainTexId);
         if (mainTex is not null)
         {
-            AtlasTexture? bdSlice = atlas.SliceById(MainTexId, 0, 0, 318, 627);
+            var bdSlice = atlas.SliceById(MainTexId, 0, 0, 318, 627);
             if (bdSlice is not null)
             {
                 var mainBd = new TextureRect
@@ -143,7 +142,7 @@ public sealed partial class HudPartyWindow : Control
                     Texture = bdSlice,
                     Position = new Vector2(0f, 85f),
                     Size = new Vector2(318f, 627f),
-                    MouseFilter = MouseFilterEnum.Ignore,
+                    MouseFilter = MouseFilterEnum.Ignore
                 };
                 AddChild(mainBd);
             }
@@ -156,10 +155,10 @@ public sealed partial class HudPartyWindow : Control
 
         // Footer strip (uitex 2, dst 0,36,318,50, src 0,683)
         // spec: ui_system.md §8.12 — "Footer strip 0,36,318,50 src(0,683) atlas 2"
-        Texture2D? footerTex = atlas.GetById(FooterTexId);
+        var footerTex = atlas.GetById(FooterTexId);
         if (footerTex is not null)
         {
-            AtlasTexture? footerSlice = atlas.SliceById(FooterTexId, 0, 683, 318, 50);
+            var footerSlice = atlas.SliceById(FooterTexId, 0, 683, 318, 50);
             if (footerSlice is not null)
             {
                 var footerImg = new TextureRect
@@ -168,7 +167,7 @@ public sealed partial class HudPartyWindow : Control
                     Texture = footerSlice,
                     Position = new Vector2(0f, 36f),
                     Size = new Vector2(318f, 50f),
-                    MouseFilter = MouseFilterEnum.Ignore,
+                    MouseFilter = MouseFilterEnum.Ignore
                 };
                 AddChild(footerImg);
             }
@@ -176,9 +175,9 @@ public sealed partial class HudPartyWindow : Control
 
         // 8 member slots
         // spec: ui_system.md §8.12 — "8 slots, baseline y=159, stride 54px"
-        for (int k = 0; k < MemberCount; k++)
+        for (var k = 0; k < MemberCount; k++)
         {
-            float baseY = SlotBaseY + k * SlotStrideY; // spec: ui_system.md §8.12
+            var baseY = SlotBaseY + k * SlotStrideY; // spec: ui_system.md §8.12
             BuildMemberSlot(atlas, text, k, baseY);
         }
 
@@ -193,7 +192,7 @@ public sealed partial class HudPartyWindow : Control
             Text = "X",
             Position = new Vector2(259f, 655f),
             Size = new Vector2(59f, 77f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
@@ -214,7 +213,7 @@ public sealed partial class HudPartyWindow : Control
             Position = new Vector2(10f, baseY - 30f),
             Size = new Vector2(300f, 54f),
             Flat = true,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         AddChild(rowBtn);
 
@@ -226,7 +225,7 @@ public sealed partial class HudPartyWindow : Control
             Text = "",
             Position = new Vector2(25f, baseY - 15f),
             Size = new Vector2(130f, 14f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(nameLbl);
         _nameLabels[k] = nameLbl;
@@ -239,7 +238,7 @@ public sealed partial class HudPartyWindow : Control
             Text = "",
             Position = new Vector2(55f, baseY),
             Size = new Vector2(50f, 14f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(levelLbl);
         _levelLabels[k] = levelLbl;
@@ -252,7 +251,7 @@ public sealed partial class HudPartyWindow : Control
             Text = "",
             Position = new Vector2(25f, baseY),
             Size = new Vector2(30f, 14f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(classLbl);
         _classLabels[k] = classLbl;
@@ -267,7 +266,7 @@ public sealed partial class HudPartyWindow : Control
             MaxValue = 1.0,
             Value = 0.0,
             ShowPercentage = false,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(hpBar);
         _hpBars[k] = hpBar;
@@ -282,7 +281,7 @@ public sealed partial class HudPartyWindow : Control
             MaxValue = 1.0,
             Value = 0.0,
             ShowPercentage = false,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(mpBar);
         _mpBars[k] = mpBar;
@@ -297,7 +296,7 @@ public sealed partial class HudPartyWindow : Control
             MaxValue = 1.0,
             Value = 0.0,
             ShowPercentage = false,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(expBar);
         _expBars[k] = expBar;
@@ -322,19 +321,19 @@ public sealed partial class HudPartyWindow : Control
             (210f, 600f, 90f, 25f, 9, "Leader"), // C — C2S 2/36
             (8f, 642f, 90f, 25f, 10, "Kick"), // D — C2S 2/36
             (109f, 642f, 90f, 25f, 12, "Transfer"), // E — expel-stage
-            (233f, 97f, 74f, 22f, 13, "Mini"), // F — MiniParty toggle
+            (233f, 97f, 74f, 22f, 13, "Mini") // F — MiniParty toggle
         };
 
         foreach (var (x, y, w, h, action, label) in buttons)
         {
-            int capturedAction = action;
+            var capturedAction = action;
             var btn = new Button
             {
                 Name = $"ActionBtn{action}",
                 Text = label,
                 Position = new Vector2(x, y),
                 Size = new Vector2(w, h),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             btn.Pressed += () => OnAction(capturedAction);
             AddChild(btn);
@@ -374,8 +373,8 @@ public sealed partial class HudPartyWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// No hub channel exists for party roster yet.
-    /// TODO(world-campaign): party populate when hub exposes S2C 5/21 + 5/38 channels.
+    ///     No hub channel exists for party roster yet.
+    ///     TODO(world-campaign): party populate when hub exposes S2C 5/21 + 5/38 channels.
     /// </summary>
     public void BindHub(IHudEventHub hub)
     {
@@ -389,10 +388,10 @@ public sealed partial class HudPartyWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the party window on/off.
-    /// Toggle key: UNVERIFIED (key-table / capture-pending).
-    /// spec: Docs/RE/specs/ui_system.md §8.12 — "toggle hotkey key-table/capture-pending".
-    /// TODO(spec): toggle hotkey.
+    ///     Toggles the party window on/off.
+    ///     Toggle key: UNVERIFIED (key-table / capture-pending).
+    ///     spec: Docs/RE/specs/ui_system.md §8.12 — "toggle hotkey key-table/capture-pending".
+    ///     TODO(spec): toggle hotkey.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

@@ -57,15 +57,15 @@
 
 using Godot;
 using MartialHeroes.Client.Application.UseCases;
+using Environment = System.Environment;
 
 namespace MartialHeroes.Client.Godot.Autoload;
 
 /// <summary>
-/// Dev/diagnostic autoload that drives the full login → lobby → game-connection flow
-/// programmatically when <c>MH_LOGIN_USER</c> / <c>MH_LOGIN_PASS</c> env vars are set.
-/// A strict no-op when those vars are absent — the normal headless boot is unaffected.
-///
-/// spec: Docs/RE/specs/login_flow.md §4.2 / §2.0 / §3.5.
+///     Dev/diagnostic autoload that drives the full login → lobby → game-connection flow
+///     programmatically when <c>MH_LOGIN_USER</c> / <c>MH_LOGIN_PASS</c> env vars are set.
+///     A strict no-op when those vars are absent — the normal headless boot is unaffected.
+///     spec: Docs/RE/specs/login_flow.md §4.2 / §2.0 / §3.5.
 /// </summary>
 public sealed partial class LiveLoginAutoload : Node
 {
@@ -84,10 +84,10 @@ public sealed partial class LiveLoginAutoload : Node
     // -------------------------------------------------------------------------
 
     private bool _enabled; // true when USER+PASS are present
-    private bool _rosterLogged; // prevent double roster-log
     private bool _enterTriggered; // latch: SelectCharacterAsync fired ONCE after roster populates
     private double _pollAccumSec; // seconds since last roster poll
     private double _pollTotalSec; // total seconds waited for roster
+    private bool _rosterLogged; // prevent double roster-log
 
     // -------------------------------------------------------------------------
     // Godot lifecycle
@@ -100,9 +100,9 @@ public sealed partial class LiveLoginAutoload : Node
             // Credentials are read from OS env vars (System.Environment, NOT Godot.OS.GetEnvironment —
             // project idiom per the namespace-collision pitfall: global::Godot.* for Godot statics).
             // spec: CLAUDE.md "Namespace-collision pitfall".
-            string? user = System.Environment.GetEnvironmentVariable("MH_LOGIN_USER");
-            string? pass = System.Environment.GetEnvironmentVariable("MH_LOGIN_PASS");
-            string? pin = System.Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
+            var user = Environment.GetEnvironmentVariable("MH_LOGIN_USER");
+            var pass = Environment.GetEnvironmentVariable("MH_LOGIN_PASS");
+            var pin = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
 
             if (string.IsNullOrEmpty(user) || string.IsNullOrEmpty(pass))
             {
@@ -151,18 +151,18 @@ public sealed partial class LiveLoginAutoload : Node
         var ctx = GetNodeOrNull<ClientContext>("/root/ClientContext");
         if (ctx?.CharacterSelection is not { } store) return;
 
-        IReadOnlyList<CharacterSlotRecord?> snapshot = store.Snapshot();
+        var snapshot = store.Snapshot();
 
         // Find the first occupied, non-blank slot index.
-        int firstOccupiedIdx = -1;
-        string firstOccupiedName = string.Empty;
-        var names = new System.Collections.Generic.List<string>();
-        for (int i = 0; i < snapshot.Count; i++)
+        var firstOccupiedIdx = -1;
+        var firstOccupiedName = string.Empty;
+        var names = new List<string>();
+        for (var i = 0; i < snapshot.Count; i++)
         {
-            CharacterSlotRecord? slot = snapshot[i];
+            var slot = snapshot[i];
             if (slot is not null &&
                 !string.Equals(slot.Name, CharacterSelectionStore.BlankSlotSentinel,
-                    System.StringComparison.Ordinal))
+                    StringComparison.Ordinal))
             {
                 names.Add(slot.Name);
                 if (firstOccupiedIdx < 0)
@@ -193,7 +193,7 @@ public sealed partial class LiveLoginAutoload : Node
             // 1/9 enter-game. Used to exercise the roster/server-list flow live without ghosting the
             // account in-world (a successful enter holds an account-level re-entry lock for a long time).
             // Offline-safe: a strict no-op unless the env var is set.
-            string? noEnter = System.Environment.GetEnvironmentVariable("MH_LOGIN_NOENTER");
+            var noEnter = Environment.GetEnvironmentVariable("MH_LOGIN_NOENTER");
             if (!string.IsNullOrEmpty(noEnter))
             {
                 GD.Print("[LiveLogin] MH_LOGIN_NOENTER set — stopping after char-list (no 1/9 enter-game).");
@@ -203,13 +203,13 @@ public sealed partial class LiveLoginAutoload : Node
 
             // DEV slot override (MH_LOGIN_SLOT): enter a specific occupied slot instead of the first
             // occupied — used to sidestep a server re-entry lock on a recently-ghosted character.
-            int enterIdx = firstOccupiedIdx;
-            string enterName = firstOccupiedName;
-            string? slotEnv = System.Environment.GetEnvironmentVariable("MH_LOGIN_SLOT");
-            if (!string.IsNullOrEmpty(slotEnv) && int.TryParse(slotEnv, out int wantSlot) &&
+            var enterIdx = firstOccupiedIdx;
+            var enterName = firstOccupiedName;
+            var slotEnv = Environment.GetEnvironmentVariable("MH_LOGIN_SLOT");
+            if (!string.IsNullOrEmpty(slotEnv) && int.TryParse(slotEnv, out var wantSlot) &&
                 wantSlot >= 0 && wantSlot < snapshot.Count && snapshot[wantSlot] is { } wantRec &&
                 !string.Equals(wantRec.Name, CharacterSelectionStore.BlankSlotSentinel,
-                    System.StringComparison.Ordinal))
+                    StringComparison.Ordinal))
             {
                 enterIdx = wantSlot;
                 enterName = wantRec.Name;
@@ -224,12 +224,12 @@ public sealed partial class LiveLoginAutoload : Node
             //   "[Net←] 4/1 payload=NNNN B"  (DispatcherFrameSink in ClientContext)
             // and GameLoop's "[GameLoop] LocalPlayerSpawnedEvent" — ClientContext exposes no public
             // "local player spawned" boolean that can be polled without draining IClientEventBus.
-            ValueTask enterTask =
-                ctx.UseCases.SelectCharacterAsync(enterIdx, System.Threading.CancellationToken.None);
+            var enterTask =
+                ctx.UseCases.SelectCharacterAsync(enterIdx, CancellationToken.None);
             _ = enterTask.AsTask().ContinueWith(
                 t => GD.PrintErr($"[LiveLogin] SelectCharacterAsync faulted: {t.Exception}"),
-                System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |
-                System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+                TaskContinuationOptions.OnlyOnFaulted |
+                TaskContinuationOptions.ExecuteSynchronously);
         }
 
         // Both log and trigger are done; disable further polling.
@@ -242,17 +242,17 @@ public sealed partial class LiveLoginAutoload : Node
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Drives the full login → lobby → game-connection flow asynchronously (fire-and-forget).
-    /// Errors are caught and logged; nothing is rethrown so the Godot main loop is never interrupted.
+    ///     Drives the full login → lobby → game-connection flow asynchronously (fire-and-forget).
+    ///     Errors are caught and logged; nothing is rethrown so the Godot main loop is never interrupted.
     /// </summary>
     private void DriveLogin(string user, string pass, string pin)
     {
         // Fire-and-forget: observe faults via ContinueWith so the task is never unobserved.
-        Task driveTask = DriveLoginAsync(user, pass, pin);
+        var driveTask = DriveLoginAsync(user, pass, pin);
         _ = driveTask.ContinueWith(
             t => GD.PrintErr($"[LiveLogin] drive task faulted: {t.Exception}"),
-            System.Threading.Tasks.TaskContinuationOptions.OnlyOnFaulted |
-            System.Threading.Tasks.TaskContinuationOptions.ExecuteSynchronously);
+            TaskContinuationOptions.OnlyOnFaulted |
+            TaskContinuationOptions.ExecuteSynchronously);
     }
 
     private async Task DriveLoginAsync(string user, string pass, string pin)
@@ -276,7 +276,7 @@ public sealed partial class LiveLoginAutoload : Node
 
             // Step 2: Fetch the server list from the lobby.
             // spec: Docs/RE/specs/login_flow.md §2.0 / §2.1 (ip.txt → list.dat → fallback host resolution).
-            IReadOnlyList<MartialHeroes.Network.Abstractions.Lobby.LobbyServerRecord> servers =
+            var servers =
                 await ctx.UseCases.FetchServerListAsync(CancellationToken.None).ConfigureAwait(false);
 
             if (servers.Count == 0)
@@ -291,12 +291,12 @@ public sealed partial class LiveLoginAutoload : Node
                 return;
             }
 
-            ushort serverId = servers[0].ServerId;
+            var serverId = servers[0].ServerId;
             GD.Print($"[LiveLogin] server list received ({servers.Count} entries); selecting serverId={serverId}.");
 
             // Step 3: Resolve the game-server channel endpoint for the chosen server.
             // spec: Docs/RE/specs/login_flow.md §2.2 (channel-endpoint query: port 10000 + serverId).
-            MartialHeroes.Network.Abstractions.Lobby.LobbyChannelEndpoint endpoint =
+            var endpoint =
                 await ctx.UseCases.SelectServerAsync(serverId, CancellationToken.None).ConfigureAwait(false);
             GD.Print(
                 $"[LiveLogin] channel endpoint resolved: {endpoint.Host}:{endpoint.Port}. spec: login_flow.md §2.2.");

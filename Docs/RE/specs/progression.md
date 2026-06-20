@@ -25,12 +25,15 @@ actor/stat storage model.
 > use of the experience message's source-sort field) are **[capture/debugger-pending]** — the client
 > only reads those values; their meaning on the wire and their runtime magnitudes need a live witness.
 >
-> - **ida_reverified:** 2026-06-16
+> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida]
 > - **conflicts:** none open. This pass re-pinned the stat-editor delta-offset labels and the
 >   `+`/`-` action-id → stat ordering (both had drifted in the prior committed doc; the on-wire
->   `2/29` commit order STR,INT,AGI,DEX,CON was already correct and is unchanged).
+>   `2/29` commit order STR,INT,AGI,DEX,CON was already correct and is unchanged). CYCLE 7 added the
+>   boot-time stat-curve loader story (§13): base HP/MP are absent-by-design (server-supplied), the
+>   level cap is data-driven, and the client owns no XP→level formula — all consistent with this
+>   document's existing server-authoritative model.
 
 Wire structs are owned by the packet specs (below); this document describes the *client behaviour*
 those packets drive and the runtime state they mutate.
@@ -561,3 +564,60 @@ and resolve to entries in the effect / sound / message tables.
   — the client only reads them, and no client VFS table drives them. Level-boundary numbers are not
   present in the client binary as constants (they arrive via the `5/32` level/points fields and the
   server's XP tables). All **[capture/debugger-pending]**.
+
+---
+
+## 13. Boot-time stat-curve loader — what the client tables actually hold (CYCLE 7)
+
+A single boot step loads the four-file **stat-curve family** in one pass and builds an in-memory
+scaling-coefficient grid (the layout facts and on-disk record strides live in `structs/stats.md` §
+"Stat-curve table family"). Three behavioural conclusions matter here, and all three **confirm and
+reinforce the server-authoritative model** the rest of this document describes:
+
+### 13.1 Base HP/MP are ABSENT-BY-DESIGN — server-supplied, not in any client table [confirmed]
+
+The stat-curve loader reads `users.scr`, `userlevel.scr`, `userpoint.scr`, and `exp.scr` and builds a
+per-class scaling grid. **There is no HP/MP magnitude column anywhere in this file family** — every
+scalar position is an unnamed scaling coefficient or a per-level stat-point/allocation value. The base
+HP/MP magnitudes a character actually has are **server-supplied at runtime**: they arrive in the
+actor/character snapshot (the major-`4` packets) and, for the local player, in the `5/67` resync and the
+`5/32` level-up vitals (§5–§6). This is consistent with `structs/stats.md`, where `max_hp`/`max_mp` are
+computed-on-demand and the two external `level_base`/`server_base` terms are flagged as server inputs.
+
+**Faithful-port consequence:** a C# stat catalogue that returns **0 base HP/MP** from the parsed `.scr`
+tables is **correct, not a bug** — the magnitudes are meant to come from the wire, never from the client
+data files. Re-implementations should not synthesise base HP/MP from these tables.
+
+### 13.2 No client-side XP→level formula — only the XP-bar display window [confirmed]
+
+There is **no client routine that increments the player level by comparing current XP to a threshold**.
+Level-up is **server-authoritative** (the new level arrives in the `5/32` level-up message; the client
+recomputes derived stats on receipt — see §5). The client owns **only the XP-bar display**, not the
+progression decision.
+
+The XP-bar fill is computed in the HUD vitals/gauge routine as:
+
+```
+bar_pixels = 44 * current / (rangeHi − base)
+```
+
+where `rangeHi` and the range component come from the **`userpoint.scr` record at +20 and +22 (both u16)**
+(see `structs/stats.md`), and the live `current` / total-XP values are **RUNTIME-ONLY** (server-supplied,
+the same accumulators `5/9 ExpGain` feeds in §3). The "curve" the client stores is therefore just the
+per-level XP-bar denominator window (`userpoint` +20/+22) plus the two level-keyed value streams parsed
+out of `exp.scr` (XP threshold / range) — it is **not** an XP→level function. Cross-ref §3 (`ExpGain`),
+§12 Q6 (server-authored magnitudes), and `structs/stats.md`.
+
+### 13.3 Level cap is DATA-DRIVEN — `.scr` row count, not a binary constant [confirmed]
+
+The level cap is **the largest level key present in the four stat-curve tables**, enforced by the
+loader's count-assert: the last level key of `userlevel.scr`, `userpoint.scr`, and `exp.scr` must all
+agree, or the load aborts. **No hardcoded "max level" comparison exists** anywhere in the
+level-consuming code — every level use is a per-item / per-quest requirement test (`level >= min`,
+`level <= max`) against a data field, never a clamp against a global cap. The shipped data caps at
+**level 300** (the exact `300` is **UNVERIFIED** at the byte level — it is the on-disk `.scr` row count,
+readable only from the VFS files, not from a code immediate). The current level itself is
+**RUNTIME-ONLY** (set from the server character snapshot, major-`4`, and the `5/32` level field), held in
+two client mirrors: a HUD/eligibility level cache and the local-player struct's level field. So the
+operative ceiling is whatever the server plus the shipped `.scr` row count allow — consistent with the
+fully server-authoritative progression model above.

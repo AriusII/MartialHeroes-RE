@@ -171,8 +171,7 @@ client's two copies of `game.ver`:
 The gate fires only on the login action. The single-field equality (both operands fetched at list
 index 5) is CODE-CONFIRMED by the comparison routine; the **>= 7** element check guarding both the
 VFS and external read paths is likewise CODE-CONFIRMED. Source: dirty-room IDA notes
-`Docs/RE/_dirty/campaign9b/login.md` §3 (CAMPAIGN 9b) and the campaign-10 two-witness
-re-verification.
+(CAMPAIGN 9b) and the campaign-10 two-witness re-verification.
 
 ## Cross-references
 

@@ -20,10 +20,15 @@
 
 ```
 verification:   sample-verified   # all 8 env-bin family sizes + fog start/end + ambient-floor chain matched against a real VFS sample
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20         # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open         # campaign-10 D6 found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
+cycle7_additions:                  # CYCLE 7 static re-walk (all HIGH immediates unless noted)
+  - in-memory engine fog struct layout pinned: type@+44 (1=EXP/2=EXP2/3=LINEAR), colour@+48 (4-byte ARGB), start@+52 f32, end@+56 f32, density@+60 f32 (§10.3)
+  - material SYNTH default (missing material.bin): ambient 0.30000001, diffuse 0.8, specular 0.0, emissive 0.0 (§3.4)
+  - light SYNTH ramp (missing light.bin): scale 80.0; per-keyframe intensity = kf_idx × 0.04 (=1/25) clamped, colour = 1.0 − intensity, 48 keyframes (§9.5)
+  - fog on-disk start/end also describable as struct-relative (start@+208, end@+212, then data_load flag + 192-byte colour block; 204 B total) — same bytes as §2.1's 0x00/0x04/0x08/0x0C
 ```
 
 > **CAMPAIGN 10 Block D6 two-witness re-verification (build `263bd994`).** Every CORE numeric claim of
@@ -393,6 +398,22 @@ Float components are in RGBA order (R at lowest index). Alpha components are gen
   colour, no day/night variation). Whether this is a test/unused area artefact or a deliberate
   constant-sky design is unverified.
 
+### 3.4 Synth default when `material%d.bin` is absent (CYCLE 7, CONFIRMED)
+
+The material loader **never hard-fails** on a missing file — it synthesises a default colour table in
+a per-entry loop. The CONFIRMED default immediates are:
+
+| Material channel | Synth default | Confidence |
+|------------------|:-------------:|------------|
+| ambient   | **0.30000001** (the float32 nearest 0.3) | CONFIRMED (immediate) |
+| diffuse   | **0.8** | CONFIRMED (immediate) |
+| specular  | **0.0** | CONFIRMED (immediate) |
+| emissive  | **0.0** | CONFIRMED (immediate) |
+
+A faithful parser should mirror this: when `material%d.bin` is absent, populate the colour table with
+`(ambient 0.3, diffuse 0.8, specular 0.0, emissive 0.0)` rather than erroring. The runtime consumes
+these floats directly (float [0,1] domain — §10.1).
+
 ---
 
 ## Section 4: `stardome%d.bin` — Star Colour Grid
@@ -673,6 +694,27 @@ the day/night cycle does **not** rotate the sun — the keyframe tables (§A/§B
 this static fallback is the only light direction the client uses (see §10.5 and
 `specs/environment.md §6`).
 
+### 9.5 Synth colour ramp + scale when `light%d.bin` is absent (CYCLE 7, CONFIRMED)
+
+The light loader **never hard-fails** on a missing file — it synthesises a default 48-keyframe
+day/night colour ramp and a fallback light vector, then returns success. The CONFIRMED synth
+immediates are:
+
+| Synth quantity | Value | Notes |
+|----------------|-------|-------|
+| Fallback light direction | `(−7.0, 7.0, 20.0)` | same vector as §9.4 (this synth path writes it into the runtime light object). |
+| Synth ramp **scale** | **80.0** | the light intensity scale used by the synth path (distinct from the `1.0` scale carried in the §9.4 fallback-vector slot). |
+| Synth colour ramp | per keyframe: `intensity = kf_idx × 0.04` (= 1/25) **clamped**; `colour = 1.0 − intensity` | 48 keyframes; the ramp darkens monotonically across the day index. |
+
+Confidence: CONFIRMED (immediates `0.04`, `1.0 −`, `80.0`). A faithful parser should synthesise this
+ramp on a missing `light%d.bin` rather than failing the area load. The ambient gate `K_ambient = 0`
+still applies (the synth ambient is inert at runtime — §10.4); the live ambient floor remains the
+`OPTION_BRIGHT` offset (§10.5).
+
+> **Light specular/ambient default mask (MED).** A constant ARGB mask `0xFF7FFFFF` is also written by
+> the synth path into the light object's specular/ambient default slots. Its precise per-channel
+> effect is MED confidence (the value is recovered; its exact consumption is not fully traced).
+
 ---
 
 ## Section 10: Colour domains and lighting/fog apply-path field facts
@@ -725,6 +767,22 @@ scalar `s` from `light%d.bin` section C (§9.3): when `s > 0` the runtime sets a
 `fog%d.bin` `start_dist` / `end_dist` seed a baseline but are overwritten by the per-frame
 `s × 3.0` derivation each tick. CODE-CONFIRMED. The runtime math and its Godot mapping are in
 `specs/environment.md §6`.
+
+**In-memory engine fog struct layout (CYCLE 7, CONFIRMED).** The runtime fog object's field offsets,
+recovered from the struct's debug-describe accessor, are:
+
+| Struct offset | Size | Type | Field | Notes |
+|--------------:|-----:|------|-------|-------|
+| +44 | 4 | u32/enum | `type` | Fog mode: **1 = EXP, 2 = EXP2, 3 = LINEAR**. The observed apply path writes LINEAR (§10.3 above). |
+| +48 | 4 | ARGB | `color` | 4-byte packed D3DCOLOR (alpha forced opaque on apply — §10.1). |
+| +52 | 4 | f32 | `start` | Fog start distance (world units, written by the apply path). |
+| +56 | 4 | f32 | `end` | Fog end distance (= `s × 3.0` from the section-C scalar on the live path). |
+| +60 | 4 | f32 | `density` | Exponential-mode density; written **0.0** on the LINEAR apply path. |
+
+These are **runtime struct** offsets, distinct from the `fog%d.bin` on-disk offsets in §2.1. (The
+on-disk `start_dist` / `end_dist` may equivalently be described as struct-relative `+208` / `+212`
+within the loading object, followed by the `data_load` flag and the 192-byte colour block — the same
+204 bytes as §2.1.)
 
 ### 10.4 Light colour domains feeding lighting math (float [0,1]) — ambient gate CONFIRMED 0.0
 

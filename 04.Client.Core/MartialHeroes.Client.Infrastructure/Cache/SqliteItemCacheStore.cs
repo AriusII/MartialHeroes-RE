@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using MartialHeroes.Client.Infrastructure.Exceptions;
 using MartialHeroes.Shared.Kernel.Ids;
 using Microsoft.Data.Sqlite;
@@ -9,14 +5,14 @@ using Microsoft.Data.Sqlite;
 namespace MartialHeroes.Client.Infrastructure.Cache;
 
 /// <summary>
-/// SQLite-backed implementation of <see cref="IItemCacheStore"/>.
-/// <para>
-/// Schema versioning uses <c>PRAGMA user_version</c>.
-/// All SQL uses parameterized queries — no value interpolation into SQL text.
-/// </para>
+///     SQLite-backed implementation of <see cref="IItemCacheStore" />.
+///     <para>
+///         Schema versioning uses <c>PRAGMA user_version</c>.
+///         All SQL uses parameterized queries — no value interpolation into SQL text.
+///     </para>
 /// </summary>
 /// <remarks>
-/// Pass <c>Data Source=:memory:</c> (or a shared-cache URI) for unit tests.
+///     Pass <c>Data Source=:memory:</c> (or a shared-cache URI) for unit tests.
 /// </remarks>
 public sealed class SqliteItemCacheStore : IItemCacheStore
 {
@@ -27,7 +23,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
     private bool _initialised;
 
     /// <param name="connectionString">
-    /// A <c>Microsoft.Data.Sqlite</c> connection string.
+    ///     A <c>Microsoft.Data.Sqlite</c> connection string.
     /// </param>
     public SqliteItemCacheStore(string connectionString)
     {
@@ -37,11 +33,14 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
     // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
 
     // ── IItemCacheStore ───────────────────────────────────────────────────────
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -57,7 +56,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<CachedItemDto?> TryGetAsync(ItemId itemId, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -80,7 +79,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task UpsertAsync(CachedItemDto item, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -97,7 +96,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task BulkUpsertAsync(IEnumerable<CachedItemDto> items, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -108,10 +107,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
             await conn.OpenAsync(cancellationToken);
             await using var tx = await conn.BeginTransactionAsync(cancellationToken);
 
-            foreach (var item in items)
-            {
-                await UpsertCoreAsync(conn, (SqliteTransaction)tx, item, cancellationToken);
-            }
+            foreach (var item in items) await UpsertCoreAsync(conn, (SqliteTransaction)tx, item, cancellationToken);
 
             await tx.CommitAsync(cancellationToken);
         }
@@ -121,7 +117,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -141,7 +137,10 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private SqliteConnection OpenConnection() => new(_connectionString);
+    private SqliteConnection OpenConnection()
+    {
+        return new SqliteConnection(_connectionString);
+    }
 
     private void EnsureInitialised()
     {
@@ -177,10 +176,10 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
     {
         var rawId = (ulong)r.GetInt64(0); // cast back: stored as int64, re-interpret as uint
         return new CachedItemDto(
-            Id: new ItemId((uint)rawId),
-            Name: r.GetString(1),
-            Description: r.GetString(2),
-            ItemTypeCode: (byte)r.GetInt32(3));
+            new ItemId((uint)rawId),
+            r.GetString(1),
+            r.GetString(2),
+            (byte)r.GetInt32(3));
     }
 
     private static async Task ApplyMigrationsAsync(SqliteConnection conn, CancellationToken ct)

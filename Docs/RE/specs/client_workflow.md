@@ -1,5 +1,5 @@
 ---
-verification: confirmed            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
 ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida]             # add 'vfs-sample' only where a real asset sample corroborated (UI dialog IDs via msg.xdb, area inventory); noted inline as SAMPLE-VERIFIED
@@ -117,7 +117,7 @@ OS process create
 
 [State 5 — In-game]
   MainHandler (~200 B) → BuildGameWorld → BuildSceneGraph
-  camera: FOV 65°, near 5, far 15000; 5 manipulators + 1 reserved slot
+  camera: FOV 65°, near 5, far 15000; 5 view platforms (no 6th) + 5 manipulators
   await S2C 4/1 GameStateTick → extract spawn position → Terrain_InitFirstRing_3x3
   per-frame world-update callbacks (six render passes A–F + UI)
   logout / disconnect ─> State 4 (Character Select), NOT back to Login
@@ -130,15 +130,25 @@ OS process create
   → writes state value 8 (exit)
 
 [Exit — state value 8, NOT a 9th case]
-  the switch is bounds-checked (state <= 7, a jump table of 8 entries 0..7 plus a default);
-  writing state value 8 falls into the switch DEFAULT branch: resource teardown in
-  reverse-singleton order, then WinMain returns / process exit
+  the switch over the scene-state field has exactly 8 explicit cases (states 0..7);
+  state value 8 is the loop-exit terminal shutdown sentinel — tested at the loop bottom,
+  it emits the end marker, runs resource teardown, and WinMain returns / process exit
+  (the switch default arm also forces 8 for any out-of-range value)
 ```
 
-> **Scene-state count (corrected):** the WinMain switch has **exactly 8 top-level cases, states 0..7**.
-> The value **8 is a sub-state / exit sentinel**, not a 9th top-level case — it is what states 6 (Quit)
-> and 7 (Error) write to drop into the switch default (teardown + return). Earlier "states 0..8 /
-> nine-state lifecycle" phrasing is wrong: it is *states 0..7 (8 cases); 8 is the exit sentinel*.
+> **Scene-state count (corrected, re-confirmed CYCLE 7):** the WinMain switch over the scene-state
+> field has **exactly 8 explicit cases, states 0..7**. The value **8 is NOT a switch case** — at the
+> top-level scene-machine dispatch it is the **loop-exit TERMINAL SHUTDOWN sentinel**: when the
+> scene-state field equals 8 the loop emits its end marker and the program returns (clean shutdown).
+> It is what states 6 (Quit) and 7 (Error) — and the switch default — write to make the next loop
+> iteration fall out and tear down. Earlier "states 0..8 / nine-state lifecycle" phrasing is wrong:
+> it is *states 0..7 (8 cases); 8 is the exit sentinel*.
+>
+> **Do not confuse top-level state 8 with any "login sub-state 8".** The "8 = login sub-state"
+> wording from earlier drafts referred to **LoginWindow's own internal handshake FSM** (the
+> credential / PIN-modal sub-state field at object offset `+0x238`, §5.1.3) — a **different field
+> entirely** from the top-level scene-state selector. At the top-level scene-machine scope there is
+> no case 8; value 8 means *exit*. (CODE-CONFIRMED — re-confirmed against IDB SHA 263bd994, CYCLE 7.)
 
 > **Key non-obvious edge:** in-game (state 5) transitions **back to character select (state 4)**,
 > not to login. Login is visited only once per process lifetime. The load/opening gate (state 2) is
@@ -261,19 +271,30 @@ and sleeps the remainder, holding the loop at the fixed 60 FPS cadence.
 
 ### 4.1 Overview (CODE-CONFIRMED)
 
-WinMain mounts the VFS once, then runs a `while(1)` switch/case over a single global engine-state
-integer record (a 3-int record: `[state, sub-state, reason]`). The switch is **bounds-checked
-(state ≤ 7) and dispatches through a jump table of exactly 8 entries (states 0..7) plus a default
-branch**. There is no 9th top-level case — the value **8 is the exit sentinel** written by the
-Quit (6) and Error (7) cases to fall into the switch default (teardown + WinMain return). See §4.2.
+WinMain mounts the VFS **once**, then runs an infinite `while(1)` loop whose body is a `switch` over
+the single global GameState **scene-state field** with **exactly 8 explicit cases, values 0..7**.
+The value **8 is not a switch case** — it is the **loop-exit terminal shutdown sentinel** tested at
+the bottom of the loop: when the scene-state field equals 8, the loop emits its end marker and
+WinMain returns (clean program shutdown). The Quit (6) and Error (7) cases, and the switch
+**default** arm (any out-of-range value), all write 8 to drive that exit. See §4.2.
 
-Each top-level case:
-1. Writes the *next* engine state immediately (pre-loop intent).
-2. Constructs the scene handler.
+> The GameState record is read as an array of dwords: `[0]` = current scene state (the switch
+> selector); `[1]` = the error / disconnect reason code (written by cases 1 and 7, read by case 7);
+> `[2]` = a secondary code (read by case 7 when `[1] == 8`); and a byte at object offset `+0x0C` =
+> the `debugmode` flag, set from the `game.lua` `debugmode` global. (§4.6 covers the reason field.)
+
+Each top-level case is **"fall-through-by-assignment"**:
+1. It **first writes the next default scene state into the selector field** (pre-loop intent).
+2. Constructs the scene handler / window.
 3. Calls the shared engine main loop (the four-phase loop from §3), which runs until a one-byte
    run-flag is cleared.
 4. Destructs the handler.
-5. Falls through to the outer `while(1)` which re-dispatches on the current engine-state value.
+5. Falls through to the outer `while(1)`, which re-dispatches on the current scene-state value.
+
+The leading assignment is only the **default next** state. The **real transition trigger is set
+inside the per-scene window code**: a scene loop may overwrite the selector field before it returns,
+in which case the next dispatch follows the scene's choice rather than the case's default. So the
+static edges below should be read as *"default next" unless the scene loop overrides the field first.*
 
 The loop-break mechanism is a dedicated function that clears the global run-flag. State transitions
 are effected by writing the desired next-state integer and then calling this break function.
@@ -312,15 +333,17 @@ also be staged in the camera follow-target slot or the world renders nothing (se
 | 3 | Opening | `COpeningWindow` — intro sequence | ~720 B |
 | 4 | Character Select | `SelectWindow` | ~6280 B |
 | 5 | In-game | `MainHandler` + full scene graph | ~200 B base |
-| 6 | Quit | Inline — engine shutdown path; writes state value 8 | — |
-| 7 | Error | Inline — modal dialog (reason from the GameState reason field); writes state value 8 | — |
-| 8 | *(exit sentinel — NOT a case)* | Switch **default** branch — teardown and WinMain return | — |
+| 6 | Quit | Inline — clean-shutdown request: tears down the scene dispose-list (no window); writes state value 8 | — |
+| 7 | Error | Inline — builds the error string from the reason codes, shows a message box, closes the net client (no window); writes state value 8 | — |
+| 8 | *(loop-exit terminal sentinel — NOT a case)* | Loop bottom emits its end marker and WinMain returns (clean shutdown) | — |
 
-> **State count (CODE-CONFIRMED, corrected):** there are **8 top-level cases (states 0..7)**.
-> The switch is bounds-checked (`state ≤ 7`) over a jump table of 8 entries plus a default branch.
-> **Value 8 is the exit sentinel, not a 9th case** — it is what cases 6 and 7 write so the next
-> `while(1)` iteration falls into the switch default (resource teardown + WinMain return). Earlier
-> "states 0..8 / nine-state" phrasing is wrong.
+> **State count (CODE-CONFIRMED, corrected — re-confirmed CYCLE 7):** there are **exactly 8 explicit
+> cases (states 0..7)**. **Value 8 is the loop-exit terminal shutdown sentinel, not a 9th case** — it
+> is what cases 6 and 7, and the switch default, write so the next `while(1)` iteration emits the end
+> marker and returns (resource teardown + WinMain return / process exit). Earlier "states 0..8 /
+> nine-state" phrasing — and the separate "8 = login sub-state" reading — are wrong **at this scope**:
+> the latter is a property of LoginWindow's internal handshake FSM field (`+0x238`, §5.1.3), a
+> different field from the scene-state selector.
 
 > Note: a `SimpleLoadHandler` class exists in the binary with a complete constructor but zero
 > callers. It is dead code from an earlier iteration. (CODE-CONFIRMED)
@@ -349,9 +372,18 @@ also be staged in the camera follow-target slot or the world renders nothing (se
 | 5 In-game | Quit / logout | 6 Quit | 8 |
 | 5 In-game | 4/1 GameStateTick (form 1), actor create fail | 4 Select | — |
 | 5 In-game | Action-result code ≠ 0, local player (S2C 3/100) | 7 Error | 8 |
-| 6 Quit | Case body | writes value 8 (exit sentinel → default branch) | — |
-| 7 Error | Case body | writes value 8 (exit sentinel → default branch) | — |
+| 6 Quit | Case body | writes value 8 (loop-exit terminal sentinel → shutdown) | — |
+| 7 Error | Case body | writes value 8 (loop-exit terminal sentinel → shutdown) | — |
+| default | Any out-of-range selector value | disposes the scene dispose-list, forces value 8 → shutdown | — |
 | Any | `WM_QUIT` | (run-flag cleared) | — |
+
+> **Who writes states 6 and 7 from *outside* the dispatch is RUNTIME-DRIVEN (UNVERIFIED).** Within
+> WinMain, case 1's two login-failure fast-paths write `[0]=7` (with reason code 1 or 3, §4.6), and
+> cases 6/7 write the exit value 8. But which external code path writes `[0]=6` (a clean-shutdown
+> request) or `[0]=7` (an out-of-band error/disconnect) from outside the switch — e.g. a network
+> disconnect handler or a user-quit action — is not visible in the dispatch itself and is **out of
+> scope here (UNVERIFIED, runtime-driven)**. Likewise, the exact world-exit target a running world
+> scene writes before returning (e.g. 6 or 7 vs the default 4) is set by the scene loop at runtime.
 
 > **Opcode attribution (CODE-CONFIRMED, corrected):** the result codes 202/203/232 and 1..4/7 above
 > are handled by the **generic char/lobby action-result S2C 3/100**, NOT by the char-manage result
@@ -694,15 +726,45 @@ On entering State 5, the case body constructs `MainHandler` and calls `BuildGame
    cell-streaming queue). Approximately 17 world-manager singletons cached.
 2. **`BuildSceneGraph`** — creates:
    - Camera: `GPerspectiveCamera`, FOV 65°, near plane 5, far plane 15000.
-   - Five `GViewPlatform` render targets plus a **reserved sixth slot** (allocated but never
-     assigned — provision for a future mode not in this build).
-   - `GScene` node labelled "charater scene" (literal label; typo is authentic).
-   - `GSwitch` node for toggling render branches.
+   - **Exactly five view platforms** — five unrolled view-platform constructor calls (no loop),
+     stored to five contiguous object slots at `+0x50, +0x54, +0x58, +0x5C, +0x60` (i.e. +80..+96).
+     **There is NO sixth view-platform slot** (the earlier "reserved sixth slot" reading is wrong —
+     see §5.4.1a).
+   - Scene-root node (a *different* class from the view platform) labelled "charater scene"
+     (literal label; typo is authentic), stored at object offset `+0x70` (+112). This is the
+     scene root, **not** a sixth view platform.
+   - Render-branch switch node for toggling render branches.
    - Five camera manipulators (Third / First / Static / Gamble / Event).
 3. **Five+ render-callback slots installed** (render pass order — see §5.4.4).
 4. **World services started**: environment/day-night driver, cursor/3D-marker service,
    per-frame update callback. HUD panel tree activated (community panel, character-billboard
    panel, link-combo panel, rank-progress panel, slot panels).
+
+#### 5.4.1a View-platform count — exactly FIVE, no sixth slot (CODE-CONFIRMED, re-confirmed CYCLE 7)
+
+The in-game scene-graph builder constructs **exactly five view platforms** — five **unrolled**
+view-platform constructor calls, with **no loop and no array index above 4** — each stored to a
+distinct, contiguous object slot:
+
+| Slot offset | Role |
+|---|---|
+| `+0x50` (+80) | in-game view platform 0 (camera-attached) |
+| `+0x54` (+84) | in-game view platform 1 |
+| `+0x58` (+88) | in-game view platform 2 |
+| `+0x5C` (+92) | in-game view platform 3 |
+| `+0x60` (+96) | in-game view platform 4 |
+
+**There is no sixth view-platform slot.** The allocation that earlier drafts mistook for a "reserved
+6th view platform" in the same builder is the **scene-root object** — a **different class** (the
+GScene root), labelled `"charater scene"` (sic in the binary), stored at object offset `+0x70`
+(+112). It writes a different vtable and serves as the scene root, not as a view platform.
+
+The char-select scene (state 4) builds its **own** single view platform plus its own scene root
+labelled `"select"` — an **independent, parallel scene**; it does **not** add a sixth platform to
+the in-game array. The view-platform construction is also mirrored in the front-end spec (see
+`specs/frontend_scenes.md` §7.1). The earlier "5 view platforms" documentation therefore **holds**;
+the "reserved 6th slot" idea is dispelled. (CODE-CONFIRMED via the view-platform constructor's
+exhaustive call-site set — re-confirmed against IDB SHA 263bd994, CYCLE 7.)
 
 #### 5.4.2 Spawn from network — the two-form 4/1 handler (CODE-CONFIRMED)
 

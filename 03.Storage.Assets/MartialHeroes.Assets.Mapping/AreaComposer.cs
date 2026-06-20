@@ -1,5 +1,9 @@
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Audio;
+using MartialHeroes.Assets.Parsers.Audio.Models;
+using MartialHeroes.Assets.Parsers.Terrain;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Assets.Parsers.World;
 
 namespace MartialHeroes.Assets.Mapping;
 
@@ -13,82 +17,74 @@ namespace MartialHeroes.Assets.Mapping;
 // spec: Docs/RE/formats/npc_spawns.md — NPC .arr 28-byte records; yaw = π/2 − rawFacing.
 
 /// <summary>
-/// Engine-free, deterministic composer that consumes an <see cref="IAreaAssemblySource"/> and
-/// emits the neutral <see cref="AssembledArea"/> / <see cref="AssembledCell"/> model.
+///     Engine-free, deterministic composer that consumes an <see cref="IAreaAssemblySource" /> and
+///     emits the neutral <see cref="AssembledArea" /> / <see cref="AssembledCell" /> model.
 /// </summary>
 /// <remarks>
-/// <para>
-/// Faithfully models the original terrain-manager/loader pair:
-/// <list type="bullet">
-///   <item>
-///     A <b>34-slot owner pool</b> (keyed by <c>(mapX, mapZ, areaId)</c>, loaded flag, recycle on
-///     first cleared slot) is the single authoritative owner of live cells.
-///     spec: Docs/RE/structs/terrain-manager.md §"Pool ownership vs ring view" — CONFIRMED.
-///     Pool size: 34.
-///     spec: Docs/RE/structs/terrain-manager.md — pool_count @ TerrainLoader +32, initialised to 34: CONFIRMED.
-///   </item>
-///   <item>
-///     A <b>25-slot borrowed-pointer ring</b> (5×5, row-major, slot = 5·row+col, centre = slot 12)
-///     is a spatial VIEW into the pool — it never owns cells.
-///     spec: Docs/RE/structs/terrain-manager.md — ring @ TerrainManager +44, 25 pointers: CONFIRMED.
-///     Ring size: 25. Ring edge: 5. Centre slot: 12.
-///     spec: Docs/RE/structs/terrain-manager.md — "centre_cell = ring slot 12 (+92)": CONFIRMED.
-///   </item>
-///   <item>
-///     Per-cell fan-out: synchronous <c>.mud</c> → <c>.gad</c> (stub/no-op) → <c>.map</c>;
-///     sub-assets from <c>DATAFILE</c> tokens inside the <c>.map</c> parse (NOT cell-key printf).
-///     spec: Docs/RE/formats/area_inventory.md §1A.4 — CODE-CONFIRMED.
-///   </item>
-///   <item>
-///     Texture resolution: <c>.ted</c> byte → idx-1 finalize (−1 on .ted byte ONLY; clamp [1,count])
-///     → <c>.map TEXTURES[idx-1].intTexId</c> → <c>BgTextureCatalog[intTexId]</c> (NO further −1) →
-///     <c>data/map000/texture/&lt;rel&gt;.dds</c>.
-///     spec: Docs/RE/specs/assembly_graph.md §1 — "Texture resolution (global under map000)": CONFIRMED.
-///   </item>
-/// </list>
-/// </para>
-/// <para>
-/// ZERO rendering/engine dependency. Runs headless with synthetic fixtures (no real VFS required).
-/// </para>
+///     <para>
+///         Faithfully models the original terrain-manager/loader pair:
+///         <list type="bullet">
+///             <item>
+///                 A <b>34-slot owner pool</b> (keyed by <c>(mapX, mapZ, areaId)</c>, loaded flag, recycle on
+///                 first cleared slot) is the single authoritative owner of live cells.
+///                 spec: Docs/RE/structs/terrain-manager.md §"Pool ownership vs ring view" — CONFIRMED.
+///                 Pool size: 34.
+///                 spec: Docs/RE/structs/terrain-manager.md — pool_count @ TerrainLoader +32, initialised to 34:
+///                 CONFIRMED.
+///             </item>
+///             <item>
+///                 A <b>25-slot borrowed-pointer ring</b> (5×5, row-major, slot = 5·row+col, centre = slot 12)
+///                 is a spatial VIEW into the pool — it never owns cells.
+///                 spec: Docs/RE/structs/terrain-manager.md — ring @ TerrainManager +44, 25 pointers: CONFIRMED.
+///                 Ring size: 25. Ring edge: 5. Centre slot: 12.
+///                 spec: Docs/RE/structs/terrain-manager.md — "centre_cell = ring slot 12 (+92)": CONFIRMED.
+///             </item>
+///             <item>
+///                 Per-cell fan-out: synchronous <c>.mud</c> → <c>.gad</c> (stub/no-op) → <c>.map</c>;
+///                 sub-assets from <c>DATAFILE</c> tokens inside the <c>.map</c> parse (NOT cell-key printf).
+///                 spec: Docs/RE/formats/area_inventory.md §1A.4 — CODE-CONFIRMED.
+///             </item>
+///             <item>
+///                 Texture resolution: <c>.ted</c> byte → idx-1 finalize (−1 on .ted byte ONLY; clamp [1,count])
+///                 → <c>.map TEXTURES[idx-1].intTexId</c> → <c>BgTextureCatalog[intTexId]</c> (NO further −1) →
+///                 <c>data/map000/texture/&lt;rel&gt;.dds</c>.
+///                 spec: Docs/RE/specs/assembly_graph.md §1 — "Texture resolution (global under map000)": CONFIRMED.
+///             </item>
+///         </list>
+///     </para>
+///     <para>ZERO rendering/engine dependency.</para>
 /// </remarks>
 public sealed class AreaComposer
 {
     // ── Pool / ring constants ─────────────────────────────────────────────────
 
     /// <summary>
-    /// Number of owner pool slots.
-    /// spec: Docs/RE/structs/terrain-manager.md — pool_count @ TerrainLoader +32, init = 34: CONFIRMED.
+    ///     Number of owner pool slots.
+    ///     spec: Docs/RE/structs/terrain-manager.md — pool_count @ TerrainLoader +32, init = 34: CONFIRMED.
     /// </summary>
     public const int PoolSize = 34; // spec: terrain-manager.md — TerrainLoader pool_count = 34: CONFIRMED
 
     /// <summary>
-    /// Number of ring (borrowed-pointer view) slots.
-    /// spec: Docs/RE/structs/terrain-manager.md — ring @ TerrainManager +44, 25 pointers: CONFIRMED.
+    ///     Number of ring (borrowed-pointer view) slots.
+    ///     spec: Docs/RE/structs/terrain-manager.md — ring @ TerrainManager +44, 25 pointers: CONFIRMED.
     /// </summary>
     public const int RingSize = 25; // spec: terrain-manager.md — TerrainManager ring_slots, 25 entries: CONFIRMED
 
     /// <summary>
-    /// One axis of the 5×5 ring grid.
-    /// spec: Docs/RE/structs/terrain-manager.md — ring is a 5×5 spatial window: CONFIRMED.
+    ///     One axis of the 5×5 ring grid.
+    ///     spec: Docs/RE/structs/terrain-manager.md — ring is a 5×5 spatial window: CONFIRMED.
     /// </summary>
     public const int RingEdge = 5; // spec: terrain-manager.md — ring is 5×5: CONFIRMED
 
     /// <summary>
-    /// Index of the live centre cell within the ring (0-based, row-major 5×5, centre = row 2 col 2).
-    /// spec: Docs/RE/structs/terrain-manager.md — "center_cell = ring slot 12 (+92)": CONFIRMED.
+    ///     Index of the live centre cell within the ring (0-based, row-major 5×5, centre = row 2 col 2).
+    ///     spec: Docs/RE/structs/terrain-manager.md — "center_cell = ring slot 12 (+92)": CONFIRMED.
     /// </summary>
     public const int CenterSlot = 12; // spec: terrain-manager.md — ring slot 12 is live centre: CONFIRMED
 
     // ── Owner pool (34 entries) ───────────────────────────────────────────────
 
     private readonly PoolEntry[] _pool = CreatePool(); // spec: terrain-manager.md — pool_count = 34: CONFIRMED
-
-    private static PoolEntry[] CreatePool()
-    {
-        var p = new PoolEntry[PoolSize]; // spec: terrain-manager.md — TerrainLoader pool_count = 34: CONFIRMED
-        for (int i = 0; i < PoolSize; i++) p[i] = new PoolEntry();
-        return p;
-    }
 
     // ── Ring (25 borrowed-pointer indices into the pool) ──────────────────────
     // Ring slot → pool index; -1 means the ring slot is empty.
@@ -103,51 +99,40 @@ public sealed class AreaComposer
     private int _centerMapZ;
     private bool _ringInitialized;
 
-    // ── Pool entry ────────────────────────────────────────────────────────────
-
-    private sealed class PoolEntry
-    {
-        public int MapX { get; set; }
-        public int MapZ { get; set; }
-        public int AreaId { get; set; }
-
-        /// <summary>
-        /// Whether this pool slot is currently occupied (loaded).
-        /// spec: Docs/RE/structs/terrain-manager.md — loaded_flag @ cell +24708: CONFIRMED.
-        /// Recycle predicate: allocator picks the first slot where loaded == false.
-        /// </summary>
-        public bool Loaded { get; set; }
-
-        public AssembledCell? Cell { get; set; }
-    }
-
     // ── Ring centre property ──────────────────────────────────────────────────
 
     /// <summary>
-    /// The live centre cell (ring slot 12), or <see langword="null"/> when no cell is centred.
-    /// spec: Docs/RE/structs/terrain-manager.md — "center_cell = ring slot 12 (+92)": CONFIRMED.
+    ///     The live centre cell (ring slot 12), or <see langword="null" /> when no cell is centred.
+    ///     spec: Docs/RE/structs/terrain-manager.md — "center_cell = ring slot 12 (+92)": CONFIRMED.
     /// </summary>
     public AssembledCell? CenterCell
     {
         get
         {
-            int poolIdx = _ring[CenterSlot]; // spec: terrain-manager.md — centre = ring slot 12: CONFIRMED
+            var poolIdx = _ring[CenterSlot]; // spec: terrain-manager.md — centre = ring slot 12: CONFIRMED
             return poolIdx >= 0 ? _pool[poolIdx].Cell : null;
         }
+    }
+
+    private static PoolEntry[] CreatePool()
+    {
+        var p = new PoolEntry[PoolSize]; // spec: terrain-manager.md — TerrainLoader pool_count = 34: CONFIRMED
+        for (var i = 0; i < PoolSize; i++) p[i] = new PoolEntry();
+        return p;
     }
 
     // ── ComposeArea ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Composes the full area from the given source: reads the cell-key membership set, loads all
-    /// per-area binaries and spawns, and assembles every cell in the membership set.
+    ///     Composes the full area from the given source: reads the cell-key membership set, loads all
+    ///     per-area binaries and spawns, and assembles every cell in the membership set.
     /// </summary>
     /// <param name="source">The VFS-backed (or synthetic) assembly source.</param>
     /// <returns>The fully assembled area model.</returns>
     /// <remarks>
-    /// spec: Docs/RE/specs/assembly_graph.md §1 — "Phase A — area load (the area orchestrator)":
-    ///   area id → d&lt;NNN&gt;.lst cell-key set → area binaries → spawns. CONFIRMED.
-    /// spec: Docs/RE/formats/area_inventory.md §1A.3 — 4 per-area binaries opened before any cell streams.
+    ///     spec: Docs/RE/specs/assembly_graph.md §1 — "Phase A — area load (the area orchestrator)":
+    ///     area id → d&lt;NNN&gt;.lst cell-key set → area binaries → spawns. CONFIRMED.
+    ///     spec: Docs/RE/formats/area_inventory.md §1A.3 — 4 per-area binaries opened before any cell streams.
     /// </remarks>
     public AssembledArea ComposeArea(IAreaAssemblySource source)
     {
@@ -155,14 +140,14 @@ public sealed class AreaComposer
 
         var cellKeys = source.AreaCellKeys;
 
-        // Build spawns from .arr files.
-        // spec: Docs/RE/specs/assembly_graph.md §1 — "npc.arr / mob.arr (position/facing/static metadata)".
-        // spec: Docs/RE/formats/area_inventory.md §1A.3 — npc<NNN>.arr opened as per-area binary #4.
+        // Build NPC spawns from npc<NNN>.arr.
+        // spec: Docs/RE/formats/area_inventory.md §1A.3 — npc<NNN>.arr opened as per-area binary #4. CODE-CONFIRMED.
+        // spec: Docs/RE/specs/assembly_graph.md §1 — npc.arr supplies position/facing/static metadata.
         var spawns = BuildSpawns(source);
 
         // Assemble each cell in the membership set.
         var cells = new Dictionary<(int MapX, int MapZ), AssembledCell>(cellKeys.Count);
-        foreach ((int mapX, int mapZ) in cellKeys)
+        foreach (var (mapX, mapZ) in cellKeys)
         {
             var cell = ComposeCell(source, mapX, mapZ);
             cells[(mapX, mapZ)] = cell;
@@ -173,27 +158,27 @@ public sealed class AreaComposer
             AreaId = source.AreaId,
             CellKeys = cellKeys.ToList(),
             Spawns = spawns,
-            Cells = cells,
+            Cells = cells
         };
     }
 
     // ── ComposeCell ───────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Composes one cell via the synchronous per-cell fan-out:
-    /// <c>.mud</c> → <c>.gad</c> (stub/no-op) → <c>.map</c>, then sub-assets from DATAFILE tokens.
+    ///     Composes one cell via the synchronous per-cell fan-out:
+    ///     <c>.mud</c> → <c>.gad</c> (stub/no-op) → <c>.map</c>, then sub-assets from DATAFILE tokens.
     /// </summary>
     /// <param name="source">The assembly source (VFS-backed or synthetic).</param>
     /// <param name="mapX">X grid index of the cell.</param>
     /// <param name="mapZ">Z grid index of the cell.</param>
     /// <returns>The assembled cell, with all available slots populated.</returns>
     /// <remarks>
-    /// spec: Docs/RE/formats/area_inventory.md §1A.4 — synchronous per-cell open order:
-    ///   .mud → .gad (stub) → .map; sub-assets from DATAFILE tokens in section order. CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/area_inventory.md §1A.5 — d&lt;NNN&gt;x..z.. printf patterns are a
-    ///   dev exporter, NOT the loader; sub-asset filenames are DATA-DRIVEN (DATAFILE tokens). CODE-CONFIRMED.
-    /// Missing .bud/.sod/.mud are NOT errors.
-    /// spec: Docs/RE/formats/area_inventory.md §3.1/§3.2/§3.4 — CONFIRMED.
+    ///     spec: Docs/RE/formats/area_inventory.md §1A.4 — synchronous per-cell open order:
+    ///     .mud → .gad (stub) → .map; sub-assets from DATAFILE tokens in section order. CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/area_inventory.md §1A.5 — d&lt;NNN&gt;x..z.. printf patterns are a
+    ///     dev exporter, NOT the loader; sub-asset filenames are DATA-DRIVEN (DATAFILE tokens). CODE-CONFIRMED.
+    ///     Missing .bud/.sod/.mud are NOT errors.
+    ///     spec: Docs/RE/formats/area_inventory.md §3.1/§3.2/§3.4 — CONFIRMED.
     /// </remarks>
     public AssembledCell ComposeCell(IAreaAssemblySource source, int mapX, int mapZ)
     {
@@ -203,8 +188,7 @@ public sealed class AreaComposer
         // Opened first in the per-cell loader.
         // spec: Docs/RE/formats/area_inventory.md §1A.4 — .mud opened FIRST: CODE-CONFIRMED.
         MudSoundGrid? soundGrid = null;
-        if (source.TryGetCellFile(mapX, mapZ, ".mud", out ReadOnlyMemory<byte> mudBytes))
-        {
+        if (source.TryGetCellFile(mapX, mapZ, ".mud", out var mudBytes))
             try
             {
                 soundGrid = MudSoundGridParser.Parse(mudBytes);
@@ -213,7 +197,6 @@ public sealed class AreaComposer
             {
                 // Corrupted .mud — treat as absent (no sound); not a fatal error.
             }
-        }
         // Missing .mud → silence. 20 areas carry zero .mud files — not an error.
         // spec: Docs/RE/formats/area_inventory.md §3.4 — absent .mud: default to silence.
 
@@ -226,18 +209,16 @@ public sealed class AreaComposer
         // ── Step 3: .map (text descriptor → DATAFILE sub-assets) ─────────────
         // Opened last; all sub-assets come from DATAFILE tokens within its parse.
         // spec: Docs/RE/formats/area_inventory.md §1A.4 — .map opened LAST; sub-assets from DATAFILE tokens: CODE-CONFIRMED.
-        if (!source.TryGetCellFile(mapX, mapZ, ".map", out ReadOnlyMemory<byte> mapBytes))
-        {
+        if (!source.TryGetCellFile(mapX, mapZ, ".map", out var mapBytes))
             // No .map → cell is empty (no sub-assets possible).
             return new AssembledCell
             {
                 MapX = mapX,
                 MapZ = mapZ,
-                SoundGrid = soundGrid,
+                SoundGrid = soundGrid
             };
-        }
 
-        MapDescriptor mapDesc = MapDescriptorParser.Parse(mapBytes);
+        var mapDesc = MapDescriptorParser.Parse(mapBytes);
 
         // ── Step 4: sub-assets from DATAFILE tokens in section order ──────────
         // spec: Docs/RE/formats/area_inventory.md §1A.4 — "sub-asset filenames are DATA-DRIVEN — read as
@@ -255,9 +236,9 @@ public sealed class AreaComposer
         SodBlob? collision = null;
         (int Flag, int TexId)[]? terrainTextures = null;
 
-        foreach (MapSection section in mapDesc.Sections)
+        foreach (var section in mapDesc.Sections)
         {
-            string key = section.Keyword; // Already upper-cased by the parser.
+            var key = section.Keyword; // Already upper-cased by the parser.
 
             // Capture TERRAIN section textures for the resolution chain.
             if (key == "TERRAIN" && section.Textures.Length > 0)
@@ -270,7 +251,7 @@ public sealed class AreaComposer
             // Each DATAFILE token names a VFS logical path of the sub-asset blob to open.
             // spec: Docs/RE/formats/area_inventory.md §1A.4 — "the parser opens + decodes that blob
             //   via the VFS open router as it scans the section." CODE-CONFIRMED.
-            if (!source.TryGetCellFileByName(section.DataFile, out ReadOnlyMemory<byte> subBytes))
+            if (!source.TryGetCellFileByName(section.DataFile, out var subBytes))
                 continue; // Missing sub-asset blob → treat as absent slot (not an error).
 
             // Dispatch by section keyword → slot assignment.
@@ -364,12 +345,10 @@ public sealed class AreaComposer
         // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS 0-based pool slot, NO −1: CONFIRMED.
         string?[]? resolvedPaths = null;
         if (slot0Ted is not null && terrainTextures is not null && terrainTextures.Length > 0)
-        {
             resolvedPaths = ResolveTexturePaths(
                 slot0Ted.TextureIndexGrid,
                 terrainTextures,
                 source.TerrainTextureCatalog);
-        }
 
         return new AssembledCell
         {
@@ -386,38 +365,35 @@ public sealed class AreaComposer
             Slot8Fx7 = slot8Fx7,
             Collision = collision,
             SoundGrid = soundGrid,
-            ResolvedTexturePaths = resolvedPaths,
+            ResolvedTexturePaths = resolvedPaths
         };
     }
 
     // ── Pool acquire / recycle ────────────────────────────────────────────────
 
     /// <summary>
-    /// Acquires a free pool slot for the given (mapX, mapZ, areaId) triple.
-    /// The allocator uses the first pool slot whose <c>loaded</c> flag is false (recycle-first-unloaded).
-    /// If no free slot is available, returns -1.
+    ///     Acquires a free pool slot for the given (mapX, mapZ, areaId) triple.
+    ///     The allocator uses the first pool slot whose <c>loaded</c> flag is false (recycle-first-unloaded).
+    ///     If no free slot is available, returns -1.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
-    ///   "Cells are allocated, key-matched, loaded, recycled and freed there.
-    ///    The slot allocator picks the first cell whose loaded_flag is clear." CONFIRMED.
+    ///     spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
+    ///     "Cells are allocated, key-matched, loaded, recycled and freed there.
+    ///     The slot allocator picks the first cell whose loaded_flag is clear." CONFIRMED.
     /// </remarks>
     public int AcquirePoolSlot(int mapX, int mapZ, int areaId)
     {
         // First check if already loaded in the pool (cache hit).
-        for (int i = 0; i < PoolSize; i++)
-        {
+        for (var i = 0; i < PoolSize; i++)
             if (_pool[i].Loaded
                 && _pool[i].MapX == mapX
                 && _pool[i].MapZ == mapZ
                 && _pool[i].AreaId == areaId)
                 return i; // Cache hit — cell already resident.
-        }
 
         // Cache miss: acquire the first free (unloaded) slot.
         // spec: Docs/RE/structs/terrain-manager.md — recycle predicate: "first cell whose loaded_flag is clear."
-        for (int i = 0; i < PoolSize; i++)
-        {
+        for (var i = 0; i < PoolSize; i++)
             if (!_pool[i].Loaded)
             {
                 _pool[i].MapX = mapX;
@@ -425,21 +401,20 @@ public sealed class AreaComposer
                 _pool[i].AreaId = areaId;
                 return i;
             }
-        }
 
         return -1; // Pool full — caller must evict or wait.
     }
 
     /// <summary>
-    /// Marks a pool slot as unloaded (recycles it for reuse).
+    ///     Marks a pool slot as unloaded (recycles it for reuse).
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
-    ///   "loaded_flag cleared by the cull." CONFIRMED.
+    ///     spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
+    ///     "loaded_flag cleared by the cull." CONFIRMED.
     /// </remarks>
     public void RecyclePoolSlot(int poolIndex)
     {
-        if ((uint)poolIndex >= (uint)PoolSize)
+        if ((uint)poolIndex >= PoolSize)
             throw new ArgumentOutOfRangeException(nameof(poolIndex),
                 $"Pool index {poolIndex} is out of range [0, {PoolSize - 1}]. " +
                 "spec: Docs/RE/structs/terrain-manager.md — pool_slots[34]: CONFIRMED.");
@@ -449,14 +424,14 @@ public sealed class AreaComposer
     }
 
     /// <summary>
-    /// Loads a cell into a pool slot: composes it, marks it loaded, and returns the pool index.
-    /// Returns -1 if no free pool slot is available.
+    ///     Loads a cell into a pool slot: composes it, marks it loaded, and returns the pool index.
+    ///     Returns -1 if no free pool slot is available.
     /// </summary>
     public int LoadCellIntoPool(IAreaAssemblySource source, int mapX, int mapZ)
     {
         ArgumentNullException.ThrowIfNull(source);
 
-        int slot = AcquirePoolSlot(mapX, mapZ, source.AreaId);
+        var slot = AcquirePoolSlot(mapX, mapZ, source.AreaId);
         if (slot < 0)
             return -1;
 
@@ -473,19 +448,19 @@ public sealed class AreaComposer
     // ── Ring / RecenterRing ───────────────────────────────────────────────────
 
     /// <summary>
-    /// Re-centres the 5×5 ring around the new (centerMapX, centerMapZ) player cell, loading any
-    /// newly-exposed edge cells on demand and recycling those that fall out of the ring.
+    ///     Re-centres the 5×5 ring around the new (centerMapX, centerMapZ) player cell, loading any
+    ///     newly-exposed edge cells on demand and recycling those that fall out of the ring.
     /// </summary>
     /// <param name="source">The assembly source to load newly-exposed cells from.</param>
     /// <param name="centerMapX">New centre X grid index.</param>
     /// <param name="centerMapZ">New centre Z grid index.</param>
     /// <remarks>
-    /// spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
-    ///   "The 25-slot manager ring is a borrowed-pointer 5×5 spatial VIEW. A single-step recenter
-    ///    shifts the whole 5×5 window by one cell; only the newly-exposed edge needs new cells loaded."
-    ///   CONFIRMED.
-    /// Ring slot formula: slot = 5·row + col.
-    /// spec: Docs/RE/structs/terrain-manager.md — "ring stored row-major (slot = 5·row+col)": CONFIRMED.
+    ///     spec: Docs/RE/structs/terrain-manager.md §Pool ownership vs ring view —
+    ///     "The 25-slot manager ring is a borrowed-pointer 5×5 spatial VIEW. A single-step recenter
+    ///     shifts the whole 5×5 window by one cell; only the newly-exposed edge needs new cells loaded."
+    ///     CONFIRMED.
+    ///     Ring slot formula: slot = 5·row + col.
+    ///     spec: Docs/RE/structs/terrain-manager.md — "ring stored row-major (slot = 5·row+col)": CONFIRMED.
     /// </remarks>
     public void RecenterRing(IAreaAssemblySource source, int centerMapX, int centerMapZ)
     {
@@ -494,60 +469,54 @@ public sealed class AreaComposer
         // Build the new 5×5 ring of (mapX, mapZ) pairs centred on (centerMapX, centerMapZ).
         // The ring half-extent: RingEdge/2 = 2 cells to each side.
         // spec: Docs/RE/structs/terrain-manager.md — "5×5 ring around centre cell": CONFIRMED.
-        int halfEdge = RingEdge / 2; // = 2 (integer division)
+        var halfEdge = RingEdge / 2; // = 2 (integer division)
 
         var newRingCoords = new (int MapX, int MapZ)[RingSize];
-        for (int row = 0; row < RingEdge; row++)
-        for (int col = 0; col < RingEdge; col++)
+        for (var row = 0; row < RingEdge; row++)
+        for (var col = 0; col < RingEdge; col++)
         {
-            int slot = RingEdge * row + col; // spec: terrain-manager.md — slot = 5·row+col: CONFIRMED
+            var slot = RingEdge * row + col; // spec: terrain-manager.md — slot = 5·row+col: CONFIRMED
             newRingCoords[slot] = (centerMapX - halfEdge + col, centerMapZ - halfEdge + row);
         }
 
         // Determine which old ring slots are no longer needed; recycle their pool entries
         // if they are not in the new ring.
         if (_ringInitialized)
-        {
-            for (int i = 0; i < RingSize; i++)
+            for (var i = 0; i < RingSize; i++)
             {
-                int oldPoolIdx = _ring[i];
+                var oldPoolIdx = _ring[i];
                 if (oldPoolIdx < 0)
                     continue;
 
-                PoolEntry oldEntry = _pool[oldPoolIdx];
-                bool stillNeeded = false;
-                for (int j = 0; j < RingSize; j++)
-                {
+                var oldEntry = _pool[oldPoolIdx];
+                var stillNeeded = false;
+                for (var j = 0; j < RingSize; j++)
                     if (newRingCoords[j].MapX == oldEntry.MapX
                         && newRingCoords[j].MapZ == oldEntry.MapZ)
                     {
                         stillNeeded = true;
                         break;
                     }
-                }
 
                 if (!stillNeeded)
                     RecyclePoolSlot(oldPoolIdx);
             }
-        }
 
         // Point each ring slot to the corresponding pool entry, loading as needed.
-        for (int i = 0; i < RingSize; i++)
+        for (var i = 0; i < RingSize; i++)
         {
-            (int mx, int mz) = newRingCoords[i];
+            var (mx, mz) = newRingCoords[i];
 
             // Only load cells that are in the area's membership set.
             // spec: Docs/RE/formats/area_inventory.md §1A.1 — "a cell may only be loaded if its
             //   key is in [the membership] set." CODE-CONFIRMED.
-            bool isMember = false;
-            foreach ((int kx, int kz) in source.AreaCellKeys)
-            {
+            var isMember = false;
+            foreach (var (kx, kz) in source.AreaCellKeys)
                 if (kx == mx && kz == mz)
                 {
                     isMember = true;
                     break;
                 }
-            }
 
             if (!isMember)
             {
@@ -555,7 +524,7 @@ public sealed class AreaComposer
                 continue;
             }
 
-            int poolIdx = LoadCellIntoPool(source, mx, mz);
+            var poolIdx = LoadCellIntoPool(source, mx, mz);
             _ring[i] = poolIdx; // -1 if pool is full; ring slot stays empty.
         }
 
@@ -567,15 +536,15 @@ public sealed class AreaComposer
     // ── Ring inspection ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the pool index pointed to by ring slot <paramref name="ringSlot"/>, or -1 when
-    /// the ring slot is empty.
+    ///     Returns the pool index pointed to by ring slot <paramref name="ringSlot" />, or -1 when
+    ///     the ring slot is empty.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/structs/terrain-manager.md — ring holds borrowed pointers into the pool: CONFIRMED.
+    ///     spec: Docs/RE/structs/terrain-manager.md — ring holds borrowed pointers into the pool: CONFIRMED.
     /// </remarks>
     public int GetRingPoolIndex(int ringSlot)
     {
-        if ((uint)ringSlot >= (uint)RingSize)
+        if ((uint)ringSlot >= RingSize)
             throw new ArgumentOutOfRangeException(nameof(ringSlot),
                 $"Ring slot {ringSlot} is out of range [0, {RingSize - 1}]. " +
                 "spec: Docs/RE/structs/terrain-manager.md — ring_slots[25]: CONFIRMED.");
@@ -583,42 +552,42 @@ public sealed class AreaComposer
     }
 
     /// <summary>
-    /// Returns the assembled cell currently pointed to by ring slot <paramref name="ringSlot"/>,
-    /// or <see langword="null"/> when the slot is empty.
+    ///     Returns the assembled cell currently pointed to by ring slot <paramref name="ringSlot" />,
+    ///     or <see langword="null" /> when the slot is empty.
     /// </summary>
     public AssembledCell? GetRingCell(int ringSlot)
     {
-        int poolIdx = GetRingPoolIndex(ringSlot);
+        var poolIdx = GetRingPoolIndex(ringSlot);
         return poolIdx >= 0 ? _pool[poolIdx].Cell : null;
     }
 
     // ── Texture resolution ────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves the 256-entry per-patch texture path array from the <c>.ted</c> TextureIndexGrid and
-    /// the TERRAIN section's <c>TEXTURES</c> list.
+    ///     Resolves the 256-entry per-patch texture path array from the <c>.ted</c> TextureIndexGrid and
+    ///     the TERRAIN section's <c>TEXTURES</c> list.
     /// </summary>
     /// <param name="textureIndexGrid">
-    /// The 256-byte (16×16) raw TextureIndexGrid from the <c>.ted</c> file.
-    /// Each byte is the 1-based index into the per-cell TEXTURES list BEFORE the −1 finalize.
-    /// spec: Docs/RE/formats/terrain.md §CORRECTED CYCLE 1 — "idx-1 decrement is the FINALIZE consumer's job":
-    ///   CONFIRMED. The parser stores the raw byte; we apply the −1 here.
+    ///     The 256-byte (16×16) raw TextureIndexGrid from the <c>.ted</c> file.
+    ///     Each byte is the 1-based index into the per-cell TEXTURES list BEFORE the −1 finalize.
+    ///     spec: Docs/RE/formats/terrain.md §CORRECTED CYCLE 1 — "idx-1 decrement is the FINALIZE consumer's job":
+    ///     CONFIRMED. The parser stores the raw byte; we apply the −1 here.
     /// </param>
     /// <param name="terrainTextures">
-    /// The <c>TEXTURES</c> entries from the TERRAIN section of the <c>.map</c> file.
-    /// Each entry is <c>(intFlag, intTexId)</c>; <c>intTexId</c> is used DIRECTLY as the
-    /// 0-based <c>bgtexture.lst</c> pool slot (NO −1).
-    /// spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — "intTexId IS the 0-based record index,
-    ///   used DIRECTLY — NO -1": CONFIRMED.
+    ///     The <c>TEXTURES</c> entries from the TERRAIN section of the <c>.map</c> file.
+    ///     Each entry is <c>(intFlag, intTexId)</c>; <c>intTexId</c> is used DIRECTLY as the
+    ///     0-based <c>bgtexture.lst</c> pool slot (NO −1).
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — "intTexId IS the 0-based record index,
+    ///     used DIRECTLY — NO -1": CONFIRMED.
     /// </param>
     /// <param name="catalog">
-    /// The global background-texture catalogue (built from <c>data/map000/texture/bgtexture.lst</c>).
-    /// Textures are global under <c>map000</c> for ALL areas.
-    /// spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000 for every area": CONFIRMED.
+    ///     The global background-texture catalogue (built from <c>data/map000/texture/bgtexture.lst</c>).
+    ///     Textures are global under <c>map000</c> for ALL areas.
+    ///     spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000 for every area": CONFIRMED.
     /// </param>
     /// <returns>
-    /// A 256-element array of VFS paths (<c>data/map000/texture/&lt;rel&gt;.dds</c>), or
-    /// <see langword="null"/> entries for empty / out-of-range slots.
+    ///     A 256-element array of VFS paths (<c>data/map000/texture/&lt;rel&gt;.dds</c>), or
+    ///     <see langword="null" /> entries for empty / out-of-range slots.
     /// </returns>
     private static string?[] ResolveTexturePaths(
         byte[] textureIndexGrid,
@@ -628,12 +597,12 @@ public sealed class AreaComposer
         // Build a BgTextureCatalog wrapper from the parsed catalog for path resolution.
         var bgCatalog = BgTextureCatalog.FromLst(catalog);
 
-        int count = terrainTextures.Length;
+        var count = terrainTextures.Length;
         var paths = new string?[textureIndexGrid.Length];
 
-        for (int i = 0; i < textureIndexGrid.Length; i++)
+        for (var i = 0; i < textureIndexGrid.Length; i++)
         {
-            byte rawByte = textureIndexGrid[i];
+            var rawByte = textureIndexGrid[i];
 
             // Apply the idx-1 finalize: clamp to [1, count], then subtract 1 to get
             // a 0-based index into the per-cell TEXTURES list.
@@ -650,7 +619,7 @@ public sealed class AreaComposer
                 rawByte = 1; // spec: terrain.md §5.6/§5.9 — BOTH under AND over floor to 1: CONFIRMED
 
             // 0-based list index after −1 finalize.
-            int listIdx = rawByte - 1; // spec: terrain.md §CORRECTED CYCLE 1 — idx-1 finalize: CONFIRMED
+            var listIdx = rawByte - 1; // spec: terrain.md §CORRECTED CYCLE 1 — idx-1 finalize: CONFIRMED
 
             // Bounds guard: if the per-cell TEXTURES list is empty or listIdx is out of range,
             // leave the slot null.
@@ -663,11 +632,11 @@ public sealed class AreaComposer
             // intTexId from the TEXTURES entry IS the 0-based bgtexture.lst pool slot; NO further −1.
             // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join —
             //   "intTexId IS the 0-based record index, used DIRECTLY — NO -1": CONFIRMED.
-            int intTexId = terrainTextures[listIdx].TexId;
+            var intTexId = terrainTextures[listIdx].TexId;
 
             // Resolve full VFS path: data/map000/texture/<rel>.dds
             // spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000": CONFIRMED.
-            paths[i] = bgCatalog.ResolveTexturePath(intTexId, BgTextureCatalog.TerrainTextureDir);
+            paths[i] = bgCatalog.ResolveTexturePath(intTexId);
         }
 
         return paths;
@@ -676,41 +645,40 @@ public sealed class AreaComposer
     // ── Spawn building ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Builds the neutral spawn descriptor list from <c>npc&lt;NNN&gt;.arr</c> and, for the offline
-    /// port, from <c>mob&lt;NNN&gt;.arr</c> as well.
-    /// Ground Y is NOT baked — re-sample per frame.
+    ///     Builds the neutral NPC spawn descriptor list from <c>npc&lt;NNN&gt;.arr</c>.
+    ///     Ground Y is NOT baked — re-sample per frame.
     /// </summary>
     /// <remarks>
-    /// spec: Docs/RE/specs/assembly_graph.md §4 — "Port-side note: offline port has no server, so it
-    ///   synthesises actors from .arr + the visual catalogue."
-    /// spec: Docs/RE/formats/npc_spawns.md §Runtime role — "Ground-Y is re-sampled from terrain
-    ///   every frame; not once at spawn." CONFIRMED.
-    /// spec: Docs/RE/formats/npc_spawns.md §Record layout facing — "runtime applies π/2 − value":
-    ///   sample-verified. Applied yaw = π/2 − rawFacing.
-    /// NPC .arr: 28-byte records, record_count = floor(file_size / 28).
-    /// spec: Docs/RE/formats/npc_spawns.md §Container structure: CONFIRMED.
-    /// Mob .arr: 20-byte records (content-census only / NO client loader — offline port synthesises from it).
-    /// spec: Docs/RE/formats/npc_spawns.md §Companion formats with NO client loader — mob.arr: CONFIRMED.
-    /// spec: Docs/RE/formats/area_inventory.md §5.1 — "mob<NNN>.arr is a content census signal only.
-    ///   There is NO runtime mob.arr loader in the client." NOTE.
+    ///     spec: Docs/RE/formats/area_inventory.md §1A.3 — npc&lt;NNN&gt;.arr is per-area binary #4,
+    ///     opened before any cell streams. CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/npc_spawns.md §Runtime role — "Ground-Y is re-sampled from terrain
+    ///     every frame; not once at spawn." CONFIRMED.
+    ///     spec: Docs/RE/formats/npc_spawns.md §Record layout facing — "runtime applies π/2 − value":
+    ///     sample-verified. Applied yaw = π/2 − rawFacing.
+    ///     NPC .arr: 28-byte records, record_count = floor(file_size / 28).
+    ///     spec: Docs/RE/formats/npc_spawns.md §Container structure: CONFIRMED.
+    ///     mob&lt;NNN&gt;.arr is a content-census signal only — there is NO runtime mob.arr loader
+    ///     in the shipped client. Live mob actors arrive via the server area-entity snapshot (packet 4/4).
+    ///     spec: Docs/RE/formats/area_inventory.md §5.1 — "no runtime mob.arr loader in the client."
+    ///     spec: Docs/RE/formats/npc_spawns.md §Companion formats with NO client loader — mob.arr: CONFIRMED.
     /// </remarks>
     private static IReadOnlyList<SpawnDescriptor> BuildSpawns(IAreaAssemblySource source)
     {
         var spawns = new List<SpawnDescriptor>();
-        int areaId = source.AreaId;
+        var areaId = source.AreaId;
 
         // NPC spawns from npc<NNN>.arr — 28-byte records.
         // spec: Docs/RE/formats/area_inventory.md §1A.3 — npc<NNN>.arr opened as per-area binary #4. CODE-CONFIRMED.
-        string npcArrPath = $"data/map{areaId:D3}/npc{areaId:D3}.arr";
-        if (source.TryGetCellFileByName(npcArrPath, out ReadOnlyMemory<byte> npcBytes))
+        var npcArrPath = $"data/map{areaId:D3}/npc{areaId:D3}.arr";
+        if (source.TryGetCellFileByName(npcArrPath, out var npcBytes))
         {
-            NpcSpawnArray npcArr = NpcSpawnParser.Parse(npcBytes);
-            foreach (NpcSpawnRecord rec in npcArr.Records)
+            var npcArr = NpcSpawnParser.Parse(npcBytes);
+            foreach (var rec in npcArr.Records)
             {
                 // Yaw = π/2 − rawFacing.
                 // spec: Docs/RE/formats/npc_spawns.md §Record layout facing —
                 //   "runtime applies π/2 − value (NOT +π/2)": sample-verified.
-                float yaw = MathF.PI / 2f - rec.Facing; // spec: npc_spawns.md §Record layout facing: sample-verified
+                var yaw = MathF.PI / 2f - rec.Facing; // spec: npc_spawns.md §Record layout facing: sample-verified
 
                 spawns.Add(new SpawnDescriptor
                 {
@@ -718,40 +686,31 @@ public sealed class AreaComposer
                     WorldZ = rec.WorldZ,
                     Yaw = yaw,
                     VisualId = rec.MobId,
-                    IsNpc = true,
+                    IsNpc = true
                 });
             }
         }
         // Missing npc.arr → zero NPC spawns; not an error (areas 11 and 14 have no npc.arr).
         // spec: Docs/RE/formats/area_inventory.md §5.2 — missing npc.arr is not an error.
 
-        // Mob spawns from mob<NNN>.arr — 20-byte records (offline port substitution only).
-        // The shipped client has NO runtime mob.arr loader; this is a faithful offline equivalent.
-        // spec: Docs/RE/formats/area_inventory.md §5.1 — "no runtime mob.arr loader in the client."
-        // spec: Docs/RE/specs/assembly_graph.md §4 — "Port-side note: offline port synthesises actors
-        //   from .arr + the visual catalogue."
-        string mobArrPath = $"data/map{areaId:D3}/mob{areaId:D3}.arr";
-        if (source.TryGetCellFileByName(mobArrPath, out ReadOnlyMemory<byte> mobBytes))
-        {
-            MobSpawnRecord[] mobArr = MobSpawnParser.Parse(mobBytes);
-            foreach (MobSpawnRecord rec in mobArr)
-            {
-                // mob.arr has no facing field; use 0 (forward).
-                // spec: Docs/RE/formats/npc_spawns.md §Companion formats — mob.arr has no client loader;
-                //   semantics out-of-client-scope. No facing field observed in the 20-byte layout.
-                spawns.Add(new SpawnDescriptor
-                {
-                    WorldX = rec.WorldX,
-                    WorldZ = rec.WorldZ,
-                    Yaw = 0f,
-                    VisualId = rec.MobId,
-                    IsNpc = false,
-                });
-            }
-        }
-        // Missing mob.arr → zero mob spawns; not an error (8 areas have no mob.arr).
-        // spec: Docs/RE/formats/area_inventory.md §5.1 — missing mob.arr is not an error.
-
         return spawns;
+    }
+
+    // ── Pool entry ────────────────────────────────────────────────────────────
+
+    private sealed class PoolEntry
+    {
+        public int MapX { get; set; }
+        public int MapZ { get; set; }
+        public int AreaId { get; set; }
+
+        /// <summary>
+        ///     Whether this pool slot is currently occupied (loaded).
+        ///     spec: Docs/RE/structs/terrain-manager.md — loaded_flag @ cell +24708: CONFIRMED.
+        ///     Recycle predicate: allocator picks the first slot where loaded == false.
+        /// </summary>
+        public bool Loaded { get; set; }
+
+        public AssembledCell? Cell { get; set; }
     }
 }

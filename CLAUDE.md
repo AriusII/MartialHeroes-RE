@@ -38,7 +38,9 @@ There is exactly **one** ground truth for what the original game *is*: the legac
 
 1. **IDA / `doida.exe` — the single absolute truth (behavior, data, layout).** Whenever a question about the original's wire protocol, struct layout, asset format, opcode, constant, or runtime behavior is open or disputed, **the answer is whatever the binary says — confirm it in IDA, never from memory, analogy, or "what seems reasonable."** Static analysis forms the hypothesis; the **live debugger confirms it against ground truth** (the maintainer F9-launches the client; you pilot the live session — **never `dbg_start`**). If the IDA MCP is down or the wrong/empty DB is loaded, **STOP and report — never fabricate IDA output.** The reverse runs **unbridled** (massively parallel reads *and* IDB writes; retry on conflict).
 2. **`Docs/RE/` specs — the committed derived truth.** The clean specs — **`Docs/RE/formats/`, `Docs/RE/packets/`, `Docs/RE/structs/`, `Docs/RE/specs/`** (+ `opcodes.md`) — are the **rewritten, firewall-clean** record of what IDA proved, and the **only** thing implementation is allowed to read. They are authoritative *because* they were derived from the binary: when a spec and `doida.exe` disagree, **the binary wins, the spec is corrected, and the change is journaled.** Treat these four trees as the load-bearing, **hyper-important** knowledge base and keep them in sync with the binary.
-3. **C# / Godot — measured against (1) and (2), never the reverse.** The .NET 10 core and the Godot port are *faithful re-creations*; their correctness is judged by fidelity to IDA + the specs. The code is **never its own source of truth** — if it diverges from the spec, the code is wrong (unless the spec is precisely what IDA just disproved). **One exception, for rendered pixels only:** the official screenshots/captures are the visual oracle, and **oracle > spec** for how a scene actually *looks* (a spec-faithful render can still diverge from the real client — see CAMPAIGN 9c/12). IDA + specs govern behavior and data; the captures govern the final image.
+3. **C# / Godot — measured against (1) and (2), never the reverse.** The .NET 10 core and the Godot port are *faithful re-creations*; their correctness is judged by fidelity to IDA + the specs. The code is **never its own source of truth** — if it diverges from the spec, the code is wrong (unless the spec is precisely what IDA just disproved). **One exception, for rendered pixels only:** the official screenshots/captures are the visual oracle, and **oracle > spec** for how a scene actually *looks* (a spec-faithful render can still diverge from the real client). IDA + specs govern behavior and data; the captures govern the final image.
+
+**`Docs/` is now a trustworthy map of what has already been done — start there, then verify against the binary.** The `Docs/RE/` specs are mature and re-verified (each carries a `verification:` banner pinned to the current IDB SHA), and `Docs/ROADMAP.md` + `Docs/RE/journal.md` + `Docs/PLAN.md` are an accurate, load-bearing record of completed work, decisions, and where to resume. Trust them to orient fast and to **avoid re-doing RE that is already settled**. They remain **derived** truth, though: the **`ida` MCP on `doida.exe` is the absolute authority on how the client actually parses and behaves** — on any open or disputed question, confirm it in IDA and let the binary correct the doc (tier 1 always overrides tier 2).
 
 **Creed:** *Confirm it in IDA → write it in the spec → build to the spec → verify against the binary (and the visual oracle for pixels).* The clean-room firewall below is the mechanism that keeps this lawful.
 
@@ -60,7 +62,7 @@ Hard rules:
 - Every magic constant / byte offset in C# cites its source spec: `// spec: Docs/RE/formats/terrain.md`.
 - `Docs/RE/journal.md` (provenance audit trail) and `Docs/RE/names.yaml` (canonical glossary) are **orchestrator-owned** — don't edit them as an authoring agent.
 
-See `Docs/RE/README.md`. Current spec inventory: ~20 packet YAMLs, ~14 format docs, ~6 struct tables, ~14 subsystem specs.
+See `Docs/RE/README.md`. The spec corpus is comprehensive — packet YAMLs, format docs, struct tables, and subsystem specs (+ `opcodes.md`), every file banner-pinned to the current IDB SHA. Read it rather than re-deriving.
 
 ## Architecture — five numbered layers, downward-only DAG
 
@@ -90,29 +92,18 @@ Five numbered layer folders, mirrored as solution folders in `MartialHeroes.slnx
 
 ### Current implementation state
 
-The core (layers 01–04) is built and covered by **10 xUnit test projects** (one per core library, under `tests/`, registered in the `/Tests/` slnx folder). The Godot client (layer 05) is present and renders — see below. RE specs are populated. This is well past the original greenfield skeleton.
+The whole clean-room client is reconstructed: the .NET core (layers 01–04) **and** the Godot client (05), which renders the world and runs the networking **1:1 live** vs the replica (login → char-select → enter-world → world render). For the **authoritative live state** — what's done, what's in flight, where to resume — read **`Docs/ROADMAP.md` + `Docs/RE/journal.md`**; the project moves fast, so don't trust a hard-coded snapshot here. xUnit is the mandated test framework for the core, but the test/project layout is being reshaped by the active re-architecture (see `Docs/ROADMAP.md`) — verify the gate (build + headless, below) rather than assuming a fixed test count.
 
 > Note on drift: the blueprint mentions `Network.Transport.Pipe`; the real project is `MartialHeroes.Network.Transport.Pipelines`. **Disk reality always wins** over blueprint naming.
 
-## Godot Pipeline — current state (commit `c266e7e`)
+## Godot Pipeline
 
-### What works
-- **Textured multi-texture terrain** (per-patch 16×16), area-aware multi-sector streaming.
-- **Populated walled town** (area 2: 779 buildings + 40 monsters/NPCs).
-- **Camera:** free / orbital.
-- **HUD:** inventory (key `I`), skills (key `K`); click-to-move + WASD via `PlayerController`.
-- **Character:** upright, textured humanoid player.
-
-### Debts (known, unfinished)
-1. **Character skinning explodes the mesh** — the legacy bind/weight convention isn't recovered yet, so the avatar is rendered **static** (no animation).
-2. **NPCs spawn at a fallback Y** before async terrain finishes loading (ground placement race).
-3. **`EnvironmentNode` is too dark** (atmosphere/lighting needs tuning).
-4. **Water is unwired.**
+For the **live** state of the Godot client — what renders, what's wired, the open fidelity debts — read `Docs/ROADMAP.md` + `Docs/RE/journal.md` (it moves too fast for a static snapshot). In broad strokes the world renders (multi-texture terrain with area-aware streaming, a populated walled town, free/orbital camera, HUD with inventory `I` / skills `K`, click-to-move + WASD) and the client drives login → enter-world → world-render **live** against the replica. The durable chains and conventions that make it render are below.
 
 ### Recovered asset mappings (the chains that make the world render)
 - **Terrain texture:** cell `.ted` `TextureIndexGrid` byte → cell `.map` `TERRAIN/BUILDING TEXTURES[idx-1].intTexId` → `bgtexture.txt[id]` → `data/map000/texture/<rel>.dds`. Textures are **global under `map000`** for all areas.
 - **Character skin:** `.skn` `IdA` → `data/char/skin.txt` col4 → col5 `tex_id` → `data/char/tex{512512|10241024|…}/{id}.png`.
-- **Character skeleton (`g{id_b}.bnd`, per class — two distinct `id_b`/`IdB` quantities):** the deform skeleton the port resolves is **`data/char/bind/g{id_b}.bnd`**, where `id_b` is the `.skn` **header `SkinClassId` ∈ {1,2,3,4}** (Musa/Salsu/Dosa/Monk → `g1..g4.bnd`). This direct rule is the operative path and is what `skinning.md §8(e)` specifies — `g{SkinClassId}.bnd` for {1,2,3,4} is correct. The original engine reaches the *same four* skeletons indirectly: it pre-loads them by NAME from `data/char/bind/bindlist.txt` (only `g1..g4.bnd` exist), registers them into a pose pool, then selects via the AnimCatalog visual map keyed by the **appearance-slot** `IdB = 5·(class + 4·variant) − 24 ∈ {1,11,16,26}` (the data-driven edge `{1→g1, 26→g2, 11→g3, 16→g4}`). The earlier "there is NO `g{IdB}.bnd` rule" note referred to *this appearance-slot* `IdB` — there is indeed no `g11.bnd`/`g16.bnd` (the binary has no `g%d.bnd` printf for the slot encoding) — but it must **not** be read as "no `g{id_b}.bnd` rule at all": the header `SkinClassId` path above is real and faithful. `classGroup` 6/11 is only an outfit/texture-family tag inside the overlay skin gids — it never picks a skeleton (so `g6.bnd`/`g11.bnd` don't exist). Idle motion via `data/char/actormotion.txt` (`col2 == skin_class` key → `motion_ids_a[0]` = **column 15**, record `+0x40`) → `data/char/mot/g{id}.mot`. spec: `Docs/RE/specs/skinning.md §8(e)`, `frontend_scenes.md`.
+- **Character skeleton:** the deform skeleton is **`data/char/bind/g{SkinClassId}.bnd`**, where `SkinClassId ∈ {1,2,3,4}` (Musa/Salsu/Dosa/Monk) is the `.skn` **header** class — only `g1..g4.bnd` exist. (The engine pre-loads those four by name from `bindlist.txt` and selects via the AnimCatalog map keyed by the appearance-slot `IdB = 5·(class + 4·variant) − 24`; there is **no** `g11.bnd`/`g16.bnd`, and `classGroup` 6/11 is only an outfit/texture-family tag, never a skeleton.) **Idle motion = `data/char/actormotion.txt` `motion_ids_a[1]` = column 16 (record `+0x44`); column 15 / `+0x40` is statically DEAD** (binary-won, CYCLE 7 — reverses an earlier "col15" reading). `.mot` clips are registered from `motlist.txt` and keyed by the `.mot` header id — there is **no** `g{id}.mot` printf. The full deform chain (bind/weights, inverse-bind, Y-up import) is recovered. spec: `Docs/RE/specs/skinning.md`, `formats/animation.md`, `formats/skn.md`.
 - **Mob → skin:** `mob_id` → `actormotion.txt` col1 → col2 `skin_class` → the `.skn` whose `IdB == skin_class`; the skeleton resolves through the same catalog/IdB lookup above (not a literal `g{skin_class}.bnd`).
 - **Spawns:** `npc{tag}.arr` = 28-byte records; `mob{tag}.arr` = 20-byte records.
 - **Collision:** `.sod` = 2D XZ wall segments (ray-parity point-in-polygon). Ground height from `.ted` bilinear interpolation.
@@ -136,9 +127,9 @@ For a **real screenshot**, run **windowed** with a temporary GDScript autoload t
 
 ## Reverse-Engineering & MCP Tooling
 
-Two local MCP servers are registered in the committed root `.mcp.json`. Both connect only when their host app is open **and** a fresh Claude session starts. Discover tool names at runtime (they're deferred).
+The local MCP servers are registered in the committed root `.mcp.json`. They connect only when their host app is open **and** a fresh Claude session starts. Discover tool names at runtime (they're deferred).
 
-- **IDA Pro MCP** — live analysis of `Main.exe` (tools `mcp__ida__*`). Reachable only when IDA is open on the database. Run `/ida-mcp-connect` to verify before RE work. **Two endpoints expose DIFFERENT toolsets — prioritize `?ext=dbg`:**
+- **IDA Pro MCP** — live analysis of `doida.exe` (tools `mcp__ida__*`). Reachable only when IDA is open on the database. Run `/ida-mcp-connect` to verify before RE work. **Two endpoints expose DIFFERENT toolsets — prioritize `?ext=dbg`:**
   - `http://127.0.0.1:13337/mcp` — base endpoint (static-analysis tools only).
   - `http://127.0.0.1:13337/mcp?ext=dbg` — **debugger-extended endpoint**: surfaces the debugger tools (`mcp__ida__dbg_*`) **in addition to** the static tools. The committed `.mcp.json` registers THIS one — it is a superset (static recovery *and* dynamic confirmation from one connection). If the `dbg_*` tools are absent, the session is on the wrong (base) endpoint. Re-register on `?ext=dbg`:
   ```powershell
@@ -146,6 +137,7 @@ Two local MCP servers are registered in the committed root `.mcp.json`. Both con
   ```
   Static analysis forms the hypothesis; the IDA **debugger** (run the real client, breakpoint, read registers/memory, step) confirms it against ground truth. Both modes are dirty-room: findings cross the firewall only as neutral prose — see `Docs/CAMPAIGN_TEMPLATE.md` §0.3/§4.4.
 - **Godot MCP** (`slangwald/godot-mcp`, registered as `godot`) — **editor tools on port 9600** (`get_scene_tree`, `run_project`, `get_output`, `modify_node`, …) and **game tools on port 9601** (`screenshot`, `click`, `get_runtime_tree`, …). Tool names are `mcp__godot__*`. Connects only with the Godot editor open + a fresh session.
+- **x32dbg MCP** (`mcp__x32dbg__*`) — the live user-mode debugger, used to byte-prove the client's sends against the real `doida.exe` when static analysis needs runtime confirmation (complements the IDA `?ext=dbg` debugger).
 
 ## Known Godot Pitfalls (each cost real time — heed them)
 
@@ -165,7 +157,7 @@ For any multi-lane objective (a research wave, a per-cluster sweep, a staged eng
 - **Use Opus 4.8 for the orchestrators** (judgment-heavy decomposition / reconciliation / gating); workers may run a lighter model where the task is mechanical.
 - **Two levels of orchestration max** (Tier-1 main session → Tier-2 Orchestrator-Agent → Tier-3 worker). A Tier-2 agent never spawns another Tier-2.
 - **IDA runs UNBRIDLED — fan out hard.** Read analysts run **massively parallel** and IDB **writes run in parallel too**: there is **no `~3` sub-wave cap and no one-writer-at-a-time rule** anymore. Push the reverse of the whole `doida.exe` as wide and fast as the IDA MCP server sustains; if a call fails or conflicts, **retry it** rather than throttling back. (The clean-room firewall, the dry-run→apply discipline, and idempotency all still hold — only the throughput throttle is lifted. The single real ceiling is whatever the live IDA MCP server can absorb, not a policy number.)
-- **The active campaign** is tracked in `Docs/PLAN.md` (method/charter) + `Docs/ROADMAP.md` (live run record), specialising `Docs/CAMPAIGN_TEMPLATE.md`. **CAMPAIGN 3** continues the `doida.exe` reverse (workflow / UI-UX / VFS) end-to-end: dirty recovery → clean specs → IDB annotation → wired client. The RE domain's IDB-annotation path (`re-orchestrator` → `ida-toolsmith` with the `/ida-annotate` skill) handles its IDB phases. Prior cycles live in git history + `Docs/RE/journal.md`.
+- **The active campaign** is tracked in `Docs/PLAN.md` (method/charter) + `Docs/ROADMAP.md` (live run record), specialising `Docs/CAMPAIGN_TEMPLATE.md` — read those for the current cycle and where to resume (don't rely on a campaign number hard-coded here). The RE domain's IDB-annotation path (`re-orchestrator` → `ida-toolsmith` with the `/ida-annotate` skill) handles its IDB phases. Prior cycles live in git history + `Docs/RE/journal.md`.
 
 ### Hooks — `.claude/hooks/` (Python, std-lib only, **advisory-only & fail-open**; they warn / inject context, never block)
 | Hook | When it fires |

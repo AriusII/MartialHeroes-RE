@@ -43,13 +43,13 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game mailbox window family: CarrierPigeonPanal (slot 96) + CarrierPigeonReadPanel (slot 98).
-///
-/// <para>PASSIVE: slot 96 is the menu; slot 98 is the read/compose surface.
-/// All network sends are stub TODOs (no use-case method yet).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 96 / slot 98.
+///     In-game mailbox window family: CarrierPigeonPanal (slot 96) + CarrierPigeonReadPanel (slot 98).
+///     <para>
+///         PASSIVE: slot 96 is the menu; slot 98 is the read/compose surface.
+///         All network sends are stub TODOs (no use-case method yet).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 96 / slot 98.
 /// </summary>
 public sealed partial class HudMailWindow : Control
 {
@@ -104,30 +104,29 @@ public sealed partial class HudMailWindow : Control
     private const int Msg55001 = 55001; // postage format  spec: §8.21.3
     private const int Msg55002 = 55002; // spec: §8.21.3
     private const int Msg55003 = 55003; // spec: §8.21.3
+    private LineEdit? _bodyBox;
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private bool _sendPanelVisible;
+    private Control? _readPanel;
     private bool _readPanelVisible;
+    private LineEdit? _recipientBox;
 
     // Sub-panel nodes
     private Control? _sendPanel;
-    private Control? _readPanel;
-    private LineEdit? _recipientBox;
-    private LineEdit? _bodyBox;
+    private bool _sendPanelVisible;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 140×195 mailbox menu at (0,0) with send + read sub-panels.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 96 / slot 98.
+    ///     Geometry pass: builds the 140×195 mailbox menu at (0,0) with send + read sub-panels.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 96 / slot 98.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -165,7 +164,7 @@ public sealed partial class HudMailWindow : Control
             Text = "Read Mail",
             Position = new Vector2(BtnX, Btn1Y),
             Size = new Vector2(BtnW, BtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn1.Pressed += OnOpenReadPanel;
         AddChild(btn1);
@@ -178,7 +177,7 @@ public sealed partial class HudMailWindow : Control
             Text = "Write Mail",
             Position = new Vector2(BtnX, Btn2Y),
             Size = new Vector2(BtnW, BtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn2.Pressed += OnOpenSendPanel;
         AddChild(btn2);
@@ -191,7 +190,7 @@ public sealed partial class HudMailWindow : Control
             Text = "Close",
             Position = new Vector2(BtnX, Btn3Y),
             Size = new Vector2(BtnW, BtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn3.Pressed += () => Toggle(false);
         AddChild(btn3);
@@ -228,7 +227,7 @@ public sealed partial class HudMailWindow : Control
         {
             Name = "CarrierPigeonSendPanel",
             Position = new Vector2(MenuW + 4f, 0f),
-            Size = new Vector2(360f, 260f),
+            Size = new Vector2(360f, 260f)
         };
 
         var sendBackdrop = new Panel { Name = "SendBackdrop" };
@@ -243,14 +242,14 @@ public sealed partial class HudMailWindow : Control
         // Title
         panel.AddChild(new Label
         {
-            Text = "Write Mail", Position = new Vector2(8f, 8f), MouseFilter = MouseFilterEnum.Ignore,
+            Text = "Write Mail", Position = new Vector2(8f, 8f), MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Recipient textbox (138×16, max 16, focus action 20)
         // spec: ui_system.md §8.21.3 — "Recipient-name textbox (138×16), max length 16, focus action 20"
         panel.AddChild(new Label
         {
-            Text = "To:", Position = new Vector2(8f, 36f), MouseFilter = MouseFilterEnum.Ignore,
+            Text = "To:", Position = new Vector2(8f, 36f), MouseFilter = MouseFilterEnum.Ignore
         });
         _recipientBox = new LineEdit
         {
@@ -258,7 +257,7 @@ public sealed partial class HudMailWindow : Control
             MaxLength = RecipientMaxLen, // spec: §8.21.3 — max 16
             Position = new Vector2(80f, 34f),
             Size = new Vector2(138f, 16f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         panel.AddChild(_recipientBox);
 
@@ -266,7 +265,7 @@ public sealed partial class HudMailWindow : Control
         // spec: ui_system.md §8.21.3 — "Message-body textbox (265×16), max length 199, multiline"
         panel.AddChild(new Label
         {
-            Text = "Message:", Position = new Vector2(8f, 60f), MouseFilter = MouseFilterEnum.Ignore,
+            Text = "Message:", Position = new Vector2(8f, 60f), MouseFilter = MouseFilterEnum.Ignore
         });
         _bodyBox = new LineEdit
         {
@@ -274,7 +273,7 @@ public sealed partial class HudMailWindow : Control
             MaxLength = BodyMaxLen, // spec: §8.21.3 — max 199
             Position = new Vector2(80f, 58f),
             Size = new Vector2(265f, 16f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         panel.AddChild(_bodyBox);
 
@@ -286,7 +285,7 @@ public sealed partial class HudMailWindow : Control
             Text = $"Send (postage: {PostageCost:N0}g)",
             Position = new Vector2(8f, 90f),
             Size = new Vector2(180f, 25f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         sendBtn.Pressed += OnSendMail;
         panel.AddChild(sendBtn);
@@ -299,7 +298,7 @@ public sealed partial class HudMailWindow : Control
             Text = "📎",
             Position = new Vector2(200f, 90f),
             Size = new Vector2(22f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         attachBtn.Pressed += OnAttachItem;
         panel.AddChild(attachBtn);
@@ -315,7 +314,7 @@ public sealed partial class HudMailWindow : Control
             Size = new Vector2(344f, 40f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         panel.AddChild(attachStub);
 
@@ -326,7 +325,7 @@ public sealed partial class HudMailWindow : Control
             Text = "×",
             Position = new Vector2(330f, 4f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += HideSendPanel;
         panel.AddChild(closeBtn);
@@ -345,7 +344,7 @@ public sealed partial class HudMailWindow : Control
         {
             Name = "CarrierPigeonReadPanel",
             Position = new Vector2(MenuW + 4f, 0f),
-            Size = new Vector2(360f, 320f),
+            Size = new Vector2(360f, 320f)
         };
 
         var readBackdrop = new Panel { Name = "ReadBackdrop" };
@@ -359,21 +358,19 @@ public sealed partial class HudMailWindow : Control
 
         panel.AddChild(new Label
         {
-            Text = "Read Mail", Position = new Vector2(8f, 8f), MouseFilter = MouseFilterEnum.Ignore,
+            Text = "Read Mail", Position = new Vector2(8f, 8f), MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Sender / date / subject / body labels (stub)
         // spec: ui_system.md §8.21.4 — "shows sender / date / subject / body labels"
         string[] fieldNames = { "From:", "Date:", "Subject:", "Body:" };
-        for (int i = 0; i < fieldNames.Length; i++)
-        {
+        for (var i = 0; i < fieldNames.Length; i++)
             panel.AddChild(new Label
             {
                 Text = fieldNames[i],
                 Position = new Vector2(8f, 34f + i * 22f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             });
-        }
 
         // Inbox list stub — populate via S2C (opcode unknown; TODO capture)
         // spec: ui_system.md §8.21.7 — "S2C populate for mailbox list not walked (TODO capture)"
@@ -387,7 +384,7 @@ public sealed partial class HudMailWindow : Control
             Size = new Vector2(344f, 60f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Reply textbox (277×25, max 199, action 2)
@@ -399,7 +396,7 @@ public sealed partial class HudMailWindow : Control
             Position = new Vector2(8f, 220f),
             Size = new Vector2(277f, 25f),
             PlaceholderText = "Reply...",
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         panel.AddChild(replyBox);
 
@@ -411,7 +408,7 @@ public sealed partial class HudMailWindow : Control
             Text = "Reply",
             Position = new Vector2(8f, 255f),
             Size = new Vector2(90f, 25f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         // TODO(world-campaign): CmsgLetterRequest (2/60) → IApplicationUseCases method pending
         // spec: ui_system.md §8.21.6 — "action-1 emits C2S CmsgLetterRequest (2/60)"
@@ -425,7 +422,7 @@ public sealed partial class HudMailWindow : Control
         // Four tab buttons: Reply / Delete / Next / Prev
         // spec: ui_system.md §8.21.4 — "Four tab buttons: Reply / Delete / Next / Prev"
         string[] tabNames = { "Reply", "Delete", "Next", "Prev" };
-        for (int i = 0; i < tabNames.Length; i++)
+        for (var i = 0; i < tabNames.Length; i++)
         {
             var tab = new Button
             {
@@ -433,7 +430,7 @@ public sealed partial class HudMailWindow : Control
                 Text = tabNames[i],
                 Position = new Vector2(8f + i * 88f, 285f),
                 Size = new Vector2(80f, 22f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             panel.AddChild(tab);
         }
@@ -445,7 +442,7 @@ public sealed partial class HudMailWindow : Control
             Text = "×",
             Position = new Vector2(330f, 4f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         panel.AddChild(closeBtn);
 
@@ -492,8 +489,8 @@ public sealed partial class HudMailWindow : Control
         // spec: ui_system.md §8.21.3 — "action 1 validates recipient (else msg 52001) and body (else 52002),
         //   requires gold >= 200000 (else 55001/55002/55003 + 52019), then opens InfoPanel confirm;
         //   confirm 'Yes' emits C2S CmsgCarrierPigeonSend (2/70)"
-        string recipient = _recipientBox?.Text ?? string.Empty;
-        string body = _bodyBox?.Text ?? string.Empty;
+        var recipient = _recipientBox?.Text ?? string.Empty;
+        var body = _bodyBox?.Text ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(recipient))
         {
@@ -530,9 +527,9 @@ public sealed partial class HudMailWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the mailbox menu.
-    /// Opened from NPC service interactions; specific open opcode = debugger-pending.
-    /// spec: Docs/RE/specs/ui_system.md §8.21.7 — "open from NPC-service; opcode not isolated (debugger-pending)".
+    ///     Toggles the mailbox menu.
+    ///     Opened from NPC service interactions; specific open opcode = debugger-pending.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.7 — "open from NPC-service; opcode not isolated (debugger-pending)".
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

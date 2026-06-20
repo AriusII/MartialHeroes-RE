@@ -5,24 +5,22 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Load;
 
 /// <summary>
-/// Full-screen loading window (Diamond_LoadingWindow analogue) — immediate-mode two-quad renderer.
-/// Background DDS rand()%3 is always present from the real VFS. Progress bar is a U-axis width fill.
-/// Emits <see cref="LoadingCompleteEventHandler"/> after the external load worker completes + 500 ms grace.
-/// spec: Docs/RE/specs/frontend_layout_tables.md §5.
+///     Full-screen loading window (Diamond_LoadingWindow analogue) — immediate-mode two-quad renderer.
+///     Background DDS rand()%3 is always present from the real VFS. Progress bar is a U-axis width fill.
+///     Emits <see cref="LoadingCompleteEventHandler" /> after the external load worker completes + 500 ms grace.
+///     spec: Docs/RE/specs/frontend_layout_tables.md §5.
 /// </summary>
 public sealed partial class LoadingWindow : Control
 {
+    // ── Signal ───────────────────────────────────────────────────────────────
+
+    /// <summary>Emitted after the external worker completes + 500 ms grace elapses.</summary>
+    [Signal]
+    public delegate void LoadingCompleteEventHandler();
+
     // spec: frontend_layout_tables.md §5 / §1 "reference canvas 1024×768".
     private const float RefWidth = 1024f;
     private const float RefHeight = 768f;
-
-    // Background DDS candidates — rand()%3. spec: frontend_layout_tables.md §5.
-    private static readonly string[] BgPaths =
-    [
-        "data/ui/loading.dds",
-        "data/ui/loading06.dds",
-        "data/ui/loading08.dds",
-    ];
 
     // Progress bar track in design-space (centre-origin ortho).
     // spec: Docs/RE/specs/frontend_layout_tables.md §5.
@@ -45,6 +43,23 @@ public sealed partial class LoadingWindow : Control
     // Grace after worker completes. spec: frontend_layout_tables.md §5 "500 ms grace".
     private const float GraceSeconds = 0.5f;
 
+    // Background DDS candidates — rand()%3. spec: frontend_layout_tables.md §5.
+    private static readonly string[] BgPaths =
+    [
+        "data/ui/loading.dds",
+        "data/ui/loading06.dds",
+        "data/ui/loading08.dds"
+    ];
+
+    // ── View state ───────────────────────────────────────────────────────────
+
+    private TextureRect? _bgRect;
+    private Texture2D? _chosenTex;
+    private float _fillPx;
+    private TextureRect? _fillRect;
+    private bool _gracePending;
+    private bool _workerDone;
+
     // ── Public inputs (set by LoadScene before adding to the tree) ───────────
 
     /// <summary>Shared HUD atlas library — loads the loading DDS textures from the real VFS.</summary>
@@ -54,26 +69,11 @@ public sealed partial class LoadingWindow : Control
     public Func<int>? ProgressProvider { get; set; }
 
     /// <summary>
-    /// When true LoadScene manages the loading BGM via GodotLoadingSoundSink / AudioService.
-    /// When false this window starts the BGM itself to avoid doubling.
-    /// spec: frontend_layout_tables.md §5/§7; sound.md §15.6a.
+    ///     When true LoadScene manages the loading BGM via GodotLoadingSoundSink / AudioService.
+    ///     When false this window starts the BGM itself to avoid doubling.
+    ///     spec: frontend_layout_tables.md §5/§7; sound.md §15.6a.
     /// </summary>
     public bool PlayOwnCue { get; set; } = true;
-
-    // ── Signal ───────────────────────────────────────────────────────────────
-
-    /// <summary>Emitted after the external worker completes + 500 ms grace elapses.</summary>
-    [Signal]
-    public delegate void LoadingCompleteEventHandler();
-
-    // ── View state ───────────────────────────────────────────────────────────
-
-    private TextureRect? _bgRect;
-    private TextureRect? _fillRect;
-    private Texture2D? _chosenTex;
-    private float _fillPx;
-    private bool _workerDone;
-    private bool _gracePending;
 
     // ── Godot lifecycle ──────────────────────────────────────────────────────
 
@@ -81,7 +81,7 @@ public sealed partial class LoadingWindow : Control
     {
         GD.Print("[LoadingWindow] _Ready — state-2 loading screen. spec: frontend_layout_tables.md §5.");
 
-        int bgIdx = (int)(global::Godot.GD.Randi() % 3u); // spec §5 "rand()%3".
+        var bgIdx = (int)(GD.Randi() % 3u); // spec §5 "rand()%3".
         GD.Print($"[LoadingWindow] BG index={bgIdx} → {BgPaths[bgIdx]}.");
 
         Size = new Vector2(RefWidth, RefHeight);
@@ -99,12 +99,12 @@ public sealed partial class LoadingWindow : Control
     {
         if (_workerDone) return;
 
-        int pct = ProgressProvider is not null
+        var pct = ProgressProvider is not null
             ? Math.Clamp(ProgressProvider(), 0, 100)
             : 0;
 
         // Fill width: clamp(223 · pct / 100, 0, 223). spec: frontend_layout_tables.md §5.
-        float newFill = Math.Clamp(FillMaxPx * pct / 100f, 0f, FillMaxPx);
+        var newFill = Math.Clamp(FillMaxPx * pct / 100f, 0f, FillMaxPx);
         if (Math.Abs(newFill - _fillPx) > 0.01f)
         {
             _fillPx = newFill;
@@ -125,7 +125,7 @@ public sealed partial class LoadingWindow : Control
 
         GD.Print("[LoadingWindow] Worker done — starting 500 ms grace. spec §5.");
 
-        SceneTreeTimer grace = GetTree().CreateTimer(GraceSeconds, processAlways: true);
+        var grace = GetTree().CreateTimer(GraceSeconds);
         grace.Timeout += OnGraceExpired;
     }
 
@@ -150,7 +150,7 @@ public sealed partial class LoadingWindow : Control
             Size = new Vector2(RefWidth, RefHeight),
             StretchMode = TextureRect.StretchModeEnum.Scale,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_bgRect);
 
@@ -169,7 +169,7 @@ public sealed partial class LoadingWindow : Control
             StretchMode = TextureRect.StretchModeEnum.Scale,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             MouseFilter = MouseFilterEnum.Ignore,
-            Visible = false,
+            Visible = false
         };
         AddChild(_fillRect);
 
@@ -190,7 +190,7 @@ public sealed partial class LoadingWindow : Control
 
     private void LoadBackgroundTexture(int bgIdx)
     {
-        Texture2D? tex = Atlas?.GetByPath(BgPaths[bgIdx]);
+        var tex = Atlas?.GetByPath(BgPaths[bgIdx]);
         if (tex is null)
         {
             GD.PrintErr($"[LoadingWindow] Loading DDS absent: {BgPaths[bgIdx]}.");
@@ -207,15 +207,15 @@ public sealed partial class LoadingWindow : Control
         if (_fillRect is null || _chosenTex is null) return;
 
         // U-axis fill: fill_px / 1024 → max 223/1024 ≈ 0.2178. spec: frontend_layout_tables.md §5.
-        int texW = _chosenTex.GetWidth();
-        int texH = _chosenTex.GetHeight();
-        float uWidthPx = texW * (_fillPx / 1024f);
+        var texW = _chosenTex.GetWidth();
+        var texH = _chosenTex.GetHeight();
+        var uWidthPx = texW * (_fillPx / 1024f);
 
         _fillRect.Texture = new AtlasTexture
         {
             Atlas = _chosenTex,
             Region = new Rect2(0f, 0f, uWidthPx, texH),
-            FilterClip = false,
+            FilterClip = false
         };
     }
 

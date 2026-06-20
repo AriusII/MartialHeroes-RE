@@ -72,16 +72,17 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game relation / teacher / fate window (RelationPanel, master service slot 193).
-///
-/// <para>A 4-tab paged roster for relation/teacher/fate/spouse management. Opened by DefaultMenu
-/// action 4002 alongside BuddyRelation (slot 185). Uses chat-command text for add/remove/master
-/// requests (no binary packet builders).</para>
-///
-/// <para>PASSIVE: zero game logic. All actions emit chat-command text stubs. Inbound roster
-/// populate (S2C relation-push) is stubbed — rows are empty until server delivers them.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.28 CODE-CONFIRMED.
+///     In-game relation / teacher / fate window (RelationPanel, master service slot 193).
+///     <para>
+///         A 4-tab paged roster for relation/teacher/fate/spouse management. Opened by DefaultMenu
+///         action 4002 alongside BuddyRelation (slot 185). Uses chat-command text for add/remove/master
+///         requests (no binary packet builders).
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. All actions emit chat-command text stubs. Inbound roster
+///         populate (S2C relation-push) is stubbed — rows are empty until server delivers them.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.28 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudRelationPanel : Control
 {
@@ -94,10 +95,6 @@ public sealed partial class HudRelationPanel : Control
     // spec: ui_system.md §8.28.1 CODE-CONFIRMED
     private const float PanelW = 295f; // spec: ui_system.md §8.28.1 CODE-CONFIRMED
     private const float PanelH = 393f; // spec: ui_system.md §8.28.1 CODE-CONFIRMED
-
-    // Tabs (4 tabs at y∈{6,63,120,177}, step y+57, 50×55)
-    // spec: ui_system.md §8.28.1 CODE-CONFIRMED
-    private static readonly float[] TabY = { 6f, 63f, 120f, 177f };
     private const float TabX = 0f; // spec: ui_system.md §8.28.1 "x"
     private const float TabW = 50f; // spec: ui_system.md §8.28.1 "50"
     private const float TabH = 55f; // spec: ui_system.md §8.28.1 "55"
@@ -152,17 +149,21 @@ public sealed partial class HudRelationPanel : Control
     private const int MsgTeacherSetFail1 = 2089; // teacher-set fail (action 15)
     private const int MsgTeacherSetFail2 = 10074; // teacher-set fail (action 15)
 
+    // Tabs (4 tabs at y∈{6,63,120,177}, step y+57, 50×55)
+    // spec: ui_system.md §8.28.1 CODE-CONFIRMED
+    private static readonly float[] TabY = { 6f, 63f, 120f, 177f };
+
+    private readonly Label[] _memberLabels = new Label[MaxVisibleMembers];
+    private int _activeTab; // 0..3
+    private int _currentPage;
+    private double _lastTimedAction = -TimedActionCooldownSecs; // allow first immediately
+    private LineEdit? _nameTextbox;
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activeTab; // 0..3
-    private int _currentPage;
-    private double _lastTimedAction = -TimedActionCooldownSecs; // allow first immediately
-
-    private readonly Label[] _memberLabels = new Label[MaxVisibleMembers];
-    private LineEdit? _nameTextbox;
     private Label? _pageIndicator;
 
     // -------------------------------------------------------------------------
@@ -170,9 +171,8 @@ public sealed partial class HudRelationPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the RelationPanel (slot 193).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.28.1 CODE-CONFIRMED.
+    ///     Geometry pass: builds the RelationPanel (slot 193).
+    ///     spec: Docs/RE/specs/ui_system.md §8.28.1 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -202,7 +202,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "Relations",
             Position = new Vector2(10f, 4f),
             Size = new Vector2(180f, 18f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(titleLbl);
 
@@ -214,23 +214,23 @@ public sealed partial class HudRelationPanel : Control
             Text = "×",
             Position = new Vector2(PanelW - 12f, 2f),
             Size = new Vector2(11f, 11f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => OnAction(16); // action 16 = close
         AddChild(closeBtn);
 
         // 4 tab buttons (actions 19..22)
         // spec: ui_system.md §8.28.1 — "(x, y∈{6,63,120,177}, 50, 55) step y+57, actions 19..22"
-        for (int t = 0; t < 4; t++)
+        for (var t = 0; t < 4; t++)
         {
-            int capturedT = t;
+            var capturedT = t;
             var tabBtn = new Button
             {
                 Name = $"Tab{t}",
                 Text = t == 0 ? "Master" : t == 1 ? "Parent" : t == 2 ? "Spouse" : "Fate",
                 Position = new Vector2(TabX, TabY[t]),
                 Size = new Vector2(TabW, TabH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             tabBtn.Pressed += () => OnAction(19 + capturedT);
             AddChild(tabBtn);
@@ -245,9 +245,9 @@ public sealed partial class HudRelationPanel : Control
             Position = new Vector2(NameTbX, NameTbY),
             Size = new Vector2(NameTbW, NameTbH),
             MaxLength = NameMaxLen,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        _nameTextbox.TextSubmitted += (_) => OnAction(9);
+        _nameTextbox.TextSubmitted += _ => OnAction(9);
         AddChild(_nameTextbox);
 
         // Name OK/search button (action 10)
@@ -258,17 +258,17 @@ public sealed partial class HudRelationPanel : Control
             Text = "OK",
             Position = new Vector2(235f, NameTbY),
             Size = new Vector2(45f, NameTbH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         nameOkBtn.Pressed += () => OnAction(10);
         AddChild(nameOkBtn);
 
         // 6 member list rows (rows 0..5, base y=118, stride 21)
         // spec: ui_system.md §8.28.1 — "base y=118, step y+21 (while y<244)"
-        for (int r = 0; r < MaxVisibleMembers; r++)
+        for (var r = 0; r < MaxVisibleMembers; r++)
         {
-            float ry = MemberBaseY + r * MemberStride;
-            int capturedR = r;
+            var ry = MemberBaseY + r * MemberStride;
+            var capturedR = r;
 
             var rowBtn = new Button
             {
@@ -278,7 +278,7 @@ public sealed partial class HudRelationPanel : Control
                 Size = new Vector2(185f, MemberStride - 2f),
                 Flat = true,
                 Alignment = HorizontalAlignment.Left,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             rowBtn.Pressed += () => OnAction(capturedR); // actions 0..5
             AddChild(rowBtn);
@@ -289,7 +289,7 @@ public sealed partial class HudRelationPanel : Control
                 Text = "",
                 Position = new Vector2(59f, ry + 2f),
                 Size = new Vector2(183f, MemberStride - 6f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(rowLbl);
             _memberLabels[r] = rowLbl;
@@ -302,7 +302,7 @@ public sealed partial class HudRelationPanel : Control
                 Text = "•",
                 Position = new Vector2(245f, ry),
                 Size = new Vector2(25f, MemberStride - 2f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             miniBtn.Pressed += () => OnAction(34 + capturedR);
             AddChild(miniBtn);
@@ -317,7 +317,7 @@ public sealed partial class HudRelationPanel : Control
             Position = new Vector2(29f, 259f),
             Size = new Vector2(224f, 18f),
             Flat = true,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         bigListBtn.Pressed += () => OnAction(12);
         AddChild(bigListBtn);
@@ -331,7 +331,7 @@ public sealed partial class HudRelationPanel : Control
             Position = new Vector2(16f, 94f),
             Size = new Vector2(185f, 18f),
             Flat = true,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         secRow.Pressed += () => OnAction(13);
         AddChild(secRow);
@@ -344,7 +344,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "•",
             Position = new Vector2(206f, 96f),
             Size = new Vector2(59f, 14f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         secMiniBtn.Pressed += () => OnAction(40);
         AddChild(secMiniBtn);
@@ -357,7 +357,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "◄",
             Position = new Vector2(PageUpX, PageBtnY),
             Size = new Vector2(PageBtnSize, PageBtnSize),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageUpBtn.Pressed += () => OnAction(7); // action 7
         AddChild(pageUpBtn);
@@ -368,7 +368,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "►",
             Position = new Vector2(PageDownX, PageBtnY),
             Size = new Vector2(PageBtnSize, PageBtnSize),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageDownBtn.Pressed += () => OnAction(8); // action 8
         AddChild(pageDownBtn);
@@ -381,22 +381,22 @@ public sealed partial class HudRelationPanel : Control
             Text = "1",
             Position = new Vector2(17f, 340f),
             Size = new Vector2(50f, 13f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_pageIndicator);
 
         // 10 numeric page buttons (y=309, x=57+15·i, 15×14, actions 23..32)
         // spec: ui_system.md §8.28.1 CODE-CONFIRMED
-        for (int p = 0; p < NumPageCount; p++)
+        for (var p = 0; p < NumPageCount; p++)
         {
-            int capturedP = p;
+            var capturedP = p;
             var numPage = new Button
             {
                 Name = $"NumPage{p}",
                 Text = $"{p + 1}",
                 Position = new Vector2(NumPageBaseX + 15f * p, NumPageY),
                 Size = new Vector2(NumPageW, NumPageH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             numPage.Pressed += () => OnAction(23 + capturedP);
             AddChild(numPage);
@@ -410,7 +410,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "...",
             Position = new Vector2(207f, NumPageY),
             Size = new Vector2(30f, NumPageH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         moreBtn.Pressed += () => OnAction(33);
         AddChild(moreBtn);
@@ -423,7 +423,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "Info",
             Position = new Vector2(BotAX, BotY),
             Size = new Vector2(BotW, BotH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         botA.Pressed += () => OnAction(11);
         AddChild(botA);
@@ -436,7 +436,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "Request",
             Position = new Vector2(BotBX, BotY),
             Size = new Vector2(BotW, BotH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         botB.Pressed += () => OnAction(14);
         AddChild(botB);
@@ -450,7 +450,7 @@ public sealed partial class HudRelationPanel : Control
             Position = new Vector2(BotBX, BotY + BotH + 2f), // slightly offset for overlay port
             Size = new Vector2(BotW, BotH),
             Visible = false, // hidden by default (overlay)
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         botC.Pressed += () => OnAction(15);
         AddChild(botC);
@@ -463,7 +463,7 @@ public sealed partial class HudRelationPanel : Control
             Text = "Close",
             Position = new Vector2(ConfirmX, ConfirmY),
             Size = new Vector2(ConfirmW, ConfirmH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         confirmBtn.Pressed += () => OnAction(6);
         AddChild(confirmBtn);
@@ -486,9 +486,9 @@ public sealed partial class HudRelationPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles RelationPanel (slot 193).
-    /// Opened by DefaultMenu action 4002 (which also opens BuddyRelation slot 185).
-    /// spec: Docs/RE/specs/ui_system.md §8.28.5 CODE-CONFIRMED.
+    ///     Toggles RelationPanel (slot 193).
+    ///     Opened by DefaultMenu action 4002 (which also opens BuddyRelation slot 185).
+    ///     spec: Docs/RE/specs/ui_system.md §8.28.5 CODE-CONFIRMED.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
@@ -547,14 +547,12 @@ public sealed partial class HudRelationPanel : Control
             case 10:
                 // ADD / REMOVE relation by typed name (chat-command text)
                 // spec: ui_system.md §8.28.6 — "action 10 add: 'friend %s %s'; remove: 'cut %s'"
-                string name = _nameTextbox?.Text.Trim() ?? "";
+                var name = _nameTextbox?.Text.Trim() ?? "";
                 if (!string.IsNullOrEmpty(name))
-                {
                     // TODO(world-campaign): submit chat-command via IApplicationUseCases.ChatSubmit("friend %s %s" / "cut %s")
                     GD.Print($"[HudRelationPanel] Action 10 add/remove name='{name}': " +
                              "TODO(world-campaign): chat-command 'friend %s %s' / 'cut %s'. " +
                              "spec: Docs/RE/specs/ui_system.md §8.28.6 CODE-CONFIRMED.");
-                }
 
                 break;
 
@@ -576,7 +574,7 @@ public sealed partial class HudRelationPanel : Control
             case 14:
                 // Timed action (3-minute cooldown): CP949 chat-command (master/training request)
                 // spec: ui_system.md §8.28.4 — "14: timed action (3-min cooldown); CP949 chat-command"
-                double now = global::Godot.Time.GetTicksMsec() / 1000.0;
+                var now = Time.GetTicksMsec() / 1000.0;
                 if (now - _lastTimedAction < TimedActionCooldownSecs)
                 {
                     GD.Print("[HudRelationPanel] Action 14 timed-request: cooldown active (3 min). " +

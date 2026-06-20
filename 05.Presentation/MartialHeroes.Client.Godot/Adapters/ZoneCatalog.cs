@@ -23,27 +23,27 @@
 // The caller (MinimapPanel) drains this during _Process.
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.Texture;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Assets.Parsers.World;
+using MartialHeroes.Assets.Parsers.World.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Adapters;
 
 /// <summary>
-/// Resolves the display name of the zone (and optionally a nearby sub-zone label) for a
-/// given legacy world XZ position. Used by <see cref="MartialHeroes.Client.Godot.HUD.MinimapPanel"/>
-/// to caption the minimap footer with the current area name.
-///
-/// <para>
-/// Zone names come from <c>data/script/mapsetting.scr</c> — spec: Docs/RE/formats/misc_data.md §7.1.
-/// Sub-zone labels come from <c>data/mapNNN/regiontableNNN.bin</c>, selected via the per-area
-/// region-id grid <c>data/mapNNN/regionNNN.bin</c> — spec: Docs/RE/formats/region_grid.md.
-/// </para>
-///
-/// <para>
-/// Both files are absent from layers 01–04 (only layer 05 may read game assets at runtime).
-/// This class is therefore placed in the <c>Adapters/</c> folder of <c>Client.Godot</c>.
-/// </para>
+///     Resolves the display name of the zone (and optionally a nearby sub-zone label) for a
+///     given legacy world XZ position. Used by <see cref="MartialHeroes.Client.Godot.HUD.MinimapPanel" />
+///     to caption the minimap footer with the current area name.
+///     <para>
+///         Zone names come from <c>data/script/mapsetting.scr</c> — spec: Docs/RE/formats/misc_data.md §7.1.
+///         Sub-zone labels come from <c>data/mapNNN/regiontableNNN.bin</c>, selected via the per-area
+///         region-id grid <c>data/mapNNN/regionNNN.bin</c> — spec: Docs/RE/formats/region_grid.md.
+///     </para>
+///     <para>
+///         Both files are absent from layers 01–04 (only layer 05 may read game assets at runtime).
+///         This class is therefore placed in the <c>Adapters/</c> folder of <c>Client.Godot</c>.
+///     </para>
 /// </summary>
 public sealed class ZoneCatalog
 {
@@ -68,79 +68,81 @@ public sealed class ZoneCatalog
 
     private readonly RealClientAssets? _assets;
 
-    // mapsetting.scr: all zone records, loaded once. Null means "not yet attempted".
-    private MapZoneRecord[]? _zones;
-    private bool _zonesAttempted;
-
-    // regiontable cache: areaId → records. Loaded on-demand per area. Null value = load failed.
-    private readonly Dictionary<int, RegionTableRecord[]?> _regionCache = new();
-
     // region-grid cache: areaId → RegionGrid. Loaded on-demand per area. Null value = load failed/absent.
     // spec: Docs/RE/formats/region_grid.md §Layout A — regionNNN.bin world XZ → region-id grid.
     private readonly Dictionary<int, RegionGrid?> _gridCache = new();
 
+    // regiontable cache: areaId → records. Loaded on-demand per area. Null value = load failed.
+    private readonly Dictionary<int, RegionTableRecord[]?> _regionCache = new();
+
+    // mapsetting.scr: all zone records, loaded once. Null means "not yet attempted".
+    private MapZoneRecord[]? _zones;
+    private bool _zonesAttempted;
+
     // ── Constructor ────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a <see cref="ZoneCatalog"/> backed by the supplied <paramref name="assets"/> handle.
-    /// Pass <see langword="null"/> for offline/no-VFS mode; all lookup methods return empty strings.
+    ///     Creates a <see cref="ZoneCatalog" /> backed by the supplied <paramref name="assets" /> handle.
+    ///     Pass <see langword="null" /> for offline/no-VFS mode; all lookup methods return empty strings.
     /// </summary>
     public ZoneCatalog(RealClientAssets? assets)
     {
         _assets = assets;
     }
 
+    /// <summary>
+    ///     Returns all loaded zone records (may be empty when VFS is offline).
+    ///     The caller must not mutate the returned array.
+    ///     spec: Docs/RE/formats/misc_data.md §7.1.
+    /// </summary>
+    public IReadOnlyList<MapZoneRecord> AllZones => EnsureZones() ?? Array.Empty<MapZoneRecord>();
+
     // ── Public API ─────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the CP949-decoded display name of the zone whose bounding box contains the given
-    /// world XZ position, or an empty string when the position is outside all zones or the VFS is
-    /// offline.
-    ///
-    /// The bounding-box fields are PLAUSIBLE — see spec grade in:
-    /// spec: Docs/RE/formats/misc_data.md §7.1 — world_min_x/z i32 @ 0x28/0x2C: PLAUSIBLE;
-    ///       world_max_x/z i32 @ 0x30/0x34: PLAUSIBLE.
-    ///
-    /// Because the world geometry negates Z (spec: CLAUDE.md — "World geometry negates Z"),
-    /// <paramref name="legacyWorldZ"/> is the LEGACY (left-handed) Z coordinate, not the Godot one.
+    ///     Returns the CP949-decoded display name of the zone whose bounding box contains the given
+    ///     world XZ position, or an empty string when the position is outside all zones or the VFS is
+    ///     offline.
+    ///     The bounding-box fields are PLAUSIBLE — see spec grade in:
+    ///     spec: Docs/RE/formats/misc_data.md §7.1 — world_min_x/z i32 @ 0x28/0x2C: PLAUSIBLE;
+    ///     world_max_x/z i32 @ 0x30/0x34: PLAUSIBLE.
+    ///     Because the world geometry negates Z (spec: CLAUDE.md — "World geometry negates Z"),
+    ///     <paramref name="legacyWorldZ" /> is the LEGACY (left-handed) Z coordinate, not the Godot one.
     /// </summary>
     /// <param name="legacyWorldX">Legacy world X position.</param>
     /// <param name="legacyWorldZ">Legacy world Z position (before Godot Z-negate).</param>
     public string GetZoneName(float legacyWorldX, float legacyWorldZ)
     {
-        MapZoneRecord[]? zones = EnsureZones();
+        var zones = EnsureZones();
         if (zones is null) return string.Empty;
 
         // Walk all zone records; return the first whose bounding box contains the position.
         // The bounding box is in legacy world space (X-Z plane), fields PLAUSIBLE.
         // spec: Docs/RE/formats/misc_data.md §7.1 — bounding box: PLAUSIBLE.
-        foreach (MapZoneRecord z in zones)
+        foreach (var z in zones)
         {
             // Guard against degenerate records (zone_id == 0 or empty name).
             if (z.ZoneId == 0 || string.IsNullOrEmpty(z.ZoneName)) continue;
 
             if (legacyWorldX >= z.WorldMinX && legacyWorldX <= z.WorldMaxX &&
                 legacyWorldZ >= z.WorldMinZ && legacyWorldZ <= z.WorldMaxZ)
-            {
                 return z.ZoneName;
-            }
         }
 
         return string.Empty;
     }
 
     /// <summary>
-    /// Returns the zone record whose bounding box contains <paramref name="legacyWorldX"/> /
-    /// <paramref name="legacyWorldZ"/>, or <see langword="null"/> when none matches.
-    ///
-    /// spec: Docs/RE/formats/misc_data.md §7.1 — zone_id: SAMPLE-VERIFIED.
+    ///     Returns the zone record whose bounding box contains <paramref name="legacyWorldX" /> /
+    ///     <paramref name="legacyWorldZ" />, or <see langword="null" /> when none matches.
+    ///     spec: Docs/RE/formats/misc_data.md §7.1 — zone_id: SAMPLE-VERIFIED.
     /// </summary>
     public MapZoneRecord? GetZoneRecord(float legacyWorldX, float legacyWorldZ)
     {
-        MapZoneRecord[]? zones = EnsureZones();
+        var zones = EnsureZones();
         if (zones is null) return null;
 
-        foreach (MapZoneRecord z in zones)
+        foreach (var z in zones)
         {
             if (z.ZoneId == 0 || string.IsNullOrEmpty(z.ZoneName)) continue;
             if (legacyWorldX >= z.WorldMinX && legacyWorldX <= z.WorldMaxX &&
@@ -152,52 +154,50 @@ public sealed class ZoneCatalog
     }
 
     /// <summary>
-    /// Returns the sub-zone label for the given area and world position, or an empty string when
-    /// the files are absent / the VFS is offline.
-    ///
-    /// <para>
-    /// <b>Resolution chain (corrected):</b> the regiontable record carries NO per-record
-    /// coordinates — the old <c>CenterX</c>/<c>CenterZ</c>/<c>SubZoneName</c> 32-byte layout is
-    /// REFUTED. The sub-zone is resolved through the per-area region-id grid instead:
-    /// <code>
+    ///     Returns the sub-zone label for the given area and world position, or an empty string when
+    ///     the files are absent / the VFS is offline.
+    ///     <para>
+    ///         <b>Resolution chain (corrected):</b> the regiontable record carries NO per-record
+    ///         coordinates — the old <c>CenterX</c>/<c>CenterZ</c>/<c>SubZoneName</c> 32-byte layout is
+    ///         REFUTED. The sub-zone is resolved through the per-area region-id grid instead:
+    ///         <code>
     ///   regionId = regionNNN.bin grid lookup at (worldX, worldZ)   // 0..31
     ///   zoneName = regiontableNNN.bin record whose RegionId == regionId  → ZoneName
     /// </code>
-    /// spec: Docs/RE/formats/region_grid.md §Layout A (grid lookup), §regiontable (record table).
-    /// </para>
-    ///
-    /// <para>
-    /// <b>Graceful degradation:</b> if the region grid is absent (some areas have no grid), this
-    /// falls back to the regiontable record whose <see cref="RegionTableRecord.RegionId"/> matches
-    /// the supplied zone record's area id, otherwise returns an empty string. No coordinates are
-    /// fabricated.
-    /// </para>
+    ///         spec: Docs/RE/formats/region_grid.md §Layout A (grid lookup), §regiontable (record table).
+    ///     </para>
+    ///     <para>
+    ///         <b>Graceful degradation:</b> if the region grid is absent (some areas have no grid), this
+    ///         falls back to the regiontable record whose <see cref="RegionTableRecord.RegionId" /> matches
+    ///         the supplied zone record's area id, otherwise returns an empty string. No coordinates are
+    ///         fabricated.
+    ///     </para>
     /// </summary>
-    /// <param name="areaId">The zone/area id (from <see cref="MapZoneRecord.ZoneId"/>).</param>
+    /// <param name="areaId">The zone/area id (from <see cref="MapZoneRecord.ZoneId" />).</param>
     /// <param name="legacyWorldX">Legacy world X position.</param>
     /// <param name="legacyWorldZ">Legacy world Z position.</param>
-    /// <param name="zoneRecord">Optional zone record; used only for the graceful-degrade fallback
-    ///   when no region grid is present.</param>
+    /// <param name="zoneRecord">
+    ///     Optional zone record; used only for the graceful-degrade fallback
+    ///     when no region grid is present.
+    /// </param>
     public string GetNearestSubZoneName(int areaId, float legacyWorldX, float legacyWorldZ,
         MapZoneRecord? zoneRecord = null)
     {
-        RegionTableRecord[]? recs = EnsureRegionTable(areaId);
+        var recs = EnsureRegionTable(areaId);
         if (recs is null || recs.Length == 0) return string.Empty;
 
         // ── Preferred path: region-id grid → matching regiontable record → its ZoneName ──
         // spec: Docs/RE/formats/region_grid.md §Layout A — world XZ → region id (0..31).
-        RegionGrid? grid = EnsureRegionGrid(areaId);
+        var grid = EnsureRegionGrid(areaId);
         if (grid is not null)
         {
             int regionId = grid.GetRegionId((int)legacyWorldX, (int)legacyWorldZ);
 
             // Match the regiontable record indexed directly by region id (0..31).
             // spec: Docs/RE/formats/region_grid.md §regiontable — "indexed directly by region id (0..31)".
-            foreach (RegionTableRecord r in recs)
-            {
+            foreach (var r in recs)
                 if (r.RegionId == regionId)
                     return r.ZoneName ?? string.Empty;
-            }
 
             return string.Empty;
         }
@@ -205,23 +205,12 @@ public sealed class ZoneCatalog
         // ── Graceful degrade: no grid for this area — match by available key, never fabricate coords ──
         // spec: Docs/RE/formats/region_grid.md §regiontable — record indexed by region id.
         if (zoneRecord is not null)
-        {
-            foreach (RegionTableRecord r in recs)
-            {
+            foreach (var r in recs)
                 if (r.RegionId == areaId)
                     return r.ZoneName ?? string.Empty;
-            }
-        }
 
         return string.Empty;
     }
-
-    /// <summary>
-    /// Returns all loaded zone records (may be empty when VFS is offline).
-    /// The caller must not mutate the returned array.
-    /// spec: Docs/RE/formats/misc_data.md §7.1.
-    /// </summary>
-    public IReadOnlyList<MapZoneRecord> AllZones => EnsureZones() ?? Array.Empty<MapZoneRecord>();
 
     // ── Lazy loaders ───────────────────────────────────────────────────────
 
@@ -235,7 +224,7 @@ public sealed class ZoneCatalog
         try
         {
             // spec: Docs/RE/formats/misc_data.md §7.1 — "logical path: data/script/mapsetting.scr".
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(MapSettingPath);
+            var raw = _assets.GetRaw(MapSettingPath);
             if (raw.IsEmpty)
             {
                 GodotPrint($"[ZoneCatalog] {MapSettingPath} absent from VFS — zone names unavailable.");
@@ -263,7 +252,7 @@ public sealed class ZoneCatalog
 
     private RegionTableRecord[]? EnsureRegionTable(int areaId)
     {
-        if (_regionCache.TryGetValue(areaId, out RegionTableRecord[]? cached)) return cached;
+        if (_regionCache.TryGetValue(areaId, out var cached)) return cached;
 
         if (_assets is null)
         {
@@ -280,8 +269,8 @@ public sealed class ZoneCatalog
         try
         {
             // spec: Docs/RE/formats/region_grid.md §regiontable — "path pattern: data/mapNNN/regiontableNNN.bin".
-            string path = string.Format(RegionTablePathFmt, areaId);
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
+            var path = string.Format(RegionTablePathFmt, areaId);
+            var raw = _assets.GetRaw(path);
             if (raw.IsEmpty)
             {
                 // Area has no regiontable — normal for some areas.
@@ -290,7 +279,7 @@ public sealed class ZoneCatalog
             }
 
             // spec: Docs/RE/formats/region_grid.md §regiontable — stride 48 bytes, 32 records: CONFIRMED.
-            RegionTableRecord[] recs = RegionTableParser.Parse(raw);
+            var recs = RegionTableParser.Parse(raw);
             _regionCache[areaId] = recs;
             GodotPrint($"[ZoneCatalog] regiontable{areaId:D3}.bin loaded: {recs.Length} records. " +
                        "spec: Docs/RE/formats/region_grid.md §regiontable CONFIRMED.");
@@ -312,7 +301,7 @@ public sealed class ZoneCatalog
 
     private RegionGrid? EnsureRegionGrid(int areaId)
     {
-        if (_gridCache.TryGetValue(areaId, out RegionGrid? cached)) return cached;
+        if (_gridCache.TryGetValue(areaId, out var cached)) return cached;
 
         if (_assets is null || areaId < 0 || areaId > RegionTableAreaCeiling)
         {
@@ -323,8 +312,8 @@ public sealed class ZoneCatalog
         try
         {
             // spec: Docs/RE/formats/region_grid.md §Layout A — "path pattern: data/mapNNN/regionNNN.bin".
-            string path = string.Format(RegionGridPathFmt, areaId);
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(path);
+            var path = string.Format(RegionGridPathFmt, areaId);
+            var raw = _assets.GetRaw(path);
             if (raw.IsEmpty)
             {
                 // Area has no region grid — normal for some areas; degrade gracefully.
@@ -333,7 +322,7 @@ public sealed class ZoneCatalog
             }
 
             // spec: Docs/RE/formats/region_grid.md §Layout A — region<area>.bin world XZ → region id.
-            RegionGrid grid = RegionBinParser.Parse(raw);
+            var grid = RegionBinParser.Parse(raw);
             _gridCache[areaId] = grid;
             GodotPrint($"[ZoneCatalog] region{areaId:D3}.bin grid loaded: {grid.Width}×{grid.Height}. " +
                        "spec: Docs/RE/formats/region_grid.md §Layout A.");
@@ -356,6 +345,13 @@ public sealed class ZoneCatalog
     // ── Thin Godot-print shims ─────────────────────────────────────────────
     // Isolated so the class is testable without Godot — swap for Console.Write in tests.
 
-    private static void GodotPrint(string msg) => GD.Print(msg);
-    private static void GodotPrintErr(string msg) => GD.PrintErr(msg);
+    private static void GodotPrint(string msg)
+    {
+        GD.Print(msg);
+    }
+
+    private static void GodotPrintErr(string msg)
+    {
+        GD.PrintErr(msg);
+    }
 }

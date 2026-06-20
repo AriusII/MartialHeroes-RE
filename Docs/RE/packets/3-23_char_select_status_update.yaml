@@ -10,7 +10,7 @@
 #   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
 #   capture_verified: false
 
-name: SmsgCharSelectStatusUpdate
+name: SmsgCharStatusBytesByName
 opcode: 0x30017           # major 3, minor 23 -> (3 << 16) | 23
 direction: S2C
 size: 28                  # fixed 28-byte payload

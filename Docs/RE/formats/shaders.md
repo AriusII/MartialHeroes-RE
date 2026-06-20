@@ -216,7 +216,7 @@ The Godot re-implementation should produce a `cel_shading.gdshader` (combining t
 
 ---
 
-## Sample File Metrics (cross-reference only — bytes stay in `_dirty/`)
+## Sample File Metrics (cross-reference only — sample bytes stay in the gitignored quarantine, never committed)
 
 These sizes are provided for parser sanity-checks and regression tests only. Do not commit the files.
 
@@ -508,4 +508,4 @@ Not applicable. This format carries no binary enumeration fields. The shader-typ
 - Related specs: `specs/rendering.md` (the render pipeline + glow/bloom post passes that bind these shaders), `specs/skinning.md` (the skinned-character vertex buffer the cel shader consumes)
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`
-- Dirty-room samples: `Docs/RE/_dirty/samples/data/shader/` (gitignored, do not commit)
+- Dirty-room shader samples are kept under the gitignored dirty-room quarantine (never committed)

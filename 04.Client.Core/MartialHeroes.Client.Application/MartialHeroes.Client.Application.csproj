@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -8,11 +8,26 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\MartialHeroes.Client.Domain\MartialHeroes.Client.Domain.csproj"/>
+        <!-- 04 -> 04.x downward seam: the event/HUD/scene/use-case contracts + DTOs live in
+             Application.Contracts (a project strictly below Application). Application implements them
+             and never the reverse — Contracts must never reference Application. -->
+        <ProjectReference Include="..\MartialHeroes.Client.Application.Contracts\MartialHeroes.Client.Application.Contracts.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Stats\MartialHeroes.Client.Domain.Stats.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Simulation\MartialHeroes.Client.Domain.Simulation.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Progression\MartialHeroes.Client.Domain.Progression.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Social\MartialHeroes.Client.Domain.Social.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Actors\MartialHeroes.Client.Domain.Actors.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Skills\MartialHeroes.Client.Domain.Skills.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Inventory\MartialHeroes.Client.Domain.Inventory.csproj"/>
         <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj"/>
         <!-- 04 -> 02 downward-legal: typed packet structs, FrameHeader, Opcodes, and the
-             Routing.IPacketHandler / PacketRouter dispatch seam this layer wires into. -->
-        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol\MartialHeroes.Network.Protocol.csproj"/>
+             Routing.IPacketHandler / PacketRouter dispatch seam this layer wires into.
+             Split from the former umbrella MartialHeroes.Network.Protocol into five projects. -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Core\MartialHeroes.Network.Protocol.Core.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Packets.Login\MartialHeroes.Network.Protocol.Packets.Login.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Packets.World\MartialHeroes.Network.Protocol.Packets.World.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Packets.Social\MartialHeroes.Network.Protocol.Packets.Social.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Routing\MartialHeroes.Network.Protocol.Routing.csproj"/>
         <!-- 04 -> 02 downward-legal: SessionHandshake (0/0 parse + 1/4 reply build) for the login
              handshake flow. The cipher/LZ4 stays downstream of IOutboundPacketSink; we only call the
              pure key-exchange parser and the PKCS#1 reply builder. -->

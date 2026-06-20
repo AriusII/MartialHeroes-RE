@@ -3,27 +3,31 @@ using System.Collections.Concurrent;
 namespace MartialHeroes.Client.Application.Input;
 
 /// <summary>
-/// The neutral input bus: Godot pushes raw pointer/key events in via <see cref="Dispatch"/>; the bus
-/// walks the registered handlers as a chain of responsibility (UI first, world second) and stops at
-/// the first that consumes the event. spec: Docs/RE/specs/input_ui.md §3 / §6 ("UI is the gate").
+///     The neutral input bus: Godot pushes raw pointer/key events in via <see cref="Dispatch" />; the bus
+///     walks the registered handlers as a chain of responsibility (UI first, world second) and stops at
+///     the first that consumes the event. spec: Docs/RE/specs/input_ui.md §3 / §6 ("UI is the gate").
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Two consumption modes.</b>
-/// <list type="bullet">
-/// <item><see cref="Dispatch"/> runs the chain <em>immediately</em> on the caller's thread, returning
-///   whether the event was consumed — the direct analogue of the legacy WndProc dispatch.</item>
-/// <item><see cref="Enqueue"/> queues the event so the deterministic <c>GameEngineLoop</c> can drain
-///   and dispatch it at the start of a fixed tick (<see cref="DrainInto"/>). This funnels input
-///   onto the single logical owner that mutates Domain, keeping the simulation deterministic
-///   (spec: Docs/RE/specs/game_loop.md §6, fixed-tick determinism).</item>
-/// </list>
-/// </para>
-/// <para>
-/// <b>Threading.</b> The queue is a lock-free MPSC <see cref="ConcurrentQueue{T}"/>: many producers
-/// (Godot input thread(s)) enqueue; the single loop thread drains. The handler list is fixed at
-/// construction so dispatch never allocates and never races a mutation. spec: input_ui.md §6.
-/// </para>
+///     <para>
+///         <b>Two consumption modes.</b>
+///         <list type="bullet">
+///             <item>
+///                 <see cref="Dispatch" /> runs the chain <em>immediately</em> on the caller's thread, returning
+///                 whether the event was consumed — the direct analogue of the legacy WndProc dispatch.
+///             </item>
+///             <item>
+///                 <see cref="Enqueue" /> queues the event so the deterministic <c>GameEngineLoop</c> can drain
+///                 and dispatch it at the start of a fixed tick (<see cref="DrainInto" />). This funnels input
+///                 onto the single logical owner that mutates Domain, keeping the simulation deterministic
+///                 (spec: Docs/RE/specs/game_loop.md §6, fixed-tick determinism).
+///             </item>
+///         </list>
+///     </para>
+///     <para>
+///         <b>Threading.</b> The queue is a lock-free MPSC <see cref="ConcurrentQueue{T}" />: many producers
+///         (Godot input thread(s)) enqueue; the single loop thread drains. The handler list is fixed at
+///         construction so dispatch never allocates and never races a mutation. spec: input_ui.md §6.
+///     </para>
 /// </remarks>
 public sealed class InputBus
 {
@@ -35,55 +39,51 @@ public sealed class InputBus
     private readonly ConcurrentQueue<InputEvent> _pending = new();
 
     /// <summary>
-    /// Creates a bus over the supplied handlers, in priority order (UI first, world last). spec:
-    /// Docs/RE/specs/input_ui.md §3.
+    ///     Creates a bus over the supplied handlers, in priority order (UI first, world last). spec:
+    ///     Docs/RE/specs/input_ui.md §3.
     /// </summary>
     public InputBus(params IInputHandler[] handlers)
     {
         ArgumentNullException.ThrowIfNull(handlers);
         _handlers = (IInputHandler[])handlers.Clone();
-        foreach (IInputHandler handler in _handlers)
-        {
-            ArgumentNullException.ThrowIfNull(handler);
-        }
+        foreach (var handler in _handlers) ArgumentNullException.ThrowIfNull(handler);
     }
 
     /// <summary>Number of events currently queued for the next tick drain.</summary>
     public int PendingCount => _pending.Count;
 
     /// <summary>
-    /// Runs the chain of responsibility for <paramref name="e"/> immediately and returns whether it was
-    /// consumed. Walks handlers in priority order, stopping at the first that returns
-    /// <see langword="true"/>. spec: Docs/RE/specs/input_ui.md §3 (UI consumes before world).
+    ///     Runs the chain of responsibility for <paramref name="e" /> immediately and returns whether it was
+    ///     consumed. Walks handlers in priority order, stopping at the first that returns
+    ///     <see langword="true" />. spec: Docs/RE/specs/input_ui.md §3 (UI consumes before world).
     /// </summary>
     public bool Dispatch(in InputEvent e)
     {
-        foreach (IInputHandler handler in _handlers)
-        {
+        foreach (var handler in _handlers)
             if (handler.TryHandle(in e))
-            {
                 return true; // UI (or an earlier link) consumed it; the world never sees it.
-            }
-        }
 
         return false;
     }
 
     /// <summary>
-    /// Queues <paramref name="e"/> for deterministic dispatch at the next fixed tick. Non-blocking;
-    /// safe to call from any producer thread. spec: Docs/RE/specs/game_loop.md §6 (drain per tick).
+    ///     Queues <paramref name="e" /> for deterministic dispatch at the next fixed tick. Non-blocking;
+    ///     safe to call from any producer thread. spec: Docs/RE/specs/game_loop.md §6 (drain per tick).
     /// </summary>
-    public void Enqueue(in InputEvent e) => _pending.Enqueue(e);
+    public void Enqueue(in InputEvent e)
+    {
+        _pending.Enqueue(e);
+    }
 
     /// <summary>
-    /// Drains every queued event and dispatches each through the chain of responsibility, returning the
-    /// number drained. Called by the loop at the start of a tick so all input mutation lands on the
-    /// single loop thread. spec: Docs/RE/specs/game_loop.md §6; input_ui.md §3.
+    ///     Drains every queued event and dispatches each through the chain of responsibility, returning the
+    ///     number drained. Called by the loop at the start of a tick so all input mutation lands on the
+    ///     single loop thread. spec: Docs/RE/specs/game_loop.md §6; input_ui.md §3.
     /// </summary>
     public int DrainAndDispatch()
     {
-        int count = 0;
-        while (_pending.TryDequeue(out InputEvent e))
+        var count = 0;
+        while (_pending.TryDequeue(out var e))
         {
             Dispatch(in e);
             count++;
@@ -93,14 +93,14 @@ public sealed class InputBus
     }
 
     /// <summary>
-    /// Drains every queued event into <paramref name="destination"/> without dispatching (diagnostics
-    /// / tests). Returns the number drained.
+    ///     Drains every queued event into <paramref name="destination" /> without dispatching (diagnostics
+    ///     / tests). Returns the number drained.
     /// </summary>
     public int DrainInto(ICollection<InputEvent> destination)
     {
         ArgumentNullException.ThrowIfNull(destination);
-        int count = 0;
-        while (_pending.TryDequeue(out InputEvent e))
+        var count = 0;
+        while (_pending.TryDequeue(out var e))
         {
             destination.Add(e);
             count++;

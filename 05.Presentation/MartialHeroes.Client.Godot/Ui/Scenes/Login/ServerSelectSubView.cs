@@ -22,28 +22,39 @@
 // spec: Docs/RE/specs/frontend_layout_tables.md §4
 // spec: Docs/RE/specs/login_flow.md §2.1
 
+using System.Globalization;
 using Godot;
-using MartialHeroes.Client.Godot.Screens; // ServerEntry record defined in ServerSelectScreen.cs
-using MartialHeroes.Client.Godot.Screens.Layout;
-using MartialHeroes.Client.Godot.Ui;
 using MartialHeroes.Client.Godot.Ui.Assets;
+using MartialHeroes.Client.Presentation.Screens;
+using MartialHeroes.Client.Presentation.Screens.Layout;
+// ServerEntry (moved to engine-free layer)
+
+// LoginLayout, WidgetRect (moved to engine-free layer)
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 /// <summary>
-/// Server-select sub-view for Login(1) sub-states 34..41.
-///
-/// <para>Renders up to two server "plate" sprites for the current page, with pager tabs
-/// and per-plate population-colour captions. All atlas drawing comes from
-/// <see cref="HudAtlasLibrary"/>; caption text from <see cref="HudTextLibrary"/>.</para>
-///
-/// <para>Subscribe to <see cref="ServerSelected"/> to receive the chosen server id.
-/// Passive intent only — never mutates domain state.</para>
-///
-/// spec: Docs/RE/specs/frontend_layout_tables.md §4
+///     Server-select sub-view for Login(1) sub-states 34..41.
+///     <para>
+///         Renders up to two server "plate" sprites for the current page, with pager tabs
+///         and per-plate population-colour captions. All atlas drawing comes from
+///         <see cref="HudAtlasLibrary" />; caption text from <see cref="HudTextLibrary" />.
+///     </para>
+///     <para>
+///         Subscribe to <see cref="ServerSelected" /> to receive the chosen server id.
+///         Passive intent only — never mutates domain state.
+///     </para>
+///     spec: Docs/RE/specs/frontend_layout_tables.md §4
 /// </summary>
 public sealed partial class ServerSelectSubView : Control
 {
+    // -------------------------------------------------------------------------
+    // Signals
+    // -------------------------------------------------------------------------
+
+    [Signal]
+    public delegate void ServerSelectedEventHandler(int serverId);
+
     // Atlas paths. spec: Docs/RE/specs/frontend_layout_tables.md §1 / §4
     private const string AtlasD = "data/ui/loginwindow_02.dds"; // A4 = loginwindow_02.dds
     private const string AtlasB = "data/ui/loginwindow.dds"; // A2 = loginwindow.dds
@@ -142,30 +153,26 @@ public sealed partial class ServerSelectSubView : Control
     // "msg 4029/4030/4031/4032 are the STATUS CAPTIONS (keyed by status_code)"
     private const int StatusCaptionMsgBase = 4029; // spec: frontend_layout_tables.md §4
 
+    // Server name caption id base. spec: Docs/RE/specs/frontend_layout_tables.md §4
+    private const int ServerNameCaptionBase = 5000; // server_id N → caption 5000+N
+
     // Population colour DWORDs (ARGB). spec: Docs/RE/specs/frontend_layout_tables.md §4
     private static readonly Color PopColorRed = Color.Color8(255, 0, 0);
     private static readonly Color PopColorOrange = Color.Color8(237, 104, 6);
     private static readonly Color PopColorYellow = Color.Color8(255, 255, 0);
     private static readonly Color PopColorGreen = Color.Color8(181, 255, 122);
 
-    // Server name caption id base. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int ServerNameCaptionBase = 5000; // server_id N → caption 5000+N
-
     // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
-    private readonly HudTextLibrary _text;
-    private IReadOnlyList<ServerEntry> _servers = [];
-    private int _page;
 
-    /// <summary>
-    /// Remembered last-selected server id (registry <c>Lastserver</c>), used to pre-highlight the plate on
-    /// re-entry. <c>-1</c> = none (no highlight) — the default offline, since no Lastserver is read.
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight".
-    /// </summary>
-    public int LastServerId { get; set; } = -1;
+    // Three status-color indicator quads (A2 src(500,786) 60×39), hidden by default.
+    // Re-anchored around a status==100 special row when present.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3"
+    private readonly TextureRect?[] _statusIndicators = new TextureRect?[3];
+    private readonly HudTextLibrary _text;
 
     // Sub-state 35 loading sentinel: true from sub-view creation until SetServers() is called.
     // Distinguishes the "fetching" state (35 — list not yet received) from the error state (36 —
@@ -173,25 +180,15 @@ public sealed partial class ServerSelectSubView : Control
     // incorrectly printed while the server-list worker is still running.
     // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
     private bool _loading = true;
-
-    // Three status-color indicator quads (A2 src(500,786) 60×39), hidden by default.
-    // Re-anchored around a status==100 special row when present.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3"
-    private readonly TextureRect?[] _statusIndicators = new TextureRect?[3];
-
-    // -------------------------------------------------------------------------
-    // Signals
-    // -------------------------------------------------------------------------
-
-    [Signal]
-    public delegate void ServerSelectedEventHandler(int serverId);
+    private int _page;
+    private IReadOnlyList<ServerEntry> _servers = [];
 
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates the server-select sub-view.
+    ///     Creates the server-select sub-view.
     /// </summary>
     public ServerSelectSubView(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -202,16 +199,23 @@ public sealed partial class ServerSelectSubView : Control
         MouseFilter = MouseFilterEnum.Pass;
     }
 
+    /// <summary>
+    ///     Remembered last-selected server id (registry <c>Lastserver</c>), used to pre-highlight the plate on
+    ///     re-entry. <c>-1</c> = none (no highlight) — the default offline, since no Lastserver is read.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight".
+    /// </summary>
+    public int LastServerId { get; set; } = -1;
+
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Populates the server list. Rebuilds the plate layout to match the count.
-    /// Clears the loading flag (transitions from sub-state 35 fetching to 36/37 resolved).
-    /// Must be called on the main thread (Control mutation).
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-states 35→36→37
-    /// spec: Docs/RE/specs/login_flow.md §2.1
+    ///     Populates the server list. Rebuilds the plate layout to match the count.
+    ///     Clears the loading flag (transitions from sub-state 35 fetching to 36/37 resolved).
+    ///     Must be called on the main thread (Control mutation).
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-states 35→36→37
+    ///     spec: Docs/RE/specs/login_flow.md §2.1
     /// </summary>
     public void SetServers(IReadOnlyList<ServerEntry> servers)
     {
@@ -228,12 +232,12 @@ public sealed partial class ServerSelectSubView : Control
     private void RebuildLayout()
     {
         // Reset indicator refs before freeing (they may be children).
-        for (int i = 0; i < _statusIndicators.Length; i++)
+        for (var i = 0; i < _statusIndicators.Length; i++)
             _statusIndicators[i] = null;
 
-        for (int i = GetChildCount() - 1; i >= 0; i--)
+        for (var i = GetChildCount() - 1; i >= 0; i--)
         {
-            Node child = GetChild(i);
+            var child = GetChild(i);
             RemoveChild(child);
             child.QueueFree();
         }
@@ -251,11 +255,11 @@ public sealed partial class ServerSelectSubView : Control
     //   atlas A2 (loginwindow.dds) src(500,786) 60×39, hidden by default"
     private void BuildStatusIndicators()
     {
-        AtlasTexture? tex = _atlas.SliceByPath(AtlasB,
+        var tex = _atlas.SliceByPath(AtlasB,
             LoginLayout.StatusIndicatorSrcX, LoginLayout.StatusIndicatorSrcY,
             LoginLayout.StatusIndicatorW, LoginLayout.StatusIndicatorH);
 
-        for (int i = 0; i < LoginLayout.StatusIndicatorCount; i++) // spec: §4 (×3)
+        for (var i = 0; i < LoginLayout.StatusIndicatorCount; i++) // spec: §4 (×3)
         {
             var rect = new TextureRect
             {
@@ -263,7 +267,7 @@ public sealed partial class ServerSelectSubView : Control
                 Size = new Vector2(LoginLayout.StatusIndicatorW, LoginLayout.StatusIndicatorH),
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
-                Visible = false, // hidden by default; shown when status==100 row present
+                Visible = false // hidden by default; shown when status==100 row present
             };
             _statusIndicators[i] = rect;
             AddChild(rect);
@@ -276,7 +280,7 @@ public sealed partial class ServerSelectSubView : Control
 
         // Hide all status indicators by default; re-anchored if status==100 found.
         // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads … hidden by default"
-        foreach (TextureRect? ind in _statusIndicators)
+        foreach (var ind in _statusIndicators)
             if (ind is not null)
                 ind.Visible = false;
 
@@ -294,21 +298,21 @@ public sealed partial class ServerSelectSubView : Control
         {
             // Sub-state 36 error branch: worker returned zero records → msg 4027.
             // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 36 "0 records → msg 4027"
-            string msg = _text.GetCaption(LoginLayout.MsgErrNoServers, string.Empty);
+            var msg = _text.GetCaption(LoginLayout.MsgErrNoServers, string.Empty);
             GD.Print($"[ServerSelectSubView] state 36 error: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
             return;
         }
 
-        int firstIndex = _page * 2; // spec: frontend_layout_tables.md §4 "plate index = 2·page + slot"
-        int visibleCount = Math.Min(2, _servers.Count - firstIndex);
+        var firstIndex = _page * 2; // spec: frontend_layout_tables.md §4 "plate index = 2·page + slot"
+        var visibleCount = Math.Min(2, _servers.Count - firstIndex);
 
         int[] plateX = [PlateBaseX0, PlateBaseX1];
         int[] statusSrcX = [StatusIconSrcX0, StatusIconSrcX1];
         int[] actions = [ActionPlate0, ActionPlate1];
 
-        for (int slot = 0; slot < visibleCount; slot++)
+        for (var slot = 0; slot < visibleCount; slot++)
         {
-            int idx = firstIndex + slot;
+            var idx = firstIndex + slot;
 
             // Default-selection highlight (drawn BEHIND the plate): only when this plate's server id
             // matches the remembered last-server. spec: §4.2 "Default-selection highlight".
@@ -344,14 +348,12 @@ public sealed partial class ServerSelectSubView : Control
 
         // Quads 1 and 2: (anchorX+139, anchorY+13) — overlap exactly (faithful duplicate).
         // spec: Docs/RE/specs/frontend_layout_tables.md §4 "quads 1 and 2 overlap exactly"
-        for (int i = 1; i <= 2; i++)
-        {
+        for (var i = 1; i <= 2; i++)
             if (_statusIndicators[i] is { } ind)
             {
                 ind.Position = PanelPoint(anchorX + 139, anchorY + 13);
                 ind.Visible = true;
             }
-        }
     }
 
     // Builds the default-selection highlight strip behind the plate at (x,y) whose server id matches the
@@ -363,21 +365,21 @@ public sealed partial class ServerSelectSubView : Control
         if (strip is null)
             return;
 
-        int hx = x + PlateStripOffsetX + PlateW - HighlightRightInset; // plate-right − 48, per the painter
-        int hy = y + (PlateH - HighlightH) / 2; // y kept on the plate; strip is shorter than the plate
+        var hx = x + PlateStripOffsetX + PlateW - HighlightRightInset; // plate-right − 48, per the painter
+        var hy = y + (PlateH - HighlightH) / 2; // y kept on the plate; strip is shorter than the plate
         AddChild(new TextureRect
         {
             Position = PanelPoint(hx, hy),
             Size = new Vector2(HighlightW, HighlightH),
             Texture = strip,
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
     }
 
     private void BuildPlate(int x, int y, int actionId, int serverIndex, int statusSrcX)
     {
-        ServerEntry e = _servers[serverIndex];
+        var e = _servers[serverIndex];
 
         // Per-plate build/draw order is the binary's (CONFIRMED, element-level pass 2026-06-19):
         //   (1) parchment select BUTTON → (2) NAME label → (3) calligraphy FACE → (4) STATUS caption →
@@ -401,7 +403,7 @@ public sealed partial class ServerSelectSubView : Control
             TextureNormal = normal,
             TextureHover = hover,
             TexturePressed = hover,
-            TextureDisabled = normal,
+            TextureDisabled = normal
         };
         btn.Pressed += () => OnPlateClicked(actionId);
         AddChild(btn);
@@ -413,16 +415,14 @@ public sealed partial class ServerSelectSubView : Control
         // parchment button. spec: §4 (z-order CONFIRMED 2026-06-19 — face inserted after the button).
         Texture2D? face = _atlas.SliceByPath(AtlasD, statusSrcX, StatusIconSrcY, StatusIconW, StatusIconH);
         if (face is not null)
-        {
             AddChild(new TextureRect
             {
                 Position = PanelPoint(x + StatusIconOffsetX, y),
                 Size = new Vector2(StatusIconW, StatusIconH),
                 Texture = face,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore, // decoration: never blocks the button hit. spec §4.
+                MouseFilter = MouseFilterEnum.Ignore // decoration: never blocks the button hit. spec §4.
             });
-        }
 
         // (4) STATUS caption + (5) COUNT label, drawn on top of the face. spec: §4.
         AddPlateStatus(x, e);
@@ -432,10 +432,10 @@ public sealed partial class ServerSelectSubView : Control
     private void OnPlateClicked(int actionId)
     {
         // spec: Docs/RE/specs/frontend_layout_tables.md §4 "index = (action−400) + 2·page"
-        int idx = 2 * _page + (actionId - ActionPlate0);
+        var idx = 2 * _page + (actionId - ActionPlate0);
         if (idx >= 0 && idx < _servers.Count)
         {
-            ServerEntry entry = _servers[idx];
+            var entry = _servers[idx];
             if (!entry.IsSelectable)
             {
                 GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
@@ -456,10 +456,10 @@ public sealed partial class ServerSelectSubView : Control
         //   "'Tabs' clarification: the ten 115+i buttons are a HIDDEN page-jump strip re-parked to a
         //    blank UV on each repaint. Do NOT render them as visible tabs."
         // The hit regions are still present (for action dispatch); they are just hidden.
-        for (int i = 0; i < PagerCount; i++)
+        for (var i = 0; i < PagerCount; i++)
         {
-            int x = 13 + i * 47; // spec: frontend_layout_tables.md §4 "pager (13+47·i, 66)"
-            int actionId = PagerActionBase + i;
+            var x = 13 + i * 47; // spec: frontend_layout_tables.md §4 "pager (13+47·i, 66)"
+            var actionId = PagerActionBase + i;
 
             var btn = new TextureButton
             {
@@ -469,10 +469,10 @@ public sealed partial class ServerSelectSubView : Control
                 IgnoreTextureSize = true,
                 StretchMode = TextureButton.StretchModeEnum.Scale,
                 // No textures — blank UV per spec (hidden pager). spec §4.
-                Visible = false, // hidden: the shipped server-list shows no visible tab strip. spec §4.
+                Visible = false // hidden: the shipped server-list shows no visible tab strip. spec §4.
             };
 
-            int capturedAction = actionId;
+            var capturedAction = actionId;
             btn.Pressed += () => OnPagerClicked(capturedAction);
             AddChild(btn);
         }
@@ -486,32 +486,28 @@ public sealed partial class ServerSelectSubView : Control
         // Absolute canvas coords — not panel-relative. spec §4.
         Texture2D? backdrop = _atlas.SliceByPath(AtlasB, 0, 0, BackdropW, BackdropH); // src(0,0)
         if (backdrop is not null)
-        {
             AddChild(new TextureRect
             {
                 Position = new Vector2(BackdropX, BackdropY), // abs (0,110) spec §4
                 Size = new Vector2(BackdropW, BackdropH), // 1024×490 spec §4
                 Texture = backdrop,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             });
-        }
 
         // BACKDROP LAYER 2: list-box scroll panel (270,85,483,490) src(0,490). spec §4.
         Texture2D? frame = _atlas.SliceByPath(AtlasB,
             LoginLayout.ServerListbox.SrcX, LoginLayout.ServerListbox.SrcY,
             LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
         if (frame is not null)
-        {
             AddChild(new TextureRect
             {
                 Position = PanelPoint(0, 0),
                 Size = new Vector2(LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H),
                 Texture = frame,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             });
-        }
 
         // Title "서버선택": baked A2 image dst(207,44) 70×17 src(0,980). spec §4.
         // "Title '서버선택' = a baked atlas image (not a msg string): atlas A2, dst(207,44) 70×17, source(0,980)"
@@ -519,16 +515,14 @@ public sealed partial class ServerSelectSubView : Control
         Texture2D? title = _atlas.SliceByPath(AtlasB, TitleSrcX, TitleSrcY,
             LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H);
         if (title is not null)
-        {
             AddChild(new TextureRect
             {
                 Position = new Vector2(TitleAbsX, TitleAbsY), // abs (207,44) spec §4
                 Size = new Vector2(LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H),
                 Texture = title,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             });
-        }
     }
 
     private void BuildFlagImage()
@@ -538,7 +532,7 @@ public sealed partial class ServerSelectSubView : Control
         //   "EVENT badge = a baked image: atlas A1, dst(407,−3) 210×70, source(743,398)"
         // Uses LoginLayout.QuitDecoPlate which captures exactly this rect (A1 src 743,398 210×70 dst 407,−3).
         // Absolute canvas coords — not panel-relative. spec §4.
-        WidgetRect r = LoginLayout.QuitDecoPlate; // A1 dst(407,-3,210,70) src(743,398). spec §4.
+        var r = LoginLayout.QuitDecoPlate; // A1 dst(407,-3,210,70) src(743,398). spec §4.
         Texture2D? tex = _atlas.SliceByPath(AtlasA1, r.SrcX, r.SrcY, r.W, r.H);
         if (tex is null)
             return;
@@ -549,7 +543,7 @@ public sealed partial class ServerSelectSubView : Control
             Size = new Vector2(r.W, r.H), // 210×70 spec §4
             Texture = tex,
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
     }
 
@@ -567,9 +561,8 @@ public sealed partial class ServerSelectSubView : Control
     //   "name label (30+233·i, 390, 174×21) … font slot 0 … center-aligned (align mode 2)"
     private void AddPlateName(int plateX, ServerEntry e)
     {
-        string name = ResolveServerName(e);
-        AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White, fontSlot: 0,
-            align: HorizontalAlignment.Center);
+        var name = ResolveServerName(e);
+        AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White);
     }
 
     // STATUS CAPTION label @ (x, 410, 174×20): font slot 4, center-aligned, colored per §4 branch.
@@ -581,9 +574,8 @@ public sealed partial class ServerSelectSubView : Control
     //   "other status_code: caption msg(4029+status_code), no color override"
     private void AddPlateStatus(int plateX, ServerEntry e)
     {
-        string statusCaption = ResolveStatusCaption(e, out Color statusColor);
-        AddRowLabel(statusCaption, plateX, RowLabelY1, RowLabelH, statusColor, fontSlot: 4,
-            align: HorizontalAlignment.Center);
+        var statusCaption = ResolveStatusCaption(e, out var statusColor);
+        AddRowLabel(statusCaption, plateX, RowLabelY1, RowLabelH, statusColor, 4);
     }
 
     // COUNT label @ (x, 430, 174×20): set to EMPTY STRING per spec §4 CORRECTION 2026-06-19.
@@ -593,19 +585,18 @@ public sealed partial class ServerSelectSubView : Control
     //    the slot-4 label is the STATUS caption at +410; +430 is left blank."
     private void AddPlateCount(int plateX)
     {
-        AddRowLabel(string.Empty, plateX, RowLabelY2, RowLabelH, Colors.White, fontSlot: 0,
-            align: HorizontalAlignment.Center);
+        AddRowLabel(string.Empty, plateX, RowLabelY2, RowLabelH, Colors.White);
     }
 
     /// <summary>
-    /// Resolves the status-caption text and color for the +410 slot-4 label.
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §4
-    ///   "Status / load coloring … slot-4 status caption at +410; ARGB re-confirmed 2026-06-18/2026-06-19"
+    ///     Resolves the status-caption text and color for the +410 slot-4 label.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4
+    ///     "Status / load coloring … slot-4 status caption at +410; ARGB re-confirmed 2026-06-18/2026-06-19"
     /// </summary>
     private string ResolveStatusCaption(ServerEntry e, out Color color)
     {
         // Load-valid flag = OpenTime/+6 nonzero. spec: §4.1 "+6 load-valid flag" (RESOLVED 2026-06-20).
-        bool loadValid = e.OpenTime != 0;
+        var loadValid = e.OpenTime != 0;
 
         if (e.StatusCode == 0)
         {
@@ -675,7 +666,7 @@ public sealed partial class ServerSelectSubView : Control
             // Faithful to the painter: msg 6005 is snprintf'd with FOUR digit args in order
             // (hourTens, hourOnes, minTens, minOnes), hour = Load(+4), minute = OpenTime(+6).
             // spec: frontend_layout_tables.md §4 "status_code==3 … snprintf(msg 6005, …) = HH:MM from +4/+6".
-            string template = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
+            var template = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
             return FormatScheduledTime(template, e.Load, e.OpenTime);
         }
 
@@ -696,7 +687,7 @@ public sealed partial class ServerSelectSubView : Control
             HorizontalAlignment = align,
             VerticalAlignment = VerticalAlignment.Center,
             AutowrapMode = TextServer.AutowrapMode.Off,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         label.AddThemeColorOverride("font_color", color);
         // Apply font slot override (slot 4 = DotumChe 12 w800 for population label).
@@ -707,25 +698,28 @@ public sealed partial class ServerSelectSubView : Control
 
     private int ClampPage(int requestedPage)
     {
-        int pageCount = Math.Max(1, (_servers.Count + 1) / 2);
+        var pageCount = Math.Max(1, (_servers.Count + 1) / 2);
         return Math.Clamp(requestedPage, 0, pageCount - 1);
     }
 
     private string BuildPageBreadcrumb(int firstIndex, int visibleCount)
     {
-        string plate0 = DescribePlate(0, firstIndex);
-        string plate1 = visibleCount > 1 ? DescribePlate(1, firstIndex + 1) : "plate1=<none>";
+        var plate0 = DescribePlate(0, firstIndex);
+        var plate1 = visibleCount > 1 ? DescribePlate(1, firstIndex + 1) : "plate1=<none>";
         return $"[ServerSelectSubView] page {_page}: {plate0}, {plate1}";
     }
 
     private string DescribePlate(int plateSlot, int serverIndex)
     {
-        ServerEntry e = _servers[serverIndex];
-        string name = ResolveServerName(e);
+        var e = _servers[serverIndex];
+        var name = ResolveServerName(e);
         return $"plate{plateSlot}=server {e.ServerId} '{name}' load {e.Load} selectable={e.IsSelectable}";
     }
 
-    private static Vector2 PanelPoint(int x, int y) => new(PanelX + x, PanelY + y);
+    private static Vector2 PanelPoint(int x, int y)
+    {
+        return new Vector2(PanelX + x, PanelY + y);
+    }
 
     private string ResolveServerName(ServerEntry e)
     {
@@ -735,7 +729,7 @@ public sealed partial class ServerSelectSubView : Control
             return _text.GetCaption(ServerNameCaptionBase + e.ServerId, string.Empty);
 
         // Out-of-range fallback: msg 5901 (formatted). spec: §2.3
-        string template = _text.GetCaption(LoginLayout.MsgServerUnknown, string.Empty);
+        var template = _text.GetCaption(LoginLayout.MsgServerUnknown, string.Empty);
         return FormatCaption(template, e.ServerId, string.Empty);
     }
 
@@ -746,9 +740,9 @@ public sealed partial class ServerSelectSubView : Control
     // otherwise a plain HH:MM fallback. spec: frontend_layout_tables.md §4 (status_code==3 → msg 6005).
     private static string FormatScheduledTime(string template, int hour, int minute)
     {
-        int hourTens = (hour / 10) % 10, hourOnes = hour % 10;
-        int minTens = (minute / 10) % 10, minOnes = minute % 10;
-        string fallback = $"{hour:00}:{minute:00}";
+        int hourTens = hour / 10 % 10, hourOnes = hour % 10;
+        int minTens = minute / 10 % 10, minOnes = minute % 10;
+        var fallback = $"{hour:00}:{minute:00}";
 
         if (template.Length == 0)
             return fallback;
@@ -756,9 +750,9 @@ public sealed partial class ServerSelectSubView : Control
         // Four single %d (the binary's snprintf form): substitute the four digits in order.
         if (CountOccurrences(template, "%d") >= 4)
         {
-            string s = template;
-            foreach (int d in (ReadOnlySpan<int>)[hourTens, hourOnes, minTens, minOnes])
-                s = ReplaceFirst(s, "%d", d.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            var s = template;
+            foreach (var d in (ReadOnlySpan<int>)[hourTens, hourOnes, minTens, minOnes])
+                s = ReplaceFirst(s, "%d", d.ToString(CultureInfo.InvariantCulture));
             return s;
         }
 
@@ -781,7 +775,9 @@ public sealed partial class ServerSelectSubView : Control
     // Formats a caption template from msg.xdb that may use {0}/{0:00} or %02d placeholders.
     // Only used for status_code==3 HH:MM (MsgServerClockFormat) and the out-of-range server name fallback.
     private static string FormatCaption(string template, int value0, string fallback)
-        => FormatCaption(template, value0, 0, fallback);
+    {
+        return FormatCaption(template, value0, 0, fallback);
+    }
 
     private static string FormatCaption(string template, int value0, int value1, string fallback)
     {
@@ -789,21 +785,21 @@ public sealed partial class ServerSelectSubView : Control
         try
         {
             if (template.Contains("{0", StringComparison.Ordinal))
-                return string.Format(System.Globalization.CultureInfo.InvariantCulture, template, value0, value1);
+                return string.Format(CultureInfo.InvariantCulture, template, value0, value1);
 
             if (template.Contains("%02d", StringComparison.Ordinal))
             {
-                string s = ReplaceFirst(template, "%02d",
-                    value0.ToString("00", System.Globalization.CultureInfo.InvariantCulture));
+                var s = ReplaceFirst(template, "%02d",
+                    value0.ToString("00", CultureInfo.InvariantCulture));
                 return ReplaceFirst(s, "%02d",
-                    value1.ToString("00", System.Globalization.CultureInfo.InvariantCulture));
+                    value1.ToString("00", CultureInfo.InvariantCulture));
             }
 
             if (template.Contains("%d", StringComparison.Ordinal))
             {
-                string s = ReplaceFirst(template, "%d",
-                    value0.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                return ReplaceFirst(s, "%d", value1.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                var s = ReplaceFirst(template, "%d",
+                    value0.ToString(CultureInfo.InvariantCulture));
+                return ReplaceFirst(s, "%d", value1.ToString(CultureInfo.InvariantCulture));
             }
         }
         catch (FormatException)
@@ -816,7 +812,7 @@ public sealed partial class ServerSelectSubView : Control
 
     private static string ReplaceFirst(string value, string oldValue, string newValue)
     {
-        int idx = value.IndexOf(oldValue, StringComparison.Ordinal);
+        var idx = value.IndexOf(oldValue, StringComparison.Ordinal);
         return idx < 0 ? value : value[..idx] + newValue + value[(idx + oldValue.Length)..];
     }
 }

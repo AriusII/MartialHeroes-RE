@@ -35,17 +35,18 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game system notice / confirm modal (MessagePanel, slot 190).
-///
-/// <para>PASSIVE: receives display text via <see cref="ShowNotice"/> or
-/// <see cref="ShowConfirm"/> and returns the user's choice via callbacks.
-/// No game-rule logic; no domain mutation.</para>
-///
-/// <para>Mode 0 — single OK notice.<br/>
-/// Mode 1 — Yes/No confirm (onYes callback fires if the user presses Yes).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.20 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 190.
+///     In-game system notice / confirm modal (MessagePanel, slot 190).
+///     <para>
+///         PASSIVE: receives display text via <see cref="ShowNotice" /> or
+///         <see cref="ShowConfirm" /> and returns the user's choice via callbacks.
+///         No game-rule logic; no domain mutation.
+///     </para>
+///     <para>
+///         Mode 0 — single OK notice.<br />
+///         Mode 1 — Yes/No confirm (onYes callback fires if the user presses Yes).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.20 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 190.
 /// </summary>
 public sealed partial class HudMessagePanel : Control
 {
@@ -62,10 +63,6 @@ public sealed partial class HudMessagePanel : Control
     // All buttons: w=113, h=40.
     private const float BtnW = 113f; // spec: ui_system.md §8.20.3
     private const float BtnH = 40f; // spec: ui_system.md §8.20.3
-
-    private static readonly Vector2 BtnLeftPos = new(MsgW / 2f - 120f, MsgH - 60f); // spec: §8.20.3 action 0 (Yes)
-    private static readonly Vector2 BtnRightPos = new(MsgW / 2f + 7f, MsgH - 60f); // spec: §8.20.3 action 1 (No)
-    private static readonly Vector2 BtnOkPos = new(MsgW / 2f - 56f, MsgH - 55f); // spec: §8.20.3 action 2 (OK)
 
     // Atlas uitex ids (CODE-CONFIRMED)
     // spec: ui_system.md §8.20.2 — uitex 2 = inventwindow.dds, uitex 8 = skillwindow.dds
@@ -87,32 +84,35 @@ public sealed partial class HudMessagePanel : Control
     private const int NoHoverX = 886;
     private const int NoHoverY = 984; // spec: §8.20.3 uitex 8
 
-    // -------------------------------------------------------------------------
-    // View state
-    // -------------------------------------------------------------------------
+    private static readonly Vector2 BtnLeftPos = new(MsgW / 2f - 120f, MsgH - 60f); // spec: §8.20.3 action 0 (Yes)
+    private static readonly Vector2 BtnRightPos = new(MsgW / 2f + 7f, MsgH - 60f); // spec: §8.20.3 action 1 (No)
+    private static readonly Vector2 BtnOkPos = new(MsgW / 2f - 56f, MsgH - 55f); // spec: §8.20.3 action 2 (OK)
+    private Button? _btnLeft; // Yes — mode 1
 
-    private bool _open;
-    private Action? _onYes;
-    private Action? _onNo;
+    // Buttons
+    private Button? _btnOk;
+    private Button? _btnRight; // No  — mode 1
 
     // Body text labels
     private Label? _label0;
     private Label? _label1;
     private Label? _label2;
+    private Action? _onNo;
+    private Action? _onYes;
 
-    // Buttons
-    private Button? _btnOk;
-    private Button? _btnLeft; // Yes — mode 1
-    private Button? _btnRight; // No  — mode 1
+    // -------------------------------------------------------------------------
+    // View state
+    // -------------------------------------------------------------------------
+
+    private bool _open;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the centered 340×190 modal with OK + Yes/No buttons.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.20.1 / §8.20.3 CODE-CONFIRMED.
+    ///     Geometry pass: builds the centered 340×190 modal with OK + Yes/No buttons.
+    ///     spec: Docs/RE/specs/ui_system.md §8.20.1 / §8.20.3 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -152,7 +152,7 @@ public sealed partial class HudMessagePanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(0f, 50f),
             Size = new Vector2(MsgW, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_label0);
 
@@ -163,7 +163,7 @@ public sealed partial class HudMessagePanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(0f, 80f),
             Size = new Vector2(MsgW, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_label1);
 
@@ -174,7 +174,7 @@ public sealed partial class HudMessagePanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(0f, 110f),
             Size = new Vector2(MsgW, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_label2);
 
@@ -212,7 +212,7 @@ public sealed partial class HudMessagePanel : Control
             Text = fallbackText,
             Position = pos,
             Size = new Vector2(BtnW, BtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         // Graceful-null: if atlas unavailable, fallback text is used
         if (atlas is not null)
@@ -229,9 +229,9 @@ public sealed partial class HudMessagePanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows the modal in mode 0 (single OK notice) with the given text.
-    /// The text is already-decoded CP949 from Application; render as-is.
-    /// spec: Docs/RE/specs/ui_system.md §8.20 — mode 0: single OK notice.
+    ///     Shows the modal in mode 0 (single OK notice) with the given text.
+    ///     The text is already-decoded CP949 from Application; render as-is.
+    ///     spec: Docs/RE/specs/ui_system.md §8.20 — mode 0: single OK notice.
     /// </summary>
     public void ShowNotice(string text)
     {
@@ -248,10 +248,10 @@ public sealed partial class HudMessagePanel : Control
     }
 
     /// <summary>
-    /// Shows the modal in mode 1 (Yes/No confirm) with the given text.
-    /// <paramref name="onYes"/> fires when the player confirms Yes (action 0).
-    /// <paramref name="onNo"/> fires when the player presses No (action 1) or Esc.
-    /// spec: Docs/RE/specs/ui_system.md §8.20 — mode 1: Yes/No confirm.
+    ///     Shows the modal in mode 1 (Yes/No confirm) with the given text.
+    ///     <paramref name="onYes" /> fires when the player confirms Yes (action 0).
+    ///     <paramref name="onNo" /> fires when the player presses No (action 1) or Esc.
+    ///     spec: Docs/RE/specs/ui_system.md §8.20 — mode 1: Yes/No confirm.
     /// </summary>
     public void ShowConfirm(string text, Action? onYes = null, Action? onNo = null)
     {
@@ -274,7 +274,7 @@ public sealed partial class HudMessagePanel : Control
 
     private void ApplyMode(int mode)
     {
-        bool modeOk = (mode == 0);
+        var modeOk = mode == 0;
         if (_btnOk is not null) _btnOk.Visible = modeOk;
         if (_btnLeft is not null) _btnLeft.Visible = !modeOk;
         if (_btnRight is not null) _btnRight.Visible = !modeOk;

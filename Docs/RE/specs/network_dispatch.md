@@ -5,7 +5,7 @@ build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wav
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
 verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read")
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-20   # §4.5 keepalive cadence re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) the open "second worker" item is RESOLVED — there is a THREE-thread model (recv consumer + keepalive timer on the NetClient side, and a THIRD socket-I/O thread spawned by the connection's connect routine that does WSARecv-completion → frame reassembly → recv queue → re-arm, and also services the send-signal → WSASend); (e) the 2/10000 keepalive body is 4 bytes (one zero u32), NOT header-only; (f) the exhaustive Response/Push install slot maps are folded in (§2a/§2b), cross-referencing opcodes.md for handler NAMES; (g) the 5/146→C2S 2/146 ack-request handshake is recorded; (h) {202/203/232} 3/100 codes prime GameState=2 (cross-link to §5); (i) PHANTOM REFUTED — there is NO 5000/10000/10001 string-id class (5000=display-duration ms; 10000=keepalive minor + 10 s timer; 10001=timed-event tag)
@@ -448,8 +448,8 @@ There are **four distinct netcode thread procedures**, owned by two distinct obj
 network-client's **start-engine** spawn arms two of them (the receive consumer and the keepalive
 timer); the embedded connection sub-object's **connect** routine spawns the genuine socket I/O thread
 (thread #3 — this resolves the old "second worker" item, old §8); and a separate **send-proxy /
-heartbeat** thread (#4) is spawned by the network-client (from a routine distinct from the start-engine
-pair) to fire the periodic C2S heartbeats. *([confirmed]; build 263bd994. Thread #4 added CYCLE 5 —
+idle-filler** thread (#4) is spawned by the network-client (from a routine distinct from the start-engine
+pair) to emit the cadence-less C2S idle fillers (`1/2` and `2/13`). *([confirmed]; build 263bd994. Thread #4 added CYCLE 5 —
 the earlier "three-thread" wording undercounted it; the start-engine path itself still spawns exactly
 two slots, so the §4.2/§4.3 start-engine description below is unchanged.)*
 
@@ -458,7 +458,7 @@ two slots, so the §4.2/§4.3 start-engine description below is unchanged.)*
 | 1 | **Receive consumer** ("network worker") | network-client start-engine spawn (worker slot at client `+82312`) | network-client | Pops a *fully-reassembled* frame off the connection's receive queue and posts a dispatch event (§4.4). Pure producer → dispatch; never touches the socket. |
 | 2 | **Keepalive timer** ("network live") | network-client start-engine spawn (worker slot at client `+82328`) | network-client | A 1-second periodic timer loop; re-sends the cached `(2,10000)` keepalive frame when the link has been idle (§4.5). Not a socket thread. |
 | 3 | **Connection I/O thread** (the real socket worker) | the connection's **connect routine**, via the C runtime thread-spawn call (`_beginthreadex`) | embedded connection sub-object | Overlapped `WSARecv`-completion → **frame reassembly** → push complete frames onto the receive queue → re-arm `WSARecv`; also services the **send-signal** event (→ `WSASend`) and the shutdown/close events (§4.4a). |
-| 4 | **Send-proxy / heartbeat thread** | the network-client, via a dedicated spawn routine **distinct from the start-engine pair** | network-client | A **~10 ms `Sleep` loop** with two independently-gated periodic sends: when the **keepalive gate** is set it emits the **`1/2` game-connection keepalive** if the link is idle; when the **world-enter gate** is set it emits the **`2/112` move-heartbeat**. It also logs a latency warning when a queued send stays pending past its budget (**400 ms** for the keepalive, **200 ms** for the move-heartbeat). This is the thread that **actually emits the `1/2` and `2/112` periodic sends** (the `(2,10000)` frame is the *other* thread, #2). *([confirmed]; CYCLE 5.)* |
+| 4 | **Send-proxy / idle-filler thread** | the network-client, via a dedicated spawn routine **distinct from the start-engine pair** | network-client | A **~10 ms `Sleep` loop** with two independently-gated idle fillers: when the **keepalive gate** is set it emits the header-only **`1/2` game-connection keepalive** while the link is idle; when the **move gate** is set it emits the **`2/13` move request** (a move anti-idle filler — NOT `2/112`). Neither has a fixed cadence: each fires on a poll tick when its gate is open and no send is already pending. The two numeric immediates **400** (for the `1/2` filler) and **200** (for the `2/13` filler) are **WARN-log latency thresholds** for an over-pending queued send, **not** send cadences. This is the thread that **actually emits the `1/2` and `2/13` idle fillers** (the `(2,10000)` frame is the *other* thread, #2). *([confirmed]; build 263bd994 / CYCLE 7.)* |
 
 The **start-engine spawn** (called only by §4.2) arms the *network-client's* two threads:
 
@@ -550,65 +550,113 @@ connection's **receive queue**; the send path hands off through the connection's
 queue/buffer object offsets are the P5-lane struct deliverable — see `structs/` (the network-client /
 connection-sub-object layout) — and are **not** re-tabled here.
 
-### 4.5 Keepalive / heartbeat — three periodic sends across TWO heartbeat threads
+### 4.5 Keepalive / anti-idle — three distinct outbound mechanisms across TWO threads
 
-There are **three periodic outbound sends**, driven by **two distinct heartbeat threads** (§4.3): the
-**keepalive-timer thread (#2)** owns mechanism (a); the **send-proxy thread (#4)** owns mechanisms
-(b) and (c). All three are real; the exact on-wire cadence is `[capture/debugger-pending]`. Record all
-three. *(CYCLE 5 refinement: the earlier "two mechanisms" framing missed the `1/2` send and treated
-the `2/112` send as a one-off toggle; both are periodic sends on the send-proxy thread #4.)*
+There are **three distinct outbound keepalive/anti-idle mechanisms**, owned by **two threads** (§4.3):
+the **keepalive-timer thread (#2)** owns mechanism (a) — the only one with a genuine fixed period; the
+**send-proxy thread (#4)** owns mechanisms (b) and (c) — both cadence-less idle fillers. A fourth
+state-driven send, the `2/112` toggle, is **not** a timer-driven heartbeat and is documented separately
+in (d). The cadence constants below are all `[confirmed]` statically on build 263bd994; what each
+keepalive *body byte means* on the wire stays `[capture/debugger-pending]`. *(CYCLE 7 correction: the
+prior "three periodic sends" framing was wrong — only (a) is periodic; (b)/(c) fire on every idle poll
+tick with no cadence immediate; the prior "`2/112` ~200 ms move-heartbeat on thread #4" was a mislabel —
+thread #4's move filler emits `2/13`, not `2/112` — see (b) and (d).)*
 
-**(a) Ctor-armed compressed periodic frame.** *([confirmed]* it is armed; the period value, the body
-width and the timer-send predicate are all read from the routines).* The client arms a **periodic
-compressed keepalive**: a keepalive frame is built **once, inline in the network-handler
-constructor** (there is no per-call builder), run once through the outbound compress stage (§6), the
-compressed buffer is stored in a client slot, the original buffer is released if a new one was
-produced, and a **periodic interval** is recorded (the recovered interval is `1000 ×` the routine's
-argument — i.e. a per-second-scaled period). Thereafter the pre-compressed keepalive frame is sent
-on that interval. As constructed in the network-handler constructor, this armed frame carries opcode
-**`(2, 10000)`** with an interval argument of **20**, i.e. a **20000 ms (20 s) period**.
+**(a) Ctor-armed compressed periodic frame — `(2,10000)`, EXACTLY 20 s when idle.** *([confirmed]:*
+the period, the body width and the timer-send predicate are all read from the routines.)* The client
+arms a **periodic compressed keepalive**: a keepalive frame is built **once, inline in the
+network-handler constructor** (there is no per-call builder), run once through the outbound compress
+stage (§6), the compressed buffer is stored in a client slot, the original buffer is released if a new
+one was produced, and a **periodic interval** is recorded as `1000 ×` the routine's argument (a
+per-second-scaled period, on the tick-count millisecond clock). As constructed in the network-handler
+constructor, this armed frame carries opcode **`(2, 10000)`** with an interval argument of **20**, i.e.
+a period of `20 × 1000` = **20000 ms = EXACTLY 20 s**. *(The earlier "~20 s" is now EXACT, not
+approximate — the cadence is fully pinned statically; only the body VALUE remains capture-pending.)*
 
 > **Body width — CORRECTED (binary wins).** The `(2,10000)` keepalive body is **4 bytes: one `u32`
 > appended with value `0x00000000`** — NOT header-only. The total wire frame is therefore **12
 > bytes** (`[u32 size=12][u16 major=2][u16 minor=10000][u32 body=0]`). Because the body is non-empty,
 > the frame is genuinely compressed at arm time (it does *not* take the `size == 8` header-only
-> bypass of §6). The cached frame is **pre-compressed** and re-sent verbatim by the timer thread;
-> it is **not** re-ciphered or re-compressed per send. *([confirmed]* shape; the meaning of the zero
-> body word is `[capture/debugger-pending]`.) `opcodes.md` carries the `2/10000` row with this
-> corrected "body = `u32` (observed 0), 12-byte frame, pre-compressed, timer-sent at 20 s when idle"
-> note.
+> bypass of §6). The cached frame is **pre-compressed** at handler-table construction and re-enqueued
+> **verbatim** by the timer thread; it is **not** re-ciphered or re-compressed per send. *([confirmed]*
+> shape; the meaning of the zero body word is `[capture/debugger-pending]`.) `opcodes.md` carries the
+> `2/10000` row with this corrected "body = `u32` (observed 0), 12-byte frame, pre-compressed, timer-sent
+> at 20 s when idle" note.
 
-**Timer-send predicate (thread #2).** The keepalive-timer thread (§4.3, thread #2) sleeps ~1 s per
-iteration while a master "network-live" flag is set, and on each tick re-sends the cached frame
-**only when the link has been idle** — i.e. when `now − last-send-tick > interval` and a suppression
-flag is clear. The send convergence (§6.1) stamps the network-client's **last-send activity clock**
-on *every* outbound packet, so any normal traffic in the preceding 20 s suppresses the redundant
-ping. The timer re-sends the cached pre-compressed frame straight onto the send queue (bypassing the
-send convergence so the cached bytes are not re-transformed). *([confirmed]* shape/predicate; the
-wall-clock cadence on the wire is `[capture/debugger-pending]`.)
+**Timer-send predicate (thread #2).** The keepalive-timer thread (§4.3, thread #2) sleeps **exactly
+1000 ms** per iteration while a master "network-live" flag is set, and on each tick re-sends the cached
+frame **only when the link has been idle** — i.e. when `tick-count now − last-send-tick > interval`
+(the 20000 ms above) **and** a **single one-deep suppress latch is clear**. The send convergence (§6.1)
+stamps the network-client's **last-send activity clock** on *every* outbound packet, so any normal
+traffic in the preceding 20 s suppresses the redundant ping. The **suppress latch** is set while a
+char-management request is in flight (a single one-deep latch) and the **`4/1` world-state handler
+CLEARS that suppress latch** at the top of its dispatch (see §4.5b). The timer re-sends the cached
+pre-compressed frame straight onto the send queue, **bypassing the normal send path** so the cached
+bytes are not re-transformed. *([confirmed]* shape/predicate/cadence; the wall-clock spacing actually
+observed on the wire is `[capture/debugger-pending]`.)
 
-**(b) Runtime C2S `2/112` move-heartbeat (send-proxy thread #4).** *([confirmed]; CYCLE 5.)* The
-send-proxy thread (§4.3, thread #4) runs a ~10 ms loop and, while a **world-enter gate** is set (the
-flag *set on world-enter and cleared on leave*), periodically sends the **C2S `2/112`** move-heartbeat
-when no send is already pending. It logs a latency warning if a queued send stays pending past **200
-ms**. This is a *periodic heartbeat on thread #4*, not the one-off "toggle" the earlier wording implied.
+**(b) Runtime C2S `1/2` game-connection keepalive — idle filler, NO cadence (send-proxy thread #4).**
+*([confirmed]; build 263bd994 / CYCLE 7.)* The `1/2` keepalive is **header-only (an 8-byte frame, no
+body), major 1 / minor 2**, sent through the normal send convergence on the **persistent game socket A**
+(not a lobby socket — see `connection_topology.md`). It is driven by the send-proxy thread (§4.3,
+thread #4), which runs a **~10 ms poll loop**: while a per-object **keepalive enable flag** is set and
+no send is in flight, it fires the `1/2` when the link is idle — i.e. essentially on **every 10 ms poll
+tick the link is idle**, capped only by the in-flight gate and the 10 ms sleep. **There is NO periodic
+interval immediate.** The **400** figure (previously quoted as a "400 ms cadence") is a **WARN-log
+latency threshold** ("send proxy wait > limit(400)") for an over-pending queued send — **not** a send
+period. The actual on-wire spacing is governed by the 10 ms poll plus idle/in-flight gating and is
+`[capture/debugger-pending]`. *(CYCLE 5 had this builder correctly re-attributed from "lobby ping" to a
+game-connection keepalive; CYCLE 7 corrects the "400 ms cadence" to a WARN threshold.)*
 
-**(c) Runtime C2S `1/2` game-connection keepalive (send-proxy thread #4).** *([confirmed]; CYCLE 5.)*
-The same send-proxy thread (#4), while a separate **keepalive gate** is set, periodically sends the
-**C2S `1/2`** game-connection keepalive when the link is idle (no send pending), with a **400 ms**
-pending-send latency budget. This `1/2` send rides the **persistent game socket** (not a lobby socket —
-see `connection_topology.md §5`); its builder is the one CYCLE 5 corrected from "lobby ping" to a
-game-connection keepalive.
+**(c) Runtime C2S `2/13` move anti-idle filler — idle filler, NO cadence (send-proxy thread #4).**
+*([confirmed]; build 263bd994 / CYCLE 7. This SUPERSEDES the prior "§4.5(b) C2S `2/112` move-heartbeat
+~200 ms".)* The same send-proxy thread (#4), while a separate per-object **move gate** is set, emits a
+**C2S `2/13` move request (16-byte body)** when the move gate is open and no send is pending. It is a
+**move anti-idle filler with no fixed cadence** — it jitters the local player's X and emits a MOVE on a
+poll tick. The **200** figure (previously a "~200 ms move-heartbeat cadence") is a **WARN-log latency
+threshold** ("send move wait > limit(200)"), **not** a send period. **Critically, this filler builds
+`2/13`, NOT `2/112`** — any prior wording placing a periodic `2/112` move-heartbeat on thread #4 is
+wrong and is corrected here. The `2/112` opcode is the *event-driven toggle* of (d), an unrelated
+mechanism. *(See the names.yaml flag below: the builder canonically named `Cmsg_MoveHeartbeat_Send` is
+MISNAMED — it emits `2/13` via the move-request builder, not `2/112`.)*
 
-> **Reconciliation (CYCLE 5).** The keepalive/heartbeat surface is **three periodic sends on two
-> threads**: `(2,10000)@~20 s` on the keepalive-timer (thread #2); the `1/2` idle-keepalive and the
-> `2/112` world move-heartbeat on the send-proxy (thread #4). They are **not** reconciled to a single
-> on-wire cadence — the actual traffic/timing is `[capture/debugger-pending]`. The `opcodes.md`
-> catalogue carries the `2/10000`, `2/112` and `1/2` rows.
+**(d) Event-driven C2S `2/112` toggle — NOT a periodic heartbeat.** *([confirmed]; build 263bd994 /
+CYCLE 7.)* The **`2/112`** send is an **event-driven toggle, not a timer-driven heartbeat** — there is
+**no timer / elapsed-time comparison anywhere in its builder** (the tick-count clock is not even
+consulted). It is purely **state-driven**: gated by a global keepalive-enabled flag, with the builder's
+argument selecting the action (**1 = enable + send; 2 = disable; otherwise resend-if-enabled**), and it
+appends a **single 1-byte body (value `1`)**, major 2 / minor 112. It is sent on **world-entry** (by the
+`4/1` world-state handler) and on **leave-world / scene transitions** (by the leave-to-logout path and
+the scene state machine) — never on a periodic schedule. *(This is why the §4.3 thread-#4 row no longer
+lists a `2/112` send: thread #4 never builds `2/112`.)*
+
+> **Reconciliation (CYCLE 7).** Only **(a) `(2,10000)` at EXACTLY 20 s when idle** is a genuine
+> periodic send (keepalive-timer thread #2). **(b) `1/2`** (header-only) and **(c) `2/13`** (16-byte
+> move) are **cadence-less idle fillers** on the send-proxy thread #4 — each fires on a 10 ms poll tick
+> when its gate is open and no send is pending; the **400 / 200** figures are WARN-log latency
+> thresholds, not cadences. **(d) `2/112`** is an **event-driven toggle** (world-entry / leave / scene
+> transition), with no timer at all. The `opcodes.md` catalogue carries the `2/10000`, `1/2`, `2/13`
+> and `2/112` rows. *(Names.yaml flag: the move-filler builder is misnamed `Cmsg_MoveHeartbeat_Send`
+> but emits `2/13`, not `2/112` — flagged for rename, e.g. `NetClient_SendProxyMoveFiller`. This is a
+> Tier-1 / `ida-toolsmith` action, not applied here.)*
+
+### 4.5b Suppress-latch arming relationship (`4/1` ↔ `2/10000`)
+
+The `(2,10000)` idle-keepalive of (a) is gated by a **single one-deep in-flight suppress latch** on the
+network-client object. *([confirmed]; build 263bd994 / CYCLE 7.)*
+
+- **Only the `2/10000` timer READS the latch** (to skip the idle ping while a char-management request is
+  outstanding).
+- The latch is **SET** by char-management sends (e.g. the `1/6`, `1/7`, `1/9`, `1/13`, `1/14`, `2/2`
+  builders) and **CLEARED** by their results.
+- The **`4/1` world-state handler CLEARS the latch** at the very top of its dispatch — so entering the
+  world re-enables the idle keepalive. The same handler also emits the `2/112` toggle on world-entry
+  (mechanism (d)). So `4/1` both **clears the `2/10000` suppress** and **fires the `2/112` enable**;
+  these are two separate actions on the same handler.
 
 ### 4.5a Link-health ack handshake — inbound `5/146` request → C2S `2/146` reply
 
-Distinct from the two keepalive mechanisms above, the protocol carries a **server-initiated
+Distinct from the keepalive/anti-idle mechanisms above, the protocol carries a **server-initiated
 ack-request / client-reply** round-trip used to confirm packet delivery. *([confirmed]* routing /
 sizes / reply opcode; the field VALUE meanings are `[capture/debugger-pending]`.)*
 
@@ -798,7 +846,7 @@ SEND:     handler builds payload → send convergence (§6.1):
 | `(0,0)` key-exchange handshake + emitted `1/4` reply (§1.4) | RSA / whitening of the `1/4` reply → `crypto.md` + the login-credential packet spec |
 | Handler-table installers + install counts (§2) + the **installed-slot maps** (§2a/§2b) | Per-handler **names / sizes / behaviour** for each `4/`·`5/` minor → `opcodes.md` rows + `handlers.md` §1 (NOT duplicated here) |
 | Network-event entry (type-15 / 100 vs 102) + handler object (§3) | (machinery only here) |
-| Three-thread model + lifecycle + keepalive duality + `5/146`→`2/146` ack (§4) | `2/112` toggle · `2/10000` armed frame · `5/146`/`2/146` ack rows → `opcodes.md`; per-handler ack behaviour → `handlers.md`; network-client / connection-sub-object / secure-handshake-context **struct offsets** → `structs/` (the P5-lane deliverable, cross-ref only) |
+| Four-thread model + lifecycle + keepalive/anti-idle (a `(2,10000)` / b `1/2` / c `2/13` / d `2/112`) + `5/146`→`2/146` ack (§4) | `2/10000` armed frame · `1/2`/`2/13` idle fillers · `2/112` toggle · `5/146`/`2/146` ack rows → `opcodes.md`; per-handler ack behaviour → `handlers.md`; network-client / connection-sub-object / secure-handshake-context **struct offsets** → `structs/` (the P5-lane deliverable, cross-ref only) |
 | Connection-state machine + codes + the `3/100`→`GameState=2` prime/resolve edge (§5) | Lobby action-code mapping + the full `3/100` code set + the shared publish method (shared numbers, different path) → `handlers.md` §12 |
 | Cipher/LZ4 placement (§6) | Cipher + LZ4 algorithms → `crypto.md` §3; inbound cipher-omission generalisation → `crypto.md` §5 |
 
@@ -864,13 +912,17 @@ SEND:     handler builds payload → send convergence (§6.1):
   recovered numeric facts; the precise meaning attached to each (connecting / connected /
   disconnected / error) is an inferred grouping and is `UNVERIFIED`. A debugger trace of a
   connect→play→disconnect cycle would pin each code to an observed transition.
-- **Keepalive duality — on-wire cadence not pinned.** Two keepalive mechanisms are both real (§4.5):
-  the ctor-armed `(2,10000)@20 s` frame (body now confirmed = one zero `u32`, §4.5a) and the runtime
-  `2/112` toggle. The *shape* of each (body, interval source, trigger sites) is confirmed; which is
-  actually observed on the wire, and at what wall-clock cadence, is `[capture/debugger-pending]`.
+- **Keepalive cadence — RESOLVED statically (CYCLE 7); on-wire spacing of the idle fillers not pinned.**
+  The three keepalive/anti-idle mechanisms are now cadence-pinned (§4.5): the ctor-armed `(2,10000)`
+  frame fires at **EXACTLY 20 s when idle** (the earlier "~20 s" is exact); the `1/2` (header-only) and
+  `2/13` (16-byte move) sends are **cadence-less idle fillers** on the send-proxy thread #4 (10 ms poll,
+  no interval immediate; the `400`/`200` figures are WARN-log latency thresholds, not cadences); and
+  `2/112` is an **event-driven toggle** (no timer). The actual wall-clock spacing of the idle fillers on
+  the wire (which depends on link idle state) is `[capture/debugger-pending]`.
 - **Wire-VALUE meanings of the keepalive/ack fields.** The `2/10000` zero body word, the `2/112`
-  toggle byte (observed `0x01`), and the `5/146`/`2/146` `token` / `local_counter` words are all
-  `[capture/debugger-pending]` — only their widths and round-trip shape are confirmed.
+  toggle byte (observed `0x01`), the `2/13` move-filler body, and the `5/146`/`2/146` `token` /
+  `local_counter` words are all `[capture/debugger-pending]` — only their widths and round-trip shape
+  are confirmed.
 - **Inbound cipher asymmetry (generalisation).** The client-side "decompress-only" placement is
   proven (§6.2); whether the server omits an inverse cipher across *every* inbound type is the
   `crypto.md` §5 open question this spec inherits but does not resolve.

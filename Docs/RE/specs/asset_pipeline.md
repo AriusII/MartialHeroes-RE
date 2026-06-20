@@ -1,6 +1,6 @@
 ---
 status: confirmed
-verification: confirmed    # control-flow + operand facts; the bgtexture/msg.xdb byte layouts also corroborated against a real VFS sample (sample-verified, see banner)
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))    # control-flow + operand facts; the bgtexture/msg.xdb byte layouts also corroborated against a real VFS sample (sample-verified, see banner)
 sample_verified: partial   # loader-selection mechanism, cache model and table strides CODE-CONFIRMED; the progress-bar visual outcome is debugger-pending
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
@@ -473,6 +473,32 @@ VFS open path; there is no special bulk I/O channel.
 > barely moves); for a *nicer* bar, replace the fixed denominator with a real total-bytes or
 > item-count denominator. Bar geometry for a 1:1 port: max width **223 px**, `barPx = 223*value/100`.
 
+### 4.5 The authoritative boot corpus ORDER lives in `resource_pipeline.md`
+
+§4.3 above lists the boot pre-warm families **in rough compiled order**. The **authoritative,
+fully-numbered ~57-step boot-load sequence** — the exact call order of the corpus worker, file by file,
+including the interleaved subsystem-init steps and the per-class stance `.do` files in the path-global
+table — is owned by `specs/resource_pipeline.md §2.1a` (with the stat-curve family load and the mob
+catalogue at steps 10 and 18 detailed in `resource_pipeline.md §2.7 / §2.8`). Treat that list as the
+single source of truth for boot order; this spec deepens loader *selection* and the *cache* model, not
+the ordering.
+
+### 4.6 RED-HERRING caveats — two seed strings that are NOT the asset manifest / a catalogue parser
+
+So that no future asset-loading lane mis-identifies the boot manifest, two seed strings are explicitly
+**not** part of the asset pipeline:
+
+- **(a) The tab-separated header `ID / TYPE / Load Size / Stream / script / script id` is NOT the boot
+  corpus manifest.** It is a **column header written by a dead sound-tester debug logger** (a routine
+  with no callers that opens a log file and writes that header). It is a sound-loading debug dump
+  header — not the resource boot list and not a loader-dispatch table.
+- **(b) The `MAXHP: %24s` line (and the companion `SORT / ID / SCR` line) is NOT a stat-table /
+  catalogue parser.** It is a **live on-screen DEBUG OVERLAY** that reads from a live actor record at
+  runtime (and pulls MAXHP from the mob catalogue record for mob actors); it loads no catalogue file.
+  Do not mistake it for an asset/catalogue loader.
+
+(Both are stated in full at `specs/resource_pipeline.md §2.1a` red-herring caveats.)
+
 ---
 
 ## 5. Cross-references
@@ -482,9 +508,15 @@ VFS open path; there is no special bulk I/O channel.
   open router described here (§1.3) — see the read-path ↔ progress-meter cross-link.**
 - `specs/vfs_overview.md` — directory tree, per-extension census, manifest-linkage table, format gaps.
 - `specs/resource_pipeline.md` — boot worker timing, loading-screen rendering, terrain streaming,
-  the high-level universal cache pattern, locking model. **The progress-bar arithmetic correction in
-  §4.4 (value = bytes / 9,395,240 integer; bar = clamp(223·value/100); near-static for the boot set;
+  the high-level universal cache pattern, locking model. **The authoritative full ~57-step boot corpus
+  ORDER is `§2.1a` (with the stat-curve family at step 10 / §2.7 and the mob catalogue at step 18 /
+  §2.8, and the two RED-HERRING caveats — the dead sound-tester header and the live debug overlay —
+  recorded there); see §4.5 / §4.6 above.** **The progress-bar arithmetic correction in §4.4
+  (value = bytes / 9,395,240 integer; bar = clamp(223·value/100); near-static for the boot set;
   completion via the worker done-flag) is cross-confirmed by this lane.**
+- `formats/config_tables.md` — the stat-curve column layouts (`users.scr` / `userlevel.scr` /
+  `userpoint.scr` / `exp.scr`) and the position→stat (HP/MP) mapping open questions; the boot
+  stat-curve loader is `resource_pipeline.md §2.7`.
 - `formats/terrain.md` — terrain cell formats (follow `bgtexture.lst`, see chain B; §5.6 block-3
   `idx-1` chain).
 - `formats/actormotion.md`, `formats/animation.md`, `formats/mesh.md` — character chain interiors.

@@ -1,30 +1,30 @@
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Load;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
-/// loading window reports preload-done + the 500 ms grace; the application scene machine then
-/// chooses 2→3 or 2→4 from its OPENNING/SKIP policy.
-/// spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
+///     State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
+///     loading window reports preload-done + the 500 ms grace; the application scene machine then
+///     chooses 2→3 or 2→4 from its OPENNING/SKIP policy.
+///     spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
 /// </summary>
 public sealed partial class LoadScene : StubSceneController
 {
+    private bool _advanceRequested;
     private ClientContext? _ctx;
     private SceneHost? _host;
-    private ScreenHost? _screenHost;
-    private LoadingWindow? _loading;
     private CancellationTokenSource? _loadCts;
-    private bool _advanceRequested;
+    private LoadingWindow? _loading;
+    private ScreenHost? _screenHost;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Load;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -41,7 +41,7 @@ public sealed partial class LoadScene : StubSceneController
             ProgressProvider = _ctx?.LoadOrchestrator is { } orch
                 ? () => Math.Clamp(orch.ProgressQuotient, 0, 100)
                 : null,
-            PlayOwnCue = _ctx?.LoadOrchestrator is null,
+            PlayOwnCue = _ctx?.LoadOrchestrator is null
         };
         _loading.LoadingComplete += OnLoadingComplete;
         _screenHost.SetScreen(_loading);
@@ -54,10 +54,7 @@ public sealed partial class LoadScene : StubSceneController
 
     public override void _ExitTree()
     {
-        if (_loading is not null)
-        {
-            _loading.LoadingComplete -= OnLoadingComplete;
-        }
+        if (_loading is not null) _loading.LoadingComplete -= OnLoadingComplete;
 
         _loadCts?.Cancel();
         _loadCts?.Dispose();
@@ -115,10 +112,7 @@ public sealed partial class LoadScene : StubSceneController
 
     private void OnLoadingComplete()
     {
-        if (_advanceRequested)
-        {
-            return;
-        }
+        if (_advanceRequested) return;
 
         _advanceRequested = true;
 

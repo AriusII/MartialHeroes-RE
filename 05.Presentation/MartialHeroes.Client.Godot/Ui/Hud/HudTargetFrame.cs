@@ -33,21 +33,22 @@
 
 using System.Threading.Channels;
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// Selected-target / mob-info plate — <c>MopGagePanel</c> (HUD slot 177).
-///
-/// <para>PASSIVE: drains <see cref="IHudEventHub.TargetChanges"/> each frame; shows/hides the
-/// plate and refills the HP bar from the delivered ratios. Zero game logic.</para>
-///
-/// <para>Width 226, screen-width-centred, top-anchored. Children bind uitex id 1 (chrome atlas).
-/// HP fill = <c>min(172, 172 · hpRatio)</c> px wide.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
+///     Selected-target / mob-info plate — <c>MopGagePanel</c> (HUD slot 177).
+///     <para>
+///         PASSIVE: drains <see cref="IHudEventHub.TargetChanges" /> each frame; shows/hides the
+///         plate and refills the HP bar from the delivered ratios. Zero game logic.
+///     </para>
+///     <para>
+///         Width 226, screen-width-centred, top-anchored. Children bind uitex id 1 (chrome atlas).
+///         HP fill = <c>min(172, 172 · hpRatio)</c> px wide.
+///     </para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudTargetFrame : Control
 {
@@ -99,10 +100,9 @@ public sealed partial class HudTargetFrame : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the MopGagePanel frame, screen-width-centred, top-anchored, W=226.
-    /// Graceful-null when the VFS/atlas is offline.
-    ///
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177, geometry.
+    ///     Geometry pass: builds the MopGagePanel frame, screen-width-centred, top-anchored, W=226.
+    ///     Graceful-null when the VFS/atlas is offline.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177, geometry.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -128,7 +128,7 @@ public sealed partial class HudTargetFrame : Control
         // --- Chrome background (slice of uitex id 1) ---
         // Top frame sub-panel: dst (0,0) 175×318 src (226,17) id 1
         // spec: ui_hud_layout.md §5.5b — "Top frame sub-panel (226,17)"
-        AtlasTexture? topFrameTex = atlas.SliceById(UitexChromeId, 226, 17, 175, 318);
+        var topFrameTex = atlas.SliceById(UitexChromeId, 226, 17, 175, 318);
         if (topFrameTex is not null)
         {
             var topFrame = new TextureRect
@@ -138,7 +138,7 @@ public sealed partial class HudTargetFrame : Control
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 Position = new Vector2(0f, 0f),
                 Size = new Vector2(175f, 318f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(topFrame);
         }
@@ -159,7 +159,7 @@ public sealed partial class HudTargetFrame : Control
 
         // --- HP bar fill (172×6, dst 35,5, src 40,517) ---
         // spec: ui_hud_layout.md §5.5b — HP bar fill width = min(172, 172·curHP/maxHP)
-        AtlasTexture? hpFillTex = atlas.SliceById(UitexChromeId, HpBarSrcX, HpBarSrcY, (int)HpBarMaxW, (int)HpBarH);
+        var hpFillTex = atlas.SliceById(UitexChromeId, HpBarSrcX, HpBarSrcY, (int)HpBarMaxW, (int)HpBarH);
         if (hpFillTex is not null)
         {
             var hpRect = new TextureRect
@@ -170,7 +170,7 @@ public sealed partial class HudTargetFrame : Control
                 Position = new Vector2(HpBarDstX, HpBarDstY),
                 Size = new Vector2(HpBarMaxW, HpBarH),
                 ClipContents = true,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(hpRect);
             _hpFill = hpRect;
@@ -184,7 +184,7 @@ public sealed partial class HudTargetFrame : Control
                 Color = new Color(0.8f, 0.15f, 0.15f, 0.9f),
                 Position = new Vector2(HpBarDstX, HpBarDstY),
                 Size = new Vector2(HpBarMaxW, HpBarH),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(hpRect);
             _hpFill = hpRect;
@@ -192,7 +192,7 @@ public sealed partial class HudTargetFrame : Control
 
         // --- Status icon A — relation icon (12,2) 13×13 src (40,309) ---
         // spec: ui_hud_layout.md §5.5b — "Status icon A (relation) src (40,309) id 1"
-        AtlasTexture? statusATex =
+        var statusATex =
             atlas.SliceById(UitexChromeId, StatusASrcX, StatusASrcY, StatusIconSide, StatusIconSide);
         var statusA = new TextureRect
         {
@@ -201,13 +201,13 @@ public sealed partial class HudTargetFrame : Control
             StretchMode = TextureRect.StretchModeEnum.Scale,
             Position = new Vector2(StatusAX, StatusAY),
             Size = new Vector2(StatusIconSide, StatusIconSide),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(statusA);
 
         // --- Status icon B — secondary state (12,17) 13×13 src (278,500) ---
         // spec: ui_hud_layout.md §5.5b — "Status icon B src (278,500) id 1"
-        AtlasTexture? statusBTex =
+        var statusBTex =
             atlas.SliceById(UitexChromeId, StatusBSrcX, StatusBSrcY, StatusIconSide, StatusIconSide);
         var statusB = new TextureRect
         {
@@ -216,7 +216,7 @@ public sealed partial class HudTargetFrame : Control
             StretchMode = TextureRect.StretchModeEnum.Scale,
             Position = new Vector2(StatusBX, StatusBY),
             Size = new Vector2(StatusIconSide, StatusIconSide),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(statusB);
 
@@ -229,7 +229,7 @@ public sealed partial class HudTargetFrame : Control
             Color = new Color(0.1f, 0.1f, 0.1f, 0.4f),
             Position = new Vector2(PortraitDstX, PortraitDstY),
             Size = new Vector2(PortraitSide, PortraitSide),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(portraitPlaceholder);
 
@@ -243,7 +243,7 @@ public sealed partial class HudTargetFrame : Control
             VerticalAlignment = VerticalAlignment.Center,
             Position = new Vector2(0f, 3f),
             Size = new Vector2(FrameW, 12f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_nameLabel);
 
@@ -256,7 +256,7 @@ public sealed partial class HudTargetFrame : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(0f, 18f),
             Size = new Vector2(FrameW, 12f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(percentLabel);
 
@@ -269,14 +269,14 @@ public sealed partial class HudTargetFrame : Control
             HorizontalAlignment = HorizontalAlignment.Left,
             Position = new Vector2(150f, 12f),
             Size = new Vector2(FrameW - 150f, 12f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_relationLabel);
 
         // --- Close button — dst (190,2) 11×11 action 3 → caption msg 16001 ---
         // spec: ui_hud_layout.md §5.5b — close (190,2) action 3, shows caption msg 16001
         _BuildButton("CloseBtn", CloseX, BtnY, BtnSide,
-            atlas, UitexChromeId, 310, 488, onPress: () =>
+            atlas, UitexChromeId, 310, 488, () =>
             {
                 // Action id 3 = close/clear target (shows msg 16001)
                 // spec: ui_hud_layout.md §5.5b — "action 3; caption msg 16001"
@@ -288,7 +288,7 @@ public sealed partial class HudTargetFrame : Control
         // --- Nav up button — dst (202,2) 11×11 action 1 ---
         // spec: ui_hud_layout.md §5.5b — nav up (202,2) action 1
         _BuildButton("NavUpBtn", NavUpX, BtnY, BtnSide,
-            atlas, UitexChromeId, 321, 488, onPress: () =>
+            atlas, UitexChromeId, 321, 488, () =>
             {
                 GD.Print("[HudTargetFrame] Nav-up button (action 1) pressed. " +
                          "spec: Docs/RE/specs/ui_hud_layout.md §5.5b.");
@@ -297,7 +297,7 @@ public sealed partial class HudTargetFrame : Control
         // --- Nav down button — dst (214,2) 11×11 action 2 ---
         // spec: ui_hud_layout.md §5.5b — nav down (214,2) action 2
         _BuildButton("NavDownBtn", NavDownX, BtnY, BtnSide,
-            atlas, UitexChromeId, 332, 488, onPress: () =>
+            atlas, UitexChromeId, 332, 488, () =>
             {
                 GD.Print("[HudTargetFrame] Nav-down button (action 2) pressed. " +
                          "spec: Docs/RE/specs/ui_hud_layout.md §5.5b.");
@@ -311,7 +311,7 @@ public sealed partial class HudTargetFrame : Control
     // Hub binding
     // -------------------------------------------------------------------------
 
-    /// <summary>Binds the target-frame to the hub's <see cref="IHudEventHub.TargetChanges"/> channel.</summary>
+    /// <summary>Binds the target-frame to the hub's <see cref="IHudEventHub.TargetChanges" /> channel.</summary>
     public void BindHub(IHudEventHub hub)
     {
         _targetChanges = hub.TargetChanges;
@@ -326,18 +326,14 @@ public sealed partial class HudTargetFrame : Control
     {
         if (_targetChanges is null) return;
 
-        while (_targetChanges.TryRead(out TargetChangedEvent? ev))
+        while (_targetChanges.TryRead(out var ev))
         {
             if (ev is null) continue;
 
             if (ev.IsCleared)
-            {
                 ClearTarget();
-            }
             else
-            {
                 ApplyTarget(ev);
-            }
         }
     }
 
@@ -351,7 +347,7 @@ public sealed partial class HudTargetFrame : Control
 
         // HP bar fill width = min(172, 172 · hpRatio)
         // spec: ui_hud_layout.md §5.5b — "fill width driven min(172, 172·curHP/maxHP)"
-        float fillW = Math.Min(HpBarMaxW, HpBarMaxW * ev.HpRatio);
+        var fillW = Math.Min(HpBarMaxW, HpBarMaxW * ev.HpRatio);
         switch (_hpFill)
         {
             case TextureRect tr:
@@ -394,9 +390,9 @@ public sealed partial class HudTargetFrame : Control
     // -------------------------------------------------------------------------
 
     private void _BuildButton(string nodeName, float x, float y, float side,
-        HudAtlasLibrary atlas, int texId, int srcX, int srcY, System.Action onPress)
+        HudAtlasLibrary atlas, int texId, int srcX, int srcY, Action onPress)
     {
-        AtlasTexture? normalTex = atlas.SliceById(texId, srcX, srcY, (int)side, (int)side);
+        var normalTex = atlas.SliceById(texId, srcX, srcY, (int)side, (int)side);
 
         if (normalTex is not null)
         {
@@ -407,7 +403,7 @@ public sealed partial class HudTargetFrame : Control
                 TextureNormal = normalTex,
                 Position = new Vector2(x, y),
                 Size = new Vector2(side, side),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             btn.Pressed += onPress;
             AddChild(btn);
@@ -421,7 +417,7 @@ public sealed partial class HudTargetFrame : Control
                 Text = string.Empty,
                 Position = new Vector2(x, y),
                 Size = new Vector2(side, side),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             btn.Pressed += onPress;
             AddChild(btn);

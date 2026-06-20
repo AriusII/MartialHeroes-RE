@@ -13,7 +13,17 @@
 >   the live HP/MP/yaw/move-target writes (driven by the runtime-table-dispatched 5/53 vitals and
 >   5/13 movement handlers, whose dispatch table is null at static time), and the role of the
 >   `partial`/`draft` auxiliary fields.
-> - **ida_reverified:** 2026-06-16  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+>   **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **CYCLE 7 (2026-06-20):** added the 30-slot buff-slot array at Actor +0x208 (520), the
+>   buff-related actor state fields it drives (+1013, +1420 enrichment, +1764, +1828, +1832, +1836,
+>   +1837, +1838), and the death-state fields (+1424 alive semantics, +1420 value 8, +1480 death
+>   timestamp). `specs/buffs.md` is the authority for the buff model. The earlier C7 "locked battle
+>   target id at Actor +444" reading has been **resolved (re-verified in IDA, CYCLE 7)**: there is
+>   **no** actor-side +444 battle-target field — the locked battle target lives on the
+>   **battle-controller singleton** (controller +9 = target id dword, controller +40 = target sort
+>   byte), distinct from the actor's UI/current `target_id` at +0x6E8. See `specs/combat.md` and the
+>   settled note at item 12.
 > - **conflicts:** no hard conflicts; two soft divergences carried as open items — (a) the `level`
 >   byte boundary (clean u16 @ SD +0x3A for the display path vs. straddling the SD +0x38/+0x39
 >   state bytes on the wire), (b) the +0x488/+0x48C region used as `last_state_ms` (int32) in one
@@ -125,6 +135,7 @@ slots, render flags) are summarized later but omitted here.
 | `model_class_id` | +0x6C  | int32  | confirmed  | Resolved visual/mesh class id (looked up from the model template for mobs). |
 | `equip_ref_table`| +0xCC  | slot[20] | confirmed | 20 entries × 16 bytes; each entry's leading dword is a worn-item actor id. = SD +0x58. See the SpawnDescriptor table. |
 | `cell_index`     | +0x3EC | int32  | confirmed  | Cached spatial grid-cell handle, resolved from the live world X/Z. NOT a coordinate. |
+| `buff_slots`     | +0x208 | slot[30] | confirmed | 30 buff slots × 12 bytes; the in-world status (buff/debuff) table. See the buff-slot table below and **`specs/buffs.md`** (the authority for the model). |
 | `current_hp`     | +0xB0  | uint32 | confirmed  | Current hit points. (Mirror of `SpawnDescriptor.current_hp`.) |
 | `current_mp`     | +0xB4  | uint32 | confirmed  | Current mana / ki points. |
 | `current_stamina`| +0xB8  | uint32 | confirmed  | Current stamina. |
@@ -146,10 +157,11 @@ slots, render flags) are summarized later but omitted here.
 | Value | Meaning |
 |---|---|
 | 0 | Uninitialised. |
-| 1 | Refreshing / active (live, accepting updates). |
+| 1 | Refreshing / active (live, accepting updates); also the idle/normal action-state. |
 | 2 | Walk. |
 | 3 | Run. |
-| 8 | Dead / scripted. |
+| 8 | **Dead / knockdown** — the canonical "is this actor dead" test (the respawn countdown re-checks `lifecycle_state != 8` to abort). The buff dispatch treats value 8 as a **protected** state it never overwrites. Set by the death-motion routine alongside `alive = 0` and the death timestamp (`+0x5C8`). See the death-state note below and `specs/buffs.md §3.3`. |
+| 11 / 12 / 13 | **Buff-driven transform / stance poses** — written by the buff effect-kind dispatch (buff_id 43 → 11, 46 → 12, 131 → 13; cleared back to 1 by the cleanse path). See the buff-slot table below and `specs/buffs.md §3.1`. |
 
 Notes for the domain engineer:
 - **`max_hp` / `max_mp` are NOT stored as fields.** They are computed on demand for the **local
@@ -303,6 +315,71 @@ domain model should treat them as engine-side and decode the wire `name` field i
 | +0x744 | 4    | bytes  | (pad)              | low        | Trailing bytes to the 0x748 boundary. |
 
 ---
+
+## Buff-slot table (Actor +0x208, 30 × 12 bytes) — CYCLE 7
+
+The actor carries a fixed **30-slot buff/debuff table** based at **Actor +0x208 (520)**, 12 bytes per
+slot (360 bytes total, spanning Actor +0x208 .. +0x36F). **`specs/buffs.md` is the authority for the
+model** (tick, effect-kind dispatch, icon/visual resolution, the buff push); this table records only
+the *layout* on the actor. `confirmed` (CYCLE 7 — slot count and stride corroborated by the per-tick
+loop, the cleanse loop, and the 360-byte local-player mirror).
+
+Per-slot record (naturally aligned; offsets within the slot are 0 / 4 / 8):
+
+| Slot offset | Actor + (slot 0) | Size | Type | Field | Confidence | Meaning |
+|---|---|---|---|---|---|---|
+| +0x00 | +0x208 | 2 | u16 | `buff_id` | confirmed | Effect-kind code; the dispatch + icon/visual key. `> 0` = active slot. |
+| +0x02 | +0x20A | 2 | u16 | (pad/high half) | partial | Id is read 16-bit; alignment pad. |
+| +0x04 | +0x20C | 4 | i32 | `remaining_ticks` | confirmed | Duration in **4-second ticks**; decremented 1 per tick, `<= 0` → release, `== 0` → clear. |
+| +0x08 | +0x210 | 2 | u16 | `param` | confirmed | Low word of the buff's 32-bit source value (per-tick visual spawn Value; packed summon code for buff_id 57). |
+| +0x0A | +0x212 | 1 | u8 | `param_hi` | confirmed | High byte (byte 2) of the 32-bit source value. |
+| +0x0B | +0x213 | 1 | u8 | (pad) | partial | Alignment tail. |
+
+> **Overlap note (soft conflict — CYCLE 7 vs. earlier passes).** Actor +0x208 is *also* the offset the
+> SpawnDescriptor table below labels `aura_pct_value` (SD +0x194), and the buff-slot array (Actor
+> +0x208 .. +0x36F) lies inside the SpawnDescriptor's opaque `equip_stat_buff_block` (SD +0xD4 .. +0x32B,
+> Actor +0x148 .. +0x39F). The two readings are not contradictory: the **wire-copied descriptor blob**
+> and the **runtime buff-slot table** occupy the same actor bytes — the spawn copies the descriptor
+> into +0x74.., and the buff subsystem then drives the 30×12 slots from that region at runtime (the
+> per-actor status table is *resident in* the descriptor's buff block). The `aura_pct_value` /
+> `buff_kind` interior points (SD +0x194 / +0x1AA) are individual fields the max-HP/MP formulas read;
+> the buff-slot table is the structured 30×12 view the buff tick walks. Carried as a context-dependent
+> overlay (the same actor bytes serve both the wire-copied descriptor blob and the runtime buff-slot
+> table), not a hard conflict.
+
+## Buff-related actor state fields (CYCLE 7)
+
+The buff effect-kind dispatch (`specs/buffs.md §3.1`) writes these actor fields. They are **not** part
+of the 12-byte slot record; they are discrete state bytes/words elsewhere on the actor. `confirmed`
+(CYCLE 7) for the offset + which buff path writes each; the precise input-gating semantics of the
+motion-state values are RUNTIME-ONLY (see `buffs.md §3.3`).
+
+| Actor offset | Size | Type | Field | Confidence | Meaning |
+|---|---|---|---|---|---|
+| +0x3F5 (1013) | 1 | u8 | `motion_suppress_flag` | confirmed | Toggled 0/1 by stun/stance buffs (cleared by buff_id 43 / 131). |
+| +0x58C (1420) | 4 | int32 | `lifecycle_state` / action-motion-state | confirmed | Same field as `lifecycle_state` above — the buff dispatch sets it to **1 / 11 / 12 / 13** (transform/stance poses); value **8** is the protected death/special state the buff code never overwrites. See the lifecycle enum. |
+| +0x6E4 (1764) | 1 | u8 | `disguise_outfit_id` | confirmed | Outfit/disguise id read by the buff_id 44 (disguise/polymorph) path to restore appearance on expiry. **Overlap:** the live-state table lists `title_slot` (uint32) at +0x6E4; this disguise byte is the low byte of that 4-byte region on the buff path — carried as a context-dependent overlay, not a hard conflict. |
+| +0x724 (1828) | 4 | int32 | `summon_state` | confirmed | Set on buff_id 57 expiry (mirror-clone summon state). |
+| +0x728 (1832) | 4 | int32 | `clone_count` | confirmed | Number of mirror clones for buff_id 57, derived from the slot's `param`. (This is the AoE-member-count dword the AoE/split-clone loop reads — see the live-state table's +0x70C region note.) |
+| +0x72C (1836) | 1 | u8 | `hidden_stealth_flag` | confirmed | Set by the buff_id 45 (stealth) path; also gates the id-47 per-tick visual. |
+| +0x72D (1837) | 1 | u8 | `flag_id47` | confirmed | Set while a buff_id 47 (DoT/periodic-aura) slot is active. |
+| +0x72E (1838) | 1 | u8 | `flag_id64` | confirmed | Set while a buff_id 64 slot is active AND its `param < 100` (param-gated threshold flag). |
+
+## Death-state fields (CYCLE 7)
+
+The death-motion routine (invoked from the inbound death handler) writes the death state onto the
+actor. `confirmed` (CYCLE 7). On death the actor's 30-slot buff table (Actor +0x208) is **cleared** —
+timed buffs are removed (see `specs/buffs.md` and the death/respawn behaviour in `world_systems.md`).
+
+| Actor offset | Size | Type | Field | Confidence | Meaning |
+|---|---|---|---|---|---|
+| +0x590 (1424) | 4 | int32 | `alive` | confirmed | Alive/active gate: **0 = dead**, 1 = alive. (Reconciles the quick-reference `alive` at +0x6EC, which is the constructor-default alive byte; this +0x590 dword is the death-handler's authoritative alive gate that the movement/targeting/pickup paths early-return on. Carried as the death gate.) Set to 1 on spawn / visual revive. |
+| +0x58C (1420) | 4 | int32 | `lifecycle_state` | confirmed | Action/motion-state — **8 = death/knockdown**, 1 = idle. Same field as above; the death value is the authoritative "is dead" test. |
+| +0x5C8 (1480) | 4 | int32 | `death_time_ms` | confirmed | Millisecond timestamp set at the moment of death (engine ms clock). |
+
+> HP/MP vitals are the 8-byte (qword) block at **Actor +0xB0** (`current_hp` / `current_mp`, see the
+> quick-reference and SpawnDescriptor tables) — server-set; the death handler does not compute any
+> penalty (XP / durability / drop magnitudes are RUNTIME-ONLY / server-authoritative).
 
 ## Embedded SpawnDescriptor (the 5/3 CharSpawn payload and 3/1 list records)
 
@@ -493,3 +570,21 @@ find "me" each frame, and do not model this as a struct field. (Working name in 
     +0x488; the char-preview path writes +0x488 and +0x48C as a 70.0f float pair (an AoE / cell
     working value). Both readings are valid in their own path — recorded as a context-dependent
     overlay, not a hard conflict.
+12. **RESOLVED (re-verified in IDA, CYCLE 7) — the locked battle target is NOT an actor field.**
+    An earlier CYCLE 7 note cited a "locked / picked battle target id at Actor +444". That reading is
+    **REFUTED**: there is **no actor-side +444 battle-target field**. The death handler's control flow
+    settles it against the binary — the locked / current **battle** target is owned by the
+    **battle-controller singleton**, not the actor:
+    - controller **+9** (dword index) = the locked battle target's **id** (dword).
+    - controller **+40** = the locked battle target's **sort** byte.
+
+    On an actor's death the handler compares `controller_target_id == dying_actor.id` **and**
+    `controller_target_sort == dying_actor.sort`, and on a match zeroes both — i.e. the lock is cleared
+    only when the dying actor *is* the currently locked battle target. This matches the combat dossier's
+    "BC+9 / BC+40" reading. See **`specs/combat.md`** for the battle-controller state model.
+
+    The actor's own **UI / current `target_id` at +0x6E8** (`confirmed`) is a **distinct** field and is
+    untouched by this resolution: the two targets are different things held on different objects — one on
+    the battle-controller singleton (the locked battle target), one on the actor (the UI/current target).
+    No actor `world_pos` (+0x444) reading is affected; there is no longer any "+444" battle-target
+    candidate on the actor in any table.

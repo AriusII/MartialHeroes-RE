@@ -67,7 +67,9 @@ notes: |
   CP949: the recipient is the standard 17-byte NUL-padded short-name cell; the message body is a
   fixed-width CP949 region with the NUL inside the declared width (decode as a fixed [InlineArray]
   blob, trim at the first NUL, then decode CP949 -- never a managed string on the wire).
-  spec: Docs/RE/_dirty/netcode/cp949_text_fields.md (recipient 17 + body ~84, tail boundary inferred).
+  (Wire text-field convention: fixed-width NUL-terminated CP949 cells -- recipient 17 + body ~84 tail
+  (boundary inferred) -- the same fixed-width CP949 text-cell form used across the game-action C2S
+  text packets.)
 
   CLIENT-SIDE SEND GATE (informational, not wire fields): a non-empty recipient name is required; the
   total of the player's funds plus the attached money must not exceed the money cap; the send is gated

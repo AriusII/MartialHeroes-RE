@@ -2,15 +2,24 @@
 verification: confirmed (the enter-world opcode ladder 1/9 -> 3/5 -> 4/1, the single in-flight
   latch set/clear ownership, the 4/1 form-selector branch and world-entry materialize, the 4/4 tag
   loop, the 2/112 ENABLE on case-5 entry, and the one-persistent-socket continuation are all
-  control-flow-confirmed on build 263bd994);
+  control-flow-confirmed on build 263bd994; the region-index -> zone-type resolution at world entry,
+  the data-driven dungeon cell-list, and the destination-only no-navmesh initial movement model are
+  static-control-flow-confirmed on IDB SHA 263bd994, CYCLE 7 (2026-06-20));
   static-hypothesis (the scene sub-state numbers attached to the join/enter steps);
   capture/debugger-pending (every concrete VALUE marked live-pending (6-D) in the closing section --
   the AreaId sent, the calendar-vs-epoch Year question, the 4/1 trailing-scalar region, the
   movement value->animation mapping, the 4/4 overlay code semantics, the real-wire keepalive
-  cadence, and which UI control fires 1/0 vs 2/0 and where the socket closes).
+  cadence, which UI control fires 1/0 vs 2/0 and where the socket closes, the per-area/per-dungeon
+  cell counts that live in each VFS .lst, and the data-driven walk/run speeds).
 ida_anchor: 263bd994
+ida_reverified: 2026-06-20
 evidence: [static-ida]
 sample_verified: false
+note: CYCLE 7 (2026-06-20) -- folded the world-entry-relevant region/zone-state resolution and the
+  initial movement/position model (region-index 0..31 -> zone-type at region record +0x28; data-driven
+  dungeon cell-list d<NNN>.lst; no-navmesh straight-line + reactive collision, server-authoritative
+  position). Full region binary layout owned by formats/region_grid.md; movement detail by
+  specs/world_systems.md; death/respawn by specs/world_exit.md. (IDB SHA 263bd994, CYCLE 7 (2026-06-20))
 -->
 
 # World Entry — Master Enter-World Lifecycle Specification
@@ -236,6 +245,83 @@ clock, never this directory selection.
 - The terrain first-ring load + cell streaming centred on the spawn: `specs/client_workflow.md
   §5.4.2` and `specs/resource_pipeline.md §terrain_streaming`.
 
+> **Per-area cell count is data-driven — there is no hard-coded cell count, and no special case for
+> dungeons.** CONFIRMED. The area cold-start opens the area's per-area cell list from
+> `data/map<NNN>/dat/d<NNN>.lst`, whose **leading `u32` is the cell count**, followed by that many
+> `u32` cell keys (`[u32 count][count × u32 cell-key]`; equivalently `count = (filesize − 4) / 4`).
+> The loader registers one cell per key. The same AreaId-string path and the same five per-area file
+> families (cell list, map-option block, region table, region grid, NPC array) serve **both overworld
+> areas and the dungeon area-ids 201–210** — there is **no `≥ 201` branch** and **no per-dungeon
+> constant** anywhere in the loader. Dungeon areas differ from overworld areas only in their **data**
+> (a usually smaller declared cell set, a different map-setting record, and whatever grid
+> dimensions/origins their region file declares), never in their load path. Any implementation that
+> asserts a fixed dungeon cell count is wrong; the count must be read from each `.lst`. The concrete
+> per-area / per-dungeon counts live in the VFS and are **capture/sample-pending (6-D)** — they
+> cannot be derived from the binary. The `.lst` byte format is owned by `formats/region_grid.md`
+> (or the cell-list format note it cross-references); this spec only records that the count source is
+> the file, not a constant.
+
+### 3.1a Region / zone state resolved at world entry — CONFIRMED
+
+When the area cold-starts (§3.1), the per-area **region grid** and **region table** are loaded
+alongside the terrain, and the actor's initial **zone-type / combat-mode** is resolved from them.
+This is the world-state the entry path establishes before the in-world loop runs; the **full binary
+layout of the region grid and region table is owned by `formats/region_grid.md`** and is only
+summarised here at the level the entry flow consults it.
+
+- **The map cells carry only a region INDEX, not the zone-type.** The per-area region grid maps a
+  world `(X, Z)` position to a single-byte **region index in the range 0..31**. The zone-type is
+  **not** stored on the cell — the index is a lookup key into the region table.
+- **The zone-type lives on the region-table record.** The region table is a fixed block of
+  **32 records × 48 bytes**. The region index selects a record; that record's **`u32` at field
+  offset `+0x28`** is the **zone-type**:
+
+  | Zone-type (record `+0x28`, `u32`) | Meaning | Effect at / after entry |
+  |----------------------------------:|---------|--------------------------|
+  | 0 | SAFE (town / peace) | no PvP; combat-mode resolves to safe |
+  | 1 | PVP (free-fight) | PvP permitted; combat-mode opens the player-attack path |
+  | 2 | CLOSED (restricted) | movement into such a cell is blocked/limited |
+
+  A value of `9` appears in some sample data with no distinguishing branch in the resolver (it falls
+  into the "nonzero, not 1" → restricted bucket); treat it as **UNVERIFIED / sample-only**.
+- **The combat-mode is the OR of two region records.** The active combat-mode is resolved from
+  **two** region-table records — the actor's cached current region and the region looked up at the
+  actor's live world `(X, Z)` — taking the zone-type of each (defaulting to PVP when a record pointer
+  is absent). If **either** endpoint is zone-type 1 the result is **PvP (1)**; else if both are
+  nonzero the result is **CLOSED (2)**; otherwise **SAFE (0)**. PvP "wins" a boundary crossing. This
+  resolved combat-mode is what later gates player-vs-player attacks. The gameplay detail (the
+  attack/movement gates and the map-wide peace-policy layer) is owned by `specs/world_systems.md`;
+  this spec records only that entry establishes the region/zone state from these two structures.
+- **Region grid scale is distinct from the terrain grid.** The region grid uses a **256-world-unit
+  cell stride** with its own width/height/origins read from the per-area region file — this is a
+  coarse overlay and **must not be confused with the 1024-unit, 65×65 terrain cell grid** the world
+  geometry uses. An out-of-bounds region lookup resolves to region index 0. Full constants and the
+  `[u32 width][u32 height][width·height u8 region-index][i32 originX][i32 originZ]` body layout are
+  owned by `formats/region_grid.md`.
+
+### 3.1b Initial movement / position model — CONFIRMED
+
+The position state the actor enters the world with comes from the `4/1` SpawnX / SpawnZ (§2.3, ground
+height resolved by terrain sampling at the spawn). From the first in-world frame onward the client
+moves the local player under a **local-prediction-with-server-reconciliation** model — there is **no
+precomputed navmesh and no client-side path graph**:
+
+- **No navmesh / no A\* / no waypoint graph.** CONFIRMED (no such code or strings exist). Movement is
+  **straight-line toward the destination** with **reactive collision** only — the recovered `.sod`
+  XZ wall segments (ray-parity point-in-polygon) and the `.ted` bilinear ground-height snap (the same
+  collision/ground chain already noted in CLAUDE.md and `specs/world_systems.md`). The client follows
+  a single pending destination directly; any real routing is the server's concern.
+- **The server is authoritative for position.** The client predicts its own motion locally and
+  *announces* heading + destination + run-state to the server; the server pushes authoritative actor
+  positions back, which the client absorbs as interpolation for small drift and as a hard snap once
+  drift grows large. The outbound periodic move emitter (`2/13`) and the inbound authoritative
+  position push (`5/13`) — and the full reconciliation bands — are owned by `specs/world_systems.md`;
+  they are **not** restated here. Entry only needs to establish that the world starts the actor at the
+  `4/1` spawn and that position authority lives on the server from frame one.
+
+The concrete walk/run speeds (resolved from the actor's motion record, not inline constants) and the
+movement-value → animation mapping are **capture/data-pending (6-D)**.
+
 ### 3.2 Three-mechanism keepalive subsystem
 
 Three independent link-keepalive mechanisms run during a session; two of them are touched by the
@@ -298,6 +384,13 @@ confirmed structure now; treat these values as tunable until captured.
 - **World-exit UI binding + socket close** — which concrete in-game UI control fires **`1/0`** vs
   **`2/0`**, and **whether / where the socket actually closes** on the `1/0` fire-and-forget path.
   live-pending (6-D). (Owned by `specs/world_exit.md` open items.)
+- **Per-area / per-dungeon cell counts** — the concrete cell count for each area (overworld and
+  dungeons 201–210) declared in the leading `u32` of its `data/map<NNN>/dat/d<NNN>.lst`. The structure
+  is confirmed; the values live in the VFS and must be read per file. capture/sample-pending (6-D).
+- **Zone-type `9`** — whether the `9` value seen in some region-record sample data is a real distinct
+  zone-type (no resolver branch distinguishes it). capture/sample-pending (6-D).
+- **Walk / run speeds + movement→animation mapping** — the per-actor walk/run speeds (resolved from
+  the motion record, not inline) and the movement-value → animation mapping. capture/data-pending (6-D).
 
 ---
 
@@ -316,6 +409,9 @@ confirmed structure now; treat these values as tunable until captured.
 | Keepalive subsystem (§3.2) | `specs/network_dispatch.md`, `specs/client_workflow.md §6.4.1` |
 | The in-flight latch (§3.3) | `specs/net_contracts.md §1.3` |
 | Area-load chain + terrain restream (§3.1) | `specs/resource_pipeline.md §terrain_streaming`, `specs/client_workflow.md §5.4.2` |
+| Per-area cell list / dungeon cell counts data-driven via `d<NNN>.lst` (§3.1) | `formats/region_grid.md` (region/cell-list binary layout) |
+| Region/zone state at entry — index 0..31 → zone-type at record `+0x28`; 32×48 table; 256-unit grid (§3.1a) | `formats/region_grid.md` (full layout + constants), `specs/world_systems.md` (zone gating + combat-mode) |
+| Initial movement/position model — no navmesh, straight-line + reactive `.sod`/`.ted` collision, server-authoritative (§3.1b) | `specs/world_systems.md` (`2/13` move emitter, `5/13` position push, reconciliation bands) |
 | One persistent socket carrying all majors (§2.6) | `specs/connection_topology.md §1–§2` |
 | Camera follow-target staging (§2.3 note) | `specs/client_workflow.md §5.4.7`, `specs/camera_movement.md §A.4.1` |
 | World exit — `1/0` vs `2/0`, convergence on state 6 / sub-state 8 (§3.4) | `specs/world_exit.md §1–§2` |

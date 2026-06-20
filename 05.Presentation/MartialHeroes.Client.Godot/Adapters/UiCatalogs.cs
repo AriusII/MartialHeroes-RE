@@ -20,41 +20,42 @@
 // spec: Docs/RE/formats/misc_data.md §6       — msg.xdb, 516-byte records, 2644 total.
 // spec: Docs/RE/specs/ui_system.md §8.5       — HUD uitex integer binding contract.
 
+using System.Runtime.InteropServices;
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
+using MartialHeroes.Assets.Parsers.Texture;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Adapters;
 
 /// <summary>
-/// Singleton-style facade (created once in <see cref="MartialHeroes.Client.Godot.Autoload.ClientContext"/>)
-/// that exposes the two startup UI data catalogs to the presentation layer.
-///
-/// <list type="bullet">
-///   <item>
-///     <term>UiTex manifest</term>
-///     <description>
-///       Lazy-loaded from <c>data/ui/UiTex.txt</c> via <see cref="UiTexManifestParser"/>.
-///       <see cref="GetTexture"/> maps a <c>tex_id</c> integer (the handle used by every legacy
-///       widget bind call) to a Godot <see cref="ImageTexture"/> loaded from the VFS DDS path.
-///       spec: Docs/RE/formats/ui_manifests.md §1 — PARSER-CONFIRMED grammar; SAMPLE-VERIFIED content.
-///       spec: Docs/RE/specs/ui_system.md §8.5 — in-game panels bind atlas by integer tex_id.
-///     </description>
-///   </item>
-///   <item>
-///     <term>Msg catalog</term>
-///     <description>
-///       Lazy-loaded from <c>data/script/msg.xdb</c> via <see cref="MsgXdbParser"/>.
-///       <see cref="GetMessage"/> returns the CP949-decoded UI caption for a numeric id.
-///       Record count: 2,644 (SAMPLE-VERIFIED: 1,364,304 bytes / 516 = 2,644 records).
-///       spec: Docs/RE/formats/misc_data.md §6 — CODE-CONFIRMED loader + stride; SAMPLE-VERIFIED content.
-///     </description>
-///   </item>
-/// </list>
-///
-/// Threading contract: all public methods must be called on the Godot main thread (same as every
-/// other <see cref="ImageTexture"/> / <see cref="Image"/> operation).
+///     Singleton-style facade (created once in <see cref="MartialHeroes.Client.Godot.Autoload.ClientContext" />)
+///     that exposes the two startup UI data catalogs to the presentation layer.
+///     <list type="bullet">
+///         <item>
+///             <term>UiTex manifest</term>
+///             <description>
+///                 Lazy-loaded from <c>data/ui/UiTex.txt</c> via <see cref="UiTexManifestParser" />.
+///                 <see cref="GetTexture" /> maps a <c>tex_id</c> integer (the handle used by every legacy
+///                 widget bind call) to a Godot <see cref="ImageTexture" /> loaded from the VFS DDS path.
+///                 spec: Docs/RE/formats/ui_manifests.md §1 — PARSER-CONFIRMED grammar; SAMPLE-VERIFIED content.
+///                 spec: Docs/RE/specs/ui_system.md §8.5 — in-game panels bind atlas by integer tex_id.
+///             </description>
+///         </item>
+///         <item>
+///             <term>Msg catalog</term>
+///             <description>
+///                 Lazy-loaded from <c>data/script/msg.xdb</c> via <see cref="MsgXdbParser" />.
+///                 <see cref="GetMessage" /> returns the CP949-decoded UI caption for a numeric id.
+///                 Record count: 2,644 (SAMPLE-VERIFIED: 1,364,304 bytes / 516 = 2,644 records).
+///                 spec: Docs/RE/formats/misc_data.md §6 — CODE-CONFIRMED loader + stride; SAMPLE-VERIFIED content.
+///             </description>
+///         </item>
+///     </list>
+///     Threading contract: all public methods must be called on the Godot main thread (same as every
+///     other <see cref="ImageTexture" /> / <see cref="Image" /> operation).
 /// </summary>
 public sealed class UiCatalogs : IDisposable
 {
@@ -68,28 +69,28 @@ public sealed class UiCatalogs : IDisposable
     // The shared VFS asset handle.  Null when the VFS is unavailable (offline mode).
     private readonly RealClientAssets? _assets;
 
-    // Lazy-loaded uitex manifest: parsed on first GetTexture() call.
-    private UiTexManifest? _uitex;
-    private bool _uitexAttempted;
-
-    // Lazy-loaded msg catalog: parsed on first GetMessage() call.
-    private MsgXdbCatalog? _msg;
-    private bool _msgAttempted;
-
     // Texture cache keyed by tex_id — each atlas DDS is loaded at most once per session.
     // spec: Docs/RE/formats/ui_manifests.md §1.5 — non-contiguous id space; dict lookup required.
     private readonly Dictionary<int, ImageTexture?> _texCache = new();
 
     private bool _disposed;
 
+    // Lazy-loaded msg catalog: parsed on first GetMessage() call.
+    private MsgXdbCatalog? _msg;
+    private bool _msgAttempted;
+
+    // Lazy-loaded uitex manifest: parsed on first GetTexture() call.
+    private UiTexManifest? _uitex;
+    private bool _uitexAttempted;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a UiCatalogs backed by the supplied <paramref name="assets"/> handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; both helpers return
-    /// their fallback values.
+    ///     Creates a UiCatalogs backed by the supplied <paramref name="assets" /> handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; both helpers return
+    ///     their fallback values.
     /// </summary>
     public UiCatalogs(RealClientAssets? assets)
     {
@@ -97,31 +98,67 @@ public sealed class UiCatalogs : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // Diagnostic helpers (for headless verify GD.Print)
+    // -------------------------------------------------------------------------
+
+    /// <summary>Number of DDS entries in the loaded uitex manifest, or 0 when unloaded/offline.</summary>
+    public int UiTexEntryCount
+    {
+        get
+        {
+            var m = EnsureUiTex();
+            return m?.DdsEntries.Count ?? 0;
+        }
+    }
+
+    /// <summary>Number of records in the loaded msg catalog, or 0 when unloaded/offline.</summary>
+    public int MsgRecordCount
+    {
+        get
+        {
+            var c = EnsureMsg();
+            return c?.Count ?? 0;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // IDisposable
+    // -------------------------------------------------------------------------
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        // Godot ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
+        _texCache.Clear();
+        // The _assets handle is owned by the caller (ClientContext); we do not dispose it here.
+    }
+
+    // -------------------------------------------------------------------------
     // UiTex — tex_id → ImageTexture
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the Godot <see cref="ImageTexture"/> for the given <paramref name="texId"/>,
-    /// or <see langword="null"/> when the VFS is offline, the id is absent from the manifest,
-    /// or the DDS file cannot be loaded.
-    ///
-    /// The texture is cached after the first load; subsequent calls for the same id are O(1).
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §1.1 — "tex_id handle used by GUWindow/GUPanel bind".
-    /// spec: Docs/RE/formats/ui_manifests.md §1.3 — "id→path mapping": PARSER-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_system.md §8.5 — in-game windows bind by integer tex_id.
+    ///     Returns the Godot <see cref="ImageTexture" /> for the given <paramref name="texId" />,
+    ///     or <see langword="null" /> when the VFS is offline, the id is absent from the manifest,
+    ///     or the DDS file cannot be loaded.
+    ///     The texture is cached after the first load; subsequent calls for the same id are O(1).
+    ///     spec: Docs/RE/formats/ui_manifests.md §1.1 — "tex_id handle used by GUWindow/GUPanel bind".
+    ///     spec: Docs/RE/formats/ui_manifests.md §1.3 — "id→path mapping": PARSER-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_system.md §8.5 — in-game windows bind by integer tex_id.
     /// </summary>
     /// <param name="texId">
-    /// The 4-digit zero-padded ID from <c>UiTex.txt</c> (e.g. 1 for mainwindow.dds,
-    /// 2 for inventwindow.dds, 8 for skillwindow.dds).
-    /// spec: Docs/RE/formats/ui_manifests.md §1.4 — confirmed id→path table (SAMPLE-VERIFIED).
+    ///     The 4-digit zero-padded ID from <c>UiTex.txt</c> (e.g. 1 for mainwindow.dds,
+    ///     2 for inventwindow.dds, 8 for skillwindow.dds).
+    ///     spec: Docs/RE/formats/ui_manifests.md §1.4 — confirmed id→path table (SAMPLE-VERIFIED).
     /// </param>
     public ImageTexture? GetTexture(int texId)
     {
-        if (_texCache.TryGetValue(texId, out ImageTexture? cached))
+        if (_texCache.TryGetValue(texId, out var cached))
             return cached;
 
-        UiTexManifest? manifest = EnsureUiTex();
+        var manifest = EnsureUiTex();
         if (manifest is null)
         {
             _texCache[texId] = null;
@@ -131,7 +168,7 @@ public sealed class UiCatalogs : IDisposable
         // Look up the VFS path for this tex_id.
         // spec: Docs/RE/formats/ui_manifests.md §1.5 — "must not assume a contiguous id space;
         //       build a dictionary and perform a direct-key lookup": PARSER-CONFIRMED.
-        UiTexEntry? entry = manifest.GetById(texId);
+        var entry = manifest.GetById(texId);
         if (entry is null)
         {
             // id not present in the manifest — gap in the id space is expected.
@@ -142,7 +179,6 @@ public sealed class UiCatalogs : IDisposable
 
         ImageTexture? tex = null;
         if (_assets is not null)
-        {
             try
             {
                 // Delegate to RealClientAssets.LoadTexture which:
@@ -156,7 +192,6 @@ public sealed class UiCatalogs : IDisposable
             {
                 GD.PrintErr($"[UiCatalogs] GetTexture(texId={texId}, path='{entry.VfsPath}'): {ex.Message}");
             }
-        }
 
         _texCache[texId] = tex;
         return tex;
@@ -167,51 +202,25 @@ public sealed class UiCatalogs : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the CP949-decoded UI caption for the given <paramref name="id"/>, or
-    /// <paramref name="fallback"/> when the catalog is unavailable or the id is absent.
-    ///
-    /// The string is already decoded from CP949 by <see cref="MsgXdbParser"/>; no byte decoding
-    /// happens in this layer.
-    ///
-    /// spec: Docs/RE/formats/misc_data.md §6 — "all visible UI captions fetched by numeric id":
-    ///       CODE-CONFIRMED load sequence.
-    /// spec: Docs/RE/specs/ui_system.md §10 — known id ranges (101–107 button labels, etc.).
+    ///     Returns the CP949-decoded UI caption for the given <paramref name="id" />, or
+    ///     <paramref name="fallback" /> when the catalog is unavailable or the id is absent.
+    ///     The string is already decoded from CP949 by <see cref="MsgXdbParser" />; no byte decoding
+    ///     happens in this layer.
+    ///     spec: Docs/RE/formats/misc_data.md §6 — "all visible UI captions fetched by numeric id":
+    ///     CODE-CONFIRMED load sequence.
+    ///     spec: Docs/RE/specs/ui_system.md §10 — known id ranges (101–107 button labels, etc.).
     /// </summary>
     /// <param name="id">Numeric message id (e.g. 101 = OK, 102 = Cancel, 103 = Close).</param>
     /// <param name="fallback">Returned when the catalog is offline or the id is not present.</param>
     public string GetMessage(int id, string fallback)
     {
-        MsgXdbCatalog? cat = EnsureMsg();
+        var cat = EnsureMsg();
         if (cat is null) return fallback;
 
         // spec: Docs/RE/formats/misc_data.md §6 — "do NOT assume id == slot_index + 1;
         //       the id stored at record +0x000 is the authoritative identifier".
-        string? text = cat.GetText(id);
+        var text = cat.GetText(id);
         return string.IsNullOrEmpty(text) ? fallback : text;
-    }
-
-    // -------------------------------------------------------------------------
-    // Diagnostic helpers (for headless verify GD.Print)
-    // -------------------------------------------------------------------------
-
-    /// <summary>Number of DDS entries in the loaded uitex manifest, or 0 when unloaded/offline.</summary>
-    public int UiTexEntryCount
-    {
-        get
-        {
-            UiTexManifest? m = EnsureUiTex();
-            return m?.DdsEntries.Count ?? 0;
-        }
-    }
-
-    /// <summary>Number of records in the loaded msg catalog, or 0 when unloaded/offline.</summary>
-    public int MsgRecordCount
-    {
-        get
-        {
-            MsgXdbCatalog? c = EnsureMsg();
-            return c?.Count ?? 0;
-        }
     }
 
     // -------------------------------------------------------------------------
@@ -219,8 +228,8 @@ public sealed class UiCatalogs : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Loads and caches the uitex manifest on first use.
-    /// Returns null when the VFS is offline or the file is absent/malformed.
+    ///     Loads and caches the uitex manifest on first use.
+    ///     Returns null when the VFS is offline or the file is absent/malformed.
     /// </summary>
     private UiTexManifest? EnsureUiTex()
     {
@@ -231,7 +240,7 @@ public sealed class UiCatalogs : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(UiTexPath);
+            var raw = _assets.GetRaw(UiTexPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[UiCatalogs] data/ui/UiTex.txt absent from VFS — texture catalog unavailable.");
@@ -257,7 +266,7 @@ public sealed class UiCatalogs : IDisposable
             GD.PrintErr($"[UiCatalogs] UiTex.txt parse failed (InvalidData): {ex.Message}");
             _uitex = null;
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException
+        catch (Exception ex) when (ex is ExternalException
                                        or ObjectDisposedException
                                        or InvalidOperationException)
         {
@@ -270,8 +279,8 @@ public sealed class UiCatalogs : IDisposable
     }
 
     /// <summary>
-    /// Loads and caches the msg catalog on first use.
-    /// Returns null when the VFS is offline or the file is absent/malformed.
+    ///     Loads and caches the msg catalog on first use.
+    ///     Returns null when the VFS is offline or the file is absent/malformed.
     /// </summary>
     private MsgXdbCatalog? EnsureMsg()
     {
@@ -282,7 +291,7 @@ public sealed class UiCatalogs : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(MsgXdbPath);
+            var raw = _assets.GetRaw(MsgXdbPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[UiCatalogs] data/script/msg.xdb absent from VFS — message catalog unavailable.");
@@ -308,7 +317,7 @@ public sealed class UiCatalogs : IDisposable
             GD.PrintErr($"[UiCatalogs] msg.xdb parse failed (InvalidData): {ex.Message}");
             _msg = null;
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException
+        catch (Exception ex) when (ex is ExternalException
                                        or ObjectDisposedException
                                        or InvalidOperationException)
         {
@@ -318,19 +327,5 @@ public sealed class UiCatalogs : IDisposable
         }
 
         return _msg;
-    }
-
-    // -------------------------------------------------------------------------
-    // IDisposable
-    // -------------------------------------------------------------------------
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-
-        // Godot ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
-        _texCache.Clear();
-        // The _assets handle is owned by the caller (ClientContext); we do not dispose it here.
     }
 }

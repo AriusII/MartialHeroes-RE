@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §2.8 — the `.do` stance-manifest SELECTION function and its class-index classStanceRef (Musa=1, Assassin=2, Wizard=3, Monk=4) with the {jung, sa, ma} file triplet per class, and the stanceType 0/1/2 + tier-sign selection rule; this resolves the *selection-by-class* half of §9 item #11b (the on-disk +0x0C discriminator enumeration for non-Musa files stays UNVERIFIED — two distinct quantities both loosely called "classStanceRef")
 ---
 
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
@@ -526,22 +526,28 @@ maps; the hotbar/skill-window builders then look up the icon coordinates from th
 
 **VFS paths (12 files, SAMPLE-VERIFIED presence):**
 
-| File | job | kind | classStanceRef | Sheet (from skillicon.txt) |
-|---|---|---|---|---|
-| `data/script/musajung.do` | 1 (Musa) | 1 (jung) | 1001 | `musajung.dds` |
-| `data/script/musasa.do` | 1 (Musa) | 2 (sa) | 1002 | `musasa.dds` |
-| `data/script/musama.do` | 1 (Musa) | 3 (ma) | 1003 | `musama.dds` |
-| `data/script/assasinjung.do` | 2 (Assassin) | 1 (jung) | TODO | `assasinjung.dds` |
-| `data/script/assasinsa.do` | 2 (Assassin) | 2 (sa) | TODO | `assasinsa.dds` |
-| `data/script/assasinma.do` | 2 (Assassin) | 3 (ma) | TODO | `assasinma.dds` |
-| `data/script/wizardjung.do` | 3 (Wizard) | 1 (jung) | TODO | `wizardjung.dds` |
-| `data/script/wizardsa.do` | 3 (Wizard) | 2 (sa) | TODO | `wizardsa.dds` |
-| `data/script/wizardma.do` | 3 (Wizard) | 3 (ma) | TODO | `wizardma.dds` |
-| `data/script/monkjung.do` | 4 (Monk) | 1 (jung) | TODO | `monkjung.dds` |
-| `data/script/monksa.do` | 4 (Monk) | 2 (sa) | TODO | `monksa.dds` |
-| `data/script/monkma.do` | 4 (Monk) | 3 (ma) | TODO | `monkma.dds` |
+> **Column note.** The `classStanceRef` column below is the **`.do` record field at +0x0C** (§2.7
+> record layout) — the per-record `(job × stance)` discriminator. It is **distinct** from the
+> selection function's **class-index** classStanceRef (1..4) of §2.8 — see the §2.8 "two distinct
+> quantities" note. The `selection class index` column is the §2.8 value (CODE-CONFIRMED).
 
-The classStanceRef values for the nine non-Musa files are unconfirmed this pass (§9 item #11c).
+| File | job | kind | selection class index (§2.8) | `.do` +0x0C discriminator | Sheet (from skillicon.txt) |
+|---|---|---|:---:|---|---|
+| `data/script/musajung.do` | 1 (Musa) | 1 (jung) | 1 | 1001 | `musajung.dds` |
+| `data/script/musasa.do` | 1 (Musa) | 2 (sa) | 1 | 1002 | `musasa.dds` |
+| `data/script/musama.do` | 1 (Musa) | 3 (ma) | 1 | 1003 | `musama.dds` |
+| `data/script/assasinjung.do` | 2 (Assassin) | 1 (jung) | 2 | UNVERIFIED | `assasinjung.dds` |
+| `data/script/assasinsa.do` | 2 (Assassin) | 2 (sa) | 2 | UNVERIFIED | `assasinsa.dds` |
+| `data/script/assasinma.do` | 2 (Assassin) | 3 (ma) | 2 | UNVERIFIED | `assasinma.dds` |
+| `data/script/wizardjung.do` | 3 (Wizard) | 1 (jung) | 3 | UNVERIFIED | `wizardjung.dds` |
+| `data/script/wizardsa.do` | 3 (Wizard) | 2 (sa) | 3 | UNVERIFIED | `wizardsa.dds` |
+| `data/script/wizardma.do` | 3 (Wizard) | 3 (ma) | 3 | UNVERIFIED | `wizardma.dds` |
+| `data/script/monkjung.do` | 4 (Monk) | 1 (jung) | 4 | UNVERIFIED | `monkjung.dds` |
+| `data/script/monksa.do` | 4 (Monk) | 2 (sa) | 4 | UNVERIFIED | `monksa.dds` |
+| `data/script/monkma.do` | 4 (Monk) | 3 (ma) | 4 | UNVERIFIED | `monkma.dds` |
+
+The **selection class index** (1..4) is CODE-CONFIRMED for all four classes (§2.8). The **+0x0C
+discriminator** values for the nine non-Musa files remain unconfirmed this pass (§9 item #11b).
 
 #### Record layout (116 bytes / 0x74) — SAMPLE-VERIFIED
 
@@ -613,6 +619,52 @@ banner `srcX`) and +0x224 (i16 banner `srcY`), which correspond to the absolute 
 +546 and +548. This is the source of the "+546/+548" pair observed in the earlier lane
 (icon-grids.md). It is the category-banner path — one icon per category (17 total) — and is
 the fallback branch of the unified icon resolver. It is **not** the per-skill icon source.
+
+### 2.8 The `.do` stance-manifest selection function — class index + stance type + tier sign (CODE-CONFIRMED — 2026-06-20)
+
+The 12 per-class stance `.do` files of §2.7 are held in a **flat pointer table** of three entries per
+class (in `{jung, sa, ma}` order). A dedicated **selection function** picks which one is the active
+manifest for the current character, from three runtime inputs:
+
+| Input | Type | Role |
+|---|---|---|
+| **class index** | small int, **1-based** | Which class: **1 = Musa, 2 = Assassin (Salsu), 3 = Wizard (Dosa), 4 = Monk** |
+| **stance type** | `0` / `1` / `2` | Selects within the class's `{jung, sa, ma}` triplet |
+| **stance-tier sign flag** | signed | A high/low (≥ 0 vs < 0) flag that toggles `jung↔ma` and `sa↔ma` |
+
+**Selection rule (per class):**
+
+- `stanceType == 0` → **jung**
+- `stanceType == 1` → **jung** if tier-sign **≥ 0**, else **ma**
+- `stanceType == 2` → **sa** if tier-sign **≥ 0**, else **ma**
+
+#### 2.8.1 `classStanceRef` (the selection class index) → file triplet (CODE-CONFIRMED)
+
+> **Two distinct quantities, both loosely called "classStanceRef" — do not conflate them.** This
+> section's `classStanceRef` is the **selection class index** (`1..4`) the selection function switches
+> on to choose the file triplet. It is **not** the `.do` **record field at +0x0C** (§2.7), which is a
+> per-record `(job × stance)` discriminator observed as `1001 / 1002 / 1003` for the three Musa files.
+> The +0x0C values for the nine non-Musa files remain **UNVERIFIED** (§9 item #11b). The table below
+> resolves only the **selection-by-class** mapping.
+
+| Class | classStanceRef (class index) | jung `.do` | sa `.do` | ma `.do` |
+|---|:---:|---|---|---|
+| **Musa** | **1** | `musajung.do` | `musasa.do` | `musama.do` |
+| **Assassin** (Salsu) | **2** | `assasinjung.do` | `assasinsa.do` | `assasinma.do` |
+| **Wizard** (Dosa) | **3** | `wizardjung.do` | `wizardsa.do` | `wizardma.do` |
+| **Monk** | **4** | `monkjung.do` | `monksa.do` | `monkma.do` |
+
+The requested selection-index values are **Assassin = 2, Wizard = 3, Monk = 4** (Musa = 1).
+Confidence: **HIGH** — the filename strings and the switch-on-class-index are unambiguous. The
+in-source class filename spelling is **"assasin"** (single `s`), which matches the class enum value
+**2 = Salsu**. These four class indices are exactly the `job_id` column of `skillicon.txt` (§2.3:
+1 = Musa, 2 = Assassin, 3 = Wizard, 4 = Monk), so the selection class index, the `skillicon.txt`
+`job_id`, and the character-class globals (§2.7 load chain) are the same 1-based class numbering.
+
+> **Cross-reference.** The selection function consumes the same character class / stance globals the
+> §2.7 load chain describes; once it returns the active `.do` file, the icon-coordinate read of
+> §2.6/§2.7 proceeds from that file's 116-byte records. This section adds the **selection** step that
+> sits upstream of the icon read.
 
 ---
 
@@ -1168,11 +1220,16 @@ table requires reading the active `.do` file for the player's `(job, kind)`.
        `instanceKey` equals `skill_id` in `skills.scr`, or is a packed composite key that must
        be decoded before joining, is not confirmed. — PLAUSIBLE (structured key); UNVERIFIED.
 
-    b. **`classStanceRef` enumeration for the nine non-Musa files.** Confirmed values:
-       1001 = musajung, 1002 = musasa, 1003 = musama. The corresponding values for Assassin,
-       Wizard, and Monk stances (presumably in a 10xx/11xx/12xx range or similar) have not been
-       read from those files. A quick read of +0x0C across all 12 `.do` files would produce the
-       full ref-to-sheet table. — PLAUSIBLE pattern; UNVERIFIED values.
+    b. **`.do` record-field (+0x0C) discriminator enumeration for the nine non-Musa files.**
+       Confirmed values: 1001 = musajung, 1002 = musasa, 1003 = musama. The corresponding +0x0C
+       record values for Assassin, Wizard, and Monk stances (presumably in a 10xx/11xx/12xx range
+       or similar) have not been read from those files. A quick read of +0x0C across all 12 `.do`
+       files would produce the full ref-to-sheet table. — PLAUSIBLE pattern; UNVERIFIED values.
+       **(PARTIALLY RESOLVED — CYCLE 7):** the *selection-by-class* half is now closed — the
+       selection function's **class-index** classStanceRef is Musa = 1, Assassin = 2, Wizard = 3,
+       Monk = 4, with the `{jung, sa, ma}` file triplet per class (§2.8). What remains UNVERIFIED is
+       only the **on-disk +0x0C record discriminator** values for the nine non-Musa files — a
+       different quantity from the selection class index (see the §2.8 "two distinct quantities" note).
 
     c. **`musama.do` 40-byte trailing fragment.** `musama.do` is 25,792 bytes = 222 full
        116-byte records + 40 trailing bytes. The loader ignores the incomplete tail. Whether the

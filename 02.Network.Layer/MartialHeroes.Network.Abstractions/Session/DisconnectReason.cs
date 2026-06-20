@@ -1,20 +1,20 @@
 namespace MartialHeroes.Network.Abstractions.Session;
 
 /// <summary>
-/// Describes why a <see cref="IConnectionSession"/> transitioned to
-/// <see cref="ConnectionState.Disconnected"/> or <see cref="ConnectionState.Faulted"/>.
+///     Describes why a <see cref="IConnectionSession" /> transitioned to
+///     <see cref="ConnectionState.Disconnected" /> or <see cref="ConnectionState.Faulted" />.
 /// </summary>
 /// <remarks>
-/// Carried by <see cref="SessionDisconnectedEventArgs"/> so that higher layers
-/// (<c>Client.Application</c>) can display appropriate UI feedback or schedule a reconnect
-/// without inspecting exception types.
+///     Carried by <see cref="SessionDisconnectedEventArgs" /> so that higher layers
+///     (<c>Client.Application</c>) can display appropriate UI feedback or schedule a reconnect
+///     without inspecting exception types.
 /// </remarks>
 public enum DisconnectReason : byte
 {
     /// <summary>No reason specified (default; not yet set).</summary>
     None = 0,
 
-    /// <summary>The local side requested a clean shutdown via <see cref="IConnectionSession.DisconnectAsync"/>.</summary>
+    /// <summary>The local side requested a clean shutdown via <see cref="IConnectionSession.DisconnectAsync" />.</summary>
     LocalClose = 1,
 
     /// <summary>The remote server closed the connection cleanly (FIN/EOF).</summary>
@@ -33,5 +33,5 @@ public enum DisconnectReason : byte
     CryptoError = 6,
 
     /// <summary>The session idle timeout elapsed without activity.</summary>
-    Timeout = 7,
+    Timeout = 7
 }

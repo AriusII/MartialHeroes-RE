@@ -5,9 +5,12 @@ subsystems: [resource_pipeline, world_systems, game_loop]
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-verification: confirmed   # control-flow-confirmed across the streaming spine; three runtime
-                          # items (worker count==0, dispatcher is sole driver, frustum
-                          # matrix-major / up-axis) remain capture/debugger-pending — see §9
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))   # control-flow-confirmed
+                          # across the streaming spine; CYCLE 7 re-confirmed the per-frame caller chain
+                          # is MAIN-THREAD-BLOCKING (ring-shift → find-or-load → blocking VFS reads, no
+                          # queue/signal hop) and the worker apparatus is present-but-dormant; three
+                          # runtime items (worker count==0 / a runtime worker spawn, dispatcher is sole
+                          # driver, frustum matrix-major / up-axis) remain capture/debugger-pending — see §9
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
 # CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
@@ -29,10 +32,12 @@ conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +1000
 > `evidence: [static-ida]`. Verification status: **confirmed** where the behaviour was recovered
 > from control flow and corroborated across multiple use sites (the synchronous-per-frame driver,
 > the dormant-worker proof, the cell-key gate, the ring shift load/cull, the cold-start fill, the
-> radius selection/clamp). **Capture/debugger-pending** for the three genuinely-runtime items in §9
-> (the worker request-count always reading zero, the per-frame dispatcher being the *sole* live
-> driver under real input, and the frustum matrix major-order / world up-axis — the last is a
-> render-lane concern, not streaming). **Conflicts: none open** — the Campaign-10 reconciliation
+> radius selection/clamp). **Capture/debugger-pending** for the genuinely-runtime items in §9 —
+> chiefly **whether the dormant worker is ever spawned at runtime** (the key debugger item; static is
+> decisive that the worker apparatus exists but is dormant and streaming is main-thread-blocking),
+> the worker request-count always reading zero, the per-frame dispatcher being the *sole* live driver
+> under real input, and the frustum matrix major-order / world up-axis (the last is a render-lane
+> concern, not streaming). **Conflicts: none open** — the Campaign-10 reconciliation
 > (the 34-slot pool vs the 25-slot ring, the `+10000` cell-index origin offset, the per-frame
 > 3-cell load count, and the 15000-threshold clamp wording) is resolved in-text below.
 >
@@ -88,6 +93,28 @@ loadable at all is gated by an **area cell-key set** populated from the area's `
 > **In this build, terrain cell loading is driven SYNCHRONOUSLY by the per-frame ring shift on the
 > main thread. Do NOT model or implement a shipping asynchronous producer.**
 
+**The per-frame caller chain is main-thread-blocking, end to end (CYCLE 7 re-confirmation).** The
+chain from frame tick to disk runs entirely on the calling (main game-loop) thread, with **no
+enqueue / signal / completion-poll hop anywhere on it**:
+
+1. The local-player per-frame update (run for the local entity once movement settles) calls the
+   **per-frame ring-shift** with the player's current world `(X, Z)`.
+2. The ring-shift calls the **per-cell find-or-load directly (inline)** — not via a request queue. (If
+   the stream radius is very large the ring-shift forwards to the 5×5 variant, which *also* calls
+   find-or-load inline.)
+3. Find-or-load computes the cell key (`mapZ + 100000·mapX`), membership-checks it against the area's
+   cell-key set, does the cache lookup, and **only on a true miss** acquires a free pool slot and
+   reads the cell's files.
+4. The slot loader performs the actual **blocking VFS reads** of the cell's `.mud` / `.gad` / `.map`
+   files, in that order, on the **same call, on the same thread**.
+
+So the ring shift, the find-or-load, and the disk reads all happen inside one call on the main thread.
+There is **no** request enqueue, **no** wait-Event signal, and **no** completion poll on this live
+path — that machinery belongs to the dormant worker below. The same synchronous find-or-load is used
+by the cold-start / area-change fills (first terrain init, the character-select scene-build, the world
+tick), and the whole-area (not per-cell) load — area binaries, region tables, the cell-key set,
+sound/weather/sky/wind — is a separate but **also synchronous** path.
+
 The loader's constructor wires up a background load thread, a request FIFO, and a wait gate (a
 **named Win32 Event**, not a mutex — the worker waits on this Event, and a separate file-scope
 critical section serialises the FIFO pop). The worker thread would drain the FIFO by calling the
@@ -107,6 +134,15 @@ per-cell loader. **But the worker never runs, on two independent grounds:**
 - The per-cell loader (the function the worker would call) is reached only from **synchronous ring
   paths** (the cold-start fill, the 3×3 shift, the 5×5 shift, the ring dispatcher) and from the
   worker's own (never-reached) drain. None of these is a FIFO producer.
+- **The worker proc is never started.** The loader's thread/handle holder only **stores** the worker
+  proc pointer (and zeroes the handle slot) — it does **not** hand that proc to any thread-create
+  call. No static call site passes the terrain worker proc to a thread-create primitive; the only
+  thread-create sites in the binary belong to unrelated subsystems. So no terrain streaming thread is
+  ever spawned on any static path.
+
+**The only live worker threads are the sound subsystem and input — terrain streaming is NOT among
+them.** A faithful port MUST NOT assume async terrain streaming; the ring streams synchronously on the
+main thread.
 
 **Conclusion:** the async worker + request FIFO is **compiled-in scaffolding for a deferred-streaming
 design that was never wired (or was compiled out).** The struct fields for it (FIFO head, count, the
@@ -119,6 +155,22 @@ The **dormant request record**, documented only because the struct initialises i
 12-byte block `{ u32 mapX; u32 mapZ; u32 areaId; }` — confirmed by what the (never-reached) worker
 reads off a popped node: it reads three consecutive `u32`s and passes them as `(mapX, mapZ, areaId)`
 to the per-cell loader before freeing the node. It never receives data in this build.
+
+### 2.1 Blocking-mitigation guards on the live (synchronous) path
+
+Because the reads are synchronous on the main thread, three guards — and only these three — keep the
+per-frame cost bounded. There is **no double-buffer and no completion-poll** anywhere on the live
+path (that overlap machinery belongs to the dormant worker):
+
+1. **"Already loaded" cache check (§4).** Find-or-load returns the cached cell on a hit, so a steady
+   camera re-loads nothing — only the newly-entered ring row/column actually hits the VFS.
+2. **One-cell-per-frame shift cap (§6).** The ring-shift asserts a per-frame cell delta `≤ 1` on each
+   axis (guaranteed by the per-frame cadence), bounding the work to the cells crossing the ring
+   boundary that frame, not the whole ring.
+3. **Fixed 34-slot cell pool (§5).** Slot reuse, no per-frame allocation of cell objects.
+
+The mitigation is therefore "skip if cached + cap shifts per frame + reuse slots", **not** async
+overlap.
 
 ---
 
@@ -468,6 +520,13 @@ object-placement grids driven by the cell `.map` descriptor.
 
 **Capture/debugger-pending (genuinely needs a live run):**
 
+- **Whether the dormant worker is ever spawned at runtime (the key debugger-pending item).** Static
+  evidence is decisive that **the worker apparatus exists but is dormant and streaming is
+  main-thread-blocking**: there is no thread-create site for the worker proc, and the keep-running
+  flag is cleared at init. A `?ext=dbg` session is the only thing that could witness whether anything
+  flips the keep-running flag to `1` and spawns the thread, and whether anything enqueues to the
+  request queue and signals the wait-Event during normal play. **Absent that live observation, the
+  static conclusion stands: the ring streams synchronously on the main thread.**
 - That the worker's request-count **always reads zero** at runtime — confirming the FIFO truly never
   receives a request (static shows no producer; a live read is the ground truth).
 - That the per-frame dispatcher is the **sole** live driver, firing under real player input (static

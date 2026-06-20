@@ -1,22 +1,22 @@
 namespace MartialHeroes.Client.Application.Assets;
 
 /// <summary>
-/// The fixed, compiled state-2 boot-load corpus the original worker registers in a single hardcoded
-/// sequence (not a scene manifest). This is the full file-registration spine in its authoritative
-/// registration ORDER; the order is load-bearing. Filename quirks (<c>musajung.do</c>,
-/// <c>items_extra.do</c>, <c>discript.sc</c> with extension <c>.sc</c>, <c>Tutor.scr</c> capitalised)
-/// are intentional spellings in the shipped data set and are preserved verbatim.
-/// spec: Docs/RE/specs/resource_pipeline.md §2.1a.
+///     The fixed, compiled state-2 boot-load corpus the original worker registers in a single hardcoded
+///     sequence (not a scene manifest). This is the full file-registration spine in its authoritative
+///     registration ORDER; the order is load-bearing. Filename quirks (<c>musajung.do</c>,
+///     <c>items_extra.do</c>, <c>discript.sc</c> with extension <c>.sc</c>, <c>Tutor.scr</c> capitalised)
+///     are intentional spellings in the shipped data set and are preserved verbatim.
+///     spec: Docs/RE/specs/resource_pipeline.md §2.1a.
 /// </summary>
 public static class LoadResourcePlan
 {
     public const string MessageCataloguePath = "data/script/msg.xdb"; // spec: Docs/RE/specs/resource_pipeline.md §2.2.
 
     /// <summary>
-    /// The 48-entry boot data-table corpus in registration order. Loaded existence-aware via
-    /// <see cref="ILoadResourceSource"/>: an absent VFS entry warns-and-continues (contributes
-    /// zero bytes), never throws. Entry #48 of the spec is the effect-manifest chain that follows
-    /// <c>bmplist.lst</c>. spec: Docs/RE/specs/resource_pipeline.md §2.1a.
+    ///     The 48-entry boot data-table corpus in registration order. Loaded existence-aware via
+    ///     <see cref="ILoadResourceSource" />: an absent VFS entry warns-and-continues (contributes
+    ///     zero bytes), never throws. Entry #48 of the spec is the effect-manifest chain that follows
+    ///     <c>bmplist.lst</c>. spec: Docs/RE/specs/resource_pipeline.md §2.1a.
     /// </summary>
     public static readonly string[] BootWorkerPaths =
     [
@@ -71,6 +71,6 @@ public static class LoadResourcePlan
         "data/effect/xobj.lst", // #48 (chain)
         "data/effect/xeffect.lst", // #48 (chain)
         "data/effect/effect.cache", // #48 (chain) effect-cache prime
-        "data/effect/totalmugong.txt", // #48 (chain)
+        "data/effect/totalmugong.txt" // #48 (chain)
     ];
 }

@@ -42,26 +42,37 @@
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e — Fisher-Yates scramble: CODE-CONFIRMED.
 
 using Godot;
-using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Ui.Assets;
-using MartialHeroes.Client.Godot.Ui.Widgets;
+using MartialHeroes.Client.Presentation.Screens.Layout;
+
+// LoginLayout, WidgetRect (moved to engine-free layer)
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 /// <summary>
-/// PIN input sub-view for Login(1) sub-states 31/32.
-///
-/// <para>Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary"/>.
-/// Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
-/// Reset (tag 11), OK (tag 12), Cancel (tag 13) buttons.</para>
-///
-/// <para>Subscribe to <see cref="PinSubmitted"/> and <see cref="Cancelled"/> to receive
-/// the outcome and emit the appropriate use-case call. Never mutate domain state here.</para>
-///
-/// spec: Docs/RE/specs/frontend_scenes.md §11.3
+///     PIN input sub-view for Login(1) sub-states 31/32.
+///     <para>
+///         Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary" />.
+///         Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
+///         Reset (tag 11), OK (tag 12), Cancel (tag 13) buttons.
+///     </para>
+///     <para>
+///         Subscribe to <see cref="PinSubmitted" /> and <see cref="Cancelled" /> to receive
+///         the outcome and emit the appropriate use-case call. Never mutate domain state here.
+///     </para>
+///     spec: Docs/RE/specs/frontend_scenes.md §11.3
 /// </summary>
 public sealed partial class PinSubView : Control
 {
+    [Signal]
+    public delegate void CancelledEventHandler();
+
+    // -------------------------------------------------------------------------
+    // Signals
+    // -------------------------------------------------------------------------
+
+    [Signal]
+    public delegate void PinSubmittedEventHandler(string pin);
     // -------------------------------------------------------------------------
     // Atlas path
     // spec: Docs/RE/specs/frontend_scenes.md §11.1 "password.dds, 1024×1024 DXT3". CODE-CONFIRMED.
@@ -118,35 +129,25 @@ public sealed partial class PinSubView : Control
     private const int PinDisplayH = 22;
 
     // -------------------------------------------------------------------------
-    // Signals
-    // -------------------------------------------------------------------------
-
-    [Signal]
-    public delegate void PinSubmittedEventHandler(string pin);
-
-    [Signal]
-    public delegate void CancelledEventHandler();
-
-    // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
     private string _pin = "";
 
+    // PIN display label.
+    private Label? _pinDisplay;
+
     // Scrambled digit assignment: _scrambled[keypadSlot] = actualDigit.
     // Fisher-Yates from wall-clock seed. spec §11.3e. CODE-CONFIRMED.
     private int[] _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-
-    // PIN display label.
-    private Label? _pinDisplay;
 
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates the PIN sub-view.
+    ///     Creates the PIN sub-view.
     /// </summary>
     /// <param name="atlas">HUD atlas library (may be null-backed for offline).</param>
     public PinSubView(HudAtlasLibrary atlas)
@@ -185,7 +186,7 @@ public sealed partial class PinSubView : Control
             Text = "",
             Position = new Vector2(PinDisplayX, PinDisplayY),
             Size = new Vector2(PinDisplayW, PinDisplayH),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);
@@ -215,7 +216,7 @@ public sealed partial class PinSubView : Control
             Color = new Color(0f, 0f, 0f, 0f),
             Position = new Vector2(-ModalX, -ModalY), // covers the whole 1024×768 canvas
             Size = new Vector2(1024, 768),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         });
 
         // password.dds backdrop blit: source (0,0,329,422) → panel-local (0,0) size 329×422.
@@ -228,7 +229,6 @@ public sealed partial class PinSubView : Control
             ModalW, ModalH // 329×422 — exact panel size = exact source region
         );
         if (backdrop is not null)
-        {
             AddChild(new TextureRect
             {
                 Position = Vector2.Zero, // panel-local (0,0)
@@ -236,9 +236,8 @@ public sealed partial class PinSubView : Control
                 Texture = backdrop,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                MouseFilter = MouseFilterEnum.Ignore, // transparent to input; buttons above handle it
+                MouseFilter = MouseFilterEnum.Ignore // transparent to input; buttons above handle it
             });
-        }
 
         // NOTE: the InventWindow.dds dragon-frame (ExitPanel clone 340×190 src(318,647)) IS built
         // by the original constructor but is immediately kept hidden (SetVisible(false)) and never
@@ -256,25 +255,25 @@ public sealed partial class PinSubView : Control
         // Position 0..4 = top row (Y=Row0Y), Position 5..9 = bottom row (Y=Row1Y).
         // Digit assigned via _scrambled[position].
         // spec: Docs/RE/specs/frontend_scenes.md §11.3a "100 buttons total, actions 0..99".
-        for (int pos = 0; pos < 10; pos++)
+        for (var pos = 0; pos < 10; pos++)
         {
-            int digit = _scrambled[pos];
-            int col = pos % 5;
-            int row = pos / 5;
+            var digit = _scrambled[pos];
+            var col = pos % 5;
+            var row = pos / 5;
 
-            int x = Col0X + col * ColSpacing; // spec §11.3a. CODE-CONFIRMED.
-            int y = row == 0 ? Row0Y : Row1Y; // spec §11.3a. CODE-CONFIRMED.
+            var x = Col0X + col * ColSpacing; // spec §11.3a. CODE-CONFIRMED.
+            var y = row == 0 ? Row0Y : Row1Y; // spec §11.3a. CODE-CONFIRMED.
 
-            for (int face = 0; face < 10; face++)
+            for (var face = 0; face < 10; face++)
             {
                 // Digit face glyph: srcU = face*52; srcV per state.
                 // spec: Docs/RE/specs/frontend_scenes.md §11.3b.
-                int srcU = face * DigitColW;
+                var srcU = face * DigitColW;
 
                 Texture2D? normal = _atlas.SliceByPath(AtlasPassword, srcU, DigitNormalV, TileW, TileH);
                 Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, srcU, DigitPressedV, TileW, TileH);
                 Texture2D? hover = _atlas.SliceByPath(AtlasPassword, srcU, DigitHoverV, TileW, TileH);
-                bool shown = face == digit;
+                var shown = face == digit;
 
                 var btn = new TextureButton
                 {
@@ -288,10 +287,10 @@ public sealed partial class PinSubView : Control
                     TexturePressed = pressed,
                     TextureDisabled = normal,
                     Visible = shown,
-                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore,
+                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore
                 };
 
-                int actionId = pos * 10 + face;
+                var actionId = pos * 10 + face;
                 btn.Pressed += () => OnDigitFaceAction(actionId);
                 AddChild(btn);
             }
@@ -319,10 +318,10 @@ public sealed partial class PinSubView : Control
             TextureNormal = normal,
             TextureHover = hover,
             TexturePressed = pressed,
-            TextureDisabled = normal,
+            TextureDisabled = normal
         };
 
-        int capturedTag = tag;
+        var capturedTag = tag;
         btn.Pressed += () => OnButtonAction(capturedTag);
         AddChild(btn);
     }
@@ -341,8 +340,8 @@ public sealed partial class PinSubView : Control
 
     private void OnDigitFaceAction(int actionId)
     {
-        int pos = actionId / 10;
-        int face = actionId % 10;
+        var pos = actionId / 10;
+        var face = actionId % 10;
         if ((uint)pos >= (uint)_scrambled.Length || _scrambled[pos] != face)
             return;
 
@@ -408,14 +407,14 @@ public sealed partial class PinSubView : Control
         _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
         // Seed from the whole-second wall clock (CRT time()). spec §3.
-        int seed = (int)((long)global::Godot.Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
+        var seed = (int)((long)Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
         var rng = new Random(seed);
 
         // Ascending Fisher-Yates (MSVC random_shuffle): for i = 1..9, swap a[i] with a[rand() mod (i+1)].
         // spec §3.
-        for (int i = 1; i < 10; i++)
+        for (var i = 1; i < 10; i++)
         {
-            int j = rng.Next(0, i + 1);
+            var j = rng.Next(0, i + 1);
             (_scrambled[i], _scrambled[j]) = (_scrambled[j], _scrambled[i]);
         }
     }
@@ -427,7 +426,7 @@ public sealed partial class PinSubView : Control
         // Store non-keypad children, clear, re-add.
         // Simpler: just free keypad-tagged buttons. Since we added dim+keypad+display+buttons
         // in a known order, re-add everything.
-        foreach (Node child in GetChildren())
+        foreach (var child in GetChildren())
             child.QueueFree();
         _pinDisplay = null;
 
@@ -441,7 +440,7 @@ public sealed partial class PinSubView : Control
             Text = new string('*', _pin.Length),
             Position = new Vector2(PinDisplayX, PinDisplayY),
             Size = new Vector2(PinDisplayW, PinDisplayH),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);

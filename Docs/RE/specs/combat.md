@@ -5,7 +5,12 @@
 >   formulas are **confirmed** (control-flow-confirmed static read on build `263bd994`); single-inference
 >   findings are marked **static-hypothesis**; server-authored magnitudes (damage numbers, cooldown
 >   wall-clock pacing, XP/reward rates, HP scale) and on-wire VALUE meanings are **capture/debugger-pending**.
-> - **ida_reverified:** 2026-06-16
+> - **re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)** — Section 5 reclassified:
+>   the `4/99` + `4/100` opcode bank previously specced here as `SmsgCombat*` is **NOT combat** — it is the
+>   **Cube-Gamble minigame** result/spin panel (see §5 and the §5.2 redirect). The death-state field
+>   convention and on-death cleanup are added (new §14). Real combat is server-authoritative via C2S `2/52`
+>   (unchanged headline).
+> - **ida_reverified:** 2026-06-20
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida] (no live network capture corroborates the in-world loop yet)
 > - **conflicts:** (1) attack-in-progress flag clear — this build shows it cleared/re-armed in
@@ -55,7 +60,7 @@ counterpart to the vitals spec and shares the same aggregation pipeline.
 | Cadence constants: per-skill cadence = `100 ms × skill_cadence` (skill record `+1332`); post-cast motion lockout = `550 ms` fixed; `100 ms` auto-repeat throttle (Section 11) | HIGH — client constants CONFIRMED; whether the server re-paces them is CAPTURE/DEBUGGER-PENDING |
 | Controller field offsets re-pinned to build 263bd994 (picked target id/sort at `+36/+40`; throttle on the move-scheduler `+36`, not `controller+144`) (Section 9.1) | HIGH for the 263bd994 offsets; the prior-build `+136/+140/+144` discrepancy is STATIC-HYPOTHESIS / names.yaml re-pin pending |
 | Attack-in-progress flag clear opcode is `4/13` on this build (was `4/2`) (Section 11) | CODE-CONFIRMED that `4/13` clears the flag; which push arms-vs-releases the swing window is CAPTURE/DEBUGGER-PENDING |
-| `4:100` body = 188 B (`0xBC`); `4:99` body = 16 B (result-code → `~58001..58030`) (Section 5) | HIGH (CODE-CONFIRMED static sizes) |
+| `4:99` + `4:100` are **NOT combat** — they are the **Cube-Gamble minigame** result/spin bank (Section 5) | HIGH (CYCLE 7 reclassification — ground-truth texture + 2/141 submit; see §5) |
 | Damage-kind → floating-number motion/colour selection; multi-hit split (Section 12) | HIGH (CODE-CONFIRMED) |
 
 **UNVERIFIED list** is consolidated in Section 7. Korean strings referenced here are **CP949 /
@@ -359,30 +364,46 @@ capture before binding penalties to specific weapon classes (`items.csv` weapon 
 | Opcode (major:minor) | Name | Role in combat |
 |---|---|---|
 | `5:53` | `SmsgActorVitalsAndPairState` | Writes **absolute** current HP / MP / stamina into the target actor. For the local player, each value is clamped against the **locally-computed maximum** (`structs/stats.md`) and negatives floor to 0. This is where "damage taken/dealt" becomes visible — as a new absolute HP value from the server, not a client subtraction. |
-| `4:100` | `SmsgCombatAttackUpdate` | A **188-byte (0xBC)** body carrying a combat **phase** indicator, a value, and (post-handling) forwarding to the reward/EXP panel. Drives **attack-swing timing** state on the local player; see §5.2. Server-paced — not a client cooldown formula. |
-| `4:99` | `SmsgCombatResultMessage` | A **16-byte** body — a combat/training **session result**: a subtype byte (subtype 1 → a result panel) else a result code `1..8` mapped to a localized message-id series (~`58001..58030`, some `printf`-formatted) shown as a coloured chat notice. CP949. UI messaging, no client math. |
+| `5:52` | `SmsgActorSkillAction` | Carries the swing/hit animation header and per-target hit records (visible damage, remaining HP). This — together with `5:53` — is the actual combat-result path. See Sections 11–12. |
 
-Field layouts for `4:99` and `4:100` are **not yet specced** (no packet YAML); they are listed in
-`opcodes.md` as routing-confirmed only. The body **sizes** are now pinned (`4:100` = 188 bytes / `0xBC`;
-`4:99` = 16 bytes), and `4:99`'s result-code → message-id banding is recorded above; both are scoped
-enough for a future packet spec but are **out of scope for combat math** here.
+> **CYCLE 7 reclassification — the former `4/100` / `4/99` "combat" rows are removed.** An earlier draft
+> of this spec listed `4:100` `SmsgCombatAttackUpdate` (188-byte body, "attack-phase" timing) and `4:99`
+> `SmsgCombatResultMessage` (16-byte body, result codes `1..8` → message ids `~58001..58030`) as combat
+> messages. **That attribution is wrong.** This entire opcode bank is the **Cube-Gamble minigame**
+> (a wager / spinning-reel daily gambling panel), not combat:
+> - The panel-init path loads the gamble UI atlas (`data/ui/cubegamble.dds` / `cubegamble_ani.dds`) into
+>   every cell of its window panel — ground-truth confirmation that the bank drives a gamble panel.
+> - The "result" path plays reel sounds, formats a money/wager quantity, diffs the wager against a
+>   baseline, compares reel sums for win/lose, and enforces a **per-day bet-limit counter**; the
+>   `~58001..58030` message ids and the bounded-random draws are **gamble outcome lines**, not damage
+>   numbers.
+> - The panel **submits via C2S `2/141`** (a char-status / gamble submit), not any combat opcode.
+> - The handler routes its payload to the gamble panel object; only a *secondary* write touches the
+>   local-player visual record (see §5.2).
+>
+> The opcode catalogue (`opcodes.md`) reclassification of `4/99` / `4/100` away from `SmsgCombat*` is
+> owned by a separate lane and is not edited here. **For combat purposes, treat `4/99` and `4/100` as
+> non-combat (Cube-Gamble).** Real combat is **server-authoritative** and uses the C2S `2/52` request
+> (§10) and the `5/52` / `5/53` result pushes (§5.1, §11, §12). There is **no client-side
+> damage/crit/defence apply path** — the client collects target ids, sends `2/52`, and applies inbound
+> results; applied magnitudes are **RUNTIME-ONLY (server-resolved)**.
 
-### 5.2 Attack-phase timing state
+### 5.2 Attack-phase timing state — corrected (the "phase 3/5" state belongs to the gamble reel, not a combat swing)
 
-The local player carries a small attack-timing block (a swing-start timestamp, a value field, and a
-phase indicator, in one contiguous run). Critically, **this run is NOT on the battle controller** — it
-lives on a **separate local-player visual/HUD object** (the main-window visual record at slot `[148]`),
-distinct from the battle-controller singleton (§9.1). `SmsgCombatAttackUpdate` (`4:100`) advances it: on
-the **swing-start phase** (phase value `3`) the client stamps a millisecond timestamp into the
-swing-start field, stores the message value into the adjacent value field, and writes the phase; on a
-later **reset phase** (phase value `5`) it zeroes the swing-start field. After updating this run the
-handler forwards the body to the reward/EXP panel. Cadence (attack speed) is therefore **gated by server
-phase messages**, so attack speed in the live game was server-paced. There is **no client-side
-attack-speed formula**, though the `items.csv` `attack_speed` coefficient (col75; range ~0.26–0.37) is
-the per-weapon input the server would have used.
+An earlier draft attributed a "swing-start timestamp / value / phase" run on the local-player visual
+record (main-window visual slot `[148]`) to a combat attack-phase update driven by `4/100`, with phase
+value `3` = swing-start and phase value `5` = reset. **That timing machinery is the Cube-Gamble reel
+update, not a combat swing-timing state.** The `4/100` handler is the gamble spin update; its *only*
+combat-adjacent effect is a secondary write of timestamp fields onto the local-player visual record, but
+those fields are driven by the **gamble** subsystem, not by a combat swing.
 
-*Which phase value marks "swing-start" vs "reset", and whether the server (re)paces these phases,
-is **capture/debugger-pending**; the phase-byte → field-write mechanism above is **confirmed** static.*
+**Real combat cadence is owned by the battle controller, not by any `4/100` phase byte.** Attack
+pacing is gated by the controller's swing-ready timestamp plus the fixed motion lockout and auto-repeat
+throttle (Section 11), and the swing/hit animation is driven by the `5/52` `SmsgActorSkillAction` result
+push (Section 12), not by a `4/100` phase indicator. The `items.csv` `attack_speed` coefficient (col75;
+range ~0.26–0.37) is the per-weapon input the **server** uses to pace swings; the client carries no
+attack-speed formula of its own. (Section 11 retains the cadence model; this subsection only removes the
+mistaken `4/100`-phase-byte attribution.)
 
 ### 5.3 Combat visuals & local input (no math)
 
@@ -676,11 +697,13 @@ Two further "can I act" gates compose with the cadence (these mirror `specs/skil
   buff-status ids — `specs/skills.md` §6 buff slots) is active.
 
 **Server pacing — strong inference, CAPTURE/DEBUGGER-PENDING.** Whether the swing-ready timestamp is
-armed purely client-side at send time, or **re-armed by a server packet** (a per-tick resync pulse, or
-the combat-phase update `4:100` `SmsgCombatAttackUpdate`, Section 5.2), governs whether attack speed was
-*truly* server-paced. The control flow strongly implies server pacing (the controller arms the swing
-window and a server resync push releases the "attack in progress" flag), but **a capture is required to
-settle the timestamp's owner.** This is the single most important open question in the combat-loop model.
+armed purely client-side at send time, or **re-armed by a server packet** (a per-tick resync pulse,
+and/or the `5/52` `SmsgActorSkillAction` result push and the `4/13` state-sync), governs whether attack
+speed was *truly* server-paced. *(Note: an earlier draft floated `4/100` `SmsgCombatAttackUpdate` as a
+candidate re-arm; that opcode is the Cube-Gamble spin update, not combat — see §5.2 — so it is **not** a
+candidate here.)* The control flow strongly implies server pacing (the controller arms the swing window
+and a server resync push releases the "attack in progress" flag), but **a capture is required to settle
+the timestamp's owner.** This is the single most important open question in the combat-loop model.
 
 > **Attack-in-progress flag clear — opcode is `4/13` on this build (was documented as `4/2`).** The
 > "attack/cast in progress" flag (controller `+80`) is set by the send paths and **cleared / re-armed
@@ -690,6 +713,28 @@ settle the timestamp's owner.** This is the single most important open question 
 > is superseded here by `4/13`. It remains **capture/debugger-pending** whether `4/2` also exists as a
 > bare per-tick tick and which push *arms* vs *releases* the swing window live; the wire layout of the
 > resync push is out of scope here.
+
+### 11.1 Executor outcome codes and the cadence gate (CONFIRMED, static)
+
+The action executor returns a small **reason code** describing why the action did or did not fire:
+`0` = sent; a non-zero value in the range **`1..21`** is the reason it was rejected (target / skill /
+level / range / cooldown / state failures — the same gate family as §10.4 and `specs/skills.md` §2.1).
+The **cadence gate** rejects a queued action when
+
+```
+(now − last-send) < 100 ms × skill_cadence        // skill_cadence = skill record field +1332
+```
+
+On a successful send the timer is **rebased** (`last-send = now`), so the minimum inter-action interval
+is `100 ms × skill_cadence`. The basic-attack chain takes a fast path that fires immediately (no full
+cadence gate). These are the same `100 ms × skill_cadence` constant and swing-ready re-arm already in
+the Section 11 table; this subsection records the **reason-code range (`1..21`)** and the rebase rule.
+
+**Combo model.** A skill record carries a short combo chain; the combo length is the **count of
+non-zero combo entries** on the record and is capped at **≤ 5 steps**. A per-action combo-step counter
+walks `0..length`, and the current step index is written into the outbound `2/52` request's
+**combo / hit byte** (the second header byte). The combo-active bookkeeping lives on the controller
+(`+69` / `+70`, §9.1). `CODE-CONFIRMED`.
 
 ---
 
@@ -922,3 +967,64 @@ mirrors); `structs/stats.md` (the `VitalFormula` that computes max HP / max MP /
 demand); `ui_hud_layout.md` Section 5.6 (the gauge that polls the HUD vitals globals); Sections 5.1 /
 12.2 (the `5/53` absolute-vitals carrier and the HP-bar-as-absolute observable); Section 11 (the `4/13`
 attack-flag clear, unchanged).
+
+---
+
+## 14. Death-state field convention & on-death cleanup (CYCLE 7)
+
+> **Verification banner for Section 14** (ida_reverified 2026-06-20, ida_anchor `263bd994`,
+> evidence [static-ida]). The death-state field offsets, the on-death cleanup set, and the deathCause
+> branch selector are **CONFIRMED** (control flow followed end-to-end). The **applied magnitudes** of
+> the death penalty (XP loss, durability loss, dropped items) are **RUNTIME-ONLY / server-authoritative**
+> — the client formats notice *text* only, never a penalty number. The **respawn flow** (request /
+> confirm opcodes, the respawn modal, the countdown engine, ground-item lifecycle) is owned by
+> `specs/world_systems.md`; this section records only the **on-actor death-state convention** that the
+> combat / domain model needs, and cross-refs `world_systems.md` for the rest.
+
+When an actor dies, its death state is recorded on the actor object itself. These are
+**object-relative field offsets** (interoperability layout facts, not binary addresses):
+
+| Actor field | Offset | Role | Death value | Alive / normal value |
+|---|---|---|---|---|
+| alive / active gate | `+1424` | The generic "alive & interactable" guard. Targeting, movement, and pickup paths all early-return when it is `0`. | `0` = dead | `1` = alive |
+| action / motion-state enum | `+1420` | The actor's current action-state. `8` is the canonical "is this actor dead" test used elsewhere. | `8` = death / knockdown | `1` = idle / normal |
+| death timestamp (ms) | `+1480` | Millisecond clock value stamped at the moment of death. | set at death | — |
+
+The death-motion routine sets all three (alive gate `→ 0`, action-state `→ 8`, timestamp `→ now`) and
+plays the death animation + death SFX; a mounted / paired entity recurses so it also plays death. The
+spawn / respawn / world-entry paths reset the alive gate and action-state back to `1` / `1` when an
+actor (re)enters the world alive.
+
+**On-death cleanup (CONFIRMED).** When the death handler processes a dying actor it:
+- clears that actor's **30-entry buff array** (12-byte slot stride, the per-actor buff table — removes
+  timed buffs on death; see `specs/skills.md` §6 / the buffs spec),
+- clears the battle controller's **current target** if the dying actor was the picked target,
+- zeroes the actor's **combat resources** (the two combat-resource fields at actor `+1256` / `+1260`).
+
+For the **local player** specifically, the same handler additionally zeroes the local resource mirror,
+opens the death / respawn modal, and sets the battle controller's **combat sub-mode field (`controller +16`)
+to `2`** ("dead"). **Local death does NOT leave the world** — it is distinct from a world-exit; the actor
+stays in the scene with the dead state set and the respawn modal shown.
+
+**deathCause selector (CONFIRMED).** The inbound death message carries a cause value that selects the
+death presentation:
+
+| deathCause | Meaning | Effect |
+|---|---|---|
+| `0` | normal death | standard death notice + town-respawn-capable modal |
+| `1` | PK death (type A) | PK death visual / SFX + "killed by" notice |
+| `2` | PK death (type B) | alternate PK death visual |
+| `3` | special / no-modal | restricted respawn modal (no town-respawn option), short one-shot countdown |
+
+**Death penalty = text only, magnitudes RUNTIME-ONLY.** The client formats death / "killed-by" notice
+strings (localized CP949 message-db ids) but **computes no XP-loss number, no durability-loss number,
+and no item-drop list** — there is no client-side death-penalty arithmetic. Any item loss arrives as
+ordinary server-driven ground-item spawns / inventory updates. **XP loss, durability loss, and dropped
+items are RUNTIME-ONLY / server-authoritative.**
+
+**Cross-references for Section 14:** `specs/world_systems.md` (the full respawn flow — respawn request
+C2S `2/3`, the respawn modal, the death-countdown timer engine, and the ground-item lifecycle; and the
+death-detect push S2C `5/10` and respawn responses S2C `4/28` / `5/28` and vitals push `5/53`);
+`structs/actor.md` (the actor-side field offsets); `specs/skills.md` §6 (the per-actor buff table that
+is cleared on death). The death-detection and respawn **opcodes** themselves are reconciled in
+`opcodes.md` by a separate lane.

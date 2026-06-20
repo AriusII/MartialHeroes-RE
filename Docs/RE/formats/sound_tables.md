@@ -4,11 +4,16 @@
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
 > verification: sample-verified
-> ida_reverified: 2026-06-16
+> ida_reverified: 2026-06-20
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > conflicts: C1 — VFS census shows 301 soundtable entries (bge=61, others=60), one extra `.bge`,
->            so "≈300 / five-per-area" is softened to "≈301, one extra .bge" (NOT a layout conflict)
+>            so "≈300 / five-per-area" is softened to "≈301, one extra .bge" (NOT a layout conflict).
+>            C2 (CYCLE 7) — the 0x3000 value is the LOADER-READ record-array extent = the full
+>            meaningful file body (256 × 48 = 12288), NOT a "trailer". The 1024 bytes AFTER 0x3000
+>            are the loader-ignored trailing region. Prior text calling 0x3000-related content a
+>            "trailer" is corrected: 0x3000 = whole record-array size; the trailer is the 0x3000..0x33FF
+>            region. The hour-of-day semantics of the +4 24-byte field are RESOLVED this cycle (was DBG-pending).
 >
 > status: sample_verified
 > sample_verified: true  (file size, entry count, stride, entry field layout, and audio container
@@ -16,12 +21,19 @@
 >                         on-disk 48-byte record stride two-witness-confirmed — 2026-06-15;
 >                         RE-CONFIRMED two-witness on build 263bd994 — 2026-06-16: the per-area
 >                         loader advances 48 bytes per record across 256 records and reads exactly
->                         12288 bytes, leaving a 1024-byte unread trailer. The stride-48 reading is
->                         now independently corroborated on BOTH witnesses — the loader's per-record
->                         advance AND field-coherence on a populated `.eff` table: at stride 48 all
->                         154 active records yield coherent world-space f32 position/radius, while
+>                         12288 bytes (0x3000), leaving a 1024-byte unread trailing region. The stride-48
+>                         reading is now independently corroborated on BOTH witnesses — the loader's
+>                         per-record advance AND field-coherence on a populated `.eff` table: at stride
+>                         48 all 154 active records yield coherent world-space f32 position/radius, while
 >                         stride 52 shreds those fields. The 52-byte reading is refuted by both
 >                         witnesses.)
+> cycle7_note: 2026-06-20 (IDB SHA 263bd994, CYCLE 7) — TWO loaders re-confirm that 0x3000 (12288)
+>              is the full record-array body (256 × 48), NOT a "trailer": a global loader reads FIVE
+>              per-map soundtable files each as a fixed 0x3000 blob; a per-scene loader reads three
+>              (.bgm/.bge/.eff) and iterates exactly 256 records at the 48-byte (12-dword) stride.
+>              The 0x3000..0x33FF region (1024 bytes) is the loader-ignored trailing region. The +4
+>              24-byte field is RESOLVED as the per-hour-of-day enable bitmap (hour-gating), and the
+>              +10 name / +0x20.. param overlap caveat is recorded (see Per-record layout).
 
 ---
 
@@ -41,6 +53,14 @@ the geometry shape variant.
 
 The `.xeff` extension (used by the particle/visual-effect system) is a completely separate
 third format and is unrelated to either `.eff` variant above.
+
+> **CYCLE 7 explicit statement (do not conflate).** The `soundtable*.eff` documented in THIS file
+> is the **SOUND-effect table** — a per-map 48-byte-stride table of triggered point-source SOUND
+> events (3D positional audio cues). It is **DISTINCT** from the **visual-effect** `.eff`
+> (`data/effect/obj/*.eff`, the triangle-mesh collision/area shapes — Section 6) and from the
+> particle `.xeff`. The visual-effect formats are owned by `formats/effects.md` / a future
+> `formats/eff_geometry.md`, **not** by this spec. Never merge the sound-effect table with the
+> visual-effect `.eff`: same extension, unrelated formats, disambiguated solely by VFS path prefix.
 
 ---
 
@@ -116,6 +136,19 @@ the field layout of the first 0x2C bytes of every record (see the per-record tab
 > reading at stride 52 misaligns the fields (only ~40–50% of 208 misaligned slots stay plausible).
 > So **both witnesses independently pick 48**; the 52-byte reading is REFUTED.
 
+> **CYCLE 7 (2026-06-20, IDB SHA 263bd994) — "0x3000" is the full record-array size, NOT a trailer.**
+> Any earlier phrasing that treated the value 0x3000 itself as a "trailer" is **corrected**: 0x3000
+> (12288) is exactly the **record-array body** = 256 records × 48 bytes, and it is the **only region
+> the loader reads**. Two distinct loaders confirm this on the live binary:
+> - a **global / map-set loader** opens **FIVE** per-map soundtable files (`.wlk .run .bgm .bge .eff`)
+>   and reads each as a **fixed 0x3000 blob** (zero-clearing each global up front), and
+> - a **per-scene loader** opens **three** (`.bgm .bge .eff`) and iterates **exactly 256 records at a
+>   48-byte (12-dword) stride** (`record_ptr += 12 dwords; while index < 256`).
+>
+> Both arrive at 256 × 48 = 0x3000. The **trailer is the 0x3000..0x33FF region** (1024 bytes after the
+> array), which the loader never touches — it is *not* the 0x3000 value. The prior "stride 48 (not 52)"
+> finding is CONFIRMED; the only correction is terminological: 0x3000 = whole record-array size.
+
 ### Two loader entry points (not one)
 
 There are **two** distinct loader routines, both using the same 12288-byte (0x3000) read size per
@@ -162,7 +195,7 @@ unread trailer (see File layout).
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0x00 | 4 | u32 | `sound_entry_id` | Numeric resource key; 0 = empty/unassigned slot. Active records carry 9-digit decimal values (range ~900000000..999999999; see Sound ID section). | CONFIRMED |
-| +0x04 | 24 | u8[24] | `hour_schedule[24]` | One byte per slot, indexed 0..23. All runtime samples have every byte = 0x01; the area-001 census sees per-byte 0x00/0x01 patterns that vary by record. The gating consumer that reads this mask is a separate function not located statically, so the mask **semantics are DBG-pending** — do NOT assume an hour-of-day meaning until the consumer is confirmed live. | CONFIRMED (structure and presence); mask semantics DBG-pending |
+| +0x04 | 24 | u8[24] | `tod_enable[24]` (hour-of-day enable bitmap) | One byte per **in-game hour 0..23**. **CYCLE 7 RESOLVED (control-flow-confirmed):** this is the per-hour-of-day **enable bitmap** that gates whether the row plays at the current hour. At play time the ambient driver computes `hour = time-of-day-ms / 3600` (clamped 0..23) and tests `record[+4 + hour]`; a zero byte suppresses/stops the cue for that hour, non-zero (re)starts it. This is the field formerly called `unlabeled_24` / "DBG-pending mask". All-runtime-0x01 in null/simple samples; area-001 census shows per-record 0x00/0x01 patterns, consistent with per-hour gating. | CONFIRMED structure; **hour-of-day semantics CYCLE 7 control-flow-confirmed** (the 3600 divisor + the +4-base index are explicit in the ambient driver) |
 | +0x1C | 4 | f32 | `weight` | Volume / attenuation / blend scalar. `weight == 1.0f` (`00 00 80 3F`) for **all 256 records in every sampled table** (including all 154 active `.eff` records), not just BGM / BGE. Not accessed in the observed runtime playback path. | SAMPLE-VERIFIED type/value; semantic UNVERIFIED |
 | +0x20 | 4 | f32 | `pos_x` | World-space X of the 3D source. Populated (non-zero) only in `.eff` (3D) records; 0.0 for BGM / BGE / WLK / RUN. Passed to the DirectSound 3D position as the X argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
 | +0x24 | 4 | — | `unlabeled_24` | The loader does NOT read these 4 bytes. The earlier `pos_y` label is incorrect — no read site assigns a meaning to this offset. The sample positively REFUTES a position role: in the 154 active `.eff` records, +0x24 is **neither a plausible world-space f32 nor exactly zero** — it is non-coordinate data, not a Y axis. Left unlabeled; role unestablished. | NOT-READ by loader; sample-confirmed NOT a position field; meaning UNRESOLVED |
@@ -171,6 +204,32 @@ unread trailer (see File layout).
 
 **Record stride: 48 bytes. CONFIRMED.** (256 × 48 = 12288 = bytes read by the loader; the
 remaining 1024 bytes are the unread file trailer.)
+
+> **CYCLE 7 field-overlap caveat — the runtime-binary record vs. the text-export record (SAMPLE/DBG-pending).**
+> The **runtime per-area loader** (the witness behind the table above) reads the record as
+> `{ u32 id @+0x00; u8 tod_enable[24] @+0x04; f32 weight @+0x1C; f32 pos_x @+0x20; (+0x24 not read);
+> f32 pos_z @+0x28; f32 radius @+0x2C }` — these are the runtime-meaningful fields and are
+> sample-verified at stride 48. Separately, the **sound-table record dumper** (an authoring/export
+> path, see "Two loader entry points" and the `tool/sound/` note) treats the same record as carrying
+> a **`sound_kind` byte at +8** (the `SOUND_KIND` enum, see `specs/sound.md §9`), a **small
+> `flag`/loop byte at +9**, and a **NUL-terminated `name`/tag string starting at +10** (`%s`).
+> These two views **overlap** in the +8..+0x1F region:
+> - The dumper's `+8 sound_kind` / `+9 flag` / `+10 name` lie *inside* the runtime's `+0x04..+0x1B`
+>   `tod_enable[24]` span and partly over `weight`/`pos_x`.
+> - They can only **coexist** if (a) in the text-export `.wlk/.run/.bgm` variant the `+10` name is
+>   short enough (≤ ~21 bytes) to leave `+0x20..+0x2F` free for the 3D params, OR (b) the binary
+>   `.eff` variant uses `+0x20/+0x28/+0x2C` for the numeric 3D params and does **not** carry a name.
+> - The `.wlk/.run/.bgm` text-export variant clearly uses the **name**; the `.eff` binary variant
+>   clearly uses the **+0x20/+0x28/+0x2C 3D params**.
+> Whether the `+10`-string view and the `+0x20/+0x28/+0x2C`-params view are **mutually exclusive
+> per file-type**, or the name is bounded ≤21B with params after, **cannot be settled statically
+> without sample bytes** of the text-export variant. **SAMPLE/DBG-pending.** For a runtime parser,
+> use the runtime field table above (24-byte `tod_enable` + the f32 params); the `+8 kind` / `+9 flag`
+> / `+10 name` view applies to the editor/dumper text form, not the shipped runtime read.
+>
+> The **`sound_kind` byte at +8** is itself authoritative for the `SOUND_KIND` enum value table — see
+> `specs/sound.md §9` (value 1 reserved/NONE; `SOUND_SKILL` = 11). The **+9 flag/loop** byte's
+> precise meaning (loop vs one-shot vs sub-channel) is **SAMPLE/DBG-pending**.
 
 > Field-naming reconciliation: an earlier spec named offsets +0x20 / +0x28 / +0x2C as
 > `pos_x` / `pos_z` / `volume_factor` and +0x24 as `unknown_36` (later mislabelled `pos_y`). The
@@ -183,7 +242,7 @@ remaining 1024 bytes are the unread file trailer.)
 
 ```
 [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
-[+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; consumer not located → semantics DBG-pending)
+[+0x04..+0x1B]  tod_enable       u8 × 24   (per-HOUR-OF-DAY enable bitmap, hour 0..23; CYCLE 7 control-flow-confirmed)
 [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; blend/attenuation scalar)
 [+0x20..+0x23]  pos_x            f32 LE    (3D world X; read; EFF records only, else 0.0)
 [+0x24..+0x27]  unlabeled_24     4 bytes   (NOT read by the loader; meaning unresolved)
@@ -191,6 +250,10 @@ remaining 1024 bytes are the unread file trailer.)
 [+0x2C..+0x2F]  radius           f32 LE    (3D audibility radius; read; EFF records only, else 0.0)
 --- end of 48-byte record; next record begins at +0x30 ---
 ```
+
+> Editor/dumper text-export overlay (NOT the runtime read; see the CYCLE 7 field-overlap caveat
+> above): the dumper reads `+8 sound_kind` (SOUND_KIND enum), `+9 flag/loop`, `+10.. name` — these
+> overlap the runtime `tod_enable` / `weight` / `pos_x` span and apply only to the editor text form.
 
 After the 256th record the file carries a 1024-byte trailer the loader never reads (see File layout).
 
@@ -421,11 +484,13 @@ the `.ogg` container format is identical.
    and all 154 active `.eff` records), not just BGM / BGE; not accessed in the observed runtime path.
    Likely a blend weight, priority, or attenuation scalar. Naming tentative.
 
-4. **`hour_schedule` per-byte mask semantics** — DBG-pending. Every byte is 0x01 in the runtime
-   samples, but the area-001 census shows per-record 0x00/0x01 patterns that vary by record. The
-   gating consumer that reads this mask is a separate function not located statically, so its
-   meaning (time-of-day mask, sub-area enable mask, weather filter, …) stays opaque pending a live
-   debugger confirmation. Do not implement a meaning for it.
+4. **`tod_enable` per-byte semantics (formerly `hour_schedule`)** — **CYCLE 7 RESOLVED**
+   (control-flow-confirmed): the 24-byte field at +0x04 is the **per-hour-of-day enable bitmap**.
+   The ambient driver computes `hour = time-of-day-ms / 3600` (clamped 0..23) and tests
+   `record[+0x04 + hour]`; a zero byte suppresses the cue for that hour, non-zero (re)starts it.
+   The 3600 divisor and the +0x04 base index are explicit in the driver. The all-0x01 runtime
+   samples mean "enabled every hour"; the varying area-001 patterns are per-hour gating. No longer
+   DBG-pending. (A faithful runtime parser should expose this as a 24-entry hour gate.)
 
 5. **EFF 3D position units** — whether `pos_x` / `pos_z` and `radius` use the same world-space
    unit scale as the terrain grid is not established; verified populated only in EFF records of one
@@ -448,6 +513,25 @@ the `.ogg` container format is identical.
 
 10. **`data/effect/obj/tringle.eff` encoding variant** — triangle-strip vs triangle-list index
     scheme is ambiguous from size alone. Requires a trace of the effect-geometry loader.
+
+11. **Editor-dumper `+9 flag/loop` byte semantics (CYCLE 7)** — the sound-table record dumper reads a
+    small flag byte at record +9 (loop vs one-shot vs sub-channel). Its precise meaning is
+    **SAMPLE/DBG-pending**. (This byte is part of the editor/dumper text-export view, which overlaps
+    the runtime `tod_enable` span — see item 12.)
+
+12. **`+10` name vs `+0x20/+0x28/+0x2C` param overlap per file-type (CYCLE 7)** — the editor/dumper
+    view reads a NUL-terminated `name`/tag string from +10, while the runtime reads f32 3D params at
+    +0x20/+0x28/+0x2C. These overlap; whether they are mutually exclusive per file-type (text-export
+    `.wlk/.run/.bgm` use the name; binary `.eff` use the params) or the name is bounded ≤21B with
+    params after **cannot be settled statically without sample bytes** of the text-export variant.
+    **SAMPLE/DBG-pending.** A runtime parser should use the runtime field table (24-byte `tod_enable`
+    + f32 params), not the dumper's name view.
+
+13. **Router category-5 vs the 0..4 cap (CYCLE 7, cross-ref `specs/sound.md §2.1`)** — the
+    actor-anchored 3D event SFX path uses a play category argument of 5, above the 0..4 multi-voice
+    cap; whether it shares the same numeric category space or belongs to a distinct router overload is
+    **DBG-pending**. (This is a playback-routing question owned by `specs/sound.md`, noted here only
+    because the `.eff` 3D records feed that path.)
 
 ---
 

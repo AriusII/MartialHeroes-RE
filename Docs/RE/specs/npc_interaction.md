@@ -1,16 +1,23 @@
 ---
 status: confirmed
 sample_verified: false
-verification: confirmed (client-side routing/sizes/offsets/formulas, control-flow-confirmed); capture/debugger-pending for server-authored magnitudes and on-wire VALUE meanings
-ida_reverified: 2026-06-16
+verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) — client-side routing/sizes/offsets/formulas control-flow-confirmed; capture/debugger-pending for server-authored magnitudes and on-wire VALUE meanings
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: 2/151 / 2/152 / 2/153 reassigned away from ProductPanel (see §9.1); JOB rank gate scoped to KIND 27-29 (see §2.3); ProductPanel true buy opcode unmapped (see §5.2)
+conflicts: 2/151 / 2/152 / 2/153 reassigned away from ProductPanel (see §9.1); JOB band gate scoped to the skill-trainer default case KIND 27-29 + 34 (see §2.3); ProductPanel true buy opcode unmapped (see §5.2); CYCLE 7 re-pinned the KIND→panel-slot mapping and the storage target (see §2.2a)
 ---
 
 # NPC Interaction — Dialogue, Shops, Repair, Storage & Services — Clean-Room Specification
 
-> **Verification banner (re-verified 2026-06-16 on build 263bd994, evidence [static-ida]).**
+> **Verification banner: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20), evidence [static-ida].**
+> CYCLE 7 re-walked the master KIND switch end-to-end and re-pinned the KIND→panel-slot
+> mapping, the skill-trainer JOB band gate, and the storage panel (KIND 22 → slot 233) as
+> the 2/142 consumer with its area-gate and refresh throttle (§2.2a, §7). Shop/repair/storage
+> *amounts* are confirmed server-arbitrated (RUNTIME-ONLY); the earlier-pass body-size and
+> opcode work below is preserved where it did not conflict.
+>
+> **Prior verification banner (re-verified 2026-06-16 on build 263bd994, evidence [static-ida]).**
 > The NPC-service routing, the panel-slot construction table, the catalog-source paths,
 > the send-builder `(major,minor)` tuples, the fixed body sizes, the struct-relative field
 > offsets, the bag-count gate thresholds, the price divisors and the message-db id ranges
@@ -151,38 +158,81 @@ recovered mapping (this completes and supersedes the partial table in
 > shop-list template+128 source path and is a rank / duel-registration candidate, **not** a
 > teleporter — see §8.4 and open question 6).
 
-### 2.3 Quest-giver default path (JOB → rank gate, scoped to KIND 27–29)
+### 2.2a KIND → panel/action table re-pinned (CYCLE 7) — authoritative
 
-The dispatcher's **default** case is the quest giver, but the **JOB → rank gate runs only
-for KIND ∈ {27, 28, 29}** (`(u8)(KIND − 27) <= 2`). The other default KINDs (12, 13, 30,
-34) skip straight to the quest-message branch with **no rank gate**. `[confirmed]` — this
-corrects the prior pass's implication that *all* default-KIND quest givers got the gate.
+CYCLE 7 re-walked the master KIND switch and re-confirmed the dispatch. The switch covers
+KIND values 1..35; KIND **1, 2, 3, 4, 6, 7, 11, 24** are inert (return, no panel). Counting
+the network-open case and the skill-trainer default as their own dispatch types, the number
+of **distinct action/panel types = 14**. `[confirmed]`. Where this table and §2.2 disagree on
+a panel-slot number or a panel role, **this CYCLE-7 table is authoritative** (§2.2 is retained
+for its narrative); the changed rows are flagged below.
 
-When the gate does run, **JOB does not select a single "required rank"** — it selects a
-**rank RANGE band** `[start, end]` plus a **compare value**. `[confirmed]`:
+| KIND (dec / hex) | Action | Panel slot / target | Type / purpose | Note vs §2.2 |
+|---|---|---|---|---|
+| 5, 9, 10, 14 (0x5/0x9/0xA/0xE) | show repair/keep-family panel; first close the trade/keep panel | **149 / 152 / 151 / 150** (four reuses of the one repair/keep panel kind) | **item-repair / keep family** (`itemrepair.dds`) | re-pinned: these four slots are one repair/keep-panel kind |
+| 8 (0x8) | open trade/keep panel | **173** | **trade / keep panel** (`tradekeepwindow.dds`) | re-pinned to slot 173 |
+| 15 (0xF) | build + show; close trade/keep | **153** | **guild NPC panel** (`guildnpc.dds`) | confirms §2.2 |
+| 17 (0x11) | build + show; close trade/keep | **154** | **confession NPC panel** (`confessionnpc.dds`) | confirms §2.2 |
+| 18, 19, 20, 21 (0x12–0x15) | build + show | **155** | **product / gather NPC panel** (`productnpc.dds`) | confirms §2.2 |
+| 22 (0x16) | show storage/warehouse panel | **233** | **storage / warehouse panel** (KeepNpcPanel) — **the 2/142 consumer** | **re-pinned**: KIND 22 → slot 233 is storage (was "fame/rank service"); the 2/142 storage open/money lane targets slot 233 (§7) |
+| 23 (0x17) | build + show | **239** | **carrier-pigeon / mail panel** | re-pinned: mail panel (not generic two-string info) |
+| 25 (0x19) | emit C2S **2/100** (no local panel) | — | **network-mediated NPC open** (server decides the panel) | confirms §2.2 |
+| 26 (0x1A) | build + show; area-keyed button list | **256** | **NPC helper / guide-list panel** (`npc_helper.dds`) | confirms §2.2 |
+| 31, 33 (0x1F / 0x21) | build + show, mode A (0) / mode B (1) | **257** | **two-mode NPC panel** | confirms §2.2 |
+| 32 (0x20) | build + show | **259** | **item-shop / buy panel** (`itemshop.dds`) | confirms §2.2 |
+| 35 (0x23) | emit C2S **2/143** (4-byte body), then open panel | **262** | **quest-item keep / warehouse** | confirms §2.2 |
+| 16 (0x10) | close the trade/keep panel only | 173 | transitional (no own panel) | confirms §2.2 |
+| default (12, 13, 27, 28, 29, 30, 34 + others) | skill-trainer / skill-book flow, JOB-band gated | **287** | **skill-trainer / skill-book panel** (§2.3) | re-framed: the default panel is the skill-trainer/skill-book panel |
 
-| NPC JOB code | band start | band end | compare value |
-|---|---|---|---|
-| 2549 | 2 | 7 | 1 |
-| 2550 | 7 | 12 | 2 |
-| 2551 | 12 | 17 | 3 |
-| 2552 | 17 | 21 | 4 |
-| 2553 | 21 | 24 | 5 |
+> **The 14th distinct type is the item-repair panel family** (RepairNpcPanel / ItemRepairPanel)
+> owned by the **149 / 150 / 151 / 152** slots — four reuses of the same repair/keep-panel kind,
+> so the *type* count is 14 even though there are ~17 live KIND cases. Binding each of
+> 149/150/151/152 to its exact panel class is `[static-hypothesis]` (the show step is generic;
+> the `itemrepair.dds` builders tie the family to repair). `[confirmed]` for the dispatch
+> structure, the 14-type count, and the storage-target re-pin (KIND 22 → slot 233).
+>
+> **Why this differs from §2.2.** §2.2 (2026-06-16 pass) read slot 5→149 as a generic merchant
+> NpcPanel and slot 9→152 as the storage KeepNpc, routing the 2/142 storage to slot 191 via a
+> KIND-9 menu. CYCLE 7's walk of the switch places the **storage/warehouse panel at slot 233
+> under KIND 22**, and groups 149/150/151/152 as the repair/keep family. Treat the CYCLE-7
+> slot/target assignments here as the operative ones; an engineer should follow §2.2a + §7 for
+> the storage panel and the 2/142 lane.
 
-- The gate compares the **player's current rank value** to the JOB's **compare value**.
-  On a match it programs the quest-message panel (slot 287) with the band `[start,
-  start−1, end]` written at panel **+396 / +400 / +404** and shows it; on a mismatch it
-  shows a "need rank N" notice **without** opening the panel. `[confirmed]` (the struct
-  offsets and the equality compare); the precise *semantics* of the compared player-rank
-  value is `[capture/debugger-pending]`.
-- Message ids on mismatch (CP949, looked up through the message DB, which is why a raw
-  immediate-search misses them): **63009** when the player-rank value is 1, **63010** when
-  it is ≥ 7, otherwise **63008** formatted with `(rank − 1)` and prefixed via **63007**.
+### 2.3 Quest-giver / skill-trainer default path (JOB band gate, scoped to KIND 27–29 + 34)
+
+The dispatcher's **default** case opens the **skill-trainer / skill-book panel (slot 287)**.
+CYCLE 7 confirms this default is the skill-trainer flow (not a generic quest-message panel):
+the JOB id selects a skill-level **window** and **rank key**, and the player's current skill
+rank is compared against it. The **JOB band gate runs only for KIND ∈ {27, 28, 29}**
+(`(u8)(KIND − 27) <= 2`) **plus KIND 34**; the other defaulted KINDs (12, 13, 30) open slot
+287 raw with **no band gate**. `[confirmed]`.
+
+When the gate runs, **JOB does not select a single "required rank"** — it selects a skill-level
+**RANGE window** `[lo, hi)` plus a **rank key**. `[confirmed]`:
+
+| NPC JOB code | skill-level window `[lo, hi)` | rank key |
+|---|---|---|
+| 2549 | levels 2 .. 7 | rank 1 |
+| 2550 | levels 7 .. 12 | rank 2 |
+| 2551 | levels 12 .. 17 | rank 3 |
+| 2552 | levels 17 .. 21 | rank 4 |
+| 2553 | levels 21 .. 24 | rank 5 |
+
+- The gate compares the **player's current skill rank** to the JOB's **rank key**. On a
+  match it populates the skill-trainer panel (slot 287) with the `[lo, hi)` window (writing
+  the window bounds at panel **+396 / +400 / +404** and a selected value at **+408**) and
+  shows it; on a mismatch it shows a rank-mismatch notice **without** opening the panel.
+  `[confirmed]` (the struct offsets and the equality compare); the precise *semantics* of the
+  compared player-rank value is `[capture/debugger-pending]`.
+- Mismatch notices (CP949, looked up through the message DB, which is why a raw
+  immediate-search misses them) use ids **63007 / 63008 / 63009 / 63010**: 63009 when the
+  player-rank value is 1, 63010 when it is ≥ 7, otherwise 63008 formatted with `(rank − 1)`
+  and prefixed via 63007. The notice is broadcast to the chat log/notice in yellow.
   `[confirmed]` for all four ids.
 
-> The prior doc's "JOB → required player rank" column maps onto the **compare value**
-> (1..5), not a minimum rank. Read the table's last column as the *compare value* against
-> the player's current rank, gated to KIND 27–29.
+> Read the table's last column as the *rank key* compared against the player's current skill
+> rank, gated to the skill-trainer default case (KIND 27–29 + 34). The window `[lo, hi)`
+> populates the skill-book level range shown to the player.
 
 ### 2.4 NPC descriptor fields read by the router
 
@@ -338,6 +388,16 @@ composites several DDS atlases (the item-shop base atlas plus a product atlas, a
 atlas and a buy-window atlas) and adds **paged buy / confirm** controls on top of the
 list. `[confirmed]` (the window composition and the class ctor).
 
+**Shop product data source (CYCLE 7).** The item-shop / product panel binds its rows from a
+per-NPC product list in **`products.scr`** — a fixed-stride table, **record = 212 bytes (0xD4)**,
+keyed by the record's first dword (product id). The in-record offsets for **price / tax** are
+**UNVERIFIED** (not isolated this pass; recommend a field-map of the 212-byte record). The shop
+window builds `data/ui/itemshop.dds` and seeds from the local player's gold/inventory anchor.
+`[confirmed]` (the 212-byte products.scr stride + map key; the row source); price/tax offsets
+`[static-hypothesis / UNVERIFIED]`. **No client-side price/tax formula exists in the open/build
+path** — buy/sell amounts are **server-arbitrated** (gold is 64-bit), so the shop *price math*
+is **RUNTIME-ONLY** (the panel only opens the UI; the confirm path round-trips to the server).
+
 **ProductPanel's true buy/commit opcode is currently unmapped.** The prior pass attributed
 ProductPanel's paging/commit to 2/151 / 2/152 / 2/153 — that attribution is **wrong**
 (those three opcodes belong to other panels — §9.1). ProductPanel's event handler drives
@@ -376,6 +436,15 @@ two sub-tables") now leans toward **two views/sub-regions of the +128 block**.
 `[static-hypothesis]` — needs an `npc.scr` sample to settle the byte layout (open
 question 3).
 
+**Repair catalog source (CYCLE 7).** The repair grade/coefficient data is also held in a
+fixed-stride table **`repair.scr`** — **record = 48 bytes (0x30)**, keyed by the record's
+first dword (a repair-grade / item-class id). The 48-byte record carries the **per-grade
+repair coefficient(s)**; the **client-side cost multiplier (if any) is UNVERIFIED**, and the
+**repair-cost amount is server-validated** before gold is deducted → the repair *cost
+formula* is **RUNTIME-ONLY**. The repair UI builds `data/ui/itemrepair.dds` (two near-identical
+builder classes, corresponding to the RepairNpcPanel / ItemRepairPanel classes). `[confirmed]`
+(the 48-byte repair.scr stride + map key + texture); cost formula `[RUNTIME-ONLY]`.
+
 ### 6.2 Commit and client-side gating
 
 On confirm, the panel reads the selected repair entry (selected-index field at panel
@@ -400,16 +469,45 @@ size; the precise *meaning* of the index value on the wire is `[capture/debugger
 
 ---
 
-## 7. Storage / bank ("keep") — KIND 9 (C2S 2/142)
+## 7. Storage / bank ("keep") — KIND 22 (slot 233), C2S 2/142
 
-KIND 9 opens **KeepNpcPanel** (slot 152), whose "open storage" menu option opens the
+### 7.0 Storage panel re-pinned to KIND 22 / slot 233 (CYCLE 7) — authoritative
+
+CYCLE 7 placed the storage/warehouse open path at **KIND 22 (0x16) → MainWindow slot 233**
+(the KeepNpcPanel storage panel), and this is **the 2/142 consumer**. The open routine:
+
+- guards on an **"already open" flag at panel +140** (matching the Block-B "+140 storage open"
+  observation); if not already open it builds the storage view and refreshes it. `[confirmed]`.
+- is **area-gated**: storage opens only when the current area id ∈ **{1, 2, 4}**; in any other
+  area it shows **MessageDB id 49045** ("can't use storage here"-style notice) in **orange**,
+  and does not open. `[confirmed]`.
+- **self-refreshes at most once per 10 000 ms (10 s)**: it re-issues a storage refresh only
+  when the panel's **last-refresh timestamp at panel +384** is older than 10 000 ms, then
+  re-stamps +384 with the current tick. `[confirmed]`.
+- uses the shared trade/keep/storage chrome **`data/ui/tradekeepwindow.dds`**. `[confirmed]`.
+- **Bank tab count and any storage-fee** are populated from the server packet (the 2/142 / 5/146
+  lane); no static client constant for tab-count or fee exists in this path → **RUNTIME-ONLY**.
+
+> **KIND 35 (0x23) quest-item keep is a SEPARATE warehouse** — not slot 233. It sends C2S
+> **2/143** (4-byte body) and opens slot **262** (§8.3). Do not conflate the two warehouses.
+
+> **Reconciliation with §7.1/§7.2 below.** The 2026-06-16 pass narrated the storage open via a
+> KIND-9 KeepNpcPanel menu (slot 152) into a 60-slot KeepPanel (slot 191); CYCLE 7's switch walk
+> re-pins the open trigger to **KIND 22 → slot 233**. The **60-slot grid geometry, the 2/142
+> 16-byte money/open body, and the 2/46/2/44 item-move lane** below remain valid as the storage
+> *grid + wire* detail; only the **open trigger (KIND 22, slot 233)** and the **+140 / +384 /
+> area-gate / 10 s throttle** facts above are the operative open-path description.
+
+### 7.1 Open flow and the 60-slot grid (grid geometry — retained)
+
+The storage open trigger is KIND 22 → slot 233 (§7.0). The storage grid it surfaces is the
 **KeepPanel** storage grid (slot 191).
 
-### 7.1 Open flow and the 60-slot grid
+### 7.1a 60-slot grid layout (retained)
 
-- Selecting the keep menu's "open storage" option is gated by the bag-count gate for
-  KIND 9 (limit 50; §9). On pass it opens **KeepPanel** (slot 191) and hides the world
-  HUD panels (inventory / skill / etc.). `[confirmed]`.
+- The keep "open storage" menu option is gated by the bag-count gate (§9). On pass it opens
+  **KeepPanel** (slot 191) and hides the world HUD panels (inventory / skill / etc.).
+  `[confirmed]`.
 - KeepPanel's constructor loops over **60 slots**, confirming the storage capacity is **60
   item slots**. **The grid is laid out exactly 10 rows × 6 columns = 60 cells** `[confirmed]`
   (HUD-II Wave 4): the build loop is a nested 6-inner / 10-outer loop that registers the 60
@@ -592,6 +690,11 @@ argument). ProductPanel's *own* buy/commit opcode is unmapped (§5.2, open quest
 | Repair list = N × **16-byte** records at template +128, 6/page (id@+0, cost@+4, aux@+8) | same +128 region, different stride (§6.1) | [confirmed] |
 | Shop atlas literal `data/ui/itemshop.dds` (DXT5) | sundry shop atlas (§5.1) | [confirmed] (literal); VFS presence [static-hypothesis] |
 | Price divisor = 1,000,000 | gold/cash amount → displayed price | [confirmed] |
+| Storage panel = KIND 22 (0x16) → slot 233; "already open" flag at panel +140; last-refresh timestamp at panel +384 | storage open path (§7.0) | [confirmed] |
+| Storage area-gate = current area id ∈ {1, 2, 4}, else MessageDB 49045 (orange) | storage open eligibility (§7.0) | [confirmed] |
+| Storage self-refresh throttle = at most once per 10 000 ms (10 s), stamped on panel +384 | storage refresh cadence (§7.0) | [confirmed] |
+| products.scr record = 212 bytes (0xD4), per-NPC product list, key = first dword; price/tax offsets UNVERIFIED | shop row source (§5.2) | [confirmed] (stride/key); [RUNTIME-ONLY] (price math) |
+| repair.scr record = 48 bytes (0x30), per-grade coefficient, key = first dword; client multiplier UNVERIFIED | repair grade source (§6.1) | [confirmed] (stride/key); [RUNTIME-ONLY] (cost formula) |
 | 2/142 body = 16 bytes; `target@+0` (=UI-handler +394 id); `op = action − 7` @+4; `amount@+8`, sent only when `amount > 0` | storage deposit/withdraw (§7.2) | [confirmed] (size + fields); op-value enum [capture/debugger-pending] |
 | 2/110 body = 4 bytes `{mode,_,_,_}` | quest-NPC step (§8.3) | [confirmed] (size); [static-hypothesis] (mode map) |
 | 2/113 body = 8 bytes = (u32 target, u32 index) | repair commit (§6.2) | [confirmed] |
@@ -600,7 +703,7 @@ argument). ProductPanel's *own* buy/commit opcode is unmapped (§5.2, open quest
 | 2/100 body = 1 byte (= 0) | KIND 0x19 open request (§9) | [confirmed] |
 | 2/151 = 1 B (goods-box req) / 2/152 = 8 B (quest action) / 2/153 = 4 B (inventory-sort, 60 s cooldown, arg = 40·bag_count) | reassigned — NOT NPC-shop opcodes (§9.1) | [confirmed] |
 | Repair confirm: dup-item → 65013; active-repairable count ≥ 25 → 65007 | repair pre-send gating (§6.2) | [confirmed] |
-| Bag-count gate: KIND 5 > 30, KIND 9 > 50, KIND 15 > 5, KIND 0 (a2=75) > 75 | per-kind open thresholds (§10.1 gate) | [confirmed] |
+| Bag-count gate: KIND 5 > 30, KIND 9 > 50, KIND 15 > 5, KIND 0 (KIND value 75) > 75 | per-kind open thresholds (§10.1 gate) | [confirmed] |
 | JOB 2549 / 2550 / 2551 / 2552 / 2553 → compare value 1 / 2 / 3 / 4 / 5 (band [2,7] / [7,12] / [12,17] / [17,21] / [21,24]); gate only for KIND 27–29 | quest-giver rank gate (§2.3) | [confirmed] (table); player-rank semantics [capture/debugger-pending] |
 | Message ids 63007–63010 | quest-giver "need rank N" notices (CP949) | [confirmed] |
 | Message ids 65005–65014 | repair price / eligibility notices (CP949) | [confirmed] |

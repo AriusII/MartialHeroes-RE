@@ -1,59 +1,58 @@
-using System;
-using System.Collections.Generic;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
 
 namespace MartialHeroes.Client.Infrastructure.Catalog;
 
 /// <summary>
-/// In-memory lookup catalogue for item definitions parsed from the <b>runtime</b> item master
-/// <c>data/script/items.scr</c>. Provides lookup by item UID, returning a typed
-/// <see cref="ItemCatalogueRecord"/> derived from the CONFIRMED / loader-resolved fields of the
-/// binary record.
+///     In-memory lookup catalogue for item definitions parsed from the <b>runtime</b> item master
+///     <c>data/script/items.scr</c>. Provides lookup by item UID, returning a typed
+///     <see cref="ItemCatalogueRecord" /> derived from the CONFIRMED / loader-resolved fields of the
+///     binary record.
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Runtime source = items.scr.</b> The shipping client loads the binary <c>items.scr</c> master at
-/// runtime, not <c>items.csv</c> (which is an authoring/dev export the client never reads). This
-/// catalogue is therefore built from <see cref="ItemsScrRecord"/> values produced by
-/// <see cref="MartialHeroes.Assets.Parsers.ItemsScrParser"/>.
-/// spec: Docs/RE/formats/items_csv.md §6 — "A faithful re-implementation MUST read items.scr for
-///   runtime item data and treat items.csv as a human-editable side export only": CONFIRMED.
-/// spec: Docs/RE/formats/items_scr.md §4 — engineer guidance (walk items.scr; read item_uid @0x034).
-/// </para>
-/// <para>
-/// <b>Only CONFIRMED / loader-resolved fields are surfaced.</b> The items.scr fixed-block numeric
-/// stat ROLES (attack / defense / required-stat columns) are UNVERIFIED / DBG-pending
-/// (spec: items_scr.md §1.6 Known Unknowns), so this catalogue deliberately does NOT invent typed
-/// stat properties from them. The surfaced fields are the SAMPLE-VERIFIED / loader-resolved ones:
-/// item name (+0x000), item UID (+0x034), description (+0x038), the model / animation reference keys
-/// (+0x080 / +0x084), the record discriminator (on-disk +0x0D2), and the effect count (+0x220).
-/// spec: Docs/RE/formats/items_scr.md §1.4 (field layout) / §1.6 (numeric stat roles UNVERIFIED).
-/// </para>
-/// <para>
-/// CP949 decoding (names / descriptions) is handled upstream by
-/// <see cref="MartialHeroes.Assets.Parsers.ItemsScrParser"/>.
-/// spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
-/// </para>
+///     <para>
+///         <b>Runtime source = items.scr.</b> The shipping client loads the binary <c>items.scr</c> master at
+///         runtime, not <c>items.csv</c> (which is an authoring/dev export the client never reads). This
+///         catalogue is therefore built from <see cref="ItemsScrRecord" /> values produced by
+///         <see cref="ItemsScrParser" />.
+///         spec: Docs/RE/formats/items_csv.md §6 — "A faithful re-implementation MUST read items.scr for
+///         runtime item data and treat items.csv as a human-editable side export only": CONFIRMED.
+///         spec: Docs/RE/formats/items_scr.md §4 — engineer guidance (walk items.scr; read item_uid @0x034).
+///     </para>
+///     <para>
+///         <b>Only CONFIRMED / loader-resolved fields are surfaced.</b> The items.scr fixed-block numeric
+///         stat ROLES (attack / defense / required-stat columns) are UNVERIFIED / DBG-pending
+///         (spec: items_scr.md §1.6 Known Unknowns), so this catalogue deliberately does NOT invent typed
+///         stat properties from them. The surfaced fields are the SAMPLE-VERIFIED / loader-resolved ones:
+///         item name (+0x000), item UID (+0x034), description (+0x038), the model / animation reference keys
+///         (+0x080 / +0x084), the record discriminator (on-disk +0x0D2), and the effect count (+0x220).
+///         spec: Docs/RE/formats/items_scr.md §1.4 (field layout) / §1.6 (numeric stat roles UNVERIFIED).
+///     </para>
+///     <para>
+///         CP949 decoding (names / descriptions) is handled upstream by
+///         <see cref="ItemsScrParser" />.
+///         spec: Docs/RE/formats/items_scr.md §Identification — "Text encoding: CP949": CONFIRMED.
+///     </para>
 /// </remarks>
 public sealed class ItemCatalogue
 {
     private readonly Dictionary<uint, ItemCatalogueRecord> _byId;
 
     /// <summary>
-    /// Constructs the runtime catalogue from pre-parsed <c>items.scr</c> records.
-    /// If <paramref name="records"/> is empty, <see cref="TryGet"/> will always return
-    /// <see langword="null"/>.
+    ///     Constructs the runtime catalogue from pre-parsed <c>items.scr</c> records.
+    ///     If <paramref name="records" /> is empty, <see cref="TryGet" /> will always return
+    ///     <see langword="null" />.
     /// </summary>
     /// <param name="records">
-    /// Records as returned by <see cref="MartialHeroes.Assets.Parsers.ItemsScrParser.Parse"/>.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 fixed-block field layout.
+    ///     Records as returned by <see cref="ItemsScrParser.Parse" />.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4 fixed-block field layout.
     /// </param>
     public ItemCatalogue(IReadOnlyList<ItemsScrRecord> records)
     {
         ArgumentNullException.ThrowIfNull(records);
         _byId = new Dictionary<uint, ItemCatalogueRecord>(records.Count);
 
-        foreach (ItemsScrRecord row in records)
+        foreach (var row in records)
         {
             var record = new ItemCatalogueRecord
             {
@@ -83,7 +82,7 @@ public sealed class ItemCatalogue
 
                 // effect_count u8 @0x220 — count of trailing 8-byte effect entries. CONFIRMED.
                 // spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED.
-                EffectCount = row.EffectCount,
+                EffectCount = row.EffectCount
             };
 
             // Each record's item_uid is unique; when a family carries colliding uids (e.g. when a
@@ -93,50 +92,13 @@ public sealed class ItemCatalogue
         }
     }
 
-    /// <summary>
-    /// <b>Tooling-only.</b> Constructs a catalogue from <c>items.csv</c> rows. The CSV is an
-    /// authoring/dev export the shipping client never loads, so this overload exists solely so
-    /// developer tooling (and offline fallbacks) can build a catalogue from the flat-text view.
-    /// Only the CONFIRMED columns that also exist in the runtime record (name / id / description)
-    /// are mapped; the CSV's UNVERIFIED numeric-stat columns are intentionally dropped.
-    /// spec: Docs/RE/formats/items_csv.md §6 (authoring/dev export only — not a runtime source).
-    /// </summary>
-    /// <param name="rows">
-    /// Rows as returned by <see cref="MartialHeroes.Assets.Parsers.ItemsCsvParser.Parse"/>.
-    /// spec: Docs/RE/formats/items_csv.md §1 (col0 name / col1 item_id / col2 description).
-    /// </param>
-    public ItemCatalogue(ItemCsvRow[] rows)
-    {
-        ArgumentNullException.ThrowIfNull(rows);
-        _byId = new Dictionary<uint, ItemCatalogueRecord>(rows.Length);
-
-        foreach (ItemCsvRow row in rows)
-        {
-            var record = new ItemCatalogueRecord
-            {
-                // col0 item_name CP949. spec: items_csv.md §1 — "col0 item_name CP949": HIGH.
-                Name = row.NameCp949,
-                // col1 item_id u32. spec: items_csv.md §1 — "col1 item_id": HIGH.
-                ItemId = row.ItemId,
-                // col2 description CP949. spec: items_csv.md §1 — "col2 item_description CP949": HIGH.
-                Description = row.DescriptionCp949,
-                // items.csv carries no loader-resolved model/anim ref keys or discriminator; those are
-                // runtime (items.scr) fields. Leave them zero — this is the authoring-only path.
-                // spec: Docs/RE/formats/items_csv.md §6 (CSV is a flat parallel, not the runtime record).
-                ModelRefKey = 0u,
-                AnimRefKey = 0u,
-                RecordDiscriminator = 0,
-                EffectCount = 0,
-            };
-
-            _byId[row.ItemId] = record;
-        }
-    }
+    /// <summary>Number of items in this catalogue.</summary>
+    public int Count => _byId.Count;
 
     /// <summary>
-    /// Creates the <b>runtime</b> <see cref="ItemCatalogue"/> by loading <c>items.scr</c> from the
-    /// given loader. This is the faithful runtime path.
-    /// spec: Docs/RE/formats/items_csv.md §6 (runtime item data comes from items.scr).
+    ///     Creates the <b>runtime</b> <see cref="ItemCatalogue" /> by loading <c>items.scr</c> from the
+    ///     given loader. This is the faithful runtime path.
+    ///     spec: Docs/RE/formats/items_csv.md §6 (runtime item data comes from items.scr).
     /// </summary>
     public static ItemCatalogue FromLoader(VfsCatalogueLoader loader)
     {
@@ -144,27 +106,26 @@ public sealed class ItemCatalogue
         return new ItemCatalogue(loader.LoadItemsScr());
     }
 
-    /// <summary>Number of items in this catalogue.</summary>
-    public int Count => _byId.Count;
-
     /// <summary>
-    /// Looks up an item by its unique UID (items.scr <c>item_uid</c> @0x034).
-    /// Returns <see langword="null"/> when the ID is not present.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — item_uid is the per-record lookup-tree key.
+    ///     Looks up an item by its unique UID (items.scr <c>item_uid</c> @0x034).
+    ///     Returns <see langword="null" /> when the ID is not present.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4 — item_uid is the per-record lookup-tree key.
     /// </summary>
-    public ItemCatalogueRecord? TryGet(uint itemId) =>
-        _byId.TryGetValue(itemId, out var r) ? r : null;
+    public ItemCatalogueRecord? TryGet(uint itemId)
+    {
+        return _byId.TryGetValue(itemId, out var r) ? r : null;
+    }
 }
 
 /// <summary>
-/// A decoded item record, derived from the CONFIRMED / loader-resolved fields of the runtime
-/// <c>items.scr</c> master. All field annotations cite spec: Docs/RE/formats/items_scr.md §1.4.
+///     A decoded item record, derived from the CONFIRMED / loader-resolved fields of the runtime
+///     <c>items.scr</c> master. All field annotations cite spec: Docs/RE/formats/items_scr.md §1.4.
 /// </summary>
 /// <remarks>
-/// The fixed-block numeric stat ROLES (attack / defense / required-stat columns) are UNVERIFIED /
-/// DBG-pending (spec: items_scr.md §1.6) and are intentionally NOT modelled here; a faithful
-/// catalogue must not invent stat values. When a debugger pass pins those roles, add them with a
-/// spec citation and confidence tag.
+///     The fixed-block numeric stat ROLES (attack / defense / required-stat columns) are UNVERIFIED /
+///     DBG-pending (spec: items_scr.md §1.6) and are intentionally NOT modelled here; a faithful
+///     catalogue must not invent stat values. When a debugger pass pins those roles, add them with a
+///     spec citation and confidence tag.
 /// </remarks>
 public sealed record ItemCatalogueRecord
 {
@@ -178,27 +139,27 @@ public sealed record ItemCatalogueRecord
     public required string Description { get; init; }
 
     /// <summary>
-    /// Model-reference key (@0x080); loader-resolved against the model/asset-lookup path.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
+    ///     Model-reference key (@0x080); loader-resolved against the model/asset-lookup path.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4 — model_ref_key u32 @0x080: loader-resolved.
     /// </summary>
     public required uint ModelRefKey { get; init; }
 
     /// <summary>
-    /// Animation-reference key (@0x084); loader-resolved against the animation/asset-lookup path.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
+    ///     Animation-reference key (@0x084); loader-resolved against the animation/asset-lookup path.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4 — anim_ref_key u32 @0x084: loader-resolved.
     /// </summary>
     public required uint AnimRefKey { get; init; }
 
     /// <summary>
-    /// Record discriminator byte at on-disk +0x0D2; the loader branches on this (tested != 14).
-    /// Full value enumeration is DBG-pending — carried as a raw byte, no meaning assigned.
-    /// spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator on-disk +0xD2 tested != 14.
+    ///     Record discriminator byte at on-disk +0x0D2; the loader branches on this (tested != 14).
+    ///     Full value enumeration is DBG-pending — carried as a raw byte, no meaning assigned.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4.1 — discriminator on-disk +0xD2 tested != 14.
     /// </summary>
     public required byte RecordDiscriminator { get; init; }
 
     /// <summary>
-    /// Count of trailing 8-byte effect/upgrade entries (effect_count @0x220). CONFIRMED.
-    /// spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED.
+    ///     Count of trailing 8-byte effect/upgrade entries (effect_count @0x220). CONFIRMED.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4 — effect_count u8 @0x220: CONFIRMED.
     /// </summary>
     public required byte EffectCount { get; init; }
 }

@@ -41,7 +41,9 @@ notes: |
 
   CP949: each slot is a fixed 49-byte cell with the NUL inside the declared width. Decode each as a fixed
   [InlineArray] blob, trim at the first NUL, then decode CP949 -- never a managed string on the wire.
-  spec: Docs/RE/_dirty/netcode/cp949_text_fields.md (the 4x49 = 196 fixed-text body).
+  (Wire text-field convention: a fixed-width NUL-terminated CP949 cell -- here 4 x 49 = 196 -- with the
+  NUL inside the declared width; this is the standard fixed-width CP949 text-slot form used across the
+  game-action C2S text packets.)
 
   TRIGGER: a "submit form" routine that blurs / de-IMEs the four input panels and gathers their text --
   a 4-line CP949 text submission. The fixed-49 slots + IME handling are consistent with a multi-line

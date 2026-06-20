@@ -1,17 +1,16 @@
 using Godot;
-using MartialHeroes.Client.Godot.Screens;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Opening;
 
 /// <summary>
-/// Post-login intro Control (GameState 3): splash slideshow + scenario crawl ("red ribbon").
-///
-/// <para>Phase 4 holds and loops its alpha fade indefinitely; the SOLE exit is an explicit skip
-/// (keyboard Enter/ESC/Space or skip button action-tag 100), which persists OPENNING/SKIP=1 and
-/// emits <see cref="IntroFinishedEventHandler"/>. There is NO auto-finish after phase 4.</para>
-///
-/// spec: Docs/RE/specs/intro_sequence.md §3.1 (no auto-finish; skip is the sole exit).
+///     Post-login intro Control (GameState 3): splash slideshow + scenario crawl ("red ribbon").
+///     <para>
+///         Phase 4 holds and loops its alpha fade indefinitely; the SOLE exit is an explicit skip
+///         (keyboard Enter/ESC/Space or skip button action-tag 100), which persists OPENNING/SKIP=1 and
+///         emits <see cref="IntroFinishedEventHandler" />. There is NO auto-finish after phase 4.
+///     </para>
+///     spec: Docs/RE/specs/intro_sequence.md §3.1 (no auto-finish; skip is the sole exit).
 /// </summary>
 public sealed partial class OpeningWindow : Control
 {
@@ -42,42 +41,36 @@ public sealed partial class OpeningWindow : Control
     private const string ScenarioPath = "data/ui/openning_scenario.dds";
     private const string MainWindowPath = "data/ui/mainwindow.dds";
 
-    private static readonly string[] SlideshowPaths =
-    [
-        "data/ui/openning_001.dds",
-        "data/ui/openning_002.dds",
-        "data/ui/openning_003.dds",
-        "data/ui/openning_004.dds",
-    ];
-
     // Skip persistence. spec: frontend_layout_tables.md §6 "[OPENNING] SKIP=1".
     internal const string SkipCfgPath = "user://options.cfg";
     private const string SkipCfgSection = "OPENNING";
     private const string SkipCfgKey = "SKIP";
 
-    // ── Injection (set by OpeningScene before SetScreen) ─────────────────────
+    // Wheel scrub: a second independent crawl-Y, ±30/event, clamped 30..1833.
+    // spec: frontend_layout_tables.md §6 "mouse-wheel/drag scrub path".
+    private const float WheelScrubStep = 30f; // spec: frontend_layout_tables.md §6.
+    private const float WheelScrubMin = 30f; // spec: frontend_layout_tables.md §6.
+    private const float WheelScrubMax = 1833f; // spec: frontend_layout_tables.md §6.
 
-    /// <summary>Shared HUD atlas library — loads DDS textures from the VFS.</summary>
-    public HudAtlasLibrary? Atlas { get; set; }
+    // ── Input — skip on Enter/ESC/Space; Page Up/Down + wheel scrub after crawl done ──
+    // spec: frontend_layout_tables.md §6 "Enter(10)/ESC(27)/Space(32)".
+    // spec: frontend_layout_tables.md §6 "mouse-wheel/drag scrub path steps ±30/event, clamped 30..1833".
+    // spec: frontend_layout_tables.md §6 "Manual scrub … Page Up / Page Down".
 
-    /// <summary>Shared audio node — fires the intro BGM.</summary>
-    public FrontEndAudio? Audio { get; set; }
+    // Page Up/Down scrub constants. spec: frontend_layout_tables.md §6 "action 1004/1005 … ±30·dt_s".
+    private const float PageScrubSpeed = 30.0f; // design-px/second. spec: frontend_layout_tables.md §6.
+    private const float PageScrubFloor = 0f; // floor 0. spec: frontend_layout_tables.md §6 action 1004.
+    private const float PageScrubCeil = 1843f; // ceil 1843. spec: frontend_layout_tables.md §6 action 1005.
 
-    // ── View state — NO domain state ─────────────────────────────────────────
+    private static readonly string[] SlideshowPaths =
+    [
+        "data/ui/openning_001.dds",
+        "data/ui/openning_002.dds",
+        "data/ui/openning_003.dds",
+        "data/ui/openning_004.dds"
+    ];
 
-    private ColorRect?
-        _blackBackdrop; // full-screen black behind slideshow. spec: frontend_layout_tables.md §6 "alpha-over-(black-cleared)-back-buffer".
-
-    private TextureRect? _scenarioRect;
-    private float _scrollOffset;
-    private float _scrollStartWait;
-    private bool _scrollDone;
-
-    private TextureRect? _slideshowRect;
-    private int _slideshowState = 1; // 1..4 (1-based). spec §6.
     private readonly Texture2D?[] _slideshowTextures = new Texture2D?[SlideshowFrameCount];
-
-    private double _dwellAccumMs;
 
     // spec: intro_sequence.md §3.4 — alpha seeded at 250 (max); first direction = fade-OUT (−1).
     // The spec seeds the constructor alpha field to 250; the port mirrors this.
@@ -86,18 +79,35 @@ public sealed partial class OpeningWindow : Control
 
     private int _alphaDir = -1; // spec: intro_sequence.md §3.2 "first phase is a fade-OUT".
 
+    // ── View state — NO domain state ─────────────────────────────────────────
+
+    private ColorRect?
+        _blackBackdrop; // full-screen black behind slideshow. spec: frontend_layout_tables.md §6 "alpha-over-(black-cleared)-back-buffer".
+
+    private double _dwellAccumMs;
+
+    private bool _finished;
+
     // _panelAtMax: true when alpha has reached its upper extreme (250). Dwell transition requires this AND dwell elapsed.
     // spec: intro_sequence.md §3.1 "when the dwell expires AND the panel has reached its alpha extreme (alpha at its maximum, 250)".
     private bool _panelAtMax = true; // initialised true because _alpha starts at 250. spec: intro_sequence.md §3.4.
 
-    // Wheel scrub: a second independent crawl-Y, ±30/event, clamped 30..1833.
-    // spec: frontend_layout_tables.md §6 "mouse-wheel/drag scrub path".
-    private const float WheelScrubStep = 30f; // spec: frontend_layout_tables.md §6.
-    private const float WheelScrubMin = 30f; // spec: frontend_layout_tables.md §6.
-    private const float WheelScrubMax = 1833f; // spec: frontend_layout_tables.md §6.
+    private TextureRect? _scenarioRect;
+    private bool _scrollDone;
+    private float _scrollOffset;
+    private float _scrollStartWait;
+
+    private TextureRect? _slideshowRect;
+    private int _slideshowState = 1; // 1..4 (1-based). spec §6.
     private float _wheelScrubOffset;
 
-    private bool _finished;
+    // ── Injection (set by OpeningScene before SetScreen) ─────────────────────
+
+    /// <summary>Shared HUD atlas library — loads DDS textures from the VFS.</summary>
+    public HudAtlasLibrary? Atlas { get; set; }
+
+    /// <summary>Shared audio node — fires the intro BGM.</summary>
+    public FrontEndAudio? Audio { get; set; }
 
     // ── Godot lifecycle ───────────────────────────────────────────────────────
 
@@ -131,22 +141,12 @@ public sealed partial class OpeningWindow : Control
     {
         if (_finished) return;
 
-        float dt = (float)delta;
-        float dtMs = dt * 1000f;
+        var dt = (float)delta;
+        var dtMs = dt * 1000f;
 
         UpdateScroll(dtMs, dt);
         UpdateSlideshow(dtMs);
     }
-
-    // ── Input — skip on Enter/ESC/Space; Page Up/Down + wheel scrub after crawl done ──
-    // spec: frontend_layout_tables.md §6 "Enter(10)/ESC(27)/Space(32)".
-    // spec: frontend_layout_tables.md §6 "mouse-wheel/drag scrub path steps ±30/event, clamped 30..1833".
-    // spec: frontend_layout_tables.md §6 "Manual scrub … Page Up / Page Down".
-
-    // Page Up/Down scrub constants. spec: frontend_layout_tables.md §6 "action 1004/1005 … ±30·dt_s".
-    private const float PageScrubSpeed = 30.0f; // design-px/second. spec: frontend_layout_tables.md §6.
-    private const float PageScrubFloor = 0f; // floor 0. spec: frontend_layout_tables.md §6 action 1004.
-    private const float PageScrubCeil = 1843f; // ceil 1843. spec: frontend_layout_tables.md §6 action 1005.
 
     public override void _Input(InputEvent ev)
     {
@@ -157,7 +157,7 @@ public sealed partial class OpeningWindow : Control
         // Use Keycode (not KeyLabel) — these are non-printable physical keys; KeyLabel is layout-dependent
         // and may not match for Enter/ESC on non-QWERTY layouts. Keycode is the reliable match.
         // spec: intro_sequence.md §2.5 "key codes 10 / 27 / 32 (Enter / ESC / Space)".
-        bool skip = ev switch
+        var skip = ev switch
         {
             InputEventKey { Pressed: true } k when
                 k.Keycode == Key.Enter || k.PhysicalKeycode == Key.Enter => true,
@@ -165,7 +165,7 @@ public sealed partial class OpeningWindow : Control
                 k.Keycode == Key.Escape || k.PhysicalKeycode == Key.Escape => true,
             InputEventKey { Pressed: true } k when
                 k.Keycode == Key.Space || k.PhysicalKeycode == Key.Space => true,
-            _ => false,
+            _ => false
         };
 
         if (skip)
@@ -186,13 +186,13 @@ public sealed partial class OpeningWindow : Control
         // spec: frontend_layout_tables.md §6 "FIXED keyboard bindings via the DirectInput DIK→app-code table".
         if (_scrollDone && ev is InputEventKey { Pressed: true } pageKey)
         {
-            float dt = (float)GetProcessDeltaTime();
-            float step = PageScrubSpeed * dt; // spec: frontend_layout_tables.md §6 "−30·dt_s / +30·dt_s"
+            var dt = (float)GetProcessDeltaTime();
+            var step = PageScrubSpeed * dt; // spec: frontend_layout_tables.md §6 "−30·dt_s / +30·dt_s"
 
             // Use Keycode for physical-key match (DIK_PRIOR/DIK_NEXT are scan-code bindings).
             // PhysicalKeycode fallback covers keyboards where Keycode resolves differently.
             // spec: frontend_layout_tables.md §6 "FIXED keyboard bindings via the DirectInput DIK→app-code table".
-            Key physKey = pageKey.Keycode != Key.None ? pageKey.Keycode : pageKey.PhysicalKeycode;
+            var physKey = pageKey.Keycode != Key.None ? pageKey.Keycode : pageKey.PhysicalKeycode;
 
             if (physKey == Key.Pageup)
             {
@@ -218,11 +218,11 @@ public sealed partial class OpeningWindow : Control
         // spec: frontend_layout_tables.md §6 "second crawl-Y by ±30 per event, clamped 30..1833".
         if (_scrollDone && ev is InputEventMouseButton mouseBtn && mouseBtn.Pressed)
         {
-            float delta = mouseBtn.ButtonIndex switch
+            var delta = mouseBtn.ButtonIndex switch
             {
                 MouseButton.WheelUp => -WheelScrubStep, // wheel up → rewind (crawl upward in screen = lower offset)
                 MouseButton.WheelDown => WheelScrubStep, // wheel down → forward
-                _ => 0f,
+                _ => 0f
             };
 
             if (delta != 0f)
@@ -271,8 +271,8 @@ public sealed partial class OpeningWindow : Control
             Name = "BlackBackdrop",
             Position = Vector2.Zero,
             Size = new Vector2(CanvasW, CanvasH),
-            Color = new Color(0f, 0f, 0f, 1f), // spec: §6 "alpha-over-(black-cleared)-back-buffer".
-            MouseFilter = MouseFilterEnum.Ignore,
+            Color = new Color(0f, 0f, 0f), // spec: §6 "alpha-over-(black-cleared)-back-buffer".
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_blackBackdrop);
 
@@ -285,12 +285,12 @@ public sealed partial class OpeningWindow : Control
             Position = Vector2.Zero,
             Size = new Vector2(CanvasW, CanvasH),
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            Modulate = new Color(1f, 1f, 1f, 1f), // alpha = 250/250 = 1.0. spec: intro_sequence.md §3.4.
-            MouseFilter = MouseFilterEnum.Ignore,
+            Modulate = new Color(1f, 1f, 1f), // alpha = 250/250 = 1.0. spec: intro_sequence.md §3.4.
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_slideshowRect);
 
-        for (int i = 0; i < SlideshowFrameCount; i++)
+        for (var i = 0; i < SlideshowFrameCount; i++)
         {
             _slideshowTextures[i] = Atlas?.GetByPath(SlideshowPaths[i]);
             if (_slideshowTextures[i] is not null)
@@ -308,10 +308,10 @@ public sealed partial class OpeningWindow : Control
         {
             Name = "ScenarioRect",
             StretchMode = TextureRect.StretchModeEnum.Scale, // spec: frontend_layout_tables.md §0.10
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
 
-        Texture2D? scenarioTex = Atlas?.GetByPath(ScenarioPath);
+        var scenarioTex = Atlas?.GetByPath(ScenarioPath);
         if (scenarioTex is not null)
         {
             _scenarioRect.Texture = scenarioTex;
@@ -322,15 +322,15 @@ public sealed partial class OpeningWindow : Control
             GD.PrintErr($"[OpeningWindow] Scenario crawl absent: {ScenarioPath}");
         }
 
-        _scenarioRect.Position = new Vector2((CanvasW * 0.5f) - 512f, ScenarioStartY);
+        _scenarioRect.Position = new Vector2(CanvasW * 0.5f - 512f, ScenarioStartY);
         _scenarioRect.Size = new Vector2(ScenarioW, ScenarioH);
         AddChild(_scenarioRect);
 
         // Layer 3: skip button (action 100) from mainwindow.dds.
         // dst (screenW−120, 10, 110×32); Normal/Hover src (761,165); Pressed src (634,165).
         // spec: frontend_layout_tables.md §6.
-        AtlasTexture? skipNormal = Atlas?.SliceByPath(MainWindowPath, 761, 165, 110, 32);
-        AtlasTexture? skipPressed = Atlas?.SliceByPath(MainWindowPath, 634, 165, 110, 32);
+        var skipNormal = Atlas?.SliceByPath(MainWindowPath, 761, 165, 110, 32);
+        var skipPressed = Atlas?.SliceByPath(MainWindowPath, 634, 165, 110, 32);
 
         // §0.12: 3-state arg order = Normal, Pressed, Hover. For this button Normal == Hover = (761,165),
         // Pressed = (634,165). spec: frontend_layout_tables.md §0.12, §6.
@@ -348,7 +348,7 @@ public sealed partial class OpeningWindow : Control
             TextureNormal = skipNormal, // src (761,165) 110×32. spec: frontend_layout_tables.md §6.
             TexturePressed = skipPressed ?? skipNormal, // src (634,165) 110×32. spec §6.
             TextureHover = skipNormal, // Normal == Hover per §0.12. spec: frontend_layout_tables.md §0.12.
-            StretchMode = TextureButton.StretchModeEnum.KeepAspect,
+            StretchMode = TextureButton.StretchModeEnum.KeepAspect
         };
         skipBtn.Pressed += OnSkipPressed;
         AddChild(skipBtn);
@@ -390,14 +390,14 @@ public sealed partial class OpeningWindow : Control
         if (_scenarioRect is null) return;
 
         // Use wheel-scrub Y when active; otherwise use auto-crawl offset.
-        float effectiveOffset = (_scrollDone && _wheelScrubOffset > 0f)
+        var effectiveOffset = _scrollDone && _wheelScrubOffset > 0f
             ? _wheelScrubOffset
             : _scrollOffset;
 
         // Y(Godot) = ScenarioStartY − effectiveOffset (upward motion).
         // spec: frontend_layout_tables.md §6 "Godot Y-up port must invert the sign".
-        float godotY = ScenarioStartY - effectiveOffset;
-        _scenarioRect.Position = new Vector2((CanvasW * 0.5f) - 512f, godotY);
+        var godotY = ScenarioStartY - effectiveOffset;
+        _scenarioRect.Position = new Vector2(CanvasW * 0.5f - 512f, godotY);
     }
 
     // ── Slideshow logic ───────────────────────────────────────────────────────
@@ -451,7 +451,7 @@ public sealed partial class OpeningWindow : Control
             _alpha = AlphaMax;
             _alphaDir = -1;
             _panelAtMax = true;
-            _slideshowRect.Modulate = new Color(1f, 1f, 1f, 1f); // alpha 250/250.
+            _slideshowRect.Modulate = new Color(1f, 1f, 1f); // alpha 250/250.
             GD.Print($"[OpeningWindow] Slideshow → phase {_slideshowState}. spec §6.");
         }
         // Phase 4: reset dwell accumulator so it holds without advancing. alpha ramp continues.

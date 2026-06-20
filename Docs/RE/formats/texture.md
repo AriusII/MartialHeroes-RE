@@ -677,7 +677,6 @@ The catalogue-population details (the full skin-row layout and the catalogue key
 result is the chain **`.skn` `IdA` -> `skin.txt` col4/col5 -> `tex_id` -> texture id registry ->
 image file**, all resolved by numeric id rather than by a runtime filename template.
 
-<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 
 ### PNG texture filename convention
 

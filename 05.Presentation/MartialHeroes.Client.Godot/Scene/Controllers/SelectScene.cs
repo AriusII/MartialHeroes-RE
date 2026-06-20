@@ -1,36 +1,37 @@
 using System.Collections.Immutable;
 using Godot;
-using MartialHeroes.Client.Application.Events;
-using MartialHeroes.Client.Application.Scene;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Select;
 using MartialHeroes.Shared.Kernel.Enums;
+using Environment = System.Environment;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
-/// Select preview camera; all flow intents are forwarded to Application use-cases.
-/// Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
-/// The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
-/// spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
+///     State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
+///     Select preview camera; all flow intents are forwarded to Application use-cases.
+///     Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
+///     The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
+///     spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
 /// </summary>
 public sealed partial class SelectScene : StubSceneController
 {
+    private FrontEndAudio? _audio;
+    private bool _confirmInFlight;
     private ClientContext? _ctx;
+    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private FrontEndAudio? _audio;
     private CharSelectWindow? _select; // NEW: Ui/Scenes substrate
-    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
-    private bool _confirmInFlight;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Select;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -58,7 +59,7 @@ public sealed partial class SelectScene : StubSceneController
 
         if (DisplayServer.GetName() == "headless" || OS.GetEnvironment("MH_SELECT_AUTOCONFIRM") == "1")
         {
-            SceneTreeTimer timer = GetTree().CreateTimer(0.35);
+            var timer = GetTree().CreateTimer(0.35);
             timer.Timeout += AutoConfirmForHeadless;
         }
     }
@@ -91,7 +92,7 @@ public sealed partial class SelectScene : StubSceneController
         {
             Name = "CharSelectWindow",
             Atlas = atlas,
-            Text = text,
+            Text = text
         };
 
         select.EnterGameRequested += OnEnterGameRequested;
@@ -148,7 +149,7 @@ public sealed partial class SelectScene : StubSceneController
         GD.Print(
             $"[SelectScene] Enter requested for '{characterName}' slot={slotIndex}; forwarding to UseCases.SelectCharacterAsync. " +
             "spec: frontend_scenes.md §7; cmsg_char_enter.yaml.");
-        _ = ConfirmSlotAsync(slotIndex, allowDevFallback: IsDevOfflineMode());
+        _ = ConfirmSlotAsync(slotIndex, IsDevOfflineMode());
     }
 
     private async Task ConfirmSlotAsync(int slotIndex, bool allowDevFallback)
@@ -201,19 +202,19 @@ public sealed partial class SelectScene : StubSceneController
         try
         {
             var request = new CharacterCreateRequest(
-                Name: name,
-                UiClassIndex: InternalClassToUiIndex(internalClass),
-                Face: checked((ushort)faceIndex),
-                Sex: 0,
-                HairOrReserved: 0,
-                Stat0: 0,
-                Stat1: 0,
-                Stat2: 0,
-                Stat3: 0,
-                Stat4: 0,
-                PointsRemaining: 0);
+                name,
+                InternalClassToUiIndex(internalClass),
+                checked((ushort)faceIndex),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0);
 
-            CharacterNameValidationResult result =
+            var result =
                 await useCases.CreateCharacterAsync(request, CancellationToken.None);
             if (!result.IsValid)
                 GD.Print($"[SelectScene] Create rejected by Application validation; msgId={result.MessageId}. " +
@@ -235,7 +236,7 @@ public sealed partial class SelectScene : StubSceneController
 
         try
         {
-            bool sent = await useCases.DeleteCharacterAsync(slotIndex, CancellationToken.None);
+            var sent = await useCases.DeleteCharacterAsync(slotIndex, CancellationToken.None);
             GD.Print($"[SelectScene] DeleteCharacterAsync({slotIndex}) sent={sent}. spec: frontend_scenes.md §5.");
         }
         catch (Exception ex)
@@ -244,14 +245,17 @@ public sealed partial class SelectScene : StubSceneController
         }
     }
 
-    private static byte InternalClassToUiIndex(int internalClass) => internalClass switch
+    private static byte InternalClassToUiIndex(int internalClass)
     {
-        4 => 0,
-        1 => 1,
-        3 => 2,
-        2 => 3,
-        _ => 0,
-    };
+        return internalClass switch
+        {
+            4 => 0,
+            1 => 1,
+            3 => 2,
+            2 => 3,
+            _ => 0
+        };
+    }
 
     private void OnBackRequested()
     {
@@ -262,10 +266,10 @@ public sealed partial class SelectScene : StubSceneController
 
     private void SeedDevRoster()
     {
-        ImmutableArray<CharacterListSlot> slots = DevCharacterList();
+        var slots = DevCharacterList();
         if (_ctx is not null)
         {
-            _ctx.EventBus.Publish(new CharacterListEvent(ServerId: 0, ChannelId: 0, Characters: slots));
+            _ctx.EventBus.Publish(new CharacterListEvent(0, 0, slots));
             GD.Print($"[SelectScene] DEV/headless roster published through EventBus ({slots.Length} slots).");
         }
         else
@@ -280,26 +284,31 @@ public sealed partial class SelectScene : StubSceneController
         if (_host?.CurrentState != EngineSceneState.Select) return;
 
         GD.Print("[SelectScene] Headless/dev auto-confirm slot 0 so SceneHost can verify state 4→5.");
-        _ = ConfirmSlotAsync(slotIndex: 0, allowDevFallback: true);
+        _ = ConfirmSlotAsync(0, true);
     }
 
-    private static ImmutableArray<CharacterListSlot> DevCharacterList() =>
-        ImmutableArray.Create(
+    private static ImmutableArray<CharacterListSlot> DevCharacterList()
+    {
+        return ImmutableArray.Create(
             // Dev/offline seed for headless + screenshot verification. PosX/PosZ are representative saved
             // map coords (descriptor +644/+648) so the info-row "%d , %d" position line is exercised.
             // spec: Docs/RE/specs/frontend_scenes.md §3.2 (descriptor position floats).
-            new CharacterListSlot(SlotIndex: 0, Name: "무사", Level: 25, ServerClass: 1, CurrentHp: 650, PosX: 2048f, PosZ: -6144f),
-            new CharacterListSlot(SlotIndex: 1, Name: "격사", Level: 32, ServerClass: 3, CurrentHp: 520, PosX: 1536f, PosZ: -3590f),
-            new CharacterListSlot(SlotIndex: 2, Name: "도사", Level: 18, ServerClass: 2, CurrentHp: 480, PosX: 1024f, PosZ: -512f),
-            new CharacterListSlot(SlotIndex: 3, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0, PosX: 0f, PosZ: 0f),
-            new CharacterListSlot(SlotIndex: 4, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0, PosX: 0f, PosZ: 0f));
+            new CharacterListSlot(0, "무사", 25, 1, 650, 2048f,
+                -6144f),
+            new CharacterListSlot(1, "격사", 32, 3, 520, 1536f,
+                -3590f),
+            new CharacterListSlot(2, "도사", 18, 2, 480, 1024f,
+                -512f),
+            new CharacterListSlot(3, "@BLANK@", 0, 0, 0),
+            new CharacterListSlot(4, "@BLANK@", 0, 0, 0));
+    }
 
     private static bool IsDevOfflineMode()
     {
-        string? envVal = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
+        var envVal = Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
         if (envVal is "1" or "true" or "yes") return true;
 
-        string cfgVal = ReadCfgKey("dev_offline_flow", "0");
+        var cfgVal = ReadCfgKey("dev_offline_flow", "0");
         return cfgVal is "1" or "true" or "yes";
     }
 
@@ -319,12 +328,12 @@ public sealed partial class SelectScene : StubSceneController
 
         try
         {
-            foreach (string rawLine in File.ReadLines(path))
+            foreach (var rawLine in File.ReadLines(path))
             {
-                string line = rawLine.Trim();
+                var line = rawLine.Trim();
                 if (line.Length == 0 || line.StartsWith('#')) continue;
 
-                int eq = line.IndexOf('=');
+                var eq = line.IndexOf('=');
                 if (eq < 0) continue;
 
                 if (line[..eq].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))

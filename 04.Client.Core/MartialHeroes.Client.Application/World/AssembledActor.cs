@@ -22,72 +22,72 @@ namespace MartialHeroes.Client.Application.World;
 // =============================================================================
 
 /// <summary>
-/// The neutral, engine-free actor descriptor the <see cref="ActorComposer"/> emits for one spawned
-/// actor. Layer-05 (Phase 6) consumes this to build the Godot mesh + skeleton; this layer never
-/// references a Godot type.
+///     The neutral, engine-free actor descriptor the <see cref="ActorComposer" /> emits for one spawned
+///     actor. Layer-05 (Phase 6) consumes this to build the Godot mesh + skeleton; this layer never
+///     references a Godot type.
 /// </summary>
 /// <remarks>
-/// The descriptor is valid even when the mesh-build step is deferred: it carries the skin id, the
-/// <c>id_b</c> skeleton key, the motion ids, and the GID list independently of any mesh. spec:
-/// Docs/RE/specs/assembly_graph.md §4 ("emit a valid actor descriptor … independent of the
-/// mesh-build step").
+///     The descriptor is valid even when the mesh-build step is deferred: it carries the skin id, the
+///     <c>id_b</c> skeleton key, the motion ids, and the GID list independently of any mesh. spec:
+///     Docs/RE/specs/assembly_graph.md §4 ("emit a valid actor descriptor … independent of the
+///     mesh-build step").
 /// </remarks>
 public sealed class AssembledActor
 {
     /// <summary>
-    /// The skeleton selector — the skin's <c>id_b</c> used verbatim as the pose-pool key. <c>0</c>
-    /// ⇒ no skeleton (see <see cref="IsInvisible"/>). spec: Docs/RE/specs/skinning.md §8(e).
+    ///     The skeleton selector — the skin's <c>id_b</c> used verbatim as the pose-pool key. <c>0</c>
+    ///     ⇒ no skeleton (see <see cref="IsInvisible" />). spec: Docs/RE/specs/skinning.md §8(e).
     /// </summary>
     public required int SkinIdB { get; init; }
 
     /// <summary>
-    /// The appearance/skeleton selector <c>model_class_id = 5·(class + 4·variant) − 24 ∈ {1,11,16,26}</c>
-    /// for players; the catalogue-resolved class for mobs. <c>0</c> = invisible sentinel (variant 3).
-    /// spec: Docs/RE/specs/skinning.md §3.5.2.
+    ///     The appearance/skeleton selector <c>model_class_id = 5·(class + 4·variant) − 24 ∈ {1,11,16,26}</c>
+    ///     for players; the catalogue-resolved class for mobs. <c>0</c> = invisible sentinel (variant 3).
+    ///     spec: Docs/RE/specs/skinning.md §3.5.2.
     /// </summary>
     public required int ModelClassId { get; init; }
 
     /// <summary>
-    /// The baked inverse-bind influences (the animatable payload): per influence the vertex index,
-    /// bone id, normalized weight, and the bone-local rest <c>localPos</c>/<c>localNormal</c>.
-    /// Empty when the actor is invisible or has no skin/skeleton. spec: Docs/RE/specs/skinning.md §0/§4.
+    ///     The baked inverse-bind influences (the animatable payload): per influence the vertex index,
+    ///     bone id, normalized weight, and the bone-local rest <c>localPos</c>/<c>localNormal</c>.
+    ///     Empty when the actor is invisible or has no skin/skeleton. spec: Docs/RE/specs/skinning.md §0/§4.
     /// </summary>
     public required IReadOnlyList<BakedInfluence> BakedInfluences { get; init; }
 
     /// <summary>
-    /// The bone bind list (parent-relative locals + bind-world + base_id) so layer-05 can build a
-    /// <c>Skeleton3D</c> rest pose. Empty when no skeleton resolved. spec: Docs/RE/specs/skinning.md §3.1/§3.4.
+    ///     The bone bind list (parent-relative locals + bind-world + base_id) so layer-05 can build a
+    ///     <c>Skeleton3D</c> rest pose. Empty when no skeleton resolved. spec: Docs/RE/specs/skinning.md §3.1/§3.4.
     /// </summary>
     public required SkeletonBindView Skeleton { get; init; }
 
     /// <summary>
-    /// Whether a skeleton was resolved at all (<c>id_b</c> registered). When <see langword="false"/>
-    /// the <see cref="Skeleton"/> is a default and the deform would run unskinned.
-    /// spec: Docs/RE/specs/skinning.md §8(e) (id_b 0 / unregistered ⇒ no skeleton).
+    ///     Whether a skeleton was resolved at all (<c>id_b</c> registered). When <see langword="false" />
+    ///     the <see cref="Skeleton" /> is a default and the deform would run unskinned.
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (id_b 0 / unregistered ⇒ no skeleton).
     /// </summary>
     public required bool HasSkeleton { get; init; }
 
     /// <summary>
-    /// The action→<c>.mot</c> clip table (a[1] idle, a[2] walk, a[3] run, a[4] death, a[5] mount-idle,
-    /// a[6] combat-idle). spec: Docs/RE/formats/actormotion.md (motion_ids_a).
+    ///     The action→<c>.mot</c> clip table (a[1] idle, a[2] walk, a[3] run, a[4] death, a[5] mount-idle,
+    ///     a[6] combat-idle). spec: Docs/RE/formats/actormotion.md (motion_ids_a).
     /// </summary>
     public required ActionClipTable MotionClipIds { get; init; }
 
     /// <summary>
-    /// The action→SFX/FX event-id table (NOT routed through animation). spec:
-    /// Docs/RE/formats/actormotion.md (motion_ids_b = SOUND/EFFECT event ids).
+    ///     The action→SFX/FX event-id table (NOT routed through animation). spec:
+    ///     Docs/RE/formats/actormotion.md (motion_ids_b = SOUND/EFFECT event ids).
     /// </summary>
     public required ActionEventTable SfxEventIds { get; init; }
 
     /// <summary>
-    /// The equipment GID list — the per-slot equipment gids the composer iterated (the
-    /// <c>{3,4,6,2,11,14}</c> overlay slots, empty slots skipped). spec: Docs/RE/specs/skinning.md §3.5.4.
+    ///     The equipment GID list — the per-slot equipment gids the composer iterated (the
+    ///     <c>{3,4,6,2,11,14}</c> overlay slots, empty slots skipped). spec: Docs/RE/specs/skinning.md §3.5.4.
     /// </summary>
     public required IReadOnlyList<int> EquipmentGids { get; init; }
 
     /// <summary>
-    /// The resolved equipment overlay parts (mesh_gid / tex_id / slot / hand-bone). All parts share
-    /// the one <see cref="SkinIdB"/> skeleton. spec: Docs/RE/specs/equipment_visuals.md §3/§4/§5.
+    ///     The resolved equipment overlay parts (mesh_gid / tex_id / slot / hand-bone). All parts share
+    ///     the one <see cref="SkinIdB" /> skeleton. spec: Docs/RE/specs/equipment_visuals.md §3/§4/§5.
     /// </summary>
     public required IReadOnlyList<EquipmentPart> EquipmentParts { get; init; }
 
@@ -98,16 +98,16 @@ public sealed class AssembledActor
     public required float WorldZ { get; init; }
 
     /// <summary>
-    /// The spawn yaw (radians). For an <c>.arr</c>-derived NPC spawn the caller applies
-    /// <c>π/2 − facing</c> before constructing this; the wire path supplies the actor yaw directly.
-    /// spec: Docs/RE/formats/npc_spawns.md (+0x12 facing; runtime applies <c>π/2 − value</c>).
+    ///     The spawn yaw (radians). For an <c>.arr</c>-derived NPC spawn the caller applies
+    ///     <c>π/2 − facing</c> before constructing this; the wire path supplies the actor yaw directly.
+    ///     spec: Docs/RE/formats/npc_spawns.md (+0x12 facing; runtime applies <c>π/2 − value</c>).
     /// </summary>
     public required float Yaw { get; init; }
 
     /// <summary>
-    /// <see langword="true"/> when the actor has no visible mesh — the model-class invisible sentinel
-    /// (variant 3 ⇒ model_class_id 0) or an <c>id_b</c> of 0 / unregistered skeleton.
-    /// spec: Docs/RE/specs/skinning.md §3.5.2 (variant 3 ⇒ 0 = invisible); §8(e) (id_b 0 ⇒ no skeleton).
+    ///     <see langword="true" /> when the actor has no visible mesh — the model-class invisible sentinel
+    ///     (variant 3 ⇒ model_class_id 0) or an <c>id_b</c> of 0 / unregistered skeleton.
+    ///     spec: Docs/RE/specs/skinning.md §3.5.2 (variant 3 ⇒ 0 = invisible); §8(e) (id_b 0 ⇒ no skeleton).
     /// </summary>
     public required bool IsInvisible { get; init; }
 
@@ -118,9 +118,9 @@ public sealed class AssembledActor
 }
 
 /// <summary>
-/// One baked inverse-bind influence — the animatable payload. The <c>localPos</c>/<c>localNormal</c>
-/// were baked once by <c>invQ ⊗ (restPos − bindWorldTrans)</c> / <c>invQ ⊗ restNormal</c> so the
-/// per-frame deform never touches the bind pose. spec: Docs/RE/specs/skinning.md §0/§4.
+///     One baked inverse-bind influence — the animatable payload. The <c>localPos</c>/<c>localNormal</c>
+///     were baked once by <c>invQ ⊗ (restPos − bindWorldTrans)</c> / <c>invQ ⊗ restNormal</c> so the
+///     per-frame deform never touches the bind pose. spec: Docs/RE/specs/skinning.md §0/§4.
 /// </summary>
 public readonly struct BakedInfluence
 {
@@ -141,8 +141,8 @@ public readonly struct BakedInfluence
 }
 
 /// <summary>
-/// One resolved equipment overlay part. spec: Docs/RE/specs/skinning.md §3.5.4;
-/// Docs/RE/specs/equipment_visuals.md §3/§5.
+///     One resolved equipment overlay part. spec: Docs/RE/specs/skinning.md §3.5.4;
+///     Docs/RE/specs/equipment_visuals.md §3/§5.
 /// </summary>
 public readonly struct EquipmentPart
 {
@@ -159,14 +159,14 @@ public readonly struct EquipmentPart
     public required int TextureId { get; init; }
 
     /// <summary>
-    /// <see langword="true"/> for the weapon slot (14), which attaches to a hand bone rather than
-    /// skinning across the body. spec: Docs/RE/specs/equipment_visuals.md §5 (weapon → hand bone).
+    ///     <see langword="true" /> for the weapon slot (14), which attaches to a hand bone rather than
+    ///     skinning across the body. spec: Docs/RE/specs/equipment_visuals.md §5 (weapon → hand bone).
     /// </summary>
     public required bool IsHandWeapon { get; init; }
 
     /// <summary>
-    /// <see langword="true"/> for the off-hand node of a dual / two-piece weapon (skin bind class 3).
-    /// Off-hand carries node flag 1; the main-hand node flag 2. spec: Docs/RE/specs/equipment_visuals.md §5.1.
+    ///     <see langword="true" /> for the off-hand node of a dual / two-piece weapon (skin bind class 3).
+    ///     Off-hand carries node flag 1; the main-hand node flag 2. spec: Docs/RE/specs/equipment_visuals.md §5.1.
     /// </summary>
     public required bool IsOffHand { get; init; }
 }

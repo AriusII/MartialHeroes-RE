@@ -10,9 +10,17 @@
 > re-read from a consumer this pass), `skillneedset.scr`, and the runtime offsets carried from prior
 > analysis; **capture/debugger-pending** for the 5/52 per-target damage / HP / stamina **value
 > semantics** and any field-value meaning that needs a live wire capture.
-> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none for
+> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none for
 > the skill layouts; the 5/52 §E.4 stub is **superseded** by the statically-recovered 24-byte header
 > (see §E.4 and `packets/5-52_actor_skill_action.yaml`).
+>
+> **CYCLE 7 update.** The combat-stat block (§A.2.5) was re-recovered from the *consumer* side — the
+> battle controller's cast gate, the AoE target resolver, and the 2/52 builder all read these fields
+> at the offsets below — so the rows promoted in §A.2.5 move from **SAMPLE-VERIFIED** to
+> **CONSUMER-CONFIRMED**. Key refinement: **+1316 is dual-purpose** — a radius (game units, compared
+> squared) for shape modes 3/6/0xA, but a **cone half-angle in DEGREES** for shape mode 4 (see
+> §A.2.5 and §A.5).
 
 Neutral, offset-model of the skill subsystem the legacy client used: the on-disk skill catalog
 (`skills.scr`), its prerequisite-graph sidecar (`skillneedset.scr`), the runtime hotbar tables, and
@@ -39,10 +47,12 @@ no binary addresses. Design input for the **network-protocol-engineer** (skill p
 | `skills.scr` record framing (1504 fixed + N×8 sub-entries, count `N` = u8 at +1500) | **CONFIRMED** (control-flow) — the loader reads the 1504-byte fixed block, takes `N` (u8) at +1500, allocates / reads `8 × N` sub-entry bytes, then advances by the total length; cross-checked by a sample walk (3,737 records, file fully consumed, 0 remainder) |
 | `skills.scr` sub-row expansion (8B disk → 12B runtime) + 1508B runtime object | **CONFIRMED** (control-flow) — runtime object = `new(1508)` (1504 fixed + sub-entry-array pointer at +1504); 8→12B expansion is byte-exact (disk +0→rt +0 word; disk +2 i16 → rt +4 i32 sign-extended; disk +4→rt +8 word; disk +6→rt +0xA byte) |
 | `skills.scr` index keys (+0 SkillId, +4 GlobalCategory) | **CONFIRMED** (control-flow) — primary catalog index keyed on +0; a secondary index keyed on +4 when non-zero |
-| Skill ID (+0), global category (+4), name (+8), class flag (+516), tier byte (+520) | **SAMPLE-VERIFIED** |
+| Skill ID (+0), global category (+4), name (+8), class flag (+516) | **SAMPLE-VERIFIED** |
+| Tier byte (+520) | **CONSUMER-CONFIRMED** (CYCLE 7) — the learn-gate orders chain forms by +520 and the cast gate compares it; sample histogram retained |
 | Constant marker +260 = `0x30000000` | **SAMPLE-VERIFIED** — identical across all 2,000 valid records |
-| Skill SORT (+1306), target/shape mode (+1308) | **CONFIRMED** |
-| Combat-stat block (+1304..+1370): range, AoE, max-hit, MP gate, recast, weapon req, stamina | **SAMPLE-VERIFIED** — values reproduced from sample for movement and combat skills |
+| Skill SORT (+1306), target/shape mode (+1308) | **CONSUMER-CONFIRMED** (CYCLE 7) |
+| Prerequisite array (+1280, 3 entries) | **CONSUMER-CONFIRMED** (CYCLE 7) — the learn-gate scans 3 entries from +1280 for the parent skill |
+| Combat-stat block (+1304..+1370): range, AoE, max-hit, cadence gate, recast, weapon req, timed-cost gates | **CONSUMER-CONFIRMED** (CYCLE 7) — read at these offsets by the cast gate / AoE resolver; sample values retained |
 | Movement-cooldown (+1372) and movement-range (+1412) | **SAMPLE-VERIFIED** — mutually exclusive with +1334 across all valid records |
 | Sub-entry disk row (8 bytes) + runtime expansion (12 bytes) | **CONFIRMED** (control-flow framing); effect-code semantics mostly `LIKELY`/`UNVERIFIED` |
 | `skillneedset.scr` 4-byte edge records | **SAMPLE-VERIFIED** — 22 edges, exact (not re-read from a consumer this pass) |
@@ -99,7 +109,7 @@ records (text overflow aside) and are reserved/unverified.
 | +260 | 4 | u32 | **TypeMarker** = `0x30000000` (constant) | Identical in all 2,000 valid records | SAMPLE-VERIFIED (value); semantic UNVERIFIED (likely internal type/version tag) |
 | +261 .. +515 | 255 | — | Reserved | Zero in valid records | UNVERIFIED |
 | +516 | 4 | u32 | **ClassFlag** = `classId << 16` (see A.3.3) | `0x00010000`..`0x00040000`; `0` = universal/mob | SAMPLE-VERIFIED |
-| +520 | 1 | u8 | **TierByte** — tier / chain-form index (see A.4) | Values 1..6 in valid sample records | SAMPLE-VERIFIED |
+| +520 | 1 | u8 | **TierByte** — tier / chain-form index (see A.4); the learn-gate orders chain forms by +520 and the cooldown-ready compare reads `(+520)+1 == other.(+520)` | Values 1..6 in valid sample records | CONSUMER-CONFIRMED |
 
 > The text at +521 (long description) and a short description near +1032 are CP949 strings. When a
 > previous hexdump showed "integer fields" in the +524..+572 region, those bytes were description
@@ -144,10 +154,10 @@ sample records — reserved or additional chain slots, UNVERIFIED.
 
 | Offset | Size | Type | Field | Evidence | Conf |
 |------:|-----:|------|-------|----------|------|
-| +1280 | 4 | u32 | **PrerequisiteSkillId** — 0 for base skills; non-zero = required parent | skill 13 → 11; skill 300132 → 300131; skill 310031 → 131307011 (composite) | CONFIRMED (pattern); composite decode UNVERIFIED |
+| +1280 | 4×3 | u32[3] | **PrerequisiteSkillId[0..2]** — a 3-entry prerequisite array; entry 0 is the primary required parent (0 for base skills). The learn-gate scans all three entries for the parent skill already on the hotbar | skill 13 → 11; skill 300132 → 300131; skill 310031 → 131307011 (composite) | CONSUMER-CONFIRMED (3-entry array); composite decode UNVERIFIED |
 | +1292 | 2 | u16 | **SkillPointCost** — skill points to learn / level this skill | 4 / 8 / 12 for tier 1/2/3; 1 for some special skills; 0 for mob skills | SAMPLE-VERIFIED |
 | +1294 | 2 | u16 | **NextTier / chain-forward ref** | 0 or composite id | CONFIRMED (presence); encoding UNVERIFIED |
-| +1296 | 4 | u32 | **ChainUpgradePath[0]** | single id or composite | CONFIRMED (presence) |
+| +1296 | 4 | u32 | **ChainUpgradePath[0] / rank-selected variant** — the cast path resolves a per-rank child variant first, then falls back to +1296 | single id or composite | CONSUMER-CONFIRMED (structure); per-rank field meanings UNVERIFIED |
 | +1300 | 4 | u32 | **ChainUpgradePath[1]** | similar | CONFIRMED (presence) |
 
 > **Important `+1292` reconciliation.** In the **disk** record, +1292 is the **SkillPointCost to
@@ -159,36 +169,53 @@ sample records — reserved or additional chain slots, UNVERIFIED.
 
 #### A.2.5 Combat-stats block (+1304 .. +1370)  — SAMPLE-VERIFIED
 
-These are the fields the cast pipeline, target resolver, and cooldown rebuilder read. Values below
-were read back directly from the sample for movement and combat skills.
+These are the fields the cast pipeline, target resolver, and cooldown rebuilder read. The CYCLE 7
+consumer pass (battle controller cast gate + AoE resolver + 2/52 builder) read each of the rows
+tagged **CONSUMER-CONFIRMED** below directly at the listed offset; sample values are retained from
+the prior sample walk.
+
+> **+1316 is dual-purpose (CYCLE 7).** For TargetShapeMode (+1308) values **3 / 6 / 0xA**
+> (circle / party / radial) it is a **radius in game units**, compared squared. For TargetShapeMode
+> **4** (cone) it is a **cone half-angle in DEGREES**, multiplied by the degree→radian constant
+> (π/180 ≈ 0.0174533) to obtain radians. The meaning is selected entirely by +1308. See §A.5.
+
+> **+1332 vs +1334 (CYCLE 7 reconciliation).** The CYCLE 7 *consumer* read shows the cast gate's
+> **cast-cadence / cooldown** check compares elapsed time since the last action against
+> **100 ms × (+1332)** — i.e. +1332 is the **cast-cadence factor** the gate enforces, NOT an MP-pool
+> subtract. The earlier "MpCostGateFactor" framing (cast blocked if available MP < `100 × factor`) is
+> a sample-era interpretation of the same field; the control-flow-confirmed role is the cadence gate
+> (`elapsed_ms < 100 × (+1332)` → blocked). +1334 remains the per-slot recast-table duration source
+> (1/100 s × 100 → ms), populated when the cooldown table is rebuilt from the hotbar. The two are
+> related but read by different code: +1332 is the inline cadence gate inside the cast routine; +1334
+> is the duration written into the 240-slot recast table.
 
 | Offset | Hex | Size | Type | Field | Sample values | Conf |
 |------:|-----|-----:|------|-------|---------------|------|
 | +1304 | 0x518 | 2 | u16 | **MotionIndexA** — animation index | 1, 20, 46, 72 (steps of ~26 across tiers) | CONFIRMED |
-| +1306 | 0x51A | 2 | u16 | **SkillSort** — internal discriminator (see A.3.2) | movement=7, combat=2, mob=5, passive(심법)=6, chain=11, revive=14, plus 0/1/3/17 | SAMPLE-VERIFIED |
-| +1308 | 0x51C | 1 | u8 | **TargetShapeMode** — targeting/shape (see A.5) | self/move=0, single-enemy=2, chain-AoE=3, combo=8 | CONFIRMED |
+| +1306 | 0x51A | 2 | u16 | **SkillSort** — internal discriminator (see A.3.2) | movement=7, combat=2, mob=5, passive(심법)=6, chain=11, revive=14, plus 0/1/3/17 | CONSUMER-CONFIRMED |
+| +1308 | 0x51C | 1 | u8 | **TargetShapeMode** — targeting/shape (see A.5); the switch selector in the AoE resolver (0..0xB) | self/move=0, single-enemy=2, chain-AoE=3, combo=8 | CONSUMER-CONFIRMED |
 | +1309 | 0x51D | 3 | — | Padding (always 0) | — | CONFIRMED |
-| +1312 | 0x520 | 4 | f32 | **BaseRange / cone length** (game units) | movement: 0.0 (uses +1412); combat: 45.0–60.0; mob: 10.0 | SAMPLE-VERIFIED |
-| +1316 | 0x524 | 4 | f32 | **AoeRadius / secondary range** (game units; compared squared) | combat: 30.0–60.0; mob: equals +1312 | SAMPLE-VERIFIED |
+| +1312 | 0x520 | 4 | f32 | **BaseRange / cone length** (game units); cast range = `+1312 + caster body radius`; cone length for shape 4 | movement: 0.0 (uses +1412); combat: 45.0–60.0; mob: 10.0 | CONSUMER-CONFIRMED |
+| +1316 | 0x524 | 4 | f32 | **AoeRadius (shape 3/6/0xA) OR cone half-angle in DEGREES (shape 4)** — radius is compared squared; cone half-angle is × π/180 to radians (see callout above and §A.5) | combat: 30.0–60.0; mob: equals +1312 | CONSUMER-CONFIRMED (dual use) |
 | +1320 | 0x528 | 4 | u32 | Reserved A (always 0) | — | UNVERIFIED |
 | +1324 | 0x52C | 4 | u32 | Reserved B (always 0) | — | UNVERIFIED |
 | +1328 | 0x530 | 4 | u32 | **ClassFlagSecondary** = `classId << 16` | mirrors +516 for single-class skills; 0 universal | CONFIRMED (pattern) |
-| +1330 | 0x532 | 2 | i16 | **MaxTargetHits** (engine clamps to 40) | movement/passive: 1; some combat: 3 | SAMPLE-VERIFIED |
-| +1332 | 0x534 | 2 | i16 | **MpCostGateFactor** — cast blocked if available MP < `100 × factor` | movement/passive: 0; combat/mob: 10 (→ 1000 MP min) | SAMPLE-VERIFIED |
-| +1334 | 0x536 | 2 | u16 | **CombatRecast** — recast time in 1/100-second units (×100 → ms) | movement: 0; combat: e.g. 600 (=6.00 s), 3 (=0.03 s chain reuse); mob: 14 (=0.14 s) | SAMPLE-VERIFIED |
+| +1330 | 0x532 | 2 | i16 | **MaxTargetHits** — AoE hit-count cap; engine clamps to **40**; the event-boost flag doubles it (×2) | movement/passive: 1; some combat: 3 | CONSUMER-CONFIRMED |
+| +1332 | 0x534 | 2 | i16 | **CastCadenceFactor** — cast-cadence / cooldown gate: blocked while `elapsed_ms < 100 × (+1332)`. NOT an MP-pool subtract (see callout above) | movement/passive: 0; combat/mob: 10 (→ 1000 ms cadence) | CONSUMER-CONFIRMED |
+| +1334 | 0x536 | 2 | u16 | **CombatRecast** — recast-table duration in 1/100-second units (×100 → ms); source for the 240-slot recast table | movement: 0; combat: e.g. 600 (=6.00 s), 3 (=0.03 s chain reuse); mob: 14 (=0.14 s) | SAMPLE-VERIFIED |
 | +1336 | 0x538 | 4 | u32 | Reserved C (always 0) | — | UNVERIFIED |
 | +1340 | 0x53C | 4 | u32 | Reserved D (always 0) | — | UNVERIFIED |
-| +1344 | 0x540 | 2 | u16 | **WeaponReqIdA** — required worn-weapon class | movement/passive: 0; combat: nonzero (e.g. 7, 46) | CONFIRMED |
+| +1344 | 0x540 | 2 | u16 | **WeaponReqIdA** — required worn-weapon class; weapon-req gate vs worn weapon; also halves the enemy radius in shape 3 when set with +1348; basic-attack match in the hotbar scan | movement/passive: 0; combat: nonzero (e.g. 7, 46) | CONSUMER-CONFIRMED |
 | +1346 | 0x542 | 2 | u16 | Padding / unknown (always 0) | — | UNVERIFIED |
-| +1348 | 0x544 | 4 | u32 | **WeaponReqIdB** (secondary, vs target) | 0 in all sample records | CONFIRMED (structure); value 0 in sample |
-| +1352 | 0x548 | 1 | u8 | **WeaponReqActiveFlag** — gates the +1344 check | movement/passive: 0; some combat: 1 | CONFIRMED |
+| +1348 | 0x544 | 4 | u32 | **WeaponReqIdB** (secondary, vs target); paired with +1344 as the shape-3 enemy-radius-halving trigger | 0 in all sample records | CONSUMER-CONFIRMED (structure); value 0 in sample |
+| +1352 | 0x548 | 1 | u8 | **WeaponReqActiveFlag** — gates the +1344 special-weapon branch | movement/passive: 0; some combat: 1 | CONSUMER-CONFIRMED |
 | +1353 | 0x549 | 1 | u8 | Unknown flag byte | 1 for some combat skills; else 0 | UNVERIFIED |
 | +1354 | 0x54A | 2 | u16 | Unknown (always 0) | — | UNVERIFIED |
-| +1356 | 0x54C | 4 | u32 | Reserved E (always 0) | — | UNVERIFIED |
+| +1356 | 0x54C | 4 | u32 | Reserved E (always 0) — within the weapon-req block walked in 12-byte steps (+1344 → +1368) | — | UNVERIFIED |
 | +1360 | 0x550 | 4 | u32 | Reserved F (always 0) | — | UNVERIFIED |
 | +1364 | 0x554 | 4 | u32 | Reserved G (always 0) | — | UNVERIFIED |
-| +1368 | 0x558 | 2 | i16 | **CastCost** — generic cost subtracted from a player vital on cast-confirm | 0 in all sample records (cost may live only in skills absent from this sample) | CONFIRMED (structure); semantic UNVERIFIED |
-| +1370 | 0x55A | 2 | u16 | **StaminaCost** — subtracted per target on cast-confirm | movement/passive: 0; combat: 20–50, scaling per tier | SAMPLE-VERIFIED |
+| +1368 | 0x558 | 2 | i16 | **CastCostTimerThreshold** — a **timed-charge gate** compared against a running global clock (blocks when `>0`, the clock delta is negative, and the value `< 30000`); NOT a flat pool subtract on this path. Magnitude server-authored | 0 in all sample records | CONSUMER-CONFIRMED (structure); semantic CAPTURE-PENDING |
+| +1370 | 0x55A | 2 | u16 | **StaminaCostTimerThreshold** — a **timed-charge gate** compared against a separate running global clock (blocks when `>0` and the clock delta is negative); NOT a flat pool subtract on this path | movement/passive: 0; combat: 20–50, scaling per tier | CONSUMER-CONFIRMED (structure); semantic CAPTURE-PENDING |
 
 #### A.2.6 Secondary timing / range block (+1372 .. +1495)
 
@@ -284,25 +311,47 @@ the upgrade order observed is base=1, upgrade=4, advanced=2.
 
 ### A.5 TargetShapeMode at +1308 (u8)
 
-Targeting / shape dispatch.
+Targeting / shape dispatch. The CYCLE 7 consumer pass recovered the geometry of each AoE branch from
+the resolver; the exact algebra is given below.
 
 | Value | Shape | Behaviour |
 |------:|-------|-----------|
 | 0  | Self / single | primary target only; movement skills use this |
 | 1  | Single ally | faction/team gate + target-state check |
 | 2  | Single enemy | target-state check; heal if friendly else damage |
-| 3  | Chain / nearby AoE | range from +1316; enemy range halved if a weapon flag is set |
-| 4  | Cone / forward line AoE | length = +1312 + caster radius; per-actor cone test |
+| 3  | Chain / nearby AoE | radius² from `+1316` (squared); enemy radius **halved** when both +1344 and +1348 are set; include actors with `distXZ² < radius²` |
+| 4  | Cone / forward line AoE | length `L = +1312 + caster radius`; cone = circular sector (see algebra below) |
 | 5  | Ground / point only | no actor targets resolved here |
-| 6  | Party AoE | walks party roster; range from +1316 |
+| 6  | Party AoE | walks party roster; radius² from `+1316` (squared) |
 | 7  | Faction/group-gated single | style/team match |
 | 8  | Combo-chain trigger | triggers chain animation sequence |
 | 9  | PK-gated single | team-byte gate |
-| 10 (0xA) | Radial AoE (both factions) | range from +1316; PCs and mobs |
+| 10 (0xA) | Radial AoE (both factions) | radius² from `+1316` (squared); loops all actors, classifies PC vs mob |
 | 11 (0xB) | Self-only | clears arrays; PC-count = 1 with caster id |
 
 Sample correlation: movement skills (sort=7) → mode 0; combat AoE → mode 3; single-target combat →
 mode 2; combo skills → mode 8; mob skills → mode 2.
+
+**AoE shape algebra (CYCLE 7, consumer-confirmed).** Distance tests are planar (XZ) and squared
+throughout; the **combined hit count is clamped to 40** after the event-boost doubling.
+
+- **Circle (mode 3).** `radius²` derived from `+1316` (squared). When the weapon-requirement fields
+  +1344 and +1348 are both set, the **enemy radius is halved** (`(+1316 × 0.5)²`). Loop the actor
+  list; include each actor whose squared XZ distance to the center (the primary target) is `< radius²`.
+- **Cone (mode 4) — a circular sector.** Length `L = +1312 + caster body radius`. The forward axis is
+  the normalized vector from the primary target to the caster, scaled by `L / 5.0`, with the origin
+  offset to the caster. The range test uses an effective squared range of `2·L²`. The **half-angle**
+  is `+1316` interpreted as DEGREES, multiplied by π/180 to radians. Per actor: include iff the
+  squared XZ distance is within `2·L²` AND the bearing `atan2(actor.x − center.x, actor.z − center.z)`
+  falls inside the `facing ± half-angle` window. So the sector's range is `√(2·L²)` and its total
+  angular width derives from `+1316°`.
+- **Party (mode 6).** `radius²` from `+1316` (squared); walk the party roster and include members
+  within `radius²`.
+- **Radial (mode 0xA).** `radius²` from `+1316` (squared); loop all actors, classify each into the PC
+  list or the mob/NPC list within range.
+- **Event-boost.** When the event-boost flag (the local-player record's boost flag) is set and the
+  base hit count is ≥ 2, the hit count doubles (×2) and the area quadruples (radius ×2, area ×4);
+  the combined count is then clamped to 40.
 
 ### A.6 Sub-entry / effect rows (trailing 8-byte entries)
 
@@ -624,7 +673,9 @@ discriminator received on spawn — **not** a per-skill cooldown table. Exact se
 - EffectTypeCode semantics for codes ~1..42 — inferred from names only, provisional.
 - `30001` magnitude sentinel and LevelThreshold-as-signed-duration — inferred, not confirmed.
 - Reader code path for MovementCooldown (+1372) — not located this pass.
-- CastCost (+1368) exact semantics (which vital it consumes) — UNVERIFIED; 0 across the sample.
+- CastCost (+1368) / StaminaCost (+1370) — CYCLE 7 consumer pass: on the cast-gate path both are
+  **timed-charge gates** compared against running global clocks, NOT flat pool subtracts. The gate
+  magnitude is server-authored — CAPTURE-PENDING. (0 across the sample.)
 - Exact Name buffer length (24 vs 32 bytes) — byte at +32 is always 0 in valid records, boundary unpinned.
 - SkillSort value 17 (present in sample, 7 records) — behaviour UNVERIFIED.
 - The unused second int of each 8-byte hotbar slot pair — purpose UNVERIFIED.

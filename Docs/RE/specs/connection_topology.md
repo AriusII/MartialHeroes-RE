@@ -1,11 +1,14 @@
 <!--
 verification: confirmed (the socket-subsystem count, which opcode majors ride which socket,
-  the single-persistent-opcode-connection model, the connect lifecycle vs the scene FSM, and the
-  lobby->game server-address handoff CHAIN are all control-flow-confirmed on build 263bd994);
+  the single-persistent-opcode-connection model, the connect lifecycle vs the scene FSM, the
+  lobby->game server-address handoff CHAIN, the lobby static port 10000, the static fallback/config
+  constants, and the XTrap static defaults are all control-flow-confirmed on build 263bd994 — the
+  endpoint constants re-verified against doida.exe IDB SHA 263bd994, CYCLE 7, 2026-06-20);
   static-hypothesis (the scene-substate numbers attached to each connect/query step);
   capture/debugger-pending (the runtime host/port VALUES beyond the binary-literal fallbacks, and
   the connection-state code meanings 201/202/203/232).
 ida_anchor: 263bd994
+ida_reverified: 2026-06-20   # endpoints + 1/2 keepalive re-verified against doida.exe IDB SHA 263bd994, CYCLE 7
 evidence: [static-ida]
 sample_verified: false
 -->
@@ -40,7 +43,7 @@ opcode-framed game connection. *([confirmed]; build 263bd994.)*
 
 | # | Subsystem | Sockets | I/O style | Host resolution | Target | Carries |
 |---|---|---|---|---|---|---|
-| **A** | **Game/world opcode connection** (the embedded `NetConn`) | **1, persistent** | overlapped `WSARecv`/`WSASend`, 4 auto-reset events, dedicated I/O thread, non-blocking connect + ~2 s `select` + `SO_ERROR` check | **DNS (`gethostbyname`)** | the game host:port from the lobby channel-endpoint token (§7) | **ALL opcode majors 0–5** — `0` key-exchange, `1` login/char-mgmt (+ the `1/2` ping), `2` game actions, `3` char-mgmt/chat, `4` Response, `5` Push — plus both keepalives and the `5/146`→`2/146` ack |
+| **A** | **Game/world opcode connection** (the embedded `NetConn`) | **1, persistent** | overlapped `WSARecv`/`WSASend`, 4 auto-reset events, dedicated I/O thread, non-blocking connect + ~2 s `select` + `SO_ERROR` check | **DNS (`gethostbyname`)** — host **RUNTIME-ONLY** | the game host:port from the lobby channel-endpoint token (§7); **NO static IP or port baked in** (both staged into the client object at connect) | **ALL opcode majors 0–5** — `0` key-exchange, `1` login/char-mgmt (+ the `1/2` keepalive), `2` game actions, `3` char-mgmt/chat, `4` Response, `5` Push — plus all keepalives/idle fillers and the `5/146`→`2/146` ack |
 | **B** | **Login / lobby queries** | **N, throwaway** | **blocking**, one-shot (open → request → recv → LZ4-decompress → close); **NO 8-byte opcode header** | `inet_addr` (dotted-quad, **no DNS**) | lobby host, **port 10000** (server list) and **port 10000 + server_id** (channel endpoint) | the server-list records and the 30-byte game-endpoint token (§7) |
 | **C** | **XTrap anti-cheat relay** | **1, blocking** | blocking + 10 × 200 ms retry + `getsockname` | `inet_addr` literal | **`211.115.86.66:2424`** (binary-literal constant) | `XL_XF_V1` anti-cheat frames — independent of the opcode protocol |
 
@@ -59,9 +62,18 @@ its **connect routine** opens the socket, creates the auto-reset events (receive
 send-signal, graceful-close, shutdown), spawns the I/O thread (one of the two user `_beginthreadex`
 sites), does a **non-blocking connect with a ~2 s `select` and an `SO_ERROR` check**, and resolves its
 host by **DNS (`gethostbyname`)**. Winsock bring-up is `WSAStartup(0x0202)`. The single send
-convergence, the master dispatcher, both keepalives, and the link-health ack all live on this socket —
-see `network_dispatch.md`. Nagle is **ON** (the sole `setsockopt` sets `SO_RCVBUF`, never
+convergence, the master dispatcher, all keepalives/idle fillers, and the link-health ack all live on
+this socket — see `network_dispatch.md`. Nagle is **ON** (the sole `setsockopt` sets `SO_RCVBUF`, never
 `TCP_NODELAY`), so frames coalesce — see `network_dispatch.md §4.4a`. *([confirmed].)*
+
+> **Endpoint is RUNTIME-ONLY (binary wins).** There is **no static game / World-Server IP or port
+> immediate anywhere in the binary** for socket A. The connect command reads the **host string** and
+> the **port** from `NetClient` object fields (staged from the lobby channel-endpoint handoff, §7),
+> resolves the host through `gethostbyname`, and connects. The **World-Server transition is an address
+> handoff on the SAME opcode socket**, so its host/port likewise arrive as runtime field values — there
+> is no reconnect and no second baked-in endpoint. The error strings on this path confirm the
+> field-driven model (a `"not connected to host ip[%s] / port[%d]"` diagnostic). *([confirmed]* the
+> resolution chain is static; the operative host **and** port VALUES are `[capture/debugger-pending]`.)*
 
 The client is a **pure outbound TCP client**: there is **no `bind`/`listen`/`accept`** anywhere.
 *([confirmed].)*
@@ -73,24 +85,43 @@ The client is a **pure outbound TCP client**: there is **no `bind`/`listen`/`acc
 A family of **short-lived blocking sockets**, each one-shot: open → send a request → receive →
 LZ4-decompress → close. These carry **no 8-byte opcode frame header** — they are a distinct wire shape
 from socket A, owned by `lobby.yaml`. Hosts are resolved with `inet_addr` (dotted-quad, **no DNS**).
-Two query kinds: the **server-list** query at **port 10000**, and the **channel-endpoint** query at
-**port 10000 + server_id**. The channel-endpoint query is what **returns the game socket's target
-address** (§7). *([confirmed]* structure; the query payload field semantics are owned by `lobby.yaml`
-and stay `[capture/debugger-pending]` where noted there.)*
+Two query kinds: the **server-list (roster)** query at **port `10000` (RESOLVED static)**, and the
+**channel-endpoint** query at **port `10000 + server_id`** (the `10000` base is a static immediate; the
+per-server offset is the runtime `server_id`). The channel-endpoint query is what **returns the game
+socket's target address** (§7). *([confirmed]* structure / static ports; the query payload field
+semantics are owned by `lobby.yaml` and stay `[capture/debugger-pending]` where noted there.)*
+
+**Lobby host is RUNTIME-ONLY** (resolved in the priority chain of §7); the only static fallback is the
+binary-literal **`211.196.150.4`**. The config filenames **`ip.txt`** and **`list.dat`** are static.
+
+> **Registry leg supplies a DISPLAY NAME only (binary wins — note to avoid mis-attribution).** A
+> registry read of **`HKLM\SOFTWARE\crspace\do`** value **`servername`** (with a CP949 Korean default
+> on a key/value miss) runs at the **end of the `list.dat` load** and only fills the **server display
+> name** field of a list record — it does **NOT** supply the connection host/IP or port. The registry is
+> part of the lobby *server-list record* assembly, not endpoint (host:port) resolution. *([confirmed].)*
 
 ---
 
 ## 4. Subsystem C — the XTrap anti-cheat relay
 
 A separate **blocking** socket (with a 10 × 200 ms connect retry and a `getsockname` call) connects to
-the binary-literal endpoint **`211.115.86.66:2424`** and exchanges `XL_XF_V1` anti-cheat frames. It is
-**independent of both the opcode protocol and the lobby queries**. *([confirmed].)*
+the host **`211.115.86.66`** and port **`2424`** and exchanges `XL_XF_V1` anti-cheat frames. Both are
+**RESOLVED static defaults** — applied (via `inet_addr` + `htons`) when no host argument is supplied. It
+is **independent of both the opcode protocol and the lobby queries**. *([confirmed].)*
 
 > **Correction to earlier notes (binary wins).** Some CYCLE-4 dirty notes attributed a
 > "lobby socket helper" cluster (a `socket`+`inet_addr`+`htons` constructor, a blocking
 > connect-with-retry, a `getsockname`) to the **server-list** path. That cluster is actually the
 > **XTrap relay (C)**. The real server-list path is the `ip.txt` probe driven by the login-window
 > state machine (§7), not that helper cluster.
+
+> **NOT an endpoint — the crash-report (BugTrap) server (binary wins — note to avoid mis-attribution).**
+> A dotted-quad **`183.99.71.33`** with port **`9999`** is baked in, but it is the **BugTrap** crash /
+> minidump reporter (a diagnostic crash-dump upload), **NOT** a game / lobby / anti-cheat socket — it is
+> none of subsystems A/B/C and carries no opcode or anti-cheat traffic. It is recorded here only so a
+> reader does not mistake it for a fourth network endpoint. **No other dotted-quad IP constants exist in
+> the binary** — the only four are the lobby fallback `211.196.150.4`, the XTrap default `211.115.86.66`,
+> and this BugTrap `183.99.71.33`. *([confirmed].)*
 
 ---
 
@@ -105,9 +136,18 @@ goes out as an overlapped `WSASend` on socket A.
 The apparent CYCLE-4 tension is resolved: the send-census ("`1/2` → the convergence") and `lobby.yaml`
 ("the lobby is a separate blocking socket") were **both correct but describing disjoint surfaces** —
 the lobby blocking threads (B) never call the `1/2` builder. On this build, the "lobby ping" is
-functionally a **game-connection keepalive/heartbeat**, not lobby-server traffic. (Naming note: the
-`1/2` builder's canonical name should reflect "game keepalive", not "lobby", to prevent future
-confusion.)
+functionally a **game-connection keepalive**, not lobby-server traffic. (Naming note: the `1/2`
+builder's canonical name should reflect "game keepalive", not "lobby", to prevent future confusion.)
+
+> **`1/2` is a header-only idle filler with NO cadence (CYCLE 7).** *([confirmed]; build 263bd994.)*
+> The `1/2` keepalive is **header-only** — an **8-byte frame, no body** — and is driven by the
+> network-client's **send-proxy / idle-filler thread** (a ~10 ms poll loop): while its enable gate is
+> set and no send is in flight, it fires on a poll tick whenever the link is idle. **There is no
+> periodic interval immediate** — the prior "400 ms" figure is a **WARN-log latency threshold** for an
+> over-pending queued send, not a send cadence. Its full mechanics, alongside the other keepalive/idle
+> mechanisms (the `2/10000` 20-second timer frame, the `2/13` move filler, and the `2/112` toggle), are
+> owned by `network_dispatch.md §4.5` — cited here, not duplicated. The on-wire spacing of this idle
+> filler is `[capture/debugger-pending]`.
 
 ---
 

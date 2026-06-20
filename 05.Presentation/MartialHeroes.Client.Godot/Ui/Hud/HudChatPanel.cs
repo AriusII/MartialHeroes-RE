@@ -25,19 +25,17 @@
 using System.Text;
 using System.Threading.Channels;
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game chat — 448×324 scrollable log + 330×20 input box.
-///
-/// <para>PASSIVE: drains <see cref="IHudEventHub.ChatLines"/>; raises <see cref="SendChatRequested"/> intent.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §1.2 — geometry CODE-CONFIRMED.
-/// spec: Docs/RE/specs/chat.md — full chat subsystem spec.
+///     In-game chat — 448×324 scrollable log + 330×20 input box.
+///     <para>PASSIVE: drains <see cref="IHudEventHub.ChatLines" />; raises <see cref="SendChatRequested" /> intent.</para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §1.2 — geometry CODE-CONFIRMED.
+///     spec: Docs/RE/specs/chat.md — full chat subsystem spec.
 /// </summary>
 public sealed partial class HudChatPanel : Control
 {
@@ -71,33 +69,33 @@ public sealed partial class HudChatPanel : Control
     private const uint ColorAlly = 0xFF82C4FFu; // spec: chat.md §3 — alliance
 
     // -------------------------------------------------------------------------
-    // Child controls
-    // -------------------------------------------------------------------------
-
-    private RichTextLabel _log = null!;
-    private LineEdit _input = null!;
-
-    // -------------------------------------------------------------------------
     // Ring buffer (view state — not domain state)
     // -------------------------------------------------------------------------
 
     private readonly Queue<(string text, uint argb)> _ring = new(RingCapacity);
     private readonly StringBuilder _sb = new(4096);
-    private bool _dirty;
 
     // -------------------------------------------------------------------------
     // Channel drain state
     // -------------------------------------------------------------------------
 
     private ChannelReader<ChatLineEvent>? _chatLines;
+    private bool _dirty;
+    private LineEdit _input = null!;
+
+    // -------------------------------------------------------------------------
+    // Child controls
+    // -------------------------------------------------------------------------
+
+    private RichTextLabel _log = null!;
 
     // -------------------------------------------------------------------------
     // Send intent event (integrator wires to a use-case call)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Raised when the player submits a chat line.
-    /// Integrator must wire to <c>ctx.UseCases.SendChatAsync(channel, text)</c>.
+    ///     Raised when the player submits a chat line.
+    ///     Integrator must wire to <c>ctx.UseCases.SendChatAsync(channel, text)</c>.
     /// </summary>
     public event Action<int, string>? SendChatRequested;
 
@@ -106,10 +104,9 @@ public sealed partial class HudChatPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: positions the 448×324 window and builds the scrollback log + editbox.
-    ///
-    /// Anchor: screen_width/2 − 512, screen_height − 324 (bottom-left area).
-    /// spec: Docs/RE/specs/ui_hud_layout.md §1.2 CONFIRMED — CHAT_WINDOW_POS_X/Y INI defaults.
+    ///     Geometry pass: positions the 448×324 window and builds the scrollback log + editbox.
+    ///     Anchor: screen_width/2 − 512, screen_height − 324 (bottom-left area).
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §1.2 CONFIRMED — CHAT_WINDOW_POS_X/Y INI defaults.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -146,7 +143,7 @@ public sealed partial class HudChatPanel : Control
             BbcodeEnabled = true,
             ScrollFollowing = true,
             SelectionEnabled = false,
-            MouseFilter = MouseFilterEnum.Pass,
+            MouseFilter = MouseFilterEnum.Pass
         };
         // Manual anchor+offset (no LayoutPreset.Custom — not available in Godot 4.6.3)
         _log.AnchorLeft = 0f;
@@ -182,7 +179,7 @@ public sealed partial class HudChatPanel : Control
             Name = "InputEditBox",
             MaxLength = EditMaxLength, // spec: ui_hud_layout.md §1.2 — "Max length 100"
             PlaceholderText = "",
-            CustomMinimumSize = new Vector2(EditW, EditH),
+            CustomMinimumSize = new Vector2(EditW, EditH)
         };
         _input.AnchorLeft = 0f;
         _input.AnchorTop = 0f;
@@ -195,7 +192,7 @@ public sealed partial class HudChatPanel : Control
         _input.TextSubmitted += OnTextSubmitted;
         AddChild(_input);
 
-        GD.Print($"[HudChatPanel] Built — 448×324 output window + 330×20 input box. " +
+        GD.Print("[HudChatPanel] Built — 448×324 output window + 330×20 input box. " +
                  "Ring=1000-line, visible=12. spec: Docs/RE/specs/ui_hud_layout.md §1.2 / chat.md §6.1.");
     }
 
@@ -226,7 +223,7 @@ public sealed partial class HudChatPanel : Control
     {
         if (_chatLines is null) return;
 
-        while (_chatLines.TryRead(out ChatLineEvent? ev))
+        while (_chatLines.TryRead(out var ev))
         {
             if (ev is null) continue;
             AppendLine(ev);
@@ -246,11 +243,11 @@ public sealed partial class HudChatPanel : Control
         // channel == 100     → dropped
         // channel > 100 && != 110 → dropped (floating notice)
         // channel == 110     → dropped
-        int ch = ev.ChannelCode;
+        var ch = ev.ChannelCode;
         if (ch >= 100) return; // spec: chat.md §6.3
 
-        uint argb = ev.ColorArgb != 0 ? ev.ColorArgb : ArgbForChannel(ch);
-        string display = ev.SenderName is { Length: > 0 } name
+        var argb = ev.ColorArgb != 0 ? ev.ColorArgb : ArgbForChannel(ch);
+        var display = ev.SenderName is { Length: > 0 } name
             ? $"{name}: {ev.Text}"
             : ev.Text;
 
@@ -268,15 +265,15 @@ public sealed partial class HudChatPanel : Control
         // Render at most VisibleLines from the tail of the ring.
         // spec: chat.md §6.4 CODE-CONFIRMED — "12 visible lines"
         _sb.Clear();
-        int skip = _ring.Count > VisibleLines ? _ring.Count - VisibleLines : 0;
-        int idx = 0;
-        foreach ((string text, uint argb) in _ring)
+        var skip = _ring.Count > VisibleLines ? _ring.Count - VisibleLines : 0;
+        var idx = 0;
+        foreach (var (text, argb) in _ring)
         {
             if (idx++ < skip) continue;
             // Convert ARGB to Godot BBCode colour
-            float r = ((argb >> 16) & 0xFF) / 255f;
-            float g = ((argb >> 8) & 0xFF) / 255f;
-            float b = (argb & 0xFF) / 255f;
+            var r = ((argb >> 16) & 0xFF) / 255f;
+            var g = ((argb >> 8) & 0xFF) / 255f;
+            var b = (argb & 0xFF) / 255f;
             _sb.Append($"[color=#{(int)(r * 255):X2}{(int)(g * 255):X2}{(int)(b * 255):X2}]");
             _sb.Append(EscapeBb(text));
             _sb.Append("[/color]\n");
@@ -285,27 +282,32 @@ public sealed partial class HudChatPanel : Control
         _log.ParseBbcode(_sb.ToString());
     }
 
-    private static uint ArgbForChannel(int ch) => ch switch
+    private static uint ArgbForChannel(int ch)
     {
-        // spec: Docs/RE/specs/chat.md §3 — channel code → ARGB table (CAPTURE-UNVERIFIED values)
-        0 => ColorSay,
-        1 => ColorShout,
-        2 => ColorParty,
-        3 => ColorGuild,
-        6 => ColorEvent,
-        7 => ColorWhisper,
-        9 => ColorWhisper,
-        15 => ColorAlly,
-        _ => ColorSay,
-    };
+        return ch switch
+        {
+            // spec: Docs/RE/specs/chat.md §3 — channel code → ARGB table (CAPTURE-UNVERIFIED values)
+            0 => ColorSay,
+            1 => ColorShout,
+            2 => ColorParty,
+            3 => ColorGuild,
+            6 => ColorEvent,
+            7 => ColorWhisper,
+            9 => ColorWhisper,
+            15 => ColorAlly,
+            _ => ColorSay
+        };
+    }
 
     // Escape square brackets to prevent accidental BBCode injection.
     private static string EscapeBb(string s)
-        => s.Replace("[", "(").Replace("]", ")");
+    {
+        return s.Replace("[", "(").Replace("]", ")");
+    }
 
     private void OnTextSubmitted(string text)
     {
-        string trimmed = text.Trim();
+        var trimmed = text.Trim();
         if (trimmed.Length == 0) return;
         _input.Clear();
         // Raise send intent with channel 0 (say); channel selection is a future feature.

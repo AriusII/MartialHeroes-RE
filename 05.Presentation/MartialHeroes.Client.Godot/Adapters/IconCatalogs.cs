@@ -34,47 +34,51 @@
 // Godot Image/ImageTexture APIs indirectly via UiAssetLoader.LoadAtlas).
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
+using MartialHeroes.Assets.Parsers.Texture;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 // ReSharper disable UnusedMember.Global  (public API consumed by HUD nodes)
 
 namespace MartialHeroes.Client.Godot.Adapters;
 
 /// <summary>
-/// Singleton-style facade (created once in ClientContext) that resolves per-skill icon
-/// <see cref="AtlasTexture"/> values for the HUD hotbar and SkillWindow.
-///
-/// <para><b>Data pipeline</b></para>
-/// <list type="bullet">
-///   <item>
-///     <term>skillicon.txt</term>
-///     <description>
-///       Maps <c>(skill_id, job_id, kind_id)</c> to the 512×512 DDS sprite sheet path.
-///       Loaded via <see cref="SkillIconManifestParser"/> from <c>data/ui/skillicon/skillicon.txt</c>.
-///       spec: Docs/RE/formats/ui_manifests.md §2 — PARSER-CONFIRMED grammar; SAMPLE-VERIFIED content.
-///     </description>
-///   </item>
-///   <item>
-///     <term>.do stance table</term>
-///     <description>
-///       The per-class stance file (e.g. <c>data/script/musajung.do</c>) is a headerless array
-///       of 116-byte records. Each record carries <c>iconSrcX</c> at +0x18 and <c>iconSrcY</c>
-///       at +0x1C — the pixel origin of the 23×23 icon cell on the 512×512 sheet.
-///       Loaded via <see cref="DoStanceParser"/>.
-///       spec: Docs/RE/formats/ui_manifests.md §2.7 — CODE-CONFIRMED + SAMPLE-VERIFIED.
-///     </description>
-///   </item>
-/// </list>
-///
-/// <para><b>Icon cell model</b></para>
-/// Fixed 23×23 pixel cell at <c>(iconSrcX, iconSrcY)</c> on the 512×512 sheet.
-/// spec: Docs/RE/formats/ui_manifests.md §2.6 — CODE-CONFIRMED (three independent draw sites).
-///
-/// <para><b>Offline mode</b></para>
-/// All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
+///     Singleton-style facade (created once in ClientContext) that resolves per-skill icon
+///     <see cref="AtlasTexture" /> values for the HUD hotbar and SkillWindow.
+///     <para>
+///         <b>Data pipeline</b>
+///     </para>
+///     <list type="bullet">
+///         <item>
+///             <term>skillicon.txt</term>
+///             <description>
+///                 Maps <c>(skill_id, job_id, kind_id)</c> to the 512×512 DDS sprite sheet path.
+///                 Loaded via <see cref="SkillIconManifestParser" /> from <c>data/ui/skillicon/skillicon.txt</c>.
+///                 spec: Docs/RE/formats/ui_manifests.md §2 — PARSER-CONFIRMED grammar; SAMPLE-VERIFIED content.
+///             </description>
+///         </item>
+///         <item>
+///             <term>.do stance table</term>
+///             <description>
+///                 The per-class stance file (e.g. <c>data/script/musajung.do</c>) is a headerless array
+///                 of 116-byte records. Each record carries <c>iconSrcX</c> at +0x18 and <c>iconSrcY</c>
+///                 at +0x1C — the pixel origin of the 23×23 icon cell on the 512×512 sheet.
+///                 Loaded via <see cref="DoStanceParser" />.
+///                 spec: Docs/RE/formats/ui_manifests.md §2.7 — CODE-CONFIRMED + SAMPLE-VERIFIED.
+///             </description>
+///         </item>
+///     </list>
+///     <para>
+///         <b>Icon cell model</b>
+///     </para>
+///     Fixed 23×23 pixel cell at <c>(iconSrcX, iconSrcY)</c> on the 512×512 sheet.
+///     spec: Docs/RE/formats/ui_manifests.md §2.6 — CODE-CONFIRMED (three independent draw sites).
+///     <para>
+///         <b>Offline mode</b>
+///     </para>
+///     All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
 /// </summary>
 public sealed class IconCatalogs : IDisposable
 {
@@ -111,35 +115,57 @@ public sealed class IconCatalogs : IDisposable
 
     private readonly RealClientAssets? _assets;
 
-    // Lazy-loaded skillicon.txt manifest.
-    private SkillIconManifest? _manifest;
-    private bool _manifestAttempted;
+    // The DDS sheet path selected for the demo class+stance, resolved from _manifest.
+    private string? _activeSheetPath;
+
+    private bool _disposed;
 
     // Lazy-loaded .do stance table (Map B: slotIndex → record).
     private DoStanceTable? _doTable;
     private bool _doTableAttempted;
 
-    // The DDS sheet path selected for the demo class+stance, resolved from _manifest.
-    private string? _activeSheetPath;
+    // Lazy-loaded skillicon.txt manifest.
+    private SkillIconManifest? _manifest;
+    private bool _manifestAttempted;
 
     // Cached full-sheet Godot texture (loaded from _activeSheetPath).
     // Kept to avoid reloading it for each icon slice.
     private ImageTexture? _sheetTexture;
     private bool _sheetTextureAttempted;
 
-    private bool _disposed;
-
     // ──────────────────────────────────────────────────────────────────────────
     //  Construction
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates an IconCatalogs backed by the supplied VFS assets handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; all methods return null.
+    ///     Creates an IconCatalogs backed by the supplied VFS assets handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; all methods return null.
     /// </summary>
     public IconCatalogs(RealClientAssets? assets)
     {
         _assets = assets;
+    }
+
+    /// <summary>Number of non-zero records in the loaded .do table, or 0 when offline/unloaded.</summary>
+    public int DoRecordCount
+    {
+        get
+        {
+            var t = EnsureDoTable();
+            return t?.Records.Count ?? 0;
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    //  IDisposable
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
+        // _assets is owned by ClientContext; we do not dispose it here.
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -147,61 +173,60 @@ public sealed class IconCatalogs : IDisposable
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns a 23×23 <see cref="AtlasTexture"/> for the skill at the given
-    /// <paramref name="slotIndex"/> (Map B key from the active .do stance table).
-    ///
-    /// <para>Resolution chain:</para>
-    /// <list type="number">
-    ///   <item>Look up the .do table record by <paramref name="slotIndex"/> (Map B).</item>
-    ///   <item>Read <c>iconSrcX</c> / <c>iconSrcY</c> from the record.</item>
-    ///   <item>Build <see cref="AtlasTexture"/> with <c>Region = Rect2(srcX, srcY, 23, 23)</c>
-    ///         on the 512×512 sheet DDS.</item>
-    /// </list>
-    ///
-    /// Returns <see langword="null"/> when the VFS is offline, the slot is not in the table,
-    /// or the DDS sheet cannot be loaded.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell, data-driven UV": CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/ui_manifests.md §2.7 — "Map B keyed by slotIndex (+0x08)": CODE-CONFIRMED.
+    ///     Returns a 23×23 <see cref="AtlasTexture" /> for the skill at the given
+    ///     <paramref name="slotIndex" /> (Map B key from the active .do stance table).
+    ///     <para>Resolution chain:</para>
+    ///     <list type="number">
+    ///         <item>Look up the .do table record by <paramref name="slotIndex" /> (Map B).</item>
+    ///         <item>Read <c>iconSrcX</c> / <c>iconSrcY</c> from the record.</item>
+    ///         <item>
+    ///             Build <see cref="AtlasTexture" /> with <c>Region = Rect2(srcX, srcY, 23, 23)</c>
+    ///             on the 512×512 sheet DDS.
+    ///         </item>
+    ///     </list>
+    ///     Returns <see langword="null" /> when the VFS is offline, the slot is not in the table,
+    ///     or the DDS sheet cannot be loaded.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell, data-driven UV": CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.7 — "Map B keyed by slotIndex (+0x08)": CODE-CONFIRMED.
     /// </summary>
     /// <param name="slotIndex">
-    /// Sequential slot number (0, 1, 2, …) — the slotIndex field at record+0x08.
-    /// spec: Docs/RE/formats/ui_manifests.md §2.7 "+0x08 u32 slotIndex": CODE-CONFIRMED.
+    ///     Sequential slot number (0, 1, 2, …) — the slotIndex field at record+0x08.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.7 "+0x08 u32 slotIndex": CODE-CONFIRMED.
     /// </param>
     public AtlasTexture? GetIcon(uint slotIndex)
     {
-        DoStanceTable? table = EnsureDoTable();
+        var table = EnsureDoTable();
         if (table is null) return null;
 
-        DoStanceRecord? record = table.GetBySlotIndex(slotIndex);
+        var record = table.GetBySlotIndex(slotIndex);
         if (record is null) return null;
 
         return BuildAtlas(record.IconSrcX, record.IconSrcY);
     }
 
     /// <summary>
-    /// Returns the first N non-zero records from the active stance table in slot order,
-    /// for use by the SkillWindow demo list and HUD hotbar demo population.
-    ///
-    /// <para>Only records where both <c>iconSrcX</c> and <c>iconSrcY</c> are non-negative
-    /// are returned (records with negative icon coordinates are likely padding entries).</para>
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §2.7 — "Map B keyed by slotIndex (sequential 0,1,2…)":
-    /// CODE-CONFIRMED.
+    ///     Returns the first N non-zero records from the active stance table in slot order,
+    ///     for use by the SkillWindow demo list and HUD hotbar demo population.
+    ///     <para>
+    ///         Only records where both <c>iconSrcX</c> and <c>iconSrcY</c> are non-negative
+    ///         are returned (records with negative icon coordinates are likely padding entries).
+    ///     </para>
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.7 — "Map B keyed by slotIndex (sequential 0,1,2…)":
+    ///     CODE-CONFIRMED.
     /// </summary>
     /// <param name="maxCount">Maximum records to return.</param>
     /// <returns>
-    /// List of <c>(slotIndex, icon)</c> pairs, ordered by slotIndex ascending.
-    /// Empty when the VFS is offline.
+    ///     List of <c>(slotIndex, icon)</c> pairs, ordered by slotIndex ascending.
+    ///     Empty when the VFS is offline.
     /// </returns>
     public IReadOnlyList<(uint SlotIndex, AtlasTexture? Icon)> GetFirstSlots(int maxCount)
     {
-        DoStanceTable? table = EnsureDoTable();
+        var table = EnsureDoTable();
         if (table is null) return Array.Empty<(uint, AtlasTexture?)>();
 
         // Sort by slotIndex then take first maxCount valid icons.
         var result = new List<(uint, AtlasTexture?)>(maxCount);
-        foreach (DoStanceRecord rec in table.Records
+        foreach (var rec in table.Records
                      .OrderBy(r => r.SlotIndex))
         {
             if (result.Count >= maxCount) break;
@@ -217,24 +242,14 @@ public sealed class IconCatalogs : IDisposable
         return result;
     }
 
-    /// <summary>Number of non-zero records in the loaded .do table, or 0 when offline/unloaded.</summary>
-    public int DoRecordCount
-    {
-        get
-        {
-            DoStanceTable? t = EnsureDoTable();
-            return t?.Records.Count ?? 0;
-        }
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     //  Lazy loaders
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Loads and caches the skillicon.txt manifest on first use.
-    /// Returns null when VFS is offline or the file is absent/malformed.
-    /// spec: Docs/RE/formats/ui_manifests.md §2 — "data/ui/skillicon/skillicon.txt": PARSER-CONFIRMED.
+    ///     Loads and caches the skillicon.txt manifest on first use.
+    ///     Returns null when VFS is offline or the file is absent/malformed.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2 — "data/ui/skillicon/skillicon.txt": PARSER-CONFIRMED.
     /// </summary>
     private SkillIconManifest? EnsureManifest()
     {
@@ -245,7 +260,7 @@ public sealed class IconCatalogs : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(SkillIconTxtPath);
+            var raw = _assets.GetRaw(SkillIconTxtPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[IconCatalogs] data/ui/skillicon/skillicon.txt absent from VFS — " +
@@ -258,7 +273,7 @@ public sealed class IconCatalogs : IDisposable
             // Resolve the active sheet path for the demo class+stance.
             // spec: Docs/RE/formats/ui_manifests.md §2.3 — lookup key is (skill_id, job_id, kind_id):
             //       PARSER-CONFIRMED. For demo we use skill_id = DemoClassStanceRef.
-            SkillIconEntry? entry = _manifest.GetEntry(DemoClassStanceRef, DemoJobId, DemoKindId);
+            var entry = _manifest.GetEntry(DemoClassStanceRef, DemoJobId, DemoKindId);
             _activeSheetPath = entry?.IconSheetPath;
 
             GD.Print($"[IconCatalogs] skillicon.txt loaded: {_manifest.Count} entries. " +
@@ -275,10 +290,10 @@ public sealed class IconCatalogs : IDisposable
     }
 
     /// <summary>
-    /// Loads and caches the Musa-jung .do stance table on first use.
-    /// Returns null when VFS is offline or the file is absent/malformed.
-    /// spec: Docs/RE/formats/ui_manifests.md §2.7 — "data/script/musajung.do": SAMPLE-VERIFIED presence.
-    ///       "record_count = file_size / 116; all-zero records skipped": SAMPLE-VERIFIED.
+    ///     Loads and caches the Musa-jung .do stance table on first use.
+    ///     Returns null when VFS is offline or the file is absent/malformed.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.7 — "data/script/musajung.do": SAMPLE-VERIFIED presence.
+    ///     "record_count = file_size / 116; all-zero records skipped": SAMPLE-VERIFIED.
     /// </summary>
     private DoStanceTable? EnsureDoTable()
     {
@@ -289,7 +304,7 @@ public sealed class IconCatalogs : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(DemoDoPath);
+            var raw = _assets.GetRaw(DemoDoPath);
             if (raw.IsEmpty)
             {
                 GD.Print($"[IconCatalogs] {DemoDoPath} absent from VFS — " +
@@ -315,9 +330,9 @@ public sealed class IconCatalogs : IDisposable
     }
 
     /// <summary>
-    /// Loads and caches the full 512×512 DDS sheet as a Godot ImageTexture.
-    /// Returns null when VFS is offline, the sheet path is unresolved, or the DDS cannot be loaded.
-    /// spec: Docs/RE/formats/ui_manifests.md §2.4 — "512×512 DDS, DXT2/3": SAMPLE-VERIFIED.
+    ///     Loads and caches the full 512×512 DDS sheet as a Godot ImageTexture.
+    ///     Returns null when VFS is offline, the sheet path is unresolved, or the DDS cannot be loaded.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.4 — "512×512 DDS, DXT2/3": SAMPLE-VERIFIED.
     /// </summary>
     private ImageTexture? EnsureSheetTexture()
     {
@@ -336,14 +351,10 @@ public sealed class IconCatalogs : IDisposable
             // spec: Docs/RE/formats/ui_manifests.md §7 — do.dds TGA caveat handled by LoadTexture.
             _sheetTexture = _assets.LoadTexture(_activeSheetPath);
             if (_sheetTexture is not null)
-            {
                 GD.Print($"[IconCatalogs] Icon sheet loaded: '{_activeSheetPath}' (512×512 SAMPLE-VERIFIED). " +
                          $"spec: Docs/RE/formats/ui_manifests.md §2.4.");
-            }
             else
-            {
                 GD.Print($"[IconCatalogs] Icon sheet '{_activeSheetPath}' loaded as null (format unsupported).");
-            }
         }
         catch (Exception ex)
         {
@@ -359,20 +370,18 @@ public sealed class IconCatalogs : IDisposable
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Constructs a 23×23 <see cref="AtlasTexture"/> at the given pixel origin on the active sheet.
-    ///
-    /// Returns null when the sheet texture is unavailable or the origin is out of the 512×512 bounds.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §2.6 — "Source rect: (iconSrcX, iconSrcY, 23, 23)
-    ///       in atlas pixels": CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/ui_manifests.md §2.4 — "sheet is 512×512": SAMPLE-VERIFIED.
+    ///     Constructs a 23×23 <see cref="AtlasTexture" /> at the given pixel origin on the active sheet.
+    ///     Returns null when the sheet texture is unavailable or the origin is out of the 512×512 bounds.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.6 — "Source rect: (iconSrcX, iconSrcY, 23, 23)
+    ///     in atlas pixels": CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.4 — "sheet is 512×512": SAMPLE-VERIFIED.
     /// </summary>
     private AtlasTexture? BuildAtlas(short iconSrcX, short iconSrcY)
     {
         // Guard: non-negative coordinates only.
         if (iconSrcX < 0 || iconSrcY < 0) return null;
 
-        ImageTexture? sheet = EnsureSheetTexture();
+        var sheet = EnsureSheetTexture();
         if (sheet is null) return null;
 
         // Guard: stay within the 512×512 sheet boundary.
@@ -384,20 +393,8 @@ public sealed class IconCatalogs : IDisposable
             Atlas = sheet,
             Region = new Rect2(iconSrcX, iconSrcY, IconCellW, IconCellH),
             // spec: Docs/RE/formats/ui_manifests.md §2.6 — "23×23 pixel cell": CODE-CONFIRMED.
-            FilterClip = true,
+            FilterClip = true
         };
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    //  IDisposable
-    // ──────────────────────────────────────────────────────────────────────────
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
-        // _assets is owned by ClientContext; we do not dispose it here.
     }
 }
 
@@ -406,32 +403,35 @@ public sealed class IconCatalogs : IDisposable
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Singleton-style facade (created once in ClientContext) that resolves per-item icon
-/// <see cref="ImageTexture"/> values for the InventoryWindow.
-///
-/// <para><b>Data pipeline</b></para>
-/// <list type="bullet">
-///   <item>
-///     <term>texturelist.txt</term>
-///     <description>
-///       Maps <c>tex_id</c> (leading decimal digits of the filename) to a VFS path of the
-///       form <c>data/item/texture/&lt;filename&gt;</c>. Loaded via
-///       <see cref="TextureListParser"/> from <c>data/item/texturelist.txt</c>.
-///       spec: Docs/RE/formats/ui_manifests.md §10 — flat newline-delimited list: CODE-CONFIRMED.
-///     </description>
-///   </item>
-/// </list>
-///
-/// <para><b>Icon draw model</b></para>
-/// Each item icon is a <b>whole-texture blit</b> — the entire DDS is used; there is no
-/// atlas sub-rect. The native DDS dimensions are used (width/height not forced).
-/// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect":
-/// CODE-CONFIRMED.
-/// spec: Docs/RE/formats/ui_manifests.md §10.4 — "loader passes width/height as 0 →
-/// native DDS dimensions": CODE-CONFIRMED.
-///
-/// <para><b>Offline mode</b></para>
-/// All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
+///     Singleton-style facade (created once in ClientContext) that resolves per-item icon
+///     <see cref="ImageTexture" /> values for the InventoryWindow.
+///     <para>
+///         <b>Data pipeline</b>
+///     </para>
+///     <list type="bullet">
+///         <item>
+///             <term>texturelist.txt</term>
+///             <description>
+///                 Maps <c>tex_id</c> (leading decimal digits of the filename) to a VFS path of the
+///                 form <c>data/item/texture/&lt;filename&gt;</c>. Loaded via
+///                 <see cref="TextureListParser" /> from <c>data/item/texturelist.txt</c>.
+///                 spec: Docs/RE/formats/ui_manifests.md §10 — flat newline-delimited list: CODE-CONFIRMED.
+///             </description>
+///         </item>
+///     </list>
+///     <para>
+///         <b>Icon draw model</b>
+///     </para>
+///     Each item icon is a <b>whole-texture blit</b> — the entire DDS is used; there is no
+///     atlas sub-rect. The native DDS dimensions are used (width/height not forced).
+///     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect":
+///     CODE-CONFIRMED.
+///     spec: Docs/RE/formats/ui_manifests.md §10.4 — "loader passes width/height as 0 →
+///     native DDS dimensions": CODE-CONFIRMED.
+///     <para>
+///         <b>Offline mode</b>
+///     </para>
+///     All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
 /// </summary>
 public sealed class ItemIconCatalog : IDisposable
 {
@@ -449,23 +449,23 @@ public sealed class ItemIconCatalog : IDisposable
 
     private readonly RealClientAssets? _assets;
 
-    // Lazy-loaded texturelist.txt manifest.
-    private TextureListManifest? _manifest;
-    private bool _manifestAttempted;
-
     // Per-tex_id texture cache. Key = tex_id, Value = loaded texture (or null when load failed).
     // Null values are cached to avoid retrying failed loads on every access.
     private readonly Dictionary<int, ImageTexture?> _textureCache = new();
 
     private bool _disposed;
 
+    // Lazy-loaded texturelist.txt manifest.
+    private TextureListManifest? _manifest;
+    private bool _manifestAttempted;
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Construction
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates an ItemIconCatalog backed by the supplied VFS assets handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; all methods return null.
+    ///     Creates an ItemIconCatalog backed by the supplied VFS assets handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; all methods return null.
     /// </summary>
     public ItemIconCatalog(RealClientAssets? assets)
     {
@@ -481,46 +481,58 @@ public sealed class ItemIconCatalog : IDisposable
     {
         get
         {
-            TextureListManifest? m = EnsureManifest();
+            var m = EnsureManifest();
             return m?.Count ?? 0;
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  IDisposable
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _textureCache.Clear();
+        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
+        // _assets is owned by ClientContext; we do not dispose it here.
+    }
+
     /// <summary>
-    /// Returns an <see cref="ImageTexture"/> for the item icon identified by <paramref name="texId"/>.
-    ///
-    /// <para>Resolution chain:</para>
-    /// <list type="number">
-    ///   <item>Look up the VFS path in the texturelist.txt manifest by <paramref name="texId"/>.</item>
-    ///   <item>Load the DDS from the VFS via <see cref="RealClientAssets.LoadTexture"/>
-    ///         (handles TGA-mislabelled-as-dds via magic-byte probe).</item>
-    ///   <item>Cache the result (including null) so the DDS is loaded at most once.</item>
-    /// </list>
-    ///
-    /// Returns <see langword="null"/> when the VFS is offline, the tex_id is absent from the
-    /// manifest, or the DDS cannot be loaded.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/ui_manifests.md §7 — DDS/TGA format handled by LoadTexture: CONFIRMED.
+    ///     Returns an <see cref="ImageTexture" /> for the item icon identified by <paramref name="texId" />.
+    ///     <para>Resolution chain:</para>
+    ///     <list type="number">
+    ///         <item>Look up the VFS path in the texturelist.txt manifest by <paramref name="texId" />.</item>
+    ///         <item>
+    ///             Load the DDS from the VFS via <see cref="RealClientAssets.LoadTexture" />
+    ///             (handles TGA-mislabelled-as-dds via magic-byte probe).
+    ///         </item>
+    ///         <item>Cache the result (including null) so the DDS is loaded at most once.</item>
+    ///     </list>
+    ///     Returns <see langword="null" /> when the VFS is offline, the tex_id is absent from the
+    ///     manifest, or the DDS cannot be loaded.
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/ui_manifests.md §7 — DDS/TGA format handled by LoadTexture: CONFIRMED.
     /// </summary>
     /// <param name="texId">
-    /// Numeric texture ID (leading decimal digits of the texturelist.txt filename).
-    /// spec: Docs/RE/formats/ui_manifests.md §10.3 step 4 — "tex_id = atol(name)": CODE-CONFIRMED.
+    ///     Numeric texture ID (leading decimal digits of the texturelist.txt filename).
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.3 step 4 — "tex_id = atol(name)": CODE-CONFIRMED.
     /// </param>
     public ImageTexture? GetIcon(int texId)
     {
         // Return cached result (even null — means we tried and failed).
-        if (_textureCache.TryGetValue(texId, out ImageTexture? cached))
+        if (_textureCache.TryGetValue(texId, out var cached))
             return cached;
 
-        TextureListManifest? manifest = EnsureManifest();
+        var manifest = EnsureManifest();
         if (manifest is null)
         {
             _textureCache[texId] = null;
             return null;
         }
 
-        TextureListEntry? entry = manifest.GetById(texId);
+        var entry = manifest.GetById(texId);
         if (entry is null)
         {
             _textureCache[texId] = null;
@@ -531,7 +543,6 @@ public sealed class ItemIconCatalog : IDisposable
         // spec: Docs/RE/formats/ui_manifests.md §7 — do.dds TGA caveat handled by LoadTexture.
         ImageTexture? tex = null;
         if (_assets is not null)
-        {
             try
             {
                 tex = _assets.LoadTexture(entry.VfsPath);
@@ -540,41 +551,39 @@ public sealed class ItemIconCatalog : IDisposable
             {
                 GD.PrintErr($"[ItemIconCatalog] LoadTexture('{entry.VfsPath}') failed: {ex.Message}");
             }
-        }
 
         _textureCache[texId] = tex;
         return tex;
     }
 
     /// <summary>
-    /// Returns the first <paramref name="maxCount"/> item textures from the manifest in file
-    /// order, for use by the InventoryWindow demo grid.
-    ///
-    /// <para>Only entries where the DDS loads successfully are returned (null entries are skipped
-    /// in the result list, but they are still counted against <paramref name="maxCount"/> to avoid
-    /// an infinite scan over a partially-offline VFS).</para>
-    ///
-    /// Returns an empty list when the VFS is offline or the manifest is absent.
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §10.2 — "1,335 entries, 100% present on real VFS":
-    /// SAMPLE-VERIFIED (B3-item-icons lane brief).
-    /// spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
+    ///     Returns the first <paramref name="maxCount" /> item textures from the manifest in file
+    ///     order, for use by the InventoryWindow demo grid.
+    ///     <para>
+    ///         Only entries where the DDS loads successfully are returned (null entries are skipped
+    ///         in the result list, but they are still counted against <paramref name="maxCount" /> to avoid
+    ///         an infinite scan over a partially-offline VFS).
+    ///     </para>
+    ///     Returns an empty list when the VFS is offline or the manifest is absent.
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.2 — "1,335 entries, 100% present on real VFS":
+    ///     SAMPLE-VERIFIED (B3-item-icons lane brief).
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
     /// </summary>
     /// <param name="maxCount">Maximum entries to return.</param>
     /// <returns>
-    /// List of <c>(texId, icon)</c> pairs from the manifest in file order, capped at
-    /// <paramref name="maxCount"/>. Icon may be null when the DDS failed to load.
+    ///     List of <c>(texId, icon)</c> pairs from the manifest in file order, capped at
+    ///     <paramref name="maxCount" />. Icon may be null when the DDS failed to load.
     /// </returns>
     public IReadOnlyList<(int TexId, ImageTexture? Icon)> GetDemoIcons(int maxCount)
     {
-        TextureListManifest? manifest = EnsureManifest();
+        var manifest = EnsureManifest();
         if (manifest is null) return Array.Empty<(int, ImageTexture?)>();
 
         var result = new List<(int, ImageTexture?)>(maxCount);
-        foreach (TextureListEntry entry in manifest.Entries)
+        foreach (var entry in manifest.Entries)
         {
             if (result.Count >= maxCount) break;
-            ImageTexture? tex = GetIcon(entry.TexId);
+            var tex = GetIcon(entry.TexId);
             result.Add((entry.TexId, tex));
         }
 
@@ -586,10 +595,10 @@ public sealed class ItemIconCatalog : IDisposable
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Loads and caches the texturelist.txt manifest on first use.
-    /// Returns null when VFS is offline or the file is absent/malformed.
-    /// spec: Docs/RE/formats/ui_manifests.md §10.2 — flat newline-delimited list: CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/ui_manifests.md §10.3 — per-line parsing rules: CODE-CONFIRMED.
+    ///     Loads and caches the texturelist.txt manifest on first use.
+    ///     Returns null when VFS is offline or the file is absent/malformed.
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.2 — flat newline-delimited list: CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/ui_manifests.md §10.3 — per-line parsing rules: CODE-CONFIRMED.
     /// </summary>
     private TextureListManifest? EnsureManifest()
     {
@@ -600,7 +609,7 @@ public sealed class ItemIconCatalog : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(TextureListPath);
+            var raw = _assets.GetRaw(TextureListPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[ItemIconCatalog] data/item/texturelist.txt absent from VFS — " +
@@ -619,18 +628,5 @@ public sealed class ItemIconCatalog : IDisposable
         }
 
         return _manifest;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  IDisposable
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _textureCache.Clear();
-        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
-        // _assets is owned by ClientContext; we do not dispose it here.
     }
 }

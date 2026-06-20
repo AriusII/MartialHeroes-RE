@@ -35,23 +35,24 @@
 
 using System.Threading.Channels;
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// Top-right corner radar minimap. Class MapPanel (RTTI-confirmed).
-///
-/// <para>PASSIVE: assembles a 3×3 BMP-tile mosaic from
-/// <c>data/effect/map/d&lt;area3&gt;x&lt;X&gt;z&lt;Z&gt;.bmp</c> at area-load time and renders it as
-/// the radar background. Player blip uses uitex glyph key 52 (TODO world-campaign for live position).
-/// Zero game logic.</para>
-///
-/// <para>The old <c>data/ui/map/map%d.dds</c> path is INCORRECT — that belongs to a separate vestigial
-/// class, and only <c>map1.dds</c> exists in the VFS. This panel renders the BMP-tile mosaic.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.4 / §5.4a CODE-CONFIRMED + sample-verified.
+///     Top-right corner radar minimap. Class MapPanel (RTTI-confirmed).
+///     <para>
+///         PASSIVE: assembles a 3×3 BMP-tile mosaic from
+///         <c>data/effect/map/d&lt;area3&gt;x&lt;X&gt;z&lt;Z&gt;.bmp</c> at area-load time and renders it as
+///         the radar background. Player blip uses uitex glyph key 52 (TODO world-campaign for live position).
+///         Zero game logic.
+///     </para>
+///     <para>
+///         The old <c>data/ui/map/map%d.dds</c> path is INCORRECT — that belongs to a separate vestigial
+///         class, and only <c>map1.dds</c> exists in the VFS. This panel renders the BMP-tile mosaic.
+///     </para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.4 / §5.4a CODE-CONFIRMED + sample-verified.
 /// </summary>
 public sealed partial class HudMinimapPanel : Control
 {
@@ -89,36 +90,35 @@ public sealed partial class HudMinimapPanel : Control
 
     // 3×3 grid of TextureRect tiles (row-major, [row][col])
     private readonly TextureRect[,] _mosaicTiles = new TextureRect[MosaicDim, MosaicDim];
-    private Control? _playerBlip;
-    private bool _collapsed;
-
-    // Mosaic viewport container (clips tiles to the 133×133 body)
-    private Control? _mosaicContainer;
 
     // -------------------------------------------------------------------------
     // Services
     // -------------------------------------------------------------------------
 
     private HudAtlasLibrary? _atlas;
-    private ChannelReader<ZoneChangedEvent>? _zoneChanges;
+    private bool _collapsed;
     private int _currentAreaId = 2; // default area 2 (town) matching the world default
+
+    // Mosaic viewport container (clips tiles to the 133×133 body)
+    private Control? _mosaicContainer;
+    private Control? _playerBlip;
 
     // Current player tile origin (centre of the 3×3 window).
     // spec: ui_hud_layout.md §5.4a — player-tile updated at runtime; XZ from ActorMovedEvent.
     // TODO(world-campaign): update _playerTileX / _playerTileZ from ActorMovedEvent.
     private int _playerTileX;
     private int _playerTileZ;
+    private ChannelReader<ZoneChangedEvent>? _zoneChanges;
 
     // -------------------------------------------------------------------------
     // Build (geometry pass)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: positions the minimap at top-right, screen_width−135, Y=0, and builds
-    /// the 3×3 BMP-tile mosaic container.
-    ///
-    /// spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.4a — BMP-tile mosaic source.
+    ///     Geometry pass: positions the minimap at top-right, screen_width−135, Y=0, and builds
+    ///     the 3×3 BMP-tile mosaic container.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §3.3 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.4a — BMP-tile mosaic source.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -149,12 +149,12 @@ public sealed partial class HudMinimapPanel : Control
 
         // Mosaic container — clips tile grid to the 133×133 inner body.
         // spec: ui_hud_layout.md §5.4 — body 133×133
-        float bodyInset = (MinimapW - BodyInnerSide) / 2f;
+        var bodyInset = (MinimapW - BodyInnerSide) / 2f;
         _mosaicContainer = new Control
         {
             Name = "MosaicContainer",
             ClipContents = true,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _mosaicContainer.AnchorLeft = 0f;
         _mosaicContainer.AnchorTop = 0f;
@@ -171,23 +171,21 @@ public sealed partial class HudMinimapPanel : Control
         // 3 × 128 = 384 px of world tile → scaled to 133 px (port choice — display-only).
         // In the real engine each tile is full-res and the radar pans+clips them.
         // spec: ui_hud_layout.md §5.4a — "tiles at the radar edge are clipped to the radar viewport"
-        float scaledTile = BodyInnerSide / MosaicDim; // 133/3 ≈ 44 px per tile at the display scale
-        for (int row = 0; row < MosaicDim; row++)
+        var scaledTile = BodyInnerSide / MosaicDim; // 133/3 ≈ 44 px per tile at the display scale
+        for (var row = 0; row < MosaicDim; row++)
+        for (var col = 0; col < MosaicDim; col++)
         {
-            for (int col = 0; col < MosaicDim; col++)
+            var tile = new TextureRect
             {
-                var tile = new TextureRect
-                {
-                    Name = $"Tile{row}_{col}",
-                    StretchMode = TextureRect.StretchModeEnum.Scale,
-                    Position = new Vector2(col * scaledTile, row * scaledTile),
-                    Size = new Vector2(scaledTile, scaledTile),
-                    MouseFilter = MouseFilterEnum.Ignore,
-                    // Texture = null until LoadMosaic populates it
-                };
-                _mosaicContainer.AddChild(tile);
-                _mosaicTiles[row, col] = tile;
-            }
+                Name = $"Tile{row}_{col}",
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                Position = new Vector2(col * scaledTile, row * scaledTile),
+                Size = new Vector2(scaledTile, scaledTile),
+                MouseFilter = MouseFilterEnum.Ignore
+                // Texture = null until LoadMosaic populates it
+            };
+            _mosaicContainer.AddChild(tile);
+            _mosaicTiles[row, col] = tile;
         }
 
         // Player blip — uitex glyph key 52 (self-marker).
@@ -202,7 +200,7 @@ public sealed partial class HudMinimapPanel : Control
             Position = new Vector2(
                 bodyInset + BodyInnerSide / 2f - 2.5f,
                 bodyInset + BodyInnerSide / 2f - 2.5f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_playerBlip);
 
@@ -213,7 +211,7 @@ public sealed partial class HudMinimapPanel : Control
             Name = "CollapseBtn",
             Text = "▲",
             CustomMinimumSize = new Vector2(MinimapW, 16f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         collapseBtn.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         collapseBtn.OffsetBottom = CollapsedH;
@@ -224,7 +222,7 @@ public sealed partial class HudMinimapPanel : Control
         // spec: ui_hud_layout.md §5.4a — "tiles loaded lazily as the player moves"
         LoadMosaic(_currentAreaId, _playerTileX, _playerTileZ);
 
-        GD.Print($"[HudMinimapPanel] Built — top-right corner, 135×195, body 133×133, BMP-tile mosaic. " +
+        GD.Print("[HudMinimapPanel] Built — top-right corner, 135×195, body 133×133, BMP-tile mosaic. " +
                  "spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.4 / §5.4a CODE-CONFIRMED.");
         GD.Print("[HudMinimapPanel] BMP-tile pattern: data/effect/map/d<area3>x<X>z<Z>.bmp. " +
                  "NOTE: map%d.dds is NOT used here (vestigial class; only map1.dds exists). " +
@@ -246,14 +244,13 @@ public sealed partial class HudMinimapPanel : Control
     {
         if (_zoneChanges is null) return;
 
-        while (_zoneChanges.TryRead(out ZoneChangedEvent? ev))
-        {
-            if (ev is null) continue;
-            // ZoneChangedEvent carries zone type (Safe/OpenPvp/Closed), not area id directly.
-            // TODO(world-campaign): subscribe to an area-change event that carries the numeric
-            // area id, then call LoadMosaic(newAreaId, playerTileX, playerTileZ).
-            // spec: ui_hud_layout.md §5.4a — "area3 = zero-padded 3-digit current-area id"
-        }
+        while (_zoneChanges.TryRead(out var ev))
+            if (ev is null)
+                continue;
+        // ZoneChangedEvent carries zone type (Safe/OpenPvp/Closed), not area id directly.
+        // TODO(world-campaign): subscribe to an area-change event that carries the numeric
+        // area id, then call LoadMosaic(newAreaId, playerTileX, playerTileZ).
+        // spec: ui_hud_layout.md §5.4a — "area3 = zero-padded 3-digit current-area id"
     }
 
     // -------------------------------------------------------------------------
@@ -261,54 +258,48 @@ public sealed partial class HudMinimapPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Loads the 3×3 BMP-tile ring centred at <paramref name="tileX"/>, <paramref name="tileZ"/>
-    /// in area <paramref name="areaId"/> and populates the mosaic TextureRect grid.
-    ///
-    /// <para>Missing tiles are skipped (graceful-null; no crash).</para>
-    ///
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.4a — "3×3 ring of 128-px tiles; missing tiles skipped".
+    ///     Loads the 3×3 BMP-tile ring centred at <paramref name="tileX" />, <paramref name="tileZ" />
+    ///     in area <paramref name="areaId" /> and populates the mosaic TextureRect grid.
+    ///     <para>Missing tiles are skipped (graceful-null; no crash).</para>
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.4a — "3×3 ring of 128-px tiles; missing tiles skipped".
     /// </summary>
     private void LoadMosaic(int areaId, int tileX, int tileZ)
     {
         if (_atlas is null || _mosaicContainer is null) return;
 
-        bool anyLoaded = false;
+        var anyLoaded = false;
 
-        for (int row = 0; row < MosaicDim; row++)
+        for (var row = 0; row < MosaicDim; row++)
+        for (var col = 0; col < MosaicDim; col++)
         {
-            for (int col = 0; col < MosaicDim; col++)
+            var tx = tileX + (col - MosaicRadius);
+            var tz = tileZ + (row - MosaicRadius);
+
+            // spec: ui_hud_layout.md §5.4a — "d<area3>x<X>z<Z>.bmp"
+            var path = string.Format(BmpTilePattern, areaId, tx, tz);
+
+            var tex = _atlas.GetByPath(path);
+            _mosaicTiles[row, col].Texture = tex; // null-safe; renders black when null
+
+            if (tex is not null)
             {
-                int tx = tileX + (col - MosaicRadius);
-                int tz = tileZ + (row - MosaicRadius);
-
-                // spec: ui_hud_layout.md §5.4a — "d<area3>x<X>z<Z>.bmp"
-                string path = string.Format(BmpTilePattern, areaId, tx, tz);
-
-                Texture2D? tex = _atlas.GetByPath(path);
-                _mosaicTiles[row, col].Texture = tex; // null-safe; renders black when null
-
-                if (tex is not null)
-                {
-                    anyLoaded = true;
-                    GD.Print($"[HudMinimapPanel] Tile loaded: {path}. " +
-                             "spec: Docs/RE/specs/ui_hud_layout.md §5.4a.");
-                }
-                else
-                {
-                    // Missing tile is expected (area edges, VFS offline): skip silently.
-                    // spec: ui_hud_layout.md §5.4a — "tiles at radar edge clipped"
-                    GD.PrintErr($"[HudMinimapPanel] BMP tile '{path}' unavailable (VFS offline or edge tile). " +
-                                "spec: Docs/RE/specs/ui_hud_layout.md §5.4a — graceful-null.");
-                }
+                anyLoaded = true;
+                GD.Print($"[HudMinimapPanel] Tile loaded: {path}. " +
+                         "spec: Docs/RE/specs/ui_hud_layout.md §5.4a.");
+            }
+            else
+            {
+                // Missing tile is expected (area edges, VFS offline): skip silently.
+                // spec: ui_hud_layout.md §5.4a — "tiles at radar edge clipped"
+                GD.PrintErr($"[HudMinimapPanel] BMP tile '{path}' unavailable (VFS offline or edge tile). " +
+                            "spec: Docs/RE/specs/ui_hud_layout.md §5.4a — graceful-null.");
             }
         }
 
         if (!anyLoaded)
-        {
             GD.PrintErr($"[HudMinimapPanel] No BMP tiles loaded for area {areaId} tile ({tileX},{tileZ}). " +
                         "VFS offline or area not yet reached. " +
                         "spec: Docs/RE/specs/ui_hud_layout.md §5.4a.");
-        }
     }
 
     // -------------------------------------------------------------------------

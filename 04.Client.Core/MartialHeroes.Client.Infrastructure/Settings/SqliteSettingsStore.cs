@@ -4,16 +4,16 @@ using Microsoft.Data.Sqlite;
 namespace MartialHeroes.Client.Infrastructure.Settings;
 
 /// <summary>
-/// SQLite-backed implementation of <see cref="ISettingsStore"/>.
-/// <para>
-/// Schema versioning uses SQLite's built-in <c>PRAGMA user_version</c>.
-/// All SQL uses parameterized queries — no value interpolation into SQL text.
-/// </para>
+///     SQLite-backed implementation of <see cref="ISettingsStore" />.
+///     <para>
+///         Schema versioning uses SQLite's built-in <c>PRAGMA user_version</c>.
+///         All SQL uses parameterized queries — no value interpolation into SQL text.
+///     </para>
 /// </summary>
 /// <remarks>
-/// Pass <c>Data Source=:memory:</c> (or a shared-cache in-memory URI such as
-/// <c>Data Source=file:settings_test?mode=memory&amp;cache=shared</c>) for
-/// unit tests so no real file is created.
+///     Pass <c>Data Source=:memory:</c> (or a shared-cache in-memory URI such as
+///     <c>Data Source=file:settings_test?mode=memory&amp;cache=shared</c>) for
+///     unit tests so no real file is created.
 /// </remarks>
 public sealed class SqliteSettingsStore : ISettingsStore
 {
@@ -26,9 +26,9 @@ public sealed class SqliteSettingsStore : ISettingsStore
     private bool _initialised;
 
     /// <param name="connectionString">
-    /// A <c>Microsoft.Data.Sqlite</c> connection string, e.g.
-    /// <c>"Data Source=/path/to/settings.db"</c> or
-    /// <c>"Data Source=:memory:"</c> for tests.
+    ///     A <c>Microsoft.Data.Sqlite</c> connection string, e.g.
+    ///     <c>"Data Source=/path/to/settings.db"</c> or
+    ///     <c>"Data Source=:memory:"</c> for tests.
     /// </param>
     public SqliteSettingsStore(string connectionString)
     {
@@ -38,11 +38,14 @@ public sealed class SqliteSettingsStore : ISettingsStore
 
     // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
-    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    public ValueTask DisposeAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
 
     // ── ISettingsStore ────────────────────────────────────────────────────────
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -58,7 +61,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<ClientSettingsDto> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -94,7 +97,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
                 LastServerPort = ParseNullableInt(values, "last_server_port"),
                 WindowX = ParseNullableInt(values, "window_x"),
                 WindowY = ParseNullableInt(values, "window_y"),
-                Language = values.GetValueOrDefault("language"),
+                Language = values.GetValueOrDefault("language")
             };
         }
         catch (SqliteException ex)
@@ -103,7 +106,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task SaveSettingsAsync(ClientSettingsDto settings, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -159,7 +162,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task<IReadOnlyList<KeybindDto>> LoadKeybindsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -173,9 +176,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
             cmd.CommandText = "SELECT action_name, key_code FROM keybinds ORDER BY action_name;";
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
-            {
                 result.Add(new KeybindDto(reader.GetString(0), reader.GetString(1)));
-            }
 
             return result;
         }
@@ -185,7 +186,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task SaveKeybindAsync(string actionName, string keyCode, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -210,7 +211,7 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public async Task ReplaceAllKeybindsAsync(IEnumerable<KeybindDto> keybinds,
         CancellationToken cancellationToken = default)
     {
@@ -255,7 +256,10 @@ public sealed class SqliteSettingsStore : ISettingsStore
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private SqliteConnection OpenConnection() => new(_connectionString);
+    private SqliteConnection OpenConnection()
+    {
+        return new SqliteConnection(_connectionString);
+    }
 
     private void EnsureInitialised()
     {
@@ -266,8 +270,8 @@ public sealed class SqliteSettingsStore : ISettingsStore
     }
 
     /// <summary>
-    /// Creates the schema idempotently and applies any outstanding migrations.
-    /// Migration history is tracked via SQLite <c>PRAGMA user_version</c>.
+    ///     Creates the schema idempotently and applies any outstanding migrations.
+    ///     Migration history is tracked via SQLite <c>PRAGMA user_version</c>.
     /// </summary>
     private static async Task ApplyMigrationsAsync(SqliteConnection conn, CancellationToken ct)
     {
@@ -321,8 +325,12 @@ public sealed class SqliteSettingsStore : ISettingsStore
     }
 
     private static int? ParseNullableInt(Dictionary<string, string> d, string key)
-        => d.TryGetValue(key, out var raw) && int.TryParse(raw, out var v) ? v : null;
+    {
+        return d.TryGetValue(key, out var raw) && int.TryParse(raw, out var v) ? v : null;
+    }
 
     private static bool? ParseNullableBool(Dictionary<string, string> d, string key)
-        => d.TryGetValue(key, out var raw) ? raw == "1" : null;
+    {
+        return d.TryGetValue(key, out var raw) ? raw == "1" : null;
+    }
 }

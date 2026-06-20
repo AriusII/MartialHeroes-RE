@@ -1,18 +1,18 @@
 namespace MartialHeroes.Client.Infrastructure.Exceptions;
 
 /// <summary>
-/// Base exception for all infrastructure layer failures.
-/// Wraps raw SQLite / IO exceptions so the Application layer is not coupled
-/// to <c>Microsoft.Data.Sqlite</c> failure modes.
+///     Base exception for all infrastructure layer failures.
+///     Wraps raw SQLite / IO exceptions so the Application layer is not coupled
+///     to <c>Microsoft.Data.Sqlite</c> failure modes.
 /// </summary>
 public class InfrastructureException : Exception
 {
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public InfrastructureException(string message) : base(message)
     {
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public InfrastructureException(string message, Exception innerException)
         : base(message, innerException)
     {
@@ -20,16 +20,16 @@ public class InfrastructureException : Exception
 }
 
 /// <summary>
-/// Thrown when the local SQLite store fails to initialize, read, or write.
+///     Thrown when the local SQLite store fails to initialize, read, or write.
 /// </summary>
 public sealed class LocalStoreException : InfrastructureException
 {
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public LocalStoreException(string message) : base(message)
     {
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public LocalStoreException(string message, Exception innerException)
         : base(message, innerException)
     {
@@ -37,16 +37,16 @@ public sealed class LocalStoreException : InfrastructureException
 }
 
 /// <summary>
-/// Thrown when a macro file cannot be read from disk.
+///     Thrown when a macro file cannot be read from disk.
 /// </summary>
 public sealed class MacroFileException : InfrastructureException
 {
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public MacroFileException(string message) : base(message)
     {
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public MacroFileException(string message, Exception innerException)
         : base(message, innerException)
     {
@@ -54,17 +54,17 @@ public sealed class MacroFileException : InfrastructureException
 }
 
 /// <summary>
-/// Thrown when a Lua config script cannot be read or parsed.
-/// spec: Docs/RE/specs/lua-config.md §2.1
+///     Thrown when a Lua config script cannot be read or parsed.
+///     spec: Docs/RE/specs/lua-config.md §2.1
 /// </summary>
 public sealed class LuaConfigException : InfrastructureException
 {
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public LuaConfigException(string message) : base(message)
     {
     }
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public LuaConfigException(string message, Exception innerException)
         : base(message, innerException)
     {

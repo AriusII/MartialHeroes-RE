@@ -1,5 +1,5 @@
 ---
-verification: confirmed          # control-flow + operand facts from static IDA (no debugger)
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))   # control-flow + operand facts from static IDA (no debugger); CYCLE 7 re-confirmed the dormant-worker fields (+12 keep_running, +20/+24 queue head/count, +28 load Event, +32 pool=34) and that the worker apparatus is present-but-dormant
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]           # heap layout, not a file format → no vfs-sample tier applies here
@@ -81,6 +81,27 @@ dissolves the old "Open item" reconciliation — see **Resolved item** below.)
 **Notes:**
 - The ctor also zeroes a small block around `+172`/`+176`/`+180`; only the zero-init is observed, not
   a write-site or role for those words (see TerrainManager note on `+176`/`+180`).
+
+> **Dormant-worker apparatus — present but never live (CYCLE 7 re-confirmation).** These five fields
+> together form a complete async-streamer apparatus that is **wired up structurally but left dormant**
+> in this build; the layout is documented for fidelity, but **a port should NOT wire an async
+> streamer** — the ring streams synchronously on the main thread (see
+> `specs/terrain-streaming.md §2`). The apparatus is:
+> - `worker_keep_running` (`+12`) — run flag; set to `1` by the ctor, **re-cleared to `0` by init**,
+>   so the worker's outer loop is false on its first test.
+> - the **request queue** — head/sentinel pointer (`+20`) and element count (`+24`); the (never-run)
+>   worker pops under the queue lock, and nothing ever pushes (no producer).
+> - the **load Event** (`+28`) — an **auto-reset** Win32 Event created in init; the worker would wait
+>   on it. It is the event gate, **not** a FIFO mutex.
+> - the **34-cell pool** — count (`+32`, `= 34`) and the pointer array (`+36`).
+>
+> Two **file-scope critical sections** (globals, not object fields) back the apparatus: one guards the
+> **request queue** (used by the worker + the queue drain), one guards the **per-cell load** (taken in
+> the slot-acquire path around the actual file read). The worker proc pointer is only **stored** in
+> the thread/handle holder (`+0`) — it is **never handed to a thread-create call** on any static path,
+> so no terrain streaming thread is ever spawned. **Residual (debugger-pending):** a live `?ext=dbg`
+> run is the only thing that could witness the keep-running flag being flipped to `1` and a thread
+> spawned, or anything enqueuing to the queue during play; absent that, the worker is dormant.
 
 ### Quick-reference (TerrainLoader)
 

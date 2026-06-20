@@ -1,13 +1,16 @@
-# NPC / Monster struct, spawn record, and mobs.scr linkage (clean-room spec)
+# NPC / Monster struct, spawn record, npc.scr interaction record, and mobs.scr linkage (clean-room spec)
 
-> **Verification banner.** verification: **confirmed** for the loader-exercised facts (the 488-byte
+> **Verification banner: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20),
+> evidence [static-ida].** verification: **confirmed** for the loader-exercised facts (the 488-byte
 > `mobs.scr` record stride, the u16 `mob_id` primary key at +0x00, the +0xF8 u64 HP qword with its
 > load-time `+= 10` mutation, the +0x144 `mob_type` boss discriminator `== 11` and its second lookup
-> map); **static-hypothesis** for every other `mobs.scr` field (on-disk/sample inferences the loader
-> never reads) and for the `npc.arr` spawn record carried from `formats/npc_spawns.md`;
-> **capture/debugger-pending** for the in-game HP *scale factor* that converts the raw `base_max_hp`
-> template input to the displayed HP pool (distinct from the offset/mutation, which are confirmed).
-> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
+> map; **CYCLE 7**: the 404-byte `npc.scr` interaction record with `KIND` u8 @+0x22 and `JOB` i16
+> @+0x34, and the separate 1916-byte `npcs.scr` relationship table — see §1A); **static-hypothesis**
+> for every other `mobs.scr` field (on-disk/sample inferences the loader never reads) and for the
+> `npc.arr` spawn record carried from `formats/npc_spawns.md`; **capture/debugger-pending** for the
+> in-game HP *scale factor* that converts the raw `base_max_hp` template input to the displayed HP
+> pool (distinct from the offset/mutation, which are confirmed).
+> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
 > (the loader **confirms** §1.3's resolution of the prior `config_tables.md §2.9` +0xF4/+0xF8
 > "level/spawn-timer" mislabel — see §3.2).
 
@@ -44,6 +47,9 @@ This document is the design input for:
 
 | Aspect | State |
 |---|---|
+| `npc.scr` interaction record stride (404 bytes, 0x194) | **confirmed** (control-flow, CYCLE 7) — the load-record routine copies 0x194 bytes per record; map keyed by the leading dword. See §1A. |
+| `npc.scr` interaction fields (NAME @+0, KIND u8 @+0x22, JOB i16 @+0x34, six 64-byte name slots @+0x14) | **confirmed** (control-flow, CYCLE 7) — the three read by the interaction dispatcher; the six name slots are loader-cleaned (NUL@63, `'0'`-prefix ⇒ zeroed). See §1A. |
+| `npcs.scr` relationship record stride (1916 bytes, 0x77C) | **confirmed** (control-flow, CYCLE 7) — a SEPARATE larger table (primary u16 @+0, secondary 60×16-byte table @+128); NOT the interaction/KIND table. See §1A.3. |
 | `mobs.scr` record stride (488 bytes) | **confirmed** (control-flow) — the loader divides file size by 488, allocates `488 × count`, and steps the record cursor by 488; cross-checked sample 1 950 536 ÷ 488 = exactly 3 997 records, zero remainder. |
 | `mobs.scr` record count / id range | **confirmed** (control-flow) — `count = file_size / 488`; record `mob_id` ranges 11 .. 31 157 in the sample (sequential ≈10-step for normal mobs; boss ids cluster at 14 000+). |
 | `mobs.scr` primary key = u16 `mob_id` at +0x00 | **confirmed** (control-flow) — the loader inserts each record into a key→record map keyed on the u16 at +0x00. |
@@ -67,6 +73,61 @@ open list is at the end.
 > Everything tagged `PARTIAL` / `UNVERIFIED` — most of the interior combat / scaling / drop fields,
 > the exact `+0xF4` field identity, and the trailing reserved spans — still needs a live combat /
 > spawn capture, or a sample with non-zero data, before its semantics are trusted.
+
+---
+
+## 1A. npc.scr — NPC interaction record (404 bytes, 0x194 stride) — CYCLE 7
+
+This is the table that drives the **click-an-NPC interaction dispatcher** (`specs/npc_interaction.md`):
+the per-NPC **KIND** classifier and **JOB** code that the master switch reads come from here, **not**
+from `mobs.scr`, `npcs.scr`, or the `.arr` spawn files. CYCLE 7 confirmed the loader and the three
+fields the interaction path reads.
+
+### 1A.1 File and record framing (facts)
+
+| Property | Value |
+|---|---|
+| File | `data/script/npc.scr` |
+| Container | Headerless flat array (fixed-stride records). |
+| Record stride | **404 bytes (0x194)** — **confirmed** (control-flow): the load-record routine copies exactly 0x194 bytes per record into a map entry. |
+| Primary key | The record's **first dword** — the loader inserts each record into a key→record map keyed on the leading dword (the record id). **confirmed** (control-flow). |
+| String encoding | CP949 / EUC-KR, NUL-terminated. |
+
+> **Name-cleanup pass (CONFIRMED, control-flow).** On load the record carries **six fixed 64-byte
+> name slots starting at +0x14** (record-relative). Each slot is NUL-terminated at byte 63, and a slot
+> whose **first byte is the ASCII digit `'0'`** is zeroed out (treated as empty). A parser should
+> apply the same emptiness convention.
+
+### 1A.2 Interaction-relevant fields (struct-relative)
+
+All offsets are relative to the start of the 404-byte record (never binary addresses).
+
+| Offset | Size | Type | Field | Conf | Meaning |
+|---|---|---|---|---|---|
+| +0x00 | var | char[] (CP949) | **NAME** — NPC display name string at the record start (NUL-terminated) | **CONFIRMED** (control-flow) | surfaced by the interaction router's NAME field |
+| +0x00 | 4 | u32 | **record id** (overlaps the NAME-string start as the map key dword) | **CONFIRMED** (control-flow) | the loader's map key is the leading dword |
+| +0x14 | 6 × 64 | bytes[64]×6 | six fixed name slots (NUL@63; `'0'`-prefix ⇒ zeroed) | **CONFIRMED** (control-flow, cleanup pass) | per-NPC name/label slots |
+| +0x22 (+34) | 1 | u8 | **KIND** — the interaction dispatch key (the master switch selector) | **CONFIRMED** (control-flow) | see `specs/npc_interaction.md §2.2a` for the KIND→panel table |
+| +0x34 (+52) | 2 | i16 | **JOB** — the skill-trainer rank-band selector (ids 2549–2553) | **CONFIRMED** (control-flow) | see `specs/npc_interaction.md §2.3` |
+
+> The interaction dispatcher's own debug format string surfaces **JOB**, **KIND**, **ID**, and
+> **NAME** together, which fixes the three field offsets above (`KIND` = record+0x22, `JOB` =
+> record+0x34, `NAME` = record+0). `[confirmed]`.
+
+### 1A.3 npc.scr vs npcs.scr — two SEPARATE tables (do not conflate)
+
+`npc.scr` (404 bytes, this section) is the **interaction/KIND** table. There is a **separate,
+larger** sibling table **`npcs.scr`** with a **1916-byte (0x77C) record**: it is a
+**spawn/relationship** table, not the interaction table. Its observed shape (CONFIRMED, control-flow):
+
+- a **primary key u16 at +0** (distinct from npc.scr's leading-dword key), and
+- a **secondary table at +128 (0x80)** of up to **60 entries × 16 bytes**, where the first dword of
+  each entry is a referenced id inserted into a second index (the relationship links).
+
+The **KIND/JOB that drive the interaction panels come from `npc.scr` (404B)** — **never** from
+`npcs.scr` (1916B) and **never** from the `.arr` spawn files (§2). The npc.scr-vs-npcs.scr-vs-`.arr`
+reconciliation as a file-format matter is owned by `formats/npc_spawns.md`; only the
+**struct/field distinction** is noted here.
 
 ---
 
@@ -310,10 +371,12 @@ The dirty-room recon places `mobs.scr` alongside several sibling NPC/quest table
 subsystem. They are noted here only so an engineer understands the scope boundary; their layouts are
 separate analysis targets and are **not** specified by this document:
 
-- **`npc.scr`** — fixed-stride NPC-definition records carrying several CP949 string sub-fields
-  (name + dialog/label slots). Stride not yet established. Likely the home of spawn ids (such as
+- **`npc.scr`** — the **interaction record** table, **404-byte (0x194) stride**, now documented in
+  **§1A** (CYCLE 7). Carries the NPC NAME, the **KIND** dispatch byte (+0x22) and **JOB** (+0x34) the
+  interaction dispatcher reads, plus six 64-byte name slots. Likely the home of spawn ids (such as
   10118) that do not resolve inside `mobs.scr`.
-- **`npcs.scr`** — a larger sibling/variant NPC table.
+- **`npcs.scr`** — a larger sibling NPC **relationship/spawn** table, **1916-byte (0x77C) stride**
+  (primary u16 @+0, secondary 60×16-byte table @+128) — **not** the interaction/KIND table (§1A.3).
 - Quest / tutorial tables (`quests.scr`, `Tutor.scr`) — unrelated to the mob/spawn structs here.
 
 ---
@@ -321,6 +384,13 @@ separate analysis targets and are **not** specified by this document:
 ## 5. Proposed canonical names (flag for names.yaml; not applied here)
 
 > Names are proposed only. This document does not edit `names.yaml`.
+
+**npc.scr interaction record (`NpcInteractionRecord`, 404 bytes):**
+`name` (+0x00, CP949), `record_id` (+0x00, u32 map key), six 64-byte name slots (+0x14),
+`kind` (+0x22, u8 dispatch key), `job` (+0x34, i16 rank-band selector).
+
+**npcs.scr relationship record (`NpcsRelationRecord`, 1916 bytes):**
+`primary_id` (+0x00, u16), relationship table (+0x80, 60 × 16-byte entries; first dword = linked id).
 
 **mobs.scr template record (`MobTemplateRecord`, 488 bytes):**
 `mob_id` (+0x00), `name` (+0x02, CP949), `region_name` (+0x13, CP949), `level` (+0x54),

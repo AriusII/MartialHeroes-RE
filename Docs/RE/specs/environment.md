@@ -36,10 +36,17 @@ verification:
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
-  ida_reverified: 2026-06-16
+  ida_reverified: 2026-06-20    # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk of the env/lighting constants
   ida_anchor: 263bd994
   evidence: [static-ida, sample-vfs]
   conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)
+  cycle7_additions:        # CYCLE 7 static re-walk landed (all static-settled HIGH unless noted)
+    - per-area sky LIGHT-RATIO scalar is quality-mode-dependent {mode1→0.25, mode2→0.7, else→2.0} (§6.6) — distinct from display.lua DISPLAY_LIGHT_RATIO (default 1.0)
+    - light synth fallback (missing light.bin): scale 80.0, ramp intensity = kf_idx × 0.04 (=1/25) clamped, colour = 1.0 − intensity, 48 day/night keyframes (§7)
+    - material synth fallback (missing material.bin): ambient 0.30000001, diffuse 0.8, specular/emissive 0.0 (§7) — material colour table is a flat 9792-byte float blob
+    - char-select env builds area 0 at PINNED time ≈ 14:30 → fog keyframe 29; fog suppression for the preview row is OPEN/DBG-pending (§6.4a) — NOT statically settled
+    - REFUTED (HIGH): the "ambient ×3 multiplier" is NOT a doida.exe constant — real floor = (OPTION_BRIGHT/100)×255 (§6.2a); the ×3 is port-side
+    - the apparent "×0.5 chain" in the display char-brightness reader is a reused-FP-stack-slot decompiler artifact, NOT a real halving (§9.6)
 -->
 
 ---
@@ -622,6 +629,23 @@ The `EnvironmentNode` debt (D3 "too dark" in the Godot known-issues list) is:
 4. Set `DirectionalLight3D` rotation from the static fallback direction vector (no per-keyframe
    direction exists).
 
+### 6.4a Character-select scene environment (pinned time-of-day; fog suppression OPEN)
+
+The character-select scene does **not** drive a live day/night clock. It builds the environment with
+**area 0**, a **pinned literal time-of-day ≈ 14:30** (52 200 simulated seconds), and a specific build
+flag set. With the 48-keyframe / 1800-s model (§2) that literal time resolves to **fog keyframe 29,
+fraction 0** — so the keyframe-29 row is consumed verbatim with no blend (the concrete area-0
+keyframe-29 values are in `environment_bins.md §11`). Because area 0's tables are static and
+achromatic, keyframe 29 is representative of the whole day for that scene.
+
+> **OPEN QUESTION (LOW / DBG-pending) — whether fog is forced OFF for the char-preview row.** Static
+> analysis does **not** cleanly settle whether (or where) fog is suppressed for the character preview
+> in the char-select scene: the per-frame fog apply still pushes LINEAR fog at keyframe 29, and an
+> IDB comment flags a char-select-specific fog-suppression site as debugger-pending. A fog-OFF
+> char-select **matches the dark-stone-temple visual oracle** and is plausible, but it is **NOT
+> binary-confirmed** statically. Do **not** assert "fog OFF on char-select" as a recovered fact;
+> confirm it live (maintainer-driven F9; never `dbg_start`) before relying on it.
+
 ### 6.5 Water wiring (D4 in the Godot known-issues list)
 
 The water rendering mechanism does not exist in the original client (§4 — RESOLVED-NEGATIVE); there
@@ -634,6 +658,29 @@ is no asset-IO loader, no render path, and no stored enable/Y to be faithful to
 
 For area 2: no water plane is needed in the current demo.
 
+### 6.6 Per-area sky light-ratio scalar — quality-mode-dependent (CONFIRMED)
+
+> **Confidence: CONFIRMED (static immediates).** Added CYCLE 7.
+
+The environment hub stores a per-area **sky light-ratio scalar** that is **not** a single constant
+— it is selected at hub-init from the global **render-quality mode** (read from the option singleton,
+the same render-detail option set at §1.1 step 5). The branch writes one of three immediates onto the
+hub:
+
+| Render-quality mode | Sky light-ratio scalar |
+|---------------------|:----------------------:|
+| mode 1 (low)        | **0.25** |
+| mode 2 (medium)     | **0.7**  |
+| else (high/default) | **2.0**  |
+
+This is a **distinct** quantity from the `display.lua` `DISPLAY_LIGHT_RATIO` (default **1.0**, the
+character light-colour correction of §9.2) and from the renderer-ctor light-ratio default (also 1.0).
+A faithful port must not conflate the two: the per-area sky light-ratio above is a quality-tiered
+scene scalar applied by the sky/environment hub, while `DISPLAY_LIGHT_RATIO` is the character lighting
+correction. The exact render-stage this scalar multiplies into is the same display-config apply-path
+that is IDA-pending in §9.4; only the three immediate values and the quality-mode selection are
+statically settled here.
+
 ---
 
 ## 7. Fallback values
@@ -644,8 +691,8 @@ If any environment file is absent or unreadable:
 |-------------|-------------------|
 | `map_option%d.bin` | Treat as all-zero flags (no sky, no indoor override) |
 | `fog%d.bin` | No fog (fog disabled) |
-| `light%d.bin` | Use hard-coded fallback: directional direction `(−7, 7, 20)` normalised, scale 1.0; ambient base `(0, 0, 0)` with the `OPTION_BRIGHT` floor of §6.2a as the only ambient (the per-keyframe §B ambient is inert, `K_ambient = 0`) |
-| `material%d.bin` | No sky-object colour tint (sky objects rendered at full white) |
+| `light%d.bin` | Loader **never hard-fails** — it synthesises a default 48-keyframe day/night colour ramp and a fallback light vector and still returns success. Synth values (CONFIRMED immediates): fallback direction `(−7, 7, 20)` (the fallback-vector slot also carries scale 1.0 — `environment_bins.md §9.4`); the **synth ramp scale is 80.0**; the synth colour ramp is, per keyframe, `intensity = kf_idx × 0.04` (= 1/25) clamped, `colour = 1.0 − intensity` across 48 keyframes (darker toward dusk). Ambient base stays `(0, 0, 0)` with the `OPTION_BRIGHT` floor of §6.2a as the only live ambient (the per-keyframe §B ambient is inert, `K_ambient = 0`). |
+| `material%d.bin` | Loader **never hard-fails** — it synthesises a default colour table (CONFIRMED immediates): per material entry **ambient 0.30000001, diffuse 0.8, specular 0.0, emissive 0.0**. (The sun/sky colour tint is absent so sky objects effectively render neutral.) |
 | `stardome%d.bin` | Stars rendered at white |
 | `clouddome%d.bin` | Cloud dome rendered at white |
 | `cloud_cycle%d.bin` | No cloud animation (clouds static or hidden) |
@@ -726,6 +773,19 @@ but **do not treat it as the fix for the dark world** — the root cause and its
 > **Source citation:** all `display.lua` values in this section are from the
 > `data/script/display.lua` config layer (the shipping client's display-config script). Provenance:
 > see `Docs/RE/journal.md`.
+
+### 9.6 NOTE — the display config reader's apparent "×0.5 chain" is a decompiler artifact
+
+**Recorded so nobody re-derives a phantom halving.** The display-config reader that copies the
+`display.lua` brightness scalars into the renderer's display-config fields appears, in the decompiler,
+to multiply consecutive values by `0.5`. This `×0.5` is **NOT a real halving** — it is an artifact of
+a single reused floating-point stack slot being shared across consecutive config-read calls; the
+decompiler attributes the slot's prior contents to each read. Each scalar (including every
+`DISPLAY_CHAR_BRIGHT_{MULTI|ADD|ALPHA}_{R|G|B}_<STATE>` value — states `DEFAULT`, `CHOICE`, `HIT`,
+`ALPHA`, `HIDDEN`, `POISON`, `TYPE`, `ANGER`, `AUTO`) is simply read verbatim from `display.lua` into
+its renderer slot. Treat the whole family as **config-driven, un-halved** (confidence HIGH on
+config-driven; the apparent 0.5 is spurious). The per-state character-tint *table* itself is owned by
+`rendering.md §6.7`.
 
 ---
 

@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-17
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed); real selected-target name/HP-MP plate not recovered (HUD-II follow-up — slot 135 is UpgradeProcessPanel) — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -203,8 +203,8 @@ Additional button fields:
 | Constructor | NORMAL | HOVER | PRESSED | DISABLED |
 |---|---|---|---|---|
 | 2-state | arg `(sX, sY)` | = NORMAL | = NORMAL | = NORMAL |
-| 3-state | arg `(sX, sY)` | = NORMAL | arg `(a9, a10)` | = NORMAL |
-| 7-state | arg `(sX, sY)` | arg `(a11, a12)` | arg `(a9, a10)` | = NORMAL |
+| 3-state | arg `(sX, sY)` | = NORMAL | arg `(pX, pY)` | = NORMAL |
+| 7-state | arg `(sX, sY)` | arg `(hX, hY)` | arg `(pX, pY)` | = NORMAL |
 
 So **all three constructors produce at most 3 distinct sprite frames** (normal, hover, pressed).
 Where HOVER equals NORMAL the button gives caption-only feedback on hover; where both equal
@@ -315,6 +315,267 @@ auxiliary 3D/scene view (from +0xE8), and a texture/skin-atlas list (from +0x220
 windows derive from it (MainWindow/"MainMaster", the login window, the opening window, the
 character-select window, and a dev/test window). The full offset table is in `structs/guwindow.md`;
 the base-class field layout is in `structs/gucomponent.md`.
+
+---
+
+## 1.9 The full panel-slot → class roster (CODE-CONFIRMED — the HUD panel registry)
+
+The in-game HUD is the set of panels stored into the master window's **panel-slot array**. That
+array lives at master-window byte offset **+0x238**; the slot index is `(byte_offset − 0x238) / 4`
+(pointer-sized) — see `structs/guwindow.md` for the array base/index derivation and the master-window
+size. A single in-game HUD-build routine walks the panel list once and, per panel, **allocates the
+object, runs its constructor, and stores the resulting pointer into a fixed slot** of that array. The
+concrete class behind each slot is read from the vtable each constructor installs at object `+0x00`
+(its RTTI type, neutralised here).
+
+> **Slot-table bases (do not confuse two numbering schemes).** This roster numbers slots from the
+> **panel-slot array base +0x238** — slot `i` = byte `+0x238 + 4·i`. §1.6 separately reports the
+> in-game scene/HUD handler "at slot index 320 = byte +0x500": that **320** counts pointer slots from
+> object `+0x00` (byte 1280 / 4 = 320), whereas the same word is **slot 178** here (byte 1280, i.e.
+> `(0x500 − 0x238)/4 = 178`, the +0x500 main-handler slot of §1.9.2). Both refer to the same pointer;
+> this roster uses the **+0x238-relative** index throughout.
+
+### 1.9.1 Slot population summary (CODE-CONFIRMED)
+
+- **178 slots are filled** by the HUD-build routine; the highest populated index is **218**.
+- **Interior gaps (never built here): slots 42, 104, 147.** **Trailing gaps:** 179–184, 187–217,
+  219–230. The scanned range is 0..230.
+- A separate **per-game-state reconfigure routine** re-stores only an *existing* fixed subset of slots
+  on a scene-state change (it sets text/colour/visibility/sounds, never geometry). It **adds no new
+  slots**, so the gaps above are genuinely null/reserved — not lazily filled later (the one exception
+  is slot 178, §1.9.2). This reconciles with `ui_hud_layout.md §0.1`, which counts the same 178 stores.
+
+### 1.9.2 Slot 178 — the in-game MainHandler (filled lazily)
+
+Slot **178** (master byte **+0x500**, a 200-byte object) is **skipped by the master window's
+slot-zeroing constructor** and is **not** filled by the HUD-build routine. It is created and stored
+**only when the in-game world scene state is entered** (the scene state machine of §11). Its class is
+**MainHandler**, the in-game state handler. See `structs/guwindow.md` for the +0x500 layout detail.
+
+### 1.9.3 The roster (slot index → concrete panel class → purpose)
+
+Toolkit primitives are kept as `GULabel` / `GUButton` / `GUPanel` / `GUComponent` / `GXCursor2D`;
+game panels carry their neutral class name. Confidence is **CODE-CONFIRMED** for every row
+(call-immediately-precedes-store attribution verified; class resolved from each constructor's `+0x00`
+vtable RTTI).
+
+| Slot | Concrete panel class | Purpose |
+|-----:|----------------------|---------|
+| 0 | `ActorChatPanel` | Floating actor speech / chat bubble |
+| 1 | `DropItemPanel` | Drop-item confirm |
+| 2 | `Gage3DPanel` | 3D world gauge (HP bars over actors) |
+| 3 | `hyubhengView` (GUPanel subclass) | "hyubheng" view panel |
+| 4 | `ItemPanel` | Inventory item window |
+| 5 | `TradePanel` | NPC trade window |
+| 6 | `DefaultMenu` | Default right-click context menu |
+| 7 | `NpcPanel` | NPC dialog root |
+| 8 | `RepairNpcPanel` | NPC repair |
+| 9 | `QuestNpcPanel` | NPC quest |
+| 10 | `KeepNpcPanel` | NPC warehouse / keep |
+| 11 | `GuildNpcPanel` | NPC guild |
+| 12 | `ConfessionNpcPanel` | NPC confession |
+| 13 | `GatherNpcPanel` | NPC gather |
+| 14 | `LinkPanel` | Link / hyperlink panel |
+| 15 | `GagePanel` | Player HP/MP gauge bar |
+| 16 | `StatusPanel` | Character status window |
+| 17 | `SkillPanel` | Skill window |
+| 18 | `ChatPanel` | Chat input panel |
+| 19 | `MapPanel` | Minimap panel |
+| 20 | `TotalMapPanel` | Full / world map |
+| 21 | `ChatOutputPanel` | Chat log / output |
+| 22 | `OptionPanel` | Options root |
+| 23 | `ExitPanel` | Exit / quit confirm |
+| 24 | `ReAskPanel` | Re-ask / re-confirm |
+| 25 | `GuildReaskPanel` | Guild re-ask confirm |
+| 26 | `ErrorPanel` | Error message popup |
+| 27 | `ActorStatePanel` | Actor buff / state icons |
+| 28 | `ActorStatePassivePanel` | Actor passive-state icons |
+| 29 | `ActorStateCashPanel` | Actor cash / premium-buff icons |
+| 30 | `ActorStateSkillPanel` | Actor skill-state icons |
+| 31 | `TalkPanel` | Talk / dialogue panel |
+| 32 | `ConfirmPanel` | Generic yes/no confirm |
+| 33 | `Descriptor` | Tooltip / item descriptor |
+| 34 | `HelpPanel` | Help window |
+| **35** | **`MopGagePanel`** | **Target-mob gauge frame — the real "target frame" (see §1.9.4)** |
+| 36 | `PcPanel` | Other-player info panel |
+| 37 | `PcTradePanel` | Player-to-player trade |
+| 38 | `StallKeeperPanel` | Personal stall (vendor) keeper |
+| 39 | `ProductPanel` | Product / goods listing |
+| 40 | `DeliveryPanel` | Delivery / mail send |
+| 41 | `RequestPanel` | Request panel |
+| 42 | *(gap — null / reserved)* | Not built by this routine |
+| 43 | `PartyPanel` | Party window |
+| 44 | `MiniParty` | Mini party HUD |
+| 45 | `PartyReqPanel` | Party invite request |
+| 46 | `OtherInfo` | Other-info panel |
+| 47 | `ShowDownReq` | Duel / showdown request |
+| 48 | `MessagePanel` | Message box |
+| 49 | `KeepPanel` | Warehouse / keep window |
+| 50 | `SetupPanel` | Setup / config panel |
+| 51 | `RelationPanel` | Relation / friend-foe panel |
+| **52** | **`PetPanel`** | **Pet window — the real pet-window slot (see §1.9.4)** |
+| 53 | `SecretMemPanel` | Secret-memo (private notes) |
+| 54 | `ItemConfirmPanel` | Item-use confirm |
+| 55 | `LetterPanel` | Letter / mail read |
+| 56 | `SurvivePanel` | Survival-mode panel |
+| 57 | `StackCountPanel` | Stack-split count input |
+| 58 | `CountInputPanel` | Numeric count input |
+| 59 | `SkillConfirmPanel` | Skill-learn confirm |
+| 60 | `CastTimePanel` | Cast-time / progress bar |
+| 61 | `NameInputPanel` | Name text input |
+| 62 | `PriceInputPanel` | Price input |
+| 63 | `InvenSortPanel` | Inventory sort control |
+| 64 | `QuestPanel` | Quest log window |
+| 65 | `GuildAPanel` | Guild "A" panel (main) |
+| 66 | `GuildCreateAPanel` | Guild create |
+| 67 | `GuildShowPanel` | Guild show / info |
+| 68 | `GuildMemberPosSetPanel` | Guild member rank set |
+| 69 | `GuildFameDonatorPanel` | Guild fame donate |
+| 70 | `PublicPeacePanel` | Public-peace / law panel |
+| 71 | `QuestGiveUpPanel` | Quest abandon |
+| 72 | `QuestItemKeepPanel` | Quest-item keep |
+| 73 | `NpcQuestPanel` | NPC quest list |
+| 74 | `NpcQuestMsgPanel` | NPC quest message |
+| 75 | `KeyBackSetup` | Key-binding setup |
+| 76 | `NpcQuestTalkPanel` | NPC quest talk |
+| 77 | `QuestResultPanel` | Quest reward / result |
+| 78 | `EmoticonPanel` | Emoticon picker |
+| 79 | `AnnouncePanel` | Announcement banner |
+| 80 | `LottoPanel` | Lotto / lottery |
+| 81 | `WarInfoPanel` | War info |
+| 82 | `GuildWarInfoPanel` | Guild-war info |
+| 83 | `BigAlarmPanel` | Big / centre alarm banner |
+| 84 | `GMPanel` | GM panel |
+| 85 | `ComboPanel` | Combo / dropdown panel |
+| 86 | `StallListPanel` | Stall (vendor) listing |
+| 87 | `PotalListPanel` | Portal / teleport list |
+| 88 | `GoodsPanel` | Goods / shop panel |
+| 89 | `StatusDistributePanel` | Stat-point distribution |
+| 90 | `GatherSlotPanel` | Gathering slots |
+| 91 | `WarStoneInfoPanel` | War-stone info |
+| 92 | `BroodWarMapInfoPanel` | Brood-war map info |
+| 93 | `BroodWarListPanel` | Brood-war list |
+| 94 | `BroodWarAllyStatePanel` | Brood-war ally state |
+| 95 | `MediatePanel` | Mediation / arbitration |
+| 96 | `CarrierPigeonPanal` | Carrier-pigeon root (in-source spelling "Panal") |
+| 97 | `CarrierPigeonSendPanel` | Carrier-pigeon send |
+| 98 | `CarrierPigeonReadPanel` | Carrier-pigeon read |
+| 99 | `ActorPotalPanel` | Actor portal panel |
+| 100 | `FontSeePanel` | Cinematic "font-see" subtitle root |
+| 101 | `FontSeeSubTitlePanel` | Font-see subtitle line |
+| 102 | `FontSeeTimePanel` | Font-see timer line |
+| 103 | `FontSeeSubjectPanel` | Font-see subject line |
+| 104 | *(gap — null / reserved)* | Not built by this routine |
+| 105 | `Pandemonium` (GUPanel subclass) | "Pandemonium" event panel |
+| 106 | `Revengesummons` | Revenge-summon panel |
+| 107 | `revengevote` | Revenge-vote panel |
+| 108 | `FameStatePanel` | Fame state |
+| 109 | `RankStatePanel` | Rank state |
+| **110** | **`Gamble`** (GUPanel subclass) | **Gambling panel — NOT a pet window (see §1.9.4)** |
+| 111 | `Gmfuntion` | GM function panel (in-source spelling) |
+| 112 | `GmCharactor` | GM character panel (in-source spelling) |
+| 113 | `Autochect` (GUPanel subclass) | Auto-check panel (in-source spelling) |
+| 114 | `NpcSearch` (GUPanel subclass) | NPC search |
+| 115 | `FameBuffNpcPanel` | NPC fame-buff |
+| 116 | `EventPopupPanel` | Event popup |
+| 117 | `SubscriptionPanel` | Subscription / billing |
+| 118 | `TenderInfoPanel` | Tender / auction info |
+| 119 | `EventItemConfirmPanel` | Event-item confirm |
+| 120 | `PlaytimePanel` | Playtime / fatigue |
+| 121 | `GameClassPanel` (subclass) | Game-class select panel |
+| 122 | `AutoQuestionPanel` | Auto-question (anti-bot) |
+| 123 | `AutoCheckPanel` | Auto-check (anti-bot) |
+| 124 | `GameAddictionWarningPanel` | Addiction warning |
+| 125 | `GfitCharNameInputPanel` | Gift-char name input (in-source spelling) |
+| 126 | `GiftCharConfirmStep1` | Gift-char confirm step 1 |
+| 127 | `GiftCharConfirmStep2` | Gift-char confirm step 2 |
+| 128 | `GiftCharConfirmWaiting` | Gift-char waiting |
+| 129 | `GiftCharReceiveConfirm` | Gift-char receive confirm |
+| 130 | `GiftCharSecondPassword` | Gift-char second password |
+| 131 | `UpgradePanel` | Item upgrade window |
+| 132 | `ItemRepairPanel` | Item repair |
+| 133 | `ItemTransformPanel` | Item transform |
+| 134 | `UpgradeResultPanel` | Upgrade result |
+| **135** | **`UpgradeProcessPanel`** | **Upgrade in-progress window — CONFIRMS the prior slot-135 finding (see §1.9.4)** |
+| 136 | `AlarmSelectCharacterKind` | Alarm: select character kind |
+| 137 | `SelectCharacterKind` | Select character kind |
+| 138 | `NoPkPenaltyAlarmPanel` | No-PK penalty alarm |
+| 139 | `AutoPenaltyAlarmPanel` | Auto-penalty alarm |
+| 140 | `OptionPanel_Other` | Options: other tab |
+| 141 | `OptionPanel_Character` | Options: character tab |
+| 142 | `OptionPanel_Graphic` | Options: graphic tab |
+| 143 | `OptionPanel_Sound` | Options: sound tab |
+| 144 | `GreetPanel` | Greeting panel |
+| 145 | `TutorTalkPanel` | Tutorial talk |
+| 146 | `GUButton` (Diamond) | Inline HUD button (toolkit primitive) |
+| 147 | *(gap — null / reserved)* | Not built by this routine |
+| 148 | `GUButton` (Diamond) | Inline HUD button |
+| 149 | `GUPanel` (Diamond) | Stat-info group container (≈180-byte) — see §1.9.5 |
+| 150 | `GULabel` (Diamond) | Stat-info text label |
+| 151 | `GUButton` (Diamond) | Inline button |
+| 152 | `GUButton` (Diamond) | Inline button |
+| 153 | `GUPanel` (Diamond) | Stat-info group container |
+| 154 | `GULabel` (Diamond) | Stat-info text label |
+| 155 | `GULabel` (Diamond) | Stat-info text label |
+| 156 | `GULabel` (Diamond) | Stat-info text label |
+| 157 | `GULabel` (Diamond) | Stat-info text label |
+| 158 | `GUPanel` (Diamond) | Stat-info group container |
+| 159 | `GULabel` (Diamond) | Stat-info text label |
+| 160 | `GULabel` (Diamond) | Stat-info text label |
+| **161** | **`GULabel` (Diamond)** | **Stat-info text label (240-byte object; caption from the message table) — NOT a distinct panel class (see §1.9.5)** |
+| 162 | `GULabel` (Diamond) | Stat-info text label |
+| 163 | `GUPanel` (Diamond) | Stat-info group container (≈180-byte) |
+| **164** | **`GULabel` (Diamond)** | **Stat-info text label (240-byte object; caption from the message table) — NOT a distinct panel class (see §1.9.5)** |
+| 165 | `GULabel` (Diamond) | Stat-info text label |
+| 166 | `GULabel` (Diamond) | Stat-info text label |
+| 167 | `GULabel` (Diamond) | Stat-info text label |
+| 168 | `GUPanel` (Diamond) | Stat-info group container |
+| 169 | `GULabel` (Diamond) | Stat-info text label |
+| 170 | `GULabel` (Diamond) | Stat-info text label |
+| 171 | `GULabel` (Diamond) | Stat-info text label |
+| 172 | `GULabel` (Diamond) | Stat-info text label |
+| 173 | `GUPanel` (Diamond) | Stat-info group container |
+| 174 | `GULabel` (Diamond) | Stat-info text label |
+| 175 | `GULabel` (Diamond) | Stat-info text label |
+| 176 | `GULabel` (Diamond) | Stat-info text label |
+| **177** | **`GUComponent` (Diamond, base image widget)** | **A base image widget — NOT MopGage / NOT a target frame (see §1.9.4)** |
+| 178 | `MainHandler` | In-game state handler (master byte +0x500; filled lazily — see §1.9.2) |
+| 179–184 | *(gap — null / reserved)* | Not built |
+| 185 | `GXCursor2D` | 2D mouse cursor |
+| 186 | `GULabel` (Diamond) | Inline text label |
+| 187–217 | *(gap — null / reserved)* | Not built |
+| 218 | `GUButton` (Diamond) | Inline HUD button |
+| 219–230 | *(gap — null / reserved)* | Not built |
+
+### 1.9.4 Binary-won slot reversals (CORRECTIONS — these supersede prior cross-references)
+
+Reading the actual store sites of the HUD-build routine settles several slot identities that earlier
+passes (and `ui_hud_layout.md`) had placed elsewhere. All are **CODE-CONFIRMED** from the store-site
+disassembly:
+
+| Slot | Real identity | Prior (refuted) claim | Verdict |
+|-----:|---------------|-----------------------|---------|
+| **35** | **`MopGagePanel`** — the real target-mob gauge / "target frame" | "MopGage / target frame = slot 177" | **The target frame is slot 35, NOT 177.** |
+| **52** | **`PetPanel`** — the real pet window | "pet = slot 110" | **The pet window is slot 52, NOT 110.** |
+| **110** | **`Gamble`** — the gambling panel | "pet window" | Slot 110 is the gambling panel. |
+| **135** | **`UpgradeProcessPanel`** — upgrade-in-progress window | (same) | **CONFIRMS** the prior slot-135 finding. |
+| **177** | **`GUComponent`** base image widget | "the real MopGage target frame" | **Slot 177 is a plain base image widget, NOT MopGage.** |
+
+> **Downstream note.** `ui_hud_layout.md §5.5a` correctly identifies slot 135 as `UpgradeProcessPanel`
+> and flags the real selected-target plate as the `MopGagePanel` / `GagePanel` family — this roster now
+> pins that plate to **slot 35** (`MopGagePanel`). Any note that placed "MopGage at slot 177" or "pet at
+> slot 110" is superseded by the table above.
+
+### 1.9.5 The stat-info readout block (slots 149–176)
+
+Slots **149–176** are not distinct named panel classes — they are a **repeating stat / info readout
+block** built entirely from toolkit primitives: roughly **5–6 groups**, each group = **one `GUPanel`
+container (≈180-byte object) + four `GULabel` text labels**, with a few **inline `GUButton`s**
+interleaved (slots 146, 148, 151, 152). The labels are 240-byte `GULabel` instances whose caption text
+is sourced by id from the message table. In particular, **slots 161 and 164 are plain `GULabel`
+instances** inside this block — not distinct panel classes (an earlier reading singled them out as if
+named). An engineer should model 149–176 as a data-fed grid of container+label groups, not as ~28
+bespoke classes. The HUD-layout view of this block is in `ui_hud_layout.md §3.3a`.
 
 ---
 
@@ -920,7 +1181,6 @@ panel tree shown/hidden as a unit by the scene-reset path:
 >   the action map above is refined by this: ids 4/5/6/61 are the per-slot button quartet; the role names
 >   -- locked base / enter-confirm / highlight art -- are inferred from action-id + atlas + show/hide
 >   polarity, the visibility behaviour is confirmed.)
-> <!-- source: _dirty/cycle6b/laneB_slotinforow.md (sections 1-3), laneA_smsg_charlist.md (section 4) -->
 
 **Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
 character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
@@ -953,7 +1213,6 @@ The five preview actors stand at fixed world positions on the select stage:
 - These world-absolute placements are the campaign-frontend re-walk view; the camera/ray geometry and
   any mesh-local stage offsets are owned by `specs/frontend_scenes.md §3.3.3` and must not be restated
   here (this spec records only the values the select-window build/hit-test code uses directly).
-<!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md -->
 
 **Class button → class enum (CODE-CONFIRMED).** The four create-form class buttons (command ids
 10/11/12/13, left-to-right → selector index 0/1/2/3, §8.2 above) map to the playable classes as:
@@ -968,14 +1227,13 @@ The five preview actors stand at fixed world positions on the select stage:
 So the left-to-right button order is **Monk / Musa / Dosa / Salsu** with enum values **4 / 1 / 3 / 2**.
 The class-name caption is set from msg.xdb ids **14003…14007**; the per-class description text comes
 from `data/script/npc.scr` keys **1…4** (loaded into the keyed node map at boot; the class-select
-handler assigns three description labels per class). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
+handler assigns three description labels per class).
 
 **Create-preview actor placement (CODE-CONFIRMED — ACTOR-ONLY, no camera move).** Entering the create
 sub-form does **not** move, dolly, or re-aim the camera in this build (no boom/FOV/near/far write on any
 create path). Instead the single create-preview actor is placed **≈ 56.5 units nearer** the lineup
 centre (toward the camera, in world −Z) and **scaled 81.0** versus the lineup's **70.0** (ratio 81/70).
 Reimplementations should keep one fixed camera and move/scale only the preview actor.
-<!-- source: _dirty/campaign-frontend/A5-creation.md -->
 
 **Name validation message ids and bound (CODE-CONFIRMED — extends the create-form validation note).**
 On create-confirm the client validates the name before sending: **min length 2**; allowed bytes are
@@ -991,7 +1249,7 @@ msg.xdb ids:
 
 The name field is bounded to **17 bytes including the NUL terminator (16 payload bytes)**. On a clean
 validation the name is staged and the create-character request is sent (wire layout owned by
-`specs/login_flow.md` / packets, not this spec). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
+`specs/login_flow.md` / packets, not this spec).
 
 ### 8.3 Shared panel chrome — `InventWindow.dds` modal
 
@@ -3355,7 +3613,6 @@ main loop until done, then ended and destroyed before the next scene is created.
 > writes 1, state 1 writes 2, state 2 writes 3 or 4, state 3 writes 4, state 4 writes 5, state 5 writes
 > 4, state 6 writes 8, state 7 writes 8). The state-8 check lives in the shared loop tail: when the
 > selector reads 8, the loop performs the final shutdown and returns.
-> <!-- source: _dirty/campaign-frontend/A6-winmain-statemachine.md -->
 
 > **State-7 error message-id is branchy, not a flat `9001 + [1]` (CODE-CONFIRMED).** The error case
 > has **two** id paths: (a) if the secondary-state slot `[1] == 8` **and** the explicit error-id slot
@@ -3425,7 +3682,6 @@ sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 > had stated "neither 31 nor 32 is a login sub-state" — that observation was about a *separate form/page*
 > state (which indeed never holds 31/32); the *Tick/workflow* substate documented in this table does. The
 > account/save flag that gates entry into substate 31 is debugger-pending.
-> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
 
 > **PIN keypad digit→slot scramble (mechanism CODE-CONFIRMED; runtime seed + permutation
 > DEBUGGER-PENDING).** The mapping of which digit appears on which keypad tile is **not** a static table
@@ -3437,7 +3693,6 @@ sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 > submit, 13 = Cancel**. The shuffle **mechanism** is code-confirmed; the **runtime seed value and the
 > resulting permutation are clock-derived and therefore debugger-pending** (not a recoverable code
 > immediate).
-> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
 
 > **Two coupled state fields — workflow `+0x238` vs handler page-state `+0x17C` (CODE-CONFIRMED).**
 > There are **two** state fields on the login window, and they are coupled. (1) the **Tick/workflow

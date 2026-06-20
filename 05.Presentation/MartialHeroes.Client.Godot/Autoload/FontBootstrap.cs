@@ -32,16 +32,13 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Autoload;
 
 /// <summary>
-/// Presentation-layer font bootstrap autoload.
-///
-/// Registers a Korean-capable <see cref="SystemFont"/> as <c>ThemeDB.FallbackFont</c>
-/// so every CP949 UI caption renders as real Hangul glyphs on any Windows 10/11 machine.
-///
-/// Must be listed <b>first</b> in the <c>[autoload]</c> section of <c>project.godot</c>
-/// so it runs before <c>ClientContext</c> or any screen autoload.
-///
-/// spec: Docs/RE/specs/ui_system.md §6.2 — legacy Korean faces (DotumChe / Dotum / BatangChe).
-/// spec: Docs/RE/specs/ui_system.md §13.4 — Godot font mapping guidance.
+///     Presentation-layer font bootstrap autoload.
+///     Registers a Korean-capable <see cref="SystemFont" /> as <c>ThemeDB.FallbackFont</c>
+///     so every CP949 UI caption renders as real Hangul glyphs on any Windows 10/11 machine.
+///     Must be listed <b>first</b> in the <c>[autoload]</c> section of <c>project.godot</c>
+///     so it runs before <c>ClientContext</c> or any screen autoload.
+///     spec: Docs/RE/specs/ui_system.md §6.2 — legacy Korean faces (DotumChe / Dotum / BatangChe).
+///     spec: Docs/RE/specs/ui_system.md §13.4 — Godot font mapping guidance.
 /// </summary>
 public sealed partial class FontBootstrap : Node
 {
@@ -64,7 +61,7 @@ public sealed partial class FontBootstrap : Node
         "GulimChe", // common KR alternative fixed-pitch sans
         "Malgun Gothic", // ships on all Windows 10/11 — guaranteed CJK coverage
         "Batang", // spec: §6.2 face "BatangChe" proportional variant CODE-CONFIRMED
-        "BatangChe", // spec: §6.2 face "BatangChe" (fixed-pitch serif) CODE-CONFIRMED
+        "BatangChe" // spec: §6.2 face "BatangChe" (fixed-pitch serif) CODE-CONFIRMED
     ];
 
     // -------------------------------------------------------------------------
@@ -89,18 +86,16 @@ public sealed partial class FontBootstrap : Node
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a <see cref="SystemFont"/> that resolves Korean faces in priority order
-    /// and installs it as <c>ThemeDB.FallbackFont</c>.
-    ///
-    /// <para>
-    /// <see cref="SystemFont"/> resolves the first installed face from the
-    /// <see cref="SystemFont.FontNames"/> list.  Every subsequent entry is a fallback.
-    /// Godot also performs its own per-glyph fallback within the font subsystem, so
-    /// even if only Malgun Gothic is installed, all Hangul code points will resolve.
-    /// </para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — face priority: DotumChe, Dotum, BatangChe.
-    /// spec: Docs/RE/specs/ui_system.md §13.4 — Godot font mapping guidance.
+    ///     Creates a <see cref="SystemFont" /> that resolves Korean faces in priority order
+    ///     and installs it as <c>ThemeDB.FallbackFont</c>.
+    ///     <para>
+    ///         <see cref="SystemFont" /> resolves the first installed face from the
+    ///         <see cref="SystemFont.FontNames" /> list.  Every subsequent entry is a fallback.
+    ///         Godot also performs its own per-glyph fallback within the font subsystem, so
+    ///         even if only Malgun Gothic is installed, all Hangul code points will resolve.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — face priority: DotumChe, Dotum, BatangChe.
+    ///     spec: Docs/RE/specs/ui_system.md §13.4 — Godot font mapping guidance.
     /// </summary>
     private static void InstallKoreanFallbackFont()
     {

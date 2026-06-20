@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\MartialHeroes.Network.Protocol.Core\MartialHeroes.Network.Protocol.Core.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Network.Protocol.Packets.Login\MartialHeroes.Network.Protocol.Packets.Login.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Network.Protocol.Packets.World\MartialHeroes.Network.Protocol.Packets.World.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Network.Protocol.Packets.Social\MartialHeroes.Network.Protocol.Packets.Social.csproj"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Source generator (00.SourcesGenerators): the PacketRouter dispatch switch is emitted at
+             compile time. Imported as an ANALYZER, not a runtime dependency:
+             ReferenceOutputAssembly="false" keeps the generator assembly out of this project's
+             output (and off every downstream consumer). OutputItemType="Analyzer" is what makes
+             Roslyn load it as a generator rather than a plain reference. -->
+        <ProjectReference Include="..\..\00.SourcesGenerators\MartialHeroes.Network.Protocol.Generators\MartialHeroes.Network.Protocol.Generators.csproj"
+                          OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+</Project>

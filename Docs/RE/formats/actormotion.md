@@ -5,9 +5,18 @@
 > reference this file.
 >
 > verification: confirmed-by-use-site (slot roles, rate semantics, motion_ids_b consumer) + sample-verified (col2 / motion-id slots) + confirmed (read-order, offsets, key math, rate math)
-> ida_reverified: 2026-06-19
+> ida_reverified: 2026-06-19; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
+>
+> **CORRECTED CYCLE 7 (ida_anchor 263bd994, 2026-06-20):** B-array slot labelling de-shifted to the
+> loader's own indexing — **death effect/sound = b[4] = +0x74** (was mislabelled "b[5]"), dead trailing
+> slots = b[5..8] (+0x78..+0x84); both 9-slot arrays share the **element-0-unused** convention
+> (consumers start at element 1). A-array column numbers made explicit: the **runtime stand idle =
+> a[1] = +0x44 = COLUMN 16** (col15 → a[0] is file-loaded but dead at runtime). The runtime idle lookup
+> is keyed by the actor **appearance key** (`5·(class+4·variant)−24`), not col2/skin_class, and the
+> motion id resolves through the `motlist.txt` clip registry (id == `.mot` header id_b) — no
+> `g{id}.mot` sprintf.
 >
 > **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** 9-slot direction reading **REFUTED**
 > (the two arrays are **action/lifecycle-keyed**, not direction-indexed); `motion_ids_b` =
@@ -135,10 +144,12 @@ re-confirmed against the IDB loader on build `263bd994`; the record fills exactl
 > skeleton — login/camera/special actors on a different code path) and **29** referencing `.bnd` ids
 > absent from the preserved VFS (expected gaps). A value of 0 is a null pointer (no skeleton).
 >
-> **`motion_ids_a` slots hold `.mot` clip ids, SAMPLE-VERIFIED.** The col15 idle reference resolves to
-> `data/char/mot/g{id}.mot` for **89.1%** of rows. (Note the runtime idle path actually reads slot
-> `a[1]` (+0x44), not the col15-loaded `a[0]`; `a[0]` is a file-source idle reference — see the slot
-> table below.)
+> **`motion_ids_a` slots hold `.mot` clip ids, SAMPLE-VERIFIED.** The col15/col16 idle references
+> resolve to registered `.mot` clips for **89.1%** of rows. The runtime stand idle reads slot **`a[1]`
+> (+0x44, COLUMN 16)**, not the col15-loaded `a[0]` — `a[0]` (+0x40, col15) is a file-source reference
+> with no runtime read-site (dead). Resolution is **not** a `g{id}.mot` sprintf: the motion id is a
+> lookup key into the `motlist.txt` clip registry (id == `.mot` header id_b) — see the slot table and
+> the runtime-idle-lookup note below.
 >
 > **`motion_ids_b` slots are SOUND/EFFECT event ids, NOT `.mot` motion ids.** Every runtime consumer
 > feeds `motion_ids_b` slots to the sound/effect routers (spawn sound, footstep SFX, death effect),
@@ -180,17 +191,34 @@ there is no `array[direction]` access site anywhere in the actor-visual code.
 - **`motion_ids_a` (0x40) → `.mot` clip ids (animation layer).** The slots feed the animation
   layer (the `.mot` clip the actor plays for each action).
 
-  | Slot | Rec off | Action / lifecycle state | Meaning | Confidence |
-  |----:|------|----|----|----|
-  | a[0] | +0x40 | (file: loader col15) | idle reference loaded from file; runtime idle reads a[1] not a[0] — file-source | MED (no direct runtime read of +0x40) |
-  | a[1] | +0x44 | idle / stand | **default idle** (the idle the runtime actually uses) | HIGH |
-  | a[2] | +0x48 | walk | walk clip | HIGH |
-  | a[3] | +0x4C | run | run clip | HIGH |
-  | a[4] | +0x50 | death / knockdown | death clip | HIGH |
-  | a[5] | +0x54 | mount-follow default idle | mount-follow idle | HIGH |
-  | a[6] | +0x58 | idle ALT (motion-kind byte == 1) | combat-stance / alternate idle | HIGH |
-  | a[7] | +0x5C | — | no static consumer | OPEN-RISK |
-  | a[8] | +0x60 | — | no static consumer | OPEN-RISK |
+  | Slot | Rec off | Column | Action / lifecycle state | Meaning | Confidence |
+  |----:|------|----|----|----|----|
+  | a[0] | +0x40 | col15 | (file-source) | idle reference loaded from file; runtime idle reads a[1] not a[0] — **dead at runtime** (no read-site of +0x40) | MED (no direct runtime read of +0x40) |
+  | a[1] | +0x44 | col16 | idle / stand | **default stand idle** (the idle the runtime actually uses) | HIGH |
+  | a[2] | +0x48 | col17 | walk | walk clip | HIGH |
+  | a[3] | +0x4C | col18 | run | run clip | HIGH |
+  | a[4] | +0x50 | col19 | death / knockdown | death clip | HIGH |
+  | a[5] | +0x54 | col20 | mount-follow default idle | mount-follow idle / default-idle cycle | HIGH |
+  | a[6] | +0x58 | col21 | idle ALT (motion-kind byte == 1) | combat-stance / alternate idle | HIGH |
+  | a[7] | +0x5C | col22 | — | no static consumer | OPEN-RISK |
+  | a[8] | +0x60 | col23 | — | no static consumer | OPEN-RISK |
+
+  **KEY POINT: the runtime stand idle is COLUMN 16 (record +0x44, a[1]), NOT column 15.** The loader
+  fills col15 into a[0] (+0x40), which has **zero runtime read-sites** — every motion-kind-0 (stand)
+  idle path reads a[1] (+0x44, col16). Same element-0-unused convention as the B-array (element 0
+  unused/padding, first consumed element is element 1).
+
+  **Runtime idle lookup KEY + resolution (CONFIRMED).** The play-time idle lookup is keyed by the
+  actor's **appearance key** (for a player, `key = 5·(class + 4·variant) − 24`), looked up in the
+  AnimCatalog ordered map — **NOT** by col2/`skin_class`. col2/`skin_class` selects the `.bnd`
+  skeleton and *builds the catalog record's `motion_key` field* (record +0x00) at load time; it is not
+  the key the idle dispatchers pass at runtime. Once the record is fetched, the motion-kind byte on the
+  actor selects the slot (stand idle = a[1] = +0x44 = col16). The a[1] motion id then resolves through
+  the **`motlist.txt` clip registry** — the motion id is an ordered-map lookup key into a registry
+  pre-populated from `motlist.txt` (each line prefixed `data/char/mot/`), where the id matches the
+  `.mot` file's **header id_b**. There is **no `g{id}.mot` sprintf** (the only `g%d` asset format string
+  is the skin path `data/char/skin/g%d.skn`). See `formats/animation.md` (the `.mot` registry / header
+  id_b join) and `specs/skinning.md` (the full idle-selection chain).
 
 - **`motion_ids_b` (0x64) → SOUND/EFFECT event ids (sound/effect routers), NOT motion.** The slots
   feed the sound/effect routers, never the animation mixer.
@@ -201,8 +229,12 @@ there is no `array[direction]` access site anywhere in the actor-visual code.
   | b[1] | +0x68 | spawn | spawn sound/event id (sound category 11) | HIGH |
   | b[2] | +0x6C | walk | walk footstep SFX id (category 7) | HIGH |
   | b[3] | +0x70 | run | run footstep SFX id (category 8) | HIGH |
-  | b[5] | +0x74 | death | death effect/sound id | MED-HIGH |
-  | b[6..8] | +0x78..+0x84 | — | no static consumer | OPEN-RISK |
+  | b[4] | +0x74 | death | death effect/sound id | MED-HIGH |
+  | b[5..8] | +0x78..+0x84 | — | no static consumer | OPEN-RISK |
+
+  By the loader's own array indexing (b[0] = +0x64), the death-effect slot is **b[4] at +0x74** —
+  not "b[5]". This is the SAME element-0-unused convention as the A-array: in **both** 9-slot arrays
+  element 0 is unused/padding and the runtime consumers start at element 1.
 
   (The walk-vs-run footstep choice is gated by an actor locomotion flag and only fires while the actor
   is in a motion state.)
@@ -237,8 +269,9 @@ category base table is **MED**.
   a[1]); a[7]/a[8] have no static consumer. Slots feed the animation layer as `.mot` clip ids.
 - **`motion_ids_b` slot index = actor action, value = SOUND/EFFECT event id (CONFIRMED by use-site).**
   b[1] spawn-sound (category 11), b[2] walk-footstep SFX (category 7), b[3] run-footstep SFX
-  (category 8), b[5] death effect/sound; b[0]/b[6..8] have no static consumer. Slots feed the
-  sound/effect routers — never the animation mixer.
+  (category 8), b[4] death effect/sound; b[0]/b[5..8] have no static consumer. Slots feed the
+  sound/effect routers — never the animation mixer. (By the loader's indexing b[0] = +0x64, so the
+  death slot at +0x74 is **b[4]**, not "b[5]" — the same element-0-unused convention as the A-array.)
 - **The "9 directions" reading is REFUTED** — there is no direction-indexed access to either array.
 
 ## Known unknowns
@@ -248,8 +281,9 @@ category base table is **MED**.
    consumed by a preview/portrait path; no static read of +0x40 confirmed (OPEN-RISK).
 2. **`motion_ids_a[7]`, `a[8]` (+0x5C, +0x60)** — no static fixed-offset consumer; possibly dead, or
    read only by a code path not statically reachable from the actor-visual cluster (OPEN-RISK).
-3. **`motion_ids_b[0]`, `b[6..8]` (+0x64, +0x78..+0x84)** — no static consumer (OPEN-RISK). `b[5]`
-   death effect/sound is MED-HIGH (one consumer found).
+3. **`motion_ids_b[0]` (+0x64) and `b[5..8]` (+0x78..+0x84)** — no static consumer (OPEN-RISK). `b[4]`
+   (+0x74) death effect/sound is MED-HIGH (one consumer found). Note both 9-slot arrays share the
+   element-0-unused convention: b[0] (+0x64) is dead, consumers start at b[1].
 4. **`int_b` (0x10) meaning** — integer field with no static read-site off the record; unresolved.
    (`int_a` at 0x04 is resolved: `skin_class` / SkinClassId — sample-verified.)
 5. **The float fields `float_c..float_g` (0x14, 0x18, 0x1C, 0x20, 0x24)** — no static read-site off the
@@ -273,8 +307,9 @@ category base table is **MED**.
   numeric rule; registration is by explicit list / `IdB` join.
 - **Asset chains:** the actormotion table is the join point for the **mob → skin** and **idle-motion**
   chains: a `mob_id` / actor maps through this table to a skin class and to a motion id, and the
-  motion id resolves to a `data/char/mot/g{id}.mot` file. See the recovered chains documented under
-  character skinning/binding (`Docs/RE/specs/skinning.md`) and the motion file format
+  motion id resolves through the **`motlist.txt` clip registry** (motion id == `.mot` header id_b;
+  files enumerated under `data/char/mot/`) — **not** a `g{id}.mot` sprintf. See the recovered chains
+  documented under character skinning/binding (`Docs/RE/specs/skinning.md`) and the motion file format
   (`Docs/RE/formats/animation.md`).
 - **Motion file format (naming reconciled, semantics CORRECTED here):** `Docs/RE/formats/animation.md`
   documents the same two arrays under the **same `motion_ids_a` / `motion_ids_b`** names. The docs agree

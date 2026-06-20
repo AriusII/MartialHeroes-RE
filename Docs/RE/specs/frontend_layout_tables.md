@@ -282,8 +282,7 @@ origin `(342,289)` + local `(125,151)`. The four spare labels are pre-built empt
 > (디오 logo / `www.doonline.co.kr` URL / dragon ornament / 2 rings on the top panel; lower stone + the
 > credential form host on the bottom panel). A port that hides them after the raise loses the entire
 > frame/banner (the observed end-of-curtain bug). Rest-visible set: background + top frame + bottom curtain
-> + curtain-header ornament + the credential form; only OK/Enter (→ 29) needs input. Dirty source:
-> `_dirty/scenes/login_complete_widgets.md`.
+> + curtain-header ornament + the credential form; only OK/Enter (→ 29) needs input.
 
 - **Edge confidence:** all edges 1..41 and their numeric boundaries are **CONFIRMED (HIGH, static IDA,
   CYCLE 18 Phase A)**, except the **35 → 36 → 37 worker-completion timing**, which is a background-thread
@@ -566,13 +565,13 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 > claimed; do not cite a numeric address for it.
 
 > **`ServerId (+0) == 100` is the special-row sentinel (CORRECTION, static IDA, 2026-06-20 — supersedes
-> the earlier "StatusCode == 100" reading).** `Diamond_LoginWindow_PaintServerList` (0x5fcd09) reads the
-> sentinel from the **+0 server-id field** (`v52 = record[+0]`; the same value fed to the name resolver and
+> the earlier "StatusCode == 100" reading).** `Diamond_LoginWindow_PaintServerList` reads the
+> sentinel from the **+0 server-id field** (`serverId = record[+0]`; the same value fed to the name resolver and
 > the `1..40` range guard), **not** from `+2` status. A record whose `+0` id is 100 is **out of the 1..40
 > name range** → its plate name falls back to msg **5901**, and the painter additionally lights the 3
 > status-color indicator quads around it (see §4 "server_id == 100 gate"). It is **display-only** — it is
 > NOT a selectability gate (the commit guard is `status (+2) == 0 && load (+4) < 2400`, confirmed in
-> `LoginWindow_OnEvent` 0x5fa86a).
+> `LoginWindow_OnEvent`).
 
 **Name resolver** — flat, no multiplier:
 
@@ -581,8 +580,8 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
 | ServerId 1..40 (in range) | `name_id = 5000 + ServerId` (msg bank **5001..5040** for ids 1..40; NO group/channel multiplier) |
 | ServerId out of range | fallback **5901** ("unknown server #n" template, formatted with the id) |
 
-> **Off-by-one (RESOLVED, static IDA, 2026-06-20):** `Server_GetNameString` (0x436a94) builds `v2[1]=msg
-> 5001 … v2[40]=msg 5040` and returns `v2[ServerId]`, so the formula is **`5000 + ServerId`** (ServerId 1 →
+> **Off-by-one (RESOLVED, static IDA, 2026-06-20):** `Server_GetNameString` builds `nameTable[1]=msg
+> 5001 … nameTable[40]=msg 5040` and returns `nameTable[ServerId]`, so the formula is **`5000 + ServerId`** (ServerId 1 →
 > 5001). The earlier "`5001 + ServerId`" wording was off by one; the C# painter already uses `5000 +
 > ServerId`. This closes the documented "5000-vs-5001" nit.
 
@@ -699,7 +698,7 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
   field +0x0C). Record fields (no swap): `+0` server_id (also the name-resolver key), `+2` status,
   `+4` load, `+6` open_time/load-valid flag.
 - **server_id == 100 gate (CORRECTION, static IDA, 2026-06-20 — was "status_code == 100"):** the painter's
-  sentinel test is on the **+0 server-id field** (`v52 = record[+0] == 100`), not `+2` status. A record whose
+  sentinel test is on the **+0 server-id field** (`serverId = record[+0] == 100`), not `+2` status. A record whose
   **id** is 100 is a **display-only special row** — its name resolves to the out-of-range fallback msg 5901
   and the painter shows the 3 status-color indicator quads re-anchored around it (when a "show special"
   flag at `this+0x425` is set), and the commit guard (`status == 0 && load < 2400`) governs selectability
