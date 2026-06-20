@@ -247,6 +247,16 @@ public sealed partial class ClientContext : Node
     public MartialHeroes.Client.Application.World.RegionService RegionService { get; private set; } = null!;
 
     /// <summary>
+    /// The session-scoped character-selection store, shared between <c>GamePacketHandler</c>
+    /// (which fills it from 3/1) and <c>ApplicationUseCases</c> (which reads it on
+    /// <c>SelectCharacterAsync</c> / the 3/14 spawn seam). Exposed for dev diagnostic
+    /// polling (e.g. <see cref="LiveLoginAutoload"/>).
+    ///
+    /// spec: Docs/RE/specs/login_flow.md §3.5 — "caches the chosen slot's record locally … consumed on 3/14".
+    /// </summary>
+    public CharacterSelectionStore? CharacterSelection { get; private set; }
+
+    /// <summary>
     /// The cell-assembly handoff: subscribes to <see cref="SectorLoadedEvent"/> and re-publishes
     /// assembled cells as <see cref="CellAssembledEvent"/>. The <see cref="GameLoop"/> drains this
     /// each frame via <see cref="CellAssemblyHandoff.OnSectorLoaded"/> on every received sector.
@@ -295,6 +305,9 @@ public sealed partial class ClientContext : Node
     // Cancellation source for the engine loop Task.
     private CancellationTokenSource? _loopCts;
     private Task? _loopTask;
+
+    // The inbound frame dispatcher's reader-loop task. Started at construction, drained in _ExitTree.
+    private Task? _inboundTask;
 
     // The late-binding outbound sink shared between ApplicationUseCases and LoginHandshakeDriver.
     // SetTarget is called in OpenGameConnectionAsync once the game TCP connection is established.
@@ -580,11 +593,24 @@ public sealed partial class ClientContext : Node
         //     in large walled areas (e.g. area 2) that exceed the 3×3 ring footprint.
         var streamingService = new SectorStreamingService(terrainSource, bus, StreamQuality.High);
 
-        // 17. Packet handler — orchestrates Domain mutation and event publishing.
+        // 17. Character-selection stores — shared between GamePacketHandler (fills on 3/1) and
+        //     ApplicationUseCases (reads on SelectCharacterAsync / 3/14 spawn seam).
+        //     spec: Docs/RE/specs/login_flow.md §3.5 — "caches the chosen slot's record locally … consumed on 3/14".
+        //     spec: Docs/RE/specs/login_flow.md §5.2 — AccountCharacterState seeds from 3/5 char-count field.
+        var characterSelection = new CharacterSelectionStore();
+        var accountCharacters = new AccountCharacterState();
+        CharacterSelection = characterSelection; // exposed for LiveLoginAutoload roster polling
+        GD.Print("[ClientContext] CharacterSelectionStore + AccountCharacterState constructed and shared. " +
+                 "spec: login_flow.md §3.5 / §5.2.");
+
+        // 17b. Packet handler — orchestrates Domain mutation and event publishing.
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
-        var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver, sceneStateMachine: sceneMachine)
+        var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver,
+            characterSelection: characterSelection,
+            accountCharacters: accountCharacters,
+            sceneStateMachine: sceneMachine)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -617,9 +643,12 @@ public sealed partial class ClientContext : Node
         //     spec: Docs/RE/specs/login_flow.md §3.3 / §7 (token = 10 × versionField + 9 = 21149).
         //     eventBus, lobbyClient, lastServerStore wired so FetchServerListAsync / SelectServerAsync
         //     publish ServerListReceivedEvent and persist Lastserver.
+        //     characterSelection: same instance as the handler's store (shared cache).
+        //     spec: Docs/RE/specs/login_flow.md §3.5 / §5.2.
         var useCases = new ApplicationUseCases(noopSink, world, credentialStore, sessionId,
             versionToken: versionToken, versionSource: null, sceneStateMachine: sceneMachine,
-            eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore);
+            eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore,
+            characterSelection: characterSelection);
         GD.Print(
             $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
             " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
@@ -657,7 +686,19 @@ public sealed partial class ClientContext : Node
             t => GD.PrintErr($"[ClientContext] EngineLoop faulted: {t.Exception}"),
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
 
-        GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop started at 30 Hz.");
+        // Start the inbound frame dispatcher's reader loop on a background task. WITHOUT this, frames
+        // enqueued by DispatcherFrameSink (live socket) and the synthetic feeder (offline) are never
+        // drained/routed — so the 0/0 KeyExchange never reaches the handler and the 1/4 auth reply is
+        // never sent (login could never complete). Shares _loopCts so _ExitTree cancels + drains it
+        // alongside the engine loop. spec: Docs/RE/specs/network_dispatch.md §1/§3 — a single
+        // recv-consumer reader routes each inbound frame through the dispatch tables.
+        Task inboundLoop = dispatcher.RunAsync(_loopCts.Token);
+        _inboundTask = inboundLoop;
+        _ = inboundLoop.ContinueWith(
+            t => GD.PrintErr($"[ClientContext] InboundDispatcher faulted: {t.Exception}"),
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+
+        GD.Print("[ClientContext] Application graph constructed. EventBus ready. EngineLoop + inbound dispatcher started.");
     }
 
     // Stored so InputRouter can wire the world handler after initialisation.
@@ -793,10 +834,14 @@ public sealed partial class ClientContext : Node
         // (the running RunAsync may touch the disposed CTS). Wait bounded so a stuck loop cannot
         // hang the editor/headless shutdown; the AggregateException wrapping the expected
         // OperationCanceledException is swallowed. spec: Docs/RE/specs/game_loop.md §6 (loop teardown).
+        // Complete the inbound dispatcher channel so its reader drains queued frames and exits cleanly.
+        Dispatcher?.Complete();
+
         _loopCts?.Cancel();
         try
         {
             _loopTask?.Wait(TimeSpan.FromSeconds(2));
+            _inboundTask?.Wait(TimeSpan.FromSeconds(2));
         }
         catch (AggregateException)
         {
@@ -806,6 +851,7 @@ public sealed partial class ClientContext : Node
         _loopCts?.Dispose();
         _loopCts = null;
         _loopTask = null;
+        _inboundTask = null;
 
         // Dispose the catalogue loader (releases the VFS memory-mapped archive).
         _catalogueLoader?.Dispose();
@@ -978,6 +1024,9 @@ file sealed class DispatcherFrameSink : IFrameSink
 
     public void OnFrame(SessionId sessionId, uint packedOpcode, ReadOnlySpan<byte> payload)
     {
+        // Diagnostic trace of every inbound opcode (CYCLE 4 live-loop instrument). spec: opcodes.md.
+        GD.Print($"[Net←] {(ushort)(packedOpcode >> 16)}/{(ushort)(packedOpcode & 0xFFFF)} payload={payload.Length}B");
+
         // Reconstruct the 8-byte header + payload frame that InboundFrameDispatcher.Enqueue expects.
         // spec: Docs/RE/specs/crypto.md §2 — +0 u32 LE size (total incl. header), +4 u16 major, +6 u16 minor.
         int totalSize = 8 + payload.Length; // spec: crypto.md §2 — size includes the 8-byte header

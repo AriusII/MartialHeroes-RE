@@ -181,14 +181,27 @@ notes: |
     host/port split happens later when the credential blob is assembled for the secure-context
     builder (see specs/login_flow.md). [CODE-CONFIRMED: 30 bytes copied; SPACE-delimited host/port]
 
-      +0 (30B) endpoint_token : fixed char[30] ASCII "<host> <port>" naming the GAME server,
-                                NUL-padded, consumed as one string token by the credential build.
+    [LIVE-CONFIRMED 2026-06-20 + IDA-RECONFIRMED] The 30 (0x1E) is a fixed COPY CAP over a
+    zero-filled destination, NOT a minimum payload length. There is NO `len >= 30` guard anywhere in
+    the reader: it receives exactly (total_size - 8) payload bytes, LZ4-decompresses into a large
+    zero-filled scratch, then memcpy's a CONSTANT 30 bytes (content + trailing zero padding) and
+    consumes the result as a NUL-terminated C string. A live channel-endpoint reply against the
+    replica decompressed to ONLY 23 bytes and parsed correctly. => an implementation MUST tolerate a
+    payload shorter than 30 (read up to 30, stop at the first NUL); requiring >= 30 is a bug (this
+    was a real defect in the C# LobbyClient, fixed CYCLE 4). The resolved GAME endpoint observed was
+    a DOTTED-QUAD host with a port handed out FRESH per channel query (e.g. 211.196.150.4:11402 /
+    :11405 / :11407 across runs) -- i.e. NOT 10000+id; the channel QUERY port is 10000+id (10004 for
+    server 4), but the GAME port carried in the token differs and varies per query.
+
+      +0 (<=30B) endpoint_token : char[30] copy CAP, ASCII "<host> <port>" naming the GAME server,
+                                NUL-terminated within the cap, consumed as one string token. The
+                                decompressed payload may be SHORTER than 30 (live: 23B).
 
     NEEDS-CAPTURE on this record:
-      - the concrete host token form (DNS name vs dotted quad) -- the GAME connect uses
-        gethostbyname so both forms work; the literal the server hands out is capture-pending;
+      - host token form: LIVE shows a DOTTED-QUAD (211.196.150.4); the GAME connect uses
+        gethostbyname so a DNS name would also work, but the replica hands out a dotted quad;
       - whether the payload carries a SINGLE endpoint or a trailing ARRAY of channel records --
-        only the first 30 bytes are read, so a single-endpoint reply is plausible but unconfirmed.
+        only the first 30 bytes are read; the live 23-byte reply (< one 30B slot) indicates SINGLE.
 
     COUPLING: the connect target for THIS query is htons(10000 + selected server_id) against the
     resolved lobby host IP; the 30-byte endpoint token fetched here then feeds the subsequent

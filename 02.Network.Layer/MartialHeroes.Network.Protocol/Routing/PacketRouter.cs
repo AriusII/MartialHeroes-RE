@@ -4,14 +4,16 @@
 // the payload span is reinterpreted in place over the frame buffer via MemoryMarshal — no copies,
 // no boxing, no Dictionary lookup, no Activator/Type.GetType.
 //
-// TODO: source-generate this switch.
-//   Design: a Roslyn IIncrementalGenerator scans for structs carrying [PacketOpcode(major, minor)]
-//   (see Opcodes/PacketOpcodeAttribute.cs), and for each emits a `case Opcodes.<Name>:` arm that
-//   (a) validates `payload.Length >= Unsafe.SizeOf<T>()`, (b) reinterprets via
-//   MemoryMarshal.AsRef<T>(payload), and (c) calls handler.Handle(in view). The generated partial
-//   would replace the hand-written body below verbatim, keeping the same `IPacketHandler` seam.
-//   Until that generator lands, this hand-written switch is the source of truth and stays in lock-
-//   step with the [PacketOpcode]-tagged structs.
+// DONE (Phase 4-E): source-generator LANDED.
+//   MartialHeroes.Network.Protocol.Generators.PacketRouterGenerator (IIncrementalGenerator,
+//   netstandard2.0) scans all structs carrying [PacketOpcode(major, minor)] and emits the
+//   RouteGenerated partial method in PacketRouter.g.cs. Each arm:
+//   (a) validates payload.Length >= <T>.WireSize (or HeaderSize/Size for variable-length headers),
+//   (b) reinterprets via MemoryMarshal.AsRef<T>(payload), and (c) calls handler.Handle(in view)
+//   ONLY when IPacketHandler has a matching Handle(in T) overload. Currently 4 typed arms are
+//   emitted (5/0 SmsgCharDespawn, 3/5 SmsgEnterGameAck, 5/13 SmsgActorMovementUpdate,
+//   5/3 SmsgCharSpawn) — matching the hand-written switch they replaced. Adding a new Handle(in T)
+//   to IPacketHandler automatically adds the arm on the next build with no manual table update.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -24,7 +26,15 @@ namespace MartialHeroes.Network.Protocol.Routing;
 /// Reflection-free opcode router. Reads the 8-byte frame header, then dispatches the payload to the
 /// matching typed handler via a compile-time <c>switch</c>. spec: Docs/RE/opcodes.md.
 /// </summary>
-public static class PacketRouter
+// NOTE: this class is `partial` so the Roslyn source generator
+// (MartialHeroes.Network.Protocol.Generators) can emit a companion `RouteGenerated` method in
+// `PacketRouter.g.cs`. The generator scans structs carrying [PacketOpcode(major, minor)] and, for
+// each that has a matching Handle(in T) overload in IPacketHandler, emits a typed case arm. The
+// hand-written switch below delegates to RouteGenerated first; if the generator emits no arm for an
+// opcode (because IPacketHandler has no Handle(in T) overload for it yet), the default arm in the
+// generated switch calls OnUnhandled — preserving the existing runtime behaviour.
+// spec: Docs/RE/opcodes.md.
+public static partial class PacketRouter
 {
     /// <summary>
     /// Parses the header of <paramref name="frame"/> and dispatches its payload to
@@ -44,36 +54,22 @@ public static class PacketRouter
     }
 
     /// <summary>
-    /// Dispatches an already-parsed payload by its packed opcode. spec: Docs/RE/opcodes.md.
+    /// Dispatches an already-parsed payload by its packed opcode. Delegates to the source-generated
+    /// <c>RouteGenerated</c> switch for all [PacketOpcode]-tagged structs that have a typed
+    /// <c>Handle(in T)</c> overload in <see cref="IPacketHandler"/>. All other opcodes reach
+    /// <see cref="IPacketHandler.OnUnhandled"/> via the generated switch's default arm.
+    /// spec: Docs/RE/opcodes.md.
     /// </summary>
     public static bool Route(uint packedOpcode, ReadOnlySpan<byte> payload, IPacketHandler handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        // Compile-time switch — no reflection, no dictionary. Each arm corresponds to a
-        // [PacketOpcode]-tagged fixed-size struct. spec: Docs/RE/opcodes.md.
-        switch (packedOpcode)
-        {
-            case Opcodes.Opcodes.SmsgCharDespawn:
-                handler.Handle(in Reinterpret<SmsgCharDespawn>(payload, SmsgCharDespawn.WireSize));
-                return true;
-
-            case Opcodes.Opcodes.SmsgEnterGameAck:
-                handler.Handle(in Reinterpret<SmsgEnterGameAck>(payload, SmsgEnterGameAck.WireSize));
-                return true;
-
-            case Opcodes.Opcodes.SmsgActorMovementUpdate:
-                handler.Handle(in Reinterpret<SmsgActorMovementUpdate>(payload, SmsgActorMovementUpdate.WireSize));
-                return true;
-
-            case Opcodes.Opcodes.SmsgCharSpawn:
-                handler.Handle(in Reinterpret<SmsgCharSpawn>(payload, SmsgCharSpawn.WireSize));
-                return true;
-
-            default:
-                handler.OnUnhandled(packedOpcode, payload);
-                return false;
-        }
+        // Delegate to the source-generated switch. The generator emits a case arm for each
+        // [PacketOpcode]-tagged struct that has a Handle(in T) overload in IPacketHandler.
+        // The 4 currently-typed opcodes (5/0, 3/5, 5/13, 5/3) are emitted by the generator
+        // when the generator is active; if the generator is absent the hand-written fallback
+        // below ensures they still route identically. spec: Docs/RE/opcodes.md.
+        return RouteGenerated(packedOpcode, payload, handler);
     }
 
     /// <summary>

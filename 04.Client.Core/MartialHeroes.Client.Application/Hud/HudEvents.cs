@@ -191,11 +191,30 @@ public sealed record HudVitalsEvent(
 /// <param name="Value">The visible damage / heal magnitude.</param>
 /// <param name="Kind">Animation kind in <see cref="MinKind"/>..<see cref="MaxKind"/> (0..7). spec: Docs/RE/specs/combat.md §12.3.</param>
 /// <param name="IsCrit">True for a critical hit (crit-style size / colour). spec: Docs/RE/specs/combat.md §12.3.</param>
+/// <param name="SkillId">
+/// The casting skill / entity key (5/52 header +0x0C), so the producer can pass the action's skill
+/// through without re-deriving it. Defaults to 0 for legacy / non-5/52 producers.
+/// spec: Docs/RE/packets/5-52_actor_skill_action.yaml (SkillId @0x0C).
+/// </param>
+/// <param name="RawDamageCandidateA">
+/// CAPTURE-PENDING raw 64-bit damage candidate read from 5/52 target record +0x10/+0x14
+/// (handlers.md §17.11 reading). NOT decoded into <see cref="Value"/> — the offset/polarity is
+/// ambiguous, so both candidates are carried raw for a capture to disambiguate.
+/// spec: Docs/RE/specs/handlers.md §17.11 / Docs/RE/packets/5-52_actor_skill_action.yaml.
+/// </param>
+/// <param name="RawDamageCandidateB">
+/// CAPTURE-PENDING raw 64-bit damage candidate read from 5/52 target record +0x14/+0x18
+/// (the 5-52.yaml reading). See <see cref="RawDamageCandidateA"/>.
+/// spec: Docs/RE/packets/5-52_actor_skill_action.yaml (§RECORD OFFSET CORRECTION).
+/// </param>
 public sealed record CombatTextEvent(
     ActorKey TargetKey,
     int Value,
     byte Kind,
-    bool IsCrit) : IHudEvent
+    bool IsCrit,
+    uint SkillId = 0u,
+    long RawDamageCandidateA = 0L,
+    long RawDamageCandidateB = 0L) : IHudEvent
 {
     /// <summary>Lowest valid animation kind. spec: Docs/RE/specs/combat.md §12.3 (kind range 0..7).</summary>
     public const byte MinKind = 0; // spec: Docs/RE/specs/combat.md §12.3 (animation kind 0..7)

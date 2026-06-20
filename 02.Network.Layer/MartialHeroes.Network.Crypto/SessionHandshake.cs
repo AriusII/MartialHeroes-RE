@@ -78,11 +78,12 @@ public static class SessionHandshake
     /// </summary>
     public readonly struct KeyExchange
     {
-        public KeyExchange(BigInteger modulus, BigInteger exponent, int modulusByteLength, uint scalar1, uint scalar2)
+        public KeyExchange(BigInteger modulus, BigInteger exponent, int modulusByteLength, int blockSizeK, uint scalar1, uint scalar2)
         {
             Modulus = modulus;
             Exponent = exponent;
             ModulusByteLength = modulusByteLength;
+            BlockSizeK = blockSizeK;
             Scalar1 = scalar1;
             Scalar2 = scalar2;
         }
@@ -93,8 +94,15 @@ public static class SessionHandshake
         /// <summary>Server RSA public exponent <c>e</c> (reconstructed from big-endian digits).</summary>
         public BigInteger Exponent { get; }
 
-        /// <summary>Wire byte width of the modulus digit array (<c>L1</c>); the PKCS#1 block size <c>k</c>.</summary>
+        /// <summary>Wire byte width of the modulus digit array (<c>L1</c>). NOTE: NOT the PKCS#1 block size — see <see cref="BlockSizeK"/>.</summary>
         public int ModulusByteLength { get; }
+
+        /// <summary>
+        /// The PKCS#1 block size <c>k</c> — sourced from the 0/0 blob's header B (<c>blob[2:4]</c>, LE
+        /// u16), NOT recomputed from the modulus digit width. The type-2 block is built to <c>k − 1</c>
+        /// bytes. spec: Docs/RE/specs/crypto.md §6.2.2 (CORRECTED CYCLE 4 — header B carries k), §6.3.
+        /// </summary>
+        public int BlockSizeK { get; }
 
         /// <summary>First trailing 4-byte server scalar (token/nonce/session-class). Stored, not interpreted.</summary>
         public uint Scalar1 { get; }
@@ -125,7 +133,9 @@ public static class SessionHandshake
                 nameof(payload));
         }
 
-        // header A(2) ‖ header B(2): opaque per-value tags, ignored. spec §6.2.1, §6.2.2.
+        // header A(2): opaque tag, ignored. header B(2): the PKCS#1 block size k (LE u16), consumed by
+        // the credential encrypt. spec §6.2.2 (CORRECTED CYCLE 4 — header B carries k, NOT opaque).
+        int blockSizeK = BinaryPrimitives.ReadUInt16LittleEndian(payload.Slice(HeaderTagBytes, HeaderTagBytes));
         int cursor = HeaderTagBytes + HeaderTagBytes;
 
         // [u32 LE L1] ‖ modulus[L1] (big-endian digits). spec §6.2.1, §6.2.3.
@@ -168,7 +178,7 @@ public static class SessionHandshake
         cursor += ScalarBytes;
         uint scalar2 = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(cursor, ScalarBytes));
 
-        return new KeyExchange(modulus, exponent, l1, scalar1, scalar2);
+        return new KeyExchange(modulus, exponent, l1, blockSizeK, scalar1, scalar2);
     }
 
     /// <summary>
@@ -229,8 +239,9 @@ public static class SessionHandshake
     {
         ArgumentNullException.ThrowIfNull(paddingRng);
 
-        // Step 1 — PKCS#1 v1.5 type-2 padding to a block of size k − 1. spec §6.3.
-        int blockLength = keyExchange.ModulusByteLength - 1;
+        // Step 1 — PKCS#1 v1.5 type-2 padding to a block of size k − 1, where k = header B from the 0/0
+        // blob (NOT the modulus digit width). spec §6.2.2 (CORRECTED CYCLE 4), §6.3.
+        int blockLength = keyExchange.BlockSizeK - 1;
         byte[] paddedBlock = BuildType2Block(blockLength, credential, paddingRng);
 
         // Step 2 — RSA public-key exponentiation: c = m^e mod n, m = padded block as big-endian int.

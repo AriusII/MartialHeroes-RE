@@ -6,13 +6,14 @@
 // </auto-generated>
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using MartialHeroes.Network.Protocol.Opcodes;
 
 namespace MartialHeroes.Network.Protocol.Packets;
 
 /// <summary>
-/// >
 /// Wire layout per <c>packets/3-13_char_status_update.yaml</c>.
 /// </summary>
+[PacketOpcode(3, 13)] // spec: Docs/RE/packets/3-13_char_status_update.yaml (opcode 3/13 = 0x3000d)
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SmsgCharStatusUpdate
 {

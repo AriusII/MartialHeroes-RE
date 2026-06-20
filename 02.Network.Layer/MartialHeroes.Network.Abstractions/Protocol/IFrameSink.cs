@@ -19,9 +19,13 @@ namespace MartialHeroes.Network.Abstractions.Protocol;
 /// need to defer processing must copy to a pooled buffer first.
 /// </para>
 /// <para>
-/// Design: <c>Network.Protocol</c>'s <c>PacketRouter</c> will reference this interface (adding a
-/// downward dependency Protocol -&gt; Abstractions) once this project is stable, replacing its local
-/// <c>IPacketHandler</c> seam.
+/// Decision (Phase 4-E): keep both seams. <c>IFrameSink</c> (Abstractions, the transport→protocol
+/// byte boundary) and <c>IPacketHandler</c> (<c>Network.Protocol</c>, typed zero-copy dispatch)
+/// coexist by design. Unifying would require a Protocol→Abstractions downward reference and moving
+/// the typed packet structs; deferred indefinitely as unnecessary — the bridge is: transport calls
+/// <c>IFrameSink.OnFrame</c> → the frame-sink implementation calls
+/// <c>PacketRouter.Route(packedOpcode, payload, IPacketHandler)</c> → typed <c>Handle</c> or
+/// <c>OnUnhandled</c>. No Protocol→Abstractions reference is being added.
 /// </para>
 /// </remarks>
 public interface IFrameSink

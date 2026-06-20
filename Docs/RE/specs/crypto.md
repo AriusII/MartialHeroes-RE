@@ -385,7 +385,7 @@ The blob is consumed strictly as follows:
 | Sub-offset | Width | Field | Meaning |
 |---|---|---|---|
 | 0 | 2 | header A | Per-value serialization tag for value #1 (the modulus). Opaque — see 6.2.2. |
-| 2 | 2 | header B | Per-value serialization tag for value #2 (the exponent). Opaque — see 6.2.2. |
+| 2 | 2 | header B | **Read as a little-endian u16 = the PKCS#1 block size `k`** (the type-2 block is built to `k − 1` bytes, §6.3). **NOT opaque** — see 6.2.2 (CORRECTED CYCLE 4). |
 | 4 | 4 | `L1` (u32, little-endian) | Byte length of the modulus digit array. |
 | 8 | `L1` | modulus digits | Big-endian digit bytes of `n` (see 6.2.3). |
 | 8 + `L1` | 4 | `L2` (u32, little-endian) | Byte length of the exponent digit array. |
@@ -401,18 +401,21 @@ only enforced invariant is the sum `L1 + L2 == 42`. A ~40-byte (~320-bit) modulu
 opaque 2-byte per-value headers, then `[LE length][digits]` for the modulus and again for the
 exponent, asserting the blob consumed exactly its declared end.
 
-#### 6.2.2 The two 2-byte per-value headers (header A / header B) — opaque, ignorable
+#### 6.2.2 The two 2-byte per-value headers — header A opaque, **header B carries `k`**
 
-Header A and header B are **per-value serialization tags** emitted by the bignum library's own
-serialized-integer format (a sign / word-count / type descriptor that prefixes each serialized big
-integer). The client **stores them but never reads them back**: they do **not** participate in the
-bignum reconstruction, the modular exponentiation, or the reply serialization. The RSA computation is
-driven **entirely** by the `[u32 len][digits]` bodies.
+Header A (`blob[0:2]`) is a per-value serialization tag from the bignum library's serialized-integer
+format (a sign / word-count / type descriptor). On the reply path it is **stored but never read back**
+and may be treated as an ignorable opaque 2-byte prefix.
 
-**Implication for the implementer:** for **decoding** the server's key and for **building** the
-client's reply, header A and header B can be treated as an **ignorable opaque 2-byte prefix** per
-value. (They would matter only for a byte-exact *re-encode* of the blob, which this client never
-performs; that would additionally require the library's tag convention, which is not specified here.)
+**Header B (`blob[2:4]`, read as a little-endian u16) is NOT opaque — it is read and used as the
+PKCS#1 block size `k`** (the modulus byte-width the type-2 block targets; the block is built to
+`k − 1` bytes — §6.3). **CORRECTED CYCLE 4 (binary re-RE on 263bd994):** the earlier "both headers
+opaque / ignorable" reading was wrong. The original sources `k` from header B (`k = LE_u16(blob[2:4])`),
+**NOT** from the imported modulus's own digit width `L1`. An implementation MUST carry header B through
+the `0/0` parse and size the PKCS#1 block as `header_B − 1`; it must **not** recompute `k` from the
+modulus bignum. (In a live `0/0` against the replica, header B equalled `L1` = 28 — they agree there —
+but they are independent wire values and are not guaranteed equal across servers, so read header B.)
+The RSA bignum reconstruction and the modexp remain driven entirely by the `[u32 len][digits]` bodies.
 
 #### 6.2.3 Bignum byte order — pinned
 
@@ -511,7 +514,7 @@ A small helper whitens the reply (Step 4 above) just before it enters the normal
 | XOR key | **`0x29`** (41) | The 32-bit XOR key applied to each dword: `dword ^= 0x00000029` (little-endian byte pattern `29 00 00 00` repeated). |
 | Selector | **`0x40`** (64) | Input to the complement test below. (It is the **selector**, not a length.) |
 | Complement test | `(selector & key & 0x1F) == 1` | Selects whether the key is replaced by its one's-complement. With the recovered values: `0x40 & 0x29 & 0x1F = 0`, which is **not 1**, so the **key is used as-is (`0x29`)**; the complement branch is **not taken** for this client. |
-| Whitened span | The **entire dword-aligned payload**: `floor(payload_size / 4)` dwords, i.e. `payload_size & ~3` bytes. **No fixed length cap** — any trailing 1–3 bytes are left untouched. |
+| Whitened span | The **ENTIRE payload, rounded UP** — the loop count is the header-inclusive wire size `(8 + payload_size) >> 2` dwords starting at the payload, so **every** payload byte is covered (the final partial dword IS processed; nothing is left untouched). The original overruns up to ~8 bytes into unsent scratch past the payload end. An exact-length buffer must therefore whiten the trailing 1–3 bytes too (XOR the key's matching low byte into the final multiple-of-4 byte). **CORRECTED CYCLE 4 (live oracle): the earlier "`floor(payload/4)` / trailing 1–3 bytes untouched" reading was WRONG — it left the last ciphertext byte un-whitened, so the server de-whitened it into corruption → password-independent `1/4` login rejection (server replied `3/100`, never `3/1`).** |
 
 Net effect for this client: **XOR every 32-bit word of the reply payload with `0x00000029`** over
 `size >> 2` dwords. To decode, re-apply the identical XOR (XOR is its own inverse). The complement
@@ -714,7 +717,7 @@ server-exchanged keys), consistent with offline file authentication. Out of inte
 | RSA plaintext | The **staged login credential (password) string** — not a nonce, not derived. Only randomness is the PKCS#1 type-2 padding. |
 | `0/0` payload | 54-byte key blob + 4-byte scalar #1 + 4-byte scalar #2 = **62 bytes**. |
 | Key blob layout | `header A(2) ‖ header B(2) ‖ [u32 LE L1] ‖ modulus[L1] ‖ [u32 LE L2] ‖ exponent[L2]`; **`L1 + L2 = 42`**. |
-| Two 2-byte headers | Opaque per-value serialization tags; **stored but never read** → ignorable for decode and reply. |
+| Two 2-byte headers | Header A opaque (stored, never read). **Header B (`blob[2:4]`, LE u16) = the PKCS#1 block size `k`** — read and consumed by the credential encrypt (block = `k−1`). CORRECTED CYCLE 4; see 6.2.2. |
 | Digit byte order | Bignum digit arrays (`n`, `e`, ciphertext `c`) **big-endian**; length prefixes **little-endian** u32. |
 | Reply padding | PKCS#1 v1.5 **block type 2** (random nonzero PS, **PS ≥ 8**); padded block = **`modulus_bytes − 1`**. |
 | Reply exponentiation | `c = m^e mod n` with server-sent `e`, `n`. |

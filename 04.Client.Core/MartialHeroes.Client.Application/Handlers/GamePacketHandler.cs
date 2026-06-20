@@ -53,6 +53,7 @@ public sealed class GamePacketHandler : IPacketHandler
     private readonly LocalPlayerState? _localPlayer;
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly AccountCharacterState? _accountCharacters;
+    private readonly IHudEventHub? _hudEventHub;
 
     /// <summary>
     /// The combat-stat recompute seam: invoked whenever an equip / buff / level change should re-accumulate
@@ -138,7 +139,8 @@ public sealed class GamePacketHandler : IPacketHandler
         LocalPlayerState? localPlayer = null,
         CharacterSelectionStore? characterSelection = null,
         AccountCharacterState? accountCharacters = null,
-        SceneStateMachine? sceneStateMachine = null)
+        SceneStateMachine? sceneStateMachine = null,
+        IHudEventHub? hudEventHub = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -148,6 +150,7 @@ public sealed class GamePacketHandler : IPacketHandler
         _localPlayer = localPlayer; // optional: only needed for the skill/buff/combat subsystems
         _characterSelection = characterSelection; // optional: only needed for the 3/1 cache + 3/14 spawn
         _accountCharacters = accountCharacters; // optional: tracks the create/delete char-count deltas
+        _hudEventHub = hudEventHub; // optional: combat-text / buff HUD stream sink (5/52, 4/102)
     }
 
     // -------------------------------------------------------------------------
@@ -279,14 +282,21 @@ public sealed class GamePacketHandler : IPacketHandler
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// 3/5 — enter-world acknowledgement. Drives the scene spine to Load (state 2). 3/5 is
-    /// state-agnostic: it forces state 2 regardless of the live scene. spec:
+    /// 3/5 — enter-world acknowledgement / post-login account-ack. Drives the scene spine to Load
+    /// (state 2) and seeds the account character-count authoritatively from char_count@40. 3/5 is
+    /// state-agnostic and UNSOLICITED — it is processed regardless of any prior 1/9 request. spec:
     /// Docs/RE/specs/client_runtime.md §7.5.2; Docs/RE/packets/3-5_enter_game_response.yaml.
     /// </summary>
     public void Handle(in SmsgEnterGameAck packet)
     {
-        _ = packet.BillingFlag; // available for a future use case; the scene transition is the effect here.
+        _ = packet.BillingFlag; // available for a future use case; billing behavior is not invented here.
         _sceneStateMachine?.OnEnterGameAck();
+
+        // Seed the account char-count authoritatively from char_count@40. Set() clamps 0..5, so passing the
+        // raw u32 is safe; the int cast is guarded against overflow. 3/5 is unsolicited (NOT gated on a prior
+        // 1/9). spec: Docs/RE/specs/login_flow.md §3.4 / §5.2 (3/5 char_count@40 seeds the account char-count);
+        // §1 step 7 (3/5 is unsolicited, NOT gated on a prior 1/9).
+        _accountCharacters?.Set((int)Math.Min(packet.CharacterCount, (uint)int.MaxValue));
     }
 
     // -------------------------------------------------------------------------
@@ -337,14 +347,295 @@ public sealed class GamePacketHandler : IPacketHandler
     }
 
     // -------------------------------------------------------------------------
+    // 4/4 — area entity snapshot (17-byte header + tag loop)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/4 — area entity snapshot. Reinterprets the fixed 17-byte area header, then walks the variable
+    /// tag loop from payload[<see cref="SmsgAreaEntitySnapshot.HeaderSize"/>..]: each iteration reads one
+    /// tag u8 (tag == 0 ends the loop) and the tag-specific record. Tags 1/2/3 carry a 892-byte actor
+    /// record (= 8-byte prefix + 880-byte SpawnDescriptor core + 4-byte trailer per §21), with the sort
+    /// carried by the tag (1 = PC, 2 = mob, 3 = NPC) and the actor lookup key at record +0; each spawns
+    /// and registers an actor and publishes <see cref="ActorSpawnedEvent"/> exactly like 5/3. Tags 4/6/9
+    /// only advance the cursor by their record size (their semantics are live-pending — no fabricated
+    /// event). The loop is bounded and stops on any short read. spec: Docs/RE/specs/handlers.md §10 + §21.
+    /// </summary>
+    private bool HandleAreaEntitySnapshot(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < SmsgAreaEntitySnapshot.HeaderSize)
+        {
+            return false;
+        }
+
+        // Header is read for the area-centre recenter coords; only the two f32s are consumed. spec: §10.
+        ref readonly SmsgAreaEntitySnapshot header = ref MemoryMarshal.AsRef<SmsgAreaEntitySnapshot>(payload);
+        _ = header.AreaCentreX; // recenter coords are presentation state; the actor spawns carry absolute XZ. spec: §10.
+        _ = header.AreaCentreZ;
+
+        // The 892-byte actor record splits 8 (prefix) + 880 (descriptor core) + 4 (trailer). spec: §21.
+        const int actorPrefixSize = 8; // entity id-key u32 at +0 within this prefix. spec: handlers.md §21.
+
+        int cursor = SmsgAreaEntitySnapshot.HeaderSize;
+        const int maxIterations = 256; // bound the loop; tag == 0 normally terminates. spec: §10 (loop ends on tag 0).
+        for (int i = 0; i < maxIterations; i++)
+        {
+            if (cursor >= payload.Length)
+            {
+                break; // short read — stop.
+            }
+
+            byte tag = payload[cursor];
+            cursor++;
+
+            if (tag == 0)
+            {
+                break; // tag == 0 terminates the loop. spec: handlers.md §10.
+            }
+
+            switch (tag)
+            {
+                case 1: // player character (sort 1). spec: handlers.md §10 + §21.
+                case 2: // mob (sort 2). spec: handlers.md §10 + §21.
+                case 3: // NPC (sort 3). spec: handlers.md §10 + §21.
+                    if (cursor + SmsgAreaEntitySnapshot.ActorRecordSize > payload.Length)
+                    {
+                        return true; // short read — consumed what we could.
+                    }
+
+                    ReadOnlySpan<byte> actorRecord =
+                        payload.Slice(cursor, SmsgAreaEntitySnapshot.ActorRecordSize);
+                    cursor += SmsgAreaEntitySnapshot.ActorRecordSize;
+
+                    // Entity id-key u32 is in the 8-byte prefix at record +0; the sort is the tag. spec: §21.
+                    uint actorId = BinaryPrimitives.ReadUInt32LittleEndian(actorRecord[..sizeof(uint)]);
+                    var key = new ActorKey(actorId, ToEntitySort(tag));
+
+                    // The 880-byte SpawnDescriptor core follows the 8-byte prefix. spec: handlers.md §21.
+                    ReadOnlySpan<byte> descriptorBytes =
+                        actorRecord.Slice(actorPrefixSize, SpawnDescriptorReader.Size);
+                    var reader = new SpawnDescriptorReader(descriptorBytes);
+
+                    string name = reader.ReadName();
+                    ushort level = reader.ReadLevel();
+                    uint currentHp = reader.ReadCurrentHp();
+                    uint currentMp = reader.ReadCurrentMp();
+                    uint currentStamina = reader.ReadCurrentStamina();
+                    ushort serverClass = reader.ReadServerClass();
+
+                    // Float -> fixed at the boundary; world Y forced to 0. spec: actor.md (coords float, Y = 0).
+                    Vector3Fixed position =
+                        Vector3Fixed.FromFloat(reader.ReadWorldX(), 0f, reader.ReadWorldZ());
+
+                    var spawnInfo = new SpawnInfo(key, level, currentHp, currentMp, currentStamina, serverClass);
+                    VitalStats vitals = VitalsResolver(spawnInfo);
+
+                    var actor = new Actor(key, level, vitals, currentHp, currentMp, currentStamina, position);
+                    _world.Add(actor);
+
+                    _eventBus.Publish(new ActorSpawnedEvent(
+                        key, name, level, actor.Position, actor.CurrentHp, actor.MaxHp, serverClass));
+                    break;
+
+                case 4: // ground item — live-pending: advance the cursor, do not invent its event. spec: §10.
+                    if (cursor + SmsgAreaEntitySnapshot.GroundItemRecordSize > payload.Length)
+                    {
+                        return true;
+                    }
+
+                    cursor += SmsgAreaEntitySnapshot.GroundItemRecordSize;
+                    break;
+
+                case 6: // guild overlay — live-pending: advance the cursor, do not invent its event. spec: §10.
+                    if (cursor + SmsgAreaEntitySnapshot.GuildRecordSize > payload.Length)
+                    {
+                        return true;
+                    }
+
+                    cursor += SmsgAreaEntitySnapshot.GuildRecordSize;
+                    break;
+
+                case 9: // title overlay — live-pending: advance the cursor, do not invent its event. spec: §10.
+                    if (cursor + SmsgAreaEntitySnapshot.TitleRecordSize > payload.Length)
+                    {
+                        return true;
+                    }
+
+                    cursor += SmsgAreaEntitySnapshot.TitleRecordSize;
+                    break;
+
+                default:
+                    // An unknown tag has no recoverable record size; stop the loop to avoid mis-stepping.
+                    // spec: handlers.md §10 (only tags 1/2/3/4/6/9 are enumerated).
+                    return true;
+            }
+        }
+
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/52 — actor skill action (24-byte header + 36-byte target records)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 5/52 — actor skill action / combat result. Reinterprets the fixed 24-byte header, then loops
+    /// <see cref="SmsgActorSkillAction.TargetCount"/> records of stride
+    /// <see cref="SmsgActorSkillAction.TargetRecordStride"/> (36) from
+    /// payload[<see cref="SmsgActorSkillAction.HeaderSize"/>..]. Per record it reads TargetSubKey @+0x00
+    /// (u8, spec-agreed) and TargetKey @+0x04 (u32, spec-agreed); the 64-bit visible-damage value offset
+    /// is AMBIGUOUS, so it reads BOTH candidate i64s raw and forwards them unmodified (no polarity/decode
+    /// chosen). For each target it publishes a <see cref="CombatTextEvent"/> on the HUD hub (when wired)
+    /// carrying the target key + skill id, with the raw damage candidates passed through. spec:
+    /// Docs/RE/packets/5-52_actor_skill_action.yaml; Docs/RE/specs/handlers.md §17.11 / §20.3.
+    /// </summary>
+    private bool HandleActorSkillAction(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < SmsgActorSkillAction.HeaderSize)
+        {
+            return false;
+        }
+
+        ref readonly SmsgActorSkillAction header = ref MemoryMarshal.AsRef<SmsgActorSkillAction>(payload);
+        uint skillId = header.SkillId; // header +0x0C (CONFIRMED). spec: 5-52 (SkillId @0x0C).
+
+        ReadOnlySpan<byte> records = payload[SmsgActorSkillAction.HeaderSize..];
+
+        // TargetCount is bounded (0, 0x28]; iterate as far as the buffer allows. spec: 5-52 (TargetCount @0x14).
+        for (int t = 0; t < header.TargetCount; t++)
+        {
+            int recordStart = t * SmsgActorSkillAction.TargetRecordStride;
+            if (recordStart + SmsgActorSkillAction.TargetRecordStride > records.Length)
+            {
+                break; // short read — stop.
+            }
+
+            ReadOnlySpan<byte> record = records.Slice(recordStart, SmsgActorSkillAction.TargetRecordStride);
+
+            // Spec-agreed offsets: sub-key u8 @+0x00, key u32 @+0x04. spec: 5-52 (TargetSubKeyOffset/TargetKeyOffset).
+            byte targetSubKey = record[SmsgActorSkillAction.TargetSubKeyOffset];
+            uint targetKey = BinaryPrimitives.ReadUInt32LittleEndian(
+                record.Slice(SmsgActorSkillAction.TargetKeyOffset, sizeof(uint)));
+
+            // live-pending: damage offset ambiguous (handlers.md §17.11 +0x10/+0x14 vs 5-52.yaml +0x14/+0x18).
+            // Read BOTH candidate i64s raw; do NOT pick a polarity or decode damage here.
+            long damageCandidateA =
+                record.Length >= 0x10 + sizeof(long)
+                    ? BinaryPrimitives.ReadInt64LittleEndian(record.Slice(0x10, sizeof(long)))
+                    : 0L; // §17.11 reading: +0x10/+0x14.
+            long damageCandidateB =
+                record.Length >= 0x14 + sizeof(long)
+                    ? BinaryPrimitives.ReadInt64LittleEndian(record.Slice(0x14, sizeof(long)))
+                    : 0L; // 5-52.yaml reading: +0x14/+0x18.
+
+            var key = new ActorKey(targetKey, ToEntitySort(targetSubKey));
+
+            // No committed damage semantics: forward target key + skill id, raw candidates passed through.
+            // Value left 0 (undecoded), Kind 0, IsCrit false until a capture pins the damage offset/polarity.
+            _hudEventHub?.PublishCombatText(new CombatTextEvent(
+                key,
+                Value: 0,
+                Kind: CombatTextEvent.MinKind,
+                IsCrit: false,
+                SkillId: skillId,
+                RawDamageCandidateA: damageCandidateA,
+                RawDamageCandidateB: damageCandidateB));
+        }
+
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/102 — full skill/state-window snapshot (30 buff records)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 4/102 — full skill/state-window snapshot. Fixed 476-byte block; the 30 buff records are FIELDS
+    /// inside the struct (so this is a typed Handle, not a span loop). Rebuilds the 30-slot HUD buff bar:
+    /// each non-empty record (BuffXXId != 0) becomes a populated <see cref="BuffSlot"/>; empty records
+    /// become <see cref="BuffSlot.EmptyBuffId"/>. The per-record 12-byte param roles are
+    /// CAPTURE-UNVERIFIED (competing {id,X,Y} vs {id,?,duration,stack,flag}), so the duration is passed
+    /// as a live-pending candidate (null) rather than inventing duration/stack semantics. Published to
+    /// the HUD hub (when wired) via <see cref="IHudEventHub.PublishBuffState"/>. spec:
+    /// Docs/RE/packets/4-102_buff_state.yaml.
+    /// </summary>
+    public void Handle(in SmsgSkillWindowStateUpdate packet)
+    {
+        if (_hudEventHub is null)
+        {
+            return; // no HUD sink wired — nothing to publish (the state is server-owned, no Domain mutation).
+        }
+
+        // Rebuild all 30 slots in wire order. spec: 4-102 (clear all 30, re-show active ones).
+        var slots = System.Collections.Immutable.ImmutableArray.CreateBuilder<BuffSlot>(
+            SmsgSkillWindowStateUpdate.BuffRecordCount);
+
+        // live-pending: the per-record 12-byte param roles (X/Y vs duration/stack/flag) are CAPTURE-UNVERIFIED.
+        // Pass the id through; carry the duration as a null candidate (do NOT invent ms/s/stack semantics).
+        // spec: 4-102_buff_state.yaml (competing {id,X,Y} vs {id,?,duration,stack,flag}).
+        AddBuffSlot(slots, packet.Buff00Id);
+        AddBuffSlot(slots, packet.Buff01Id);
+        AddBuffSlot(slots, packet.Buff02Id);
+        AddBuffSlot(slots, packet.Buff03Id);
+        AddBuffSlot(slots, packet.Buff04Id);
+        AddBuffSlot(slots, packet.Buff05Id);
+        AddBuffSlot(slots, packet.Buff06Id);
+        AddBuffSlot(slots, packet.Buff07Id);
+        AddBuffSlot(slots, packet.Buff08Id);
+        AddBuffSlot(slots, packet.Buff09Id);
+        AddBuffSlot(slots, packet.Buff10Id);
+        AddBuffSlot(slots, packet.Buff11Id);
+        AddBuffSlot(slots, packet.Buff12Id);
+        AddBuffSlot(slots, packet.Buff13Id);
+        AddBuffSlot(slots, packet.Buff14Id);
+        AddBuffSlot(slots, packet.Buff15Id);
+        AddBuffSlot(slots, packet.Buff16Id);
+        AddBuffSlot(slots, packet.Buff17Id);
+        AddBuffSlot(slots, packet.Buff18Id);
+        AddBuffSlot(slots, packet.Buff19Id);
+        AddBuffSlot(slots, packet.Buff20Id);
+        AddBuffSlot(slots, packet.Buff21Id);
+        AddBuffSlot(slots, packet.Buff22Id);
+        AddBuffSlot(slots, packet.Buff23Id);
+        AddBuffSlot(slots, packet.Buff24Id);
+        AddBuffSlot(slots, packet.Buff25Id);
+        AddBuffSlot(slots, packet.Buff26Id);
+        AddBuffSlot(slots, packet.Buff27Id);
+        AddBuffSlot(slots, packet.Buff28Id);
+        AddBuffSlot(slots, packet.Buff29Id);
+
+        _hudEventHub.PublishBuffState(BuffStateEvent.FromSlots(slots.MoveToImmutable()));
+    }
+
+    /// <summary>
+    /// Appends one 4/102 buff record as a <see cref="BuffSlot"/>: a populated slot when the catalog id is
+    /// non-zero, else the empty sentinel. The remaining-time candidate is null (live-pending — the
+    /// duration field role is CAPTURE-UNVERIFIED). spec: Docs/RE/packets/4-102_buff_state.yaml.
+    /// </summary>
+    private static void AddBuffSlot(
+        System.Collections.Immutable.ImmutableArray<BuffSlot>.Builder slots, uint buffId)
+    {
+        if (buffId == 0u)
+        {
+            slots.Add(new BuffSlot(BuffSlot.EmptyBuffId, RemainingTicks: null)); // empty slot. spec: 4-102.
+            return;
+        }
+
+        // The catalog id is a u32 on the wire but the HUD slot keys it as u16; take the low word.
+        // spec: 4-102_buff_state.yaml (buff id; HUD BuffSlot.BuffId is u16). live-pending: duration role.
+        slots.Add(new BuffSlot(unchecked((ushort)buffId), RemainingTicks: null));
+    }
+
+    // -------------------------------------------------------------------------
     // Unhandled
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Opcodes the typed <see cref="PacketRouter"/> seam does not dispatch (it routes only the core 4).
-    /// We decode the additional S2C packets here by reinterpreting the payload via
-    /// <see cref="MemoryMarshal.AsRef{T}"/> over the Network.Protocol struct, and drive the login
-    /// handshake on 0/0. Anything else is counted via the injected sink; never throws, never blocks.
+    /// Opcodes the typed <see cref="PacketRouter"/> seam does not dispatch — the variable-length S2C
+    /// messages whose handlers must read beyond their fixed header (chat text body, the 4/4 tag loop, the
+    /// 5/52 target-record loop, per-field decoders) plus the login key exchange (0/0). We decode these
+    /// from the raw payload span here and drive the login handshake on 0/0. Anything else is counted via
+    /// the injected sink; never throws, never blocks. Fixed-size opcodes whose handler reads entirely
+    /// within their struct are routed by the generator to a typed <c>Handle(in T)</c> overload instead.
     /// spec: Docs/RE/opcodes.md.
     /// </summary>
     public void OnUnhandled(uint packedOpcode, ReadOnlySpan<byte> payload)
@@ -355,86 +646,21 @@ public sealed class GamePacketHandler : IPacketHandler
                 HandleKeyExchange(payload);
                 return;
 
-            case Opcodes.SmsgActorVitalsAndPairState: // 5/53 — actor vitals
-                if (payload.Length >= SmsgActorVitalsAndPairState.WireSize)
-                {
-                    HandleVitals(in MemoryMarshal.AsRef<SmsgActorVitalsAndPairState>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgActorSpawnExtended: // 5/1 — extended actor spawn
-                if (payload.Length >= SmsgActorSpawnExtended.WireSize)
-                {
-                    HandleSpawnExtended(in MemoryMarshal.AsRef<SmsgActorSpawnExtended>(payload));
-                    return;
-                }
-
-                break;
-
             case Opcodes.SmsgGameStateTick: // 4/1 — world-entry snapshot / state tick
                 HandleGameStateTick(payload);
                 return;
 
-            case Opcodes.SmsgStatUpdate: // 4/29 — stat update
-                if (payload.Length >= SmsgStatUpdate.WireSize)
+            case Opcodes.SmsgAreaEntitySnapshot: // 4/4 — area entity snapshot (17B header + tag loop)
+                if (HandleAreaEntitySnapshot(payload))
                 {
-                    HandleStatUpdate(in MemoryMarshal.AsRef<SmsgStatUpdate>(payload));
                     return;
                 }
 
                 break;
 
-            case Opcodes.SmsgLevelUp: // 5/32 — level up
-                if (payload.Length >= SmsgLevelUp.WireSize)
+            case Opcodes.SmsgActorSkillAction: // 5/52 — actor skill action (24B header + 36B target records)
+                if (HandleActorSkillAction(payload))
                 {
-                    HandleLevelUp(in MemoryMarshal.AsRef<SmsgLevelUp>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgEquipItemResult: // 4/12 — equip/unequip result
-                if (payload.Length >= SmsgEquipItemResult.WireSize)
-                {
-                    HandleEquipResult(in MemoryMarshal.AsRef<SmsgEquipItemResult>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgItemSlotStateAck: // 4/22 — item-slot state ack
-                if (payload.Length >= SmsgItemSlotStateAck.WireSize)
-                {
-                    HandleItemSlotState(in MemoryMarshal.AsRef<SmsgItemSlotStateAck>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgNpcBuyOrAcquireAck: // 4/19 — NPC buy / acquire ack
-                if (payload.Length >= SmsgNpcBuyOrAcquireAck.WireSize)
-                {
-                    HandleNpcAcquire(in MemoryMarshal.AsRef<SmsgNpcBuyOrAcquireAck>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgSkillHotbarSlotSet: // 5/33 — hotbar slot overwrite
-                if (payload.Length >= SmsgSkillHotbarSlotSet.WireSize)
-                {
-                    HandleHotbarSlotSet(in MemoryMarshal.AsRef<SmsgSkillHotbarSlotSet>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgSkillHotbarAssignResult: // 4/41 — hotbar assign result
-                if (payload.Length >= SmsgSkillHotbarAssignResult.WireSize)
-                {
-                    HandleHotbarAssignResult(in MemoryMarshal.AsRef<SmsgSkillHotbarAssignResult>(payload));
                     return;
                 }
 
@@ -505,46 +731,9 @@ public sealed class GamePacketHandler : IPacketHandler
 
                 break;
 
-            case Opcodes.SmsgCharSpawnResult: // 3/14 — enter-game spawn result (16-byte block)
-                if (payload.Length >= SmsgCharSpawnResult.WireSize)
+            case Opcodes.SmsgSceneEntityUpdate: // 3/4 — in-place roster refill (same 3+N×981 decode as 3/1)
+                if (HandleSceneEntityUpdate(payload))
                 {
-                    HandleCharSpawnResult(in MemoryMarshal.AsRef<SmsgCharSpawnResult>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgCharManageResult: // 3/7 — char manage / delete result (8-byte block)
-                if (payload.Length >= SmsgCharManageResult.WireSize)
-                {
-                    HandleCharManageResult(in MemoryMarshal.AsRef<SmsgCharManageResult>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgRenameCharResult: // 3/6 — rename result (12-byte block)
-                if (payload.Length >= SmsgRenameCharResult.WireSize)
-                {
-                    HandleRenameCharResult(payload);
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgCharCreateResult: // 3/23 — character-create result (12-byte block)
-                if (payload.Length >= SmsgCharCreateResult.WireSize)
-                {
-                    HandleCharCreateResult(in MemoryMarshal.AsRef<SmsgCharCreateResult>(payload));
-                    return;
-                }
-
-                break;
-
-            case Opcodes.SmsgCharActionResult: // 3/100 — generic char-management action/result code
-                if (payload.Length >= SmsgCharActionResult.WireSize)
-                {
-                    HandleCharActionResult(in MemoryMarshal.AsRef<SmsgCharActionResult>(payload));
                     return;
                 }
 
@@ -589,7 +778,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// maxima by Domain) and emits <see cref="ActorVitalsChangedEvent"/>. The sort value 8 normalises
     /// to 1. spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
     /// </summary>
-    private void HandleVitals(in SmsgActorVitalsAndPairState packet)
+    public void Handle(in SmsgActorVitalsAndPairState packet)
     {
         byte rawSort = packet.Sort == 8 ? (byte)1 : packet.Sort; // spec: 5-53 (sort 8 -> 1)
         var key = new ActorKey(packet.ActorId, ToEntitySort(rawSort));
@@ -620,7 +809,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// boundary, registers the Domain actor, and emits <see cref="ActorSpawnedEvent"/>. spec:
     /// Docs/RE/packets/5-1_actor_spawn_extended.yaml; Docs/RE/structs/spawn_descriptor.md.
     /// </summary>
-    private void HandleSpawnExtended(in SmsgActorSpawnExtended packet)
+    public void Handle(in SmsgActorSpawnExtended packet)
     {
         EntitySort sort = ToEntitySort(packet.Sort);
         var key = new ActorKey(packet.ActorId, sort);
@@ -660,7 +849,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// handler publishes the snapshot without re-deriving anything. spec:
     /// Docs/RE/packets/4-29_stat_update.yaml.
     /// </summary>
-    private void HandleStatUpdate(in SmsgStatUpdate packet)
+    public void Handle(in SmsgStatUpdate packet)
     {
         const byte applied = 1; // ResultOk == 1 applies the update. spec: 4-29.
         if (packet.ResultOk != applied)
@@ -685,7 +874,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// <see cref="ActorLeveledUpEvent"/>. HP/MP are packed as two i32 halves in one i64 (HP = low,
     /// MP = high). spec: Docs/RE/packets/5-32_level_up.yaml (HpMpPacked, HIGH CONFIDENCE core).
     /// </summary>
-    private void HandleLevelUp(in SmsgLevelUp packet)
+    public void Handle(in SmsgLevelUp packet)
     {
         var key = new ActorKey(packet.ActorId, ToEntitySort(packet.Sort));
 
@@ -715,7 +904,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// player and triggers a combat-stat recompute (equipment changed); ToSlot 15 forces a title-slot
     /// visual rebuild. spec: Docs/RE/specs/handlers.md §3 (4/12); Docs/RE/structs/item.md.
     /// </summary>
-    private void HandleEquipResult(in SmsgEquipItemResult packet)
+    public void Handle(in SmsgEquipItemResult packet)
     {
         const byte ok = 1; // result 1 = success. spec: handlers.md §3 (4/12 result byte).
         const byte titleSlot = 15; // ToSlot 15 = title/gear visual rebuild. spec: handlers.md §3 / item.md.
@@ -740,7 +929,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// triggered (the slot's stats may feed the aggregate). spec: Docs/RE/specs/handlers.md §13 Group B
     /// (4/22); Docs/RE/structs/item.md.
     /// </summary>
-    private void HandleItemSlotState(in SmsgItemSlotStateAck packet)
+    public void Handle(in SmsgItemSlotStateAck packet)
     {
         const byte ok = 1; // result 1 = ok. spec: item.md (4/22 result byte).
         bool success = packet.Result == ok;
@@ -762,7 +951,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// 4/19 — NPC buy / inventory-acquire ack. Publishes the acquire outcome (slot, item actor id, gold).
     /// spec: Docs/RE/specs/handlers.md §13 Group B (4/19); Docs/RE/structs/item.md.
     /// </summary>
-    private void HandleNpcAcquire(in SmsgNpcBuyOrAcquireAck packet)
+    public void Handle(in SmsgNpcBuyOrAcquireAck packet)
     {
         const byte ok = 1; // result 1 = ok. spec: item.md (4/19 result byte).
         bool success = packet.Result == ok;
@@ -781,7 +970,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// snapshot. Ignored when no <see cref="LocalPlayerState"/> is wired. spec: Docs/RE/specs/handlers.md §4
     /// (5/33); Docs/RE/structs/skill.md.
     /// </summary>
-    private void HandleHotbarSlotSet(in SmsgSkillHotbarSlotSet packet)
+    public void Handle(in SmsgSkillHotbarSlotSet packet)
     {
         // HotbarSlot must be < 240. spec: structs/skill.md (hotbar_slot < 0xF0).
         if (packet.HotbarSlot >= SmsgSkillHotbarSlotSet.HotbarSlotCount)
@@ -809,7 +998,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// 4/41 — result of a client-initiated hotbar assignment. spec: Docs/RE/specs/handlers.md §13 Group C
     /// (4/41); Docs/RE/structs/skill.md.
     /// </summary>
-    private void HandleHotbarAssignResult(in SmsgSkillHotbarAssignResult packet)
+    public void Handle(in SmsgSkillHotbarAssignResult packet)
     {
         const byte ok = 1; // gate 1 = apply/ok. spec: structs/skill.md (4/41 gate).
         bool success = packet.Gate == ok;
@@ -1119,6 +1308,30 @@ public sealed class GamePacketHandler : IPacketHandler
         // A fresh list replaces the prior roster (and any stale chosen-slot cache). spec: login_flow.md §3.2.
         _characterSelection?.Reset();
 
+        // 3/1 and 3/4 both reach this same 3 + N×981 roster decode. spec: login_flow.md §1 step 7 / §5.1.
+        System.Collections.Immutable.ImmutableArray<CharacterListSlot> slots =
+            DecodeAndRetainRoster(in header, payload);
+
+        // 3/1 CharacterList FORCES a Select (state 4) re-entry, accepted from Load/Select. This is the
+        // 3/1-only behaviour; 3/4 does NOT force a scene change. spec: client_runtime.md §7.5.2; login_flow.md §1 step 7.
+        _sceneStateMachine?.OnCharacterListReceived();
+
+        _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, slots));
+        return true;
+    }
+
+    /// <summary>
+    /// Shared roster decode for the 3+N×981 character list, reached by BOTH <c>3/1 SmsgCharacterList</c>
+    /// and <c>3/4 SmsgSceneEntityUpdate</c> (the in-place refill). Walks the slot mask over exactly 5
+    /// slots (indices 0..4), decodes each set slot's embedded 880-byte SpawnDescriptor into a
+    /// <see cref="CharacterListSlot"/>, and retains each RAW per-slot record into the
+    /// <see cref="_characterSelection"/> store. The caller owns the <c>Reset()</c>, the scene transition
+    /// (3/1 only), and the <see cref="CharacterListEvent"/> publish. spec: Docs/RE/specs/login_flow.md
+    /// §1 step 7 / §5.1 / §3.2; Docs/RE/packets/3-1_character_list.yaml; Docs/RE/structs/spawn_descriptor.md.
+    /// </summary>
+    private System.Collections.Immutable.ImmutableArray<CharacterListSlot> DecodeAndRetainRoster(
+        in SmsgCharacterListHeader header, ReadOnlySpan<byte> payload)
+    {
         var builder = System.Collections.Immutable.ImmutableArray.CreateBuilder<CharacterListSlot>();
         int cursor = SmsgCharacterListHeader.HeaderSize;
 
@@ -1155,11 +1368,48 @@ public sealed class GamePacketHandler : IPacketHandler
                 new CharacterSlotRecord(slot, record[..descriptorAndStatsSize], slotFlag));
         }
 
-        // 3/1 CharacterList forces a Select (state 4) re-entry, accepted from Load/Select.
-        // spec: client_runtime.md §7.5.2.
-        _sceneStateMachine?.OnCharacterListReceived();
+        return builder.ToImmutable();
+    }
 
-        _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, builder.ToImmutable()));
+    // -------------------------------------------------------------------------
+    // 3/4 — scene-entity update / in-place roster refill (gated by form_byte0 == 1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// 3/4 — the in-place character-roster refill. The 3-byte header
+    /// <c>[form_byte0][channel_byte1][slot_mask_byte2]</c> is byte-identical to the 3/1 header, so it is
+    /// read through <see cref="SmsgCharacterListHeader"/>; <c>form_byte0</c> is the header's first byte.
+    /// Per spec, 3/4 decodes the roster ONLY when <c>form_byte0 == 1</c> (the in-place refill form);
+    /// other forms are consumed as a no-op. Unlike 3/1, 3/4 does NOT force a scene change. On the refill
+    /// form it resets the selection store, runs the shared 3+N×981 roster decode, and republishes the
+    /// <see cref="CharacterListEvent"/> so the char-select screen repopulates in place. spec:
+    /// Docs/RE/specs/login_flow.md §5.1, §1 step 7.
+    /// </summary>
+    private bool HandleSceneEntityUpdate(ReadOnlySpan<byte> payload)
+    {
+        // The 3/4 header is byte-identical to the 3/1 header (form, channel, slot mask). spec: §1 step 7 / §5.1.
+        if (payload.Length < SmsgCharacterListHeader.HeaderSize)
+        {
+            return false;
+        }
+
+        ref readonly SmsgCharacterListHeader header =
+            ref MemoryMarshal.AsRef<SmsgCharacterListHeader>(payload);
+
+        // GATE: form_byte0 is the header's first byte. 3/4 is the in-place refill gated on form_byte0 == 1;
+        // any other form is consumed as a no-op refill. spec: Docs/RE/specs/login_flow.md §5.1, §1 step 7.
+        const byte refillForm = 1;
+        if (header.ServerId != refillForm)
+        {
+            return true; // consumed; non-form-1 is a no-op refill (no scene change, no decode). spec: §1 step 7.
+        }
+
+        // In-place refill: replace the prior roster, run the SAME roster decode 3/1 uses, and republish so
+        // the char-select screen repopulates. NO forced scene change (3/4 != 3/1). spec: §5.1, §1 step 7.
+        _characterSelection?.Reset();
+        System.Collections.Immutable.ImmutableArray<CharacterListSlot> slots =
+            DecodeAndRetainRoster(in header, payload);
+        _eventBus.Publish(new CharacterListEvent(header.ServerId, header.ChannelId, slots));
         return true;
     }
 
@@ -1174,7 +1424,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// The local player is registered as the controlled actor (<see cref="ClientWorld.LocalActorKey"/>),
     /// so the move/skill use cases can source its position. spec: Docs/RE/specs/login_flow.md §3.5 / §5.3.
     /// </summary>
-    private void HandleCharSpawnResult(in SmsgCharSpawnResult packet)
+    public void Handle(in SmsgCharSpawnResult packet)
     {
         // Result 0 = failure (a timed message is shown). spec: login_flow.md §5.3.
         if (packet.Result == 0)
@@ -1268,7 +1518,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// format a "wait HH:MM" delete-cooldown message on the blocked path. spec:
     /// Docs/RE/specs/login_flow.md §5.5; Docs/RE/opcodes.md (3/7 SmsgCharManageResult).
     /// </summary>
-    private void HandleCharManageResult(in SmsgCharManageResult packet)
+    public void Handle(in SmsgCharManageResult packet)
     {
         const byte success = 1; // result 1 = success path. spec: §5.5.
         const byte deleteConfirmSubtype = 2; // subtype 2 = delete-confirm. spec: §5.5.
@@ -1303,9 +1553,8 @@ public sealed class GamePacketHandler : IPacketHandler
     /// 3/6 — rename-character result. A 12-byte block: result code, error code, padding, slot index, and an unverified dword.
     /// spec: Docs/RE/packets/3-6_rename_char_result.yaml.
     /// </summary>
-    private void HandleRenameCharResult(ReadOnlySpan<byte> payload)
+    public void Handle(in SmsgRenameCharResult packet)
     {
-        var packet = MemoryMarshal.AsRef<SmsgRenameCharResult>(payload);
         bool ok = packet.Result != 0;
 
         if (ok)
@@ -1329,7 +1578,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// count is incremented; on failure Code is an error code (0xC8..0xD4). spec:
     /// Docs/RE/specs/login_flow.md §5.4; Docs/RE/packets/SmsgCharCreateResult.
     /// </summary>
-    private void HandleCharCreateResult(in SmsgCharCreateResult packet)
+    public void Handle(in SmsgCharCreateResult packet)
     {
         const byte success = 1; // result 1 = success. spec: §5.4.
         bool ok = packet.Result == success;
@@ -1354,7 +1603,7 @@ public sealed class GamePacketHandler : IPacketHandler
     /// the exact result-code table (0, 1..4/7, 202/203/232, out-of-range). spec:
     /// Docs/RE/opcodes.md; Docs/RE/specs/client_runtime.md §7.5.2.
     /// </summary>
-    private void HandleCharActionResult(in SmsgCharActionResult packet)
+    public void Handle(in SmsgCharActionResult packet)
     {
         int result = packet.Result > int.MaxValue ? int.MaxValue : (int)packet.Result;
         _sceneStateMachine?.OnCharActionResult(result, _world.LocalActor is not null);

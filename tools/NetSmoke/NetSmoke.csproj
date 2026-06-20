@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        Standalone diagnostic tool — NOT added to MartialHeroes.slnx.
+        Purpose: live-integration smoke test for the layer-02 network stack.
+        spec: Docs/RE/specs/crypto.md, Docs/RE/specs/login_flow.md, Docs/RE/specs/network_dispatch.md
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <AssemblyName>NetSmoke</AssemblyName>
+        <RootNamespace>MartialHeroes.Tools.NetSmoke</RootNamespace>
+        <Nullable>enable</Nullable>
+        <!-- Self-contained single binary for portability — no separate runtime install needed. -->
+        <SelfContained>false</SelfContained>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Layer 02: wire contracts, framing + lobby, in-place cipher, LZ4 codec, handshake -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Abstractions\MartialHeroes.Network.Abstractions.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol\MartialHeroes.Network.Protocol.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Crypto\MartialHeroes.Network.Crypto.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Transport.Pipelines\MartialHeroes.Network.Transport.Pipelines.csproj"/>
+    </ItemGroup>
+
+</Project>

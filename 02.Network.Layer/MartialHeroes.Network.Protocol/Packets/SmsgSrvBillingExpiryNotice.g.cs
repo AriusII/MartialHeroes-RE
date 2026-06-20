@@ -6,13 +6,14 @@
 // </auto-generated>
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using MartialHeroes.Network.Protocol.Opcodes;
 
 namespace MartialHeroes.Network.Protocol.Packets;
 
 /// <summary>
-/// >
 /// Wire layout per <c>packets/1-19_srv_billing_expiry_notice.yaml</c>.
 /// </summary>
+[PacketOpcode(1, 19)] // spec: Docs/RE/packets/1-19_srv_billing_expiry_notice.yaml (opcode 1/19 = 0x10013)
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SmsgSrvBillingExpiryNotice
 {

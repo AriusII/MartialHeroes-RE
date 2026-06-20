@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 FontBootstrap="*res://Autoload/FontBootstrap.cs"
 ClientContext="*res://Autoload/ClientContext.cs"
+LiveLoginAutoload="*res://Autoload/LiveLoginAutoload.cs"
 McpBridgeGame="*res://mcp_bridge_game.gd"
 
 [display]

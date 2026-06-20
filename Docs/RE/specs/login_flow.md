@@ -143,8 +143,33 @@ The ordered lifecycle is:
    replies inline with `1/4 CmsgAuthReply` (RSA-encrypted staged credential). The session is then
    marked secure. (Cited — `specs/crypto.md` §6.)
 
-7. **Character list.** Server → client `3/1 SmsgCharacterList` drives the client into the
-   **character-select scene** (Section 3). The list enumerates the account's character slots.
+   **Login outcome surface (no dedicated login-result opcode).** After sending `1/4` the client is
+   **fully passive** — it sends nothing and waits for the server to drive the outcome by *which frame
+   it pushes next* (static-IDA confirmed CYCLE 4; wire VALUE semantics live/capture-pending):
+   - **SUCCESS** ⟹ an **unsolicited `3/1 SmsgCharacterList` push** → character-select (step 7).
+   - **Hard FAILURE** ⟹ a connection-state event (network event **type-15 / sub-code 102**) →
+     disconnect, bounded by a **~30s watchdog**.
+   - **Coded outcome** ⟹ a `3/100 SmsgCharActionResult` carrying a 4-byte code (select-screen
+     message / connect-progress prime; see `net_contracts.md` Appendix A.4). A coded `3/100` is
+     **neither** a char-list **nor** a disconnect — the connection stays open and a message is shown.
+
+   *(Live note, CYCLE 4: a `1/4` to the replica with a valid dev account returned `3/100 code=10`,
+   password-independent — under live investigation as duplicate-session vs a 1/4 build defect; a
+   successful login would instead surface as an unsolicited `3/1`.)*
+
+7. **Character list.** Server → client the **character roster** (3-byte header
+   `[form_byte0][channel_byte1][slot_mask_byte2]` + `popcount(slot_mask) × 981`-byte records, §5.1)
+   drives the **character-select scene**. **LIVE + IDA CONFIRMED (CYCLE 4):** the same roster decode is
+   reached by **two** minors — `3/1` (force-select: zeroes the scratch, always populates, forces
+   GameState→char-select) and **`3/4`** (in-place refill, gated by `form_byte0 == 1`, no forced scene
+   change). The live replica delivers the post-login roster **unsolicited on `3/4`**, immediately
+   followed by **`3/5`** — a 44-byte post-login **account-ack** (name@0, billing@28, char_count@40; +4
+   trailing) that nudges the scene toward Load — itself unsolicited (NOT gated on a prior `1/9`). A live
+   login (dev account) returned `3/4` (2946B = `3 + 3×981`, mask `0x07` = 3 chars, first name "jeonsa")
+   → `3/5` ("xwdvg26") → later `3/100` code 21 (generic select-screen notice; meaning live-pending).
+   Both `3/1` and `3/4` MUST route to the same 3+N×981 roster decode + char-select population. (The
+   earlier CYCLE-10 "3/4 = SmsgSceneEntityUpdate" label was a misname — the handler decodes the roster,
+   not a scene-entity update; proposed canonical name `SmsgCharacterListUpdate`.)
 
 8. **Slot management (optional).** From the select scene the player may **create**, **delete /
    manage**, or **rename** a character; the server answers with the corresponding character-management

@@ -231,22 +231,26 @@ public sealed class LobbyClient : ILobbyClient
 
         (ReadOnlyMemory<byte> decompressed, _) = ReceiveAndDecompress(socket, out _);
 
-        if (decompressed.Length < ChannelEndpointLength)
+        if (decompressed.Length == 0)
         {
             throw new InvalidOperationException(
-                $"Lobby channel-endpoint payload too short: got {decompressed.Length} bytes, " +
-                $"need at least {ChannelEndpointLength}. spec: Docs/RE/packets/lobby.yaml RECORD SHAPE B.");
+                "Lobby channel-endpoint payload was empty. spec: Docs/RE/packets/lobby.yaml RECORD SHAPE B.");
         }
 
-        // First 30 bytes = NUL-padded ASCII "host port".
-        // spec: Docs/RE/specs/login_flow.md §7 — "Channel-endpoint copy length = 30 (0x1E) bytes".
-        ReadOnlySpan<byte> endpointBytes = decompressed.Span[..ChannelEndpointLength];
+        // The channel-endpoint string is a NUL-terminated ASCII "host port" inside a fixed copy
+        // window of AT MOST 30 (0x1E) bytes. The 30 is the client's COPY-BUFFER CAP, NOT a minimum
+        // payload length: the live replica returns a SHORTER decompressed payload (observed: 23 bytes)
+        // when "host port" + NUL fits in fewer bytes. Read up to 30 but tolerate fewer; stop at the NUL.
+        // spec correction (server/binary wins — CYCLE 4 live oracle): login_flow.md §7's "copy length
+        // = 30" is a CAP, not a guaranteed length. To be promoted in lobby.yaml / login_flow.md §7.
+        int window = Math.Min(decompressed.Length, ChannelEndpointLength);
+        ReadOnlySpan<byte> endpointBytes = decompressed.Span[..window];
 
-        // Find the actual content length (before any NUL padding).
+        // Find the actual content length (before any NUL padding/terminator).
         int contentLength = endpointBytes.IndexOf((byte)0);
         if (contentLength < 0)
         {
-            contentLength = ChannelEndpointLength;
+            contentLength = window;
         }
 
         // Decode as ASCII. The spec says ASCII "host port"; the client is Korean but the endpoint

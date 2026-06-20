@@ -26,21 +26,37 @@ public static class HandshakeWhitening
     private const byte ComplementTriggerValue = 1;
 
     /// <summary>
-    /// XOR every aligned 32-bit dword of <paramref name="authReplyPayload"/> with the whitening key.
-    /// Operates on <c>floor(length / 4)</c> dwords (i.e. <c>length &amp; ~3</c> bytes); any trailing
-    /// 1–3 bytes are left untouched. In place, zero-allocation, and an involution.
-    /// spec: Docs/RE/specs/crypto.md §6.4 (whitened span = whole dword-aligned payload, no cap).
+    /// XOR every 32-bit dword of <paramref name="authReplyPayload"/> with the whitening key, covering
+    /// the WHOLE payload — the final partial dword (1–3 trailing bytes) is processed too, NOT skipped.
+    /// In place, zero-allocation, and an involution.
+    /// <para>
+    /// The original sizes the loop by the header-inclusive wire size <c>(8 + payload) &gt;&gt; 2</c>
+    /// dwords starting at the payload, so it whitens every payload byte (overrunning into unsent
+    /// scratch). On an exact-length buffer we reproduce the SENT effect by whitening all aligned dwords
+    /// and then the trailing partial dword's bytes. spec: Docs/RE/specs/crypto.md §6.4 — CORRECTED
+    /// CYCLE 4 (live oracle): leaving the trailing 1–3 bytes un-whitened corrupted the last ciphertext
+    /// byte on the server → password-independent <c>1/4</c> login rejection.
+    /// </para>
     /// </summary>
     public static void XorWhitenDwords(Span<byte> authReplyPayload)
     {
         uint key = ResolveDwordKey();
+        int length = authReplyPayload.Length;
 
-        int dwordBytes = authReplyPayload.Length & ~3; // size >> 2 dwords, in bytes. §6.4
-        for (int offset = 0; offset < dwordBytes; offset += sizeof(uint))
+        int full = length & ~3; // aligned dword bytes. spec §6.4
+        for (int offset = 0; offset < full; offset += sizeof(uint))
         {
             Span<byte> slot = authReplyPayload.Slice(offset, sizeof(uint));
             uint value = BinaryPrimitives.ReadUInt32LittleEndian(slot);
             BinaryPrimitives.WriteUInt32LittleEndian(slot, value ^ key);
+        }
+
+        // Trailing partial dword (1–3 bytes): XOR each remaining byte with the matching little-endian
+        // key byte. For the recovered key 0x00000029 only the low byte (the final multiple-of-4 byte)
+        // flips; this matches the original whitening the last payload byte. spec: crypto.md §6.4.
+        for (int offset = full; offset < length; offset++)
+        {
+            authReplyPayload[offset] ^= (byte)(key >> (8 * (offset - full)));
         }
     }
 

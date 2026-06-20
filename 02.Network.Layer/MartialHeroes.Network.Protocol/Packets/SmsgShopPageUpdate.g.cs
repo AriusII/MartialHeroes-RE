@@ -6,6 +6,7 @@
 // </auto-generated>
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using MartialHeroes.Network.Protocol.Opcodes;
 
 namespace MartialHeroes.Network.Protocol.Packets;
 
@@ -13,6 +14,7 @@ namespace MartialHeroes.Network.Protocol.Packets;
 /// Inbound money/gold refresh for the product/crafting panel. The handler reads exactly one u32 (the player's current gold), stores it to player-state, and triggers a repaint of the active product panel. It carries NO recipe grid and NO page array -- the recipe list is populated from a client-cached vector filled elsewhere (area/NPC load); 3/8 only re-drives the money value and the panel repaint.
 /// Wire layout per <c>packets/3-8_shop_page_update.yaml</c>.
 /// </summary>
+[PacketOpcode(3, 8)] // spec: Docs/RE/packets/3-8_shop_page_update.yaml (opcode 3/8 = 0x30008)
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SmsgShopPageUpdate
 {
