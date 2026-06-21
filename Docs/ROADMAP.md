@@ -170,11 +170,17 @@ code-reviewer + render-reviewer PASS. Windowed passive screenshots captured (git
 **Server-list functionally proven** (real data fetched, 2-plate render per spec, click→TCP) but **not captured
 visually** (transient — auto-login selects in ~10 frames; needs a pause-after-server-list hook for a shot).
 
+**P3.3 char-select avatar visibility — FIXED (`b0c4480`).** Two real defects: (a) camera used `LookAt`
+where §3.5 is a free-look KEYFRAMED camera (per-KF Euler) — aimed past the actors + tilted down; fixed to
+per-keyframe Euler (§3.5.3); (b) mesh Y-recentre used the animated frame-0 floor but the mesh shows in
+REST pose at spawn — sank slot 2; fixed to `GetMeshAabb()`. PreviewScale ×3→×6 (unit reconcile).
+Windowed-verified: avatars stand visible + grounded on the map000 platform, idle animating.
+
 ## CYCLE 9 — Owed next (remaining front-end debt)
-1. **Char-select 3D actor on-screen VISIBILITY.** The 3 actors now decode+build correctly (class ∈{1..4},
-   skeletons/clips/invariants PASS) but do **not clearly appear** in the windowed frame — a Godot
-   **camera-framing / scale / Y-placement** issue (distinct from the now-fixed decode). The scene (map000
-   platform, torches, fog, 2D HUD) renders; the avatars need to be made visible/framed.
+1. **Slot-2 (arius) appearance / per-slot `.skn` resolution.** The avatar is now visible + grounded but
+   renders a **wrong-shape mesh** (flat sliver) — an appearance-resolution debt: the per-slot variant/equip
+   must resolve the correct `.skn` (the §3.3.7 overlay build from `+0x34/+0x2C/+0x2E/+0x58`). Route:
+   layer-04 surface + assets appearance lane.
 2. **Dedicated Server-list screenshot** — add a temp "pause-after-server-list" capture path so the real
    live plates can be eyeballed (functionally already proven).
 3. **Equip overlays** on the char-select preview (the §3.3.7 per-part build) — `EquipGids` now surfaced;
