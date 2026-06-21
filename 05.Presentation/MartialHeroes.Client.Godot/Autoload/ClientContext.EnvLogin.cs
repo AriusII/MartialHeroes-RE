@@ -64,11 +64,11 @@ public sealed partial class ClientContext
     {
         // Read once at startup; never re-read mid-session.
         // Env var is the primary source; the creds file is the fallback for any key not set in env.
-        var loginId       = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
-        var loginPw       = Environment.GetEnvironmentVariable("MH_LOGIN_PW");
-        var loginPin      = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
-        var sessionToken  = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
-        var enterSlotStr  = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
+        var loginId = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
+        var loginPw = Environment.GetEnvironmentVariable("MH_LOGIN_PW");
+        var loginPin = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
+        var sessionToken = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
+        var enterSlotStr = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
 
         // ---- creds-file fallback -----------------------------------------------
         // File: %LOCALAPPDATA%\MartialHeroes\login.creds
@@ -77,14 +77,14 @@ public sealed partial class ClientContext
         // Fail-open: a missing, unreadable, or malformed file behaves like "env-only".
         {
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            var credsPath    = System.IO.Path.Combine(localAppData, "MartialHeroes", "login.creds");
-            if (System.IO.File.Exists(credsPath))
+            var credsPath = Path.Combine(localAppData, "MartialHeroes", "login.creds");
+            if (File.Exists(credsPath))
             {
                 Dictionary<string, string>? fileDict = null;
                 try
                 {
                     fileDict = new Dictionary<string, string>(StringComparer.Ordinal);
-                    foreach (var rawLine in System.IO.File.ReadAllLines(credsPath))
+                    foreach (var rawLine in File.ReadAllLines(credsPath))
                     {
                         var line = rawLine.Trim();
                         if (line.Length == 0 || line.StartsWith('#'))
@@ -107,11 +107,16 @@ public sealed partial class ClientContext
                 if (fileDict is not null)
                 {
                     // Env var WINS; file is the fallback only when env is absent/whitespace.
-                    if (string.IsNullOrWhiteSpace(loginId)      && fileDict.TryGetValue("MH_LOGIN_ID",         out var fId))     loginId      = fId;
-                    if (string.IsNullOrWhiteSpace(loginPw)      && fileDict.TryGetValue("MH_LOGIN_PW",         out var fPw))     loginPw      = fPw;
-                    if (string.IsNullOrWhiteSpace(loginPin)     && fileDict.TryGetValue("MH_LOGIN_PIN",        out var fPin))    loginPin     = fPin;
-                    if (string.IsNullOrWhiteSpace(sessionToken) && fileDict.TryGetValue("MH_SESSION_TOKEN",    out var fTok))    sessionToken = fTok;
-                    if (string.IsNullOrWhiteSpace(enterSlotStr) && fileDict.TryGetValue("MH_LOGIN_ENTER_SLOT", out var fSlot))   enterSlotStr = fSlot;
+                    if (string.IsNullOrWhiteSpace(loginId) && fileDict.TryGetValue("MH_LOGIN_ID", out var fId))
+                        loginId = fId;
+                    if (string.IsNullOrWhiteSpace(loginPw) && fileDict.TryGetValue("MH_LOGIN_PW", out var fPw))
+                        loginPw = fPw;
+                    if (string.IsNullOrWhiteSpace(loginPin) && fileDict.TryGetValue("MH_LOGIN_PIN", out var fPin))
+                        loginPin = fPin;
+                    if (string.IsNullOrWhiteSpace(sessionToken) &&
+                        fileDict.TryGetValue("MH_SESSION_TOKEN", out var fTok)) sessionToken = fTok;
+                    if (string.IsNullOrWhiteSpace(enterSlotStr) &&
+                        fileDict.TryGetValue("MH_LOGIN_ENTER_SLOT", out var fSlot)) enterSlotStr = fSlot;
                 }
             }
         }

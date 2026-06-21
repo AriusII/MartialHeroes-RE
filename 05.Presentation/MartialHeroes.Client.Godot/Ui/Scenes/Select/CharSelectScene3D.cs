@@ -403,7 +403,7 @@ public sealed partial class CharSelectScene3D : Node3D
         // Freeze at keyframe 29 = 14:30 (52200 s ÷ 1800 s/kf = 29 exactly, interpolation frac 0).
         // spec: §3.6.1 — "At the frozen char-select clock 52200 s = 14:30 the index is keyframe 29
         //   exactly (interpolation fraction 0)." CODE-CONFIRMED.
-        _environmentNode.SetTimeOfDay(EnvFrozenKeyframe, true);
+        _environmentNode.SetTimeOfDay(EnvFrozenKeyframe);
 
         // Fog override: the select-scene build helper explicitly zeroes the fog-blend OFFSET field,
         // turning distance fog OFF. EnvironmentNode's ApplyFog may re-enable it from the bin data;

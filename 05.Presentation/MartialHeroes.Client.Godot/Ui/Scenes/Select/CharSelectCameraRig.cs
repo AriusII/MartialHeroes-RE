@@ -170,10 +170,11 @@ public sealed partial class CharSelectCameraRig : Node
         _dollyComplete = false;
         _boomZ = 0.0f; // spec: §3.5.4 boom seed = 0 → eye on KF1 at rest. CODE-CONFIRMED.
 
-        GD.Print($"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
-                 $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
-                 $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}°/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
-                 $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: §3.5.3/§3.5.4.");
+        GD.Print(
+            $"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
+            $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
+            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}°/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
+            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: §3.5.3/§3.5.4.");
     }
 
     /// <inheritdoc />

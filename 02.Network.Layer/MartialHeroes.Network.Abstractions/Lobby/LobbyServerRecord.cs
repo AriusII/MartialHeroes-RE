@@ -75,5 +75,6 @@ public readonly record struct LobbyServerRecord(
     ///     spec: Docs/RE/specs/login_flow.md §2.1 (signed status_code == 0 &amp;&amp; load &lt; 2400
     ///     — signedness CONFIRMED CYCLE 9, binary-won, 263bd994).
     /// </summary>
-    public bool IsSelectable => StatusCode == 0 && Load < 2400; // spec: Docs/RE/specs/login_flow.md §2.1 (signed status==0 && load<2400)
+    public bool IsSelectable =>
+        StatusCode == 0 && Load < 2400; // spec: Docs/RE/specs/login_flow.md §2.1 (signed status==0 && load<2400)
 }

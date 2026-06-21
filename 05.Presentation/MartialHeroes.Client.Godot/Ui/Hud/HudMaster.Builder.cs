@@ -240,7 +240,7 @@ public sealed partial class HudMaster
         _keepNpcDialog = AddPanel<HudKeepNpcDialog>();
         _keepNpcDialog.Wire(
             () => _storageWindow?.Open(), // sel 1 → KeepPanel §8.27.3
-            () => _vendorWindow?.Open()   // sel 0 → NPC dialog (vendor in absence of dedicated dialog window)
+            () => _vendorWindow?.Open() // sel 0 → NPC dialog (vendor in absence of dedicated dialog window)
         );
         _keepNpcDialog.Build(atlas);
 

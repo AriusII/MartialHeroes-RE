@@ -61,7 +61,8 @@ public readonly record struct ServerListEntryView(
     ///     the predicate. The <c>ServerId == 100</c> sentinel is a display-only special row, NOT a
     ///     selectability gate.
     /// </summary>
-    public bool IsSelectable => StatusCode == 0 && Load < 2400; // spec: Docs/RE/specs/login_flow.md §2.1 (signed status==0 && load<2400)
+    public bool IsSelectable =>
+        StatusCode == 0 && Load < 2400; // spec: Docs/RE/specs/login_flow.md §2.1 (signed status==0 && load<2400)
 }
 
 /// <summary>
