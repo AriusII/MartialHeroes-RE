@@ -467,6 +467,8 @@ Docs/RE/_dirty/
 05.Presentation/MartialHeroes.Client.Godot/qa_*.gd.uid
 screenshot_probe.gd
 screenshot_probe.gd.uid
+# render-reviewer / verify-loop screenshots (contain decompressed client art — NEVER commit)
+.render/
 
 # === Claude Code tooling: SHARE hooks/skills/agents/settings + the kit design docs, keep local state secret ===
 .claude/*

@@ -18,6 +18,10 @@ public sealed partial class HudMaster
     /// <summary>
     ///     Geometry pass: allocates all core panels at their confirmed rects.
     ///     Mirrors the HUD-build routine's flat sequence of allocate→size→attach→slot-store.
+    ///     BUILDER PATTERN: each panel is constructed via AddPanel&lt;T&gt;() which assigns the field
+    ///     reference AND calls AddChild() in the same order as the original flat sequence.
+    ///     The 3 panels requiring pre-build wiring (CommandBar, KeepNpcDialog, ErrorPanel) are
+    ///     kept as explicit inline steps to guarantee Wire() precedes Build() per the spec.
     ///     spec: Docs/RE/specs/ui_hud_layout.md §0.1 — HUD-build routine (builds panels).
     /// </summary>
     public void Build(ClientContext ctx, HudAtlasLibrary atlas, HudIconLibrary icons, HudTextLibrary text)
@@ -28,57 +32,53 @@ public sealed partial class HudMaster
 
         _hub = ctx.HudEventHub;
 
+        // -----------------------------------------------------------------------
         // Geometry pass — panel order matches paint order (insertion = back-to-front).
+        // Each AddPanel<T>() call: new T() → AddChild(t) → return t (caller assigns field).
+        // Invariant: insertion order here == AddChild order == z/paint order.
+        // -----------------------------------------------------------------------
 
         // 1. Right-edge HP/MP gauge composite
         //    spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula
         //    Strips at screen_width−135, Y=200 / Y=250, W=140, H=35
-        _rightEdgeGauge = new HudRightEdgeGauge();
-        AddChild(_rightEdgeGauge);
+        _rightEdgeGauge = AddPanel<HudRightEdgeGauge>();
         _rightEdgeGauge.Build(atlas);
 
         // 2. Chat panel (output window 448×324 + input box 330×20)
         //    spec: Docs/RE/specs/ui_hud_layout.md §1.2 CONFIRMED
-        _chatPanel = new HudChatPanel();
-        AddChild(_chatPanel);
+        _chatPanel = AddPanel<HudChatPanel>();
         _chatPanel.Build(atlas);
 
         // 3. Minimap (MapPanel, 135×195, top-right)
         //    spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.4 CODE-CONFIRMED
-        _minimapPanel = new HudMinimapPanel();
-        AddChild(_minimapPanel);
+        _minimapPanel = AddPanel<HudMinimapPanel>();
         _minimapPanel.Build(atlas);
 
         // 4. Buff bar (data-driven from buff_icon_position.xdb, base X=545)
         //    spec: Docs/RE/specs/ui_hud_layout.md §2 / §5.10 CODE-CONFIRMED
-        _buffBar = new HudBuffBar();
-        AddChild(_buffBar);
+        _buffBar = AddPanel<HudBuffBar>();
         _buffBar.Build(icons);
 
         // 5. Skill hotbar (container origin 349,13; 9 slots data-driven)
         //    spec: Docs/RE/specs/ui_hud_layout.md §3.5 / §5.10 CODE-CONFIRMED container origin
-        _skillHotbar = new HudSkillHotbar();
-        AddChild(_skillHotbar);
+        _skillHotbar = AddPanel<HudSkillHotbar>();
         _skillHotbar.Build(atlas, icons);
 
         // 6. Inventory window (318×732, right-anchored; key I)
         //    spec: Docs/RE/specs/ui_hud_layout.md §1.1 / §5.3 CODE-CONFIRMED
         //    spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5 grid
-        _inventoryPanel = new HudInventoryPanel();
-        AddChild(_inventoryPanel);
+        _inventoryPanel = AddPanel<HudInventoryPanel>();
         _inventoryPanel.Build(atlas, ctx);
 
         // 7. Skill window (964×655, centred; key K)
         //    spec: Docs/RE/specs/ui_system.md §8.8 SkillPanel builder CODE-CONFIRMED
         //    spec: Docs/RE/specs/ui_hud_layout.md §5.2 — parked at (43, -655)
-        _skillPanel = new HudSkillPanel();
-        AddChild(_skillPanel);
+        _skillPanel = AddPanel<HudSkillPanel>();
         _skillPanel.Build(atlas, text);
 
         // 8. Character stats window (StatusPanel, centred; key C)
         //    spec: Docs/RE/specs/ui_system.md §8.7 StatusPanel builder CODE-CONFIRMED
-        _statsPanel = new HudCharacterStatsPanel();
-        AddChild(_statsPanel);
+        _statsPanel = AddPanel<HudCharacterStatsPanel>();
         _statsPanel.Build(atlas, text, ctx);
 
         // 9. Selected-target plate (MopGagePanel, HUD panel-slot array slot 35) — recovered in HUD-II pass.
@@ -89,91 +89,78 @@ public sealed partial class HudMaster
         //    spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won).
         //    spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
         //    spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
-        _targetFrame = new HudTargetFrame();
-        AddChild(_targetFrame);
+        _targetFrame = AddPanel<HudTargetFrame>();
         _targetFrame.Build(atlas);
 
         // 10. Options window (OptionPanel, centered 215×204)
         //     spec: Docs/RE/specs/ui_system.md §8.9.1 CODE-CONFIRMED
-        _optionsWindow = new HudOptionsWindow();
-        AddChild(_optionsWindow);
+        _optionsWindow = AddPanel<HudOptionsWindow>();
         _optionsWindow.Build(atlas, text);
 
         // 11. Party window (PartyPanel, right-dock 318×732)
         //     spec: Docs/RE/specs/ui_system.md §8.12 CODE-CONFIRMED
-        _partyWindow = new HudPartyWindow();
-        AddChild(_partyWindow);
+        _partyWindow = AddPanel<HudPartyWindow>();
         _partyWindow.Build(atlas, text);
 
         // 12. Trade window (KeepPanel/TradeKeepWindow, right-dock 318×732)
         //     spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED
-        _tradeWindow = new HudTradeWindow();
-        AddChild(_tradeWindow);
+        _tradeWindow = AddPanel<HudTradeWindow>();
         _tradeWindow.Build(atlas, text);
 
         // 13. Friend window (FriendPanel, right-dock 318×732)
         //     spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED
-        _friendWindow = new HudFriendWindow();
-        AddChild(_friendWindow);
+        _friendWindow = AddPanel<HudFriendWindow>();
         _friendWindow.Build(atlas, text);
 
         // 14. Guild window (GuildAPanel, right-dock 318×732)
         //     spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED
-        _guildWindow = new HudGuildWindow();
-        AddChild(_guildWindow);
+        _guildWindow = AddPanel<HudGuildWindow>();
         _guildWindow.Build(atlas, text);
 
         // 15. Quest window (QuestPanel, right-dock 318×732)
         //     spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED
-        _questWindow = new HudQuestWindow();
-        AddChild(_questWindow);
+        _questWindow = AddPanel<HudQuestWindow>();
         _questWindow.Build(atlas, text);
 
         // -------------------------------------------------------------------------
-        // HUD-II Wave 2 E panels (16→22)
+        // HUD-II Wave 2 E panels (16→21)
         // -------------------------------------------------------------------------
 
         // 16. MessagePanel — system notice / confirm modal (slot 190, centered 340×190)
         //     spec: Docs/RE/specs/ui_system.md §8.20 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 190.
-        _messagePanel = new HudMessagePanel();
-        AddChild(_messagePanel);
+        _messagePanel = AddPanel<HudMessagePanel>();
         _messagePanel.Build(atlas);
 
         // 17. ProductPanel — NPC production / crafting window (slot 230)
         //     spec: Docs/RE/specs/ui_system.md §8.18 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 230.
-        _productWindow = new HudProductWindow();
-        AddChild(_productWindow);
+        _productWindow = AddPanel<HudProductWindow>();
         _productWindow.Build(atlas, text);
 
         // 18. EmoticonPanel — emote / chat-emoticon picker (+0x370)
         //     spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — MainWindow +0x370.
-        _emoticonWindow = new HudEmoticonWindow();
-        AddChild(_emoticonWindow);
+        _emoticonWindow = AddPanel<HudEmoticonWindow>();
         _emoticonWindow.Build(atlas, ctx);
 
         // 19. TenderInfoPanel — consignment-purchase / info confirm (slot 118, 512×595)
         //     spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 118.
-        _tenderWindow = new HudTenderWindow();
-        AddChild(_tenderWindow);
+        _tenderWindow = AddPanel<HudTenderWindow>();
         _tenderWindow.Build(atlas, text);
 
         // 20. CarrierPigeonPanal — mailbox menu (slot 96, top-left 140×195)
         //     + CarrierPigeonReadPanel (slot 98) as sub-window.
         //     spec: Docs/RE/specs/ui_system.md §8.21.2/§8.21.3/§8.21.4 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 96/98.
-        _mailWindow = new HudMailWindow();
-        AddChild(_mailWindow);
+        _mailWindow = AddPanel<HudMailWindow>();
         _mailWindow.Build(atlas, text);
 
         // 21. DeliveryPanel — consignment / delivery retrieve box (slot 40, 5×8 grid)
         //     spec: Docs/RE/specs/ui_system.md §8.21.5 CODE-CONFIRMED
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 40.
-        _deliveryWindow = new HudDeliveryWindow();
-        AddChild(_deliveryWindow);
+        _deliveryWindow = AddPanel<HudDeliveryWindow>();
         _deliveryWindow.Build(atlas, text);
 
         // -------------------------------------------------------------------------
@@ -181,10 +168,11 @@ public sealed partial class HudMaster
         // -------------------------------------------------------------------------
 
         // 22. HudCommandBar — bottom command strip (DefaultMenu, slot 148, always-visible)
+        //     SPECIAL WIRING: Wire() called BEFORE Build() per §8.23 recovered build contract.
+        //     Wire() injects Toggle* delegates before the button nodes are realized.
         //     spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148, always-built strip.
-        _commandBar = new HudCommandBar();
-        AddChild(_commandBar);
+        _commandBar = AddPanel<HudCommandBar>();
         _commandBar.Wire(
             ToggleInventory,
             ToggleSkill,
@@ -201,29 +189,27 @@ public sealed partial class HudMaster
         // 23. HudVendorWindow — NPC vendor / item-shop buy/sell (slot 259)
         //     spec: Docs/RE/specs/ui_system.md §8.22 CODE-CONFIRMED.
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 259.
-        _vendorWindow = new HudVendorWindow();
-        AddChild(_vendorWindow);
+        _vendorWindow = AddPanel<HudVendorWindow>();
         _vendorWindow.Build(atlas, text);
 
         // 24. HudHelpOverlay — full-screen help image (direct MainMaster member, not slot entry)
         //     spec: Docs/RE/specs/ui_system.md §8.24 CODE-CONFIRMED.
         //     Note: NOT a service-slot entry; direct member of the root HUD window.
-        _helpOverlay = new HudHelpOverlay();
-        AddChild(_helpOverlay);
+        _helpOverlay = AddPanel<HudHelpOverlay>();
         _helpOverlay.Build(atlas);
 
         // 25. HudAnnouncePanel — scrolling announce banner (slot 221)
         //     spec: Docs/RE/specs/ui_system.md §8.25.1 CODE-CONFIRMED.
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 221.
-        _announcePanel = new HudAnnouncePanel();
-        AddChild(_announcePanel);
+        _announcePanel = AddPanel<HudAnnouncePanel>();
         _announcePanel.Build();
 
         // 26. HudErrorPanel — timed floating notice/error modal (slot 168)
+        //     SPECIAL WIRING: SetAnnounceDelegate() called AFTER Build() — AnnouncePanel (slot 25)
+        //     must already exist (it does — added at step 25 above). Order is load-bearing.
         //     spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 168.
-        _errorPanel = new HudErrorPanel();
-        AddChild(_errorPanel);
+        _errorPanel = AddPanel<HudErrorPanel>();
         _errorPanel.Build();
         // Wire the AnnouncePanel delegate (§8.25.1 — "forwards banner to AnnouncePanel when present")
         _errorPanel.SetAnnounceDelegate(_announcePanel);
@@ -231,8 +217,7 @@ public sealed partial class HudMaster
         // 27. HudPetPanel — player-couple/pair-relation window (slot 194, NOT creature-pet)
         //     spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.
         //     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 194.
-        _petPanel = new HudPetPanel();
-        AddChild(_petPanel);
+        _petPanel = AddPanel<HudPetPanel>();
         _petPanel.Build(atlas, text);
 
         // -------------------------------------------------------------------------
@@ -243,45 +228,41 @@ public sealed partial class HudMaster
         //     Opened ONLY via KeepNpcPanel sel 1 + C2S 2/142. No hotkey.
         //     DISTINCT from HudTradeWindow (§8.13 TradeKeepWindow).
         //     spec: Docs/RE/specs/ui_system.md §8.32 CODE-CONFIRMED.
-        _storageWindow = new HudStorageWindow();
-        AddChild(_storageWindow);
+        _storageWindow = AddPanel<HudStorageWindow>();
         _storageWindow.Build(atlas, text);
 
         // 29. HudKeepNpcDialog — NPC storage/keep dialog menu (KeepNpcPanel, slot 152)
+        //     SPECIAL WIRING: Wire() called BEFORE Build() — lambdas capture _storageWindow and
+        //     _vendorWindow, which must both be added (steps 28 and 23) before this step. Order
+        //     is load-bearing: _storageWindow at step 28, _vendorWindow at step 23.
         //     Opened by world NPC-click dispatcher when NPC is KIND 9.
-        //     Routes sel 1 → _storageWindow.Open(); routes to vendor (slot 259) via ShowVendor.
         //     spec: Docs/RE/specs/ui_system.md §8.27 CODE-CONFIRMED.
-        _keepNpcDialog = new HudKeepNpcDialog();
-        AddChild(_keepNpcDialog);
+        _keepNpcDialog = AddPanel<HudKeepNpcDialog>();
         _keepNpcDialog.Wire(
             () => _storageWindow?.Open(), // sel 1 → KeepPanel §8.27.3
-            () => _vendorWindow?.Open() // sel 0 → NPC dialog (vendor in absence of dedicated dialog window)
+            () => _vendorWindow?.Open()   // sel 0 → NPC dialog (vendor in absence of dedicated dialog window)
         );
         _keepNpcDialog.Build(atlas);
 
         // 30. HudStallListWindow — personal-stall market list (StallListPanel, slot 228, key `l`)
         //     spec: Docs/RE/specs/ui_system.md §8.29 CODE-CONFIRMED.
-        _stallListWindow = new HudStallListWindow();
-        AddChild(_stallListWindow);
+        _stallListWindow = AddPanel<HudStallListWindow>();
         _stallListWindow.Build(atlas, text);
 
         // 31. HudGuildDiplomacyWindow — guild-diplomacy roster (BroodWarListPanel, slot 235, key `u`)
         //     spec: Docs/RE/specs/ui_system.md §8.30 CODE-CONFIRMED.
-        _guildDiplomacyWindow = new HudGuildDiplomacyWindow();
-        AddChild(_guildDiplomacyWindow);
+        _guildDiplomacyWindow = AddPanel<HudGuildDiplomacyWindow>();
         _guildDiplomacyWindow.Build(atlas);
 
         // 32. HudGuildWarInfoWindow — guild-war info display, read-only (GuildWarInfoPanel, slot 224, key `j`)
         //     spec: Docs/RE/specs/ui_system.md §8.31 CODE-CONFIRMED.
-        _guildWarInfoWindow = new HudGuildWarInfoWindow();
-        AddChild(_guildWarInfoWindow);
+        _guildWarInfoWindow = AddPanel<HudGuildWarInfoWindow>();
         _guildWarInfoWindow.Build(atlas);
 
         // 33. HudRelationPanel — relation/teacher/fate window (RelationPanel, slot 193)
         //     DefaultMenu 4002 opens BOTH slot 185 (BuddyRelation, TODO) + this slot 193 together.
         //     spec: Docs/RE/specs/ui_system.md §8.28 CODE-CONFIRMED.
-        _relationPanel = new HudRelationPanel();
-        AddChild(_relationPanel);
+        _relationPanel = AddPanel<HudRelationPanel>();
         _relationPanel.Build(atlas, text);
 
         GD.Print("[HudMaster] Build complete — ~33 panels total " +
@@ -347,5 +328,32 @@ public sealed partial class HudMaster
             "spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel slot 35 (binary-won; 'slot 177' REFUTED §1.9.4). " +
             "spec: Docs/RE/specs/ui_system.md §8.12 — PartyPanel hub stub (TODO world-campaign). " +
             "spec: Docs/RE/specs/ui_system.md §8.27/§8.28/§8.29/§8.30/§8.31/§8.32 — Wave-4 TODO hubs.");
+    }
+
+    // -----------------------------------------------------------------------
+    // Builder helper
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    ///     Instantiates a panel of type <typeparamref name="T" />, calls AddChild() to place it
+    ///     in the scene at the current tail position, and returns the instance for the caller to
+    ///     assign to its <c>_field</c>.
+    ///     <para>
+    ///         This is the uniform single-step of the builder pattern: the one line that was
+    ///         previously three lines (new → AddChild → assign). Callers still assign the returned
+    ///         value to their private field so that Input/Toggles partials can reference it — no
+    ///         field is dropped or renamed.
+    ///     </para>
+    ///     <para>
+    ///         AddChild insertion order == paint/z-order (back-to-front). The invariant is
+    ///         preserved because Build() calls AddPanel in the canonical sequence (1→33) and
+    ///         AddChild is always called inside this helper, never skipped.
+    ///     </para>
+    /// </summary>
+    private T AddPanel<T>() where T : Control, new()
+    {
+        var panel = new T();
+        AddChild(panel);
+        return panel;
     }
 }
