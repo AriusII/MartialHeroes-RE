@@ -169,8 +169,11 @@ public sealed class LobbyClient : ILobbyClient
         if (!socket.Connected) return [];
 
         var (decompressed, _) = ReceiveAndDecompress(socket, out var major);
-        // spec: Docs/RE/packets/lobby.yaml — "count = wrapper.major" on the server-list query.
-        int count = major; // major field re-purposed as record count on this query
+        // spec: Docs/RE/specs/login_flow.md §2.1 — "count = wrapper.major" on the server-list query.
+        // The count is a SIGNED int: on connect-failure the legacy client stores −1 as a sentinel.
+        // Cast the u16 wire value to signed int so that a −1 sentinel (0xFFFF on wire) is handled
+        // correctly by the `count <= 0` guard below. spec: Docs/RE/specs/login_flow.md §2.1.
+        int count = (short)major; // treat as signed i16 → int; −1 sentinel safe via count<=0 guard
 
         if (count <= 0 || decompressed.Length < count * ServerRecordSize) return [];
 
@@ -179,10 +182,10 @@ public sealed class LobbyClient : ILobbyClient
         for (var i = 0; i < count; i++)
         {
             var rec = data.Slice(i * ServerRecordSize, ServerRecordSize);
-            // spec: Docs/RE/packets/lobby.yaml Record Shape A:
-            //   +0 u16 server_id, +2 i16 status_code, +4 i16 load, +6 i16 open_time
+            // spec: Docs/RE/specs/login_flow.md §2.1 (CYCLE 9 signedness correction, binary-won, 263bd994):
+            //   +0 i16 server_id (signed — CYCLE 9 signedness correction; was wrongly u16), +2 i16 status_code, +4 i16 load, +6 i16 open_time
             records[i] = new LobbyServerRecord(
-                BinaryPrimitives.ReadUInt16LittleEndian(rec[..]),
+                BinaryPrimitives.ReadInt16LittleEndian(rec[..]),
                 BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
                 BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
                 BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
@@ -204,8 +207,8 @@ public sealed class LobbyClient : ILobbyClient
     ///     (spec: Docs/RE/packets/lobby.yaml — "server_id IS the channel port offset, ports 10001..10040").
     /// </remarks>
     /// <param name="serverId">
-    ///     The numeric server ID selected by the player (1..40).
-    ///     spec: Docs/RE/packets/lobby.yaml +0 u16 server_id.
+    ///     The numeric server ID selected by the player (1..40; the wire field at record +0 is i16-signed
+    ///     but the value is always a positive index). spec: Docs/RE/specs/login_flow.md §2.1.
     /// </param>
     /// <param name="cancellationToken">Token to abort the blocking I/O.</param>
     private LobbyChannelEndpoint FetchChannelEndpointCore(
@@ -226,12 +229,13 @@ public sealed class LobbyClient : ILobbyClient
             throw new InvalidOperationException(
                 "Lobby channel-endpoint payload was empty. spec: Docs/RE/packets/lobby.yaml RECORD SHAPE B.");
 
-        // The channel-endpoint string is a NUL-terminated ASCII "host port" inside a fixed copy
-        // window of AT MOST 30 (0x1E) bytes. The 30 is the client's COPY-BUFFER CAP, NOT a minimum
-        // payload length: the live replica returns a SHORTER decompressed payload (observed: 23 bytes)
-        // when "host port" + NUL fits in fewer bytes. Read up to 30 but tolerate fewer; stop at the NUL.
-        // spec correction (server/binary wins — CYCLE 4 live oracle): login_flow.md §7's "copy length
-        // = 30" is a CAP, not a guaranteed length. To be promoted in lobby.yaml / login_flow.md §7.
+        // The channel-endpoint string is a NUL-padded ASCII "host port" inside a copy window of AT
+        // MOST 30 (0x1E) bytes. 30 is the client's COPY-BUFFER CAP, NOT a minimum payload length:
+        // the live replica may return a SHORTER decompressed payload (e.g. 23 bytes) when the
+        // "host port" + NUL fits in fewer bytes. Read up to 30 but tolerate fewer; stop at the NUL.
+        // Delimiter is a SINGLE SPACE (0x20) — NOT a colon, NOT NUL.
+        // spec: Docs/RE/specs/login_flow.md §2.2 (CONFIRMED CYCLE 9, 263bd994 — 30 is a COPY CAP not
+        // a minimum; single SPACE delimiter; single endpoint; host before space, port=atol after).
         var window = Math.Min(decompressed.Length, ChannelEndpointLength);
         var endpointBytes = decompressed.Span[..window];
 

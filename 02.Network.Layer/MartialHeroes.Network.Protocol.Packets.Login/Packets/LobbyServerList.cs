@@ -8,8 +8,10 @@
 //
 // !!! CAPTURE-UNVERIFIED STATIC LAYOUT !!!
 // Every offset below is a static inference (capture_verified: false in the spec). The widths and
-// the 8-byte wrapper / 8-byte entry / 30-byte endpoint shapes are CODE-CONFIRMED; the field
-// signedness and the endpoint token's internal delimiter are needs-capture.
+// the 8-byte wrapper / 8-byte entry / 30-byte endpoint shapes are CODE-CONFIRMED.
+// SIGNEDNESS: all four fields of LobbyServerEntry (Id, StatusCode, Load, OpenTime) are signed i16 —
+// CONFIRMED CYCLE 9 (binary-won, 263bd994). The earlier "needs-capture" signedness flag is RESOLVED.
+// ENDPOINT DELIMITER: single SPACE (0x20) — CONFIRMED CYCLE 9 (binary-won, 263bd994); see §2.2.
 //
 // COMPRESSION: both lobby response PAYLOADS are LZ4-compressed (raw block) and NOT encrypted. The
 // LZ4 decompression is the TRANSPORT / caller's job; the structs below map the DECOMPRESSED bytes.
@@ -84,10 +86,11 @@ public readonly struct LobbyFrameWrapper
 ///     ("RECORD SHAPE A"). CAPTURE-UNVERIFIED.
 /// </summary>
 /// <remarks>
-///     Signedness: the painter sign-extends some fields for a debug print but zero-extends them on the
-///     branch reads; signedness is presentation-only and needs-capture. The spec documents the fields
-///     as 16-bit, so they are modelled as signed <see cref="short" /> per the spec field types
-///     (<c>i16</c>). spec: Docs/RE/packets/lobby.yaml.
+///     Signedness: all four fields are <b>signed <c>i16</c></b> — CONFIRMED CYCLE 9
+///     (binary-won, build 263bd994). The binary reads every field with a sign-extending load, and
+///     the commit gate's <c>load &lt; 2400</c> is a signed branch — the decisive evidence.
+///     An earlier "needs-capture" note on signedness is RESOLVED; the field types are definitive.
+///     spec: Docs/RE/specs/login_flow.md §2.1 (Signedness CONFLICT corrected, CYCLE 9, 263bd994).
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct LobbyServerEntry
@@ -100,7 +103,8 @@ public readonly struct LobbyServerEntry
     ///     plate-pick commit) as the server id, sign-extended; feeds the client-local server-name lookup
     ///     and draws the remembered-default highlight. The <c>== 100</c> literal is display-only (the
     ///     "new server" label reposition), NOT a selectability gate. CODE-CONFIRMED.
-    ///     spec: Docs/RE/packets/lobby.yaml Record Shape A.
+    ///     Signed i16 — CONFIRMED CYCLE 9 (binary-won, 263bd994); all four record fields are signed.
+    ///     spec: Docs/RE/specs/login_flow.md §2.1 Record Shape A, offset +0 (i16).
     /// </summary>
     public readonly short Id;
 
@@ -132,14 +136,14 @@ public readonly struct LobbyServerEntry
 /// <summary>
 ///     The 30-byte CHANNEL-ENDPOINT token (record shape B) from the channel query
 ///     (port 10000 + selected channel offset). The channel thread zero-fills a 30-byte field then copies
-///     the FIRST 30 bytes of the decompressed payload verbatim as a fixed ASCII endpoint token naming
-///     the GAME server, consumed OPAQUELY (it is later spliced into the credential blob — this layer does
-///     not parse host/port out of it). NOT guaranteed NUL-terminated within the field.
-///     spec: Docs/RE/packets/lobby.yaml ("RECORD SHAPE B"). CAPTURE-UNVERIFIED.
+///     UP TO 30 bytes of the decompressed payload as a NUL-terminated ASCII "&lt;host&gt; &lt;port&gt;" token
+///     naming the GAME server (single-space delimiter, port via decimal atol). 30 is a copy CAP, not a
+///     minimum; it is a SINGLE endpoint (no trailing array).
+///     spec: Docs/RE/specs/login_flow.md §2.2; Docs/RE/packets/lobby.yaml ("RECORD SHAPE B").
 /// </summary>
 /// <remarks>
-///     The exact internal format / delimiter of the token (host:port vs host port vs fixed sub-fields)
-///     is needs-capture — no parse happens here. spec: Docs/RE/packets/lobby.yaml.
+///     Token format binary-confirmed CYCLE 9 Phase 1: "&lt;host&gt; &lt;port&gt;", single space (0x20),
+///     NUL-terminated, up-to-30-byte copy cap, single endpoint. spec: Docs/RE/specs/login_flow.md §2.2.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct LobbyChannelEndpointToken

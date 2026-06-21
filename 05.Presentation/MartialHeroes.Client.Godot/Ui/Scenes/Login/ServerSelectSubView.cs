@@ -30,11 +30,11 @@
 
 using System.Globalization;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Ui.Assets;
-using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.Screens.Layout;
 
-// ServerEntry (moved to engine-free layer)
+// ServerListEntryView (canonical published server-list view — Client.Application.Contracts.Events)
 
 // LoginLayout, WidgetRect (moved to engine-free layer)
 
@@ -190,7 +190,7 @@ public sealed partial class ServerSelectSubView : Control
     // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
     private bool _loading = true;
     private int _page;
-    private IReadOnlyList<ServerEntry> _servers = [];
+    private IReadOnlyList<ServerListEntryView> _servers = [];
 
     // -------------------------------------------------------------------------
     // Construction
@@ -244,7 +244,7 @@ public sealed partial class ServerSelectSubView : Control
     ///     spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-states 35→36→37
     ///     spec: Docs/RE/specs/login_flow.md §2.1
     /// </summary>
-    public void SetServers(IReadOnlyList<ServerEntry> servers)
+    public void SetServers(IReadOnlyList<ServerListEntryView> servers)
     {
         _loading = false; // spec: §4 sub-state 36 — fetch result received; transition from 35.
         _servers = servers;
@@ -477,9 +477,9 @@ public sealed partial class ServerSelectSubView : Control
             var entry = _servers[idx];
 
             // Commit guard: status_code == 0 && load < 2400. Failure = silent no-op.
-            // ServerEntry.IsSelectable encodes exactly this: StatusCode == 0 && Load < 2400
-            // (confirmed in MartialHeroes.Client.Presentation.Screens.ServerEntry).
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Commit guard".
+            // ServerListEntryView.IsSelectable encodes exactly this: StatusCode == 0 && Load < 2400
+            // (the single canonical helper, in MartialHeroes.Client.Application.Contracts.Events).
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Commit guard"; login_flow.md §2.1.
             if (!entry.IsSelectable)
             {
                 GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
@@ -604,7 +604,7 @@ public sealed partial class ServerSelectSubView : Control
     // NAME label @ (x, 390, 174×21): font slot 0, center-aligned, horizontal.
     // spec: Docs/RE/specs/frontend_layout_tables.md §4
     //   "name label (30+233·i, 390, 174×21) … font slot 0 … center-aligned (align mode 2)"
-    private void AddPlateName(int plateX, ServerEntry e)
+    private void AddPlateName(int plateX, ServerListEntryView e)
     {
         var name = ResolveServerName(e);
         AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White);
@@ -617,7 +617,7 @@ public sealed partial class ServerSelectSubView : Control
     //    ≤500→msg(4029+status_code) green (0xFFB5FF7A) — the available/사용가능 case"
     //   "status_code==3: load==24→msg 6004; else msg 6005 HH:MM"
     //   "other status_code: caption msg(4029+status_code), no color override"
-    private void AddPlateStatus(int plateX, ServerEntry e)
+    private void AddPlateStatus(int plateX, ServerListEntryView e)
     {
         var statusCaption = ResolveStatusCaption(e, out var statusColor);
         AddRowLabel(statusCaption, plateX, RowLabelY1, RowLabelH, statusColor, 4);
@@ -638,7 +638,7 @@ public sealed partial class ServerSelectSubView : Control
     ///     spec: Docs/RE/specs/frontend_layout_tables.md §4
     ///     "Status / load coloring … slot-4 status caption at +410; ARGB re-confirmed 2026-06-18/2026-06-19"
     /// </summary>
-    private string ResolveStatusCaption(ServerEntry e, out Color color)
+    private string ResolveStatusCaption(ServerListEntryView e, out Color color)
     {
         // Load-valid flag = OpenTime/+6 nonzero. spec: §4.1 "+6 load-valid flag" (RESOLVED 2026-06-20).
         var loadValid = e.OpenTime != 0;
@@ -766,7 +766,7 @@ public sealed partial class ServerSelectSubView : Control
         return new Vector2(PanelX + x, PanelY + y);
     }
 
-    private string ResolveServerName(ServerEntry e)
+    private string ResolveServerName(ServerListEntryView e)
     {
         // Display name resolves client-side from msg.xdb ids 5001..5040 (server_id N → id 5000+N).
         // spec: Docs/RE/specs/frontend_layout_tables.md §4 "Name id = 5000 + server_id"

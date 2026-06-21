@@ -35,13 +35,34 @@ namespace MartialHeroes.Client.Application.Contracts.Events;
 /// </param>
 /// <param name="LoadHint">Presentation color band classified from the load thresholds (presentation hint).</param>
 /// <param name="StatusHint">Presentation classification of the caption branch (presentation hint).</param>
+/// <param name="DisplayName">
+///     Client-local localized server display name. Resolved CLIENT-SIDE from the message bank
+///     (id <c>5000 + ServerId</c>, range 5001..5040; out-of-range → fallback 5901). The msg bank lives in
+///     the engine layer (layer 05, <c>HudTextLibrary</c>) which the engine-free Application cannot reach, so
+///     this field is left <see cref="string.Empty" /> when constructed in core (e.g.
+///     <c>ApplicationUseCases.FetchServerListAsync</c>); the layer-05 <c>ServerSelectSubView</c> resolves the
+///     real localized name from the msg bank at render time.
+///     spec: Docs/RE/specs/login_flow.md §2.1 (server-name resolution is client-local, msg bank 5000+ServerId);
+///     Docs/RE/specs/frontend_layout_tables.md §4.1.
+/// </param>
 public readonly record struct ServerListEntryView(
-    ushort ServerId,
+    short ServerId,
     short StatusCode,
     short Load,
     short OpenTime,
     ServerLoadBand LoadHint,
-    ServerStatusHint StatusHint);
+    ServerStatusHint StatusHint,
+    string DisplayName)
+{
+    /// <summary>
+    ///     Canonical selectability gate for a lobby server plate: <c>StatusCode == 0</c> (active) AND
+    ///     <c>Load &lt; 2400</c> (0x960, signed strict less-than). Both comparisons are on signed
+    ///     <c>i16</c> fields. The select screen MUST route through this property rather than re-inlining
+    ///     the predicate. The <c>ServerId == 100</c> sentinel is a display-only special row, NOT a
+    ///     selectability gate.
+    /// </summary>
+    public bool IsSelectable => StatusCode == 0 && Load < 2400; // spec: Docs/RE/specs/login_flow.md §2.1 (signed status==0 && load<2400)
+}
 
 /// <summary>
 ///     Presentation color band for a lobby server's load gauge, classified from the spec thresholds
@@ -189,41 +210,6 @@ public sealed record CharRenameResultEvent(
     bool Success,
     string NewName,
     byte ErrorCode) : IClientEvent;
-
-/// <summary>
-///     Application-side projection of a SUCCESSFUL character-create. This is NOT the decode of a
-///     (non-existent) 12-byte 3/23 create-result packet — login_flow.md §5.4 REFUTES that model: there is
-///     **no dedicated create-result opcode at all**. A character-create (C2S 1/6, 52-byte body) is acked by
-///     the inbound manage-result ladder — **3/7 SmsgCharManageResult** (success) + a **refreshed 3/1
-///     SmsgCharacterList roster** (which re-populates the slot and re-seeds the account character count) and
-///     a 3/4 in-place refill. The 3/23 opcode is **SmsgCharStatusBytesByName** (a 28-byte by-name status/
-///     level patch — see <see cref="CharStatusBytesByNameEvent" />), NOT a create result.
-///     <para>
-///         This event type is RETAINED as the Application-side projection of a successful create (to be
-///         raised when the 3/7 manage-result success + refreshed roster lands). It is **not** published by
-///         the 3/23 handler (that handler emits <see cref="CharStatusBytesByNameEvent" />). The
-///         <see cref="AssignedSlotId" />/<see cref="ErrorCode" />/<see cref="Value1" />/<see cref="Value2" />
-///         members are vestigial of the refuted 12-byte create-packet model and carry no wire meaning.
-///     </para>
-///     spec: Docs/RE/specs/login_flow.md §5.4 (no 12-byte create-result; create acked via 3/7 + refreshed
-///     3/1 + 3/4); §5.5 (3/7 SmsgCharManageResult); §6 (3/23 = SmsgCharStatusBytesByName, NOT a create result).
-/// </summary>
-/// <param name="Success">True when the create succeeded (projected from the 3/7 manage-result success path). spec: §5.4 / §5.5.</param>
-/// <param name="AssignedSlotId">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
-/// <param name="ErrorCode">Vestigial (refuted 12-byte create-packet model); the create/rename UI error range 0xC8..0xD4 is surfaced through the create flow, not this field. spec: §5.4 / §5.7.</param>
-/// <param name="Value1">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
-/// <param name="Value2">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
-/// <param name="AccountCharacterCount">
-///     The account character count AFTER the create (re-seeded by the refreshed 3/1 roster, not by a
-///     create-result packet). spec: §5.4 (create acked via 3/7 + refreshed 3/1).
-/// </param>
-public sealed record CharCreateResultEvent(
-    bool Success,
-    byte AssignedSlotId,
-    byte ErrorCode,
-    uint Value1,
-    uint Value2,
-    int AccountCharacterCount) : IClientEvent;
 
 /// <summary>
 ///     Published whenever a 3/100 SmsgCharActionResult lands, carrying the decoded 4-byte action/result

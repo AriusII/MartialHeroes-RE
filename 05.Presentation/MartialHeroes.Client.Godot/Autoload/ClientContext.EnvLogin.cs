@@ -1,7 +1,7 @@
 // ClientContext.EnvLogin.cs — env-gated "copie conforme" verification harness.
 //
 // Drives the REAL login flow (same use-case intents as LoginScene's OK button) when the
-// maintainer sets the appropriate environment variables:
+// maintainer sets the appropriate environment variables OR the creds file:
 //
 //   STEP 1 — login → char-select (roster printed, no enter-world):
 //     MH_LOGIN_ID=<account>
@@ -11,15 +11,22 @@
 //   STEP 2 — full enter-world (adds slot selection after the roster arrives):
 //     + MH_LOGIN_ENTER_SLOT=<0..4>
 //
-// When NONE of the env vars are present the harness is FULLY INERT — the interactive UI
-// login path is completely unchanged; not a single path is auto-driven.
+// Credentials can also be supplied via a gitignored creds file:
+//   %LOCALAPPDATA%\MartialHeroes\login.creds
+//   Format: KEY=VALUE lines; lines starting with '#' are comments; blank lines skipped.
+//   Keys: MH_LOGIN_ID, MH_LOGIN_PW, MH_LOGIN_PIN, MH_SESSION_TOKEN, MH_LOGIN_ENTER_SLOT
+//   Precedence: env var WINS over creds file; file value is the fallback only when env is absent.
+//
+// When NONE of the env vars or creds-file keys supply MH_LOGIN_ID + MH_LOGIN_PW the harness
+// is FULLY INERT — the interactive UI login path is completely unchanged.
 //
 // spec: Docs/RE/specs/login_flow.md §1 / §2 / §3 / §4 — the ordered lifecycle this harness
 //        exercises via the exact same IApplicationUseCases calls the UI makes.
 //
-// SECURITY NOTE: credentials come ONLY from env vars; they are logged as "present/absent +
-// length" but their VALUES are never printed. MH_LOGIN_PW and MH_SESSION_TOKEN values are
-// always redacted in logs. spec: login_flow.md §4.2 — password never in a plaintext log.
+// SECURITY NOTE: credentials come from env vars or the gitignored creds file; they are logged
+// as "present/absent + length + source" but their VALUES are never printed. MH_LOGIN_PW and
+// MH_SESSION_TOKEN values are always redacted in logs.
+// spec: login_flow.md §4.2 — password never in a plaintext log.
 
 using Godot;
 using MartialHeroes.Client.Application.UseCases;
@@ -56,21 +63,71 @@ public sealed partial class ClientContext
     internal void MaybeStartEnvLogin()
     {
         // Read once at startup; never re-read mid-session.
-        var loginId = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
-        var loginPw = Environment.GetEnvironmentVariable("MH_LOGIN_PW");
-        var loginPin = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
+        // Env var is the primary source; the creds file is the fallback for any key not set in env.
+        var loginId       = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
+        var loginPw       = Environment.GetEnvironmentVariable("MH_LOGIN_PW");
+        var loginPin      = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
+        var sessionToken  = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
+        var enterSlotStr  = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
+
+        // ---- creds-file fallback -----------------------------------------------
+        // File: %LOCALAPPDATA%\MartialHeroes\login.creds
+        // Format: KEY=VALUE lines; '#'-prefixed lines are comments; blank lines skipped.
+        // Only falls back when the corresponding env var is null/whitespace.
+        // Fail-open: a missing, unreadable, or malformed file behaves like "env-only".
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var credsPath    = System.IO.Path.Combine(localAppData, "MartialHeroes", "login.creds");
+            if (System.IO.File.Exists(credsPath))
+            {
+                Dictionary<string, string>? fileDict = null;
+                try
+                {
+                    fileDict = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (var rawLine in System.IO.File.ReadAllLines(credsPath))
+                    {
+                        var line = rawLine.Trim();
+                        if (line.Length == 0 || line.StartsWith('#'))
+                            continue;
+                        var eq = line.IndexOf('=');
+                        if (eq <= 0) continue; // malformed — no key
+                        var key = line[..eq].Trim();
+                        var val = line[(eq + 1)..].Trim();
+                        if (key.Length > 0)
+                            fileDict[key] = val;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[ClientContext/EnvLogin] Could not read creds file '{credsPath}': {ex.Message} — " +
+                                "continuing with env vars only.");
+                    fileDict = null;
+                }
+
+                if (fileDict is not null)
+                {
+                    // Env var WINS; file is the fallback only when env is absent/whitespace.
+                    if (string.IsNullOrWhiteSpace(loginId)      && fileDict.TryGetValue("MH_LOGIN_ID",         out var fId))     loginId      = fId;
+                    if (string.IsNullOrWhiteSpace(loginPw)      && fileDict.TryGetValue("MH_LOGIN_PW",         out var fPw))     loginPw      = fPw;
+                    if (string.IsNullOrWhiteSpace(loginPin)     && fileDict.TryGetValue("MH_LOGIN_PIN",        out var fPin))    loginPin     = fPin;
+                    if (string.IsNullOrWhiteSpace(sessionToken) && fileDict.TryGetValue("MH_SESSION_TOKEN",    out var fTok))    sessionToken = fTok;
+                    if (string.IsNullOrWhiteSpace(enterSlotStr) && fileDict.TryGetValue("MH_LOGIN_ENTER_SLOT", out var fSlot))   enterSlotStr = fSlot;
+                }
+            }
+        }
+        // -------------------------------------------------------------------------
 
         if (string.IsNullOrWhiteSpace(loginId) || string.IsNullOrWhiteSpace(loginPw))
         {
-            // No env credentials — interactive UI path unchanged.
-            GD.Print("[ClientContext/EnvLogin] MH_LOGIN_ID / MH_LOGIN_PW absent — harness inactive; " +
+            // No credentials from env OR creds file — interactive UI path unchanged.
+            GD.Print("[ClientContext/EnvLogin] MH_LOGIN_ID / MH_LOGIN_PW absent from env AND " +
+                     "%LOCALAPPDATA%\\MartialHeroes\\login.creds — harness inactive; " +
                      "interactive UI login path unchanged. spec: login_flow.md §1.");
             return;
         }
 
-        // Log presence + length only; never log the raw password value.
+        // Log presence + length + source only; never log the raw credential values.
         // spec: login_flow.md §4.2 — password is never in a plaintext log.
-        var enterSlotStr = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
         int? enterSlot = null;
         if (!string.IsNullOrWhiteSpace(enterSlotStr)
             && int.TryParse(enterSlotStr.Trim(), out var parsedSlot)
@@ -81,7 +138,7 @@ public sealed partial class ClientContext
                  $"MH_LOGIN_ID present (len={loginId.Trim().Length}), " +
                  $"MH_LOGIN_PW present (len={loginPw.Trim().Length}), " +
                  $"MH_LOGIN_PIN={(string.IsNullOrWhiteSpace(loginPin) ? "absent" : $"present (len={loginPin.Trim().Length})")}, " +
-                 $"MH_SESSION_TOKEN={(Environment.GetEnvironmentVariable("MH_SESSION_TOKEN") is { Length: > 0 } t ? $"present (len={t.Length})" : "absent")}, " +
+                 $"MH_SESSION_TOKEN={(string.IsNullOrWhiteSpace(sessionToken) ? "absent" : $"present (len={sessionToken.Trim().Length})")}, " +
                  $"MH_LOGIN_ENTER_SLOT={(enterSlot.HasValue ? enterSlot.Value.ToString() : "absent (stop at char-select)")}. " +
                  "spec: login_flow.md §1.");
 
@@ -201,12 +258,12 @@ public sealed partial class ClientContext
 
             ct.ThrowIfCancellationRequested();
 
-            // Select the first server with status_code == 0 and load < 2400.
-            // spec: login_flow.md §2.1 — "selectability gate: status==0 && load<2400".
+            // Select the first server that passes the canonical selectability gate.
+            // spec: login_flow.md §2.1 — IsSelectable: status==0 && load<2400.
             LobbyServerRecord selectedRecord = default;
             var foundServer = false;
             foreach (var r in servers)
-                if (r.StatusCode == 0 && r.Load < 2400)
+                if (r.IsSelectable) // spec: login_flow.md §2.1
                 {
                     selectedRecord = r;
                     foundServer = true;
@@ -216,7 +273,7 @@ public sealed partial class ClientContext
             if (!foundServer)
             {
                 GD.PrintErr($"[ClientContext/EnvLogin] No selectable server (total={servers.Count}). " +
-                            "spec: login_flow.md §2.1 — gate status==0 && load<2400.");
+                            "spec: login_flow.md §2.1 — IsSelectable: status==0 && load<2400.");
                 return;
             }
 
@@ -231,7 +288,7 @@ public sealed partial class ClientContext
             LobbyChannelEndpoint endpoint;
             try
             {
-                endpoint = await UseCases.SelectServerAsync(selectedRecord.ServerId, ct).ConfigureAwait(false);
+                endpoint = await UseCases.SelectServerAsync((ushort)selectedRecord.ServerId, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -250,7 +307,7 @@ public sealed partial class ClientContext
             //        into LoginCredentialStore and later into the RSA 1/4 ciphertext; it is NEVER
             //        printed and NEVER placed in a plaintext log.
             // ------------------------------------------------------------------
-            GD.Print($"[ClientContext/EnvLogin] Phase 3: staging credentials (account='{loginId}', " +
+            GD.Print($"[ClientContext/EnvLogin] Phase 3: staging credentials (account present len={loginId.Length}, " +
                      $"password=**REDACTED**, pin={(loginPin is null ? "none" : "**REDACTED** (a7-gated)")}). " +
                      "spec: login_flow.md §4.2.");
             await UseCases.LoginAsync(loginId, loginPw, loginPin, ct).ConfigureAwait(false);

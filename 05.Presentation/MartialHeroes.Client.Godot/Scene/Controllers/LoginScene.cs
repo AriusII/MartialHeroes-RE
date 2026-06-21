@@ -4,11 +4,9 @@ using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Login;
-using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Shared.Kernel.Enums;
 
 // FrontEndAudio, ScreenHost
-// ServerEntry (moved to engine-free layer)
 // LoginWindow, PinSubView, ServerSelectSubView
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
@@ -181,18 +179,13 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_serverSelect is null || !IsInstanceValid(_serverSelect)) return;
 
-        var entries = new List<ServerEntry>(serverList.Servers.Length);
-        foreach (var e in serverList.Servers)
-            entries.Add(new ServerEntry(
-                e.ServerId,
-                string.Empty,
-                e.StatusCode,
-                e.Load,
-                e.OpenTime));
-
-        _serverSelect.SetServers(entries);
-        GD.Print($"[LoginScene] Applied ServerListReceivedEvent ({entries.Count} entries) to state-1 server-list. " +
-                 "spec: login_flow.md §2.1.");
+        // Pass the published ServerListEntryView records straight through (no view-model conversion hop):
+        // ServerSelectSubView.SetServers now consumes ServerListEntryView directly and resolves each
+        // server's localized DisplayName itself via the msg bank (5000+ServerId). spec: login_flow.md §2.1.
+        _serverSelect.SetServers(serverList.Servers);
+        GD.Print(
+            $"[LoginScene] Applied ServerListReceivedEvent ({serverList.Servers.Length} entries) to state-1 server-list. " +
+            "spec: login_flow.md §2.1.");
     }
 
     // LoginFlowCompleted is now emitted by LoginWindow.NotifyConnectSuccess → state 41.

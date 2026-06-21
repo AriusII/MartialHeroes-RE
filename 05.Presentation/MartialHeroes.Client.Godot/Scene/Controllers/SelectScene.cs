@@ -108,10 +108,6 @@ public sealed partial class SelectScene : StubSceneController
                 GD.Print($"[SelectScene] CharacterListEvent applied ({list.Characters.Length} slots). " +
                          "spec: frontend_scenes.md §3.1; login_flow.md §3.2.");
                 break;
-            case CharCreateResultEvent create:
-                GD.Print($"[SelectScene] CharCreateResult success={create.Success} slot={create.AssignedSlotId} " +
-                         $"error={create.ErrorCode}; waiting for core roster refresh. spec: frontend_scenes.md §6.");
-                break;
             case CharManageResultEvent manage:
                 GD.Print($"[SelectScene] CharManageResult success={manage.Success} subtype={manage.Subtype} " +
                          $"count={manage.AccountCharacterCount}. spec: frontend_scenes.md §5/§6.");

@@ -234,9 +234,15 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // spec: Docs/RE/packets/lobby.yaml Record Shape A.
         var builder = ImmutableArray.CreateBuilder<ServerListEntryView>(records.Count);
         foreach (var r in records)
+            // DisplayName is left string.Empty here: the localized server name resolves CLIENT-SIDE from
+            // the msg bank (5000 + ServerId), which lives in the engine layer (layer 05, HudTextLibrary).
+            // The engine-free Application has no msg bank, so the layer-05 ServerSelectSubView resolves the
+            // real localized name from the msg bank at render time. r.ServerId is already short (no cast).
+            // spec: Docs/RE/specs/login_flow.md §2.1 (server-name resolution is client-local);
+            // Docs/RE/specs/frontend_layout_tables.md §4.1.
             builder.Add(new ServerListEntryView(
                 r.ServerId, r.StatusCode, r.Load, r.OpenTime,
-                ClassifyLoad(r.Load), ClassifyStatus(r.StatusCode)));
+                ClassifyLoad(r.Load), ClassifyStatus(r.StatusCode), string.Empty));
 
         _eventBus?.Publish(new ServerListReceivedEvent(builder.ToImmutable()));
         return records;

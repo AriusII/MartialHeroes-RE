@@ -76,17 +76,15 @@ public interface ILobbyClient
     /// </summary>
     /// <remarks>
     ///     <para>
-    ///         The channel thread zero-fills a 30-byte endpoint field, then copies the first 30 (0x1E)
-    ///         bytes of the decompressed payload verbatim as a fixed ASCII endpoint token. The 30 source
-    ///         bytes are <b>not</b> guaranteed NUL-terminated. The legacy client consumed this token
-    ///         opaquely (it did not itself parse host/port out of it in the channel thread); the exact
-    ///         internal delimiter (e.g. <c>"host:port"</c> vs <c>"host port"</c> vs
-    ///         <c>"host\0port"</c> vs fixed sub-fields) is <b>NEEDS-CAPTURE</b> — not statically
-    ///         determinable. A whitespace-split is a reasonable implementation choice pending a live
-    ///         capture that confirms the delimiter.
+    ///         The channel thread zero-fills a 30-byte endpoint field, then copies <b>up to</b> 30 (0x1E)
+    ///         bytes of the decompressed payload as a NUL-terminated ASCII <c>"&lt;host&gt; &lt;port&gt;"</c>
+    ///         token: 30 is a copy CAP (not a minimum — a shorter live payload is tolerated), the token is
+    ///         read up to the first NUL, and the delimiter is a <b>single space (0x20)</b> with the port
+    ///         tail parsed via decimal <c>atol</c>. It is a SINGLE endpoint — there is no trailing channel
+    ///         array. (Binary-confirmed CYCLE 9 Phase 1; the prior "delimiter NEEDS-CAPTURE" reading is
+    ///         settled — requiring &gt;=30, or splitting on <c>':'</c>/NUL, or looping for an array, is a bug.)
     ///         <br />
-    ///         spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE B — CHANNEL-ENDPOINT text
-    ///         [CODE-CONFIRMED: 30 bytes copied, consumed opaquely; delimiter = NEEDS-CAPTURE].
+    ///         spec: Docs/RE/specs/login_flow.md §2.2; Docs/RE/packets/lobby.yaml §RECORD SHAPE B.
     ///     </para>
     ///     <para>
     ///         The returned <see cref="LobbyChannelEndpoint" /> names the <b>game server</b>, not the

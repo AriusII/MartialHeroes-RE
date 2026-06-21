@@ -6,15 +6,15 @@ namespace MartialHeroes.Network.Abstractions.Lobby;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The lobby channel-endpoint query decompresses the LZ4 payload and reads the first
-///         30 (0x1E) bytes as a fixed ASCII endpoint token (not guaranteed NUL-terminated). The
-///         exact internal delimiter (e.g. <c>"host:port"</c>, <c>"host port"</c>, or fixed
-///         sub-fields) is <b>NEEDS-CAPTURE</b> — the legacy client consumed the token opaquely.
-///         The transport implementation parses it to produce the <see cref="Host" /> and
-///         <see cref="Port" /> fields exposed here; a whitespace-split is a reasonable choice pending
-///         a capture that confirms the delimiter.
+///         The lobby channel-endpoint query decompresses the LZ4 payload and copies up to 30 (0x1E)
+///         bytes into a zero-filled buffer, then reads it as a NUL-padded ASCII endpoint token.
+///         The token format is <c>"&lt;host&gt; &lt;port&gt;"</c> with a <b>single SPACE (0x20) as
+///         the delimiter</b> (not a colon, not NUL) — CONFIRMED CYCLE 9 (binary-won, 263bd994).
+///         30 is the <b>copy-cap</b>, not a minimum: a shorter decompressed payload is valid and
+///         must be tolerated. There is a <b>single endpoint</b> per response (no trailing array).
+///         The transport splits on the single space: host = text before, port = decimal-ASCII after.
 ///         <br />
-///         spec: Docs/RE/packets/lobby.yaml §RECORD SHAPE B [CODE-CONFIRMED: 30 bytes; delimiter = NEEDS-CAPTURE].
+///         spec: Docs/RE/specs/login_flow.md §2.2 [CODE-CONFIRMED: up-to-30-byte copy cap; single-SPACE delimiter; single endpoint].
 ///     </para>
 ///     <para>
 ///         This endpoint identifies the <b>game server</b>, not the lobby. After obtaining this record
