@@ -70,16 +70,43 @@ from one connection).
    (e.g. list a few strings) to confirm responses are real. If the database looks wrong or empty,
    warn the user before continuing.
 
-5. **Green light.** Only when the socket is UP, `mcp__ida__*` tools are present, and a sane database
-   is confirmed: report "IDA session ready", note the binary name + function count, and hand off to
-   the requested RE workflow (recon, opcode mapping, crypto, struct dump).
+5. **`server_health` — the structured UP report.** When a `server_health` tool exists, call it: it
+   returns `idb_path` / `module` / `imagebase` / `auto_analysis_ready` / `hexrays_ready` /
+   `strings_cache`. This is the authoritative confirmation that the **correct, non-empty** Martial
+   Heroes IDB is loaded (`module`/`idb_path` is the `doida.exe` client) and that analysis is ready.
+   If `auto_analysis_ready` is false, recovery results are unreliable — wait/warn. If `hexrays_ready`
+   is false, decompile calls will fail until warm-up.
+
+6. **`server_warmup` (optional, recommended).** If the report shows Hex-Rays uninitialized or caches
+   cold, call `server_warmup` (init Hex-Rays / build caches) once so the first heavy
+   decompile/xref/string query in the session is not paying cold-start cost. Skip if already warm.
+
+7. **Point the analyst at the CAPABILITY MAP.** Before any recovery call, read the bundled toolbox
+   reference so the right tool is chosen for the task (and the firewall lanes are respected):
+
+   ```
+   Read ${CLAUDE_SKILL_DIR}/references/ida-mcp-toolbox.md
+   ```
+
+   It is a neutral, categorized map of the live `mcp__ida__*` families (PREFLIGHT · SURVEY/RECON ·
+   SEARCH · NAV/XREF/FLOW · DECOMPILE/DISASM · TYPES/STRUCTS · IDB-WRITE · IDAPYTHON · DEBUGGER ·
+   DIFF) plus a "which tool for which RE task" table and the G0→G4 gate chain. **`survey_binary` is the
+   FIRST recovery call of any new investigation.**
+
+8. **Green light.** Only when the socket is UP, `server_health` confirms a sane non-empty `doida.exe`
+   IDB, and the toolbox map is loaded: report "IDA session ready", note `module` + function count +
+   whether `dbg_*` is present (`?ext=dbg`), and hand off to the requested RE workflow.
 
 ## Verify / Done when
 
-- The probe printed `IDA MCP: UP`, the `mcp__ida__*` tools resolve, and a one-liner confirmed a sane,
-  non-empty IDB whose `get_root_filename()` is the Martial Heroes client (not another instance).
+- The probe printed `IDA MCP: UP`, the `mcp__ida__*` tools resolve, and `server_health` (or a one-liner)
+  confirmed a sane, non-empty IDB whose `module`/`idb_path` is the `doida.exe` client (not another
+  instance), with `auto_analysis_ready` true.
 - The available tool category (script-exec / debugger / typed) is reported, and whether `dbg_*` is
   present (i.e. on `?ext=dbg`).
+- The capability map (`references/ida-mcp-toolbox.md`) was read before recovery began, so the right
+  tool family is chosen and the firewall lanes (decompile→`_dirty/`, IDB-write→`ida-toolsmith`,
+  `dbg_*`→`re-validator`) are respected.
 - If anything failed, the exact remediation was handed back and **no** analysis was allowed to start.
 
 ## Pitfalls

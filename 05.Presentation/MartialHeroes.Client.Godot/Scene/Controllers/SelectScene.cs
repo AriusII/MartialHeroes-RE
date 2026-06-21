@@ -1,36 +1,36 @@
 using System.Collections.Immutable;
 using Godot;
-using MartialHeroes.Client.Application.Events;
-using MartialHeroes.Client.Application.Scene;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Select;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
-/// Select preview camera; all flow intents are forwarded to Application use-cases.
-/// Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
-/// The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
-/// spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
+///     State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
+///     Select preview camera; all flow intents are forwarded to Application use-cases.
+///     Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
+///     The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
+///     spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
 /// </summary>
 public sealed partial class SelectScene : StubSceneController
 {
+    private FrontEndAudio? _audio;
+    private bool _confirmInFlight;
     private ClientContext? _ctx;
+    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private FrontEndAudio? _audio;
     private CharSelectWindow? _select; // NEW: Ui/Scenes substrate
-    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
-    private bool _confirmInFlight;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Select;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -50,16 +50,21 @@ public sealed partial class SelectScene : StubSceneController
         if (_ctx is not null)
             StartEventDrain(_select, _ctx.EventBus);
 
-        if (IsDevOfflineMode() || DisplayServer.GetName() == "headless")
-            SeedDevRoster();
-
         GD.Print("[SelectScene] State 4 Select built CharacterSelectScreen: roster UI, 3D preview actors, " +
                  "and Select camera dolly. spec: client_runtime.md §7.3/§7.4; frontend_scenes.md §3.");
 
-        if (DisplayServer.GetName() == "headless" || OS.GetEnvironment("MH_SELECT_AUTOCONFIRM") == "1")
+        // Roster catch-up replay: the live 3/4 CharacterListEvent fires during LOAD state (state 3),
+        // before this drainer is armed. If the Application store already retained the roster, replay
+        // it directly into ApplyCharacterList so the 5 preview actors build with the correct class.
+        // The drainer is still fully armed above — if a fresh 3/4 arrives later, ApplyCharacterList
+        // runs again (full rebuild). This replay is additive, not a drainer suppression.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.1.
+        var retained = _ctx?.CharacterSelection?.ProjectRetainedRoster() ?? ImmutableArray<CharacterListSlot>.Empty;
+        if (retained.Length > 0)
         {
-            SceneTreeTimer timer = GetTree().CreateTimer(0.35);
-            timer.Timeout += AutoConfirmForHeadless;
+            _select.ApplyCharacterList(retained);
+            GD.Print($"[SelectScene] Replayed {retained.Length} retained roster slots into ApplyCharacterList " +
+                     "(live 3/4 CharacterListEvent fired pre-Select-drainer). spec: frontend_scenes.md §3.1.");
         }
     }
 
@@ -91,7 +96,7 @@ public sealed partial class SelectScene : StubSceneController
         {
             Name = "CharSelectWindow",
             Atlas = atlas,
-            Text = text,
+            Text = text
         };
 
         select.EnterGameRequested += OnEnterGameRequested;
@@ -118,10 +123,6 @@ public sealed partial class SelectScene : StubSceneController
                 GD.Print($"[SelectScene] CharacterListEvent applied ({list.Characters.Length} slots). " +
                          "spec: frontend_scenes.md §3.1; login_flow.md §3.2.");
                 break;
-            case CharCreateResultEvent create:
-                GD.Print($"[SelectScene] CharCreateResult success={create.Success} slot={create.AssignedSlotId} " +
-                         $"error={create.ErrorCode}; waiting for core roster refresh. spec: frontend_scenes.md §6.");
-                break;
             case CharManageResultEvent manage:
                 GD.Print($"[SelectScene] CharManageResult success={manage.Success} subtype={manage.Subtype} " +
                          $"count={manage.AccountCharacterCount}. spec: frontend_scenes.md §5/§6.");
@@ -130,10 +131,15 @@ public sealed partial class SelectScene : StubSceneController
                 GD.Print($"[SelectScene] CharRenameResult success={rename.Success} newName='{rename.NewName}' " +
                          $"error={rename.ErrorCode}. spec: frontend_scenes.md §6.");
                 break;
-            case SceneStateChangedEvent { Next.State: EngineSceneState.InGame }:
+            case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
+                // Out-of-band committed transition (e.g. 3/5 Select→InGame, or 3/100 Select→Quit/Error).
+                // The Application scene machine already pre-committed the new state; converge the visible
+                // controller without re-advancing the machine (Advance() would jump past the target).
+                // spec: Docs/RE/specs/client_runtime.md §7.5.3.
                 GD.Print(
-                    "[SelectScene] Application scene machine observed Select→InGame; SceneHost will re-dispatch. " +
-                    "spec: client_runtime.md §7.5.3.");
+                    $"[SelectScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
+                    "out-of-band committed transition — calling SyncToCurrentState. spec: client_runtime.md §7.5.3.");
+                _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
                 break;
         }
     }
@@ -143,10 +149,10 @@ public sealed partial class SelectScene : StubSceneController
         GD.Print(
             $"[SelectScene] Enter requested for '{characterName}' slot={slotIndex}; forwarding to UseCases.SelectCharacterAsync. " +
             "spec: frontend_scenes.md §7; cmsg_char_enter.yaml.");
-        _ = ConfirmSlotAsync(slotIndex, allowDevFallback: IsDevOfflineMode());
+        _ = ConfirmSlotAsync(slotIndex);
     }
 
-    private async Task ConfirmSlotAsync(int slotIndex, bool allowDevFallback)
+    private async Task ConfirmSlotAsync(int slotIndex)
     {
         if (_confirmInFlight) return;
         _confirmInFlight = true;
@@ -162,12 +168,9 @@ public sealed partial class SelectScene : StubSceneController
         {
             GD.PrintErr($"[SelectScene] SelectCharacterAsync({slotIndex}) failed/skipped: {ex.Message}");
         }
-
-        if (allowDevFallback && _host?.CurrentState == EngineSceneState.Select)
+        finally
         {
-            GD.Print("[SelectScene] Dev/headless fallback advancing Select→InGame through SceneHost.Advance. " +
-                     "spec: client_runtime.md §7.5.1; real connected flow uses UseCases.SelectCharacterAsync.");
-            _host.CallDeferred(SceneHost.MethodName.Advance);
+            _confirmInFlight = false;
         }
     }
 
@@ -196,19 +199,19 @@ public sealed partial class SelectScene : StubSceneController
         try
         {
             var request = new CharacterCreateRequest(
-                Name: name,
-                UiClassIndex: InternalClassToUiIndex(internalClass),
-                Face: checked((ushort)faceIndex),
-                Sex: 0,
-                HairOrReserved: 0,
-                Stat0: 0,
-                Stat1: 0,
-                Stat2: 0,
-                Stat3: 0,
-                Stat4: 0,
-                PointsRemaining: 0);
+                name,
+                InternalClassToUiIndex(internalClass),
+                checked((ushort)faceIndex),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0);
 
-            CharacterNameValidationResult result =
+            var result =
                 await useCases.CreateCharacterAsync(request, CancellationToken.None);
             if (!result.IsValid)
                 GD.Print($"[SelectScene] Create rejected by Application validation; msgId={result.MessageId}. " +
@@ -230,7 +233,7 @@ public sealed partial class SelectScene : StubSceneController
 
         try
         {
-            bool sent = await useCases.DeleteCharacterAsync(slotIndex, CancellationToken.None);
+            var sent = await useCases.DeleteCharacterAsync(slotIndex, CancellationToken.None);
             GD.Print($"[SelectScene] DeleteCharacterAsync({slotIndex}) sent={sent}. spec: frontend_scenes.md §5.");
         }
         catch (Exception ex)
@@ -239,95 +242,22 @@ public sealed partial class SelectScene : StubSceneController
         }
     }
 
-    private static byte InternalClassToUiIndex(int internalClass) => internalClass switch
+    private static byte InternalClassToUiIndex(int internalClass)
     {
-        4 => 0,
-        1 => 1,
-        3 => 2,
-        2 => 3,
-        _ => 0,
-    };
+        return internalClass switch
+        {
+            4 => 0,
+            1 => 1,
+            3 => 2,
+            2 => 3,
+            _ => 0
+        };
+    }
 
     private void OnBackRequested()
     {
         GD.Print("[SelectScene] Back requested from SelectWindow; routing to scene-aware quit for now. " +
                  "spec: client_runtime.md §7.5.3.");
         _ctx?.SceneMachine.RequestQuit();
-    }
-
-    private void SeedDevRoster()
-    {
-        ImmutableArray<CharacterListSlot> slots = DevCharacterList();
-        if (_ctx is not null)
-        {
-            _ctx.EventBus.Publish(new CharacterListEvent(ServerId: 0, ChannelId: 0, Characters: slots));
-            GD.Print($"[SelectScene] DEV/headless roster published through EventBus ({slots.Length} slots).");
-        }
-        else
-        {
-            _select?.ApplyCharacterList(slots);
-            GD.Print($"[SelectScene] DEV/headless roster applied directly ({slots.Length} slots; no ClientContext).");
-        }
-    }
-
-    private void AutoConfirmForHeadless()
-    {
-        if (_host?.CurrentState != EngineSceneState.Select) return;
-
-        GD.Print("[SelectScene] Headless/dev auto-confirm slot 0 so SceneHost can verify state 4→5.");
-        _ = ConfirmSlotAsync(slotIndex: 0, allowDevFallback: true);
-    }
-
-    private static ImmutableArray<CharacterListSlot> DevCharacterList() =>
-        ImmutableArray.Create(
-            new CharacterListSlot(SlotIndex: 0, Name: "무사", Level: 25, ServerClass: 1, CurrentHp: 650),
-            new CharacterListSlot(SlotIndex: 1, Name: "격사", Level: 32, ServerClass: 3, CurrentHp: 520),
-            new CharacterListSlot(SlotIndex: 2, Name: "도사", Level: 18, ServerClass: 2, CurrentHp: 480),
-            new CharacterListSlot(SlotIndex: 3, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0),
-            new CharacterListSlot(SlotIndex: 4, Name: "@BLANK@", Level: 0, ServerClass: 0, CurrentHp: 0));
-
-    private static bool IsDevOfflineMode()
-    {
-        string? envVal = System.Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
-        if (envVal is "1" or "true" or "yes") return true;
-
-        string cfgVal = ReadCfgKey("dev_offline_flow", "0");
-        return cfgVal is "1" or "true" or "yes";
-    }
-
-    private static string ReadCfgKey(string key, string defaultValue)
-    {
-        string path;
-        try
-        {
-            path = ProjectSettings.GlobalizePath("res://client_dir.cfg");
-        }
-        catch
-        {
-            path = "client_dir.cfg";
-        }
-
-        if (!File.Exists(path)) return defaultValue;
-
-        try
-        {
-            foreach (string rawLine in File.ReadLines(path))
-            {
-                string line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-
-                int eq = line.IndexOf('=');
-                if (eq < 0) continue;
-
-                if (line[..eq].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
-                    return line[(eq + 1)..].Trim();
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[SelectScene] ReadCfgKey('{key}') failed: {ex.Message}");
-        }
-
-        return defaultValue;
     }
 }

@@ -1,0 +1,60 @@
+# spec: Docs/RE/packets/2-57_stack_distribute.yaml
+# Role: C2S stack split/distribute submit — fixed 20-byte header + counted u8 contributing-slot tail.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgStackDistribute
+opcode: 0x20039           # major 2 (GameAction), minor 57 -> (2 << 16) | 57
+direction: C2S
+size: var                 # 20-byte fixed header + tail_count u8 slot-index bytes (variable)
+spec: packets/2-57_stack_distribute.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Stack split / distribute submit. Distributes/splits a stack across the matching slots of an item the player owns, with an affordability cap. A fixed 20-byte header followed by an OPTIONAL u8 tail of contributing-slot indices (one byte per slot), appended only when op_type==1 and the count is nonzero.
+
+# Wire order, offset 0 = first payload byte. Pack=1. VARIABLE: fixed 20-byte header + tail_count records.
+fields:
+  # --- fixed 20-byte header ---
+  - { name: OpType,      type: u8 }          # 0x00  operation type; gate is ==1 (distribute/split) [capture/debugger-pending]
+  - { name: SourceIndex, type: u8 }          # 0x01  index into a record table resolving the item/stack id [capture/debugger-pending]
+  - { name: DestSlot,    type: u8 }          # 0x02  destination panel slot [capture/debugger-pending]
+  - { name: Pad0,        type: "u8[3]" }     # 0x03  alignment gap (unwritten)
+  - { name: Quantity,    type: u16 }         # 0x06  requested amount; clamped to available before send [capture/debugger-pending]
+  - { name: ValueA,      type: u32 }         # 0x08  amount/price low dword [capture/debugger-pending]
+  - { name: ValueB,      type: u32 }         # 0x0c  amount/price high dword [capture/debugger-pending]
+  - { name: TailCount,   type: u8 }          # 0x10  number of trailing slot-index bytes (N)
+  - { name: Pad1,        type: "u8[3]" }     # 0x11  alignment gap (unwritten)
+  # --- optional repeated record (appended only when OpType==1 and TailCount>0) ---
+  - { name: SlotIndices, type: "u8[TailCount]" }  # 0x14  one byte per contributing slot; repeated TailCount times
+
+notes: |
+  CONTROL-FLOW CONFIRMED: a fixed 20-byte (0x14) header blit, THEN — only when OpType==1 and a
+  buffer is present and TailCount>0 — a tail of TailCount individual bytes appended one at a time.
+  Total body = 20 + TailCount. The field VALUES are static inferences (capture-pending).
+
+  FIXED HEADER (20 bytes):
+    0x00 (1B)  OpType      : operation type; the tail-append gate is OpType==1 (distribute/split mode).
+    0x01 (1B)  SourceIndex : index into a 16-byte-stride record table that resolves an item/stack id.
+    0x02 (1B)  DestSlot    : destination panel slot (a 48-byte-stride slot table).
+    0x03 (3B)  Pad0        : alignment gap before Quantity (unwritten).
+    0x06 (2B)  Quantity    : requested amount; clamped down to the affordable/available total
+                             before the send.
+    0x08 (4B)  ValueA      : a price/amount low dword (written into the slot record).
+    0x0c (4B)  ValueB      : a high dword / second amount (written into the slot record).
+    0x10 (1B)  TailCount   : number of trailing slot-index bytes that follow.
+    0x11 (3B)  Pad1        : alignment gap (unwritten).
+
+  REPEATED RECORD (variable):
+    0x14 (TailCount x u8) SlotIndices : one byte per contributing slot, appended only when OpType==1
+                                        and TailCount>0.
+
+  TRIGGER: a HUD list double-click that distributes/splits a stack across the matching slots of an
+  item/stack the player owns; the sender accumulates matching-id slots into the tail and counts them
+  into TailCount before sending. Affordability is capped client-side.
+
+  UNKNOWNS to resolve with a capture:
+    - the per-field VALUE meanings (the exact item-vs-stall semantics, ValueA/ValueB roles);
+    - the inbound reply opcode (the server confirms the redistributed slots) — pending.
+
+  UNBLOCKS: Client.Application stack split/distribute use-case (variable-length send).

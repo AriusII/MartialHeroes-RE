@@ -1,0 +1,31 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-127).
+# size: 12 bytes (0x0C) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgStealthToggle
+opcode: 0x5007f           # major 5 (Push), minor 127 -> (5 << 16) | 127
+direction: S2C
+size: 12                  # fixed 12-byte payload (0x0C)
+spec: packets/5-127_stealth_toggle.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor stealth toggle. Activates or deactivates stealth rendering (transparency / visibility)
+  on the target actor.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: StealthFlag, type: u8, offset: 8 }      # stealth active flag (0 = visible, nonzero = stealthed)
+  - { name: Padding, type: "u8[3]", offset: 9 }     # alignment padding to 12 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the actor via (ActorSort, ActorId).
+    - Writes the StealthFlag boolean to actor structure offset 1836.
+    - If the actor is not the local player:
+      - If StealthFlag is true: hides the actor model (releases active meshes).
+      - If StealthFlag is false: re-deforms and re-uploads the actor's skin model to show it again.

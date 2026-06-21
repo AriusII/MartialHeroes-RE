@@ -5,7 +5,7 @@ verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/
   structure, and the game-server DNS connect are all static-control-flow-confirmed against the
   binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
   (every on-wire byte VALUE -- no .pcapng present).
-ida_reverified: 2026-06-18
+ida_reverified: 2026-06-21   # CYCLE 9 Phase 1 (263bd994): server-list 8-byte record signedness CONFLICT corrected -- all four fields are signed i16 (server_id +0 was wrongly u16; binary reads sign-extending loads, commit gate load<2400 is a signed branch); channel-endpoint parse shape (single SPACE delim, 30=copy-cap, single endpoint), lobby host-resolution (ip.txt/list.dat/211.196.150.4 + inet_addr), login ladder (29->31 PIN / 32->33 fetch / 37->38 commit / 40 hand-off), PIN srand(time()) ascending shuffle, curtain +5/>222 + SFX 861010105, game.ver index-5 gate, Loading (2 ortho quads + BGM 920100100) and 3/1 char-select (hard 5-slot loop) all static-RE-CONFIRMED. CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
@@ -143,18 +143,49 @@ The ordered lifecycle is:
    replies inline with `1/4 CmsgAuthReply` (RSA-encrypted staged credential). The session is then
    marked secure. (Cited — `specs/crypto.md` §6.)
 
-7. **Character list.** Server → client `3/1 SmsgCharacterList` drives the client into the
-   **character-select scene** (Section 3). The list enumerates the account's character slots.
+   **Login outcome surface (no dedicated login-result opcode).** After sending `1/4` the client is
+   **fully passive** — it sends nothing and waits for the server to drive the outcome by *which frame
+   it pushes next* (static-IDA confirmed CYCLE 4; wire VALUE semantics live/capture-pending):
+   - **SUCCESS** ⟹ an **unsolicited `3/1 SmsgCharacterList` push** → character-select (step 7).
+   - **Hard FAILURE** ⟹ a connection-state event (network event **type-15 / sub-code 102**) →
+     disconnect, bounded by a **~30s watchdog**.
+   - **Coded outcome** ⟹ a `3/100 SmsgCharActionResult` carrying a 4-byte code (select-screen
+     message / connect-progress prime; see `net_contracts.md` Appendix A.4). A coded `3/100` is
+     **neither** a char-list **nor** a disconnect — the connection stays open and a message is shown.
+
+   *(Live note, CYCLE 4: a `1/4` to the replica with a valid dev account returned `3/100 code=10`,
+   password-independent — under live investigation as duplicate-session vs a 1/4 build defect; a
+   successful login would instead surface as an unsolicited `3/1`.)*
+
+7. **Character list.** Server → client the **character roster** (3-byte header
+   `[form_byte0][channel_byte1][slot_mask_byte2]` + `popcount(slot_mask) × 981`-byte records, §5.1)
+   drives the **character-select scene**. **LIVE + IDA CONFIRMED (CYCLE 4):** the same roster decode is
+   reached by **two** minors — `3/1` (force-select: zeroes the scratch, always populates, forces
+   GameState→char-select) and **`3/4`** (in-place refill, gated by `form_byte0 == 1`, no forced scene
+   change). The live replica delivers the post-login roster **unsolicited on `3/4`**, immediately
+   followed by **`3/5`** — a 44-byte post-login **account-ack** (name@0, billing@28, char_count@40; +4
+   trailing) that nudges the scene toward Load — itself unsolicited (NOT gated on a prior `1/9`). A live
+   login (dev account) returned `3/4` (2946B = `3 + 3×981`, mask `0x07` = 3 chars, first name "jeonsa")
+   → `3/5` ("xwdvg26") → later `3/100` code 21 (generic select-screen notice; meaning live-pending).
+   Both `3/1` and `3/4` MUST route to the same 3+N×981 roster decode + char-select population. (The
+   earlier CYCLE-10 "3/4 = SmsgSceneEntityUpdate" label was a misname — the handler decodes the roster,
+   not a scene-entity update; proposed canonical name `SmsgCharacterListUpdate`.)
 
 8. **Slot management (optional).** From the select scene the player may **create**, **delete /
    manage**, or **rename** a character; the server answers with the corresponding character-management
    responses (Section 5).
 
-9. **Enter game.** The player confirms a slot. The client sends `1/9 CmsgEnterGameRequest`
-   (40-byte body, Section 3) and **caches the chosen slot's character record locally** for the world
-   load. The server answers `3/5 SmsgEnterGameAck` (44 bytes) → the client transitions to the
-   **in-world game state**. The local player's actual **world** spawn is then driven by the
-   `4/1 SmsgGameStateTick` world-entry snapshot, which consumes the cached character record. (A
+9. **Enter game (CORRECTED 2026-06-21 against the live server `211.196.150.4`).** The player confirms a
+   slot. The client sends `1/9 CmsgEnterGameRequest` (40-byte body, Section 3) and **caches the chosen
+   slot's character record locally** for the world load. The server answers directly with
+   `4/1 SmsgGameStateTick` (the ~9100-byte world-entry snapshot) — **the `4/1` IS the enter
+   confirmation**, with **NO enter-ladder `3/5` in between**. On a **`4/1` received while the enter
+   request (`1/9`) is in flight**, the client transitions to the **in-world game state** and spawns the
+   local player from the cached descriptor. **The live enter ladder is `1/9 → 4/1`, NOT
+   `1/9 → 3/5 → 4/1`** — a live headless run observed `… roster (3/4) → 3/5 (post-login account-ack,
+   BEFORE the 1/9) → 1/9 (enter request) → 4/1 (enter confirmation) → 5/121`. The `3/5 SmsgEnterGameAck`
+   is **only the unsolicited post-login account-ack** (it arrives **before** any `1/9`, step 7); it is
+   **not** a step in the enter ladder and must **not**, by itself, enter the world. (A
    `3/14 SmsgCharSpawnResponse` (16 bytes) may also arrive as an enter-into-world *bridge* that
    re-enters the enter-builder, but it is **not** the local-player world spawn.) Ongoing world state
    thereafter is maintained by the major-5 Push family (out of scope here).
@@ -215,6 +246,12 @@ see §2.2 / §3.0). It:
 4. Connection failure is **non-fatal to the helper** — it logs the error and still returns the
    socket; the caller detects failure by the absence of a valid reply.
 
+> **Re-confirmed (Phase 2b, build 263bd994).** Static IDA re-traced the lobby connect path: it uses
+> **`inet_addr`** on a dotted-quad string (NO `gethostbyname`, NO DNS, `getaddrinfo` absent;
+> `inet_ntoa` appears only for diagnostic peer-IP display). The separate **game-server** connect
+> path uses **`gethostbyname` (DNS)** on a dynamic host string (§2.2 / §3.0). The `211.196.150.4`
+> literal is referenced from exactly one function (the lobby connect routine); all call sites traced.
+
 > **Registry note.** `servername` (Tier 2 selector) and `Lastserver` (the selected-server persist of
 > §2.1) live under the **same** key `HKLM\SOFTWARE\crspace\do`. The write path uses the lowercase
 > `software\crspace\do` spelling, the read paths use `SOFTWARE\crspace\do`; the registry is
@@ -243,18 +280,28 @@ So: **server-list payload = `count` × 8-byte records, where `count = wrapper.ma
 
 #### Server-list record (8 bytes) — decoded
 
-Each record is four little-endian 16-bit fields (record stride 8). The meanings were recovered from
-the login window's server-list **render** path: a debug format literal of the shape
+Each record is four little-endian **signed** 16-bit fields (record stride 8), **all four `i16`**
+(SIGNEDNESS static-CONFIRMED CYCLE 9, 263bd994 — see the signedness note below). The meanings were
+recovered from the login window's server-list **render** path: a debug format literal of the shape
 `"i %d status %d count %d"` ties the fields at record offsets +2 and +4 to "status" and "count"
 (load), and the field at +0 is the index fed to the client-local server-name lookup. **Wire-relevant
 fields only** — the localized name itself is *not* on the wire (see the name-table note below).
 
 | Offset | Size | Field | Meaning | Confidence |
 |---|---|---|---|---|
-| +0 | 2 (u16) | `server_id` | Index **1..40** into the client-local localized server-name table. Values outside 1..40 are out of range. | HIGH |
-| +2 | 2 (i16) | `status_code` | Server availability state. A value `≤ 0` or `> 40` is treated as **invalid / unavailable** (an error label is shown). Special values: **3** = "open-time scheduled" (the open time is rendered from `open_time` at +6); **24** = a distinct "preparing / check" fixed label; **100** = "this is the connected / current selection" sentinel that, with a UI flag set, auto-advances into the channel-connect step. | MEDIUM–HIGH |
-| +4 | 2 (i16) | `load` | Population / load gauge. Compared against thresholds **1200 / 800 / 500** to choose a colored "load" label and text color (e.g. red above the high threshold, intermediate colors below). | MEDIUM–HIGH |
-| +6 | 2 (i16) | `open_time` | Used **only** when `status_code == 3`: rendered as a packed open-hour / open-minute schedule using a `×10` split (the field, and the `load` field, are each split as `value/10` and `value%10` to feed an `HH:MM`-style display). The exact packing is **inferred, not pinned**. | LOW–MEDIUM |
+| +0 | 2 (i16) | `server_id` | Index **1..40** into the client-local localized server-name table. Values outside 1..40 are out of range. Read **signed** at every value use (sign-extending load; the record base is read through a signed-16 element). | HIGH |
+| +2 | 2 (i16) | `status_code` | Server availability state. A value `≤ 0` or `> 40` is treated as **invalid / unavailable** (an error label is shown). Special values: **3** = "open-time scheduled" (the open time is rendered from `open_time` at +6); **24** = a distinct "preparing / check" fixed label; **100** = "this is the connected / current selection" sentinel that, with a UI flag set, auto-advances into the channel-connect step. (Loaded **signed**; its branches are equality / small-enum tests, so sign is behaviorally inert, but the field type is `i16`.) | MEDIUM–HIGH |
+| +4 | 2 (i16) | `load` | Population / load gauge. Compared against thresholds **1200 / 800 / 500** to choose a colored "load" label and text color (e.g. red above the high threshold, intermediate colors below). The commit gate's `load < 2400` comparison is a **signed strict-less-than** — this is the decisive evidence the field is `i16`. | MEDIUM–HIGH |
+| +6 | 2 (i16) | `open_time` | Used **only** when `status_code == 3`: rendered as a packed open-hour / open-minute schedule using a `×10` split (the field, and the `load` field, are each split as `value/10` and `value%10` to feed an `HH:MM`-style display). The exact packing is **inferred, not pinned**. (Read **signed** — the minute use is a signed load + signed division by 10.) | LOW–MEDIUM |
+
+> **Signedness (CONFLICT corrected — binary-won, CYCLE 9, 263bd994).** All four record fields are
+> **signed `i16`**. An earlier version of this table listed `server_id (+0)` as `u16`; the binary
+> reads it (and every record field) with a sign-extending load, and the only decisive numeric ordering
+> branch — the commit gate's `load < 2400` — is a **signed** comparison. The `server_id` **1..40**
+> range check is emitted as an unsigned-style range idiom (`(unsigned)(server_id − 1) > 39`), which is
+> the usual compiler form for a bounded range test; **do not infer `u16` from that guard** — the field
+> is `i16`. This makes the table agree with `packets/lobby.yaml` Record Shape A and
+> `specs/frontend_layout_tables.md §4.1`, which already record all four fields as `i16`.
 
 **Server-name table (client-local, NOT wire data).** The localized server name shown in the UI is
 **not** transmitted. The wire carries only the numeric `server_id` (+0); the client resolves it
@@ -369,9 +416,12 @@ field shape mirrored in `packets/0-0_key_exchange.yaml`.
 `3/1 SmsgCharacterList` (S2C) is the message that **actually switches the client into the
 character-select scene**. Its shape:
 
-- a **3-byte header**: a server-id context byte, a channel-id context byte, and a **slot bitmask**
-  byte (bit *i* set ⇒ slot *i* is occupied);
-- for each set bit, one **per-slot record of 981 bytes**, read sequentially.
+- a **3-byte header**: two leading **context bytes** (a server-id context byte and a channel-id
+  context byte) followed by a **SlotMask** byte whose **bits 0..4** each indicate whether that slot's
+  981-byte record follows (bit *i* set ⇒ slot *i* is occupied; only bits 0..4 are meaningful — see the
+  hard 5-slot bound below);
+- for each set bit, one **per-slot record of 981 bytes**, read sequentially. The frame total is
+  therefore `3 + popcount(SlotMask) × 981`.
 
 Per-slot record (981 bytes total), as consumed by the handler:
 
@@ -384,6 +434,54 @@ Per-slot record (981 bytes total), as consumed by the handler:
 
 After parsing all occupied slots, the client derives a **CP949** display name (cleaned/truncated to
 **17 bytes**) per slot, then forces the **character-select scene**.
+
+#### 3.2.1 Per-slot record field map — char-select roster + appearance (consumer-confirmed)
+
+The character-select roster and the previewed avatar are built **entirely from the server's per-slot
+record**; there is no local appearance store. The fields below were re-confirmed from the **consumer
+side** (the select-scene render + the enter-game stage that read them). All offsets are **relative to
+the per-slot record / SpawnDescriptor start** (sub-offset 0 of the 981-byte record). The full
+descriptor + skeleton chain is **owned by `structs/actor.md` and `specs/skinning.md`** and is not
+restated here — only the slots this roster reads.
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| +0x00 | 17 | `name` | CP949, NUL-terminated cell (≤ 16 chars + NUL). Space-trimmed for display. Compared against the empty-slot sentinel `"@BLANK@"` (§3.5). |
+| +0x2C | 1 (u8) | `appearance_variant` | Doubles as the **row-occupancy gate** (whether the slot renders) **and** as the `variant` input to the appearance formula below. |
+| +0x34 | 2 (u16) | `internal_class` | Class id ∈ **{1,2,3,4}** = Musa / Salsu / Dosa / Monk. The `class` input to the appearance formula and the skeleton selector. |
+| +0x3A | 2 (u16) | `level` (display) | The level value the **char-select roster renders**. See the level-divergence note below. |
+| +0x4C | 4 (f32) | `world_x` | Position X (shown as an integer `"%d , %d"` position label). |
+| +0x50 | 4 (f32) | `world_z` | Position Z (the second number of the `"%d , %d"` label). World **Y is not present** in the record. |
+| +0x58 | 20 × 16 | `equip_ref_table` | Visible-gear table: 20 entries × 16 bytes; each entry's **leading dword** is a worn-item / part gid. The avatar preview overlays specific slots from this table. |
+
+> **Level display-vs-enter-game divergence (flagged).** The char-select roster reads the displayed
+> level from `level` @ **+0x3A**. The **enter-game path**, however, reads the local-player level from
+> a **different descriptor region** — approximately **+0x300**, inside the equip / buff block — **not**
+> from +0x3A. The two paths therefore source the player level from two distinct offsets. Which offset
+> is **authoritative** for the live player level is **live-pending (6-D)**.
+
+**Appearance preview construction.** The avatar shown for an existing list character is composed from
+the server descriptor alone:
+
+- **Skeleton selector.** The model identity is
+  `model_class_id = 5 × (internal_class + 4 × appearance_variant) − 24`, which for the four starter
+  classes yields an appearance-slot identity in **{1, 11, 16, 26}**. That identity selects the
+  **catalog skeleton** (the data-driven edge `{1→g1, 26→g2, 11→g3, 16→g4}`; the underlying skeleton
+  chain and the `SkinClassId → g{1..4}.bnd` rule are **owned by `specs/skinning.md`**).
+- **Outfit overlay.** The visible outfit is layered on top of that skeleton from the
+  `equip_ref_table` (+0x58) worn-item gids.
+
+(Cross-links: `structs/actor.md` owns the full SpawnDescriptor layout; `specs/skinning.md` owns the
+skeleton/appearance chain. This spec only records which descriptor slots the **char-select roster**
+consumes.)
+
+#### 3.2.2 StatBlock, SlotFlag, and Timing (record tail)
+
+| Record sub-offset | Size | Field | Meaning |
+|---|---|---|---|
+| 880 (0x370) | 96 (0x60) | `StatBlock` | The slot's **primary-stat record**. On enter-game the chosen slot's 96-byte StatBlock is **copied verbatim** into the local-player stat globals — it *is* the character's stat record. Layout owned by `structs/stats.md`. |
+| 976 | 1 | `SlotFlag` | Per-slot flag byte that **gates the slot button** (locked / second-password / restricted class). The exact relation/lock semantics are **live-pending (6-D)**. |
+| 977 | 4 (u32) | `Timing` | Per-slot timing value, likely a cooldown / relation timestamp (e.g. delete-cooldown / create-time class). Exact meaning **live-pending (6-D)**. |
 
 > **Slot count (now a hard constant).** The slot-parse loop is a **fixed, bounded iteration of
 > exactly 5** — it walks slot indices **0..4** and stops; it is not an open-ended scan driven only by
@@ -423,10 +521,20 @@ is 1:1 with the raw layout.)
 > client build) is firm; its *offset* within the body is not. Field spec:
 > `packets/1-9_enter_game_request.yaml`.
 
-### 3.4 Enter-game acknowledgement (3/5, S2C) and in-world transition
+### 3.4 The `3/5 SmsgEnterGameAck` (unsolicited post-login account-ack) and the live enter ladder
 
-The server answers with **`3/5 SmsgEnterGameAck`**, a **44-byte** payload, after which the client
-transitions into the **in-world game state**.
+> **CORRECTED 2026-06-21 against the live server `211.196.150.4`.** Earlier this section called `3/5`
+> the "enter-game acknowledgement" and put it on the enter ladder as `1/9 → 3/5 → 4/1`. A live headless
+> run **disproved** that ladder: the only `3/5` arrives as the **unsolicited post-login account-ack**
+> right after the roster and **BEFORE any `1/9`**; the enter request itself is answered **directly by
+> `4/1`**. So the live enter ladder is **`1/9 → 4/1`** (the `4/1` IS the enter confirmation), and
+> **`3/5` is NOT a step in the enter ladder**.
+
+The server pushes **`3/5 SmsgEnterGameAck`**, a **44-byte** payload, **once after login** (right after
+the `3/4`/`3/1` roster, step 7) as the account-ack — it carries the account name/billing/char-count and
+nudges the scene toward Load, but it does **not**, by itself, enter the world. Because it arrives before
+any `1/9`, the in-flight latch is **not armed** when it is received, which is exactly how the client
+distinguishes it from a (non-existent on this server) enter-ladder ack.
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
@@ -437,6 +545,14 @@ transitions into the **in-world game state**.
 > Total = a 40-byte leading block + a trailing u32 = **44 bytes**. `opcodes.md` marks this 44-byte
 > size as corroborated by two captures. Field internals of the 40-byte block beyond name@0 and
 > billing@28 are **UNVERIFIED**. Field spec: `packets/3-5_enter_game_response.yaml`.
+
+**The in-world transition (live).** The client enters the in-world game state on the **`4/1
+SmsgGameStateTick` received while the `1/9` enter request is in flight** (the latch armed by the `1/9`
+send). The `4/1` is `4/1`'s own enter confirmation: it clears the latch (its first statement) and drives
+the scene Select/Load → InGame, then spawns the local player from the cached descriptor (§3.5). A
+latch-**unarmed** `4/1` is an ordinary in-world tick and does not transition the scene; an unsolicited
+`3/5` (latch unarmed) does not enter the world; and a `3/100 SmsgCharActionResult` during the enter
+phase rejects the enter and keeps the client at char-select.
 
 ### 3.5 Local slot caching and the actual spawn
 
@@ -457,9 +573,12 @@ enter-into-world *bridge* that re-enters the enter-builder, but it is **not** th
 spawn. After spawn, the world entity is maintained by the major-5 Push handlers (out of scope; see
 `opcodes.md` 5/x).
 
-> **Enter-game, in one line:** send `1/9` → cache the chosen slot's descriptor locally → on `3/5`,
-> transition to the in-world state → on the `4/1` world-entry snapshot, spawn the local player into
-> the world from the cached descriptor.
+> **Enter-game, in one line (CORRECTED 2026-06-21, live):** send `1/9` (arms the in-flight latch) →
+> cache the chosen slot's descriptor locally → on the **`4/1` world-entry snapshot received with the
+> latch armed**, transition to the in-world state (Select/Load → InGame), clear the latch, and spawn
+> the local player into the world from the cached descriptor. **There is no enter-ladder `3/5` between
+> the `1/9` and the `4/1`** — the only `3/5` is the unsolicited post-login account-ack that precedes the
+> `1/9`.
 
 ### 3.6 Character-select C2S senders (create / slot-select) — cross-reference
 
@@ -483,6 +602,37 @@ in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
 > operation is ever in flight. The full per-field byte tables live in those packet YAMLs — they are
 > the single source of truth; this spec does not restate them. The actual world-entry request is the
 > separate `1/9` enter-game message (§3.3).
+
+> **CYCLE 6b CORRECTION (2026-06-20) -- the full char-manage C2S/S2C family + the deferred-write rule
+> (CODE-CONFIRMED, build 263bd994).** `// confirmed: static IDA 2026-06-20` The select screen emits
+> five C2S messages, not two; delete has no dedicated opcode; and the local slot writers run only off
+> the server ack:
+> - **`1/7` carries a mode byte: `{slot, mode}` (2 bytes).** `mode = 1` = **select-and-play**;
+>   `mode = 0` = **slot-lock / pre-play**. Both emit sites are character-**SELECT** code paths in the
+>   select-window command handler (one builder, two call sites). **Phase 2b binary-won reversal
+>   (build 263bd994):** the earlier reading on this line (`mode = 1` = **delete request**, "delete
+>   multiplexed onto `1/7`") is **REFUTED** -- there is **no major-1 char-delete opcode** on this
+>   build, and neither 1/7 site is a delete path. Character removal is surfaced only via the inbound
+>   major-3 result ladder (`3/7 SmsgCharManageResult` subtype 2, below). The runtime *meaning* of
+>   `mode 1` vs `mode 0` is the only part still capture/debugger-pending.
+> - **`1/9` enter-game** (40 bytes) -- as `section 3.3`.
+> - **`1/6` create character** (52 bytes) -- as above; class map UI{0,1,2,3} to internal {4,1,3,2}.
+> - **`1/13` rename character** (18 bytes).
+> - **`1/14` move/relocate slot** (1 byte: slot index).
+> - **Result: `3/7 SmsgCharManageResult` (8-byte body, subtype byte).** Subtype 2 = **delete confirmed**
+>   (decrements the account character count); other subtypes drive the create/rename slot-facing refresh
+>   and a same-day delete-cooldown notice. The select scene is then reset/refreshed (it does **not**
+>   re-transition; only `3/1` transitions into select -- `section 3.2`).
+> - **Deferred-write rule.** The client writes a new slot record and clears a deleted slot **only from
+>   the matching S2C result handler** (rename-result / `3/7` manage-result), **never** optimistically on
+>   the C2S send. So a create/delete is not reflected locally until the server acknowledges.
+> - **No corner-X close; window close = system-close to state 6 / sub-state 8.** The select window
+>   builds no frame-X widget; an OS/system-close message routes the scene to **state 6, sub-state 8**
+>   (back toward login). The "Back" tab does **not** transition to the server list -- in-window "back"
+>   controls only dismiss the create/rename/move sub-panels. (See `ui_system.md section 8.2`,
+>   `frontend_scenes.md section 3` / `section 5`.)
+> - **Byte-granular blob layouts** of the 40B enter / 52B create / 18B rename / 8B `3/7` bodies remain
+>   capture / debugger-pending; the opcode pairings and sizes above are static-confirmed.
 
 ---
 
@@ -674,20 +824,32 @@ field-layout-unspecced.
 > front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed, places the 8-byte
 > manage result at `3/7` and the variable scene-entity update here at `3/4`.
 
-### 5.4 Character create result — `3/23 SmsgCharCreateResult`
+### 5.4 By-name character status patch — `3/23 SmsgCharStatusBytesByName`
 
-A **12-byte** payload:
+A **28-byte** payload — a by-name character status / level patch (NOT a create result; see the
+correction note below). The handler matches the CP949 character-name key against the lobby roster
+slots and writes two trailing status bytes (a status/flag byte and the character level byte) into the
+matched record (and into the local-player globals when the key is the local player).
 
-| Offset | Size | Field | Meaning |
+| Offset (body) | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 (u8) | Result | 1 = success, 0 = failure. |
-| 1 | 1 (u8) | Code | On success: the assigned slot id. On failure: an error code (range `0xC8..0xD4`, mapped to UI strings; shared with rename, §5.6). |
-| 2 | 2 | Padding | Alignment. |
-| 4 | 4 (u32) | Value 1 | Passed to slot refresh on success. |
-| 8 | 4 (u32) | Value 2 | Passed to slot refresh on success. |
+| 0x00 | 8 | leading block | Copied but **not** used by the name matcher/writer. Its head bytes drive a custom-name-vs-code branch, but the by-name update keys on the name string below. |
+| 0x08 | 17 | char[] (CP949) | Character-name **key**, string-matched against the roster names. **(CYCLE 8 binary re-confirm: the name is at body offset 0x08, not 0x00.)** |
+| 0x19 (+25) | 1 (u8) | Status flag byte | Written into the matched roster record (and the local flag global when it is the local player). |
+| 0x1A (+26) | 1 (u8) | Level byte | Written into the matched roster record (and the local-player level global when it is the local player). |
+| 0x1B (+27) | 1 (u8) | Padding | Trailing reserved byte (unused). |
 
-On success the account character count is incremented. `opcodes.md` carries a **capture-verified**
-12-byte example for this message. Field internals beyond result/code are otherwise **UNVERIFIED**.
+> Offsets are **body-relative** (the payload cursor that begins after the 8-byte wire header).
+> Total body = 28 bytes. Roster scratch: ~5 slots, slot stride 880 bytes, name field at slot+0x3C.
+
+> **There is NO dedicated `3/23` create-result message.** An earlier reading modelled `3/23` as a
+> 12-byte `SmsgCharCreateResult`; the binary refutes this — the inbound major-3 dispatcher routes `3/23`
+> to **`SmsgCharStatusBytesByName`** (28-byte by-name status/level patch). The character-create ack is
+> the manage-result latch + **`3/7`** + a refreshed `3/1` character list (which increments the account
+> character count) — there is no 12-byte create-result opcode at all. The full `3/23` field table is
+> owned by `character_creation.md` §5.1 (the exact interior offsets of the two trailing bytes within the
+> 28-byte read are static-partial). The error-string range `0xC8..0xD4` is the **create/rename UI
+> error** range surfaced through the create flow (§5.7), not fields of `3/23`.
 
 ### 5.5 Character manage / delete result — `3/7 SmsgCharManageResult`
 
@@ -734,15 +896,21 @@ front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed
 
 ### 5.7 Rename-character result — `3/6 SmsgRenameCharResult`
 
-A **19-byte (0x13)** payload:
+A **12-byte (0x0C)** payload:
 
-| Offset | Size | Field | Meaning |
+| Offset (body) | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 (u8) | Result | Nonzero = success. |
-| 1 | 18 | Name **or** error | On success: the new character name as a CP949 ASCIIZ string, up to 18 bytes including the NUL. On failure: an error code in byte +1 (range `0xC8..0xD4`, mapped to UI strings). |
+| 0x00 | 1 (u8) | Result | 0 = failure, 1 = success, other = no-op. |
+| 0x01 | 1 (u8) | ErrorCode | Failure-only error sub-code (range `0xC8..0xD4`, mapped to UI message buckets). |
+| 0x02 | 2 | Padding | Alignment / unused. |
+| 0x04 | 4 (f32) | PlacementValue0 | Loaded as an IEEE float on success; forwarded to the char-select slot-record writer. |
+| 0x08 | 4 (f32) | PlacementValue1 | Second IEEE-float placement value; forwarded to the slot-record writer. |
 
-> The 19-byte size is dispatch-confirmed. The success/failure discrimination is by the result byte at
-> offset 0.
+> **CYCLE 8 correction (binary-won):** the true body is **12 bytes**, not 19. The handler reads a
+> single fixed 12-byte block and performs **no** name string-copy on the success path — the earlier
+> 19-byte / embedded-CP949-name reading is refuted. Success/failure is discriminated by the result
+> byte at offset 0; the two trailing 4-byte values are IEEE floats (placement), not slot-index/unk
+> integers. Offsets are body-relative (post-8-byte-header).
 
 ### 5.8 Other major-3 responses (catalog cross-reference, not specced here)
 
@@ -766,8 +934,8 @@ sources of truth in the binary; only the **dispatch arithmetic + the byte-level 
   payload each handler reads), not to any legacy name.
 - This spec promotes opcodes **by behavior + `opcodes.md`** only. For example, the message whose
   handler reads the 44-byte enter-game block is **`3/5 SmsgEnterGameAck`** (regardless of any legacy
-  name suggesting otherwise), and the message whose handler reads the 12-byte create result is
-  **`3/23 SmsgCharCreateResult`**.
+  name suggesting otherwise), and the message whose handler reads the 28-byte by-name status patch is
+  **`3/23 SmsgCharStatusBytesByName`** (NOT a create result — §5.4).
 - **Do not** infer any minor→name mapping from legacy handler names. This inconsistency is flagged
   for the project glossary (`names.yaml`) review; it does not change any byte-level behavior in this
   spec.
@@ -776,7 +944,7 @@ The behavior-anchored opcode subset for this flow:
 
 | Opcode (major:minor) | Catalog name | Dir | Size | Behavior anchor |
 |---|---|---|---|---|
-| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count; 8-byte records {id u16, status u16, load u16, open-time u16} |
+| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count (signed `>0` gate, stored in a signed slot with a `−1` sentinel on connect-fail); 8-byte records {id i16, status i16, load i16, open-time i16} (all four **signed**, CYCLE 9) |
 | lobby (port `10000+off`) | channel-endpoint | S2C | 8-byte wrapper + ≥30 | first 30 bytes = `host port` ASCII |
 | 0:0 | SmsgKeyExchange | S2C | 62 (cited) | RSA key material; triggers `1/4` (see `crypto.md`) |
 | 1:4 | CmsgAuthReply | C2S | var (cited) | **THE login credential send** — secure auth-reply to `0/0`; plaintext pre-image `[0x2B][u32len account\0]([u32len PIN\0])` + RSA ciphertext of the account password (runtime-confirmed) |
@@ -789,7 +957,7 @@ The behavior-anchored opcode subset for this flow:
 | 3:6 | SmsgRenameCharResult | S2C | 19 | result + (error code \| new name ASCIIZ[18]) |
 | 3:7 | SmsgCharManageResult | S2C | 8 | result + subtype + ready_time (delete cooldown); decrements the account char-count on a delete-confirm |
 | 3:14 | SmsgCharSpawnResponse | S2C | 16 | enter-into-world bridge / spawn confirm (re-enters the enter-builder); NOT the local-player world spawn (that is `4/1`) |
-| 3:23 | SmsgCharCreateResult | S2C | 12 | result + code + 2×u32; capture-verified sample |
+| 3:23 | SmsgCharStatusBytesByName | S2C | 28 | by-name status/level patch (name key + status flag byte + level byte); NOT a create result (§5.4) |
 | 4:1 | SmsgGameStateTick | S2C | var | world-entry snapshot — drives the **local-player world spawn** from the cached descriptor |
 
 > **Note on the `1/4` / `1/6` rows above.** The login-blob structure (`[0x2B][u32len account\0]
@@ -820,7 +988,7 @@ The behavior-anchored opcode subset for this flow:
 | PIN keypad scramble | **time-seeded Fisher-Yates shuffle of a 10-digit (0–9) permutation, per show** | Anti-keylogger random on-screen keypad layout; PIN masked with `*`, capped at 4 digits; submit → 3rd TAB token → optional `1/4` blob field. Static recovery, CAMPAIGN 9. See §4.2a. |
 | Channel-endpoint copy length | **30 (0x1E) bytes** | The leading `host port` ASCII string. |
 | Server-list record size | **8 bytes** | Count = `wrapper.major`. |
-| Server-list record fields | id u16 @+0 (1..40), status u16 @+2, load u16 @+4, open-time u16 @+6 | See Section 2.1. |
+| Server-list record fields | id i16 @+0 (1..40), status i16 @+2, load i16 @+4, open-time i16 @+6 — **all four signed** (CYCLE 9, 263bd994) | See Section 2.1. |
 | Server-list load thresholds (UI color) | **1200 / 800 / 500** | Client-side load-gauge coloring (presentation only). |
 | Server-list status sentinels (UI) | **3** (open-time scheduled), **24** (preparing/check), **100** (current selection) | Client-side render special cases (presentation only). |
 | Server-name table | **41 entries**, indexed by `server_id` (+0) | Client-local localized names; **not on the wire**. |
@@ -833,7 +1001,7 @@ The behavior-anchored opcode subset for this flow:
 | EnterGameRequest body (1/9) | **40 (0x28) bytes** | Slot index at offset 0. |
 | Version token | `10 × versionField + 9` = **21149** (this build) | Derived from `data/cursor/game.ver` (field index 5 = 2114). `sample_verified`. |
 | EnterGameAck (3/5) | **44 bytes** | 40-byte block + trailing char-count u32; billing u32 @ +28. |
-| CharCreateResult (3/23) | **12 bytes** | — |
+| CharStatusBytesByName (3/23) | **28 bytes** | By-name status/level patch; NOT a create result (create acked via 3/7 + 3/1 refresh). |
 | SceneEntityUpdate (3/4) | **var** | Scene / entity / char-slot scratch refill; not yet specced. |
 | CharManageResult (3/7) | **8 bytes** | Result + subtype + ready-time; decrements the account char-count on a delete-confirm. |
 | CharSpawnResponse (3/14) | **16 bytes** | Enter-into-world bridge / spawn confirm; NOT the local-player world spawn (that is 4/1). |
@@ -916,7 +1084,18 @@ The behavior-anchored opcode subset for this flow:
     submit → TAB-third-token → optional `1/4` blob path are static-confirmed (CAMPAIGN 9); the exact
     storage slot width/offset is **UNVERIFIED / debugger-pending** (a single live read would confirm
     it). This does not change the §4.2 wire layout.
-13. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
+13. **Char-list per-slot level offset — display vs enter-game (which is authoritative)** (§3.2.1). The
+    char-select roster reads the displayed level from `level` @ +0x3A; the enter-game path reads the
+    local-player level from a **different** descriptor region (≈ +0x300, inside the equip / buff block).
+    Which offset is the **authoritative** live player level is **live-pending (6-D)**.
+14. **Char-list per-slot `SlotFlag` (record +976) relation/lock semantics** (§3.2.2) — gates the slot
+    button (locked / second-password / restricted); exact relation semantics **live-pending (6-D)**.
+15. **Char-list per-slot `Timing` (record +977, u32) meaning** (§3.2.2) — likely a cooldown / relation
+    timestamp; exact meaning **live-pending (6-D)**.
+16. **Char-list 3-byte header context-byte VALUES** (§3.2) — the two leading context bytes (server-id /
+    channel-id context preceding the SlotMask byte) — their concrete on-wire values are **live-pending
+    (6-D)**.
+17. **No live network capture was loaded for this analysis.** All wire offsets/sizes are static reads,
     **except** the login blob (carried by `1/4`) field layout, which is corroborated by a runtime read
     of the live client's assembled packet buffer (still not a network capture). The only on-disk
     real-byte corroboration is the local `data/cursor/game.ver` file (item 5 / Section 3.3). The lobby

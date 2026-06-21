@@ -18,13 +18,13 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUPanel-faithful atlas-backed container for HUD widgets.
-///
-/// <para>Wraps a Godot <see cref="Control"/> and optionally a background
-/// <see cref="TextureRect"/>. Children are added as Godot child nodes; paint order =
-/// insertion order (back→front).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §1 (GUPanel role), §3.1 (render order), §4.4 (hit-test).
+///     GUPanel-faithful atlas-backed container for HUD widgets.
+///     <para>
+///         Wraps a Godot <see cref="Control" /> and optionally a background
+///         <see cref="TextureRect" />. Children are added as Godot child nodes; paint order =
+///         insertion order (back→front).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §1 (GUPanel role), §3.1 (render order), §4.4 (hit-test).
 /// </summary>
 public sealed class HudPanel : HudWidget
 {
@@ -35,14 +35,16 @@ public sealed class HudPanel : HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a HudPanel, optionally backed by an atlas texture sub-rect.
+    ///     Creates a HudPanel, optionally backed by an atlas texture sub-rect.
     /// </summary>
     /// <param name="x">Screen-local X on the 1024×768 canvas.</param>
     /// <param name="y">Screen-local Y.</param>
     /// <param name="w">Width in pixels.</param>
     /// <param name="h">Height in pixels.</param>
-    /// <param name="background">Optional atlas texture for the panel background.
-    ///   When null the panel is transparent (container only).</param>
+    /// <param name="background">
+    ///     Optional atlas texture for the panel background.
+    ///     When null the panel is transparent (container only).
+    /// </param>
     public HudPanel(int x, int y, int w, int h, Texture2D? background = null, bool modalFlag = false)
     {
         _root = new Control
@@ -51,7 +53,7 @@ public sealed class HudPanel : HudWidget
             Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
             ClipContents = modalFlag,
-            MouseFilter = modalFlag ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Pass,
+            MouseFilter = modalFlag ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Pass
         };
 
         if (background is not null)
@@ -66,7 +68,7 @@ public sealed class HudPanel : HudWidget
                 // The atlas texture is already a W×H slice, so native draw size is the destination size.
                 // spec: Docs/RE/specs/frontend_scenes.md — source extent equals destination W×H.
                 StretchMode = TextureRect.StretchModeEnum.Keep,
-                MouseFilter = Control.MouseFilterEnum.Ignore,
+                MouseFilter = Control.MouseFilterEnum.Ignore
             };
             _root.AddChild(bg);
         }
@@ -76,6 +78,9 @@ public sealed class HudPanel : HudWidget
     // HudWidget
     // -------------------------------------------------------------------------
 
-    /// <inheritdoc/>
-    public override Control? GetControl() => _root;
+    /// <inheritdoc />
+    public override Control? GetControl()
+    {
+        return _root;
+    }
 }

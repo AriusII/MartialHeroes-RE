@@ -5,32 +5,83 @@
 >   inverse-bind cancellation property, both bind/animated world walks, the `.mot` keyframe sampler,
 >   the major/minor split + per-vertex normalization, the per-mesh and per-node scale sources, and the
 >   quaternion conventions (XYZW / Hamilton / active-rotation / parent-on-left) — all re-read from the
->   function bodies this pass and reproduced exactly. *static-hypothesis* for the inverse-bind **bake
->   routine** (its existence is forced by the data — the deform consumes a zero-initialised bone-local
->   rest position, so a bake must run between load and first deform — but the routine itself was not
->   pinned statically this pass) and for the `(−x,−y,−z,w)` conjugate / subtract-then-rotate bake
->   order. *capture/debugger-pending* for the matrix major-order, the native up-axis / handedness
->   *label* (no axis flip exists inside the math, but whether native is literally left-handed D3D9
->   Y-up needs a runtime read), the exact Godot quaternion remap under Z-negation, and whether the
->   three epsilon tests are an absolute-value clamp (their disassembly surfaced as a log-shaped
->   logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an absolute-value epsilon
->   clamp at 0.001).
-> - **Idle-animation lane (added 2026-06-16):** *confirmed* (control-flow) that the engine feeds the
->   anim mixer real per-frame elapsed time (`dt = ms × 0.001`) and advances each active layer's clock
->   every frame, so the keyframe sampler is never pinned at `t = 0` (`formats/animation.md`
->   §Per-frame clip-time advance); *sample-verified* (production-parser keyframe diff) that the human
->   col15 stand idle `g101100001.mot` is **static data** (0/84 animated tracks). The runtime question
->   "which idle slot does the live engine select for a standing human" is *debugger-pending*. See §10.
-> - **ida_reverified:** 2026-06-16
+>   function bodies this pass and reproduced exactly. *confirmed (static)* — as of CYCLE 1 — for the
+>   inverse-bind **bake** itself: the bake pass is now pinned statically (a separate skin-attach pass
+>   that runs after the bind world transforms exist and before any deform), and its `(−x,−y,−z,w)`
+>   conjugate / subtract-then-rotate order is read directly from the routine — see §4 and the
+>   corrected status row below. *confirmed (visual-oracle, 2026-06-21)* for the `.skn` geometry
+>   height-axis: the rest-mesh is authored **X-TALL** (native-X height), requiring a **+90°-about-Z
+>   importer remap** to stand the avatar up — see the CORRECTED note below and §7/§8(b)/§9. The matrix
+>   major-order, the exact Godot quaternion remap under Z-negation, and the three epsilon tests remain
+>   *capture/debugger-pending* (the epsilons surface in disassembly as a log-shaped intrinsic compared
+>   against 0.001 — almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp at 0.001).
+> - **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** inverse-bind bake pinned static
+>   (no longer a hypothesis); a `.skn` weight's bone index is a base-relative bone-ID
+>   (`bone_array[id − base_id]`), NOT an array slot / palette / track index; skeleton selection is the
+>   `.skn` header `id_b` used VERBATIM as the pose-pool key. These three corrections jointly **retire
+>   the skinning-explosion debt** — the avatar can now be animated from the static recovery.
+> - **CORRECTED 2026-06-21 (visual-oracle) — the `.skn` GEOMETRY height-axis is native X, NOT Y.**
+>   Measured against the visual oracle (raw `.skn` rest-mesh bytes via the asset extractor + the
+>   displayed-frame AABB through the production deform path), the mesh's height axis runs along **native
+>   X**: the raw rest-mesh extent is tall-along-X *before any deform or handedness conversion* (e.g. the
+>   g1 player body ≈ X 5.0 > Y 2.4 > Z 1.7, skeleton g1.bnd = 84 bones, clip 84 tracks), and the deformed
+>   frame-0 AABB at an identity importer pivot is likewise tall-X (recumbent). The inverse-bind
+>   cancellation (INV1) PASSES at the float-noise floor, so this is a **PURE ORIENTATION property of the
+>   asset data**, NOT a deform-math or wrong-skeleton bug. **A faithful Godot import MUST apply a
+>   +90°-about-Z importer (display-node pivot) stand-up remap** to map native +X height onto Godot +Y
+>   (verified: AABB tall-X → tall-Y; screenshot +90° upright, −90° upside-down). This **CORRECTS** the
+>   CYCLE-7 "the UP-AXIS is RESOLVED to Y-up / identity import / the correct up-axis conversion is the
+>   IDENTITY" claim wherever it appears (this banner, §7, §8(b), §9): the engine's **Y-up is real but for
+>   a DIFFERENT quantity** — it is the WORLD-PLACEMENT / HEADING convention (yaw about Y, ground plane XZ,
+>   facing from the XZ planar delta), which is KEPT and governs how an actor is placed/turned. The `.skn`
+>   geometry height-axis is the separate quantity §7/§9 had left as a `capture/debugger-pending` label,
+>   now settled to native X. The "avatar lies on X" is the **as-authored** axis, NOT a port-added spurious
+>   rotation — the fix is to **ADD the +90°-Z remap**, never to chase a non-existent upstream rotation to
+>   remove. The deform / inverse-bind math (§0/§4/§5) is UNTOUCHED; only the importer orientation remap
+>   changes. A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording.
+> - **re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20).** Three previously-open
+>   items are now closed at the per-vertex level: **(1) the full per-vertex deform chain is CONFIRMED
+>   end-to-end** — the on-disk `.skn` influence packing, the per-vertex weight drop (< 0.01) +
+>   normalize-to-1.0, the inverse-bind bake form and its storage slots, the runtime two-pass LBS (major
+>   pass WRITES, minor pass ACCUMULATES), right-handed Hamilton (XYZW scalar-last), parent-LEFT
+>   pre-multiply bone-world compose, per-mesh scale = 1.0 (uniform override only), and the base-relative
+>   `bone_array[id − base_id]` resolve are all confirmed *inside the runtime deform itself*, not just the
+>   bake (§0, §4, §5, §7). **(2) two DISTINCT axis quantities (CORRECTED 2026-06-21, visual-oracle).**
+>   (2a) The engine's **WORLD-PLACEMENT / HEADING convention is Y-up** (yaw is a pure rotation about Y;
+>   the ground plane is XZ; facing is the XZ planar delta; the render forward basis is +Z; the device is
+>   left-handed D3D); there is no runtime character root rotation beyond the Y-yaw heading. This governs
+>   actor placement/turning and is KEPT. The "−Z world / −X mesh-local" flips are port-side
+>   handedness/forward reconciliations that do not touch the placement up axis (§7, §8(b)). (2b) The
+>   **`.skn` GEOMETRY height-axis is native X** (visual-oracle-settled) — the rest-mesh is authored
+>   X-TALL, so the importer must apply a **+90°-about-Z stand-up remap** (native +X height → Godot +Y).
+>   This SUPERSEDES the earlier "up-axis RESOLVED to Y-up / identity import" reading of the asset geometry
+>   (see the CORRECTED note above and §7/§8(b)/§9). **(3) the standing-idle column is CORRECTED to
+>   column 16** (in-memory record +0x44 = direction array A element 1), keyed by the **appearance key**
+>   (not col2/skin_class), resolved via the **motlist.txt clip registry** (not a `g{id}.mot` sprintf) —
+>   see §8(e) and §10.
+> - **Idle-animation lane (added 2026-06-16; slot/key CORRECTED by CYCLE 7 below):** *confirmed*
+>   (control-flow) that the engine feeds the anim mixer real per-frame elapsed time (`dt = ms × 0.001`)
+>   and advances each active layer's clock every frame, so the keyframe sampler is never pinned at
+>   `t = 0` (`formats/animation.md` §Per-frame clip-time advance); *sample-verified* (production-parser
+>   keyframe diff) that the observed human stand idle `g101100001.mot` is **static data** (0/84 animated
+>   tracks). ⚠️ The original "col15 / `motion_ids_a[0]`, debugger-pending slot" framing of this bullet is
+>   **SUPERSEDED by CYCLE 7**: the runtime stand slot is **column 16 (record +0x44, array A element 1)**,
+>   keyed by the **appearance key**, resolved via the **motlist.txt registry** (not `g{id}.mot`), and the
+>   slot question is RESOLVED static (col15 / element 0 is statically dead). See §8(e) and §10.
+> - **ida_reverified:** 2026-06-20 (CYCLE 7)
+> - **spec_corrected:** 2026-06-21 (visual-oracle — `.skn` geometry height-axis = native X; +90°-Z importer remap)
 > - **ida_anchor:** 263bd994
-> - **evidence:** [static-ida, vfs-sample]
+> - **evidence:** [static-ida, vfs-sample, visual-oracle]
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
 >   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
 >   translation lock is **interior-bone-only** (a bone with both a parent and a grandparent and at
 >   least one child), narrower than the previous "every non-root bone" phrasing. The core math
 >   (deform equation, quaternion order, Hamilton product, active rotation, both world walks, scale
->   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**.
+>   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**. A third
+>   conflict was resolved against the **visual oracle** on 2026-06-21: the `.skn` geometry height-axis is
+>   **native X** (requiring a +90°-Z importer remap), correcting the CYCLE-7 "identity / Y-up import"
+>   reading of the asset geometry (the placement/heading Y-up convention is unaffected).
 
 Neutral, data-only model of how the legacy *Martial Heroes* client **deforms and animates** skinned
 characters: how the bind pose is built from a `.bnd` skeleton, how the inverse-bind transform is
@@ -64,32 +115,44 @@ documented in the container spec.
 > explodes the mesh. The fix is to reproduce the cancellation, applying ONE handedness conversion
 > uniformly to bones + vertices + keyframes. See §8 (Godot import guidance).
 >
-> **Mesh-explosion status (RETIRED).** The earlier Godot mesh-explosion debt is **retired**: the port
-> renders the skinned character correctly via quaternion LBS that preserves the §0 cancellation. The
-> remaining character-animation observation — a standing human looks static — is a **separate and
-> faithful** matter: the standing-idle clip the recovered chain resolves is genuinely static data
-> (§10), so a frozen standing human is correct for that asset, not a skinning/animation defect. The
-> only open animation question is which idle slot the live engine selects at runtime (§10, DEBUGGER-PENDING).
+> **Mesh-explosion status (RETIRED — now from a complete static recovery).** The earlier Godot
+> mesh-explosion debt is **retired**, and as of CYCLE 1 the three facts that retire it are all
+> **CONFIRMED static** — the avatar can be animated entirely from the static recovery, with no live
+> read required: (1) the inverse-bind **bake** is pinned (§4: subtract bind-world translation then
+> rotate by the conjugate bind-world quaternion); (2) a `.skn` weight's bone index is a **base-relative
+> bone-ID** resolved as `bone_array[id − base_id]` — NOT an array slot, palette index, or track index,
+> and the weight id-space is the **same** base-relative space the bind skeleton and `.mot` tracks use
+> (§3.2); (3) the deform skeleton is selected by the skin's `id_b` used **verbatim** as the pose-pool
+> key (§8(e)). Feeding array positions instead of base-relative IDs, OR pairing the skin with a
+> wrong-`id_b` skeleton, is exactly what reproduces the explosion. The port already renders correctly
+> via quaternion LBS that preserves the §0 cancellation. The remaining character-animation observation
+> — a standing human looks static — is a **separate and faithful** matter: the standing-idle clip the
+> recovered chain resolves is genuinely static data (§10), so a frozen standing human is correct for
+> that asset, not a skinning/animation defect. The only open animation question is which idle slot the
+> live engine selects at runtime (§10, DEBUGGER-PENDING).
 
 | Area | Confidence |
 |---|---|
 | CPU LBS, no GPU bone palette, no 4×4 matrices in the skinning math | HIGH (re-confirmed CAMPAIGN 10) |
 | Inverse-bind **baked into** per-influence bone-local rest position/normal; consumed by the deform with no per-frame inverse | HIGH (deform consumes bone-local rest; the load fields start zeroed → a bake pass populates them) |
-| Inverse-bind **bake routine** (its exact address / conjugate-and-order) | STATIC-HYPOTHESIS — existence forced by the data; routine not pinned statically (debugger follow-up) |
+| Inverse-bind **bake** (its existence, conjugate form, and subtract-then-rotate order) | **CONFIRMED (static), CYCLE 1** — pinned as a separate skin-attach pass; conjugate `(−x,−y,−z,w)`, subtract bind-world translation then rotate by the inverse bind-world quaternion (supersedes the prior STATIC-HYPOTHESIS) |
 | Bind-pose world transform accumulated from parent-relative `.bnd` locals | HIGH (re-confirmed CAMPAIGN 10) |
-| Bones addressed by **bone ID** (`id − base_id`), not array position, by both `.skn` weights and `.mot` tracks | HIGH (re-confirmed) |
+| Bones addressed by **bone ID** in base-relative ID space (`bone_array[id − base_id]`), NOT an array slot / palette index / track index, by both `.skn` weights and `.mot` tracks | **CONFIRMED (static), CYCLE 1** (the explosion root cause — weight id-space == bind/`.mot` id-space) |
+| Skeleton selection: `.skn` header `id_b` passed VERBATIM as the pose-pool key (no `g{N}.bnd` formatting, no slot transform at the resolve site) | **CONFIRMED (static), CYCLE 1** (§8(e)) |
 | Runtime pose bone stride **88 bytes**; in-memory bind bone **72 bytes**; bone count is a single **u8** (≤ 255 bones) | HIGH (recovered CAMPAIGN 10 — see §3.4) |
 | Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
-| LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | HIGH (re-confirmed) |
+| LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | **CONFIRMED end-to-end at the per-vertex level (CYCLE 7)** — runtime two-pass deform read directly: major pass WRITES, minor pass ACCUMULATES; `vertex_world = Σ wᵢ·(boneWorldQuat·(restPos·scale)+boneWorldTrans)`, normals same without translation |
 | `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation, 28-byte keyframe | HIGH (re-confirmed) |
 | Per-frame clip time `t` advances (real `dt = ms × 0.001`; mixer ticked every frame; never pinned to 0) | HIGH (control-flow-confirmed — `formats/animation.md` §Per-frame clip-time advance) |
-| Human col15 stand idle (`g101100001.mot`) is STATIC data → frozen standing human is FAITHFUL, not a defect (§10) | SAMPLE-VERIFIED (production-parser keyframe diff + positive controls) |
-| Which idle slot the live engine selects for a standing human (static col15 vs an animated slot) | DEBUGGER-PENDING (§10) |
+| Standing/stand-still idle clip = actormotion **column 16** (in-memory record +0x44, direction array A element 1), keyed by the **appearance key** (not col2/skin_class), resolved via the **motlist.txt clip registry** (motion id == `.mot` header id_b), NOT a `g{id}.mot` sprintf | **CONFIRMED static (CYCLE 7)** — every motion-kind-0 idle read-site reads record +0x44; record +0x40 (col15, array A element 0) has ZERO read-sites (statically dead). Supersedes the prior "col15 / `motion_ids_a[0]`" claim and the `g{id}.mot` resolution assumption (§8(e), §10) |
+| Which idle slot the live engine plays for a standing human | RESOLVED statically to the column-16 stand clip (record +0x44); the live-vs-static slot question is settled by the static read-site evidence (§10) |
 | Interpolation alpha is RAW seconds in `[0, 0.1]`, not renormalized to `[0,1]` | HIGH (observed); intentional-vs-defect UNVERIFIED |
 | Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10 — §6.3) |
 | Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH (re-confirmed) |
 | Out-of-range bone id is **clamped to the last bone** (NOT skipped) | HIGH (re-confirmed CAMPAIGN 10 — the engine clamps; "skip" is importer hardening only, §8(e)) |
-| NO axis flip inside the skinning math; native-space *handedness label* | HIGH that no flip exists; the LH-D3D9 *label* / up-axis is CAPTURE/DEBUGGER-PENDING |
+| NO axis flip inside the skinning math | HIGH — there is no single-axis negation or remap *inside* the deform/bake math; bone space and rest-mesh space are the same native space (§7). This is distinct from the importer orientation knob below |
+| `.skn` GEOMETRY height-axis (raw rest-mesh up axis) | **CORRECTED 2026-06-21 (visual-oracle): native X** — the rest-mesh is authored X-TALL, so a faithful import applies a **+90°-about-Z importer remap** (native +X height → Godot +Y). This SUPERSEDES the prior "RESOLVED to Y-up / identity import" reading. It is a pure asset-orientation property (inverse-bind cancellation passes at the float-noise floor); §0/§4/§5 deform math is untouched — only the importer remap changes (§7, §8(b), §9) |
+| World-PLACEMENT / HEADING convention | **Y-up (KEPT)** — yaw is a pure rotation about Y, the ground plane is XZ, facing is the XZ planar delta, the render forward basis is +Z, the device is left-handed D3D; no runtime character root rotation beyond the Y-yaw heading. Governs how an actor is placed/turned — a DIFFERENT quantity from the `.skn` geometry height-axis above (§7) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — validate on one sample bone |
 | Per-mesh `scale` real source (read at attach as `nodeScale · meshScale · optionalOverride`) | CONFIRMED — resolves the prior "assumed 1.0" open item |
 | Per-**node** scale (distinct from per-mesh scale), applied in the animated world walk | HIGH (recovered CAMPAIGN 10 — §6.6) |
@@ -150,6 +213,18 @@ boneWorldQuat ⊗ ( bindWorldQuat⁻¹ ⊗ (p − bindWorldTrans) ) + bindWorldT
 ```
 
 i.e. the rest position is reproduced exactly. **This identity is what a naïve skinning setup lacks.**
+
+> **CONFIRMED end-to-end at the per-vertex level (CYCLE 7).** Every link of this rule — the on-disk
+> influence packing, the per-vertex weight drop (< 0.01) and normalize-to-1.0, the inverse-bind bake
+> (and its storage slots, §4), the runtime two-pass Linear Blend Skinning (the MAJOR pass writes the
+> destination vertex, the MINOR pass accumulates into it), the right-handed Hamilton quaternion
+> operators (XYZW scalar-last), the parent-LEFT pre-multiply bone-world composition, the per-mesh scale
+> (uniform, default 1.0), the absence of any single-axis flip or axis remap, and the base-relative
+> `bone_array[id − base_id]` bone resolve — was read directly out of the runtime deform routine, not
+> merely the load-time bake. The deform chain is fully pinned for a 1:1 port; see §4 (bake), §5 (deform
+> loop), §7 (convention dictionary). NOTE: "no axis flip inside the math" is about the *deform math*; it
+> is a separate matter from the importer-layer **+90°-about-Z stand-up remap** the `.skn` geometry
+> height-axis requires (native-X-tall → Godot +Y) — see §7/§8(b)/§9.
 
 ---
 
@@ -265,10 +340,45 @@ is the bone with `self_id == parent_id == 0`. An unmatched `parent_id` is a fata
 client.
 
 **Bone lookup is by ID offset, `bone_array[ id − base_id ]`**, where `base_id` is the first bone's
-`self_id`. This is the single most important indexing fact for the importer:
+`self_id`. This is the single most important indexing fact for the importer — and the **root cause of
+the skinning explosion** (CONFIRMED static, CYCLE 1):
 
-- A **`.skn` weight's `bone_index` is a bone ID**, not a palette slot or array position.
-- A **`.mot` track's `bone_id`** (low byte of the track descriptor) is the same bone ID.
+- A **`.skn` weight's `bone_index` is a bone ID in base-relative bone-ID space**, resolved as
+  `bone_array[id − base_id]` — NOT an array slot, NOT a palette index, and NOT a track index.
+- A **`.mot` track's `bone_id`** (low byte of the track descriptor) is the same bone ID, in the
+  **same** base-relative space; the weight id-space, the bind-skeleton id-space, and the `.mot`-track
+  id-space are one and the same (all three resolve through the `id − base_id` resolver).
+- Feeding **array positions** instead of base-relative bone-IDs, OR pairing the skin with a
+  **wrong-`id_b` skeleton** (§8(e)), reproduces the explosion. This retires the skinning-explosion
+  debt: with the correct base-relative resolve and the correct `id_b`-selected skeleton, the avatar
+  deforms and animates correctly from the static recovery.
+
+> **DEBT#1 (skinning math) — CLOSED, re-confirmed end-to-end (static IDA, 2026-06-21).** A dedicated
+> binary-verdict re-walk re-confirmed every load-bearing element from the static recovery — the on-disk
+> `.skn` vertex/bone/weight packing, the base-relative bone-ID resolve (`id − base_id`, **not** an array
+> index), the inverse-bind bake (conjugate quaternion, subtract-then-rotate, baked per-influence), the
+> deform multiply order (active-rotate → add bone world-translation → scale by weight; parent-on-left;
+> XYZW Hamilton; right-handed; no axis flip), the `.mot` keyframe sampler, and the pose compose. **Nothing
+> in the recovery is unproven.** The **char-select preview path** provides an **independent second witness**:
+> the preview's idle-motion apply derives the appearance key from the actor's appearance slot, looks up the
+> animation catalogue by that key, and plays the **column-16 stand clip (catalogue record +0x44)** on the
+> skeleton selected by the skin's **`id_b` used verbatim** as the pose-pool key — i.e. the exact same
+> `id_b`-verbatim skeleton selection and the same col-16 idle that the in-world path uses. So the five
+> char-select avatars' skinning + idle is **fully pinned** by two independent read-sites.
+>
+> **The "mesh explodes" note is OBSOLETE; the "static-upright / recumbent" symptom is the `.skn`
+> geometry's native-X height-axis (CORRECTED 2026-06-21, visual-oracle).** Any remaining tooling/agent
+> text describing the avatar as *exploding* predates this recovery and refers to a **port-side**
+> implementation bug (the classic port causes below), **not** a recovery gap. The separate
+> *static-upright / lies-on-X (recumbent)* symptom is now SETTLED: the `.skn` rest-mesh is authored
+> **X-TALL** (height along native X), so a faithful import must apply a **+90°-about-Z importer
+> stand-up remap** (native +X height → Godot +Y) — this is the as-authored asset orientation, NOT a
+> spurious port rotation to remove (§7, §8(b)). The classic explosion causes (all preventable) are:
+> feeding Godot bone array indices instead of base-relative IDs; dropping or mis-ordering the
+> inverse-bind; applying the handedness flip to vertices but not bones (or vice-versa) instead of one
+> uniform conversion to bones+verts+keyframes; pairing the `.skn` with a wrong-`id_b` skeleton; or
+> sampling a started clip at a frozen `t = 0`. With the recovery above applied AND the +90°-Z stand-up
+> remap, the mesh deforms, stands upright, and animates correctly.
 
 For the recovered sample skeletons `base_id == 0`, so ID equals array index — but the importer **must
 not assume** `base_id == 0` in general. Always resolve `bone_array[id − base_id]`.
@@ -362,7 +472,9 @@ model_class_id = 5 * (class + 4 * variant) - 24            in {1, 11, 16, 26}
 - `class` is the internal class index (1..4); `variant` is the appearance variant.
 - `variant == 3` resolves to `0`, which means an **invisible actor** (no mesh) — a reserved sentinel.
 - `model_class_id` selects the visual record in the appearance catalogue, whose bound bind-pose
-  handle is the actor's skeleton (§3, §8(e)).
+  handle is the actor's skeleton (§3, §8(e)). Note this slot transform is an **upstream** appearance
+  decision (it chooses *which* `.skn`/`id_b` an actor uses); it is **not** re-applied at the
+  skin-load / skeleton-resolve site, where the skin's `id_b` is the verbatim pool key (§8(e)).
 
 ### 3.5.3 The appearance catalogue is populated from skin.txt (CODE-CONFIRMED)
 
@@ -405,7 +517,6 @@ confirm and must not be invented:
 - the concrete **`model_class_id` -> bind-pose handle** mapping (which loaded `.bnd` each of
   `{1, 11, 16, 26}` selects — the data-driven `{1->g1, 26->g2, 11->g3, 16->g4}` edge of §8(e)).
 
-<!-- source: _dirty/campaign5/character-appearance-assembly.md -->
 <!-- pending live-debugger value-edges: catalogue categoryBase[] contents; model_class_id -> concrete bind-pose handle -->
 
 ## 4. Inverse bind — computed at load, never stored
@@ -433,18 +544,50 @@ in the bone's local frame, so the animated bone world transform can re-place it.
 into `localPos`, the per-frame deform never touches the bind pose again — it needs only the animated
 bone world transform. The cancellation in §0 is the direct consequence.
 
-> **The bake is a SEPARATE pass, not part of the `.skn` load (STATIC-HYPOTHESIS on the routine).**
+> **The bake is a SEPARATE pass, not part of the `.skn` load — PINNED STATIC (CONFIRMED, CYCLE 1).**
 > At the end of `.skn` parsing the influence records' `localPos` (+12) and `localNormal` (+24) fields
 > are **zero-initialised** — the load builds the 9-float influence (bone id, vertex index, weight) and
-> memsets the rest to zero. Therefore the inverse-bind bake of this section is a distinct pass that
-> must run **after** the skeleton is resolved and its bind **world** transforms exist (§3.1), and
-> **before** the first deform (which reads `localPos`/`localNormal` as already bone-local, with no
-> per-frame inverse). The bake's **existence is forced by the data** and its **result matches** the
-> equations above; the static re-verification pass did **not** pin the exact bake routine (it is not
-> in the load path nor the attach path). The conjugate form `(−x,−y,−z,w)` and the subtract-then-rotate
-> order are the consistent reconstruction — a debugger breakpoint on the first deform, watching the
-> major-influence `localPos` slot, would catch the writing routine and confirm both. (CAMPAIGN 10,
-> static.)
+> the influence-record default constructor sets the bone id and vertex index to a sentinel and zeroes
+> the seven floats, so the bake's target fields are provably zero at skin-load. The inverse-bind bake
+> is a **distinct pass invoked at skin-attach**, immediately after the `.skn` is parsed and its
+> matching bind pose is resolved by the skin's `id_b` (§8(e)). It runs **after** the skeleton's bind
+> **world** transforms exist (built at `.bnd` load by the bind-world walk, §3.1) and **before** the
+> first deform (which reads `localPos`/`localNormal` as already bone-local, with no per-frame inverse).
+>
+> This pass — its existence, location, and math — is now **CONFIRMED static** (no longer a hypothesis,
+> no debugger needed). It loops the MAJOR influence array first then the MINOR array (same body),
+> stride 36 bytes per record, and per influence reads the bone id (byte) and vertex index, resolves
+> the bind bone via the base-relative ID resolver (§3.2), reads the 32-byte render vertex's position
+> (first three floats) and normal (next three floats), and writes the two baked fields exactly as the
+> equations above:
+> - `localPos` = subtract the bind-world translation from the rest position **first**, then rotate by
+>   the inverse (conjugate) bind-world quaternion — `invQ ⊗ (restPos − bindWorldTrans)`;
+> - `localNormal` = rotate the rest normal by the same inverse quaternion only — `invQ ⊗ restNorm`
+>   (no translation term).
+> The inverse is the **unit-quaternion conjugate** `(−x,−y,−z,w)` (the routine divides all four
+> components by the squared magnitude — unity for a unit quaternion — then negates X/Y/Z and keeps W).
+> The whole bake is quaternion-based: only 3-vector subtract, unit-quat inverse, and active
+> quaternion-rotate primitives are called — **no 4×4 matrices anywhere**. The bind-world source is the
+> static bind-world walk (parent-on-left: `worldTrans = parentQuat ⊗ localTrans + parentTrans`,
+> `worldQuat = parentQuat ⊗ localQuat`) with **no animation term**, so the bake is taken against the
+> rest/bind pose directly (see the frame-0 cross-check below). This is the textbook offset transform
+> `B⁻¹`, and it produces exactly the §0 cancellation. (CYCLE 1, static.) **CYCLE 7 update:** the bake's
+> rest pos/normal are stored per influence at the in-memory influence record's `localPos` slot (+0x0C)
+> and `localNormal` slot (+0x18) — i.e. the bake folds the inverse-bind into the per-influence rest
+> geometry rather than keeping a separate inverse-bind matrix array; this is the same quantity glTF
+> stores as `inverseBindMatrix · vertex_bind`. **CORRECTED 2026-06-21 (visual-oracle):** there is no
+> axis flip *inside* the bake/deform math, but the `.skn` rest geometry is authored **X-TALL** (native-X
+> height-axis), so a faithful import must add a **+90°-about-Z importer stand-up remap** (native +X
+> height → Godot +Y) — applied uniformly to the rest geometry, bones and keyframes so the §0
+> cancellation survives the change of basis (§7, §8(b)). The bake math itself is unchanged.
+
+> **Frame-0 vs rest cross-check (CONFIRMED static).** The skin-matrix bake reads the **bind/rest** pose
+> directly — there is **no** mixer / animation-sample / clip-advance step on the skin-attach path
+> before the bake, and the bone world transforms it reads are the bind-world slots written by the
+> animation-free bind-world walk. The campaign-9c finding that a **pivot/AABB** is computed from an
+> *animated frame-0* is a **separate, port-side preview-centering** concern (the char-create / Godot
+> preview pivot), operating on a different quantity entirely — **no contradiction**: the *skin-matrix
+> bake* uses the rest pose; the *preview pivot* reads an animated frame-0 AABB.
 
 ---
 
@@ -524,6 +667,20 @@ contributes the rest, summed for the vertex. Newer skins happen to use a fixed 4
 but older skins use a variable count. An importer that must cap to its engine's per-vertex influence
 limit **must re-normalize the surviving weights to sum 1.0** after dropping the smallest influences,
 to preserve the convex-combination property.
+
+> **Port rule for Godot `Skeleton3D`'s 4-bone-per-vertex cap (CONFIRMED CYCLE 7 — implementable).**
+> The legacy loader already normalizes each vertex's surviving influences to Σ = 1.0 across **all** of
+> them (major + every minor), so a 4-cap port must **re-normalize after capping**:
+> 1. For each vertex, collect its influences (1 major + n minor), each `{boneId, weight}` from the same
+>    `id_b` skin.
+> 2. **Sort by weight descending and keep the top 4.** (Every vertex has exactly one major influence —
+>    the dominant bone — which is always among the kept four.)
+> 3. **Re-normalize the kept weights to sum 1.0** (divide each by their kept-weight total).
+> 4. Pack into Godot's `ARRAY_BONES` / `ARRAY_WEIGHTS` (4 per vertex). Map each `boneId` to the
+>    `Skeleton3D` bone index via the base-relative scheme (build the bone order so `bone index == id −
+>    baseId`, §3.2). A vertex with fewer than 4 influences pads the unused slots with weight 0.
+> Skipping the re-normalize after capping (relying on the engine's original Σ = 1.0) is wrong, because
+> dropping the smallest minor influences removes weight that must be redistributed to the survivors.
 
 ---
 
@@ -644,21 +801,53 @@ exactly the `boneWorldTrans` / `boneWorldQuat` the deform loop (§5.3) reads.
 | Animated rotation | applied as a **right (post) multiply** delta: `parentWorld ⊗ bindLocal ⊗ animLocal` |
 | Deform | LBS: `Σ w·(qWorld ⊗ (localPos·scale) + tWorld)`; normal `Σ w·(qWorld ⊗ localNormal)` |
 | Inverse-bind | `localPos = qBindWorld⁻¹ ⊗ (modelPos − tBindWorld)`, baked at load |
-| Render space | **D3D9 left-handed**; **no axis flip inside the skinning math** |
+| Render space (engine internal) | **D3D9 left-handed, +Z-forward** (CONFIRMED CYCLE 7); **no axis flip inside the skinning math** |
+| World-PLACEMENT / HEADING up axis | **Y-up (KEPT)** — yaw is a pure rotation about Y, the ground plane is XZ, facing is the XZ planar delta; the engine places/turns actors about Y. This governs world placement, NOT the `.skn` geometry height-axis below |
+| `.skn` GEOMETRY height-axis | **native X (CORRECTED 2026-06-21, visual-oracle)** — the rest-mesh is authored X-TALL; a faithful Godot import applies a **+90°-about-Z importer (display-node) stand-up remap** to map native +X height onto Godot +Y. This SUPERSEDES the prior "Y-up / identity import" reading of the asset geometry. It is a pure asset-orientation property (the inverse-bind cancellation passes at the float-noise floor); the deform math is untouched. See §8(b), §9 |
 | Vertex stream | 32 bytes: pos[0..11], normal[12..23], uv[24..31]; `uv.v` stored as `1.0 − v` |
 
 **No axis negation or mirroring happens inside the skinning math.** The known project conventions
 (world negates Z; `.skn` mesh-local geometry negates X) are **importer-layer transforms**, not engine
-internals. Bone space and rest-mesh space are the same native left-handed space — that is precisely why
-the inverse-bind and the forward transform cancel. §8 explains how to bridge this to Godot without
-breaking the cancellation.
+internals. Bone space and rest-mesh space are the same native space — that is precisely why the
+inverse-bind and the forward transform cancel. Separately, that native space is **X-TALL** for the
+`.skn` geometry (height along native X), so the importer adds a **+90°-about-Z stand-up remap** on top
+of the handedness/forward reconciliation; both are importer-layer, both must be applied **uniformly**
+to bones + verts + keyframes so the cancellation survives. §8 explains how to bridge this to Godot
+without breaking the cancellation.
+
+> **The two up-axis quantities — do NOT conflate them (CORRECTED 2026-06-21, visual-oracle).**
+> The engine's own placement/heading transforms are genuinely **Y-up**, and that is KEPT: a "turn to
+> face" is a pure quaternion rotation **about Y** (the heading quaternion is `{0, sin(θ/2), 0,
+> cos(θ/2)}`), facing is computed from the **XZ planar delta only** (the Y coordinate is height and is
+> unused in facing), the render walk's forward basis vector is hard-coded **+Z**, and the device
+> pipeline is a **left-handed** look-at. There is **no runtime character root rotation** other than the
+> Y-yaw heading. **That Y-up is the WORLD-PLACEMENT / HEADING convention — how an actor is positioned
+> and turned in the world.** It is a **different quantity** from the `.skn` GEOMETRY height-axis, which
+> the visual oracle has now settled to **native X**: the raw rest-mesh is tall-along-X *before any
+> deform or handedness conversion* (e.g. the g1 player body ≈ X 5.0 > Y 2.4 > Z 1.7), and the deformed
+> frame-0 AABB at an identity importer pivot is likewise recumbent (tall-X). Because the inverse-bind
+> cancellation passes at the float-noise floor, this is a **pure orientation property of the asset
+> bytes**, not a deform-math or wrong-skeleton bug. Therefore a faithful import applies a **+90°-about-Z
+> importer (display-node pivot) stand-up remap** to map native +X height onto Godot +Y (verified: AABB
+> tall-X → tall-Y; screenshot +90° upright, −90° upside-down). This SUPERSEDES the CYCLE-7 "the up-axis
+> is RESOLVED to Y-up / identity import / correct conversion = IDENTITY" wording for the asset geometry.
+> The documented "−Z world" and "−X mesh-local" rules remain **port-side** left-handed→right-handed +
+> forward-axis reconciliations (they convert the original's LH +Z-forward space to Godot's RH
+> −Z-forward space); they are separate from, and applied alongside, the +90°-Z stand-up remap. The
+> "avatar lies on X" is the **as-authored** geometry orientation — the fix is to **ADD** the +90°-Z
+> remap, NOT to remove a non-existent upstream rotation. See §8(b) and the "avatar lies on X"
+> diagnostic there. A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording.
 
 ---
 
 ## 8. Godot import guidance
 
-The legacy math lives entirely in the engine's native **left-handed** space and is internally
-consistent. Godot is **right-handed, Y-up**. Four things must be honoured.
+The legacy math lives entirely in the engine's native **left-handed, +Z-forward** space and is
+internally consistent. Godot is **right-handed, Y-up, −Z-forward**. The engine's world-PLACEMENT /
+HEADING convention is Y-up (yaw about Y) and is reconciled by the handedness/forward conversion below;
+SEPARATELY, the `.skn` GEOMETRY is authored **X-TALL** (native-X height-axis, CORRECTED 2026-06-21 by
+the visual oracle), so the character import must also apply a **+90°-about-Z stand-up remap** to bring
+native +X height onto Godot +Y. Five things must be honoured.
 
 ### (a) Preserve the bind / inverse-bind cancellation — this is what stops the explosion
 
@@ -678,7 +867,7 @@ In both cases the invariant to assert during bring-up: **with the idle/bind pose
 playing, the deformed mesh must equal the rest mesh.** If it does not, the cancellation is broken —
 fix that before touching animation.
 
-### (b) Unify the project's two ad-hoc flips into ONE handedness conversion
+### (b) Unify the handedness conversion AND apply the +90°-about-Z geometry stand-up remap
 
 The project today applies two separate negations: world geometry negates Z
 (`Helpers/WorldCoordinates.ToGodot`: `(x,y,z) → (x,y,−z)`), and `.skn` mesh-local geometry negates X.
@@ -691,6 +880,33 @@ to `(−x,−y,z,w)` (negate the two components orthogonal to the un-flipped Z a
 quaternion remap against a single sample bone rotation rather than assuming it** (§9 open item). The
 key requirement is *uniformity*: bones, verts, and keyframes all undergo the same conversion, so the
 cancellation property survives the change of basis.
+
+**On top of the handedness conversion, apply the +90°-about-Z importer stand-up remap (CORRECTED
+2026-06-21, visual-oracle).** The `.skn` geometry is authored X-TALL (height along native X), so the
+character import MUST rotate it +90° about Z (at the display-node / importer pivot) to map native +X
+height onto Godot +Y. Like the handedness conversion, apply this remap **uniformly** to bones + verts +
+keyframes so the §0 cancellation survives. The world-PLACEMENT / HEADING up axis stays Y (yaw about Y)
+— that convention is unaffected; the +90°-Z remap is purely the asset-geometry stand-up.
+
+> **The "avatar lies on X (recumbent)" symptom is the as-authored geometry axis — ADD the +90°-about-Z
+> remap; do NOT chase a rotation to remove (CORRECTED 2026-06-21, visual-oracle).** The `.skn` rest-mesh
+> is authored X-TALL (§7), so at an identity importer pivot the avatar lies on its side (recumbent along
+> X) — this is the **native** orientation of the asset bytes, NOT a port-added spurious rotation. **The
+> fix is to ADD a +90°-about-Z importer (display-node) stand-up remap**, mapping native +X height onto
+> Godot +Y. Do NOT search for and remove a non-existent upstream Z-up→Y-up rotation; the earlier "set
+> the importer up-axis to identity / remove the spurious −90°-about-X" guidance is SUPERSEDED — that
+> path leaves the avatar recumbent. (Screenshot evidence: +90°-Z is upright, −90°-Z is upside-down.)
+>
+> **Deformed-pose AABB verification.** Bake the bind pose (or a single idle `.mot` frame) through the
+> parser-true math, compute the deformed-vertex AABB, and check which axis spans the figure's height:
+> - **CORRECT (with the +90°-about-Z stand-up remap applied):** the AABB's largest extent is along
+>   **Y** (a tall standing figure), small along X and Z; the head is at max-Y and the feet at min-Y.
+> - **WRONG (the current "lies on X", identity importer pivot):** the AABB's largest extent is along
+>   **X** — the figure is laid down. This is the signature of the as-authored native-X height-axis with
+>   the +90°-Z stand-up remap **missing** (NOT a spurious −90°-about-X to remove).
+> Run the check with the +90°-Z remap applied; that case must produce the tall-along-Y AABB. (The bake
+> AABB itself is already sane and the inverse-bind cancellation is at the float-noise floor, per CYCLE 1
+> — the orientation knob is the importer +90°-Z stand-up remap only, not the deform math.)
 
 ### (c) The raw-seconds interpolation alpha (faithful vs. renormalized)
 
@@ -735,8 +951,7 @@ relationship is a confirmed bijection across all 349 ids — see `formats/mesh.m
 
 ### (e) Rig/clip identity: select skeleton AND clip by the skin's `id_b` (the class/rig-mismatch shatter)
 
-> Provenance: promoted from a dirty-room root-cause note kept under
-> `Docs/RE/_dirty/campaign4/charselect3d/class4-shatter-mot.md` (gitignored). Asset byte facts are
+> Provenance: promoted (rewritten, not copied) from a dirty-room root-cause note. Asset byte facts are
 > **SAMPLE-VERIFIED** against the real client VFS; the resolution mechanism is **CODE-CONFIRMED**
 > (prior). The cross-link to the char-create preview is `frontend_scenes.md` §3.7.5 (preview-character
 > assets for the four starter classes).
@@ -755,6 +970,43 @@ three of the following are the same `id_b` rig:
 - the **deform skeleton** that supplies the animated bone world transforms,
 - the **inverse-bind bake** that produced each influence's `localPos` / `localNormal`, and
 - the **played clip**, whose track `bone_id`s address that same skeleton.
+
+#### How the engine actually selects the skeleton: verbatim `id_b` against an eager-preloaded pool (CONFIRMED static, CYCLE 1)
+
+The runtime resolves the deform skeleton through a single, transform-free lookup, populated once at
+boot:
+
+- **Eager preload at boot.** Every `.bnd` named in `bindlist.txt` is physically opened, parsed into a
+  pose object, and inserted into a shared **pose pool** during the boot data-table corpus load — not
+  lazily on actor spawn, not registered by name for deferred load. (All ~349 listed skeletons are
+  parsed up front; only the four `g1..g4.bnd` players plus mob/NPC rigs are listed.) Each pose is
+  filed in the pool under the **`actor_id` parsed from that `.bnd`'s header** (its offset-0 field).
+- **Verbatim `id_b` key.** When a `.skn` loads, the loader reads the header's second identity field
+  (`id_b`) and passes it **verbatim** as the pool key. There is **no** arithmetic between the read and
+  the lookup at this site: no `g{N}.bnd` path formatting, no `5·(class + 4·variant) − 24` appearance
+  slot transform, no use of the header `SkinClassId` as the lookup key. The selected skeleton is simply
+  the registered pose whose **`actor_id == id_b`**; an `id_b` of `0` (or any unregistered value)
+  resolves to **no skeleton** (the deform then runs without a rig — the reserved invisible/no-mesh
+  case).
+
+So the operative runtime rule is: `selected_skeleton(skn) = pose_pool[ skn.header.id_b ]`, where the
+pool key is each preloaded `.bnd`'s parsed `actor_id`. The familiar `g{SkinClassId}.bnd`-for-`{1,2,3,4}`
+convenience rule and the `{1,11,16,26}` appearance-slot encoding both remain correct as **chain
+documentation**, but they live one level **upstream** (they decide *which* `.skn`/`id_b` an actor
+wears); they are **not** re-applied as a second remap inside the pool lookup. The four player rigs
+resolve cleanly precisely because each class's `.skn` `id_b` already equals the `actor_id` of its
+intended `g{n}.bnd` (`g1.bnd` parses to `actor_id 1`, and so on) — so the verbatim-key rule and the
+`g{id_b}.bnd` convenience rule agree for players.
+
+**Mobs reach the same pool indirectly.** A mob is NOT a literal `g{skin_class}.bnd`. The mob's record
+carries an appearance value that is combined with a per-category base offset into an **appearance key**;
+that key indexes the animation catalogue (the actormotion map); the catalogue record yields a
+model-class-id key; that key resolves a visual/skin record in the same character visual registry the
+preloaded skeletons live in; and the visual record holds the **bind-pose handle** from which the
+runtime pose is built. The skeleton a mob ends up with is therefore still one of the bind poses
+preloaded **by name** from `bindlist.txt`, reached through the catalogue indirection rather than a
+filename. (The concrete `model_class_id → loaded `.bnd`` value-edges and the per-category base-offset
+table contents remain value-edges pending a live read — do not invent them; see §3.5.5.)
 
 Concretely the engine-intended matched trio per class is:
 
@@ -804,12 +1056,29 @@ class renders correctly purely because its shared default choice coincided with 
 
 #### Importer invariant (implementers MUST follow)
 
-1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton as
-   `data/char/bind/g{id_b}.bnd`, **per class** — never a single shared rig hard-coded across all classes.
-2. Select the idle clip from `actormotion.txt` keyed by `skin_class == id_b` (col2 → col16), **per
-   class** — never a single shared idle clip. Each clip's track count equals its rig's bone count.
+1. Parse the base `.skn` and read its `id_b` (`formats/mesh.md` §Header). Resolve the deform skeleton by
+   **looking the `id_b` up verbatim** in the skeleton pool keyed by each `.bnd`'s parsed `actor_id`
+   (CONFIRMED static, CYCLE 1 — see "How the engine actually selects the skeleton" above) — **per
+   class**, never a single shared rig hard-coded across all classes. For the four players this pool
+   lookup is equivalent to loading `data/char/bind/g{id_b}.bnd` (each `g{n}.bnd` parses to
+   `actor_id n`), so an importer may use that filename convenience for `id_b ∈ {1,2,3,4}`; for mobs the
+   skeleton is reached through the animation-catalogue indirection onto the same preloaded pool, NOT a
+   literal `g{skin_class}.bnd` filename.
+2. Select the standing idle clip from `actormotion.txt` **column 16** (in-memory record +0x44 =
+   direction array A element 1), looked up by the actor's resolved **appearance key**
+   `5·(class + 4·variant) − 24`, NOT by col2/skin_class. **Resolve the clip through the motlist.txt clip
+   registry**, NOT a `g{id}.mot` sprintf: the `.mot` files are pre-registered from `motlist.txt` lines
+   (each prefixed `data/char/mot/`), and the column-16 value is a **motion id** that equals a `.mot`
+   file's header `id_b` — the registry lookup key. (col2/skin_class is the `.bnd` skeleton selector and
+   contributes to building the catalogue record's key; it is NOT the runtime idle lookup key. Record
+   +0x40 = column 15 = array A element 0 is statically DEAD — it has no read-site — so any "idle =
+   col15 / `motion_ids_a[0]`" claim is the off-by-one to avoid; the first *consumed* A-array element is
+   element 1 = column 16.) Each clip's track count equals its rig's bone count. **Per class** — never a
+   single shared idle clip.
 3. Skin **every** overlay part onto that **same** `id_b`-selected skeleton (all of a class's overlays
-   carry the class's `id_b`).
+   carry the class's `id_b`). Apply the **+90°-about-Z stand-up remap** (§8(b)) uniformly across all
+   parts + bones + keyframes so the geometry stands upright (native-X height → Godot +Y) without
+   breaking the §0 cancellation.
 4. **Defensive guard (importer hardening — NOT legacy parity).** The legacy bone resolver
    **CLAMPS** an out-of-range id to the **last bone**: when `id − base_id ≥ bone_count` it returns
    `pose_bone_base + 88 · bone_count − 88`, and the mixer's non-null guard never fires because the
@@ -842,16 +1111,17 @@ shared default. This is the recovered cause of the char-create preview shatter c
 
 | Item | Status | Impact |
 |---|---|---|
-| Inverse-bind **bake routine** address + exact conjugate/order (§4) | STATIC-HYPOTHESIS — the bake's *existence* is forced by the data (load leaves `localPos`/`localNormal` zeroed; the deform consumes them as bone-local with no per-frame inverse) and its result matches §4, but the routine was not pinned statically | Pin via a debugger breakpoint on the first deform watching the major-influence `localPos` slot; confirm `(−x,−y,−z,w)` + subtract-then-rotate. Does not block the importer (the math is known) |
+| Inverse-bind **bake** existence + conjugate/order (§4) | RESOLVED (CONFIRMED static, CYCLE 1) — the bake is pinned as a separate skin-attach pass: conjugate `(−x,−y,−z,w)`, subtract bind-world translation then rotate by the inverse bind-world quaternion, against the rest/bind world pose, normal rotation-only, quaternion-based (no matrices). No longer a hypothesis and no debugger needed | None — the math is settled; importers implement §4 directly |
+| Skeleton-selection key + skeleton preload (§8(e)) | RESOLVED (CONFIRMED static, CYCLE 1) — the `.skn` `id_b` is the verbatim pose-pool key (no `g{N}.bnd` formatting / slot transform at the resolve site); all listed `.bnd` are eager-preloaded at boot keyed by parsed `actor_id`; mobs reach the same pool via the animation-catalogue indirection | None for the resolve mechanism; the concrete `model_class_id → loaded `.bnd`` value-edge + the per-category base-offset table remain value-edges (§3.5.5) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
-| Native up-axis / handedness *label* | CAPTURE/DEBUGGER-PENDING — no axis flip exists inside the math (confirmed), but whether native is literally left-handed D3D9 Y-up needs a runtime read of one live bone transform | Determines the §8(b) handedness conversion; the *uniformity* requirement holds regardless |
+| `.skn` GEOMETRY height-axis + importer stand-up remap | **CORRECTED 2026-06-21 (visual-oracle): native X → +90°-about-Z importer remap.** The rest-mesh is authored X-TALL (height along native X), measured against the visual oracle (raw rest-mesh bytes tall-along-X *pre-deform*, e.g. g1 body ≈ X 5.0 > Y 2.4 > Z 1.7; deformed frame-0 AABB recumbent at an identity pivot). It is a pure asset-orientation property — the inverse-bind cancellation passes at the float-noise floor — so a faithful import applies a **+90°-about-Z importer (display-node) stand-up remap** (native +X height → Godot +Y), applied uniformly to bones+verts+keyframes. SUPERSEDES the prior "RESOLVED to Y-up / identity import" reading. The world-PLACEMENT / HEADING up axis stays Y (yaw about Y), a separate quantity that is unaffected | The "avatar lies on X" symptom is the as-authored geometry axis — **ADD** the +90°-Z stand-up remap (§8(b)); do NOT remove a non-existent upstream rotation. Verify with the deformed-pose AABB (tall along Y with the remap applied). A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording |
 | Log-shaped epsilon tests (dedup §2.1; accumulate / commit floors §6.2) | CAPTURE/DEBUGGER-PENDING — the three tests disassemble as a logarithm-shaped intrinsic compared against 0.001, almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp; behaviourally treated as a 0.001 clamp | A debugger step over one site confirms the intrinsic; no importer impact (treat as a 0.001 clamp) |
 | Per-mesh + per-node `scale` (§3.4, §5.3, §6.6) | RESOLVED (CAMPAIGN 9, re-confirmed CAMPAIGN 10) — per-mesh scale is a skin-object field set at attach as `nodeScale · meshScale` (× optional non-zero override); a separate per-node scale lives at runtime bone +84; both generally non-unit | The importer **must read and apply** the per-mesh scale to positions and the per-node scale to bone-local translation (not normals, not rotations); do NOT assume 1.0 |
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |
 | Multi-bone character `.skn`/`.bnd` byte-level cross-check of the inverse-bind bake | PARTIALLY VERIFIED — corpus confirms multi-weight skins exist (§5.2); the bake math is code-recovered, not yet byte-validated end-to-end on a real character | Validate against the §8(d) player trio; assert the cancellation invariant |
 | Which skeleton the original char-create preview pairs with class 4 (§8(e)) | PLAUSIBLE (disk-implied: the class-4 skin's own `id_b` selects the 89-bone rig) — to be ratified against the live original | The recovered fix resolves rig + clip from the skin's `id_b` per class; the live ratification only confirms the original makes the same per-class choice |
-| Runtime standing-idle slot selection (§10) | DEBUGGER-PENDING — the col15 stand idle is settled as static data and other `motion_ids_a` slots animate; which slot the live engine plays for a standing human (and whether it ever swaps col15 for an animated idle) needs a live debugger read | Render the col15 clip faithfully (static stand is correct for that asset); do not synthesize a breathing idle. Revisit slot selection once confirmed live |
+| Runtime standing-idle slot selection (§10) | **RESOLVED static (CYCLE 7)** — the standing/stand-still idle clip (motion-kind 0) = actormotion **column 16** (record +0x44, direction array A element 1), read by every motion-kind-0 idle path; record +0x40 (col15, element 0) has ZERO read-sites (statically dead). Keyed by the appearance key, resolved via the motlist.txt registry (motion id == `.mot` header id_b), NOT a `g{id}.mot` sprintf. The live-vs-static slot question is settled by the static read-site evidence | Select column 16 (not col15) for the stand idle; resolve via the registry, not a filename sprintf. Whether that clip's *data* animates is a per-asset matter (§10) |
 
 ---
 
@@ -861,12 +1131,26 @@ shared default. This is the recovered cause of the char-create preview shatter c
 > "character idle is flat/static" observation — one read the engine sampler/advance math, the other
 > diffed the keyframes of the real `.mot` through the production parser over the maintainer's own VFS
 > sample. **Engine math: control-flow-confirmed. Keyframe diff: sample-verified.** The runtime
-> slot-selection question that remains is **DEBUGGER-PENDING**.
+> slot-selection question is now **RESOLVED static (CYCLE 7)** — see the correction note below.
+
+> **CORRECTION — the standing-idle SLOT is column 16, not column 15 (CONFIRMED static, CYCLE 7).**
+> The runtime stand/idle clip (motion-kind 0) is **direction array A element 1 = in-memory record +0x44
+> = actormotion.txt column 16**, looked up by the actor's **appearance key** `5·(class + 4·variant) − 24`
+> (NOT by col2/skin_class). Every motion-kind-0 idle read-site reads record +0x44; **record +0x40
+> (column 15, array A element 0) has ZERO read-sites — it is statically dead for clip selection.** This
+> is the same element-0-unused off-by-one already proven for the direction-B array (consumers start at
+> element 1). The earlier "col15 / `motion_ids_a[0]`" attribution below is therefore the off-by-one to
+> avoid; read every "col15 / `motion_ids_a[0]` stand idle" in this section as **column 16 / array A
+> element 1**. Resolution is via the **motlist.txt clip registry** (the column-16 value is a motion id
+> that equals a `.mot` file's header `id_b`, the registry key), **not** a `g{id}.mot` sprintf — no
+> `g%d.mot` format string exists in the binary (the only `g%d` asset format is `data/char/skin/g%d.skn`,
+> a SKIN path). The "static stand pose is faithful, not a defect" conclusion below still holds for
+> whichever clip the column-16 slot resolves to; only the slot/key/resolution mechanics are corrected.
 
 This section resolves the framing of the character-idle observation. A standing human in the port
 looks frozen while mobs animate. That is **not** a parser bug, a missing-animation defect, or a
 residue of the (now retired) mesh-explosion debt. It is the **faithful** result of the static data the
-recovered idle chain resolves.
+recovered idle chain resolves (whichever clip the column-16 stand slot resolves to is rendered as-is).
 
 ### 10.1 The engine DOES animate a looping idle — it never pins time (CONFIRMED)
 
@@ -880,13 +1164,16 @@ with modulo wrap, or sync-mode `t = duration × phase/range`) are documented in
 short looping idle in the original is *alive* exactly when its keyframes differ — the engine cannot
 produce a flat result from a clip whose keyframes carry motion.
 
-### 10.2 The col15 human idle's keyframes do NOT differ — it is static data (SAMPLE-VERIFIED)
+### 10.2 The observed human stand idle's keyframes do NOT differ — it is static data (SAMPLE-VERIFIED)
 
-The standing-idle clip the recovered chain resolves for the first human class is
-`data/char/mot/g101100001.mot` (via `actormotion.txt` col2 = `skin_class` = 1 → col15 =
-`motion_ids_a[0]` = 101100001 → the motion-id registry — see `formats/animation.md`
-§`actormotion.txt` layout). A keyframe diff of this clip through the production parser shows it is a
-**fixed stand pose**:
+> **Slot/key corrected (CYCLE 7):** the runtime stand slot is **column 16 (record +0x44, array A
+> element 1)** keyed by the **appearance key**, resolved via the **motlist.txt registry** (motion id ==
+> `.mot` header id_b) — see the §10 correction note. The "col2 → col15 → `g{id}.mot`" chain below is the
+> superseded attribution; the keyframe-diff observation of a static stand `.mot` stands on its own as a
+> per-asset finding.
+
+A keyframe diff of the observed human stand clip (`data/char/mot/g101100001.mot`) through the production
+parser shows it is a **fixed stand pose**:
 
 - `frame_count = 3`, `track_count = 84`, with 3 keyframes on **all** 84 tracks (a full-shape clip,
   not a stub);
@@ -898,34 +1185,60 @@ keyframe-diff table and positive controls (mob clips and other human slots that 
 the identical metric, proving the metric detects motion) are in `formats/animation.md`
 §Static idle clips.
 
-### 10.3 The rig HAS animated idle content — just not in the col15 slot
+### 10.3 The rig HAS animated idle content — just not in the observed stand slot
 
-Other slots in the same human `motion_ids_a` array **do** animate: a `peace`-tagged slot is a subtle
+Other slots in the same human direction-A array **do** animate: a `peace`-tagged slot is a subtle
 breathing/idle-sway loop (51 of 84 bones move), and a combat slot moves strongly. So animated idle
-content exists for the human rig; the col15 (`motion_ids_a[0]`) slot is specifically the **static
-stand snapshot**. A visible breathing idle in the port would require selecting a **different**,
-animated slot — a runtime motion-selection choice, not a parser or missing-animation fix.
+content exists for the human rig; the observed stand slot is specifically the **static stand snapshot**.
+A visible breathing idle in the port would require selecting a **different**, animated slot. Note the
+sibling idle slots recovered alongside the stand idle: the default-idle-cycle / state-8 idle is array A
+element 5 (record +0x54, column 20), and the alt-idle (motion-kind 1) is array A element 6 (record
++0x58, column 21) — distinct columns from the motion-kind-0 stand idle at column 16.
+
+#### 10.3.1 Standing-idle slot selection — RESOLVED static (CYCLE 7): motion-kind 0 → column 16
+
+> **RESOLVED static (CYCLE 7).** An actor carries a client-side **motion-kind word** (a small per-actor
+> state field) that selects which catalogue slot supplies the idle clip. Reading every motion-kind-0
+> (stand) branch directly: the **stand/idle case reads the catalogue record at +0x44 = direction array
+> A element 1 = actormotion column 16**, and applies that motion id to the actor's animation mixer. The
+> alt-idle case (motion-kind 1) reads +0x58 (element 6, column 21); the default-idle-cycle / state-8
+> idle reads +0x54 (element 5, column 20). The lookup is keyed by the actor's stored **appearance key**
+> `5·(class + 4·variant) − 24`, not by col2/skin_class (skin_class selects the `.bnd` skeleton and
+> builds the catalogue record's key — it is not the runtime idle lookup key).
+>
+> **Record +0x40 (column 15, array A element 0) has ZERO read-sites — it is statically dead for clip
+> selection.** A reg+stack scan of every catalogue-getter call-site shows no record read at +0x40. So
+> the live-vs-static slot question is **settled by the static read-site evidence**: for a plain standing
+> human the engine plays the **column-16** stand clip. (The prior "6-case, value-mapping
+> debugger-pending" framing is superseded — the stand slot is pinned statically; whether the
+> *column-16 clip's data* animates is a separate per-asset matter, §10.2.)
 
 ### 10.4 What is settled vs. open
 
 | Question | Verdict |
 |----------|---------|
 | Does the engine advance clip time for a looping idle? | YES — real per-frame `dt`, never pinned to 0 (CONFIRMED). |
-| Is the col15 human stand idle clip static data? | YES — 0/84 animated tracks, a fixed held pose (SAMPLE-VERIFIED). |
-| Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static col15 asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds); the mesh-explosion debt is **retired**. |
-| Which standing-idle slot does the **live engine** select at runtime (static col15 vs an animated slot)? | **DEBUGGER-PENDING** — needs a live debugger to read the slot the mixer actually plays for a standing human; no live server/debugger was available on this lane. |
+| Which slot is the runtime stand/idle clip? | **Column 16 (record +0x44, direction array A element 1), keyed by the appearance key — RESOLVED static, CYCLE 7.** Record +0x40 (col15, element 0) is statically dead (no read-site). |
+| How is the stand idle clip resolved to a file? | Via the **motlist.txt clip registry** (the column-16 value is a motion id == `.mot` header id_b, the registry key) — **NOT** a `g{id}.mot` sprintf (no such format string exists). |
+| Is the observed human stand `.mot` static data? | YES — 0/84 animated tracks, a fixed held pose (SAMPLE-VERIFIED, per-asset). |
+| Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static stand asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds) once the +90°-about-Z geometry stand-up remap is applied (§8(b)); the mesh-explosion debt is **retired**. |
+| Which standing-idle slot does the **live engine** select at runtime? | **RESOLVED static (CYCLE 7)** — the column-16 stand clip; settled by the static read-site evidence (no debugger needed). |
 
 ### 10.5 Guidance for the port
 
-- Render the col15 idle clip **faithfully**: a static stand is correct for that asset. Do **not**
-  synthesize a breathing idle or treat the flat result as a defect to "fix" in the parser/mixer.
+- Select the stand idle from **column 16** (record +0x44, direction array A element 1) keyed by the
+  appearance key, and resolve it through the **motlist.txt registry** (motion id == `.mot` header id_b)
+  — **not** column 15 and **not** a `g{id}.mot` sprintf.
+- Render that idle clip **faithfully**: if its data is a static stand, a static stand is correct for
+  that asset. Do **not** synthesize a breathing idle or treat the flat result as a defect to "fix" in
+  the parser/mixer.
 - The importer must still drive the active clip's clock with real per-frame `dt` and wrap at clip end
   (§6, `formats/animation.md` §Per-frame clip-time advance) so that **animated** clips (mobs, combat,
-  the animated human slots) play correctly — the static look must come from the data, never from a
-  port that fails to advance `t`.
-- If a breathing standing idle is desired as a presentation choice, select an animated `motion_ids_a`
-  slot rather than col15 — but first re-check §10.4's DEBUGGER-PENDING question, because the engine's
-  own runtime selection is not yet confirmed and must not be guessed.
+  the animated sibling idle slots) play correctly — the static look must come from the data, never from
+  a port that fails to advance `t`.
+- If a breathing standing idle is desired as a presentation choice, select an animated direction-A slot
+  (e.g. the `peace`-tagged slot, §10.3) rather than the column-16 stand snapshot — a deliberate
+  presentation choice, not a parity requirement.
 
 ---
 

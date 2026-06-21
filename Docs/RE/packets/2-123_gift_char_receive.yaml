@@ -1,0 +1,50 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band5.md §2/123 (gift-character receive confirm: accept/decline).
+# Role: the recipient's accept/decline of an incoming gift-character offer.
+#
+# CAPTURE-UNVERIFIED: the 12-byte size and the {u8, u32, u8} shape are control-flow CONFIRMED from the
+# builder; the +0x05 sub-field meaning is capture/debugger-pending. capture_verified: false.
+
+name: CmsgGiftCharReceiveConfirm
+opcode: 0x2007b           # major 2 (GameAction), minor 123 (0x7b) -> (2 << 16) | 123
+direction: C2S
+size: 12                  # FIXED 12-byte body
+spec: packets/2-123_gift_char_receive.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The recipient's accept / decline of an incoming gift-character offer. A fixed 12-byte body carrying an
+  accept/decline flag, the offer / transaction id, and a sub-field, with the remainder zero-padded.
+  Companion to 2/122 (the gift-character send). Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
+# CONTROL-FLOW CONFIRMED: the builder zero-fills 12 bytes, stores a u8, a u32, and a u8, then blits 12.
+fields:
+  - { name: AcceptFlag, type: u8 }            # 0x00  accept/decline (1 = accept on confirm, 0 = cancel/decline) [confirmed]
+  - { name: OfferId,    type: u32 }           # 0x01  offer / transaction id (from the offer state) [confirmed offset]
+  - { name: SubField,   type: u8 }            # 0x05  sub-field (from the offer state) [meaning capture/debugger-pending]
+  - { name: Pad06,      type: "bytes[6]" }    # 0x06  zero padding to 12 bytes
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (12 bytes) and the {u8, u32, u8, pad} shape; the +0x05 sub-field's
+  VALUE meaning is capture/debugger-pending.
+
+    0x00 (1B) AcceptFlag : accept / decline. The caller sets 1 on the confirm button and 0 on
+                           cancel / ESC (decline). [confirmed]
+    0x01 (4B) OfferId    : the offer / transaction id of the incoming gift-character offer. [confirmed
+                           offset; value identity follows the offer state]
+    0x05 (1B) SubField   : a sub-field copied from the offer state; meaning [pending].
+    0x06 (6B) Pad06      : zero padding to bring the body to 12 bytes.
+
+  TRIGGER: the recipient accepts (button) or declines (ESC / cancel) an incoming gift-character offer; a
+  second caller also raises the same send.
+
+  EXPECTED S2C REPLY: a gift-transfer result (the transaction outcome); not statically linked this lane.
+  [pending]
+
+  CROSS-REF: 2/122 CmsgGiftCharSend (packets/2-122_gift_char_send.yaml) is the offer / send side.
+
+  UNKNOWNS (capture-pending): the +0x05 sub-field meaning; the S2C transfer-result opcode.
+
+  UNBLOCKS: the Client.Application gift-character receive-confirm use-case (a fixed 12-byte send).

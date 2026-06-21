@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 164-byte body, and the result byte @+0x08
+#                 (1 -> motion/weapon-fx swap kind 8; 0 -> swap kind 9; block always forwarded to an NPC
+#                 panel updater) are control-flow-confirmed; the 164-byte record interior beyond the
+#                 result byte is forwarded opaquely; every VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior canonical-list entry tagged 4/40 "var / thin". The binary reads a fixed
+#              164-byte (0xA4) medium record. BINARY WINS.
+
+name: SmsgMotionWeaponFxSwap
+opcode: 0x40028            # major 4 (Response), minor 40 -> (4 << 16) | 40
+direction: S2C
+size: 164                 # fixed 164-byte body (0xA4) -- a medium record
+spec: packets/4-40_motion_weapon_fx_swap.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes a 164-byte record that drives a local-player motion / weapon-FX swap selected by a result byte, then forwards the whole block to an NPC panel updater. A medium record, not a thin slot.
+
+# Wire order, offset 0 = first payload byte. Pack=1; only the field THIS handler reads is named; the
+# rest of the 164-byte record is forwarded to the NPC panel updater (its interior is consumed
+# downstream). Widths sum to size: 164.
+fields:
+  - { name: Head,   type: "bytes[8]" }     # 0x00  leading region read before the result byte (opaque; not field-decoded)
+  - { name: Result, type: u8 }             # 0x08  result byte: 1 = motion/weapon-fx swap kind 8; 0 = swap kind 9
+  - { name: Body,   type: "bytes[155]" }   # 0x09  remainder of the 164-byte record, forwarded to the NPC panel updater (interior consumed downstream)
+  # widths: 8 + 1 + 155 = 164
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 164-byte (0xA4) body and the result byte @+0x08. CAPTURE-UNVERIFIED
+  for VALUE meanings; the record interior beyond +0x08 is forwarded opaquely.
+
+    0x08 (1B) Result : selects the swap: 1 = a motion / weapon-FX swap (kind 8); 0 = the alternate swap
+                       (kind 9). Either way the whole 164-byte block is forwarded to an NPC panel
+                       updater.
+
+  RECORD INTERIOR (DOWNSTREAM): the 155 bytes past the result byte are consumed by the NPC panel
+  updater, not field-read by this handler. Do NOT publish guessed interior offsets -- they are
+  capture/downstream-pending.
+
+  UNKNOWNS to resolve with a capture: the swap "kind 8 / kind 9" meaning and the NPC panel record layout
+  inside the forwarded block.

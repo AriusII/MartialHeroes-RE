@@ -1,0 +1,58 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgExitNotify
+opcode: 0x20089           # major 2 (GameAction), minor 137 -> (2 << 16) | 137
+direction: C2S
+size: 16                  # fixed 16-byte payload
+spec: packets/2-137_exit_notify.yaml
+status: confirmed
+capture_verified: false
+
+summary: Client exit/quit notification, sent when GameState==4. Carries the exit mode, coordinate pair (always zero), and padding.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 16.
+fields:
+  - { name: Mode,     type: u8  }          # 0x00  exit mode (1=normal exit, 2=exit with flag)
+  - { name: Flag,     type: u8  }          # 0x01  always 0
+  - { name: Reserved, type: u16 }          # 0x02  reserved / alignment
+  - { name: CoordX,   type: f32 }          # 0x04  always 0.0
+  - { name: CoordY,   type: f32 }          # 0x08  always 0.0
+  - { name: Extra,    type: u8  }          # 0x0C  always 0
+  - { name: Padding,  type: "u8[3]" }     # 0x0D  padding to 16 bytes
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (16 bytes),
+  CAPTURE-UNVERIFIED meaning.
+
+    0x00 (1B) Mode     : exit mode byte. 1 = normal exit, 2 = exit with flag (le u8).
+    0x01 (1B) Flag     : always zero in observed paths (le u8).
+    0x02 (2B) Reserved : reserved alignment padding (le u16).
+    0x04 (4B) CoordX   : floating-point X coordinate; always 0.0 (le f32).
+    0x08 (4B) CoordY   : floating-point Y coordinate; always 0.0 (le f32).
+    0x0C (1B) Extra    : extra byte; always 0 (le u8).
+    0x0D (3B) Padding  : padding to bring total to 16 bytes.
+
+  CONTEXT: sent only when the client game state equals 4 (in-world). The coordinate
+  fields are populated but always zero in the observed exit path.
+
+  [UNVERIFIED] ROLE DIVERGENCE: a later in-game pass reads 2/137 as a posture / action toggle
+  rather than an exit notify — same 16-byte SHAPE, refined field reading:
+    0x00 (1B) ActionCode : posture/action code (caller passes 2 when a window flag is set, else 1).
+    0x01 (1B) SubFlag    : a sub-flag. [capture/debugger-pending]
+    0x02 (2B) pad        : only +0/+1 are written (the source is a 4-byte slot).
+    0x04 (4B) FloatA     : a (float)(u8) value — 0.0 in the observed call site (orientation/offset?).
+    0x08 (4B) FloatB     : a (float)(u8) value — 0.0 in the observed call site (orientation/offset?).
+    0x0c (1B) TrailFlag  : a trailing flag.
+    0x0d (3B) pad        : zero pad to 16 bytes.
+  Both readings agree the body is 16 bytes (two leading bytes, two f32, a trailing byte, pad) and that
+  it fires only when GameState==4; they differ on whether it is an exit notify or a posture/action
+  toggle. The two f32 being cast from small u8 args favours a posture/orientation pair over true world
+  coordinates. The role is capture/debugger-pending; the file keeps its existing name.
+
+  UNKNOWNS to resolve with a capture:
+    - the role (exit notify vs posture/action toggle — see ROLE DIVERGENCE above);
+    - whether Mode/ActionCode values beyond 1 and 2 exist;
+    - whether the two f32 fields are ever non-zero (orientation/offset values).
+
+  UNBLOCKS: Client.Application exit/disconnect notification (or in-game posture/action toggle) flow.

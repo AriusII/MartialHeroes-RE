@@ -2,17 +2,19 @@
 """UserPromptSubmit hook — inject targeted orientation when a prompt is RE-flavored and/or
 about the Godot presentation layer (merges re_intent_primer + godot_render_state_primer).
 
-Advisory only: it injects context via additionalContext and never blocks the prompt. Two
+Advisory only: it injects context via additionalContext and never blocks the prompt. Three
 independent triggers, each preserving its source hook's behavior:
 
   * RE keywords (ida / decompile / opcode / packet / crypto / capture / …) -> the RE-context
     block: IDA status, the Ground-Truth Doctrine, the local capture count, the dirty->spec
     pipeline, the unbridled-fan-out note, the clean-room rule, and useful agents/skills.
   * Godot/render keywords (godot / render / scene / terrain / character / screenshot) -> the
-    current Godot render-state note (the commit c266e7e demo, the headless-screenshot verify
-    loop, and the four open render debts).
+    Godot render-state note: a pointer to Docs/ROADMAP.md (live state, not a hard-coded
+    snapshot), the headless/screenshot verify loop, and the coordinate conventions.
+  * Planning-scale keywords (campaign / roadmap / multi-phase / orchestrate / rearchitect / …)
+    -> a pointer to route the mandate through the planning-orchestrator (O1) + /plan-campaign.
 
-When both fire, both blocks are injected; when neither fires, the hook stays silent.
+Any subset may fire; their blocks are concatenated. When none fire, the hook stays silent.
 """
 import os
 import re
@@ -37,16 +39,31 @@ _KEYWORDS = re.compile(
 _TRIGGER = re.compile(r"\b(godot|render(?:ing)?|scene|terrain|character|screenshot)\b", re.I)
 
 _NOTE = (
-    "Godot render state (commit c266e7e): the working demo is AREA 2 — a walled town "
-    "(779 buildings + 40 monsters/NPCs) on textured multi-texture terrain, with an upright "
-    "textured humanoid player, free/orbital camera, and HUD (inventory=I, skills=K).\n"
-    "Headless verify loop (no user needed): run the Godot console exe "
-    "`--headless --path <godotproj> --quit-after 150` to dump GD.Print/errors to stdout; "
-    "for a real screenshot run WINDOWED with a temporary GDScript autoload that calls "
-    "get_viewport().get_texture().get_image().save_png(...).\n"
-    "Open render debts: (1) character SKINNING explodes the mesh (legacy bind convention not "
-    "recovered) so chars are rendered static; (2) NPCs spawn at a fallback Y before async "
-    "terrain loads; (3) EnvironmentNode is too dark; (4) water is unwired."
+    "[Godot] The layer-05 client renders the world LIVE against the replica (login → "
+    "enter-world → world render). For the CURRENT render state, open debts, and where to "
+    "resume, read Docs/ROADMAP.md + Docs/RE/journal.md — don't trust a hard-coded snapshot.\n"
+    "Headless verify loop (no user needed): the godot-run-headless skill builds the layer-05 "
+    "assembly then runs the Godot 4.6.3 console exe `--headless --path <godotproj> "
+    "--quit-after 150` (GD.Print/errors to stdout); for a real screenshot it runs WINDOWED "
+    "with a temporary GDScript autoload that grabs the viewport to a PNG.\n"
+    "Coordinate conventions (get them wrong and the world mirrors): WORLD geometry negates Z "
+    "(Helpers/WorldCoordinates.ToGodot); MESH-LOCAL .skn geometry negates X; cells 1024 / "
+    "65×65 grid / spacing 16."
+)
+
+# Big multi-phase mandate -> route through the planning domain (O1). Strong scale signals only,
+# to stay low-noise (bare 'plan' is too common to trigger on).
+_PLAN_TRIGGER = re.compile(
+    r"\b(campaign|roadmap|giga[- ]?workflow|multi[- ]?(?:step|phase)|several phases|"
+    r"reverse[- ]?engineer all|refactor (?:the )?whole|re[- ]?architect\w*|orchestrat\w*)\b",
+    re.I,
+)
+_PLAN_NOTE = (
+    "[Planning] This looks like a multi-phase mandate. Consider routing it through the "
+    "planning-orchestrator (O1): it reformulates the mandate, fans out refining workers, and "
+    "authors a FINAL PLAN as a precise PHASE/OBJECTIVE workflow (the /plan-campaign skill). "
+    "Doctrine: Tier-1 session → Tier-2 domain orchestrator (planning-/re-/csharp-port-/godot-/"
+    "docs-tooling-) → Tier-3 worker; two levels of orchestration max."
 )
 
 
@@ -61,7 +78,8 @@ def _re_context(ev):
         "Dirty-room work writes ONLY to Docs/RE/_dirty/ (gitignored). Promote findings to clean specs (Docs/RE/specs|packets|formats|opcodes.md) before any C# is written.",
         "IDA fan-out is UNBRIDLED: run read analysts AND IDB writes massively in parallel — no ~3 cap, no one-writer-at-a-time rule; retry failed/conflicting calls. Goal = reverse ALL of doida.exe for the faithful 1:1 Godot port.",
         h.CLEAN_ROOM_BLURB,
-        "Useful: agents @re-function-analyst @re-protocol-analyst @re-crypto-analyst; skills /ida-recon /ida-py /ida-crypto-hunt /pcap-extract.",
+        "RE pipeline (gates): G0 /re-brainstorm (plan the attack + pick the mcp__ida__* tool per angle) -> G1 recover static into _dirty/ -> G2 CONFIRM end-to-end on the ?ext=dbg debugger for every load-bearing fact (re-validator; never dbg_start; static is only a hypothesis until confirmed) -> G3 spec-author promotes a neutral spec -> G4 /re-handoff stamps it implementation-ready -> ONLY THEN does C# port it. IDA = the strict truth; /ida-mcp-connect carries the toolbox mapping which tool serves each angle.",
+        "Useful: agents @re-function-analyst @re-protocol-analyst @re-crypto-analyst; skills /ida-mcp-connect /re-brainstorm /ida-recon /ida-explore /ida-py /ida-crypto-hunt /pcap-extract /re-handoff.",
     ]
     return "\n".join(lines)
 
@@ -78,6 +96,8 @@ def main():
         blocks.append(_re_context(ev))
     if _TRIGGER.search(prompt):
         blocks.append(_NOTE)
+    if _PLAN_TRIGGER.search(prompt):
+        blocks.append(_PLAN_NOTE)
 
     if not blocks:
         h.ok()

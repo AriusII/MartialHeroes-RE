@@ -1,0 +1,32 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-12).
+# size: 20 bytes (0x14) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorVisualSlotSet
+opcode: 0x5000c           # major 5 (Push), minor 12 -> (5 << 16) | 12
+direction: S2C
+size: 20                  # fixed 20-byte payload (0x14)
+spec: packets/5-12_actor_visual_slot_set.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor equipment/visual slot set. Updates the model visual representation of an actor's
+  equipped item, including upgrading flags and shield/weapon visibility toggles.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key (typically 1 for players)
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: ItemId, type: u32, offset: 8 }          # item database/visual ID (0 to clear)
+  - { name: ItemUpgrade, type: u32, offset: 12 }    # item upgrade level / visual glow index
+  - { name: SlotIndex, type: u8, offset: 16 }       # visual equipment slot (0..19)
+  - { name: Padding, type: "u8[3]", offset: 17 }    # alignment padding to 20 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the player actor via (ActorSort, ActorId).
+    - Writes the ItemId and ItemUpgrade into the actor's visual slots table (offset 204 + 16 * SlotIndex).
+    - Toggles visual shield or weapon flags when special slots (e.g. 12 or 15) are updated.
+    - Forces a re-draw and motion reset of the actor's 3D mesh model if not in world transitions.

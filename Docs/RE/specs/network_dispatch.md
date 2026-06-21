@@ -4,11 +4,11 @@ sample_verified: false
 build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wave B)
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
-verification: confirmed (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed) · static-hypothesis (the blanket "every installed handler opens with a bounded read") · capture/debugger-pending (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types)
-ida_reverified: 2026-06-16
+verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read")
+ida_reverified: 2026-06-21   # CYCLE 8 (263bd994): frame header, asymmetric transform (C2S cipher+LZ4 / S2C LZ4-only, cipher single-xref), 3-phase handshake, keepalive 2/10000=20s, major-4/major-5 154-slot tables (98 Response / 65 Push installed), SO_RCVBUF-only / Nagle ON — all re-confirmed CODE-CONFIRMED, zero conflicts. Prior: §4.5 keepalive cadence re-verified CYCLE 7 (2026-06-20)
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) Response install count refined ~98 -> ~99 (101 stores - 2 zero-clears); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending)
+conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) the open "second worker" item is RESOLVED — there is a THREE-thread model (recv consumer + keepalive timer on the NetClient side, and a THIRD socket-I/O thread spawned by the connection's connect routine that does WSARecv-completion → frame reassembly → recv queue → re-arm, and also services the send-signal → WSASend); (e) the 2/10000 keepalive body is 4 bytes (one zero u32), NOT header-only; (f) the exhaustive Response/Push install slot maps are folded in (§2a/§2b), cross-referencing opcodes.md for handler NAMES; (g) the 5/146→C2S 2/146 ack-request handshake is recorded; (h) {202/203/232} 3/100 codes prime GameState=2 (cross-link to §5); (i) PHANTOM REFUTED — there is NO 5000/10000/10001 string-id class (5000=display-duration ms; 10000=keepalive minor + 10 s timer; 10001=timed-event tag)
 ---
 
 # Network Dispatch & Connection Lifecycle — Clean-Room Specification
@@ -22,10 +22,13 @@ conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake bra
 > **Spec path (cite this):** `// spec: Docs/RE/specs/network_dispatch.md`
 >
 > **Scope.** This document describes the *plumbing under the handlers*: the master receive
-> dispatcher, the two handler-table installers, the network-event entry and handler object, the
-> network-client connection lifecycle (start / worker threads / receive loop / keepalive /
-> disconnect), the connection-state machine, and where the cipher/compression stages sit in the
-> send/receive pipeline.
+> dispatcher, the two handler-table installers **and their installed-slot maps**, the network-event
+> entry and handler object, the network-client connection lifecycle (start / the **three** worker
+> threads / receive loop / keepalive / disconnect), the link-health ack handshake, the
+> connection-state machine, and where the cipher/compression stages sit in the send/receive
+> pipeline. The install-slot maps record **slot occupancy** (installed / NULL / no-op); the per-opcode
+> handler **names, sizes and behaviour** are owned by `opcodes.md` and `handlers.md` and are cited,
+> not duplicated.
 >
 > **It deliberately does not duplicate its neighbours:**
 > - `opcodes.md` owns the **wire frame header** (size + major + minor layout) and the per-opcode
@@ -184,9 +187,20 @@ handshake**. *([confirmed]* control flow; the *meaning* of each blob field is
 
 1. **Parses the inbound S2C key-exchange blob.** The parser reads, from the packet body in order: a
    **54-byte key blob** (imported as an RSA modulus/exponent), then **two trailing `u32` server
-   scalars**, and stamps a local time. On a parse failure it logs a "read packet version" style
-   diagnostic. So the **S2C `(0,0)` body read order is `[54-byte key blob][u32][u32]`**. *([confirmed]
-   read order / sizes; the field MEANINGS are `[capture/debugger-pending]`.)*
+   scalars**, and stamps a local time. So the **S2C `(0,0)` body read order is
+   `[54-byte key blob][u32][u32]`**. *([confirmed] read order / sizes; the field MEANINGS are
+   `[capture/debugger-pending]`.)*
+
+   > **Two distinct diagnostic log sites (corrected attribution — no wire impact).** The failure
+   > diagnostics on this branch come from **two different routines** and were previously conflated.
+   > The dispatcher-side **wrapper** (the routine that invokes the key-exchange parser) emits the
+   > single coarse **"read packet version"** style message, and only when the parser returns failure
+   > — it is a version/length-level diagnostic of the wrapper. The **parser itself** emits the
+   > finer-grained per-field key-recovery diagnostics (one message per failed field read or failed
+   > blob import — distinct messages for the 54-byte blob read, the blob import, and each of the two
+   > trailing `u32` reads). So the coarse "read packet version" message belongs to the *wrapper*; the
+   > granular key-recovery messages belong to the *parser*. This is a pure log-attribution correction
+   > with no effect on the wire layout or read order above. *([confirmed].)*
 2. **Builds and sends the C2S credential reply stamped opcode `(1, 4)`.** It constructs the secure
    auth reply (an RSA-encrypted credential, then a per-`u32` whitening pass) and hands it to the send
    convergence (§6.1). This is the structural link **dispatch `(0,0)` → emits the `1/4` login
@@ -213,17 +227,31 @@ Two boot-time routines populate the Response and Push handler tables inside the 
 They are the machinery that turns the empty 154-slot tables of §1.3 into the live routing surface
 that `handlers.md` enumerates. *(STRUCTURE-HIGH; build 263bd994.)*
 
-| Installer | Family | Recovered installed slots | Role |
-|---|---|---|---|
-| Response-family installer | major 4 | **~99 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
-| Push-family installer | major 5 | **65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
+| Installer | Family | Raw store count | Derived live handlers | Role |
+|---|---|---|---|---|
+| Response-family installer | major 4 | **102 stores** | **99 distinct / 100 slots** | Wires each Response per-opcode handler into the client handler table at boot. |
+| Push-family installer | major 5 | **65 stores** | **65 distinct / 65 slots** | Wires each Push per-opcode handler into the client handler table at boot. |
 
-- The two install counts (**~99 Response / 65 Push**) are control-flow counts on this build.
-  *([confirmed].)* The Response figure is refined from the earlier `~98`: the installer issues 101
-  store instructions, of which **2 are zero-clears** (slots `0` and `27`) and **99 install handler
-  pointers** — and one of those handlers is written to **two adjacent slots** (`143` and `144`), so
-  the installer wires ~99 live Response handlers. The Push installer issues 66 stores (65 handler
-  installs + a final return). These are the same counts `handlers.md` §1 reports; they are
+- **Raw store counts (corrected — binary wins).** The Response installer emits **exactly 102 store
+  instructions**; the Push installer emits **exactly 65 store instructions**. Earlier wording put the
+  Response installer at 101 stores and the Push installer at 66; both were off by one and are
+  corrected here. The Push "+1" was a miscount of the function's `ret` epilogue (control flow, not a
+  table store); the Response figure rises to 102 because the handler shared between slots `143` and
+  `144` is **two distinct store instructions** in the actual code stream (the handler is loaded into
+  a register once, then stored twice), not the single store it was previously counted as. *([confirmed].)*
+- **Derived counts (unchanged — they reconcile with the raw counts).** The Response installer's 102
+  stores decompose as **2 zero-clears + 100 handler-pointer stores**:
+  - the **2 zero-clears** target minors **0** and **27** (each NULL-ed via an and-with-zero store, not
+    the no-op pointer) — leaving **2 NULL slots**;
+  - the **100 handler-pointer stores** land in 100 occupied slots, but minors **143** and **144**
+    receive the **same** handler (two stores into one shared handler), so the installer wires
+    **99 distinct live Response handlers across 100 slots**.
+  The Push installer's 65 stores are all live handler installs — **no zero-clears, no shared slots** —
+  giving **65 distinct live Push handlers across 65 slots** (Push minor `0` is a live handler, not a
+  zero-clear). The default-route slot is the single live default fill (the inert no-op handler) on
+  every uninstalled minor. So the derived picture is **100 Response slots / 99 distinct handlers /
+  2 NULL slots (minors 0 and 27) / one live default**, all reconciling with the **102** raw Response
+  stores and **65** raw Push stores. These are the same counts `handlers.md` §1 reports; they are
   reproduced here to characterise the installer routines, not to re-enumerate the handlers. Every
   minor not installed by these two routines keeps the inert no-op fill from §1.3.
 - **The two tables are physically adjacent** inside the handler object: the Response (major-4) table
@@ -243,6 +271,65 @@ that `handlers.md` enumerates. *(STRUCTURE-HIGH; build 263bd994.)*
   several of which are control-flow-confirmed there.)*
 - The installers run **once at network-client boot**, before any traffic is dispatched, so by the
   time the master dispatcher (§1) runs, both tables are fully populated.
+
+### 2a. Response table (major 4) — installed-slot map
+
+The exhaustive Response slot map below records **which of the 154 slots the installer writes** and
+**how** (live handler / explicit NULL / no-op fill). It is the *dispatch surface*, not the opcode
+catalogue: the per-opcode **handler NAMES, sizes and behaviour** live in `opcodes.md` (the
+`4/<minor>` rows) and `handlers.md` — they are **not duplicated here**. *([confirmed]* routing /
+slot occupancy; every wire-byte VALUE semantic remains `[capture/debugger-pending]`.)*
+
+**Installed live-handler minors (99 distinct handlers across 100 slots):**
+
+> `1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 28, 29, 30, 35, 36, 37, 39,
+> 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 54, 55, 56, 57, 58, 60, 61, 62, 63, 64, 65, 66, 70,
+> 71, 72, 74, 75, 76, 78, 79, 80, 81, 82, 83, 84, 93, 95, 96, 97, 99, 100, 101, 102, 103, 105, 107,
+> 108, 109, 113, 114, 115, 120, 122, 123, 125, 126, 132, 133, 134, 135, 137, 138, 139, 140, 142,
+> 143, 144, 146, 148, 149, 150, 151, 152, 153`
+
+Each of these minors maps to a `4/<minor>` row in `opcodes.md`; look the handler name up there. Slot
+occupancy notes:
+
+| Slot kind | Minors | Behaviour |
+|---|---|---|
+| Live handler | the 99/100 minors listed above | Installer overwrites the no-op fill with the per-opcode handler. |
+| **Shared handler** | **143 and 144** | A single handler is written to **both** adjacent slots (one handler, two stores); it branches internally on the frame's minor. This is why "100 handler-pointer stores" but "99 distinct handlers". |
+| **Explicit NULL (zero-clear)** | **0 and 27** | The installer's first two stores are explicit zero-writes (NOT the no-op pointer). These slots are **reserved/unused** — distinct from no-op-filled slots; nothing dispatches them in normal traffic. *([confirmed].)* |
+| Inert no-op | every other minor in `0..153` | Keeps the constructor's no-op fill (returns success, no action). |
+| Out of range | `≥ 154` | Not dispatched through the table (see §1.3 / §5 specials). |
+
+**Routed OUTSIDE the table** (special-case dispatcher branches, NOT installed slots): `4/500` and
+`4/50000` — these exceed the 154 bound by construction and are matched by literal compares (see
+§1.3, last bullet). They have `opcodes.md` rows but no table slot.
+
+### 2b. Push table (major 5) — installed-slot map
+
+The Push installer writes **65 live handler slots and no zero-clears**; every store is a live
+handler. As above, handler **names/sizes/behaviour** are owned by `opcodes.md` (the `5/<minor>`
+rows) and `handlers.md` — **not duplicated here**. *([confirmed]* routing / occupancy; VALUE
+semantics `[capture/debugger-pending]`.)*
+
+**Installed live-handler minors (65):**
+
+> `0, 1, 3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 18, 21, 26, 28, 31, 32, 33, 34, 38, 39, 42, 51,
+> 52, 53, 55, 57, 59, 61, 64, 65, 67, 68, 73, 76, 77, 79, 80, 85, 86, 87, 88, 89, 90, 91, 92, 93,
+> 94, 98, 106, 121, 123, 124, 126, 127, 129, 130, 131, 136, 139, 146, 147`
+
+Slot occupancy notes:
+
+| Slot kind | Minors | Behaviour |
+|---|---|---|
+| Live handler | the 65 minors listed above | Installer overwrites the no-op fill with the per-opcode handler. |
+| **Push minor 0** | **0** | A **real** live handler — NOT a zero-clear (contrast the Response table, whose minor 0 IS a NULL zero-clear). *([confirmed].)* |
+| Inert no-op | every other minor in `0..153` (e.g. 27) | Keeps the no-op fill. |
+| Out of range | `≥ 154` | Not dispatched at all (the dispatcher jumps to the ignore/free path; §1.3). |
+
+> **No-gap cross-check.** Every installed `4/<minor>` and `5/<minor>` slot above has a matching row
+> in `opcodes.md`, and every catalogued `4/`·`5/` row is either an installed slot here or one of the
+> two documented major-4 dispatcher specials (`4/500`, `4/50000`). The installed dispatch surface
+> and the `opcodes.md` S2C catalogue are in exact agreement — neither over- nor under-claims routing.
+> *([confirmed].)*
 
 ---
 
@@ -269,10 +356,19 @@ umbrella), reads a **sub-code word at `+4`**:
 | (anything else) | — | ignored (returns without action) |
 
 So **type `15` is the umbrella; sub-code `100` vs `102` discriminates packet-dispatch from
-connection-state**. This is distinct from the close-event *factory* tag also numbered `15` in §4.6
-(that tag identifies the disconnect event the teardown path *builds*; the `+0` type byte here is the
-*umbrella* under which the `100`/`102` sub-codes live). Field value semantics carried inside a
-dispatched packet remain `[capture/debugger-pending]`.
+connection-state**.
+
+> **One shared event factory, two sub-codes (corrected — binary wins).** There is exactly **one**
+> type-`15` event factory, not two. The same factory and the same type-`15` type byte produce **both**
+> events on this branch: the **receive worker** posts a type-`15` event with **sub-code `100`** (a
+> reassembled inbound frame to dispatch), and the **disconnect / teardown path** (§4.6) posts a
+> type-`15` event with **sub-code `102`** (a connection-state transition / link gone). Both enter this
+> same gate and are routed by the same `100`-vs-`102` discriminator. The disconnect event is therefore
+> **not** a separate "close-event factory tag also numbered 15" — it is simply the umbrella's
+> sub-code-`102` case from the one shared factory. (The earlier wording that treated the §4.6 close
+> event as a distinct factory is dropped.)
+
+Field value semantics carried inside a dispatched packet remain `[capture/debugger-pending]`.
 
 ### 3.2 The handler object and its embedded sub-objects
 
@@ -281,12 +377,29 @@ A dedicated **network-handler object** carries the dispatch logic. At constructi
 
 | Sub-object | Role (LIKELY) |
 |---|---|
-| Guest sub-object | The pre-authenticated / lobby-side handling surface — constructed first and wired into the handler object's table. |
-| Member sub-object | The in-session handling surface — constructed second; on construction it also caches a pair of internal manager references (an actor manager and an animation catalog) into shared slots for the handlers to reach. |
+| Guest sub-object | The pre-authenticated / lobby-side handling surface — constructed first and wired into the handler object's table; its constructor only stamps its own vtable pointer (no manager caching). |
+| Member sub-object | The in-session handling surface — constructed second; on construction it caches a pair of internal manager references (an actor manager and an animation catalog) into shared slots for the handlers to reach. |
 
 The two sub-objects are constructed as part of the single handler-object construction; their exact
 runtime placement inside the handler object is an in-process layout detail with no wire effect and
 is not promoted here.
+
+**Two distinct actor-manager caches are taken at construction (corrected — binary wins).** *([confirmed].)*
+The actor-manager reference is cached **twice**, by two different routines, into two different places:
+
+| Cache | Cached by | Destination | Source singleton |
+|---|---|---|---|
+| Member-sub-object cache | the **member sub-object** constructor | a process-lifetime **shared global slot** | the actor-manager singleton |
+| Parent-handler cache | the **parent handler-object** constructor | the handler object's **own field** | the actor-manager singleton |
+
+Both reach the **same** actor-manager singleton; they are distinct caches (member→shared-global vs
+handler-object→own-field), and the parent's own-field cache was previously unrecorded. Alongside the
+member sub-object's actor-manager cache, the member constructor also caches an **animation catalog**
+reference into the adjacent shared slot — and that "anim catalog" is precisely the
+**actor-visual-global singleton** (the animation/visual catalog surface). So the member sub-object
+caches the **actor-manager + actor-visual-global (anim catalog)** pair into adjacent shared slots,
+while the parent handler separately caches the actor-manager into its own object field. These are
+in-process layout facts with no wire effect.
 
 ### 3.3 Singleton accessor pattern
 
@@ -301,6 +414,15 @@ instance. This is the conceptual pattern; no offsets-as-addresses are recorded.
 The network client is a single object that owns the connection sub-object, the worker threads, and
 the init-gate. Its lifecycle is: **construct → start engine → spawn workers → run the receive loop
 → keepalive → disconnect**. *(STRUCTURE-HIGH; build 263bd994.)*
+
+> **Where this socket sits in the wider topology (cross-ref).** This lifecycle is the **single
+> persistent game/world opcode connection** — it carries **all** opcode majors `0–5` (login + char-mgmt
+> + game actions + the World Server Response/Push), connects **once** (after the lobby hands off the
+> game address) and does **not** reconnect for enter-world. The client also opens two **non-opcode**
+> socket families — the short-lived **login/lobby blocking queries** and the **XTrap** anti-cheat relay
+> — which are NOT this connection. The full socket inventory, the `1/2`-ping resolution (it rides
+> *this* socket, not a lobby socket), and the lobby→game address handoff live in
+> **`connection_topology.md`** — cited here, not duplicated.
 
 ### 4.1 Construction
 
@@ -320,58 +442,240 @@ Starting the network engine performs the Windows sockets bring-up and arms the w
 | Set init-gate | On success, sets the init-gate byte (§4.1) so the rest of the client treats the engine as up. |
 | Spawn workers | Calls the worker-thread spawn routine (§4.3). |
 
-### 4.3 Worker-thread spawn
+### 4.3 Thread model — FOUR thread procedures (RESOLVES the old "second worker" open item)
 
-The spawn routine arms the threading machinery and is **called only by start-engine** (§4.2):
+There are **four distinct netcode thread procedures**, owned by two distinct objects. The
+network-client's **start-engine** spawn arms two of them (the receive consumer and the keepalive
+timer); the embedded connection sub-object's **connect** routine spawns the genuine socket I/O thread
+(thread #3 — this resolves the old "second worker" item, old §8); and a separate **send-proxy /
+idle-filler** thread (#4) is spawned by the network-client (from a routine distinct from the start-engine
+pair) to emit the cadence-less C2S idle fillers (`1/2` and `2/13`). *([confirmed]; build 263bd994. Thread #4 added CYCLE 5 —
+the earlier "three-thread" wording undercounted it; the start-engine path itself still spawns exactly
+two slots, so the §4.2/§4.3 start-engine description below is unchanged.)*
 
-- Creates a **manual-reset stop event** that the worker loops watch to know when to exit.
-- Arms **two "alive" flags**, one per worker slot.
-- Starts **two worker thread slots** — the **receive worker** (§4.4) and a **second worker**
-  (the connection's I/O-side worker).
+| # | Thread procedure | Spawned by | Owner object | Duty |
+|---|---|---|---|---|
+| 1 | **Receive consumer** ("network worker") | network-client start-engine spawn (worker slot at client `+82312`) | network-client | Pops a *fully-reassembled* frame off the connection's receive queue and posts a dispatch event (§4.4). Pure producer → dispatch; never touches the socket. |
+| 2 | **Keepalive timer** ("network live") | network-client start-engine spawn (worker slot at client `+82328`) | network-client | A 1-second periodic timer loop; re-sends the cached `(2,10000)` keepalive frame when the link has been idle (§4.5). Not a socket thread. |
+| 3 | **Connection I/O thread** (the real socket worker) | the connection's **connect routine**, via the C runtime thread-spawn call (`_beginthreadex`) | embedded connection sub-object | Overlapped `WSARecv`-completion → **frame reassembly** → push complete frames onto the receive queue → re-arm `WSARecv`; also services the **send-signal** event (→ `WSASend`) and the shutdown/close events (§4.4a). |
+| 4 | **Send-proxy / idle-filler thread** | the network-client, via a dedicated spawn routine **distinct from the start-engine pair** | network-client | A **~10 ms `Sleep` loop** with two independently-gated idle fillers: when the **keepalive gate** is set it emits the header-only **`1/2` game-connection keepalive** while the link is idle; when the **move gate** is set it emits the **`2/13` move request** (a move anti-idle filler — NOT `2/112`). Neither has a fixed cadence: each fires on a poll tick when its gate is open and no send is already pending. The two numeric immediates **400** (for the `1/2` filler) and **200** (for the `2/13` filler) are **WARN-log latency thresholds** for an over-pending queued send, **not** send cadences. This is the thread that **actually emits the `1/2` and `2/13` idle fillers** (the `(2,10000)` frame is the *other* thread, #2). *([confirmed]; build 263bd994 / CYCLE 7.)* |
+
+The **start-engine spawn** (called only by §4.2) arms the *network-client's* two threads:
+
+- Creates a **manual-reset stop event** the two network-client worker loops watch to know when to
+  exit.
+- Arms **two "alive" flags**, one per network-client worker slot.
+- Starts **worker slot 1 (receive consumer)** and **worker slot 2 (keepalive timer)**.
 - Applies a **thread priority** to each started thread (a generic "set priority if the handle is
   valid" step, not network-specific).
 
-### 4.4 The receive-worker loop
+> **Resolution of the old "two worker thread slots" wording.** The two slots the network-client
+> start-engine path creates are the **receive consumer** and the **keepalive timer** — NOT a
+> socket worker. The genuine socket-read/reassembly/send-pump thread is thread #3, owned by the
+> embedded connection sub-object and spawned in its **connect** routine via the C runtime
+> thread-spawn call. The recv-consumer thread and the connection I/O thread hand off through the
+> **connection's receive queue** (the connection I/O thread is the producer; the recv consumer is
+> the consumer). *([confirmed].)*
 
-The receive worker is a thread procedure (tagged with a "network worker start/end" marker) that
+### 4.4 The receive-consumer loop (thread #1)
+
+The receive consumer is a thread procedure (tagged with a "network worker start/end" marker) that
 runs until the stop event is signalled. Each iteration: *(STRUCTURE-HIGH; build 263bd994.)*
 
-1. **Pop** one packet from the **connection's receive queue** (the queue owned by the embedded
-   connection sub-object).
+1. **Pop** one *already-reassembled* frame from the **connection's receive queue** (the queue owned
+   by the embedded connection sub-object; a pop with a short spin-wait until an item is available).
 2. **Push** a **dispatch event** onto the network-event sink (§3.1) so the dispatcher (§1) will act
-   on that packet on the consuming side.
-3. **Dispose** the packet: the dispatched inbound packet buffer is freed (an empty no-op hook on
-   the buffer-free path, then the raw block free). Disposal is the worker's responsibility once the
+   on that frame on the consuming side. This is the **type-15 / sub-code-100** event of §3.1.
+3. **Dispose** the frame: the dispatched inbound packet buffer is freed (an empty no-op hook on the
+   buffer-free path, then the raw block free). Disposal is the consumer's responsibility once the
    dispatch event has been posted.
 
-So the worker thread never decodes packets itself — it is a pure producer that moves a received
-packet into a dispatch event and then releases the buffer; all decode/routing happens on the
-dispatcher side.
+So the receive consumer never reads the socket and never decodes packets — it is a pure producer
+that moves an already-reassembled frame into a dispatch event and then releases the buffer; all
+socket I/O and reassembly happen on thread #3, and all decode/routing happens on the dispatcher
+side.
 
-### 4.5 Keepalive — TWO distinct mechanisms
+### 4.4a The connection I/O thread (thread #3 — the real socket worker)
 
-There are **two separate keepalive mechanisms**, both real; which one is actually sent on-wire (and
-at what cadence) is `[capture/debugger-pending]`. Record both.
+The connection's I/O thread is spawned by the connection's **connect** routine: the connect routine
+opens the socket, creates a small set of **auto-reset events** (receive-completion, send-signal,
+shutdown, graceful-close), starts the I/O thread via the C runtime thread-spawn call, and kicks it.
+The thread then loops on a wait over those events: *([confirmed]; build 263bd994.)*
 
-**(a) Ctor-armed compressed periodic frame.** *([confirmed]* it is armed; the period value is read
-from the routine).* The client arms a **periodic compressed keepalive**: a supplied keepalive
-packet is run once through the outbound compress stage (§6), the compressed buffer is stored in a
-client slot, the original buffer is released if a new one was produced, and a **periodic interval**
-is recorded (the recovered interval is `1000 ×` the routine's argument — i.e. a per-second-scaled
-period). Thereafter the pre-compressed keepalive frame is sent on that interval. As constructed in
-the network-handler constructor, this armed frame carries opcode **`(2, 10000)`** with an interval
-argument of **20**, i.e. a **20000 ms (20 s) period**.
+- **Receive-completion event** → collect the overlapped `WSARecv` result, advance the fill count of
+  the connection's **receive reassembly buffer**, then run a **frame-reassembly inner loop**: while
+  at least a header's worth of bytes is buffered, read the **frame size word at the frame start**,
+  and if a whole `size` bytes are present, copy the frame into a fresh frame buffer, **push it onto
+  the receive queue** (under the receive-queue lock), fire an optional notify callback, and advance
+  the consumed offset by `size`; otherwise break and **re-arm** the overlapped `WSARecv` (compacting
+  the buffer first if it has filled past its compaction threshold).
+  > **Reassembly reads the LOW 16 bits of the size word.** At the frame start the I/O thread reads
+  > the frame length as a **u16** even though the wire/header size field is the u32 at `+0` (§1.1).
+  > This is safe because frames never exceed the receive capacity (≈ 11.6 KB, well under 64 KB), so
+  > the high word of the size is always zero. The header layout owned by `opcodes.md` is unaffected:
+  > on the wire the size is a u32; the reassembler simply uses its low half as the frame length.
+  > *([confirmed].)*
+- **Send-signal event** → under the send-queue lock, if a frame is queued, perform the actual
+  `WSASend` of the head frame (fill a socket buffer descriptor from the frame pointer and the frame's
+  u32 size word, post the overlapped send, then free the frame). This is the same send-drain step
+  the inline send path also triggers (§6.1), so queued sends are serviced **both inline from the
+  send convergence and from this I/O thread**.
+- **Shutdown event** → the thread returns (exits).
+- **Graceful-close event** → re-arm receive; on failure run the connection shutdown, push a
+  sentinel onto the receive queue, and fire the notify callback.
+- On any receive error → connection shutdown + record the last-error string, and the loop exits.
 
-**(b) Runtime C2S `2/112` toggle.** *([confirmed]* it exists as a 1-byte C2S send gated by a master
-flag; its cadence is capture-pending.)* A separate **C2S `2/112` one-byte toggle** is gated by a
-**master-enable flag** that is *set on world-enter and cleared on leave*. This is the runtime,
-in-session keepalive path, distinct from the `(2,10000)` frame armed at construction.
+> **Why the reassembly loop is mandatory — Nagle coalescing (interop note).** TCP framing here is
+> **not** one-segment-per-message. The **server leaves Nagle's algorithm enabled** (it does **not** set
+> `TCP_NODELAY`) on its game connection — a maintainer-observed runtime fact, and most pronounced for
+> the **World Server** (the high-rate major-4 Response / major-5 Push traffic). Nagle batches small
+> writes, so the server can **coalesce several application frames into a single TCP segment**, and a
+> single frame can equally be **split across segments**. The client end is **symmetric**: the only
+> socket option the client sets on its connection is the **receive-buffer size (`SO_RCVBUF`, at
+> `SOL_SOCKET`)** — it **never sets `TCP_NODELAY`**, so the client's own send path is likewise
+> Nagle-subject and may batch its outbound frames. *([confirmed]* on the client side — the sole
+> `setsockopt` call sets `SO_RCVBUF`; there is **no** `TCP_NODELAY` call anywhere in the client. The
+> server-side Nagle posture is a **maintainer-observed runtime fact**, not a static claim derived from
+> the client.)* This is **precisely why** the inner loop is length-prefix-driven: it reads the 8-byte
+> header's `size` word and emits a frame only once `size` bytes are buffered, then advances by `size` —
+> tolerating **N frames per `recv`** and a **partial trailing frame**. A faithful re-implementation
+> **must** frame on the header `size`, never assume "one `recv` = one message", size its receive
+> reassembly buffer for coalesced bursts (the decode capacity is `0x2DA0` = 11680 bytes, §6.2), and
+> leave its own send path free to coalesce — otherwise it diverges from the original's on-wire batching.
 
-> These are **two distinct mechanisms**, not one read two ways: `(2,10000)@20 s` is the
-> construction-time armed periodic frame; `2/112` is the world-session 1-byte toggle. They are
-> **not reconciled to a single on-wire cadence** — the actual keepalive traffic and timing is
-> `[capture/debugger-pending]`. The `opcodes.md` catalogue carries **both** rows (`2/10000` and a
-> `2/112` keepalive-toggle row).
+So thread #3 is the **socket-read + frame-reassembly + send-pump** thread; thread #1 (the receive
+consumer) only lifts *already-reassembled* frames into dispatch events. The two hand off through the
+connection's **receive queue**; the send path hands off through the connection's **send queue**
+(producer = the send convergence of §6.1; consumer = this I/O thread's send-signal step). The
+queue/buffer object offsets are the P5-lane struct deliverable — see `structs/` (the network-client /
+connection-sub-object layout) — and are **not** re-tabled here.
+
+### 4.5 Keepalive / anti-idle — three distinct outbound mechanisms across TWO threads
+
+There are **three distinct outbound keepalive/anti-idle mechanisms**, owned by **two threads** (§4.3):
+the **keepalive-timer thread (#2)** owns mechanism (a) — the only one with a genuine fixed period; the
+**send-proxy thread (#4)** owns mechanisms (b) and (c) — both cadence-less idle fillers. A fourth
+state-driven send, the `2/112` toggle, is **not** a timer-driven heartbeat and is documented separately
+in (d). The cadence constants below are all `[confirmed]` statically on build 263bd994; what each
+keepalive *body byte means* on the wire stays `[capture/debugger-pending]`. *(CYCLE 7 correction: the
+prior "three periodic sends" framing was wrong — only (a) is periodic; (b)/(c) fire on every idle poll
+tick with no cadence immediate; the prior "`2/112` ~200 ms move-heartbeat on thread #4" was a mislabel —
+thread #4's move filler emits `2/13`, not `2/112` — see (b) and (d).)*
+
+**(a) Ctor-armed compressed periodic frame — `(2,10000)`, EXACTLY 20 s when idle.** *([confirmed]:*
+the period, the body width and the timer-send predicate are all read from the routines.)* The client
+arms a **periodic compressed keepalive**: a keepalive frame is built **once, inline in the
+network-handler constructor** (there is no per-call builder), run once through the outbound compress
+stage (§6), the compressed buffer is stored in a client slot, the original buffer is released if a new
+one was produced, and a **periodic interval** is recorded as `1000 ×` the routine's argument (a
+per-second-scaled period, on the tick-count millisecond clock). As constructed in the network-handler
+constructor, this armed frame carries opcode **`(2, 10000)`** with an interval argument of **20**, i.e.
+a period of `20 × 1000` = **20000 ms = EXACTLY 20 s**. *(The earlier "~20 s" is now EXACT, not
+approximate — the cadence is fully pinned statically; only the body VALUE remains capture-pending.)*
+
+> **Body width — CORRECTED (binary wins).** The `(2,10000)` keepalive body is **4 bytes: one `u32`
+> appended with value `0x00000000`** — NOT header-only. The total wire frame is therefore **12
+> bytes** (`[u32 size=12][u16 major=2][u16 minor=10000][u32 body=0]`). Because the body is non-empty,
+> the frame is genuinely compressed at arm time (it does *not* take the `size == 8` header-only
+> bypass of §6). The cached frame is **pre-compressed** at handler-table construction and re-enqueued
+> **verbatim** by the timer thread; it is **not** re-ciphered or re-compressed per send. *([confirmed]*
+> shape; the meaning of the zero body word is `[capture/debugger-pending]`.) `opcodes.md` carries the
+> `2/10000` row with this corrected "body = `u32` (observed 0), 12-byte frame, pre-compressed, timer-sent
+> at 20 s when idle" note.
+
+**Timer-send predicate (thread #2).** The keepalive-timer thread (§4.3, thread #2) sleeps **exactly
+1000 ms** per iteration while a master "network-live" flag is set, and on each tick re-sends the cached
+frame **only when the link has been idle** — i.e. when `tick-count now − last-send-tick > interval`
+(the 20000 ms above) **and** a **single one-deep suppress latch is clear**. The send convergence (§6.1)
+stamps the network-client's **last-send activity clock** on *every* outbound packet, so any normal
+traffic in the preceding 20 s suppresses the redundant ping. The **suppress latch** is set while a
+char-management request is in flight (a single one-deep latch) and the **`4/1` world-state handler
+CLEARS that suppress latch** at the top of its dispatch (see §4.5b). The timer re-sends the cached
+pre-compressed frame straight onto the send queue, **bypassing the normal send path** so the cached
+bytes are not re-transformed. *([confirmed]* shape/predicate/cadence; the wall-clock spacing actually
+observed on the wire is `[capture/debugger-pending]`.)
+
+**(b) Runtime C2S `1/2` game-connection keepalive — idle filler, NO cadence (send-proxy thread #4).**
+*([confirmed]; build 263bd994 / CYCLE 7.)* The `1/2` keepalive is **header-only (an 8-byte frame, no
+body), major 1 / minor 2**, sent through the normal send convergence on the **persistent game socket A**
+(not a lobby socket — see `connection_topology.md`). It is driven by the send-proxy thread (§4.3,
+thread #4), which runs a **~10 ms poll loop**: while a per-object **keepalive enable flag** is set and
+no send is in flight, it fires the `1/2` when the link is idle — i.e. essentially on **every 10 ms poll
+tick the link is idle**, capped only by the in-flight gate and the 10 ms sleep. **There is NO periodic
+interval immediate.** The **400** figure (previously quoted as a "400 ms cadence") is a **WARN-log
+latency threshold** ("send proxy wait > limit(400)") for an over-pending queued send — **not** a send
+period. The actual on-wire spacing is governed by the 10 ms poll plus idle/in-flight gating and is
+`[capture/debugger-pending]`. *(CYCLE 5 had this builder correctly re-attributed from "lobby ping" to a
+game-connection keepalive; CYCLE 7 corrects the "400 ms cadence" to a WARN threshold.)*
+
+**(c) Runtime C2S `2/13` move anti-idle filler — idle filler, NO cadence (send-proxy thread #4).**
+*([confirmed]; build 263bd994 / CYCLE 7. This SUPERSEDES the prior "§4.5(b) C2S `2/112` move-heartbeat
+~200 ms".)* The same send-proxy thread (#4), while a separate per-object **move gate** is set, emits a
+**C2S `2/13` move request (16-byte body)** when the move gate is open and no send is pending. It is a
+**move anti-idle filler with no fixed cadence** — it jitters the local player's X and emits a MOVE on a
+poll tick. The **200** figure (previously a "~200 ms move-heartbeat cadence") is a **WARN-log latency
+threshold** ("send move wait > limit(200)"), **not** a send period. **Critically, this filler builds
+`2/13`, NOT `2/112`** — any prior wording placing a periodic `2/112` move-heartbeat on thread #4 is
+wrong and is corrected here. The `2/112` opcode is the *event-driven toggle* of (d), an unrelated
+mechanism. *(See the names.yaml flag below: the builder canonically named `Cmsg_MoveHeartbeat_Send` is
+MISNAMED — it emits `2/13` via the move-request builder, not `2/112`.)*
+
+**(d) Event-driven C2S `2/112` toggle — NOT a periodic heartbeat.** *([confirmed]; build 263bd994 /
+CYCLE 7.)* The **`2/112`** send is an **event-driven toggle, not a timer-driven heartbeat** — there is
+**no timer / elapsed-time comparison anywhere in its builder** (the tick-count clock is not even
+consulted). It is purely **state-driven**: gated by a global keepalive-enabled flag, with the builder's
+argument selecting the action (**1 = enable + send; 2 = disable; otherwise resend-if-enabled**), and it
+appends a **single 1-byte body (value `1`)**, major 2 / minor 112. It is sent on **world-entry** (by the
+`4/1` world-state handler) and on **leave-world / scene transitions** (by the leave-to-logout path and
+the scene state machine) — never on a periodic schedule. *(This is why the §4.3 thread-#4 row no longer
+lists a `2/112` send: thread #4 never builds `2/112`.)*
+
+> **Reconciliation (CYCLE 7).** Only **(a) `(2,10000)` at EXACTLY 20 s when idle** is a genuine
+> periodic send (keepalive-timer thread #2). **(b) `1/2`** (header-only) and **(c) `2/13`** (16-byte
+> move) are **cadence-less idle fillers** on the send-proxy thread #4 — each fires on a 10 ms poll tick
+> when its gate is open and no send is pending; the **400 / 200** figures are WARN-log latency
+> thresholds, not cadences. **(d) `2/112`** is an **event-driven toggle** (world-entry / leave / scene
+> transition), with no timer at all. The `opcodes.md` catalogue carries the `2/10000`, `1/2`, `2/13`
+> and `2/112` rows. *(Names.yaml flag: the move-filler builder is misnamed `Cmsg_MoveHeartbeat_Send`
+> but emits `2/13`, not `2/112` — flagged for rename, e.g. `NetClient_SendProxyMoveFiller`. This is a
+> Tier-1 / `ida-toolsmith` action, not applied here.)*
+
+### 4.5b Suppress-latch arming relationship (`4/1` ↔ `2/10000`)
+
+The `(2,10000)` idle-keepalive of (a) is gated by a **single one-deep in-flight suppress latch** on the
+network-client object. *([confirmed]; build 263bd994 / CYCLE 7.)*
+
+- **Only the `2/10000` timer READS the latch** (to skip the idle ping while a char-management request is
+  outstanding).
+- The latch is **SET** by char-management sends (e.g. the `1/6`, `1/7`, `1/9`, `1/13`, `1/14`, `2/2`
+  builders) and **CLEARED** by their results.
+- The **`4/1` world-state handler CLEARS the latch** at the very top of its dispatch — so entering the
+  world re-enables the idle keepalive. The same handler also emits the `2/112` toggle on world-entry
+  (mechanism (d)). So `4/1` both **clears the `2/10000` suppress** and **fires the `2/112` enable**;
+  these are two separate actions on the same handler.
+
+### 4.5a Link-health ack handshake — inbound `5/146` request → C2S `2/146` reply
+
+Distinct from the keepalive/anti-idle mechanisms above, the protocol carries a **server-initiated
+ack-request / client-reply** round-trip used to confirm packet delivery. *([confirmed]* routing /
+sizes / reply opcode; the field VALUE meanings are `[capture/debugger-pending]`.)*
+
+- **Inbound `5/146`** routes through the Push table (§2b) to its installed handler. The handler reads
+  an **8-byte body** — two `u32`s: a **request id / sequence** word and a **request token** word.
+- The handler **validates the token against a locally-tracked pending-request list** (a list of
+  fixed-size records keyed on the token, with a state filter). **If no matching pending request is
+  found, the handler does nothing — no reply is sent.** The client only acks requests it actually has
+  outstanding.
+- On a match it surfaces a preset coloured system message (a message-DB string, id `[capture-pending]`)
+  and then **builds and sends a C2S `2/146` reply** with an **8-byte body**: `[u32 echoed request id]`
+  (the inbound id echoed back) followed by `[u32 local counter / state]` (a local ack counter). The
+  reply goes out through the normal send convergence (§6.1 — cipher + compress + queue).
+
+> **One-line summary.** Server sends **`5/146`** `[u32 req_id][u32 token]`; the client, *iff* it has
+> that request pending, replies with **C2S `2/146`** `[u32 echoed_req_id][u32 local_counter]`. So
+> **`5/146`'s reply opcode is `2/146`.** `opcodes.md` owns both catalogue rows; `handlers.md` owns
+> the per-handler behaviour. *([confirmed]* shape; the meaning of `token`, `local_counter` and the
+> system message id are `[capture/debugger-pending]`.)
 
 ### 4.6 Disconnect
 
@@ -380,7 +684,7 @@ Disconnect is the connection-teardown path:
 | Step | Detail |
 |---|---|
 | Connection shutdown | Shuts down the embedded connection sub-object: signals its own stop event, waits its I/O thread, tears down and closes the socket, and closes its event/thread handles. |
-| Post disconnect event | Builds a **disconnect/close network event** (a code-`15` close event via the event factory) and pushes it onto the dispatch sink so the rest of the client learns the connection is gone. The same post-disconnect path is also used by the receive worker. |
+| Post disconnect event | Builds a **disconnect/close network event** through the **same shared type-`15` event factory** the receive worker uses, but stamped with **sub-code `102`** (vs the receive worker's sub-code `100`), and pushes it onto the dispatch sink so the rest of the client learns the connection is gone. It enters the §3.1 gate and is routed by the sub-code-`102` branch into the connection-state machine (§5). |
 | Clear init-gate | Clears the init-gate byte (§4.1), so the client no longer treats the engine as up. |
 
 ---
@@ -437,6 +741,29 @@ trace pins them. Model them as a neutral connection-state enum:
 > read**. They are distinct paths that happen to share some numeric code values — do not conflate
 > them.
 
+> **Prime-then-resolve cross-link (load-bearing).** The `3/100` packet handler is what *posts* the
+> codes **`202` / `203` / `232`** into the game-state machine's pending-result slot **and sets the
+> game-state code to `2`** (the connect-progress state). The connection-state machine documented here
+> then, on the next `102` connection event, **consumes and clears** exactly those `202/203/232` codes
+> from that pending slot. So **`3/100` (packet path) PRIMES `GameState = 2`; this connection-state
+> machine (the `102` path) RESOLVES it.** Code `201` is the only one this machine itself *publishes*
+> (outward, via the shared select-screen publish method) — it never *stores* `201`; the machine only
+> stores its own sentinel and clears the externally-posted `202/203/232`. This is the concrete edge
+> between packet dispatch (§1) and the connection-state machine. The shared publish method and the
+> full `3/100` code set are owned by `handlers.md` §12 — cited, not re-tabled. *([confirmed]* control
+> flow; the meaning of each code is `[capture/debugger-pending]`.)
+
+> **PHANTOM REFUTED — there is NO `5000 / 10000 / 10001` "string-id class".** An earlier framing
+> grouped these three integers as a select-screen *message-string-id* family; the binary disproves
+> it. They are **three different things**, none a string-id: **`5000`** is a UI **display-duration /
+> timer-delay in milliseconds** (e.g. "show this status line for 5 s", or the 5 s arm for the timed
+> event below); **`10000`** is the **opcode minor of the `2/10000` keepalive** *and* the 10 s
+> timer-delay variant; **`10001`** is the **timed-event tag** (the connection/scene retry-or-timeout
+> tick driven off the deferred timer, §5.1). Do **not** model any `5000/10000/10001` string-id class;
+> the select-screen messages are driven by separate message-DB string-id handles (owned by
+> `handlers.md`), not by these integers. *([confirmed]* integer roles; the human text of any message
+> id remains `[capture/debugger-pending]`.)
+
 ### 5.3 What it is not
 
 This routine is **not** a packet-body handler: it reads no payload fields, takes no actor key, and
@@ -469,6 +796,14 @@ compressed buffer and freeing the original), then hands the frame to the queue/t
 **The order is cipher THEN compress.** **Header-only frames (`size == 8`) bypass both stages.**
 *([confirmed].)*
 
+> **Send fan-in (corrected count — binary wins).** The convergence is reached by **105 distinct
+> builder functions emitting 104 unique `(major, minor)` opcodes** — 105 call sites, each a distinct
+> caller, every opcode statically pinned. The **one opcode collision** is `2/52`: it is emitted by
+> **two** different builders — a **short-form** skill-use request and a **full-form** skill-use
+> request — so the 105 builders map onto 104 unique opcodes. (Earlier "~104 builders" wording is
+> corrected to **105 builders / 104 unique opcodes**.) The per-builder opcode census is owned by the
+> C2S catalogue in `opcodes.md`; what each builder's payload bytes *mean* is `[capture/debugger-pending]`.
+
 ### 6.2 Inbound (server → client), before dispatch
 
 An inbound packet is **LZ4-decompressed before dispatch** (the expand step of §1.2), then handed
@@ -489,13 +824,16 @@ generalised across the whole protocol, is the `crypto.md` §5 open question and 
 ### 6.3 Pipeline diagram
 
 ```
-RECEIVE:  socket → conn recv queue → [recv worker pops] → dispatch event
+RECEIVE:  socket → [I/O thread #3: WSARecv completion → frame reassembly] → conn recv queue
+                 → [recv consumer thread #1 pops] → dispatch event (type-15 / sub-code-100)
                  → [LZ4 decompress if not header-only]   (crypto.md §3.2 inverse)
-                 → master dispatcher (§1) → family routing → installed handler (§2)
+                 → master dispatcher (§1) → family routing → installed handler (§2/§2a/§2b)
 
-SEND:     handler builds payload → byte cipher (crypto.md §3.1)
-                 → LZ4 compress (crypto.md §3.2) → send queue → socket
-          (header-only frames pass through untouched)
+SEND:     handler builds payload → send convergence (§6.1):
+                   GetTickCount activity stamp → byte cipher (crypto.md §3.1)
+                 → LZ4 compress (crypto.md §3.2) → conn send queue
+                 → WSASend (inline kick AND/OR I/O thread #3 send-signal)
+          (header-only frames, size==8, pass through both transforms untouched)
 ```
 
 ---
@@ -506,10 +844,10 @@ SEND:     handler builds payload → byte cipher (crypto.md §3.1)
 |---|---|
 | Master dispatcher routing fan-out (§1) | Per-opcode routing list + dispatch-model summary → `handlers.md` §1; wire header → `opcodes.md` |
 | `(0,0)` key-exchange handshake + emitted `1/4` reply (§1.4) | RSA / whitening of the `1/4` reply → `crypto.md` + the login-credential packet spec |
-| Handler-table installers + install counts (§2) | Per-handler behaviour and the same counts → `handlers.md` §1 |
+| Handler-table installers + install counts (§2) + the **installed-slot maps** (§2a/§2b) | Per-handler **names / sizes / behaviour** for each `4/`·`5/` minor → `opcodes.md` rows + `handlers.md` §1 (NOT duplicated here) |
 | Network-event entry (type-15 / 100 vs 102) + handler object (§3) | (machinery only here) |
-| Network-client lifecycle + keepalive duality (§4) | `2/112` keepalive-toggle row + `2/10000` armed frame → `opcodes.md` |
-| Connection-state machine + codes (§5) | Lobby action-code mapping (shared numbers, different path) → `handlers.md` §12 |
+| Four-thread model + lifecycle + keepalive/anti-idle (a `(2,10000)` / b `1/2` / c `2/13` / d `2/112`) + `5/146`→`2/146` ack (§4) | `2/10000` armed frame · `1/2`/`2/13` idle fillers · `2/112` toggle · `5/146`/`2/146` ack rows → `opcodes.md`; per-handler ack behaviour → `handlers.md`; network-client / connection-sub-object / secure-handshake-context **struct offsets** → `structs/` (the P5-lane deliverable, cross-ref only) |
+| Connection-state machine + codes + the `3/100`→`GameState=2` prime/resolve edge (§5) | Lobby action-code mapping + the full `3/100` code set + the shared publish method (shared numbers, different path) → `handlers.md` §12 |
 | Cipher/LZ4 placement (§6) | Cipher + LZ4 algorithms → `crypto.md` §3; inbound cipher-omission generalisation → `crypto.md` §5 |
 
 ---
@@ -524,13 +862,44 @@ SEND:     handler builds payload → byte cipher (crypto.md §3.1)
 - **Major-0 shape — RESOLVED (conflict).** Major-0 is a **hardwired `(0,0)` handshake branch, not an
   inline switch**; it parses the inbound key blob and emits the `1/4` reply (§1.4). The earlier
   "inline switch / small fixed set of minors" wording was an overstatement and is corrected.
-- **Response install count — RESOLVED (conflict).** Refined from `~98` to **~99** (101 stores − 2
-  zero-clears, one handler shared across slots `143`/`144`) (§2).
+- **Install raw-store counts — CORRECTED (binary wins).** The Response installer emits **102** store
+  instructions (2 zero-clears at minors `0`/`27` + 100 handler-pointer stores, one handler shared
+  across slots `143`/`144`); the Push installer emits **65** stores (all live, no zero-clears). Earlier
+  101/66 counts were off by one (the Push "+1" was the `ret` epilogue; the Response "+1" is the second
+  store of the shared `143`/`144` handler). Derived counts unchanged: **100 Response slots / 99 distinct
+  handlers / 2 NULL slots (0, 27) / one live default** (§2).
 - **Inbound cipher omission on the CLIENT side — RESOLVED (positive single-caller proof).** The byte
   cipher has exactly one cross-reference (the outbound send gate), so it is structurally unreachable
   on receive; client inbound is **decompress-only** (§6.2). Crypto OQ#1 is resolved for the client
   receive path. (Generalising the omission across *all* inbound types on the wire stays
   capture-pending — `crypto.md` §5.)
+
+### Resolved this pass (CYCLE 2 extension — control-flow-confirmed)
+
+- **"Second worker's exact duties" — RESOLVED.** The old open item is closed by the **three-thread
+  model** (§4.3): the two threads the network-client spawns at start-engine are the **receive
+  consumer** and the **keepalive timer**; the genuine socket worker is a **third** thread owned by
+  the embedded connection sub-object and spawned by its **connect** routine (via the C runtime
+  thread-spawn call). Thread #3 does `WSARecv`-completion → **frame reassembly** → receive queue →
+  re-arm, and also services the **send-signal** event (→ `WSASend`); its loop is now decomposed in
+  §4.4a. The recv consumer and thread #3 hand off through the connection's **receive queue**.
+- **`2/10000` keepalive body — CORRECTED.** The body is **4 bytes (one zero `u32`)**, 12-byte wire
+  frame, pre-compressed at arm time, timer-sent at 20 s **only when idle** (§4.5a). It is **not**
+  header-only and does **not** take the `size == 8` bypass. `opcodes.md` carries the corrected row.
+- **`5/146` ack-request — RESOLVED.** Inbound `5/146` `[u32 req_id][u32 token]`, validated against a
+  local pending-request list, replies with **C2S `2/146`** `[u32 echoed_req_id][u32 local_counter]`
+  (§4.5a). `5/146`'s reply opcode is `2/146`.
+- **Install-table slot maps — ENUMERATED (§2a/§2b).** All **99 distinct Response handlers across 100
+  slots** (with the shared `143`/`144` handler and the explicit NULL zero-clears at `0`/`27`) and all
+  **65 Push handlers** (with live `5/0` and no zero-clears) are mapped slot-by-slot; the installed
+  surface matches the `opcodes.md` S2C catalogue with **zero gap** (modulo the two `4/500`/`4/50000`
+  dispatcher specials).
+- **`3/100` → `GameState = 2` prime/resolve edge — RECORDED (§5).** `3/100` posts `202/203/232` into
+  the pending slot and primes `GameState = 2`; the connection-state machine consumes/clears them on
+  the next `102` event. Code `201` is published-outward only, never stored.
+- **PHANTOM `5000/10000/10001` "string-id class" — REFUTED (§5).** No such string-id family exists:
+  `5000` = display-duration / timer-delay (ms); `10000` = the `2/10000` keepalive minor + 10 s
+  timer-delay; `10001` = the timed-event tag. Do not model a string-id class on these integers.
 
 ### Still open (capture / debugger-pending)
 
@@ -543,12 +912,17 @@ SEND:     handler builds payload → byte cipher (crypto.md §3.1)
   recovered numeric facts; the precise meaning attached to each (connecting / connected /
   disconnected / error) is an inferred grouping and is `UNVERIFIED`. A debugger trace of a
   connect→play→disconnect cycle would pin each code to an observed transition.
-- **Keepalive duality — on-wire cadence not pinned.** Two keepalive mechanisms are both real (§4.5):
-  the ctor-armed `(2,10000)@20 s` frame and the runtime `2/112` toggle. Which is actually sent on the
-  wire, and at what cadence, is `[capture/debugger-pending]`. (The `1000 ×` interval scaling is read
-  from the routine; the wall-clock keepalive period is unconfirmed.)
+- **Keepalive cadence — RESOLVED statically (CYCLE 7); on-wire spacing of the idle fillers not pinned.**
+  The three keepalive/anti-idle mechanisms are now cadence-pinned (§4.5): the ctor-armed `(2,10000)`
+  frame fires at **EXACTLY 20 s when idle** (the earlier "~20 s" is exact); the `1/2` (header-only) and
+  `2/13` (16-byte move) sends are **cadence-less idle fillers** on the send-proxy thread #4 (10 ms poll,
+  no interval immediate; the `400`/`200` figures are WARN-log latency thresholds, not cadences); and
+  `2/112` is an **event-driven toggle** (no timer). The actual wall-clock spacing of the idle fillers on
+  the wire (which depends on link idle state) is `[capture/debugger-pending]`.
+- **Wire-VALUE meanings of the keepalive/ack fields.** The `2/10000` zero body word, the `2/112`
+  toggle byte (observed `0x01`), the `2/13` move-filler body, and the `5/146`/`2/146` `token` /
+  `local_counter` words are all `[capture/debugger-pending]` — only their widths and round-trip shape
+  are confirmed.
 - **Inbound cipher asymmetry (generalisation).** The client-side "decompress-only" placement is
   proven (§6.2); whether the server omits an inverse cipher across *every* inbound type is the
   `crypto.md` §5 open question this spec inherits but does not resolve.
-- **Second worker's exact duties.** The receive worker is fully characterised (§4.4); the second
-  spawned worker is the connection's I/O-side thread, but its loop is not decomposed here.

@@ -7,7 +7,7 @@ opcode: 0x20038           # major 2 (GameAction), minor 56 -> (2 << 16) | 56
 direction: C2S
 size: 4                   # fixed 4-byte body built by the stall-enter sender
 spec: packets/2-56_stall_enter.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client request to enter / open a selected stall from the personal-stall market list. A fixed 4-byte body carrying the selected stall row's stored id. Issued by the StallListPanel's ENTER action and the row double-click, with the id taken from the selected row record.

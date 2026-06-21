@@ -1,9 +1,9 @@
 ---
-verification: confirmed    # the boot/loading orchestration load-bearing facts are recovered from control-flow; runtime replay & exact INI string remain capture/debugger-pending
-ida_reverified: 2026-06-16
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 8 (2026-06-21))    # the boot/loading orchestration load-bearing facts are recovered from control-flow; CYCLE 8 closed the world-entry replay question statically (REPLAY — §2.6); only the exact INI string + second-pass timing remain capture/debugger-pending
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # control-flow recovery + real-VFS file-coverage counts (§6) corroborated against the shipped archive
-conflicts: world-entry state-2 full-corpus replay vs cached short-circuit (§2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
+conflicts: world-entry state-2 full-corpus replay vs cached short-circuit — RESOLVED CYCLE 8 (REPLAY: full corpus re-runs; loaders are idempotent rebuilders with no cache gate; msg.xdb is the only state-1-only non-reloaded table — §2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
 status: confirmed
 sample_verified: partial   # VFS index lookup mechanics CODE-CONFIRMED; area file-coverage counts SAMPLE-VERIFIED; thread timing values CODE-CONFIRMED
 subsystems: [vfs_loader, boot_loader, loading_screen, terrain_streaming, subsystem_caches]
@@ -282,6 +282,128 @@ The boot set consists of approximately **50 entries** in a fixed global pointer 
   period), then clears the thread-running flag (stored at a fixed offset from the handler object),
   and exits.
 
+The §2.1 summary lists the boot set by category; the **exact ordered corpus** the worker registers
+in sequence is enumerated authoritatively in §2.1a.
+
+## 2.1a Boot data-table corpus — the authoritative registration ORDER — (CODE-CONFIRMED)
+
+The boot worker registers the global data tables and catalogues **in a fixed, compiled sequence**.
+The order is **load-bearing**: it is the exact sequence in which the loader installs each table into
+its module-global registry, and a clean-room boot should mirror it unless a per-table dependency
+audit proves the order non-load-bearing (§7.2, §8 item 2). It runs **once** — there is no internal
+re-read loop and no replay: the worker sleeps briefly, clears its busy flag, and ends the thread.
+
+The table below is the **authoritative full ~57-step boot-load list** — the exact call order inside
+the corpus worker, including the file-loader steps and the interleaved subsystem-init / manifest
+steps. The file-path arguments are pulled from a **contiguous global pointer table** (each slot holds
+a pointer to a literal path string). Where a step's loader role is not pinned, it is marked
+"(loader)" or "(init)". (All listed files carry **CP949** contents.)
+
+A handful of **filename quirks** in this corpus are *intentional spellings in the shipped data set*
+and must be preserved verbatim by a faithful port: the descript table is **`discript.sc`** (extension
+`.sc`, **not** `.scr`); the tutor table is **`Tutor.scr`** (capital **T**); and the extra-items table
+is **`items_extra.do`**. (The post-load destination gate also reads INI section **`OPENNING`** with a
+double **N** — §2.5.)
+
+| # | Loader role | File |
+|--:|---|---|
+| 1 | scripted-events table | `data/script/events.scr` |
+| 2 | system-control table | `data/script/system_control.scr` |
+| 3 | map-setting table | `data/script/mapsetting.scr` |
+| 4 | playtime-reward table | `data/script/playtime_reward.scr` |
+| 5 | item definitions | `data/script/items.scr` |
+| 6 | skill definitions | `data/script/skills.scr` |
+| 7 | skill-icon manifest parse | (skill-icon manifest) |
+| 8 | skill-category / stance "do"-table streaming load | `data/script/skillcategory.scr` |
+| 9 | extra-items "do" table | `data/item/items_extra.do` |
+| 10 | **stat-curve family loader** (the four-file stat-curve pass) | `data/script/users.scr` (+ `userlevel.scr` / `userpoint.scr` / `exp.scr` — see §2.7) |
+| 11 | product (cash-shop) table | `data/script/products.scr` |
+| 12 | product-collect table | `data/script/productcollect.scr` |
+| 13 | product random-name table | `data/script/productrandname.scr` |
+| 14 | help table | `data/script/helps.scr` |
+| 15 | NPC dialog/description table | `data/script/npc.scr` |
+| 16 | NPC spawn/definition table | `data/script/npcs.scr` |
+| 17 | repair table | `data/script/repair.scr` |
+| 18 | **mob stat catalogue** | `data/script/mobs.scr` (see §2.8) |
+| 19 | repair table (re-use of the repair slot) | `data/script/repair.scr` |
+| 20 | upgrade-items table | `data/script/upgradeitems.scr` |
+| 21 | quest table | `data/script/quests.scr` |
+| 22 | menu-label / descript table | `data/script/discript.sc` |
+| 23 | text-command "do" table | `data/script/textcommand.do` |
+| 24 | chivalry table | `data/script/chivalry.scr` |
+| 25 | letters table | `data/script/letters.scr` |
+| 26 | nick-to-fame table | `data/script/nicktofame.scr` |
+| 27 | guild-crest table | `data/script/guildcrest.scr` |
+| 28 | menu-label / descript table load | `data/script/discript.sc` |
+| 29 | tip-help table | `data/script/tiphelp.scr` |
+| 30 | set-item-name table | `data/script/setitemname.scr` |
+| 31 | ob-list table | `data/script/oblist.scr` |
+| 32 | cash-item table | `data/script/citems.scr` |
+| 33 | tutor table | `data/script/Tutor.scr` |
+| 34 | war-stone-info table | `data/script/warstoneinfo.scr` |
+| 35 | statue table | `data/script/statue.scr` |
+| 36 | skill-need-set table | `data/script/skillneedset.scr` |
+| 37 | VIP-levels table | `data/script/viplevels.scr` |
+| 38 | item-scale table | `data/script/itemscale.scr` |
+| 39 | item-effect table | `data/script/itemeffect.scr` |
+| 40 | UI-texture manifest (the UI id pool, §3A.2(a)) | `data/ui/UiTex.txt` |
+| 41 | UI focus init (conditional) | — |
+| 42 | banned-word table init | (banned-word table) |
+| 43 | (init) | — |
+| 44 | (init) | — |
+| 45 | shadow-manager init | — |
+| 46 | effect-manager init | — |
+| 47 | (init) | — |
+| 48 | item skin-list table | `data/item/skinlist.txt` |
+| 49 | (init) | — |
+| 50 | terrain-manager singleton init | — |
+| 51 | character-visual manifest load | (char manifests) |
+| 52 | same-emoticon table | `data/char/sameemoticon.txt` |
+| 53 | guild-crest icon list + pool | `data/ui/guildicon/crestlist.txt` (paired with the `data/ui/guildicon/pool/` directory; 23×23 icons) |
+| 54 | effect-scale table | (effect-scale `.xdb`) |
+| 55 | creature-item table | (creature-item `.xdb`) |
+| 56 | vehicle table | (vehicle `.xdb`) |
+| 57 | buff-icon-position table | (buff-icon-position `.xdb`) |
+
+The numbered entries above are the **exact worker call order** a port must reproduce. Steps 7, 41–47,
+49–51 are subsystem-init / manifest steps that resolve their own paths internally rather than reading
+a single data-table file; they are part of the ordered sequence and are not separate from it.
+
+After the effect-manager init (and once `bmplist.lst` and the rest of the effect-manifest chain are
+loaded by the effect subsystem — `xobj.lst`, `xeffect.lst` plus the effect-cache prime,
+`totalmugong.txt`, and the joint/sword-light tables; see `specs/effects.md §3`), the worker performs
+the completion handshake (`Sleep(500)`, clear the thread-running flag, exit — §2.1).
+
+> **Path-global table — additional entries not on the worker's top-level call list.** The same
+> contiguous global pointer table also holds **per-class stance `.do` files** — `musajung.do`,
+> `musasa.do`, `musama.do`, `assasinjung.do`, `assasinsa.do`, `assasinma.do`, `wizardjung.do`,
+> `wizardsa.do`, `wizardma.do`, `monkjung.do`, `monksa.do`, `monkma.do` — plus `errorinfo.do`,
+> `msginfo.do`, `emoticon.do`, and several `.dds` format strings (e.g. `lensflare%d.dds`,
+> `crest%dimage.dds`, `guildcresticon%d.dds`). The stance `.do` files are consumed by the
+> stance/"do"-table and the per-class loaders (step 8 and downstream), **not** all by this worker's
+> top-level list above. Do not assume every path in the global table is a separate top-level worker
+> step.
+
+> **Config / INI files are loaded by an EARLIER phase, not this worker.** `uiconfig.lua`, `msg.xdb`,
+> `display.lua`, and `option.ini` are **config**, loaded by the boot/UI/option phase before and around
+> the data-table corpus worker (`option.ini` via the option-loading routines). They are not part of
+> the data-table corpus. `msg.xdb` specifically is the synchronous case-1 main-thread pre-load (§2.2),
+> not a corpus-worker entry. **`option.ini` is re-read on option change / scene re-entry — that is the
+> ONLY reload in this whole pipeline** (the exact cadence is RUNTIME-ONLY; see §2.5).
+
+> ### RED-HERRING caveats — two seed strings that are NOT the boot manifest (state these explicitly)
+>
+> **(a) The tab-separated header `ID / TYPE / Load Size / Stream / script / script id` is NOT the boot
+> corpus manifest.** It is a **column header written by a dead sound-tester debug logger** (a routine
+> with no callers that opens a log file and writes that header). It is a sound-loading debug dump
+> header, not the resource boot list. Do not mistake it for the resource manifest.
+>
+> **(b) The `MAXHP: %24s` line (and the companion `SORT / ID / SCR` line) is NOT a stat-table
+> parser.** It is a **live on-screen DEBUG OVERLAY** that reads from a live actor record at runtime —
+> it prints SORT/ID/SCR and the running HP from the actor's live state, and pulls MAXHP from the **mob
+> catalogue** record (§2.8) for mob actors. It reads catalogue/runtime state at draw time; it never
+> loads any catalogue file. Do not mistake it for a stat-table loader.
+
 ## 2.2 State-1-to-state-2 synchronous pre-load — (CODE-CONFIRMED)
 
 **Before** the worker thread starts, during the state-1 → state-2 transition, the UI message
@@ -371,18 +493,101 @@ the load.
 > "reload forces Select / reload skips the INI read" rule; it re-reads SKIP and only omits the `msg.xdb`
 > reload.
 
-## 2.6 State 2 is entered twice per session — (CODE-CONFIRMED structure; world-entry replay capture/debugger-pending)
+## 2.6 State 2 is entered twice per session — REPLAY (CODE-CONFIRMED — CYCLE 8, the binary wins)
 
 The scene lifecycle enters state 2 both after login (the post-login global-table boot-load pass above)
 and on entering the world. The **same handler and worker-thread machinery runs for both passes** — the
 case-2 setup constructs the opening window first, then the loading window (= the `LoadHandler`), and
 the `OPENNING/SKIP` read (§2.5) is performed before both, fixing the post-load state (3 vs 4) up front.
 
-Whether the in-world (state-2) pass **replays the full table corpus** or **short-circuits
-already-loaded / cached entries** (the subsystem caches of §3 would make re-registration cheap) **could
-not be determined statically** — it depends on runtime control flow. Treat both passes as potentially
-running the full sequence and confirm against a live world-entry transition. *(capture/debugger-pending
-— see §8 open item 5; this is what determines whether the second loading screen is fast or full-length.)*
+**Resolved statically (CYCLE 8): the second (in-world) pass REPLAYS the full table corpus — it does
+NOT short-circuit to cached tables.** The "replay vs cached short-circuit" ambiguity is closed against
+the binary by a static chain of evidence, no debugger required:
+
+1. **The state-2 trigger carries no cache gate.** Both world-entry acks re-enter state 2 by writing the
+   scene state to 2 and breaking the inner scene loop (the enter-game ack `3/5` and the char-management
+   reload `3/100`); neither tests an "already loaded" flag.
+2. **Case 2 is unconditional.** The case-2 body always performs the `OPENNING/SKIP` read and always
+   constructs the loading handler + loading window (which launches the boot worker). There is no
+   "skip if already loaded" branch.
+3. **The boot worker is an unconditional flat call list.** It runs the whole ~57-step corpus (§2.1a) in
+   sequence with no internal guard and no replay short-circuit, then sleeps briefly, clears its busy
+   flag, and ends the thread.
+4. **The individual table loaders REBUILD, they do not early-out.** Representative loaders re-open their
+   file, reset their record store, bulk-read, and re-insert every record into their global map from
+   scratch — no "already populated" early-return. They are **idempotent rebuilders**: re-running the
+   worker re-reads the files and rebuilds the catalogues.
+
+**Therefore world entry (and the `3/100` reload) re-runs the full corpus — the second loading screen is
+a full-length reload, not a near-instant cached pass.** The **one documented exception** is the message
+string table (`msg.xdb`): it is a **state-1-only** synchronous main-thread preload, and because the
+`3/5` / `3/100` paths re-enter state 2 directly (never state 1), it is **not** re-loaded on a reload.
+
+> **Residual (timing only, not load-bearing).** The control-flow question is settled (REPLAY). The only
+> remaining runtime-only observation is the *wall-clock duration* of the second pass — the bytes are
+> physically re-read through the VFS each time, but exact timing/perf is a live measurement, not a spec
+> fact.
+
+## 2.7 The stat-curve family loader (boot step 10) and the 0-HP/MP root cause — (CODE-CONFIRMED)
+
+Boot step 10 (§2.1a) is **not** a single-file load: the stat-curve loader pulls a **four-file family
+in one pass** and then builds a scaling-coefficient grid from them. This subsection records the load
+mechanics and the root cause of the C# `ScrStatCatalogue` returning zero base HP/MP; the detailed
+column layouts are owned by `formats/config_tables.md` (a different lane — cross-reference, not
+re-derived here).
+
+**The four-file family (loaded in one pass):**
+
+| File | On-disk shape | Role |
+|---|---|---|
+| `users.scr` | a **single 496-byte (0x1F0) blob**, no record stride | per-class stat-**ratio** inputs |
+| `userlevel.scr` | **60-byte (0x3C)** records into a grid container | per-level scaling rows |
+| `userpoint.scr` | **32-byte (0x20)** records into a grid container | per-level point rows |
+| `exp.scr` | **20-byte (0x14)** records; key == sequential level index | per-level experience |
+
+From these, the loader builds a **45-float scaling-coefficient grid (a 5 × 3 × 3 grid)** where each
+slot is computed as **`(10 / A) × B`** — `A` is a divisor index drawn from the level-row tier
+counters and `B` is a ratio input from `users.scr`. **When the divisor `A` is 0 the slot is skipped**
+(it stays 0). The loader **asserts the three record counts agree** (or it aborts the whole load).
+
+### Root cause — the C# `ScrStatCatalogue` returning 0 base HP/MP is FAITHFUL, not a parser bug
+
+This is **expected, absent-by-design behaviour**:
+
+- The per-stat **base values — including base HP and base MP — are SERVER-SUPPLIED at runtime** and
+  are **not stored in any client `.scr` file**. `users.scr` / `userlevel.scr` carry only
+  ratios / scaling coefficients, never a raw HP/MP magnitude. **There is no explicit HP or MP
+  column** in these tables.
+- The position → named-stat mapping (which of the four positive-scale float positions is HP vs MP
+  vs the others) is **statically unverifiable**: every sampled record carries identical values
+  across all four positions, so the bytes cannot disambiguate which position is HP/MP.
+- Therefore the C# `ScrStatCatalogue` returning `StatBaseCurve.Empty` (zero base) for HP and MP is
+  **faithful** — it correctly reflects that the boot stat tables contain no raw HP/MP base. The real
+  per-level HP/MP magnitude is produced at runtime from (server-supplied base) × (the scaling-
+  coefficient grid). No parser fix is warranted.
+
+**RUNTIME-ONLY residue.** Resolving non-zero HP/MP needs either a **live debugger witness** on the
+grid consumer (to capture which float position feeds HP vs MP and the exact runtime combine with the
+server-supplied base) and/or the **server base-stat packet**. Both are beyond static analysis. The
+column-layout detail is in `formats/config_tables.md`.
+
+## 2.8 The mob stat catalogue (boot step 18) — HP IS populated at boot — (CODE-CONFIRMED)
+
+Boot step 18 (§2.1a) loads `data/script/mobs.scr` as **488-byte records keyed by a 16-bit mob id**
+(record count = file size / 488). Two load-time facts matter for HP:
+
+- **At load, each record's MAXHP qword (at record offset `+0xF8` / `+248`) is read from the file and
+  adjusted by `+10`.** So the mob catalogue's HP **is populated at boot — it is not zero.** A mob that
+  shows MAXHP 0 is a **lookup miss** (mob id not in the table), not a parse failure.
+- A record also enters a **second boss/elite index** when a flag byte at record offset `+0x144`
+  (`+324`) equals **11**.
+
+This mob path is **separate** from the player stat-curve issue of §2.7: the mob catalogue does store a
+concrete MAXHP value; the player stat tables do not.
+
+> **RUNTIME-ONLY residue (`mobs.scr` reload trigger).** `mobs.scr` has a **second load site outside
+> the boot worker thread** — i.e. it can be reloaded after boot — but the **reload trigger is
+> UNVERIFIED** (likely a dev/reload or map-change path). Confirm against a live session.
 
 ---
 
@@ -911,12 +1116,14 @@ and `.ted` are required for a cell to be minimally renderable.
    the 3×3 default. The configuration value (a radius threshold > 1000) that selects between
    them was observed but its source (a graphics option, a map config entry, or a hard constant)
    was not traced.
-5. **Whether world-entry state-2 reloads all ~50 boot tables. *(capture/debugger-pending)*** State 2
-   is entered both after login and on entering the world. The same handler machinery runs both times.
-   Whether the in-world pass replays the full boot table sequence or short-circuits already-cached
-   entries depends on runtime control flow and **could not be determined statically**. This determines
-   whether the second loading screen is fast or full-length; confirm against a live world-entry
-   transition.
+5. **Whether world-entry state-2 reloads all ~57 boot tables — RESOLVED CYCLE 8 (REPLAY).** State 2
+   is entered both after login and on entering the world; the same handler machinery runs both times.
+   The static control flow now settles it: the in-world pass **replays the full boot table corpus** —
+   the state-2 trigger has no cache gate, the case-2 body is unconditional, the boot worker is an
+   unconditional flat call list, and the individual table loaders are idempotent rebuilders that
+   re-read and re-insert every record (no "already populated" early-return). `msg.xdb` is the only
+   table NOT re-loaded (it is a state-1-only synchronous preload; the reload paths re-enter state 2,
+   never state 1). Only the second pass's wall-clock **timing** remains a runtime-only observation.
 6. **`Map_LoadCellAssets` internal order and partial-failure behaviour.** The exact sequence in
    which `.map`, `.ted`, `.sod`, `.bud`, and texture files are opened within the cell bundle
    loader, and whether a missing `.sod` or `.bud` aborts or degrades the load, was not traced in
@@ -942,6 +1149,16 @@ and `.ted` are required for a cell to be minimally renderable.
     engine constructor and never overwritten — owned by `specs/client_runtime.md` / `specs/game_loop.md`).
     The display-config FRAMERATE value has **no statically-traced consumer that reaches the throttle**;
     whether it is truly inert (so the cap is unconditionally hardcoded 60 FPS) needs a live check.
+12. **`mobs.scr` post-boot reload trigger. *(RUNTIME-ONLY)*** `mobs.scr` has a second load site
+    outside the boot worker thread (§2.8) — the mob catalogue can be reloaded after boot — but what
+    triggers that reload (likely a dev/reload or map-change path) is **UNVERIFIED**. Confirm against a
+    live session.
+13. **Stat-curve position → named-stat mapping and the runtime HP/MP combine. *(RUNTIME-ONLY)*** Which
+    of the four positive-scale float positions in the stat-curve grid (§2.7) feeds HP vs MP, and the
+    exact runtime combine of (server-supplied base) × (scaling coefficient), are not statically
+    recoverable (every sampled record carries identical values across the four positions). Resolving
+    non-zero base HP/MP needs a live debugger witness on the grid consumer and/or the server
+    base-stat packet. The C# `ScrStatCatalogue` zero-base result is faithful in the meantime.
 
 ---
 
@@ -956,6 +1173,8 @@ and `.ted` are required for a cell to be minimally renderable.
 - **Sound table format:** `formats/sound_tables.md`
 - **Spawn record format:** `formats/npc_spawns.md`
 - **Misc data (`.scr` record tables, `msg.xdb`):** `formats/misc_data.md`
+- **Stat-curve column layouts (`users.scr` / `userlevel.scr` / `userpoint.scr` / `exp.scr`):**
+  `formats/config_tables.md` (the position→stat mapping open questions are owned there)
 - **Scene lifecycle (state-2 context):** `specs/client_runtime.md §7`
 - **Environment assembly at area entry:** `specs/environment.md`
 - **Skinning pipeline (uses skin/bind/motion caches):** `specs/skinning.md`

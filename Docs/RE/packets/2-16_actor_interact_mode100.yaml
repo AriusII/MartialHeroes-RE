@@ -1,0 +1,52 @@
+# spec: Docs/RE/packets/2-16_actor_interact_mode100.yaml
+# Role: C2S actor/NPC interaction request (mode-100 family) — small-byte header + u32 actor/arg.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgActorInteractMode100
+opcode: 0x20010           # major 2 (GameAction), minor 16 -> (2 << 16) | 16
+direction: C2S
+size: 12                  # fixed 12-byte body
+spec: packets/2-16_actor_interact_mode100.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Actor/NPC interaction request carrying an interaction mode plus several sub-byte parameters and a u32 actor id / numeric argument. One caller hard-codes mode=100 (the NPC-open mode used elsewhere); a second caller carries a six-parameter action.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 12.
+fields:
+  - { name: Mode,       type: u8 }          # 0x00  interaction mode (e.g. 100 in the NPC-open caller) [capture/debugger-pending]
+  - { name: B1,         type: u8 }          # 0x01  sub-parameter [capture/debugger-pending]
+  - { name: B2,         type: u8 }          # 0x02  sub-parameter [capture/debugger-pending]
+  - { name: B3,         type: u8 }          # 0x03  sub-parameter [capture/debugger-pending]
+  - { name: B4,         type: u8 }          # 0x04  sub-parameter [capture/debugger-pending]
+  - { name: Pad0,       type: "u8[3]" }     # 0x05  alignment gap before the u32 (unwritten)
+  - { name: ActorOrArg, type: u32 }         # 0x08  actor id or numeric argument [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 12-byte blit of a caller-staged scratch);
+  the field VALUES are static inferences (capture-pending).
+
+    0x00 (1B)  Mode       : interaction mode. One caller stamps the constant 100 (the same NPC-open
+                            mode used by other interaction paths); the other caller passes a
+                            6-parameter action mode. [capture/debugger-pending]
+    0x01..0x04 (4x u8)    : sub-parameter bytes (B1..B4). [capture/debugger-pending]
+    0x05 (3B)  Pad0       : 3-byte alignment gap before the u32; not written by the packer
+                            (zero/stack remnant).
+    0x08 (4B)  ActorOrArg : the target actor id or a numeric argument. [capture/debugger-pending]
+
+  TRIGGER: two NPC/actor context-action paths feed this builder — a 3-arg wrapper that stamps
+  mode=100 plus three bytes, and a 6-arg interaction path that validates actor/party-id conflicts
+  (emitting a same-party-block notice) and gates on HUD/list state before sending.
+
+  [UNVERIFIED] NAME COLLISION: this opcode and 2/139 were both staged under the working name
+  "CmsgActorInteract" in the dirty-room notes. They are DISTINCT opcodes (2/16 = 12-byte mode-100
+  family; 2/139 = 28-byte actor/NPC interaction). This file is keyed by major-minor (2/16) and uses
+  the disambiguated name CmsgActorInteractMode100; the collision is left for the names lane to settle.
+
+  UNKNOWNS to resolve with a capture:
+    - the mode taxonomy (what values besides 100 occur and what each means);
+    - whether ActorOrArg is always an actor id;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application actor/NPC interaction (mode-100 family).

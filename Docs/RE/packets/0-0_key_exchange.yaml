@@ -1,31 +1,60 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads a 54-byte key blob, then two trailing u32
+#                 scalars via the fixed-width payload cursor, in that order; 54 + 4 + 4 = 62)
+#   blob internal layout: confirmed (the key-blob importer consumes the 54 bytes as a self-describing
+#                 [2B hdrA][2B hdrB][u32 modulus-len][modulus][u32 exp-len][exponent] record and asserts
+#                 it consumed exactly 54 bytes)
+#   ida_reverified: 2026-06-20   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false  # the two trailing scalars' VALUE meanings are capture/debugger-pending
 
 name: SmsgKeyExchange
 opcode: 0x0               # major 0 (KeyExchange), minor 0 -> (0 << 16) | 0
 direction: S2C
-size: var                # ~62 bytes total observed by a prior analyst; treat as variable until captured
+size: 62                  # 54-byte RSA key blob + two trailing u32 scalars (62 bytes total)
 spec: packets/0-0_key_exchange.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
-summary: Handshake; the first frame of the secure session. Carries the server's asymmetric key material.
+summary: Handshake; the first frame of the secure session. Carries the server's RSA public key (a 54-byte length-prefixed modulus/exponent record) plus two trailing server scalars. Its arrival synchronously drives the C2S 1/4 credential reply.
 
-# The handler consumes roughly 54 bytes of key blob plus two trailing u32s.
+# The handler reads the three fields in this fixed order via the fixed-width payload cursor:
+# the 54-byte key blob, then scalarA, then scalarB. Widths sum to size: 62 (54 + 4 + 4).
 fields:
-  - { name: ServerKeyBlob, type: "bytes[54]" }  # 0x00  server public-key blob (root of the per-session cipher)
-  - { name: ServerValue2,  type: u32 }        # 0x36  server-supplied value (purpose unconfirmed)
-  - { name: ServerValue3,  type: u32 }        # 0x3a  server-supplied value (purpose unconfirmed)
+  - { name: RsaKeyBlob,    type: "bytes[54]" }  # 0x00  RSA public-key blob (length-prefixed modulus/exponent; internal layout in notes)
+  - { name: ServerScalarA, type: u32 }          # 0x36  first trailing server scalar (value meaning capture/debugger-pending)
+  - { name: ServerScalarB, type: u32 }          # 0x3a  second trailing server scalar (value meaning capture/debugger-pending)
 
 notes: |
-  Static inference only; no capture available. A prior analyst note (capture-unverified here)
-  observed 0/0 as a 62-byte frame that is NOT XOR-obfuscated. The handler parses a key blob then
-  two trailing 4-byte values; on receipt the client immediately sends a C2S 1/4 auth reply and
-  disables the compressed keepalive.
-    0x00..0x35 (54B) server public-key / "recv key" blob.
-    0x36 (4B) server value 2.
-    0x3a (4B) server value 3.
-  This is the root of the per-session cipher key schedule -- the actual crypto belongs to the
-  network-crypto-engineer (hand off via the crypto notes).
-  UNKNOWN: exact blob length (54 vs 62 total) and the meaning of value2/value3. Capture required
-  before treating any byte as fixed.
+  Static inference only; no capture available. The handler reads the three fields IN ORDER through
+  the fixed-width payload cursor -- the 54-byte blob, then scalarA, then scalarB, each with its own
+  read -- then stamps a local receive timestamp. On a clean parse the dispatcher immediately
+  dispatches the C2S 1/4 credential reply (packets/login.yaml) and sets the auth-in-flight latch
+  (which suppresses the keepalive frame while the auth exchange is in flight). The inbound 0/0 frame
+  carries NO inverse cipher -- it is read in the clear after the inbound LZ4-decompress framing.
+
+    0x00..0x35 (54B) RsaKeyBlob    : the RSA public key (see internal layout below).
+    0x36 (4B)        ServerScalarA : first trailing server scalar; value meaning capture/debugger-pending.
+    0x3a (4B)        ServerScalarB : second trailing server scalar; value meaning capture/debugger-pending.
+
+  RSA KEY BLOB INTERNAL LAYOUT (54 bytes, CONFIRMED): the key-blob importer consumes the 54 bytes as
+  a self-describing length-prefixed modulus/exponent record and asserts it consumed exactly 54 bytes:
+
+    sub-off | width        | role
+    --------|--------------|-------------------------------------------------------
+    +0      | 2            | per-value header word A (role capture/debugger-pending)
+    +2      | 2            | per-value header word B (role capture/debugger-pending)
+    +4      | 4 (u32 LE)   | modulus digit-length
+    +8      | (mod length) | RSA modulus, big-endian digits
+    +...    | 4 (u32 LE)   | exponent digit-length
+    +...    | (exp length) | RSA public exponent, big-endian digits
+
+  So the blob is NOT opaque -- it IS the RSA public key, a [modulus][exponent] pair the client imports
+  into its secure-context bignum slots. The imported modulus/exponent are used to RSA-cipher the
+  credential in the 1/4 reply. The two trailing scalars are read separately and are NOT part of the
+  imported key; their consumer/meaning is capture/debugger-pending.
+
+  CRYPTO HAND-OFF: the modulus/exponent parse and the per-session cipher key schedule are owned by
+  specs/crypto.md (the network-crypto layer). This spec owns only the framing/field layout.
+
+  UNKNOWNS (capture/debugger required): the two scalars' meanings; the per-value header word roles.

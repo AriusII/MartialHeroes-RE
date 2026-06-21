@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 24-byte body, and the applier's
+#                 per-field decode -- Op@0x08 / SlotIndex@0x09 / ByteA@0x0A / ByteB@0x0B / Value16@0x0C
+#                 / Value32A@0x10 / Value32B@0x14 -- are control-flow-confirmed; the leading 8 bytes are
+#                 a header region this applier does not field-read; every wire-byte VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: REFINED. The handler forwards the 24-byte block verbatim; a deeper pass decoded the
+#              applier (the deferred sub-handler) -- the per-entry record is the 7 fields below, not an
+#              undecoded blob. Field labels aligned to the applier's reads.
+
+name: SmsgTrackedPanelSlotUpdate
+opcode: 0x50039           # major 5 (Push), minor 57 -> (5 << 16) | 57
+direction: S2C
+size: 24                  # fixed 24-byte body (0x18)
+spec: packets/5-57_tracked_panel_slot_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server push that updates or clears a single slot in a tracked HUD panel. A fixed 24-byte body holding
+  an 8-byte header region the applier does not field-read, then an op byte, a slot index, two property
+  bytes, a signed 16-bit value, and two 32-bit values.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 24.
+fields:
+  - { name: Header,    type: "bytes[8]" }   # 0x00  header region (likely entity keys consumed upstream); this applier does not field-read it
+  - { name: Op,        type: u8 }           # 0x08  1 = set/update slot, 0 = clear slot
+  - { name: SlotIndex, type: u8 }           # 0x09  target slot index in the tracked panel
+  - { name: ByteA,     type: u8 }           # 0x0a  per-slot property/category byte A
+  - { name: ByteB,     type: u8 }           # 0x0b  per-slot property/category byte B
+  - { name: Value16,   type: i16 }          # 0x0c  signed 16-bit value (stored widened to a dword)
+  - { name: Pad0,      type: "bytes[2]" }   # 0x0e  alignment padding between the i16 and the next dword
+  - { name: Value32A,  type: i32 }          # 0x10  signed 32-bit value A
+  - { name: Value32B,  type: u32 }          # 0x14  32-bit value B
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 24-byte body and the applier's per-field decode. CAPTURE-UNVERIFIED
+  for every wire-byte VALUE meaning. The dispatch handler forwards the 24-byte block verbatim to an
+  applier; the applier is what decodes it.
+
+    0x00 (8B) Header   : a header region (likely entity keys consumed upstream). The applier begins
+                         reading at +0x08, so these 8 bytes are not field-read here. Reserved opaque.
+    0x08 (1B) Op       : 1 => set/update the slot; 0 => clear/remove the slot. On clear, only SlotIndex
+                         (+0x09) is read to clear that slot.
+    0x09 (1B) SlotIndex: the panel slot index. Used as a multiplier into the tracked-panel table.
+    0x0a (1B) ByteA / 0x0b (1B) ByteB : per-slot property/category bytes.
+    0x0c (2B) Value16  : read as a signed 16-bit, stored widened to a dword.
+    0x10 (4B) Value32A : a signed 32-bit value (stored into a parallel slot region).
+    0x14 (4B) Value32B : a 32-bit value B.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): the applier scatters the decoded fields into a
+  runtime tracked-panel table (a 48-byte slot stride, plus a parallel region keyed to the slot index).
+  Those runtime slot offsets are NOT wire fields and are omitted from the field table. Only the 24-byte
+  wire body above is promotable.
+
+  UNKNOWNS to resolve with a capture: the meaning of Op, ByteA/ByteB, Value16 and the two 32-bit values
+  (which is a count vs a timer vs an id), and what the 8-byte header carries.
+
+  Frame = 8-byte frame header + 24-byte body = 32 bytes on the wire.

@@ -48,49 +48,22 @@ def _cp949_msg(ev):
 
 
 # ------------------------------------------------------------------------ zero-alloc
-_ALWAYS = [
-    ("LINQ .Select/.Where/.OrderBy/.GroupBy", re.compile(r"\.(?:Select|Where|OrderBy|GroupBy|Aggregate|ToDictionary)\(")),
-    (".ToArray()/.ToList()", re.compile(r"\.To(?:Array|List)\(\)")),
-    ("string.Split (allocates)", re.compile(r"\.Split\(")),
-]
-_LINQ_USING = re.compile(r"using\s+System\.Linq\b")
-_LOOP_KW = re.compile(r"\b(?:for|foreach|while)\s*\(")
-_NEW_ARRAY = re.compile(r"\bnew\s+\w[\w<>,. ]*\[")          # new byte[len], new Foo[n]
-_NEW_LIST = re.compile(r"\bnew\s+(?:List|Dictionary|HashSet|StringBuilder)\s*<")
-
+# The detector lives in _hooklib.alloc_hits (ONE definition, shared). This hook OWNS the
+# alloc nudge — cs_post_edit no longer emits it, so a hot-path edit gets one warning, not two.
 
 def _alloc_msg(ev):
     path = h.file_path(ev)
+    if not (path or "").lower().endswith(".cs"):
+        return None
     layer, _proj = h.layer_of(path)
-    if layer not in (2, 3) or not (path or "").lower().endswith(".cs"):
-        return None
-
-    text = h.strip_comments_strings(h.added_text(ev))
-    if not text.strip():
-        return None
-
-    has_linq_using = bool(_LINQ_USING.search(text))
-    hits = []
-    for label, rx in _ALWAYS:
-        # Only count LINQ operators when System.Linq is actually imported in the hunk, to avoid
-        # flagging a method that merely happens to be named Select/Where on a non-LINQ type.
-        if label.startswith("LINQ") and not has_linq_using:
-            continue
-        if rx.search(text):
-            hits.append(label)
-
-    in_loop = bool(_LOOP_KW.search(text))
-    if in_loop and (_NEW_ARRAY.search(text) or _NEW_LIST.search(text)):
-        hits.append("array/collection allocation inside a loop")
-
+    hits = h.alloc_hits(h.strip_comments_strings(h.added_text(ev)), layer)
     if not hits:
         return None
-
     return (
         "ℹ zero-alloc nudge (layer 0{}, hot path) — {}. Prefer Span<byte>/ReadOnlySpan<byte>, "
         "`stackalloc` hoisted OUT of the loop (or a pooled/reused buffer), "
         "`SequenceReader`/`BinaryPrimitives` for parsing, and no LINQ on parse/decrypt paths. "
-        "Advisory only.".format(layer, "; ".join(dict.fromkeys(hits)))
+        "Advisory only.".format(layer, "; ".join(hits))
     )
 
 
@@ -118,6 +91,42 @@ def _spec_citation_msg(ev):
         "committed record, not to memory. Gentle nudge only — nothing was blocked.".format(
             ", ".join(hits[:8])
         )
+    )
+
+
+# ------------------------------------------------------- broken spec citation (O5)
+# A `// spec: Docs/RE/...` citation that does not resolve on disk (renamed/typo'd path) —
+# a doc↔code drift signal. Reliable + low-FP: it only fires on a Docs/RE-relative citation
+# whose target file is genuinely absent.
+_SPEC_REF = re.compile(r"//\s*spec\s*:\s*([^\s,;`\"']+)", re.I)
+
+
+def _broken_spec_citation_msg(ev):
+    path = h.file_path(ev)
+    if not h.is_layer_cs(path):
+        return None
+    raw = h.added_text(ev)
+    if "spec" not in raw.lower():
+        return None
+    pdir = h.project_dir(ev)
+    missing = []
+    seen = set()
+    for m in _SPEC_REF.finditer(raw):
+        ref = m.group(1).strip()
+        low = ref.replace("\\", "/").lower()
+        if "docs/re/" not in low:          # only check repo-relative Docs/RE citations
+            continue
+        if ref in seen:
+            continue
+        seen.add(ref)
+        if not os.path.isfile(os.path.join(pdir, ref.replace("\\", "/"))):
+            missing.append(ref)
+    if not missing:
+        return None
+    return (
+        "ℹ clean-room: `// spec:` citation(s) that do not resolve on disk ({}). Point each at "
+        "the real committed spec under Docs/RE/ so the constant traces to the derived truth "
+        "(the spec may have been renamed/moved). Advisory only.".format(", ".join(missing[:6]))
     )
 
 
@@ -172,7 +181,7 @@ def main():
         return
 
     msgs = []
-    for fn in (_cp949_msg, _alloc_msg, _spec_citation_msg, _test_after_core_msg):
+    for fn in (_cp949_msg, _alloc_msg, _spec_citation_msg, _broken_spec_citation_msg, _test_after_core_msg):
         m = fn(ev)
         if m:
             msgs.append(m)

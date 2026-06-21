@@ -47,12 +47,12 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game Guild window (GuildAPanel — 50-member roster, 10 visible rows paged).
-///
-/// <para>PASSIVE: renders member rows from Application events; emits guild op intents as
-/// use-case calls (stubbed pending world-campaign). Inbound S2C 4/65 (1812B) stubbed.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED.
+///     In-game Guild window (GuildAPanel — 50-member roster, 10 visible rows paged).
+///     <para>
+///         PASSIVE: renders member rows from Application events; emits guild op intents as
+///         use-case calls (stubbed pending world-campaign). Inbound S2C 4/65 (1812B) stubbed.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudGuildWindow : Control
 {
@@ -106,28 +106,27 @@ public sealed partial class HudGuildWindow : Control
     // spec: ui_system.md §8.15 — "resync request action 42 (30s throttle)"
     private const double ResyncThrottleSecs = 30.0;
 
-    // -------------------------------------------------------------------------
-    // View state
-    // -------------------------------------------------------------------------
-
-    private bool _open;
-    private int _currentPage; // 0-based page (10 members per page)
-    private double _lastResyncTime = -ResyncThrottleSecs;
-
     private readonly Label[] _col1Labels = new Label[VisibleRows]; // name
     private readonly Label[] _col2Labels = new Label[VisibleRows]; // class/title
     private readonly Label[] _col3Labels = new Label[VisibleRows]; // level
     private readonly Label[] _col4Labels = new Label[VisibleRows]; // status/loc
     private readonly Button[] _rowActBtns = new Button[VisibleRows];
+    private int _currentPage; // 0-based page (10 members per page)
+    private double _lastResyncTime = -ResyncThrottleSecs;
+
+    // -------------------------------------------------------------------------
+    // View state
+    // -------------------------------------------------------------------------
+
+    private bool _open;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the GuildAPanel (50-cap, 10 visible rows).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED.
+    ///     Geometry pass: builds the GuildAPanel (50-cap, 10 visible rows).
+    ///     spec: Docs/RE/specs/ui_system.md §8.15 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -164,7 +163,7 @@ public sealed partial class HudGuildWindow : Control
             Text = text.GetCaption(MsgGuildLevel, $"[msg {MsgGuildLevel}]"),
             Position = new Vector2(11f, 30f),
             Size = new Vector2(200f, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(guildLevelLbl);
 
@@ -176,7 +175,7 @@ public sealed partial class HudGuildWindow : Control
             Text = "▲",
             Position = new Vector2(0f, 26f),
             Size = new Vector2(295f, 25f), // adjusted for 318-wide port
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageUpBtn.Pressed += () => ChangePage(-1); // action 4600
         AddChild(pageUpBtn);
@@ -187,7 +186,7 @@ public sealed partial class HudGuildWindow : Control
             Text = "▼",
             Position = new Vector2(0f, 267f),
             Size = new Vector2(295f, 25f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageDownBtn.Pressed += () => ChangePage(+1); // action 4601
         AddChild(pageDownBtn);
@@ -208,7 +207,7 @@ public sealed partial class HudGuildWindow : Control
             Text = "✕",
             Position = new Vector2(295f, 10f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => Toggle(false); // action 40
         AddChild(closeBtn);
@@ -219,7 +218,7 @@ public sealed partial class HudGuildWindow : Control
             Text = "↺",
             Position = new Vector2(270f, 10f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         refreshBtn.Pressed += OnRefresh; // action 41
         AddChild(refreshBtn);
@@ -230,7 +229,7 @@ public sealed partial class HudGuildWindow : Control
             Text = "⟳",
             Position = new Vector2(245f, 10f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         resyncBtn.Pressed += OnResync; // action 42
         AddChild(resyncBtn);
@@ -246,9 +245,9 @@ public sealed partial class HudGuildWindow : Control
     private void BuildMemberRows(HudTextLibrary text)
     {
         // spec: ui_system.md §8.15 — "10 visible rows; per row: col1(name,11), col2(class,80), col3(level,203), col4(status,252)"
-        for (int r = 0; r < VisibleRows; r++)
+        for (var r = 0; r < VisibleRows; r++)
         {
-            float rowY = RowBaseY + r * RowStrideY; // spec: y = 164 + 23·r
+            var rowY = RowBaseY + r * RowStrideY; // spec: y = 164 + 23·r
 
             // Col1 — name (clickable, action 0..9)
             var col1 = new Label
@@ -257,7 +256,7 @@ public sealed partial class HudGuildWindow : Control
                 Text = "",
                 Position = new Vector2(Col1X, rowY),
                 Size = new Vector2(ColW, RowH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             AddChild(col1);
             _col1Labels[r] = col1;
@@ -269,7 +268,7 @@ public sealed partial class HudGuildWindow : Control
                 Text = "",
                 Position = new Vector2(Col2X, rowY),
                 Size = new Vector2(115f, RowH), // col2→col3 gap
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(col2);
             _col2Labels[r] = col2;
@@ -281,7 +280,7 @@ public sealed partial class HudGuildWindow : Control
                 Text = "",
                 Position = new Vector2(Col3X, rowY),
                 Size = new Vector2(41f, RowH), // col3→col4 gap
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(col3);
             _col3Labels[r] = col3;
@@ -293,23 +292,23 @@ public sealed partial class HudGuildWindow : Control
                 Text = "",
                 Position = new Vector2(Col4X, rowY),
                 Size = new Vector2(56f, RowH), // col4 width
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(col4);
             _col4Labels[r] = col4;
 
             // Per-row action button (kick/manage) — dst(202, 162+23r, 43, 14), action 4613+r
             // spec: ui_system.md §8.15 CODE-CONFIRMED
-            float rowActY = 162f + r * RowStrideY; // spec: "202, 162+23r"
+            var rowActY = 162f + r * RowStrideY; // spec: "202, 162+23r"
             var rowActBtn = new Button
             {
                 Name = $"RowAction{r}",
                 Text = "⚙",
                 Position = new Vector2(RowActX, rowActY),
                 Size = new Vector2(RowActW, RowH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedR = r;
+            var capturedR = r;
             rowActBtn.Pressed += () => OnRowAction(capturedR); // action 4613+r
             AddChild(rowActBtn);
             _rowActBtns[r] = rowActBtn;
@@ -320,18 +319,18 @@ public sealed partial class HudGuildWindow : Control
     {
         // spec: ui_system.md §8.15 — "icon buttons 4501..4508 (invite/kick/promote/demote/leave/disband/notice/4508=guild-cap)"
         string[] labels = { "Invite", "Kick", "Promote", "Demote", "Leave", "Disband", "Notice", "Cap" };
-        for (int i = 0; i < labels.Length; i++)
+        for (var i = 0; i < labels.Length; i++)
         {
-            int actionId = 4501 + i;
+            var actionId = 4501 + i;
             var btn = new Button
             {
                 Name = $"GuildAction{actionId}",
                 Text = labels[i],
                 Position = new Vector2(10f + i * 38f, 690f),
                 Size = new Vector2(36f, 22f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int captured = actionId;
+            var captured = actionId;
             btn.Pressed += () => OnGuildAction(captured);
             AddChild(btn);
         }
@@ -344,8 +343,8 @@ public sealed partial class HudGuildWindow : Control
     private void ChangePage(int direction)
     {
         // spec: ui_system.md §8.15 — "action 4600 = −10 rows, 4601 = +10 rows"
-        int maxPage = (MemberCap - 1) / VisibleRows; // 0..4 for 50 members
-        _currentPage = System.Math.Clamp(_currentPage + direction, 0, maxPage);
+        var maxPage = (MemberCap - 1) / VisibleRows; // 0..4 for 50 members
+        _currentPage = Math.Clamp(_currentPage + direction, 0, maxPage);
         GD.Print(
             $"[HudGuildWindow] Page → {_currentPage} (showing members {_currentPage * VisibleRows}..{_currentPage * VisibleRows + VisibleRows - 1}). " +
             "spec: Docs/RE/specs/ui_system.md §8.15.");
@@ -355,7 +354,7 @@ public sealed partial class HudGuildWindow : Control
     private void OnRowAction(int rowIndex)
     {
         // spec: ui_system.md §8.15 — action 4613+r = per-row kick/manage
-        int globalMember = _currentPage * VisibleRows + rowIndex;
+        var globalMember = _currentPage * VisibleRows + rowIndex;
         GD.Print($"[HudGuildWindow] row action for member index {globalMember} (action {4613 + rowIndex}). " +
                  "TODO(world-campaign): C2S 2/30 CmsgGuildOp. " +
                  "spec: Docs/RE/specs/ui_system.md §8.15.");
@@ -383,7 +382,7 @@ public sealed partial class HudGuildWindow : Control
     private void OnResync()
     {
         // spec: ui_system.md §8.15 — "action 42 = resync request (30s throttle)"
-        double now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        var now = Time.GetTicksMsec() / 1000.0;
         if (now - _lastResyncTime < ResyncThrottleSecs)
         {
             GD.Print("[HudGuildWindow] Resync throttled (30s cooldown). " +
@@ -402,10 +401,10 @@ public sealed partial class HudGuildWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows or hides the guild window.
-    /// No dedicated hotkey (CODE-CONFIRMED). Opened by guild NPC/context action.
-    /// spec: Docs/RE/specs/ui_system.md §8.15 — "no dedicated guild hotkey CODE-CONFIRMED; context-driven open".
-    /// TODO(spec): no hotkey — open via guild context action.
+    ///     Shows or hides the guild window.
+    ///     No dedicated hotkey (CODE-CONFIRMED). Opened by guild NPC/context action.
+    ///     spec: Docs/RE/specs/ui_system.md §8.15 — "no dedicated guild hotkey CODE-CONFIRMED; context-driven open".
+    ///     TODO(spec): no hotkey — open via guild context action.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

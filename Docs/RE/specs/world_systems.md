@@ -4,9 +4,17 @@
 verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
                        against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
                        wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
-ida_reverified:        2026-06-16
+ida_reverified:        2026-06-20
 ida_anchor:            263bd994
 evidence:              [static-ida]
+this_pass:             IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the movement / targeting / pathfinding
+                       model (Ch. 18), the death / respawn flow (Ch. 19, with a concise cross-ref to
+                       world_exit.md), and the dark / absent-subsystems section (Ch. 20: mounts, auction,
+                       instanced dungeons, housing, arena/ladder all confirmed-absent by static exhaustion).
+                       No prior claim refuted; the Ch. 16 zone-type enum {0,1,2} is reconfirmed by the
+                       movement/combat-gate census. Offsets / opcodes / payload sizes CONFIRMED via static
+                       IDA; on-wire VALUE meanings and exact thresholds beyond those listed stay
+                       capture/debugger-pending.
 conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the recovered handler NAME is contested —
                            the IDB emphasises an actor-pair-relation role, this index emphasises absolute vitals
                            (HP/MP/stamina). Routing is settled; the canonical NAME + the body's full semantics are
@@ -14,6 +22,10 @@ conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the rec
                        (2) F1 attack-in-progress flag: on build 263bd994 the clear/re-arm is observed in
                            SmsgLocalPlayerStateSync (4/13), NOT a 4/2 handler. Which push arms-vs-releases the swing
                            window is capture/debugger-pending (Chapter 1).
+CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): §17 "indoor BGM override" RELABELLED = trade/exchange-busy
+                       override (per-local-player actor flag set by the trade state-toggle handler forces a fixed
+                       BGM over the .mud→.bgm table and suppresses .bge); no map/region "indoor" attribute is on
+                       this path.
 -->
 
 > Clean-room neutral spec — a navigable **overview / index** of the in-world ("World scene")
@@ -128,8 +140,8 @@ swing-ready timestamp gated by the per-tick resync pulse / combat-phase update).
 | `2/13` | C2S | `CmsgMoveRequest` — emitted by the click-to-attack approach loop when the target is out of range. |
 | `5/52` | S2C | `SmsgActorSkillAction` — swing/hit animation header + per-target hit records (≤40). |
 | `5/53` | S2C | `SmsgActorVitalsAndPairState` — **absolute** current HP/MP/stamina (the "damage lands here" observable). |
-| `4/100` | S2C | `SmsgCombatAttackUpdate` — combat-phase / attack-swing timing (server pacing). |
-| `4/99` | S2C | `SmsgCombatResultMessage` — combat/training session result (reward/EXP strings). |
+| `4/100` | S2C | `SmsgCubeGambleReelUpdate` — Cube-Gamble minigame reel/state update (NOT combat-attack timing). |
+| `4/99` | S2C | `SmsgCubeGambleResultMessage` — Cube-Gamble minigame result (reward strings; NOT a combat/training result). |
 | `4/2` | S2C | per-tick server game-tick/resync pulse (server pacing). |
 
 > **Attack-in-progress flag (capture/debugger-pending).** The local "swing in progress" flag's
@@ -568,8 +580,8 @@ tail). **Routing and sizes are CODE-CONFIRMED; every body field is CAPTURE-UNVER
 | `4/35`/`4/36`/`4/37`/`4/76` | S2C | 56/56/56/var | Party invite-state / remove / leader / accept | Social/party (5) |
 | `4/50` | S2C | 32 | `SmsgUpgradeItemResult` | Inventory/upgrade (6) |
 | `4/62`/`4/65` | S2C | 80/1812 | Guild invite-join / full sync | Social/guild (5) |
-| `4/99` | S2C | var | `SmsgCombatResultMessage` | Combat (1) |
-| `4/100`| S2C | var | `SmsgCombatAttackUpdate` | Combat cadence (1) |
+| `4/99` | S2C | var | `SmsgCubeGambleResultMessage` | Cube-Gamble minigame (1) |
+| `4/100`| S2C | var | `SmsgCubeGambleReelUpdate` | Cube-Gamble minigame (1) |
 | `4/102`| S2C | 476 | `SmsgSkillWindowStateUpdate` (buff/state bar) | Buffs (9) |
 | `4/140`| S2C | var | `SmsgColoredSystemText` | Chat (2) |
 | `4/149`/`4/153` | S2C | var | Item-panel slot chunk / refresh | Inventory (6) |
@@ -619,7 +631,11 @@ tail). **Routing and sizes are CODE-CONFIRMED; every body field is CAPTURE-UNVER
 | `specs/minimap.md` | HUD radar projection, tile streaming, blip table; full-screen world map. |
 | `specs/ui_system.md` | The `Diamond::GU*` widget toolkit hosting every World-scene window. |
 | `world_systems.md` Ch. 16 | The 256-unit region grid, the **zone-type enum (safe/PvP/closed), CONFIRMED-COMPLETE at 3 values**, the `regiontable` record (zoneName + zoneType + tail), the PvP/movement gates, the **server-authoritative quest/event verdict**, the gather-anchor table, and `.mud` as a per-cell audio-zone grid. |
-| `world_systems.md` Ch. 17 | **Per-area background-music selection** — the five per-map sound tables, the `.mud +2` music-zone byte driver, the indoor override, and the cross-fade play path. |
+| `world_systems.md` Ch. 17 | **Per-area background-music selection** — the five per-map sound tables, the `.mud +2` music-zone byte driver, the trade/exchange-busy BGM override (§17.2 — formerly mislabelled "indoor override"), and the cross-fade play path. |
+| `world_systems.md` Ch. 18 | **Movement, targeting & pathfinding** — the `2/13` movement-intent emitter (16-byte body, event-driven), the two-click targeting model (`2/12` engage + `2/79` confirm, locked target stored on the actor), the no-navmesh straight-line + reactive-`.sod`/`.ted` walk model, and the server reconciliation push `5/13` with its catch-up / teleport distance bands. |
+| `world_systems.md` Ch. 19 | **Death & respawn (concise)** — the death actor-state fields, the `5/10` death push + cause codes, the level-gated local death modal, the region-gated respawn countdown timer, and the `2/3` respawn-choice request with its `4/28` / `5/28` responses. World-exit detail (death does NOT leave the world) is owned by `world_exit.md`. |
+| `world_systems.md` Ch. 20 | **Dark / absent subsystems** — mounts, auction house, instanced dungeons, housing, and arena/ladder, each recorded as **confirmed-absent** by static exhaustion (so engineers never build a phantom system). |
+| `specs/world_exit.md` | The world-exit / logout flow; also owns the death-vs-exit distinction (death does not leave the world; the dead combat sub-mode). Ch. 19 here records the death actor-field facts and cross-refs there. |
 | `formats/region_grid.md` | The `region<area>.bin` grid + the `regiontable<area>.bin` record (zoneName/zoneType/tail) byte layouts that Ch. 16 reads. |
 | `formats/config_tables.md` | `.scr` / `.do` / `.csv` catalogues (items, skills, NPCs, stat curves, quests, `msg.xdb`). |
 | `formats/misc_data.md` | `.xdb` / `.mi` / `.tol` / `.ion` / `.sc` small data files (incl. `actor_size.xdb`). |
@@ -887,13 +903,29 @@ Each frame the sound manager picks the active music from the player's **current 
 3. Read the **music-zone id = `.mud` cell byte +2**.
 4. On a **music-zone change** (the +2 id under the player differs from the current one), or when a
    **forced periodic re-pick** fires (~600 s), select and **cross-fade** to the new track:
-   - **Indoor override:** when the player is in the indoor state, music is forced to a **fixed indoor
-     BGM id** (a constant, not a table lookup). [CONFIRMED]
-   - **Outdoor:** the music-zone id indexes the per-map `.bgm` table (entry = `12 dwords × zone_id`,
-     i.e. the first dword of the 48-byte `.bgm` record is the track id), and that track is played via
-     the cross-fade path. [CONFIRMED]
+   - **Trade/exchange-busy override (formerly mislabelled "indoor override"):** when the local player
+     is in an **active player-to-player trade (exchange in progress)**, music is forced to a **fixed
+     constant BGM id** (a constant, not a table lookup) — a trade-ambience / exchange-mode track — and
+     the looped-ambient (`.bge`) slots are **suppressed** for the duration; the event/3D-point (`.eff`)
+     slots are **unaffected**. The gate is a **per-local-player actor trade/exchange-busy flag**, set
+     while a trade is open and cleared when it ends; it is written by the trade state-toggle handler
+     (and propagated to the trade partner), **not** by any map cell, map-header, area-id, or region
+     attribute. When the trade ends, the normal per-map table music + ambience resume. [CONFIRMED for
+     the mechanism — fixed constant over the table, `.bge` suppressed, `.eff` untouched; HIGH for the
+     trade-busy semantic label]
+   - **Normal (not trading):** the music-zone id indexes the per-map `.bgm` table (entry = `12 dwords ×
+     zone_id`, i.e. the first dword of the 48-byte `.bgm` record is the track id), and that track is
+     played via the cross-fade path. [CONFIRMED]
 5. The looped-ambient (`.bge`, bytes +3/+4) and event/3D SFX (`.eff`, bytes +5/+6/+7) zones are
-   handled in the same per-cell-change loop.
+   handled in the same per-cell-change loop. (During the trade-busy override above, the `.bge` slot
+   start is skipped; the `.eff` slots still run.)
+
+> **OPEN-RISK (semantic label only — the wiring is pinned):** a writer-scan found only the trade /
+> interaction-state handlers setting this actor flag; **no distinct map/area/region "indoor" attribute
+> was found feeding this override branch**. The absence of a separate map-indoor flag is carried at
+> MEDIUM confidence (negative result); the gate wiring (this per-player actor flag forces the constant
+> id and suppresses `.bge`) is HIGH/CONFIRMED. If a true map-indoor override exists elsewhere, it is
+> not on this code path.
 
 - **Movement throttle:** the driver early-outs unless the player has moved at least a small threshold
   since the last evaluation (or the ~600 s timer fired) — music is re-evaluated on movement, not every
@@ -920,6 +952,11 @@ To keep the regions story (Ch. 16) and the audio story separate:
 - A "music zone" in the loose sense (a contiguous run of cells sharing the same `.mud +2` id) is what
   changes the track — but the mechanism is the per-cell `.mud` byte and the per-map `.bgm` table, not
   the region grid. A single map can therefore contain many music zones.
+- **Nor does any map/area/region "indoor" attribute drive an override.** The only thing that bypasses
+  the per-cell `.mud +2` → `.bgm` table is the per-local-player **trade/exchange-busy** actor flag of
+  §17.2 — there is no map-indoor attribute on this path. This reinforces the negative result above:
+  neither regions nor a map-indoor flag select music; only the cell driver and the trade-busy override
+  do. [CONFIRMED-NEGATIVE for a map-indoor attribute, MED on the absence]
 
 ### 17.5 Known unknowns
 
@@ -930,6 +967,244 @@ To keep the regions story (Ch. 16) and the audio story separate:
 - **Cross-references:** the `.mud` audio-byte roles are recorded in Ch. 16.5 and flagged for the
   owning `.mud` / `formats/terrain.md` spec; the per-map `soundtable<id>.{wlk,run,bgm,bge,eff}` table
   byte layout is not yet owned by a committed format spec and should be promoted to one when sampled.
+
+---
+
+## 18. Movement, targeting & pathfinding — CYCLE 7
+
+> **Cycle-7 addition** (Block C). This chapter records the in-world locomotion and target-acquisition
+> model: how the client announces movement, how it picks a target, why there is no client pathfinder,
+> and how the server corrects client drift. It complements Chapter 1 (which only noted `2/13` as the
+> combat-approach send) and `specs/camera_movement.md` (the local-prediction integration math). Engine
+> code citing a constant here writes `// spec: Docs/RE/specs/world_systems.md` (Ch. 18). Movement is
+> **local-prediction with periodic server reconciliation** — never lock-step. The headline of Chapter
+> 0 holds: the client moves freely by prediction and merely *announces* intent; the **server owns the
+> authoritative world position** and corrects the client out-of-band.
+
+### 18.1 The movement-intent emitter (`2/13`, 16-byte body) — CONFIRMED
+
+Movement is announced to the server by a single C2S message, `2/13` `CmsgMoveRequest`, with a
+**fixed 16-byte body**. It is **event-driven** — there is **no fixed millisecond send interval / tick**.
+It fires when the local player's movement *intent* changes: at motion start/stop ("arrival"), and as a
+re-sync after a long frame stall.
+
+| Body offset | Size | Type | Field | Notes | Confidence |
+|---:|---:|---|---|---|---|
+| +0 | 4 | f32 | **heading** | the facing angle, computed from the (destX − curX, destZ − curZ) delta — points from current position toward the destination | CONFIRMED |
+| +4 | 4 | f32 | **destination X** | the target world X the player is walking toward | CONFIRMED |
+| +8 | 4 | f32 | **destination Z** | the target world Z the player is walking toward | CONFIRMED |
+| +12 | 1 | u8 | **tag** | a constant value `3` written inline on every emit | CONFIRMED |
+| +13 | 1 | u8 | **runState** | `1` when the player is in the running movement state, else `0` (walking) | CONFIRMED |
+| +14 | 2 | — | _pad | the unused tail of the 16-byte copy block; not explicitly written | CONFIRMED (size); contents UNVERIFIED |
+
+- **Send cadence is event-driven, not a timer.** The client emits on motion-end ("arrived, here are my
+  final coords"), and as a forced re-sync after a long inter-frame stall (a frame gap greater than the
+  local-prediction window snaps the interpolation target and re-announces). A separate gated
+  move-heartbeat path can also emit a liveness `2/13` while a move gate is open; its exact wall-clock
+  cadence is **RUNTIME-ONLY**. No single fixed move interval is hard-coded. [CONFIRMED that it is
+  event-driven; heartbeat wall-clock RUNTIME-ONLY]
+- **Movement speed is data-driven.** Per-frame ground speed is read from the actor's animation/motion
+  record at **+0x30 (walk rate)** or **+0x34 (run rate)** depending on the run/mount flag — i.e. the
+  walk/run speed values live in the `actormotion` / animation-catalogue data tables (owned by the asset
+  lane), **not** as inline constants. [CONFIRMED that the source is the motion record at +0x30/+0x34;
+  the numeric speeds are RUNTIME/data-driven]
+
+### 18.2 Two-tier targeting (`2/12` engage, `2/79` confirm) — CONFIRMED
+
+Target acquisition is a **two-click model** with two distinct C2S opcodes:
+
+| Opcode | Dir | Size | Role | Confidence |
+|---|---|---|---|---|
+| `2/12` | C2S | 3 | **Tier-1 — engage** (the first click): pick an actor in the scene / from the published cursor-target, run the local candidate filter, lock it, and notify the server. The 3-byte body packs a source-kind + index + slot selector into the actor tables. | CONFIRMED |
+| `2/79` | C2S | 16 | **Tier-2 — confirm** (the second click): a UI-list highlight→confirm. The first click on a row only highlights locally (no send); a second click on the **same** already-highlighted row sends the 16-byte target descriptor. | CONFIRMED |
+| `2/82` | C2S | 28 | The parallel name-search / named-target request (social / name panel). | CONFIRMED |
+| `5/6`  | S2C | 16 | `SmsgActorAutotargetOrMotion` — the server-side auto-target / motion push (attack-mode change / motion change / clear) that confirms target/combat state. | CONFIRMED |
+
+- **Locked target storage.** The current locked target's actor id is stored on the **local-player
+  actor at +444**; the actor is re-resolved each access by id lookup. A separate published
+  world-target descriptor (a 16-byte global block) holds the cursor/hover selection that the engage
+  tier consumes. [CONFIRMED]
+- **Selection is an index/id pick, not an in-routine raycast.** The cursor / mouse pick is done
+  upstream (the hover-pick publishes the highlighted target into a global), and the targeting tiers
+  consume that selection by reference. The Tier-1 engage runs a **candidate filter** (target must
+  exist; a faction/group gate; a party/self alive gate over the tracked-slot table; a zone/region gate)
+  before it locks and sends. [CONFIRMED]
+
+### 18.3 No client pathfinder — straight-line + reactive collision — CONFIRMED
+
+There is **no client-side A\* / waypoint / navmesh pathfinder.** A string search for
+`astar / pathfind / waypoint / navmesh` yields **zero hits**, and the click-to-move path reads a
+**single pending destination** and walks the local player **straight toward it** by per-frame forward
+integration. When a destination is reached the client pulls the next one from a small destination list
+(a straight-line follow of queued destinations, not a graph search).
+
+- **Collision is reactive, not planned.** The straight walk is tested against the recovered `.sod` 2D
+  XZ wall segments (ray-parity point-in-polygon), and the predicted Y is snapped to the `.ted` ground
+  height every frame (bilinear). There is **no precomputed nav graph**. [CONFIRMED]
+- **Model:** the client sends the *destination* (in the `2/13` body), walks straight there locally
+  with reactive `.sod` wall collision and `.ted` ground-snap, and any real routing / validation is the
+  **server's** responsibility — the server streams authoritative positions back via `5/13`. [CONFIRMED]
+
+### 18.4 Server reconciliation (`5/13`, distance bands) — CONFIRMED
+
+The server pushes authoritative actor positions via **`5/13` `SmsgActorMovementUpdate`** (a **40-byte
+body**: XZ coords + heading + mode/run flags). The handler reconciles the client position against the
+pushed position by **distance band**:
+
+| Band (client–server divergence) | Client reaction | Confidence |
+|---|---|---|
+| small drift | smooth interpolation toward the server coordinate | CONFIRMED |
+| divergence **> 200 units** | a **faster catch-up correction** (accelerated convergence to the server position) | CONFIRMED (200-unit threshold) |
+| divergence **> 300 units** | a **hard teleport snap** to the server position | CONFIRMED (300-unit threshold) |
+| already at the coordinate | position set exactly (no interpolation) | CONFIRMED |
+
+- **Boundary statement.** The client moves the local player immediately by local prediction (forward
+  integration + ground-snap) and merely *notifies* the server of heading + destination + run-state via
+  `2/13`. The **server's position wins** whenever the client has drifted past the interpolation band:
+  small drift is absorbed as interpolation, drift past ~200 units triggers a fast catch-up, and drift
+  past ~300 units is a hard teleport. [CONFIRMED]
+
+| Opcode | Dir | Size | Role |
+|---|---|---|---|
+| `2/13` | C2S | 16 | `CmsgMoveRequest` — movement-intent emitter (heading + dest + tag=3 + runState). |
+| `2/12` | C2S | 3  | Tier-1 engage target. |
+| `2/79` | C2S | 16 | Tier-2 confirm target. |
+| `2/82` | C2S | 28 | Named-target request. |
+| `5/6`  | S2C | 16 | `SmsgActorAutotargetOrMotion` — auto-target / motion confirm. |
+| `5/13` | S2C | 40 | `SmsgActorMovementUpdate` — authoritative position push + reconciliation bands. |
+
+- **Driving VFS data:** `actormotion.txt` / the animation catalogue (walk/run speed at the motion
+  record +0x30 / +0x34), `.sod` wall segments + `.ted` ground height (collision / ground-snap) —
+  `formats/config_tables.md`, `formats/terrain.md`.
+- **See also:** Chapter 1 (combat approach loop also emits `2/13`); Chapter 16 (the zone/region gate
+  the engage filter consults; the same movement gate denies entry into a type-2 cell); Chapter 7
+  (ground-item pickup also depends on the alive/active actor gate); `specs/camera_movement.md` (the
+  local-prediction integration math, the click-to-move follow, the reconciliation constants).
+
+---
+
+## 19. Death & respawn — CYCLE 7 (concise; world-exit owns the exit distinction)
+
+> **Cycle-7 addition** (Block C). This chapter records the **death-state actor fields**, the death
+> push, the local death modal, the respawn-countdown timer, and the respawn-choice request/response.
+> The **death-vs-exit distinction** (local death does NOT leave the world; it enters a dead combat
+> sub-mode) is owned by `specs/world_exit.md` — this chapter cross-refs there and keeps its own
+> coverage concise. The death/respawn outcome is server-authoritative: the client renders the death,
+> shows a respawn modal, and only sends a *choice*; the respawn location and restored HP are decided by
+> the server. Engine code citing a constant here writes `// spec: Docs/RE/specs/world_systems.md`
+> (Ch. 19).
+
+### 19.1 Death-state actor fields — CONFIRMED
+
+Death is recorded on the actor object by two state fields (and a timestamp), written when the death
+motion plays:
+
+| Actor offset | Field | Dead value | Alive / normal value | Confidence |
+|---:|---|---|---|---|
+| **+1424** | alive / active gate flag | **0 = dead** | `1` = alive | CONFIRMED |
+| **+1420** | action / motion-state | **8 = death** | `1` = idle / normal | CONFIRMED |
+| +1480 | death timestamp (ms) | set at the moment of death | — | CONFIRMED |
+
+- `+1420 == 8` is the canonical "is this actor dead" test; `+1424` is the generic "alive & interactable"
+  guard — the movement, targeting, and pickup paths all early-return when it is `0`, which is the
+  implicit input lockout while dead (there is no separate "input disabled" boolean). [CONFIRMED]
+- These fields are (re)set alive (`+1424 = 1`, `+1420 = 1`) by the spawn / respawn / network handlers
+  when an actor (re)enters the world alive. [CONFIRMED]
+
+### 19.2 The death push (`5/10`, 20-byte body) — CONFIRMED
+
+Inbound death is `S2C 5/10 SmsgCharDeath`, a **20-byte body**. Its key field is a **death-cause** code
+that selects the local reaction:
+
+| deathCause | Meaning | Confidence |
+|---|---|---|
+| `0` | normal death | CONFIRMED |
+| `1` / `2` | PK-type death (player-kill) — drives the PK death VFX and notice text | CONFIRMED |
+| `3` | special death — no town-respawn option (modal mode 3 only) | CONFIRMED |
+
+On death the handler plays the death motion (setting the §19.1 fields), clears the dying actor's timed
+buffs and combat target, and — if the dying actor is the local player — opens the death/respawn modal
+and enqueues the respawn countdown (§19.3). Death notices and "killed by &lt;name&gt;" lines are localized
+`msg.xdb` ids; the exact wording is CP949 table data = RUNTIME-ONLY.
+
+### 19.3 Local death modal + respawn countdown — CONFIRMED
+
+- **Local death modal:** when the local player dies normally, the modal opens in **mode 1 if the
+  player's level is ≥ 36, else mode 3** (a lower-vs-higher-level respawn-option layout). `deathCause 3`
+  forces mode 3. (A mode-2 "revive by another player" variant is reached from a separate revive-offer
+  path.) [CONFIRMED]
+- **Respawn countdown:** driven by a timed event (event id **10003**). For the local player it
+  decrements a countdown (showing the remaining seconds / minutes from `msg.xdb`) and, on reaching `0`,
+  auto-sends the default respawn choice. The normal countdown is **600 seconds** (a region-gated
+  alternative of 20 seconds applies in a specific PvP-zone context — RUNTIME context); `deathCause 3`
+  uses a short one-shot instead. Remote actors are revived visually by the same timer without any
+  network round-trip. [CONFIRMED that the timer is event 10003 and the normal duration is 600 s; the
+  region/alt selection is region-gated, RUNTIME context]
+
+### 19.4 Respawn request / response — CONFIRMED
+
+The respawn choice is sent through the generic dialog-response sender as **C2S 2/3**, body = a single
+**int16 choice** (`0` / `1` / `2` / `3`) selecting which respawn option (e.g. town / accept-revive /
+in-place / variant). The server answers with two pushes:
+
+| Opcode | Dir | Size | Role | Confidence |
+|---|---|---|---|---|
+| `2/3` | C2S | 2 (int16 choice) | respawn / dialog response — the respawn choice (and the auto-send on countdown 0). | CONFIRMED |
+| `4/28` | S2C | 20 | respawn confirm — **local-player** relocate/respawn (recreate the local actor at the new server position, re-resolve the cell). | CONFIRMED |
+| `5/28` | S2C | 12 | respawn-at-point — recreate a **remote** actor at a respawn point. | CONFIRMED |
+
+- **Respawn location & HP are server-authoritative.** The client only sends the choice; the new
+  position arrives in the `4/28` / `5/28` body, and restored HP/MP arrive via the vitals push (`5/53`).
+  There is **no client-side respawn-position or HP arithmetic**, and no client-side death-penalty
+  computation (XP / durability / item-drop magnitudes are all server-authoritative = RUNTIME-ONLY).
+  [CONFIRMED — absence of client penalty math]
+
+| Opcode | Dir | Size | Role |
+|---|---|---|---|
+| `5/10` | S2C | 20 | `SmsgCharDeath` — death push + deathCause {0 normal, 1/2 PK, 3 special}. |
+| `2/3`  | C2S | 2  | respawn / dialog-response choice (0/1/2/3). |
+| `4/28` | S2C | 20 | respawn confirm (local relocate). |
+| `5/28` | S2C | 12 | respawn-at-point (remote actor). |
+
+- **Driving VFS data:** `msg.xdb` (death notices, "killed by" lines, countdown seconds/minutes text)
+  — `formats/config_tables.md`.
+- **See also:** `specs/world_exit.md` (death does NOT leave the world; the dead combat sub-mode);
+  `specs/combat.md` (the death-state field convention + on-death cleanup); Chapter 1 (the combat loop
+  whose result lands the killing blow); Chapter 9 (buffs cleared on death); Chapter 7 (ground items —
+  any item loss arrives as ordinary server-driven spawns, not client-computed).
+
+---
+
+## 20. Dark / absent subsystems — CYCLE 7 (load-bearing negative results)
+
+> **Cycle-7 addition** (Block D). This section records subsystems that are **confirmed absent** from
+> the client, so a faithful re-implementation never builds a phantom system. Each verdict is backed by
+> an exhaustive static census — a CP949 raw byte-scan for the relevant Korean keywords across the whole
+> image, plus RTTI / panel-class and opcode decode of the closest "near-miss" features. **No
+> corresponding subsystem was found in static analysis (CYCLE 7).** Each item is stated as a negative
+> result by exhaustion, not a positive design claim. [All CONFIRMED-ABSENT]
+
+| Subsystem | Verdict | What exists instead (the near-miss) |
+|---|---|---|
+| **Mounts** | **ABSENT** | A `vehicle.xdb` table exists but is a **visual seat table only** — it carries no mount-movement or mount-stat system. No ride locomotion, no mount stats. |
+| **Auction house** | **ABSENT** | Only **personal stalls** exist (player-run fixed-price shops). The closest opcode, `2/118`, is an **empty-body stall buy-confirm**, not a bid — there are no listings, no competing bids, and no win-bid resolution. **stall ≠ auction.** |
+| **Instanced dungeons** | **ABSENT** | The "brood-war" maps are **shared, scheduled** event maps joined by many parties — **no instance id, no lockout, no per-party private copy**. Maps are addressed by global indices. **special-map ≠ instance.** |
+| **Housing** | **ABSENT** | Only the personal **stall** (a temporary vendor placement) and the **keep** (item storage) exist — neither is an owned, decoratable dwelling. **stall / keep ≠ housing.** |
+| **Arena / ranking ladder** | **ABSENT (as a system)** | "ShowDown" is a **peer 1-v-1 duel** issued through the generic context-action (operation **42**), resolved peer-to-peer — no matchmaking, no persistent standings. "RankStatePanel" is merely a **buff-icon status strip** (the player's fame/rank tier painted as icons), **not** a leaderboard. **duel ≠ arena-ladder.** |
+
+- **Evidence basis:** a raw CP949 keyword scan (auction / bid / win-bid / dungeon / instance / house /
+  furniture / ranking / rank-order / arena / duel / ladder) returned **zero hits** for every absent
+  system; the only related hit anywhere was the single "duel" string behind the peer ShowDown feature.
+  Mounts, auction, instances, housing, and arena/ladder are confirmed-absent by exhaustion in static
+  IDA (CYCLE 7). [CONFIRMED]
+- **Why this matters:** these are the systems most likely to be assumed present by analogy with other
+  MMORPGs. The re-implementation should **not** scaffold a mount system, an auction house, an instance
+  manager, a housing system, or an arena/ladder matchmaker. The faithful surfaces are the **stall**
+  (vendor), the **keep** (storage), the shared **brood-war** event maps, and the peer **ShowDown**
+  duel — already covered by the inventory/NPC and social chapters.
+- **See also:** Chapter 6 (inventory / trade — the stall and keep surfaces); Chapter 5 (social — the
+  context-action `42` channel ShowDown rides; the buff-icon RankState strip is a HUD status panel,
+  Chapter 9 / 13).
 
 ---
 

@@ -1,0 +1,68 @@
+using System.Text;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+
+namespace MartialHeroes.Assets.Parsers.Texture;
+
+/// <summary>
+///     Parser for <c>data/map{area}/texture/bgtexture.txt</c> — the plain-text human-readable
+///     companion to the binary <c>bgtexture.lst</c> background-texture index.
+/// </summary>
+/// <remarks>
+///     spec: Docs/RE/formats/bgtexture_lst.md §Relationship to bgtexture.txt:
+///     "bgtexture.txt is a HUMAN-READABLE MIRROR of the binary index — it exists as a
+///     development/debug aid. The shipping loader reads ONLY bgtexture.lst (the binary). The .txt
+///     is never opened at runtime." CONFIRMED (CYCLE 1, CODE-CONFIRMED).
+///     <para>
+///         This parser is provided for archival, debug, and interoperability purposes only.
+///         For a faithful 1:1 port, load <c>bgtexture.lst</c> via <see cref="BgtextureLstParser" />
+///         — that is the authoritative runtime source.
+///     </para>
+///     <para>
+///         Format (CP949, LF or CRLF lines), one entry per line, TAB-separated, no header:
+///         <c>&lt;poolIndex:int&gt; \t &lt;typeFlag:int&gt; \t &lt;relPath&gt;</c>
+///         where <c>relPath</c> is the texture path relative to <c>data/map{area}/texture/</c> without
+///         the <c>.dds</c> extension (e.g. <c>terrain/g3</c>, <c>building/_castle</c>).
+///         spec: Docs/RE/formats/bgtexture_lst.md §bgtexture.txt columns. CONFIRMED.
+///     </para>
+///     <para>ZERO rendering/engine dependencies.</para>
+/// </remarks>
+public static class BgTextureTxtParser
+{
+    /// <inheritdoc cref="Parse(ReadOnlySpan{byte})" />
+    public static BgTextureCatalog Parse(ReadOnlyMemory<byte> data)
+    {
+        return Parse(data.Span);
+    }
+
+    /// <summary>Parses the raw bytes (CP949) of a <c>bgtexture.txt</c> file.</summary>
+    public static BgTextureCatalog Parse(ReadOnlySpan<byte> span)
+    {
+        // spec: Docs/RE/formats/terrain.md §4.2 — encoding CP949 (no BOM). CONFIRMED.
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        return ParseText(Encoding.GetEncoding(949).GetString(span));
+    }
+
+    /// <summary>Overload accepting pre-decoded text (for testing).</summary>
+    public static BgTextureCatalog ParseText(string text)
+    {
+        var map = new Dictionary<int, string>();
+
+        foreach (var rawLine in text.Split('\n'))
+        {
+            // spec: Docs/RE/formats/terrain.md §4.2 — "<poolIndex>\t<typeFlag>\t<relPath>". CONFIRMED.
+            var line = rawLine.Replace("\r", string.Empty);
+            if (line.Length == 0) continue;
+
+            var cols = line.Split('\t');
+            if (cols.Length < 3) continue;
+            if (!int.TryParse(cols[0].Trim(), out var poolIndex)) continue;
+
+            var rel = cols[2].Trim();
+            if (rel.Length == 0) continue;
+
+            map[poolIndex] = rel;
+        }
+
+        return new BgTextureCatalog(map);
+    }
+}

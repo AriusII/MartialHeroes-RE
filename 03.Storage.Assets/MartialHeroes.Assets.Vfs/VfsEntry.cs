@@ -18,13 +18,13 @@ namespace MartialHeroes.Assets.Vfs;
 // Total: 144 bytes = 0x90.  Sample-verified by allocation arithmetic and stride literal in spec.
 
 /// <summary>
-/// One record from the VFS Table of Contents.
-/// Parsed from a 144-byte (0x90) region in <c>data.inf</c>.
+///     One record from the VFS Table of Contents.
+///     Parsed from a 144-byte (0x90) region in <c>data.inf</c>.
 /// </summary>
 /// <remarks>
-/// The <c>name</c> field is decoded to a managed <see cref="string"/> at parse time and used as
-/// the lookup key.  The 100-byte name field in the raw record is decoded immediately on parse;
-/// no raw name buffer is retained at runtime.
+///     The <c>name</c> field is decoded to a managed <see cref="string" /> at parse time and used as
+///     the lookup key.  The 100-byte name field in the raw record is decoded immediately on parse;
+///     no raw name buffer is retained at runtime.
 /// </remarks>
 public readonly struct VfsEntry : IComparable<VfsEntry>
 {
@@ -38,15 +38,15 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
     public readonly string Name;
 
     /// <summary>
-    /// Byte offset of the payload within <c>data/data.vfs</c>.
-    /// spec: Docs/RE/formats/pak.md — dataOffset @ +104, i64 LE. CONFIRMED.
+    ///     Byte offset of the payload within <c>data/data.vfs</c>.
+    ///     spec: Docs/RE/formats/pak.md — dataOffset @ +104, i64 LE. CONFIRMED.
     /// </summary>
     public readonly long DataOffset;
 
     /// <summary>
-    /// Byte count of the payload.  Only the low 32 bits are meaningful;
-    /// a non-zero high dword causes the original engine's read to fail.
-    /// spec: Docs/RE/formats/pak.md — dataSize @ +112, i64 LE. CONFIRMED.
+    ///     Byte count of the payload.  Only the low 32 bits are meaningful;
+    ///     a non-zero high dword causes the original engine's read to fail.
+    ///     spec: Docs/RE/formats/pak.md — dataSize @ +112, i64 LE. CONFIRMED.
     /// </summary>
     public readonly long DataSize;
 
@@ -58,8 +58,8 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
     }
 
     /// <summary>
-    /// Parses one 144-byte record from <paramref name="raw"/>.
-    /// <paramref name="raw"/> must be exactly <see cref="RecordSize"/> bytes.
+    ///     Parses one 144-byte record from <paramref name="raw" />.
+    ///     <paramref name="raw" /> must be exactly <see cref="RecordSize" /> bytes.
     /// </summary>
     internal static VfsEntry Parse(ReadOnlySpan<byte> raw)
     {
@@ -70,10 +70,10 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
 
         // Decode the null-terminated ASCII name at offset 0, length 100.
         // spec: Docs/RE/formats/pak.md — name @ +0, char[100], null-terminated, lowercased. CONFIRMED.
-        ReadOnlySpan<byte> nameSpan = raw[..NameCapacity];
-        int nameLen = nameSpan.IndexOf((byte)0);
+        var nameSpan = raw[..NameCapacity];
+        var nameLen = nameSpan.IndexOf((byte)0);
         if (nameLen < 0) nameLen = NameCapacity; // no null terminator — use full width
-        string name = Encoding.ASCII.GetString(nameSpan[..nameLen]);
+        var name = Encoding.ASCII.GetString(nameSpan[..nameLen]);
         // Names are stored lower-case at build time; normalise at parse time as well
         // so the lookup invariant holds even for archives with mixed-case names.
         name = name.ToLowerInvariant();
@@ -82,10 +82,10 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
         // entries (build-tool path residue in 14, inert since never consumed).
 
         // dataOffset @ +104, i64 LE. CONFIRMED.
-        long dataOffset = BinaryPrimitives.ReadInt64LittleEndian(raw[DataOffsetField..]);
+        var dataOffset = BinaryPrimitives.ReadInt64LittleEndian(raw[DataOffsetField..]);
 
         // dataSize @ +112, i64 LE.  Only low 32 bits are consumed. CONFIRMED.
-        long dataSize = BinaryPrimitives.ReadInt64LittleEndian(raw[DataSizeField..]);
+        var dataSize = BinaryPrimitives.ReadInt64LittleEndian(raw[DataSizeField..]);
 
         // Trailing 24 bytes at +120: three Windows FILETIME values (creation @ +120, last-access @ +128,
         // last-write @ +136), recorded by the build tool from source-file NTFS metadata. Never read by
@@ -94,11 +94,15 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
         return new VfsEntry(name, dataOffset, dataSize);
     }
 
-    /// <inheritdoc/>
-    public int CompareTo(VfsEntry other) =>
-        string.CompareOrdinal(Name, other.Name);
+    /// <inheritdoc />
+    public int CompareTo(VfsEntry other)
+    {
+        return string.CompareOrdinal(Name, other.Name);
+    }
 
-    /// <inheritdoc/>
-    public override string ToString() =>
-        $"VfsEntry {{ Name=\"{Name}\", DataOffset={DataOffset}, DataSize={DataSize} }}";
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        return $"VfsEntry {{ Name=\"{Name}\", DataOffset={DataOffset}, DataSize={DataSize} }}";
+    }
 }

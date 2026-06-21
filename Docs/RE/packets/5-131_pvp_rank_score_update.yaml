@@ -1,0 +1,39 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 8-byte body (two u32 score fields)
+#                 are control-flow-confirmed; every VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading marked 5/131 "var (8 body)"; the handler reads a fixed 8-byte
+#              block (two dwords). BINARY WINS.
+
+name: SmsgPvpRankScoreUpdate
+opcode: 0x50083           # major 5 (Push), minor 131 -> (5 << 16) | 131
+direction: S2C
+size: 8                   # fixed 8-byte body (two u32 score fields)
+spec: packets/5-131_pvp_rank_score_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes two PvP rank/progress score values into the PvP rank panel and refreshes it. A fixed 8-byte body of two u32 score fields.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 8.
+fields:
+  - { name: ScoreA, type: u32 }   # 0x00  rank score field A
+  - { name: ScoreB, type: u32 }   # 0x04  rank score field B
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 8-byte body and the two fields. CAPTURE-UNVERIFIED for the score
+  VALUE meanings. The handler writes both dwords into the PvP rank/progress panel state and refreshes
+  the panel.
+
+    0x00 (4B) ScoreA : the first rank-score value.
+    0x04 (4B) ScoreB : the second rank-score value.
+
+  RUNTIME-OFFSET HYGIENE: the two values are stored into runtime PvP-rank panel fields; those panel
+  offsets are not wire fields.
+
+  Contract role: pure-Push (PvP rank-score panel update). UNKNOWN to resolve with a capture: what ScoreA
+  / ScoreB numerically represent (rank points vs a tier index vs a streak).

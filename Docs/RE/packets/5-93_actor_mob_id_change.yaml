@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 16-byte body -- sort@0x00 /
+#                 actor_id@0x04 / old_mob_id@0x08 / new_mob_id@0x0C -- are control-flow-confirmed (field
+#                 names are read from the handler's own debug log); every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: REFINED from "var (16 hdr)" to a fixed-16 clean 4-field record. The size is fixed and the
+#              body is forwarded whole to the apply routine.
+
+name: SmsgActorMobIdChange
+opcode: 0x5005d           # major 5 (Push), minor 93 -> (5 << 16) | 93
+direction: S2C
+size: 16                  # fixed 16-byte body (0x10)
+spec: packets/5-93_actor_mob_id_change.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server changes an actor's mob template (a polymorph / transform broadcast). A fixed 16-byte 4-field
+  record holding the actor key (sort + id), the old mob template id, and the new mob template id.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 16.
+fields:
+  - { name: Sort,      type: u32 }   # 0x00  actor sort key
+  - { name: ActorId,   type: u32 }   # 0x04  actor id
+  - { name: OldMobId,  type: u32 }   # 0x08  previous mob template id
+  - { name: NewMobId,  type: u32 }   # 0x0c  new mob template id (selects the new mesh)
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 16-byte body and the four fields (the field names are taken from the
+  handler's own debug-log format string). CAPTURE-UNVERIFIED for the id VALUE space. The handler reads
+  the 16 bytes and forwards them whole to the mob-id-change apply routine.
+
+    0x00 (4B) Sort     : actor sort key.
+    0x04 (4B) ActorId  : actor id.
+    0x08 (4B) OldMobId : the previous mob template id.
+    0x0c (4B) NewMobId : the new mob template id (resolves the new model/mesh).
+
+  Contract role: pure unsolicited Push (server changes an actor's mob template). No triggering C2S
+  recovered.
+
+  UNKNOWN to resolve with a capture: the actual old/new mob-template id values under a real polymorph.

@@ -16,7 +16,7 @@ opcode: 0x2000d           # major 2 (GameAction), minor 13 -> (2 << 16) | 13
 direction: C2S
 size: 16                 # fixed 16-byte payload built by the client move sender
 spec: packets/2-13_move_request.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client click-to-move / position-sync request. Sends a computed facing angle, a target XZ point, and a movement-mode/run-flag region. The server re-broadcasts the result via S2C 5/13 ActorMovementUpdate.

@@ -1,6 +1,6 @@
 ---
-verification: confirmed
-ida_reverified: 2026-06-16
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: none
@@ -74,6 +74,95 @@ streamer, a boot data-table worker behind the loading screen, and a streaming-BG
   optionally scaled by an engine-wide time-scale float (slow-mo / fast-forward). The frame *throttle*
   separately samples the high-resolution performance counter. (CODE-CONFIRMED — `specs/game_loop.md`
   §4.)
+
+---
+
+## 1A. Object model, RTTI & memory lifecycle
+
+(see `structs/runtime_singletons.md` — the Diamond base-object layout; `specs/game_loop.md`,
+`specs/client_runtime.md` for the frame loop)
+
+The 3D layer **is** the **"Diamond" scene-graph engine** — an OpenSceneGraph-style Direct3D 9
+scene graph (the engine name is proven by an embedded build-path string referencing a `diamond`
+source directory). Roughly **90 engine RTTI classes** are present. This section supersedes any
+earlier "object lifecycle: NONE" statement: the engine has a single, uniform refcounted object
+model. (CODE-CONFIRMED — static.)
+
+### 1A.1 Class hierarchy
+
+A single abstract refcounted base anchors the whole engine. The root chain is:
+
+```
+GObject  (abstract refcounted base)
+  └─ GNode  (adds a parent back-reference vector)
+       ├─ GViewPlatform  (per-frame view processing; drives cull/draw)
+       └─ GGroup  (adds a child vector)
+            └─ { GScene, GTransform, GGeode, GSwitch, GLight, … }
+```
+
+Every Diamond class — render-state (`GRS*`: depth-test / alpha-test / blending / material / fog /
+…), UI (`GU*`: GUWindow / GUComponent / GULabel / …), pipeline (GPipeline / GCullPipeline / GCull /
+GTraverser / …), assets (GTexture / GSound / CVFSManager / DiskFile / File / …), and camera
+(GCamera / GPerspectiveCamera / GFrustum / …) — derives from `GObject` and therefore shares the
+same object head described below.
+
+### 1A.2 Shared base layout (the head of EVERY Diamond class)
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0x00 | 4 | vtable pointer | Installed by each constructor; the abstract base's slot 0 is a pure-virtual stub. |
+| +0x04 | 4 | `ref_count` | Intrusive reference count, initialised to 0. |
+| +0x08 | 0x1C | `name` | An MSVC `std::string` object name; its constructor allocates, its destructor frees the buffer. |
+
+`GNode` extends this head with a **parent back-reference vector** and `GGroup` adds a **child
+vector** (offset table in `structs/runtime_singletons.md`). `GViewPlatform` is a `GNode` subclass
+with an 84-byte (0x54) object size; `GScene` / `GGroup` share the same +0x00 / +0x04 / +0x08 head.
+
+### 1A.3 Reference-count mechanism (the OpenSceneGraph "Referenced" pattern)
+
+- **`ref()`** is an **inlined increment** of the `ref_count` field (+0x04), performed when a child
+  is added to a parent.
+- **`unref()`** is a **dedicated routine** that first **asserts the count is non-zero**, then
+  decrements `ref_count`.
+- There is **no separate AddRef / Release vtable slot** — `ref()` / `unref()` are non-virtual
+  operations on +0x04.
+
+### 1A.4 Destruction shape (MSVC vector-deleting destructor)
+
+Virtual-table **slot 0** of every Diamond class is the MSVC **"vector deleting destructor"**: it
+takes a flags byte, runs the real destructor body, then frees the object when `(flags & 1)`. So
+`delete obj` = run the virtual destructor chain (derived → base, each releasing its owned children)
+then free the heap block originally returned by `operator new`.
+
+### 1A.5 Ownership: owner-frees-children by refcount
+
+`GGroup` / `GNode` hold a child vector:
+
+- **addChild** increments the child's `ref_count` and registers a parent back-reference.
+- **removeChild** / **removeAllChildren** decrement the child's `ref_count` and detach it.
+- On destruction or removal, a child's vector-deleting destructor is invoked **only when that
+  child's `ref_count` has reached 0** — objects are freed at refcount 0. Parent back-references
+  live in a second (parent) vector.
+
+### 1A.6 Allocator model
+
+The engine and gameplay allocate through **plain CRT `operator new` → `malloc` → Win32 `HeapAlloc`
+on the process heap**. There is **no custom game pool / arena / free-list allocator**;
+placement-`new` appears only as STL in-place construction into pre-sized container storage. (Each
+class news its own members and children — allocation is decentralised, not funneled through a
+central pool.) The bundled third-party static libraries carry their own internal allocators and are
+tagged separately; they are not the game's pattern. Steady-state per-frame heap churn is low: the
+render path reuses persistent draw / render-bin / particle containers (cleared-and-refilled), so
+the dominant heap activity is at **scene-mutation** time (spawn / despawn, area load, effect build),
+handled by the CRT new/delete + refcounted node lifecycle above. (Exact container reset-vs-reserve
+thresholds are a runtime detail — capture/debugger-pending.)
+
+### 1A.7 Frame-rate cap
+
+The main loop is paced by a **hardcoded fixed 60 FPS upper cap**, seeded once into the engine
+driver object and consumed directly by the frame throttle; the `DISPLAY_FRAMERATE` display-config
+value is parsed but has **no reader** and is therefore inert. See `specs/game_loop.md` /
+`specs/client_runtime.md` for the limiter detail and §5 below.
 
 ---
 
@@ -411,7 +500,7 @@ Each subject spec mapped to the section here that summarizes it.
 | `structs/gucomponent.md` | base widget field offsets + flag bits | §4 |
 | `specs/input_ui.md` | input event taxonomy + IME + hit-test ordering | §4 |
 | `formats/ui_manifests.md` | `UiTex.txt` / `uitex.txt` id-resolved atlases | §4, §6 |
-| `structs/runtime_singletons.md` | singleton construction order + MainMaster service slots | §2, §4 |
+| `structs/runtime_singletons.md` | singleton construction order + MainMaster service slots + Diamond base-object layout | §1A, §2, §4 |
 | `specs/rendering.md` | per-frame draw loop, draw order, glow/bloom chain | §5 |
 | `formats/pak.md` | `.inf`/`.vfs` container byte layout | §6 |
 | `specs/vfs_overview.md` | VFS overview | §6 |

@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgGmCommand
+opcode: 0x20048           # major 2 (GameAction), minor 72 -> (2 << 16) | 72
+direction: C2S
+size: 32                  # fixed 32-byte payload
+spec: packets/2-72_gm_command.yaml
+status: confirmed
+capture_verified: false
+
+summary: GM tool panel administrative command. Carries a mode selector, a 16-byte CP949 target name, and three numeric parameters parsed from the GM input fields.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 32.
+fields:
+  - { name: Mode,       type: u8 }          # 0x00  0=server-side, 1=client-side
+  - { name: TargetName, type: "char[16]" }  # 0x01  CP949, NUL-padded target player name
+  - { name: Padding,    type: "u8[3]" }     # 0x11  padding
+  - { name: Param1,     type: u32 }         # 0x14  integer parameter (atol from input)
+  - { name: Param2,     type: f32 }         # 0x18  float parameter (atof from input)
+  - { name: Param3,     type: f32 }         # 0x1C  float parameter (atof from input)
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (32 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (1B)  Mode       : selects the execution domain. 0 = server-side command,
+                            1 = client-side command (le u8).
+    0x01 (16B) TargetName : the target player name, encoded CP949, NUL-padded to 16 bytes.
+    0x11 (3B)  Padding    : alignment padding, expected zero.
+    0x14 (4B)  Param1     : first numeric parameter, parsed via atol from the GM input field
+                            (le u32).
+    0x18 (4B)  Param2     : second numeric parameter, parsed via atof from the GM input field
+                            (le f32, IEEE 754).
+    0x1C (4B)  Param3     : third numeric parameter, parsed via atof from the GM input field
+                            (le f32, IEEE 754).
+
+  SCOPE: this models the GM tool panel's general-purpose command send only. Specific GM sub-commands
+  and their parameter interpretations are not enumerated here.
+
+  UNKNOWNS to resolve with a capture:
+    - the complete set of Mode values and their command routing;
+    - the specific sub-command codes carried in Param1;
+    - whether TargetName is ever left empty (self-targeted commands).
+
+  UNBLOCKS: Client.Application GM tool panel command dispatch.

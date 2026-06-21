@@ -1,0 +1,34 @@
+# spec: Docs/RE/packets/2-55_hud_record_32.yaml
+# Role: C2S submit a 32-byte HUD record (same panel cluster as 2/50 / 2/58).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgHudRecord32
+opcode: 0x20037           # major 2 (GameAction), minor 55 -> (2 << 16) | 55
+direction: C2S
+size: 32                  # fixed 32-byte body
+spec: packets/2-55_hud_record_32.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Submit a 32-byte HUD record. The sender blits a 32-byte caller-assembled record after the standard list/panel guards. Sibling of 2/50 (16B) and 2/58 (24B, priced) in the same in-game panel cluster.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 32.
+fields:
+  - { name: Record, type: "u8[32]" }   # 0x00  opaque 32-byte HUD record [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 32-byte blit of an opaque caller-assembled
+  record). The record's internal layout is not resolvable from the send side (capture-pending) — the
+  builder's selector here is a trivial constant that gates only.
+
+    0x00 (32B) Record : an opaque 32-byte HUD record. [capture/debugger-pending]
+
+  TRIGGER: a HUD list-entry action with the standard list/panel guards. Shares its caller cluster
+  with 2/50 (16-byte record) and 2/58 (24-byte priced commit) — one logical panel's action set.
+
+  UNKNOWNS to resolve with a capture:
+    - the internal field breakdown of the 32-byte record;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application 32-byte HUD record submit use-case.

@@ -15,7 +15,7 @@ opcode: 0x10006           # major 1, minor 6 -> (1 << 16) | 6
 direction: C2S
 size: 52                  # fixed 52-byte (0x34) appearance/creation record
 spec: packets/cmsg_char_create.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

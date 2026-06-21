@@ -13,15 +13,18 @@
 
 ```
 verification:   sample-verified   # delimiter/encoding/line-ending/headerlessness/hazards corroborated
-                                   # against the real VFS sample (first 512 B of line 1); the
-                                   # runtime non-loading is confirmed from the boot data-loader's
-                                   # callee set (loader-control-flow only).
+                                   # against the FULL real VFS sample (all rows scanned, not just
+                                   # line 1): exact row count, exact column count, and both hazard
+                                   # magnitudes are now COUNTED over the whole file; the runtime
+                                   # non-loading is confirmed from the boot data-loader's callee set
+                                   # (loader-control-flow only).
 ida_reverified: 2026-06-16
 ida_anchor:     263bd994
-evidence:       [static-ida, vfs-sample]
+evidence:       [static-ida, vfs-sample-full]
 conflicts:      none open          # the prior "runtime role UNVERIFIED" is now resolved:
                                    #   items.csv is CONFIRMED not loaded by the shipping client
-                                   #   (authoring/dev export only).
+                                   #   (authoring/dev export only). No contradictions found on the
+                                   #   full-file re-pass — only UNVERIFIED -> SAMPLE-VERIFIED upgrades.
 ```
 
 ---
@@ -32,8 +35,9 @@ conflicts:      none open          # the prior "runtime role UNVERIFIED" is now 
 items.csv:  CONFIRMED  # delimiter/encoding/line-ending/headerlessness SAMPLE-VERIFIED;
                        # runtime non-loading CONFIRMED (authoring/dev export only, not read by the client);
                        # leading columns (0..6) role-inferred from observed value patterns;
-                       # column count >= 139 SAMPLE-VERIFIED (exact total still UNVERIFIED);
-                       # the TWO parser hazards below are SAMPLE-VERIFIED and load-bearing.
+                       # canonical column count = 139 SAMPLE-VERIFIED (full-file count, see §1);
+                       # row count = 89,712 SAMPLE-VERIFIED (exact LF count);
+                       # the TWO parser hazards below are SAMPLE-VERIFIED, MAGNITUDE-COUNTED, and load-bearing.
 ```
 
 This is the **only `.csv` file in the VFS** and is **not** referenced by any prior spec
@@ -68,9 +72,10 @@ text sweep. It is a flat, comma-separated, line-oriented text table — distinct
   fields are the ASCII subset of CP949. SAMPLE-VERIFIED (first fields decode to a valid Korean item
   name).
 - **Endianness:** not applicable (text format).
-- **Size class:** the largest text table in the VFS (~33 MB; ~33,069,300 bytes). At an estimated
-  ~1 KB per row this is on the order of tens of thousands of rows; the exact row count is UNVERIFIED
-  and should be derived by counting LF line terminators at load time, not assumed.
+- **Size class:** the largest text table in the VFS (33,069,300 bytes, ~33 MB). The file holds
+  **89,712 LF-terminated rows** (SAMPLE-VERIFIED — exact LF count over the full file), averaging
+  ~369 bytes per row. A loader should still derive the count by counting LF terminators rather than
+  hard-coding it.
 
 ---
 
@@ -90,19 +95,21 @@ correctly resolved** — a naive split shifts every index after column 0.
 | 4    | u32    | `base_item_id` / archetype id (9-digit)                     | HIGH       |
 | 5    | u32    | secondary type id (9-digit)                                 | MEDIUM     |
 | 6    | u32    | small flag (1 observed)                                     | LOW        |
-| 7..N | u32 **or f32** | wide stat array — mostly 0 with sparse non-zero values; **at least one column is a float** (hazard, §2) | LOW–MEDIUM |
+| 7..138 | u32 **or f32** | wide stat array — mostly 0 with sparse non-zero values; **several columns are floats** (hazard, §2; primary float at col ~75) | LOW–MEDIUM |
 
-- **Record count source:** number of LF-terminated lines (no count prefix, no header). UNVERIFIED
-  exact value; derive at load.
+- **Record count source:** number of LF-terminated lines (no count prefix, no header).
+  **SAMPLE-VERIFIED = 89,712** (exact LF count); a loader should still derive it at load by counting
+  LF terminators.
 - **Record structure:** `{name},{id},{description},{numeric columns…}`. The first two text fields
   (cols 0 and 2) carry the embedded-comma hazard; everything from col 3 onward is numeric. The full
   ordered shape `name → id → description → small-int → base_item_id → secondary-type-id → flag →
-  numeric-tail` was SAMPLE-VERIFIED against line 1 of the real VFS sample.
-- **Full column count — at least 139, SAMPLE-VERIFIED lower bound; exact total UNVERIFIED.** The
-  first 512 bytes of line 1 already contain 138 commas (≥ 139 fields) and the line continues past the
-  observed window, so the true column count is higher. A complete column census still requires a
-  dedicated pass that counts commas per row **after** correcting for the embedded commas in cols 0
-  and 2.
+  numeric-tail` was SAMPLE-VERIFIED against the real VFS sample.
+- **Canonical column count = 139 (138 commas) — SAMPLE-VERIFIED over the full file.** Counting commas
+  per row across all 89,712 rows: **89,109 rows are exactly 139 fields**; the remaining 603 rows show
+  140–143 naive fields purely because their name/description carries a literal comma (Hazard A, §2 —
+  after the hazard is resolved those rows are also 139 columns). The canonical schema is therefore
+  **139 columns** (cols 0..138). The early columns spot-checked at several row indices (0, 1, 1000,
+  30000, 60000) all hold the stable 139-field shape.
 
 ---
 
@@ -118,6 +125,20 @@ may contain literal comma characters (Korean punctuation, or a comma as part of 
 fields are **not** wrapped in quotes and **not** escaped. A naive `string.Split(',')` therefore
 mis-counts columns for any row whose name or description contains a comma, silently shifting every
 downstream column.
+
+**Magnitude (SAMPLE-VERIFIED, full-file count).** Of the 89,712 rows, **603 carry embedded commas**
+and so split into more than 139 naive fields:
+
+| naive field count | rows |
+|-------------------|------|
+| 139 (clean)       | 89,109 |
+| 140               | 449  |
+| 141               | 126  |
+| 142               | 25   |
+| 143               | 3    |
+
+A purely positional `Split(',')` corrupts those 603 rows; the count-/structure-based rule below
+recovers all of them.
 
 **Correct field-splitting rule (count-/structure-based, not quote-based):**
 
@@ -143,11 +164,12 @@ split the numeric tail on raw commas. A purely positional `Split(',')` is incorr
 > period as numeric too (it is the float field, Hazard B) — otherwise a `0.26` token would be
 > mistaken for the start/continuation of a text field and re-open the description boundary.
 
-### HAZARD B — at least one numeric column is a float (HIGH)
+### HAZARD B — several numeric columns are floats (HIGH, pervasive)
 
-At least one numeric column uses **floating-point notation with a period decimal separator**
-(observed values in the `0.26`–`0.3` range). A parser that assumes every column after the
-description is an **integer** will fail two ways:
+Several numeric columns use **floating-point notation with a period decimal separator** (observed
+values in the `0.26`–`0.3` range). This is **not rare**: **69,399 of 89,712 rows (~77%)** contain at
+least one float token. A parser that assumes every column after the description is an **integer**
+will fail two ways:
 
 1. **Phantom column split** — a hand-rolled tokenizer that treats the period as a separator (or
    rejects non-integer tokens) turns `0.26` into two tokens (`0` and `26`, or `0` and `.26`),
@@ -159,6 +181,22 @@ description is an **integer** will fail two ways:
 separator, never a comma), or detect-and-branch per token. **Use the invariant culture explicitly**
 so a machine with a comma-decimal locale does not mis-read `0.26`. The decimal point is part of the
 value, never a delimiter.
+
+**Float column positions (SAMPLE-VERIFIED, clean-row scan).** Over the 139-field clean rows, floats
+cluster at a small set of fixed 0-based indices in the numeric tail:
+
+| col index (0-based) | hits (over a 20,000-row scan) | role |
+|---------------------|-------------------------------|------|
+| **75** (primary)    | 13,236 | dominant float column — the `0.26`/`0.27`/`0.28` value seen incrementing across the first item-upgrade ladder |
+| 78                  | 6,764  | secondary float |
+| 76                  | 1,776  | secondary float |
+| 81                  | 960    | secondary float |
+| 82                  | 816    | secondary float |
+
+These indices are positional in **clean** (139-field) rows; for Hazard-A rows the index shifts, but
+the numeric-anchor recipe in §3 handles both without needing a fixed index. (Note: a period also
+appears inside col 2 — the Korean description text — in a few hundred rows; that is text punctuation,
+not a float, and the description-boundary rule in §2 excludes it.)
 
 ### Secondary note — LF-only line endings (MEDIUM)
 
@@ -201,15 +239,13 @@ float column (the period is kept inside its value and parsed under invariant cul
 
 ## 5. Known unknowns
 
-- **Full column count** — at least 139 fields (SAMPLE-VERIFIED lower bound); exact total UNVERIFIED.
-  Only cols 0–6 are role-inferred. The wide numeric tail (col 7+) is an item-stat array
-  (attack/defense/required-level/etc., by analogy to the binary `items.scr` stats block) but
-  per-column roles are UNVERIFIED. IMPACT: MEDIUM.
-- **Exact float-column position(s)** — at least one float column exists (`0.26` was SAMPLE-VERIFIED
-  in line 1); which fixed index (or indices) it occupies is UNVERIFIED because the embedded-comma
-  hazard must be resolved first to establish a stable index. IMPACT: MEDIUM. The recipe in §3 handles
-  it positionally without needing the fixed index.
-- **Row count** — file is ~33 MB; exact record count UNVERIFIED (derive by counting LF lines).
+- **Per-column roles of the numeric tail** — the canonical column count is **139** (SAMPLE-VERIFIED,
+  §1) and only cols 0–6 are role-inferred. The wide numeric tail (cols 7..138) is an item-stat array
+  (attack/defense/required-level/etc., by analogy to the binary `items.scr` stats block) but the
+  meaning of each individual column is UNVERIFIED. IMPACT: MEDIUM.
+- **Semantics of the float columns** — their fixed indices are now pinned (col ~75 primary, plus
+  76/78/81/82; §2 Hazard B); what stat each float encodes (a multiplier/rate in the `0.26`–`0.3`
+  range) is UNVERIFIED. IMPACT: LOW.
 - **Col 3 / col 6 flag semantics** — UNVERIFIED.
 - **Runtime role — RESOLVED (no longer a known unknown):** `items.csv` is CONFIRMED **not** loaded
   by the shipping client (zero `.csv` string references; absent from the boot data-loader callee
@@ -223,15 +259,31 @@ float column (the period is kept inside its value and parsed under invariant cul
 null-padded CP949 name/description + a numeric stats block — see `formats/items_scr.md`). This CSV
 appears to be a **flat text parallel** of the same item data, formatted for human editing/export:
 
-- The `item_id` in CSV col 1 is expected to correspond to the item id in `items.scr` records,
-  making the two parallel views of one dataset rather than independent sources. (Cross-key
-  correspondence is **inferred, not byte-verified** — UNVERIFIED.)
+- **Join key:** the `item_id` in CSV col 1 corresponds to the item uid in the `items.scr` records
+  (the uid field in the binary header record — see `formats/items_scr.md`). The two are parallel views
+  of one dataset rather than independent sources. (Cross-key correspondence is **inferred, not
+  byte-joined** — UNVERIFIED.)
+- **Record-count cross-check:** the CSV holds **89,712 rows**; `items.scr` holds roughly **90,937
+  records**. The counts are close but **not equal**, so the two are *parallel* views, not a
+  byte-identical export — the CSV is most likely a subset or an older snapshot. (Counts compared, not
+  rows byte-joined — INFERRED.)
 - Which one the shipping client loads at runtime is now **RESOLVED**: the client loads **`items.scr`**
   (it is among the boot data-loader's callees) and does **not** load `items.csv` at all (zero `.csv`
-  string references; no CSV reader in the loader callee set). `items.csv` is therefore an
-  authoring/developer export of the binary master, not a runtime source. A faithful loader MUST read
-  `items.scr` for runtime data; treat `items.csv` strictly as a human-editable side export. If a tool
-  reconciles the two for export/diff purposes, key on `item_id`.
+  string references; no CSV reader in the loader callee set; the same items.scr load also appears on
+  an alternate/orphan boot path, never a CSV). `items.csv` is therefore an authoring/developer export
+  of the binary master, not a runtime source. A faithful loader MUST read `items.scr` for runtime
+  data; treat `items.csv` strictly as a human-editable side export. If a tool reconciles the two for
+  export/diff purposes, key on `item_id`.
+
+> **Runtime build chain (items.scr, for orientation — clean):** at boot the data-loader opens
+> `items.scr` from the VFS and reads it as a sequence of **fixed-size binary header records** (item
+> name and uid in the header, an effect/effect-count field near the record tail). For each record it
+> reads a variable block of effect entries (widened from the on-disk stride into the runtime stride),
+> allocates the runtime item object, populates it, and dispatches it to the actor/animation catalogue
+> by a discriminator byte at the record tail (an animation-class selector). This is a pure binary,
+> offset-driven reader with no comma scanning, no text tokenizing and no float-string parsing — i.e.
+> categorically not a CSV parser, corroborating that `items.csv` is the dev export and `items.scr` is
+> the runtime master. Full binary layout lives in `formats/items_scr.md`.
 
 **Proposed canonical name:** `items_csv_table` (flag for `names.yaml`, orchestrator-owned).
 

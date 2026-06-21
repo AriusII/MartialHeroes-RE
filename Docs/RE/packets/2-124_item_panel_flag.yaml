@@ -1,0 +1,32 @@
+# spec: Docs/RE/packets/2-124_item_panel_flag.yaml
+# Role: C2S item-panel single-byte flag/toggle action.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgItemPanelFlag
+opcode: 0x2007c           # major 2 (GameAction), minor 124 -> (2 << 16) | 124
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-124_item_panel_flag.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Item-panel single-byte flag / toggle action. A single selection/flag byte emitted from the item-panel event handler.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Flag, type: u8 }   # 0x00  flag / selection byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 1-byte blit); the field VALUE meaning is a static
+  inference (capture-pending).
+
+    0x00 (1B) Flag : a flag / selection byte from the item panel. [capture/debugger-pending]
+
+  TRIGGER: raised from the item-panel event handler (an item-panel action/toggle).
+
+  UNKNOWNS to resolve with a capture:
+    - the flag's meaning / value space;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application item-panel flag/toggle use-case.

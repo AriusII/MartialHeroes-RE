@@ -1,0 +1,37 @@
+# spec: Docs/RE/packets/2-22_service_list_action.yaml
+# Role: C2S HUD-list / actor service action (actor-validated) — u32 mode + actor index + tail.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgServiceListAction
+opcode: 0x20016           # major 2 (GameAction), minor 22 -> (2 << 16) | 22
+direction: C2S
+size: 8                   # fixed 8-byte body
+spec: packets/2-22_service_list_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: HUD-list / actor service action (same family as 2/16/2/17/2/21, distinct selector). Carries a u32 mode/flag, an actor/list index byte resolved to an actor id, and trailing status bytes. The caller validates the resolved actor before sending.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: Mode,       type: u32 }      # 0x00  mode / flag (0 = primary path) [capture/debugger-pending]
+  - { name: ActorIndex, type: u8 }       # 0x04  actor / list index resolved to an actor id [capture/debugger-pending]
+  - { name: Tail,       type: "u8[3]" }  # 0x05  trailing status bytes [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 8-byte blit); the field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (4B) Mode       : a mode/flag dword (0 = primary path in the resolver). [capture/debugger-pending]
+    0x04 (1B) ActorIndex : an actor/list index resolved to an actor id. [capture/debugger-pending]
+    0x05 (3B) Tail       : trailing status bytes. [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): gated by a list selection feedback and a HUD guard;
+  the caller validates the resolved actor before sending. Same actor-service family as 2/16/2/17/2/21.
+
+  UNKNOWNS to resolve with a capture:
+    - the Mode value space and the Tail meaning;
+    - the inbound reply opcode (service result) — pending.
+
+  UNBLOCKS: Client.Application HUD-list actor service action use-case.

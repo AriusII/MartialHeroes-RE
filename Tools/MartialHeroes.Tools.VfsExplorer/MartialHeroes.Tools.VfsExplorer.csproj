@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        MartialHeroes.Tools.VfsExplorer (CLI: "vfsls") — first-class VFS inspection / decode /
+        convert tool, built on the PRODUCTION Assets.Vfs + Assets.Parsers + Assets.Mapping libraries
+        so every observation matches what the shipping client sees. List / contains / census / head,
+        plus decode / extract / convert / hexdump / coverage and the family-census subcommands.
+
+        It is a solution member (Tools/ folder): it builds with `dotnet build MartialHeroes.slnx` and
+        tracks the live parser API — if the API drifts the tool fails to compile, which is the signal
+        to fix the call site here (never the library). It is a leaf CONSUMER of layer 03: nothing in
+        the layered core references it. It NEVER extracts copyrighted payload into the repo tree (the
+        extract/convert commands write only to guarded EXTERNAL paths).
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <!-- Assets.Vfs uses unsafe memory-mapping internals. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Memory-mapped archive (the mount + zero-copy slices). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
+        <!-- The nine production parser families (unified MartialHeroes.Assets.Parsers namespace). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Core\MartialHeroes.Assets.Parsers.Core.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Mesh\MartialHeroes.Assets.Parsers.Mesh.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Terrain\MartialHeroes.Assets.Parsers.Terrain.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.DataTables\MartialHeroes.Assets.Parsers.DataTables.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Effects\MartialHeroes.Assets.Parsers.Effects.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.World\MartialHeroes.Assets.Parsers.World.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Texture\MartialHeroes.Assets.Parsers.Texture.csproj"/>
+        <!-- Mapping = the modern-format bridge used by the `convert` subcommand (mesh→GLB, texture→PNG, xeff→JSON). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
+    </ItemGroup>
+
+    <!--
+        CP949 (Korean code page 949) decoding for client text payloads is provided by
+        System.Text.Encoding.CodePages (in the .NET 10 shared framework). Program.cs registers it via
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance).
+    -->
+
+</Project>

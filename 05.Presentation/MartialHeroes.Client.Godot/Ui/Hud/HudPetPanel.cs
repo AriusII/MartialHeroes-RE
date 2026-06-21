@@ -63,15 +63,14 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game player-couple / pair-relation window (PetPanel, slot 194).
-///
-/// <para>IMPORTANT: "PetPanel" is the retained legacy name. This is the COUPLE/PAIR window,
-/// not a creature-pet feature. Auto-shown by S2C 5/53 SmsgActorPairRelation.</para>
-///
-/// <para>PASSIVE: zero game logic; no domain mutation; net sends = TODO stubs.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 194.
+///     In-game player-couple / pair-relation window (PetPanel, slot 194).
+///     <para>
+///         IMPORTANT: "PetPanel" is the retained legacy name. This is the COUPLE/PAIR window,
+///         not a creature-pet feature. Auto-shown by S2C 5/53 SmsgActorPairRelation.
+///     </para>
+///     <para>PASSIVE: zero game logic; no domain mutation; net sends = TODO stubs.</para>
+///     spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 194.
 /// </summary>
 public sealed partial class HudPetPanel : Control
 {
@@ -116,15 +115,15 @@ public sealed partial class HudPetPanel : Control
     // msg.xdb caption ids (CODE-CONFIRMED)
     // spec: Docs/RE/specs/ui_system.md §8.26.5 CODE-CONFIRMED
     private const int MsgHelpBtn = 16002; // spec: §8.26.5 — help-button caption (action 2)
+    private ProgressBar? _gauge0;
+    private ProgressBar? _gauge1;
+    private Label? _levelLabel;
 
     // -------------------------------------------------------------------------
     // Child references
     // -------------------------------------------------------------------------
 
     private Label? _nameLabel;
-    private Label? _levelLabel;
-    private ProgressBar? _gauge0;
-    private ProgressBar? _gauge1;
 
     // -------------------------------------------------------------------------
     // View state
@@ -137,11 +136,10 @@ public sealed partial class HudPetPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the couple/pair-relation window at its fixed absolute position.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_system.md §8.26.1 CODE-CONFIRMED — geometry.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 194.
+    ///     Geometry pass: builds the couple/pair-relation window at its fixed absolute position.
+    ///     spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_system.md §8.26.1 CODE-CONFIRMED — geometry.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 194.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -205,7 +203,7 @@ public sealed partial class HudPetPanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(0f, NameLblY), // spec: §8.26.1
             Size = new Vector2(WinW, NameLblH), // spec: §8.26.1
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_nameLabel);
 
@@ -217,7 +215,7 @@ public sealed partial class HudPetPanel : Control
             Text = string.Empty,
             Position = new Vector2(10f, 59f), // spec: §8.26.1
             Size = new Vector2(78f, 15f), // spec: §8.26.1
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_levelLabel);
 
@@ -231,7 +229,7 @@ public sealed partial class HudPetPanel : Control
             Value = 0.0,
             Position = new Vector2(GaugeX, Gauge0Y), // spec: §8.26.1
             Size = new Vector2(GaugeW, GaugeH), // spec: §8.26.1
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_gauge0);
 
@@ -245,7 +243,7 @@ public sealed partial class HudPetPanel : Control
             Value = 0.0,
             Position = new Vector2(GaugeX, Gauge1Y), // spec: §8.26.1
             Size = new Vector2(GaugeW, GaugeH), // spec: §8.26.1
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_gauge1);
 
@@ -264,7 +262,7 @@ public sealed partial class HudPetPanel : Control
             Text = text?.GetCaption(MsgHelpBtn, "[정보]") ?? "[정보]", // msg 16002 // spec: §8.26.5
             Position = new Vector2(110f, 253f), // spec: §8.26.1
             Size = new Vector2(110f, 39f), // spec: §8.26.1
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         infoBtn.Pressed += () => OnAction(7); // action 7 = info/details // spec: §8.26.3
         AddChild(infoBtn);
@@ -286,13 +284,13 @@ public sealed partial class HudPetPanel : Control
         var btn = new Button
         {
             Name = nodeName,
-            Text = action == 8 ? "×" : (action == 0 ? "−" : "?"),
+            Text = action == 8 ? "×" : action == 0 ? "−" : "?",
             Position = new Vector2(x, y),
             Size = new Vector2(CornerBtnSize, CornerBtnSize), // spec: §8.26.1 — 11×11
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn.AddThemeFontSizeOverride("font_size", 8);
-        int captured = action;
+        var captured = action;
         btn.Pressed += () => OnAction(captured);
         AddChild(btn);
     }
@@ -303,12 +301,12 @@ public sealed partial class HudPetPanel : Control
         var btn = new Button
         {
             Name = nodeName,
-            Text = $"[{action}]",
+            Text = string.Empty,
             Position = new Vector2(x, y),
             Size = new Vector2(CmdBtnW, CmdBtnH), // spec: §8.26.1 — 91×25
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        int captured = action;
+        var captured = action;
         btn.Pressed += () => OnAction(captured);
         AddChild(btn);
     }
@@ -319,12 +317,11 @@ public sealed partial class HudPetPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Populates and shows the panel from a partner actor push.
-    /// Called when S2C SmsgActorPairRelation (5/53) fires the relation-set path.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED —
-    /// "auto-shown by S2C 5/53 on relation-set; populate from partnered actor record".
-    /// TODO(world-campaign): call from the 5/53 packet handler.
+    ///     Populates and shows the panel from a partner actor push.
+    ///     Called when S2C SmsgActorPairRelation (5/53) fires the relation-set path.
+    ///     spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED —
+    ///     "auto-shown by S2C 5/53 on relation-set; populate from partnered actor record".
+    ///     TODO(world-campaign): call from the 5/53 packet handler.
     /// </summary>
     public void ShowPartner(string partnerName, int partnerLevel, float gauge0Value, float gauge1Value)
     {
@@ -342,10 +339,9 @@ public sealed partial class HudPetPanel : Control
     }
 
     /// <summary>
-    /// Clears the panel and hides it (relation clear or partner death).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED —
-    /// "hidden on relation clear (5/53 clear path), confirm-click, partner death (SmsgCharDeath)".
+    ///     Clears the panel and hides it (relation clear or partner death).
+    ///     spec: Docs/RE/specs/ui_system.md §8.26.4 CODE-CONFIRMED —
+    ///     "hidden on relation clear (5/53 clear path), confirm-click, partner death (SmsgCharDeath)".
     /// </summary>
     public void ClearPartner()
     {

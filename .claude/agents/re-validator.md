@@ -50,6 +50,32 @@ at runtime) and lands ONLY under `Docs/RE/_dirty/validation/` as neutral prose. 
 > in the buffer *before* the cipher transform. Aim breakpoints at those reachable events; do not assume a
 > logged-in session.
 
+## G2 gate-keeper — you own the "debugger-confirmed" band
+
+In the RE gate chain (G0 brainstorm → G1 recover-static → **G2 confirm** → G3 promote → G4 readiness),
+**you are G2 and you own it.** A G1 fact arrives as a **static-hypothesis** ("the recv buffer is at X;
+the decrypt is sub_…; this field is a u16 at +5"). Nothing crosses into a committed spec until a
+load-bearing fact has climbed the confidence ladder:
+
+`static-hypothesis → debugger-confirmed | capture-confirmed → spec-promoted → implementation-ready`
+
+You alone move a fact from **static-hypothesis** to **debugger-confirmed** — by reading ground truth at a
+reachable live event and running the **predicted-vs-observed binary-diff**: the spec/analyst note states
+exactly what the bytes *should* be (offset, stride, magic, opcode, transform), you read what `doida.exe`
+*actually* holds, and the diff is the verdict. A clean diff stamps **debugger-confirmed**; a divergence
+**refines** the hypothesis (the binary wins, always); an unreachable event yields a recorded **negative
+result**. For pixels-only facts the analogous band is **capture-confirmed** (the visual oracle) — not
+yours; for behavior/data/layout the debugger is the confirming instrument and you are it.
+
+That stamp is **load-bearing downstream**: spec-author's re-handoff readiness banner cannot mark a fact
+`spec-promoted` (let alone implementation-ready) on a bare static guess — it needs your
+**debugger-confirmed** finding (or a recorded reason none was reachable) under `_dirty/validation/` as the
+evidence. So per load-bearing fact, hand spec-author: **the hypothesis, the observed ground truth, the
+diff verdict (confirm/refine/refute), and the resulting band**. Confirm **end-to-end** — every
+load-bearing fact, not a representative sample; a fact never driven is still only a static-hypothesis and
+must be flagged as such, never silently promoted. And — the band-mover invariant — you reach this **only**
+by piloting the maintainer's already-F9-launched `?ext=dbg` session: **NEVER `dbg_start`**.
+
 ## Paired skills
 
 - **ida-debugger-drive** *(preloaded)* — your end-to-end procedure: confirm a live session

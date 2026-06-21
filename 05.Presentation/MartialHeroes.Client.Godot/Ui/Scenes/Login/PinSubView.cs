@@ -4,12 +4,18 @@
 //
 // Backed entirely by HudAtlasLibrary — no UiAssetLoader dependency.
 // Faithfully reimplements GU PIN modal behaviour from:
+//   spec: Docs/RE/specs/frontend_layout_tables.md §3 (chrome re-trace 2026-06-19, CODE-CONFIRMED).
 //   spec: Docs/RE/specs/frontend_scenes.md §11.3 (CODE-CONFIRMED layout).
 //
 // Layout (panel-local coordinates inside the 329×422 modal panel):
+//   BACKDROP (drawn first, behind everything):
+//     password.dds source (0,0,329,422) → panel-local (0,0) size 329×422.
+//     This region contains the ornate window frame, carved title "2차 비밀번호 입력",
+//     red multi-line warning, "번호입력" caption and input-field box — all baked art.
+//     Do NOT synthesize these as Godot labels or color rects; they are pixels in the texture.
 //   Keypad:  2 × 5 tiles, each 52×52. Column spacing 55. Col0 X=28.
 //            Row 0 Y=170 (digits 0..4), Row 1 Y=230 (digits 5..9).
-//   Digit d glyph: password.dds src(d*52, 560/612/664, 52,52).
+//   Digit d glyph: password.dds src(d*52, 560/664/612, 52,52) Normal/Pressed/Hover.
 //   Reset button (tag 11): panel-local (243,133,58,30). password.dds N(663,8) H(663,88) P(663,48).
 //     → wipes the entered digits AND re-scrambles the keypad (NOT a single-digit backspace).
 //   OK button (tag 12): panel-local (90,290,154,58). password.dds N(330,0) H(330,116) P(330,58).
@@ -17,8 +23,9 @@
 //   Cancel button (tag 13): panel-local (90,350,154,58). password.dds N(486,0) H(486,116) P(486,58).
 //     → closes the modal (Cancelled).
 //   There is NO separate clear/backspace tag — the only edit verbs are digit / Reset / OK / Cancel.
-//   spec: Docs/RE/specs/frontend_layout_tables.md §3 (re-confirmed vs binary 2026-06-18:
-//   Reset=11 → ScrambleKeypad, OK=12 → SubmitOk, Cancel=13 → Cancel).
+//   The InventWindow.dds ExitPanel (340×190 src(318,647)) IS built in the original but kept HIDDEN
+//   (SetVisible(false)) — it is NOT drawn and NOT added here.
+//   spec: Docs/RE/specs/frontend_layout_tables.md §3 — Reset=11, OK=12, Cancel=13.
 //
 // Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
@@ -35,26 +42,37 @@
 // spec: Docs/RE/specs/frontend_scenes.md §11.3e — Fisher-Yates scramble: CODE-CONFIRMED.
 
 using Godot;
-using MartialHeroes.Client.Godot.Screens.Layout;
 using MartialHeroes.Client.Godot.Ui.Assets;
-using MartialHeroes.Client.Godot.Ui.Widgets;
+using MartialHeroes.Client.Presentation.Screens.Layout;
+
+// LoginLayout, WidgetRect (moved to engine-free layer)
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 /// <summary>
-/// PIN input sub-view for Login(1) sub-states 31/32.
-///
-/// <para>Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary"/>.
-/// Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
-/// OK (tag 11), Clear (tag 12), third/cancel (tag 13) buttons.</para>
-///
-/// <para>Subscribe to <see cref="PinSubmitted"/> and <see cref="Cancelled"/> to receive
-/// the outcome and emit the appropriate use-case call. Never mutate domain state here.</para>
-///
-/// spec: Docs/RE/specs/frontend_scenes.md §11.3 — CODE-CONFIRMED PIN modal.
+///     PIN input sub-view for Login(1) sub-states 31/32.
+///     <para>
+///         Builds a 2×5 scrambled keypad from <c>password.dds</c> via <see cref="HudAtlasLibrary" />.
+///         Fisher-Yates scramble seeded from wall-clock milliseconds (spec §11.3e).
+///         Reset (tag 11), OK (tag 12), Cancel (tag 13) buttons.
+///     </para>
+///     <para>
+///         Subscribe to <see cref="PinSubmitted" /> and <see cref="Cancelled" /> to receive
+///         the outcome and emit the appropriate use-case call. Never mutate domain state here.
+///     </para>
+///     spec: Docs/RE/specs/frontend_scenes.md §11.3
 /// </summary>
 public sealed partial class PinSubView : Control
 {
+    [Signal]
+    public delegate void CancelledEventHandler();
+
+    // -------------------------------------------------------------------------
+    // Signals
+    // -------------------------------------------------------------------------
+
+    [Signal]
+    public delegate void PinSubmittedEventHandler(string pin);
     // -------------------------------------------------------------------------
     // Atlas path
     // spec: Docs/RE/specs/frontend_scenes.md §11.1 "password.dds, 1024×1024 DXT3". CODE-CONFIRMED.
@@ -83,10 +101,12 @@ public sealed partial class PinSubView : Control
     private const int Row1Y = LoginLayout.PinKeypadRow1Y; // 230
 
     // Digit glyph source V rows in password.dds.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.3b. CODE-CONFIRMED.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 — Normal=560, Pressed=664, Hover=612 (CORRECTED).
+    // The prior "Pressed 612 / Hover 664" reading was INVERTED — the construct call's argument order
+    // (NORMAL,PRESSED,HOVER per §0.12) resolves 664 as PRESSED and 612 as HOVER unambiguously.
     private const int DigitNormalV = LoginLayout.PinDigitNormalSrcY; // 560
-    private const int DigitHoverV = LoginLayout.PinDigitHoverSrcY; // 664
-    private const int DigitPressedV = LoginLayout.PinDigitPressedSrcY; // 612
+    private const int DigitHoverV = LoginLayout.PinDigitHoverSrcY; // 612 (CORRECTED from 664)
+    private const int DigitPressedV = LoginLayout.PinDigitPressedSrcY; // 664 (CORRECTED from 612)
     private const int DigitColW = LoginLayout.PinDigitColWidth; // 52
 
     // PIN capacity.
@@ -109,45 +129,25 @@ public sealed partial class PinSubView : Control
     private const int PinDisplayH = 22;
 
     // -------------------------------------------------------------------------
-    // Signals
-    // -------------------------------------------------------------------------
-
-    [Signal]
-    public delegate void PinSubmittedEventHandler(string pin);
-
-    [Signal]
-    public delegate void CancelledEventHandler();
-
-    // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
     private string _pin = "";
 
-    // Scrambled digit assignment: _scrambled[keypadSlot] = actualDigit.
-    // Fisher-Yates from wall-clock seed. spec §11.3e. CODE-CONFIRMED.
-    private int[] _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-
     // PIN display label.
     private Label? _pinDisplay;
 
-    // DEV: prefill PIN for offline replay (skip keypad interaction).
-    // This is the only departure from the pure-passive contract — it is a DEV-only
-    // convenience that skips the visual scrambled keypad and auto-submits.
-    // guarded by IsDevPrefillActive.
-    public string? DevPrefillPin { private get; set; }
-
-    // Retained for LoginWindow/LoginScene factory compatibility; the recovered rect is absolute either way.
-    // spec: Docs/RE/specs/frontend_scenes.md §11.3 "panel rect (347,173,329,422)". CODE-CONFIRMED.
-    public bool HostInReferenceSpace { get; set; }
+    // Scrambled digit assignment: _scrambled[keypadSlot] = actualDigit.
+    // Fisher-Yates from wall-clock seed. spec §11.3e. CODE-CONFIRMED.
+    private int[] _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates the PIN sub-view.
+    ///     Creates the PIN sub-view.
     /// </summary>
     /// <param name="atlas">HUD atlas library (may be null-backed for offline).</param>
     public PinSubView(HudAtlasLibrary atlas)
@@ -186,66 +186,63 @@ public sealed partial class PinSubView : Control
             Text = "",
             Position = new Vector2(PinDisplayX, PinDisplayY),
             Size = new Vector2(PinDisplayW, PinDisplayH),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);
 
         // Reset(11) / OK(12) / Cancel(13) control buttons.
         BuildControlButtons();
-
-        // DEV: auto-submit prefilled PIN if provided.
-        if (DevPrefillPin is { Length: > 0 } pre)
-        {
-            GD.Print($"[PinSubView] DEV prefill: auto-submitting PIN (len={pre.Length}).");
-            _pin = pre.Length > PinMaxLength ? pre[..PinMaxLength] : pre;
-            UpdatePinDisplay();
-            CallDeferred(MethodName.AutoSubmitPin);
-        }
-    }
-
-    private void AutoSubmitPin()
-    {
-        OnButtonAction(TagOk);
     }
 
     // -------------------------------------------------------------------------
-    // Modal chrome: transparent click-capture + dragon-frame plate
-    // spec: Docs/RE/specs/frontend_layout_tables.md §3 (dragon frame 340×190 src(318,647), centered);
-    //       ui_system.md §1.6 (GUPanel_ShowModalAndFocus — focus-capturing modal eats outside clicks).
+    // Modal chrome: transparent click-capture + password.dds backdrop blit
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3
+    //   "the keypad constructor assigns data/ui/password.dds as the panel's own backdrop texture …
+    //    blits that backdrop BEFORE the children, source (0,0)-(329,422) → destination (347,173)
+    //    size 329×422. The ornate chrome IS this backdrop region — frame, title '2차 비밀번호 입력',
+    //    red warning, '번호입력' caption, input-field box — all painted into the texture."
+    //   "The reused ExitPanel child (InventWindow.dds 340×190 src(318,647)) is built then kept
+    //    HIDDEN (SetVisible(false)). Do not draw it." (§3 "Hidden reused ExitPanel child".)
     // -------------------------------------------------------------------------
 
     private void BuildModalChrome()
     {
         // Transparent full-canvas capture rect: a focus-capturing modal eats clicks outside the panel
         // so they do NOT fall through to the login form. No invented dim tint (not in the binary).
+        // Must be first child so it sits behind the backdrop.
         AddChild(new ColorRect
         {
             Color = new Color(0f, 0f, 0f, 0f),
             Position = new Vector2(-ModalX, -ModalY), // covers the whole 1024×768 canvas
             Size = new Vector2(1024, 768),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         });
 
-        // Dragon-frame chrome (same InventWindow.dds plate as the confirm dialogs), centered in the
-        // 329×422 panel. spec §3 "Dragon frame 340×190, src(318,647), centered".
-        int frameX = (ModalW - LoginLayout.ModalChromeW) / 2;
-        int frameY = (ModalH - LoginLayout.ModalChromeH) / 2;
-        Texture2D? frame = _atlas.SliceByPath(LoginLayout.AtlasInventWindow,
-            LoginLayout.ModalChromeSrcX, LoginLayout.ModalChromeSrcY,
-            LoginLayout.ModalChromeW, LoginLayout.ModalChromeH);
-        if (frame is not null)
-        {
+        // password.dds backdrop blit: source (0,0,329,422) → panel-local (0,0) size 329×422.
+        // This IS the entire ornate window chrome — frame, title, warning text, input-field box
+        // are all baked into this region of the texture. Drawn BEFORE the keypad children.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 (chrome re-trace 2026-06-19).
+        Texture2D? backdrop = _atlas.SliceByPath(
+            AtlasPassword,
+            0, 0, // srcX=0, srcY=0 — top-left corner of password.dds
+            ModalW, ModalH // 329×422 — exact panel size = exact source region
+        );
+        if (backdrop is not null)
             AddChild(new TextureRect
             {
-                Position = new Vector2(frameX, frameY),
-                Size = new Vector2(LoginLayout.ModalChromeW, LoginLayout.ModalChromeH),
-                Texture = frame,
+                Position = Vector2.Zero, // panel-local (0,0)
+                Size = new Vector2(ModalW, ModalH),
+                Texture = backdrop,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore // transparent to input; buttons above handle it
             });
-        }
+
+        // NOTE: the InventWindow.dds dragon-frame (ExitPanel clone 340×190 src(318,647)) IS built
+        // by the original constructor but is immediately kept hidden (SetVisible(false)) and never
+        // drawn. We do NOT add it here — it is explicitly absent from the visible draw order.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 "Hidden reused ExitPanel child".
     }
 
     // -------------------------------------------------------------------------
@@ -258,25 +255,25 @@ public sealed partial class PinSubView : Control
         // Position 0..4 = top row (Y=Row0Y), Position 5..9 = bottom row (Y=Row1Y).
         // Digit assigned via _scrambled[position].
         // spec: Docs/RE/specs/frontend_scenes.md §11.3a "100 buttons total, actions 0..99".
-        for (int pos = 0; pos < 10; pos++)
+        for (var pos = 0; pos < 10; pos++)
         {
-            int digit = _scrambled[pos];
-            int col = pos % 5;
-            int row = pos / 5;
+            var digit = _scrambled[pos];
+            var col = pos % 5;
+            var row = pos / 5;
 
-            int x = Col0X + col * ColSpacing; // spec §11.3a. CODE-CONFIRMED.
-            int y = row == 0 ? Row0Y : Row1Y; // spec §11.3a. CODE-CONFIRMED.
+            var x = Col0X + col * ColSpacing; // spec §11.3a. CODE-CONFIRMED.
+            var y = row == 0 ? Row0Y : Row1Y; // spec §11.3a. CODE-CONFIRMED.
 
-            for (int face = 0; face < 10; face++)
+            for (var face = 0; face < 10; face++)
             {
                 // Digit face glyph: srcU = face*52; srcV per state.
                 // spec: Docs/RE/specs/frontend_scenes.md §11.3b.
-                int srcU = face * DigitColW;
+                var srcU = face * DigitColW;
 
                 Texture2D? normal = _atlas.SliceByPath(AtlasPassword, srcU, DigitNormalV, TileW, TileH);
                 Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, srcU, DigitPressedV, TileW, TileH);
                 Texture2D? hover = _atlas.SliceByPath(AtlasPassword, srcU, DigitHoverV, TileW, TileH);
-                bool shown = face == digit;
+                var shown = face == digit;
 
                 var btn = new TextureButton
                 {
@@ -290,10 +287,10 @@ public sealed partial class PinSubView : Control
                     TexturePressed = pressed,
                     TextureDisabled = normal,
                     Visible = shown,
-                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore,
+                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore
                 };
 
-                int actionId = pos * 10 + face;
+                var actionId = pos * 10 + face;
                 btn.Pressed += () => OnDigitFaceAction(actionId);
                 AddChild(btn);
             }
@@ -321,10 +318,10 @@ public sealed partial class PinSubView : Control
             TextureNormal = normal,
             TextureHover = hover,
             TexturePressed = pressed,
-            TextureDisabled = normal,
+            TextureDisabled = normal
         };
 
-        int capturedTag = tag;
+        var capturedTag = tag;
         btn.Pressed += () => OnButtonAction(capturedTag);
         AddChild(btn);
     }
@@ -343,8 +340,8 @@ public sealed partial class PinSubView : Control
 
     private void OnDigitFaceAction(int actionId)
     {
-        int pos = actionId / 10;
-        int face = actionId % 10;
+        var pos = actionId / 10;
+        var face = actionId % 10;
         if ((uint)pos >= (uint)_scrambled.Length || _scrambled[pos] != face)
             return;
 
@@ -368,17 +365,25 @@ public sealed partial class PinSubView : Control
                 break;
 
             case TagOk:
-                // OK tag 12: submit the PIN. Application validates length.
-                // spec: frontend_layout_tables.md §3 (binary: tag 12 → SubmitOk).
+                // OK tag 12: submit the PIN, then re-scramble (re-roll on OK per spec §3).
+                // spec: frontend_layout_tables.md §3 "re-roll: the scramble re-seeds and re-shuffles on
+                //   open (SetVisible-show), Reset, OK, and Cancel."
                 GD.Print($"[PinSubView] OK (tag 12): PinSubmitted(pin_len={_pin.Length}). " +
                          "spec: frontend_layout_tables.md §3.");
                 EmitSignal(SignalName.PinSubmitted, _pin);
+                _pin = "";
+                Scramble();
+                RebuildKeypad();
                 break;
 
             case TagCancel:
-                // Cancel tag 13: close the modal.
-                // spec: frontend_layout_tables.md §3 (binary: tag 13 → Cancel).
+                // Cancel tag 13: close the modal, then re-scramble (re-roll on Cancel per spec §3).
+                // spec: frontend_layout_tables.md §3 "re-roll: the scramble re-seeds and re-shuffles on
+                //   open (SetVisible-show), Reset, OK, and Cancel."
                 GD.Print("[PinSubView] Cancel (tag 13): Cancelled. spec: frontend_layout_tables.md §3.");
+                _pin = "";
+                Scramble();
+                RebuildKeypad();
                 EmitSignal(SignalName.Cancelled);
                 break;
         }
@@ -410,14 +415,14 @@ public sealed partial class PinSubView : Control
         _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
         // Seed from the whole-second wall clock (CRT time()). spec §3.
-        int seed = (int)((long)global::Godot.Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
+        var seed = (int)((long)Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
         var rng = new Random(seed);
 
         // Ascending Fisher-Yates (MSVC random_shuffle): for i = 1..9, swap a[i] with a[rand() mod (i+1)].
         // spec §3.
-        for (int i = 1; i < 10; i++)
+        for (var i = 1; i < 10; i++)
         {
-            int j = rng.Next(0, i + 1);
+            var j = rng.Next(0, i + 1);
             (_scrambled[i], _scrambled[j]) = (_scrambled[j], _scrambled[i]);
         }
     }
@@ -429,7 +434,7 @@ public sealed partial class PinSubView : Control
         // Store non-keypad children, clear, re-add.
         // Simpler: just free keypad-tagged buttons. Since we added dim+keypad+display+buttons
         // in a known order, re-add everything.
-        foreach (Node child in GetChildren())
+        foreach (var child in GetChildren())
             child.QueueFree();
         _pinDisplay = null;
 
@@ -443,7 +448,7 @@ public sealed partial class PinSubView : Control
             Text = new string('*', _pin.Length),
             Position = new Vector2(PinDisplayX, PinDisplayY),
             Size = new Vector2(PinDisplayW, PinDisplayH),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center
         };
         _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
         AddChild(_pinDisplay);

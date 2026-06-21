@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 16-byte body -- Sort@0x00 /
+#                 ActorId@0x04 / TimedValue@0x08 / StateByte@0x0C -- are control-flow-confirmed; the
+#                 handler's runtime write destinations are live-actor fields, NOT wire fields; every
+#                 wire-byte VALUE meaning is capture-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none (runtime-offset hygiene applied -- the live-actor mixer/timer destinations were
+#              dropped from the field table; they are not on the wire)
+
+name: SmsgActorTimedStateUpdate
+opcode: 0x50088           # major 5 (Push), minor 136 -> (5 << 16) | 136
+direction: S2C
+size: 16                  # fixed 16-byte body (0x10)
+spec: packets/5-136_actor_timed_state_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server sets a temporary / periodic timed state value and a state flag on an actor, optionally propagating the value to a linked companion actor. A fixed 16-byte body keyed by (Sort, ActorId).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 16.
+fields:
+  - { name: Sort,       type: u32 }          # 0x00  actor sort key
+  - { name: ActorId,    type: u32 }          # 0x04  actor id to update
+  - { name: TimedValue, type: u32 }          # 0x08  timed-state duration / value
+  - { name: StateByte,  type: u8 }           # 0x0c  state flag byte
+  - { name: Pad0,       type: "bytes[3]" }   # 0x0d  alignment padding to 16 bytes
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 16-byte body and the field offsets. CAPTURE-UNVERIFIED for the
+  VALUE meanings.
+
+    0x00 (4B) Sort       : actor sort key (the lookup checks the local player first, then the manager).
+    0x04 (4B) ActorId    : actor id to update.
+    0x08 (4B) TimedValue : a timed-state duration or value.
+    0x0c (1B) StateByte  : a state flag byte.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): the handler writes TimedValue and StateByte into
+  live-actor runtime fields (the animation-mixer / timer region, outside the descriptor window), and
+  -- if the actor has a linked partner/companion -- mirrors TimedValue onto that partner actor and
+  pulses a UI panel. Those runtime destinations and side effects are NOT wire fields; only the 16-byte
+  wire body above is promotable.
+
+  UNKNOWNS to resolve with a capture: what TimedValue measures (a duration vs a magnitude) and the
+  StateByte's enum meaning.

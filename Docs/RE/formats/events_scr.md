@@ -13,9 +13,15 @@
 >   field-consumption contract is established from neutral static control-flow notes). Genuinely
 >   ambiguous items (mode_flag's exact 0/1 semantics; the 5 anomalous records' @0x08 sub-block) stay
 >   capture/debugger-pending.
-> ida_reverified: 2026-06-16
+> ida_reverified: 2026-06-20
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
+> CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): events.scr runtime linkage = event_id→record
+>   exact-match map, consumed by item/shop/exchange UI only (NOT timer/zone/captcha; captcha =
+>   autoquestion_cl.scr); see Runtime-linkage section (§1.9). Byte layout (§1.1–§1.8) unchanged.
+> CYCLE 7 note (verification: IDB SHA 263bd994, CYCLE 7 (2026-06-20)): disambiguated the table's `event_id` keys from the
+>   runtime timed-event ENGINE ids (e.g. 10003 = death-respawn countdown, 10001 = engine-quit); those
+>   engine ids are NOT events.scr records — see §1.10. No byte-layout change.
 > conflicts: none open in §1/§2. §3 is an estimate index only — its `userlevel.scr` stride estimate
 >   (120) is REFUTED (see §3); the authoritative value is 60 B / 300 records (scr.md / config_tables.md).
 >
@@ -176,6 +182,146 @@ event in the data but are not exercised by this client build.
 - `event_type` and `day_count` were observed with a near-single value each; whether other values
   occur in other game versions is unknown (and also client-unconsumed).
 
+### 1.9 Runtime linkage / consumer surface (how the table is loaded, looked up, and used)
+
+This section describes the runtime WIRING around `events.scr` — what loads it, where the parsed table
+lives in memory, what selects a row, and what consumes it — as distinct from §1.3's byte layout. It
+is the operative reference for re-implementing the table's behaviour faithfully.
+
+**Confidence: CONFIRMED (static) for the loader → storage → map chain, the single lookup accessor and
+its consumer call sites, and the key rule. PLAUSIBLE for the exact per-panel meaning of each consumed
+event (drop-rate display vs exchange-choice list vs goods toggle). CONFIRMED that the anti-bot captcha
+is NOT sourced here. One OPEN-RISK is carried (the item-side join column — see §1.9.5).**
+
+#### 1.9.1 Loader linkage
+
+`events.scr` is loaded **once, at boot**, by the data-table corpus loader (the same bulk pass that
+loads the other `data/script/*.scr` tables). The events.scr table is the first table that pass loads.
+A dedicated loader routine takes the logical path `data/script/events.scr`, validates that the file
+size is a whole multiple of the 520-byte record stride, sets `record_count = file_size / 520`,
+bulk-copies the entire file into one heap buffer, and then iterates the records reading **only the
+leading `event_id` u32 (@0x00) of each** to populate an `event_id → record` lookup index. No other
+field is touched at load time. (Consistent with §1.2 and §1.6.) CONFIRMED.
+
+#### 1.9.2 Parsed-table storage (three cooperating roles)
+
+The loader writes the parsed table into **three cooperating storage roles** that together form one
+owning unit:
+
+1. **Record vector** — the container object that owns the contiguous blob of fixed 520-byte records
+   (it carries the 520-byte element stride and handles sizing/growth). It is the lifetime owner of
+   the record data.
+2. **Record-blob base pointer** — the data pointer of that vector, i.e. the base address of the
+   contiguous record blob (the bulk-loaded file image). Every record-field read indexes off this
+   base: **record N lives at `base + 520·N`**.
+3. **`event_id → record` map** — the root of a balanced (red-black) tree index keyed on the record's
+   `event_id` (u32 @0x00), whose value is a pointer to that record inside the blob. One entry is
+   inserted per record at load. This tree is the **lookup index** every consumer uses.
+
+A teardown/reset routine clears the map first, then the record vector — confirming the three roles
+are one owning unit released together. CONFIRMED.
+
+#### 1.9.3 The KEY RULE — `event_id` exact-match lookup (load-bearing)
+
+> A runtime trigger always carries an **`event_id` (u32)**. The client maps it to a row by an
+> **exact-match search of the `event_id → record` balanced tree** — there is a single shared lookup
+> accessor that performs this tree search and is the **only** read path into the table.
+>
+> - **Map MISS** (no record with that `event_id`): the accessor yields "none", and the consumer
+>   **no-ops** — the tooltip shows nothing, the eligibility predicate is false, the choice list is
+>   empty.
+> - **Map HIT**: the accessor yields the record pointer. The consumer then reads the `mode_flag`
+>   (u16 @0x64) — the eligibility/display-mode selector (value `1` vs `0`) — and walks the two
+>   positionally-paired fixed arrays: the `rate_array` (u32[50] @0x68, each value **divided by
+>   1,000,000** to yield a percent) and the `actor_array` (u32[52] @0x130, each entry an actor/item
+>   id, **zero-terminated**, each resolved through the actor manager by id).
+
+There is **NO row-index addressing and NO per-row type-byte dispatch.** Row selection is purely the
+`event_id` primary-key map lookup; once a row is found the consumer branches on the `mode_flag`, never
+on a "row type". CONFIRMED. (This matches §1.6: only `event_id`, `mode_flag`, `rate_array`,
+`actor_array` are ever consumed.)
+
+#### 1.9.4 Consumer surface — item / shop / exchange UI ONLY
+
+The consumer surface for `events.scr` is **entirely an item / shop / exchange UI lookup system**.
+There is **no** timer, clock, day-window, level-gate, zone-entry, or anti-bot trigger that reads this
+table in this build. Every consumer reaches a row through the single `event_id` lookup accessor
+(§1.9.3); the distinct consumer behaviours observed are:
+
+- **Tooltip / display builder** — reads `mode_flag`, then iterates the `actor_array`, resolving each
+  entry to a name via the actor manager and annotating it with its positionally-paired `rate_array`
+  value (÷ 1,000,000) shown as a `%`. It builds choice/option lines into a tooltip/display buffer.
+  This is the path reached when an item in a shop/storage/exchange-style panel is hovered or opened.
+  (The "drop / contribution rate display" role of §1.7.)
+- **Eligibility predicate** — returns true only when a record is present **and** its `mode_flag`
+  equals `1`. It is the gate at the head of the selection flow.
+- **Actor choice-list builder** — when the eligibility predicate passes, iterates the `actor_array`
+  (zero/non-positive-terminated, capped at 50 entries) to materialise a selectable list of actors for
+  the player. The selection flow chains these: predicate first (abort if false), then build the list;
+  an empty list broadcasts a localized "nothing available" chat message.
+- **Goods-panel select** — for a goods row of a specific actor-class tag, looks up the item's stored
+  `event_id` and tests the **first** `actor_array` entry against a fixed actor id to toggle a UI
+  element.
+
+The exact per-panel semantics (rate display vs exchange choice vs goods toggle) are PLAUSIBLE; the
+fact that every one of these is an item/shop/exchange UI interaction (and none is a timer/zone/captcha
+trigger) is CONFIRMED from the call graph.
+
+#### 1.9.5 The trigger — a UI interaction with an event_id-bearing item/slot
+
+A row **fires on a UI interaction with an item or slot that carries an `event_id`** — never on a
+timer, clock, day-window, level, or anti-bot condition. Concretely:
+
+- **Hovering / opening** an item in a shop/storage/exchange panel renders the event's `actor_array`
+  with per-actor `%` rates into the tooltip (display builder).
+- **Selecting / clicking** an option in such a panel runs the `mode_flag == 1` eligibility gate, then
+  materialises the actor choice list for the player to pick from.
+- **Selecting** a goods-panel row of the relevant actor-class tag branches on the event's first
+  `actor_array` entry.
+
+In every case the `event_id` is supplied by the **UI context** — the item record or panel slot the
+player interacted with stores the `event_id` that joins it to the `events.scr` row. The record's
+day-window, level, and sub-flag fields are never read by any of these paths (matches §1.6).
+
+> **OPEN-RISK:** exactly which item/slot field stores the `event_id` join column on the item side has
+> not been byte-pinned — it was observed indirectly (one panel reads it off the item record at an
+> item-side offset; the tooltip/select panels receive it from slot context). Treat the **item → event_id
+> join column** as a follow-up to pin against the item-record / slot layout.
+
+#### 1.9.6 Not the captcha source (correction)
+
+The anti-bot **captcha** question pool is the **separate `autoquestion_cl.scr` table (Section 2)**,
+which is **server-pushed and has no client loader** — `events.scr` is NOT the captcha source. Any
+earlier framing of `events.scr` as a "captcha + role index" is superseded: `events.scr` is an
+item/shop/exchange event table only. This corroborates §2.4 (no client load path for
+`autoquestion_cl.scr`; the captcha text arrives over the wire). CONFIRMED.
+
+Likewise, the record's day-window, level-bound, and sub-flag fields (§1.3) are **never read by any
+consumer** — only `event_id`, `mode_flag`, `rate_array`, and `actor_array` participate in the runtime
+linkage above.
+
+#### 1.10 NOT the runtime timed-event engine (id-namespace disambiguation)
+
+There is a SEPARATE runtime **timed-event engine** in the client — a generic enqueue/tick scheduler
+that the gameplay code arms with a numeric `event_id`, a tick interval, and a remaining-count, and
+which is unrelated to this VFS table. Its ids share the small-integer 5-digit shape of some
+`events.scr` keys, so it is easy to confuse the two. They are **distinct**: the timed-event engine
+keys are NOT looked up in the `events.scr` `event_id → record` map, and conversely no `events.scr`
+record drives a timer (the entire consumer surface is item / shop / exchange UI — §1.9.4).
+
+Two timed-event-engine ids surfaced while reverse-engineering the death/respawn flow; recorded here
+ONLY to fence them off from this table's key space:
+
+| Timed-event engine id | Role | Notes |
+|----------------------:|------|-------|
+| **10003** | **Death-respawn countdown** | Local-player respawn timer: a one-second tick that counts a remaining-seconds value down to zero (auto-respawn fires at zero). The countdown duration is **600 seconds** for a normal death (an alternate short **20-second** value is selected in a PvP-zone branch — **region-gated**, the same per-region zone-type that `region_grid.md` describes), and a short one-shot for the special no-modal death cause. The countdown also drives the visual revive of remote actors. CONFIRMED (static IDA). The behavioural death/respawn flow (state fields, the modal, the respawn opcode/choice) belongs to `world_exit.md` — see the cross-reference there; this table does not participate. |
+| **10001** | Engine-quit signal | Handled in the same timed-event tick path as a teardown/shutdown trigger; entirely unrelated to respawn. Recorded only to avoid mistaking it for an `events.scr` key. CONFIRMED (static IDA). |
+
+Operative takeaway for an engineer: **do NOT look up 10003 or 10001 in `events.scr`.** An `events.scr`
+record is reached only by a UI interaction that carries the record's own `event_id` (§1.9.5); the
+death-respawn countdown and the engine-quit signal are runtime timed-event-engine ids handled outside
+this table. CONFIRMED.
+
 ---
 
 ## Section 2 — `autoquestion_cl.scr` (NPC anti-bot captcha Q&A table)
@@ -308,6 +454,10 @@ Out of scope (owned elsewhere): `items.scr`, `citems.scr`, `npc.scr`, `quests.sc
   its values through the item-ID resolver.
 - **Mob / skill / NPC roles** in the §3 index feed the recovered actor chains; see
   `Docs/RE/formats/actormotion.md`, `Docs/RE/formats/npc_spawns.md`, and `Docs/RE/specs/`.
+- **Timed-event engine ids** (§1.10) — the death-respawn countdown (id 10003, 600 s, region-gated)
+  and its full behavioural flow are owned by `Docs/RE/specs/world_exit.md`; the per-region zone-type
+  that gates the 600 s ↔ 20 s choice is described in `Docs/RE/formats/region_grid.md`. These are NOT
+  `events.scr` records.
 - **CP949 handling** convention: see project notes (register `CodePagesEncodingProvider`, use code
   page 949) — same as `Docs/RE/formats/misc_data.md`.
 - Glossary: see `Docs/RE/names.yaml` (candidate names for `names.yaml`: `event_id`, `mode_flag`,

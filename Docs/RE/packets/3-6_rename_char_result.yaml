@@ -1,0 +1,48 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the 3/6 handler reads a single fixed 12-byte block
+#     from the payload cursor — there is NO second read and NO name string-copy).
+#   frame-of-reference: offsets are BODY-relative (post-8-byte-header payload cursor).
+#   CYCLE 8 (2026-06-21) binary re-confirm: true body size is 12 bytes (0x0C), NOT 19. The earlier
+#     "19-byte / up-to-18-byte CP949 name @+1" reading is REFUTED — on success the handler copies
+#     no name; it consumes two trailing 4-byte values as IEEE floats and forwards them to the
+#     char-select slot-record writer (placement values, not slot-index/unk integers).
+#   ida_reverified: 2026-06-21   ida_anchor: 263bd994   evidence: [static-ida]   cycle: 8
+#   capture_verified: false
+
+name: SmsgRenameCharResult
+opcode: 0x30006           # major 3, minor 6 -> (3 << 16) | 6
+direction: S2C
+size: 12                  # 12-byte fixed payload (binary-confirmed; refutes a prior 19-byte reading)
+spec: packets/3-6_rename_char_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Character rename result message. Emitted by the server in response to C2S 1/13 rename request.
+  On success it carries two floating-point placement values forwarded to the renamed character's
+  select-lobby slot record. On failure it carries the error code which drives the error status line.
+
+fields:
+  - { name: Result,          type: u8 }     # 0x00  result status: 1 = success, 0 = failure, other = no-op
+  - { name: ErrorCode,       type: u8 }     # 0x01  error sub-code, used only on failure (e.g. name already exists, invalid characters)
+  - { name: Pad,             type: "bytes[2]" } # 0x02  alignment padding / unused
+  - { name: PlacementValue0, type: f32 }    # 0x04  floating-point placement value (loaded as IEEE float on success), forwarded to the slot-record writer
+  - { name: PlacementValue1, type: f32 }    # 0x08  second floating-point placement value (loaded as IEEE float on success), forwarded to the slot-record writer
+
+notes: |
+  Statically confirmed from the 3/6 handler (IDB 263bd994, CYCLE 8 re-confirm).
+  The handler reads a single fixed 12-byte block; offsets are BODY-relative (post-header cursor).
+  There is NO name string-copy on the success path — the prior 19-byte reading is refuted.
+
+  Success path (Result == 1):
+    Clears the pending rename latch, reads the two trailing 4-byte values as IEEE floats
+    (PlacementValue0 / PlacementValue1), and forwards them to the char-select slot-record writer.
+
+  Failure path (Result == 0):
+    Inspects ErrorCode and maps it to one of four UI message-string buckets:
+      - 0xC8 / 0xC9 -> message bucket A
+      - 0xCC / 0xCD / 0xCF / 0xD0 / 0xD1 / 0xD2 -> message bucket B
+      - 0xCE -> message bucket C
+      - 0xD4 -> message bucket D
+    Displays the selected error message on the status line. Out-of-set codes fall through silently.

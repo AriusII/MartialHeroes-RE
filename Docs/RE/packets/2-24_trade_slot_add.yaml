@@ -6,7 +6,7 @@ opcode: 0x20018           # major 2 (GameAction), minor 24 -> (2 << 16) | 24
 direction: C2S
 size: 20                 # fixed 20-byte payload built by the trade-slot builder
 spec: packets/2-24_trade_slot_add.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client add / update one trade-window slot (offer an item, set a quantity, or set the money total). A 1-byte category selector chooses the meaning of the three 4-byte numeric fields; money is carried as a 64-bit value split across two of them. The server replies with 4/24 TradeSlotUpdate.

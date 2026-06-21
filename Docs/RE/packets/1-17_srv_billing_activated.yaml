@@ -1,0 +1,27 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads 0 bytes from the payload cursor, header-only)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: SmsgSrvBillingActivated
+opcode: 0x10011           # major 1, minor 17 -> (1 << 16) | 17
+direction: S2C
+size: 0                   # header-only, 0-byte payload
+spec: packets/1-17_srv_billing_activated.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Server billing activated notification. Turns on the client's subscription-active state, 
+  formats a preset notification string (ID 45008), and posts it to the chat log or lobby status line.
+
+fields: []
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header on the wire.
+
+  When received:
+  - Sets the internal billing singleton's active state flag.
+  - If the player is in-game, logs a system message to the chat panel (channel 13).
+  - If in the lobby, displays the notice on the select screen status line.

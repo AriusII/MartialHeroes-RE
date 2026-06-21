@@ -1,7 +1,7 @@
 ---
 name: ida-struct-recovery
 description: Use when you need the field layout or vtable of a legacy object from the Martial Heroes client (Main.exe / doida.exe) — for example a packet struct, an entity/actor class, or an asset header — so a spec-author can write a clean offset table. Dumps member offset/size/type and vtable slots to the dirty quarantine, plus a neutral .h-style offset table that is safe to promote. Includes a dedicated VTABLE-WALK mode that resolves a C++ vtable from its data EA or its installing constructor, role-tags each function-pointer slot (ctor/dtor, per-frame virtual, getter, serialize), and harvests RTTI — the way to recover a polymorphic interface (an actor or asset-loader class hierarchy) before the clean struct is written.
-allowed-tools: Read Write
+allowed-tools: mcp__ida__* Read Write
 model: sonnet
 effort: high
 ---
@@ -108,7 +108,7 @@ together they give the whole object: fields + virtual interface.
 3. **Describe each slot, neutrally.** Turn the heuristic tags into a one-line conceptual description
    per slot ("slot 0: destructor", "slot 3: per-frame update", "slot 7: serialize-to-buffer"). These
    are hypotheses; confirm the important ones by reading the single slot's behavior
-   (`ida-decompile-export`) before a spec-author promotes them.
+   (`ida-explore` DECOMPILE-ONE mode) before a spec-author promotes them.
 4. **(Optional) harvest RTTI / class hierarchy.** For a wider sweep across many classes, the bundled
    `${CLAUDE_SKILL_DIR}/scripts/rtti_harvest.py` enumerates RTTI complete-object-locators / type
    descriptors / base-class arrays, and `${CLAUDE_SKILL_DIR}/scripts/c01_manifest_gen.py` builds a

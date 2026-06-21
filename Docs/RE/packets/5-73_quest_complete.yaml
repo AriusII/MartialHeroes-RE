@@ -1,30 +1,78 @@
-# DEPRECATED / REDIRECT -- do NOT implement from this file.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 #
-# BINARY-WINS CORRECTION (HUD-II Wave 4): opcode 5/73 was previously catalogued here as
-# SmsgQuestComplete (a "quest turn-in verdict"). A direct binary re-confirmation this wave proved this
-# is WRONG: the 5/73 handler reads a 344-byte (0x158) block and forwards it to the GuildWarInfoPanel
-# (the guild-war info window), drives its war-alarm banner, and rebuilds the panel. It is NOT a quest
-# channel. The quest result returns on 5/68 SmsgQuestList ONLY.
-#
-# The correct, current spec for opcode 5/73 lives at:
-#   packets/5-73_guildwar_info_update.yaml   (name: SmsgGuildWarInfoUpdate)
-#
-# This file is retained as a deprecation pointer so old citations resolve. It carries NO authoritative
-# fields. There is NO separate "quest complete" opcode -- quest turn-in results ride 5/68.
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 344-byte body, the verdict gate @+0x08
+#                 and the completion-subtype @+0x0C are control-flow-confirmed; the per-row reward record
+#                 layout inside the 344 bytes is forwarded verbatim into a panel mirror and is NOT
+#                 wire-pinned by a wire-side loop -- it is capture/struct-pending; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: BINARY-WINS NAME CORRECTION. A fresh instruction-level reading of the 5/73 handler (CYCLE
+#              4 netcode-deep) shows it gates on a quest verdict, plays a quest-completion cue, and
+#              forwards the block to a quest-RESULT panel that lays out a 10-row objective/reward list
+#              (CP949 names + integer counts) -- it references NO guild manager, NO guild-war string, NO
+#              war-window calls. Opcode 5/73 = SmsgQuestComplete. The earlier SmsgGuildWarInfoUpdate
+#              attribution is REFUTED. THIS file is the authoritative 5/73 spec;
+#              packets/5-73_guildwar_info_update.yaml is superseded (kept only as a redirect pointer).
 
-name: SmsgGuildWarInfoUpdate
+name: SmsgQuestComplete
 opcode: 0x50049           # major 5 (Push), minor 73 -> (5 << 16) | 73
 direction: S2C
-size: 344
-spec: packets/5-73_guildwar_info_update.yaml
-status: deprecated-redirect
+size: 344                 # fixed 344-byte payload block (0x158)
+spec: packets/5-73_quest_complete.yaml
+status: hypothesis
 capture_verified: false
 
-summary: DEPRECATED redirect. 5/73 is SmsgGuildWarInfoUpdate; see packets/5-73_guildwar_info_update.yaml. The former "SmsgQuestComplete" reading is refuted -- quest results ride 5/68.
+summary: >
+  Server pushes a quest turn-in / completion verdict. A fixed 344-byte block holding a verdict gate, a
+  success/cancel subtype byte (which plays or stops a quest-completion cue), then a forwarded body the
+  quest-result panel walks as a 10-row objective/reward list (each row a CP949 name + an integer count).
+  This is the quest turn-in verdict channel; the full quest LIST snapshot rides 5/68.
 
+# Fixed 344-byte block. Only the verdict header (+0x08 gate, +0x0C subtype) is wire-pinned; the reward
+# rows are copied verbatim into a panel mirror and the panel walks the MIRROR (not the raw wire), so the
+# exact wire offset of the 10-row name+count array is NOT pinned by a wire-side loop. The body beyond the
+# header is therefore reserved as one opaque region (do NOT publish guessed row offsets).
 fields:
-  - { name: Payload, type: "bytes[344]" }   # 0x000  see packets/5-73_guildwar_info_update.yaml
+  - { name: Head,    type: "bytes[8]" }     # 0x000  leading region read before the verdict gate (opaque; not field-decoded)
+  - { name: Gate,    type: u32 }            # 0x008  verdict gate: the handler proceeds only when == 1
+  - { name: Subtype, type: u8 }             # 0x00c  completion subtype: 1 = success (play cue), 2 = cancel (stop cue)
+  - { name: Body,    type: "bytes[331]" }   # 0x00d  forwarded verbatim into the quest-result panel mirror (10-row reward list); wire offsets of the rows are NOT pinned here
 
 notes: |
-  Do not implement from this file. Use packets/5-73_guildwar_info_update.yaml. The "quest complete"
-  attribution for 5/73 is a binary-refuted mislabel; the quest result channel is 5/68.
+  CONTROL-FLOW CONFIRMED routing + fixed 344-byte (0x158) size + the verdict header (Gate @+0x08,
+  Subtype @+0x0C). CAPTURE-UNVERIFIED and UNDECODED reward-row body. The widths sum to 344
+  (8 + 4 + 1 + 331).
+
+    0x008 (4B) Gate    : the verdict gate. The handler runs the success path only when this == 1.
+    0x00c (1B) Subtype : completion subtype. == 1 toggles a visual flag and plays the quest-completion
+                         cue (a 2D completion sound); == 2 stops that cue (success vs cancel of the
+                         completion effect).
+    0x00d (331B) Body  : the remainder of the 344-byte block, forwarded WHOLE into the quest-result
+                         panel mirror. The panel then walks its MIRROR copy and lays out 10 rows, each
+                         carrying a CP949 name string and an integer count (an objective / reward list).
+                         Because the body is copied verbatim into the mirror, the exact WIRE offset of
+                         the 10-row array is NOT pinned by a wire-side loop -- it is pinned only relative
+                         to the mirror base. Reserved opaque here; do NOT guess row offsets.
+
+  WHY THIS IS QUEST-COMPLETE (binary evidence, behaviour read): the handler forwards the 344-byte block
+  to a quest-RESULT panel mirror; that mirror drives a panel-state command (one state code shows the
+  panel, another hides it) and the panel's redraw lays out 10 component rows of {CP949 name + integer
+  count}. The handler references no guild manager, no guild-war string, and no war-window call. The
+  completion cue and the quest-result panel are the decisive signals.
+
+  CHANNEL SEPARATION: 5/73 is the quest turn-in VERDICT (gate + a small success/cancel effect + the
+  result panel). The full quest-LOG snapshot (which quests, their flags/ids/names) rides 5/68
+  SmsgQuestList (packets/5-68_quest_list.yaml). The C2S that drives quest actions is 2/28 CmsgQuestAction
+  (packets/2-28_quest_action.yaml).
+
+  UNKNOWNS to resolve with a quest-completion capture:
+    - the per-row reward record layout inside the 344-byte body (row stride, the count vs id split, the
+      CP949 name cell width) -- not wire-pinned statically;
+    - the Gate / Subtype value space beyond the success(1)/cancel(2) reading;
+    - whether any reward field is a currency vs an item id vs a count.
+
+  UNBLOCKS: reserving the correct frame length in Client.Application; full reward-row parsing is BLOCKED
+  on a capture.

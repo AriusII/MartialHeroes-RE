@@ -1,0 +1,51 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 184-byte (0xB8) body, and the
+#                 success@+0x00 / fail_sub@+0x01 gate bytes are control-flow-confirmed; the 184-byte
+#                 product-result record interior is forwarded to a product-apply sub-handler; every
+#                 VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: REFINED from "opaque" to a gated 184-byte product-result panel. The fail_sub == 102 arm
+#              decrements the local player's character count (a cash product that consumes a character
+#              slot).
+
+name: SmsgProductPurchaseResultPanel
+opcode: 0x4004b           # major 4 (Response), minor 75 -> (4 << 16) | 75
+direction: S2C
+size: 184                 # fixed 184-byte body (0xB8)
+spec: packets/4-75_product_purchase_result_panel.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server pushes a product / cash-item purchase result with an on-screen result panel. A fixed 184-byte body gated by a success byte and a failure sub-code; on success the whole block is forwarded to a product-apply sub-handler, and one failure sub-code decrements the local player's character count (a cash product that consumes a character slot).
+
+# Wire order, offset 0 = first payload byte. Pack=1; only the two gate bytes are interpreted by THIS
+# handler; the rest of the 184-byte record is forwarded to the product-apply sub-handler. Widths sum
+# to size: 184. (A small pre-init helper scrubs the first 8 bytes of the destination before the read;
+# the success/fail bytes are read at payload +0x00 / +0x01.)
+fields:
+  - { name: Success, type: u8 }            # 0x00  != 0 => success path (forward block); == 0 => failure path
+  - { name: FailSub, type: u8 }            # 0x01  failure path only: 101 = show an error string; 102 = decrement the local-player character count by 1
+  - { name: Body,    type: "bytes[182]" }  # 0x02  remainder of the 184-byte product-result record, forwarded to the product-apply sub-handler
+  # widths: 1 + 1 + 182 = 184
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 184-byte (0xB8) body and the two gate bytes (success @+0x00,
+  fail_sub @+0x01). CAPTURE-UNVERIFIED for VALUE meanings; the record interior is forwarded opaquely.
+
+    0x00 (1B) Success : nonzero => the success path, which forwards the whole 184-byte block to a
+                        product-apply sub-handler; 0 => the failure path.
+    0x01 (1B) FailSub : consulted only on the failure path. 101 = surface an error string; 102 =
+                        decrement the local player's character count by 1 (a cash product that consumes
+                        a character slot).
+
+  RECORD INTERIOR (DOWNSTREAM): the bytes past the two gate bytes are consumed by the product-apply
+  sub-handler, not field-read here. Do NOT publish guessed interior offsets -- capture/downstream-pending.
+
+  CONTRACT ROLE: a product / cash-item purchase result. Candidate paired C2S: the product family
+  (2/151 / 2/153).
+
+  UNKNOWNS to resolve with a capture: the product-result record layout and the full FailSub enum.

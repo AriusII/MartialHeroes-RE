@@ -6,7 +6,7 @@ opcode: 0x20017           # major 2 (GameAction), minor 23 -> (2 << 16) | 23
 direction: C2S
 size: 8                  # fixed 8-byte payload built by the shared social-op sender
 spec: packets/2-23_trade_request.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client player-to-player trade request / response. Carries a 1-byte mode selector and a 4-byte actor id. Started from the right-click target "trade" menu; the server replies with 4/23 TradeRequestResult.

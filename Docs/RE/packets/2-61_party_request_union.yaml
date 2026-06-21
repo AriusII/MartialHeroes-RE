@@ -1,0 +1,55 @@
+# spec: Docs/RE/packets/2-61_party_request_union.yaml
+# Role: C2S party-operations request — a 36-byte discriminated union keyed by a leading subcode.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgPartyRequest
+opcode: 0x2003d           # major 2 (GameAction), minor 61 -> (2 << 16) | 61
+direction: C2S
+size: 36                  # fixed 36-byte body (discriminated union keyed by byte 0)
+spec: packets/2-61_party_request_union.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Party operations request — create / invite / disband / leave keyed by a leading action subcode; one path is a guild-fame donation carrying a name + amount. A fixed 36-byte discriminated union. Driven by the Guild/Party "A" panel and the social re-ask confirm panel.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 36. Union keyed by Subcode.
+fields:
+  - { name: Subcode,   type: u8 }          # 0x00  action subcode (union discriminator) [capture/debugger-pending]
+  - { name: SubFlag,   type: u8 }          # 0x01  sub-flag / member slot index [capture/debugger-pending]
+  - { name: Reserved0, type: "u8[2]" }     # 0x02  pad / reserved (zeroed)
+  - { name: ContextId, type: u32 }         # 0x04  self/context id, or fame amount in the donation path [capture/debugger-pending]
+  - { name: AmountQ,   type: "u8[8]" }     # 0x08  reserved / amount qword region (donation path fills it) [capture/debugger-pending]
+  - { name: Name,      type: "char[17]" }  # 0x10  target/self CP949 character name, NUL-padded (union region) [capture/debugger-pending]
+  - { name: Tail,      type: "u8[3]" }     # 0x21  NUL pad to the 36-byte body
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a fixed 36-byte blit of a caller-assembled buffer); the layout is
+  a discriminated union keyed by byte 0, so intra-buffer offsets vary by Subcode. The field VALUES are
+  static inferences (capture-pending).
+
+    0x00 (1B)  Subcode   : the action subcode (union discriminator). Two confirmed shapes: a small
+                           [subcode][index] form, and a name+amount donation form. [capture/debugger-pending]
+    0x01 (1B)  SubFlag   : a sub-flag / member slot index. [capture/debugger-pending]
+    0x02 (2B)  Reserved0 : pad/reserved (zeroed by the buffer memset).
+    0x04 (4B)  ContextId : a self/context id, OR (donation path) a fame amount. [capture/debugger-pending]
+    0x08 (8B)  AmountQ   : a reserved/amount qword region (filled by the donation path). [capture/debugger-pending]
+    0x10 (17B) Name      : a target/self CP949 character name, NUL-padded (the dominant 17-byte cell),
+                           occupying the per-subcode union region. [capture/debugger-pending]
+    0x21 (3B)  Tail      : NUL pad filling the 36-byte body.
+
+  [UNVERIFIED] UNION OFFSETS: the dirty-room note sketched per-subcode offsets that do not all fit a
+  single flat 36-byte layout (it is a discriminated union read across several call sites). The header
+  region (Subcode/SubFlag/Reserved0/ContextId/AmountQ, 16 bytes) is firm; the 20-byte trailing region
+  (0x10..0x23) holds the per-subcode union members (a 17-byte CP949 name in the donation form, or an
+  index/amount in the small form). The exact intra-union offsets per subcode are capture-pending; only
+  the total 36-byte width is control-flow confirmed.
+
+  TRIGGER: Guild/Party panel button commands and the social re-ask confirm panel (one path is a
+  guild-fame donate confirm carrying a name + amount).
+
+  UNKNOWNS to resolve with a capture:
+    - the full Subcode enum and the per-subcode field map (union members);
+    - the inbound reply opcode (a party/guild state-update S2C) — pending.
+
+  UNBLOCKS: Client.Application party request (discriminated) use-case.

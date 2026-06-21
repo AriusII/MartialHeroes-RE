@@ -3,22 +3,26 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers / Assets.Mapping. Every offset an engineer cites must reference this file.
 >
-> **verification:** sample-verified (two-witness) — the plain-ASCII D3D9-assembly-text format, the
+> **verification:** sample-verified (two-witness) — the D3D9-assembly-text format, the
 > `vs.1.1` / `ps.1.1` version line, the CRLF line endings, the VFS-or-disk load path (assembler flags
 > = 0 at every site), the five-shader assemble order, the three render targets, and the `toonramp.bmp`
 > stage-1 LUT were all re-confirmed against the live cel/glow initialiser AND a byte-walk of real shader
-> files (`dotoonshading.vsh`, `power1dx8.psh`, `toonramp.bmp`). The `c4`–`c10` cel constants (incl. the
-> BT.601 `c9`) were NOT re-decoded this pass — they carry forward from the prior bit-pattern confirmation.
-> **ida_reverified:** 2026-06-16
+> files. This pass the **three previously-unextracted cel/composite pixel shaders**
+> (`dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`) were extracted from the VFS and read,
+> upgrading their per-instruction content from UNVERIFIED to SAMPLE-VERIFIED; the `.psh` family CRLF
+> line-ending was re-confirmed by a raw byte-walk. The `c4`–`c10` cel constants (incl. the BT.601 `c9`)
+> carry forward from the prior bit-pattern confirmation (not re-decoded this pass).
+> **ida_reverified:** 2026-06-21
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida, vfs-sample]
-> **conflicts:** NONE — no committed claim is contradicted by the loader or the real sample on this build.
-> The three unextracted shader sources (`dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`) and
-> the exact `toonramp.bmp` pixel band layout remain the only open items (see Known Unknowns); the ramp's
-> 824-byte file size on this build corroborates the ~256×1×24bpp estimate.
+> **conflicts:** NONE structural. Two corrections vs the earlier text (both refinements, not reversals):
+> the encoding statement is loosened — shader *code tokens* are ASCII but *comments* may carry CP949 text
+> (two cel `.psh` samples open with a Korean comment line); and `power2dx8.psh` / `power4dx8.psh` are
+> marked not statically string-referenced in the `doida.exe` build (data-driven on disk only). The exact
+> `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
 >
-> **spec_status:** sample_verified (4 samples cross-confirmed; two-witness re-confirmed build 263bd994)
-> **date:** 2026-06-11 (re-verified 2026-06-16)
+> **spec_status:** sample_verified (7 samples cross-confirmed; all five runtime-assembled shaders read)
+> **date:** 2026-06-11 (re-verified 2026-06-21)
 
 ---
 
@@ -27,7 +31,7 @@
 - **Extensions:** `.vsh` (vertex shader), `.psh` (pixel shader)
 - **Found in:** `.pak` archive; logical path pattern: `shader/*`
 - **Magic / signature:** None. There is no binary header or magic bytes. The file begins immediately with the version-declaration text line.
-- **Encoding:** 7-bit ASCII throughout. No bytes above `0x7E` observed in any verified sample. No CP949/EUC-KR text is present — shader source is entirely ASCII.
+- **Encoding:** Shader **code tokens** (the version line, mnemonics, registers, `def` literals) are 7-bit ASCII. **Comment text** (everything after a `;`) is *not* guaranteed ASCII: two verified cel pixel-shader samples open with a CP949/EUC-KR Korean comment line (bytes above `0x7E`). Because the assembler ignores everything after `;`, this never affects the parse — but do not assert "no bytes above 0x7E"; a faithful reader must tolerate CP949 in comments.
 - **Line endings:** Windows CRLF (`0x0D 0x0A`) throughout all verified samples. No lone-LF endings observed.
 - **Endianness:** Not applicable (text format).
 - **Compression / encryption:** Not observed in verified samples. The game's VFS layer may apply the same decryption pass used for other asset types; this is unconfirmed — see Open Questions.
@@ -61,7 +65,7 @@ This format is identical to the standard Direct3D 9 SDK shader assembly text for
                     | <instruction>
 
 <blank-line>      ::= (empty — zero bytes before CRLF)
-<comment-line>    ::= ";" <any ASCII text>
+<comment-line>    ::= ";" <any text>       ; ASCII or CP949 — ignored to end-of-line
 <constant-definition> ::= "def" SP <c-register> "," SP <f32> "," SP <f32> "," SP <f32> "," SP <f32>
 <instruction>     ::= [ "+" ] <mnemonic> SP <operand-list> [ SP ";" <comment-text> ]
 ```
@@ -152,26 +156,30 @@ Verified in: `dotoonshading.vsh`.
 | `tex`    | Sample texture into a texture register: `texN = Sample(samplerN)` |
 | `mov`    | Component-wise copy |
 | `mul`    | Component-wise multiply: `dst = src0 * src1` |
+| `add`    | Component-wise add: `dst = src0 + src1` (also used self-paired as `add r, r, r` for a ×2 scale) |
 
-Verified in: `power1dx8.psh`, `power2dx8.psh`, `power4dx8.psh`.
+Verified in: `power1dx8.psh`, `dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`. The `+mov` co-issue prefix is verified in the cel/composite pixel shaders (alpha written in a paired instruction).
 
 ---
 
 ## Known Shader Files
 
-Seven shader filenames are known. Four have been sample-verified; three are inferred from the game's load path (format expected identical).
+Seven shader filenames are known, all now sample-verified. The five that the `doida.exe` build statically
+references by string are the five runtime-assembled shaders; `power2dx8.psh` / `power4dx8.psh` are present
+on disk as a data-driven multi-tap chain but are **not** string-referenced by the executable on build
+263bd994 (the glow pixel-shader path is read from an editable filename slot, default `power1dx8.psh`).
 
 | Filename | Extension | Shader model | Role | Sample status |
 |----------|-----------|-------------|------|---------------|
 | `dotoonshading.vsh`  | .vsh | vs.1.1 | Cel-shading vertex shader: world-view-projection transform, two-light Lambert diffuse, emits luminance-based UV on output texcoord 1 for toon LUT lookup | VERIFIED |
-| `power1dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 1: base texture sample, 1× multiply | VERIFIED |
-| `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 2: squared sample (pass 1 ^ 2) | VERIFIED |
-| `power4dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 4: quartic sample (square twice) | VERIFIED |
-| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — normal render state | UNVERIFIED (sample not extracted; load path confirmed) |
-| `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — stealth/invisible render state | UNVERIFIED (sample not extracted; load path confirmed) |
-| `finaldx8.psh`       | .psh | ps.1.1 | Final composite: saturate(2 × edge × c0 + bloom × c1) | UNVERIFIED (sample not extracted; load path confirmed) |
+| `power1dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 1: base texture sample, scale by `c0` | VERIFIED (string-referenced) |
+| `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value | VERIFIED (string-referenced) |
+| `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — **stealth / 은신 (invisible)** render state: identical arithmetic to the normal shader except alpha is taken from `c1.w` (the per-state ADD's w drives the stealth fade) | VERIFIED (string-referenced) |
+| `finaldx8.psh`       | .psh | ps.1.1 | Final composite / post: `saturate(scene×2×c0 + glow×c1)`, alpha forced opaque from a literal `(1,1,1,1)` constant | VERIFIED (string-referenced) |
+| `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (squared sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power4dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (quartic sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
 
-Whether additional shader files exist beyond these seven is unknown (see Open Questions).
+Whether additional shader files exist beyond these seven is unknown (see Known Unknowns).
 
 ---
 
@@ -207,33 +215,55 @@ The text source files are the complete, human-readable description of the shader
 - Two-light Lambert accumulation: for each light, compute `dp3(normal, lightDir)`, clamp to `[0, 1]` with `max`, modulate by light colour, accumulate.
 - `dp3 oT1.xyz, r1, c9` — dot the accumulated diffuse colour against a luminance-weight vector (in `c9`) to produce a scalar luminance value; write to the x-component of output texcoord 1. This value indexes the 1D toon LUT texture in the pixel shader.
 
+**`dotoonshading.psh` (cel tone, NORMAL render state) — sample-verified arithmetic:**
+- Sample the base texture into `t0` and the toon ramp LUT into `t1`.
+- `lit = (base × toonRamp)` — the base colour modulated by the 1-D N·L cel ramp lookup (this is the toon lighting).
+- `lit = lit × 2` (a self-paired `add` doubling).
+- `lit = lit × c0` — multiply by the per-state brightness **MULTI** constant.
+- `rgb = lit + c1` — add the per-state brightness **ADD** constant; **alpha passes through the lit value** (a paired `+mov r0.a`).
+- Net: `out.rgb = (base × toonRamp) × 2 × c0 + c1`, `out.a = lit.a`. This confirms §C5.5 — `c0`/`c1` are the per-state brightness MULTI/ADD pair, applied here.
+
+**`dotoonshading2.psh` (cel tone, STEALTH / 은신 render state) — sample-verified arithmetic:**
+- **Identical** to `dotoonshading.psh` except the alpha write: alpha is taken from **`c1.w`** (the per-state ADD's w component) instead of from the lit value. The ADD constant's w therefore drives the stealth/invisible fade.
+
+**`finaldx8.psh` (final composite / post) — sample-verified arithmetic:**
+- Sample the scene/bright render target into `t0` and the bloom/glow render target into `t1`.
+- `scene = t0 × 2 × c0`, `glow = t1 × c1` — both `c0`/`c1` are composite-scale constants set per pass (NOT per-character brightness).
+- `rgb = scene + glow`; alpha forced opaque from a literal `def c2, 1,1,1,1`.
+- Net: `out = saturate(scene×2×c0 + glow×c1)`, `out.a = 1`. This refines the prior "saturate(2·edge·c0 + bloom·c1)" summary: `t0` = bright/scene RT scaled ×2·`c0`, `t1` = bloom/glow RT scaled by `c1`, `c2` = literal opaque-alpha constant.
+
 **`power*.psh` (glow/bloom passes):**
 - `power1dx8.psh`: `r0 = tex t0; r0 = r0 * c0` — sample base texture, scale by constant.
 - `power2dx8.psh`: square the sample (multiply by itself) to steepen the falloff curve.
 - `power4dx8.psh`: square twice (two multiplies) for a quartic falloff, producing a sharper/brighter highlight core.
 
-The Godot re-implementation should produce a `cel_shading.gdshader` (combining the VS and PS logic) and a `bloom_pass.gdshader` (parameterised by the pass index to avoid three near-identical files).
+The Godot re-implementation should produce a `cel_shading.gdshader` with normal/stealth variants (the alpha-from-`c1.w` path is the stealth fade), a `final_composite.gdshader` for `finaldx8.psh`, and a `bloom_pass.gdshader` (parameterised by the pass index to avoid near-identical files).
 
 ---
 
-## Sample File Metrics (cross-reference only — bytes stay in `_dirty/`)
+## Sample File Metrics (cross-reference only — sample bytes stay in the gitignored quarantine, never committed)
 
 These sizes are provided for parser sanity-checks and regression tests only. Do not commit the files.
 
 | Filename | File size (bytes) | CRLF-terminated lines |
 |----------|------------------|-----------------------|
 | `dotoonshading.vsh` | 754 | 24 (including 1 trailing blank) |
+| `dotoonshading.psh` | 332 | (CRLF throughout; zero lone-LF — raw byte-walked) |
 | `power1dx8.psh`     | 116 | 7 |
 | `power2dx8.psh`     | 170 | 7 |
 | `power4dx8.psh`     | 226 | 10 |
+
+`dotoonshading.psh` was raw byte-walked on build 263bd994: 332 bytes, CRLF (`\r\n`) throughout with zero
+lone-LF endings — confirming the CRLF claim holds for the `.psh` family as well (the cel/composite pixel
+shaders were also read but their exact byte sizes are not pinned here).
 
 ---
 
 ## Known Unknowns
 
 1. **VFS encryption:** Whether `.psh`/`.vsh` files inside the `.pak` archive are subject to the same encryption or obfuscation pass as other asset types (mesh, texture) is unconfirmed. The load path reads them via the VFS layer, which may transparently decrypt. If shaders are stored raw (unencrypted) inside `.pak`, the parser needs no decryption step; if they are encrypted, the same key/scheme as other assets applies.
-2. **Unverified shader files:** `dotoonshading.psh`, `dotoonshading2.psh`, and `finaldx8.psh` were not in the extracted sample set; their per-instruction *content* has not been sample-confirmed. Their format is strongly inferred to be identical based on the shared load path. **Re-confirmed (build 263bd994):** all five shader paths are present in the VFS and `power1dx8.psh` was byte-walked (`ps.1.1\r\n` header, 116 B); the executable carries only the load logic and the file paths — never the shader source or bytecode — so recovering the exact arithmetic of the three unextracted shaders still requires reading those on-disk files.
-3. **Shader file completeness:** Only seven shader filenames are known (from the game's internal string table). Whether additional shader files exist for other effects (e.g. character effects, weather, UI) has not been confirmed. The power progression is 1/2/4 — a `power3dx8.psh` is not referenced in known strings.
+2. **~~Unverified shader files~~ — RESOLVED (build 263bd994):** `dotoonshading.psh`, `dotoonshading2.psh`, and `finaldx8.psh` have now been extracted from the VFS and read; their per-instruction arithmetic is sample-verified and recorded in the Known Shader Files table and the Re-authoring Guidance (cel `base × toonRamp × 2 × c0 + c1` with normal/stealth alpha split; composite `saturate(scene×2×c0 + glow×c1)`). All five runtime-assembled shaders are now content-confirmed. The executable still carries only the load logic and file paths (never source or bytecode), so any *future* shader content is recovered only by reading the on-disk file.
+3. **Shader file completeness:** Only seven shader filenames are known. The executable string table references exactly six paths (`dotoonshading.vsh`, `dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`, `power1dx8.psh`, `toonramp.bmp`); `power2dx8.psh` / `power4dx8.psh` exist on disk but are **not** string-referenced in build 263bd994 (the glow path is the editable slot, default `power1dx8.psh` — so the multi-tap depth is data-driven). Whether additional shader files exist for other effects (character effects, weather, UI) has not been confirmed. The power progression is 1/2/4 — a `power3dx8.psh` is not referenced anywhere.
 4. **Other shader model versions:** Only version `1.1` has been observed. Whether any shader files use `vs.1.0`, `ps.1.4`, `vs.2.0`, or any other model is unknown.
 5. **D3DX flags:** All observed load sites use flags value `0`. Whether any code path uses `D3DXSHADER_DEBUG` or another flag in a debug build is unknown.
 
@@ -285,8 +315,10 @@ only the *file paths* and the *loader logic* — never the shader source or its 
 actual `.psh` / `.vsh` / `.bmp` bytes are **external VFS asset files** under `data/shader/` and are
 **not recoverable from the executable**. Recovering the precise per-instruction shader logic (the
 exact ramp lookup, the exact composite arithmetic, any rim math) requires the on-disk files from the
-client VFS. The `dotoonshading.psh`, `dotoonshading2.psh`, and `finaldx8.psh` source samples remain
-UNVERIFIED for this reason (see Known Unknowns #2).
+client VFS. Those on-disk files have now been read: the `dotoonshading.psh`, `dotoonshading2.psh`, and
+`finaldx8.psh` sources are **SAMPLE-VERIFIED** (their arithmetic is recorded in the Known Shader Files
+table and Re-authoring Guidance). The executable itself still carries no source or bytecode — only the
+paths and load logic.
 
 ### C5.3 Toon ramp LUT — `data/shader/toonramp.bmp`
 
@@ -383,9 +415,12 @@ the external display configuration file, not in the executable.
 numeric edge constant in code. It is the bright/edge render-target composite performed in the
 post-process chain (the final composite of the bright-extract render target combined with the bloom
 render target) together with the stepped tone bands baked into the toon ramp file. There is **no
-code-set edge threshold, outline width, or edge-detect constant to recover** — any such math, if it
-exists at all, lives only inside the external composite/cel pixel-shader source. The post-chain pass
-pipeline and its present-blend are owned by `specs/rendering.md`; this spec does not duplicate them.
+code-set edge threshold, outline width, or edge-detect constant to recover**. The now-read cel/composite
+pixel-shader sources confirm this: `dotoonshading.psh` / `dotoonshading2.psh` carry only the
+`base × toonRamp × 2 × c0 + c1` tone math (no edge/rim term), and `finaldx8.psh` is a plain additive
+`saturate(scene×2·c0 + glow·c1)` composite — neither contains an edge-detect or outline-width constant.
+The post-chain pass pipeline and its present-blend are owned by `specs/rendering.md`; this spec does not
+duplicate them.
 
 ### C5.6 Load / bind flow + post-process gating (neutral prose)
 
@@ -420,11 +455,12 @@ pipeline and its present-blend are owned by `specs/rendering.md`; this spec does
 ### C5.7 Campaign 5 / 5B known unknowns
 
 - **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the
-  executable. The exact per-instruction shader arithmetic (the N·L accumulation, the 1-D ramp lookup
-  math, and any composite/edge math) is recoverable only from the on-disk `data/shader/*.psh|vsh`
-  files. The `power1dx8.psh` internal `c0` scale and the `finaldx8.psh` composite arithmetic
-  (the `saturate(2·edge·c0 + bloom·c1)` form is a prior-lane summary, not re-derived) live there, not
-  in the binary. UNVERIFIED until the on-disk files are read.
+  executable, but now READ. The cel/composite per-instruction arithmetic is **SAMPLE-VERIFIED**:
+  `dotoonshading.psh` = `(base × toonRamp) × 2 × c0 + c1` (alpha passthrough); `dotoonshading2.psh`
+  = identical with alpha from `c1.w` (stealth fade); `finaldx8.psh` = `saturate(scene×2×c0 + glow×c1)`
+  with opaque alpha — see the Re-authoring Guidance. The `finaldx8.psh` arithmetic confirms (and refines
+  the naming of) the earlier prior-lane `saturate(2·edge·c0 + bloom·c1)` summary. The cel vertex
+  shader's exact N·L accumulation/ramp-lookup math still lives in `dotoonshading.vsh` (already read).
 - **The numeric light-step threshold** — there is none in code; the quantisation lives in
   `toonramp.bmp` (the number of tone steps and the per-step luminance thresholds are in the ramp
   file's pixels, not in the executable).
@@ -443,57 +479,6 @@ pipeline and its present-blend are owned by `specs/rendering.md`; this spec does
   multiply/add table (§C5.5) defaults to white-multiply / zero-add in the binary; the actual shipped
   per-state tints live in the external display configuration file, not in the executable.
 
-----------|-----------------|------|------------|
-| `c4` | runtime-set light vector | Configurable light direction (from an editable renderer slot; value set at runtime) | HIGH (mechanism); value runtime-set |
-| `c5` | `[0, 0, -1, 0]` | Axis / view-Z vector | HIGH |
-| `c6` | `[1, 1, 1, 1]` | White / material-ambient | HIGH |
-| `c7` | `[0, 0, 0, 0]` | Zero vector | HIGH |
-| `c8` | `[0, 1, 1, 1]` | Mask / partial-white | HIGH |
-| **`c9`** | **`[0.299, 0.587, 0.114, 1.0]`** | **Luminance weights — exactly the ITU-R BT.601 luma coefficients (R, G, B). This is the signature constant of the cel shader: the dot of the accumulated diffuse colour against `c9` produces the scalar N·L luminance that keys the toon-ramp lookup.** | HIGH |
-| `c10` | `[1, 1, 1, 1]` | White | HIGH |
-
-The default colour-modulation triple read by the post composite pass is `[1, 1, 1]` (white init
-default); those per-tone post constants are owned by the post chain — see `specs/rendering.md` §6.
-
-### C5.5 Load / bind flow (neutral prose)
-
-1. **Device creation** runs the full cel initialiser. It creates three offscreen render targets at
-   backbuffer size (with a 1024×1024 fallback) — a scene/cel RT, a bright/edge RT, and a downscaled
-   glow RT — and opens a render-to-surface helper for each (the post chain is documented in
-   `specs/rendering.md` §6).
-2. It loads the toon ramp LUT (`data/shader/toonramp.bmp`) into its dedicated slot (1-D N·L ramp,
-   stage-1 texture).
-3. It builds the inline cel vertex declaration (stream-0 stride 32: XYZ at 0, NORMAL at 12,
-   TEXCOORD0 at 24, plus the N·L luminance channel — see `specs/rendering.md` §5.2), then assembles
-   the five shaders in order: `dotoonshading.vsh` → `dotoonshading.psh` → `dotoonshading2.psh` →
-   `finaldx8.psh` → the editable-slot glow shader (default `power1dx8.psh`). Each is created as a
-   device vertex or pixel shader and stored on the renderer; the temporary assembly object is
-   released.
-4. **Per-frame use:** the cel constants `c4`–`c10` (including the BT.601 luma vector `c9`) are uploaded
-   each frame and the cel render/texture states are set. Once per skinned-character draw, the cel bind
-   site binds the ramp to stage 1, sets the cel vertex shader, and sets the stealth or normal cel
-   pixel shader based on a boolean argument. The offscreen/scene and glow-extract/bloom-blur post
-   passes use the glow and composite pixel shaders and the three RTs — those passes belong to
-   `specs/rendering.md`.
-5. **Hot reload:** on a device reset, the partial reload re-assembles only the two cel pixel shaders
-   (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
-   shader or the render targets.
-
-### C5.6 Campaign 5 known unknowns
-
-- **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the
-  executable. The `saturate(2·edge·c0 + bloom·c1)` note for `finaldx8.psh` (above) is a prior-lane
-  summary, not re-derived here. UNVERIFIED until the on-disk files are read.
-- **The numeric light-step threshold** — there is none in code; the quantisation lives in
-  `toonramp.bmp`.
-- **A distinct rim / outline colour constant** — not found in the cel path; the outline is the
-  bright/edge render target composited in the post chain (see `specs/rendering.md` §6), not a literal
-  colour.
-- **Exact `toonramp.bmp` pixel dimensions** — prior-lane comment says about 256×1×24 bpp; not
-  re-measured (MEDIUM confidence). Confirmable by reading the on-disk file.
-- **The runtime light-direction value (`c4`)** — the mechanism (editable slot + accessor) is HIGH
-  confidence; the live value would need the running client or whatever config feeds it.
-
 ---
 
 ## Enumerations / Flags
@@ -508,4 +493,4 @@ Not applicable. This format carries no binary enumeration fields. The shader-typ
 - Related specs: `specs/rendering.md` (the render pipeline + glow/bloom post passes that bind these shaders), `specs/skinning.md` (the skinned-character vertex buffer the cel shader consumes)
 - Glossary: see `Docs/RE/names.yaml`
 - Provenance: see `Docs/RE/journal.md`
-- Dirty-room samples: `Docs/RE/_dirty/samples/data/shader/` (gitignored, do not commit)
+- Dirty-room shader samples are kept under the gitignored dirty-room quarantine (never committed)

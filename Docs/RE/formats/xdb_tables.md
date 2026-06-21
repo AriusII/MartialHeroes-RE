@@ -7,11 +7,13 @@
 > on every magic constant, stride, and byte offset.
 >
 > ```
-> verification: sample-verified            # every stride/count below confirmed by exact divisibility of the real VFS file size; head records byte-decoded on build 263bd994
-> ida_reverified: 2026-06-16
+> verification: sample-verified            # every stride/count below confirmed by exact divisibility of the real VFS file size; head records byte-decoded on build 263bd994; loaders/consumers re-read 2026-06-21
+> ida_reverified: 2026-06-21
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > conflicts: buff_icon_position origin spacing CORRECTED 27 -> 25 (sample shows step 25 on both axes); 21x21 draw-cell needs the sprite sheet to adjudicate
+> CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): creature_item.xdb RELABELLED = creature held-item VISUAL attachment keyed by creature_key (NOT a loot/drop table); vehicle.xdb keyed by vehicle_id (mount-visual + per-facing seat-Y); both §4/§5 DBG-pending runtime-use notes RESOLVED to STATIC-CONFIRMED.
+> CORRECTED 2026-06-21: (a) loader mechanism = FOUR distinct, individually-named per-format loaders called DIRECTLY in sequence from the boot data-table thread (NOT an indirect loader-pointer dispatch table); (b) actor_size.xdb is FULLY DEAD — its path constant sits in the data-side pointer table but is NEVER passed to any loader (no actor_size loader exists), so it is never opened at runtime, sharper than the prior "opened but result unused" verdict; (c) vehicle per-facing seat-Y floats pinned to byte offsets +0x24/+0x28/+0x2C/+0x30 (facing 1..4).
 > ```
 >
 > status: sample_verified
@@ -25,10 +27,20 @@
 > `vehicle` 3,016/52=58, `creature_item` 44,208/48=921, `msg` 1,364,304/516=2,644). Head records
 > byte-decoded and re-confirmed for every table. **One correction landed:** the `buff_icon_position`
 > origin spacing is **25, not 27** (§2) — the sample shows the `sprite_x`/`sprite_y` origins step by 25
-> on both axes; the earlier "27" was an unverified estimate. **One loader fact folded in:** the five small
-> tables are loaded through the **shared boot data-table corpus loader** (an indirect per-format loader
-> table dispatched at boot); `msg.xdb` alone is loaded from the main-window startup path (see
-> `msg_xdb.md`). No addresses or decompiler output crossed the firewall.
+> on both axes; the earlier "27" was an unverified estimate.
+>
+> **2026-06-21 loader-mechanism re-read (static, build 263bd994) — supersedes the Block-D loader note.**
+> The earlier "shared boot data-table corpus loader (an indirect per-format loader-pointer table
+> dispatched at boot)" wording is **withdrawn**. The binary shows the boot data-table thread calls
+> **four distinct, individually-named per-format loaders DIRECTLY, in sequence** (no indirect
+> function-pointer dispatch table): `effectscale.xdb`, `creature_item.xdb`, `vehicle.xdb`,
+> `buff_icon_position.xdb`. `msg.xdb` alone is loaded separately from the main-window startup path (the
+> login-scene transition; see `misc_data.md §6` / `msg_xdb.md`). **`actor_size.xdb` has NO loader at
+> all** — its path string is present only as a data-side pointer-table slot and is never passed to any
+> open/load call, so it is **never opened at runtime in this build** (a sharper verdict than "opened
+> but result unused"). All strides/counts/field offsets/field semantics re-confirmed against the
+> loaders, the named consumers, and the real VFS sample. No addresses or decompiler output crossed the
+> firewall.
 
 ---
 
@@ -50,11 +62,11 @@ a different, much larger file and is documented separately in `misc_data.md §6`
 
 | VFS path                              | Size (bytes) | Stride | Record count | Section | Runtime consumer |
 |---------------------------------------|-------------:|-------:|-------------:|---------|------------------|
-| `data/script/actor_size.xdb`          | 180          | 12     | 15           | §1      | **NONE (dead in this build)** |
+| `data/script/actor_size.xdb`          | 180          | 12     | 15           | §1      | **NONE (never loaded in this build)** |
 | `data/script/buff_icon_position.xdb`  | 1,608        | 12     | 134          | §2      | buff-icon renderer |
 | `data/script/effectscale.xdb`         | 16           | 8      | 2            | §3      | effect-scale lookup |
-| `data/script/vehicle.xdb`             | 3,016        | 52     | 58           | §4      | vehicle / mount catalogue |
-| `data/script/creature_item.xdb`       | 44,208       | 48     | 921          | §5      | creature attached-item placement |
+| `data/script/vehicle.xdb`             | 3,016        | 52     | 58           | §4      | mount/seat catalogue (keyed by vehicle_id) |
+| `data/script/creature_item.xdb`       | 44,208       | 48     | 921          | §5      | creature held-item visual attachment (keyed by creature_key) |
 | `data/script/msg.xdb`                 | 1,364,304    | 516    | 2,644        | see `misc_data.md §6` | message strings |
 
 ### Second black-box witness (reconciliation note)
@@ -75,23 +87,72 @@ verdicts are landed inline and called out per field.
 
 ---
 
+## Loaders & read algorithm
+
+> **2026-06-21 re-read (static, build 263bd994).** This section replaces the prior "indirect
+> per-format loader-pointer table dispatched at boot" framing.
+
+### Who loads what, and from where
+
+- **Four small tables — boot data-table thread, direct calls.** A dedicated boot data-table loading
+  thread loads dozens of `.scr` / `.txt` / `.xdb` catalogues in a fixed sequence; at the **end** of
+  that sequence it calls **four distinct, individually-named per-format loaders DIRECTLY** — ordinary
+  direct calls, NOT an indirect dispatch through a function-pointer table — in this order:
+  `effectscale.xdb`, then `creature_item.xdb`, then `vehicle.xdb`, then `buff_icon_position.xdb`.
+  Each path is taken from a contiguous `char*` path-pointer table in the data segment (one slot per
+  `data/script/*.xdb` string).
+- **`msg.xdb` — main-window startup path.** Loaded once by its own loader during the transition into
+  the login scene (the WinMain scene-state machine), **not** from the boot data-table thread. See
+  `misc_data.md §6` (the large message-string table).
+- **`actor_size.xdb` — never loaded.** Its `data/script/actor_size.xdb` path string is present in the
+  data-side path-pointer table, but the slot is **never passed to any open/load call** and **no
+  actor_size loader function exists**. The file is therefore **never opened at runtime in this
+  build** (the string carries a single data reference — the pointer-table slot itself — and no code
+  reference). This is the sharper successor to the earlier "opened but result unused" verdict.
+
+### Common read algorithm (identical across all five live loaders)
+
+The five live loaders (`msg.xdb` plus the four small tables) share one template; there is **no
+per-field decode, no transform, and no endianness swap** — the on-disk bytes ARE the in-memory
+record layout (little-endian):
+
+1. **Open** the file by VFS path (a disk-file open-for-read; guarded by an is-good check).
+2. **Derive the count:** `count = file_size / stride`, an integer divide where `stride` is the
+   per-format constant (8 / 12 / 48 / 52 / 516). The divide is exact for every shipped file
+   (remainder 0). (`effectscale` uses a right-shift by 3 for its `/8`.)
+3. **Reserve / clear** the destination record buffer and reset the per-table index map for `count`
+   entries.
+4. **Bulk-read the whole file in one shot** into a flat record buffer (`stride * count` bytes). On a
+   read failure the loader logs an "error read file" diagnostic and bails; otherwise the buffer holds
+   `count` back-to-back fixed-stride records.
+5. **Close** the file.
+6. **Index by first dword:** loop `i = 0 .. count-1`, take `key = first u32 of record i` (the field
+   at record offset `+0`), and insert `key -> &record[i]` into that table's per-table ordered map
+   (a balanced binary tree). The map **value is the record pointer**; lookups return that pointer, or
+   0 on a miss.
+
+So the only validation is is-good / read-ok; everything downstream keys on the record's `+0` dword.
+
+---
+
 ## §1 — actor_size.xdb (actor scale table)
 
-> **DEAD RESULT IN THIS BUILD — the parsed table is unused (loader-resolved).** The file is present
-> on disk in the VFS, and its path string **is wired into the shared boot data-table corpus loader**
-> (the boot path opens it like the other small `.xdb` tables) — so the byte verdict is **"opened, but
-> the parsed result is consumed by nothing"**, not "never opened". The earlier "no runtime consumer
-> of the result" verdict comes from a prior-campaign trace of the loader's return value (the parsed
-> array is not read anywhere in the engine); the Block-D static-only re-verify pass (build 263bd994)
-> could re-confirm that the path is in the corpus loader table but did **not** re-trace the result's
-> consumers, so the "result unused" half of the verdict carries as a **static-hypothesis** for this
-> pass (it was CONFIRMED in a prior campaign). Net guidance for the port: actor scaling in this build
-> is driven elsewhere, not by this file's parsed values, so a faithful 1:1 port need not act on the
-> parsed result. The layout below is documented for completeness and archival fidelity.
+> **NEVER LOADED IN THIS BUILD — there is no loader for this file at all (CORRECTED 2026-06-21).**
+> The file is present on disk in the VFS, and its `data/script/actor_size.xdb` path string is present
+> in the data-side path-pointer table, **but the slot is never passed to any open/load call and no
+> actor_size loader function exists.** So the byte verdict is **"path constant present in the data
+> table, but the file is NEVER OPENED at runtime"** — sharper than, and superseding, the prior
+> "opened at boot, but the parsed result is consumed by nothing" verdict. (The earlier reading came
+> from a campaign that assumed actor_size shared the small-table corpus loader; the 2026-06-21
+> loader-mechanism re-read shows the corpus thread calls only four named loaders directly —
+> effectscale / creature_item / vehicle / buff_icon_position — and actor_size is **not** among them.)
+> Net guidance for the port: actor scaling in this build is driven elsewhere, not by this file, and a
+> faithful 1:1 port need not load it at all. The layout below is documented for completeness and
+> archival fidelity.
 >
-> Confidence: **path-in-corpus-loader CONFIRMED (opened at boot); result-unused = prior-campaign
-> CONFIRMED, carried as static-hypothesis for the Block-D pass** — the on-disk record layout is the
-> black-box witness (record 0 = id 0, scale (1.0, 1.0), SAMPLE-VERIFIED on build 263bd994).
+> Confidence: **never-loaded CONFIRMED (no loader exists; the path string has only the pointer-table
+> data reference, no code reference)** — the on-disk record layout is the black-box witness (record 0
+> = id 0, scale (1.0, 1.0), SAMPLE-VERIFIED on build 263bd994).
 
 - **Stride:** 12 bytes. **Record count:** 15 (`180 / 12 = 15`, exact). **No file header.**
 
@@ -185,15 +246,35 @@ verdicts are landed inline and called out per field.
 
 ---
 
-## §4 — vehicle.xdb (vehicle / mount catalogue)
+## §4 — vehicle.xdb (mount / seat catalogue, keyed by vehicle_id)
+
+> **CYCLE 1 (build 263bd994, 2026-06-19) — runtime use RESOLVED to STATIC-CONFIRMED (supersedes the
+> prior "DBG-pending runtime use" note; the prior reading is kept below for history).** This table IS
+> consumed at runtime, keyed by `vehicle_id` (record `+0`), on the **mounted-vehicle path**. Static
+> decompilation of the consumers settled it — no debugger needed. Two runtime consumers, both reached
+> when an actor is riding a vehicle and its visual/position is being updated:
+> 1. **Mount-attachment refresh.** When the ridden target is a vehicle-kind actor and an attach-active
+>    predicate holds, the row is looked up by `vehicle_id` and the rider's **mount visual is spawned**
+>    from that row.
+> 2. **Per-frame rider Y-placement.** After sampling terrain height under the actor, the mount-rider
+>    branch looks up the row by `vehicle_id` and **adds a per-facing seat-height offset** read from the
+>    record's trailing float array — one float per cardinal facing (facing indices 1..4; other facings
+>    contribute 0). This lifts the rider to the correct seat height for the current heading.
+>
+> The `vehicle_id` key is the small sequential 1-based id (record `+0`), taken from the rider/mount
+> actor when mounting/seating. `tag_a` (`+8`) and `tag_b` (`+12`) are **not** read by either consumer
+> (consistent with the prior note — `tag_a` is not a lookup key; this does not over-claim it dead).
+> This is a mount/seat catalogue, **not** a loot/drop table.
+>
+> Confidence: **CONFIRMED** (both consumers decompiled; the map key is the record's `+0` `vehicle_id`).
 
 - **Stride:** 52 bytes. **Record count:** 58 (`3,016 / 52 = 58`, exact). **No file header.**
 
 | Offset | Size | Type   | Field          | Notes                                              | Confidence |
 |-------:|-----:|--------|----------------|----------------------------------------------------|------------|
-| +0     | 4    | u32 LE | `vehicle_id`   | Sequential 1-based (1..58)                          | CONFIRMED  |
+| +0     | 4    | u32 LE | `vehicle_id`   | Sequential 1-based (1..58). **The runtime lookup key** — taken from the rider/mount actor when mounting/seating; resolves the row that supplies the mount visual and the per-facing seat-Y offset. | CONFIRMED (lookup key) |
 | +4     | 4    | u32 LE | `item_id`      | Item id in `items.scr`; early records form a consecutive block (id 1 → 3108, id 2 → 3109, …); later records are non-consecutive | CONFIRMED |
-| +8     | 4    | u32 LE | `tag_a`        | Takes 3 distinct values across the 58 records (one dominant block of 16, one block of ~40, and a 2-record special family), so it reads like a vehicle-family discriminator. **Runtime use is DBG-pending:** the two-witness pass found no loader read-site for this column, but the loader witness alone CANNOT refute a runtime read — the consumer side was not traced. Treat it as opaque metadata until a live-debugger pass confirms whether anything reads it; do NOT branch on it in the port until then. | DBG-pending (runtime use) |
+| +8     | 4    | u32 LE | `tag_a`        | Takes 3 distinct values across the 58 records (one dominant block of 16, one block of ~40, and a 2-record special family), so it reads like a vehicle-family discriminator. **Not read by either mount-path consumer** (CYCLE 1, static-confirmed): the two runtime consumers touch only the `+0` key and the trailing per-facing float array, so `tag_a` is not a lookup key and is not consumed on the mount/seat path. It remains opaque metadata with no recovered runtime reader; parse it but do NOT branch on it in the port. (This does not over-claim the column dead — only that the two recovered consumers do not read it.) | Not read by mount-path consumers (CYCLE 1, static-confirmed) |
 | +12    | 4    | u32 LE | `tag_b`        | **Constant `0x1575A3E4` in all 58 records.** Carries no per-vehicle information — a table-type stamp (table-name hash or compile-time constant inserted by the table tool). Proposed name `table_stamp`. | CONFIRMED (constant) |
 | +16    | 4    | f32 LE | `param_0`      | Rider mount-point X offset (lateral). Range ≈ 0.0 .. 4.0; zero for most records (zero = use the model's own default mount point). | HIGH (present); INFERRED (X offset) |
 | +20    | 4    | f32 LE | `param_1`      | **Always 0.0 across all 58 records** — a constrained / unused axis (consistent with a fixed vertical component if mount points share a height). | CONFIRMED (always 0); INFERRED (constrained axis) |
@@ -202,31 +283,70 @@ verdicts are landed inline and called out per field.
 | +32    | 4    | f32 LE | `param_4`      | 0.0 except in the 2-record special family, where it is a large negative offset (≈ -22 / -33) — specific to that family's geometry. | INFERRED |
 | +36    | 16   | f32[4] | `param_5..8`   | 0.0 for almost all records; the last few records carry small positive values (≈ 1.5 .. 2.0), possibly collision / attachment dimensions for late-table mounts. | UNVERIFIED |
 
-- **`tag_a` runtime use is DBG-pending (two-witness nuance):** the three distinct `tag_a` values
-  partition the table into what looks like three vehicle families. The two-witness pass found NO
-  loader read-site for `tag_a`, but a missing loader read-site **does not by itself prove** the
-  column is never consumed at runtime — the consumer/render side was not traced, so the loader
-  witness cannot refute a runtime read. A faithful port should parse the column but **not** branch
-  on it as a live discriminator until a live-debugger pass settles whether any code reads it. Keep
-  it opaque; do not promote a "tool-side only" verdict until confirmed.
-- **Rider mount-point reading (INFERRED):** the float params behave like a rider attachment
-  offset — `param_0` lateral (X), `param_1` always zero (the constrained axis), `param_2`
-  forward/back (Z) — with the all-zero records using the model's built-in default mount point.
-  Treat the offset axes as INFERRED until the loader confirms.
+- **`tag_a` not read by the mount-path consumers (CYCLE 1, static-confirmed):** the three distinct
+  `tag_a` values partition the table into what looks like three vehicle families, but neither of the
+  two recovered runtime consumers reads this column — they touch only the `+0` `vehicle_id` key and
+  the per-facing trailing float array. A faithful port should parse the column but **not** branch on
+  it as a live discriminator; it carries no value consumed by the mount/seat path. (No over-claim of
+  "dead" — only that the recovered consumers ignore it.)
+- **Per-facing seat-Y offset (CYCLE 1, CONFIRMED from the consumer side; offsets pinned 2026-06-21):**
+  the per-frame rider Y-placement consumer indexes the record's **trailing float array** by the
+  rider's cardinal facing (facing 1..4; other facings contribute 0) and adds that float to the
+  rider's world Y after the terrain-height sample — i.e. the trailing floats are **per-facing
+  seat-height offsets** that lift the rider to the correct seat height for the current heading.
+  **Exact float slots (2026-06-21 consumer re-read):** the consumer reads the record-as-float array
+  at index `facing + 8`, so for facing 1..4 it reads float indices **9, 10, 11, 12** = byte offsets
+  **+0x24, +0x28, +0x2C, +0x30** — i.e. the four floats this spec labels `param_2`, `param_3`,
+  `param_4`, and the first slot of `param_5..8`. (So the leading-float "mount-point offset"
+  interpretation below and the per-facing seat-Y reading overlap on `param_2..4`; on the seat-Y path
+  the float chosen depends only on the current facing.) This settles the meaning of the trailing
+  block on the seat-Y path; the earlier free-form "mount-point offset" reading below is the prior
+  interpretation, kept for history.
+- **Rider mount-point reading (prior INFERRED interpretation, kept for history):** the early float
+  params were read as a rider attachment offset — `param_0` lateral (X), `param_1` always zero (the
+  constrained axis), `param_2` forward/back (Z) — with the all-zero records using the model's
+  built-in default mount point. The CONFIRMED seat-Y reading above supersedes the offset-axis guess
+  for the **trailing** floats consumed per-facing; the exact axis assignment of the leading floats
+  stays INFERRED.
 - **Sample-verified:** all 58 records decoded for the column statistics above.
 
 ---
 
-## §5 — creature_item.xdb (creature attached-item table)
+## §5 — creature_item.xdb (creature held-item VISUAL attachment, keyed by creature_key)
+
+> **CYCLE 1 (build 263bd994, 2026-06-19) — RELABEL (binary-won spec reversal). This is a creature
+> held/worn-item VISUAL attachment table — it places an item visual ON the creature. It is NOT a
+> loot/drop table.** Any prior "drop" / "loot" / "drop sub-probability" framing is withdrawn; the
+> consumer-side decompilation shows a visual-attachment + cadence-gate use, never a drop roll. The
+> formerly DBG-pending consumer note is RESOLVED to **STATIC-CONFIRMED** — this table HAS live runtime
+> consumers (no debugger needed). Two consumers, both on the creature attached-item path:
+> 1. **Spawn-attach.** At creature spawn / appearance refresh the row is looked up by `creature_key`
+>    and a visual item — the row's `item_id` (`+4`) — is **spawned and attached to the creature**. It
+>    is positioned by the **three XZ offset pairs (`+8..+31`), each as `(x, 0, z)` rotated into world
+>    space by the creature's facing** (Y forced to 0), with the row's visual-scale field (`+36`)
+>    carried into the spawned descriptor. A state branch selects which of the second/third XZ pairs is
+>    used.
+> 2. **Per-tick gate.** Every tick the attached creature-item re-validates its pickup/effect cadence,
+>    gating on the row's flag bytes (`+40`, `+43`) and using the `+44` column as a millisecond tick
+>    interval, driving the pickup-validate / effect-fire branch. So `+40..+44` are **gate flags + a
+>    cadence value**, NOT a draw/drop probability.
+>
+> **Key rule:** `creature_key` (record `+0`), read from the creature actor's **appearance / visual-key
+> field**, indexes the lookup — at spawn and per-tick. It is the creature's visual/appearance id, not a
+> mob/drop id.
+>
+> Confidence: **CONFIRMED** (both consumers decompiled; the map key is the record's `+0` `creature_key`,
+> and the floats are read exactly as the §5 layout predicts).
 
 - **Stride:** 48 bytes. **Record count:** 921 (`44,208 / 48 = 921`, exact). **No file header.**
-- **Attachment-offset reading CONFIRMED (two-witness):** the per-record floats place the attached
-  item relative to the creature in the **facing frame** as **XZ offset pairs with Y forced to 0** —
-  they are **NOT** a bone reference. See the dedicated note below the table.
+- **Attachment-offset reading CONFIRMED (now from the consumer side too):** the per-record floats
+  place the attached item relative to the creature in the **facing frame** as **XZ offset pairs with
+  Y forced to 0** — they are **NOT** a bone reference. The spawn-attach consumer applies them exactly
+  this way. See the dedicated note below the table.
 
 | Offset | Size | Type   | Field             | Notes                                                       | Confidence |
 |-------:|-----:|--------|-------------------|-------------------------------------------------------------|------------|
-| +0     | 4    | u32 LE | `creature_key`    | Large `u32` key. Runs of consecutive variants share sequential keys, but different creature families occupy disjoint key blocks (large gaps in the key space — ~3,175-value span for 921 records). A compound entity-type + index id. | CONFIRMED (block-sequential, gapped) |
+| +0     | 4    | u32 LE | `creature_key`    | Large `u32` key. Runs of consecutive variants share sequential keys, but different creature families occupy disjoint key blocks (large gaps in the key space — ~3,175-value span for 921 records). A compound entity-type + index id. **The runtime lookup key** — read from the creature actor's appearance / visual-key field at spawn and per-tick to resolve the attached-item row. | CONFIRMED (lookup key; block-sequential, gapped) |
 | +4     | 4    | u32 LE | `item_id`         | Attached item id (e.g. 3001)                                | CONFIRMED  |
 | +8     | 4    | f32 LE | `attach_x0`       | X component of the first XZ offset pair, in the creature's facing frame | CONFIRMED (XZ-facing offset) |
 | +12    | 4    | f32 LE | `attach_z0`       | Z component of the first XZ offset pair (Y is forced to 0)  | CONFIRMED (XZ-facing offset) |
@@ -235,12 +355,12 @@ verdicts are landed inline and called out per field.
 | +24    | 4    | f32 LE | `attach_x2`       | X component of the third XZ offset pair                     | CONFIRMED (XZ-facing offset) |
 | +28    | 4    | f32 LE | `attach_z2`       | Z component of the third XZ offset pair (Y forced to 0)     | CONFIRMED (XZ-facing offset) |
 | +32    | 4    | f32 LE | `scale_or_radius` | Takes only **two values across all 921 records: 3.0 or 8.0.** The narrow two-level spread points to a **collision-sphere radius** (small creature = 3.0, large creature = 8.0) rather than a free-form scale. Proposed name `collision_radius`. | CONFIRMED (two values); INFERRED (collision radius) |
-| +36    | 4    | f32 LE | `attach_probability_f32` | A **float**, not a constant zero. 716 of 921 records are 0.0; the remaining 205 carry clean fractional values (0.1, 0.2, 0.3, 0.4, 0.7, 0.8, 1.0, 1.8, 2.0, 2.2). The clean-fraction distribution is the signature of a sub-probability / multiplier float (0.0 = use default). | CONFIRMED (f32, non-zero in 205/921); INFERRED (sub-probability) |
-| +40    | 1    | u8     | `flag_0`          | Binary flag. Values across the table: ~272 zero, ~649 one. Likely a primary-vs-secondary attachment-slot flag. | CONFIRMED (independent u8 flag) |
+| +36    | 4    | f32 LE | `visual_scale`    | A **float**, not a constant zero. 716 of 921 records are 0.0; the remaining 205 carry clean fractional values (0.1, 0.2, 0.3, 0.4, 0.7, 0.8, 1.0, 1.8, 2.0, 2.2). **Consumer-confirmed:** the spawn-attach consumer copies this field into the spawned visual item's descriptor — it is a per-entry visual-scale / size field for the attached item (0.0 = use default), **not** a drop sub-probability. (Proposed name `visual_scale`; earlier `attach_probability_f32` framing withdrawn.) | CONFIRMED (f32, non-zero in 205/921; copied into the spawned visual) |
+| +40    | 1    | u8     | `flag_0`          | Binary flag. Values across the table: ~272 zero, ~649 one. **Consumer-confirmed as a per-tick gate flag** — the per-tick consumer tests this byte when validating the attachment's pickup/effect cadence. | CONFIRMED (independent u8 gate flag) |
 | +41    | 1    | u8     | `flag_1`          | Binary flag, **almost always 1** (916 of 921). Likely an is-active / is-visible flag. | CONFIRMED (independent u8 flag) |
 | +42    | 1    | u8     | `flag_2`          | Binary flag, nearly always 1 (910 of 921). Likely paired with `flag_1` (is-enabled). | CONFIRMED (independent u8 flag) |
-| +43    | 1    | u8     | `flag_3`          | Binary flag, mostly 0 (824 of 921); set to 1 in ~97 records. Likely a has-extended-data marker (does NOT directly correlate with the 205 non-zero `attach_probability_f32` records, so it encodes something distinct). | CONFIRMED (independent u8 flag) |
-| +44    | 4    | u32 LE | `probability`     | **Constant `100` (`0x64`) in all 921 records.** Integer-percent probability; effectively a fixed 100% for this table. | CONFIRMED (constant 100) |
+| +43    | 1    | u8     | `flag_3`          | Binary flag, mostly 0 (824 of 921); set to 1 in ~97 records. **Consumer-confirmed as a per-tick gate flag** — the per-tick consumer tests this byte alongside `+40` when gating the pickup/effect cadence. (Does NOT directly correlate with the 205 non-zero `visual_scale` records, so it encodes something distinct.) | CONFIRMED (independent u8 gate flag) |
+| +44    | 4    | u32 LE | `tick_interval`   | **Constant `100` (`0x64`) in all 921 records.** **Consumer-confirmed as a millisecond tick-interval value** — the per-tick consumer uses this column as a cadence interval that gates how often the attachment re-validates its pickup/effect, **not** as a draw/drop probability percentage. (Proposed name `tick_interval`; earlier `probability` framing withdrawn.) | CONFIRMED (constant 100; consumed as a cadence interval) |
 
 - **Attachment floats are XZ offset pairs in the facing frame (CONFIRMED, two-witness):** the six
   floats at +8..+31 are **three XZ offset pairs** — each pair is a horizontal offset (X then Z)
@@ -252,21 +372,28 @@ verdicts are landed inline and called out per field.
 - **Four independent `u8` flags at +40..+43 — RESOLVED:** the earlier "4 `u8` flags vs. 1 packed
   `u32`" ambiguity is settled in favour of **four independent `u8` flags**. Each byte has its own
   full-table distribution (272/649, 916/5, 910/11, 824/97); a single packed `u32` would force the
-  four bytes to move together, which the data does not show.
-- **`attach_probability_f32` at +36 — RESOLVED:** previously read as "always zero in the head"
-  and tagged unknown; the full scan shows it is a float that is non-zero in 205 of 921 records with
-  clean decimal values, so it is a real per-entry float (sub-probability or variant scale), not an
-  error/zero field.
+  four bytes to move together, which the data does not show. **CYCLE 1:** the per-tick consumer reads
+  `+40` and `+43` as **pickup/effect cadence gate flags** (see the §5 header note).
+- **`visual_scale` at +36 — RESOLVED (CYCLE 1, consumer-confirmed):** previously read as "always
+  zero in the head" and tagged unknown, then as a candidate sub-probability; the full scan shows it
+  is a float non-zero in 205 of 921 records with clean decimal values, and the spawn-attach consumer
+  copies it into the spawned visual item's descriptor — so it is a per-entry **visual-scale / size**
+  field, **not** a drop sub-probability. The earlier "sub-probability" reading is withdrawn.
+- **`+44` is a cadence interval, not a probability (CYCLE 1, consumer-confirmed):** the constant-100
+  column at `+44` is consumed by the per-tick gate as a **millisecond tick-interval** value (the
+  cadence at which the attachment re-validates pickup/effect), not an integer-percent drop
+  probability. The earlier "100% probability" reading is withdrawn.
 - **Tail records (different family):** the last few records show all four flags set to 1 and a
-  non-default `attach_probability_f32` (e.g. 1.0), consistent with a distinct creature family
-  (e.g. bosses / rare spawns). Field types are unchanged.
+  non-default `visual_scale` (e.g. 1.0), consistent with a distinct creature family (e.g. bosses /
+  rare spawns). Field types are unchanged.
 - **Sample-verified:** all 921 records decoded for the per-column statistics above.
 
 ---
 
 ## Known unknowns (all five tables)
 
-- `actor_size.xdb`: **no runtime consumer (dead in this build)** — the on-disk layout is recorded
+- `actor_size.xdb`: **never loaded in this build** (no loader function; the path string sits in the
+  data-side pointer table but is never passed to an open/load call) — the on-disk layout is recorded
   for archival completeness only; which scale factor is which axis is moot for the port.
 - `buff_icon_position.xdb`: the buff-icon texture path (not encoded in this file); whether any
   later VFS revision adds rows beyond the 134 observed; the **draw-cell size** (provisionally 21×21)
@@ -276,13 +403,19 @@ verdicts are landed inline and called out per field.
 - `effectscale.xdb`: confirmation of the high16=type-tag / low16=index split of `effect_key`
   (NARROWED but the table holds only 2 records). The `scale_factor` purpose (per-effect overall
   size multiplier) is now CONFIRMED.
-- `vehicle.xdb`: `tag_a` runtime use is DBG-pending (no loader read-site found, but the loader
-  witness cannot refute a runtime read — consumer side untraced); the exact axis assignment of the
-  rider-offset floats (INFERRED); the semantic of `param_3` and the tail `param_5..8` values remain open.
-- `creature_item.xdb`: the six attachment floats are now CONFIRMED as three XZ offset pairs in the
-  facing frame (Y forced 0). Final confirmation that `scale_or_radius` (only 3.0/8.0) is a collision
-  radius; the exact meaning of each of the four flag bytes; whether `attach_probability_f32` is a
-  drop sub-probability or a variant scale, remain open.
+- `vehicle.xdb`: runtime use is now **STATIC-CONFIRMED** (CYCLE 1) — keyed by `vehicle_id`, consumed
+  on the mount path (mount-visual spawn + per-facing seat-Y, the latter read from float indices 9..12
+  = byte offsets +0x24/+0x28/+0x2C/+0x30 for facing 1..4). `tag_a` is **not read by either consumer**
+  (not a key; carries no value on the mount/seat path) — no live-debugger pass needed for that
+  verdict. Open: the exact axis assignment of the *leading* rider-offset floats (INFERRED); the
+  semantic of `param_3` and any non-seat-Y use of the leading floats.
+- `creature_item.xdb`: **RELABELLED (CYCLE 1) as a creature held-item VISUAL attachment table, not a
+  loot/drop table** — STATIC-CONFIRMED consumers (spawn-attach + per-tick gate), keyed by
+  `creature_key` from the creature actor's appearance field. The six attachment floats are CONFIRMED
+  as three XZ offset pairs in the facing frame (Y forced 0); `+36` is a visual-scale field (copied
+  into the spawned visual) and `+44` is a millisecond cadence interval — neither is a drop
+  probability. Open: final confirmation that `scale_or_radius` (only 3.0/8.0) is a collision radius;
+  the exact meaning of `flag_1`/`flag_2`.
 
 ---
 
@@ -295,15 +428,52 @@ verdicts are landed inline and called out per field.
 - Glossary: see `Docs/RE/names.yaml` (proposed: `ActorSizeXdb`, `BuffIconPositionXdb`,
   `EffectScaleXdb`, `VehicleXdb`, `CreatureItemXdb` and their record fields, including
   `VehicleXdb.tableStamp`, `CreatureItemXdb.collisionRadius`,
-  `CreatureItemXdb.attachProbability`).
+  `CreatureItemXdb.visualScale` (the `+36` field, formerly proposed `attachProbability`),
+  `CreatureItemXdb.tickInterval` (the constant-100 `+44` field, formerly proposed `probability`)).
+- **Runtime linkages (named consumers, 2026-06-21).** Each live table is indexed by its record `+0`
+  dword and looked up on a specific path:
+  - `effectscale.xdb`: looked up by `effect_key` from the lazy `.xeff` parse path; the looked-up
+    `scale_factor` **overwrites** (does not stack with) the `.xeff` base-scale field at parse time
+    (ctor default 1.0). Join key = `effect_key` → the `.xeff` effect being parsed (see `effects.md`).
+  - `buff_icon_position.xdb`: looked up by `buff_id` from the buff/status icon panels (every UI panel
+    that draws a buff-icon strip); returns the `(sprite_x, sprite_y)` pixel origin. Join key =
+    `buff_id`.
+  - `vehicle.xdb`: looked up by `vehicle_id` on the mount path — a mount-attachment refresh spawns the
+    mount visual from the row (`item_id` `+4` → `items.scr`), and a per-frame rider Y-placement adds
+    the per-facing seat-Y float (indices 9..12). Join key = `vehicle_id`; secondary `item_id` →
+    `items.scr`.
+  - `creature_item.xdb`: looked up by `creature_key` (the creature actor's appearance / visual-key
+    field) at spawn (spawn-attach) and per-tick (cadence gate). Join key = `creature_key`; secondary
+    `item_id` `+4` → `items.scr` / `citems.scr`.
+  - `msg.xdb`: looked up by `msg_id`; returns the 512-byte CP949 caption/format template (see
+    `misc_data.md §6`).
 - Provenance: see `Docs/RE/journal.md`. CAMPAIGN VFS-MASTERY (two-witness: loader + black-box):
-  `actor_size.xdb` result-unused (the path IS opened via the boot corpus loader, but the parsed result
-  is consumed by nothing); `effectscale.scale_factor` = per-effect overall size
-  multiplier (CONFIRMED); `vehicle.tag_a` runtime use DBG-pending (no
-  loader read-site; loader witness cannot refute a runtime read); `creature_item` six floats = three XZ offset pairs in the facing frame, Y forced 0,
-  not a bone (CONFIRMED); `buff_icon_position.sprite_y = 401` data-side blank-tile convention.
+  `effectscale.scale_factor` = per-effect overall size multiplier (CONFIRMED); `creature_item` six
+  floats = three XZ offset pairs in the facing frame, Y forced 0, not a bone (CONFIRMED);
+  `buff_icon_position.sprite_y = 401` data-side blank-tile convention. (NOTE: the VFS-MASTERY
+  `actor_size.xdb` "result-unused via the boot corpus loader" reading is SUPERSEDED by the 2026-06-21
+  re-read below — actor_size has no loader at all and is never opened.)
   **CAMPAIGN 10 Block D (build 263bd994, 2026-06-16):** all six strides/counts re-confirmed
   [sample-verified]; `buff_icon_position` origin spacing CORRECTED **27 → 25** (sample byte-steps),
-  the 21×21 draw cell flagged sprite-sheet-pending; the five small tables load through the **shared
-  boot data-table corpus loader** (an indirect per-format loader-pointer table dispatched at boot),
-  while `msg.xdb` is loaded directly from the main-window startup path (see `msg_xdb.md`).
+  the 21×21 draw cell flagged sprite-sheet-pending.
+  **2026-06-21 loader-mechanism + consumer re-read (static, build 263bd994) — supersedes the Block-D
+  loader note:** the four small tables (`effectscale`, `creature_item`, `vehicle`,
+  `buff_icon_position`) load through **four distinct, individually-named per-format loaders called
+  DIRECTLY in sequence** from the boot data-table thread — **not** an indirect loader-pointer dispatch
+  table. `msg.xdb` is loaded separately from the main-window startup path (the login-scene transition;
+  see `misc_data.md §6` / `msg_xdb.md`). **`actor_size.xdb` is NEVER loaded** — no loader exists and
+  its path string is never passed to an open/load call (data-side pointer-table slot only). The
+  vehicle per-facing seat-Y floats are pinned to byte offsets +0x24/+0x28/+0x2C/+0x30 (facing 1..4).
+  **CYCLE 1 (build 263bd994, 2026-06-19) — xdb runtime linkage (supersedes the VFS-MASTERY
+  `vehicle.tag_a` DBG-pending note):** both formerly-pending runtime-use notes RESOLVED to
+  STATIC-CONFIRMED by decompiling the consumers — no debugger needed. `vehicle.xdb` IS consumed at
+  runtime keyed by `vehicle_id` (record `+0`) on the mount path: a mount-attachment refresh spawns the
+  mount visual from the looked-up row, and a per-frame rider Y-placement adds a per-facing seat-height
+  offset from the record's trailing float array (one float per cardinal facing, indices 1..4). `tag_a`
+  (`+8`)/`tag_b` (`+12`) are not read by either consumer (not keys). **`creature_item.xdb` RELABELLED:
+  it is a creature held-item VISUAL attachment table, NOT a loot/drop table** — keyed by `creature_key`
+  (record `+0`) read from the creature actor's appearance/visual-key field, consumed at creature spawn
+  (spawn-attach: the row's `item_id` `+4` is attached as a visual, placed by the three facing-frame XZ
+  offset pairs `+8..+31` with the `+36` visual-scale) and per-tick (a flag/cadence gate on `+40`,
+  `+43`, and the `+44` millisecond tick-interval). The earlier "drop / drop sub-probability /
+  100%-probability" framing is withdrawn.

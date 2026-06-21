@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgNpcSearchById
+opcode: 0x20086           # major 2 (GameAction), minor 134 -> (2 << 16) | 134
+direction: C2S
+size: 24                  # fixed 24-byte payload
+spec: packets/2-134_npc_search_by_id.yaml
+status: confirmed
+capture_verified: false
+
+summary: Dual-mode NPC search (by ID or by name string). When SearchId is nonzero the server looks up by NPC id; when SearchId is zero the server falls back to the CP949 name filter.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 24.
+fields:
+  - { name: SearchId,   type: u32 }         # 0x00  NPC id; 0 when searching by name
+  - { name: NameFilter, type: "char[17]" }  # 0x04  CP949, set when SearchId==0
+  - { name: Padding,    type: "u8[3]" }     # 0x15  padding
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (24 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (4B)  SearchId   : the NPC id to search for. When nonzero, the server uses this as the
+                            primary lookup key and ignores NameFilter. When zero, the server
+                            falls back to the name-based search (le u32).
+    0x04 (17B) NameFilter : a CP949 NUL-padded name string used as a search filter when
+                            SearchId is zero. Ignored when SearchId is nonzero.
+    0x15 (3B)  Padding    : alignment padding, expected zero.
+
+  DUAL-MODE DESIGN: the same opcode serves both id-based and name-based NPC search. The client
+  sets SearchId to 0 and populates NameFilter for name searches, or sets SearchId to the NPC id
+  and leaves NameFilter empty for id searches.
+
+  UNKNOWNS to resolve with a capture:
+    - the exact server response format for search results;
+    - whether partial name matches are supported in NameFilter;
+    - whether SearchId uses the same id space as actor ids.
+
+  UNBLOCKS: Client.Application NPC search UI (by-id mode and by-name fallback).

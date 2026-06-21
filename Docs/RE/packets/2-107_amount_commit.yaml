@@ -1,0 +1,35 @@
+# spec: Docs/RE/packets/2-107_amount_commit.yaml
+# Role: C2S commit of a numeric amount entered on a keypad (a single u32 amount).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgAmountCommit
+opcode: 0x2006b           # major 2 (GameAction), minor 107 -> (2 << 16) | 107
+direction: C2S
+size: 4                   # fixed 4-byte body
+spec: packets/2-107_amount_commit.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Commit a numeric amount entered digit-by-digit on a keypad. A single u32 holding the final accumulated amount (e.g. an amount to bet/deposit/buy).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 4.
+fields:
+  - { name: Amount, type: u32 }   # 0x00  the accumulated numeric amount [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 4-byte blit of the caller's argument); the target
+  subsystem of the amount is a static inference (capture-pending).
+
+    0x00 (4B) Amount : the final numeric amount accumulated on a digit keypad (digit presses
+                       multiply by 1000/100/10 and add into a running total). [capture/debugger-pending]
+
+  TRIGGER: a numeric-input accumulator routine — digits accumulate into a window field; on the commit
+  step the total is read and sent as 2/107, then the accumulator resets and the window closes. An
+  over-limit guard shows a notice instead of sending when tripped.
+
+  UNKNOWNS to resolve with a capture:
+    - the target subsystem of the amount (bet / deposit / buy / other);
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application keypad amount-commit use-case.

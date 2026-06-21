@@ -1,0 +1,37 @@
+# spec: Docs/RE/packets/2-108_npc_locate_request.yaml
+# Role: C2S NPC search / locate request — a resolved NPC array (npc.arr) record id.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgNpcLocateRequest
+opcode: 0x2006c           # major 2 (GameAction), minor 108 -> (2 << 16) | 108
+direction: C2S
+size: 4                   # fixed 4-byte body
+spec: packets/2-108_npc_locate_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: NPC search / locate request. Sends the resolved NPC array (npc.arr) record id the player selected, so the server can answer with the NPC's location/region.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 4.
+fields:
+  - { name: NpcRecordId, type: u32 }   # 0x00  NPC array record id (resolved from a selected NPC reference) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 4-byte blit of the caller's argument); the field
+  VALUE meaning is a static inference (capture-pending).
+
+    0x00 (4B) NpcRecordId : an NPC/spawn record id resolved from a selected NPC reference via the
+                            npc.arr record finder. [capture/debugger-pending]
+
+  TRIGGER: a thin wrapper in the NPC-search path that resolves an NPC array record by id and
+  immediately sends it — the "send the resolved NPC record" step of an NPC search/locate feature.
+
+  RELATED: 2/134 (CmsgNpcSearchById, dual-mode id+name query) and 2/135 (CmsgNpcSearchByName) are the
+  query-submit lanes; 2/108 is the locate-by-resolved-record-id lane.
+
+  UNKNOWNS to resolve with a capture:
+    - the npc.arr record-id space;
+    - the inbound reply opcode (an NPC location/region answer is the natural reply) — pending.
+
+  UNBLOCKS: Client.Application NPC locate request use-case.

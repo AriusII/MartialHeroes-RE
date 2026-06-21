@@ -1,0 +1,52 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 32-byte body (ONE roster entry) --
+#                 member-key@0x00 / sort@0x04 / rank-flag@0x08 / CP949 name @0x09 -- are
+#                 control-flow-confirmed; every VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading marked 5/65 "var (32 body)" implying a stride-32 multi-record
+#              body. The handler reads a single fixed 32-byte block = ONE member update (one packet =
+#              one member), NOT a variable count of stride-32 records. BINARY WINS.
+
+name: SmsgGuildMemberRosterUpdate
+opcode: 0x50041           # major 5 (Push), minor 65 -> (5 << 16) | 65
+direction: S2C
+size: 32                  # fixed 32-byte body (0x20) -- ONE guild-member roster entry
+spec: packets/5-65_guild_member_roster_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server assigns or clears one guild member's name and rank/flag on the resolved actor (and mirrors onto the local player when the local player is the affected member). A fixed 32-byte block carrying ONE roster entry -- one packet updates one member, NOT a multi-record list.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 32.
+fields:
+  - { name: MemberKey, type: u32 }          # 0x00  actor composite key low (member id)
+  - { name: Sort,      type: u32 }          # 0x04  actor composite key high (sort)
+  - { name: RankFlag,  type: u8 }           # 0x08  rank / flag byte
+  - { name: Name,      type: "bytes[16]" }  # 0x09  member guild-name string (CP949, 16-char field, NUL at +0x19)
+  - { name: Tail,      type: "bytes[7]" }   # 0x19  remainder of the 32-byte block (NUL terminator + trailing pad)
+  # widths: 4 + 4 + 1 + 16 + 7 = 32
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 32-byte body (a SINGLE roster entry) and the field offsets.
+  CAPTURE-UNVERIFIED for the VALUE meanings.
+
+    0x00 (4B) MemberKey : actor composite key low (the member id used to resolve the actor).
+    0x04 (4B) Sort      : actor composite key high (the sort half of the key).
+    0x08 (1B) RankFlag  : a rank / flag byte (assigned onto the resolved actor's guild rank field).
+    0x09 (16B) Name     : the member's guild-name string, a NUL-bounded CP949 field (16 usable chars,
+                          forced NUL at +0x19).
+
+  ONE-ENTRY SEMANTICS: this packet updates exactly one guild member; it is NOT a stride-32 array. A
+  full roster comes through the guild full-sync (4/65), not by repeating this packet's body.
+
+  RUNTIME-OFFSET HYGIENE: the rank/flag and name are written onto live-actor guild fields (and mirrored
+  onto the local player when applicable); those runtime field offsets are not wire fields.
+
+  UNKNOWN to resolve with a capture: the RankFlag's enum meaning.
+
+  RELATED: the full guild roster snapshot is 4/65 SmsgGuildInfoFullSync
+  (packets/4-65_guild_info_full_sync.yaml).

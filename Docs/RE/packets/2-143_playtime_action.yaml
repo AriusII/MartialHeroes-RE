@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgPlaytimeAction
+opcode: 0x2008f           # major 2 (GameAction), minor 143 -> (2 << 16) | 143
+direction: C2S
+size: 4                   # fixed 4-byte payload (size corrected from variable)
+spec: packets/2-143_playtime_action.yaml
+status: confirmed
+capture_verified: false
+
+summary: Playtime reward panel action. Opens/refreshes the playtime panel or claims a reward item depending on Mode.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 4.
+fields:
+  - { name: Mode,       type: u8 }        # 0x00  action mode (0=open/refresh, 1=claim item)
+  - { name: SlotOrFlag, type: u8 }        # 0x01  slot index or flag
+  - { name: Param1,     type: u8 }        # 0x02  parameter 1
+  - { name: Param2,     type: u8 }        # 0x03  parameter 2
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (4 bytes),
+  CAPTURE-UNVERIFIED meaning. Size corrected from variable to fixed 4 bytes.
+
+    0x00 (1B) Mode       : action mode. 0 = open/refresh the playtime reward panel,
+                           1 = claim an available reward item (le u8).
+    0x01 (1B) SlotOrFlag : slot index for claim mode, or a flag for refresh mode (le u8).
+    0x02 (1B) Param1     : additional parameter; meaning varies by mode (le u8).
+    0x03 (1B) Param2     : additional parameter; meaning varies by mode (le u8).
+
+  CONTEXT: the playtime reward system tracks accumulated online time and offers
+  claimable rewards at thresholds. Mode 0 queries the current state; Mode 1 claims
+  from a specific slot.
+
+  UNKNOWNS to resolve with a capture:
+    - whether Mode values beyond 0 and 1 exist;
+    - the exact semantics of SlotOrFlag, Param1, and Param2 per mode;
+    - whether the original was truly variable-length (corrected to 4 here).
+
+  UNBLOCKS: Client.Application playtime reward panel interaction.

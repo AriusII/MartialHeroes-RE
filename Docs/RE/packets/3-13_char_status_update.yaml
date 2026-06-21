@@ -1,0 +1,32 @@
+name: SmsgCharStatusUpdate
+opcode: 0x3000d           # major 3, minor 13 -> (3 << 16) | 13
+direction: S2C
+size: 19                  # 19-byte fixed payload
+spec: packets/3-13_char_status_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Character status update notification. Emitted by the server to update the status text of a character
+  in the select lobby. On success, it refreshes the status field with the carried name.
+  On failure, it drives an error message status line.
+
+fields:
+  - { name: Result,     type: u8 }          # 0x00  result status: 1 = success, 0 = failure
+  - { name: ErrorCode,  type: u8 }          # 0x01  error code (used on failure)
+  - { name: Name,       type: "char[17]" }  # 0x02  character name (CP949 asciiz string)
+
+notes: |
+  Statically confirmed from the 3/13 handler.
+  The handler reads a fixed 19-byte block.
+
+  Success path (Result != 0):
+    Writes the carried Name into the select-window status field (the select-window singleton, sub-object 13).
+
+  Failure path (Result == 0):
+    Inspects ErrorCode and maps it to one of four UI message-string buckets:
+      - 0xC8 / 0xC9 -> message bucket A
+      - 0xCC / 0xCD / 0xCF / 0xD0 / 0xD1 / 0xD2 -> message bucket B
+      - 0xCE -> message bucket C
+      - 0xD4 -> message bucket D
+    Displays the selected error message on the status line.

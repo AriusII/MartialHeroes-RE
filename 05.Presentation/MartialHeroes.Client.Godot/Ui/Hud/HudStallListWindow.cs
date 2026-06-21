@@ -61,15 +61,16 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game personal-stall market list window (StallListPanel, master service slot 228, key `l`).
-///
-/// <para>A searchable, sortable, paged list of player-run stalls. Toggled by key `l`.
-/// DISTINCT from the NPC vendor (slot 259) and the trade window (§8.13).</para>
-///
-/// <para>PASSIVE: zero game logic. Search/enter/sort emits intent stubs. Inbound S2C 4/74
-/// (N×36B row records) is stubbed — stub rows are empty until server populates them.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.29 CODE-CONFIRMED.
+///     In-game personal-stall market list window (StallListPanel, master service slot 228, key `l`).
+///     <para>
+///         A searchable, sortable, paged list of player-run stalls. Toggled by key `l`.
+///         DISTINCT from the NPC vendor (slot 259) and the trade window (§8.13).
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. Search/enter/sort emits intent stubs. Inbound S2C 4/74
+///         (N×36B row records) is stubbed — stub rows are empty until server populates them.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.29 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudStallListWindow : Control
 {
@@ -125,28 +126,27 @@ public sealed partial class HudStallListWindow : Control
     private const int MsgUnknownOwner = 29022; // unknown owner
     private const int MsgEmptyRow = 29023; // empty-row placeholder
 
+    private readonly Label[] _rowLabels = new Label[VisibleRows];
+    private int _currentPage;
+    private double _lastSearchTime = -SearchRateSecs; // allow first search immediately
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _currentPage;
-    private int _totalPages = 1;
-    private int _selectedRow = -1; // -1 = none
-    private double _lastSearchTime = -SearchRateSecs; // allow first search immediately
-
-    private readonly Label[] _rowLabels = new Label[VisibleRows];
-    private LineEdit? _searchBox;
     private Label? _pageLabel;
+    private LineEdit? _searchBox;
+    private int _selectedRow = -1; // -1 = none
+    private int _totalPages = 1;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the stall list panel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.29.1 CODE-CONFIRMED.
+    ///     Geometry pass: builds the stall list panel.
+    ///     spec: Docs/RE/specs/ui_system.md §8.29.1 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -193,7 +193,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "↻",
             Position = new Vector2(333f, 2f),
             Size = new Vector2(11f, 11f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         titleA.Pressed += OnRefreshOwnList; // action 12
         AddChild(titleA);
@@ -206,7 +206,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "⠿",
             Position = new Vector2(345f, 2f),
             Size = new Vector2(11f, 11f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         titleB.Pressed += OnHeaderDrag; // action 13
         AddChild(titleB);
@@ -219,16 +219,16 @@ public sealed partial class HudStallListWindow : Control
             Text = "×",
             Position = new Vector2(357f, 2f),
             Size = new Vector2(11f, 11f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         titleC.Pressed += OnDismissBody; // action 14 = dismiss body sub-panel
         AddChild(titleC);
 
         // 10 visible row hit buttons (actions 0..9)
         // spec: ui_system.md §8.29.1 — "(23, 58+25·i, 337, 21) action = row index"
-        for (int r = 0; r < VisibleRows; r++)
+        for (var r = 0; r < VisibleRows; r++)
         {
-            float ry = RowBaseY + r * RowStrideY;
+            var ry = RowBaseY + r * RowStrideY;
             var rowBtn = new Button
             {
                 Name = $"Row{r}",
@@ -237,9 +237,9 @@ public sealed partial class HudStallListWindow : Control
                 Size = new Vector2(RowW, RowH),
                 Flat = true,
                 Alignment = HorizontalAlignment.Left,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedRow = r;
+            var capturedRow = r;
             rowBtn.Pressed += () => OnRowSelect(capturedRow);
             AddChild(rowBtn);
 
@@ -249,7 +249,7 @@ public sealed partial class HudStallListWindow : Control
                 Text = "",
                 Position = new Vector2(RowX + 2f, ry + 2f),
                 Size = new Vector2(RowW - 4f, RowH - 4f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(rowLbl);
             _rowLabels[r] = rowLbl;
@@ -257,7 +257,7 @@ public sealed partial class HudStallListWindow : Control
 
         // 10 column-sort buttons (actions 17..26)
         // spec: ui_system.md §8.29.1 — "(112+15·i, 361, 15, 14) actions 17..26"
-        for (int c = 0; c < 10; c++)
+        for (var c = 0; c < 10; c++)
         {
             var sortBtn = new Button
             {
@@ -265,9 +265,9 @@ public sealed partial class HudStallListWindow : Control
                 Text = "▼",
                 Position = new Vector2(112f + 15f * c, 361f),
                 Size = new Vector2(15f, 14f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedCol = c;
+            var capturedCol = c;
             sortBtn.Pressed += () => OnSort(17 + capturedCol);
             AddChild(sortBtn);
         }
@@ -280,7 +280,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "Name",
             Position = new Vector2(262f, 361f),
             Size = new Vector2(59f, 14f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         wideSort.Pressed += () => OnSort(27);
         AddChild(wideSort);
@@ -293,7 +293,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "◄",
             Position = new Vector2(16f, 355f),
             Size = new Vector2(26f, 26f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pagePrev.Pressed += () => OnPage(-1); // action 15
         AddChild(pagePrev);
@@ -306,7 +306,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "►",
             Position = new Vector2(332f, 355f),
             Size = new Vector2(26f, 26f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageNext.Pressed += () => OnPage(+1); // action 16
         AddChild(pageNext);
@@ -319,7 +319,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "1 / 1",
             Position = new Vector2(60f, 363f),
             Size = new Vector2(60f, 13f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_pageLabel);
 
@@ -333,9 +333,9 @@ public sealed partial class HudStallListWindow : Control
             Position = new Vector2(SearchX, SearchY),
             Size = new Vector2(SearchW, SearchH),
             MaxLength = SearchMaxLen,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        _searchBox.TextSubmitted += (_) => OnSearchSubmit(); // action 28/29 combined
+        _searchBox.TextSubmitted += _ => OnSearchSubmit(); // action 28/29 combined
         AddChild(_searchBox);
 
         // Submit/search button (action 29)
@@ -347,7 +347,7 @@ public sealed partial class HudStallListWindow : Control
             Text = text.GetCaption(MsgSubmitCaption, "Search"),
             Position = new Vector2(268f, 321f),
             Size = new Vector2(44f, 28f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         submitBtn.Pressed += OnSearchSubmit; // action 29
         AddChild(submitBtn);
@@ -361,7 +361,7 @@ public sealed partial class HudStallListWindow : Control
             Text = text.GetCaption(MsgResetCaption, "All"),
             Position = new Vector2(313f, 321f),
             Size = new Vector2(44f, 28f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         resetBtn.Pressed += OnSearchReset; // action 30
         AddChild(resetBtn);
@@ -374,7 +374,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "Enter Stall",
             Position = new Vector2(37f, 410f),
             Size = new Vector2(113f, 40f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         enterBtn.Pressed += OnEnterStall; // action 11
         AddChild(enterBtn);
@@ -387,7 +387,7 @@ public sealed partial class HudStallListWindow : Control
             Text = "Close",
             Position = new Vector2(224f, 410f),
             Size = new Vector2(113f, 40f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += OnClose; // action 10
         AddChild(closeBtn);
@@ -407,8 +407,8 @@ public sealed partial class HudStallListWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the stall list panel (key `l`, ASCII 108, slot 228).
-    /// spec: Docs/RE/specs/ui_system.md §8.29.5 CODE-CONFIRMED — key `l` toggle.
+    ///     Toggles the stall list panel (key `l`, ASCII 108, slot 228).
+    ///     spec: Docs/RE/specs/ui_system.md §8.29.5 CODE-CONFIRMED — key `l` toggle.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
@@ -469,7 +469,7 @@ public sealed partial class HudStallListWindow : Control
     {
         // action 29 — search/submit with 10-second rate gate
         // spec: ui_system.md §8.29.4 — "29: validate input, 10-second rate gate (msg 29017/29019/29020/29021), C2S 2/74"
-        double now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        var now = Time.GetTicksMsec() / 1000.0;
         if (now - _lastSearchTime < SearchRateSecs)
         {
             GD.Print($"[HudStallListWindow] Search rate-limited (msg {MsgRateLimitCountdown}). " +
@@ -477,7 +477,7 @@ public sealed partial class HudStallListWindow : Control
             return;
         }
 
-        string filter = _searchBox?.Text.Trim() ?? "";
+        var filter = _searchBox?.Text.Trim() ?? "";
         _lastSearchTime = now;
         // TODO(world-campaign): IApplicationUseCases.StallListRequest(filter) → C2S 2/74
         GD.Print($"[HudStallListWindow] Search submit filter='{filter}' → " +
@@ -527,7 +527,7 @@ public sealed partial class HudStallListWindow : Control
     {
         // actions 15 (prev) / 16 (next)
         // spec: ui_system.md §8.29.4 — "15/16: page up/down → re-render"
-        int newPage = _currentPage + delta;
+        var newPage = _currentPage + delta;
         if (newPage < 0) newPage = 0;
         if (newPage >= _totalPages) newPage = _totalPages - 1;
         _currentPage = newPage;

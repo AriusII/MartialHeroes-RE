@@ -1,0 +1,21 @@
+name: SmsgEquipChangeResult
+opcode: 0x40010           # major 4, minor 16
+direction: S2C
+size: 20                  # fixed 20-byte body
+spec: packets/4-16_equip_change_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server push that updates the equipment table of the local player in bulk. Refreshes equipped item visuals and mirrors.
+
+fields:
+  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque header/echo region
+  - { name: Result,      type: u8 }           # 0x08 1 = OK, 0 = Error
+  - { name: Pad0,        type: "bytes[1]" }   # 0x09 Alignment padding
+  - { name: SlotKind,    type: u8 }           # 0x0a Slot surface index
+  - { name: SlotIndex,   type: u8 }           # 0x0b Index within container
+  - { name: Trailer,     type: "bytes[8]" }   # 0x0c Remainder of the 20-byte payload
+
+notes: |
+  The handler reads a fixed 20-byte body. Frame = 8-byte header + 20 = 28 bytes on the wire.
+  If Result is successful, it copies the equipment slot mirror (20 slots × 16 bytes) and triggers weapon drawn refreshes when SlotIndex == 15.

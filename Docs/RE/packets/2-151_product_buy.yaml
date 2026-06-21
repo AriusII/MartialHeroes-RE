@@ -13,7 +13,12 @@ spec: packets/2-151_product_buy.yaml
 status: hypothesis
 capture_verified: false
 
-summary: The product / crafting panel's ONLY network send. A 1-byte selector body: the panel sends this once on open/refresh (selector 0) to ask the server for the current production list/money, and again on the tip-panel confirm action (selector 200 / 0xC8). All tab and page navigation inside the panel are LOCAL repaints over a server-pushed recipe list -- they are not network sends. The list/money refresh arrives inbound on S2C 3/8.
+summary: >
+  The product / crafting panel's ONLY network send. A 1-byte selector body: the panel sends this once
+  on open/refresh (selector 0) to ask the server for the current production list/money, and again on the
+  tip-panel confirm action (selector 200 / 0xC8). All tab and page navigation inside the panel are LOCAL
+  repaints over a server-pushed recipe list -- they are not network sends. The list/money refresh arrives
+  inbound on S2C 3/8.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 1.
 # CONTROL-FLOW CONFIRMED: the send builder writes the header (major 2 / minor 151) and appends a
@@ -43,9 +48,15 @@ notes: |
       so 2/153's exclusive ownership by the product family is no longer asserted. If 2/153 retains
       independent evidence as a separate confirm/finalize send, it gets its own spec when captured.
 
-  INBOUND PAIR: the product list/money refresh arrives on S2C 3/8 SmsgShopPageUpdate
-  (packets/3-8_shop_page_update.yaml) -- a 4-byte money/gold push that triggers a panel repaint over
-  the client-cached recipe vector. 3/8 carries no grid/page array.
+  INBOUND PAIR (binary-won, control-flow): the reply is selector-dependent --
+    - selector 0 (open/refresh) <- S2C 3/8 SmsgShopPageUpdate (packets/3-8_shop_page_update.yaml): a
+      money/gold push that triggers a panel repaint over the client-cached recipe vector; 3/8 carries no
+      grid/page array. The open-path caller and the 3/8 handler invoke the SAME product-list repaint
+      routine, which is what pins this pairing.
+    - selector 200 (0xC8, confirm) <- the major-4 product-result family 4/113 SmsgItemShopPurchaseResult
+      / 4/114 SmsgCashShopActionResult / 4/115 SmsgItemShopBalanceUpdate (the purchase result + balance
+      update). The census "2/151 -> 1/20" tie is REFUTED: 1/20 is the letter/mail received notice and
+      touches no product-panel state.
 
   WHAT IS NOT HERE: the recipe-list source vector fill path (where the cached recipe records come
   from -- area/NPC load vs a separate S2C) is not pinned this lane.

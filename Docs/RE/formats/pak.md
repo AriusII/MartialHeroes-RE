@@ -6,6 +6,7 @@
 > **Verification:** **sample-verified** (the strongest tier — facts established by control-flow +
 > operand evidence AND matched byte-for-byte against a real VFS sample).
 > ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
+> re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > Conflicts: none vs the committed structural claims (the campaign-10 re-verification supplies a
 > real sample that *promotes* the previously-"unknown content" header/TOC-trailing fields — those
 > are additions, not corrections; every prior CONFIRMED offset/size/stride re-verified true).
@@ -24,15 +25,19 @@
 
 - **Extension (index):** `.inf`  — default filename `data.inf`
 - **Extension (data):**  `.vfs`  — default path `data/data.vfs`
-- **Magic / signature (sample-verified):** the first 8 bytes of the header are a null-padded ASCII
-  magic string **`VFS001`** (`'V','F','S','0','0','1','\0','\0'`). The 24-byte header is read in
-  full in a single bulk operation, but **only** the `entry_count` field at offset 12 is extracted and
-  consumed — the client performs **no magic assertion, no version check, and no flags branch** on any
-  surrounding field. The earlier reading of these 8 bytes as a 4-char tag (`"VFS0"` / `"FVS0"`) plus
-  a separate 2-char version (`"01"`) was a mis-split of this **one** 8-byte magic field; the
-  authoritative direct byte-read is the single string `VFS001`. A reimplementation may assert this
-  magic, but the original does not — so a reimplementation that wishes to remain bug-compatible should
-  tolerate any header here.
+- **Magic / signature (present on disk; not validated by the client):** the first 8 bytes of the
+  header are a null-padded ASCII magic string **`VFS001`** (`'V','F','S','0','0','1','\0','\0'`) — this
+  is **sample-verified present on disk**. The client, however, **does not validate it**: the 24-byte
+  header is read in full in a single bulk operation, but **only** the `entry_count` field at offset 12
+  is extracted and consumed. The magic bytes are **read-and-discarded** — the mount routine neither
+  extracts them from the buffer nor compares them against any constant, and an image-wide byte search
+  confirms the ASCII bytes `VFS001` are **absent from the executable**, so the client carries no
+  constant to compare against (parser-verified). The client performs **no magic assertion, no version
+  check, and no flags branch** on any surrounding field. The earlier reading of these 8 bytes as a
+  4-char tag (`"VFS0"` / `"FVS0"`) plus a separate 2-char version (`"01"`) was a mis-split of this
+  **one** 8-byte magic field; the authoritative direct byte-read is the single string `VFS001`. A
+  reimplementation may assert this magic, but the original does not — so a reimplementation that wishes
+  to remain bug-compatible should tolerate any header here.
 - **Endianness:** little-endian throughout.
 - **Compression:** none on the data path — confirmed (see §Storage model — RAW/uncompressed).
 - **Encryption:** none on the data path — confirmed.
@@ -123,18 +128,28 @@ The 24-byte header now reads, in struct terms:
 `entry_count` is consumed by the client; the other fields are positively confirmed
 read-and-discarded by the mount routine, but a real sample has now resolved their on-disk content.
 
+> **No FILETIME inside the 24-byte index header.** The three Windows FILETIME values
+> (creation / last-access / last-write) documented below are **per-entry TOC fields** (at per-entry
+> offsets 120 / 128 / 136 inside each 144-byte record), **not** index-header fields. The index header
+> is exactly `magic(8) + field_08(4) + entry_count(4) + total_blob_size(u64)` with **no timestamp
+> field anywhere in its 24 bytes** — in particular `field_08` at +0x08 is a single 4-byte tag (value
+> 39), not a FILETIME or any timestamp.
+
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0 | 8 | char[8] | `magic` | Null-padded ASCII signature **`VFS001`** (`'V','F','S','0','0','1','\0','\0'`). Part of the single 24-byte bulk read; the mount routine does not extract or assert it. Same 8 bytes appear at data.vfs offset 0. (Earlier "VFS0"/"FVS0" + "01" split readings were a mis-split of these 8 bytes.) | sample-verified (read-and-discarded by client) |
-| 8 | 4 | u32 LE | `field_08` | Small scalar = **39 (0x27)** in the reference archive. Read-and-discarded; meaning unknown — plausibly a format sub-version, build/region tag, or section count. NOT the entry count (the +0x08-as-count hypothesis is refuted, see below). | sample-verified value; meaning capture/debugger-pending |
+| 0 | 8 | char[8] | `magic` | Null-padded ASCII signature **`VFS001`** (`'V','F','S','0','0','1','\0','\0'`). **Present on disk; read-and-discarded / NOT validated by the client** — part of the single 24-byte bulk read, but the mount routine never extracts or compares it, and the ASCII bytes are absent from the executable image (no constant to compare against). Same 8 bytes appear at data.vfs offset 0. (Earlier "VFS0"/"FVS0" + "01" split readings were a mis-split of these 8 bytes.) | sample-verified present on disk; non-validation parser-verified |
+| 8 | 4 | u32 LE | `field_08` | Opaque build/region/format-revision **tag** = **39 (0x27)** in the reference archive. **READ-AND-DISCARDED** — never read out of the 24-byte buffer (no consumer extracts, stores, or compares it anywhere in the client). NOT a FILETIME / timestamp (it is a single 4-byte value, not an 8-byte 100-ns tick count). NOT the entry count (the +0x08-as-count hypothesis is refuted, see below). | parser-verified (discarded); sample-verified value 39; meaning capture/debugger-pending |
 | 12 | 4 | u32 LE | `entry_count` | Number of TOC entries (= **43,347** in the reference archive). The ONLY header field the mount routine extracts; drives both the heap allocation (`144 × entry_count` bytes) and the bulk read of the TOC array. | sample-verified |
 | 16 | 4 | u32 LE | `total_blob_size` (lo) | Low dword of a u64 total-blob-size pair (with offset 20). = **3,802,182,193** in the reference archive — the **exact byte length of `data/data.vfs`**. Read-and-discarded by the client; useful as an integrity cross-check in a reimplementation. | sample-verified (read-and-discarded by client) |
 | 20 | 4 | u32 LE | `total_blob_size` (hi) | High dword of the total-blob-size u64. = **0** in the reference archive. Read-and-discarded. | sample-verified (read-and-discarded by client) |
 
 The non-`entry_count` fields are definitively not consumed by the mount routine in the
-examined client version — they are positively confirmed discarded without use. Their on-disk
-**content** is now sample-verified (magic / `field_08` scalar / total-blob-size), though the
-*meaning* of `field_08` (= 39) is settled only as a value, not a role.
+examined client version — they are positively confirmed discarded without use (parser-verified: the
+header is read once into a stack-local and only the +0x0C dword is extracted before the frame is torn
+down, so no other function can observe the `+0x08` tag). Their on-disk **content** is now
+sample-verified (magic / `field_08` scalar / total-blob-size), though the *meaning* of `field_08`
+(= 39) is settled only as a value, not a role. Note that **none of these 24 header bytes is a
+FILETIME** — the FILETIME timestamps live exclusively in the per-entry TOC records (see §TOC array).
 
 **Entry-count position is at offset 12 (+0x0C), sample-verified both ways.** This resolves an
 earlier open question (whether the count lived at +0x08 or +0x0C):
@@ -389,8 +404,8 @@ texture spec (`formats/terrain.md`) should follow the `.lst` binary, not the `.t
 | Question | Status |
 |---|---|
 | `entry_count` position (offset 12 / +0x0C of header) | sample-verified — static-IDA reads the count at buffer-relative +0x0C; sample arithmetic `24 + 144 × 43,347` is byte-exact. The +0x08-as-count hypothesis is REFUTED (`field_08` = 39, an unrelated scalar) |
-| Header magic = `VFS001` (8 bytes @0) | sample-verified — raw bytes `'V','F','S','0','0','1','\0','\0'`; read-and-discarded by the client; earlier "VFS0"/"FVS0"+"01" splits were mis-splits of these 8 bytes |
-| Header `field_08` = 39 (@8) | sample-verified value; meaning capture/debugger-pending — read-and-discarded; not the count, not a size; role (sub-version / build-region tag / section count?) open |
+| Header magic = `VFS001` (8 bytes @0) | sample-verified PRESENT on disk (`'V','F','S','0','0','1','\0','\0'`) but NOT validated by the client — read-and-discarded; the ASCII bytes are absent from the executable image (no constant to compare against), parser-verified; earlier "VFS0"/"FVS0"+"01" splits were mis-splits of these 8 bytes |
+| Header `field_08` = 39 (@8) | parser-verified READ-AND-DISCARDED (never read out of the buffer; no consumer anywhere) + sample-verified value 39 — not the count, not a size, NOT a FILETIME; role (sub-version / build-region tag / section count?) capture/debugger-pending |
 | Header `total_blob_size` u64 (@16/@20) | sample-verified — low dword = 3,802,182,193 = exact `data/data.vfs` byte length, high dword = 0; read-and-discarded by the client (usable as an integrity cross-check) |
 | `name[100]` + `dataOffset[104]` + `dataSize[112]` | sample-verified — corroborated by three independent call sites, 64-bit index arithmetic, and the byte-read |
 | Record stride = 144 bytes | sample-verified — by allocation arithmetic, the byte-exact archive size, and field offsets |

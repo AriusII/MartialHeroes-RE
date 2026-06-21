@@ -1,17 +1,20 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: exact total byte-end of MainWindow (1464B) not re-measured this lane (capture/debugger-pending). LoginWindow size now CODE-CONFIRMED at 0x558 = 1368 bytes (scene-state-1 Login allocation).
+conflicts: none open. MainWindow size CODE-CONFIRMED at 0x5B8 = 1464 bytes (CYCLE 7, IDB SHA 263bd994) — the prior "not re-measured / capture-pending" item is RESOLVED. LoginWindow size CODE-CONFIRMED at 0x558 = 1368 bytes (scene-state-1 Login allocation).
 ---
 
 # GUWindow multiple-inheritance layout (clean-room spec)
 
 Neutral, rewritten offset model of the legacy client's top-level UI window object. `GUWindow` is the
-top of the in-house `Diamond::GU*` widget toolkit: it derives from `GUPanel` (and through it
-`GUComponent`) **and** from a second event-handler base (RTTI class **"Cmdhandler"**), embedding a
-command handler, an auxiliary 3D/scene view (RTTI class **`Diamond::GView`**), and a texture/skin-atlas
+top of the in-house `Diamond::GU*` widget toolkit. It is a multiple-inheritance class: the primary
+single-inheritance chain (`GUWindow -> GUPanel -> GUComponent`) occupies the start of the object, and a
+second event-handler base subobject sits at +0xBC. That second base is the **abstract** event handler
+`Diamond::EventHandler`, realised through a **concrete embedded `CmdHandler` subobject** (`CmdHandler`
+derives `Diamond::EventHandler`; the RTTI class name of the concrete subobject is **`CmdHandler`**).
+The object also embeds an auxiliary 3D/scene view (`Diamond::GView`) and a per-window texture/skin-atlas
 list. Five top-level windows in the client derive from it; the in-game HUD master ("MainMaster") is one
 of them.
 
@@ -25,15 +28,21 @@ of them.
 
 | Aspect | State |
 |---|---|
-| Two-vptr multiple-inheritance shape | **CODE-CONFIRMED** — the primary vtable at +0x00 and the secondary command-handler vtable at +0xBC. |
+| Two-vptr multiple-inheritance shape | **CODE-CONFIRMED** — the primary vtable at +0x00, and the secondary vtable at +0xBC belonging to the concrete `CmdHandler` subobject (which realises the abstract `Diamond::EventHandler` base). |
 | Embedded sub-object start offsets (command handler / view / texture list) | **CODE-CONFIRMED** — start offsets pinned (+0xBC / +0xE8 / +0x220). |
 | Embedded sub-object byte spans | **CODE-CONFIRMED** — command-handler span +0xBC..+0xE7 (44B) and aux-view span +0xE8..+0x21F (312B) are derivable from the next sub-object's start; no longer "unknown". |
 | Inherited base-class region (GUPanel → GUComponent) | **CODE-CONFIRMED** — see `structs/gucomponent.md`. |
 | Window flag bit | **CODE-CONFIRMED** — the "is a window" mask 0x2000, OR-set **last** in the ctor. |
-| Primary vtable (15 slots) + secondary vtable (3 slots) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. |
+| Primary vtable (15 slots) + secondary vtable (**2 slots**) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. The secondary (MI base) vtable holds **2 slots**; **CYCLE 8 closed the prior [UNVERIFIED]**: every one of the five derived windows OVERRIDES BOTH secondary slots (slot 0 = base/dtor entry, slot 1 = the derived window's command/event sink — action-id routing). |
+| `MainWindow` total size | **CODE-CONFIRMED** (CYCLE 7) — **1464 bytes (0x5B8)**, from the zero-init routine's highest writes (dword at +0x5B0, byte at +0x5B4 → end 0x5B5 → 4-aligned 0x5B8). |
+| `MainWindow` static-singleton construction | **CODE-CONFIRMED** (CYCLE 7) — Meyers-style accessor over a static buffer; one-shot guarded ctor, atexit-registered; primary vtable at +0x00, secondary (MI base) vtable at +0xBC, then the service block is zero-cleared. |
+| Panel-slot array mechanism | **CODE-CONFIRMED** (CYCLE 7) — base **+0x238**, pointer-sized entries, slot index `= (offset − 0x238) / 4`. (Slot→class roster contents live in `specs/ui_system.md`.) |
 
-Cross-reference: the concrete `MainWindow` subclass and its service-slot table are in
-`structs/runtime_singletons.md §3.10`; the window-manager doctrine is in `specs/ui_system.md`.
+Cross-reference: the concrete `MainWindow` panel-slot roster (the slot→class contents and the
+slot-resolution verdicts) is in `specs/ui_system.md`; the service-slot table is cross-listed in
+`structs/runtime_singletons.md §3.10`; the window-manager doctrine is in `specs/ui_system.md`. This
+struct file owns the **layout mechanism** (object size, slot-array base, index formula); the **roster
+contents** belong to `specs/ui_system.md`.
 
 ---
 
@@ -41,12 +50,18 @@ Cross-reference: the concrete `MainWindow` subclass and its service-slot table a
 
 `GUWindow` is the classic MSVC multiple-inheritance layout: **two vtable pointers in one object**.
 The primary chain (`GUWindow → GUPanel → GUComponent`) occupies the start of the object; a second
-event-handler base ("Cmdhandler") contributes a second vtable pointer mid-object at +0xBC.
+event-handler base — the concrete `CmdHandler` subobject realising the abstract `Diamond::EventHandler` — contributes a second vtable pointer mid-object at +0xBC.
+
+> **Two real base subobjects only.** The object has exactly two genuine base subobjects with a vtable
+> pointer: the primary chain at +0x00 and the `CmdHandler`/`Diamond::EventHandler` subobject at +0xBC.
+> A third class-layout record (with a corrupt base-class count) surfaces during analysis but has **no**
+> object vtable pointer; it is a transient dynamic-cast / exception-catch artifact, **not** a third base
+> subobject. Do not model a third vptr.
 
 | Range | Region |
 |---|---|
 | +0x00 .. ~+0xBB | GUPanel header (which contains the GUComponent header) — see `structs/gucomponent.md` |
-| +0xBC .. +0xE7 | Embedded **command handler** ("Cmdhandler") sub-object (the event-handler base; carries the secondary vtable). 44 bytes. |
+| +0xBC .. +0xE7 | Embedded **command handler** (`CmdHandler`) sub-object — the concrete realisation of the abstract `Diamond::EventHandler` base; carries the secondary vtable. 44 bytes. |
 | +0xE8 .. +0x21F | Embedded **auxiliary view** sub-object (`Diamond::GView`, a 3D/scene view with HUD/scene callback hook slots). 312 bytes. |
 | +0x220 .. (end) | Embedded **texture list** sub-object (the window's per-window texture / skin-atlas list). |
 
@@ -78,8 +93,8 @@ order:
 | +0x00 | 4 | ptr | `vftable_primary` | Overwritten with the GUWindow vtable after the GUPanel base ran. The primary interface (component/panel/window method chain) — 15 slots, see §3. |
 | +0x08 | 4 | u32 | `flags` | OR-set with mask **0x2000** → "is a top-level window" (the window bit; see `structs/gucomponent.md §4`). OR-set **last** in the ctor. |
 | +0xA4 .. +0xB8 | — | — | (inherited GUPanel child-list region) | See `structs/gucomponent.md §3`. |
-| +0xBC | 4 | ptr | `vftable_secondary` | The **second** vtable pointer — the command-handler ("Cmdhandler") event-handler interface used to dispatch input/command events into the window. This is the MSVC multiple-inheritance adjustor-thunk layout. 3 slots, see §3. |
-| +0xBC .. +0xE7 | 44 | obj | `command_handler` ("Cmdhandler") | Embedded command-handler (event-handler) sub-object, constructed in place starting here. Its first word is the secondary vtable above. The command handler routes a clicked widget's action id to the window's action dispatch. RTTI class name literally **"Cmdhandler"**. Internal layout below. |
+| +0xBC | 4 | ptr | `vftable_secondary` | The **second** vtable pointer — the `CmdHandler` subobject's event-handler interface (the concrete realisation of abstract `Diamond::EventHandler`), used to dispatch input/command events into the window. This is the MSVC multiple-inheritance adjustor-thunk layout. **2 slots**, see §3. |
+| +0xBC .. +0xE7 | 44 | obj | `command_handler` (`CmdHandler`) | Embedded command-handler sub-object — the concrete `CmdHandler` realising the abstract `Diamond::EventHandler` base — constructed in place starting here. Its first word is the secondary vtable above. The command handler routes a clicked widget's action id to the window's action dispatch. RTTI class name of the concrete subobject is **`CmdHandler`**; its base is **`Diamond::EventHandler`**. Internal layout below. |
 | +0xC0 | 16 | obj | `command_handler.name` | Inline `std::string` (16-byte small-string buffer) holding the handler's name (e.g. the HUD master's "MainMaster"). |
 | +0xDC | 4 | u32 | `command_handler.count_a` | First numeric ctor argument (e.g. 1000). |
 | +0xE0 | 4 | u32 | `command_handler.count_b` | Second numeric ctor argument (e.g. 28158). |
@@ -137,16 +152,32 @@ GUWindow vtables, then each derived ctor overwrites them with its own).
 | 13 | sweep deferred-removed children | reads each child's remove-mark byte at child +0x8D. |
 | 14 | aux-view (GView) init helper | finalises the embedded `GView`: sets its size, writes owner back-pointers (at GView-relative +200/+216/+168) to the owning window, and sets the (null in the shipped client) hook function-ptr slot at GView-relative +164. |
 
-### 3.2 Secondary command-handler vtable — 3 slots
+### 3.2 Secondary command-handler vtable — 2 slots
 
-The "Cmdhandler" event interface. The GUWindow base installs a 3-slot vtable; its second slot is the
-event-handler entry (the window's `SetVisible`/event sink). Derived windows replace this whole vtable
-with their own variant (e.g. the login window and the MainWindow each install a distinct 3-slot
-command-handler vtable; the MainWindow's has two live entries, a null, and a runtime-library thunk).
+The `CmdHandler` event interface (the concrete realisation of the abstract `Diamond::EventHandler`
+base). **The GUWindow secondary (MI base) vtable holds exactly 2 slots** — its boundary is pinned by
+the class-layout record that immediately precedes the primary vtable, so the slot count is not a guess.
+Slot 0 is the base event-handler entry; slot 1 is the window's event sink (the `SetVisible` / event
+delivery path on the MI-base subobject).
 
-The "Cmdhandler" **base** class (before GUWindow's override) has a 5-slot vtable; the **"Cmdhandler"**
-RTTI class name is reached through that base vtable's RTTI record and is the original author's term for
-this sub-object.
+**Per-derived override (CODE-CONFIRMED — CYCLE 8).** Every one of the five derived windows
+(`CommonLoginWindow`, `MainWindow`, `OpeningWindow`, `SelectWindow`, `TestWindow`) **overrides BOTH
+secondary slots** at +0xBC, in the standard MSVC multiple-inheritance pattern (the GUWindow base ctor
+installs the GUWindow command-handler vtable, then each derived ctor overwrites it with its own 2-slot
+table). **Slot 0** is the base event-handler / scalar-deleting-destructor entry; **slot 1 is the
+window-specific command/event sink**. The GUWindow base slot 1 walks the active panel's child vector,
+finds the visible child whose back-pointer matches the handler sub-object, routes the event into that
+child's onEvent (primary slot 6), reads the child's hit action id (primary slot 10) into the window's
+captured-action field, and returns "consumed" when an action id was captured; if no child captures, it
+falls back to the primary-object input dispatch. Each derived window replaces slot 1 with its own sink
+(e.g. the login-form logic vs the char-select logic) so the same 2-slot shape carries per-window
+behaviour. (This **supersedes** a prior cycle's report of extra live/null/thunk entries in the
+MainWindow secondary vtable — the bound is exactly 2 slots, both overridden.)
+
+Both the abstract `Diamond::EventHandler` base and the concrete `CmdHandler` base each expose a 2-slot
+vtable of their own (before any GUWindow override). The `CmdHandler` and `Diamond::EventHandler` class
+names are reached through those base vtables' RTTI records and are the original author's terms for this
+sub-object and its abstract base.
 
 ---
 
@@ -182,7 +213,7 @@ into that base ctor). Each is a distinct top-level scene/window:
 | Window | Role | Name / args at construction |
 |---|---|---|
 | **CommonLoginWindow** (base of **LoginWindow**) | The login window base (login form, server selection / channel-resolve handoff). Built in **scene state 1** (LOGIN). `LoginWindow` is a further derivation of `CommonLoginWindow`, not a direct base-ctor caller. | "Loginer", 1000, 28158 |
-| **MainWindow** ("MainMaster") | The in-game HUD master window (**scene state 5**). **Also the de-facto window manager** — its service-slot table holds every HUD child-panel pointer (see `structs/runtime_singletons.md §3.10` and `specs/ui_system.md`). | "MainMaster", 1000, 28158 |
+| **MainWindow** ("MainMaster") | The in-game HUD master window (**scene state 5**). **Also the de-facto window manager** — its panel-slot array (base +0x238, see §6) holds every HUD child-panel pointer (layout in §6; slot→class roster in `specs/ui_system.md`). | "MainMaster", 1000, 28158 |
 | **OpeningWindow** | The opening-cinematic window (**scene state 3**). | (not re-read this lane) |
 | **SelectWindow** | The character-select window (**scene state 4**); hosts the live 3D preview row and the preview camera (see `specs/frontend_scenes.md`). | (not re-read this lane) |
 | **TestWindow** | A dev/test top-level window (one construction site; likely debug/dead code). | (not re-read this lane) |
@@ -194,22 +225,91 @@ into that base ctor). Each is a distinct top-level scene/window:
 > vtable, then `CommonLoginWindow` overwrites it, then `LoginWindow` overwrites it again.
 
 > **Window-manager finding (cross-reference).** There is **no separate "WindowManager" class**. The
-> MainWindow ("MainMaster") *is* the manager: a global singleton `GUWindow` whose flat service-slot
-> pointer table (documented in `structs/runtime_singletons.md §3.10` at +0x238..+0x5B4) holds every
-> HUD child-panel pointer, reached through one very-high-call-count singleton accessor. Detailed in
-> `specs/ui_system.md`. (The per-scene std::list teardown/dispose mechanism — distinct from this
-> manager attachment — tears scene objects down at scene exit; see `specs/ui_system.md`.)
+> MainWindow ("MainMaster") *is* the manager: a static-singleton `GUWindow`-derived object whose flat
+> panel-slot pointer array (base +0x238, see §6 below; cross-listed in
+> `structs/runtime_singletons.md §3.10`) holds every HUD child-panel pointer, reached through one
+> very-high-call-count singleton accessor. The slot→class roster is detailed in `specs/ui_system.md`.
+> (The per-scene std::list teardown/dispose mechanism — distinct from this manager attachment — tears
+> scene objects down at scene exit; see `specs/ui_system.md`.)
 
 ---
 
-## 6. Residual unknowns (capture/debugger-pending)
+## 6. MainWindow ("MainMaster") — the root HUD window-manager (CODE-CONFIRMED — CYCLE 7)
 
-- The exact **total byte-end** of the `MainWindow` (cross-referenced as 1464 bytes) was not
-  re-measured in this lane.
-- The **`LoginWindow` object size is now CODE-CONFIRMED at `0x558` = 1368 bytes** (the scene-state-1
+`MainWindow` is the concrete top-level window that derives from `GUWindow` and serves as the in-game
+HUD **window-manager** (its RTTI / command-handler name is **"MainMaster"**). It is the deepest level
+of the widget hierarchy (`GUComponent → GUPanel → GUWindow → MainWindow`).
+
+### 6.1 Static-singleton construction (not heap-allocated)
+
+`MainWindow` is a **static singleton**, *not* an `operator new` allocation:
+
+- A **Meyers-style accessor** returns a fixed static buffer (the single instance), guarded by a
+  one-shot construction latch; the constructor is **atexit-registered** for teardown.
+- The constructor chains the `GUWindow` base ctor, then **installs the primary `MainWindow` vtable at
+  +0x00** (over the GUWindow one), then **installs a secondary (multiple-inheritance base-subobject)
+  vtable at +0xBC** (the `CmdHandler` interface realising abstract `Diamond::EventHandler`, over the
+  GUWindow command-handler vtable), then
+  runs a **zero-clear of the service block** (the panel-slot array and trailing fields).
+- Because it is a static buffer, the object size cannot be read from an allocation size; it is
+  recovered from the zero-init routine's highest writes (see §6.2).
+
+### 6.2 MainWindow total size — 1464 bytes (0x5B8) — CONFIRMED
+
+The service-block zero-init routine clears the instance through the trailing fields. The **highest
+fields it writes** are a dword at **+0x5B0 (1456)** and a byte at **+0x5B4 (1460)**; the object end is
+therefore **0x5B5**, rounded up to 4-byte alignment = **0x5B8 = 1464 bytes**. This **confirms** the
+prior-cycle 1464-byte / 0x5B8 hypothesis — the residual is resolved. Confidence: high.
+
+### 6.3 MainWindow top-level layout
+
+| Offset | Size | Type | Field / region | Notes |
+|-------:|-----:|------|----------------|-------|
+| +0x00 | 4 | ptr | primary vtable (`MainWindow`) | The GUWindow-derived primary chain (component/panel/window methods); installed over the GUWindow vtable by the ctor. |
+| +0x00 .. +0xBB | 188 | (inherited) | GUWindow / GUPanel / GUComponent header | base subobject (see §1–§4 and `structs/gucomponent.md`). |
+| +0xBC | 4 | ptr | secondary (MI base) vtable | the command-handler ("Cmdhandler") interface vtable, installed over the GUWindow one by the ctor. |
+| +0xC0 .. +0x237 | ~376 | mixed | `MainWindow` own members / GUPanel child list etc. | zero-cleared by the ctor; not individually pinned this lane. |
+| **+0x238** | 4×N | ptr[] | **PANEL-SLOT ARRAY base** (the HUD panel registry) | see §6.4. |
+| +0x238 .. +0x517 | ~736 | ptr[] | panel-pointer slots 0..183 | zero-cleared by the ctor, filled by the in-game HUD-build routine. Slot→class contents: `specs/ui_system.md`. |
+| +0x500 | 4 | ptr | in-game main-handler slot (slot 178) | **SKIPPED by the zero-init** and filled when the in-game world scene state is entered — see §6.5. |
+| +0x518 .. +0x5A4 | — | ptr[] | trailing sparse slots (up to ~slot 218) | mostly null/reserved. |
+| +0x5A8 | 4 | int | trailing field | cleared by the ctor. |
+| +0x5B0 | 4 | int | trailing field (last dword) | highest dword written by the zero-init. |
+| +0x5B4 | 1 | u8 | trailing field (last byte) | end of object → 0x5B5 → 4-aligned 0x5B8. |
+
+### 6.4 The panel-slot array mechanism
+
+The HUD panel registry is a **flat array of pointer-sized slots** embedded in the `MainWindow` object:
+
+- **Base offset = +0x238.**
+- Entries are **pointer-sized (4 bytes)** in this 32-bit client.
+- **Slot index → offset:** slot `i` lives at **`+0x238 + i × 4`**.
+- **Offset → slot index:** `i = (offset − 0x238) / 4`.
+
+The array is zero-cleared by the constructor (one slot deliberately excepted — see §6.5) and
+populated by the in-game HUD-build routine, which constructs each panel and stores its pointer into
+its slot. **The contents of the array — which concrete panel class occupies which slot, the gaps, and
+the slot-resolution verdicts — are documented in `specs/ui_system.md`, not here.** This file owns only
+the array *mechanism* (base, stride, index formula).
+
+### 6.5 Slot 178 (+0x500) — the in-game state handler
+
+Slot 178 sits at **+0x238 + 178 × 4 = +0x500**. It is **deliberately skipped by the constructor's
+zero-init** and is instead constructed and stored when the in-game world scene state is entered: the
+scene state machine allocates a **200-byte (0xC8)** in-game handler object and stores its pointer into
+this slot. (Its concrete class identity and role are catalogued in `specs/ui_system.md`.) Confidence:
+high.
+
+---
+
+## 7. Residual unknowns (capture/debugger-pending)
+
+- **`MainWindow` size — RESOLVED (CYCLE 7).** Now CODE-CONFIRMED at **1464 bytes (0x5B8)** (§6.2);
+  the prior "not re-measured / capture-pending" item no longer applies.
+- The **`LoginWindow` object size is CODE-CONFIRMED at `0x558` = 1368 bytes** (the scene-state-1
   Login case allocates `0x558` before running the LoginWindow ctor); +0x554 is the last slot, so the
-  object ends exactly at 0x558. (Previously logged as "~1368B not re-measured" — now pinned exact.)
-  The MainWindow service-slot table occupies +0x238..+0x5B4 (`structs/runtime_singletons.md §3.10`).
+  object ends exactly at 0x558. The MainWindow service-slot table occupies +0x238..+0x5B4
+  (`specs/ui_system.md`; cross-listed in `structs/runtime_singletons.md §3.10`).
 - The runtime **semantics** of the `GView` hook function-ptr slot (null in the shipped client) — its
   purpose is inferred, not observed firing.
 - The detailed roles of the small shared GUComponent accessor slots (primary vtable slots 2–5,
@@ -217,8 +317,9 @@ into that base ctor). Each is a distinct top-level scene/window:
 
 ## Cross-references
 
-- Base-class field layout (GUPanel / GUComponent): `structs/gucomponent.md`
-- Concrete `MainWindow` + the 223-slot service table: `structs/runtime_singletons.md §3.10`
+- Base-class field layout (GUPanel / GUComponent), the 13/14/15 vtable layering, +0x8D / +0xB8: `structs/gucomponent.md`
+- `MainWindow` panel-slot **roster** (slot→class contents + slot-resolution verdicts): `specs/ui_system.md`
+- `MainWindow` service-slot table (cross-listed): `structs/runtime_singletons.md §3.10`
 - Window-manager doctrine, widget catalogue, draw/input behaviour, dispose/teardown list: `specs/ui_system.md`
 - Character-select window + preview camera: `specs/frontend_scenes.md`
 - Glossary: `Docs/RE/names.yaml`

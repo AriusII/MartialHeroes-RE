@@ -1,6 +1,6 @@
 ---
 verification: confirmed                # animation/scene-state facts CODE-CONFIRMED (static); residual on-screen-rate/fade-duration/sound-extension are capture/debugger-pending
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-18            # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]     # texture sizes/paths SAMPLE-VERIFIED (VFS); behaviour STATIC-IDA
 conflicts: on-screen realized scroll rate (design→screen scale); visible fade duration (frame-gated, frame-rate dependent); sound 910061000 .ogg basename/extension; display FRAMERATE config inertness
@@ -37,6 +37,8 @@ encoding_note: texture/sound paths are ASCII; no CP949 concerns in this scene
 | Slideshow state machine 1→2→3→4; 17500 ms dwell (+92 latch); alpha crossfade bounds 0..250, field INITIALISED to 250 | CODE-CONFIRMED (static) |
 | Alpha applied via the D3D TEXTUREFACTOR render-state (single device factor), not per-vertex color | CODE-CONFIRMED (static) |
 | Skip button anchored TOP-right (y=10, x=clientWidth−120) | CODE-CONFIRMED (static) |
+| Scenario crawl is a baked DDS sprite — no font slot, no typeset text, no script/`msg.xdb` text source | CODE-CONFIRMED (static) |
+| Teardown = a named-command dispatch on the driver + dispose-list push + slot-0 scalar-deleting destructor (NOT a plain destructor) | CODE-CONFIRMED (static) |
 | Intro sound id 910061000 fired at scene start | CODE-CONFIRMED (static) |
 | Texture paths and pixel dimensions | SAMPLE-VERIFIED (VFS) |
 | On-screen realized scroll rate after the view-context design→screen scale | capture/debugger-pending |
@@ -85,6 +87,14 @@ flow and `specs/game_loop.md` / `specs/client_runtime.md` for the GameState enum
 > **NOT** a login-window effect, **NOT** a UV-scrolled shader, and **NOT** an `.xeff` particle
 > effect. The login/PIN/server-list scenes have no dedicated particle VFX (see `formats/effects.md`
 > front-end section). The "ribbon" is a positional crawl of one whole DDS quad.
+>
+> **The crawl is a baked image, not typeset text (CONFIRMED).** The scenario calligraphy/scenario
+> band is **a single pre-rendered DDS sprite** (`data/ui/openning_scenario.dds`, 1024×2048),
+> translated in Y to scroll. There is **NO font slot**, **NO engine glyph typesetting**, and **NO
+> script-file / `msg.xdb` string-table source** for the crawl text — the CP949 calligraphy was baked
+> into the DDS at authoring time and the client neither loads nor typesets it at runtime. (The
+> front-end font slots configured at boot are not consumed by this scene.) Do not model the crawl as
+> rendered text from a string table.
 
 The two layers are:
 
@@ -195,6 +205,28 @@ Either path: persists `[OPENNING] SKIP=1` to the client config INI (so the GameS
 the intro next run, §0.1), sets the scene's "closing" flag, and tears down the scene's child
 objects. The same handler also carries the mouse-wheel/drag scrub (UI event type 8, §2.3) as a
 separate, non-closing branch.
+
+### 2.6 Scene teardown (CORRECTION — the small "cleanup" helper is NOT a destructor)
+
+When the scene tears down, a small helper runs that was previously (mis)read as a plain
+"cleanup"/destructor. It is **not** a destructor. What it actually does on teardown is **dispatch a
+NAMED engine command on the engine driver** — it passes the scene's own name string to a
+"dispatch-by-name" entry point on the driver singleton. That named-command dispatch is the helper's
+sole job; it does **not** free the object.
+
+The **real object teardown** is a separate, three-part sequence:
+
+1. **Named-command dispatch** — the helper above issues the by-name command on the engine driver
+   (passing the scene name).
+2. **Dispose-list push** — the scene's embedded UI-event sub-object is pushed onto the engine's
+   dispose-list (the same sub-object that was registered at construction).
+3. **Slot-0 scalar-deleting destructor** — the scene's vtable **slot-0** scalar-deleting destructor
+   then runs (invoked with the "also free" argument), which adjusts to the base, restores the base
+   vtable, and conditionally frees the object. Textures and child components are released through the
+   dispose-list and the window base, not enumerated by this slot-0 destructor itself.
+
+So describe the teardown as: **a named-command dispatch on the driver, then a dispose-list push of
+the sub-object, then a slot-0 scalar-deleting destructor** — not as a single plain destructor.
 
 ---
 
@@ -327,6 +359,20 @@ shared scheduler. Do not attribute the crawl to that queue.
   861010105 is a separate later cue.
 - **Scale caveat:** the 30 px/s and the 1843/1833 clamps are in design-pixel space — apply the same
   design→screen scaling the rest of the UI uses so the crawl reaches the same visual endpoint.
+
+---
+
+## Pending / to confirm (Phase 5 — live debugger)
+
+Two items remain open and are deferred to a Phase-5 live-debugger confirmation pass:
+
+- **D3D blend-factor enum mapping** — the slideshow panel sets the blend render-states before the
+  quad, but the exact source/destination blend-factor enum (the `SRCALPHA` / `INVSRCALPHA` reading,
+  §3.2/§3.3) is inferred from the raw render-state arguments and not yet confirmed.
+- **Realized on-screen crawl rate and fade duration** — the crawl advances at 30 design-px/s and the
+  alpha steps ±1 per rendered frame, both of which are scale- and frame-rate dependent; the actual
+  on-screen pixels-per-second of the crawl and the perceived fade time (§2.4/§3.3) need a live read
+  to pin down.
 
 ---
 

@@ -18,13 +18,15 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUCheckBox-faithful toggle widget backed by a Godot <see cref="TextureButton"/> in toggle mode.
-///
-/// <para>The NORMAL frame is the unchecked sprite; the PRESSED frame is the checked sprite, drawn at
-/// the exact widget rect. spec: Docs/RE/specs/ui_system.md §1 — "GUCheckBox checked = PRESSED frame".</para>
-///
-/// <para>Subscribe to <see cref="Toggled"/> to react to state changes and emit a use-case
-/// call. Never mutate domain state in a UI handler.</para>
+///     GUCheckBox-faithful toggle widget backed by a Godot <see cref="TextureButton" /> in toggle mode.
+///     <para>
+///         The NORMAL frame is the unchecked sprite; the PRESSED frame is the checked sprite, drawn at
+///         the exact widget rect. spec: Docs/RE/specs/ui_system.md §1 — "GUCheckBox checked = PRESSED frame".
+///     </para>
+///     <para>
+///         Subscribe to <see cref="Toggled" /> to react to state changes and emit a use-case
+///         call. Never mutate domain state in a UI handler.
+///     </para>
 /// </summary>
 public sealed class HudCheckbox : HudWidget
 {
@@ -40,7 +42,7 @@ public sealed class HudCheckbox : HudWidget
         Texture2D? normalFrame = null,
         Texture2D? pressedFrame = null)
     {
-        Texture2D? checkedTex = pressedFrame ?? normalFrame;
+        var checkedTex = pressedFrame ?? normalFrame;
 
         _check = new TextureButton
         {
@@ -55,7 +57,7 @@ public sealed class HudCheckbox : HudWidget
             TextureNormal = normalFrame,
             TexturePressed = checkedTex,
             TextureHover = normalFrame,
-            TextureDisabled = normalFrame,
+            TextureDisabled = normalFrame
         };
 
         _check.Toggled += pressed =>
@@ -73,11 +75,14 @@ public sealed class HudCheckbox : HudWidget
     }
 
     /// <summary>
-    /// Fired when the checkbox state changes. Subscribers must emit a use-case call.
-    /// Never mutate domain state in the UI layer.
+    ///     Fired when the checkbox state changes. Subscribers must emit a use-case call.
+    ///     Never mutate domain state in the UI layer.
     /// </summary>
     public event Action<bool>? Toggled;
 
-    /// <inheritdoc/>
-    public override Control? GetControl() => _check;
+    /// <inheritdoc />
+    public override Control? GetControl()
+    {
+        return _check;
+    }
 }

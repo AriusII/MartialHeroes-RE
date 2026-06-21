@@ -23,9 +23,9 @@ namespace MartialHeroes.Assets.Vfs;
 //                                   only). Sample-verified.
 
 /// <summary>
-/// Parses <c>data.inf</c> and exposes a sorted, binary-searchable directory of
-/// <see cref="VfsEntry"/> records.  The <c>data.inf</c> stream is read in full and
-/// then released; the caller retains no file handle after construction.
+///     Parses <c>data.inf</c> and exposes a sorted, binary-searchable directory of
+///     <see cref="VfsEntry" /> records.  The <c>data.inf</c> stream is read in full and
+///     then released; the caller retains no file handle after construction.
 /// </summary>
 internal sealed class VfsDirectory
 {
@@ -36,17 +36,26 @@ internal sealed class VfsDirectory
     /// <summary>Sorted array of entries — the binary-search target.</summary>
     private readonly VfsEntry[] _entries;
 
+    private VfsDirectory(VfsEntry[] entries)
+    {
+        _entries = entries;
+    }
+
     /// <summary>Number of entries in the directory.</summary>
     public int EntryCount => _entries.Length;
 
-    private VfsDirectory(VfsEntry[] entries) => _entries = entries;
+    /// <summary>
+    ///     Enumerates all directory entries in sorted order.
+    ///     For diagnostics and test assertions; not a hot path.
+    /// </summary>
+    public ReadOnlySpan<VfsEntry> Entries => _entries.AsSpan();
 
     /// <summary>
-    /// Reads and parses <c>data.inf</c> from <paramref name="stream"/>.
-    /// The stream is read sequentially from its current position; it is not disposed.
+    ///     Reads and parses <c>data.inf</c> from <paramref name="stream" />.
+    ///     The stream is read sequentially from its current position; it is not disposed.
     /// </summary>
     /// <exception cref="InvalidDataException">
-    /// Thrown when the stream is too short or a TOC record cannot be decoded.
+    ///     Thrown when the stream is too short or a TOC record cannot be decoded.
     /// </exception>
     public static VfsDirectory Load(Stream stream)
     {
@@ -66,7 +75,7 @@ internal sealed class VfsDirectory
         // where a high-bit-set u32 would overflow the checked multiply below).
         // spec: Docs/RE/formats/pak.md §Header — entry_count @ +12. Sample-verified.
         // spec: Docs/RE/specs/vfs_overview.md §Mount — "treated as a signed i32 ... count <= 0 guard".
-        int entryCount = BinaryPrimitives.ReadInt32LittleEndian(header[EntryCountOffset..]);
+        var entryCount = BinaryPrimitives.ReadInt32LittleEndian(header[EntryCountOffset..]);
 
         if (entryCount <= 0)
             return new VfsDirectory([]);
@@ -75,15 +84,15 @@ internal sealed class VfsDirectory
         // spec: Docs/RE/formats/pak.md — "Allocate 144 × entry_count bytes" then
         // "Read 144 × entry_count bytes from data.inf starting at offset 24". CONFIRMED.
         // The multiply is overflow-checked (mirrors the original's overflow-checked allocation).
-        int tocByteCount = checked(entryCount * VfsEntry.RecordSize);
-        byte[] toc = new byte[tocByteCount];
+        var tocByteCount = checked(entryCount * VfsEntry.RecordSize);
+        var toc = new byte[tocByteCount];
         ReadExact(stream, toc);
 
         // --- 3. Parse each 144-byte record ---
-        VfsEntry[] entries = new VfsEntry[entryCount];
-        for (int i = 0; i < entryCount; i++)
+        var entries = new VfsEntry[entryCount];
+        for (var i = 0; i < entryCount; i++)
         {
-            int recordStart = i * VfsEntry.RecordSize;
+            var recordStart = i * VfsEntry.RecordSize;
             entries[i] = VfsEntry.Parse(toc.AsSpan(recordStart, VfsEntry.RecordSize));
         }
 
@@ -98,22 +107,22 @@ internal sealed class VfsDirectory
     }
 
     /// <summary>
-    /// Binary-searches for <paramref name="normalizedName"/> (must already be lower-case).
-    /// Returns <see langword="null"/> if not found.
+    ///     Binary-searches for <paramref name="normalizedName" /> (must already be lower-case).
+    ///     Returns <see langword="null" /> if not found.
     /// </summary>
     /// <remarks>
-    /// Allocation-free on the hot path; no LINQ.
-    /// spec: Docs/RE/formats/pak.md — "Binary search the TOC array in ascending order
-    /// using a byte-for-byte string comparison on the 100-byte name field". CONFIRMED.
+    ///     Allocation-free on the hot path; no LINQ.
+    ///     spec: Docs/RE/formats/pak.md — "Binary search the TOC array in ascending order
+    ///     using a byte-for-byte string comparison on the 100-byte name field". CONFIRMED.
     /// </remarks>
     public VfsEntry? TryFind(string normalizedName)
     {
-        int lo = 0;
-        int hi = _entries.Length - 1;
+        var lo = 0;
+        var hi = _entries.Length - 1;
         while (lo <= hi)
         {
-            int mid = (int)(((uint)lo + (uint)hi) >> 1);
-            int cmp = string.CompareOrdinal(_entries[mid].Name, normalizedName);
+            var mid = (int)(((uint)lo + (uint)hi) >> 1);
+            var cmp = string.CompareOrdinal(_entries[mid].Name, normalizedName);
             if (cmp == 0) return _entries[mid];
             if (cmp < 0) lo = mid + 1;
             else hi = mid - 1;
@@ -122,20 +131,14 @@ internal sealed class VfsDirectory
         return null;
     }
 
-    /// <summary>
-    /// Enumerates all directory entries in sorted order.
-    /// For diagnostics and test assertions; not a hot path.
-    /// </summary>
-    public ReadOnlySpan<VfsEntry> Entries => _entries.AsSpan();
-
     // Reads exactly <paramref name="buffer"/>.Length bytes from <paramref name="stream"/>,
     // throwing <see cref="InvalidDataException"/> on a premature end-of-stream.
     private static void ReadExact(Stream stream, Span<byte> buffer)
     {
-        int totalRead = 0;
+        var totalRead = 0;
         while (totalRead < buffer.Length)
         {
-            int n = stream.Read(buffer[totalRead..]);
+            var n = stream.Read(buffer[totalRead..]);
             if (n == 0)
                 throw new InvalidDataException(
                     $"Unexpected end of stream while reading data.inf " +

@@ -8,17 +8,26 @@
 > `formats/mesh.md`, or `structs/item.md`.
 
 <!--
-verification: confirmed (per-part rebuild model, GID formulas, in-memory offsets, EquipTable layout
-  are control-flow-confirmed); static-hypothesis (weapon-glow tier toggler — not re-located this pass;
-  the `+1052` slot-value element semantics); capture/debugger-pending (the literal equip-result opcode
-  pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔ static
-  enchant level` mapping, the subtype 53-vs-55 meaning, the named hand bone).
-ida_reverified: 2026-06-16
+verification: confirmed (per-part rebuild model, GID formulas + the digit→lane wiring, in-memory
+  offsets, EquipTable layout, the weapon→hand-bone attach + dual-hand discriminator, AND the weapon-glow
+  tier toggler are control-flow-confirmed); plausible (the human NAMES of each appearance byte; the
+  named hand bone; the slot-value element semantics); capture/debugger-pending (the literal equip-result
+  opcode pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔
+  static enchant level` mapping, the subtype 53-vs-55 meaning, the per-tier glow VISUAL and the tooltip
+  loc-strings).
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: none open. RECON#F4 RESOLVED the prior off-hand-flag inversion — the off-hand node carries
   node flag = 1; node flag = 2 selects the MAIN-hand catalog columns (was stated backwards as
   "off-hand = flag 2" in the previous build's doc). All in-memory offsets re-pinned to 263bd994.
+note: ASSET-FIDELITY (ida_anchor 263bd994, 2026-06-21): the ATTACH MECHANISM is settled — weapon =
+  rigid single-bone attach selected by a numeric bone-id (no bone-name string in the binary; 88-byte
+  bone stride; the concrete hand bone-id is the one DBG-PENDING value); non-weapon parts (head/face/
+  body {2,3,4,6,11}) are skinned-deform under the shared root (NO head/face socket); Visual+100 is a
+  single scalar scale (not a matrix). CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): GID-digit→lane wiring CODE-CONFIRMED;
+  weapon-glow tier toggler RE-LOCATED (101..109→1..9, 4 emitters, grade flows by register — why a
+  literal search missed it).
 -->
 
 ---
@@ -44,29 +53,36 @@ conflicts: none open. RECON#F4 RESOLVED the prior off-hand-flag inversion — th
 | Local-player rebuild rebinds part slots `{3, 4, 6, 2, 11, 14}` (+ head / face / hand-weapon builders) | CODE-CONFIRMED |
 | Other-actor rebuild rebinds `{3, 4, 6, 2, 11}` — **no slot 14** (+ head / face / body builders) | CODE-CONFIRMED |
 | Part slot **14 = WEAPON** | CODE-CONFIRMED |
-| Weapon mesh GID uses the special base-1000 digit formula keyed on appearance fields | CODE-CONFIRMED (formula); PLAUSIBLE (digit → column meaning) |
-| Non-weapon parts derive GID via `10000·(id/10000) + id%100` through the animation-catalog GID→skin map | CODE-CONFIRMED (formula); PLAUSIBLE (digit → column meaning) |
+| Weapon mesh GID uses the special base-1000 digit formula keyed on appearance fields; the digit → lane WIRING is read off a single visual-part builder routine | CODE-CONFIRMED (formula + digit→lane wiring); PLAUSIBLE (human NAME of each appearance byte) |
+| Non-weapon parts derive GID via `10000·(part/10000) + part%100` through the animation-catalog GID→skin map | CODE-CONFIRMED (formula + digit→lane wiring); PLAUSIBLE (human NAME of each appearance byte) |
 | All parts share ONE skeleton / matrix root (`Visual+1300`); each part contributes to a combined vertex/index pool | CODE-CONFIRMED |
-| Weapon model attaches to a **hand bone** via the bone-attach list (`Visual+1376`); transform from `Visual+100` | CODE-CONFIRMED (structure); PLAUSIBLE (which named bone) |
+| Non-weapon parts (head, face, body slots `{2,3,4,6,11}`) are **skinned-deform parts under the shared skeleton root**, inserted into the draw list (`Visual+1360`) and deformed each frame against the shared pose — they are **NOT bone-attached** and there is **no head-bone or face-bone socket** (the head is built exactly like a body part). Only the **weapon** uses the bone-attach list (`Visual+1376`). | CODE-CONFIRMED |
+| Weapon model attaches to a **single bone** via the bone-attach list (`Visual+1376`); the bone is chosen by a **bone-id** on the attach-host node (resolved each frame against the loaded `.bnd`), NOT by a bone-name string (none exists in the binary); `Visual+100` is a single **scalar scale**, not a matrix | CODE-CONFIRMED (mechanism + 88-byte bone stride + scalar scale); DBG-PENDING (the concrete hand bone-id value) |
 | Dual / two-hand case (weapon bind class == 3) builds main-hand + off-hand nodes (**off-hand = node flag == 1; node flag == 2 selects the MAIN-hand columns**) | CODE-CONFIRMED |
-| Weapon glow / enchant aura from item-actor `+231` (`weapon_effect_grade`); 4-emitter glow object; 9 tiers | STATIC-HYPOTHESIS (toggler not re-located on 263bd994 — see §8) |
-| Grade values `101..109` normalize to tiers `1..9`; `0` = no glow | STATIC-HYPOTHESIS (carried; not re-proven this pass) |
-| Weapon glow tooltip uses loc-strings `57019..57024` | STATIC-HYPOTHESIS (carried; not re-proven this pass) |
-| Which **named bone** the weapon hangs from | PLAUSIBLE — runtime value from the loaded `.bnd`, not a literal |
+| Weapon glow / enchant aura from the weapon actor's grade byte (`weapon_effect_grade`); 4-emitter glow object (master + 3 satellites); 9 tiers | CODE-CONFIRMED — tier toggler RE-LOCATED on 263bd994 (see §6.1 / §8) |
+| Grade values `101..109` normalize to tiers `1..9`; `0` = no glow | CODE-CONFIRMED (grade normalised in the enable-for-grade routine) |
+| Per-tier glow VISUAL (which particle set tiers 1..9 show) + the weapon-glow tooltip loc-strings | OPEN-RISK / CAPTURE-PENDING (per-tier resource selection not in this slice; tooltip id appears computed base+tier, not a baked literal) |
+| Which bone the weapon hangs from | **There is no bone-name string** — the host node carries a numeric **bone-id** resolved against the loaded `.bnd`; the concrete id is DBG-PENDING (the host node is constructed with the default bone-id 0 and no static override is reachable). |
 
-> **RE-VERIFIED ON BUILD `263bd994` (2026-06-16).** The per-part rebuild model, the two rebind lists,
-> the GID formulas (§3), the shared-skeleton attach tail (§4), the weapon attach / dual-hand structure
-> (§5), the EquipTable layout (§6.3), and every in-memory offset in §7 were re-confronted against the
-> live disassembly this pass and hold (offsets re-pinned to this build). The one substantive correction
-> is the **off-hand node flag** (now flag `1`; flag `2` selects the **main-hand** columns — see §5.1).
-> Several enrichments the previous doc omitted are added (the dual-purpose `+10` byte, the exact 64-bit
-> catalog-key packing, the full per-class weapon-index ladder, the separate `+1052` slot-value array,
-> and the per-grade joint-effect / sheathe-sound special-case) — §6.2 and §6.4.
+> **RE-VERIFIED ON BUILD `263bd994` (2026-06-19).** The per-part rebuild model, the two rebind lists,
+> the GID formulas **and their digit→lane wiring** (§3), the shared-skeleton attach tail (§4), the weapon
+> attach / dual-hand structure (§5), the EquipTable layout (§6.3), and every in-memory offset in §7 were
+> re-confronted against the live disassembly this pass and hold (offsets re-pinned to this build). Two
+> substantive upgrades this cycle: (a) the **GID-digit → part-column wiring** is now CODE-CONFIRMED — a
+> single visual-part builder routine resolves the part and the digit→lane mapping is read straight off
+> its arithmetic (only the human *names* of each appearance byte stay PLAUSIBLE); (b) the **weapon-glow
+> tier toggler** is **RE-LOCATED** (§6.1) — grade normalisation `101..109 → 1..9`, a four-emitter glow
+> object, and the reason a literal-constant search missed it (the grade flows in by register, never as a
+> compare-against-immediate). The earlier off-hand node-flag correction (flag `1` for off-hand; flag `2`
+> selects the **main-hand** columns — §5.1) still holds. Carried enrichments: the dual-purpose skip byte,
+> the exact 64-bit catalog-key packing, the full per-class weapon-index ladder, the separate slot-value
+> array, and the per-grade joint-effect / sheathe-sound special-case — §6.2 and §6.4.
 >
 > **STILL STATIC-ONLY.** There was **no live capture** in the source analysis. The literal **equip-result
 > opcode pair** and the **on-wire framing** of the slot-type / skip-visual bytes (§6.2) are
-> capture/debugger-pending; the **weapon-glow tier toggler** (§6.1) was *not* re-located this pass and
-> is carried as a static-hypothesis from the prior build, not re-proven.
+> capture/debugger-pending; the **per-tier glow VISUAL** (which particle set each of tiers 1..9 shows)
+> and the **tooltip loc-strings** are OPEN-RISK / capture-pending — the toggler ON/OFF + normalisation +
+> four-emitter wiring are confirmed, but the per-tier resource selection is not in this slice.
 
 Open items are consolidated in §8.
 
@@ -147,49 +163,67 @@ part-actor is absent, the builder derives a numeric mesh GID from the per-charac
 
 ## 3. Part mesh GID derivation
 
-**Confidence: CODE-CONFIRMED for the formulas; PLAUSIBLE for the exact meaning of each appearance digit.**
+**Confidence: CODE-CONFIRMED for the formulas AND the digit → part-lane wiring; PLAUSIBLE only for the
+human NAME of each appearance digit.**
 
-When a part has no live part-actor, the builder computes a mesh resource GID from the visual's
-appearance fields (§7). There are two formulas: a special one for the weapon slot, and a general one
-for every other part.
+When a part has no live part-actor, **a single visual-part builder routine** computes a mesh resource
+GID from the visual's appearance fields (§7). That routine resolves the part and its branch is keyed on
+the **part-slot argument**: part slot `14` takes the weapon formula, any other slot takes the general
+one. The digit → lane wiring below is read straight off the builder's arithmetic and is **CODE-CONFIRMED
+on build `263bd994`**; only the *labels* of the appearance bytes (calling one "hair" vs another
+"class/race") stay PLAUSIBLE — they are inferred from the `5·(hair + 4·class) − 24` packing used by the
+skin/skeleton catalog elsewhere, not read from a labelled table. Keep that nuance.
 
 ### 3.1 Weapon (part slot 14)
 
 ```
-weapon_gid = 1000 · ( B + 10 · ( C + 10 · ( D + 10 · ( part_id / 1000000 ) ) ) )
+weapon_gid = 1000 · ( B + 10 · ( C + 10 · ( D + 10 · ( part_actor_id / 1000000 ) ) ) )
+gid        = weapon_gid + ( part_actor_id mod 1000 )
 ```
 
-where the digits come from the visual's appearance fields:
+where the three appearance terms come from the visual's appearance fields — **the same three fields
+that feed the shared base term in §3.2**:
 
-| Digit | Source field | Visual offset |
-|---|---|---|
-| `B` | weapon appearance / grade digit (u8) | `+150 (0x96)` |
-| `C` | hair / variant id (i16) | `+168 (0xA8)` |
-| `D` | class / race id (u8) | `+160 (0xA0)` |
+| Digit | Role (PLAUSIBLE label) | Source field | Visual offset |
+|---|---|---|---|
+| `B` | least-significant weapon-appearance / grade byte (u8) | weapon appearance digit | `+150 (0x96)` |
+| `C` | next variant / "hair" field (i16) | variant id | `+168 (0xA8)` |
+| `D` | next class / race byte (u8) | class/race id | `+160 (0xA0)` |
 
-`part_id` is the weapon part-actor id; its high digits (`part_id / 1000000`) supply the most
-significant term. In effect the weapon mesh is keyed by the character's class/race/variant digits
-plus the weapon's high-order part id digits, scaled into the base-1000 GID space. The mapping of each
-digit to a specific `class.txt` / `skin.txt` column is **PLAUSIBLE** — it is inferred from the GID
-arithmetic, not read from a labelled table.
+`part_actor_id` is the weapon part-actor id; its high digits (`part_actor_id / 1000000`) supply the
+most-significant term, and its low three digits (`part_actor_id mod 1000`) are added back after the
+base-1000 scale. In effect the weapon mesh is keyed by the character's appearance digits plus the
+weapon's high-order part-id digits, scaled into the base-1000 GID space. The **digit → lane wiring is
+CODE-CONFIRMED**; only the human *naming* of each digit's role is PLAUSIBLE.
 
 ### 3.2 Non-weapon parts
 
 ```
-part_gid = 10000 · ( part_id / 10000 ) + part_id % 100
+gid = 10000 · ( part_actor_id / 10000 ) + ( part_actor_id mod 100 )
 ```
 
-The result is combined with a class/variant base term derived from the same appearance fields into a
-64-bit key, which is looked up in the animation-catalog **GID → skin map** (a sorted/tree map inside the
-animation catalog singleton). The exact packing (CODE-CONFIRMED on build `263bd994`) is:
+The result is combined with a class/variant base term derived from the **same three appearance fields**
+into a 64-bit catalog key, which is looked up in the animation-catalog **GID → skin map** (a sorted/tree
+map inside the animation catalog singleton). The exact packing (CODE-CONFIRMED on build `263bd994`,
+shared by both branches below the skin-level cap) is:
 
 ```
-base_term = 5 · ( hair_variant + 4 · class_race ) − 24
-key       = part_gid + 1,000,000,000 · ( part_slot + 100 · base_term )
+base_term = 5 · ( variant_field + 4 · class_field ) − 24
+key64     = gid + 1,000,000,000 · ( part_slot + 100 · base_term )
 ```
 
-The catalog map resolves this 64-bit key to a concrete skin resource. The digit-to-column meanings of
-the appearance fields are again PLAUSIBLE; the arithmetic itself is exact.
+The catalog map resolves `key64` to a concrete skin resource; a miss yields null mesh pointers. The
+arithmetic itself — including the variant field folding into the `·1` term and the class field into the
+`·4` term, and `part_slot` / `base_term` occupying the high billions lane — is exact. Only the human
+naming of each appearance field stays PLAUSIBLE.
+
+### 3.3 Per-character skin-level cap (short-circuit)
+
+The GID-derivation block above runs only while the base skin id is at or below a per-character
+skin-level cap (a value read from the animation catalog). **Above that cap** (base skin id > catalog
+cap) the whole GID-derivation block is **skipped** — the live part-actor path is used, or a null result
+falls through — and the local-player rebuild then binds **only the body slot** (slot 3). High-tier
+characters therefore use a reduced composition. Keep this short-circuit.
 
 > This GID→skin indirection is the same animation-catalog map that the `id_b ↔ .bnd` and skin-class
 > chains use elsewhere; see `formats/mesh.md` (id_b ↔ skeleton bijection) and `specs/skinning.md` (bone
@@ -220,11 +254,23 @@ per-part skeleton; the head, face, hair, body, and weapon meshes are all skinned
 hierarchy. See `specs/skinning.md` for the bone-addressing and deform conventions that this shared
 skeleton obeys.
 
+> **Skinned-under-root vs. bone-attached — the load-bearing distinction (CODE-CONFIRMED, re-walked
+> 2026-06-21).** The non-weapon parts — head, face, hair, and the body part slots `{2,3,4,6,11}` —
+> are **skinned-deform parts**: each is parented with the shared skeleton root as its parent matrix
+> and inserted into the visual's **draw list** (`Visual+1360`), and is deformed every frame against
+> the shared pose (linear-blend or rigid skinning, selected per visual). They are **never** placed in
+> the bone-attach list, and there is **no per-part single-bone socket** — in particular **no head-bone
+> and no face-bone socket**; the head and face are built by dedicated builders but end in exactly the
+> same skinned-under-root tail as a body part. Only the **weapon** is a rigid single-bone attachment
+> (§5). A faithful port therefore skins headgear/armor/hair with the whole skeleton and rigid-attaches
+> only the weapon to one bone.
+
 ---
 
 ## 5. Weapon-in-hand: bone attach, dual / two-hand
 
-**Confidence: CODE-CONFIRMED for the structure and the node-flag discriminator; PLAUSIBLE for the named bone.**
+**Confidence: CODE-CONFIRMED for the structure, the node-flag discriminator, the bone-id attach
+mechanism, and the scalar scale; DBG-PENDING for the concrete hand bone-id value.**
 
 The hand/weapon-attach builder (called by the local-player rebuild) is responsible for hanging the
 weapon model on the skeleton:
@@ -243,11 +289,28 @@ weapon model on the skeleton:
    | `45` | `+1` |
    | `> 45` | no shift |
 
-3. The weapon model is attached to a **hand bone** by inserting the weapon node into the visual's
-   **bone-attach list** at `Visual+1376` and binding it to the resolved bone. The node's transform is
-   taken from `Visual+100`. The **named bone index is a runtime value from the loaded `.bnd`
-   skeleton**, not a literal — recovering which named bone (e.g. a right-hand bone) requires a sample
-   `.bnd` + a trace, so it is graded PLAUSIBLE.
+3. The weapon model is attached to a **single bone** by inserting the weapon node into the visual's
+   **bone-attach list** at `Visual+1376`. The bone is selected by a numeric **bone-id stored on the
+   attach-host node** — there is **no bone-name string** in the binary. Each frame the renderer
+   resolves that id to a bone record in the loaded `.bnd` pose by the `.bnd` id-offset convention
+   (bone records are an **88-byte** stride, addressed relative to the first bone's self-id — the same
+   convention `specs/skinning.md` documents for `.skn` weights and `.mot` tracks), then composes the
+   host's world from that bone as a **rigid follow**: host position = bone-rotation applied to the
+   host's local offset, plus the bone translation; host rotation = bone-rotation composed with the
+   host's local rotation. The per-weapon grip geometry then comes from the weapon `.skn`'s
+   **attach-set** (a set of records each placed relative to the host: position = host-rotation applied
+   to the record's local offset **scaled by `Visual+100`**, plus the host position). So `Visual+100`
+   is a single **scalar scale** (not a matrix, not identity) applied to the attach-set offsets, and
+   the grip placement is asset data from the `.skn`, not code.
+
+   > **DBG-PENDING (one runtime value).** The host node is constructed with the default bone-id `0`
+   > (the root/first bone) and no static write to that id is reachable on the build path, yet the
+   > per-frame compose unconditionally resolves a bone by it. So either the weapon genuinely hangs
+   > from the root and the grip is carried entirely by the `.skn` attach-set offsets, or the `.skn`
+   > attach metadata sets a hand-bone id at load. Distinguishing these — and naming the hand bone —
+   > needs a live read of the host node's bone-id with a weapon equipped. The same value (off-hand vs.
+   > main-hand bone-id) is the only DBG-PENDING item for the dual-weapon case below; both default to
+   > `0` statically.
 
 ### 5.1 Single vs. dual / two-hand weapons
 
@@ -283,46 +346,57 @@ motion table. The node-flag value selects which pair of catalog columns the node
 
 ## 6. Weapon glow (enchant aura) and the network entry points
 
-**Confidence: STATIC-HYPOTHESIS for the glow toggler (§6.1, not re-located on 263bd994);
-CODE-CONFIRMED for the network entry points and the in-memory EquipTable (§6.2–§6.4);
-CAPTURE/DEBUGGER-PENDING for the wire opcodes and framing.**
+**Confidence: CODE-CONFIRMED for the glow tier toggler (§6.1, RE-LOCATED on 263bd994), the network
+entry points and the in-memory EquipTable (§6.2–§6.4); OPEN-RISK / CAPTURE-PENDING for the per-tier
+glow VISUAL + the tooltip loc-strings; CAPTURE/DEBUGGER-PENDING for the wire opcodes and framing.**
 
 ### 6.1 The enchant-aura glow
 
 Equipping, unequipping, or swapping a **weapon-slot** item drives a weapon glow ("enchant aura"). On a
-weapon-slot mutation the handler is understood to:
+weapon-slot mutation the handler:
 
-1. look up the currently equipped weapon actor (via the weapon-slot actor-id singleton);
-2. read the weapon's **`weapon_effect_grade`** byte at item-actor **`+231` (`0xE7`)** — see
+1. looks up the currently equipped weapon actor (via the weapon-slot actor-id singleton);
+2. reads the weapon's **`weapon_effect_grade`** byte at item-actor **`+231` (`0xE7`)** — see
    `structs/item.md §6g`;
-3. if the grade is non-zero, enable the glow at the corresponding tier; if zero, clear it.
+3. if the grade is non-zero, calls the **enable-for-grade** routine to turn the glow on at the
+   corresponding tier; if zero, calls the mirror **disable** routine to turn it off.
 
-**Grade normalisation:** stored grade values **`101..109` normalise to tiers `1..9`** (subtract 100);
-a grade of **`0` means no glow**. There are exactly **nine glow tiers**.
+**The tier toggler — RE-LOCATED on build `263bd994` (CODE-CONFIRMED).** The enable-for-grade routine
+normalises the grade and selects the tier:
 
-**The glow object** is a dedicated effect object with **four emitters**: one master emitter plus three
-satellite emitters. Enabling the glow toggles all four on together at the selected tier; clearing it
-toggles all four off. The weapon-glow tooltip / label builder reads the same `+231` grade, normalises
-it the same way, and formats a per-tier enchant-percentage label from **localisation strings
-`57019..57024`** (the baked per-tier "+N%" rows).
+- **Grade normalisation:** stored grade values **`101..109` normalise to tiers `1..9`** — the routine
+  computes `tier = grade − 100` when `grade − 101 ≤ 8`; a raw `1..9` also passes through unchanged. A
+  grade of **`0` means no glow**.
+- **Tier guard:** the routine then guards `tier ≤ 9` — there are **exactly nine valid tiers**; outside
+  that range the enable is skipped.
+- **Anchor + enable:** it anchors the glow from a layout sub-object, then **enables four emitters** — a
+  master emitter plus three satellite emitters (**four total**). A mirror disable routine turns the same
+  four off. The glow object is a single window-singleton sub-object.
 
-> **Re-RE status (build `263bd994`).** The specific tier toggler (`101..109 → 1..9`, the four-emitter
-> glow object, the loc-string `57019..57024` label) was **not independently re-located this pass** — so
-> the whole of §6.1 is carried forward as a **STATIC-HYPOTHESIS** from the prior build, not re-confirmed
-> on 263bd994. What *was* observed on this build: the UI panels (inventory / target-select) read the
-> *actor's* `+231` as a simple "has-glow" boolean and route it through a window-effect call; the
-> item-actor `+231` *grade* read appears to be pointer-relative rather than a literal-immediate access,
-> which is why a constant-search for the toggler missed it. The clean re-RE entry point for a follow-up
-> is the four-emitter glow-object constructor / the tooltip loc-string builder, **not** the `+231`
-> immediate. See §8.
->
-> **Related (CODE-CONFIRMED on 263bd994):** the same `+150` "weapon_gid_digit" appearance field
-> (§7) also indexes a **per-grade joint-effect (XEffect) registry** in the weapon/joint-effect refresh
-> path, and that refresh special-cases the local player for `item_subtype == 55` with a specific
-> weapon set-flag value (a sheathe / draw-swap sound cue). So `+150` is consumed by both the GID
-> formula (§3.1) and a per-grade joint-effect lookup.
+**Why a literal-constant search missed it.** The grade flows into the enable routine as a **register
+value** — the weapon actor's grade byte (`weapon_effect_grade`) passed by argument — never as a
+compare-against-immediate. Every weapon-slot equip-result handler and every world target-select panel
+follows the identical shape: resolve the weapon actor, read its grade byte, call enable (when non-zero)
+or disable (when zero). Because the literal `101..109` / `1..9` never appears as a compared immediate at
+the toggler, an earlier constant-search for the toggler failed to land on it; the toggler is real and
+now located.
 
-> **Grade vs. static enchant level.** The runtime `weapon_effect_grade` (range `0..9` after
+**Per-tier VISUAL differentiation — OPEN-RISK / capture-pending.** *Which* particle set each of tiers
+`1..9` actually shows is **not** in this slice (the per-tier resource/colour selection appears to flow
+into the emitter objects / the anchor-layout, not the toggler). Likewise the **weapon-glow tooltip /
+label loc-strings** are capture-pending: those ids are not baked literal immediates anywhere — the label
+builder appears to *compute* the id (a base id plus the tier) rather than bake a per-tier constant. The
+toggler ON/OFF + the normalisation + the four-emitter wiring are CODE-CONFIRMED; the per-tier visual and
+the tooltip strings are not.
+
+> **Related (CODE-CONFIRMED on 263bd994):** the same `+150` weapon-appearance / grade byte (§7) that
+> feeds the weapon GID formula (§3.1) **also** indexes a **per-grade joint-effect (XEffect) registry**
+> in the weapon/joint-effect refresh path. That refresh special-cases the **local player** for a
+> sheathe / draw-swap sound cue when the weapon's `item_subtype` is `55` **and** the weapon set-flag
+> equals **`303`** (the set-flag literal on this build). So the same appearance byte is consumed by both
+> the GID formula and a per-grade joint-effect lookup.
+
+> **Grade vs. static enchant level.** The runtime `weapon_effect_grade` (range `1..9` after
 > normalisation) is a *compressed* tier, not the raw enchant count. Its relationship to the static
 > enchant-level column in the binary item record (range `0..28`) is **CAPTURE-PENDING**; see
 > `structs/item.md §6g` and §8 here.
@@ -437,10 +511,12 @@ These corroborate `structs/item.md`; offsets are within the item-actor object.
 |---|---|---|
 | Which **named bone** the weapon hangs from | PLAUSIBLE — the bone index is a runtime value from the loaded `.bnd`; needs a sample skeleton + a trace to name the hand/weapon bone | Get it wrong and the weapon floats off the hand; resolve against a real `.bnd` before placing weapons |
 | ~~Off-hand discriminator~~ | **RESOLVED on `263bd994` (RECON#F4)** — off-hand node flag = `1`; flag `2` selects the **main-hand** columns (§5.1). Was inverted in the prior doc. | Affects dual-wield; the correct flags are now in §5.1 |
-| Appearance digit → column mapping (`+150 / +160 / +162 / +168`) | PLAUSIBLE — inferred from the GID arithmetic, not from a labelled table | The GID formulas (and the exact 64-bit key packing, §3.2) are exact; only the *naming* of each digit's role is uncertain |
-| **Weapon-glow tier toggler** (`101..109 → 1..9`, four emitters, loc `57019..57024`) | STATIC-HYPOTHESIS — carried from the prior build, **not re-located on `263bd994`** (the `+231` grade read is pointer-relative, not a literal immediate) | Re-RE entry point = the four-emitter glow-object constructor / the tooltip loc-string builder, not the `+231` immediate |
+| Appearance digit → **lane** wiring (`+150 / +160 / +168`) | CODE-CONFIRMED — the digit→lane wiring is read straight off the single visual-part builder routine | The GID formulas + the exact 64-bit key packing (§3.2) + which appearance byte feeds which lane are exact |
+| Appearance digit → **human name** (`+150 / +160 / +162 / +168`) | PLAUSIBLE — inferred from the `5·(hair + 4·class) − 24` packing, not from a labelled table | Only the *naming* of each digit's role is uncertain; the wiring above is exact |
+| **Weapon-glow tier toggler** (`101..109 → 1..9`, four emitters, grade by register) | **RE-LOCATED / CODE-CONFIRMED on `263bd994`** — enable-for-grade normalises `101..109 → 1..9`, guards `tier ≤ 9`, enables a master + 3 satellite emitters; a literal search missed it because the grade flows in by register, never as a compared immediate (§6.1) | The toggler ON/OFF + normalisation + four-emitter wiring are settled |
+| **Per-tier glow VISUAL** (which particle set tiers 1..9 show) + the **tooltip loc-strings** | OPEN-RISK / CAPTURE-PENDING — per-tier resource selection is not in this slice; the tooltip id appears computed (base + tier), not a baked literal | Needs a live read of the glow / emitter init (and the label builder) to pin per-tier appearance and the tooltip ids |
 | `weapon_effect_grade` (0..9) ↔ static enchant level (0..28) | CAPTURE-PENDING — see `structs/item.md §6g` | The glow has exactly 9 tiers, so `+231` is a compressed tier, not the raw enchant count |
-| Weapon-drawn subtype semantics (`53` vs `55`) | CAPTURE-PENDING — no label, no capture (both confirmed as the two weapon-drawn subtypes; `55` + a specific set-flag triggers a local-player sheathe-sound special-case) | Distinguishes drawn/sheathable weapon kinds; not needed to compose the mesh |
+| Weapon-drawn subtype semantics (`53` vs `55`) | CAPTURE-PENDING — no label, no capture (both confirmed as the two weapon-drawn subtypes; `55` + weapon set-flag `303` triggers a local-player sheathe / draw-swap sound special-case in the per-grade joint-effect path) | Distinguishes drawn/sheathable weapon kinds; not needed to compose the mesh |
 | `+1052` slot-value array element meaning (worn item id vs handle vs count) | STATIC-HYPOTHESIS — confirmed as a separate flat per-slot i32 array; element semantics not pinned | Distinct from the part table (`+204`) and the EquipTable (§6.3) |
 | Equip-result wire opcodes + framing (slot-type / `+10` skip byte) | CAPTURE/DEBUGGER-PENDING — the handler bodies and the in-memory block offsets (`+8`/`+11`/`+12`) are confirmed, but the literal opcode pair and on-wire framing are not traced | Confirm the opcode pair and the wire framing against a real capture before any wire claim is authoritative |
 
@@ -461,11 +537,13 @@ For the layer-05 avatar, the load-bearing takeaways are:
    bind class == 3). When driving the per-node animation columns, the **main-hand node carries flag `2`**
    (reads catalog columns 902/904) and the **off-hand node carries flag `1`** (reads 903/905) — see
    §5.1; do not invert this.
-4. **Enchant aura is optional and tiered.** Drive a four-emitter glow from the weapon's
-   `weapon_effect_grade` (`structs/item.md §6g`): tiers `1..9`, none at `0`. This is *separate* from
-   the weapon-trail sword-light (`specs/effects.md §12`). Note the toggler itself is a
-   STATIC-HYPOTHESIS on build `263bd994` (§6.1) — treat the four-emitter / loc-string detail as a
-   working model pending a re-RE pass, not a confirmed contract.
+4. **Enchant aura is optional and tiered.** Drive a four-emitter glow (one master + three satellites)
+   from the weapon's `weapon_effect_grade` (`structs/item.md §6g`): normalise `101..109 → 1..9`, tiers
+   `1..9`, none at `0`, and skip above nine. This is *separate* from the weapon-trail sword-light
+   (`specs/effects.md §12`). The toggler ON/OFF + the four-emitter wiring are now CODE-CONFIRMED on
+   build `263bd994` (§6.1); the **per-tier visual** (which particle set each tier shows) and the tooltip
+   strings are still capture-pending — pick a reasonable per-tier effect now and refine once the
+   per-tier resource selection is recovered.
 5. **Weapon-drawn gates a HUD component too.** The weapon-drawn flag (§6.4) is mirrored into the HUD
    weapon-state toggle, not only the avatar mesh — wire it to both.
 

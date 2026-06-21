@@ -4,8 +4,8 @@ sample_verified: false
 subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
-verification: confirmed   # control-flow-confirmed where noted; a few re-locate items + on-wire value meanings are capture/debugger-pending
-ida_reverified: 2026-06-16
+verification: confirmed   # control-flow-confirmed where noted; CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
@@ -13,7 +13,7 @@ conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = Us
 
 # Camera, Client Movement & Collision — Clean-Room Specification
 
-> **Verification banner (re-verified 2026-06-16, anchor build `263bd994`, evidence: static-ida).**
+> **Verification banner (re-verified 2026-06-16; extended CYCLE 7 2026-06-20, anchor build `263bd994`, evidence: static-ida).**
 > Client-side routing, message sizes, struct/field offsets, view-mode wiring, grid/cell index
 > math, and the movement-pipeline formulas below are **[confirmed]** by IDB control-flow + operands
 > on this build. Server-authored magnitudes (per-map walk/run speed numbers, any damage/cooldown/XP
@@ -41,6 +41,27 @@ conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = Us
 > authoritative gameplay value stays **65°** — see §A.7. Not load-bearing for Godot.) The same pass added **§A.4.1** (how the follow target is *selected*
 > — a network-staged target/selection slot) and a one-line note that the world camera carries **no**
 > brightness/gamma input (near-black world is an environment/ambient matter, not a camera one).
+
+> **CYCLE 7 deepening (2026-06-20, anchor `263bd994`, static-ida).** This pass pinned the
+> *mechanism* behind the view modes and added two offset tables:
+> 1. **View modes are dispatched by C++ polymorphism — there is no integer mode enum and no
+>    switch-case on the camera update path.** Each mode is a distinct **CameraManipulator
+>    subclass** (derived from the in-house engine's transform/scene-node base); a scene controller constructs the one
+>    it needs, and the active manipulator's **per-frame virtual update (vtable slot +0x40)** computes
+>    the camera pose every frame. The **only** integer discriminator anywhere is the Event mode's
+>    internal sub-mode field at object offset **+0x16C** (§A.5 "Event"). See §A.1 and the refined
+>    §A.2. **Six** subclasses exist (the brief named 5 — Third/First/Static/Gamble/Event; the binary
+>    also carries **Select**, the previously-recovered char-select dolly — §A.5 "Select").
+> 2. A **CameraManipulator object-offset table** (§A.9) and a separate **projection-camera
+>    (GPerspectiveCamera) offset table** (§A.7.1) were promoted as layout facts. The projection
+>    object is a *separate* node from the manipulator.
+> 3. Per-mode **inline re-locate constants** (§A.5.3) were extracted directly from each subclass's
+>    update method — including the formerly `[capture/debugger-pending re-locate]` Third-person
+>    `+3.8` lift / `+2.0` bias / terrain-clip push-out / occlusion items (now CODE-CONFIRMED), plus
+>    full First / Static / Gamble / Select / Event constant sets. **Residue:** the literal FOV
+>    (~65 world / ~50 select), near (~5), far (~15000), and the char-select KF1 world coords
+>    (~512, 87, −9652) are **not** inline immediates — they load from read-only data at
+>    scene-construction; they stay carried-from-prior-cycle / DBG-pending (§A.7, §A.5 "Select", §D).
 
 > Neutral, rewritten behavioural specification. No legacy symbols, no addresses,
 > no pseudo-code, no decompiler identifiers. Describes the *observed behaviour*,
@@ -86,37 +107,53 @@ The renderer is an in-house scene-graph engine. Two distinct concepts cooperate:
 2. **The camera "manipulator"** — a family of scene-graph nodes that, every frame,
    *position and orient* the camera object based on the follow target (the local
    player) and on input. This is where the gameplay "view mode" behaviour lives.
-   **One manipulator class per view mode.**
+   **One manipulator *class* per view mode**, dispatched by **C++ polymorphism**
+   (see §A.2): each mode is a distinct subclass of a common `CameraManipulator`
+   base (itself derived from the in-house engine's transform/scene-node base), and the
+   active subclass's **per-frame virtual update method (vtable slot +0x40)** computes
+   the camera pose. There is **no integer mode enum and no switch-case** on the update
+   path — the polymorphic class *is* the view mode. (CODE-CONFIRMED via RTTI + vtable)
+   The common base is the in-house engine's transform/scene-node class.
 
-There are **five in-world view modes**, all sharing one common base manipulator
-that holds the shared state (§A.4), plus a **sixth, non-in-world** manipulator used
-only by the character-select / create-preview window. A **reserved seventh slot**
-exists in the scene graph but is never assigned — provision only. (CODE-CONFIRMED)
+There are **six** manipulator subclasses. Five are in-world / event modes
+(Third, First, Static, Gamble, Event); the sixth, **Select**, is non-in-world and is
+used only by the character-select / create-preview window. They share a common base
+that holds the shared state (§A.4) and the common per-frame skeleton. (CODE-CONFIRMED)
 
-| Mode | Role | Orbits player? | Terrain collision? | Default? |
-|---|---|---|---|---|
-| **Third** | Over-the-shoulder follow camera | yes (yaw + pitch) | yes (height clamp + occlusion nudge) | **yes** |
-| **First** | First-person (eye at player head) | yaw/pitch look, no follow distance | no | no |
-| **Static** | Fixed-angle tracking; follows position, never rotates around the player | no | no | no |
-| **Gamble** | Orbit camera for the gamble / betting minigame UI | yaw orbit, UI-driven | partial (world-AABB probe) | no |
-| **Event** | Scripted / cutscene camera; built-in per-region curve; player loses control | n/a (built-in curve or orbit) | data-driven | no |
-| *Select* | Character-select / create-preview camera (out-of-world; framed by the select window) | preview-frame | no | n/a |
+| Mode | Subclass (neutral RTTI name) | Role | Orbits player? | Terrain collision? | User input? | Default? |
+|---|---|---|---|---|---|---|
+| **Third** | `ThirdCameraManipulator` | Over-the-shoulder orbital follow boom | yes (yaw + pitch) | yes (height clamp + occlusion nudge) | full | **yes** |
+| **First** | `FirstCameraManipulator` | Player-attached look cam (orientation × player head/body quat) | yaw/pitch look, very short boom | no | full | no |
+| **Static** | `StaticCameraManipulator` | Player-following; yaw from player facing, not mouse | no (yaw not mouse-driven) | no | pitch + zoom only | no |
+| **Gamble** | `GambleCameraManipulator` | **Fixed framing of the cube-gamble mini-game; NO user input** | no (fixed eye XZ) | partial (samples terrain for eye Y) | none | no |
+| **Event** | `EventCameraManipulator` | Cinematic / cutscene; sub-mode at +0x16C selects orbit vs keyframe track | n/a (built-in orbit or track) | data-driven | none (player loses control) | no |
+| *Select* | `SelectCameraManipulator` | Char-select / create-preview entry-dolly (out-of-world; framed by the select window) | entry dolly, no orbit | no | boom + preview-actor turn | n/a |
 
 This matches the input/UI spec (`specs/input_ui.md` §4), which records 5 active
-view-platform slots plus a reserved-and-unused sixth slot and a single integer
-"active view index." (CODE-CONFIRMED)
+in-world view-platform slots and a single integer "active view index"; Select is the
+out-of-world char-select camera and is not part of that in-world set. (CODE-CONFIRMED)
 
-## A.2 View-mode switching model (no pointer swap)
+## A.2 View-mode switching model (polymorphism, not an enum/switch)
 
-There is **no dispatch table that swaps a single active-manipulator pointer.**
-Instead **all five in-world manipulators live in the scene graph simultaneously**,
-constructed once at scene setup. Each manipulator carries a per-mode **enable flag**;
-its per-frame traversal hook early-outs unless that flag is set. So **"switch view
-mode" = enable the chosen manipulator and disable the others, then apply the chosen
-mode's projection and persist the localized mode name.** (CODE-CONFIRMED)
+**Dispatch is by C++ polymorphism, not by an integer mode value.** There is no
+`switch (mode)` on the camera update path and no central factory; instead a scene
+controller **constructs the manipulator subclass it needs** for the current scene
+(in-world scenes build the in-world set; the char-select scene builds Select). The
+view mode IS the concrete class. The common base is the in-house engine's
+transform/scene-node class. (CODE-CONFIRMED via RTTI + per-class vtable)
 
-The per-frame skeleton per manipulator is: a traversal hook (runs only if enabled)
-which calls the mode's positioning math, then traverses scene-graph children.
+The in-world manipulators are constructed once at scene setup and co-exist in the
+scene graph; each carries a per-mode **enable flag (object offset +0xE5)** and an
+**input-active gate (+0xE4)**. The common per-frame wrapper (the manipulator's
+shared per-frame virtual, vtable slot +8) **early-outs if the enable flag is 0**,
+otherwise runs a shared base update and then calls the **per-mode virtual update at
+vtable slot +0x40** — the subclass method that holds the mode's positioning math. So
+at runtime **"switch view mode" = enable the chosen manipulator (set +0xE5) and
+disable the others, then apply that mode's projection and persist the localized mode
+name.** All six per-mode update methods resolve the local player singleton, use a
+millisecond delta-time smoothing, compose a yaw quaternion, and sample terrain height
+at the camera XZ. (CODE-CONFIRMED)
+
 First-person and Third-person **share the same input-event handler** (mouse-look). (CODE-CONFIRMED)
 
 ### A.2.1 Default mode
@@ -350,27 +387,47 @@ Per-mode detail notes:
   behaviours. Focus = the player's head position when available, else the player's ground position
   with vertical forced to 0.
 
-- **First.** Shares Third's input pool and constant pool. Eye sits at the player's head so the
-  trailing follow distance collapses. No terrain collision. Yaw-orbit seeded to π (initial 180°
-  facing flip). (CODE-CONFIRMED; visual effect of π-flip INFERRED)
+- **First.** Shares Third's input pool and constant pool (same boom machinery). The camera
+  **orientation is multiplied by the player's head/body orientation quaternion** (read from the
+  local-player object at offset **+0x45C**) so the view looks where the avatar points; full
+  yaw/pitch/zoom input. Eye height = sampled terrain **+3.8**, look-at offset **+2.0**. Despite the
+  name it is a very short boom, not a true 0-length head cam, so the trailing follow distance nearly
+  collapses. No terrain collision. Yaw-orbit seeded to π (initial 180° facing flip). Pitch limit
+  **±π/2**, hard-clamped at **+4.0**; boom-distance delta clamp **±4.0**; input rate / damping /
+  decay = **0.3 / 0.6 / 0.0001**. (CODE-CONFIRMED; visual effect of π-flip INFERRED)
 
-- **Static.** Polls only the elevation keys. Gain **50.0**, friction **0.8**. Yaw is fixed — the
-  camera tracks player position without orbiting. No terrain collision.
+- **Static.** Player-following but **non-mouse-yaw**: yaw is taken from the player's facing/heading
+  field (the player heading), not from the mouse; only **pitch (mouse)** and **zoom (scroll)** are
+  user-driven. Eye = player position (read from the local-player object at offset **+0x428**)
+  projected back along the boom; eye height = sampled terrain **+2.0**, look-at offset **+2.0**.
+  Pitch limit **±π/2**, hard-clamped at **−8.0**; boom-distance delta clamp **±4.0**; scroll-zoom
+  rate **50.0·dt**, damping **0.8**. A fixed/over-the-shoulder framing that auto-aligns behind the
+  player. No terrain collision. (CODE-CONFIRMED)
 
-- **Gamble.** Far-orbit UI camera for the betting minigame. Orbit radius ≈ 60 684 units (Gamble
-  eye-offset ≈ (24 097, 0, 55 694)), default pitch −60°. Yaw clamp **symmetric ±π/2** (no ease).
-  Has a world-AABB collision/height response; orbit input is UI-driven, not movement-key-driven.
-  (CODE-CONFIRMED for values; UI driver UNVERIFIED)
+- **Gamble.** **Fixed-framing camera with NO user input** — it frames a fixed mini-game / gambling
+  location (corroborated by the `data/ui/cubegamble*.dds` cube-gamble UI assets and a `Gamble` RTTI
+  class). The eye XZ is **hard-pinned to literal world coordinates: X = 24097.46484375,
+  Z = 55694.4296875**; the eye Y is taken from the **sampled terrain height + a height bias**
+  (manipulator offset +0x164); the **look-at = the player** (read from local-player offset +0x428).
+  Pitch limit **±π/2**. (This sharpens the prior "far-orbit UI camera" reading: it is a *fixed*
+  framing, not an orbit, and takes no movement/UI orbit input.) (CODE-CONFIRMED for values)
 
-- **Event (cutscene).** Runs *during* the cinematic lock (§A.2.3). Two sub-modes:
-  - **Orbit sub-mode (cinematic integer = 2):** eye locks to the player's last network position
-    and orbits around the player for a fixed duration of **12 000 ms**. (CODE-CONFIRMED)
-  - **Region-curve sub-mode (other values):** eye position is read from a **built-in 17-entry ×
-    3-float orbit-curve table compiled directly into the client binary**, indexed as
-    `table[mapRegionIndex % 17]`. The map region index (0..31) is set from the server's world-state
-    packet and reset to 0 on map unload. Cinematic duration is taken from a **motion-clip's length**
-    (a CoreMotManager record's float field × 1000 − 100 ms), so the cut-scene is timed to an
-    animation clip, not to a script file. (CODE-CONFIRMED)
+- **Event (cutscene).** Runs *during* the cinematic lock (§A.2.3). The sub-mode is the **only
+  integer discriminator** in the whole camera system, held at manipulator offset **+0x16C**:
+  - **Player-orbit sub-mode (sub-mode == 2):** eye locks to the player's last network position and
+    orbits the player with an **eased yaw rate (0.5·dt, clamped 1.0)** at a fixed **boom distance
+    12.0**, with the look-at lifted **+8.0** above the player; runs for a fixed duration of
+    **12 000 ms**. (CODE-CONFIRMED)
+  - **Keyframe-track sub-mode (any other value):** plays an authored **2-track MotionClip cutscene**
+    — track index 0 is the **eye** track and track index 1 is the **look-at** track, sampled from
+    the clip's track block (clip record + 0x34). The timeline advances at **t = (elapsed_ms / 1000)
+    · 3.0** (3× speed). A fixed **basis-correction quaternion (0, 0, −0.70710677, 0.70710677)**
+    (a −90° rotation about the Z axis) is applied to the sampled eye/look basis. The cut **ends when
+    its status reaches 100**, at which point the scene is set to mode 2 and the camera is popped.
+    The look-at target is read from manipulator offset +0x188. The earlier "built-in 17-entry ×
+    3-float region curve indexed by map region" reading from a prior cycle is **superseded** by this
+    MotionClip-track model for the non-orbit Event path. Cinematic duration is still tied to a
+    motion clip's length, not to a `.scr`/Lua script. (CODE-CONFIRMED)
   - **This camera is NOT data-file-driven, NOT Lua-scripted, and NOT driven by `.scr` files.**
     The `data/script/*.scr` files are CSV data tables (quests, items, NPC, map settings, etc.) and
     are not camera-path sources. Lua in this client is config/UI/localisation only — there is no
@@ -414,6 +471,86 @@ Per-mode detail notes:
   far 15000; path anchor (2048,0,−6144); KF1 (512,87,−9652); manual boom/yaw overlay; slot-select
   moves the actor not the camera. Recovered via static RE, CAMPAIGN 9.)
 
+  **CYCLE 7 — the dolly *math* is inline (the dolly *coords* are not).** The Select subclass's
+  per-frame update computes the blend as follows (all inline immediates, CODE-CONFIRMED):
+  - **Blend factor** `t = elapsed_ms · 0.0005` (i.e. `elapsed_ms / 2000`, a ≈0.5 s ramp), clamped to
+    a maximum of **1.0**; the dolly start timestamp is stored at manipulator offset **+0x238**.
+  - **Ease curve** applied to `t`: **`(1 − t) · (2t)`**.
+  - The **eye is Lerped** between the "from" keyframe eye and the "to" keyframe eye, and the
+    **orientation is Slerped** between the from/to keyframe quaternions, by the eased `t`.
+  - A continuous overlay eases **yaw/pitch toward goal angles** (yaw goal at +0x1B0, pitch goal at
+    +0x1B4), with input rate **0.1·dt**, dampings **0.5 / 0.8**, and a yaw/pitch clamp **±1.0**;
+    scroll zoom rate **10.0·dt**, damping **0.8**; boom-distance delta clamp **±4.0**.
+
+  **Residue (DBG-pending).** The literal char-select world coordinates of the keyframes — the known
+  **KF1 ≈ (512, 87, −9652)** from prior cycles, the **KF0** start, and the **(2048, 0, −6144)** path
+  anchor — are **NOT inline immediates** in the Select update method. They are **data-driven keyframe
+  slots written at scene setup** (the "from" eye region at manipulator offset +0x178/+0x194 and a
+  "to" region further on). Their *values* therefore remain **scene-construction / DBG-pending** and
+  are carried from prior cycles; only the dolly *math* above is inline-confirmed this pass.
+
+### A.5.3 Per-mode inline re-locate constants (CYCLE 7, read from each subclass's per-frame update)
+
+Every value below is an **immediate operand inside the named mode's per-frame update method** on
+build `263bd994` — **(CODE-CONFIRMED as a code immediate)**; runtime feel **(INFERRED)**, expose as
+config. These *replace* the prior `[capture/debugger-pending re-locate]` flag on the Third-person
+`+3.8` / `+2.0` / push-out / occlusion items (those are now re-located and confirmed). The shared
+`dt = elapsed_ms · 0.001 · speedMultiplier(+0xE0)` conversion (§A.4) is used by **all** modes.
+
+| Mode | Constant role | Value | Confidence |
+|---|---|---:|---|
+| **Third** | eye height above sampled terrain | **+3.8** | CODE-CONFIRMED |
+| **Third** | look-at / boom-base height offset | **+2.0** | CODE-CONFIRMED |
+| **Third** | pitch soft limit | **±(π/2 · 0.9) ≈ ±1.4137 rad (~±81°)** | CODE-CONFIRMED |
+| **Third** | pitch hard clamp-down floor | clamp `> −12.0` → set **−12.0** | CODE-CONFIRMED |
+| **Third** | pitch kill / zero boom-rate | `< −90.0` → zero boom-rate | CODE-CONFIRMED |
+| **Third** | boom-distance delta clamp | **±4.0** | CODE-CONFIRMED |
+| **Third** | yaw/pitch input rate | **0.3** (per dt) | CODE-CONFIRMED |
+| **Third** | input-idle damping | **0.6** | CODE-CONFIRMED |
+| **Third** | zoom auto-decay / boom-yaw free-spin decay | **0.0001** per dt | CODE-CONFIRMED |
+| **Third** | terrain-clip push-out rate | **+50.0·dt** | CODE-CONFIRMED |
+| **Third** | yaw/pitch deadzone clamp | **±0.1** | CODE-CONFIRMED |
+| **First** | eye height above sampled terrain | **+3.8** | CODE-CONFIRMED |
+| **First** | look-at height offset | **+2.0** | CODE-CONFIRMED |
+| **First** | pitch limit | **±π/2 (±1.5707964)** | CODE-CONFIRMED |
+| **First** | pitch hard clamp | `> +4.0` → **+4.0** | CODE-CONFIRMED |
+| **First** | boom-distance delta clamp | **±4.0** | CODE-CONFIRMED |
+| **First** | input rate / damping / decay | **0.3 / 0.6 / 0.0001** | CODE-CONFIRMED |
+| **First** | player head-orientation source | local-player **+0x45C** | CODE-CONFIRMED |
+| **Static** | eye height above sampled terrain | **+2.0** | CODE-CONFIRMED |
+| **Static** | look-at height offset | **+2.0** | CODE-CONFIRMED |
+| **Static** | pitch limit | **±π/2** | CODE-CONFIRMED |
+| **Static** | pitch hard clamp | `> −8.0` → **−8.0** | CODE-CONFIRMED |
+| **Static** | boom-distance delta clamp | **±4.0** | CODE-CONFIRMED |
+| **Static** | scroll-zoom rate / damping | **50.0·dt / 0.8** | CODE-CONFIRMED |
+| **Static** | player position source | local-player **+0x428** | CODE-CONFIRMED |
+| **Gamble** | FIXED eye X (world) | **24097.46484375** | CODE-CONFIRMED |
+| **Gamble** | FIXED eye Z (world) | **55694.4296875** | CODE-CONFIRMED |
+| **Gamble** | eye Y | sampled terrain **+ height bias (+0x164)** | CODE-CONFIRMED |
+| **Gamble** | pitch limit | **±π/2** | CODE-CONFIRMED |
+| **Gamble** | player look-at source | local-player **+0x428** | CODE-CONFIRMED |
+| **Select** | dolly blend factor | **elapsed_ms · 0.0005** (≈0.5 s ramp, clamp 1.0) | CODE-CONFIRMED |
+| **Select** | dolly ease curve | **(1 − t) · (2t)** | CODE-CONFIRMED |
+| **Select** | boom-distance delta clamp | **±4.0** | CODE-CONFIRMED |
+| **Select** | yaw/pitch clamp | **±1.0** | CODE-CONFIRMED |
+| **Select** | scroll-zoom rate / damping | **10.0·dt / 0.8** | CODE-CONFIRMED |
+| **Select** | yaw/pitch input rate / damping | **0.1·dt / 0.5 / 0.8** | CODE-CONFIRMED |
+| **Select** | yaw goal / pitch goal field | **+0x1B0 / +0x1B4** | CODE-CONFIRMED |
+| **Event** | sub-mode discriminator | **+0x16C**: `==2` player-orbit, else keyframe-track | CODE-CONFIRMED |
+| **Event (orbit)** | orbit boom distance | **12.0** | CODE-CONFIRMED |
+| **Event (orbit)** | yaw ease rate | **0.5·dt** (clamp 1.0) | CODE-CONFIRMED |
+| **Event (orbit)** | look-at vertical lift | **+8.0** | CODE-CONFIRMED |
+| **Event (track)** | cutscene timeline scale | **t = elapsed_ms/1000 · 3.0** (3× speed) | CODE-CONFIRMED |
+| **Event (track)** | basis-correction quaternion | **(0, 0, −0.70710677, 0.70710677)** (−90° about Z) | CODE-CONFIRMED |
+| **Event (track)** | MotionClip track block | clip **+0x34**; track idx 0 = eye, idx 1 = look-at | CODE-CONFIRMED |
+| **Event (track)** | end-of-cut | status `== 100` → set scene mode 2 + pop | CODE-CONFIRMED |
+| **ALL** | dt unit conversion | **elapsed_ms · 0.001 · speedMultiplier (+0xE0)** | CODE-CONFIRMED |
+
+> These per-mode values are consistent with — and finer-grained than — the shared
+> smoothing/clamp table in §A.4. Where a mode-specific value differs (e.g. Static damping 0.8 vs
+> the shared 0.6, Static/Static-zoom 50.0 vs the keyboard 0.3, Select's ±1.0 vs Third's ±0.1), the
+> **mode-specific value governs that mode**; the §A.4 table is the base/Third default.
+
 ## A.6 Terrain collision for the Third-person camera
 
 Third-person performs **two** collision behaviours; the other modes do neither:
@@ -434,11 +571,13 @@ Third-person performs **two** collision behaviours; the other modes do neither:
    hard hit, force the yaw-rate to **−0.01** to stop the camera fighting the ground.
    **Radius is fixed — there is no horizontal pull-in on collision.** (CODE-CONFIRMED for
    the grid math, the cell-edge `−1.1` nudge, the sentinel, and the bilinear/flat
-   dispatcher; the `+3.8` lift, `+2.0` bias, `−0.01` yaw-kill, and occlusion nudge are
-   inline-computed constants not re-located in the 2026-06-16 pass — **[capture/debugger-pending re-locate]**, carry as the faithful starting values but flag for a focused re-walk.)
-2. **Occlusion nudge.** If the focus→eye line is occluded, nudge pitch by **50.0 · dt**
-   (+ 0.01 correction) to keep the target visible. No radial change. (CODE-CONFIRMED as a
-   model; exact constant re-location is part of the same [capture/debugger-pending re-locate] above.)
+   dispatcher. **The `+3.8` lift, `+2.0` bias, the terrain-clip push-out, and the pitch
+   kill/clamp were re-located and confirmed as inline immediates in the Third-person update
+   in CYCLE 7 — see §A.5.3** — so the former `[capture/debugger-pending re-locate]` flag on
+   these is **CLEARED**.)
+2. **Occlusion nudge.** If the focus→eye line is occluded, nudge pitch by **+50.0 · dt**
+   (+ 0.01 correction) to keep the target visible. No radial change. (CODE-CONFIRMED — the
+   `+50.0·dt` terrain-clip push-out is an inline immediate in the Third-person update, §A.5.3.)
 
 > The terrain grid origin (**10000**) and cell size (**1024**) here are the **same
 > constants** the movement collision system uses (§B.4) and match the terrain/cell
@@ -481,6 +620,38 @@ View-volume derivation (centered case): `top = near · tan(fovY/2)`, `bottom = �
 `right = top · aspect`, `left = −right`, then build the 6-plane frustum.
 An off-center mode re-derives field-of-view from explicit L/R/B/T. (CODE-CONFIRMED)
 
+> **CYCLE 7 caveat — the FOV/near/far *values* are not inline immediates.** The literal
+> ~65° (world) / ~50° (select) field-of-view, near ~5, and far ~15000 are **float constants
+> loaded from read-only data at scene-construction time**, not immediate operands in any
+> manipulator update or in the projection setter (CYCLE 7 immediate-operand searches for the
+> corresponding bit patterns returned no hits in the update/setter path). The CYCLE 7
+> contribution is the **field offsets** that carry these values on the projection object
+> (§A.7.1); the literal *values* stay where prior cycles hold them and are **DBG-confirmable**
+> by reading the fovy field (+0xA8) at runtime. Treat 65° / 50° / near 5 / far 15000 as the
+> carried-forward faithful values, not as freshly re-located immediates.
+
+### A.7.1 Projection object (GPerspectiveCamera) — field offsets (separate from the manipulator)
+
+The projection is owned by a **separate `GPerspectiveCamera` node**, *not* by the manipulator —
+the manipulator positions/orients it, but field-of-view / aspect / near / far / ortho parameters
+live on the projection object. Offsets (bytes from the projection object) are layout facts:
+
+| Offset | Bytes | Role | Confidence |
+|---:|---|---|---|
+| **+0x94** | byte | ortho flag (1 = ortho left/right/bottom/top; 0 = perspective fovy/aspect) | CONFIRMED |
+| **+0x98** | float | ortho right | CONFIRMED |
+| **+0x9C** | float | ortho left | CONFIRMED |
+| **+0xA0** | float | ortho bottom | CONFIRMED |
+| **+0xA4** | float | ortho top | CONFIRMED |
+| **+0xA8** | float | **fovy** (perspective vertical field-of-view) | CONFIRMED |
+| **+0xB0** | float | aspect ratio | CONFIRMED |
+| **+0xAC** | float | near plane (inferred adjacency to fovy/aspect) | MEDIUM |
+| **+0xB4** | float | far plane (inferred adjacency to fovy/aspect) | MEDIUM |
+
+> The ortho/fovy/aspect offsets are CODE-CONFIRMED (recovered from the projection object's
+> field-describe routine); the near/far offsets at +0xAC/+0xB4 are **MEDIUM** (inferred by
+> adjacency to the fovy/aspect block, not directly named by the field-describe routine).
+
 ## A.8 Camera persistence (local config, not networked)
 
 The chosen view mode is written to the **local options/config file** under INI section
@@ -491,6 +662,47 @@ floor value 1 is the default. (CODE-CONFIRMED)
 Two additional config tokens, **`CAMERA_XZ`** and **`CAMERA_XYZ`**, distinguish a
 2-axis vs 3-axis camera-follow option in the saved options. Their exact runtime
 consumer is **(UNVERIFIED)**. Any Korean labels in this option table are CP949-encoded. (INFERRED)
+
+## A.9 CameraManipulator object layout (CYCLE 7 — offsets are layout facts)
+
+Offsets from the manipulator object (`this`) shared by all six subclasses (some fields are
+mode-specific, noted in the Role column). These are struct-layout facts, not code addresses.
+
+| Offset | Bytes | Role | Confidence |
+|---:|---|---|---|
+| **+0x5C** | 64 (Matrix4) | view matrix (rebuilt each frame) | CONFIRMED |
+| **+0x8C** | 12 (float[3]) | view-matrix translation row (camera eye X/Y/Z) | CONFIRMED |
+| **+0x9C** | 64 (Matrix4) | inverse-orthonormal view matrix | CONFIRMED |
+| **+0xE0** | float | camera move/zoom speed multiplier (the dt scale, §A.5.3) | CONFIRMED |
+| **+0xE4** | byte | input-active gate (1 = allow input) | CONFIRMED |
+| **+0xE5** | byte | manipulator-enabled flag (per-frame update no-ops if 0) | CONFIRMED |
+| **+0xE8** | float | pitch angle accumulator (radians) | CONFIRMED |
+| **+0xEC** | float | yaw angle accumulator (radians) | CONFIRMED |
+| **+0xF0** | 12 (float[3]) | boom forward / look direction (scaled for zoom) | CONFIRMED |
+| **+0xFC** | 12 (float[3]) | computed eye position | CONFIRMED |
+| **+0x108** | 12 (float[3]) | boom / orbit base offset vector | CONFIRMED |
+| **+0x110** | float | boom-pitch (degrees) working value | CONFIRMED |
+| **+0x114** | float | boom-distance / zoom accumulator | CONFIRMED |
+| **+0x11C** | float | pitch input-rate accumulator | CONFIRMED |
+| **+0x120** | float | yaw input-rate accumulator | CONFIRMED |
+| **+0x128** | 16 (Quat) | camera orientation quaternion | CONFIRMED |
+| **+0x140** | 16 (Quat) | pitch sub-rotation quaternion | CONFIRMED |
+| **+0x164** | float | extra eye-height bias (added to terrain sample; Gamble eye Y) | CONFIRMED |
+| **+0x16C** | int | **Event sub-mode** (2 = player-orbit, else keyframe-track) | CONFIRMED |
+| **+0x178** | 12 (float[3]) | Event/Select: current / "from" keyframe eye | CONFIRMED |
+| **+0x184** | ptr | Event: MotionClip pointer (cutscene) / Select: from-frame quat region | CONFIRMED |
+| **+0x188** | 12 (float[3]) | blended look-at / eye target | CONFIRMED |
+| **+0x194** | 12 (float[3]) | Select "to" keyframe eye / Event orbit look-at point | CONFIRMED |
+| **+0x1A0** | 16 (Quat) | Select "to" keyframe orientation / Event orbit quat | CONFIRMED |
+| **+0x1B0** | float | Select yaw goal | CONFIRMED |
+| **+0x1B4** | float | Select pitch goal | CONFIRMED |
+| **+0x238** | int | Select dolly start timestamp (ms) | CONFIRMED |
+
+> Cross-reference: the local-player object fields the manipulators read are **+0x428**
+> (player world position — Static eye base, Gamble look-at) and **+0x45C** (player
+> head/body orientation quaternion — First-person orientation multiply). The projection
+> parameters (fovy/aspect/near/far/ortho) live on the **separate** projection object,
+> not here — see §A.7.1.
 
 ---
 
@@ -799,17 +1011,35 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 
 1. **Camera action polarity** — which member of the pitch pair (1002/1003) and zoom
    pair (1000/1001) is up/in vs down/out. Implement as configurable ± axes. (INFERRED/configurable)
-2. ~~**Authoritative runtime FOV**~~ — **RESOLVED.** 65° vertical, near 5, far 15000 is
-   the CODE-CONFIRMED in-world gameplay camera (§A.7). The 60° and 45° figures belong
-   to a separate generic projection initializer, not the gameplay camera.
+2. **Authoritative runtime FOV — literal *values* DBG-pending (CYCLE 7).** The in-world
+   gameplay FOV is **65°** vertical, near **5**, far **15000** and select is **50°** — these
+   are the carried-forward faithful values and the field *offsets* that hold them are now
+   pinned (fovy at projection +0xA8, §A.7.1). But CYCLE 7 found the literal *values are NOT
+   inline immediates* — they load from read-only data at scene-construction, so the values
+   themselves stay **[DBG-pending]** (read +0xA8 at runtime to confirm). Implement at 65°/50°
+   but treat as config.
 3. **`CAMERA_XZ` / `CAMERA_XYZ` semantics** — the exact 2-axis vs 3-axis follow toggle
    the saved option controls.
-4. **Gamble UI driver** — the UI message(s) that control the Gamble orbit angle.
-5. ~~**Event-camera scripted-path format**~~ — **RESOLVED.** The Event camera is a
-   built-in 17-entry × 3-float orbit-curve table indexed by map region index (§A.5,
-   "Event" row). Not a data file. Not Lua. Not `.scr`. (CODE-CONFIRMED)
+4. **Gamble UI driver** — n/a per CYCLE 7: Gamble takes **no user input** (fixed-XZ framing,
+   §A.5 "Gamble"). The remaining open question is only *what triggers entering Gamble mode*
+   (the mini-game open path), not an orbit driver.
+5. ~~**Event-camera scripted-path format**~~ — **RESOLVED, refined (CYCLE 7).** The Event
+   camera's non-orbit sub-mode is a **2-track MotionClip cutscene** (track 0 = eye, track 1 =
+   look-at, 3× timeline, −90°-about-Z basis quaternion, ends at status 100 → scene mode 2 +
+   pop; §A.5 "Event", §A.5.3). This **supersedes** the prior "built-in 17-entry × 3-float
+   region curve indexed by map region" reading. Still not a data file, not Lua, not `.scr`.
+   (CODE-CONFIRMED)
 6. A constant mode-tag (value 2) is set in every camera constructor; its meaning is
-   unknown (node/camera-type tag?). Cosmetic; not load-bearing.
+   unknown (node/camera-type tag?). Cosmetic; not load-bearing. (Distinct from the Event
+   sub-mode at +0x16C, which is a runtime field, not a constructor tag.)
+6a. **Projection near/far field offsets** — +0xAC (near) / +0xB4 (far) on the projection
+    object are **MEDIUM** (inferred by adjacency to fovy/aspect, not named by the
+    field-describe routine, §A.7.1). Confirm by reading them at runtime.
+6b. **Char-select keyframe literal coords (KF0, KF1 ≈ (512,87,−9652), path anchor
+    (2048,0,−6144))** — **NOT inline immediates** in the Select update (CYCLE 7); they are
+    data-driven keyframe slots (manipulator +0x178/+0x194) written at scene setup. The dolly
+    *math* is inline-confirmed; the coord *values* are **[scene-construction / DBG-pending]**,
+    carried from prior cycles.
 
 **Movement**
 
@@ -831,20 +1061,21 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 14. **Input id 1013** assumed left-mouse-hold for the click handler; unconfirmed.
 15. **Vertical (type-flag) solid segments** — handled in the line-intersection math but
     not corroborated by any sample.
-16. **Re-locate the inline mover/camera constants** — the per-frame `speed · 4.0`
-    integrator site, and the Third-person camera's `+3.8` lift / `+2.0` bias / `−0.01`
-    yaw-kill / `50·dt` occlusion nudge, were **not re-located** in the 2026-06-16 pass
-    (they are inline-computed, not standalone `.rdata` floats). Carry as the faithful
-    starting values; flag for a focused re-walk of the mover advance and the
-    Third-person traversal hook. **[capture/debugger-pending re-locate]**
+16. **Re-locate the inline mover/camera constants** — the **camera-side** half is now
+    **RESOLVED (CYCLE 7)**: the Third-person `+3.8` lift / `+2.0` bias / `+50·dt`
+    terrain-clip push-out / pitch kill-clamp are re-located as inline immediates in the
+    Third-person update (§A.5.3), and full per-mode constant sets for all six modes were
+    extracted. **Still open (movement-side):** the per-frame `speed · 4.0` integrator site
+    within the mover-advance cluster was **not** re-located this pass — carry as the faithful
+    value; flag for a focused re-walk of the mover advance. **[capture/debugger-pending re-locate]**
 
 ---
 
 ## Provenance
 
 Rewritten (not copied) from dirty-room recon notes (subsystem keys `camera_views`,
-`camera_constants`, `movement_collision`). Updated in Mission E from
-`_dirty/recon/camera-scene.raw.md` (Mission 1G findings): FOV reconciliation (65°
+`camera_constants`, `movement_collision`). Updated in Mission E from the dirty-room
+camera-scene recon (Mission 1G findings): FOV reconciliation (65°
 CODE-CONFIRMED), fixed-radius orbit model explicitly stated, per-mode parameter tables
 with confirmed numbers added, Event camera model corrected (built-in binary curve
 table, not data-file/Lua/`.scr`), mode-switch trigger call sites enumerated, default
@@ -881,9 +1112,30 @@ constants were not re-located this pass. Server-authored magnitudes (per-map spe
 and on-wire VALUE meanings (2/13 flag-region split, local-position-correction channel) remain
 capture/debugger-pending.
 
-All legacy addresses, decompiler-style
-identifiers, RTTI class names, vtable offsets, and raw struct offsets were
-**deliberately omitted**; only neutral behaviour, formulas, role-keyed constants,
-the `MAP_SPEED` record's field offsets (interoperability facts), and already-cataloged
-opcode tuples (2/13, 5/13, 4/13 — see `opcodes.md`) were promoted. Camera is non-networked.
-No new opcode is introduced by this spec.
+Extended **CYCLE 7 (2026-06-20)**, anchor **`263bd994`**, static-ida (P-Lane 5 RENDER/UI/AUDIO),
+rewritten (not copied) from the dirty-room lane note (key `camera_views`). This pass landed:
+(1) the **dispatch mechanism** — view modes are **C++ polymorphism**, one `CameraManipulator`
+subclass per mode dispatched via the per-frame virtual at **vtable slot +0x40**, gated by the enable
+flag at **+0xE5**, with **no integer mode enum / switch** (the only integer discriminator is the
+Event sub-mode at **+0x16C**) — §A.1, refined §A.2; (2) the **six neutral RTTI class names**
+(Third/First/Static/Gamble/Event/Select), with Gamble re-read as a **fixed-XZ, no-input** framing of
+the cube-gamble mini-game (eye X 24097.46484375 / Z 55694.4296875), First as **orientation ×
+player-head-quat (+0x45C)**, Static as **yaw-from-player-facing** with player pos at **+0x428**, and
+the Event non-orbit path re-read as a **2-track MotionClip cutscene** (superseding the prior "17-entry
+region curve"); (3) the **per-mode inline re-locate constant table** §A.5.3 (clearing the former
+camera-side `[re-locate]` flag on the Third `+3.8`/`+2.0`/push-out/clamp items); (4) the
+**CameraManipulator object-offset table** §A.9 and the **separate GPerspectiveCamera projection
+offset table** §A.7.1 (fovy +0xA8 / aspect +0xB0 / ortho +0x94.. CODE-CONFIRMED; near/far +0xAC/+0xB4
+MEDIUM); (5) the **Select entry-dolly math** (blend `elapsed_ms·0.0005`, ease `(1−t)·(2t)`,
+eye-Lerp + orientation-Slerp, goal/clamp constants). **Residue carried as DBG-pending:** the literal
+FOV (~65 world / ~50 select), near (~5), far (~15000), and the char-select keyframe world coords
+(KF1 ≈ (512,87,−9652), path anchor (2048,0,−6144)) are **not inline immediates** — they load from
+read-only data at scene-construction; and the projection near/far offsets are MEDIUM. Proposed
+canonical update-method names for the IDB are staged for the names.yaml sync (orchestrator-owned).
+
+Per the clean-room firewall, this spec carries **neutral RTTI class names** (e.g.
+`ThirdCameraManipulator`) and **struct field offsets** (layout facts) — both explicitly permitted —
+but **no** code addresses, no Hex-Rays / decompiler identifiers, no mangled RTTI strings, and no
+vtable data addresses. Only neutral behaviour, formulas, role-keyed constants, struct/projection
+field offsets (interoperability facts), and already-cataloged opcode tuples (2/13, 5/13, 4/13 — see
+`opcodes.md`) are promoted. Camera is non-networked. No new opcode is introduced by this spec.

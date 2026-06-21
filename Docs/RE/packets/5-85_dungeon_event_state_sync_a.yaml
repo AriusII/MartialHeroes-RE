@@ -1,0 +1,56 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 20-byte body -- an 8-byte header/key
+#                 region then three u32 state values @0x08/0x0C/0x10 -- are control-flow-confirmed; the
+#                 scenario id is RESIDENT in the dungeon-event-state object, NOT in the packet; every
+#                 VALUE meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading marked 5/85 "var (20 hdr)"; the read is a fixed 20-byte block.
+#              Also: the scenario id (300/301) is read from the resident state object, not from the wire.
+
+name: SmsgDungeonEventStateSyncA
+opcode: 0x50055           # major 5 (Push), minor 85 -> (5 << 16) | 85
+direction: S2C
+size: 20                  # fixed 20-byte body (0x14)
+spec: packets/5-85_dungeon_event_state_sync_a.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server syncs dungeon/event state (variant A). A fixed 20-byte body holding an 8-byte header/key
+  region then three u32 state values. The handler branches on its own RESIDENT scenario id and an
+  event-state code, arms a timer, writes state/flag fields on the local player and a dungeon service
+  slot, then commits the event-state object.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 20.
+fields:
+  - { name: Header, type: "bytes[8]" }   # 0x00  header / key region (staged; not all decoded by this handler)
+  - { name: StateA, type: u32 }          # 0x08  state value A
+  - { name: StateB, type: u32 }          # 0x0c  state value B
+  - { name: StateC, type: u32 }          # 0x10  state value C
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 20-byte body and the three state dwords. CAPTURE-UNVERIFIED for the
+  VALUE meanings.
+
+    0x00 (8B) Header : a header / key region the handler stages; not all of it is field-decoded here.
+    0x08 (4B) StateA : a state value (drives sub-flag math in the event-state object).
+    0x0c (4B) StateB : a second state value (gates a main-window flag block).
+    0x10 (4B) StateC : a third state value (written to a dungeon service slot).
+
+  SCENARIO ID IS NOT ON THE WIRE: the handler branches on a scenario id (e.g. 300 / 301) that is
+  RESIDENT in the dungeon-event-state object, not carried by this packet. Do not model a scenario id as
+  a wire field.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): the three state values are scattered into the
+  event-state object, a dungeon service slot, and local-player flag fields, and a timer is armed. Those
+  runtime destinations and side effects are not wire fields.
+
+  UNKNOWNS to resolve with a capture: what StateA/StateB/StateC numerically mean and the event-state
+  code space.
+
+  RELATED: 5/86 SmsgDungeonEventStateSyncB (packets/5-86_dungeon_event_state_sync_b.yaml) is the variant
+  keyed by a leading mode byte.

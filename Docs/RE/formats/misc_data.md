@@ -9,21 +9,27 @@
 <!--
 verification: sample-verified (every documented format re-decoded against the real VFS on build
               263bd994 — strides divide file sizes with zero remainder, CP949 text decodes
-              coherently); a handful of field semantics remain capture/debugger-pending
+              coherently); a handful of field semantics remain capture/debugger-pending;
+              re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
-conflicts: mobinfo.mi portrait_res_3 — sampled values (99, 103) are inconsistent with the
-           "large portrait resource ID" model; field role re-flagged UNVERIFIED (open, §2)
+conflicts: (RESOLVED, CYCLE 7) mobinfo.mi field6 (was portrait_res_3) — RESOLVED: mobinfo.mi is
+           DEAD in build 263bd994 (confirmed not read — no loader, no path literal, not in the
+           boot data-table corpus pointer table, not compiled in as a static array), so field6
+           has no consumer read-site to pin. The portrait_res_3 label is withdrawn; field6 is a
+           4-byte u32/i32 LE with 0xFFFFFFFF = -1 = "none". See §2.
 -->
 
 > **status: sample_verified** — every format below was re-confronted with the real VFS mount
 > (43 347 entries) on build `263bd994`: `actor_size.xdb`, `buff_icon_position.xdb`,
 > `effectscale.xdb`, `mobinfo.mi`, `.tol`, `descript.ion`, `discript.sc`, `msg.xdb`,
 > `mapsetting.scr`, and `regiontableNNN.bin` all re-decoded cleanly (strides divide their file
-> sizes with zero remainder; CP949 names decode coherently). One UNRESOLVED conflict is carried:
-> `mobinfo.mi` `portrait_res_3` (§2). Two undocumented `.xdb` variants present in the VFS are now
-> covered: `creature_item.xdb` (§8) and `vehicle.xdb` (§9). See per-section confidence notes.
+> sizes with zero remainder; CP949 names decode coherently). The previously-carried `mobinfo.mi`
+> `field6` (was `portrait_res_3`) conflict is now **RESOLVED**: `mobinfo.mi` is **DEAD in this build**
+> (confirmed not read), so `field6` has no consumer read-site and the `portrait_res_3` label is
+> withdrawn (§2). Two undocumented `.xdb` variants present in the VFS are now covered:
+> `creature_item.xdb` (§8) and `vehicle.xdb` (§9). See per-section confidence notes.
 
 This document covers the miscellaneous script and data file types that share no common wire format
 but are all small script/data assets extracted from the `.pak` / VFS container. They are grouped
@@ -278,9 +284,24 @@ strip). The exact HUD element it belongs to is not confirmed.
 
 ---
 
-## Section 2 — `mobinfo.mi` — Monster Info Table
+## Section 2 — `mobinfo.mi` — Monster Info Table (DEAD in build `263bd994` — present on disk, not read)
 
-**sample_verified: true** (header and stride); **hypothesis** (field semantics — see notes)
+**sample_verified: true** (on-disk header and stride); **DEAD in this build** (no loader / no path
+literal / not in the boot data-table corpus / not compiled in — confirmed not read, see "Runtime
+status" below); **hypothesis** (field semantics — moot, no consumer to confirm them)
+
+> **Runtime status (CONFIRMED not read, CYCLE 7, build `263bd994`):** the file
+> `data/ui/mobinfo.mi` is **present on disk** in the 43,347-entry VFS with its documented container
+> shape, but the client has **no code that opens it**. Exhaustive static search (four ways — the
+> string index, a case-insensitive regex over the string store, a raw ASCII byte scan, and a
+> UTF-16LE wide byte scan) returns **zero** hits for any `mobinfo` path or name; the filename is
+> **not** in the boot data-table corpus's filename pointer table; and the table is **not** compiled
+> into the binary as a static array (byte scans for its on-disk record signature return zero). This
+> **upgrades** the prior "appears not to read it via a path" verdict to a hard **"confirmed not
+> read."** "Present" ≠ "read". The mob data the client **does** read comes from
+> `data/script/mobs.scr` (loaded at boot) plus `msg.xdb` (mob name / portrait strings, §6) — **not**
+> from `mobinfo.mi`. The on-disk shape documented below stands as a sample-true record of the file,
+> but nothing in this build consumes it.
 
 - **Extension:** `.mi`
 - **Found in:** `.pak` archive; logical path: `data/ui/mobinfo.mi`
@@ -312,20 +333,24 @@ Total file size = 4 + (`count` × 28).
 | 12     | 4    | u32LE | icon_index     | UI sprite index for this mob's icon; range 55 – 173 observed | HIGH     |
 | 16     | 4    | u32LE | portrait_res_1 | Resource ID for the primary portrait image; 0xFFFFFFFF = none | PARTIAL |
 | 20     | 4    | u32LE | portrait_res_2 | Resource ID for the hover/alternate portrait frame; 0xFFFFFFFF = none | PARTIAL |
-| 24     | 4    | u32LE | field6 (was `portrait_res_3`) | **Role UNRESOLVED** — see conflict below. Either a large resource ID (0xFFFFFFFF = none) or a small index; sampled values do not fit a single model. | UNVERIFIED |
+| 24     | 4    | u32/i32 LE | field6 (was `portrait_res_3`) | **Role MOOT — file is DEAD (no read-site).** 4-byte LE; `0xFFFFFFFF` = -1 = "none / not present" sentinel; small populated values (e.g. 99, 103) read as an optional small id/index (HYPOTHESIS, unconfirmable without a reader). The `portrait_res_3` label is withdrawn. See note below. | DEAD (no consumer) |
 
 **Sentinel:** 0xFFFFFFFF indicates "not present" for the optional reference fields
 (`name_str_id`, `alt_name_str_id`, `portrait_res_1`, `portrait_res_2`). It is also one of the
 values seen in `field6`, but `field6`'s overall role is unresolved (next note).
 
-> **UNRESOLVED CONFLICT — `field6` (offset +24, was `portrait_res_3`):** the re-verification sample
-> on build `263bd994` shows record 0 = 103 and record 1 = 99 (small integers) while record 2 =
-> 0xFFFFFFFF. The small values (99, 103) are **inconsistent with** the large ~5 080 000-range
-> resource IDs that `portrait_res_1` / `portrait_res_2` hold in the same records, so this field is
-> almost certainly **not** a third portrait resource ID. Two open hypotheses: (1) a small index
-> (e.g. a UI sprite or colour index, or a second `icon_index`); (2) the 7-field stride is correct
-> but field[6] carries a different semantic entirely. No loader was traced for `mobinfo.mi`, so this
-> is left **OPEN** — sample-probe / IDB-pending. Do not assume "portrait resource" for this field.
+> **RESOLVED (CYCLE 7) — `field6` (offset +24, was `portrait_res_3`):** the field's role is **MOOT
+> in this build** because there is **no consumer read-site** to pin it — `mobinfo.mi` is DEAD (see
+> the Runtime status note above: no loader, no path literal, not in the boot data-table corpus
+> pointer table, not compiled in). On the on-disk shape: the field is **4 bytes, u32/i32 LE**;
+> `0xFFFFFFFF` = -1 is the "none / not present" sentinel (the re-verification sample shows record 0 =
+> 103, record 1 = 99, record 2 = 0xFFFFFFFF). The small populated values (99, 103) read as an
+> **optional small id/index** (HYPOTHESIS, unconfirmable without a reader). The earlier
+> `portrait_res_3` label is **withdrawn**: the small two/three-digit values are inconsistent with the
+> large ~5 080 000-range adjacent resource IDs that `portrait_res_1` / `portrait_res_2` hold in the
+> same records, so this field is **not** a third portrait resource ID. With zero read-sites there is
+> no consumer behaviour to disambiguate "small index" from "small id" from "small category"; the
+> distinction is unresolvable from this binary.
 
 ### Field notes
 
@@ -345,24 +370,29 @@ values seen in `field6`, but `field6`'s overall role is unresolved (next note).
   (`portrait_res_2 = portrait_res_1 + 1`), consistent with sequential resource allocation per mob
   (e.g. `5 079 876` / `5 079 877`; `5 013 620` / `5 013 621`; `5 099 990` / `5 099 991`).
 - `field6` (offset +24) does **not** follow this pattern (small values 99 / 103) — see the
-  UNRESOLVED conflict above; it is not treated as a third portrait resource.
+  RESOLVED note above; it is not a third portrait resource (label withdrawn). Its role is moot in
+  any case, as nothing reads this file.
 
 **Size verification (SAMPLE-VERIFIED, build `263bd994`):** the single VFS instance at
 `data/ui/mobinfo.mi` is **592 bytes**: a 4-byte header `count = 21` (`0x15`) followed by 21 × 28-byte
 records (`4 + 21 × 28 = 592` exactly). The container shape — present-on-disk, 21 records, 28-byte
-stride of 7 × u32 — is sample-verified. (No client loader / path literal was found, so the runtime
-does not appear to read it via a path; the on-disk shape stands regardless.)
+stride of 7 × u32 — is sample-verified. (The runtime **confirmed does not read** this file in build
+`263bd994` — no loader, no path literal, not in the boot data-table corpus, not compiled in; see the
+Runtime status note at the top of §2. The on-disk shape stands regardless.)
 
 ### Known unknowns
 
-- No loader routine located in the binary; the file path was not found as a string literal in the
-  binary. The container shape (count + 28-byte records) is **sample-verified**; the runtime
-  consumption path is not (no loader / no path literal).
+- **The file is DEAD in this build (CONFIRMED not read).** No loader routine, no path/name string
+  literal (exhaustive static search — string index, regex, raw ASCII byte scan, UTF-16LE wide scan,
+  all zero), not in the boot data-table corpus's filename pointer table, and not compiled in as a
+  static array. The container shape (count + 28-byte records) is **sample-verified**; the runtime
+  consumption path is **absent** — nothing opens it. This is no longer an open question.
 - The exact string-table structure that `name_str_id` / `alt_name_str_id` index is not documented
   here; see §6 of this document (`msg.xdb`) for the resolved record format.
-- **`field6` (offset +24) role is UNRESOLVED** — sampled values 99 / 103 / 0xFFFFFFFF do not fit
-  the "large portrait resource ID" model; OPEN (sample-probe / IDB-pending). See the conflict note
-  in the record layout above.
+- **`field6` (offset +24) role is MOOT** — the file has no read-site, so there is no consumer to
+  pin its meaning. On disk it is a 4-byte u32/i32 LE with `0xFFFFFFFF` = -1 = none; the small values
+  99 / 103 read as an optional small id/index (HYPOTHESIS only). The `portrait_res_3` label is
+  withdrawn. See the RESOLVED note in the record layout above.
 - The portrait resource ID encoding (group × 1e6 + index vs another scheme) for
   `portrait_res_1` / `portrait_res_2` is unconfirmed.
 - Whether files with `mob_class_id` ranges outside 101 – 121 exist is unknown (single sample).
@@ -1110,7 +1140,7 @@ be an exact multiple of 52; any remainder is an error.
 | `effectscale.xdb` | none          | 8 B    | `file_size / 8` = 2 records | none        | stride only   |
 | `creature_item.xdb` | none        | 48 B   | `file_size / 48` = 921 records | none (numeric) | NO (head-only; sample-verified stride) |
 | `vehicle.xdb`   | none            | 52 B   | `file_size / 52` = 58 records | none (numeric) | NO (head-only; sample-verified stride) |
-| `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field (= 21) | none (refs only) | NO        |
+| `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field (= 21) | none (refs only) | NO — DEAD (confirmed not read; present on disk, no loader) |
 | `.tol`          | 16-byte header  | 1 B/tile | `width × height`    | none          | NO            |
 | `descript.ion`  | none            | variable | until EOF (CRLF delimited) | ASCII  | NO            |
 | `discript.sc`   | none            | 68 B   | `file_size / 68`      | CP949 (display_name) | YES (context-menu label loader + stride) |
@@ -1121,10 +1151,12 @@ be an exact multiple of 52; any remainder is an error.
 ## Known unknowns (cross-format)
 
 - Whether any `.xdb` variant can vary in stride across game patches.
-- **`mobinfo.mi` `field6` (offset +24, was `portrait_res_3`)** — sampled values (99, 103,
-  0xFFFFFFFF) are inconsistent with the "large portrait resource ID" model; role UNRESOLVED, OPEN
-  (§2).
-- Whether `mobinfo.mi` files covering mob class IDs outside the range 101 – 121 exist.
+- **`mobinfo.mi` `field6` (offset +24, was `portrait_res_3`)** — role MOOT: the file is DEAD in this
+  build (confirmed not read), so there is no consumer to pin the field. On disk it is a 4-byte
+  u32/i32 LE with `0xFFFFFFFF` = -1 = none; small values (99, 103) read as an optional small
+  id/index (HYPOTHESIS); the `portrait_res_3` label is withdrawn (§2). RESOLVED, CYCLE 7.
+- Whether `mobinfo.mi` files covering mob class IDs outside the range 101 – 121 exist (academic —
+  the file is not read in this build).
 - The full field semantics of `creature_item.xdb` (§9) and `vehicle.xdb` (§10) — stride and count
   are sample-verified, but the per-record field roles are head-only inferences with no loader trace.
 - The semantics of `descript.ion` `field1` / `field2` — pak offset vs checksum vs size (the sampled

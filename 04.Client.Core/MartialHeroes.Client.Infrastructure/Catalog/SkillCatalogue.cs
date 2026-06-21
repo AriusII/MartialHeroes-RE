@@ -1,31 +1,31 @@
 using System.Buffers.Binary;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Domain.Skills;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
+using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Infrastructure.Catalog;
 
 /// <summary>
-/// In-memory lookup catalogue for skill definitions parsed from <c>data/script/skills.scr</c>.
-/// Maps skill IDs to <see cref="SkillDefinition"/> Domain objects.
+///     In-memory lookup catalogue for skill definitions parsed from <c>data/script/skills.scr</c>.
+///     Maps skill IDs to <see cref="SkillDefinition" /> Domain objects.
 /// </summary>
 /// <remarks>
-/// <para>
-/// spec: Docs/RE/formats/config_tables.md §2.8 skills.scr — "stride: 1504 bytes, ~194 real records":
-///   CONFIRMED.
-/// spec: Docs/RE/structs/skill.md Part A.2 — fixed-block field layout 1504 bytes.
-/// </para>
-/// <para>
-/// <b>Valid record filter.</b> Not all records in the file contain real skill data; many are
-/// zero-padded or garbage. A record is valid iff:
-///   skill_id &gt; 0 and skill_id &lt; 10,000,000.
-/// spec: Docs/RE/formats/config_tables.md §2.8 — "A real record is distinguished from garbage by
-///   a plausible skill ID (&lt; 10,000,000) and a plausible category index (&lt; 300)": CONFIRMED.
-/// </para>
-/// <para>
-/// <b>UNVERIFIED fields.</b> Only the confirmed offsets from the spec are decoded. All other byte
-/// regions are discarded. The full list of open questions is in spec §2.8 (skills.scr known unknowns).
-/// </para>
+///     <para>
+///         spec: Docs/RE/formats/config_tables.md §2.8 skills.scr — "stride: 1504 bytes, ~194 real records":
+///         CONFIRMED.
+///         spec: Docs/RE/structs/skill.md Part A.2 — fixed-block field layout 1504 bytes.
+///     </para>
+///     <para>
+///         <b>Valid record filter.</b> Not all records in the file contain real skill data; many are
+///         zero-padded or garbage. A record is valid iff:
+///         skill_id &gt; 0 and skill_id &lt; 10,000,000.
+///         spec: Docs/RE/formats/config_tables.md §2.8 — "A real record is distinguished from garbage by
+///         a plausible skill ID (&lt; 10,000,000) and a plausible category index (&lt; 300)": CONFIRMED.
+///     </para>
+///     <para>
+///         <b>UNVERIFIED fields.</b> Only the confirmed offsets from the spec are decoded. All other byte
+///         regions are discarded. The full list of open questions is in spec §2.8 (skills.scr known unknowns).
+///     </para>
 /// </remarks>
 public sealed class SkillCatalogue
 {
@@ -84,28 +84,31 @@ public sealed class SkillCatalogue
     // spec: Docs/RE/structs/skill.md §A.2.5 — "+1370 u16 StaminaCost: SAMPLE-VERIFIED".
     private const int StaminaCostOffset = 1370;
 
+    // Minimum record size to safely read all confirmed fields (up to StaminaCost at +1370+2=+1372).
+    private const int SkillScrMinRecordSize = 1372;
+
     private readonly Dictionary<uint, SkillDefinition> _byId;
 
     /// <summary>
-    /// Constructs the catalogue from pre-parsed skill catalogue entries.
-    /// Records with invalid skill IDs are silently skipped.
-    /// spec: Docs/RE/formats/config_tables.md §2.8 — valid record filter: plausible id &lt; 10,000,000.
+    ///     Constructs the catalogue from pre-parsed skill catalogue entries.
+    ///     Records with invalid skill IDs are silently skipped.
+    ///     spec: Docs/RE/formats/config_tables.md §2.8 — valid record filter: plausible id &lt; 10,000,000.
     /// </summary>
     public SkillCatalogue(SkillCatalogEntry[] entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
         _byId = new Dictionary<uint, SkillDefinition>(entries.Length);
 
-        foreach (SkillCatalogEntry entry in entries)
+        foreach (var entry in entries)
         {
-            ReadOnlySpan<byte> rec = entry.RawRecord.Span;
+            var rec = entry.RawRecord.Span;
 
             if (rec.Length < SkillScrMinRecordSize)
                 continue;
 
             // +0 u32 SkillId. CONFIRMED.
             // spec: Docs/RE/structs/skill.md §A.2.1 — "+0 u32 SkillId: SAMPLE-VERIFIED".
-            uint skillId = BinaryPrimitives.ReadUInt32LittleEndian(rec[SkillIdOffset..]);
+            var skillId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
 
             // Valid-record filter: skip id=0 and id >= 10,000,000 (garbage / padding records).
             // spec: Docs/RE/formats/config_tables.md §2.8 — "A real record is distinguished from
@@ -115,42 +118,42 @@ public sealed class SkillCatalogue
 
             // +1306 u16 SkillSort (used as Category in Domain model). SAMPLE-VERIFIED.
             // spec: Docs/RE/structs/skill.md §A.2.5 — "+1306 u16 SkillSort: SAMPLE-VERIFIED".
-            ushort skillSort = BinaryPrimitives.ReadUInt16LittleEndian(rec[SkillSortOffset..]);
+            var skillSort = BinaryPrimitives.ReadUInt16LittleEndian(rec[SkillSortOffset..]);
 
             // +1308 u8 TargetShapeMode. CONFIRMED.
             // spec: Docs/RE/structs/skill.md §A.2.5 — "+1308 u8 TargetShapeMode: CONFIRMED".
-            byte targetShapeByte = rec[TargetShapeModeOffset];
-            SkillTargetMode targetMode = MapTargetMode(targetShapeByte);
+            var targetShapeByte = rec[TargetShapeModeOffset];
+            var targetMode = MapTargetMode(targetShapeByte);
 
             // +1312 f32 BaseRange. SAMPLE-VERIFIED.
-            float baseRange = BinaryPrimitives.ReadSingleLittleEndian(rec[BaseRangeOffset..]);
+            var baseRange = BinaryPrimitives.ReadSingleLittleEndian(rec[BaseRangeOffset..]);
 
             // +1316 f32 AoeRadius. SAMPLE-VERIFIED.
-            float aoeRadius = BinaryPrimitives.ReadSingleLittleEndian(rec[AoeRadiusOffset..]);
+            var aoeRadius = BinaryPrimitives.ReadSingleLittleEndian(rec[AoeRadiusOffset..]);
 
             // +1330 i16 MaxTargetHits (engine clamps to 40). SAMPLE-VERIFIED.
-            short maxTargetHits = BinaryPrimitives.ReadInt16LittleEndian(rec[MaxTargetHitsOffset..]);
+            var maxTargetHits = BinaryPrimitives.ReadInt16LittleEndian(rec[MaxTargetHitsOffset..]);
 
             // +1332 i16 MpCostGateFactor. SAMPLE-VERIFIED.
-            short mpCostFactor = BinaryPrimitives.ReadInt16LittleEndian(rec[MpCostGateFactorOffset..]);
+            var mpCostFactor = BinaryPrimitives.ReadInt16LittleEndian(rec[MpCostGateFactorOffset..]);
 
             // +1334 u16 CombatRecast (centi-seconds). SAMPLE-VERIFIED.
-            ushort combatRecast = BinaryPrimitives.ReadUInt16LittleEndian(rec[CombatRecastOffset..]);
+            var combatRecast = BinaryPrimitives.ReadUInt16LittleEndian(rec[CombatRecastOffset..]);
 
             // +1344 u16 WeaponReqA. CONFIRMED.
-            ushort weaponReqA = BinaryPrimitives.ReadUInt16LittleEndian(rec[WeaponReqAOffset..]);
+            var weaponReqA = BinaryPrimitives.ReadUInt16LittleEndian(rec[WeaponReqAOffset..]);
 
             // +1348 u32 WeaponReqB. CONFIRMED.
-            uint weaponReqB = BinaryPrimitives.ReadUInt32LittleEndian(rec[WeaponReqBOffset..]);
+            var weaponReqB = BinaryPrimitives.ReadUInt32LittleEndian(rec[WeaponReqBOffset..]);
 
             // +1352 u8 WeaponReqActiveFlag. CONFIRMED.
-            bool weaponReqActive = rec[WeaponReqActiveFlagOffset] != 0;
+            var weaponReqActive = rec[WeaponReqActiveFlagOffset] != 0;
 
             // +1368 i16 CastCost. CONFIRMED (structure); semantic UNVERIFIED; 0 in all sample records.
-            short castCost = BinaryPrimitives.ReadInt16LittleEndian(rec[CastCostOffset..]);
+            var castCost = BinaryPrimitives.ReadInt16LittleEndian(rec[CastCostOffset..]);
 
             // +1370 u16 StaminaCost. SAMPLE-VERIFIED.
-            ushort staminaCost = BinaryPrimitives.ReadUInt16LittleEndian(rec[StaminaCostOffset..]);
+            var staminaCost = BinaryPrimitives.ReadUInt16LittleEndian(rec[StaminaCostOffset..]);
 
             var def = new SkillDefinition
             {
@@ -166,18 +169,18 @@ public sealed class SkillCatalogue
                 WeaponReqB = weaponReqB,
                 WeaponReqActive = weaponReqActive,
                 ConsumedCost = castCost,
-                StaminaCost = staminaCost,
+                StaminaCost = staminaCost
             };
 
             _byId[skillId] = def;
         }
     }
 
-    // Minimum record size to safely read all confirmed fields (up to StaminaCost at +1370+2=+1372).
-    private const int SkillScrMinRecordSize = 1372;
+    /// <summary>Number of valid skills in this catalogue.</summary>
+    public int Count => _byId.Count;
 
     /// <summary>
-    /// Creates a <see cref="SkillCatalogue"/> by loading <c>skills.scr</c> from the given loader.
+    ///     Creates a <see cref="SkillCatalogue" /> by loading <c>skills.scr</c> from the given loader.
     /// </summary>
     public static SkillCatalogue FromLoader(VfsCatalogueLoader loader)
     {
@@ -185,26 +188,26 @@ public sealed class SkillCatalogue
         return new SkillCatalogue(loader.LoadSkillsScr());
     }
 
-    /// <summary>Number of valid skills in this catalogue.</summary>
-    public int Count => _byId.Count;
-
     /// <summary>
-    /// Looks up a skill by its ID.
-    /// Returns <see langword="null"/> when the ID is not present.
-    /// spec: Docs/RE/structs/skill.md §A.2.1 — SkillId is the catalog key.
+    ///     Looks up a skill by its ID.
+    ///     Returns <see langword="null" /> when the ID is not present.
+    ///     spec: Docs/RE/structs/skill.md §A.2.1 — SkillId is the catalog key.
     /// </summary>
-    public SkillDefinition? TryGet(uint skillId) =>
-        _byId.TryGetValue(skillId, out var d) ? d : null;
+    public SkillDefinition? TryGet(uint skillId)
+    {
+        return _byId.TryGetValue(skillId, out var d) ? d : null;
+    }
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Maps the raw TargetShapeMode byte to the Domain enum.
-    /// spec: Docs/RE/structs/skill.md §A.5 TargetShapeMode.
-    /// Values 0..11 are confirmed; anything else maps to <see cref="SkillTargetMode.SingleSelfOrPrimary"/>.
+    ///     Maps the raw TargetShapeMode byte to the Domain enum.
+    ///     spec: Docs/RE/structs/skill.md §A.5 TargetShapeMode.
+    ///     Values 0..11 are confirmed; anything else maps to <see cref="SkillTargetMode.SingleSelfOrPrimary" />.
     /// </summary>
-    private static SkillTargetMode MapTargetMode(byte raw) =>
-        raw switch
+    private static SkillTargetMode MapTargetMode(byte raw)
+    {
+        return raw switch
         {
             // 0 = Self / single (movement skills use this). spec: §A.5 value 0: CONFIRMED.
             0 => SkillTargetMode.SingleSelfOrPrimary,
@@ -232,6 +235,7 @@ public sealed class SkillCatalogue
             // 11 = Self-only. spec: §A.5 value 11: CONFIRMED.
             11 => SkillTargetMode.SelfOnly,
             // Unknown / future value — default to Self.
-            _ => SkillTargetMode.SingleSelfOrPrimary,
+            _ => SkillTargetMode.SingleSelfOrPrimary
         };
+    }
 }

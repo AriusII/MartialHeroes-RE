@@ -1,0 +1,39 @@
+# spec: Docs/RE/packets/2-63_relation_named_action.yaml
+# Role: C2S name-targeted party/guild action (class + gold gated) — 16-byte name + mode byte.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgRelationNamedAction
+opcode: 0x2003f           # major 2 (GameAction), minor 63 -> (2 << 16) | 63
+direction: C2S
+size: 17                  # fixed 17-byte body
+spec: packets/2-63_relation_named_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A name-targeted party/guild action (invite-to / promote-within a named target), gated by class rank and gold. A 16-byte character name plus a mode/flag byte.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 17.
+fields:
+  - { name: Name, type: "char[16]" }   # 0x00  CP949 target character name (4 dwords) [capture/debugger-pending]
+  - { name: Mode, type: u8 }           # 0x10  mode / flag byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 17-byte blit = 16 + 1); the field VALUES are
+  static inferences (capture-pending).
+
+    0x00 (16B) Name : a CP949 target character name carried as a 16-byte key (4 dwords).
+                      [capture/debugger-pending]
+    0x10 (1B)  Mode : a mode / flag byte. [capture/debugger-pending]
+
+  NOTE: this name field is the 16-byte variant (4-dword key copy), not the 17-byte cell.
+
+  TRIGGER / GATE (client-side, informational): the social confirm panel. The validator compares the
+  name against the player's own name, checks party-exists + a class-rank byte, and a gold-cost table
+  before allowing the send — i.e. a named party/guild action with a cost gate.
+
+  UNKNOWNS to resolve with a capture:
+    - the Mode value space and the exact action (invite-to / promote-within / other);
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application name-targeted relation action use-case.

@@ -1,0 +1,111 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CONTROL-FLOW CONFIRMED: fixed 1092-byte (0x444) body copy (twice) with all sub-tables resolved
+# into real 8-slot fixed-stride layouts. VALUE semantics PENDING. capture_verified: false.
+# spec: Docs/RE/packets/4-71_structured_panel_snapshot.yaml
+#
+# VERIFICATION BANNER
+#   verification: control-flow confirmed (the body shape is fully resolved: the +52 opaque blob is
+#                 broken into real sub-tables -- subtype gate, an 8-entry id array, an 8-entry status
+#                 array, two CP949 name-cell regions, an 8-entry 8-byte pair array, and 8 x 80-byte
+#                 slot records of 5 x 16-byte sub-cells); per-slot VALUE meanings remain
+#                 capture/debugger-pending.
+#   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   capture_verified: false
+#
+# RECLASSIFICATION (CYCLE 2 lane W-C3): opcode 4/71 was previously lumped with the "thin UI-slot
+# updater" family. THAT IS WRONG. 4/71 is a STRUCTURED 1092-byte panel snapshot -- a subtype byte +
+# an 8-entry id array + an 8-entry status array + further fixed-stride sub-records. This file removes
+# it from the thin-slot family. (opcodes.md already flags it "Structured panel snapshot (NOT a thin slot)".)
+
+name: SmsgResponseSlot71   # neutral name (names.yaml / opcodes.md); a structured panel snapshot, not a thin slot
+opcode: 0x40047            # major 4 (Response), minor 71 -> (4 << 16) | 71
+direction: S2C
+size: 1092                # fixed 1092-byte payload block (0x444)
+spec: packets/4-71_structured_panel_snapshot.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Server pushes a structured 1092-byte (0x444) panel snapshot. The body opens with a subtype byte,
+  then an 8-entry per-slot id array and a parallel 8-entry status-byte array, then two CP949 name-cell
+  regions (one for other players, one for self), an 8-entry 8-byte pair array, and an array of 8
+  fixed 80-byte slot records (each 5 x 16-byte sub-cells). On the structured subtype the consumer
+  walks the 8-slot record panel. The body shape is fully resolved (no opaque tail); the on-wire VALUE
+  meanings are capture-pending.
+
+# Wire order, offset 0 = first payload byte. Pack=1. The arrays are modelled as fixed bytes[N] blobs;
+# the engineer slices each into its stated per-slot entries. The fields list sums to exactly 1092.
+fields:
+  - { name: HeaderPad0,        type: "bytes[8]" }     # +0    leading header region (subtype gate is the next byte)
+  - { name: Subtype,           type: u8 }             # +8    subtype gate: 1 = structured panel apply
+  - { name: ReservedA,         type: "bytes[3]" }     # +9    filler to the id array
+  - { name: IdArray,           type: "bytes[32]" }    # +12   8 x u32 per-slot id (4-byte stride); non-zero = active slot
+  - { name: StatusArray,       type: "bytes[8]" }     # +44   8 x u8 per-slot status byte (1-byte stride); value 2 is tested
+  - { name: ReservedGap1,      type: "bytes[32]" }    # +52   32-byte region NOT read by this consumer; reserved
+  - { name: NameCellRegion1,   type: "bytes[136]" }   # +84   8 CP949 name cells x 17-byte stride; selected when slot id != local-player id (other players)
+  - { name: ReservedGap2,      type: "bytes[32]" }    # +220  32-byte region NOT read by this consumer; reserved
+  - { name: NameCellRegion2,   type: "bytes[136]" }   # +252  8 CP949 name cells x 17-byte stride; selected when slot id == local-player id (self)
+  - { name: PairArray,         type: "bytes[64]" }    # +388  8 entries x 8-byte stride (2 x u32, read as a qword pair per slot)
+  - { name: SlotRecordArray,   type: "bytes[640]" }   # +452  8 records x 80-byte stride (5 sub-cells x 16 bytes); ends exactly at +0x444
+  # widths: 8 + 1 + 3 + 32 + 8 + 32 + 136 + 32 + 136 + 64 + 640 = 1092
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 0x444 (1092) total (a whole-block copy, independently
+  re-confirmed by a second whole-block copy in the panel walker), the +8 subtype gate, and every
+  sub-table below. There is NO variable tail -- all sub-tables are 8-slot, fixed-stride. The field
+  widths sum to exactly 1092 (verified). The +52 opaque blob from the prior revision is now broken
+  into its real sub-tables; do NOT re-introduce a "do not field-model past +52" warning.
+
+  RECLASSIFICATION VERDICT: this is NOT a thin slot. It is a structured 1092-byte panel snapshot.
+
+  RESOLVED BODY LAYOUT (offset 0 = first payload byte):
+    +0   (8B)   HeaderPad0      : leading header region (the subtype gate is the next byte).
+    +8   (1B)   Subtype         : apply gate -- 1 = structured panel apply. Branch on it first.
+    +9   (3B)   ReservedA       : filler to the id array.
+    +12  (32B)  IdArray         : 8 x u32 per-slot id, 4-byte stride. A non-zero entry marks an
+                                  active slot; entries are compared to a panel id table and to the
+                                  local-player id. Control-flow-confirmed by an 8-trip walk and an
+                                  id search that caps at 8.
+    +44  (8B)   StatusArray     : 8 x u8 per-slot status byte, 1-byte stride. Value 2 is tested.
+                                  Control-flow-confirmed (8-trip walk at this base).
+    +52  (32B)  ReservedGap1    : a 32-byte region NOT read by this consumer (no read site between
+                                  +52 and +84). Treat as reserved until a capture shows otherwise.
+    +84  (136B) NameCellRegion1 : 8 CP949 name cells x 17-byte stride. Selected for a slot when the
+                                  slot id != the local-player id (other players).
+    +220 (32B)  ReservedGap2    : a 32-byte region NOT read by this consumer (no read site between
+                                  +220 and +252). Treat as reserved until a capture shows otherwise.
+    +252 (136B) NameCellRegion2 : 8 CP949 name cells x 17-byte stride. Selected for a slot when the
+                                  slot id == the local-player id (self).
+    +388 (64B)  PairArray       : 8 entries x 8-byte stride (2 x u32, read as a qword pair per slot).
+    +452 (640B) SlotRecordArray : 8 records x 80-byte stride (see per-record table below). Ends
+                                  exactly at +0x444.
+
+  PER SLOT-RECORD (80-byte stride = 5 sub-cells x 16 bytes). A sub-cell is applied into the panel
+  only when its +4 presence-guard dword is non-zero; on a live sub-cell its full 16 bytes are copied:
+    +0  (4B u32) sub-cell key / type
+    +4  (4B u32) presence guard -- non-zero = the sub-cell is live
+    +8  (4B u32) payload dword A
+    +12 (4B u32) payload dword B
+  (sub-cell total 16; 5 sub-cells = 80 per record; 8 records = 640.)
+
+  SELECTION LOGIC (one line, no value invention): per slot the walker resolves the slot id to a
+  record index (capped at 8), then binds NameCellRegion2 (self) or NameCellRegion1 (other) plus the
+  8-byte pair, and copies the live 16-byte sub-cells of that slot's 80-byte record into the panel.
+
+  HOST-SIDE STRINGS: any matched name/title strings BEYOND these wire name-cells are HOST-side -- the
+  consumer reads them from the resolved actor object (looked up by slot id), NOT from additional wire
+  bytes. The 1092 bytes are fully accounted for by the header + the sub-tables above. Do not invent
+  extra string offsets inside the body.
+
+  WIDTH CHECK: 8 + 1 + 3 + 32 + 8 + 32 + 136 + 32 + 136 + 64 + 640 = 1092 (exact, closes at +0x444).
+
+  UNKNOWNS to resolve with a capture / live read:
+    - the per-slot id/status value meanings (status==2 is a state test of unknown semantics);
+    - the sub-cell key/payload dword meanings;
+    - whether the two 32-byte ReservedGap regions (+52, +220) carry server data unread by THIS
+      consumer (no read site here -- reserved until a capture shows otherwise).
+
+  UNBLOCKS: reserving the correct frame length in Client.Application and slicing the resolved
+  sub-tables; the per-slot VALUE meanings need a live read before full interpretation.

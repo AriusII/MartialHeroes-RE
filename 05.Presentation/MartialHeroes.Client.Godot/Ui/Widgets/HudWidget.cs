@@ -26,18 +26,27 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUComponent-faithful base widget for the new HUD substrate.
-///
-/// <para>Concrete widgets (HudButton, HudLabel, etc.) extend this class. Each must call
-/// <see cref="InitBase"/> after construction and override
-/// <see cref="GetControl"/> to return the backing <see cref="Control"/> node.</para>
-///
-/// <para>Paint order = child insertion order (back→front).
-/// Hit-test order = reverse (topmost painter wins input).
-/// spec: Docs/RE/specs/ui_system.md §7.3 — z-order rules.</para>
+///     GUComponent-faithful base widget for the new HUD substrate.
+///     <para>
+///         Concrete widgets (HudButton, HudLabel, etc.) extend this class. Each must call
+///         <see cref="InitBase" /> after construction and override
+///         <see cref="GetControl" /> to return the backing <see cref="Control" /> node.
+///     </para>
+///     <para>
+///         Paint order = child insertion order (back→front).
+///         Hit-test order = reverse (topmost painter wins input).
+///         spec: Docs/RE/specs/ui_system.md §7.3 — z-order rules.
+///     </para>
 /// </summary>
 public abstract class HudWidget
 {
+    // -------------------------------------------------------------------------
+    // Child management (insertion-order list — back→front paint, reverse hit-test)
+    // spec: Docs/RE/specs/ui_system.md §7.3 — z-order rules.
+    // spec: Docs/RE/specs/ui_system.md §7.4 — child management.
+    // -------------------------------------------------------------------------
+
+    private readonly List<HudWidget> _children = [];
     // -------------------------------------------------------------------------
     // Action id
     // spec: Docs/RE/structs/gucomponent.md +0x10 — action_id (default -1).
@@ -45,20 +54,11 @@ public abstract class HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Integer action identifier fired to <see cref="ActionFired"/> on click-release.
-    /// Default = -1 (no action, matches legacy sentinel).
-    ///
-    /// spec: Docs/RE/structs/gucomponent.md +0x10 action_id default -1.
+    ///     Integer action identifier fired to <see cref="ActionFired" /> on click-release.
+    ///     Default = -1 (no action, matches legacy sentinel).
+    ///     spec: Docs/RE/structs/gucomponent.md +0x10 action_id default -1.
     /// </summary>
     public int ActionId { get; set; } = -1;
-
-    /// <summary>
-    /// Fired when the widget is clicked (pressed and released inside its bounds).
-    /// Subscribers should emit a use-case call — NEVER mutate domain state directly.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.4 — "click fires actionId on click-release only".
-    /// </summary>
-    public event Action<int>? ActionFired;
 
     // -------------------------------------------------------------------------
     // Remove-mark (deferred removal)
@@ -67,14 +67,26 @@ public abstract class HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Whether this widget is marked for removal on the next <see cref="RemoveMarked"/> pass.
-    ///
-    /// spec: Docs/RE/structs/gucomponent.md +0x8D remove_mark.
+    ///     Whether this widget is marked for removal on the next <see cref="RemoveMarked" /> pass.
+    ///     spec: Docs/RE/structs/gucomponent.md +0x8D remove_mark.
     /// </summary>
     public bool IsMarkedForRemoval { get; private set; }
 
+    /// <summary>Read-only view of the current child list (insertion order).</summary>
+    public IReadOnlyList<HudWidget> Children => _children;
+
+    /// <summary>
+    ///     Fired when the widget is clicked (pressed and released inside its bounds).
+    ///     Subscribers should emit a use-case call — NEVER mutate domain state directly.
+    ///     spec: Docs/RE/specs/ui_system.md §1.4 — "click fires actionId on click-release only".
+    /// </summary>
+    public event Action<int>? ActionFired;
+
     /// <summary>Marks this widget for deferred removal on the next RemoveMarked pass.</summary>
-    public void MarkForRemoval() => IsMarkedForRemoval = true;
+    public void MarkForRemoval()
+    {
+        IsMarkedForRemoval = true;
+    }
 
     // -------------------------------------------------------------------------
     // Show / hide
@@ -82,94 +94,79 @@ public abstract class HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Begins a fade-in (alpha toward 1.0 at ±64/tick).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "showing → alpha +64 per tick toward 255".
+    ///     Begins a fade-in (alpha toward 1.0 at ±64/tick).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "showing → alpha +64 per tick toward 255".
     /// </summary>
     public void Show()
     {
-        Control? ctrl = GetControl();
+        var ctrl = GetControl();
         if (ctrl is null) return;
         AlphaFade.For(ctrl).Show();
     }
 
     /// <summary>
-    /// Begins a fade-out (alpha toward 0 at −64/tick; Visible=false when done).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "hiding → alpha −64 toward 0".
+    ///     Begins a fade-out (alpha toward 0 at −64/tick; Visible=false when done).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "hiding → alpha −64 toward 0".
     /// </summary>
     public void Hide()
     {
-        Control? ctrl = GetControl();
+        var ctrl = GetControl();
         if (ctrl is null) return;
         AlphaFade.For(ctrl).Hide();
     }
 
     /// <summary>
-    /// Snaps alpha to 1.0 immediately and sets Visible=true (SetShown=show / forced-alpha pin).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps to 255 immediately".
-    /// spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha byte ≠ 0xFF pins alpha immediately".
+    ///     Snaps alpha to 1.0 immediately and sets Visible=true (SetShown=show / forced-alpha pin).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps to 255 immediately".
+    ///     spec: Docs/RE/specs/ui_system.md §7.2 — "forced-alpha byte ≠ 0xFF pins alpha immediately".
     /// </summary>
     public void ShowInstant()
     {
-        Control? ctrl = GetControl();
+        var ctrl = GetControl();
         if (ctrl is null) return;
         AlphaFade.For(ctrl).ShowInstant();
     }
 
     /// <summary>
-    /// Snaps alpha to 0.0 immediately and sets Visible=false (SetShown=hide / forced-alpha pin).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps to 0 immediately".
+    ///     Snaps alpha to 0.0 immediately and sets Visible=false (SetShown=hide / forced-alpha pin).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "SetShown snaps to 0 immediately".
     /// </summary>
     public void HideInstant()
     {
-        Control? ctrl = GetControl();
+        var ctrl = GetControl();
         if (ctrl is null) return;
         AlphaFade.For(ctrl).HideInstant();
     }
 
     /// <summary>
-    /// Switches this widget to the slow ±32/tick fade (GUComponentEx variant).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.1 — "GUComponentEx uses ±32/tick".
+    ///     Switches this widget to the slow ±32/tick fade (GUComponentEx variant).
+    ///     spec: Docs/RE/specs/ui_system.md §7.1 — "GUComponentEx uses ±32/tick".
     /// </summary>
     public void UseSlowFade()
     {
-        Control? ctrl = GetControl();
+        var ctrl = GetControl();
         if (ctrl is null) return;
         AlphaFade.For(ctrl).UseSlowFade();
     }
 
-    // -------------------------------------------------------------------------
-    // Child management (insertion-order list — back→front paint, reverse hit-test)
-    // spec: Docs/RE/specs/ui_system.md §7.3 — z-order rules.
-    // spec: Docs/RE/specs/ui_system.md §7.4 — child management.
-    // -------------------------------------------------------------------------
-
-    private readonly List<HudWidget> _children = [];
-
     /// <summary>
-    /// Adds a child widget. Added children paint later (on top) and have lower hit-test
-    /// priority than earlier children.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.3 — "paint order = insertion order; later = on top".
-    /// spec: Docs/RE/specs/ui_system.md §7.4 — Panel_AddChild.
+    ///     Adds a child widget. Added children paint later (on top) and have lower hit-test
+    ///     priority than earlier children.
+    ///     spec: Docs/RE/specs/ui_system.md §7.3 — "paint order = insertion order; later = on top".
+    ///     spec: Docs/RE/specs/ui_system.md §7.4 — Panel_AddChild.
     /// </summary>
     public void AddChild(HudWidget child)
     {
         _children.Add(child);
-        Control? parentCtrl = GetControl();
-        Control? childCtrl = child.GetControl();
+        var parentCtrl = GetControl();
+        var childCtrl = child.GetControl();
         if (parentCtrl is not null && childCtrl is not null)
             parentCtrl.AddChild(childCtrl);
     }
 
     /// <summary>
-    /// Adds a child widget and sets its <see cref="ActionId"/>.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §7.4 — Panel_AddChildWithAction(parent, child, actionId).
+    ///     Adds a child widget and sets its <see cref="ActionId" />.
+    ///     spec: Docs/RE/specs/ui_system.md §7.4 — Panel_AddChildWithAction(parent, child, actionId).
     /// </summary>
     public void AddChildWithAction(HudWidget child, int actionId)
     {
@@ -178,35 +175,30 @@ public abstract class HudWidget
     }
 
     /// <summary>
-    /// Sweeps all children whose <see cref="IsMarkedForRemoval"/> is true, removing them from
-    /// the child vector and freeing their backing <see cref="Control"/> node.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §2 slot 13 — RemoveMarkedChildren.
-    /// spec: Docs/RE/specs/ui_system.md §7.4 — "deferred-removal sweep on remove-flag +0x8D==1".
+    ///     Sweeps all children whose <see cref="IsMarkedForRemoval" /> is true, removing them from
+    ///     the child vector and freeing their backing <see cref="Control" /> node.
+    ///     spec: Docs/RE/specs/ui_system.md §2 slot 13 — RemoveMarkedChildren.
+    ///     spec: Docs/RE/specs/ui_system.md §7.4 — "deferred-removal sweep on remove-flag +0x8D==1".
     /// </summary>
     public void RemoveMarked()
     {
-        for (int i = _children.Count - 1; i >= 0; i--)
+        for (var i = _children.Count - 1; i >= 0; i--)
         {
             if (!_children[i].IsMarkedForRemoval) continue;
-            HudWidget removed = _children[i];
+            var removed = _children[i];
             _children.RemoveAt(i);
             removed.GetControl()?.QueueFree();
         }
     }
-
-    /// <summary>Read-only view of the current child list (insertion order).</summary>
-    public IReadOnlyList<HudWidget> Children => _children;
 
     // -------------------------------------------------------------------------
     // Action dispatch helpers
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Fires the <see cref="ActionFired"/> event with this widget's <see cref="ActionId"/>.
-    /// Call this from the backing Control's pressed/clicked signal handler.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.4 — "window command handler routes actionId to OnAction".
+    ///     Fires the <see cref="ActionFired" /> event with this widget's <see cref="ActionId" />.
+    ///     Call this from the backing Control's pressed/clicked signal handler.
+    ///     spec: Docs/RE/specs/ui_system.md §1.4 — "window command handler routes actionId to OnAction".
     /// </summary>
     protected void FireAction()
     {
@@ -219,9 +211,9 @@ public abstract class HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the backing Godot <see cref="Control"/> node for this widget.
-    /// The control is the visual representation; its position, size, and Modulate
-    /// reflect this widget's state.
+    ///     Returns the backing Godot <see cref="Control" /> node for this widget.
+    ///     The control is the visual representation; its position, size, and Modulate
+    ///     reflect this widget's state.
     /// </summary>
     public abstract Control? GetControl();
 }

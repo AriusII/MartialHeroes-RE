@@ -1,0 +1,30 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-16).
+# size: 16 bytes (0x10) fixed-size block read via PacketBuffer_ReadField.
+
+name: SmsgActorVisualSlotClear
+opcode: 0x50010           # major 5 (Push), minor 16 -> (5 << 16) | 16
+direction: S2C
+size: 16                  # fixed 16-byte payload (0x10)
+spec: packets/5-16_actor_visual_slot_clear.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Actor equipment/visual slot clear. Clears the item visual from the specified slot,
+  performing a visual refresh of the actor's 3D mesh model. Mirror of 5/12.
+
+fields:
+  - { name: ActorSort, type: u32, offset: 0 }       # actor sort key
+  - { name: ActorId, type: u32, offset: 4 }         # actor ID to update
+  - { name: Mode, type: u8, offset: 8 }             # clear mode (0 = full reset, 1 = single slot clear)
+  - { name: SlotIndex, type: u8, offset: 9 }        # visual equipment slot (0..19) to clear
+  - { name: Padding, type: "u8[6]", offset: 10 }    # alignment padding to 16 bytes
+
+notes: |
+  Static analysis only; no capture available.
+
+  BEHAVIOUR:
+    - Resolves the actor via (ActorSort, ActorId).
+    - Resets the ItemId to 0 in the actor's visual slots table (offset 204 + 16 * SlotIndex).
+    - Rebuilds the actor visual and updates stance/motion representations.

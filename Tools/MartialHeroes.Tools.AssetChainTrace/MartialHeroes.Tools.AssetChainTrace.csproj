@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        MartialHeroes.Tools.AssetChainTrace (CLI: "chaintrace") — existence tracer for a resolved
+        asset-chain hop. Reports ONLY index metadata: membership (Contains), size, offset, and a
+        derived record count (stride mode). INDEX/EXISTENCE ONLY: there is intentionally no
+        GetFileContent call anywhere — it never reads, decodes, or prints payload bytes. Keep it so.
+
+        It is a solution member (Tools/ folder) built on the production Assets.Vfs library and tracks
+        the live MappedVfsArchive API — if the API drifts the tool fails to compile, which is the
+        signal to fix the call site here (never the library). Leaf CONSUMER of layer 03; nothing in
+        the layered core references it.
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <!-- The referenced Assets.Vfs uses unsafe memory-mapping internals. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
+    </ItemGroup>
+
+    <!--
+        CP949 (Korean code page 949) decoding for client text tables is provided by
+        System.Text.Encoding.CodePages (in the .NET 10 shared framework). Program.cs registers it via
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance).
+    -->
+
+</Project>

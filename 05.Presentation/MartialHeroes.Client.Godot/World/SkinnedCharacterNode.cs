@@ -17,46 +17,79 @@
 // NEVER uses GltfDocument — builds ArrayMesh directly (Bud/Skn MeshBuilder pattern).
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Helpers;
+using MartialHeroes.Assets.Parsers.Core.Models;
+using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Presentation.Helpers;
+using MartialHeroes.Client.Presentation.World;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// A skinned character rendered by per-frame CPU LBS. Owns its own ArrayMesh and updates it
-/// from the idle <c>.mot</c> clip each frame.
-///
-/// spec: Docs/RE/specs/skinning.md (linear-blend skinning, inverse-bind, pose composition).
+///     A skinned character rendered by per-frame CPU LBS. Owns its own ArrayMesh and updates it
+///     from the idle <c>.mot</c> clip each frame.
+///     spec: Docs/RE/specs/skinning.md (linear-blend skinning, inverse-bind, pose composition).
 /// </summary>
 public sealed partial class SkinnedCharacterNode : Node3D
 {
+    // =========================================================================
+    // EW4: Standing-idle playback + the 6-case visual-state selector (§10.3.1)
+    // =========================================================================
+
+    /// <summary>
+    ///     The per-actor client visual-state word that §10.3.1 reports drives a 6-case idle-motion applier
+    ///     (a 6-way jump table), each branch routing a standing actor to an <c>actormotion.txt</c> column.
+    ///     The branch STRUCTURE is recovered; the concrete value → case → column mapping is
+    ///     <c>live-pending (6-D)</c> and must be read off the live debugger — it must NOT be guessed from
+    ///     the jump-table shape. We model the 6 cases here so the structure is faithful in code, but every
+    ///     case currently resolves to the one slot we can statically resolve: the standing idle.
+    ///     spec: Docs/RE/specs/skinning.md §10.3.1 (6-case visual-state idle applier; value mapping
+    ///     live-pending), §10.4 (selection mechanism recovered, value → column live-pending).
+    /// </summary>
+    public enum VisualState
+    {
+        Standing = 0, // the neutral standing case → default idle slot (motion_ids_a[1] / col16, §8(e)).
+
+        // The remaining five branches of the recovered 6-way idle applier. Which concrete visual-state
+        // VALUE lands on which case — and which actormotion column each case selects — is NOT settled
+        // statically (§10.3.1). Until a live debugger read confirms the value→clip mapping we do NOT
+        // guess a clip for these; SelectVisualStateClip() defaults them to the standing idle.
+        VisualState1 = 1, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState2 = 2, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState3 = 3, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState4 = 4, // live-pending (skinning.md §10) — column unconfirmed
+        VisualState5 = 5 // live-pending (skinning.md §10) — column unconfirmed
+    }
+
+    // Interpolation choice for .mot sampling. Smoothed (renormalized alpha) for a modern look.
+    // spec: Docs/RE/specs/skinning.md §8(c) — "Smoothed (recommended): renormalize alpha /= 0.1."
+    private const bool RenormalizeAlpha = true;
+
+    /// <summary>
+    ///     Default hand bone-id a rigid weapon attaches to. The recovered weapon-attach host node is
+    ///     constructed with bone-id 0 (the root/first bone) and no static override is reachable — the
+    ///     concrete hand bone-id is DBG-PENDING. Held as a SINGLE adjustable constant so naming the hand
+    ///     bone (a live read with a weapon equipped) is a one-line change.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 / §8 (host bone-id default 0, DBG-PENDING).
+    /// </summary>
+    public const int DefaultHandBoneId = 0;
+
+    // Rigidly bone-attached weapon parts (slot 14). Each follows ONE shared-skeleton bone every frame
+    // (no per-vertex skinning) — the recovered weapon attach model. spec: equipment_visuals.md §5.
+    private readonly List<WeaponAttachment> _weapons = new();
+
+    private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
+    private int _baseId;
+
     // ---- Precomputed rig (immutable after Setup) ----
     private Bone[] _bones = [];
-    private int[] _parentIndex = [];
-    private bool[] _hasChild = []; // per-bone: parent of ≥1 bone (§6.3 interior-bone lock)
-    private float[] _nodeScale = []; // per-bone runtime scale (+84, default 1.0; SPEC GAP source)
-    private SkinningMath.VertexInfluences[] _perVertex = [];
-    private AnimationTrack?[] _trackByBoneIndex = [];
+
+    private float _clipDuration;
 
     // Render topology: flat unindexed corner list. _cornerVertex[c] = unique vertex index.
     private int[] _cornerVertex = [];
-    private Vector2[] _uvs = [];
-
-    // Reused per-frame buffers.
-    private SkinningMath.BoneTransform[] _world = []; // per bone, animated world transform (native)
-    private Vec3[] _deformedPos = []; // per unique vertex, native space
     private Vec3[] _deformedNrm = []; // per unique vertex, native space
-    private Vector3[] _outPos = []; // per corner, Godot space
-    private Vector3[] _outNrm = []; // per corner, Godot space
-
-    private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
-    private MeshInstance3D? _meshInstance;
-    private Material? _material;
-
-    private float _clipDuration;
-    private bool _hasClip;
-    private float _time;
-    private bool _ready;
+    private Vec3[] _deformedPos = []; // per unique vertex, native space
 
     // When true, the node does NOT self-drive from _Process; the owner pumps it via Tick(dt).
     // The player path leaves this false (per-frame _Process). The town's 40 mobs set it true so
@@ -64,10 +97,46 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // This is a pure scheduling change — the deform math and the rest-pose cancellation invariant
     // are identical either way. spec: Docs/RE/formats/animation.md §Timing — original runs at 10 fps.
     private bool _externalDrive;
+    private bool[] _hasChild = []; // per-bone: parent of ≥1 bone (§6.3 interior-bone lock)
+    private bool _hasClip;
 
-    // Interpolation choice for .mot sampling. Smoothed (renormalized alpha) for a modern look.
-    // spec: Docs/RE/specs/skinning.md §8(c) — "Smoothed (recommended): renormalize alpha /= 0.1."
-    private const bool RenormalizeAlpha = true;
+    // The resolved STANDING/DEFAULT IDLE clip (motion_ids_a[1] = the actormotion col-16 idle id),
+    // supplied to Setup() and held so the node can (re)start looping idle playback on _Ready / when
+    // built. The upstream builder resolves this id via the §8(e) chain: data/char/actormotion.txt, the
+    // row keyed by the appearance key (col2 == skin_class selects the .bnd skeleton), motion_ids_a[1] =
+    // column 16, record +0x44 → the motlist.txt clip registry. NOTE: motion_ids_a[0] / column 15 /
+    // record +0x40 is STATICALLY DEAD (zero read-sites) — the prior "col15 / motion_ids_a[0]" framing
+    // was the off-by-one to avoid. Whether the resolved col-16 clip's DATA animates is per-asset (a
+    // static stand snapshot is faithful, §10.2) — render it as-is; do NOT synthesize a breathing idle.
+    // spec: Docs/RE/specs/skinning.md §8(e) item 2 (idle = motion_ids_a[1] = col16 / record +0x44; col15 /
+    //       motion_ids_a[0] / record +0x40 is statically dead), §10 / §10.2 / §10.5.
+    private AnimationClip? _idleClip;
+
+    // Bone-id → array-index map (base-relative resolve, §3.2) + base id, retained from Setup so a
+    // rigid weapon attach can resolve its hand bone-id to a pose bone each frame.
+    // spec: Docs/RE/specs/skinning.md §3.2 (bone_array[id − base_id]).
+    private int[] _idToIndex = [];
+
+    // True once a visual-state clip has been engaged for looping playback (idle by default). Diagnostic
+    // affordance; the actual frame advance is the _Process / Tick → Advance path. Gated on a clip
+    // being present so an offline build leaves this false and the node simply stands. spec: §10.5.
+    private Material? _material;
+    private MeshInstance3D? _meshInstance;
+    private float[] _nodeScale = []; // per-bone runtime scale (+84, default 1.0; SPEC GAP source)
+
+    // Rest-pose tracks (all null) reused so the rest path allocates nothing per frame.
+    private AnimationTrack?[] _noTracks = [];
+    private Vector3[] _outNrm = []; // per corner, Godot space
+    private Vector3[] _outPos = []; // per corner, Godot space
+    private int[] _parentIndex = [];
+    private SkinningMath.VertexInfluences[] _perVertex = [];
+    private bool _ready;
+    private float _time;
+    private AnimationTrack?[] _trackByBoneIndex = [];
+    private Vector2[] _uvs = [];
+
+    // Reused per-frame buffers.
+    private SkinningMath.BoneTransform[] _world = []; // per bone, animated world transform (native)
 
     // Animated-rotation composition mode. spec: Docs/RE/specs/skinning.md §6.5/§6.6 — the sampled
     // keyframe rotation is composed as a RIGHT (post) multiply on top of the bind-local rotation in
@@ -92,9 +161,15 @@ public sealed partial class SkinnedCharacterNode : Node3D
     internal static bool AnimAsDelta { get; set; } = true;
 
     /// <summary>
-    /// Builds the rig from parsed data. Must be called once before the node ticks.
-    /// Performs: hierarchy resolution, bind-world accumulation, influence build, inverse-bind bake,
-    /// per-bone track binding, and the static rest ArrayMesh.
+    ///     True when the standing-idle (or its live-pending default, §10.3.1) is engaged for looping
+    ///     playback. False when no idle clip resolved (offline / no VFS) and the node merely stands.
+    /// </summary>
+    public bool IsIdlePlaying { get; private set; }
+
+    /// <summary>
+    ///     Builds the rig from parsed data. Must be called once before the node ticks.
+    ///     Performs: hierarchy resolution, bind-world accumulation, influence build, inverse-bind bake,
+    ///     per-bone track binding, and the static rest ArrayMesh.
     /// </summary>
     public void Setup(
         SkinnedMesh mesh,
@@ -106,13 +181,17 @@ public sealed partial class SkinnedCharacterNode : Node3D
     {
         _externalDrive = externalDrive;
         _bones = skeleton.Bones;
-        int boneCount = _bones.Length;
+        var boneCount = _bones.Length;
 
         // 1) Hierarchy + bind world. Also build the per-bone has-child flag for the §6.3
         // interior-bone translation lock.
         // spec: Docs/RE/specs/skinning.md §3 / §6.3.
-        SkinningMath.ResolveHierarchy(_bones, out _parentIndex, out int[] idToIndex, out int baseId, out _hasChild);
-        SkinningMath.BoneTransform[] bindWorld = SkinningMath.AccumulateBindWorld(_bones, _parentIndex);
+        SkinningMath.ResolveHierarchy(_bones, out _parentIndex, out var idToIndex, out var baseId, out _hasChild);
+        // Retain the bone-id map + base id so a rigid weapon attach (§5) can resolve its hand bone-id
+        // to a pose bone each frame. spec: Docs/RE/specs/skinning.md §3.2 (bone_array[id − base_id]).
+        _idToIndex = idToIndex;
+        _baseId = baseId;
+        var bindWorld = SkinningMath.AccumulateBindWorld(_bones, _parentIndex);
 
         // Per-bone runtime node scale (+84 field; rotate → scale → translate in the world walk, §6.6).
         // SPEC GAP: the on-disk SOURCE of the per-node scale is not yet pinned in any clean spec, so we
@@ -121,9 +200,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // spec-gap: per-node runtime scale (+84) disk source undecoded — default 1.0.
         // spec: Docs/RE/specs/skinning.md §6.6 / §3.4 (+84).
         _nodeScale = new float[boneCount];
-        for (int i = 0; i < boneCount; i++) _nodeScale[i] = 1.0f;
+        for (var i = 0; i < boneCount; i++) _nodeScale[i] = 1.0f;
 
-        int vertexCount = mesh.Positions.Length;
+        var vertexCount = mesh.Positions.Length;
 
         // 2) Influences (grouped, ID-resolved, normalized) + inverse-bind bake.
         // spec: Docs/RE/specs/skinning.md §4, §5.
@@ -142,19 +221,25 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // spec: Docs/RE/specs/skinning.md §8(e) item 4 — "SKIP (do not clamp) any clip track whose
         //       bone_id falls outside [base_id, base_id + bone_count)".
         // spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId.
+        // The supplied clip IS the resolved default-idle slot (motion_ids_a[1] / col-16 idle, §8(e)).
+        // Retain it so SelectVisualStateClip() can hand it back as the played clip for every recovered
+        // visual-state case (only the idle slot is resolvable here; the others are live-pending, §10.3.1).
+        // spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[1] = col16), §10.3.1.
+        _idleClip = clip;
+
         _trackByBoneIndex = new AnimationTrack?[boneCount];
         if (clip is not null && clip.FrameCount > 0)
         {
-            int boundTracks = 0;
-            int skippedTracks = 0;
-            foreach (AnimationTrack tr in clip.Tracks)
+            var boundTracks = 0;
+            var skippedTracks = 0;
+            foreach (var tr in clip.Tracks)
             {
                 // Resolve bone_id → array slot ONLY by the skeleton's own id→index map. A bone_id
                 // absent from the map names a joint that does not exist on this rig → SKIP it.
                 // (No "off = bone_id − base_id" salvage: that is exactly the clamp-into-range the
                 // spec forbids, since the offset could land on an unrelated bone of the wrong rig.)
-                int bid = tr.BoneId & 0xFF;
-                int bIdx = (bid >= 0 && bid < 256) ? idToIndex[bid] : -1;
+                var bid = tr.BoneId & 0xFF;
+                var bIdx = bid >= 0 && bid < 256 ? idToIndex[bid] : -1;
 
                 if (bIdx >= 0 && bIdx < boneCount)
                 {
@@ -168,11 +253,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
             }
 
             if (skippedTracks > 0)
-            {
                 GD.PrintErr($"[Skinning] '{mesh.Name}': SKIPPED {skippedTracks} clip track(s) whose " +
                             $"bone_id is not a bone of this {boneCount}-bone rig (base_id={baseId}); " +
                             $"bound {boundTracks}. spec: skinning.md §8(e) item 4 — skip, do not clamp.");
-            }
 
             // Duration = frame_count × 0.1 (10 fps).
             // spec: Docs/RE/formats/animation.md §Timing. CONFIRMED.
@@ -182,20 +265,20 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
         // 4) Render topology: flat unindexed corner list with CW→CCW winding swap.
         // spec: Docs/RE/formats/mesh.md §Face table — D3D9 CW winding, swap [0,2,1] for Godot CCW.
-        int faceCount = (int)mesh.FaceCount;
-        int cornerCount = faceCount * 3;
+        var faceCount = (int)mesh.FaceCount;
+        var cornerCount = faceCount * 3;
         _cornerVertex = new int[cornerCount];
         _uvs = new Vector2[cornerCount];
-        SknCorner[] corners = mesh.Corners;
-        for (int f = 0; f < faceCount; f++)
+        var corners = mesh.Corners;
+        for (var f = 0; f < faceCount; f++)
         {
-            int cBase = f * 3;
+            var cBase = f * 3;
             // CCW: emit source corners 0,2,1 into output slots 0,1,2.
             int[] order = [cBase + 0, cBase + 2, cBase + 1];
-            for (int j = 0; j < 3; j++)
+            for (var j = 0; j < 3; j++)
             {
-                SknCorner corner = corners[order[j]];
-                uint vi = corner.VertexIndex;
+                var corner = corners[order[j]];
+                var vi = corner.VertexIndex;
                 if (vi >= (uint)vertexCount) vi = 0;
                 _cornerVertex[cBase + j] = (int)vi;
                 _uvs[cBase + j] = new Vector2(corner.UvU, corner.UvV);
@@ -216,7 +299,6 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // spec: Docs/RE/formats/shaders.md §C5 — Runtime Cel/Glow Shader Set, Campaign 5.
         // spec: CLAUDE.md asset chain — skin.txt col5 texId → data/char/tex{dir}/{texId}.png.
         if (CelShadeMaterialFactory.CelEnabled)
-        {
             try
             {
                 _material = CelShadeMaterialFactory.Build(albedo);
@@ -227,7 +309,6 @@ public sealed partial class SkinnedCharacterNode : Node3D
                             "— falling back to StandardMaterial3D.");
                 _material = null;
             }
-        }
 
         if (_material is null)
         {
@@ -235,12 +316,12 @@ public sealed partial class SkinnedCharacterNode : Node3D
             var stdMat = new StandardMaterial3D
             {
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
             if (albedo is not null)
                 stdMat.AlbedoTexture = albedo;
             else
-                stdMat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f, 1f);
+                stdMat.AlbedoColor = new Color(0.85f, 0.75f, 0.65f);
             _material = stdMat;
         }
 
@@ -252,7 +333,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _arrayMesh = new ArrayMesh();
         _meshInstance = new MeshInstance3D { Name = "LbsMesh", Mesh = _arrayMesh };
         AddChild(_meshInstance);
-        DeformAndUpload(0f, restPose: true); // fills surface 0 on _arrayMesh first
+        DeformAndUpload(0f, true); // fills surface 0 on _arrayMesh first
         // Set the material AFTER DeformAndUpload so surface 0 exists when SetSurfaceOverrideMaterial runs.
         if (_material is not null)
             _meshInstance.SetSurfaceOverrideMaterial(0, _material);
@@ -267,28 +348,112 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // pair of liveness screenshots is ambiguous between "clip never loaded" and "probe captured
         // the same frame"; this line disambiguates by logging the clip's frame count + duration.
         // spec: Docs/RE/formats/animation.md §Timing — 10 fps, duration = frame_count × 0.1.
-        uint frameCount = clip?.FrameCount ?? 0u;
+        var frameCount = clip?.FrameCount ?? 0u;
         GD.Print($"[Skinning] Setup '{mesh.Name}': hasClip={_hasClip} clipFrameCount={frameCount} " +
                  $"clipDuration={_clipDuration:F2}s externalDrive={externalDrive}.");
 
         _ready = true;
+
+        // EW4: begin LOOPING STANDING-IDLE playback as soon as the skinned character is built. The
+        // standing visual state routes to the default idle slot (motion_ids_a[1] / col-16 idle, §8(e));
+        // the other 5 recovered visual-state cases are live-pending (§10.3.1) and default to this same
+        // idle clip — see SelectVisualStateClip(). Playback is gated on the clip being present, so an
+        // offline / no-VFS build with no resolvable idle still stands silently (no crash).
+        // spec: Docs/RE/specs/skinning.md §10.5 (drive the active clip's clock with real per-frame dt
+        //       and loop at clip end; the static look comes from the DATA, not from failing to advance t).
+        PlayStandingIdle();
+    }
+
+    /// <summary>
+    ///     Maps a recovered visual-state case to the clip to play. ONLY the <see cref="VisualState.Standing" />
+    ///     case has a statically-resolvable clip (the col-16 default idle = <c>motion_ids_a[1]</c>, §8(e));
+    ///     the other five cases are <c>live-pending (6-D)</c> (§10.3.1) and intentionally default to the same
+    ///     idle clip rather than guessing a clip the live engine has not been confirmed to select. This node
+    ///     only ever holds the resolved idle clip, so the default is the faithful conservative choice.
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[1] = col16), §10.3.1 / §10.4
+    ///     (value → column mapping live-pending — do not guess).
+    /// </summary>
+    private AnimationClip? SelectVisualStateClip(VisualState state)
+    {
+        return state switch
+        {
+            // KNOWN: neutral standing → the col-16 default idle (motion_ids_a[1]). spec: skinning.md §8(e).
+            VisualState.Standing => _idleClip,
+
+            // live-pending (skinning.md §10) — the value → column mapping for these five cases is not
+            // statically settled (§10.3.1); default to the standing idle until a live debugger read pins it.
+            VisualState.VisualState1 => _idleClip, // live-pending (skinning.md §10)
+            VisualState.VisualState2 => _idleClip, // live-pending (skinning.md §10)
+            VisualState.VisualState3 => _idleClip, // live-pending (skinning.md §10)
+            VisualState.VisualState4 => _idleClip, // live-pending (skinning.md §10)
+            VisualState.VisualState5 => _idleClip, // live-pending (skinning.md §10)
+
+            _ => _idleClip // any other value → faithful default (standing idle). spec: skinning.md §10.5.
+        };
+    }
+
+    /// <summary>
+    ///     Starts looping playback of the STANDING-IDLE clip (the default state; §10.5). Resolves the clip
+    ///     through the 6-case visual-state selector for the <see cref="VisualState.Standing" /> case and
+    ///     engages it; the per-frame <see cref="Advance" /> path (driven by <c>_Process</c> for the player,
+    ///     or by the throttled owner via <see cref="Tick" />) advances the clock with real elapsed time and
+    ///     wraps at clip end (CycleLayer loop). Gated on a clip being present — with no resolvable idle
+    ///     (offline / no VFS) the node simply stands in the rest pose (no crash, no playback).
+    ///     STRICTLY PASSIVE: which clip plays arrives as the visual state; this method only translates it
+    ///     into AnimationPlayer-style playback. No game-rule authority, no clip synthesis.
+    ///     spec: Docs/RE/specs/skinning.md §10.5 (render the col16 idle faithfully, advance with real dt and
+    ///     loop at clip end — the static look comes from the data), §8(e) (idle slot resolution).
+    /// </summary>
+    public void PlayStandingIdle()
+    {
+        PlayVisualState(VisualState.Standing);
+    }
+
+    /// <summary>
+    ///     Selects the clip for <paramref name="state" /> (the standing idle, or its live-pending default per
+    ///     §10.3.1) and begins looping playback. No-op (the node just stands) when no clip resolves.
+    ///     Note: the clip is the single resolved idle held since Setup, so engaging it is a matter of
+    ///     confirming the playback gate — the per-frame <see cref="Advance" /> clock (real dt + modulo wrap,
+    ///     §10.5) does the looping. The phase is left as Setup initialized it (0, or the per-actor stagger
+    ///     from <c>startPhaseSeconds</c> so a town of mobs sharing one idle does not animate in lockstep);
+    ///     this method does NOT clobber that stagger.
+    ///     spec: Docs/RE/specs/skinning.md §10.3.1 / §10.5.
+    /// </summary>
+    public void PlayVisualState(VisualState state)
+    {
+        var selected = SelectVisualStateClip(state);
+
+        // Playback gate: only drive the clock when a clip is actually present. CycleLayer looping is
+        // handled in Advance() (modulo wrap at _clipDuration). With no resolvable idle (offline / no
+        // VFS) the node stands in the rest pose, faithfully (§10.2/§10.5) — no crash, no playback.
+        if (selected is null || !_hasClip || _clipDuration <= 0f)
+            return;
+
+        // The idle is now engaged: _Process (player) / Tick (throttled mobs) advances _time from its
+        // current phase each frame and DeformAndUpload re-samples the clip, looping at clip end. We do
+        // NOT reset _time here so Setup's per-actor stagger phase is preserved.
+        IsIdlePlaying = true;
+        GD.Print($"[Skinning] Idle playback engaged (state={state}, looping, " +
+                 $"duration={_clipDuration:F2}s). spec: skinning.md §10.5 (advance real dt + loop).");
     }
 
     /// <summary>Current ArrayMesh AABB (rest pose after Setup), for recentring.</summary>
-    public Aabb GetMeshAabb() => _arrayMesh?.GetAabb() ?? new Aabb();
+    public Aabb GetMeshAabb()
+    {
+        return _arrayMesh?.GetAabb() ?? new Aabb();
+    }
 
     /// <summary>
-    /// AABB of the DISPLAYED animated pose at clip frame 0 (Godot space), or the rest AABB when
-    /// there is no clip. Used by the builder to derive the stand-up pivot and recentre from the pose
-    /// that is actually rendered — not the raw bind pose, which can have a different tallest axis.
-    ///
-    /// Why this matters: a rig authored lying along X (X-tallest at rest) whose idle stands it
-    /// upright on Y (Y-tallest animated) would be double-rotated if the pivot were derived from the
-    /// rest pose. Deriving from the animated frame-0 pose makes the pivot reflect what is on screen.
-    /// For the g1 World player (X-tallest in BOTH rest and animation) this returns the same tallest
-    /// axis as the rest AABB, so the World rendering is provably unchanged.
-    /// spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the bind pose);
-    ///       §8(b) (single handedness conversion, applied at output here too).
+    ///     AABB of the DISPLAYED animated pose at clip frame 0 (Godot space), or the rest AABB when
+    ///     there is no clip. Used by the builder to derive the stand-up pivot and recentre from the pose
+    ///     that is actually rendered — not the raw bind pose, which can have a different tallest axis.
+    ///     Why this matters: a rig authored lying along X (X-tallest at rest) whose idle stands it
+    ///     upright on Y (Y-tallest animated) would be double-rotated if the pivot were derived from the
+    ///     rest pose. Deriving from the animated frame-0 pose makes the pivot reflect what is on screen.
+    ///     For the g1 World player (X-tallest in BOTH rest and animation) this returns the same tallest
+    ///     axis as the rest AABB, so the World rendering is provably unchanged.
+    ///     spec: Docs/RE/specs/skinning.md §6 (the displayed pose is the sampled idle, not the bind pose);
+    ///     §8(b) (single handedness conversion, applied at output here too).
     /// </summary>
     public Aabb GetDisplayedFrame0Aabb()
     {
@@ -298,9 +463,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
         // Render frame 0 of the idle, read its AABB, then restore the rest pose so the visible mesh
         // and _time are left exactly as Setup left them (the first Tick/_Process re-advances).
-        DeformAndUpload(0f, restPose: false);
-        Aabb animated = _arrayMesh.GetAabb();
-        DeformAndUpload(0f, restPose: true);
+        DeformAndUpload(0f, false);
+        var animated = _arrayMesh.GetAabb();
+        DeformAndUpload(0f, true);
         return animated;
     }
 
@@ -314,11 +479,11 @@ public sealed partial class SkinnedCharacterNode : Node3D
     }
 
     /// <summary>
-    /// Advances the idle clip by <paramref name="dtSeconds"/> and re-uploads the deformed surface.
-    /// Used by the throttled owner (NpcRenderer) for externally-driven nodes. The accumulated dt
-    /// makes ~10 Hz updates visually equivalent to per-frame ones: the clip time still advances by
-    /// real elapsed seconds, only the resample cadence is coarser (matching the original 10 fps).
-    /// spec: Docs/RE/formats/animation.md §Timing — fixed 10 fps clip rate.
+    ///     Advances the idle clip by <paramref name="dtSeconds" /> and re-uploads the deformed surface.
+    ///     Used by the throttled owner (NpcRenderer) for externally-driven nodes. The accumulated dt
+    ///     makes ~10 Hz updates visually equivalent to per-frame ones: the clip time still advances by
+    ///     real elapsed seconds, only the resample cadence is coarser (matching the original 10 fps).
+    ///     spec: Docs/RE/formats/animation.md §Timing — fixed 10 fps clip rate.
     /// </summary>
     public void Tick(float dtSeconds)
     {
@@ -335,13 +500,13 @@ public sealed partial class SkinnedCharacterNode : Node3D
         if (_clipDuration > 0f && _time >= _clipDuration)
             _time %= _clipDuration; // CycleLayer loop. spec: animation.md §Wrap and loop behaviour.
 
-        DeformAndUpload(_time, restPose: false);
+        DeformAndUpload(_time, false);
     }
 
     /// <summary>
-    /// Runs the full per-frame pipeline at clip time <paramref name="t"/> and uploads the result
-    /// to the single ArrayMesh surface. When <paramref name="restPose"/> is true the animated pose
-    /// is forced to the bind pose (used for the initial build and the rest-cancellation diagnostic).
+    ///     Runs the full per-frame pipeline at clip time <paramref name="t" /> and uploads the result
+    ///     to the single ArrayMesh surface. When <paramref name="restPose" /> is true the animated pose
+    ///     is forced to the bind pose (used for the initial build and the rest-cancellation diagnostic).
     /// </summary>
     private void DeformAndUpload(float t, bool restPose)
     {
@@ -350,18 +515,16 @@ public sealed partial class SkinnedCharacterNode : Node3D
         ComputeWorldPoses(t, restPose);
 
         // LBS deform every unique vertex in native space.
-        for (int v = 0; v < _deformedPos.Length; v++)
-        {
+        for (var v = 0; v < _deformedPos.Length; v++)
             (_deformedPos[v], _deformedNrm[v]) = SkinningMath.DeformVertex(_perVertex[v], _world);
-        }
 
         // Expand to corners and apply the single handedness conversion at the output.
         // spec: Docs/RE/specs/skinning.md §8(b) — single conversion (world Z-negate) at output.
-        for (int c = 0; c < _cornerVertex.Length; c++)
+        for (var c = 0; c < _cornerVertex.Length; c++)
         {
-            int vi = _cornerVertex[c];
-            Vec3 p = _deformedPos[vi];
-            Vec3 n = _deformedNrm[vi];
+            var vi = _cornerVertex[c];
+            var p = _deformedPos[vi];
+            var n = _deformedNrm[vi];
             var (gx, gy, gz) = WorldCoordinates.SkinToGodot(p.X, p.Y, p.Z);
             var (nx, ny, nz) = WorldCoordinates.SkinToGodot(n.X, n.Y, n.Z);
             _outPos[c] = new Vector3(gx, gy, gz);
@@ -374,7 +537,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
         //
         // The per-upload Godot.Collections.Array allocation is an ENGINE API CONSTRAINT — Godot's
         // AddSurfaceFromArrays accepts only a Variant-typed Array; keep the reused CPU buffers above.
-        var arrays = new global::Godot.Collections.Array();
+        var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = _outPos;
         arrays[(int)Mesh.ArrayType.Normal] = _outNrm;
@@ -386,15 +549,123 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // SetSurfaceOverrideMaterial on MeshInstance3D is NOT called per-frame (it was set once in
         // Setup after the first DeformAndUpload, and it persists across ClearSurfaces).
         _arrayMesh.SurfaceSetMaterial(0, _material);
+
+        // Rigidly re-place any bone-attached weapon parts (slot 14) from the SAME animated bone world
+        // poses (_world) computed above, so the weapon follows the hand exactly as the body deforms.
+        // spec: Docs/RE/specs/equipment_visuals.md §5 (weapon = rigid single-bone follow).
+        UpdateWeaponAttachments();
     }
 
-    // Rest-pose tracks (all null) reused so the rest path allocates nothing per frame.
-    private AnimationTrack?[] _noTracks = [];
+    // =========================================================================
+    // Weapon attach (slot 14) — rigid single-bone follow of the shared skeleton (§5)
+    // =========================================================================
+
+    /// <summary>
+    ///     Rigidly attaches a weapon mesh to ONE bone of the shared skeleton (the recovered weapon
+    ///     model — NOT skinned-deform). The weapon node follows that bone's animated world transform
+    ///     each frame; the per-mesh <paramref name="visualScale" /> reproduces the <c>Visual+100</c>
+    ///     single scalar scale (equipment_visuals.md §5: the grip placement is a scalar, not a matrix).
+    ///     <para>
+    ///         The hand <paramref name="boneId" /> is the numeric bone-id the engine resolves against the
+    ///         loaded <c>.bnd</c> (there is NO bone-name string in the binary). Statically the host node is
+    ///         constructed with bone-id 0 (DBG-PENDING — see §5 / §8); callers pass
+    ///         <see cref="DefaultHandBoneId" /> until a live read names the hand bone.
+    ///     </para>
+    ///     STRICTLY PASSIVE: builds + places geometry only; no game-rule authority. Main-thread only.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 (bone-id attach, 88-byte stride, scalar
+    ///     <c>Visual+100</c>; off-hand = node flag 1), §5.1 (dual / two-piece), §9 item 3.
+    ///     spec: Docs/RE/specs/skinning.md §3.2 (bone resolved by <c>id − base_id</c>), §8(b) (single
+    ///     handedness conversion at output — applied here identically to the body).
+    /// </summary>
+    /// <param name="weaponMesh">Parsed weapon <c>.skn</c> (built as a static rigid mesh).</param>
+    /// <param name="albedo">Optional weapon albedo; null → neutral material.</param>
+    /// <param name="boneId">Hand bone-id (base-relative). Default <see cref="DefaultHandBoneId" />.</param>
+    /// <param name="visualScale">The <c>Visual+100</c> scalar scale for the grip. Default 1.0.</param>
+    /// <param name="offHand">True for the off-hand node of a dual / two-piece weapon (§5.1).</param>
+    public void AttachHandWeapon(
+        SkinnedMesh weaponMesh,
+        ImageTexture? albedo = null,
+        int boneId = DefaultHandBoneId,
+        float visualScale = 1.0f,
+        bool offHand = false)
+    {
+        // Resolve the hand bone-id to a pose-bone array index (base-relative, §3.2). Clamp out-of-range
+        // to the root so a wrong id never indexes out of bounds (importer hardening; the engine itself
+        // clamps to the last bone — here root is the safe inert choice for a missing hand bone).
+        var bid = boneId & 0xFF;
+        var boneIndex = bid >= 0 && bid < _idToIndex.Length ? _idToIndex[bid] : -1;
+        if (boneIndex < 0)
+        {
+            // Defensive fallback: plain id − base_id, else root.
+            var off = boneId - _baseId;
+            boneIndex = off >= 0 && off < _bones.Length ? off : 0;
+        }
+
+        // Build the weapon as a static rigid ArrayMesh (rest geometry + the single handedness
+        // conversion), exactly the Bud/Skn MeshBuilder pattern — never GltfDocument.
+        var (inst, _) = SkinnedCharacterBuilder.BuildStaticRigidMesh(weaponMesh, albedo,
+            $"Weapon{(offHand ? "Off" : "Main")}_{weaponMesh.Name}");
+
+        AddChild(inst);
+        _weapons.Add(new WeaponAttachment(inst, boneIndex, visualScale, offHand));
+
+        // Place it immediately from the current pose so it is not at the origin for one frame.
+        UpdateWeaponAttachments();
+
+        GD.Print($"[Skinning] Weapon attached: '{weaponMesh.Name}' boneId={boneId} " +
+                 $"(idx={boneIndex}) scale={visualScale:F2} offHand={offHand}. " +
+                 "spec: equipment_visuals.md §5 (rigid single-bone follow).");
+    }
+
+    /// <summary>Removes all attached weapon nodes (e.g. on an equip change / teardown, §1).</summary>
+    public void ClearWeapons()
+    {
+        foreach (var w in _weapons)
+            if (IsInstanceValid(w.Node))
+            {
+                RemoveChild(w.Node);
+                w.Node.QueueFree();
+            }
+
+        _weapons.Clear();
+    }
+
+    /// <summary>
+    ///     Re-places every attached weapon node from its hand bone's animated world transform in the
+    ///     reused <c>_world</c> buffer (native space), converted once to Godot space by the SAME single
+    ///     handedness conversion the body uses (§8(b)). The grip offset comes from the weapon's own rest
+    ///     geometry (built into the mesh), scaled by the <c>Visual+100</c> scalar; here we drive the
+    ///     node's transform = (boneWorldQuat, boneWorldTrans · scale) so the weapon rigidly follows.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 / Docs/RE/specs/skinning.md §6.6 (bone world pose).
+    /// </summary>
+    private void UpdateWeaponAttachments()
+    {
+        if (_weapons.Count == 0 || _world.Length == 0) return;
+
+        for (var i = 0; i < _weapons.Count; i++)
+        {
+            var w = _weapons[i];
+            if (!IsInstanceValid(w.Node)) continue;
+            if ((uint)w.BoneIndex >= (uint)_world.Length) continue;
+
+            var bw = _world[w.BoneIndex];
+
+            // Native bone world quaternion → Godot (the SAME quaternion remap the project documents for
+            // the Z-negate handedness conversion: (x,y,z,w) → (−x,−y,z,w)). spec: skinning.md §8(b).
+            var (qx, qy, qz, qw) = WorldCoordinates.SkinQuatToGodot(bw.Quat.X, bw.Quat.Y, bw.Quat.Z, bw.Quat.W);
+            // Native bone world translation → Godot (Z-negate), scaled by the Visual+100 scalar.
+            var (tx, ty, tz) = WorldCoordinates.SkinToGodot(bw.Trans.X, bw.Trans.Y, bw.Trans.Z);
+
+            var basis = new Basis(new Quaternion(qx, qy, qz, qw).Normalized());
+            if (w.VisualScale != 1.0f) basis = basis.Scaled(Vector3.One * w.VisualScale);
+            w.Node.Transform = new Transform3D(basis, new Vector3(tx, ty, tz) * w.VisualScale);
+        }
+    }
 
     /// <summary>Computes per-bone animated world transforms into the reused <c>_world</c> buffer.</summary>
     private void ComputeWorldPoses(float t, bool restPose)
     {
-        AnimationTrack?[] tracks = restPose ? _noTracks : _trackByBoneIndex;
+        var tracks = restPose ? _noTracks : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(
             _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta,
             _hasChild, _nodeScale);
@@ -405,37 +676,36 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // =========================================================================
 
     /// <summary>
-    /// Computes the rest-pose cancellation deviation, the rest AABB, and a liveness sample, and
-    /// returns them for the orchestrator to print. Run after <see cref="Setup"/>.
-    ///
-    /// Invariant 1 (REST CANCELLATION): with the bind pose, the deformed vertices must equal the
-    /// rest model vertices (max deviation ~0, &lt; 1e-3). spec: skinning.md §0 / §8(a).
-    /// Invariant 2 (LIVENESS): a tracked vertex must move between two clip times.
-    /// Invariant 3 (AABB): finite, human-sized.
+    ///     Computes the rest-pose cancellation deviation, the rest AABB, and a liveness sample, and
+    ///     returns them for the orchestrator to print. Run after <see cref="Setup" />.
+    ///     Invariant 1 (REST CANCELLATION): with the bind pose, the deformed vertices must equal the
+    ///     rest model vertices (max deviation ~0, &lt; 1e-3). spec: skinning.md §0 / §8(a).
+    ///     Invariant 2 (LIVENESS): a tracked vertex must move between two clip times.
+    ///     Invariant 3 (AABB): finite, human-sized.
     /// </summary>
     public SkinDiagnostics BuildDiagnostics(SkinnedMesh mesh)
     {
         var d = new SkinDiagnostics();
 
         // ---- Invariant 1: rest cancellation (native space, against model-space rest verts) ----
-        ComputeWorldPoses(0f, restPose: true);
-        float maxDev = 0f;
-        for (int v = 0; v < _deformedPos.Length; v++)
+        ComputeWorldPoses(0f, true);
+        var maxDev = 0f;
+        for (var v = 0; v < _deformedPos.Length; v++)
         {
-            (Vec3 p, _) = SkinningMath.DeformVertex(_perVertex[v], _world);
-            Vec3 r = mesh.Positions[v];
+            var (p, _) = SkinningMath.DeformVertex(_perVertex[v], _world);
+            var r = mesh.Positions[v];
             float dx = p.X - r.X, dy = p.Y - r.Y, dz = p.Z - r.Z;
-            float dev = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+            var dev = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
             if (dev > maxDev) maxDev = dev;
         }
 
         d.MaxRestDeviation = maxDev;
 
         // ---- Invariant 3: rest-pose AABB in Godot space ----
-        DeformAndUpload(0f, restPose: true);
+        DeformAndUpload(0f, true);
         if (_arrayMesh is not null)
         {
-            Aabb aabb = _arrayMesh.GetAabb();
+            var aabb = _arrayMesh.GetAabb();
             d.RestAabbPos = aabb.Position;
             d.RestAabbSize = aabb.Size;
             d.AabbFinite = IsFinite(aabb.Position) && IsFinite(aabb.Size);
@@ -459,28 +729,28 @@ public sealed partial class SkinnedCharacterNode : Node3D
         if (_hasClip && _clipDuration > 0f && _deformedPos.Length > 0)
         {
             // Reference pose at frame 0.
-            ComputeWorldPoses(0f, restPose: false);
-            int vc = _deformedPos.Length;
+            ComputeWorldPoses(0f, false);
+            var vc = _deformedPos.Length;
             var p0 = new Vec3[vc];
-            for (int v = 0; v < vc; v++)
+            for (var v = 0; v < vc; v++)
                 (p0[v], _) = SkinningMath.DeformVertex(_perVertex[v], _world);
 
             // Sample times spanning the clip (skip 0; include the last interior frame). For a 3-frame
             // 0.3s idle this hits t≈0.075/0.15/0.225/0.29 — enough to catch a subtle idle's peak.
-            float[] sampleTimes = LivenessSampleTimes(_clipDuration);
+            var sampleTimes = LivenessSampleTimes(_clipDuration);
 
-            float bestDelta = 0f;
-            int bestVi = 0;
-            float bestT = 0f;
+            var bestDelta = 0f;
+            var bestVi = 0;
+            var bestT = 0f;
             Vector3 bestP0 = Vector3.Zero, bestP1 = Vector3.Zero;
-            foreach (float t in sampleTimes)
+            foreach (var t in sampleTimes)
             {
-                ComputeWorldPoses(t, restPose: false);
-                for (int v = 0; v < vc; v++)
+                ComputeWorldPoses(t, false);
+                for (var v = 0; v < vc; v++)
                 {
-                    (Vec3 pt, _) = SkinningMath.DeformVertex(_perVertex[v], _world);
+                    var (pt, _) = SkinningMath.DeformVertex(_perVertex[v], _world);
                     float dx = pt.X - p0[v].X, dy = pt.Y - p0[v].Y, dz = pt.Z - p0[v].Z;
-                    float dev = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                    var dev = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
                     if (dev > bestDelta)
                     {
                         bestDelta = dev;
@@ -501,45 +771,54 @@ public sealed partial class SkinnedCharacterNode : Node3D
         }
 
         // Restore the visible mesh to the rest pose; _Process will drive it once in the tree.
-        DeformAndUpload(0f, restPose: true);
+        DeformAndUpload(0f, true);
         _time = 0f;
         return d;
     }
 
     /// <summary>
-    /// The clip times the liveness probe samples (excludes t=0, the reference). Uses up to four
-    /// interior samples spread across the clip so a SHORT idle's subtle peak motion is captured;
-    /// the last sample is just inside the final frame. spec: animation.md §Timing (10 fps).
+    ///     The clip times the liveness probe samples (excludes t=0, the reference). Uses up to four
+    ///     interior samples spread across the clip so a SHORT idle's subtle peak motion is captured;
+    ///     the last sample is just inside the final frame. spec: animation.md §Timing (10 fps).
     /// </summary>
     private static float[] LivenessSampleTimes(float clipDuration)
     {
-        float last = MathF.Max(clipDuration - 0.01f, 0f);
+        var last = MathF.Max(clipDuration - 0.01f, 0f);
         // Quarter/half/three-quarter plus the last interior frame.
         return
         [
             clipDuration * 0.25f,
             clipDuration * 0.5f,
             clipDuration * 0.75f,
-            last,
+            last
         ];
     }
 
     private static bool IsFinite(Vector3 v)
-        => !(float.IsNaN(v.X) || float.IsNaN(v.Y) || float.IsNaN(v.Z)
-             || float.IsInfinity(v.X) || float.IsInfinity(v.Y) || float.IsInfinity(v.Z));
+    {
+        return !(float.IsNaN(v.X) || float.IsNaN(v.Y) || float.IsNaN(v.Z)
+                 || float.IsInfinity(v.X) || float.IsInfinity(v.Y) || float.IsInfinity(v.Z));
+    }
+
+    /// <summary>One rigidly bone-attached weapon node (slot 14). spec: equipment_visuals.md §5.</summary>
+    private readonly record struct WeaponAttachment(
+        MeshInstance3D Node,
+        int BoneIndex,
+        float VisualScale,
+        bool OffHand);
 
     /// <summary>Diagnostic results for the mandatory skinning invariants.</summary>
     public sealed class SkinDiagnostics
     {
+        public bool AabbFinite;
+        public float LivenessDelta;
+        public Vector3 LivenessP0;
+        public Vector3 LivenessP1;
+        public float LivenessT0;
+        public float LivenessT1;
+        public int LivenessVertex = -1;
         public float MaxRestDeviation;
         public Vector3 RestAabbPos;
         public Vector3 RestAabbSize;
-        public bool AabbFinite;
-        public int LivenessVertex = -1;
-        public float LivenessT0;
-        public float LivenessT1;
-        public Vector3 LivenessP0;
-        public Vector3 LivenessP1;
-        public float LivenessDelta;
     }
 }

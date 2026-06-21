@@ -37,13 +37,13 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game consignment-purchase / info window (TenderInfoPanel, slot 118). 512×595 screen-centred.
-///
-/// <para>PASSIVE: action 0 (confirm) emits C2S CmsgTenderConfirm (2/118, header-only) via
-/// use-case call (stub — no method exists yet). Tender listing = TODO(capture).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 118.
+///     In-game consignment-purchase / info window (TenderInfoPanel, slot 118). 512×595 screen-centred.
+///     <para>
+///         PASSIVE: action 0 (confirm) emits C2S CmsgTenderConfirm (2/118, header-only) via
+///         use-case call (stub — no method exists yet). Tender listing = TODO(capture).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 118.
 /// </summary>
 public sealed partial class HudTenderWindow : Control
 {
@@ -63,23 +63,22 @@ public sealed partial class HudTenderWindow : Control
     // spec: ui_system.md §8.21.1 CODE-CONFIRMED
     private const int MsgNotEnoughGold = 66006; // spec: §8.21.1
     private const int MsgDetailOverCap = 66007; // spec: §8.21.1
+    private int _detailRequestCount;
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _detailRequestCount;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the centered 512×595 TenderInfoPanel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 118.
+    ///     Geometry pass: builds the centered 512×595 TenderInfoPanel.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.1 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 118.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -116,7 +115,7 @@ public sealed partial class HudTenderWindow : Control
             Name = "Title",
             Text = "Consignment Purchase",
             Position = new Vector2(10f, 10f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         // 3D item-preview placeholder
@@ -126,17 +125,17 @@ public sealed partial class HudTenderWindow : Control
             Name = "ItemPreview3D_TODO",
             Color = new Color(0.10f, 0.08f, 0.14f, 0.7f),
             Position = new Vector2(10f, 40f),
-            Size = new Vector2(100f, 80f),
+            Size = new Vector2(100f, 80f)
         };
         AddChild(previewPlaceholder);
         AddChild(new Label
         {
             Name = "PreviewLbl",
-            Text = "// TODO(world-campaign): 3D item preview (GUCanvas3D)",
+            Text = string.Empty,
             Position = new Vector2(10f, 42f),
             Size = new Vector2(200f, 20f),
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Scrollable list area (action 2 = scrollbar)
@@ -144,14 +143,12 @@ public sealed partial class HudTenderWindow : Control
         var listStub = new Label
         {
             Name = "TenderListStub",
-            Text = "// TODO(capture): tender listing populate.\n" +
-                   "// Inbound S2C opcode unknown — populate residual (debugger/capture-pending).\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.21.7 CODE-CONFIRMED residual.",
+            Text = string.Empty,
             Position = new Vector2(10f, 140f),
             Size = new Vector2(492f, 60f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(listStub);
 
@@ -161,7 +158,7 @@ public sealed partial class HudTenderWindow : Control
             Name = "ItemStatStub",
             Text = "Item info: (populated from tender listing)", // spec: §8.21.1 — "item-stat info labels"
             Position = new Vector2(10f, 220f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         });
 
         // Confirm / Buy button (action 0) — gated by player gold check
@@ -172,7 +169,7 @@ public sealed partial class HudTenderWindow : Control
             Text = "Confirm Purchase",
             Position = new Vector2(10f, 530f),
             Size = new Vector2(160f, 35f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         confirmBtn.Pressed += OnConfirm;
         AddChild(confirmBtn);
@@ -185,7 +182,7 @@ public sealed partial class HudTenderWindow : Control
             Text = "Request Detail",
             Position = new Vector2(180f, 530f),
             Size = new Vector2(140f, 35f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         detailBtn.Pressed += OnRequestDetail;
         AddChild(detailBtn);
@@ -197,7 +194,7 @@ public sealed partial class HudTenderWindow : Control
             Text = "×",
             Position = new Vector2(TenderW - 30f, 10f),
             Size = new Vector2(20f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
@@ -242,19 +239,17 @@ public sealed partial class HudTenderWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows or hides the tender window.
-    /// Opened from NPC consignment interaction; specific open opcode = debugger-pending.
-    /// spec: Docs/RE/specs/ui_system.md §8.21.1 — "open from NPC consignment (opcode-pending)".
+    ///     Shows or hides the tender window.
+    ///     Opened from NPC consignment interaction; specific open opcode = debugger-pending.
+    ///     spec: Docs/RE/specs/ui_system.md §8.21.1 — "open from NPC consignment (opcode-pending)".
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
         _open = forceState ?? !_open;
         Visible = _open;
         if (_open)
-        {
             // Reset detail-request counter on open
             _detailRequestCount = 0;
-        }
     }
 
     public override void _Input(InputEvent @event)

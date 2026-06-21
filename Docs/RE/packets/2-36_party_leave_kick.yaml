@@ -6,7 +6,7 @@ opcode: 0x20024           # major 2 (GameAction), minor 36 -> (2 << 16) | 36
 direction: C2S
 size: 8                  # fixed 8-byte payload built by the shared social-op sender
 spec: packets/2-36_party_leave_kick.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client party leave (self) or kick (expel a member) request. Carries a 1-byte mode selector and a 4-byte actor id. The server replies with 4/36 PartyMemberRemoveResult.

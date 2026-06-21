@@ -1,0 +1,47 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band4.md §2/92 (revenge-system "summon target" confirm).
+# Role: the revenge / vengeance (PK-retaliation) subsystem's "summon my revenge target" confirm.
+#
+# CAPTURE-UNVERIFIED: the 4-byte size and the single-u32 shape are control-flow CONFIRMED; the u32's
+# exact identity (entity id vs handle) is capture/debugger-pending. capture_verified: false.
+
+name: CmsgRevengeSummon
+opcode: 0x2005c           # major 2 (GameAction), minor 92 (0x5c) -> (2 << 16) | 92
+direction: C2S
+size: 4                   # FIXED 4-byte body: one target reference
+spec: packets/2-92_revenge_summon.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  The revenge / vengeance subsystem's "summon my revenge target" confirmation. A fixed 4-byte body
+  carrying a target / object reference (the selected revenge target). Sent from the revenge-summon
+  window's confirm branch after a target/relationship validation. Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
+# CONTROL-FLOW CONFIRMED: a fixed 4-byte blit of a single target reference filled by the caller.
+fields:
+  - { name: TargetRef, type: u32 }   # 0x00  selected revenge-target reference (entity id or handle) [identity capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (4 bytes) and the single-u32 shape; the u32's exact identity is
+  capture/debugger-pending.
+
+    0x00 (4B) TargetRef : the selected revenge-target reference. The caller stores its "selected revenge
+                          target" pointer/id into the body word before send. Whether it is an entity id
+                          or an opaque handle is [pending].
+
+  TRIGGER: the revenge-summon window's confirm / OK branch. Before sending it validates the target via a
+  target / relationship check; on validation failure it shows revenge-system notice strings. After send
+  it closes the window. Best static read: the "summon my revenge target" confirmation of the revenge /
+  vengeance (PK-retaliation) subsystem.
+
+  EXPECTED S2C REPLY: a revenge-system result / spawn confirmation is plausible; not statically linked
+  this lane. [pending]
+
+  CROSS-REF: 2/93 CmsgRevengeVote (packets/2-93_revenge_vote.yaml) is the revenge-vote response of the
+  same subsystem.
+
+  UNKNOWNS (capture-pending): the TargetRef identity (entity id vs handle); the S2C result.
+
+  UNBLOCKS: the Client.Application revenge-summon use-case (a fixed 4-byte send).

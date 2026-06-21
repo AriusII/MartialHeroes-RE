@@ -1,41 +1,38 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
 /// <summary>
-/// Converts a <see cref="TerrainCell"/> (parsed .ted terrain geometry blob) to a
-/// self-contained GLB (binary glTF 2.0) stream.
-///
-/// Terrain grid conventions:
-///   spec: Docs/RE/formats/terrain.md §5.1 Grid geometry
-///   - 65×65 vertex grid, 64×64 quads per cell.
-///   - Vertex spacing: 16.0 world units (= 1024 / 64). CONFIRMED.
-///   - Heights are IEEE 754 f32 in row-major order. Axis orientation PARSER-VERIFIED:
-///       heights[row * 65 + col]  with  col → world X (inner/fast, stride 1)
-///                                       row → world Z (outer/slow, stride 65)
+///     Converts a <see cref="TerrainCell" /> (parsed .ted terrain geometry blob) to a
+///     self-contained GLB (binary glTF 2.0) stream.
+///     Terrain grid conventions:
+///     spec: Docs/RE/formats/terrain.md §5.1 Grid geometry
+///     - 65×65 vertex grid, 64×64 quads per cell.
+///     - Vertex spacing: 16.0 world units (= 1024 / 64). CONFIRMED.
+///     - Heights are IEEE 754 f32 in row-major order. Axis orientation PARSER-VERIFIED:
+///     heights[row * 65 + col]  with  col → world X (inner/fast, stride 1)
+///     row → world Z (outer/slow, stride 65)
 ///     spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
-///   spec: Docs/RE/formats/terrain.md §5.2 Block 1 — Heightmap: f32le, 65×65 = 4225. CONFIRMED.
-///
-/// Coordinate-system conversion (identical to GltfConverter):
-///   Legacy format: left-handed Y-up (D3D9 default).
-///   glTF 2.0: right-handed Y-up, −Z forward.
-///   Conversion: negate the X component of every position to flip handedness.
-///   spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED (same convention).
-///   glTF 2.0 spec §3.4: right-handed Y-up.
-///
-///   Winding order: the X-flip reverses the winding of every quad triangle.
-///   The quad triangulation is adjusted so the emitted winding is counter-clockwise in glTF.
-///   glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines front faces.
-///
-/// Diffuse colour:
-///   Block 5 of the .ted file supplies one RGBA8 colour per vertex (65×65 = 4225 entries).
-///   spec: Docs/RE/formats/terrain.md §5.2 Block 5 — Diffuse colour: u8×4 (R,G,B,A). CONFIRMED.
-///   These colours are emitted as a COLOR_0 VEC4 accessor (normalised UNSIGNED_BYTE) and as
-///   a baseColorTexture via a small 65×65 PNG image embedded as a data-URI in the extras.
-///   The PNG path reuses <see cref="PngConverter.WritePngRgba8"/>.
+///     spec: Docs/RE/formats/terrain.md §5.4 Block 1 — Heightmap: f32le, 65×65 = 4225. CONFIRMED.
+///     Coordinate-system conversion (identical to GltfConverter):
+///     Legacy format: left-handed Y-up (D3D9 default).
+///     glTF 2.0: right-handed Y-up, −Z forward.
+///     Conversion: negate the X component of every position to flip handedness.
+///     spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED (same convention).
+///     glTF 2.0 spec §3.4: right-handed Y-up.
+///     Winding order: the X-flip reverses the winding of every quad triangle.
+///     The quad triangulation is adjusted so the emitted winding is counter-clockwise in glTF.
+///     glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines front faces.
+///     Diffuse colour:
+///     Block 5 of the .ted file supplies one RGBA8 colour per vertex (65×65 = 4225 entries).
+///     spec: Docs/RE/formats/terrain.md §5.2 Block 5 — Diffuse colour: u8×4 (R,G,B,A). CONFIRMED.
+///     These colours are emitted as a COLOR_0 VEC4 accessor (normalised UNSIGNED_BYTE) and as
+///     a baseColorTexture via a small 65×65 PNG image embedded as a data-URI in the extras.
+///     The PNG path reuses <see cref="PngConverter.WritePngRgba8" />.
 /// </summary>
 public static class TerrainGltfConverter
 {
@@ -45,21 +42,21 @@ public static class TerrainGltfConverter
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Number of vertices per axis.
-    /// spec: Docs/RE/formats/terrain.md §5.1 — "65 × 65 vertices": CONFIRMED.
+    ///     Number of vertices per axis.
+    ///     spec: Docs/RE/formats/terrain.md §5.1 — "65 × 65 vertices": CONFIRMED.
     /// </summary>
     private const int GridSize = TerrainCell.GridSize; // 65
 
     /// <summary>
-    /// Quad grid dimension (one less than vertex grid).
-    /// spec: Docs/RE/formats/terrain.md §5.1 — "64 × 64 quads per cell": CONFIRMED.
+    ///     Quad grid dimension (one less than vertex grid).
+    ///     spec: Docs/RE/formats/terrain.md §5.1 — "64 × 64 quads per cell": CONFIRMED.
     /// </summary>
     private const int QuadSize = GridSize - 1; // 64
 
     /// <summary>
-    /// World-space distance between adjacent vertices in X and Z.
-    /// spec: Docs/RE/formats/terrain.md §5.1 — "Vertex spacing: 16.0 world units
-    /// (derived: 1024 / 64 = 16)": CONFIRMED.
+    ///     World-space distance between adjacent vertices in X and Z.
+    ///     spec: Docs/RE/formats/terrain.md §5.1 — "Vertex spacing: 16.0 world units
+    ///     (derived: 1024 / 64 = 16)": CONFIRMED.
     /// </summary>
     private const float VertexSpacing = 16.0f;
 
@@ -87,12 +84,12 @@ public static class TerrainGltfConverter
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Converts one <see cref="TerrainCell"/> to a GLB stream.
-    /// The output contains:
-    ///   - A POSITION accessor (65×65 = 4225 VEC3 f32 vertices).
-    ///   - A TEXCOORD_0 accessor (normalised UVs over the [0,1] grid).
-    ///   - A COLOR_0 accessor (VEC4 UNSIGNED_BYTE normalised, from block 5 diffuse colours).
-    ///   - An index accessor (64×64×2×3 = 24576 triangles).
+    ///     Converts one <see cref="TerrainCell" /> to a GLB stream.
+    ///     The output contains:
+    ///     - A POSITION accessor (65×65 = 4225 VEC3 f32 vertices).
+    ///     - A TEXCOORD_0 accessor (normalised UVs over the [0,1] grid).
+    ///     - A COLOR_0 accessor (VEC4 UNSIGNED_BYTE normalised, from block 5 diffuse colours).
+    ///     - An index accessor (64×64×2×3 = 24576 triangles).
     /// </summary>
     /// <param name="cell">Parsed terrain cell from <c>TedTerrainParser</c>.</param>
     /// <param name="output">Destination stream (does not need to be seekable).</param>
@@ -110,15 +107,15 @@ public static class TerrainGltfConverter
         const bool use32Bit = false;
 
         // ---- Build binary buffer ----
-        byte[] binaryBuffer = BuildBinaryBuffer(
+        var binaryBuffer = BuildBinaryBuffer(
             cell, vertexCount, indexCount,
-            out int posOffset, out int posLength,
-            out int uvOffset, out int uvLength,
-            out int colOffset, out int colLength,
-            out int idxOffset, out int idxLength);
+            out var posOffset, out var posLength,
+            out var uvOffset, out var uvLength,
+            out var colOffset, out var colLength,
+            out var idxOffset, out var idxLength);
 
         // ---- Build JSON ----
-        string json = BuildJson(
+        var json = BuildJson(
             cell, binaryBuffer.Length,
             vertexCount, indexCount, use32Bit,
             posOffset, posLength,
@@ -151,9 +148,9 @@ public static class TerrainGltfConverter
         uvOffset = Align4(posOffset + posLength);
         colOffset = Align4(uvOffset + uvLength);
         idxOffset = Align4(colOffset + colLength);
-        int bufSize = Align4(idxOffset + idxLength);
+        var bufSize = Align4(idxOffset + idxLength);
 
-        byte[] buf = new byte[bufSize];
+        var buf = new byte[bufSize];
 
         // ---- Positions ----
         // Grid layout: heights[row * 65 + col]
@@ -170,33 +167,31 @@ public static class TerrainGltfConverter
         // Coordinate flip: negate X to convert left-handed D3D9 → right-handed glTF.
         // spec: Docs/RE/formats/mesh.md §Vertex list — same convention as character meshes.
         // glTF 2.0 spec §3.4.
-        int cursor = posOffset;
+        var cursor = posOffset;
         float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
         float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
 
-        for (int r = 0; r < GridSize; r++)
+        for (var r = 0; r < GridSize; r++)
+        for (var c = 0; c < GridSize; c++)
         {
-            for (int c = 0; c < GridSize; c++)
-            {
-                // heights[row * 65 + col]: col → world X (inner/fast), row → world Z (outer/slow).
-                // spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
-                int vi = r * GridSize + c; // = row * 65 + col
-                float worldX = -(c * VertexSpacing); // col * 16.0, then negated for handedness flip
-                float worldY = cell.Heights[vi]; // direct world-space Y (no scale)
-                float worldZ = r * VertexSpacing; // row * 16.0
+            // heights[row * 65 + col]: col → world X (inner/fast), row → world Z (outer/slow).
+            // spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
+            var vi = r * GridSize + c; // = row * 65 + col
+            var worldX = -(c * VertexSpacing); // col * 16.0, then negated for handedness flip
+            var worldY = cell.Heights[vi]; // direct world-space Y (no scale)
+            var worldZ = r * VertexSpacing; // row * 16.0
 
-                BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), worldX);
-                BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), worldY);
-                BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), worldZ);
-                cursor += 12;
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), worldX);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), worldY);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), worldZ);
+            cursor += 12;
 
-                if (worldX < minX) minX = worldX;
-                if (worldX > maxX) maxX = worldX;
-                if (worldY < minY) minY = worldY;
-                if (worldY > maxY) maxY = worldY;
-                if (worldZ < minZ) minZ = worldZ;
-                if (worldZ > maxZ) maxZ = worldZ;
-            }
+            if (worldX < minX) minX = worldX;
+            if (worldX > maxX) maxX = worldX;
+            if (worldY < minY) minY = worldY;
+            if (worldY > maxY) maxY = worldY;
+            if (worldZ < minZ) minZ = worldZ;
+            if (worldZ > maxZ) maxZ = worldZ;
         }
 
         // min/max are recomputed inside BuildJson from the same cell data.
@@ -207,16 +202,14 @@ public static class TerrainGltfConverter
         // spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED):
         //   col → X (inner), row → Z (outer); same convention for all five blocks.
         cursor = uvOffset;
-        for (int r = 0; r < GridSize; r++)
+        for (var r = 0; r < GridSize; r++)
+        for (var c = 0; c < GridSize; c++)
         {
-            for (int c = 0; c < GridSize; c++)
-            {
-                float u = c / (float)(GridSize - 1);
-                float v = r / (float)(GridSize - 1);
-                BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), u);
-                BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), v);
-                cursor += 8;
-            }
+            var u = c / (float)(GridSize - 1);
+            var v = r / (float)(GridSize - 1);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), u);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), v);
+            cursor += 8;
         }
 
         // ---- Colours (COLOR_0) ----
@@ -227,7 +220,7 @@ public static class TerrainGltfConverter
         // The mapping layer (Assets.Mapping) is responsible for converting decoded floats to wire bytes.
         cursor = colOffset;
         var diffuse = cell.DiffuseColours;
-        for (int vi = 0; vi < vertexCount; vi++)
+        for (var vi = 0; vi < vertexCount; vi++)
         {
             var (dr, dg, db, da) = diffuse[vi];
             buf[cursor + 0] = (byte)Math.Clamp((int)(dr * 255f + 0.5f), 0, 255); // R
@@ -255,27 +248,25 @@ public static class TerrainGltfConverter
         //   tri 0 (reversed): TL, BR, TR
         //   tri 1 (reversed): TL, BL, BR
         cursor = idxOffset;
-        for (int r = 0; r < QuadSize; r++)
+        for (var r = 0; r < QuadSize; r++)
+        for (var c = 0; c < QuadSize; c++)
         {
-            for (int c = 0; c < QuadSize; c++)
-            {
-                ushort vi0 = (ushort)(r * GridSize + c); // TL
-                ushort vi1 = (ushort)(r * GridSize + c + 1); // TR
-                ushort vi2 = (ushort)((r + 1) * GridSize + c); // BL
-                ushort vi3 = (ushort)((r + 1) * GridSize + c + 1); // BR
+            var vi0 = (ushort)(r * GridSize + c); // TL
+            var vi1 = (ushort)(r * GridSize + c + 1); // TR
+            var vi2 = (ushort)((r + 1) * GridSize + c); // BL
+            var vi3 = (ushort)((r + 1) * GridSize + c + 1); // BR
 
-                // tri 0 (winding-corrected): TL, BR, TR
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi3);
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi1);
-                cursor += 6;
+            // tri 0 (winding-corrected): TL, BR, TR
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi3);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi1);
+            cursor += 6;
 
-                // tri 1 (winding-corrected): TL, BL, BR
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi2);
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi3);
-                cursor += 6;
-            }
+            // tri 1 (winding-corrected): TL, BL, BR
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi2);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi3);
+            cursor += 6;
         }
 
         return buf;
@@ -296,15 +287,15 @@ public static class TerrainGltfConverter
     {
         // Recompute position min/max (with X-flip applied).
         // spec: Docs/RE/formats/terrain.md §5.1 — vertex spacing 16.0 world units: CONFIRMED.
-        float minPosX = -((GridSize - 1) * VertexSpacing); // after negate, min is the largest col
-        float maxPosX = 0f; // col 0 → X = 0 after negate
-        float minPosZ = 0f;
-        float maxPosZ = (GridSize - 1) * VertexSpacing;
+        var minPosX = -((GridSize - 1) * VertexSpacing); // after negate, min is the largest col
+        var maxPosX = 0f; // col 0 → X = 0 after negate
+        var minPosZ = 0f;
+        var maxPosZ = (GridSize - 1) * VertexSpacing;
 
         // Height min/max: scan the heights array.
-        float minPosY = float.MaxValue;
-        float maxPosY = float.MinValue;
-        foreach (float h in cell.Heights)
+        var minPosY = float.MaxValue;
+        var maxPosY = float.MinValue;
+        foreach (var h in cell.Heights)
         {
             if (h < minPosY) minPosY = h;
             if (h > maxPosY) maxPosY = h;
@@ -316,7 +307,7 @@ public static class TerrainGltfConverter
             maxPosY = 0f;
         }
 
-        int indexComponentType = use32Bit ? ComponentTypeUnsignedInt : ComponentTypeUnsignedShort;
+        var indexComponentType = use32Bit ? ComponentTypeUnsignedInt : ComponentTypeUnsignedShort;
 
         var sb = new StringBuilder(1024);
         sb.Append('{');
@@ -436,11 +427,11 @@ public static class TerrainGltfConverter
 
     private static void WriteGlbChunks(Stream output, string json, byte[] binaryBuffer)
     {
-        byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
-        int jsonPadded = Align4(jsonBytes.Length);
-        int binPadded = Align4(binaryBuffer.Length);
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+        var jsonPadded = Align4(jsonBytes.Length);
+        var binPadded = Align4(binaryBuffer.Length);
 
-        uint totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
+        var totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(hdr, GlbMagic);
@@ -467,7 +458,7 @@ public static class TerrainGltfConverter
 
     private static void WritePadding(Stream output, int actualLength, int paddedLength, byte padByte)
     {
-        int pad = paddedLength - actualLength;
+        var pad = paddedLength - actualLength;
         if (pad <= 0) return;
         Span<byte> p = stackalloc byte[pad];
         p.Fill(padByte);
@@ -475,8 +466,13 @@ public static class TerrainGltfConverter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Align4(int value) => (value + 3) & ~3;
+    private static int Align4(int value)
+    {
+        return (value + 3) & ~3;
+    }
 
-    private static string F(float v) =>
-        v.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
+    private static string F(float v)
+    {
+        return v.ToString("G9", CultureInfo.InvariantCulture);
+    }
 }

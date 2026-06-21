@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band1.md §2/3 (dialog response).
+# Role: the user's confirm/cancel/which-option response to a server-driven modal / relink dialog.
+#
+# CAPTURE-UNVERIFIED: the 2-byte size and the u16 response shape are control-flow CONFIRMED; the enum
+# VALUE meanings (0/1/2/3) are capture/debugger-pending. capture_verified: false.
+
+name: CmsgDialogResponse
+opcode: 0x20003           # major 2 (GameAction), minor 3 -> (2 << 16) | 3
+direction: C2S
+size: 2                   # FIXED 2-byte body: one u16 response code
+spec: packets/2-3_dialog_response.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Confirm / cancel response to a server-driven modal or relink/connection-state dialog -- a
+  yes/no/which-option acknowledgement. A fixed 2-byte body carrying a small response enum (values 0..3
+  observed) that distinguishes the chosen branch. Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 2.
+# CONTROL-FLOW CONFIRMED: the builder zero-inits a local then stores a 2-byte value -- effectively a u16
+# whose low byte carries the small enum.
+fields:
+  - { name: ResponseCode, type: u16 }   # 0x00  small response enum (observed 0,1,2,3) [value meaning capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (2 bytes) and the u16 shape; the enum VALUE meaning is
+  capture/debugger-pending.
+
+    0x00 (2B) ResponseCode : a small response enum. Observed values 0, 1, 2, 3; the meaning of each
+                             value is [pending]. The enum distinguishes which branch the user chose on
+                             the dialog. Surface as a raw u16; do NOT hardcode a value constant.
+
+  TRIGGER: raised from relink / connection-state dialog handlers (keyed on a dialog state byte) and from
+  a command-line / console handler. In the dialog handlers, different dialog states map to different
+  response codes (a yes/no/which-option choice). So 2/3 is the user's selection on a
+  connection/relink confirm dialog.
+
+  EXPECTED S2C REPLY: the continuation of whatever the modal gated (a relink / state transition); not
+  pinned this lane. [pending]
+
+  UNKNOWNS (capture-pending): the per-value meaning of the response enum; the exact dialog family; the
+  S2C continuation.
+
+  UNBLOCKS: the Client.Application connection/relink dialog-response use-case (a fixed 2-byte send).

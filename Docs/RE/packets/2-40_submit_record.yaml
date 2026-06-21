@@ -1,0 +1,40 @@
+# spec: Docs/RE/packets/2-40_submit_record.yaml
+# Role: C2S submit a full 72-byte record selected from a HUD list (opaque record + selector index).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgSubmitRecord
+opcode: 0x20028           # major 2 (GameAction), minor 40 -> (2 << 16) | 40
+direction: C2S
+size: 72                  # fixed 72-byte body
+spec: packets/2-40_submit_record.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Submit a full multi-field record selected from a HUD list. A fixed 72-byte opaque record; the only field a pre-flight validator reads is a u8 selector/index at body offset 0x44.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 72.
+fields:
+  - { name: RecordBody,     type: "u8[68]" }   # 0x00  opaque fixed record body [capture/debugger-pending]
+  - { name: SelectorIndex,  type: u8 }         # 0x44  u8 index into a record table (read by the validator) [capture/debugger-pending]
+  - { name: Tail,           type: "u8[3]" }    # 0x45  tail pad [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 72-byte blit of a caller-assembled record); the
+  record is opaque except for the validator-read selector at 0x44. The field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (68B) RecordBody    : an opaque fixed record body. [capture/debugger-pending]
+    0x44 (1B)  SelectorIndex : a u8 index the pre-flight validator reads (an index into a
+                               16-byte-stride record table). [capture/debugger-pending]
+    0x45 (3B)  Tail          : tail pad. [capture/debugger-pending]
+
+  TRIGGER: a HUD list-entry action that submits a large pre-built 72-byte record; the caller performs
+  a pre-flight validation (reading SelectorIndex at 0x44) and a panel-busy guard, then blits the whole
+  record.
+
+  UNKNOWNS to resolve with a capture:
+    - the internal field breakdown of the 72-byte record;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application HUD full-record submit use-case.

@@ -46,12 +46,12 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game Friend window (FriendPanel — two-tab add/cut friend-list).
-///
-/// <para>PASSIVE: renders friend rows from Application events; emits add/cut intents as
-/// use-case calls (stubbed pending world-campaign). Inbound list (5/26 candidate) stubbed.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED.
+///     In-game Friend window (FriendPanel — two-tab add/cut friend-list).
+///     <para>
+///         PASSIVE: renders friend rows from Application events; emits add/cut intents as
+///         use-case calls (stubbed pending world-campaign). Inbound list (5/26 candidate) stubbed.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudFriendWindow : Control
 {
@@ -99,32 +99,31 @@ public sealed partial class HudFriendWindow : Control
     // spec: ui_system.md §8.14 — "3-min throttle" for C2S 2/54
     private const double RefreshThrottleSecs = 180.0; // spec: ui_system.md §8.14
 
+    private readonly Button[] _rowBtnsA = new Button[VisibleRows];
+    private readonly Button[] _rowBtnsB = new Button[VisibleRows];
+    private readonly Label[] _statusA = new Label[VisibleRows];
+    private readonly Label[] _statusB = new Label[VisibleRows];
+    private int _activeTab; // 0=add, 1=cut
+    private double _lastRefreshTime = -RefreshThrottleSecs; // allow first refresh immediately
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activeTab; // 0=add, 1=cut
-    private double _lastRefreshTime = -RefreshThrottleSecs; // allow first refresh immediately
+    private Control? _tabAContent;
+    private Control? _tabBContent;
 
     private LineEdit? _textboxAdd;
     private LineEdit? _textboxCut;
-
-    private readonly Button[] _rowBtnsA = new Button[VisibleRows];
-    private readonly Button[] _rowBtnsB = new Button[VisibleRows];
-    private readonly Label[] _statusA = new Label[VisibleRows];
-    private readonly Label[] _statusB = new Label[VisibleRows];
-    private Control? _tabAContent;
-    private Control? _tabBContent;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the friend-list panel with two tabs and dual-tab rows.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED.
+    ///     Geometry pass: builds the friend-list panel with two tabs and dual-tab rows.
+    ///     spec: Docs/RE/specs/ui_system.md §8.14 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -154,7 +153,7 @@ public sealed partial class HudFriendWindow : Control
         backdrop.AddThemeStyleboxOverride("panel", bdStyle);
         AddChild(backdrop);
 
-        Texture2D? mainTex = atlas.GetById(MainTexId);
+        var mainTex = atlas.GetById(MainTexId);
         if (mainTex is null)
             GD.PrintErr("[HudFriendWindow] messagewindow.dds (uitex 9) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.14.");
@@ -167,7 +166,7 @@ public sealed partial class HudFriendWindow : Control
             Text = "Add",
             Position = new Vector2(11f, 7f),
             Size = new Vector2(62f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabA.Pressed += () => SelectTab(0);
         AddChild(tabA);
@@ -180,7 +179,7 @@ public sealed partial class HudFriendWindow : Control
             Text = "Cut",
             Position = new Vector2(73f, 7f),
             Size = new Vector2(62f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabB.Pressed += () => SelectTab(1);
         AddChild(tabB);
@@ -189,7 +188,7 @@ public sealed partial class HudFriendWindow : Control
         // spec: ui_system.md §8.14 CODE-CONFIRMED
         if (mainTex is not null)
         {
-            AtlasTexture? hdrSlice = atlas.SliceById(MainTexId, 463, 338, 189, 17);
+            var hdrSlice = atlas.SliceById(MainTexId, 463, 338, 189, 17);
             if (hdrSlice is not null)
             {
                 var hdr = new TextureRect
@@ -198,7 +197,7 @@ public sealed partial class HudFriendWindow : Control
                     Texture = hdrSlice,
                     Position = new Vector2(12f, 84f),
                     Size = new Vector2(189f, 17f),
-                    MouseFilter = MouseFilterEnum.Ignore,
+                    MouseFilter = MouseFilterEnum.Ignore
                 };
                 AddChild(hdr);
             }
@@ -213,9 +212,9 @@ public sealed partial class HudFriendWindow : Control
             Size = new Vector2(TbW, TbH),
             MaxLength = TbMaxLen,
             PlaceholderText = "Friend name...",
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        _textboxAdd.TextSubmitted += (name) => CommitAddFriend(name);
+        _textboxAdd.TextSubmitted += name => CommitAddFriend(name);
         AddChild(_textboxAdd);
 
         // Textbox for Cut (action 3, TB#2) — "cut %s" commit
@@ -228,9 +227,9 @@ public sealed partial class HudFriendWindow : Control
             MaxLength = TbMaxLen,
             PlaceholderText = "Friend name...",
             Visible = false,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        _textboxCut.TextSubmitted += (name) => CommitCutFriend(name);
+        _textboxCut.TextSubmitted += name => CommitCutFriend(name);
         AddChild(_textboxCut);
 
         // Tab A content (friend rows)
@@ -254,40 +253,40 @@ public sealed partial class HudFriendWindow : Control
             Text = "Refresh",
             Position = new Vector2(130f, 236f),
             Size = new Vector2(83f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         refreshBtn.Pressed += OnRefresh; // action 18
         AddChild(refreshBtn);
 
         // OK / confirm button (uitex 2, dst (w/2−56, h−66, 113×40), src 825,807, action 14)
         // spec: ui_system.md §8.14 — "confirm button horizontally centered near bottom"
-        float okX = FriendW / 2f - 56f;
-        float okY = FriendH - 66f;
+        var okX = FriendW / 2f - 56f;
+        var okY = FriendH - 66f;
         var okBtn = new Button
         {
             Name = "ConfirmBtn",
             Text = text.GetCaption(MsgModalHint, "OK"),
             Position = new Vector2(okX, okY),
             Size = new Vector2(113f, 40f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         okBtn.Pressed += OnConfirm; // action 14
         AddChild(okBtn);
 
         // Top-bar action buttons (uitex 1, actions 15/16/17)
         // spec: ui_system.md §8.14 — "3 small top-bar arrow/icon buttons (actions 15/16/17) on uitex 1"
-        for (int i = 0; i < 3; i++)
+        for (var i = 0; i < 3; i++)
         {
-            int actionId = 15 + i;
+            var actionId = 15 + i;
             var topBtn = new Button
             {
                 Name = $"TopBtn{actionId}",
                 Text = "•",
                 Position = new Vector2(265f + i * 16f, 7f),
                 Size = new Vector2(14f, 14f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int captured = actionId;
+            var captured = actionId;
             topBtn.Pressed += () => OnTopBarAction(captured);
             AddChild(topBtn);
         }
@@ -308,9 +307,9 @@ public sealed partial class HudFriendWindow : Control
         container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         container.Visible = !hidden;
 
-        for (int r = 0; r < VisibleRows; r++)
+        for (var r = 0; r < VisibleRows; r++)
         {
-            float rowY = RowBaseY + r * RowStrideY; // stride −16 (upward)
+            var rowY = RowBaseY + r * RowStrideY; // stride −16 (upward)
 
             var rowBtn = new Button
             {
@@ -319,9 +318,9 @@ public sealed partial class HudFriendWindow : Control
                 Position = new Vector2(RowX, rowY),
                 Size = new Vector2(RowW, RowH),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedRow = r;
+            var capturedRow = r;
             rowBtn.Pressed += () => OnRowSelect(tabName == "TabA" ? 0 : 1, capturedRow);
             container.AddChild(rowBtn);
             rowBtns[r] = rowBtn;
@@ -334,7 +333,7 @@ public sealed partial class HudFriendWindow : Control
                 Text = "",
                 Position = new Vector2(StatusGlyphX, rowY),
                 Size = new Vector2(StatusGlyphSize, StatusGlyphSize),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             container.AddChild(statusGlyph);
             statusGlyphs[r] = statusGlyph;
@@ -352,7 +351,7 @@ public sealed partial class HudFriendWindow : Control
             Text = "↑",
             Position = new Vector2(203f, 68f),
             Size = new Vector2(13f, 10f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollUp.Pressed += () => OnScroll(-1); // action 8/9
         AddChild(scrollUp);
@@ -363,7 +362,7 @@ public sealed partial class HudFriendWindow : Control
             Text = "↓",
             Position = new Vector2(203f, 221f),
             Size = new Vector2(13f, 10f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollDown.Pressed += () => OnScroll(+1); // action 10/11
         AddChild(scrollDown);
@@ -377,10 +376,10 @@ public sealed partial class HudFriendWindow : Control
     {
         _activeTab = tab;
 
-        if (_tabAContent is not null) _tabAContent.Visible = (tab == 0);
-        if (_tabBContent is not null) _tabBContent.Visible = (tab == 1);
-        if (_textboxAdd is not null) _textboxAdd.Visible = (tab == 0);
-        if (_textboxCut is not null) _textboxCut.Visible = (tab == 1);
+        if (_tabAContent is not null) _tabAContent.Visible = tab == 0;
+        if (_tabBContent is not null) _tabBContent.Visible = tab == 1;
+        if (_textboxAdd is not null) _textboxAdd.Visible = tab == 0;
+        if (_textboxCut is not null) _textboxCut.Visible = tab == 1;
     }
 
     // -------------------------------------------------------------------------
@@ -391,7 +390,7 @@ public sealed partial class HudFriendWindow : Control
     {
         // spec: ui_system.md §8.14 — "TB#1 commit → 'friend %s %s' command → C2S 2/49 tag=0"
         if (string.IsNullOrWhiteSpace(name)) return;
-        string trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
+        var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
         // TODO(world-campaign): IApplicationUseCases.FriendAdd(trimmed) → C2S 2/49 tag=0
         GD.Print($"[HudFriendWindow] Add friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=0. " +
                  "spec: Docs/RE/specs/ui_system.md §8.14.");
@@ -402,7 +401,7 @@ public sealed partial class HudFriendWindow : Control
     {
         // spec: ui_system.md §8.14 — "TB#2 commit → 'cut %s' command → C2S 2/49 tag=1"
         if (string.IsNullOrWhiteSpace(name)) return;
-        string trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
+        var trimmed = name.Length > TbMaxLen ? name[..TbMaxLen] : name;
         // TODO(world-campaign): IApplicationUseCases.FriendCut(trimmed) → C2S 2/49 tag=1
         GD.Print($"[HudFriendWindow] Cut friend '{trimmed}' → TODO(world-campaign): C2S 2/49 tag=1. " +
                  "spec: Docs/RE/specs/ui_system.md §8.14.");
@@ -412,7 +411,7 @@ public sealed partial class HudFriendWindow : Control
     private void OnRefresh()
     {
         // spec: ui_system.md §8.14 — "action 18 = refresh (C2S 2/54, 3-min throttle)"
-        double now = global::Godot.Time.GetTicksMsec() / 1000.0;
+        var now = Time.GetTicksMsec() / 1000.0;
         if (now - _lastRefreshTime < RefreshThrottleSecs)
         {
             GD.Print("[HudFriendWindow] Refresh throttled (3-min cooldown). " +
@@ -464,10 +463,10 @@ public sealed partial class HudFriendWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the friend window on/off.
-    /// Toggle key: UNVERIFIED. ESC closes / Tab cycles TB focus.
-    /// spec: Docs/RE/specs/ui_system.md §8.14 — "open key UNVERIFIED; ESC blurs+closes".
-    /// TODO(spec): toggle hotkey.
+    ///     Toggles the friend window on/off.
+    ///     Toggle key: UNVERIFIED. ESC closes / Tab cycles TB focus.
+    ///     spec: Docs/RE/specs/ui_system.md §8.14 — "open key UNVERIFIED; ESC blurs+closes".
+    ///     TODO(spec): toggle hotkey.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
@@ -491,7 +490,6 @@ public sealed partial class HudFriendWindow : Control
     {
         if (!_open) return;
         if (@event is InputEventKey key && key.Pressed)
-        {
             switch (key.Keycode)
             {
                 case Key.Escape:
@@ -518,6 +516,5 @@ public sealed partial class HudFriendWindow : Control
                     GetViewport().SetInputAsHandled();
                     break;
             }
-        }
     }
 }

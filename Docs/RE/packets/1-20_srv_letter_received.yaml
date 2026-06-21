@@ -1,0 +1,47 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads a 76-byte block then a length-prefixed string)
+#   offsets:
+#     letter_id @ 0x00: confirmed
+#     sender @ 0x04: confirmed (copied as sender_name)
+#     letter_type @ 0x18: confirmed (checked for special type 51)
+#     attachment_gold @ 0x1C: confirmed
+#     attachment_item_id @ 0x20: confirmed
+#     status_flags @ 0x24: confirmed
+#     date_string @ 0x28: confirmed
+#     subject_string @ 0x39: confirmed
+#     body_text @ 0x4C: confirmed (variable length-prefixed string)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: SmsgSrvLetterReceived
+opcode: 0x10014           # major 1, minor 20 -> (1 << 16) | 20
+direction: S2C
+size: variable            # 76 bytes fixed block + [4 bytes length + N bytes body_text]
+spec: packets/1-20_srv_letter_received.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  In-game letter / mail received notification. Delivers a mail header structure containing sender,
+  subject, date, attachment details, and the text body of the letter.
+
+fields:
+  - { name: LetterId, type: u32 }              # 0x00  unique ID of the letter
+  - { name: Sender, type: "char[17]" }         # 0x04  CP949 sender character name (NUL-terminated)
+  - { name: Pad0, type: "bytes[3]" }           # 0x15  alignment padding
+  - { name: LetterType, type: u32 }            # 0x18  letter classification/type code (e.g. type 51)
+  - { name: AttachmentGold, type: u32 }        # 0x1C  amount of gold attached to this mail
+  - { name: AttachmentItemId, type: u32 }      # 0x20  item ID attached to this mail
+  - { name: StatusFlags, type: u32 }           # 0x24  internal mail status / delivery flags
+  - { name: DateString, type: "char[17]" }     # 0x28  CP949 timestamp string ("YYYY-MM-DD HH:MM")
+  - { name: SubjectString, type: "char[17]" }  # 0x39  CP949 subject line (NUL-terminated)
+  - { name: Reserved, type: "u8[2]" }          # 0x4A  padding bytes (brings fixed block to 76 bytes)
+  - { name: BodyText, type: string }           # 0x4C  length-prefixed CP949 mail body text
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 76 + 4 + strlen(BodyText) on the wire.
+
+  When received:
+  - Deserializes the fixed 76-byte header block and the trailing variable-length string.
+  - If the player is in-game, triggers a system announcement ("You have received a new letter...") and opens or updates the mailbox UI interface.

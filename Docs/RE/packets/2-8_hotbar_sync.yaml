@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band1.md §2/8 (hotbar / quickslot snapshot upload).
+# Role: a hotbar / quickslot layout snapshot push -- a count-prefixed 240-entry slot-index array.
+#
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 241-byte size and the count + u8[240] shape are
+# control-flow CONFIRMED from the builder. capture_verified: false.
+
+name: CmsgHotbarSync
+opcode: 0x20008           # major 2 (GameAction), minor 8 -> (2 << 16) | 8
+direction: C2S
+size: 241                 # FIXED 241-byte (0xF1) body: u8 count + u8[240] slot indices
+spec: packets/2-8_hotbar_sync.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Hotbar / quickslot snapshot upload. The client enumerates its 240 hotbar slots, collects the indices
+  whose bound entity resolves to a valid record, prefixes the count, and pushes the whole fixed 241-byte
+  block. A state push (commit/sync the hotbar layout). Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 241.
+# CONTROL-FLOW CONFIRMED: a single fixed 241-byte blit -- a leading count byte then a 240-byte array.
+fields:
+  - { name: Count,       type: u8 }          # 0x00  number of valid slot indices that follow (0..240) [confirmed]
+  - { name: SlotIndices, type: "u8[240]" }   # 0x01  hotbar slot indices; only the first Count are meaningful [confirmed]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (241 bytes / 0xF1) and the count + u8[240] shape.
+
+    0x00 (1B)   Count       : the number of valid slot indices that follow (0..240).
+    0x01 (240B) SlotIndices : a fixed 240-byte array of hotbar slot indices. Each entry is a hotbar slot
+                              index whose bound entity is valid; only the first Count entries are
+                              meaningful, the remainder are stale/zero. The whole 240-byte array is sent
+                              regardless of Count (fixed-size body).
+
+  TRIGGER: a "commit / sync hotbar layout" routine that runs after a UI guard check; it scans the
+  240-entry hotbar table, collects the valid slot indices, prefixes the count, and sends the fixed
+  241-byte block. The caller is the hotbar save/sync action.
+
+  EXPECTED S2C REPLY: likely none, or a simple ack (this is a state push). [pending]
+
+  UNKNOWNS (capture-pending): whether any ack is sent; the precise validity rule the client uses to
+  include a slot index.
+
+  UNBLOCKS: the Client.Application hotbar-sync use-case (a fixed 241-byte state push).

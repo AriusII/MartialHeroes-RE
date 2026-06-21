@@ -1,37 +1,33 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Text;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
 /// <summary>
-/// Converts a <see cref="CollisionTriangleList"/> (.up upper terrain or .exd extra terrain)
-/// to a self-contained GLB (binary glTF 2.0) stream.
-///
-/// Both .up and .exd share the identical 40-byte triangle record; this converter handles both.
-///
-/// Coordinate-system conventions:
-///   The .up / .exd formats use Y-up world space (same D3D9 convention as all other terrain).
-///   spec: Docs/RE/formats/terrain_layers.md §Overview — "Coordinate system: Y-up world space": CONFIRMED.
-///   glTF 2.0 mandates right-handed Y-up.
-///   Conversion: negate X to flip from left-handed to right-handed.
-///   spec: Docs/RE/formats/mesh.md §Vertex list — same D3D9 convention: CONFIRMED.
-///   glTF 2.0 spec §3.4.
-///
-///   Winding order:
-///   Each <see cref="CollisionTriangle"/> stores three vertices in on-disk order.
-///   After negating X the winding reverses; we swap v1 and v2 to restore CCW in glTF.
-///   spec: Docs/RE/formats/terrain_layers.md §2.1 Triangle record — v1/v2/v3: CONFIRMED.
-///   glTF 2.0 spec §3.7.2.1.
-///
-///   The plane_height field at record offset +0x24 is a scalar companion (equals vertex Y
-///   in all flat-triangle samples); it is NOT emitted as a vertex attribute (it carries
-///   no geometry information beyond what the three vertex positions already provide).
-///   spec: Docs/RE/formats/terrain_layers.md §2.1 — plane_height @ +0x24: CONFIRMED (flat-triangle case).
-///
-///   Normals are NOT present on disk for .up / .exd triangles.
-///   The NORMAL accessor is omitted; the consumer must compute face normals if needed.
+///     Converts a <see cref="CollisionTriangleList" /> (.up upper terrain or .exd extra terrain)
+///     to a self-contained GLB (binary glTF 2.0) stream.
+///     Both .up and .exd share the identical 40-byte triangle record; this converter handles both.
+///     Coordinate-system conventions:
+///     The .up / .exd formats use Y-up world space (same D3D9 convention as all other terrain).
+///     spec: Docs/RE/formats/terrain_layers.md §Overview — "Coordinate system: Y-up world space": CONFIRMED.
+///     glTF 2.0 mandates right-handed Y-up.
+///     Conversion: negate X to flip from left-handed to right-handed.
+///     spec: Docs/RE/formats/mesh.md §Vertex list — same D3D9 convention: CONFIRMED.
+///     glTF 2.0 spec §3.4.
+///     Winding order:
+///     Each <see cref="CollisionTriangle" /> stores three vertices in on-disk order.
+///     After negating X the winding reverses; we swap v1 and v2 to restore CCW in glTF.
+///     spec: Docs/RE/formats/terrain_layers.md §2.1 Triangle record — v1/v2/v3: CONFIRMED.
+///     glTF 2.0 spec §3.7.2.1.
+///     The plane_height field at record offset +0x24 is a scalar companion (equals vertex Y
+///     in all flat-triangle samples); it is NOT emitted as a vertex attribute (it carries
+///     no geometry information beyond what the three vertex positions already provide).
+///     spec: Docs/RE/formats/terrain_layers.md §2.1 — plane_height @ +0x24: CONFIRMED (flat-triangle case).
+///     Normals are NOT present on disk for .up / .exd triangles.
+///     The NORMAL accessor is omitted; the consumer must compute face normals if needed.
 /// </summary>
 public static class CollisionLayerGltfConverter
 {
@@ -55,12 +51,12 @@ public static class CollisionLayerGltfConverter
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Writes a GLB containing one mesh primitive with the collision triangle geometry
-    /// from <paramref name="triangleList"/> (.up or .exd source).
-    /// The stream does not need to be seekable.
+    ///     Writes a GLB containing one mesh primitive with the collision triangle geometry
+    ///     from <paramref name="triangleList" /> (.up or .exd source).
+    ///     The stream does not need to be seekable.
     /// </summary>
     /// <param name="triangleList">
-    /// Parsed .up or .exd data from <c>TerrainLayerParsers</c>.
+    ///     Parsed .up or .exd data from <c>TerrainLayerParsers</c>.
     /// </param>
     /// <param name="output">Destination stream.</param>
     public static void WriteGlb(CollisionTriangleList triangleList, Stream output)
@@ -68,26 +64,26 @@ public static class CollisionLayerGltfConverter
         ArgumentNullException.ThrowIfNull(triangleList);
         ArgumentNullException.ThrowIfNull(output);
 
-        CollisionTriangle[] tris = triangleList.Triangles;
-        int triCount = tris.Length;
-        int vertCount = triCount * 3; // one unique vertex per triangle corner (no index sharing needed)
-        int indexCount = triCount * 3; // indices 0,1,2, 3,4,5, …
+        var tris = triangleList.Triangles;
+        var triCount = tris.Length;
+        var vertCount = triCount * 3; // one unique vertex per triangle corner (no index sharing needed)
+        var indexCount = triCount * 3; // indices 0,1,2, 3,4,5, …
 
         // For up to 65535 triangles × 3 vertices the count is at most 65535 * 3 = 196605,
         // which exceeds u16. We check and upgrade to u32 if required.
         // In practice observed triangle_count values are small (12 for .up, 2 for .exd).
-        bool use32 = vertCount > ushort.MaxValue;
+        var use32 = vertCount > ushort.MaxValue;
 
         // ---- Binary buffer layout: [positions VEC3 f32] [indices u16/u32] ----
-        int posLen = vertCount * 3 * sizeof(float);
-        int idxStride = use32 ? sizeof(uint) : sizeof(ushort);
-        int idxLen = indexCount * idxStride;
+        var posLen = vertCount * 3 * sizeof(float);
+        var idxStride = use32 ? sizeof(uint) : sizeof(ushort);
+        var idxLen = indexCount * idxStride;
 
-        int posOff = 0;
-        int idxOff = Align4(posOff + posLen);
-        int bufSize = Align4(idxOff + idxLen);
+        var posOff = 0;
+        var idxOff = Align4(posOff + posLen);
+        var bufSize = Align4(idxOff + idxLen);
 
-        byte[] buf = new byte[bufSize];
+        var buf = new byte[bufSize];
 
         // ---- Fill positions ----
         // Each triangle contributes 3 vertices in on-disk order: v1, v2, v3.
@@ -96,10 +92,10 @@ public static class CollisionLayerGltfConverter
         float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
         float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
 
-        int cursor = posOff;
-        for (int t = 0; t < triCount; t++)
+        var cursor = posOff;
+        for (var t = 0; t < triCount; t++)
         {
-            CollisionTriangle tri = tris[t];
+            var tri = tris[t];
 
             WriteVertex(buf, ref cursor, -tri.V1X, tri.V1Y, tri.V1Z, ref minX, ref minY, ref minZ, ref maxX, ref maxY,
                 ref maxZ);
@@ -114,9 +110,9 @@ public static class CollisionLayerGltfConverter
         // After X-flip the winding reverses; swap v1↔v2 (indices 1↔2) to restore CCW.
         // glTF 2.0 spec §3.7.2.1.
         cursor = idxOff;
-        for (int t = 0; t < triCount; t++)
+        for (var t = 0; t < triCount; t++)
         {
-            int base3 = t * 3;
+            var base3 = t * 3;
             // Winding-swapped: [base3+0, base3+2, base3+1]
             if (use32)
             {
@@ -135,7 +131,7 @@ public static class CollisionLayerGltfConverter
         }
 
         // ---- Build JSON ----
-        string json = BuildJson(bufSize, vertCount, indexCount, use32,
+        var json = BuildJson(bufSize, vertCount, indexCount, use32,
             posOff, posLen, idxOff, idxLen,
             minX, minY, minZ, maxX, maxY, maxZ);
 
@@ -155,7 +151,7 @@ public static class CollisionLayerGltfConverter
         float minX, float minY, float minZ,
         float maxX, float maxY, float maxZ)
     {
-        int indexComponentType = use32 ? 5125 /*UNSIGNED_INT*/ : ComponentTypeUnsignedShort;
+        var indexComponentType = use32 ? 5125 /*UNSIGNED_INT*/ : ComponentTypeUnsignedShort;
 
         var sb = new StringBuilder(512);
         sb.Append('{');
@@ -228,11 +224,11 @@ public static class CollisionLayerGltfConverter
 
     private static void WriteGlbChunks(Stream output, string json, byte[] binaryBuffer)
     {
-        byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
-        int jsonPadded = Align4(jsonBytes.Length);
-        int binPadded = Align4(binaryBuffer.Length);
+        var jsonBytes = Encoding.UTF8.GetBytes(json);
+        var jsonPadded = Align4(jsonBytes.Length);
+        var binPadded = Align4(binaryBuffer.Length);
 
-        uint totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
+        var totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
         BinaryPrimitives.WriteUInt32LittleEndian(hdr, GlbMagic);
@@ -281,7 +277,7 @@ public static class CollisionLayerGltfConverter
 
     private static void WritePadding(Stream output, int actual, int padded, byte padByte)
     {
-        int pad = padded - actual;
+        var pad = padded - actual;
         if (pad <= 0) return;
         Span<byte> p = stackalloc byte[pad];
         p.Fill(padByte);
@@ -289,8 +285,13 @@ public static class CollisionLayerGltfConverter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Align4(int v) => (v + 3) & ~3;
+    private static int Align4(int v)
+    {
+        return (v + 3) & ~3;
+    }
 
-    private static string F(float v) =>
-        v.ToString("G9", System.Globalization.CultureInfo.InvariantCulture);
+    private static string F(float v)
+    {
+        return v.ToString("G9", CultureInfo.InvariantCulture);
+    }
 }

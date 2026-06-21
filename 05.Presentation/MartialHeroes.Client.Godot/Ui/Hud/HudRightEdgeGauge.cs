@@ -18,18 +18,18 @@
 // spec: Docs/RE/specs/ui_hud_layout.md §5.3 — "chunrihojung.dds" source texture.
 
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// Right-edge stacked HP/MP gauge composite. Two 140×35 strips at screen_width−135.
-///
-/// <para>PASSIVE: reads <see cref="IHudEventHub"/> ExpLevels for vitals; renders ProgressBar fills.
-/// Zero game logic. Degrades gracefully when VFS is offline.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+///     Right-edge stacked HP/MP gauge composite. Two 140×35 strips at screen_width−135.
+///     <para>
+///         PASSIVE: reads <see cref="IHudEventHub" /> ExpLevels for vitals; renders ProgressBar fills.
+///         Zero game logic. Degrades gracefully when VFS is offline.
+///     </para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
 /// </summary>
 public sealed partial class HudRightEdgeGauge : Control
 {
@@ -53,26 +53,26 @@ public sealed partial class HudRightEdgeGauge : Control
     // -------------------------------------------------------------------------
 
     private ProgressBar _hpBar = null!;
-    private ProgressBar _mpBar = null!;
     private Label _hpLabel = null!;
-    private Label _mpLabel = null!;
 
     // -------------------------------------------------------------------------
     // Hub drain state
     // -------------------------------------------------------------------------
 
     // The Vitals channel is drained every frame in _Process.
-    // spec: MartialHeroes.Client.Application.Hud.IHudEventHub.Vitals
+    // spec: MartialHeroes.Client.Application.Contracts.Hud.IHudEventHub.Vitals
     // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
     private IHudEventHub? _hub;
+    private ProgressBar _mpBar = null!;
+    private Label _mpLabel = null!;
 
     // -------------------------------------------------------------------------
     // Build (geometry pass)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: positions the two gauge strips at screen_width−135, Y=200 and Y=250.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
+    ///     Geometry pass: positions the two gauge strips at screen_width−135, Y=200 and Y=250.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -93,19 +93,19 @@ public sealed partial class HudRightEdgeGauge : Control
 
         // Try to load chunrihojung.dds as the gauge backdrop.
         // spec: ui_hud_layout.md §5.3 / §5.6 — "chunrihojung.dds" source texture.
-        Texture2D? gaugeTex = atlas.GetByPath(GaugeDdsPath);
+        var gaugeTex = atlas.GetByPath(GaugeDdsPath);
         if (gaugeTex is null)
             GD.PrintErr("[HudRightEdgeGauge] chunrihojung.dds unavailable — gauge chrome absent (VFS offline). " +
                         "spec: Docs/RE/specs/ui_hud_layout.md §5.6.");
 
         // HP strip (strip A)
-        _hpBar = BuildGaugeStrip(gaugeTex, localY: 0f,
-            fillColor: new Color(0.9f, 0.1f, 0.1f, 0.85f));
+        _hpBar = BuildGaugeStrip(gaugeTex, 0f,
+            new Color(0.9f, 0.1f, 0.1f, 0.85f));
 
         // MP strip (strip B)  — positioned +50 from HP strip
         // spec: ui_hud_layout.md §5.6 — "Y+50 for strip B"
-        _mpBar = BuildGaugeStrip(gaugeTex, localY: MpY - HpY, // = 50
-            fillColor: new Color(0.1f, 0.3f, 0.9f, 0.85f));
+        _mpBar = BuildGaugeStrip(gaugeTex, MpY - HpY, // = 50
+            new Color(0.1f, 0.3f, 0.9f, 0.85f));
 
         // HP value label
         _hpLabel = new Label
@@ -114,7 +114,7 @@ public sealed partial class HudRightEdgeGauge : Control
             Text = "HP —/—",
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _hpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _hpLabel.OffsetTop = 0f;
@@ -128,7 +128,7 @@ public sealed partial class HudRightEdgeGauge : Control
             Text = "MP —/—",
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _mpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _mpLabel.OffsetTop = MpY - HpY;
@@ -146,7 +146,7 @@ public sealed partial class HudRightEdgeGauge : Control
             Name = localY < 1f ? "HpStrip" : "MpStrip",
             Position = new Vector2(0f, localY),
             Size = new Vector2(GaugeW, GaugeH),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(container);
 
@@ -164,10 +164,10 @@ public sealed partial class HudRightEdgeGauge : Control
                 {
                     Atlas = chromeTex,
                     Region = new Rect2(0, chromeSrcY, (int)GaugeW, (int)GaugeH),
-                    FilterClip = true,
+                    FilterClip = true
                 },
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             chrome.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             container.AddChild(chrome);
@@ -181,7 +181,7 @@ public sealed partial class HudRightEdgeGauge : Control
             MaxValue = 100,
             Value = 100,
             MouseFilter = MouseFilterEnum.Ignore,
-            ShowPercentage = false,
+            ShowPercentage = false
         };
         bar.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         var fillStyle = new StyleBoxFlat { BgColor = fillColor };
@@ -198,9 +198,9 @@ public sealed partial class HudRightEdgeGauge : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Binds to the HUD event hub so the gauge drains <see cref="IHudEventHub.Vitals"/> each frame.
-    /// spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
-    /// spec: MartialHeroes.Client.Application.Hud.IHudEventHub.Vitals.
+    ///     Binds to the HUD event hub so the gauge drains <see cref="IHudEventHub.Vitals" /> each frame.
+    ///     spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
+    ///     spec: MartialHeroes.Client.Application.Contracts.Hud.IHudEventHub.Vitals.
     /// </summary>
     public void BindHub(IHudEventHub hub)
     {
@@ -215,7 +215,7 @@ public sealed partial class HudRightEdgeGauge : Control
 
         // Drain latest-wins Vitals channel; apply the last received value per frame.
         HudVitalsEvent? latest = null;
-        while (_hub.Vitals.TryRead(out HudVitalsEvent? v))
+        while (_hub.Vitals.TryRead(out var v))
             latest = v;
 
         if (latest is null) return;

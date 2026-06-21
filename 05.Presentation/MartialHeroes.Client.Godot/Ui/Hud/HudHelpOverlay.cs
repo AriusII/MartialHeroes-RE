@@ -39,37 +39,35 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game full-screen help overlay (HelpPanel member of MainMaster).
-///
-/// <para>Draws a single full-screen image from <c>data/ui/help.dds</c>. No navigation,
-/// no message feed — the picture IS the help content. Toggled by key <c>h</c>.</para>
-///
-/// <para>PASSIVE: zero game logic. Toggle calls from HudMaster._Input and HudCommandBar action 4011.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.24 CODE-CONFIRMED.
+///     In-game full-screen help overlay (HelpPanel member of MainMaster).
+///     <para>
+///         Draws a single full-screen image from <c>data/ui/help.dds</c>. No navigation,
+///         no message feed — the picture IS the help content. Toggled by key <c>h</c>.
+///     </para>
+///     <para>PASSIVE: zero game logic. Toggle calls from HudMaster._Input and HudCommandBar action 4011.</para>
+///     spec: Docs/RE/specs/ui_system.md §8.24 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudHelpOverlay : Control
 {
     // VFS path — direct literal bind, not a uitex registry id.
     // spec: Docs/RE/specs/ui_system.md §8.24.2 CODE-CONFIRMED — "literal path data/ui/help.dds"
     private const string HelpDdsVfsPath = "data/ui/help.dds"; // spec: §8.24.2
+    private TextureRect? _helpImage;
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _visible;
-    private TextureRect? _helpImage;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the full-screen help overlay.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.24.1 CODE-CONFIRMED — "(0,0) full-screen, opaque white".
-    /// spec: Docs/RE/specs/ui_system.md §8.24.2 CODE-CONFIRMED — "single literal image data/ui/help.dds".
+    ///     Geometry pass: builds the full-screen help overlay.
+    ///     spec: Docs/RE/specs/ui_system.md §8.24.1 CODE-CONFIRMED — "(0,0) full-screen, opaque white".
+    ///     spec: Docs/RE/specs/ui_system.md §8.24.2 CODE-CONFIRMED — "single literal image data/ui/help.dds".
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -95,7 +93,7 @@ public sealed partial class HudHelpOverlay : Control
             Name = "HelpImage",
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _helpImage.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
@@ -116,7 +114,7 @@ public sealed partial class HudHelpOverlay : Control
             {
                 Name = "HelpFallback",
                 Color = new Color(0.05f, 0.05f, 0.10f, 0.95f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             fallback.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(fallback);
@@ -127,7 +125,7 @@ public sealed partial class HudHelpOverlay : Control
                 Text = "[ data/ui/help.dds — VFS asset absent ]",
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             fallbackLbl.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(fallbackLbl);
@@ -143,7 +141,7 @@ public sealed partial class HudHelpOverlay : Control
             Name = "CloseHint",
             Text = "[H] 닫기", // press H to close
             Position = new Vector2(10f, 10f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(closeHint);
 
@@ -160,11 +158,10 @@ public sealed partial class HudHelpOverlay : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the help overlay. Called by key 'h' and DefaultMenu action 4011.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.24.3 CODE-CONFIRMED —
-    /// "Toggle = key h: pressing h while hidden shows it; pressing while visible hides it."
-    /// Space trigger REFUTED in static code.
+    ///     Toggles the help overlay. Called by key 'h' and DefaultMenu action 4011.
+    ///     spec: Docs/RE/specs/ui_system.md §8.24.3 CODE-CONFIRMED —
+    ///     "Toggle = key h: pressing h while hidden shows it; pressing while visible hides it."
+    ///     Space trigger REFUTED in static code.
     /// </summary>
     public void Toggle()
     {
@@ -175,8 +172,8 @@ public sealed partial class HudHelpOverlay : Control
     }
 
     /// <summary>
-    /// Forces the overlay to a specific visible state (for ESC / forced-hide on logout).
-    /// spec: Docs/RE/specs/ui_system.md §8.24.3 — "Forced hide when leaving the world".
+    ///     Forces the overlay to a specific visible state (for ESC / forced-hide on logout).
+    ///     spec: Docs/RE/specs/ui_system.md §8.24.3 — "Forced hide when leaving the world".
     /// </summary>
     public void Toggle(bool show)
     {

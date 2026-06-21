@@ -15,7 +15,7 @@ opcode: 0x1000e           # major 1, minor 14 -> (1 << 16) | 14
 direction: C2S
 size: 1                   # fixed 1-byte payload
 spec: packets/cmsg_char_move.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

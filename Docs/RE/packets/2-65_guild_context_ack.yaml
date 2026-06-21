@@ -1,0 +1,35 @@
+# spec: Docs/RE/packets/2-65_guild_context_ack.yaml
+# Role: C2S 1-byte context ack/refresh — REACTIVE, raised from S2C handlers (not a UI button).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgGuildContextAck
+opcode: 0x20041           # major 2 (GameAction), minor 65 -> (2 << 16) | 65
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-65_guild_context_ack.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A reactive 1-byte context ack / refresh. Raised event-driven from several S2C handlers (the per-tick game-state handler, the guild-member-remove result) and from guild/social panel context resolution — an auto-reply / state-confirm, not a single UI button.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Selector, type: u8 }   # 0x00  single selector / answer byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 1-byte blit built inline from the builder's
+  argument); the field VALUE meaning is a static inference (capture-pending).
+
+    0x00 (1B) Selector : a single selector / answer byte. [capture/debugger-pending]
+
+  REACTIVE: this opcode is sent reactively to S2C handlers — it is raised from the per-tick game-state
+  tick handler and the guild-member-remove result handler, as well as from guild panel context
+  resolution. The broad caller set + 1-byte size + being raised from inbound handlers indicate an
+  event-driven auto-reply / state-confirm ack (e.g. a guild/party refresh), NOT a user-pressed button.
+
+  UNKNOWNS to resolve with a capture:
+    - the Selector value space and which inbound event drives which value;
+    - the inbound reply opcode (likely a refreshed guild/party list S2C) — pending.
+
+  UNBLOCKS: Client.Application reactive guild/party context ack handling.

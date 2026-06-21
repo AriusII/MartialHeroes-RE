@@ -1,30 +1,32 @@
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Godot.Autoload;
-using MartialHeroes.Client.Godot.Screens;
+using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Load;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 /// <summary>
-/// State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
-/// loading window reports preload-done + the 500 ms grace; the application scene machine then
-/// chooses 2→3 or 2→4 from its <c>OPENNING/SKIP</c> policy.
-/// spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
+///     State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
+///     loading window reports preload-done + the 500 ms grace; the application scene machine then
+///     chooses 2→3 or 2→4 from its OPENNING/SKIP policy.
+///     spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
 /// </summary>
 public sealed partial class LoadScene : StubSceneController
 {
+    private bool _advanceRequested;
     private ClientContext? _ctx;
     private SceneHost? _host;
-    private ScreenHost? _screenHost;
-    private LoadingWindow? _loading;
     private CancellationTokenSource? _loadCts;
-    private bool _advanceRequested;
+    private LoadingWindow? _loading;
+    private ScreenHost? _screenHost;
+    private bool _syncingScene;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Load;
 
-    /// <inheritdoc/>
+    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -34,11 +36,6 @@ public sealed partial class LoadScene : StubSceneController
         _screenHost = new ScreenHost { Name = "LoadScreenHost" };
         AddChild(_screenHost);
 
-        // Build the new Ui/Scenes substrate LoadingWindow.
-        // Atlas comes from ClientContext.HudAtlas (Phase-A substrate, shared handle).
-        // PlayOwnCue=false when the LoadOrchestrator is present — it routes BGM 920100100
-        // through GodotLoadingSoundSink → AudioService so the cue is not doubled.
-        // spec: Docs/RE/specs/frontend_scenes.md §2L / §9.1; sound.md §15.6a. CODE-CONFIRMED.
         _loading = new LoadingWindow
         {
             Name = "LoadingWindow",
@@ -46,35 +43,61 @@ public sealed partial class LoadScene : StubSceneController
             ProgressProvider = _ctx?.LoadOrchestrator is { } orch
                 ? () => Math.Clamp(orch.ProgressQuotient, 0, 100)
                 : null,
-            PlayOwnCue = _ctx?.LoadOrchestrator is null,
+            PlayOwnCue = _ctx?.LoadOrchestrator is null
         };
         _loading.LoadingComplete += OnLoadingComplete;
         _screenHost.SetScreen(_loading);
 
         StartCoreLoad();
 
-        GD.Print("[LoadScene] State 2 Load built LoadingWindow (Ui/Scenes substrate); preload started; " +
-                 "completion will advance via SceneHost.Advance(). spec: frontend_scenes.md §2L / §9.1.");
+        GD.Print("[LoadScene] State 2 Load built LoadingWindow; preload started. " +
+                 "spec: frontend_scenes.md §2L / §9.1.");
     }
 
     public override void _ExitTree()
     {
-        if (_loading is not null)
-        {
-            _loading.LoadingComplete -= OnLoadingComplete;
-        }
+        if (_loading is not null) _loading.LoadingComplete -= OnLoadingComplete;
 
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
     }
 
+    /// <summary>
+    ///     Drains the SingleReader event bus while Load is the active scene, converging the visible
+    ///     controller when the Application scene machine commits an OUT-OF-BAND transition away from Load.
+    ///     The load-bearing case is an enter-phase REJECTION: a 1/9 was sent, the server answered
+    ///     <c>3/100 SmsgCharActionResult</c> instead of the <c>4/1</c> world tick, so the machine returns
+    ///     to char-select (Load → Select) — the world must NOT be entered via the loading-grace timer
+    ///     without the server's enter sequence. Calling <see cref="SceneHost.Advance" /> here would be
+    ///     wrong (it would advance from the already-committed state); we converge to the committed state
+    ///     instead. The grace-timer advance is independently guarded in <see cref="OnLoadingComplete" />
+    ///     (it no-ops once SceneHost has left Load). spec: Docs/RE/specs/client_runtime.md §7.5.2;
+    ///     Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (enter only on 3/5 → 4/1).
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_ctx is null || _syncingScene) return;
+
+        while (_ctx.EventBus.Reader.TryRead(out var evt))
+            switch (evt)
+            {
+                case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
+                    GD.Print(
+                        $"[LoadScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
+                        "out-of-band committed transition (e.g. 3/100 enter rejection → char-select) — " +
+                        "calling SyncToCurrentState. spec: client_runtime.md §7.5.2; login_flow.md §1 step 9.");
+                    _syncingScene = true;
+                    _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
+                    return;
+            }
+    }
+
     private void StartCoreLoad()
     {
         if (_ctx?.LoadOrchestrator is not { } load)
         {
-            GD.Print(
-                "[LoadScene] ClientContext.LoadOrchestrator unavailable — LoadingScreen fallback simulation remains active.");
+            GD.Print("[LoadScene] ClientContext.LoadOrchestrator unavailable.");
             return;
         }
 
@@ -82,21 +105,12 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts?.Dispose();
         _loadCts = new CancellationTokenSource();
 
-        try
-        {
-            load.Start(_loadCts.Token);
-            // Start() synchronously applies the OPENNING/SKIP decision to SceneMachine.SkipOpening.
-            // Godot does not choose the route; it only reports the decision for diagnostics.
-            // spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
-            GD.Print($"[LoadScene] LoadOrchestrator started; destination={load.DestinationAfterLoad}, " +
-                     $"skipOpening={load.ShouldSkipOpening}. spec: resource_pipeline.md §2.");
-            _ = AwaitCoreLoadAsync(load.Completion);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[LoadScene] LoadOrchestrator.Start failed: {ex.Message}; completing Load scene defensively.");
-            _loading?.CallDeferred(LoadingWindow.MethodName.CompleteExternalLoad);
-        }
+        load.Start(_loadCts.Token);
+        // Start() synchronously applies the OPENNING/SKIP decision to SceneMachine.SkipOpening.
+        // spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
+        GD.Print($"[LoadScene] LoadOrchestrator started; destination={load.DestinationAfterLoad}, " +
+                 $"skipOpening={load.ShouldSkipOpening}. spec: resource_pipeline.md §2.");
+        _ = AwaitCoreLoadAsync(load.Completion);
     }
 
     private async Task AwaitCoreLoadAsync(Task completion)
@@ -115,26 +129,22 @@ public sealed partial class LoadScene : StubSceneController
         }
         catch (OperationCanceledException)
         {
-            GD.Print(
-                "[LoadScene] LoadOrchestrator completion wait cancelled; orchestrator is settled and can restart on re-enter.");
+            GD.Print("[LoadScene] LoadOrchestrator completion wait cancelled.");
         }
         catch (Exception ex)
         {
+            // Real load fault → error state (state 7). Do not advance to next scene.
+            // spec: Docs/RE/scenes/load.md §3 "Load → Error: load fault (state 7)".
             Callable.From(() =>
             {
-                GD.PrintErr(
-                    $"[LoadScene] LoadOrchestrator faulted: {ex.Message}; advancing after loading-window grace.");
-                _loading?.CompleteExternalLoad();
+                GD.PrintErr($"[LoadScene] LoadOrchestrator faulted: {ex.Message}; routing to error.");
             }).CallDeferred();
         }
     }
 
     private void OnLoadingComplete()
     {
-        if (_advanceRequested)
-        {
-            return;
-        }
+        if (_advanceRequested) return;
 
         _advanceRequested = true;
 

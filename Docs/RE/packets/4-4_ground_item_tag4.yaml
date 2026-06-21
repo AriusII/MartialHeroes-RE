@@ -39,6 +39,19 @@ notes: |
   area-snapshot framing belongs to the 4/4 SmsgAreaEntitySnapshot spec (not yet written); this file
   documents the ground-item record so a codegen for the snapshot can embed it.
 
+  PARENT TAG SET (the 4/4 stream, for the snapshot-spec author -- CONFIRMED sizes, VALUE meanings
+  pending): the tag loop dispatches on a leading tag byte and reads a tag-specific record:
+    tag 1 / 2 / 3 -> an 892-byte spawn record (an 8-byte prefix {id u32 @+0, kind byte @+4, field
+                     byte @+5, 2 pad} + an 880-byte SpawnDescriptor core @+8 + a 4-byte trailer @+0x378;
+                     the descriptor's world_x / world_z land at WIRE +0x54 / +0x58 -- the same 8-byte
+                     prefix as 5/3 SmsgCharSpawn). The spawn factory copies exactly 0x370 = 880 bytes.
+    tag 4         -> the 24-byte ground-item record specced in THIS file.
+    tag 6         -> a 36-byte record.
+    tag 9         -> a 24-byte record.
+    tag 0         -> the terminator (ends the loop).
+  Only the tag-4 record's fields are pinned here; the 892-byte spawn record's interior is the
+  SpawnDescriptor (structs/spawn_descriptor.md), shared with 5/1 / 5/3.
+
     0x00 (4B) Key        : the ground-item entity key. This is the value a later CmsgPickupItem
                              (2/15) targets and that SmsgTrackedWorldObjectRemove (5/15) removes.
     0x04 (4B) TemplateId : the item template id. The client resolves a per-template 3D model from it;

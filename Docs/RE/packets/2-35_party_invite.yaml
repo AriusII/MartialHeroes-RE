@@ -6,7 +6,7 @@ opcode: 0x20023           # major 2 (GameAction), minor 35 -> (2 << 16) | 35
 direction: C2S
 size: 8                  # fixed 8-byte payload built by the shared social-op sender
 spec: packets/2-35_party_invite.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client party invite / accept request. Carries a 1-byte mode selector and a 4-byte target actor id. Issued from the right-click target menu and the party panel context menu; the server replies in the 4/35 PartyInviteState / 4/76 PartyAcceptResult family.

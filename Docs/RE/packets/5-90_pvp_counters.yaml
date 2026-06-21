@@ -1,0 +1,53 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 32-byte body fully decoded into 8
+#                 scalars -- sort@0x00 / id@0x04 / six u32 counters @0x08..0x1C -- are
+#                 control-flow-confirmed; this body is NOT an opaque blit; every counter's VALUE meaning
+#                 is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. The deep struct pass confirmed 5/90 field-decodes its 32-byte block into the shared
+#              PvP-state object (8 fields) -- NOT opaque-forward. This file already reflects that.
+
+name: SmsgPvpCounters
+opcode: 0x5005a           # major 5 (Push), minor 90 -> (5 << 16) | 90
+direction: S2C
+size: 32                 # fixed 32-byte payload block (0x20) -- fully accounted (no opaque region)
+spec: packets/5-90_pvp_counters.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes the PvP counters. A fixed 32-byte block of eight contiguous scalars: an actor key
+  (sort + id) and six u32 counters. Every byte of the 32-byte read is consumed. Drives the PvP-rank
+  panel's five score lines (counter 5 is a threshold that toggles a tier path at >= 150).
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 32.
+fields:
+  - { name: Sort,      type: u8 }            # +0x00  counter sort / flag (u8)
+  - { name: GapA,      type: "bytes[3]" }    # +0x01  gap (not copied) -- opaque
+  - { name: Id,        type: u32 }           # +0x04  actor id (likely)
+  - { name: Counter1,  type: u32 }           # +0x08  counter 1 (drives a score line)
+  - { name: Counter2,  type: u32 }           # +0x0C  counter 2 (drives a score line)
+  - { name: Counter3,  type: u32 }           # +0x10  counter 3 (drives a score line)
+  - { name: Counter4,  type: u32 }           # +0x14  counter 4 (drives a score line)
+  - { name: Counter5,  type: u32 }           # +0x18  counter 5 (threshold; drives a score line; >= 150 toggles a tier path)
+  - { name: Counter6,  type: u32 }           # +0x1C  counter 6
+  # widths: 1 + 3 + 4 + 4 + 4 + 4 + 4 + 4 + 4 = 32
+
+notes: |
+  CONFIRMED routing + size + the full scalar decode (the consumer decodes the whole 32-byte block
+  into 8 scalars -- there is NO opaque region). Field VALUE meanings are LIKELY (the id is named via a
+  debug-format string; the counters drive the five PvP-rank score labels). [capture/debugger-pending]
+  for the exact counter meanings. The field widths sum to exactly 32 (verified).
+
+  ACTOR KEY ORDER: sort @+0 (u8) then id @+4 (u32) with a 3-byte gap -- the standard PvP actor-key
+  family layout.
+
+  Section map: { u8 sort, gap[3], u32 id, u32 c1, u32 c2, u32 c3, u32 c4, u32 c5(threshold), u32 c6 }.
+  Counter 5 (+0x18) is a threshold: a value >= 150 toggles a tier path in the rank panel.
+
+  UNBLOCKS: the Client.Application PvP-counters handler (5/90) -- the layout is fully accounted; the
+  counter identities are capture-pending.

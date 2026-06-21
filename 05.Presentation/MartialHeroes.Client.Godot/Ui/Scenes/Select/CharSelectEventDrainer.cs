@@ -12,33 +12,33 @@
 // spec: Docs/RE/specs/frontend_scenes.md §3.1 — CharacterListEvent (opcode 3/1) drives char-select.
 
 using Godot;
-using MartialHeroes.Client.Application.Events;
+using MartialHeroes.Client.Application.Contracts.Events;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 /// <summary>
-/// Drains the Application event bus on the Godot main thread and routes
-/// <see cref="CharacterListEvent"/> to the bound <see cref="CharSelectWindow"/>.
-///
-/// <para>All other events are surfaced via <see cref="EventDrained"/> so the scene owner
-/// can react without competing with this reader.</para>
-///
-/// spec: Docs/RE/specs/frontend_scenes.md §3.1 — CharacterListEvent drives char-select. CODE-CONFIRMED.
+///     Drains the Application event bus on the Godot main thread and routes
+///     <see cref="CharacterListEvent" /> to the bound <see cref="CharSelectWindow" />.
+///     <para>
+///         All other events are surfaced via <see cref="EventDrained" /> so the scene owner
+///         can react without competing with this reader.
+///     </para>
+///     spec: Docs/RE/specs/frontend_scenes.md §3.1 — CharacterListEvent drives char-select. CODE-CONFIRMED.
 /// </summary>
 public sealed partial class CharSelectEventDrainer : Node
 {
-    private CharSelectWindow? _window;
     private IClientEventBus? _bus;
+    private CharSelectWindow? _window;
 
     /// <summary>
-    /// Raised for every drained Application event so the scene owner can observe
-    /// state/result events without adding a second competing channel reader.
+    ///     Raised for every drained Application event so the scene owner can observe
+    ///     state/result events without adding a second competing channel reader.
     /// </summary>
     public event Action<IClientEvent>? EventDrained;
 
     /// <summary>
-    /// Binds the drainer to the window and the Application event bus.
-    /// Call immediately after construction before adding to the scene tree.
+    ///     Binds the drainer to the window and the Application event bus.
+    ///     Call immediately after construction before adding to the scene tree.
     /// </summary>
     public void Bind(CharSelectWindow window, IClientEventBus bus)
     {
@@ -50,7 +50,7 @@ public sealed partial class CharSelectEventDrainer : Node
     {
         if (_bus is null || _window is null) return;
 
-        while (_bus.Reader.TryRead(out IClientEvent? evt))
+        while (_bus.Reader.TryRead(out var evt))
         {
             EventDrained?.Invoke(evt);
 

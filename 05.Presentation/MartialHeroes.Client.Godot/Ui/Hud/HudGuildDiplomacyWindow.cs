@@ -62,16 +62,17 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game guild-diplomacy / brood-war relations list window (BroodWarListPanel, slot 235, key `u`).
-///
-/// <para>The roster of allies / war-declarations / enemies, filtered by relation-state bucket.
-/// Declare-war/ally actions open a confirm popup (slot 167) — the actual send fires from there.
-/// Toggled by key `u` (ASCII 117).</para>
-///
-/// <para>PASSIVE: zero game logic. Inbound S2C 4/81 (roster push) is stubbed. Declare/cancel
-/// actions emit intent stubs (world-campaign).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.30 CODE-CONFIRMED.
+///     In-game guild-diplomacy / brood-war relations list window (BroodWarListPanel, slot 235, key `u`).
+///     <para>
+///         The roster of allies / war-declarations / enemies, filtered by relation-state bucket.
+///         Declare-war/ally actions open a confirm popup (slot 167) — the actual send fires from there.
+///         Toggled by key `u` (ASCII 117).
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. Inbound S2C 4/81 (roster push) is stubbed. Declare/cancel
+///         actions emit intent stubs (world-campaign).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.30 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudGuildDiplomacyWindow : Control
 {
@@ -99,10 +100,6 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     private const float CheckH = 23f; // spec: ui_system.md §8.30.1 CODE-CONFIRMED
     private const float NameW = 147f; // spec: ui_system.md §8.30.1 CODE-CONFIRMED
     private const float NameH = 14f; // spec: ui_system.md §8.30.1 CODE-CONFIRMED
-
-    // Top tabs (3 category tabs)
-    // spec: ui_system.md §8.30.1 — "(x∈{11,91,171}, 24, 89, 20) actions 15/16/17"
-    private static readonly float[] TabX = { 11f, 91f, 171f };
     private const float TabY = 24f;
     private const float TabW = 89f;
     private const float TabH = 20f;
@@ -145,29 +142,32 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     // spec: ui_system.md §8.30.7 CODE-CONFIRMED
     private const int MsgCancelNotice = 51014; // action 30 cancel notice
 
+    // Top tabs (3 category tabs)
+    // spec: ui_system.md §8.30.1 — "(x∈{11,91,171}, 24, 89, 20) actions 15/16/17"
+    private static readonly float[] TabX = { 11f, 91f, 171f };
+
+    private readonly Label[] _rowNameLabels = new Label[VisibleRows];
+    private int _activeTab; // 0..2 top category tabs
+    private Button? _cancelBtn;
+    private int _currentPage;
+    private LineEdit? _nameInput;
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _currentPage;
-    private int _totalPages = 1;
-    private int _selectedRow = -1;
-    private int _activeTab; // 0..2 top category tabs
-
-    private readonly Label[] _rowNameLabels = new Label[VisibleRows];
     private Label? _pageLabel;
-    private Button? _cancelBtn;
-    private LineEdit? _nameInput;
+    private int _selectedRow = -1;
+    private int _totalPages = 1;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the guild-diplomacy roster panel.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.30.1 CODE-CONFIRMED.
+    ///     Geometry pass: builds the guild-diplomacy roster panel.
+    ///     spec: Docs/RE/specs/ui_system.md §8.30.1 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -203,22 +203,22 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "Guild Diplomacy",
             Position = new Vector2(10f, 4f),
             Size = new Vector2(180f, 18f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(titleLbl);
 
         // 3 top category tabs (actions 15/16/17)
         // spec: ui_system.md §8.30.1 — "(x∈{11,91,171}, 24, 89, 20) actions 15/16/17"
-        for (int t = 0; t < 3; t++)
+        for (var t = 0; t < 3; t++)
         {
-            int capturedT = t;
+            var capturedT = t;
             var tab = new Button
             {
                 Name = $"CategoryTab{t}",
                 Text = t == 0 ? "Allies" : t == 1 ? "War" : "Enemy",
                 Position = new Vector2(TabX[t], TabY),
                 Size = new Vector2(TabW, TabH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             tab.Pressed += () => OnCategoryTab(15 + capturedT);
             AddChild(tab);
@@ -226,10 +226,10 @@ public sealed partial class HudGuildDiplomacyWindow : Control
 
         // 6 visible row pairs: check buttons (6..11) + name buttons (0..5)
         // spec: ui_system.md §8.30.1 — "step y+30 (rows 0..5)"
-        for (int r = 0; r < VisibleRows; r++)
+        for (var r = 0; r < VisibleRows; r++)
         {
-            float ry = RowBaseY + r * RowStride;
-            int capturedR = r;
+            var ry = RowBaseY + r * RowStride;
+            var capturedR = r;
 
             var checkBtn = new Button
             {
@@ -237,7 +237,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
                 Text = "□",
                 Position = new Vector2(RowCheckX, ry),
                 Size = new Vector2(CheckW, CheckH),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             checkBtn.Pressed += () => OnRowCheck(6 + capturedR);
             AddChild(checkBtn);
@@ -250,7 +250,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
                 Size = new Vector2(NameW, NameH),
                 Flat = true,
                 Alignment = HorizontalAlignment.Left,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             nameBtn.Pressed += () => OnRowName(capturedR);
             AddChild(nameBtn);
@@ -261,7 +261,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
                 Text = "",
                 Position = new Vector2(RowNameX + 2f, ry + 1f),
                 Size = new Vector2(NameW - 4f, NameH),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(nameLbl);
             _rowNameLabels[r] = nameLbl;
@@ -275,7 +275,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "◄",
             Position = new Vector2(PagePrevX, PageBtnY),
             Size = new Vector2(PageBtnSize, PageBtnSize),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pagePrev.Pressed += () => OnPage(-1); // action 13
         AddChild(pagePrev);
@@ -286,7 +286,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "►",
             Position = new Vector2(PageNextX, PageBtnY),
             Size = new Vector2(PageBtnSize, PageBtnSize),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         pageNext.Pressed += () => OnPage(+1); // action 14
         AddChild(pageNext);
@@ -299,7 +299,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "1 / 1",
             Position = new Vector2(PagePrevX, 330f),
             Size = new Vector2(60f, 13f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_pageLabel);
 
@@ -311,7 +311,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "List",
             Position = new Vector2(RefreshX, RefreshY),
             Size = new Vector2(RefreshW, RefreshH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         refreshBtn.Pressed += OnRefresh; // action 12
         AddChild(refreshBtn);
@@ -324,7 +324,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "Declare War",
             Position = new Vector2(DeclWarX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         declWarBtn.Pressed += OnDeclareWar; // action 28
         AddChild(declWarBtn);
@@ -337,7 +337,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "Declare Ally",
             Position = new Vector2(DeclAllyX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         declAllyBtn.Pressed += OnDeclareAlly; // action 29
         AddChild(declAllyBtn);
@@ -351,7 +351,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Position = new Vector2(CancelX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
             Visible = false, // hidden on init per spec
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         _cancelBtn.Pressed += OnCancelRelation; // action 30
         AddChild(_cancelBtn);
@@ -364,7 +364,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "A",
             Position = new Vector2(TabAX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabABtn.Pressed += () => OnActionTab(31);
         AddChild(tabABtn);
@@ -377,7 +377,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "B",
             Position = new Vector2(TabBX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabBBtn.Pressed += () => OnActionTab(32);
         AddChild(tabBBtn);
@@ -390,7 +390,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Text = "C",
             Position = new Vector2(TabCX, ActionBtnY),
             Size = new Vector2(ActionBtnW, ActionBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabCBtn.Pressed += () => OnActionTab(33);
         AddChild(tabCBtn);
@@ -404,9 +404,9 @@ public sealed partial class HudGuildDiplomacyWindow : Control
             Position = new Vector2(NameInputX, NameInputY),
             Size = new Vector2(NameInputW, NameInputH),
             MaxLength = NameInputMaxLen,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        _nameInput.TextSubmitted += (_) => OnNameSubmit(); // action 34
+        _nameInput.TextSubmitted += _ => OnNameSubmit(); // action 34
         AddChild(_nameInput);
 
         GD.Print("[HudGuildDiplomacyWindow] Built — BroodWarListPanel slot 235 (key 'u'). " +
@@ -425,8 +425,8 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the guild-diplomacy window (key `u`, ASCII 117, slot 235).
-    /// spec: Docs/RE/specs/ui_system.md §8.30.5 CODE-CONFIRMED — key `u` toggle.
+    ///     Toggles the guild-diplomacy window (key `u`, ASCII 117, slot 235).
+    ///     spec: Docs/RE/specs/ui_system.md §8.30.5 CODE-CONFIRMED — key `u` toggle.
     /// </summary>
     public void Toggle(bool? forceState = null)
     {
@@ -453,7 +453,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     {
         // actions 6..11 — row check buttons (also select)
         // spec: ui_system.md §8.30.4 — "6..11: row check buttons — also row select"
-        int row = action - 6;
+        var row = action - 6;
         _selectedRow = row;
         GD.Print($"[HudGuildDiplomacyWindow] Row check action {action} (row {row}) selected. " +
                  "spec: Docs/RE/specs/ui_system.md §8.30.4.");
@@ -472,7 +472,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     {
         // actions 13 (prev) / 14 (next)
         // spec: ui_system.md §8.30.4 — "13/14: prev/next page"
-        int newPage = _currentPage + delta;
+        var newPage = _currentPage + delta;
         if (newPage < 0) newPage = 0;
         if (newPage >= _totalPages) newPage = _totalPages - 1;
         _currentPage = newPage;
@@ -530,7 +530,7 @@ public sealed partial class HudGuildDiplomacyWindow : Control
     {
         // action 34 — name textbox commit
         // spec: ui_system.md §8.30.4 — "34: name-input textbox commit"
-        string name = _nameInput?.Text.Trim() ?? "";
+        var name = _nameInput?.Text.Trim() ?? "";
         GD.Print($"[HudGuildDiplomacyWindow] Name submit '{name}' (action 34). " +
                  "spec: Docs/RE/specs/ui_system.md §8.30.4.");
     }

@@ -1,32 +1,3 @@
-// Ui/Scenes/Load/LoadingWindow.cs
-//
-// State-2 LoadingWindow — IMMEDIATE-MODE renderer of two textured quads:
-//   1. Full-screen background DDS (rand()%3).
-//   2. Progress bar quad: 329×223 px track, fill grows LEFT→RIGHT by U-axis (width fill).
-//
-// SPEC (authoritative): Docs/RE/specs/frontend_layout_tables.md §5 (supersedes frontend_scenes.md §2L).
-//
-// BACKGROUND:
-//   rand()%3 → data/ui/loading.dds | data/ui/loading06.dds | data/ui/loading08.dds.
-//   Full-screen (0,0,screenW,screenH). spec: §5.
-//
-// PROGRESS BAR:
-//   Track in design-space (centre-origin ortho): X span −499..−170 (329 px wide),
-//   Y span −363..−140 (223 px tall). Lower-center placement.
-//   Fill = clamp(223 · pct/100, 0, 223), normalized /1024 → max U 223/1024 ≈ 0.2178.
-//   Fill is a WIDTH fill (U-axis), bar height is always 223 px.
-//   spec: Docs/RE/specs/frontend_layout_tables.md §5.
-//
-// AUDIO:
-//   Looped 2D cue 920100100, category 0 (single direct voice → cannot double-stack).
-//   spec: Docs/RE/specs/frontend_layout_tables.md §5/§7.
-//
-// COMPLETION:
-//   Worker done + 500 ms grace → emit LoadingComplete. LoadScene drives the advance.
-//   spec: §5 "loading active flag cleared by background loader + 500 ms grace".
-//
-// THREADING: all Control mutation on the main thread (_Process + timers). PASSIVE.
-
 using Godot;
 using MartialHeroes.Client.Godot.Audio;
 using MartialHeroes.Client.Godot.Ui.Assets;
@@ -34,126 +5,98 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Load;
 
 /// <summary>
-/// Full-screen loading window (Diamond_LoadingWindow analogue) — immediate-mode two-quad renderer.
-///
-/// <para>Emits <see cref="LoadingCompleteEventHandler"/> after the external load worker completes
-/// plus a 500 ms grace period. LoadScene advances the scene spine on this signal.</para>
-///
-/// <para>Strictly passive: reads atlases from HudAtlasLibrary, turns worker progress into a
-/// U-axis fill width, plays BGM 920100100 via AudioService. No domain mutation.</para>
-///
-/// spec: Docs/RE/specs/frontend_layout_tables.md §5.
+///     Full-screen loading window (Diamond_LoadingWindow analogue) — immediate-mode two-quad renderer.
+///     Background DDS rand()%3 is always present from the real VFS.
+///     Progress bar fills VERTICALLY (top→down): fixed X extents (329 design units), animated bottom-vertex Y
+///     and V texcoord. spec: Docs/RE/scenes/load.md §5A.4 (GAP-1); Docs/RE/specs/frontend_layout_tables.md §5.
+///     Emits <see cref="LoadingCompleteEventHandler" /> after the external load worker completes + 500 ms grace.
 /// </summary>
 public sealed partial class LoadingWindow : Control
 {
-    // =========================================================================
-    // Constants — spec: frontend_layout_tables.md §5.
-    // =========================================================================
+    // ── Signal ───────────────────────────────────────────────────────────────
 
-    // Design canvas dimensions (centre-origin ortho, 1024×768).
-    // spec: frontend_layout_tables.md §5 / §1 "reference canvas 1024×768". CODE-CONFIRMED.
-    private const float RefWidth = 1024f; // spec §1.
-    private const float RefHeight = 768f; // spec §1.
-
-    // Background DDS candidates — rand()%3.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §5.
-    private static readonly string[] BgPaths =
-    [
-        "data/ui/loading.dds", // index 0. spec §5.
-        "data/ui/loading06.dds", // index 1. spec §5.
-        "data/ui/loading08.dds", // index 2. spec §5.
-    ];
-
-    // Progress bar track in design-space (centre-origin ortho):
-    //   X span −499..−170 → 329 px wide.
-    //   Y span −363..−140 → 223 px tall.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §5.
-    private const float TrackDesignX1 = -499f; // left edge.  spec §5.
-    private const float TrackDesignY1 = -363f; // bottom (in centre-origin, +Y up). spec §5.
-    private const float TrackDesignY2 = -140f; // top.        spec §5.
-    private const float TrackDesignHeight = TrackDesignY2 - TrackDesignY1; // 223 px. spec §5.
-
-    // Centre-origin → canvas (top-left +Y down) for track top-left corner:
-    //   cx = 512, cy = 384
-    //   x = cx + TrackDesignX1 = 512 + (−499) = 13
-    //   y = cy − TrackDesignY2 = 384 − (−140) = 524
-    // spec: Docs/RE/specs/frontend_layout_tables.md §5.
-    private const float TrackCanvasX = RefWidth / 2f + TrackDesignX1; // 13.  spec §5.
-    private const float TrackCanvasY = RefHeight / 2f - TrackDesignY2; // 524. spec §5.
-
-    // Fill: fill_px = clamp(223 · pct / 100, 0, 223); U = fill_px / 1024 → max 223/1024.
-    // Fill is a WIDTH (U-axis) fill — bar height is always 223 px.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §5 "max U 223/1024 ≈ 0.2178".
-    private const float FillMaxPx = 223f; // max fill width (screen px). spec §5.
-    private const float FillMaxU = 223f / 1024f; // max U fraction ≈ 0.2178. spec §5.
-
-    // BGM sound id. spec: frontend_layout_tables.md §5/§7 "920100100 looped category 0". CODE-CONFIRMED.
-    private const uint BgmSoundId = 920100100u; // spec §7.
-
-    // Grace period after external worker completes.
-    // spec: frontend_layout_tables.md §5 "500 ms grace before advancing". CODE-CONFIRMED.
-    private const float GraceSeconds = 0.5f; // spec §5.
-
-    // =========================================================================
-    // Public inputs (set by LoadScene before adding to the tree)
-    // =========================================================================
-
-    /// <summary>
-    /// Shared HUD atlas library — used to load the loading DDS textures.
-    /// Must be set before <see cref="_Ready"/> fires.
-    /// </summary>
-    public HudAtlasLibrary? Atlas { get; set; }
-
-    /// <summary>
-    /// Live progress provider from LoadOrchestrator.ProgressQuotient (0..100, clamped by caller).
-    /// LoadScene wires this. When null the bar stays at 0.
-    /// spec: Docs/RE/specs/resource_pipeline.md §2.4.
-    /// </summary>
-    public Func<int>? ProgressProvider { get; set; }
-
-    /// <summary>
-    /// When true, LoadScene manages the loading BGM via GodotLoadingSoundSink / AudioService.
-    /// When false (offline), this window starts the BGM itself to avoid doubling.
-    /// spec: frontend_layout_tables.md §5/§7; sound.md §15.6a.
-    /// </summary>
-    public bool PlayOwnCue { get; set; } = true;
-
-    // =========================================================================
-    // Signal
-    // =========================================================================
-
-    /// <summary>
-    /// Emitted after the external worker completes + 500 ms grace elapses.
-    /// LoadScene advances the scene spine on this signal.
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §5.
-    /// </summary>
+    /// <summary>Emitted after the external worker completes + 500 ms grace elapses.</summary>
     [Signal]
     public delegate void LoadingCompleteEventHandler();
 
-    // =========================================================================
-    // View state
-    // =========================================================================
+    // spec: frontend_layout_tables.md §5 / §1 "reference canvas 1024×768".
+    private const float RefWidth = 1024f;
+    private const float RefHeight = 768f;
+
+    // Progress bar track in design-space (centre-origin ortho, Y-down).
+    // X-left  = −499, X-right = −170  → X span = 329 design units.
+    // Y-top   = −363, Y-bottom = −140 → Y span = 223 design units (fill max).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §5; Docs/RE/scenes/load.md §5A.2 steps 21/§5A.4.
+    private const float TrackDesignXLeft = -499f; // spec §5 "X-left  xScale·−499".
+    private const float TrackDesignXRight = -170f; // spec §5 "X-right xScale·−170".
+
+    private const float TrackDesignYTop = -363f; // spec §5 "Y-top   yScale·−363".
+    // TrackDesignYBottom = −140 is the fully-filled position (pct=100) — not used directly.
+
+    // Track in canvas space (top-left origin, +Y down): centre = (512, 384).
+    // X-left  canvas = 512 + (−499) = 13.   spec §5.
+    // X-right canvas = 512 + (−170) = 342.  spec §5. Width = 329.
+    // Y-top   canvas = 384 + (−363) = 21.   spec §5.
+    private const float TrackCanvasX = RefWidth / 2f + TrackDesignXLeft; // 13.  spec §5.
+    private const float TrackCanvasY = RefHeight / 2f + TrackDesignYTop; // 21.  spec §5.
+    private const float TrackCanvasWidth = TrackDesignXRight - TrackDesignXLeft; // 329. spec §5.
+
+    // Fill height: clamp(223 · pct / 100, 0, 223) design-px — grows downward from Y-top.
+    // spec: Docs/RE/scenes/load.md §5A.4; frontend_layout_tables.md §5 "fill_px = clamp(223·pct/100,0,223)".
+    private const float FillMaxPx = 223f; // spec §5 / load.md §5A.4 "max 223 ref-units".
+
+    // UV sub-rect of the bg DDS for the gauge fill band (pixels, before normalization).
+    // U: 443..772 (329 src px wide, fixed). V-top: 576 (fixed). V-bottom: 576+fill_px (animated).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §5 "U 443/1024..772/1024, V 576/768..744/768".
+    // The DDS is 1024×1024 (inferred V=0.75=768/1024 per load.md §5A.3); pixel coords are into that DDS.
+    private const float GaugeSrcULeft = 443f; // spec §5.
+    private const float GaugeSrcVTop = 576f; // spec §5 "V 576/768" → pixel row 576 in the 1024×1024 DDS.
+
+    // BGM. spec: frontend_layout_tables.md §5/§7 "920100100 looped category 0".
+    private const uint BgmSoundId = 920100100u;
+
+    // Grace after worker completes. spec: frontend_layout_tables.md §5 "500 ms grace".
+    private const float GraceSeconds = 0.5f;
+
+    // Background DDS candidates — rand()%3. spec: frontend_layout_tables.md §5.
+    private static readonly string[] BgPaths =
+    [
+        "data/ui/loading.dds",
+        "data/ui/loading06.dds",
+        "data/ui/loading08.dds"
+    ];
+
+    // ── View state ───────────────────────────────────────────────────────────
 
     private TextureRect? _bgRect;
-    private TextureRect? _fillRect;
     private Texture2D? _chosenTex;
-
-    // Current bar fill width in screen pixels (0..223).
     private float _fillPx;
-
-    private bool _workerDone;
+    private TextureRect? _fillRect;
     private bool _gracePending;
+    private bool _workerDone;
 
-    // =========================================================================
-    // Godot lifecycle
-    // =========================================================================
+    // ── Public inputs (set by LoadScene before adding to the tree) ───────────
+
+    /// <summary>Shared HUD atlas library — loads the loading DDS textures from the real VFS.</summary>
+    public HudAtlasLibrary? Atlas { get; set; }
+
+    /// <summary>Live progress provider from LoadOrchestrator.ProgressQuotient (0..100, clamped by caller).</summary>
+    public Func<int>? ProgressProvider { get; set; }
+
+    /// <summary>
+    ///     When true LoadScene manages the loading BGM via GodotLoadingSoundSink / AudioService.
+    ///     When false this window starts the BGM itself to avoid doubling.
+    ///     spec: frontend_layout_tables.md §5/§7; sound.md §15.6a.
+    /// </summary>
+    public bool PlayOwnCue { get; set; } = true;
+
+    // ── Godot lifecycle ──────────────────────────────────────────────────────
 
     public override void _Ready()
     {
         GD.Print("[LoadingWindow] _Ready — state-2 loading screen. spec: frontend_layout_tables.md §5.");
 
-        // Choose background by rand()%3. spec: frontend_layout_tables.md §5 "rand()%3". CODE-CONFIRMED.
-        int bgIdx = (int)(global::Godot.GD.Randi() % 3u);
+        var bgIdx = (int)(GD.Randi() % 3u); // spec §5 "rand()%3".
         GD.Print($"[LoadingWindow] BG index={bgIdx} → {BgPaths[bgIdx]}.");
 
         Size = new Vector2(RefWidth, RefHeight);
@@ -165,21 +108,19 @@ public sealed partial class LoadingWindow : Control
             StartBgm();
 
         GD.Print($"[LoadingWindow] Built. BG={BgPaths[bgIdx]}, PlayOwnCue={PlayOwnCue}.");
-
-        Dev.LayoutDump.DumpDeferred(this, "LOAD");
     }
 
     public override void _Process(double delta)
     {
         if (_workerDone) return;
 
-        // Pull progress from the LoadOrchestrator. spec: resource_pipeline.md §2.4.
-        int pct = ProgressProvider is not null
+        var pct = ProgressProvider is not null
             ? Math.Clamp(ProgressProvider(), 0, 100)
             : 0;
 
-        // Fill width: clamp(223 · pct / 100, 0, 223). spec: frontend_layout_tables.md §5.
-        float newFill = Math.Clamp(FillMaxPx * pct / 100f, 0f, FillMaxPx);
+        // Fill height (vertical, top→down): clamp(223 · pct / 100, 0, 223).
+        // spec: Docs/RE/scenes/load.md §5A.4; Docs/RE/specs/frontend_layout_tables.md §5.
+        var newFill = Math.Clamp(FillMaxPx * pct / 100f, 0f, FillMaxPx);
         if (Math.Abs(newFill - _fillPx) > 0.01f)
         {
             _fillPx = newFill;
@@ -187,33 +128,22 @@ public sealed partial class LoadingWindow : Control
         }
     }
 
-    // =========================================================================
-    // External API (called by LoadScene on the main thread via CallDeferred)
-    // =========================================================================
+    // ── External API ─────────────────────────────────────────────────────────
 
-    /// <summary>
-    /// Called by LoadScene when the LoadOrchestrator worker completes.
-    /// Starts the 500 ms grace timer before emitting LoadingComplete.
-    /// spec: Docs/RE/specs/frontend_layout_tables.md §5.
-    /// </summary>
+    /// <summary>Called by LoadScene when the LoadOrchestrator worker completes. Starts the 500 ms grace timer.</summary>
     public void CompleteExternalLoad()
     {
         if (_workerDone) return;
         _workerDone = true;
 
-        // Snap to full fill. spec §5.
         _fillPx = FillMaxPx;
         UpdateFill();
 
         GD.Print("[LoadingWindow] Worker done — starting 500 ms grace. spec §5.");
 
-        SceneTreeTimer grace = GetTree().CreateTimer(GraceSeconds, processAlways: true);
+        var grace = GetTree().CreateTimer(GraceSeconds);
         grace.Timeout += OnGraceExpired;
     }
-
-    // =========================================================================
-    // Event handlers
-    // =========================================================================
 
     private void OnGraceExpired()
     {
@@ -224,144 +154,100 @@ public sealed partial class LoadingWindow : Control
         EmitSignal(SignalName.LoadingComplete);
     }
 
-    // =========================================================================
-    // UI construction
-    // =========================================================================
+    // ── UI construction ──────────────────────────────────────────────────────
 
     private void BuildLayout(int bgIdx)
     {
-        // ── Background quad — full-screen ──────────────────────────────────────
-        // spec: frontend_layout_tables.md §5 "full-screen (0,0,screenW,screenH)".
+        // Background quad — full-screen. spec: frontend_layout_tables.md §5.
         _bgRect = new TextureRect
         {
             Name = "BgRect",
             Position = Vector2.Zero,
             Size = new Vector2(RefWidth, RefHeight),
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            // IgnoreSize: respect the 1024×768 Size instead of ballooning to the 1024×1024 DDS.
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_bgRect);
 
         LoadBackgroundTexture(bgIdx);
-
-        // ── Progress bar fill — 329×223 px track, U-axis fill ──────────────────
-        // spec: frontend_layout_tables.md §5.
         BuildFillRect();
     }
 
     private void BuildFillRect()
     {
-        // Track top-left in canvas space (top-left origin, +Y down):
-        //   x = 512 + (−499) = 13
-        //   y = 384 − (−140) = 524
-        // Track dimensions: 329 × 223 px.
-        // Fill starts at 0 width; bar height is always 223 px (full height from start).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §5.
+        // Track top-left in canvas space: x=13, y=21. Width fixed at 329. Height starts at 0 (no fill yet).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §5; Docs/RE/scenes/load.md §5A.4.
         _fillRect = new TextureRect
         {
             Name = "FillRect",
-            Position = new Vector2(TrackCanvasX, TrackCanvasY), // top-left of track. spec §5.
-            Size = new Vector2(0f, TrackDesignHeight), // width grows, height fixed. spec §5.
+            Position = new Vector2(TrackCanvasX, TrackCanvasY), // (13, 21). spec §5.
+            Size = new Vector2(TrackCanvasWidth, 0f), // width=329 fixed; height=0 until fill starts.
             StretchMode = TextureRect.StretchModeEnum.Scale,
-            // IgnoreSize: the bar must respect its (fill_px × 223) Size, not balloon to the DDS size.
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             MouseFilter = MouseFilterEnum.Ignore,
-            Visible = false,
+            Visible = false
         };
         AddChild(_fillRect);
 
         ApplyFillTexture();
     }
 
-    // =========================================================================
-    // Bar update (called from _Process and CompleteExternalLoad)
-    // =========================================================================
-
     private void UpdateFill()
     {
         if (_fillRect is null) return;
 
-        // Width fill: _fillPx ∈ [0,223] screen px. Position is fixed (left edge of track).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §5 "U-axis fill, bar height always 223 px".
-        _fillRect.Size = new Vector2(_fillPx, TrackDesignHeight);
+        // Fill grows VERTICALLY (top→down): height = fill_px, X extents are FIXED at 329 wide.
+        // spec: Docs/RE/scenes/load.md §5A.4 "the fill grows downward from a fixed top edge".
+        _fillRect.Size = new Vector2(TrackCanvasWidth, _fillPx);
         _fillRect.Visible = _fillPx > 0f && _fillRect.Texture is not null;
 
         ApplyFillTexture();
     }
 
-    // =========================================================================
-    // Asset loading
-    // =========================================================================
+    // ── Asset loading ────────────────────────────────────────────────────────
 
     private void LoadBackgroundTexture(int bgIdx)
     {
-        if (Atlas is null)
+        var tex = Atlas?.GetByPath(BgPaths[bgIdx]);
+        if (tex is null)
         {
-            GD.Print("[LoadingWindow] No atlas library — background transparent (offline).");
+            GD.PrintErr($"[LoadingWindow] Loading DDS absent: {BgPaths[bgIdx]}.");
             return;
         }
 
-        try
-        {
-            Texture2D? tex = Atlas.GetByPath(BgPaths[bgIdx]);
-            if (tex is null)
-            {
-                GD.PrintErr($"[LoadingWindow] Loading DDS absent: {BgPaths[bgIdx]} — transparent.");
-                return;
-            }
-
-            _chosenTex = tex;
-            GD.Print($"[LoadingWindow] BG {BgPaths[bgIdx]} loaded ({tex.GetWidth()}×{tex.GetHeight()}).");
-            _bgRect!.Texture = tex;
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[LoadingWindow] LoadBackgroundTexture failed: {ex.Message} — transparent.");
-        }
+        _chosenTex = tex;
+        GD.Print($"[LoadingWindow] BG {BgPaths[bgIdx]} loaded ({tex.GetWidth()}×{tex.GetHeight()}).");
+        _bgRect!.Texture = tex;
     }
 
     private void ApplyFillTexture()
     {
         if (_fillRect is null || _chosenTex is null) return;
 
-        // Fill samples the background DDS from U=0 up to fill_px/1024.
-        // fill_px = _fillPx (0..223); U_max = _fillPx/1024 → max 223/1024 ≈ 0.2178.
-        // Height: full texture height (V=0..1) so the bar shows the bottom strip of the DDS.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §5 "max U 223/1024".
-        int texW = _chosenTex.GetWidth(); // typically 1024
-        int texH = _chosenTex.GetHeight(); // typically 1024
-
-        float uWidthPx = texW * (_fillPx / 1024f); // fill_px normalised by 1024 → texture pixels
-        // spec: §5 fill_px/1024 = U fraction; multiply by texW for AtlasTexture region.
-
+        // V-axis fill: sample a fixed U band [443..772] and animate the V-bottom downward.
+        // U extents are fixed at 329 source pixels: U-left=443, U-width=329.
+        // V-top is fixed at pixel row 576. V-height = fill_px (grows 0..223).
+        // The DDS is 1024×1024 (see load.md §5A.3); texcoord delta = fill_px / 1024.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §5 "U 443/1024..772/1024, V 576/768..744/768";
+        //        Docs/RE/scenes/load.md §5A.4 "V texcoord of the two moving vertices shifts by fill_px·(1/1024)".
         _fillRect.Texture = new AtlasTexture
         {
             Atlas = _chosenTex,
-            Region = new Rect2(0f, 0f, uWidthPx, texH), // U-axis fill; full V. spec §5.
-            FilterClip = false,
+            Region = new Rect2(GaugeSrcULeft, GaugeSrcVTop, TrackCanvasWidth, _fillPx),
+            FilterClip = false
         };
-
-        GD.Print(FormattableString.Invariant(
-            $"[LoadingWindow] Fill width={_fillPx:F1}/{FillMaxPx:F0}px, U={_fillPx / 1024f:F4} (max={FillMaxU:F4}). spec: frontend_layout_tables.md §5."));
     }
 
-    // =========================================================================
-    // BGM (offline-only path)
-    // =========================================================================
+    // ── BGM ──────────────────────────────────────────────────────────────────
 
     private void StartBgm()
     {
-        // Looped BGM 920100100, category 0. spec: frontend_layout_tables.md §5/§7. CODE-CONFIRMED.
+        // spec: frontend_layout_tables.md §5/§7 "920100100 looped category 0".
         if (AudioService.Instance is { } audio)
         {
-            audio.StartBgm(BgmSoundId); // spec §7 "920100100 looped category 0". CODE-CONFIRMED.
-            GD.Print($"[LoadingWindow] BGM {BgmSoundId} started (offline path). spec §5/§7.");
-        }
-        else
-        {
-            GD.Print($"[LoadingWindow] AudioService unavailable — BGM {BgmSoundId} skipped (headless).");
+            audio.StartBgm(BgmSoundId);
+            GD.Print($"[LoadingWindow] BGM {BgmSoundId} started.");
         }
     }
 }

@@ -1,0 +1,23 @@
+name: SmsgItemPanelSlotRefresh
+opcode: 0x40099           # major 4, minor 153
+direction: S2C
+size: variable            # 12 + 16 * Count
+spec: packets/4-153_item_panel_slot_refresh.yaml
+status: confirmed
+capture_verified: false
+
+summary: Refresh a single slot or a range of slots in the inventory container. Can clear slots or insert slot records.
+
+fields:
+  - { name: Guard,       type: u8 }           # 0x00 Guard value
+  - { name: Pad0,        type: "bytes[3]" }   # 0x01 Alignment padding
+  - { name: PlayerId,    type: u32 }          # 0x04 Target player actor id
+  - { name: Action,      type: i8 }           # 0x08 0 = update slot records, -1 (0xFF) = close panel
+  - { name: StartSlot,   type: u8 }           # 0x09 Starting slot index to update
+  - { name: Count,       type: u8 }           # 0x0a Number of records in the payload
+  - { name: Pad1,        type: "bytes[1]" }   # 0x0b Alignment padding
+  - { name: Records,     type: "ItemSlotRecord[Count]" } # 0x0c contiguously packed 16-byte slot records
+
+notes: |
+  Shares the same wire layout structure as SmsgItemPanelSlotChunk (4/149), but is processed by SmsgItemPanelSlotRefresh_Handler.
+  If Action == -1 (0xFF), the client closes the item panel. If Action == 0, it invokes the inventory-container slot-refresh routine to refresh the slots starting at StartSlot for Count records.

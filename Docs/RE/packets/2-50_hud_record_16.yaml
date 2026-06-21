@@ -1,0 +1,36 @@
+# spec: Docs/RE/packets/2-50_hud_record_16.yaml
+# Role: C2S submit a 16-byte HUD record (closes any open panel group first).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgHudRecord16
+opcode: 0x20032           # major 2 (GameAction), minor 50 -> (2 << 16) | 50
+direction: C2S
+size: 16                  # fixed 16-byte body
+spec: packets/2-50_hud_record_16.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Submit a 16-byte HUD record. The sender closes any open panel group, then blits a 16-byte caller-assembled record. Sibling of 2/55 (32B) and 2/58 (24B, priced) in the same in-game panel cluster.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 16.
+fields:
+  - { name: Record, type: "u8[16]" }   # 0x00  opaque 16-byte record (likely 4x u32 or id+coords) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 16-byte blit of an opaque caller-assembled
+  record). The record's internal layout is not resolvable from the send side (capture-pending) — the
+  builder's selector here is a trivial constant that gates only, so no field is read on the way out.
+
+    0x00 (16B) Record : an opaque 16-byte HUD record (likely four u32, or an id plus coordinates).
+                        [capture/debugger-pending]
+
+  TRIGGER: a HUD action that first closes any open panel group, then submits the 16-byte record.
+  Shares its caller cluster with 2/55 (32-byte record) and 2/58 (24-byte priced commit) — one
+  logical panel's action set.
+
+  UNKNOWNS to resolve with a capture:
+    - the internal field breakdown of the 16-byte record;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application 16-byte HUD record submit use-case.

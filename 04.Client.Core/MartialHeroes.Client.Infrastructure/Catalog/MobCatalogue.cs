@@ -1,38 +1,39 @@
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
 
 namespace MartialHeroes.Client.Infrastructure.Catalog;
 
 /// <summary>
-/// In-memory lookup catalogue for mob (monster) definitions parsed from
-/// <c>data/script/mobs.scr</c>.
+///     In-memory lookup catalogue for mob (monster) definitions parsed from
+///     <c>data/script/mobs.scr</c>.
 /// </summary>
 /// <remarks>
-/// <para>
-/// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr — "stride: 488 bytes, 3,997 records": CONFIRMED.
-/// </para>
-/// <para>
-/// Only confirmed / plausible-range fields are surfaced. The majority of the 488-byte record is
-/// UNVERIFIED and is preserved as the raw record in <see cref="MobRecord.Raw"/> for future analysis.
-/// spec: §2.9 — "internal layout: majority UNVERIFIED".
-/// </para>
+///     <para>
+///         spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr — "stride: 488 bytes, 3,997 records": CONFIRMED.
+///     </para>
+///     <para>
+///         Only confirmed / plausible-range fields are surfaced. The majority of the 488-byte record is
+///         UNVERIFIED and is preserved as the raw record in <see cref="MobRecord.Raw" /> for future analysis.
+///         spec: §2.9 — "internal layout: majority UNVERIFIED".
+///     </para>
 /// </remarks>
 public sealed class MobCatalogue
 {
     private readonly Dictionary<ushort, MobRecord> _byId;
 
     /// <summary>
-    /// Constructs the catalogue from pre-parsed mob catalogue entries.
+    ///     Constructs the catalogue from pre-parsed mob catalogue entries.
     /// </summary>
     /// <param name="entries">
-    /// Records as returned by <see cref="MartialHeroes.Assets.Parsers.ConfigTableParser.ParseMobsScr"/>.
-    /// spec: Docs/RE/formats/config_tables.md §2.9.
+    ///     Records as returned by <see cref="ConfigTableParser.ParseMobsScr" />.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9.
     /// </param>
     public MobCatalogue(MobCatalogEntry[] entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
         _byId = new Dictionary<ushort, MobRecord>(entries.Length);
 
-        foreach (MobCatalogEntry e in entries)
+        foreach (var e in entries)
         {
             var record = new MobRecord
             {
@@ -53,15 +54,18 @@ public sealed class MobCatalogue
                 SpawnTimerSeconds = e.SpawnTimer,
 
                 // Full raw record for future analysis of UNVERIFIED fields.
-                Raw = e.Raw,
+                Raw = e.Raw
             };
 
             _byId[e.Id] = record;
         }
     }
 
+    /// <summary>Number of mobs in this catalogue.</summary>
+    public int Count => _byId.Count;
+
     /// <summary>
-    /// Creates a <see cref="MobCatalogue"/> by loading <c>mobs.scr</c> from the given loader.
+    ///     Creates a <see cref="MobCatalogue" /> by loading <c>mobs.scr</c> from the given loader.
     /// </summary>
     public static MobCatalogue FromLoader(VfsCatalogueLoader loader)
     {
@@ -69,58 +73,57 @@ public sealed class MobCatalogue
         return new MobCatalogue(loader.LoadMobsScr());
     }
 
-    /// <summary>Number of mobs in this catalogue.</summary>
-    public int Count => _byId.Count;
-
     /// <summary>
-    /// Looks up a mob by its ID.
-    /// Returns <see langword="null"/> when the ID is not present.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — Mob ID u16 @ +0 is the map key.
+    ///     Looks up a mob by its ID.
+    ///     Returns <see langword="null" /> when the ID is not present.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — Mob ID u16 @ +0 is the map key.
     /// </summary>
-    public MobRecord? TryGet(ushort mobId) =>
-        _byId.TryGetValue(mobId, out var r) ? r : null;
+    public MobRecord? TryGet(ushort mobId)
+    {
+        return _byId.TryGetValue(mobId, out var r) ? r : null;
+    }
 }
 
 /// <summary>
-/// A decoded mob record. Only confirmed / plausible-range fields are surfaced.
-/// spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr.
+///     A decoded mob record. Only confirmed / plausible-range fields are surfaced.
+///     spec: Docs/RE/formats/config_tables.md §2.9 mobs.scr.
 /// </summary>
 public sealed record MobRecord
 {
     /// <summary>
-    /// Mob ID (map key). u16 @ +0.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "Mob ID u16 @ +0: CONFIRMED".
+    ///     Mob ID (map key). u16 @ +0.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "Mob ID u16 @ +0: CONFIRMED".
     /// </summary>
     public required ushort Id { get; init; }
 
     /// <summary>
-    /// Mob type byte @ +324.
-    /// 0 = normal (3,749 records); 2–10 = sub-types; 11 = boss/elite (125 records); 12 = special.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "+324 u8 Mob type: CONFIRMED".
+    ///     Mob type byte @ +324.
+    ///     0 = normal (3,749 records); 2–10 = sub-types; 11 = boss/elite (125 records); 12 = special.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+324 u8 Mob type: CONFIRMED".
     /// </summary>
     public required byte Type { get; init; }
 
     /// <summary>
-    /// Mob level @ +244. −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "+244 i32 Mob level: CONFIRMED (boss validation path)".
+    ///     Mob level @ +244. −1 = not set; 0 = trivial; boss range 36..46 for ID range 14000–14009.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+244 i32 Mob level: CONFIRMED (boss validation path)".
     /// </summary>
     public required int Level { get; init; }
 
     /// <summary>
-    /// Spawn timer in seconds @ +248. Range 33..41,006 in sample; boss default ≈ 40 s.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "+248 u32 Spawn timer (seconds): CONFIRMED (plausible range)".
+    ///     Spawn timer in seconds @ +248. Range 33..41,006 in sample; boss default ≈ 40 s.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "+248 u32 Spawn timer (seconds): CONFIRMED (plausible range)".
     /// </summary>
     public required uint SpawnTimerSeconds { get; init; }
 
     /// <summary>
-    /// True if this is a boss/elite mob (Type == 11).
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "mob type byte = 11 → boss/elite": CONFIRMED.
+    ///     True if this is a boss/elite mob (Type == 11).
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "mob type byte = 11 → boss/elite": CONFIRMED.
     /// </summary>
     public bool IsBoss => Type == 11;
 
     /// <summary>
-    /// Full raw 488-byte record. Fields between confirmed offsets are UNVERIFIED.
-    /// spec: Docs/RE/formats/config_tables.md §2.9 — "mobs.scr stride 488 bytes: CONFIRMED".
+    ///     Full raw 488-byte record. Fields between confirmed offsets are UNVERIFIED.
+    ///     spec: Docs/RE/formats/config_tables.md §2.9 — "mobs.scr stride 488 bytes: CONFIRMED".
     /// </summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }

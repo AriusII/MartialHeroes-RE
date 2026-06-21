@@ -1,0 +1,284 @@
+// spec: Docs/RE/opcodes.md — compile-time source generator for the PacketRouter switch.
+//
+// Scans structs carrying [PacketOpcode(major, minor)] in the compilation AND all referenced
+// assemblies, then emits a partial PacketRouter with a generated routing switch. Each arm:
+//   (a) validates payload.Length >= <T>.WireSize (or HeaderSize/Size for variable-length packets),
+//   (b) reinterprets the payload in place via MemoryMarshal.AsRef<T>,
+//   (c) calls handler.Handle(in view) ONLY when IPacketHandler has a matching Handle(in T) overload.
+//
+// If no Handle(in T) overload exists for a tagged struct, the arm is NOT emitted — it falls through
+// to the default arm (OnUnhandled), preserving the current runtime behaviour.
+//
+// Reflection-free generated code: no Activator, no Dictionary, no LINQ in the emitted switch.
+//
+// NOTE on discovery strategy: the generator runs on the Network.Protocol.Routing compilation, which
+// REFERENCES the packet-struct assemblies (Packets.Login / .World / .Social) rather than containing
+// their source. A SyntaxProvider only visits nodes in the CURRENT compilation's source files, so it
+// would find zero structs. Instead we walk compilation.GlobalNamespace recursively — this covers both
+// the current compilation's types AND all types visible from referenced assemblies — so every
+// [PacketOpcode]-tagged struct is discovered regardless of which assembly defined it.
+// spec: Docs/RE/opcodes.md.
+
+using System;
+using System.Collections.Generic;
+using System.Text;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+
+namespace MartialHeroes.Network.Protocol.Generators;
+
+[Generator]
+public sealed class PacketRouterGenerator : IIncrementalGenerator
+{
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        // Register directly off CompilationProvider: no syntax scan needed because we walk the
+        // semantic symbol graph (covers referenced assemblies, not just source-in-this-project).
+        // spec: Docs/RE/opcodes.md — (major:minor) -> handler dispatch.
+        context.RegisterSourceOutput(context.CompilationProvider, static (spc, compilation) =>
+        {
+            // Resolve [PacketOpcodeAttribute] by metadata name.
+            // Namespace confirmed from 02.Network.Layer/MartialHeroes.Network.Protocol.Core/Opcodes/PacketOpcodeAttribute.cs.
+            // spec: Docs/RE/opcodes.md.
+            var opcodeAttrSymbol = compilation.GetTypeByMetadataName(
+                "MartialHeroes.Network.Protocol.Core.Opcodes.PacketOpcodeAttribute");
+
+            // Build the list of [PacketOpcode]-tagged packet structs by walking the whole namespace tree.
+            var packets = new List<PacketInfo>();
+            var seenOpcodes = new HashSet<uint>();
+
+            // Walk starting from the MartialHeroes child of the global namespace so we skip
+            // System.*, Microsoft.*, K4os.*, SQLitePCLRaw.*, etc. entirely.
+            var globalNs = compilation.GlobalNamespace;
+            foreach (var topLevel in globalNs.GetNamespaceMembers())
+            {
+                if (topLevel.Name != "MartialHeroes")
+                    continue;
+
+                CollectTaggedStructs(topLevel, opcodeAttrSymbol, packets, seenOpcodes, compilation);
+            }
+
+            // Resolve IPacketHandler to know which Handle(in T) overloads exist.
+            var handlerInterface = compilation.GetTypeByMetadataName(
+                "MartialHeroes.Network.Protocol.Routing.Routing.IPacketHandler");
+
+            var handleOverloadFqns = new HashSet<string>(
+                StringComparer.Ordinal);
+
+            if (handlerInterface is not null)
+                foreach (var member in handlerInterface.GetMembers())
+                    if (member is IMethodSymbol method && method.Name == "Handle"
+                                                       && method.Parameters.Length == 1)
+                    {
+                        var param = method.Parameters[0];
+                        if (param.RefKind == RefKind.In)
+                        {
+                            // Must match the FQN format used when scanning tagged structs.
+                            var typeFqn = param.Type.ToDisplayString(
+                                new SymbolDisplayFormat(
+                                    SymbolDisplayGlobalNamespaceStyle.Omitted,
+                                    SymbolDisplayTypeQualificationStyle
+                                        .NameAndContainingTypesAndNamespaces));
+                            handleOverloadFqns.Add(typeFqn);
+                        }
+                    }
+
+            // Sort by packed opcode for deterministic output.
+            packets.Sort(static (a, b) => a.PackedOpcode.CompareTo(b.PackedOpcode));
+
+            // Emit the generated source.
+            var sb = new StringBuilder();
+            sb.AppendLine("// <auto-generated>");
+            sb.AppendLine("//   Generated by PacketRouterGenerator.");
+            sb.AppendLine("//   spec: Docs/RE/opcodes.md — compile-time (major:minor) -> handler dispatch.");
+            sb.AppendLine("//   DO NOT EDIT by hand — this file is regenerated on every build.");
+            sb.AppendLine("// </auto-generated>");
+            sb.AppendLine("#nullable enable");
+            sb.AppendLine();
+            sb.AppendLine("using System.Runtime.InteropServices;");
+            sb.AppendLine("using MartialHeroes.Network.Protocol.Packets;");
+            sb.AppendLine();
+            sb.AppendLine("namespace MartialHeroes.Network.Protocol.Routing.Routing;");
+            sb.AppendLine();
+            sb.AppendLine("public static partial class PacketRouter");
+            sb.AppendLine("{");
+            sb.AppendLine("    /// <summary>");
+            sb.AppendLine("    /// Source-generated dispatch switch over all [PacketOpcode]-tagged structs.");
+            sb.AppendLine("    /// Arms are emitted only for structs with a Handle(in T) overload in IPacketHandler.");
+            sb.AppendLine("    /// All other opcodes reach OnUnhandled via the default arm. spec: Docs/RE/opcodes.md.");
+            sb.AppendLine("    /// </summary>");
+            sb.AppendLine(
+                "    private static bool RouteGenerated(uint packedOpcode, System.ReadOnlySpan<byte> payload, IPacketHandler handler)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        switch (packedOpcode)");
+            sb.AppendLine("        {");
+
+            var armsEmitted = 0;
+            foreach (var packet in packets)
+            {
+                // Only emit a typed arm when IPacketHandler.Handle(in T) exists for this struct.
+                if (!handleOverloadFqns.Contains(packet.FullyQualifiedName))
+                    continue;
+
+                armsEmitted++;
+                sb.AppendLine($"            // {packet.Major}/{packet.Minor} {packet.Name} — spec: Docs/RE/opcodes.md");
+                sb.AppendLine($"            case 0x{packet.PackedOpcode:X}:");
+                sb.AppendLine($"                if (payload.Length < {packet.FullyQualifiedName}.{packet.SizeConst})");
+                sb.AppendLine("                {");
+                sb.AppendLine("                    throw new System.ArgumentOutOfRangeException(");
+                sb.AppendLine("                        nameof(payload), payload.Length,");
+                sb.AppendLine(
+                    $"                        $\"Payload too small for {packet.Name}: need {{{packet.FullyQualifiedName}.{packet.SizeConst}}} bytes.\");");
+                sb.AppendLine("                }");
+                sb.AppendLine(
+                    $"                handler.Handle(in MemoryMarshal.AsRef<{packet.FullyQualifiedName}>(payload));");
+                sb.AppendLine("                return true;");
+                sb.AppendLine();
+            }
+
+            // Default arm — routes unknown / untyped opcodes to OnUnhandled.
+            // spec: Docs/RE/opcodes.md — keepalive opcodes 0/0, 3/1, 3/7, 3/4, 3/6, 3/23 are
+            // forwarded here intentionally: they keep the session alive without throwing.
+            sb.AppendLine("            default:");
+            sb.AppendLine("                handler.OnUnhandled(packedOpcode, payload);");
+            sb.AppendLine("                return false;");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+
+            spc.AddSource("PacketRouter.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Symbol-walk helpers
+    // ---------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Recursively walks <paramref name="ns" /> and all child namespaces, collecting every
+    ///     public struct that carries [PacketOpcodeAttribute]. Covers types from both the current
+    ///     compilation's source and from any referenced assembly — unlike SyntaxProvider which only
+    ///     sees the current compilation's syntax trees. spec: Docs/RE/opcodes.md.
+    /// </summary>
+    private static void CollectTaggedStructs(
+        INamespaceSymbol ns,
+        INamedTypeSymbol? opcodeAttrSymbol,
+        List<PacketInfo> packets,
+        HashSet<uint> seenOpcodes,
+        Compilation compilation)
+    {
+        // Visit all types directly in this namespace.
+        foreach (var type in ns.GetTypeMembers())
+            InspectType(type, opcodeAttrSymbol, packets, seenOpcodes, compilation);
+
+        // Recurse into child namespaces.
+        foreach (var child in ns.GetNamespaceMembers())
+            CollectTaggedStructs(child, opcodeAttrSymbol, packets, seenOpcodes, compilation);
+    }
+
+    private static void InspectType(
+        INamedTypeSymbol type,
+        INamedTypeSymbol? opcodeAttrSymbol,
+        List<PacketInfo> packets,
+        HashSet<uint> seenOpcodes,
+        Compilation compilation)
+    {
+        if (type.TypeKind != TypeKind.Struct)
+            return;
+
+        // Find [PacketOpcode(major, minor)] — match by attribute class name (simple, proven) or
+        // by symbol equality when the symbol resolved successfully (more robust).
+        AttributeData? attr = null;
+        foreach (var a in type.GetAttributes())
+        {
+            var attrClass = a.AttributeClass;
+            if (attrClass is null)
+                continue;
+
+            var matched = opcodeAttrSymbol is not null
+                ? SymbolEqualityComparer.Default.Equals(attrClass, opcodeAttrSymbol)
+                : attrClass.Name == "PacketOpcodeAttribute" || attrClass.Name == "PacketOpcode";
+
+            if (matched)
+            {
+                attr = a;
+                break;
+            }
+        }
+
+        if (attr is null || attr.ConstructorArguments.Length < 2)
+            return;
+
+        var majorObj = attr.ConstructorArguments[0].Value;
+        var minorObj = attr.ConstructorArguments[1].Value;
+        if (majorObj is null || minorObj is null)
+            return;
+
+        var major = Convert.ToUInt16(majorObj);
+        var minor = Convert.ToUInt16(minorObj);
+        var packed = ((uint)major << 16) | minor;
+
+        // Skip duplicate opcodes — first struct encountered wins.
+        if (!seenOpcodes.Add(packed))
+            return;
+
+        // Use the minimal (non-global-prefixed) fully qualified name for generated code.
+        // SymbolDisplayFormat.FullyQualifiedFormat produces "global::Ns.Name" which doesn't
+        // compile in files that lack a top-level global:: alias resolution. We emit the
+        // namespace-qualified name without the global:: prefix instead.
+        var fqn = type.ToDisplayString(
+            new SymbolDisplayFormat(
+                SymbolDisplayGlobalNamespaceStyle.Omitted,
+                SymbolDisplayTypeQualificationStyle
+                    .NameAndContainingTypesAndNamespaces));
+        var name = type.Name;
+
+        // Detect the size constant: WireSize (fixed) > HeaderSize (var header) > Size (fallback).
+        // spec: Docs/RE/opcodes.md — every fixed-size packet struct declares one of these.
+        string? sizeConst = null;
+        foreach (var member in type.GetMembers())
+            if (member is IFieldSymbol field && field.IsConst)
+            {
+                if (field.Name == "WireSize")
+                {
+                    sizeConst = "WireSize";
+                    break;
+                }
+
+                if (field.Name == "HeaderSize" && sizeConst is null)
+                    sizeConst = "HeaderSize";
+                else if (field.Name == "Size" && sizeConst is null)
+                    sizeConst = "Size";
+            }
+
+        if (sizeConst is null)
+            return; // cannot emit a safe length check
+
+        packets.Add(new PacketInfo(packed, major, minor, fqn, name, sizeConst));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Data carrier
+    // ---------------------------------------------------------------------------
+
+    private sealed class PacketInfo
+    {
+        public readonly string FullyQualifiedName;
+        public readonly ushort Major;
+        public readonly ushort Minor;
+        public readonly string Name;
+        public readonly uint PackedOpcode;
+        public readonly string SizeConst;
+
+        public PacketInfo(uint packed, ushort major, ushort minor,
+            string fqn, string name, string sizeConst)
+        {
+            PackedOpcode = packed;
+            Major = major;
+            Minor = minor;
+            FullyQualifiedName = fqn;
+            Name = name;
+            SizeConst = sizeConst;
+        }
+    }
+}

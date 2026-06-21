@@ -14,8 +14,13 @@
 > - **capture/debugger-pending** — the two external inputs (`level_base`, `server_base`) are
 >   server-supplied and inherently capture-pending; the class-id → class-enum mapping; and the
 >   gear that populates the two extra HP/MP equip slots.
-> - **ida_reverified:** 2026-06-16  **ida_anchor:** 263bd994  **evidence:** [static-ida]
-> - **conflicts:** none raised against this doc this pass.
+> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+>   **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **conflicts:** none raised against this doc this pass. CYCLE 7 added the "Stat-curve table family"
+>   section below (on-disk record layouts for users/userlevel/userpoint/exp.scr + the in-memory scaling
+>   grid). It does not change the max-HP/MP formula above; it documents where the per-level scaling
+>   coefficients come from and confirms that **base HP/MP magnitudes are absent from these tables**
+>   (server-supplied), reinforcing the formula's `level_base`/`server_base` external-input flags.
 
 Neutral, data-only model of how the legacy client derives a character's **maximum HP** and
 **maximum MP** from primary stats, equipment, and active auras. Promoted from a dirty-room note;
@@ -269,3 +274,104 @@ global, **not** an Actor field and **not** the char-select stats record. Keep th
   character-info sub-panel; it is **not** the formula's stat-slot table.
 - **Effective primary stats** — the resolved STR/DEX/AGI/INT/CON the formula's Stage 1 consumes,
   assembled from base + equipment + set + buff (see "Inputs").
+
+---
+
+## Stat-curve table family (on-disk layouts) — CYCLE 7
+
+A single boot step loads a **four-file stat-curve family** in one pass and builds an in-memory
+scaling-coefficient grid. These tables hold **per-level scaling coefficients and per-level stat-point /
+XP-bar values — NOT base HP/MP magnitudes**. The base HP/MP a character actually has is server-supplied
+at runtime (it arrives in the major-`4` snapshot, the `5/67` resync, and the `5/32` level-up vitals); a
+parser of these files that yields **0 base HP/MP is faithful, not a bug**. See `specs/progression.md` §13
+for the behavioural story (absent-by-design base HP/MP, data-driven level cap, no client XP→level
+formula). The per-level **derived-stat-A / derived-stat-B contributions** (`userpoint` +24 / +28 below)
+are the per-level *coefficients* the max-HP-like / max-MP-like sums add in; they scale runtime stat totals
+but do not themselves carry the server-supplied base magnitudes — consistent with the formula's
+`level_base` / `server_base` external inputs above.
+
+The four files load together (cross-ref `formats/config_tables.md`):
+
+| File | On-disk record stride | Keying | Role |
+|---|---|---|---|
+| `users.scr`     | one 496-byte blob (4 × 124-byte per-class windows; no per-record stride) | per-class window index | per-class divisor (`A`, u16) + ratio (`B`, f32) inputs to the scaling grid |
+| `userlevel.scr` | **60 bytes** per record | level key | per-level scaling coefficients (level-keyed) |
+| `userpoint.scr` | **32 bytes** per record | level key (`+0` u16) | per-level stat-point allocation + XP-bar window + derived-stat contributions |
+| `exp.scr`       | **20 bytes** per record | sequential level index 1..N (`+0` u16) | two parallel level-keyed XP value streams (threshold / range) |
+
+### `userpoint.scr` record (32 bytes) [confirmed layout]
+
+| Offset | Size | Field | Meaning |
+|---|---|---|---|
+| +0  | u16   | level key | the level this record applies to (1..N). |
+| +4  | 4×dword | stat-point block | a **2×2 dword block** addressed `+4 + 4·(sub + 2·group)`, `group`,`sub` ∈ {0,1} — four per-level stat-point / allocation values keyed by a stat-group selector and a sub-index. |
+| +20 | u16   | XP-bar range hi | numerator-bound term for the XP-bar fill (see `specs/progression.md` §13.2). |
+| +22 | u16   | XP-bar range component | second XP-bar range term. |
+| +24 | dword | derived-stat-A per-level contribution | per-level base contribution to the max-HP-like derived-stat sum (a coefficient, not a base magnitude). |
+| +28 | dword | derived-stat-B per-level contribution | per-level base contribution to the max-MP-like derived-stat sum. |
+
+### `exp.scr` record (20 bytes) [layout confirmed; interior split UNVERIFIED]
+
+| Offset | Size | Field | Meaning | Tag |
+|---|---|---|---|---|
+| +0 | u16 | level key | sequential level index 1..N; the loader rejects any out-of-sequence key, and the last key becomes the table's level count. | [confirmed] |
+| +2 | 18 bytes | two value streams | the remaining 18 bytes are split into **two parallel level-keyed value streams** (an XP threshold stream and an XP range stream). The exact byte split between the two streams is **UNVERIFIED** (resolved inside the level-keyed container builders; settle with a debugger read of a populated node). | [UNVERIFIED] |
+
+### `users.scr` (496 bytes = 4 × 124-byte per-class windows) [size confirmed; interior UNVERIFIED]
+
+`users.scr` is read as one flat 496-byte blob. The grid-build divisor `A` (u16) and ratio `B` (f32)
+helpers index **124-byte per-class windows** — one window read two ways: 62 u16 divisors and 31 f32
+ratios over the **same** 124-byte span. Within a window, a `(group, tier)` pair (`group` 0..2,
+`tier` 0..2) indexes a **3×3 sub-grid**.
+
+| Window | Offset | Size |
+|---|---|---|
+| class window 0 | +0   | 124 |
+| class window 1 | +124 | 124 |
+| class window 2 | +248 | 124 |
+| class window 3 | +372 | 124 |
+
+> **UNVERIFIED — do not promote the 124-byte window's internal field meaning as confirmed.** Static
+> analysis shows a **discrepancy between the users.scr load destination and the divisor/ratio base
+> offsets** the grid-build helpers read from (the loaded blob lands offset from where the `A`/`B`
+> helpers index). Either the on-disk destination overlaps the `A`/`B` base in a way the static view
+> mislabels, or the `A`/`B` tables are populated by a path not statically resolved, or `A` is `0` for
+> this build (which would leave the whole grid `0`). This must be settled by a live (`?ext=dbg`) read
+> of the loaded region after the boot load step. Until then, treat the per-class window's interior
+> field meaning as **UNVERIFIED**.
+
+### In-memory scaling grid (built at boot) — 5×3×3 [dimensions confirmed; consumer UNVERIFIED]
+
+The loader builds a **45-float scaling grid** via a triple loop = **5 × 3 × 3**:
+
+| Dimension | Size | Meaning |
+|---|---|---|
+| 1st | 5 | class slot (4 real classes — matching the 4 `users.scr` windows — plus 1 spare slot present in the loop). |
+| 2nd | 3 | stat group. |
+| 3rd | 3 | tier / sub-grade within the group. |
+
+Each cell is computed as:
+
+```
+cell = (10 / A) * B
+```
+
+where `A` is the per-class u16 divisor and `B` the per-class f32 ratio, both drawn from the matching
+`users.scr` 124-byte window. A cell is written **only when `A > 0`**; when `A == 0` the slot is left at
+its zero-initialised value (so the 5th/spare class slot, which has no `users.scr` window, stays 0).
+
+Conceptual in-memory globals the loader maintains:
+
+- the **5×3×3 scaling grid** (45 floats);
+- the **saved level count** (= the last level key, the data-driven level cap — `specs/progression.md`
+  §13.3);
+- the **current-level mirrors** (a HUD/eligibility level cache and the local-player struct's level
+  field), both **RUNTIME-ONLY** (server-supplied).
+
+> **UNVERIFIED — grid consumer not statically resolvable.** The only references to the scaling grid are
+> inside the loader itself (the zero-init and the per-cell write); no statically-resolvable routine reads
+> the grid back. Candidate per-level / derived-stat routines were checked and do **not** read it.
+> Register this for a live (`?ext=dbg`) read: dump the grid after the boot load step, then watch which
+> routine loads from it. This couples with the users.scr base-offset discrepancy above — if `A` is
+> always `0`, the grid is all-zero and effectively unused in this build, which must be ruled in or out
+> live.

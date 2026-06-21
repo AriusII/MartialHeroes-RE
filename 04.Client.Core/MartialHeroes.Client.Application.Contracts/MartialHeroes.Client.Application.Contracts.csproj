@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Contracts is the downward seam below Application: it carries the event/HUD/scene
+             contracts + DTOs. It references ONLY Shared.Kernel + the specific Domain aggregates whose
+             types appear in those contracts (Actors + Stats). It MUST NEVER reference
+             MartialHeroes.Client.Application (that is the cycle this split exists to avoid). -->
+        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Actors\MartialHeroes.Client.Domain.Actors.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Client.Domain.Stats\MartialHeroes.Client.Domain.Stats.csproj"/>
+    </ItemGroup>
+
+</Project>

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        MartialHeroes.Tools.PacketInspect (CLI: "pktinspect") — opcode catalogue + frame decoder over
+        the PRODUCTION wire layer. It reflects the [PacketOpcode]-tagged structs in the Network.Protocol
+        packet families (the same metadata the source-generated router consumes), so its opcode map is
+        ALWAYS in sync with the actual wire structs — never a hand-maintained copy of opcodes.md.
+
+        Two jobs: (a) `opcodes` lists every known (major:minor) → struct + wire size; (b) `decode <hex>`
+        parses an 8-byte FrameHeader from a captured/pasted frame, identifies the opcode, validates the
+        declared size, and dumps the struct's primitive fields. Reflection is fine here — this is a
+        tool, not the zero-alloc hot path.
+
+        Solution member (Tools/ folder), leaf CONSUMER of layer 02; nothing in the core references it.
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Frame header + [PacketOpcode] attribute + opcode enums. -->
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Protocol.Core\MartialHeroes.Network.Protocol.Core.csproj"/>
+        <!-- The three packet families whose [PacketOpcode]-tagged structs the catalogue reflects. -->
+    </ItemGroup>
+
+</Project>

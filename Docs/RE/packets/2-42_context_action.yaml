@@ -1,0 +1,41 @@
+# spec: Docs/RE/packets/2-42_context_action.yaml
+# Role: C2S context-action record — fixed 44-byte record (11 x u32) with a leading mode discriminator.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgContextAction
+opcode: 0x2002a           # major 2 (GameAction), minor 42 -> (2 << 16) | 42
+direction: C2S
+size: 44                  # fixed 44-byte body
+spec: packets/2-42_context_action.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Submit a 44-byte context-action record (11 u32 + tail) from a HUD list/panel on a context object. A leading mode/discriminator byte selects an optional confirmation-tooltip path; the same context object also raises the 2/35 party-op. Width corroborated by two independent callers.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 44 (11 x u32).
+fields:
+  - { name: Mode,    type: u8 }          # 0x00  mode / discriminator (value 2 triggers a tooltip path; one caller sets 0) [capture/debugger-pending]
+  - { name: Rest0,   type: "u8[3]" }     # 0x01  remainder of the first dword [capture/debugger-pending]
+  - { name: Words,   type: "u32[10]" }   # 0x04  ten more u32 (the record the validator checks field-by-field) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 44-byte blit = 11 x u32; corroborated by two
+  callers, one a literal 44-byte copy). The record is validated field-by-field over its 11 dwords; the
+  field VALUES are static inferences (capture-pending).
+
+    0x00 (1B)  Mode  : a mode / discriminator byte. The value 2 triggers an optional confirmation
+                       tooltip; one caller sets it to 0. It is the low byte of the first dword.
+                       [capture/debugger-pending]
+    0x01 (3B)  Rest0 : the remaining bytes of the first dword. [capture/debugger-pending]
+    0x04 (40B) Words : ten more u32 (the rest of the 11-dword record the validator consumes).
+                       [capture/debugger-pending]
+
+  TRIGGER: a HUD list/panel action on a context object (a mode-routed dispatcher with an optional
+  confirmation tooltip). The same object family also raises 2/35 (party-op).
+
+  UNKNOWNS to resolve with a capture:
+    - the per-field meanings of the 11-dword record and the Mode enum;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application context-action record submit use-case.

@@ -15,7 +15,7 @@ opcode: 0x30005            # major 3 (CharacterMgmt), minor 5 -> (3 << 16) | 5
 direction: S2C
 size: 44                  # 40-byte account/billing block + trailing u32 char count
 spec: packets/3-5_enter_game_response.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

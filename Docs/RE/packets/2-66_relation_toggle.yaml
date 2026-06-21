@@ -1,0 +1,33 @@
+# spec: Docs/RE/packets/2-66_relation_toggle.yaml
+# Role: C2S 1-byte relation toggle / answer from the social confirm panel.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgRelationToggle
+opcode: 0x20042           # major 2 (GameAction), minor 66 -> (2 << 16) | 66
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-66_relation_toggle.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A 1-byte toggle / answer from the social confirm (re-ask) panel. The validator is a no-op returning the OK sentinel.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Toggle, type: u8 }   # 0x00  single toggle / answer byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 1-byte blit); the field VALUE meaning is a static
+  inference (capture-pending).
+
+    0x00 (1B) Toggle : a single toggle / answer byte. [capture/debugger-pending]
+
+  TRIGGER: the social confirm (re-ask) panel's single-byte answer; the validator is trivial (returns
+  the OK sentinel). Distinct from the reactive 2/65 ack — 2/66 is a user-driven panel answer.
+
+  UNKNOWNS to resolve with a capture:
+    - the Toggle value space and the exact relation answered;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application relation toggle/answer use-case.

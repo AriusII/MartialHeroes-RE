@@ -5,6 +5,25 @@
 
 ---
 
+## Re-verification banner (2026-06-21, CYCLE 7 — `.ted`/`.map`/`.lst` two-witness re-confirm)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — the `.ted` five-block layout, the `.map` text grammar + decoder routing, and the per-cell streaming chain were RE-confirmed against two independent witnesses with **no contradictions** to the layout below |
+| `ida_reverified` | `2026-06-21` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = the static loader read-path (cell streamer → `.map` text parser → `.ted` five-read loader → per-cell texture finalize); witness 2 = a fresh real on-disk cell sample and its sidecars |
+| `conflicts`      | None. This pass adds confirmations only and settles no new disputes. Re-confirmed verbatim: (1) the `.ted` blob is **five fixed reads summing 46 987 B with no header** (the fresh sample is exactly 46 987 B; its block-1 heights, block-2 normals decoding `(0,127,0) → (0,1,0)` Y-up, and block-5 RGBA with `A = 0` padding all match §5.3–§5.8); (2) the block-3 texture-index byte is stored **RAW** by the `.ted` loader (no `idx − 1`, no clamp), with the `idx − 1` and `[1, count]` clamp applied once by the **per-cell texture finalize routine** — §5.6/§14(#2); (3) the `.map` text grammar, all 12 section keywords, and the keyword→decoder routing — §3.1/§3.2; (4) the geometry directives (`WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN`) are present on disk but NOT consumed by the runtime `.map` parser — §3.4; (5) the three fixed sidecars `.mud`/`.gad`/`.map` keyed off the per-cell base path — §1.3/§6/§7. **`.lst` key formula RE-CONFIRMED** against a fresh witness-2 sample: a `d000.lst` of 2 entries (12 B = `4 + 2×4`) carries cell key `1000009990` for cell `(mapX=10000, mapZ=9990)`, which decodes exactly as `key = mapZ + 100000·mapX` = `9990 + 100000·10000` = `1 000 009 990` — §1.2. |
+
+**Read-buffer note (witness 1, internal only — no on-disk impact):** the `.ted` five reads land in
+five distinct scratch buffers in block order; within the loader the **block-3 (texture-index) bytes
+and block-4 (direction) bytes are read into two adjacent internal buffers**, and the editor export
+writer emits them in the same internal order. The **on-disk order is unchanged** (block 3 = texture
+index at offset 29 575, block 4 = direction at offset 29 831 — §5.3); this is purely a note that the
+loader's in-memory staging order is not the source of any offset.
+
+---
+
 ## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
 
 | Attribute        | Value |
@@ -62,14 +81,25 @@ updated per finding below.
 reconcile pass (loader read-path witness + black-box VFS census over all 2 505 `.ted` instances)
 **revises** the block-3 TextureIndexGrid verdict above: the loader stores the texture-index byte
 **RAW** — it applies **no** `idx − 1` decrement and **no** value-below-1 clamp. Both the `idx − 1`
-resolution and the value-0 → 1 floor are **RENDER-domain** behaviours that occur where the resolved
-texture is bound at draw time, **not** in the `.ted` loader; their exact location on the render path is
-**DBG-pending** (needs the live debugger under a real area load; never `dbg_start`). This supersedes
-the 2026-06-15 reading that placed the decrement and clamp "in the loader" (items 2 and 3 of the
-banner above): the *render-time outcome* is unchanged (a tile selects `texlist[byte − 1]`, a byte
-below 1 floors to slot 1), but a faithful **parser** must store the raw block-3 byte and must NOT
-decrement or clamp — see §5.6, §5.9, §14. The five-block 46 987-byte layout (item 1) and the `.sod`
-`edge_pad0` padding (item 4) are unaffected.
+resolution and the value-0 → 1 floor occur **downstream of the parse**, where the resolved texture
+is finalized — **not** in the `.ted` loader; a faithful **parser** must store the raw block-3 byte
+and must NOT decrement or clamp — see §5.6, §5.9, §14. The five-block 46 987-byte layout (item 1) and
+the `.sod` `edge_pad0` padding (item 4) are unaffected.
+
+**CORRECTED CYCLE 1 (2026-06-19, ida_anchor 263bd994, evidence [static-ida]) — the `idx − 1`
+decrement is RESOLVED.** The earlier "DBG-pending render-path site" for the decrement/clamp is now
+**statically resolved** and is no longer debugger-pending. The `idx − 1` decrement is a **real,
+fixed, statically isolable code site in the map/cell-descriptor finalize path** — the **per-cell
+texture finalize routine** (a 16×16 = 256-cell loop). It applies **only** to the `.ted` per-cell
+texture-index byte: each cell's byte is first **clamped to `[1, count]`** (both `< 1` and `> count`
+→ 1), then resolved as `perCellTexList[byte − 1]`. The `− 1` is purely the difference between the
+resolve base and the write base (the list is written from one slot higher than it is read), with the
+clamped index ranging `1..count` — it is constant-folded into a fixed base displacement, so no live
+frame is needed to observe it. The raw `.map` `intTexId` is stored into the per-cell list **without**
+any `− 1`, and the global texture-pool accessors index `pool_base + 76 · intTexId` **directly,
+without** any `− 1`. So the `.ted` index byte is the **only** `− 1` in the entire chain. This
+retires every prior "OPEN / DBG-pending decrement-site" note. (See `bgtexture_lst.md §Cross-file
+join`, which encodes the same resolution.)
 
 ---
 
@@ -150,9 +180,12 @@ key = mapZ + 100000 × mapX
 ```
 
 Verified: file size is exactly `4 + count × 4` bytes with no header prefix. The three samples
-(1-entry 8-byte files and a 2-entry 12-byte file) all match this formula exactly.
+(1-entry 8-byte files and a 2-entry 12-byte file) all match this formula exactly. RE-CONFIRMED
+(2026-06-21, CYCLE 7): a fresh `d000.lst` of 2 entries (12 B = `4 + 2×4`) carries cell key
+`1000009990` for cell `(mapX=10000, mapZ=9990)`, decoding exactly as `9990 + 100000·10000`
+= `1 000 009 990` — the key formula holds against this independent witness.
 
-**Known unknowns:** None outstanding — the three sample files are fully accounted for.
+**Known unknowns:** None outstanding — the sample files are fully accounted for.
 
 ### 1.3 Per-cell base path
 
@@ -560,13 +593,17 @@ block 3 (texture index) has no error string. No drift from this layout.
   own per-section registration-order list, with the identical `- 1` applied at resolution. **A faithful
   `.ted` parser must store the raw block-3 byte and must NOT decrement it**; the decrement belongs to
   the render/texture-resolution layer (`Assets.Mapping` / the renderer), not `Assets.Parsers`. The
-  render-time outcome (`texlist[byte - 1]`) is settled by two witnesses; the exact render-path site of
-  the decrement is DBG-pending. Confidence: CONFIRMED (render outcome) / RENDER-DOMAIN, DBG-pending
-  (decrement site — not loader behaviour).
+  render-time outcome (`texlist[byte - 1]`) is settled by two witnesses, and the decrement site is
+  now **statically RESOLVED** (CYCLE 1): the `- 1` is applied in the **per-cell texture finalize
+  routine** of the map/cell-descriptor finalize path — a fixed, isolable code site, not a live-frame
+  artifact. Confidence: CONFIRMED (render outcome) / CONFIRMED (finalize-site decrement — not `.ted`
+  loader behaviour).
   **RE-CONFIRMED at the loader store site (2026-06-16, anchor 263bd994):** the `.ted` loader copies
   the block-3 byte **verbatim** into the in-memory patch record — there is no decrement and no clamp
-  at the store. This directly corroborates the render-domain reading: the loader stores raw; only the
-  downstream texture-bind applies the `- 1` and the `< 1` floor.
+  at the store. This corroborates the split: the `.ted` loader stores raw; the **finalize routine**
+  (not a draw-time render path) applies the `- 1` and the `[1, count]` clamp once, while resolving
+  the per-cell texture list. **CORRECTED CYCLE 1:** the `- 1` is on the `.ted` byte ONLY (clamp
+  `[1, count]`); the `.map` `intTexId` is stored raw and the global pool accessors apply no `- 1`.
 - **Value 0 — clamp-to-1, NOT a sentinel (REFUTED); clamp is RENDER-domain (corrected 2026-06-16).**
   No sample tile carries value 0, but a 0 (or any value below 1) is **clamped up to 1** at the render
   path (`if byte < 1: byte = 1`) and therefore renders texture slot 1 — it does **not** select a
@@ -574,10 +611,10 @@ block 3 (texture index) has no error string. No drift from this layout.
   **REFUTED**: there is no sentinel branch; an out-of-range low byte is silently floored to the first
   texture. **The `.ted` loader does NOT perform this clamp** — it stores the raw byte; the floor-to-1
   is applied where the texture is resolved for binding, alongside the `- 1` decrement above. A faithful
-  **parser** stores the raw block-3 byte; a faithful **renderer/mapper** treats any byte `< 1` as 1
-  before applying the `- 1`, so a 0 byte resolves to `texlist[0]` (the first registered texture).
-  Confidence: CONFIRMED (render outcome) / RENDER-DOMAIN, DBG-pending (clamp site — not loader
-  behaviour).
+  **parser** stores the raw block-3 byte; the **finalize routine** treats any byte `< 1` as 1 (and any
+  byte `> count` as 1) before applying the `- 1`, so a 0 byte resolves to `texlist[0]` (the first
+  registered texture). Confidence: CONFIRMED (render outcome) / CONFIRMED (clamp `[1, count]` at the
+  finalize site — not `.ted` loader behaviour; statically RESOLVED CYCLE 1).
 
 ### 5.7 Block 4 — Quad split / UV orientation flags
 
@@ -631,12 +668,13 @@ block 3 (texture index) has no error string. No drift from this layout.
 ### 5.9 Known unknowns
 
 - Block 3 reference target: RESOLVED — the 1-based byte indexes the per-cell `TEXTURES{}` list,
-  which itself indexes the global `bgtexture.lst` pool (§5.6). **Loader vs render domain (corrected
-  2026-06-16):** the `.ted` loader stores the byte RAW; the `idx − 1` decrement and the value-below-1
-  → 1 clamp are **RENDER-domain** behaviours (DBG-pending render-path site), not loader behaviour. The
-  render-time outcome is settled (tile uses `texlist[byte − 1]`; a byte < 1 floors to slot 1; NOT a
-  no-texture sentinel — that reading is REFUTED). Open sub-question: the exact render-path location of
-  the decrement/clamp (DBG-pending).
+  which itself indexes the global `bgtexture.lst` pool (§5.6). **Loader vs finalize domain (RESOLVED
+  CYCLE 1):** the `.ted` loader stores the byte RAW; the `idx − 1` decrement and the `[1, count]`
+  clamp are applied once by the **per-cell texture finalize routine** (a fixed, statically isolable
+  code site in the map/cell-descriptor finalize path — no longer DBG-pending). The outcome is settled
+  (tile uses `texlist[byte − 1]`; a byte `< 1` or `> count` floors to slot 1; NOT a no-texture
+  sentinel — that reading is REFUTED). The `− 1` is on the `.ted` byte ONLY; the `.map` `intTexId` is
+  stored raw and the pool accessors apply no `− 1`. No open sub-question remains for the decrement site.
 - Block 4 flag mapping: RESOLVED for texture orientation — bit `0x01` mirrors S (U), bit `0x02`
   mirrors T (V) (§5.7). Open (PARTIAL): whether a flip combination also re-selects the quad
   triangulation diagonal rather than only re-orienting the texture.
@@ -852,6 +890,26 @@ samples; behaviour for non-planar triangles is unknown.
 Each FX section (`FX1`–`FX7`) has its own DATAFILE blob with the corresponding extension
 (`.fx1`–`.fx7`). All blobs share a common outer structure, but the header size and vertex record
 stride depend on a `typeId` field within the header.
+
+### 10.0 FX-layer attachment wiring (CYCLE 1)
+
+The `.fx1`..`.fx7` blobs **attach to the cell's render sub-manager slots 2..8 DURING the `.map` text
+parse** — not in a later finalize pass. While the `.map` parser is scanning inside an `FXN { … }`
+section and encounters the `DATAFILE` keyword, it reads the path token, opens that blob via the
+VFS/disk open router, and decodes it straight into that section's dedicated sub-manager slot:
+`FX1 → slot 2`, `FX2 → slot 3`, …, `FX7 → slot 8` (the cell's 9 render sub-manager slots are
+slot 0 = ground texture-patch grid, slot 1 = building/object grid, slots 2..8 = fx1..fx7 — see
+`structs/terrain-manager.md`). The matching `TEXTURES { idx texId }` sub-block in the same section
+registers the per-layer texture indices onto the same slot. So **attachment = (the FX section + its
+`DATAFILE` keyword) at parse time.** On any open/decode failure the parser logs a "cannot open" error
+and aborts the whole cell load.
+
+A **separate post-parse finalize pass** then walks the same 9 slots in order and **builds** each
+already-attached blob into a usable per-cell grid. The build/finalize is distinct from the attach: it
+does **not** open the file — it operates on data already attached during the parse. (This is the same
+finalize pass that applies the `.ted` `idx − 1` decrement to slot 0, §5.6.) The adjacent
+`EXTRA_TERRAIN` / `UP_TERRAIN` / `SOLID` sections target **separate** managers and are **not** part of
+the 9-slot FX block. **Confidence: parser-verified (CYCLE 1, ida_anchor 263bd994).**
 
 Authoring sidecars named `*.fx<N>.pre` are full standalone files in their corresponding base
 `.fx<N>` format but are never read by the runtime — see §16 and `terrain_layers.md`.
@@ -1182,11 +1240,13 @@ The following items remain unverified and represent the highest-risk unknowns fo
 
 2. **`.ted` block 3 reference target:** RESOLVED — the 1-based texture index resolves first into
    the per-cell `TEXTURES{}` list (`idx − 1`), then into the global `bgtexture.lst` pool (§5.6).
-   **Loader vs render domain (corrected 2026-06-16):** the `.ted` loader stores the byte RAW; the
-   `idx − 1` decrement and the value-below-1 → 1 clamp are **RENDER-domain**, not loader behaviour
-   (DBG-pending render-path site). The render outcome is settled (tile uses `texlist[byte − 1]`; a
-   byte < 1 floors to slot 1; the "0 = no-texture sentinel" reading is REFUTED). A faithful parser
-   stores the raw byte and does NOT decrement/clamp. Open sub-question: the exact render-path site.
+   **Loader vs finalize domain (RESOLVED CYCLE 1, ida_anchor 263bd994):** the `.ted` loader stores
+   the byte RAW; the `idx − 1` decrement and the `[1, count]` clamp are applied once by the
+   **per-cell texture finalize routine** (a fixed, statically isolable code site in the
+   map/cell-descriptor finalize path — no longer DBG-pending). The outcome is settled (tile uses
+   `texlist[byte − 1]`; a byte `< 1` or `> count` floors to slot 1; the "0 = no-texture sentinel"
+   reading is REFUTED). The `− 1` is on the `.ted` byte ONLY; the `.map` `intTexId` is stored raw and
+   the pool accessors apply no `− 1`. A faithful parser stores the raw byte and does NOT decrement/clamp.
 
 3. **`.ted` block 4 bit-to-geometry mapping:** RESOLVED for texture orientation — bit `0x01`
    mirrors S (U), bit `0x02` mirrors T (V) (§5.7). Remaining sub-question (PARTIAL): whether a flip
@@ -1232,7 +1292,9 @@ The following items remain unverified and represent the highest-risk unknowns fo
   census); the prior "0 = no-texture sentinel" reading is REFUTED. The 2026-06-16 reconcile pass
   (**CAMPAIGN VFS-MASTERY-B**, same two-witness method over all 2 505 `.ted` instances) **corrected
   the domain** of the block-3 `idx − 1` decrement and value-0 clamp: the `.ted` loader stores the
-  byte RAW; both behaviours are RENDER-domain (DBG-pending render-path site), not loader behaviour.
+  byte RAW. **CYCLE 1 (2026-06-19, ida_anchor 263bd994) RESOLVED the decrement site statically:** the
+  `idx − 1` and the `[1, count]` clamp are applied once by the per-cell texture finalize routine (a
+  fixed code site, not draw-time / DBG-pending); the `− 1` is on the `.ted` byte only.
 
 ---
 

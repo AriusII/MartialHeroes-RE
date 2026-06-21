@@ -38,14 +38,14 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game Trade escrow window (KeepPanel / TradeKeepWindow). 318×732 right-docked.
-///
-/// <para>PASSIVE: renders the 60-cell trade grid toggled between my-side and their-side.
-/// All item-move intents and commit intents fire use-case calls (stubbed pending world-campaign).
-/// Inbound slot updates (S2C 4/24 / 4/25) are stubbed with TODO.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
+///     In-game Trade escrow window (KeepPanel / TradeKeepWindow). 318×732 right-docked.
+///     <para>
+///         PASSIVE: renders the 60-cell trade grid toggled between my-side and their-side.
+///         All item-move intents and commit intents fire use-case calls (stubbed pending world-campaign).
+///         Inbound slot updates (S2C 4/24 / 4/25) are stubbed with TODO.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudTradeWindow : Control
 {
@@ -79,23 +79,22 @@ public sealed partial class HudTradeWindow : Control
     // spec: ui_system.md §8.13 — msg 2213 = add-money; msg 2214 = set-money
     private const int MsgAddMoney = 2213; // spec: ui_system.md §8.13
     private const int MsgSetMoney = 2214; // spec: ui_system.md §8.13
+    private readonly Panel[] _gridCells = new Panel[GridCellCount];
+    private int _activeSide; // 0 = my-offer, 1 = their-offer
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activeSide; // 0 = my-offer, 1 = their-offer
-    private readonly Panel[] _gridCells = new Panel[GridCellCount];
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 318×732 right-anchored trade window.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED.
+    ///     Geometry pass: builds the 318×732 right-anchored trade window.
+    ///     spec: Docs/RE/specs/ui_system.md §8.13 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -127,14 +126,14 @@ public sealed partial class HudTradeWindow : Control
 
         // Main frame from uitex 4 (tradekeepwindow.dds), dst (0,85,318,625) src (317,0)
         // spec: ui_system.md §8.13 CODE-CONFIRMED
-        Texture2D? mainTex = atlas.GetById(MainTexId);
+        var mainTex = atlas.GetById(MainTexId);
         if (mainTex is null)
             GD.PrintErr("[HudTradeWindow] tradekeepwindow.dds (uitex 4) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.13.");
 
         if (mainTex is not null)
         {
-            AtlasTexture? frameSlice = atlas.SliceById(MainTexId, 317, 0, 318, 625);
+            var frameSlice = atlas.SliceById(MainTexId, 317, 0, 318, 625);
             if (frameSlice is not null)
             {
                 var frameImg = new TextureRect
@@ -143,7 +142,7 @@ public sealed partial class HudTradeWindow : Control
                     Texture = frameSlice,
                     Position = new Vector2(0f, 85f),
                     Size = new Vector2(318f, 625f),
-                    MouseFilter = MouseFilterEnum.Ignore,
+                    MouseFilter = MouseFilterEnum.Ignore
                 };
                 AddChild(frameImg);
             }
@@ -153,7 +152,7 @@ public sealed partial class HudTradeWindow : Control
         // spec: ui_system.md §8.13 CODE-CONFIRMED
         if (atlas.GetById(BottomTexId) is not null)
         {
-            AtlasTexture? footerSlice = atlas.SliceById(BottomTexId, 0, 683, 318, 50);
+            var footerSlice = atlas.SliceById(BottomTexId, 0, 683, 318, 50);
             if (footerSlice is not null)
             {
                 var footerImg = new TextureRect
@@ -162,7 +161,7 @@ public sealed partial class HudTradeWindow : Control
                     Texture = footerSlice,
                     Position = new Vector2(0f, 36f),
                     Size = new Vector2(318f, 50f),
-                    MouseFilter = MouseFilterEnum.Ignore,
+                    MouseFilter = MouseFilterEnum.Ignore
                 };
                 AddChild(footerImg);
             }
@@ -176,7 +175,7 @@ public sealed partial class HudTradeWindow : Control
             Text = "My offer",
             Position = new Vector2(25f, 105f),
             Size = new Vector2(65f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         sideA.Pressed += () => SetActiveSide(0); // action 261
         AddChild(sideA);
@@ -187,7 +186,7 @@ public sealed partial class HudTradeWindow : Control
             Text = "Their offer",
             Position = new Vector2(90f, 105f),
             Size = new Vector2(65f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         sideB.Pressed += () => SetActiveSide(1); // action 262
         AddChild(sideB);
@@ -200,34 +199,34 @@ public sealed partial class HudTradeWindow : Control
             Text = "0",
             Position = new Vector2(51f, 598f),
             Size = new Vector2(128f, 15f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(moneyLbl);
 
         // Add-money button (action 263, msg 2213)
         // spec: ui_system.md §8.13 — "Add-money button dst(183,592,53,22) action 263 msg 2213 (cyan)"
-        string addMoneyCaption = text.GetCaption(MsgAddMoney, $"[{MsgAddMoney}]");
+        var addMoneyCaption = text.GetCaption(MsgAddMoney, $"[{MsgAddMoney}]");
         var addMoneyBtn = new Button
         {
             Name = "AddMoneyBtn",
             Text = addMoneyCaption,
             Position = new Vector2(183f, 592f),
             Size = new Vector2(53f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         addMoneyBtn.Pressed += () => OnAddMoney(); // action 263
         AddChild(addMoneyBtn);
 
         // Set-money button (action 264, msg 2214)
         // spec: ui_system.md §8.13 — "Remove/set-money button dst(238,592,53,22) action 264 msg 2214 (red)"
-        string setMoneyCaption = text.GetCaption(MsgSetMoney, $"[{MsgSetMoney}]");
+        var setMoneyCaption = text.GetCaption(MsgSetMoney, $"[{MsgSetMoney}]");
         var setMoneyBtn = new Button
         {
             Name = "SetMoneyBtn",
             Text = setMoneyCaption,
             Position = new Vector2(238f, 592f),
             Size = new Vector2(53f, 22f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         setMoneyBtn.Pressed += () => OnSetMoney(); // action 264
         AddChild(setMoneyBtn);
@@ -240,7 +239,7 @@ public sealed partial class HudTradeWindow : Control
             Text = "LOCK",
             Position = new Vector2(259f, 655f),
             Size = new Vector2(59f, 77f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         lockBtn.Pressed += () => OnLockCommit(); // action 260
         AddChild(lockBtn);
@@ -260,29 +259,27 @@ public sealed partial class HudTradeWindow : Control
     private void BuildTradeGrid(HudAtlasLibrary atlas)
     {
         // spec: ui_system.md §8.13 — "10×6=60 cells, 38×38, +38 stride, origin (45,162), action 200..259"
-        for (int row = 0; row < GridRows; row++)
+        for (var row = 0; row < GridRows; row++)
+        for (var col = 0; col < GridCols; col++)
         {
-            for (int col = 0; col < GridCols; col++)
-            {
-                int idx = row * GridCols + col;
-                float x = GridOriginX + col * CellSide;
-                float y = GridOriginY + row * CellSide;
+            var idx = row * GridCols + col;
+            var x = GridOriginX + col * CellSide;
+            var y = GridOriginY + row * CellSide;
 
-                var cell = new Panel
-                {
-                    Name = $"TradeCell{CellActionBase + idx}",
-                    Position = new Vector2(x, y),
-                    Size = new Vector2(CellSide, CellSide),
-                    MouseFilter = MouseFilterEnum.Stop,
-                };
-                var cs = new StyleBoxFlat();
-                cs.BgColor = new Color(0.06f, 0.08f, 0.07f, 0.75f);
-                cs.SetBorderWidthAll(1);
-                cs.BorderColor = new Color(0.3f, 0.45f, 0.3f, 0.65f);
-                cell.AddThemeStyleboxOverride("panel", cs);
-                AddChild(cell);
-                _gridCells[idx] = cell;
-            }
+            var cell = new Panel
+            {
+                Name = $"TradeCell{CellActionBase + idx}",
+                Position = new Vector2(x, y),
+                Size = new Vector2(CellSide, CellSide),
+                MouseFilter = MouseFilterEnum.Stop
+            };
+            var cs = new StyleBoxFlat();
+            cs.BgColor = new Color(0.06f, 0.08f, 0.07f, 0.75f);
+            cs.SetBorderWidthAll(1);
+            cs.BorderColor = new Color(0.3f, 0.45f, 0.3f, 0.65f);
+            cell.AddThemeStyleboxOverride("panel", cs);
+            AddChild(cell);
+            _gridCells[idx] = cell;
         }
     }
 
@@ -335,9 +332,9 @@ public sealed partial class HudTradeWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows or hides the trade window.
-    /// Normally opened by S2C 4/23 phase=3 (not a keyboard hotkey).
-    /// spec: Docs/RE/specs/ui_system.md §8.13 — "no hotkey; opened by trade state machine S2C 4/23".
+    ///     Shows or hides the trade window.
+    ///     Normally opened by S2C 4/23 phase=3 (not a keyboard hotkey).
+    ///     spec: Docs/RE/specs/ui_system.md §8.13 — "no hotkey; opened by trade state machine S2C 4/23".
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

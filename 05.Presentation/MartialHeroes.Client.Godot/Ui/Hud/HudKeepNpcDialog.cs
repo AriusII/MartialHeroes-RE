@@ -38,16 +38,17 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game NPC storage/keep dialog menu (KeepNpcPanel, master service slot 152).
-///
-/// <para>This is the 5-option vertical NPC interaction menu shown for KIND-9 storage NPCs. It
-/// routes the player's selection to the appropriate target window via wired delegates.
-/// It emits NO packets itself; it merely opens other windows.</para>
-///
-/// <para>PASSIVE: zero game logic. Call <see cref="Open"/> from the world NPC-click dispatcher
-/// when the clicked NPC is KIND 9.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.27 CODE-CONFIRMED.
+///     In-game NPC storage/keep dialog menu (KeepNpcPanel, master service slot 152).
+///     <para>
+///         This is the 5-option vertical NPC interaction menu shown for KIND-9 storage NPCs. It
+///         routes the player's selection to the appropriate target window via wired delegates.
+///         It emits NO packets itself; it merely opens other windows.
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. Call <see cref="Open" /> from the world NPC-click dispatcher
+///         when the clicked NPC is KIND 9.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.27 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudKeepNpcDialog : Control
 {
@@ -73,12 +74,13 @@ public sealed partial class HudKeepNpcDialog : Control
     private const float SvcBtnX = 25f;
     private const float SvcBtnW = 106f;
     private const float SvcBtnH = 40f;
-    private static readonly float[] SvcBtnY = { 69f, 109f, 149f, 189f };
 
     // uitex integer ids
     // spec: ui_system.md §8.27.2 CODE-CONFIRMED
     private const int BackdropTexId = 4; // uitex 4: backdrop + top-button + keep-service btn
     private const int DialogTexId = 2; // uitex 2: dialog/quest/close buttons
+    private static readonly float[] SvcBtnY = { 69f, 109f, 149f, 189f };
+    private uint _activeNpcId; // stored by the NPC dispatcher on open (debugger-pending exact field)
 
     // -------------------------------------------------------------------------
     // Routing delegates (wired by HudMaster)
@@ -93,16 +95,14 @@ public sealed partial class HudKeepNpcDialog : Control
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private uint _activeNpcId; // stored by the NPC dispatcher on open (debugger-pending exact field)
 
     // -------------------------------------------------------------------------
     // Wiring (called by HudMaster before Build)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Wires the selector routing delegates.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.27.3 — selector mechanism.
+    ///     Wires the selector routing delegates.
+    ///     spec: Docs/RE/specs/ui_system.md §8.27.3 — selector mechanism.
     /// </summary>
     /// <param name="onOpenStorage">Invoked on sel 1 (KIND-9 open storage → KeepPanel slot 191).</param>
     /// <param name="onVendor">Invoked on sel 0 (NPC dialog); may be null → TODO(world-campaign).</param>
@@ -117,9 +117,8 @@ public sealed partial class HudKeepNpcDialog : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 5-button NPC dialog menu.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.27.1 CODE-CONFIRMED.
+    ///     Geometry pass: builds the 5-button NPC dialog menu.
+    ///     spec: Docs/RE/specs/ui_system.md §8.27.1 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -153,7 +152,7 @@ public sealed partial class HudKeepNpcDialog : Control
             Text = "Open Storage",
             Position = new Vector2(TopBtnX, TopBtnY),
             Size = new Vector2(TopBtnW, TopBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         topBtn.Pressed += () => OnSelector(1); // action 1, sel 1 → open storage
         AddChild(topBtn);
@@ -166,7 +165,7 @@ public sealed partial class HudKeepNpcDialog : Control
             Text = "Talk",
             Position = new Vector2(SvcBtnX, SvcBtnY[1]), // y=109
             Size = new Vector2(SvcBtnW, SvcBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btnDialog.Pressed += () => OnSelector(0);
         AddChild(btnDialog);
@@ -179,7 +178,7 @@ public sealed partial class HudKeepNpcDialog : Control
             Text = "Service",
             Position = new Vector2(SvcBtnX, SvcBtnY[0]), // y=69
             Size = new Vector2(SvcBtnW, SvcBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btnKeep.Pressed += () => OnSelector(2);
         AddChild(btnKeep);
@@ -192,7 +191,7 @@ public sealed partial class HudKeepNpcDialog : Control
             Text = "Quest",
             Position = new Vector2(SvcBtnX, SvcBtnY[2]), // y=149
             Size = new Vector2(SvcBtnW, SvcBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btnQuest.Pressed += () => OnSelector(3);
         AddChild(btnQuest);
@@ -205,7 +204,7 @@ public sealed partial class HudKeepNpcDialog : Control
             Text = "Close",
             Position = new Vector2(SvcBtnX, SvcBtnY[3]), // y=189
             Size = new Vector2(SvcBtnW, SvcBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btnClose.Pressed += () => OnSelector(4);
         AddChild(btnClose);
@@ -222,9 +221,9 @@ public sealed partial class HudKeepNpcDialog : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Opens the KeepNpcPanel for the given NPC id.
-    /// Called by the world NPC-click dispatcher when NPC is KIND 9.
-    /// spec: Docs/RE/specs/ui_system.md §8.27 — "KIND 9 → open KeepNpcPanel".
+    ///     Opens the KeepNpcPanel for the given NPC id.
+    ///     Called by the world NPC-click dispatcher when NPC is KIND 9.
+    ///     spec: Docs/RE/specs/ui_system.md §8.27 — "KIND 9 → open KeepNpcPanel".
     /// </summary>
     public void Open(uint npcId = 0)
     {

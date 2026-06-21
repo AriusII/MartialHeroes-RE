@@ -2,6 +2,7 @@
 name: martial-heroes-domain
 description: Use when working with Martial Heroes (D.O. Online) protocol, opcodes, frame headers, the cipher, LZ4 payloads, CP949 text, or the recovered render asset chains (terrain .ted/.map/bgtexture/.dds, character .skn/skin.txt/.bnd/.mot, .arr spawns, .sod collision) and coordinate conventions — a neutral INDEX pointing at CLAUDE.md and the committed Docs/RE specs.
 user-invocable: false
+paths: Docs/RE/**
 ---
 
 # martial-heroes-domain

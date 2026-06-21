@@ -3,23 +3,31 @@
 # VERIFICATION BANNER
 #   verification: confirmed  (opcode->handler routing, the 3-byte header read, the 5-slot loop bound,
 #                 and the per-slot 981-byte sub-block read sizes 880/96/1/4 are all control-flow-confirmed);
-#                 field VALUE semantics (descriptor interior, SlotFlag/Timestamp meaning, ServerId/
-#                 ChannelId real values) are capture/debugger-pending (no live capture this campaign).
-#   ida_reverified: 2026-06-16
+#                 the sub-block-3 occupied/facing marker and the sub-block-4 flags-word (bit 0 =
+#                 billing/premium) meanings are now RESOLVED (binary-won); other field VALUE semantics
+#                 (descriptor interior, ServerId/ChannelId real values) are capture/debugger-pending.
+#   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
+#                 CYCLE 9 Phase 3.1 (2026-06-21) static-confirmed the model-class inputs --
+#                 internal_class (u16 @ desc +0x34) and appearance_variant (u8 @ desc +0x2C) are the
+#                 class/variant args of the preview model formula, HIGH confidence (four independent
+#                 read sites; the in-world spawn path feeds the same two offsets to the same factory).
 #   ida_anchor: 263bd994
 #   evidence: [static-ida]
 #   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots
 #              (the account character-slot count); the 5x981 record model is confirmed.
+#              REFUTED the prior "Timestamp = rename/delete cooldown" hypothesis -> sub-block 4 is a
+#              flags word (bit 0 = billing/premium), NOT a timestamp; there is NO client-side
+#              rename-cooldown field in 3/1 (cooldown is server-enforced, surfaced via 3/6).
 
 name: SmsgCharacterList
 opcode: 0x30001           # major 3 (CharacterMgmt), minor 1 -> (3 << 16) | 1
 direction: S2C
 size: var                 # 3-byte header + N x 981-byte slot records
 spec: packets/3-1_character_list.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
-summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. The handler loops EXACTLY 5 slot indices (the account character-slot count) and reads a record per set bit. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a flag + a timestamp. The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.
+summary: Character-select list. A 3-byte header with a slot bitmask, followed by one 981-byte slot record per populated slot. The handler loops EXACTLY 5 slot indices (the account character-slot count) and reads a record per set bit. Each slot record is an 880-byte SpawnDescriptor + a 96-byte stat block + a 1-byte occupied/facing marker + a 4-byte flags word (bit 0 = billing/premium). The descriptor drives the slot's rendered appearance (skin/skeleton/outfit) -- a list slot shows the REAL character, not a placeholder.
 
 # Fixed header only is modelled as the codegen struct. The variable per-slot records are described
 # in notes as their own field tables (the engineer hand-codes the repeat loop driven by SlotMask).
@@ -48,8 +56,19 @@ notes: |
       member map is owned by structs/actor.md -- decode from there. The fields that drive the
       char-select preview's REAL appearance are:
         +0x00  name (char[17], CP949/EUC-KR, NUL-terminated, <=16 bytes + terminator)
-        +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula
-        +0x34  internal_class (u16, {1,2,3,4})  -- THE skeleton driver; the 'class' arg of the formula
+        +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula.
+               STATIC-CONFIRMED HIGH (CYCLE 9 Phase 3.1): read zero-extended; this same byte doubles as
+               the per-slot occupied/body marker. Distinct from the render-occupancy gate at desc +0x2E.
+        +0x34  internal_class (u16, {1,2,3,4})  -- THE skeleton driver; the 'class' arg of the formula.
+               STATIC-CONFIRMED HIGH (CYCLE 9 Phase 3.1): read sign-extended; confirmed at four
+               independent read sites; the in-world spawn path (5/3, 5/1, snapshot, respawn,
+               game-state-tick) feeds the SAME +0x34/+0x2C offsets to the SAME actor factory.
+               PORT ACTION ITEM (alignment bug, NOT a layout error): a decoder that reads class == 0
+               at +0x34 for a real slot is reading from a MISALIGNED descriptor base -- the tell is
+               that level (u16 @ desc +0x3A) in the SAME descriptor copy decodes correctly. Re-base the
+               per-slot descriptor at the first byte of the slot record's 880-byte descriptor block;
+               then u16 @ +0x34 yields {1,2,3,4} and 5*(class + 4*variant) - 24 resolves. The live wire
+               VALUE byte-proof stays debugger-pending; the OFFSET is static-confirmed.
         +0x38/+0x39  level/state bytes  -- see level CONFLICT below
         +0x3C/+0x40/+0x44  current_hp / current_mp / current_stamina (u32 each)
         +0x4C/+0x50  world_x / world_z (f32 each)
@@ -79,14 +98,37 @@ notes: |
                                          stats.md, capture-pending.
       96-byte boundary confirmed (first 5 dwords + tail span exactly one 0x60 block).
 
-    Sub-block 3 -- SlotFlag (1 byte, record-relative 0x3d0):
-      A per-slot availability/relation flag byte. The handler clears it to 0 on a successful read,
-      i.e. it is initialised on load. Exact relation semantics (e.g. locked / deletion-pending)
-      UNRESOLVED -- needs a capture with a non-default flag. Partial.
+    Sub-block 3 -- SlotFlag / occupied + UI-facing marker (1 byte, record-relative 0x3d0): RESOLVED.
+      This byte is a load-time OCCUPIED / availability marker that ALSO multiplexes the slot's
+      front/back facing UI state. The handler initialises it on load. Concrete semantics:
+        - ENTER GAME REQUIRES this byte == 0 (the enter-game path gates on it being 0).
+        - It doubles as the per-slot facing state used by the char-select scene: face-back sets 0,
+          face-front sets 1, a deletion-pending clear sets 2; a freshly created/renamed character is
+          written back as 0; the preview-lineup and slot-select-confirm paths compare it == 1.
+      There is NO rename-cooldown stored here. (Deletion-pending is NOT this byte's value 2 alone for
+      enter-blocking purposes -- the enter-blocking "locked / deletion-pending" condition is the
+      descriptor state_byte at desc +0x38 == 7; see structs/actor.md.)
 
-    Sub-block 4 -- Timestamp (4 bytes, record-relative 0x3d1..0x3d4):
-      A timing / timestamp value (le u32) -- likely a cooldown/relation timestamp (delete- or
-      rename-cooldown). Exact meaning UNRESOLVED. Partial.
+    Sub-block 4 -- FlagsWord (4 bytes, record-relative 0x3d1..0x3d4, le u32): RESOLVED.
+      A per-slot FLAGS WORD (slot_flags / billing_state_flags). It is NOT a timestamp -- the prior
+      "Timestamp = rename/delete cooldown" hypothesis is REFUTED. Only BIT 0 (mask 0x1) is
+      client-consumed: it is the character's billing/premium state bit. At Enter Game the bit is
+      extracted and copied verbatim into the in-game player panel (a generic panel active/state
+      byte), so the slot's premium/billing flag follows the character into the world. Bits 1..31 are
+      wire-reserved -- no client test references any bit >= 1 of this field (capture-only to
+      enumerate any server-set high bits).
+      BillingStateFlags clarification: bit-0-only is meaningful here. The ACCOUNT-WIDE billing-active
+      state is a SEPARATE single boolean held elsewhere (set by the billing-activated notice), NOT a
+      bit in this per-slot record. The 1/19 expiry notice and 5/34 banner toggle are display-only
+      notices; the 4/3 world-entry confirm carries its own single billing byte -- none of these is a
+      bit inside the 3/1 record.
+
+    NO CLIENT-SIDE RENAME-COOLDOWN IN 3/1: there is no dedicated rename-cooldown bit/byte anywhere in
+      the 3/1 per-slot record. The rename command is gated only by text validation (banned-word,
+      unchanged-name, length >= 2) plus an in-flight guard -- never by a per-slot cooldown field.
+      Rename cooldown is SERVER-ENFORCED and surfaced to the client via the 3/6 char-manage result
+      error codes (one of those error codes is the cooldown refusal); the cooldown value itself never
+      reaches the 3/1 record.
 
     Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame
     = 3 + 2*981 (two populated slots), capture-unverified here.
@@ -114,14 +156,15 @@ notes: |
   PER-SLOT SCRATCH GEOMETRY (corroboration, CONFIRMED control-flow; NOT wire fields): the 5 decoded
   slot records land in distinct scratch regions of the char-select handler singleton -- the 880-byte
   descriptors occupy a contiguous descriptor block (stride 880 bytes per slot), the 96-byte stat
-  blocks a contiguous 5 x 96 = 480-byte block, the 5 flag bytes a 5-byte run, and the 5 timing words
-  a stride-4 run. This independently confirms BOTH the 5-slot count and the 981-byte (880+96+1+4)
-  per-record layout.
+  blocks a contiguous 5 x 96 = 480-byte block, the 5 SlotFlag bytes a 5-byte run, and the 5 flags
+  words a stride-4 run. This independently confirms BOTH the 5-slot count and the 981-byte
+  (880+96+1+4) per-record layout.
 
   CONFLICT (level boundary): the level u16 at descriptor +0x3A may overlap the two state bytes at
   desc +0x38/+0x39. Do NOT promote a clean u16 level without a 5/53 vitals capture for a character
   of known level. Flagged open question (see structs/actor.md open question 1), not adjudicated.
 
   REMAINING UNKNOWNS (capture-pending): the StatBlock tail (+0x24, +0x34, +0x38..) interior;
-  SlotFlag and Timestamp semantics; whether ServerId/ChannelId carry real values; the level byte
-  boundary above.
+  whether ServerId/ChannelId carry real values; the level byte boundary above; whether the server
+  ever sets FlagsWord bits >= 1 (the client ignores them); which 3/6 error code is the rename-cooldown
+  refusal. (SlotFlag and FlagsWord MEANINGS are now RESOLVED -- see sub-blocks 3 and 4 above.)

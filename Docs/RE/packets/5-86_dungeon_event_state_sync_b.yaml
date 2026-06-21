@@ -1,0 +1,57 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 20-byte body -- a leading mode byte
+#                 @0x00, then two u32 values @0x08/0x0C -- are control-flow-confirmed; the scenario id is
+#                 RESIDENT in the dungeon-event-state object, NOT in the packet; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading marked 5/86 "var (20 hdr)"; the read is a fixed 20-byte block.
+#              Also: the scenario id (300/301) is read from the resident state object, not from the wire.
+
+name: SmsgDungeonEventStateSyncB
+opcode: 0x50056           # major 5 (Push), minor 86 -> (5 << 16) | 86
+direction: S2C
+size: 20                  # fixed 20-byte body (0x14)
+spec: packets/5-86_dungeon_event_state_sync_b.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server syncs dungeon/event state (variant B). A fixed 20-byte body holding a leading mode byte (0..4)
+  selecting a sub-path, then two u32 payload values. The handler branches on the mode byte plus the
+  RESIDENT scenario id, arms a timer, writes state/flag fields on a per-event service slot and the local
+  player, then commits.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 20.
+fields:
+  - { name: Mode,    type: u8 }           # 0x00  mode byte: 0 = teardown; 1 / 2 / 3 / 4 = distinct sub-paths
+  - { name: Header,  type: "bytes[7]" }   # 0x01  header / opaque region within the first 8 bytes
+  - { name: ValueA,  type: u32 }          # 0x08  sub-index / selector value (drives the per-mode field writes)
+  - { name: ValueB,  type: u32 }          # 0x0c  payload value (written into event-state object slots)
+  - { name: Tail,    type: "bytes[4]" }   # 0x10  trailing region within the 20-byte body (staged; not all decoded)
+  # widths: 1 + 7 + 4 + 4 + 4 = 20
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 20-byte body, the leading mode byte, and the two payload dwords.
+  CAPTURE-UNVERIFIED for the VALUE meanings.
+
+    0x00 (1B) Mode   : the mode byte. 0 = teardown; 1 / 2 / 3 / 4 select distinct sub-paths.
+    0x01 (7B) Header : the rest of the leading 8-byte region (staged / opaque).
+    0x08 (4B) ValueA : a sub-index / selector value that drives the per-mode field writes (also acts as
+                       a presence / scenario value in some branches).
+    0x0c (4B) ValueB : a payload value written into event-state object slots.
+    0x10 (4B) Tail   : the trailing region inside the 20-byte body (staged; not all field-decoded here).
+
+  SCENARIO ID IS NOT ON THE WIRE: as with 5/85, the branch scenario id (300 / 301) is RESIDENT in the
+  dungeon-event-state object, not carried by this packet.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): ValueA/ValueB are scattered into event-state object
+  slots, a per-event service slot, and local-player fields, and a timer is armed. Those runtime
+  destinations are not wire fields.
+
+  UNKNOWNS to resolve with a capture: the per-mode meaning of ValueA/ValueB and the full Mode enum.
+
+  RELATED: 5/85 SmsgDungeonEventStateSyncA (packets/5-85_dungeon_event_state_sync_a.yaml).

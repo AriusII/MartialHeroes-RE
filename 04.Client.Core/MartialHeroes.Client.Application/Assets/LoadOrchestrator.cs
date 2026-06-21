@@ -1,4 +1,4 @@
-using MartialHeroes.Client.Application.Scene;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Application.Assets;
@@ -9,13 +9,13 @@ public enum LoadOrchestratorState
     Running,
     Completed,
     Cancelled,
-    Faulted,
+    Faulted
 }
 
 /// <summary>
-/// Engine-free analogue of state 2's LoadHandler: pre-decides Opening vs Select, starts the looping
-/// loading SFX, and runs the fixed boot-resource worker behind the loading screen.
-/// spec: Docs/RE/specs/resource_pipeline.md §2; Docs/RE/specs/client_runtime.md §7.3.
+///     Engine-free analogue of state 2's LoadHandler: pre-decides Opening vs Select, starts the looping
+///     loading SFX, and runs the fixed boot-resource worker behind the loading screen.
+///     spec: Docs/RE/specs/resource_pipeline.md §2; Docs/RE/specs/client_runtime.md §7.3.
 /// </summary>
 public sealed class LoadOrchestrator
 {
@@ -23,12 +23,12 @@ public sealed class LoadOrchestrator
         LoadingSoundCueId = 920100100; // spec: Docs/RE/specs/resource_pipeline.md §2.3; client_runtime.md §7.4.
 
     private const long LegacyProgressDenominatorBytes = 9_395_240; // spec: Docs/RE/specs/resource_pipeline.md §2.4.
+    private readonly object _gate = new();
+    private readonly IOpeningSkipReader _openingSkipReader;
+    private readonly ILoadResourceSource _resourceSource;
 
     private readonly SceneStateMachine _scene;
-    private readonly ILoadResourceSource _resourceSource;
-    private readonly IOpeningSkipReader _openingSkipReader;
     private readonly ILoadingSoundSink? _soundSink;
-    private readonly object _gate = new();
     private Task _completion = Task.CompletedTask;
     private long _cumulativeBytes;
     private bool _startedAsReload;
@@ -54,7 +54,9 @@ public sealed class LoadOrchestrator
         get
         {
             lock (_gate)
+            {
                 return _completion;
+            }
         }
     }
 
@@ -63,10 +65,10 @@ public sealed class LoadOrchestrator
     public int ProgressQuotient => (int)(CumulativeBytes / LegacyProgressDenominatorBytes);
 
     /// <summary>
-    /// Post-load destination: follows the <c>OPENNING/SKIP</c> gate unconditionally, even on a
-    /// reload. A reload reaches Select only because <c>option.ini</c> already has <c>SKIP=1</c>
-    /// after the first opening — NOT because the reload forces Select.
-    /// spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
+    ///     Post-load destination: follows the <c>OPENNING/SKIP</c> gate unconditionally, even on a
+    ///     reload. A reload reaches Select only because <c>option.ini</c> already has <c>SKIP=1</c>
+    ///     after the first opening — NOT because the reload forces Select.
+    ///     spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
     /// </summary>
     public EngineSceneState DestinationAfterLoad =>
         _scene.SkipOpening ? EngineSceneState.Select : EngineSceneState.Opening;
@@ -111,13 +113,12 @@ public sealed class LoadOrchestrator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // msg.xdb is a case-1-only synchronous pre-load (main thread, state-1 → state-2 transition).
-            // It is NOT re-loaded on a reload (state-2 re-entry from 3/100 codes 202/203/232).
-            // spec: Docs/RE/specs/resource_pipeline.md §2.2 / §2.5 (CAMPAIGN 16).
+            // msg.xdb is a case-1-only synchronous pre-load; NOT re-loaded on a reload (3/100 codes
+            // 202/203/232). spec: Docs/RE/specs/resource_pipeline.md §2.2 / §2.5.
             if (!_startedAsReload)
                 await LoadAndTrackAsync(LoadResourcePlan.MessageCataloguePath, cancellationToken).ConfigureAwait(false);
 
-            foreach (string path in LoadResourcePlan.BootWorkerPaths)
+            foreach (var path in LoadResourcePlan.BootWorkerPaths)
                 await LoadAndTrackAsync(path, cancellationToken).ConfigureAwait(false);
 
             State = LoadOrchestratorState.Completed;
@@ -127,18 +128,12 @@ public sealed class LoadOrchestrator
             State = LoadOrchestratorState.Cancelled;
             throw;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Fault = ex;
-            State = LoadOrchestratorState.Faulted;
-            throw;
-        }
     }
 
     private async ValueTask LoadAndTrackAsync(string path, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        long bytes = await _resourceSource.LoadAsync(path, cancellationToken).ConfigureAwait(false);
+        var bytes = await _resourceSource.LoadAsync(path, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes > 0)
             Interlocked.Add(ref _cumulativeBytes, bytes);

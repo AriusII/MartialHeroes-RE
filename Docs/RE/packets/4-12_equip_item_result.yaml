@@ -1,0 +1,24 @@
+name: SmsgEquipItemResult
+opcode: 0x4000c           # major 4, minor 12
+direction: S2C
+size: 16                  # fixed 16-byte body
+spec: packets/4-12_equip_item_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server response to an equip request. Updates the equipment slot of the player actor and triggers a weapon-drawn or visual-rebuild refresh when slot 14/15 is modified.
+
+fields:
+  - { name: Guard,       type: u8 }           # 0x00 Must be non-zero
+  - { name: Pad0,        type: "bytes[3]" }   # 0x01 Alignment padding
+  - { name: ActorSort,   type: u32 }          # 0x04 Target actor sort code
+  - { name: Result,      type: u8 }           # 0x08 1 = OK, 0 = Error
+  - { name: Pad1,        type: "bytes[1]" }   # 0x09 Alignment padding
+  - { name: FromSlot,    type: u8 }           # 0x0a Source slot index
+  - { name: FromSub,     type: u8 }           # 0x0b Source container/sub-slot
+  - { name: ToSlot,      type: u8 }           # 0x0c Target slot index (15 = appearance slot, 14 = weapon slot)
+  - { name: PadEnd,      type: "bytes[3]" }   # 0x0d Alignment padding to 16 bytes
+
+notes: |
+  The handler reads a fixed 16-byte body. Frame = 8-byte header + 16 = 24 bytes on the wire.
+  If ToSlot == 15, the client triggers a full character visual rebuild. Slot 14 triggers a weapon draw visual state update.

@@ -13,16 +13,30 @@ verification:   sample-verified   # framing, leading fields, stride and counts c
                                    # real VFS sample bytes AND the runtime loader's control flow
                                    # (two-witness). Field ROLES inside the fixed block and the full
                                    # discriminator enumeration remain debugger-pending.
-ida_reverified: 2026-06-16
+                # re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+ida_reverified: 2026-06-20
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
-conflicts:      - items.scr discriminator offset: RESOLVED — on-disk +0xD2 (210); the prior
-                    "+0xBA" was the loader's internal 0x18-shifted working-buffer notation
-                    (+0xBA + 0x18 = +0xD2). Normalized to on-disk +0xD2 below.
+corrected:      CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): items.scr +0x80 = data/char/skin/g%d.skn
+                mesh selector, +0x84 = bind-pose pool id; citems.scr description paragraphs = 10 (capacity,
+                '#'-sentinel terminated), resolving the 6-vs-10 conflict.
+                CORRECTED CYCLE 7 (ida_anchor 263bd994, 2026-06-20): items.scr record discriminator is
+                on-disk +0xBA (the loader reads the 548-byte block DIRECTLY into the staging buffer —
+                read base = record start — with NO 0x18 shift); the four dispatch flags are on-disk
+                +0xCD..+0xD0. The earlier +0xD2 / "+0x18-shift / 0x18-ahead working buffer" model is
+                REFUTED by the binary. items.scr carries NO paragraph block (the paragraph model is
+                citems-only).
+conflicts:      - items.scr discriminator offset: RESOLVED — on-disk +0xBA (186). The loader reads the
+                    548-byte (0x224) block directly into the staging buffer (read base = record start),
+                    so the discriminator local at staging-buffer +0xBA is the on-disk +0xBA — there is
+                    NO 0x18 shift. The earlier +0xD2 / "+0x18-shifted working buffer" reading is REFUTED.
                 - citems.scr +0x00 field: RESOLVED — it is `item_id`, NOT `slot_index`
                     (values are non-monotonic; billing ids > 100000 appear mid-file).
-                - citems.scr description paragraph count: OPEN — 6 vs 10 UNRESOLVED
-                    (sample-probe pending; see §2.4). Carried as an explicit open conflict.
+                - citems.scr description paragraph count: RESOLVED in favor of 10 (capacity;
+                    '#'-sentinel terminated; the loader's verbatim record copy carries no count
+                    constant, while the consumer paragraph accessor bounds the index < 10). The
+                    prior 6 was merely the count of typically-populated paragraphs in samples.
+                    See §2.4.
 ```
 
 ---
@@ -32,11 +46,15 @@ conflicts:      - items.scr discriminator offset: RESOLVED — on-disk +0xD2 (21
 ```
 items.scr:   framing SAMPLE-VERIFIED  # fixed 548-byte (0x224) record + optional 8-byte effect tail;
                                        # stride = 0x224 + 8*effect_count; 90,937 records; EOF-terminated.
-                                       # +0x80/+0x84 = model/anim ref keys (loader-resolved);
-                                       # record discriminator = on-disk +0xD2 (!=14).
+                                       # +0x80 = .skn mesh selector (data/char/skin/g<key>.skn);
+                                       # +0x84 = bind-pose/skeleton pool id; both resolved at
+                                       # actor-spawn via the shared actor-visual catalogue (§1.4.2).
+                                       # record discriminator = on-disk +0xBA (!=14); dispatch flags
+                                       # on-disk +0xCD..+0xD0. NO paragraph block (citems-only model).
                                        # Remaining stat-field ROLES remain UNVERIFIED / DBG-pending.
 citems.scr:  SAMPLE-VERIFIED          # fixed stride 1052 B × 512 records; item_id@+0x00, name@+0x04;
-                                       # desc paragraphs @+0xE4 (81 B each) — paragraph COUNT 6-vs-10 OPEN.
+                                       # desc paragraphs @+0xE4 (81 B each) — paragraph COUNT = 10
+                                       # (capacity, '#'-sentinel early-terminated; CONFIRMED, §2.4).
 ```
 
 The `items.scr` framing (record stride, termination, and the leading name/uid/effect-count fields)
@@ -45,15 +63,19 @@ is **SAMPLE-VERIFIED** on two independent grounds: a full-file black-box walk of
 own cursor arithmetic (a single fixed-size read of the leading block followed by a count-driven tail
 read). Two reference fields inside the fixed block — `+0x80` and `+0x84` — are **loader-resolved** as
 model-reference and animation-reference keys (the loader resolves them against asset-lookup paths).
-The per-record **discriminator** the loader branches on is at **on-disk offset +0xD2** (tested
-`!= 14`), correcting an earlier mis-located `+0xB8` item-type branch; the loader expresses this byte
-internally as `+0xBA` relative to a working buffer whose base sits 0x18 ahead of the record start
-(`+0xBA + 0x18 = +0xD2`). The remaining numeric stat ROLES inside the fixed block are still
+The per-record **discriminator** the loader branches on is at **on-disk offset +0xBA** (tested
+`!= 14`), correcting an earlier mis-located `+0xB8` item-type branch. The loader reads the 548-byte
+(0x224) block **directly** into its staging buffer (read base = record start), so the discriminator
+local at staging-buffer +0xBA IS the on-disk +0xBA — there is **no 0x18 working-buffer shift** (the
+prior +0xD2 reading is refuted; see §1.4.1 and §1.7). The four dispatch flag bytes the loader
+consults alongside it sit at on-disk **+0xCD..+0xD0**. The remaining numeric stat ROLES inside the
+fixed block are still
 UNVERIFIED / DBG-pending; they are best assigned by a later cross-family debugger pass that dumps
 complete fixed records across weapon / armour / consumable / quest families. The `citems.scr` schema
 is fully fixed-stride and boundary-confirmed across all 512 records; its leading `+0x00` field is the
-item id (see §2) and its description-paragraph **count** (6 vs 10) is an explicit OPEN conflict
-(§2.4).
+item id (see §2) and its description-paragraph **count** is now CONFIRMED at **10** (the structural
+capacity; runtime-terminated early by a `'#'`-sentinel paragraph), resolving the former 6-vs-10 OPEN
+conflict (§2.4).
 
 Both files were re-verified by a two-witness gate: black-box byte observation of the user-supplied
 reference VFS sample AND the runtime loader's control flow / cursor arithmetic. These are two
@@ -118,6 +140,14 @@ The "records vary by ~8 bytes" effect seen in earlier passes is fully explained:
 more effect entry is exactly 8 bytes larger. There is NO variable-width description buffer driving
 the stride. The description is a fixed-extent field inside the 548-byte block.
 
+> **No paragraph block — the paragraph model is citems-only.** `items.scr` does **not** carry a
+> citems-style description-paragraph block (no 338-byte tail, no `10 × 81`-byte paragraphs, no
+> `'#'`-sentinel). Its body is exactly the fixed 548-byte block plus the optional 8-byte-per-entry
+> trailing effect array (`effect_count × 8` at +0x220). The record installer copies the 548-byte
+> block verbatim and stores a single trailing-effect pointer immediately after it — there is no
+> inline paragraph region. The 10-paragraph / `'#'`-sentinel model belongs to `citems.scr` alone
+> (§2.4); the two are unrelated schemas that merely share the `.scr` extension.
+
 ### 1.3 Record count and stride
 
 - **Record count source:** none stored. The count is obtained only by walking records to EOF,
@@ -133,24 +163,26 @@ A parser walks the file by: read the 548-byte block, read `effect_count` at +0x2
 
 All offsets are absolute within the 548-byte (0x224) record block. Endianness: little-endian.
 
-> **Loader buffer base.** When the runtime loader stages a record into memory it does so against a
-> working buffer whose base sits **0x18 bytes** ahead of the record start, and its branch/flag
-> offsets are expressed relative to that **0x18 buffer base**. To convert any loader-relative offset
-> to the on-disk position used in the table below, **add 0x18** (e.g. loader `+0xBA` → on-disk
-> `+0xD2`; loader `+0xCD..+0xD0` → on-disk `+0xE5..+0xE8`). The on-disk offsets in the table below
-> are absolute within the 548-byte record block; the discriminator note in §1.4.1 maps the loader's
-> branch offset onto the on-disk position so an engineer needs only this file.
+> **Loader buffer base.** The runtime loader reads the 548-byte (0x224) block **directly** into its
+> staging buffer with a single fixed-size read — the **read base IS the record start / staging-buffer
+> start**. There is **no 0x18 shift**: every staging-buffer offset the loader uses for its
+> branch/flag fields is identical to the on-disk offset within the 548-byte record block. So the
+> discriminator local at staging-buffer +0xBA is the on-disk **+0xBA**, and the dispatch flags at
+> staging-buffer +0xCD..+0xD0 are on-disk **+0xCD..+0xD0**. (An earlier revision claimed a 0x18-ahead
+> working buffer normalized these to +0xD2 / +0xE5..+0xE8; that +0x18-shift model is REFUTED by the
+> binary — see §1.4.1 and §1.7.) The on-disk offsets in the table below are absolute within the
+> 548-byte record block.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x000 | 52 | CP949[] | `item_name` | Fixed window 0x000..0x033 (52 bytes); CP949 text, NUL-terminated then zero-padded. Enchant variants of one base item carry a `+N` suffix inside this buffer. | CONFIRMED (90,937/90,937) |
 | 0x034 | 4 | u32 | `item_uid` | Per-record id; increments by 1 within a family (e.g. across enchant levels). Observed high-byte families: 0x0B,0x0C,0x0D,0x0E,0x0F,0x10,0x11. The loader uses this value as the per-record lookup-tree key. Sample id 201,171,898 (0x0B family) confirms the 9-digit UID range. | SAMPLE-VERIFIED (90,937/90,937) |
 | 0x038 | variable extent within block | CP949[] | `item_desc` | CP949 description, NUL-terminated, beginning at +0x038 and bounded by the fixed block. Its exact end offset within the block is UNVERIFIED. | CONFIRMED present; exact extent UNVERIFIED |
-| 0x080 | 4 | u32 | `model_ref_key` | Model-reference key. The loader resolves this value against the model/asset-lookup path (a reference into the visual-asset set, not a free numeric stat). Non-zero for families that carry a visual model; identical across enchant variants of one base item. | loader-resolved |
-| 0x084 | 4 | u32 | `anim_ref_key` | Animation-reference key. The loader resolves this value against the animation/asset-lookup path. Identical across enchant variants of one base item; varies by item template/category. | loader-resolved |
+| 0x080 | 4 | u32 | `model_ref_key` | Mesh-selector key. Stored verbatim into the shared actor-visual catalogue at load and resolved at actor-spawn to a `.skn` mesh path **`data/char/skin/g<model_ref_key>.skn`** (printf-formatted numeric selector). Non-zero for families that carry a visual model; identical across enchant variants of one base item. See §1.4.2. | resolved (asset key; HIGH) |
+| 0x084 | 4 | u32 | `anim_ref_key` | Bind-pose/skeleton-pool selector. Stored verbatim alongside `model_ref_key` and resolved at actor-spawn as an **id into the pre-loaded bind-pose/skeleton pool** (the `data/char/bind/g{id}.bnd` skeletons + `data/char/mot/g{id}.mot` motions seeded at boot from `bindlist.txt`) — NOT a direct printf. Identical across enchant variants; varies by item template/category. See §1.4.2. | resolved (pool id; HIGH that it is a pool id, MEDIUM that the item-side g{id}.bnd/.mot file is the exact 1:1 member) |
 | 0x0A4 | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled. Reads as a plausible small float for some weapon families, but its role is unconfirmed. Keep OPAQUE — needs live-debugger confirmation; do not assign a stat meaning. | DBG-pending |
-| 0x0D2 | 1 | u8 | `record_discriminator` | The value the loader branches on to select per-record handling — see §1.4.1. Tested `!= 14`. On-disk offset is **+0xD2**; the loader expresses it internally as `+0xBA` against its 0x18-ahead working buffer (`+0xBA + 0x18 = +0xD2`). (Supersedes the earlier `+0x0B8 item_type_tag` claim, which is REFUTED; see §1.7.) | loader-resolved (offset CONFIRMED; value enumeration DBG-pending) |
-| 0x0E5 | 4 | u8[] | dispatch flags | Four per-record dispatch flag bytes the loader consults alongside the discriminator: `+0xE5`, `+0xE6`, `+0xE7`, `+0xE8`. Observed loader-pushed comparison codes 1 / 26 / 11 / 16 respectively (loader-relative `+0xCD..+0xD0`). Role of each flag is DBG-pending. | loader-resolved (offsets CONFIRMED; semantics DBG-pending) |
+| 0x0BA | 1 | u8 | `record_discriminator` | The value the loader branches on to select per-record handling — see §1.4.1. Tested `!= 14`. On-disk offset is **+0xBA** (the loader reads the 548-byte block directly into the staging buffer, read base = record start, so staging-buffer +0xBA = on-disk +0xBA — NO 0x18 shift). (Supersedes the earlier `+0x0B8 item_type_tag` claim AND the later +0xD2 / +0x18-shift reading, both REFUTED; see §1.7.) | loader-resolved (offset CONFIRMED; value enumeration DBG-pending) |
+| 0x0CD | 4 | u8[] | dispatch flags | Four per-record dispatch flag bytes the loader consults alongside the discriminator: `+0xCD`, `+0xCE`, `+0xCF`, `+0xD0` (on-disk; read base = record start, no shift). The loader maps each byte's `== 1` to comparison codes 1 / 26 / 11 / 16 respectively. Role of each flag is DBG-pending. | loader-resolved (offsets CONFIRMED; semantics DBG-pending) |
 | 0x200 | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled. Keep OPAQUE — needs live-debugger confirmation; do not assign a meaning. | DBG-pending |
 | 0x21C | 4 | bytes | (opaque) | Read into the staged record but no consumer semantics are settled (non-zero in only a small subset of records). Keep OPAQUE — needs live-debugger confirmation; do not assign a meaning. | DBG-pending |
 | 0x220 | 1 | u8 | `effect_count` | Count of trailing 8-byte effect/upgrade entries; drives the per-record stride (see §1.2). | CONFIRMED (90,937/90,937) |
@@ -159,28 +191,74 @@ All offsets are absolute within the 548-byte (0x224) record block. Endianness: l
 Region +0x038..+0x07F (between the description start and the first reference field) and the remaining
 bytes of the block that are not tabled above are not yet mapped. See Known Unknowns.
 
-#### 1.4.1 Record discriminator — on-disk +0xD2, tested `!= 14`
+#### 1.4.1 Record discriminator — on-disk +0xBA, tested `!= 14`
 
-The runtime loader stages each record into a working buffer whose **base is 0x18 bytes ahead of the
-record start** and expresses its branch offsets relative to that **0x18 buffer base**. The field the
-loader uses to select per-record handling is a **discriminator at on-disk offset +0xD2 (210)** of the
-record block. The loader's own disassembly comment names this byte `+0xBA`, but that is the
-**loader-relative** offset against its 0x18-ahead working buffer; the **on-disk** offset is
-unambiguously **+0xD2** (`+0xBA + 0x18 = +0xD2`, confirmed by stack-frame analysis of the dispatch
-routine). Engineers reading the file from disk must use **+0xD2**. The loader's primary branch tests
-this discriminator for **`!= 14`**: one handling path is taken when the value is 14, the other when it
-is not.
+The runtime loader reads the 548-byte (0x224) block with a **single fixed-size read directly into its
+staging buffer** — the **read base is the record start**, so every staging-buffer offset equals the
+on-disk offset. The field the loader uses to select per-record handling is a **discriminator at
+on-disk offset +0xBA (186)** of the record block (the u8 the loader passes to the actor-anim
+catalogue dispatch). Engineers reading the file from disk use **+0xBA** directly — there is **no
+0x18 shift**. The loader's primary branch tests this discriminator for **`!= 14`**: one handling path
+is taken when the value is 14, the other when it is not.
 
-Alongside the discriminator the loader consults **four dispatch flag bytes at on-disk +0xE5, +0xE6,
-+0xE7, +0xE8** (loader-relative `+0xCD..+0xD0`); the loader compares them against codes **1, 26, 11,
-16** respectively. The per-flag semantics are DBG-pending.
+Alongside the discriminator the loader consults **four dispatch flag bytes at on-disk +0xCD, +0xCE,
++0xCF, +0xD0**; for each, an `== 1` maps to comparison codes **1, 26, 11, 16** respectively. The
+per-flag semantics are DBG-pending.
 
 This **corrects** the prior model that placed an `item_type_tag` branch at `+0xB8`: that offset and
-that branch are REFUTED (see §1.7). It also **normalizes** the discriminator's reference frame: an
-earlier revision of this spec stated "on-disk offset +0xBA", but +0xBA is the loader's 0x18-shifted
-internal notation — the on-disk offset is **+0xD2**. The full enumeration of discriminator values and
-what each selected handling path does is **DBG-pending** — only the offset and the `!= 14` split are
-established; do not invent the remaining category meanings.
+that branch are REFUTED (see §1.7). It also **supersedes** the later +0xD2 reading: an earlier
+revision of this spec claimed the loader staged the record into a working buffer 0x18 bytes ahead of
+the record start, normalizing the discriminator to "on-disk +0xD2" and the flags to +0xE5..+0xE8.
+That **+0x18-shift model is REFUTED** — the binary (arbitrated against the doida.exe IDB this cycle)
+reads the block directly into the staging buffer with no shift, anchored by the CONFIRMED
+`effect_count` field at on-disk +0x220 landing at the same staging buffer; measuring the discriminator
+and flags against that same buffer base yields **+0xBA** and **+0xCD..+0xD0** with no shift. The full
+enumeration of discriminator values and what each selected handling path does is **DBG-pending** —
+only the offset and the `!= 14` split are established; do not invent the remaining category meanings.
+
+#### 1.4.2 Asset-key resolution — how +0x80 / +0x84 become real VFS paths
+
+`items.scr` does **not** retain a parsed-items array that is later path-resolved. While the loader
+walks the file, **each record's `model_ref_key` (+0x80) and `anim_ref_key` (+0x84) are stored
+verbatim** — as the two 32-bit words of a small value node — **into a single process-global
+actor-visual catalogue** (a sorted map). This is the *same* catalogue that `data/char/skin.txt`
+feeds, so an item's visual model rides the identical mechanism as a character skin. The node is keyed
+by a composite id the loader derives from the record's uid, discriminator, dispatch code, and an
+actor-visual class/base field on the catalogue. Path resolution is **deferred to actor-spawn time**:
+when an actor part attaches, the catalogue is queried by the same composite key, the stored
+`{model_ref_key, anim_ref_key}` pair is recovered, and only then do the two keys diverge into asset
+I/O. (The composite arithmetic only forms the lookup key — the +0x80/+0x84 values themselves are
+stored and recovered unchanged.) CONFIRMED that the values ride this shared catalogue (loader
+control-flow + the matching skin.txt insertion are both explicit).
+
+- **`model_ref_key` (+0x80) → a `.skn` MESH path.** At spawn the skin cache, on a miss, formats the
+  numeric key into **`data/char/skin/g%d.skn`** and opens/parses the `.skn`. The loaded skin then runs
+  the existing `.skn` → `skin.txt` → texture chain downstream (out of scope here; see the character
+  skin chain). So +0x80 is a numeric `.skn` mesh selector; the on-disk path is
+  **`data/char/skin/g<model_ref_key>.skn`**. Confidence **HIGH** (the format string and the `.skn`
+  open are both explicit).
+
+- **`anim_ref_key` (+0x84) → a bind-pose/skeleton POOL id (NOT a direct printf).** At spawn the key is
+  looked up **by id** in the global bind-pose/skeleton pool — the pool that is pre-populated *by name*
+  earlier in boot from `bindlist.txt` (the `data/char/bind/g{id}.bnd` skeletons and their
+  `data/char/mot/g{id}.mot` motions, the established character skeleton/idle chain). The resolved pose
+  handle is stored on the skin and ref-counted. So +0x84 selects **which bind skeleton + motion set
+  the item's mesh binds to**, indexing the pre-loaded pose pool rather than naming a file directly.
+  Confidence: **HIGH** that it is an id into the pose pool (the by-id lookup is explicit); **MEDIUM**
+  that the exact item-side `g{id}.bnd` / `g{id}.mot` file is the literal 1:1 pool member.
+
+> **OPEN-RISK — `anim_ref_key` (+0x84) exact bind file.** The precise `g{id}.bnd` / `g{id}.mot` file
+> that an item's +0x84 id selects from the pre-loaded pool is **not byte-pinned**. The wiring (a by-id
+> lookup into the pool seeded from `bindlist.txt` / `g{id}.bnd`) is established statically; the exact
+> 1:1 id→file mapping on the *item* side would need either tracing the pool-seeding key assignment or
+> a debugger pass at actor spawn. No guess is recorded. The attach site uses only the pool indirection
+> — no item-side `g%d.bnd` / `g%d.mot` printf was observed.
+
+This **refines** §1.7 item 2 (which already retired the "free numeric stats at +0x080/+0x084"
+reading): both fields are asset-resolution keys, now with their concrete resolution shapes
+(`.skn` mesh path for +0x80; bind-pose pool id for +0x84). The loader reads the leading 548-byte
+block verbatim into the staging buffer (read base = record start), so the on-disk discriminator in
+§1.4.1 (+0xBA) is unaffected by this lane.
 
 ### 1.5 Trailing effect entries — on-disk 8-byte layout
 
@@ -207,9 +285,9 @@ across an enchant series). A cross-family debugger pass is the way to assign the
 
 - Exact end offset of the `item_desc` field within the 548-byte block.
 - Layout of region +0x038..+0x07F beyond the description text.
-- The full enumeration of `record_discriminator` (on-disk +0xD2) values beyond the established
+- The full enumeration of `record_discriminator` (on-disk +0xBA) values beyond the established
   `!= 14` split, and what each selected handling path does — DBG-pending.
-- The per-flag semantics of the four dispatch flag bytes at on-disk +0xE5..+0xE8 (compared against
+- The per-flag semantics of the four dispatch flag bytes at on-disk +0xCD..+0xD0 (`== 1` maps to
   codes 1 / 26 / 11 / 16) — DBG-pending.
 - Consumer semantics of the opaque fields at +0x0A4, +0x200, and +0x21C — DBG-pending (read their
   bytes, assign no meaning until a live-debugger pass settles them).
@@ -222,18 +300,29 @@ across an enchant series). A cross-family debugger pass is the way to assign the
 Earlier models of `items.scr` were proven wrong and must NOT be revived. They are recorded here only
 so the same mistakes are not made again.
 
-1. **`item_type_tag` discriminator at `+0x0B8`.** An earlier spec placed the record's category /
-   dispatch field at `+0x0B8` and treated it as a packed item-type tag. This is **REFUTED**. The
-   field the loader actually branches on is the **discriminator at on-disk +0xD2**, tested **`!= 14`**
-   (the loader names it `+0xBA` relative to its 0x18-ahead working buffer; `+0xBA + 0x18 = +0xD2` —
-   see §1.4.1). No branch reads `+0x0B8`. Do not reintroduce a `+0x0B8 item_type_tag`. (Authority:
-   two-witness gate — loader branch + black-box; Campaign 10 D8 stack-frame analysis normalized the
-   on-disk offset to +0xD2.)
+1. **`item_type_tag` discriminator at `+0x0B8`, AND the later `+0xD2` / `+0x18-shift` reading.** Two
+   successive readings here are now REFUTED:
+   - An earlier spec placed the record's category / dispatch field at `+0x0B8` and treated it as a
+     packed item-type tag. **REFUTED** — no branch reads `+0x0B8`.
+   - A subsequent revision claimed the loader staged the record into a working buffer **0x18 bytes
+     ahead** of the record start, normalizing the discriminator to **on-disk +0xD2** and the four
+     dispatch flags to +0xE5..+0xE8. **That +0x18-shift model is itself REFUTED.** The binary
+     (arbitrated against the doida.exe IDB, SHA 263bd994, CYCLE 7) reads the 548-byte block
+     **directly** into the staging buffer — the read base IS the record start, with **no shift**.
+   The field the loader actually branches on is the **discriminator at on-disk +0xBA**, tested
+   **`!= 14`**, with the four dispatch flags at on-disk **+0xCD..+0xD0** (see §1.4.1). The
+   staging-buffer base is iron-clad because the CONFIRMED `effect_count` field at on-disk +0x220
+   lands at the same staging buffer; measured against that base the discriminator is +0xBA and the
+   flags +0xCD..+0xD0 with no shift. Do not reintroduce `+0x0B8`, `+0xD2`, the `+0x18-shift /
+   0x18-ahead working buffer` notation, or the +0xE5..+0xE8 flag offsets. (Authority: two-witness —
+   loader branch + black-box; CYCLE 7 IDB arbitration against the +0x220 effect_count anchor.)
 
 2. **Free numeric stats at `+0x080` / `+0x084`.** An earlier spec read these as inferred
-   `template_ref` / `template_ref_b` numeric stats of UNVERIFIED role. They are now **loader-resolved**
-   as the **model-reference** (`+0x080`) and **animation-reference** (`+0x084`) keys (§1.4) — they are
-   asset-lookup keys the loader resolves, not free numeric stats.
+   `template_ref` / `template_ref_b` numeric stats of UNVERIFIED role. They are now **resolved asset
+   keys**, not free numeric stats: `+0x080` is the **mesh selector** that resolves to
+   `data/char/skin/g<key>.skn`, and `+0x084` is the **bind-pose/skeleton-pool id**. Both are stored
+   verbatim into the shared actor-visual catalogue at load and resolved at actor-spawn — see §1.4.2 for
+   the full resolution chain.
 
 3. **Variable-stride "stats block at `0x38 + desc_width`" (former §1.4).** An earlier spec treated
    the description as a variable-width buffer whose width drove the record size, and placed a
@@ -304,7 +393,11 @@ All offsets are relative to the start of the record.
 | 0x1D7 | 81 | CP949[] | `desc_para[3]` | Description paragraph 3. | CONFIRMED (512/512) |
 | 0x228 | 81 | CP949[] | `desc_para[4]` | Description paragraph 4 (populated in fewer records). | CONFIRMED (512/512) |
 | 0x279 | 81 | CP949[] | `desc_para[5]` | Description paragraph 5 (populated in fewer records). | CONFIRMED (512/512) |
-| 0x2CA | 338 | bytes | (record remainder) | Remainder of the record after the **6-paragraph** description block (0x2CA..0x41B); content unmapped, likely duration / equip requirements / icon-graphic id. **If the description is actually 10 paragraphs (see §2.4 OPEN conflict), this region is partly paragraphs 6–9 instead.** | UNVERIFIED |
+| 0x2CA | 81 | CP949[] | `desc_para[6]` | Description paragraph 6 (structural capacity; rarely populated in samples — see §2.4). | CONFIRMED (capacity) |
+| 0x31B | 81 | CP949[] | `desc_para[7]` | Description paragraph 7 (structural capacity; rarely populated). | CONFIRMED (capacity) |
+| 0x36C | 81 | CP949[] | `desc_para[8]` | Description paragraph 8 (structural capacity; rarely populated). | CONFIRMED (capacity) |
+| 0x3BD | 81 | CP949[] | `desc_para[9]` | Description paragraph 9 (structural capacity; rarely populated). Block ends at 0x40E (`+0xE4 + 10·81 = 0x40E`). | CONFIRMED (capacity) |
+| 0x40E | 14 | bytes | (record tail) | The true non-paragraph tail, 0x40E..0x41B (14 bytes), after the 10-paragraph description block; content unmapped, likely duration / equip requirements / icon-graphic id. | UNVERIFIED |
 
 > **Billing filter (loader behaviour).** The loader filters cash-shop records by `item_id` against a
 > threshold: when billing is **inactive** it admits only `item_id < 100000` (regular cash items);
@@ -319,42 +412,45 @@ All offsets are relative to the start of the record.
 - **Record stride:** 1052 bytes (0x41C). SAMPLE-VERIFIED — exact divisor; loader reads 0x41C per
   record.
 
-### 2.4 citems.scr — description block (fixed 81-byte paragraphs; COUNT 6-vs-10 OPEN)
+### 2.4 citems.scr — description block (fixed 81-byte paragraphs; COUNT = 10, CONFIRMED)
 
-The description is NOT a single contiguous buffer. It is a block of **fixed-offset paragraphs, each
-81 bytes (0x51) wide**, CP949 text, NUL-terminated within each paragraph then zero-padded, starting
-at **+0x0E4**:
+The description is NOT a single contiguous buffer. It is a block of **ten fixed-offset paragraphs,
+each 81 bytes (0x51) wide**, CP949 text, NUL-terminated within each paragraph then zero-padded,
+starting at **+0x0E4**:
 
 ```
-desc_para[i] start = 0x0E4 + i * 81
-desc_para_width    = 81 (0x51) bytes        (applies to every paragraph)
+desc_para[i] start = 0x0E4 + i * 81     (i = 0 .. 9)
+desc_para_width    = 81 (0x51) bytes    (applies to every paragraph)
+desc_para_count    = 10                 (structural capacity; CONFIRMED)
 ```
 
-Paragraph start offsets for the first six: 0x0E4, 0x135, 0x186, 0x1D7, 0x228, 0x279. The first two
-paragraphs (`+0x0E4`, `+0x135`) are SAMPLE-VERIFIED to hold CP949 text; the 81-byte stride between
-them is confirmed. An empty paragraph is all-zero, and later paragraphs are populated in fewer
-records.
+Paragraph start offsets (all ten): 0x0E4, 0x135, 0x186, 0x1D7, 0x228, 0x279, 0x2CA, 0x31B, 0x36C,
+0x3BD. The block ends at **0x40E** (`0x0E4 + 10·81 = 228 + 810 = 1038 = 0x40E`), leaving a 14-byte
+non-paragraph tail at 0x40E..0x41B inside the 1052-byte (0x41C) record. The first two paragraphs
+(`+0x0E4`, `+0x135`) are SAMPLE-VERIFIED to hold CP949 text; the 81-byte stride between them is
+confirmed. An empty paragraph is all-zero.
 
-> **OPEN CONFLICT — paragraph count (6 vs 10), UNRESOLVED.** Two prior readings disagree on how many
-> 81-byte paragraphs the description block contains, and this re-verification could **not** settle it
-> from the available sample (only the first two paragraphs were byte-observed):
+> **RESOLVED — paragraph count is 10 (structural capacity), CONFIRMED.** The former 6-vs-10 conflict
+> is settled in favour of **10**:
 >
-> - **6 paragraphs** (this spec's prior reading): block = 0x0E4..0x328 (486 bytes), leaving a
->   338-byte record remainder at 0x2CA..0x41B. This matches the prior-campaign observation of a
->   non-paragraph remainder there.
-> - **10 paragraphs** (the sibling `config_tables.md` §2.11 reading): block = 0x0E4 + 10×81 =
->   0x0E4..0x41E. Note 0x41E is **2 bytes past** the 1052-byte (0x41C) record stride, so a strict
->   10-paragraph block does not fit cleanly — but a 9-paragraph-plus reading (or the remainder being
->   partly paragraphs 6–9) is not excluded by the first-two-paragraph sample alone.
+> - The runtime paragraph accessor **hard-bounds the index at `< 10`** and returns
+>   `record_base + 81·index + 228` (paragraph base +0xE4, width 81 / 0x51 bytes); the cash-shop
+>   description-builder loops `i < 10`. The structural CAPACITY is unambiguously **10**, not 6.
+> - A `'#'`-first-byte sentinel paragraph (an 81-byte paragraph whose first byte is `'#'`)
+>   **early-terminates** the consumer at runtime. This is why VFS samples populate only the first few
+>   paragraphs — 6 was merely the count of *typically-populated* paragraphs, not the capacity.
+> - **No overflow.** The 10-paragraph block ends at `0x0E4 + 10·81 = 0x40E` = byte 1038, INSIDE the
+>   1052-byte (0x41C) record (14-byte tail at 0x40E..0x41B). The earlier "10×81 overflows by 2 bytes
+>   (ends at 0x41E)" worry was a hex-arithmetic slip — `0xE4 + 810` is `0x40E`, not `0x41E`.
+> - The conflict was inconclusive earlier because the count is NOT in the loader: the loader copies
+>   the whole 1052-byte record **verbatim** (no per-paragraph loop), so it exposes no count constant.
+>   The count lives in the **consumer** accessor (the `< 10` index bound), so the loader-only witness
+>   was correctly inconclusive — the consumer witness settles it. CONFIRMED (code-confirmed, static;
+>   compile-time constant in the binary). (Resolves: Campaign 10 D8 §3.2 CONFLICT B / §7 action item 1.)
 >
-> Neither witness is decisive: the loader copies the whole 1052-byte record verbatim (one `memcpy`),
-> so the disassembly exposes **no paragraph-count constant**; and the VFS sample observed only
-> paragraphs 0–1. **Do not pick a count.** RESOLUTION REQUIRES a sample probe: read the bytes at
-> +0x2CA, +0x31B, +0x36C, +0x3BD (paragraphs 6–9 under the 10-para model) across many records and
-> check whether they ever hold CP949 text (→ count > 6) or are always zero / non-text (→ count = 6).
-> Until that probe runs, treat the description as **>= 6 fixed 81-byte paragraphs from +0x0E4**, and
-> treat the 0x2CA..0x41B remainder as POSSIBLY further paragraphs. (Conflict raised: Campaign 10 D8,
-> §3.2 CONFLICT B / §7 action item 1.)
+> Engineering note: the number of *populated* paragraphs per record is data-dependent and
+> runtime-terminated by the `'#'` sentinel; read up to 10 paragraphs but stop at the first `'#'`-sentinel
+> paragraph (a paragraph whose first byte is `'#'`). Do not hard-code a count of 6.
 
 ### 2.5 citems.scr — corrections from earlier spec (do not reintroduce)
 
@@ -368,18 +464,17 @@ records.
 - **The field formerly documented as `item_ref` (u32 at +0x04) DOES NOT EXIST.** Those 4 bytes are
   the first 4 bytes of the `item_name` CP949 string. It has been removed.
 - **The description is NOT a single buffer near offset 0xDC.** It is the fixed 81-byte paragraph block
-  starting at 0x0E4 described in §2.4. (Authority: scr_desc_bounds.raw.md §1.) Note the paragraph
-  **count** (6 vs 10) is an OPEN conflict — see §2.4.
+  starting at 0x0E4 described in §2.4 — **ten paragraphs (capacity)**, runtime-terminated early by a
+  `'#'` sentinel. The former 6-vs-10 count conflict is RESOLVED in favour of 10 (see §2.4); do not
+  re-document a 6-paragraph block.
 
 ### 2.6 citems.scr — Known Unknowns
 
-- **Description paragraph COUNT — 6 vs 10, OPEN.** See §2.4; resolution requires a multi-record
-  sample probe of the bytes at +0x2CA / +0x31B / +0x36C / +0x3BD. PRIORITY: HIGH.
 - `unknown_36` (u16 at +0x36) value and purpose.
 - `slot_seq_2` (+0x3C) role relative to item categorisation.
 - `item_uid` (+0x48) generation rule (high-range, not a simple increment).
-- Record remainder 0x2CA..0x41B (likely duration / equip requirements / icon-graphic id — or, under
-  the 10-paragraph reading, partly further description paragraphs; see §2.4).
+- Record tail 0x40E..0x41B (the 14-byte non-paragraph remainder after the 10-paragraph block; likely
+  duration / equip requirements / icon-graphic id — see §2.4).
 
 ---
 
@@ -395,11 +490,11 @@ records.
 | Leading id field | — (name at +0x000) | `item_id` u32 at +0x000 (NOT a slot index) |
 | Name buffer | +0x000, 52 B fixed (CP949) | +0x004, 48 B fixed (CP949) |
 | Per-record unique id | `item_uid` u32 at +0x034 | `item_uid` u32 at +0x048 |
-| Description | CP949 from +0x038, bounded within the fixed block | >= 6 × 81-byte paragraphs from +0x0E4 (COUNT 6-vs-10 OPEN, §2.4) |
-| Asset refs / discriminator | `model_ref_key` +0x080, `anim_ref_key` +0x084 (loader-resolved); discriminator on-disk +0x0D2 `!= 14`; dispatch flags +0x0E5..+0x0E8 | — |
+| Description | CP949 from +0x038, bounded within the fixed block | 10 × 81-byte paragraphs from +0x0E4 (capacity; `'#'`-sentinel early-terminated; CONFIRMED, §2.4) |
+| Asset refs / discriminator | `model_ref_key` +0x080 → `data/char/skin/g<key>.skn`, `anim_ref_key` +0x084 → bind-pose pool id (both via the shared actor-visual catalogue, §1.4.2); discriminator on-disk +0x0BA `!= 14`; dispatch flags +0x0CD..+0x0D0 | — |
 | Price field | none confirmed (asset-ref keys at +0x080/+0x084; +0x0A4 opaque) | NX cash points at +0x038 |
 | Schema | regular item master | cash-shop item master |
-| Overall confidence | framing SAMPLE-VERIFIED; +0x80/+0x84 + discriminator +0xD2 settled; other stat ROLES UNVERIFIED/DBG-pending | SAMPLE-VERIFIED; desc paragraph COUNT OPEN (§2.4) |
+| Overall confidence | framing SAMPLE-VERIFIED; +0x80 (.skn path) HIGH / +0x84 (bind-pose pool id) HIGH–MEDIUM; discriminator +0xBA settled (no 0x18 shift); other stat ROLES UNVERIFIED/DBG-pending | SAMPLE-VERIFIED; desc paragraph COUNT = 10 CONFIRMED (§2.4) |
 
 The two files are NOT the same schema. They share the concept of CP949 name + CP949 description +
 numeric fields but organise them differently.
@@ -414,20 +509,27 @@ numeric fields but organise them differently.
   the 548-byte block, read `effect_count` (u8 at +0x220), then read `effect_count × 8` trailing
   bytes; advance by `0x224 + 8 * effect_count`; stop at EOF. Read `item_name` (+0x000, 52 B),
   `item_uid` (+0x034, u32), and `item_desc` (CP949 from +0x038) as SAMPLE-VERIFIED. Read
-  `model_ref_key` (+0x080) and `anim_ref_key` (+0x084) as the loader-resolved asset-reference keys.
-  The per-record **discriminator** is at **on-disk +0x0D2** with the loader's branch testing `!= 14`
-  (the loader names this byte `+0xBA` against a working buffer 0x18 ahead of the record start;
-  `+0xBA + 0x18 = +0xD2`; the four dispatch flags sit at on-disk +0x0E5..+0x0E8) — read it, but the
-  full meaning of each discriminator value is DBG-pending. Treat the fields at **+0x0A4, +0x200,
-  +0x21C** as **OPAQUE / DBG-pending** — read their bytes but assign no semantics until a
-  live-debugger pass settles them. Do NOT read a field at +0x0B8 (REFUTED).
+  `model_ref_key` (+0x080) and `anim_ref_key` (+0x084) as resolved asset-reference keys — +0x080 is the
+  `.skn` mesh selector resolving to `data/char/skin/g<key>.skn` (then the `.skn` → skin.txt → tex
+  chain), and +0x084 is a bind-pose/skeleton-pool id selecting a `g{id}.bnd` skeleton + `g{id}.mot`
+  motions from the pre-loaded pool; both are recovered at actor-spawn from the shared actor-visual
+  catalogue (§1.4.2). The exact item-side `g{id}.bnd`/`.mot` file for +0x084 is OPEN-RISK (not
+  byte-pinned). The per-record **discriminator** is at **on-disk +0x0BA** with the loader's branch
+  testing `!= 14` (the loader reads the 548-byte block directly into the staging buffer, read base =
+  record start, so staging-buffer +0xBA = on-disk +0xBA — there is NO 0x18 shift; the four dispatch
+  flags sit at on-disk +0x0CD..+0x0D0) — read it, but the full meaning of each discriminator value is
+  DBG-pending. `items.scr` carries **no description-paragraph block** (the `10 × 81`-byte /
+  `'#'`-sentinel model is citems-only). Treat the fields at **+0x0A4, +0x200, +0x21C** as **OPAQUE /
+  DBG-pending** — read their bytes but assign no semantics until a live-debugger pass settles them.
+  Do NOT read a field at +0x0B8 or +0x0D2 (both REFUTED).
 - **citems.scr** is safe to implement: iterate 512 records at 1052-byte stride; read `item_id`
   (u32 at +0x00 — **not** a slot index), `item_name` (+0x04, 48 B CP949), `cash_price_nx` (+0x38),
   `item_uid` (+0x48), and the description paragraphs (`0x0E4 + i*81`, 81 bytes each, CP949
-  NUL-terminated). **Read at least 6 paragraphs**, and treat the 0x2CA..0x41B remainder cautiously
-  until the paragraph **count** (6 vs 10) is resolved — see the §2.4 OPEN conflict; do not hard-code a
-  count of exactly 6 in a way that would silently drop later text. If filtering billing/premium items,
-  the threshold is `item_id >= 100000` (see §2.2 billing-filter note).
+  NUL-terminated). **The description block holds 10 paragraphs (capacity)**; iterate `i` from 0 to 9
+  and **stop at the first `'#'`-sentinel paragraph** (first byte `'#'`), which is the runtime early
+  terminator (§2.4). Do not hard-code a count of 6 (it would silently drop later text). The 14-byte
+  tail at 0x40E..0x41B follows the paragraph block. If filtering billing/premium items, the threshold
+  is `item_id >= 100000` (see §2.2 billing-filter note).
 - `Assets.Parsers` stays rendering-free; any conversion or presentation belongs to `Assets.Mapping`.
 
 ---
@@ -442,17 +544,31 @@ numeric fields but organise them differently.
 
 - **Glossary (proposed names — orchestrator records in `names.yaml`):** `ItemRecord` (the 548+8N
   block), `item_name`, `item_uid`, `item_desc`, `model_ref_key` (u32 at +0x080),
-  `anim_ref_key` (u32 at +0x084), `record_discriminator` (u8 at on-disk +0x0D2, tested `!= 14`),
+  `anim_ref_key` (u32 at +0x084), `record_discriminator` (u8 at on-disk +0x0BA, tested `!= 14`),
   `effect_count` (u8 at +0x220), `EffectEntry` (8-byte trailing record); for citems.scr —
   `item_id` (u32 at +0x000, **not** `slot_index`), `cash_price_nx`, `slot_seq_2`,
-  `citems_stride = 1052`, `citems_desc_para_width = 81`, `citems_desc_para_count` (= 6 or 10, OPEN).
+  `citems_stride = 1052`, `citems_desc_para_width = 81`, `citems_desc_para_base = 0x0E4`,
+  `citems_desc_para_count = 10` (capacity; `'#'`-sentinel early-terminated).
   Candidate loader names from the dirty-room (orchestrator-owned): `ItemsScr_LoadFile`,
   `CitemsScr_LoadFile`.
 - **Provenance:** see `Docs/RE/journal.md` — promotion entries: CAMPAIGN VFS-MASTERY (two-witness:
   loader + black-box) settled `+0x80/+0x84` as model/anim ref keys and REFUTED the `+0x0B8
   item_type_tag` branch and left `+0x0A4 / +0x200 / +0x21C` opaque (DBG-pending). Campaign 10 D8
-  (two-witness, IDB SHA 263bd994 + VFS sample) normalized the record discriminator to **on-disk
-  +0x0D2** (`!= 14`; loader-internal `+0xBA` against the 0x18-ahead working buffer), surfaced the four
-  dispatch flags at on-disk +0x0E5..+0x0E8, corrected the citems.scr `+0x00` field from `slot_index`
-  to `item_id`, and raised the citems.scr description-paragraph **count** (6 vs 10) as an OPEN
-  conflict pending a sample probe.
+  (two-witness, IDB SHA 263bd994 + VFS sample) placed the record discriminator at on-disk +0x0D2 via a
+  "+0x18-shifted working buffer" model, surfaced four dispatch flags at +0x0E5..+0x0E8, corrected the
+  citems.scr `+0x00` field from `slot_index` to `item_id`, and raised the citems.scr
+  description-paragraph **count** (6 vs 10) as an OPEN conflict pending a sample probe. **CORRECTED
+  CYCLE 7** (static-IDA, IDB SHA 263bd994, 2026-06-20) REFUTES that +0x18-shift model: the loader
+  reads the 548-byte block **directly** into the staging buffer (read base = record start, anchored by
+  the CONFIRMED `effect_count` at on-disk +0x220), so the **discriminator is on-disk +0x0BA** (`!= 14`)
+  and the **four dispatch flags are on-disk +0x0CD..+0x0D0** — with NO shift. CYCLE 7 also confirms
+  `items.scr` carries **no paragraph block** (the `10 × 81` / `'#'`-sentinel paragraph model is
+  citems-only). **CORRECTED CYCLE 1** (static-IDA, IDB SHA 263bd994, 2026-06-19)
+  resolved both: (1) `items.scr` +0x080 / +0x084 are asset-resolution keys recovered at actor-spawn
+  from the shared actor-visual catalogue — +0x080 → a `.skn` mesh path `data/char/skin/g<key>.skn`
+  (printf selector, HIGH), +0x084 → a bind-pose/skeleton-pool id resolved against the pre-loaded
+  `g{id}.bnd`/`g{id}.mot` pool (HIGH it is a pool id; the exact item-side file is OPEN-RISK / not
+  byte-pinned) — see §1.4.2; (2) the citems.scr description-paragraph **count is 10** (structural
+  capacity), CODE-CONFIRMED by the consumer paragraph accessor's `< 10` index bound and the
+  `'#'`-sentinel early-termination — the loader's verbatim record copy carries no count constant, so
+  the loader-only witness was correctly inconclusive — resolving the 6-vs-10 conflict (§2.4).

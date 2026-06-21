@@ -18,7 +18,7 @@ opcode: 0x20007           # major 2 (GameAction), minor 7 -> (2 << 16) | 7
 direction: C2S
 size: var                 # fixed 19-byte (0x13) prefix + [u32 textLength-excl-NUL][CP949 text]
 spec: packets/2-7_whisper.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

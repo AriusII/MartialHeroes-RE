@@ -1,0 +1,73 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 7 RECLASSIFICATION (binary-won): this is the CUBE-GAMBLE reel-update push, NOT combat.
+#   The dev/IDB "SmsgCombatAttackUpdate" label was a mislabel — the owning subsystem loads
+#   cubegamble.dds, tracks a daily bet limit, and submits via C2S 2/141 (Block C evidence).
+#   The 188-byte (0xBC) layout below is CONTROL-FLOW CONFIRMED; only the *naming/semantics*
+#   changed from "combat" to "cube-gamble reel". Filename retains the legacy autoname.
+# spec: Docs/RE/packets/4-100_cube_gamble_reel_update.yaml
+
+name: SmsgCubeGambleReelUpdate
+opcode: 0x40064           # major 4 (Response), minor 100 -> (4 << 16) | 100
+direction: S2C
+size: 188                # fixed 188-byte payload block (0xBC)
+spec: packets/4-100_combat_attack_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a Cube-Gamble reel-state update to the local player. A fixed 188-byte block: an
+  8-byte head, a 3-field interpreted prefix (a reel-phase byte, a sub-kind byte, and a dword value)
+  that drives the local player's gamble reel timestamps and phase flags, then a 172-byte opaque tail
+  forwarded whole to a downstream reel-apply routine.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 188. Only the three prefix
+# fields at +0x08/+0x0A/+0x0C are interpreted by this handler; the rest of the block is reserved
+# opaque (the 8-byte head is unread before the forward; the 172-byte tail is consumed wholesale).
+fields:
+  - { name: HeadOpaque, type: "bytes[8]" }    # +0x00  opaque head; bytes 0x00..0x07 not read by this handler before the forward
+  - { name: Phase,      type: u8 }            # +0x08  branch selector (compares == 3, == 5); drives reel timestamps/flags
+  - { name: ReservedA,  type: "bytes[1]" }    # +0x09  filler to the sub-kind byte
+  - { name: SubKind,    type: u8 }            # +0x0A  branch selector (compares == 0xFF); pokes a main-window actor sub-slot
+  - { name: ReservedB,  type: "bytes[1]" }    # +0x0B  filler to the value dword
+  - { name: Value,      type: u32 }           # +0x0C  reel value; stored into the local-player gamble slot when Phase == 3
+  - { name: OpaqueTail, type: "bytes[172]" }  # +0x10  opaque tail (0xAC bytes) forwarded as one block to the reel-apply consumer -- opaque section boundary, inner shape PENDING
+  # widths: 8 + 1 + 1 + 1 + 1 + 4 + 172 = 188
+
+notes: |
+  CYCLE 7 (binary-won): the owning subsystem is the Cube-Gamble minigame (loads cubegamble.dds,
+  enforces a daily bet limit on the local-player struct, submits the bet via C2S 2/141). The earlier
+  "combat attack-state" reading (and the dev/IDB "SmsgCombatAttackUpdate" name) is REFUTED; the real
+  combat melee/skill path is C2S 2/52 -> S2C 5/52 (server broadcast). See specs/combat.md and
+  specs/handlers.md for the de-labelling. Only the semantics changed; the byte layout below stands.
+
+  CONTROL-FLOW CONFIRMED body size (a single fixed 0xBC bulk copy into one local block) and the three
+  interpreted prefix fields. The 172-byte tail is BOUNDED as one opaque block: the full 188-byte
+  block is passed by pointer to a downstream reel-apply routine that consumes it wholesale -- this
+  handler does NOT sub-index the tail. There is no loop and no per-record stride; the body is a single
+  fixed 188-byte struct, not an array. The field widths sum to exactly 188 (verified).
+
+  INTERPRETED PREFIX (offsets +0x08..+0x0F):
+    +0x08 (1B) Phase   : a branch selector. The handler tests == 3 and == 5.
+                         == 3 -> writes a current-time millisecond stamp to a local-player slot,
+                           stores Value (+0x0C) into the local-player gamble slot, stores the Phase
+                           byte itself, and clears a 1-byte flag.
+                         == 5 -> zeros a local-player gamble slot and sets the same flag.
+                         VALUE meaning (which reel phase each number is) PENDING.
+    +0x0A (1B) SubKind : a branch selector. == 0xFF pokes a main-window actor sub-slot (a UI/actor
+                         hook; the reel-teardown/reset sentinel). VALUE meaning PENDING.
+    +0x0C (4B) Value   : a reel value stored into the local-player gamble slot on the Phase == 3
+                         branch. VALUE meaning (reel result / counter) PENDING.
+
+  OPAQUE TAIL (+0x10..+0xBB, 172 bytes): reserved as one OPAQUE SECTION BOUNDARY. The whole 188-byte
+  block is handed by pointer to a reel-apply consumer that walks it; its internal shape (sub-records
+  vs fixed fields, whether keyed by Phase/SubKind) is NOT decidable from this handler -- it would
+  require decompiling the reel-apply consumer. Do NOT invent byte meanings inside this block. Inner
+  shape PENDING (a follow-on lane / capture).
+
+  UNKNOWNS to resolve with a capture / follow-on RE of the reel-apply consumer:
+    - the meaning of each Phase / SubKind value and the Value field;
+    - the internal structure of the 172-byte opaque tail.
+
+  UNBLOCKS: the Client.Application Cube-Gamble reel-update handler (4/100) -- the prefix fields drive
+  the local-player gamble reel state; the tail is forwarded to the reel-apply step (specced separately
+  once the consumer is reversed).

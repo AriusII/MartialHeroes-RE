@@ -1,0 +1,40 @@
+# spec: Docs/RE/packets/2-45_hud_flags_target.yaml
+# Role: C2S HUD action — four flag bytes + a target/slot u32, with an inventory prerequisite.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgHudFlagsTarget
+opcode: 0x2002d           # major 2 (GameAction), minor 45 -> (2 << 16) | 45
+direction: C2S
+size: 8                   # fixed 8-byte body
+spec: packets/2-45_hud_flags_target.yaml
+status: hypothesis
+capture_verified: false
+
+summary: HUD action carrying four flag bytes and a target/slot id. Gated on a MainWindow state flag and an inventory prerequisite (an inventory/slot-id lookup); aborts with a chat notice if a trade is busy.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 8.
+fields:
+  - { name: B0,    type: u8 }    # 0x00  flag byte [capture/debugger-pending]
+  - { name: B1,    type: u8 }    # 0x01  flag byte [capture/debugger-pending]
+  - { name: B2,    type: u8 }    # 0x02  flag byte [capture/debugger-pending]
+  - { name: B3,    type: u8 }    # 0x03  flag byte [capture/debugger-pending]
+  - { name: Value, type: u32 }   # 0x04  slot/target id (or 0 on the alternate path) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 8-byte blit: four bytes then a u32); the field
+  VALUES are static inferences (capture-pending).
+
+    0x00..0x03 (4x u8) : four flag/selector bytes (B0..B3). [capture/debugger-pending]
+    0x04 (4B) Value    : a slot/target id resolved from the panel object (0 on the alternate path).
+                         [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): gated on a MainWindow state flag; if an inventory
+  prerequisite check fails it emits a chat notice and aborts; otherwise it resolves Value from the
+  panel. The trade-busy abort indicates this action is blocked during an active trade.
+
+  UNKNOWNS to resolve with a capture:
+    - the meaning of the four flag bytes and of Value;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application HUD flags+target action use-case.

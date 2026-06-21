@@ -22,23 +22,24 @@
 // spec: Docs/RE/specs/ui_system.md §1.3 — "atlas pixels map 1:1 to screen pixels on 1024×768".
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.Texture;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Ui.Assets;
 
 /// <summary>
-/// Shared HUD atlas library — maps uitex.txt tex_ids and hard-coded VFS paths to
-/// Godot <see cref="Texture2D"/> objects and slices <see cref="AtlasTexture"/> sub-rects.
-///
-/// <para>Pass to every HUD widget/window that needs atlas access. One instance per session,
-/// created by the composition root (ClientContext) and passed down by constructor.</para>
-///
-/// <para>All public methods return <see langword="null"/> when the VFS is unavailable or an
-/// id/path is absent. Callers MUST handle null and render nothing.</para>
-///
-/// spec: Docs/RE/formats/ui_manifests.md §1 — uitex.txt grammar (PARSER-CONFIRMED).
+///     Shared HUD atlas library — maps uitex.txt tex_ids and hard-coded VFS paths to
+///     Godot <see cref="Texture2D" /> objects and slices <see cref="AtlasTexture" /> sub-rects.
+///     <para>
+///         Pass to every HUD widget/window that needs atlas access. One instance per session,
+///         created by the composition root (ClientContext) and passed down by constructor.
+///     </para>
+///     <para>
+///         All public methods return <see langword="null" /> when the VFS is unavailable or an
+///         id/path is absent. Callers MUST handle null and render nothing.
+///     </para>
+///     spec: Docs/RE/formats/ui_manifests.md §1 — uitex.txt grammar (PARSER-CONFIRMED).
 /// </summary>
 public sealed class HudAtlasLibrary : IDisposable
 {
@@ -47,10 +48,6 @@ public sealed class HudAtlasLibrary : IDisposable
     private const string UiTexPath = "data/ui/UiTex.txt";
 
     private readonly RealClientAssets? _assets;
-
-    // Lazy-loaded uitex manifest.
-    private UiTexManifest? _manifest;
-    private bool _manifestAttempted;
 
     // Texture cache keyed by tex_id — each atlas is loaded at most once per session.
     // spec: Docs/RE/formats/ui_manifests.md §1.5 — non-contiguous id space requires dict lookup.
@@ -61,13 +58,17 @@ public sealed class HudAtlasLibrary : IDisposable
 
     private bool _disposed;
 
+    // Lazy-loaded uitex manifest.
+    private UiTexManifest? _manifest;
+    private bool _manifestAttempted;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a HudAtlasLibrary backed by the supplied VFS assets handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; all methods return null.
+    ///     Creates a HudAtlasLibrary backed by the supplied VFS assets handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; all methods return null.
     /// </summary>
     public HudAtlasLibrary(RealClientAssets? assets)
     {
@@ -75,35 +76,47 @@ public sealed class HudAtlasLibrary : IDisposable
     }
 
     // -------------------------------------------------------------------------
+    // IDisposable
+    // -------------------------------------------------------------------------
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _texByIdCache.Clear();
+        _texByPathCache.Clear();
+        // Godot Texture2D objects are reference-counted by Godot's GC; no manual free needed.
+        // _assets is owned by ClientContext; we do not dispose it here.
+    }
+
+    // -------------------------------------------------------------------------
     // Atlas by tex_id (uitex.txt)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the Godot <see cref="Texture2D"/> for the given uitex.txt
-    /// <paramref name="texId"/>, or <see langword="null"/> when the VFS is offline,
-    /// the id is absent from the manifest, or the DDS file cannot be loaded.
-    ///
-    /// <para>Cached after the first load; O(1) on subsequent calls for the same id.</para>
-    ///
-    /// spec: Docs/RE/formats/ui_manifests.md §1.4 — confirmed id→path (SAMPLE-VERIFIED):
-    ///   id 1=mainwindow.dds, 2=inventwindow.dds, 8=skillwindow.dds,
-    ///   9=messagewindow.dds, 10=skillpipe.dds, 11=skillpipe_02.dds,
-    ///   14=blacksheet.dds.
-    /// spec: Docs/RE/formats/ui_manifests.md §1.5 — non-contiguous id space.
+    ///     Returns the Godot <see cref="Texture2D" /> for the given uitex.txt
+    ///     <paramref name="texId" />, or <see langword="null" /> when the VFS is offline,
+    ///     the id is absent from the manifest, or the DDS file cannot be loaded.
+    ///     <para>Cached after the first load; O(1) on subsequent calls for the same id.</para>
+    ///     spec: Docs/RE/formats/ui_manifests.md §1.4 — confirmed id→path (SAMPLE-VERIFIED):
+    ///     id 1=mainwindow.dds, 2=inventwindow.dds, 8=skillwindow.dds,
+    ///     9=messagewindow.dds, 10=skillpipe.dds, 11=skillpipe_02.dds,
+    ///     14=blacksheet.dds.
+    ///     spec: Docs/RE/formats/ui_manifests.md §1.5 — non-contiguous id space.
     /// </summary>
     public Texture2D? GetById(int texId)
     {
-        if (_texByIdCache.TryGetValue(texId, out Texture2D? cached))
+        if (_texByIdCache.TryGetValue(texId, out var cached))
             return cached;
 
-        UiTexManifest? manifest = EnsureManifest();
+        var manifest = EnsureManifest();
         if (manifest is null)
         {
             _texByIdCache[texId] = null;
             return null;
         }
 
-        UiTexEntry? entry = manifest.GetById(texId);
+        var entry = manifest.GetById(texId);
         if (entry is null)
         {
             // Gap in the non-contiguous id space — expected and not an error.
@@ -112,7 +125,7 @@ public sealed class HudAtlasLibrary : IDisposable
             return null;
         }
 
-        Texture2D? tex = LoadFromVfs(entry.VfsPath);
+        var tex = LoadFromVfs(entry.VfsPath);
         _texByIdCache[texId] = tex;
         return tex;
     }
@@ -122,21 +135,21 @@ public sealed class HudAtlasLibrary : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the Godot <see cref="Texture2D"/> for the given VFS
-    /// <paramref name="vfsPath"/>, or <see langword="null"/> when the VFS is offline
-    /// or the file cannot be loaded. Cached per path.
-    ///
-    /// <para>Used for atlases referenced by hard-coded path in screen build routines
-    /// (login_slice1.dds, loginwindow.dds, etc.) rather than through uitex.txt.</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.1 — login atlases loaded by hard-coded path.
+    ///     Returns the Godot <see cref="Texture2D" /> for the given VFS
+    ///     <paramref name="vfsPath" />, or <see langword="null" /> when the VFS is offline
+    ///     or the file cannot be loaded. Cached per path.
+    ///     <para>
+    ///         Used for atlases referenced by hard-coded path in screen build routines
+    ///         (login_slice1.dds, loginwindow.dds, etc.) rather than through uitex.txt.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §8.1 — login atlases loaded by hard-coded path.
     /// </summary>
     public Texture2D? GetByPath(string vfsPath)
     {
-        if (_texByPathCache.TryGetValue(vfsPath, out Texture2D? cached))
+        if (_texByPathCache.TryGetValue(vfsPath, out var cached))
             return cached;
 
-        Texture2D? tex = LoadFromVfs(vfsPath);
+        var tex = LoadFromVfs(vfsPath);
         _texByPathCache[vfsPath] = tex;
         return tex;
     }
@@ -146,32 +159,31 @@ public sealed class HudAtlasLibrary : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns an <see cref="AtlasTexture"/> for the sub-rect at
-    /// <c>(srcX, srcY, w, h)</c> within the atlas identified by uitex.txt
-    /// <paramref name="texId"/>, or <see langword="null"/> when offline.
-    ///
-    /// <para><c>FilterClip = true</c> is set to prevent atlas bleed at non-integer
-    /// scale factors (a Godot port choice — not a legacy spec literal).</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.3 — "pSrcRect = {srcX, srcY, srcX+w, srcY+h}
-    ///   passed to ID3DXSprite::Draw; atlas pixels 1:1 on 1024×768 canvas".
+    ///     Returns an <see cref="AtlasTexture" /> for the sub-rect at
+    ///     <c>(srcX, srcY, w, h)</c> within the atlas identified by uitex.txt
+    ///     <paramref name="texId" />, or <see langword="null" /> when offline.
+    ///     <para>
+    ///         <c>FilterClip = true</c> is set to prevent atlas bleed at non-integer
+    ///         scale factors (a Godot port choice — not a legacy spec literal).
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §1.3 — "pSrcRect = {srcX, srcY, srcX+w, srcY+h}
+    ///     passed to ID3DXSprite::Draw; atlas pixels 1:1 on 1024×768 canvas".
     /// </summary>
     public AtlasTexture? SliceById(int texId, int srcX, int srcY, int w, int h)
     {
-        Texture2D? atlas = GetById(texId);
+        var atlas = GetById(texId);
         return atlas is null ? null : BuildAtlasTexture(atlas, srcX, srcY, w, h);
     }
 
     /// <summary>
-    /// Returns an <see cref="AtlasTexture"/> for the sub-rect at
-    /// <c>(srcX, srcY, w, h)</c> within the atlas at the given VFS path,
-    /// or <see langword="null"/> when offline.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.3 — atlas pixel map 1:1 on 1024×768 canvas.
+    ///     Returns an <see cref="AtlasTexture" /> for the sub-rect at
+    ///     <c>(srcX, srcY, w, h)</c> within the atlas at the given VFS path,
+    ///     or <see langword="null" /> when offline.
+    ///     spec: Docs/RE/specs/ui_system.md §1.3 — atlas pixel map 1:1 on 1024×768 canvas.
     /// </summary>
     public AtlasTexture? SliceByPath(string vfsPath, int srcX, int srcY, int w, int h)
     {
-        Texture2D? atlas = GetByPath(vfsPath);
+        var atlas = GetByPath(vfsPath);
         return atlas is null ? null : BuildAtlasTexture(atlas, srcX, srcY, w, h);
     }
 
@@ -180,14 +192,13 @@ public sealed class HudAtlasLibrary : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Eagerly loads a set of VFS atlas paths into the internal cache so subsequent
-    /// <see cref="GetByPath"/> / <see cref="SliceByPath"/> calls are O(1).
-    ///
-    /// <para>Call this at screen-build time before constructing any widgets.</para>
+    ///     Eagerly loads a set of VFS atlas paths into the internal cache so subsequent
+    ///     <see cref="GetByPath" /> / <see cref="SliceByPath" /> calls are O(1).
+    ///     <para>Call this at screen-build time before constructing any widgets.</para>
     /// </summary>
     public void Preload(ReadOnlySpan<string> vfsPaths)
     {
-        foreach (string path in vfsPaths)
+        foreach (var path in vfsPaths)
             GetByPath(path); // populates the cache, result discarded
     }
 
@@ -204,7 +215,7 @@ public sealed class HudAtlasLibrary : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(UiTexPath);
+            var raw = _assets.GetRaw(UiTexPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[HudAtlasLibrary] data/ui/UiTex.txt absent from VFS — atlas catalog unavailable.");
@@ -237,7 +248,7 @@ public sealed class HudAtlasLibrary : IDisposable
         {
             // RealClientAssets.LoadTexture probes the file magic bytes internally and
             // handles the DDS/TGA/PNG/BMP variants (including .dds-named TGA files).
-            ImageTexture? tex = _assets.LoadTexture(vfsPath);
+            var tex = _assets.LoadTexture(vfsPath);
             if (tex is null)
                 GD.PrintErr($"[HudAtlasLibrary] LoadTexture returned null for '{vfsPath}'.");
             return tex;
@@ -261,21 +272,7 @@ public sealed class HudAtlasLibrary : IDisposable
             Region = new Rect2(srcX, srcY, w, h),
             // FilterClip prevents texture bleed at non-integer scale factors.
             // This is a Godot port-side mitigation, not a legacy spec value.
-            FilterClip = true,
+            FilterClip = true
         };
-    }
-
-    // -------------------------------------------------------------------------
-    // IDisposable
-    // -------------------------------------------------------------------------
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _texByIdCache.Clear();
-        _texByPathCache.Clear();
-        // Godot Texture2D objects are reference-counted by Godot's GC; no manual free needed.
-        // _assets is owned by ClientContext; we do not dispose it here.
     }
 }

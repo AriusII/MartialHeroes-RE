@@ -7,10 +7,24 @@
 > status: sample-verified (small tables + strides surveyed below corroborated against the real VFS);
 >   loader-control-flow facts: confirmed; genuinely ambiguous body fields: capture/debugger-pending
 > ida_reverified: 2026-06-16
+> re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
-> conflicts: helps_1.scr per-entry 4-byte prefix UNRESOLVED (sample-probe-pending); helps.scr
->   two-level body layout WITHIN the confirmed 48-byte frame still UNVERIFIED.
+> CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): citems.scr description paragraph count
+>   RESOLVED = 10 (capacity, '#'-sentinel terminated; consumer accessor bounds index < 10).
+> conflicts: citems.scr description-paragraph count 6-vs-10 — RESOLVED in favour of 10 (capacity;
+>   each paragraph 81 bytes at block base +0xE4; runtime early-terminated by a '#'-first-byte
+>   sentinel paragraph; the loader copies the record verbatim and so carries no count constant,
+>   while the consumer paragraph accessor hard-bounds the index < 10). "6" was merely the typically
+>   populated count in VFS samples.
+> CORRECTED CYCLE 7 (ida_anchor 263bd994, 2026-06-20): helps.scr is a flat fixed-stride array,
+>   stride 1696 bytes (0x6A0), record_count = file_size / 1696 — the earlier "48-byte stride /
+>   1378 records" and "64-byte" readings are REFUTED by the loader. The per-record "4-byte prefix"
+>   open conflict is RESOLVED: it is the u32 help_id sorted-map key at +0 (id 0 on the leading
+>   record, non-zero ascending after) — an id, NOT a length/offset/flag/next-pointer. The client
+>   loads ONLY helps.scr; there is no helps_%d / numbered-help filename and no helps_1.scr loader,
+>   so helps_1.scr is UNCONSUMED by the client (no loader reads it) and its "16 + 20 + 20×64"
+>   geometry is REFUTED. The helps prefix UNRESOLVED-CONFLICT is closed.
 > Provenance: two-witness pass — neutral static-loader control-flow notes (build 263bd994) plus
 >   black-box harness observation of the maintainer's legally-owned client VFS (43,347 entries).
 
@@ -22,7 +36,7 @@ This file documents the **`.scr` container family** as a whole and the **small f
 tables** surveyed during the VFS-DEEP triage of the 44 `.scr` entries under `data/script/`:
 
 - `exp.scr`, `guildcrest.scr`, `guildposname.scr`, `itemeffect.scr`, `chivalry.scr`,
-  `dashs.scr`, `helps.scr`, `helps_1.scr`
+  `dashs.scr`, `helps.scr` (`helps_1.scr` is client-unconsumed — see its note below)
 - `discript.sc` (note: extension is `.sc`, not `.scr`; included here because it is the same
   loader family and was triaged alongside)
 
@@ -91,8 +105,9 @@ Every `.scr` (and the `.sc` sibling) in this family shares one loader shape:
   one is ever encountered.
 
 A parser that assumes a uniform stride for every `.scr` will be wrong for the non-flat members
-(`helps.scr`, `helps_1.scr`, `events.scr`, and the trailing-sub-entry catalogues `items.scr` /
-`skills.scr`). Always check the per-file note before choosing the stride model.
+(`events.scr` and the trailing-sub-entry catalogues `items.scr` / `skills.scr`). Always check the
+per-file note before choosing the stride model. (`helps.scr` is, by contrast, a plain flat 1696-byte
+fixed-stride array — see its section below; the earlier non-flat / two-level reading is REFUTED.)
 
 ---
 
@@ -110,8 +125,8 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/itemeffect.scr` | 4 B flat (u32 list) | 793 | no | VERIFIED | Item-effect type-code list |
 | `data/script/chivalry.scr` | 24 B flat | 16 | yes | VERIFIED (stride) | Chivalry/honor rank records |
 | `data/script/dashs.scr` | 199 B flat | 28 | yes | SAMPLE-VERIFIED (stride; body UNVERIFIED) | Dash/evasion skill table |
-| `data/script/helps.scr` | 48 B flat (two-level reading within one frame) | 1378 | yes | SAMPLE-VERIFIED (stride 48; 64 refuted) | In-game help text |
-| `data/script/helps_1.scr` | 16 B header + 20 B title + N×64 B entries | 1 + 1 + 20 | yes | SAMPLE-VERIFIED (geometry; per-entry prefix UNRESOLVED) | Help chapter index |
+| `data/script/helps.scr` | 1696 B (0x6A0) flat | `file_size / 1696` | yes | CONFIRMED (loader stride 1696; 48 / 64 refuted) | In-game help text |
+| `data/script/helps_1.scr` | n/a — client-unconsumed (no loader) | n/a | — | CONFIRMED unconsumed (no loader / no helps_%d filename) | DEAD; not parsed by the client (see note) |
 | `data/script/discript.sc` | 68 B flat | 33 | yes | VERIFIED (stride) | UI context-menu label table |
 | `data/script/autoquestion_cl.scr` | 92 B flat | 1300 | — | SAMPLE-VERIFIED | Anti-bot quiz pool (see config_tables.md) |
 | `data/script/mapsetting.scr` | 84 B flat | 52 | yes | SAMPLE-VERIFIED | Per-zone map settings (see config_tables.md) |
@@ -123,7 +138,7 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/skillneedset.scr` | 4 B flat | 22 | no | SAMPLE-VERIFIED (count) | Skill prerequisite edges (see config_tables.md) |
 | `data/script/viplevels.scr` | 92 B flat | 9 | no | SAMPLE-VERIFIED (stride + count) | VIP level table (see config_tables.md) |
 | `data/script/warstoneinfo.scr` | 40 B flat | 1 | yes | SAMPLE-VERIFIED (single record) | War-stone region info (see config_tables.md) |
-| `data/script/oblist.scr` | 12 B flat | 1 | no | SAMPLE-VERIFIED (single record) | Object list (see config_tables.md) |
+| `data/script/oblist.scr` | 12 B flat | `file_size / 12` | no | CONFIRMED (loader stride + filter; single-record sample) | Object-id → value map (id at +4), conditionally loaded by a runtime selector at +8; consumed by the actor/object builder via an id lookup (per-file section below) |
 | `data/script/itemscale.scr` | 8 B flat | — | no | (items_scr.md) | Item scale/sizing table |
 | `data/script/skills.scr` | 1504 B + N×8 trailing | ~194 real | yes | (config_tables.md) | Skill database |
 | `data/script/mobs.scr` | 488 B flat | 3997 | yes | (config_tables.md) | Mob stat table |
@@ -146,7 +161,7 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/users.scr` | 496 B single structure (no record stride) | 1 blob (4 class windows) | yes | (config_tables.md) | Per-class stat-ratio grid |
 | `data/script/userpoint*/userpoint.scr` variants | — | — | — | — | (as above) |
 | `data/script/citems.scr` | 1052 B flat | 512 | yes | (other lane → items_scr.md) | Billing/premium item catalogue |
-| `data/script/items.scr` | 548 B + N×8 trailing | 90,937 | yes | (other lane → items_scr.md) | Full item database |
+| `data/script/items.scr` | 548 B + N×8 trailing (NO paragraph block) | 90,937 | yes | (other lane → items_scr.md) | Full item database |
 | `data/script/events.scr` | indexed (offset table) | — | yes | (other lane → events_scr.md) | Event schedule/data table |
 | `data/script_newserver/items.scr` | item-db variant | — | yes | (other lane → items_scr.md) | New-server item database |
 | `data/script_newserver/npcs.scr` | npc-table variant | — | yes | (config_tables.md) | New-server NPC table |
@@ -202,7 +217,30 @@ not mis-size records or mis-decode the strings.
   distinct from a key; the one field plays both roles. Confidence: **loader-resolved** (settled by
   observed loader behaviour, not a static guess).
 
-See `formats/items_scr.md` for the remaining `citems.scr` body fields.
+- **Description block = 10 fixed-offset paragraphs (capacity).** The trailing description region is
+  a block of **10** fixed-width paragraphs, each **81 bytes (0x51)** wide, beginning at record block
+  base **+0xE4 (228)**; paragraph *i* sits at `+0xE4 + 81·i`. The block fits cleanly inside the
+  record: `+0xE4 + 10·81 = 228 + 810 = 1038 (0x40E)`, leaving a 14-byte tail inside the 1052-byte
+  (0x41C) stride — there is **no overflow** (the earlier "+0x41E / 2-bytes-past" worry was a
+  hex-arithmetic slip). At runtime a `'#'`-first-byte sentinel paragraph (also 81 bytes)
+  **early-terminates** the consumer, which is why VFS samples populate only the first few paragraphs;
+  "6" was the typically-populated count, not the structural capacity. The count is **not** exposed by
+  the loader (it copies the whole record verbatim, with no per-paragraph loop) — it lives in the
+  consumer's paragraph accessor, which hard-bounds the index `< 10` (returning null for index ≥ 10)
+  and in the cash-shop description-builder loop (`i < 10`). This **RESOLVES** the prior 6-vs-10
+  ambiguity in favour of **10** and agrees with `config_tables.md §2.11`. Confidence: **HIGH**
+  (code-confirmed, static; capacity is 10, populated count is data-dependent and sentinel-terminated).
+
+See `formats/items_scr.md §2.4` for the full `citems.scr` body field layout (the authority for the
+description-paragraph body; this section resolves only the paragraph count and is not a duplicate of
+that table).
+
+> **`items.scr` carries NO description-paragraph block (CYCLE 7 clarification).** The 10 × 81-byte
+> paragraph model above is **citems.scr-only**. `items.scr` is a different schema that merely shares
+> the `.scr` extension: its body is a **fixed 548-byte block + an optional trailing array of 8-byte
+> effect entries** (`effect_count` × 8), with no paragraph region, no per-paragraph loop, and no
+> `'#'`-sentinel. The full `items.scr` layout is the authority of `formats/items_scr.md`. (Do not
+> read the citems paragraph model onto `items.scr`.)
 
 ---
 
@@ -316,68 +354,45 @@ description.
 > body-field offsets beyond the id-at-+0 from this spec yet; the stride (199) is the only
 > body-independent fact that is fully settled.
 
-### helps.scr — In-game help text (48 B flat frame, two-level reading) — stride SAMPLE-VERIFIED
+### helps.scr — In-game help text (1696 B flat, stride CONFIRMED)
 
-Record model: a uniform **48-byte record frame** read in a **two-level** way — the first record at
-the file start is a chapter/section descriptor; subsequent records are topic entries. Both kinds
-share the same 48-byte stride. Record count = `file_size / 48` = 1378 records.
-
-Inner record (uniform 48-byte frame):
-
-| Offset | Size | Type | Field | Notes | Confidence |
-|-------:|-----:|------|-------|-------|------------|
-| +0 | 4 | u32 | chapter_id / section_id | First of seven leading u32 fields (+0..+27) | MED |
-| +4 | 4 | u32 | sub_id / entry_index | | MED |
-| +8 | 4 | u32 | flags / reserved | Zero observed | LOW |
-| +12 | 4 | u32 | count / param | e.g. child-entry count | MED |
-| +16 | 4 | u32 | entry_id / reference | | MED |
-| +20 | 4 | u32 | parent_id / reference | | MED |
-| +24 | 4 | u32 | reserved | Zero observed | LOW |
-| +28 | 1 | u8 | control byte | 1 on chapter records, 0 on topic records | MED |
-| +29 | 19 | char[19] | topic/chapter title (CP949, null-padded) | On a topic entry the CP949 title sits at the same +29 within its own 48-byte frame | HIGH |
-
-> **STRIDE RESOLVED (sample-verified): 48 B; the 64-byte reading is REFUTED.** The arithmetic stride
-> 48 divides the file size exactly (`size / 48 = 1378` records, remainder 0). The competing 64-byte
-> candidate is **arithmetically impossible** — `size / 64` is **not** an integer (it lands on a
-> fractional record count), so 64 cannot be the record stride. The "64-byte title spacing" seen in
-> earlier head-window passes was a misread of the inter-title byte distance, not the record stride.
-> The earlier "48 vs 64 conflict" is therefore **closed in favour of 48 B**. The two-level reading
-> (`config_tables.md`'s 16-byte page header + N × 48-byte sub-entries model) is preserved, but every
-> record shares the single 48-byte frame — there is no separate page-header stride. The internal
-> field roles within the 48-byte frame (the seven leading u32s) remain UNVERIFIED beyond the
-> control byte at +28 and the CP949 title at +29.
-
-### helps_1.scr — Help chapter index (header + title + 64 B entries) — geometry SAMPLE-VERIFIED
-
-Record model: a small file header, then a title record, then a run of fixed 64-byte content
-entries (not a single uniform stride). The total size reconciles **exactly** as
-`16 (header) + 20 (title) + 20 × 64 (entries)` = the observed file size (sample-verified, remainder 0).
+Record model: a **flat fixed-stride array** of **1696-byte (0x6A0)** records, concatenated with no
+file header and no record-count prefix. The loader reads exactly 1696 bytes per record, copies the
+record verbatim, and walks to end-of-file / a short read; the count is therefore
+`record_count = file_size / 1696`. Each record is keyed into a runtime sorted map by its leading
+u32 (`help_id`).
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0 | 4 | u32 | record id (= 1) | Header field | HIGH |
-| +4 | 4 | u32 | reserved / zero | | LOW |
-| +8 | 4 | u32 | declared total slots | Sample declares 100 but only ~20 entries present | MED |
-| +12 | 4 | u32 | reserved / zero | | LOW |
-| +16 | 20 | char[20] | Title record (CP949, null-padded) | Zero-fill completes the 20-byte field | HIGH |
-| +36 | 64 | record | Content entry: optional 4-byte prefix + CP949 title + null pad | Repeats for each of the 20 entries — see prefix conflict below | HIGH (frame) / UNRESOLVED (prefix) |
+| +0x00 | 4 | u32 | `help_id` | Sorted-map key the loader inserts each record by; id 0 on the leading record, non-zero ascending afterward. **This is the byte run earlier misread as a "4-byte prefix".** | HIGH (loader insert keyed on +0) |
+| +0x04 | 25 | bytes | (unmapped body region) | The +0x04..+0x1C region before the title is verbatim-copied but not separately consumed by the loader. | UNVERIFIED |
+| +0x1D (29) | (to record end) | CP949[] | `help_title` / help text | CP949, null-terminated; built as a string starting at record+29. The remainder of the 1696-byte record holds the (long) help-text body. | HIGH (string read site at +29) |
 
-The header/title/entry geometry is sample-verified (16 + 20 + 20×64 = file size, exact). The
-declared-total field (value 100) vs the 20 entries actually present is UNVERIFIED — the file may be
-sparse with null slots, or the field may be a different quantity (e.g. a pixel height).
+> **STRIDE CORRECTED (CYCLE 7) — 1696 B (0x6A0) flat; the 48-byte and 64-byte readings are REFUTED.**
+> The single help loader reads exactly **1696 bytes** per record and copies it verbatim into a
+> 1696-byte record object, looping to EOF / short read with no count prefix — so the stride is
+> **1696**, not 48. The earlier "48-byte flat frame / 1378 records" reading (and the "64-byte"
+> black-box candidate, and the `config_tables.md` two-level page-header + sub-entry model) are
+> **REFUTED** by the loader: there is no 48-byte frame and no two-level read. The title-at-+29
+> observation **survives** — but it is +29 *inside the 1696-byte record*, not inside a 48-byte one.
+> The internal roles of the +0x04..+0x1C region remain UNVERIFIED.
 
-> **OPEN CONFLICT — per-entry 4-byte prefix (UNRESOLVED, sample-probe-pending).** The earlier model
-> claimed every 64-byte content entry begins with a fixed 4-byte prefix (an index back-reference or
-> flags) followed by the CP949 title. The harness pass does **not** confirm this consistently:
-> - Content entry 0 begins with 4 zero bytes, and the CP949 title starts at entry+4.
-> - Content entry 1 appears to begin **directly** with CP949 title bytes — no 4 leading zero bytes.
+### helps_1.scr — DEAD / client-unconsumed (no loader)
+
+> **`helps_1.scr` is NOT parsed by the client (CYCLE 7).** The binary contains **no** `helps_1.scr`
+> loader, **no** `helps_%d` / `%s_%d.scr` / numbered-help format string, and **no** constructed
+> numbered help filename anywhere. The only help-text file the client loads is `helps.scr` (the
+> 1696-byte flat format above). If a distinct `helps_1.scr` file physically exists in the VFS, treat
+> it as **UNCONSUMED by this build (no loader reads it)** rather than a parsed format — do not
+> implement a parser for it.
 >
-> This is **not resolved**. Either (a) the 4 leading bytes are a per-slot sparse/index indicator
-> that happens to be zero on entry 0 and non-zero (CP949-looking) on entry 1, or (b) entry 0 is a
-> special first slot and regular entries carry no prefix. A faithful parser should read **64 raw
-> bytes per content entry** and treat the first 4 bytes as a possible sparse/index field (value 0 or
-> not) with the remainder a CP949 null-terminated title — but MUST NOT hard-assume a uniform 4-byte
-> prefix until a deeper per-entry harness pass settles it. Carried as an explicit open conflict.
+> **Per-entry 4-byte prefix — OPEN CONFLICT CLOSED.** The previously-carried "per-entry 4-byte
+> prefix UNRESOLVED" conflict (4 zero bytes on entry 0, non-zero bytes on entry 1) is resolved: that
+> 4-byte run is the **u32 `help_id` record key at +0** of the `helps.scr` record (id 0 is reserved
+> for the leading slot; real entries carry non-zero ascending ids). It is an **id / sorted-map key —
+> NOT a length, an offset, a flag, or a next-pointer.** The earlier "16 + 20 + 20×64" geometry was a
+> black-box reading with no corroborating loader and is **REFUTED**; it is folded into the
+> `helps.scr` 1696-byte model above.
 
 ### discript.sc — UI context-menu label table (stride 68 B, 33 records) — CONFIRMED
 
@@ -399,6 +414,67 @@ zero tail). Note the extension is `.sc`, not `.scr`.
 | +0 | 4 | u32 | record_id (map key) | Sparse id space (party/currency/window/guild groups); not 1-based | HIGH |
 | +4 | 64 | bytes | Remaining record body | Field layout is the authority of `misc_data.md §5` | see misc_data.md |
 
+### oblist.scr — Object-id → value map (stride 12 B, conditionally loaded) — CONFIRMED
+
+Record model: a **flat fixed-stride array** of **12-byte (0x0C)** records, concatenated with no file
+header, no magic, no version, and no record-count prefix — the same family shape as the other small
+tables. The loader reads exactly 12 bytes per iteration and walks to end-of-file / a short read, so
+`record_count = file_size / 12`. There are **no embedded CP949 text fields**; each record is three
+32-bit little-endian integers. The leading help-style key model does **not** apply — the map key here
+is the **second** field (+4), not the first (see the layout note below).
+
+Unlike every other small `.scr` table, `oblist.scr` is **conditionally loaded by a load-time
+selector filter**: a record is inserted into the runtime map **only when** its third field (+8)
+matches a runtime selector value. This filter is unique to `oblist.scr` among the family and a
+faithful parser must replicate it (see the read algorithm).
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | `value` (lookup result) | The value stored in the runtime map for this id; what an id lookup returns. | HIGH (loader copies +0; lookup returns it) |
+| +0x04 | 4 | u32 | `id` (MAP KEY / join key) | The runtime map key — callers resolve a record by this id. Also logged as the record's "ID" at load time. | HIGH (used as map key; logged as ID) |
+| +0x08 | 4 | u32 | `selector` (LOAD-TIME FILTER) | Compared for equality against a runtime selector value at load; the record is inserted only when they match. | HIGH (filter mechanism); selector domain UNVERIFIED |
+
+> **Which field is key vs value.** The runtime map stores the pair with **+0x04 as the key** and
+> **+0x00 as the value**: the loader sets the entry's key from the record's second field and the id
+> lookup returns the entry's first field. The clean functional contract is therefore: **+0x04 = id /
+> map key** (what callers look up by), **+0x00 = associated value** (what the lookup returns),
+> **+0x08 = load-time selector**. In the single shipped 12-byte sample both `value` and `id` happen
+> to be equal, so that one file alone cannot prove `value` is independent of the key; structurally
+> they are two distinct fields (the map holds key and value separately), but their data relationship
+> in a populated `oblist.scr` is UNVERIFIED (see Known unknowns).
+
+**Read algorithm (raw bytes → runtime id→value map):**
+
+1. Open `data/script/oblist.scr` from the VFS. If the file does not open, log an error and build no
+   map.
+2. Loop until end-of-file (break on EOF or a short read):
+   1. Read 12 bytes as three little-endian u32 fields `{value @ +0, id @ +4, selector @ +8}`.
+   2. Read the **runtime selector** (a single byte from the global application/account state,
+      sign-extended to an int). If it does **not** equal the record's `selector` (+8), **skip** the
+      record (do not insert) and continue.
+   3. (Dedup/diagnostics) look the `id` up in the map already built; if it is already present, log
+      the duplicate; then log the record's `id`.
+   4. Allocate a new map entry, copy the three fields into it, and insert it keyed by `id` (+4). The
+      runtime map container is created lazily on first insertion.
+3. Close the file.
+
+No decode, decompression, or decryption — fields are stored and consumed verbatim as little-endian
+u32. The only non-trivial step is the **load-time selector filter** (step 2.2).
+
+> **Selector semantics (mechanism CONFIRMED; domain UNVERIFIED).** The selector compared against
+> +0x08 is a single **byte** read from the global application/account state — the same singleton
+> touched by the login / enter-game / billing / character-manage flow — sign-extended to an int.
+> Because the runtime side is one byte (effective range -128..127), a record whose +0x08 lies outside
+> that range (e.g. the shipped sample's `selector = 1000`) can never match and is effectively a
+> disabled / placeholder row on any build where the selector byte stays small. The selector therefore
+> behaves like a **server-type / channel / nation / open-beta mode gate** set during the
+> login→enter-world flow, but its exact value domain is UNVERIFIED (a live read of the selector byte
+> at enter-world would settle it). A faithful online parser must replicate the filter; a single-build
+> offline reconstruction must instead pin the selector value it intends to load against.
+
+> See `config_tables.md` for any deeper survey of the same file; that file should carry the same
+> 3-field table and the selector-filter note.
+
 ---
 
 ## Known unknowns
@@ -408,15 +484,15 @@ zero tail). Note the extension is `.sc`, not `.scr`.
   is only the internal body field sequence: the long-description offset cannot be explained by a
   simple 4 + 8 + 187 layout (unexplained gap). `config_tables.md §2.17.5` should be corrected to the
   199-byte stride.
-- **helps.scr** stride: **RESOLVED — 48 B (sample-verified, 1378 records); the 64-byte reading is
-  arithmetically impossible** and REFUTED. The two-level (chapter header + topic entries) reading is
-  preserved within the single 48-byte frame. The internal field roles of the seven leading u32s
-  (within the 48-byte frame) remain UNVERIFIED.
-- **helps_1.scr** geometry (16 + 20 + 20×64) is SAMPLE-VERIFIED. Two items stay open: the
-  declared-total field (100) vs the 20 entries present (sparse vs alternate meaning, UNVERIFIED), and
-  the **per-entry 4-byte prefix (UNRESOLVED open conflict)** — entry 0 carries 4 leading zero bytes
-  while entry 1 appears to start directly with CP949 title bytes; a deeper per-entry harness pass is
-  pending.
+- **helps.scr** stride: **RESOLVED (CYCLE 7) — 1696 B (0x6A0) flat**, `record_count = file_size /
+  1696`, u32 `help_id` map key at +0, CP949 title/text from +29. The earlier "48 B / 1378 records"
+  and "64-byte" readings are **REFUTED** by the loader (single 1696-byte read + verbatim copy, no
+  two-level frame). What remains UNVERIFIED is only the internal +0x04..+0x1C region before the title.
+- **helps_1.scr**: **DEAD / client-unconsumed (CYCLE 7)** — no loader, no `helps_%d` filename; the
+  client parses only `helps.scr`. The former "per-entry 4-byte prefix UNRESOLVED" conflict is
+  **CLOSED**: that run is the u32 `help_id` key at +0 of the `helps.scr` record (id 0 on the leading
+  slot, non-zero after). The "16 + 20 + 20×64" geometry is REFUTED and folded into the helps.scr
+  1696-byte model. If a distinct `helps_1.scr` exists in the VFS it is unconsumed by this build.
 - **chivalry.scr** regions at +9 and +18 — padding, numeric, or extra name slots, UNVERIFIED.
 - **guildposname.scr** numeric parameter at +68 and trailing region at +72 — UNVERIFIED.
 - **guildcrest.scr** field at +4 — duplicate of crest_id or independent index/variant, UNVERIFIED.
@@ -430,6 +506,15 @@ zero tail). Note the extension is `.sc`, not `.scr`.
   build, and the CP949 encoding are CONFIRMED here.
 - **citems.scr** body fields beyond `item_id` at +0 — UNVERIFIED here; the authority is
   `items_scr.md`.
+- **oblist.scr** `value` (+0x00) vs `id` (+0x04) independence — in the single 12-byte sample both
+  are equal, so this file cannot prove `value` is distinct from the key; structurally they are two
+  separate fields (map key vs stored value), but their data relationship in a populated file is
+  UNVERIFIED (needs a multi-record sample).
+- **oblist.scr** `selector` (+0x08) domain — the set of values the runtime selector byte can take
+  (and therefore which rows ever load) is UNVERIFIED; the shipped sample's `selector = 1000` cannot
+  match a single byte, so that row is inert on a small-byte build. The selector-filter **mechanism**
+  is CONFIRMED. What the looked-up `value` ultimately drives inside the actor/object builder is a
+  deeper actor-system question, out of scope for this format spec.
 - **UNVERIFIED-stride family members** (`mobsitem.scr`, `minds.scr`, `letters.scr`,
   `nicktofame.scr`, `productrandname.scr`, `productcollect.scr`, `playtime_reward.scr`,
   `repair.scr`, `system_control.scr`, `tiphelp.scr`, `upgradeitems.scr`): stride/layout not yet
@@ -451,8 +536,9 @@ zero tail). Note the extension is `.sc`, not `.scr`.
   - `formats/pak.md` — the VFS container that delivers all `.scr` files.
 - Proposed canonical names (flag for `names.yaml`, orchestrator-owned): `exp_level_record` (20 B),
   `guild_crest_record` (20 B), `guild_pos_record` (88 B), `item_effect_id_entry` (4 B),
-  `chivalry_rank_record` (24 B), `dash_skill_record` (199 B), `help_entry_record` (48 B),
-  `help_chapter_header` (16 B), `district_desc_record` (68 B), `npcs_stat_record` (1916 B).
+  `chivalry_rank_record` (24 B), `dash_skill_record` (199 B), `help_record` (1696 B, `help_id` u32
+  @ +0, `help_title` CP949 @ +29), `district_desc_record` (68 B), `npcs_stat_record` (1916 B),
+  `oblist_record` (12 B: `value` u32 @ +0, `id` u32 @ +4, `selector` u32 @ +8).
 - Glossary: see Docs/RE/names.yaml
 - Provenance: see Docs/RE/journal.md (add an entry for this spec).
   - CAMPAIGN VFS-MASTERY (two-witness: loader + black-box): `npcs.scr` stride 1916 / **812 records
@@ -473,3 +559,24 @@ zero tail). Note the extension is `.sc`, not `.scr`.
     records confirmed). `guildposname.scr` +68 observed = 10 (semantic still UNVERIFIED).
     `itemeffect.scr` head 8 entries gap-free. **Open:** `helps_1.scr` per-entry 4-byte prefix
     UNRESOLVED (entry 0 has it, entry 1 appears not to) — carried as a sample-probe-pending conflict.
+  - CYCLE 7 (re-verified against doida.exe IDB SHA 263bd994, 2026-06-20; static loader): **helps.scr
+    corrected to a flat 1696-byte (0x6A0) stride** (`record_count = file_size / 1696`, u32 `help_id`
+    map key at +0, CP949 title/text from +29) — the prior "48 B / 1378 records" and "64-byte"
+    readings are REFUTED by the single help loader (one 1696-byte read + verbatim copy). The
+    `helps_1.scr` "per-entry 4-byte prefix UNRESOLVED" conflict is **CLOSED**: that run is the u32
+    `help_id` key at +0 (id 0 on the leading record, non-zero after), an id — not a
+    length/offset/flag/next-pointer; the "16 + 20 + 20×64" geometry is REFUTED. **`helps_1.scr` is
+    client-unconsumed** (no loader, no `helps_%d` filename — only `helps.scr` is parsed). One-line
+    clarification added that **`items.scr` carries no description-paragraph block** (548-byte block +
+    8-byte-per-entry trailing effect array; the 10×81 paragraph model is citems-only — authority
+    `formats/items_scr.md`).
+  - CYCLE 7 (re-verified against doida.exe IDB SHA 263bd994, 2026-06-20; static loader + VFS sample):
+    **`oblist.scr` promoted from a one-line inventory row to a full per-file section.** Confirmed the
+    flat 12-byte stride (`record_count = file_size / 12`) and the no-embedded-text reading, and ADDED
+    the 3-field record table (`value` u32 @ +0, `id` u32 @ +4 = map key, `selector` u32 @ +8), the
+    read algorithm, and the **load-time selector filter** (a record is inserted only when +0x08 equals
+    a runtime selector byte — a server/mode/channel gate set during login/enter-world; the only small
+    `.scr` table with such a row filter). Role text expanded to "object-id → value map consumed by the
+    actor/object builder; join key = id (+4)". Open: `value`-vs-`id` independence (sample has both
+    equal) and the selector-byte domain (the sample's +0x08 = 1000 cannot match a single byte) — both
+    settleable only with a multi-record sample or a live selector-byte read.

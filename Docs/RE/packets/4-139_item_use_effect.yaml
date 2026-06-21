@@ -1,0 +1,64 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 24-byte (0x18) body -- leading
+#                 dword@0x00 / actor_id@0x04 (gated == local player) / result@0x08 / flag_b@0x09 /
+#                 flag_c@0x0A / kind@0x0B / tail@0x0C..0x17 -- are control-flow-confirmed; every VALUE
+#                 meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading tagged 4/139 "var (24-byte header)". The whole wire read is a
+#              FIXED 24-byte block; the "var" tail is a 28-byte ECHO the handler BUILDS and forwards
+#              downstream, NOT a wire field it reads. BINARY WINS.
+
+name: SmsgItemUseEffect
+opcode: 0x4008b           # major 4 (Response), minor 139 -> (4 << 16) | 139
+direction: S2C
+size: 24                  # fixed 24-byte body (0x18)
+spec: packets/4-139_item_use_effect.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes an item-use effect for the local player. A fixed 24-byte body carrying a leading dword,
+  the actor id (must equal the local player or the handler aborts), a result byte (apply vs
+  dismiss-notice), and a few echoed flag/kind bytes. The handler builds a 28-byte echo from this block
+  and forwards it to the shared item-use sub-handler.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 24.
+fields:
+  - { name: LeadingBlock, type: "bytes[4]" }   # 0x00  first dword of the block; first byte echoed into the forward struct
+  - { name: ActorId,      type: u32 }          # 0x04  actor id (composite-key lookup; must equal the local player, else abort)
+  - { name: Result,       type: u8 }           # 0x08  0 = dismiss-notice path (modal clear); 1 = apply effect
+  - { name: FlagB,        type: u8 }           # 0x09  echoed flag byte
+  - { name: FlagC,        type: u8 }           # 0x0a  == 1 selects slot -> item-id resolve via the item manager
+  - { name: Kind,         type: u8 }           # 0x0b  echoed kind byte
+  - { name: TailBlock,    type: "bytes[12]" }  # 0x0c  remainder of the 24-byte block; echoed into the forward struct
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 24-byte body and the field offsets. CAPTURE-UNVERIFIED for VALUE
+  meanings.
+
+    0x00 (4B) LeadingBlock : the first dword of the block; its first byte is echoed into the forward
+                             struct.
+    0x04 (4B) ActorId      : an actor id resolved via composite-key lookup. It MUST equal the local
+                             player, or the handler logs an item-use "no actor" error and returns.
+    0x08 (1B) Result       : 0 = dismiss-notice path (clears a modal); 1 = apply the effect.
+    0x09 (1B) FlagB        : an echoed flag byte.
+    0x0a (1B) FlagC        : == 1 selects a slot -> item-id resolve via the item manager (else an
+                             item-use error path).
+    0x0b (1B) Kind         : an echoed kind byte.
+    0x0c (12B) TailBlock   : the rest of the 24-byte block, echoed into the forward struct.
+
+  THE 28-BYTE ECHO IS NOT A WIRE FIELD: the handler assembles a 28-byte echo struct from this 24-byte
+  block and forwards it to the shared item-use sub-handler. That 28-byte echo is a downstream
+  construction, not bytes on the wire. The wire body is the fixed 24 bytes above.
+
+  ITEM-ID EFFECT/SOUND BANDS (asset facts, not wire fields): on the apply path the resolved item id is
+  matched against shared item-id range tables that select effect / sound ids (the same tables used by
+  4/5 SmsgItemUseResult). Those id ranges are catalogued in the asset pipeline, not carried here.
+
+  UNKNOWNS to resolve with a capture: the LeadingBlock / FlagB / Kind / TailBlock meanings.
+
+  RELATED: shares the item-use sub-handler with 4/5 SmsgItemUseResult (packets/4-5_item_use_result.yaml).

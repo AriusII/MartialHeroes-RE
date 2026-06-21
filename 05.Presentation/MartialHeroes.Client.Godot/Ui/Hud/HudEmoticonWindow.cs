@@ -50,19 +50,21 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game emote / chat-emoticon picker (EmoticonPanel, stored at MainWindow +0x370).
-///
-/// <para>Page 0 — text-macro shortcuts (SHIFT_1..9 from INI): sending one fires
-/// <see cref="IApplicationUseCases.SendChatAsync"/> (chat C2S 2/7). Rate-limit: 5000 ms.</para>
-///
-/// <para>Page 1 — graphical emote balloons: client-local (sound 862030103 + balloon slot 327).
-/// Driven by emoticon.do records (40-byte, VFS-pending). <b>Sends NO packet.</b></para>
-///
-/// <para>PASSIVE: zero game logic. Text-macros emit use-case calls; graphical emotes
-/// are pure client-local display. No domain state touched here.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — MainWindow +0x370.
+///     In-game emote / chat-emoticon picker (EmoticonPanel, stored at MainWindow +0x370).
+///     <para>
+///         Page 0 — text-macro shortcuts (SHIFT_1..9 from INI): sending one fires
+///         <see cref="IApplicationUseCases.SendChatAsync" /> (chat C2S 2/7). Rate-limit: 5000 ms.
+///     </para>
+///     <para>
+///         Page 1 — graphical emote balloons: client-local (sound 862030103 + balloon slot 327).
+///         Driven by emoticon.do records (40-byte, VFS-pending). <b>Sends NO packet.</b>
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. Text-macros emit use-case calls; graphical emotes
+///         are pure client-local display. No domain state touched here.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — MainWindow +0x370.
 /// </summary>
 public sealed partial class HudEmoticonWindow : Control
 {
@@ -139,35 +141,34 @@ public sealed partial class HudEmoticonWindow : Control
     private const int MacroSlotCount = 9;
     private const long MacroRateLimitMs = 5000L; // spec: §8.19.4 — "rate-limited to one per 5000 ms"
 
+    // Text macros from INI (loaded lazily)
+    private readonly string?[] _macroSlots = new string?[MacroSlotCount]; // SHIFT_1..9
+    private int _activePage; // 0 = text macros, 1 = graphical emotes
+
+    // Use-case reference (needed for SendChatAsync — chat text-macro)
+    private ClientContext? _ctx;
+
+    // Macro rate-limit (world time ms)
+    private long _lastMacroSentMs;
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activePage; // 0 = text macros, 1 = graphical emotes
 
     // Page containers
     private Control? _page0Panel;
     private Control? _page1Panel;
-
-    // Macro rate-limit (world time ms)
-    private long _lastMacroSentMs;
-
-    // Use-case reference (needed for SendChatAsync — chat text-macro)
-    private ClientContext? _ctx;
-
-    // Text macros from INI (loaded lazily)
-    private readonly string?[] _macroSlots = new string?[MacroSlotCount]; // SHIFT_1..9
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the right-dock 318×732 EmoticonPanel with two tabbed grids.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — MainWindow +0x370.
+    ///     Geometry pass: builds the right-dock 318×732 EmoticonPanel with two tabbed grids.
+    ///     spec: Docs/RE/specs/ui_system.md §8.19 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — MainWindow +0x370.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, ClientContext? ctx)
     {
@@ -200,7 +201,7 @@ public sealed partial class HudEmoticonWindow : Control
 
         // Top-bar chrome (uitex 2, src (0,683), 318×50 at (0,36))
         // spec: ui_system.md §8.19.3 — TopBar: (0,36) 318×50 src (0,683) uitex 2
-        Texture2D? tex2 = atlas?.GetById(Tex2);
+        var tex2 = atlas?.GetById(Tex2);
         if (tex2 is not null)
         {
             var topBar = new TextureRect
@@ -211,7 +212,7 @@ public sealed partial class HudEmoticonWindow : Control
                 Size = new Vector2(EmoW, 50f),
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             AddChild(topBar);
         }
@@ -224,7 +225,7 @@ public sealed partial class HudEmoticonWindow : Control
             Text = "×",
             Position = new Vector2(CloseBtnX, CloseBtnY),
             Size = new Vector2(29f, 26f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += () => Toggle(false);
         AddChild(closeBtn);
@@ -237,7 +238,7 @@ public sealed partial class HudEmoticonWindow : Control
             Text = "Chat Macros",
             Position = new Vector2(Tab0X, TabY),
             Size = new Vector2(149f, 29f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tab0.Pressed += () => SelectPage(0);
         AddChild(tab0);
@@ -250,7 +251,7 @@ public sealed partial class HudEmoticonWindow : Control
             Text = "Emotes",
             Position = new Vector2(Tab1X, TabY),
             Size = new Vector2(149f, 29f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tab1.Pressed += () => SelectPage(1);
         AddChild(tab1);
@@ -263,7 +264,7 @@ public sealed partial class HudEmoticonWindow : Control
             Text = "≡",
             Position = new Vector2(BottomBtnX, BottomBtnY),
             Size = new Vector2(59f, 77f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         botBtn.Pressed += () => Toggle(false);
         AddChild(botBtn);
@@ -276,7 +277,7 @@ public sealed partial class HudEmoticonWindow : Control
             MaxLength = 47, // spec: §8.19.3 — max len 47
             Position = new Vector2(InputBoxX, InputBoxY),
             Size = new Vector2(297f, 23f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         AddChild(inputBox);
 
@@ -310,21 +311,21 @@ public sealed partial class HudEmoticonWindow : Control
         {
             Name = "MacroPage",
             Position = new Vector2(GridPageX, GridPageY),
-            Size = new Vector2(GridPageW, GridPageH),
+            Size = new Vector2(GridPageW, GridPageH)
         };
 
         // 9 macro-slot buttons (92×29 each, action 0-indexed)
         // spec: ui_system.md §8.19.4 — "each cell = 3-state button (92×29), label image, wide phrase button (297×23)"
-        for (int i = 0; i < MacroSlotCount; i++)
+        for (var i = 0; i < MacroSlotCount; i++)
         {
-            int capturedI = i;
+            var capturedI = i;
             var slotBtn = new Button
             {
                 Name = $"Macro{i + 1}",
                 Text = $"SHIFT+{i + 1}",
                 Position = new Vector2(10f, 5f + i * 34f),
                 Size = new Vector2(92f, 29f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             slotBtn.Pressed += () => OnMacroPressed(capturedI);
             panel.AddChild(slotBtn);
@@ -337,9 +338,9 @@ public sealed partial class HudEmoticonWindow : Control
                 Text = _macroSlots[i] ?? string.Empty,
                 Position = new Vector2(110f, 5f + i * 34f + 3f),
                 Size = new Vector2(180f, 23f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedPhrase = i;
+            var capturedPhrase = i;
             phraseBtn.Pressed += () => OnMacroPressed(capturedPhrase);
             panel.AddChild(phraseBtn);
         }
@@ -360,20 +361,18 @@ public sealed partial class HudEmoticonWindow : Control
         {
             Name = "EmotePage",
             Position = new Vector2(GridPageX, GridPageY),
-            Size = new Vector2(GridPageW, GridPageH),
+            Size = new Vector2(GridPageW, GridPageH)
         };
 
         var stub = new Label
         {
             Name = "EmoteStub",
-            Text = "// TODO(format): emoticon.do records (40-byte, VFS-pending).\n" +
-                   "// Graphical emotes: client-local (sound 862030103 + balloon slot 327). No packet.\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.19.5/§8.19.6 CODE-CONFIRMED.",
+            Text = string.Empty,
             Position = new Vector2(5f, 5f),
             Size = new Vector2(308f, GridPageH - 10f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             LabelSettings = new LabelSettings { FontSize = 9 },
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         panel.AddChild(stub);
 
@@ -388,8 +387,8 @@ public sealed partial class HudEmoticonWindow : Control
     private void SelectPage(int page)
     {
         _activePage = page;
-        if (_page0Panel is not null) _page0Panel.Visible = (page == 0);
-        if (_page1Panel is not null) _page1Panel.Visible = (page == 1);
+        if (_page0Panel is not null) _page0Panel.Visible = page == 0;
+        if (_page1Panel is not null) _page1Panel.Visible = page == 1;
     }
 
     // -------------------------------------------------------------------------
@@ -400,7 +399,7 @@ public sealed partial class HudEmoticonWindow : Control
     private void OnMacroPressed(int slotIndex)
     {
         // spec: ui_system.md §8.19.4 — "rate-limited to one per 5000 ms"
-        long nowMs = (long)(global::Godot.Time.GetTicksMsec());
+        var nowMs = (long)Time.GetTicksMsec();
         if (nowMs - _lastMacroSentMs < MacroRateLimitMs)
         {
             GD.Print($"[HudEmoticonWindow] Macro rate-limited (5000 ms). slot={slotIndex}. " +
@@ -408,11 +407,8 @@ public sealed partial class HudEmoticonWindow : Control
             return;
         }
 
-        string? text = _macroSlots[slotIndex];
-        if (string.IsNullOrEmpty(text))
-        {
-            return; // Empty slot — nothing to send
-        }
+        var text = _macroSlots[slotIndex];
+        if (string.IsNullOrEmpty(text)) return; // Empty slot — nothing to send
 
         _lastMacroSentMs = nowMs;
 
@@ -422,7 +418,7 @@ public sealed partial class HudEmoticonWindow : Control
         if (_ctx is not null)
         {
             // Channel 0 = normal chat. spec: Docs/RE/packets/2-7_chat_send.yaml
-            _ = _ctx.UseCases.SendChatAsync((byte)0, text);
+            _ = _ctx.UseCases.SendChatAsync(0, text);
             GD.Print($"[HudEmoticonWindow] Macro slot {slotIndex} sent via chat C2S 2/7. " +
                      "spec: Docs/RE/specs/ui_system.md §8.19.4 CODE-CONFIRMED.");
         }
@@ -437,9 +433,9 @@ public sealed partial class HudEmoticonWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the emote picker.
-    /// Open trigger (hotkey/toolbar action id) is debugger-pending.
-    /// spec: Docs/RE/specs/ui_system.md §8.19.7 — "toolbar action id SHOWING = residual (debugger-pending)".
+    ///     Toggles the emote picker.
+    ///     Open trigger (hotkey/toolbar action id) is debugger-pending.
+    ///     spec: Docs/RE/specs/ui_system.md §8.19.7 — "toolbar action id SHOWING = residual (debugger-pending)".
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

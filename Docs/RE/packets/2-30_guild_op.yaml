@@ -6,7 +6,7 @@ opcode: 0x2001e           # major 2 (GameAction), minor 30 -> (2 << 16) | 30
 direction: C2S
 size: 8                  # fixed 8-byte payload (two dwords) built by the social-op sender
 spec: packets/2-30_guild_op.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Small client guild / relation action primitive. Carries a 4-byte operation code and a 4-byte actor id. The lightweight channel for assorted guild/relation actions; richer guild flows use separate opcodes.

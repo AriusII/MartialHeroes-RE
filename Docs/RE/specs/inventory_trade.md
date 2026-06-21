@@ -1,8 +1,8 @@
 ---
 status: confirmed
 sample_verified: false
-verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending)
-ida_reverified: 2026-06-16
+verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned)
@@ -34,6 +34,15 @@ conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets 
 > the **three-array** inventory model and the **bag soft-cap** were confirmed exactly, and
 > the pre-send **validator message ids** for 2/24 and 2/15 were pinned. See §11 and the
 > per-row notes.
+>
+> **CYCLE 7 re-verification (2026-06-20).** re-verified against doida.exe IDB SHA 263bd994,
+> CYCLE 7 (2026-06-20). The ground-item drop/pickup lifecycle (§12) was re-confronted from the
+> death/ground-item lane: the **4/14 drop-ack handler was located** and its **result byte pinned
+> at +0x0C** (correcting the prior doc-asserted +0x08; §12.6), the pickup pre-validation gate set
+> was re-confirmed including a **distance gate of < 20 game units** (a metric proximity check, now
+> distinguished from the free-slot capacity gate; §12.3), and the absence of any client-side
+> ground-item despawn timer (server-driven lifetime) was re-affirmed. Item-drop-on-death is not
+> client-computed (penalty magnitudes RUNTIME-ONLY).
 
 ## Status & confidence
 
@@ -707,7 +716,9 @@ walks to build its per-occupied-slot record list (§8.1).
 | Mob-drop auto-expire ≈ 1000 ms | Ground item from a Mob dropper auto-despawns after ~1 s (added 2026-06-13). | CODE-CONFIRMED |
 | Gold cap on coin pickup = 9,999,999,990,000,000 | Pickup pre-validation rejects when amount + current gold exceeds this (added 2026-06-13). | CODE-CONFIRMED |
 | Pickup level requirement: player level ≥ item level requirement | Pickup pre-validation; else error 10005 (player level field +1684 vs item field +228) (added 2026-06-13). | CODE-CONFIRMED |
-| Pickup free-slot capacity threshold = 20 | Inventory free-slot count gate (marker byte 0xFF across the bag arrays), NOT a distance check (added 2026-06-13). | CODE-CONFIRMED |
+| Pickup free-slot capacity threshold = 20 | Inventory free-slot count gate (marker byte 0xFF across the bag arrays) (added 2026-06-13). | CODE-CONFIRMED |
+| Pickup distance gate = < 20 game units | Metric proximity check against the ground-item actor on the 2/15 send path; a separate gate from the free-slot threshold above, sharing the value 20 (added CYCLE 7 2026-06-20). | CONFIRMED |
+| 4/14 drop-ack result byte at +0x0C (`0` = close panel, `1` = drop SFX + grid update) | Drop-ack handler located CYCLE 7; corrects the prior doc-asserted result@+0x08 (added 2026-06-20). | CONFIRMED |
 | Drop SFX 862030106; coin-pickup SFX 862030105 | Ground-item A/V cues (added 2026-06-13). | LIKELY |
 | Drop announce string 2146; pickup announce 10006 / 37003; other-player pickup notice 10018 | Ground-item chat cues, CP949 (added 2026-06-13). | LIKELY |
 | Pickup error strings 10001…10005 | 4/15 failure subtypes 1…5; 10005 = level/eligibility (added 2026-06-13). CP949. | CODE-CONFIRMED |
@@ -778,20 +789,31 @@ walks to build its per-occupied-slot record list (§8.1).
     "else" success path also runs a local remover for the picker. Whether a 5/15 always follows a
     4/15 for the picker, or the client self-despawns and 5/15 is only for observers, is
     capture-unverified.
-18. **Pickup physical proximity** (added 2026-06-13) — no explicit client-side metric distance
-    gate was found on the 2/15 send path (the free-slot count of 20 is a capacity check, not
-    units). Proximity is enforced by the click hit-test and presumably server-side. The C2S 2/15
+18. **(Refined CYCLE 7 2026-06-20.)** Pickup physical proximity — a client-side metric **distance
+    gate of < 20 game units** against the ground-item actor **was** located on the 2/15 send path
+    (§12.3 gate 6), distinct from the free-slot capacity threshold (also 20). The C2S 2/15
     share-bytes (+4/+5/+6) carry a client-suggested destination free-slot index for non-coin
     pickups (and `(0xF0, 0, 0)` for coins); whether the server honours the suggestion or re-derives
-    the slot is unknown.
+    the slot is still unknown (capture-pending).
 19. **(Resolved 2026-06-16.)** The **4/23 two-level selector** (outer `select`@+8 accept-vs-decline
     with decline-reason@+9 cases 1–5; inner `phase`@+10) and the **4/25 offsets** (`phase`@+8,
     `item_count`@+0x18, 28-byte base) are now re-pinned (§8.2). Remaining: the per-reason decline
     text (4/23 +9 cases 1–5) and the runtime meaning of enum values stay `capture-pending`.
-20. **4/14 `SmsgGroundItemDropAck` handler not located in the 2026-06-16 lane** (added 2026-06-16)
-    — only the matching 2/14 C2S send builder (8 bytes) was re-confirmed. The §12.6 interior
-    offsets (result@+8, mode@+10, slot@+11, count@+12, opaque@+16) are **doc-asserted /
-    capture-pending** until the handler is walked or a capture confirms them.
+20. **(Resolved CYCLE 7 2026-06-20.)** 4/14 `SmsgGroundItemDropAck` handler **was located** — it
+    reads a **20-byte body** and gates on **result @+0x0C** (`0` = close panel, `1` = drop SFX +
+    inventory-grid slot update), correcting the prior doc-asserted result@+0x08 (§12.6). The
+    remaining drop sub-record interior offsets (mode/slot/count/opaque) were not re-pinned this
+    cycle and stay doc-asserted / capture-pending.
+21. **Ground-item despawn lifetime** (CYCLE 7 2026-06-20) — there is **no client-side despawn
+    timer** for ordinary ground items; the item actor is removed by the normal server-driven
+    actor-remove flow (and 5/15, §12.8). The Mob-drop ~1000 ms auto-expire (§12.5/§12.9) is the
+    one client-side timed removal. General ground-item lifetime is **RUNTIME-ONLY /
+    server-authoritative**.
+22. **Item drop on death** (CYCLE 7 2026-06-20) — item loss on player death is **not
+    client-computed**: the death handler runs no drop arithmetic and formats no dropped-item list;
+    any items lost on death arrive as ordinary server-driven ground-item spawns / inventory
+    updates. Death-penalty magnitudes (dropped items, and any XP / durability loss) are
+    **RUNTIME-ONLY / server-authoritative**.
 
 ---
 
@@ -865,16 +887,20 @@ message ids pinned 2026-06-16):
    "too much gold" msg **884**; otherwise set the share-bytes to `(0xF0, 0, 0)` and send.
 5. **Non-coin** — resolve a free destination bag slot; if the item is **non-pickable** (its
    pickable flag is clear) or the inventory **free-slot capacity** gate fails (the count of empty
-   bag slots, threshold **20** — a capacity gate, **not** a distance check), show msg **19**
-   (and/or msg **601**); and check the **level requirement** (player level ≥ the item's
-   level-requirement field — the player level field at +1684 vs the item field at +228) — on
-   failure, error string **10005**.
-6. On success — send 2/15 with the target key, amount, and the share-byte destination hint, and
+   bag slots, threshold **20**), show msg **19** (and/or msg **601**); and check the **level
+   requirement** (player level ≥ the item's level-requirement field — the player level field at
+   +1684 vs the item field at +228) — on failure, error string **10005**.
+6. **Distance gate** — the ground item must be within **< 20 game units** of the local player
+   (a squared-distance / metric proximity check against the ground-item actor's position). Beyond
+   that, the pickup is rejected. `CONFIRMED` (CYCLE 7; this is a metric proximity gate, distinct
+   from the free-slot capacity threshold in gate 5 which also happens to be 20).
+7. On success — send 2/15 with the target key, amount, and the share-byte destination hint, and
    stamp the current time as a last-pickup rate gate.
 
-No explicit client-side metric pickup radius was found on the send path; physical proximity is
-enforced by the click hit-test (the target must be the picked ground-item actor) and presumably
-server-side (§11 #18).
+A client-side metric pickup **distance** gate (< 20 game units) **was** located in the CYCLE 7
+re-confirm (gate 6 above), refining the earlier note that proximity was only enforced by the click
+hit-test / server-side. The free-slot threshold (gate 5) and the distance threshold (gate 6) are
+two separate gates that share the numeric value 20 (§11 #18).
 
 ### 12.4 S2C 4/4 tag-4 ground-item spawn record (24 bytes, inside the area stream)
 
@@ -926,24 +952,25 @@ ranges; re-verified 2026-06-16).
 Result of a **drop-from-inventory** request; on success it spawns the dropped item at the local
 player's current position.
 
-> **Re-verification note (2026-06-16):** the 4/14 *handler* was **not located** in the
-> 2026-06-16 re-confirm pass (only the matching 2/14 C2S send builder + its 8-byte size were
-> re-verified). The offsets below remain **doc-asserted / `capture-pending`** — confirm them
-> against a capture or a later handler walk before relying on the interior layout (§11 #G8).
+> **Re-verification note (CYCLE 7, 2026-06-20):** the 4/14 *handler* **was located** this cycle
+> (the death/ground-item lane walked it). The handler reads a **20-byte body** and gates on a
+> **result byte at +0x0C** — `0` = close the drop panel; `1` = play the drop SFX and run the
+> inventory-grid slot update (which removes the dropped item from the owner's inventory grid). This
+> **corrects the prior doc-asserted result@+0x08** to **+0x0C** and promotes it from
+> capture-pending to `CONFIRMED`. The other interior offsets (mode/slot/count/opaque) were **not**
+> re-pinned this cycle and remain doc-asserted / capture-pending. NB: 4/14 updates the *owner's
+> inventory grid*, not a separate world-visual record — the world visual is the spawned actor.
 
 | Off | Size | Type | Meaning | Conf |
 |---|---|---|---|---|
 | +0..+7 | 8 | — | header / echo region | PLAUSIBLE |
-| +8  | 1 | u8  | **result** (`0` = error → UI error; `1` = ok → spawn the drop) | capture-pending |
-| +10 | 1 | u8  | **mode** (`0` = bag slot, `1` = equip slot, `2` = fixed slot, `0xFF` = coin) | capture-pending |
-| +11 | 1 | u8  | **slot** index | capture-pending |
-| +12 | 4 | i32 | **count / coin amount** | capture-pending |
-| +16 | 4 | i32 | **opaque** (→ ground-item actor opaque slot) | capture-pending |
+| +0x0C (12) | 1 | u8 | **result** (`0` = close drop panel; `1` = drop SFX + inventory-grid slot update) | CONFIRMED (offset + outcomes; CYCLE 7) |
+| (interior) | — | — | **mode / slot / count / opaque** drop sub-record (prior pass; positions not re-pinned this cycle) | capture-pending |
 
-On `result == 1` the client reads the drop sub-record (mode / slot / count / opaque), resolves the
-item id (bag, equip, or coin — coin forces id 217000501), and spawns the ground item at the local
-player's current world position. Drop SFX **862030106**, drop announce string **2146**. The
-*behaviour* is consistent with the 2/14 send shape; the *byte offsets* are capture-pending.
+On `result == 1` the client plays the drop SFX and runs the inventory-grid slot update for the
+dropped item, then spawns/keeps the ground item at the local player's current world position. Drop
+SFX **862030106**, drop announce string **2146**. The result byte at +0x0C and its outcomes are
+`CONFIRMED` (CYCLE 7); the drop sub-record interior offsets are capture-pending.
 
 ### 12.7 S2C 4/15 `SmsgItemWorldPickupAck` (36 bytes, read 0x24)
 

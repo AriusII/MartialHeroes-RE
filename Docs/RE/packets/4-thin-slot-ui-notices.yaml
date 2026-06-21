@@ -1,0 +1,93 @@
+# Clean-room FAMILY spec. Promoted from neutral analyst notes; rewritten, not copied.
+# This is a FAMILY notice, NOT a per-minor field spec. It documents the shared shape of the major-4
+# "thin UI-slot updater" S2C messages whose field layout is not yet specced, and records which minors
+# were RECLASSIFIED OUT of the family into their own structured specs. capture_verified: false.
+# spec: Docs/RE/packets/4-thin-slot-ui-notices.yaml
+
+name: SmsgThinSlotUiNoticeFamily   # umbrella for the major-4 thin UI-slot updater messages (per-minor names below)
+opcode: 0x4xxxx                    # major 4 (Response); SEVERAL minors (enumerated below) -- NOT a single opcode
+direction: S2C
+size: var                          # each member reads a small fixed block; the read length is the handler's bulk-read minimum, not a proven frame size
+spec: packets/4-thin-slot-ui-notices.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  A family of major-4 Response messages that each drive ONE UI panel slot ("thin slot updater"). The
+  shared shape: the handler bulk-reads a small fixed block, gates on a leading result/subtype byte,
+  and either applies the block to a specific main-window panel/list slot or surfaces a preset
+  notice/error string. The per-minor FIELD layout is not yet specced (routing + the gate byte + the
+  bulk-read length are dispatch-table-confirmed; the body interior is capture-pending). This file is
+  the family notice so engineers do not expect a per-minor packet YAML for each thin slot.
+
+# No field table: the family members have varied, mostly-unspecced bodies. The COMMON shape is
+# described in notes. The per-minor canonical names and read lengths are listed in notes; create a
+# dedicated packets/4-<minor>_*.yaml only when a minor's interior is actually decoded.
+fields: []
+
+notes: |
+  FAMILY SHAPE (control-flow common pattern; per-minor details vary):
+    - The handler bulk-reads a small FIXED block (the read length is the handler's bulk-read minimum,
+      NOT a proven on-wire frame size).
+    - A leading byte (commonly at body +8) is a RESULT / SUBTYPE gate: on the "ok" value the block is
+      applied to a specific main-window panel/list/slot; on the "fail" value the handler dismisses a
+      pending notice and/or surfaces a preset message-string id.
+    - Some members are local-player-gated (they drop the packet unless the carried id is the local
+      player).
+    - Routing is dispatch-table-confirmed for every member; the per-minor body field layout is NOT yet
+      specced (capture/debugger-pending).
+
+  THIN-SLOT FAMILY MEMBERS (major 4; canonical names per opcodes.md; read length where known):
+    4:40  SmsgResponseSlot40   (fixed block; result-byte-driven local visual/motion swap + NPC-panel forward)
+    4:57  SmsgResponseSlot57   (28-byte read; success -> slot update, else dismiss notice)
+    4:58  SmsgResponseSlot58   (52-byte read; success -> slot update + message 10009 + list reset)
+    4:60  SmsgResponseSlot60   (fixed block; gate byte primes a singleton then forwards to an apply routine)
+    4:66  SmsgResponseSlot66   (fixed block; success-byte local-player motion swap + panel forward)
+    4:70  SmsgResponseSlot70   (140-byte read; result==1 apply, else notice/error 40042)
+    4:72  SmsgResponseSlot72   (fixed block; gate byte forwards two floats to a rank/progress panel slot)
+    4:75  SmsgResponseSlot75   (184-byte read; ENRICHED but kept neutral -- see "enriched members" below)
+    4:122 SmsgResponseSlot122  (16-byte read; success forwards to a UI list/slot sink, subtype msg 67013)
+    4:123 SmsgResponseSlot123  (12-byte read; refresh a service-panel widget; flag byte updates a slot or posts a notice)
+    4:125 SmsgResponseSlot125  (no payload read; pulses a refresh on one service-slot panel)
+    4:126 SmsgResponseSlot126  (12-byte read; branch sets a global toggle + refreshes an actor/panel, else notice/error)
+    4:135 SmsgResponseSlot135  (80-byte read; ENRICHED but kept neutral -- see "enriched members" below)
+    4:142 SmsgResponseSlot142  (fixed block; local-player-id-gated; ok -> store four globals + refresh three panels, else preset error)
+    4:151 SmsgResponseSlot151  (reads three trailing dwords -> a UI panel via the runtime-singleton table)
+    4:152 SmsgResponseSlot152  (local-player-id-gated; two specific result codes surface a preset message, else no-op)
+
+  ENRICHED MEMBERS (still in the family by NAME, but their section boundaries ARE recovered; they
+  remain neutral-named because no string disambiguates the exact gameplay panel):
+    4:75  SmsgResponseSlot75  (184 / 0xB8 bytes): section map = [8B prefix] [result@+8, subtype@+9,
+          10-byte record-index map @+0x0A] [10 x 16-byte item/result records @+0x14, gated by a u32
+          presence word at record+0x04] [u32 trailing handle @+0xB4]. Structure HIGH; per-record
+          interior (12 bytes past the presence word) opaque. Kept neutral (a 10-item-record + a
+          Diamond record-id panel result -- no gameplay string justifies a rename). [capture-pending]
+    4:135 SmsgResponseSlot135 (80 / 0x50 bytes): section map = [u32 echo @0] [u32 actor-id (local-only
+          gate) @+4] [u8 delimiter @+8] [33-byte delimiter-encoded CP949 string A @+9] [38-byte
+          encoded string B @+0x2A] [u32 class/mode selector @+0x4C]. It is a local-player-gated
+          party/roster name+grade string refresh (richer than "thin slot", but genuinely opaque -- the
+          two strings are decoded char-by-char by an encoding scheme, not a fixed field grid). The
+          "thin slot" label understates it; flagged for the opcodes.md curator. Kept neutral.
+
+  RECLASSIFIED OUT OF THE THIN-SLOT FAMILY (these are STRUCTURED panel snapshots, NOT thin slots --
+  each now has its own dedicated packet spec; do NOT treat them as thin slots):
+    4:56  SmsgResponseSlot56  -> packets/4-56_structured_panel_snapshot.yaml
+                                 (1552-byte structured panel/spawn snapshot: subtype @+8 + actor id
+                                 @+12 + a 64-entry dual transform table)
+    4:71  SmsgResponseSlot71  -> packets/4-71_structured_panel_snapshot.yaml
+                                 (1092-byte structured panel snapshot: subtype @+8 + an 8-entry id
+                                 array @+12 + an 8-entry status array @+44 + sub-records)
+
+  OTHER major-4 Response minors that were NEVER thin slots and already have real specs / catalogue
+  entries (listed here only to prevent mis-classification): 4/48 SmsgRankProgressEvent (rank-progress;
+  packets/4-48_rank_progress_event.yaml), 4/65 SmsgGuildInfoFullSync, 4/80 SmsgPvpDeathResult,
+  4/100 SmsgCombatAttackUpdate, 4/102 SmsgSkillWindowStateUpdate, 4/103 SmsgGuildPanelTextUpdate.
+
+  POLICY: do NOT author a per-minor packets/*.yaml for a thin-slot member until its body interior is
+  actually decoded (and even then only if a real field layout exists). The family notice + the
+  opcodes.md catalogue rows are the authoritative record for the still-opaque members. The READ
+  lengths above are bulk-read minimums, not proven frame sizes.
+
+  UNBLOCKS: keeps the packets/ tree from accumulating empty per-minor stubs for the thin-slot family;
+  engineers reserve a frame length from the opcodes.md row and treat the body as opaque until a
+  capture decodes a given minor.

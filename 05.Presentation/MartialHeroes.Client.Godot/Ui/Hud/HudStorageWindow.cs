@@ -72,16 +72,17 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game player storage / warehouse window (KeepPanel, master service slot 191).
-///
-/// <para>A 60-cell (10×6) item grid for the player's warehouse storage. Opened ONLY via the
-/// KeepNpcPanel (KIND-9 NPC interaction → sel 1 → C2S 2/142). No hotkey, no DefaultMenu entry.
-/// DISTINCT from HudTradeWindow (KeepPanel/TradeKeepWindow §8.13).</para>
-///
-/// <para>PASSIVE: zero game logic. Cell clicks emit move intents as use-case calls (stubbed).
-/// Storage contents arrive via shared item-panel S2C family (capture-pending specific minor).</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.32 CODE-CONFIRMED.
+///     In-game player storage / warehouse window (KeepPanel, master service slot 191).
+///     <para>
+///         A 60-cell (10×6) item grid for the player's warehouse storage. Opened ONLY via the
+///         KeepNpcPanel (KIND-9 NPC interaction → sel 1 → C2S 2/142). No hotkey, no DefaultMenu entry.
+///         DISTINCT from HudTradeWindow (KeepPanel/TradeKeepWindow §8.13).
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic. Cell clicks emit move intents as use-case calls (stubbed).
+///         Storage contents arrive via shared item-panel S2C family (capture-pending specific minor).
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.32 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudStorageWindow : Control
 {
@@ -145,24 +146,23 @@ public sealed partial class HudStorageWindow : Control
     private const int StorageSlotBase = 56; // spec: ui_system.md §8.32.4 CODE-CONFIRMED
     private const int SlotPerPage = 60; // spec: ui_system.md §8.32.4 CODE-CONFIRMED
 
+    // 60 cell buttons (parallel to the cell grid)
+    private readonly Button[] _cellBtns = new Button[TotalCells];
+    private int _activePage; // 0 or 1 (two page tabs)
+
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activePage; // 0 or 1 (two page tabs)
-
-    // 60 cell buttons (parallel to the cell grid)
-    private readonly Button[] _cellBtns = new Button[TotalCells];
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 60-cell storage grid plus chrome.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.32.1/§8.32.2 CODE-CONFIRMED.
+    ///     Geometry pass: builds the 60-cell storage grid plus chrome.
+    ///     spec: Docs/RE/specs/ui_system.md §8.32.1/§8.32.2 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -210,7 +210,7 @@ public sealed partial class HudStorageWindow : Control
             Text = "Storage",
             Position = new Vector2(10f, TitleBarY + 16f),
             Size = new Vector2(180f, 20f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(titleLbl);
 
@@ -223,7 +223,7 @@ public sealed partial class HudStorageWindow : Control
             Text = text.GetCaption(MsgTabA, "Page 1"),
             Position = new Vector2(PageTabAX, PageTabAY),
             Size = new Vector2(65f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabA.Pressed += () => OnPageTab(0); // action 261
         AddChild(tabA);
@@ -237,20 +237,20 @@ public sealed partial class HudStorageWindow : Control
             Text = text.GetCaption(MsgTabB, "Page 2"),
             Position = new Vector2(PageTabBX, PageTabBY),
             Size = new Vector2(65f, 20f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         tabB.Pressed += () => OnPageTab(1); // action 262
         AddChild(tabB);
 
         // Build the 60 cell buttons (actions 200..259)
         // spec: ui_system.md §8.32.1 CODE-CONFIRMED
-        for (int i = 0; i < TotalCells; i++)
+        for (var i = 0; i < TotalCells; i++)
         {
-            int col = i % Cols;
-            int row = i / Cols;
-            float cx = GridOriginX + col * CellSize; // spec: ui_system.md §8.32.1 "x=45+38·col"
-            float cy = GridOriginY + row * CellSize; // spec: ui_system.md §8.32.1 "y=162+38·row"
-            int actionId = CellActionBase + i; // spec: ui_system.md §8.32.1 "action=200+i"
+            var col = i % Cols;
+            var row = i / Cols;
+            var cx = GridOriginX + col * CellSize; // spec: ui_system.md §8.32.1 "x=45+38·col"
+            var cy = GridOriginY + row * CellSize; // spec: ui_system.md §8.32.1 "y=162+38·row"
+            var actionId = CellActionBase + i; // spec: ui_system.md §8.32.1 "action=200+i"
 
             var cell = new Button
             {
@@ -259,9 +259,9 @@ public sealed partial class HudStorageWindow : Control
                 Position = new Vector2(cx, cy),
                 Size = new Vector2(CellSize, CellSize),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int captured = i;
+            var captured = i;
             cell.Pressed += () => OnCellClick(captured); // action 200+i
             AddChild(cell);
             _cellBtns[i] = cell;
@@ -275,7 +275,7 @@ public sealed partial class HudStorageWindow : Control
             Text = "",
             Position = new Vector2(51f, 598f),
             Size = new Vector2(128f, 15f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(infoLbl);
 
@@ -288,7 +288,7 @@ public sealed partial class HudStorageWindow : Control
             Text = text.GetCaption(MsgDeposit, "Deposit"),
             Position = new Vector2(DepositX, MoneyBtnY),
             Size = new Vector2(MoneyBtnW, MoneyBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         depositBtn.Pressed += OnDeposit; // action 263
         AddChild(depositBtn);
@@ -302,7 +302,7 @@ public sealed partial class HudStorageWindow : Control
             Text = text.GetCaption(MsgWithdraw, "Withdraw"),
             Position = new Vector2(WithdrawX, MoneyBtnY),
             Size = new Vector2(MoneyBtnW, MoneyBtnH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         withdrawBtn.Pressed += OnWithdraw; // action 264
         AddChild(withdrawBtn);
@@ -315,13 +315,13 @@ public sealed partial class HudStorageWindow : Control
             Text = "OK",
             Position = new Vector2(CloseX, CloseY),
             Size = new Vector2(CloseW, CloseH),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         closeBtn.Pressed += OnClose; // action 260
         AddChild(closeBtn);
 
         GD.Print("[HudStorageWindow] Built — KeepPanel slot 191 (60-cell 10×6 storage grid). " +
-                 $"Cell grid: x=45+38·col, y=162+38·row, actions 200..259. " +
+                 "Cell grid: x=45+38·col, y=162+38·row, actions 200..259. " +
                  "Page tabs 261/262; deposit 263; withdraw 264; close 260. " +
                  "Open: ONLY via KeepNpcPanel sel 1 + C2S 2/142. No hotkey. " +
                  "Item move: TODO(world-campaign): C2S 2/46 (move) + 2/44 (quick-move). " +
@@ -334,9 +334,9 @@ public sealed partial class HudStorageWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Opens the storage window (called from HudKeepNpcDialog sel 1).
-    /// Also emits C2S 2/142 (storage open request) via use-case — stubbed.
-    /// spec: Docs/RE/specs/ui_system.md §8.32.5 — "KIND-9 NPC → KeepNpcPanel → sel 1 → C2S 2/142 → show slot 191".
+    ///     Opens the storage window (called from HudKeepNpcDialog sel 1).
+    ///     Also emits C2S 2/142 (storage open request) via use-case — stubbed.
+    ///     spec: Docs/RE/specs/ui_system.md §8.32.5 — "KIND-9 NPC → KeepNpcPanel → sel 1 → C2S 2/142 → show slot 191".
     /// </summary>
     public void Open()
     {
@@ -377,8 +377,8 @@ public sealed partial class HudStorageWindow : Control
         // spec: ui_system.md §8.32.4 — "200..259 click: place/move or pick-up"
         // Unified slot = action + 60·page + 56
         // spec: ui_system.md §8.32.4 CODE-CONFIRMED — "slot = action + 60·page + 56"
-        int action = CellActionBase + cellIndex;
-        int unifiedSlot = action + SlotPerPage * _activePage + StorageSlotBase;
+        var action = CellActionBase + cellIndex;
+        var unifiedSlot = action + SlotPerPage * _activePage + StorageSlotBase;
         // TODO(world-campaign): drag/drop → C2S 2/46 (move) or 2/44 (quick-move)
         GD.Print($"[HudStorageWindow] Cell {cellIndex} clicked (action {action}, " +
                  $"unified slot {unifiedSlot}, page {_activePage}). " +

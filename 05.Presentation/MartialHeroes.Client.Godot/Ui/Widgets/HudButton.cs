@@ -21,16 +21,18 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 /// <summary>
-/// GUButton-faithful 3-state HUD button.
-///
-/// <para>Holds up to three sprite frames (NORMAL/HOVER/PRESSED). When a frame is null,
-/// the NORMAL frame is used (2-state / 3-state fallback). DISABLED always uses NORMAL.
-/// spec: Docs/RE/specs/ui_system.md §1.5.</para>
-///
-/// <para>Caption (CP949-decoded string) is drawn over the sprite with state-dependent
-/// colour. Font slot defaults to 0 (DotumChe 12/6 — spec §6.2 / §6.3).</para>
+///     GUButton-faithful 3-state HUD button.
+///     <para>
+///         Holds up to three sprite frames (NORMAL/HOVER/PRESSED). When a frame is null,
+///         the NORMAL frame is used (2-state / 3-state fallback). DISABLED always uses NORMAL.
+///         spec: Docs/RE/specs/ui_system.md §1.5.
+///     </para>
+///     <para>
+///         Caption (CP949-decoded string) is drawn over the sprite with state-dependent
+///         colour. Font slot defaults to 0 (DotumChe 12/6 — spec §6.2 / §6.3).
+///     </para>
 /// </summary>
-public sealed partial class HudButton : HudWidget
+public sealed class HudButton : HudWidget
 {
     // -------------------------------------------------------------------------
     // Spec-cited colour constants
@@ -38,11 +40,11 @@ public sealed partial class HudButton : HudWidget
 
     // Disabled caption colour.
     // spec: Docs/RE/specs/ui_system.md §1.5 — "disabled → grey 0xFF666666": CODE-CONFIRMED.
-    private static readonly Color DisabledCaptionColor = new(0x66 / 255f, 0x66 / 255f, 0x66 / 255f, 1f);
+    private static readonly Color DisabledCaptionColor = new(0x66 / 255f, 0x66 / 255f, 0x66 / 255f);
 
     // Hovered caption colour.
     // spec: Docs/RE/specs/ui_system.md §1.5 — "hovered → yellow 0xFFFFFF00": CODE-CONFIRMED.
-    private static readonly Color HoveredCaptionColor = new(1f, 1f, 0f, 1f);
+    private static readonly Color HoveredCaptionColor = new(1f, 1f, 0f);
 
     // -------------------------------------------------------------------------
     // Backing Godot node
@@ -51,12 +53,17 @@ public sealed partial class HudButton : HudWidget
     private readonly TextureButton _btn;
     private readonly Label _captionLabel;
 
+    // Per-widget caption tint for the normal/pressed state.
+    // Stored as a field so IsDisabled can restore it without requiring a MouseExited signal.
+    // spec: Docs/RE/specs/ui_system.md §1.5 — "+0x0C tint/colour, default 0xFFFFFFFF = white".
+    private readonly Color _captionTint;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a HudButton.
+    ///     Creates a HudButton.
     /// </summary>
     /// <param name="x">Screen-local X on the 1024×768 canvas.</param>
     /// <param name="y">Screen-local Y.</param>
@@ -66,10 +73,14 @@ public sealed partial class HudButton : HudWidget
     /// <param name="hoverFrame">HOVER frame; null = use NORMAL.</param>
     /// <param name="pressedFrame">PRESSED frame; null = use NORMAL.</param>
     /// <param name="caption">CP949-decoded caption string (may be empty).</param>
-    /// <param name="captionTint">Per-widget tint for normal/pressed caption (default white).
-    ///   spec §1.5 — "+0x0C tint/colour".</param>
-    /// <param name="captionFontSlot">Font slot index (0..14, default 0 = DotumChe 12).
-    ///   spec §6.3 — "button caption font at +0xE8, default 0": CODE-CONFIRMED.</param>
+    /// <param name="captionTint">
+    ///     Per-widget tint for normal/pressed caption (default white).
+    ///     spec §1.5 — "+0x0C tint/colour".
+    /// </param>
+    /// <param name="captionFontSlot">
+    ///     Font slot index (0..14, default 0 = DotumChe 12).
+    ///     spec §6.3 — "button caption font at +0xE8, default 0": CODE-CONFIRMED.
+    /// </param>
     public HudButton(
         int x, int y, int w, int h,
         Texture2D? normalFrame,
@@ -88,7 +99,7 @@ public sealed partial class HudButton : HudWidget
             IgnoreTextureSize = true,
             // Each atlas frame is sliced to the destination W×H before assignment; keep native size.
             // spec: Docs/RE/specs/frontend_scenes.md — widget blits are 1:1 pixel rects, never scaled.
-            StretchMode = TextureButton.StretchModeEnum.Keep,
+            StretchMode = TextureButton.StretchModeEnum.Keep
         };
 
         // Tag the TextureButton so AudioService can identify HUD buttons via NodeAdded without a
@@ -112,11 +123,11 @@ public sealed partial class HudButton : HudWidget
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             AnchorsPreset = (int)Control.LayoutPreset.FullRect,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
+            MouseFilter = Control.MouseFilterEnum.Ignore
         };
 
-        Color tint = captionTint ?? Colors.White;
-        _captionLabel.AddThemeColorOverride("font_color", tint);
+        _captionTint = captionTint ?? Colors.White;
+        _captionLabel.AddThemeColorOverride("font_color", _captionTint);
 
         // Apply font slot (default 0 = DotumChe 12/6).
         // spec: §6.3 — "button caption font slot at +0xE8, default 0": CODE-CONFIRMED.
@@ -133,8 +144,9 @@ public sealed partial class HudButton : HudWidget
         _btn.MouseExited += () =>
         {
             // Restore tint or disabled colour.
+            // spec: §1.5 — "caption colour = grey when disabled, widget tint otherwise".
             _captionLabel.AddThemeColorOverride("font_color",
-                _btn.Disabled ? DisabledCaptionColor : tint);
+                _btn.Disabled ? DisabledCaptionColor : _captionTint);
         };
 
         // Click-release signal → ActionFired.
@@ -147,8 +159,8 @@ public sealed partial class HudButton : HudWidget
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Gets or sets the caption text (CP949-decoded, already a .NET string).
-    /// Never decode bytes in the UI layer.
+    ///     Gets or sets the caption text (CP949-decoded, already a .NET string).
+    ///     Never decode bytes in the UI layer.
     /// </summary>
     public string Caption
     {
@@ -157,12 +169,12 @@ public sealed partial class HudButton : HudWidget
     }
 
     /// <summary>
-    /// Gets or sets the disabled state.
-    ///
-    /// <para>When disabled: the button uses the NORMAL frame (spec §1.5 — "DISABLED = NORMAL")
-    /// and the caption draws in grey (0xFF666666).</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §1.5 — frame-selection precedence + disabled caption colour.
+    ///     Gets or sets the disabled state.
+    ///     <para>
+    ///         When disabled: the button uses the NORMAL frame (spec §1.5 — "DISABLED = NORMAL")
+    ///         and the caption draws in grey (0xFF666666).
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §1.5 — frame-selection precedence + disabled caption colour.
     /// </summary>
     public bool IsDisabled
     {
@@ -170,8 +182,11 @@ public sealed partial class HudButton : HudWidget
         set
         {
             _btn.Disabled = value;
-            if (value)
-                _captionLabel.AddThemeColorOverride("font_color", DisabledCaptionColor);
+            // spec: Docs/RE/specs/ui_system.md §1.5 — "disabled → grey 0xFF666666; normal/pressed → widget tint".
+            // Restore the per-widget caption tint on re-enable so the caption does not stay grey
+            // after a disable→enable cycle without an intervening MouseExited signal.
+            _captionLabel.AddThemeColorOverride("font_color",
+                value ? DisabledCaptionColor : _captionTint);
         }
     }
 
@@ -179,6 +194,9 @@ public sealed partial class HudButton : HudWidget
     // HudWidget
     // -------------------------------------------------------------------------
 
-    /// <inheritdoc/>
-    public override Control? GetControl() => _btn;
+    /// <inheritdoc />
+    public override Control? GetControl()
+    {
+        return _btn;
+    }
 }

@@ -16,11 +16,13 @@
 //   spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
 //
 // Winding order:
-//   The on-disk index array is passed through as-is (no swap). The CW-vs-CCW winding is not
-//   independently sample-confirmed, so the material is rendered double-sided (CullMode.Disabled)
-//   as a safety net — faces show from either side. Shading uses the explicit per-vertex normals
-//   (negated on Z to match positions), so it is correct regardless of winding.
-//   spec: Docs/RE/formats/terrain_scene.md §Index array — u16 triangle list (winding UNVERIFIED).
+//   The spec confirms CCW front faces (terrain_scene.md §3.2.4). Negating Z (the world handedness
+//   flip applied to both positions and normals) inverts the triangle winding: CCW legacy → CW
+//   Godot. We correct this by swapping indices[1] ↔ indices[2] per triangle (re-establishes CCW
+//   in Godot space). The material is also rendered double-sided (CullMode.Disabled) because thin
+//   architectural props are often viewed from both sides.
+//   spec: Docs/RE/formats/terrain_scene.md §Index array — "CONFIRMED CCW front faces."
+//   spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) → (x, y, -z). CONFIRMED.
 //
 // Per-vertex colour:
 //   BudVertex is exactly 8 × f32 (pos XYZ, normal XYZ, uv UV = 32 bytes on disk).
@@ -45,43 +47,42 @@
 //   spec value.
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Builds Godot <see cref="ArrayMesh"/> geometry directly from a parsed <see cref="BudScene"/>,
-/// bypassing the native Godot GLB importer (<c>GltfDocument.AppendFromBuffer</c>).
-///
-/// Returns a <see cref="Node3D"/> root node whose children are one <see cref="MeshInstance3D"/>
-/// per <see cref="BudObject"/>. An optional <see cref="ImageTexture"/> resolver may be supplied
-/// to apply diffuse textures; if null or if the resolver returns null, a neutral grey material
-/// with a small emission boost is applied so placeholder geometry is never near-black.
-///
-/// spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
-/// spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW: CONFIRMED.
+///     Builds Godot <see cref="ArrayMesh" /> geometry directly from a parsed <see cref="BudScene" />,
+///     bypassing the native Godot GLB importer (<c>GltfDocument.AppendFromBuffer</c>).
+///     Returns a <see cref="Node3D" /> root node whose children are one <see cref="MeshInstance3D" />
+///     per <see cref="BudObject" />. An optional <see cref="ImageTexture" /> resolver may be supplied
+///     to apply diffuse textures; if null or if the resolver returns null, a neutral grey material
+///     with a small emission boost is applied so placeholder geometry is never near-black.
+///     spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
+///     spec: Docs/RE/formats/terrain_scene.md §Index array — u16 indices, triangle list, CCW front faces: CONFIRMED.
+///     spec: Helpers/WorldCoordinates.ToGodot — Z-flip inverts winding; corrected by swapping indices[1]↔indices[2]:
+///     CONFIRMED.
 /// </summary>
 public static class BudMeshBuilder
 {
     /// <summary>
-    /// Builds a scene graph from all objects in <paramref name="scene"/>.
-    ///
-    /// <paramref name="textureResolver"/> is called with a 1-based tex_id; it may return null,
-    /// in which case the mesh renders with a neutral untextured material (slightly emissive grey).
-    ///
-    /// spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: PARTIAL.
+    ///     Builds a scene graph from all objects in <paramref name="scene" />.
+    ///     <paramref name="textureResolver" /> is called with a 1-based tex_id; it may return null,
+    ///     in which case the mesh renders with a neutral untextured material (slightly emissive grey).
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: PARTIAL.
     /// </summary>
     public static Node3D Build(BudScene scene, Func<uint, ImageTexture?>? textureResolver = null)
     {
         var root = new Node3D { Name = "BudSceneNode" };
 
-        for (int i = 0; i < scene.Objects.Length; i++)
+        for (var i = 0; i < scene.Objects.Length; i++)
         {
-            BudObject obj = scene.Objects[i];
+            var obj = scene.Objects[i];
 
             try
             {
-                MeshInstance3D? inst = BuildObject(obj, i, textureResolver);
+                var inst = BuildObject(obj, i, textureResolver);
                 if (inst is not null)
                     root.AddChild(inst);
             }
@@ -110,14 +111,14 @@ public static class BudMeshBuilder
             return null;
         }
 
-        int vertCount = obj.Vertices.Length;
+        var vertCount = obj.Vertices.Length;
         var positions = new Vector3[vertCount];
         var normals = new Vector3[vertCount];
         var uvs = new Vector2[vertCount];
 
-        for (int v = 0; v < vertCount; v++)
+        for (var v = 0; v < vertCount; v++)
         {
-            BudVertex bv = obj.Vertices[v];
+            var bv = obj.Vertices[v];
 
             // Handedness flip for ABSOLUTE world-space geometry: negate Z (world convention).
             // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) -> (x, y, -z).
@@ -140,28 +141,47 @@ public static class BudMeshBuilder
             uvs[v] = new Vector2(bv.UvU, bv.UvV);
         }
 
-        // Build index array — on-disk order copied as-is (no winding swap).
+        // Build index array — swap indices 1 and 2 per triangle to correct winding after the Z-flip.
         //
-        // The triangle winding (CW vs CCW on disk) is NOT independently re-verified here, so the
-        // material below is rendered DOUBLE-SIDED (CullMode.Disabled): faces are visible from
-        // either side regardless of winding. Lighting uses the explicit per-vertex normals (which
-        // are negated on Z to match the positions), not face winding, so building shading is
-        // correct either way. spec: Docs/RE/formats/terrain_scene.md §Index array — u16 triangle
-        // list (winding convention not yet sample-confirmed; double-sided material is the safety net).
-        int triCount = obj.Indices.Length / 3;
+        // The spec confirms CCW winding for front faces (terrain_scene.md §3.2.4 "CONFIRMED CCW").
+        // In legacy D3D9 (left-handed), CCW is front-facing; Godot (right-handed) also treats CCW
+        // as front-facing. HOWEVER, negating Z (the world handedness flip applied to positions and
+        // normals) inverts the triangle winding: a CCW legacy triangle becomes CW in Godot.
+        //
+        // Without a winding correction the "front" and "back" faces swap. With CullMode.Disabled
+        // the geometry still renders from both sides, but Godot's Forward Plus renderer computes the
+        // geometric face normal from the winding for shading (normal-map, shadow, deferred G-buffer
+        // face direction checks). If the geometric face normal is inverted relative to the stored
+        // vertex normal, per-pixel shading on top faces (normals pointing +Y) can produce near-zero
+        // irradiance for a sun coming from above (the geometric normal shadow test fires negatively
+        // for the "back" winding). This causes top/roof faces to render near-black even though
+        // CullMode.Disabled keeps them geometrically visible.
+        //
+        // FIX: swap the two latter indices of each triangle (indices[1] ↔ indices[2]) to re-invert
+        // the winding back to CCW in Godot space. This realigns the geometric face normal with the
+        // stored per-vertex normal and restores correct irradiance on top faces.
+        //
+        // spec: Docs/RE/formats/terrain_scene.md §Index array — "CONFIRMED counter-clockwise (CCW)
+        //   for front faces." §Vertex record — Z negation (world convention, port-side): CONFIRMED.
+        // spec: Helpers/WorldCoordinates.ToGodot — (x, y, z) → (x, y, -z): CONFIRMED.
+        var triCount = obj.Indices.Length / 3;
         var indices = new int[triCount * 3];
-        for (int t = 0; t < triCount; t++)
+        for (var t = 0; t < triCount; t++)
         {
-            int src = t * 3;
-            int dst = t * 3;
-            // No swap: on-disk CCW is Godot CCW — copy directly.
+            var src = t * 3;
+            var dst = t * 3;
+            // Swap indices 1 and 2 to correct CCW winding after the Z-flip.
+            // Before flip-Z: CCW in legacy (D3D9 left-handed) = front face.
+            // After flip-Z:  CCW becomes CW in Godot (right-handed) = back face.
+            // Swap re-establishes CCW = front face in Godot space.
+            // spec: terrain_scene.md §3.2.4 — CCW front faces; WorldCoordinates — negate Z. CONFIRMED.
             indices[dst + 0] = obj.Indices[src + 0];
-            indices[dst + 1] = obj.Indices[src + 1];
-            indices[dst + 2] = obj.Indices[src + 2];
+            indices[dst + 1] = obj.Indices[src + 2]; // swap: was [1]
+            indices[dst + 2] = obj.Indices[src + 1]; // swap: was [2]
         }
 
         // Assemble ArrayMesh.
-        var arrays = new global::Godot.Collections.Array();
+        var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = positions;
         arrays[(int)Mesh.ArrayType.Normal] = normals;
@@ -198,13 +218,12 @@ public static class BudMeshBuilder
         mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled; // double-sided — thin arch. surfaces
         mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
 
-        bool hasTexture = false;
+        var hasTexture = false;
 
         if (textureResolver is not null)
-        {
             try
             {
-                ImageTexture? tex = textureResolver(obj.TexId);
+                var tex = textureResolver(obj.TexId);
                 if (tex is not null)
                 {
                     mat.AlbedoTexture = tex;
@@ -215,16 +234,15 @@ public static class BudMeshBuilder
             {
                 GD.PrintErr($"[BudMeshBuilder] textureResolver threw for tex_id={obj.TexId}: {ex.Message}");
             }
-        }
 
         if (!hasTexture)
         {
             // Neutral grey placeholder: visible under dynamic lighting.
             // Add a small emission so it never goes near-black at grazing light angles.
             // Emission value is empirical (visual safety net, not a spec constant).
-            mat.AlbedoColor = new Color(0.6f, 0.6f, 0.6f, 1f);
+            mat.AlbedoColor = new Color(0.6f, 0.6f, 0.6f);
             mat.EmissionEnabled = true;
-            mat.Emission = new Color(0.15f, 0.15f, 0.15f, 1f); // empirical: modest floor, ~0.25 effective
+            mat.Emission = new Color(0.15f, 0.15f, 0.15f); // empirical: modest floor, ~0.25 effective
         }
 
         mesh.SurfaceSetMaterial(0, mat);
@@ -232,7 +250,7 @@ public static class BudMeshBuilder
         return new MeshInstance3D
         {
             Mesh = mesh,
-            Name = $"BudObject_{objIndex}_tex{obj.TexId}",
+            Name = $"BudObject_{objIndex}_tex{obj.TexId}"
         };
     }
 }

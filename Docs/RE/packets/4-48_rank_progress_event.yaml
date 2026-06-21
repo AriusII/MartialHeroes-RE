@@ -1,0 +1,68 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 236-byte (0xEC) body, the two routing
+#                 bytes (route @+0x08, sub-select @+0x09), and the record array (base +0x0C, stride 28,
+#                 count 8) are control-flow-confirmed; 12 + 8*28 = 236 EXACT -- NO overrun; every VALUE
+#                 meaning is capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. A prior reading flagged an [UNVERIFIED] 12-byte overrun (records starting at
+#              body+24 -> 8*28 ending at +248). The binary refutes it: the consumer forwards block+12 to
+#              the record walker, the record base is +0x0C, stride 28, count 8, so the array spans
+#              +0x0C..+0xEC = 12 + 224 = 236 EXACTLY. There is NO overrun -- the prior reading
+#              double-counted the 12-byte header. BINARY WINS.
+
+name: SmsgRankProgressEvent
+opcode: 0x40030           # major 4 (Response), minor 48 -> (4 << 16) | 48
+direction: S2C
+size: 236                # fixed 236-byte payload block (0xEC) = 12-byte header + 8 x 28-byte records
+spec: packets/4-48_rank_progress_event.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a rank-progress event panel. A fixed 236-byte block: a 12-byte header (a route byte
+  @+0x08 and a sub-select byte @+0x09) then an array of 8 interleaved 28-byte records, each carrying an
+  id key, an 18-byte CP949 name, and two i16 numbers. The record array (base +0x0C, stride 28, count 8)
+  fills the block EXACTLY: 12 + 8 x 28 = 236.
+
+# Wire order, offset 0 = first payload byte. Pack=1. The record array is modelled as a fixed bytes[N]
+# blob; the engineer slices it into 8 entries of the 28-byte stride. Widths sum to size: 236.
+fields:
+  - { name: HeaderPad0,  type: "bytes[8]" }     # +0x00  leading header region before the route bytes
+  - { name: RouteByte,   type: u8 }             # +0x08  route / branch byte; non-zero -> detail path
+  - { name: SubSelect,   type: u8 }             # +0x09  sub-select byte (0 / 1) -> picks a UI list entry
+  - { name: ReservedA,   type: "bytes[2]" }     # +0x0a  filler to the record array base (+0x0C)
+  - { name: RecordArray, type: "bytes[224]" }   # +0x0c  record array: 8 x 28-byte record (see per-record table); ends exactly at +0xEC
+  # widths: 8 + 1 + 1 + 2 + 224 = 236 (record array base +0x0C; 8 x 28 = 224; +0x0C + 224 = +0xEC = 236).
+
+# PER-RECORD layout (28-byte stride; offsets RECORD-RELATIVE to each record base):
+#   +0  (4B)  u32   presence/id key  (zero => empty slot -> blank labels)
+#   +4  (18B) char  CP949 name string
+#   +22 (2B)  i16   numeric field A
+#   +24 (2B)  i16   numeric field B
+#   (record total = 28 bytes)
+
+notes: |
+  CONTROL-FLOW CONFIRMED: routing + fixed 236-byte (0xEC) size + the two routing bytes (route @+0x08,
+  sub-select @+0x09) + the record array (base +0x0C, stride 28, count 8). CAPTURE-UNVERIFIED for VALUE
+  meanings.
+
+  THE +0x0C RECORD BASE (corrected): the panel record parser is handed the body at +0x0C, and the
+  record walk reads from +0x0C with a 28-byte stride for exactly 8 records, ending at +0xEC (236). The
+  first 12 bytes are the header consumed by the routing layer (route @+0x08, sub-select @+0x09). 12 +
+  8*28 = 236 -- the block closes exactly, with NO overrun.
+
+  PER-RECORD (28-byte stride, record-relative):
+    +0  (4B)  presence/id key : zero marks an empty slot (the panel blanks that row's labels).
+    +4  (18B) CP949 name      : a name string (18 bytes inside the 28-byte record).
+    +22 (2B)  i16 numeric A    : passed to a numeric formatter.
+    +24 (2B)  i16 numeric B    : passed to a second numeric formatter.
+
+  UNKNOWNS to resolve with a 4/48 capture:
+    - the route / sub-select byte meanings;
+    - the per-record numeric field meanings (rank value vs progress vs threshold).
+
+  UNBLOCKS: the Client.Application rank-progress event handler (4/48).

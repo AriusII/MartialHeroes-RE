@@ -1,16 +1,17 @@
 ---
 name: ida-explore
-description: Use to NAVIGATE and TRIAGE the legacy Martial Heroes client (Main.exe / doida.exe) in IDA before deep-reading any single function — four modes in one skill. XREF mode maps every cross-reference to a string/global/constant/function ("who reaches this"); CALLGRAPH mode builds a bounded callers+callees graph around a target ("how this function sits in its subsystem"); DATA-FLOW mode traces a value forward/backward from an instruction ("where does this recv buffer go / what feeds this length field"); BATCH mode profiles a whole candidate subsystem of related functions and emits a per-function role summary. Drives the typed mcp__ida__* navigation tools (xref_query/xrefs_to/callgraph/callees/trace_data_flow/analyze_batch), falling back to bundled IDAPython snippets, and writes neutral maps to Docs/RE/_dirty/. The fast way to find the few functions worth reading closely.
+description: Use to NAVIGATE and TRIAGE the legacy Martial Heroes client (Main.exe / doida.exe) in IDA before AND including the deep read of a single function — five modes in one skill. XREF mode maps every cross-reference to a string/global/constant/function ("who reaches this"); CALLGRAPH mode builds a bounded callers+callees graph around a target ("how this function sits in its subsystem"); DATA-FLOW mode traces a value forward/backward from an instruction ("where does this recv buffer go / what feeds this length field"); BATCH mode profiles a whole candidate subsystem of related functions and emits a per-function role summary; DECOMPILE-ONE mode exports exactly ONE function's raw Hex-Rays pseudo-C plus its callers/callees into the dirty quarantine for an analyst to describe in neutral prose. Drives the typed mcp__ida__* navigation/decompile tools (xref_query/xrefs_to/callgraph/callees/trace_data_flow/analyze_batch/decompile), falling back to bundled IDAPython snippets, and writes neutral maps (and dirty pseudo-C, DECOMPILE-ONE only) to Docs/RE/_dirty/. The fast way to find the few functions worth reading closely — then to read one of them.
 allowed-tools: mcp__ida__* Read Write
 model: sonnet
 effort: high
 ---
 
-# ida-explore — navigate & triage the legacy client before a deep read
+# ida-explore — navigate & triage the legacy client, then deep-read one function
 
-One skill, four navigation modes. Each turns a recognizable anchor (a string, a global, a
-constant, a function, an observed value, a function cluster) into the **small set of functions
-worth reading closely** — so you never decompile twenty functions to find the three that matter.
+One skill, five modes. Modes A–D turn a recognizable anchor (a string, a global, a constant, a
+function, an observed value, a function cluster) into the **small set of functions worth reading
+closely** — so you never decompile twenty functions to find the three that matter. Mode E
+(DECOMPILE-ONE) then **reads exactly one** of those functions into the quarantine.
 
 | Mode | Question it answers | Anchor | Bundled snippet | Dirty dir |
 |---|---|---|---|---|
@@ -18,9 +19,13 @@ worth reading closely** — so you never decompile twenty functions to find the 
 | **CALLGRAPH** | "how does this function sit in its subsystem?" | one function | `callgraph_map.py` | `_dirty/static/` |
 | **DATA-FLOW** | "where does this value go / what feeds it?" | instruction + operand/reg | `data_flow.py` | `_dirty/static/` |
 | **BATCH** | "what does this cluster of functions do?" | a set/range of functions | `batch_analyze.py` (+ `profile_all*.py` sweeps) | `_dirty/static/` |
+| **DECOMPILE-ONE** | "what does THIS one function actually do?" | one function | `decompile_one.py` | `_dirty/functions/` |
 
 All output is **dirty** — addresses derived directly from the copyrighted binary — and lands only
 under `Docs/RE/_dirty/`. Nothing here is committed; promotion to clean specs is a separate step.
+**DECOMPILE-ONE is the only mode that emits verbatim pseudo-C** (the others emit structure only):
+its `_dirty/functions/<name>.dirty.md` is the most contaminated artifact this skill produces — read,
+never transcribed, and never echoed into a reply.
 
 **Ground truth:** every edge, xref, flow step, and metric is read FROM the IDA query — never from
 memory, analogy, or a guess at "how a subsystem is usually wired." A static map is a *hypothesis*
@@ -138,7 +143,7 @@ matter.
    record parser", "dispatch fan-out", "leaf math helper") — explicitly hypotheses to confirm.
 4. **Save** to `Docs/RE/_dirty/static/batch.<label>.md` (metrics table + per-function evidence/role).
    In your reply, rank the 1–3 most worth a deep read and point the next analyst at them
-   (`ida-decompile-export` to read, Mode C to trace, or a specialist analyst).
+   (Mode E / DECOMPILE-ONE to read, Mode C to trace, or a specialist analyst).
 
 **Decide:** a set **> ~30 functions** → split into batches; a sweep over hundreds dilutes guesses and
 risks dumping the binary. A function with **recv/cipher/opcode** import evidence → flag as the
@@ -147,35 +152,84 @@ the candidate set to `ida-debugger-drive` for a breakpoint census. **Under an or
 **massively in parallel** — no `~3` sub-wave cap; IDB writes may run in parallel too (retry any
 failed/conflicting call).
 
+## Mode E — DECOMPILE-ONE (read exactly one function into the quarantine)
+
+Once A–D have isolated the 1–3 functions that matter, read **one** of them: export its raw Hex-Rays
+pseudo-C plus callers/callees/local types to `_dirty/functions/<name>.dirty.md` for a spec-author to
+**describe in neutral prose** (never transcribe). This is the static-hypothesis half of clean-room
+RE; the live `?ext=dbg` debugger confirms the layout before any spec asserts it.
+
+> [!IMPORTANT]
+> **The DECOMPILE-ONE artifact is CONTAMINATED** — verbatim copyright-tainted decompiler pseudo-C.
+> It may live ONLY under `Docs/RE/_dirty/functions/`. NEVER commit it, paste it into C#, copy it into
+> `Docs/RE/specs|packets|formats|structs|opcodes.md`, or echo any token of it into a reply. The only
+> thing that crosses the firewall is a from-scratch neutral note a spec-author authors separately.
+
+1. **Pick the target** — a canonical name from `Docs/RE/names.yaml` (prefer it; it survives rebases)
+   or an address `0x…`. If the name is not yet applied to the DB, fall back to the address. **One
+   function per invocation** — to map a call tree, re-run per discovered callee from Mode B.
+2. **Run the export.**
+   - **Typed (preferred for the body):** if `mcp__ida__decompile` / `decompile_function` exists, use
+     it for the pseudo-C, but still gather xrefs + the SHA-256 (run the snippet, or `xrefs_to` /
+     `callees`) — the dirty file needs callers, callees, and the build tag.
+   - **Snippet:** read `${CLAUDE_SKILL_DIR}/scripts/decompile_one.py`, set `TARGET` (name in quotes,
+     or address as an int literal `0x004A1230`), run via the exec tool. It resolves the target,
+     decompiles, collects xrefs to/from with names, captures prototype + local-var types, computes the
+     input SHA-256, and prints one `DECOMP_JSON:` line. Capture that line.
+3. **Write the dirty file.** Parse the JSON; create `Docs/RE/_dirty/functions/` if absent; write
+   `<name>.dirty.md` (`<name>` = canonical name, else `sub_<addr>`). It MUST begin with this banner
+   verbatim, then the content:
+
+   ```
+   > DIRTY — verbatim Hex-Rays pseudo-C from the legacy client (sha256 <full-sha>). COPYRIGHT-TAINTED.
+   > Never commit. Never copy into C# or into Docs/RE/specs|packets|formats|structs|opcodes.md.
+   > A spec-author must REWRITE behavior in neutral prose; this file is read-only reference.
+   ```
+
+   Then sections: `## Target` (name + address + prototype), `## Callers (xrefs to)`,
+   `## Callees (xrefs from)`, `## Local types`, and a fenced ```` ```c ```` block with the raw body.
+4. **Report** — resolved address, caller/callee counts, the SHA-256, and the dirty path; remind that
+   promotion needs a fresh neutral note by a spec-author. **No pseudo-C in the reply, only counts.**
+
+**Decide:** a body heavy on `*(_DWORD*)(this + N)` field accesses → shape is best confirmed live; flag
+it for `ida-debugger-drive` (`dbg_add_bp` at the EA, then `dbg_gpregs` / `dbg_read`; never `dbg_start`).
+**Garbled decompilation** (bad stack analysis, missing/wrong inferred prototype) → fix the
+prototype/struct first (or fall back to disassembly); never transcribe garbled pseudo-C as fact.
+
 ## Verify / Done when
 
 - The mode's artifact exists under the right `_dirty/` dir (`queries/` for XREF; `static/` for
-  CALLGRAPH / DATA-FLOW / BATCH) with the expected shape (xref table / edge+node summary / step chain
-  / metrics table).
+  CALLGRAPH / DATA-FLOW / BATCH; `functions/` for DECOMPILE-ONE) with the expected shape (xref table /
+  edge+node summary / step chain / metrics table / banner+four-sections+fenced pseudo-C).
 - Every entry carries an EA and the mode's tag (reference-kind / in-out degree / boundary / role).
 - The walk/sweep stayed **bounded**; ambiguity is reported as ambiguous, never silently resolved.
-- The reply names the primary consumer / entry point / chain-implication / 1–3 deep-read targets, and
-  points at the next skill.
+  DECOMPILE-ONE exported **exactly one** function and its file leads with the verbatim DIRTY banner;
+  the JSON resolved a real address (not 0) and the SHA-256 matches the pinned build.
+- The reply names the primary consumer / entry point / chain-implication / 1–3 deep-read targets (or,
+  for DECOMPILE-ONE, the resolved address + caller/callee counts + SHA + path), and points at the next
+  skill — and contains **no** pseudo-C, only counts and the path.
 - No address or `sub_`/`loc_` symbol leaked outside `_dirty/`.
 
 ## Pitfalls (never)
 
-- Never invent an xref, edge, flow step, or metric — a partial/failed call is reported as partial, not guessed.
-- Never paste a function body or disassembly — every mode produces structure (xrefs / edges / a step chain / metrics), not pseudo-C. Reading a node closely is `ida-decompile-export`'s job.
+- Never invent an xref, edge, flow step, metric, or pseudo-C line — a partial/failed call is reported as partial, not guessed.
+- In modes A–D never paste a function body or disassembly — they produce structure (xrefs / edges / a step chain / metrics), not pseudo-C. Only **DECOMPILE-ONE** writes pseudo-C, and only into `_dirty/functions/` — never into a reply or any other file.
+- Never bulk-dump a call tree with DECOMPILE-ONE — one function per invocation; re-run per discovered callee. A mass dump is both contaminating and unreviewable.
 - Never emit an **unbounded** graph or sweep — always cap depth/nodes/range.
 - Never extend the intra-function data-flow snippet to fake cross-function flow.
-- Never treat a static fan-in / virtual edge / role guess as the runtime truth — confirm in the debugger when it matters.
+- Never treat a static fan-in / virtual edge / role guess / inferred prototype as the runtime truth — confirm in the debugger when it matters.
 
 *North star N1: turns a marker, a function, a value, or a cluster into the exact few functions worth reading — the entry to every static-hypothesis pass the debugger then confirms.*
 
 ## Hard rules
 
-- Output goes ONLY to `Docs/RE/_dirty/queries/` (XREF) or `Docs/RE/_dirty/static/` (CALLGRAPH /
-  DATA-FLOW / BATCH). Never write to a committed RE spec, `names.yaml`, `journal.md`, or any `0X.*`
-  source folder / `.cs` / `.csproj` / `.slnx`.
-- **Never decompile-to-C#** and never paste Hex-Rays pseudo-C into a reply or any file. These modes
-  map *which* functions / *how* they connect / *where* a value goes / *what* a cluster does — not
-  their bodies.
+- Output goes ONLY to `Docs/RE/_dirty/queries/` (XREF), `Docs/RE/_dirty/static/` (CALLGRAPH /
+  DATA-FLOW / BATCH), or `Docs/RE/_dirty/functions/` (DECOMPILE-ONE). Never write to a committed RE
+  spec, `names.yaml`, `journal.md`, or any `0X.*` source folder / `.cs` / `.csproj` / `.slnx`.
+- **Never decompile-to-C#** and never paste Hex-Rays pseudo-C into a reply. Modes A–D map *which*
+  functions / *how* they connect / *where* a value goes / *what* a cluster does — not their bodies;
+  DECOMPILE-ONE captures one body, but ONLY into a `_dirty/functions/` file an analyst reads — its
+  promotion is a separate, deliberate clean-room rewrite by a spec-author, never done from this skill.
 - Addresses appear only inside `_dirty/`. In replies, prefer canonical names + counts/role labels;
   use a bare address only when no name exists. Resolve `sub_…` names to *proposed* canonical names for
   `ida-annotate`'s names-sync mode; never rename here.

@@ -19,25 +19,26 @@
 // spec: Docs/RE/formats/misc_data.md §1.6 (buff bar render model — 30 slots, cell sizes, atlas binding).
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Adapters;
 
 /// <summary>
-/// Singleton-style facade (created once by the HUD or ClientContext) that resolves buff icon
-/// <see cref="AtlasTexture"/> slices from the shared stateicon.dds atlas.
-///
-/// <para><b>Atlas model</b></para>
-/// One shared 512×512 DXT2 atlas (<c>data/ui/skillicon/stateicon.dds</c>) serves every buff
-/// and state. The per-buff <c>(atlas_x, atlas_y)</c> pixel origin is read from
-/// <c>data/script/buff_icon_position.xdb</c>. Cell size is class-dependent:
-/// ≤80 → 23×23 px; &gt;80 → 25×25 px.
-/// spec: Docs/RE/formats/misc_data.md §1.3 CODE-CONFIRMED; §1.6 CODE-CONFIRMED.
-///
-/// <para><b>Offline mode</b></para>
-/// All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
+///     Singleton-style facade (created once by the HUD or ClientContext) that resolves buff icon
+///     <see cref="AtlasTexture" /> slices from the shared stateicon.dds atlas.
+///     <para>
+///         <b>Atlas model</b>
+///     </para>
+///     One shared 512×512 DXT2 atlas (<c>data/ui/skillicon/stateicon.dds</c>) serves every buff
+///     and state. The per-buff <c>(atlas_x, atlas_y)</c> pixel origin is read from
+///     <c>data/script/buff_icon_position.xdb</c>. Cell size is class-dependent:
+///     ≤80 → 23×23 px; &gt;80 → 25×25 px.
+///     spec: Docs/RE/formats/misc_data.md §1.3 CODE-CONFIRMED; §1.6 CODE-CONFIRMED.
+///     <para>
+///         <b>Offline mode</b>
+///     </para>
+///     All methods return null when VFS is unavailable. Callers keep their existing placeholder look.
 /// </summary>
 public sealed class BuffIconCatalog : IDisposable
 {
@@ -75,26 +76,26 @@ public sealed class BuffIconCatalog : IDisposable
 
     private readonly RealClientAssets? _assets;
 
-    // Lazy-loaded position table (buff_id → BuffIconPositionRecord).
-    private BuffIconPositionTable? _table;
-    private bool _tableAttempted;
+    // Per-buffId AtlasTexture cache (null cached = "tried and failed or absent").
+    private readonly Dictionary<uint, AtlasTexture?> _cache = new();
+    private bool _atlasAttempted;
 
     // Lazy-loaded stateicon.dds full-sheet texture.
     private ImageTexture? _atlasTexture;
-    private bool _atlasAttempted;
-
-    // Per-buffId AtlasTexture cache (null cached = "tried and failed or absent").
-    private readonly Dictionary<uint, AtlasTexture?> _cache = new();
 
     private bool _disposed;
+
+    // Lazy-loaded position table (buff_id → BuffIconPositionRecord).
+    private BuffIconPositionTable? _table;
+    private bool _tableAttempted;
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Construction
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a catalog backed by the supplied VFS assets handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; all methods return null.
+    ///     Creates a catalog backed by the supplied VFS assets handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; all methods return null.
     /// </summary>
     public BuffIconCatalog(RealClientAssets? assets)
     {
@@ -108,40 +109,53 @@ public sealed class BuffIconCatalog : IDisposable
     /// <summary>Number of entries in the loaded position table, or 0 when offline / unloaded.</summary>
     public int TableCount => EnsureTable()?.Records.Count ?? 0;
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  IDisposable
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        _cache.Clear();
+        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
+        // _assets is owned by the caller; we do not dispose it here.
+    }
+
     /// <summary>
-    /// Returns an <see cref="AtlasTexture"/> for the buff with the given <paramref name="buffId"/>.
-    ///
-    /// <para>Resolution chain:</para>
-    /// <list type="number">
-    ///   <item>Look up <paramref name="buffId"/> in <c>buff_icon_position.xdb</c> for <c>(atlas_x, atlas_y)</c>.</item>
-    ///   <item>Select cell size: buffId ≤ 80 → 23×23; &gt;80 → 25×25.</item>
-    ///   <item>Build <see cref="AtlasTexture"/> with <c>Region = Rect2(atlas_x, atlas_y, cellSize, cellSize)</c>.</item>
-    /// </list>
-    ///
-    /// Returns <see langword="null"/> when the VFS is offline, the id is absent from the table,
-    /// or the atlas cannot be loaded.
-    ///
-    /// spec: Docs/RE/formats/misc_data.md §1.3 — "(atlas_x, atlas_y) are raw stored pixel values,
-    ///       never inferred from a formula": CODE-CONFIRMED.
-    /// spec: Docs/RE/formats/misc_data.md §1.6 — cell size selection (23 or 25): CODE-CONFIRMED.
+    ///     Returns an <see cref="AtlasTexture" /> for the buff with the given <paramref name="buffId" />.
+    ///     <para>Resolution chain:</para>
+    ///     <list type="number">
+    ///         <item>Look up <paramref name="buffId" /> in <c>buff_icon_position.xdb</c> for <c>(atlas_x, atlas_y)</c>.</item>
+    ///         <item>Select cell size: buffId ≤ 80 → 23×23; &gt;80 → 25×25.</item>
+    ///         <item>Build <see cref="AtlasTexture" /> with <c>Region = Rect2(atlas_x, atlas_y, cellSize, cellSize)</c>.</item>
+    ///     </list>
+    ///     Returns <see langword="null" /> when the VFS is offline, the id is absent from the table,
+    ///     or the atlas cannot be loaded.
+    ///     spec: Docs/RE/formats/misc_data.md §1.3 — "(atlas_x, atlas_y) are raw stored pixel values,
+    ///     never inferred from a formula": CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/misc_data.md §1.6 — cell size selection (23 or 25): CODE-CONFIRMED.
     /// </summary>
     public AtlasTexture? GetIcon(ushort buffId)
     {
         uint key = buffId;
-        if (_cache.TryGetValue(key, out AtlasTexture? cached))
+        if (_cache.TryGetValue(key, out var cached))
             return cached;
 
-        AtlasTexture? icon = BuildIcon(buffId);
+        var icon = BuildIcon(buffId);
         _cache[key] = icon;
         return icon;
     }
 
     /// <summary>
-    /// Returns the cell size (23 or 25) for the given <paramref name="buffId"/>.
-    /// spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.
+    ///     Returns the cell size (23 or 25) for the given <paramref name="buffId" />.
+    ///     spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.
     /// </summary>
-    public static int CellSizeForId(ushort buffId) =>
-        buffId <= BuffStateBoundary ? BuffCellSize : StateCellSize; // spec: misc_data.md §1.6
+    public static int CellSizeForId(ushort buffId)
+    {
+        return buffId <= BuffStateBoundary ? BuffCellSize : StateCellSize;
+        // spec: misc_data.md §1.6
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     //  Internal build
@@ -149,23 +163,23 @@ public sealed class BuffIconCatalog : IDisposable
 
     private AtlasTexture? BuildIcon(ushort buffId)
     {
-        BuffIconPositionTable? table = EnsureTable();
+        var table = EnsureTable();
         if (table is null) return null;
 
         // TryGetById uses uint key per the BuffIconPositionTable API.
-        BuffIconPositionRecord? rec = table.TryGetById(buffId);
+        var rec = table.TryGetById(buffId);
         if (rec is null) return null;
 
-        int atlasX = rec.AtlasX;
-        int atlasY = rec.AtlasY;
+        var atlasX = rec.AtlasX;
+        var atlasY = rec.AtlasY;
 
         // Negative coordinates indicate no icon (some entries are sentinel padding).
         if (atlasX < 0 || atlasY < 0) return null;
 
-        ImageTexture? atlas = EnsureAtlas();
+        var atlas = EnsureAtlas();
         if (atlas is null) return null;
 
-        int cellSize = CellSizeForId(buffId); // spec: Docs/RE/formats/misc_data.md §1.6
+        var cellSize = CellSizeForId(buffId); // spec: Docs/RE/formats/misc_data.md §1.6
 
         // Bounds-check against 512×512 atlas.
         // spec: Docs/RE/formats/misc_data.md §1.3 — "512×512 DXT2".
@@ -176,7 +190,7 @@ public sealed class BuffIconCatalog : IDisposable
             Atlas = atlas,
             // spec: Docs/RE/formats/misc_data.md §1.3 — "(atlas_x, atlas_y) are raw stored pixel values": CODE-CONFIRMED.
             Region = new Rect2(atlasX, atlasY, cellSize, cellSize),
-            FilterClip = true,
+            FilterClip = true
         };
     }
 
@@ -193,7 +207,7 @@ public sealed class BuffIconCatalog : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(BuffIconPositionXdbPath);
+            var raw = _assets.GetRaw(BuffIconPositionXdbPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[BuffIconCatalog] buff_icon_position.xdb absent from VFS — " +
@@ -227,14 +241,10 @@ public sealed class BuffIconCatalog : IDisposable
             //       exactly once and binds that single texture handle to all icon slots": CODE-CONFIRMED.
             _atlasTexture = _assets.LoadTexture(StateIconAtlasPath);
             if (_atlasTexture is not null)
-            {
                 GD.Print("[BuffIconCatalog] stateicon.dds loaded (512×512 DXT2 shared atlas). " +
                          "spec: Docs/RE/formats/misc_data.md §1.6 CODE-CONFIRMED.");
-            }
             else
-            {
                 GD.Print("[BuffIconCatalog] stateicon.dds loaded as null (format unsupported).");
-            }
         }
         catch (Exception ex)
         {
@@ -243,18 +253,5 @@ public sealed class BuffIconCatalog : IDisposable
         }
 
         return _atlasTexture;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    //  IDisposable
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        _cache.Clear();
-        // ImageTexture objects are reference-counted by Godot's GC — no manual free needed.
-        // _assets is owned by the caller; we do not dispose it here.
     }
 }

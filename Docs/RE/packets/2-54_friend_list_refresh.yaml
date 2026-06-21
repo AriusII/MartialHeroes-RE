@@ -7,7 +7,7 @@ opcode: 0x20036           # major 2 (GameAction), minor 54 -> (2 << 16) | 54
 direction: C2S
 size: 1                   # fixed 1-byte body built by the friend-list refresh sender
 spec: packets/2-54_friend_list_refresh.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client request to refresh the friend list / online-status. A 1-byte send raised by the friend window's refresh control. The send path is rate-limited client-side (a 3-minute throttle) so it cannot be spammed.

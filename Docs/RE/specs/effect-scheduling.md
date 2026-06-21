@@ -36,7 +36,7 @@ subsystems: [effects, combat, game_loop]
 >   DRAIN/dispatch consumer was not isolated this pass); *capture/debugger-pending* where a runtime
 >   witness is needed (the two death-FSM in-state clock reads' precise role; the per-kind particle
 >   colour/semantic labels).
-> - **ida_reverified:** 2026-06-16
+> - **ida_reverified:** 2026-06-20 (CYCLE 7 runtime trigger-dispatch spine added; prior 2026-06-16)
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the stated effect-list claims — the §3 "NOT a priority queue" model is
@@ -44,6 +44,14 @@ subsystems: [effects, combat, game_loop]
 >   queue IS a sorted tree** keyed by fire-time; it is a **distinct sibling mechanism** hosted on the
 >   effect manager, not a contradiction of the effect-list model. §3 is now scoped accordingly and
 >   §5A documents the tree.
+> - **CYCLE 7 (2026-06-20, IDB SHA 263bd994):** added §10 — the **runtime trigger-dispatch chain**
+>   (server effect packet → handler → spawn factory → descriptor resolve → first-tick particle build
+>   → insert into the **owner-actor list** at +0x240, or **self-destruct** when the effective lifetime
+>   is zero). Confirms the shared central per-frame tick is **vtable slot 1**, driving all pooled
+>   effects, and that the per-effect lifetime deadline = `spawn_arg + clock_ms` stored at effect
+>   **+0x40** — the same `now + delay` arm primitive as §4.1, on a different object offset. The pool
+>   family, the per-actor list, and the JointXEffect bone-attach detail are owned by `specs/effects.md`
+>   and are cross-referenced, not duplicated here.
 
 ---
 
@@ -61,6 +69,8 @@ subsystems: [effects, combat, game_loop]
 | Death/respawn FSM state graph + cycle-driven advance | HIGH |
 | Per-kind particle colour/semantic labels (impact vs blood vs decal) | MED |
 | Runtime now-ms equals the raw system millisecond timer (scale path dead) | CODE-CONFIRMED |
+| Trigger-dispatch chain: packet handler → spawn factory → descriptor resolve → first-tick build → owner-actor-list insert / zero-lifetime self-destruct (CYCLE 7, §10) | CODE-CONFIRMED |
+| Shared central per-frame tick = vtable slot 1; per-effect deadline = `spawn_arg + clock_ms` at effect +0x40 (CYCLE 7, §10) | CODE-CONFIRMED |
 
 ---
 
@@ -439,7 +449,80 @@ those two reads pace the death phase or merely seed a debounce is **MED** pendin
 
 ---
 
-## 9. Cross-references
+## 9. Runtime Trigger Dispatch — the spawn-to-list chain (CYCLE 7)
+
+**Confidence: CODE-CONFIRMED** (the trigger → spawn → first-tick → insert chain was traced; the
+DBG-pending residue is the pool capacities and the numeric bone-source values, both owned by
+`specs/effects.md`).
+
+This section adds the **runtime trigger dispatch** that precedes the deadline-arm primitive of §4 —
+i.e. *how a server event becomes an armed, listed effect*. It is the scheduling-side companion to
+the effect-system detail in `specs/effects.md` (pool family §4/§4B, per-actor list §5.2, trigger-site
+families §7.1, JointXEffect bone-attach §9.4); those are **cross-referenced, not restated** here.
+
+### 9.1 The trigger → spawn → ctor → insert chain
+
+A gameplay effect is **never** spawned by a direct "skill cast" call. The chain is:
+
+```
+server effect packet            (an S2C handler — attack/skill-impact, item-use, actor-state/buff,
+  ↓                              level-up, exp-gain, spawn, death, periodic game-state tick, …)
+spawn factory                   (called with the effect id taken FROM the packet)
+  ↓
+descriptor resolve              (sorted-map lower-bound lookup keyed by the raw effect id;
+  ↓                              lazy-loaded on first use; FIRST-WINS on a duplicate id.
+  ↓                              A miss clears the object's valid word → the factory destroys it
+  ↓                              back to the pool and the spawn is silently abandoned.)
+first-tick particle build       (builds the per-element particle resources; an element whose
+  ↓                              resource selector is ≥ 10000 bridges to the particle registry)
+insert OR self-destruct         (if the effective lifetime ≠ 0: APPEND the armed effect to the
+                                 OWNER ACTOR's doubly-linked effect list at actor offset +0x240;
+                                 if the lifetime == 0: self-destruct immediately — a zero-lifetime
+                                 one-shot is never listed.)
+```
+
+The owner-actor list (head at actor +0x240, allocator at +0x244) is the *per-actor* container that
+the per-frame tick spine (§2) walks — there is **no single global active pool**. The handler families,
+the pool family, and the per-actor list are documented in `specs/effects.md` (§7.1, §4B, §5.2).
+
+### 9.2 The shared central tick is vtable slot 1
+
+Every pooled effect is driven each frame by the **shared central tick/dispatch routine reached
+through vtable slot 1** of the effect object (slot 0 = destructor/cleanup, slot 2 = the type-specific
+update). The spine of §2 invokes this slot-1 tick per live instance against the **single per-frame
+now-ms** (§1); the slot-1 tick is the §4.2 elapsed-consumer (`elapsed = now − baseline`) for the
+descriptor-driven effect object. This confirms, from the trigger side, the §2/§4 model: one clock
+sample fanned out, an O(n) walk of unordered lists, deadline gates evaluated *inside* each element's
+tick.
+
+### 9.3 The per-effect lifetime deadline = `spawn_arg + clock_ms` at effect +0x40
+
+The spawn factory writes the effect's **lifetime deadline** as `lifetime_arg + clock_ms` (the
+caller's duration added to the now-ms captured at the spawn site) into the effect object at offset
+**+0x40**. This is the **same `now + delay` arm primitive** documented in §4.1 — only the object
+**offset differs** between the two effect-object layouts this subsystem uses:
+
+| Object | Deadline / baseline offset | Convention |
+|---|---|---|
+| Descriptor-driven timed effect (the spawn-and-arm factory of §4.3) | **+64 (0x40)** baseline = `now + delay` | §4.1 — elapsed origin, consumed as `elapsed = now − baseline` |
+| The XEffect-family pooled instance (this section's spawn factories) | **+0x40** lifetime = `spawn_arg + clock_ms` | same arm; expiry when `now > lifetime`, bypassed by the loop/persist flag |
+| Particle billboard element (§5) | **+48 (0x30)** absolute start-deadline | §5 — start gate then a hard 1-second life |
+
+`+64` (decimal) and `+0x40` (hex) are the **same offset**; the two §4 / §10 descriptions are the
+same arm primitive seen from the scheduling side and the trigger side. The loop/persist flag (effect
++0x3C, set from the setup argument) bypasses the lifetime-cap expiry so a looping effect (e.g. a
+cast-channel aura) lives until it is explicitly soft-stopped — see `specs/effects.md §15.4/§15.5`.
+
+### 9.4 DBG-pending residue (owned by `specs/effects.md`)
+
+The runtime witnesses this chain still needs — the six pool capacity counts, the emitter-registry
+record count, the descriptor lazy-load timing, and the numeric `bone_source` → bone-name mapping —
+are tracked in `specs/effects.md §14` (items 1, 2, 2b). They are runtime-only values; static code does
+not settle them.
+
+---
+
+## 10. Cross-references
 
 - Effect class hierarchy, pools, descriptor formats: `specs/effects.md`, `formats/effects.md`.
 - Combat outcome / damage flow: `specs/combat.md`.

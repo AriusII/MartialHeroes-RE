@@ -1,0 +1,73 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Role: the cash-shop / product (Goods) panel's item / PRODUCT process-confirm send.
+#
+# THIS IS THE LIVE, AUTHORITATIVE 2/153 SPEC. The competing CmsgPetSummon reading is REFUTED (binary
+# wins): there is exactly ONE builder that stamps (2,153) and exactly ONE payload shape (this fixed
+# 4-byte record); the four bytes are item-slot / occupancy / quantity selectors read from an inventory
+# item-process panel (MainWindow slot 205, via a panel button click and the MainWindow dispatcher's
+# case 87 menu route) — an item / product process-confirm, not a summon. The 60-second cooldown the pet
+# reading observed is real, but it is this send's per-commit throttle. packets/2-153_pet_summon.yaml is
+# now a tombstone redirecting here.
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size + 4x u8 shape + 60s post-send client cooldown: control-flow CONFIRMED
+#   per-byte VALUE meanings + reply opcode: capture/debugger-pending. capture_verified: false.
+
+name: CmsgProductConfirm
+opcode: 0x20099           # major 2 (GameAction), minor 153 (0x99) -> (2 << 16) | 153
+direction: C2S
+size: 4                   # FIXED 4-byte body: four distinct u8 selection bytes
+spec: packets/2-153_product_confirm.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  The cash-shop / product ("Goods") panel's purchase-CONFIRM send. A fixed 4-byte body of four distinct
+  selection bytes (two id bytes, a checkbox/state byte, and a quantity/page index). The confirm routine
+  arms a 60-second client-side cooldown after sending (the anti-double-purchase guard). This is the
+  second step of the two-step product flow: 2/151 (1-byte command) opens/drives the Goods panel; this
+  2/153 confirms a specific purchase.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the four byte widths sum to size: 4.
+# CONTROL-FLOW CONFIRMED: the builder takes four distinct char args and writes them as four bytes, then
+# blits 4 bytes. Each byte's SOURCE is caller-resolved; each byte's MEANING is capture-pending.
+fields:
+  - { name: SelectA,  type: u8 }   # 0x00  selection byte A (product slot / tab) [meaning capture/debugger-pending]
+  - { name: SelectB,  type: u8 }   # 0x01  selection byte B (product slot / tab) [meaning capture/debugger-pending]
+  - { name: Checkbox, type: u8 }   # 0x02  a sub-widget on/off (pressed/checked state) [meaning capture/debugger-pending]
+  - { name: Quantity, type: u8 }   # 0x03  quantity / page index; -1 default or a derived index [meaning capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (4 bytes) and the four-u8 shape; the per-byte VALUE meanings are
+  capture/debugger-pending. The confirm routine reads the user's current selection and sends the four
+  bytes; immediately after sending it stamps a 60-second client-side cooldown timestamp (the classic
+  anti-double-purchase rate limit).
+
+    0x00 (1B) SelectA  : selection byte A (a product slot / tab id; caller-resolved). [pending]
+    0x01 (1B) SelectB  : selection byte B (a product slot / tab id; caller-resolved). [pending]
+    0x02 (1B) Checkbox : a sub-widget on/off state (a UI control's pressed/checked flag). [pending]
+    0x03 (1B) Quantity : a quantity / page index; the caller passes either a default sentinel or a
+                         derived index value. [pending]
+
+  TWO-STEP PRODUCT FLOW (load-bearing): 2/151 CmsgProductBuy (1-byte selector) interacts with the
+  storefront / Goods panel; this 2/153 (4 bytes) is the actual purchase confirm, rate-limited to once
+  per 60 seconds by a client-stamped cooldown. Both belong to the Goods / cash-shop panel.
+
+  CLIENT-SIDE GATE (informational, not wire fields): a modal-busy guard before send; a 60-second
+  client cooldown stamped after send.
+
+  EXPECTED S2C REPLY [capture/debugger-pending]: the builder stamps no reply opcode and installs no
+  await, so the answering minor cannot be settled statically. The best-evidenced hypothesis, given the
+  item-process UI path, is the item/product-result family 4/113 SmsgItemShopPurchaseResult /
+  4/114 SmsgCashShopActionResult / 4/115 SmsgItemShopBalanceUpdate. The product-list / money refresh
+  side rides S2C 3/8 SmsgShopPageUpdate (per the 2/151 pair).
+
+  CROSS-REF: 2/151 CmsgProductBuy (packets/2-151_product_buy.yaml) is the 1-byte open/refresh + confirm
+  command on the same Goods panel. packets/2-153_pet_summon.yaml is a tombstone redirecting here (the
+  CmsgPetSummon reading of this minor is refuted).
+
+  UNKNOWNS (capture-pending): the per-byte meanings (SelectA/SelectB/Checkbox/Quantity); the exact S2C
+  reply (4/113/4/114/4/115 is the working hypothesis).
+
+  UNBLOCKS: the Client.Application cash-shop / item process-confirm use-case (a fixed 4-byte send + a
+  60s client cooldown).

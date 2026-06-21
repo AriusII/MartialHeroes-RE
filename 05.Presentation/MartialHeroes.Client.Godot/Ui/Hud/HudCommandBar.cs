@@ -51,16 +51,15 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game bottom command bar (DefaultMenu, slot 148).
-///
-/// <para>Persistent strip anchored to the screen bottom. Each button fires a
-/// <see cref="HudMaster"/> toggle method, making the HUD fully mouse-navigable
-/// (complements the §8.17 keyboard dispatch).</para>
-///
-/// <para>PASSIVE: zero game logic. Entry clicks emit HudMaster toggle intents.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148.
+///     In-game bottom command bar (DefaultMenu, slot 148).
+///     <para>
+///         Persistent strip anchored to the screen bottom. Each button fires a
+///         <see cref="HudMaster" /> toggle method, making the HUD fully mouse-navigable
+///         (complements the §8.17 keyboard dispatch).
+///     </para>
+///     <para>PASSIVE: zero game logic. Entry clicks emit HudMaster toggle intents.</para>
+///     spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148.
 /// </summary>
 public sealed partial class HudCommandBar : Control
 {
@@ -76,6 +75,12 @@ public sealed partial class HudCommandBar : Control
     private const float QuickBtnSize = 21f; // spec: §8.23.1 — quick-slot buttons 21×21
     private const float QuickBtnY = 14f; // spec: §8.23.1 — quick-slot buttons at y=14
 
+    // msg.xdb caption ids (CODE-CONFIRMED)
+    // spec: Docs/RE/specs/ui_system.md §8.23.5 CODE-CONFIRMED
+    private const int MsgChatBusy = 10082; // spec: §8.23.5 — action 4007 chat-busy notice
+    private const int MsgProductUnavailable = 45003; // spec: §8.23.5 — action 4013 ProductPanel-unavailable
+    private const int MsgNumberFormat = 2222; // spec: §8.23.5 — expanded-bar number-format template
+
     // Left x-cluster entry-button positions (§8.23.1 approximate — exact VFS/debugger-pending)
     // spec: Docs/RE/specs/ui_system.md §8.23.1 — "left cluster ≈ 218..373"
     private static readonly float[] LeftClusterX = { 218f, 250f, 282f, 314f, 346f };
@@ -88,28 +93,22 @@ public sealed partial class HudCommandBar : Control
     // spec: Docs/RE/specs/ui_system.md §8.23.1 — "x={856,898,940}"
     private static readonly float[] QuickSlotX = { 856f, 898f, 940f }; // spec: §8.23.1
 
-    // msg.xdb caption ids (CODE-CONFIRMED)
-    // spec: Docs/RE/specs/ui_system.md §8.23.5 CODE-CONFIRMED
-    private const int MsgChatBusy = 10082; // spec: §8.23.5 — action 4007 chat-busy notice
-    private const int MsgProductUnavailable = 45003; // spec: §8.23.5 — action 4013 ProductPanel-unavailable
-    private const int MsgNumberFormat = 2222; // spec: §8.23.5 — expanded-bar number-format template
+    // View state
+    private bool _expanded; // bar-height toggle (false = 30 px collapsed, true = 254 px expanded)
+    private Panel? _mainBar;
+    private Action? _onHelp; // action 4011 → HelpPanel (member, §8.24)
 
     // -------------------------------------------------------------------------
     // Callback wiring (set by HudMaster.Build via Wire)
     // -------------------------------------------------------------------------
 
     private Action? _onInventory; // action 4001 → slot 158 ItemPanel
-    private Action? _onSkill; // action 4003 → slot 159 SkillPanel
-    private Action? _onQuest; // action 4004/4024 → slot 206 QuestPanel
-    private Action? _onStats; // action 4005 → slot 146 StatusPanel
-    private Action? _onHelp; // action 4011 → HelpPanel (member, §8.24)
     private Action? _onParty; // action 4012 → slot 220 PartyPanel
     private Action? _onProduct; // action 4013 → slot 230 ProductPanel
+    private Action? _onQuest; // action 4004/4024 → slot 206 QuestPanel
     private Action? _onRelation; // action 4002 → slot 185 RelationPanel
-
-    // View state
-    private bool _expanded; // bar-height toggle (false = 30 px collapsed, true = 254 px expanded)
-    private Panel? _mainBar;
+    private Action? _onSkill; // action 4003 → slot 159 SkillPanel
+    private Action? _onStats; // action 4005 → slot 146 StatusPanel
     private Panel? _subStrip;
 
     // -------------------------------------------------------------------------
@@ -117,10 +116,9 @@ public sealed partial class HudCommandBar : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Wires each entry button to its HudMaster toggle/show method.
-    /// Call BEFORE Build or immediately after to connect the callbacks.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.23.3 CODE-CONFIRMED — entry→action-id→slot map.
+    ///     Wires each entry button to its HudMaster toggle/show method.
+    ///     Call BEFORE Build or immediately after to connect the callbacks.
+    ///     spec: Docs/RE/specs/ui_system.md §8.23.3 CODE-CONFIRMED — entry→action-id→slot map.
     /// </summary>
     public void Wire(
         Action? onInventory,
@@ -147,11 +145,10 @@ public sealed partial class HudCommandBar : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the bottom command strip at its confirmed bottom-anchor.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_system.md §8.23.1 CODE-CONFIRMED — geometry.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148, always-built.
+    ///     Geometry pass: builds the bottom command strip at its confirmed bottom-anchor.
+    ///     spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_system.md §8.23.1 CODE-CONFIRMED — geometry.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148, always-built.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -226,10 +223,10 @@ public sealed partial class HudCommandBar : Control
 
         // ── Quick-slot stance buttons (21×21, y=14) ──
         // spec: §8.23.1 — "x={856,898,940}, 21×21 at y=14, uitex 26"
-        for (int i = 0; i < QuickSlotX.Length; i++)
+        for (var i = 0; i < QuickSlotX.Length; i++)
         {
-            int action = 4019 + i; // 4019/4020/4021 = stance buttons 0/1/2 // spec: §8.23.3
-            int capturedI = i;
+            var action = 4019 + i; // 4019/4020/4021 = stance buttons 0/1/2 // spec: §8.23.3
+            var capturedI = i;
             BuildQuickSlotButton($"QuickSlot{i}", QuickSlotX[i], QuickBtnY, action, OnAction);
         }
 
@@ -241,7 +238,7 @@ public sealed partial class HudCommandBar : Control
             Text = "▲",
             Position = new Vector2(1008f - (BarHeight + SubStripH), 30f), // right-relative approx
             Size = new Vector2(11f, 11f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         // Anchor right-bottom relative
         collapseBtn.AnchorLeft = 1f;
@@ -276,10 +273,10 @@ public sealed partial class HudCommandBar : Control
             Text = label,
             Position = new Vector2(x, y),
             Size = new Vector2(EntryBtnSize, EntryBtnSize), // spec: §8.23.1 — 29×29
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn.AddThemeFontSizeOverride("font_size", 8);
-        int captured = actionId;
+        var captured = actionId;
         btn.Pressed += () => handler(captured);
         _mainBar?.AddChild(btn);
     }
@@ -293,9 +290,9 @@ public sealed partial class HudCommandBar : Control
             Text = actionId == 4014 ? "⚔" : "☮",
             Position = new Vector2(x, y),
             Size = new Vector2(w, h),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        int captured = actionId;
+        var captured = actionId;
         btn.Pressed += () => handler(captured);
         _mainBar?.AddChild(btn);
     }
@@ -309,10 +306,10 @@ public sealed partial class HudCommandBar : Control
             Text = "●",
             Position = new Vector2(x, y),
             Size = new Vector2(QuickBtnSize, QuickBtnSize), // spec: §8.23.1 — 21×21
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         btn.AddThemeFontSizeOverride("font_size", 8);
-        int captured = actionId;
+        var captured = actionId;
         btn.Pressed += () => handler(captured);
         _mainBar?.AddChild(btn);
     }

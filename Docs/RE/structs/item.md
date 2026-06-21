@@ -13,6 +13,15 @@
 > 16-byte slot record. ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] ·
 > conflicts: one low-severity offset refinement — 4/12 `to_slot` is a single byte at **+0x0C**
 > (not the hedged +0x0B–0x0C); the "value 15 ⇒ visual rebuild" semantic is unchanged.
+>
+> **CYCLE 7 re-verification (2026-06-20).** re-verified against doida.exe IDB SHA 263bd994, CYCLE 7
+> (2026-06-20). The 4/50 upgrade-result handler was re-read by control flow and its RESULT/REASON
+> branch table promoted from `LIKELY` to `CONFIRMED` (§8). The per-slot enchant-progress accumulator
+> location was **corrected**: it is a global per-slot array, not slot-record +0x0C (§1a, §8). The
+> upgrade-level cap (28), upgrade-process step count (6), and the `upgradeitems.scr` record stride
+> (44 B) were pinned (§8, §11). A new item-actor field — +0x7C `event_id` (the events.scr join column)
+> — and the special-goods `item_subtype` value 1004 were added (§6e). Item-actor template offsets in
+> §6 remain static-hypothesis; wire-field value semantics remain capture/debugger-pending.
 
 Neutral, offset-model of the item-related structures the legacy client used. Promoted from
 dirty-room notes; rewritten, no decompiler identifiers, no binary addresses. Design input for the
@@ -47,7 +56,7 @@ staging), and back each equipment slot inside the SpawnDescriptor (see `spawn_de
 | +0x03  | 1    | uint8  | `client_flag_dst` | LIKELY     | **Client-local, not wire data.** Zeroed on every normal slot write; set during drag/drop staging to mark the destination context. |
 | +0x04  | 4    | uint32 | `item_actor_id`   | CONFIRMED  | Id of the item's runtime actor instance (which carries the stat-grant/template fields in §6). **`0` = empty slot.** Every consumer resolves the item by this id. |
 | +0x08  | 4    | uint32 | `qty_or_expiry_lo`| CONFIRMED  | Overloaded by item type — see §1a. Stackable: current stack count. Timed: low 32 bits of a UNIX `time_t` expiry. |
-| +0x0C  | 4    | uint32 | `enchant_or_expiry_hi`| CONFIRMED | Overloaded by item type — see §1a. Upgradeable gear: running enchant-progress accumulator. Timed: high 32 bits of the same `time_t`. |
+| +0x0C  | 4    | uint32 | `enchant_or_expiry_hi`| CONFIRMED | Overloaded by item type — see §1a. Timed: high 32 bits of the same `time_t`. **Not** the upgrade accumulator (corrected CYCLE 7): the per-slot enchant-progress accumulator lives in a separate global per-slot array, see §1a and §8; the 4/50 upgrade-result handler does not write this slot-record field. |
 
 The +0x04 actor-id read and the +0x08/+0x0C dual-use are confirmed across many consumers. The two
 leading bytes (`flags_a`/`flags_b`) are written verbatim but never individually dispatched, so their
@@ -63,18 +72,32 @@ The +0x08/+0x0C pair is interpreted differently depending on the item's actor te
 
 | Item type                | +0x08 meaning                          | +0x0C meaning |
 |--------------------------|----------------------------------------|---------------|
-| Stackable                | `quantity` (uint32, range 1..1000)     | enchant-progress accumulator (only meaningful for upgradeable gear) |
+| Stackable                | `quantity` (uint32, range 1..1000)     | (overload free; not the upgrade accumulator) |
 | Timed / expiring         | `expiry_lo` — low 32 bits of a 64-bit UNIX `time_t` | `expiry_hi` — high 32 bits of the same `time_t` |
-| Non-stack permanent gear | enchant-progress accumulator (or 0)    | enchant-progress accumulator (or 0) |
+| Non-stack permanent gear | (unused / 0)                           | (unused / 0; not the upgrade accumulator) |
 
 - **Stack cap = 1000** (CONFIRMED constant). Two same-template stackable items merge only if the
   combined count stays ≤ 1000.
-- For upgradeable gear, +0x0C is a **running enchant-progress accumulator**: the server-supplied
-  upgrade delta is *added* into it on a partial upgrade, the accumulator is *cleared to 0* on a
-  successful full upgrade, and it is compared against per-tier thresholds the client looks up by
-  index (the threshold table is data-driven; see open questions).
 - A 64-bit `time_t` (lo at +0x08, hi at +0x0C) is consumed by a local-time conversion when the slot
   is applied; `0` = no expiry (permanent item).
+
+#### Enchant-progress accumulator — a global per-slot array, NOT slot-record +0x0C — CONFIRMED (CYCLE 7)
+
+An earlier promotion placed the upgrade/enchant-progress accumulator inside this 16-byte slot record
+(at +0x0C). **Corrected this pass:** the accumulator the item-upgrade pipeline advances and clears is a
+**global, flat, per-slot array of 32-bit integers** (one `int32` per upgrade slot, 4-byte stride),
+**outside** the `ItemSlotRecord`. The 4/50 upgrade-result handler (§8) is the writer:
+
+- on **partial progress** it adds the server-supplied delta into `accumulator[slot_index]`;
+- on **success** it resets `accumulator[slot_index]` to 0.
+
+A **sibling global per-slot array** runs in parallel — one entry per upgrade slot, holding the
+**active/displayed item actor id** for that slot (resolved through the actor manager when the upgrade
+panel reads it). Role of the accumulator array is `CONFIRMED`; role of the sibling id array is `LIKELY`
+(active-item id per upgrade slot).
+
+The slot-record field at +0x0C therefore stays a separate, overloaded `enchant_or_expiry_hi` field
+(timed-item expiry high dword); the 4/50 handler never writes it.
 
 ### 1b. Per-slot chunk framing (4/149)
 
@@ -167,8 +190,9 @@ Bag counts above 3 would exceed the hard cap and were not observed.
   (+0x02/+0x03).
 - **Item consume**: decrements `qty_or_expiry_lo` (+0x08) by 1.
 - **Stack merge**: adds a delta into `qty_or_expiry_lo` (+0x08), capped at 1000.
-- **Item upgrade** (4/50): on success, overwrites all four dwords and clears the enchant accumulator
-  (+0x0C) to 0; on partial progress, adds the server delta into the enchant accumulator. See §8.
+- **Item upgrade** (4/50): on success, overwrites all four dwords of the slot record and resets the
+  slot's entry in the **global enchant-progress accumulator array** (§1a) to 0; on partial progress,
+  adds the server delta into that global accumulator entry (the slot record is not replaced). See §8.
 
 ---
 
@@ -268,7 +292,8 @@ pair is CONFIRMED only for the attack/defense pair and LIKELY-by-position for th
 
 | Item-actor offset | Size | Type | Field                 | Conf | Meaning |
 |-------------------|------|------|-----------------------|------|---------|
-| +136 (0x088)      | 2 | uint16 | `item_subtype`        | CONFIRMED | Item sub-category. Value **62** = socketing stone (special handling in slot-clear); value **1001** = a special NPC-guard subtype (suppressed from sell display). The full subtype code table is data-driven (an equippable range plus discrete special codes). |
+| +124 (0x07C)      | 4 | uint32 | `event_id`            | CONFIRMED | **events.scr join column** (added CYCLE 7). The item-actor / `items.scr` record carries a 32-bit `event_id` here that joins to the `events.scr` table by that table's primary key (events record +0x00, exact-match lookup). Resolved when the goods/cash-shop info path looks up the item's bound event. `0` = no bound event. See `formats/events_scr.md` for the events side. (The +0x7C field is within the 548-byte template copied verbatim from the on-disk `items.scr` record.) |
+| +136 (0x088)      | 2 | uint16 | `item_subtype`        | CONFIRMED | Item sub-category. Value **62** = socketing stone (special handling in slot-clear); value **1001** = a special NPC-guard subtype (suppressed from sell display); value **1004** = a special-goods subtype gated by the cash-shop / goods info path (added CYCLE 7). The full subtype code table is data-driven (an equippable range plus discrete special codes). |
 | +184 (0x0B8)      | 1 | uint8  | `stackable_flag` / `durability_enabled` | CONFIRMED | **Dual-role byte at the same offset.** Non-zero gates two systems: it marks the item as **stackable** (stacks merge if same template and combined count ≤ 1000) **and** marks the item type as participating in the **durability/wear system** (see §6f). Different code paths read this same byte for the two purposes. |
 | +231 (0x0E7)      | 1 | uint8  | `weapon_effect_grade` | CONFIRMED | Weapon visual-glow tier and tooltip enchant display (see §6g). |
 
@@ -391,27 +416,65 @@ capture before committing the packet YAML.
 ## 8. Item upgrade-result packet (opcode 4/50) — 32-byte fixed body
 
 The server response to an item-upgrade attempt. Read as a **fixed 32-byte body** — the handler's read
-size is **control-flow confirmed** at 0x20. On success it replaces the target bag slot's record; on
-partial progress it advances the slot's enchant accumulator (§1a). The `success` gate at +0x08 is
-confirmed in the result handler; every other field below is consumed inside the **upgrade-apply
-function** (not re-located by control flow this pass) — treat those as static-hypothesis.
+size is **control-flow confirmed** at 0x20. On success it replaces the target slot's record and resets
+that slot's entry in the **global enchant-progress accumulator array** (§1a); on partial progress it
+adds the delta into that global accumulator entry. The **RESULT / REASON branch table is now
+control-flow CONFIRMED** (CYCLE 7) — promoted from the earlier hedged "reason 1/2/3/4" note; the field
+offsets the handler itself reads (RESULT +0x08, REASON +0x09, `slot_index` +0x0B, `enchant_delta`
++0x1C) are all control-flow confirmed. The new-record dwords (+0x10..) are consumed inside the
+**upgrade-apply function** (not re-located this pass) — treat those as static-hypothesis.
 
 | Offset | Size | Type   | Field          | Conf       | Meaning |
 |--------|------|--------|----------------|------------|---------|
 | +0x00  | 8    | char[8]| `header`       | LIKELY     | Guard / actor-identity prefix bytes. |
-| +0x08  | 1    | uint8  | `success`      | CONFIRMED (offset) | Read by the handler at +0x08: `0` = failure (plays the fail motion), `1` = success (plays the success motion, then applies). The +0x08 read is control-flow confirmed; the code set stays capture-pending. |
-| +0x09  | 1    | uint8  | `reason`       | LIKELY     | Failure / progress reason: `1` = generic fail; `2` = partial progress; `3` = partial progress (higher tier); `4` = another failure type. Consumed inside the apply function. |
+| +0x08  | 1    | uint8  | `result`       | CONFIRMED  | Read by the handler at +0x08: `1` = success; `0` = not-success (branch on `reason`). Control-flow confirmed. |
+| +0x09  | 1    | uint8  | `reason`       | CONFIRMED  | Read by the handler at +0x09. See the RESULT/REASON branch table below. Control-flow confirmed. |
 | +0x0A  | 1    | uint8  | `pad_a`        | UNVERIFIED | Not individually decoded. |
-| +0x0B  | 1    | uint8  | `slot_index`   | LIKELY     | Bag/inventory slot the upgraded item occupies. |
+| +0x0B  | 1    | uint8  | `slot_index`   | CONFIRMED  | Upgrade slot index; indexes the global enchant accumulator array (and its sibling id array). Control-flow confirmed. |
 | +0x0C  | 4    | uint32 | `pad_c`        | UNVERIFIED | Not individually decoded; possibly extra info. |
 | +0x10  | 4    | uint32 | `new_flags`    | LIKELY     | On success: replaces the slot's leading dword (+0x00..+0x03). |
 | +0x14  | 4    | uint32 | `new_actor_id` | LIKELY     | On success: new item actor id; replaces slot +0x04. |
 | +0x18  | 4    | uint32 | `new_qty`      | LIKELY     | On success: new quantity / `expiry_lo`; replaces slot +0x08. |
-| +0x1C  | 4    | uint32 | `enchant_delta`| LIKELY     | On partial progress (reason 2/3): added into the slot's enchant accumulator (+0x0C). On success: the whole record is replaced and the accumulator is cleared to 0. |
+| +0x1C  | 4    | uint32 | `enchant_delta`| CONFIRMED  | On partial progress (REASON 2/3): added into the slot's **global** enchant accumulator entry (§1a). The +0x1C read is control-flow confirmed. |
 
-Behaviour summary: `success == 1` ⇒ overwrite all four dwords of `slot_index`'s record and clear its
-enchant accumulator. `success == 0 && reason ∈ {2,3}` ⇒ add `enchant_delta` into the accumulator
-(no record replacement). Other failures show a localized message.
+**RESULT / REASON branch table — CONFIRMED (control flow):**
+
+| `result` (+0x08) | `reason` (+0x09) | Outcome | Client action |
+|---|---|---|---|
+| 1 | (any) | **SUCCESS** | Reset the slot's global accumulator entry to 0, apply the new record, play the **success cue 862100101**. |
+| 0 | 1 | **FAIL (generic)** | Generic-fail apply path; play the **fail/progress cue 862100102**. |
+| 0 | 2 | **PARTIAL PROGRESS (tier A)** | Add `enchant_delta` (+0x1C) into the slot's global accumulator entry; advance the gauge; play cue 862100102. |
+| 0 | 3 | **PARTIAL PROGRESS (tier B)** | Add `enchant_delta` (+0x1C) into the slot's global accumulator entry; advance the gauge; play cue 862100102. |
+| 0 | 4 | **FAIL (alternate)** | A distinct apply path (the candidate item-break / downgrade branch); play cue 862100102. |
+
+Sound cues: success = **862100101**; fail / partial-progress = **862100102** (CONFIRMED constants).
+
+> **REASON 4 semantic.** REASON 4 takes a different apply path from the generic REASON 1 fail and is
+> the candidate **item-break / downgrade** branch; the binary names neither failure path, so the exact
+> "break vs downgrade" gameplay distinction is **RUNTIME-ONLY** (capture-pending). Both REASON 1 and
+> REASON 4 are failure paths.
+
+**Upgrade caps & the recipe table (CONFIRMED, CYCLE 7):**
+
+- **Upgrade-level cap = 28.** The upgrade UI loads 28 distinct per-level art assets (a `weap_made01`
+  … `weap_made28` family), so there are 28 upgrade levels. This is consistent with the static
+  `enchant_level` column range 0..28 on the binary item record; the relationship between that column
+  and the runtime weapon-glow grade 1..9 (§6g) remains UNVERIFIED.
+- **Upgrade process = 6 steps.** The upgrade-process panel state machine exits when its current-step
+  counter reaches **≥ 6**, so the flow has 6 process steps.
+- **`upgradeitems.scr` recipe table — record stride = 44 bytes (0x2C).** Loaded into a **doubly-linked
+  list** (not a flat array), keyed on **record +0x04** (primary lookup key, likely the base item id)
+  and **record +0x08** (secondary key, likely a material / second item id); the recipe **result id** is
+  returned from **record +0x00**. The payload region **+0x0C..+0x2B** holds success-rate floats and
+  step parameters; the exact field-by-field layout is **UNVERIFIED**.
+- **Per-recipe success rates are RUNTIME-ONLY (server-authored).** The upgrade panel's animated
+  "step gauge rate" is a **time-based UI fill** (elapsed time since the step started, against a cached
+  duration), **not** the success probability — do not treat the animated gauge as the success rate.
+
+Behaviour summary: `result == 1` ⇒ overwrite all four dwords of `slot_index`'s record and reset its
+global accumulator entry. `result == 0 && reason ∈ {2,3}` ⇒ add `enchant_delta` into the global
+accumulator entry (no record replacement). `result == 0 && reason ∈ {1,4}` ⇒ failure paths
+(REASON 4 = candidate break/downgrade); play the fail cue and show the localized message.
 
 ---
 
@@ -475,6 +538,12 @@ the engineer understands the client's pending-upgrade state machine.
 | Weapon-effect grade display range | 1..9 (0 = none) | CONFIRMED | Glow tier; values 101..109 normalize to 1..9. |
 | Socketing-stone subtype | 62 | CONFIRMED | `item_subtype` discriminator. |
 | Special NPC-guard subtype | 1001 | CONFIRMED | Suppressed from sell display. |
+| Special-goods subtype | 1004 | CONFIRMED | `item_subtype` gated by the cash-shop / goods info path (added CYCLE 7). |
+| Upgrade-level cap | 28 | CONFIRMED | 28 distinct per-level art assets (`weap_made01`…`weap_made28`); upgrade levels 1..28 (added CYCLE 7). |
+| Upgrade-process step count | 6 | CONFIRMED | Upgrade-process panel exits when current step ≥ 6 (added CYCLE 7). |
+| `upgradeitems.scr` record stride | 44 bytes (0x2C) | CONFIRMED | Recipe record; doubly-linked list keyed on +0x04 / +0x08, result id at +0x00; payload +0x0C..+0x2B = success-rate floats + step params (field-by-field UNVERIFIED) (added CYCLE 7). |
+| Upgrade success cue | 862100101 | CONFIRMED | 4/50 RESULT 1 sound id (added CYCLE 7). |
+| Upgrade fail / partial-progress cue | 862100102 | CONFIRMED | 4/50 RESULT 0 sound id (added CYCLE 7). |
 
 ---
 

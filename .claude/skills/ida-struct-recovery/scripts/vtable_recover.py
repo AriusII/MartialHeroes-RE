@@ -132,7 +132,7 @@ def main():
         "- vtable_ea: `0x%X`   ptr_size: %d   slots: %d" % (vt, PTR, len(slots)),
         "- generated: %s" % stamp,
         "",
-        "> Slot roles are HEURISTIC hypotheses — confirm important slots via ida-decompile-export "
+        "> Slot roles are HEURISTIC hypotheses — confirm important slots via ida-explore (DECOMPILE-ONE mode) "
         "before a spec-author promotes this into Docs/RE/structs/*.md.",
         "",
         "| Slot | Slot EA | Target EA | Target Name | In-deg | Role (HYPOTHESIS) |",

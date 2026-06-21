@@ -1,7 +1,7 @@
 ---
 name: ida-crypto-hunt
-description: Use to recover the packet cipher and key schedule of the legacy Martial Heroes client (Main.exe) so Network.Crypto can interoperate with the original wire format. Fuses crypto-shaped bit-op loop detection, xrefs walked out from the socket-recv/decrypt path, and constant-table (S-box/key-material) extraction into one crypto-focused report under Docs/RE/_dirty/crypto/. The deliverable that crosses the firewall is a NEUTRAL algorithm description in words and math — never transcribed code.
-allowed-tools: 'Read Write'
+description: Use to recover the packet cipher and key schedule of the legacy Martial Heroes client (doida.exe; Main.exe historical) so Network.Crypto can interoperate with the original wire format. Fuses crypto-shaped bit-op loop detection, xrefs walked out from the socket-recv/decrypt path, and constant-table (S-box/key-material) extraction into one crypto-focused report under Docs/RE/_dirty/crypto/. The deliverable that crosses the firewall is a NEUTRAL algorithm description in words and math — never transcribed code.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---

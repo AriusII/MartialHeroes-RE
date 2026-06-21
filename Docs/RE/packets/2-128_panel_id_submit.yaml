@@ -1,0 +1,41 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band5.md §2/128 (u32 panel id submit).
+# Role: a one-shot id / index submit from a panel (the caller clears the field after send).
+#
+# CAPTURE-UNVERIFIED: the 4-byte size and the single-u32 shape are control-flow CONFIRMED; the id's
+# meaning is undetermined. capture_verified: false.
+
+name: CmsgPanelIdSubmit
+opcode: 0x20080           # major 2 (GameAction), minor 128 (0x80) -> (2 << 16) | 128
+direction: C2S
+size: 4                   # FIXED 4-byte body: one id / index value
+spec: packets/2-128_panel_id_submit.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  A one-shot id / index submit from a panel. A fixed 4-byte body carrying a u32 id / index value; the
+  caller reads the value from a panel field, sends, then zeroes the field (a one-shot submit). Major 2 is
+  C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
+# CONTROL-FLOW CONFIRMED: a fixed 4-byte blit of a single u32 the caller reads then clears.
+fields:
+  - { name: PanelId, type: u32 }   # 0x00  id / index value (a selection / slot index) [meaning capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (4 bytes) and the single-u32 shape; the id's meaning is undetermined.
+
+    0x00 (4B) PanelId : a u32 id / index value. The caller reads it from a panel field, sends it, then
+                        zeroes the field -- suggesting a one-shot id submit (a selection / slot index).
+                        The exact meaning is [pending].
+
+  TRIGGER: a panel submit path inside a large panel dispatcher -- it submits a u32 then clears the
+  field. Neutral role: a one-shot panel id / selection submit.
+
+  EXPECTED S2C REPLY: [pending].
+
+  UNKNOWNS (capture-pending): what the id encodes (selection vs slot index vs record key); the panel's
+  subsystem; the S2C reply.
+
+  UNBLOCKS: provisional only -- a fixed 4-byte panel id submit.

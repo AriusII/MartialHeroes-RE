@@ -52,13 +52,13 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game Quest window (QuestPanel — 3 browser tabs + detail view).
-///
-/// <para>PASSIVE: renders quest rows from Application events; emits accept/give-up intents
-/// as use-case calls (stubbed pending world-campaign). Inbound 5/68 + 5/73 stubbed.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
+///     In-game Quest window (QuestPanel — 3 browser tabs + detail view).
+///     <para>
+///         PASSIVE: renders quest rows from Application events; emits accept/give-up intents
+///         as use-case calls (stubbed pending world-campaign). Inbound 5/68 + 5/73 stubbed.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §3.3 / §5.3 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudQuestWindow : Control
 {
@@ -104,28 +104,27 @@ public sealed partial class HudQuestWindow : Control
     // msg.xdb ids
     // spec: ui_system.md §8.16 — msg 18031 = "active-tab quest header line" CODE-CONFIRMED
     private const int MsgActiveHeader = 18031; // spec: ui_system.md §8.16 CODE-CONFIRMED
+    private int _activeTab;
+
+    private Control? _activeTabContent;
+    private Control? _availableTabContent;
+    private Control? _completableTabContent;
+    private Control? _detailTabContent;
 
     // -------------------------------------------------------------------------
     // View state
     // -------------------------------------------------------------------------
 
     private bool _open;
-    private int _activeTab;
     private bool _trackingEnabled;
-
-    private Control? _activeTabContent;
-    private Control? _completableTabContent;
-    private Control? _availableTabContent;
-    private Control? _detailTabContent;
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 318×732 right-anchored quest window.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.
+    ///     Geometry pass: builds the 318×732 right-anchored quest window.
+    ///     spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -155,7 +154,7 @@ public sealed partial class HudQuestWindow : Control
         backdrop.AddThemeStyleboxOverride("panel", bdStyle);
         AddChild(backdrop);
 
-        Texture2D? mainTex = atlas.GetById(MainTexId);
+        var mainTex = atlas.GetById(MainTexId);
         if (mainTex is null)
             GD.PrintErr("[HudQuestWindow] skillwindow.dds (uitex 8) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.16.");
@@ -184,7 +183,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "▐",
             Position = new Vector2(286f, 46f),
             Size = new Vector2(29f, 26f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollThumb.Pressed += () => GD.Print("[HudQuestWindow] list scroll-thumb action 92.");
         AddChild(scrollThumb);
@@ -197,7 +196,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "Accept",
             Position = new Vector2(49f, 658f),
             Size = new Vector2(113f, 40f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         acceptBtn.Pressed += OnAccept; // action 85
         AddChild(acceptBtn);
@@ -210,7 +209,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "Proceed",
             Position = new Vector2(148f, 658f),
             Size = new Vector2(113f, 40f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         proceedBtn.Pressed += OnProceed; // action 86
         AddChild(proceedBtn);
@@ -223,7 +222,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "Give Up",
             Position = new Vector2(259f, 655f),
             Size = new Vector2(59f, 77f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         giveUpBtn.Pressed += OnGiveUp; // action 91
         AddChild(giveUpBtn);
@@ -236,9 +235,9 @@ public sealed partial class HudQuestWindow : Control
             Position = new Vector2(9f, 669f),
             Size = new Vector2(24f, 24f),
             ButtonPressed = false,
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
-        trackingCb.Toggled += (pressed) =>
+        trackingCb.Toggled += pressed =>
         {
             // spec: ui_system.md §8.16 — "action 94 writes CHAR_QUEST_TRACKING (0/1)"
             _trackingEnabled = pressed;
@@ -251,7 +250,7 @@ public sealed partial class HudQuestWindow : Control
         SelectTab(0); // default to ACTIVE tab
 
         GD.Print("[HudQuestWindow] Built — 318×732 right-anchored QuestPanel. " +
-                 $"Tabs: ACTIVE (6 rows), COMPLETABLE (6 rows), AVAILABLE (10 rows), DETAIL. " +
+                 "Tabs: ACTIVE (6 rows), COMPLETABLE (6 rows), AVAILABLE (10 rows), DETAIL. " +
                  "Row stride 31px, base y=44. " +
                  "Inbound: TODO(capture): quest list record bodies (5/68/5/73 opaque). " +
                  "Outbound: TODO(world-campaign): C2S 2/28 (give-up) + 2/152 (row request). " +
@@ -266,24 +265,24 @@ public sealed partial class HudQuestWindow : Control
             (4f, 105f, 62f, 22f, 0, "Active", TabActiveSrcY), // spec: dst(4,105,62,22) action 0
             (66f, 105f, 62f, 22f, 1, "Complete", TabCompleteSrcY), // spec: dst(66,105,62,22) action 1
             (128f, 105f, 64f, 22f, 2, "Available", TabAvailableSrcY), // spec: dst(128,105,64,22) action 2
-            (192f, 107f, 63f, 18f, 3, "Detail", 0), // spec: dst(192,107,63,18) action 3
+            (192f, 107f, 63f, 18f, 3, "Detail", 0) // spec: dst(192,107,63,18) action 3
         };
 
         foreach (var (x, y, w, h, action, label, srcY) in tabs)
         {
-            int capturedAction = action;
+            var capturedAction = action;
             var tabBtn = new Button
             {
                 Name = $"TabBtn{action}",
                 Text = label,
                 Position = new Vector2(x, y),
                 Size = new Vector2(w, h),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
 
             if (srcY > 0 && atlas.GetById(MainTexId) is not null)
             {
-                AtlasTexture? tabSlice = atlas.SliceById(MainTexId, 960, srcY, (int)w, (int)h);
+                var tabSlice = atlas.SliceById(MainTexId, 960, srcY, (int)w, (int)h);
                 if (tabSlice is not null)
                 {
                     var st = new StyleBoxTexture { Texture = tabSlice };
@@ -302,9 +301,9 @@ public sealed partial class HudQuestWindow : Control
         var container = new Control { Name = tabName };
         container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
 
-        for (int r = 0; r < visibleRows; r++)
+        for (var r = 0; r < visibleRows; r++)
         {
-            float baseY = RowBaseY + r * RowStrideY; // spec: ui_system.md §8.16
+            var baseY = RowBaseY + r * RowStrideY; // spec: ui_system.md §8.16
 
             // Left cell button (state/level)
             var leftBtn = new Button
@@ -314,9 +313,9 @@ public sealed partial class HudQuestWindow : Control
                 Position = new Vector2(10f, baseY),
                 Size = new Vector2(62f, 28f),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
-            int capturedR = r;
+            var capturedR = r;
             leftBtn.Pressed += () =>
                 GD.Print(
                     $"[HudQuestWindow] {tabName} row {capturedR} left cell (action {rowActionBase + capturedR}). " +
@@ -332,7 +331,7 @@ public sealed partial class HudQuestWindow : Control
                 Position = new Vector2(72f, baseY),
                 Size = new Vector2(194f, 28f),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             nameBtn.Pressed += () =>
                 GD.Print(
@@ -349,7 +348,7 @@ public sealed partial class HudQuestWindow : Control
                 Position = new Vector2(266f, baseY),
                 Size = new Vector2(44f, 28f),
                 Flat = true,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             container.AddChild(rightBtn);
         }
@@ -370,7 +369,7 @@ public sealed partial class HudQuestWindow : Control
             Position = new Vector2(10f, 130f),
             Size = new Vector2(298f, 475f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         panel.AddChild(detailBody);
 
@@ -382,7 +381,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "↑",
             Position = new Vector2(19f, 15f),
             Size = new Vector2(75f, 19f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollUp.Pressed += () => GD.Print("[HudQuestWindow] detail scroll up (action 87).");
         panel.AddChild(scrollUp);
@@ -393,7 +392,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "▲",
             Position = new Vector2(284f, 15f),
             Size = new Vector2(13f, 10f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollUpArrow.Pressed += () => GD.Print("[HudQuestWindow] detail scroll up arrow (action 89).");
         panel.AddChild(scrollUpArrow);
@@ -404,7 +403,7 @@ public sealed partial class HudQuestWindow : Control
             Text = "▼",
             Position = new Vector2(284f, 264f),
             Size = new Vector2(13f, 10f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         scrollDownArrow.Pressed += () => GD.Print("[HudQuestWindow] detail scroll down arrow (action 90).");
         panel.AddChild(scrollDownArrow);
@@ -420,10 +419,10 @@ public sealed partial class HudQuestWindow : Control
     {
         _activeTab = tab;
 
-        if (_activeTabContent is not null) _activeTabContent.Visible = (tab == 0);
-        if (_completableTabContent is not null) _completableTabContent.Visible = (tab == 1);
-        if (_availableTabContent is not null) _availableTabContent.Visible = (tab == 2);
-        if (_detailTabContent is not null) _detailTabContent.Visible = (tab == 3);
+        if (_activeTabContent is not null) _activeTabContent.Visible = tab == 0;
+        if (_completableTabContent is not null) _completableTabContent.Visible = tab == 1;
+        if (_availableTabContent is not null) _availableTabContent.Visible = tab == 2;
+        if (_detailTabContent is not null) _detailTabContent.Visible = tab == 3;
     }
 
     // -------------------------------------------------------------------------
@@ -458,10 +457,10 @@ public sealed partial class HudQuestWindow : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the quest window on/off.
-    /// ESC closes (CODE-CONFIRMED). Open key: debugger/capture-pending.
-    /// spec: Docs/RE/specs/ui_system.md §8.16 — "ESC (key 27 with panel-open latch) closes CODE-CONFIRMED".
-    /// TODO(spec): toggle hotkey (open key debugger/capture-pending).
+    ///     Toggles the quest window on/off.
+    ///     ESC closes (CODE-CONFIRMED). Open key: debugger/capture-pending.
+    ///     spec: Docs/RE/specs/ui_system.md §8.16 — "ESC (key 27 with panel-open latch) closes CODE-CONFIRMED".
+    ///     TODO(spec): toggle hotkey (open key debugger/capture-pending).
     /// </summary>
     public void Toggle(bool? forceState = null)
     {

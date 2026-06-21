@@ -6,13 +6,16 @@
 
 <!--
 verification: sample-verified
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: none
+note: PINNED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): preload-vs-lazy = EAGER boot preload (file opened+parsed in the boot loop); selection key = .skn id_b used verbatim (no g{N}.bnd formatting)
+note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimCatalog map key vs skin_class skeleton selector vs .skn id_b pool key) and added the motlist.txt-registry parallel for .mot (no g{id}.mot rule)
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` · `ida_anchor: 263bd994` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` (re-verified against
+> doida.exe IDB SHA `263bd994`, CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the bindlist load-and-register loop and the per-skeleton register-by-`actor_id` path) AND
 > the real `data/char/bindlist.txt` VFS sample. The 349-entry count, the 348-CRLF-plus-final-line-
@@ -97,6 +100,28 @@ rigs.
 > still just four ordinary entries within a 349-entry registry. Every non-player skeleton (NPC, mob,
 > mount, etc.) is registered exactly the same way, keyed by its own parsed `actor_id`.
 
+### Load timing — EAGER PRELOAD at boot, not lazy (CONFIRMED — was a known unknown)
+
+The registry is built by an **eager preload at startup**, not by deferring the parse to first use.
+Every `.bnd` named in `bindlist.txt` is **physically opened, parsed in full into a pose object, and
+inserted into the pose pool during boot** — on the boot data-table corpus worker (the same one-shot
+startup pass that loads the other char manifests and the rest of the boot tables), **NOT** on actor
+spawn and **NOT** lazily on first reference.
+
+| Claim | Status |
+|-------|--------|
+| Every listed `.bnd` is opened + parsed into a pose object at boot | CONFIRMED — control-flow confirmed end-to-end, static (build `263bd994`) |
+| The parse runs inside the bindlist load loop (one open+parse per line), on the boot corpus worker | CONFIRMED — the register step opens the file and runs the full `.bnd` parse before the first actor spawns |
+| All 349 listed skeletons are loaded + parsed into the pool at boot | CONFIRMED — the loop visits every line identically |
+| The client only registers the name and defers the parse to first reference (lazy) | REFUTED — a name-only/lazy registry would store the string and defer the parse; this loader opens + parses eagerly |
+
+> **Why this is preload, not lazy.** The registration step does not stop at recording the filename:
+> for *every* line it opens the assembled `data/char/bind/<stem>` path and runs the full `.bnd`
+> skeleton parse, constructs a pose object, and inserts it into the pool — all on the boot worker,
+> before any actor exists. A lazy registry would keep only the string and defer the parse; this one
+> does the work up front. Confidence: **HIGH** (control-flow confirmed). The one residual is the
+> per-actor re-load / hot-swap question — see §Known unknowns (OPEN-RISK).
+
 ## Naming convention (descriptive, NOT a derivation rule)
 
 Each entry follows the form `g<N>.bnd`, where `<N>` is an integer.
@@ -122,6 +147,14 @@ path from an arbitrary integer and assume the file exists. It reads this explici
 is not a contract that any integer `N` maps to a valid skeleton. Engineers must treat membership in
 this list (or the join via `id_b` / `skin_class`) as the test of whether a skeleton is registered.
 
+> **The `.mot` motion clips follow the exact same registry pattern (CYCLE 7, `263bd994`).** Motion
+> clips are reached via the sibling **`data/char/motlist.txt`** registry — each listed line is prefixed
+> with the literal `data/char/mot/` and the parsed `.mot` clip is registered by its id — **NOT** by a
+> computed `g{id}.mot` path (the binary carries no such `g%d.mot` / `%d.mot` format string). This is
+> exactly parallel to `bindlist.txt`: `bindlist.txt` registers skeletons by parsed `actor_id`,
+> `motlist.txt` registers `.mot` clips by id; **neither uses a computed `g{N}.<ext>` path rule**. See
+> `formats/animation.md` for the `motlist.txt` motion-clip registry and the clip-id join.
+
 ## Cross-file join
 
 `bindlist.txt` is a registry (a set of valid skeleton names, each resolving to a parsed `actor_id`),
@@ -133,6 +166,52 @@ not a keyed lookup table on its own columns. The character bind/idle chain joins
   the registered skeleton whose parsed `actor_id` equals `id_b`. Resolve by `actor_id` lookup; do
   **not** treat `id_b` as a dense 0..348 index or assume a `g{id_b}.bnd` filename exists for an
   arbitrary value (see `formats/mesh.md` §`.skn` Header → `id_b`).
+
+### Skeleton selection — `.skn` header `id_b` is the pool key, VERBATIM (CONFIRMED at the call site)
+
+An actor selects its deform skeleton by passing the `.skn` header `id_b` **unmodified** as the pool
+lookup key. There is **no arithmetic between reading `id_b` and the lookup**:
+
+- **no** appearance-slot transform (`5·(class + 4·variant) − 24`),
+- **no** `g{N}.bnd` path formatting,
+- **no** use of the header `SkinClassId` for *this* lookup.
+
+The pool is keyed by each registered `.bnd`'s parsed `actor_id`, so the resolved skeleton is the
+registered pose whose `actor_id == id_b`. Stated plainly:
+
+```
+selected_skeleton(skn) = pose_pool[ skn.header.id_b ]        // pool key == parsed .bnd actor_id
+```
+
+- `id_b == 0` (or any absent / unregistered value) ⇒ **no skeleton** — the lookup returns nothing and
+  the skin deforms **unskinned**. This is consistent with the existing "`0` = no skeleton" note above.
+- Any **appearance-slot `IdB` transform** (the `{1,11,16,26}` slot encoding, the `g{SkinClassId}.bnd`
+  convenience rule) happens **UPSTREAM** — it decides *which* `.skn` / `id_b` the actor loads. It is
+  **not** a second remap applied inside the pool lookup. At the `.skn` → pose-pool edge the key is the
+  literal header `id_b`, full stop.
+- This re-confirms the "resolve by `actor_id` lookup; do not assume a `g{id_b}.bnd` filename" guidance
+  above — now verified **at the call site**, not merely inferred. Confidence: **HIGH** (the value read
+  into `id_b` is passed straight to the pool lookup with no intervening math; build `263bd994`).
+
+> **Three distinct keys — do not conflate them (sharpened, CYCLE 7, `263bd994`).** Three separate
+> integer keys travel through the bind / motion chain, and only one of them keys *this* registry:
+>
+> 1. **Appearance-slot key — `5·(class + 4·variant) − 24` ∈ {1, 11, 16, 26}.** This is the **KEY into
+>    the runtime AnimCatalog ordered map** (a red-black-tree lookup), **not** an array subscript and
+>    **not** a `g{IdB}.bnd` skeleton path. This is precisely why **no `g11.bnd` / `g16.bnd` skeleton
+>    file exists** — those values are map *keys*, never filenames, and the binary carries no path-format
+>    string that would turn them into one. The **runtime idle-motion clip lookup is keyed by this same
+>    appearance key**, not by `skin_class`.
+> 2. **`skin_class` (the per-actor skeleton class).** This is the **per-actor selector that joins to a
+>    registered skeleton in THIS registry** (resolve by parsed `actor_id`, validated against the 349
+>    entries). It additionally helps **compose** the AnimCatalog record's key at load time — but it is
+>    **not itself** the runtime idle lookup key.
+> 3. **`.skn` header `id_b`.** Used **verbatim** as the pose-pool key for **skeleton** selection
+>    (unchanged — see the pool-lookup rule above).
+>
+> Net: (a) appearance key → AnimCatalog map; (b) `skin_class` → registered skeleton (this registry);
+> (c) `.skn` `id_b` → pose pool. The appearance-slot transform is upstream of all three resolutions —
+> it decides which actor/skin is loaded, never remaps a pool or registry lookup.
 - `bindlist.txt` is the authoritative set of the 349 registered skeletons; it validates which
   `id_b` / `skin_class` values resolve to a real registered skeleton (a value resolves iff some
   listed `.bnd` parses to that `actor_id`). The on-disk filenames happen to follow `g<N>.bnd`, but
@@ -151,10 +230,18 @@ parsed `actor_id`, producing the 349-entry keyed registry the joins above resolv
 
 ## Known unknowns
 
-- Whether the client **preloads** every listed `.bnd` at startup or merely registers the names for
-  lazy load on first reference (the registration vs. preload distinction is not pinned down here).
 - The semantic meaning of the integer `<N>` beyond "skeleton id" (whether the value encodes a
   body type / gender / class grouping is not established from this file alone).
+- **OPEN-RISK (LOW).** The eager-preload finding pins the **initial boot population**. A separate
+  per-actor **re-load / hot-swap / streaming-evict** path that re-parses a `.bnd` on demand was not
+  exhaustively traced. Static cross-references show the `.bnd` parse is reached **only** from the boot
+  bindlist load loop, so the boot preload is the operative path — but "no lazy fallback anywhere" rests
+  on cross-reference coverage rather than a runtime trace. Importers should treat the boot preload as
+  authoritative and carry this only as a residual to confirm if ever in doubt.
+
+> **Now answered (moved out of Known unknowns, CYCLE 1 — `263bd994`):** the preload-vs-lazy question
+> (→ **eager boot preload**, see §Load timing) and the skeleton-selection key (→ **`.skn` `id_b`
+> verbatim**, see §Skeleton selection) are both pinned.
 
 ## Cross-references
 

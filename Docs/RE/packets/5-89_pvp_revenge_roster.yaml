@@ -1,0 +1,59 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 188-byte body, and the full field
+#                 decode -- sort@0x00 / id@0x04 / team@0x08 / team_guild@0x09 / 10x17-byte CP949 name
+#                 array @0x0A / default-property bytes @0xB4 / random-property bytes @0xB6 -- are
+#                 control-flow-confirmed; this body is NOT an opaque blit; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none. A deep struct pass confirmed the five PvP setters (5/89/90/91/92/94) field-decode
+#              their wire blocks into a shared PvP-state object -- they are NOT opaque-forward blits.
+#              This file's per-field layout already reflects that and is retained.
+
+name: SmsgPvpRevengeRoster
+opcode: 0x50059           # major 5 (Push), minor 89 -> (5 << 16) | 89
+direction: S2C
+size: 188                # fixed 188-byte payload block (0xBC)
+spec: packets/5-89_pvp_revenge_roster.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes the PvP revenge roster. A fixed 188-byte block: a small header (a revenge actor key,
+  a team byte and a team-guild byte), then a fixed 10-entry CP949 name array (17-byte cells), then a
+  small property tail (two default-property bytes and four random-property bytes). 188 = 10 header +
+  170 names (10 x 17) + 6 property + 2 pad. Forwarded into the PvP-state object.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 188. The name array is
+# modelled as a fixed bytes[N] blob (10 x 17-byte cells); the property bytes are modelled per byte.
+fields:
+  - { name: RevengeSort,        type: u8 }            # +0x00  revenge actor sort (composite-key sub-key)
+  - { name: RevengeId,          type: u32 }           # +0x01  revenge actor id (u32; read at +1)
+  - { name: GapA,               type: "bytes[3]" }    # +0x05  gap (not copied) -- opaque
+  - { name: RevengeTeam,        type: u8 }            # +0x08  revenge team byte
+  - { name: RevengeTeamGuild,   type: u8 }            # +0x09  revenge team-guild byte (also mirrored to local player)
+  - { name: NameArray,          type: "bytes[170]" }  # +0x0A  10 x 17-byte CP949 name cell (17-byte stride)
+  - { name: DefaultPropertyMax, type: "bytes[2]" }    # +0xB4  2 x u8 default-property-max values
+  - { name: RandomPropertyMax,  type: "bytes[4]" }    # +0xB6  4 x u8 random-property-max values
+  - { name: TailPad,            type: "bytes[2]" }    # +0xBA  trailing pad (not read) -- opaque, pad to 188
+  # widths: 1 + 4 + 3 + 1 + 1 + 170 + 2 + 4 + 2 = 188
+
+notes: |
+  CONFIRMED routing + size + section boundaries + the 10-entry x 17-byte name-array stride (the
+  consumer pre-zeroes exactly 170 bytes for the name region -- the stride is hard-confirmed). Field
+  VALUE meanings are LIKELY where named (the binary emits debug-format strings that name the fields:
+  revenge_actor_sort, revenge_actor_id, revenge_team, revenge_team_guild, DEFAULT_PROPERTY_MAX,
+  RANDOM_PROPERTY_MAX) and opaque otherwise. The field widths sum to exactly 188 (verified).
+  [capture/debugger-pending] for all value meanings -- no capture this lane.
+
+  ACTOR KEY ORDER: sort @+0 (u8) then id @+4 (u32) with a 3-byte gap between -- the standard PvP
+  actor-key family layout.
+
+  Section map: { sort u8, id u32, gap[3], team u8, team_guild u8, name[17] x 10, default_prop[2],
+  random_prop[4], pad[2] }. Each name cell is NUL-bounded CP949 (copied with a <=16-byte bound).
+
+  UNBLOCKS: the Client.Application PvP revenge-roster handler (5/89) -- offsets are solid; the byte
+  meanings are capture-pending.

@@ -1,0 +1,40 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads a 3-byte header, then loops 5 slots reading 981 bytes per set bit)
+#   offsets:
+#     server_id @ 0x00: confirmed
+#     channel_id @ 0x01: confirmed
+#     slot_mask @ 0x02: confirmed
+#     slot_record @ 0x03+: confirmed (880-byte SpawnDescriptor + 96-byte StatsBlock + 1-byte flag + 4-byte timing)
+#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   capture_verified: false
+
+name: SmsgSceneEntityUpdate
+opcode: 0x30004           # major 3, minor 4 -> (3 << 16) | 4
+direction: S2C
+size: variable            # 3 bytes + N * 981 bytes, where N is the number of bits set in slot_mask (N <= 5)
+spec: packets/3-4_scene_entity_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Lobby scene and character slots update. Refills the lobby character scratch area for the slots
+  marked in the bitmask with character descriptors, stats, selectable states, and timings.
+  Shares the exact slot record formatting with SmsgCharacterList (3/1).
+
+fields:
+  - { name: ServerId, type: u8 }            # 0x00  inbound server ID indicator
+  - { name: ChannelId, type: u8 }           # 0x01  inbound channel ID indicator
+  - { name: SlotMask, type: u8 }            # 0x02  bitmask of character slots present (bits 0..4 select slots 0..4)
+  # Followed by N set slot records, where each record contains:
+  #   - SpawnDescriptor descriptor (880 bytes)
+  #   - StatsBlock stats (96 bytes)
+  #   - u8 selectable_flag (1 byte)
+  #   - u32 character_timing (4 bytes)
+
+notes: |
+  Static analysis only; no capture. Stride = 981 bytes per set slot. Maximum payload size = 3 + 5 * 981 = 4908 bytes.
+  
+  Unlike SmsgCharacterList (3/1), this message updates the character select scratch in-place 
+  without resetting the whole structure or forcing the top-level GameState to 4. 
+  If ServerId is not 1, it delegates to the select-window sub-handler.

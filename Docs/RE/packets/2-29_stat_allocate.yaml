@@ -6,7 +6,7 @@ opcode: 0x2001d           # major 2 (GameAction), minor 29 -> (2 << 16) | 29
 direction: C2S
 size: 20                 # fixed 20-byte body: five contiguous u32 absolute stats
 spec: packets/2-29_stat_allocate.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client stat-point allocation request. Carries the five primary stats as ABSOLUTE target values (not deltas), in the order STR, INT, AGI, DEX, CON. Sent by the character/stat window's Apply action. The server answers with the 4/29 stat-update ack.

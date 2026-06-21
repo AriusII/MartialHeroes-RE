@@ -1,0 +1,99 @@
+# spec: Docs/RE/packets/2-80_guild_request_union.yaml
+# Role: C2S guild / clan + map-territory request — a 48-byte DISCRIMINATED UNION keyed by a selector byte.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size + the overlay offsets are control-flow facts; the selector enum and
+# the amount VALUES are static inferences (capture/debugger-pending).
+#
+# VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   size + union shape + the per-selector overlay offsets (Selector@+0x00, ContextId@+0x04, NameCellA
+#   @+0x0E, SubSelector@+0x1C, NameCellB@+0x1D, AmountValue@+0x20, TailValueA/B@+0x28/+0x2C):
+#   control-flow CONFIRMED. Selector enum + amount VALUES: capture/debugger-pending. capture_verified: false.
+#
+# CORRECTION (W5.1 body-struct recovery — binary wins): the 48-byte body is NOT a flat opaque record —
+# it is a DISCRIMINATED UNION (overlay). Callers memset(rec, 0, 0x30) then write a leading selector byte
+# at +0x00 followed by selector-specific fields, so bytes +0x08..+0x2F are PER-SELECTOR reinterpretations
+# of the same buffer (not all simultaneously live). The overlay offsets below replace the earlier coarse
+# {ContextId / AmountQ / Union} model.
+
+name: CmsgGuildRequest
+opcode: 0x20050           # major 2 (GameAction), minor 80 -> (2 << 16) | 80
+direction: C2S
+size: 48                  # fixed 48-byte body (0x30) — discriminated union keyed by Selector @+0x00
+spec: packets/2-80_guild_request_union.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Guild / clan operations request (create / join / leave / disband / accept / reject / fame-donate, plus
+  a map/territory object-pick variant). A fixed 48-byte DISCRIMINATED UNION keyed by a leading Selector
+  byte: a common front (Selector @+0x00, ContextId @+0x04) plus a per-selector overlay over +0x08..+0x2F
+  that reinterprets the buffer as a primary id/value, a sub-op marker, two CP949 width-17 name cells, an
+  amount qword, and two tail values. Driven by guild fame/management panel buttons and a world-map region
+  click (Selector 0). Contract class: Request -> async-channel (selector-dependent guild push/panel reply).
+
+# Wire order, offset 0 = first payload byte. Pack=1; the union spans the full 48 bytes. The COMMON FRONT
+# (+0x00..+0x07) is live for every selector; the SELECTOR OVERLAY (+0x08..+0x2F) is per-selector — the
+# fields below are the union members observed across the callers, NOT all simultaneously present.
+fields:
+  # --- common front (all selectors) ---
+  - { name: Selector,     type: u8 }            # 0x00  op discriminator (union key) [enum capture/debugger-pending]
+  - { name: Pad0,         type: "u8[3]" }       # 0x01  zero pad (the 48-byte buffer is zero-cleared, then the low selector byte is written)
+  - { name: ContextId,    type: u32 }           # 0x04  window/guild context handle (resolved from a UI-context accessor), written on nearly every selector [capture/debugger-pending]
+  # --- selector overlay (+0x08..+0x2F) — per-selector reinterpretations of the same buffer ---
+  - { name: PrimaryValue, type: u32 }           # 0x08  PrimaryValue / PtrOrId: sel 0 = map-pin id; sel 2 = a computed cost; sel 5/0xA = a list/completion handle [capture/debugger-pending]
+  - { name: SubOpA,       type: u8 }            # 0x0c  sub-op marker (e.g. sel 9 sets this to 2, a donate/contribute marker) [capture/debugger-pending]
+  - { name: NameCellA,    type: "bytes[17]" }   # 0x0e  CP949 width-17 NUL-padded name cell (e.g. sel 9 = local player name)
+  - { name: SubSelector,  type: u8 }            # 0x1c  name-op discriminator for the name-bearing selectors [capture/debugger-pending]
+  - { name: NameCellB,    type: "bytes[17]" }   # 0x1d  CP949 width-17 NUL-padded target/guild name cell (strncpy count 0x11)
+  - { name: AmountValue,  type: i64 }           # 0x20  amount qword (e.g. sel 9 donation amount) [capture/debugger-pending]
+  - { name: TailValueA,   type: u32 }           # 0x28  secondary amount / handle [capture/debugger-pending]
+  - { name: TailValueB,   type: u32 }           # 0x2c  window/list handle (high half of the +0x28 qword on some selectors) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 48-byte / 0x30 blit of a memset-zeroed buffer) and the
+  union overlay offsets. The layout is a DISCRIMINATED UNION keyed by the Selector byte at +0x00, so the
+  +0x08..+0x2F region's content varies by selector — the fields[] above are the union MEMBERS, not all
+  live at once. Field VALUES are static inferences (capture-pending).
+
+  COMMON FRONT (every selector):
+    0x00 (1B) Selector  : the action discriminator. Observed values across callers: 0 = map-pin / area
+                          select; 1 = guild create-cost commit; 2 = guild cost-quote; 3,4,5,7,8 = guild
+                          list/info sub-ops; sub-ops 6/7/0xC/0xD/0xE use the +0x1C SubSelector overlay.
+                          [enum capture/debugger-pending]
+    0x01 (3B) Pad0      : zero pad.
+    0x04 (4B) ContextId : a window/guild context handle, written on nearly every selector. [pending]
+
+  SELECTOR OVERLAY (+0x08..+0x2F, per active selector):
+    0x08 (4B)  PrimaryValue : selector 0 -> a map-pin id (from an area record); selector 2 -> a computed
+                              cost (10 x unit x qty); selectors 5/0xA -> an internal list/completion
+                              handle. [pending]
+    0x0c (1B)  SubOpA       : a sub-op marker; selector 9 sets it to 2 (a donate/contribute marker). [pending]
+    0x0e (17B) NameCellA    : a CP949 width-17 NUL-padded name cell; selector 9 carries the local player's
+                              name here.
+    0x1c (1B)  SubSelector  : name-op discriminator for the name-bearing selectors: 0/1 (add target),
+                              2 (variant), 3/4 (other name ops). [pending]
+    0x1d (17B) NameCellB    : the target/guild name for the name-op selectors, CP949 width-17 (strncpy
+                              count 0x11; preceded by an 18-byte clear at +0x1C on some paths).
+    0x20 (8B)  AmountValue  : an amount qword; selector 9 = a donation amount (1,000,000 x x). [pending]
+    0x28 (4B)  TailValueA   : a secondary amount / handle; selector 9. [pending]
+    0x2c (4B)  TailValueB   : a window/list handle; selectors 1 and 3 (the high half of the +0x28 qword). [pending]
+
+  Byte-total reconciliation: the union spans the full 48 bytes — front +0x00..+0x07 common; the largest
+  overlay (name-op) reaches +0x1D + 17 = +0x2E; the value-op overlay reaches +0x2C + 4 = +0x30 (48). Both
+  fit exactly within 48. CONFIRMED.
+
+  TRIGGER: guild fame/management panel buttons (create / join / leave / disband / accept / reject /
+  donate) and a world-map region click (the map/territory object-pick, Selector 0). The validator gates
+  on party-exists + a member count and, for join/leave-style selectors, string-compares an input name
+  against the player's clan/party name.
+
+  CONTRACT CLASS: Request -> async-channel. No installed same-minor ack; the reply rides the guild
+  push/panel channel (the 5/55 / 5/65 / 4/103 family, same as 2/30), selector-dependent (capture-pending).
+
+  UNKNOWNS to resolve with a capture:
+    - the full Selector enum and the per-selector overlay member map;
+    - the amount VALUES (donation / cost-quote scaling);
+    - the inbound reply opcode (a guild state-update / territory-info S2C) — pending.
+
+  UNBLOCKS: Client.Application guild / clan / territory request use-case (frame the 48-byte union; branch
+  the overlay on Selector).

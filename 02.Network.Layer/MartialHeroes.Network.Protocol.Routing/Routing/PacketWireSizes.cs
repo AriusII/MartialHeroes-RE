@@ -1,0 +1,219 @@
+// spec: Docs/RE/opcodes.md + the per-packet specs — compile-time opcode → struct wire/header size.
+//
+// Reflection-free. This is an explicit `switch` (no Dictionary, no Activator, no Type.GetType) that
+// maps each opcode this project models to the byte size of its Pack=1 struct: the full WireSize for
+// fixed-size packets, or the fixed HeaderSize for variable-length packets (whose tail the caller
+// hand-codes). It complements the IPacketHandler dispatch in PacketRouter without changing it: a
+// consumer can size-check a payload before reinterpreting it via TypedPacketView, additively.
+
+using MartialHeroes.Network.Protocol.Core.Opcodes;
+using MartialHeroes.Network.Protocol.Packets;
+using MartialHeroes.Network.Protocol.Packets.Login.Packets;
+using MartialHeroes.Network.Protocol.Packets.Social.Packets;
+using MartialHeroes.Network.Protocol.Packets.World.Packets;
+
+namespace MartialHeroes.Network.Protocol.Routing.Routing;
+
+/// <summary>
+///     Compile-time map from a packed opcode to the byte size of its modelled wire struct. Returns the
+///     fixed <c>WireSize</c> for fixed-size packets and the fixed <c>HeaderSize</c> for variable-length
+///     packets (those carry an additional hand-coded tail). spec: Docs/RE/opcodes.md and the per-packet
+///     specs cited on each arm.
+/// </summary>
+public static class PacketWireSizes
+{
+    /// <summary>
+    ///     Returns <see langword="true" /> and the modelled struct size for a known opcode; otherwise
+    ///     <see langword="false" />. Reflection-free explicit switch. spec: Docs/RE/opcodes.md.
+    /// </summary>
+    public static bool TryGet(uint packedOpcode, out int size, out bool isVariableLength)
+    {
+        switch (packedOpcode)
+        {
+            // --- fixed-size S2C packets ---
+            case Opcodes.SmsgCharDespawn: // spec: packets/5-0_char_despawn.yaml
+                size = SmsgCharDespawn.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgEnterGameAck: // spec: packets/3-5_enter_game_response.yaml
+                size = SmsgEnterGameAck.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgActorMovementUpdate: // spec: packets/5-13_actor_movement_update.yaml
+                size = SmsgActorMovementUpdate.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharSpawn: // spec: packets/5-3_char_spawn.yaml
+                size = SmsgCharSpawn.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgActorSpawnExtended: // spec: packets/5-1_actor_spawn_extended.yaml
+                size = SmsgActorSpawnExtended.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgActorVitalsAndPairState: // spec: packets/5-53_actor_vitals_and_pair_state.yaml
+                size = SmsgActorVitalsAndPairState.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgLevelUp: // spec: packets/5-32_level_up.yaml
+                size = SmsgLevelUp.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgStatUpdate: // spec: packets/4-29_stat_update.yaml
+                size = SmsgStatUpdate.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgEquipItemResult: // spec: Docs/RE/structs/item.md (EquipItemResult, 4/12)
+                size = SmsgEquipItemResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgItemSlotStateAck: // spec: Docs/RE/structs/item.md (EquipSlotBody, 4/22)
+                size = SmsgItemSlotStateAck.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgNpcBuyOrAcquireAck: // spec: Docs/RE/structs/item.md (NpcBuy ack, 4/19)
+                size = SmsgNpcBuyOrAcquireAck.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgSkillHotbarSlotSet: // spec: Docs/RE/structs/skill.md (SkillHotbarSlotSet, 5/33)
+                size = SmsgSkillHotbarSlotSet.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgSkillHotbarAssignResult
+                : // spec: Docs/RE/structs/skill.md (SkillHotbarAssignResult, 4/41)
+                size = SmsgSkillHotbarAssignResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharActionResult: // spec: Docs/RE/opcodes.md (3/100 generic char action result)
+                size = SmsgCharActionResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgSrvBillingDeactivated: // spec: packets/1-16_srv_billing_deactivated.yaml
+                size = 0;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgSrvBillingActivated: // spec: packets/1-17_srv_billing_activated.yaml
+                size = 0;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgSrvBillingExpiryNotice: // spec: packets/1-19_srv_billing_expiry_notice.yaml
+                size = SmsgSrvBillingExpiryNotice.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgRenameCharResult: // spec: packets/3-6_rename_char_result.yaml
+                size = SmsgRenameCharResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharManageResult: // spec: packets/3-7_char_manage_result.yaml
+                size = SmsgCharManageResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgShopPageUpdate: // spec: packets/3-8_shop_page_update.yaml
+                size = SmsgShopPageUpdate.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharStatusUpdate: // spec: packets/3-13_char_status_update.yaml
+                size = SmsgCharStatusUpdate.Size;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharSpawnResult
+                : // spec: packets/3-14_char_spawn_response.yaml (mapped to SmsgCharSpawnResult in Opcodes)
+                size = SmsgCharSpawnResult.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharStatusBytesByName
+                : // spec: Docs/RE/packets/3-23_char_select_status_update.yaml (28-byte roster patch, NOT 12-byte create-result)
+                size = SmsgCharStatusBytesByName.WireSize;
+                isVariableLength = false;
+                return true;
+
+            // --- variable-length packets: only the fixed header is modelled ---
+            case Opcodes.SmsgGameStateTick: // spec: handlers.md §4/1; client_runtime.md §9.4
+                size = SmsgGameStateTick.WireSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgCharacterList: // spec: packets/3-1_character_list.yaml
+                size = SmsgCharacterListHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgChatBroadcast: // spec: packets/5-7_chat_broadcast.yaml
+                size = SmsgChatBroadcastHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgSkillPointUpdate: // spec: Docs/RE/structs/skill.md (SkillPointUpdate, 4/150)
+                size = SmsgSkillPointUpdateHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgSrvLetterReceived: // spec: packets/1-20_srv_letter_received.yaml
+                size = 76;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgSceneEntityUpdate: // spec: packets/3-4_scene_entity_update.yaml
+                size = 3;
+                isVariableLength = true;
+                return true;
+            case Opcodes.SmsgGmChatMessage: // spec: packets/3-50000_gm_chat_message.yaml
+                size = 5;
+                isVariableLength = true;
+                return true;
+
+            // --- C2S CharacterMgmt request builders (major 1; modelled for the send path) ---
+            case Opcodes.CmsgLogout: // spec: packets/cmsg_logout.yaml (header-only, 0 B payload)
+                size = CmsgLogout.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgCreateCharacter: // spec: packets/cmsg_char_create.yaml (52 B body)
+                size = CmsgCreateCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgSelectCharacterSlot
+                : // spec: Docs/RE/packets/cmsg_char_select.yaml (1/7 select-and-play or slot-lock)
+                size = CmsgSelectCharacterSlot.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgEnterGameRequest: // spec: packets/cmsg_char_enter.yaml
+                size = CmsgEnterGameRequest.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgRenameCharacter: // spec: packets/cmsg_char_rename.yaml
+                size = CmsgRenameCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgMoveCharacter: // spec: packets/cmsg_char_move.yaml
+                size = CmsgMoveCharacter.WireSize;
+                isVariableLength = false;
+                return true;
+
+            // --- other C2S packets the client emits (modelled for the send path) ---
+            case Opcodes.CmsgMoveRequest: // spec: packets/2-13_move_request.yaml
+                size = CmsgMoveRequest.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.CmsgWhisper: // spec: packets/2-7_whisper.yaml
+                size = CmsgWhisperHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.CmsgUseSkill: // spec: packets/2-52_use_skill.yaml
+                size = CmsgUseSkillHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.CmsgChatContextual: // spec: packets/2-83_chat_contextual.yaml
+                size = CmsgChatContextualHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.CmsgChatChannel: // spec: packets/3-21_chat_channel.yaml
+                size = CmsgChatChannelHeader.HeaderSize;
+                isVariableLength = true;
+                return true;
+            case Opcodes.CmsgKeepaliveToggle: // spec: Docs/RE/opcodes.md (2/112, 1-byte body)
+                size = CmsgKeepaliveToggle.WireSize;
+                isVariableLength = false;
+                return true;
+
+            default:
+                size = 0;
+                isVariableLength = false;
+                return false;
+        }
+    }
+}

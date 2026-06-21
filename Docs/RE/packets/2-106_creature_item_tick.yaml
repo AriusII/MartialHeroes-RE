@@ -1,0 +1,36 @@
+# spec: Docs/RE/packets/2-106_creature_item_tick.yaml
+# Role: C2S creature-item / effect-tick acknowledgment (single flag byte).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgCreatureItemTick
+opcode: 0x2006a           # major 2 (GameAction), minor 106 -> (2 << 16) | 106
+direction: C2S
+size: 1                   # fixed 1-byte body
+spec: packets/2-106_creature_item_tick.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Creature-item / effect-tick acknowledgment. A single flag byte (both callers pass the constant 1). A recurring "I'm doing the gated thing now" signal driven by the creature-attached-item effect loop and a UI/map gate.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the width sums to size: 1.
+fields:
+  - { name: Flag, type: u8 }   # 0x00  enable/trigger flag; both callers pass constant 1 [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 1-byte blit); the exact server-side meaning is a
+  static inference (capture-pending).
+
+    0x00 (1B) Flag : an enable/trigger byte; both callers pass the constant 1 (a trigger, not a
+                     value). [capture/debugger-pending]
+
+  TRIGGER: two callers, both passing 1 — the per-tick gate for the creature-attached item
+  (creature_item.xdb effect cadence), which emits when the resolved record's effect flag is set and
+  a HUD condition is active; and a small gate that emits unless a UI state or a map flag blocks it.
+  So 2/106 is a recurring effect-tick / auto-action acknowledgment fired from the item-effect loop.
+
+  UNKNOWNS to resolve with a capture:
+    - the exact server-side meaning (effect/loot result vs simple liveness ack);
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application creature-item effect-tick handling.

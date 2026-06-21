@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-17
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed); real selected-target name/HP-MP plate not recovered (HUD-II follow-up — slot 135 is UpgradeProcessPanel) — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring RESOLVED CYCLE 8 (the canvas carries NO render-target/viewport field of its own — it is a thin 2D hit-region + drag-orbit-delta widget; the live preview renders via the owner window's embedded GView at window +0xE8); in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback — 2026-06-21 CYCLE 8 (IDB SHA 263bd994): event-dispatch / single-shared-ID3DXSprite render path / 15-slot HANGUL font table / 178-slot HUD roster (slot 35 MopGagePanel, 52 PetPanel, 110 Gamble, 135 UpgradeProcessPanel, 178 MainHandler) all re-confirmed CODE-CONFIRMED with zero conflicts; GUCanvas3D render-target gap CLOSED (no own RT field; owner GView renders the preview); leaf-widget offset tables deepened (font-slot is per-leaf-class: Button +0xE8 / Label +0xE4 / Textbox +0xDC; GUShortLabel absent as a distinct class)
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -40,8 +40,13 @@ family. Key architectural facts:
 - **Rendering uses a single shared `ID3DXSprite`** per frame. Every visible widget submits exactly
   one textured-quad blit (atlas sub-rect + translation transform + ARGB tint). There is no custom
   vertex format for UI geometry.
-- **Text rendering** is GPU-side via `D3DXCreateFontA` with `HANGUL_CHARSET = 129`, using the
-  standard Korean Windows system fonts. There is no VFS-shipped glyph atlas for body text.
+- **Text rendering** is GPU-side via the D3DX font object's text-draw method (`HANGUL_CHARSET = 129`),
+  using the standard Korean Windows system fonts; there is no VFS-shipped glyph atlas for body text.
+  **15 font slots** are created at startup with common parameters (char-set 129, mip-levels 1,
+  italic off, default output-precision/quality, default pitch-and-family). Body-text layout is
+  **monospace per slot** (advance = the slot's character width) with **no kerning table**; the only
+  OS text measurement anywhere in the path is for the IME composition underline cursor. Full slot
+  table and metrics in §6.
 - **UI captions** are fetched by numeric ID from `data/script/msg.xdb`, encoded CP949.
 - The **master scene machine** has 9 primary states driven by a WinMain switch; in-game (state 5)
   returns to character-select (state 4), not to login.
@@ -125,9 +130,25 @@ These are instance-field offsets on the base `GUComponent`, shared by all subcla
 | +0x8C (byte) | 1 | u8 | Show/hide target (1 = visible/showing, 0 = hiding; alpha chases this) | CODE-CONFIRMED |
 | +0x8D (byte) | 1 | u8 | Remove-mark flag (1 = sweep this child out on the next RemoveMarkedChildren pass) | CODE-CONFIRMED |
 | +0x90 | 4 | u32 | Bound texture ID | CODE-CONFIRMED |
-| +0x98 | 4 | u32 | Timer expiry (ms) | CODE-CONFIRMED |
-| +0x9C | 4 | u32 | Timer interval (default 3000 ms) | CODE-CONFIRMED |
-| +0xA0 | 4 | ptr | Timer callback pointer (null if unused) | CODE-CONFIRMED |
+| +0x95 (byte) | 1 | u8 (bool) | **Auto-hide enable** — opt-in flag; zero-initialised by both base constructors (auto-hide OFF by default). Gates **both** the arm path (the show method) and the per-frame tick. A transient/auto-dismissing panel turns auto-hide on by writing 1 here. NOT a tooltip-armed latch, hover-state byte, or delay-mode selector (hover lives at +0x88/+0x89). | CODE-CONFIRMED |
+| +0x98 | 4 | u32 | **Auto-hide arm-start timestamp (ms)** — set to the current millisecond clock when the timer is armed (floored to 1; 0 = not armed). Elapsed time is computed each frame as `now - this`. Reset to 0 when the timer fires. *(Was previously labelled "Timer expiry"; the field holds the START time, and expiry is computed as start + interval.)* | CODE-CONFIRMED |
+| +0x9C | 4 | u32 | **Auto-hide timeout duration (ms)** — constructor default **3000**; per-instance overridable. The tick fires when `(now - start) >= this`. | CODE-CONFIRMED |
+| +0xA0 | 4 | ptr | **Auto-hide timeout callback** — function pointer fired on timeout (invoked with no arguments); null when unused. On fire the callback runs **first**, then the component hides itself, then +0x98 resets to 0. | CODE-CONFIRMED |
+
+> **Auto-hide timer mechanism (CODE-CONFIRMED, re-walked 2026-06-21 / 263bd994).** The +0x95..+0xA0
+> block is the shared auto-hide timer inherited by every widget. **Bytes +0x94, +0x96, +0x97 are
+> alignment padding - not fields** (no read or write touches them in any timer path; +0x95 is a lone
+> byte). **Arm:** the show method (vtable slot 1, the visibility setter) records the arm timestamp into
+> +0x98 only when all three conditions hold - the widget is being shown (+0x8C != 0), auto-hide is
+> enabled (+0x95 != 0), and a non-zero timeout (+0x9C) is set. Hiding clears the show-target, so the
+> timer is not re-armed. **Tick/fire:** the per-frame draw / alpha-fade method (vtable slot 7) checks
+> `(now - start) >= timeout` as an **unsigned millisecond** comparison; on fire it calls the +0xA0
+> callback (if non-null), then hides itself to begin the fade-out, then disarms (+0x98 = 0). The clock
+> is the OS millisecond timer scaled by the global time-scale, so both +0x98 and +0x9C are genuine
+> milliseconds. Observed timeout values: the default **3000 ms**; one panel overrides to **6000 ms**;
+> another derives the timeout from a config value (config-seconds x 1000). There is no separate
+> hover-delay or fade-duration constant in this block (the show/hide alpha chase toward +0x8C is the
+> unrelated fade, +/-64 per tick, +/-32 for the extended base).
 
 Per-text-widget font-slot fields (see §6.3):
 
@@ -203,13 +224,85 @@ Additional button fields:
 | Constructor | NORMAL | HOVER | PRESSED | DISABLED |
 |---|---|---|---|---|
 | 2-state | arg `(sX, sY)` | = NORMAL | = NORMAL | = NORMAL |
-| 3-state | arg `(sX, sY)` | = NORMAL | arg `(a9, a10)` | = NORMAL |
-| 7-state | arg `(sX, sY)` | arg `(a11, a12)` | arg `(a9, a10)` | = NORMAL |
+| 3-state | arg `(sX, sY)` | = NORMAL | arg `(pX, pY)` | = NORMAL |
+| 7-state | arg `(sX, sY)` | arg `(hX, hY)` | arg `(pX, pY)` | = NORMAL |
 
 So **all three constructors produce at most 3 distinct sprite frames** (normal, hover, pressed).
 Where HOVER equals NORMAL the button gives caption-only feedback on hover; where both equal
 NORMAL the sprite never changes. The "7-state" label refers to the state-count field value,
 not to a count of distinct sprites.
+
+### 1.5a Leaf-widget added-field offsets — the rest of the family (CODE-CONFIRMED — CYCLE 8)
+
+Beyond GUButton (§1.5), the other concrete leaves each add their own fields on the GUComponent base
+(byte offsets from the object base; all CODE-CONFIRMED CYCLE 8). The vtable stays the layered 13-slot
+interface for every direct GUComponent leaf — leaves **override** slots, none extends the table —
+except `GUScrollEx`, which derives `GUPanel` (14 slots). Each leaf OR-sets one kind bit into the
+capability-flags word at +0x08.
+
+**`GUCheckBox`** (derives **GUButton**; kind bit 0x10) — reuses the whole GUButton frame machinery:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| (inherits all GUButton fields +0xA4..+0xF8) | | | |
+| +0xFC | 1 | `checked` (toggle) | 0 → NORMAL frame; 1 → the **PRESSED** frame (the checked sprite reuses PRESSED); disabled → DISABLED. |
+
+**`GULabel` / `GULabels`** (kind bit 0x80; `GUShortLabel` is **absent** as a distinct RTTI class — it
+is a single-vs-multi-line variant of GULabel/GULabels):
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA4 | 16+ | `caption` (CP949 std::string) | primary text. |
+| +0xC0 | 16+ | `aux_text` (CP949 std::string) | secondary/auxiliary text. |
+| +0xE4 | 4 | `font_slot` | selects the font-table slot at draw time (label font slot — distinct from the button's +0xE8). |
+
+**`GUTextbox`** (kind bit 0x400) — the only editable widget:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0x8B | 1 | `caret_active` / focused | caret-blink runs only when set. |
+| +0xA4 | 4 | `mode_style_word` (init 1) | **bit 0x80 = password-mask** (draws "*" per char); other bits = IME mode. |
+| +0xA8 | 1 | `ime_compose_state` | value 3 selects the IME-composition caret placement. |
+| +0xB4 | 16+ | `text` (CP949 std::string) | the editable buffer. |
+| +0xC8 | 4 | `text_length` | char count (drives the password-mask loop + scroll math). |
+| +0xD0 | 4 | `max_length` (init 10) | edit cap. |
+| +0xD4 | 4 | `caret_blink_ms` | blink half-period 500 ms. |
+| +0xD8 | 4 | `scroll_start` | first visible char index. |
+| +0xDC | 4 | `font_slot` | textbox font slot (distinct from button +0xE8 and label +0xE4). |
+
+**`GUList`** (kind bit 0x200) — a GUComponent-derived listbox carrying its **own** row vector (it is
+**not** a GUPanel):
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA8 / +0xAC / +0xB0 | 4 ea | `rows_begin` / `rows_end` / `rows_capacity` | the row child-vector (zero-init). |
+| +0xB8 | 4 | `selected_index` | **−1** = no selection. |
+| +0xC4 | 4 | `row_state_count` | init 2. |
+
+**`GUScroll`** (kind bit 0x800) — a GUComponent-derived scrollbar embedding three 24-byte
+button/thumb sub-blocks:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xC0 | 24 | `up_button` sub-block | |
+| +0xD8 | 24 | `down_button` sub-block | |
+| +0xF0 | 24 | `thumb` sub-block | |
+| +0x108 | 4 | `step` | scroll step (seeded 20). |
+
+**`GUScrollEx`** (derives **GUPanel**, 14-slot vtable) — a panel-hosted scrollbar; adds a `mode`
+field (init 1, +0xBC) and a `dragging` byte (+0xDC) over the inherited GUPanel child vector.
+
+**`GUCanvas3D`** (kind bit 0x40) — a thin 2D widget, **176 bytes (0xB0)**: its draw virtual is an
+**empty stub** and it carries **no render-target/viewport field** (see §9 open-item 9, resolved). Its
+only added state is a drag-orbit delta captured on press/move:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA8 | 4 | `drag_dx` | cursor X − world X (orbit delta consumed by the owner). |
+| +0xAC | 4 | `drag_dy` | cursor Y − world Y. |
+
+The live 3D preview into the canvas rectangle is rendered by the **owner window's embedded GView**
+(window +0xE8, `structs/guwindow.md §4`), not by the canvas.
 
 > **Front-end 3-state argument order (CODE-CONFIRMED).** The 3-state button builder used by the
 > login and character-select scenes takes its three frame origins in the order
@@ -315,6 +408,267 @@ auxiliary 3D/scene view (from +0xE8), and a texture/skin-atlas list (from +0x220
 windows derive from it (MainWindow/"MainMaster", the login window, the opening window, the
 character-select window, and a dev/test window). The full offset table is in `structs/guwindow.md`;
 the base-class field layout is in `structs/gucomponent.md`.
+
+---
+
+## 1.9 The full panel-slot → class roster (CODE-CONFIRMED — the HUD panel registry)
+
+The in-game HUD is the set of panels stored into the master window's **panel-slot array**. That
+array lives at master-window byte offset **+0x238**; the slot index is `(byte_offset − 0x238) / 4`
+(pointer-sized) — see `structs/guwindow.md` for the array base/index derivation and the master-window
+size. A single in-game HUD-build routine walks the panel list once and, per panel, **allocates the
+object, runs its constructor, and stores the resulting pointer into a fixed slot** of that array. The
+concrete class behind each slot is read from the vtable each constructor installs at object `+0x00`
+(its RTTI type, neutralised here).
+
+> **Slot-table bases (do not confuse two numbering schemes).** This roster numbers slots from the
+> **panel-slot array base +0x238** — slot `i` = byte `+0x238 + 4·i`. §1.6 separately reports the
+> in-game scene/HUD handler "at slot index 320 = byte +0x500": that **320** counts pointer slots from
+> object `+0x00` (byte 1280 / 4 = 320), whereas the same word is **slot 178** here (byte 1280, i.e.
+> `(0x500 − 0x238)/4 = 178`, the +0x500 main-handler slot of §1.9.2). Both refer to the same pointer;
+> this roster uses the **+0x238-relative** index throughout.
+
+### 1.9.1 Slot population summary (CODE-CONFIRMED)
+
+- **178 slots are filled** by the HUD-build routine; the highest populated index is **218**.
+- **Interior gaps (never built here): slots 42, 104, 147.** **Trailing gaps:** 179–184, 187–217,
+  219–230. The scanned range is 0..230.
+- A separate **per-game-state reconfigure routine** re-stores only an *existing* fixed subset of slots
+  on a scene-state change (it sets text/colour/visibility/sounds, never geometry). It **adds no new
+  slots**, so the gaps above are genuinely null/reserved — not lazily filled later (the one exception
+  is slot 178, §1.9.2). This reconciles with `ui_hud_layout.md §0.1`, which counts the same 178 stores.
+
+### 1.9.2 Slot 178 — the in-game MainHandler (filled lazily)
+
+Slot **178** (master byte **+0x500**, a 200-byte object) is **skipped by the master window's
+slot-zeroing constructor** and is **not** filled by the HUD-build routine. It is created and stored
+**only when the in-game world scene state is entered** (the scene state machine of §11). Its class is
+**MainHandler**, the in-game state handler. See `structs/guwindow.md` for the +0x500 layout detail.
+
+### 1.9.3 The roster (slot index → concrete panel class → purpose)
+
+Toolkit primitives are kept as `GULabel` / `GUButton` / `GUPanel` / `GUComponent` / `GXCursor2D`;
+game panels carry their neutral class name. Confidence is **CODE-CONFIRMED** for every row
+(call-immediately-precedes-store attribution verified; class resolved from each constructor's `+0x00`
+vtable RTTI).
+
+| Slot | Concrete panel class | Purpose |
+|-----:|----------------------|---------|
+| 0 | `ActorChatPanel` | Floating actor speech / chat bubble |
+| 1 | `DropItemPanel` | Drop-item confirm |
+| 2 | `Gage3DPanel` | 3D world gauge (HP bars over actors) |
+| 3 | `hyubhengView` (GUPanel subclass) | "hyubheng" view panel |
+| 4 | `ItemPanel` | Inventory item window |
+| 5 | `TradePanel` | NPC trade window |
+| 6 | `DefaultMenu` | Default right-click context menu |
+| 7 | `NpcPanel` | NPC dialog root |
+| 8 | `RepairNpcPanel` | NPC repair |
+| 9 | `QuestNpcPanel` | NPC quest |
+| 10 | `KeepNpcPanel` | NPC warehouse / keep |
+| 11 | `GuildNpcPanel` | NPC guild |
+| 12 | `ConfessionNpcPanel` | NPC confession |
+| 13 | `GatherNpcPanel` | NPC gather |
+| 14 | `LinkPanel` | Link / hyperlink panel |
+| 15 | `GagePanel` | Player HP/MP gauge bar |
+| 16 | `StatusPanel` | Character status window |
+| 17 | `SkillPanel` | Skill window |
+| 18 | `ChatPanel` | Chat input panel |
+| 19 | `MapPanel` | Minimap panel |
+| 20 | `TotalMapPanel` | Full / world map |
+| 21 | `ChatOutputPanel` | Chat log / output |
+| 22 | `OptionPanel` | Options root |
+| 23 | `ExitPanel` | Exit / quit confirm |
+| 24 | `ReAskPanel` | Re-ask / re-confirm |
+| 25 | `GuildReaskPanel` | Guild re-ask confirm |
+| 26 | `ErrorPanel` | Error message popup |
+| 27 | `ActorStatePanel` | Actor buff / state icons |
+| 28 | `ActorStatePassivePanel` | Actor passive-state icons |
+| 29 | `ActorStateCashPanel` | Actor cash / premium-buff icons |
+| 30 | `ActorStateSkillPanel` | Actor skill-state icons |
+| 31 | `TalkPanel` | Talk / dialogue panel |
+| 32 | `ConfirmPanel` | Generic yes/no confirm |
+| 33 | `Descriptor` | Tooltip / item descriptor |
+| 34 | `HelpPanel` | Help window |
+| **35** | **`MopGagePanel`** | **Target-mob gauge frame — the real "target frame" (see §1.9.4)** |
+| 36 | `PcPanel` | Other-player info panel |
+| 37 | `PcTradePanel` | Player-to-player trade |
+| 38 | `StallKeeperPanel` | Personal stall (vendor) keeper |
+| 39 | `ProductPanel` | Product / goods listing |
+| 40 | `DeliveryPanel` | Delivery / mail send |
+| 41 | `RequestPanel` | Request panel |
+| 42 | *(gap — null / reserved)* | Not built by this routine |
+| 43 | `PartyPanel` | Party window |
+| 44 | `MiniParty` | Mini party HUD |
+| 45 | `PartyReqPanel` | Party invite request |
+| 46 | `OtherInfo` | Other-info panel |
+| 47 | `ShowDownReq` | Duel / showdown request |
+| 48 | `MessagePanel` | Message box |
+| 49 | `KeepPanel` | Warehouse / keep window |
+| 50 | `SetupPanel` | Setup / config panel |
+| 51 | `RelationPanel` | Relation / friend-foe panel |
+| **52** | **`PetPanel`** | **Pet window — the real pet-window slot (see §1.9.4)** |
+| 53 | `SecretMemPanel` | Secret-memo (private notes) |
+| 54 | `ItemConfirmPanel` | Item-use confirm |
+| 55 | `LetterPanel` | Letter / mail read |
+| 56 | `SurvivePanel` | Survival-mode panel |
+| 57 | `StackCountPanel` | Stack-split count input |
+| 58 | `CountInputPanel` | Numeric count input |
+| 59 | `SkillConfirmPanel` | Skill-learn confirm |
+| 60 | `CastTimePanel` | Cast-time / progress bar |
+| 61 | `NameInputPanel` | Name text input |
+| 62 | `PriceInputPanel` | Price input |
+| 63 | `InvenSortPanel` | Inventory sort control |
+| 64 | `QuestPanel` | Quest log window |
+| 65 | `GuildAPanel` | Guild "A" panel (main) |
+| 66 | `GuildCreateAPanel` | Guild create |
+| 67 | `GuildShowPanel` | Guild show / info |
+| 68 | `GuildMemberPosSetPanel` | Guild member rank set |
+| 69 | `GuildFameDonatorPanel` | Guild fame donate |
+| 70 | `PublicPeacePanel` | Public-peace / law panel |
+| 71 | `QuestGiveUpPanel` | Quest abandon |
+| 72 | `QuestItemKeepPanel` | Quest-item keep |
+| 73 | `NpcQuestPanel` | NPC quest list |
+| 74 | `NpcQuestMsgPanel` | NPC quest message |
+| 75 | `KeyBackSetup` | Key-binding setup |
+| 76 | `NpcQuestTalkPanel` | NPC quest talk |
+| 77 | `QuestResultPanel` | Quest reward / result |
+| 78 | `EmoticonPanel` | Emoticon picker |
+| 79 | `AnnouncePanel` | Announcement banner |
+| 80 | `LottoPanel` | Lotto / lottery |
+| 81 | `WarInfoPanel` | War info |
+| 82 | `GuildWarInfoPanel` | Guild-war info |
+| 83 | `BigAlarmPanel` | Big / centre alarm banner |
+| 84 | `GMPanel` | GM panel |
+| 85 | `ComboPanel` | Combo / dropdown panel |
+| 86 | `StallListPanel` | Stall (vendor) listing |
+| 87 | `PotalListPanel` | Portal / teleport list |
+| 88 | `GoodsPanel` | Goods / shop panel |
+| 89 | `StatusDistributePanel` | Stat-point distribution |
+| 90 | `GatherSlotPanel` | Gathering slots |
+| 91 | `WarStoneInfoPanel` | War-stone info |
+| 92 | `BroodWarMapInfoPanel` | Brood-war map info |
+| 93 | `BroodWarListPanel` | Brood-war list |
+| 94 | `BroodWarAllyStatePanel` | Brood-war ally state |
+| 95 | `MediatePanel` | Mediation / arbitration |
+| 96 | `CarrierPigeonPanal` | Carrier-pigeon root (in-source spelling "Panal") |
+| 97 | `CarrierPigeonSendPanel` | Carrier-pigeon send |
+| 98 | `CarrierPigeonReadPanel` | Carrier-pigeon read |
+| 99 | `ActorPotalPanel` | Actor portal panel |
+| 100 | `FontSeePanel` | Cinematic "font-see" subtitle root |
+| 101 | `FontSeeSubTitlePanel` | Font-see subtitle line |
+| 102 | `FontSeeTimePanel` | Font-see timer line |
+| 103 | `FontSeeSubjectPanel` | Font-see subject line |
+| 104 | *(gap — null / reserved)* | Not built by this routine |
+| 105 | `Pandemonium` (GUPanel subclass) | "Pandemonium" event panel |
+| 106 | `Revengesummons` | Revenge-summon panel |
+| 107 | `revengevote` | Revenge-vote panel |
+| 108 | `FameStatePanel` | Fame state |
+| 109 | `RankStatePanel` | Rank state |
+| **110** | **`Gamble`** (GUPanel subclass) | **Gambling panel — NOT a pet window (see §1.9.4)** |
+| 111 | `Gmfuntion` | GM function panel (in-source spelling) |
+| 112 | `GmCharactor` | GM character panel (in-source spelling) |
+| 113 | `Autochect` (GUPanel subclass) | Auto-check panel (in-source spelling) |
+| 114 | `NpcSearch` (GUPanel subclass) | NPC search |
+| 115 | `FameBuffNpcPanel` | NPC fame-buff |
+| 116 | `EventPopupPanel` | Event popup |
+| 117 | `SubscriptionPanel` | Subscription / billing |
+| 118 | `TenderInfoPanel` | Tender / auction info |
+| 119 | `EventItemConfirmPanel` | Event-item confirm |
+| 120 | `PlaytimePanel` | Playtime / fatigue |
+| 121 | `GameClassPanel` (subclass) | Game-class select panel |
+| 122 | `AutoQuestionPanel` | Auto-question (anti-bot) |
+| 123 | `AutoCheckPanel` | Auto-check (anti-bot) |
+| 124 | `GameAddictionWarningPanel` | Addiction warning |
+| 125 | `GfitCharNameInputPanel` | Gift-char name input (in-source spelling) |
+| 126 | `GiftCharConfirmStep1` | Gift-char confirm step 1 |
+| 127 | `GiftCharConfirmStep2` | Gift-char confirm step 2 |
+| 128 | `GiftCharConfirmWaiting` | Gift-char waiting |
+| 129 | `GiftCharReceiveConfirm` | Gift-char receive confirm |
+| 130 | `GiftCharSecondPassword` | Gift-char second password |
+| 131 | `UpgradePanel` | Item upgrade window |
+| 132 | `ItemRepairPanel` | Item repair |
+| 133 | `ItemTransformPanel` | Item transform |
+| 134 | `UpgradeResultPanel` | Upgrade result |
+| **135** | **`UpgradeProcessPanel`** | **Upgrade in-progress window — CONFIRMS the prior slot-135 finding (see §1.9.4)** |
+| 136 | `AlarmSelectCharacterKind` | Alarm: select character kind |
+| 137 | `SelectCharacterKind` | Select character kind |
+| 138 | `NoPkPenaltyAlarmPanel` | No-PK penalty alarm |
+| 139 | `AutoPenaltyAlarmPanel` | Auto-penalty alarm |
+| 140 | `OptionPanel_Other` | Options: other tab |
+| 141 | `OptionPanel_Character` | Options: character tab |
+| 142 | `OptionPanel_Graphic` | Options: graphic tab |
+| 143 | `OptionPanel_Sound` | Options: sound tab |
+| 144 | `GreetPanel` | Greeting panel |
+| 145 | `TutorTalkPanel` | Tutorial talk |
+| 146 | `GUButton` (Diamond) | Inline HUD button (toolkit primitive) |
+| 147 | *(gap — null / reserved)* | Not built by this routine |
+| 148 | `GUButton` (Diamond) | Inline HUD button |
+| 149 | `GUPanel` (Diamond) | Stat-info group container (≈180-byte) — see §1.9.5 |
+| 150 | `GULabel` (Diamond) | Stat-info text label |
+| 151 | `GUButton` (Diamond) | Inline button |
+| 152 | `GUButton` (Diamond) | Inline button |
+| 153 | `GUPanel` (Diamond) | Stat-info group container |
+| 154 | `GULabel` (Diamond) | Stat-info text label |
+| 155 | `GULabel` (Diamond) | Stat-info text label |
+| 156 | `GULabel` (Diamond) | Stat-info text label |
+| 157 | `GULabel` (Diamond) | Stat-info text label |
+| 158 | `GUPanel` (Diamond) | Stat-info group container |
+| 159 | `GULabel` (Diamond) | Stat-info text label |
+| 160 | `GULabel` (Diamond) | Stat-info text label |
+| **161** | **`GULabel` (Diamond)** | **Stat-info text label (240-byte object; caption from the message table) — NOT a distinct panel class (see §1.9.5)** |
+| 162 | `GULabel` (Diamond) | Stat-info text label |
+| 163 | `GUPanel` (Diamond) | Stat-info group container (≈180-byte) |
+| **164** | **`GULabel` (Diamond)** | **Stat-info text label (240-byte object; caption from the message table) — NOT a distinct panel class (see §1.9.5)** |
+| 165 | `GULabel` (Diamond) | Stat-info text label |
+| 166 | `GULabel` (Diamond) | Stat-info text label |
+| 167 | `GULabel` (Diamond) | Stat-info text label |
+| 168 | `GUPanel` (Diamond) | Stat-info group container |
+| 169 | `GULabel` (Diamond) | Stat-info text label |
+| 170 | `GULabel` (Diamond) | Stat-info text label |
+| 171 | `GULabel` (Diamond) | Stat-info text label |
+| 172 | `GULabel` (Diamond) | Stat-info text label |
+| 173 | `GUPanel` (Diamond) | Stat-info group container |
+| 174 | `GULabel` (Diamond) | Stat-info text label |
+| 175 | `GULabel` (Diamond) | Stat-info text label |
+| 176 | `GULabel` (Diamond) | Stat-info text label |
+| **177** | **`GUComponent` (Diamond, base image widget)** | **A base image widget — NOT MopGage / NOT a target frame (see §1.9.4)** |
+| 178 | `MainHandler` | In-game state handler (master byte +0x500; filled lazily — see §1.9.2) |
+| 179–184 | *(gap — null / reserved)* | Not built |
+| 185 | `GXCursor2D` | 2D mouse cursor |
+| 186 | `GULabel` (Diamond) | Inline text label |
+| 187–217 | *(gap — null / reserved)* | Not built |
+| 218 | `GUButton` (Diamond) | Inline HUD button |
+| 219–230 | *(gap — null / reserved)* | Not built |
+
+### 1.9.4 Binary-won slot reversals (CORRECTIONS — these supersede prior cross-references)
+
+Reading the actual store sites of the HUD-build routine settles several slot identities that earlier
+passes (and `ui_hud_layout.md`) had placed elsewhere. All are **CODE-CONFIRMED** from the store-site
+disassembly:
+
+| Slot | Real identity | Prior (refuted) claim | Verdict |
+|-----:|---------------|-----------------------|---------|
+| **35** | **`MopGagePanel`** — the real target-mob gauge / "target frame" | "MopGage / target frame = slot 177" | **The target frame is slot 35, NOT 177.** |
+| **52** | **`PetPanel`** — the real pet window | "pet = slot 110" | **The pet window is slot 52, NOT 110.** |
+| **110** | **`Gamble`** — the gambling panel | "pet window" | Slot 110 is the gambling panel. |
+| **135** | **`UpgradeProcessPanel`** — upgrade-in-progress window | (same) | **CONFIRMS** the prior slot-135 finding. |
+| **177** | **`GUComponent`** base image widget | "the real MopGage target frame" | **Slot 177 is a plain base image widget, NOT MopGage.** |
+
+> **Downstream note.** `ui_hud_layout.md §5.5a` correctly identifies slot 135 as `UpgradeProcessPanel`
+> and flags the real selected-target plate as the `MopGagePanel` / `GagePanel` family — this roster now
+> pins that plate to **slot 35** (`MopGagePanel`). Any note that placed "MopGage at slot 177" or "pet at
+> slot 110" is superseded by the table above.
+
+### 1.9.5 The stat-info readout block (slots 149–176)
+
+Slots **149–176** are not distinct named panel classes — they are a **repeating stat / info readout
+block** built entirely from toolkit primitives: roughly **5–6 groups**, each group = **one `GUPanel`
+container (≈180-byte object) + four `GULabel` text labels**, with a few **inline `GUButton`s**
+interleaved (slots 146, 148, 151, 152). The labels are 240-byte `GULabel` instances whose caption text
+is sourced by id from the message table. In particular, **slots 161 and 164 are plain `GULabel`
+instances** inside this block — not distinct panel classes (an earlier reading singled them out as if
+named). An engineer should model 149–176 as a data-fed grid of container+label groups, not as ~28
+bespoke classes. The HUD-layout view of this block is in `ui_hud_layout.md §3.3a`.
 
 ---
 
@@ -467,6 +821,12 @@ Font objects are created at startup (master scene state 1 — Login) using the D
 - **charset = 129 = HANGUL_CHARSET** — the load-bearing Korean encoding constant. The client
   renders Korean glyphs through the OS Hangul code page (CP949). No bitmap glyph atlas is shipped
   in the VFS for body text.
+- **Common font-creation parameters for every slot** (CODE-CONFIRMED, identical across all 15
+  slots; only face / row-height / char-width / weight vary per slot, see §6.2): mip-levels = 1,
+  italic = off, output-precision = default, quality = default, pitch-and-family = default. No slot
+  sets an italic, underline, or strikeout style. When a slot's stored width or weight is 0 the
+  creation helper backfills it from the slot's fallback-size field, and a weight of 0 is treated by
+  the font API as "don't-care" (system default weight).
 - The creation call signature is `Font_Create(table, slotByteOffset, faceName, sizeFallback,
   charWidth, rowHeight, weight)` where the D3DX API receives **Height = rowHeight** and
   **Width = charWidth**. The `sizeFallback` field is stored in the slot descriptor but is not the
@@ -514,6 +874,15 @@ therefore **fixed-advance** (charWidth per character, not proportional metrics),
 laid out on a monospace grid even with proportional faces. This matters for matching legacy text
 positioning.
 
+> **No kerning table; one OS measurement only (CODE-CONFIRMED).** Widget body text uses the fixed
+> per-slot character width for every layout decision — drawn width = char-width x character count,
+> drawn height = row-height x line count, and the label ellipsize threshold = floor(box-width /
+> char-width). There is **no per-glyph kerning or proportional-metrics table** for body text. The
+> single place the client measures real glyph extents through the OS is the **IME composition
+> underline cursor** (a memory device-context text-extent query); everything else is the fixed
+> per-slot advance. Label truncation appends a 2-byte ellipsis marker at the cut point and is
+> CP949 lead-byte aware (it never cuts a 2-byte Korean character in half).
+
 **Per-widget font-slot index (CODE-CONFIRMED).** Each text widget stores its font slot as an
 instance field and supplies it to the shared text-draw helper at draw time:
 - `GULabel` — slot at **+0xE4**.
@@ -527,11 +896,14 @@ Both label and textbox constructors **zero-initialise** their slot field, so the
 **Front-end resolution (CODE-CONFIRMED — closes the long-open "per-widget font slot" question for
 login and character-select).** A full sweep of the login `BuildScene` found **no write** to any
 text widget's font-slot field after construction; the label/textbox slot fields are left at their
-ctor default. Therefore **every login label, caption, and textbox draws with font slot 0**
-(DotumChe 12 / 6 / weight 0). Button captions on the login window are mostly sprite-only or empty,
-so slot 0 is the default for any caption that does draw. The same field mechanism applies on the
-character-select scene; the front-end as a whole uses slot 0 universally for its text — there is
-no per-widget font differentiation on the login or character-select screens at the build level.
+ctor default. **Slot 0 (DotumChe 12 / 6 / weight 0) is therefore the default for any text widget
+whose font slot is never set** — and most front-end body labels stay at slot 0. *(Correction,
+2026-06-21: the login and character-select build routines DO call the font-slot setter on some
+controls, so it is not literally true that every front-end control draws with slot 0; the precise
+claim is "slot 0 when the slot is left unset.")* Button captions on the login window are mostly
+sprite-only or empty, so slot 0 is the default for any caption that does draw. The exact
+per-control slot map is a mechanical enumeration of the font-slot-setter call sites, not a runtime
+question.
 
 > **In-game caveat.** In-game windows (Section 8.7+) DO use larger / bold slots (e.g. titles via
 > slots 2 / 3 / 10 per §6.2); per-widget font variety lives in those builders, not the front-end.
@@ -767,7 +1139,7 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 | `data/ui/mainwindow.dds` | Several slot-row action buttons + create-form widgets (steppers, confirm/cancel, name title) |
 | `data/ui/InventWindow.dds` | Detail / confirm sub-panels (647 × 340 dialog frames) shared with login |
 | `data/ui/CarrierPigeonPerson.dds` | Appearance selector accents; gender/class preview swatches |
-| `data/ui/CarrierPigeonAll.dds`, `data/ui/tradekeepwindow.dds`, `data/ui/blacksheet.dds` | Small create-form accents; a 23 × 23 corner close button (blacksheet) |
+| `data/ui/CarrierPigeonAll.dds`, `data/ui/tradekeepwindow.dds`, `data/ui/blacksheet.dds` | Small create-form accents. `blacksheet.dds` is loaded by the window builder but is used by a later create-form sub-panel — it is **not** a corner-X frame close (that prior claim is REFUTED; see the verified-facts note after the structural table). |
 
 > **§8.2 atlas correction.** The character-select chrome is **not** a single dedicated atlas. It
 > composites from at least three primary shared UI atlases (`loginwindow.dds` dominant, plus
@@ -796,8 +1168,32 @@ The two intro-banner pager buttons additionally carry their own EULA/intro banne
 | Name-entry textbox | 60 | 80 | 274 | 18 | `GUTextbox`; CP949 character name | CODE-CONFIRMED |
 | Name-entry OK | 55 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
 | Name-entry Cancel | 174 | — | 113 | 40 | `InventWindow.dds` | CODE-CONFIRMED |
-| Corner close | 610 | 23 | 23 | 23 | `blacksheet.dds`; the select-window builder contains **no literal for this rect** — most likely base `GUWindow` title-bar chrome, so dst is base-window-chrome / debugger-pending and src origin is register-fed / debugger-pending. The close **action** is confirmed (close message type 13 / id 10001 → quit → GameState 6 sub-state 8). | base-window-chrome / debugger-pending (dst + src); close action CODE-CONFIRMED |
+| ~~Corner close (atlas-blit widget)~~ | — | — | — | — | **REFUTED — there is NO discrete corner-X close widget built from `blacksheet.dds` in the char-select window.** The select-window builder constructs no close-button rect (no atlas-blit "X"), and `blacksheet.dds`, while loaded by the window builder, is consumed by a later create-form sub-panel, **not** by a frame close. The close is a **message-handler branch**, not a clicked button: a system-close message (ESC / system close) drives the scene to **state 6, sub-state 8** (return to login). See the verified-facts note below. | REFUTED (no widget); close-as-message-branch CODE-CONFIRMED |
 | Detail / confirm dialog frames | 318 | 190 | 647 | 340 | `InventWindow.dds` (×5 near-identical panels) | CODE-CONFIRMED |
+
+> **Window close — NO corner-X widget (CODE-CONFIRMED; premise REFUTED, build 263bd994).** The
+> earlier rows asserting a discrete 23 × 23 corner-X close button blitted from `blacksheet.dds` are
+> **wrong and have been struck.** The select-window builder constructs **no close-button widget** —
+> there is no atlas-blit "X" rect for the frame, and no register-fed source for one. `blacksheet.dds`
+> *is* loaded by the window builder, but it is consumed by a **later create-form sub-panel**, not by a
+> frame close. The window close is instead a **message-handler branch**: a system-close message
+> (ESC / system close) is handled directly and drives the scene to **state 6, sub-state 8** (return to
+> login). It is **not** a clicked atlas-blit button.
+>
+> Verified about the char-select window chrome and its real buttons:
+> - The frame chrome is drawn from the **login-window / main-window chrome sheets**
+>   (`loginwindow.dds` dominant, plus `mainwindow.dds` / `InventWindow.dds`), **not** from
+>   `blacksheet.dds`.
+> - The window's real navigation is a **trio of action-bound buttons** — **new-character (action 4)**,
+>   **enter-game (action 6)**, and a **panel toggle** — these are the visible buttons; **none of them
+>   is a window-frame "X".**
+> - **Window origin = screen-center minus a fixed offset**, so the window's absolute screen position is
+>   resolution-dependent / runtime-fed. The window-local destination rects of the nav buttons are
+>   fixed (tabulated above), but their **absolute pixel positions** and the exact **hover / pressed
+>   atlas source rects** are **live-pending (6-D / visual-oracle)** — do not treat any concrete pixel
+>   rect as confirmed for those.
+> - Whether the official UI even displays a corner-X at all is a **visual-oracle question**
+>   (**live-pending (6-D)**), since the binary builds none.
 
 **Slot occupancy and the shared left panel (CODE-CONFIRMED).** The character-select screen does
 **not** build five distinct 2D "plate" widgets, one per roster slot. Slot selection is the 3D
@@ -874,6 +1270,29 @@ panel tree shown/hidden as a unit by the scene-reset path:
 > do not bind the `(42, 325)` / `(112, 325)` widgets to the Create or Delete buttons — they are
 > Confirm (35) and Cancel (36).
 
+> **CYCLE 6b CORRECTION (2026-06-20) -- the per-slot info row + the four selectable-gated slot buttons
+> (CODE-CONFIRMED, build 263bd994).** `// confirmed: static IDA 2026-06-20`
+> - **Shared info row = exactly 3 labels.** The single shared left character-info panel's per-slot text
+>   is a contiguous **3-label block**, refreshed for the currently-selected slot: (1) name, (2) level,
+>   (3) **position**, formatted as the literal `"%d , %d"` over the two world-position floats (descriptor
+>   +0xA0 / +0xA4) truncated to int. **There is NO class label on the info row** -- earlier notes that
+>   implied a class line are corrected. The class value drives the 3D preview visual only.
+> - **The 10-cell stat grid is NOT fed from the wire 96-byte stats block.** On the select screen the
+>   grid is the create-form point-buy control (action ids 25..34, see above) and its glyphs are
+>   build-time literals; the per-slot 96-byte stats block parsed by `3/1` is carried through and only
+>   consumed by the **in-game** Character-info window (8.7) after Enter. Do not populate a select-screen
+>   stat readout from the wire stats block.
+> - **Four selectable-gated slot buttons (action ids 4 / 5 / 6 / 61).** Adjacent to the 3-label block,
+>   the window holds four 3-state buttons gated by a **per-slot selectable byte** (the server-supplied
+>   per-slot flag, `frontend_scenes.md §3.4`). Default after build: the locked base button (id 4) and the
+>   highlight art (id 61) shown; the two enter/confirm buttons (ids 5, 6) hidden. When the slot is
+>   selectable the polarity flips: {id 61, 5, 6 shown; id 4 hidden}; not-selectable shows {id 4} only.
+>   A freshly created character forces its selectable byte clear until the server resolves location, so a
+>   just-created slot first shows the locked state. (The "61..74 = per-slot / stat-grid actions" row in
+>   the action map above is refined by this: ids 4/5/6/61 are the per-slot button quartet; the role names
+>   -- locked base / enter-confirm / highlight art -- are inferred from action-id + atlas + show/hide
+>   polarity, the visibility behaviour is confirmed.)
+
 **Slot hit-test is a 3D ray-pick — NOT 2D rects (CODE-CONFIRMED).** Selecting one of the five
 character preview actors is a **3D camera-unproject ray test against a per-slot axis-aligned
 bounding box**, not a 2D rectangle hit-test and not a viewport-column partition. The click pixel is
@@ -905,7 +1324,6 @@ The five preview actors stand at fixed world positions on the select stage:
 - These world-absolute placements are the campaign-frontend re-walk view; the camera/ray geometry and
   any mesh-local stage offsets are owned by `specs/frontend_scenes.md §3.3.3` and must not be restated
   here (this spec records only the values the select-window build/hit-test code uses directly).
-<!-- source: _dirty/campaign-frontend/A4-charselect-camera-fx.md -->
 
 **Class button → class enum (CODE-CONFIRMED).** The four create-form class buttons (command ids
 10/11/12/13, left-to-right → selector index 0/1/2/3, §8.2 above) map to the playable classes as:
@@ -920,14 +1338,13 @@ The five preview actors stand at fixed world positions on the select stage:
 So the left-to-right button order is **Monk / Musa / Dosa / Salsu** with enum values **4 / 1 / 3 / 2**.
 The class-name caption is set from msg.xdb ids **14003…14007**; the per-class description text comes
 from `data/script/npc.scr` keys **1…4** (loaded into the keyed node map at boot; the class-select
-handler assigns three description labels per class). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
+handler assigns three description labels per class).
 
 **Create-preview actor placement (CODE-CONFIRMED — ACTOR-ONLY, no camera move).** Entering the create
 sub-form does **not** move, dolly, or re-aim the camera in this build (no boom/FOV/near/far write on any
 create path). Instead the single create-preview actor is placed **≈ 56.5 units nearer** the lineup
 centre (toward the camera, in world −Z) and **scaled 81.0** versus the lineup's **70.0** (ratio 81/70).
 Reimplementations should keep one fixed camera and move/scale only the preview actor.
-<!-- source: _dirty/campaign-frontend/A5-creation.md -->
 
 **Name validation message ids and bound (CODE-CONFIRMED — extends the create-form validation note).**
 On create-confirm the client validates the name before sending: **min length 2**; allowed bytes are
@@ -943,7 +1360,7 @@ msg.xdb ids:
 
 The name field is bounded to **17 bytes including the NUL terminator (16 payload bytes)**. On a clean
 validation the name is staged and the create-character request is sent (wire layout owned by
-`specs/login_flow.md` / packets, not this spec). <!-- source: _dirty/campaign-frontend/A5-creation.md -->
+`specs/login_flow.md` / packets, not this spec).
 
 ### 8.3 Shared panel chrome — `InventWindow.dds` modal
 
@@ -3134,7 +3551,7 @@ object; its 2D chrome composites from **four atlases** (VFS-VERIFIED paths):
 | `data/ui/loginwindow.dds` | **Primary** chrome: backgrounds, slot-row plates, stat-icon grids, appearance ± steppers, tab buttons, Create/Delete | VFS-VERIFIED / CODE-CONFIRMED |
 | `data/ui/mainwindow.dds` | Slot-row plates + the **create name-plate** atlas (Create/Delete/Enter button strips at src V=1004) and other create-form widgets | VFS-VERIFIED / CODE-CONFIRMED |
 | `data/ui/InventWindow.dds` | Modal chrome (confirm / delete / name-entry dialog frames), shared with login | VFS-VERIFIED / CODE-CONFIRMED |
-| `data/ui/blacksheet.dds` | Corner-close button; dim/blackout overlay | VFS-VERIFIED / CODE-CONFIRMED |
+| `data/ui/blacksheet.dds` | Loaded by the window builder for a **later create-form sub-panel** (and the dim/blackout overlay). **NOT a corner-X frame close** — that prior claim is REFUTED (the close is a system-close message-handler branch → state 6 sub-state 8, not an atlas-blit widget; see §8.2 verified-facts note). | VFS-VERIFIED; close-as-widget REFUTED |
 | (GUCanvas3D live 3D viewports) | Character previews; not a 2D atlas | CODE-CONFIRMED |
 
 > **Correction.** Earlier versions of this section listed `carrierpigeonperson.dds`,
@@ -3307,7 +3724,6 @@ main loop until done, then ended and destroyed before the next scene is created.
 > writes 1, state 1 writes 2, state 2 writes 3 or 4, state 3 writes 4, state 4 writes 5, state 5 writes
 > 4, state 6 writes 8, state 7 writes 8). The state-8 check lives in the shared loop tail: when the
 > selector reads 8, the loop performs the final shutdown and returns.
-> <!-- source: _dirty/campaign-frontend/A6-winmain-statemachine.md -->
 
 > **State-7 error message-id is branchy, not a flat `9001 + [1]` (CODE-CONFIRMED).** The error case
 > has **two** id paths: (a) if the secondary-state slot `[1] == 8` **and** the explicit error-id slot
@@ -3377,7 +3793,6 @@ sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 > had stated "neither 31 nor 32 is a login sub-state" — that observation was about a *separate form/page*
 > state (which indeed never holds 31/32); the *Tick/workflow* substate documented in this table does. The
 > account/save flag that gates entry into substate 31 is debugger-pending.
-> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
 
 > **PIN keypad digit→slot scramble (mechanism CODE-CONFIRMED; runtime seed + permutation
 > DEBUGGER-PENDING).** The mapping of which digit appears on which keypad tile is **not** a static table
@@ -3389,7 +3804,6 @@ sub-state values 1..6 and 29..41 (with gaps); the field is initialised to 1.
 > submit, 13 = Cancel**. The shuffle **mechanism** is code-confirmed; the **runtime seed value and the
 > resulting permutation are clock-derived and therefore debugger-pending** (not a recoverable code
 > immediate).
-> <!-- source: _dirty/campaign-frontend/A2-pin-modal.md -->
 
 > **Two coupled state fields — workflow `+0x238` vs handler page-state `+0x17C` (CODE-CONFIRMED).**
 > There are **two** state fields on the login window, and they are coupled. (1) the **Tick/workflow
@@ -3489,9 +3903,14 @@ the +6 open-time field is static-only and CAPTURE-UNVERIFIED.
 8. **`GULabels`, `GUScroll`, `GUScrollEx` internals.** The multi-line label and the two scrollbar
    widgets have their own draw/event virtuals that were not covered in this pass.
 
-9. **`GUCanvas3D` render-target wiring.** The mechanism by which the 3D preview widget binds a
-   render target / viewport for its live scene (the D3D device viewport/scene-graph wiring) was not
-   traced.
+9. **`GUCanvas3D` render-target wiring — RESOLVED (CODE-CONFIRMED, CYCLE 8).** The widget itself
+   binds **no** render target or viewport. Its draw virtual is an **empty stub**; its only added state
+   is a drag-orbit delta (the cursor-minus-world offset captured on press/move) consumed by the owner
+   to rotate the previewed model. The live 3D preview into the UI rectangle is therefore driven by the
+   **owning window's embedded auxiliary view** (the `GView` sub-object at window +0xE8, see
+   `structs/guwindow.md §4`) and the panel's own draw — **not** by any field on the canvas. So there
+   is no "untraced canvas render-target": the canvas is a thin 2D hit-region + drag-capture placeholder,
+   and the preview render target is the window's GView, already documented.
 
 10. **Tint field +0x0C per-widget provenance.** Confirmed as the low-24-bit RGB tint in the draw
     ARGB, but where each widget's tint is set (ctor default vs per-screen override) was not swept.

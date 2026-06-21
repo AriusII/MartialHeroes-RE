@@ -17,20 +17,20 @@
 // spec: Docs/RE/formats/msg_xdb.md — 2,644 records (1,364,304 / 516 = 2,644): SAMPLE-VERIFIED.
 
 using Godot;
-using MartialHeroes.Assets.Parsers;
-using MartialHeroes.Assets.Parsers.Models;
-using MartialHeroes.Client.Godot.Dev;
+using MartialHeroes.Assets.Parsers.DataTables;
+using MartialHeroes.Assets.Parsers.DataTables.Models;
+using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Ui.Assets;
 
 /// <summary>
-/// Shared HUD text library — looks up CP949-decoded UI captions from msg.xdb by numeric id.
-///
-/// <para>One instance per session, created by the composition root (ClientContext).</para>
-/// <para>All public methods return the caller-supplied fallback string when the VFS is
-/// unavailable, the file is absent, or the id is not present.</para>
-///
-/// spec: Docs/RE/formats/msg_xdb.md — full format and lookup contract.
+///     Shared HUD text library — looks up CP949-decoded UI captions from msg.xdb by numeric id.
+///     <para>One instance per session, created by the composition root (ClientContext).</para>
+///     <para>
+///         All public methods return the caller-supplied fallback string when the VFS is
+///         unavailable, the file is absent, or the id is not present.
+///     </para>
+///     spec: Docs/RE/formats/msg_xdb.md — full format and lookup contract.
 /// </summary>
 public sealed class HudTextLibrary : IDisposable
 {
@@ -51,54 +51,13 @@ public sealed class HudTextLibrary : IDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Creates a HudTextLibrary backed by the supplied VFS assets handle.
-    /// Pass <see langword="null"/> for offline / no-VFS mode; all lookups return the fallback.
+    ///     Creates a HudTextLibrary backed by the supplied VFS assets handle.
+    ///     Pass <see langword="null" /> for offline / no-VFS mode; all lookups return the fallback.
     /// </summary>
     public HudTextLibrary(RealClientAssets? assets)
     {
         _assets = assets;
     }
-
-    // -------------------------------------------------------------------------
-    // Caption lookup
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    /// Returns the CP949-decoded UI caption for the given <paramref name="captionId"/>,
-    /// or <paramref name="fallback"/> when the catalogue is unavailable or the id is absent.
-    ///
-    /// <para>The string is already decoded from CP949 by <see cref="MsgXdbParser"/>; no byte
-    /// decoding happens in this layer. Pass it directly to a <see cref="Label.Text"/>.</para>
-    ///
-    /// <para>Key lookup uses unsigned comparison (ascending unsigned order on disk).
-    /// ID space is SPARSE — do not assume id == record_index + 1.</para>
-    ///
-    /// spec: Docs/RE/formats/msg_xdb.md — "ordered-map lower-bound (binary search) on caption_id".
-    /// spec: Docs/RE/formats/msg_xdb.md — "key comparison is UNSIGNED": CONFIRMED.
-    /// spec: Docs/RE/formats/msg_xdb.md — caption IDs are SPARSE.
-    /// </summary>
-    /// <param name="captionId">
-    /// Numeric caption identifier (e.g. 4001–4022 = EULA lines, 14001–14002 = char-select prompts).
-    /// spec: Docs/RE/formats/msg_xdb.md (front-end caption-ID index).
-    /// </param>
-    /// <param name="fallback">Returned when the catalogue is offline or the id is absent.</param>
-    public string GetCaption(int captionId, string fallback = "")
-    {
-        MsgXdbCatalog? cat = EnsureCatalog();
-        if (cat is null) return fallback;
-
-        // MsgXdbParser returns null/empty for absent ids.
-        string? text = cat.GetText(captionId);
-        return string.IsNullOrEmpty(text) ? fallback : text;
-    }
-
-    /// <summary>
-    /// Convenience overload accepting an unsigned caption id.
-    ///
-    /// spec: Docs/RE/formats/msg_xdb.md — "key comparison is UNSIGNED": CONFIRMED.
-    /// </summary>
-    public string GetCaption(uint captionId, string fallback = "")
-        => GetCaption((int)captionId, fallback);
 
     // -------------------------------------------------------------------------
     // Diagnostics
@@ -109,9 +68,63 @@ public sealed class HudTextLibrary : IDisposable
     {
         get
         {
-            MsgXdbCatalog? c = EnsureCatalog();
+            var c = EnsureCatalog();
             return c?.Count ?? 0;
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // IDisposable
+    // -------------------------------------------------------------------------
+
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        // _assets is owned by ClientContext; we do not dispose it here.
+    }
+
+    // -------------------------------------------------------------------------
+    // Caption lookup
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Returns the CP949-decoded UI caption for the given <paramref name="captionId" />,
+    ///     or <paramref name="fallback" /> when the catalogue is unavailable or the id is absent.
+    ///     <para>
+    ///         The string is already decoded from CP949 by <see cref="MsgXdbParser" />; no byte
+    ///         decoding happens in this layer. Pass it directly to a <see cref="Label.Text" />.
+    ///     </para>
+    ///     <para>
+    ///         Key lookup uses unsigned comparison (ascending unsigned order on disk).
+    ///         ID space is SPARSE — do not assume id == record_index + 1.
+    ///     </para>
+    ///     spec: Docs/RE/formats/msg_xdb.md — "ordered-map lower-bound (binary search) on caption_id".
+    ///     spec: Docs/RE/formats/msg_xdb.md — "key comparison is UNSIGNED": CONFIRMED.
+    ///     spec: Docs/RE/formats/msg_xdb.md — caption IDs are SPARSE.
+    /// </summary>
+    /// <param name="captionId">
+    ///     Numeric caption identifier (e.g. 4001–4022 = EULA lines, 14001–14002 = char-select prompts).
+    ///     spec: Docs/RE/formats/msg_xdb.md (front-end caption-ID index).
+    /// </param>
+    /// <param name="fallback">Returned when the catalogue is offline or the id is absent.</param>
+    public string GetCaption(int captionId, string fallback = "")
+    {
+        var cat = EnsureCatalog();
+        if (cat is null) return fallback;
+
+        // MsgXdbParser returns null/empty for absent ids.
+        var text = cat.GetText(captionId);
+        return string.IsNullOrEmpty(text) ? fallback : text;
+    }
+
+    /// <summary>
+    ///     Convenience overload accepting an unsigned caption id.
+    ///     spec: Docs/RE/formats/msg_xdb.md — "key comparison is UNSIGNED": CONFIRMED.
+    /// </summary>
+    public string GetCaption(uint captionId, string fallback = "")
+    {
+        return GetCaption((int)captionId, fallback);
     }
 
     // -------------------------------------------------------------------------
@@ -127,7 +140,7 @@ public sealed class HudTextLibrary : IDisposable
 
         try
         {
-            ReadOnlyMemory<byte> raw = _assets.GetRaw(MsgXdbPath);
+            var raw = _assets.GetRaw(MsgXdbPath);
             if (raw.IsEmpty)
             {
                 GD.Print("[HudTextLibrary] data/script/msg.xdb absent from VFS — captions unavailable.");
@@ -147,16 +160,5 @@ public sealed class HudTextLibrary : IDisposable
         }
 
         return _catalog;
-    }
-
-    // -------------------------------------------------------------------------
-    // IDisposable
-    // -------------------------------------------------------------------------
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        // _assets is owned by ClientContext; we do not dispose it here.
     }
 }

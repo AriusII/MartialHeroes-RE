@@ -35,12 +35,12 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game skill book window (SkillPanel). 964×655 parked at (43,−655); key-K toggles it.
-///
-/// <para>PASSIVE: reads skill catalogue for display; emits drag-to-hotbar intents as use-case calls.
-/// Zero game logic — no validation, no optimistic state.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED.
+///     In-game skill book window (SkillPanel). 964×655 parked at (43,−655); key-K toggles it.
+///     <para>
+///         PASSIVE: reads skill catalogue for display; emits drag-to-hotbar intents as use-case calls.
+///         Zero game logic — no validation, no optimistic state.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudSkillPanel : Control
 {
@@ -77,14 +77,14 @@ public sealed partial class HudSkillPanel : Control
     // -------------------------------------------------------------------------
 
     private readonly Button[] _tabs = new Button[TabCount];
-    private VBoxContainer _skillList = null!;
-    private Label _titleLabel = null!;
 
     // -------------------------------------------------------------------------
     // View state (not domain state)
     // -------------------------------------------------------------------------
 
     private bool _open;
+    private VBoxContainer _skillList = null!;
+    private Label _titleLabel = null!;
 
     // -------------------------------------------------------------------------
     // Events
@@ -99,8 +99,8 @@ public sealed partial class HudSkillPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: creates the 964×655 skill panel parked at (43,−655).
-    /// spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED.
+    ///     Geometry pass: creates the 964×655 skill panel parked at (43,−655).
+    ///     spec: Docs/RE/specs/ui_system.md §8.8 CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
     {
@@ -115,7 +115,7 @@ public sealed partial class HudSkillPanel : Control
 
         // Load chrome (skill_window_1.dds, uitex 3)
         // spec: ui_system.md §8.6.1 — uitex 3 = data/ui/skill_window_1.dds
-        Texture2D? chromeTex = atlas.GetById(SkillWindowTexId);
+        var chromeTex = atlas.GetById(SkillWindowTexId);
         if (chromeTex is null)
             GD.PrintErr("[HudSkillPanel] skill_window_1.dds (uitex 3) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.6.1.");
@@ -138,7 +138,7 @@ public sealed partial class HudSkillPanel : Control
                 Name = "Chrome",
                 Texture = chromeTex,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspect,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             chrome.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(chrome);
@@ -146,13 +146,13 @@ public sealed partial class HudSkillPanel : Control
 
         // Title from msg.xdb key 3027
         // spec: ui_system.md §8.8 CODE-CONFIRMED — msg.xdb[3027] = window title
-        string titleStr = text.GetCaption(TitleMsgKey, "스킬"); // CP949 "스킬" = "Skill"
+        var titleStr = text.GetCaption(TitleMsgKey, "스킬"); // CP949 "스킬" = "Skill"
         _titleLabel = new Label
         {
             Name = "TitleLabel",
             Text = titleStr,
             HorizontalAlignment = HorizontalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         _titleLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _titleLabel.OffsetBottom = 30f;
@@ -165,13 +165,13 @@ public sealed partial class HudSkillPanel : Control
             Name = "TabRow",
             Position = new Vector2(0f, 30f),
             Size = new Vector2(SkillPanelW, 28f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(tabRow);
 
-        for (int t = 0; t < TabCount; t++)
+        for (var t = 0; t < TabCount; t++)
         {
-            int tabIdx = t;
+            var tabIdx = t;
             var tab = new Button
             {
                 Name = $"Tab{TabActionStart + t}",
@@ -179,7 +179,7 @@ public sealed partial class HudSkillPanel : Control
                 // Placeholder numeric label for now.
                 Text = $"{t + 1}",
                 CustomMinimumSize = new Vector2(SkillPanelW / TabCount - 2f, 26f),
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
             tab.Pressed += () => OnTabPressed(tabIdx);
             tabRow.AddChild(tab);
@@ -192,21 +192,21 @@ public sealed partial class HudSkillPanel : Control
             Name = "SkillList",
             Position = new Vector2(8f, 62f),
             Size = new Vector2(SkillPanelW - 16f, SkillPanelH - 80f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_skillList);
 
         // Skill-pipe panels (4 panels — placeholder; exact geometry not recovered)
         // spec: ui_system.md §8.8 CODE-CONFIRMED — "4 skill-pipe panels"
         // TODO(spec): recover exact skill-pipe geometry.
-        for (int p = 0; p < SkillPipeCount; p++)
+        for (var p = 0; p < SkillPipeCount; p++)
         {
             var pipePlaceholder = new Panel
             {
                 Name = $"SkillPipe{p}",
                 Position = new Vector2(8f + p * 240f, SkillPanelH - 60f),
                 Size = new Vector2(232f, 52f),
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             var ps = new StyleBoxFlat();
             ps.BgColor = new Color(0.08f, 0.08f, 0.14f, 0.8f);
@@ -228,13 +228,13 @@ public sealed partial class HudSkillPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the skill panel. Called by HudMaster on key-K press.
-    /// spec: ui_system.md §8.8 — "[K] toggles SkillPanel (slots 158+159 logic)".
+    ///     Toggles the skill panel. Called by HudMaster on key-K press.
+    ///     spec: ui_system.md §8.8 — "[K] toggles SkillPanel (slots 158+159 logic)".
     /// </summary>
     public void Toggle()
     {
         _open = !_open;
-        float newY = _open ? OpenY : ParkY;
+        var newY = _open ? OpenY : ParkY;
         Position = new Vector2(ParkX, newY);
         Visible = _open;
         GD.Print($"[HudSkillPanel] Toggle → open={_open}, Y={newY}. " +

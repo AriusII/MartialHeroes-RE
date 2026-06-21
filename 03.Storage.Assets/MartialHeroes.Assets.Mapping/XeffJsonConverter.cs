@@ -1,20 +1,18 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Effects.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
 /// <summary>
-/// Serializes a <see cref="XeffData"/> (.xeff particle effect descriptor) to a neutral JSON
-/// representation using System.Text.Json.
-///
-/// All fields that are CONFIRMED or SAMPLE-VERIFIED are emitted under their documented names.
-/// Fields marked UNRESOLVED are emitted as-is under their parser property names so that
-/// downstream tooling can access the raw data without further decoding here.
-///
-/// No engine/rendering dependency; this is a pure data serialization step.
-/// spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
-/// spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
+///     Serializes a <see cref="XeffData" /> (.xeff particle effect descriptor) to a neutral JSON
+///     representation using System.Text.Json.
+///     All fields that are CONFIRMED or SAMPLE-VERIFIED are emitted under their documented names.
+///     Fields marked UNRESOLVED are emitted as-is under their parser property names so that
+///     downstream tooling can access the raw data without further decoding here.
+///     No engine/rendering dependency; this is a pure data serialization step.
+///     spec: Docs/RE/formats/effects.md §A.2 File Header (32 bytes, CORRECTED): VERIFIED.
+///     spec: Docs/RE/formats/effects.md §A.4 Sub-Effect Block Structure: CONFIRMED.
 /// </summary>
 public static class XeffJsonConverter
 {
@@ -22,7 +20,7 @@ public static class XeffJsonConverter
     {
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
     // -------------------------------------------------------------------------
@@ -30,8 +28,8 @@ public static class XeffJsonConverter
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Serializes <paramref name="effect"/> to the UTF-8 JSON output stream.
-    /// The stream does not need to be seekable.
+    ///     Serializes <paramref name="effect" /> to the UTF-8 JSON output stream.
+    ///     The stream does not need to be seekable.
     /// </summary>
     /// <param name="effect">Parsed .xeff data from <c>XeffParser</c>.</param>
     /// <param name="output">Destination stream.</param>
@@ -40,18 +38,18 @@ public static class XeffJsonConverter
         ArgumentNullException.ThrowIfNull(effect);
         ArgumentNullException.ThrowIfNull(output);
 
-        XeffJsonRoot root = MapToRoot(effect);
+        var root = MapToRoot(effect);
         JsonSerializer.Serialize(output, root, SerializerOptions);
     }
 
     /// <summary>
-    /// Serializes <paramref name="effect"/> to a UTF-8 JSON byte array.
-    /// Useful for tests and in-memory scenarios.
+    ///     Serializes <paramref name="effect" /> to a UTF-8 JSON byte array.
+    ///     Useful for tests and in-memory scenarios.
     /// </summary>
     public static byte[] WriteJsonBytes(XeffData effect)
     {
         ArgumentNullException.ThrowIfNull(effect);
-        XeffJsonRoot root = MapToRoot(effect);
+        var root = MapToRoot(effect);
         return JsonSerializer.SerializeToUtf8Bytes(root, SerializerOptions);
     }
 
@@ -67,15 +65,15 @@ public static class XeffJsonConverter
         // those bytes are sub-effect block 0's element fixed head (A.4.0).
         // spec: Docs/RE/formats/effects.md §A.17 Correction history.
         return new XeffJsonRoot(
-            EffectId: effect.EffectId,
-            SubEffectCount: effect.SubEffectCount,
-            SubEffects: MapSubEffects(effect.SubEffects));
+            effect.EffectId,
+            effect.SubEffectCount,
+            MapSubEffects(effect.SubEffects));
     }
 
     private static XeffJsonSubEffect[] MapSubEffects(XeffSubEffect[] subEffects)
     {
         var result = new XeffJsonSubEffect[subEffects.Length];
-        for (int i = 0; i < subEffects.Length; i++)
+        for (var i = 0; i < subEffects.Length; i++)
             result[i] = MapSubEffect(subEffects[i]);
         return result;
     }
@@ -87,62 +85,62 @@ public static class XeffJsonConverter
         // spec: Docs/RE/formats/effects.md §A.4.3 Track header (anim_loop, anim_stride, anim_base_time): CONFIRMED.
         // spec: Docs/RE/formats/effects.md §A.4.4 Keyframe array: CONFIRMED.
         return new XeffJsonSubEffect(
-            EmitterType: sub.EmitterType,
-            ResourceId: sub.ResourceId,
-            AnimFlag: sub.AnimFlag,
-            EntryCount: sub.EntryCount,
-            TextureNames: sub.TextureNames,
-            AlphaKeys: MapAlphaKeys(sub.AlphaKeys),
-            DiffuseR: sub.DiffuseR,
-            DiffuseG: sub.DiffuseG,
-            DiffuseB: sub.DiffuseB,
-            AnimLoop: sub.AnimLoop,
-            AnimStride: sub.AnimStride,
-            AnimBaseTime: sub.AnimBaseTime,
-            Keyframes: MapKeyframes(sub.Keyframes));
+            sub.EmitterType,
+            sub.ResourceId,
+            sub.AnimFlag,
+            sub.EntryCount,
+            sub.TextureNames,
+            MapAlphaKeys(sub.AlphaKeys),
+            sub.DiffuseR,
+            sub.DiffuseG,
+            sub.DiffuseB,
+            sub.AnimLoop,
+            sub.AnimStride,
+            sub.AnimBaseTime,
+            MapKeyframes(sub.Keyframes));
     }
 
     private static XeffJsonKeyframe[] MapKeyframes(XeffKeyframe[] kfs)
     {
         var result = new XeffJsonKeyframe[kfs.Length];
-        for (int i = 0; i < kfs.Length; i++)
+        for (var i = 0; i < kfs.Length; i++)
         {
-            XeffKeyframe kf = kfs[i];
+            var kf = kfs[i];
             // spec: Docs/RE/formats/effects.md §A.4.4 — kf_index, velocity Vec3, size Vec3, rotation degrees: CONFIRMED.
             // spec: Docs/RE/formats/effects.md §A.8 Resolved semantics: HIGH.
             // spec: Docs/RE/formats/effects.md §A.7 Rotation Encoding Note: CONFIRMED.
-            Vec3 vel = kf.Velocity;
-            Vec3 sz = kf.Size;
-            Quat rot = kf.Rotation;
+            var vel = kf.Velocity;
+            var sz = kf.Size;
+            var rot = kf.Rotation;
             result[i] = new XeffJsonKeyframe(
-                KfIndex: kf.KfIndex,
-                Velocity: [vel.X, vel.Y, vel.Z],
-                Size: [sz.X, sz.Y, sz.Z],
-                Rotation: [rot.X, rot.Y, rot.Z, rot.W],
-                RotXDeg: kf.RotXDeg,
-                RotYDeg: kf.RotYDeg,
-                RotZDeg: kf.RotZDeg);
+                kf.KfIndex,
+                [vel.X, vel.Y, vel.Z],
+                [sz.X, sz.Y, sz.Z],
+                [rot.X, rot.Y, rot.Z, rot.W],
+                kf.RotXDeg,
+                kf.RotYDeg,
+                kf.RotZDeg);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Converts per-curve alpha values (stored inverted in the file: 0.0=opaque, 1.0=transparent)
-    /// to explicit opacity/file-value pairs for consumer clarity.
-    /// spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — stored as 1.0−opacity: CONFIRMED.
-    /// spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention: CONFIRMED.
-    /// Note: the parser emits the raw file value (not pre-inverted). Inversion is a mapping concern.
+    ///     Converts per-curve alpha values (stored inverted in the file: 0.0=opaque, 1.0=transparent)
+    ///     to explicit opacity/file-value pairs for consumer clarity.
+    ///     spec: Docs/RE/formats/effects.md §A.4.2 Pass 1 alpha — stored as 1.0−opacity: CONFIRMED.
+    ///     spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention: CONFIRMED.
+    ///     Note: the parser emits the raw file value (not pre-inverted). Inversion is a mapping concern.
     /// </summary>
     private static XeffJsonAlpha[] MapAlphaKeys(float[] keys)
     {
         var result = new XeffJsonAlpha[keys.Length];
-        for (int i = 0; i < keys.Length; i++)
+        for (var i = 0; i < keys.Length; i++)
         {
             // File value is stored inverted: file=0.0 → opaque, file=1.0 → transparent.
             // spec: Docs/RE/formats/effects.md §A.6 — "file value 0.0 means fully opaque; 1.0 means fully transparent": CONFIRMED.
-            float fileValue = keys[i];
-            result[i] = new XeffJsonAlpha(FileValue: fileValue, Opacity: 1f - fileValue);
+            var fileValue = keys[i];
+            result[i] = new XeffJsonAlpha(fileValue, 1f - fileValue);
         }
 
         return result;
@@ -179,8 +177,8 @@ public static class XeffJsonConverter
         XeffJsonKeyframe[] Keyframes);
 
     /// <summary>
-    /// One alpha key entry. Emits both the raw file value and the derived opacity.
-    /// spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention — file 0.0=opaque, 1.0=transparent: CONFIRMED.
+    ///     One alpha key entry. Emits both the raw file value and the derived opacity.
+    ///     spec: Docs/RE/formats/effects.md §A.6 Alpha Inversion Convention — file 0.0=opaque, 1.0=transparent: CONFIRMED.
     /// </summary>
     private sealed record XeffJsonAlpha(float FileValue, float Opacity);
 

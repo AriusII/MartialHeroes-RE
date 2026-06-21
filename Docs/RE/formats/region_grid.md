@@ -10,10 +10,14 @@
 
 ```
 verification:   sample-verified   # runtime region.bin layout, regiontable stride/size, .tol layout — all matched against a real VFS sample
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open         # the 5 campaign-10 conflicts (C1–C5) are RESOLVED into this revision (see below)
+# CYCLE 7 note: re-confirmed against the live region/area loader (IDB SHA 263bd994, CYCLE 7 (2026-06-20)) — the
+# 32×48 region table with zoneType@+0x28, the 256-unit region cell, and the two-region combat-mode resolution rule
+# are CONFIRMED via static IDA; the d<NNN>.lst count-prefixed cell-list sub-format (dungeon 201–210 cell counts are
+# data-driven, NOT a binary constant) is newly CONFIRMED via static IDA. Sections added below.
 ```
 
 Two-witness re-verification on build `263bd994` (the per-map area loader + a 60-map `region.bin`
@@ -51,6 +55,8 @@ earlier revision had wrong. The corrected facts (each folded in below):
 - **Endianness:** little-endian throughout (x86 client). All multi-byte fields decode sanely as LE.
 - **Cell type:** single unsigned byte (`u8`) = region ID.
 - **Cell-to-world stride:** **256 world units per cell** (the divisor used by the runtime region indexer) — CONFIRMED (parser).
+
+> **⚠️ Do NOT confuse the region cell size with the terrain cell size.** The **region** grid cell is **256 world units** (its own coarse spatial overlay). This is **DISTINCT** from the **terrain** cell, which is **1024 world units** on a 65×65 grid (see `terrain.md` / the coordinate conventions). The region grid is a separate, coarser partition with its own `width`/`height`/origins read from `region<NNN>.bin` — an engineer must index it with the 256-unit stride, never the 1024-unit terrain stride. CONFIRMED via static IDA (CYCLE 7).
 
 ---
 
@@ -155,6 +161,25 @@ The returned ID indexes a 32-slot **region table** (`regiontable<NNN>.bin` — `
 
 > **Active-region note (CONFIRMED).** For the **player's own** position the active region id is **not** read from this grid — it is a separate value **pushed by the server** into the world-state tick (the local-player status handler and the per-tick game-state handler). The local grid lookup above is used to classify a **target actor's** position. See `Docs/RE/specs/world_systems.md §16.3`.
 
+### Combat-mode resolution — the two-region rule (consumer contract) — CONFIRMED (static IDA, CYCLE 7)
+
+The decision "is this point in a safe / PvP / closed combat context" is **not** taken from a single region record. The combat-mode arbiter reads **TWO** region records and combines their `zoneType` fields, with **PvP winning the boundary**:
+
+1. The record for the cached **current** region id (the active region described in the note above).
+2. The record for the region looked up at the actor's world `(X, Z)` via the grid indexer above (`region<NNN>.bin` → cell byte → region-table record).
+
+Each record contributes its `zoneType` (offset +0x28). If a record pointer is absent, that endpoint is treated as the **PvP** default (`1`). The resolved combat-mode is then:
+
+| Condition on the two endpoints' `zoneType` | Resolved combat-mode | Meaning |
+|---|--:|---|
+| **Either** endpoint `zoneType == 1` | `1` | **PvP** — free fight (the OR of the two endpoints; PvP wins the boundary) |
+| Else **both** endpoints non-zero (neither is `1`) | `2` | **Closed / restricted** combat context |
+| Else (some endpoint `zoneType == 0`) | `0` | **Safe** — no combat |
+
+> **The "can I attack" gate.** A player-versus-player attack is permitted **only when the resolved combat-mode `== 1`** (i.e. at least one of the two endpoints is an open-PvP region). Any other resolved value forbids the player attack. This is the load-bearing consumer rule for the region grid: **`can-attack ⟺ combat-mode == 1`**. (Additional non-region gates — the per-map peace policy on the `map<NNN>.bin` record, target-style and level checks — are layered on top; see `Docs/RE/specs/world_systems.md §16`.) CONFIRMED via static IDA (CYCLE 7).
+
+So crossing from a safe cell into a PvP cell (or vice-versa) is decided by the **OR** of the two endpoints — a faithful port must resolve combat-mode from *both* the active region and the target's region, not from one cell alone. The richer movement-restriction gate additionally reads `zoneType` at the **destination** cell and refuses movement when it is `2` (the closed case).
+
 ---
 
 ## `regiontable<NNN>.bin` — region-properties record layout
@@ -238,6 +263,59 @@ re-traced in the build-`263bd994` two-witness pass, so they stand from the earli
 
 ---
 
+## `d<NNN>.lst` — per-area cell-list (count-prefixed u32 array) — CONFIRMED (static IDA, CYCLE 7)
+
+> **Path:** `data/map<NNN>/dat/d<NNN>.lst` (`<NNN>` is the 3-digit area string). Read on the area-load
+> path; it declares **which cells the area populates** and therefore the **per-area cell count**.
+
+The cell list is a trivial **count-prefixed `u32` array**: a leading `u32` count, then that many `u32`
+cell-key entries. Each cell-key is fed to the area's cell-registration routine.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | `cellCount` | Number of cell-key entries that follow | CONFIRMED |
+| +0x04 | `cellCount × 4` | u32[] | `cellKeys` | One cell-key per populated cell, fed to the cell registration | CONFIRMED |
+
+- **Total size:** `4 + cellCount × 4` bytes; equivalently `cellCount = (fileSize − 4) / 4`.
+- **No validation, no per-area constant, no special-case branch.** The loader simply reads the leading
+  `u32` and loops that many times — there is **no** hard-coded cell count baked into the binary for any
+  area, including dungeons.
+
+### Dungeon area-ids 201–210: cell counts are DATA-DRIVEN (not a binary constant) — CONFIRMED
+
+Dungeon areas (numeric area-ids `201`–`210`) load through the **exact same** area-load path as overworld
+areas — there is **no** `area-id ≥ 201` branch anywhere. The area-id is purely a numeric key turned into
+the 3-digit path string (e.g. `201 → "201"`), which then fills every per-area path including the cell
+list `data/map<NNN>/dat/d<NNN>.lst`.
+
+Consequently the **per-dungeon cell count is whatever its `d<NNN>.lst` declares in its leading `u32`** — it
+**cannot** be read from the executable; it must be read from each VFS `.lst` file. The structural file
+families and layouts (the 32×48 region table, the 256-unit region grid, the 520-byte `map<NNN>.bin`,
+`npc<NNN>.arr` spawns) are **identical** between dungeon and overworld areas; only the **data** differs
+(usually a smaller declared cell set, a different `map<NNN>.bin` settings record, and whatever
+dimensions/origins that area's `region<NNN>.bin` declares). No client-side **instancing** is visible in
+the asset loader — one area's files stream into the same singletons (the prior area is freed first); any
+private-instance separation would be a server concern, not an asset-format one.
+
+| Area id | 3-digit string | Cell-list file | Cell count |
+|--------:|:--------------:|----------------|-----------:|
+| 201 | "201" | `data/map201/dat/d201.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY (read from the VFS) |
+| 202 | "202" | `data/map202/dat/d202.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 203 | "203" | `data/map203/dat/d203.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 204 | "204" | `data/map204/dat/d204.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 205 | "205" | `data/map205/dat/d205.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 206 | "206" | `data/map206/dat/d206.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 207 | "207" | `data/map207/dat/d207.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 208 | "208" | `data/map208/dat/d208.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 209 | "209" | `data/map209/dat/d209.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+| 210 | "210" | `data/map210/dat/d210.lst` | leading `u32` of the `.lst` — RUNTIME-ONLY |
+
+To populate the concrete per-dungeon counts, read the leading `u32` of each `d<NNN>.lst` from the VFS
+(a `pak-explore` task). Dungeon **names** likewise come from data (the per-map settings / message
+catalogue), not from a binary string keyed on `201`–`210`.
+
+---
+
 ## Enumerations / flags
 
 ### Region ID (cell byte)
@@ -288,7 +366,8 @@ The following remain unresolved and must not be guessed at during implementation
 | `regiontable.bin`    | `data/map<NNN>/regiontable.bin`   | 32-slot × 48-byte region record table (zoneName + zoneType + tail), indexed by the cell region ID |
 | `map<NNN>.bin`       | `data/map<NNN>/map<NNN>.bin`      | Per-map setting record (520 B = `0x208`) read FIRST on the map-load path (mode enum +0x3C, name-mask flag +0x50, opaque +0x44/+0x48/+0x4C). **CORRECTED filename** — was `mapsetting<NNN>.bin`; do not confuse with `data/script/mapsetting.scr` (a separate 4,368-byte script). |
 | `npc_spawns.md`      | `data/map<NNN>/npc<NNN>.arr` etc. | Spawn placement; the **28-byte `npc.arr` record** is read by the same loader (right after `region.bin`), and is the source of the refuted "32-byte" region-table stride conflation |
-| `terrain.md`         | `data/map<NNN>/*.ted` etc.        | Per-cell terrain; the region grid is the coarser map-wide partition |
+| `d<NNN>.lst`         | `data/map<NNN>/dat/d<NNN>.lst`     | Per-area cell list (`[u32 count][count × u32 cell-key]`) read on the same area-load path; the data-driven source of each area's cell count, incl. dungeon area-ids 201–210 |
+| `terrain.md`         | `data/map<NNN>/*.ted` etc.        | Per-cell terrain; the region grid (256-unit cell) is the **coarser** map-wide partition — **distinct** from the 1024-unit / 65×65 terrain cell grid; do not conflate the two cell sizes |
 | `pak.md`             | `data.inf` / `data/data.vfs`      | VFS container (note: `region.bin` loaded by name; `.tol` is loose)  |
 
 ### Subsystem specs
@@ -299,5 +378,5 @@ The following remain unresolved and must not be guessed at during implementation
 
 World coordinates use X (east/west) and Z (north/south) as the horizontal plane. The region grid is sampled by subtracting the stored (signed) origin and dividing by the 256-unit cell stride. Y (vertical) is not part of the region grid.
 
-- **Glossary:** see `Docs/RE/names.yaml`. Names flagged for the glossary: `RegionGridFile` / `TolFile`, `RegionGridHeader`, `RegionId` (u8 index 0..31), `RegionGrid.CellStrideWorldUnits = 256`, `RegionGridOrigin` (i32 signed X/Z), `RegionRecord { char zoneName[40]; u32 zoneType; u32 _tail; }`, `RegionZoneType { Safe=0, OpenPvp=1, Closed=2 }` (consumer set; on-disk may carry a stray 9 → default), `MapBinRecord` (520-byte `map<NNN>.bin`) `{ u8 mode@+0x3C; u8 nameMask@+0x50; opaque +0x44/+0x48/+0x4C }`.
-- **Provenance:** see `Docs/RE/journal.md`. CAMPAIGN VFS-MASTERY two-witness promotion (region-table loader + black-box layout): regiontable stride RE-AFFIRMED 48 with on-disk size CORRECTED to 1,664 (1,536 records + 128-byte unread trailer); origins refined to signed i32; map-binary `+0x3C` mode enum and `+0x50` name-mask reclassified from padding; `+0x44/+0x48/+0x4C` left DBG-pending. **CAMPAIGN 10 Block D6 two-witness re-verification (build `263bd994`, area loader + 60-map `region.bin` corpus + 3 in-VFS `.tol`)** corrected five facts: cell byte is a region INDEX exercising the full `0..31` range (REFUTES the `0/1`-mask reading); on-disk `zoneType` union is `{0,1,2,9}` (consumer routes `9` to default); the per-map binary is `map<NNN>.bin` (520 B), NOT `mapsetting<NNN>.bin`; 3 `.tol` files DO live inside `data.vfs`; `.tol` front origins MATCH the runtime trailing origins (resolves the field0/field1 = originX/originZ question).
+- **Glossary:** see `Docs/RE/names.yaml`. Names flagged for the glossary: `RegionGridFile` / `TolFile`, `RegionGridHeader`, `RegionId` (u8 index 0..31), `RegionGrid.CellStrideWorldUnits = 256`, `RegionGridOrigin` (i32 signed X/Z), `RegionRecord { char zoneName[40]; u32 zoneType; u32 _tail; }`, `RegionZoneType { Safe=0, OpenPvp=1, Closed=2 }` (consumer set; on-disk may carry a stray 9 → default), `MapBinRecord` (520-byte `map<NNN>.bin`) `{ u8 mode@+0x3C; u8 nameMask@+0x50; opaque +0x44/+0x48/+0x4C }`, `AreaCellListFile` (`d<NNN>.lst` = `{ u32 cellCount; u32 cellKeys[cellCount]; }`), `CombatMode { Safe=0, Pvp=1, Closed=2 }` (resolved from two region records; `can-attack ⟺ Pvp`).
+- **Provenance:** see `Docs/RE/journal.md`. CAMPAIGN VFS-MASTERY two-witness promotion (region-table loader + black-box layout): regiontable stride RE-AFFIRMED 48 with on-disk size CORRECTED to 1,664 (1,536 records + 128-byte unread trailer); origins refined to signed i32; map-binary `+0x3C` mode enum and `+0x50` name-mask reclassified from padding; `+0x44/+0x48/+0x4C` left DBG-pending. **CAMPAIGN 10 Block D6 two-witness re-verification (build `263bd994`, area loader + 60-map `region.bin` corpus + 3 in-VFS `.tol`)** corrected five facts: cell byte is a region INDEX exercising the full `0..31` range (REFUTES the `0/1`-mask reading); on-disk `zoneType` union is `{0,1,2,9}` (consumer routes `9` to default); the per-map binary is `map<NNN>.bin` (520 B), NOT `mapsetting<NNN>.bin`; 3 `.tol` files DO live inside `data.vfs`; `.tol` front origins MATCH the runtime trailing origins (resolves the field0/field1 = originX/originZ question). **CYCLE 7 (IDB SHA 263bd994, CYCLE 7 (2026-06-20))** added, from the live region/area loader (static IDA): the **two-region combat-mode resolution rule** (combat-mode resolved from the active region record AND the target's region record; PvP wins the OR; `can-attack ⟺ combat-mode == 1`); the explicit **256-unit region cell vs 1024-unit terrain cell** callout (the two cell sizes must not be conflated); and the new **`d<NNN>.lst` count-prefixed cell-list sub-format** (`[u32 count][count × u32]`) establishing that dungeon area-ids 201–210 have **data-driven** cell counts read from the VFS, not hard-coded constants. No prior fact was contradicted — CYCLE 7 re-confirmed the existing 32×48 / zoneType@+0x28 / 256-unit constants and extends them.

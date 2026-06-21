@@ -40,16 +40,17 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game timed floating notice / error modal (ErrorPanel, slot 168).
-///
-/// <para>The global sink for server notices/errors. Shows text with a countdown;
-/// auto-dismisses. Also delegates the banner to <see cref="HudAnnouncePanel"/> when present.</para>
-///
-/// <para>PASSIVE: zero game logic; no domain mutation.
-/// Use <see cref="ShowError"/> from <see cref="HudMaster"/>.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 168.
+///     In-game timed floating notice / error modal (ErrorPanel, slot 168).
+///     <para>
+///         The global sink for server notices/errors. Shows text with a countdown;
+///         auto-dismisses. Also delegates the banner to <see cref="HudAnnouncePanel" /> when present.
+///     </para>
+///     <para>
+///         PASSIVE: zero game logic; no domain mutation.
+///         Use <see cref="ShowError" /> from <see cref="HudMaster" />.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 168.
 /// </summary>
 public sealed partial class HudErrorPanel : Control
 {
@@ -61,13 +62,19 @@ public sealed partial class HudErrorPanel : Control
     private const float PanelW = 330f; // spec: §8.25.2 — backdrop W=330 (approximate; exact sub-rect MED)
     private const float PanelH = 100f; // spec: §8.25.2 — H≈100 (exact = MED)
     private const int DefaultTimeoutMs = 5000; // spec: §8.25.3 — notice-sink default timeout 5000 ms
+    private HudAnnouncePanel? _announceDelegate; // slot 221 delegate
+    private Label? _countdownLabel;
+
+    // Last integer second displayed — guards UpdateCountdownLabel against per-frame
+    // string allocation (the visible integer changes only once per second).
+    // spec: §8.25.2 — "per-second countdown caption": update only when the integer changes.
+    private int _lastDisplayedSec = -1;
 
     // -------------------------------------------------------------------------
     // Child references
     // -------------------------------------------------------------------------
 
     private Label? _messageLabel;
-    private Label? _countdownLabel;
     private Button? _okButton;
 
     // -------------------------------------------------------------------------
@@ -76,17 +83,15 @@ public sealed partial class HudErrorPanel : Control
 
     private bool _open;
     private double _remainingSecs;
-    private HudAnnouncePanel? _announceDelegate; // slot 221 delegate
 
     // -------------------------------------------------------------------------
     // Build
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the error modal.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 168.
+    ///     Geometry pass: builds the error modal.
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 168.
     /// </summary>
     public void Build()
     {
@@ -128,7 +133,7 @@ public sealed partial class HudErrorPanel : Control
             AutowrapMode = TextServer.AutowrapMode.Word,
             Position = new Vector2(10f, 15f),
             Size = new Vector2(PanelW - 20f, 50f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_messageLabel);
 
@@ -141,7 +146,7 @@ public sealed partial class HudErrorPanel : Control
             HorizontalAlignment = HorizontalAlignment.Center,
             Position = new Vector2(10f, 60f),
             Size = new Vector2(PanelW - 20f, 16f),
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(_countdownLabel);
 
@@ -153,7 +158,7 @@ public sealed partial class HudErrorPanel : Control
             Text = "확인", // "OK" — CP949
             Position = new Vector2((PanelW - 80f) / 2f, PanelH - 28f),
             Size = new Vector2(80f, 24f),
-            MouseFilter = MouseFilterEnum.Stop,
+            MouseFilter = MouseFilterEnum.Stop
         };
         _okButton.Pressed += OnOk;
         AddChild(_okButton);
@@ -166,9 +171,9 @@ public sealed partial class HudErrorPanel : Control
     }
 
     /// <summary>
-    /// Wires the AnnouncePanel delegate (slot 221).
-    /// Call from HudMaster.Build after both panels are constructed.
-    /// spec: Docs/RE/specs/ui_system.md §8.25.1 — "ErrorPanel forwards banner to AnnouncePanel when slot 221 exists".
+    ///     Wires the AnnouncePanel delegate (slot 221).
+    ///     Call from HudMaster.Build after both panels are constructed.
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.1 — "ErrorPanel forwards banner to AnnouncePanel when slot 221 exists".
     /// </summary>
     public void SetAnnounceDelegate(HudAnnouncePanel? announcePanel)
     {
@@ -180,21 +185,20 @@ public sealed partial class HudErrorPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Shows a timed error/notice modal. Auto-dismisses after <paramref name="seconds"/>.
-    /// Also delegates the banner text to AnnouncePanel (slot 221) if present.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED —
-    /// "shows text with per-second countdown; auto-dismisses on expiry".
-    /// spec: Docs/RE/specs/ui_system.md §8.25.1 — "notice show forwards to AnnouncePanel when present".
-    ///
-    /// TODO(world-campaign): wire 4/500 SmsgShowPopupByCode sink
-    /// (popup-by-code → one of seven preset strings; codes 1..7 capture-pending).
-    /// spec: Docs/RE/specs/ui_system.md §8.25.3 — SmsgShowPopupByCode 4/500.
+    ///     Shows a timed error/notice modal. Auto-dismisses after <paramref name="seconds" />.
+    ///     Also delegates the banner text to AnnouncePanel (slot 221) if present.
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.2 CODE-CONFIRMED —
+    ///     "shows text with per-second countdown; auto-dismisses on expiry".
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.1 — "notice show forwards to AnnouncePanel when present".
+    ///     TODO(world-campaign): wire 4/500 SmsgShowPopupByCode sink
+    ///     (popup-by-code → one of seven preset strings; codes 1..7 capture-pending).
+    ///     spec: Docs/RE/specs/ui_system.md §8.25.3 — SmsgShowPopupByCode 4/500.
     /// </summary>
     public void ShowError(string text, double seconds = DefaultTimeoutMs / 1000.0)
     {
         if (_messageLabel != null) _messageLabel.Text = text;
         _remainingSecs = seconds;
+        _lastDisplayedSec = -1; // force label update on first frame
         _open = true;
         Visible = true;
         UpdateCountdownLabel();
@@ -234,8 +238,13 @@ public sealed partial class HudErrorPanel : Control
     private void UpdateCountdownLabel()
     {
         // spec: §8.25.2 — "per-second countdown caption"
+        // Guard: only allocate + assign when the displayed integer second changes.
+        // The visible value changes at most once per second; no per-frame string alloc.
+        var sec = (int)_remainingSecs;
+        if (sec == _lastDisplayedSec) return;
+        _lastDisplayedSec = sec;
         if (_countdownLabel != null)
-            _countdownLabel.Text = $"{(int)_remainingSecs}";
+            _countdownLabel.Text = sec.ToString();
     }
 
     // -------------------------------------------------------------------------
@@ -256,6 +265,7 @@ public sealed partial class HudErrorPanel : Control
         _open = false;
         Visible = false;
         _remainingSecs = 0.0;
+        _lastDisplayedSec = -1;
         if (_messageLabel != null) _messageLabel.Text = string.Empty;
         if (_countdownLabel != null) _countdownLabel.Text = string.Empty;
     }

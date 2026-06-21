@@ -15,7 +15,7 @@ opcode: 0x1000d           # major 1, minor 13 -> (1 << 16) | 13
 direction: C2S
 size: 18                  # fixed 18-byte (0x12) payload
 spec: packets/cmsg_char_rename.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: >

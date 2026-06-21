@@ -1,0 +1,55 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# VERIFICATION:
+#   routing+size: confirmed (control-flow: the handler reads 28 bytes from the payload cursor)
+#   frame-of-reference: offsets are BODY-relative (the dispatcher hands the handler the
+#     payload cursor that begins immediately after the 8-byte wire header).
+#   offsets:
+#     leading_block @ 0x00 (8 bytes): confirmed copied-but-unused by the name matcher/writer
+#       (a leading 8-byte region; the HasCustomText/StatusCode reading below is a plausible
+#        interpretation of its head bytes that drives the code-vs-name branch, but the matcher
+#        ignores this block when keying by name)
+#     has_custom_text @ 0x00: branch selector (custom name vs code) within the leading block
+#     status_code @ 0x01: status reason code used if HasCustomText is 0
+#     character_name @ 0x08: CONFIRMED — 17-byte CP949 name, string-compared against the slot name.
+#       CYCLE 8 (2026-06-21) binary re-confirm: the name key is at BODY offset 0x08, NOT 0x02 and
+#       NOT 0x00 (refutes both prior readings). Roster scratch: ~5 slots, slot stride 880 bytes,
+#       slot name field at slot+0x3C.
+#     status_value @ 0x19 (25): confirmed (updates character descriptor +206 high byte)
+#     level @ 0x1A (26): confirmed (updates player level descriptor +207 low byte / local player level)
+#   ida_reverified: 2026-06-21   ida_anchor: 263bd994   evidence: [static-ida]   cycle: 8
+#   capture_verified: false
+
+name: SmsgCharStatusBytesByName
+opcode: 0x30017           # major 3, minor 23 -> (3 << 16) | 23
+direction: S2C
+size: 28                  # fixed 28-byte payload
+spec: packets/3-23_char_select_status_update.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Select-screen character level and status update. Sent by the server to update a character's level
+  and custom status byte by matching the CP949 name string inside the lobby character slots.
+
+fields:
+  - { name: HasCustomText, type: u8 }        # 0x00  1 if name-based status is updated, 0 for code-based status (head of the leading 8-byte block)
+  - { name: StatusCode, type: u8 }           # 0x01  status reason code used if HasCustomText is 0
+  - { name: Pad0, type: "u8[6]" }            # 0x02  remainder of the leading 8-byte block (copied, unused by the name matcher)
+  - { name: CharacterName, type: "char[17]" } # 0x08  CP949 NUL-terminated character name key (string-compared against roster slot names)
+  - { name: StatusValue, type: u8 }          # 0x19  updates character status / PK / faction byte (staged in the global client status flag)
+  - { name: Level, type: u8 }                # 0x1A  updates character level (staged in the local player level global)
+  - { name: Padding, type: u8 }              # 0x1B  1 byte padding/reserved (unused)
+
+notes: |
+  Static analysis only; no capture. Frame = 8-byte header + 28 = 36 bytes on the wire.
+  Offsets above are BODY-relative (post-header payload cursor).
+
+  CYCLE 8 (2026-06-21, IDB 263bd994) binary re-confirm: the 17-byte CP949 name KEY sits at
+  body offset 0x08. The leading 8 bytes (0x00..0x07) are copied but NOT used by the slot
+  matcher/writer; the name string-compare is what keys the update across the roster slots.
+
+  When received:
+  - If HasCustomText is non-zero, it performs a character slot lookup matching CharacterName in the net-handler lobby scratch area.
+    It updates the matched character's StatusValue and Level fields.
+  - If HasCustomText is 0, it switches on StatusCode to display a timed status notice (e.g. timeout / lock notice) on the lobby UI.
+  - If the local player is already instantiated (in-game), it directly updates the global client status flag and the local player level global.

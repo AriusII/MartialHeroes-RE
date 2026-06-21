@@ -7,8 +7,4 @@
         <LangVersion>14.0</LangVersion>
     </PropertyGroup>
 
-    <ItemGroup>
-        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
-    </ItemGroup>
-
 </Project>

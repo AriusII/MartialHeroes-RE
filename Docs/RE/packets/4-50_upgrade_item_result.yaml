@@ -1,0 +1,26 @@
+name: SmsgUpgradeItemResult
+opcode: 0x40032           # major 4, minor 50
+direction: S2C
+size: 32                  # fixed 32-byte body
+spec: packets/4-50_upgrade_item_result.yaml
+status: confirmed
+capture_verified: false
+
+summary: Server response to an item upgrade / enchant request. Applies item mutations or enchant progress increments, and plays success/failure animations.
+
+fields:
+  - { name: Header,       type: "bytes[8]" }   # 0x00 Opaque header/echo region
+  - { name: Success,      type: u8 }           # 0x08 1 = success, 0 = failure
+  - { name: Reason,       type: u8 }           # 0x09 Upgrade result reason code (e.g. partial progress, item break)
+  - { name: Pad0,         type: "bytes[1]" }   # 0x0a Alignment padding
+  - { name: SlotIndex,    type: u8 }           # 0x0b Inventory slot index of the upgraded item
+  - { name: Pad1,         type: "bytes[4]" }   # 0x0c Alignment padding
+  - { name: NewFlags,     type: u32 }          # 0x10 Updated ItemSlotRecord flags on success
+  - { name: NewActorId,   type: u32 }          # 0x14 Updated ItemSlotRecord actor id on success
+  - { name: NewQty,       type: u32 }          # 0x18 Updated ItemSlotRecord quantity on success
+  - { name: EnchantDelta, type: u32 }          # 0x1c Enchant progress delta added to accumulator on partial success
+
+notes: |
+  The handler reads a fixed 32-byte body. Frame = 8-byte header + 32 = 40 bytes on the wire.
+  Success (Success == 1) plays success motion and updates item slot values.
+  Failure (Success == 0) plays failure motion. If Reason matches partial progress (2 or 3), it increments the enchant progress accumulator.

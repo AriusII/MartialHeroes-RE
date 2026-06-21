@@ -1,0 +1,46 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 8-byte body -- ActorId@0x00 /
+#                 CombatFlag@0x04 -- are control-flow-confirmed; the handler's runtime write destination
+#                 is a live-actor field, NOT a wire field; the wire-byte VALUE meaning is capture-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none new. Hygiene note: the live-actor combat-flag destination coincides numerically with
+#              a spawn-descriptor field shifted by the standard runtime rebasing; do NOT label that
+#              descriptor offset as the 5/147 wire field. 5/147 delivers the flag in its own 8-byte body.
+
+name: SmsgActorCombatFlagUpdate
+opcode: 0x50093           # major 5 (Push), minor 147 -> (5 << 16) | 147
+direction: S2C
+size: 8                   # fixed 8-byte body
+spec: packets/5-147_actor_combat_flag_update.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Server sets an actor's in-combat flag. A fixed 8-byte body carrying the actor id and a combat-flag dword; the handler resolves the actor (sort fixed = 1) and writes the flag onto the live actor.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 8.
+fields:
+  - { name: ActorId,    type: u32 }   # 0x00  target actor id (resolved with a fixed sort of 1)
+  - { name: CombatFlag, type: i32 }   # 0x04  in-combat flag value written onto the resolved actor
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 8-byte body and the two field offsets. CAPTURE-UNVERIFIED for the
+  flag's VALUE meaning.
+
+    0x00 (4B) ActorId    : target actor id; resolved with a hardcoded sort of 1.
+    0x04 (4B) CombatFlag : the in-combat flag value written onto the resolved live actor.
+
+  RUNTIME-OFFSET HYGIENE (DO-NOT-PROMOTE-AS-WIRE): CombatFlag is stored into the live actor's runtime
+  combat-flag field. That runtime offset numerically equals the spawn descriptor's in-combat-flag field
+  shifted by the standard descriptor->actor rebasing -- the two are the SAME byte in two coordinate
+  spaces (descriptor vs live actor), which is the trap. Do NOT promote the descriptor offset as the
+  5/147 wire field. The wire field is the flag dword at body +0x04 only. (Cross-confirmed: the combat
+  set-flag branch of 5/5 also writes the same live-actor combat-flag field.)
+
+  UNKNOWN to resolve with a capture: the flag's encoding (boolean vs a multi-state combat enum).
+
+  RELATED: 5/5 SmsgActorStateEvent (packets/5-5_actor_state_event.yaml) carries a sibling set-combat-flag
+  branch.

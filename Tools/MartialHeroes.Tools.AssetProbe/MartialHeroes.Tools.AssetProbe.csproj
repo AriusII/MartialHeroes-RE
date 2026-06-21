@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        MartialHeroes.Tools.AssetProbe (CLI: "assetprobe") - headless raw-asset dump tool for
+        byte-exact validation of layer-03 parser output against the real client VFS.
+
+        Phase 0 of the asset-fidelity campaign: dumps raw field values from live VFS files so that
+        downstream phases can diff them against the C# parsers and Docs/RE specs.
+
+        Subcommands:
+          mot-frames   - per-keyframe rows from a .mot animation clip
+          bnd-matrices - per-bone bind-pose data from a .bnd skeleton
+          skn-weights  - header ids + per-vertex skin-weight influences from a .skn
+          ted-blocks   - five .ted terrain blocks: offsets/sizes + key field values
+          xeff-emitters - per-emitter raw fields from a .xeff particle effect
+
+        Leaf CONSUMER of layer 03. Nothing in the layered core references it.
+        All dumps go to an EXTERNAL path (guarded). Never writes inside the repo tree.
+    -->
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <LangVersion>14.0</LangVersion>
+        <!-- Assets.Vfs uses unsafe memory-mapping internals. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <!-- Memory-mapped archive (mount + zero-copy slices). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
+        <!-- Mesh parsers: AnimationParser (.mot), BndParser (.bnd), SknParser (.skn). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Mesh\MartialHeroes.Assets.Parsers.Mesh.csproj"/>
+        <!-- Terrain parser: TedTerrainParser (.ted). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Terrain\MartialHeroes.Assets.Parsers.Terrain.csproj"/>
+        <!-- Effects parsers: XeffParser (.xeff), ParticleEmitterParser (particleEmitter.eff). -->
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Effects\MartialHeroes.Assets.Parsers.Effects.csproj"/>
+    </ItemGroup>
+
+    <!--
+        CP949 (Korean code page 949) decoding for client text payloads is provided by
+        System.Text.Encoding.CodePages (in the .NET 10 shared framework). Program.cs registers it via
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance).
+    -->
+
+</Project>

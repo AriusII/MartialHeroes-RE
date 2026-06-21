@@ -423,6 +423,11 @@ Main.exe
 # Recommended drop-zone for the user's own legacy client files (bring-your-own-assets).
 /LegacyClient/
 
+# Bulk VFS extraction mirror (vfsls `extract-all`): the FULL set of pure original files extracted
+# byte-for-byte from data.vfs for hand-parsing / IDA cross-checking. data.vfs stays the single
+# source Godot reads; this is just a local convenience mirror. Copyrighted originals — never commit.
+/extract/
+
 # === Clean-room firewall: decompiler-tainted RE material stays local ===
 # Docs/RE/_dirty/ holds raw IDA/Hex-Rays output. It must never enter git — only neutral
 # specs promoted out of it are committed. See Docs/RE/README.md.
@@ -462,6 +467,8 @@ Docs/RE/_dirty/
 05.Presentation/MartialHeroes.Client.Godot/qa_*.gd.uid
 screenshot_probe.gd
 screenshot_probe.gd.uid
+# render-reviewer / verify-loop screenshots (contain decompressed client art — NEVER commit)
+.render/
 
 # === Claude Code tooling: SHARE hooks/skills/agents/settings + the kit design docs, keep local state secret ===
 .claude/*
@@ -488,3 +495,4 @@ screenshot_probe.gd.uid
 
 # Scratch screenshots/probes (never committed)
 _scratch/
+.agents/

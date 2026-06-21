@@ -11,13 +11,22 @@
         <ProjectReference Include="..\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
         <!-- Downstream references to layer-03 are acyclic: Assets.* never reference Client.*. -->
         <!-- spec: PRESERVATION_AND_ARCHITECTURE.md — dependency DAG: Infrastructure → Application → Domain; Assets.* ≤ layer-03 < layer-04. -->
-        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers\MartialHeroes.Assets.Parsers.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.DataTables\MartialHeroes.Assets.Parsers.DataTables.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
     </ItemGroup>
 
     <ItemGroup>
         <!-- Lightweight ADO.NET SQLite provider — no ORM dependency leaks across the Application boundary. -->
         <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9"/>
+        <!--
+            Build hygiene (NU1903): Microsoft.Data.Sqlite 10.0.9 transitively resolves
+            SQLitePCLRaw.lib.e_sqlite3 2.1.11, which carries the high-severity SQLite advisory
+            GHSA-2m69-gcr7-jv3q. Pin the SQLitePCLRaw bundle forward to 3.0.3 (the latest published
+            bundle, which carries the patched e_sqlite3 3.50.x native lib) so the vulnerable 2.1.11
+            transitive is overridden at the source. spec: N/A (build hygiene; no behavioral change —
+            same ADO.NET provider surface).
+        -->
+        <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3"/>
     </ItemGroup>
 
 </Project>

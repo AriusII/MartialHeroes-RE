@@ -63,7 +63,8 @@ Fidelity is graded against **two** ground truths, and they govern different thin
    ```
    dotnet build 05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj
    ```
-   (or run `/godot-build`). A `Failed to load assembly` at boot means this step was skipped.
+   (or let `/godot-run-headless` build it for you — it builds layer 05 before its headless/screenshot
+   modes). A `Failed to load assembly` at boot means this step was skipped.
 
 2. **Headless run — capture prints + errors.** Run the Godot **console** exe headless against the
    project and capture every `GD.Print` / `GD.PrintErr` / engine error to stdout (no editor needed):
@@ -172,8 +173,8 @@ parser-vs-spec defect to name, not an excuse to tweak the preview until it looks
 3. **Wire a one-node preview scene.** Either author a tiny `res://Dev/AssetPreview.tscn` with a single
    root carrying `AssetPreviewNode.cs` (attach the script as a PROPERTY LINE — Mode A above), or register
    it as a temporary autoload. Set the env vars to the chosen asset.
-4. **Build, then screenshot.** Run `/godot-build`, then `/godot-run-headless`'s screenshot mode (windowed)
-   against the preview scene; Read the PNG back.
+4. **Build, then screenshot.** Run `/godot-run-headless`'s screenshot mode (windowed) against the
+   preview scene — it builds layer 05 first, then captures; Read the PNG back.
 5. **Inspect.** Is the shape sane and right-side-out? Buildings near origin (not mirrored ~1000+ units
    away — a Z/X negate mix-up)? Character upright (the known skinning-explosion debt renders it static,
    which is expected)? UVs tiling rather than smeared?

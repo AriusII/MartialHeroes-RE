@@ -79,10 +79,9 @@ def _clean_room_msg(ev):
 
 
 # ----------------------------------------------------------------- artifact protection
-_FORBIDDEN = re.compile(
-    r"(\.pak\b|\.pcapng\b|\.tsv\b|\.exe\b|\.dll\b|\bmain\.exe\b|(?:^|[\\/])\.godot[\\/])",
-    re.I,
-)
+# The canonical artifact set + path regex live in _hooklib (ONE source of truth shared by the
+# write / bash / git-add / git-commit checks below — they used to drift apart).
+_FORBIDDEN = h.FORBIDDEN_PATH_RE
 _GIT_MUTATOR = re.compile(r"\bgit\s+(add|commit|stash)\b", re.I)
 _GIT_SAFE = re.compile(r"\bgit\s+(rm|restore|reset)\b", re.I)
 _BLANKET = re.compile(r"\bgit\s+add\s+(-A\b|--all\b|\.\s|\.$|:/)", re.I)
@@ -127,10 +126,9 @@ def _artifact_write_msg(ev):
 
 
 # ------------------------------------------------------------------- git commit guard
-# Copyrighted-original / captured artifacts that must never be committed (all gitignored).
-_FORBIDDEN_EXT = (
-    ".pak", ".vfs", ".exe", ".dll", ".pcapng", ".scr", ".mot", ".ted", ".bud",
-)
+# Copyrighted-original / captured artifacts that must never be committed (all gitignored) —
+# shared canonical tuple in _hooklib.
+_FORBIDDEN_EXT = h.FORBIDDEN_EXTS
 _GIT_COMMIT = re.compile(r"\bgit\b[^\n;&|]*\bcommit\b")
 
 
@@ -179,7 +177,7 @@ def _git_commit_msg(ev):
 
 
 # ----------------------------------------------------------------- git add dirty guard
-_FORBIDDEN_EXT_RE = re.compile(r"\.(?:pak|vfs|exe|dll|pcapng|scr|mot|ted|bud)\b", re.I)
+_FORBIDDEN_EXT_RE = h.FORBIDDEN_EXT_RE
 _DIRTY_RE = re.compile(r"_dirty\b", re.I)
 _GIT_ADD = re.compile(r"\bgit\b[^\n;&|]*\badd\b")
 
@@ -233,12 +231,8 @@ def _bump_counter(pdir):
 
 
 def _target_hint(ti):
-    if not isinstance(ti, dict):
-        return None
-    for k in ("name", "function_name", "function", "address", "ea", "offset", "symbol", "query"):
-        if k in ti and ti[k] not in (None, ""):
-            return {k: ti[k]}
-    return None
+    # Shared extractor in _hooklib so this breadcrumb matches re_provenance_logger's record.
+    return h.ida_target_hint(ti)
 
 
 def _ida_provenance(ev, name):

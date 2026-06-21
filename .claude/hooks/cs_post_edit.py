@@ -2,24 +2,15 @@
 """PostToolUse(Write|Edit|MultiEdit) hook — consolidated post-edit advisories (one process).
 
 Advisory only. Handles, in order: (a) touched-file breadcrumb; (b) placeholder Class1.cs note;
-(c) zero-allocation perf nudges for Network.*/Assets.* hot paths; (d) packet-struct layout nudge;
-(e) slnx-sync note for new .csproj files; (f) optional owning-project build check, gated behind
-env MH_BUILD_ON_EDIT=1 and debounced (off by default during the greenfield phase).
+(c) [zero-alloc nudge moved to csharp_guard — one warning per edit, not two]; (d) packet-struct
+layout nudge; (e) slnx-sync note for new .csproj files; (f) optional owning-project build check,
+gated behind env MH_BUILD_ON_EDIT=1 and debounced (off by default during the greenfield phase).
 """
 import os
 import re
 import time
 import _hooklib as h
 
-_ALLOC = [
-    ("new byte[]", re.compile(r"\bnew\s+byte\s*\[")),
-    ("new T[]", re.compile(r"\bnew\s+\w+\[\]")),
-    (".ToArray()/.ToList()", re.compile(r"\.To(?:Array|List)\(\)")),
-    ("new List<>", re.compile(r"\bnew\s+List<")),
-    ("BitConverter", re.compile(r"\bBitConverter\.(?:To\w+|GetBytes)\b")),
-]
-_LINQ = re.compile(r"\.(?:Select|Where|Aggregate|OrderBy|GroupBy|ToDictionary)\(")
-_LINQ_USING = re.compile(r"using\s+System\.Linq\b")
 _PACKET_STRUCT = re.compile(r"\bstruct\s+\w*(?:Packet|Header|Msg|Payload)\b")
 _HAS_LAYOUT = re.compile(r"StructLayout")
 
@@ -106,13 +97,7 @@ def main():
     text = h.strip_comments_strings(h.added_text(ev))
     layer, _proj = h.layer_of(path)
 
-    # (c) perf nudges in Network.*/Assets.* (layers 2-3)
-    if layer in (2, 3) and text.strip():
-        hits = [label for label, rx in _ALLOC if rx.search(text)]
-        if _LINQ_USING.search(text) and _LINQ.search(text):
-            hits.append("LINQ on a hot path")
-        if hits:
-            advisories.append("zero-alloc nudge ({}): prefer Span<byte>/stackalloc/SequenceReader/BinaryPrimitives on Network/Assets hot paths.".format(", ".join(hits[:6])))
+    # (c) zero-alloc nudge now lives solely in csharp_guard (one warning per edit, not two).
 
     # (d) packet-struct layout nudge
     if _PACKET_STRUCT.search(text) and not _HAS_LAYOUT.search(h.added_text(ev)):

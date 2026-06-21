@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-17
+ida_reverified: 2026-06-21   # CYCLE 8: 178-slot panel array base +0x238 + slot 35/52/110/135/178 re-confirmed; prior CYCLE 7 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: skill-hotbar overlay-rect VALUES (record layout recovered; only the authored rect values are data/debugger-pending); the ACTUAL selected-target name/HP/MP plate (OtherInfo / MopGagePanel / GagePanel family — a HUD-II follow-up, not recovered this pass); the unsited "226×54 top bar" (no build site found — demoted, debugger-pending); absolute pixel resolution of every screen-relative panel (needs a runtime screen-size read)
+conflicts: skill-hotbar overlay-rect VALUES (record layout recovered; only the authored rect values are data/debugger-pending); the unsited "226×54 top bar" (no build site found — demoted, debugger-pending); absolute pixel resolution of every screen-relative panel (needs a runtime screen-size read) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): the selected-target plate is now PINNED to the panel-slot roster — **target frame = slot 35 (MopGagePanel)**, **pet window = slot 52 (PetPanel)**; prior "MopGage = slot 177 / pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; full roster + verdicts in `ui_system.md §1.9`
 ---
 
 # In-Game HUD Layout — Clean-Room Specification
@@ -328,6 +328,22 @@ runtime read of the screen-size globals at a known resolution — see §3.3, §5
 > window (the parked 964 × 655 panel listed in §5.2), which is a centred/parked spell-book window, not
 > the bar. See the §5.2 note correcting the earlier "off-screen parked panel" mislabel.
 
+### 3.3a Stat-info readout block — slots 149–176 (CODE-CONFIRMED structure)
+
+The master panel-slot roster (`ui_system.md §1.9`) shows that **slots 149–176 are a repeating
+stat / info readout block** assembled entirely from toolkit primitives, not from bespoke panel
+classes. At the HUD-layout level this matters because it is a **data-fed group grid**, not a set of
+distinct rectangles to place by hand:
+
+- Roughly **5–6 groups**, each group = **one `GUPanel` container (≈180-byte object) + four `GULabel`
+  text labels** (each label a 240-byte object whose caption is sourced by id from the message table).
+- A few **inline `GUButton`s** are interleaved at slots **146, 148, 151, 152**.
+- **Slots 161 and 164 are plain `GULabel` instances** inside this block — not distinct named panel
+  classes (an earlier reading singled them out as if named).
+
+Model this region as a repeating *container + four-label* group fed from data, anchored within the
+top-left stats area alongside the §3.4 actor-state cluster — **not** as ~28 separate placement sites.
+
 ### 3.4 Stats sub-panels (four absolute sibling panels — CONFIRMED roles)
 
 The stats group is built as a family of four **distinct C++ classes** (identified by RTTI), each
@@ -594,11 +610,16 @@ it shows nothing about a selected target.
 > resolution-dependent). The earlier §5.12 "in-panel centring vs half-screen shortcut" ambiguity is
 > closed: it is in-panel (inventory-width / 2, constant X = 765).
 
-> **The actual selected-target plate is NOT recovered here (HUD-II follow-up).** The real selected-target
-> name / level / HP / MP plate is a **separate class family** — `OtherInfo` / `MopGagePanel` / `GagePanel`
-> (the actor-state-reading classes in the uitex-map caller set). That plate was **not** recovered this
-> pass; it is a flagged HUD-II follow-up. An engineer building a target frame should build a SHELL and
-> **not** wire it to the slot-135 (UpgradeProcessPanel) geometry above.
+> **The actual selected-target plate is `MopGagePanel` at slot 35 (CYCLE 7 — PINNED).** The real
+> selected-target name / level / HP / MP frame is **`MopGagePanel`, the panel at slot 35** of the
+> master panel-slot array (`ui_system.md §1.9`). The earlier note that "slot 135 is the target frame"
+> was a mis-attribution — slot 135 is `UpgradeProcessPanel` (above), and the prior alternate claim that
+> "MopGage = slot 177" is **refuted** (slot 177 is a plain base `GUComponent` image). The class family
+> for the target read-out is `MopGagePanel` (slot 35), with `GagePanel` (slot 15 = player HP/MP gauge)
+> and `OtherInfo` (slot 46) as the related actor-state-reading classes. An engineer building a target
+> frame should wire it to the **slot-35 `MopGagePanel`**, NOT to the slot-135 `UpgradeProcessPanel`
+> geometry above. Its placement rect is still a HUD-II follow-up (not decoded this pass), but its slot
+> and class identity are now CODE-CONFIRMED.
 
 ### 5.6 Right-edge stacked gauge (HP/MP-style composite)
 
@@ -784,6 +805,15 @@ This table is the placement companion to that dispatch map: one row per HUD serv
 with the panel class, anchor formula, and size. Anchor conventions are the §5.1 families; absolute
 pixels for screen-relative rows are CONFIRMED-formula / pixel-pending (§5.11).
 
+> **Slot-number scheme in §5.13 ≠ the §1.9 roster index.** The "Slot" column in the §5.13 tables is the
+> **window-open dispatcher's own slot id** (the id the action dispatcher of `ui_system.md §8.17` toggles),
+> **not** the `+0x238`-relative panel-slot-array index used by the master roster in `ui_system.md §1.9`.
+> They are different numbering spaces: e.g. `StatusPanel` is dispatcher-slot **146** here but roster
+> index **16**; `ItemPanel` is dispatcher-slot **158** here but roster index **4**; `PetPanel` is
+> dispatcher-slot **194** here but roster index **52** (`ui_system.md §1.9`). Do **not** read the §5.13
+> "PetPanel slot 194" as contradicting the roster "PetPanel slot 52" — they are the same class in two
+> different slot-id schemes. The roster's `+0x238`-relative index is the canonical array index.
+
 **Open-dispatch windows (toggled by the ASCII-keycode strip and/or the DefaultMenu radial):**
 
 | Slot | Panel class | X | Y | W | H | Anchor | Conf |
@@ -858,9 +888,11 @@ pixels for screen-relative rows are CONFIRMED-formula / pixel-pending (§5.11).
   recovered, but the authored rect VALUES are data-driven and need a live-debugger read of a populated
   record for 1:1 overlay placement **(data/debugger-pending)**. The record layout itself is no longer
   unknown.
-- **The actual selected-target name/HP/MP plate** (§5.5a) — slot 135 is `UpgradeProcessPanel`, not a
-  target plate; the real plate is the `OtherInfo` / `MopGagePanel` / `GagePanel` class family and was
-  **not recovered** this pass **(HUD-II follow-up)**.
+- **The actual selected-target name/HP/MP plate** (§5.5a) — **CLASS + SLOT now pinned (CYCLE 7):** the
+  target frame is **`MopGagePanel` at slot 35** (`ui_system.md §1.9`); slot 135 is `UpgradeProcessPanel`
+  (not a target plate) and the alternate "MopGage = slot 177" claim is **refuted** (slot 177 = base
+  `GUComponent` image). The pet window is **`PetPanel` at slot 52**; "pet = slot 110" is **refuted**
+  (slot 110 = `Gamble`). Only the target frame's placement **rect** remains a HUD-II follow-up.
 - **The unsited "226 × 54 top bar"** (§5.4) — no `226 × 54` build site was found; the row is demoted to
   unsited and needs a concrete site or a runtime read to confirm it exists at all **(debugger-pending)**.
 - **Absolute pixel resolution for every screen-relative panel** — the minimap (`screen_width − 135`),

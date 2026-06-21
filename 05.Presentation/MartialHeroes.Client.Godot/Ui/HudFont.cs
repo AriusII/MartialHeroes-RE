@@ -24,16 +24,19 @@ using Godot;
 namespace MartialHeroes.Client.Godot.Ui;
 
 /// <summary>
-/// HUD font helper — creates Godot <see cref="SystemFont"/> objects faithful to the legacy
-/// 15-slot D3DXCreateFontA table built at Login (scene state 1).
-///
-/// <para>Use <see cref="CreateSlot"/> to produce a font for a specific slot, or
-/// <see cref="ApplyToLabel"/> to set the slot's face+size on an existing label.</para>
-///
-/// spec: Docs/RE/specs/ui_system.md §6.2 — 15-slot table: CODE-CONFIRMED.
+///     HUD font helper — creates Godot <see cref="SystemFont" /> objects faithful to the legacy
+///     15-slot D3DXCreateFontA table built at Login (scene state 1).
+///     <para>
+///         Use <see cref="CreateSlot" /> to produce a font for a specific slot, or
+///         <see cref="ApplyToLabel" /> to set the slot's face+size on an existing label.
+///     </para>
+///     spec: Docs/RE/specs/ui_system.md §6.2 — 15-slot table: CODE-CONFIRMED.
 /// </summary>
 public static class HudFont
 {
+    // Number of slots in the table.
+    // spec: Docs/RE/specs/ui_system.md §6.2 — exactly 15 slots (indices 0..14): CODE-CONFIRMED.
+    public const int SlotCount = 15; // spec: Docs/RE/specs/ui_system.md §6.2
     // -------------------------------------------------------------------------
     // The 15-slot font descriptor table
     // spec: Docs/RE/specs/ui_system.md §6.2 — CODE-CONFIRMED.
@@ -49,29 +52,6 @@ public static class HudFont
 
     private static readonly string[] BatangCheFaces =
         ["BatangChe", "Batang", "Gulim", "Malgun Gothic"];
-
-    /// <summary>
-    /// Font slot descriptor (mirrors the D3DXCreateFontA arguments).
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — columns: Face, D3DX Height (rowHeight),
-    ///   advanceWidth, cellHeight, Weight.
-    /// </summary>
-    public readonly struct SlotDescriptor
-    {
-        public string[] FaceNames { get; }
-        public int Size { get; } // legacy logical point/pixel size field
-        public int AdvanceWidth { get; } // D3DX Width — fixed-advance layout
-        public int CellHeight { get; } // D3DX Height — Godot font size
-        public int Weight { get; } // GDI weight
-
-        public SlotDescriptor(string[] faceNames, int size, int advanceWidth, int cellHeight, int weight)
-        {
-            FaceNames = faceNames;
-            Size = size;
-            AdvanceWidth = advanceWidth;
-            CellHeight = cellHeight;
-            Weight = weight;
-        }
-    }
 
     // spec: Docs/RE/specs/frontend_scenes.md — 15-slot table: face, size, advanceWidth, cellHeight, weight.
     private static readonly SlotDescriptor[] Slots =
@@ -90,22 +70,17 @@ public static class HudFont
         new(DotumCheFaces, 10, 5, 10, 400), // 11
         new(DotumCheFaces, 12, 6, 12, 400), // 12
         new(DotumCheFaces, 14, 7, 14, 400), // 13
-        new(DotumCheFaces, 16, 8, 16, 400), // 14
+        new(DotumCheFaces, 16, 8, 16, 400) // 14
     ];
-
-    // Number of slots in the table.
-    // spec: Docs/RE/specs/ui_system.md §6.2 — exactly 15 slots (indices 0..14): CODE-CONFIRMED.
-    public const int SlotCount = 15; // spec: Docs/RE/specs/ui_system.md §6.2
 
     // -------------------------------------------------------------------------
     // Public API
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Returns the <see cref="SlotDescriptor"/> for the given slot index (0..14).
-    /// Returns slot 0 (DotumChe 12 / 6 / wt 0) for any out-of-range index.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — slot 0 is the default for all front-end text.
+    ///     Returns the <see cref="SlotDescriptor" /> for the given slot index (0..14).
+    ///     Returns slot 0 (DotumChe 12 / 6 / wt 0) for any out-of-range index.
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — slot 0 is the default for all front-end text.
     /// </summary>
     public static ref readonly SlotDescriptor GetSlotDescriptor(int slot)
     {
@@ -114,58 +89,72 @@ public static class HudFont
     }
 
     /// <summary>
-    /// Creates a Godot <see cref="SystemFont"/> for the given font slot (0..14).
-    ///
-    /// <para>The returned font resolves the legacy Korean face names in priority order with
-    /// Malgun Gothic as the Windows 10/11 guaranteed fallback. Font size = rowHeight from
-    /// the spec §6.2 table.</para>
-    ///
-    /// <para>Note: weight emulation on <see cref="SystemFont"/> uses
-    /// <see cref="SystemFont.FontWeight"/>. Godot resolves the nearest available weight
-    /// from the OS font tables.</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — slot face/height/charWidth/weight: CODE-CONFIRMED.
-    /// spec: Docs/RE/specs/ui_system.md §6.1 — "charset=129=HANGUL_CHARSET": CODE-CONFIRMED.
+    ///     Creates a Godot <see cref="SystemFont" /> for the given font slot (0..14).
+    ///     <para>
+    ///         The returned font resolves the legacy Korean face names in priority order with
+    ///         Malgun Gothic as the Windows 10/11 guaranteed fallback. Font size = rowHeight from
+    ///         the spec §6.2 table.
+    ///     </para>
+    ///     <para>
+    ///         Note: weight emulation on <see cref="SystemFont" /> uses
+    ///         <see cref="SystemFont.FontWeight" />. Godot resolves the nearest available weight
+    ///         from the OS font tables.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — slot face/height/charWidth/weight: CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/ui_system.md §6.1 — "charset=129=HANGUL_CHARSET": CODE-CONFIRMED.
     /// </summary>
     public static SystemFont CreateSlot(int slot)
     {
-        ref readonly SlotDescriptor desc = ref GetSlotDescriptor(slot);
+        ref readonly var desc = ref GetSlotDescriptor(slot);
 
         var sf = new SystemFont
         {
             FontNames = desc.FaceNames,
             FontWeight = desc.Weight == 0 ? 400 : desc.Weight,
-            Antialiasing = TextServer.FontAntialiasing.Lcd,
+            // No kerning table in the original (CODE-CONFIRMED: body text uses fixed-advance
+            // charWidth per character, no per-glyph kerning table).
+            // spec: Docs/RE/specs/ui_system.md §6.3 — "no per-glyph kerning or proportional-
+            //   metrics table for body text; drawn width = charWidth × character count".
+            // Disable sub-pixel positioning to most closely match the fixed-advance monospace grid.
+            SubpixelPositioning = TextServer.SubpixelPositioning.Disabled,
+            // No hinting — the D3DXCreateFontA quality=default maps to no-hinting in practice.
+            // spec: Docs/RE/specs/ui_system.md §6.1 — "quality=default" for all slots.
             Hinting = TextServer.Hinting.None,
+            // Antialiasing matched to the D3DXCreateFontA default output quality.
+            Antialiasing = TextServer.FontAntialiasing.Gray
         };
 
         return sf;
     }
 
     /// <summary>
-    /// Returns the row height (Godot font size) for the given slot.
-    /// Use this to set <c>AddThemeFontSizeOverride("font_size", …)</c> on a label.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — D3DX Height = rowHeight.
+    ///     Returns the row height (Godot font size) for the given slot.
+    ///     Use this to set <c>AddThemeFontSizeOverride("font_size", …)</c> on a label.
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — D3DX Height = rowHeight.
     /// </summary>
-    public static int RowHeight(int slot) => GetSlotDescriptor(slot).CellHeight;
+    public static int RowHeight(int slot)
+    {
+        return GetSlotDescriptor(slot).CellHeight;
+    }
 
     /// <summary>
-    /// Returns the character cell width for the given slot.
-    /// Used to compute fixed-advance label widths: <c>charWidth × text.Length</c>.
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.3 — "bounding rect = {x, y, x+charWidth×strlen, y+rowHeight}".
+    ///     Returns the character cell width for the given slot.
+    ///     Used to compute fixed-advance label widths: <c>charWidth × text.Length</c>.
+    ///     spec: Docs/RE/specs/ui_system.md §6.3 — "bounding rect = {x, y, x+charWidth×strlen, y+rowHeight}".
     /// </summary>
-    public static int CharWidth(int slot) => GetSlotDescriptor(slot).AdvanceWidth;
+    public static int CharWidth(int slot)
+    {
+        return GetSlotDescriptor(slot).AdvanceWidth;
+    }
 
     /// <summary>
-    /// Applies the font slot's face and size overrides to the given <see cref="Label"/>.
-    ///
-    /// <para>Sets <c>font</c> and <c>font_size</c> theme overrides so this label uses the
-    /// correct Korean face and pixel height for the slot.</para>
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — per-widget font-slot index.
-    /// spec: Docs/RE/specs/ui_system.md §6.3 — fixed-advance rendering.
+    ///     Applies the font slot's face and size overrides to the given <see cref="Label" />.
+    ///     <para>
+    ///         Sets <c>font</c> and <c>font_size</c> theme overrides so this label uses the
+    ///         correct Korean face and pixel height for the slot.
+    ///     </para>
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — per-widget font-slot index.
+    ///     spec: Docs/RE/specs/ui_system.md §6.3 — fixed-advance rendering.
     /// </summary>
     public static void ApplyToLabel(Label label, int slot)
     {
@@ -174,14 +163,36 @@ public static class HudFont
     }
 
     /// <summary>
-    /// Applies the font slot's face and size overrides to the given <see cref="LineEdit"/>
-    /// (used by HudTextbox to set CP949-input text size).
-    ///
-    /// spec: Docs/RE/specs/ui_system.md §6.2 — GUTextbox font slot at +0xDC: CODE-CONFIRMED.
+    ///     Applies the font slot's face and size overrides to the given <see cref="LineEdit" />
+    ///     (used by HudTextbox to set CP949-input text size).
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — GUTextbox font slot at +0xDC: CODE-CONFIRMED.
     /// </summary>
     public static void ApplyToLineEdit(LineEdit edit, int slot)
     {
         edit.AddThemeFontOverride("font", CreateSlot(slot));
         edit.AddThemeFontSizeOverride("font_size", RowHeight(slot));
+    }
+
+    /// <summary>
+    ///     Font slot descriptor (mirrors the D3DXCreateFontA arguments).
+    ///     spec: Docs/RE/specs/ui_system.md §6.2 — columns: Face, D3DX Height (rowHeight),
+    ///     advanceWidth, cellHeight, Weight.
+    /// </summary>
+    public readonly struct SlotDescriptor
+    {
+        public string[] FaceNames { get; }
+        public int Size { get; } // legacy logical point/pixel size field
+        public int AdvanceWidth { get; } // D3DX Width — fixed-advance layout
+        public int CellHeight { get; } // D3DX Height — Godot font size
+        public int Weight { get; } // GDI weight
+
+        public SlotDescriptor(string[] faceNames, int size, int advanceWidth, int cellHeight, int weight)
+        {
+            FaceNames = faceNames;
+            Size = size;
+            AdvanceWidth = advanceWidth;
+            CellHeight = cellHeight;
+            Weight = weight;
+        }
     }
 }

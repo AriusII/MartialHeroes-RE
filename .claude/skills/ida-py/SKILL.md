@@ -1,7 +1,7 @@
 ---
 name: ida-py
-description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (Main.exe / doida.exe) and capture its result — the escape hatch for any one-off RE query the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-explore, ida-struct-recovery, ida-annotate) do not cover. Either fill the RESULT_JSON harness template for a freeform probe, or pick one of the bundled parameterized snippets ("who calls X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced") and set its CONFIG. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
-allowed-tools: Read Write
+description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (doida.exe; Main.exe historical) and capture its result — the escape hatch for any one-off RE query the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-explore, ida-struct-recovery, ida-annotate) do not cover. Either fill the RESULT_JSON harness template for a freeform probe, or pick one of the bundled parameterized snippets ("who calls X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced") and set its CONFIG. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: medium
 ---
@@ -102,7 +102,7 @@ that needs proof → the debugger (`dbg_add_bp` at the EA, `dbg_read`/`dbg_gpreg
 ## Pitfalls
 
 - **Never** dump disassembly or pseudo-C into `result` or the reply — reading one function closely is
-  `ida-decompile-export`'s quarantined job.
+  the quarantined job of `ida-explore` (DECOMPILE-ONE mode).
 - Do not reinvent a fixed skill's wheel here — `ida-py` is the escape hatch, not the default.
 - Do not edit the serialization boilerplate — a malformed `RESULT_JSON:` line is unparseable and the
   finding is lost.
@@ -115,8 +115,8 @@ that needs proof → the debugger (`dbg_add_bp` at the EA, `dbg_read`/`dbg_gpreg
 - Output goes ONLY to `Docs/RE/_dirty/queries/`. Never write to a committed RE spec, `names.yaml`,
   `journal.md`, or any `0X.*` source folder / `.cs` / `.csproj` / `.slnx`.
 - **Never decompile-to-C#.** This skill must not emit Hex-Rays pseudo-C into a reply or any file.
-  If the analysis needs to read one function closely, that is `ida-decompile-export`'s job — the
-  output stays in the quarantine and is described in neutral prose.
+  If the analysis needs to read one function closely, that is the job of `ida-explore`
+  (DECOMPILE-ONE mode) — the output stays in the quarantine and is described in neutral prose.
 - Keep `result` to metadata you explicitly gathered. Reading a handful of bytes/strings is fine;
   transcribing whole disassembly/pseudo-code listings is not.
 - Edit only the CONFIG block and the `# === USER CODE ===` block of the template — leave the

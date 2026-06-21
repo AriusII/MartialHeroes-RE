@@ -7,7 +7,7 @@ opcode: 0x20031           # major 2 (GameAction), minor 49 -> (2 << 16) | 49
 direction: C2S
 size: 19                  # fixed 19-byte (0x13) body built by the friend-command sender
 spec: packets/2-49_friend_add_remove.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client add or remove a friend, by name. One send-only message that serves BOTH operations -- a leading tag byte selects add (0) vs cut/remove (1) -- carrying a 16-byte CP949 friend name. Issued from the friend window's add-name and cut-name text fields after the typed name is committed.

@@ -1,0 +1,55 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 16-byte body, and the field decode --
+#                 actor_sort@0x00 / actor_id@0x04 / vote_side flag@0x08 / vote_result code@0x0C -- are
+#                 control-flow-confirmed; this body is NOT an opaque blit; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: REFINED. An earlier same-wave note marked 5/94 "opaque-forward"; a deeper struct pass
+#              shows the setter field-decodes the 16-byte block into the shared PvP-state object (the
+#              binary names the fields via its own debug-format strings). The deeper decode is taken.
+
+name: SmsgVoteResult
+opcode: 0x5005e           # major 5 (Push), minor 94 -> (5 << 16) | 94
+direction: S2C
+size: 16                  # fixed 16-byte body (0x10), fully accounted
+spec: packets/5-94_vote_result.yaml
+status: hypothesis
+capture_verified: false
+
+summary: >
+  Server pushes a PvP vote result. A fixed 16-byte block holding an actor key (sort + id), a vote-side
+  flag, two small bytes, and a vote-result code that drives a win/lose/in-progress notice. Field-decoded
+  into the shared PvP-state object.
+
+# Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 16.
+fields:
+  - { name: ActorSort,  type: u8 }           # 0x00  actor sort (composite-key sub-key)
+  - { name: GapA,       type: "bytes[3]" }   # 0x01  gap (not copied) -- opaque
+  - { name: ActorId,    type: u32 }          # 0x04  actor id
+  - { name: VoteSide,   type: u8 }           # 0x08  vote-side flag (==1 selects the "this side" tally branch)
+  - { name: ByteB,      type: u8 }           # 0x09  byte B
+  - { name: ByteC,      type: u8 }           # 0x0a  byte C
+  - { name: Pad0,       type: "bytes[1]" }   # 0x0b  pad
+  - { name: VoteResult, type: u32 }          # 0x0c  vote-result code (drives a win/lose/in-progress notice)
+
+notes: |
+  CONTROL-FLOW CONFIRMED: the fixed 16-byte body fully decoded. CAPTURE-UNVERIFIED for every VALUE
+  meaning. The field widths sum to exactly 16.
+
+    0x00 (1B) ActorSort  : actor sort (the standard PvP actor-key sub-key; id @+4 with a 3-byte gap).
+    0x04 (4B) ActorId    : actor id.
+    0x08 (1B) VoteSide   : a vote-side flag; == 1 selects the "this side" tally branch.
+    0x09 (1B) ByteB / 0x0A (1B) ByteC : two small bytes (mirrored into the PvP-state object).
+    0x0c (4B) VoteResult : a vote-result code, fed to a result-text lookup that drives a
+                           win / lose / in-progress notice.
+
+  RUNTIME-OFFSET HYGIENE: the setter scatters these fields into a shared PvP-state singleton object at
+  fixed offsets; those singleton offsets are runtime structure, not wire fields, and are omitted here.
+
+  UNKNOWNS to resolve with a capture: the VoteSide / VoteResult enum values and what ByteB/ByteC encode.
+
+  RELATED: part of the PvP setter family alongside 5/89 / 5/90 / 5/91 / 5/92.

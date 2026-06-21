@@ -1,0 +1,46 @@
+# spec: Docs/RE/packets/2-99_action_toggle.yaml
+# Role: C2S action/stance toggle (window command) — action code + category + local-player flag.
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgActionToggle
+opcode: 0x20063           # major 2 (GameAction), minor 99 -> (2 << 16) | 99
+direction: C2S
+size: 3                   # fixed 3-byte body
+spec: packets/2-99_action_toggle.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Small stance/action toggle (window command) carrying an action code, a category byte, and a local-player condition flag. Two sibling builders distinguish two related command families sharing the same 3-byte shape.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 3.
+fields:
+  - { name: ActionCode, type: u8 }   # 0x00  action/command code [capture/debugger-pending]
+  - { name: Category,   type: u8 }   # 0x01  category byte mapped to {1,2,3,4} [capture/debugger-pending]
+  - { name: LocalFlag,  type: u8 }   # 0x02  local-player condition byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 3-byte blit); the field VALUES are static
+  inferences (capture-pending).
+
+    0x00 (1B) ActionCode : the action/command code. One caller derives a 1-based selection index;
+                           the sibling caller selects one of a distinct command group. So this byte
+                           carries a small command selector whose space depends on which command
+                           family fired. [capture/debugger-pending]
+    0x01 (1B) Category   : a category byte derived from a window field and mapped to {1,2,3,4}
+                           (each caller maps a different source set onto this range).
+                           [capture/debugger-pending]
+    0x02 (1B) LocalFlag  : a local-player condition byte (a state of the local player object).
+                           [capture/debugger-pending]
+
+  TRIGGER: two sibling builders form a paired window action group; both first run a local validate
+  (with a mode flag of 0 vs 1) and send only on success. The pair distinguishes two related command
+  families sharing the same 3-byte shape and the same category+flag bytes. The exact subsystem (the
+  window the command drives) is capture-pending.
+
+  UNKNOWNS to resolve with a capture:
+    - the ActionCode value space and the meaning of each command family;
+    - the Category mapping source;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application action/stance toggle use-case.

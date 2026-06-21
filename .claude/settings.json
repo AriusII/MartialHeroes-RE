@@ -45,7 +45,8 @@
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/cs_post_edit.py\"", "timeout": 70 },
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/csharp_guard.py\"", "timeout": 8 },
           { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/godot_guard.py\"", "timeout": 6 },
-          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/kit_guard.py\"", "timeout": 6 }
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/kit_guard.py\"", "timeout": 6 },
+          { "type": "command", "command": "python \"${CLAUDE_PROJECT_DIR}/.claude/hooks/python_tooling_lint.py\"", "timeout": 6 }
         ]
       },
       {

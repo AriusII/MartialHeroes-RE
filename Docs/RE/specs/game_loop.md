@@ -1,9 +1,9 @@
 ---
-verification: confirmed
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: is the display FRAMERATE config (DISPLAY_FRAMERATE in display.lua) truly inert at runtime, or does some unseen/runtime path wire it into the frame cap? (capture/debugger-pending)
+conflicts: none — the display FRAMERATE config (DISPLAY_FRAMERATE in display.lua) is RESOLVED as statically inert (parsed into a renderer field with two writers and zero readers; never reaches the limiter); the per-frame cap is a hardcoded 60.0 (CYCLE 7)
 status: confirmed
 sample_verified: false
 ---
@@ -21,9 +21,11 @@ sample_verified: false
 > prior statements are corrected: (1) the loop order is **four** phases (not the §1
 > three-phase `pump → render → tick`); (2) the present path is **not** vsync-capped
 > — there is an explicit software FPS throttle (see §0.5 and §7); and (3) **the throttle's
-> cap rate is a hardcoded 60.0 FPS** read from the engine scene-machine object's framerate
-> field — seeded to `60.0` in the engine constructor and never overwritten — **NOT** the
-> `DISPLAY_FRAMERATE` display-config value (Campaign-10 correction; see §0.5, §0.6, §5, §7.4).
+> cap rate is a hardcoded 60.0 FPS** read from the engine scene-machine driver object's
+> target-frame-rate field (offset +0x30) — seeded once to the float `60.0` in that object's
+> constructor and never overwritten — **NOT** the `DISPLAY_FRAMERATE` display-config value
+> (Campaign-10 correction; the config is **RESOLVED dead — two writers, zero readers — in CYCLE 7**;
+> see §0.5, §0.6, §5, §7.4).
 > The detailed scene state machine that re-enters this loop once per screen lives in
 > `specs/client_runtime.md §7` and `§"Front-end scene state machine"`.
 
@@ -347,12 +349,14 @@ multimedia timer (`timeGetTime`-style), returning a 32-bit millisecond count.
   The ~60 Hz framerate does **NOT** come from it. **Correction (Campaign 10):** nor does the
   cap come from `DISPLAY_FRAMERATE` — the §7.4 software throttle reads a **hardcoded 60.0**
   framerate field seeded by the engine constructor. (CODE-CONFIRMED.)
-- **`DISPLAY_FRAMERATE` (display.lua) is inert as observed statically.** It is read with the
-  integer config getter and stored **raw** (no zero-default at the read site) into a renderer
-  field whose only other reference is an init-time zeroing; **no code path reads it back into
-  the loop's throttle**. So the configured framerate value has no static consumer reaching the
-  cap. Whether some unseen / runtime path re-wires `DISPLAY_FRAMERATE` into the cap is
-  **(capture/debugger-pending)** — not exercised this campaign.
+- **`DISPLAY_FRAMERATE` (display.lua) is dead config — RESOLVED (CYCLE 7).** It is read with the
+  integer config getter and stored **raw** (no zero-default at the read site) into a field of the
+  renderer/display singleton. An exhaustive static search of that field's displacement returns
+  **exactly two sites, both writes** (the singleton constructor's zero-init and the config store)
+  and **no reader anywhere in the binary** — so the configured framerate value has no consumer at
+  all and never reaches the §7.4 throttle. The earlier "is it truly inert?" question is **closed:
+  inert/dead**. The cap is the hardcoded 60.0 driver field, not this value. (A live runtime
+  reconfirmation that 60.0 paces at 60 FPS would be RUNTIME-ONLY and is not needed for the verdict.)
 - ~~Whether the D3D present path uses **vsync** as a de-facto FPS cap~~ — **RESOLVED
   (Campaign 9D)**: present interval is IMMEDIATE (vsync OFF); the FPS cap is the §7.4
   software throttle at a fixed 60 FPS. (CODE-CONFIRMED — see §0.5, §7.4.)
@@ -426,32 +430,56 @@ subscribers this frame), and dispatches each selected subscriber, applying its p
 `(now − last) ≥ interval` threshold. This confirms the §3 model exactly — the scheduler is the
 amortised, threshold-based logic clock with no leftover-time carry.
 
-### 7.4 Phase 4 — frame throttle (the software FPS cap) — (cap rate corrected Campaign 10)
+### 7.4 Phase 4 — frame throttle (the software FPS cap) — (cap rate RESOLVED, CYCLE 7)
 
 The high-resolution performance counter measures the real elapsed seconds since the previous
-frame. The target interval is `1.0 / framerate`, where `framerate` is the **framerate field of the
-engine scene-machine object**. That field is seeded to **60.0** by the engine constructor and is
-**never overwritten** before or during the loop, so the cap is a **fixed 60 FPS**. If the target
-exceeds the measured delta, the loop **sleeps the remainder** (`(target − measured)` seconds), then
-re-baselines the counter anchor for the next frame.
+frame. The target interval is `1.0 / rate`, where `rate` is the **target-frame-rate field
+(offset +0x30) of the engine scene-machine driver object**. That field is seeded **once** as an
+immediate to the float **60.0** by the driver object's constructor and is **never overwritten** by
+config or anything else before or during the loop, so the cap is a **fixed 60 FPS**. The limiter
+math is `Sleep((1.0/rate − measured) × 1000)` ms: if the target frame time exceeds the measured
+delta, the loop sleeps the remainder, then re-baselines the counter anchor for the next frame. The
+`× 1000` is a seconds→milliseconds **units conversion**, *not* a second cap. So the per-frame budget
+is `1000/rate` ms ≈ **16.67 ms** at rate 60.
 
-The throttle also **publishes the measured inter-frame delta** (the elapsed seconds) into a
-delta-time field on the same engine object every frame. This is a real per-frame delta the engine
-exposes — but note the logic scheduler (§3) does **not** use it; the scheduler runs its own
-millisecond-threshold model. (No other observed consumer of this published delta was pinned down
-this campaign.)
+**The limiter caps only the upper FPS.** Busy frames where the measured delta already meets or
+exceeds `1/60` skip the `Sleep` and run uncapped — the throttle does **not** pad slow frames, it
+only holds the ceiling. The fixed-60 driver pacing is shared by the load, opening, character-select,
+and in-game scene loops (each re-enters this same loop on the driver singleton). The login scene
+runs the same loop on its own window-derived object's own +0x30 loop-rate field (a per-object loop
+rate, also seeded per-object — **not** the dead display config field).
+
+The throttle also **measures and stores the inter-frame delta** (the elapsed seconds) into a
+last-frame delta-time field (offset +0x34) on the same driver object every frame. This is a real
+per-frame delta the engine exposes — but note the logic scheduler (§3) does **not** use it; the
+scheduler runs its own millisecond-threshold model. (No other observed consumer of this stored delta
+was pinned down.)
 
 This is the **software FPS cap**. Combined with the IMMEDIATE present interval (§0.5), the client
 is **not** vsync-locked — it is throttled by this counter-and-sleep step to a fixed 60 FPS.
 
-> **Correction (Campaign 10) — the cap rate is NOT `DISPLAY_FRAMERATE`.** The earlier reading that
-> the cap is keyed to the `DISPLAY_FRAMERATE` display-config value is **wrong**. The throttle reads
-> the engine object's hardcoded-60.0 framerate field; the `DISPLAY_FRAMERATE` value (read from
-> `display.lua`) is stored **raw with no zero-default** into an unrelated renderer field that has
-> **no reader feeding this throttle** — i.e. it is **inert** as observed statically. There is
-> therefore no "if the config value is 0 a default applies" behaviour at the cap. *Whether some
-> unseen / runtime path re-wires `DISPLAY_FRAMERATE` into the cap is* **(capture/debugger-pending)** —
-> not exercised this campaign.
+**Limiter constants:**
+
+| Constant | Meaning |
+|---|---|
+| the float **60.0** | hardcoded target frame rate, seeded once into the driver object's +0x30 field by its constructor; the rate passed to the limiter |
+| **1.0** | numerator of the target frame time `1.0 / rate` |
+| **1000.0** | seconds→milliseconds conversion in `Sleep((1/rate − measured) × 1000)` — units only, *not* a cap |
+| **1 ms** | the `timeBeginPeriod(1)` timer resolution that gives the `Sleep` its granularity |
+
+> **Resolution (CYCLE 7) — the cap rate is NOT `DISPLAY_FRAMERATE`; the config is dead.** The
+> reading that the cap is keyed to the `DISPLAY_FRAMERATE` display-config value is **wrong**, and the
+> earlier "is the config truly inert?" question is now **closed: it is inert (dead)**. The throttle
+> reads the driver object's hardcoded-60.0 +0x30 field. The `DISPLAY_FRAMERATE` value (parsed from
+> `data/script/display.lua` with the integer config getter) is stored **raw, with no zero-default**,
+> into a field of a **different** object — the renderer/display singleton (the field is initialised to
+> 0 in that singleton's constructor). An exhaustive static search of that field's displacement found
+> **exactly two sites, both writes** (the constructor zero-init and the config store) and **zero
+> readers anywhere in the binary** — the stored value never reaches the limiter. There is therefore
+> no "if the config value is 0 a default applies" behaviour at the cap. **Any spec or port that
+> claims the FPS cap is configurable is WRONG; pace gameplay at a fixed 60 FPS upper bound to match.**
+> (Only a live runtime confirmation that 60.0 actually paces at 60 FPS would remain — RUNTIME-ONLY,
+> not needed for the verdict.)
 
 ### 7.5 Loop exit
 

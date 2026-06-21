@@ -1,6 +1,6 @@
 ---
-verification: confirmed            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
-ida_reverified: 2026-06-16
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
+ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida]             # add 'vfs-sample' only where a real asset sample corroborated (UI dialog IDs via msg.xdb, area inventory); noted inline as SAMPLE-VERIFIED
 conflicts: login credential wire opcode (key-string secure context vs literal C2S 2/1 byte form); 4/1-form arrival ordering; whether the display FRAMERATE config is truly inert vs the hardcoded 60 FPS cap — all capture/debugger-pending
@@ -117,7 +117,7 @@ OS process create
 
 [State 5 — In-game]
   MainHandler (~200 B) → BuildGameWorld → BuildSceneGraph
-  camera: FOV 65°, near 5, far 15000; 5 manipulators + 1 reserved slot
+  camera: FOV 65°, near 5, far 15000; 5 view platforms (no 6th) + 5 manipulators
   await S2C 4/1 GameStateTick → extract spawn position → Terrain_InitFirstRing_3x3
   per-frame world-update callbacks (six render passes A–F + UI)
   logout / disconnect ─> State 4 (Character Select), NOT back to Login
@@ -130,15 +130,25 @@ OS process create
   → writes state value 8 (exit)
 
 [Exit — state value 8, NOT a 9th case]
-  the switch is bounds-checked (state <= 7, a jump table of 8 entries 0..7 plus a default);
-  writing state value 8 falls into the switch DEFAULT branch: resource teardown in
-  reverse-singleton order, then WinMain returns / process exit
+  the switch over the scene-state field has exactly 8 explicit cases (states 0..7);
+  state value 8 is the loop-exit terminal shutdown sentinel — tested at the loop bottom,
+  it emits the end marker, runs resource teardown, and WinMain returns / process exit
+  (the switch default arm also forces 8 for any out-of-range value)
 ```
 
-> **Scene-state count (corrected):** the WinMain switch has **exactly 8 top-level cases, states 0..7**.
-> The value **8 is a sub-state / exit sentinel**, not a 9th top-level case — it is what states 6 (Quit)
-> and 7 (Error) write to drop into the switch default (teardown + return). Earlier "states 0..8 /
-> nine-state lifecycle" phrasing is wrong: it is *states 0..7 (8 cases); 8 is the exit sentinel*.
+> **Scene-state count (corrected, re-confirmed CYCLE 7):** the WinMain switch over the scene-state
+> field has **exactly 8 explicit cases, states 0..7**. The value **8 is NOT a switch case** — at the
+> top-level scene-machine dispatch it is the **loop-exit TERMINAL SHUTDOWN sentinel**: when the
+> scene-state field equals 8 the loop emits its end marker and the program returns (clean shutdown).
+> It is what states 6 (Quit) and 7 (Error) — and the switch default — write to make the next loop
+> iteration fall out and tear down. Earlier "states 0..8 / nine-state lifecycle" phrasing is wrong:
+> it is *states 0..7 (8 cases); 8 is the exit sentinel*.
+>
+> **Do not confuse top-level state 8 with any "login sub-state 8".** The "8 = login sub-state"
+> wording from earlier drafts referred to **LoginWindow's own internal handshake FSM** (the
+> credential / PIN-modal sub-state field at object offset `+0x238`, §5.1.3) — a **different field
+> entirely** from the top-level scene-state selector. At the top-level scene-machine scope there is
+> no case 8; value 8 means *exit*. (CODE-CONFIRMED — re-confirmed against IDB SHA 263bd994, CYCLE 7.)
 
 > **Key non-obvious edge:** in-game (state 5) transitions **back to character select (state 4)**,
 > not to login. Login is visited only once per process lifetime. The load/opening gate (state 2) is
@@ -261,19 +271,30 @@ and sleeps the remainder, holding the loop at the fixed 60 FPS cadence.
 
 ### 4.1 Overview (CODE-CONFIRMED)
 
-WinMain mounts the VFS once, then runs a `while(1)` switch/case over a single global engine-state
-integer record (a 3-int record: `[state, sub-state, reason]`). The switch is **bounds-checked
-(state ≤ 7) and dispatches through a jump table of exactly 8 entries (states 0..7) plus a default
-branch**. There is no 9th top-level case — the value **8 is the exit sentinel** written by the
-Quit (6) and Error (7) cases to fall into the switch default (teardown + WinMain return). See §4.2.
+WinMain mounts the VFS **once**, then runs an infinite `while(1)` loop whose body is a `switch` over
+the single global GameState **scene-state field** with **exactly 8 explicit cases, values 0..7**.
+The value **8 is not a switch case** — it is the **loop-exit terminal shutdown sentinel** tested at
+the bottom of the loop: when the scene-state field equals 8, the loop emits its end marker and
+WinMain returns (clean program shutdown). The Quit (6) and Error (7) cases, and the switch
+**default** arm (any out-of-range value), all write 8 to drive that exit. See §4.2.
 
-Each top-level case:
-1. Writes the *next* engine state immediately (pre-loop intent).
-2. Constructs the scene handler.
+> The GameState record is read as an array of dwords: `[0]` = current scene state (the switch
+> selector); `[1]` = the error / disconnect reason code (written by cases 1 and 7, read by case 7);
+> `[2]` = a secondary code (read by case 7 when `[1] == 8`); and a byte at object offset `+0x0C` =
+> the `debugmode` flag, set from the `game.lua` `debugmode` global. (§4.6 covers the reason field.)
+
+Each top-level case is **"fall-through-by-assignment"**:
+1. It **first writes the next default scene state into the selector field** (pre-loop intent).
+2. Constructs the scene handler / window.
 3. Calls the shared engine main loop (the four-phase loop from §3), which runs until a one-byte
    run-flag is cleared.
 4. Destructs the handler.
-5. Falls through to the outer `while(1)` which re-dispatches on the current engine-state value.
+5. Falls through to the outer `while(1)`, which re-dispatches on the current scene-state value.
+
+The leading assignment is only the **default next** state. The **real transition trigger is set
+inside the per-scene window code**: a scene loop may overwrite the selector field before it returns,
+in which case the next dispatch follows the scene's choice rather than the case's default. So the
+static edges below should be read as *"default next" unless the scene loop overrides the field first.*
 
 The loop-break mechanism is a dedicated function that clears the global run-flag. State transitions
 are effected by writing the desired next-state integer and then calling this break function.
@@ -288,8 +309,8 @@ there is no direct jump to it. The relevant edges:
   the character-select scene loop. When the player confirms enter-game and that loop exits, the outer
   `while(1)` re-reads the now-armed state value **5** and dispatches into case 5.
 - **Case 5 (In-game) builds the world** — it constructs the world handler / main window, performs the
-  world-build sequence (§5.4.1), **sends the keepalive-toggle C2S `2/112` on entry** (the in-world
-  keepalive enable, mirrored by the leave/logout path that disables it — §4.4 / §6.4), and runs the
+  world-build sequence (§5.4.1), **sends the keepalive software-toggle C2S `2/112` ENABLE on entry**
+  (mechanism (b) of §6.4.1, mirrored by the leave/logout DISABLE — §4.4 / §6.4.1), and runs the
   blocking world loop.
 - **Case 5 in turn pre-arms state 4 on its own entry**, so that when the world loop exits (logout /
   disconnect) the switch returns to **Character Select (4)**, not to Login — consistent with the
@@ -312,15 +333,17 @@ also be staged in the camera follow-target slot or the world renders nothing (se
 | 3 | Opening | `COpeningWindow` — intro sequence | ~720 B |
 | 4 | Character Select | `SelectWindow` | ~6280 B |
 | 5 | In-game | `MainHandler` + full scene graph | ~200 B base |
-| 6 | Quit | Inline — engine shutdown path; writes state value 8 | — |
-| 7 | Error | Inline — modal dialog (reason from the GameState reason field); writes state value 8 | — |
-| 8 | *(exit sentinel — NOT a case)* | Switch **default** branch — teardown and WinMain return | — |
+| 6 | Quit | Inline — clean-shutdown request: tears down the scene dispose-list (no window); writes state value 8 | — |
+| 7 | Error | Inline — builds the error string from the reason codes, shows a message box, closes the net client (no window); writes state value 8 | — |
+| 8 | *(loop-exit terminal sentinel — NOT a case)* | Loop bottom emits its end marker and WinMain returns (clean shutdown) | — |
 
-> **State count (CODE-CONFIRMED, corrected):** there are **8 top-level cases (states 0..7)**.
-> The switch is bounds-checked (`state ≤ 7`) over a jump table of 8 entries plus a default branch.
-> **Value 8 is the exit sentinel, not a 9th case** — it is what cases 6 and 7 write so the next
-> `while(1)` iteration falls into the switch default (resource teardown + WinMain return). Earlier
-> "states 0..8 / nine-state" phrasing is wrong.
+> **State count (CODE-CONFIRMED, corrected — re-confirmed CYCLE 7):** there are **exactly 8 explicit
+> cases (states 0..7)**. **Value 8 is the loop-exit terminal shutdown sentinel, not a 9th case** — it
+> is what cases 6 and 7, and the switch default, write so the next `while(1)` iteration emits the end
+> marker and returns (resource teardown + WinMain return / process exit). Earlier "states 0..8 /
+> nine-state" phrasing — and the separate "8 = login sub-state" reading — are wrong **at this scope**:
+> the latter is a property of LoginWindow's internal handshake FSM field (`+0x238`, §5.1.3), a
+> different field from the scene-state selector.
 
 > Note: a `SimpleLoadHandler` class exists in the binary with a complete constructor but zero
 > callers. It is dead code from an earlier iteration. (CODE-CONFIRMED)
@@ -349,9 +372,18 @@ also be staged in the camera follow-target slot or the world renders nothing (se
 | 5 In-game | Quit / logout | 6 Quit | 8 |
 | 5 In-game | 4/1 GameStateTick (form 1), actor create fail | 4 Select | — |
 | 5 In-game | Action-result code ≠ 0, local player (S2C 3/100) | 7 Error | 8 |
-| 6 Quit | Case body | writes value 8 (exit sentinel → default branch) | — |
-| 7 Error | Case body | writes value 8 (exit sentinel → default branch) | — |
+| 6 Quit | Case body | writes value 8 (loop-exit terminal sentinel → shutdown) | — |
+| 7 Error | Case body | writes value 8 (loop-exit terminal sentinel → shutdown) | — |
+| default | Any out-of-range selector value | disposes the scene dispose-list, forces value 8 → shutdown | — |
 | Any | `WM_QUIT` | (run-flag cleared) | — |
+
+> **Who writes states 6 and 7 from *outside* the dispatch is RUNTIME-DRIVEN (UNVERIFIED).** Within
+> WinMain, case 1's two login-failure fast-paths write `[0]=7` (with reason code 1 or 3, §4.6), and
+> cases 6/7 write the exit value 8. But which external code path writes `[0]=6` (a clean-shutdown
+> request) or `[0]=7` (an out-of-band error/disconnect) from outside the switch — e.g. a network
+> disconnect handler or a user-quit action — is not visible in the dispatch itself and is **out of
+> scope here (UNVERIFIED, runtime-driven)**. Likewise, the exact world-exit target a running world
+> scene writes before returning (e.g. 6 or 7 vs the default 4) is set by the scene loop at runtime.
 
 > **Opcode attribution (CODE-CONFIRMED, corrected):** the result codes 202/203/232 and 1..4/7 above
 > are handled by the **generic char/lobby action-result S2C 3/100**, NOT by the char-manage result
@@ -374,8 +406,9 @@ A scene-aware quit dispatcher reads the current engine state and picks the appro
   event; tears down world UI / actor slots.
 - State 7 is the generic error path for unexpected disconnects from any state.
 
-The in-world leave/logout teardown additionally disables the keepalive (clears the master-enable
-global, see §6.4), emits SFX 861010106, and writes state 6 / sub-state 8.
+The in-world leave/logout teardown additionally sends the **2/112 software-toggle DISABLE**
+(mechanism (b), §6.4.1) — independent of the periodic idle-heartbeat suppress flag — emits SFX
+861010106, and writes state 6 / sub-state 8.
 
 Full network-driven transition table: `specs/client_runtime.md §7.5.2`.
 
@@ -684,22 +717,54 @@ part of leaving the character-select scene. (CODE-CONFIRMED)
 
 On entering State 5, the case body constructs `MainHandler` and calls `BuildGameWorld`:
 
-0. **On case-5 entry** the case body sends the in-world **keepalive-toggle C2S `2/112`** (enable),
-   then constructs the world handler / main window before the build steps below. The leave /
-   logout path disables the same keepalive (§4.4 / §6.4). (CODE-CONFIRMED)
+0. **On case-5 entry** the scene state machine sends the in-world **keepalive software-toggle
+   C2S `2/112`** (ENABLE, 1-byte body; mechanism (b) of §6.4.1), then constructs the world handler /
+   main window before the build steps below. The leave / logout path sends the matching DISABLE
+   (§4.4 / §6.4.1). This 2/112 toggle is **independent** of the periodic idle heartbeat C2S 2/10000
+   (mechanism (a)), whose suppress flag is cleared separately by the S2C 4/1 handler. (CODE-CONFIRMED)
 1. **`BuildGameWorld`** — allocates world-layer objects (physics grid, entity registry,
    cell-streaming queue). Approximately 17 world-manager singletons cached.
 2. **`BuildSceneGraph`** — creates:
    - Camera: `GPerspectiveCamera`, FOV 65°, near plane 5, far plane 15000.
-   - Five `GViewPlatform` render targets plus a **reserved sixth slot** (allocated but never
-     assigned — provision for a future mode not in this build).
-   - `GScene` node labelled "charater scene" (literal label; typo is authentic).
-   - `GSwitch` node for toggling render branches.
+   - **Exactly five view platforms** — five unrolled view-platform constructor calls (no loop),
+     stored to five contiguous object slots at `+0x50, +0x54, +0x58, +0x5C, +0x60` (i.e. +80..+96).
+     **There is NO sixth view-platform slot** (the earlier "reserved sixth slot" reading is wrong —
+     see §5.4.1a).
+   - Scene-root node (a *different* class from the view platform) labelled "charater scene"
+     (literal label; typo is authentic), stored at object offset `+0x70` (+112). This is the
+     scene root, **not** a sixth view platform.
+   - Render-branch switch node for toggling render branches.
    - Five camera manipulators (Third / First / Static / Gamble / Event).
 3. **Five+ render-callback slots installed** (render pass order — see §5.4.4).
 4. **World services started**: environment/day-night driver, cursor/3D-marker service,
    per-frame update callback. HUD panel tree activated (community panel, character-billboard
    panel, link-combo panel, rank-progress panel, slot panels).
+
+#### 5.4.1a View-platform count — exactly FIVE, no sixth slot (CODE-CONFIRMED, re-confirmed CYCLE 7)
+
+The in-game scene-graph builder constructs **exactly five view platforms** — five **unrolled**
+view-platform constructor calls, with **no loop and no array index above 4** — each stored to a
+distinct, contiguous object slot:
+
+| Slot offset | Role |
+|---|---|
+| `+0x50` (+80) | in-game view platform 0 (camera-attached) |
+| `+0x54` (+84) | in-game view platform 1 |
+| `+0x58` (+88) | in-game view platform 2 |
+| `+0x5C` (+92) | in-game view platform 3 |
+| `+0x60` (+96) | in-game view platform 4 |
+
+**There is no sixth view-platform slot.** The allocation that earlier drafts mistook for a "reserved
+6th view platform" in the same builder is the **scene-root object** — a **different class** (the
+GScene root), labelled `"charater scene"` (sic in the binary), stored at object offset `+0x70`
+(+112). It writes a different vtable and serves as the scene root, not as a view platform.
+
+The char-select scene (state 4) builds its **own** single view platform plus its own scene root
+labelled `"select"` — an **independent, parallel scene**; it does **not** add a sixth platform to
+the in-game array. The view-platform construction is also mirrored in the front-end spec (see
+`specs/frontend_scenes.md` §7.1). The earlier "5 view platforms" documentation therefore **holds**;
+the "reserved 6th slot" idea is dispelled. (CODE-CONFIRMED via the view-platform constructor's
+exhaustive call-site set — re-confirmed against IDB SHA 263bd994, CYCLE 7.)
 
 #### 5.4.2 Spawn from network — the two-form 4/1 handler (CODE-CONFIRMED)
 
@@ -988,15 +1053,59 @@ Three cooperating threads (CODE-CONFIRMED):
 |--------|------|
 | IO-completion | `WSAWaitForMultipleEvents`, overlapped recv/send, raw frame enqueue |
 | Network worker | Recv-queue pop → message-bus hop → handler dispatch |
-| Keepalive | Sends C2S **2/112** ping (1-byte payload) every ~20 s; gated by a master-enable global (see below) |
+| Keepalive timer | Idle-heartbeat timer thread (mechanism **(a)** below): fires C2S **2/10000** after full outbound silence |
 
-**Keepalive opcode (CODE-CONFIRMED — corrected):** the keepalive is **C2S 2/112** (major 2,
-minor 112 = 0x70) with a **1-byte payload**, NOT 2/10000. It is governed by a dedicated
-**master-enable global**: the sender enables the keepalive on **World entry** (state 5 case body)
-and disables it on **world leave / logout**. This master-enable is a *distinct* mechanism from the
-per-send suppress byte at NetClient object offset +82364 (that byte is set by every C2S send and
-cleared at the start of the 4/1 and 3/1 handlers). (Wire-level: the 2/112 opcode is static-confirmed
-from the send path; an on-the-wire capture remains capture/debugger-pending.)
+A separate **send-proxy worker** thread (the outbound proxy that drains the C2S queue) also emits a
+header-only idle filler — mechanism **(c)** below.
+
+#### 6.4.1 Keepalive — THREE independent mechanisms (CODE-CONFIRMED — corrected)
+
+The connection is kept alive by **three independent mechanisms**, not one heartbeat. They are driven
+by *different* threads, carry *different* opcodes, and are gated by *different* flags. Treating them as
+a single "2/112 ping every 20 s" (as earlier drafts did) is wrong.
+
+| # | Opcode | Body | Driver | Cadence / gate |
+|---|--------|------|--------|---------------|
+| (a) | C2S **2/10000** | 4-byte zero body | dedicated keepalive timer thread | periodic idle heartbeat — fires after the connection has been outbound-idle longer than the idle interval |
+| (b) | C2S **2/112** | 1-byte body (value `0x01`) | scene state machine | one-shot software toggle — ENABLE just before the in-world loop, DISABLE on leave-world |
+| (c) | C2S **1/2** | header-only (size 8, no body) | send-proxy worker thread | idle filler — emitted roughly once per millisecond while the proxy is idle |
+
+**(a) 2/10000 — periodic idle heartbeat.** A C2S frame with a **4-byte zero body**, fired by a
+dedicated **timer thread**. The timer polls every **1000 ms**; when it observes that the connection
+has been outbound-idle longer than the **idle interval = 20000 ms (20 s)**, it emits the heartbeat.
+The frame is **pre-compressed once** and **enqueued directly**, bypassing the normal send path. It is
+suppressed by a **per-connection suppress flag**; the **S2C 4/1 world-state handler CLEARS
+(un-suppresses)** that flag. The idle clock is **reset by ANY outbound packet**, so the heartbeat only
+fires after a stretch of *full outbound silence* — it is a true idle keepalive, not a fixed-period
+ping. The 4/1 handler's role in un-suppressing this periodic heartbeat is documented in
+`handlers.md (§4/1)`.
+
+**(b) 2/112 — one-shot software toggle.** A C2S frame with a **1-byte body** (value `0x01`). The
+**ENABLE** is fired by the **scene state machine just before the in-world loop** (case-5 entry, §5.4.1);
+the **DISABLE** is fired on **leave-world** (§4.4). It flips an **independent software gate** — this is
+**NOT** the same flag as the 2/10000 suppress flag in (a). The two gates are distinct mechanisms that
+happen to bracket the same in-world lifetime.
+
+**(c) 1/2 — send-proxy-worker idle filler.** A **header-only** C2S frame (size 8, no body), emitted by
+the **send-proxy worker thread** (a thread separate from both the IO-completion thread and the keepalive
+timer) roughly **once per millisecond** while that proxy is idle.
+
+> **Corrections recorded explicitly (binary wins):**
+> 1. **"10000 = a 10-second delay" is WRONG.** `10000` is the **opcode minor** of the idle heartbeat
+>    (C2S 2/10000); it is *not* a delay value. The actual idle interval is **20 s** (timer polls every
+>    1 s). Any reading that treats the `10000` as "10 000 ms / 10 s delay" is a mis-attribution.
+> 2. **"4/1 enables 2/112" is WRONG.** The S2C 4/1 world-state handler **CLEARS the 2/10000 suppress
+>    flag** (un-suppresses the *periodic* heartbeat). The **2/112 ENABLE** lives in the **scene state
+>    machine, just before the in-world loop** — not in the 4/1 handler. The earlier text that bound
+>    4/1 to a single "2/112 master-enable" conflated mechanisms (a) and (b).
+
+> **(live-pending (6-D)):** the real-wire **cadence of 2/10000 vs 1/2** is not statically settled. The
+> static hypothesis is that the **1/2 proxy filler keeps the idle clock fresh**, so the **2/10000 idle
+> heartbeat rarely fires** and acts as a **full-silence fallback** rather than a regular tick. Confirm
+> the relative cadence (and whether 1/2 truly resets the 2/10000 idle clock) on a live capture.
+
+> **(live-pending (6-D)):** the on-the-wire byte forms of all three frames (2/10000, 2/112, 1/2) are
+> static-confirmed from the send path only; an actual capture of each on the wire remains pending.
 
 All handler dispatch happens on the **frame thread** (message-bus hop), not on the IO thread.
 (CODE-CONFIRMED — handlers may read/write game state without additional locks.)
@@ -1120,7 +1229,7 @@ interaction. Empty cells = no direct interaction observed.
 | Initiator ↓ \ Target → | UI/GU* | Effects | Sound | Network | Resource | Environment | Terrain | Actor/Skin | Anti-cheat |
 |------------------------|--------|---------|-------|---------|----------|-------------|---------|------------|------------|
 | **Scene machine** | Constructs scene handlers (Login/Select/World); widget trees via uiconfig.lua | — | Entry BGM trigger (910066000) | State transitions via S2C packets | BulkAssetLoader on states 2 → 4/5 | — | — | Preview in char-select | XTrap gate at state 1 |
-| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive thread (C2S 2/112, parallel; master-enable global) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
+| **Frame loop** | HitTest + Draw each frame | Per-frame tick (elapsed-ms / keyframe lerp / geometry build) | Ambient clock tick (1000/3000 ms accum) | Keepalive: 3 mechanisms — 2/10000 idle-heartbeat timer + 2/112 scene toggle + 1/2 proxy filler (§6.4.1) | — | Pre-draw day/night tick (pass A, ≥50 ms gate) | — | LBS deform + animate | — |
 | **UI/GU*** | — | Button hover FX (PLAUSIBLE) | Login SFX on sub-states (e.g. 861010105 at sub-state 2) | Login/select/chat packets sent on button actionId | msg.xdb string load | — | — | 3D preview render (GUCanvas3D) in char-select | — |
 | **Effects** | Damage number overlay draw | — | SFX trigger on effect events (totalmugong.txt) | — | Lazy-load xeffect.lst, bmplist.lst, xobj.lst | — | MapXEffect world-space placement | JointXEffect bone attachment (bone_source_enum) | — |
 | **Sound** | Volume slider UI binding | — | — | Clock sync via 5/18 (game-hour → ambient re-eval) | Load .bgm/.bge/.eff/.wlk/.run tables | Day/night hour gates ambient re-pick | Mud-cell ambient lookup (offsets +0x02–+0x07) | Footstep SFX from actor visual fields +108/+112 | — |
@@ -1185,11 +1294,16 @@ What remains open is the *runtime arrival ordering* on world entry — whether a
 a form-1 materialize or a form-0 update, and how the major-1 billing notices interleave with it.
 Needs a live capture. Owned by `specs/client_runtime.md §9.5` / `packets/s2c_billing.yaml` (pending).
 
-**OQ-PROTO-04 — Keepalive gating mechanism. (mostly resolved; residual capture-pending)**
-The keepalive opcode is C2S **2/112** (1-byte payload), gated by a **master-enable global** set on
-World entry and cleared on world leave (§6.4). A *separate* per-send suppress byte at NetClient
-object offset +82364 is set by every C2S send and cleared at the start of the 4/1 and 3/1 handlers.
-What is not statically settled is whether any server-side instruction also influences these flags.
+**OQ-PROTO-04 — Keepalive: three mechanisms, relative wire cadence. (mostly resolved; cadence live-pending (6-D))**
+The connection is kept alive by **three independent mechanisms** (§6.4.1), not one: (a) the periodic
+**idle heartbeat C2S 2/10000** (4-byte zero body) from a timer thread, fired after the idle interval
+(20 s) and suppressed by a per-connection suppress flag that the **4/1 handler clears**; (b) the
+one-shot **software toggle C2S 2/112** (1-byte body) ENABLED by the scene state machine just before the
+in-world loop and DISABLED on leave-world, flipping an *independent* gate; and (c) the **send-proxy
+idle filler C2S 1/2** (header-only) emitted ~once/ms while the proxy is idle. What is **not** statically
+settled and is **live-pending (6-D)**: the real-wire **cadence of 2/10000 vs 1/2** (static hypothesis:
+the 1/2 filler keeps the idle clock fresh so 2/10000 rarely fires and is a full-silence fallback), and
+whether any server-side instruction also influences the suppress / toggle gates.
 Owned by `specs/client_runtime.md §network`.
 
 ### 9.2 Scene machine / UI

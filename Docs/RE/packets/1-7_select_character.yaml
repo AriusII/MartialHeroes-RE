@@ -1,6 +1,10 @@
 # *** SUPERSEDED -> see packets/cmsg_char_select.yaml ***
-# Refined select layout (slot + flag, two emit paths) lives in cmsg_char_select.yaml; the
-# opcodes.md 1/7 row points there. Retained as historical provenance only.
+# The authoritative 1/7 spec is packets/cmsg_char_select.yaml: CmsgSelectCharacterSlot, a 2-byte
+# [u8 slot][u8 mode] character-SELECT commit (mode 1 = select-and-play, 0 = slot-lock). The
+# opcodes.md 1/7 row points there. The old "StateFlag lock/relation" reading below AND the later
+# "delete-mode overload" reading are BOTH refuted (CYCLE 4 W1.3, binary-won): 1/7 is a select
+# commit, not a delete carrier; there is no major-1 delete opcode (deletes ride the major-3 result
+# ladder). Retained as historical provenance only -- do not implement from it.
 #
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.

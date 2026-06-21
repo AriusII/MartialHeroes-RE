@@ -1,0 +1,57 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# Source spec: c2s_unknown_sweep_band4.md §2/103 (4-line CP949 text-form submit).
+# Role: a multi-line CP949 text-form submission -- four fixed-width text lines from a UI input panel.
+#
+# CAPTURE-UNVERIFIED in subsystem purpose; the 196-byte size and the 4 x char[49] layout are
+# control-flow CONFIRMED (exactly recovered from the caller). capture_verified: false.
+
+name: CmsgTextFormSubmit4
+opcode: 0x20067           # major 2 (GameAction), minor 103 (0x67) -> (2 << 16) | 103
+direction: C2S
+size: 196                 # FIXED 196-byte body = 4 x 49 (char[4][49])
+spec: packets/2-103_text_form_submit.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  A 4-line CP949 text-form submission. A fixed 196-byte body = four contiguous 49-byte NUL-terminated
+  CP949 text slots (char[4][49]), one per UI input panel; empty panels are left zeroed. Sent by a
+  "submit form" routine that blurs/de-IMEs the four input panels and gathers their text. The form's exact
+  subsystem (notice/board posting, multi-field registration, or memo) is not pinned. Major 2 is C2S-only.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the four 49-byte slots sum to size: 196.
+# CONTROL-FLOW CONFIRMED: the caller memsets a 196-byte buffer to zero, then for each of four input
+# panels that has content copies up to 49 bytes (48 usable + NUL) of CP949 text into a fixed slot.
+fields:
+  - { name: Line0, type: "bytes[49]" }   # 0x00  text line 0 (panel 0), CP949, NUL-padded
+  - { name: Line1, type: "bytes[49]" }   # 0x31  text line 1 (panel 1), CP949, NUL-padded
+  - { name: Line2, type: "bytes[49]" }   # 0x62  text line 2 (panel 2), CP949, NUL-padded
+  - { name: Line3, type: "bytes[49]" }   # 0x93  text line 3 (panel 3), CP949, NUL-padded
+
+notes: |
+  CONTROL-FLOW CONFIRMED layout (exactly recovered from the caller): four fixed-width 49-byte text
+  slots, 4 x 49 = 196 (exact). There are no separate length fields -- each slot is a fixed 49-byte
+  NUL-terminated CP949 string (up to 48 usable chars + NUL inside the width). Only the form's PURPOSE is
+  pending.
+
+    0x00 (49B) Line0 : text line 0 (UI input panel index 0), CP949-encoded, NUL-padded.
+    0x31 (49B) Line1 : text line 1 (panel index 1).
+    0x62 (49B) Line2 : text line 2 (panel index 2).
+    0x93 (49B) Line3 : text line 3 (panel index 3).
+
+  CP949: each slot is a fixed 49-byte cell with the NUL inside the declared width. Decode each as a fixed
+  [InlineArray] blob, trim at the first NUL, then decode CP949 -- never a managed string on the wire.
+  (Wire text-field convention: a fixed-width NUL-terminated CP949 cell -- here 4 x 49 = 196 -- with the
+  NUL inside the declared width; this is the standard fixed-width CP949 text-slot form used across the
+  game-action C2S text packets.)
+
+  TRIGGER: a "submit form" routine that blurs / de-IMEs the four input panels and gathers their text --
+  a 4-line CP949 text submission. The fixed-49 slots + IME handling are consistent with a multi-line
+  CP949 message form (e.g. a notice/board posting, a multi-field registration, or a multi-line memo).
+  The parent window class was not resolved this lane.
+
+  EXPECTED S2C REPLY: a submit-result / ack is plausible; not statically linked this lane. [pending]
+
+  UNKNOWNS (capture-pending): the form's exact subsystem / purpose; the S2C reply.
+
+  UNBLOCKS: the Client.Application 4-line text-form submit use-case (a flat char[4][49] body).

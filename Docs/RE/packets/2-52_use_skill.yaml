@@ -8,18 +8,18 @@
 #   target arrays:       confirmed   (CountA = u16 @0x14, CountB = u16 @0x16; each entry is a 4-byte u32 actor id;
 #                        an array is appended only when its count != 0)
 #   SkillSlot/melee:     confirmed   (SkillSlot @0x00; the basic-melee path passes 0xFF and sends header-only, counts 0)
-#   @0x01 selector:      static-hypothesis (the short builder writes a DERIVED byte (a2!=1)-56, NOT a clean 0/1 enum)
+#   @0x01 selector:      static-hypothesis (the short builder writes a DERIVED byte (invokeKind!=1)-56, NOT a clean 0/1 enum)
 #   aim fields 0x04..0x13: static-hypothesis (caller-staged in the full form; only the count words are builder-visible)
 #   wire VALUE semantics: capture/debugger-pending (array A vs B meaning; AimMode enum; the @0x01 selector meaning)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
-#   conflicts: RESOLVED -- the @0x01 byte is a DERIVED selector ((a2!=1)-56), not a 0/1 enum; do not codegen a 0/1 field.
+#   conflicts: RESOLVED -- the @0x01 byte is a DERIVED selector ((invokeKind!=1)-56), not a 0/1 enum; do not codegen a 0/1 field.
 
 name: CmsgUseSkill
 opcode: 0x20034           # major 2 (GameAction), minor 52 -> (2 << 16) | 52
 direction: C2S
 size: var                 # fixed 24-byte header + (optional) two count-prefixed target-id arrays
 spec: packets/2-52_use_skill.yaml
-status: hypothesis
+status: confirmed
 capture_verified: false
 
 summary: Client skill-activate / battle-action request. A 24-byte header (skill slot + aim) followed by two optional arrays of target actor ids. Basic melee is the same opcode with SkillSlot=0xFF and both counts 0. The server replies with the S2C 5/52 ActorSkillAction broadcast.
@@ -30,7 +30,7 @@ summary: Client skill-activate / battle-action request. A 24-byte header (skill 
 # sub-fields are caller-staged (not written by the builder) -> static-hypothesis offsets.
 fields:
   - { name: SkillSlot, type: u8 }          # 0x00  skill slot index; 0xFF = basic melee attack  (CONFIRMED)
-  - { name: Selector,  type: u8 }          # 0x01  DERIVED selector byte ((a2!=1)-56 in the short builder); NOT a 0/1 enum
+  - { name: Selector,  type: u8 }          # 0x01  DERIVED selector byte ((invokeKind!=1)-56 in the short builder); NOT a 0/1 enum
   - { name: Pad0,      type: "bytes[2]" }   # 0x02  zeroed in the short form (rest of the 0x01..0x03 region)
   - { name: AimMode,   type: u32 }         # 0x04  aim mode selector (caller-staged; static-hypothesis)
   - { name: AimScale,  type: f32 }         # 0x08  aim scale / radius factor (caller-staged; static-hypothesis)
@@ -57,11 +57,11 @@ notes: |
 
   Header = 24 bytes (0x00..0x17), matching the fixed block the sender writes before any arrays.
     0x00 (1B) SkillSlot : which skill the client is activating; 0xFF marks the basic-melee form. CONFIRMED.
-    0x01 (1B) Selector  : a DERIVED selector byte. The short builder writes (a2 != 1) - 56 here, i.e. a
-                          small NEGATIVE byte (e.g. -56 / -55), NOT a clean 0/1 flag. Treat it as an
-                          opaque derived selector pending capture -- do NOT codegen a 0/1 enum. The
-                          remaining bytes of the 0x01..0x03 region (modeled as Pad0) are zeroed in the
-                          short form.
+    0x01 (1B) Selector  : a DERIVED selector byte. The short builder writes (invokeKind != 1) - 56 here
+                          (invokeKind = the builder's invoke-form input), i.e. a small NEGATIVE byte
+                          (e.g. -56 / -55), NOT a clean 0/1 flag. Treat it as an opaque derived selector
+                          pending capture -- do NOT codegen a 0/1 enum. The remaining bytes of the
+                          0x01..0x03 region (modeled as Pad0) are zeroed in the short form.
     0x04 (4B) AimMode   : aim-mode selector (u32; set to 1.0 by the basic-attack builders). CALLER-STAGED
                           in the full form -> the offset is a static-hypothesis (not witnessed at the builder).
     0x08 (4B) AimScale  : aim scale / radius factor (le f32). Caller-staged; static-hypothesis offset.
@@ -75,9 +75,32 @@ notes: |
   IMPORTANT: the two counts are u16, but each array element is 4 bytes wide (a u32 actor id), so
   trailer length = (CountA + CountB) * 4 bytes. Both arrays are omitted when their count is 0.
 
-  Total wire payload = 24 + (CountA + CountB) * 4. There are two observed builder forms:
-    - full form: header + the two target arrays (single- or multi-target / AoE casts);
-    - short form: header only with both counts 0 (basic melee attack / fixed-form action).
+  Total wire payload = 24 + (CountA + CountB) * 4. There are two distinct builder ROUTINES that emit
+  2/52 (this is the one opcode-collision in the C2S table — two builders, one opcode):
+
+    - SHORT form  (CmsgUseSkillShort): a FIXED 32-byte frame (8 header + the 24-byte struct, both
+      counts 0, no trailing arrays). It is built REACTIVELY inside inbound S2C handlers (the local-player
+      state-sync handler and the world game-state-tick handler) plus two small helper subs — i.e. the
+      client's automatic re-issue of a basic skill / auto-attack action driven by a server tick, NOT a
+      fresh user command. Its @0x01 byte is the derived on/off discriminator ((invokeKind != 1) - 56 ->
+      0xC8 or 0xC9, an auto-attack toggle); its @0x04 float region stays zero. The SHORT form sets NO
+      combat latch.
+
+    - FULL form   (CmsgUseSkill): the variable header + the two target arrays (single- / multi-target /
+      AoE casts), and also the basic-attack form (SkillSlot 0xFF, both counts 0 -> exactly 32 bytes). It
+      is PLAYER-DRIVEN (called from the two basic-attack wrappers and the battle-action executor), runs a
+      pre-send target-validation gate (resolves the hovered/selected target, reads its level requirement,
+      aborts without sending if the local player level is 0 or below the requirement, or if a UI/list
+      guard mismatches). It writes a 1.0 float at @0x04. The calling basic-attack wrappers SET THE COMBAT
+      IN-FLIGHT LATCH (a process global, set to 1, with a sibling combat flag cleared) immediately before
+      this builder sends.
+
+  DISCRIMINATOR (load-bearing): when the FULL form carries trailing arrays (CountA/CountB > 0) the two
+  forms differ by total length. When the FULL form is a basic attack (both counts 0) BOTH forms are 32
+  bytes — length alone does NOT distinguish them. The on-wire distinction is then the struct CONTENT: the
+  SHORT form leaves @0x04 zero and writes the 0xC8/0xC9 discriminator at @0x01; the FULL form writes a
+  1.0 float at @0x04 and an invoke-form byte (0/1) at @0x01. Whether the server keys off the count words,
+  the @0x04 float, or @0x01 to branch is capture/debugger-pending; statically both reach the same 5/52.
 
   Server reply: S2C 5/52 SmsgActorSkillAction (packets/5-52_actor_skill_action.yaml).
 
@@ -85,7 +108,7 @@ notes: |
   the header size, the count words, and the 4-byte stride are control-flow confirmed):
     - the precise meaning of array A vs array B (primary targets vs splash targets is the leading
       hypothesis);
-    - the meaning of the DERIVED @0x01 selector byte ((a2!=1)-56);
+    - the meaning of the DERIVED @0x01 selector byte ((invokeKind!=1)-56);
     - the meaning/values of the caller-staged aim sub-fields (0x04..0x13);
     - whether AimMode is an enum worth lifting into Shared.Kernel.
 

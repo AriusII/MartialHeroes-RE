@@ -1,65 +1,63 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED VALUE semantics; the routing and the success/error read offsets are control-flow
-# CONFIRMED from the result handler; the body field meanings are NOT decoded. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the leading status@+0x08 / error@+0x09 reads,
+#                 plus the two extra-byte sub-cases (0x15 reads a seconds value formatted mm:ss; 0x17
+#                 reads a server-config percent) are control-flow-confirmed; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-20
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: BINARY-WINS NAME CORRECTION. Response slot 81 was catalogued here as
+#              SmsgGuildDiplomacyResult. The binary shows slot 81 is the CROSS-DOMAIN generic
+#              SmsgActionErrorResult (action-error / cooldown feedback), NOT a guild-diplomacy reply. The
+#              guild-diplomacy verdict rides 4/61 SmsgGuildStateChangeResult
+#              (packets/4-61_guild_state_change_result.yaml). The "submitDiplomacy" string is a SEND-side
+#              debug log in the 2/81 builder's caller, not a receive handler. (Filename retained;
+#              CONTENT corrected.)
 
-name: SmsgGuildDiplomacyResult
+name: SmsgActionErrorResult
 opcode: 0x40051           # major 4 (Response), minor 81 -> (4 << 16) | 81
 direction: S2C
-size: var                # leading result/error region then a variable success-body (relation roster)
+size: var                 # leading status/error region; two sub-cases consume an extra trailing byte/word
 spec: packets/4-81_guild_diplomacy_result.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server result for a guild-diplomacy / brood-war declaration. Carries a success flag plus an error code; on the success path it forwards a relation-roster body (participant guild ids/names plus a count-prefixed array of relation records) that the guild-relations list window re-applies. Reply to C2S 2/81 CmsgGuildDiplomacyDeclare.
+summary: A generic, cross-domain action-error / feedback result. Carries a status byte and an error code; a value of 0xFF selects a default notice, while specific error codes consume an extra trailing field (one a seconds value formatted as an mm:ss cooldown, the other a server-config percent). Not tied to any one subsystem; used wherever a server action needs a generic error/cooldown reply.
 
-# VARIABLE-LENGTH packet. The leading result/error region is described below; the success body is an
-# opaque/undecoded relation-roster region described in notes. All offsets are payload-relative (frame +8).
+# The leading status/error region is described below; the extra trailing bytes are sub-case-dependent
+# (see notes). All offsets are payload-relative (frame +8).
 fields:
-  - { name: Head, type: "bytes[16]" }    # 0x00  leading region read before the success/error bytes (opaque; not decoded)
-  - { name: Success, type: u8 }          # 0x10  success flag (==1 -> forward the success body; else error path)
-  - { name: ErrorCode, type: u8 }        # 0x11  error/result code (maps to a notice-string id on the error path)
+  - { name: Head,   type: "bytes[8]" }   # 0x00  leading region read before the status/error bytes (opaque; not decoded)
+  - { name: Status, type: u8 }           # 0x08  status byte
+  - { name: Error,  type: u8 }           # 0x09  error / result code (0xFF => default notice; some codes consume an extra trailing field)
 
 notes: |
   CONTROL-FLOW CONFIRMED routing (the result handler is installed in the Response dispatch table) and
-  the success/error read offsets; CAPTURE-UNVERIFIED and largely UNDECODED body. VARIABLE-LENGTH.
+  the status/error read offsets. CAPTURE-UNVERIFIED for the VALUE meanings. The body is mostly the
+  leading status/error region; only two error codes consume an extra trailing field.
 
-    0x00 (16B) Head      : a leading region the handler reads before the success/error bytes. Its
-                           internal fields are not decoded; reserved as opaque so the success/error
-                           bytes land at their confirmed offsets. Modelled as bytes[16].
-    0x10 (1B)  Success   : the success flag. When set, the handler forwards the body to the relation
-                           sub-handler that re-applies the roster; otherwise it runs the error path.
-    0x11 (1B)  ErrorCode : the error / result code. The handler maps small codes to notice-string ids
-                           (a generic value of 255 selects a default notice); a "finished" sentinel
-                           shows a completion message. Two specific codes consume an extra trailing
-                           byte -- one a seconds value formatted as an mm:ss cooldown, the other a
-                           server-config percent. Value meanings capture-pending.
+    0x08 (1B) Status : a status byte (the leading result/state of the generic action).
+    0x09 (1B) Error  : an error / result code. The handler maps codes to notice-string ids; a value of
+                       0xFF selects a generic/default notice. Two specific codes consume an extra
+                       trailing field:
+                         - one code (0x15) reads a SECONDS value at the next offset and formats it as an
+                           mm:ss cooldown;
+                         - another code (0x17) reads a SERVER-CONFIG PERCENT value.
+                       The remaining codes resolve to fixed notice strings with no extra field.
 
-  SUCCESS BODY (variable, present on the success path) -- STATIC SHAPE ONLY, value meaning
-  capture-pending: the relation sub-handler reads a result-subtype byte, an initiator/actor name
-  string, a small fixed set of participant guild ids and 17-byte CP949 participant names, then a
-  count field followed by a count-sized array of fixed relation records (each ~28 bytes: a guild id,
-  a name string, and an auxiliary dword). It clears the panel's relation list, re-adds every entry,
-  and rebuilds the visible row window. The EXACT in-body offsets of this success region are NOT
-  reliably static (the handler interleaves the reads into panel object fields) and MUST be confirmed
-  against a real diplomacy-result capture before any field is parsed -- reserved as opaque here.
+  GENERIC / CROSS-DOMAIN: this is NOT a guild-specific reply. It is the shared action-error / cooldown
+  feedback used across subsystems. (Guild diplomacy/state outcomes ride 4/61
+  SmsgGuildStateChangeResult.)
 
-  HANDLER USE (engineer's mental model): clear the pending UI message latch; on Success forward the
-  body to the relation roster apply path (which also adjusts a couple of local PvP-rank / gold counters
-  and emits chat notices); on failure map ErrorCode to a notice and show it.
+  UNKNOWNS to resolve with a capture:
+    - the full Error -> notice-string map and the exact codes that consume the extra trailing field;
+    - the internal fields of the 8-byte leading Head region.
 
-  RELATIONSHIP: reply to C2S 2/81 CmsgGuildDiplomacyDeclare
-  (packets/2-81_guild_diplomacy_declare.yaml). NOTE: this handler was previously named
-  SmsgActionErrorResult (a generic "action error result"); the guild-relations evidence shows it is the
-  guild-diplomacy / brood-war relation result -- renamed accordingly.
+  IMPLEMENTATION NOTE: decode Status + Error; for the two extra-byte codes read the trailing seconds /
+  percent field; otherwise the body ends at the error byte's notice resolution.
 
-  UNKNOWNS to resolve with a guild-diplomacy-result capture (routing + success/error offsets settled;
-  these are VALUE / body questions):
-    - the internal fields of the 16-byte leading Head region;
-    - the full ErrorCode -> notice-string map and the two extra-byte codes;
-    - the exact in-body offsets and field meanings of the success relation-roster region.
-
-  IMPLEMENTATION NOTE: decode the leading region + Success + ErrorCode; treat the success body as an
-  opaque tail until a capture pins its offsets. Do NOT publish guessed body offsets.
-
-  UNBLOCKS: the Client.Application guild-diplomacy result handler (success-body parsing still BLOCKED
-  on a capture).
+  RELATED: the guild-diplomacy declare round-trip is C2S 2/81 CmsgGuildDiplomacyDeclare ->
+  S2C 4/61 SmsgGuildStateChangeResult (packets/4-61_guild_state_change_result.yaml) -- a DIFFERENT
+  opcode from this generic action-error result.

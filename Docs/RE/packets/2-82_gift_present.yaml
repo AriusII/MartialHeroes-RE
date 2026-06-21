@@ -1,0 +1,45 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+
+name: CmsgGiftPresent
+opcode: 0x20052           # major 2 (GameAction), minor 82 -> (2 << 16) | 82
+direction: C2S
+size: 28                  # fixed 28-byte payload
+spec: packets/2-82_gift_present.yaml
+status: confirmed
+capture_verified: false
+
+summary: Send a gift/present to another player. Carries a gift id or proxy value, a UI parameter, and a 17-byte CP949 friend name with trailing padding.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 28.
+fields:
+  - { name: GiftIdOrProxy, type: u32 }         # 0x00  gift id or proxy value
+  - { name: ParamFromUI,   type: u32 }         # 0x04  parameter from UI selection
+  - { name: FriendName,    type: "char[17]" }  # 0x08  CP949 target friend name, NUL-padded
+  - { name: Padding,       type: "u8[3]" }     # 0x19  padding
+
+notes: |
+  Static inference only; no capture available. CODE-CONFIRMED layout (28 bytes), CAPTURE-UNVERIFIED
+  meaning.
+
+    0x00 (4B)  GiftIdOrProxy : identifies the gift item or acts as a proxy value selecting
+                               the gift type (le u32).
+    0x04 (4B)  ParamFromUI   : a parameter sourced from the gift UI, possibly a quantity or
+                               variant selector (le u32).
+    0x08 (17B) FriendName    : the recipient player name, encoded CP949, NUL-padded to 17 bytes.
+    0x19 (3B)  Padding       : alignment padding, expected zero.
+
+  [UNVERIFIED] ROLE DIVERGENCE: a later service-menu pass reads 2/82 as a slot-230-panel
+  named-target request (two window/record handle u32 @0x00/0x04 + a 17-byte name @0x08 + 3 pad),
+  raised from a UI command dispatcher (action code 50) — i.e. a "act on this named target" command
+  rather than specifically a gift. The 28-byte SHAPE (two u32 + char[17] + 3 pad) is identical under
+  both readings; only the role/value meaning differs. Kept under the existing name; the precise role
+  (gift vs generic named-target request) is capture/debugger-pending.
+
+  UNKNOWNS to resolve with a capture:
+    - whether GiftIdOrProxy is a direct item id or a catalog index;
+    - the meaning of ParamFromUI (quantity, gift-wrap variant, etc.);
+    - whether the server echoes a confirmation or error response;
+    - the precise role (gift vs generic named-target request — see ROLE DIVERGENCE above).
+
+  UNBLOCKS: Client.Application gift/present (or named-target) sending use-case.

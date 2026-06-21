@@ -31,20 +31,20 @@
 //   TODO(world-campaign): live inventory-contents event wiring.
 
 using Godot;
-using MartialHeroes.Client.Application.Hud;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-/// In-game inventory bag (ItemPanel). 318×732 right-anchored; key-I toggles it.
-///
-/// <para>PASSIVE: reads item catalogue for display; emits equip/move intents as use-case calls.
-/// Zero game logic — no validation, no optimistic state mutation.</para>
-///
-/// spec: Docs/RE/specs/ui_hud_layout.md §1.1 / §5.3 CODE-CONFIRMED.
-/// spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5/40-cell grid CODE-CONFIRMED.
+///     In-game inventory bag (ItemPanel). 318×732 right-anchored; key-I toggles it.
+///     <para>
+///         PASSIVE: reads item catalogue for display; emits equip/move intents as use-case calls.
+///         Zero game logic — no validation, no optimistic state mutation.
+///     </para>
+///     spec: Docs/RE/specs/ui_hud_layout.md §1.1 / §5.3 CODE-CONFIRMED.
+///     spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5/40-cell grid CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudInventoryPanel : Control
 {
@@ -73,13 +73,13 @@ public sealed partial class HudInventoryPanel : Control
     // Chrome atlas
     // spec: ui_system.md §8.6.1 — uitex 2 = data/ui/inventwindow.dds
     private const int InvTexId = 2; // spec: ui_system.md §8.6.1
+    private readonly TextureRect[] _equipCells = new TextureRect[EquipCellCount];
 
     // -------------------------------------------------------------------------
     // Child controls
     // -------------------------------------------------------------------------
 
     private readonly TextureRect[] _gridCells = new TextureRect[GridCellCount];
-    private readonly TextureRect[] _equipCells = new TextureRect[EquipCellCount];
 
     // -------------------------------------------------------------------------
     // View state (not domain state)
@@ -92,11 +92,10 @@ public sealed partial class HudInventoryPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Geometry pass: builds the 318×732 right-anchored panel with the 8×5 item grid.
-    /// Initially hidden (off-screen); revealed by key-I toggle.
-    ///
-    /// spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "X=screen_width+318, Y=0, W=318, H=732".
-    /// spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5 grid CODE-CONFIRMED.
+    ///     Geometry pass: builds the 318×732 right-anchored panel with the 8×5 item grid.
+    ///     Initially hidden (off-screen); revealed by key-I toggle.
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "X=screen_width+318, Y=0, W=318, H=732".
+    ///     spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5 grid CODE-CONFIRMED.
     /// </summary>
     public void Build(HudAtlasLibrary atlas, ClientContext ctx)
     {
@@ -118,7 +117,7 @@ public sealed partial class HudInventoryPanel : Control
 
         // Load chrome texture (inventwindow.dds, uitex 2)
         // spec: ui_system.md §8.6.1 — uitex 2 = data/ui/inventwindow.dds
-        Texture2D? chromeTex = atlas.GetById(InvTexId);
+        var chromeTex = atlas.GetById(InvTexId);
         if (chromeTex is null)
             GD.PrintErr("[HudInventoryPanel] inventwindow.dds (uitex 2) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.6.1.");
@@ -141,7 +140,7 @@ public sealed partial class HudInventoryPanel : Control
                 Name = "Chrome",
                 Texture = chromeTex,
                 StretchMode = TextureRect.StretchModeEnum.KeepAspect,
-                MouseFilter = MouseFilterEnum.Ignore,
+                MouseFilter = MouseFilterEnum.Ignore
             };
             chrome.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             AddChild(chrome);
@@ -153,7 +152,7 @@ public sealed partial class HudInventoryPanel : Control
             Name = "TitleLabel",
             Text = "인벤토리", // CP949 — "Inventory" (will be replaced by msg.xdb if available)
             HorizontalAlignment = HorizontalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         titleLbl.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         titleLbl.OffsetBottom = 30f;
@@ -168,7 +167,7 @@ public sealed partial class HudInventoryPanel : Control
         // 20-cell equip sub-grid (action ids 50..69)
         // spec: ui_system.md §8.10.1 CODE-CONFIRMED — "20 cells, 38×38, action ids 50..69"
         // Placed below the main grid
-        int equipStartY = GridStartY + GridRows * CellSide + 10;
+        var equipStartY = GridStartY + GridRows * CellSide + 10;
         BuildEquipGrid(atlas, GridStartX, equipStartY);
 
         // Equipment paperdoll placeholder (hand-placed per-slot; exact positions not recovered)
@@ -184,50 +183,57 @@ public sealed partial class HudInventoryPanel : Control
     private void BuildItemGrid(HudAtlasLibrary atlas, int startX, int startY)
     {
         // spec: ui_system.md §8.10.1 CODE-CONFIRMED — 8×5 main grid, 38×38 cells, +38 pitch
-        for (int row = 0; row < GridRows; row++)
+        for (var row = 0; row < GridRows; row++)
+        for (var col = 0; col < GridCols; col++)
         {
-            for (int col = 0; col < GridCols; col++)
+            var idx = row * GridCols + col;
+            var x = startX + col * CellSide;
+            var y = startY + row * CellSide;
+
+            var cell = new TextureRect
             {
-                int idx = row * GridCols + col;
-                int x = startX + col * CellSide;
-                int y = startY + row * CellSide;
+                Name = $"ItemCell{idx}",
+                Position = new Vector2(x, y),
+                Size = new Vector2(CellSide, CellSide),
+                StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
+                MouseFilter = MouseFilterEnum.Stop
+            };
 
-                var cell = new TextureRect
-                {
-                    Name = $"ItemCell{idx}",
-                    Position = new Vector2(x, y),
-                    Size = new Vector2(CellSide, CellSide),
-                    StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                    MouseFilter = MouseFilterEnum.Stop,
-                };
+            // Cell background — dark with border.
+            // In the original client each 38×38 cell button draws its background from a
+            // sub-rect of inventwindow.dds (uitex 2); the exact (srcX, srcY, 38, 38) origin
+            // has NOT been recovered from the spec yet — the §8.10.1 description lists the
+            // full set of atlas ids used (uitex 2/14/69/71/78) but does not enumerate the
+            // per-element sub-rect coordinates.
+            // spec: Docs/RE/specs/ui_system.md §8.10.1 — "cells resolve texture handles by
+            //   uitex.txt id 2 (inventory body + cells), 14 (count/qty), 69/71/78 (glyphs)".
+            // TODO(spec): once the cell-bg sub-rect coordinates are recovered from the IDA
+            //   builder (the multi-layered cell construction site in the ItemPanel builder),
+            //   replace this StyleBoxFlat placeholder with:
+            //   atlas.SliceById(InvTexId, srcX, srcY, CellSide, CellSide)
+            var cellPanel = new Panel { Name = "CellBg" };
+            cellPanel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+            var cs = new StyleBoxFlat();
+            cs.BgColor = new Color(0.06f, 0.06f, 0.1f, 0.75f);
+            cs.SetBorderWidthAll(1);
+            cs.BorderColor = new Color(0.35f, 0.3f, 0.2f, 0.7f);
+            cellPanel.AddThemeStyleboxOverride("panel", cs);
+            cell.AddChild(cellPanel);
 
-                // Cell background — dark with border
-                // (In the real client the cell bg is a 38×38 slice from inventwindow.dds)
-                // TODO(spec): bind correct cell bg sub-rect from inventwindow.dds atlas.
-                var cellPanel = new Panel { Name = "CellBg" };
-                cellPanel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
-                var cs = new StyleBoxFlat();
-                cs.BgColor = new Color(0.06f, 0.06f, 0.1f, 0.75f);
-                cs.SetBorderWidthAll(1);
-                cs.BorderColor = new Color(0.35f, 0.3f, 0.2f, 0.7f);
-                cellPanel.AddThemeStyleboxOverride("panel", cs);
-                cell.AddChild(cellPanel);
-
-                AddChild(cell);
-                _gridCells[idx] = cell;
-            }
+            AddChild(cell);
+            _gridCells[idx] = cell;
         }
     }
 
     private void BuildEquipGrid(HudAtlasLibrary atlas, int startX, int startY)
     {
         // spec: ui_system.md §8.10.1 CODE-CONFIRMED — equip sub-grid 20 cells, 38×38, action 50..69
-        for (int i = 0; i < EquipCellCount; i++)
+        for (var i = 0; i < EquipCellCount; i++)
         {
-            int col = i % GridCols;
-            int row = i / GridCols;
-            int x = startX + col * CellSide;
-            int y = startY + row * CellSide;
+            var col = i % GridCols;
+            var row = i / GridCols;
+            var x = startX + col * CellSide;
+            var y = startY + row * CellSide;
 
             var cell = new TextureRect
             {
@@ -235,7 +241,7 @@ public sealed partial class HudInventoryPanel : Control
                 Position = new Vector2(x, y),
                 Size = new Vector2(CellSide, CellSide),
                 StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
-                MouseFilter = MouseFilterEnum.Stop,
+                MouseFilter = MouseFilterEnum.Stop
             };
 
             var cellPanel = new Panel { Name = "CellBg" };
@@ -261,10 +267,10 @@ public sealed partial class HudInventoryPanel : Control
         var paperdollPlaceholder = new Label
         {
             Name = "PaperdollPlaceholder",
-            Text = "[paperdoll]",
+            Text = string.Empty,
             Position = new Vector2(x, y),
             HorizontalAlignment = HorizontalAlignment.Center,
-            MouseFilter = MouseFilterEnum.Ignore,
+            MouseFilter = MouseFilterEnum.Ignore
         };
         AddChild(paperdollPlaceholder);
     }
@@ -274,8 +280,8 @@ public sealed partial class HudInventoryPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Binds to the HUD event hub.
-    /// TODO(world-campaign): wire inventory-contents events when the hub publishes them.
+    ///     Binds to the HUD event hub.
+    ///     TODO(world-campaign): wire inventory-contents events when the hub publishes them.
     /// </summary>
     public void BindHub(IHudEventHub hub)
     {
@@ -289,9 +295,9 @@ public sealed partial class HudInventoryPanel : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Toggles the inventory panel visibility and slides it in/out.
-    /// Called by HudMaster on key-I press.
-    /// spec: ui_system.md §8.10.1 — "[I] toggles slots 158+159 (inventory+skill) together".
+    ///     Toggles the inventory panel visibility and slides it in/out.
+    ///     Called by HudMaster on key-I press.
+    ///     spec: ui_system.md §8.10.1 — "[I] toggles slots 158+159 (inventory+skill) together".
     /// </summary>
     public void Toggle()
     {

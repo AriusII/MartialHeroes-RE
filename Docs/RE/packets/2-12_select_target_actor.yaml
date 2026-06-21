@@ -1,0 +1,41 @@
+# spec: Docs/RE/packets/2-12_select_target_actor.yaml
+# Role: C2S target / escort-actor selection request ("target/follow this actor").
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgSelectTargetActor
+opcode: 0x2000c           # major 2 (GameAction), minor 12 -> (2 << 16) | 12
+direction: C2S
+size: 3                   # fixed 3-byte body
+spec: packets/2-12_select_target_actor.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Target / escort-actor selection request. Three contiguous bytes (selection mode, sub-index, escort/party slot index). Sent by the escort/target select handler after it validates the local player's 20-slot escort table.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 3.
+fields:
+  - { name: SelectMode, type: u8 }   # 0x00  selection mode (0/1/2 dispatch) [capture/debugger-pending]
+  - { name: SubIndex,   type: u8 }   # 0x01  sub-selection [capture/debugger-pending]
+  - { name: SlotIndex,  type: u8 }   # 0x02  escort/party slot index (0..19) [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 3-byte append of three contiguous bytes);
+  the field VALUES are static inferences (capture-pending).
+
+    0x00 (1B) SelectMode : selection mode that resolves how the target actor is found (0/1/2).
+                           [capture/debugger-pending]
+    0x01 (1B) SubIndex   : a sub-selection byte. [capture/debugger-pending]
+    0x02 (1B) SlotIndex  : an escort/party slot index in the local player's 20-slot escort table
+                           (range 0..19). [capture/debugger-pending]
+
+  TRIGGER / GATE (client-side, informational): the sender resolves the actor by SelectMode, runs a
+  battle/escort-state validation loop over the local player's 20-slot escort array, emits chat
+  notices on conflict, and sends only when the actor is valid and not already engaged. The
+  target-vs-escort distinction within the mode/index values is capture-pending.
+
+  UNKNOWNS to resolve with a capture:
+    - the full SelectMode value space and the target-vs-escort distinction;
+    - the inbound reply opcode (target/escort-set confirmation) — pending.
+
+  UNBLOCKS: Client.Application target/escort selection use-case.

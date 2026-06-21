@@ -49,16 +49,16 @@
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 
 using Godot;
-using MartialHeroes.Assets.Parsers.Models;
+using MartialHeroes.Assets.Parsers.Texture.Models;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
 /// <summary>
-/// Passive sky-dome rendering node: builds and animates a star dome and cloud dome
-/// from the parsed environment bin data.
-///
-/// Call <see cref="Build"/> once after construction (on the Godot main thread).
-/// Call <see cref="UpdateDomes"/> each frame from <see cref="EnvironmentNode._Process"/>.
+///     Passive sky-dome rendering node: builds and animates a star dome and cloud dome
+///     from the parsed environment bin data.
+///     Call <see cref="Build" /> once after construction (on the Godot main thread).
+///     Call <see cref="UpdateDomes" /> each frame from <see cref="EnvironmentNode._Process" />.
 /// </summary>
 public sealed partial class SkyDomeNode : Node3D
 {
@@ -68,20 +68,20 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Stardome/clouddome keyframe count (coarser 12-frame cycle).
-    /// spec: Docs/RE/specs/environment.md §2.1 — STARDOME_KF_COUNT = 12: CONFIRMED.
+    ///     Stardome/clouddome keyframe count (coarser 12-frame cycle).
+    ///     spec: Docs/RE/specs/environment.md §2.1 — STARDOME_KF_COUNT = 12: CONFIRMED.
     /// </summary>
     private const int DomeKfCount = StarDomeBin.KeyframeCount; // 12
 
     /// <summary>
-    /// Milliseconds per stardome/clouddome keyframe step (4 × 1800 ms lighting keyframes).
-    /// spec: Docs/RE/specs/environment.md §2.1 — STARDOME_KF_MS = 7200: CONFIRMED.
+    ///     Milliseconds per stardome/clouddome keyframe step (4 × 1800 ms lighting keyframes).
+    ///     spec: Docs/RE/specs/environment.md §2.1 — STARDOME_KF_MS = 7200: CONFIRMED.
     /// </summary>
     private const double DomeKfMs = 7200.0;
 
     /// <summary>
-    /// Total simulated day period (same as the main cycle).
-    /// spec: Docs/RE/specs/environment.md §2.1 — SKY_PERIOD_MS = 86 400: CONFIRMED.
+    ///     Total simulated day period (same as the main cycle).
+    ///     spec: Docs/RE/specs/environment.md §2.1 — SKY_PERIOD_MS = 86 400: CONFIRMED.
     /// </summary>
     private const double PeriodMs = 86_400.0;
 
@@ -90,32 +90,32 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Dome radius in world units. Sized to sit just inside the far-clip plane (15 000 wu)
-    /// so it always surrounds the scene without z-fighting at the horizon.
-    /// Engineering choice (not a legacy constant); the legacy domes were rendered at an
-    /// unspecified radius by the D3D9 pipeline's fixed-function sky stage.
+    ///     Dome radius in world units. Sized to sit just inside the far-clip plane (15 000 wu)
+    ///     so it always surrounds the scene without z-fighting at the horizon.
+    ///     Engineering choice (not a legacy constant); the legacy domes were rendered at an
+    ///     unspecified radius by the D3D9 pipeline's fixed-function sky stage.
     /// </summary>
     private const float DomeRadius = 13_000f;
 
     /// <summary>
-    /// Sector count for the dome hemisphere tessellation.
-    /// Chosen to match the per-keyframe vertex count constraints from the spec:
-    ///   - Cloud dome: 240 vertices = 15 stacks × 16 sectors.
+    ///     Sector count for the dome hemisphere tessellation.
+    ///     Chosen to match the per-keyframe vertex count constraints from the spec:
+    ///     - Cloud dome: 240 vertices = 15 stacks × 16 sectors.
     ///     spec: Docs/RE/formats/environment_bins.md §5.4 — "vertex count … is 240": CONFIRMED.
-    ///   - Star dome: 192 vertices = 12 stacks × 16 sectors.
+    ///     - Star dome: 192 vertices = 12 stacks × 16 sectors.
     ///     spec: Docs/RE/formats/environment_bins.md §4.1 — "192 star instances": CONFIRMED.
     /// </summary>
     private const int DomeSectors = 16;
 
     /// <summary>
-    /// Stack count for the cloud dome (15 stacks × 16 sectors = 240 vertices).
-    /// spec: Docs/RE/formats/environment_bins.md §5.4 — vertex count 240: CONFIRMED.
+    ///     Stack count for the cloud dome (15 stacks × 16 sectors = 240 vertices).
+    ///     spec: Docs/RE/formats/environment_bins.md §5.4 — vertex count 240: CONFIRMED.
     /// </summary>
     private const int CloudDomeStacks = 15;
 
     /// <summary>
-    /// Stack count for the star dome (12 stacks × 16 sectors = 192 vertices).
-    /// spec: Docs/RE/formats/environment_bins.md §4.1 — 192 star instances: CONFIRMED.
+    ///     Stack count for the star dome (12 stacks × 16 sectors = 192 vertices).
+    ///     spec: Docs/RE/formats/environment_bins.md §4.1 — 192 star instances: CONFIRMED.
     /// </summary>
     private const int StarDomeStacks = 12;
 
@@ -144,22 +144,20 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// UV offset rate per second for each speed unit from the cloud cycle spec.
-    /// The spec gives speed as an integer 1–10 but does not specify world-space drift velocity.
-    /// spec: Docs/RE/formats/environment_bins.md §6.3 known unknown — "speed units: unverified".
-    /// Engineering choice: 0.003 UV/s per speed unit (so speed 5 ≈ 0.015 UV/s — a gentle drift).
+    ///     UV offset rate per second for each speed unit from the cloud cycle spec.
+    ///     The spec gives speed as an integer 1–10 but does not specify world-space drift velocity.
+    ///     spec: Docs/RE/formats/environment_bins.md §6.3 known unknown — "speed units: unverified".
+    ///     Engineering choice: 0.003 UV/s per speed unit (so speed 5 ≈ 0.015 UV/s — a gentle drift).
     /// </summary>
     private const float CloudUvRatePerSpeedUnit = 0.003f;
 
-    // -------------------------------------------------------------------------
-    // Node references
-    // -------------------------------------------------------------------------
-
-    private MeshInstance3D? _starDomeMesh;
+    // Active cloud cycle row (row 0 — day-pattern selection algorithm is a known unknown).
+    // spec: Docs/RE/formats/environment_bins.md §6.3 — selection algorithm: known unknown.
+    private CloudCycleRow _activeCycleRow;
+    private CloudCycleBin? _cloudCycle;
+    private CloudDomeBin? _cloudDome;
     private MeshInstance3D? _cloudDomeMesh1; // inner cloud layer
     private MeshInstance3D? _cloudDomeMesh2; // outer/haze cloud layer
-
-    private ShaderMaterial? _starMaterial;
     private ShaderMaterial? _cloudMaterial1;
     private ShaderMaterial? _cloudMaterial2;
 
@@ -168,12 +166,14 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     private StarDomeBin? _starDome;
-    private CloudDomeBin? _cloudDome;
-    private CloudCycleBin? _cloudCycle;
 
-    // Active cloud cycle row (row 0 — day-pattern selection algorithm is a known unknown).
-    // spec: Docs/RE/formats/environment_bins.md §6.3 — selection algorithm: known unknown.
-    private CloudCycleRow _activeCycleRow;
+    // -------------------------------------------------------------------------
+    // Node references
+    // -------------------------------------------------------------------------
+
+    private MeshInstance3D? _starDomeMesh;
+
+    private ShaderMaterial? _starMaterial;
 
     // -------------------------------------------------------------------------
     // Per-frame animation state
@@ -187,11 +187,10 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds the dome meshes from parsed environment data. Must be called on the Godot main thread
-    /// once, after this node is added to the scene tree.
-    ///
-    /// Passing null for either dome bin is a graceful no-op: that dome is simply not created.
-    /// spec: Docs/RE/specs/environment.md §7 — graceful fallback when files absent.
+    ///     Builds the dome meshes from parsed environment data. Must be called on the Godot main thread
+    ///     once, after this node is added to the scene tree.
+    ///     Passing null for either dome bin is a graceful no-op: that dome is simply not created.
+    ///     spec: Docs/RE/specs/environment.md §7 — graceful fallback when files absent.
     /// </summary>
     public void Build(StarDomeBin? starDome, CloudDomeBin? cloudDome, CloudCycleBin? cloudCycle)
     {
@@ -210,9 +209,9 @@ public sealed partial class SkyDomeNode : Node3D
             BuildCloudDome();
 
         // Report construction so headless runs can verify the dome creation log line (lane gate).
-        string starStatus = starDome is not null ? "built" : "absent(no-op)";
-        string cloudStatus = cloudDome is not null ? "built" : "absent(no-op)";
-        string cycleStatus = cloudCycle is not null
+        var starStatus = starDome is not null ? "built" : "absent(no-op)";
+        var cloudStatus = cloudDome is not null ? "built" : "absent(no-op)";
+        var cycleStatus = cloudCycle is not null
             ? $"speed={_activeCycleRow.Speed} cloud1Id={_activeCycleRow.Cloud1Id0To12H}"
             : "absent";
         GD.Print($"[SkyDome] star={starStatus} cloud={cloudStatus} cloudCycle={cycleStatus} " +
@@ -220,26 +219,25 @@ public sealed partial class SkyDomeNode : Node3D
     }
 
     /// <summary>
-    /// Updates dome tint and visibility for the current day/night clock.
-    /// Call once per frame from EnvironmentNode._Process (main thread only).
-    ///
-    /// <paramref name="clockMs"/> is the same running clock EnvironmentNode maintains
-    /// (milliseconds elapsed, already wrapped to the day period).
-    /// <paramref name="delta"/> is the frame delta in seconds (for UV scroll animation).
-    /// spec: Docs/RE/specs/environment.md §3.2 — per-frame update: steps 4–5 for star/cloud.
+    ///     Updates dome tint and visibility for the current day/night clock.
+    ///     Call once per frame from EnvironmentNode._Process (main thread only).
+    ///     <paramref name="clockMs" /> is the same running clock EnvironmentNode maintains
+    ///     (milliseconds elapsed, already wrapped to the day period).
+    ///     <paramref name="delta" /> is the frame delta in seconds (for UV scroll animation).
+    ///     spec: Docs/RE/specs/environment.md §3.2 — per-frame update: steps 4–5 for star/cloud.
     /// </summary>
     public void UpdateDomes(double clockMs, double delta)
     {
         // Dome 12-frame keyframe.
         // spec: Docs/RE/specs/environment.md §2.2 — star_kf_index = t_wrapped / STARDOME_KF_MS.
-        double tWrapped = clockMs % PeriodMs;
-        int domeKf = (int)(tWrapped / DomeKfMs) % DomeKfCount;
-        int domeKfNext = (domeKf + 1) % DomeKfCount;
-        float domeFrac = (float)((tWrapped % DomeKfMs) / DomeKfMs);
+        var tWrapped = clockMs % PeriodMs;
+        var domeKf = (int)(tWrapped / DomeKfMs) % DomeKfCount;
+        var domeKfNext = (domeKf + 1) % DomeKfCount;
+        var domeFrac = (float)(tWrapped % DomeKfMs / DomeKfMs);
 
         // Main 48-frame keyframe index (for day/night star-visibility weighting).
         // spec: Docs/RE/specs/environment.md §2.2 — kf_index = t_wrapped / SKY_KEYFRAME_MS.
-        float mainKfFloat = (float)(tWrapped / 1800.0);
+        var mainKfFloat = (float)(tWrapped / 1800.0);
 
         UpdateStarDome(domeKf, domeKfNext, domeFrac, mainKfFloat);
         UpdateCloudDomes(domeKf, domeKfNext, domeFrac, mainKfFloat, (float)delta);
@@ -256,12 +254,12 @@ public sealed partial class SkyDomeNode : Node3D
         // Interpolated star tint from the 12-frame BGRA table (star [0] is the uniform tint).
         // spec: Docs/RE/formats/environment_bins.md §4.3 — "all 192 instances share the same BGRA":
         //       SAMPLE-VERIFIED. Use star index [0] as the representative tint.
-        Color tintA = BgraToColor(_starDome.StarColors[kf][0]);
-        Color tintB = BgraToColor(_starDome.StarColors[kfNext][0]);
-        Color tint = tintA.Lerp(tintB, frac);
+        var tintA = BgraToColor(_starDome.StarColors[kf][0]);
+        var tintB = BgraToColor(_starDome.StarColors[kfNext][0]);
+        var tint = tintA.Lerp(tintB, frac);
 
         // Day/night alpha: fade stars in at dusk and out at dawn.
-        float alpha = StarAlpha(mainKf);
+        var alpha = StarAlpha(mainKf);
 
         // Apply to the unshaded material as a tint × alpha.
         _starMaterial.SetShaderParameter("albedo_color", new Color(tint.R, tint.G, tint.B, alpha));
@@ -271,14 +269,12 @@ public sealed partial class SkyDomeNode : Node3D
     }
 
     /// <summary>
-    /// Computes star visibility alpha [0, 1] from the fractional 48-keyframe index.
-    ///
-    /// Night = [0, StarFullNightKf] and [StarFullNightKf2, 48): alpha = 1.
-    /// Day   = [StarFadeOutKf, StarFadeInKf]: alpha = 0.
-    /// Transition dawn [StarFullNightKf, StarFadeOutKf]: linear fade from 1→0.
-    /// Transition dusk [StarFadeInKf, StarFullNightKf2]: linear fade from 0→1.
-    ///
-    /// Engineering choice — boundary keyframes are symmetric around kf 0 and kf 24.
+    ///     Computes star visibility alpha [0, 1] from the fractional 48-keyframe index.
+    ///     Night = [0, StarFullNightKf] and [StarFullNightKf2, 48): alpha = 1.
+    ///     Day   = [StarFadeOutKf, StarFadeInKf]: alpha = 0.
+    ///     Transition dawn [StarFullNightKf, StarFadeOutKf]: linear fade from 1→0.
+    ///     Transition dusk [StarFadeInKf, StarFullNightKf2]: linear fade from 0→1.
+    ///     Engineering choice — boundary keyframes are symmetric around kf 0 and kf 24.
     /// </summary>
     private static float StarAlpha(float kf)
     {
@@ -299,7 +295,7 @@ public sealed partial class SkyDomeNode : Node3D
         if (_cloudDome is null) return;
 
         // Cloud alpha: visible by day, hidden at night (inverse of stars).
-        float cloudAlpha = 1f - StarAlpha(mainKf);
+        var cloudAlpha = 1f - StarAlpha(mainKf);
 
         // UV scroll (CloudCycleBin speed, §6.1) is spec-confirmed but not yet applied:
         // the dome shader is colour-only (no albedo texture sampler), so UV offset has no effect.
@@ -327,9 +323,22 @@ public sealed partial class SkyDomeNode : Node3D
         // representative uniform tint (vertex [0]) and apply it as a shader parameter.
         // This is consistent with the spec's observation that all vertices in a keyframe share
         // the same value in the sampled data (spec §4.3 equivalent observation for clouds).
-        Color tintA = BgraToColor(layerColors[kf][0]);
-        Color tintB = BgraToColor(layerColors[kfNext][0]);
-        Color tint = tintA.Lerp(tintB, frac);
+        var tintA = BgraToColor(layerColors[kf][0]);
+        var tintB = BgraToColor(layerColors[kfNext][0]);
+        var tint = tintA.Lerp(tintB, frac);
+
+        // PORT-SIDE LEGIBILITY GATE (aesthetic, not spec-dictated):
+        // If the cloud tint is near-black (luminance < 0.015), hide the dome so it doesn't render as an
+        // opaque black hemisphere over the WorldEnvironment background. This is observed with area-2
+        // cloud-dome bins where the BGRA vertex colours are effectively zero at several keyframes,
+        // producing a black sky cap. When official captures are available, calibrate/remove this gate.
+        // Aesthetic threshold 0.015 — engineering choice for port-side legibility.
+        var tintLum = 0.2126f * tint.R + 0.7152f * tint.G + 0.0722f * tint.B;
+        if (tintLum < 0.015f)
+        {
+            mesh.Visible = false;
+            return;
+        }
 
         mat.SetShaderParameter("albedo_color", new Color(tint.R, tint.G, tint.B, alpha));
         // uv_offset removed: dome shader is colour-only, no texture to scroll.
@@ -345,9 +354,9 @@ public sealed partial class SkyDomeNode : Node3D
     {
         // Star dome: inverted hemisphere, 12 stacks × 16 sectors = 192 vertices.
         // spec: Docs/RE/formats/environment_bins.md §4.1 — 192 star instances: CONFIRMED.
-        ArrayMesh mesh = BuildHemisphereMesh(DomeRadius, StarDomeStacks, DomeSectors, inverted: true);
+        var mesh = BuildHemisphereMesh(DomeRadius, StarDomeStacks, DomeSectors, true);
 
-        _starMaterial = BuildDomeMaterial(isCloud: false);
+        _starMaterial = BuildDomeMaterial(false);
         var mi = new MeshInstance3D
         {
             Name = "StarDome",
@@ -357,12 +366,15 @@ public sealed partial class SkyDomeNode : Node3D
             // pass, so opaque geometry writes over it. Engineering choice; the spec only
             // documents draw order (spec §8 item 9), not the exact Godot render-priority value.
             ExtraCullMargin = 0f,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off
         };
         mi.SetLayerMaskValue(1, true);
         // Use VisualInstance3D.Layers to assign sky layer (bit 20 = Godot sky/background convention).
         // This is an engineering choice — Godot does not mandate a specific sky layer number.
         mi.Layers = 1; // visible to camera layer 1 (the default 3D camera layer)
+        // Start hidden — UpdateDomes sets visibility each frame. Avoids a one-frame white flash
+        // before the first UpdateDomes call evaluates the tint + luminance gate.
+        mi.Visible = false;
         AddChild(mi);
         _starDomeMesh = mi;
     }
@@ -373,8 +385,8 @@ public sealed partial class SkyDomeNode : Node3D
         // spec: Docs/RE/formats/environment_bins.md §5.4 — vertex count 240: CONFIRMED.
 
         // Inner cloud layer (layer 1).
-        ArrayMesh mesh1 = BuildHemisphereMesh(DomeRadius * 0.97f, CloudDomeStacks, DomeSectors, inverted: true);
-        _cloudMaterial1 = BuildDomeMaterial(isCloud: true);
+        var mesh1 = BuildHemisphereMesh(DomeRadius * 0.97f, CloudDomeStacks, DomeSectors, true);
+        _cloudMaterial1 = BuildDomeMaterial(true);
         var mi1 = new MeshInstance3D
         {
             Name = "CloudDomeInner",
@@ -383,14 +395,16 @@ public sealed partial class SkyDomeNode : Node3D
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1,
+            // Start hidden — UpdateDomes sets visibility each frame (avoids a one-frame white flash).
+            Visible = false
         };
         AddChild(mi1);
         _cloudDomeMesh1 = mi1;
 
         // Outer/haze cloud layer (layer 2) — slightly larger radius so it draws behind layer 1.
         // spec: Docs/RE/formats/environment_bins.md §5.5 — "layer 2 is outer/haze": CONFIRMED (inferred).
-        ArrayMesh mesh2 = BuildHemisphereMesh(DomeRadius, CloudDomeStacks, DomeSectors, inverted: true);
-        _cloudMaterial2 = BuildDomeMaterial(isCloud: true);
+        var mesh2 = BuildHemisphereMesh(DomeRadius, CloudDomeStacks, DomeSectors, true);
+        _cloudMaterial2 = BuildDomeMaterial(true);
         var mi2 = new MeshInstance3D
         {
             Name = "CloudDomeOuter",
@@ -399,28 +413,26 @@ public sealed partial class SkyDomeNode : Node3D
             ExtraCullMargin = 0f,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             Layers = 1,
+            // Start hidden — UpdateDomes sets visibility each frame (avoids a one-frame white flash).
+            Visible = false
         };
         AddChild(mi2);
         _cloudDomeMesh2 = mi2;
     }
 
     /// <summary>
-    /// Builds an inverted hemisphere ArrayMesh (vertices on the inside face inward).
-    /// The hemisphere spans from Y=0 (equator) to Y=+radius (zenith).
-    ///
-    /// The tessellation is a standard UV-sphere hemisphere: <paramref name="stacks"/> latitude
-    /// rings × <paramref name="sectors"/> longitude segments.
-    ///
-    /// When <paramref name="inverted"/> is true the triangle winding is reversed so that the mesh
-    /// is visible from inside (back-face culling sees the outside; the camera is at the centre).
-    ///
-    /// Vertex count = stacks × sectors (no top cap vertex — the topmost ring collapses cleanly).
-    /// For cloud dome: 15 × 16 = 240. For star dome: 12 × 16 = 192.
-    /// spec: Docs/RE/formats/environment_bins.md §5.4 — cloud vertex count 240: CONFIRMED.
-    /// spec: Docs/RE/formats/environment_bins.md §4.1 — star vertex count 192: CONFIRMED.
-    ///
-    /// Note: GltfDocument is NOT used. The mesh is built via Godot ArrayMesh directly.
-    /// spec: CLAUDE.md — "GltfDocument.AppendFromBuffer crashes natively … Never use it."
+    ///     Builds an inverted hemisphere ArrayMesh (vertices on the inside face inward).
+    ///     The hemisphere spans from Y=0 (equator) to Y=+radius (zenith).
+    ///     The tessellation is a standard UV-sphere hemisphere: <paramref name="stacks" /> latitude
+    ///     rings × <paramref name="sectors" /> longitude segments.
+    ///     When <paramref name="inverted" /> is true the triangle winding is reversed so that the mesh
+    ///     is visible from inside (back-face culling sees the outside; the camera is at the centre).
+    ///     Vertex count = stacks × sectors (no top cap vertex — the topmost ring collapses cleanly).
+    ///     For cloud dome: 15 × 16 = 240. For star dome: 12 × 16 = 192.
+    ///     spec: Docs/RE/formats/environment_bins.md §5.4 — cloud vertex count 240: CONFIRMED.
+    ///     spec: Docs/RE/formats/environment_bins.md §4.1 — star vertex count 192: CONFIRMED.
+    ///     Note: GltfDocument is NOT used. The mesh is built via Godot ArrayMesh directly.
+    ///     spec: CLAUDE.md — "GltfDocument.AppendFromBuffer crashes natively … Never use it."
     /// </summary>
     private static ArrayMesh BuildHemisphereMesh(float radius, int stacks, int sectors, bool inverted)
     {
@@ -431,9 +443,9 @@ public sealed partial class SkyDomeNode : Node3D
         // Vertex/index counts are fully deterministic: (stacks+1)×(sectors+1) ring vertices and
         // stacks×sectors×6 indices (two triangles per quad). Pre-size and write by index to avoid the
         // List growth + ToArray() copies — this is one-time build cost, but the counts are known up front.
-        int stride = sectors + 1;
-        int vertCount = (stacks + 1) * stride;
-        int indexCount = stacks * sectors * 6;
+        var stride = sectors + 1;
+        var vertCount = (stacks + 1) * stride;
+        var indexCount = stacks * sectors * 6;
 
         var vertices = new Vector3[vertCount];
         var normals = new Vector3[vertCount];
@@ -441,29 +453,29 @@ public sealed partial class SkyDomeNode : Node3D
         var indices = new int[indexCount];
 
         // Theta from π/2 (equator) up to π (top). stacks+1 rings including equator and zenith.
-        for (int stack = 0; stack <= stacks; stack++)
+        for (var stack = 0; stack <= stacks; stack++)
         {
             // theta: π/2 at equator (stack=0), π at zenith (stack=stacks).
-            float theta = MathF.PI / 2f + stack * (MathF.PI / 2f) / stacks;
-            float sinTheta = MathF.Sin(theta);
-            float cosTheta = MathF.Cos(theta);
+            var theta = MathF.PI / 2f + stack * (MathF.PI / 2f) / stacks;
+            var sinTheta = MathF.Sin(theta);
+            var cosTheta = MathF.Cos(theta);
 
-            for (int sec = 0; sec <= sectors; sec++)
+            for (var sec = 0; sec <= sectors; sec++)
             {
-                float phi = sec * (2f * MathF.PI) / sectors;
-                float sinPhi = MathF.Sin(phi);
-                float cosPhi = MathF.Cos(phi);
+                var phi = sec * (2f * MathF.PI) / sectors;
+                var sinPhi = MathF.Sin(phi);
+                var cosPhi = MathF.Cos(phi);
 
                 // Sphere position (Y = cosTheta × radius, up). At θ=π/2 cosθ=0 → equator. At θ=π cosθ=-1 → top.
                 // Remap: use sinTheta for horizontal spread and -cosTheta for Y (so equator Y=0, zenith Y=radius).
-                float x = radius * sinTheta * cosPhi;
-                float y = radius * (-cosTheta); // remapped so zenith is +Y
-                float z = radius * sinTheta * sinPhi;
+                var x = radius * sinTheta * cosPhi;
+                var y = radius * -cosTheta; // remapped so zenith is +Y
+                var z = radius * sinTheta * sinPhi;
 
                 Vector3 pos = new(x, y, z);
                 // Inward-pointing normal (negated outward normal) for inverted dome.
-                Vector3 outward = pos.Normalized();
-                int vi = stack * stride + sec;
+                var outward = pos.Normalized();
+                var vi = stack * stride + sec;
                 vertices[vi] = pos;
                 normals[vi] = inverted ? -outward : outward;
                 uvs[vi] = new Vector2((float)sec / sectors, (float)stack / stacks);
@@ -471,39 +483,37 @@ public sealed partial class SkyDomeNode : Node3D
         }
 
         // Generate quad indices (two triangles per quad), reversed winding if inverted.
-        int idx = 0;
-        for (int stack = 0; stack < stacks; stack++)
+        var idx = 0;
+        for (var stack = 0; stack < stacks; stack++)
+        for (var sec = 0; sec < sectors; sec++)
         {
-            for (int sec = 0; sec < sectors; sec++)
-            {
-                int tl = stack * stride + sec;
-                int tr = tl + 1;
-                int bl = tl + stride;
-                int br = bl + 1;
+            var tl = stack * stride + sec;
+            var tr = tl + 1;
+            var bl = tl + stride;
+            var br = bl + 1;
 
-                if (inverted)
-                {
-                    // Reversed winding: face points inward.
-                    indices[idx++] = tl;
-                    indices[idx++] = bl;
-                    indices[idx++] = tr;
-                    indices[idx++] = tr;
-                    indices[idx++] = bl;
-                    indices[idx++] = br;
-                }
-                else
-                {
-                    indices[idx++] = tl;
-                    indices[idx++] = tr;
-                    indices[idx++] = bl;
-                    indices[idx++] = tr;
-                    indices[idx++] = br;
-                    indices[idx++] = bl;
-                }
+            if (inverted)
+            {
+                // Reversed winding: face points inward.
+                indices[idx++] = tl;
+                indices[idx++] = bl;
+                indices[idx++] = tr;
+                indices[idx++] = tr;
+                indices[idx++] = bl;
+                indices[idx++] = br;
+            }
+            else
+            {
+                indices[idx++] = tl;
+                indices[idx++] = tr;
+                indices[idx++] = bl;
+                indices[idx++] = tr;
+                indices[idx++] = br;
+                indices[idx++] = bl;
             }
         }
 
-        var arrays = new global::Godot.Collections.Array();
+        var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
         arrays[(int)Mesh.ArrayType.Vertex] = vertices;
         arrays[(int)Mesh.ArrayType.Normal] = normals;
@@ -520,18 +530,16 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Builds an unshaded (no lighting), fog-exempt, transparent ShaderMaterial for a sky dome.
-    ///
-    /// The material uses a minimal inline shader:
-    ///   - No lighting calculation (unshaded = sky appearance does not depend on scene lights).
-    ///   - Fog exempt: the Godot 4 FogOverride shader built-in disables depth-fog on this surface.
-    ///   - Alpha from the albedo_color parameter for day/night fading.
-    ///   - UV offset parameter for cloud scroll animation.
-    ///   - Depth write disabled so the sky does not occlude world geometry's depth buffer.
-    ///   - Render priority = -128 (behind all default-priority geometry).
-    ///
-    /// The unshaded + fog-exempt approach is the canonical Godot 4 sky-dome technique.
-    /// Engineering choice; the spec does not mandate a shader implementation.
+    ///     Builds an unshaded (no lighting), fog-exempt, transparent ShaderMaterial for a sky dome.
+    ///     The material uses a minimal inline shader:
+    ///     - No lighting calculation (unshaded = sky appearance does not depend on scene lights).
+    ///     - Fog exempt: the Godot 4 FogOverride shader built-in disables depth-fog on this surface.
+    ///     - Alpha from the albedo_color parameter for day/night fading.
+    ///     - UV offset parameter for cloud scroll animation.
+    ///     - Depth write disabled so the sky does not occlude world geometry's depth buffer.
+    ///     - Render priority = -128 (behind all default-priority geometry).
+    ///     The unshaded + fog-exempt approach is the canonical Godot 4 sky-dome technique.
+    ///     Engineering choice; the spec does not mandate a shader implementation.
     /// </summary>
     private static ShaderMaterial BuildDomeMaterial(bool isCloud)
     {
@@ -557,7 +565,7 @@ public sealed partial class SkyDomeNode : Node3D
         var mat = new ShaderMaterial();
         mat.Shader = shader;
         mat.RenderPriority = -128; // behind default (0) geometry in the transparent pass
-        mat.SetShaderParameter("albedo_color", new Color(1f, 1f, 1f, 1f));
+        mat.SetShaderParameter("albedo_color", new Color(1f, 1f, 1f));
         // uv_offset removed: the dome shader is colour-only (no albedo texture) so UV scroll
         // had no effect. The cloud UV scroll is animated via C# CloudCycleBin speed but the
         // dome geometry doesn't sample a texture, making the offset a dead no-op.
@@ -570,5 +578,7 @@ public sealed partial class SkyDomeNode : Node3D
 
     /// <summary>BGRA u8 → Godot Color. spec: Docs/RE/specs/environment.md §6.2 — r=bgra[2], g=bgra[1], b=bgra[0].</summary>
     private static Color BgraToColor(BgraColor c)
-        => new(c.R / 255f, c.G / 255f, c.B / 255f, 1f);
+    {
+        return new Color(c.R / 255f, c.G / 255f, c.B / 255f);
+    }
 }

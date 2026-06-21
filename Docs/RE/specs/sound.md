@@ -1,7 +1,7 @@
 ---
 status: confirmed
-verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader = control-flow-confirmed; SOUND_KIND integer values + option-store index decode + per-widget click cue = capture/debugger-pending
-ida_reverified: 2026-06-16
+verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader, playback-category mixer routing, SOUND_KIND value table, BGM-swap crossfade, trade-busy override (5/106) = control-flow-confirmed; +9 record flag + per-FE-widget click cue + name/param overlap + router category-5-vs-0..4 cap = capture/debugger-pending
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: resolved         # C1 coop-level NORMAL not PRIORITY; C2 primary caps 0x11 not 0x10011; C3 five tables loaded (3 read / 2 dead) not three; C4 per-area soundtable path; C5 ambient EFF = kind 6 via a separate helper
@@ -13,6 +13,16 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 
 # Sound subsystem (runtime audio engine)
 
+> **Verification banner (re-verified 2026-06-20, IDB SHA 263bd994, CYCLE 7, evidence [static-ida]).**
+> CYCLE 7 (2026-06-20) added the **playback-category mixer routing** (the play-by-id primitive's
+> category 0 / 1 / 2..4 slot selection — §2.1), upgraded the **`SOUND_KIND` value table** to the
+> authoritative byte-resolved enum recovered from the table dumper's 12-case switch (value 1 is
+> **reserved/NONE**, `SOUND_SKILL` = **11** — §9), detailed the **BGM-swap soft-crossfade state
+> machine** (no-restart-on-same-id; the crossfade state fields — §6.6a), and pinned the
+> **trade/exchange-busy override** to opcode **5/106** with its full cue family (§6.6b). The
+> dominant in-game HUD click cue **862020102** (category 2) is now recorded (§16). These are CYCLE 7
+> additions on top of the 2026-06-16 base below.
+>
 > **Verification banner (re-verified 2026-06-16, ida_anchor 263bd994, evidence [static-ida]).**
 > The audio architecture, device-init constants, the volume curve, the ambient mud-tile driver, the
 > worker-thread opcode set, the per-area table loader, and the actor-event SFX router are all
@@ -54,7 +64,8 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 | 512 KiB scratch / 1 MiB streaming ring; 3D over-size reject | CODE-CONFIRMED |
 | Volume curve: −10000 at X=0, nested-log form ×3000+0.5 otherwise | CODE-CONFIRMED (exact expression) |
 | Per-area table loader reads **FIVE** files (`.wlk .run .bgm .bge .eff`, `data/map<area>/soundtable<area>.<ext>`, 0x3000 each); 3 read at runtime, 2 (`.wlk`/`.run`) dead | CODE-CONFIRMED |
-| Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume, indoor id 863500002 | CODE-CONFIRMED |
+| Ambient driver: 600 000 ms cadence, hour/3600, ×0.7 volume | CODE-CONFIRMED |
+| Trade/exchange-busy override (RELABELLED from "indoor", §6.6): per-local-player actor busy flag forces fixed BGM **863500002** over the `.mud +2` → `.bgm` table AND suppresses `.bge`; `.eff` un-gated; NO map/region "indoor" attribute on this path | CODE-CONFIRMED (wiring HIGH) / MEDIUM (the "indoor"→"trade-busy" label) |
 | Ambient 3D-point (`.eff`) play uses **kind 6** via a separate play helper (not the SFX router) | CODE-CONFIRMED |
 | Deferred/scheduled actor-event SFX dispatcher (time-gated list feeding the router) | CODE-CONFIRMED |
 | Footstep id source: actor-visual fields (+108 walk, +112 run), NOT mud cells | CODE-CONFIRMED |
@@ -196,6 +207,44 @@ The sound ID is formatted as a **plain decimal integer** (no zero-padding). The 
 `ov_open_callbacks` decode); the plain `fopen` path is a dev/editor fallback.
 
 The created object is a `GSoundOGG` instance, **776 bytes** in size.
+
+---
+
+## 2.1 The play-by-id primitive and its mixing-category argument (CODE-CONFIRMED)
+
+Above `createSound` sits **the** high-level play-by-id primitive used by ~190 call sites across HUD,
+scenes, combat, weather, and trade. Its signature is:
+
+```
+play(SoundManager, category, sound_id, loop_flag)
+```
+
+The **`category` argument selects the mixing slot / bus** — it is **NOT** the `SOUND_KIND` enum (§9)
+and **NOT** the `createSound` `type_flags` byte (§2). It is a separate small integer that decides
+*how many concurrent voices* the sound may occupy and *which slot structure* holds it:
+
+| category | Mixing behaviour | Used by |
+|---:|---|---|
+| **0** | **Single direct BGM slot** — one voice only (the manager's `+0x34` active-BGM `GSound*`). On an id mismatch it **stops and frees the prior voice** before acquiring the new one; it **cannot double-stack**. | Music / BGM |
+| **1** | Same single-slot path as 0, but **first arms the BGM-stop bookkeeping** (clears the fading-out-id field, sets a pending flag) and then falls through into the single-slot path. | BGM transitions that want the crossfade bookkeeping primed (§6.6a) |
+| **2..4** | **Multi-voice sorted map** — many concurrent voices are allowed (the manager keeps a sorted id→voice map and inserts into it). This is the SFX / UI path. Categories **> 4 are rejected** unless the id is one of the two music-exempt special cases **861010109 / 861010110**. | 2D SFX, UI cues, system sounds |
+
+**Volume per voice.** Each voice's amplitude is taken from the manager's option/gain fields (the
+music-amp and sfx-amp bus gains, §10) and pushed through the millibel volume curve (§5). The two
+special-case ids **861010109 / 861010110** are forced to **amplitude 1.0 (full volume)** when the
+relevant options flag is set (the music-slider-exempt cues, §10.6) — likely the char-select / login
+theme that must always play at full volume regardless of the music slider.
+
+**Relation to the other selectors.** The category here (slot/bus topology) is orthogonal to:
+- the `createSound` `type_flags` 2D/3D bit (§2) — that picks the directory and the DirectSound buffer kind; and
+- the `SOUND_KIND` record byte (§9) — that picks the *loader family* and, indirectly, which category bus a record's id is played on (§9.1).
+
+> **Category-5 router caveat (capture/debugger-pending).** The actor-anchored event-SFX path (§8)
+> is reached through a **distinct router overload** that uses a category argument of **5** for 3D
+> positional event SFX. Whether that `5` lives in the same numeric space as the 0..4 categories here
+> (and is simply above the multi-voice cap) or is a separate router's own argument is **not settled
+> statically** — treat the actor-event router (§8) as a different entry point from the 0..4
+> play-by-id primitive. (DBG-pending.)
 
 ---
 
@@ -419,22 +468,130 @@ are re-picked only when the relevant mud-cell byte actually changes. This preven
 
 ### 6.6 BGM zone change
 
+> **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** the "indoor/instanced BGM override"
+> documented in earlier passes is **RELABELLED = trade/exchange-busy override**. The gate is a
+> **per-local-player actor busy flag** (set by the trade state-toggle handler, propagated to the
+> linked trade-partner actor), **not** any map/area/region "indoor" attribute. While the flag is
+> set, the ambient driver forces fixed BGM **863500002** over the `.mud +2` → `.bgm` table entry and
+> **additionally suppresses the `.bge` looped-ambient slots**; the `.eff` 3D-point slots are **not**
+> gated. No map-cell "indoor" attribute is on this path. The §11 `+0x8C` latch is a *separate*
+> SoundManager-object cache byte (do not conflate the two).
+
 When the BGM slot changes (mud+0x02 byte differs from the cached value):
 
 1. Stop and release the current BGM sound (`stopMusicZone`).
-2. **Indoor/instanced override:** if the local player's indoor flag is set (a flag on the player
-   actor signalling an instanced area), the BGM is forced to ID **863500002** instead of the table
-   entry's `sound_entry_id`.
-3. Otherwise use the table entry's `sound_entry_id`.
+2. **Trade/exchange-busy override:** if the **per-local-player actor trade/exchange-busy flag** is
+   set — i.e. the local player is currently inside an active player-to-player trade/exchange — the
+   BGM is forced to the constant ID **863500002** (a trade-ambience / exchange-mode track) instead of
+   the table entry's `sound_entry_id`, AND the `.bge` looped-ambient slots are **suppressed** for the
+   duration (§6.7). The `.eff` 3D-point slots are **not** affected — they continue to play (§6.8).
+   This flag is **not** a map/area/region "indoor" classifier: it is set/cleared on the local-player
+   actor object by the trade state-toggle S2C handler (and a small group of interaction-state actor
+   handlers), and the same value is propagated to the linked trade-partner actor. The same id
+   **863500002** is additionally reused as a one-shot 2D UI cue when the trade window opens.
+   *(Corroboration, neutral: the same per-actor busy flag also forces a frozen "trading"
+   animation/render state in the actor's per-frame update — confirming it is a trade-busy state
+   across BOTH audio and animation, never a map attribute.)*
+3. Otherwise (not trading) use the table entry's `sound_entry_id` — the normal `.mud +2` → `.bgm`
+   table music (and `.bge` ambience) plays.
 4. Start the new BGM (`playMusicZone`), which calls `createSound` with the music-volume bus gain.
 
 `playMusicZone` deduplicates: if the requested BGM ID is already playing, it does not restart.
+
+### 6.6a BGM transition = a soft crossfade with no-restart-on-same-id (CODE-CONFIRMED, CYCLE 7)
+
+When the ambient driver decides the BGM id has changed, it does **not** hard-cut. The transition is
+a **soft crossfade** driven by a small set of SoundManager crossfade-state fields:
+
+| Field (manager offset) | Meaning |
+|---|---|
+| **+0x34** (`+52`) | Current playing BGM voice `GSound*` — the single category-0 slot |
+| **+0x28** (`+40`) | Pending / next BGM id |
+| **+0x24** (`+36`) | Fading-out BGM id (the crossfade target being faded down) |
+| **+0x20** (`+32`) | Crossfade-in-progress boolean |
+| **+0x1C** (`+28`) | Crossfade gain ramp (float) |
+
+> Note: these are the crossfade-machine views of the manager fields; §11's object-field summary
+> lists the same offsets under their gain/cache roles. The five fields above are the ones the
+> BGM-transition logic reads and writes.
+
+The transition logic:
+
+1. **No change** → keep the current voice untouched.
+2. **New BGM id** → begin a crossfade:
+   - if a voice exists and is not already fading, start fading out the **current** id (record it as
+     the fading-out id, set the in-progress bool, seed the gain ramp);
+   - set the **pending id** and loop flag;
+   - **if the current voice already matches the new id → just restore full volume (NO restart)** —
+     the track is not stopped and re-acquired, it is simply ramped back to full gain;
+   - otherwise start the new voice on the single category-0 slot.
+3. **Silence tile (BGM id 0)** → ramp the **current** voice **down to silence** (begin-crossfade with
+   target id 0, drive the gain ramp toward the silence floor). The voice is faded, not abruptly cut.
+
+The defining property: **a transition to the same id never restarts the voice** — it only restores
+gain. This is what makes the per-frame trade-busy force-assert (§6.6b) idempotent.
+
+### 6.6b Trade/exchange-busy override — opcode 5/106 lifecycle and cue family (CODE-CONFIRMED, CYCLE 7)
+
+§6.6 establishes that the per-local-player trade/exchange-busy flag (the actor's trade-busy byte,
+actor **+0x734 == 1**) forces BGM to the fixed cue **863500002** (looped, on the category-0 music
+slot) and suppresses the normal tile/`.bge` BGM. CYCLE 7 pins the **wire trigger and lifecycle** to
+the trade-state-toggle handler for opcode **5/106**:
+
+**SET busy** — opcode **5/106** with the toggle flag == 1 for the local player:
+1. sets the actor trade-busy flag (+0x734 = 1);
+2. opens the trade UI panel;
+3. plays **863500002** on **category 0** (music slot), **looped** — the trade-busy BGM;
+4. plays a one-shot **trade-open UI sting 863500003** on **category 2**;
+5. plays an actor-anchored **trade-open SFX 863500001** through the 3D actor-event router (§8); and
+6. spawns the trade visual effect (a `formats/effects.md` concern, not this spec).
+
+While the flag is set, the **ambient driver force-asserts 863500002 every frame** — this is safe
+because the BGM transition no-restarts on a matching id (§6.6a), so the override is idempotent and
+robust even if an area-BGM change is attempted mid-trade. The `.bge` looped-ambient slots stay
+suppressed (§6.7); the `.eff` 3D-point slots are not gated (§6.8).
+
+**CLEAR busy** — opcode **5/106** with the toggle flag != 1:
+1. clears the actor trade-busy flag (+0x734 = 0);
+2. **stops the 863500002 loop ONLY if it is the current music id** — a guarded stop, so it will not
+   kill a real area BGM that happened to be playing; and
+3. restores the prior music amplitude (the music bus gain).
+
+After the clear, the **next ambient-driver pass re-applies the real tile-driven BGM** for the cell
+the player is standing on.
+
+**Trade cue family (CODE-CONFIRMED):**
+
+| Cue id | Role | Category / router |
+|---:|---|---|
+| **863500001** | Trade-open actor SFX (anchored to the actor) | category 5 — 3D actor-event router (§8) |
+| **863500002** | Trade-busy BGM loop (the forced override track) | category 0 — single music slot |
+| **863500003** | Trade-open UI sting (one-shot) | category 2 — multi-voice map |
+
+**Summary:** trade-busy is a **flag-gated override BGM** (cue 863500002, looped, music slot),
+entered and left on opcode **5/106**, reverting to the normal tile-driven BGM when the trade ends.
+
+**Confidence (this override path):** the decision function being the per-frame ambient driver (the
+sole `.mud`-tile consumer), the gating flag being the per-local-player actor busy byte, the override
+forcing 863500002 over the `.bgm` table, the `.bge` suppression, and `.eff` being un-gated are ALL
+**CODE-CONFIRMED (HIGH)**. The *semantic label* "trade/exchange-busy" (vs the earlier "indoor")
+is **HIGH** (the writer is the trade state-toggle handler, propagated to the partner, and the same
+byte freezes the trading pose). Two residual **OPEN-RISK** items, carried on the *label* only (the
+wiring is pinned): (a) that no distinct map/area/region "indoor" attribute exists on this path is a
+**MEDIUM** negative-scan result; (b) that 863500002 is specifically a trade-mode track (rather than a
+generic track reused for trade) is **MEDIUM**, inferred from the trade-only writer and the UI-open
+cue reuse.
 
 ### 6.7 Looped ambient slot change (`.bge`)
 
 When either of the two ambient slots changes (mud+0x03 / mud+0x04), the old clip for that slot is
 stopped and the new one started via `playMusicZone` / `stopMusicZone`, gated by the hour-active
 byte for the new entry.
+
+**Trade/exchange-busy suppression:** when the per-local-player actor trade/exchange-busy flag is set
+(§6.6 item 2), the looped-ambient slot **start is skipped entirely** — the `.bge` ambience is
+silenced for the duration of the trade, alongside the forced BGM 863500002. When the flag clears
+(trade ends), the normal `.bge` ambience resumes on the next evaluation. (CODE-CONFIRMED, HIGH.)
 
 ### 6.8 3D point source slot change (`.eff`)
 
@@ -613,35 +770,65 @@ dispatch as §8.2–§8.4 — it differs only in *when* the router is invoked.
 
 ---
 
-## 9. SOUND_KIND enumeration (names CODE-CONFIRMED; values UNVERIFIED)
+## 9. SOUND_KIND enumeration — value table (CODE-CONFIRMED; CYCLE 7 byte-resolved)
 
-The following names were recovered from editor/tool debug format strings that enumerate the kind
-enum. They correspond to the `kind` argument to `triggerSfxByKind`. The **integer values assigned
-to each name are not byte-confirmed** — the enum definition resides in an editor-tool region that
-was not fully traced. The names themselves are the developers' own labels.
+> **CYCLE 7 upgrade (2026-06-20, IDB SHA 263bd994):** the name→integer mapping is now
+> **byte-resolved**, recovered from the sound-table **record dumper**, which switches on the disk
+> record's kind byte (record **+8**, the same field documented in `formats/sound_tables.md`) through
+> a **12-case switch** and prints each case's canonical name. The earlier "values UNVERIFIED" caveat
+> is **closed** for the value table itself (the residual remaining is only which named families flow
+> to which playback category bus — §9.1). The integer is the value stored at record **+8**; it is
+> also the `kind` argument to the actor-event SFX router (§8).
 
-| Name | Approximate runtime mapping | Notes |
-|---|---|---|
-| `SOUND_KIND_NONE` | — | Null/unused |
-| `SOUND_SKILL` | likely kind 5, 10, or 11 | Skill-cast audio |
-| `SOUND_ACTION` | likely kind 5, 10, or 11 | General action audio |
-| `SOUND_DASH` | likely kind 5, 10, or 11 | Dash movement audio |
-| `SOUND_RUN` | kind 8 | Running footstep (confirmed from router) |
-| `SOUND_WALK` | kind 7 | Walking footstep (confirmed from router) |
-| `SOUND_BG3D` | kind 9 | 3D background/ambient SFX |
-| `SOUND_SYSTEM3D` | likely kind 5, 10, or 11 | System 3D sounds |
-| `SOUND_NPC` | likely kind 5, 10, or 11 | NPC audio |
-| `SOUND_WEATHER` | — | Weather audio |
-| `SOUND_SYSTEM2D` | — | System 2D sounds |
-| `SOUND_BG` | — | 2D background |
+| Value (record +8) | `SOUND_KIND` name | Notes |
+|---:|---|---|
+| **0** | `SOUND_BG` | 2D background music |
+| **1** | *(none / reserved)* | **No explicit case 1 in the dumper switch** — value 1 falls to the `default` arm, which prints `SOUND_KIND_NONE`. **Value 1 is reserved/NONE, not a kind.** |
+| **2** | `SOUND_SYSTEM2D` | 2D system / UI sounds |
+| **3** | `SOUND_WEATHER` | Weather audio |
+| **4** | `SOUND_NPC` | NPC audio |
+| **5** | `SOUND_SYSTEM3D` | 3D system sounds |
+| **6** | `SOUND_BG3D` | 3D background / ambient (the ambient EFF path, §6.8) |
+| **7** | `SOUND_WALK` | Walking footstep |
+| **8** | `SOUND_RUN` | Running footstep |
+| **9** | `SOUND_DASH` | Dash-movement audio |
+| **10** (0xA) | `SOUND_ACTION` | General action audio |
+| **11** (0xB) | `SOUND_SKILL` | Skill-cast audio |
+| *(default)* | `SOUND_KIND_NONE` | Printed for value 1 and any value ≥ 12 |
+
+> **Two facts to record carefully (CYCLE 7):**
+> 1. **Value 1 is reserved/NONE**, *not* a sound kind. The dumper has explicit cases for
+>    `0,2,3,4,5,6,7,8,9,10,11` and a `default` (= `SOUND_KIND_NONE`); there is **no `case 1`**, so
+>    value 1 routes to the NONE/default arm. (An earlier summary listed "1 = NONE"; the precise
+>    statement is that 1 has no kind and falls to the NONE default.)
+> 2. **`SOUND_SKILL` is value 11 (0xB)**, the top of the enum — *not* value 1.
+
+The full ordered enum is therefore:
+`{0 BG, 1 (none/reserved), 2 SYSTEM2D, 3 WEATHER, 4 NPC, 5 SYSTEM3D, 6 BG3D, 7 WALK, 8 RUN, 9 DASH, 10 ACTION, 11 SKILL}`.
+
+(The kind families are corroborated by the loader debug strings: `loadSkillSound`,
+`loadActorInfoSound`, `loadSystemSound`, `loadTerrainSound`, `loadTotalMugongSound`.)
+
+### 9.1 How kind affects routing (CODE-CONFIRMED at the family level; per-name bus = DBG-pending)
+
+The `SOUND_KIND` on a record selects **which loader family** populates the descriptor **and which
+playback-category bus** (§2.1) the descriptor's id is played on:
+
+| Kind family | Play path |
+|---|---|
+| `SOUND_BG` (0) / `SOUND_BG3D` (6) | **Music slot** — category 0/1 single-voice BGM (§2.1, §6.6a) |
+| `SOUND_SYSTEM2D` (2) / `SOUND_SYSTEM3D` (5) / `SOUND_NPC` (4) / `SOUND_ACTION` (10) / `SOUND_SKILL` (11) | **Multi-voice map** — category 2..4 (§2.1) |
+| `SOUND_WALK` (7) / `SOUND_RUN` (8) / `SOUND_DASH` (9) | **Footstep / motion voices** on the per-actor motion path (§8.5) |
+
+The **3D kinds** (`SOUND_BG3D`, `SOUND_SYSTEM3D`) load from `data/sound/3d/` with positional
+parameters; the **2D kinds** load from `data/sound/2d/`.
 
 The **actor-event SFX router** (§8) is confirmed to dispatch the play-kind integers **5, 7, 8, 9,
 10, 11**. Separately, the **ambient 3D-point path** (§6.8) is confirmed to use **kind 6** through its
 own play helper (the router rejects 6, but the ambient helper is a different function). So the full
-set of runtime-used kind integers is **5, 6, 7, 8, 9, 10, 11** — but kind 6 reaches the engine only
-via the ambient driver, never via the router. The mapping of name to integer must still be confirmed
-by tracing the editor-tool enum loader before any implementation hard-codes a specific integer for a
-named kind (capture/debugger-pending).
+set of runtime-used kind integers is **5, 6, 7, 8, 9, 10, 11** — kind 6 reaches the engine only via
+the ambient driver, never via the router. The **exact per-name → category bus binding** (e.g. whether
+`SOUND_NPC` uses category 2 vs 3 vs 4) is the only residual on this section and is DBG-pending.
 
 ---
 
@@ -757,7 +944,7 @@ They are engine-internal C++ heap offsets — not wire offsets, not file offsets
 | +0x85 | 1 | u8 | Terrain enabled | `OPTION_SOUND_TERRAIN` |
 | +0x86 | 1 | u8 | Char/mob enabled | `OPTION_SOUND_CHAR` || `OPTION_SOUND_MOB` |
 | +0x88 | 4 | u32 | Mixer channel count = **10** | Set at init |
-| +0x8C | 1 | u8 | Indoor/global BGM toggle latch | Flipped on indoor-flag transition |
+| +0x8C | 1 | u8 | SoundManager global-BGM toggle latch (cache byte) | A SoundManager-object cache byte, flipped on a BGM-toggle transition. **SEPARATE from** the per-local-player actor trade/exchange-busy flag that drives the §6.6 BGM override — do **not** conflate the two (the actor busy flag lives on the actor object, not here) |
 | +0x90 | 4 | u32 | Ambient-driver last-eval time (ms) | Throttle anchor for 600 000 ms cadence |
 
 ---
@@ -785,7 +972,7 @@ specific C# API.
 | 3D SFX always one-shot (all under 250 KB, well within 512 KiB limit) | Confirmed by VFS census |
 | Volume = 0.0 maps to full silence (−10 000 mB equivalent) | Audio drop must be hard, not a near-silent bleed |
 | Footstep ID comes from actor-visual fields (+108/+112), NOT from `.wlk`/`.run` tables | Those tables are all-null; reading them returns silence |
-| BGM indoor override = **863500002** | Must be applied before `playMusicZone` dedup check |
+| BGM trade/exchange-busy override = **863500002** (forced over the `.bgm` table when the per-local-player actor trade-busy flag is set; also suppresses `.bge`, leaves `.eff` alone) | Must be applied before `playMusicZone` dedup check; NOT a map/region "indoor" attribute (§6.6) |
 | Music-exempt IDs **861010109** / **861010110** bypass the music bus gain | Play at amplitude 1.0 regardless of the music slider |
 
 ### 12.3 Ambient driver re-implementation checklist
@@ -794,8 +981,12 @@ specific C# API.
 2. Gate on player existence; skip if no movement (< 2.0 unit threshold).
 3. Update 3D listener position.
 4. Look up the MUD cell at player (X, Z); read bytes at offsets +2 through +7.
-5. For BGM (byte +2): on change, stop old → apply indoor override if needed → start new (dedup).
+5. For BGM (byte +2): on change, stop old → if the per-local-player actor trade/exchange-busy flag
+   is set, force BGM 863500002 (and suppress `.bge`, step 6) → else use the table entry → start new
+   (dedup).
 6. For ambient (bytes +3, +4): on change per slot, stop old → check hour → start new if hour-active.
+   **If the trade/exchange-busy flag is set, skip the `.bge` slot start entirely** (suppressed for
+   the trade's duration; §6.7).
 7. For 3D point (bytes +5, +6, +7): on change per slot, stop old → check hour → play new at
    (entry.pos_x, playerY, entry.pos_z) with volume `entry.volume_factor × 0.7`.
 8. Honour 600 000 ms forced-re-eval cadence.
@@ -1043,6 +1234,35 @@ therefore **not VFS-resident** — they are compiled into the client binary or s
 consistent with the login flow opening a fixed endpoint rather than reading a VFS config. A revival
 must source the auth endpoint from its own configuration, not from the asset archive.
 
+---
+
+## 16. In-game HUD per-widget click cues (CODE-CONFIRMED, CYCLE 7)
+
+> **Confidence:** the per-action hard-coding architecture and the dominant cue id are CODE-CONFIRMED
+> (static). The *exhaustive* per-widget cue map is large and only the dominant value is pinned —
+> a full table is enumeration/DBG-pending.
+
+Unlike the front-end (where the cue lives in the owner-window action handler, §15.1), the **in-game
+HUD click cues are per-action constants hard-coded inside each widget's own on-event handler**, and
+are **not** read from a widget field. The cue id is a literal constant baked into each handler.
+
+- The **dominant generic HUD-button click cue is 862020102**, played on **category 2** (the 2D
+  multi-voice map; this is a `SOUND_SYSTEM2D`-kind UI cue). It appears in many HUD toggle handlers
+  (e.g. attack-mode toggle, quest-tracker toggle, and other HUD on-event handlers).
+- The **862020xxx family** is the UI-cue family (kind `SOUND_SYSTEM2D`, §9). Different panels and
+  widgets use their own constant cue ids from this family; 862020102 is the value most widely reused
+  as the generic "button click".
+
+**Play path:** widget receives its click event → its on-event dispatcher runs → fetches the
+SoundManager singleton → calls the play-by-id primitive `play(SoundManager, 2, <cueId>, 0)` (§2.1).
+
+**Scope note.** The full per-widget cue map (every panel's specific id) is voluminous; only the
+dominant **862020102** is pinned here. If a complete HUD cue table is ever needed, enumerate the
+play-by-id call sites inside the HUD on-event handlers and read each literal — straightforward but
+voluminous (enumeration/DBG-pending).
+
+---
+
 ## Open questions
 
 1. **`SOUND_KIND` integer values.** The enum names are recovered from editor debug strings. The
@@ -1126,6 +1346,7 @@ must source the auth endpoint from its own configuration, not from the asset arc
   `specs/intro_sequence.md`.
 - **Front-end scene flow** (login state machine, char-select chrome): `specs/frontend_scenes.md`.
 - **Canonical names**: see `Docs/RE/names.yaml` (`SoundManager`, `GSound`, `GSoundOGG`,
-  `GSoundThread`, `SoundKind`, `SoundEvent`, `IndoorBgmOverrideId`, `MusicSliderExemptIds`,
-  `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).
+  `GSoundThread`, `SoundKind`, `SoundEvent`, the trade/exchange-busy BGM override id (863500002 —
+  formerly catalogued as an "indoor" override id; relabelled this cycle, see §6.6),
+  `MusicSliderExemptIds`, `DecodeScratchBytes`, `StreamRingBytes`, `AmbientReevalMs`).
 - **Provenance**: see `Docs/RE/journal.md`.

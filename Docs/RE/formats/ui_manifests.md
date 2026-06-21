@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B here vs 166B in config_tables.md (config-table-lane fix, open); char-select corner close-button atlas (overflow on blacksheet 512x512 SAMPLE-VERIFIED; correct 1024-square atlas IDA-pending, CAMPAIGN 14)
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §2.8 — the `.do` stance-manifest SELECTION function and its class-index classStanceRef (Musa=1, Assassin=2, Wizard=3, Monk=4) with the {jung, sa, ma} file triplet per class, and the stanceType 0/1/2 + tier-sign selection rule; this resolves the *selection-by-class* half of §9 item #11b (the on-disk +0x0C discriminator enumeration for non-Musa files stays UNVERIFIED — two distinct quantities both loosely called "classStanceRef") — 2026-06-21 (IDB SHA 263bd994): added §2.9 — `data/script/emoticon.do`, the 40-byte (0x28) chat-emoticon picker sub-family (EOF-driven loader, dual id/index maps, full record layout incl. the +0x04 low-byte pageId padding caveat, the four-widget page builder joining UiTex id 27=emoticon.dds + id 3 chrome, and the +0x0C emoteCode click dispatch); establishes that `.do` is NOT one format but ≥3 distinct fixed-stride tables (40B emoticon / 108B errorinfo-msginfo / 116B stance) disambiguated by filename + loader, never by extension
 ---
 
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
@@ -526,22 +526,28 @@ maps; the hotbar/skill-window builders then look up the icon coordinates from th
 
 **VFS paths (12 files, SAMPLE-VERIFIED presence):**
 
-| File | job | kind | classStanceRef | Sheet (from skillicon.txt) |
-|---|---|---|---|---|
-| `data/script/musajung.do` | 1 (Musa) | 1 (jung) | 1001 | `musajung.dds` |
-| `data/script/musasa.do` | 1 (Musa) | 2 (sa) | 1002 | `musasa.dds` |
-| `data/script/musama.do` | 1 (Musa) | 3 (ma) | 1003 | `musama.dds` |
-| `data/script/assasinjung.do` | 2 (Assassin) | 1 (jung) | TODO | `assasinjung.dds` |
-| `data/script/assasinsa.do` | 2 (Assassin) | 2 (sa) | TODO | `assasinsa.dds` |
-| `data/script/assasinma.do` | 2 (Assassin) | 3 (ma) | TODO | `assasinma.dds` |
-| `data/script/wizardjung.do` | 3 (Wizard) | 1 (jung) | TODO | `wizardjung.dds` |
-| `data/script/wizardsa.do` | 3 (Wizard) | 2 (sa) | TODO | `wizardsa.dds` |
-| `data/script/wizardma.do` | 3 (Wizard) | 3 (ma) | TODO | `wizardma.dds` |
-| `data/script/monkjung.do` | 4 (Monk) | 1 (jung) | TODO | `monkjung.dds` |
-| `data/script/monksa.do` | 4 (Monk) | 2 (sa) | TODO | `monksa.dds` |
-| `data/script/monkma.do` | 4 (Monk) | 3 (ma) | TODO | `monkma.dds` |
+> **Column note.** The `classStanceRef` column below is the **`.do` record field at +0x0C** (§2.7
+> record layout) — the per-record `(job × stance)` discriminator. It is **distinct** from the
+> selection function's **class-index** classStanceRef (1..4) of §2.8 — see the §2.8 "two distinct
+> quantities" note. The `selection class index` column is the §2.8 value (CODE-CONFIRMED).
 
-The classStanceRef values for the nine non-Musa files are unconfirmed this pass (§9 item #11c).
+| File | job | kind | selection class index (§2.8) | `.do` +0x0C discriminator | Sheet (from skillicon.txt) |
+|---|---|---|:---:|---|---|
+| `data/script/musajung.do` | 1 (Musa) | 1 (jung) | 1 | 1001 | `musajung.dds` |
+| `data/script/musasa.do` | 1 (Musa) | 2 (sa) | 1 | 1002 | `musasa.dds` |
+| `data/script/musama.do` | 1 (Musa) | 3 (ma) | 1 | 1003 | `musama.dds` |
+| `data/script/assasinjung.do` | 2 (Assassin) | 1 (jung) | 2 | UNVERIFIED | `assasinjung.dds` |
+| `data/script/assasinsa.do` | 2 (Assassin) | 2 (sa) | 2 | UNVERIFIED | `assasinsa.dds` |
+| `data/script/assasinma.do` | 2 (Assassin) | 3 (ma) | 2 | UNVERIFIED | `assasinma.dds` |
+| `data/script/wizardjung.do` | 3 (Wizard) | 1 (jung) | 3 | UNVERIFIED | `wizardjung.dds` |
+| `data/script/wizardsa.do` | 3 (Wizard) | 2 (sa) | 3 | UNVERIFIED | `wizardsa.dds` |
+| `data/script/wizardma.do` | 3 (Wizard) | 3 (ma) | 3 | UNVERIFIED | `wizardma.dds` |
+| `data/script/monkjung.do` | 4 (Monk) | 1 (jung) | 4 | UNVERIFIED | `monkjung.dds` |
+| `data/script/monksa.do` | 4 (Monk) | 2 (sa) | 4 | UNVERIFIED | `monksa.dds` |
+| `data/script/monkma.do` | 4 (Monk) | 3 (ma) | 4 | UNVERIFIED | `monkma.dds` |
+
+The **selection class index** (1..4) is CODE-CONFIRMED for all four classes (§2.8). The **+0x0C
+discriminator** values for the nine non-Musa files remain unconfirmed this pass (§9 item #11b).
 
 #### Record layout (116 bytes / 0x74) — SAMPLE-VERIFIED
 
@@ -613,6 +619,203 @@ banner `srcX`) and +0x224 (i16 banner `srcY`), which correspond to the absolute 
 +546 and +548. This is the source of the "+546/+548" pair observed in the earlier lane
 (icon-grids.md). It is the category-banner path — one icon per category (17 total) — and is
 the fallback branch of the unified icon resolver. It is **not** the per-skill icon source.
+
+### 2.8 The `.do` stance-manifest selection function — class index + stance type + tier sign (CODE-CONFIRMED — 2026-06-20)
+
+The 12 per-class stance `.do` files of §2.7 are held in a **flat pointer table** of three entries per
+class (in `{jung, sa, ma}` order). A dedicated **selection function** picks which one is the active
+manifest for the current character, from three runtime inputs:
+
+| Input | Type | Role |
+|---|---|---|
+| **class index** | small int, **1-based** | Which class: **1 = Musa, 2 = Assassin (Salsu), 3 = Wizard (Dosa), 4 = Monk** |
+| **stance type** | `0` / `1` / `2` | Selects within the class's `{jung, sa, ma}` triplet |
+| **stance-tier sign flag** | signed | A high/low (≥ 0 vs < 0) flag that toggles `jung↔ma` and `sa↔ma` |
+
+**Selection rule (per class):**
+
+- `stanceType == 0` → **jung**
+- `stanceType == 1` → **jung** if tier-sign **≥ 0**, else **ma**
+- `stanceType == 2` → **sa** if tier-sign **≥ 0**, else **ma**
+
+#### 2.8.1 `classStanceRef` (the selection class index) → file triplet (CODE-CONFIRMED)
+
+> **Two distinct quantities, both loosely called "classStanceRef" — do not conflate them.** This
+> section's `classStanceRef` is the **selection class index** (`1..4`) the selection function switches
+> on to choose the file triplet. It is **not** the `.do` **record field at +0x0C** (§2.7), which is a
+> per-record `(job × stance)` discriminator observed as `1001 / 1002 / 1003` for the three Musa files.
+> The +0x0C values for the nine non-Musa files remain **UNVERIFIED** (§9 item #11b). The table below
+> resolves only the **selection-by-class** mapping.
+
+| Class | classStanceRef (class index) | jung `.do` | sa `.do` | ma `.do` |
+|---|:---:|---|---|---|
+| **Musa** | **1** | `musajung.do` | `musasa.do` | `musama.do` |
+| **Assassin** (Salsu) | **2** | `assasinjung.do` | `assasinsa.do` | `assasinma.do` |
+| **Wizard** (Dosa) | **3** | `wizardjung.do` | `wizardsa.do` | `wizardma.do` |
+| **Monk** | **4** | `monkjung.do` | `monksa.do` | `monkma.do` |
+
+The requested selection-index values are **Assassin = 2, Wizard = 3, Monk = 4** (Musa = 1).
+Confidence: **HIGH** — the filename strings and the switch-on-class-index are unambiguous. The
+in-source class filename spelling is **"assasin"** (single `s`), which matches the class enum value
+**2 = Salsu**. These four class indices are exactly the `job_id` column of `skillicon.txt` (§2.3:
+1 = Musa, 2 = Assassin, 3 = Wizard, 4 = Monk), so the selection class index, the `skillicon.txt`
+`job_id`, and the character-class globals (§2.7 load chain) are the same 1-based class numbering.
+
+> **Cross-reference.** The selection function consumes the same character class / stance globals the
+> §2.7 load chain describes; once it returns the active `.do` file, the icon-coordinate read of
+> §2.6/§2.7 proceeds from that file's 116-byte records. This section adds the **selection** step that
+> sits upstream of the icon read.
+
+### 2.9 `data/script/emoticon.do` — chat-emoticon picker grid (CODE-CONFIRMED + SAMPLE-VERIFIED — 2026-06-21)
+
+> **The `.do` extension is NOT one format — disambiguate by filename + loader, never by extension.**
+> `.do` is a file extension reused by **several unrelated fixed-stride binary record tables** under
+> `data/script/`, each with its OWN record size and its OWN loader. They share only the family
+> conventions (no header, no magic, no version, no count field; a tightly-packed array of fixed-size
+> little-endian records; an EOF-driven loader that copies each raw record verbatim into a heap node
+> and inserts it into one or more in-memory ordered maps keyed by a record field). At least three
+> distinct strides are confirmed:
+>
+> | Sub-family | Record stride | Files | Role | This doc |
+> |---|---:|---|---|---|
+> | Per-class skill stance | 116 B (0x74) | `musajung.do` + 11 siblings | per-skill icon coords | §2.7, §2.8 |
+> | Emoticon / chat-token grid | **40 B (0x28)** | `emoticon.do` | emoticon picker grid → `emoticon.dds` sprites + chat code | §2.9 (here) |
+> | Message / error label table | 108 B (0x6C) | `errorinfo.do`, `msginfo.do` | panel text-message / label records | §2.9.5 (note only) |
+>
+> A parser MUST select the stride and field layout from the filename (or the loader that opens it),
+> NOT from the `.do` extension. The 116-byte facts of §2.7/§2.8 are unchanged; §2.9 ADDS the 40-byte
+> emoticon sibling.
+
+#### 2.9.1 Role and identification
+
+`data/script/emoticon.do` is the data table behind the **chat-emoticon picker panel**. It is a flat
+array of fixed **40-byte** records, one per selectable emoticon, that supplies each emoticon button's
+on-panel grid position, its glyph and name-strip source rectangles on `emoticon.dds`, its page/tab,
+and the chat token emitted when the player clicks it. There is no file header, no magic, no version,
+and no count field. All fields are little-endian.
+
+- **Path:** `data/script/emoticon.do`. Loaded once at startup by the boot data-table corpus loader
+  (the same boot thread that loads `errorinfo.do`, `msginfo.do`, `textcommand.do`, and the stance
+  `.do` family).
+- **Record stride:** 40 bytes (0x28).
+- **Record count:** `file_size / 40`. There is no count field; the loader is purely EOF-driven, so a
+  non-zero size remainder is a truncated trailing record that the loader's failed read drops.
+- **Sample:** the observed VFS copy is **840 bytes = exactly 21 records × 40, remainder 0.**
+
+#### 2.9.2 Read algorithm (loader)
+
+The emoticon loader and record constructor follow the shared `.do` family pattern:
+
+1. Open the VFS file by name (`data/script/emoticon.do`).
+2. If the handle is valid, loop while the file is not at end-of-entry **and** a read of exactly
+   **40 bytes (0x28)** into a stack buffer succeeds:
+   - allocate a 40-byte heap node;
+   - copy the full 40 raw bytes verbatim into the node (node layout == on-disk layout for all 40 bytes);
+   - lazily create two in-memory ordered (red-black-tree) maps on first record, then insert the node
+     into both:
+     - **Map A** — keyed by the record field at **+0x00** (`id`);
+     - **Map B** — keyed by the record field at **+0x08** (`index`).
+3. Close and destruct the file handle.
+
+So two indices exist over the same node set: by `id` (+0x00) and by `index` (+0x08). There is **no
+count field** — the loop is purely EOF-driven, identical to the stance `.do` family.
+
+#### 2.9.3 On-disk record layout (40 bytes / 0x28, little-endian) — SAMPLE-VERIFIED + CODE-CONFIRMED
+
+Field roles are pinned by the picker-panel page builder (§2.9.4), the click handler (§2.9.5), and the
+page-count / reverse-lookup helpers. All offsets are byte offsets within a single 40-byte record.
+
+| Offset | Size | Type | Field | Consumer use | Observed values | Confidence |
+|------:|----:|------|-------|--------------|-----------------|------------|
+| +0x00 | 4 | u32 | `id` | Map A key | sequential 1..21 | CODE+SAMPLE |
+| +0x04 | 1 | u8 | `pageId` (tab) | page/tab filter in the builder and click handler | 0 (recs 0–17), 1 (recs 18–20); valid range 0..2 | CODE+SAMPLE |
+| +0x05 | 3 | — | padding | none | authoring-tool struct pad (uninitialized `0xCC` fill) | SAMPLE |
+| +0x08 | 4 | u32 | `index` | Map B key; click-match key; passed as the button's child-action id | sequential 0..20 | CODE+SAMPLE |
+| +0x0C | 4 | u32 | `emoteCode` | the chat/output token sent to the main window on click; reverse-lookup key | 0 on page-0 recs, then 10/11/12 on the last recs (per-page numbering) | CODE+SAMPLE |
+| +0x10 | 4 | i32 | `dstX` | destination X of all four widgets on the panel | 10 (col 0) / 160 (col 1) | CODE+SAMPLE |
+| +0x14 | 4 | i32 | `dstY` | destination Y base for the four widgets | 20, 75, 130, 185, 240, 295, 350, 405 (step 55) | CODE+SAMPLE |
+| +0x18 | 4 | i32 | `glyphSrcX` | atlas src X of the 23×23 emoticon glyph on `emoticon.dds` | 0 on most early recs; varies later | CODE+SAMPLE |
+| +0x1C | 4 | i32 | `glyphSrcY` | atlas src Y of the 23×23 emoticon glyph | 0 early; 23 on rec 20 | CODE+SAMPLE |
+| +0x20 | 4 | i32 | `labelSrcX` | atlas src X of the 87×13 name-strip sprite on `emoticon.dds` | alternates 0 / 87 | CODE+SAMPLE |
+| +0x24 | 4 | i32 | `labelSrcY` | atlas src Y of the 87×13 name-strip sprite | 46, 46, 59, 59, 72, 72, 85, 85 … (step 13 per pair) | CODE+SAMPLE |
+
+> **`+0x04` width caveat (load-bearing).** Although there are three bytes between `pageId` (+0x04) and
+> `index` (+0x08), the loader and every consumer read **only the low byte** at +0x04. Those three pad
+> bytes are the authoring tool's uninitialized-fill pattern (`0xCC`), so reading +0x04 as a 4-byte
+> integer yields a nonsense value such as `0xCCCCCC00`/`0xCCCCCC01`. A parser MUST read `pageId` as a
+> single byte (or mask the i32 with `0xFF`), never as a 4-byte field, and MUST treat +0x05..+0x07 as
+> don't-care padding to the +0x08 boundary.
+
+#### 2.9.4 Consumer — the emoticon-picker page builder
+
+The picker panel's per-page build path constructs the grid for a given page index (0..2):
+
+1. Resolve two UI texture handles from the `UiTex.txt` registry (§1):
+   - tex id **3** (skill-window chrome atlas) — backplate + frame-ring decoration;
+   - tex id **27** = `data/ui/emoticon.dds` (256×256, BC2; §1.4 entry 0027) — emoticon glyph + name-strip
+     source. **This is the join to `emoticon.dds`.**
+2. Count the records whose `pageId` (+0x04) equals the requested page, and allocate a widget array of
+   four widget pointers per matched record.
+3. Iterate Map B (the by-`index` map) in order; for each record whose `pageId == page`, read
+   `dstX`/`dstY` (+0x10/+0x14), the glyph src (+0x18/+0x1C), the label src (+0x20/+0x24), and `index`
+   (+0x08), then build **four** child widgets:
+
+| # | Widget | Texture | Destination (x, y) | Size (px) | Atlas source | Notes |
+|---|--------|---------|--------------------|-----------|--------------|-------|
+| 1 | Image (backplate) | id 3 chrome | (dstX, dstY) | 146×49 | (63, 661) | fixed chrome rect |
+| 2 | 3-state Button (the emoticon) | id 27 `emoticon.dds` | (dstX+23, dstY+11) | **23×23** | **(glyphSrcX, glyphSrcY) = (+0x18, +0x1C)** | all three button states share the same src; the button is added with **child-action id = `index` (+0x08)** |
+| 3 | Image (name strip) | id 27 `emoticon.dds` | (dstX+48, dstY+16) | **87×13** | **(labelSrcX, labelSrcY) = (+0x20, +0x24)** | the emoticon's pre-rendered Korean name sprite |
+| 4 | Image (frame ring) | id 3 chrome | (dstX+20, dstY+8) | 29×29 | (763, 655) | fixed chrome rect |
+
+Only widget 2 carries a click action (its action id is the record's `index`); widgets 1/3/4 are plain
+decoration. This builder is the authority that pins the field roles: the glyph src is (+0x18, +0x1C),
+the name-strip src is (+0x20, +0x24), the destination grid is (+0x10, +0x14), `pageId` is the +0x04 low
+byte, and the action/`index` is +0x08.
+
+#### 2.9.5 Consumer — the picker click handler, and the other `.do` strides
+
+The picker click handler receives `(page, action)` and:
+
+- guards `page <= 2` (so exactly **three tabs / pages**, ids 0/1/2) and `action < 200`;
+- filters Map B for the record whose `pageId == page` AND `index == action`;
+- on a match: plays a 2D click sound, reads `emoteCode` (+0x0C), stores it on the panel, and dispatches
+  `emoteCode` to the main window — i.e. **+0x0C is the chat/output token emitted when the player clicks
+  an emoticon.**
+
+A companion reverse-lookup scans Map A for the record whose `emoteCode` (+0x0C) equals an incoming
+value, resolving a received emote code back to its record.
+
+**Other `.do` strides (context, not the emoticon target):** `errorinfo.do` and `msginfo.do` are a
+**third** pattern — **108-byte (0x6C) records**, loaded by their own loader on first panel open (the
+errorinfo path is guarded by an "already loaded" flag), used as text-message / label record tables for
+the error and message panels. They share the family conventions but have a DIFFERENT stride and a
+DIFFERENT record constructor; do not conflate them with the 40-byte emoticon table. Their full field
+layout is not decoded here.
+
+> **Note on the related text tables.** `data/char/emoticon.txt` and `data/char/sameemoticon.txt` are
+> SEPARATE CP949 text tables (likely actor-animation emoticon mappings), not the UI picker grid. They
+> are out of scope for this binary `.do` spec.
+
+#### 2.9.6 Linkages (emoticon.do)
+
+| Direction | What | Join key |
+|---|---|---|
+| emoticon.do → `emoticon.dds` | the 23×23 glyph and 87×13 name-strip sprites are blitted from `data/ui/emoticon.dds` (256×256, BC2) | `UiTex.txt` tex id **27** (§1.4 entry 0027), hard-coded in the page builder |
+| emoticon.do → skill-window chrome | backplate / frame-ring decoration | `UiTex.txt` tex id **3** (§1.4 entry 0003), hard-coded in the page builder |
+| emoticon.do → chat / main window | clicking an emoticon dispatches `emoteCode` (+0x0C) to the main window | the click handler's main-window dispatch |
+| boot → emoticon.do | loaded once at startup by the boot data-table corpus loader | the boot data-table loader thread |
+| runtime index | two in-memory ordered maps over the records | Map A by +0x00 `id`; Map B by +0x08 `index` |
+
+#### 2.9.7 Open questions (emoticon.do)
+
+- `emoteCode` (+0x0C) value space: the sample shows 0 and 10/11/12; whether the value is a chat-emoticon
+  opcode or an index into `emoticon.txt` is not confirmed (the downstream main-window consumer is not
+  traced here).
+- The 87×13 name-strip labels are very likely pre-rendered Korean text baked into `emoticon.dds` (they
+  are atlas sprites, not text-rendered captions), but this is visually probable, not byte-confirmed.
+- Exact tab/page semantics for the three pages (`pageId` 0/1/2): the sample exercises only pages 0 and 1
+  (21 records); a fuller `emoticon.do` may populate page 2.
+- `errorinfo.do` / `msginfo.do` (108-byte) full field layout is not decoded.
 
 ---
 
@@ -816,33 +1019,64 @@ atlases** already documented above — drawing their chrome with literal source 
 > these **shared** atlases. **Any port code that binds a `select.dds` (or similar dedicated
 > char-select atlas) would be wrong** — no such file exists in the VFS. — SAMPLE-VERIFIED.
 
-### 5.1b FLAGGED MIS-BINDING — char-select corner close button overflows `blacksheet.dds` (SAMPLE-VERIFIED overflow; correct atlas IDA-PENDING)
+### 5.1b RESOLVED — char-select corner close button binds `tradekeepwindow.dds` (CYCLE 1 A3-7; was a mis-binding to `blacksheet.dds`)
 
-The port's char-select layout declares the corner close button with source rect
-**`(srcX = 941, srcY = 910, w = 23, h = 23)` on `data/ui/blacksheet.dds`**. But `blacksheet.dds` is
-**512×512** (header-confirmed, §1.4a). The arithmetic is decisive:
+> **RESOLVED — CYCLE 1 A3-7 (2026-06-19), static-ida + sample-verified.** The earlier FLAGGED
+> MIS-BINDING (port bound the close button to `data/ui/blacksheet.dds`, which overflows; correct
+> 1024-square atlas IDA-pending) is now settled from the char-select window construct witness.
+> **The button binds `data/ui/tradekeepwindow.dds` (uitex.txt id `0004`, 1024×1024 DXT3, §1.4).**
 
-- `srcX + w = 941 + 23 = 964` → exceeds 512.
-- `srcY + h = 910 + 23 = 933` → exceeds 512.
+The char-select (state-4) window construct builds the corner close button as a **3-state button**
+(normal / hover / pressed). The texture handle handed to that button is the one loaded from
+**`data/ui/tradekeepwindow.dds`**; that handle is consumed unchanged by the button build (no
+intervening reassignment between the load and the build), so the binding is unambiguous.
 
-Both right and bottom edges fall **outside** the 512×512 atlas, so the rect samples empty/garbage UV.
-A `(941, 910)` origin only fits a **1024×1024** atlas. **The overflow is arithmetic-certain
-(SAMPLE-VERIFIED); the binding to `blacksheet.dds` is therefore a mis-binding.** — SAMPLE-VERIFIED.
+**Source rect — read directly from the construct (CONFIRMED):**
 
-> **Correct atlas — IDA-PENDING.** The same physical close glyph at `(941, 910)` would land in-bounds
-> on a 1024² atlas; the most plausible candidates are `loginwindow.dds` or `mainwindow.dds` (both
-> 1024×1024, both already among the char-select shared atlases, §5.1a). **Which atlas the original
-> actually binds for this close button is NOT settled here** — it requires the char-select window
-> construct (`BuildScene`) witness in IDA / the running loader to confirm both the bound texture path
-> and the real `(srcX, srcY, w, h)`. Do **not** guess the atlas; reconcile this flag once the
-> construct witness lands, and do not ship `(941, 910)` against a 512² texture. — [IDA-PENDING].
+| Field | Value | Note |
+|---|---:|---|
+| srcX  | 941 | computed at build time as `910 + 0x1F` (so a literal "941" never appears in the image — see below) |
+| srcY  | 910 | |
+| w     | 23  | |
+| h     | 23  | |
+| dstX  | 971 | on-screen destination X |
+| dstY  | 610 | on-screen destination Y |
+| color | 0   | |
 
-> **Action for the port lane.** Treat the close button as a flagged defect: it must be re-bound to a
-> 1024² atlas (correct one IDA-pending) before it can render. This is the **only** char-select
-> source-rect overflow found in the CAMPAIGN 14 bounds sweep; all other char-select / login / PIN
-> rects fit their bound atlas (the tightest fit is the create-form class strip at `srcY = 1005`,
-> which sits exactly at the 1024 bottom edge for a height up to 19px — worth a runtime height check
-> but in-bounds).
+All **three** button states (normal / hover / pressed) sample the **same** atlas origin `(941, 910)`
+on the **same** texture handle — the glyph does not move between states; only the interaction flags
+change.
+
+> **Why a literal "941" search returns nothing.** The `srcX = 941` value is a **computed** quantity
+> (`910 + 0x1F`), not a stored literal, which is why a whole-binary search for the literal `941`
+> finds no hit while `910` is present. The port's rect was therefore **correct** — record this so the
+> rect `(941, 910, 23, 23)` is not re-doubted on the basis of a missing literal. Only the *atlas* was
+> wrong.
+
+**Refuted candidates.** The previously proposed candidates are all **REFUTED**:
+- `data/ui/blacksheet.dds` (512×512) — the original mis-binding; the rect overflows it
+  (`941 + 23 = 964 > 512`, `910 + 23 = 933 > 512`), so the overflow diagnosis below was correct in
+  spirit, but the fix is a different file.
+- `data/ui/loginwindow.dds` and `data/ui/mainwindow.dds` (the two 1024² guesses) — neither is the
+  bound atlas. The witnessed atlas is a **third** file, `tradekeepwindow.dds`.
+
+**Bounds check on the bound atlas (`tradekeepwindow.dds`, 1024×1024) — fits with margin:**
+- `srcX + w = 941 + 23 = 964 ≤ 1024` → OK.
+- `srcY + h = 910 + 23 = 933 ≤ 1024` → OK.
+
+> **Port fix (implied).** Re-bind the char-select corner close button to
+> **`data/ui/tradekeepwindow.dds`** (1024×1024), keep the source rect **`(941, 910, 23, 23)`** and the
+> destination **`(971, 610)`**, with all three states sharing origin `(941, 910)`. This was the
+> **only** char-select source-rect overflow found in the CAMPAIGN 14 bounds sweep; all other
+> char-select / login / PIN rects fit their bound atlas (the tightest fit is the create-form class
+> strip at `srcY = 1005`, which sits at the 1024 bottom edge for a height up to 19px — worth a runtime
+> height check but in-bounds).
+
+> **Confidence: PARSER-CONFIRMED / HIGH.** Single decisive construct site; the texture-handle
+> dataflow from the `tradekeepwindow.dds` load to the close-button texture argument is direct and
+> uninterrupted; the rect is read straight from the construct; the atlas dimension (1024×1024) is
+> cross-referenced from the sample-verified UiTex registry (§1.4). Static-only caveat: the on-screen
+> pixel result was not visually verified — that is presentation, not the binding.
 
 ### 5.2 Loading screens
 
@@ -1137,11 +1371,16 @@ table requires reading the active `.do` file for the player's `(job, kind)`.
        `instanceKey` equals `skill_id` in `skills.scr`, or is a packed composite key that must
        be decoded before joining, is not confirmed. — PLAUSIBLE (structured key); UNVERIFIED.
 
-    b. **`classStanceRef` enumeration for the nine non-Musa files.** Confirmed values:
-       1001 = musajung, 1002 = musasa, 1003 = musama. The corresponding values for Assassin,
-       Wizard, and Monk stances (presumably in a 10xx/11xx/12xx range or similar) have not been
-       read from those files. A quick read of +0x0C across all 12 `.do` files would produce the
-       full ref-to-sheet table. — PLAUSIBLE pattern; UNVERIFIED values.
+    b. **`.do` record-field (+0x0C) discriminator enumeration for the nine non-Musa files.**
+       Confirmed values: 1001 = musajung, 1002 = musasa, 1003 = musama. The corresponding +0x0C
+       record values for Assassin, Wizard, and Monk stances (presumably in a 10xx/11xx/12xx range
+       or similar) have not been read from those files. A quick read of +0x0C across all 12 `.do`
+       files would produce the full ref-to-sheet table. — PLAUSIBLE pattern; UNVERIFIED values.
+       **(PARTIALLY RESOLVED — CYCLE 7):** the *selection-by-class* half is now closed — the
+       selection function's **class-index** classStanceRef is Musa = 1, Assassin = 2, Wizard = 3,
+       Monk = 4, with the `{jung, sa, ma}` file triplet per class (§2.8). What remains UNVERIFIED is
+       only the **on-disk +0x0C record discriminator** values for the nine non-Musa files — a
+       different quantity from the selection class index (see the §2.8 "two distinct quantities" note).
 
     c. **`musama.do` 40-byte trailing fragment.** `musama.do` is 25,792 bytes = 222 full
        116-byte records + 40 trailing bytes. The loader ignores the incomplete tail. Whether the
@@ -1605,10 +1844,10 @@ gets the event. [confirmed]
 - Binary configuration tables (`.scr`, `.do`, `.ini`): `formats/config_tables.md`
 - Per-class stance `.do` skill tables (on-disk source of `iconSrcX`/`iconSrcY`): §2.7 above;
   see also `formats/config_tables.md` for the general `.do` loader pattern. Note: the stride
-  for the class-stance skill `.do` files is **116 bytes (0x74)** — this CONTRADICTS the
-  `config_tables.md` entry for `monkma.do` and class-stance variants which states 166 bytes
-  (0xA6). The 116-byte stride is CODE-CONFIRMED + SAMPLE-VERIFIED here; the `config_tables.md`
-  entry should be corrected by the config-table analyst.
+  for the class-stance skill `.do` files is **116 bytes (0x74)** — this now AGREES with
+  `formats/config_tables.md` (§2.2 / §2.16 / §3.5), which also CONFIRMS 116 bytes (0x74) and
+  REFUTES the earlier 166-byte (0xA6) estimate (166 divides none of the 12 files). The 116-byte
+  stride is CODE-CONFIRMED + SAMPLE-VERIFIED across both specs (CYCLE 1 A3-6, resolved).
 - `skillcategory.scr` (17-record × 564-byte category-banner file): see `formats/config_tables.md`
 - Character class IDs and skill IDs: `formats/config_tables.md` §2.6 (users.scr classes),
   §2.8 (skills.scr — skill catalog carrying name, cost, cooldown, motion data; does NOT carry

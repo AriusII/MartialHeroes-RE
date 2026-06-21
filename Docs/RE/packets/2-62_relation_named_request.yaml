@@ -1,0 +1,40 @@
+# spec: Docs/RE/packets/2-62_relation_named_request.yaml
+# Role: C2S name-keyed relation/party request — 16-byte name + (u16 type, u8 flag).
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgRelationNamedRequest
+opcode: 0x2003e           # major 2 (GameAction), minor 62 -> (2 << 16) | 62
+direction: C2S
+size: 19                  # fixed 19-byte body
+spec: packets/2-62_relation_named_request.yaml
+status: hypothesis
+capture_verified: false
+
+summary: A name-keyed relation/party request carrying a 16-byte character name plus a type word and a flag byte. A thin send from the social confirm panel after selecting a named target.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 19.
+fields:
+  - { name: Name, type: "char[16]" }   # 0x00  CP949 target character name (4 dwords copied as the key) [capture/debugger-pending]
+  - { name: Type, type: u16 }          # 0x10  type / index word [capture/debugger-pending]
+  - { name: Flag, type: u8 }           # 0x12  flag byte [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED body size (a single fixed 19-byte blit = 16 + 2 + 1); the field VALUES are
+  static inferences (capture-pending).
+
+    0x00 (16B) Name : a CP949 target character name carried as a 16-byte key (copied as 4 dwords).
+                      [capture/debugger-pending]
+    0x10 (2B)  Type : a type / index selector word. [capture/debugger-pending]
+    0x12 (1B)  Flag : a flag byte. [capture/debugger-pending]
+
+  NOTE: this name field is the 16-byte variant (4-dword key copy), not the dominant 17-byte cell.
+
+  TRIGGER: the social confirm / re-ask panel after selecting a named target; the validator gates only
+  on the global "in-panel" flag, so it is a thin send.
+
+  UNKNOWNS to resolve with a capture:
+    - the Type/Flag value space and the exact relation op;
+    - the inbound reply opcode — pending.
+
+  UNBLOCKS: Client.Application name-keyed relation request use-case.

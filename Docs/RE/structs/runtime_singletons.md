@@ -1,9 +1,9 @@
 ---
-verification: confirmed
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
 ida_reverified: 2026-06-17
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis; display FRAMERATE config inertness (capture/debugger-pending). 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected
+conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis. 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected. 2026-06-20 CYCLE 7: display FRAMERATE config inertness RESOLVED — statically exhaustive (the only two references to the config field are both stores, no reader), so the 60 FPS cap is confirmed hardcoded/inert (§16); the Diamond base-object layout (§3.0) is added
 status: code-confirmed
 sample_verified: false   # layout recovered from binary analysis; no live capture
 subsystems: [scene_lifecycle, render_pipeline, network, actor, sound, vfs, ui_system, effects, game_loop, input, scripting]
@@ -116,6 +116,52 @@ embedded static object (CODE-CONFIRMED unless marked otherwise).
 
 All offsets are within the object. "→" notation means the field holds a pointer to another
 object; the pointed-to type is named but its layout is in its own spec section or file.
+
+### 3.0 Diamond base object — shared head of every engine class (CODE-CONFIRMED)
+
+Cross-reference: `specs/client_architecture.md §1A` for the object-model / RTTI-lifecycle behaviour.
+
+The 3D layer is the **"Diamond" scene-graph engine** (an OpenSceneGraph-style Direct3D 9 scene
+graph; ~90 engine RTTI classes). A single abstract refcounted base, `GObject`, anchors the
+hierarchy `GObject → GNode → GGroup → {GScene, GTransform, GGeode, GSwitch, GLight, …}`, with
+`GViewPlatform` branching off `GNode`. **Every** Diamond class (render-state `GRS*`, UI `GU*`,
+pipeline, asset, camera families) begins with the same head:
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 4 | void** | `vtable` | Installed by each constructor; the abstract base's slot 0 is a pure-virtual stub. |
+| +0x04 | 4 | uint32 | `ref_count` | Intrusive reference count, initialised to 0. `ref()` = inlined increment; `unref()` = assert-non-zero then decrement. |
+| +0x08 | 0x1C | std::string | `name` | Object name; the constructor allocates, the destructor frees. |
+| +0x3C | 0x0C | std::vector<node*> | `parents` | Parent back-reference vector (introduced at the `GNode` level): begin / end / capacity. |
+| +0x4C | 0x0C | std::vector<node*> | `children` | Child vector (introduced at the `GGroup` level): begin / end / capacity. `addChild` `ref()`s the child and pushes it; `removeChild` `unref()`s and erases. |
+
+**Refcount mechanism (OpenSceneGraph "Referenced" pattern).** `ref()` is an inlined increment of
++0x04 performed when a child is added; `unref()` is a dedicated routine that asserts `ref_count`
+is non-zero before decrementing. There is **no AddRef / Release vtable slot** — these are
+non-virtual operations on +0x04.
+
+**Destruction.** Virtual-table slot 0 is the MSVC "vector deleting destructor": it takes a flags
+byte, runs the real destructor body, then frees the object when `(flags & 1)`. So `delete obj`
+runs the destructor chain (derived → base, each releasing its owned children) then frees the
+`operator new` heap block.
+
+**Ownership.** `GGroup` / `GNode` hold the child vector and free children **by refcount**: a child's
+vector-deleting destructor is invoked only when its `ref_count` reaches 0. Parent back-references
+live in the separate `parents` vector (+0x3C).
+
+**`GGroup` virtual interface (slot roles, neutral).** Slot 0 = vector-deleting destructor; a
+`removeAllChildren` slot (unref + detach each); an `addChild` slot (ref the child, register the
+parent, push); a `removeChild` slot (find, unregister the parent, unref, erase); and a
+bounds/dirty-flag propagation slot that walks the **parent** chain via a flags byte at **+0x38**
+(this dirty-flag byte is **not** the refcount).
+
+**`GViewPlatform`** is a `GNode` subclass with object size **0x54 (84 bytes)**; `GScene` / `GGroup`
+share the same +0x00 / +0x04 / +0x08 head as above.
+
+> **Allocator note.** All Diamond and gameplay objects are allocated via plain CRT
+> `operator new → malloc → HeapAlloc` on the process heap — there is **no** custom game pool /
+> arena / free-list; placement-`new` appears only as STL in-place construction. (See
+> `specs/client_architecture.md §1A.6`.)
 
 ### 3.1 GameState — 16 bytes (CODE-CONFIRMED)
 
@@ -749,6 +795,14 @@ at nearly every level of the call graph; they are infrastructure, not domain log
 
 The following information is **new** with respect to the currently committed spec set:
 
+- **(2026-06-20 CYCLE 7, new)** The **Diamond base-object layout** (§3.0): the shared
+  vtable(+0x00) / `ref_count`(+0x04) / `name`(+0x08) head, the `GNode` parent vector (+0x3C) and
+  `GGroup` child vector (+0x4C), the intrusive-refcount mechanism, the vector-deleting-destructor at
+  vtable slot 0, owner-frees-children-by-refcount, and the CRT-only allocator model — supersedes any
+  prior "object lifecycle: NONE" statement.
+- **(2026-06-20 CYCLE 7, resolved)** Display FRAMERATE config inertness (§16) is now CODE-CONFIRMED
+  (statically exhaustive: the config field has two references, both stores) — the 60 FPS cap is
+  hardcoded / config-inert, no longer capture/debugger-pending.
 - Exact object sizes for the singletons (NetClient 82 368, FrameTickScheduler 72 068,
   NetHandler 6 220, etc.) — not previously documented in any committed spec.
 - **(2026-06-16 re-verification, new)** `MainWindow` ("MainMaster") and `MainHandler` are **two
@@ -865,12 +919,15 @@ The following information is **new** with respect to the currently committed spe
     and total sizes are CODE-CONFIRMED; the inner offsets are carried forward as (static-hypothesis)
     and should be re-walked from the respective init/constructor routines.
 
-16. **Display FRAMERATE config inertness (capture/debugger-pending).** The per-frame loop is
-    software frame-capped at a fixed 60 FPS (the rate lives in the engine object's framerate field,
-    seeded to 60.0f in the engine constructor and never overwritten; a QPC-measured limiter sleeps
-    each iteration to hold the target period). Static analysis finds **no consumer** that routes the
-    display-config FRAMERATE value into the throttle — i.e. it appears inert and the cap is
-    effectively hardcoded 60 FPS. Whether the display FRAMERATE config is *truly* inert at runtime
-    needs debugger confirmation (capture/debugger-pending). The driver loop has four phases
-    (message-pump+input / scene-render+present / round-robin tick-scheduler / frame-throttle); the
-    behavioural detail is owned by `specs/game_loop.md`.
+16. **Display FRAMERATE config inertness — RESOLVED (CODE-CONFIRMED, CYCLE 7 2026-06-20).** The
+    per-frame loop is software frame-capped at a fixed 60 FPS: the rate lives in the engine driver
+    object's framerate field, **seeded once to 60.0f in the engine constructor and never
+    overwritten**; a performance-counter-measured limiter sleeps each iteration to hold the target
+    period (`Sleep((1/rate − dt) × 1000 ms)`, i.e. a ~16.67 ms/frame budget — an upper cap only, so
+    busy frames run uncapped). The `DISPLAY_FRAMERATE` value read from the display config is parsed
+    and stored into a field of the renderer/display singleton that **has no reader**: a statically
+    **exhaustive** search of that field's address finds exactly two references and **both are
+    stores** (the ctor zero-init and the config parse). The throttle therefore never consults the
+    config value — the cap is confirmed **hardcoded 60 FPS / config-inert** (no longer pending). The
+    driver loop has four phases (message-pump+input / scene-render+present / round-robin
+    tick-scheduler / frame-throttle); the behavioural detail is owned by `specs/game_loop.md`.

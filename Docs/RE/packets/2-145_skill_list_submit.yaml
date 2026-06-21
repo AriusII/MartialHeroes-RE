@@ -1,0 +1,47 @@
+# spec: Docs/RE/packets/2-145_skill_list_submit.yaml
+# Role: C2S skill-list submit — count-prefixed [u32 N][12B record x N].
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.
+
+name: CmsgSkillListSubmit
+opcode: 0x20091           # major 2 (GameAction), minor 145 -> (2 << 16) | 145
+direction: C2S
+size: var                 # [u32 count][12-byte record x count] (variable), count <= 40
+spec: packets/2-145_skill_list_submit.yaml
+status: hypothesis
+capture_verified: false
+
+summary: Skill-list submit. Submits a confirmed list of skill records from the skill-confirm panel. A u32 record count followed by that many fixed 12-byte records.
+
+# Wire order, offset 0 = first payload byte. Pack=1. VARIABLE: count-prefixed records.
+fields:
+  # --- fixed prefix (4 bytes) ---
+  - { name: Count, type: u32 }   # 0x00  record count N (number of 12-byte records that follow), N <= 40
+  # --- repeated record (12 bytes), Count times, starting at 0x04 ---
+  - { name: Record, type: "u8[12]" }   # +0x00 (within record)  opaque 12-byte skill record [capture/debugger-pending]
+
+notes: |
+  CONTROL-FLOW CONFIRMED variable shape: a u32 count, then Count fixed 12-byte records appended in a
+  loop (blitted verbatim from the caller's array, 12-byte stride). NOT a fixed 16-byte body — the
+  census's static "16" was the count + first record only. The field VALUES are static inferences
+  (capture-pending).
+
+  FIXED PREFIX (4 bytes):
+    0x00 (4B) Count : the number of 12-byte records that follow (N, observed bound <= 40).
+
+  REPEATED RECORD (12 bytes each, Count times, base 0x04):
+    +0x00 (12B) Record : an opaque 12-byte skill record blitted verbatim from the caller array.
+                         Likely [u32 skill/slot id][u32 level/value][u32 aux] — to confirm against
+                         the caller's array build. [capture/debugger-pending]
+
+  CORRECTION: the c2s_builder_census recorded a static size of 16 for 2/145. The binary refutes a
+  fixed body — 2/145 is count-prefixed variable, same idiom as 2/120. Size = var.
+
+  TRIGGER: the skill-confirm panel — the user confirms a list of skill records; the builder writes
+  the count and loops emitting one 12-byte record per confirmed skill.
+
+  UNKNOWNS to resolve with a capture:
+    - the per-record inner layout;
+    - the inbound reply opcode (likely a skill-apply result in the skills family) — pending.
+
+  UNBLOCKS: Client.Application skill-list submit use-case (variable-length send).

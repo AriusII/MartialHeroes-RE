@@ -96,8 +96,10 @@ specialist as an open item, minted later via `kit-author`). "Route a phase here 
 | Domain | Tier-2 captain | Representative Tier-3 workers | Key skills | Route here when… |
 |---|---|---|---|---|
 | **RE (dirty→spec + IDB legibility)** | `re-orchestrator` | `re-function/protocol/crypto/struct/asset-format-analyst`, `ida-toolsmith` (IDB annotate) → bridge `spec-author`; confirm `re-validator` | `ida-mcp-connect`, `ida-explore`, `ida-annotate`, `re-promote` | a behavior/format/opcode/struct is **not yet in the committed specs** and must be recovered from the binary then promoted, OR the **IDB itself** needs legible names/comments/types |
-| **C#/Godot Porting** | `port-orchestrator` | `network-engineer` (02), `assets-engineer` (03), `core-engineer` (04), `dotnet-foundation-engineer` (01+cross), `godot-world/ui-engineer`, `godot-character-specialist`, `code-reviewer`, `test-engineer`, `render-reviewer` | `dotnet-build-test`, `packet-codegen`, `pak-explore`, `godot-run-headless`, `godot-fidelity-check`, `clean-room-check` | the deliverable is **engine-free core code** (layers 01–04) or **layer-05 presentation/fidelity**, read from committed specs |
-| **Planning / Kit** | `planning-orchestrator` | `requirement-analyst`, `todo-architect`, `knowledge-gap-detector`, `plan-reviewer`, `kit-author`, `tooling-auditor` | `plan-campaign`, `clean-room-check` | the phase is **planning/decomposition**, a **knowledge-gap** sweep, a **gate** (build/test/firewall/DAG via `code-reviewer`/`tooling-auditor`), or it changes the **`.claude/` kit** itself |
+| **C# Porting (layers 00→04 + Tools, NO Godot)** | `csharp-port-orchestrator` | `dotnet-foundation-engineer` (01+cross), `network-engineer` (02), `assets-engineer` (03), `core-engineer` (04), `code-reviewer`, `test-engineer` | `dotnet-build-test`, `packet-codegen`, `pak-explore`, `scaffold-project`, `csharp-tooling`, `clean-room-check` | the deliverable is **engine-free core code** (layers 00–04) or a Tools project, read from committed specs |
+| **Godot (layer 05 only + godot MCP)** | `godot-orchestrator` | `godot-world-engineer`, `godot-ui-engineer`, `godot-character-specialist`, `render-reviewer` (+ shared `code-reviewer`) | `godot-run-headless`, `godot-scene-author`, `godot-fidelity-check`, `godot-mcp-connect`, `asset-chain-trace` | the deliverable is **layer-05 presentation/fidelity** (terrain/world, HUD/menus, skinning/motion), read from committed specs |
+| **Documentation & Tooling** | `docs-tooling-orchestrator` | `docs-engineer`, `tooling-engineer`, `kit-author`, `tooling-auditor` | `doc-authoring`, `python-tooling`, `csharp-tooling`, `preservation`, `memory-curate` | the phase authors/maintains **docs**, builds/maintains **tooling** (parsers, scripts), or changes the **`.claude/` kit** itself |
+| **Planning** | `planning-orchestrator` | `requirement-analyst`, `todo-architect`, `knowledge-gap-detector`, `plan-reviewer` | `plan-campaign`, `clean-room-check` | the phase is **planning/decomposition**, a **knowledge-gap** sweep, or a plan/doc **review gate** (via `plan-reviewer`) |
 
 **Two-levels-max (hard).** Tier-1 → Tier-2 → Tier-3; a Tier-2 never spawns another Tier-2
 (`CAMPAIGN_TEMPLATE` §2.2). The plan **names** the lane captains for **Tier-1 to invoke after
@@ -156,7 +158,7 @@ Output: `Docs/RE/_dirty/<area>/*.md` ONLY. Ledger: one writer per `_dirty/<area>
 Master synthesis written LAST (barrier). Tier-1 post-promotion (serialized): firewall scan · opcode
 reconcile · names.yaml · journal.md.
 
-## Phase <N>-E — ENGINEERING (clean room) — driven by <C# / Godot captain>
+## Phase <N>-E — ENGINEERING (clean room) — driven by <csharp-port-orchestrator and/or godot-orchestrator>
 One engineer per project per stage. Stage A contracts → Stage B components → Stage C integration; ∥ tests.
 **E EXIT:** build 0/0 · DAG clean · constants cited (`// spec: …`) · tests green · headless boot clean.
 
@@ -165,8 +167,8 @@ One engineer per project per stage. Stage A contracts → Stage B components →
 |---|------|-------|-------------|
 | T1 | <new skill / agent / parser> | <agent> | <deliverable> |
 
-## Phase <N>-R — REVIEW + FIX + GATES — driven by quality-gate-orchestrator
-4 read-only reviewers (render / C# / clean-room / architecture) → confirm → fix wave (one scope each) → gates.
+## Phase <N>-R — REVIEW + FIX + GATES — driven by csharp-port-orchestrator / godot-orchestrator (their reviewers)
+Read-only reviewers — `code-reviewer` (C# correctness/perf/DAG/clean-room firewall) · `render-reviewer` (Godot 1:1 fidelity) · `test-engineer` (xUnit + build) → confirm → fix wave (one scope each) → gates.
 **FINAL GATE:** build 0/0 (--no-incremental) · all suites green · firewall PASS.
 
 ## Phase <N>-C — CONSOLIDATION

@@ -4,9 +4,10 @@
 Stdlib-only. Walks the repo, reads every MartialHeroes.*.csproj, extracts its
 <ProjectReference Include="..."/> edges, and asserts that the resulting graph:
 
-  1. matches the intended dependency DAG exactly (no missing, no unexpected edges),
-  2. is strictly downward (a lower-numbered layer never references a higher one,
-     and intra-layer references respect the established sub-order),
+  1. references only KNOWN projects (every node is in the layer map),
+  2. is strictly downward -- a lower-numbered layer never references a higher
+     one, and intra-layer references respect the established sub-order
+     (a project may only reference a peer with a STRICTLY lower sub-order),
   3. is acyclic,
   4. never names the transport project ".Pipe" -- the real project is
      "Network.Transport.Pipelines".
@@ -17,9 +18,23 @@ Usage:
 REPO_ROOT defaults to the current working directory. Exit code 0 on success;
 non-zero on any drift, with a human-readable diff printed to stdout.
 
-This intentionally only governs ProjectReference edges between the 12 core class
-libraries. Client.Godot (layer 05) is owned by the godot-csproj-bootstrap skill
-and is ignored here. Package references are out of scope.
+Scope: governs the ProjectReference edges between the core class libraries
+(layers 01-04). Client.Godot (layer 05) is owned by the godot-csproj-bootstrap
+skill and is not *scanned* -- but it remains a valid *target* (layer 5) so that
+any core->Godot edge is caught as upward. Package references are out of scope.
+The 00.SourcesGenerators Roslyn analyzers sit at layer 0 (referenced only as
+analyzers; every analyzer edge into them is downward). The Tools/ CLI utilities
+are leaf CONSUMERS at a band above the core (layer 6): they reference down into
+the libraries and nothing in the core references them.
+
+Model: CAMPAIGN "STRICT 1:1 RECONSTRUCTION" re-architected the 12-project graph
+into the maximal 34/35-project graph (Docs/ARCHITECTURE_TARGET.md). Rather than
+hand-maintain an exact intended edge-set per project across a multi-wave reorg,
+this checker enforces the load-bearing INVARIANTS (downward-only by layer +
+sub-order, acyclic, known-projects-only, no ".Pipe") which are stable regardless
+of which precise downward edges a wave wires. Unused/redundant downward edges are
+pruned in the Phase-4 quality pass (build-level unused-reference detection), not
+here.
 """
 
 from __future__ import annotations
@@ -30,74 +45,118 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# --- The intended graph -----------------------------------------------------
+# --- The target graph: layer + intra-layer sub-order per project ------------
 # Keys are short project names (the "MartialHeroes." prefix is implied).
-# Values are the set of short names each project is allowed to reference.
-# Anything not listed here must have NO ProjectReferences.
+# An edge src -> dst is legal iff LAYER[dst] < LAYER[src], OR
+# (LAYER[dst] == LAYER[src] AND SUBORDER[dst] < SUBORDER[src]).
+# Anything referenced but absent from this map is an "unknown project" error.
 
-INTENDED: dict[str, set[str]] = {
-    # 01.Infrastructure.Shared
-    "Shared.Kernel": set(),
-    "Shared.Diagnostics": set(),
-    # 02.Network.Layer
-    "Network.Abstractions": {"Shared.Kernel"},
-    "Network.Protocol": {"Shared.Kernel"},
-    "Network.Crypto": {"Shared.Kernel"},
-    "Network.Transport.Pipelines": {"Network.Abstractions"},
-    # 03.Storage.Assets
-    "Assets.Vfs": set(),
-    "Assets.Parsers": {"Assets.Vfs"},
-    "Assets.Mapping": {"Assets.Parsers"},
-    # 04.Client.Core
-    "Client.Domain": {"Shared.Kernel"},
-    # Application IS the packet-handling + login layer: its handlers consume the
-    # wire structs/opcodes (Network.Protocol) and its login flow consumes the
-    # session handshake (Network.Crypto). Both edges are downward (4->2) and
-    # acyclic -- accepted as legitimate by-design edges (CAMPAIGN 11 Phase 3b,
-    # "accept + document"; see CLAUDE.md architecture section).
-    "Client.Application": {"Client.Domain", "Network.Abstractions", "Network.Protocol", "Network.Crypto"},
-    # Infrastructure builds the local catalogues from the binary data tables: it
-    # reads decoded records (Assets.Parsers) off the VFS (Assets.Vfs). Both edges
-    # are downward (4->3) and acyclic -- accepted as legitimate by-design edges
-    # (CAMPAIGN 11 Phase 3b).
-    "Client.Infrastructure": {"Client.Application", "Assets.Parsers", "Assets.Vfs"},
-}
-
-# Layer number per project, used for the downward-only check. Within a layer,
-# ties are broken by ORDER (a lower order may not reference a higher order).
 LAYER: dict[str, int] = {
+    # 00.SourcesGenerators (Roslyn analyzers; layer 0 -- referenced only as analyzers, downward by all)
+    "Network.Protocol.Generators": 0,        # PacketRouter source-gen
+    "Shared.Kernel.Generators": 0,           # [StronglyTypedId] source-gen
+    # 01.Infrastructure.Shared
     "Shared.Kernel": 1,
     "Shared.Diagnostics": 1,
+    # 02.Network.Layer
     "Network.Abstractions": 2,
-    "Network.Protocol": 2,
     "Network.Crypto": 2,
+    "Network.Protocol.Core": 2,              # frame header, opcode attr, router base, enums
+    "Network.Protocol.Packets.Login": 2,     # major 0/1/3 structs
+    "Network.Protocol.Packets.World": 2,     # major 4/5/6 structs
+    "Network.Protocol.Packets.Social": 2,    # major 2 + social/trade/guild structs
     "Network.Transport.Pipelines": 2,
+    "Network.Protocol.Routing": 2,           # hosts the generated router (sees all packets); optional per source-gen resolution
+    # 03.Storage.Assets
     "Assets.Vfs": 3,
-    "Assets.Parsers": 3,
+    "Assets.Parsers.Core": 3,                # LenStrReader, Vec2/Vec3/Quat primitives
+    "Assets.Parsers.Mesh": 3,
+    "Assets.Parsers.Terrain": 3,
+    "Assets.Parsers.Character": 3,
+    "Assets.Parsers.DataTables": 3,
+    "Assets.Parsers.Effects": 3,
+    "Assets.Parsers.World": 3,
+    "Assets.Parsers.Audio": 3,
+    "Assets.Parsers.Texture": 3,
     "Assets.Mapping": 3,
-    "Client.Domain": 4,
+    # 04.Client.Core
+    "Client.Domain.Stats": 4,
+    "Client.Domain.Simulation": 4,
+    "Client.Domain.Progression": 4,
+    "Client.Domain.Quests": 4,
+    "Client.Domain.Social": 4,
+    "Client.Domain.Skills": 4,
+    "Client.Domain.Inventory": 4,
+    "Client.Domain.Actors": 4,
+    "Client.Application.Contracts": 4,
     "Client.Application": 4,
+    "Client.Presentation": 4,                # engine-free presentation lib (NO using Godot;)
     "Client.Infrastructure": 4,
+    # 05.Presentation (not scanned -- see IGNORED_PROJECTS -- but a valid target)
+    "Client.Godot": 5,
+    # Tools/ (CLI utilities; leaf CONSUMERS above the core -- reference down, referenced by none)
+    "Tools.AssetChainTrace": 6,
+    "Tools.AssetProbe": 6,
+    "Tools.PacketInspect": 6,
+    "Tools.VfsExplorer": 6,
 }
 
 # Intra-layer sub-order: a project may only reference a peer with a STRICTLY
-# lower order value (so Parsers->Vfs is fine, Vfs->Parsers is upward).
+# lower sub-order value (so Parsers.Mesh->Parsers.Core is fine; the reverse is
+# upward). Equal sub-order means "no reference allowed between them".
 SUBORDER: dict[str, int] = {
+    # 00
+    "Network.Protocol.Generators": 0,
+    "Shared.Kernel.Generators": 0,
+    # 01
     "Shared.Kernel": 0,
     "Shared.Diagnostics": 1,
-    "Network.Abstractions": 0,
-    "Network.Protocol": 0,
-    "Network.Crypto": 0,
-    "Network.Transport.Pipelines": 1,
+    # 02
+    "Network.Abstractions": 1,
+    "Network.Crypto": 1,
+    "Network.Protocol.Core": 1,
+    "Network.Protocol.Packets.Login": 2,
+    "Network.Protocol.Packets.World": 2,
+    "Network.Protocol.Packets.Social": 2,
+    "Network.Transport.Pipelines": 2,
+    "Network.Protocol.Routing": 3,           # above the packet families it composes
+    # 03
     "Assets.Vfs": 0,
-    "Assets.Parsers": 1,
-    "Assets.Mapping": 2,
-    "Client.Domain": 0,
-    "Client.Application": 1,
-    "Client.Infrastructure": 2,
+    "Assets.Parsers.Core": 1,
+    "Assets.Parsers.Mesh": 2,
+    "Assets.Parsers.Terrain": 2,
+    "Assets.Parsers.Character": 2,
+    "Assets.Parsers.DataTables": 2,
+    "Assets.Parsers.Effects": 2,
+    "Assets.Parsers.World": 2,
+    "Assets.Parsers.Audio": 2,
+    "Assets.Parsers.Texture": 2,
+    "Assets.Mapping": 3,                      # above the parser families it converts
+    # 04
+    "Client.Domain.Stats": 0,
+    "Client.Domain.Simulation": 0,
+    "Client.Domain.Progression": 0,
+    "Client.Domain.Quests": 0,
+    "Client.Domain.Social": 0,
+    "Client.Domain.Skills": 1,               # -> Stats
+    "Client.Domain.Inventory": 1,            # -> Stats
+    "Client.Domain.Actors": 1,               # -> Stats, Simulation
+    "Client.Application.Contracts": 2,       # -> selected Domain aggregates
+    "Client.Application": 3,                  # -> Contracts, Domain, (down to layer 02 network)
+    "Client.Presentation": 4,                # -> Contracts, (down to layer 03 Mapping/Parsers read-models)
+    "Client.Infrastructure": 5,              # -> Application, (down to layer 03 Parsers/Vfs)
+    # 05
+    "Client.Godot": 0,
+    # Tools
+    "Tools.AssetChainTrace": 0,
+    "Tools.AssetProbe": 0,
+    "Tools.PacketInspect": 0,
+    "Tools.VfsExplorer": 0,
 }
 
-# Project layer 05 (Godot) is deliberately excluded from this checker.
+# Layer 05 (Godot) is not scanned as a source (its csproj is owned elsewhere and
+# legitimately holds the documented 05->02 transport + 05->04.x presentation
+# edges, which this checker does not police). It stays a valid reference TARGET.
 IGNORED_PROJECTS = {"Client.Godot"}
 
 PREFIX = "MartialHeroes."
@@ -105,7 +164,7 @@ PREFIX = "MartialHeroes."
 
 def short_name(csproj_path: Path) -> str:
     """'.../MartialHeroes.Network.Crypto.csproj' -> 'Network.Crypto'."""
-    stem = csproj_path.stem  # MartialHeroes.Network.Crypto
+    stem = csproj_path.stem
     if stem.startswith(PREFIX):
         return stem[len(PREFIX):]
     return stem
@@ -114,10 +173,11 @@ def short_name(csproj_path: Path) -> str:
 def find_csprojs(root: Path) -> list[Path]:
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        # Skip build artefacts and editor caches.
+        # Skip build artefacts, editor caches, and the tooling/quarantine trees
+        # (the .claude/.agents skill harnesses are not "MartialHeroes.*" anyway).
         dirnames[:] = [
             d for d in dirnames
-            if d not in {"bin", "obj", ".git", ".godot", "_dirty"}
+            if d not in {"bin", "obj", ".git", ".godot", "_dirty", ".claude", ".agents"}
         ]
         for fn in filenames:
             if fn.startswith(PREFIX) and fn.endswith(".csproj"):
@@ -134,7 +194,6 @@ def parse_references(csproj_path: Path) -> set[str]:
         print(f"  ! cannot parse {csproj_path}: {exc}")
         return refs
     root = tree.getroot()
-    # csproj has no XML namespace under the modern SDK, but be defensive.
     for el in root.iter():
         tag = el.tag.split("}")[-1]  # strip any namespace
         if tag != "ProjectReference":
@@ -142,7 +201,6 @@ def parse_references(csproj_path: Path) -> set[str]:
         include = el.get("Include")
         if not include:
             continue
-        # Normalise Windows/Unix separators, take the file name.
         norm = include.replace("\\", "/")
         name = Path(norm).stem
         refs.add(name[len(PREFIX):] if name.startswith(PREFIX) else name)
@@ -160,7 +218,7 @@ def has_cycle(graph: dict[str, set[str]]) -> list[str] | None:
         stack.append(node)
         for nxt in graph.get(node, set()):
             if nxt not in color:
-                continue  # edge to something outside the core graph
+                continue  # edge to something outside the scanned graph
             if color[nxt] == GRAY:
                 idx = stack.index(nxt)
                 return stack[idx:] + [nxt]
@@ -218,43 +276,39 @@ def main(argv: list[str]) -> int:
         )
         errors.extend(f"    {h}" for h in pipe_hits)
 
-    # --- Presence: every intended project should exist on disk ---------------
-    for name in INTENDED:
-        if name not in actual:
-            warnings.append(f"  intended project not found on disk: {PREFIX}{name}")
-
-    # --- Edge comparison + downward-only check -------------------------------
-    for name, refs in sorted(actual.items()):
-        intended = INTENDED.get(name)
-        if intended is None:
-            warnings.append(
-                f"  unknown core project '{name}' (not in intended graph); "
-                f"references: {sorted(refs)}"
-            )
+    # --- Presence: every mapped (non-ignored) project should exist on disk ----
+    for name in LAYER:
+        if name in IGNORED_PROJECTS:
             continue
+        if name not in actual:
+            warnings.append(f"  mapped project not found on disk: {PREFIX}{name}")
 
-        missing = intended - refs
-        extra = refs - intended
-        for m in sorted(missing):
-            errors.append(f"  MISSING edge: {name} -> {m}")
-        for e in sorted(extra):
-            # Classify the unexpected edge for a clearer message.
-            if e in LAYER and name in LAYER:
-                src_l, dst_l = LAYER[name], LAYER[e]
-                if dst_l > src_l:
-                    errors.append(
-                        f"  UPWARD edge (layer {src_l} -> {dst_l}): {name} -> {e}"
-                    )
-                elif dst_l == src_l and SUBORDER.get(e, 0) >= SUBORDER.get(name, 0):
-                    errors.append(
-                        f"  SIDEWAYS/UPWARD intra-layer edge: {name} -> {e}"
-                    )
-                else:
-                    errors.append(
-                        f"  UNEXPECTED edge (downward but not in DAG): {name} -> {e}"
-                    )
-            else:
-                errors.append(f"  UNEXPECTED edge: {name} -> {e}")
+    # --- Unknown scanned projects --------------------------------------------
+    for name in sorted(actual):
+        if name not in LAYER:
+            errors.append(
+                f"  UNKNOWN core project '{name}' (not in the layer map); "
+                f"add it to LAYER/SUBORDER or fix the name. refs: {sorted(actual[name])}"
+            )
+
+    # --- Edge legality: downward-only by layer + sub-order --------------------
+    for name, refs in sorted(actual.items()):
+        if name not in LAYER:
+            continue  # already reported as unknown
+        src_l, src_s = LAYER[name], SUBORDER.get(name, 0)
+        for dst in sorted(refs):
+            if dst not in LAYER:
+                errors.append(f"  edge to UNKNOWN project: {name} -> {dst}")
+                continue
+            dst_l, dst_s = LAYER[dst], SUBORDER.get(dst, 0)
+            if dst_l > src_l:
+                errors.append(f"  UPWARD edge (layer {src_l} -> {dst_l}): {name} -> {dst}")
+            elif dst_l == src_l and dst_s >= src_s:
+                errors.append(
+                    f"  SIDEWAYS/UPWARD intra-layer edge "
+                    f"(sub-order {src_s} -> {dst_s}): {name} -> {dst}"
+                )
+            # else: strictly downward -> legal
 
     # --- Acyclicity ----------------------------------------------------------
     cycle = has_cycle(actual)
@@ -275,8 +329,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     print(
-        f"\nOK: {len(actual)} core projects, graph matches the intended DAG, "
-        "acyclic, downward-only, no '.Pipe' naming."
+        f"\nOK: {len(actual)} core projects, graph downward-only "
+        "(by layer + sub-order), acyclic, no '.Pipe' naming."
     )
     return 0
 

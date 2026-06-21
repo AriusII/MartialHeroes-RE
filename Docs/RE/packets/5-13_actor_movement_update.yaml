@@ -12,6 +12,10 @@
 #   conflicts: CORRECTED -- payload @0x20 is NOT consumed as a speed scalar by the handler (interp
 #              speeds are internal constants keyed on distance/run-flag). The prior "SpeedScale@0x20"
 #              reading is UNSUPPORTED; @0x20 is now modelled as Reserved0x20 (role unconfirmed).
+#              CLARIFIED -- the consumer at THIS layer is an if-ladder (Sort discriminator, then
+#              binary MotionCode==5 and RunFlag==1 tests plus three squared-distance thresholds), NOT
+#              a single compiler jump table. The true jump table lives DOWNSTREAM in the idle-motion
+#              applier and is keyed on a client-side actor visual-state byte, not on any wire field.
 
 name: SmsgActorMovementUpdate
 opcode: 0x5000d              # major 5 (Push), minor 13 -> (5 << 16) | 13
@@ -50,14 +54,46 @@ notes: |
     0x08 (4B) yaw float -> yaw quaternion.
     0x0c (4B) / 0x10 (4B) current position X / Z as le f32. Y is not on the wire.
     0x14 (4B) / 0x18 (4B) destination X / Z as le f32.
-    0x1c (1B) run flag.
+    0x1c (1B) RunFlag (CONFIRMED at body offset 0x1C, u8). Tested as a binary RunFlag == 1; selects
+              the run vs walk interpolation-speed constant.
     0x20 (4B) Reserved0x20: this dword is WITHIN the 40-byte read but is NOT visibly consumed as a
               speed by the handler -- interpolation speeds are internal constants selected by
               distance and the run flag, not by this field. The prior "SpeedScale ~1.0" reading is a
               static guess that the read site does not support; modelled as reserved (role unconfirmed)
               until a capture proves it carries a value. CORRECTED.
-    0x24 (1B) motion code (==5 => snap).
+    0x24 (1B) MotionCode (CONFIRMED at body offset 0x24, u8). Statically tested ONLY as a binary
+              MotionCode == 5 (the instant-snap branch); no other per-value semantic is read here.
     0x26 (1B) stance byte.
-  UNKNOWNS to resolve with a capture:
+
+  CONSUMER BRANCH SHAPE (this layer is an IF-LADDER, not a jump table):
+    The movement handler dispatches via a cascade of binary tests, not a single compiler-generated
+    switch. The branch structure, in order:
+      1. Primary discriminator: Sort byte @ 0x00 (actor category) selects the interpolation path.
+      2. MotionCode @ 0x24 tested as == 5 -> instant-snap branch (teleport, no interpolation).
+      3. RunFlag @ 0x1C tested as == 1 -> selects the run-speed constant over the walk-speed constant.
+      4. Three squared-distance thresholds compare (dest - pos) squared magnitude against the
+         compiled constants 0.5, 40000, and 90000, driving the walk / run / idle / face-only choice.
+    There are roughly 7 terminal roles the ladder resolves to:
+      - snap (instant position set, MotionCode == 5),
+      - set-position (place at the given position outright),
+      - snap-then-idle (snap into place, then settle to idle),
+      - run-interpolate (move toward destination at the run-speed constant),
+      - walk-interpolate (move toward destination at the walk-speed constant),
+      - face-only (rotate to face the destination without translating),
+      - drop (no actionable change; the update is discarded).
+
+  INTERPOLATION SPEEDS ARE COMPILED-IN, NOT ON THE WIRE:
+    The two interpolation speeds (1.5 and 3.0) are compiled-in constants, selected by the
+    squared-distance thresholds together with RunFlag -- there is NO wire speed scalar. This
+    corroborates the Reserved0x20 correction above: @0x20 is not a speed.
+
+  TRUE JUMP TABLE IS DOWNSTREAM (and not wire-keyed):
+    The only genuine compiler jump table in this flow lives DOWNSTREAM, in the idle-motion applier.
+    It is keyed on a CLIENT-SIDE actor visual-state byte (6 cases) -- a derived runtime state, NOT a
+    field carried by this packet. Do not model it as part of the wire layout.
+
+  live-pending (6-D):
+    - MotionCode VALUE -> animation mapping: statically MotionCode is used ONLY as == 5 (snap); any
+      other per-value animation/action semantic is unconfirmed and awaits a capture/debugger pass.
     - whether the three Pad* regions carry real data or are true filler.
     - whether Reserved0x20 carries any value at all (it is not read as a speed by the handler).

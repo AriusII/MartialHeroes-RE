@@ -15,13 +15,28 @@
 >   ownership on the drawable); *capture/debugger-pending* where a runtime witness is needed
 >   (billboard up-axis / handedness, matrix major-order, the on-screen diffuse colour given the
 >   B,G,R,A pack order).
-> - **ida_reverified:** 2026-06-16
+> - **ida_reverified:** 2026-06-21 (ASSET-FIDELITY: GPU-particle CPU-simulation model + 52-byte sub-record roles resolved, §11.3; CYCLE 7 runtime pool/trigger deep-dive 2026-06-20; prior 2026-06-16)
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the runtime claims here — every spot-checked runtime constant matches
 >   the binary. The one campaign9c correction (sub-effect offset Z-negation) is reclassified as a
 >   **port-side Godot convention only**, not an original behaviour (§8.2 step 8, §17.4); the
 >   `effectscale.xdb` open question (§14.9) is now **CLOSED** to REPLACE-at-parse.
+> - **CYCLE 7 (2026-06-20, IDB SHA 263bd994) runtime additions.** §4 rewritten: there is **NO single
+>   global active pool** — spawned XEffects insert into the **owner actor's per-effect doubly-linked
+>   list** (actor offset +0x240 = list head, +0x244 = allocator); a zero-lifetime effect self-destructs
+>   instead of listing. The two runtime subsystems are crisply distinguished (new §4A): the
+>   process-global `ParticleEffectManager` emitter **registry** (a draw `std::list` + an id-keyed
+>   `std::map`, FIRST-WINS on a duplicate entry id, no separate active pool) versus the fixed-capacity
+>   XEffect **pools**. Four pool-backed classes + two `XPObj` particle-wrapper element rings are
+>   tabulated with sizes (new §4B), each a fixed pre-sized block + a segmented-deque free-list that
+>   recycles without re-running the constructor. The XEFF→particle bridge (descriptor element XObjId
+>   ≥ 10000) and the shared vtable slot layout (slot1 = the central tick) are documented (§5.3, §8).
+>   JointXEffect bone-attach is refined (§9): TWO parallel managers (A/B), the on-object attach block
+>   (+0x58 actor-key, +0x5C/+0x5D bone-source A/B, +0x60 sub-index, +0x64 flags, +0x40 lifetime,
+>   +0x3C loop), the 20-slot/skip-8 per-actor attachment array at actor +0x0CC, and the composite-key
+>   categories (1, 15, 16). The numeric bone_source→bone-NAME mapping and the pool capacity counts
+>   remain **DBG-pending**.
 
 ---
 
@@ -33,7 +48,9 @@
 | Time base | Milliseconds from the engine wall clock (system timer, `ms` throughout). See §1. |
 | Class hierarchy | Recovered from RTTI strings and constructor call chains. See §2. |
 | Boot sequence | CODE-CONFIRMED; eight manifest files loaded in a fixed order. See §3. |
-| Object pools | CODE-CONFIRMED for three pools; fourth pool type UNRESOLVED. See §4. |
+| Two runtime subsystems | CODE-CONFIRMED — the process-global `ParticleEffectManager` emitter registry vs the fixed-capacity XEffect pools are distinct mechanisms. See §4A. (CYCLE 7) |
+| Object pools | CODE-CONFIRMED — **four** pool-backed effect classes (`XEffect` / `UserXEffect` / `JointXEffect` / `MapXEffect`) plus two `XPObj` particle-wrapper element rings (24-byte / 40-byte). The CYCLE-7 pass resolved the formerly "fourth UNRESOLVED" pool: it is `MapXEffect`. Pool capacity counts are DBG-pending. See §4, §4B. |
+| Per-actor effect list | CODE-CONFIRMED — spawned XEffects insert into the **owner actor's** doubly-linked list (actor +0x240), NOT a single global container; a zero-lifetime effect self-destructs. See §4, §5.2. (CYCLE 7) |
 | Spawn pathways | CODE-CONFIRMED for all three instance kinds. See §5. |
 | Per-frame tick | CODE-CONFIRMED (central dispatch function traced). See §8. |
 | Trigger table | CODE-CONFIRMED (all hard-coded effect IDs traced to network handlers). See §7. |
@@ -136,20 +153,46 @@ Same format as `itemswordlight.txt`. Mapped keyed by `mob_id`. See §12.
 
 ## 4. Object Pool Allocation
 
-**Confidence: CODE-CONFIRMED** for three pools; fourth pool class **UNRESOLVED**.
+**Confidence: CODE-CONFIRMED** (CYCLE 7 resolved the formerly-unknown fourth pool class as `MapXEffect`; pool **capacity counts** remain DBG-pending).
 
-Each live-effect class allocates from a fixed-size object pool. Objects are returned to the pool (not freed) on expiry; the destructor path returns the object to the pool only if setup fails (effect ID not found). Objects that successfully enter the active list are returned on expiry or when the list is flushed.
+Each live-effect class allocates from a fixed-size object pool. On a pool allocation, if a free element exists it is **recycled from the pool's free-list** (the allocator does **NOT** re-run the constructor on a recycled element); only when the free-list is empty does the pool cold-allocate the backing block. Objects are returned to the pool (not freed) on expiry; the setup/destructor path returns the object to the pool immediately if setup fails (effect id not found in the descriptor registry — see §5.1). Objects that successfully enter their owning actor's active list (§5.2) are returned on expiry or when the list is flushed.
 
-| Effect class | Pool | Notes |
-|---|---|---|
-| `MapXEffect` | Pool A | World-space effects |
-| `UserXEffect` | Pool B | Free-floating / actor-relative effects |
-| `JointXEffect` | Pool C | Bone-attached effects |
-| (Unknown class) | Pool D | Type unresolved; torn down at shutdown alongside the three known pools. Candidates: a local-player-only subtype or an absolute-world subtype. |
+> **CYCLE 7 correction — the four pool-backed classes are now all identified.** The earlier table
+> listed three concrete pools (`MapXEffect` / `UserXEffect` / `JointXEffect`) and a fourth
+> "(Unknown class) Pool D". The four pool-backed effect classes are now **`XEffect`** (the
+> world-positioned base), **`UserXEffect`** (owner/actor-anchored), **`JointXEffect`** (bone-attached),
+> and **`MapXEffect`** (map-ambient) — see the full family table in **§4B**. Two further pools hold the
+> `XPObj` particle-wrapper element rings (a 24-byte ring and a 40-byte ring), bringing the count of
+> pool globals torn down together at scene unload to six. An additional singleton
+> (`SwordLightManager`) is also torn down at the same shutdown point but belongs to the separate
+> sword-light sub-system (§12).
 
-An additional singleton (`SwordLightManager`) is also torn down at the same shutdown point but belongs to the separate sword-light sub-system (§12).
+Each pool is a **fixed pre-sized block + a segmented-deque free-list**: when the free-list is empty the allocator cold-allocates a block of `element_size × capacity` bytes and pushes every element pointer onto the deque free-list; subsequent allocations pop a recycled element and decrement the free count. The element size is therefore structurally load-bearing for the pool stride (e.g. the `UserXEffect` pool strides at 104 bytes; see §17.1, §4B). The **capacity** is a per-pool construction-time value, **not** an immediate visible in the allocator — read the live pool object to recover it (**DBG-pending**). CONFIRMED for the allocator algorithm and the family; DBG-pending for the capacity counts.
 
-The `UserXEffect` pool (Pool B) is a **fixed-block free-list pool**: when its free-list is empty it batch-allocates a block of `N` elements at the fixed element stride (104 bytes; see §17.1) and links them into the free-list, so the element size is structurally load-bearing for the pool. CONFIRMED.
+## 4A. The Two Runtime Subsystems — registry vs pools (CYCLE 7)
+
+**Confidence: CODE-CONFIRMED** (CYCLE 7). Two completely separate runtime subsystems are reached from "spawn an effect":
+
+**(1) `ParticleEffectManager` — the process-global named-emitter REGISTRY.** A single process-global singleton owns the particle-emitter registry loaded from the emitter manifest. The registry is **two views over the same long-lived records**: a `std::list` walked once per frame to draw every live emitter (in the transparent pass), and a `std::map` keyed by **entry id** for id→record lookup. There is **NO separate "active particle pool"** here — each registry entry **IS** a persistent emitter record that recycles its own internal particle ring in place. The effective "capacity" of this subsystem is therefore the **number of records in the emitter manifest** (data-driven, sample-dependent — DBG-pending), **not** a compiled constant. On a duplicate **entry id**, the registry is **FIRST-WINS**: the id-keyed insert is a lower-bound insert that only creates a node when the key is absent, so the first-loaded record for an id is kept and any later same-id record is left out. (This is the *runtime* consequence; the on-disk emitter record byte layout is owned by `formats/effects.md §E` — do not re-document it here.)
+
+**(2) The XEffect family — fixed-capacity object POOLS.** The per-actor / per-cast gameplay visual effects (`XEffect` / `UserXEffect` / `JointXEffect` / `MapXEffect`, plus the two `XPObj` particle-wrapper element rings) are pool-allocated (§4, §4B), configured by a spawn factory (§5), and inserted into the **owner actor's** effect list (§5.2) — this is the real "effect pool".
+
+The gameplay trigger → spawn → first-tick chain runs through subsystem (2). Subsystem (1) is reached from the XEffect family **only** through the **XEFF→particle bridge**: when a descriptor element's resource selector (`XObjId`) is **≥ 10000**, the first-tick builder wraps an `XPObj` and creates a particle emitter from the `ParticleEffectManager` registry; elements with `XObjId < 10000` use the internal XEffect particle ring instead. This `< 10000 / ≥ 10000` split is the only path from the XEffect pools into the `ParticleEffectManager`. (The element/threshold byte format is `formats/effects.md §A.12 / §A.14 / §E.4` — referenced here, not re-documented.)
+
+## 4B. The four pool-backed effect classes + the two XPObj rings (CYCLE 7)
+
+**Confidence: CODE-CONFIRMED** (RTTI class names + element sizes read directly; pool capacities DBG-pending).
+
+| Effect class (neutral RTTI name) | Element size | Spawn factory (role) | Role |
+|---|---:|---|---|
+| `XEffect` | **84 bytes (0x54)** | WorldPos factory | World-positioned timed FX; the base of the family. Its spawn factory pool-allocates the 84-byte element and runs the world-position-and-direction setup. |
+| `UserXEffect` | **104 bytes (0x68)** | Anchored factory | Owner / actor-anchored FX (also the looping cast-channel, §15.4). Extends `XEffect` with an anchor block at +84/+88/+92/+96/+100. |
+| `JointXEffect` | **104 bytes (0x68)** | two spawn tables A / B | Bone / joint-attached FX; follows an actor's skeleton bone each tick (§9, §17.4). |
+| `MapXEffect` | (deque; size not byte-pinned) | Ambient factory | Map-ambient / environment FX. The fourth pool, resolved in CYCLE 7 (was "Pool D unknown"). |
+| `XPObj` particle-wrapper ring | 24-byte ring elements | first-tick builder (`XObjId < 10000` path) | CPU particle-element ring used by the internal XEffect particle path. |
+| `XPObj` particle-wrapper ring (variant) | 40-byte ring elements | first-tick builder (`XObjId ≥ 10000` path) | Particle-element ring used on the GPU-particle bridge path. |
+
+Each class's vtable shares a fixed slot convention: **slot 0** = the destructor / cleanup (the arg-deleting destructor), **slot 1** = the **shared central tick/dispatch** (`XEffect_tickAndDispatch`, driven once per frame for every pooled effect — see §8), **slot 2** = the type-specific per-frame update. `UserXEffect`'s setup runs the base `XEffect` constructor, writes the extra anchor block, then swaps to the `UserXEffect` vtable; `JointXEffect`'s release-ctor installs its own vtable and re-registers the node into its manager free-pool. Two further classes in the same RTTI family — `XPObj` (the particle-element wrapper) and `CoreXEffect` (the parsed file-backed descriptor, §2) — exist but are not the four pool-backed gameplay classes above. CONFIRMED (RTTI strings + vtables + the alloc-immediate sizes).
 
 ---
 
@@ -173,9 +216,11 @@ All three spawn paths call the same **lazy-load resolver**. The resolver:
 3. If found but `CoreXEffect.loaded_flag` is clear → calls the load callback via the virtual dispatch table. This triggers the full element parse: reads all sub-effect elements, resolves textures, loads alpha and scale curves, and reads the keyframe array into heap-allocated arrays within the `CoreXEffect`. The parser reads the **first u32 of the file header as the `effect_id` directly** — the header is **id-first, NOT magic-prefixed**. A loader that begins the file with a literal `"XEFF"` ASCII magic is treated as an **error**: if that first u32 equals the little-endian value of the four bytes `"XEFF"`, the parser emits an "id error … maybe start with XEFF" diagnostic and aborts the parse. A faithful reimplementation must NOT expect or skip an `"XEFF"` magic; it must read the id-first header. (Block D owns the byte layout in `formats/effects.md §A.2`; this is the behavioural rejection rule.) CONFIRMED.
 4. On success → records the load timestamp in the `CoreXEffect`, applies the `effectscale.xdb` override as a REPLACE of `scale_default` (§14.9), and returns the descriptor pointer.
 
-### 5.2 Active-list management
+### 5.2 Active-list management — a per-actor list, not a single global pool (CYCLE 7)
 
-Active effect objects are stored in a linked list rooted at the effect manager. Insertion happens at the end of every successful factory call. On each draw frame, the manager iterates the list, calls the tick/dispatch function for each live instance, and removes expired instances (lifetime exhausted or descriptor pointer null). Removed instances are returned to their pool.
+**Confidence: CODE-CONFIRMED.** Active effect objects are stored in a **doubly-linked list owned by the OWNER ACTOR**, not in one global container. Every actor object holds its own list of live effects: the list head is at actor object offset **+0x240** and its node allocator at **+0x244**. The spawn factory, after a successful setup, **appends the armed effect to the owner actor's list** at +0x240 — **unless** the effect's effective lifetime is zero, in which case the factory immediately self-destructs the instance (returning it to its pool) rather than listing it. This is the "zero-lifetime one-shot self-destructs" rule.
+
+On each draw frame, the shared central tick (vtable slot 1, §8) iterates each owner's list, ticks every live instance, and removes expired instances (lifetime exhausted, descriptor pointer null, or — for `JointXEffect` — the bound actor gone). Removed instances are returned to their pool's free-list (the constructor is **not** re-run on a later recycle, §4). The full trigger → spawn → ctor → list-insert / self-destruct chain is documented in `specs/effect-scheduling.md §9` (the runtime trigger-dispatch spine).
 
 ---
 
@@ -202,10 +247,10 @@ All three concrete instance types share the base `XEffect` layout and extend it.
 
 | Offset | Type | Field | Notes |
 |---:|---|---|---|
-| +0x54 | u32 | Actor sort-id or world-space handle (`a3` at setup) | |
+| +0x54 | u32 | Actor sort-id or world-space handle (`actorSortId` setup arg) | |
 | +0x58 | u8 | Actor sort byte — distinguishes PC (1) from mob (2) and others | |
-| +0x5C | u32 | Actor id (`a5` at setup) | |
-| +0x60 | u8 | Flag parameter (`a6` at setup) — semantics unresolved | |
+| +0x5C | u32 | Actor id (`actorId` setup arg) | |
+| +0x60 | u8 | Flag parameter (`flag` setup arg) — semantics unresolved | |
 
 Note: the layout note in the dirty source observes that offset `+0x3C` is shared between the `loop_flag` (u8 low byte) and what may be a larger u32 lookup-result field. The safe read is to treat `+0x3C` as a u32 where the low byte encodes the loop flag, and the non-zero-ness of the whole dword is the validity indicator for the lookup result.
 
@@ -220,7 +265,7 @@ Note: the layout note in the dirty source observes that offset `+0x3C` is shared
 | +0x59 | u8 | `bone_source_enum` — how to locate the bone; see §9 | |
 | +0x5C | u32 | `bone_id_or_hint` — explicit bone index when `bone_source_enum` = 0 | |
 | +0x60 | u8 | `quat_source_enum` — which orientation quaternion to use; see §9 | |
-| +0x64 | u32 | Color / render parameter (`a11` at setup) — semantics unresolved | |
+| +0x64 | u32 | Color / render parameter (`colorParam` setup arg) — semantics unresolved | |
 
 ### 6.4 `MapXEffect` — additional fields
 
@@ -282,6 +327,29 @@ Two factory functions cover all dispatches. The table below lists every confirme
 | `EFFECT_ID_TRADE_TOGGLE` | 350000063 | Trade aura toggle |
 | `EFFECT_ID_PVP_STAND` | 371003701 | PvP death — stand-phase effect |
 | `EFFECT_ID_PVP_FALL` | 371003702 | PvP death — fall-phase effect |
+
+### 7.1 Trigger SITE families (CYCLE 7) — the handlers that call the spawn factories
+
+**Confidence: CODE-CONFIRMED** (backward call-site walk from the two spawn factories — the anchored factory has ~53 call sites, the world-position factory ~12). Every gameplay effect spawn originates from an S2C packet handler or an actor-visual refresh; **there is no direct "skill cast" call into the effect system**. The families (neutral names only):
+
+| Trigger family (neutral) | Effect role |
+|---|---|
+| Attack / skill-impact effect | melee/skill impact FX on cast or hit |
+| Item-use effect | item-use visual |
+| Item-use-result effect | item result FX |
+| Actor-state / buff / stance effect | state-driven FX (buff, stance) |
+| Level-up burst | level-up radiance |
+| Exp-gain effect | experience-gain FX |
+| Char / actor spawn-attached effect | appearance FX on spawn |
+| Char / actor death effect | death FX (incl. the PvP-death legs) |
+| Periodic / aura game-state-tick effect | recurring aura FX driven from the periodic game-state tick |
+| Billing-state visual | a billing/account-state visual cue |
+| Locomotion footfall dust | per-step ground dust |
+| Walk / run motion-tied effect | motion-state-tied FX |
+| Equip-buff visual overlays | equipment-driven buff visual overlays on the local player |
+| Per-frame weapon / joint-effect refresh | the per-frame attachment refresh that re-resolves bone-attached effects (§9) |
+
+**The indirect skill-cast path.** A skill cast reaches the effect system indirectly: the server pushes an attack/skill-action effect packet → the handler calls a spawn factory with the effect id taken **from the packet** → the factory resolves the descriptor through the XEffect descriptor registry (a sorted-map lower-bound lookup, lazy-loaded on first use, FIRST-WINS on a duplicate id — §5.1) → the first tick builds the per-element particle resources (and, for an element whose resource selector is ≥ 10000, bridges to the `ParticleEffectManager` registry, §4A). The cast-channel leg specifically is documented in §15.
 
 ---
 
@@ -425,6 +493,43 @@ On every tick, a `JointXEffect` executes:
 
 **Entry point B** — called from equip and actor-spawn paths. Iterates the `itemjointeff.txt` / `mobjointeff.txt` binding list for the given actor id; spawns one `JointXEffect` per record. Each record in those files: `[actor_id u32][effect_id u32][bone_id u32][bone_source u32][scale f32][flag u8]`.
 
+### 9.4 Two parallel JointXEffect managers + the on-object attach block (CYCLE 7)
+
+**Confidence: STRUCTURE CODE-CONFIRMED; the numeric `bone_source` → bone-NAME mapping is DBG-pending.**
+
+There are **two parallel JointXEffect managers**, A and B. Each is a singleton holding a sorted map (id-keyed tree) keyed by an **actor composite-key**, mapping an actor to its set of bone-attached effect descriptors. The two managers carry **different descriptor record shapes**:
+
+| | Manager A | Manager B |
+|---|---|---|
+| Descriptor record | `effect_id` (u32) + **two** bone-source bytes (`boneSrcA`, `boneSrcB`) + `scale` (f32) + `flag` (byte) | `effect_id` (u32) + **one** bone-source byte + `scale` (f32) + `flag` (byte) |
+| Setup call | passes **both** bone sources | passes one bone source; the setup's **secondary** source is forced to **0** |
+
+Both managers spawn by allocating a `JointXEffect` node from the joint pool and calling the shared bone-attach setup, then inserting the node into the manager's list (or self-destructing it when the lifetime is zero, as in §5.2).
+
+**The attach/anchor block written on the `JointXEffect` object** (offsets into the live instance):
+
+| Offset | Field | Meaning |
+|---:|---|---|
+| +0x58 | `actor_composite_key` | the owner the effect attaches to |
+| +0x5C | `bone_source_A` (u8) | primary bone / attachment selector |
+| +0x5D | `bone_source_B` (u8) | secondary bone / attachment selector (0 for Manager B) |
+| +0x60 | `attach_sub_index` (int) | attach sub-index / parameter |
+| +0x64 | `attach_flags` (u8) | attach flags |
+| +0x40 | `lifetime` | `lifetime_arg + clock_ms` (the deadline; matches the §8.3 / scheduling `+64`-style convention) |
+| +0x3C | `loop_flag` (u8) | loop / persist flag |
+
+The per-frame **expiry match** in both managers tests `effect[+0x58] == actor_key && effect[+0x5C] == bone_source` — i.e. `+0x58` is the owner key and `+0x5C` the bone-source key used to address a specific attachment. (Note these CYCLE-7 attach-block offsets are the field-level companions to the +0x54/+0x58/+0x59/+0x5C/+0x60/+0x64 view in §6.3 and the overlay in `formats/effects.md §A.16.2`; both describe the same region of the same 104-byte instance.)
+
+**The engine-side attachment iteration** (the per-frame weapon/joint-effect refresh, §7.1 last row) walks a **per-actor attachment-slot array at actor object offset +0x0CC**: a pointer-stride (4-byte) array of **20 slots**, with **slot index 8 SKIPPED** (reserved, not joint-effect-driven). The refresh resolves owners through an actor-manager composite-key lookup and an appearance resolver, using these fixed **composite-key categories**:
+
+| Category constant | Use |
+|---:|---|
+| **1** | table-A / mount attach lookup |
+| **15** | table-B attach lookup |
+| **16** | appearance-resolve (the appearance/attachment category passed to the appearance resolver) |
+
+**The `bone_source` enum VALUES are data-driven, not a compiled switch.** The numeric bone-source bytes flow from (1) the joint-effect descriptor records (loaded from the joint-effect data manifest — format territory, `formats/effects.md`) and (2) the actor-appearance resolver, and they index the actor's live skeleton bones at draw time. The literal `bone_source` → bone-**NAME** mapping (e.g. which value means right-hand, root, etc.) is **NOT recoverable from static code** — it lives in the joint-effect manifest values plus the actor skeleton bone indexing, and is **DBG-pending** (a live breakpoint on the bone-attach setup, reading the two bone-source bytes and the resolved bone the JointXEffect update fetches, is required to enumerate the values in use). Confidence on the structure (two managers, two record shapes, +0x58/+0x5C/+0x5D attach block, the 20-slot/skip-8 array, the 1/15/16 categories): **High/CONFIRMED**. Confidence on the numeric value meanings: **DBG-pending**.
+
 ---
 
 ## 10. Damage-Number Renderer
@@ -477,6 +582,53 @@ It then:
 The `GParticleBuffer` is a Direct3D vertex buffer manager dedicated to particle geometry; it uses a prepare-and-lock mechanism. Error conditions include: "index lock failed" and "vertex lock failed" (confirmed from error strings in the binary read-only data section).
 
 The Campaign-5 pass adds that the start/stop of a GPU-particle component is gated by that component's **active-frame window**: entering the window starts the emitter, leaving it stops/destroys it. See §17.2.
+
+### 11.3 GPU-particle runtime simulation model (CODE-CONFIRMED, 2026-06-21)
+
+**Confidence: CODE-CONFIRMED** — the per-particle simulation kernel and the draw fill were read end
+to end statically; no debugger was required to settle the model. This closes the previously
+DBG-pending 52-byte sub-record roles (the field-role table is owned by `formats/effects.md §E.2.2`).
+
+**A GPU-particle emitter is a CPU-simulated, GPU-uploaded billboard system — not a keyframe sampler.**
+When a `.xeff` element bridges in (its `resource_id ≥ 10000`), the manager resolves the matching
+`particleEmitter.eff` entry by raw-id equality (§11.2) and builds a runtime emitter that holds **one
+particle per 52-byte sub-record**; the entry header's `num_frames` is therefore the **particle
+count**, not a timeline length. There is **no interpolation** between sub-records.
+
+**Runtime objects.** The emitter object carries: the resolved texture, the world origin, a per-emitter
+blend flag, and three parallel per-particle arrays sized by the particle count — a render-state array
+(current position, current size, current packed colour), a simulation-aux array (per-particle timers,
+velocity, a visible flag, and a link back to its sub-record and render-state), and a shared dynamic
+vertex buffer for the billboards. A thin GPU-particle wrapper (built on the `≥ 10000` arm of the
+first-tick bridge) carries the emitter pointer and re-pushes the emitter's world position each frame.
+
+**Per-particle simulation (the field roles in action).** At spawn, each particle takes its initial
+size, colour, position (offset by the emitter origin) and velocity from its sub-record, and arms its
+lifetime and spawn-delay timers. The simulation advances on a **fixed ~67 ms step** (≈15 Hz),
+accumulator-driven from the environment wall clock (the same fixed-step idiom the `.xeff` animation
+stride uses); leftover time is carried. On each active step a particle integrates by stepwise Euler:
+if its velocity-damping factor is non-zero the velocity is scaled by it, then position += velocity ×
+dt, size += size-rate × dt, and each colour channel += its **signed** per-second rate × dt, with alpha
+finally scaled by the global display-brightness option (`formats/effects.md §E.2.4`). A particle that
+is still in its spawn delay merely counts down; when its lifetime expires it **respawns** from the
+same sub-record (reset position/size/colour/velocity), unless the effect is one-shot, in which case
+it dies.
+
+**Update / draw decoupling.** The simulation runs in the world tick; drawing runs separately in the
+transparent pass, which walks the live emitters, sets the device blend mode from each emitter's blend
+flag (alpha-blend when the flag is zero, additive otherwise), then fills the dynamic vertex buffer.
+Each live particle is a **camera-facing billboard quad** (four vertices, the corner template at a
+half-extent of −0.5 rotated into camera space, scaled by half the particle's current size), with the
+particle's current colour copied into every vertex and fixed corner texture coordinates. Only
+contiguous runs of currently-visible particles are emitted. The billboard half-extent and the
+camera-facing build match §8.2 step 9.
+
+**Faithful re-implementation.** Drive each emitter as a CPU particle simulation with one particle per
+sub-record, the fixed ~67 ms step, the per-particle Euler integration above, lifetime-driven respawn,
+the per-emitter alpha-vs-additive blend choice, and camera-facing billboards. Do **not** interpolate
+between sub-records and do **not** size the rings by `max_particles` (size them by `num_frames`).
+The one residual DBG-pending item is whether the header's `max_particles` ever bounds the
+vertex/index-buffer capacity at runtime when it differs from `num_frames`.
 
 ---
 
@@ -553,9 +705,11 @@ is known) — a faithful port must reproduce the catalog to compute the mob/mugo
 
 ## 14. Open Questions
 
-1. **Fourth (and possibly sixth) effect pool class.** The fourth pool type was not identified from the traced class hierarchy; possible candidates are a local-player-only effect type or an absolute-world effect type. A search from the fourth pool's allocator function would recover the constructor and class name.
+1. **Fourth (and possibly sixth) effect pool class. — RESOLVED (CYCLE 7).** The fourth pool-backed class is **`MapXEffect`** (map-ambient FX); the four pool-backed classes are `XEffect` / `UserXEffect` / `JointXEffect` / `MapXEffect`, and the two further pools hold the `XPObj` particle-wrapper element rings (24-byte / 40-byte). See §4B. **Still DBG-pending:** the per-pool **capacity counts** (a construction-time value, not visible in the allocator) — read the live pool object to recover each integer.
 
-2. **`bone_source_enum` modes 1 and 2 (action tables A and B).** The tables themselves were not located or traced. They are likely per-action effect-slot tables inside the actor structure, possibly linked to animation event descriptors. Cross-reference with `specs/skinning.md` and the animation catalog for the bone-mapping tables. The Campaign-5 pass (§17.4) narrows this to an AnimCatalog weapon-hand slot lookup but does not resolve which slot means which hand/weapon — still open.
+2. **`bone_source_enum` modes / the numeric `bone_source` values (action tables A and B). — REFRAMED (CYCLE 7), DBG-pending.** CYCLE 7 resolved the *structure*: there are two parallel JointXEffect managers (A carries two bone-source bytes, B one), the attach block is written at +0x58/+0x5C/+0x5D/+0x60/+0x64 on the instance, and the engine attachment iteration walks a 20-slot/skip-8 array at actor +0x0CC using composite-key categories 1/15/16 (§9.4). What remains **DBG-pending** is the literal `bone_source` value → bone-**NAME** mapping: the numeric bytes are data-driven (joint-effect manifest + appearance resolver + skeleton bone indexing), not a compiled switch, so static code cannot name them. Breakpoint the bone-attach setup on a live cast, read the two bone-source bytes and the resolved bone the JointXEffect update fetches, to enumerate the values in use. Cross-reference `specs/skinning.md` and the animation catalog. The Campaign-5 pass (§17.4) narrows mode 1 to an AnimCatalog weapon-hand slot lookup but does not resolve which slot means which hand/weapon — still open.
+
+2b. **Pool capacities, emitter record count, and lazy-load timing (CYCLE 7, DBG-pending).** Three runtime witnesses are needed: (a) the six pool capacity counts (per-pool construction value, §4 / §4B); (b) the `ParticleEffectManager` registry size = the number of records in the emitter manifest (data-driven / sample-dependent, §4A); (c) the lazy-load timing of the XEffect descriptor registry (the first-spawn parse). All require reading the live runtime state.
 
 3. **Per-frame bone world-position read offset.** The byte offset of the bone's world-space position within the actor's skeleton transform array was not isolated in this pass. Engineers implementing bone attachment should reference `specs/skinning.md` for the confirmed bone-world-transform layout. The Campaign-5 pass (§17.4) observes the runtime reads the bone world translation from the bone matrix's translation row and a quaternion adjacent to it; reconcile the exact slot indices with the skinning lane.
 
