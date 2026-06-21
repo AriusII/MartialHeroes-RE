@@ -143,3 +143,39 @@ fidelity (FSM, UI layout, wire routing, asset parsing). C# must stub them with a
 CYCLE 8 closed (all phases committed on `major-campaign`, build 0/0, headless→Login green). Next cycle's
 highest-leverage move is the **live-world verification wave** (#1 above) — it is the only thing that can
 confirm the layer-05 in-world/HUD fidelity the headless gate cannot reach.
+
+---
+
+# CYCLE 9 — FRONT-END FLOW 1:1, LIVE-VERIFIED (Opening→Loading→Login→PIN→Server-list→TCP→Char-select)
+
+**Opened/closed:** 2026-06-21 · **Branch:** `major-campaign` · **IDB:** `263bd994` · **Mode:** static-IDA RE +
+**LIVE** verify (server 211.196.150.4 via `login.creds`). Method = specs → C# → Godot.
+
+**Mandate:** verify + clean the front-end flow, **Server-list** the focus — remove duplicates, fix deltas/bugs,
+make it work with LIVE data; then char-select 2D/3D on map000. Commits `7053e5f`(P1) `5f7549f`(P2)
+`cd8e6d6`(P3) `ccf7de9`(P3.2).
+
+| Phase | Outcome |
+|---|---|
+| **P1 RE (static)** | Confirmed lobby/server-list/channel-endpoint wire: all 4 server-record fields **signed i16**; `load<2400` signed; channel-endpoint = single-space, 30B copy-cap, NUL-term, single endpoint (settled the `NEEDS-CAPTURE`). 1 CONFLICT fixed (server_id u16→i16). |
+| **P2 C# clean** | **DEDUP** `ServerEntry`→`ServerListEntryView` (deleted the dup); single `IsSelectable`; all types signed `short`; removed dead `CharCreateResultEvent`; **EnvLogin now reads `%LOCALAPPDATA%\MartialHeroes\login.creds`** (was env-only → inert) + account redacted. **LIVE PROVEN:** auto-login → real server-list (server_id=4) → endpoint :11403/:11410 → roster (jeonsa/jeongja/arius) → char-select, no ghost-lock. |
+| **P3 Godot connect** | Swapped 3 Godot inline CP949 parsers → layer-03 catalogues (idle col16 / skin.txt). Server-list render+click→TCP verified intact post-dedup. Login renders **1:1**; all audio cues fire (curtain SFX 861010105, loading BGM 920100100, lobby BGM 920100200). |
+| **P3.1 RE** | 3/1 SpawnDescriptor `internal_class` = u16 @ +0x34 (CONFIRMED, 4 read sites), `variant` @ +0x2C — spec re-pinned. |
+| **P3.2 char-select actors** | **Fixed** the empty char-select: root cause was **event timing** (live roster arrives 3/4 in Load state, before SelectScene arms its drainer) → `CharacterSelectionStore.ProjectRetainedRoster()` + `SelectScene.OnEnter` replay. Headless-proven: 3 actors **build** (84-bone skeletons, idle clips, invariants PASS). DEFECT #2 (auto-fire) = confirmed **non-bug** (windowed input-sim artifact; code never auto-fires). |
+
+**Gate:** build **0/0**, check_dag OK, headless live auto-login → char-select clean (no 3/100/ghost-lock),
+code-reviewer + render-reviewer PASS. Windowed passive screenshots captured (gitignored `.render/`).
+
+**Verified visually (windowed live):** login screen **1:1**, loading screen, char-select scene on map000.
+**Server-list functionally proven** (real data fetched, 2-plate render per spec, click→TCP) but **not captured
+visually** (transient — auto-login selects in ~10 frames; needs a pause-after-server-list hook for a shot).
+
+## CYCLE 9 — Owed next (remaining front-end debt)
+1. **Char-select 3D actor on-screen VISIBILITY.** The 3 actors now decode+build correctly (class ∈{1..4},
+   skeletons/clips/invariants PASS) but do **not clearly appear** in the windowed frame — a Godot
+   **camera-framing / scale / Y-placement** issue (distinct from the now-fixed decode). The scene (map000
+   platform, torches, fog, 2D HUD) renders; the avatars need to be made visible/framed.
+2. **Dedicated Server-list screenshot** — add a temp "pause-after-server-list" capture path so the real
+   live plates can be eyeballed (functionally already proven).
+3. **Equip overlays** on the char-select preview (the §3.3.7 per-part build) — `EquipGids` now surfaced;
+   the overlay loop is drivable but not yet enabled.
