@@ -7,11 +7,15 @@
 //   1. ENTRY DOLLY: on scene enter, blends the Camera3D from keyframe 0 (KF0, dolly start) to
 //      keyframe 1 (KF1, resting pose) over ~2.0 s:
 //        - position LERP from KF0 to KF1
-//        - orientation SLERP between the two LookAt(eye, row pivot) quaternions
+//        - orientation SLERP between the two per-keyframe FREE-LOOK Euler quaternions (yaw∘pitch);
+//          there is NO look-at point — the §3.5 HEADLINE CORRECTION supersedes the old "LookAt the
+//          row pivot" framing: each keyframe carries an explicit Euler (yaw, pitch) and the view
+//          direction comes from those angles, not from aiming at a world point.
 //        - tween normalizer t = clamp(elapsedMs × 0.0005, 0, 1)  [0.0005 = 1/2000 → 2.0 s full]
 //      The KF0↔KF1 leg uses the PLAIN lerp/slerp (no parabolic mid-arc bow — that only fires for
 //      inner keyframes ≥ 2, which are dormant in this scene). After t = 1.0 the camera holds KF1.
-//      spec: Docs/RE/specs/frontend_scenes.md §3.5 / §3.5.2 / §3.5.4 CODE-CONFIRMED.
+//      spec: Docs/RE/specs/frontend_scenes.md §3.5 (free-look Euler headline) / §3.5.2 / §3.5.3
+//            (the 12 PI-scaled angle multipliers) / §3.5.4 CODE-CONFIRMED.
 //   2. MANUAL BOOM-ZOOM: after the dolly, a hold-to-zoom moves the camera along its forward view
 //      axis; the boom depth is HARD-CLAMPED to [0, 22] (boom seed = 0 → eye sits on KF1 at rest).
 //      spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
@@ -58,6 +62,36 @@ public sealed partial class CharSelectCameraRig : Node
 
     private const float DollyRatePerMs = 0.0005f; // spec: §3.5.4 literal 0.0005 CODE-CONFIRMED
 
+    // =========================================================================
+    // Per-keyframe FREE-LOOK orientation (Euler yaw/pitch) — spec: §3.5.3 CODE-CONFIRMED.
+    //   The rig is a FREE-LOOK keyframed camera (§3.5 HEADLINE CORRECTION): NO look-at point, the
+    //   view direction is the keyframe's explicit Euler. §3.5.3 gives 12 PI-scaled multipliers —
+    //   indices 0..5 = PITCH per kf (about local X), indices 6..11 = YAW per kf (about world-up Y).
+    //   Only KF0 (idx 0 pitch / idx 6 yaw) and KF1 (idx 1 pitch / idx 7 yaw) are armed (§3.5.2).
+    //   The angle is multiplier × π (radians).
+    // =========================================================================
+
+    // KF0 orientation. spec: §3.5.3 — idx 0 PITCH mult −0.03333334 (= −6.000°); idx 6 YAW mult
+    //   0.01333333 (= +2.400°). CODE-CONFIRMED.
+    private const float Kf0PitchRad = -0.03333334f * Mathf.Pi; // ≈ −0.104720 rad (−6.000°)
+    private const float Kf0YawRad = 0.01333333f * Mathf.Pi; // ≈ +0.041888 rad (+2.400°)
+
+    // KF1 orientation (the RESTING pose the player holds). spec: §3.5.3 — idx 1 PITCH mult
+    //   −0.01483333 (= −2.670°); idx 7 YAW mult 0.00436111 (= +0.785°). CODE-CONFIRMED.
+    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi; // ≈ −0.046600 rad (−2.670°)
+    private const float Kf1YawRad = 0.00436111f * Mathf.Pi; // ≈ +0.013701 rad (+0.785°)
+
+    // Base heading that turns the free-look Euler so the camera's −Z view axis points at the actor
+    // row IN GODOT-SPACE. The §3.5.3 angles were authored in legacy LEFT-handed space, where the
+    // KF1 camera at Z=−9652 looks in −Z toward the row at Z≈−9738 (§3.3.2 / §3.5.4). The single
+    // world Z-negate (Helpers/WorldCoordinates) flips that inequality: in Godot-space the camera at
+    // Z=+9652 must look toward GREATER Z (+9738) to face the row, i.e. +Z — but a Godot camera's
+    // default view axis is its local −Z. A π base yaw turns the rig so the small per-keyframe yaw/
+    // pitch then frame the row from in front. The sign is VERIFIED EMPIRICALLY from the screenshot
+    // (row IN FRONT, not behind the camera). spec: §3.5.4 (KF1 looks in −Z toward the row; Z-negate
+    // flips the realized heading) / Helpers/WorldCoordinates (world geometry negates Z).
+    private const float BaseHeadingYawRad = Mathf.Pi;
+
     // Manual boom-zoom (a forward/back dolly on the view axis); boom depth clamped [0, 22].
     // spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
     private const float BoomZoomUnitsPerSecond = 10.0f; // the §3.5.3 manual-zoom input-rate scalar (10.0)
@@ -96,7 +130,6 @@ public sealed partial class CharSelectCameraRig : Node
     private Vector3 _kf0Pos; // Godot-space KF0 (= world (515.549,137.266,−9397.710), Z negated)
     private Quaternion _kf1Orientation;
     private Vector3 _kf1Pos; // Godot-space KF1 (= world (512,87,−9652), Z negated)
-    private Vector3 _lookAtTarget; // the row pivot (constant through the dolly). spec: §3.5.4 / §3.6.5
 
     // Slot-actor accessor — used by the ray-pick (HitTest) to read each actor's base Y. The former
     // selected-slot accessor drove the removed actor-yaw spin and is no longer stored.
@@ -116,8 +149,7 @@ public sealed partial class CharSelectCameraRig : Node
         float[] slotGodotZ,
         Func<int, Node3D?> slotActorProvider,
         Vector3 kf0Pos,
-        Vector3 kf1Pos,
-        Vector3 lookAtTarget)
+        Vector3 kf1Pos)
     {
         _camera = camera;
         _slotGodotX = slotGodotX;
@@ -126,19 +158,22 @@ public sealed partial class CharSelectCameraRig : Node
 
         _kf0Pos = kf0Pos;
         _kf1Pos = kf1Pos;
-        _lookAtTarget = lookAtTarget;
 
-        // Both keyframes frame the same row-pivot look-at; the exact free-look Euler is debugger-
-        // pending, so LookAt toward the row pivot is the documented framing. spec: §3.5 / §3.5.4.
-        _kf0Orientation = LookAtQuaternion(kf0Pos, lookAtTarget);
-        _kf1Orientation = LookAtQuaternion(kf1Pos, lookAtTarget);
+        // FREE-LOOK Euler endpoints — NO look-at point (§3.5 HEADLINE CORRECTION). Each keyframe's
+        // orientation is its explicit per-keyframe Euler (yaw, pitch) from §3.5.3, turned by the
+        // π base heading so the camera's −Z view axis faces the actor row in Godot-space (the world
+        // Z-negate flips the legacy −Z heading). spec: §3.5.3 (angle multipliers) / §3.5.4.
+        _kf0Orientation = EulerOrientation(Kf0YawRad, Kf0PitchRad);
+        _kf1Orientation = EulerOrientation(Kf1YawRad, Kf1PitchRad);
 
         _dollyElapsedMs = 0.0f;
         _dollyComplete = false;
         _boomZ = 0.0f; // spec: §3.5.4 boom seed = 0 → eye on KF1 at rest. CODE-CONFIRMED.
 
-        GD.Print($"[CharSelectCameraRig] Entry dolly armed: KF0={kf0Pos} → KF1={kf1Pos} " +
-                 $"look-at(row pivot)={lookAtTarget}; t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: §3.5.2/§3.5.4.");
+        GD.Print($"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
+                 $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
+                 $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}°/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
+                 $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: §3.5.3/§3.5.4.");
     }
 
     /// <inheritdoc />
@@ -239,11 +274,24 @@ public sealed partial class CharSelectCameraRig : Node
     // Helpers.
     // =========================================================================
 
-    private static Quaternion LookAtQuaternion(Vector3 eye, Vector3 target)
+    /// <summary>
+    ///     Builds a keyframe's FREE-LOOK orientation from its explicit Euler (yaw, pitch), per
+    ///     spec §3.5.3: a YAW quaternion about world-up Y composed with a PITCH quaternion about the
+    ///     camera's local X ("builds a pitch quaternion from the 0..5 value and a yaw quaternion from
+    ///     the matching 6..11 value, multiplies them into that keyframe's orientation"). A π base
+    ///     heading is folded into the yaw so the camera's local −Z view axis faces the actor row in
+    ///     Godot-space (the world Z-negate flips the legacy −Z heading — verified on-screen).
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.5.3 (yaw∘pitch) / §3.5 (free-look, no look-at).
+    /// </summary>
+    private static Quaternion EulerOrientation(float yawRad, float pitchRad)
     {
-        var forward = (target - eye).Normalized();
-        if (forward.LengthSquared() < 1e-6f) return Quaternion.Identity;
-        return Basis.LookingAt(forward, Vector3.Up).GetRotationQuaternion();
+        // Yaw about world-up Y (azimuth), then pitch about the local X (elevation). Composing
+        // yaw ∘ pitch (yaw on the LEFT) rotates the local pitch axis by the yaw — matching the
+        // spec's "yaw quaternion × pitch quaternion" multiply order. The π base heading turns the
+        // default −Z view axis toward the row in Godot-space.
+        var yaw = new Quaternion(Vector3.Up, yawRad + BaseHeadingYawRad);
+        var pitch = new Quaternion(Vector3.Right, pitchRad);
+        return (yaw * pitch).Normalized();
     }
 
     private static bool TryRayAabb(Vector3 origin, Vector3 dir, Vector3 boxMin, Vector3 boxMax, out float tHit)

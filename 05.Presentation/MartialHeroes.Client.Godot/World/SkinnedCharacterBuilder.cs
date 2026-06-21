@@ -160,13 +160,23 @@ public static class SkinnedCharacterBuilder
                     LogDiagnostics(mesh, skeleton!, clip, d);
                 }
 
-                // Recentre from the DISPLAYED animated frame-0 pose (the pose actually on screen), as
-                // REORIENTED by the pivot up-axis remap, so feet sit near local Y=0 and the body
-                // centres on X/Z in the final upright orientation. The single Z-negate inside the
-                // skinning output stays the only handedness conversion in the math; the pivot remap is
-                // a port-side display reorientation (§7/§9), shared by player + actors.
-                // spec: Docs/RE/specs/skinning.md §6 (displayed pose is the sampled idle) / §7 / §9.
-                var displayedAabb = lbs.GetDisplayedFrame0Aabb();
+                // Recentre from the REST (bind-pose) AABB — the pose the mesh is actually displayed in
+                // at spawn (Setup leaves the surface in rest; the idle only advances once _Process runs)
+                // and the STABLE reference the idle oscillates AROUND (the delta-composed idle keeps every
+                // frame near the bind pose — §6.5/§6.6, the validated AnimAsDelta default). The earlier
+                // choice of the ANIMATED frame-0 AABB diverged from the displayed rest extent for rigs
+                // whose idle frame-0 pulls the silhouette in (measured: a209110001 rest X-extent 7.25 vs
+                // animated-frame-0 3.22), recentring against a pose the mesh is NOT sitting in and floating
+                // the feet ~9 units off the platform. The bind pose is the canonical standing reference, so
+                // recentring feet to local Y=0 from the rest AABB is both what's on screen AND stable across
+                // the idle cycle (no wandering floor). The single Z-negate inside the skinning output stays
+                // the only handedness conversion; the pivot remap is the port-side display reorientation
+                // (§7/§9), shared by player + actors — and the player's bind feet land on the ground, the
+                // idle gently oscillating around that contact (behaviour-preserving for the in-world render).
+                // spec: Docs/RE/specs/skinning.md §8(a) (the orientation/recentre knob is the pivot/root
+                //       transform only, NOT the deform math; bind pose is the cancellation reference) /
+                //       §6.5/§6.6 (delta idle stays near bind) / §7 / §9.
+                var displayedAabb = lbs.GetMeshAabb();
 
                 if (PrintDiagnostics)
                 {

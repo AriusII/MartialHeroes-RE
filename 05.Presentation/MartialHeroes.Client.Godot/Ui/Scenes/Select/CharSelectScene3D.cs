@@ -14,11 +14,12 @@
 //      achromatic dark background. NO procedural sky shader, NO coloured omni lights. spec: §3.6 +
 //      environment_bins.md.
 //   3. CAMERA (entry dolly) — KF0 → KF1 over 2.0 s (CharSelectCameraRig), projection FOV 50 / near
-//      5 / far 15000, framed by a documented LookAt toward the row pivot. spec: §3.5 / §3.5.1.
+//      5 / far 15000. FREE-LOOK keyframed rig: each keyframe carries an explicit Euler (yaw, pitch)
+//      per §3.5.3 — there is NO look-at point (the §3.5 HEADLINE CORRECTION). spec: §3.5 / §3.5.1 / §3.5.3.
 //   4. AMBIENT EFFECT — the real char_select-u.xeff (id 380003000) at the row-centre anchor, as
 //      alpha-blended camera-facing billboards (XeffSceneEffect). spec: §3.6.5 / §3.6.6.
 //   5. ACTORS — up to 5 preview actors via SkinnedCharacterBuilder at the spec per-slot positions
-//      (the slightly-bowed Z), on the platform Y≈70, PreviewScale ×3.0. spec: §3.3.1 / §3.7.5.
+//      (the slightly-bowed Z), on the platform Y≈70, PreviewScale ×6.0. spec: §3.3.1 / §3.7.5.
 //      Selection-facing is actor-local: selected slot snaps front (yaw 0), non-selected slots face
 //      back (yaw π), and ui_left/ui_right manually yaw only the selected preview at 2 rad/s.
 //      spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
@@ -93,11 +94,19 @@ public sealed partial class CharSelectScene3D : Node3D
     private const float RowPivotLegacyY = 69.89f;
     private const float RowPivotLegacyZ = -9758.57f;
 
-    // Preview scale ×3.0. spec §3.3.1: the legacy per-slot scale literal ≈70 (lineup) is a LEGACY-
-    // space value that does NOT map 1:1 to Godot; the unit-reconciled Godot equivalent is ×3.0
-    // (verified against the importer's mesh scale, documented — NOT a hard-coded guess; the raw 70
-    // literal would explode the actors in Godot space). spec: §3.3.1 (fidelity-reconciliation item).
-    private const float PreviewScale = 3.0f;
+    // Preview scale — a PORT UNIT-RECONCILIATION against the §3.3.1 legacy lineup scale literal ≈70
+    // (which is LEGACY-space, explicitly NOT a ready-to-use Godot multiplier; §3.3.1 flags this as a
+    // fidelity-reconciliation item, not a binary unknown). The deformed actor is only ≈11 Godot units
+    // tall, and at the §3.5 KF1 camera distance (≈85 units) with FOV 50° an ×3.0 actor filled ~14% of
+    // frame height — too small to read as a prominent character preview (the oracle: the original
+    // char-select shows the lineup filling a meaningful fraction of the lower frame). Raised to ×6.0 so
+    // each avatar fills ~25-30% of frame height — clearly visible as a prominent character preview
+    // WITHOUT the ×9 overshoot that made the front-facing selected avatar dominate/overlap the frame.
+    // NOT a spec change — the spec already flags the 70-literal as needing unit-reconciliation against
+    // the importer mesh scale; ×6.0 is that reconciliation, measured empirically from the framed AABB at
+    // the §3.5 KF1 distance (≈85 units, FOV 50°). spec: §3.3.1 (legacy scale ≈70, LEGACY-space,
+    // fidelity-reconciliation item).
+    private const float PreviewScale = 6.0f;
 
     // Slot-selection visual yaw — actor rotates, camera stays fixed.
     // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
@@ -156,11 +165,10 @@ public sealed partial class CharSelectScene3D : Node3D
     // KF1 (entry-dolly end / resting pose) = world (512, 87, −9652). EXACT. spec: §3.5 / §3.5.2.
     internal static readonly Vector3 DollyKF1Godot = ToGodotVec(512.0f, 87.0f, -9652.0f);
 
-    // Camera look-at anchor = the row pivot (the camera look-at sits essentially over it; §3.5.4 /
-    // §3.7.2). The exact per-keyframe free-look Euler (yaw/pitch) is DEBUGGER-PENDING (§3.5
-    // headline), so — per the Lane brief — we keep a documented LookAt toward the row pivot for
-    // framing rather than inventing an orbit or an aesthetic aim point. spec: §3.5 / §3.6.5.
-    internal static readonly Vector3 DollyLookAtGodot = ToGodotVec(RowPivotLegacyX, RowPivotLegacyY, RowPivotLegacyZ);
+    // NO look-at anchor: the camera is a FREE-LOOK keyframed rig (§3.5 HEADLINE CORRECTION) — each
+    // keyframe carries an explicit Euler (yaw, pitch) per §3.5.3, NOT an aim at a world point. The
+    // former DollyLookAtGodot (row-pivot look-at) is superseded and removed; CharSelectCameraRig
+    // builds each endpoint orientation from the §3.5.3 angle multipliers. spec: §3.5 / §3.5.3.
 
     // =========================================================================
     // Ambient effect (§3.6.5) — the single code-spawned char_select-u.xeff (id 380003000).
@@ -453,13 +461,13 @@ public sealed partial class CharSelectScene3D : Node3D
         };
         AddChild(_camera);
 
-        // Pose the camera at KF0 framing the row pivot; the rig animates it to KF1 over 2.0 s.
+        // Pose the camera at KF0; the rig sets the FREE-LOOK Euler orientation (NO look-at point —
+        // §3.5 HEADLINE CORRECTION) and animates position+orientation to KF1 over 2.0 s.
         // spec: §3.5.2 — rig constructed at index 0 (dolly start). CODE-CONFIRMED.
         _camera.Position = DollyKF0Godot;
-        _camera.LookAt(DollyLookAtGodot, Vector3.Up);
 
         // Build + wire the entry-dolly + manual-input + hit-test rig.
-        // spec: §3.5 (entry dolly KF0→KF1) / §3.5.4 (manual boom-zoom + actor-yaw) / §3.3.3 (hit-test).
+        // spec: §3.5 (entry dolly KF0→KF1, free-look Euler) / §3.5.4 (manual boom-zoom) / §3.3.3 (hit-test).
         _cameraRig = new CharSelectCameraRig { Name = "CharSelectCameraRig" };
         AddChild(_cameraRig);
         _cameraRig.Configure(
@@ -468,12 +476,11 @@ public sealed partial class CharSelectScene3D : Node3D
             SlotGodotZ,
             i => (uint)i < (uint)_slotActors.Length ? _slotActors[i] : null,
             DollyKF0Godot,
-            DollyKF1Godot,
-            DollyLookAtGodot);
+            DollyKF1Godot);
 
         GD.Print($"[CharSelectScene3D] Camera: KF0={DollyKF0Godot} → KF1={DollyKF1Godot} " +
-                 $"look-at(row pivot)={DollyLookAtGodot}; FOV {CameraFov}/near {CameraNear}/far {CameraFar}; " +
-                 "2.0 s lerp/slerp then hold KF1. spec: §3.5 / §3.5.1 / §3.5.2.");
+                 $"(FREE-LOOK Euler per §3.5.3, NO look-at); FOV {CameraFov}/near {CameraNear}/far {CameraFar}; " +
+                 "2.0 s lerp/slerp then hold KF1. spec: §3.5 / §3.5.1 / §3.5.2 / §3.5.3.");
     }
 
     // =========================================================================
@@ -731,7 +738,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
         var slotWrapper = new Node3D { Name = $"Slot{slotIdx}Actor" };
         slotWrapper.Position = new Vector3(SlotLegacyX[slotIdx], rowY, SlotGodotZ[slotIdx]);
-        slotWrapper.Scale = Vector3.One * PreviewScale; // spec: §3.3.1 ×3.0 (unit-reconciled)
+        slotWrapper.Scale = Vector3.One * PreviewScale; // spec: §3.3.1 ×6.0 (unit-reconciled)
 
         // Facing is selection-driven: selected preview snaps front; every other built preview faces back.
         // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
