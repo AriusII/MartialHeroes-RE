@@ -60,14 +60,21 @@ public static class ItemsScrParser
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
     private const int OffOpaque0A4 = 0x0A4;
 
-    // record_discriminator u8 @ on-disk +0xD2 — tested != 14 by the loader.
-    // CORRECTED CAMPAIGN 10 (two-witness: stack-frame analysis + black-box):
-    //   The prior "+0x0BA" was the loader's internal notation against its working buffer whose base
-    //   sits 0x18 bytes ahead of the record start: +0xBA + 0x18 = +0xD2 (on-disk).
-    //   Engineers reading the file from disk MUST use +0xD2. Full discriminator value enumeration is DBG-pending.
-    // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
-    // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED.
-    private const int OffRecordDiscriminator = 0x0D2; // on-disk +0xD2; spec: Docs/RE/formats/items_scr.md §1.4.1
+    // record_discriminator u8 @ on-disk +0xBA — tested != 14 by the loader.
+    // CORRECTED CYCLE 7 (IDB 263bd994, two-witness: loader branch + black-box):
+    //   The loader reads the 548-byte block DIRECTLY into the staging buffer (read base = record start).
+    //   There is NO 0x18 shift — the earlier "+0xD2 / 0x18-ahead working buffer" model is REFUTED.
+    //   The CONFIRMED effect_count at on-disk +0x220 lands at staging-buffer +0x220 with no shift,
+    //   anchoring the discriminator at staging-buffer +0xBA = on-disk +0xBA. Full enumeration DBG-pending.
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xBA tested != 14: loader-resolved.
+    // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED; "+0xD2/0x18-shift" REFUTED.
+    private const int OffRecordDiscriminator = 0x0BA; // on-disk +0xBA; spec: Docs/RE/formats/items_scr.md §1.4.1
+
+    // dispatch flag bytes @ on-disk +0xCD, +0xCE, +0xCF, +0xD0 — consulted alongside the discriminator.
+    // For each flag byte, == 1 maps to comparison codes 1 / 26 / 11 / 16 respectively.
+    // Per-flag semantics are DBG-pending. No 0x18 shift (same staging-buffer base as discriminator).
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — dispatch flags on-disk +0xCD..+0xD0: loader-resolved.
+    private const int OffDispatchFlags = 0x0CD; // 4 consecutive bytes; spec: Docs/RE/formats/items_scr.md §1.4.1
 
     // opaque_200 4 bytes @ 0x200 — read and retained; no consumer semantics settled.
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
@@ -198,19 +205,26 @@ public static class ItemsScrParser
         var animRefKey = BinaryPrimitives.ReadUInt32LittleEndian(fixedBlock[OffAnimRefKey..]);
 
         // opaque_0a4: 4 bytes @ 0x0A4. Read and retained; no consumer semantics settled — DBG-pending.
+        // Offset is absolute from record start; there is NO 0x18 working-buffer shift.
+        // The "+0xD2 / 0x18-ahead working buffer" model is REFUTED (CYCLE 7, IDB 263bd994) — see §1.7.
         // spec: Docs/RE/formats/items_scr.md §1.4 — +0x0A4 (opaque): DBG-pending.
-        // Dispatch offset base note: the loader stages records against a working buffer 0x18 bytes ahead;
-        // its internal branch offsets are relative to that 0x18 base. On-disk offsets here are absolute.
-        // spec: Docs/RE/formats/items_scr.md §1.4 "Loader buffer base" note.
+        // spec: Docs/RE/formats/items_scr.md §1.7 — "+0xD2/0x18-shift" REFUTED.
         var opaque0A4 = data.Slice(recordOffset + OffOpaque0A4, 4);
 
-        // record_discriminator u8 @ on-disk +0xD2. Tested != 14 by the loader for per-record routing.
-        // CORRECTED CAMPAIGN 10: on-disk offset is +0xD2 (the loader's "+0xBA" is its 0x18-shifted internal
-        // working-buffer notation; +0xBA + 0x18 = +0xD2 on-disk — see §1.4.1).
-        // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
-        // spec: Docs/RE/formats/items_scr.md §1.7 — "+0x0B8 item_type_tag" REFUTED; DO NOT reintroduce.
+        // record_discriminator u8 @ on-disk +0xBA. Tested != 14 by the loader for per-record routing.
+        // CORRECTED CYCLE 7 (IDB 263bd994): the loader reads the 548-byte block directly into the staging
+        // buffer (read base = record start); staging-buffer +0xBA = on-disk +0xBA — NO 0x18 shift.
+        // The earlier +0xD2 / "0x18-ahead working buffer" model is REFUTED. See §1.4.1 and §1.7.
+        // spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xBA tested != 14: loader-resolved.
+        // spec: Docs/RE/formats/items_scr.md §1.7 — "+0xD2/0x18-shift" REFUTED; "+0xB8 item_type_tag" REFUTED.
         // Full discriminator value enumeration is DBG-pending; read the byte, assign no meaning.
         var recordDiscriminator = fixedBlock[OffRecordDiscriminator];
+
+        // dispatch flag bytes @ on-disk +0xCD..+0xD0 (4 consecutive bytes).
+        // The loader consults each alongside the discriminator; == 1 maps to codes 1 / 26 / 11 / 16.
+        // Per-flag semantics are DBG-pending; read and retain, assign no meaning.
+        // spec: Docs/RE/formats/items_scr.md §1.4.1 — dispatch flags +0xCD..+0xD0: loader-resolved.
+        var dispatchFlags = data.Slice(recordOffset + OffDispatchFlags, 4);
 
         // opaque_200: 4 bytes @ 0x200. Read and retained; no consumer semantics settled — DBG-pending.
         // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
@@ -282,6 +296,7 @@ public static class ItemsScrParser
             AnimRefKey = animRefKey,
             Opaque0A4 = opaque0A4,
             RecordDiscriminator = recordDiscriminator,
+            DispatchFlags = dispatchFlags,
             Opaque200 = opaque200,
             Opaque21C = opaque21C,
             EffectCount = effectCount,

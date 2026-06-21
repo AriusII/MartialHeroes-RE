@@ -123,11 +123,12 @@ public sealed record ChannelEndpointResolvedEvent(
     int Port) : IClientEvent;
 
 // =====================================================================================================
-// Character-management results (3/4, 3/6, 3/23)
+// Character-management results (3/7 manage-result, 3/6 rename-result, 3/23 by-name status patch)
+// spec: Docs/RE/specs/login_flow.md §5.5 (3/7) / §5.7 (3/6) / §5.4 (3/23 is a status patch, NOT a create result)
 // =====================================================================================================
 
 /// <summary>
-///     The manage action a 3/4 result is for, mapped from the wire <c>Subtype</c> byte. spec:
+///     The manage action a 3/7 result is for, mapped from the wire <c>Subtype</c> byte. spec:
 ///     Docs/RE/specs/login_flow.md §5.5 (subtype 0 / 1 / 2; only subtype 2 = delete-confirm is inferred).
 /// </summary>
 public enum CharManageSubtype
@@ -190,22 +191,31 @@ public sealed record CharRenameResultEvent(
     byte ErrorCode) : IClientEvent;
 
 /// <summary>
-///     Published when a 3/23 character-create result lands (SmsgCharCreateResult). Immutable snapshot.
-///     Pairs with the <see cref="CreateCharacterRequestedEvent" /> the select use-case emits for a blank
-///     slot. On success the account char count is incremented and <see cref="AssignedSlotId" /> carries
-///     the new slot; on failure <see cref="ErrorCode" /> carries the wire error code (0xC8..0xD4). spec:
-///     Docs/RE/specs/login_flow.md §5.4.
-///     NOTE: This event predates the Phase 2b binary-confirmed 3/23 layout correction. Create is acked
-///     via 3/7 SmsgCharManageResult + a refreshed 3/4 list; 3/23 = SmsgCharStatusBytesByName (roster patch).
-///     This event type is retained for compatibility but is no longer published by the 3/23 handler.
+///     Application-side projection of a SUCCESSFUL character-create. This is NOT the decode of a
+///     (non-existent) 12-byte 3/23 create-result packet — login_flow.md §5.4 REFUTES that model: there is
+///     **no dedicated create-result opcode at all**. A character-create (C2S 1/6, 52-byte body) is acked by
+///     the inbound manage-result ladder — **3/7 SmsgCharManageResult** (success) + a **refreshed 3/1
+///     SmsgCharacterList roster** (which re-populates the slot and re-seeds the account character count) and
+///     a 3/4 in-place refill. The 3/23 opcode is **SmsgCharStatusBytesByName** (a 28-byte by-name status/
+///     level patch — see <see cref="CharStatusBytesByNameEvent" />), NOT a create result.
+///     <para>
+///         This event type is RETAINED as the Application-side projection of a successful create (to be
+///         raised when the 3/7 manage-result success + refreshed roster lands). It is **not** published by
+///         the 3/23 handler (that handler emits <see cref="CharStatusBytesByNameEvent" />). The
+///         <see cref="AssignedSlotId" />/<see cref="ErrorCode" />/<see cref="Value1" />/<see cref="Value2" />
+///         members are vestigial of the refuted 12-byte create-packet model and carry no wire meaning.
+///     </para>
+///     spec: Docs/RE/specs/login_flow.md §5.4 (no 12-byte create-result; create acked via 3/7 + refreshed
+///     3/1 + 3/4); §5.5 (3/7 SmsgCharManageResult); §6 (3/23 = SmsgCharStatusBytesByName, NOT a create result).
 /// </summary>
-/// <param name="Success">True when the wire result byte was 1. spec: §5.4.</param>
-/// <param name="AssignedSlotId">On success: the assigned slot id (wire Code byte). 0 on failure. spec: §5.4.</param>
-/// <param name="ErrorCode">On failure: the error code (0xC8..0xD4). 0 on success. spec: §5.4.</param>
-/// <param name="Value1">Slot-refresh value 1 (wire u32; MEANING UNVERIFIED). spec: §5.4.</param>
-/// <param name="Value2">Slot-refresh value 2 (wire u32; MEANING UNVERIFIED). spec: §5.4.</param>
+/// <param name="Success">True when the create succeeded (projected from the 3/7 manage-result success path). spec: §5.4 / §5.5.</param>
+/// <param name="AssignedSlotId">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
+/// <param name="ErrorCode">Vestigial (refuted 12-byte create-packet model); the create/rename UI error range 0xC8..0xD4 is surfaced through the create flow, not this field. spec: §5.4 / §5.7.</param>
+/// <param name="Value1">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
+/// <param name="Value2">Vestigial (refuted 12-byte create-packet model); no wire meaning. spec: §5.4.</param>
 /// <param name="AccountCharacterCount">
-///     The account character count AFTER applying this result (a success incremented it). spec: §5.4.
+///     The account character count AFTER the create (re-seeded by the refreshed 3/1 roster, not by a
+///     create-result packet). spec: §5.4 (create acked via 3/7 + refreshed 3/1).
 /// </param>
 public sealed record CharCreateResultEvent(
     bool Success,

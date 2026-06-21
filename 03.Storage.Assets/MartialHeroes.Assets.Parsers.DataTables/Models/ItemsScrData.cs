@@ -116,19 +116,33 @@ public sealed class ItemsScrRecord
     /// </summary>
     public required ReadOnlyMemory<byte> Opaque0A4 { get; init; }
 
-    // spec: Docs/RE/formats/items_scr.md §1.4.1 — record_discriminator u8 @on-disk +0xD2: tested != 14.
-    // The loader expresses this internally as +0xBA against its working buffer whose base sits 0x18 ahead
-    // of the record start (+0xBA + 0x18 = +0xD2 on-disk). CONFIRMED.
-    // CORRECTED CAMPAIGN VFS-MASTERY: prior "+0xB8 item_type_tag" is REFUTED (see §1.7).
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — record_discriminator u8 @on-disk +0xBA: tested != 14.
+    // CORRECTED CYCLE 7 (IDB 263bd994): the loader reads the 548-byte block directly into the staging buffer
+    // (read base = record start). There is NO 0x18 shift — the earlier "+0xD2 / 0x18-ahead working buffer"
+    // model is REFUTED. The CONFIRMED effect_count at on-disk +0x220 anchors this discriminator at +0xBA.
+    // Prior "+0xB8 item_type_tag" is also REFUTED (see §1.7).
     /// <summary>
-    ///     Record discriminator byte at on-disk offset +0xD2. The loader branches on this value != 14.
-    ///     (The loader's internal notation is +0xBA relative to a working buffer 0x18 ahead of the record start:
-    ///     +0xBA + 0x18 = +0xD2 on-disk. Engineers reading from disk MUST use +0xD2.)
+    ///     Record discriminator byte at on-disk offset +0xBA. The loader branches on this value != 14.
+    ///     The loader reads the 548-byte block directly into the staging buffer (read base = record start),
+    ///     so staging-buffer +0xBA = on-disk +0xBA — there is NO 0x18 shift.
+    ///     The earlier "+0xD2 / 0x18-shift" model is REFUTED (CYCLE 7, IDB 263bd994).
     ///     Full discriminator value enumeration is DBG-pending.
-    ///     DO NOT confuse with +0x0B8 (REFUTED — see items_scr.md §1.7).
-    ///     spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xD2 tested != 14: loader-resolved.
+    ///     DO NOT confuse with +0x0B8 (REFUTED) or +0xD2 (REFUTED) — see items_scr.md §1.7.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4.1 — on-disk +0xBA tested != 14: loader-resolved.
     /// </summary>
     public required byte RecordDiscriminator { get; init; }
+
+    // spec: Docs/RE/formats/items_scr.md §1.4.1 — dispatch flags @on-disk +0xCD..+0xD0 (4 bytes).
+    // For each byte, == 1 maps to comparison codes 1 / 26 / 11 / 16 respectively.
+    // Per-flag semantics are DBG-pending. No 0x18 shift (same staging-buffer base as discriminator).
+    /// <summary>
+    ///     Four dispatch flag bytes at on-disk offsets +0xCD, +0xCE, +0xCF, +0xD0.
+    ///     The loader consults each alongside <see cref="RecordDiscriminator" />; for each byte,
+    ///     a value of 1 maps to comparison codes 1 / 26 / 11 / 16 respectively.
+    ///     Per-flag semantics are DBG-pending; retain as opaque until a live-debugger pass settles them.
+    ///     spec: Docs/RE/formats/items_scr.md §1.4.1 — dispatch flags +0xCD..+0xD0: loader-resolved.
+    /// </summary>
+    public required ReadOnlyMemory<byte> DispatchFlags { get; init; }
 
     // spec: Docs/RE/formats/items_scr.md §1.4 — +0x200 (opaque): DBG-pending.
     /// <summary>
