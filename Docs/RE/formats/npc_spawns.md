@@ -11,9 +11,9 @@
 verification:   sample-verified   # stride 28, +0 id / +4 x / +8 z / +12 facing / +16 spawn_type,
                                    #   facing math, +20/+24 inert, mob.arr 20-byte stride, map000 anomaly
                                    #   all matched against the real VFS sample (43,347 entries)
-ida_reverified: 2026-06-16
-ida_anchor:     263bd994
-evidence:       [static-ida, vfs-sample]
+ida_reverified: 2026-06-21        # re-confirmed in full on the doida.exe build (no layout corrections)
+ida_anchor:     263bd994          # primary anchor; also re-verified against the active doida.exe build
+evidence:       [static-ida, vfs-sample, doida.exe-reverify]
 conflicts:      spawn_type enumeration is 0..11 (not {0,7}); field_02 frequently non-zero on disk
                 (loader-inert verdict unaffected) — see CONFLICTS below
 loader_resolved: true              # two-witness gate (IDB loader read-set + real-VFS black-box census):
@@ -21,6 +21,16 @@ loader_resolved: true              # two-witness gate (IDB loader read-set + rea
                                    #   +12 confirmed facing/orientation value; runtime applies π/2 − value (NOT +π/2)
                                    #   mob.arr (20-byte record) + mobinfo.mi: NO CLIENT LOADER (tool/editor formats)
 ```
+
+> **Re-verification (active `doida.exe` build, 2026-06-21).** This spec was re-confronted against the
+> currently-loaded `doida.exe` build (a different build/SHA than the pinned `263bd994` anchor) plus the
+> real VFS sample. **Verdict: CONFIRMED IN FULL — no layout corrections.** Every structural and
+> behavioural claim re-confirms identically: headerless 28-byte stride, sentinel slot 0, identity
+> index, field offsets (+0 id / +4 x / +8 z / +12 facing / +16 spawn_type), `π/2 − value` facing math,
+> the 20-byte `mob.arr` stride with no client loader, and the map-000 (16-byte) / map-207 (240-byte)
+> anomalies. Three non-corrective refinements were folded in: the area-binary load coupling (the
+> `.arr` is the LAST of four area binaries opened on area-enter — see §Loading sequence), the exact
+> elite-modifier-A predicate (see §`spawn_type`), and this build added to the evidence anchor line.
 
 > **CORRECTED CYCLE 1 (ida_anchor 263bd994, evidence [static-ida]):** the `.arr` is **NOT the
 > live-actor source.** Live actors arrive via the **server area-entity snapshot** (a network packet)
@@ -185,6 +195,36 @@ A parallel index array of `(record_count + 1) × 4` bytes is allocated alongside
 
 ---
 
+## Loading sequence — coupled to area-enter (not an independent asset open)
+
+The `.arr` is **not** loaded on demand as a standalone asset. It is opened as the **last** of **four
+area binaries** read together by the area-load routine each time the player enters an area; the loader
+first frees the previous area's geometry and spawn array, then opens and reads the four binaries in a
+fixed order through the VFS file wrappers (it reads through the archive, never a raw OS file):
+
+| Order | Logical path pattern | Read shape |
+|------:|----------------------|------------|
+| 1 | `data/map<NNN>/map<NNN>.bin` | fixed-size map header |
+| 2 | `data/map<NNN>/regiontable<NNN>.bin` | fixed-size region table |
+| 3 | `data/map<NNN>/region<NNN>.bin` | grid (width × height) + origin X / origin Z |
+| 4 | `data/map<NNN>/npc<NNN>.arr` | **the spawn array (this format)** |
+
+`<NNN>` is the same zero-padded three-digit map number in every path (driven by the current area-id
+byte). The spawn-array stage performs the headerless read described in §In-memory layout after load.
+The alternative path literals `tool/npc/npc<NNN>.arr` and `tool/mob/mob<NNN>.arr` exist in the binary's
+path table but have **no runtime cross-reference** — confirming the "tool / editor format" verdict for
+the `tool/*` and `mob*.arr` variants (no shipped-client loader reads them).
+
+If the spawn file is missing or unreadable the loader reports a file open/read error and the area load
+fails gracefully (returns a failure code) without crashing. On area-leave the same subsystem frees the
+spawn array and its index array and zeroes the count, so each area-enter starts from a clean slot 0
+sentinel.
+
+The other three binaries are siblings loaded at the same area-load stage but are **separate formats**
+(map / region geometry), not described here.
+
+---
+
 ## Enumerations / flags
 
 ### `spawn_type` known values
@@ -198,7 +238,15 @@ loader/consumer code; all other values act as ordinary spawn-group/type ids.
 |------:|---------|
 | 0 | Standard spawn — no modifier (most common value in the sample) |
 | 1–6, 8–11 | Ordinary spawn-group / spawn-type ids — no special loader branch; matched against an actor's own spawn-group id during in-scene lookup |
-| 7 | Elite / boss modifier — the spawn-matching code returns a 10 % bonus multiplier (110 vs. baseline 100) under an area/state guard in one site, and an additive elite bonus in another. Common in the sample (second-most-frequent value after 0). |
+| 7 | Elite / boss modifier — the spawn-matching code returns a 10 % bonus multiplier (110 vs. baseline 100) at one site and an additive elite bonus at another. Common in the sample (second-most-frequent value after 0). |
+
+**Exact elite-modifier predicate (refinement).** The 110-vs-100 bonus site fires only under the
+full guard **`spawn_type == 7` AND current-area-id == 1 AND an area-state flag == 12** — i.e. the
+10 % bonus is gated to a specific area in a specific state, not applied to every `spawn_type == 7`
+record everywhere. The second site applies its additive elite bonus more directly. A third consumer
+matches `spawn_type` (`+16`) against a live actor's own spawn-group field during in-scene lookup
+(the spawn-group-link use of the field). A faithful port that reproduces the elite bonus must
+honour the full area/state predicate, not just the `== 7` test.
 
 Values above 11 are unobserved in the sampled archive but are not ruled out; the field is a full
 `u32` and the runtime imposes no documented upper bound. A faithful port must NOT special-case any

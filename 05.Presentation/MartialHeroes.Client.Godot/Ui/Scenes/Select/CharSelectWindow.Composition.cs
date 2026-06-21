@@ -46,6 +46,15 @@ public sealed partial class CharSelectWindow
         _scene3DContainer.AddChild(_scene3DViewport);
         AddChild(_scene3DContainer);
 
+        // Force the 3D backdrop to sibling index 0 (backmost) so all 2D chrome siblings
+        // added afterward paint on top.  In Godot 4 Control nodes follow back-to-front
+        // child-vector insertion order — the last sibling added draws in front.
+        // This MoveChild is a defensive guarantee: even if a future wave adds any Control
+        // child before this call, the SubViewportContainer stays at the back.
+        // spec: Docs/RE/specs/ui_system.md §7.3 ("Paint order = insertion order: later children
+        //       paint on top") and §3.1 child-vector draw walk (front → end, back-to-front).
+        MoveChild(_scene3DContainer, 0);
+
         Callable.From(InitialiseScene3D).CallDeferred();
     }
 

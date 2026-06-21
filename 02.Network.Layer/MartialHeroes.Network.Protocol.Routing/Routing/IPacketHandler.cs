@@ -3,6 +3,9 @@
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
+// Note: SmsgCharStatusBytesByName replaces the retired SmsgCharCreateResult (wrong 12-byte 3/23 binding).
+// spec: Docs/RE/specs/net_contracts.md §2.2 (binary wins — 3/23 is a 28-byte roster patch, not create-result).
+
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
 
 /// <summary>
@@ -77,8 +80,14 @@ public interface IPacketHandler
     /// <summary>3/6 — rename-character result. spec: packets/3-6_rename_char_result.yaml.</summary>
     void Handle(in SmsgRenameCharResult packet);
 
-    /// <summary>3/23 — character-create result. spec: Docs/RE/specs/login_flow.md §5.4.</summary>
-    void Handle(in SmsgCharCreateResult packet);
+    /// <summary>
+    ///     3/23 — select-screen character level and status update (28 bytes).
+    ///     Binary-confirmed (Phase 2b, build 263bd994): 3/23 is NOT a 12-byte create-result — it is a
+    ///     28-byte by-name roster patch. Create is acked via 3/7 + a refreshed 3/4 list.
+    ///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml;
+    ///     Docs/RE/specs/net_contracts.md §2.2.
+    /// </summary>
+    void Handle(in SmsgCharStatusBytesByName packet);
 
     /// <summary>3/100 — generic char-management action/result code. spec: Docs/RE/opcodes.md (3/100).</summary>
     void Handle(in SmsgCharActionResult packet);

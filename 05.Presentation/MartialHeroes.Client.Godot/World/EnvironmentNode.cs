@@ -193,6 +193,13 @@ public sealed partial class EnvironmentNode : Node3D
         _areaId = areaId;
         ResolveOrCreateSceneNodes(sceneWorldEnv, sceneDirLight);
 
+        // Apply static post/tonemap settings ONCE at configure time — they never change per-keyframe.
+        // Removed from ApplyKeyframe (which runs every frame) to eliminate redundant native property
+        // writes on a path that changes nothing after the first call. spec: PERF-M3.
+        // spec: Docs/RE/specs/rendering.md §6 — no tonemap/exposure pass in original post chain.
+        // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
+        ApplyStaticPostSettings();
+
         if (assets is null)
         {
             // No VFS data — _environment is now a freshly-allocated empty Environment that replaced
@@ -204,16 +211,12 @@ public sealed partial class EnvironmentNode : Node3D
             // Aesthetic: these values are engineering choices for a legible fallback, not spec-dictated.
             if (_environment is not null)
             {
+                // Tonemap/SSAO/SSIL/SDFGI already set by ApplyStaticPostSettings() above.
                 _environment.BackgroundMode = Environment.BGMode.Color;
                 _environment.BackgroundColor = new Color(0.45f, 0.55f, 0.70f); // neutral sky — aesthetic
                 _environment.AmbientLightSource = Environment.AmbientSource.Color;
                 _environment.AmbientLightColor = Colors.White;
                 _environment.AmbientLightEnergy = 1.0f; // OPTION_BRIGHT=100 floor — spec: environment.md §6.2a
-                _environment.TonemapMode = Environment.ToneMapper.Linear;
-                _environment.TonemapExposure = 1.0f;
-                _environment.SsaoEnabled = false;
-                _environment.SsilEnabled = false;
-                _environment.SdfgiEnabled = false;
                 _environment.GlowEnabled = false;
                 _environment.FogEnabled = false;
             }
@@ -237,18 +240,9 @@ public sealed partial class EnvironmentNode : Node3D
         BuildSkyDomes();
 
         // Seed at noon and apply once immediately so the first rendered frame is daylight.
+        // The original always runs the day/night cycle — there is no dev freeze toggle.
         _clockMs = NoonKeyframe * KeyframeMs;
         _appliedKeyframe = -1;
-
-        // MH_ENV_FREEZE=1 → freeze the cycle at noon (for screenshot captures / dev inspection).
-        // Aesthetic / dev utility: not spec-dictated. The original always runs the day/night cycle.
-        var freezeEnv = System.Environment.GetEnvironmentVariable("MH_ENV_FREEZE");
-        if (freezeEnv is "1" or "true")
-        {
-            CycleEnabled = false;
-            GD.Print(
-                "[Environment] MH_ENV_FREEZE=1 — day/night cycle frozen at noon (keyframe 24). Aesthetic/dev mode.");
-        }
 
         ApplyKeyframe(NoonKeyframe, 0f);
 

@@ -5,6 +5,25 @@
 
 ---
 
+## Re-verification banner (2026-06-21, CYCLE 7 — `.ted`/`.map`/`.lst` two-witness re-confirm)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — the `.ted` five-block layout, the `.map` text grammar + decoder routing, and the per-cell streaming chain were RE-confirmed against two independent witnesses with **no contradictions** to the layout below |
+| `ida_reverified` | `2026-06-21` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = the static loader read-path (cell streamer → `.map` text parser → `.ted` five-read loader → per-cell texture finalize); witness 2 = a fresh real on-disk cell sample and its sidecars |
+| `conflicts`      | None. This pass adds confirmations only and settles no new disputes. Re-confirmed verbatim: (1) the `.ted` blob is **five fixed reads summing 46 987 B with no header** (the fresh sample is exactly 46 987 B; its block-1 heights, block-2 normals decoding `(0,127,0) → (0,1,0)` Y-up, and block-5 RGBA with `A = 0` padding all match §5.3–§5.8); (2) the block-3 texture-index byte is stored **RAW** by the `.ted` loader (no `idx − 1`, no clamp), with the `idx − 1` and `[1, count]` clamp applied once by the **per-cell texture finalize routine** — §5.6/§14(#2); (3) the `.map` text grammar, all 12 section keywords, and the keyword→decoder routing — §3.1/§3.2; (4) the geometry directives (`WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN`) are present on disk but NOT consumed by the runtime `.map` parser — §3.4; (5) the three fixed sidecars `.mud`/`.gad`/`.map` keyed off the per-cell base path — §1.3/§6/§7. **`.lst` key formula RE-CONFIRMED** against a fresh witness-2 sample: a `d000.lst` of 2 entries (12 B = `4 + 2×4`) carries cell key `1000009990` for cell `(mapX=10000, mapZ=9990)`, which decodes exactly as `key = mapZ + 100000·mapX` = `9990 + 100000·10000` = `1 000 009 990` — §1.2. |
+
+**Read-buffer note (witness 1, internal only — no on-disk impact):** the `.ted` five reads land in
+five distinct scratch buffers in block order; within the loader the **block-3 (texture-index) bytes
+and block-4 (direction) bytes are read into two adjacent internal buffers**, and the editor export
+writer emits them in the same internal order. The **on-disk order is unchanged** (block 3 = texture
+index at offset 29 575, block 4 = direction at offset 29 831 — §5.3); this is purely a note that the
+loader's in-memory staging order is not the source of any offset.
+
+---
+
 ## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
 
 | Attribute        | Value |
@@ -161,9 +180,12 @@ key = mapZ + 100000 × mapX
 ```
 
 Verified: file size is exactly `4 + count × 4` bytes with no header prefix. The three samples
-(1-entry 8-byte files and a 2-entry 12-byte file) all match this formula exactly.
+(1-entry 8-byte files and a 2-entry 12-byte file) all match this formula exactly. RE-CONFIRMED
+(2026-06-21, CYCLE 7): a fresh `d000.lst` of 2 entries (12 B = `4 + 2×4`) carries cell key
+`1000009990` for cell `(mapX=10000, mapZ=9990)`, decoding exactly as `9990 + 100000·10000`
+= `1 000 009 990` — the key formula holds against this independent witness.
 
-**Known unknowns:** None outstanding — the three sample files are fully accounted for.
+**Known unknowns:** None outstanding — the sample files are fully accounted for.
 
 ### 1.3 Per-cell base path
 

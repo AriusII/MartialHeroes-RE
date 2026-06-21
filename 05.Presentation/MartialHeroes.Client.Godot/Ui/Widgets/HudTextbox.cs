@@ -59,12 +59,18 @@ public sealed class HudTextbox : HudWidget
     /// <param name="w">Width in pixels.</param>
     /// <param name="h">Height in pixels.</param>
     /// <param name="password">
-    ///     True for password mode (masking + 6px glyph advance via LineEdit.Secret).
-    ///     spec §5.2 — "password mode: 6 px/char advance": CONFIRMED.
+    ///     True for password mode. Sets <see cref="LineEdit.Secret" /> which renders Godot's
+    ///     built-in secret glyph (bullet/dot at proportional metrics). This diverges from the
+    ///     spec'd literal <c>'*'</c> at a fixed 6 px advance (spec §5.2); for a pixel-faithful
+    ///     credential field use <see cref="MaskedTextField" /> instead.
+    ///     spec §5.2 — "password mode: '*' glyph, 6 px/char fixed advance": NOTE-DIVERGENCE.
     /// </param>
     /// <param name="maxLength">
     ///     Maximum character count (0 = unlimited).
-    ///     spec §8.1 — ID textbox maxlen 6, PW textbox maxlen 129: CODE-CONFIRMED.
+    ///     Per-keystroke caps: ID field = 16, PW field = 12
+    ///     (spec: Docs/RE/specs/frontend_layout_tables.md §2.7 / GAP-4, 2026-06-21 RESOLVED).
+    ///     An earlier reading quoted "6 / 129" — those were the charset-mask byte and the
+    ///     hand-off buffer size respectively, not per-keystroke input caps.
     /// </param>
     /// <param name="fontSlot">
     ///     Font slot index 0..14 (default 0 = DotumChe 12/6/wt0).
@@ -105,9 +111,12 @@ public sealed class HudTextbox : HudWidget
             Size = new Vector2(w, h),
             CustomMinimumSize = new Vector2(w, h),
 
-            // Password mode: Godot's Secret property displays bullet glyphs (one per char).
-            // The original fixed 6-pixel glyph advance applies uniformly.
-            // spec: §5.2 — "password mode: 6 px/char fixed advance, draws '*' per char": CONFIRMED.
+            // Password mode: Godot's Secret property displays bullet glyphs at proportional metrics.
+            // DIVERGENCE from spec §5.2 which requires the literal '*' glyph at a fixed 6 px advance
+            // (same as font-slot-0 DotumChe advance width). For pixel-faithful credential fields use
+            // MaskedTextField; this widget is suitable for non-credential password inputs where
+            // the exact glyph/advance is not visually critical.
+            // spec: §5.2 — "password mode: '*' glyph, 6 px/char fixed advance": NOTE-DIVERGENCE.
             Secret = password,
 
             // Max-length cap.

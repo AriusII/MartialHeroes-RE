@@ -65,6 +65,11 @@ public sealed partial class HudErrorPanel : Control
     private HudAnnouncePanel? _announceDelegate; // slot 221 delegate
     private Label? _countdownLabel;
 
+    // Last integer second displayed — guards UpdateCountdownLabel against per-frame
+    // string allocation (the visible integer changes only once per second).
+    // spec: §8.25.2 — "per-second countdown caption": update only when the integer changes.
+    private int _lastDisplayedSec = -1;
+
     // -------------------------------------------------------------------------
     // Child references
     // -------------------------------------------------------------------------
@@ -193,6 +198,7 @@ public sealed partial class HudErrorPanel : Control
     {
         if (_messageLabel != null) _messageLabel.Text = text;
         _remainingSecs = seconds;
+        _lastDisplayedSec = -1; // force label update on first frame
         _open = true;
         Visible = true;
         UpdateCountdownLabel();
@@ -232,8 +238,13 @@ public sealed partial class HudErrorPanel : Control
     private void UpdateCountdownLabel()
     {
         // spec: §8.25.2 — "per-second countdown caption"
+        // Guard: only allocate + assign when the displayed integer second changes.
+        // The visible value changes at most once per second; no per-frame string alloc.
+        var sec = (int)_remainingSecs;
+        if (sec == _lastDisplayedSec) return;
+        _lastDisplayedSec = sec;
         if (_countdownLabel != null)
-            _countdownLabel.Text = $"{(int)_remainingSecs}";
+            _countdownLabel.Text = sec.ToString();
     }
 
     // -------------------------------------------------------------------------
@@ -254,6 +265,7 @@ public sealed partial class HudErrorPanel : Control
         _open = false;
         Visible = false;
         _remainingSecs = 0.0;
+        _lastDisplayedSec = -1;
         if (_messageLabel != null) _messageLabel.Text = string.Empty;
         if (_countdownLabel != null) _countdownLabel.Text = string.Empty;
     }

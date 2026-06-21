@@ -357,26 +357,88 @@ public sealed class TextCommandRecord
 }
 
 /// <summary>
-///     One record from <c>data/script/emoticon.do</c>. Stride: 40 bytes.
+///     One record from <c>data/script/emoticon.do</c>. Stride: 40 bytes (0x28).
+///     Defines one emoticon entry in the picker-panel: its tab/page membership, click dispatch code,
+///     panel grid placement, and the atlas source rects on <c>emoticon.dds</c>.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/config_tables.md §3.2: CONFIRMED (all 21 records).
+///     spec: Docs/RE/formats/ui_manifests.md §2.9.3: SAMPLE-VERIFIED + CODE-CONFIRMED (all 21 records).
+///     <para>
+///         LOAD-BEARING caveat for <see cref="CategoryFlag" /> (<c>pageId</c>): the low byte at +0x04
+///         is the page id (0..2). The three bytes at +0x05..+0x07 are authoring-tool 0xCC fill and MUST
+///         be ignored. The parser reads only the low byte.
+///         spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x04 width caveat (load-bearing)".
+///     </para>
 /// </remarks>
 public sealed class EmoticonRecord
 {
-    /// <summary>Emote ID u32 @ +0 (primary BST key). spec: §3.2 CONFIRMED.</summary>
+    /// <summary>
+    ///     Record id (u32 @ +0x00). Primary Map-A key. Sequential 1..21. CODE-CONFIRMED + SAMPLE-VERIFIED.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x00 u32 id (Map A key)".
+    /// </summary>
     public required uint EmoteId { get; init; }
 
-    /// <summary>Category flag u8 @ +4. spec: §3.2 CONFIRMED (pattern); semantic UNVERIFIED.</summary>
-    public required byte CategoryFlag { get; init; }
+    /// <summary>
+    ///     Page/tab id (u8 @ +0x04 — LOW BYTE ONLY). Picker-panel tab filter in the page builder and click handler.
+    ///     Observed: 0 (records 0–17), 1 (records 18–20); valid range 0..2.
+    ///     The three bytes at +0x05..+0x07 are 0xCC authoring pad — must NOT be included.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x04 u8 pageId (low byte only)": CODE+SAMPLE.
+    /// </summary>
+    public required byte CategoryFlag { get; init; } // CategoryFlag = pageId; name kept for API back-compat
 
-    /// <summary>Secondary key u32 @ +8. spec: §3.2 CONFIRMED.</summary>
-    public required uint SecondaryKey { get; init; }
+    /// <summary>
+    ///     Map-B key / click action id (u32 @ +0x08). Sequential 0..20. CODE-CONFIRMED + SAMPLE-VERIFIED.
+    ///     This is the button's child-action id; the click handler matches on (page, action) → this field.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x08 u32 index (Map B key; action id)": CODE+SAMPLE.
+    /// </summary>
+    public required uint SecondaryKey { get; init; } // SecondaryKey = index; name kept for API back-compat
 
-    /// <summary>Action link u32 @ +12. spec: §3.2 CONFIRMED (pattern); name UNVERIFIED.</summary>
-    public required uint ActionLink { get; init; }
+    /// <summary>
+    ///     Emoticon chat/output token (u32 @ +0x0C). Dispatched to the main window when this emoticon is clicked.
+    ///     Also the reverse-lookup key (scan Map A for emoteCode == incoming value).
+    ///     Observed: 0 on page-0 records, 10/11/12 on the last records.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x0C u32 emoteCode": CODE+SAMPLE.
+    /// </summary>
+    public required uint ActionLink { get; init; } // ActionLink = emoteCode; name kept for API back-compat
 
-    /// <summary>Full 40-byte raw record (includes all fields at +16..+36 which are UNVERIFIED).</summary>
+    /// <summary>
+    ///     Picker-panel destination X of all four widgets (i32 @ +0x10). Observed: 10 (col 0), 160 (col 1).
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x10 i32 dstX": CODE+SAMPLE.
+    /// </summary>
+    public required int DstX { get; init; }
+
+    /// <summary>
+    ///     Picker-panel destination Y base for the four widgets (i32 @ +0x14). Observed: 20, 75, 130, 185, 240, 295, 350, 405
+    ///     (step 55).
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x14 i32 dstY": CODE+SAMPLE.
+    /// </summary>
+    public required int DstY { get; init; }
+
+    /// <summary>
+    ///     Atlas source X of the 23×23 emoticon glyph on <c>emoticon.dds</c> (i32 @ +0x18).
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x18 i32 glyphSrcX": CODE+SAMPLE.
+    /// </summary>
+    public required int GlyphSrcX { get; init; }
+
+    /// <summary>
+    ///     Atlas source Y of the 23×23 emoticon glyph on <c>emoticon.dds</c> (i32 @ +0x1C). Observed: 0 early; 23 on rec 20.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x1C i32 glyphSrcY": CODE+SAMPLE.
+    /// </summary>
+    public required int GlyphSrcY { get; init; }
+
+    /// <summary>
+    ///     Atlas source X of the 87×13 name-strip sprite on <c>emoticon.dds</c> (i32 @ +0x20). Alternates 0/87.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x20 i32 labelSrcX": CODE+SAMPLE.
+    /// </summary>
+    public required int LabelSrcX { get; init; }
+
+    /// <summary>
+    ///     Atlas source Y of the 87×13 name-strip sprite on <c>emoticon.dds</c> (i32 @ +0x24). Steps 13 per pair.
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x24 i32 labelSrcY": CODE+SAMPLE.
+    /// </summary>
+    public required int LabelSrcY { get; init; }
+
+    /// <summary>Full 40-byte raw record (zero-copy slice of the original VFS buffer).</summary>
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
 

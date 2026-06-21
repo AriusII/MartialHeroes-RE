@@ -16,93 +16,6 @@ public sealed partial class RealWorldRenderer
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     Resolves <see cref="TargetAreaId" />, <see cref="TargetMapX" /> and <see cref="TargetMapZ" />
-    ///     by enumerating real VFS entries instead of using a hard-coded coordinate.
-    ///     Resolution order:
-    ///     1. Read "area=" key from client_dir.cfg (defaults to 0).
-    ///     2. Enumerate .ted entries in the VFS for that area via
-    ///     <see cref="RealClientAssets.EnumerateTerrainCells" />.
-    ///     3. If at least one cell is found for the requested area, read the spawn files (mob/npc
-    ///     .arr) to compute a spawn-weighted anchor cell, then call <see cref="PickRingCenter" />
-    ///     with that anchor so the ring centers on where the game content actually is.
-    ///     Falls back to terrain centroid when no spawn data is available.
-    ///     4. If the requested area has NO cells, try areas 0..20 in order and pick the first
-    ///     area+cell pair that exists.
-    ///     5. If no cells are found in any area, fall back to the configured defaults and log a
-    ///     warning — streaming will silently produce empty sectors but won't crash.
-    ///     spec: Docs/RE/formats/terrain.md §1.3 — per-cell path pattern. CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §1.1 — area id digit decomposition. CONFIRMED.
-    ///     spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8: CONFIRMED.
-    /// </summary>
-    private void ResolveTargetCell()
-    {
-        if (Assets is null) return;
-
-        // Read area= from config. Default 0. Silently ignore missing key.
-        var configArea = ReadAreaFromConfig();
-        GD.Print($"[RealWorldRenderer] Config area={configArea} (from client_dir.cfg or default).");
-
-        // Read ring_radius= from config. Default 2 (5×5 ring, High quality).
-        // spec: Docs/RE/formats/terrain.md §12.2 — High quality = radius 2 (5×5). CONFIRMED.
-        var ringRadius = ReadRingRadiusFromConfig();
-        GD.Print($"[RealWorldRenderer] Ring radius={ringRadius} ({2 * ringRadius + 1}×{2 * ringRadius + 1} ring) " +
-                 $"(from client_dir.cfg ring_radius= or default 2).");
-
-        // Try to get cells for the configured area first.
-        var cells = Assets.EnumerateTerrainCells(configArea);
-        if (cells.Count > 0)
-        {
-            // Compute a spawn-weighted anchor from mob/npc .arr files so the ring centers on
-            // game content (the walled town, NPC clusters) rather than the terrain centroid.
-            // spec: Docs/RE/formats/terrain.md §1.4 — cell key formula. CONFIRMED.
-            // spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8. CONFIRMED.
-            // The spawn-anchor density is always computed with the smallest ring (radius=1 / 3×3
-            // neighbourhood) to find the tightest content cluster — not the streaming ring radius.
-            // A 5×5 neighbourhood would smear the density peak outward and miss tight clusters.
-            // The found anchor is then passed to PickRingCenter which selects a streaming center
-            // covering the anchor with the actual ringRadius.
-            // spec: Docs/RE/formats/terrain.md §12.2 — density anchor at radius 1; stream at radius 2. CONFIRMED.
-            const int DensityRadius = 1; // always 3×3 neighbourhood for anchor detection.
-            var (anchorX, anchorZ) = ComputeSpawnAnchor(Assets, configArea, cells, DensityRadius);
-            var (mx, mz, fullRing) = PickRingCenter(cells, anchorX, anchorZ, ringRadius);
-            TargetAreaId = configArea;
-            TargetMapX = mx;
-            TargetMapZ = mz;
-            GD.Print($"[RealWorldRenderer] Area {configArea}: {cells.Count} cells found — " +
-                     $"selected ({TargetMapX},{TargetMapZ}) " +
-                     $"(anchor=({anchorX:F1},{anchorZ:F1}), " +
-                     $"full {2 * ringRadius + 1}×{2 * ringRadius + 1} ring={fullRing}).");
-            return;
-        }
-
-        GD.Print($"[RealWorldRenderer] Area {configArea} has no .ted cells — scanning areas 0..20.");
-
-        // Auto-select: try areas 0 through 20 and take the first that has cells.
-        for (var area = 0; area <= 20; area++)
-        {
-            if (area == configArea) continue; // already tried
-            var areaCells = Assets.EnumerateTerrainCells(area);
-            if (areaCells.Count > 0)
-            {
-                const int DensityRadiusAuto = 1; // same fixed radius for auto-select.
-                var (anchorX, anchorZ) = ComputeSpawnAnchor(Assets, area, areaCells, DensityRadiusAuto);
-                var (mx, mz, fullRing) = PickRingCenter(areaCells, anchorX, anchorZ, ringRadius);
-                TargetAreaId = area;
-                TargetMapX = mx;
-                TargetMapZ = mz;
-                GD.Print($"[RealWorldRenderer] Auto-selected area {area}: {areaCells.Count} cells — " +
-                         $"cell ({TargetMapX},{TargetMapZ}) " +
-                         $"(full {2 * ringRadius + 1}×{2 * ringRadius + 1} ring={fullRing}).");
-                return;
-            }
-        }
-
-        // No cells found anywhere — keep configured defaults but warn clearly.
-        GD.PrintErr($"[RealWorldRenderer] WARNING: no .ted cells found in any area 0..20. " +
-                    $"Keeping defaults ({TargetMapX},{TargetMapZ}) — streaming will produce empty sectors.");
-    }
-
-    /// <summary>
     ///     Computes a spawn-density anchor by reading the area's <c>mob{tag}.arr</c> and
     ///     <c>npc{tag}.arr</c> files and finding the cell that maximises the number of spawn
     ///     records that fall within a neighbourhood of <paramref name="ringRadius" /> cells
@@ -336,41 +249,6 @@ public sealed partial class RealWorldRenderer
         var chosen = useFullRing ? bestFull : bestAny;
 
         return (chosen.MapX, chosen.MapZ, useFullRing);
-    }
-
-    /// <summary>
-    ///     Reads the "area=" integer key from client_dir.cfg.
-    ///     Returns 0 (the default) when the key is absent or unparseable.
-    /// </summary>
-    private static int ReadAreaFromConfig()
-    {
-        try
-        {
-            // Reuse ClientPathResolver's internal config reader by re-opening the same file.
-            // Duplicate the minimal read logic here to keep the coupling narrow.
-            // Fully-qualify to avoid ambiguity with the MartialHeroes namespace. spec: Godot API.
-            var absPath = ProjectSettings.GlobalizePath("res://client_dir.cfg");
-            if (!File.Exists(absPath)) return 0;
-
-            foreach (var rawLine in File.ReadLines(absPath))
-            {
-                var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-                var eq = line.IndexOf('=');
-                if (eq < 0) continue;
-                var k = line[..eq].Trim();
-                var v = line[(eq + 1)..].Trim();
-                if (k.Equals("area", StringComparison.OrdinalIgnoreCase) &&
-                    int.TryParse(v, out var parsed))
-                    return parsed;
-            }
-        }
-        catch
-        {
-            // Any I/O error → default 0.
-        }
-
-        return 0;
     }
 
     /// <summary>

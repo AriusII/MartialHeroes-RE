@@ -13,13 +13,19 @@
 //   Population colour (status==0; CORRECTION 2026-06-20, TWO ladders selected by the +6 load-valid flag):
 //     +6!=0 (raw count): >1200 red(6001) / >800 orange(6002) / >500 yellow(6003) / ≤500 green(4029).
 //     +6==0 (discrete level): ==4 red(6001) / ==3 orange(6002) / ==2 yellow(6003) / else green(4029).
-//   Commit gate: status(+2)==0 AND load(+4) < 2400 (not overloaded). spec: LoginWindow_OnEvent 0x5fa86a.
+//   Commit gate: status(+2)==0 AND load(+4) < 2400 (not overloaded). spec: frontend_layout_tables.md §4.2.
 //   Server display names: msg bank 5001..5040 → name_id = 5000 + server_id (out-of-range → 5901).
 //   Count label (+430): EMPTY — the "%4d / %4d" line is dead-debug, never drawn.
 //   Special row: SERVER-ID(+0) == 100 (NOT status) → 3 indicator quads A2 src(500,786) 60×39.
-//   Selection highlight: A4 src(700,18) 46×168 on the plate whose id == remembered Lastserver.
+//   Selection highlight: A4 src(700,18) 46×168 on the plate whose ServerId == NewServerIndex
+//     (uiconfig.lua-sourced NEW_SERVER_INDEX; CORRECTION 2026-06-21: NOT the Lastserver registry value).
+//     Lastserver is WRITTEN on commit (persist to registry); it is NOT the highlight key here.
+//   Visible plate order is STABLE: page i shows raw records [2i] and [2i+1] sequentially (CORRECTION
+//     2026-06-21). Fisher-Yates permutation hits a separate parallel id-vector only; must NEVER reorder
+//     displayed plates.
 //
 // spec: Docs/RE/specs/frontend_layout_tables.md §4
+// spec: Docs/RE/specs/frontend_layout_tables.md §4.2 (CORRECTION 2026-06-21)
 // spec: Docs/RE/specs/login_flow.md §2.1
 
 using System.Globalization;
@@ -27,6 +33,7 @@ using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.Screens.Layout;
+
 // ServerEntry (moved to engine-free layer)
 
 // LoginLayout, WidgetRect (moved to engine-free layer)
@@ -139,10 +146,12 @@ public sealed partial class ServerSelectSubView : Control
     private const int SpecialRowServerId = 100;
 
     // Default-selection highlight strip: atlas A4 (loginwindow_02.dds) src(700,18) 46×168, drawn on the
-    // plate whose ServerId matches the remembered last-server (registry Lastserver). The painter
-    // (0x5fcd09) compares record[+0] to the remembered id (object field this+0x554) and, on a match,
-    // repositions the strip to the plate's right edge (x = plate.dstX + plate.width − 48; y unchanged).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" / "Selection highlight strip".
+    // plate whose ServerId matches NEW_SERVER_INDEX (the single uiconfig.lua-sourced value).
+    // CORRECTION 2026-06-21: the highlight key is NEW_SERVER_INDEX, NOT the Lastserver registry value.
+    // Lastserver is written on commit (persist); whether it is read back to pre-highlight is done
+    // elsewhere and was not re-confirmed — do not assert it as this painter's behaviour.
+    // The painter repositions the strip to the plate's right edge (x = plate.dstX + plate.width − 48).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" (CORRECTION 2026-06-21).
     private const int HighlightSrcX = 700;
     private const int HighlightSrcY = 18;
     private const int HighlightW = 46;
@@ -200,11 +209,29 @@ public sealed partial class ServerSelectSubView : Control
     }
 
     /// <summary>
-    ///     Remembered last-selected server id (registry <c>Lastserver</c>), used to pre-highlight the plate on
-    ///     re-entry. <c>-1</c> = none (no highlight) — the default offline, since no Lastserver is read.
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight".
+    ///     The <c>NEW_SERVER_INDEX</c> value sourced from <c>uiconfig.lua</c>, used to pre-highlight the
+    ///     default server plate. <c>-1</c> = no highlight (default when uiconfig.lua does not supply a value).
+    ///     <para>
+    ///         CORRECTION 2026-06-21: the authoritative list painter compares each record's <c>ServerId</c>
+    ///         against this value — <strong>not</strong> against the <c>Lastserver</c> registry value.
+    ///         <c>Lastserver</c> is <em>written</em> on commit (persisted to registry); it is not the
+    ///         highlight key in this painter.
+    ///     </para>
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" (CORRECTION 2026-06-21).
     /// </summary>
-    public int LastServerId { get; set; } = -1;
+    public int NewServerIndex { get; set; } = -1;
+
+    /// <summary>
+    ///     Alias retained for call-site compatibility. Forwards to <see cref="NewServerIndex" />.
+    ///     The authoritative highlight key is <see cref="NewServerIndex" /> (NEW_SERVER_INDEX from
+    ///     uiconfig.lua); Lastserver is only written on commit — it is not read back by this painter.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.2 (CORRECTION 2026-06-21).
+    /// </summary>
+    public int LastServerId
+    {
+        get => NewServerIndex;
+        set => NewServerIndex = value;
+    }
 
     // -------------------------------------------------------------------------
     // Public API
@@ -303,7 +330,13 @@ public sealed partial class ServerSelectSubView : Control
             return;
         }
 
-        var firstIndex = _page * 2; // spec: frontend_layout_tables.md §4 "plate index = 2·page + slot"
+        // STABLE PLATE ORDER (CORRECTION 2026-06-21): page i always shows raw records [2i] and [2i+1]
+        // read sequentially from the raw record array. A Fisher-Yates permutation is performed each repaint,
+        // but it operates on a SEPARATE PARALLEL server-id vector (only observable effect: which id is
+        // persisted to the Lastserver registry). It NEVER reorders the visible plates. Do NOT shuffle
+        // the displayed rows.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "The on-screen plate order is STABLE" (CORRECTION 2026-06-21).
+        var firstIndex = _page * 2; // spec: frontend_layout_tables.md §4.2 "page i shows raw records [2i]/[2i+1]"
         var visibleCount = Math.Min(2, _servers.Count - firstIndex);
 
         int[] plateX = [PlateBaseX0, PlateBaseX1];
@@ -314,9 +347,11 @@ public sealed partial class ServerSelectSubView : Control
         {
             var idx = firstIndex + slot;
 
-            // Default-selection highlight (drawn BEHIND the plate): only when this plate's server id
-            // matches the remembered last-server. spec: §4.2 "Default-selection highlight".
-            if (LastServerId >= 0 && _servers[idx].ServerId == LastServerId)
+            // Default-selection highlight (drawn BEHIND the plate): only when this plate's ServerId
+            // matches NEW_SERVER_INDEX (uiconfig.lua-sourced). CORRECTION 2026-06-21: highlight key is
+            // NewServerIndex, not the Lastserver registry value. Lastserver is written on commit.
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" (CORRECTION 2026-06-21).
+            if (NewServerIndex >= 0 && _servers[idx].ServerId == NewServerIndex)
                 BuildSelectionHighlight(plateX[slot], PlateY);
 
             BuildPlate(plateX[slot], PlateY, actions[slot], idx, statusSrcX[slot]);
@@ -356,9 +391,13 @@ public sealed partial class ServerSelectSubView : Control
             }
     }
 
-    // Builds the default-selection highlight strip behind the plate at (x,y) whose server id matches the
-    // remembered last-server. atlas A4 src(700,18) 46×168, positioned at the plate's right edge
-    // (x = plate.dstX + plate.width − 48). spec: frontend_layout_tables.md §4.2 "Default-selection highlight".
+    // Builds the default-selection highlight strip behind the plate at (x,y) whose ServerId matches
+    // NEW_SERVER_INDEX (uiconfig.lua-sourced; CORRECTION 2026-06-21: not Lastserver).
+    // atlas A4 src(700,18) 46×168, positioned at the plate's right edge (x = plate.dstX + plate.width − 48).
+    // Draw order: this method is called BEFORE BuildPlate in RebuildVisiblePage, so AddChild here inserts
+    // the strip BEFORE the plate node — Godot draws earlier siblings behind later ones, placing the
+    // highlight strip behind the selected plate. spec: frontend_layout_tables.md §4.2 "Selection highlight
+    // strip" and "drawn behind the selected plate" (CORRECTION 2026-06-21).
     private void BuildSelectionHighlight(int x, int y)
     {
         Texture2D? strip = _atlas.SliceByPath(AtlasD, HighlightSrcX, HighlightSrcY, HighlightW, HighlightH);
@@ -431,19 +470,25 @@ public sealed partial class ServerSelectSubView : Control
 
     private void OnPlateClicked(int actionId)
     {
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "index = (action−400) + 2·page"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "index = (action−400) + 2·page"
         var idx = 2 * _page + (actionId - ActionPlate0);
         if (idx >= 0 && idx < _servers.Count)
         {
             var entry = _servers[idx];
+
+            // Commit guard: status_code == 0 && load < 2400. Failure = silent no-op.
+            // ServerEntry.IsSelectable encodes exactly this: StatusCode == 0 && Load < 2400
+            // (confirmed in MartialHeroes.Client.Presentation.Screens.ServerEntry).
+            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Commit guard".
             if (!entry.IsSelectable)
             {
                 GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
                          $"unavailable (status={entry.StatusCode}, load={entry.Load}). " +
-                         "spec: frontend_layout_tables.md §4.");
+                         "spec: frontend_layout_tables.md §4.2 commit guard: status==0 && load<2400.");
                 return;
             }
 
+            // Intent only — passive view; LoginWindow lane wires SelectServerAsync → connect.
             EmitSignal(SignalName.ServerSelected, entry.ServerId);
         }
     }

@@ -19,13 +19,30 @@ public sealed partial class GamePacketHandler
     /// <summary>
     ///     3/5 — enter-world acknowledgement / post-login account-ack. Drives the scene spine to Load
     ///     (state 2) and seeds the account character-count authoritatively from char_count@40. 3/5 is
-    ///     state-agnostic and UNSOLICITED — it is processed regardless of any prior 1/9 request. spec:
-    ///     Docs/RE/specs/client_runtime.md §7.5.2; Docs/RE/packets/3-5_enter_game_response.yaml.
+    ///     state-agnostic and UNSOLICITED — it forces Load regardless of any prior 1/9 request.
+    ///     <para>
+    ///         <b>Enter-ladder discrimination.</b> 3/5 is overloaded: it is BOTH the tail of the enter
+    ///         ladder (1/9 → 3/5 → 4/1) AND an unsolicited post-login account-ack the replica pushes right
+    ///         after the 3/4 roster (login_flow.md §1 step 7). Only the enter-ladder 3/5 may arm the
+    ///         "enter-world confirmed" latch that lets the following load terminate at InGame; the
+    ///         post-login 3/5 must leave it disarmed so the load lands at Select via the roster — otherwise
+    ///         the loading-grace timer would carry the client into the world with no 1/9 ever sent (the live
+    ///         enter-world fidelity gap). The discriminator is the single in-flight latch: 1/9 ARMS it and
+    ///         4/1 (not 3/5) CLEARS it (net_contracts.md §1.3), so an armed latch at 3/5 means an enter is
+    ///         genuinely pending. We DELIBERATELY do not clear the latch here (only 4/1 clears it).
+    ///     </para>
+    ///     spec: Docs/RE/specs/client_runtime.md §7.5.2 / §7.9.4; Docs/RE/specs/login_flow.md §1 step 7 /
+    ///     step 9 / §3.4 / §3.5; Docs/RE/specs/net_contracts.md §1.3 (1/9 arms / 4/1 clears; 3/5 does NOT);
+    ///     Docs/RE/packets/3-5_enter_game_response.yaml.
     /// </summary>
     public void Handle(in SmsgEnterGameAck packet)
     {
         _ = packet.BillingFlag; // available for a future use case; billing behavior is not invented here.
-        _sceneStateMachine?.OnEnterGameAck();
+
+        // Arm the enter-world latch only when an enter request (1/9) is genuinely in flight. spec:
+        // net_contracts.md §1.3 (the in-flight latch is the enter-ladder pending primitive).
+        var enterRequestPending = _inFlightLatch?.IsArmed ?? false;
+        _sceneStateMachine?.OnEnterGameAck(enterRequestPending);
 
         // Seed the account char-count authoritatively from char_count@40. Set() clamps 0..5, so passing the
         // raw u32 is safe; the int cast is guarded against overflow. 3/5 is unsolicited (NOT gated on a prior
@@ -158,39 +175,50 @@ public sealed partial class GamePacketHandler
     }
 
     // -------------------------------------------------------------------------
-    // 3/23 — character-create result
+    // 3/23 — select-screen character level and status update (SmsgCharStatusBytesByName)
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     3/23 — character-create result. Pairs with the CreateCharacterRequestedEvent the select use-case
-    ///     emits for a blank slot. On success the Code byte is the assigned slot id and the account char
-    ///     count is incremented; on failure Code is an error code (0xC8..0xD4). spec:
-    ///     Docs/RE/specs/login_flow.md §5.4; Docs/RE/packets/SmsgCharCreateResult.
+    ///     3/23 — select-screen character level and status update (28-byte body, by-name roster patch).
+    ///     Binary-confirmed (Phase 2b, build 263bd994): this is NOT a 12-byte char-create result.
+    ///     When HasCustomText is non-zero the handler matches CharacterName in the lobby roster and
+    ///     updates StatusValue and Level. When HasCustomText is 0 it switches on StatusCode to show a
+    ///     timed status notice. If the local player is instantiated it updates the global status flag and
+    ///     the local player level global. Create is acked via 3/7 SmsgCharManageResult + a refreshed 3/4
+    ///     char list — NOT via a 3/23 create-result handler.
+    ///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml;
+    ///     Docs/RE/specs/net_contracts.md §2.2.
     /// </summary>
-    public void Handle(in SmsgCharCreateResult packet)
+    public void Handle(in SmsgCharStatusBytesByName packet)
     {
-        const byte success = 1; // result 1 = success. spec: §5.4.
-        var ok = packet.Result == success;
-
-        // On success the account char count is incremented. spec: §5.4.
-        var charCount = _accountCharacters?.CharacterCount ?? 0;
-        if (ok && _accountCharacters is not null) charCount = _accountCharacters.Increment();
-
-        // Code is the assigned slot id on success, or the error code on failure. spec: §5.4.
-        var assignedSlotId = ok ? packet.Code : (byte)0;
-        var errorCode = ok ? (byte)0 : packet.Code;
-
-        _eventBus.Publish(new CharCreateResultEvent(
-            ok, assignedSlotId, errorCode, packet.Value1, packet.Value2, charCount));
+        // When HasCustomText is non-zero: by-name roster patch — update the matching slot's
+        // StatusValue (character status / PK / faction byte) and Level fields.
+        // When HasCustomText is 0: code-based timed status notice (shown by presentation).
+        // The application layer surfaces these as a roster-status event for the presentation to act on.
+        // spec: Docs/RE/packets/3-23_char_select_status_update.yaml (handler behavior).
+        _eventBus.Publish(new CharStatusBytesByNameEvent(
+            packet.HasCustomText != 0,
+            packet.StatusCode,
+            packet.StatusValue,
+            packet.Level));
     }
 
     /// <summary>
-    ///     3/100 — generic character-management action/result code. Feeds the Campaign-15 scene spine with
-    ///     the exact result-code table (0, 1..4/7, 202/203/232, out-of-range). spec:
-    ///     Docs/RE/opcodes.md; Docs/RE/specs/client_runtime.md §7.5.2.
+    ///     3/100 — generic character-management action/result code. Feeds the scene spine with the exact
+    ///     result-code table (0, 1..4/7, 202/203/232, out-of-range) AND publishes the decoded 4-byte code
+    ///     so the presentation can surface the reason (the live log left this code undecoded). When a 3/100
+    ///     arrives during the enter phase (a 1/9 was sent and the server answered 3/100 instead of the 4/1
+    ///     world tick), the scene machine treats it as a REJECTION and returns to char-select rather than
+    ///     entering the world. spec: Docs/RE/opcodes.md; Docs/RE/specs/client_runtime.md §7.5.2;
+    ///     Docs/RE/specs/login_flow.md §1 step 6 (coded outcome) / step 9 (enter only on 3/5→4/1).
     /// </summary>
     public void Handle(in SmsgCharActionResult packet)
     {
+        // Surface the raw 4-byte action-result code so the rejection reason is VISIBLE (it was not decoded
+        // in the live log). Code 0 = success; any non-zero code is a rejection per the §7.5.2 table.
+        // spec: Docs/RE/specs/login_flow.md §1 step 6 (a coded outcome shows a message); §7.5.2.
+        _eventBus.Publish(new CharActionResultEvent(packet.Result, packet.Result != 0));
+
         var result = packet.Result > int.MaxValue ? int.MaxValue : (int)packet.Result;
         _sceneStateMachine?.OnCharActionResult(result, _world.LocalActor is not null);
     }
@@ -246,6 +274,11 @@ public sealed partial class GamePacketHandler
         var builder = ImmutableArray.CreateBuilder<CharacterListSlot>();
         var cursor = SmsgCharacterListHeader.HeaderSize;
 
+        // CA2014: scratch buffer hoisted out of the per-slot loop (stackalloc-in-loop). Reuse is safe
+        // because ReadVisibleGearGids fully overwrites all 6 entries each call and ImmutableArray.Create
+        // snapshots them before the next iteration overwrites the buffer.
+        Span<uint> gearScratch = stackalloc uint[SpawnDescriptorReader.VisibleGearSlots.Length];
+
         // Hard, bounded iteration of exactly 5 slots (indices 0..4); the list never references a slot
         // beyond 4. spec: login_flow.md §3.2 / §7 (Char-list maximum slots = 5).
         for (var slot = 0; slot < CharacterSelectionStore.MaxSlots; slot++)
@@ -266,9 +299,17 @@ public sealed partial class GamePacketHandler
             // world_x/world_z at +0x4C/+0x50. Reusing the actor.md offsets for decode consistency; the
             // §3.2 offset is unconfirmed. The X/Z (vs X/Y) axis pairing is itself flagged debugger-pending
             // in §3.2. spec: Docs/RE/structs/actor.md / frontend_scenes.md §3.2
+            // Decode the appearance-driver fields the layer-05 preview row renders the REAL character
+            // from (internal_class is the skeleton driver, NOT server_class). The six visible-gear gids
+            // are the overlay slots {3,4,6,2,11,14} read out of the +0x58 equip table.
+            // spec: Docs/RE/packets/3-1_character_list.yaml (Sub-block 1 + APPEARANCE DRIVER).
+            reader.ReadVisibleGearGids(gearScratch);
+            var equipGids = ImmutableArray.Create(gearScratch);
+
             builder.Add(new CharacterListSlot(
                 slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp(),
-                reader.ReadWorldX(), reader.ReadWorldZ()));
+                reader.ReadWorldX(), reader.ReadWorldZ(),
+                reader.ReadInternalClass(), reader.ReadAppearanceVariant(), reader.ReadFaceA(), equipGids));
 
             // Retain the RAW per-slot record (880 descriptor + 96 stats + 1 flag byte) so SelectCharacterAsync
             // can detect "@BLANK@", and the 3/14 handler can materialize the local player. spec: login_flow.md §3.5.

@@ -111,8 +111,17 @@ public static class HudFont
         {
             FontNames = desc.FaceNames,
             FontWeight = desc.Weight == 0 ? 400 : desc.Weight,
-            Antialiasing = TextServer.FontAntialiasing.Lcd,
-            Hinting = TextServer.Hinting.None
+            // No kerning table in the original (CODE-CONFIRMED: body text uses fixed-advance
+            // charWidth per character, no per-glyph kerning table).
+            // spec: Docs/RE/specs/ui_system.md §6.3 — "no per-glyph kerning or proportional-
+            //   metrics table for body text; drawn width = charWidth × character count".
+            // Disable sub-pixel positioning to most closely match the fixed-advance monospace grid.
+            SubpixelPositioning = TextServer.SubpixelPositioning.Disabled,
+            // No hinting — the D3DXCreateFontA quality=default maps to no-hinting in practice.
+            // spec: Docs/RE/specs/ui_system.md §6.1 — "quality=default" for all slots.
+            Hinting = TextServer.Hinting.None,
+            // Antialiasing matched to the D3DXCreateFontA default output quality.
+            Antialiasing = TextServer.FontAntialiasing.Gray
         };
 
         return sf;

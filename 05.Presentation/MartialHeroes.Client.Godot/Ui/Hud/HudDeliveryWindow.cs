@@ -324,8 +324,7 @@ public sealed partial class HudDeliveryWindow : Control
         AddChild(new Label
         {
             Name = "DeliveryListStub",
-            Text = "// TODO(capture): delivery list populate. S2C opcode unknown (capture-pending).\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.21.7.",
+            Text = string.Empty,
             Position = new Vector2(10f, PanelH - 48f),
             Size = new Vector2(PanelW - 20f, 40f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,

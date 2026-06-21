@@ -207,6 +207,15 @@ public sealed class BgtextureLstCatalog
     }
 
     /// <summary>
+    ///     The empty catalog (zero records). Returned when the real <c>bgtexture.lst</c> is absent
+    ///     (offline / no VFS): every pool-slot lookup yields <see langword="null" /> so no texture is
+    ///     resolved and nothing is fabricated. The packed binary <c>.lst</c> is the sole runtime source —
+    ///     its absence means an empty pool, not a synthesised stand-in.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md — ".lst is the file the loader consumes": CONFIRMED.
+    /// </summary>
+    public static BgtextureLstCatalog Empty { get; } = new([]);
+
+    /// <summary>
     ///     Total number of records (equals <c>record_count</c> from the file header).
     ///     spec: Docs/RE/formats/bgtexture_lst.md §Header layout — record_count u32LE @ 0: CONFIRMED.
     /// </summary>

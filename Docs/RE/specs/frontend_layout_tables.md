@@ -6,7 +6,7 @@ ida_reverified: 2026-06-19
 anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending); SERVER-LIST NAME/STATUS/POPULATION RESOLVERS CORRECTED 2026-06-20 (see §4.1) — name bank is FLAT 5001+ServerId (the prior "5301-5440 banked resolver" is DROPPED; 5301/5101/5201/5401/5421 = discarded cache warm-up), status caption = 4029+StatusCode (4029..4032), population colour keyed on LoadCount (1200/800/500 → 6001 red / 6002 orange / 6003 yellow / green default, siblings 6004 maintenance + 6005 cur/max), 8-byte record {ServerId i16@+0, StatusCode i16@+2, LoadCount i16@+4, gate/flag i16@+6} with array ptr + count as OBJECT FIELDS (stale "+388" count offset DROPPED), StatusCode 100 = selectable sentinel (display-only); residual live-pending (6-D) = ServerId-vs-ServerId-1 off-by-one between call sites, runtime StatusCode value semantics, +6 gate nonzero meaning
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending); SERVER-LIST NAME/STATUS/POPULATION RESOLVERS CORRECTED 2026-06-20 (see §4.1) — name bank is FLAT 5001+ServerId (the prior "5301-5440 banked resolver" is DROPPED; 5301/5101/5201/5401/5421 = discarded cache warm-up), status caption = 4029+StatusCode (4029..4032), population colour keyed on LoadCount (1200/800/500 → 6001 red / 6002 orange / 6003 yellow / green default, siblings 6004 maintenance + 6005 cur/max), 8-byte record {ServerId i16@+0, StatusCode i16@+2, LoadCount i16@+4, gate/flag i16@+6} with array ptr + count as OBJECT FIELDS (stale "+388" count offset DROPPED), StatusCode 100 = selectable sentinel (display-only); SERVER-LIST per-render SHUFFLE + Lastserver vs connected-id RESOLVED 2026-06-21 (visible plates are STABLE raw records [2i]/[2i+1]; the Fisher-Yates permutation hits a parallel id-vector whose only effect is the Lastserver value; the old "ServerId-vs-ServerId-1 off-by-one" was two different arrays, not an off-by-one; default-highlight key = NEW_SERVER_INDEX, not Lastserver); residual live-pending (6-D) = runtime StatusCode value semantics only
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -140,7 +140,7 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | ID label plate | image | 340 | 30 | 38 | 13 | 0 | 398 | A1 | — | "ID" caption graphic |
 | PW label plate | image | 507 | 30 | 49 | 13 | 38 | 398 | A1 | — | "Password" caption graphic |
 | Save-ID label plate | image | 619 | 86 | 67 | 13 | 87 | 398 | A1 | — | small notice/caption strip |
-| **ID textbox** | textbox | 390 | 32 | 102 | 13 | 615 | 404 | A1 | 109 | IME mode 16; maxlen 6; **unmasked** (mask bit clear); font slot 0 |
+| **ID textbox** | textbox | 390 | 32 | 102 | 13 | 615 | 404 | A1 | 109 | IME mode 16; **maxlen 16** (GAP-4, §2.7); **unmasked** (mask bit clear); font slot 0 |
 | **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; **masked** (mask bit set; `*` glyph, 6 px/char); font slot 0 — see §2.7 |
 | **Save-ID checkbox** | checkbox | 694 | 86 | 13 | 13 | off 717,398 / on 730,398 | A1 | 104 | 13×13; initial state seeded from saved-id (see §2.5) |
 | **OK / Login button** | button3 | 456 | 64 | 112 | 39 | N266,398 / H490,398 | A1 | 103 | gated on the game.ver index-5 check before advancing to validate (§2.4) |
@@ -377,8 +377,10 @@ see §5/§6. The selected server id persists to registry `HKLM\SOFTWARE\crspace\
 ### 2.6 Credential hand-off (sub-state 40)
 
 Build a single TAB-delimited string `"<account>\t<password>\t<PIN>\t<host> <port>"` (host/port from
-the channel-endpoint fetch, space-separated). Field caps: account < 20, password = 17, PIN < 5
-(≤4 digits). This feeds the secure-context builder → login packet **0x2B** (see `packets/login.yaml`,
+the channel-endpoint fetch, space-separated). **Hand-off buffer caps** (the downstream TAB-string copy,
+NOT the per-keystroke input caps): account < 20, password = 17, PIN < 5 (≤4 digits). The **per-keystroke
+input caps** enforced by the textboxes themselves are smaller — **ID = 16, password = 12** (see §2.7 /
+GAP-4) — so these hand-off buffers never bind. This feeds the secure-context builder → login packet **0x2B** (see `packets/login.yaml`,
 `login_flow.md`). A 30 s connect timeout is armed.
 
 ### 2.7 Credential textbox construction & masking (element-level pass, 2026-06-19)
@@ -391,9 +393,12 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
   (the high bit) is set**, the field draws the literal glyph `*` once per entered character, advancing
   **6 px per character**, in font slot 0. When the mask bit is clear, the field draws the stored string
   left-aligned (with horizontal scroll once the character count overflows the visible width).
-  - **ID field:** mask bit clear → shown in clear; IME mode 16; the low bits of the length/flags field
-    encode a small in-field length seed (the effective max length is enforced by the input handler, not
-    by construction — **UNVERIFIED** exact cap).
+  - **ID field:** mask bit clear → shown in clear; IME mode 16. **Max length = 16 characters (CONFIRMED,
+    static IDA, 2026-06-21 — GAP-4 resolved):** the textbox carries a per-field max-length cap set to 16 at
+    login-window construction, enforced live by the per-keystroke and Ctrl+V paste input handlers (a typed
+    or pasted character past 16 is rejected). The `6` quoted by an earlier reading was the field's
+    **character-filter / charset mask**, not a length. The password field's equivalent max-length cap is
+    **12**.
   - **PW field:** mask bit set → masked; IME mode 12. Mask glyph = `*`, 6 px advance.
 - **The IME mode (16 / 12) is NOT the mask switch.** Masking is purely the length/flags high bit; the
   IME mode only selects the IME conversion behavior of the field. (DIFF vs any reading that ties the PW
@@ -628,9 +633,14 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
   ladder above.
 
 **`live-pending (6-D)` items for the server-list resolvers** (debugger-confirmable, see §4.2):
-- The **ServerId vs ServerId-1 off-by-one** between call sites — a cell-helper passes `ServerId − 1`
-  while the full plate painters pass the raw 1-based `ServerId`. Which call site paints the **visible**
-  plate, and whether server #1's plate maps to the `5001` record, is `live-pending (6-D)`.
+- ~~**ServerId vs ServerId-1 off-by-one** between call sites~~ — **RESOLVED (static IDA, 2026-06-21):**
+  this was never an off-by-one. It is **two different arrays**. The **connected / committed** server id is
+  read from the **raw record array** (record field `ServerId` at +0). The **`Lastserver` registry** value is
+  read from a **separate, per-render-permuted parallel server-id vector** (indexed by the clicked record
+  position, or element [0] for the single-server auto-select path). So the value persisted to `Lastserver`
+  can legitimately differ from the displayed / connected id — they come from two distinct arrays, not from a
+  one-off index slip. The visible plate order itself is **stable** (page i shows raw records [2i] and [2i+1]
+  in order — see §4.2). No longer `live-pending`.
 - The **runtime `StatusCode` value semantics** — which integer means "available" vs "full" (beyond the
   100 = selectable sentinel) — is `live-pending (6-D)`.
 - ~~**When the +6 gate / flag field is nonzero**~~ — **RESOLVED (static IDA, 2026-06-20):** `+6` is the
@@ -676,10 +686,15 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
 - **Record decode** (8-byte LE record, in-memory list; field table + resolvers in §4.1; see also
   `packets/lobby.yaml`):
   `{server_id (+0), status_code (+2), load (+4), open_time/flags (+6)}`. Display index from a page =
-  `record = (action − 400) + 2·page`. **On-screen row order is shuffled each repaint** (a per-render
-  permutation is applied), so the visible row → record-byte-position mapping is **not** stable across
-  renders (do not assume row 0 = the first record). The page stride is 2 records; page-jump via the
-  115..124 strip is absolute (button i → page i), not relative ±1.
+  `record = (action − 400) + 2·page`. **The on-screen plate order is STABLE (CORRECTION, static IDA,
+  2026-06-21):** page i always shows raw records **[2i]** and **[2i+1]**, read sequentially from the raw
+  record array — the visible row → record-byte-position mapping **is** stable across renders. A per-render
+  Fisher-Yates permutation **is** performed each repaint, but it operates on a **separate parallel
+  server-id vector**, NOT on the visible plates; its **only** observable effect is which server id is
+  persisted to the `Lastserver` registry (see Persist below and the two-arrays resolution in the §4.2 live-pending list). So a
+  port must draw the plates in raw record order and must NOT shuffle the displayed rows. (This supersedes
+  the earlier "on-screen row order is shuffled each repaint / row 0 ≠ first record" note.) The page stride
+  is 2 records; page-jump via the 115..124 strip is absolute (button i → page i), not relative ±1.
 - **Commit guard:** `status_code == 0 && load < 2400` → write selected server_id, persist Lastserver,
   advance to channel-endpoint fetch (port 10000 + server_id). Selection is a **2D button hit**
   (OnEvent action 400/401), **not** a 3D ray-pick (that belongs to character-select — do not conflate).
@@ -708,9 +723,13 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
   destination corner `(anchorX, anchorY)` (the plate's dst-X/dst-Y fields): quad 0 → `(anchorX−30,
   anchorY−13)`; quads 1 and 2 → `(anchorX+139, anchorY+13)` (the two right quads overlap exactly — a
   faithful duplicate, not a third distinct slot). Only the dst-X/Y are rewritten; size/source unchanged.
-- **Default-selection highlight:** the painter compares each record's id against the remembered last
-  server (registry `Lastserver`, read at boot) to draw the default highlight; the `NEW_SERVER_INDEX`
-  value (the only `uiconfig.lua`-sourced number) marks the "new server" badge slot.
+- **Default-selection highlight (CORRECTION, static IDA, 2026-06-21):** the authoritative list painter
+  draws the default highlight by comparing each record's `ServerId` (+0) against **`NEW_SERVER_INDEX`**
+  (the single `uiconfig.lua`-sourced value) — **not** against the `Lastserver` registry value. The earlier
+  "compares against the remembered last server" wording is superseded: in this painter the default-highlight
+  key is `NEW_SERVER_INDEX`. (`Lastserver` is **written** on commit — see Persist below; whether it is read
+  back to pre-highlight a server is done elsewhere and was **not** re-confirmed this pass, so do not assert
+  it as this painter's behaviour.)
 - **Persist:** committing a server writes registry `HKLM\SOFTWARE\crspace\do : Lastserver` (REG_DWORD
   = server id); the next launch reads it back to pre-highlight the previously selected server.
 

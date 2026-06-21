@@ -4,8 +4,8 @@ namespace MartialHeroes.Client.Application.Contracts.Hud;
 
 /// <summary>
 ///     The single facade the World-Scene HUD resolves to bind its widgets to application-layer state, and
-///     that the packet handlers (today: demo/stub publishers; tomorrow: the 4/102 buff, 5/9 exp, 5/52
-///     combat, 5/7 chat, and target-selection handlers) publish onto.
+///     that the packet handlers (the 4/102 buff, 5/9 exp, 5/52 combat, 5/7 chat, and
+///     target-selection handlers) publish onto.
 /// </summary>
 /// <remarks>
 ///     <para>

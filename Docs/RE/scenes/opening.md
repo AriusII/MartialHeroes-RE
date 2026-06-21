@@ -1,13 +1,35 @@
-verification: independently re-confirmed 2026-06-19 directly from the doida.exe binary (build 263bd994,
-  element-level front-end construction pass, static IDA) — the Opening construct/tick routines were
-  re-read at the element/asset/src-rect level: the 4 splash panels (openning_001..004), the
-  scenario-crawl quad (openning_scenario.dds 1024×2048, dst x=screenW/2−512 / y=screenH−200), the
-  single-texture alpha-over-black crossfade (alpha ceiling 250, +1/tick, ~17500 ms dwell), the crawl
-  scroll math (1000 ms gate, +30 u/s, clamp 1843, manual scrub actions 1004/1005 + wheel ±30), and the
-  skip button (mainwindow.dds src N/H (761,165) / P (634,165), 110×32, action 100, persists
-  [OPENNING] SKIP=1) all CONFIRMED — no corrections. (Prior basis: 2026-06-18 scene reconstruction —
-  SKIP routing re-read from the application entry point; crawl never auto-finishes; skip is the sole
-  exit. Outcome CONFIRMED.)
+verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994, full 2D-GUI
+  cartography pass, static IDA). The COpeningWindow class chain
+  (COpeningWindow : GUWindow : GUPanel : GUComponent + the Diamond::EventHandler MI base at +0xBC),
+  the deferred child-build virtual (primary vtable slot 14), the exact TWO-child inventory
+  (one GUComponent image + one GUButton, action-id 100), the four banner texture-handle members,
+  the per-frame Tick / TickStep FSM, the EventHandler-base skip-gate slot, and the [OPENNING] SKIP ini
+  persistence were ALL re-read at the element / member-offset / atlas-src-rect level and CONFIRMED;
+  this pass adds the full COMPONENT TREE (member-offset map), the numbered CREATION ORDER with
+  geometry + action-ids, the per-component 2D-ASSET LINKAGE table, the dynamic / sub-state behaviour,
+  and the text/font/caption sourcing (§11), cross-referenced to the shared GU* framework
+  (structs/gucomponent.md, structs/guwindow.md, specs/ui_system.md). Three prior framings were
+  corrected this pass: (a) the four openning_00N panels are raw texture-handle members drawn by the
+  slideshow FSM, NOT GU child components — there are exactly TWO live GU children; (b) actions
+  1004/1005 are per-frame INPUT-POLL ids inside the crawl updater, not GU action-ids routed through the
+  event handler (the only GU action-id is 100); (c) the mouse-wheel crawl scrub and the auto crawl-Y
+  use TWO SEPARATE position fields. The slideshow holds terminally on panel 4 and the fade-exit branch
+  is vestigial: SKIP is the SOLE exit. A completeness audit this pass re-read the ctor, build method,
+  Tick / TickStep, the crawl + slideshow updaters, the draw path, the skip-gate event handler, and both
+  pre-build helpers, and CONFIRMED the inventory is exhaustive — exactly TWO GU children (no third
+  add-call anywhere), all six DDS textures traced to literal VFS paths, every action accounted for
+  (GU action-id 100; keyboard 10/27/32; mouse-wheel event-type 8; input-poll 1004/1005), and every
+  sub-state branch mapped. It also CORRECTED one prior struct framing: the subobject at primary +0xE8
+  (object+232) is the SCENE RENDER-PASS DISPATCHER (sky/background + opaque-world + transparent/particle
+  pass callbacks; caches the manager singletons), NOT an "embedded MessageBox" — there is no modal,
+  toast, gauge, or error box anywhere in this scene. (Prior basis: 2026-06-19 element-level front-end construction
+  pass — the 4 splash panels (openning_001..004), the scenario-crawl quad (openning_scenario.dds
+  1024×2048, dst x=screenW/2−512 / y=screenH−200), the single-texture alpha-over-black crossfade
+  (alpha ceiling 250, +1/tick, ~17500 ms dwell), the crawl scroll math (1000 ms gate, +30 u/s, clamp
+  1843, manual scrub 1004/1005 + wheel ±30), and the skip button (mainwindow.dds src N/H (761,165) /
+  P (634,165), 110×32, action 100, persists [OPENNING] SKIP=1) all CONFIRMED. 2026-06-18 scene
+  reconstruction — SKIP routing re-read from the application entry point; crawl never auto-finishes;
+  skip is the sole exit. Outcome CONFIRMED.)
 
 # Opening Scene Dossier — engine state 3 (post-login intro)
 
@@ -387,3 +409,267 @@ divergence is RESOLVED, §7):
   `05.Presentation/MartialHeroes.Client.Godot/Ui/Scenes/Opening/OpeningWindow.cs`,
   `05.Presentation/MartialHeroes.Client.Godot/Scene/Controllers/OpeningScene.cs`.
 - **Glossary / provenance:** `Docs/RE/names.yaml`, `Docs/RE/journal.md`.
+- **Shared GUI framework (cited in §11):** `Docs/RE/structs/gucomponent.md`,
+  `Docs/RE/structs/guwindow.md`, `Docs/RE/specs/ui_system.md`.
+
+---
+
+## 11. 2D GUI component reference (full cartography)
+
+> **Scope of this section.** §2–§6 above give the architectural / animation / asset view; this
+> section is the **complete 2D-GUI element catalogue** for the Opening window: every element with its
+> role, widget class, parent, and object member-offset; the exact numbered build sequence with literal
+> geometry and action ids; the per-component atlas / sub-rect / VFS linkage; the dynamic / sub-state
+> behaviour; and the text / font / caption sourcing. It is built strictly on the shared
+> `Diamond::GU*` widget toolkit documented in `structs/gucomponent.md`, `structs/guwindow.md`, and
+> `specs/ui_system.md`. Member offsets are byte offsets relative to the object start (interop facts),
+> never memory addresses. Every sub-rect below is a **1:1 atlas blit** (destination w/h equals source
+> w/h; no UV scaling) per the universal builder contract. The defining feature of this scene is how
+> **little** of the toolkit it uses — only two live GU children, no labels, no input box, no modal.
+
+### 11.0 Class identity & the shared GU* framework
+
+The Opening scene is one branch of the in-house `Diamond::GU*` widget toolkit (see
+`structs/gucomponent.md §hierarchy` and `specs/ui_system.md §1`). The scene's own RTTI-confirmed
+class chain, with the multiple-inheritance event-handler base:
+
+- `COpeningWindow : GUWindow : GUPanel : GUComponent`, plus the multiple-inheritance mixin base
+  `Diamond::EventHandler` whose subobject (its own secondary vtable) sits at **+0xBC** — exactly the
+  MI shape `structs/guwindow.md` documents for every `GUWindow`. **The window IS its own event sink:**
+  the skip-gate handler is overridden on this secondary EventHandler base, not on the primary chain.
+- Object size **0x2D0 (720 bytes)**, allocated by the boot scene state machine for engine state 3.
+  Naturally-aligned (4-byte) MSVC layout, **not** `Pack=1` — the same alignment rule as every other
+  `GU*` object (`structs/gucomponent.md §layout`).
+- Widget leaf classes actually instantiated as children: just two — `GUComponent` (a plain image
+  widget) and `GUButton` (the shared 3-state sprite + label).
+
+There is **no dedicated MessageBox / Dialog / Toast / Gauge / Slider / Tooltip widget class** in this
+scene (none anywhere — the toolkit composes those from primitives; `specs/ui_system.md §1`). The
+Opening uses **no `GULabel`, no `GUTextbox`, no nested `GUPanel`, and no modal** at all. The shared
+13-slot `GUComponent` virtual interface (destructor · setVisible · setPosition · getPosition ·
+hitTest(vec) · hitTest(x,y) · onEvent · onDraw · onUpdate · computeTransform · getHitActionId ·
+onMouseEnter · onMouseLeave; container subclasses append a child-sweep slot), the `GUButton` 3-state
+priority (disabled > pressed > hover > normal), and the `GUTextbox` password mask are all defined once
+in `specs/ui_system.md` / `structs/gucomponent.md` and are **not** re-specified per scene here.
+
+**Where the tree is built.** Two `COpeningWindow` constructors exist. The heavy scene ctor (the one
+WinMain state-3 reaches) chains the `GUWindow` base ctor with the window name **`"Opening"`**, installs
+both vtables (primary + the EventHandler-base secondary), seeds the runtime latches (see §11.4), and
+zeroes a 0x20-byte scratch region — it creates **no** children. The complete child set is created by
+**one** virtual build method on `COpeningWindow` — the **primary vtable slot 14** override (vtable
++0x38), the only `COpeningWindow`-specific primary-vtable override. WinMain's state-3 case invokes it
+on the object right after construction, before the scene loop begins. The secondary (EventHandler)
+vtable has 2 slots: slot 0 a subobject deleting-destructor thunk, **slot 1** the skip-gate `onEvent`
+override.
+
+### 11.1 COMPONENT TREE — every element (role · widget class · parent · member offset)
+
+`COpeningWindow` child / texture-handle members (offsets are object-relative; the `GUWindow` shell —
+including the `EventHandler` MI base at +0xBC and the embedded `CmdHandler`/`GView`/per-window texture
+list — occupies the low region, the Opening-specific state block sits high, near the 0x2D0 end):
+
+| Member (canonical) | Offset | Widget / type | Parent | Role |
+|---|---|---|---|---|
+| `scenarioImageChild` | +0x294 | `GUComponent` (image) | window (GUPanel child) | The vertical scenario / credits crawl surface — one whole 1024×2048 quad, **no** sub-rect slicing. Added with plain AddChild (**no action id**). |
+| `skipButtonChild` | +0x29C | `GUButton` (3-state) | window (GUPanel child) | Top-right SKIP button; click emits **action-id 100**. Added with AddChildWithAction(100). |
+| `bannerTex1` | +0x2A4 | `IDirect3DTexture9*` handle | — (not a GU child) | Intro banner strip 1 (`openning_001.dds`) — drawn directly by the slideshow FSM. |
+| `bannerTex2` | +0x2A8 | `IDirect3DTexture9*` handle | — | Intro banner strip 2 (`openning_002.dds`). |
+| `bannerTex3` | +0x2AC | `IDirect3DTexture9*` handle | — | Intro banner strip 3 (`openning_003.dds`). |
+| `bannerTex4` | +0x2B0 | `IDirect3DTexture9*` handle | — | Intro banner strip 4 (`openning_004.dds`, terminal). |
+| `bannerState` | +0x2C4 | i32 | — | Current banner index 1..4 (selects which `bannerTexN` the slideshow draws; init = 1). |
+| `crossfadeAlpha` | +0x2C8 | byte (0..250) | — | Device-wide fade alpha for the banner quad and the fade-out ramp (init = 0xFA / 250). |
+| `finishingFlag` | +0x2C9 | byte | — | Final-fade-armed latch read by TickStep; **only ever written = 0** in the ctor (the slideshow never sets it — see §11.4). |
+| `wait_flag` | +0x2CA | byte | — | One-shot ~1000 ms scenario-crawl startup gate (init = 1). |
+| `scenarioScrollOffset` | this+384 (0x180) | float/i32 | — | Auto crawl-Y accumulator (advanced 30 u/s after the gate, clamp 1843; also nudged by input-poll 1004/1005). **Distinct** from the wheel-scroll field. |
+| (mouse-wheel scroll field) | (separate member) | i32 | — | Wheel/drag scroll offset adjusted by the skip-gate handler's UI-event-type-8 branch (±30, clamp 30..1833/1843). NOT the same field as `scenarioScrollOffset`. |
+| `closingFlag` | this+525 (0x20D) | byte | — | Closing status latch set by the skip handler (status only; has no reader inside the cluster — the loop exit is driven by the close vfuncs, §11.4). |
+
+Sub-tree (the GUPanel child vector holds exactly two entries, in paint / Z order = insertion order):
+
+- **`COpeningWindow` (GUPanel child list)**
+  - `scenarioImageChild` (`GUComponent` image) — no action; insertion #1 (drawn first / below).
+  - `skipButtonChild` (`GUButton` 3-state, **action-id 100**) — insertion #2 (drawn last / on top).
+
+The four `bannerTexN` are **raw D3D texture handles**, not GU components — they are not in the child
+vector and are not hit-tested; the per-frame background renderer blits the current one as a
+screen-filling textured quad **under** the GU child draw. This makes the two-child inventory provably
+complete: the build method makes exactly one AddChild and one AddChildWithAction, with no third
+add-call anywhere.
+
+### 11.2 CREATION ORDER — the numbered build sequence
+
+The universal child builder arg shape is **`(this, textureId, dstX, dstY, w, h, srcX, srcY, color)`**
+— the trailing value is the **color / tint** (`-1` = none), **not** an action id (this refines the
+generic "(textureId,x,y,w,h,srcX,srcY,actionId)" framing: actionId is a property of the *add-child*
+call, not the ctor). The 3-state button builder chains that image builder using the **normal-state**
+source origin, then writes the `GUButton` vtable, constructs its (empty) label `std::string`, and
+stores the hover + pressed atlas origins. **Action ids are never ctor arguments** — `AddChild(parent,
+child)` adds with no action; `AddChildWithAction(parent, child, actionId)` binds the action onto the
+child (`+0x10`). Geometry uses runtime `GetClientRect`-derived metrics (client width/height); the
+literal anchors are `clientW − 120` / `clientH − 200` etc.
+
+**Step 0 — ctor (no children).** Boot scene machine allocates 0x2D0 bytes and runs the heavy
+`COpeningWindow` ctor: chains the `GUWindow` base ctor with window name **`"Opening"`**, installs the
+primary + EventHandler-base vtables, seeds `crossfadeAlpha = 0xFA (250)`, `wait_flag = 1`,
+`finishingFlag = 0`, `scenarioScrollOffset = 0`, and zeroes a 0x20-byte scratch region.
+
+**Step 1 — build method (primary vtable slot 14 / +0x38) runs once.** Sub-steps in observed order:
+
+1. **Preamble (no children yet).** A base component init; a render-pass-callback registration on the
+   embedded panel at object+232 (installs sky/background, opaque-world, transparent/particle render-pass
+   function pointers and caches manager singletons — it does **not** create children); a show/window
+   helper; cache the display-driver singleton; `GetClientRect` of the main HWND into an embedded RECT;
+   compute the centered screen-quad transform block (half-width / half-height, scale 1.0) from the
+   backdrop image dimensions — the intro pan/zoom state.
+2. **Texture pre-loads (member handles, NOT children).** Load `data/ui/openning_001.dds` →
+   `bannerTex1`, `openning_002.dds` → `bannerTex2`, `openning_003.dds` → `bannerTex3`,
+   `openning_004.dds` → `bannerTex4`; set `bannerState = 1`; load `data/ui/openning_scenario.dds`
+   (this one becomes child #1).
+3. **CHILD #1 — IMAGE (`scenarioImageChild`).** `new` a `GUComponent`, build it:
+   - texture = `openning_scenario.dds`
+   - dstX = `backdropWidth/2 − 512` (centered; source is 1024 wide), dstY = `clientHeight − 200`
+   - w = 1024, h = 2048; srcX = 0, srcY = 0; color = −1 (no tint)
+   - **AddChild** (no action) → stored at +0x294; then setVisible(true) (vtable slot 1).
+4. **CHILD #2 — 3-STATE BUTTON (`skipButtonChild`).** `new` a `GUButton`, build the 3-state SKIP
+   button:
+   - texture = `data/ui/mainwindow.dds`
+   - dstX = `clientWidth − 120`, dstY = `10`; w = 110, h = 32
+   - source origins: **normal (761,165) · hover (761,165) · pressed (634,165)**; color = −1
+   - **AddChildWithAction(action = 100)** → stored at +0x29C; then setVisible(true).
+5. **Post-children.** A layout / recompute (computeTransform) vtable call on self; get the
+   sound-manager singleton and create+play the looped 2D opening cue **id 910061000** (0x363E6DC8);
+   install the per-frame Tick callback (with the object as its context).
+
+**Net result:** exactly **two** GU children, in order —
+1. Image `openning_scenario.dds` (1024×2048, centered-X, y = clientH − 200) — no action.
+2. 3-state button `mainwindow.dds` (110×32, top-right clientW − 120 / y = 10) — **action-id 100**.
+
+The four `openning_00N.dds` are member-held banner handles driven by the Tick slideshow, not children.
+
+### 11.3 2D ASSET LINKAGES — component → atlas / sub-rect / VFS path
+
+All six textures load through one VFS texture-loader chokepoint: when the packed archive is mounted it
+does a VFS find+read of the `data/ui/...` relative path then creates a D3D texture from the in-memory
+bytes and appends the handle; when unmounted it forwards to the loose-file loader with the **identical**
+relative path. No name keying, no dedup (two loads of one path make two textures). The binary spells
+the stem **`openning`** (double-n) — that is the literal on-disk VFS name, preserved verbatim.
+
+| Component / member | VFS path | Sub-rect (src) | Dest geometry | Notes |
+|---|---|---|---|---|
+| `scenarioImageChild` (GUComponent image) | `data/ui/openning_scenario.dds` (1024×2048) | (0,0) whole texture | x = backdropW/2 − 512, y = clientH − 200, 1024×2048 | One whole-texture quad, white tint; **no** slicing; the animated quantity is its destination Y. |
+| `bannerTex1` (slideshow handle) | `data/ui/openning_001.dds` (1024×768) | full-screen | full-screen quad | Banner index 1; faded screen-fill quad. |
+| `bannerTex2` | `data/ui/openning_002.dds` (1024×768) | full-screen | full-screen quad | Banner index 2. |
+| `bannerTex3` | `data/ui/openning_003.dds` (1024×768) | full-screen | full-screen quad | Banner index 3. |
+| `bannerTex4` | `data/ui/openning_004.dds` (1024×768) | full-screen | full-screen quad | Banner index 4 (terminal). |
+| `skipButtonChild` (GUButton 3-state) | `data/ui/mainwindow.dds` (shared UI atlas) | normal/hover (761,165) · pressed (634,165) | x = clientW − 120, y = 10, 110×32 | 1:1 atlas blit; normal and hover share one origin. |
+| Opening BGM (not an image) | sound id **910061000** (0x363E6DC8) | — | — | Looped 2D cue, created+played at build; resolves through the sound-id table (out of the image facet's scope). |
+
+The four banner handles are stored contiguously (base member +0x2A4, handle[i] at +0x2A4 + 4·i); the
+current index `bannerState` (+0x2C4, init = 1) selects which the background renderer draws.
+
+### 11.4 DYNAMIC / MODAL / SUB-STATE behaviour
+
+**No modal, no toast, no error box exists in the Opening scene.** The only transient surfaces are the
+scenario crawl, the four-frame banner crossfade, and the skip button. (Process-level `MessageBoxA`
+calls in this flow belong to WinMain fatal-error / launcher-arg paths and the global error GameState
+reached from the login path — never from `COpeningWindow`.) There is **no progress bar / gauge** — the
+only "progress" surfaces are the fade alpha and the crawl-Y position.
+
+**Per-frame Tick / TickStep FSM.** Each frame the installed Tick runs: TickStep (the scene FSM) →
+window self-update → render the fade quad + active banner → draw the GU child tree → pump the
+scene/sound/effect singletons. TickStep always advances the scenario crawl, then **branches**:
+- If `finishingFlag` (+0x2C9) is set, ramp `crossfadeAlpha` to 250 and, once it reaches 250, call the
+  engine `ClearRunFlag` (ending the scene loop). **This branch is vestigial:** a whole-`.text` xref
+  scan found **no** writer that sets `finishingFlag = 1` (it is written = 0 only in the ctor and read
+  only here). The slideshow never arms it.
+- Otherwise run the **banner slideshow FSM:** cycle `bannerState` 1 → 2 → 3 → 4, each with a 0 ↔ 250
+  alpha crossfade (a global byte holds fade direction) and a ~17500 ms dwell per banner; **panel 4 is
+  terminal** — it never advances to a state 5 and never sets `finishingFlag`. It holds and re-loops its
+  fade indefinitely. Therefore the natural slideshow end does **not** exit Opening.
+
+**Scenario crawl updater.** A ~1000 ms one-shot startup gate (`wait_flag` +0x2CA) consumes the first
+second and resets the time baseline; thereafter the crawl advances `scenarioScrollOffset` by `dt × 30`
+(30 design-px/s, frame-rate independent), pushing the new value into the image component as a src-Y /
+destination-Y offset, until it reaches **1843**, where it latches "crawl complete" and stops (no
+wrap). After completion, the updater **polls two input ids each frame** — **1004 = scroll-up,
+1005 = scroll-down** — via an "is-input-down" query against the app/input singleton, gated on the
+crawl-complete flag. **These are INPUT-POLL ids, not GU action-ids** and are not routed through the
+event handler; the only GU action-id in the entire scene is **100** (the skip button).
+
+**Click → action-id dispatch (shared GU path).** The inherited `GUWindow` InputDispatch (primary
+vtable slot 6) fans mouse / keyboard events to children **topmost-first, first-consumer-wins**:
+hit-test each visible child, call its `onEvent`, and on the first consumer record that child's
+action-id onto the window. This is how a raw click on `skipButtonChild` becomes the recorded
+**action-id 100** the skip gate then reads — the same shared input path ~150 windows use
+(`specs/ui_system.md`).
+
+**Skip gate (EventHandler secondary-base `onEvent`, slot 1).** Triggers SKIP on keyboard
+**Enter (10) / ESC (27) / Space (32)** OR a recorded **action-id 100**. SKIP does three things:
+1. persists `[OPENNING] SKIP = "1"` to the config ini via `WritePrivateProfileStringA`
+   (section `OPENNING`, key `SKIP`, value `1`, file `option.ini`);
+2. sets the `closingFlag` (+0x20D) status latch;
+3. calls two close vfuncs (slot +4) on a manager pointer and a window-stack pointer — these GU close
+   calls internally break the engine scene loop (`ClearRunFlag`).
+SKIP does **not** use the fade ramp; it is the **sole** real exit (the `finishingFlag` fade branch is
+vestigial). A separate non-closing branch of the same handler is **UI event type 8 (mouse wheel)**,
+which adjusts the **separate** wheel-scroll field (±30, clamp 30..1833/1843) — distinct from the auto
+`scenarioScrollOffset`. Event-type enum confirmed in the handler: **1 = keyboard, 6 = component-action,
+8 = mouse-wheel.**
+
+**The `[OPENNING] SKIP` read side (gate, not in this window).** WinMain's Loading state (engine state
+2, *before* Opening) reads `GetPrivateProfileIntA(section "OPENNING", key "SKIP", default 0,
+file=option.ini)`: non-zero → jump straight to engine state 4 (Char-Select / SelectWindow), bypassing
+Opening; zero → engine state 3 (play it). Same config singleton on both sides, so skipping once
+permanently bypasses the intro on later launches.
+
+**Transition out → Char-Select.** WinMain's state-3 case pre-writes the next state = 4 (Char-Select)
+**up-front**; the scene loop returns only when SKIP's close vfuncs clear the engine run flag. Opening
+then falls through directly to engine state 4 (SelectWindow). (The vestigial `finishingFlag` ramp would
+reach the same `ClearRunFlag`, but nothing sets that flag.)
+
+### 11.5 TEXT / FONT / CAPTIONS
+
+The Opening scene renders **NO live font text and uses NO string DB (`msg.xdb`)**. Every visible
+caption, story text, and the button face is **baked into DDS art** and blitted as textured quads; the
+global 15-slot D3DX HANGUL (charset 129) font system is **not referenced** anywhere in the
+`COpeningWindow` cluster, and there is no `DrawText` / glyph draw / charset-129 path in this scene.
+
+| Visible element | Source | Owning component / field |
+|---|---|---|
+| Story / scenario crawl text | baked into `data/ui/openning_scenario.dds` (1024×2048) | `scenarioImageChild` (scrolls via crawl-Y) |
+| Intro banner art (any wording) | baked into `openning_001..004.dds` | `bannerTexN` handle, selected by `bannerState` |
+| SKIP button face (any "SKIP" wording) | baked into `data/ui/mainwindow.dds` atlas sub-rects | `skipButtonChild`; its `GUButton` label `std::string` is allocated but left **empty** — pure sprite, no font label |
+
+Localization of the opening therefore happens at the **asset** level (re-author the DDS), not via the
+message DB. The only strings the scene touches are **non-visual**:
+- `"Opening"` — the internal `GUWindow` identity name (never drawn).
+- `"OPENNING"` / `"SKIP"` / `"1"` — the ini section / key / value written on skip (config only, never
+  displayed).
+
+For the live-font / string-DB facet, see the Login / Loading / HUD scenes (`scenes/login.md §12.5`,
+`specs/ui_system.md`) — not Opening.
+
+### 11.6 Cross-references (shared GUI framework)
+
+- **`structs/gucomponent.md`** — the `GUComponent` / `GUPanel` byte-offset model the two Opening
+  children obey: geometry fields (+0x14 srcX, +0x18 srcY, +0x1C width, +0x20 height, +0x24 posX,
+  +0x28 posY, +0x3C/+0x40 extents), action id +0x10, tint/alpha, bound-texture handle +0x90, and the
+  `GUPanel` child-vector region (here holding exactly the two children of §11.1). The `GUButton`
+  3-state sprite model (normal/hover/pressed/disabled src origins + state flags + label) is the contract
+  `skipButtonChild` instantiates.
+- **`structs/guwindow.md`** — the `GUWindow` multiple-inheritance shape `COpeningWindow` specialises:
+  primary vtable +0x00, the `CmdHandler`/`EventHandler` MI base at **+0xBC** (where the skip-gate
+  `onEvent` is overridden — the window is its own event sink), the embedded `GView`, and the per-window
+  texture/atlas list that holds the six loaded Opening textures.
+- **`specs/ui_system.md`** — the widget-toolkit doctrine: full `GU*` class hierarchy, the 13/14-slot
+  virtual interface, the `GUButton` 3-state priority (disabled > pressed > hover > normal), the shared
+  InputDispatch topmost-first / first-consumer-wins routing that turns a click into action-id 100, the
+  15-slot font table + `msg.xdb` lookup (which Opening pointedly does **not** use), and the master scene
+  state machine — the framework this scene specialises.
+- **`scenes/login.md §12`** — the sibling cartography for the next scene in the boot flow (the
+  state-machine cousin Opening hands off toward); a worked example of the same `Diamond::GU*` toolkit
+  used at full breadth (~73 widgets, modals, PIN keypad, font + message DB) — the contrast that makes
+  Opening's two-child minimalism legible.
+- **`scenes/scene_state_machine.md` / `specs/intro_sequence.md` / `specs/frontend_layout_tables.md §6`**
+  — the boot scene FSM (entry/exit of engine state 3), the authoritative animation behaviour, and the
+  numeric layout oracle for the geometry and timing constants cited above.

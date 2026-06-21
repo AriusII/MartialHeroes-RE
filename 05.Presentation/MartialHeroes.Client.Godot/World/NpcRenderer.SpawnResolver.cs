@@ -5,7 +5,8 @@
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 // spec: Docs/RE/formats/mesh.md §.skn header — id_b; §actormotion.txt. CONFIRMED.
-// spec: Docs/RE/formats/animation.md §col15 — idle_motion_id. CONFIRMED.
+// spec: Docs/RE/specs/skinning.md §8(e)/§10 — idle = motion_ids_a[1] = column 16 (record +0x44);
+//       column 15 / motion_ids_a[0] (record +0x40) is statically DEAD.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
@@ -25,7 +26,7 @@ public sealed partial class NpcRenderer
     ///     Resolves a model for the given mob_id via the confirmed chain and builds a SKINNED +
     ///     idle-animated CPU-LBS node (the same pipeline the player uses), falling back to a static
     ///     rest-pose node when any piece is missing:
-    ///     actormotion.txt col1==mob_id → col2=skin_class (and col15 = idle .mot id)
+    ///     actormotion.txt col1==mob_id → col2=skin_class (and col16 = default idle .mot id)
     ///     skinlist.txt scan → first .skn whose parsed IdB == skin_class
     ///     data/char/bind/g{skin_class}.bnd → skeleton (.bnd)
     ///     data/char/mot/g{idle}.mot → idle clip (.mot)
@@ -34,7 +35,8 @@ public sealed partial class NpcRenderer
     ///     Returns null when even the .skn cannot be resolved; never throws.
     ///     spec: MISSION — "resolve each actor's skin/bind/idle-mot via the existing actormotion chain,
     ///     build the skinned node, fall back to the static path when any piece is missing."
-    ///     spec: Docs/RE/formats/animation.md §actormotion.txt — col2=SkinClassId, col15=idle motion id.
+    ///     spec: Docs/RE/specs/skinning.md §8(e)/§10 — col2=SkinClassId; idle = motion_ids_a[1] = col16
+    ///     (record +0x44), NOT col15/motion_ids_a[0] (record +0x40, statically dead).
     ///     spec: Docs/RE/specs/skinning.md §8(d) — mob trio g2048.bnd + g219000630.skn + g182006900.mot.
     /// </summary>
     private Node3D? TryBuildFromMobId(RealClientAssets assets, ushort mobId)
@@ -54,9 +56,18 @@ public sealed partial class NpcRenderer
         if (!_skinClassToSknPath.TryGetValue(skinClass, out var sknPath))
             return null; // no .skn with matching IdB — silently skip
 
-        // col15 = idle motion id (MotionIds[0]). Zero = empty slot.
-        // spec: Docs/RE/formats/animation.md §col15 — idle_motion_id = motion_ids_a[0]. CONFIRMED.
-        var idleMotId = entry.MotionIds.Length > 0 ? entry.MotionIds[0] : 0;
+        // Idle motion id = motion_ids_a[1] = column 16 (in-memory record +0x44 = direction array A
+        // element 1) — the DEFAULT IDLE slot. NOT motion_ids_a[0] / column 15 (record +0x40), which is
+        // STATICALLY DEAD (zero read-sites) — selecting it (the off-by-one) plays the file-source idle
+        // ref, frequently a fixed-stand snapshot, producing a frozen-looking mob (the liveDelta=0
+        // diagnostic on the 120-frame mob trio). The first CONSUMED element of motion_ids_a is element 1.
+        // Fall back to element 0 only if the array has no element 1 (defensive; the array is 9-wide).
+        // spec: Docs/RE/specs/skinning.md §8(e) item 2 / §10 / §10.3.1 — stand/default idle = column 16
+        //       (record +0x44, array A element 1); record +0x40 (col15, element 0) is statically DEAD.
+        // spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_a a[1]=default idle.
+        var idleMotId = entry.MotionIds.Length > 1 ? entry.MotionIds[1]
+            : entry.MotionIds.Length > 0 ? entry.MotionIds[0]
+            : 0;
 
         return TryBuildActorNode(assets, sknPath, skinClass, idleMotId,
             $"mob_id={mobId} skin_class={skinClass}");

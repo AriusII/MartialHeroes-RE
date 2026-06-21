@@ -1,10 +1,14 @@
 // spec: Docs/RE/packets/cmsg_char_select.yaml — opcode 1/7 (0x10007), 2-byte fixed payload.
 //
-// !!! CAPTURE-UNVERIFIED VALUE SEMANTICS !!!
-// The (major:minor) routing and the fixed 2-byte size are control-flow CONFIRMED; the delete
-// MODE-byte literal (1) is code-confirmed; the plain-select mode VALUE split (0 = view vs another
-// split) stays capture/debugger-pending (capture_verified: false in the spec).
-// spec: Docs/RE/packets/cmsg_char_select.yaml (VERIFICATION block).
+// Binary-confirmed (Phase 2b, build 263bd994): 1/7 is a character-SELECT commit, NOT a delete
+// carrier. The single send-builder has exactly two call sites in the select-window command handler:
+//   mode 1 = select-and-play (the "play / select this slot" confirm)
+//   mode 0 = slot-lock / pre-play (the "lock / pre-stage" confirm)
+// The prior "CmsgManageCharacter / DELETE overloads mode=1" reading is REFUTED.
+// There is NO major-1 char-delete opcode on this build.
+// Character removal surfaces only via the inbound 3/7 SmsgCharManageResult (subtype 2).
+// The runtime meaning of mode 1 vs mode 0 is the only part still capture/debugger-pending.
+// spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
 
 using System.Runtime.InteropServices;
 using MartialHeroes.Network.Protocol.Core.Opcodes;
@@ -12,34 +16,39 @@ using MartialHeroes.Network.Protocol.Core.Opcodes;
 namespace MartialHeroes.Network.Protocol.Packets.Login.Packets;
 
 /// <summary>
-///     1/7 — character-MANAGE request on the character-select screen: a slot index plus a MODE byte that
-///     discriminates the action. DELETE OVERLOADS this op (there is NO dedicated delete opcode in major 1):
-///     <c>{slot, 0}</c> = plain select/view, <c>{slot, 1}</c> = delete the slot (code-confirmed literal).
-///     Two emitters build the plain-select form; a third (the delete-confirm Yes path) builds the delete
-///     form. The plain-select form pre-stages a slot, then 1/9 (cmsg_char_enter.yaml) drives world entry.
-///     The delete/manage RESULT returns on S2C 3/7 SmsgCharManageResult (subtype 2 = delete-confirmed).
-///     Fixed 2 bytes. spec: Docs/RE/packets/cmsg_char_select.yaml. CAPTURE-UNVERIFIED value semantics.
+///     1/7 — character-SELECT slot request on the character-select screen.
+///     A 2-byte body: slot index and a mode byte.
+///     Binary-confirmed (Phase 2b, build 263bd994):
+///     <list type="bullet">
+///         <item><c>mode 1</c> = <b>select-and-play</b> (the "play / select this slot" confirm path).</item>
+///         <item><c>mode 0</c> = <b>slot-lock / pre-play</b> (the slot-lock / pre-stage confirm path).</item>
+///     </list>
+///     There is NO delete mode on 1/7 and NO dedicated major-1 char-delete opcode on this build.
+///     Character removal surfaces only via the inbound S2C <c>3/7 SmsgCharManageResult</c> (subtype 2).
+///     Fixed 2 bytes. spec: Docs/RE/packets/cmsg_char_select.yaml;
+///     Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
 /// </summary>
-[PacketOpcode(1, 7)]
+[PacketOpcode(1, 7)] // spec: Docs/RE/opcodes.md row 1/7
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
-public readonly struct CmsgSelectCharacter
+public readonly struct CmsgSelectCharacterSlot
 {
-    /// <summary>Packed opcode 0x10007 (1/7). spec: packets/cmsg_char_select.yaml.</summary>
-    public const uint OpcodeId = Opcodes.CmsgSelectCharacter;
+    /// <summary>Packed opcode 0x10007 (1/7). spec: Docs/RE/packets/cmsg_char_select.yaml.</summary>
+    public const uint OpcodeId = Opcodes.CmsgSelectCharacterSlot; // spec: Docs/RE/opcodes.md row 1/7
 
-    /// <summary>Declared wire size in bytes. spec: packets/cmsg_char_select.yaml (size: 2).</summary>
-    public const int WireSize = 2;
+    /// <summary>Declared wire size in bytes. spec: Docs/RE/packets/cmsg_char_select.yaml (size: 2).</summary>
+    public const int WireSize = 2; // spec: Docs/RE/packets/cmsg_char_select.yaml
 
-    /// <summary>0x00 — selected character slot index, range 0..4. STATIC HIGH. spec: packets/cmsg_char_select.yaml.</summary>
+    /// <summary>
+    ///     0x00 — selected character slot index, range 0..4. spec: Docs/RE/packets/cmsg_char_select.yaml SlotIndex @0x00.
+    /// </summary>
     public readonly byte SlotIndex;
 
     /// <summary>
-    ///     0x01 — mode discriminator selecting which manage action this 1/7 carries:
-    ///     <c>0</c> = plain select / view a slot (STATIC HIGH for the select path); <c>1</c> = DELETE the
-    ///     slot (code-confirmed literal — the delete-confirm path writes 1 here, so the delete body is
-    ///     <c>{slot, 1}</c>; the earlier "2 by elimination" reading is refuted). DELETE rides this op:
-    ///     there is no dedicated delete opcode. The delete RESULT arrives on S2C 3/7 SmsgCharManageResult.
-    ///     spec: Docs/RE/packets/cmsg_char_select.yaml (Mode: 0 = select/view, 1 = delete).
+    ///     0x01 — mode byte selecting the select action:
+    ///     <c>1</c> = select-and-play (binary-confirmed, Phase 2b); <c>0</c> = slot-lock / pre-play
+    ///     (binary-confirmed, Phase 2b). Runtime meaning of each mode is still capture/debugger-pending.
+    ///     There is NO delete mode here. spec: Docs/RE/packets/cmsg_char_select.yaml Mode @0x01;
+    ///     Docs/RE/specs/login_flow.md §3.6; Docs/RE/specs/net_contracts.md §2.2.
     /// </summary>
     public readonly byte Mode;
 }

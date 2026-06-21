@@ -55,7 +55,6 @@
 //
 // PUBLIC API (consumed by CharSelectEventDrainer and SelectScene):
 //   ApplyCharacterList(ImmutableArray<CharacterListSlot>) — called on main thread.
-//   DevShowCreateForm()                                    — dev/headless only.
 //
 // PASSIVE: zero game logic, zero domain state, zero packet parsing.
 // spec: Docs/RE/specs/ui_system.md §8.2/§8.4.
@@ -213,6 +212,21 @@ public sealed partial class CharSelectWindow : Control
     private const float NameBoxW = 274f;
     private const float NameBoxH = 18f;
 
+    // Delete-confirm popup — actions Yes=54 / No=55, msgs 14001/14002.
+    // Dragon frame: inventwindow.dds src(318,647) 340×190, drawn centred at (342,289,340,190).
+    // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d (DELETE-confirm popup). CODE-CONFIRMED.
+    private const int ActionDeleteYes = 54;
+    private const int ActionDeleteNo = 55;
+    private const uint MsgDeleteConfirmBody = 14001u; // spec §11.5d. CODE-CONFIRMED.
+    private const uint MsgDeleteConfirmTitle = 14002u; // spec §11.5d. CODE-CONFIRMED.
+    private const float DeleteModalW = 340f; // spec §11.5d "340×190". CODE-CONFIRMED.
+
+    private const float DeleteModalH = 190f;
+
+    // Centred at (342,289) means Position = (342 - 340/2, 289 - 190/2) = (172,194). CODE-CONFIRMED.
+    private const float DeleteModalX = 342f - DeleteModalW / 2f; // spec §11.5d. CODE-CONFIRMED.
+    private const float DeleteModalY = 289f - DeleteModalH / 2f; // spec §11.5d. CODE-CONFIRMED.
+
     // Face index range 1-7. spec: frontend_scenes.md §4.2+§9. CODE-CONFIRMED.
     private const int FaceMin = 1;
     private const int FaceMax = 7;
@@ -260,6 +274,10 @@ public sealed partial class CharSelectWindow : Control
     private CharCreatePreview3D? _createPreview3D;
     private int _createUiClass; // 0..3
 
+    // Delete-confirm modal (shown when Delete is pressed on an occupied slot).
+    // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
+    private Control? _deleteConfirmModal;
+
     private HudLabel? _infoLevelWidget;
     private HudLabel? _infoNameWidget;
 
@@ -274,6 +292,7 @@ public sealed partial class CharSelectWindow : Control
 
     // npc.scr class descriptions (CP949, already decoded by NpcScrDescriptions).
     private NpcScrDescriptions _npcScrDesc = null!;
+    private int _pendingDeleteSlot = -1; // slot index awaiting user Yes/No — view state only.
 
     // Shared assets for 3D previews.
     private RealClientAssets? _realAssets;
@@ -337,7 +356,13 @@ public sealed partial class CharSelectWindow : Control
                 s.CurrentHp,
                 idx,
                 s.PosX,
-                s.PosZ);
+                s.PosZ,
+                // The real skeleton/appearance descriptor fields (now surfaced on CharacterListSlot).
+                // spec: skinning.md §3.5.2; Docs/RE/packets/3-1_character_list.yaml.
+                s.InternalClass,
+                s.AppearanceVariant,
+                s.FaceA,
+                s.EquipGids);
         }
 
         _selectedSlot = 0;
@@ -349,12 +374,6 @@ public sealed partial class CharSelectWindow : Control
 
         GD.Print($"[CharSelectWindow] ApplyCharacterList: {slots.Length} slots; " +
                  $"atlas={Atlas is not null}.");
-    }
-
-    /// <summary>DEV-ONLY: opens the create form for screenshot/oracle verification.</summary>
-    public void DevShowCreateForm()
-    {
-        ShowCreateForm();
     }
 
     // =========================================================================
@@ -369,6 +388,15 @@ public sealed partial class CharSelectWindow : Control
         Size = new Vector2(RefW, RefH);
         CustomMinimumSize = new Vector2(RefW, RefH);
         MouseFilter = MouseFilterEnum.Ignore;
+
+        // Front-end overlay render state: alpha-blend ON, additive ONE/ONE.
+        // spec: Docs/RE/specs/rendering.md §4.2 — "UI/HUD front-end overlay (login/char-select/
+        //   opening): ONE/ONE (additive); additionally clears fog, dither, alpha-test;
+        //   stage 0 = select-arg-1/diffuse, stage 1 = disabled; linear/linear/mip-none sampling."
+        Material = new CanvasItemMaterial
+        {
+            BlendMode = CanvasItemMaterial.BlendModeEnum.Add // spec: rendering.md §4.2 ONE/ONE additive
+        };
 
         try
         {
@@ -440,5 +468,12 @@ public sealed partial class CharSelectWindow : Control
         uint CurrentHp = 0,
         int SlotIndex = 0,
         float PosX = 0f,
-        float PosZ = 0f);
+        float PosZ = 0f,
+        // WAVE 3: the real skeleton/appearance descriptor fields decoded from the 3/1 roster
+        // (CharacterListSlot now carries them — descriptor +0x34/+0x2C/+0x2E/+0x58). InternalClass is
+        // the {1..4} skeleton driver (NOT the server_class +0x74). spec: skinning.md §3.5.2; structs/actor.md.
+        ushort InternalClass = 0,
+        byte AppearanceVariant = 0,
+        ushort FaceA = 0,
+        ImmutableArray<uint> EquipGids = default);
 }

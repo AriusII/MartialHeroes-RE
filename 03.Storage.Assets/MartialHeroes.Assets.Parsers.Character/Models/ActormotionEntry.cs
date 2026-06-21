@@ -105,28 +105,28 @@ public sealed class ActormotionEntry
     /// <remarks>spec: Docs/RE/formats/actormotion.md — rate_src_y @ 0x0C, col5.</remarks>
     public float RateSrcY { get; init; }
 
-    /// <summary>Integer field at record offset 0x10 (text col6). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — int_b @ 0x10, col6.</remarks>
+    /// <summary>Integer field at record offset 0x10 (text col7). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — int_b @ 0x10, col7.</remarks>
     public int IntB { get; init; }
 
-    /// <summary>Float field at record offset 0x14 (text col7). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_c @ 0x14, col7.</remarks>
+    /// <summary>Float field at record offset 0x14 (text col8). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_c @ 0x14, col8.</remarks>
     public float FloatC { get; init; }
 
-    /// <summary>Float field at record offset 0x18 (text col8). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_d @ 0x18, col8.</remarks>
+    /// <summary>Float field at record offset 0x18 (text col9). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_d @ 0x18, col9.</remarks>
     public float FloatD { get; init; }
 
-    /// <summary>Float field at record offset 0x1C (text col9). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_e @ 0x1C, col9.</remarks>
+    /// <summary>Float field at record offset 0x1C (text col10). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_e @ 0x1C, col10.</remarks>
     public float FloatE { get; init; }
 
-    /// <summary>Float field at record offset 0x20 (text col10). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_f @ 0x20, col10.</remarks>
+    /// <summary>Float field at record offset 0x20 (text col11). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_f @ 0x20, col11.</remarks>
     public float FloatF { get; init; }
 
-    /// <summary>Float field at record offset 0x24 (text col11). Meaning MED.</summary>
-    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_g @ 0x24, col11.</remarks>
+    /// <summary>Float field at record offset 0x24 (text col12). Meaning UNRESOLVED.</summary>
+    /// <remarks>spec: Docs/RE/formats/actormotion.md — float_g @ 0x24, col12.</remarks>
     public float FloatG { get; init; }
 
     /// <summary>
@@ -212,14 +212,17 @@ public sealed class ActormotionEntry
     ///     9 elements; feeds the sound/effect routers, NEVER the animation mixer.
     ///     NOT secondary motion — this is a binary-won spec reversal.
     ///     <para>
-    ///         Slot table: b[0]=no consumer; b[1]=spawn sound (cat 11); b[2]=walk footstep SFX (cat 7);
-    ///         b[3]=run footstep SFX (cat 8); b[5]=death effect/sound; b[6..8]=no consumer.
+    ///         Slot table (loader indexing: b[0] = +0x64, element-0-unused convention):
+    ///         b[0]=no consumer; b[1]=spawn sound (cat 11); b[2]=walk footstep SFX (cat 7);
+    ///         b[3]=run footstep SFX (cat 8); b[4]=death effect/sound (+0x74); b[5..8]=no consumer.
     ///     </para>
     /// </summary>
     /// <remarks>
     ///     spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_b @ 0x64:
     ///     SOUND/EFFECT event ids — fed to the sound/effect routers, NEVER the animation mixer
     ///     (binary-won correction vs the old 'secondary motion' reading). HIGH layout / HIGH meaning (by use-site).
+    ///     CYCLE 7 CORRECTED: death slot = b[4] @ +0x74 (NOT b[5]) — same element-0-unused convention
+    ///     as the A-array. spec: Docs/RE/formats/actormotion.md §Enumerations — "b[4] at +0x74, not b[5]".
     /// </remarks>
     public int[] DirArray2 { get; init; } = [];
 
@@ -237,6 +240,25 @@ public sealed class ActormotionEntry
     ///     action → .mot CLIP ids. The "9-direction interpretation is REFUTED".
     /// </remarks>
     public int[] MotionClipIds => DirArray1; // spec: actormotion.md — motion_ids_a: action→.mot clip ids
+
+    /// <summary>
+    ///     The <c>.mot</c> clip-id the runtime uses for the default stand idle (motion_ids_a[1]).
+    ///     This is record offset +0x44, text column 16 (a[1]).
+    /// </summary>
+    /// <remarks>
+    ///     BINARY-WON (CYCLE 7, build 263bd994): the runtime stand idle reads a[1] (+0x44, col16),
+    ///     NOT a[0] (+0x40, col15). The a[0] slot is file-loaded but has zero runtime read-sites
+    ///     (dead at runtime). Both A-array and B-array share the element-0-unused convention:
+    ///     element 0 is unused/padding, consumers start at element 1.
+    ///     spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — a[1] @ +0x44 = col16 =
+    ///     "default stand idle (the idle the runtime actually uses)". HIGH.
+    ///     spec: Docs/RE/formats/actormotion.md — "KEY POINT: the runtime stand idle is COLUMN 16
+    ///     (record +0x44, a[1]), NOT column 15."
+    /// </remarks>
+    public int IdleMotionId =>
+        DirArray1.Length > 1
+            ? DirArray1[1]
+            : 0; // spec: actormotion.md — a[1] @ +0x44, col16 = runtime idle (BINARY-WON)
 
     /// <summary>
     ///     Alias for <see cref="DirArray2" />: the 9-element action → SOUND/EFFECT event-id array

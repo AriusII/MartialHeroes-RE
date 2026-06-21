@@ -173,9 +173,7 @@ public sealed partial class EffectRenderer
                 if (mi is not null && IsInstanceValid(mi))
                     mi.QueueFree();
 
-        // Tear down GPU-particle nodes for resource_id >= 10000 sub-effects.
-        // These are now always null (no-placeholder doctrine); the loop is retained for forward
-        // compatibility if real GPU particle rendering is later wired.
+        // Tear down GpuParticles3D nodes (kept null in practice; retained for forward compat).
         if (live.GpuParticles is not null)
             foreach (var gpu in live.GpuParticles)
                 if (gpu is not null && IsInstanceValid(gpu))
@@ -187,5 +185,12 @@ public sealed partial class EffectRenderer
                         if (IsInstanceValid(gpu)) gpu.QueueFree();
                     };
                 }
+
+        // Tear down GPU-particle simulation nodes (GpuParticleSimNode).
+        // spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration nodes: CODE-CONFIRMED.
+        if (live.SimNodes is not null)
+            foreach (var sim in live.SimNodes)
+                if (sim is not null && IsInstanceValid(sim))
+                    sim.QueueFree();
     }
 }

@@ -40,41 +40,48 @@ public sealed partial class EnvironmentNode
         // ---- Ambient light ----
         ApplyAmbient(env, kf, kfNext, frac);
 
-        // ---- Tonemap / post — Linear pass-through (no tonemap in original) ----
-        // spec: Docs/RE/specs/rendering.md §6 — no tonemap/exposure pass in post chain.
-        // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
-        env.TonemapMode = Environment.ToneMapper.Linear;
-        env.TonemapExposure = 1.0f;
-        env.SsaoEnabled = false;
-        env.SsilEnabled = false;
-        env.SdfgiEnabled = false;
-
-        // ---- Glow / bloom — reproduces the legacy 3-RT chain ----
-        // The legacy post chain is: scene capture → bright extract (TEX1) → glow blur at ÷2
-        // downsample (TEX2, power1dx8.psh) → additive composite (finaldx8.psh) onto the backbuffer.
-        // spec: Docs/RE/specs/rendering.md §6 — glow/bloom post chain (CONFIRMED load + execution).
-        // spec: Docs/RE/specs/rendering.md §6.1 — TEX2 downscaled by the glow divisors (default ÷2).
-        // spec: Docs/RE/formats/shaders.md §C5.1 — power1dx8.psh glow blur, finaldx8.psh composite.
-        //
-        // Godot WorldEnvironment Glow stands in for the bright-extract + blur + additive composite:
-        //   HDRThreshold  → equivalent to the bright-pass extract cutoff.
-        //   Intensity/Bloom → the accumulation weight of the blurred pass in the composite.
-        //   BlendMode Additive → matches the additive fullscreen-quad present (pass 5, rendering.md §6.2).
-        //   Levels           → mirror the ÷2 default downsample (levels 1–2 cover that range).
-        //
-        // The power1dx8.psh semantics recovered in the spec: "sample base texture, scale by constant"
-        // → simple 1× downsample blur. That matches Godot's default Glow (Gaussian blur, not quartic).
-        // spec: Docs/RE/formats/shaders.md — power1dx8.psh: "r0 = r0 * c0 — sample base texture, scale."
-        //
-        // Parameter values: aesthetic engineering choices to match the legacy bright look without
-        // blowing out; none are spec-dictated numeric literals (the spec records the pass ORDER and
-        // RT ROLES, not the concrete float values). Declared as aesthetic.
-        ApplyGlow(env);
-
         // ---- Directional sun ----
         ApplyDirectional(kf, kfNext, frac);
 
         _appliedKeyframe = kf;
+    }
+
+    /// <summary>
+    ///     Applies the static (never-changing) post-process and tone-mapping settings to the owned
+    ///     <see cref="Environment" /> instance. Called ONCE from <see cref="Configure" />, not per-frame
+    ///     (these values never change after Configure runs — pulling them out of ApplyKeyframe eliminates
+    ///     redundant native property writes on the hot per-frame path, i.e. PERF-M3).
+    ///     spec: Docs/RE/specs/rendering.md §6 — post chain: bright-copy → blur → composite → present; NO tonemap.
+    ///     spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
+    ///     spec: Docs/RE/specs/rendering.md §6.4 — glow wiring; SSAO/SSIL/SDFGI absent from original.
+    /// </summary>
+    private void ApplyStaticPostSettings()
+    {
+        var env = _environment;
+        if (env is null) return;
+
+        // Tonemap: Linear pass-through (no tonemap/exposure pass in the original DX8 post chain).
+        // spec: Docs/RE/specs/rendering.md §6 — no tonemap stage confirmed.
+        // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
+        env.TonemapMode = Environment.ToneMapper.Linear;
+        env.TonemapExposure = 1.0f; // identity — spec: rendering.md §6 — no exposure pass.
+
+        // Screen-space and global-illumination effects: all absent from the original DX8 engine.
+        env.SsaoEnabled = false;
+        env.SsilEnabled = false;
+        env.SdfgiEnabled = false;
+
+        // Glow / bloom — reproduces the legacy 3-RT chain (constant, never per-keyframe).
+        // The legacy post chain is: scene capture → bright extract (TEX1) → glow blur at ÷2
+        // downsample (TEX2, power1dx8.psh) → additive composite (finaldx8.psh) onto the backbuffer.
+        // All glow parameters are constant (aesthetic engineering choices matching the spec-confirmed
+        // pass ORDER and blend weights — none change per keyframe). Moved here from ApplyKeyframe
+        // (PERF-M3) to eliminate redundant native property writes on the hot per-frame path.
+        // spec: Docs/RE/specs/rendering.md §6 — glow/bloom post chain (CONFIRMED load + execution).
+        // spec: Docs/RE/specs/rendering.md §6.1 — TEX2 downscaled by the glow divisors (default ÷2).
+        // spec: Docs/RE/specs/rendering.md §6.4 — single-tap blur (power1dx8 only). CONFIRMED.
+        // spec: Docs/RE/formats/shaders.md §C5.1 — power1dx8.psh glow blur, finaldx8.psh composite.
+        ApplyGlow(env);
     }
 
     /// <summary>

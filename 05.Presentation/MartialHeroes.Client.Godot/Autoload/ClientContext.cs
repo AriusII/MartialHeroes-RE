@@ -169,32 +169,13 @@ public sealed partial class ClientContext : Node
     /// <summary>
     ///     The two startup UI data catalogs:
     ///     - UiTex manifest (data/ui/UiTex.txt)  → <see cref="Adapters.UiCatalogs.GetTexture" />
-    ///     - Msg catalog (data/script/msg.xdb)   → <see cref="UiCatalogs.GetMessage" />
+    ///     - Msg catalog (data/script/msg.xdb)   → <see cref="Adapters.UiCatalogs.GetMessage" />
     ///     spec: Docs/RE/formats/ui_manifests.md §1 (uitex.txt, PARSER-CONFIRMED grammar).
     ///     spec: Docs/RE/formats/misc_data.md §6 (msg.xdb, CODE-CONFIRMED loader).
     ///     spec: Docs/RE/specs/ui_system.md §8.5 (HUD uitex integer binding contract).
     /// </summary>
     public UiCatalogs UiCatalogs { get; private set; } = null!;
 
-    /// <summary>
-    ///     Skill icon catalog: resolves per-skill 23×23 AtlasTextures from the active class-stance
-    ///     .do table and the skillicon.txt sheet manifest.
-    ///     Populated from:
-    ///     - <c>data/ui/skillicon/skillicon.txt</c> (sheet DDS paths per (job,kind))
-    ///     - <c>data/script/musajung.do</c> (Musa-jung demo stance; per-skill iconSrcX/Y)
-    ///     spec: Docs/RE/formats/ui_manifests.md §2.6 (23×23 cell model: CODE-CONFIRMED).
-    ///     spec: Docs/RE/formats/ui_manifests.md §2.7 (.do record layout: CODE-CONFIRMED + SAMPLE-VERIFIED).
-    /// </summary>
-    public IconCatalogs IconCatalogs { get; private set; } = null!;
-
-    /// <summary>
-    ///     Item icon catalog: resolves per-item <see cref="Godot.ImageTexture" /> values from
-    ///     <c>data/item/texturelist.txt</c> for display in the InventoryWindow.
-    ///     Each item icon is a whole-texture DDS blit — no atlas sub-rect.
-    ///     spec: Docs/RE/formats/ui_manifests.md §10 (texturelist.txt: CODE-CONFIRMED).
-    ///     spec: Docs/RE/formats/ui_manifests.md §10.5 — "whole-texture blit, no sub-rect": CODE-CONFIRMED.
-    /// </summary>
-    public ItemIconCatalog ItemIconCatalog { get; private set; } = null!;
 
     /// <summary>
     ///     The audio service façade. Handles BGM streaming, UI click SFX, world-entry SFX, and
@@ -265,8 +246,7 @@ public sealed partial class ClientContext : Node
     /// <summary>
     ///     The session-scoped character-selection store, shared between <c>GamePacketHandler</c>
     ///     (which fills it from 3/1) and <c>ApplicationUseCases</c> (which reads it on
-    ///     <c>SelectCharacterAsync</c> / the 3/14 spawn seam). Exposed for dev diagnostic
-    ///     polling (e.g. <see cref="LiveLoginAutoload" />).
+    ///     <c>SelectCharacterAsync</c> / the 3/14 spawn seam).
     ///     spec: Docs/RE/specs/login_flow.md §3.5 — "caches the chosen slot's record locally … consumed on 3/14".
     /// </summary>
     public CharacterSelectionStore? CharacterSelection { get; private set; }
@@ -371,6 +351,11 @@ public sealed partial class ClientContext : Node
         AddChild(audio);
         Audio = audio;
         GD.Print("[ClientContext] AudioService added as child node.");
+
+        // Start the env-gated verification harness if MH_LOGIN_ID / MH_LOGIN_PW are set.
+        // INERT when env vars are absent — interactive UI path is completely unchanged.
+        // spec: Docs/RE/specs/login_flow.md §1 (same flow as LoginScene, driven via use-cases).
+        MaybeStartEnvLogin();
     }
 
     public override void _ExitTree()
@@ -408,6 +393,10 @@ public sealed partial class ClientContext : Node
             // Expected: the loop faulted/cancelled — the inner OperationCanceledException is benign.
         }
 
+        // Drain the env-login harness task (_loopCts already cancelled above).
+        // spec: Docs/RE/specs/login_flow.md §1 — harness shares _loopCts lifecycle.
+        DrainEnvLogin();
+
         _loopCts?.Dispose();
         _loopCts = null;
         _loopTask = null;
@@ -425,12 +414,6 @@ public sealed partial class ClientContext : Node
         // spec: Docs/RE/formats/ui_manifests.md §1 / Docs/RE/formats/msg_xdb.md.
         HudAtlas?.Dispose();
         HudText?.Dispose();
-        // Dispose the skill icon catalog (no archive owned — just clears internal state).
-        // spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
-        IconCatalogs?.Dispose();
-        // Dispose the item icon catalog (clears texture cache; no archive owned).
-        // spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
-        ItemIconCatalog?.Dispose();
         _uiAssets?.Dispose();
         _uiAssets = null;
 

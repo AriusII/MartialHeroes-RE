@@ -116,8 +116,10 @@ public static class ActormotionParser
 
     /// <summary>
     ///     Number of elements in each motion-id sub-array.
-    ///     The per-direction interpretation of the 9 slots is proposed, not proven.
-    ///     spec: Docs/RE/formats/actormotion.md §The two 9-element motion-id sub-arrays (0x40, 0x64).
+    ///     Slots are action/lifecycle-keyed (idle, walk, run, death, …) — NOT direction-indexed.
+    ///     The "9 directions" reading is REFUTED (binary-won, CYCLE 7, build 263bd994).
+    ///     spec: Docs/RE/formats/actormotion.md §The two 9-element motion-id sub-arrays (0x40, 0x64) —
+    ///     "The '9 directions' reading is REFUTED."
     /// </summary>
     private const int MotionIdArrayCount = 9; // spec: Docs/RE/formats/actormotion.md §motion-id sub-arrays
 
@@ -255,19 +257,19 @@ public static class ActormotionParser
                 CultureInfo.InvariantCulture, out var rateSrcY); // col5 → 0x0C
             int.TryParse(cols[ColIntB].Trim(), out var intB); // col7 → 0x10
             float.TryParse(cols[ColFloatC].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatC); // col7 → 0x14
+                CultureInfo.InvariantCulture, out var floatC); // col8 → 0x14
             float.TryParse(cols[ColFloatD].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatD); // col8 → 0x18
+                CultureInfo.InvariantCulture, out var floatD); // col9 → 0x18
             float.TryParse(cols[ColFloatE].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatE); // col9 → 0x1C
+                CultureInfo.InvariantCulture, out var floatE); // col10 → 0x1C
             float.TryParse(cols[ColFloatF].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatF); // col10 → 0x20
+                CultureInfo.InvariantCulture, out var floatF); // col11 → 0x20
             float.TryParse(cols[ColFloatG].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatG); // col11 → 0x24
+                CultureInfo.InvariantCulture, out var floatG); // col12 → 0x24
             float.TryParse(cols[ColFloatH].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatH); // col12 → 0x38
+                CultureInfo.InvariantCulture, out var floatH); // col13 → 0x38
             float.TryParse(cols[ColFloatI].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatI); // col13 → 0x3C
+                CultureInfo.InvariantCulture, out var floatI); // col14 → 0x3C
             int.TryParse(cols[ColDivisorY].Trim(), out var divisorY); // col6 → 0x2C
 
             // Divide-by-zero guard: force divisors to 1 when parsed as 0.

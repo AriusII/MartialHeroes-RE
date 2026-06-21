@@ -65,3 +65,183 @@ handler corrections + move-emitter clarification + PetPanel note; 3 mid-function
    XP/HP base), on-wire VALUE semantics inside the 4/48·4/56·4/71 opaque tails, the stat-grid float→named-stat
    mapping, effect per-field particle roles, the dormant terrain-worker spawn question — each re-flagged with a
    reason in the affected specs; require a future `?ext=dbg` / capture pass.
+
+---
+
+## CYCLE — Front-End Fidelity 1:1, PHASE 1 (promotion-centric) — 2026-06-21
+
+**Scope:** Docs/RE committed specs only (the porting/C# lane is separate and was NOT touched). Static IDA
+only (no debugger). IDB SHA 263bd994 (doida.exe), preflight green. Phase 0.B had already
+done the deep static recovery; this phase promoted the spec-delta and confirmed two binary facts. All
+findings crossed the firewall as rewritten neutral prose — no addresses, no Hex-Rays artifacts in any
+committed file (re-scanned clean). Dirty dossiers (gitignored) remain intact as provenance.
+
+**STREAM 1 — spec-delta promotions (binary wins where it refines/contradicts):**
+1. `specs/frontend_layout_tables.md §4` — REFINED the server-list per-render shuffle: the visible plate
+   order is STABLE (page i shows raw records [2i]/[2i+1] in order); the Fisher-Yates permutation hits a
+   PARALLEL server-id vector whose only effect is the `Lastserver` registry value. The old "on-screen rows
+   shuffled / row≠record" note dropped. RESOLVED the standing "ServerId-vs-ServerId-1 off-by-one": it is TWO
+   ARRAYS (raw record = connected id; shuffled vector = Lastserver id), not an off-by-one. CORRECTED the
+   default-highlight compare key to NEW_SERVER_INDEX (not Lastserver). Banner residual list trimmed. Confirmed
+   (unchanged): plate/pager/status/highlight rects, load thresholds 1200/800/500 + colours, msg maps
+   (4029+StatusCode; 6001..6005), click actions 400/401, commit guard status==0 && load<2400.
+2. `structs/gucomponent.md` — ADDED +0x89 `hover_edge` as a DISTINCT enter/leave edge latch (separate from
+   steady hovered +0x88); slot-5 vtable row updated. Full offset table + 13-slot vtable confirmed.
+3. `structs/guwindow.md` — REFINED the MI naming: the +0xBC base is the abstract `Diamond::EventHandler`
+   realised by a concrete embedded `CmdHandler` subobject; secondary (MI base) vtable CORRECTED to **2 slots**
+   (was "3"); derived-window overrides marked UNVERIFIED; +0xBC/+0xE8(GView)/+0x220 confirmed; the spurious
+   third RTTI COL noted as a dynamic-cast artifact (not a real base).
+4. `specs/ui_system.md §2` — CORRECTED the divergent vtable mapping (was a flat "16 slots", slot 2/3 generic
+   accessor, slot 4 "rect setter", slot-15 SetShown alias) to the actual LAYERED GUComponent **13-slot**
+   vtable (2 setPosition, 3 getPosition, 4 hitTest-vector, 5 hitTest, 7 draw, 10 getHitActionId, 11
+   onMouseEnter, 12 onMouseLeave) + GUPanel slot 13, GUWindow slot 14; made gucomponent.md §6 authoritative.
+   §4 now cross-references the new dispatch spec.
+5. `specs/frontend_scenes.md` — char-select camera boom-Z clamp set to **26.0** everywhere (CONFLICT C3
+   RESOLVED; the "22" ambiguity removed across §3.5.x).
+6. `specs/skinning.md` — recorded the binary RE-confirmation that **DEBT#1 is CLOSED** end-to-end, with the
+   char-select PREVIEW path as an independent second witness (id_b-verbatim skeleton key + col16 idle); the
+   "mesh explodes / static-upright" note marked OBSOLETE (a port-side bug class, not a recovery gap).
+   skn.md/animation.md/bindlist.md confirmed by the dossier with no contradiction (no edits needed).
+7. `specs/ui_event_dispatch.md` (NEW) — promoted the GU hit-test / hover / press / dispatch STATE MACHINE
+   (the load-bearing 1:1 input behaviour): press-inside-then-release-inside-same-widget => synthetic CLICK;
+   ONE process-global click-capture; container walks children in REVERSE for pointer/click (topmost-painted
+   wins), move (type 3) broadcasts hover to all; action_id (+0x10) -> panel active_child (+0xB4) -> window
+   switch; ESC=close, login also reads Tab/Enter. Event-type catalogue (1..8) included.
+
+**STREAM 2 — static-IDA confirmations + promotions:**
+8. NETCODE socket setup -> `specs/net_contracts.md §1.1`: re-confirmed the client sets **NO TCP_NODELAY** on
+   the game path (Nagle stays ON) — the only setsockopt anywhere is SO_RCVBUF on the game socket. CONFIRMS the
+   live replica's `Socket.NoDelay=false`. Added blocking-mode detail: game socket non-blocking only during
+   connect (FIONBIO+select ~2s), reverted to blocking; overlapped WSARecv steady-state; lobby socket plain
+   blocking, no options.
+9. GAP-4 (login ID textbox max-length) -> RESOLVED to **16** in both `specs/frontend_scenes.md §1.3` and
+   `specs/frontend_layout_tables.md §2.6/§2.7`. The "6" (frontend_scenes) was the textbox CHARSET-FILTER mask
+   misread as a length; the "20/19" (frontend_layout_tables) was the downstream TAB hand-off BUFFER, not the
+   input cap. Per-keystroke input cap = 16 (ID) / 12 (password), enforced at textbox construction + the
+   WM_CHAR/paste handlers. Contradiction removed.
+
+**Provenance:** dirty sources under `Docs/RE/_dirty/{functions/server_list, functions/char_select,
+structs/gu_framework, formats/skinning_verdict, functions/netcode_socket}/` (gitignored). Files touched:
+frontend_layout_tables.md, frontend_scenes.md, net_contracts.md, skinning.md, ui_system.md, gucomponent.md,
+guwindow.md, + NEW ui_event_dispatch.md. No `names.yaml` change required this cycle (no new canonical names).
+
+---
+
+## Phase 2b — protocol-semantics reconciliation (3 netcode divergences, static IDA)
+**Date:** 2026-06-21  **Build/anchor:** doida.exe IDB SHA 263bd994  **Evidence:** [static-ida] (READONLY; no debugger)
+
+The Phase 2 netcode audit surfaced three spec-vs-spec / spec-vs-code divergences. Each was reconciled against
+the binary (static IDA only). The binary wins; the committed specs were corrected to agree.
+
+1. **1/7 CmsgSelectCharacterSlot — mode semantics.** 1/7 (2-byte `[u8 slot][u8 mode]`) is a character-**SELECT**
+   commit, NOT a delete carrier. One send-builder, two call sites in the select-window command handler: the
+   "play / select this slot" confirm writes mode = 1 (select-and-play); the slot-lock / pre-play confirm writes
+   mode = 0 (slot-lock). The earlier "mode = 1 = delete request, delete multiplexed onto 1/7" reading is
+   **REFUTED** — there is **no major-1 char-delete opcode** on this build (major-1 C2S builder family = 1/0, 1/2,
+   1/6, 1/7, 1/9, 1/13, 1/14); character removal is surfaced only via the inbound major-3 result ladder
+   (3/7 SmsgCharManageResult subtype 2). Static-HIGH on builder/sites/literals; the runtime meaning of mode 1 vs
+   0 stays capture-pending. Corrected: `net_contracts.md §2.2` (1/7 row + the 3/4-vs-3/7 CONFLICT retired) and
+   `login_flow.md §3.6` (CYCLE 6b quoted block). `opcodes.md` (1/7) + `cmsg_char_select.yaml` were already correct.
+
+2. **3/23 SmsgCharStatusBytesByName — size & role.** 3/23 reads exactly 28 bytes and is a BY-NAME status/level
+   patch (keys off an in-body 17-byte CP949 name, string-matched across the up-to-5-slot roster, then writes a
+   status byte + a level byte), NOT a 12-byte create-result. **No 12-byte create-result opcode exists** anywhere
+   in the major-3 table. Character-create (1/6) is acked by 3/7 SmsgCharManageResult (8B, clears the awaiting-reply
+   latch) PLUS a refreshed char list (3/1 SmsgCharacterList roster rebuild; 3/4 SmsgSceneEntityUpdate scene
+   refresh). `net_contracts.md §2.2` (1/6 row) + `login_flow.md §5.4` + `opcodes.md` (3/23) were already correct;
+   no spec edit needed. Flagged a layer-02 codegen follow-up (retire SmsgCharCreateResult).
+
+3. **Lobby connect — inet_addr, NO DNS.** CONFIRMED: the lobby (port-10000 server-list) connect path resolves
+   its host via **inet_addr** on a dotted-quad string (ip.txt -> list.dat CIPList -> hardcoded 211.196.150.4
+   fallback) — no gethostbyname, no DNS, getaddrinfo absent (inet_ntoa only for diagnostic peer-IP display). The
+   GAME-server path uses gethostbyname (DNS). Affirmed with a dated re-confirmation note in `login_flow.md §2.0`.
+   Flagged a layer-02 follow-up (LobbyClient.ConnectBlocking currently uses Dns.GetHostAddresses).
+
+**Provenance:** dirty sources under `Docs/RE/_dirty/{protocol/1-7_mode_semantics_recon, protocol/3-23_size_role_recon,
+functions/lobby_connect_resolution_recon}.md` (gitignored). Committed files touched: `specs/net_contracts.md`,
+`specs/login_flow.md`. No `names.yaml` change required (3/23 = SmsgCharStatusBytesByName already canonical; the
+mode-enum candidates Mode.SelectAndPlay=1 / Mode.SlotLock=0 stay deferred until capture). Firewall: no addresses
+or pseudo-C in any committed file; raw findings stayed in `_dirty/`.
+
+
+---
+
+## Asset-Fidelity Campaign (Phases 1+2) — UI 2D / Character / World 3D re-verification (static IDA)
+**Date:** 2026-06-21  **Build/anchor:** doida.exe IDB SHA 263bd994  **Evidence:** [static-ida] (READONLY; no debugger — `dbg_start` never called)
+
+Re-verified the documented OPENs across three asset domains and promoted the reconciled dirty findings into the
+committed specs (re-pinning each touched banner to 263bd994 / 2026-06-21). Already-confirmed corpus (skinning/LBS
+math, .skn/.bnd/.mot layouts, terrain texturing chain, GUComponent/GUWindow layouts + the 178 MainWindow slots)
+was NOT re-derived.
+
+**UI 2D**
+1. **UI bucket render-state** — CORRECTED/REFINED: the per-bucket matrix's single "UI / HUD" row split into
+   (a) in-game HUD panels (2D-ortho enter — alpha-blend disabled at bucket-enter, per-quad opt-in; depth test
+   off; depth write off; cull CW; fill solid; ortho proj; no alpha-ref) and (b) front-end overlay (alpha ON,
+   additive ONE/ONE; clears fog/dither/alpha-test; stage-0 select-arg1/diffuse). The 18-slot render-state cache
+   mechanism re-confirmed (one cache slot per state type; blend setter forwards the bare integer; Z-write
+   imperative). Present row = opaque copy (unchanged). Two DBG-PENDING: the per-quad translucent blend pair and
+   the effective first-draw depth-write. Corrected `specs/rendering.md §4.1/§4.2` + Status.
+2. **Font / glyph** — CAPTURE/DBG-PENDING cleared, settled statically: 15 font slots via the D3DX font API,
+   common params (char-set 129 HANGUL, mip-levels 1, italic off, default precision/quality/pitch), faces
+   DotumChe/Dotum/BatangChe; monospace per-slot layout (advance = slot char-width), NO kerning table, the only OS
+   text measurement is the IME composition underline; password mask = fixed 6 px/char. CORRECTED the prior
+   "every front-end label = slot 0" to "slot 0 is the unset default" (some controls call the slot setter).
+   Corrected `specs/ui_system.md §0/§6`.
+3. **Tooltip / auto-hide timer** — settled the GUComponent +0x95..+0xA0 block: +0x95 = auto-hide enable (opt-in,
+   gates arm + tick); +0x98 = arm-START timestamp (CORRECTED from "expiry"); +0x9C = timeout (default 3000 ms,
+   per-instance override e.g. 6000 ms / config*1000); +0xA0 = on-timeout callback (fires first, then the
+   component hides, then disarms); +0x94/+0x96/+0x97 = padding (no flag block). Corrected `specs/ui_system.md`
+   GUComponent timer rows + a mechanism note.
+
+**Character**
+4. **Equipment / item attachment** — load-bearing OPEN settled: the WEAPON is a rigid single-bone attach chosen
+   by a numeric bone-id on the attach-host node (NO bone-name string exists in the binary; 88-byte bone stride;
+   the concrete hand bone-id is the one DBG-PENDING value, default 0 statically). NON-weapon parts (head/face/body
+   slots {2,3,4,6,11}) are skinned-deform under the shared skeleton root (draw list, deformed each frame) — NOT
+   bone-attached, and there is NO head/face socket (the head is built like a body part). `Visual+100` = a single
+   SCALAR scale (not a matrix). slot->mesh + dual-hand (off-hand flag 1 / main flag 2) unchanged. Corrected
+   `specs/equipment_visuals.md §4/§5` + Status.
+5. **Idle motion** — CONFIRMED-UNCHANGED: idle = actormotion column 16 (record field +0x44 = motion_ids_a[1]);
+   column 15 / field +0x40 statically dead (zero readers). No spec change (carried).
+
+**World 3D**
+6. **GPU particle emitter (resource_id >= 10000)** — the 52-byte sub-record ROLES resolved from DBG-pending to
+   CODE-CONFIRMED. Structural CORRECTION: a sub-record is a PER-PARTICLE spawn+Euler-integration descriptor, NOT
+   a keyframe; num_frames = particle count (not a timeline); the live ring/loop count is num_frames, not the disk
+   max_particles. Field roles: life_bonus/lifetime/spawn_delay/size_init (u16), RGBA8 colour, position xyz +
+   size_rate (f32), four SIGNED i16 colour rates, velocity xyz + velocity_damp (f32); alpha scaled by a global
+   brightness option (0.05 + 0.95*bright/100). Fixed ~67 ms sim step; camera-facing billboard, -0.5 half-extent,
+   per-emitter alpha-vs-additive blend. Corrected `formats/effects.md §E.2.1/§E.2.2 (+ new §E.2.4)` and added
+   `specs/effects.md §11.3`. One DBG-PENDING (does disk max_particles bound VB capacity when != num_frames).
+7. **Glow .psh conflict (C5)** — RESOLVED (binary-won) in favour of `rendering.md §6.4`: the binary's shader set
+   is exactly five files (cel VS, two cel PS, finaldx8 composite, power1dx8) — NO power2/power4 literal and NO
+   power-N filename-construction format string. The display.lua DISPLAY_POWERSHADER key is a FILENAME STRING
+   copied verbatim into the editable glow-shader slot (default power1dx8.psh); the stock client binds power1dx8
+   for glow and finaldx8 for the composite; VFS-first by name. The "DISPLAY_POWER=2 -> power2dx8.psh" reading is
+   REFUTED. Whether a VFS-supplied power2dx8.psh exists is now DATA-PENDING (not IDA-pending). Corrected
+   `specs/rendering.md §6.3/§6.4/§6.5/§6.6` + banner C5 + Status.
+8. **.fx1-.fx7 terrain overlay internals** — re-walked the seven on-disk file decoders: universal group-array
+   model (u32 group_count + per-group {header, vc x VF, ic x u16}); per-channel header width / vc-ic offsets /
+   vertex stride tabulated (fx1=VF_36/20B, fx2=VF_44/20B, fx3=VF_36/44B, fx4=VF_44/48B, fx5=VF_36/48B,
+   fx6=VF_32/36B, fx7=VF_32/48B). CORRECTED: group header +0x00 = 1-based texture_index into the per-channel
+   register (was mis-read as a "constant 15/0x0F/5" header word — REFUTED); fx4 is the universal model, NOT a
+   distinct "flat tile array"; fx3 carries a signed elevation/extent dword before vc. Corrected
+   `formats/terrain_layers.md §1.1a (+ new §1.4a/§1.4b)` + banner. DBG-PENDING: index topology + exact UV
+   encoding + the unread inter-header dwords.
+9. **Water + skybox absences** — CONFIRMED-UNCHANGED: no water renderer / no water asset-loader (OPTION_WATER is
+   a stored quality-toggle; map_option 0x00/0x04 are dungeon flag + sight-clamp, not water); .box skybox absent
+   (the .box by-name open path is wired but gated by the map_option SKYBOX flag, reset to 0 before each area
+   load; the sun/moon orbiting billboards are a separate system). Re-pinned `specs/environment.md §4` +
+   `formats/sky.md Section A`.
+10. **Ambient brightness (DEBT#3)** — CONFIRMED-UNCHANGED: ambient floor = floor((OPTION_BRIGHT/100)*255) over
+    the (0,0,0) base, default 100 / clamp [1,100]; K_ambient = 0.0 with zero writers (per-keyframe ambient term
+    inert); device-ambient render-state token 139; quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else
+    2.0}. Re-pinned `specs/environment.md`.
+
+**Provenance:** dirty sources under `Docs/RE/_dirty/assetfidelity/{ui,character,world}/*.md` (gitignored).
+Committed files touched: `specs/ui_system.md`, `specs/rendering.md`, `specs/equipment_visuals.md`,
+`formats/effects.md`, `specs/effects.md`, `formats/terrain_layers.md`, `specs/environment.md`, `formats/sky.md`.
+No `names.yaml` change applied this campaign (proposed canonical names left in the dirty notes for a later
+`ida-toolsmith` annotation pass). Firewall: zero addresses / pseudo-C / Hex-Rays autonames in any committed file
+(self-scrubbed); all raw findings stayed in `_dirty/`. Recovery and promotion ran as separate sub-waves.

@@ -6,15 +6,15 @@
 
 ---
 
-## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+## Re-verification banner (2026-06-21, refinement pass)
 
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | `sample-verified` — fixed 0x8000 size, grid geometry, world→tile indexer, and the byte-2/3-4/5-7 BGM/BGE/EFF consumer reads are all matched against a real VFS sample **and** the legacy loader/indexer/consumer read-path (two-witness). RE-CONFIRMED in full on this build with no drift. |
-| `ida_reverified` | `2026-06-16` |
+| `ida_reverified` | `2026-06-21` |
 | `ida_anchor`     | `263bd994` |
-| `evidence`       | `[static-ida, vfs-sample]` — loader (raw 0x8000 single read), tile indexer, and the sole ambient-sound consumer (witness 1) + black-box census over the real `data.vfs` (witness 2) |
-| `conflicts`      | None. Re-confirmed: headerless fixed 32 768 B (all 1 578 `.mud` files in the VFS are exactly this size); 64 × 64 tiles, 8-byte stride, 16-unit tiles; the sole consumer reads **only bytes 2–7** (byte 2 = BGM, bytes 3–4 = BGE, bytes 5–7 = EFF, byte 7 `effId2` confirmed consumed); **bytes 0 and 1 are never read** — the walk/run footstep hypothesis stays REFUTED. Two minor enrichments folded in (not conflicts): the consumer's forced re-pick interval is exactly **600 000 ms (10 min)** (§Runtime usage), and the null-blob (missing-file) fallback resolves to a single fixed **static default tile** (§Runtime usage). |
+| `evidence`       | `[static-ida, vfs-sample]` — loader (raw 0x8000 single read), tile indexer, and the sole ambient-sound consumer (witness 1) + a real VFS cell sample (witness 2) |
+| `conflicts`      | None. Re-confirmed on this build: headerless fixed 32 768 B; 64 × 64 tiles, 8-byte stride, 16-unit tiles; the sole consumer reads **only bytes 2–7** (byte 2 = BGM, bytes 3–4 = BGE, bytes 5–7 = EFF, byte 7 `effId2` confirmed consumed); **bytes 0 and 1 are never read** (and were observed single-valued `0x00` across all 4096 tiles of the sample cell) — the walk/run footstep hypothesis stays REFUTED. Two enrichments sharpened (not conflicts): the missing-file (null-blob) fallback tile is specifically a fixed **all-zero** tile ⇒ total silence in every slot (§Runtime usage); and a **missing `.mud` is a soft outcome**, not a load failure — the loader reports success with a null blob, so the cell's `.gad`/`.map` still load (§Read algorithm / §Runtime usage). |
 
 ---
 
@@ -96,6 +96,32 @@ The `& 0x3F` masks clamp both axes to the 0..63 range; the `<< 6` is the 64-tile
 
 The cell-origin biasing convention `(mapX - 10000) * 1024` is shared with the terrain system —
 see `terrain.md` for the full cell coordinate model.
+
+---
+
+## Read algorithm
+
+There is **no parse step**. The file is read as one fixed-size raw blob; the grid is interpreted
+lazily by the audio consumer, tile-by-tile, on demand. The on-disk bytes ARE the runtime grid —
+no header, no transform, no decode, no validation of tile contents.
+
+1. Open the cell's `.mud` over the VFS by its logical path (the loader builds the cell base path,
+   then appends the `.mud` extension).
+2. **If the file is absent:** treat as a **soft / non-fatal** outcome — the loader reports success,
+   the per-cell grid pointer stays **null**, and the cell's companion `.gad`/`.map` continue to
+   load normally. (A missing `.mud` is NOT a load failure.) The later tile lookups then resolve to
+   the static default tile (see §Runtime usage). — confidence: CONFIRMED
+3. Allocate exactly **32768 bytes (0x8000)**. (Allocation failure is a hard error — the grid
+   pointer is left null and the load returns failure.) — confidence: CONFIRMED
+4. Read exactly **32768 bytes** in a **single** read into that buffer. (A read error on an opened
+   file is a hard error — the buffer is freed, the pointer nulled, and the load returns failure.)
+   — confidence: CONFIRMED
+5. Retain the buffer verbatim as the cell's per-cell audio grid. No byte-level parse, no decode, no
+   tile-content validation occurs at load time. — confidence: CONFIRMED
+
+This sharp split — only a *missing* file is soft, while an alloc failure or a read error on an
+*opened* file is hard — is what lets a cell with no ambient-sound grid stream in silently while a
+truncated/corrupt grid still surfaces as a load error.
 
 ---
 
@@ -184,9 +210,12 @@ well under the 256 records per table). Full table layout and chain detail: `soun
    - A periodic forced re-pick re-evaluates the current tile even without movement. The interval is
      **600 000 ms (exactly 10 minutes)** — the consumer compares the elapsed time since the last
      re-pick against this constant.
-4. **Missing `.mud` (null blob):** when no `.mud` is loaded for the cell, the indexer returns a
-   single fixed **static default tile** rather than reading the grid, so audio falls back to that
-   tile's indices.
+4. **Missing `.mud` (null blob):** a missing file is a soft outcome (see §Read algorithm) — the
+   grid pointer stays null and the cell streams in regardless. When the grid pointer is null, the
+   indexer returns a single fixed **static default tile** rather than reading the grid. That default
+   tile is specifically an **all-zero** tile, so every audio slot resolves to the `0` silence
+   sentinel: a cell with no `.mud` plays **no BGM, no BGE, and no EFF** at all. — confidence:
+   CONFIRMED
 
 Crossfade/stop timing and the indoor override id are behavioural details that belong to a
 sound-subsystem spec, not to this format doc.
@@ -209,8 +238,14 @@ sound-subsystem spec, not to this format doc.
 
 - Cell streaming model and `(mapX, mapZ)` origin biasing: `terrain.md`
 - On-disk sound tables and the full mud-byte → table → leaf-audio resolution chain:
-  `sound_tables.md` (CONFIRMED for BGM / BGE / EFF)
-- Companion per-cell files sharing the base path: `.gad` (no-op stub), `.map` (text scene)
+  `sound_tables.md` (CONFIRMED for BGM / BGE / EFF). NOTE for the sound_tables author: each of the
+  three per-area tables (BGM/BGE/EFF) shares a fixed 48-byte (0x30) record stride, and the EFF
+  record's Y coordinate is taken from the **player** position at lookup time (the record itself
+  supplies X at +0x20, Z at +0x28, and a radius at +0x2C) — confirm/reconcile there, out of scope
+  for this format doc.
+- Companion per-cell files sharing the same cell base path: `.gad` (no-op stub) and `.map` (text
+  scene descriptor) are loaded in the same streaming call; the wider base-path family also includes
+  `.ted` / `.ted.post` (terrain height + post-process), `.sod` (collision), and `.lst` (cell list).
 - Glossary: see Docs/RE/names.yaml
 - Provenance: see Docs/RE/journal.md (entry paired with this spec)
 
@@ -231,6 +266,14 @@ sound-subsystem spec, not to this format doc.
   sample). No drift. Two minor enrichments added: the forced re-pick interval is exactly 600 000 ms
   (10 min), and the missing-`.mud` (null-blob) lookup falls back to a single fixed static default
   tile (both noted under §Runtime usage).
+- **Refinement pass** (2026-06-21, anchor 263bd994): two-witness re-confirm (loader / indexer /
+  sole consumer + a real VFS cell sample). All load-bearing claims re-confirmed with no drift;
+  bytes 0 and 1 observed single-valued `0x00` across all 4096 tiles of the sample cell. Two
+  enrichments sharpened: (a) the static default tile is specifically an **all-zero** tile, so a
+  missing `.mud` yields total silence in every slot; (b) a **missing `.mud` is a soft outcome** —
+  the loader reports success with a null blob and the cell's `.gad`/`.map` still load, whereas only
+  an allocation failure or a read error on an *opened* file is a hard load failure. Added a
+  consolidated §Read algorithm. (No change to the on-disk layout or geometry.)
 
 ---
 

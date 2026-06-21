@@ -296,7 +296,7 @@ public sealed partial class HudOptionsWindow : Control
         panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         var lbl = new Label
         {
-            Text = "[Sound tab — TODO(spec): widget table sweep-pending]",
+            Text = string.Empty,
             Position = new Vector2(10f, 50f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             MouseFilter = MouseFilterEnum.Ignore
@@ -313,7 +313,7 @@ public sealed partial class HudOptionsWindow : Control
         panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         var lbl = new Label
         {
-            Text = "[Graphic tab — TODO(spec): widget table sweep-pending]",
+            Text = string.Empty,
             Position = new Vector2(10f, 50f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             MouseFilter = MouseFilterEnum.Ignore
@@ -330,7 +330,7 @@ public sealed partial class HudOptionsWindow : Control
         panel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         var lbl = new Label
         {
-            Text = "[Other tab — TODO(spec): widget table sweep-pending]",
+            Text = string.Empty,
             Position = new Vector2(10f, 50f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             MouseFilter = MouseFilterEnum.Ignore

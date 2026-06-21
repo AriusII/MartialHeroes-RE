@@ -48,7 +48,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     /// </summary>
     public enum VisualState
     {
-        Standing = 0, // the neutral standing case → known idle slot (motion_ids_a[0] / col15, §8(e)).
+        Standing = 0, // the neutral standing case → default idle slot (motion_ids_a[1] / col16, §8(e)).
 
         // The remaining five branches of the recovered 6-way idle applier. Which concrete visual-state
         // VALUE lands on which case — and which actormotion column each case selects — is NOT settled
@@ -65,7 +65,21 @@ public sealed partial class SkinnedCharacterNode : Node3D
     // spec: Docs/RE/specs/skinning.md §8(c) — "Smoothed (recommended): renormalize alpha /= 0.1."
     private const bool RenormalizeAlpha = true;
 
+    /// <summary>
+    ///     Default hand bone-id a rigid weapon attaches to. The recovered weapon-attach host node is
+    ///     constructed with bone-id 0 (the root/first bone) and no static override is reachable — the
+    ///     concrete hand bone-id is DBG-PENDING. Held as a SINGLE adjustable constant so naming the hand
+    ///     bone (a live read with a weapon equipped) is a one-line change.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 / §8 (host bone-id default 0, DBG-PENDING).
+    /// </summary>
+    public const int DefaultHandBoneId = 0;
+
+    // Rigidly bone-attached weapon parts (slot 14). Each follows ONE shared-skeleton bone every frame
+    // (no per-vertex skinning) — the recovered weapon attach model. spec: equipment_visuals.md §5.
+    private readonly List<WeaponAttachment> _weapons = new();
+
     private ArrayMesh? _arrayMesh; // live render mesh (also used for BuildDiagnostics AABB sampling)
+    private int _baseId;
 
     // ---- Precomputed rig (immutable after Setup) ----
     private Bone[] _bones = [];
@@ -86,16 +100,22 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private bool[] _hasChild = []; // per-bone: parent of ≥1 bone (§6.3 interior-bone lock)
     private bool _hasClip;
 
-    // The resolved STANDING IDLE clip (motion_ids_a[0] = the actormotion col-15 idle id), supplied to
-    // Setup() and held so the node can (re)start looping idle playback on _Ready / when built. The
-    // upstream builder resolves this id via the §8(e) chain: data/char/actormotion.txt, the row whose
-    // col2 == skin_class (the .skn header id_b), motion_ids_a[0] = column 15, record +0x40 →
-    // data/char/mot/g{id}.mot. For the first human class this is the static stand g101100001.mot — a
-    // faithful held pose (§10.2), NOT a missing-animation defect. We do NOT resolve any other slot here.
-    // spec: Docs/RE/specs/skinning.md §8(e) (idle-clip resolution chain, col2==skin_class → col15 /
-    //       motion_ids_a[0] / record +0x40), §10 / §10.2 / §10.5 (the col15 stand idle is static DATA,
-    //       render it faithfully; do not synthesize a breathing idle).
+    // The resolved STANDING/DEFAULT IDLE clip (motion_ids_a[1] = the actormotion col-16 idle id),
+    // supplied to Setup() and held so the node can (re)start looping idle playback on _Ready / when
+    // built. The upstream builder resolves this id via the §8(e) chain: data/char/actormotion.txt, the
+    // row keyed by the appearance key (col2 == skin_class selects the .bnd skeleton), motion_ids_a[1] =
+    // column 16, record +0x44 → the motlist.txt clip registry. NOTE: motion_ids_a[0] / column 15 /
+    // record +0x40 is STATICALLY DEAD (zero read-sites) — the prior "col15 / motion_ids_a[0]" framing
+    // was the off-by-one to avoid. Whether the resolved col-16 clip's DATA animates is per-asset (a
+    // static stand snapshot is faithful, §10.2) — render it as-is; do NOT synthesize a breathing idle.
+    // spec: Docs/RE/specs/skinning.md §8(e) item 2 (idle = motion_ids_a[1] = col16 / record +0x44; col15 /
+    //       motion_ids_a[0] / record +0x40 is statically dead), §10 / §10.2 / §10.5.
     private AnimationClip? _idleClip;
+
+    // Bone-id → array-index map (base-relative resolve, §3.2) + base id, retained from Setup so a
+    // rigid weapon attach can resolve its hand bone-id to a pose bone each frame.
+    // spec: Docs/RE/specs/skinning.md §3.2 (bone_array[id − base_id]).
+    private int[] _idToIndex = [];
 
     // True once a visual-state clip has been engaged for looping playback (idle by default). Diagnostic
     // affordance; the actual frame advance is the _Process / Tick → Advance path. Gated on a clip
@@ -167,6 +187,10 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // interior-bone translation lock.
         // spec: Docs/RE/specs/skinning.md §3 / §6.3.
         SkinningMath.ResolveHierarchy(_bones, out _parentIndex, out var idToIndex, out var baseId, out _hasChild);
+        // Retain the bone-id map + base id so a rigid weapon attach (§5) can resolve its hand bone-id
+        // to a pose bone each frame. spec: Docs/RE/specs/skinning.md §3.2 (bone_array[id − base_id]).
+        _idToIndex = idToIndex;
+        _baseId = baseId;
         var bindWorld = SkinningMath.AccumulateBindWorld(_bones, _parentIndex);
 
         // Per-bone runtime node scale (+84 field; rotate → scale → translate in the world walk, §6.6).
@@ -197,10 +221,10 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // spec: Docs/RE/specs/skinning.md §8(e) item 4 — "SKIP (do not clamp) any clip track whose
         //       bone_id falls outside [base_id, base_id + bone_count)".
         // spec: Docs/RE/formats/animation.md §Bone-track linkage — bone_id matches Bone.SelfId.
-        // The supplied clip IS the resolved standing-idle slot (motion_ids_a[0] / col-15 idle, §8(e)).
+        // The supplied clip IS the resolved default-idle slot (motion_ids_a[1] / col-16 idle, §8(e)).
         // Retain it so SelectVisualStateClip() can hand it back as the played clip for every recovered
         // visual-state case (only the idle slot is resolvable here; the others are live-pending, §10.3.1).
-        // spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[0] = col15), §10.3.1.
+        // spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[1] = col16), §10.3.1.
         _idleClip = clip;
 
         _trackByBoneIndex = new AnimationTrack?[boneCount];
@@ -331,7 +355,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _ready = true;
 
         // EW4: begin LOOPING STANDING-IDLE playback as soon as the skinned character is built. The
-        // standing visual state routes to the known idle slot (motion_ids_a[0] / col-15 idle, §8(e));
+        // standing visual state routes to the default idle slot (motion_ids_a[1] / col-16 idle, §8(e));
         // the other 5 recovered visual-state cases are live-pending (§10.3.1) and default to this same
         // idle clip — see SelectVisualStateClip(). Playback is gated on the clip being present, so an
         // offline / no-VFS build with no resolvable idle still stands silently (no crash).
@@ -342,18 +366,18 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     /// <summary>
     ///     Maps a recovered visual-state case to the clip to play. ONLY the <see cref="VisualState.Standing" />
-    ///     case has a statically-resolvable clip (the col-15 standing idle = <c>motion_ids_a[0]</c>, §8(e));
+    ///     case has a statically-resolvable clip (the col-16 default idle = <c>motion_ids_a[1]</c>, §8(e));
     ///     the other five cases are <c>live-pending (6-D)</c> (§10.3.1) and intentionally default to the same
     ///     idle clip rather than guessing a clip the live engine has not been confirmed to select. This node
     ///     only ever holds the resolved idle clip, so the default is the faithful conservative choice.
-    ///     spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[0] = col15), §10.3.1 / §10.4
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (idle = motion_ids_a[1] = col16), §10.3.1 / §10.4
     ///     (value → column mapping live-pending — do not guess).
     /// </summary>
     private AnimationClip? SelectVisualStateClip(VisualState state)
     {
         return state switch
         {
-            // KNOWN: neutral standing → the col-15 standing idle (motion_ids_a[0]). spec: skinning.md §8(e).
+            // KNOWN: neutral standing → the col-16 default idle (motion_ids_a[1]). spec: skinning.md §8(e).
             VisualState.Standing => _idleClip,
 
             // live-pending (skinning.md §10) — the value → column mapping for these five cases is not
@@ -377,7 +401,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     ///     (offline / no VFS) the node simply stands in the rest pose (no crash, no playback).
     ///     STRICTLY PASSIVE: which clip plays arrives as the visual state; this method only translates it
     ///     into AnimationPlayer-style playback. No game-rule authority, no clip synthesis.
-    ///     spec: Docs/RE/specs/skinning.md §10.5 (render the col15 idle faithfully, advance with real dt and
+    ///     spec: Docs/RE/specs/skinning.md §10.5 (render the col16 idle faithfully, advance with real dt and
     ///     loop at clip end — the static look comes from the data), §8(e) (idle slot resolution).
     /// </summary>
     public void PlayStandingIdle()
@@ -525,6 +549,117 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // SetSurfaceOverrideMaterial on MeshInstance3D is NOT called per-frame (it was set once in
         // Setup after the first DeformAndUpload, and it persists across ClearSurfaces).
         _arrayMesh.SurfaceSetMaterial(0, _material);
+
+        // Rigidly re-place any bone-attached weapon parts (slot 14) from the SAME animated bone world
+        // poses (_world) computed above, so the weapon follows the hand exactly as the body deforms.
+        // spec: Docs/RE/specs/equipment_visuals.md §5 (weapon = rigid single-bone follow).
+        UpdateWeaponAttachments();
+    }
+
+    // =========================================================================
+    // Weapon attach (slot 14) — rigid single-bone follow of the shared skeleton (§5)
+    // =========================================================================
+
+    /// <summary>
+    ///     Rigidly attaches a weapon mesh to ONE bone of the shared skeleton (the recovered weapon
+    ///     model — NOT skinned-deform). The weapon node follows that bone's animated world transform
+    ///     each frame; the per-mesh <paramref name="visualScale" /> reproduces the <c>Visual+100</c>
+    ///     single scalar scale (equipment_visuals.md §5: the grip placement is a scalar, not a matrix).
+    ///     <para>
+    ///         The hand <paramref name="boneId" /> is the numeric bone-id the engine resolves against the
+    ///         loaded <c>.bnd</c> (there is NO bone-name string in the binary). Statically the host node is
+    ///         constructed with bone-id 0 (DBG-PENDING — see §5 / §8); callers pass
+    ///         <see cref="DefaultHandBoneId" /> until a live read names the hand bone.
+    ///     </para>
+    ///     STRICTLY PASSIVE: builds + places geometry only; no game-rule authority. Main-thread only.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 (bone-id attach, 88-byte stride, scalar
+    ///     <c>Visual+100</c>; off-hand = node flag 1), §5.1 (dual / two-piece), §9 item 3.
+    ///     spec: Docs/RE/specs/skinning.md §3.2 (bone resolved by <c>id − base_id</c>), §8(b) (single
+    ///     handedness conversion at output — applied here identically to the body).
+    /// </summary>
+    /// <param name="weaponMesh">Parsed weapon <c>.skn</c> (built as a static rigid mesh).</param>
+    /// <param name="albedo">Optional weapon albedo; null → neutral material.</param>
+    /// <param name="boneId">Hand bone-id (base-relative). Default <see cref="DefaultHandBoneId" />.</param>
+    /// <param name="visualScale">The <c>Visual+100</c> scalar scale for the grip. Default 1.0.</param>
+    /// <param name="offHand">True for the off-hand node of a dual / two-piece weapon (§5.1).</param>
+    public void AttachHandWeapon(
+        SkinnedMesh weaponMesh,
+        ImageTexture? albedo = null,
+        int boneId = DefaultHandBoneId,
+        float visualScale = 1.0f,
+        bool offHand = false)
+    {
+        // Resolve the hand bone-id to a pose-bone array index (base-relative, §3.2). Clamp out-of-range
+        // to the root so a wrong id never indexes out of bounds (importer hardening; the engine itself
+        // clamps to the last bone — here root is the safe inert choice for a missing hand bone).
+        var bid = boneId & 0xFF;
+        var boneIndex = bid >= 0 && bid < _idToIndex.Length ? _idToIndex[bid] : -1;
+        if (boneIndex < 0)
+        {
+            // Defensive fallback: plain id − base_id, else root.
+            var off = boneId - _baseId;
+            boneIndex = off >= 0 && off < _bones.Length ? off : 0;
+        }
+
+        // Build the weapon as a static rigid ArrayMesh (rest geometry + the single handedness
+        // conversion), exactly the Bud/Skn MeshBuilder pattern — never GltfDocument.
+        var (inst, _) = SkinnedCharacterBuilder.BuildStaticRigidMesh(weaponMesh, albedo,
+            $"Weapon{(offHand ? "Off" : "Main")}_{weaponMesh.Name}");
+
+        AddChild(inst);
+        _weapons.Add(new WeaponAttachment(inst, boneIndex, visualScale, offHand));
+
+        // Place it immediately from the current pose so it is not at the origin for one frame.
+        UpdateWeaponAttachments();
+
+        GD.Print($"[Skinning] Weapon attached: '{weaponMesh.Name}' boneId={boneId} " +
+                 $"(idx={boneIndex}) scale={visualScale:F2} offHand={offHand}. " +
+                 "spec: equipment_visuals.md §5 (rigid single-bone follow).");
+    }
+
+    /// <summary>Removes all attached weapon nodes (e.g. on an equip change / teardown, §1).</summary>
+    public void ClearWeapons()
+    {
+        foreach (var w in _weapons)
+            if (IsInstanceValid(w.Node))
+            {
+                RemoveChild(w.Node);
+                w.Node.QueueFree();
+            }
+
+        _weapons.Clear();
+    }
+
+    /// <summary>
+    ///     Re-places every attached weapon node from its hand bone's animated world transform in the
+    ///     reused <c>_world</c> buffer (native space), converted once to Godot space by the SAME single
+    ///     handedness conversion the body uses (§8(b)). The grip offset comes from the weapon's own rest
+    ///     geometry (built into the mesh), scaled by the <c>Visual+100</c> scalar; here we drive the
+    ///     node's transform = (boneWorldQuat, boneWorldTrans · scale) so the weapon rigidly follows.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 / Docs/RE/specs/skinning.md §6.6 (bone world pose).
+    /// </summary>
+    private void UpdateWeaponAttachments()
+    {
+        if (_weapons.Count == 0 || _world.Length == 0) return;
+
+        for (var i = 0; i < _weapons.Count; i++)
+        {
+            var w = _weapons[i];
+            if (!IsInstanceValid(w.Node)) continue;
+            if ((uint)w.BoneIndex >= (uint)_world.Length) continue;
+
+            var bw = _world[w.BoneIndex];
+
+            // Native bone world quaternion → Godot (the SAME quaternion remap the project documents for
+            // the Z-negate handedness conversion: (x,y,z,w) → (−x,−y,z,w)). spec: skinning.md §8(b).
+            var (qx, qy, qz, qw) = WorldCoordinates.SkinQuatToGodot(bw.Quat.X, bw.Quat.Y, bw.Quat.Z, bw.Quat.W);
+            // Native bone world translation → Godot (Z-negate), scaled by the Visual+100 scalar.
+            var (tx, ty, tz) = WorldCoordinates.SkinToGodot(bw.Trans.X, bw.Trans.Y, bw.Trans.Z);
+
+            var basis = new Basis(new Quaternion(qx, qy, qz, qw).Normalized());
+            if (w.VisualScale != 1.0f) basis = basis.Scaled(Vector3.One * w.VisualScale);
+            w.Node.Transform = new Transform3D(basis, new Vector3(tx, ty, tz) * w.VisualScale);
+        }
     }
 
     /// <summary>Computes per-bone animated world transforms into the reused <c>_world</c> buffer.</summary>
@@ -664,6 +799,13 @@ public sealed partial class SkinnedCharacterNode : Node3D
         return !(float.IsNaN(v.X) || float.IsNaN(v.Y) || float.IsNaN(v.Z)
                  || float.IsInfinity(v.X) || float.IsInfinity(v.Y) || float.IsInfinity(v.Z));
     }
+
+    /// <summary>One rigidly bone-attached weapon node (slot 14). spec: equipment_visuals.md §5.</summary>
+    private readonly record struct WeaponAttachment(
+        MeshInstance3D Node,
+        int BoneIndex,
+        float VisualScale,
+        bool OffHand);
 
     /// <summary>Diagnostic results for the mandatory skinning invariants.</summary>
     public sealed class SkinDiagnostics

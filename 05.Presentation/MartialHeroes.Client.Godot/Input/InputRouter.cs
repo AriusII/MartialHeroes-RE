@@ -58,9 +58,17 @@ public sealed partial class InputRouter : Node
     private InputBus _inputBus = null!;
     private int _pressButton = -1;
 
-    // Click-synthesis latch state: records the press position and button so that on release at the
-    // same-ish position we can emit a MouseButtonClick (type 6) event.
-    // spec: Docs/RE/specs/input_ui.md §2b — "latch widget on press, synthesise click on same-widget release".
+    // Click-synthesis latch state: records the press position and button so that on release within the
+    // drag tolerance we can emit a MouseButtonClick (type 6) event.
+    // The full same-widget rule (§3 of ui_event_dispatch.md — "one process-global click-capture pointer")
+    // is OWNED BY THE HudInputHandler in the Application layer, not here: InputRouter cannot perform a
+    // widget hit-test because it operates below the UI container tree. InputRouter approximates the
+    // same-widget check via the 2-px drag tolerance, which is sufficient at the Godot→Application boundary.
+    // The HudInputHandler is responsible for the precise capture-pointer comparison (+0x88/+0x89 latch).
+    // OUT-OF-LANE NOTE: the container reverse-child routing (§4), hover edge latch (+0x88/+0x89), and
+    // active-child field (+0xB4) store all live in the Application-layer IInputHandler chain, not here.
+    // spec: Docs/RE/specs/ui_event_dispatch.md §3 (same-widget click-capture, global capture pointer).
+    // spec: Docs/RE/specs/input_ui.md §2b — latch widget on press, synthesise click on same-widget release.
     // The 2-px drag tolerance is byte-confirmed in input_ui.md §2b.
     private int _pressX = -1;
     private int _pressY = -1;
@@ -208,8 +216,11 @@ public sealed partial class InputRouter : Node
                             _inputBus.Enqueue(in clickEvt);
                         }
 
-                        // Clear the latch.
+                        // Clear the latch fully (button, position).
+                        // spec: Docs/RE/specs/ui_event_dispatch.md §3 — "clears the capture" on release.
                         _pressButton = -1;
+                        _pressX = -1;
+                        _pressY = -1;
                     }
 
                     break;
@@ -389,12 +400,19 @@ public sealed partial class InputRouter : Node
         }
 
         /// <summary>
-        ///     Handles left-button-down events as click-to-move. Returns true to consume.
+        ///     Handles a synthesised left-button CLICK (type 6) as click-to-move. Returns true to consume.
+        ///     The world handler must react to the synthetic CLICK (type 6), not the raw press (type 4):
+        ///     the click is the drag-vs-click discriminator — only a press+release on the same widget
+        ///     produces it, so a drag that overshoots never triggers a spurious move.
+        ///     spec: Docs/RE/specs/ui_event_dispatch.md §3 — "the synthetic CLICK event (type 6) is the
+        ///     genuine click-vs-drag discriminator; a drag-off release never reaches the window switch".
         ///     spec: Docs/RE/specs/input_ui.md §3 — "(c) Otherwise, ground action — click-to-move".
         /// </summary>
         public bool TryHandle(in AppInputEvent e)
         {
-            if (!e.IsLeftButtonDown) return false;
+            // React to the synthesised CLICK (type 6), not the raw press (type 4).
+            // spec: Docs/RE/specs/ui_event_dispatch.md §3 (click-synth is the action discriminator).
+            if (!e.IsLeftButtonClick) return false;
 
             return _router.HandleClickToMove(e.X, e.Y);
         }

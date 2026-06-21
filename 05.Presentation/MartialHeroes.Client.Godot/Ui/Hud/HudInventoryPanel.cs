@@ -199,9 +199,18 @@ public sealed partial class HudInventoryPanel : Control
                 MouseFilter = MouseFilterEnum.Stop
             };
 
-            // Cell background — dark with border
-            // (In the real client the cell bg is a 38×38 slice from inventwindow.dds)
-            // TODO(spec): bind correct cell bg sub-rect from inventwindow.dds atlas.
+            // Cell background — dark with border.
+            // In the original client each 38×38 cell button draws its background from a
+            // sub-rect of inventwindow.dds (uitex 2); the exact (srcX, srcY, 38, 38) origin
+            // has NOT been recovered from the spec yet — the §8.10.1 description lists the
+            // full set of atlas ids used (uitex 2/14/69/71/78) but does not enumerate the
+            // per-element sub-rect coordinates.
+            // spec: Docs/RE/specs/ui_system.md §8.10.1 — "cells resolve texture handles by
+            //   uitex.txt id 2 (inventory body + cells), 14 (count/qty), 69/71/78 (glyphs)".
+            // TODO(spec): once the cell-bg sub-rect coordinates are recovered from the IDA
+            //   builder (the multi-layered cell construction site in the ItemPanel builder),
+            //   replace this StyleBoxFlat placeholder with:
+            //   atlas.SliceById(InvTexId, srcX, srcY, CellSide, CellSide)
             var cellPanel = new Panel { Name = "CellBg" };
             cellPanel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             var cs = new StyleBoxFlat();
@@ -258,7 +267,7 @@ public sealed partial class HudInventoryPanel : Control
         var paperdollPlaceholder = new Label
         {
             Name = "PaperdollPlaceholder",
-            Text = "[paperdoll]",
+            Text = string.Empty,
             Position = new Vector2(x, y),
             HorizontalAlignment = HorizontalAlignment.Center,
             MouseFilter = MouseFilterEnum.Ignore

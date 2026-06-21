@@ -83,13 +83,24 @@ LZ4-decompress only, **no inverse cipher** — `opcodes.md §Wire frame header`)
 > u16 read is safe; an implementer must nonetheless not assume a single width on both paths. *spec:*
 > `network_dispatch.md`, `opcodes.md §Wire frame header`.
 
-> **Nagle coalescing (carried for implementers).** Neither end disables Nagle's algorithm: the server
-> leaves `TCP_NODELAY` unset (a maintainer-observed runtime fact, most pronounced for the **World
-> Server** major-4/major-5 traffic), and the client sets only `SO_RCVBUF` — **never** `TCP_NODELAY`
-> (`[confirmed]` from the client's sole `setsockopt` site). So **multiple framed messages may arrive
-> coalesced in a single TCP segment, and one message may be split across segments** — in both
-> directions. Always reassemble on the 8-byte header `size` word; never treat one `recv` (or one
-> `send`) as one message. Full discussion: `network_dispatch.md §4.4a`.
+> **Nagle coalescing (carried for implementers).** Neither end disables Nagle's algorithm. **The client
+> does NOT set `TCP_NODELAY` on the game connection — Nagle stays ON by default** (re-confirmed static
+> IDA, 2026-06-21). An exhaustive census of every socket-option call in the client finds **exactly one**
+> `setsockopt` site anywhere, and it sets **`SO_RCVBUF`** (receive-buffer size) on the **game socket**;
+> there is **no** `setsockopt` with the TCP-level `TCP_NODELAY` option on any socket (not the game path,
+> not the lobby path). The server likewise leaves `TCP_NODELAY` unset (a maintainer-observed runtime fact,
+> most pronounced for the **World Server** major-4/major-5 traffic). This **confirms** the live replica
+> fact that the working game connection runs with Nagle ON (`Socket.NoDelay = false`). So **multiple
+> framed messages may arrive coalesced in a single TCP segment, and one message may be split across
+> segments** — in both directions. Always reassemble on the 8-byte header `size` word; never treat one
+> `recv` (or one `send`) as one message.
+>
+> **Socket blocking mode (re-confirmed static IDA, 2026-06-21).** The **game socket** is switched to
+> **non-blocking only during connect** (the connect is timed with a `select`, roughly a 2-second timeout,
+> plus a socket-error check), then **reverted to blocking** for steady-state operation. Steady-state
+> receive is **overlapped**: a dedicated I/O thread drives overlapped receives (with overlapped sends and
+> completion waits). The **lobby socket** (the server-list / channel-endpoint query on port 10000) is
+> plain blocking throughout with **no** socket options set. Full discussion: `network_dispatch.md §4.4a`.
 
 ### 1.2 Contract categories
 
@@ -146,12 +157,21 @@ netcode-deep, control-flow-confirmed):
   20-second idle heartbeat while a request is pending) — it does NOT route or match any response.
 - **`1/0 CmsgLogout` sets NO latch** (fire-and-forget — the one lifecycle builder that does not arm it).
 
-**The enter ladder.** Enter-world is the load-bearing chain `1/9 CmsgEnterGameRequest → 3/5
-SmsgEnterGameAck → 4/1 SmsgGameStateTick`. The 1/9 send SETS the enter-game latch; **`4/1` (not `3/5`)
-CLEARS it** — clearing the latch is `4/1`'s very first statement, before its form-A/form-B branch,
-unconditional. `3/5` advances the scene but does **not** clear the latch. *spec:* `handlers.md`
+**The enter ladder (CORRECTED 2026-06-21 against the live server `211.196.150.4`).** Enter-world is
+the chain **`1/9 CmsgEnterGameRequest → 4/1 SmsgGameStateTick`** — the **`4/1` IS the enter
+confirmation** (the world-state snapshot), with **NO enter-ladder `3/5` in between**. A live headless
+run observed, after the roster: `3/4 (roster) → 3/5 (44B, the post-login account-ack, BEFORE any 1/9)`,
+then `1/9 (enter request) → 4/1 (9100B, the enter confirmation) → 5/121`. The `1/9` send SETS the
+enter-game latch; **`4/1` (not `3/5`) CLEARS it** — clearing the latch is `4/1`'s very first statement,
+unconditional. A **latch-armed `4/1` IS the enter confirmation** and drives the scene into the in-world
+state (Select/Load → InGame). The **`3/5 SmsgEnterGameAck` is ONLY the unsolicited post-login
+account-ack** the replica pushes right after the `3/4`/`3/1` roster (it arrives **before** any `1/9`,
+so the latch is NOT armed at that `3/5`); it nudges the scene toward Load but **is NOT a step in the
+enter ladder** and must NOT, by itself, enter the world. (The earlier reading of a three-step
+`1/9 → 3/5 → 4/1` ladder where the *enter-ladder* `3/5` armed the world-load is **REFUTED for this
+server**: that `3/5` never arrives between the `1/9` and the `4/1`.) *spec:* `handlers.md`
 (Group I — in-flight latch census; §4/1 latch note), `opcodes.md` (1/0, 1/9, 2/2 notes),
-`network_dispatch.md §4` (outstanding-request guard + keepalive read).
+`network_dispatch.md §4` (outstanding-request guard + keepalive read), `login_flow.md §1 step 9 / §3.4`.
 
 ### 1.4 Master coverage statement
 
@@ -236,8 +256,8 @@ The major-3 reply minors use the campaign-10 de-swapped labels: **3/4 = SmsgScen
 |---|---|---|---|---|---|
 | **1/0** CmsgLogout | 0 | none (server drops the session) | — | fire-and-forget — the only char-mgmt builder that does not set the in-flight latch. | `cmsg_logout.yaml` |
 | **1/6** CmsgCreateCharacter *(52-byte appearance blob)* | 52 | create-ack = the in-flight latch cleared by **3/7** SmsgCharManageResult (8B) + a refreshed char list (**3/4** SmsgSceneEntityUpdate) (+ **3/23** SmsgCharStatusBytesByName roster patch) | 8 / var / 28 | inferred/med — sets the latch; **CORRECTED (binary wins):** there is **no 12-byte create-result opcode** — the create round-trip is acked by the latch-clearing **3/7 SmsgCharManageResult (8B)** plus a refreshed char list; **3/23 = SmsgCharStatusBytesByName (28B)** (17B name key + status bytes; patches the roster BY NAME — NOT a create-result, prior "SmsgCharSelectStatusUpdate" label dropped). | `cmsg_char_create.yaml`, `3-7_char_manage_result.yaml`, `3-4_scene_entity_update.yaml` |
-| **1/7** CmsgManageCharacter *(select; DELETE overloads mode=1)* | 2 | **3/4** SmsgSceneEntityUpdate *(manage result, subtype 2)* — committed; **UNVERIFIED 3/7** alternative | var / 8 | inferred/med + **CONFLICT** — `opcodes.md` attributes the manage/delete result to 3/4 subtype 2 (authoritative); a fresh static read suggests an UNVERIFIED 3/7. Do not re-point on static evidence. The mode=1==DELETE semantic itself is capture-pending. (§Open Questions Q1) | `cmsg_char_select.yaml`, `3-4_scene_entity_update.yaml`, `3-7_char_manage_result.yaml` |
-| **1/9** CmsgEnterGameRequest | 40 | **3/5** SmsgEnterGameAck → then **4/1** SmsgGameStateTick *(world snapshot, form B)* | 44 / var | confirmed/high — the documented enter ladder `1/9 → 3/5 → 4/1`. 1/9 SETS the enter-game latch; **`4/1` (not 3/5) CLEARS it** as its first statement (`handlers.md` Group I + §4/1). 4/1 = installed Response slot 1, the form-B world-entry packet. | `cmsg_char_enter.yaml`, `3-5_enter_game_response.yaml`, `4-1_game_state_tick.yaml` |
+| **1/7** CmsgSelectCharacterSlot *(2-byte `[u8 slot][u8 mode]`; both sites are SELECT paths)* | 2 | result on the major-3 ladder (no dedicated per-opcode reply); removal via **3/7** SmsgCharManageResult subtype 2 | 8 | **CORRECTED — binary wins (Phase 2b, build 263bd994):** 1/7 is a character-**SELECT** commit, NOT a delete carrier. A single send-builder has exactly two call sites in the select-window command handler: the "play / select this slot" confirm writes **mode = 1** (select-and-play); the slot-lock / pre-play confirm writes **mode = 0** (slot-lock). The prior "CmsgManageCharacter / DELETE overloads mode=1" reading is **REFUTED** — there is **no major-1 char-delete opcode** on this build (the major-1 C2S builder family is exactly 1/0, 1/2, 1/6, 1/7, 1/9, 1/13, 1/14). Character removal is surfaced only via the inbound major-3 result ladder (**3/7** SmsgCharManageResult subtype 2). Builder identity, the two call sites, and the per-site mode literals are static-HIGH; the runtime *meaning* of mode 1 vs mode 0 (and which major-3 reply each elicits) remains capture-pending. The earlier 3/4-vs-3/7 CONFLICT is RESOLVED (binary won). | `cmsg_char_select.yaml`, `3-7_char_manage_result.yaml` |
+| **1/9** CmsgEnterGameRequest | 40 | **4/1** SmsgGameStateTick *(world snapshot, form B — the enter confirmation)* | var | **CORRECTED 2026-06-21 (live `211.196.150.4`):** the live enter ladder is **`1/9 → 4/1`** — the **`4/1` IS the enter confirmation**, with **NO enter-ladder `3/5` in between** (the only `3/5` is the unsolicited post-login account-ack, which arrives BEFORE the `1/9`). 1/9 SETS the enter-game latch; **`4/1` (not 3/5) CLEARS it** as its first statement, and a **latch-armed `4/1` drives Select/Load → InGame**. 4/1 = installed Response slot 1, the form-B world-entry packet. (The prior `1/9 → 3/5 → 4/1` reading is REFUTED for this server — see §1.3 "The enter ladder".) | `cmsg_char_enter.yaml`, `4-1_game_state_tick.yaml`, `3-5_enter_game_response.yaml` |
 | **1/13** CmsgRenameCharacter | 18 | **3/6** SmsgRenameCharResult (+ **3/4** subtype-1 slot refresh) | 12 / var | inferred/med — sets the latch; 3/6 clears the pending latch and applies the new name on success. | `cmsg_char_rename.yaml`, `3-6_rename_char_result.yaml` |
 | **1/14** CmsgMoveCharacter *(slot-move)* | 1 | **3/4** SmsgSceneEntityUpdate *(subtype refresh; exact subtype not pinned)* | var | inferred/med — slot-relocate rides the same 3/4 subtype-refresh family the other char-mgmt ops use; no dedicated 1/14 reply. | `cmsg_char_move.yaml`, `3-4_scene_entity_update.yaml` |
 

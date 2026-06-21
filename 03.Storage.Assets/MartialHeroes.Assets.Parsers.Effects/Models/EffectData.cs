@@ -372,63 +372,154 @@ public sealed class EffObjectShape
 
 /// <summary>
 ///     One sub-record (52 bytes) within a <c>particleEmitter.eff</c> entry.
-///     Only the 4-byte colour-like quad at +0x08 has an identified read-site.
-///     The remaining bytes are UNRESOLVED and must not be invented.
+///     A sub-record is a per-particle spawn-and-integration descriptor — NOT an interpolated keyframe.
+///     <c>num_frames</c> is the particle count (one particle per sub-record).
+///     Each particle is initialised from its sub-record at spawn and then advanced each fixed sim step
+///     (~67 ms) via stepwise Euler integration (no lerp/slerp over the array).
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/effects.md §E.2.2 Sub-record (52 bytes / 0x34): CONFIRMED stride.
-///     spec: Docs/RE/formats/effects.md §E.3 Known unknowns — 52-byte sub-record inner fields: UNRESOLVED except colour
-///     quad.
-///     Sub-record stride: 52 bytes (CONFIRMED — loader allocates num_frames × 52).
-///     Only +0x08..+0x0B colour-like quad has a confirmed read-site (default constructor).
+///     spec: Docs/RE/formats/effects.md §E.2.2 — Sub-record (52 bytes / 0x34): CODE-CONFIRMED (2026-06-21).
+///     Field layout: 4 × u16 (+0x00), RGBA8 (+0x08), 4 × f32 (+0x0C), 4 × i16 (+0x1C), 4 × f32 (+0x24).
+///     Total = 8 + 4 + 16 + 8 + 16 = 52 bytes.
+///     sim step: if velocity_damp ≠ 0 → velocity *= velocity_damp; position += velocity × dt;
+///     size += size_rate × dt; each colour ch += colour_rate × dt; alpha scaled by brightness factor.
+///     spec: Docs/RE/formats/effects.md §E.2.2 / §E.2.4.
 /// </remarks>
 public sealed class ParticleSubRecord
 {
-    // spec: Docs/RE/formats/effects.md §E.2.2 — +0x00 8 bytes unresolved_lead: UNRESOLVED.
-    /// <summary>
-    ///     First 8 bytes of the sub-record. No isolated read-site found.
-    ///     // UNRESOLVED: no semantic has been traced for these bytes.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — _unresolved_lead_ @ +0x00: UNRESOLVED.
-    /// </summary>
-    public required ReadOnlyMemory<byte> UnresolvedLead { get; init; }
+    // ── +0x00 : 4 × u16 timer / size fields ─────────────────────────────────
 
-    // spec: Docs/RE/formats/effects.md §E.2.2 — color_r u8 @ +0x08: MEDIUM.
     /// <summary>
-    ///     Colour R byte at sub-record +0x08. Default constructor zeroes this.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_r u8 @ +0x08: MEDIUM.
+    ///     Added once to the active-lifetime at init (<c>life += this</c>).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — life_bonus u16 LE @ +0x00: CODE-CONFIRMED.
+    /// </summary>
+    public required ushort LifeBonus { get; init; }
+
+    /// <summary>
+    ///     Base active-lifetime set at (re)spawn; counts down each step.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — lifetime u16 LE @ +0x02: CODE-CONFIRMED.
+    /// </summary>
+    public required ushort Lifetime { get; init; }
+
+    /// <summary>
+    ///     Initial / respawn delay set at (re)spawn; counts down, then the particle spawns.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — spawn_delay u16 LE @ +0x04: CODE-CONFIRMED.
+    /// </summary>
+    public required ushort SpawnDelay { get; init; }
+
+    /// <summary>
+    ///     Initial particle size, copied to the render state at spawn.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — size_init u16 LE @ +0x06: CODE-CONFIRMED.
+    /// </summary>
+    public required ushort SizeInit { get; init; }
+
+    // ── +0x08 : RGBA8 colour quad ────────────────────────────────────────────
+
+    /// <summary>
+    ///     Initial red channel (u8), copied to render state at spawn.
+    ///     Default constructor zeroes this.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_r u8 @ +0x08: CONFIRMED.
     /// </summary>
     public required byte ColorR { get; init; }
 
-    // spec: Docs/RE/formats/effects.md §E.2.2 — color_g u8 @ +0x09: MEDIUM.
     /// <summary>
-    ///     Colour G byte at sub-record +0x09. Default constructor zeroes this.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_g u8 @ +0x09: MEDIUM.
+    ///     Initial green channel (u8). Default constructor zeroes this.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_g u8 @ +0x09: CONFIRMED.
     /// </summary>
     public required byte ColorG { get; init; }
 
-    // spec: Docs/RE/formats/effects.md §E.2.2 — color_b u8 @ +0x0A: MEDIUM.
     /// <summary>
-    ///     Colour B byte at sub-record +0x0A. Default constructor zeroes this.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_b u8 @ +0x0A: MEDIUM.
+    ///     Initial blue channel (u8). Default constructor zeroes this.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_b u8 @ +0x0A: CONFIRMED.
     /// </summary>
     public required byte ColorB { get; init; }
 
-    // spec: Docs/RE/formats/effects.md §E.2.2 — color_a u8 @ +0x0B: MEDIUM (active sentinel 0xFF).
     /// <summary>
-    ///     Colour A byte (or active-sentinel) at sub-record +0x0B.
-    ///     Default constructor sets this byte to 0xFF — looks like alpha channel or "active = 0xFF" sentinel.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_a (active sentinel) u8 @ +0x0B: MEDIUM.
+    ///     Initial alpha channel (u8, genuine alpha — NOT an "active = 0xFF" sentinel).
+    ///     Default constructor sets this to 0xFF (default opaque). Alpha is subsequently
+    ///     scaled by the global brightness factor each step (§E.2.4).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_a u8 @ +0x0B: CONFIRMED (genuine initial alpha).
     /// </summary>
     public required byte ColorA { get; init; }
 
-    // spec: Docs/RE/formats/effects.md §E.2.2 — +0x0C 40 bytes unresolved_tail: UNRESOLVED.
+    // ── +0x0C : position xyz + size_rate (4 × f32) ──────────────────────────
+
     /// <summary>
-    ///     Remaining 40 bytes at sub-record +0x0C..+0x33. No read-sites captured.
-    ///     Likely per-particle velocity/size/time fields by analogy, but NOT proven.
-    ///     // UNRESOLVED: do not branch on or assign meaning to these bytes without spec confirmation.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — _unresolved_tail_ @ +0x0C: UNRESOLVED.
+    ///     Initial position X offset from the emitter origin.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — spawn_pos_x f32 LE @ +0x0C: CODE-CONFIRMED.
     /// </summary>
-    public required ReadOnlyMemory<byte> UnresolvedTail { get; init; }
+    public required float SpawnPosX { get; init; }
+
+    /// <summary>
+    ///     Initial position Y offset from the emitter origin.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — spawn_pos_y f32 LE @ +0x10: CODE-CONFIRMED.
+    /// </summary>
+    public required float SpawnPosY { get; init; }
+
+    /// <summary>
+    ///     Initial position Z offset from the emitter origin.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — spawn_pos_z f32 LE @ +0x14: CODE-CONFIRMED.
+    /// </summary>
+    public required float SpawnPosZ { get; init; }
+
+    /// <summary>
+    ///     Size growth per second: <c>size += size_rate × dt</c> each sim step.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — size_rate f32 LE @ +0x18: CODE-CONFIRMED.
+    /// </summary>
+    public required float SizeRate { get; init; }
+
+    // ── +0x1C : 4 × signed i16 colour-rate fields ───────────────────────────
+
+    /// <summary>
+    ///     Signed red change per second: <c>r += color_r_rate × dt</c>.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_r_rate i16 LE @ +0x1C: CODE-CONFIRMED.
+    /// </summary>
+    public required short ColorRRate { get; init; }
+
+    /// <summary>
+    ///     Signed green change per second.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_g_rate i16 LE @ +0x1E: CODE-CONFIRMED.
+    /// </summary>
+    public required short ColorGRate { get; init; }
+
+    /// <summary>
+    ///     Signed blue change per second.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_b_rate i16 LE @ +0x20: CODE-CONFIRMED.
+    /// </summary>
+    public required short ColorBRate { get; init; }
+
+    /// <summary>
+    ///     Signed alpha change per second (alpha is then scaled by global brightness option per §E.2.4).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — color_a_rate i16 LE @ +0x22: CODE-CONFIRMED.
+    /// </summary>
+    public required short ColorARate { get; init; }
+
+    // ── +0x24 : velocity xyz + damping (4 × f32) ────────────────────────────
+
+    /// <summary>
+    ///     Initial velocity X (units/second).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — velocity_x f32 LE @ +0x24: CODE-CONFIRMED.
+    /// </summary>
+    public required float VelocityX { get; init; }
+
+    /// <summary>
+    ///     Initial velocity Y (units/second).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — velocity_y f32 LE @ +0x28: CODE-CONFIRMED.
+    /// </summary>
+    public required float VelocityY { get; init; }
+
+    /// <summary>
+    ///     Initial velocity Z (units/second).
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — velocity_z f32 LE @ +0x2C: CODE-CONFIRMED.
+    /// </summary>
+    public required float VelocityZ { get; init; }
+
+    /// <summary>
+    ///     Velocity scale applied each active step when non-zero (<c>velocity *= velocity_damp</c>).
+    ///     Acts as drag or acceleration. Zero means no damping.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — velocity_damp f32 LE @ +0x30: CODE-CONFIRMED.
+    /// </summary>
+    public required float VelocityDamp { get; init; }
 }
 
 /// <summary>

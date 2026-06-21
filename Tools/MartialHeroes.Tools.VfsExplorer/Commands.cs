@@ -116,6 +116,197 @@ internal static class Commands
     }
 
     // ════════════════════════════════════════════════════════════════════════════════════════
+    // extract-all  [--out <dir>] [--filter <substr>] [--force] [--limit <n>]
+    // Bulk-extract EVERY VFS entry to a directory tree on disk, byte-for-byte. The VFS stores files
+    // RAW (no compression, no encryption — spec: Docs/RE/formats/pak.md "No decompression. No
+    // decryption."), so GetFileContent yields the pure original file exactly as Godot and the parsers
+    // read it. The result is a clean, uncorrupted on-disk mirror you can parse by hand or cross-check
+    // against IDA, while data.vfs stays the single source Godot reads.
+    //
+    // Default out = <repoRoot>/extract — KEEP gitignored (these are copyrighted originals, exactly
+    // like the in-repo clientdata/). Refuses to write inside a .git directory; guards path traversal.
+    // Idempotent: a re-run skips files already present at the same size unless --force.
+    // ════════════════════════════════════════════════════════════════════════════════════════
+    public static int ExtractAll(MappedVfsArchive archive, string[] args)
+    {
+        string? outArg = null, filter = null;
+        var force = false;
+        long limit = 0; // 0 = all
+
+        for (var i = 0; i < args.Length; i++)
+            switch (args[i])
+            {
+                case "--out" when i + 1 < args.Length:
+                    outArg = args[++i];
+                    break;
+                case "--filter" when i + 1 < args.Length:
+                    filter = NormPath(args[++i]);
+                    break;
+                case "--force":
+                    force = true;
+                    break;
+                case "--limit" when i + 1 < args.Length && long.TryParse(args[i + 1], out var l):
+                    limit = l;
+                    i++;
+                    break;
+            }
+
+        // Default output: <repoRoot>/extract — the gitignored mirror of the real VFS, alongside the
+        // in-repo clientdata/. An explicit --out may point anywhere (e.g. D:/extract).
+        var repoRoot = RepoRoot.Find();
+        string outDir;
+        try
+        {
+            outDir = Path.GetFullPath(
+                outArg ?? Path.Combine(repoRoot ?? Directory.GetCurrentDirectory(), "extract"));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"extract-all: invalid --out path ({ex.Message}).");
+            return 2;
+        }
+
+        // Never write into a .git directory.
+        var outSlashed = outDir.Replace('\\', '/');
+        if (outSlashed.Contains("/.git/", StringComparison.OrdinalIgnoreCase) ||
+            outSlashed.EndsWith("/.git", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.Error.WriteLine($"extract-all: refusing to write inside a .git directory ({outDir}).");
+            return 3;
+        }
+
+        // If the target is inside the repo, it MUST be gitignored — originals never get committed.
+        if (repoRoot is not null && IsUnder(outDir, Path.GetFullPath(repoRoot)))
+        {
+            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(outDir));
+            Console.WriteLine(
+                $"extract-all: output is inside the repo ({outDir}). Ensure '{name}/' is gitignored " +
+                "(the default 'extract/' is). These are copyrighted originals — NEVER commit them.");
+        }
+
+        Directory.CreateDirectory(outDir);
+
+        var entries = archive.GetEntries();
+        long written = 0, skipped = 0, failed = 0, sanitized = 0, totalBytes = 0;
+        var processed = 0;
+
+        Console.WriteLine($"extract-all: {entries.Length:N0} entries → {outDir}" +
+                          (filter is not null ? $"  (filter: \"{filter}\")" : string.Empty) +
+                          (force ? "  [--force]" : string.Empty));
+
+        foreach (var e in entries)
+        {
+            if (filter is not null && !e.Name.Contains(filter, StringComparison.Ordinal)) continue;
+            if (limit > 0 && written + skipped >= limit) break;
+
+            // Map the VFS name to an on-disk path under outDir. Some VFS names (e.g. user-generated
+            // guild-icon emblems) carry CP949 bytes that the ASCII TOC decode renders as '?' — illegal
+            // in a Windows filename. Sanitize invalid filename chars to '_' and, when that happens,
+            // append a stable hash of the ORIGINAL name so distinct originals never collide. The file
+            // BYTES are always the exact original; only the on-disk NAME is made filesystem-safe.
+            var safeRel = MakeSafeRelPath(e.Name, out var wasSanitized);
+            if (wasSanitized) sanitized++;
+            var dest = Path.GetFullPath(Path.Combine(outDir, safeRel));
+            if (dest != outDir &&
+                !dest.StartsWith(outDir + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                Console.Error.WriteLine($"  SKIP unsafe path: {e.Name}");
+                failed++;
+                continue;
+            }
+
+            // Low 32 bits are the meaningful byte count (spec: pak.md — high dword must be 0).
+            var length = e.DataSize & 0xFFFF_FFFFL;
+
+            // Idempotent: skip an already-extracted file of the same size unless --force.
+            if (!force && File.Exists(dest) && new FileInfo(dest).Length == length)
+            {
+                skipped++;
+                continue;
+            }
+
+            try
+            {
+                // GetFileContent returns the raw, uncompressed original payload (zero-copy mmap slice).
+                var content = archive.GetFileContent(e.Name);
+                var destDir = Path.GetDirectoryName(dest);
+                if (destDir is not null) Directory.CreateDirectory(destDir);
+                using (var fs = new FileStream(dest, FileMode.Create, FileAccess.Write))
+                {
+                    fs.Write(content.Span);
+                }
+
+                written++;
+                totalBytes += content.Length;
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"  FAILED {e.Name}: {ex.GetType().Name}: {ex.Message}");
+                failed++;
+            }
+
+            if (++processed % 2000 == 0)
+                Console.WriteLine($"  … {processed:N0} processed " +
+                                  $"(written={written:N0} skipped={skipped:N0} failed={failed:N0})");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"extract-all: done — written={written:N0}  skipped(existing)={skipped:N0}  " +
+                          $"failed={failed:N0}  name-sanitized={sanitized:N0}  bytes={totalBytes:N0}");
+        if (sanitized > 0)
+            Console.WriteLine($"  note: {sanitized:N0} file(s) had filesystem-illegal names (CP949 '?' etc.); " +
+                              "written with sanitized names + a stable name-hash suffix (bytes unchanged).");
+        Console.WriteLine($"  output: {outDir}");
+        WarnNeverCommit();
+        return failed > 0 ? 1 : 0;
+    }
+
+    // Builds a filesystem-safe relative path from a VFS entry name. Splits on '/', replaces any char
+    // illegal in a path segment (Windows: ? * : | &lt; &gt; " and control chars) with '_'. When any
+    // segment was changed, a stable FNV-1a hash of the ORIGINAL full name is appended before the
+    // extension so two distinct originals that sanitize to the same string never collide on disk.
+    private static string MakeSafeRelPath(string vfsName, out bool sanitized)
+    {
+        sanitized = false;
+        var invalid = Path.GetInvalidFileNameChars(); // includes ? * : | < > " and control chars
+        var segments = vfsName.Split('/');
+        for (var s = 0; s < segments.Length; s++)
+        {
+            var seg = segments[s];
+            if (seg.IndexOfAny(invalid) < 0) continue;
+            sanitized = true;
+            var sb = new StringBuilder(seg.Length);
+            foreach (var ch in seg)
+                sb.Append(Array.IndexOf(invalid, ch) >= 0 ? '_' : ch);
+            segments[s] = sb.ToString();
+        }
+
+        var safe = string.Join(Path.DirectorySeparatorChar, segments);
+        if (!sanitized) return safe;
+
+        // Disambiguate sanitized names with a stable hash of the ORIGINAL VFS name.
+        var ext = Path.GetExtension(safe);
+        var stem = safe[..^ext.Length];
+        return $"{stem}.{Fnv1a(vfsName):x8}{ext}";
+    }
+
+    // Stable 32-bit FNV-1a over the UTF-8 bytes of a string. Deterministic across runs (unlike
+    // string.GetHashCode), so re-runs map the same original name to the same on-disk file.
+    private static uint Fnv1a(string s)
+    {
+        const uint offset = 2166136261u;
+        const uint prime = 16777619u;
+        var hash = offset;
+        foreach (var b in Encoding.UTF8.GetBytes(s))
+        {
+            hash ^= b;
+            hash *= prime;
+        }
+
+        return hash;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════
     // convert <vfs-path> <out-dir>
     // Convert via Assets.Mapping where supported (mesh→GLB, texture→PNG, xeff→JSON, …).
     // ════════════════════════════════════════════════════════════════════════════════════════

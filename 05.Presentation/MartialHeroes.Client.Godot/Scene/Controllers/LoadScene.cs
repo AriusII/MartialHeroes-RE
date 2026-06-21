@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Load;
@@ -20,6 +21,7 @@ public sealed partial class LoadScene : StubSceneController
     private CancellationTokenSource? _loadCts;
     private LoadingWindow? _loading;
     private ScreenHost? _screenHost;
+    private bool _syncingScene;
 
     /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Load;
@@ -59,6 +61,36 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+    }
+
+    /// <summary>
+    ///     Drains the SingleReader event bus while Load is the active scene, converging the visible
+    ///     controller when the Application scene machine commits an OUT-OF-BAND transition away from Load.
+    ///     The load-bearing case is an enter-phase REJECTION: a 1/9 was sent, the server answered
+    ///     <c>3/100 SmsgCharActionResult</c> instead of the <c>4/1</c> world tick, so the machine returns
+    ///     to char-select (Load → Select) — the world must NOT be entered via the loading-grace timer
+    ///     without the server's enter sequence. Calling <see cref="SceneHost.Advance" /> here would be
+    ///     wrong (it would advance from the already-committed state); we converge to the committed state
+    ///     instead. The grace-timer advance is independently guarded in <see cref="OnLoadingComplete" />
+    ///     (it no-ops once SceneHost has left Load). spec: Docs/RE/specs/client_runtime.md §7.5.2;
+    ///     Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (enter only on 3/5 → 4/1).
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        if (_ctx is null || _syncingScene) return;
+
+        while (_ctx.EventBus.Reader.TryRead(out var evt))
+            switch (evt)
+            {
+                case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
+                    GD.Print(
+                        $"[LoadScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
+                        "out-of-band committed transition (e.g. 3/100 enter rejection → char-select) — " +
+                        "calling SyncToCurrentState. spec: client_runtime.md §7.5.2; login_flow.md §1 step 9.");
+                    _syncingScene = true;
+                    _host?.CallDeferred(SceneHost.MethodName.SyncToCurrentState);
+                    return;
+            }
     }
 
     private void StartCoreLoad()

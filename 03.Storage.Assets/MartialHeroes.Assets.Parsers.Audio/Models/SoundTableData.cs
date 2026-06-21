@@ -42,18 +42,20 @@ public enum SoundTableExtension : byte
 }
 
 /// <summary>
-///     Inline-array value type holding exactly 24 per-hour activity bytes.
+///     Inline-array value type holding exactly 24 per-in-game-hour enable bytes.
 ///     Eliminates the heap allocation that <c>byte[24]</c> would incur per entry (256 × per Parse call).
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/sound_tables.md §Per-record layout —
-///     hour_schedule u8×24 @ +0x04: CONFIRMED (structure and access pattern);
-///     value-pattern semantics (hour mask vs. sub-area/weather/time-of-day filter) UNVERIFIED.
+///     spec: Docs/RE/formats/sound_tables.md §Per-record layout — tod_enable u8×24 @ +0x04:
+///     CONFIRMED structure. Semantics CYCLE 7 control-flow-confirmed (2026-06-21): the ambient driver
+///     computes <c>hour = time_of_day_ms / 3600</c> (clamped 0..23) and tests <c>record[+0x04 + hour]</c>;
+///     a zero byte suppresses/stops the cue for that hour, non-zero (re)starts it. This is the per-hour-of-day
+///     enable bitmap that gates whether the row plays at the current in-game hour.
 ///     <c>[InlineArray(24)]</c> lets the runtime store 24 bytes as a direct struct field,
 ///     accessed via <see cref="this[int]" /> or <see cref="AsSpan" />/<see cref="AsReadOnlySpan" />.
 ///     <c>foreach</c> over an instance works natively in C# 12 (compiler lowers to span iteration).
 /// </remarks>
-[InlineArray(SoundTableData.HoursPerDay)] // spec: hour_schedule u8×24 @ +0x04
+[InlineArray(SoundTableData.HoursPerDay)] // spec: tod_enable u8×24 @ +0x04 — Docs/RE/formats/sound_tables.md
 public struct HourSchedule24
 {
     // Single private field required by [InlineArray].
@@ -65,14 +67,14 @@ public struct HourSchedule24
     ///     Exposed as a convenience so callers can write <c>schedule.Length</c> instead
     ///     of the magic constant.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24: CONFIRMED</remarks>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md — tod_enable u8×24 @ +0x04: CONFIRMED</remarks>
     public int Length => SoundTableData.HoursPerDay; // 24
 
     /// <summary>
     ///     Returns a writable span over all 24 hour bytes.
     ///     Use to fill the schedule during parsing (zero-copy, no allocation).
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED</remarks>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md — tod_enable u8×24 @ +0x04: CONFIRMED</remarks>
     public Span<byte> AsSpan()
     {
         return MemoryMarshal.CreateSpan(ref _e0, SoundTableData.HoursPerDay);
@@ -81,7 +83,7 @@ public struct HourSchedule24
     /// <summary>
     ///     Returns a read-only span over all 24 hour bytes.
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED</remarks>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md — tod_enable u8×24 @ +0x04: CONFIRMED</remarks>
     public ReadOnlySpan<byte> AsReadOnlySpan()
     {
         return MemoryMarshal.CreateReadOnlySpan(ref _e0, SoundTableData.HoursPerDay);
@@ -106,7 +108,7 @@ public struct HourSchedule24
 ///     Byte-level field map (quick reference):
 ///     <code>
 /// [+0x00..+0x03]  sound_entry_id   u32 LE    (0 = null/unassigned)
-/// [+0x04..+0x1B]  hour_schedule    u8 × 24   (per-byte 0x00/0x01 mask; semantics DBG-pending)
+/// [+0x04..+0x1B]  tod_enable       u8 × 24   (per-hour-of-day enable bitmap, hour 0..23; CYCLE 7 control-flow-confirmed)
 /// [+0x1C..+0x1F]  weight           f32 LE    (1.0f for BGM/BGE; semantic UNVERIFIED)
 /// [+0x20..+0x23]  pos_x            f32 LE    (3D world X; read; EFF records only, else 0.0)
 /// [+0x24..+0x27]  unlabeled_24     4 bytes   (NOT read by the loader; meaning UNRESOLVED)
@@ -128,17 +130,22 @@ public sealed class SoundTableEntry
     public required uint SoundEntryId { get; init; }
 
     /// <summary>
-    ///     Per-in-game-hour activity flags; exactly <see cref="SoundTableData.HoursPerDay" /> = 24 bytes.
-    ///     <c>HourSchedule[h]</c> non-zero → sound active during game hour h,
-    ///     where h = game_clock_seconds / 3600 (integer division).
-    ///     Value-pattern semantics (hour mask vs. sub-area/weather/time-of-day filter) UNVERIFIED.
+    ///     Per-in-game-hour enable bitmap (<c>tod_enable</c> on disk); exactly
+    ///     <see cref="SoundTableData.HoursPerDay" /> = 24 bytes.
+    ///     <c>HourSchedule[h]</c> non-zero → sound active during in-game hour h,
+    ///     where h = time_of_day_ms / 3600 (integer division, 0..23).
+    ///     CYCLE 7 control-flow-confirmed (2026-06-21): the ambient driver reads this field at
+    ///     <c>record[+0x04 + hour]</c> — a zero byte suppresses the cue for that hour; non-zero (re)starts it.
+    ///     All-0x01 in simple/null samples means "enabled every hour"; per-hour patterns gate specific hours.
     ///     Stored as an <see cref="HourSchedule24" /> inline-array struct to avoid allocating
     ///     a <c>byte[24]</c> per entry.
     ///     Use <see cref="HourSchedule24.AsReadOnlySpan" /> or direct indexing for access.
     /// </summary>
     /// <remarks>
-    ///     spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED (structure and access pattern);
-    ///     value-pattern semantics UNVERIFIED.
+    ///     spec: Docs/RE/formats/sound_tables.md §Per-record layout — tod_enable u8×24 @ +0x04:
+    ///     CONFIRMED structure; hour-of-day enable semantics CYCLE 7 control-flow-confirmed (2026-06-21,
+    ///     3600 divisor + +0x04 base explicit in the ambient driver). Formerly labelled hour_schedule;
+    ///     the semantics were DBG-pending — now RESOLVED as the per-hour-of-day enable bitmap.
     /// </remarks>
     public required HourSchedule24 HourSchedule { get; init; }
 
@@ -258,16 +265,22 @@ public sealed class SoundTableData
     public const int ReadSize = 0x3000; // 12288
 
     /// <summary>
-    ///     Size of the unread trailer at the end of the file: 1024 bytes (0x0400).
-    ///     The loader never reads this region. Its purpose is UNRESOLVED.
+    ///     Size of the loader-ignored trailer at the end of the file: 1024 bytes (0x0400).
+    ///     The loader never reads this region. Identified as a <c>u32[256]</c> per-slot present-flag table:
+    ///     one dword per record index, value 1 where the matching record is populated, else 0.
+    ///     Almost certainly an authoring/editor artifact — the runtime loader never touches it.
+    ///     (File offset 0x3000 .. 0x33FF.)
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md §File layout — "Unread trailer: 1024 bytes (0x0400)": CONFIRMED</remarks>
+    /// <remarks>
+    ///     spec: Docs/RE/formats/sound_tables.md §File layout — "Present-flag trailer (unread): 1024 bytes (0x0400)":
+    ///     CONFIRMED layout; CYCLE 7 Known unknown #1 — identified as u32[256] present-flag table.
+    /// </remarks>
     public const int TrailerSize = 0x0400; // 1024
 
     /// <summary>
-    ///     Number of per-hour schedule bytes per record.
+    ///     Number of per-hour enable bytes per record (= 24 in-game hours).
     /// </summary>
-    /// <remarks>spec: Docs/RE/formats/sound_tables.md — hour_schedule u8×24 @ +0x04: CONFIRMED</remarks>
+    /// <remarks>spec: Docs/RE/formats/sound_tables.md — tod_enable u8×24 @ +0x04: CONFIRMED</remarks>
     public const int HoursPerDay = 24;
 
     // ─── decoded payload ───────────────────────────────────────────────────────

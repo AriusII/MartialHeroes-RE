@@ -36,8 +36,15 @@ public sealed class ShaderSource
     public required ShaderType ShaderType { get; init; }
 
     /// <summary>
-    ///     Full source text, decoded as ASCII (7-bit).
-    ///     spec: Docs/RE/formats/shaders.md §Identification — "Encoding: 7-bit ASCII": VERIFIED.
+    ///     Full source text, decoded byte-preservingly (Latin-1 / ISO-8859-1).
+    ///     Shader CODE TOKENS are 7-bit ASCII. COMMENT TEXT (everything after ';') may contain
+    ///     CP949/EUC-KR bytes above 0x7E — two verified cel pixel-shader samples open with a Korean
+    ///     comment line. Latin-1 preserves these bytes as-is so the code tokens round-trip exactly
+    ///     and comments are not mangled.
+    ///     spec: Docs/RE/formats/shaders.md §Identification —
+    ///     "Shader code tokens are 7-bit ASCII. Comment text is NOT guaranteed ASCII: two verified
+    ///     cel pixel-shader samples open with a CP949/EUC-KR Korean comment line (bytes above 0x7E).
+    ///     Do not assert no bytes above 0x7E." VERIFIED.
     /// </summary>
     public required string SourceText { get; init; }
 

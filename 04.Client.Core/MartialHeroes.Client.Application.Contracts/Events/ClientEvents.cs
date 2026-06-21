@@ -335,6 +335,25 @@ public sealed record CharacterListEvent(
 ///     line 3. World Y is forced to 0, so the second float is the Z component. spec:
 ///     Docs/RE/specs/frontend_scenes.md §3.2; Docs/RE/structs/actor.md (world_z).
 /// </param>
+/// <param name="InternalClass">
+///     The descriptor's internal class word {1,2,3,4} — THE skeleton driver and the <c>class</c> argument
+///     of the model-class formula <c>5*(InternalClass + 4*AppearanceVariant) - 24</c>. Distinct from
+///     <see cref="ServerClass" /> (which is kept). The layer-05 preview row drives its rendered appearance
+///     from this, NOT from <see cref="ServerClass" />. spec: Docs/RE/packets/3-1_character_list.yaml (+0x34).
+/// </param>
+/// <param name="AppearanceVariant">
+///     The descriptor's body / gender variant — the <c>variant</c> argument of the model-class formula.
+///     spec: Docs/RE/packets/3-1_character_list.yaml (+0x2C).
+/// </param>
+/// <param name="FaceA">
+///     The descriptor's faceA (face index / render-visibility byte; nonzero ⇒ slot occupied). Surfaced as
+///     the spec-pinned u16. spec: Docs/RE/specs/frontend_scenes.md §3.2 (+0x2E, u16, CODE-CONFIRMED).
+/// </param>
+/// <param name="EquipGids">
+///     The six visible-gear part gids for overlay slots {3,4,6,2,11,14}, decoded from the descriptor's
+///     +0x58 equip table (leading dword of each 16-byte entry; slot id == entry index). Defaults to empty.
+///     spec: Docs/RE/packets/3-1_character_list.yaml (+0x58); Docs/RE/specs/frontend_scenes.md §3.3.7.
+/// </param>
 public readonly record struct CharacterListSlot(
     int SlotIndex,
     string Name,
@@ -342,7 +361,11 @@ public readonly record struct CharacterListSlot(
     ushort ServerClass,
     uint CurrentHp,
     float PosX = 0f,
-    float PosZ = 0f);
+    float PosZ = 0f,
+    ushort InternalClass = 0,
+    byte AppearanceVariant = 0,
+    ushort FaceA = 0,
+    ImmutableArray<uint> EquipGids = default);
 
 // =====================================================================================================
 // Enter-game spawn (3/7) and character-creation routing

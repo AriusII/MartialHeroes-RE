@@ -6,6 +6,7 @@ using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Login;
 using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Shared.Kernel.Enums;
+
 // FrontEndAudio, ScreenHost
 // ServerEntry (moved to engine-free layer)
 // LoginWindow, PinSubView, ServerSelectSubView
@@ -237,10 +238,8 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_ctx?.UseCases is not { } useCases)
         {
-            // Offline / no UseCases: fail immediately so the popup doesn't hang.
-            // spec: §4 "offline-safe: popup shows briefly then failure path shows error box"
             GD.PrintErr(
-                $"[LoginScene] SelectServerAsync({serverId}): no UseCases (offline). Reporting failure. spec: §4.");
+                $"[LoginScene] SelectServerAsync({serverId}): no UseCases — cannot connect. spec: §4.");
             CallDeferred(MethodName.ReportConnectFailed);
             return;
         }

@@ -4,9 +4,20 @@
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
 > verification: sample-verified
-> ida_reverified: 2026-06-20
+> ida_reverified: 2026-06-21
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
+> reverify_2026-06-21: STATIC-IDA + REAL-SAMPLE re-run CONFIRMS this spec on every load-bearing point
+>            (size 13312, stride 48, count 256, read 0x3000, two loaders, tod_enable hour gate with
+>            3600 divisor + +0x04 base, +0x20 X / +0x28 Z / +0x2C radius EFF-only, null sentinel,
+>            mud byte mapping, cat 0/6 + boundary 5 → 2d/3d, join key id → <dir>/<id>.ogg). Three
+>            refinements applied: (R1) the 1024-byte trailer is positively a `u32[256]` per-slot
+>            present-flag table (not "unresolved padding"); (R3) the `+8 kind` / `+9 flag` / `+10 name`
+>            view is the RUNTIME index-node layout, NOT an on-disk overlay — there is NO on-disk field
+>            overlap, so the prior per-file-type ambiguity is withdrawn; (R2) +0x24 NOT-pos_y is
+>            doubly corroborated — the EFF play path substitutes the LOCAL PLAYER's Y, never reading
+>            +0x24. (R4) the `data/effect/obj` geometry-.eff path string was not found in this run's
+>            string set — Section 6 rests on prior samples; flagged for re-check.
 > conflicts: C1 — VFS census shows 301 soundtable entries (bge=61, others=60), one extra `.bge`,
 >            so "≈300 / five-per-area" is softened to "≈301, one extra .bge" (NOT a layout conflict).
 >            C2 (CYCLE 7) — the 0x3000 value is the LOADER-READ record-array extent = the full
@@ -31,9 +42,11 @@
 >              is the full record-array body (256 × 48), NOT a "trailer": a global loader reads FIVE
 >              per-map soundtable files each as a fixed 0x3000 blob; a per-scene loader reads three
 >              (.bgm/.bge/.eff) and iterates exactly 256 records at the 48-byte (12-dword) stride.
->              The 0x3000..0x33FF region (1024 bytes) is the loader-ignored trailing region. The +4
->              24-byte field is RESOLVED as the per-hour-of-day enable bitmap (hour-gating), and the
->              +10 name / +0x20.. param overlap caveat is recorded (see Per-record layout).
+>              The 0x3000..0x33FF region (1024 bytes) is the loader-ignored trailing region (since
+>              re-verified as a `u32[256]` present-flag table — see Known unknown #1). The +4
+>              24-byte field is RESOLVED as the per-hour-of-day enable bitmap (hour-gating). The
+>              former "+10 name vs +0x20.. param overlap" caveat is WITHDRAWN: `+8 kind`/`+9 flag`/
+>              `+10 name` is the RUNTIME index-node layout, not an on-disk overlay (see Per-record layout).
 
 ---
 
@@ -44,7 +57,7 @@ only by VFS directory path:
 
 | Path pattern | File type |
 |---|---|
-| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 records × 48 B read by the loader, then a 1024-byte unread trailer; same layout as .wlk/.run/.bgm/.bge) |
+| `data/map*/soundtable*.eff` | Per-map sound trigger schedule table (256 records × 48 B read by the loader, then a 1024-byte unread `u32[256]` present-flag trailer; same layout as .wlk/.run/.bgm/.bge) |
 | `data/effect/obj/*.eff` | 3D triangle mesh collision / area shape (variable length, starts with a u32 triangle count) |
 
 An engineer must never assume a `.eff` file is a sound table without first confirming the
@@ -165,7 +178,7 @@ runtime per-area path. The field/stride/count conclusions are identical across b
 | Region | Offset | Size (bytes) | Notes |
 |---|---:|---:|---|
 | Record table (read) | 0 (0x0000) | 12288 (0x3000) | 256 records × **48 bytes** — loader reads this region |
-| Unread trailer | 12288 (0x3000) | 1024 (0x0400) | Present in every file; the loader never reads it. Purpose UNRESOLVED. |
+| Present-flag trailer (unread) | 12288 (0x3000) | 1024 (0x0400) | `u32[256]` per-slot present/active flag table — one dword per record index, value 1 where the matching record is populated, else 0. Present in every file; the loader never reads it (almost certainly an authoring/editor artifact). | 
 | **Total on disk** | — | **13312 (0x3400)** | Confirmed across 12 runtime samples and ≈301 census tables (301/301 sample-verified on build 263bd994) |
 
 - **Record count source:** fixed at **256** — there is no count field; the loader iterates 256
@@ -198,38 +211,37 @@ unread trailer (see File layout).
 | +0x04 | 24 | u8[24] | `tod_enable[24]` (hour-of-day enable bitmap) | One byte per **in-game hour 0..23**. **CYCLE 7 RESOLVED (control-flow-confirmed):** this is the per-hour-of-day **enable bitmap** that gates whether the row plays at the current hour. At play time the ambient driver computes `hour = time-of-day-ms / 3600` (clamped 0..23) and tests `record[+4 + hour]`; a zero byte suppresses/stops the cue for that hour, non-zero (re)starts it. This is the field formerly called `unlabeled_24` / "DBG-pending mask". All-runtime-0x01 in null/simple samples; area-001 census shows per-record 0x00/0x01 patterns, consistent with per-hour gating. | CONFIRMED structure; **hour-of-day semantics CYCLE 7 control-flow-confirmed** (the 3600 divisor + the +4-base index are explicit in the ambient driver) |
 | +0x1C | 4 | f32 | `weight` | Volume / attenuation / blend scalar. `weight == 1.0f` (`00 00 80 3F`) for **all 256 records in every sampled table** (including all 154 active `.eff` records), not just BGM / BGE. Not accessed in the observed runtime playback path. | SAMPLE-VERIFIED type/value; semantic UNVERIFIED |
 | +0x20 | 4 | f32 | `pos_x` | World-space X of the 3D source. Populated (non-zero) only in `.eff` (3D) records; 0.0 for BGM / BGE / WLK / RUN. Passed to the DirectSound 3D position as the X argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
-| +0x24 | 4 | — | `unlabeled_24` | The loader does NOT read these 4 bytes. The earlier `pos_y` label is incorrect — no read site assigns a meaning to this offset. The sample positively REFUTES a position role: in the 154 active `.eff` records, +0x24 is **neither a plausible world-space f32 nor exactly zero** — it is non-coordinate data, not a Y axis. Left unlabeled; role unestablished. | NOT-READ by loader; sample-confirmed NOT a position field; meaning UNRESOLVED |
+| +0x24 | 4 | — | `unlabeled_24` | The loader does NOT read these 4 bytes. The earlier `pos_y` label is incorrect — no read site assigns a meaning to this offset. Two independent witnesses REFUTE a position role: (a) the EFF play path builds the 3D source position from `+0x20` (X), the **local player's current Y** (substituted at play time), and `+0x28` (Z) — it never reads `+0x24` as the Y axis; (b) in the 154 active `.eff` records the sample value at +0x24 is **neither a plausible world-space f32 nor exactly zero** (one active record reads as a tiny f32 denormal / arbitrary integer) — non-coordinate data, not a Y axis. Left unlabeled; role unestablished (possibly an editor id). | NOT-READ by loader; play-path + sample both confirm NOT a position field; meaning UNRESOLVED |
 | +0x28 | 4 | f32 | `pos_z` | World-space Z of the 3D source. Populated only in `.eff` records; 0.0 for BGM / BGE. Passed to the DirectSound 3D position as the Z argument. | CONFIRMED (runtime semantic); EFF-only population SAMPLE-VERIFIED |
 | +0x2C | 4 | f32 | `radius` | Audibility radius of the 3D source (formerly labelled `volume_factor`). Populated only in `.eff` records; 0.0 for BGM / BGE. For the BGM playback path the runtime applies a 0.7 volume scaling at a separate stage. | CONFIRMED f32 type; EFF radius role SAMPLE-VERIFIED area 001 |
 
 **Record stride: 48 bytes. CONFIRMED.** (256 × 48 = 12288 = bytes read by the loader; the
 remaining 1024 bytes are the unread file trailer.)
 
-> **CYCLE 7 field-overlap caveat — the runtime-binary record vs. the text-export record (SAMPLE/DBG-pending).**
-> The **runtime per-area loader** (the witness behind the table above) reads the record as
-> `{ u32 id @+0x00; u8 tod_enable[24] @+0x04; f32 weight @+0x1C; f32 pos_x @+0x20; (+0x24 not read);
-> f32 pos_z @+0x28; f32 radius @+0x2C }` — these are the runtime-meaningful fields and are
-> sample-verified at stride 48. Separately, the **sound-table record dumper** (an authoring/export
-> path, see "Two loader entry points" and the `tool/sound/` note) treats the same record as carrying
-> a **`sound_kind` byte at +8** (the `SOUND_KIND` enum, see `specs/sound.md §9`), a **small
-> `flag`/loop byte at +9**, and a **NUL-terminated `name`/tag string starting at +10** (`%s`).
-> These two views **overlap** in the +8..+0x1F region:
-> - The dumper's `+8 sound_kind` / `+9 flag` / `+10 name` lie *inside* the runtime's `+0x04..+0x1B`
->   `tod_enable[24]` span and partly over `weight`/`pos_x`.
-> - They can only **coexist** if (a) in the text-export `.wlk/.run/.bgm` variant the `+10` name is
->   short enough (≤ ~21 bytes) to leave `+0x20..+0x2F` free for the 3D params, OR (b) the binary
->   `.eff` variant uses `+0x20/+0x28/+0x2C` for the numeric 3D params and does **not** carry a name.
-> - The `.wlk/.run/.bgm` text-export variant clearly uses the **name**; the `.eff` binary variant
->   clearly uses the **+0x20/+0x28/+0x2C 3D params**.
-> Whether the `+10`-string view and the `+0x20/+0x28/+0x2C`-params view are **mutually exclusive
-> per file-type**, or the name is bounded ≤21B with params after, **cannot be settled statically
-> without sample bytes** of the text-export variant. **SAMPLE/DBG-pending.** For a runtime parser,
-> use the runtime field table above (24-byte `tod_enable` + the f32 params); the `+8 kind` / `+9 flag`
-> / `+10 name` view applies to the editor/dumper text form, not the shipped runtime read.
+> **The `+8 kind` / `+9 flag` / `+10 name` view is the RUNTIME INDEX NODE, NOT an on-disk overlay
+> (re-verification — supersedes the earlier "field-overlap" caveat).** The on-disk record is
+> unambiguously `{ u32 id @+0x00; u8 tod_enable[24] @+0x04; f32 weight @+0x1C; f32 pos_x @+0x20;
+> (+0x24 not read); f32 pos_z @+0x28; f32 radius @+0x2C }` — sample-verified at stride 48, with **no
+> kind, flag, or name field anywhere in the on-disk bytes**. The `+8 sound_kind` / `+9 flag` /
+> `+10 name` layout instead describes a **runtime-constructed index node** the per-area loader builds
+> for each non-null record: it allocates a fresh 48-byte (0x30) node and populates it as
+> `{ id @+0x00; kind byte @+0x08; 0 @+0x09; name string (≤31 bytes) @+0x0A; owner @+0x2C; 0 @+0x29 }`,
+> then inserts it into a sorted by-id collection. The `id` is copied from the on-disk record's
+> `+0x00`; the **`kind` byte is a HARDCODED category** assigned at index time (0 for the `.bgm`/`.bge`
+> arrays, 6 for the `.eff` array — see Sound ID section); the **`name` is the strncpy ARGUMENT** (a
+> runtime tag passed to the indexer), not bytes read from the file. The coincidence that the runtime
+> node is also 48 bytes is unrelated to the on-disk record size.
 >
-> The **`sound_kind` byte at +8** is itself authoritative for the `SOUND_KIND` enum value table — see
-> `specs/sound.md §9` (value 1 reserved/NONE; `SOUND_SKILL` = 11). The **+9 flag/loop** byte's
-> precise meaning (loop vs one-shot vs sub-channel) is **SAMPLE/DBG-pending**.
+> Consequently there is **no on-disk field overlap and no per-file-type ambiguity**: the `+8 kind` /
+> `+9 flag` / `+10 name` offsets are valid *only* for the in-memory index node, and the runtime parser
+> should read the on-disk record exactly as the field table above (24-byte `tod_enable` + the f32
+> params). The earlier "SAMPLE/DBG-pending: +10 name vs +0x20 params, mutually exclusive per file
+> type?" question is **withdrawn** — it rested on treating the runtime node layout as a possible
+> alternate on-disk reading, which the binary disproves.
+>
+> The **`sound_kind` value table** itself (the `SOUND_KIND` enum the runtime `kind` byte holds) is
+> documented in `specs/sound.md §9` (value 1 reserved/NONE; `SOUND_SKILL` = 11). The runtime node's
+> `+9 flag` byte's precise meaning (loop vs one-shot vs sub-channel) remains **unestablished**.
 
 > Field-naming reconciliation: an earlier spec named offsets +0x20 / +0x28 / +0x2C as
 > `pos_x` / `pos_z` / `volume_factor` and +0x24 as `unknown_36` (later mislabelled `pos_y`). The
@@ -251,11 +263,12 @@ remaining 1024 bytes are the unread file trailer.)
 --- end of 48-byte record; next record begins at +0x30 ---
 ```
 
-> Editor/dumper text-export overlay (NOT the runtime read; see the CYCLE 7 field-overlap caveat
-> above): the dumper reads `+8 sound_kind` (SOUND_KIND enum), `+9 flag/loop`, `+10.. name` — these
-> overlap the runtime `tod_enable` / `weight` / `pos_x` span and apply only to the editor text form.
+> The `+8 sound_kind` (SOUND_KIND enum) / `+9 flag` / `+10.. name` triple is the layout of the
+> RUNTIME index node the loader builds per record (NOT an on-disk overlay — see the caveat above);
+> the on-disk record has no such fields.
 
-After the 256th record the file carries a 1024-byte trailer the loader never reads (see File layout).
+After the 256th record the file carries a 1024-byte `u32[256]` present-flag trailer the loader never
+reads (see File layout, Known unknown #1).
 
 ---
 
@@ -279,7 +292,8 @@ all well under the 256 records per table — SAMPLE-VERIFIED across 1578 `.mud` 
 .mud tile bytes +5, +6, +7 (effId0/1/2 = N)
   └─► data/map<AAA>/soundtable<AAA>.eff  record[N] (0-based), +0x00 sound_entry_id (u32 LE)
         └─► data/sound/3d/{sound_entry_id}.ogg          (EFF = 3D positional)
-              3D source position = record +0x20 (X), +0x28 (Z) as f32 (note: +0x24 is NOT read)
+              3D source position = record +0x20 (X), the LOCAL PLAYER's current Y (substituted at
+                                   play time), +0x28 (Z) as f32 (note: record +0x24 is NOT read)
               audibility radius  = record +0x2C as f32
 
 .mud tile byte +0  (PLAUSIBLE walk index — UNVERIFIED)
@@ -392,6 +406,12 @@ is UNRESOLVED.
 A dedicated `formats/eff_geometry.md` spec should be produced once the geometry-shape
 loader is traced.
 
+> Path-string note (re-verification): the literal `data/effect/obj` path string was **not present in
+> the string set examined during the 2026-06-21 re-run** (the geometry-shape variant rests on prior
+> samples, not on a string witness in that build). This is not a contradiction — the variant is
+> sample-verified from `cone.eff` / `rect.eff` — but the path prefix is unverified from strings in
+> this build; re-confirm it when Section 6 is next revised.
+
 ---
 
 ## Section 7 — Audio container formats (.ogg and .wav)
@@ -467,18 +487,24 @@ the `.ogg` container format is identical.
 
 ## Known unknowns
 
-1. **1024-byte unread trailer** — the final 1024 bytes (file offset 0x3000 .. 0x33FF) are present
-   in every file but the loader never reads them. Their content/purpose is UNRESOLVED — plausibly
-   editor-side metadata or reserved padding. The trailer is all-zero in null tables (`.wlk` / `.run`
-   and the null `map000` examples), but the 263bd994 sample found a **single non-zero byte** in some
-   populated `.bgm` / `.eff` trailers — so it is not guaranteed all-zero, yet it remains loader-
-   ignored regardless. A faithful parser may skip it.
+1. **1024-byte unread trailer — IDENTIFIED as `u32[256]` present-flag table** — the final 1024 bytes
+   (file offset 0x3000 .. 0x33FF) are present in every file but the loader never reads them. The
+   trailing region is positively a **256-entry `u32` per-slot present/active flag table**: one dword
+   per record index, value `1` at the index of each populated record and `0` elsewhere. On the
+   populated `.bgm` / `.eff` samples the only non-zero entry is index `[1]` (= the single populated
+   record at index 1); on the all-null `.bge` / `.run` / `.wlk` samples it is entirely zero. (This
+   supersedes the earlier "unresolved padding / single non-zero byte" reading: the non-zero content
+   is a structured u32 present-flag, not stray bytes.) It is almost certainly an authoring/editor
+   artifact — the runtime loader never touches it, so a faithful runtime parser may skip it. Its only
+   remaining open point is whether non-1 values ever appear (all observed non-zero entries are 1).
 
 2. **`unlabeled_24` at +0x24** — these 4 bytes are NOT read by the loader on any path. The earlier
-   `pos_y` / `unknown_36` labels are withdrawn; the 263bd994 sample positively REFUTES a position
-   role (in the 154 active `.eff` records the value is neither a plausible world-space f32 nor zero
-   → non-coordinate data, not a Y axis). No recovered meaning is assigned. Candidate for an IDA
-   cross-check only if a consumer is ever found.
+   `pos_y` / `unknown_36` labels are withdrawn. A position role is REFUTED by two witnesses:
+   (a) the EFF 3D play path constructs the source position from `+0x20` (X), the **local player's
+   current Y** (substituted at play time), and `+0x28` (Z), never reading `+0x24` as the Y axis; and
+   (b) the sample value at +0x24 in the 154 active `.eff` records is neither a plausible world-space
+   f32 nor zero → non-coordinate data, not a Y axis. No recovered meaning is assigned (possibly an
+   editor-side id). Candidate for an IDA cross-check only if a consumer is ever found.
 
 3. **`weight` at +0x1C semantic** — `1.0f` in **all 256 records of every sampled table** (BGM, BGE,
    and all 154 active `.eff` records), not just BGM / BGE; not accessed in the observed runtime path.
@@ -514,18 +540,18 @@ the `.ogg` container format is identical.
 10. **`data/effect/obj/tringle.eff` encoding variant** — triangle-strip vs triangle-list index
     scheme is ambiguous from size alone. Requires a trace of the effect-geometry loader.
 
-11. **Editor-dumper `+9 flag/loop` byte semantics (CYCLE 7)** — the sound-table record dumper reads a
-    small flag byte at record +9 (loop vs one-shot vs sub-channel). Its precise meaning is
-    **SAMPLE/DBG-pending**. (This byte is part of the editor/dumper text-export view, which overlaps
-    the runtime `tod_enable` span — see item 12.)
+11. **Runtime index-node `+9 flag` byte semantics** — the per-area loader builds an in-memory index
+    node per record carrying a small flag byte at node offset +9 (loop vs one-shot vs sub-channel).
+    Its precise meaning is unestablished. (This byte lives in the runtime-constructed index node, NOT
+    the on-disk record — see the field-map caveat. It is unrelated to the on-disk `tod_enable` span.)
 
-12. **`+10` name vs `+0x20/+0x28/+0x2C` param overlap per file-type (CYCLE 7)** — the editor/dumper
-    view reads a NUL-terminated `name`/tag string from +10, while the runtime reads f32 3D params at
-    +0x20/+0x28/+0x2C. These overlap; whether they are mutually exclusive per file-type (text-export
-    `.wlk/.run/.bgm` use the name; binary `.eff` use the params) or the name is bounded ≤21B with
-    params after **cannot be settled statically without sample bytes** of the text-export variant.
-    **SAMPLE/DBG-pending.** A runtime parser should use the runtime field table (24-byte `tod_enable`
-    + f32 params), not the dumper's name view.
+12. **`+10` name vs `+0x20/+0x28/+0x2C` overlap — WITHDRAWN (no on-disk overlap exists).** The earlier
+    open question — whether a NUL-terminated `name` string at +10 and the f32 3D params at
+    +0x20/+0x28/+0x2C are mutually exclusive per file-type — rested on reading the `+8/+9/+10` triple
+    as a possible alternate ON-DISK record layout. The binary disproves that: `+8 kind` / `+9 flag` /
+    `+10 name` belong to the RUNTIME index node, and the on-disk record carries the `tod_enable`
+    schedule + f32 params with no name field. There is therefore no on-disk overlap to settle. (Item
+    closed; see the field-map caveat for the runtime-node vs on-disk distinction.)
 
 13. **Router category-5 vs the 0..4 cap (CYCLE 7, cross-ref `specs/sound.md §2.1`)** — the
     actor-anchored 3D event SFX path uses a play category argument of 5, above the 0..4 multi-voice
@@ -578,6 +604,8 @@ five active field offsets, the null sentinel, the category split) re-confirmed T
 - Struct: `SoundTableRecord` (48 bytes): `sound_entry_id` (u32 @+0x00), `hour_schedule` (u8[24]
   @+0x04), `weight` (f32 @+0x1C), `pos_x`/`pos_z` (f32 @+0x20/+0x28, EFF only), `radius`
   (f32 @+0x2C, EFF only), `unlabeled_24` (4 bytes @+0x24, not read by the loader)
+- Trailer: `SoundTablePresentFlags` (`u32[256]` @ file offset 0x3000, loader-ignored present/active
+  flag per record index)
 - Constants: `SOUNDTABLE_FILE_SIZE = 13312`, `SOUNDTABLE_RECORD_COUNT = 256`,
   `SOUNDTABLE_RECORD_STRIDE = 48`, `SOUNDTABLE_READ_SIZE = 12288`,
   `SOUNDTABLE_TRAILER_SIZE = 1024`

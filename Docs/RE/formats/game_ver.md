@@ -8,7 +8,12 @@
 >
 > verification: sample-verified — the structural layout and the two confirmed runtime fields are
 >   corroborated by BOTH the IDB loader control flow and a real VFS sample of `data/cursor/game.ver`.
-> ida_reverified: 2026-06-16
+>   2026-06-21 re-verification re-confirmed the layout, the index-5 token (multiply-add at the
+>   instruction level), and the external reader, and enriched the spec with: the external reader is a
+>   client system-info object whose two `game.ver` slots default to 1/1 when the file is missing; the
+>   enter-game token is built immediately before the enter-game packet send; the login gate is skipped
+>   when the VFS is not mounted.
+> ida_reverified: 2026-06-21
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > conflicts: none unresolved. The single-sample semantics of the five opaque fields
@@ -62,7 +67,7 @@ a longer file is read and counted but carries no interpreted meaning here.
 | 0x00   | 4    | u32LE | field0          | Role unknown. Not read by the version-token path; not interpreted here. | semantic capture/debugger-pending (single-sample) |
 | 0x04   | 4    | u32LE | field1          | Role unknown. Not read by the version-token path; not interpreted here. | semantic capture/debugger-pending (single-sample) |
 | 0x08   | 4    | u32LE | field2          | Role unknown. Not read by the version-token path; not interpreted here. | semantic capture/debugger-pending (single-sample) |
-| 0x0C   | 4    | u32LE | field3 (index 3) | Read by a **separate external (non-VFS, file-opened) reader** alongside index 5. The external reader seeks to **byte offset 12** (= index 3) and reads a u32 into a runtime field. Its exact runtime use is not pinned, but the field IS consumed — it is not dead. | SAMPLE-VERIFIED (consumed at offset 12); semantic capture/debugger-pending |
+| 0x0C   | 4    | u32LE | field3 (index 3) | Read by a **separate external (non-VFS, file-opened) reader** alongside index 5. The external reader seeks to **byte offset 12** (= index 3) and reads a u32 into a runtime field of a client system-info object (the slot defaults to 1 when the external file is missing — see below). Its exact runtime use is not pinned, but the field IS consumed — it is not dead. | SAMPLE-VERIFIED (consumed at offset 12); semantic capture/debugger-pending |
 | 0x10   | 4    | u32LE | field4          | Role unknown. Not read by the version-token path; not interpreted here. | semantic capture/debugger-pending (single-sample) |
 | 0x14   | 4    | u32LE | version_source (index 5) | Source value for the enter-game version token (see formula below). The single field the login version gate compares. Also read by the separate external reader, which seeks to **byte offset 20** (= index 5). | SAMPLE-VERIFIED |
 | 0x18   | 4    | u32LE | field6          | Role unknown. Not read by the version-token path; not interpreted here. | semantic capture/debugger-pending (single-sample) |
@@ -90,6 +95,14 @@ This token derivation is SAMPLE-VERIFIED: the loader/handshake path that folds i
 token and a black-box check of the resulting token against the real VFS sample agree
 (`version_source` from the sample, run through the formula, reproduces the previously observed
 enter-game token). The other six fields are not known to participate in any derived value.
+
+The token is built on the char-select "enter game" action: `game.ver` is loaded (VFS copy when the
+VFS is mounted, otherwise the external `<client-root>\game.ver`), list index 5 is fetched, and the
+token is computed as the fixed integer multiply-add `10 × version_source + 9`. The token is computed
+**immediately before the enter-game packet is built and sent**, so it travels with the enter-game
+handshake (the wire framing for that packet is protocol-spec material — see Cross-references). The
+multiply-add nature of the formula (a fixed `× 10` then `+ 9`) is confirmed at the instruction level,
+not inferred.
 
 ## Field semantics discussion
 
@@ -163,15 +176,30 @@ client's two copies of `game.ver`:
 - **Match ->** the gate passes and login proceeds. **Mismatch ->** a Win32 message box (body =
   message id **2204**) is shown and the client quits.
 - **Separate external reader (index 3 + index 5):** beyond this login gate, a distinct external
-  (`fopen`-style, non-VFS) reader of `game.ver` reads BOTH index 3 (offset 0x0C) AND index 5 (offset
+  (ordinary file-open, non-VFS) reader of `game.ver` reads BOTH index 3 (offset 0x0C) AND index 5 (offset
   0x14). The external reader seeks to **byte offset 12** for index 3 and **byte offset 20** for index
   5. This is why index 3 is marked SAMPLE-VERIFIED-as-consumed in the field table — it is read by this
   external path even though the login gate compares only index 5.
 
-The gate fires only on the login action. The single-field equality (both operands fetched at list
-index 5) is CODE-CONFIRMED by the comparison routine; the **>= 7** element check guarding both the
-VFS and external read paths is likewise CODE-CONFIRMED. Source: dirty-room IDA notes
-(CAMPAIGN 9b) and the campaign-10 two-witness re-verification.
+The gate fires only on the login action, **and only when the VFS is mounted** — the gate call is
+itself guarded by a "VFS mounted?" check at both call sites. When the VFS is NOT mounted the version
+comparison is skipped entirely and login proceeds without it. The single-field equality (both operands
+fetched at list index 5) is CODE-CONFIRMED by the comparison routine; the **>= 7** element check
+guarding both the VFS and external read paths is likewise CODE-CONFIRMED. Source: dirty-room IDA notes
+(CAMPAIGN 9b), the campaign-10 two-witness re-verification, and the 2026-06-21 re-verification.
+
+### External reader = client system-info object (defaults 1/1 on missing file)
+
+The external (non-VFS) reader of `game.ver` is not a free-standing routine: it is a member read of a
+**client system-info object** (the object whose constructor also records the host OS version). On
+construction, both of its `game.ver`-backed runtime slots — the one fed by index 3 (offset 0x0C) and
+the one fed by index 5 (offset 0x14) — are **pre-initialized to 1**. The object then opens
+`game.ver` (CWD / client-root relative, NOT the VFS path): on success it overwrites the two slots
+from byte offsets 12 and 20; on failure it logs a "file not found" message and leaves the slots at
+their defaults. The concrete fallback behavior is therefore that **a missing external `game.ver`
+yields version `1` / `1`** for these two slots rather than an error. — confidence: SAMPLE-VERIFIED
+(default-init and seek offsets); the runtime *meaning* of the two slots remains
+capture/debugger-pending.
 
 ## Cross-references
 
@@ -196,3 +224,13 @@ VFS and external read paths is likewise CODE-CONFIRMED. Source: dirty-room IDA n
   entries; the no-magic identification. Held capture/debugger-pending: the *semantics* of fields
   0/1/2/4/6 and the *meaning* of field3 (single effective sample, no protocol trace). No addresses,
   decompiler output, or sample bytes crossed the firewall.
+- **2026-06-21 re-verification (IDB anchor 263bd994):** layout, the index-5 token, and the external
+  reader re-confirmed; no corrections required. Three enrichments folded in: (1) the external
+  (non-VFS) reader is a member of a **client system-info object** whose constructor also records the
+  host OS version, and whose two `game.ver`-backed slots (index 3 / index 5) **default to 1/1** when
+  the external file is missing; (2) the enter-game token is a fixed integer multiply-add
+  (`10 × index5 + 9`, confirmed at the instruction level) computed **immediately before the enter-game
+  packet is built and sent**; (3) the login version gate is **skipped entirely when the VFS is not
+  mounted** (both call sites are guarded by a VFS-mounted check). Held capture/debugger-pending: the
+  semantics of fields 0/1/2/4/6 and the meaning of field3. No addresses, decompiler output, or sample
+  bytes crossed the firewall.

@@ -43,9 +43,8 @@ public sealed partial class ActorRegistry : Node
     //   cellMapZ = floor(legacyZ / 1024) + 10000
     // spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024 wu. CONFIRMED.
     //
-    // Bounded wait: if no sector ever arrives (offline / no VFS), actors remain at the fallback Y
-    // and the pending list is never drained — this is the same behaviour as before this fix and
-    // preserves the offline demo path exactly (no game logic, just a deferred Y update).
+    // Bounded wait: if no sector ever arrives (VFS absent), actors remain at the fallback Y
+    // and the pending list is never drained — no game logic, just a deferred Y update.
     private readonly List<(ActorKey Key, float LegacyX, float LegacyZ)> _pendingSnaps = new();
 
     // Set during Initialise() — not constructor, since Godot nodes are wired after _Ready.
@@ -153,13 +152,17 @@ public sealed partial class ActorRegistry : Node
             if (grounded) groundY = terrainY;
         }
 
-        var (gx, _, gz) = WorldCoordinates.ToGodot(fx, groundY, fz);
-        // spec: Docs/RE/specs/world_entry.md §2.3 — spawn Y forced to 0 on the wire; use terrain Y.
-        visual.GlobalPosition = new Vector3(gx, groundY, gz);
         visual.ActorKey = evt.Key;
         visual.ActorName = evt.Name;
 
+        // AddChild BEFORE setting GlobalPosition: Godot throws !is_inside_tree() if GlobalPosition
+        // is set on a node that has not yet been added to the scene tree.
+        // spec: Docs/RE/specs/world_entry.md §2.3 — actor added to tree, then position applied.
         AddChild(visual);
+
+        var (gx, _, gz) = WorldCoordinates.ToGodot(fx, groundY, fz);
+        // spec: Docs/RE/specs/world_entry.md §2.3 — spawn Y forced to 0 on the wire; use terrain Y.
+        visual.GlobalPosition = new Vector3(gx, groundY, gz);
         _actors[evt.Key] = visual;
 
         // If the sector is not yet resident, queue for deferred snap when it arrives.

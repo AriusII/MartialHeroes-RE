@@ -95,9 +95,10 @@ LAYER: dict[str, int] = {
     # 05.Presentation (not scanned -- see IGNORED_PROJECTS -- but a valid target)
     "Client.Godot": 5,
     # Tools/ (CLI utilities; leaf CONSUMERS above the core -- reference down, referenced by none)
-    "Tools.VfsExplorer": 6,
     "Tools.AssetChainTrace": 6,
+    "Tools.AssetProbe": 6,
     "Tools.PacketInspect": 6,
+    "Tools.VfsExplorer": 6,
 }
 
 # Intra-layer sub-order: a project may only reference a peer with a STRICTLY
@@ -147,9 +148,10 @@ SUBORDER: dict[str, int] = {
     # 05
     "Client.Godot": 0,
     # Tools
-    "Tools.VfsExplorer": 0,
     "Tools.AssetChainTrace": 0,
+    "Tools.AssetProbe": 0,
     "Tools.PacketInspect": 0,
+    "Tools.VfsExplorer": 0,
 }
 
 # Layer 05 (Godot) is not scanned as a source (its csproj is owned elsewhere and

@@ -2,7 +2,6 @@ using MartialHeroes.Assets.Parsers.Audio;
 using MartialHeroes.Assets.Parsers.Audio.Models;
 using MartialHeroes.Assets.Parsers.Terrain;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
-using MartialHeroes.Assets.Parsers.Texture.Models;
 using MartialHeroes.Assets.Parsers.World;
 
 namespace MartialHeroes.Assets.Mapping;
@@ -91,7 +90,7 @@ public sealed class AreaComposer
     // Row-major: ring[5·row + col] → pool index.
     // spec: Docs/RE/structs/terrain-manager.md — ring stored row-major (slot = 5·row+col): CONFIRMED.
 
-    private readonly int[] _ring = Enumerable.Repeat(-1, RingSize).ToArray();
+    private readonly int[] _ring = CreateRing();
 
     // ── Centre tracking ───────────────────────────────────────────────────────
 
@@ -119,6 +118,15 @@ public sealed class AreaComposer
         var p = new PoolEntry[PoolSize]; // spec: terrain-manager.md — TerrainLoader pool_count = 34: CONFIRMED
         for (var i = 0; i < PoolSize; i++) p[i] = new PoolEntry();
         return p;
+    }
+
+    private static int[] CreateRing()
+    {
+        // Initialize all ring slots to -1 (empty) without LINQ/closures.
+        // spec: Docs/RE/structs/terrain-manager.md — ring @ TerrainManager +44, 25 pointers: CONFIRMED.
+        var r = new int[RingSize]; // spec: terrain-manager.md — ring_slots[25]: CONFIRMED
+        for (var i = 0; i < RingSize; i++) r[i] = -1; // -1 = empty slot (no pool entry)
+        return r;
     }
 
     // ── ComposeArea ───────────────────────────────────────────────────────────
@@ -235,14 +243,23 @@ public sealed class AreaComposer
         Fx7Layer? slot8Fx7 = null;
         SodBlob? collision = null;
         (int Flag, int TexId)[]? terrainTextures = null;
+        (int Flag, int TexId)[]? buildingTextures = null;
 
         foreach (var section in mapDesc.Sections)
         {
             var key = section.Keyword; // Already upper-cased by the parser.
 
-            // Capture TERRAIN section textures for the resolution chain.
+            // Capture TERRAIN section textures for the ground-patch resolution chain.
             if (key == "TERRAIN" && section.Textures.Length > 0)
                 terrainTextures = section.Textures;
+
+            // Capture BUILDING section textures for the .bud per-object resolution chain.
+            // spec: Docs/RE/specs/asset_linkages.md §1.5 — "Building geometry uses the identical
+            //   chain via the BUILDING list: the .bud per-object tex_id is a 1-based index into
+            //   the per-cell BUILDING TEXTURES list, whose value is itself a 1-based index into
+            //   the global bgtexture pool": CONFIRMED.
+            if (key == "BUILDING" && section.Textures.Length > 0)
+                buildingTextures = section.Textures;
 
             // Route DATAFILE token to the right slot.
             if (section.DataFile is null)
@@ -337,7 +354,13 @@ public sealed class AreaComposer
             }
         }
 
-        // ── Step 5: resolve per-patch texture paths ───────────────────────────
+        // ── Steps 5–6: resolve texture paths (terrain + building) ────────────
+        // Both chains use the same global bgtexture pool; build one BgTextureCatalog instance
+        // and pass it to both resolvers so we don't construct it twice per cell.
+        // spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000 for every area": CONFIRMED.
+        var bgCatalog = BgTextureCatalog.FromLst(source.TerrainTextureCatalog);
+
+        // Step 5: ground-patch resolution chain.
         // .ted TextureIndexGrid byte → idx-1 finalize (−1 ONLY on the .ted byte; clamp [1,count])
         // → .map TERRAIN TEXTURES[idx-1].intTexId → bgtexture.lst[intTexId] (NO −1) → path.
         // spec: Docs/RE/specs/assembly_graph.md §1 — "Texture resolution (global under map000)": CONFIRMED.
@@ -345,10 +368,19 @@ public sealed class AreaComposer
         // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS 0-based pool slot, NO −1: CONFIRMED.
         string?[]? resolvedPaths = null;
         if (slot0Ted is not null && terrainTextures is not null && terrainTextures.Length > 0)
-            resolvedPaths = ResolveTexturePaths(
-                slot0Ted.TextureIndexGrid,
-                terrainTextures,
-                source.TerrainTextureCatalog);
+            resolvedPaths = ResolveTexturePaths(slot0Ted.TextureIndexGrid, terrainTextures, bgCatalog);
+
+        // Step 6: building-object resolution chain.
+        // .bud BudObject.TexId (1-based) → BUILDING TEXTURES[TexId-1].intTexId →
+        // bgtexture.lst[intTexId] (NO −1; 0-based direct) → path.
+        // spec: Docs/RE/specs/asset_linkages.md §1.5 — "Building geometry uses the identical chain
+        //   via the BUILDING list: the .bud per-object tex_id is a 1-based index into the per-cell
+        //   BUILDING TEXTURES list, whose value is itself a 1-based index into the global bgtexture pool."
+        // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS 0-based pool slot, NO −1: CONFIRMED.
+        // spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: CONFIRMED (1-based).
+        string?[]? resolvedBuildingPaths = null;
+        if (buildingTextures is not null && buildingTextures.Length > 0)
+            resolvedBuildingPaths = ResolveBuildingTexturePaths(buildingTextures, bgCatalog);
 
         return new AssembledCell
         {
@@ -365,7 +397,8 @@ public sealed class AreaComposer
             Slot8Fx7 = slot8Fx7,
             Collision = collision,
             SoundGrid = soundGrid,
-            ResolvedTexturePaths = resolvedPaths
+            ResolvedTexturePaths = resolvedPaths,
+            ResolvedBuildingTexturePaths = resolvedBuildingPaths
         };
     }
 
@@ -502,23 +535,20 @@ public sealed class AreaComposer
                     RecyclePoolSlot(oldPoolIdx);
             }
 
+        // Build a hash-set of membership keys for O(1) per-slot lookup.
+        // spec: Docs/RE/formats/area_inventory.md §1A.1 — "a cell may only be loaded if its key is
+        //   in [the membership] set." CODE-CONFIRMED.
+        // Constructing the set here avoids an O(RingSize × N) linear scan for each of the 25 ring slots.
+        var memberSet = new HashSet<(int MapX, int MapZ)>(source.AreaCellKeys);
+
         // Point each ring slot to the corresponding pool entry, loading as needed.
         for (var i = 0; i < RingSize; i++)
         {
             var (mx, mz) = newRingCoords[i];
 
-            // Only load cells that are in the area's membership set.
-            // spec: Docs/RE/formats/area_inventory.md §1A.1 — "a cell may only be loaded if its
-            //   key is in [the membership] set." CODE-CONFIRMED.
-            var isMember = false;
-            foreach (var (kx, kz) in source.AreaCellKeys)
-                if (kx == mx && kz == mz)
-                {
-                    isMember = true;
-                    break;
-                }
-
-            if (!isMember)
+            // Membership gate: O(1) via the set built above.
+            // spec: Docs/RE/formats/area_inventory.md §1A.1 — membership predicate. CODE-CONFIRMED.
+            if (!memberSet.Contains((mx, mz)))
             {
                 _ring[i] = -1;
                 continue;
@@ -580,9 +610,10 @@ public sealed class AreaComposer
     ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — "intTexId IS the 0-based record index,
     ///     used DIRECTLY — NO -1": CONFIRMED.
     /// </param>
-    /// <param name="catalog">
-    ///     The global background-texture catalogue (built from <c>data/map000/texture/bgtexture.lst</c>).
-    ///     Textures are global under <c>map000</c> for ALL areas.
+    /// <param name="bgCatalog">
+    ///     The already-constructed background-texture catalogue (built from
+    ///     <c>data/map000/texture/bgtexture.lst</c>). Passed in to avoid constructing it
+    ///     twice per cell when both terrain and building textures are resolved.
     ///     spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000 for every area": CONFIRMED.
     /// </param>
     /// <returns>
@@ -592,11 +623,8 @@ public sealed class AreaComposer
     private static string?[] ResolveTexturePaths(
         byte[] textureIndexGrid,
         (int Flag, int TexId)[] terrainTextures,
-        BgtextureLstCatalog catalog)
+        BgTextureCatalog bgCatalog)
     {
-        // Build a BgTextureCatalog wrapper from the parsed catalog for path resolution.
-        var bgCatalog = BgTextureCatalog.FromLst(catalog);
-
         var count = terrainTextures.Length;
         var paths = new string?[textureIndexGrid.Length];
 
@@ -634,6 +662,50 @@ public sealed class AreaComposer
             //   "intTexId IS the 0-based record index, used DIRECTLY — NO -1": CONFIRMED.
             var intTexId = terrainTextures[listIdx].TexId;
 
+            // Resolve full VFS path: data/map000/texture/<rel>.dds
+            // spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000": CONFIRMED.
+            paths[i] = bgCatalog.ResolveTexturePath(intTexId);
+        }
+
+        return paths;
+    }
+
+    /// <summary>
+    ///     Resolves the per-BUILDING-section texture path array from the BUILDING section's
+    ///     <c>TEXTURES</c> list into an indexed array of full VFS paths. Index 0 = slot 0, i.e.
+    ///     the first TEXTURES entry, which a <see cref="BudObject.TexId" /> of 1 maps to via the
+    ///     <c>TexId − 1</c> consumer-side subtraction.
+    /// </summary>
+    /// <param name="buildingTextures">
+    ///     The <c>TEXTURES</c> entries from the BUILDING section of the <c>.map</c> file.
+    ///     Each entry is <c>(intFlag, intTexId)</c>; <c>intTexId</c> is used DIRECTLY as the
+    ///     0-based <c>bgtexture.lst</c> pool slot (NO −1).
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — "intTexId IS the 0-based record index,
+    ///     used DIRECTLY — NO -1": CONFIRMED.
+    /// </param>
+    /// <param name="catalog">
+    ///     The global background-texture catalogue (built from <c>data/map000/texture/bgtexture.lst</c>).
+    ///     spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000 for every area": CONFIRMED.
+    /// </param>
+    /// <returns>
+    ///     An array of VFS paths, one per BUILDING TEXTURES registration slot (0-based), or
+    ///     <see langword="null" /> entries for empty/kind-0/out-of-range pool slots.
+    ///     Consumers address it as <c>ResolvedBuildingTexturePaths[BudObject.TexId − 1]</c>.
+    ///     spec: Docs/RE/specs/asset_linkages.md §1.5 — "the .bud per-object tex_id is a 1-based index
+    ///     into the per-cell BUILDING TEXTURES list": CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: CONFIRMED (1-based).
+    /// </returns>
+    private static string?[] ResolveBuildingTexturePaths(
+        (int Flag, int TexId)[] buildingTextures,
+        BgTextureCatalog bgCatalog)
+    {
+        var paths = new string?[buildingTextures.Length];
+
+        for (var i = 0; i < buildingTextures.Length; i++)
+        {
+            // intTexId IS the 0-based bgtexture.lst pool slot; NO −1.
+            // spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS 0-based, NO -1: CONFIRMED.
+            var intTexId = buildingTextures[i].TexId;
             // Resolve full VFS path: data/map000/texture/<rel>.dds
             // spec: Docs/RE/specs/assembly_graph.md §1 — "textures are global under map000": CONFIRMED.
             paths[i] = bgCatalog.ResolveTexturePath(intTexId);

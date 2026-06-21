@@ -175,11 +175,17 @@ The ordered lifecycle is:
    manage**, or **rename** a character; the server answers with the corresponding character-management
    responses (Section 5).
 
-9. **Enter game.** The player confirms a slot. The client sends `1/9 CmsgEnterGameRequest`
-   (40-byte body, Section 3) and **caches the chosen slot's character record locally** for the world
-   load. The server answers `3/5 SmsgEnterGameAck` (44 bytes) → the client transitions to the
-   **in-world game state**. The local player's actual **world** spawn is then driven by the
-   `4/1 SmsgGameStateTick` world-entry snapshot, which consumes the cached character record. (A
+9. **Enter game (CORRECTED 2026-06-21 against the live server `211.196.150.4`).** The player confirms a
+   slot. The client sends `1/9 CmsgEnterGameRequest` (40-byte body, Section 3) and **caches the chosen
+   slot's character record locally** for the world load. The server answers directly with
+   `4/1 SmsgGameStateTick` (the ~9100-byte world-entry snapshot) — **the `4/1` IS the enter
+   confirmation**, with **NO enter-ladder `3/5` in between**. On a **`4/1` received while the enter
+   request (`1/9`) is in flight**, the client transitions to the **in-world game state** and spawns the
+   local player from the cached descriptor. **The live enter ladder is `1/9 → 4/1`, NOT
+   `1/9 → 3/5 → 4/1`** — a live headless run observed `… roster (3/4) → 3/5 (post-login account-ack,
+   BEFORE the 1/9) → 1/9 (enter request) → 4/1 (enter confirmation) → 5/121`. The `3/5 SmsgEnterGameAck`
+   is **only the unsolicited post-login account-ack** (it arrives **before** any `1/9`, step 7); it is
+   **not** a step in the enter ladder and must **not**, by itself, enter the world. (A
    `3/14 SmsgCharSpawnResponse` (16 bytes) may also arrive as an enter-into-world *bridge* that
    re-enters the enter-builder, but it is **not** the local-player world spawn.) Ongoing world state
    thereafter is maintained by the major-5 Push family (out of scope here).
@@ -239,6 +245,12 @@ see §2.2 / §3.0). It:
    TCP stream socket and connects to `{ host, port }`.
 4. Connection failure is **non-fatal to the helper** — it logs the error and still returns the
    socket; the caller detects failure by the absence of a valid reply.
+
+> **Re-confirmed (Phase 2b, build 263bd994).** Static IDA re-traced the lobby connect path: it uses
+> **`inet_addr`** on a dotted-quad string (NO `gethostbyname`, NO DNS, `getaddrinfo` absent;
+> `inet_ntoa` appears only for diagnostic peer-IP display). The separate **game-server** connect
+> path uses **`gethostbyname` (DNS)** on a dynamic host string (§2.2 / §3.0). The `211.196.150.4`
+> literal is referenced from exactly one function (the lobby connect routine); all call sites traced.
 
 > **Registry note.** `servername` (Tier 2 selector) and `Lastserver` (the selected-server persist of
 > §2.1) live under the **same** key `HKLM\SOFTWARE\crspace\do`. The write path uses the lowercase
@@ -499,10 +511,20 @@ is 1:1 with the raw layout.)
 > client build) is firm; its *offset* within the body is not. Field spec:
 > `packets/1-9_enter_game_request.yaml`.
 
-### 3.4 Enter-game acknowledgement (3/5, S2C) and in-world transition
+### 3.4 The `3/5 SmsgEnterGameAck` (unsolicited post-login account-ack) and the live enter ladder
 
-The server answers with **`3/5 SmsgEnterGameAck`**, a **44-byte** payload, after which the client
-transitions into the **in-world game state**.
+> **CORRECTED 2026-06-21 against the live server `211.196.150.4`.** Earlier this section called `3/5`
+> the "enter-game acknowledgement" and put it on the enter ladder as `1/9 → 3/5 → 4/1`. A live headless
+> run **disproved** that ladder: the only `3/5` arrives as the **unsolicited post-login account-ack**
+> right after the roster and **BEFORE any `1/9`**; the enter request itself is answered **directly by
+> `4/1`**. So the live enter ladder is **`1/9 → 4/1`** (the `4/1` IS the enter confirmation), and
+> **`3/5` is NOT a step in the enter ladder**.
+
+The server pushes **`3/5 SmsgEnterGameAck`**, a **44-byte** payload, **once after login** (right after
+the `3/4`/`3/1` roster, step 7) as the account-ack — it carries the account name/billing/char-count and
+nudges the scene toward Load, but it does **not**, by itself, enter the world. Because it arrives before
+any `1/9`, the in-flight latch is **not armed** when it is received, which is exactly how the client
+distinguishes it from a (non-existent on this server) enter-ladder ack.
 
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
@@ -513,6 +535,14 @@ transitions into the **in-world game state**.
 > Total = a 40-byte leading block + a trailing u32 = **44 bytes**. `opcodes.md` marks this 44-byte
 > size as corroborated by two captures. Field internals of the 40-byte block beyond name@0 and
 > billing@28 are **UNVERIFIED**. Field spec: `packets/3-5_enter_game_response.yaml`.
+
+**The in-world transition (live).** The client enters the in-world game state on the **`4/1
+SmsgGameStateTick` received while the `1/9` enter request is in flight** (the latch armed by the `1/9`
+send). The `4/1` is `4/1`'s own enter confirmation: it clears the latch (its first statement) and drives
+the scene Select/Load → InGame, then spawns the local player from the cached descriptor (§3.5). A
+latch-**unarmed** `4/1` is an ordinary in-world tick and does not transition the scene; an unsolicited
+`3/5` (latch unarmed) does not enter the world; and a `3/100 SmsgCharActionResult` during the enter
+phase rejects the enter and keeps the client at char-select.
 
 ### 3.5 Local slot caching and the actual spawn
 
@@ -533,9 +563,12 @@ enter-into-world *bridge* that re-enters the enter-builder, but it is **not** th
 spawn. After spawn, the world entity is maintained by the major-5 Push handlers (out of scope; see
 `opcodes.md` 5/x).
 
-> **Enter-game, in one line:** send `1/9` → cache the chosen slot's descriptor locally → on `3/5`,
-> transition to the in-world state → on the `4/1` world-entry snapshot, spawn the local player into
-> the world from the cached descriptor.
+> **Enter-game, in one line (CORRECTED 2026-06-21, live):** send `1/9` (arms the in-flight latch) →
+> cache the chosen slot's descriptor locally → on the **`4/1` world-entry snapshot received with the
+> latch armed**, transition to the in-world state (Select/Load → InGame), clear the latch, and spawn
+> the local player into the world from the cached descriptor. **There is no enter-ladder `3/5` between
+> the `1/9` and the `4/1`** — the only `3/5` is the unsolicited post-login account-ack that precedes the
+> `1/9`.
 
 ### 3.6 Character-select C2S senders (create / slot-select) — cross-reference
 
@@ -564,8 +597,14 @@ in their own `packets/*.yaml`**; this is a brief cross-reference only (see also
 > (CODE-CONFIRMED, build 263bd994).** `// confirmed: static IDA 2026-06-20` The select screen emits
 > five C2S messages, not two; delete has no dedicated opcode; and the local slot writers run only off
 > the server ack:
-> - **`1/7` carries a mode byte: `{slot, mode}` (2 bytes).** `mode = 0` = select / view; `mode = 1` =
->   **delete request**. There is **no standalone delete opcode** -- delete is multiplexed onto `1/7`.
+> - **`1/7` carries a mode byte: `{slot, mode}` (2 bytes).** `mode = 1` = **select-and-play**;
+>   `mode = 0` = **slot-lock / pre-play**. Both emit sites are character-**SELECT** code paths in the
+>   select-window command handler (one builder, two call sites). **Phase 2b binary-won reversal
+>   (build 263bd994):** the earlier reading on this line (`mode = 1` = **delete request**, "delete
+>   multiplexed onto `1/7`") is **REFUTED** -- there is **no major-1 char-delete opcode** on this
+>   build, and neither 1/7 site is a delete path. Character removal is surfaced only via the inbound
+>   major-3 result ladder (`3/7 SmsgCharManageResult` subtype 2, below). The runtime *meaning* of
+>   `mode 1` vs `mode 0` is the only part still capture/debugger-pending.
 > - **`1/9` enter-game** (40 bytes) -- as `section 3.3`.
 > - **`1/6` create character** (52 bytes) -- as above; class map UI{0,1,2,3} to internal {4,1,3,2}.
 > - **`1/13` rename character** (18 bytes).

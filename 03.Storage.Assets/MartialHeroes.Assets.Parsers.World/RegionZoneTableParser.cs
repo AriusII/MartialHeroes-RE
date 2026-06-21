@@ -15,15 +15,11 @@ namespace MartialHeroes.Assets.Parsers.World;
 ///         value at record offset +40.
 ///     </para>
 ///     <para>
-///         This is <b>distinct</b> from <see cref="RegionTableParser" />, which interprets the same VFS
-///         file through the 32-byte-stride sub-zone-label lens (spec:
-///         <c>
-///             Docs/RE/formats/misc_data.md
-///             §7.2
-///         </c>
-///         ). The two parsers expose different views of the same file for different consumers:
-///         one for the minimap label chain, one for the PvP/movement gating chain. Both views are
-///         documented in their respective committed specs.
+///         <see cref="RegionTableParser" /> parses the same VFS file with the same 48-byte stride
+///         and also surfaces the <c>zoneName</c> CP949 string alongside the zone-type field. Both
+///         parsers expose different views of the same <c>regiontable&lt;NNN&gt;.bin</c> data — one
+///         for the minimap label chain, one for the PvP/movement gating chain.
+///         spec: Docs/RE/formats/region_grid.md §regiontable — "Record stride: 48 bytes — CONFIRMED (RE-AFFIRMED)".
 ///     </para>
 ///     <para>
 ///         Record count: fixed 32 (one per possible region id 0..31).
@@ -51,8 +47,9 @@ public static class RegionZoneTableParser
     // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.2 — "32 records × 48 bytes = 1 536 bytes": CONFIRMED.
     public const int ExpectedTableSize = RecordCount * RecordStride; // 1 536
 
-    // Opaque leading bytes per record: +0 .. +39 (40 bytes, UNVERIFIED meaning).
-    // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.2 — "+0 40 (opaque) unread bytes": UNVERIFIED.
+    // Leading bytes per record: +0 .. +39 (40 bytes) = zoneName char[40] CP949 (read by 3 minimap UI sites).
+    // This parser retains them verbatim; RegionTableParser decodes them as CP949 zone names.
+    // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
     private const int OpaqueLeadingSize = 40;
 
     // Zone-type u32le at record offset +40.
@@ -100,8 +97,9 @@ public static class RegionZoneTableParser
         {
             var recBase = regionId * RecordStride;
 
-            // Opaque leading bytes at +0..+39 (preserved but not interpreted).
-            // spec: Docs/RE/specs/world_systems.md Ch. 16 §16.2 — "+0 40 (opaque)": UNVERIFIED.
+            // Leading bytes at +0..+39 = zoneName char[40] CP949, preserved verbatim by this parser.
+            // RegionTableParser decodes them as CP949 zone names; this parser exposes them raw.
+            // spec: Docs/RE/formats/region_grid.md §regiontable — "zoneName char[40] @ +0x00": HIGH.
             var opaqueLeading = data.Slice(recBase, OpaqueLeadingSize);
 
             // Zone-type u32le at +40 — the only field consumed by region-gating logic.

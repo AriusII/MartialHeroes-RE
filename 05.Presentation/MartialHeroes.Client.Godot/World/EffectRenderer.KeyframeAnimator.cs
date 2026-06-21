@@ -10,7 +10,7 @@ public sealed partial class EffectRenderer
     // Per-frame .xeff tick
     // ─────────────────────────────────────────────────────────────────────────
 
-    private void TickXeffEffect(LiveEffect live, SubEffectDesc[] subEffects)
+    private void TickXeffEffect(LiveEffect live, SubEffectDesc[] subEffects, double deltaMs = 0)
     {
         if (!IsInstanceValid(live.Anchor)) return;
 
@@ -21,12 +21,25 @@ public sealed partial class EffectRenderer
         {
             var se = subEffects[i];
 
-            // GPU-particle sub-effects follow anchor but don't rebuild geometry.
+            // GPU-particle sub-effects: tick the simulation node and follow anchor.
+            // spec: Docs/RE/formats/effects.md §E.2.2 — Euler integration per sim step: CODE-CONFIRMED.
             if (se.ResourceId >= XeffResourceParticleThreshold)
             {
-                var gpu = live.GpuParticles?[i];
-                if (gpu is not null && IsInstanceValid(gpu))
-                    gpu.GlobalPosition = anchorPos;
+                // Tick the real Euler-integration sim node (if present).
+                var sim = live.SimNodes?[i];
+                if (sim is not null && IsInstanceValid(sim))
+                {
+                    sim.GlobalPosition = anchorPos;
+                    sim.Tick(deltaMs / 1000.0); // deltaMs is the per-frame ms; Tick expects seconds
+                }
+                else
+                {
+                    // Fallback: legacy GpuParticles3D (always null now; keep for compat).
+                    var gpu = live.GpuParticles?[i];
+                    if (gpu is not null && IsInstanceValid(gpu))
+                        gpu.GlobalPosition = anchorPos;
+                }
+
                 continue;
             }
 

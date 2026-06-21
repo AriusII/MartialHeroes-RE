@@ -77,11 +77,11 @@ public readonly struct CharacterListSlotRecord
     /// <summary>SlotFlag size. spec: packets/3-1_character_list.yaml (sub-block 3).</summary>
     public const int SlotFlagSize = 1;
 
-    /// <summary>Timing size. spec: packets/3-1_character_list.yaml (sub-block 4).</summary>
-    public const int TimingSize = 4;
+    /// <summary>FlagsWord size. spec: packets/3-1_character_list.yaml (sub-block 4).</summary>
+    public const int FlagsWordSize = 4;
 
     /// <summary>Total per-slot record stride. spec: packets/3-1_character_list.yaml (880+96+1+4 = 981).</summary>
-    public const int WireSize = DescriptorSize + StatBlockSize + SlotFlagSize + TimingSize; // 981
+    public const int WireSize = DescriptorSize + StatBlockSize + SlotFlagSize + FlagsWordSize; // 981
 
     // --- record-relative offsets of the four sub-blocks (spec: packets/3-1_character_list.yaml) ---
 
@@ -94,8 +94,8 @@ public readonly struct CharacterListSlotRecord
     /// <summary>Record-relative offset of the SlotFlag byte (0x3D0). spec: same.</summary>
     public const int SlotFlagOffset = StatBlockOffset + StatBlockSize; // 0x3D0
 
-    /// <summary>Record-relative offset of the Timing dword (0x3D1). spec: same.</summary>
-    public const int TimingOffset = SlotFlagOffset + SlotFlagSize; // 0x3D1
+    /// <summary>Record-relative offset of the FlagsWord dword (0x3D1). spec: same.</summary>
+    public const int FlagsWordOffset = SlotFlagOffset + SlotFlagSize; // 0x3D1
 
     // --- SpawnDescriptor (SD-relative) field offsets (spec: Docs/RE/structs/actor.md) ---
 
@@ -262,7 +262,7 @@ public readonly struct CharacterListSlotRecord
     // (packets/3-1_character_list.yaml: "REMAINING UNKNOWNS"). Do not invent accessors.
 
     // ----------------------------------------------------------------------
-    // SlotFlag + Timing accessors (record-relative)
+    // SlotFlag + FlagsWord accessors (record-relative)
     // ----------------------------------------------------------------------
 
     /// <summary>
@@ -273,10 +273,13 @@ public readonly struct CharacterListSlotRecord
     public readonly byte SlotFlag => ReadU8(SlotFlagOffset);
 
     /// <summary>
-    ///     Record +0x3D1 — a timing / timestamp value (LE u32), likely a delete/rename cooldown. TODO
-    ///     needs-capture: exact meaning UNRESOLVED. spec: Docs/RE/packets/3-1_character_list.yaml (sub-block 4).
+    ///     Record +0x3D1 — per-slot FLAGS WORD (LE u32). Bit 0 (mask 0x1) = billing/premium state flag;
+    ///     on Enter Game this bit is copied into the in-game player panel. Bits 1..31 are wire-reserved
+    ///     (no client test references any bit &gt;= 1). NOT a timestamp — the "delete/rename cooldown" reading
+    ///     is REFUTED by the binary (CYCLE 7); rename cooldown is server-enforced via 3/6 error codes, not
+    ///     stored here. spec: Docs/RE/packets/3-1_character_list.yaml (sub-block 4 — RESOLVED FlagsWord).
     /// </summary>
-    public readonly uint Timing => ReadU32(TimingOffset);
+    public readonly uint FlagsWord => ReadU32(FlagsWordOffset);
 
     // ----------------------------------------------------------------------
     // Zero-alloc primitives (read at record-relative byte offsets, little-endian)
@@ -367,7 +370,7 @@ public static class CharacterAppearance
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int ModelClassId(int internalClass, int appearanceVariant)
     {
-        return (5 * (internalClass + (4 * appearanceVariant))) - 24;
+        return 5 * (internalClass + 4 * appearanceVariant) - 24;
     }
 }
 

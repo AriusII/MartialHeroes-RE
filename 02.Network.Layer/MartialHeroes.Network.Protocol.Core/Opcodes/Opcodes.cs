@@ -37,14 +37,15 @@ public static class Opcodes
     public const uint CmsgCreateCharacter = 0x10006;
 
     /// <summary>
-    ///     1:7 — client character-MANAGE request (2 B: slot + mode). status: confirmed (routing+size).
-    ///     DELETE OVERLOADS this op — there is NO dedicated delete opcode in major 1: <c>{slot, 0}</c> =
-    ///     select/view, <c>{slot, 1}</c> = delete (code-confirmed literal). The delete/manage RESULT
-    ///     returns on S2C 3/7 SmsgCharManageResult (subtype 2). The C# struct keeps the
-    ///     <c>CmsgSelectCharacter</c> identifier; the catalog name is CmsgManageCharacter. spec:
-    ///     packets/cmsg_char_select.yaml.
+    ///     1:7 — client character-SELECT request (2 B: slot + mode). status: confirmed (routing+size).
+    ///     Binary-confirmed (Phase 2b, build 263bd994): 1/7 is a character-SELECT commit, NOT a delete
+    ///     carrier. mode 1 = select-and-play; mode 0 = slot-lock / pre-play. Both send sites are
+    ///     SELECT code paths; there is NO major-1 char-delete opcode on this build. Character removal
+    ///     surfaces only via the inbound 3/7 SmsgCharManageResult (subtype 2). spec:
+    ///     packets/cmsg_char_select.yaml; Docs/RE/specs/net_contracts.md §2.2;
+    ///     Docs/RE/specs/login_flow.md §3.6.
     /// </summary>
-    public const uint CmsgSelectCharacter = 0x10007;
+    public const uint CmsgSelectCharacterSlot = 0x10007; // spec: Docs/RE/opcodes.md row 1/7
 
     /// <summary>
     ///     1:9 — client enter-world request (40 B: slot + version blob + version-check u32). status: draft. spec:
@@ -167,11 +168,13 @@ public static class Opcodes
     /// </summary>
     public const uint SmsgCharSpawnResult = 0x3000e;
 
-    /// <summary>3:23 — character create result. status: confirmed.</summary>
-    public const uint SmsgCharCreateResult = 0x30017;
-
-    /// <summary>3:23 — character select status update (alias for SmsgCharCreateResult). status: confirmed.</summary>
-    public const uint SmsgCharSelectStatusUpdate = 0x30017;
+    /// <summary>
+    ///     3:23 — select-screen character level and status update (28 bytes, by-name roster patch).
+    ///     Binary-confirmed (Phase 2b, build 263bd994): this is NOT a 12-byte char-create result.
+    ///     Create is acked via 3/7 SmsgCharManageResult + a refreshed 3/4 char list. spec:
+    ///     Docs/RE/specs/net_contracts.md §2.2; Docs/RE/packets/3-23_char_select_status_update.yaml.
+    /// </summary>
+    public const uint SmsgCharStatusBytesByName = 0x30017; // spec: Docs/RE/opcodes.md row 3/23
 
     /// <summary>3:100 — generic character action result. status: confirmed.</summary>
     public const uint SmsgCharActionResult = 0x30064;

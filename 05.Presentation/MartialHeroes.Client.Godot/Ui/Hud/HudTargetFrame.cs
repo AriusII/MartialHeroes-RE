@@ -1,9 +1,15 @@
 // Ui/Hud/HudTargetFrame.cs
 //
-// Selected-target / mob-info plate — MopGagePanel (HUD service slot 177).
+// Selected-target / mob-info plate — MopGagePanel (HUD panel-slot array slot 35).
 //
 // RECOVERED in the HUD-II pass (263bd994). This supersedes the earlier
 // "real target plate NOT recovered" / "OtherInfo/MopGagePanel not recovered" deferral.
+// SLOT CORRECTED: ui_system.md §1.9.3/§1.9.4 binary-won reversal — real slot is 35
+// (member +0x2C4 relative to MainWindow+0x238 base); slot 177 is a plain GUComponent image
+// (the trailing image of the bottom command-bar cluster, §2.3). The C# naming "slot 177"
+// throughout HUD-II was REFUTED. Corrected to slot 35 per the 263bd994 RTTI pass.
+// spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won).
+// spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
 //
 // Panel geometry (CODE-CONFIRMED width + anchor; dstY / total-H debugger-pending):
 //   X = (screen_width − 226) / 2   → screen-width-centred
@@ -11,7 +17,7 @@
 //   Top-anchored (Y ≈ 0)
 //   Container is transparent; children carry chrome from uitex id 1.
 //
-// spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel class, slot 177, geometry.
+// spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel class, slot 35, geometry.
 //
 // Child widgets (all binding uitex id 1 unless noted):
 //   HP bar fill  dst (35,5) 172×6  src (40,517)   fill width = min(172, 172·hpRatio)
@@ -39,7 +45,7 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
-///     Selected-target / mob-info plate — <c>MopGagePanel</c> (HUD slot 177).
+///     Selected-target / mob-info plate — <c>MopGagePanel</c> (HUD panel-slot array slot 35).
 ///     <para>
 ///         PASSIVE: drains <see cref="IHudEventHub.TargetChanges" /> each frame; shows/hides the
 ///         plate and refills the HP bar from the delivered ratios. Zero game logic.
@@ -48,6 +54,8 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 ///         Width 226, screen-width-centred, top-anchored. Children bind uitex id 1 (chrome atlas).
 ///         HP fill = <c>min(172, 172 · hpRatio)</c> px wide.
 ///     </para>
+///     spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won reversal of prior "slot 177").
+///     spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
 ///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
 /// </summary>
 public sealed partial class HudTargetFrame : Control
@@ -102,7 +110,8 @@ public sealed partial class HudTargetFrame : Control
     /// <summary>
     ///     Geometry pass: builds the MopGagePanel frame, screen-width-centred, top-anchored, W=226.
     ///     Graceful-null when the VFS/atlas is offline.
-    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177, geometry.
+    ///     spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won; prior "slot 177" REFUTED §1.9.4).
+    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel geometry.
     /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
@@ -303,7 +312,9 @@ public sealed partial class HudTargetFrame : Control
                          "spec: Docs/RE/specs/ui_hud_layout.md §5.5b.");
             });
 
-        GD.Print("[HudTargetFrame] Built — MopGagePanel slot 177, W=226, screen-centred, top. " +
+        GD.Print("[HudTargetFrame] Built — MopGagePanel slot 35, W=226, screen-centred, top. " +
+                 "(Prior 'slot 177' REFUTED — ui_system.md §1.9.4 binary-won reversal, 263bd994 RTTI pass.) " +
+                 "spec: Docs/RE/specs/ui_system.md §1.9.3 CODE-CONFIRMED. " +
                  "spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.");
     }
 

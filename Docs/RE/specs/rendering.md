@@ -12,19 +12,20 @@
 > - **verification:** *confirmed* for the device-step / Present / device-lost routine, the
 >   offscreen-vs-direct fork, the four-(really-≥6)-callback firing order, the glow/bloom 3-RT
 >   chain (plain bright-extract, single blur, TEX1+TEX2 composite), the cel-gating-on-post flag,
->   the RTTI camera setup, the per-frame Clear flags, and the world/FX vertex strides — each
+>   the RTTI camera setup, the per-frame Clear flags, the world/FX vertex strides, and — re-walked
+>   2026-06-21 — the UI/HUD render-state row and the glow `.psh` selection — each
 >   recovered by following the static control flow. *sample-verified* for the
 >   `data/script/display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI=0.3, GLOW_RANGE 1×1,
 >   POWER=2→power2dx8.psh) and the `DISPLAY_CHAR_BRIGHT_*` 9-state character-tint table (§6.6,
 >   §6.7) — read verbatim from the real VFS file. *static-hypothesis* for the c0/c1 ×0.5
 >   derivation and 1.0 defaults, the per-scene frame-rate field's per-window default value, the
->   particle/UI vertex strides, and — IDA-PENDING — whether `power2dx8.psh` is a VFS-loaded shader
->   vs. a hardcoded one and which `.psh` the loader actually opens given POWER=2 (§6.4 conflict).
+>   particle/UI vertex strides. *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note
+>   below and §6.4.)*
 >   *capture/debugger-pending* for the present-time blend bytes (ONE/ZERO), the matrix major-order /
->   up-axis, and any on-screen colour verdict; the 18-slot render-state cache mechanism and the
->   per-bucket blend/Z-write byte matrix are *re-confirm pending* (not re-walked this lane — see §4
->   flag).
-> - **ida_reverified:** 2026-06-20    *(CYCLE 7, 2026-06-20 — static re-walk of the glow/toon post chain; IDB SHA 263bd994)*
+>   up-axis, and any on-screen colour verdict. *(2026-06-21 ASSET-FIDELITY re-walk: the 18-slot
+>   render-state cache mechanism is re-confirmed, and the UI/HUD row of the per-bucket matrix is
+>   re-walked and split into the in-game-HUD vs. front-end-overlay entry paths — see §4.1 / §4.2.)*
+> - **ida_reverified:** 2026-06-21    *(ASSET-FIDELITY 2026-06-21 — UI render-state row split, auto-hide timer, glow `.psh` conflict resolved; on CYCLE 7 2026-06-20 glow/toon post chain; IDB SHA 263bd994)*
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida, sample-vfs]
 > - **cycle7_additions:** glow blur uses a **fixed pass-loop count of 16** (single small 2×2 box blur,
@@ -38,12 +39,17 @@
 >   light/material/luma constants in registers 4..10 (incl. the BT.601 luma weights), **not** a
 >   world-view-projection matrix constant (§5.1a); (C4) the frame-rate cap is a configurable
 >   per-scene rate, with 60 being only the device-reset presentation refresh-rate default (§2.0).
->   **OPEN — `display.lua` vs §6.4 glow chain (C5):** the shipped `data/script/display.lua` selects
->   `DISPLAY_POWER = 2` (→ `power2dx8.psh`), glow range 1×1, and a 0.3 glow multiplier, whereas §6.4
->   states the glow chain is a single-tap `power1dx8` with `power2`/`power4` "absent from the binary"
->   and a composite scalar default of 0.5. Both readings are recorded (§6.3 / §6.4); the
->   reconciliation (which `.psh` the loader actually opens at POWER=2, and whether `power2dx8.psh` is
->   VFS-loaded vs. hardcoded) is **IDA-PENDING** for the resumed IDA pass. Not silently overwritten.
+>   **RESOLVED (2026-06-21, binary-won) — `display.lua` vs §6.4 glow chain (C5):** the §6.4 reading
+>   wins. The binary's shader string set is exactly five files (the cel vertex shader, two cel pixel
+>   shaders, the `finaldx8` composite, and `power1dx8.psh`) — there is **no `power2dx8.psh` /
+>   `power4dx8.psh` literal and no `power-N` filename-construction format string** anywhere in the
+>   executable, so the binary cannot itself name a power-2/4 shader. The glow loader opens whatever
+>   **string** the editable glow-shader filename slot holds; that slot is pre-filled with
+>   `data/shader/power1dx8.psh` and is overwritten only by the display-config `DISPLAY_POWERSHADER`
+>   **string** key (read as a string and copied verbatim — it is a filename, not a numeric power level).
+>   The shipped client therefore binds `power1dx8.psh` for glow and `finaldx8.psh` for the composite.
+>   A config that names `power2dx8.psh` would only load if such a file existed in the VFS (a
+>   **DATA-PENDING** question about the data files, not an IDA question about the binary). See §6.4.
 
 ---
 
@@ -57,14 +63,14 @@
 | Frame-rate cap (configurable per-scene rate, seeded 60, unoverwritten) | CONFIRMED (mechanism). See §2.0. |
 | Per-frame draw loop (direct + offscreen paths, ordered scene callbacks, cull walk) | CONFIRMED. The "four callbacks" model is a behavioural abstraction over ≥6 real callback slots. See §2. |
 | Draw order verdict (opaque → alpha-test → transparent → effects → post → UI, no depth sort) | CONFIRMED (firing order). The FX sub-bucket internals are re-confirm-pending — see §3 / §4. |
-| Render-state cache (18-slot lazy compare-and-apply) | CONFIRMED previously; NOT re-walked this lane — re-confirm pending. See §4.1. |
+| Render-state cache (18-slot lazy compare-and-apply) | CONFIRMED — re-confirmed 2026-06-21 (the per-state-type render-state objects, one cache slot per state type; blend setter forwards the bare integer to the device blend state; Z-write toggled imperatively). See §4.1. |
 | Per-bucket render-state matrix | CONFIRMED previously (D3DBLEND enum bytes byte-verified; two transparent buckets DO write depth); NOT re-walked this lane — re-confirm pending. See §4.2. |
 | Per-object material/texture binding (cel = skinned actors only, gated on post-process flag) | CONFIRMED. See §5. |
 | Cel shader binding (cel VS gets light/luma constants in regs 4..10, NOT a WVP matrix) | CONFIRMED. See §5.1a. |
 | Shader set (5 shaders: 2 cel PS + cel VS + composite + editable glow; VFS-first load) | CONFIRMED. See §6 / §6.5. |
 | Per-class vertex stride / FVF | CONFIRMED for world geometry (terrain/building/static/skinned = 32-byte XYZ+N+UV) and FX (24-byte XYZ+DIFFUSE+UV). Particle/UI strides PLAUSIBLE. See §5.2. |
 | Glow/bloom post chain (3 render targets, ordered pass list) | CONFIRMED (load + execution). No bright-pass threshold; single blur pass; present is an opaque copy; composite weights config-driven. See §6. |
-| `display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI, GLOW_RANGE, POWER→power-shader) | SAMPLE-VERIFIED values; **CONFLICT with §6.4** flagged, reconciliation IDA-pending. See §6.3 / §6.4 / §6.6. |
+| `display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI, GLOW_RANGE, glow-shader filename) | SAMPLE-VERIFIED values; the §6.4 conflict is **RESOLVED (2026-06-21, binary-won)** — the glow shader is `power1dx8.psh` (the `DISPLAY_POWERSHADER` key is a filename string, no `power-N` construction exists in the binary), composite is `finaldx8.psh`. See §6.3 / §6.4 / §6.6. |
 | `DISPLAY_CHAR_BRIGHT_*` 9-state character tint table | SAMPLE-VERIFIED values; **recovered, NOT-YET-PORTED feature**. See §6.7. |
 | Device-lost / reset / restore lifecycle | CONFIRMED. See §2.0.2. |
 
@@ -330,7 +336,7 @@ assumed from a slot default — see §4.2.
 
 ### 4.2 Per-bucket render-state matrix
 
-**Confidence: CONFIRMED (prior pass, byte-verified); NOT re-walked this lane → re-confirm-pending.**
+**Confidence: CONFIRMED (byte-verified); the UI/HUD row re-walked 2026-06-21.**
 The named source/destination blend pairs are **byte-verified** Direct3D `D3DBLEND` enum values (the
 blend setters forward the bare integer straight to `SetRenderState`, so the integer in each bucket
 setup *is* the enum byte). Per-bucket **Z-write** is also byte-verified: it is toggled explicitly per
@@ -352,7 +358,8 @@ remains capture/debugger-pending (§6.3).
 | Post: glow extract / bloom blur | OFF | OFF | OFF | OFF (extract); blur via glow PS | off | fullscreen quad |
 | Post: final composite | OFF | OFF | OFF | OFF (composite into RT) | off | composite / glow PS; see §6 |
 | Post: present | OFF | OFF | OFF | ONE / ZERO (opaque copy to backbuffer) | off | straight blit of the composited RT; see §6 |
-| UI / HUD | OFF | OFF | OFF | SRCALPHA / INVSRCALPHA | — | 2D ortho |
+| UI / HUD — in-game panels (ortho enter) | OFF | OFF | OFF | **blend disabled at bucket-enter** (each quad/glyph opts in to translucency itself; canonical translucent = SRCALPHA / INVSRCALPHA) | OFF | 2D ortho enter at the head of every panel draw; also sets cull = CW, fill = solid, an orthographic projection (near/far ≈ −300 .. +300) with identity world/view; **no alpha-reference** |
+| UI / HUD — front-end overlay (login / character-select / opening) | OFF | OFF | OFF | **ONE / ONE (additive)** | OFF | additionally clears fog, dither, and alpha-test; stage 0 = select-arg-1 / diffuse, stage 1 = disabled; samplers = linear / linear / mip-none |
 
 **Blend-factor note (CONFIRMED, byte-verified).** The source/destination blend setters pass their
 integer argument through unchanged to the Direct3D source-blend / destination-blend render states, so
@@ -373,6 +380,22 @@ the 2×/multiply layer and again for the water/reflective bucket, then **disable
 particles. So the opaque bucket is **not the sole Z-writer** — the 2×/multiply and water/reflective
 FX buckets also write depth, deliberately letting those surfaces occlude later transparent FX, while
 billboards and particles remain depth-read-only.
+
+**UI / HUD bucket (re-walked 2026-06-21, CODE-CONFIRMED).** The UI bucket has two distinct entry
+paths and they differ in their blend setup, so the single "UI / HUD" row was split above. The
+**in-game HUD panels** run a 2D-ortho enter at the head of every panel draw: depth test OFF, depth
+write OFF, lighting OFF, cull clockwise, fill solid, an orthographic projection (near/far roughly
+−300 .. +300) over identity world/view, and **alpha-blend left disabled at bucket-enter** — each
+quad or glyph opts into translucency itself through its own blend state (the canonical translucent
+pair being source-alpha / inverse-source-alpha). No alpha-reference is written (alpha-test stays
+disabled). The **front-end overlay** (login, character-select, opening windows) instead enters with
+alpha-blend ON and an **additive** source = ONE / destination = ONE pair, and additionally clears
+fog, dither, and alpha-test and configures texture stage 0 = select-arg-1 / diffuse with stage 1
+disabled and linear/linear/mip-none sampling. A 3D item-preview inset embedded inside an inventory
+panel temporarily re-enables depth test and then restores it on the way out — confirming that
+"no depth" is the UI default that the inset deviates from. The per-quad translucent source/dest
+pair for the in-game panels and the effective depth-write state at the very first UI draw are
+**DBG-PENDING** (a live device render-state read during a panel draw).
 
 ---
 
@@ -597,40 +620,36 @@ the code path.
 filename slot is pre-filled with the `power1dx8` path and can be overwritten **only** by an external
 display-config string (a dedicated power-shader key). That a stock client only ever loads `power1dx8`,
 and that a byte-level search finds **zero** `power2` / `power4` literals, was established in a prior
-pass and **not re-searched this lane** → treat the `power1dx8`-as-default-name and the
-absence-of-power2/4 as **static-hypothesis carried forward**, while the **single-blur-pass** structure
-is CONFIRMED. A multi-tap chain could only run if the external display config explicitly named such a
-path *and* the file existed on disk; the executable never names or sequences them.
+pass and **re-searched and re-confirmed 2026-06-21** (exhaustive string sweep): the executable's
+complete shader-filename set is exactly `dotoonshading.vsh`, `dotoonshading.psh`,
+`dotoonshading2.psh`, `finaldx8.psh`, and `power1dx8.psh` — there is **no `power2dx8.psh` /
+`power4dx8.psh` literal and no `power-N` / `%ddx8.psh` filename-construction format string** in the
+binary. So the `power1dx8`-as-default-name, the absence of power2/4, and the **single-blur-pass**
+structure are all **CONFIRMED**. A multi-tap chain could only run if the external display config
+explicitly named such a path *and* the file existed in the VFS; the executable never names or
+sequences them.
 
-> **CONFLICT — `data/script/display.lua` selects POWER = 2 → `power2dx8.psh` (DO NOT silently
-> overwrite).** The shipping `data/script/display.lua` is the external display-config string source
-> the paragraph above refers to. It sets (SAMPLE-VERIFIED):
+> **RESOLVED (2026-06-21, binary-won) — `display.lua` `DISPLAY_POWERSHADER` is a filename string, not
+> a numeric power level.** The earlier conflict (whether `DISPLAY_POWER = 2` selects a `power2dx8.psh`)
+> is settled in favour of the binary:
 >
-> | `display.lua` key | Value | Resolved |
-> |---|---|---|
-> | `DISPLAY_POWER` | **2** | the glow-power selector (valid set: 1, 2, 4, 8, 16, 32) |
-> | `DISPLAY_POWERSHADER` | **`"data/shader/power2dx8.psh"`** | from a Lua if/elseif at the file tail keyed by `DISPLAY_POWER`: 1→`power1dx8.psh`, 2→`power2dx8.psh`, 4→`power4dx8.psh`, 8→`power8dx8.psh`, 16→`power16dx8.psh`, 32→`power32dx8.psh`, else→`power1dx8.psh` |
+> - The binary reads the display-config key **`DISPLAY_POWERSHADER`** with the **string** getter and
+>   copies it **verbatim** into the editable glow-shader filename slot (which is pre-filled with
+>   `data/shader/power1dx8.psh` by the post-process constructor). It is consumed as a **filename**, not
+>   as a number that indexes a shader array.
+> - An exhaustive string sweep of the executable finds **only** `power1dx8.psh` among the `power*`
+>   shaders, and **no `power-N` / `%ddx8.psh` filename-construction format string** — the binary cannot
+>   itself build a `power2dx8.psh` / `power4dx8.psh` name. The complete shader-filename set is the five
+>   files of §6.5.
+> - The glow loader therefore binds **whatever string the slot holds**, which is `power1dx8.psh` in the
+>   stock client, and the composite pass binds `finaldx8.psh`.
 >
-> **This conflicts with the CONFIRMED-from-binary text above**, which states the glow chain is a
-> single-tap `power1dx8` and that `power2`/`power4` literals are **absent from the binary**. The
-> shipped config explicitly names `power2dx8.psh` and a full 1/2/4/8/16/32 dispatch ladder. Both
-> readings are recorded here; neither is overwritten by the other.
->
-> **Reconciliation — IDA-PENDING.** The resumed IDA pass must settle:
-> 1. **Which `.psh` the loader actually opens** when `DISPLAY_POWER = 2` — does the display-config
->    string (`power2dx8.psh`) override the binary's `power1dx8` default filename slot, or does the
->    loader ignore the config key and keep `power1dx8`?
-> 2. **Whether `power2dx8.psh` is a VFS-loaded shader vs. a hardcoded one** — the binary's string
->    table reportedly carries no `power2`/`power4` literals, yet the config names `power2dx8.psh`; is
->    the shader file present in the client VFS and loaded by name (VFS-first, §6.5), making the
->    binary's missing literal irrelevant?
-> 3. **Whether the single-blur-pass structure still holds** with `power2dx8.psh` bound — the
->    single-tap structure is CONFIRMED; swapping the bound `.psh` filename does not by itself add a
->    second pass, but this must be confirmed against the loader.
->
-> Until reconciled, treat `DISPLAY_POWER = 2 → power2dx8.psh` as the **SAMPLE-VERIFIED shipped
-> config** and the **single-tap `power1dx8` / absent-power2 reading as the binary-default
-> static-hypothesis** — the two are not yet reconciled. `// spec: Docs/RE/specs/rendering.md §6.4`
+> Consequence: §6.4's binary reading — single-tap `power1dx8`, no power-2/4 in the binary — is
+> **CONFIRMED**. The only remaining question is **DATA-PENDING (not IDA-pending)**: *if* a player's
+> `display.lua` set `DISPLAY_POWERSHADER` to a `power2dx8.psh` *and* such a file existed in the VFS,
+> the VFS-first loader (§6.5) would open it — but that depends on the data files, not the binary, and
+> no such shader is shipped. For a faithful port, bind a single `power1dx8`-style blur shader.
+> `// spec: Docs/RE/specs/rendering.md §6.4`
 
 ### 6.5 Shader set — five shaders, two cel pixel shaders, VFS-first load
 
@@ -643,7 +662,7 @@ shaders and loads the toon-ramp LUT:
 | Cel **pixel** shader **#1** | Primary toon-shading pixel shader. |
 | Cel **pixel** shader **#2** | A **second** toon-shading pixel shader (a variant) — uploaded to its own handle slot alongside #1. |
 | Composite **pixel** shader | The glow/composite shader bound in pass 4 (the `finaldx8` composite — see `formats/shaders.md`). |
-| Editable **glow** pixel shader | The blur shader bound in pass 3; its filename is the editable slot defaulting to `power1dx8` (§6.4), overridable by the `display.lua` `DISPLAY_POWERSHADER` key (§6.4 conflict). |
+| Editable **glow** pixel shader | The blur shader bound in pass 3; its filename is the editable slot defaulting to `power1dx8.psh`, overridable by the `display.lua` `DISPLAY_POWERSHADER` **filename string** key (§6.4, resolved). The stock client binds `power1dx8.psh`. |
 
 > **Cel EDGE / outline — REFUTED (CYCLE 7, HIGH, absence over the full set).** There is **no
 > outline / edge-detect shader and no edge pass** anywhere in the cel pipeline. The complete shader
@@ -676,11 +695,11 @@ in-memory blob; otherwise it is assembled **from the on-disk file**. The `.vsh` 
 ramp LUT (`data/shader/toonramp.bmp`) is loaded through the same VFS-or-disk texture loader into its
 own cel slot (see §6.1 / `formats/shaders.md`).
 
-> **Bearing on the §6.4 conflict.** Because shaders are **VFS-first by name**, a `power2dx8.psh`
-> named in `display.lua` could be loaded straight from the client VFS even if the executable's string
-> table carries no `power2` literal — the missing-literal observation would then not contradict the
-> shipped config. Confirming whether `power2dx8.psh` exists in the VFS and is opened at `DISPLAY_POWER
-> = 2` is part of the IDA-pending reconciliation (§6.4).
+> **Bearing on the §6.4 conflict (RESOLVED 2026-06-21).** Because shaders are **VFS-first by name** and
+> the glow filename slot holds the verbatim `DISPLAY_POWERSHADER` string, a `power2dx8.psh` named in
+> `display.lua` *could* load straight from the VFS — but the binary itself never constructs that name
+> and ships only `power1dx8.psh`, so the stock client binds `power1dx8`. Whether any data set actually
+> supplies a `power2dx8.psh` is a DATA-PENDING question about the VFS, not a binary question (§6.4).
 
 ### 6.6 `data/script/display.lua` glow/bloom + display config — SAMPLE-VERIFIED values
 

@@ -1,35 +1,33 @@
 // World/RealWorldRenderer.cs
 //
 // PASSIVE rendering node for real client assets (activated when the VFS is available).
-// Activated when ClientPathResolver.RealAssetsEnabled returns true (client dir résolu + real_assets != false).
+// Activated when ClientPathResolver.RealAssetsEnabled returns true (i.e. a valid client dir is resolved).
+//
+// SERVER-DRIVEN: Initialise() only opens the VFS and sets up the camera — it builds NO area content.
+// The world is built solely on the server's 4/1 world-entry (OnWorldEntered), keyed to the
+// server-supplied AreaId. There is no offline demo area, no config "area=" default, no demo character.
 //
 // What this node does (all passive, no game logic):
-//   1. Uses SectorStreamingService to load a 3×3 ring of real terrain sectors.
-//   2. Loads building geometry (.bud → ArrayMesh via BudMeshBuilder — NO GltfDocument).
-//   3. Loads a skinned character (.skn + .bnd + idle .mot → CPU-skinned, animated ArrayMesh via
-//      SkinnedCharacterBuilder / SkinnedCharacterNode — NO GltfDocument).
-//   4. Applies diffuse textures (PNG/BMP/DDS via AssetPassthrough → ImageTexture).
-//   5. Positions a camera over the terrain.
-//   6. PLAYER-FOLLOWING TERRAIN STREAMING: each frame, if the player crosses a cell boundary
-//      (Chebyshev distance ≥ 1 from the current streaming anchor with hysteresis), the streaming
-//      ring is re-centred on the player's current cell. The initial anchor is always the spawn-
-//      density peak (boot behaviour unchanged). New sectors are loaded asynchronously off the main
-//      thread; sectors > 2 cells from the new anchor are evicted by SectorStreamingService
-//      (Chebyshev eviction policy). spec: Docs/RE/specs/resource_pipeline.md §4.3 (streamer thread).
-//      spec: Docs/RE/formats/terrain.md §9.2 / §9.3 (ring eviction).
+//   1. On 4/1 (OnWorldEntered): streams the server area's terrain sectors (SectorStreamingService),
+//      loads its building geometry (.bud → ArrayMesh via BudMeshBuilder — NO GltfDocument), loads its
+//      static NPC scenery (mob/npc .arr), wires environment, and applies diffuse textures (DDS/PNG/BMP).
+//   2. The local player + dynamic actors arrive from the server (3/7 spawn, 4/4 actor stream) and are
+//      placed by ActorRegistry — this node renders no character itself.
+//   3. Positions a CameraController; SetLocalPlayer (called by GameLoop on 3/7) makes it follow the
+//      live player.
+//   4. PLAYER-FOLLOWING TERRAIN STREAMING: each frame, once a live player is registered, if the player
+//      crosses a cell boundary (Chebyshev ≥ 1 from the anchor, with hysteresis) the streaming ring
+//      re-centres on the player's cell. New sectors load asynchronously off the main thread; sectors
+//      > 2 cells from the new anchor are evicted (Chebyshev eviction).
+//      spec: Docs/RE/specs/resource_pipeline.md §4.3 (streamer thread); terrain.md §9.2 / §9.3 (eviction).
 //
 // GltfDocument.AppendFromBuffer is NOT used anywhere in this file. The native Godot GLB importer
 // was removed because it caused a native crash on our generated GLBs (no managed stack trace).
 // BudMeshBuilder builds Godot ArrayMesh directly from parsed model data.
 //
 // Threading: all Godot node creation happens on the main thread (_Ready or CallDeferred).
-// Heavy parsing runs synchronously in Initialise to keep it simple.
-// The 3×3 sector streaming call goes through SectorStreamingService.UpdateCenterAsync which
+// The sector streaming call goes through SectorStreamingService.UpdateCenterAsync which
 // is called from a background task (fire-and-forget) — TerrainNode reacts via the event bus.
-//
-// load_models flag:
-//   Set load_models=false in client_dir.cfg to skip .bud and .skn loading (terrain only).
-//   Default: true. Read via ClientPathResolver.LoadModelsEnabled.
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 // spec: Docs/RE/formats/terrain.md §1.1–1.4 (path, manifest, ted, world bounds).
@@ -51,11 +49,15 @@ namespace MartialHeroes.Client.Godot.World;
 /// <summary>
 ///     Passive rendering node for real client assets.
 ///     Spawned and started by <see cref="GameLoop._Ready" /> when <see cref="IsEnabled" /> is true.
-///     Default cell rendered: area 000, cell (10000, 10000) — the world-origin cell.
-///     Override via <see cref="TargetAreaId" />, <see cref="TargetMapX" />, <see cref="TargetMapZ" />.
-///     Character rendered: the first .skn found under data/item/skin/ (best-effort).
-///     Override <see cref="SknVirtualPath" /> / <see cref="BndVirtualPath" /> before
-///     <see cref="Initialise" /> is called.
+///     <para>
+///         <b>Server-driven world build (no offline demo).</b> <see cref="Initialise" /> only opens the
+///         VFS and sets up the camera; it builds NO area content. The world is built solely on the
+///         server's 4/1 world-entry packet via <see cref="OnWorldEntered" />, keyed to the
+///         server-supplied AreaId — terrain, buildings, and the area's static NPC scenery all load from
+///         the VFS for that area. The local player and dynamic actors arrive from the server
+///         (3/7 spawn, 4/4 actor stream); this node renders no demo character.
+///         spec: Docs/RE/specs/world_entry.md §2.3/§3.1.
+///     </para>
 ///     NOTE: GltfDocument.AppendFromBuffer is NOT called by this class. All geometry is built
 ///     as Godot ArrayMesh directly via BudMeshBuilder.
 /// </summary>
@@ -108,6 +110,11 @@ public sealed partial class RealWorldRenderer : Node3D
     // stops touching this node (and skips its completion prints) once the node leaves the tree.
     private readonly CancellationTokenSource _lifetimeCts = new();
 
+    // True once the server area's static content (buildings + .arr NPC scenery) has been built for the
+    // first server world-entry (4/1) on the legacy (non-compose) path. Guards OnWorldEntered against
+    // rebuilding the single-cell content on every 4/1. spec: server 4/1 is the sole world-build trigger.
+    private bool _areaContentBuilt;
+
     // -------------------------------------------------------------------------
     // Internal state
     // -------------------------------------------------------------------------
@@ -153,8 +160,11 @@ public sealed partial class RealWorldRenderer : Node3D
     // Guards against overlapping recenter tasks that would double-load the same sectors.
     private volatile bool _isRecentering;
 
-    // Player controller reference: used to push TargetForCamera → CameraController each frame.
-    private PlayerController? _playerController;
+    // Live local-player node (the 3/7-spawned VisualActor), set by GameLoop via SetLocalPlayer once the
+    // server spawns the local player. Drives the camera-follow and the player-following terrain streaming.
+    // Null until the server's 3/7 LocalPlayerSpawnedEvent arrives — there is no local player to follow
+    // before then (strictly server-driven; no offline demo character).
+    private Node3D? _localPlayerNode;
 
     // Current streaming anchor in biased cell coordinates (mapX, mapZ).
     // Initialised from the spawn-density peak in TriggerTerrainStreaming; updated each recenter.
@@ -215,10 +225,10 @@ public sealed partial class RealWorldRenderer : Node3D
     /// <summary>
     ///     Returns true when the real-asset rendering path should be activated.
     ///     Delegates to <see cref="ClientPathResolver" />:
-    ///     - Resolves the client directory (env → config → auto-detect).
-    ///     - Returns true by default when a valid directory is found.
-    ///     - Returns false when real_assets=false (config) or MH_REAL_ASSETS=0 (env) forces
-    ///     synthetic mode, or when no valid client directory is found at all.
+    ///     - Resolves the client directory (MH_CLIENT_DIR env → config → auto-detect).
+    ///     - Returns true whenever a valid directory is found; false when none is.
+    ///     There is no dev toggle to force synthetic mode — the client always uses the real VFS when
+    ///     present, and renders nothing when it is absent.
     /// </summary>
     public static bool IsEnabled
     {
@@ -236,6 +246,26 @@ public sealed partial class RealWorldRenderer : Node3D
     ///     spec: World/PlayerAvatarResolver.cs — local player skin/bind/idle resolution reuses this handle.
     /// </summary>
     public RealClientAssets? Assets { get; private set; }
+
+    // -------------------------------------------------------------------------
+    // Live local-player wiring (server-driven)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Registers the server-spawned local-player node (the 3/7 <see cref="VisualActor" />) so the
+    ///     camera-follow and the player-following terrain streaming track the real player. Called by
+    ///     <see cref="GameLoop" /> from the <c>LocalPlayerSpawnedEvent</c> (3/7) handler. There is no
+    ///     offline demo character: until the server spawns the local player this is never called and the
+    ///     camera simply holds its spawn-cell framing.
+    ///     spec: Docs/RE/specs/login_flow.md §3.5 / §5.3 (3/7 spawns the local player).
+    ///     spec: Docs/RE/specs/resource_pipeline.md §4.3 (streamer follows the player cell).
+    /// </summary>
+    public void SetLocalPlayer(Node3D playerNode)
+    {
+        _localPlayerNode = playerNode;
+        GD.Print("[RealWorldRenderer] Local player registered — camera + terrain-streaming now follow the " +
+                 "live (3/7) player. spec: login_flow.md §3.5 / resource_pipeline.md §4.3.");
+    }
 
     // -------------------------------------------------------------------------
     // Lifecycle
@@ -305,18 +335,18 @@ public sealed partial class RealWorldRenderer : Node3D
     /// </summary>
     public override void _Process(double delta)
     {
-        if (_playerController is not null && _cameraController is not null)
-            _cameraController.PlayerGodotPosition = _playerController.TargetForCamera;
+        if (_localPlayerNode is not null && IsInstanceValid(_localPlayerNode) && _cameraController is not null)
+            _cameraController.PlayerGodotPosition = _localPlayerNode.GlobalPosition;
 
         // ---- Player-following streaming ----
         // Only runs when the follow anchor is armed (TriggerTerrainStreaming succeeded) and a
         // ClientContext + player controller are available. No game logic here — pure presentation.
-        if (!_followAnchorArmed || _ctx is null || _playerController is null)
+        if (!_followAnchorArmed || _ctx is null || _localPlayerNode is null || !IsInstanceValid(_localPlayerNode))
             return;
 
-        // Read the player's Godot-space position (X unchanged, Z negated relative to legacy).
+        // Read the live player's Godot-space position (X unchanged, Z negated relative to legacy).
         // spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z). CONFIRMED.
-        var godotPos = _playerController.TargetForCamera;
+        var godotPos = _localPlayerNode.GlobalPosition;
         var legacyX = godotPos.X;
         var legacyZ = -godotPos.Z; // negate back to legacy world Z
 

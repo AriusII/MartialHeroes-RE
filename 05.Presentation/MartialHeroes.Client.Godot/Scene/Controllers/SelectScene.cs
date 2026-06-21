@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Scene;
@@ -7,7 +6,6 @@ using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Select;
 using MartialHeroes.Shared.Kernel.Enums;
-using Environment = System.Environment;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
@@ -51,17 +49,8 @@ public sealed partial class SelectScene : StubSceneController
         if (_ctx is not null)
             StartEventDrain(_select, _ctx.EventBus);
 
-        if (IsDevOfflineMode() || DisplayServer.GetName() == "headless")
-            SeedDevRoster();
-
         GD.Print("[SelectScene] State 4 Select built CharacterSelectScreen: roster UI, 3D preview actors, " +
                  "and Select camera dolly. spec: client_runtime.md §7.3/§7.4; frontend_scenes.md §3.");
-
-        if (DisplayServer.GetName() == "headless" || OS.GetEnvironment("MH_SELECT_AUTOCONFIRM") == "1")
-        {
-            var timer = GetTree().CreateTimer(0.35);
-            timer.Timeout += AutoConfirmForHeadless;
-        }
     }
 
     public override void _ExitTree()
@@ -149,10 +138,10 @@ public sealed partial class SelectScene : StubSceneController
         GD.Print(
             $"[SelectScene] Enter requested for '{characterName}' slot={slotIndex}; forwarding to UseCases.SelectCharacterAsync. " +
             "spec: frontend_scenes.md §7; cmsg_char_enter.yaml.");
-        _ = ConfirmSlotAsync(slotIndex, IsDevOfflineMode());
+        _ = ConfirmSlotAsync(slotIndex);
     }
 
-    private async Task ConfirmSlotAsync(int slotIndex, bool allowDevFallback)
+    private async Task ConfirmSlotAsync(int slotIndex)
     {
         if (_confirmInFlight) return;
         _confirmInFlight = true;
@@ -168,12 +157,9 @@ public sealed partial class SelectScene : StubSceneController
         {
             GD.PrintErr($"[SelectScene] SelectCharacterAsync({slotIndex}) failed/skipped: {ex.Message}");
         }
-
-        if (allowDevFallback && _host?.CurrentState == EngineSceneState.Select)
+        finally
         {
-            GD.Print("[SelectScene] Dev/headless fallback advancing Select→InGame through SceneHost.Advance. " +
-                     "spec: client_runtime.md §7.5.1; real connected flow uses UseCases.SelectCharacterAsync.");
-            _host.CallDeferred(SceneHost.MethodName.Advance);
+            _confirmInFlight = false;
         }
     }
 
@@ -262,89 +248,5 @@ public sealed partial class SelectScene : StubSceneController
         GD.Print("[SelectScene] Back requested from SelectWindow; routing to scene-aware quit for now. " +
                  "spec: client_runtime.md §7.5.3.");
         _ctx?.SceneMachine.RequestQuit();
-    }
-
-    private void SeedDevRoster()
-    {
-        var slots = DevCharacterList();
-        if (_ctx is not null)
-        {
-            _ctx.EventBus.Publish(new CharacterListEvent(0, 0, slots));
-            GD.Print($"[SelectScene] DEV/headless roster published through EventBus ({slots.Length} slots).");
-        }
-        else
-        {
-            _select?.ApplyCharacterList(slots);
-            GD.Print($"[SelectScene] DEV/headless roster applied directly ({slots.Length} slots; no ClientContext).");
-        }
-    }
-
-    private void AutoConfirmForHeadless()
-    {
-        if (_host?.CurrentState != EngineSceneState.Select) return;
-
-        GD.Print("[SelectScene] Headless/dev auto-confirm slot 0 so SceneHost can verify state 4→5.");
-        _ = ConfirmSlotAsync(0, true);
-    }
-
-    private static ImmutableArray<CharacterListSlot> DevCharacterList()
-    {
-        return ImmutableArray.Create(
-            // Dev/offline seed for headless + screenshot verification. PosX/PosZ are representative saved
-            // map coords (descriptor +644/+648) so the info-row "%d , %d" position line is exercised.
-            // spec: Docs/RE/specs/frontend_scenes.md §3.2 (descriptor position floats).
-            new CharacterListSlot(0, "무사", 25, 1, 650, 2048f,
-                -6144f),
-            new CharacterListSlot(1, "격사", 32, 3, 520, 1536f,
-                -3590f),
-            new CharacterListSlot(2, "도사", 18, 2, 480, 1024f,
-                -512f),
-            new CharacterListSlot(3, "@BLANK@", 0, 0, 0),
-            new CharacterListSlot(4, "@BLANK@", 0, 0, 0));
-    }
-
-    private static bool IsDevOfflineMode()
-    {
-        var envVal = Environment.GetEnvironmentVariable("DEV_OFFLINE_FLOW");
-        if (envVal is "1" or "true" or "yes") return true;
-
-        var cfgVal = ReadCfgKey("dev_offline_flow", "0");
-        return cfgVal is "1" or "true" or "yes";
-    }
-
-    private static string ReadCfgKey(string key, string defaultValue)
-    {
-        string path;
-        try
-        {
-            path = ProjectSettings.GlobalizePath("res://client_dir.cfg");
-        }
-        catch
-        {
-            path = "client_dir.cfg";
-        }
-
-        if (!File.Exists(path)) return defaultValue;
-
-        try
-        {
-            foreach (var rawLine in File.ReadLines(path))
-            {
-                var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-
-                var eq = line.IndexOf('=');
-                if (eq < 0) continue;
-
-                if (line[..eq].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))
-                    return line[(eq + 1)..].Trim();
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[SelectScene] ReadCfgKey('{key}') failed: {ex.Message}");
-        }
-
-        return defaultValue;
     }
 }

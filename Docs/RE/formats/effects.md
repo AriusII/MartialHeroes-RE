@@ -16,7 +16,7 @@
 > particleEmitter walk reaches its `num_frames == 0` tail over 146 variable-length entries, and every
 > manifest / `.xdb` size formula is byte-exact. The Section B `.eff` geometry shape and Section F
 > link-tables remain at their prior sample-verified status (not re-walked this pass).
-> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change.
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida, vfs-sample]
 > **conflicts:** NONE structural — the loader and the real sample contradict no committed claim on this
@@ -70,7 +70,7 @@
 |------|-------|
 | `loader_confirmed` | **SAMPLE-VERIFIED (two-witness, build 263bd994) — variable-length entry sequence** (loader read-order, byte-symmetric with the writer, AND a byte-walk of the real `particleEmitter.eff`, 116,652 B: **146 variable-length entries walked to a clean `num_frames == 0`/EOF tail with no desync**). The file is a SEQUENCE of variable-length entries — each a 28-byte entry header + (`num_frames` × 52-byte sub-record) + 64-byte trailing texture name — and the read loop terminates when an entry header's `num_frames` is 0 (or fewer than 28 bytes remain). There is NO file-level magic check (the first dword is data — `entry_id = 10001`, the value the old flat model misread as "magic 0x2711"). The earlier "16-byte header + 2,243 × 52-byte flat records" model is REFUTED (see E.0 Correction). |
 | Endianness | Little-endian |
-| Field semantics | Entry-header fields CONFIRMED/HIGH (`entry_id`, `num_frames`, `sprite_size_x/y`, `max_particles`, trailing texture name). The 52-byte sub-record is now **fully typed** (CYCLE 7): 4 × u16, an RGBA8 colour quad at +0x08 (CONFIRMED), 4 × f32, 4 × u16, 4 × f32. Field **widths/types are RESOLVED**; per-field **roles** (other than colour) remain DBG-pending. |
+| Field semantics | Entry-header fields CONFIRMED/HIGH (`entry_id`, `num_frames` = live particle count, `sprite_size_x/y`, `max_particles`, trailing texture name). The 52-byte sub-record is **fully typed AND its roles are now CODE-CONFIRMED** (2026-06-21): 4 × u16 timers/size (`life_bonus`, `lifetime`, `spawn_delay`, `size_init`), an RGBA8 colour quad at +0x08, position xyz + `size_rate` (f32), four signed colour-rate i16, and velocity xyz + `velocity_damp` (f32). A sub-record is a per-particle spawn+Euler-integration descriptor (NOT a keyframe). See §E.2.2 / §E.2.4. |
 | Note | This is a distinct `.eff` sub-type at `data/effect/particle/particleEmitter.eff` (VFS-lowercased `particleemitter.eff`); must NOT be parsed with the Section B geometry parser. Entry-record selection is by **raw `entry_id` equality** to a `.xeff` element's `resource_id` (no `−10000` subtraction) — see E.4 and A.4.0. |
 
 ---
@@ -286,6 +286,13 @@ The 9-float layout per frame is (in file order):
 included, has the u32 index prefix) and the 9-float count; **SAMPLE-VERIFIED (partial)** for
 individual field semantics.
 
+**Animated keyframe-count source (CODE-CONFIRMED, static re-walk):** in the animated path the loader
+does NOT re-read a keyframe count from disk. It takes the count from the **element count of the
+texture-handle vector it has already built** while reading the name table (A.4.1) — i.e. the number
+of resolved texture handles — which by construction equals `tex_count` (A.4.0). So "`tex_count`
+keyframes" and "one keyframe per resolved texture handle" are the same number; a faithful parser may
+read exactly `tex_count` 40-byte entries.
+
 ### A.4.6 The one real `emitter_type`-dependent branch (NOT a header tagged union)
 
 The shape of the keyframe / static-state section depends on the track header `anim_loop` byte
@@ -358,6 +365,17 @@ formula `4 + 3669 × 30 = 110,074` matches the on-disk file size exactly). The b
 `u32` count, then `count` 30-byte NUL-padded name records, building `data/effect/xeff/<name>` per
 record. (The 85-entry surplus over the 3,584 `.xeff` files in the VFS is recorded in Open Questions
 — stale manifest rows or names served from a secondary archive; the structure itself is exact.)
+
+**Boot-path reader confirmed (CODE-CONFIRMED, static re-walk):** the manifest reader actually invoked
+on the boot path does read this exact `u32 count` + `count × 30-byte record` structure (despite an
+internal "headerless" working name that is a misnomer — it is NOT headerless, it reads the leading
+count). Per record it concatenates the directory prefix with the record name to form
+`data/effect/xeff/<name>`, opens the file, takes the `.xeff` header's first u32 as the `effect_id`,
+and inserts the descriptor into the registry keyed on that id (FIRST-WINS on a duplicate — see §C.2).
+The end-to-end manifest → file → registry chain is therefore confirmed; the A.9 layout above is exact.
+A second, alternate manifest reader exists (it reads the count through a different disk-read helper but
+parses the same 30-byte records and performs the same registry insert); it is NOT on the traced boot
+path and resolves to the identical on-disk structure, so it imposes no separate layout.
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
@@ -918,16 +936,17 @@ trailing name (E.2.3).
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | u32 LE | `entry_id` | Map key for this entry. A GPU-particle id in the `≥ 10000` space (first observed entry = 10001). Selected at spawn by raw equality to a `.xeff` element's `resource_id` (E.4). | CONFIRMED |
-| 0x04 | 4 | u32 LE | `num_frames` | Sub-record count for this entry AND the loop terminator (`0` ends the read loop). Drives the 52-byte sub-record array length. | CONFIRMED |
+| 0x04 | 4 | u32 LE | `num_frames` | Sub-record count for this entry AND the loop terminator (`0` ends the read loop). Drives the 52-byte sub-record array length. **This is also the live particle count** — the per-particle rings and the simulation loop are sized by `num_frames`, NOT by `max_particles` (0x10); see the note below. | CONFIRMED |
 | 0x08 | 4 | f32 LE | `sprite_size_x` | Per-emitter sprite size; fed to the GPU particle buffer's sprite-size setter. "x then y" axis naming is HIGH, not CONFIRMED (the setter's internal axis assignment was not traced). | HIGH |
 | 0x0C | 4 | f32 LE | `sprite_size_y` | Second sprite-size float; fed to the same sprite-size setter. | HIGH |
-| 0x10 | 4 | u32 LE | `max_particles` | Particle cap for this emitter; asserted non-zero by the loader. Sizes the per-particle state and the vertex/index buffers. | HIGH |
+| 0x10 | 4 | u32 LE | `max_particles` | Carried into the runtime emitter object and asserted non-zero by the loader, but on the render path the per-particle rings and the simulation loop are sized by `num_frames` (0x04), not by this field — in an observed entry the two differ (num_frames = 10, max_particles = 1). Whether `max_particles` ever bounds the vertex/index-buffer capacity at runtime is **DBG-pending**. | HIGH (carried + asserted; ring sizing uses num_frames) |
 | 0x14 | 4 | u32 LE | `tex_handle_slot` | **OVERWRITTEN at load** with the resolved texture handle (from the trailing 64-byte name). The on-disk value is a saved slot id and is **ignored on load**; the trailing name is authoritative. | MEDIUM (disk value unused) |
 | 0x18 | 4 | u32 LE | `subrecord_array_ptr` | **OVERWRITTEN at load** with the pointer to the newly-allocated 52-byte sub-record array. The on-disk value is a stale/placeholder pointer, never consumed. | MEDIUM (disk value unused) |
 
-- **Mandatory-field assert:** the loader asserts that the resolved texture handle, the particle count
-  (`max_particles`), and the sub-record array pointer are all present — confirming those three are
-  required for a valid entry.
+- **Mandatory-field assert:** the loader asserts that the resolved texture handle, `max_particles`,
+  and the sub-record array pointer are all present (non-zero) — confirming those three are required
+  for a valid entry. (The live ring/loop count is `num_frames`, not `max_particles`; size the rings
+  by `num_frames` and merely carry `max_particles`.)
 - **Engineer note:** treat the two trailing dwords (0x14, 0x18) as *ignored on read*. Resolve the
   texture from the 64-byte name; do not consume the on-disk slot/pointer.
 - **Cross-witness (CYCLE 7):** the entry-header field set (`entry_id`, the two sprite-size f32, and
@@ -950,36 +969,40 @@ explicit width and storage cast (single bytes for the colour quad, `u16` for the
 `f32` for the float fields). That sibling parser is the authoritative width/type map; it is the same
 record struct that ships in binary form inside `particleEmitter.eff`.
 
-**Roles still DBG-pending.** Only the colour quad at +0x08 has a confirmed *role*. The remaining 48
-non-colour bytes are now typed (8 × u16 + 8 × f32) but their **semantic roles are DBG-pending**
-(live-debugger confirmation against the runtime per-particle simulation required). By analogy to the
-§A.16 runtime element the f32 quads at +0x0C and +0x24 are plausibly per-frame velocity/size/time and
-the u16 quads plausibly per-frame indices/counts — but this is **NOT proven** and must not be
-promoted. Use field labels `field_a`..`field_p` as neutral placeholders for the typed-but-role-unknown
-fields; do not invent meanings.
+**Roles RESOLVED (CODE-CONFIRMED, 2026-06-21 — superseding the earlier "roles DBG-pending" note).**
+A static read of the per-particle simulation kernel (the spawn routine and the per-tick integrator)
+shows exactly how each field is consumed, so every field's role is now CODE-CONFIRMED. The key
+structural finding: **a sub-record is NOT an interpolated keyframe — it is a per-particle
+spawn-and-integration descriptor.** `num_frames` is the **particle count** (one particle per
+sub-record), not a timeline length. Each particle is initialised from its sub-record (spawn delay,
+lifetime, initial position/size/colour/velocity) and then advanced every fixed simulation step by
+constant per-second rates (size rate, four signed colour rates, a velocity damping factor) via
+stepwise Euler integration — there is no lerp/slerp over the array. The two f32 quads are therefore
+**position xyz + size-rate** (+0x0C) and **velocity xyz + damping** (+0x24), and the four 16-bit
+values at +0x1C..+0x22 are **signed per-second colour deltas**, not indices.
 
 | Rec offset | Size | Type | Field | Notes | Confidence |
 |-----------:|-----:|------|-------|-------|------------|
-| +0x00 | 2 | u16 LE | `field_a` | Typed via the text-serializer sibling; role unknown. | width CONFIRMED · role DBG-pending |
-| +0x02 | 2 | u16 LE | `field_b` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x04 | 2 | u16 LE | `field_c` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x06 | 2 | u16 LE | `field_d` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x08 | 1 | u8 | `color_r` | Red channel of the RGBA8 quad. Default constructor zeroes it. | CONFIRMED |
-| +0x09 | 1 | u8 | `color_g` | Green channel. Default constructor zeroes it. | CONFIRMED |
-| +0x0A | 1 | u8 | `color_b` | Blue channel. Default constructor zeroes it. | CONFIRMED |
-| +0x0B | 1 | u8 | `color_a` | **Alpha channel** (genuine alpha, NOT an "active = 0xFF" sentinel). Default constructor sets it to `0xFF`, giving a default of opaque black RGBA `(0, 0, 0, 255)`. | CONFIRMED |
-| +0x0C | 4 | f32 LE | `field_e` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x10 | 4 | f32 LE | `field_f` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x14 | 4 | f32 LE | `field_g` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x18 | 4 | f32 LE | `field_h` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x1C | 2 | u16 LE | `field_i` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x1E | 2 | u16 LE | `field_j` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x20 | 2 | u16 LE | `field_k` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x22 | 2 | u16 LE | `field_l` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x24 | 4 | f32 LE | `field_m` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x28 | 4 | f32 LE | `field_n` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x2C | 4 | f32 LE | `field_o` | Role unknown. | width CONFIRMED · role DBG-pending |
-| +0x30 | 4 | f32 LE | `field_p` | Role unknown. | width CONFIRMED · role DBG-pending |
+| +0x00 | 2 | u16 LE | `life_bonus` | Added once to the active-lifetime at init (`life += this`). | CODE-CONFIRMED |
+| +0x02 | 2 | u16 LE | `lifetime` | Base active-lifetime set at (re)spawn; counts down each step. | CODE-CONFIRMED |
+| +0x04 | 2 | u16 LE | `spawn_delay` | Initial / respawn delay set at (re)spawn; counts down, then the particle spawns. | CODE-CONFIRMED |
+| +0x06 | 2 | u16 LE | `size_init` | Initial particle size, copied to the render state at spawn. | CODE-CONFIRMED |
+| +0x08 | 1 | u8 | `color_r` | Initial red of the RGBA8 quad, copied to the render state at spawn. Default constructor zeroes it. | CONFIRMED |
+| +0x09 | 1 | u8 | `color_g` | Initial green. Default constructor zeroes it. | CONFIRMED |
+| +0x0A | 1 | u8 | `color_b` | Initial blue. Default constructor zeroes it. | CONFIRMED |
+| +0x0B | 1 | u8 | `color_a` | **Initial alpha** (genuine alpha, NOT an "active = 0xFF" sentinel). Default constructor sets it to `0xFF`, giving a default of opaque black RGBA `(0, 0, 0, 255)`. | CONFIRMED |
+| +0x0C | 4 | f32 LE | `spawn_pos_x` | Initial position X; the spawn position is offset by the emitter origin. | CODE-CONFIRMED |
+| +0x10 | 4 | f32 LE | `spawn_pos_y` | Initial position Y. | CODE-CONFIRMED |
+| +0x14 | 4 | f32 LE | `spawn_pos_z` | Initial position Z. | CODE-CONFIRMED |
+| +0x18 | 4 | f32 LE | `size_rate` | Size growth per second: `size += this × dt` each step. | CODE-CONFIRMED |
+| +0x1C | 2 | i16 LE | `color_r_rate` | **Signed** red change per second: `r += this × dt`. | CODE-CONFIRMED |
+| +0x1E | 2 | i16 LE | `color_g_rate` | Signed green change per second. | CODE-CONFIRMED |
+| +0x20 | 2 | i16 LE | `color_b_rate` | Signed blue change per second. | CODE-CONFIRMED |
+| +0x22 | 2 | i16 LE | `color_a_rate` | Signed alpha change per second (alpha is then scaled by the global brightness option, §E.2.4). | CODE-CONFIRMED |
+| +0x24 | 4 | f32 LE | `velocity_x` | Initial velocity X (units/second). | CODE-CONFIRMED |
+| +0x28 | 4 | f32 LE | `velocity_y` | Initial velocity Y. | CODE-CONFIRMED |
+| +0x2C | 4 | f32 LE | `velocity_z` | Initial velocity Z. | CODE-CONFIRMED |
+| +0x30 | 4 | f32 LE | `velocity_damp` | Velocity scale applied each active step when non-zero (`velocity *= this`) — drag/acceleration. | CODE-CONFIRMED |
 
 - **Sub-record stride:** 52 bytes (CONFIRMED).
 - **Sub-record count source:** the entry header's `num_frames` (CONFIRMED).
@@ -987,9 +1010,14 @@ fields; do not invent meanings.
   genuine alpha channel, upgraded from MEDIUM to CONFIRMED this cycle. The default constructor proves
   it: it zeroes `r`/`g`/`b` and sets `a = 0xFF` (default opaque black). It is NOT an "active = 0xFF"
   flag.
-- **Do not branch on any role-pending field.** A parser may safely read all 19 typed fields by their
-  widths and act on the colour quad; assigning a behavioural meaning to the other 18 fields requires
-  tracing the runtime particle simulation (DBG-pending).
+- **Per-particle simulation (CODE-CONFIRMED).** At spawn, a particle's render state is set from
+  `size_init`, the colour quad, and `spawn_pos` (offset by the emitter origin), and its velocity from
+  the `velocity` triple; `lifetime`/`spawn_delay` arm its timers. Each fixed simulation step (~67 ms;
+  see `specs/effects.md §11`): if `velocity_damp ≠ 0` the velocity is scaled by it, then position +=
+  velocity × dt, size += `size_rate` × dt, and each colour channel += its signed rate × dt, with alpha
+  finally scaled by the global brightness option (§E.2.4). When a particle's lifetime expires it
+  respawns from the same sub-record (unless the effect is one-shot). A faithful re-implementation runs
+  exactly this stepwise integration — it must NOT interpolate between sub-records.
 - **Citation:** engineers cite this layout as `// spec: Docs/RE/formats/effects.md §E.2.2`.
 
 ### E.2.3 Trailing texture name (64 bytes / 0x40)
@@ -998,9 +1026,19 @@ fields; do not invent meanings.
 |-----------:|-----:|------|-------|-------|------------|
 | +0x00 | 64 | char[64] | `texture_name` | Read immediately after the sub-record array; NUL-padded ASCII/CP949. **The stored string is the FULL texture path, used verbatim** (loader-resolved, CAMPAIGN VFS-MASTERY): the texture manager looks it up by an **exact string compare** — no directory prefix is prepended and no extension is stripped or appended. The resolved handle is written back into the entry header's `tex_handle_slot` (0x14). A name that does not resolve falls back to a default texture slot. | CONFIRMED (loader-resolved) |
 
+### E.2.4 Global brightness modulation of alpha (CODE-CONFIRMED)
+
+After a particle's alpha rate is accumulated each step, the resulting alpha is scaled by a global
+display-brightness factor derived from the client brightness option: the factor is `0.05 + 0.95 ×
+(brightness_option / 100)`, clamped so that the lowest brightness setting drives the factor to 0. The
+`0.05` floor is a fixed constant. This is the GPU-particle expression of the same "alpha scaled by a
+global brightness option" behaviour noted for the `.xeff` path (`specs/effects.md §17.3`), now pinned
+to this sub-system with the exact floor. A faithful re-implementation applies this alpha scale after
+the per-step colour-rate accumulation, before the colour is written to the vertex diffuse.
+
 ## E.3 Known unknowns (Section E)
 
-- **52-byte sub-record — WIDTHS RESOLVED (CYCLE 7); ROLES the remaining PRIMARY GAP (DBG-pending).**
+- **52-byte sub-record — WIDTHS AND ROLES RESOLVED (roles CODE-CONFIRMED 2026-06-21; see §E.2.2).**
   All 19 fields are now typed (4 × u16 + RGBA8 quad + 4 × f32 + 4 × u16 + 4 × f32) — the two prior
   "opaque slice" runs are fully decomposed (E.2.2), proven by the `tool/effect/particle_%d.txt` text
   serializer. The colour quad at +0x08 is CONFIRMED RGBA8 (genuine alpha). What remains open is the

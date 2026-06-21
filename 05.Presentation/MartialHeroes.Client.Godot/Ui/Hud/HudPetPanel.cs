@@ -301,7 +301,7 @@ public sealed partial class HudPetPanel : Control
         var btn = new Button
         {
             Name = nodeName,
-            Text = $"[{action}]",
+            Text = string.Empty,
             Position = new Vector2(x, y),
             Size = new Vector2(CmdBtnW, CmdBtnH), // spec: §8.26.1 — 91×25
             MouseFilter = MouseFilterEnum.Stop

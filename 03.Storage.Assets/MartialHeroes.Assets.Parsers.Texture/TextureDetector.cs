@@ -19,17 +19,21 @@ namespace MartialHeroes.Assets.Parsers.Texture;
 public static class TextureDetector
 {
     // Minimum header bytes needed to identify any supported format.
-    private const int MinHeaderBytes = 4;
+    // PNG signature is 8 bytes — the longest magic in the set.
+    // spec: Docs/RE/formats/texture.md §Format: PNG — "Magic (bytes 0–7)". SAMPLE-VERIFIED.
+    private const int MinHeaderBytes = 8;
 
     // DDS magic: ASCII "DDS " = 0x44 0x44 0x53 0x20
-    // spec: Docs/RE/formats/texture.md §Magic / signature:
-    //   "DDS files begin with ASCII 'DDS ' (four bytes)". CONFIRMED.
-    // spec: Docs/RE/formats/texture.md §Implementation guidance:
-    //   "If the first four bytes of the raw buffer are 44 44 53 20 (ASCII 'DDS '), treat as DDS."
+    // spec: Docs/RE/formats/texture.md §Format: DDS — "Magic (bytes 0–3): 44 44 53 20 (ASCII DDS , space included)". SAMPLE-VERIFIED.
+    // spec: Docs/RE/formats/texture.md §Implementation guidance for Assets.Parsers — step 2.
     private static ReadOnlySpan<byte> DdsMagic => "DDS "u8;
 
+    // PNG magic: 8 bytes per ISO 15948 / RFC 2083.
+    // spec: Docs/RE/formats/texture.md §Format: PNG — "Magic (bytes 0–7): 89 50 4E 47 0D 0A 1A 0A". SAMPLE-VERIFIED.
+    private static ReadOnlySpan<byte> PngMagic => new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+
     // BMP magic: ASCII "BM" = 0x42 0x4D
-    // spec: Docs/RE/formats/texture.md §Likely concrete formats — BMP: LOW confidence. UNVERIFIED.
+    // spec: Docs/RE/formats/texture.md §Format: BMP — "Magic (bytes 0–1): 42 4D (ASCII BM)". SAMPLE-VERIFIED.
     private static ReadOnlySpan<byte> BmpMagic => "BM"u8;
 
     /// <summary>
@@ -87,31 +91,38 @@ public static class TextureDetector
         if (totalLength < 1)
             return TextureFormat.Unknown;
 
-        // DDS check (highest-confidence format for this era).
-        // spec: Docs/RE/formats/texture.md §Implementation guidance:
-        //   "Attempt DDS decoding first (highest-confidence format for this era)." HIGH confidence.
+        // DDS check: magic "DDS " (4 bytes).
+        // spec: Docs/RE/formats/texture.md §Format: DDS — "Magic (bytes 0–3): 44 44 53 20". SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/texture.md §Implementation guidance — step 2: "DDS: bytes 0–3 = 44 44 53 20".
         if (header.Length >= DdsMagic.Length && header[..DdsMagic.Length].SequenceEqual(DdsMagic))
             return TextureFormat.Dds;
 
+        // PNG check: 8-byte signature.
+        // spec: Docs/RE/formats/texture.md §Format: PNG — "Magic (bytes 0–7): 89 50 4E 47 0D 0A 1A 0A". SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/texture.md §Implementation guidance — step 2: "PNG: bytes 0–7 = 89 50 4E 47 0D 0A 1A 0A".
+        // Note: PNG is the format for character skin textures in data/char/tex*/ — this check is load-bearing.
+        if (header.Length >= PngMagic.Length && header[..PngMagic.Length].SequenceEqual(PngMagic))
+            return TextureFormat.Png;
+
         // BMP check: magic "BM" at offset 0.
-        // spec: Docs/RE/formats/texture.md §Likely concrete formats — BMP: LOW confidence. UNVERIFIED.
+        // spec: Docs/RE/formats/texture.md §Format: BMP — "Magic (bytes 0–1): 42 4D". SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/texture.md §Implementation guidance — step 2: "BMP: bytes 0–1 = 42 4D".
         if (header.Length >= BmpMagic.Length && header[..BmpMagic.Length].SequenceEqual(BmpMagic))
             return TextureFormat.Bmp;
 
-        // TGA has no fixed magic.  A heuristic is used: the 18-byte TGA header has
-        // byte[2] (image type) typically in range 1-3 or 9-11 for common TGA variants,
-        // and byte[16] (bits per pixel) in {8, 16, 24, 32}.
-        // This is a low-confidence heuristic only; it is applied as a last resort.
-        // spec: Docs/RE/formats/texture.md §Likely concrete formats — TGA: MEDIUM confidence. UNVERIFIED.
-        //
-        // The heuristic is conservative: only flag as TGA when the byte pattern is clearly
-        // incompatible with DDS/BMP yet plausibly TGA.  We check byte[2] (color map type 0 or 1)
-        // and whether the rest of the initial bytes look like binary data rather than text.
+        // TGA has no fixed magic. Identify by extension or decoder heuristic (last resort).
+        // spec: Docs/RE/formats/texture.md §Format: TGA — "TGA has no fixed magic bytes;
+        //   identify by extension or D3DX9 auto-detection heuristics". SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/texture.md §Implementation guidance — step 2:
+        //   "TGA: no magic; use file extension. If extension is .tga, treat as TGA regardless
+        //    of first-byte value."
+        // This heuristic applies only when the caller has no extension information.
+        // The caller should prefer extension-based dispatch over this heuristic when possible.
         if (LooksTga(header, totalLength))
             return TextureFormat.Tga;
 
         // spec: Docs/RE/formats/texture.md §Implementation guidance:
-        //   "If an unrecognized format header is encountered, log the first four bytes and
+        //   "If an unrecognized format header is encountered, log the first eight bytes and
         //    report failure rather than attempting a blind decode."
         return TextureFormat.Unknown;
     }

@@ -21,13 +21,21 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 ///         spec: Docs/RE/formats/mi.md §Identification -- "Magic: none. Version: none. Endianness: little-endian.": HIGH.
 ///     </para>
 ///     <para>
-///         Field semantics within each record are PLAUSIBLE working hypotheses derived from a full
-///         re-parse of all 21 sample records; the dedicated loader was not located in the static pass
-///         so meanings are pending live-debugger confirmation.
-///         PLAUSIBLE groupings: field0=sequential ordinal; field1+2=caption +-1 couple;
-///         field4+5=decimal-packed icon-id pair; field3+6=kind/link couple; 0xFFFFFFFF=none sentinel.
-///         spec: Docs/RE/formats/mi.md §Status -- "record_field_semantics: PLAUSIBLE; loader: UNRESOLVED (static) --
-///         LIVE-DEBUGGER-PENDING".
+///         <b>CONFIRMED NOT READ in build 263bd994 (CYCLE 7 hardened, 2026-06-20).</b>
+///         An exhaustive 4-way static search (string-index, case-insensitive regex, raw ASCII byte scan,
+///         UTF-16LE wide scan) returned ZERO hits for any <c>mobinfo</c> / <c>.mi</c> path literal.
+///         The file IS present in the VFS at <c>data/ui/mobinfo.mi</c>, but the shipped client has no
+///         code path that opens it -- there is no loader function and no reference. This parser exists
+///         for archival / interoperability completeness ONLY; a faithful 1:1 port need NOT load this file.
+///         spec: Docs/RE/formats/mi.md §Loader -- "CONFIRMED NOT READ in build 263bd994 (4-way exhaustive static search =
+///         0 hits)".
+///     </para>
+///     <para>
+///         Field semantics are SINGLE-SAMPLE provisional hypotheses derived from a re-parse of all 21
+///         sample records. Because there is NO client consumer, per-field meanings are OUT-OF-CLIENT-SCOPE
+///         and cannot be confirmed from the client side. Do NOT implement port behaviour driven by these
+///         provisional roles.
+///         spec: Docs/RE/formats/mi.md §Status -- "record_field_semantics: OUT-OF-CLIENT-SCOPE (no consumer)".
 ///     </para>
 ///     <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>

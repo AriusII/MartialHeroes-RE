@@ -15,13 +15,17 @@ verification: confirmed (per-part rebuild model, GID formulas + the digit→lane
   opcode pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔
   static enchant level` mapping, the subtype 53-vs-55 meaning, the per-tier glow VISUAL and the tooltip
   loc-strings).
-ida_reverified: 2026-06-19
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: none open. RECON#F4 RESOLVED the prior off-hand-flag inversion — the off-hand node carries
   node flag = 1; node flag = 2 selects the MAIN-hand catalog columns (was stated backwards as
   "off-hand = flag 2" in the previous build's doc). All in-memory offsets re-pinned to 263bd994.
-note: CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): GID-digit→lane wiring CODE-CONFIRMED;
+note: ASSET-FIDELITY (ida_anchor 263bd994, 2026-06-21): the ATTACH MECHANISM is settled — weapon =
+  rigid single-bone attach selected by a numeric bone-id (no bone-name string in the binary; 88-byte
+  bone stride; the concrete hand bone-id is the one DBG-PENDING value); non-weapon parts (head/face/
+  body {2,3,4,6,11}) are skinned-deform under the shared root (NO head/face socket); Visual+100 is a
+  single scalar scale (not a matrix). CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): GID-digit→lane wiring CODE-CONFIRMED;
   weapon-glow tier toggler RE-LOCATED (101..109→1..9, 4 emitters, grade flows by register — why a
   literal search missed it).
 -->
@@ -52,12 +56,13 @@ note: CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): GID-digit→lane wiri
 | Weapon mesh GID uses the special base-1000 digit formula keyed on appearance fields; the digit → lane WIRING is read off a single visual-part builder routine | CODE-CONFIRMED (formula + digit→lane wiring); PLAUSIBLE (human NAME of each appearance byte) |
 | Non-weapon parts derive GID via `10000·(part/10000) + part%100` through the animation-catalog GID→skin map | CODE-CONFIRMED (formula + digit→lane wiring); PLAUSIBLE (human NAME of each appearance byte) |
 | All parts share ONE skeleton / matrix root (`Visual+1300`); each part contributes to a combined vertex/index pool | CODE-CONFIRMED |
-| Weapon model attaches to a **hand bone** via the bone-attach list (`Visual+1376`); transform from `Visual+100` | CODE-CONFIRMED (structure); PLAUSIBLE (which named bone) |
+| Non-weapon parts (head, face, body slots `{2,3,4,6,11}`) are **skinned-deform parts under the shared skeleton root**, inserted into the draw list (`Visual+1360`) and deformed each frame against the shared pose — they are **NOT bone-attached** and there is **no head-bone or face-bone socket** (the head is built exactly like a body part). Only the **weapon** uses the bone-attach list (`Visual+1376`). | CODE-CONFIRMED |
+| Weapon model attaches to a **single bone** via the bone-attach list (`Visual+1376`); the bone is chosen by a **bone-id** on the attach-host node (resolved each frame against the loaded `.bnd`), NOT by a bone-name string (none exists in the binary); `Visual+100` is a single **scalar scale**, not a matrix | CODE-CONFIRMED (mechanism + 88-byte bone stride + scalar scale); DBG-PENDING (the concrete hand bone-id value) |
 | Dual / two-hand case (weapon bind class == 3) builds main-hand + off-hand nodes (**off-hand = node flag == 1; node flag == 2 selects the MAIN-hand columns**) | CODE-CONFIRMED |
 | Weapon glow / enchant aura from the weapon actor's grade byte (`weapon_effect_grade`); 4-emitter glow object (master + 3 satellites); 9 tiers | CODE-CONFIRMED — tier toggler RE-LOCATED on 263bd994 (see §6.1 / §8) |
 | Grade values `101..109` normalize to tiers `1..9`; `0` = no glow | CODE-CONFIRMED (grade normalised in the enable-for-grade routine) |
 | Per-tier glow VISUAL (which particle set tiers 1..9 show) + the weapon-glow tooltip loc-strings | OPEN-RISK / CAPTURE-PENDING (per-tier resource selection not in this slice; tooltip id appears computed base+tier, not a baked literal) |
-| Which **named bone** the weapon hangs from | PLAUSIBLE — runtime value from the loaded `.bnd`, not a literal |
+| Which bone the weapon hangs from | **There is no bone-name string** — the host node carries a numeric **bone-id** resolved against the loaded `.bnd`; the concrete id is DBG-PENDING (the host node is constructed with the default bone-id 0 and no static override is reachable). |
 
 > **RE-VERIFIED ON BUILD `263bd994` (2026-06-19).** The per-part rebuild model, the two rebind lists,
 > the GID formulas **and their digit→lane wiring** (§3), the shared-skeleton attach tail (§4), the weapon
@@ -249,11 +254,23 @@ per-part skeleton; the head, face, hair, body, and weapon meshes are all skinned
 hierarchy. See `specs/skinning.md` for the bone-addressing and deform conventions that this shared
 skeleton obeys.
 
+> **Skinned-under-root vs. bone-attached — the load-bearing distinction (CODE-CONFIRMED, re-walked
+> 2026-06-21).** The non-weapon parts — head, face, hair, and the body part slots `{2,3,4,6,11}` —
+> are **skinned-deform parts**: each is parented with the shared skeleton root as its parent matrix
+> and inserted into the visual's **draw list** (`Visual+1360`), and is deformed every frame against
+> the shared pose (linear-blend or rigid skinning, selected per visual). They are **never** placed in
+> the bone-attach list, and there is **no per-part single-bone socket** — in particular **no head-bone
+> and no face-bone socket**; the head and face are built by dedicated builders but end in exactly the
+> same skinned-under-root tail as a body part. Only the **weapon** is a rigid single-bone attachment
+> (§5). A faithful port therefore skins headgear/armor/hair with the whole skeleton and rigid-attaches
+> only the weapon to one bone.
+
 ---
 
 ## 5. Weapon-in-hand: bone attach, dual / two-hand
 
-**Confidence: CODE-CONFIRMED for the structure and the node-flag discriminator; PLAUSIBLE for the named bone.**
+**Confidence: CODE-CONFIRMED for the structure, the node-flag discriminator, the bone-id attach
+mechanism, and the scalar scale; DBG-PENDING for the concrete hand bone-id value.**
 
 The hand/weapon-attach builder (called by the local-player rebuild) is responsible for hanging the
 weapon model on the skeleton:
@@ -272,11 +289,28 @@ weapon model on the skeleton:
    | `45` | `+1` |
    | `> 45` | no shift |
 
-3. The weapon model is attached to a **hand bone** by inserting the weapon node into the visual's
-   **bone-attach list** at `Visual+1376` and binding it to the resolved bone. The node's transform is
-   taken from `Visual+100`. The **named bone index is a runtime value from the loaded `.bnd`
-   skeleton**, not a literal — recovering which named bone (e.g. a right-hand bone) requires a sample
-   `.bnd` + a trace, so it is graded PLAUSIBLE.
+3. The weapon model is attached to a **single bone** by inserting the weapon node into the visual's
+   **bone-attach list** at `Visual+1376`. The bone is selected by a numeric **bone-id stored on the
+   attach-host node** — there is **no bone-name string** in the binary. Each frame the renderer
+   resolves that id to a bone record in the loaded `.bnd` pose by the `.bnd` id-offset convention
+   (bone records are an **88-byte** stride, addressed relative to the first bone's self-id — the same
+   convention `specs/skinning.md` documents for `.skn` weights and `.mot` tracks), then composes the
+   host's world from that bone as a **rigid follow**: host position = bone-rotation applied to the
+   host's local offset, plus the bone translation; host rotation = bone-rotation composed with the
+   host's local rotation. The per-weapon grip geometry then comes from the weapon `.skn`'s
+   **attach-set** (a set of records each placed relative to the host: position = host-rotation applied
+   to the record's local offset **scaled by `Visual+100`**, plus the host position). So `Visual+100`
+   is a single **scalar scale** (not a matrix, not identity) applied to the attach-set offsets, and
+   the grip placement is asset data from the `.skn`, not code.
+
+   > **DBG-PENDING (one runtime value).** The host node is constructed with the default bone-id `0`
+   > (the root/first bone) and no static write to that id is reachable on the build path, yet the
+   > per-frame compose unconditionally resolves a bone by it. So either the weapon genuinely hangs
+   > from the root and the grip is carried entirely by the `.skn` attach-set offsets, or the `.skn`
+   > attach metadata sets a hand-bone id at load. Distinguishing these — and naming the hand bone —
+   > needs a live read of the host node's bone-id with a weapon equipped. The same value (off-hand vs.
+   > main-hand bone-id) is the only DBG-PENDING item for the dual-weapon case below; both default to
+   > `0` statically.
 
 ### 5.1 Single vs. dual / two-hand weapons
 

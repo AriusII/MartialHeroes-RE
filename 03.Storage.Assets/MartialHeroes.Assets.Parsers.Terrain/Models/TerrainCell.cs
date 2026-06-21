@@ -30,10 +30,11 @@ public sealed class TerrainCell
     /// <summary>
     ///     Height values for each vertex, in row-major order.
     ///     Length = 4 225 (65 × 65). Each value is an IEEE 754 f32 LE.
-    ///     Axis orientation of row-major storage is UNVERIFIED (see spec §5.3).
+    ///     Axis orientation: row = Z axis, col = X axis. CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain.md §5.2 — col=X, row=Z: CONFIRMED.
     ///     Height scale factor is UNVERIFIED — values appear to be direct world-space Y units.
     ///     spec: Docs/RE/formats/terrain.md §5.2 Block 1 — "Heightmap: f32le, 65×65 = 4225": CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §5.2 Block 1 — byte offset 0, size 16900 (0x4204): CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain.md §5.3 Block table — byte offset 0, size 16900 (0x4204): CONFIRMED.
     /// </summary>
     public required float[] Heights { get; init; }
 
@@ -69,8 +70,8 @@ public sealed class TerrainCell
     /// <summary>
     ///     16 × 16 direction / UV-orientation flags (row-major, Z=row, X=col).
     ///     Length = 256. Observed values: 0, 1, 2, 3 only (2 bits used).
-    ///     Exact bit-to-geometry mapping UNVERIFIED.
-    ///     spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "u8, values 0-3: CONFIRMED. Bit semantics UNVERIFIED."
+    ///     Bit semantics: bit 0x01 = s_flip, bit 0x02 = t_flip. CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain.md §5.7 Block 4 — "bit 0x01=s_flip, 0x02=t_flip: CONFIRMED."
     /// </summary>
     public required byte[] DirectionFlags { get; init; }
 
@@ -213,26 +214,29 @@ public sealed class MapDescriptor
 /// <summary>
 ///     One tile record from a <c>.mud</c> ambient-sound tile blob.
 ///     Stride: 8 bytes. All fields are single bytes; no endianness dependency.
+///     Bytes 0-1 (unread0/unread1) are never read by the runtime and are always zero.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §6.2 Record layout — 8 bytes per tile: VERIFIED (all 3 samples).
+///     spec: Docs/RE/formats/mud.md §Tile record layout — 8-byte stride, all fields CONFIRMED.
+///     Canonical field names from spec: unread0 @ +0, unread1 @ +1, bgmZoneId @ +2,
+///     bgeAmbientId0 @ +3, bgeAmbientId1 @ +4, effId0 @ +5, effId1 @ +6, effId2 @ +7.
 /// </remarks>
 public readonly record struct MudTileRecord(
-    /// <summary>Always zero. spec: §6.2 pad0 u8 @ +0: VERIFIED.</summary>
+    /// <summary>Never read by runtime — always zero on disk. spec: Docs/RE/formats/mud.md — unread0 u8 @ +0.</summary>
     byte Pad0,
-    /// <summary>Always zero. spec: §6.2 pad1 u8 @ +1: VERIFIED.</summary>
+    /// <summary>Never read by runtime — always zero on disk. spec: Docs/RE/formats/mud.md — unread1 u8 @ +1.</summary>
     byte Pad1,
-    /// <summary>Music BGM group index. 0=no music. spec: §6.2 music_group u8 @ +2: VERIFIED.</summary>
+    /// <summary>BGM zone index. 0=no music. spec: Docs/RE/formats/mud.md — bgmZoneId u8 @ +2: CONFIRMED.</summary>
     byte MusicGroup,
-    /// <summary>Ambient sound index 0. 0=no sound. spec: §6.2 ambient_idx_0 u8 @ +3: VERIFIED.</summary>
+    /// <summary>Ambient-loop sound index 0. 0=no sound. spec: Docs/RE/formats/mud.md — bgeAmbientId0 u8 @ +3: CONFIRMED.</summary>
     byte AmbientIdx0,
-    /// <summary>Ambient sound index 1. 0=no sound. spec: §6.2 ambient_idx_1 u8 @ +4: VERIFIED.</summary>
+    /// <summary>Ambient-loop sound index 1. 0=no sound. spec: Docs/RE/formats/mud.md — bgeAmbientId1 u8 @ +4: CONFIRMED.</summary>
     byte AmbientIdx1,
-    /// <summary>Effect sound index 0. 0=no sound. spec: §6.2 effect_idx_0 u8 @ +5: VERIFIED.</summary>
+    /// <summary>Effect sound index 0. 0=no sound. spec: Docs/RE/formats/mud.md — effId0 u8 @ +5: CONFIRMED.</summary>
     byte EffectIdx0,
-    /// <summary>Effect sound index 1. 0=no sound. spec: §6.2 effect_idx_1 u8 @ +6: VERIFIED.</summary>
+    /// <summary>Effect sound index 1. 0=no sound. spec: Docs/RE/formats/mud.md — effId1 u8 @ +6: CONFIRMED.</summary>
     byte EffectIdx1,
-    /// <summary>Effect sound index 2. Always zero in known samples. spec: §6.2 effect_idx_2 u8 @ +7: VERIFIED (limited).</summary>
+    /// <summary>Effect sound index 2. Always zero in known samples. spec: Docs/RE/formats/mud.md — effId2 u8 @ +7: CONFIRMED.</summary>
     byte EffectIdx2
 );
 
@@ -241,65 +245,66 @@ public readonly record struct MudTileRecord(
 ///     Fixed size: 32 768 bytes (0x8000) = 64 × 64 × 8 B.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §6 Ambient-sound tile blob — .mud.
-///     Total size CONFIRMED. Grid 64×64 CONFIRMED. Record stride 8 B CONFIRMED. All fields VERIFIED.
-///     Index formula: col = floor(worldX/16) &amp; 0x3F; row = floor(worldZ/16) &amp; 0x3F.
-///     spec: Docs/RE/formats/terrain.md §6.1 index formula: CONFIRMED.
+///     spec: Docs/RE/formats/mud.md — canonical source for .mud format.
+///     Total size CONFIRMED. Grid 64×64 CONFIRMED. Record stride 8 B CONFIRMED. All fields CONFIRMED.
+///     tile_index formula: col + (row &lt;&lt; 6); col = floor(worldX/16) &amp; 0x3F; row = floor(worldZ/16) &amp; 0x3F.
+///     spec: Docs/RE/formats/mud.md §Indexing — "tile_index = col + (row &lt;&lt; 6)": CONFIRMED.
 /// </remarks>
 public sealed class MudBlob
 {
     /// <summary>
     ///     Grid width (columns, X axis). 64.
-    ///     spec: Docs/RE/formats/terrain.md §6.1 — GridCols = 64: CONFIRMED.
+    ///     spec: Docs/RE/formats/mud.md §Grid geometry — GridCols = 64: CONFIRMED.
     /// </summary>
     public const int GridCols = 64;
 
     /// <summary>
     ///     Grid height (rows, Z axis). 64.
-    ///     spec: Docs/RE/formats/terrain.md §6.1 — GridRows = 64: CONFIRMED.
+    ///     spec: Docs/RE/formats/mud.md §Grid geometry — GridRows = 64: CONFIRMED.
     /// </summary>
     public const int GridRows = 64;
 
     /// <summary>
     ///     Record stride in bytes. 8.
-    ///     spec: Docs/RE/formats/terrain.md §6.1 — RecordStride = 8: CONFIRMED.
+    ///     spec: Docs/RE/formats/mud.md §Tile record layout — RecordStride = 8: CONFIRMED.
     /// </summary>
     public const int RecordStride = 8;
 
     /// <summary>
     ///     Expected fixed size of a .mud file in bytes (64 × 64 × 8 = 32 768).
-    ///     spec: Docs/RE/formats/terrain.md §6 — FixedSize = 32 768 bytes (0x8000): CONFIRMED.
+    ///     spec: Docs/RE/formats/mud.md §Fixed size — FixedSize = 32 768 bytes (0x8000): CONFIRMED.
     /// </summary>
     public const int FixedSize = GridRows * GridCols * RecordStride; // 32768
 
     /// <summary>
     ///     Decoded tile grid, row-major (row = Z axis, col = X axis).
-    ///     Length = 4 096 (64 × 64). Index = row × 64 + col.
-    ///     spec: Docs/RE/formats/terrain.md §6.1 — Row-major (Z=row, X=col): CONFIRMED.
+    ///     Length = 4 096 (64 × 64). Index = col + (row &lt;&lt; 6).
+    ///     spec: Docs/RE/formats/mud.md §Indexing — row-major Z=row, X=col: CONFIRMED.
     /// </summary>
     public required MudTileRecord[] Tiles { get; init; }
 }
 
 /// <summary>
-///     Decoded <c>.sod</c> collision solid blob for one map cell.
-///     Top-level count (CONFIRMED), solid record stride 108 B (CONFIRMED), quad record stride 48 B (CONFIRMED).
-///     AABB fields (VERIFIED), corner fields (VERIFIED). Trailing quad scalars PARTIAL.
+///     Decoded <c>.sod</c> per-cell wall-collision segment blob.
+///     Top-level solidCount (CONFIRMED), SolidRecord stride 108 B (CONFIRMED),
+///     WallSegment (QuadRecord) stride 48 B (CONFIRMED).
+///     BINARY-WON (CYCLE 7, anchor 263bd994): slope-intercept line z=m·x+b, NOT 4-corner ray-parity PIP.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §11. Collision solid blob — .sod
-///     spec: Docs/RE/formats/terrain.md §11.1 Top-level layout: CONFIRMED.
+///     spec: Docs/RE/formats/sod.md — authoritative binary-won spec.
+///     spec: Docs/RE/formats/sod.md §Container structure: CONFIRMED.
 /// </remarks>
 public sealed class SodBlob
 {
     /// <summary>
     ///     Number of solid records in this file.
-    ///     spec: Docs/RE/formats/terrain.md §11.1 — solidCount u32le @ offset 0: CONFIRMED.
+    ///     spec: Docs/RE/formats/sod.md §Container structure — "u32 solidCount": CONFIRMED.
     /// </summary>
     public required uint SolidCount { get; init; }
 
     /// <summary>
-    ///     Decoded solid records. One per solid, each with a typed AABB and an array of decoded quads.
-    ///     spec: Docs/RE/formats/terrain.md §11.2 SolidRecord (108 bytes): CONFIRMED (stride + AABB fields VERIFIED).
+    ///     Decoded solid records. One per solid, each with a typed AABB and wall segments.
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord: CONFIRMED (stride + AABB fields).
     /// </summary>
     public required SolidRecord[] Solids { get; init; }
 
@@ -307,158 +312,147 @@ public sealed class SodBlob
 
     /// <summary>
     ///     Raw solid records, each exactly 108 bytes (backward compat — prefer <see cref="Solids" />).
-    ///     spec: Docs/RE/formats/terrain.md §11.2 SolidRecord — stride 108 bytes (0x6C): CONFIRMED.
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — stride 108 bytes (0x6C): CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte>[] RawSolidRecords { get; init; }
 
     /// <summary>
-    ///     Per-solid quad (triangle) counts (backward compat — prefer <see cref="Solids" />).
-    ///     spec: Docs/RE/formats/terrain.md §11.1 — quadCount u32le per solid (stream copy): CONFIRMED.
+    ///     Per-solid wall-segment counts (backward compat — prefer <see cref="Solids" />).
+    ///     spec: Docs/RE/formats/sod.md §Container structure — "u32 quadCount per solid (stream copy)": CONFIRMED.
     /// </summary>
     public required uint[] TriangleCounts { get; init; }
 
     /// <summary>
-    ///     Per-solid raw quad data, each quad is 48 bytes (backward compat — prefer <see cref="Solids" />).
-    ///     spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — stride 48 bytes: CONFIRMED.
+    ///     Per-solid raw wall-segment data; each segment is 48 bytes (backward compat — prefer <see cref="Solids" />).
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord — stride 48 bytes (0x30): CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte>[] RawTriangleData { get; init; }
 }
 
 /// <summary>
 ///     One solid record from a <c>.sod</c> file (108 bytes on disk).
-///     Contains the solid's 2D XZ AABB and an array of decoded <see cref="CollisionQuad" /> records.
+///     Contains the solid's 2D XZ AABB and an array of decoded <see cref="WallSegment" /> records.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §11.2 SolidRecord — 108 bytes (0x6C): CONFIRMED (stride).
-///     AABB fields +0..+15: VERIFIED. Reserved bytes +016..+059: all-zero (VERIFIED value, meaning UNVERIFIED).
-///     quad_count_embedded +060 u32: VERIFIED (equals stream count). _authoring_ptr +064 u32: stale pointer (VERIFIED).
-///     Reserved bytes +068..+107: all-zero (VERIFIED value). Parser reads stream copy of quadCount, not embedded copy.
+///     spec: Docs/RE/formats/sod.md §SolidRecord — stride 108 bytes (0x6C): CONFIRMED.
+///     AABB fields +0x00..+0x0F: parser + sample.
+///     +0x10..+0x3B (44 bytes): zero on disk, runtime-only — ignored on read.
+///     quadCount embedded @ +0x3C u32: redundant; stream word is authoritative.
+///     quadArrayPtr @ +0x40 u32: on-disk garbage, overwritten at load — ignored on read.
+///     +0x44..+0x6B (40 bytes): zero on disk, runtime use — ignored on read.
 /// </remarks>
 public sealed class SolidRecord
 {
-    // ── AABB +0..+15 (VERIFIED) ──────────────────────────────────────────────
+    // ── AABB +0x00..+0x0F (parser + sample) ─────────────────────────────────
 
     /// <summary>
-    ///     AABB minimum X (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_xmin f32 @ +000: VERIFIED.
+    ///     AABB minimum X (world-space XZ plane).
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — aabbMinX f32 @ +0x00 (parser + sample).
     /// </summary>
-    public required float AabbXMin { get; init; }
+    public required float AabbMinX { get; init; }
 
     /// <summary>
-    ///     AABB minimum Z (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_zmin f32 @ +004: VERIFIED.
+    ///     AABB minimum Z (world-space XZ plane).
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — aabbMinZ f32 @ +0x04 (parser + sample).
     /// </summary>
-    public required float AabbZMin { get; init; }
+    public required float AabbMinZ { get; init; }
 
     /// <summary>
-    ///     AABB maximum X (world-space). spec: Docs/RE/formats/terrain.md §11.2 — aabb_xmax f32 @ +008: VERIFIED.
+    ///     AABB maximum X (world-space XZ plane).
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — aabbMaxX f32 @ +0x08 (parser + sample).
     /// </summary>
-    public required float AabbXMax { get; init; }
+    public required float AabbMaxX { get; init; }
 
     /// <summary>
-    ///     AABB maximum Z (world-space). Equals the union of all owned CollisionQuad AABBs.
-    ///     spec: Docs/RE/formats/terrain.md §11.2 — aabb_zmax f32 @ +012: VERIFIED.
+    ///     AABB maximum Z (world-space XZ plane). Equals the union of all owned WallSegment AABBs.
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — aabbMaxZ f32 @ +0x0C (parser + sample).
     /// </summary>
-    public required float AabbZMax { get; init; }
+    public required float AabbMaxZ { get; init; }
 
-    // ── Decoded quad array ────────────────────────────────────────────────────
+    // ── Decoded wall-segment array ────────────────────────────────────────────
 
     /// <summary>
-    ///     Decoded collision quads belonging to this solid.
-    ///     spec: Docs/RE/formats/terrain.md §11.3 QuadRecord (48 bytes): VERIFIED (corners), PARTIAL (trailing scalars).
+    ///     Decoded wall segments (wall-collision lines) belonging to this solid.
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord: CONFIRMED (slope-intercept line, AABB, endpoints, axisFlag).
     /// </summary>
-    public required CollisionQuad[] Quads { get; init; }
+    public required WallSegment[] Segments { get; init; }
 
     // ── Raw 108-byte record ───────────────────────────────────────────────────
 
     /// <summary>
-    ///     Full 108-byte raw record including reserved regions (+016..+059, +068..+107) and the
-    ///     stale authoring pointer (+064). Reserved bytes are all-zero in every sample.
-    ///     spec: Docs/RE/formats/terrain.md §11.2 — _reserved_a +016..+059 (all-zero: VERIFIED); _authoring_ptr +064 (stale:
-    ///     VERIFIED).
+    ///     Full 108-byte raw record, including on-disk-zero and runtime-only regions.
+    ///     spec: Docs/RE/formats/sod.md §SolidRecord — full stride layout: CONFIRMED.
     /// </summary>
     public required ReadOnlyMemory<byte> RawRecord { get; init; }
 }
 
 /// <summary>
-///     One collision quad from a <c>.sod</c> file (48 bytes on disk).
-///     Stores four explicit XZ world-space corner points followed by four dead authoring scalars.
-///     The runtime rebuilds all collision containment from the four corner points via a ray-parity
-///     point-in-polygon test. The trailing scalars (+032..+047) are never read at runtime.
+///     One wall-collision segment from a <c>.sod</c> file (48 bytes on disk).
+///     Encodes a wall line in slope-intercept form: z = slope·x + intercept.
+///     When axisFlag == 1 the wall is vertical/axis-aligned; use xConst instead.
+///     Collision is line/segment intersection against this record's AABB, NOT ray-parity PIP.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — 48 bytes: VERIFIED (first 32 bytes = four XZ corners).
-///     Correction note (2026-06-12): earlier spec read these as slope/intercept; corrected to four XZ corners.
-///     Correction note (2026-06-14): trailing scalars re-labelled as dead 2D edge-line cache (not a plane equation).
-///     The four trailing scalars (edge_slope, edge_pad0, edge_intercept, edge_pad1) are a precomputed
-///     2D edge line authored at build time; NO runtime collision routine reads past offset +028 in a QuadRecord.
-///     spec: Docs/RE/formats/terrain.md §11.3 — trailing scalars +032..+047 VERIFIED NOT READ; re-labelled 2026-06-14.
-///     The engine code calls these "triangles"; each quad may be split at runtime into two triangles (diagonal
-///     UNVERIFIED).
+///     spec: Docs/RE/formats/sod.md §QuadRecord — stride 48 bytes (0x30): CONFIRMED.
+///     BINARY-WON (CYCLE 7, anchor 263bd994): slope-intercept wall-segment, NOT four XZ corners.
+///     AABB +0x00..+0x0F (parser + sample); endpoints +0x10..+0x1F (sample);
+///     slope/xConst/intercept/axisFlag +0x20..+0x2F (parser + sample).
 /// </remarks>
-public sealed class CollisionQuad
+public sealed class WallSegment
 {
-    // ── Four XZ world-space corners +000..+031 (VERIFIED) ────────────────────
+    // ── 2D segment AABB +0x00..+0x0F (parser + sample) ──────────────────────
 
-    /// <summary>Corner 0 world X. spec: §11.3 — x0 f32 @ +000: VERIFIED.</summary>
-    public required float X0 { get; init; }
+    /// <summary>Segment AABB minimum X. spec: Docs/RE/formats/sod.md §QuadRecord — aabbMinX f32 @ +0x00.</summary>
+    public required float AabbMinX { get; init; }
 
-    /// <summary>Corner 0 world Z. spec: §11.3 — z0 f32 @ +004: VERIFIED.</summary>
-    public required float Z0 { get; init; }
+    /// <summary>Segment AABB minimum Z. spec: Docs/RE/formats/sod.md §QuadRecord — aabbMinZ f32 @ +0x04.</summary>
+    public required float AabbMinZ { get; init; }
 
-    /// <summary>Corner 1 world X. spec: §11.3 — x1 f32 @ +008: VERIFIED.</summary>
-    public required float X1 { get; init; }
+    /// <summary>Segment AABB maximum X. spec: Docs/RE/formats/sod.md §QuadRecord — aabbMaxX f32 @ +0x08.</summary>
+    public required float AabbMaxX { get; init; }
 
-    /// <summary>Corner 1 world Z. spec: §11.3 — z1 f32 @ +012: VERIFIED.</summary>
-    public required float Z1 { get; init; }
+    /// <summary>Segment AABB maximum Z. spec: Docs/RE/formats/sod.md §QuadRecord — aabbMaxZ f32 @ +0x0C.</summary>
+    public required float AabbMaxZ { get; init; }
 
-    /// <summary>Corner 2 world X. spec: §11.3 — x2 f32 @ +016: VERIFIED.</summary>
-    public required float X2 { get; init; }
+    // ── Segment endpoints +0x10..+0x1F (sample) ──────────────────────────────
 
-    /// <summary>Corner 2 world Z. spec: §11.3 — z2 f32 @ +020: VERIFIED.</summary>
-    public required float Z2 { get; init; }
+    /// <summary>Endpoint 0 X. spec: Docs/RE/formats/sod.md §QuadRecord — p0x f32 @ +0x10 (sample).</summary>
+    public required float P0X { get; init; }
 
-    /// <summary>Corner 3 world X. spec: §11.3 — x3 f32 @ +024: VERIFIED.</summary>
-    public required float X3 { get; init; }
+    /// <summary>Endpoint 0 Z. spec: Docs/RE/formats/sod.md §QuadRecord — p0z f32 @ +0x14 (sample).</summary>
+    public required float P0Z { get; init; }
 
-    /// <summary>Corner 3 world Z. spec: §11.3 — z3 f32 @ +028: VERIFIED.</summary>
-    public required float Z3 { get; init; }
+    /// <summary>Endpoint 1 X. spec: Docs/RE/formats/sod.md §QuadRecord — p1x f32 @ +0x18 (sample).</summary>
+    public required float P1X { get; init; }
 
-    // ── Dead 2D edge-line cache +032..+047 (VERIFIED NOT READ at runtime) ────
-    // These four scalars are a precomputed 2D edge line (slope + intercept for one quad edge)
-    // authored at build/export time. NO runtime collision or quadtree routine reads any of them —
-    // the maximum offset any runtime code touches inside a QuadRecord is +028 (the last corner Z).
-    // The runtime reconstructs all containment from the four explicit XZ corners via ray-parity PIP.
-    // A parser must allocate the full 48-byte stride but may ignore these four floats.
-    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
-    // spec: Docs/RE/formats/terrain.md §11.3 Correction 2026-06-14: NOT a plane equation.
+    /// <summary>Endpoint 1 Z. spec: Docs/RE/formats/sod.md §QuadRecord — p1z f32 @ +0x1C (sample).</summary>
+    public required float P1Z { get; init; }
+
+    // ── Slope-intercept line equation +0x20..+0x2F (parser + sample) ─────────
 
     /// <summary>
-    ///     Dead authoring residue — slope-like coefficient of a precomputed 2D edge line f32 @ +032.
-    ///     Never read by any runtime routine. Parser should skip.
-    ///     spec: Docs/RE/formats/terrain.md §11.3 — edge_slope f32 @ +032: VERIFIED (not read) / MODERATE (slope reading).
+    ///     Slope m in z = m·x + b.
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord — slope f32 @ +0x20 (parser + sample).
     /// </summary>
-    public required float EdgeSlope { get; init; }
+    public required float Slope { get; init; }
 
     /// <summary>
-    ///     Dead authoring residue — always 0.0 in every sampled quad f32 @ +036.
-    ///     Unused lane in the 2D edge-line cache.
-    ///     spec: Docs/RE/formats/terrain.md §11.3 — edge_pad0 f32 @ +036: VERIFIED.
+    ///     X constant used when axisFlag == 1 (vertical/axis-aligned wall: x = XConst along Z axis).
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord — xConst f32 @ +0x24 (parser + sample).
     /// </summary>
-    public required float EdgePad0 { get; init; }
+    public required float XConst { get; init; }
 
     /// <summary>
-    ///     Dead authoring residue — intercept-like term of the same 2D edge line f32 @ +040.
-    ///     Never read by any runtime routine. Parser should skip.
-    ///     spec: Docs/RE/formats/terrain.md §11.3 — edge_intercept f32 @ +040: VERIFIED (not read) / MODERATE (intercept
-    ///     reading).
+    ///     Intercept b in z = m·x + b.
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord — intercept f32 @ +0x28 (parser + sample).
     /// </summary>
-    public required float EdgeIntercept { get; init; }
+    public required float Intercept { get; init; }
 
     /// <summary>
-    ///     Dead authoring residue — always 0.0 in every sampled quad f32 @ +044.
-    ///     Unused lane in the 2D edge-line cache.
-    ///     spec: Docs/RE/formats/terrain.md §11.3 — edge_pad1 f32 @ +044: VERIFIED.
+    ///     Axis-alignment flag. Value == 1 means vertical wall (use XConst, not Slope/Intercept).
+    ///     spec: Docs/RE/formats/sod.md §QuadRecord — axisFlag u32 @ +0x2C (parser + sample).
     /// </summary>
-    public required float EdgePad1 { get; init; }
+    public required uint AxisFlag { get; init; }
 }
 
 /// <summary>

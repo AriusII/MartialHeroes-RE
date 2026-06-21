@@ -4,80 +4,79 @@ using MartialHeroes.Assets.Parsers.Terrain.Models;
 namespace MartialHeroes.Assets.Parsers.Terrain;
 
 /// <summary>
-///     Parser for <c>.sod</c> collision solid blob files.
+///     Parser for <c>.sod</c> per-cell wall-collision segment blob files.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §11. Collision solid blob — .sod
+///     spec: Docs/RE/formats/sod.md — wall-segment (slope-intercept line z=m·x+b) set; in-memory
+///     quadtree built at load time. BINARY-WON (CYCLE 7, anchor 263bd994):
+///     NOT ray-parity point-in-polygon and NOT four-corner quads.
 ///     <para>
-///         Top-level layout:
-///         solidCount u32le | solidCount × 108-byte SolidRecord[]
-///         then, for each solid:
-///         quadCount u32le | quadCount × 48-byte QuadRecord[]
-///         spec: Docs/RE/formats/terrain.md §11.1 Top-level layout: CONFIRMED.
+///         Top-level layout (spec: Docs/RE/formats/sod.md §Container structure):
+///         u32 solidCount | solidCount × 108-byte SolidRecord[] (read in one pass) |
+///         for each solid: u32 quadCount | quadCount × 48-byte WallSegment[]
 ///     </para>
 ///     <para>
-///         SolidRecord 108 bytes: AABB +0..+15 VERIFIED, _reserved_a +016..+059 all-zero VERIFIED,
-///         quad_count_embedded +060 VERIFIED, _authoring_ptr +064 stale pointer VERIFIED,
-///         _reserved_b +068..+107 all-zero VERIFIED.
-///         spec: Docs/RE/formats/terrain.md §11.2 SolidRecord: CONFIRMED (stride + AABB + reserved fields).
+///         SolidRecord 108 bytes (spec: Docs/RE/formats/sod.md §SolidRecord):
+///         aabbMinX/Z/MaxX/Z f32×4 +0x00..+0x0F (parser + sample);
+///         +0x10..+0x3B 44 bytes zero on disk (runtime-only fields, ignored on read);
+///         quadCount u32 @ +0x3C — embedded redundant copy (authoritative copy is the stream word);
+///         quadArrayPtr u32 @ +0x40 — on-disk garbage, overwritten at load (ignored on read);
+///         +0x44..+0x6B 40 bytes zero on disk (runtime use, ignored on read).
 ///     </para>
 ///     <para>
-///         QuadRecord 48 bytes: four XZ corners +0..+31 VERIFIED;
-///         trailing scalars +32..+47 are dead 2D edge-line cache (VERIFIED NOT READ at runtime).
-///         spec: Docs/RE/formats/terrain.md §11.3 QuadRecord — correction 2026-06-12: corners, not slope/intercept.
-///         spec: Docs/RE/formats/terrain.md §11.3 — correction 2026-06-14: trailing scalars re-labelled
-///         edge_slope/edge_pad0/edge_intercept/edge_pad1 (NOT a plane equation; VERIFIED NOT READ at runtime).
-///         The runtime reconstructs collision from the four explicit XZ corners via ray-parity PIP.
+///         WallSegment (QuadRecord) 48 bytes (spec: Docs/RE/formats/sod.md §QuadRecord):
+///         AABB aabbMinX/Z/MaxX/Z f32×4 @ +0x00..+0x0F (parser + sample);
+///         endpoint p0x/p0z/p1x/p1z f32×4 @ +0x10..+0x1F (sample);
+///         slope f32 @ +0x20, xConst f32 @ +0x24, intercept f32 @ +0x28, axisFlag u32 @ +0x2C
+///         (all: parser + sample). Line equation: z = slope·x + intercept; axisFlag==1 = vertical case.
 ///     </para>
 ///     <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
 public static class SodBlobParser
 {
     // SolidRecord stride: 108 bytes (0x6C). CONFIRMED.
-    // spec: Docs/RE/formats/terrain.md §11.2 — "108 bytes (0x6C)": CONFIRMED (stride).
+    // spec: Docs/RE/formats/sod.md §SolidRecord — "stride 108 (0x6C)".
     private const int SolidRecordStride = 108; // 0x6C
 
-    // QuadRecord stride: 48 bytes. CONFIRMED.
-    // spec: Docs/RE/formats/terrain.md §11.3 — "48 bytes (0x30)": CONFIRMED (stride).
-    private const int QuadRecordStride = 48; // 0x30
+    // WallSegment (QuadRecord) stride: 48 bytes (0x30). CONFIRMED.
+    // spec: Docs/RE/formats/sod.md §QuadRecord — "stride 48 (0x30)".
+    private const int WallSegmentStride = 48; // 0x30
 
-    // SolidRecord field offsets (all VERIFIED or CONFIRMED).
-    // spec: Docs/RE/formats/terrain.md §11.2.
-    private const int SolidAabbXMinOffset = 0; // f32 VERIFIED
-    private const int SolidAabbZMinOffset = 4; // f32 VERIFIED
-    private const int SolidAabbXMaxOffset = 8; // f32 VERIFIED
+    // SolidRecord field offsets.
+    // spec: Docs/RE/formats/sod.md §SolidRecord.
+    private const int SolidAabbMinXOffset = 0x00; // f32 aabbMinX — parser + sample
+    private const int SolidAabbMinZOffset = 0x04; // f32 aabbMinZ — parser + sample
+    private const int SolidAabbMaxXOffset = 0x08; // f32 aabbMaxX — parser + sample
 
-    private const int SolidAabbZMaxOffset = 12; // f32 VERIFIED
-    // +016..+059: _reserved_a (all-zero, VERIFIED — meaning UNVERIFIED)
-    // +060: quad_count_embedded u32 (VERIFIED — parser reads stream copy instead)
-    // +064: _authoring_ptr u32 (stale pointer, VERIFIED — parser ignores it)
-    // +068..+107: _reserved_b (all-zero, VERIFIED)
+    private const int SolidAabbMaxZOffset = 0x0C; // f32 aabbMaxZ — parser + sample
+    // +0x10..+0x3B (44 bytes): zero on disk, runtime-only (node-grid / pointer / center). Ignored on read.
+    // spec: Docs/RE/formats/sod.md §SolidRecord — "+0x10 44 (zero on disk)".
+    // +0x3C (4 bytes): u32 quadCount embedded — redundant copy; authoritative copy is the stream word. Ignored on read.
+    // spec: Docs/RE/formats/sod.md §SolidRecord — "+0x3C (+60) u32 quadCount embedded: re-read from stream".
+    // +0x40 (4 bytes): quadArrayPtr — on-disk garbage, overwritten at load. Ignored on read.
+    // spec: Docs/RE/formats/sod.md §SolidRecord — "+0x40 (+64) u32 quadArrayPtr on-disk garbage".
+    // +0x44..+0x6B (40 bytes): zero on disk, runtime use. Ignored on read.
 
-    // QuadRecord field offsets.
-    // spec: Docs/RE/formats/terrain.md §11.3.
-    private const int QuadX0Offset = 0; // f32 VERIFIED
-    private const int QuadZ0Offset = 4; // f32 VERIFIED
-    private const int QuadX1Offset = 8; // f32 VERIFIED
-    private const int QuadZ1Offset = 12; // f32 VERIFIED
-    private const int QuadX2Offset = 16; // f32 VERIFIED
-    private const int QuadZ2Offset = 20; // f32 VERIFIED
-    private const int QuadX3Offset = 24; // f32 VERIFIED
-
-    private const int QuadZ3Offset = 28; // f32 VERIFIED
-
-    // Dead 2D edge-line cache — never read at runtime; allocated but ignored (VERIFIED NOT READ, 2026-06-14).
-    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
-    // spec: Docs/RE/formats/terrain.md §11.3 Correction 2026-06-14: NOT a plane equation. Re-labelled from plane0..3.
-    private const int QuadEdgeSlopeOffset = 32; // f32 dead authoring residue
-    private const int QuadEdgePad0Offset = 36; // f32 always 0.0
-    private const int QuadEdgeInterceptOffset = 40; // f32 dead authoring residue
-    private const int QuadEdgePad1Offset = 44; // f32 always 0.0
+    // WallSegment (QuadRecord) field offsets.
+    // spec: Docs/RE/formats/sod.md §QuadRecord.
+    private const int SegAabbMinXOffset = 0x00; // f32 aabbMinX — parser + sample
+    private const int SegAabbMinZOffset = 0x04; // f32 aabbMinZ — parser + sample
+    private const int SegAabbMaxXOffset = 0x08; // f32 aabbMaxX — parser + sample
+    private const int SegAabbMaxZOffset = 0x0C; // f32 aabbMaxZ — parser + sample
+    private const int SegP0XOffset = 0x10; // f32 p0x endpoint-0 X — sample
+    private const int SegP0ZOffset = 0x14; // f32 p0z endpoint-0 Z — sample
+    private const int SegP1XOffset = 0x18; // f32 p1x endpoint-1 X — sample
+    private const int SegP1ZOffset = 0x1C; // f32 p1z endpoint-1 Z — sample
+    private const int SegSlopeOffset = 0x20; // f32 slope (m) in z=m·x+b — parser + sample
+    private const int SegXConstOffset = 0x24; // f32 xConst (vertical-axis special case) — parser + sample
+    private const int SegInterceptOffset = 0x28; // f32 intercept (b) in z=m·x+b — parser + sample
+    private const int SegAxisFlagOffset = 0x2C; // u32 axisFlag (==1 means vertical / axis-aligned) — parser + sample
 
     /// <summary>
     ///     Parses the raw bytes of a <c>.sod</c> file into a <see cref="SodBlob" />.
     /// </summary>
     /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Decoded SodBlob with typed AABB and quad data.</returns>
+    /// <returns>Decoded <see cref="SodBlob" /> with wall-segment collision data.</returns>
     /// <exception cref="InvalidDataException">
     ///     Thrown on truncation or buffer overrun.
     /// </exception>
@@ -91,114 +90,130 @@ public static class SodBlobParser
         var offset = 0;
 
         // solidCount u32le @ offset 0.
-        // spec: Docs/RE/formats/terrain.md §11.1 — "solidCount u32le @ offset 0: CONFIRMED".
+        // spec: Docs/RE/formats/sod.md §Container structure — "u32 solidCount".
         if (offset + 4 > span.Length)
             throw new InvalidDataException(
                 ".sod parse error: buffer too short for solidCount field. " +
-                "spec: Docs/RE/formats/terrain.md §11.1.");
+                "spec: Docs/RE/formats/sod.md §Container structure.");
 
         var solidCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
         offset += 4;
 
-        // Read solidCount × 108-byte solid records.
-        // spec: Docs/RE/formats/terrain.md §11.1 — "SolidRecord[solidCount] — fixed stride 108 bytes each": CONFIRMED.
+        // Read the whole solid array in one pass — solidCount × 108-byte SolidRecord[].
+        // spec: Docs/RE/formats/sod.md §Container structure —
+        //   "108 × N SolidRecord[N] read in a single pass; quadCount arrays follow after".
         var solidBlockBytes = (long)solidCount * SolidRecordStride;
         if (offset + solidBlockBytes > span.Length)
             throw new InvalidDataException(
                 $".sod parse error: SolidRecord array truncated — solidCount={solidCount} requires " +
                 $"{solidBlockBytes} bytes at offset {offset}, but buffer length is {span.Length}. " +
-                "spec: Docs/RE/formats/terrain.md §11.1.");
+                "spec: Docs/RE/formats/sod.md §Container structure.");
 
-        // Collect raw solid records and decode AABB from each.
         var rawSolids = new ReadOnlyMemory<byte>[(int)solidCount];
-        // Decoded AABB data extracted now; quads added below.
-        var solidAabbXMin = new float[(int)solidCount];
-        var solidAabbZMin = new float[(int)solidCount];
-        var solidAabbXMax = new float[(int)solidCount];
-        var solidAabbZMax = new float[(int)solidCount];
+        var solidAabbMinX = new float[(int)solidCount];
+        var solidAabbMinZ = new float[(int)solidCount];
+        var solidAabbMaxX = new float[(int)solidCount];
+        var solidAabbMaxZ = new float[(int)solidCount];
 
         for (var s = 0; s < (int)solidCount; s++)
         {
-            rawSolids[s] = backing.Slice(offset, SolidRecordStride);
+            // Retain a zero-copy slice of the raw record.
+            rawSolids[s] = backing.IsEmpty
+                ? (ReadOnlyMemory<byte>)span.Slice(offset, SolidRecordStride).ToArray()
+                : backing.Slice(offset, SolidRecordStride);
             var solidSpan = span.Slice(offset, SolidRecordStride);
 
-            // AABB +0..+15 (VERIFIED).
-            // spec: Docs/RE/formats/terrain.md §11.2 — aabb_xmin f32 @ +000: VERIFIED.
-            solidAabbXMin[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[..]);
-            solidAabbZMin[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbZMinOffset..]);
-            solidAabbXMax[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbXMaxOffset..]);
-            solidAabbZMax[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbZMaxOffset..]);
+            // AABB +0x00..+0x0F — four f32 world-space XZ bounds.
+            // spec: Docs/RE/formats/sod.md §SolidRecord — aabbMinX/Z f32 @ +0x00/+0x04 (parser + sample).
+            solidAabbMinX[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[..]);
+            solidAabbMinZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMinZOffset..]);
+            solidAabbMaxX[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMaxXOffset..]);
+            solidAabbMaxZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMaxZOffset..]);
+
+            // +0x10..+0x3B: zero on disk, runtime-only — ignored.
+            // spec: Docs/RE/formats/sod.md §SolidRecord — "+0x10 44 (zero on disk)".
+            // +0x3C: embedded quadCount (redundant) — not read here; authoritative stream word read below.
+            // spec: Docs/RE/formats/sod.md §SolidRecord — "+0x3C (+60) u32 quadCount: Also re-read from stream".
+            // +0x40: quadArrayPtr (on-disk garbage) — ignored.
+            // +0x44..+0x6B: runtime use, zero on disk — ignored.
 
             offset += SolidRecordStride;
         }
 
-        // Read per-solid quad lists.
-        // spec: Docs/RE/formats/terrain.md §11.1 — "per-solid quadCount u32le + QuadRecord[quadCount]".
-        var triCounts = new uint[(int)solidCount];
-        var rawTris = new ReadOnlyMemory<byte>[(int)solidCount];
-        var decodedQuadsPerSolid = new CollisionQuad[(int)solidCount][];
+        // Per-solid wall-segment blocks follow the entire solid array.
+        // spec: Docs/RE/formats/sod.md §Container structure —
+        //   "for i in 0..solidCount-1: u32 quadCount + QuadRecord[quadCount]".
+        var segmentCounts = new uint[(int)solidCount];
+        var rawSegmentData = new ReadOnlyMemory<byte>[(int)solidCount];
+        var decodedSegmentsPerSolid = new WallSegment[(int)solidCount][];
 
         for (var s = 0; s < (int)solidCount; s++)
         {
-            // quadCount u32le (stream copy — NOT the embedded copy in the SolidRecord).
-            // spec: Docs/RE/formats/terrain.md §11.1 — "quadCount u32le appears AFTER the flat SolidRecord array": CONFIRMED.
+            // quadCount u32le — stream copy (authoritative; embedded SolidRecord copy at +0x3C is redundant).
+            // spec: Docs/RE/formats/sod.md §Container structure — "u32 quadCount" preceding each solid's segment array.
             if (offset + 4 > span.Length)
                 throw new InvalidDataException(
                     $".sod parse error: quadCount for solid[{s}] truncated at offset {offset}. " +
-                    "spec: Docs/RE/formats/terrain.md §11.1.");
+                    "spec: Docs/RE/formats/sod.md §Container structure.");
 
-            var quadCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+            var segCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
             offset += 4;
-            triCounts[s] = quadCount;
+            segmentCounts[s] = segCount;
 
-            var quadBytes = (long)quadCount * QuadRecordStride;
-            if (offset + quadBytes > span.Length)
+            var segBlockBytes = (long)segCount * WallSegmentStride;
+            if (offset + segBlockBytes > span.Length)
                 throw new InvalidDataException(
-                    $".sod parse error: QuadRecord data for solid[{s}] truncated — " +
-                    $"quadCount={quadCount} requires {quadBytes} bytes at offset {offset}, " +
+                    $".sod parse error: WallSegment data for solid[{s}] truncated — " +
+                    $"quadCount={segCount} requires {segBlockBytes} bytes at offset {offset}, " +
                     $"but buffer length is {span.Length}. " +
-                    "spec: Docs/RE/formats/terrain.md §11.3.");
+                    "spec: Docs/RE/formats/sod.md §QuadRecord.");
 
-            rawTris[s] = backing.Slice(offset, (int)quadBytes);
+            rawSegmentData[s] = backing.IsEmpty
+                ? (ReadOnlyMemory<byte>)span.Slice(offset, (int)segBlockBytes).ToArray()
+                : backing.Slice(offset, (int)segBlockBytes);
 
-            // Decode each QuadRecord.
-            // spec: Docs/RE/formats/terrain.md §11.3 QuadRecord (48 bytes): four XZ corners VERIFIED.
-            // Trailing scalars +032..+047 are dead 2D edge-line cache — VERIFIED NOT READ at runtime (2026-06-14 correction).
-            // spec: Docs/RE/formats/terrain.md §11.3 — trailing scalars re-labelled edge_slope/edge_pad0/edge_intercept/edge_pad1: VERIFIED NOT READ.
-            var quads = new CollisionQuad[(int)quadCount];
-            for (var q = 0; q < (int)quadCount; q++)
+            // Decode each WallSegment (QuadRecord) — slope-intercept line z = slope·x + intercept.
+            // spec: Docs/RE/formats/sod.md §QuadRecord — BINARY-WON (CYCLE 7, anchor 263bd994):
+            //   each record is a wall SEGMENT; collision is slope-intercept line intersection + AABB clamping.
+            var segs = new WallSegment[(int)segCount];
+            for (var q = 0; q < (int)segCount; q++)
             {
-                var qOff = offset + q * QuadRecordStride;
-                var qSpan = span.Slice(qOff, QuadRecordStride);
+                var qOff = offset + q * WallSegmentStride;
+                var qSpan = span.Slice(qOff, WallSegmentStride);
 
-                // Corners +0..+31 (VERIFIED).
-                // spec: Docs/RE/formats/terrain.md §11.3 — x0 f32 @ +000: VERIFIED.
-                quads[q] = new CollisionQuad
+                segs[q] = new WallSegment
                 {
-                    X0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[..]),
-                    Z0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ0Offset..]),
-                    X1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadX1Offset..]),
-                    Z1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ1Offset..]),
-                    X2 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadX2Offset..]),
-                    Z2 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ2Offset..]),
-                    X3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadX3Offset..]),
-                    Z3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadZ3Offset..]),
-                    // Dead 2D edge-line cache +032..+047 — read to fill the stride, but these values
-                    // are never consumed by any runtime collision or quadtree routine.
-                    // The runtime rebuilds containment from the four explicit corners (ray-parity PIP).
-                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_slope f32 @ +032: VERIFIED NOT READ.
-                    EdgeSlope = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgeSlopeOffset..]),
-                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_pad0 f32 @ +036: VERIFIED (always 0).
-                    EdgePad0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgePad0Offset..]),
-                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_intercept f32 @ +040: VERIFIED NOT READ.
-                    EdgeIntercept = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgeInterceptOffset..]),
-                    // spec: Docs/RE/formats/terrain.md §11.3 — edge_pad1 f32 @ +044: VERIFIED (always 0).
-                    EdgePad1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[QuadEdgePad1Offset..])
+                    // 2D segment AABB +0x00..+0x0F.
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — aabbMinX f32 @ +0x00 (parser + sample).
+                    AabbMinX = BinaryPrimitives.ReadSingleLittleEndian(qSpan[..]),
+                    AabbMinZ = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMinZOffset..]),
+                    AabbMaxX = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMaxXOffset..]),
+                    AabbMaxZ = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMaxZOffset..]),
+
+                    // Segment endpoints p0/p1 +0x10..+0x1F — bound the segment within its AABB.
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — "+0x10 f32 p0x, +0x14 f32 p0z" (sample).
+                    P0X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP0XOffset..]),
+                    P0Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP0ZOffset..]),
+                    P1X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP1XOffset..]),
+                    P1Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP1ZOffset..]),
+
+                    // Slope-intercept line equation z = slope·x + intercept.
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — "+0x20 f32 slope (m)" (parser + sample).
+                    Slope = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegSlopeOffset..]),
+                    // xConst: X value when the wall is vertical (axisFlag==1); x = xConst along Z.
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — "+0x24 f32 xConst" (parser + sample).
+                    XConst = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegXConstOffset..]),
+                    // Intercept b in z = slope·x + b.
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — "+0x28 f32 intercept (b)" (parser + sample).
+                    Intercept = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegInterceptOffset..]),
+                    // axisFlag u32: ==1 means vertical/axis-aligned wall (use xConst, not slope/intercept).
+                    // spec: Docs/RE/formats/sod.md §QuadRecord — "+0x2C u32 axisFlag" (parser + sample).
+                    AxisFlag = BinaryPrimitives.ReadUInt32LittleEndian(qSpan[SegAxisFlagOffset..])
                 };
             }
 
-            decodedQuadsPerSolid[s] = quads;
-            offset += (int)quadBytes;
+            decodedSegmentsPerSolid[s] = segs;
+            offset += (int)segBlockBytes;
         }
 
         // Assemble typed SolidRecord array.
@@ -206,11 +221,11 @@ public static class SodBlobParser
         for (var s = 0; s < (int)solidCount; s++)
             solids[s] = new SolidRecord
             {
-                AabbXMin = solidAabbXMin[s],
-                AabbZMin = solidAabbZMin[s],
-                AabbXMax = solidAabbXMax[s],
-                AabbZMax = solidAabbZMax[s],
-                Quads = decodedQuadsPerSolid[s],
+                AabbMinX = solidAabbMinX[s],
+                AabbMinZ = solidAabbMinZ[s],
+                AabbMaxX = solidAabbMaxX[s],
+                AabbMaxZ = solidAabbMaxZ[s],
+                Segments = decodedSegmentsPerSolid[s],
                 RawRecord = rawSolids[s]
             };
 
@@ -219,8 +234,8 @@ public static class SodBlobParser
             SolidCount = solidCount,
             Solids = solids,
             RawSolidRecords = rawSolids,
-            TriangleCounts = triCounts,
-            RawTriangleData = rawTris
+            TriangleCounts = segmentCounts,
+            RawTriangleData = rawSegmentData
         };
     }
 }

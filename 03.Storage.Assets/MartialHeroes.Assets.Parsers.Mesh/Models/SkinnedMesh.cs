@@ -21,11 +21,46 @@ public readonly record struct SknCorner(
 ///     One skin-weight influence record from a <c>.skn</c> skinned mesh.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/mesh.md §Weight record — 12 bytes, little-endian
+///     spec: Docs/RE/formats/skn.md §Influence (weight) section — 12-byte record: CONFIRMED.
+///     spec: Docs/RE/formats/mesh.md §Weight record — 12 bytes, little-endian: CONFIRMED.
+///     <para>
+///         <b>+0x00</b> <c>VertexIndex</c> u32 — plain vertex index (binary-won: NOT a position key / float-bit compare).
+///         spec: Docs/RE/formats/skn.md §Influence record +0x00 — "plain u32 vertex index": CONFIRMED (sample-verified).
+///     </para>
+///     <para>
+///         <b>+0x04</b> <c>BoneIndex</c> u32 — on-disk field name is <c>bone_id</c> in the spec.
+///         Despite the C# member name "BoneIndex", this value is a <b>bone ID</b>, not a dense
+///         array index: it is resolved base-relative as <c>bone_array[BoneIndex − base_id]</c>
+///         against the bound skeleton. For the recovered player skeletons <c>base_id == 0</c>,
+///         so ID equals array index — but parsers must not assume <c>base_id == 0</c> in general.
+///         spec: Docs/RE/formats/skn.md §Influence record +0x04 — "bone_id, resolved base-relative": CONFIRMED.
+///         spec: Docs/RE/formats/mesh.md §Bone addressing — "a bone ID resolved by id − base_id, no indirection table":
+///         CONFIRMED.
+///     </para>
+///     <para>
+///         <b>+0x08</b> <c>Weight</c> f32 — records below 0.01 are dropped; survivors normalized per-vertex to 1.0.
+///         spec: Docs/RE/formats/skn.md §Per-vertex influence packing — "drop threshold 0.01, normalize": CONFIRMED.
+///     </para>
 /// </remarks>
 public readonly record struct SknWeight(
+    /// <summary>
+    ///     Zero-based index of the vertex this influence applies to.
+    ///     A plain <c>u32</c> vertex index (binary-won: not a position key / float-bit compare).
+    ///     spec: Docs/RE/formats/skn.md §Influence record +0x00 — "plain u32 vertex index": CONFIRMED (sample-verified).
+    /// </summary>
     uint VertexIndex,
+    /// <summary>
+    ///     Bone identifier (on-disk name: <c>bone_id</c>). Resolved base-relative against the bound skeleton:
+    ///     <c>bone_array[BoneIndex − base_id]</c>. NOT a dense 0-based array subscript.
+    ///     spec: Docs/RE/formats/skn.md §Influence record +0x04 — "bone_id, resolved base-relative": CONFIRMED.
+    ///     spec: Docs/RE/formats/mesh.md §Bone addressing — "bone_index is a bone ID resolved by id − base_id, no indirection table": CONFIRMED.
+    /// </summary>
     uint BoneIndex,
+    /// <summary>
+    ///     Per-influence blend weight. Records with <c>weight &lt; 0.01</c> are dropped by the
+    ///     character loader; survivors are normalised per-vertex to sum to 1.0.
+    ///     spec: Docs/RE/formats/skn.md §Per-vertex influence packing — "drop threshold 0.01, normalize": CONFIRMED.
+    /// </summary>
     float Weight);
 
 /// <summary>

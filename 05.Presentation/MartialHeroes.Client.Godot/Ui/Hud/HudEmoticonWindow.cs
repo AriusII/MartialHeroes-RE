@@ -367,9 +367,7 @@ public sealed partial class HudEmoticonWindow : Control
         var stub = new Label
         {
             Name = "EmoteStub",
-            Text = "// TODO(format): emoticon.do records (40-byte, VFS-pending).\n" +
-                   "// Graphical emotes: client-local (sound 862030103 + balloon slot 327). No packet.\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.19.5/§8.19.6 CODE-CONFIRMED.",
+            Text = string.Empty,
             Position = new Vector2(5f, 5f),
             Size = new Vector2(308f, GridPageH - 10f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,

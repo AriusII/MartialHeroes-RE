@@ -5,8 +5,8 @@ using MartialHeroes.Shared.Kernel.Enums;
 namespace MartialHeroes.Client.Application.Contracts.Hud;
 
 // =====================================================================================================
-// HUD event DTOs — immutable snapshots the World-Scene HUD binds to. Fed today by demo/stub publishers
-// and tomorrow by the live packet handlers noted per type. Each carries only value types / already-
+// HUD event DTOs — immutable snapshots the World-Scene HUD binds to, fed by the live packet handlers
+// noted per type. Each carries only value types / already-
 // decoded managed strings so the render-thread consumer can never observe torn Domain state.
 // =====================================================================================================
 
@@ -17,7 +17,7 @@ namespace MartialHeroes.Client.Application.Contracts.Hud;
 ///     The chat log is a single append sink fed by both local echo and the inbound 5/7 broadcast handler;
 ///     every line is a <c>(text, channel, colour)</c> triple keyed off the integer channel code that
 ///     selects the C2S route, the log colour, and the overhead-bubble slot. The CP949 text is decoded at
-///     the producer boundary (the future 5/7 handler / a stub) into a managed string — never carried as
+///     the producer boundary (the 5/7 handler) into a managed string — never carried as
 ///     raw bytes across this seam, matching <see cref="MartialHeroes.Client.Application.Events.ChatBroadcastEvent" />.
 ///     spec: Docs/RE/specs/chat.md §3 (channel → colour table), §6.2 (the 36-byte line record:
 ///     text + ARGB colour + channel), §6.3 (the append sink's (text, channel, colour) contract).

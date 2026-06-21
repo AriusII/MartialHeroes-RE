@@ -68,6 +68,7 @@
     <Folder Name="/Docs/"/>
     <Folder Name="/Tools/">
         <Project Path="Tools/MartialHeroes.Tools.AssetChainTrace/MartialHeroes.Tools.AssetChainTrace.csproj"/>
+        <Project Path="Tools/MartialHeroes.Tools.AssetProbe/MartialHeroes.Tools.AssetProbe.csproj"/>
         <Project Path="Tools/MartialHeroes.Tools.PacketInspect/MartialHeroes.Tools.PacketInspect.csproj"/>
         <Project Path="Tools/MartialHeroes.Tools.VfsExplorer/MartialHeroes.Tools.VfsExplorer.csproj"/>
     </Folder>

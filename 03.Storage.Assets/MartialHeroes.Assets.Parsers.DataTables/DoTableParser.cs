@@ -24,12 +24,12 @@ public static class DoTableParser
     private const int TextCommandStride = 52;
 
     // =========================================================================
-    // emoticon.do — Emoticon sprite definitions (stride: 40 bytes)
+    // emoticon.do — Emoticon picker-panel sprite/grid definitions (stride: 40 bytes)
     // =========================================================================
 
-    // Stride: 40 bytes. CONFIRMED (21 records).
-    // spec: Docs/RE/formats/config_tables.md §3.2 emoticon.do — "stride: 40 bytes": CONFIRMED.
-    private const int EmoticonStride = 40;
+    // Stride: 40 bytes. CONFIRMED (840 bytes = 21 records × 40). EOF-driven (no count prefix).
+    // spec: Docs/RE/formats/ui_manifests.md §2.9 emoticon.do — "stride: 40 bytes (0x28); 21 records; EOF-driven": CONFIRMED.
+    private const int EmoticonStride = 40; // 0x28
 
     // =========================================================================
     // msginfo.do — In-game popup messages (stride: 128 bytes)
@@ -108,16 +108,27 @@ public static class DoTableParser
     }
 
     /// <summary>
-    ///     Parses <c>data/script/emoticon.do</c> — emoticon sprite-sheet definitions.
-    ///     Record count = file_size / 40.
+    ///     Parses <c>data/script/emoticon.do</c> — emoticon picker-panel sprite/grid definitions.
+    ///     Record count = file_size / 40 (EOF-driven; no count prefix).
     /// </summary>
     /// <remarks>
-    ///     spec: Docs/RE/formats/config_tables.md §3.2: CONFIRMED (all 21 records).
+    ///     spec: Docs/RE/formats/ui_manifests.md §2.9: SAMPLE-VERIFIED + CODE-CONFIRMED (all 21 records).
+    ///     <para>
+    ///         Two in-memory ordered maps are built by the loader over the same node set:
+    ///         Map A keyed by <c>id</c> (+0x00), Map B keyed by <c>index</c> (+0x08).
+    ///         spec: Docs/RE/formats/ui_manifests.md §2.9.2 — "Map A by id (+0x00); Map B by index (+0x08)".
+    ///     </para>
+    ///     <para>
+    ///         LOAD-BEARING caveat: <c>pageId</c> (+0x04) is a SINGLE BYTE (low byte only).
+    ///         The three bytes at +0x05..+0x07 are uninitialized authoring-tool fill (0xCC).
+    ///         Reading +0x04 as a u32 yields a nonsense value (e.g. 0xCCCCCC00); always read it as u8.
+    ///         spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x04 width caveat (load-bearing): read pageId as u8 ONLY".
+    ///     </para>
     /// </remarks>
     public static EmoticonRecord[] ParseEmoticonDo(ReadOnlyMemory<byte> data)
     {
         var span = data.Span;
-        EnsureStride(span, EmoticonStride, "emoticon.do", "Docs/RE/formats/config_tables.md §3.2");
+        EnsureStride(span, EmoticonStride, "emoticon.do", "Docs/RE/formats/ui_manifests.md §2.9");
         var count = span.Length / EmoticonStride;
         var results = new EmoticonRecord[count];
 
@@ -126,23 +137,51 @@ public static class DoTableParser
             var offset = i * EmoticonStride;
             var rec = span.Slice(offset, EmoticonStride);
 
-            // Emote ID u32 @ +0. CONFIRMED. Sequential 1..21.
-            // spec: Docs/RE/formats/config_tables.md §3.2 — "+0 u32 Emote ID: CONFIRMED".
+            // id u32 @ +0x00. Primary map key (Map A). Sequential 1..21. CODE-CONFIRMED + SAMPLE-VERIFIED.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x00 u32 id (Map A key)": CODE+SAMPLE.
             var emoteId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
 
-            // Category flag u8 @ +4. CONFIRMED (value pattern); semantic UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §3.2 — "+4 u8 Category flag: CONFIRMED (pattern)".
-            var categoryFlag = rec[4];
+            // pageId u8 @ +0x04 — LOW BYTE ONLY. Values: 0 (records 0–17), 1 (records 18–20); valid range 0..2.
+            // +0x05..+0x07 are authoring-tool 0xCC fill — MUST NOT be read as part of pageId.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x04 u8 pageId (low byte only); +0x05..+0x07 0xCC padding": CODE+SAMPLE.
+            var categoryFlag = rec[4]; // pageId — read as single byte
 
-            // Alignment pad 3 bytes @ +5.
+            // +0x05..+0x07: 3-byte 0xCC authoring pad — consumed implicitly (skip to +0x08).
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x05 3 — padding (0xCC fill)".
 
-            // Secondary key u32 @ +8. CONFIRMED. Sequential 0..20.
-            // spec: Docs/RE/formats/config_tables.md §3.2 — "+8 u32 Secondary key: CONFIRMED".
+            // index u32 @ +0x08. Secondary map key (Map B) + click-match key. Sequential 0..20. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x08 u32 index (Map B key; action id)": CODE+SAMPLE.
             var secondaryKey = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]);
 
-            // Action link field u32 @ +12. CONFIRMED (value pattern); name UNVERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §3.2 — "+12 u32 Action link: CONFIRMED (pattern)".
+            // emoteCode u32 @ +0x0C. Chat/output token dispatched to the main window on click.
+            // Also the reverse-lookup key (Map A scan for emoteCode == incoming value).
+            // Observed: 0 on page-0 records, then 10/11/12 on the last records. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x0C u32 emoteCode": CODE+SAMPLE.
             var actionLink = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]);
+
+            // dstX i32 @ +0x10. Picker-panel destination X of all four widgets. Observed: 10, 160. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x10 i32 dstX": CODE+SAMPLE.
+            var dstX = BinaryPrimitives.ReadInt32LittleEndian(rec[16..]);
+
+            // dstY i32 @ +0x14. Picker-panel destination Y base. Observed: 20, 75, 130, 185, 240, 295, 350, 405. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x14 i32 dstY": CODE+SAMPLE.
+            var dstY = BinaryPrimitives.ReadInt32LittleEndian(rec[20..]);
+
+            // glyphSrcX i32 @ +0x18. Atlas src X of the 23×23 emoticon glyph on emoticon.dds. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x18 i32 glyphSrcX": CODE+SAMPLE.
+            var glyphSrcX = BinaryPrimitives.ReadInt32LittleEndian(rec[24..]);
+
+            // glyphSrcY i32 @ +0x1C. Atlas src Y of the 23×23 emoticon glyph. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x1C i32 glyphSrcY": CODE+SAMPLE.
+            var glyphSrcY = BinaryPrimitives.ReadInt32LittleEndian(rec[28..]);
+
+            // labelSrcX i32 @ +0x20. Atlas src X of the 87×13 name-strip sprite. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x20 i32 labelSrcX": CODE+SAMPLE.
+            var labelSrcX = BinaryPrimitives.ReadInt32LittleEndian(rec[32..]);
+
+            // labelSrcY i32 @ +0x24. Atlas src Y of the 87×13 name-strip sprite. CODE+SAMPLE.
+            // spec: Docs/RE/formats/ui_manifests.md §2.9.3 — "+0x24 i32 labelSrcY": CODE+SAMPLE.
+            var labelSrcY = BinaryPrimitives.ReadInt32LittleEndian(rec[36..]);
 
             results[i] = new EmoticonRecord
             {
@@ -150,6 +189,12 @@ public static class DoTableParser
                 CategoryFlag = categoryFlag,
                 SecondaryKey = secondaryKey,
                 ActionLink = actionLink,
+                DstX = dstX,
+                DstY = dstY,
+                GlyphSrcX = glyphSrcX,
+                GlyphSrcY = glyphSrcY,
+                LabelSrcX = labelSrcX,
+                LabelSrcY = labelSrcY,
                 Raw = data.Slice(offset, EmoticonStride)
             };
         }

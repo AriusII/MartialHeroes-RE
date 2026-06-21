@@ -87,15 +87,28 @@ public static class SknParser
         for (var f = 0; f < (int)faceCount; f++)
         for (var c = 0; c < 3; c++)
         {
-            // Corner sub-record: vertIdx u32 + uv_u f32 + uv_v f32 = 12 bytes.
+            // Corner sub-record: vertex_index u32 + uv_u f32 + uv_v f32 = 12 bytes.
+            // spec: Docs/RE/formats/skn.md §Face section — "3 corners × {u32 vertex_index, f32 uv_u, f32 uv_v}": CONFIRMED.
             // spec: Docs/RE/formats/mesh.md §Face record — corner sub-record @ each 12 bytes: CONFIRMED.
             // Bounds already checked above; read without per-element string allocation.
+
+            // +0: vertex_index u32 — plain u32 index (binary-won: face0 sample = 2,3,4; small integers, NOT position floats).
+            // spec: Docs/RE/formats/skn.md §Face section corner — "vertex_index: plain u32 index": CONFIRMED (sample-verified).
             var vIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
             var uvU = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
-            // V-flip: engine applies 1.0 - uv_v when building the render vertex.
-            // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.
+            // V-flip: 1.0 − uv_v applied here so the output UV uses a bottom-left origin.
+            // spec: Docs/RE/formats/skn.md §Face section corner — uv_v: "the engine applies 1.0 − uv_v
+            //   when building the render vertex — the v-flip lives in the parser's render-vertex
+            //   assembly, not in the bytes". CONFIRMED.
+            // Architecture note: the original "render-vertex assembly" (combined face/vertex expand)
+            // is the role of Assets.Mapping (GltfConverter.ExpandSkinnedVertices). However the V-flip
+            // is applied here in the parser so that the SknCorner model carries bottom-left UVs that
+            // the Mapping consumer (GltfConverter) can pass through without a further flip.
+            // This is a deliberate cross-layer convention: both SknParser and GltfConverter must
+            // agree on which layer applies the flip. The GltfConverter currently documents
+            // "V already bottom-left from parser" (see GltfConverter.cs §UVs comment).
             var uvV = 1.0f - BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
 
@@ -103,6 +116,7 @@ public static class SknParser
         }
 
         // --- Vertex table ---
+        // spec: Docs/RE/formats/skn.md §Vertex section — Nvtx u32 LE + Nvtx × 24-byte records: CONFIRMED.
         // spec: Docs/RE/formats/mesh.md §Vertex table — vertex_count u32 LE: CONFIRMED.
         var vertexCount = ReadU32LE(data, ref offset, "vertex_count");
 
@@ -138,7 +152,8 @@ public static class SknParser
             normals[v] = new Vec3(normX, normY, normZ);
         }
 
-        // --- Weight / skin table ---
+        // --- Influence (weight) section ---
+        // spec: Docs/RE/formats/skn.md §Influence (weight) section — Nweight u32 LE + Nweight × 12-byte records: CONFIRMED.
         // spec: Docs/RE/formats/mesh.md §Weight / skin table — weight_count u32 LE: CONFIRMED.
         var weightCount = ReadU32LE(data, ref offset, "weight_count");
 
@@ -151,15 +166,27 @@ public static class SknParser
         var weights = new SknWeight[weightCount];
         for (var w = 0; w < (int)weightCount; w++)
         {
-            // spec: Docs/RE/formats/mesh.md §Weight record — vertIdx u32 + boneIdx u32 + weight f32 = 12 bytes: CONFIRMED.
+            // Influence record: vertex_index u32 + bone_id u32 + weight f32 = 12 bytes.
+            // spec: Docs/RE/formats/skn.md §Influence record — 12 bytes: CONFIRMED (sample-verified).
+            // spec: Docs/RE/formats/mesh.md §Weight record — 12 bytes, little-endian: CONFIRMED.
             // Bounds already checked above; read without per-element string allocation.
+
+            // +0x00: vertex_index u32 — plain vertex index (binary-won: NOT a position key / float-bit compare).
+            // spec: Docs/RE/formats/skn.md §Influence record +0x00 — "plain u32 vertex index": CONFIRMED (sample-verified).
             var wVertIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
-            var wBoneIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
+
+            // +0x04: bone_id u32 — bone ID resolved base-relative (id − base_id) against the bound skeleton.
+            // NOT a dense array subscript. spec: Docs/RE/formats/skn.md §Influence record +0x04 — "bone_id": CONFIRMED.
+            // spec: Docs/RE/formats/mesh.md §Weight record — "bone_index is a bone ID resolved by id − base_id": CONFIRMED.
+            var wBoneId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
+
+            // +0x08: weight f32 — the character loader drops records below 0.01 and normalizes survivors to 1.0.
+            // spec: Docs/RE/formats/skn.md §Per-vertex influence packing — "drop threshold 0.01, normalize": CONFIRMED.
             var wVal = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
-            weights[w] = new SknWeight(wVertIdx, wBoneIdx, wVal);
+            weights[w] = new SknWeight(wVertIdx, wBoneId, wVal);
         }
 
         return new SkinnedMesh

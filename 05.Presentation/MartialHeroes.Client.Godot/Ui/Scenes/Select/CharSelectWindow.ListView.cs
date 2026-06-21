@@ -121,6 +121,13 @@ public sealed partial class CharSelectWindow
         _createForm.Visible = false;
         AddChild(_createForm);
 
+        // Delete-confirm modal (initially hidden) — raised by Delete (action 5) on an occupied slot.
+        // Drawn on top of everything; added last so it paints over the 3D scene + chrome + create form.
+        // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
+        _deleteConfirmModal = BuildDeleteConfirmModal();
+        _deleteConfirmModal.Visible = false;
+        AddChild(_deleteConfirmModal);
+
         RefreshInfo();
 
         GD.Print($"[CharSelectWindow] built; atlas={Atlas is not null}; " +
@@ -135,11 +142,37 @@ public sealed partial class CharSelectWindow
     private void PushSlotDescriptors()
     {
         if (_scene3D is null) return;
-        var descs = new (bool IsOccupied, uint SkinClassId)[MaxSlots];
+
+        // WAVE 3: push the widened §3.2 SlotDescriptor (class +0x34, variant +0x2C, faceA +0x2E,
+        // equip +0x58) so the 3D preview resolves appearance/skeleton faithfully (§3.3.7 / §3.5.2).
+        //
+        // The layer-04 CharacterListSlot event surface DECODES the real descriptor fields from the
+        // 3/1 roster: InternalClass (+0x34, {1..4} = the skeleton driver), AppearanceVariant (+0x2C),
+        // FaceA (+0x2E), and the equip gid table (+0x58) — distinct from server_class (+0x74). We plumb
+        // those through VERBATIM, never offsetting InternalClass to 0 (the SkinClassId=0 = no-skeleton
+        // bug). FALLBACK: when InternalClass is 0 (e.g. a live roster record that predates the +0x34
+        // decode), we use ServerClass as the best class-like value so the preview still resolves a valid
+        // {1..4} class instead of skipping the slot. spec:
+        // Docs/RE/specs/skinning.md §3.5.2; Docs/RE/structs/actor.md (internal_class +0x34 vs server_class
+        // +0x74); Docs/RE/packets/3-1_character_list.yaml.
+        var descs = new CharSelectScene3D.SlotDescriptor[MaxSlots];
         for (var i = 0; i < MaxSlots; i++)
         {
             var ls = _slots[i];
-            descs[i] = (!ls.IsEmpty, !ls.IsEmpty ? ls.ServerClass : 0u);
+            if (ls.IsEmpty)
+            {
+                descs[i] = default;
+                continue;
+            }
+
+            // Prefer the real internal class (+0x34); fall back to ServerClass only when it is unsurfaced (0).
+            var internalClass = ls.InternalClass != 0 ? ls.InternalClass : ls.ServerClass;
+            descs[i] = new CharSelectScene3D.SlotDescriptor(
+                true,
+                internalClass, // +0x34 verbatim (ServerClass fallback when +0x34 is 0)
+                ls.AppearanceVariant, // +0x2C
+                ls.FaceA, // +0x2E
+                ls.EquipGids.IsDefaultOrEmpty ? null : ls.EquipGids.ToArray()); // +0x58 visible-gear gids
         }
 
         _scene3D.SlotDescriptors = descs;

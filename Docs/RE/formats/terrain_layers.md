@@ -10,10 +10,10 @@
 
 | Attribute        | Value |
 |------------------|-------|
-| `verification`   | `mixed` — see per-format rows. This pass re-confirmed only the **routing/identification** layer (which decoder each extension reaches) two-witness; the per-format byte tables (FX VF_36/44/32 strides, group headers, `.up`/`.exd` 40-byte triangle record, light/wind/point_light layouts) were **not** re-dumped this pass and hold at their committed tiers. |
-| `ida_reverified` | `2026-06-16` |
+| `verification`   | `mixed` — see per-format rows. The **FX `.fx1`–`.fx7` group-array on-disk format is now CODE-CONFIRMED** from the seven file decoders (per-channel header width, vc/ic offsets, vertex stride, 1-based `texture_index` at group `+0x00`; the `.fx4` "flat tile" framing is retired) — §1.4a/§1.4b, re-walked 2026-06-21. The **`.fx2` path was independently re-walked against a live single-group sample** (decoder read-sequence + AABB finalize 44-byte stride; exact size match, zero residual) — §1.4a/§1.6 unchanged. Newly recorded this pass: the **`.fxN` load path / `.map` linkages** (§1.1b), the **exact 1-based texture-register remap** (§1.4b), the **FX3/FX5 = water channel identity** (§1.4c, render path DBG-PENDING), and the **`.fx1.pre`–`.fx7.pre` editor sidecars** (§5.5, editor-only). The `.up`/`.exd` 40-byte triangle record and the light/wind/point_light layouts were **not** re-dumped this pass and hold at their committed tiers. |
+| `ida_reverified` | `2026-06-21` (FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
 | `ida_anchor`     | `263bd994` |
-| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser (witness 1) + VFS census file-count corroboration (witness 2) |
+| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser + per-channel FX decoders (witness 1) + VFS census file-count corroboration and a live single-group `.fx2` sample whose size matches the decoder formula exactly (witness 2) |
 | `conflicts`      | None. Routing re-confirmed with no drift: (1) **`.up` and `.exd` are ONE shared, distinct format** — `count(u32) + count × 40-byte triangle`, decoded by the same record decoder; `EXTRA_TERRAIN → .exd`, `UP_TERRAIN → .up`. This is structurally **distinct** from the FX group-array model of §1 — any reading that lumps `.exd`/`.up` in with the FX channels is REFUTED. (2) Each FX channel `.fx1`–`.fx7` has its **own** group decoder and its **own** per-channel texture register; the per-channel header width + vertex stride (§1.13) are mandatory. (3) Each FX channel's texture index is **1-based with a `< 1 \|\| > max` guard** (corroborated by per-channel `fx<N> texture index(%d) < 1 \|\| > max(%d)` client error strings) — confirming the shared building/terrain 1-based + clamp texture-index convention without needing the render path. |
 
 **Census this pass (witness 2, full VFS mount, routing-level corroboration):** `.up` 222 files,
@@ -27,7 +27,7 @@ ballpark as §1.13's table. File counts are corpus observations, not load-bearin
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `mixed` — see per-format status rows below |
-| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array; internal header fields sample-unverified) |
+| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header, and the `.fx{N}.pre` sidecar's existence + leading group-count word; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array; internal header fields sample-unverified). `.fx{N}.pre` body is **editor-only and not decoded** (§5.5). |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client, x86 LE) |
 | `confidence`      | Fields annotated CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields annotated UNVERIFIED are structurally inferred or parser-only, without sample cross-check. |
 
@@ -48,6 +48,7 @@ The formats are grouped as follows:
 | 3       | `.exd`     | Per terrain cell | Extra terrain collision triangles (supplementary) |
 | 4       | `.sod.pre` | Per terrain cell | Collision polygon vertex cache (editor sidecar) |
 | 5       | `.ted.post`| Per terrain cell | Full terrain snapshot (editor sidecar) |
+| 5.5     | `.fx1.pre`–`.fx7.pre` | Per terrain cell | FX layer editor sidecars (editor-only; not read at runtime) |
 | 6       | `light%d.bin` | Per map       | Directional and ambient light keyframe table |
 | 7       | `point_light%d.bin` | Per map | Point light array |
 | 8       | `wind%d.bin` | Per map        | Foliage-sway / wind keyframe array |
@@ -125,23 +126,27 @@ The group record begins with a fixed group header, then its own vertex block and
 group header carries a few leading words (read into the group struct but not all consumed for
 parsing), a `render_state` word, and the per-group vertex and index counts that size the two blocks.
 
+This table shows the **`.fx1` / `.fx2`** group header (20-byte header); the longer-header channels
+(`.fx3`–`.fx7`) place the same leading `texture_index` and the same `vertex_count` / `index_count`
+pair at the channel-specific offsets given in the per-channel table of §1.4a.
+
 | Group-rel offset | Size | Type | Field | Notes | Confidence |
 |-----------------:|-----:|------|-------|-------|------------|
-| +0x00 | 4 | u32 | `group_flags_0` | Read into the group struct; not consumed for layout. Observed near-constant (commonly 1). | UNVERIFIED (read-but-not-consumed) |
-| +0x04 | 4 | u32 | `group_flags_1` | Read into the group struct; not consumed for layout. Observed mostly 0. | UNVERIFIED (read-but-not-consumed) |
-| +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — not a constant. Documented at conceptual file offset `0x0C` for a single-group file (`0x04` file-header word + this group field at group-relative `+0x08`). | CONFIRMED-variable (two-witness) |
-| +0x0C | 4 | u32 | `vertex_count` | Sizes the group's vertex block (`vertex_count × vertex_stride`). | CONFIRMED |
-| +0x10 | 4 | u32 | `index_count` | Sizes the group's index block (`index_count × 2`, u16). | CONFIRMED |
+| +0x00 | 4 | u32 | `texture_index` | **1-based** index into this channel's own texture-id register (the `.map` `TEXTURES{ slot id }` list for this FX channel). The grid-build pass clamps it with `index < 1 || index > count` (substituting `1` on violation, with the per-channel error message), then remaps it to the registered texture id. *(CORRECTED 2026-06-21, binary-won: this was previously read as a `group_flags_0` constant "commonly 1" — that is a 1-based texture index of 1; it is traced through the clamp + the per-channel texture register, see §1.4b.)* | CODE-CONFIRMED |
+| +0x04 .. (vc) | varies | u32… | inter-header words | One or more channel-specific dwords between `texture_index` and the `vertex_count` / `index_count` pair (the width difference between the 20/36/44/48-byte headers — see §1.4a). Most are read into the group struct but **not consumed** by the parse. For `.fx3` one such dword (just before `vertex_count`) is a **signed elevation/extent** value the bbox finalize stores as `(−value, +value)` to set a symmetric vertical extent. The remaining inter-header dwords are zero-initialised by the in-memory ctor and their on-disk semantics (material / flags / reserved) are **sample-unverified — DBG-PENDING**; do NOT assert a meaning. | mixed (fx3 elevation word CODE-CONFIRMED; the rest DBG-PENDING) |
+| (channel vc offset) | 4 | u32 | `vertex_count` | Sizes the group's vertex block (`vertex_count × vertex_stride`). Offset per channel in §1.4a. | CONFIRMED |
+| (channel ic offset) | 4 | u32 | `index_count` | Sizes the group's index block (`index_count × 2`, u16). Offset per channel in §1.4a. | CONFIRMED |
 
 - **Vertex block (per group):** `vertex_count × vertex_stride` bytes, where the stride is the
   extension's vertex format from §1.2 (VF_36 / VF_44 / VF_32).
 - **Index block (per group):** `index_count × 2` bytes (u16 triangle list).
 
-**`render_state` (group-relative `+0x08`) is CONFIRMED-variable.** The spec's earlier claim that this
-word is a fixed constant (15 / `0x0F` for `.fx1`/`.fx2`, 5 for `.fx3`) is **REFUTED** — the value
-differs across files and across groups. An engineer must read it per group and must **not** hard-code
-15 or 5. Its semantic (a render-state enum vs. a texture-binding index vs. a blend-mode key) remains a
-known unknown (§ Known Unknowns), but its variability is settled.
+**The old "constant 2nd word (15 / `0x0F` for `.fx1`/`.fx2`, 5 for `.fx3`)" reading is REFUTED**
+(re-walked 2026-06-21 on the actual file decoders). That reading was at the wrong offset/routine; the
+only stable leading field is the 1-based `texture_index` at group `+0x00`. Everything between it and
+the `vertex_count` / `index_count` pair is channel-specific and only partly consumed (see the
+`inter-header words` row above and §1.4a). An engineer must read `vertex_count` / `index_count` from
+the channel-specific offsets and must **not** hard-code any "constant" header word.
 
 > **Note on the longer FX3 / FX5 / FX7 group headers.** The single-group FX-family files documented
 > in §§1.5–1.11 below were originally written up with longer, format-specific headers (48-byte for
@@ -150,6 +155,94 @@ known unknown (§ Known Unknowns), but its variability is settled.
 > different model. Treat §§1.5–1.11 as worked single-group / per-stride instances of this one
 > group-array layout; the leading word is the group count in every case, the `render_state` word is
 > variable in every case, and only the vertex stride differs.
+
+### 1.1b Load path / linkages (who reads `.fxN`, and the join to `.map`)
+
+The `.fxN` files are **not** opened by a standalone top-level loader. Each is a **DATAFILE referenced
+from the per-cell `.map` text descriptor** (`terrain.md`). The chain, by role:
+
+1. **Cell descriptor loader** — opens the cell `.map` file (via the client's VFS-or-loose-disk file
+   router) and, on success, hands it to the descriptor parser, then runs a finalize tail that builds
+   the per-cell grids (including the FX layer grids).
+2. **`.map` descriptor parser** — a whitespace-delimited, `#`-comment text tokenizer. It recognises
+   the block keywords `TERRAIN`, `EXTRA_TERRAIN`, `UP_TERRAIN`, `BUILDING`, `FX1`…`FX7`, and `SOLID`.
+   Each FX block carries a `DATAFILE <path>` (the `.fxN` file) and a `TEXTURES { slot id … }` sub-block:
+   - the `DATAFILE` is opened through the same file router and passed to that channel's **FX group
+     decoder** (one decoder per channel, FX1…FX7);
+   - each `TEXTURES` row registers an `(slot, texId)` pair into that channel's **per-channel texture
+     register** (§1.4b; capacity 32).
+3. **FX group decoder (per channel)** — the actual `.fxN` byte reader. It reads `group_count`, then per
+   group reads the channel-specific group header (sizing the vertex/index blocks from `vertex_count` /
+   `index_count`), the vertex block (channel stride from §1.2), and the u16 index block, and computes a
+   per-group AABB. Read sequence and offsets are §1.1a / §1.4a.
+4. **Per-cell grid build pass (per channel)** — runs from the descriptor loader's finalize tail. It
+   expands each decoded group into the cell's 16×16 grid bucket and resolves the group's 1-based
+   `texture_index` through the per-channel texture register (§1.4b). FX channels 3 and 5 take the
+   distinct **water** build path (§1.4c); the other five take the generic build path.
+
+**Join keys:** the per-cell `.map` descriptor is the hub — its `FX{N} { DATAFILE … }` names the `.fxN`
+file for that channel, and its `FX{N} { TEXTURES { slot id … } }` populates the register that the
+group's 1-based `texture_index` indexes. The resolved texture id then joins the shared terrain texture
+chain in `terrain.md`.
+
+### 1.4a Per-channel group-header layout and vertex format (CODE-CONFIRMED, re-walked 2026-06-21)
+
+Re-walking the seven on-disk file decoders directly settles the per-channel group-header width, the
+`vertex_count` / `index_count` offsets within that header, and the vertex stride each channel applies.
+The universal model (§1.1a) holds for all seven; only these three columns vary.
+
+| Channel | Vertex format | Group-header width | `vertex_count` offset | `index_count` offset |
+|---------|---------------|--------------------|-----------------------|----------------------|
+| `.fx1` | VF_36 (36 B) | 20 B (0x14) | +0x0C | +0x10 |
+| `.fx2` | VF_44 (44 B, dual-UV) | 20 B (0x14) | +0x0C | +0x10 |
+| `.fx3` | VF_36 (36 B) | 44 B (0x2C) | +0x24 | +0x28 |
+| `.fx4` | VF_44 (44 B) | 48 B (0x30) | +0x28 | +0x2C |
+| `.fx5` | VF_36 (36 B) | 48 B (0x30) | +0x28 | +0x2C |
+| `.fx6` | VF_32 (32 B, no colour) | 36 B (0x24) | +0x1C | +0x20 |
+| `.fx7` | VF_32 (32 B, no colour) | 48 B (0x30) | +0x28 | +0x2C |
+
+- Each decoder multiplies `vertex_count` by the channel's vertex stride for the vertex block and reads
+  `index_count × 2` bytes (u16) for the index block.
+- **`.fx6` and `.fx7` share VF_32** (no per-vertex colour, confirmed by an empty vertex-element
+  constructor) but differ in header width (36 B vs 48 B).
+- **`.fx4` is the universal group-array model** with VF_44 vertices and a 48-byte header — CORRECTED
+  2026-06-21: the earlier "flat tile array" framing is retired. It is NOT a distinct on-disk format;
+  the "flat tile" impression came from the post-parse 16×16 grid bucketing that ALL channels share.
+- VF_36 carries an RGBA8 colour at element +24 (the vertex-element constructor defaults it with
+  alpha 0xFF); VF_44 = VF_36 + a second UV; VF_32 has no colour. The exact UV0/UV1 float-vs-packed
+  encoding is PLAUSIBLE (sample-unverified), and the index-block primitive topology (triangle-list vs
+  strip) is PLAUSIBLE/DBG-PENDING — the decoder stores a flat u16 array and does not decide topology.
+
+### 1.4b Per-channel texture register (CODE-CONFIRMED)
+
+Each FX channel owns its **own** texture-id table (no sharing across channels), populated from the
+`.fx` channel's `TEXTURES{ slot id }` list in the per-cell `.map` descriptor. The register holds up to
+**32 entries** (overflow is logged). A group's `texture_index` (group `+0x00`) is **1-based** into this
+register: the build pass guards `index < 1 || index > count`, substitutes `1` on violation, then maps
+`index` to the registered texture id (index 1 → the first registered id). This is the same 1-based +
+clamp convention the base terrain/building texture indices use (`terrain.md`).
+
+The remap is an exact 1-based lookup: the registered texture id for a group is the entry at
+`register[texture_index − 1]`, where `register[0]` is the first id declared in the `.map` `TEXTURES`
+block for that channel. (Reconfirmed 2026-06-21 against the `.fx2` build pass: the off-by-one between
+the register base and the 1-based index resolves so that `texture_index = 1` selects the first
+registered id.) After the build pass, the registered id flows downstream through the shared terrain
+texture chain — `bgtexture.txt` → `.dds` — described in `terrain.md`.
+
+### 1.4c WATER channel identity — FX3 and FX5 (channel-identity CONFIRMED; render path DBG-PENDING)
+
+The per-cell `.map` descriptor wires the seven FX channels through seven distinct grid-build passes
+after the descriptor is parsed. **FX channels 3 and 5 take a separate "water layer" build path**
+(distinct from the generic build path used by channels 1, 2, 4, 6, and 7); they are the channels the
+client treats as **water** overlays. This channel identity is CODE-CONFIRMED from the dedicated build
+routines for those two channels (and corroborates the per-group elevation/direction word documented in
+§§1.7–1.8 for FX3/FX5).
+
+> **Scope of this fact.** "Water layers = FX3 and FX5" is a **channel-identity** statement (which two
+> channels follow the water build path). The actual water **material / render branch** — what the
+> water shader does, how the elevation/direction word drives it — has **not** been traced and is
+> **DBG-PENDING** (needs the render path or the live debugger). Do not assert water render behaviour
+> from this section; only the channel assignment is settled.
 
 ### 1.2 Vertex formats (on-disk)
 
@@ -736,6 +829,32 @@ of the live `.ted` the runtime reads.
 
 ---
 
+## Section 5.5: FX Editor Sidecars  (`.fx1.pre` – `.fx7.pre`)
+
+| Format key | sample_verified |
+|-----------|-----------------|
+| `fx_pre` | `true` (sidecar existence + leading group-count word) — editor-only; **NOT read by the client runtime** |
+
+**Purpose:** Editor-toolchain sidecars that sit on disk beside the runtime FX layer files
+(`.fx1`–`.fx7`). They belong to the same editor-sidecar family as `.sod.pre` (Section 4) and
+`.ted.post` (Section 5): a precomputed/editor-state companion to a runtime asset.
+
+**Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.fx{N}.pre`
+(the parent `.fx{N}` runtime file's path with a `.pre` suffix appended).
+
+**Runtime status — DO NOT READ at runtime.** The runtime client opens **only** the `.fxN` file named
+by the `DATAFILE` entry in the per-cell `.map` descriptor (§1.1b). The matching `.fxN.pre` is **never
+opened by the runtime parser**. A runtime FX reader must **skip** any `.fx{N}.pre` file it encounters
+during a directory scan, exactly as it skips `.sod.pre`, `.ted.post`, and the sky `.txt` siblings.
+
+**Layout (observation only).** A `.fxN.pre` shares the **leading `u32` group count** with its runtime
+`.fxN` counterpart, but its per-group header content and its overall file size **differ** from the
+runtime file. The internal sidecar layout was **not** decoded (it is outside the runtime path and not
+required for the client). Treat the body as **opaque editor data** — do not assume it matches the
+runtime FX group layout of Section 1.
+
+---
+
 ## Section 6: Directional / Ambient Light Keyframes  (`light%d.bin`)
 
 | Format key | sample_verified |
@@ -940,6 +1059,16 @@ these without further evidence.
 7. **FX4 per-group header leading 40 bytes:** Read but not consumed at load (candidates: transform /
    texture-id / flags). Single FX4 instance in the corpus → all per-field observations are
    single-sample.
+
+7a. **Water render path for FX3 / FX5:** The channel identity is settled — FX3 and FX5 take the
+    dedicated "water layer" build path (§1.4c). What that path does at render time (the water shader,
+    how the per-group elevation/direction word in §§1.7–1.8 drives it) is **not** traced. DBG-PENDING —
+    needs the render path or the live debugger; do not assert water render behaviour.
+
+7b. **`.fx1.pre`–`.fx7.pre` editor-sidecar body (Section 5.5):** Editor-only companions to the runtime
+    `.fxN` files; they share the leading `u32` group count but their per-group body and overall size
+    differ from the runtime file, and the body was not decoded. The runtime parser must **skip** them
+    (it opens only the `.map`-named `.fxN`); their internal layout is opaque editor data.
 
 8. **`.up` / `.exd` `plane_height`:** Resolved as an **independent per-triangle scalar** that
    frequently differs from vertex Y (non-flat geometry is the norm in the full corpus). Its precise

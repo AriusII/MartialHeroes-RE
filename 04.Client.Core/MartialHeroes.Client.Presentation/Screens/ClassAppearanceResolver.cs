@@ -234,7 +234,8 @@ public static class ClassAppearanceResolver
     ///     (the caller logs + skips — never substitutes a wrong-class mesh). Routes through the
     ///     appearance path at variant 0 (the starter appearance). Each mesh carries its OWN id_b which
     ///     then drives its rig (<c>g{id_b}.bnd</c>, see <see cref="SkeletonBndForModelClassId" />) and
-    ///     idle clip (actormotion col15).
+    ///     idle clip (actormotion col16 = motion_ids_a[1] = record +0x44; col15 / a[0] / +0x40 is DEAD at runtime — CYCLE 7
+    ///     reversal).
     ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5.
     /// </summary>
     public static string? SknPathForClass(int classId)

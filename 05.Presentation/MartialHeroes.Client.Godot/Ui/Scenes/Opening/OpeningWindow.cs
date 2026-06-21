@@ -116,6 +116,14 @@ public sealed partial class OpeningWindow : Control
         Size = new Vector2(CanvasW, CanvasH);
         MouseFilter = MouseFilterEnum.Stop;
 
+        // Front-end overlay render state: alpha-blend ON, additive ONE/ONE.
+        // spec: Docs/RE/specs/rendering.md §4.2 — "UI/HUD front-end overlay (login/char-select/
+        //   opening): ONE/ONE (additive); additionally clears fog, dither, alpha-test."
+        Material = new CanvasItemMaterial
+        {
+            BlendMode = CanvasItemMaterial.BlendModeEnum.Add // spec: rendering.md §4.2 ONE/ONE additive
+        };
+
         BuildUi();
 
         _scrollStartWait = ScrollStartDelayMs;

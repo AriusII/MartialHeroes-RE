@@ -11,7 +11,8 @@
 //   - Icons via HudIconLibrary; text via HudTextLibrary.
 //   - Graceful-null offline: GD.PrintErr + skip, no fake chrome.
 //
-// HUD-II (CAMPAIGN 17): MopGagePanel target frame recovered (slot 177); minimap BMP-tile
+// HUD-II (CAMPAIGN 17): MopGagePanel target frame recovered (slot 35 — binary-won; prior "slot 177" REFUTED
+//   by ui_system.md §1.9.4, 263bd994 RTTI pass); minimap BMP-tile
 // mosaic corrected (map%d.dds retired); hotbar cooldown overlay frames added (§5.10a).
 // HUD-II Wave 1 E (CAMPAIGN 17): 6 secondary toggle windows added:
 //   HudOptionsWindow (OptionPanel, centered 215×204)
@@ -85,7 +86,7 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 /// <summary>
 ///     In-game HUD master. Builds and owns all core panels including the recovered MopGagePanel
-///     target frame (HUD slot 177).
+///     target frame (HUD panel-slot array slot 35 — binary-won; prior "slot 177" REFUTED by §1.9.4).
 ///     <para>PASSIVE: zero game logic. Reads Application catalogues and channels; emits use-case calls.</para>
 ///     <para>
 ///         Two distinct passes (matching the recovered MainMaster build contract):
@@ -96,7 +97,9 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 ///     </para>
 ///     spec: Docs/RE/specs/ui_hud_layout.md §0 — MainMaster three-routine model.
 ///     spec: Docs/RE/specs/ui_hud_layout.md §0.1 — 178 distinct slot stores (slot set confirmed).
-///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177 (recovered HUD-II).
+///     spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won reversal of "slot 177").
+///     spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED" (263bd994 RTTI pass).
+///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel geometry (recovered HUD-II).
 ///     spec: Docs/RE/specs/ui_system.md §8.6.1 — uitex integer id→DDS key table.
 /// </summary>
 public sealed partial class HudMaster : Control
@@ -226,7 +229,11 @@ public sealed partial class HudMaster : Control
     // spec: Docs/RE/specs/ui_system.md §8.32 CODE-CONFIRMED
     private HudStorageWindow? _storageWindow;
 
-    // Target frame (MopGagePanel, HUD slot 177) — recovered in HUD-II pass.
+    // Target frame (MopGagePanel, HUD panel-slot array slot 35) — recovered in HUD-II pass.
+    // SLOT CORRECTED: binary-won reversal per ui_system.md §1.9.3/§1.9.4 (263bd994 RTTI pass).
+    // Slot 177 is a plain GUComponent image (bottom command-bar trailing image, §2.3) — NOT this panel.
+    // spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35.
+    // spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
     // spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
     private HudTargetFrame? _targetFrame;
 

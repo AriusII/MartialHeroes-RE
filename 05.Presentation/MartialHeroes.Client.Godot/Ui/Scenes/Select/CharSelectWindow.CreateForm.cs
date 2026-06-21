@@ -425,6 +425,112 @@ public sealed partial class CharSelectWindow
     }
 
     // =========================================================================
+    // Delete-confirm modal — raised by Delete (action 5) on an occupied slot.
+    // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d (DELETE-confirm popup). CODE-CONFIRMED.
+    //   Dragon frame: inventwindow.dds src(318,647) 340×190 centred at (342,289).
+    //   Yes = action 54 → emits DeleteCharacterRequested; No = action 55 → dismiss.
+    //   Body caption msg 14001; title caption msg 14002.
+    // =========================================================================
+
+    private Control BuildDeleteConfirmModal()
+    {
+        var modal = new Control
+        {
+            Name = "DeleteConfirmModal",
+            Position = new Vector2(DeleteModalX, DeleteModalY),
+            Size = new Vector2(DeleteModalW, DeleteModalH),
+            MouseFilter = MouseFilterEnum.Stop
+        };
+
+        // Dragon frame background: inventwindow.dds src(318,647) 340×190.
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5d (shared dragon-frame quad). CODE-CONFIRMED.
+        var bg = Atlas?.SliceByPath(AtlasInventWindow, 318, 647, (int)DeleteModalW, (int)DeleteModalH);
+        if (bg is not null)
+        {
+            var bgRect = new TextureRect
+            {
+                Name = "DeleteModalBg",
+                Texture = bg,
+                Position = Vector2.Zero,
+                Size = new Vector2(DeleteModalW, DeleteModalH),
+                ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore
+            };
+            modal.AddChild(bgRect);
+        }
+
+        // Title caption (msg 14002). spec §11.5d. CODE-CONFIRMED.
+        var titleWidget = HudWidgetFactory.MakeLabel(
+            12, 12, (int)(DeleteModalW - 24f), 22,
+            Text?.GetCaption(MsgDeleteConfirmTitle, string.Empty) ?? string.Empty,
+            new Color(0.95f, 0.86f, 0.55f));
+        if (titleWidget.GetControl() is Label titleLbl)
+        {
+            titleLbl.Name = "DeleteModalTitle";
+            titleLbl.HorizontalAlignment = HorizontalAlignment.Center;
+            modal.AddChild(titleLbl);
+        }
+
+        // Body caption (msg 14001). spec §11.5d. CODE-CONFIRMED.
+        var bodyWidget = HudWidgetFactory.MakeLabel(
+            12, 46, (int)(DeleteModalW - 24f), 60,
+            Text?.GetCaption(MsgDeleteConfirmBody, string.Empty) ?? string.Empty,
+            new Color(0.85f, 0.85f, 0.9f),
+            multiline: true);
+        if (bodyWidget.GetControl() is Label bodyLbl)
+        {
+            bodyLbl.Name = "DeleteModalBody";
+            bodyLbl.HorizontalAlignment = HorizontalAlignment.Center;
+            modal.AddChild(bodyLbl);
+        }
+
+        // Yes (54) / No (55) buttons via inventwindow.dds.
+        // Layout mirrors the name modal OK/Cancel pair (same dragon-frame quad geometry).
+        // spec: Docs/RE/specs/frontend_scenes.md §11.5d (Yes 54 / No 55). CODE-CONFIRMED.
+        if (Atlas is not null)
+        {
+            // MakeButton2 = 2-state (NORMAL only). src (302,860) = shared dragon-frame OK art.
+            // spec: Docs/RE/specs/ui_system.md §8.3 (dragon-frame OK/Cancel src). CODE-CONFIRMED.
+            var yesBtn = HudWidgetFactory.MakeButton2(
+                Atlas, AtlasInventWindow,
+                55, 136, 113, 40,
+                302, 860, // spec §8.3. CODE-CONFIRMED.
+                ActionDeleteYes,
+                Text?.GetCaption(2301u, string.Empty) ?? string.Empty);
+            yesBtn.ActionFired += OnDeleteConfirmYes;
+            modal.AddChild(yesBtn.GetControl()!);
+
+            var noBtn = HudWidgetFactory.MakeButton2(
+                Atlas, AtlasInventWindow,
+                174, 136, 113, 40,
+                302, 900, // spec §8.3. CODE-CONFIRMED.
+                ActionDeleteNo,
+                Text?.GetCaption(2302u, string.Empty) ?? string.Empty);
+            noBtn.ActionFired += _ => HideDeleteConfirmModal();
+            modal.AddChild(noBtn.GetControl()!);
+        }
+
+        return modal;
+    }
+
+    private void ShowDeleteConfirmModal(int slotIndex)
+    {
+        _pendingDeleteSlot = slotIndex;
+        if (_deleteConfirmModal is not null && IsInstanceValid(_deleteConfirmModal))
+            _deleteConfirmModal.Visible = true;
+        GD.Print($"[CharSelectWindow] Delete-confirm modal opened for slot {slotIndex}. " +
+                 "spec: frontend_scenes.md §5+§11.5d.");
+    }
+
+    private void HideDeleteConfirmModal()
+    {
+        _pendingDeleteSlot = -1;
+        if (_deleteConfirmModal is not null && IsInstanceValid(_deleteConfirmModal))
+            _deleteConfirmModal.Visible = false;
+    }
+
+    // =========================================================================
     // Create form lifecycle helpers
     // =========================================================================
 
@@ -441,6 +547,9 @@ public sealed partial class CharSelectWindow
 
         if (_nameModal is not null && IsInstanceValid(_nameModal))
             _nameModal.Visible = false;
+
+        // Dismiss any pending delete-confirm if the user somehow opens Create while it is showing.
+        HideDeleteConfirmModal();
 
         if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
         {

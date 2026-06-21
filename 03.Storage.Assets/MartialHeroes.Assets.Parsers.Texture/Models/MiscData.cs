@@ -5,34 +5,75 @@ namespace MartialHeroes.Assets.Parsers.Texture.Models;
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-///     One record from <c>mobinfo.mi</c>. Stride: 28 bytes (7 × u32).
+///     One record from <c>data/ui/mobinfo.mi</c>. Stride: 28 bytes (7 × u32 LE).
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/misc_data.md §2 mobinfo.mi: sample_verified (header + stride).
-///     Field semantics: PARTIAL (string-table IDs; portrait resource IDs).
+///     spec: Docs/RE/formats/mi.md §Container layout — SAMPLE-VERIFIED (count header + fixed-stride records).
+///     spec: Docs/RE/formats/mi.md §Per-record layout — stride 28 bytes = 7 × u32 LE: SAMPLE-VERIFIED.
+///     <para>
+///         IMPORTANT: the shipping client has NO loader for this file (CONFIRMED NOT READ, build 263bd994).
+///         This record is documented for archival/interoperability completeness only.
+///         A faithful 1:1 port must NOT load mobinfo.mi at runtime.
+///         spec: Docs/RE/formats/mi.md §Loader — "CONFIRMED NOT READ in build 263bd994".
+///         spec: Docs/RE/formats/mi.md §Implications for a faithful port.
+///     </para>
+///     <para>
+///         Field semantics are SINGLE-SAMPLE / OUT-OF-CLIENT-SCOPE: there is no client consumer
+///         to confirm meanings. The field *widths* (u32 per slot, 28 bytes total) are SAMPLE-VERIFIED;
+///         the roles below are provisional from a single-sample reading.
+///         spec: Docs/RE/formats/mi.md §Per-record layout — "field roles SINGLE-SAMPLE / OUT-OF-CLIENT-SCOPE".
+///     </para>
+///     <para>
+///         NOTE: the earlier "PortraitRes3" label (field +0x18 / +24) is WITHDRAWN per CYCLE 7.
+///         See spec: Docs/RE/formats/mi.md §Per-record layout — "any PortraitRes3 labeling WITHDRAWN".
+///     </para>
 /// </remarks>
 public sealed class MobInfoRecord
 {
-    /// <summary>spec: §2 — mob_class_id u32 @ +0: HIGH.</summary>
-    public required uint MobClassId { get; init; }
+    /// <summary>
+    ///     Dense sequential entry id — monotonic 101, 102, …, 121 across the 21 records (the row key).
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+0: entry_id — dense sequential: SAMPLE-VERIFIED".
+    /// </summary>
+    public required uint EntryId { get; init; }
 
-    /// <summary>String-table reference for primary display name; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
-    public required uint NameStrId { get; init; }
+    /// <summary>
+    ///     Caption message-catalogue id (~20000 band) — primary caption/name string.
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+4: caption_msg_id — SINGLE-SAMPLE".
+    /// </summary>
+    public required uint CaptionMsgId { get; init; }
 
-    /// <summary>String-table reference for alternate name; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
-    public required uint AltNameStrId { get; init; }
+    /// <summary>
+    ///     Description message-catalogue id (~20000 band); 0xFFFFFFFF = absent (null sentinel).
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+8: description_msg_id — SINGLE-SAMPLE".
+    /// </summary>
+    public required uint DescriptionMsgId { get; init; }
 
-    /// <summary>UI sprite index for mob icon; range 55–173 observed. spec: §2 — icon_index: HIGH.</summary>
-    public required uint IconIndex { get; init; }
+    /// <summary>
+    ///     Small sub-id / category code (observed values: low tens to low hundreds).
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+12: small_param — SINGLE-SAMPLE".
+    /// </summary>
+    public required uint SmallParam { get; init; }
 
-    /// <summary>Portrait resource 1; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
-    public required uint PortraitRes1 { get; init; }
+    /// <summary>
+    ///     Decimal-packed code A of the form <c>group × 10000 + index</c>. NOT a code pointer.
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+16: packed_code_a — SINGLE-SAMPLE".
+    ///     spec: Docs/RE/formats/mi.md — "coincidence trap: +16/+20 are NOT .text code pointers".
+    /// </summary>
+    public required uint PackedCodeA { get; init; }
 
-    /// <summary>Portrait resource 2; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
-    public required uint PortraitRes2 { get; init; }
+    /// <summary>
+    ///     Decimal-packed code B — related pair to <see cref="PackedCodeA" />; delta NOT universally 1.
+    ///     Final record carries 0xFFFFFFFF here.
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+20: packed_code_b — SINGLE-SAMPLE".
+    /// </summary>
+    public required uint PackedCodeB { get; init; }
 
-    /// <summary>Portrait resource 3; 0xFFFFFFFF = none. spec: §2 — PARTIAL.</summary>
-    public required uint PortraitRes3 { get; init; }
+    /// <summary>
+    ///     Auxiliary optional small id/index; 0xFFFFFFFF = none. Role is MOOT (no consumer read-site).
+    ///     spec: Docs/RE/formats/mi.md §Per-record layout — "+24: aux_field — SINGLE-SAMPLE / HYPOTHESIS".
+    ///     spec: Docs/RE/formats/mi.md — "field6 role MOOT; any portrait_res_3 label WITHDRAWN (CYCLE 7)".
+    /// </summary>
+    public required uint AuxField { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

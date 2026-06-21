@@ -299,6 +299,11 @@ public static class MapDescriptorParser
                                 $".map parse error: TEXTURES entry in section '{keyword}' " +
                                 $"could not parse integers from '{tl}'.");
 
+                        // Positivity gate: intFlag <= 0 is the block terminator predicate.
+                        // Only entries with intFlag > 0 are valid texture references.
+                        // spec: Docs/RE/formats/terrain.md §3.5 — "intFlag > 0: data line; intFlag <= 0: terminator".
+                        if (flag <= 0) break;
+
                         textures.Add((flag, texId));
                     }
                 }

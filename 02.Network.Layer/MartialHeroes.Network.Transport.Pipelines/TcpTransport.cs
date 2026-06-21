@@ -79,7 +79,8 @@ public sealed class TcpTransport : ITransport
         // client's; with NoDelay = false (Nagle on) the same 1/9 is ACCEPTED and the server sends the
         // 4/1 SmsgGameStateTick world snapshot. The original "disable Nagle, latency-sensitive" reading
         // was wrong — the server requires the default Nagle behaviour. Override to true only via
-        // MH_TCP_NODELAY=1 (diagnostics). spec: Docs/RE/specs/network_dispatch.md (game-connection TCP).
+        // MH_TCP_NODELAY=1 (diagnostics).
+        // spec: Docs/RE/specs/net_contracts.md §1.1 (Nagle coalescing — client never sets TCP_NODELAY).
         var noDelay = Environment.GetEnvironmentVariable("MH_TCP_NODELAY") == "1";
         var socket = new Socket(af, SocketType.Stream, ProtocolType.Tcp)
         {

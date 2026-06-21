@@ -138,7 +138,7 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/skillneedset.scr` | 4 B flat | 22 | no | SAMPLE-VERIFIED (count) | Skill prerequisite edges (see config_tables.md) |
 | `data/script/viplevels.scr` | 92 B flat | 9 | no | SAMPLE-VERIFIED (stride + count) | VIP level table (see config_tables.md) |
 | `data/script/warstoneinfo.scr` | 40 B flat | 1 | yes | SAMPLE-VERIFIED (single record) | War-stone region info (see config_tables.md) |
-| `data/script/oblist.scr` | 12 B flat | 1 | no | SAMPLE-VERIFIED (single record) | Object list (see config_tables.md) |
+| `data/script/oblist.scr` | 12 B flat | `file_size / 12` | no | CONFIRMED (loader stride + filter; single-record sample) | Object-id → value map (id at +4), conditionally loaded by a runtime selector at +8; consumed by the actor/object builder via an id lookup (per-file section below) |
 | `data/script/itemscale.scr` | 8 B flat | — | no | (items_scr.md) | Item scale/sizing table |
 | `data/script/skills.scr` | 1504 B + N×8 trailing | ~194 real | yes | (config_tables.md) | Skill database |
 | `data/script/mobs.scr` | 488 B flat | 3997 | yes | (config_tables.md) | Mob stat table |
@@ -414,6 +414,67 @@ zero tail). Note the extension is `.sc`, not `.scr`.
 | +0 | 4 | u32 | record_id (map key) | Sparse id space (party/currency/window/guild groups); not 1-based | HIGH |
 | +4 | 64 | bytes | Remaining record body | Field layout is the authority of `misc_data.md §5` | see misc_data.md |
 
+### oblist.scr — Object-id → value map (stride 12 B, conditionally loaded) — CONFIRMED
+
+Record model: a **flat fixed-stride array** of **12-byte (0x0C)** records, concatenated with no file
+header, no magic, no version, and no record-count prefix — the same family shape as the other small
+tables. The loader reads exactly 12 bytes per iteration and walks to end-of-file / a short read, so
+`record_count = file_size / 12`. There are **no embedded CP949 text fields**; each record is three
+32-bit little-endian integers. The leading help-style key model does **not** apply — the map key here
+is the **second** field (+4), not the first (see the layout note below).
+
+Unlike every other small `.scr` table, `oblist.scr` is **conditionally loaded by a load-time
+selector filter**: a record is inserted into the runtime map **only when** its third field (+8)
+matches a runtime selector value. This filter is unique to `oblist.scr` among the family and a
+faithful parser must replicate it (see the read algorithm).
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 4 | u32 | `value` (lookup result) | The value stored in the runtime map for this id; what an id lookup returns. | HIGH (loader copies +0; lookup returns it) |
+| +0x04 | 4 | u32 | `id` (MAP KEY / join key) | The runtime map key — callers resolve a record by this id. Also logged as the record's "ID" at load time. | HIGH (used as map key; logged as ID) |
+| +0x08 | 4 | u32 | `selector` (LOAD-TIME FILTER) | Compared for equality against a runtime selector value at load; the record is inserted only when they match. | HIGH (filter mechanism); selector domain UNVERIFIED |
+
+> **Which field is key vs value.** The runtime map stores the pair with **+0x04 as the key** and
+> **+0x00 as the value**: the loader sets the entry's key from the record's second field and the id
+> lookup returns the entry's first field. The clean functional contract is therefore: **+0x04 = id /
+> map key** (what callers look up by), **+0x00 = associated value** (what the lookup returns),
+> **+0x08 = load-time selector**. In the single shipped 12-byte sample both `value` and `id` happen
+> to be equal, so that one file alone cannot prove `value` is independent of the key; structurally
+> they are two distinct fields (the map holds key and value separately), but their data relationship
+> in a populated `oblist.scr` is UNVERIFIED (see Known unknowns).
+
+**Read algorithm (raw bytes → runtime id→value map):**
+
+1. Open `data/script/oblist.scr` from the VFS. If the file does not open, log an error and build no
+   map.
+2. Loop until end-of-file (break on EOF or a short read):
+   1. Read 12 bytes as three little-endian u32 fields `{value @ +0, id @ +4, selector @ +8}`.
+   2. Read the **runtime selector** (a single byte from the global application/account state,
+      sign-extended to an int). If it does **not** equal the record's `selector` (+8), **skip** the
+      record (do not insert) and continue.
+   3. (Dedup/diagnostics) look the `id` up in the map already built; if it is already present, log
+      the duplicate; then log the record's `id`.
+   4. Allocate a new map entry, copy the three fields into it, and insert it keyed by `id` (+4). The
+      runtime map container is created lazily on first insertion.
+3. Close the file.
+
+No decode, decompression, or decryption — fields are stored and consumed verbatim as little-endian
+u32. The only non-trivial step is the **load-time selector filter** (step 2.2).
+
+> **Selector semantics (mechanism CONFIRMED; domain UNVERIFIED).** The selector compared against
+> +0x08 is a single **byte** read from the global application/account state — the same singleton
+> touched by the login / enter-game / billing / character-manage flow — sign-extended to an int.
+> Because the runtime side is one byte (effective range -128..127), a record whose +0x08 lies outside
+> that range (e.g. the shipped sample's `selector = 1000`) can never match and is effectively a
+> disabled / placeholder row on any build where the selector byte stays small. The selector therefore
+> behaves like a **server-type / channel / nation / open-beta mode gate** set during the
+> login→enter-world flow, but its exact value domain is UNVERIFIED (a live read of the selector byte
+> at enter-world would settle it). A faithful online parser must replicate the filter; a single-build
+> offline reconstruction must instead pin the selector value it intends to load against.
+
+> See `config_tables.md` for any deeper survey of the same file; that file should carry the same
+> 3-field table and the selector-filter note.
+
 ---
 
 ## Known unknowns
@@ -445,6 +506,15 @@ zero tail). Note the extension is `.sc`, not `.scr`.
   build, and the CP949 encoding are CONFIRMED here.
 - **citems.scr** body fields beyond `item_id` at +0 — UNVERIFIED here; the authority is
   `items_scr.md`.
+- **oblist.scr** `value` (+0x00) vs `id` (+0x04) independence — in the single 12-byte sample both
+  are equal, so this file cannot prove `value` is distinct from the key; structurally they are two
+  separate fields (map key vs stored value), but their data relationship in a populated file is
+  UNVERIFIED (needs a multi-record sample).
+- **oblist.scr** `selector` (+0x08) domain — the set of values the runtime selector byte can take
+  (and therefore which rows ever load) is UNVERIFIED; the shipped sample's `selector = 1000` cannot
+  match a single byte, so that row is inert on a small-byte build. The selector-filter **mechanism**
+  is CONFIRMED. What the looked-up `value` ultimately drives inside the actor/object builder is a
+  deeper actor-system question, out of scope for this format spec.
 - **UNVERIFIED-stride family members** (`mobsitem.scr`, `minds.scr`, `letters.scr`,
   `nicktofame.scr`, `productrandname.scr`, `productcollect.scr`, `playtime_reward.scr`,
   `repair.scr`, `system_control.scr`, `tiphelp.scr`, `upgradeitems.scr`): stride/layout not yet
@@ -467,7 +537,8 @@ zero tail). Note the extension is `.sc`, not `.scr`.
 - Proposed canonical names (flag for `names.yaml`, orchestrator-owned): `exp_level_record` (20 B),
   `guild_crest_record` (20 B), `guild_pos_record` (88 B), `item_effect_id_entry` (4 B),
   `chivalry_rank_record` (24 B), `dash_skill_record` (199 B), `help_record` (1696 B, `help_id` u32
-  @ +0, `help_title` CP949 @ +29), `district_desc_record` (68 B), `npcs_stat_record` (1916 B).
+  @ +0, `help_title` CP949 @ +29), `district_desc_record` (68 B), `npcs_stat_record` (1916 B),
+  `oblist_record` (12 B: `value` u32 @ +0, `id` u32 @ +4, `selector` u32 @ +8).
 - Glossary: see Docs/RE/names.yaml
 - Provenance: see Docs/RE/journal.md (add an entry for this spec).
   - CAMPAIGN VFS-MASTERY (two-witness: loader + black-box): `npcs.scr` stride 1916 / **812 records
@@ -499,3 +570,13 @@ zero tail). Note the extension is `.sc`, not `.scr`.
     clarification added that **`items.scr` carries no description-paragraph block** (548-byte block +
     8-byte-per-entry trailing effect array; the 10×81 paragraph model is citems-only — authority
     `formats/items_scr.md`).
+  - CYCLE 7 (re-verified against doida.exe IDB SHA 263bd994, 2026-06-20; static loader + VFS sample):
+    **`oblist.scr` promoted from a one-line inventory row to a full per-file section.** Confirmed the
+    flat 12-byte stride (`record_count = file_size / 12`) and the no-embedded-text reading, and ADDED
+    the 3-field record table (`value` u32 @ +0, `id` u32 @ +4 = map key, `selector` u32 @ +8), the
+    read algorithm, and the **load-time selector filter** (a record is inserted only when +0x08 equals
+    a runtime selector byte — a server/mode/channel gate set during login/enter-world; the only small
+    `.scr` table with such a row filter). Role text expanded to "object-id → value map consumed by the
+    actor/object builder; join key = id (+4)". Open: `value`-vs-`id` independence (sample has both
+    equal) and the selector-byte domain (the sample's +0x08 = 1000 cannot match a single byte) — both
+    settleable only with a multi-record sample or a live selector-byte read.

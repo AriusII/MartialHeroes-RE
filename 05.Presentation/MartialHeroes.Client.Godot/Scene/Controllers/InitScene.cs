@@ -12,10 +12,8 @@ namespace MartialHeroes.Client.Godot.Scene.Controllers;
 ///     and writes the next state = Login.
 /// </summary>
 /// <remarks>
-///     This automatic 0→1 advance is what drives the <b>interactive (windowed/player)</b> boot to the Login
-///     window — it does NOT depend on the headless developer auto-walk. Without it the host would sit on the
-///     empty Init scene forever in windowed mode (a blank/grey window), because the auto-walk only runs
-///     headless or under <c>MH_SCENE_AUTOWALK=1</c>. The advance is deferred so it runs after this
+///     This automatic 0→1 advance drives the boot to the Login window. Without it the host would sit on the
+///     empty Init scene forever (a blank/grey window). The advance is deferred so it runs after this
 ///     <see cref="OnEnter" /> returns, never re-entering <c>ShowSceneFor</c> while the host is mid-dispatch.
 ///     spec: Docs/RE/specs/client_runtime.md §7.1 / §7.3 (init precedes the loop; the loop starts at Login).
 /// </remarks>

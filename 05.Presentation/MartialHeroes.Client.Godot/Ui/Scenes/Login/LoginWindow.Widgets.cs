@@ -305,9 +305,9 @@ public sealed partial class LoginWindow
             LoginLayout.SmallDecorPlate.SrcX, LoginLayout.SmallDecorPlate.SrcY);
 
         // ID textbox — MaskedTextField: 1:1 atlas blit + slot-0 text; mask bit CLEAR.
-        // dest (390,32,102,13); src A1 (615,404,102,13). action 109, maxlen 19.
+        // dest (390,32,102,13); src A1 (615,404,102,13). action 109, maxlen 16.
         // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "ID textbox | unmasked"
-        // spec: Docs/RE/specs/frontend_layout_tables.md §2.6 "account < 20 → max typed chars = 19"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "ID field maxlen=16 (per-keystroke cap, GAP-4 RESOLVED)"
         // spec: Docs/RE/specs/frontend_layout_tables.md §0.10 "every front-end widget is a 1:1 atlas blit"
         _idBox = new MaskedTextField(
             _atlas,
@@ -316,15 +316,15 @@ public sealed partial class LoginWindow
             LoginLayout.AccountBox.W, LoginLayout.AccountBox.H, // field rect (102×13)
             LoginLayout.AccountBox.SrcX, LoginLayout.AccountBox.SrcY, // A1 src (615,404)
             false, // spec: frontend_layout_tables.md §2.7 "mask bit clear → clear text"
-            LoginLayout.IdMaxLength); // spec: frontend_layout_tables.md §2.6 "account < 20 → 19"
+            16); // spec: frontend_layout_tables.md §2.7 "ID per-keystroke max length = 16 (GAP-4 RESOLVED)"
         _idBox.Name = "IdTextbox";
         _idBox.TextSubmitted += OnEnterKey;
         credPanel.AddChild(_idBox);
 
         // PW textbox — MaskedTextField: 1:1 atlas blit + slot-0 masked '*' at 6 px/char.
-        // dest (568,32,102,13); src A1 (615,404,102,13). action 110, maxlen 17.
+        // dest (568,32,102,13); src A1 (615,404,102,13). action 110, maxlen 12.
         // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.7 "PW textbox | masked; '*' glyph, 6 px/char"
-        // spec: Docs/RE/specs/frontend_layout_tables.md §2.6 "password = 17"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "PW per-keystroke max length = 12 (GAP-4 RESOLVED)"
         _pwBox = new MaskedTextField(
             _atlas,
             LoginLayout.EditFieldFrameAtlas,
@@ -332,7 +332,7 @@ public sealed partial class LoginWindow
             LoginLayout.PasswordBox.W, LoginLayout.PasswordBox.H, // field rect (102×13)
             LoginLayout.PasswordBox.SrcX, LoginLayout.PasswordBox.SrcY, // A1 src (615,404)
             true, // spec: frontend_layout_tables.md §2.7 "mask bit set → '*' glyph, 6 px/char"
-            LoginLayout.PwMaxLength); // spec: frontend_layout_tables.md §2.6 "password = 17"
+            12); // spec: frontend_layout_tables.md §2.7 "PW per-keystroke max length = 12 (GAP-4 RESOLVED)"
         _pwBox.Name = "PwTextbox";
         _pwBox.TextSubmitted += OnEnterKey;
         credPanel.AddChild(_pwBox);

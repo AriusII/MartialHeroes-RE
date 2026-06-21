@@ -150,7 +150,8 @@ internal sealed class VfsAreaAssemblySource : IAreaAssemblySource
     /// <summary>
     ///     Loads the global background-texture catalog from data/map000/texture/bgtexture.lst.
     ///     The packed binary .lst is the sole runtime source — there is no .txt mirror fallback.
-    ///     Returns an empty catalog (loud sentinel) when the .lst is absent.
+    ///     Returns <see cref="BgtextureLstCatalog.Empty" /> when the .lst is absent (offline / no VFS):
+    ///     an honestly-empty pool where every lookup resolves to null and nothing is fabricated.
     ///     spec: Docs/RE/formats/bgtexture_lst.md — global pool, all areas share map000.
     ///     spec: Docs/RE/specs/assembly_graph.md §1 — textures are global under map000. CONFIRMED.
     /// </summary>
@@ -166,25 +167,16 @@ internal sealed class VfsAreaAssemblySource : IAreaAssemblySource
                     // spec: Docs/RE/formats/bgtexture_lst.md — binary index-keyed pool. CONFIRMED.
                     return BgtextureLstParser.Parse(data);
             }
-
-            // The packed binary data/map000/texture/bgtexture.lst is the SOLE runtime source for the
-            // background-texture pool (spec: Docs/RE/formats/bgtexture_lst.md). There is NO loose-tree
-            // .txt mirror fallback — a real packed VFS never ships one, so its absence is a hard error
-            // (it falls through to the loud minimal sentinel below).
         }
         catch
         {
-            // VFS error — fall through to the sentinel below.
+            // VFS error — fall through to the empty pool below.
         }
 
-        // Minimal valid .lst: count=1, one record with kind=0 (skipped/no-texture slot).
-        // This gives a 1-slot catalog where every slot resolves to null — no textures.
-        // The BgtextureLstCatalog constructor is internal to Assets.Parsers; we must parse bytes.
-        // spec: Docs/RE/formats/bgtexture_lst.md §Header layout — count u32LE @ 0; 48-byte records.
-        var minimal = new byte[4 + 48]; // 4-byte header (count=1) + 1×48-byte record
-        minimal[0] = 1; // count = 1 as LE u32
-        // record[0]: kind byte = 0x01 (static, non-empty slot), relpath = all-zero bytes → empty string
-        minimal[4] = 0x01;
-        return BgtextureLstParser.Parse(minimal);
+        // The packed binary data/map000/texture/bgtexture.lst is the SOLE runtime source for the
+        // background-texture pool (spec: Docs/RE/formats/bgtexture_lst.md). When it is absent, the pool
+        // is honestly EMPTY — no synthesised stand-in record. Every lookup then resolves to null and no
+        // texture renders (the client shows only real VFS data; nothing is fabricated offline).
+        return BgtextureLstCatalog.Empty;
     }
 }

@@ -155,7 +155,7 @@ public sealed partial class HudProductWindow : Control
         var previewLbl = new Label
         {
             Name = "PreviewLbl",
-            Text = "// TODO(world-campaign): live craft preview",
+            Text = string.Empty,
             Position = new Vector2(20f, 42f),
             Size = new Vector2(200f, 20f),
             LabelSettings = new LabelSettings { FontSize = 9 },
@@ -178,7 +178,7 @@ public sealed partial class HudProductWindow : Control
             var cellBtn = new Button
             {
                 Name = $"RecipeCell{cellIdx}",
-                Text = $"[Recipe {cellIdx}]", // placeholder — populated from recipe list
+                Text = string.Empty, // populated from recipe list
                 Position = new Vector2(cellX, cellY),
                 Size = new Vector2(160f, 40f),
                 MouseFilter = MouseFilterEnum.Stop
@@ -261,7 +261,7 @@ public sealed partial class HudProductWindow : Control
         var listStub = new Label
         {
             Name = "RecipeListStub",
-            Text = "// TODO(capture): recipe list from S2C 3/8 SmsgShopPageUpdate",
+            Text = string.Empty,
             Position = new Vector2(10f, 660f),
             Size = new Vector2(780f, 20f),
             LabelSettings = new LabelSettings { FontSize = 9 },

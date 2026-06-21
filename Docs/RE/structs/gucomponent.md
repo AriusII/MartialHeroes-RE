@@ -109,7 +109,8 @@ ordering; the IDB control-flow does not support any such ctor, and that narrativ
 | +0x40 | 4 | i32 | `y_extent` | Bottom edge = `pos_y(+0x28) + height(+0x20)`. **(Corrected arithmetic source.)** |
 | +0x44 | 64 | matrix | `transform` | 4×4 D3D transform matrix (a translation target built by `computeTransform`); spans **+0x44 .. +0x83**. Passed to the draw-submit path. **(New — explains the old +0x40→+0x84 gap.)** |
 | +0x84 | 4 | ptr | `parent` | **Parent component pointer.** The ctor zeroes it; the panel `AddChild` helper stores the parent into the child's +0x84; `computeTransform` follows it to accumulate world coordinates. **(Corrected: previously mislabelled zero-filler `field_84`.)** |
-| +0x88 | 1 | u8 | `hovered` | Status byte, zero-initialised; the hit-test sets **1** when the point is inside, **0** outside, firing enter/leave (vtable slots 11/12). |
+| +0x88 | 1 | u8 | `hovered` | **Steady** hover state, zero-initialised; the hit-test sets **1** while the point is inside, **0** outside. It is distinct from the edge latch at +0x89, which is what actually gates the enter/leave callbacks (see +0x89). |
+| +0x89 | 1 | u8 | `hover_edge` | **Hover enter/leave EDGE latch**, zero-initialised — a distinct field from the steady `hovered` at +0x88 (previously folded into it). It is the edge memory that fires the enter/leave callbacks exactly once per transition. In the hit-test (slot 5): when the point is **inside**, if `hover_edge == 0` this is the **enter** edge -> it sets `hover_edge = 1` and fires `onMouseEnter` (slot 11); when the point goes **outside**, if `hover_edge == 1` this is the **leave** edge -> it sets `hover_edge = 0`, fires `onMouseLeave` (slot 12), and clears the steady `hovered` at +0x88. So +0x88 carries the moment-to-moment hover state and +0x89 carries the latched edge that prevents the enter/leave callbacks from re-firing every frame. |
 | +0x8A | 1 | u8 | `interactive` | Set to **1** at construction; the **interactive / clickable gate** — `onEvent` only captures press/release on a widget whose +0x8A is set. **(Role pinned: previously value-only `flag_8A`.)** |
 | +0x8B | 1 | u8 | `flag_8B` | Zero-initialised. Role unpinned. |
 | +0x8C | 1 | u8 | `show_target` | Set to **1** at construction; the show/hide alpha-fade target (1 = showing, 0 = hiding). The draw/fade path chases the +0x04 alpha toward it; `setVisible` writes it. |
@@ -230,7 +231,7 @@ The base class exposes exactly **13 virtual slots** (indices 0..12) — re-confi
 | 2 | `setPosition(x, y)` — writes +0x24/+0x28 and mirrors the copies +0x34/+0x38. |
 | 3 | `getPosition` — reads +0x24/+0x28. |
 | 4 | `hitTest` by point vector (thin wrapper over slot 5). |
-| 5 | `hitTest(x, y)` — rect test against world rect `[world_x, world_x+width] × [world_y, world_y+height]`, toggles hover +0x88, fires enter/leave (slots 11/12). |
+| 5 | `hitTest(x, y)` — rect test against world rect `[world_x, world_x+width] × [world_y, world_y+height]`; sets the steady hover +0x88, and uses the **edge latch +0x89** to fire enter (slot 11) / leave (slot 12) exactly once per transition. |
 | 6 | `onEvent` — press/release capture and action dispatch, gated by the interactive flag +0x8A. |
 | 7 | `draw` — alpha-fade toward +0x8C, apply tint/forced-alpha (+0x0C/+0x0F), submit the bound handle +0x90 with the transform +0x44, and evaluate the auto-hide timer (+0x95/+0x98/+0x9C, callback +0xA0). |
 | 8 | `onUpdate` — recompute extents +0x3C/+0x40 and the src-rect copies +0x34/+0x38, then call slot 9. |

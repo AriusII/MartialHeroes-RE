@@ -110,8 +110,28 @@ public sealed partial class CharSelectWindow
             return;
         }
 
-        GD.Print($"[CharSelectWindow] DeleteCharacterRequested: name='{ls.Name}' slot={_selectedSlot}.");
-        EmitSignal(SignalName.DeleteCharacterRequested, _selectedSlot, ls.Name);
+        // Delete requires a confirm popup (Yes=54/No=55, msgs 14001/14002).
+        // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
+        ShowDeleteConfirmModal(_selectedSlot);
+    }
+
+    /// <summary>
+    ///     Handles the Yes button (action 54) in the delete-confirm modal.
+    ///     Emits <see cref="DeleteCharacterRequested" /> only after explicit user confirmation.
+    ///     spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
+    /// </summary>
+    private void OnDeleteConfirmYes(int _)
+    {
+        var slot = _pendingDeleteSlot;
+        HideDeleteConfirmModal();
+
+        if (slot < 0 || slot >= MaxSlots) return;
+        var ls = _slots[slot];
+        if (ls.IsEmpty) return;
+
+        GD.Print($"[CharSelectWindow] Delete confirmed by user: name='{ls.Name}' slot={slot}; " +
+                 "emitting DeleteCharacterRequested. spec: frontend_scenes.md §5.");
+        EmitSignal(SignalName.DeleteCharacterRequested, slot, ls.Name);
     }
 
     private void OnCreateClassAction(int actionId)

@@ -2,7 +2,7 @@
 
 ```
 verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; sun→screen→flare transform + lensflare.txt carried [confirmed] from CYCLE 7 static IDA; orbit/day-cycle math carried [confirmed] from prior IDA
-ida_reverified: 2026-06-20         # IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the sun→screen→lens-flare transform + lensflare.txt
+ida_reverified: 2026-06-21         # IDB SHA 263bd994 — ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE: the .box by-name open path is wired but gated by the map_option SKYBOX flag (reset to 0 before each area load); the sun/moon orbiting billboards are a separate system (Section D); prior CYCLE 7 (2026-06-20) added the sun→screen→lens-flare transform + lensflare.txt
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 bytes") RESOLVED into §B.2 below; CYCLE 7 refined the §D.2 sun-orbit model (log-curve, not sin) and resolved the §D.4 flare transform

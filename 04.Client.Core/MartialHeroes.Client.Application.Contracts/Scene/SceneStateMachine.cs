@@ -27,15 +27,20 @@ public sealed class SceneStateMachine
 
     /// <summary>
     ///     The "enter-world confirmed" latch — the engine-free analogue of the original's
-    ///     "already entering" guard / locally-cached character descriptor that distinguishes a BOOT
-    ///     load (terminates at Opening/Select per OPENNING/SKIP) from an ENTER load (terminates at
-    ///     InGame). Set when the 3/5 EnterGameAck arrives (an enter is in flight; the load that follows
-    ///     is the world load), consumed when that Load completes and routes to InGame.
-    ///     spec: Docs/RE/specs/client_runtime.md §7.5.3 (live enter path 4 → 2 → … → 5),
-    ///     §7.9.4 (char-select post-tick promotes to 5 when the "enter world confirmed" flag is set),
-    ///     §7.9.5 (happy path: enter-game-ack → 2 loading → … → 5);
-    ///     Docs/RE/specs/login_flow.md §1 step 9 / §3.5 (the chosen slot's descriptor is cached locally
-    ///     on enter, and the world load consumes it).
+    ///     "already entering" guard that distinguishes a BOOT load (terminates at Opening/Select per
+    ///     OPENNING/SKIP) from an ENTER load (terminates at InGame).
+    ///     <para>
+    ///         CORRECTED 2026-06-21 (live server 211.196.150.4): on the live server the enter is
+    ///         confirmed by the latch-armed <c>4/1 SmsgGameStateTick</c> (see
+    ///         <see cref="OnWorldEntryConfirmed" />), NOT by an enter-ladder <c>3/5</c> (which never
+    ///         arrives between the 1/9 and the 4/1 — the only 3/5 is the unsolicited post-login
+    ///         account-ack that precedes the 1/9). This flag remains the engine-free "this Load is the
+    ///         world load" marker for the defensive 3/5 path and for the 3/100 enter-phase rejection,
+    ///         but the authoritative enter trigger is the in-flight latch read at 4/1.
+    ///     </para>
+    ///     spec: Docs/RE/specs/client_runtime.md §7.5.3 (enter path terminates at 5);
+    ///     Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (CORRECTED enter ladder 1/9 → 4/1);
+    ///     Docs/RE/specs/net_contracts.md §1.3 (CORRECTED — 4/1 confirms + clears the latch).
     /// </summary>
     public bool EnteringWorld { get; private set; }
 
@@ -62,12 +67,27 @@ public sealed class SceneStateMachine
     }
 
     // spec: Docs/RE/specs/client_runtime.md §7.5.2 — EnterGameAck (3/5) forces Load (state 2), state-agnostic.
-    // Also arms the enter-world latch so the load that follows terminates at InGame (5), not
-    // Opening/Select — the engine-free analogue of caching the chosen slot's descriptor for the
-    // world load. spec: client_runtime.md §7.5.3 / §7.9.5; login_flow.md §1 step 9 / §3.5.
-    public bool OnEnterGameAck()
+    //
+    // CORRECTED 2026-06-21 (live server 211.196.150.4): on the live server the enter ladder is
+    // 1/9 → 4/1 — the enter is confirmed by 4/1 (see OnWorldEntryConfirmed), and there is NO
+    // enter-ladder 3/5. The only 3/5 is the UNSOLICITED post-login account-ack the replica pushes right
+    // after the 3/4/3/1 roster (login_flow.md §1 step 7 / §3.4), and it arrives BEFORE any 1/9 — so the
+    // in-flight latch is NOT armed when it is received. This method therefore forces Load (state 2) but
+    // leaves the enter-world latch DISARMED in the normal case, so the boot load terminates at
+    // Opening/Select (the roster), never the world. The world is entered ONLY by a latch-armed 4/1.
+    //
+    // The <paramref name="enterRequestPending"/> guard is retained for robustness: should some server
+    // ever interleave a 3/5 while a 1/9 is genuinely in flight, it pre-arms EnteringWorld; but on the
+    // live server this branch never taken (the 3/5 precedes the 1/9) and 4/1 remains the authority.
+    //
+    // spec: Docs/RE/specs/client_runtime.md §7.5.2 / §7.5.3; Docs/RE/specs/login_flow.md §1 step 7
+    // (unsolicited post-login 3/5, CORRECTED) / §3.4 (CORRECTED enter ladder 1/9 → 4/1);
+    // Docs/RE/specs/net_contracts.md §1.3 (CORRECTED enter ladder; 4/1 confirms + clears the latch).
+    public bool OnEnterGameAck(bool enterRequestPending)
     {
-        EnteringWorld = true;
+        // Defensive only: on the live server a 3/5 never arrives with the latch armed (it precedes the
+        // 1/9). The authoritative enter confirmation is the latch-armed 4/1 (OnWorldEntryConfirmed).
+        if (enterRequestPending) EnteringWorld = true;
         return Commit(Current.To(EngineSceneState.Load));
     }
 
@@ -92,9 +112,58 @@ public sealed class SceneStateMachine
         return Current.State == EngineSceneState.InGame && Commit(Current.To(EngineSceneState.Select));
     }
 
+    // spec: Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (CORRECTED 2026-06-21 against the live server);
+    //       Docs/RE/specs/net_contracts.md §1.3 (CORRECTED enter ladder).
+    //
+    // LIVE ENTER CONFIRMATION (4/1). The live server's enter ladder is 1/9 → 4/1: the 4/1
+    // SmsgGameStateTick world-entry snapshot IS the enter confirmation, with NO enter-ladder 3/5 in
+    // between (the only 3/5 on this server is the UNSOLICITED post-login account-ack that arrives
+    // BEFORE the 1/9). So a 4/1 observed while the in-flight latch is ARMED (a 1/9 was sent) is the
+    // server's confirmation that the world was entered: drive the scene to InGame (state 5) directly
+    // and consume the enter-world latch. This subsumes the older 3/5-driven Load → InGame promotion
+    // (OnEnterGameAck + AdvanceLoadScene) which never fired on the live server because the enter-ladder
+    // 3/5 never arrives. <paramref name="enterRequestPending"/> carries the latch-armed state captured
+    // by the handler BEFORE it clears the latch.
+    //
+    // A 4/1 with no enter pending (no 1/9 sent) is an ordinary in-world tick and must NOT transition
+    // the scene (it is already in InGame, or the unsolicited-3/5 path already drove Load); this method
+    // returns false (an explicit no-op) so total-machine coverage is preserved.
+    public bool OnWorldEntryConfirmed(bool enterRequestPending)
+    {
+        if (!enterRequestPending) return false; // no 1/9 in flight — not an enter confirmation.
+
+        // The live ladder collapses the spec's 4 → 2 → … → 5 enter path onto the single 4/1: from
+        // Select (the scene the 1/9 was sent from) or Load (if an unsolicited 3/5 nudged Load first),
+        // the latch-armed 4/1 commits straight to InGame (5). spec: client_runtime.md §7.5.3 (enter
+        // path terminates at 5); login_flow.md §1 step 9 (CORRECTED 1/9 → 4/1).
+        EnteringWorld = false;
+        if (Current.State is EngineSceneState.Select or EngineSceneState.Load)
+            return Commit(Current.To(EngineSceneState.InGame));
+
+        // Already in InGame (e.g. a re-enter tick) — no transition, but the enter is confirmed.
+        return false;
+    }
+
     // spec: Docs/RE/specs/client_runtime.md §7.5.2 — 3/100 SmsgCharActionResult result-code table (NOT 3/7).
     public bool OnCharActionResult(int result, bool hasLocalPlayer)
     {
+        // ENTER-PHASE REJECTION (Load + EnteringWorld). A 3/100 that arrives while an enter pre-armed
+        // EnteringWorld and pushed the scene to Load (the defensive 3/5 path), but the server answered
+        // 3/100 instead of the 4/1 world tick, is a REJECTION of the enter — e.g. a duplicate-session /
+        // ghost-lock. The world must NOT be entered: abandon the in-flight enter, disarm the latch, and
+        // return to char-select (Select, sub 8) so the user stays at the roster and the reason code is
+        // surfaced (the handler publishes the decoded code). Only Select / InGame have explicit 3/100
+        // rows in §7.5.2; this Load-phase row is the faithful realisation of "enter the world ONLY on the
+        // server's enter confirmation (the latch-armed 4/1); a 3/100 during the enter phase keeps the
+        // client at char-select". spec: Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (CORRECTED — enter
+        // only on a latch-armed 4/1); Docs/RE/specs/net_contracts.md §1.3 (CORRECTED enter ladder
+        // 1/9 → 4/1; 4/1 confirms + clears the latch); Docs/RE/specs/client_runtime.md §7.5.2.
+        if (Current.State == EngineSceneState.Load && EnteringWorld)
+        {
+            EnteringWorld = false;
+            return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), true);
+        }
+
         if (Current.State == EngineSceneState.Select && !hasLocalPlayer)
             return result switch
             {

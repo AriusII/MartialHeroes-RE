@@ -24,11 +24,20 @@ public sealed partial class GamePacketHandler
     /// </summary>
     private void HandleGameStateTick(ReadOnlySpan<byte> payload)
     {
-        // 4/1's very first action, before any form branch, is to CLEAR the single in-flight latch
-        // (this closes the 1/9 → 3/5 → 4/1 enter ladder; 3/5 leaves the latch armed). Unconditional.
-        // spec: Docs/RE/specs/world_entry.md §2.3 / §3.3; Docs/RE/specs/net_contracts.md §1.3;
-        // Docs/RE/specs/handlers.md §4/1 (latch clear is the first statement).
+        // LIVE ENTER LADDER (CORRECTED 2026-06-21 against the real server): the ladder is 1/9 → 4/1 —
+        // the 4/1 IS the enter confirmation, NO enter-ladder 3/5 in between. So capture the latch-armed
+        // state (a 1/9 in flight) BEFORE clearing the latch, then drive the scene Select/Load → InGame
+        // (state 5) on a latch-armed 4/1. 4/1's very first action is still to CLEAR the single in-flight
+        // latch (it confirms the enter and closes the ladder). spec: Docs/RE/specs/login_flow.md §1 step 9
+        // (CORRECTED 1/9 → 4/1); Docs/RE/specs/net_contracts.md §1.3 (CORRECTED: 4/1 confirms + clears the
+        // latch; no enter-ladder 3/5); Docs/RE/specs/world_entry.md §2.3 / §3.3; handlers.md §4/1.
+        var enterRequestPending = _inFlightLatch?.IsArmed ?? false;
         _inFlightLatch?.Clear();
+
+        // A latch-armed 4/1 is the live enter confirmation: route the scene spine to InGame (state 5)
+        // before building the world. A 4/1 with no 1/9 pending is an ordinary in-world tick (no-op).
+        // spec: Docs/RE/specs/login_flow.md §1 step 9 (CORRECTED); client_runtime.md §7.5.3.
+        if (enterRequestPending) _sceneStateMachine?.OnWorldEntryConfirmed(true);
 
         if (!SmsgGameStateTick.TryReadWorldEntrySeed(payload, out var seed))
         {

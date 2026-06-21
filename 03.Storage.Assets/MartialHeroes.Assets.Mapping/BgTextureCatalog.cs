@@ -11,26 +11,24 @@ namespace MartialHeroes.Assets.Mapping;
 ///     <c>data.vfs</c>).
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/specs/asset_pipeline.md §3 chain B — the runtime terrain-texture index is the
-///     BINARY <c>bgtexture.lst</c>; <c>bgtexture.txt</c> is absent from the image. The loader opens
-///     <c>data/map000/texture/</c> + <c>bgtexture.lst</c>, builds an index-keyed pool, and resolves
-///     each texture as <c>data/map000/texture/&lt;rel&gt;.dds</c>. CONFIRMED.
-///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected, 263bd994) — the pool slot is
-///     the 0-based <c>.lst</c> record index, and the <c>.map</c> <c>intTexId</c> IS that slot used DIRECTLY
-///     (NO -1; the accessor reads <c>pool[0]+stride*intTexId</c> at IDA 0x445833 / 0x44a46d); the path is
-///     <c>data/map000/texture/&lt;rel_path&gt;.dds</c> (the <c>data/map000/texture/</c> prefix and the
-///     <c>.dds</c> extension are added at runtime, not stored in the record). CONFIRMED.
+///     spec: Docs/RE/specs/asset_linkages.md §5 — the GLOBAL TEXTURE POOL: the runtime terrain-texture
+///     index is the BINARY <c>bgtexture.lst</c> under <c>data/map000/texture/</c>; <c>bgtexture.txt</c>
+///     is an authoring sidecar the client never reads. The loader opens <c>data/map000/texture/bgtexture.lst</c>,
+///     builds an index-keyed pool, and resolves each texture as <c>data/map000/texture/&lt;rel&gt;.dds</c>.
+///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected, anchor 263bd994) — the pool
+///     slot is the 0-based <c>.lst</c> record index, and the <c>.map</c> <c>intTexId</c> IS that slot used
+///     DIRECTLY (NO -1); the <c>data/map000/texture/</c> prefix and the <c>.dds</c> extension are added at
+///     runtime, not stored in the record. CONFIRMED (CYCLE 1, no drift).
 ///     <para>
 ///         <b>Indexing model (CONFIRMED).</b> The pool index equals the record's on-disk position.
 ///         Every record consumes a slot (the loader steps one pool element per record regardless of its
-///         kind byte). Records whose <c>kind</c> byte is <c>0</c> are <b>skipped at build time</b> — no
-///         texture path is constructed for them — but they still occupy their slot index, so the numbering
-///         of later records is never shifted. Such empty slots resolve to <see langword="null" /> here.
-///         spec: Docs/RE/specs/asset_pipeline.md §3 chain B — "Kind selector: … 0 ⇒ slot skipped (no
-///         element built)"; the loader builds one pool element per record (index stored on the element),
-///         so the index is the registration position. CONFIRMED.
-///         spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — the kind byte gates the pool init path
-///         (<c>== 0x01</c> animated vs the static path) but does not change the slot index. CONFIRMED.
+///         kind byte). A record whose relpath is empty resolves to <see langword="null" /> here — the
+///         slot index is still occupied so the numbering of later records is never shifted.
+///         spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — every record occupies a slot
+///         (stride 48 bytes, flat array, no gaps). CONFIRMED.
+///         spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — the kind byte gates a single binary
+///         branch (<c>== 0x01</c> STATIC vs <c>!= 0x01</c> NON-STATIC); it does NOT change the slot index.
+///         CODE-CONFIRMED (CYCLE 1).
 ///     </para>
 ///     <para>
 ///         <b>Two known terrain instances.</b> The terrain texture repository under
@@ -47,9 +45,11 @@ public sealed class BgTextureCatalog
     /// <summary>
     ///     The on-disk texture directory the terrain pool resolves against. The original client
     ///     hardcodes this prefix at the call site (it is not stored in the <c>.lst</c> record).
-    ///     spec: Docs/RE/specs/asset_pipeline.md §3 chain B — runtime path
-    ///     <c>data/map000/texture/&lt;rel&gt;.dds</c>; the terrain pool is global under
+    ///     spec: Docs/RE/specs/asset_linkages.md §5 — runtime path
+    ///     <c>data/map000/texture/&lt;rel&gt;.dds</c>; the terrain pool is GLOBAL under
     ///     <c>map000</c> for all areas. CONFIRMED.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Identification — terrain instance prefix; the prefix is
+    ///     not stored in the record, added at runtime.
     /// </summary>
     public const string TerrainTextureDir = "data/map000/texture/";
 
@@ -64,8 +64,8 @@ public sealed class BgTextureCatalog
     private const string DdsExtension = ".dds";
 
     // Index-keyed pool: slot[i] = relative texture path (no extension) for on-disk record i,
-    // or null for an empty / kind-0 / out-of-range slot. The pool index is the registration
-    // position — see the indexing-model note in the type remarks.
+    // or null for an empty-relpath slot. The pool index equals the record's on-disk position
+    // — see the indexing-model note in the type remarks.
     private readonly string?[] _relPathBySlot;
 
     private BgTextureCatalog(string?[] relPathBySlot)
@@ -82,8 +82,9 @@ public sealed class BgTextureCatalog
     /// <summary>
     ///     Builds the catalogue from the binary <c>bgtexture.lst</c> bytes delivered by the VFS — the
     ///     <b>runtime form</b> the original client consumes. The binary <c>bgtexture.lst</c> is the only
-    ///     real source; the loose-tree <c>bgtexture.txt</c> text mirror is absent from a real packed
-    ///     <c>data.vfs</c>. spec: Docs/RE/specs/asset_pipeline.md §3 chain B.
+    ///     real source; the <c>bgtexture.txt</c> text mirror is an authoring sidecar the client never reads.
+    ///     spec: Docs/RE/specs/asset_linkages.md §5 — global texture pool; .lst is the runtime artifact.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Scope — ".lst BINARY is the file the loader consumes".
     /// </summary>
     /// <param name="lstBytes">Raw <c>bgtexture.lst</c> file bytes (the complete file).</param>
     /// <returns>An index-keyed catalogue mapping each pool slot to its texture relpath.</returns>
@@ -106,25 +107,28 @@ public sealed class BgTextureCatalog
     /// </summary>
     /// <remarks>
     ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — the pool slot is the record's
-    ///     0-based on-disk index; a record with an empty relpath (a kind-0 / skipped slot) yields
-    ///     no texture. CONFIRMED.
+    ///     0-based on-disk index; a record with an empty relpath yields no texture for that slot.
+    ///     CONFIRMED.
     /// </remarks>
     public static BgTextureCatalog FromLst(BgtextureLstCatalog parsed)
     {
         ArgumentNullException.ThrowIfNull(parsed);
 
-        // The pool index is the record's on-disk position; every record occupies a slot. A record
-        // whose kind byte is 0 is built-skipped (no element) — represented here as an empty slot —
-        // but it still holds its slot index, so later records keep their positions.
-        // spec: Docs/RE/specs/asset_pipeline.md §3 chain B — slot index = registration position;
-        //   kind 0 ⇒ no element built. CONFIRMED.
+        // The pool index is the record's on-disk position; every record occupies a slot.
+        // A record with an empty relpath leaves the slot empty (no texture path constructed)
+        // but still holds its slot index so later records keep their positions.
+        // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — stride 48 bytes, flat array;
+        //   slot index = registration position. CONFIRMED.
+        // spec: Docs/RE/formats/bgtexture_lst.md §Enumerations — the 6 observed kind values
+        //   (0x01, 0x02, 0x0A, 0x0B, 0x0C, 0x14); the kind byte gates dispatch only (== 0x01 STATIC
+        //   vs != 0x01 NON-STATIC), it does NOT gate slot allocation. CODE-CONFIRMED (CYCLE 1).
         var slots = new string?[parsed.Count];
         foreach (var record in parsed.Records)
-            // A kind-0 record (or one with an empty relpath) leaves the slot empty: the original
-            // loader skips path construction for it (its kind byte is 0), and the slot resolves to
-            // no texture. We key strictly by the record's on-disk Index so numbering never shifts.
-            // spec: Docs/RE/specs/asset_pipeline.md §3 chain B — "0 ⇒ slot skipped (no element built)".
-            slots[record.Index] = record.KindRaw == 0 || record.RelPath.Length == 0
+            // An empty relpath means no texture path can be constructed for this slot.
+            // We key strictly by the record's on-disk Index so numbering never shifts.
+            // spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — rel_path char[47] @ +1;
+            //   a zero-length relpath = no texture path for this slot.
+            slots[record.Index] = record.RelPath.Length == 0
                 ? null
                 : record.RelPath;
 
@@ -142,20 +146,21 @@ public sealed class BgTextureCatalog
     ///     directly with NO subtraction.
     /// </param>
     /// <returns>
-    ///     The relative path (e.g. <c>"terrain/g3"</c>), or <see langword="null" /> for an empty,
-    ///     kind-0, or out-of-range slot.
+    ///     The relative path (e.g. <c>"terrain/g3"</c>), or <see langword="null" /> for an empty-relpath
+    ///     or out-of-range slot.
     /// </returns>
     /// <remarks>
-    ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected, 263bd994) — the pool
-    ///     accessor reads <c>pool[0]+stride*intTexId</c> with NO subtraction (IDA 0x445833 / 0x44a46d /
-    ///     store 0x44b267): the <c>.map</c> <c>intTexId</c> IS the 0-based pool slot. The earlier
-    ///     "1-based intTexId minus 1" reading was WRONG and is REFUTED.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join (IDA-corrected, anchor 263bd994) — the
+    ///     pool accessor reads <c>pool_base + stride * intTexId</c> with NO subtraction: the <c>.map</c>
+    ///     <c>intTexId</c> IS the 0-based pool slot, used DIRECTLY. The earlier "1-based intTexId minus 1"
+    ///     reading was WRONG and is REFUTED. CODE-CONFIRMED, CYCLE 1, no drift.
+    ///     spec: Docs/RE/specs/asset_linkages.md §5.1 — terrain texture join restated; intTexId → pool slot.
     ///     <para>
     ///         The ONE legitimate <c>-1</c> in the terrain chain is on the <c>.ted</c> per-cell byte, NOT here:
     ///         the byte is clamped to <c>[1, count]</c> (both <c>&lt;1</c> and <c>&gt;count</c> → 1) and indexes
     ///         the cell texture list as <c>perCellTexList[byte - 1]</c>, yielding the <c>intTexId</c> passed to
     ///         this method directly. That clamp + <c>-1</c> are the render-domain consumer's job, not this
-    ///         catalogue's. spec: Docs/RE/formats/terrain.md §5.6 — Ted_ResolvePatchTextures (IDA 0x44b296).
+    ///         catalogue's. spec: Docs/RE/formats/terrain.md §5.6 — Ted_ResolvePatchTextures.
     ///     </para>
     /// </remarks>
     public string? ResolveRelativePath(int poolSlot)
@@ -178,9 +183,10 @@ public sealed class BgTextureCatalog
     ///     <see langword="null" /> for an empty / out-of-range slot.
     /// </returns>
     /// <remarks>
-    ///     spec: Docs/RE/specs/asset_pipeline.md §3 chain B — runtime path
-    ///     <c>data/map000/texture/&lt;rel&gt;.dds</c>; the prefix and extension are added at runtime.
-    ///     CONFIRMED.
+    ///     spec: Docs/RE/specs/asset_linkages.md §5 — runtime path <c>data/map000/texture/&lt;rel&gt;.dds</c>;
+    ///     the prefix and extension are added at runtime (not stored in the record). CONFIRMED.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Record / body layout — rel_path is stored WITHOUT the
+    ///     <c>.dds</c> extension and WITHOUT the texture directory prefix. CONFIRMED.
     /// </remarks>
     public string? ResolveTexturePath(int poolSlot, string textureDir = TerrainTextureDir)
     {

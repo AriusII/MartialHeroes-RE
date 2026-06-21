@@ -1,7 +1,7 @@
 // World/NpcRenderer.Populator.cs
 //
 // Partial class — area population / placement / spawn iteration, lazy lookup-table loading,
-// ground-snap notification, and the g2048 pivot probe.
+// and ground-snap notification.
 // See NpcRenderer.cs for the full file description and all spec cites.
 //
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
@@ -22,21 +22,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class NpcRenderer
 {
-    // -------------------------------------------------------------------------
-    // g2048 pivot probe
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    ///     One-time explicit probe of the spec's canonical MOB rig (g2048) so its stand-up pivot is
-    ///     derived from its own rest AABB and printed, independently of g1. Builds the trio
-    ///     (g2048.bnd + g219000630.skn + g182006900.mot) off-tree, logs the pivot decision via the
-    ///     builder's diagnostics, then frees the temporary node. Skips silently if the assets are
-    ///     absent (the trio is user-supplied and may not be present in every install).
-    ///     spec: MISSION TASK 2 — "derive/verify the pivot empirically for mob rigs; check g2048
-    ///     explicitly and print per-rig pivot decisions."
-    ///     spec: Docs/RE/specs/skinning.md §8(d) — mob trio paths.
-    /// </summary>
-    private static bool _g2048Probed;
     // -------------------------------------------------------------------------
     // Primary entry point
     // -------------------------------------------------------------------------
@@ -78,13 +63,6 @@ public sealed partial class NpcRenderer
         EnsureActorMotionLoaded(assets);
         EnsureSkinClassMapLoaded(assets);
 
-        // STAND-UP PIVOT verification: the +90°-about-Z pivot was validated on the g1 PLAYER rig
-        // only. Explicitly probe the spec's canonical MOB rig (g2048) so its pivot decision is
-        // derived from ITS OWN rest AABB rather than inherited from g1.
-        // spec: MISSION TASK 2 — "check g2048 explicitly and print per-rig pivot decisions."
-        // spec: Docs/RE/specs/skinning.md §8(d) — g2048.bnd (45 bones) + g219000630.skn (933 verts).
-        ProbeG2048Pivot(assets);
-
         var spawned = 0;
 
         // ── Step 1: Monster spawns (mob{tag}.arr, 20-byte records) ─────────────
@@ -103,10 +81,6 @@ public sealed partial class NpcRenderer
         GD.Print($"[NpcRenderer] summary: {_totalSkinned} skinned / {_totalStaticFallback} static-fallback / " +
                  $"{_totalGrounded} grounded ({spawned} spawned, cap={MaxSpawns}, " +
                  $"{_pendingSnaps.Count} pending terrain arrival).");
-
-        // One mob AABB sanity line so headless runs can confirm "plausible, not exploded".
-        // spec: MISSION VERIFY — "print one mob AABB sanity line".
-        PrintMobAabbSanity();
     }
 
     // -------------------------------------------------------------------------
@@ -312,48 +286,6 @@ public sealed partial class NpcRenderer
                  $"({spawned} spawned from {spawns.Count} composer descriptors, cap={MaxSpawns}, " +
                  $"{_pendingSnaps.Count} pending terrain arrival). " +
                  "spec: assembly_graph.md §1 (Phase A — spawns from AreaAssembledEvent).");
-
-        PrintMobAabbSanity();
-    }
-
-    private void ProbeG2048Pivot(RealClientAssets assets)
-    {
-        if (_g2048Probed) return;
-        _g2048Probed = true;
-
-        const string sknPath = "data/char/skin/g219000630.skn";
-        const string bndPath = "data/char/bind/g2048.bnd";
-        const string motPath = "data/char/mot/g182006900.mot";
-
-        if (!assets.Contains(sknPath) || !assets.Contains(bndPath))
-        {
-            GD.Print("[NpcRenderer] g2048 pivot probe: trio assets absent — skipping explicit check.");
-            return;
-        }
-
-        try
-        {
-            var mesh = SknParser.Parse(assets.GetRaw(sknPath));
-            var skel = BndParser.Parse(assets.GetRaw(bndPath));
-            var clip = assets.Contains(motPath)
-                ? AnimationParser.Parse(assets.GetRaw(motPath))
-                : null;
-
-            GD.Print($"[NpcRenderer] g2048 pivot probe: skn={mesh.Positions.Length}v " +
-                     $"bnd={skel.Bones.Length}bones mot={(clip is null ? "none" : $"{clip.FrameCount}f")}.");
-
-            // Build off-tree (externalDrive so it never self-ticks) purely to trigger the per-rig
-            // pivot derivation + diagnostics, then free it. The builder prints the pivot decision.
-            var probe = SkinnedCharacterBuilder.Build(
-                mesh, skel, clip, null,
-                true, 0f,
-                out _, "g2048(mob-canonical)");
-            probe.QueueFree();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[NpcRenderer] g2048 pivot probe failed: {ex.Message}");
-        }
     }
 
     // -------------------------------------------------------------------------

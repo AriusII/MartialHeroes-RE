@@ -58,9 +58,18 @@ public sealed partial class MaskedTextField : Control
     private readonly int _maxLen;
     private readonly int _srcX;
     private readonly int _srcY;
+
+    // Cached slot-0 font — created once in _Ready; never re-allocated per draw.
+    // Eliminates the per-redraw HudFont.CreateSlot() SystemFont allocation (perf: L1).
+    private Font? _cachedFont;
     private float _caretPhaseMs; // accumulated ms for caret blink
     private bool _caretVisible = true;
     private bool _focused;
+
+    // Cached mask string — rebuilt only when _text.Length changes, not on every draw.
+    // Eliminates new string('*', n) per-redraw allocation (perf: L2).
+    private string _maskedText = "";
+    private int _maskedTextLen = -1; // sentinel: -1 forces first build
 
     private string _text = "";
 
@@ -114,6 +123,7 @@ public sealed partial class MaskedTextField : Control
         set
         {
             _text = value ?? "";
+            RebuildMaskedTextIfNeeded();
             QueueRedraw();
         }
     }
@@ -144,6 +154,14 @@ public sealed partial class MaskedTextField : Control
 
     public override void _Ready()
     {
+        // Cache the slot-0 font once. HudFont.CreateSlot allocates a SystemFont (heavyweight);
+        // caching here avoids recreating it on every _Draw triggered by the caret blink.
+        // Pattern: FixedAdvanceLabel in HudLabel.cs caches identically (line 135). (perf: L1)
+        _cachedFont = HudFont.CreateSlot(0);
+
+        // Build the initial masked string (empty text → empty stars, but sets _maskedTextLen).
+        RebuildMaskedTextIfNeeded();
+
         // Connect focus signals.
         FocusEntered += OnFocusEntered;
         FocusExited += OnFocusExited;
@@ -182,6 +200,7 @@ public sealed partial class MaskedTextField : Control
                 if (_text.Length > 0)
                 {
                     _text = _text[..^1];
+                    RebuildMaskedTextIfNeeded();
                     QueueRedraw();
                 }
 
@@ -202,6 +221,7 @@ public sealed partial class MaskedTextField : Control
                     if (_maxLen <= 0 || _text.Length < _maxLen)
                     {
                         _text += char.ConvertFromUtf32((int)key.Unicode);
+                        RebuildMaskedTextIfNeeded();
                         _caretVisible = true;
                         _caretPhaseMs = 0f;
                         QueueRedraw();
@@ -229,26 +249,23 @@ public sealed partial class MaskedTextField : Control
 
         // Text rendering — font slot 0 = DotumChe 12 px.
         // spec: Docs/RE/specs/frontend_layout_tables.md §1/§2.7 "font slot 0".
+        // _cachedFont is created once in _Ready — no per-draw allocation (perf: L1).
         var fontSize = HudFont.RowHeight(0); // slot 0 = 12 px. spec: frontend_layout_tables.md §1.
-        Font font = HudFont.CreateSlot(0);
+        var font = _cachedFont ?? HudFont.CreateSlot(0); // fallback only if _Ready not yet called
 
         if (_masked)
-        {
             // PW field: one '*' per character, advancing 6 px per char (spec: §2.7 "6 px/char, font slot 0").
             // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "'*' glyph, 6 px/char".
-            var stars = new string('*', _text.Length);
-            DrawString(font, new Vector2(1f, TextOffsetY + fontSize), stars,
+            // _maskedText is rebuilt in RebuildMaskedTextIfNeeded only when _text.Length changes — no per-draw alloc (perf: L2).
+            DrawString(font, new Vector2(1f, TextOffsetY + fontSize), _maskedText,
                 HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
                 new Color(1f, 1f, 1f));
-        }
         else
-        {
             // ID field: left-aligned clear text.
             // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "mask bit clear → draws the stored string left-aligned"
             DrawString(font, new Vector2(1f, TextOffsetY + fontSize), _text,
                 HorizontalAlignment.Left, (int)Size.X - 2, fontSize,
                 new Color(1f, 1f, 1f));
-        }
 
         // Caret — only while focused.
         // spec: Docs/RE/specs/frontend_layout_tables.md §2.7 "drawn only while focused"
@@ -265,6 +282,20 @@ public sealed partial class MaskedTextField : Control
                 new Vector2(caretX, Size.Y - 2f),
                 Colors.White);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Masked text cache helper
+    // -------------------------------------------------------------------------
+
+    // Rebuilds _maskedText only when _text.Length changes. This avoids allocating
+    // new string('*', n) on every _Draw (which fires on every caret blink). (perf: L2)
+    private void RebuildMaskedTextIfNeeded()
+    {
+        if (!_masked) return;
+        if (_text.Length == _maskedTextLen) return;
+        _maskedText = new string('*', _text.Length);
+        _maskedTextLen = _text.Length;
     }
 
     // -------------------------------------------------------------------------

@@ -54,11 +54,32 @@ public sealed class InputBus
 
     /// <summary>
     ///     Runs the chain of responsibility for <paramref name="e" /> immediately and returns whether it was
-    ///     consumed. Walks handlers in priority order, stopping at the first that returns
-    ///     <see langword="true" />. spec: Docs/RE/specs/input_ui.md §3 (UI consumes before world).
+    ///     consumed. Walks handlers in priority order; for every event EXCEPT a move it stops at the first
+    ///     that returns <see langword="true" /> (first-consumer-wins). spec: Docs/RE/specs/input_ui.md §3
+    ///     (UI consumes before world).
+    ///     <para>
+    ///         A <see cref="InputType.MouseMove" /> (legacy pointer type 3) is the ONE pointer event that does
+    ///         NOT stop at the first consumer: it is BROADCAST so every widget refreshes its hover state. The
+    ///         walk continues through all handlers; the return value reports whether ANY handler consumed it.
+    ///         spec: Docs/RE/specs/ui_event_dispatch.md §4 (move = hover broadcast, keep scanning) / §1
+    ///         (pointer/click group {3,4,5,6,7}; move is the lone broadcast).
+    ///     </para>
     /// </summary>
     public bool Dispatch(in InputEvent e)
     {
+        // Move (type 3) is the lone broadcast event: keep walking ALL handlers so every widget refreshes
+        // hover; report whether any consumed. All other events stop at the first consumer.
+        // spec: Docs/RE/specs/ui_event_dispatch.md §4 / §1.
+        if (e.Type == InputType.MouseMove)
+        {
+            var consumed = false;
+            foreach (var handler in _handlers)
+                if (handler.TryHandle(in e))
+                    consumed = true; // do NOT stop — broadcast to refresh every widget's hover.
+
+            return consumed;
+        }
+
         foreach (var handler in _handlers)
             if (handler.TryHandle(in e))
                 return true; // UI (or an earlier link) consumed it; the world never sees it.

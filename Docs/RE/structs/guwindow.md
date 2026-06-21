@@ -9,9 +9,12 @@ conflicts: none open. MainWindow size CODE-CONFIRMED at 0x5B8 = 1464 bytes (CYCL
 # GUWindow multiple-inheritance layout (clean-room spec)
 
 Neutral, rewritten offset model of the legacy client's top-level UI window object. `GUWindow` is the
-top of the in-house `Diamond::GU*` widget toolkit: it derives from `GUPanel` (and through it
-`GUComponent`) **and** from a second event-handler base (RTTI class **"Cmdhandler"**), embedding a
-command handler, an auxiliary 3D/scene view (RTTI class **`Diamond::GView`**), and a texture/skin-atlas
+top of the in-house `Diamond::GU*` widget toolkit. It is a multiple-inheritance class: the primary
+single-inheritance chain (`GUWindow -> GUPanel -> GUComponent`) occupies the start of the object, and a
+second event-handler base subobject sits at +0xBC. That second base is the **abstract** event handler
+`Diamond::EventHandler`, realised through a **concrete embedded `CmdHandler` subobject** (`CmdHandler`
+derives `Diamond::EventHandler`; the RTTI class name of the concrete subobject is **`CmdHandler`**).
+The object also embeds an auxiliary 3D/scene view (`Diamond::GView`) and a per-window texture/skin-atlas
 list. Five top-level windows in the client derive from it; the in-game HUD master ("MainMaster") is one
 of them.
 
@@ -25,12 +28,12 @@ of them.
 
 | Aspect | State |
 |---|---|
-| Two-vptr multiple-inheritance shape | **CODE-CONFIRMED** — the primary vtable at +0x00 and the secondary command-handler vtable at +0xBC. |
+| Two-vptr multiple-inheritance shape | **CODE-CONFIRMED** — the primary vtable at +0x00, and the secondary vtable at +0xBC belonging to the concrete `CmdHandler` subobject (which realises the abstract `Diamond::EventHandler` base). |
 | Embedded sub-object start offsets (command handler / view / texture list) | **CODE-CONFIRMED** — start offsets pinned (+0xBC / +0xE8 / +0x220). |
 | Embedded sub-object byte spans | **CODE-CONFIRMED** — command-handler span +0xBC..+0xE7 (44B) and aux-view span +0xE8..+0x21F (312B) are derivable from the next sub-object's start; no longer "unknown". |
 | Inherited base-class region (GUPanel → GUComponent) | **CODE-CONFIRMED** — see `structs/gucomponent.md`. |
 | Window flag bit | **CODE-CONFIRMED** — the "is a window" mask 0x2000, OR-set **last** in the ctor. |
-| Primary vtable (15 slots) + secondary vtable (3 slots) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. |
+| Primary vtable (15 slots) + secondary vtable (**2 slots**) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. The secondary (MI base) vtable holds **2 slots**; whether a given derived window overrides those 2 slots is **[UNVERIFIED]** this pass. |
 | `MainWindow` total size | **CODE-CONFIRMED** (CYCLE 7) — **1464 bytes (0x5B8)**, from the zero-init routine's highest writes (dword at +0x5B0, byte at +0x5B4 → end 0x5B5 → 4-aligned 0x5B8). |
 | `MainWindow` static-singleton construction | **CODE-CONFIRMED** (CYCLE 7) — Meyers-style accessor over a static buffer; one-shot guarded ctor, atexit-registered; primary vtable at +0x00, secondary (MI base) vtable at +0xBC, then the service block is zero-cleared. |
 | Panel-slot array mechanism | **CODE-CONFIRMED** (CYCLE 7) — base **+0x238**, pointer-sized entries, slot index `= (offset − 0x238) / 4`. (Slot→class roster contents live in `specs/ui_system.md`.) |
@@ -47,12 +50,18 @@ contents** belong to `specs/ui_system.md`.
 
 `GUWindow` is the classic MSVC multiple-inheritance layout: **two vtable pointers in one object**.
 The primary chain (`GUWindow → GUPanel → GUComponent`) occupies the start of the object; a second
-event-handler base ("Cmdhandler") contributes a second vtable pointer mid-object at +0xBC.
+event-handler base — the concrete `CmdHandler` subobject realising the abstract `Diamond::EventHandler` — contributes a second vtable pointer mid-object at +0xBC.
+
+> **Two real base subobjects only.** The object has exactly two genuine base subobjects with a vtable
+> pointer: the primary chain at +0x00 and the `CmdHandler`/`Diamond::EventHandler` subobject at +0xBC.
+> A third class-layout record (with a corrupt base-class count) surfaces during analysis but has **no**
+> object vtable pointer; it is a transient dynamic-cast / exception-catch artifact, **not** a third base
+> subobject. Do not model a third vptr.
 
 | Range | Region |
 |---|---|
 | +0x00 .. ~+0xBB | GUPanel header (which contains the GUComponent header) — see `structs/gucomponent.md` |
-| +0xBC .. +0xE7 | Embedded **command handler** ("Cmdhandler") sub-object (the event-handler base; carries the secondary vtable). 44 bytes. |
+| +0xBC .. +0xE7 | Embedded **command handler** (`CmdHandler`) sub-object — the concrete realisation of the abstract `Diamond::EventHandler` base; carries the secondary vtable. 44 bytes. |
 | +0xE8 .. +0x21F | Embedded **auxiliary view** sub-object (`Diamond::GView`, a 3D/scene view with HUD/scene callback hook slots). 312 bytes. |
 | +0x220 .. (end) | Embedded **texture list** sub-object (the window's per-window texture / skin-atlas list). |
 
@@ -84,8 +93,8 @@ order:
 | +0x00 | 4 | ptr | `vftable_primary` | Overwritten with the GUWindow vtable after the GUPanel base ran. The primary interface (component/panel/window method chain) — 15 slots, see §3. |
 | +0x08 | 4 | u32 | `flags` | OR-set with mask **0x2000** → "is a top-level window" (the window bit; see `structs/gucomponent.md §4`). OR-set **last** in the ctor. |
 | +0xA4 .. +0xB8 | — | — | (inherited GUPanel child-list region) | See `structs/gucomponent.md §3`. |
-| +0xBC | 4 | ptr | `vftable_secondary` | The **second** vtable pointer — the command-handler ("Cmdhandler") event-handler interface used to dispatch input/command events into the window. This is the MSVC multiple-inheritance adjustor-thunk layout. 3 slots, see §3. |
-| +0xBC .. +0xE7 | 44 | obj | `command_handler` ("Cmdhandler") | Embedded command-handler (event-handler) sub-object, constructed in place starting here. Its first word is the secondary vtable above. The command handler routes a clicked widget's action id to the window's action dispatch. RTTI class name literally **"Cmdhandler"**. Internal layout below. |
+| +0xBC | 4 | ptr | `vftable_secondary` | The **second** vtable pointer — the `CmdHandler` subobject's event-handler interface (the concrete realisation of abstract `Diamond::EventHandler`), used to dispatch input/command events into the window. This is the MSVC multiple-inheritance adjustor-thunk layout. **2 slots**, see §3. |
+| +0xBC .. +0xE7 | 44 | obj | `command_handler` (`CmdHandler`) | Embedded command-handler sub-object — the concrete `CmdHandler` realising the abstract `Diamond::EventHandler` base — constructed in place starting here. Its first word is the secondary vtable above. The command handler routes a clicked widget's action id to the window's action dispatch. RTTI class name of the concrete subobject is **`CmdHandler`**; its base is **`Diamond::EventHandler`**. Internal layout below. |
 | +0xC0 | 16 | obj | `command_handler.name` | Inline `std::string` (16-byte small-string buffer) holding the handler's name (e.g. the HUD master's "MainMaster"). |
 | +0xDC | 4 | u32 | `command_handler.count_a` | First numeric ctor argument (e.g. 1000). |
 | +0xE0 | 4 | u32 | `command_handler.count_b` | Second numeric ctor argument (e.g. 28158). |
@@ -143,16 +152,23 @@ GUWindow vtables, then each derived ctor overwrites them with its own).
 | 13 | sweep deferred-removed children | reads each child's remove-mark byte at child +0x8D. |
 | 14 | aux-view (GView) init helper | finalises the embedded `GView`: sets its size, writes owner back-pointers (at GView-relative +200/+216/+168) to the owning window, and sets the (null in the shipped client) hook function-ptr slot at GView-relative +164. |
 
-### 3.2 Secondary command-handler vtable — 3 slots
+### 3.2 Secondary command-handler vtable — 2 slots
 
-The "Cmdhandler" event interface. The GUWindow base installs a 3-slot vtable; its second slot is the
-event-handler entry (the window's `SetVisible`/event sink). Derived windows replace this whole vtable
-with their own variant (e.g. the login window and the MainWindow each install a distinct 3-slot
-command-handler vtable; the MainWindow's has two live entries, a null, and a runtime-library thunk).
+The `CmdHandler` event interface (the concrete realisation of the abstract `Diamond::EventHandler`
+base). **The GUWindow secondary (MI base) vtable holds exactly 2 slots** — its boundary is pinned by
+the class-layout record that immediately precedes the primary vtable, so the slot count is not a guess.
+Slot 0 is the base event-handler entry; slot 1 is the window's event sink (the `SetVisible` / event
+delivery path on the MI-base subobject).
 
-The "Cmdhandler" **base** class (before GUWindow's override) has a 5-slot vtable; the **"Cmdhandler"**
-RTTI class name is reached through that base vtable's RTTI record and is the original author's term for
-this sub-object.
+Whether a given **derived window overrides** these 2 slots — and what each override does — is
+**[UNVERIFIED]** this pass. (A prior cycle reported the MainWindow's secondary vtable as carrying extra
+live/null/thunk entries; that count is **superseded** by the 2-slot bound recovered here, and any
+per-derived override behaviour is left unverified pending a dedicated walk.)
+
+Both the abstract `Diamond::EventHandler` base and the concrete `CmdHandler` base each expose a 2-slot
+vtable of their own (before any GUWindow override). The `CmdHandler` and `Diamond::EventHandler` class
+names are reached through those base vtables' RTTI records and are the original author's terms for this
+sub-object and its abstract base.
 
 ---
 
@@ -223,7 +239,8 @@ of the widget hierarchy (`GUComponent → GUPanel → GUWindow → MainWindow`).
   one-shot construction latch; the constructor is **atexit-registered** for teardown.
 - The constructor chains the `GUWindow` base ctor, then **installs the primary `MainWindow` vtable at
   +0x00** (over the GUWindow one), then **installs a secondary (multiple-inheritance base-subobject)
-  vtable at +0xBC** (the command-handler interface, over the GUWindow command-handler vtable), then
+  vtable at +0xBC** (the `CmdHandler` interface realising abstract `Diamond::EventHandler`, over the
+  GUWindow command-handler vtable), then
   runs a **zero-clear of the service block** (the panel-slot array and trailing fields).
 - Because it is a static buffer, the object size cannot be read from an allocation size; it is
   recovered from the zero-init routine's highest writes (see §6.2).

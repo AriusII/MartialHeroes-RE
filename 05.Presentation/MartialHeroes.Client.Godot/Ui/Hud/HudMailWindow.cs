@@ -308,8 +308,7 @@ public sealed partial class HudMailWindow : Control
         var attachStub = new Label
         {
             Name = "AttachListStub",
-            Text = "// TODO(world-campaign): attachment list (30 rows, action 6..35 → item pick).\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.21.3 CODE-CONFIRMED.",
+            Text = string.Empty,
             Position = new Vector2(8f, 122f),
             Size = new Vector2(344f, 40f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
@@ -377,9 +376,7 @@ public sealed partial class HudMailWindow : Control
         panel.AddChild(new Label
         {
             Name = "InboxStub",
-            Text = "// TODO(capture): mailbox populate.\n" +
-                   "// S2C SmsgSrvLetterReceived (1/20) = arrival notification only.\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.21.7.",
+            Text = string.Empty,
             Position = new Vector2(8f, 130f),
             Size = new Vector2(344f, 60f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,

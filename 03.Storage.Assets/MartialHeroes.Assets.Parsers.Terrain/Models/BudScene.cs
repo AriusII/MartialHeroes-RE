@@ -29,24 +29,22 @@ public sealed class BudScene
 public sealed class BudObject
 {
     /// <summary>
-    ///     Object sub-class discriminator.
-    ///     Only value 0 observed; full enumeration UNVERIFIED.
-    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — type_byte u8 @ +0x00: PARTIAL.
+    ///     Object sub-class discriminator. Confirmed-variable: values {0, 1, 2} observed in samples.
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — type_byte u8 @ +0x00: CONFIRMED-variable {0,1,2}.
     /// </summary>
     public required byte TypeByte { get; init; }
 
     /// <summary>
     ///     1-based index into the TEXTURES list of the enclosing BUILDING section.
-    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: PARTIAL.
-    ///     1-based convention assumed (only value 1 observed).
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: CONFIRMED (1-based).
     /// </summary>
     public required uint TexId { get; init; }
 
     /// <summary>
     ///     Vertex array, each 32 bytes: pos XYZ (f32), normal XYZ (f32), uv UV (f32).
     ///     spec: Docs/RE/formats/terrain_scene.md §Vertex record (32 bytes): CONFIRMED.
-    ///     Max 3072 vertices enforced at parse time.
-    ///     spec: Docs/RE/formats/terrain_scene.md §vertex_count — "Must be ≤ 3072": CONFIRMED.
+    ///     vertex_count cap 3072: warn-and-continue (never enforced as hard error at parse time).
+    ///     spec: Docs/RE/formats/terrain_scene.md §vertex_count — "cap=3072 is warn-and-continue": CONFIRMED.
     /// </summary>
     public required BudVertex[] Vertices { get; init; }
 

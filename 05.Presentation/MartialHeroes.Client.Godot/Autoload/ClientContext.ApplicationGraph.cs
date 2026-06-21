@@ -141,18 +141,6 @@ public sealed partial class ClientContext
         HudText = new HudTextLibrary(_uiAssets);
         GD.Print("[ClientContext] HudAtlasLibrary + HudTextLibrary constructed (Ui/Scenes substrate).");
 
-        // 14. Skill icon catalog: skillicon.txt + musajung.do stance table (lazy).
-        //     spec: Docs/RE/formats/ui_manifests.md §2.6 / §2.7.
-        IconCatalogs = new IconCatalogs(_uiAssets);
-        GD.Print($"[ClientContext] IconCatalogs: {IconCatalogs.DoRecordCount} musajung.do records. " +
-                 "spec: Docs/RE/formats/ui_manifests.md §2.7.");
-
-        // 15. Item icon catalog: data/item/texturelist.txt (lazy, whole-texture blit).
-        //     spec: Docs/RE/formats/ui_manifests.md §10 / §10.5.
-        ItemIconCatalog = new ItemIconCatalog(_uiAssets);
-        GD.Print($"[ClientContext] ItemIconCatalog: {ItemIconCatalog.ManifestCount} texturelist.txt entries. " +
-                 "spec: Docs/RE/formats/ui_manifests.md §10.");
-
         // 16-A. HUD event hub: the single facade for all per-frame HUD channels.
         //     Constructed once here; widgets subscribe via IHudEventHub.
         //     spec: MartialHeroes.Client.Application.Hud — IHudEventHub / HudEventHub.
@@ -324,7 +312,7 @@ public sealed partial class ClientContext
         //     spec: Docs/RE/specs/login_flow.md §5.2 — AccountCharacterState seeds from 3/5 char-count field.
         var characterSelection = new CharacterSelectionStore();
         var accountCharacters = new AccountCharacterState();
-        CharacterSelection = characterSelection; // exposed for LiveLoginAutoload roster polling
+        CharacterSelection = characterSelection; // shared store (filled on 3/1, read on SelectCharacterAsync)
         GD.Print("[ClientContext] CharacterSelectionStore + AccountCharacterState constructed and shared. " +
                  "spec: login_flow.md §3.5 / §5.2.");
 
@@ -359,13 +347,15 @@ public sealed partial class ClientContext
         // 19b. SessionToken — resolve the 33-byte launcher/session token for payload +0x01 of 1/9.
         //
         //     Priority (first non-empty string wins):
-        //       a) env MH_SESSION_TOKEN  — explicit override; use System.Environment (NOT Godot.OS —
-        //          project idiom: global::Godot.* for Godot statics; System.Environment for OS env).
+        //       a) env MH_SESSION_TOKEN  — explicit override (env-gated verification harness).
+        //          Use System.Environment (NOT Godot.OS — project idiom: global::Godot.* for Godot
+        //          statics; System.Environment for OS env).
         //       b) clientdata/session_token.txt (first non-empty trimmed line) — gitignored by the
         //          clientdata/ blanket .gitignore which already ignores everything except .gitignore
         //          and README.md; no extra gitignore rule needed.
-        //       c) dev-fallback constant — the public MD5 hash of the legitimate binary, safe to
-        //          hardcode (it is a public build identity, not a credential).
+        //       c) absent → zero-filled 33-byte buffer. No fabricated demo value. When no real token
+        //          is supplied the field stays zero, which is acceptable for the interactive UI login
+        //          path where the maintainer has not yet obtained a launcher token.
         //
         //     The resolved string is ASCII-encoded (spec: SessionToken is an asciiz within 33 bytes),
         //     copied up to 32 bytes into a zero-initialised 33-byte array (byte[32] stays NUL).
@@ -380,14 +370,11 @@ public sealed partial class ClientContext
         //     ApplicationUseCases ctor: _versionToken is derived from versionSource unconditionally.
         //     spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
 
-        // Dev-fallback: public MD5 of the legitimate doida.exe binary (public build identity).
-        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
-        const string DevFallbackSessionToken = "a1437026e6eefeba94702909cd9a33b9"; // spec: cmsg_char_enter.yaml
-
-        string sessionTokenStr;
+        string? sessionTokenStr = null;
         string sessionTokenSource;
 
-        // a) env MH_SESSION_TOKEN — explicit override (System.Environment, not Godot.OS).
+        // a) env MH_SESSION_TOKEN — env-gated verification harness (System.Environment, not Godot.OS).
+        // spec: login_flow.md §3.3; cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
         var envToken = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
         if (!string.IsNullOrWhiteSpace(envToken))
         {
@@ -399,7 +386,6 @@ public sealed partial class ClientContext
             // b) clientdata/session_token.txt — resolved via ClientPathResolver.ResolveClientDir().
             //    The clientdata/ blanket .gitignore already ignores this file; no extra rule needed.
             var clientDirForToken = ClientPathResolver.ResolveClientDir();
-            string? fileToken = null;
             if (clientDirForToken is not null)
             {
                 var tokenFilePath = Path.Combine(clientDirForToken, "session_token.txt");
@@ -411,7 +397,7 @@ public sealed partial class ClientContext
                             var trimmed = rawLine.Trim();
                             if (trimmed.Length > 0)
                             {
-                                fileToken = trimmed;
+                                sessionTokenStr = trimmed;
                                 break;
                             }
                         }
@@ -422,35 +408,27 @@ public sealed partial class ClientContext
                 }
             }
 
-            if (fileToken is not null)
-            {
-                sessionTokenStr = fileToken;
-                sessionTokenSource = "file:session_token.txt";
-            }
-            else
-            {
-                // c) dev-fallback — public binary hash; safe to print.
-                sessionTokenStr = DevFallbackSessionToken;
-                sessionTokenSource = "dev-fallback";
-            }
+            sessionTokenSource = sessionTokenStr is not null ? "file:session_token.txt" : "absent";
         }
 
-        // Build the 33-byte buffer: ASCII-encode (asciiz within the field), copy up to 32 bytes,
-        // leave byte[32] = NUL (the array is zero-initialised so the trailing NUL is automatic).
+        // Build the 33-byte buffer: ASCII-encode if a token was found, else stay zero-filled.
         // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes, asciiz).
         var sessionTokenBytes = new byte[ApplicationUseCases.SessionTokenLength]; // 33 bytes, zero-init
-        var encodedToken = Encoding.ASCII.GetBytes(sessionTokenStr);
-        var copyLen = Math.Min(encodedToken.Length, ApplicationUseCases.SessionTokenLength - 1); // max 32; byte[32]=NUL
-        encodedToken.AsSpan(0, copyLen).CopyTo(sessionTokenBytes);
+        if (sessionTokenStr is not null)
+        {
+            var encodedToken = Encoding.ASCII.GetBytes(sessionTokenStr);
+            var copyLen = Math.Min(encodedToken.Length, ApplicationUseCases.SessionTokenLength - 1);
+            encodedToken.AsSpan(0, copyLen).CopyTo(sessionTokenBytes);
+        }
 
-        // Log source only (never print the raw token when it came from env or file).
-        if (sessionTokenSource == "dev-fallback")
-            GD.Print(
-                $"[ClientContext] SessionToken wired (source={sessionTokenSource}, token={DevFallbackSessionToken}, 33B). " +
-                "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
-        else
-            GD.Print($"[ClientContext] SessionToken wired (source={sessionTokenSource}, 33B). " +
-                     "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
+        // Log source and length only. Never print the raw token value (even from env/file).
+        // spec: Docs/RE/specs/login_flow.md §3.3 — token is a launcher identity, not a secret per
+        // se, but the env-harness convention is: log "present/absent + length", not the raw value.
+        GD.Print(sessionTokenSource == "absent"
+            ? "[ClientContext] SessionToken wired (source=absent, zero-filled 33B — supply MH_SESSION_TOKEN or session_token.txt for a real token). " +
+              "spec: cmsg_char_enter.yaml; login_flow.md §3.3."
+            : $"[ClientContext] SessionToken wired (source={sessionTokenSource}, len={sessionTokenStr!.Length}, 33B). " +
+              "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
 
         // 20. Use-case facade — presentation calls these for input intents.
         //     versionToken: the resolved 33-byte SessionToken span → ApplicationUseCases stamps it at

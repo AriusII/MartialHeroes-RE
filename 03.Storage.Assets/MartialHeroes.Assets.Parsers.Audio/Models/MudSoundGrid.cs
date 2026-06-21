@@ -17,20 +17,23 @@ namespace MartialHeroes.Assets.Parsers.Audio.Models;
 ///         <item>
 ///             <term>+0</term>
 ///             <description>
-///                 WlkSoundIndex (PLAUSIBLE) — walk-footstep zone index into the area's <c>.wlk</c> sound table.
-///                 Was previously labelled <c>reserved0</c>. Not read by the analysed ambient-update path;
-///                 observed 0 in available samples. The pairing is PLAUSIBLE (exactly two unaccounted tile bytes
-///                 match exactly two unaccounted table types: .wlk and .run), but unverified.
-///                 spec: Docs/RE/formats/mud.md §Tile layout offset 0 — wlkZoneId?: PLAUSIBLE (was MED/unused).
+///                 Unread0 — NOT read by the located consumer. Meaning unknown; treat as opaque/ignored.
+///                 The walk-footstep zone index hypothesis (bytes 0/1 → .wlk / .run tables) is REFUTED:
+///                 the sole consumer reads only bytes 2–7; bytes 0 and 1 are never read.
+///                 Observed 0 in available samples.
+///                 spec: Docs/RE/formats/mud.md §Tile layout offset 0 — unread0: REFUTED-hypothesis / unconsumed
+///                 (2026-06-21).
 ///             </description>
 ///         </item>
 ///         <item>
 ///             <term>+1</term>
 ///             <description>
-///                 RunSoundIndex (PLAUSIBLE) — run-footstep zone index into the area's <c>.run</c> sound table.
-///                 Was previously labelled <c>reserved1</c>. Not read by the analysed ambient-update path;
-///                 observed 0 in available samples. PLAUSIBLE — see bytes-0/1 hypothesis in mud.md.
-///                 spec: Docs/RE/formats/mud.md §Tile layout offset 1 — runZoneId?: PLAUSIBLE (was MED/unused).
+///                 Unread1 — NOT read by the located consumer. Meaning unknown; treat as opaque/ignored.
+///                 The run-footstep zone index hypothesis (bytes 0/1 → .wlk / .run tables) is REFUTED:
+///                 the sole consumer reads only bytes 2–7; bytes 0 and 1 are never read.
+///                 Observed 0 in available samples.
+///                 spec: Docs/RE/formats/mud.md §Tile layout offset 1 — unread1: REFUTED-hypothesis / unconsumed
+///                 (2026-06-21).
 ///             </description>
 ///         </item>
 ///         <item>
@@ -43,36 +46,37 @@ namespace MartialHeroes.Assets.Parsers.Audio.Models;
 ///         <item>
 ///             <term>+3</term>
 ///             <description>
-///                 bgeAmbientId0 — background-environment ambient layer 0; 0 = silence. spec:
+///                 bgeAmbientId0 — background-environment ambient index, layer 0 → .bge table. spec:
 ///                 Docs/RE/formats/mud.md §Tile layout offset 3 — bgeAmbientId0 u8: CONFIRMED.
 ///             </description>
 ///         </item>
 ///         <item>
 ///             <term>+4</term>
 ///             <description>
-///                 bgeAmbientId1 — background-environment ambient layer 1; 0 = silence. spec:
+///                 bgeAmbientId1 — background-environment ambient index, layer 1 → .bge table. spec:
 ///                 Docs/RE/formats/mud.md §Tile layout offset 4 — bgeAmbientId1 u8: CONFIRMED.
 ///             </description>
 ///         </item>
 ///         <item>
 ///             <term>+5</term>
 ///             <description>
-///                 effId0 — 3D positional sound effect slot 0; 0 = silence. spec: Docs/RE/formats/mud.md §Tile
+///                 effId0 — 3D positional sound-effect index, slot 0 → .eff table. spec: Docs/RE/formats/mud.md §Tile
 ///                 layout offset 5 — effId0 u8: CONFIRMED.
 ///             </description>
 ///         </item>
 ///         <item>
 ///             <term>+6</term>
 ///             <description>
-///                 effId1 — 3D positional sound effect slot 1; 0 = silence. spec: Docs/RE/formats/mud.md §Tile
+///                 effId1 — 3D positional sound-effect index, slot 1 → .eff table. spec: Docs/RE/formats/mud.md §Tile
 ///                 layout offset 6 — effId1 u8: CONFIRMED.
 ///             </description>
 ///         </item>
 ///         <item>
 ///             <term>+7</term>
 ///             <description>
-///                 effId2 — 3D positional sound effect slot 2; 0 = silence. spec: Docs/RE/formats/mud.md §Tile
-///                 layout offset 7 — effId2 u8: CONFIRMED.
+///                 effId2 — 3D positional sound-effect index, slot 2 → .eff table. Confirmed consumed: read and
+///                 used as a direct index into the per-area EFF sound table.
+///                 spec: Docs/RE/formats/mud.md §Tile layout offset 7 — effId2 u8: CONFIRMED.
 ///             </description>
 ///         </item>
 ///     </list>
@@ -85,28 +89,30 @@ public readonly struct MudSoundTile
     // MemoryMarshal.Cast is valid because Pack=1 and all fields are u8 (no endianness concern).
 
     /// <summary>
-    ///     Walk-footstep zone index (PLAUSIBLE); selects a record in the area's <c>.wlk</c> sound table.
-    ///     Observed zero in available samples. Not read by the analysed ambient-update path.
-    ///     Was previously labelled <c>Reserved0</c>; renamed per spec update 2026-06-14.
+    ///     Byte 0 — NOT read by the located ambient-sound consumer. Meaning unknown; treat as opaque/ignored.
+    ///     Observed 0 in available samples (all 4096 tiles of one real VFS cell sample).
+    ///     The walk-footstep index hypothesis (bytes 0/1 → .wlk / .run tables) is REFUTED:
+    ///     the sole consumer reads only bytes 2–7; bytes 0 and 1 are never read.
     /// </summary>
     /// <remarks>
-    ///     spec: Docs/RE/formats/mud.md §Tile layout offset 0 — wlkZoneId?: PLAUSIBLE (was MED/unused).
-    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis: PLAUSIBLE — needs verify.
-    ///     Do not treat as confirmed footstep index; do not treat as hard "reserved" either.
+    ///     spec: Docs/RE/formats/mud.md §Tile layout offset 0 — unread0: REFUTED-hypothesis / unconsumed.
+    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis REFUTED (2026-06-21).
+    ///     A faithful port treats this byte as opaque/ignored.
     /// </remarks>
-    public readonly byte WlkSoundIndex; // PLAUSIBLE — spec: mud.md §Tile layout offset 0 — wlkZoneId?
+    public readonly byte Unread0; // NOT read by consumer — spec: mud.md §Tile layout offset 0 — unread0
 
     /// <summary>
-    ///     Run-footstep zone index (PLAUSIBLE); selects a record in the area's <c>.run</c> sound table.
-    ///     Observed zero in available samples. Not read by the analysed ambient-update path.
-    ///     Was previously labelled <c>Reserved1</c>; renamed per spec update 2026-06-14.
+    ///     Byte 1 — NOT read by the located ambient-sound consumer. Meaning unknown; treat as opaque/ignored.
+    ///     Observed 0 in available samples (all 4096 tiles of one real VFS cell sample).
+    ///     The run-footstep index hypothesis (bytes 0/1 → .wlk / .run tables) is REFUTED:
+    ///     the sole consumer reads only bytes 2–7; bytes 0 and 1 are never read.
     /// </summary>
     /// <remarks>
-    ///     spec: Docs/RE/formats/mud.md §Tile layout offset 1 — runZoneId?: PLAUSIBLE (was MED/unused).
-    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis: PLAUSIBLE — needs verify.
-    ///     Do not treat as confirmed footstep index; do not treat as hard "reserved" either.
+    ///     spec: Docs/RE/formats/mud.md §Tile layout offset 1 — unread1: REFUTED-hypothesis / unconsumed.
+    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis REFUTED (2026-06-21).
+    ///     A faithful port treats this byte as opaque/ignored.
     /// </remarks>
-    public readonly byte RunSoundIndex; // PLAUSIBLE — spec: mud.md §Tile layout offset 1 — runZoneId?
+    public readonly byte Unread1; // NOT read by consumer — spec: mud.md §Tile layout offset 1 — unread1
 
     /// <summary>
     ///     Background-music zone index (→ BGM table). Sentinel value 0 = silence.
@@ -140,6 +146,7 @@ public readonly struct MudSoundTile
 
     /// <summary>
     ///     3D positional sound-effect index, slot 2 (→ EFF table). Sentinel 0 = silence.
+    ///     Confirmed consumed: read and used as a direct index into the per-area EFF sound table.
     ///     spec: Docs/RE/formats/mud.md §Tile layout offset 7 — effId2 u8: CONFIRMED.
     /// </summary>
     public readonly byte EffId2;
@@ -243,17 +250,20 @@ public sealed class MudSoundGrid
 
     /// <summary>
     ///     Returns the resolved sound-table indices for the tile at the given local position.
-    ///     This is a convenience wrapper over <see cref="GetTile" /> that unpacks the 8 byte fields into
-    ///     a named structure aligned with the resolution chain in <c>mud.md</c> and <c>sound_tables.md</c>.
+    ///     This is a convenience wrapper over <see cref="GetTile" /> that unpacks the consumed byte fields
+    ///     (bytes 2–7) into a named structure aligned with the resolution chain in <c>mud.md</c> and
+    ///     <c>sound_tables.md</c>.
+    ///     Bytes 0 and 1 (<see cref="MudSoundTile.Unread0" /> / <see cref="MudSoundTile.Unread1" />) are
+    ///     NOT exposed here — the walk/run footstep hypothesis is REFUTED; those bytes have no known role.
     /// </summary>
     /// <param name="localX">World X minus the cell's X origin.</param>
     /// <param name="localZ">World Z minus the cell's Z origin.</param>
     /// <returns>
-    ///     A <see cref="TileSoundIndices" /> struct with the five index families (wlk PLAUSIBLE, run
-    ///     PLAUSIBLE, bgm CONFIRMED, bge CONFIRMED, eff CONFIRMED).
+    ///     A <see cref="TileSoundIndices" /> struct with the three confirmed index families (bgm, bge, eff).
     /// </returns>
     /// <remarks>
     ///     spec: Docs/RE/formats/mud.md §Resolution chain — mud tile byte → sound table → leaf audio.
+    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis REFUTED (2026-06-21).
     ///     spec: Docs/RE/formats/sound_tables.md §Resolution chain — .mud tile → soundtable record → leaf audio.
     /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -262,8 +272,6 @@ public sealed class MudSoundGrid
         var tile = GetTile(localX, localZ);
         return new TileSoundIndices
         {
-            WlkIndex = tile.WlkSoundIndex, // PLAUSIBLE — spec: mud.md §Tile layout offset 0
-            RunIndex = tile.RunSoundIndex, // PLAUSIBLE — spec: mud.md §Tile layout offset 1
             BgmIndex = tile.BgmZoneId, // CONFIRMED — spec: mud.md §Tile layout offset 2
             BgeIndices = (tile.BgeAmbientId0, tile.BgeAmbientId1), // CONFIRMED — spec: mud.md offset 3/4
             EffIndices = (tile.EffId0, tile.EffId1, tile.EffId2) // CONFIRMED — spec: mud.md offset 5/6/7
@@ -274,26 +282,14 @@ public sealed class MudSoundGrid
 
     /// <summary>
     ///     Describes the resolved sound indices for a given tile, extracted from <see cref="MudSoundTile" />.
-    ///     Provides a structured view of the five sound-table index families plus the PLAUSIBLE footstep
-    ///     indices, without caller needing to know the mud byte semantics.
+    ///     Provides a structured view of the three confirmed sound-table index families (bgm, bge, eff)
+    ///     without the caller needing to know the mud byte semantics.
+    ///     Bytes 0/1 are excluded — the walk/run footstep hypothesis is REFUTED and those bytes are opaque.
     ///     spec: Docs/RE/formats/mud.md §Resolution chain — tile byte → sound table → leaf audio.
+    ///     spec: Docs/RE/formats/mud.md §Bytes 0 and 1 — walk/run footstep hypothesis REFUTED (2026-06-21).
     /// </summary>
     public readonly struct TileSoundIndices
     {
-        /// <summary>
-        ///     Walk-footstep zone index (PLAUSIBLE). Selects record in <c>.wlk</c> table.
-        ///     0 = null/silence.
-        ///     spec: Docs/RE/formats/mud.md §Tile layout offset 0 — wlkZoneId?: PLAUSIBLE.
-        /// </summary>
-        public byte WlkIndex { get; init; }
-
-        /// <summary>
-        ///     Run-footstep zone index (PLAUSIBLE). Selects record in <c>.run</c> table.
-        ///     0 = null/silence.
-        ///     spec: Docs/RE/formats/mud.md §Tile layout offset 1 — runZoneId?: PLAUSIBLE.
-        /// </summary>
-        public byte RunIndex { get; init; }
-
         /// <summary>
         ///     Background-music zone index. Selects record in <c>.bgm</c> table.
         ///     0 = null/silence.

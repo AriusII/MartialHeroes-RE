@@ -15,7 +15,7 @@
 >   ownership on the drawable); *capture/debugger-pending* where a runtime witness is needed
 >   (billboard up-axis / handedness, matrix major-order, the on-screen diffuse colour given the
 >   B,G,R,A pack order).
-> - **ida_reverified:** 2026-06-20 (CYCLE 7 runtime pool/trigger deep-dive; prior 2026-06-16)
+> - **ida_reverified:** 2026-06-21 (ASSET-FIDELITY: GPU-particle CPU-simulation model + 52-byte sub-record roles resolved, §11.3; CYCLE 7 runtime pool/trigger deep-dive 2026-06-20; prior 2026-06-16)
 > - **ida_anchor:** 263bd994
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the runtime claims here — every spot-checked runtime constant matches
@@ -582,6 +582,53 @@ It then:
 The `GParticleBuffer` is a Direct3D vertex buffer manager dedicated to particle geometry; it uses a prepare-and-lock mechanism. Error conditions include: "index lock failed" and "vertex lock failed" (confirmed from error strings in the binary read-only data section).
 
 The Campaign-5 pass adds that the start/stop of a GPU-particle component is gated by that component's **active-frame window**: entering the window starts the emitter, leaving it stops/destroys it. See §17.2.
+
+### 11.3 GPU-particle runtime simulation model (CODE-CONFIRMED, 2026-06-21)
+
+**Confidence: CODE-CONFIRMED** — the per-particle simulation kernel and the draw fill were read end
+to end statically; no debugger was required to settle the model. This closes the previously
+DBG-pending 52-byte sub-record roles (the field-role table is owned by `formats/effects.md §E.2.2`).
+
+**A GPU-particle emitter is a CPU-simulated, GPU-uploaded billboard system — not a keyframe sampler.**
+When a `.xeff` element bridges in (its `resource_id ≥ 10000`), the manager resolves the matching
+`particleEmitter.eff` entry by raw-id equality (§11.2) and builds a runtime emitter that holds **one
+particle per 52-byte sub-record**; the entry header's `num_frames` is therefore the **particle
+count**, not a timeline length. There is **no interpolation** between sub-records.
+
+**Runtime objects.** The emitter object carries: the resolved texture, the world origin, a per-emitter
+blend flag, and three parallel per-particle arrays sized by the particle count — a render-state array
+(current position, current size, current packed colour), a simulation-aux array (per-particle timers,
+velocity, a visible flag, and a link back to its sub-record and render-state), and a shared dynamic
+vertex buffer for the billboards. A thin GPU-particle wrapper (built on the `≥ 10000` arm of the
+first-tick bridge) carries the emitter pointer and re-pushes the emitter's world position each frame.
+
+**Per-particle simulation (the field roles in action).** At spawn, each particle takes its initial
+size, colour, position (offset by the emitter origin) and velocity from its sub-record, and arms its
+lifetime and spawn-delay timers. The simulation advances on a **fixed ~67 ms step** (≈15 Hz),
+accumulator-driven from the environment wall clock (the same fixed-step idiom the `.xeff` animation
+stride uses); leftover time is carried. On each active step a particle integrates by stepwise Euler:
+if its velocity-damping factor is non-zero the velocity is scaled by it, then position += velocity ×
+dt, size += size-rate × dt, and each colour channel += its **signed** per-second rate × dt, with alpha
+finally scaled by the global display-brightness option (`formats/effects.md §E.2.4`). A particle that
+is still in its spawn delay merely counts down; when its lifetime expires it **respawns** from the
+same sub-record (reset position/size/colour/velocity), unless the effect is one-shot, in which case
+it dies.
+
+**Update / draw decoupling.** The simulation runs in the world tick; drawing runs separately in the
+transparent pass, which walks the live emitters, sets the device blend mode from each emitter's blend
+flag (alpha-blend when the flag is zero, additive otherwise), then fills the dynamic vertex buffer.
+Each live particle is a **camera-facing billboard quad** (four vertices, the corner template at a
+half-extent of −0.5 rotated into camera space, scaled by half the particle's current size), with the
+particle's current colour copied into every vertex and fixed corner texture coordinates. Only
+contiguous runs of currently-visible particles are emitted. The billboard half-extent and the
+camera-facing build match §8.2 step 9.
+
+**Faithful re-implementation.** Drive each emitter as a CPU particle simulation with one particle per
+sub-record, the fixed ~67 ms step, the per-particle Euler integration above, lifetime-driven respawn,
+the per-emitter alpha-vs-additive blend choice, and camera-facing billboards. Do **not** interpolate
+between sub-records and do **not** size the rings by `max_particles` (size them by `num_frames`).
+The one residual DBG-pending item is whether the header's `max_particles` ever bounds the
+vertex/index-buffer capacity at runtime when it differs from `num_frames`.
 
 ---
 

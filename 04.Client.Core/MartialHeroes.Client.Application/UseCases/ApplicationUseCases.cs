@@ -369,9 +369,12 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                 StringComparison.Ordinal)))
             return ValueTask.FromResult(false);
 
-        Span<byte> payload = stackalloc byte[CmsgSelectCharacter.WireSize];
-        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
-        payload[0x01] = 0; // spec: cmsg_char_select.yaml — Mode 0 = select/view.
+        // spec: Docs/RE/packets/cmsg_char_select.yaml (CmsgSelectCharacterSlot, 2 bytes).
+        // Binary-confirmed (Phase 2b): mode 0 = slot-lock / pre-play; mode 1 = select-and-play.
+        // spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
+        Span<byte> payload = stackalloc byte[CmsgSelectCharacterSlot.WireSize];
+        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0x00.
+        payload[0x01] = 0; // spec: cmsg_char_select.yaml — Mode 0 = slot-lock / pre-play (binary-confirmed, Phase 2b).
 
         // 1/7 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
         _inFlightLatch?.Arm();
@@ -431,11 +434,18 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                 StringComparison.Ordinal)))
             return ValueTask.FromResult(false);
 
-        Span<byte> payload = stackalloc byte[CmsgSelectCharacter.WireSize];
-        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0.
-        payload[0x01] = 1; // spec: cmsg_char_select.yaml — Mode 1 = delete, code-confirmed.
+        // TODO(spec): outbound char-delete opcode under RE confirmation
+        //   (1/7 mode=1 is select-and-play per binary, NOT delete — Phase 2b refutation,
+        //   build 263bd994). The real outbound delete opcode is under RE investigation.
+        //   The existing send behavior (1/7 mode=1) is left INTACT until the correct delete
+        //   opcode is identified and promoted via the spec pipeline.
+        //   spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
+        Span<byte> payload = stackalloc byte[CmsgSelectCharacterSlot.WireSize];
+        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0x00.
+        payload[0x01] = 1; // PROVISIONAL: mode 1 kept as-is pending RE confirmation of delete opcode.
+        // Note: binary-confirmed mode 1 = select-and-play, NOT delete. spec: §2.2/§3.6.
 
-        // 1/7 (delete-overload) is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
+        // 1/7 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
         _inFlightLatch?.Arm();
         return SendBoolAsync(1, 7, payload, true, cancellationToken);
     }

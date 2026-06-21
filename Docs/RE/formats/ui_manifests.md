@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §2.8 — the `.do` stance-manifest SELECTION function and its class-index classStanceRef (Musa=1, Assassin=2, Wizard=3, Monk=4) with the {jung, sa, ma} file triplet per class, and the stanceType 0/1/2 + tier-sign selection rule; this resolves the *selection-by-class* half of §9 item #11b (the on-disk +0x0C discriminator enumeration for non-Musa files stays UNVERIFIED — two distinct quantities both loosely called "classStanceRef")
+conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §2.8 — the `.do` stance-manifest SELECTION function and its class-index classStanceRef (Musa=1, Assassin=2, Wizard=3, Monk=4) with the {jung, sa, ma} file triplet per class, and the stanceType 0/1/2 + tier-sign selection rule; this resolves the *selection-by-class* half of §9 item #11b (the on-disk +0x0C discriminator enumeration for non-Musa files stays UNVERIFIED — two distinct quantities both loosely called "classStanceRef") — 2026-06-21 (IDB SHA 263bd994): added §2.9 — `data/script/emoticon.do`, the 40-byte (0x28) chat-emoticon picker sub-family (EOF-driven loader, dual id/index maps, full record layout incl. the +0x04 low-byte pageId padding caveat, the four-widget page builder joining UiTex id 27=emoticon.dds + id 3 chrome, and the +0x0C emoteCode click dispatch); establishes that `.do` is NOT one format but ≥3 distinct fixed-stride tables (40B emoticon / 108B errorinfo-msginfo / 116B stance) disambiguated by filename + loader, never by extension
 ---
 
 # Format: .txt (UI manifest files) — uitex.txt, skillicon.txt, crestlist.txt, texturelist.txt
@@ -665,6 +665,157 @@ in-source class filename spelling is **"assasin"** (single `s`), which matches t
 > §2.7 load chain describes; once it returns the active `.do` file, the icon-coordinate read of
 > §2.6/§2.7 proceeds from that file's 116-byte records. This section adds the **selection** step that
 > sits upstream of the icon read.
+
+### 2.9 `data/script/emoticon.do` — chat-emoticon picker grid (CODE-CONFIRMED + SAMPLE-VERIFIED — 2026-06-21)
+
+> **The `.do` extension is NOT one format — disambiguate by filename + loader, never by extension.**
+> `.do` is a file extension reused by **several unrelated fixed-stride binary record tables** under
+> `data/script/`, each with its OWN record size and its OWN loader. They share only the family
+> conventions (no header, no magic, no version, no count field; a tightly-packed array of fixed-size
+> little-endian records; an EOF-driven loader that copies each raw record verbatim into a heap node
+> and inserts it into one or more in-memory ordered maps keyed by a record field). At least three
+> distinct strides are confirmed:
+>
+> | Sub-family | Record stride | Files | Role | This doc |
+> |---|---:|---|---|---|
+> | Per-class skill stance | 116 B (0x74) | `musajung.do` + 11 siblings | per-skill icon coords | §2.7, §2.8 |
+> | Emoticon / chat-token grid | **40 B (0x28)** | `emoticon.do` | emoticon picker grid → `emoticon.dds` sprites + chat code | §2.9 (here) |
+> | Message / error label table | 108 B (0x6C) | `errorinfo.do`, `msginfo.do` | panel text-message / label records | §2.9.5 (note only) |
+>
+> A parser MUST select the stride and field layout from the filename (or the loader that opens it),
+> NOT from the `.do` extension. The 116-byte facts of §2.7/§2.8 are unchanged; §2.9 ADDS the 40-byte
+> emoticon sibling.
+
+#### 2.9.1 Role and identification
+
+`data/script/emoticon.do` is the data table behind the **chat-emoticon picker panel**. It is a flat
+array of fixed **40-byte** records, one per selectable emoticon, that supplies each emoticon button's
+on-panel grid position, its glyph and name-strip source rectangles on `emoticon.dds`, its page/tab,
+and the chat token emitted when the player clicks it. There is no file header, no magic, no version,
+and no count field. All fields are little-endian.
+
+- **Path:** `data/script/emoticon.do`. Loaded once at startup by the boot data-table corpus loader
+  (the same boot thread that loads `errorinfo.do`, `msginfo.do`, `textcommand.do`, and the stance
+  `.do` family).
+- **Record stride:** 40 bytes (0x28).
+- **Record count:** `file_size / 40`. There is no count field; the loader is purely EOF-driven, so a
+  non-zero size remainder is a truncated trailing record that the loader's failed read drops.
+- **Sample:** the observed VFS copy is **840 bytes = exactly 21 records × 40, remainder 0.**
+
+#### 2.9.2 Read algorithm (loader)
+
+The emoticon loader and record constructor follow the shared `.do` family pattern:
+
+1. Open the VFS file by name (`data/script/emoticon.do`).
+2. If the handle is valid, loop while the file is not at end-of-entry **and** a read of exactly
+   **40 bytes (0x28)** into a stack buffer succeeds:
+   - allocate a 40-byte heap node;
+   - copy the full 40 raw bytes verbatim into the node (node layout == on-disk layout for all 40 bytes);
+   - lazily create two in-memory ordered (red-black-tree) maps on first record, then insert the node
+     into both:
+     - **Map A** — keyed by the record field at **+0x00** (`id`);
+     - **Map B** — keyed by the record field at **+0x08** (`index`).
+3. Close and destruct the file handle.
+
+So two indices exist over the same node set: by `id` (+0x00) and by `index` (+0x08). There is **no
+count field** — the loop is purely EOF-driven, identical to the stance `.do` family.
+
+#### 2.9.3 On-disk record layout (40 bytes / 0x28, little-endian) — SAMPLE-VERIFIED + CODE-CONFIRMED
+
+Field roles are pinned by the picker-panel page builder (§2.9.4), the click handler (§2.9.5), and the
+page-count / reverse-lookup helpers. All offsets are byte offsets within a single 40-byte record.
+
+| Offset | Size | Type | Field | Consumer use | Observed values | Confidence |
+|------:|----:|------|-------|--------------|-----------------|------------|
+| +0x00 | 4 | u32 | `id` | Map A key | sequential 1..21 | CODE+SAMPLE |
+| +0x04 | 1 | u8 | `pageId` (tab) | page/tab filter in the builder and click handler | 0 (recs 0–17), 1 (recs 18–20); valid range 0..2 | CODE+SAMPLE |
+| +0x05 | 3 | — | padding | none | authoring-tool struct pad (uninitialized `0xCC` fill) | SAMPLE |
+| +0x08 | 4 | u32 | `index` | Map B key; click-match key; passed as the button's child-action id | sequential 0..20 | CODE+SAMPLE |
+| +0x0C | 4 | u32 | `emoteCode` | the chat/output token sent to the main window on click; reverse-lookup key | 0 on page-0 recs, then 10/11/12 on the last recs (per-page numbering) | CODE+SAMPLE |
+| +0x10 | 4 | i32 | `dstX` | destination X of all four widgets on the panel | 10 (col 0) / 160 (col 1) | CODE+SAMPLE |
+| +0x14 | 4 | i32 | `dstY` | destination Y base for the four widgets | 20, 75, 130, 185, 240, 295, 350, 405 (step 55) | CODE+SAMPLE |
+| +0x18 | 4 | i32 | `glyphSrcX` | atlas src X of the 23×23 emoticon glyph on `emoticon.dds` | 0 on most early recs; varies later | CODE+SAMPLE |
+| +0x1C | 4 | i32 | `glyphSrcY` | atlas src Y of the 23×23 emoticon glyph | 0 early; 23 on rec 20 | CODE+SAMPLE |
+| +0x20 | 4 | i32 | `labelSrcX` | atlas src X of the 87×13 name-strip sprite on `emoticon.dds` | alternates 0 / 87 | CODE+SAMPLE |
+| +0x24 | 4 | i32 | `labelSrcY` | atlas src Y of the 87×13 name-strip sprite | 46, 46, 59, 59, 72, 72, 85, 85 … (step 13 per pair) | CODE+SAMPLE |
+
+> **`+0x04` width caveat (load-bearing).** Although there are three bytes between `pageId` (+0x04) and
+> `index` (+0x08), the loader and every consumer read **only the low byte** at +0x04. Those three pad
+> bytes are the authoring tool's uninitialized-fill pattern (`0xCC`), so reading +0x04 as a 4-byte
+> integer yields a nonsense value such as `0xCCCCCC00`/`0xCCCCCC01`. A parser MUST read `pageId` as a
+> single byte (or mask the i32 with `0xFF`), never as a 4-byte field, and MUST treat +0x05..+0x07 as
+> don't-care padding to the +0x08 boundary.
+
+#### 2.9.4 Consumer — the emoticon-picker page builder
+
+The picker panel's per-page build path constructs the grid for a given page index (0..2):
+
+1. Resolve two UI texture handles from the `UiTex.txt` registry (§1):
+   - tex id **3** (skill-window chrome atlas) — backplate + frame-ring decoration;
+   - tex id **27** = `data/ui/emoticon.dds` (256×256, BC2; §1.4 entry 0027) — emoticon glyph + name-strip
+     source. **This is the join to `emoticon.dds`.**
+2. Count the records whose `pageId` (+0x04) equals the requested page, and allocate a widget array of
+   four widget pointers per matched record.
+3. Iterate Map B (the by-`index` map) in order; for each record whose `pageId == page`, read
+   `dstX`/`dstY` (+0x10/+0x14), the glyph src (+0x18/+0x1C), the label src (+0x20/+0x24), and `index`
+   (+0x08), then build **four** child widgets:
+
+| # | Widget | Texture | Destination (x, y) | Size (px) | Atlas source | Notes |
+|---|--------|---------|--------------------|-----------|--------------|-------|
+| 1 | Image (backplate) | id 3 chrome | (dstX, dstY) | 146×49 | (63, 661) | fixed chrome rect |
+| 2 | 3-state Button (the emoticon) | id 27 `emoticon.dds` | (dstX+23, dstY+11) | **23×23** | **(glyphSrcX, glyphSrcY) = (+0x18, +0x1C)** | all three button states share the same src; the button is added with **child-action id = `index` (+0x08)** |
+| 3 | Image (name strip) | id 27 `emoticon.dds` | (dstX+48, dstY+16) | **87×13** | **(labelSrcX, labelSrcY) = (+0x20, +0x24)** | the emoticon's pre-rendered Korean name sprite |
+| 4 | Image (frame ring) | id 3 chrome | (dstX+20, dstY+8) | 29×29 | (763, 655) | fixed chrome rect |
+
+Only widget 2 carries a click action (its action id is the record's `index`); widgets 1/3/4 are plain
+decoration. This builder is the authority that pins the field roles: the glyph src is (+0x18, +0x1C),
+the name-strip src is (+0x20, +0x24), the destination grid is (+0x10, +0x14), `pageId` is the +0x04 low
+byte, and the action/`index` is +0x08.
+
+#### 2.9.5 Consumer — the picker click handler, and the other `.do` strides
+
+The picker click handler receives `(page, action)` and:
+
+- guards `page <= 2` (so exactly **three tabs / pages**, ids 0/1/2) and `action < 200`;
+- filters Map B for the record whose `pageId == page` AND `index == action`;
+- on a match: plays a 2D click sound, reads `emoteCode` (+0x0C), stores it on the panel, and dispatches
+  `emoteCode` to the main window — i.e. **+0x0C is the chat/output token emitted when the player clicks
+  an emoticon.**
+
+A companion reverse-lookup scans Map A for the record whose `emoteCode` (+0x0C) equals an incoming
+value, resolving a received emote code back to its record.
+
+**Other `.do` strides (context, not the emoticon target):** `errorinfo.do` and `msginfo.do` are a
+**third** pattern — **108-byte (0x6C) records**, loaded by their own loader on first panel open (the
+errorinfo path is guarded by an "already loaded" flag), used as text-message / label record tables for
+the error and message panels. They share the family conventions but have a DIFFERENT stride and a
+DIFFERENT record constructor; do not conflate them with the 40-byte emoticon table. Their full field
+layout is not decoded here.
+
+> **Note on the related text tables.** `data/char/emoticon.txt` and `data/char/sameemoticon.txt` are
+> SEPARATE CP949 text tables (likely actor-animation emoticon mappings), not the UI picker grid. They
+> are out of scope for this binary `.do` spec.
+
+#### 2.9.6 Linkages (emoticon.do)
+
+| Direction | What | Join key |
+|---|---|---|
+| emoticon.do → `emoticon.dds` | the 23×23 glyph and 87×13 name-strip sprites are blitted from `data/ui/emoticon.dds` (256×256, BC2) | `UiTex.txt` tex id **27** (§1.4 entry 0027), hard-coded in the page builder |
+| emoticon.do → skill-window chrome | backplate / frame-ring decoration | `UiTex.txt` tex id **3** (§1.4 entry 0003), hard-coded in the page builder |
+| emoticon.do → chat / main window | clicking an emoticon dispatches `emoteCode` (+0x0C) to the main window | the click handler's main-window dispatch |
+| boot → emoticon.do | loaded once at startup by the boot data-table corpus loader | the boot data-table loader thread |
+| runtime index | two in-memory ordered maps over the records | Map A by +0x00 `id`; Map B by +0x08 `index` |
+
+#### 2.9.7 Open questions (emoticon.do)
+
+- `emoteCode` (+0x0C) value space: the sample shows 0 and 10/11/12; whether the value is a chat-emoticon
+  opcode or an index into `emoticon.txt` is not confirmed (the downstream main-window consumer is not
+  traced here).
+- The 87×13 name-strip labels are very likely pre-rendered Korean text baked into `emoticon.dds` (they
+  are atlas sprites, not text-rendered captions), but this is visually probable, not byte-confirmed.
+- Exact tab/page semantics for the three pages (`pageId` 0/1/2): the sample exercises only pages 0 and 1
+  (21 records); a fuller `emoticon.do` may populate page 2.
+- `errorinfo.do` / `msginfo.do` (108-byte) full field layout is not decoded.
 
 ---
 

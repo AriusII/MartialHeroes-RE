@@ -19,6 +19,7 @@ public sealed partial class InGameScene : StubSceneController
 {
     private ClientContext? _ctx;
     private SceneHost? _host;
+    private CanvasLayer? _hudLayer;
     private HudMaster? _hudMaster;
     private GameLoop? _worldLoop;
 
@@ -53,8 +54,24 @@ public sealed partial class InGameScene : StubSceneController
                 // spec: Docs/RE/specs/ui_hud_layout.md §0 — HUD-build routine asset pipeline.
                 var icons = new HudIconLibrary(null, _ctx.HudAtlas);
 
+                // HUD is the LAST draw callback (+212 in the binary's slot table).
+                // spec: Docs/RE/scenes/ingame_composition.md §4.2 — UI/HUD (+212) is LAST, over finished 3D backbuffer.
+                // spec: Docs/RE/scenes/ingame_composition.md §5 — depth test OFF / depth write OFF / ortho.
+                // Wrap HudMaster in a CanvasLayer so the last-draw invariant is explicit and
+                // order-independent: Godot draws CanvasLayer nodes over all 3D nodes in the same
+                // viewport regardless of sibling position. Layer=128 (mid-range, above any future 3D
+                // overlay, below any future system-level overlay). Declared aesthetic: the layer
+                // integer is a port-side choice for ordering safety; the original uses D3D callback
+                // ordering (+212 is the last installed slot), not a Godot layer number.
+                _hudLayer = new CanvasLayer
+                {
+                    Name = "HudCanvasLayer",
+                    Layer = 128 // aesthetic: guarantees HUD is drawn last over the 3D scene
+                };
+                AddChild(_hudLayer);
+
                 _hudMaster = new HudMaster { Name = "HudMaster" };
-                AddChild(_hudMaster);
+                _hudLayer.AddChild(_hudMaster);
                 _hudMaster.Build(_ctx, _ctx.HudAtlas, icons, _ctx.HudText);
                 _hudMaster.BindHub(_ctx);
                 _hudMaster.Reconfigure();
@@ -64,8 +81,9 @@ public sealed partial class InGameScene : StubSceneController
                 // spec: Docs/RE/specs/input_ui.md §3 / §6.
                 _worldLoop.SetHudMaster(_hudMaster);
 
-                GD.Print("[InGameScene] HudMaster built, bound, and hit-test wired (CAMPAIGN 17 Wave 2b). " +
-                         "GameHud removed — HudMaster is now the sole in-game HUD. " +
+                GD.Print("[InGameScene] HudMaster built in CanvasLayer(128), bound, and hit-test wired. " +
+                         "CanvasLayer makes the last-draw-over-3D invariant explicit and order-independent. " +
+                         "spec: Docs/RE/scenes/ingame_composition.md §4.2 (UI/HUD +212 = LAST callback). " +
                          "spec: Docs/RE/specs/ui_hud_layout.md §0.");
             }
             catch (Exception ex)
@@ -74,8 +92,8 @@ public sealed partial class InGameScene : StubSceneController
             }
 
         GD.Print("[InGameScene] State 5 BuildGameWorld built: charater scene root, five view-platform slots, " +
-                 "terrain stream node, real-asset renderer (area from client_dir.cfg; area 2 town by default), " +
-                 "NPC/player/camera/HUD wiring. spec: client_runtime.md §7.4/§9.");
+                 "terrain stream node, real-asset renderer (world build deferred to the server 4/1 world-entry), " +
+                 "camera/HUD wiring. spec: client_runtime.md §7.4/§9.");
     }
 
     public override void _ExitTree()
@@ -87,6 +105,7 @@ public sealed partial class InGameScene : StubSceneController
         _host = null;
         _ctx = null;
         _hudMaster = null;
+        _hudLayer = null;
     }
 
     private static GameLoop BuildGameWorld()
@@ -159,21 +178,34 @@ public sealed partial class InGameScene : StubSceneController
 
     private static WorldEnvironment BuildWorldEnvironment()
     {
+        // Bootstrap WorldEnvironment: visible only for the brief window before EnvironmentNode.Configure
+        // takes over at the first server 4/1 world-entry (OnWorldEntered). All values here must match
+        // what EnvironmentNode will apply at steady-state so the bootstrap frame is coherent.
+        //
+        // TonemapMode = Linear (NOT Filmic): the original DX8 client has NO tonemap/exposure pass.
+        // spec: Docs/RE/specs/rendering.md §6 — post chain is bright-copy → blur → composite → present; NO tonemap.
+        // spec: Docs/RE/specs/environment.md §6.2a — colours applied RAW, no gamma.
+        // TonemapExposure = 1.0 (identity, per spec: no exposure adjustment).
+        // AmbientLightEnergy = 1.0 (OPTION_BRIGHT=100 default floor).
+        // spec: Docs/RE/specs/environment.md §6.2a — default OPTION_BRIGHT=100 → device_ambient = full white.
+        // BackgroundColor dark-grey: matches rendering.md §2.0.1 fallback clear 0xFF505050.
+        // spec: Docs/RE/specs/rendering.md §2.0.1 — fallback clear 0xFF505050 (dark-grey ARGB). CONFIRMED.
         var env = new Environment
         {
             BackgroundMode = Environment.BGMode.Color,
-            BackgroundColor = new Color(0.45f, 0.45f, 0.45f),
+            BackgroundColor =
+                new Color(0.314f, 0.314f, 0.314f), // 0xFF505050 = #505050 ≈ 0.314 — spec: rendering.md §2.0.1
             AmbientLightSource = Environment.AmbientSource.Color,
             AmbientLightColor = Colors.White,
-            AmbientLightSkyContribution = 0.5f,
-            AmbientLightEnergy = 1.0f,
-            TonemapMode = Environment.ToneMapper.Filmic,
-            TonemapExposure = 1.1f,
-            TonemapWhite = 6.0f,
+            AmbientLightSkyContribution = 0f,
+            AmbientLightEnergy = 1.0f, // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT=100 → 1.0
+            TonemapMode = Environment.ToneMapper.Linear, // spec: Docs/RE/specs/rendering.md §6 — no tonemap in original
+            TonemapExposure = 1.0f, // spec: Docs/RE/specs/rendering.md §6 — no exposure pass; identity
             GlowEnabled = false,
             SsaoEnabled = false,
             SsilEnabled = false,
-            SdfgiEnabled = false
+            SdfgiEnabled = false,
+            FogEnabled = false
         };
 
         return new WorldEnvironment

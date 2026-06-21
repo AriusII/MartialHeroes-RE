@@ -8,8 +8,8 @@ namespace MartialHeroes.Client.Application.Contracts.Hud;
 /// </summary>
 /// <remarks>
 ///     All legacy game text — chat lines, sender / target names — is CP949 with no BOM. The HUD DTOs carry
-///     already-decoded managed strings (never raw bytes), so the demo/stub publishers and the future packet
-///     handlers decode at the seam through this helper. The code-pages provider is registered once in the
+///     already-decoded managed strings (never raw bytes), so the packet handlers decode at the seam
+///     through this helper. The code-pages provider is registered once in the
 ///     static constructor, per the project-wide convention. NUL-terminated buffers (the legacy fixed
 ///     name/text fields) are trimmed at the first NUL.
 ///     spec: Docs/RE/specs/chat.md §0 (all chat text is CP949 / EUC-KR);

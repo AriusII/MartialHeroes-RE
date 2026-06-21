@@ -34,14 +34,27 @@ public static class ParticleEmitterParser
     private const int TextureNameSize = 64;
 
     // Sub-record inner field offsets (relative to start of sub-record):
-    // spec: Docs/RE/formats/effects.md §E.2.2.
-    private const int SubRecUnresolvedLeadSize = 8; // +0x00..+0x07: UNRESOLVED
-    private const int SubRecColorROffset = 8; // +0x08: MEDIUM
-    private const int SubRecColorGOffset = 9; // +0x09: MEDIUM
-    private const int SubRecColorBOffset = 10; // +0x0A: MEDIUM
-    private const int SubRecColorAOffset = 11; // +0x0B: MEDIUM (active sentinel 0xFF)
-    private const int SubRecUnresolvedTailOffset = 12; // +0x0C..+0x33: UNRESOLVED
-    private const int SubRecUnresolvedTailSize = 40; // 40 bytes UNRESOLVED
+    // All 19 fields CODE-CONFIRMED 2026-06-21. spec: Docs/RE/formats/effects.md §E.2.2.
+    private const int SubRecLifeBonusOffset = 0; // +0x00 u16 LE CODE-CONFIRMED
+    private const int SubRecLifetimeOffset = 2; // +0x02 u16 LE CODE-CONFIRMED
+    private const int SubRecSpawnDelayOffset = 4; // +0x04 u16 LE CODE-CONFIRMED
+    private const int SubRecSizeInitOffset = 6; // +0x06 u16 LE CODE-CONFIRMED
+    private const int SubRecColorROffset = 8; // +0x08 u8  CONFIRMED
+    private const int SubRecColorGOffset = 9; // +0x09 u8  CONFIRMED
+    private const int SubRecColorBOffset = 10; // +0x0A u8  CONFIRMED
+    private const int SubRecColorAOffset = 11; // +0x0B u8  CONFIRMED (genuine alpha)
+    private const int SubRecSpawnPosXOffset = 12; // +0x0C f32 LE CODE-CONFIRMED
+    private const int SubRecSpawnPosYOffset = 16; // +0x10 f32 LE CODE-CONFIRMED
+    private const int SubRecSpawnPosZOffset = 20; // +0x14 f32 LE CODE-CONFIRMED
+    private const int SubRecSizeRateOffset = 24; // +0x18 f32 LE CODE-CONFIRMED
+    private const int SubRecColorRRateOffset = 28; // +0x1C i16 LE CODE-CONFIRMED
+    private const int SubRecColorGRateOffset = 30; // +0x1E i16 LE CODE-CONFIRMED
+    private const int SubRecColorBRateOffset = 32; // +0x20 i16 LE CODE-CONFIRMED
+    private const int SubRecColorARateOffset = 34; // +0x22 i16 LE CODE-CONFIRMED
+    private const int SubRecVelocityXOffset = 36; // +0x24 f32 LE CODE-CONFIRMED
+    private const int SubRecVelocityYOffset = 40; // +0x28 f32 LE CODE-CONFIRMED
+    private const int SubRecVelocityZOffset = 44; // +0x2C f32 LE CODE-CONFIRMED
+    private const int SubRecVelocityDampOffset = 48; // +0x30 f32 LE CODE-CONFIRMED
 
     // Entry header field offsets (all relative to start of entry header):
     // spec: Docs/RE/formats/effects.md §E.2.1.
@@ -131,33 +144,61 @@ public static class ParticleEmitterParser
                 var srOffset = offset + (int)f * SubRecordStride;
                 var sr = span.Slice(srOffset, SubRecordStride);
 
-                // Unresolved lead: +0x00..+0x07 (8 bytes). UNRESOLVED.
-                // spec: Docs/RE/formats/effects.md §E.2.2 — _unresolved_lead_ @ +0x00: UNRESOLVED.
-                var unresolvedLead = backing.IsEmpty
-                    ? sr[..SubRecUnresolvedLeadSize].ToArray()
-                    : backing.Slice(srOffset, SubRecUnresolvedLeadSize);
+                // All 19 fields CODE-CONFIRMED (2026-06-21). spec: Docs/RE/formats/effects.md §E.2.2.
 
-                // Colour quad: +0x08..+0x0B. MEDIUM confidence.
-                // spec: Docs/RE/formats/effects.md §E.2.2 — color_r/g/b/a @ +0x08..+0x0B: MEDIUM.
+                // +0x00 : 4 × u16 LE timer/size fields.
+                var lifeBonus = BinaryPrimitives.ReadUInt16LittleEndian(sr[..]);
+                var lifetime = BinaryPrimitives.ReadUInt16LittleEndian(sr[SubRecLifetimeOffset..]);
+                var spawnDelay = BinaryPrimitives.ReadUInt16LittleEndian(sr[SubRecSpawnDelayOffset..]);
+                var sizeInit = BinaryPrimitives.ReadUInt16LittleEndian(sr[SubRecSizeInitOffset..]);
+
+                // +0x08 : RGBA8 colour quad (genuine alpha — NOT a sentinel).
+                // spec: Docs/RE/formats/effects.md §E.2.2 — color_a is genuine initial alpha: CONFIRMED.
                 var colorR = sr[SubRecColorROffset];
                 var colorG = sr[SubRecColorGOffset];
                 var colorB = sr[SubRecColorBOffset];
                 var colorA = sr[SubRecColorAOffset];
 
-                // Unresolved tail: +0x0C..+0x33 (40 bytes). UNRESOLVED.
-                // spec: Docs/RE/formats/effects.md §E.2.2 — _unresolved_tail_ @ +0x0C: UNRESOLVED.
-                var unresolvedTail = backing.IsEmpty
-                    ? sr[SubRecUnresolvedTailOffset..(SubRecUnresolvedTailOffset + SubRecUnresolvedTailSize)].ToArray()
-                    : backing.Slice(srOffset + SubRecUnresolvedTailOffset, SubRecUnresolvedTailSize);
+                // +0x0C : spawn position xyz + size_rate (4 × f32 LE).
+                var spawnPosX = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecSpawnPosXOffset..]);
+                var spawnPosY = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecSpawnPosYOffset..]);
+                var spawnPosZ = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecSpawnPosZOffset..]);
+                var sizeRate = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecSizeRateOffset..]);
+
+                // +0x1C : 4 × signed i16 LE colour-rate fields (signed per-second deltas).
+                var colorRRate = BinaryPrimitives.ReadInt16LittleEndian(sr[SubRecColorRRateOffset..]);
+                var colorGRate = BinaryPrimitives.ReadInt16LittleEndian(sr[SubRecColorGRateOffset..]);
+                var colorBRate = BinaryPrimitives.ReadInt16LittleEndian(sr[SubRecColorBRateOffset..]);
+                var colorARate = BinaryPrimitives.ReadInt16LittleEndian(sr[SubRecColorARateOffset..]);
+
+                // +0x24 : velocity xyz + velocity_damp (4 × f32 LE).
+                var velocityX = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecVelocityXOffset..]);
+                var velocityY = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecVelocityYOffset..]);
+                var velocityZ = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecVelocityZOffset..]);
+                var velocityDamp = BinaryPrimitives.ReadSingleLittleEndian(sr[SubRecVelocityDampOffset..]);
 
                 subRecords[f] = new ParticleSubRecord
                 {
-                    UnresolvedLead = unresolvedLead,
+                    LifeBonus = lifeBonus,
+                    Lifetime = lifetime,
+                    SpawnDelay = spawnDelay,
+                    SizeInit = sizeInit,
                     ColorR = colorR,
                     ColorG = colorG,
                     ColorB = colorB,
                     ColorA = colorA,
-                    UnresolvedTail = unresolvedTail
+                    SpawnPosX = spawnPosX,
+                    SpawnPosY = spawnPosY,
+                    SpawnPosZ = spawnPosZ,
+                    SizeRate = sizeRate,
+                    ColorRRate = colorRRate,
+                    ColorGRate = colorGRate,
+                    ColorBRate = colorBRate,
+                    ColorARate = colorARate,
+                    VelocityX = velocityX,
+                    VelocityY = velocityY,
+                    VelocityZ = velocityZ,
+                    VelocityDamp = velocityDamp
                 };
             }
 

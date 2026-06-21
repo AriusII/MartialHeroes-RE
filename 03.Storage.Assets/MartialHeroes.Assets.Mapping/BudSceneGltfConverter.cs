@@ -26,8 +26,10 @@ namespace MartialHeroes.Assets.Mapping;
 ///     glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines front faces.
 ///     UV coordinates:
 ///     The .bud format stores UV as world-scale tiled values (observed range ~24–29).
-///     No top-left → bottom-left flip is needed because glTF stores UVs with V=0 at
-///     the top (same convention used by the .bud world-scale tiling).
+///     No V-flip is applied because terrain_scene.md documents no V-flip convention for .bud UVs;
+///     UV values are emitted as stored on disk. (Note: glTF 2.0 defines V=0 at the BOTTOM,
+///     OpenGL convention — not the top. The .bud tiled UVs are world-scale values, not
+///     normalised [0,1] atlas coords, so a V-flip would be meaningless regardless.)
 ///     spec: Docs/RE/formats/terrain_scene.md §Vertex record — uv_u @ +0x18, uv_v @ +0x1C: CONFIRMED.
 ///     Normals:
 ///     The .bud vertex record contains confirmed normal XYZ (unit-length float32).

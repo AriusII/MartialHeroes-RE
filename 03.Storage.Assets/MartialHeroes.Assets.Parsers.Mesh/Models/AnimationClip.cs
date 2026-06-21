@@ -43,9 +43,14 @@ public sealed class AnimationTrack
     public required byte BoneId { get; init; }
 
     /// <summary>
-    ///     Upper three bytes of the on-disk <c>track_descriptor</c> u32.
-    ///     Purpose UNVERIFIED; stored opaquely pending clarification.
-    ///     spec: Docs/RE/formats/animation.md §Per-track record — upper bytes UNVERIFIED.
+    ///     Upper three bytes (bits 8–31) of the on-disk <c>track_descriptor</c> u32.
+    ///     CONFIRMED reserved/unused padding — the loader reads the full word once, slices off
+    ///     the low byte as <see cref="BoneId" />, and discards the remaining 24 bits.
+    ///     All three candidate interpretations (key-count, channel-mask, interp-flag) have been
+    ///     REFUTED. Strict validators may assert these are zero; the loader itself never checks.
+    ///     Stored here for completeness; consumers must not assign meaning to this value.
+    ///     spec: Docs/RE/formats/animation.md §track_descriptor byte decomposition — "CONFIRMED
+    ///     (loader-direct + sample-verified; upper bytes confirmed unused padding)".
     /// </summary>
     public required uint TrackDescriptorHigh24 { get; init; }
 
@@ -81,9 +86,11 @@ public sealed class AnimationClip
 
     /// <summary>
     ///     Clip name string from the header LenStr field.
-    ///     spec: Docs/RE/formats/animation.md §Header layout — name LenStr @ offset 8: CONFIRMED (field present).
-    ///     Wire format (4-byte prefix) is UNVERIFIED — assumed by analogy with .skn/.bnd;
-    ///     see formats/animation.md §LenStr encoding.
+    ///     spec: Docs/RE/formats/animation.md §LenStr encoding — "CONFIRMED (loader + sample)":
+    ///     wire format is a 4-byte u32 LE length prefix + exactly that many body bytes, no null
+    ///     terminator on disk. Confirmed two ways: loader control-flow + real sample (the 4-byte
+    ///     prefix walk lands frame_count exactly). Field is discarded at runtime; parser must still
+    ///     consume it to keep the cursor aligned.
     /// </summary>
     public required string Name { get; init; }
 

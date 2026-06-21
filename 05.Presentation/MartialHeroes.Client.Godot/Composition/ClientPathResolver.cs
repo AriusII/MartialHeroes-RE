@@ -9,8 +9,9 @@
 //   Si aucune source ne fournit un répertoire valide, retourne null → mode synthétique.
 //
 // ACTIVATION DU RENDU RÉEL :
-//   Par défaut TRUE si un répertoire valide est trouvé.
-//   Forcer FALSE via real_assets=false dans client_dir.cfg ou MH_REAL_ASSETS=0 en env.
+//   TRUE dès qu'un répertoire valide est trouvé ; il n'existe plus de bascule dev pour le désactiver
+//   (plus de MH_REAL_ASSETS / real_assets= / load_models=). Le client utilise toujours le vrai VFS ;
+//   sans VFS, le rendu est vide (rien n'est fabriqué).
 //
 // Un répertoire est « valide » s'il contient data.inf ET data/data.vfs.
 //
@@ -31,7 +32,7 @@ namespace MartialHeroes.Client.Godot.Composition;
 ///     et décider si le rendu sur assets réels est activé.
 ///     Tous les appelants (<see cref="ClientContext" />, <see cref="RealClientAssets" />,
 ///     <see cref="MartialHeroes.Client.Godot.World.RealWorldRenderer" />) passent ici
-///     plutôt que de lire MH_CLIENT_DIR / MH_REAL_ASSETS directement.
+///     plutôt que de lire MH_CLIENT_DIR directement.
 /// </summary>
 public static class ClientPathResolver
 {
@@ -122,56 +123,15 @@ public static class ClientPathResolver
     }
 
     /// <summary>
-    ///     Retourne true si le chargement des modèles 3D (.bud et .skn) est activé.
-    ///     Lit la clé <c>load_models</c> dans client_dir.cfg.
-    ///     Défaut : true (les modèles sont chargés).
-    ///     Mettre load_models=false pour charger uniquement le terrain (mode safe).
-    /// </summary>
-    public static bool LoadModelsEnabled()
-    {
-        var cfgPath = ResolveCfgPath();
-        if (cfgPath is null) return true; // clé absente → défaut true
-
-        var raw = ReadKeyFromCfg(cfgPath, "load_models");
-        if (raw is null) return true; // clé absente → défaut true
-
-        // false / 0 → désactivé ; tout autre valeur → activé.
-        return ParseBoolFlag(raw);
-    }
-
-    /// <summary>
-    ///     Retourne true si le rendu sur assets réels doit être activé.
-    ///     Retourne false si :
-    ///     - <paramref name="clientDir" /> est null (aucun client trouvé).
-    ///     - MH_REAL_ASSETS=0 (override env).
-    ///     - real_assets=false dans client_dir.cfg.
-    ///     Retourne true par défaut dès qu'un répertoire valide est résolu.
+    ///     Retourne true si le rendu sur assets réels doit être activé : vrai dès qu'un répertoire client
+    ///     valide est résolu (<paramref name="clientDir" /> non null), faux sinon. Le client utilise
+    ///     TOUJOURS le vrai VFS quand il est présent — il n'existe plus de bascule dev (MH_REAL_ASSETS /
+    ///     real_assets= / load_models=) pour forcer un mode synthétique ou terrain-seul. Sans VFS, le
+    ///     rendu est simplement vide : rien n'est fabriqué.
     /// </summary>
     public static bool RealAssetsEnabled(string? clientDir)
     {
-        if (clientDir is null) return false;
-
-        // Override env : MH_REAL_ASSETS=0 force le mode synthétique.
-        var envFlag = Environment.GetEnvironmentVariable("MH_REAL_ASSETS");
-        if (envFlag is not null)
-        {
-            var envEnabled = envFlag != "0";
-            GD.Print(
-                $"[ClientPath] RealAssets override via MH_REAL_ASSETS={envFlag}: {(envEnabled ? "activé" : "désactivé")}");
-            return envEnabled;
-        }
-
-        // Clé real_assets= dans la config (false = mode synthétique forcé).
-        var cfgFlag = ReadRealAssetsFlagFromConfig();
-        if (cfgFlag.HasValue)
-        {
-            GD.Print(
-                $"[ClientPath] RealAssets override via client_dir.cfg real_assets={cfgFlag.Value}: {(cfgFlag.Value ? "activé" : "désactivé")}");
-            return cfgFlag.Value;
-        }
-
-        // Défaut : activé puisqu'un client valide est présent.
-        return true;
+        return clientDir is not null;
     }
 
     // -------------------------------------------------------------------------
@@ -209,30 +169,6 @@ public static class ClientPathResolver
         if (cfgPath is null) return null;
 
         return ReadKeyFromCfg(cfgPath, "client_dir");
-    }
-
-    /// <summary>
-    ///     Lit la valeur de real_assets= dans client_dir.cfg.
-    ///     Retourne null si la clé est absente ou le fichier inaccessible.
-    /// </summary>
-    private static bool? ReadRealAssetsFlagFromConfig()
-    {
-        var cfgPath = ResolveCfgPath();
-        if (cfgPath is null) return null;
-
-        var raw = ReadKeyFromCfg(cfgPath, "real_assets");
-        if (raw is null) return null;
-
-        return ParseBoolFlag(raw);
-    }
-
-    /// <summary>
-    ///     Parses a string cfg flag: "false" (OrdinalIgnoreCase) or "0" → false; anything else → true.
-    ///     Used by LoadModelsEnabled and ReadRealAssetsFlagFromConfig.
-    /// </summary>
-    private static bool ParseBoolFlag(string raw)
-    {
-        return !raw.Equals("false", StringComparison.OrdinalIgnoreCase) && raw != "0";
     }
 
     /// <summary>

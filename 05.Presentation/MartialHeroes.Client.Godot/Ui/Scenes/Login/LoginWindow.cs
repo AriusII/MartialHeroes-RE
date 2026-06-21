@@ -45,6 +45,7 @@
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Widgets;
+
 // FrontEndAudio
 
 // LoginLayout, WidgetRect (moved to engine-free layer)
@@ -227,6 +228,16 @@ public sealed partial class LoginWindow : Control
 
     public override void _Ready()
     {
+        // Front-end overlay render state: alpha-blend ON, additive ONE/ONE.
+        // spec: Docs/RE/specs/rendering.md §4.2 — "UI/HUD front-end overlay: ONE/ONE (additive);
+        //   additionally clears fog, dither, alpha-test; stage 0 = select-arg-1/diffuse,
+        //   stage 1 = disabled; samplers = linear/linear/mip-none."
+        // In Godot this translates to BlendMode.Add on the root CanvasItem.
+        Material = new CanvasItemMaterial
+        {
+            BlendMode = CanvasItemMaterial.BlendModeEnum.Add // spec: rendering.md §4.2 ONE/ONE additive
+        };
+
         LoadSaveId();
 
         // Build all layers back-to-front (Z-order = add-order).

@@ -19,8 +19,8 @@ namespace MartialHeroes.Assets.Parsers.World.Models;
 ///   +0x00            u32le  width      (grid columns, cells along X)
 ///   +0x04            u32le  height     (grid rows, cells along Z)
 ///   +0x08            u8[]   cells      (width × height bytes, row-major region IDs)
-///   +0x08 + W×H      u32le  originX    (world-space X origin)
-///   +0x08 + W×H + 4  u32le  originZ    (world-space Z origin)
+///   +0x08 + W×H      i32le  originX    (world-space X origin, SIGNED)
+///   +0x08 + W×H + 4  i32le  originZ    (world-space Z origin, SIGNED)
 ///   Total = 16 + width × height bytes
 /// </code>
 ///         spec: Docs/RE/formats/region_grid.md §Layout A — region&lt;NNN&gt;.bin (RUNTIME): HIGH (parser).
@@ -74,14 +74,16 @@ public sealed class RegionGrid
     public required byte[] Cells { get; init; }
 
     /// <summary>
-    ///     World-space X origin subtracted before the 256-unit cell quantisation.
-    ///     spec: Docs/RE/formats/region_grid.md §Layout A — "originX u32le @ 0x08 + W×H": HIGH (parser).
+    ///     World-space X origin (signed) subtracted before the 256-unit cell quantisation.
+    ///     Stored as a signed 32-bit integer so maps with negative world extents decode correctly.
+    ///     spec: Docs/RE/formats/region_grid.md §Layout A — "originX i32 signed @ 0x08 + W×H": CONFIRMED.
     /// </summary>
     public required int OriginX { get; init; }
 
     /// <summary>
-    ///     World-space Z origin subtracted before the 256-unit cell quantisation.
-    ///     spec: Docs/RE/formats/region_grid.md §Layout A — "originZ u32le @ 0x08 + W×H + 4": HIGH (parser).
+    ///     World-space Z origin (signed) subtracted before the 256-unit cell quantisation.
+    ///     Stored as a signed 32-bit integer so maps with negative world extents decode correctly.
+    ///     spec: Docs/RE/formats/region_grid.md §Layout A — "originZ i32 signed @ 0x08 + W×H + 4": CONFIRMED.
     /// </summary>
     public required int OriginZ { get; init; }
 

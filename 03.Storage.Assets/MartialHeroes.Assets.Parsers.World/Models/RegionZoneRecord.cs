@@ -16,11 +16,12 @@ namespace MartialHeroes.Assets.Parsers.World.Models;
 ///         spec: Docs/RE/specs/world_systems.md Ch. 16 §16.2 — "indexed directly by region id (0..31)": CONFIRMED.
 ///     </para>
 ///     <para>
-///         Note: this table (<c>regiontable&lt;area&gt;.bin</c>, 48-byte stride, 32 records) is distinct
-///         from the sub-zone LABEL table parsed by <see cref="RegionTableParser" /> which uses the 32-byte
-///         stride specified in <c>Docs/RE/formats/misc_data.md §7.2</c>. The 48-byte zone-type view is
-///         the region-gating interpretation described in
-///         <c>Docs/RE/specs/world_systems.md Ch. 16 §16.2</c>.
+///         <see cref="RegionTableParser" /> parses the same <c>regiontable&lt;area&gt;.bin</c>
+///         file (48-byte stride, 32 records) and exposes both the <c>zoneName</c> CP949 string and
+///         the <c>zoneType</c> field together. This type retains the opaque leading bytes verbatim
+///         and exposes only <see cref="ZoneTypeRaw" /> for callers that exclusively need the gating
+///         field.
+///         spec: Docs/RE/formats/region_grid.md §regiontable — "Record stride: 48 bytes — CONFIRMED (RE-AFFIRMED)".
 ///     </para>
 /// </remarks>
 public sealed class RegionZoneRecord

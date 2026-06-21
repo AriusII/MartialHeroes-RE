@@ -199,7 +199,7 @@ public sealed partial class HudVendorWindow : Control
             _rowLabels[i] = new Label
             {
                 Name = $"RowLabel{i}",
-                Text = $"[항목 {i}]", // placeholder — filled from shop-script map
+                Text = string.Empty, // empty until real shop stock (server/VFS) — no fabricated rows
                 Position = new Vector2(NameLblX, rowY + 5f), // spec: §8.22.1
                 Size = new Vector2(NameLblW, NameLblH), // spec: §8.22.1
                 MouseFilter = MouseFilterEnum.Ignore
@@ -234,19 +234,9 @@ public sealed partial class HudVendorWindow : Control
         };
         AddChild(_statusLabel);
 
-        // ── Stock stub ──
-        // TODO(capture): vendor stock list — S2C pending.
-        // spec: §8.22.5 — "shop stock is a local script table; only buy/sell on wire"
-        var stockStub = new Label
-        {
-            Name = "StockStub",
-            Text = "// TODO(capture): vendor stock from shop script map (NPC id keyed)",
-            Position = new Vector2(10f, 250f),
-            Size = new Vector2(340f, 15f),
-            LabelSettings = new LabelSettings { FontSize = 8 },
-            MouseFilter = MouseFilterEnum.Ignore
-        };
-        AddChild(stockStub);
+        // Vendor stock is supplied by the real shop data (server / VFS shop script) when wired
+        // (TODO world-campaign). No on-screen stub text and no fabricated rows — the panel stays empty
+        // until real stock arrives. spec: §8.22.5.
 
         // ── Confirm / close button (135, 200, 90, 25), action 0 ──
         // spec: §8.22.1 — "(135,200,90,25), uitex 2, src (837,815)/(837,775), action 0"
@@ -288,19 +278,13 @@ public sealed partial class HudVendorWindow : Control
         _open = true;
         Visible = true;
 
-        // Seed money label placeholder (real value from player gold on S2C 4/115).
-        // spec: §8.22.3 — "seeded on open and re-driven on every balance push".
-        if (_moneyLabel != null) _moneyLabel.Text = "[금액: ---]"; // TODO(world-campaign): read player gold
-
-        // Populate row labels from the shop-script map (keyed by npcId).
-        // spec: §8.22.5 — "6-entry populate from client-side shop script map keyed by NPC id"
-        // TODO(world-campaign): populate from shop-script catalogue.
-        for (var i = 0; i < _rowLabels.Length; i++)
-            if (_rowLabels[i] != null)
-                _rowLabels[i].Text = $"[항목 {i} — NPC {npcId}]";
+        // The money value (player gold) and the row stock are driven by REAL data when wired:
+        // gold from S2C 4/115 SmsgItemShopBalanceUpdate; stock from the shop data (server / VFS shop
+        // script) keyed by npcId (TODO world-campaign). No placeholder gold and no fabricated rows are
+        // shown — the panel stays empty until real data arrives. spec: §8.22.3 / §8.22.5.
 
         GD.Print($"[HudVendorWindow] Open — npcId={npcId}. " +
-                 "TODO(world-campaign): populate from shop-script map + read player gold. " +
+                 "TODO(world-campaign): populate from real shop data + read player gold (no placeholders). " +
                  "spec: Docs/RE/specs/ui_system.md §8.22.5 CODE-CONFIRMED.");
     }
 
@@ -334,8 +318,8 @@ public sealed partial class HudVendorWindow : Control
         _selectedRow = rowIdx;
         var actionId = 100 + rowIdx; // spec: §8.22.1 — actions 100..102
 
-        if (_statusLabel != null)
-            _statusLabel.Text = $"[선택: {rowIdx}]"; // local view state
+        // No invented status text: the real item-info / result text is driven by server responses
+        // (4/113 purchase result, etc.) when wired. Until then the status line stays empty.
 
         GD.Print($"[HudVendorWindow] Row selected: {rowIdx} (action {actionId}). " +
                  "TODO(world-campaign): C2S CmsgShopBuy (2/115) on confirm. " +

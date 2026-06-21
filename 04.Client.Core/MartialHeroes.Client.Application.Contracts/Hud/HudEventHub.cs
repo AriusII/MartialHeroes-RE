@@ -9,7 +9,7 @@ namespace MartialHeroes.Client.Application.Contracts.Hud;
 /// <remarks>
 ///     <para>
 ///         <b>Topology.</b> Every stream is configured <c>SingleReader = true</c>, <c>SingleWriter = true</c>:
-///         the lone producer is the network reader that owns Domain mutation (today, the stub publishers), and
+///         the lone producer is the network reader that owns Domain mutation, and
 ///         the lone consumer is the one HUD widget that binds to that family. This is the cheapest, lock-light
 ///         synchronisation the BCL offers for this fan-in/fan-out shape and matches
 ///         <see cref="MartialHeroes.Client.Application.Contracts.Events.ClientEventBus" />. If a future topology adds a

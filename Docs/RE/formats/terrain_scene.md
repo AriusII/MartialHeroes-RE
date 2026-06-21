@@ -15,20 +15,19 @@
 
 ---
 
-## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+## Re-verification banner (2026-06-21)
 
 | Attribute        | Value |
 |------------------|-------|
-| `verification`   | `sample-verified` for the `.map`+`.bud` scene model. This pass re-confirmed the **scene/routing** layer (BUILDING section → `.bud` loader; SOLID section → `.sod` loader; `.bud`↔`.sod` independence; the BUILDING `TEXTURES` pool and 1-based `tex_id`) two-witness. The `.bud` byte-internal tables (9-byte object header, 32-byte FVF-0x112 vertex, warn-and-continue 0xC00 cap) were **not** re-dumped this pass and hold at their committed (sample-verified) tier. |
-| `ida_reverified` | `2026-06-16` |
+| `verification`   | `sample-verified` for the `.map`+`.bud` scene model. This pass re-confirmed the format **end-to-end** — loader chain, on-disk layout, read algorithm, and linkages — against the `.bud` loader and a real 195-byte single-object sample, with the file-size formula reproducing to the byte and zero trailing data. No layout field flipped. The pass added refinements only: the precise cull-footprint metric (§7.1), the `TEXTURES` first-integer positivity gate (§2), the pool-cap drop vs. per-object clamp distinction (§6), the explicit read algorithm (§3.3), and the `.bud.pre` negative finding (§3.0). |
+| `ida_reverified` | `2026-06-21` |
 | `ida_anchor`     | `263bd994` |
-| `evidence`       | `[static-ida, vfs-sample]` — `.map` parser dispatch (witness 1) + prior `.bud` sample verification (committed tier) |
-| `conflicts`      | None. RE-confirmed with no drift: the BUILDING section is reached only via the `.map` `BUILDING` block and loads `.bud`; the `BUILDING TEXTURES` pool registers in slot order (same discard-first-int / read-`intTexId` logic as `TERRAIN`), and `tex_id` is a 1-based index into it; `.bud` and `.sod` are independent blobs with no in-file cross-reference (SOLID → `.sod`). The geometry directives `WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN` are present on disk but **not consumed by the located runtime `.map` parser** (see `terrain.md §3.4`). |
+| `evidence`       | `[static-ida, vfs-sample]` — `.bud` loader read-sequence (witness 1) + real `.bud` sample, byte-exact (witness 2) |
+| `conflicts`      | None. RE-confirmed with no drift: the BUILDING section is reached only via the `.map` `BUILDING` block and loads `.bud`; the `BUILDING TEXTURES` pool registers via the discard-first-int / keep-second-int (`intTexId`) convention shared with `TERRAIN`, and `tex_id` is a 1-based index into it; `.bud` and `.sod` are independent blobs with no in-file cross-reference (SOLID → `.sod`). The geometry directives `WIDTH`/`HEIGHT`/`GRID`/`MAX_HEIGHTFILED`/`MIN_HEIGHTFILED`/`ORIGIN` are present on disk but **not consumed by the located runtime `.map` parser** (see `terrain.md §3.4`). The earlier "XZ footprint extent" wording for the cull metric is refined (not contradicted) to the 0.6-scaled XZ-diagonal vs. Y-extent maximum (§7.1). |
 
-> **Building-mesh lane flag (deferred):** the `.bud` 32-byte vertex / 9-byte object header / 0xC00
-> warn-and-continue cap were carried forward at their committed tier this pass; a dedicated
-> building-mesh re-verification against the `.bud` loader and a multi-object sample is the place to
-> re-open those tables, not this terrain-core pass.
+> **Cross-area identity (sample-verified):** the same cell coordinate yields byte-identical `.bud`
+> content across different area IDs (cell `x10023z10035` is identical across maps 016/022/026/034/205),
+> consistent with world-space geometry baked at content-build time (§7.1).
 
 ---
 
@@ -76,6 +75,12 @@ The `.map` text file is the entry point: a section parser reads it, and when it 
 `SOLID { DATAFILE … }` stanza it loads the named `.sod`. The two blobs are independent and
 have no in-file cross-reference to one another (see §7).
 
+Each `DATAFILE` (the `.map` itself, the `.bud`, the `.sod`) is opened through a single
+file-open router that resolves the name two ways: when the packed VFS is mounted it locates the
+entry in the archive table of contents and reads it (see `formats/pak.md`); when running against
+loose files on disk it opens the file directly. The geometry stream is then read sequentially,
+field by field, with no decompression or decryption stage — see §3.3.
+
 All multi-byte fields in `.bud` are **little-endian**. Korean path/comment text that may appear
 in a `.map` file is **CP949 (EUC-KR)** encoded.
 
@@ -103,13 +108,23 @@ Key facts for an implementor of the `.bud` consumer:
 
 - **`DATAFILE`** gives the logical path of the `.bud` blob to load for this cell.
 - **`TEXTURES`** declares, in order, the texture pool that `.bud` records index into. Each entry
-  has an integer flag (purpose unknown — see open questions), an integer texture-pool index that
-  the engine registers, and a quoted original artist path. The quoted path is **metadata only**;
-  the binary parser does not open it (textures are resolved through the packed VFS / texture
-  atlas, not through this string). The string may contain CP949 Korean text.
-- The `TEXTURES` list builds an ordered pool (the legacy client caps this pool at **128** entries
-  for the building section). A `.bud` record's `tex_id` is a **1-based** index into this pool
-  (see §3.2 and §6).
+  is a line of two integers and a quoted original artist path:
+  - **First integer — a positivity gate, not stored.** The parser reads it first; a value `≤ 0`
+    is treated as the block terminator / skip predicate (the loop also stops on a closing `}`),
+    so only lines whose first integer is `> 0` are taken as data lines. On a data line this first
+    integer is then **discarded** (re-read but not retained). Its only observed effect is the
+    `> 0` gate; see open questions.
+  - **Second integer — the registered pool entry.** This is the value the engine actually
+    registers as the pool entry; it is itself a 1-based index into the global `bgtexture.lst`
+    catalogue (`intTexId`). This is the same "discard-first-int / keep-second-int" convention the
+    `TERRAIN` section uses for its texture entries.
+  - **Quoted path — metadata only.** The binary parser does not open it (textures are resolved
+    through the packed VFS / texture atlas, not through this string). The string may contain
+    CP949 Korean text.
+- The `TEXTURES` list builds an ordered pool. The legacy client caps this pool at **128** entries
+  for the building section: registering past the cap **drops** the over-cap entry (it does not
+  clamp or overwrite) and logs a pool-overflow message. A `.bud` record's `tex_id` is a
+  **1-based** index into this pool (see §3.2 and §6).
 - Section keywords are order-independent. Other sections (`TERRAIN`, `EXTRA_TERRAIN`,
   `UP_TERRAIN`, `SOLID`, `FX1`–`FX7`) drive their own loaders and are documented in
   `terrain.md`. Only `BUILDING` reaches the `.bud` loader; only `SOLID` reaches the `.sod` loader.
@@ -135,6 +150,12 @@ error.)
 - **Role:** all static-object (building / prop) triangle geometry for one cell. Loaded as the
   `DATAFILE` of the `.map` `BUILDING` section. It is not the heightmap (`.ted`) or the
   collision blob (`.sod`); those are separate formats with separate loaders.
+- **`.bud.pre` siblings (ignore at runtime):** the asset set contains `.bud.pre` files beside the
+  `.bud` (same base name). A `.bud.pre` uses the same structure (same `object_count`,
+  `vertex_count`, `index_count`) but holds different pre-bake source vertex data. The client
+  **never opens `.bud.pre`** — it only ever loads the `.bud` named explicitly by the `.map`
+  `DATAFILE`. `.bud.pre` is a content-build artifact, not a runtime format; a parser should
+  ignore `.pre` siblings (this parallels the `.ted` / `.ted.post` pair).
 
 ### 3.1 File-level header
 
@@ -248,6 +269,31 @@ little-endian. Indices are 0-based; the legal range is `[0, vertex_count − 1]`
   `.bud` geometry.
 - **Index width:** u16 (2 bytes). No 32-bit index variant was observed.
 
+### 3.3 Read algorithm (bytes → runtime)
+
+The loader reads the stream strictly sequentially in the on-disk order, with no transform and no
+decode:
+
+1. Open the `.bud` named by the `BUILDING { DATAFILE … }` stanza through the file-open router
+   (VFS entry read when mounted, direct file read when loose — see §1).
+2. Read `object_count` (u32). Allocate an array of that many object records (no count cap).
+3. For each object, in order: read `type_byte` (u8), `tex_id` (u32), `vertex_count` (u32);
+   allocate `32 × vertex_count` bytes and **blit the whole vertex block in one read** (the
+   per-vertex layout is a raw copy — there is no per-vertex decode or conversion step); apply the
+   warn-only `0xC00` cap check (§3.2.1) without truncating; read `index_count` (u32); allocate
+   `2 × index_count` bytes and blit the index block.
+4. Per object after the read, compute the AABB from vertex positions (reading only the first
+   12 bytes of each 32-byte vertex), apply the degenerate-axis nudge, and derive the
+   distance-squared cull threshold (§7.1).
+5. No coordinate transform, matrix multiply, endianness swap, or geometry decode/decompression is
+   applied — positions are already absolute world-space (§7.1). The only mutations the loader
+   makes are the AABB degenerate-axis nudge and the `tex_id` clamp-to-1 guard (§6); the warn-only
+   vertex cap mutates nothing.
+6. After **all** `.map` sections are parsed, a per-cell mass-object grid builder bins the loaded
+   objects into the cell's spatial grid for rendering and culling (this runs alongside the
+   ground-grid and FX-layer builders for the cell). The render mesh build consumes these objects'
+   32-byte FVF-0x112 vertices and u16 index lists directly.
+
 ---
 
 ## 4. File-size formula
@@ -322,6 +368,13 @@ on it in the render path, mirroring the legacy consumer.
   (`intTexId` fields). To resolve a texture: `tex_id` → pool entry `intTexId` → `bgtexture.lst`
   record at index `(intTexId − 1)` → `kind` byte and `path_stem` → full DDS path. The complete
   resolution chain is documented in `formats/texture.md §bgtexture.lst`.
+- **Two distinct guards — do not conflate them.** The 128-entry pool cap and the per-object
+  `tex_id` validation react differently:
+  - *Pool build (cap 128):* registering a `TEXTURES` entry past the 128-entry cap **drops** the
+    over-cap entry and logs a pool-overflow message. It does not clamp or overwrite an existing
+    slot.
+  - *Per-object resolve (`tex_id`):* a `tex_id` that is `< 1` or `> pool_size` is logged as an
+    error and **clamped to 1** (see below).
 - A `.bud` consumer only needs to treat `tex_id` as a 1-based offset into the per-cell
   `BUILDING` texture list it was given alongside the blob.
 
@@ -354,17 +407,31 @@ Consequences for an implementor:
   consistent with world-space coordinates baked at content-build time.
 
 The runtime does compute, per object after load, an axis-aligned bounding box from the vertex
-positions and derives a distance-squared visibility-culling threshold from the object's XZ
+positions and derives a distance-squared visibility-culling threshold from the object's
 footprint. This is **runtime state, not stored in the file**; it is documented here only so
-that implementors understand the intent of the `pos_*` fields:
+that implementors understand the intent of the `pos_*` fields.
 
-| XZ footprint extent | Cull distance (units) | Distance² |
-|---------------------|-----------------------|-----------|
+The footprint metric used to pick the threshold is **not** a raw axis extent. It is the larger
+of two measures of the object's bounding box:
+
+- a horizontal measure: the planar (XZ) diagonal length of the box, scaled by **0.6** and
+  truncated to an integer; and
+- a vertical measure: the box's Y (height) extent, truncated to an integer.
+
+`footprint = max( floor(0.6 × XZ_diagonal_length), floor(Y_extent) )`. The threshold table is
+then selected by `footprint`:
+
+| `footprint` band | Cull distance (units) | Distance² |
+|------------------|-----------------------|-----------|
 | < 8  | 300   | 90 000    |
 | < 16 | 500   | 250 000   |
 | < 32 | 1 000 | 1 000 000 |
 | < 64 | 1 500 | 2 250 000 |
 | ≥ 64 | ~1 800 | 3 240 000 |
+
+The post-load bounding-box routine also guards against a degenerate (zero-thickness) axis: if
+any AABB axis has `min == max`, it nudges that axis's `max` upward by 2.0 before computing the
+footprint, so a flat object still receives a non-zero box.
 
 ### 7.2 Relationship to `.sod` (collision)
 
@@ -477,8 +544,11 @@ in the legacy asset set.
 6. **UV convention selection.** Both tiled world-scale and atlas-normalized UVs are confirmed
    present in the real data. The choice is per-object and follows from the content. Whether any
    fixed UV = world_position / tile_size relationship holds for tiled objects is unconfirmed.
-7. **`BUILDING TEXTURES` integer flag.** The first integer on each `TEXTURES` line is read but
-   its meaning is unknown. It is not the `bgtexture.lst` record index.
+7. **`BUILDING TEXTURES` first integer.** The first integer on each `TEXTURES` line is read but
+   then discarded on a data line; its only *observed* effect is a positivity gate (`≤ 0` ends /
+   skips the block, `> 0` marks a data line — see §2). Whether the value carries any further
+   meaning beyond that gate is unknown. It is **not** the registered pool entry (that is the
+   second integer) and not the `bgtexture.lst` record index.
 8. **No name/string fields in `.bud`.** Object naming, if any, is carried by the `.map` text,
    not the `.bud` binary.
 

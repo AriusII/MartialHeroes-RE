@@ -125,6 +125,30 @@ public sealed class AssembledCell
     /// </summary>
     public string?[]? ResolvedTexturePaths { get; init; }
 
+    // ── Resolved texture paths (building objects) ──────────────────────────
+
+    /// <summary>
+    ///     For each <c>.map</c> BUILDING TEXTURES slot (registration order, 0-based), the resolved
+    ///     <c>data/map000/texture/&lt;rel&gt;.dds</c> VFS path — or <see langword="null" />
+    ///     for an empty/kind-0 pool slot or an out-of-range index.
+    ///     <para>
+    ///         Resolution chain (identical join to terrain, different per-cell list):
+    ///         <see cref="MartialHeroes.Assets.Parsers.Terrain.Models.BudObject.TexId" /> (1-based)
+    ///         → BUILDING TEXTURES[TexId−1].intTexId
+    ///         → bgtexture.lst[intTexId] (NO −1; intTexId IS the 0-based pool slot)
+    ///         → data/map000/texture/&lt;rel&gt;.dds.
+    ///     </para>
+    ///     Consumers resolve a <see cref="MartialHeroes.Assets.Parsers.Terrain.Models.BudObject.TexId" />
+    ///     (1-based) to a path by indexing <c>ResolvedBuildingTexturePaths[TexId − 1]</c>.
+    ///     Null when the BUILDING section has no TEXTURES list or <c>.bud</c> is absent.
+    ///     spec: Docs/RE/specs/asset_linkages.md §1.5 — "Building geometry uses the identical chain via
+    ///     the BUILDING list: the .bud per-object tex_id is a 1-based index into the per-cell BUILDING
+    ///     TEXTURES list, whose value is itself a 1-based index into the global bgtexture pool": CONFIRMED.
+    ///     spec: Docs/RE/formats/bgtexture_lst.md §Cross-file join — intTexId IS the 0-based pool slot, NO −1: CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain_scene.md §Object header — tex_id u32 @ +0x01: CONFIRMED (1-based).
+    /// </summary>
+    public string?[]? ResolvedBuildingTexturePaths { get; init; }
+
     // ── Collision geometry ─────────────────────────────────────────────────
 
     /// <summary>

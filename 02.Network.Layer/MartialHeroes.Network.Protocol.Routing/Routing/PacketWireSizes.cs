@@ -121,8 +121,9 @@ public static class PacketWireSizes
                 size = SmsgCharSpawnResult.WireSize;
                 isVariableLength = false;
                 return true;
-            case Opcodes.SmsgCharSelectStatusUpdate: // spec: packets/3-23_char_select_status_update.yaml
-                size = SmsgCharSelectStatusUpdate.Size;
+            case Opcodes.SmsgCharStatusBytesByName
+                : // spec: Docs/RE/packets/3-23_char_select_status_update.yaml (28-byte roster patch, NOT 12-byte create-result)
+                size = SmsgCharStatusBytesByName.WireSize;
                 isVariableLength = false;
                 return true;
 
@@ -165,8 +166,9 @@ public static class PacketWireSizes
                 size = CmsgCreateCharacter.WireSize;
                 isVariableLength = false;
                 return true;
-            case Opcodes.CmsgSelectCharacter: // spec: packets/cmsg_char_select.yaml
-                size = CmsgSelectCharacter.WireSize;
+            case Opcodes.CmsgSelectCharacterSlot
+                : // spec: Docs/RE/packets/cmsg_char_select.yaml (1/7 select-and-play or slot-lock)
+                size = CmsgSelectCharacterSlot.WireSize;
                 isVariableLength = false;
                 return true;
             case Opcodes.CmsgEnterGameRequest: // spec: packets/cmsg_char_enter.yaml

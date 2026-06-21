@@ -10,23 +10,24 @@
 //   - body .skn  : data/char/skinlist.txt scan → first entry whose parsed IdB == SkinClassId
 //   - skeleton   : data/char/bind/g{SkinClassId}.bnd
 //   - idle .mot  : data/char/actormotion.txt row whose col2 (skin_class) == SkinClassId →
-//                  motion_ids_a[0] (col15, record +0x40) → data/char/mot/g{id}.mot
+//                  motion_ids_a[1] (col16, record +0x44 = default idle) → data/char/mot/g{id}.mot
 //   - albedo     : CharacterTextureResolver (skin.txt: mesh.IdA → tex id → PNG)
 //   - build      : SkinnedCharacterBuilder.Build (skinned when the .bnd resolves; static otherwise)
 //
-// The col15 standing idle for the first human class (g101100001.mot) is STATIC DATA (0 animated
+// The standing idle for the first human class (g101100001.mot) is STATIC DATA (0 animated
 // tracks): a frozen STANDING HUMAN is FAITHFUL, not a defect — only mobs have genuinely animated
 // idles. SkinnedCharacterBuilder/Setup auto-engages PlayStandingIdle, so playback is already on.
 //
 // The player avatar is built SELF-DRIVEN (externalDrive=false): SkinnedCharacterNode._Process
-// advances it per frame, identical to RealWorldRenderer's demo avatar. NpcRenderer's ~10 Hz
+// advances it per frame independently. NpcRenderer's ~10 Hz
 // staggered scheduler is for the town of mobs only and does not apply here.
 //
 // spec: Docs/RE/specs/skinning.md §8(e) — skeleton = g{SkinClassId}.bnd for {1,2,3,4}; idle clip =
-//       actormotion col2 == skin_class → motion_ids_a[0] (col15); skin .skn = skinlist entry whose
-//       id_b == SkinClassId. §10 / §10.2 / §10.5 — col15 stand idle is static data, render faithfully.
-// spec: Docs/RE/formats/actormotion.md — col2 = skin_class (int_a @ +0x04); motion_ids_a[0]
-//       (+0x40, col15) = file-source idle reference.
+//       actormotion col2 == skin_class → motion_ids_a[1] (col16, +0x44 = default idle); skin .skn =
+//       skinlist entry whose id_b == SkinClassId. §10 / §10.2 — the human stand idle is static data,
+//       render faithfully. col15/motion_ids_a[0] (+0x40) is the statically DEAD file-source ref.
+// spec: Docs/RE/formats/actormotion.md — col2 = skin_class (int_a @ +0x04); col16 = motion_ids_a[1]
+//       (+0x44) = default idle; col15 = motion_ids_a[0] (+0x40) = dead file-source ref.
 // spec: CLAUDE.md "Recovered asset mappings" — skin (.skn IdA → skin.txt), skeleton (g{SkinClassId}.bnd),
 //       idle motion via actormotion.txt.
 
@@ -114,16 +115,16 @@ internal static class PlayerAvatarResolver
         // spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4} is the direct rule.
         var skeleton = TryLoadSkeleton(assets, skinClass);
 
-        // ── Step 4: idle .mot — actormotion row col2 == skinClass → motion_ids_a[0] (col15) ──
-        // spec: skinning.md §8(e); formats/actormotion.md — col2 = skin_class, motion_ids_a[0] = col15.
+        // ── Step 4: idle .mot — actormotion row col2 == skinClass → motion_ids_a[1] (col16, default idle) ──
+        // spec: skinning.md §8(e) item 2; formats/actormotion.md — col2 = skin_class, col16 = default idle.
         var idleMotId = skeleton is not null ? ResolveIdleMotionId(assets, skinClass) : 0;
         var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, idleMotId)
             : null;
 
         // ── Step 5: build via SkinnedCharacterBuilder (skinned when .bnd present; static otherwise) ──
-        // SELF-DRIVEN (externalDrive=false): the node self-ticks per frame via _Process, identical to
-        // RealWorldRenderer's demo avatar. The town's ~10 Hz stagger scheduler (NpcRenderer) is mob-only.
+        // SELF-DRIVEN (externalDrive=false): the node self-ticks per frame via _Process.
+        // The town's ~10 Hz stagger scheduler (NpcRenderer) is mob-only.
         // Setup() auto-calls PlayStandingIdle, so the looping idle is engaged on build.
         // The pivot up-axis remap (UpAxisRemapDeg) is applied inside Build — IDENTICAL to NPCs, so the
         // player stands the same way every spawned actor does (see report: up-axis is §9 debugger-pending).
@@ -233,9 +234,10 @@ internal static class PlayerAvatarResolver
 
     /// <summary>
     ///     Finds the <c>actormotion.txt</c> row whose <c>col2</c> (skin_class) == <paramref name="skinClass" />
-    ///     and returns its <c>motion_ids_a[0]</c> (col15, record +0x40) — the file-source idle reference.
+    ///     and returns its <c>motion_ids_a[1]</c> (col16, record +0x44) — the DEFAULT idle the runtime uses
+    ///     (col15/[0] @ +0x40 is the statically DEAD file-source ref; fall back to [0] only if [1] is absent).
     ///     Returns 0 when no row matches or the slot is empty.
-    ///     spec: skinning.md §8(e); formats/actormotion.md — col2 = skin_class, motion_ids_a[0] = col15.
+    ///     spec: skinning.md §8(e) item 2 / §10; formats/actormotion.md — col2 = skin_class, col16 = default idle.
     /// </summary>
     private static int ResolveIdleMotionId(RealClientAssets assets, int skinClass)
     {
@@ -248,10 +250,13 @@ internal static class PlayerAvatarResolver
             foreach (var entry in catalogue.AllEntries)
             {
                 // col2 == skin_class is the player idle key (the player IS a class, not a mob_id).
-                // spec: skinning.md §8(e) — actormotion col2 == id_b → motion_ids_a[0].
+                // spec: skinning.md §8(e) — actormotion col2 == id_b → default idle.
                 if (entry.SkinClassId != skinClass) continue;
-                // col15 = motion_ids_a[0]. Zero = empty slot. spec: formats/actormotion.md §col15.
-                return entry.MotionIds.Length > 0 ? entry.MotionIds[0] : 0;
+                // col16 = motion_ids_a[1] (record +0x44) = the DEFAULT idle the runtime uses; col15/[0]
+                // (+0x40) is the statically DEAD file-source ref. Prefer [1]; fall back to [0]; 0 = empty.
+                // spec: skinning.md §8(e) item 2 / §10; formats/actormotion.md — col16 = default idle.
+                return entry.MotionIds.Length > 1 ? entry.MotionIds[1]
+                    : entry.MotionIds.Length > 0 ? entry.MotionIds[0] : 0;
             }
         }
         catch (Exception ex)

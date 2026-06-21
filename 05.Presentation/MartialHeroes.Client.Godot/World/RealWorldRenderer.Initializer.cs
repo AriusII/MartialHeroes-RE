@@ -60,174 +60,15 @@ public sealed partial class RealWorldRenderer
         GD.Print("[RealWorldRenderer] Initialise: loading cel toon ramp");
         CelShadeMaterialFactory.InitSession(Assets);
 
-        // Resolve the target area and cell.
-        // The area id is read from client_dir.cfg (key "area="), defaulting to 0.
-        // The cell is discovered by enumerating real VFS entries for that area.
-        // If the configured area has no cells, we auto-select the first area that does.
-        // This ensures we NEVER target a non-existent cell (fixing the (10000,10000) bug).
-        GD.Print("[RealWorldRenderer] Initialise: resolving target cell");
-        try
-        {
-            ResolveTargetCell();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr(
-                $"[RealWorldRenderer] ResolveTargetCell failed: {ex.Message} — keeping default ({TargetMapX},{TargetMapZ}).");
-        }
+        // NO area content is built here. The world is built SOLELY on the server's 4/1 world-entry
+        // (OnWorldEntered), keyed to the server-supplied AreaId: terrain, buildings, and the area's
+        // static NPC scenery all load from the VFS for that area; the local player and dynamic actors
+        // arrive from the server (3/7 spawn, 4/4 actor stream). There is NO offline demo build, NO
+        // config "area=" default, and NO demo character. Without a 4/1 the world stays empty.
+        // spec: Docs/RE/specs/world_entry.md §2.3/§3.1 — 4/1 AreaId cold-starts the area.
 
-        GD.Print($"[RealWorldRenderer] Target cell resolved to ({TargetMapX},{TargetMapZ}) for area {TargetAreaId}.");
-
-        // Load the texture-resolution inputs once: the global bgtexture pool (runtime bgtexture.lst,
-        // with the .txt mirror as dev/loose-tree fallback) and the cell's .map (per-section TEXTURES
-        // lists). spec: asset_pipeline.md §3 chain B + terrain.md §3.5. CONFIRMED.
-        LoadTextureResolutionInputs();
-
-        // Atmosphere (EnvironmentNode): assemble the area's sky/fog/light from the parsed per-area
-        // environment bins (map_option/fog/light/material). RECONCILED Campaign 5: map_option carries
-        // no water field, so no map_option-driven water plane is placed (per-cell water presence is
-        // detected separately from .map FX texture names).
-        // spec: Docs/RE/specs/environment.md §3 (assembly) + §4 (water RESOLVED-NEGATIVE).
-        GD.Print("[RealWorldRenderer] Initialise: wiring environment + water");
-        try
-        {
-            WireEnvironmentAndWater();
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealWorldRenderer] WireEnvironmentAndWater failed: {ex.Message}");
-        }
-
-        // Wire the texture resolver into TerrainNode so each sector can get a real texture.
-        // spec: Docs/RE/formats/terrain.md §5.6 Block 3 — 1-based TextureIndexGrid → texture path.
-        GD.Print("[RealWorldRenderer] Initialise: wiring terrain texture resolver");
-        try
-        {
-            WireTerrainTextureResolver(terrainNode);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealWorldRenderer] WireTerrainTextureResolver failed: {ex.Message}");
-        }
-
-        // Kick off 5×5 terrain streaming via SectorStreamingService.
-        // spec: Docs/RE/formats/terrain.md §12.2 (5×5 ring, StreamQuality.High).
-        GD.Print("[RealWorldRenderer] Initialise: triggering terrain streaming");
-        try
-        {
-            TriggerTerrainStreaming(ctx);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealWorldRenderer] TriggerTerrainStreaming failed: {ex.Message}");
-        }
-
-        // Check load_models flag before loading .bud and .skn.
-        // Set load_models=false in client_dir.cfg to render terrain only (safe fallback).
-        var loadModels = ClientPathResolver.LoadModelsEnabled();
-        GD.Print($"[RealWorldRenderer] Initialise: load_models={loadModels}");
-
-        if (loadModels)
-        {
-            // Load BUD scene and create MeshInstance3D children via ArrayMesh (no GltfDocument).
-            // FLAG-GATE (CYCLE 2 Phase 2-A): when compose_render is ON, buildings are placed from
-            // CellAssembledEvent → OnCellAssembled → SlotRenderer.RenderSlot1Buildings for each
-            // streamed cell. Suppress the legacy single-cell LoadAndSpawnBudScene to avoid double-
-            // spawning the target cell's buildings (legacy once + compose once = 2×).
-            // The legacy path runs unchanged when compose_render is OFF (zero regression).
-            // spec: Docs/RE/specs/assembly_graph.md §1 — slot 1 buildings come from the assembled cell.
-            if (_composeRender)
-            {
-                GD.Print("[RealWorldRenderer] Initialise: compose_render=ON — LoadAndSpawnBudScene " +
-                         "SUPPRESSED (buildings placed per-cell from CellAssembledEvent via OnCellAssembled). " +
-                         "spec: assembly_graph.md §1.");
-            }
-            else
-            {
-                GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene start");
-                try
-                {
-                    LoadAndSpawnBudScene();
-                }
-                catch (Exception ex)
-                {
-                    GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}");
-                }
-
-                GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnBudScene done");
-            }
-
-            // Spawn skinned character static pose (if available) via ArrayMesh (no GltfDocument).
-            GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnCharacter start");
-            try
-            {
-                LoadAndSpawnCharacter();
-            }
-            catch (Exception ex)
-            {
-                GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnCharacter failed: {ex.Message}");
-            }
-
-            GD.Print("[RealWorldRenderer] Initialise: LoadAndSpawnCharacter done");
-
-            // Populate the area with monsters/NPCs from mob*.arr + npc*.arr (static characters,
-            // resolved via the mob_id -> actormotion -> skin chain). Areas with no spawns are no-ops.
-            //
-            // FLAG-GATE (CYCLE 2 Phase 2-A.5): when compose_render is ON, actor placement is driven
-            // by the AreaAssembledEvent → OnAreaAssembled composer path (see below). In that case,
-            // NpcRenderer.PopulateFromArea is SUPPRESSED to avoid double-spawning the same actors.
-            // When compose_render is OFF, the legacy NpcRenderer path runs unchanged (zero regression).
-            // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — spawns reach layer-05 via event bus).
-            if (_composeRender)
-            {
-                GD.Print("[RealWorldRenderer] Initialise: compose_render=ON — NpcRenderer.PopulateFromArea " +
-                         "SUPPRESSED (actors placed from AreaAssembledEvent.Spawns via OnAreaAssembled). " +
-                         "spec: assembly_graph.md §1/§4.");
-            }
-            else
-            {
-                GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea start");
-                try
-                {
-                    var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
-                    // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
-                    npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
-                    // TryGroundYFunc returns false (not just a fallback constant) when the sector is absent —
-                    // used by the pending-snap mechanism to snap only when real data is available.
-                    // spec: TerrainNode.TryGetGroundHeight — returns false when cell absent: CONFIRMED.
-                    if (_terrainNode is not null)
-                    {
-                        var terrainCapture = _terrainNode;
-                        npcRenderer.TryGroundYFunc = (lx, lz, out hy) =>
-                            terrainCapture.TryGetGroundHeight(lx, lz, out hy);
-                    }
-
-                    AddChild(npcRenderer);
-                    npcRenderer.PopulateFromArea(Assets, TargetAreaId);
-
-                    // Wire the sector-resident notification so actors are re-grounded as soon as each
-                    // cell's heightmap arrives — eliminates the fallback-Y race (D2).
-                    // TerrainNode fires SectorBecameResident on the Godot main thread (GameLoop._Process)
-                    // after the cell enters its height-lookup cache.
-                    // spec: TerrainNode.SectorBecameResident — fired after _cellCache updated: CONFIRMED.
-                    if (_terrainNode is not null)
-                        _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
-                }
-                catch (Exception ex)
-                {
-                    GD.PrintErr($"[RealWorldRenderer] NpcRenderer.PopulateFromArea failed: {ex.Message}");
-                }
-
-                GD.Print("[RealWorldRenderer] Initialise: NpcRenderer.PopulateFromArea done");
-            }
-        }
-        else
-        {
-            GD.Print("[RealWorldRenderer] Initialise: load_models=false — skipping BUD and character.");
-        }
-
-        // Position a camera above the origin cell centre.
-        // spec: Docs/RE/formats/terrain.md §1.4 — worldX_min = (mapX-10000)×1024, cell size 1024. CONFIRMED.
+        // Set up the camera controller (the spec-faithful Third-person orbit). It holds its initial
+        // framing until SetLocalPlayer wires it to the server-spawned (3/7) player.
         GD.Print("[RealWorldRenderer] Initialise: SpawnCamera start");
         try
         {
@@ -238,7 +79,8 @@ public sealed partial class RealWorldRenderer
             GD.PrintErr($"[RealWorldRenderer] SpawnCamera failed: {ex.Message}");
         }
 
-        GD.Print($"[RealWorldRenderer] Initialise: complete for cell ({TargetMapX},{TargetMapZ}).");
+        GD.Print("[RealWorldRenderer] Initialise: renderer ready — world build deferred to server 4/1 " +
+                 "(OnWorldEntered). spec: world_entry.md §2.3/§3.1.");
     }
 
     // -------------------------------------------------------------------------
@@ -251,8 +93,8 @@ public sealed partial class RealWorldRenderer
     ///     Called by <see cref="GameLoop" /> when <c>InGameWorldBootstrappedEvent</c> arrives (the 4/1
     ///     world-entry carrier). This makes the area cold-start <b>server-driven</b>: the AreaId at
     ///     4/1 body offset 12 selects the on-disk area, and the config "area=" key becomes an
-    ///     OFFLINE-DEMO fallback only (Initialise still uses it when no live 4/1 supplies a different
-    ///     id — preserving the demo path exactly as before).
+    ///     offline fallback only (Initialise still uses it when no live 4/1 supplies a different
+    ///     id — the renderer renders nothing when real assets are absent).
     ///     Behaviour:
     ///     <list type="bullet">
     ///         <item>
@@ -260,8 +102,7 @@ public sealed partial class RealWorldRenderer
     ///             spec: Docs/RE/specs/world_entry.md §2.3.
     ///         </item>
     ///         <item>
-    ///             <c>_assets</c> null (offline, Initialise bailed) → log and return; the offline
-    ///             demo area is preserved exactly as before.
+    ///             <c>_assets</c> null (offline, VFS absent) → log and return; renders nothing.
     ///         </item>
     ///         <item>
     ///             <c>areaId == TargetAreaId</c> AND already initialised → no-op (avoid double-init /
@@ -291,10 +132,10 @@ public sealed partial class RealWorldRenderer
 
         if (Assets is null)
         {
-            // Offline path (Initialise bailed with no VFS): the offline demo area is preserved.
+            // VFS absent (Initialise bailed): renders nothing.
             // spec: Docs/RE/specs/world_entry.md §2.3 (server AreaId drives cold-start; config is fallback).
-            GD.Print($"[RealWorldRenderer] OnWorldEntered: areaId={areaId} — no real assets (offline demo); " +
-                     "offline demo area kept. spec: Docs/RE/specs/world_entry.md §2.3.");
+            GD.Print($"[RealWorldRenderer] OnWorldEntered: areaId={areaId} — VFS unavailable; renders nothing. " +
+                     "spec: Docs/RE/specs/world_entry.md §2.3.");
             return;
         }
 
@@ -392,12 +233,81 @@ public sealed partial class RealWorldRenderer
             else
                 GD.PrintErr("[RealWorldRenderer] OnWorldEntered: _ctx is null — terrain streaming not triggered.");
 
+            // Build the server area's static scenery (buildings + .arr NPC placements) from the VFS, ONCE,
+            // on the first server world-entry. In compose_render mode the buildings arrive per streamed
+            // cell via OnCellAssembled and the area's NPCs via OnAreaAssembled (both already triggered by
+            // the streaming kicked off above), so this legacy build runs only when compose_render is OFF.
+            // This is REAL VFS data for the server-supplied area (the static map scenery the original
+            // loads on area entry) — not fabricated. Dynamic actors still arrive via the 4/4 stream.
+            // spec: Docs/RE/specs/world_entry.md §3.1; Docs/RE/specs/assembly_graph.md §1.
+            if (!_composeRender && !_areaContentBuilt)
+            {
+                BuildLegacyAreaContent();
+                _areaContentBuilt = true;
+            }
+
             GD.Print($"[RealWorldRenderer] OnWorldEntered: cold-start complete for area {areaId}. " +
                      "spec: Docs/RE/specs/world_entry.md §2.3.");
         }
         finally
         {
             _worldEntryInProgress = false;
+        }
+    }
+
+    /// <summary>
+    ///     Builds the legacy (non-compose) static scenery for the current server area: the resolved spawn
+    ///     cell's buildings (.bud) and the area's static NPC/mob placements (mob/npc .arr → mob_id→skin
+    ///     chain), both read from the VFS. Called once from <see cref="OnWorldEntered" /> on the first
+    ///     server world-entry when <c>compose_render</c> is OFF (the compose path places these via
+    ///     <see cref="OnCellAssembled" /> / <see cref="OnAreaAssembled" />). This is REAL VFS area data
+    ///     keyed to the server-supplied AreaId — not fabricated content. Dynamic actors the server
+    ///     controls still arrive separately via the 4/4 ActorSpawnedEvent stream.
+    ///     spec: Docs/RE/specs/world_entry.md §3.1; Docs/RE/specs/assembly_graph.md §1.
+    /// </summary>
+    private void BuildLegacyAreaContent()
+    {
+        if (Assets is null) return;
+
+        // Buildings (.bud) for the resolved spawn cell.
+        GD.Print("[RealWorldRenderer] OnWorldEntered: LoadAndSpawnBudScene start");
+        try
+        {
+            LoadAndSpawnBudScene();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] LoadAndSpawnBudScene failed: {ex.Message}");
+        }
+
+        // Static NPC/mob scenery for the area (mob/npc .arr). Areas with no spawns are a no-op.
+        GD.Print("[RealWorldRenderer] OnWorldEntered: NpcRenderer.PopulateFromArea start");
+        try
+        {
+            var npcRenderer = new NpcRenderer { Name = "NpcRenderer" };
+            // Sample terrain height (legacy worldX/worldZ); falls back to 26 until sectors load.
+            npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
+            // TryGroundYFunc returns false when the sector is absent — used by the pending-snap mechanism
+            // to snap only when real heightmap data is available.
+            // spec: TerrainNode.TryGetGroundHeight — returns false when cell absent: CONFIRMED.
+            if (_terrainNode is not null)
+            {
+                var terrainCapture = _terrainNode;
+                npcRenderer.TryGroundYFunc = (lx, lz, out hy) =>
+                    terrainCapture.TryGetGroundHeight(lx, lz, out hy);
+            }
+
+            AddChild(npcRenderer);
+            npcRenderer.PopulateFromArea(Assets, TargetAreaId);
+
+            // Re-ground actors as each cell's heightmap arrives (eliminates the fallback-Y race).
+            // spec: TerrainNode.SectorBecameResident — fired after _cellCache updated: CONFIRMED.
+            if (_terrainNode is not null)
+                _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] NpcRenderer.PopulateFromArea failed: {ex.Message}");
         }
     }
 

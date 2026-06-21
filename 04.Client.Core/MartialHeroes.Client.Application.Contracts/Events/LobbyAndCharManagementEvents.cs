@@ -195,6 +195,9 @@ public sealed record CharRenameResultEvent(
 ///     slot. On success the account char count is incremented and <see cref="AssignedSlotId" /> carries
 ///     the new slot; on failure <see cref="ErrorCode" /> carries the wire error code (0xC8..0xD4). spec:
 ///     Docs/RE/specs/login_flow.md §5.4.
+///     NOTE: This event predates the Phase 2b binary-confirmed 3/23 layout correction. Create is acked
+///     via 3/7 SmsgCharManageResult + a refreshed 3/4 list; 3/23 = SmsgCharStatusBytesByName (roster patch).
+///     This event type is retained for compatibility but is no longer published by the 3/23 handler.
 /// </summary>
 /// <param name="Success">True when the wire result byte was 1. spec: §5.4.</param>
 /// <param name="AssignedSlotId">On success: the assigned slot id (wire Code byte). 0 on failure. spec: §5.4.</param>
@@ -211,3 +214,60 @@ public sealed record CharCreateResultEvent(
     uint Value1,
     uint Value2,
     int AccountCharacterCount) : IClientEvent;
+
+/// <summary>
+///     Published whenever a 3/100 SmsgCharActionResult lands, carrying the decoded 4-byte action/result
+///     code so the presentation can SURFACE the reason (the live log left this code undecoded). 3/100 is
+///     the table-driven scene-transition message of client_runtime.md §7.5.2; this event makes its raw
+///     code visible to the UI in addition to whatever scene transition the machine commits. When 3/100
+///     arrives during the enter phase (a 1/9 was sent and the server answered 3/100 instead of the 4/1
+///     world tick) it is a REJECTION (e.g. duplicate-session / ghost-lock): the client stays at
+///     char-select and this event lets the UI show the reason code. spec:
+///     Docs/RE/specs/client_runtime.md §7.5.2; Docs/RE/specs/login_flow.md §1 step 9 / §6 (coded
+///     outcome surfaces a message, neither char-list nor disconnect); Docs/RE/opcodes.md (3/100,
+///     4-byte code).
+/// </summary>
+/// <param name="ResultCode">
+///     The raw 4-byte action/result code (wire +0). The §7.5.2 table classifies it: 0 = success/return;
+///     1..4 or 7 = char-operation failure (error); 202/203/232 = create/rename/billing accepted (reload);
+///     out-of-range = hard char-op error. Forwarded verbatim so the presentation maps it to a localized
+///     string. spec: Docs/RE/specs/client_runtime.md §7.5.2.
+/// </param>
+/// <param name="IsRejection">
+///     True when this code is NOT a success (code != 0) — i.e. the enter / char-op was rejected and the
+///     UI should surface the reason rather than proceed. spec: Docs/RE/specs/client_runtime.md §7.5.2.
+/// </param>
+public sealed record CharActionResultEvent(
+    uint ResultCode,
+    bool IsRejection) : IClientEvent;
+
+/// <summary>
+///     Published when a 3/23 SmsgCharStatusBytesByName lands (select-screen character level and status
+///     update, 28-byte roster patch by CP949 name). Binary-confirmed layout (Phase 2b, build 263bd994).
+///     When <see cref="HasCustomText" /> is true the handler matched a slot by name and updated its
+///     <see cref="StatusValue" /> and <see cref="Level" />; when false a code-based timed status notice
+///     is shown keyed by <see cref="StatusCode" />. spec:
+///     Docs/RE/packets/3-23_char_select_status_update.yaml;
+///     Docs/RE/specs/net_contracts.md §2.2.
+/// </summary>
+/// <param name="HasCustomText">
+///     True when HasCustomText != 0 (name-based slot patch). False for code-based status notice.
+///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml HasCustomText @0x00.
+/// </param>
+/// <param name="StatusCode">
+///     Status reason code (used only when HasCustomText is false).
+///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml StatusCode @0x01.
+/// </param>
+/// <param name="StatusValue">
+///     Character status / PK / faction byte from the server.
+///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml StatusValue @0x19.
+/// </param>
+/// <param name="Level">
+///     Updated character level from the server.
+///     spec: Docs/RE/packets/3-23_char_select_status_update.yaml Level @0x1A.
+/// </param>
+public sealed record CharStatusBytesByNameEvent(
+    bool HasCustomText,
+    byte StatusCode,
+    byte StatusValue,
+    byte Level) : IClientEvent;

@@ -81,10 +81,14 @@ public sealed partial class HudMaster
         AddChild(_statsPanel);
         _statsPanel.Build(atlas, text, ctx);
 
-        // 9. Selected-target plate (MopGagePanel, HUD slot 177) — recovered in HUD-II pass.
+        // 9. Selected-target plate (MopGagePanel, HUD panel-slot array slot 35) — recovered in HUD-II pass.
+        //    SLOT CORRECTED: binary-won reversal per ui_system.md §1.9.3/§1.9.4 (263bd994 RTTI pass).
+        //    Slot 177 = plain GUComponent image (bottom command-bar trailing element, §2.3) — NOT this panel.
         //    Screen-width-centred W=226, top-anchored, transparent container.
         //    Children bind uitex id 1 chrome; HP fill = min(172, 172·hpRatio) px wide.
-        //    spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED (slot 177).
+        //    spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won).
+        //    spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
+        //    spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
         _targetFrame = new HudTargetFrame();
         AddChild(_targetFrame);
         _targetFrame.Build(atlas);
@@ -292,7 +296,7 @@ public sealed partial class HudMaster
                  "Help(4011/§8.24) Party(4012/220) Product(4013/230) Relation(4002/185+193). " +
                  "KeepNpcDialog: sel1→Storage; sel0→Vendor(interim). " +
                  "BuddyRelation(185) reconciliation: interim→FriendWindow; full build TODO(world-campaign). " +
-                 "spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177 recovered HUD-II. " +
+                 "spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel slot 35 (binary-won; 'slot 177' REFUTED §1.9.4). " +
                  "spec: Docs/RE/specs/ui_system.md §8.17/§8.18/§8.19/§8.20/§8.21/§8.22/§8.23/§8.24/§8.25/§8.26 CODE-CONFIRMED. " +
                  "spec: Docs/RE/specs/ui_system.md §8.27/§8.28/§8.29/§8.30/§8.31/§8.32 CODE-CONFIRMED.");
     }
@@ -340,7 +344,7 @@ public sealed partial class HudMaster
             "[HudMaster] BindHub: ~33 panels connected (10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E). " +
             "Party hub wired (stub). Wave-3/4 panels have no hub channel yet " +
             "(TODO world-campaign: global notice sink, 5/53 pair-relation, S2C 4/74/4/81/5/73, relation roster push). " +
-            "spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel slot 177. " +
+            "spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel slot 35 (binary-won; 'slot 177' REFUTED §1.9.4). " +
             "spec: Docs/RE/specs/ui_system.md §8.12 — PartyPanel hub stub (TODO world-campaign). " +
             "spec: Docs/RE/specs/ui_system.md §8.27/§8.28/§8.29/§8.30/§8.31/§8.32 — Wave-4 TODO hubs.");
     }

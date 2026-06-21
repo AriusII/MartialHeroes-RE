@@ -10,6 +10,13 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 /// <remarks>
 ///     spec: Docs/RE/formats/events_scr.md §2 autoquestion_cl.scr — sample_verified.
 ///     <para>
+///         <b>NO CLIENT LOADER in build 263bd994 (CYCLE 7 hardened, 2026-06-20).</b>
+///         The file is present in the VFS but the client never opens it: captcha text is
+///         server-pushed; no loader function for this path exists in the shipped binary.
+///         This parser exists for archival / interoperability completeness ONLY.
+///         spec: Docs/RE/formats/events_scr.md §2.5 — "NO client loader in build 263bd994 (captcha is server-pushed)".
+///     </para>
+///     <para>
 ///         Format: no file header; fixed stride 92 bytes (0x5C); record count = file_size / 92.
 ///         Known sample: 92 × 1300 = 119,600 bytes, exact.
 ///         spec: Docs/RE/formats/events_scr.md §2.1 — "Record stride: 92 bytes (0x5C)": CONFIRMED.

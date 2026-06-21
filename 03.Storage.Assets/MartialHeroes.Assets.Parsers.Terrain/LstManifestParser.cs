@@ -17,10 +17,8 @@ namespace MartialHeroes.Assets.Parsers.Terrain;
 ///         Decomposition: mapX = key / 100000; mapZ = key % 100000.
 ///     </para>
 ///     <para>
-///         Known unknowns: whether the file begins with a magic number or version prefix is UNVERIFIED.
-///         The parser was observed reading a 4-byte count then a contiguous array of 4-byte keys.
-///         spec: Docs/RE/formats/terrain.md §1.2 — "Known unknowns: whether the file begins with a magic
-///         number or version prefix is unverified." UNVERIFIED.
+///         No magic number or version prefix: file starts directly at u32 count. CONFIRMED.
+///         spec: Docs/RE/formats/terrain.md §1.2 — "no magic, no version prefix: CONFIRMED."
 ///     </para>
 ///     <para>
 ///         ZERO rendering/engine dependencies.

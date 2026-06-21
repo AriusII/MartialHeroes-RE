@@ -4,19 +4,21 @@
 > NO binary code addresses. Consumed by Assets.Parsers. Every offset an engineer cites must
 > reference this file.
 >
-> verification: sample-verified (layout); confirmed (loader-control-flow facts); BANI body + handedness capture/debugger-pending
+> verification: sample-verified (layout, incl. BANI body); confirmed (loader-control-flow facts); handedness capture/debugger-pending
 > re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20): runtime stand idle = actormotion col16 (record +0x44, direction-array-A element 1), NOT col15/+0x40; death SFX/effect = motion_ids_b element b[4] (+0x74), NOT b[5]; the runtime idle catalogue lookup is keyed by the APPEARANCE KEY (player = 5·(class+4·variant)−24), NOT col2/skin_class; the a[1] motion id joins to a `.mot` clip through the motlist.txt-seeded clip registry keyed by the `.mot` header `id_b` (no `g{id}.mot` runtime sprintf exists).
-> ida_reverified: 2026-06-16; CYCLE 7 (2026-06-20)
+> re-verified again (2026-06-21): BANI body is now DECODED (identical standard track/keyframe layout, sample residual 0); the BANI "all-files-constant" claims are CORRECTED (the `unknown_field` and `track_count` are NOT constant — three rig groups exist); the oversized standard clip is identified. See §BANI variant and §Oversized standard clip.
+> ida_reverified: 2026-06-16; CYCLE 7 (2026-06-20); 2026-06-21
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > status: sample_verified
 > sample_verified: true
 >
-> **Conflicts carried (this anchor):** BANI body layout (post `track_count`) remains NOT YET DECODED;
-> the per-bone `bone_id`→direction-slot meaning of the two 9-slot motion-id arrays is PROPOSED (not
-> proven). Up-axis / handedness / unit-scale are capture/debugger-pending (this lane was static-only).
-> No layout/structural drift was found on build `263bd994` against the real VFS sample — only the
-> minor BANI sample-value corrections folded in below.
+> **Conflicts carried (this anchor):** the per-bone `bone_id`→direction-slot meaning of the two
+> 9-slot motion-id arrays is PROPOSED (not proven). Up-axis / handedness / unit-scale are
+> capture/debugger-pending (this lane was static-only). The BANI body layout, previously carried as
+> NOT YET DECODED, is now characterised (it reuses the standard track/keyframe layout — §BANI variant);
+> only the oversized standard clip's trailing block remains undecoded (§Oversized standard clip). No
+> layout/structural drift was found on build `263bd994` against the real VFS sample.
 
 ---
 
@@ -26,7 +28,9 @@
 |------|--------|------------|
 | `.mot` header (`id_a`, `id_b`, `name_length`, `name_body`, `frame_count`) | Resolved | CONFIRMED (sample-verified) |
 | `.mot` corpus is real, not stubs (3877/3891 are real clips) | Resolved | SAMPLE-VERIFIED (full census of 3,891 files) |
-| `.mot` BANI-magic variant (11 files; different header) | Header fully recovered (re-confronted on build `263bd994`: `name_len = 10`, g170350513 `frame_count = 24`) | SAMPLE-VERIFIED (all header fields cross-checked on 3 of 11 files; body layout NOT YET DECODED) |
+| `.mot` BANI-magic variant (11 files; different header) | Header fully recovered (re-confronted on build `263bd994`: `name_len = 10`, g170350513 `frame_count = 24`); **all 11 files now enumerated** — `version`/`anim_id`/`unknown_field`/`frame_count`/`track_count` read per-file (§BANI variant — full enumeration) | SAMPLE-VERIFIED (every header field of all 11 files) |
+| `.mot` BANI body layout (post `track_count`) | **Resolved — identical to the standard track/keyframe layout** (per-track `u32 descriptor (low byte = bone_id) + u32 key_count + key_count × 28 keyframes`, 7 f32 each). Only the BANI header differs from standard. | SAMPLE-VERIFIED (one BANI file reconciles to EOF with zero residual) |
+| `.mot` BANI `unknown_field` / `track_count` are NOT constant (three rig groups) | Resolved — earlier "constant 7830 / constant 52" claims REFUTED; `unknown_field` ∈ {7830, 7899, 8881}, `track_count` ∈ {52, 77, 67}, the two co-vary (rig group id ↔ bone count) | SAMPLE-VERIFIED (all 11 files) |
 | `.mot` track / keyframe layout | Resolved | CONFIRMED (CAMPAIGN VFS-MASTERY two-witness: loader + black-box corpus census) |
 | LenStr 4-byte u32 LE prefix, no on-disk terminator | Resolved | CONFIRMED (loader + sample) |
 | `track_descriptor` upper-3-byte padding (key-count / channel-mask / interp-flag all refuted) | Resolved | CONFIRMED (loader-direct + sample-verified) |
@@ -84,8 +88,10 @@ pose composition, quaternion/handedness conventions) is documented in `specs/ski
 - **One standard-variant clip is oversized:** of the 3,880 standard files, exactly **one** has a
   large trailing region (≈+48,719 bytes) past the end of the parsed clip (header + track array). It
   parses cleanly as a normal clip and the trailing block is left unconsumed; its content is not
-  decoded (possible multi-clip / LOD / appended data). This is an isolated anomaly — see
-  §Oversized standard clip and §Known unknowns. All other standard files reconcile with zero residual.
+  decoded (possible multi-clip / LOD / appended data). The anomalous file has been **identified** —
+  it is the clip whose `id_a` is `142206011` (residual exactly 48,719 bytes, the sole standard
+  anomaly in a 559-file every-7th sample). This is an isolated anomaly — see §Oversized standard clip
+  and §Known unknowns. All other standard files reconcile with zero residual.
 
 **Implication:** character skinning is **not** blocked by missing animations — the assets are present
 and plentiful. The deform/skinning math that consumes them is specified in `specs/skinning.md`.
@@ -493,6 +499,11 @@ fewer bones than the skeleton has — e.g. a 80-track clip on an 84-bone skeleto
 > zero residual. The file parses normally up to and including its last track's keyframes — the extra
 > bytes sit *after* the structure this spec documents and are never read by the shipping loader.
 
+**The anomalous file is identified:** it is the clip whose `id_a` is `142206011` — the single
+standard-variant anomaly (residual exactly 48,719 bytes) in a 559-file (~14%) every-7th + BANI
+sample where it was the only file that did not reconcile to zero residual. Earlier this file was left
+anonymous.
+
 The trailing block has **not been decoded**. Candidate interpretations (none confirmed): an appended
 second clip / multi-clip container, a level-of-detail variant, or stale appended tool data. Because
 the loader reads `track_count` tracks and then stops (it does not seek to EOF), the block is inert.
@@ -510,22 +521,28 @@ the trailing block is **DBG-pending** and is not required for production parsing
 
 ## BANI variant
 
-> **Format deviation — header fully recovered; body layout partially characterised.**
+> **Format deviation — header AND body now fully characterised.**
 > Of the 3,891 `.mot` files, **11 begin with a 4-byte ASCII magic `"BANI"`** (`42 41 4E 49`)
 > instead of the bare standard header. The standard loader in the shipping client has **no
 > magic-check branch** and cannot load these files — all 11 produce parse errors and are
-> effectively dead data in the VFS. See §BANI variant — loader rejection for details.
+> effectively dead data in the VFS. See §BANI variant — loader rejection for details. The body that
+> follows the BANI header, however, **uses the identical standard track/keyframe layout** (now
+> sample-decoded — see §BANI body layout), so the variant differs from the standard format **only**
+> in its header.
 
-The 11 BANI files all reside in `data/char/mot/`. They fall in two numeric ID bands:
+The 11 BANI files all reside in `data/char/mot/`. They form **three rig groups** distinguished by
+their `unknown_field` / `track_count` pair (see §BANI variant — full enumeration), not the two bands
+an earlier revision described:
 
-- `g170350513.mot` through `g170350515.mot` (3 files, `version = 1`)
-- `g170576814.mot` through `g170948714.mot` (8 files, `version` values 1 and 3)
+- ID band `170350513`–`170350515` (3 files, `version = 1`, 52-bone rig).
+- ID band `170576814`–`170577315` (7 files, `version = 3`, 77-bone rig).
+- the single file `170948714` (1 file, `version = 3`, 67-bone rig).
 
-They account for 0.28% of the `.mot` corpus. They are plausibly a specific character class's
+They account for 0.28% of the `.mot` corpus. They are plausibly specific character classes'
 animations exported from a newer or different pipeline that was never integrated into the shipping
 client loader.
 
-### BANI header layout (SAMPLE-VERIFIED — 3 of 11 files cross-checked)
+### BANI header layout (SAMPLE-VERIFIED — all 11 files enumerated)
 
 The header is variable-length due to the embedded LenStr name field. All fields listed below are
 **SAMPLE-VERIFIED** except where noted.
@@ -533,41 +550,58 @@ The header is variable-length due to the embedded LenStr name field. All fields 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | u8[4] | `magic` | ASCII `"BANI"` (`42 41 4E 49`). Identifies the variant. | SAMPLE-VERIFIED |
-| 0x04 | 4 | u32 LE | `version` | Sub-format variant selector. Observed values: **1** (files g170350513–515 and part of the 170576xxx group) and **3** (one or more files in the 170577xxx / 170948xxx group). Whether version affects post-header payload layout is unknown. | SAMPLE-VERIFIED |
+| 0x04 | 4 | u32 LE | `version` | Sub-format variant selector. Observed values **1** (the 3-file `170350xxx` group) and **3** (the eight `170576xxx`/`170577xxx`/`170948xxx` files). Co-varies with the rig group: version 1 ↔ the 52-bone rig; version 3 ↔ both the 77-bone and 67-bone rigs (so version does NOT uniquely identify the rig). Whether version affects post-header payload layout is unknown; the one body decoded so far (a version-1 file) matches the standard track/keyframe layout. | SAMPLE-VERIFIED |
 | 0x08 | 4 | u32 LE | `anim_id` | Numeric animation identifier. Matches the decimal numeric suffix of the filename (same role as standard `id_a` but at offset 8 rather than offset 0). | SAMPLE-VERIFIED |
-| 0x0C | 4 | u32 LE | `unknown_field` | Constant value **7830** (0x1E96) across all 11 observed files. Candidate interpretations: skeleton/rig group ID, animation set category, or build-tool export revision. See §unknown_field note. | SAMPLE-VERIFIED (value); PROPOSED (interpretation) |
-| 0x10 | 4 | u32 LE | `name_len` | Byte length of the embedded name string (LenStr 4-byte u32 LE prefix, same encoding as the standard variant). **Observed value 10** in the cross-checked samples (re-confirmed on build `263bd994`; an earlier "11" reading is corrected). | SAMPLE-VERIFIED |
+| 0x0C | 4 | u32 LE | `rig_group_id` | **NOT constant** (an earlier "constant 7830" reading is REFUTED). Takes **three values** across the 11 files — `7830`, `7899`, `8881` — each paired one-to-one with a distinct `track_count` (7830↔52, 7899↔77, 8881↔67). The strict co-variation with bone count strongly supports the **skeleton / rig group id** interpretation. See §Per-file enumeration of all 11 BANI files. | SAMPLE-VERIFIED (values); PROPOSED (interpretation) |
+| 0x10 | 4 | u32 LE | `name_len` | Byte length of the embedded name string (LenStr 4-byte u32 LE prefix, same encoding as the standard variant). **Value 10 for all 11 files** (re-confirmed on build `263bd994`; an earlier "11" reading is corrected). | SAMPLE-VERIFIED |
 | 0x14 | N | u8[N] | `name` | ASCII name string of `name_len` bytes; no NUL terminator on disk. Encodes the bare animation identifier token, e.g. `"g170350513"` (**10 bytes**). | SAMPLE-VERIFIED |
-| 0x14+N | 4 | u32 LE | `frame_count` | Total number of keyframes. Observed values: **24, 29, 38** across the three cross-checked samples (re-confirmed on build `263bd994`; the g170350513 value is **24**, an earlier "28" reading is corrected). | SAMPLE-VERIFIED |
-| 0x18+N | 4 | u32 LE | `track_count` | Number of bone tracks. **Constant 52 across all 11 files** (confirmed from the census scan). Consistent with a shared 52-bone skeleton rig. | SAMPLE-VERIFIED |
-| 0x1C+N | variable | — | payload | Per-track and per-frame data. Layout not yet decoded; see §BANI payload note. | NOT YET DECODED |
+| 0x14+N | 4 | u32 LE | `frame_count` | Total number of keyframes. **Varies per file** (observed range 24–96; see §BANI variant — full enumeration). An earlier "28" reading for the first file is corrected to **24**. | SAMPLE-VERIFIED |
+| 0x18+N | 4 | u32 LE | `track_count` | Number of bone tracks. **NOT constant** (an earlier "constant 52" reading is REFUTED). Takes **three values** — `52`, `77`, `67` — one per rig group; equals the bone count of that rig. | SAMPLE-VERIFIED |
+| 0x1C+N | variable | — | payload | Per-track and per-frame data. **Same layout as the standard variant** — `track_count` repetitions of `u32 descriptor (low byte = bone_id) + u32 key_count + key_count × 28-byte keyframes`. See §BANI body layout. | SAMPLE-VERIFIED |
 
-After `track_count` the payload begins. Its structure is not confirmed. Identity-rotation float
-values appear in positions consistent with the standard keyframe encoding (translation XYZ +
-quaternion XYZW, 28 bytes per keyframe), but the exact arrangement of track descriptors and
-keyframe blocks has not been characterised.
+After `track_count` the payload begins, and it is the standard track array (§Track array layout):
+`track_count` per-track records, each an 8-byte preamble (`track_descriptor` with the low byte the
+`bone_id`, then `key_count`) followed by `key_count × 28`-byte keyframes (7 f32 each — translation
+XYZ then quaternion XYZW). See §BANI body layout.
 
-### Confirmed all-samples constants
+### Per-file enumeration of all 11 BANI files
 
-Two field values are consistent across every one of the 11 BANI files (confirmed from the full
-file census):
+> The "all-files-constant" claim of an earlier revision is **REFUTED**: neither `rig_group_id`
+> (offset 0x0C) nor `track_count` is constant. Full enumeration of every BANI file (SAMPLE-VERIFIED):
 
-| Field | Constant value | Interpretation |
-|-------|---------------|----------------|
-| `unknown_field` | 7830 (0x1E96) | Candidate: skeleton group / rig set ID; links these 11 files to a common 52-bone hierarchy. PROPOSED — requires cross-reference to the skeleton catalogue to confirm. |
-| `track_count` | 52 | Matches the bone count of a specific skeleton rig. All 11 files animate the same skeleton. |
+| File `anim_id` | `version` | `rig_group_id` | `name_len` | `frame_count` | `track_count` (bones) |
+|---------------:|:---------:|:--------------:|:----------:|:-------------:|:---------------------:|
+| 170350513 | 1 | 7830 | 10 | 24 | 52 |
+| 170350514 | 1 | 7830 | 10 | 29 | 52 |
+| 170350515 | 1 | 7830 | 10 | 38 | 52 |
+| 170576814 | 3 | 7899 | 10 | 49 | 77 |
+| 170576914 | 3 | 7899 | 10 | 96 | 77 |
+| 170577014 | 3 | 7899 | 10 | 75 | 77 |
+| 170577114 | 3 | 7899 | 10 | 41 | 77 |
+| 170577214 | 3 | 7899 | 10 | 48 | 77 |
+| 170577314 | 3 | 7899 | 10 | 47 | 77 |
+| 170577315 | 3 | 7899 | 10 | 61 | 77 |
+| 170948714 | 3 | 8881 | 10 | 59 | 67 |
 
-### Cross-checked sample summary
+**Three rig groups** emerge: `rig_group_id 7830 ↔ 52 bones (version 1)`,
+`7899 ↔ 77 bones (version 3)`, `8881 ↔ 67 bones (version 3)`. `frame_count` varies freely per file.
 
-| File | `version` | `anim_id` | `unknown_field` | `name` (`name_len`) | `frame_count` | `track_count` |
-|------|:---------:|----------:|:--------------:|--------|:------------:|:-------------:|
-| `g170350513.mot` | 1 | 170350513 | 7830 | `g170350513` (10) | 24 | 52 |
-| `g170350514.mot` | 1 | 170350514 | 7830 | `g170350514` (10) | 29 | 52 |
-| `g170350515.mot` | 1 | 170350515 | 7830 | `g170350515` (10) | 38 | 52 |
+### BANI body layout (SAMPLE-VERIFIED — identical to the standard variant)
 
-> Re-confirmed on build `263bd994` against the real VFS sample: `name_len` is **10** (the body is the
-> bare 10-byte id token, no terminator), and g170350513's `frame_count` is **24** (514/515 unchanged at
-> 29/38). The body layout after `track_count` is still **NOT YET DECODED** (see §BANI payload note).
+The body that follows the BANI header reuses the **standard track/keyframe layout** exactly
+(§Track array layout, §Keyframe record): for each of `track_count` tracks, a `u32 track_descriptor`
+(low byte = `bone_id`, upper three bytes unused padding) and a `u32 key_count`, then `key_count`
+keyframes of 28 bytes each (7 little-endian f32 — translation XYZ then quaternion XYZW). One BANI
+file (the first `170350xxx` clip, a 52-bone / 24-frame, version-1 file) was decoded end-to-end with
+this layout and **reconciles to EOF with zero residual** — its first track is `bone_id = 0` with 24
+keyframes whose first keyframe carries an identity quaternion. Only the **header** distinguishes
+BANI from the standard format; the track and keyframe encoding is the same.
+
+The decoded BANI body uses f32 keyframes (the identity quaternion in the first track confirms the
+float layout). A quantized representation in later BANI tracks was not exhaustively excluded but is
+LOW RISK given the zero-residual reconciliation under the f32 assumption. The body remains
+**loader-unreachable** in the shipping client (no magic-check branch — §BANI variant — loader
+rejection), so it is decodable but dead data at runtime.
 
 ### BANI variant — loader rejection (SAMPLE-VERIFIED + CODE-CONFIRMED)
 
@@ -591,22 +625,23 @@ at runtime by any code path in the shipping client.
 1. **Sniff the first 4 bytes.** If they equal `42 41 4E 49` (ASCII `"BANI"`), skip or log and
    continue — do not attempt standard header parsing.
 2. BANI files may be safely excluded from the production animation catalogue. If future
-   completeness requires them, a dedicated BANI parser may be built from the header table above;
-   the payload layout must be decoded separately before that parser is considered production-ready.
+   completeness requires them, a dedicated BANI parser can now be built from the **header table
+   above plus the standard track/keyframe body** (§BANI body layout): parse the BANI header, then
+   read the body exactly as the standard track array (`track_count` × `[u32 descriptor + u32
+   key_count + key_count × 28-byte keyframes]`). This body decode is SAMPLE-VERIFIED on one file.
 3. Mark any BANI file in the catalogue as `NonLoadable` in the parser output — do not surface them
-   to `Client.Application` as valid clips.
+   to `Client.Application` as valid clips, even though their body is now decodable; the shipping
+   client never plays them.
 
 ### BANI payload note
 
-After the `track_count` field, the payload structure is not yet decoded. Based on the confirmed
-`frame_count` and `track_count` values, the expected content is:
-- Per-track bone index / channel type descriptors
-- Per-frame quaternion/translation samples for each track
-
-Whether per-track data uses f32 or f16 quantization, and the exact packing order (interleaved
-vs. planar), is unknown. Decoding this payload is a deferred task; it is not required for the
-`Assets.Parsers` implementation because BANI files are non-loadable by the shipping client and
-should be skipped.
+The payload after `track_count` is now **decoded** — it is the standard track/keyframe array
+(§BANI body layout), not an unknown structure. The earlier "not yet decoded; possibly f16
+quantized" wording is superseded: a version-1 BANI file reconciles to EOF with zero residual under
+the standard f32 / 28-byte keyframe layout. A quantized variant in the version-3 (77- and 67-bone)
+groups was not exhaustively excluded but is LOW RISK. Because BANI files are non-loadable by the
+shipping client, decoding the body is still not required for the production `Assets.Parsers`
+implementation — sniff and skip them — but the body format is no longer an open unknown.
 
 ---
 
@@ -631,6 +666,13 @@ known unknown and is now resolved.
 In short: `id_b` answers "which set does this clip belong to" (used while loading); `id_a` answers
 "which exact clip is this" (used by the mixer to address an already-active layer). Both descriptions
 are correct once read in their respective contexts.
+
+> **Loaded-clip object footprint (informative, for struct recovery).** Each loaded clip is a single
+> heap object of **80 bytes (0x50)**, allocated once per clip when the registry first finds-or-creates
+> it. Stage 1 fills its header-derived fields (the two ids, the `frame_count × 0.1` duration as f32,
+> and a "fully loaded" flag, all distinct slots); Stage 2 fills the track array. A parser in
+> `Assets.Parsers` does not need to reproduce this in-memory object — it is recorded only as a hint for
+> anyone recovering the runtime layout; the on-disk format above is the authority for parsing.
 
 > **CYCLE 7 reconciliation — the `actormotion.txt` motion-id resolve uses the `id_b`-keyed map (binary
 > wins).** This section previously stated "the 9-digit motion IDs in `actormotion.txt` are `id_a`
@@ -1118,11 +1160,11 @@ The following aspects are unresolved and must not be assumed by the implementing
 
 | Item | Status | Impact |
 |------|--------|--------|
-| Oversized standard clip trailing block (1 file, ≈+48,719 B) | DBG-pending — one standard-variant file has a large undecoded trailing region after the parsed clip; possible appended/LOD/multi-clip data. All other standard files end with zero residual. | Read `track_count` tracks and stop; tolerate a positive EOF residual; do not parse the trailing bytes. Decoding is deferred and not needed for production. |
-| BANI variant payload layout (post `track_count`) | NOT YET DECODED — magic, version, anim_id, unknown_field, name LenStr (`name_len = 10`), frame_count, and track_count are all sample-verified on build `263bd994`; the per-track and per-keyframe structure that follows is not characterised. | Sniff and skip BANI files in the standard parser; do not rely on BANI clips for production. If future decode is needed, the payload is expected to be similar to the standard keyframe encoding but this is unconfirmed. |
+| Oversized standard clip trailing block (1 file, ≈+48,719 B) | DBG-pending (block) / IDENTIFIED (file) — the anomalous file is identified as the clip with `id_a 142206011`; its large trailing region after the parsed clip is still undecoded (possible appended/LOD/multi-clip data). All other standard files end with zero residual. | Read `track_count` tracks and stop; tolerate a positive EOF residual; do not parse the trailing bytes. Decoding the block is deferred and not needed for production. |
+| BANI variant payload layout (post `track_count`) | RESOLVED — the body is the standard track/keyframe array (`track_count` × `[u32 descriptor + u32 key_count + key_count × 28-byte 7-f32 keyframes]`); one version-1 file reconciles to EOF with zero residual (§BANI body layout). Only the BANI header differs from standard. (A quantized variant in the version-3 groups is LOW RISK, not exhaustively excluded.) | Sniff and skip BANI files in the standard parser (they are non-loadable by the shipping client). A dedicated BANI parser can decode the body with the standard track layout if completeness ever requires it. |
 | Up-axis / handedness / unit-scale of the keyframe float triples | CAPTURE/DEBUGGER-PENDING — the translation/quaternion floats are stored verbatim; the absolute axis orientation, handedness, and unit scale are a render-frame property not decidable from the static loader bytes alone (this re-verification lane was static-only by directive). | Decode the 7-float record as specified; confirm world placement against the project's recovered world conventions (world negates Z; `.skn` mesh-local negates X) in a live debugger session. Specified for the Godot path in `specs/skinning.md`. |
-| BANI `unknown_field = 7830` interpretation | PROPOSED — constant across all 11 files; candidate is a skeleton group / rig set ID linking these files to the 52-bone hierarchy. Cross-reference with the skeleton catalogue required to confirm. | Carry the value through; do not branch on it. |
-| BANI `version` effect on payload | UNVERIFIED — values 1 and 3 observed; whether they imply different post-header layouts is unknown. | Treat as informational metadata until payload is decoded. |
+| BANI `rig_group_id` (offset 0x0C) interpretation | PROPOSED (interpretation) / SAMPLE-VERIFIED (values) — NOT constant: three values (`7830`, `7899`, `8881`) each paired one-to-one with a distinct `track_count` (52 / 77 / 67). The strict co-variation with bone count strongly supports a **skeleton / rig group id**. Cross-reference with the skeleton catalogue to confirm. | Carry the value through; do not branch on it. |
+| BANI `version` effect on payload | UNVERIFIED — values 1 and 3 observed (version 1 ↔ 52-bone rig; version 3 ↔ both the 77- and 67-bone rigs). The one decoded body (version 1) uses the standard layout; whether version 3 bodies differ is unconfirmed (LOW RISK). | Treat as informational metadata; decode the body with the standard track layout and verify per-file. |
 | `actormotion.txt` per-column semantics (cols 3–14) | UNVERIFIED — record layout, types, and offsets are confirmed; the proposed names (`phase_*`, `weight_*`, `speed_override_*`, `flags` bit meanings) are inferred from sample values. Cols 2 and 15 are now sample-verified and removed from this caveat. | Parse by offset and type; treat cols 3–14 field names as provisional until cross-checked against the actor controller. |
 | `actormotion.txt` 15-unit rate base | UNVERIFIED — derived rate fields use a `15.0` base; relationship to the `.mot` 10 fps clip rate is unknown. | Compute the derived rates as specified; do not assume the bases are interchangeable. |
 | Default layer speed constant (≈1.575) | UNVERIFIED — a confirmed float literal set at layer construction; its interaction with `actormotion.txt` `speed_override` columns is unknown. | Document the constant; do not hard-wire playback speed to it until its role is confirmed. |
@@ -1152,6 +1194,9 @@ unknowns table:
 | Animation mixer runtime blend model (provisional) | CONFIRMED — two-list architecture, sync-phase mechanism with 1.5× constant, weight ramping with 0.001 s floor, and per-bone normalized weighted-average accumulation (order-dependent for ≥3 layers) documented in §Animation mixer — runtime blend model. |
 | "Is the human idle flat because the parser/loop is broken?" | RESOLVED — NO. The engine advances clip time every frame with real `dt = ms × 0.001` and interpolates between keyframes (§Per-frame clip-time advance), so the sampler is never pinned at `t = 0`; and the human col15 stand idle's keyframes are byte-identical (0 animated tracks — §Static idle clips). A frozen standing human is therefore **faithful to the static col15 asset**, not a parser bug. The runtime stand slot is now pinned to col16 (+0x44, a[1]) by CYCLE 7 use-site evidence; the only open piece is the *content* of that col16 clip (static vs animated) and the full live behaviour (DEBUGGER-PENDING, above). |
 | BANI files loadable by shipping client | CONFIRMED NEGATIVE (SAMPLE-VERIFIED + CODE-CONFIRMED) — the standard loader has no magic-check branch; all 11 BANI files produce parse errors and are dead/unused data. Parsers must sniff and skip them. |
+| BANI body layout "NOT YET DECODED" | RESOLVED — the body after `track_count` is the **standard track/keyframe array** (`track_count` × `[u32 descriptor + u32 key_count + key_count × 28-byte 7-f32 keyframes]`); one version-1 BANI file reconciles to EOF with zero residual (§BANI body layout). Only the header differs from the standard variant. The earlier "possibly f16-quantized / unknown packing" speculation is dropped (LOW-RISK caveat retained for version-3 groups). |
+| BANI `unknown_field` / `track_count` "constant across all 11 files" | CORRECTED (binary/sample-won) — neither is constant. `unknown_field` (now named `rig_group_id`) takes `7830`/`7899`/`8881` and `track_count` takes `52`/`77`/`67`, co-varying one-to-one as three rig groups (§Per-file enumeration of all 11 BANI files). `version` is 1 for the 52-bone rig and 3 for both the 77- and 67-bone rigs. |
+| Oversized standard clip anonymous | IDENTIFIED — the single oversized standard file is the clip with `id_a 142206011` (residual exactly 48,719 bytes; sole anomaly in a 559-file sample). The trailing block itself is still undecoded (DBG-pending — §Oversized standard clip). |
 
 ---
 
@@ -1167,7 +1212,8 @@ unknowns table:
 - **Canonical names:** see `Docs/RE/names.yaml`
   (`MotionClip`, `BoneTrack`, `Keyframe`, `MotionClipManager`, `AnimationMixer`,
   `AnimationCycleLayer`, `AnimationActionLayer`; proposed `BaniMotClip`, `bani_magic`,
-  `bani_version`). The shipping loaders re-affirmed on build `263bd994` are `CoreMot_LoadHeader`
+  `bani_version`, and `bani_rig_group_id` for the BANI offset-0x0C field). The shipping loaders
+  re-affirmed on build `263bd994` are `CoreMot_LoadHeader`
   (Stage-1 header) and `CoreMot_LoadFullData` (Stage-2 track/keyframe data); the actor table loader is
   `ActorMotionTable_LoadFromTxt`; the shared field readers are `AssetStream_ReadInt32Field`,
   `AssetStream_ReadFloatField`, and `AssetStream_ReadLenStrToString`.

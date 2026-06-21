@@ -9,32 +9,53 @@
 >   inverse-bind **bake** itself: the bake pass is now pinned statically (a separate skin-attach pass
 >   that runs after the bind world transforms exist and before any deform), and its `(−x,−y,−z,w)`
 >   conjugate / subtract-then-rotate order is read directly from the routine — see §4 and the
->   corrected status row below. *capture/debugger-pending* for the matrix major-order, the native
->   up-axis / handedness *label* (no axis flip exists inside the math, but whether native is literally
->   left-handed D3D9 Y-up needs a runtime read), the exact Godot quaternion remap under Z-negation,
->   and whether the three epsilon tests are an absolute-value clamp (their disassembly surfaced as a
->   log-shaped logarithm-shaped intrinsic — almost certainly a decompiler mis-symbol of an
->   absolute-value epsilon clamp at 0.001).
+>   corrected status row below. *confirmed (visual-oracle, 2026-06-21)* for the `.skn` geometry
+>   height-axis: the rest-mesh is authored **X-TALL** (native-X height), requiring a **+90°-about-Z
+>   importer remap** to stand the avatar up — see the CORRECTED note below and §7/§8(b)/§9. The matrix
+>   major-order, the exact Godot quaternion remap under Z-negation, and the three epsilon tests remain
+>   *capture/debugger-pending* (the epsilons surface in disassembly as a log-shaped intrinsic compared
+>   against 0.001 — almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp at 0.001).
 > - **CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19):** inverse-bind bake pinned static
 >   (no longer a hypothesis); a `.skn` weight's bone index is a base-relative bone-ID
 >   (`bone_array[id − base_id]`), NOT an array slot / palette / track index; skeleton selection is the
 >   `.skn` header `id_b` used VERBATIM as the pose-pool key. These three corrections jointly **retire
 >   the skinning-explosion debt** — the avatar can now be animated from the static recovery.
+> - **CORRECTED 2026-06-21 (visual-oracle) — the `.skn` GEOMETRY height-axis is native X, NOT Y.**
+>   Measured against the visual oracle (raw `.skn` rest-mesh bytes via the asset extractor + the
+>   displayed-frame AABB through the production deform path), the mesh's height axis runs along **native
+>   X**: the raw rest-mesh extent is tall-along-X *before any deform or handedness conversion* (e.g. the
+>   g1 player body ≈ X 5.0 > Y 2.4 > Z 1.7, skeleton g1.bnd = 84 bones, clip 84 tracks), and the deformed
+>   frame-0 AABB at an identity importer pivot is likewise tall-X (recumbent). The inverse-bind
+>   cancellation (INV1) PASSES at the float-noise floor, so this is a **PURE ORIENTATION property of the
+>   asset data**, NOT a deform-math or wrong-skeleton bug. **A faithful Godot import MUST apply a
+>   +90°-about-Z importer (display-node pivot) stand-up remap** to map native +X height onto Godot +Y
+>   (verified: AABB tall-X → tall-Y; screenshot +90° upright, −90° upside-down). This **CORRECTS** the
+>   CYCLE-7 "the UP-AXIS is RESOLVED to Y-up / identity import / the correct up-axis conversion is the
+>   IDENTITY" claim wherever it appears (this banner, §7, §8(b), §9): the engine's **Y-up is real but for
+>   a DIFFERENT quantity** — it is the WORLD-PLACEMENT / HEADING convention (yaw about Y, ground plane XZ,
+>   facing from the XZ planar delta), which is KEPT and governs how an actor is placed/turned. The `.skn`
+>   geometry height-axis is the separate quantity §7/§9 had left as a `capture/debugger-pending` label,
+>   now settled to native X. The "avatar lies on X" is the **as-authored** axis, NOT a port-added spurious
+>   rotation — the fix is to **ADD the +90°-Z remap**, never to chase a non-existent upstream rotation to
+>   remove. The deform / inverse-bind math (§0/§4/§5) is UNTOUCHED; only the importer orientation remap
+>   changes. A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording.
 > - **re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20).** Three previously-open
 >   items are now closed at the per-vertex level: **(1) the full per-vertex deform chain is CONFIRMED
 >   end-to-end** — the on-disk `.skn` influence packing, the per-vertex weight drop (< 0.01) +
 >   normalize-to-1.0, the inverse-bind bake form and its storage slots, the runtime two-pass LBS (major
 >   pass WRITES, minor pass ACCUMULATES), right-handed Hamilton (XYZW scalar-last), parent-LEFT
->   pre-multiply bone-world compose, per-mesh scale = 1.0 (uniform override only), no axis flip / no axis
->   remap, and the base-relative `bone_array[id − base_id]` resolve are all confirmed *inside the runtime
->   deform itself*, not just the bake (§0, §4, §5, §7). **(2) the UP-AXIS is RESOLVED to Y-up / identity
->   import** — the engine treats character data as Y-up (yaw is a pure rotation about Y; the ground plane
->   is XZ; the render forward basis is +Z; the device is left-handed D3D), there is no fixed character
->   import/root rotation beyond the runtime Y-yaw heading, so the correct character up-axis conversion is
->   the IDENTITY (no up-axis rotation). The "−Z world / −X mesh-local" flips are port-side
->   handedness/forward reconciliations that do NOT touch the up axis (§7, §8(b)). The only residual is the
->   raw numeric up-axis label of the asset bytes, which does not affect correctness (the engine never
->   remaps; a Y-up import reproduces the original exactly). **(3) the standing-idle column is CORRECTED to
+>   pre-multiply bone-world compose, per-mesh scale = 1.0 (uniform override only), and the base-relative
+>   `bone_array[id − base_id]` resolve are all confirmed *inside the runtime deform itself*, not just the
+>   bake (§0, §4, §5, §7). **(2) two DISTINCT axis quantities (CORRECTED 2026-06-21, visual-oracle).**
+>   (2a) The engine's **WORLD-PLACEMENT / HEADING convention is Y-up** (yaw is a pure rotation about Y;
+>   the ground plane is XZ; facing is the XZ planar delta; the render forward basis is +Z; the device is
+>   left-handed D3D); there is no runtime character root rotation beyond the Y-yaw heading. This governs
+>   actor placement/turning and is KEPT. The "−Z world / −X mesh-local" flips are port-side
+>   handedness/forward reconciliations that do not touch the placement up axis (§7, §8(b)). (2b) The
+>   **`.skn` GEOMETRY height-axis is native X** (visual-oracle-settled) — the rest-mesh is authored
+>   X-TALL, so the importer must apply a **+90°-about-Z stand-up remap** (native +X height → Godot +Y).
+>   This SUPERSEDES the earlier "up-axis RESOLVED to Y-up / identity import" reading of the asset geometry
+>   (see the CORRECTED note above and §7/§8(b)/§9). **(3) the standing-idle column is CORRECTED to
 >   column 16** (in-memory record +0x44 = direction array A element 1), keyed by the **appearance key**
 >   (not col2/skin_class), resolved via the **motlist.txt clip registry** (not a `g{id}.mot` sprintf) —
 >   see §8(e) and §10.
@@ -48,15 +69,19 @@
 >   keyed by the **appearance key**, resolved via the **motlist.txt registry** (not `g{id}.mot`), and the
 >   slot question is RESOLVED static (col15 / element 0 is statically dead). See §8(e) and §10.
 > - **ida_reverified:** 2026-06-20 (CYCLE 7)
+> - **spec_corrected:** 2026-06-21 (visual-oracle — `.skn` geometry height-axis = native X; +90°-Z importer remap)
 > - **ida_anchor:** 263bd994
-> - **evidence:** [static-ida, vfs-sample]
+> - **evidence:** [static-ida, vfs-sample, visual-oracle]
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
 >   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
 >   translation lock is **interior-bone-only** (a bone with both a parent and a grandparent and at
 >   least one child), narrower than the previous "every non-root bone" phrasing. The core math
 >   (deform equation, quaternion order, Hamilton product, active rotation, both world walks, scale
->   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**.
+>   source, raw-seconds alpha, 28-byte keyframe, XYZW) was reproduced with **no correction**. A third
+>   conflict was resolved against the **visual oracle** on 2026-06-21: the `.skn` geometry height-axis is
+>   **native X** (requiring a +90°-Z importer remap), correcting the CYCLE-7 "identity / Y-up import"
+>   reading of the asset geometry (the placement/heading Y-up convention is unaffected).
 
 Neutral, data-only model of how the legacy *Martial Heroes* client **deforms and animates** skinned
 characters: how the bind pose is built from a `.bnd` skeleton, how the inverse-bind transform is
@@ -125,7 +150,9 @@ documented in the container spec.
 | Pose composition: `parentWorld ⊗ bindLocal ⊗ animLocal`; **interior** bones rotate-only; root + leaf/near-root translate | HIGH (lock narrowed to interior bones, CAMPAIGN 10 — §6.3) |
 | Quaternion convention: XYZW (scalar W last), Hamilton product, active rotation, parent-on-left | HIGH (re-confirmed) |
 | Out-of-range bone id is **clamped to the last bone** (NOT skipped) | HIGH (re-confirmed CAMPAIGN 10 — the engine clamps; "skip" is importer hardening only, §8(e)) |
-| NO axis flip inside the skinning math; native up-axis | **RESOLVED to Y-up / identity import (CYCLE 7)** — engine treats character data as Y-up (yaw about Y, ground plane XZ, forward +Z, left-handed D3D device); no fixed character import/root rotation; correct port up-axis conversion = IDENTITY. The "−Z world / −X mesh-local" flips are port-side handedness/forward reconciliations, NOT engine ops, and do NOT touch the up axis. Raw numeric up-axis *label* of the asset bytes is the only residual and does not affect correctness |
+| NO axis flip inside the skinning math | HIGH — there is no single-axis negation or remap *inside* the deform/bake math; bone space and rest-mesh space are the same native space (§7). This is distinct from the importer orientation knob below |
+| `.skn` GEOMETRY height-axis (raw rest-mesh up axis) | **CORRECTED 2026-06-21 (visual-oracle): native X** — the rest-mesh is authored X-TALL, so a faithful import applies a **+90°-about-Z importer remap** (native +X height → Godot +Y). This SUPERSEDES the prior "RESOLVED to Y-up / identity import" reading. It is a pure asset-orientation property (inverse-bind cancellation passes at the float-noise floor); §0/§4/§5 deform math is untouched — only the importer remap changes (§7, §8(b), §9) |
+| World-PLACEMENT / HEADING convention | **Y-up (KEPT)** — yaw is a pure rotation about Y, the ground plane is XZ, facing is the XZ planar delta, the render forward basis is +Z, the device is left-handed D3D; no runtime character root rotation beyond the Y-yaw heading. Governs how an actor is placed/turned — a DIFFERENT quantity from the `.skn` geometry height-axis above (§7) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — validate on one sample bone |
 | Per-mesh `scale` real source (read at attach as `nodeScale · meshScale · optionalOverride`) | CONFIRMED — resolves the prior "assumed 1.0" open item |
 | Per-**node** scale (distinct from per-mesh scale), applied in the animated world walk | HIGH (recovered CAMPAIGN 10 — §6.6) |
@@ -195,7 +222,9 @@ i.e. the rest position is reproduced exactly. **This identity is what a naïve s
 > (uniform, default 1.0), the absence of any single-axis flip or axis remap, and the base-relative
 > `bone_array[id − base_id]` bone resolve — was read directly out of the runtime deform routine, not
 > merely the load-time bake. The deform chain is fully pinned for a 1:1 port; see §4 (bake), §5 (deform
-> loop), §7 (convention dictionary).
+> loop), §7 (convention dictionary). NOTE: "no axis flip inside the math" is about the *deform math*; it
+> is a separate matter from the importer-layer **+90°-about-Z stand-up remap** the `.skn` geometry
+> height-axis requires (native-X-tall → Godot +Y) — see §7/§8(b)/§9.
 
 ---
 
@@ -323,6 +352,33 @@ the skinning explosion** (CONFIRMED static, CYCLE 1):
   **wrong-`id_b` skeleton** (§8(e)), reproduces the explosion. This retires the skinning-explosion
   debt: with the correct base-relative resolve and the correct `id_b`-selected skeleton, the avatar
   deforms and animates correctly from the static recovery.
+
+> **DEBT#1 (skinning math) — CLOSED, re-confirmed end-to-end (static IDA, 2026-06-21).** A dedicated
+> binary-verdict re-walk re-confirmed every load-bearing element from the static recovery — the on-disk
+> `.skn` vertex/bone/weight packing, the base-relative bone-ID resolve (`id − base_id`, **not** an array
+> index), the inverse-bind bake (conjugate quaternion, subtract-then-rotate, baked per-influence), the
+> deform multiply order (active-rotate → add bone world-translation → scale by weight; parent-on-left;
+> XYZW Hamilton; right-handed; no axis flip), the `.mot` keyframe sampler, and the pose compose. **Nothing
+> in the recovery is unproven.** The **char-select preview path** provides an **independent second witness**:
+> the preview's idle-motion apply derives the appearance key from the actor's appearance slot, looks up the
+> animation catalogue by that key, and plays the **column-16 stand clip (catalogue record +0x44)** on the
+> skeleton selected by the skin's **`id_b` used verbatim** as the pose-pool key — i.e. the exact same
+> `id_b`-verbatim skeleton selection and the same col-16 idle that the in-world path uses. So the five
+> char-select avatars' skinning + idle is **fully pinned** by two independent read-sites.
+>
+> **The "mesh explodes" note is OBSOLETE; the "static-upright / recumbent" symptom is the `.skn`
+> geometry's native-X height-axis (CORRECTED 2026-06-21, visual-oracle).** Any remaining tooling/agent
+> text describing the avatar as *exploding* predates this recovery and refers to a **port-side**
+> implementation bug (the classic port causes below), **not** a recovery gap. The separate
+> *static-upright / lies-on-X (recumbent)* symptom is now SETTLED: the `.skn` rest-mesh is authored
+> **X-TALL** (height along native X), so a faithful import must apply a **+90°-about-Z importer
+> stand-up remap** (native +X height → Godot +Y) — this is the as-authored asset orientation, NOT a
+> spurious port rotation to remove (§7, §8(b)). The classic explosion causes (all preventable) are:
+> feeding Godot bone array indices instead of base-relative IDs; dropping or mis-ordering the
+> inverse-bind; applying the handedness flip to vertices but not bones (or vice-versa) instead of one
+> uniform conversion to bones+verts+keyframes; pairing the `.skn` with a wrong-`id_b` skeleton; or
+> sampling a started clip at a frozen `t = 0`. With the recovery above applied AND the +90°-Z stand-up
+> remap, the mesh deforms, stands upright, and animates correctly.
 
 For the recovered sample skeletons `base_id == 0`, so ID equals array index — but the importer **must
 not assume** `base_id == 0` in general. Always resolve `bone_array[id − base_id]`.
@@ -519,9 +575,11 @@ bone world transform. The cancellation in §0 is the direct consequence.
 > rest pos/normal are stored per influence at the in-memory influence record's `localPos` slot (+0x0C)
 > and `localNormal` slot (+0x18) — i.e. the bake folds the inverse-bind into the per-influence rest
 > geometry rather than keeping a separate inverse-bind matrix array; this is the same quantity glTF
-> stores as `inverseBindMatrix · vertex_bind`. The native handedness/up-axis is no longer an OPEN-RISK:
-> the up-axis is **RESOLVED to Y-up / identity import** (§7, §8(b)) and no axis flip exists inside the
-> math, so the bake reproduces the original exactly under a Y-up import.
+> stores as `inverseBindMatrix · vertex_bind`. **CORRECTED 2026-06-21 (visual-oracle):** there is no
+> axis flip *inside* the bake/deform math, but the `.skn` rest geometry is authored **X-TALL** (native-X
+> height-axis), so a faithful import must add a **+90°-about-Z importer stand-up remap** (native +X
+> height → Godot +Y) — applied uniformly to the rest geometry, bones and keyframes so the §0
+> cancellation survives the change of basis (§7, §8(b)). The bake math itself is unchanged.
 
 > **Frame-0 vs rest cross-check (CONFIRMED static).** The skin-matrix bake reads the **bind/rest** pose
 > directly — there is **no** mixer / animation-sample / clip-advance step on the skin-attach path
@@ -743,39 +801,53 @@ exactly the `boneWorldTrans` / `boneWorldQuat` the deform loop (§5.3) reads.
 | Animated rotation | applied as a **right (post) multiply** delta: `parentWorld ⊗ bindLocal ⊗ animLocal` |
 | Deform | LBS: `Σ w·(qWorld ⊗ (localPos·scale) + tWorld)`; normal `Σ w·(qWorld ⊗ localNormal)` |
 | Inverse-bind | `localPos = qBindWorld⁻¹ ⊗ (modelPos − tBindWorld)`, baked at load |
-| Render space | **D3D9 left-handed, Y-up, +Z-forward** (CONFIRMED CYCLE 7); **no axis flip inside the skinning math** |
-| Up axis | **Y-up** (RESOLVED CYCLE 7) — height runs along +Y, ground plane is XZ; correct character import up-axis conversion is the IDENTITY (no up-axis rotation) |
+| Render space (engine internal) | **D3D9 left-handed, +Z-forward** (CONFIRMED CYCLE 7); **no axis flip inside the skinning math** |
+| World-PLACEMENT / HEADING up axis | **Y-up (KEPT)** — yaw is a pure rotation about Y, the ground plane is XZ, facing is the XZ planar delta; the engine places/turns actors about Y. This governs world placement, NOT the `.skn` geometry height-axis below |
+| `.skn` GEOMETRY height-axis | **native X (CORRECTED 2026-06-21, visual-oracle)** — the rest-mesh is authored X-TALL; a faithful Godot import applies a **+90°-about-Z importer (display-node) stand-up remap** to map native +X height onto Godot +Y. This SUPERSEDES the prior "Y-up / identity import" reading of the asset geometry. It is a pure asset-orientation property (the inverse-bind cancellation passes at the float-noise floor); the deform math is untouched. See §8(b), §9 |
 | Vertex stream | 32 bytes: pos[0..11], normal[12..23], uv[24..31]; `uv.v` stored as `1.0 − v` |
 
 **No axis negation or mirroring happens inside the skinning math.** The known project conventions
 (world negates Z; `.skn` mesh-local geometry negates X) are **importer-layer transforms**, not engine
-internals. Bone space and rest-mesh space are the same native left-handed space — that is precisely why
-the inverse-bind and the forward transform cancel. §8 explains how to bridge this to Godot without
-breaking the cancellation.
+internals. Bone space and rest-mesh space are the same native space — that is precisely why the
+inverse-bind and the forward transform cancel. Separately, that native space is **X-TALL** for the
+`.skn` geometry (height along native X), so the importer adds a **+90°-about-Z stand-up remap** on top
+of the handedness/forward reconciliation; both are importer-layer, both must be applied **uniformly**
+to bones + verts + keyframes so the cancellation survives. §8 explains how to bridge this to Godot
+without breaking the cancellation.
 
-> **Up-axis RESOLVED to Y-up (CONFIRMED CYCLE 7).** The engine's own placement/heading/render
-> transforms fix the absolute up axis without needing a sample: a "turn to face" is a pure quaternion
-> rotation **about Y** (the heading quaternion is `{0, sin(θ/2), 0, cos(θ/2)}`), facing is computed from
-> the **XZ planar delta only** (the Y coordinate is height and is unused in facing), the render walk's
-> forward basis vector is hard-coded **+Z**, and the device pipeline is a **left-handed** look-at. There
-> is **no fixed character import/root rotation** other than the runtime Y-yaw heading: the visual-attach
-> initializes the actor's orientation quaternions to identity, and the render walk seeds the root bone's
-> world quaternion with only the Y-yaw facing. Therefore the character data is Y-up and a faithful port
-> imports it with the **identity** on the up axis (no Z-up→Y-up rotation). The documented "−Z world" and
-> "−X mesh-local" rules are **port-side** left-handed→right-handed + forward-axis reconciliations (they
-> convert the original's LH +Z-forward space to Godot's RH −Z-forward space) and **leave the up axis
-> alone** — the binary itself performs neither. The only residual is the raw numeric up-axis label of the
-> asset bytes, which does not affect correctness because the engine never remaps and a Y-up import
-> reproduces the original exactly. See §8(b) and the "avatar lies on X" diagnostic there.
+> **The two up-axis quantities — do NOT conflate them (CORRECTED 2026-06-21, visual-oracle).**
+> The engine's own placement/heading transforms are genuinely **Y-up**, and that is KEPT: a "turn to
+> face" is a pure quaternion rotation **about Y** (the heading quaternion is `{0, sin(θ/2), 0,
+> cos(θ/2)}`), facing is computed from the **XZ planar delta only** (the Y coordinate is height and is
+> unused in facing), the render walk's forward basis vector is hard-coded **+Z**, and the device
+> pipeline is a **left-handed** look-at. There is **no runtime character root rotation** other than the
+> Y-yaw heading. **That Y-up is the WORLD-PLACEMENT / HEADING convention — how an actor is positioned
+> and turned in the world.** It is a **different quantity** from the `.skn` GEOMETRY height-axis, which
+> the visual oracle has now settled to **native X**: the raw rest-mesh is tall-along-X *before any
+> deform or handedness conversion* (e.g. the g1 player body ≈ X 5.0 > Y 2.4 > Z 1.7), and the deformed
+> frame-0 AABB at an identity importer pivot is likewise recumbent (tall-X). Because the inverse-bind
+> cancellation passes at the float-noise floor, this is a **pure orientation property of the asset
+> bytes**, not a deform-math or wrong-skeleton bug. Therefore a faithful import applies a **+90°-about-Z
+> importer (display-node pivot) stand-up remap** to map native +X height onto Godot +Y (verified: AABB
+> tall-X → tall-Y; screenshot +90° upright, −90° upside-down). This SUPERSEDES the CYCLE-7 "the up-axis
+> is RESOLVED to Y-up / identity import / correct conversion = IDENTITY" wording for the asset geometry.
+> The documented "−Z world" and "−X mesh-local" rules remain **port-side** left-handed→right-handed +
+> forward-axis reconciliations (they convert the original's LH +Z-forward space to Godot's RH
+> −Z-forward space); they are separate from, and applied alongside, the +90°-Z stand-up remap. The
+> "avatar lies on X" is the **as-authored** geometry orientation — the fix is to **ADD** the +90°-Z
+> remap, NOT to remove a non-existent upstream rotation. See §8(b) and the "avatar lies on X"
+> diagnostic there. A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording.
 
 ---
 
 ## 8. Godot import guidance
 
-The legacy math lives entirely in the engine's native **left-handed, Y-up, +Z-forward** space and is
-internally consistent. Godot is **right-handed, Y-up, −Z-forward**. Crucially, **both are Y-up**: the
-only difference is handedness/forward, NOT the up axis. So the character import applies the IDENTITY on
-the up axis and reconciles handedness/forward only. Four things must be honoured.
+The legacy math lives entirely in the engine's native **left-handed, +Z-forward** space and is
+internally consistent. Godot is **right-handed, Y-up, −Z-forward**. The engine's world-PLACEMENT /
+HEADING convention is Y-up (yaw about Y) and is reconciled by the handedness/forward conversion below;
+SEPARATELY, the `.skn` GEOMETRY is authored **X-TALL** (native-X height-axis, CORRECTED 2026-06-21 by
+the visual oracle), so the character import must also apply a **+90°-about-Z stand-up remap** to bring
+native +X height onto Godot +Y. Five things must be honoured.
 
 ### (a) Preserve the bind / inverse-bind cancellation — this is what stops the explosion
 
@@ -795,7 +867,7 @@ In both cases the invariant to assert during bring-up: **with the idle/bind pose
 playing, the deformed mesh must equal the rest mesh.** If it does not, the cancellation is broken —
 fix that before touching animation.
 
-### (b) Unify the project's two ad-hoc flips into ONE handedness conversion
+### (b) Unify the handedness conversion AND apply the +90°-about-Z geometry stand-up remap
 
 The project today applies two separate negations: world geometry negates Z
 (`Helpers/WorldCoordinates.ToGodot`: `(x,y,z) → (x,y,−z)`), and `.skn` mesh-local geometry negates X.
@@ -807,27 +879,34 @@ flips for skinned characters. A Z-negation is a handedness flip; under it a quat
 to `(−x,−y,z,w)` (negate the two components orthogonal to the un-flipped Z axis). **Validate this exact
 quaternion remap against a single sample bone rotation rather than assuming it** (§9 open item). The
 key requirement is *uniformity*: bones, verts, and keyframes all undergo the same conversion, so the
-cancellation property survives the change of basis. This handedness/forward conversion **must not touch
-the up axis** — it is a Z-negate only; the up axis stays Y throughout (the source and Godot are both
-Y-up).
+cancellation property survives the change of basis.
 
-> **The up-axis import is the IDENTITY — and the "avatar lies on X (recumbent)" symptom is a port-side
-> spurious up-axis rotation to REMOVE (RESOLVED CYCLE 7).** The engine treats character data as Y-up
-> (§7), so a faithful character import applies **NO up-axis rotation**. If the avatar currently lies on
-> its side (recumbent along X), the port is applying an **extra Z-up→Y-up rotation (−90° about X)** to
-> data that is already Y-up — tipping the upright Y axis onto the horizontal plane. **The fix is to
-> REMOVE that rotation:** set the character importer's up-axis to **Y-up / no rotation**. Do not add a
-> rotation to "correct" it; remove the spurious one.
+**On top of the handedness conversion, apply the +90°-about-Z importer stand-up remap (CORRECTED
+2026-06-21, visual-oracle).** The `.skn` geometry is authored X-TALL (height along native X), so the
+character import MUST rotate it +90° about Z (at the display-node / importer pivot) to map native +X
+height onto Godot +Y. Like the handedness conversion, apply this remap **uniformly** to bones + verts +
+keyframes so the §0 cancellation survives. The world-PLACEMENT / HEADING up axis stays Y (yaw about Y)
+— that convention is unaffected; the +90°-Z remap is purely the asset-geometry stand-up.
+
+> **The "avatar lies on X (recumbent)" symptom is the as-authored geometry axis — ADD the +90°-about-Z
+> remap; do NOT chase a rotation to remove (CORRECTED 2026-06-21, visual-oracle).** The `.skn` rest-mesh
+> is authored X-TALL (§7), so at an identity importer pivot the avatar lies on its side (recumbent along
+> X) — this is the **native** orientation of the asset bytes, NOT a port-added spurious rotation. **The
+> fix is to ADD a +90°-about-Z importer (display-node) stand-up remap**, mapping native +X height onto
+> Godot +Y. Do NOT search for and remove a non-existent upstream Z-up→Y-up rotation; the earlier "set
+> the importer up-axis to identity / remove the spurious −90°-about-X" guidance is SUPERSEDED — that
+> path leaves the avatar recumbent. (Screenshot evidence: +90°-Z is upright, −90°-Z is upside-down.)
 >
 > **Deformed-pose AABB verification.** Bake the bind pose (or a single idle `.mot` frame) through the
 > parser-true math, compute the deformed-vertex AABB, and check which axis spans the figure's height:
-> - **CORRECT (Y-up, no up rotation):** the AABB's largest extent is along **Y** (a tall standing
->   figure), small along X and Z; the head is at max-Y and the feet at min-Y.
-> - **WRONG (the current "lies on X"):** the AABB's largest extent is along **X** (or Z) — the figure is
->   laid down. This is the signature of the extra −90°-about-X (a Z-up assumption) that must be removed.
-> Run the check with no up rotation; the "no rotation" case must produce the tall-along-Y AABB. (The
-> bake AABB itself is already sane and the inverse-bind cancellation is at the float-noise floor, per
-> CYCLE 1 — the orientation knob is the importer up-axis only, not the deform math.)
+> - **CORRECT (with the +90°-about-Z stand-up remap applied):** the AABB's largest extent is along
+>   **Y** (a tall standing figure), small along X and Z; the head is at max-Y and the feet at min-Y.
+> - **WRONG (the current "lies on X", identity importer pivot):** the AABB's largest extent is along
+>   **X** — the figure is laid down. This is the signature of the as-authored native-X height-axis with
+>   the +90°-Z stand-up remap **missing** (NOT a spurious −90°-about-X to remove).
+> Run the check with the +90°-Z remap applied; that case must produce the tall-along-Y AABB. (The bake
+> AABB itself is already sane and the inverse-bind cancellation is at the float-noise floor, per CYCLE 1
+> — the orientation knob is the importer +90°-Z stand-up remap only, not the deform math.)
 
 ### (c) The raw-seconds interpolation alpha (faithful vs. renormalized)
 
@@ -997,7 +1076,9 @@ class renders correctly purely because its shared default choice coincided with 
    element 1 = column 16.) Each clip's track count equals its rig's bone count. **Per class** — never a
    single shared idle clip.
 3. Skin **every** overlay part onto that **same** `id_b`-selected skeleton (all of a class's overlays
-   carry the class's `id_b`).
+   carry the class's `id_b`). Apply the **+90°-about-Z stand-up remap** (§8(b)) uniformly across all
+   parts + bones + keyframes so the geometry stands upright (native-X height → Godot +Y) without
+   breaking the §0 cancellation.
 4. **Defensive guard (importer hardening — NOT legacy parity).** The legacy bone resolver
    **CLAMPS** an out-of-range id to the **last bone**: when `id − base_id ≥ bone_count` it returns
    `pose_bone_base + 88 · bone_count − 88`, and the mixer's non-null guard never fires because the
@@ -1033,7 +1114,7 @@ shared default. This is the recovered cause of the char-create preview shatter c
 | Inverse-bind **bake** existence + conjugate/order (§4) | RESOLVED (CONFIRMED static, CYCLE 1) — the bake is pinned as a separate skin-attach pass: conjugate `(−x,−y,−z,w)`, subtract bind-world translation then rotate by the inverse bind-world quaternion, against the rest/bind world pose, normal rotation-only, quaternion-based (no matrices). No longer a hypothesis and no debugger needed | None — the math is settled; importers implement §4 directly |
 | Skeleton-selection key + skeleton preload (§8(e)) | RESOLVED (CONFIRMED static, CYCLE 1) — the `.skn` `id_b` is the verbatim pose-pool key (no `g{N}.bnd` formatting / slot transform at the resolve site); all listed `.bnd` are eager-preloaded at boot keyed by parsed `actor_id`; mobs reach the same pool via the animation-catalogue indirection | None for the resolve mechanism; the concrete `model_class_id → loaded `.bnd`` value-edge + the per-category base-offset table remain value-edges (§3.5.5) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
-| Native up-axis / handedness *label* | **RESOLVED to Y-up / identity import (CONFIRMED static, CYCLE 7)** — the engine treats character data as Y-up (yaw about Y, ground plane XZ, forward +Z, left-handed D3D); no fixed character import/root rotation; correct up-axis conversion = IDENTITY. The "−Z world / −X mesh-local" flips are port-side handedness/forward reconciliations that leave the up axis alone. Only the raw numeric up-axis *label* of the asset bytes is unread, and it does not affect correctness (engine never remaps) | The "avatar lies on X" symptom is a spurious port-side −90°-about-X to **remove** (§8(b)); verify with the deformed-pose AABB (tall along Y) |
+| `.skn` GEOMETRY height-axis + importer stand-up remap | **CORRECTED 2026-06-21 (visual-oracle): native X → +90°-about-Z importer remap.** The rest-mesh is authored X-TALL (height along native X), measured against the visual oracle (raw rest-mesh bytes tall-along-X *pre-deform*, e.g. g1 body ≈ X 5.0 > Y 2.4 > Z 1.7; deformed frame-0 AABB recumbent at an identity pivot). It is a pure asset-orientation property — the inverse-bind cancellation passes at the float-noise floor — so a faithful import applies a **+90°-about-Z importer (display-node) stand-up remap** (native +X height → Godot +Y), applied uniformly to bones+verts+keyframes. SUPERSEDES the prior "RESOLVED to Y-up / identity import" reading. The world-PLACEMENT / HEADING up axis stays Y (yaw about Y), a separate quantity that is unaffected | The "avatar lies on X" symptom is the as-authored geometry axis — **ADD** the +90°-Z stand-up remap (§8(b)); do NOT remove a non-existent upstream rotation. Verify with the deformed-pose AABB (tall along Y with the remap applied). A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording |
 | Log-shaped epsilon tests (dedup §2.1; accumulate / commit floors §6.2) | CAPTURE/DEBUGGER-PENDING — the three tests disassemble as a logarithm-shaped intrinsic compared against 0.001, almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp; behaviourally treated as a 0.001 clamp | A debugger step over one site confirms the intrinsic; no importer impact (treat as a 0.001 clamp) |
 | Per-mesh + per-node `scale` (§3.4, §5.3, §6.6) | RESOLVED (CAMPAIGN 9, re-confirmed CAMPAIGN 10) — per-mesh scale is a skin-object field set at attach as `nodeScale · meshScale` (× optional non-zero override); a separate per-node scale lives at runtime bone +84; both generally non-unit | The importer **must read and apply** the per-mesh scale to positions and the per-node scale to bone-local translation (not normals, not rotations); do NOT assume 1.0 |
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
@@ -1140,7 +1221,7 @@ element 5 (record +0x54, column 20), and the alt-idle (motion-kind 1) is array A
 | Which slot is the runtime stand/idle clip? | **Column 16 (record +0x44, direction array A element 1), keyed by the appearance key — RESOLVED static, CYCLE 7.** Record +0x40 (col15, element 0) is statically dead (no read-site). |
 | How is the stand idle clip resolved to a file? | Via the **motlist.txt clip registry** (the column-16 value is a motion id == `.mot` header id_b, the registry key) — **NOT** a `g{id}.mot` sprintf (no such format string exists). |
 | Is the observed human stand `.mot` static data? | YES — 0/84 animated tracks, a fixed held pose (SAMPLE-VERIFIED, per-asset). |
-| Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static stand asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds); the mesh-explosion debt is **retired**. |
+| Is a frozen standing human in the port a bug? | NO — it is **faithful** to the static stand asset. The mesh renders correctly via quaternion LBS (§0 cancellation holds) once the +90°-about-Z geometry stand-up remap is applied (§8(b)); the mesh-explosion debt is **retired**. |
 | Which standing-idle slot does the **live engine** select at runtime? | **RESOLVED static (CYCLE 7)** — the column-16 stand clip; settled by the static read-site evidence (no debugger needed). |
 
 ### 10.5 Guidance for the port

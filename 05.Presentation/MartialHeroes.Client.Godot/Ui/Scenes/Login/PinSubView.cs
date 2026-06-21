@@ -365,17 +365,25 @@ public sealed partial class PinSubView : Control
                 break;
 
             case TagOk:
-                // OK tag 12: submit the PIN. Application validates length.
-                // spec: frontend_layout_tables.md §3 (binary: tag 12 → SubmitOk).
+                // OK tag 12: submit the PIN, then re-scramble (re-roll on OK per spec §3).
+                // spec: frontend_layout_tables.md §3 "re-roll: the scramble re-seeds and re-shuffles on
+                //   open (SetVisible-show), Reset, OK, and Cancel."
                 GD.Print($"[PinSubView] OK (tag 12): PinSubmitted(pin_len={_pin.Length}). " +
                          "spec: frontend_layout_tables.md §3.");
                 EmitSignal(SignalName.PinSubmitted, _pin);
+                _pin = "";
+                Scramble();
+                RebuildKeypad();
                 break;
 
             case TagCancel:
-                // Cancel tag 13: close the modal.
-                // spec: frontend_layout_tables.md §3 (binary: tag 13 → Cancel).
+                // Cancel tag 13: close the modal, then re-scramble (re-roll on Cancel per spec §3).
+                // spec: frontend_layout_tables.md §3 "re-roll: the scramble re-seeds and re-shuffles on
+                //   open (SetVisible-show), Reset, OK, and Cancel."
                 GD.Print("[PinSubView] Cancel (tag 13): Cancelled. spec: frontend_layout_tables.md §3.");
+                _pin = "";
+                Scramble();
+                RebuildKeypad();
                 EmitSignal(SignalName.Cancelled);
                 break;
         }

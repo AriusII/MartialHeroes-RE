@@ -141,7 +141,7 @@ public sealed partial class EffectRenderer
 
     /// <summary>
     ///     Spawns a looping actor-anchored effect for the given cast.
-    ///     Attempts to load and render the real .xeff; falls back to the placeholder if unavailable.
+    ///     Attempts to load and render the real .xeff; renders nothing when unavailable (no-placeholder doctrine).
     ///     Called when action code 0xC8 (cast-enable) is received.
     ///     spec: Docs/RE/specs/effects.md §15.3 — 0xC8 = cast-enable; CODE-CONFIRMED.
     ///     spec: Docs/RE/specs/effects.md §15.4 — looping UserXEffect, actor-anchored; CODE-CONFIRMED.
@@ -169,9 +169,11 @@ public sealed partial class EffectRenderer
         LiveEffect live;
         if (subEffects is { Length: > 0 })
         {
-            // Build one MeshInstance3D per sub-effect (billboard/mesh geometry).
+            // Build one MeshInstance3D per CPU sub-effect (billboard/mesh geometry)
+            // and one GpuParticleSimNode per GPU-particle sub-effect.
             var meshInstances = new MeshInstance3D?[subEffects.Length];
-            var gpuParticles = new GpuParticles3D?[subEffects.Length];
+            var gpuParticles = new GpuParticles3D?[subEffects.Length]; // kept for teardown compat; always null
+            var simNodes = new GpuParticleSimNode?[subEffects.Length];
             var textures = new ImageTexture?[subEffects.Length][];
 
             for (var i = 0; i < subEffects.Length; i++)
@@ -184,10 +186,19 @@ public sealed partial class EffectRenderer
 
                 if (se.ResourceId >= XeffResourceParticleThreshold)
                 {
-                    // GPU particle element (resource_id >= 10000): not yet implemented — render nothing.
-                    // No-placeholder doctrine: leave gpuParticles[i] = null rather than emitting
-                    // a synthetic orange GpuParticles3D burst that has zero fidelity value.
+                    // GPU particle element (resource_id >= 10000): render via GpuParticleSimNode,
+                    // which runs stepwise Euler integration from the particleEmitter.eff descriptor.
                     // spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
+                    // spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration: CODE-CONFIRMED.
+                    // spec: Docs/RE/formats/effects.md §E.4 — raw entry_id equality lookup: CONFIRMED.
+                    var simNode = TryBuildParticleSimNode(se.ResourceId, origin);
+                    if (simNode is not null)
+                    {
+                        simNodes[i] = simNode;
+                        AddChild(simNode);
+                    }
+
+                    // GpuParticles3D slot kept null (teardown compat) — SimNodes[i] carries the node.
                     gpuParticles[i] = null;
                 }
                 else
@@ -207,12 +218,14 @@ public sealed partial class EffectRenderer
                 SubEffects = subEffects,
                 MeshInstances = meshInstances,
                 GpuParticles = gpuParticles,
+                SimNodes = simNodes,
                 Textures = textures,
                 ElapsedMs = 0
             };
 
+            var gpuCount = simNodes.Count(s => s is not null);
             GD.Print($"[EffectRenderer] PlayCast: effectId={effectId} actor={key.RawId} " +
-                     $"— loaded real .xeff ({subEffects.Length} sub-effects) origin={origin}. " +
+                     $"— loaded real .xeff ({subEffects.Length} sub-effects, {gpuCount} GPU-particle sims) origin={origin}. " +
                      "spec: Docs/RE/specs/effects.md §15.4 looping UserXEffect; CODE-CONFIRMED.");
         }
         else
@@ -260,22 +273,85 @@ public sealed partial class EffectRenderer
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // GPU-particle simulation node builder
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Loads (lazily) the <c>particleEmitter.eff</c> table and builds a
+    ///     <see cref="GpuParticleSimNode" /> for the entry whose <c>entry_id</c> equals
+    ///     <paramref name="resourceId" /> (raw equality — NO −10000 subtraction).
+    ///     Returns null on VFS miss, table parse failure, or entry miss (renders nothing, faithful).
+    ///     spec: Docs/RE/formats/effects.md §E.1 — particleEmitter.eff path: CONFIRMED.
+    ///     spec: Docs/RE/formats/effects.md §E.4 — raw entry_id equality: CONFIRMED.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration: CODE-CONFIRMED.
+    /// </summary>
+    private GpuParticleSimNode? TryBuildParticleSimNode(uint resourceId, Vector3 origin)
+    {
+        if (_assets is null) return null;
+
+        // Lazy-load the table once.
+        // spec: Docs/RE/formats/effects.md §E.1 — particleemitter.eff (VFS-lowercased): CONFIRMED.
+        if (!_particleEmitterTableAttempted)
+        {
+            _particleEmitterTableAttempted = true;
+            var raw = _assets.GetRaw(ParticleEmitterEffPath);
+            if (!raw.IsEmpty)
+                try
+                {
+                    _particleEmitterTable = ParticleEmitterParser.Parse(raw);
+                    GD.Print($"[EffectRenderer] particleEmitter.eff loaded: " +
+                             $"{_particleEmitterTable.Entries.Length} entries. " +
+                             "spec: Docs/RE/formats/effects.md §E.1.");
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[EffectRenderer] particleEmitter.eff parse failed: {ex.Message}");
+                }
+            else
+                GD.Print("[EffectRenderer] particleEmitter.eff not found in VFS — GPU particles unavailable.");
+        }
+
+        if (_particleEmitterTable is null) return null;
+
+        // Raw entry_id equality lookup (NO −10000 subtraction).
+        // spec: Docs/RE/formats/effects.md §E.4 — raw-id equality: CONFIRMED.
+        var entry = _particleEmitterTable.TryGetById(resourceId);
+        if (entry is null)
+        {
+            GD.Print($"[EffectRenderer] particleEmitter.eff: no entry for resource_id={resourceId} " +
+                     "(raw-id miss → render nothing). spec: Docs/RE/formats/effects.md §E.4.");
+            return null;
+        }
+
+        // Resolve the entry's texture by its stored full path (exact string, no prefix added).
+        // spec: Docs/RE/formats/effects.md §E.2.3 — texture_name is the FULL path, used verbatim: CONFIRMED.
+        ImageTexture? tex = null;
+        if (!string.IsNullOrEmpty(entry.TextureName))
+            tex = _assets.LoadTexture(entry.TextureName);
+
+        var simNode = new GpuParticleSimNode(entry, tex)
+        {
+            GlobalPosition = origin
+        };
+
+        GD.Print($"[EffectRenderer] GPU particle sim: resource_id={resourceId} entry_id={entry.EntryId} " +
+                 $"numParticles={entry.NumFrames} spriteSize=({entry.SpriteSizeX},{entry.SpriteSizeY}) " +
+                 $"tex='{entry.TextureName}'. spec: Docs/RE/formats/effects.md §E.2.2.");
+        return simNode;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // .xeff loading (mini-parser, corrected 8-byte header spec)
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    ///     Attempts to load and parse a .xeff file by raw effect_id.
-    ///     Resolution order (per spec):
-    ///     1. Registry lookup: _effectRegistry[effectId] → vfs path (built from xeffect.lst at boot).
-    ///     spec: Docs/RE/formats/effects.md §C.2 — "runtime ALWAYS resolves through registry keyed
-    ///     by raw effect_id; NO numeric-name sprintf in original; CONFIRMED."
+    ///     Attempts to load and parse a .xeff file by raw effect_id, resolving ONLY through the registry
+    ///     (built from xeffect.lst at boot): <c>_effectRegistry[effectId]</c> → vfs path. The original
+    ///     ALWAYS resolves through this registry keyed by raw effect_id; there is NO numeric-name sprintf
+    ///     path in the binary, so a registry miss renders nothing (no fabricated path probe).
+    ///     spec: Docs/RE/formats/effects.md §C.2 — "runtime ALWAYS resolves through registry keyed by raw
+    ///     effect_id; NO numeric-name sprintf in original (Option A REJECTED); CONFIRMED."
     ///     spec: Docs/RE/formats/effects.md §A.9 — xeffect.lst manifest.
-    ///     2. Numeric-name fallback: data/effect/xeff/{effectId}.xeff — NOT in original (Option A
-    ///     REJECTED per spec §C.2), but kept as a DOCUMENTED last-resort so the demo/dev path
-    ///     still works for numeric-named files (984 of 3,584 are numeric and their filename
-    ///     coincides with the effect_id by authoring convention).
-    ///     spec: Docs/RE/formats/effects.md §C.2 — "Option A REJECTED; no numeric-name path in binary."
-    ///     On a registry miss with no numeric-name file, logs and returns null (placeholder fallback).
     /// </summary>
     private SubEffectDesc[]? TryLoadXeff(uint effectId)
     {
@@ -290,31 +366,21 @@ public sealed partial class EffectRenderer
                      "spec: Docs/RE/formats/effects.md §C.2 registry resolve.");
         }
 
-        // 2) Numeric-name fallback (DOCUMENTED last-resort; NOT in original — spec §C.2 Option A REJECTED).
-        if (vfsPath is null)
-        {
-            var numericPath = $"data/effect/xeff/{effectId}.xeff";
-            var probe = _assets.GetRaw(numericPath);
-            if (!probe.IsEmpty)
-            {
-                vfsPath = numericPath;
-                GD.Print($"[EffectRenderer] Registry MISS for effectId={effectId}; numeric fallback hit: {vfsPath}. " +
-                         "NOTE: original had no numeric-path fallback (spec §C.2 Option A REJECTED). " +
-                         "This path is a dev/demo last-resort only.");
-            }
-        }
-
+        // No numeric-name fallback: the original ALWAYS resolves through the registry keyed by raw
+        // effect_id; there is no sprintf("%d.xeff") path in the binary (spec §C.2 Option A REJECTED).
+        // A registry miss therefore renders nothing — the faithful behaviour, no fabricated path probe.
         if (vfsPath is null)
         {
             GD.Print(
-                $"[EffectRenderer] effectId={effectId}: not in registry, no numeric file found — using placeholder.");
+                $"[EffectRenderer] effectId={effectId}: not in registry — rendering nothing " +
+                "(spec §C.2: registry is the sole resolver; no numeric-name fallback).");
             return null;
         }
 
         var raw = _assets.GetRaw(vfsPath);
         if (raw.IsEmpty)
         {
-            GD.Print($"[EffectRenderer] .xeff not found in VFS: {vfsPath} — using placeholder.");
+            GD.Print($"[EffectRenderer] .xeff not found in VFS: {vfsPath} — rendering nothing.");
             return null;
         }
 
@@ -334,7 +400,7 @@ public sealed partial class EffectRenderer
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[EffectRenderer] .xeff parse failed ({vfsPath}): {ex.Message} — using placeholder.");
+            GD.PrintErr($"[EffectRenderer] .xeff parse failed ({vfsPath}): {ex.Message} — rendering nothing.");
             return null;
         }
     }

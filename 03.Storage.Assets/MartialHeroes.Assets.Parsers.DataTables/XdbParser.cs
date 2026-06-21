@@ -53,15 +53,37 @@ public static class XdbParser
     // spec: Docs/RE/formats/xdb_tables.md §4 — "stride 52 bytes, 58 records": CONFIRMED.
     private const int VehicleStride = 52;
 
-    // Unknown 8-byte region starts at record +8. UNVERIFIED layout.
-    // spec: Docs/RE/formats/xdb_tables.md §4 — unknown_8b u8[8] @ +8: UNVERIFIED.
-    private const int VehicleUnknown8bOffset = 8;
-    private const int VehicleUnknown8bLen = 8;
+    // vehicle.xdb named field offsets — CONFIRMED (CYCLE 1, 2026-06-21 consumer re-read).
+    // spec: Docs/RE/formats/xdb_tables.md §4 — full field table.
+    // tag_a u32LE @ +8: takes 3 distinct values across 58 records (family discriminator metadata).
+    //   NOT READ by either mount-path consumer (CYCLE 1, static-confirmed). Parse but do NOT branch on it.
+    // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_a u32LE @ +8: not read by mount-path consumers (CYCLE 1)".
+    private const int VehicleTagAOffset = 8;
 
-    // 36-byte zero region starts at record +16. Layout UNVERIFIED; all-zero in head records.
-    // spec: Docs/RE/formats/xdb_tables.md §4 — zero_region u8[36] @ +16: layout UNVERIFIED.
-    private const int VehicleZeroRegionOffset = 16;
-    private const int VehicleZeroRegionLen = 36;
+    // tag_b u32LE @ +12: CONSTANT 0x1575A3E4 in all 58 records. A table-type stamp; no per-vehicle info.
+    // NOT READ by either consumer.
+    // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_b u32LE @ +12: CONSTANT 0x1575A3E4 (table_stamp)": CONFIRMED.
+    private const int VehicleTagBOffset = 12;
+    private const uint VehicleTagBExpected = 0x1575A3E4u; // table-type stamp; CONSTANT in all 58 records
+
+    // float params start at +16. param_0..param_8 = nine f32 LE = 36 bytes total (+16..+51=stride end).
+    // Per-facing seat-Y floats at byte offsets +0x24/+0x28/+0x2C/+0x30 = param_2/3/4 and first of param_5..8.
+    // Consumer reads float-array-as-a-whole at index (facing+8) for facing 1..4 → indices 9,10,11,12
+    //   = byte offsets +0x24, +0x28, +0x2C, +0x30.
+    // spec: Docs/RE/formats/xdb_tables.md §4 — "per-facing seat-Y floats: float indices 9..12 = byte offsets +0x24/+0x28/+0x2C/+0x30 (facing 1..4)".
+    private const int VehicleParam0Offset = 16; // f32 param_0: lateral rider mount-point X. INFERRED.
+    private const int VehicleParam1Offset = 20; // f32 param_1: ALWAYS 0.0 across all 58 records.
+
+    private const int
+        VehicleParam2Offset = 24; // f32 param_2: facing-1 seat-Y / rider Z offset. CONFIRMED seat-Y (facing=1).
+
+    private const int VehicleParam3Offset = 28; // f32 param_3: facing-2 seat-Y. CONFIRMED seat-Y (facing=2).
+
+    private const int VehicleParam4Offset = 32; // f32 param_4: facing-3 seat-Y. CONFIRMED seat-Y (facing=3).
+
+    // param_5..8 = f32[4] @ +36..+51: last 4 float slots; facing-4 seat-Y is at +36 (param_5).
+    // spec: Docs/RE/formats/xdb_tables.md §4 — param_5..8 f32[4] @ +36: float indices 9(+0x24)..12(+0x30).
+    private const int VehicleParam5to8Offset = 36; // f32[4] = param_5, param_6, param_7, param_8.
 
     // =========================================================================
     // creature_item.xdb — Creature attached-item table (stride: 48 bytes)
@@ -116,10 +138,11 @@ public static class XdbParser
         return results;
     }
 
-    // Render cell geometry (CONFIRMED-variable):
-    //   DrawCellSize  = 21×21 pixels (the blitted icon footprint)
-    //   OriginSpacing = 27 pixels (stride between successive sprite_x/sprite_y origins)
-    // spec: Docs/RE/formats/xdb_tables.md §2 — "render cell 21×21, origin spacing 27": CONFIRMED-variable.
+    // Render cell geometry (SAMPLE-VERIFIED):
+    //   OriginSpacing = 25 pixels (stride between successive sprite_x/sprite_y origins — CORRECTED 27→25, sample-verified)
+    //   DrawCellSize  = 21×21 pixels (the blitted icon footprint — sprite-sheet-pending; only OriginSpacing=25 is CONFIRMED)
+    // spec: Docs/RE/formats/xdb_tables.md §2 — "origin spacing 25 (CORRECTED, sample-verified; prior '27' is REFUTED)".
+    // spec: Docs/RE/formats/xdb_tables.md §2 — "draw-cell size (21×21) needs the sprite sheet to confirm; only the 25-unit origin step is CONFIRMED".
     // NOTE: sprite_y = 401 is a DATA-SIDE BLANK-TILE CONVENTION (not a code sentinel).
     //   No loader branch tests for 401; it is an authored Y-origin pointing at a deliberately empty
     //   tile on the sprite sheet. Treat it as any other sprite_y — do NOT add a hardcoded sentinel check.
@@ -137,7 +160,9 @@ public static class XdbParser
     ///     <para>
     ///         <c>sprite_y = 401</c> is a data-side blank-tile convention — treat it as any other pixel-Y
     ///         origin. Do NOT add a hardcoded sentinel check.
-    ///         Render cell is 21×21 pixels; origin spacing between cells is 27 pixels.
+    ///         Origin spacing between cells is <b>25</b> pixels (CORRECTED from 27; sample-verified).
+    ///         Draw-cell size (21×21) needs the sprite sheet to confirm.
+    ///         spec: Docs/RE/formats/xdb_tables.md §2 — "origin spacing 25 CONFIRMED; prior '27' REFUTED".
     ///     </para>
     /// </remarks>
     public static BuffIconPositionRecord[] ParseBuffIconPositionXdb(ReadOnlyMemory<byte> data)
@@ -222,22 +247,19 @@ public static class XdbParser
         return results;
     }
 
-    // NOTE: tag_a (if encountered in earlier spec readings) is tool-side authoring metadata.
-    // REFUTED as a runtime discriminator: the shipped client does NOT read or branch on this field
-    // at runtime. Do NOT implement any runtime logic keyed on tag_a.
-    // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_a: tool-only, REFUTED as runtime field (loader-resolved)".
-
     /// <summary>
-    ///     Parses <c>data/script/vehicle.xdb</c>.
+    ///     Parses <c>data/script/vehicle.xdb</c> — mount/seat catalogue, keyed by vehicle_id.
     ///     Record count = file_size / 52 (must be exact multiple).
     /// </summary>
     /// <remarks>
     ///     spec: Docs/RE/formats/xdb_tables.md §4 vehicle.xdb: sample_verified true.
     ///     <para>
-    ///         Fields beyond <c>vehicle_id</c> and <c>item_id</c> are UNVERIFIED in their sub-layout;
-    ///         carried through as raw bytes. The <c>tag_a</c> field mentioned in authoring tooling is
-    ///         tool-side only — REFUTED as a runtime discriminator.
-    ///         spec: Docs/RE/formats/xdb_tables.md §4 — "tag_a: tool-only, REFUTED as runtime field".
+    ///         Runtime use CONFIRMED (CYCLE 1): keyed by <c>vehicle_id</c> (+0) on the mount path.
+    ///         Two consumers: (1) mount-attachment refresh; (2) per-frame rider Y-placement, reading
+    ///         per-facing seat-Y from float indices 9..12 = byte offsets +0x24/+0x28/+0x2C/+0x30.
+    ///         <c>tag_a</c> (+8) and <c>tag_b</c> (+12) are NOT read by either consumer (parse, do not branch).
+    ///         spec: Docs/RE/formats/xdb_tables.md §4 — "runtime consumers: vehicle_id key + per-facing seat-Y floats;
+    ///         tag_a/tag_b not read".
     ///     </para>
     /// </remarks>
     public static VehicleXdbRecord[] ParseVehicleXdb(ReadOnlyMemory<byte> data)
@@ -252,34 +274,72 @@ public static class XdbParser
             var recBase = i * VehicleStride;
             var rec = span.Slice(recBase, VehicleStride);
 
-            // vehicle_id u32LE @ +0. Sequential 1-based (1..58). CONFIRMED.
-            // spec: Docs/RE/formats/xdb_tables.md §4 — vehicle_id u32LE @ +0: CONFIRMED.
+            // vehicle_id u32LE @ +0. Sequential 1-based (1..58). Runtime lookup key. CONFIRMED.
+            // spec: Docs/RE/formats/xdb_tables.md §4 — vehicle_id u32LE @ +0: CONFIRMED (lookup key).
             var vehicleId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
 
             // item_id u32LE @ +4. Consecutive block (id 1 → 3108, id 2 → 3109, …). CONFIRMED.
             // spec: Docs/RE/formats/xdb_tables.md §4 — item_id u32LE @ +4: CONFIRMED.
             var itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]);
 
-            // unknown_8b u8[8] @ +8. Identical 8-byte run in head records. UNVERIFIED layout.
-            // NOTE: includes the authoring-only "tag_a" region; tag_a is REFUTED as runtime field.
-            // spec: Docs/RE/formats/xdb_tables.md §4 — unknown_8b u8[8] @ +8: UNVERIFIED.
-            // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_a: tool-only, REFUTED as runtime field".
-            // Carried through as raw bytes without interpretation.
-            var unknown8b =
-                data.Slice(recBase + VehicleUnknown8bOffset, VehicleUnknown8bLen);
+            // tag_a u32LE @ +8. Three distinct values across 58 records (vehicle-family discriminator).
+            // NOT READ by either mount-path consumer (CYCLE 1, static-confirmed). Parse but do NOT branch.
+            // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_a u32LE @ +8: not read by consumers (CYCLE 1)".
+            var tagA = BinaryPrimitives.ReadUInt32LittleEndian(rec[VehicleTagAOffset..]);
 
-            // zero_region u8[36] @ +16. All-zero in head records; layout UNVERIFIED.
-            // spec: Docs/RE/formats/xdb_tables.md §4 — zero_region u8[36] @ +16: layout UNVERIFIED.
-            // Carried through as raw bytes without interpretation.
-            var zeroRegion =
-                data.Slice(recBase + VehicleZeroRegionOffset, VehicleZeroRegionLen);
+            // tag_b u32LE @ +12. CONSTANT 0x1575A3E4 in all 58 records (table-type stamp).
+            // NOT READ by either consumer.
+            // spec: Docs/RE/formats/xdb_tables.md §4 — "tag_b u32LE @ +12: CONSTANT 0x1575A3E4 (table_stamp)": CONFIRMED.
+            var tagB = BinaryPrimitives.ReadUInt32LittleEndian(rec[VehicleTagBOffset..]);
+
+            // param_0 f32LE @ +16. Lateral rider mount-point X (most records zero). INFERRED axis.
+            // spec: Docs/RE/formats/xdb_tables.md §4 — param_0 f32LE @ +16: HIGH (present); INFERRED (X offset).
+            var param0 = BinaryPrimitives.ReadSingleLittleEndian(rec[VehicleParam0Offset..]);
+
+            // param_1 f32LE @ +20. ALWAYS 0.0 across all 58 records (constrained axis).
+            // spec: Docs/RE/formats/xdb_tables.md §4 — param_1 f32LE @ +20: CONFIRMED (always 0); INFERRED (constrained axis).
+            var param1 = BinaryPrimitives.ReadSingleLittleEndian(rec[VehicleParam1Offset..]);
+
+            // param_2 f32LE @ +24 (byte offset +0x18, float index 6). INFERRED rider Z offset.
+            // Also: per-facing seat-Y for facing=1 (float index 9 from record start = byte +0x24).
+            // Wait — float index within record = byte offset / 4. +0x24 = 36 / 4 = 9th float (0-based).
+            // Record floats 0..12: [vehicleId, itemId, tagA, tagB, param0, param1, param2, param3, param4, param5, param6, param7, param8]
+            // Index 9 = param_5 at byte +36; Index 10 = param_6 at +40; etc.
+            // Per-facing seat-Y: float indices 9..12 = byte offsets +0x24/+0x28/+0x2C/+0x30
+            // = the consumer reads rec[as float array][facing+8] for facing 1..4.
+            // +0x24 = byte 36 = param_5 slot (NOT param_2). The labels below use the spec's param names.
+            // spec: Docs/RE/formats/xdb_tables.md §4 — "per-facing seat-Y floats at float indices 9..12 = byte offsets +0x24/+0x28/+0x2C/+0x30".
+            var param2 = BinaryPrimitives.ReadSingleLittleEndian(rec[VehicleParam2Offset..]); // @ +24
+            var param3 = BinaryPrimitives.ReadSingleLittleEndian(rec[VehicleParam3Offset..]); // @ +28
+            var param4 = BinaryPrimitives.ReadSingleLittleEndian(rec[VehicleParam4Offset..]); // @ +32
+
+            // param_5..8: f32[4] @ +36..+51. Float indices 9..12 when viewed as float array.
+            // Per-facing seat-Y for facings 1..4 maps to these indices (float index = facing+8).
+            // facing=1 → index 9 → +0x24 = byte 36 = param_5[0]
+            // facing=2 → index 10 → +0x28 = byte 40 = param_5[1]
+            // facing=3 → index 11 → +0x2C = byte 44 = param_5[2]
+            // facing=4 → index 12 → +0x30 = byte 48 = param_5[3]
+            // spec: Docs/RE/formats/xdb_tables.md §4 — "param_5..8 f32[4] @ +36..+51 (facing seat-Y, indices 9..12)".
+            var seatYFacing1 = BinaryPrimitives.ReadSingleLittleEndian(rec[(VehicleParam5to8Offset + 0)..]);
+            var seatYFacing2 = BinaryPrimitives.ReadSingleLittleEndian(rec[(VehicleParam5to8Offset + 4)..]);
+            var seatYFacing3 = BinaryPrimitives.ReadSingleLittleEndian(rec[(VehicleParam5to8Offset + 8)..]);
+            var seatYFacing4 = BinaryPrimitives.ReadSingleLittleEndian(rec[(VehicleParam5to8Offset + 12)..]);
 
             results[i] = new VehicleXdbRecord
             {
                 VehicleId = vehicleId,
                 ItemId = itemId,
-                Unknown8b = unknown8b,
-                ZeroRegion = zeroRegion
+                TagA = tagA,
+                TagB = tagB,
+                Param0 = param0,
+                Param1 = param1,
+                Param2 = param2,
+                Param3 = param3,
+                Param4 = param4,
+                SeatYFacing1 = seatYFacing1,
+                SeatYFacing2 = seatYFacing2,
+                SeatYFacing3 = seatYFacing3,
+                SeatYFacing4 = seatYFacing4
             };
         }
 
@@ -357,9 +417,12 @@ public static class XdbParser
             // spec: Docs/RE/formats/xdb_tables.md §5 — scale_or_radius f32LE @ +32: CONFIRMED (present); semantic UNVERIFIED.
             var scaleOrRadius = BinaryPrimitives.ReadSingleLittleEndian(rec[32..]);
 
-            // unknown_u1 u32LE @ +36. Zero in head records. UNVERIFIED.
-            // spec: Docs/RE/formats/xdb_tables.md §5 — unknown_u1 u32LE @ +36: CONFIRMED (value=0 in head); UNVERIFIED.
-            var unknownU1 = BinaryPrimitives.ReadUInt32LittleEndian(rec[36..]);
+            // visual_scale f32LE @ +36. CONSUMER-CONFIRMED: copied into the spawned visual item's descriptor.
+            // 716 of 921 records are 0.0; 205 records carry clean fractional values (0.1, 0.2, 0.3, 0.4, 0.7, 0.8, 1.0, 1.8, 2.0, 2.2).
+            // 0.0 = "use default scale"; non-zero = per-entry visual scale for the attached item.
+            // Earlier "unknown_u1 u32" framing is WITHDRAWN — field is a float, confirmed by consumer read.
+            // spec: Docs/RE/formats/xdb_tables.md §5 — "visual_scale f32LE @ +36: CONFIRMED (f32, non-zero in 205/921; copied into spawned visual)".
+            var unknownU1 = BinaryPrimitives.ReadSingleLittleEndian(rec[36..]);
 
             // flag_0..flag_3 u8 @ +40..+43. Semantics UNVERIFIED.
             // spec: Docs/RE/formats/xdb_tables.md §5 — flag_0..flag_3 u8 @ +40..+43: UNVERIFIED.
@@ -386,7 +449,7 @@ public static class XdbParser
                 AttachF4 = f4,
                 AttachF5 = f5,
                 ScaleOrRadius = scaleOrRadius,
-                UnknownU1 = unknownU1,
+                VisualScale = unknownU1,
                 Flag0 = flag0,
                 Flag1 = flag1,
                 Flag2 = flag2,

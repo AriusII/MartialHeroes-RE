@@ -20,7 +20,6 @@ using Godot;
 using MartialHeroes.Assets.Parsers.Core.Models;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Presentation.Helpers;
-using MartialHeroes.Client.Presentation.World;
 using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -48,29 +47,40 @@ public static class SkinnedCharacterBuilder
     internal static bool PrintDiagnostics { get; set; } = true;
 
     /// <summary>
-    ///     PORT-SIDE coordinate convention: map the legacy native up-axis onto Godot's Y-up.
-    ///     The recovered bind/inverse-bind/LBS math (<see cref="SkinningMath" />, the bake) is CORRECT and
-    ///     is NOT touched here — the deform reproduces the rig faithfully in its NATIVE axis frame. But the
-    ///     legacy engine's native up-axis differs from Godot's Y-up, so the faithfully-deformed avatar
-    ///     arrives lying along X (the CYCLE-2 screenshots show AABB longest extent X≈25 vs Y≈12). This is
-    ///     the SAME CATEGORY of port-side coordinate mapping as the existing conventions already in the
-    ///     codebase: world geometry negates Z (<see cref="Helpers.WorldCoordinates.ToGodot" />) and the
-    ///     mesh-local .skn geometry negates X. It is a display-node reorientation — a coordinate-mapping
-    ///     PORT CHOICE — NOT a fabricated game behaviour and NOT a change to the bind/bake math.
-    ///     Applied to the Pivot node (the Node3D wrapping the mesh), so it composes cleanly with the
-    ///     caller's actor yaw on the root (NpcRenderer / RealWorldRenderer set root.Rotation = (0,yaw,0))
-    ///     and is shared by BOTH the player and the spawned actors (both go through Build).
-    ///     The human avatar's faithfully-deformed mesh is tallest along X (AABB X≈5.0 vs Y≈2.4 vs Z≈1.7
-    ///     for the g2 player b202110001 — it arrives lying down the +X axis). Mapping X→Y stands it up,
-    ///     which is a rotation about Z (not about X — about X only swaps Y↔Z and leaves it X-tall). A
-    ///     +90° rotation about Z maps +X onto +Y while keeping the figure NOT mirrored/inside-out (a pure
-    ///     rotation has det = +1, so winding is preserved, unlike a reflection). The AABB long axis moves
-    ///     from X to Y, which is the verifiable signature.
-    ///     Held as a named field so it is trivially adjustable when the maintainer confirms the native axis
-    ///     against the official captures / live debugger.
-    ///     spec: Docs/RE/specs/skinning.md §9 — the native up-axis / handedness LABEL is capture/debugger-
-    ///     pending (no axis flip inside the math); this is the importer-layer remap §7 sanctions.
-    ///     spec: CLAUDE.md "Coordinate conventions" — same category as world Z-negate / mesh-local X-negate.
+    ///     PORT-SIDE up-axis remap for the imported character: a +90° rotation about Z that maps the
+    ///     native <c>.skn</c> height axis onto Godot +Y.
+    ///     <para>
+    ///         ORACLE-MEASURED (asset bytes, the visual oracle — Ground-Truth Doctrine: oracle > spec for
+    ///         rendered pixels). The raw <c>g202110001.skn</c> (player class 1, <c>id_b = 1</c>) rest mesh
+    ///         parsed through the production <see cref="MartialHeroes.Assets.Parsers.Mesh.SknParser" /> has
+    ///         extent ≈ (X 5.02, Y 2.44, Z 1.67) — its HEIGHT runs along native <b>X</b>, not Y. Deformed
+    ///         through the §0 LBS pipeline with the CORRECT skeleton (<c>g1.bnd</c>, 84 bones) and a matched
+    ///         84-track idle, the displayed frame-0 AABB is tall-along-X (≈ 3.73 × 2.56 × 2.11) — the avatar
+    ///         is recumbent. The rest-pose cancellation invariant (§8(a)) PASSES (max dev ≈ 1.5e-6), so this
+    ///         is a pure ORIENTATION issue, not a deform-math defect. A +90° rotation about Z brings the
+    ///         figure tall-along-Y (head at +Y); −90° lays it head-down. Measured by the headless AABB probe.
+    ///     </para>
+    ///     <para>
+    ///         RECONCILIATION with skinning.md §7/§8(b)/§9. The spec currently states the up axis is "Y-up,
+    ///         import = IDENTITY", but that is the engine's WORLD-placement / heading convention (yaw is a
+    ///         pure rotation about Y), inferred — NOT the per-vertex height axis of the <c>.skn</c> geometry,
+    ///         which §7's banner and §9 still flag as the
+    ///         <b>
+    ///             native up-axis LABEL = capture/debugger-pending
+    ///             (raw numeric up-axis of the asset bytes unread)
+    ///         </b>
+    ///         . The asset bytes settle that pending label:
+    ///         the geometry is authored X-tall, so a faithful port needs the up-axis remap that stands it on
+    ///         Y. §8(b)'s "remove the spurious −90°-about-X" guidance assumed the recumbency came from a
+    ///         port-ADDED rotation; here the recumbency is intrinsic to the data with the pivot at identity,
+    ///         so the correct action is to ADD the measured stand-up remap, not remove one. The "−Z world /
+    ///         −X mesh-local" handedness flips still leave the up axis alone (§8(b)); this remap is the
+    ///         separate, importer-layer up-axis convention.
+    ///     </para>
+    ///     Held as a named field so an axis-label refinement (or a per-rig variant) is trivially adjustable.
+    ///     spec: Docs/RE/specs/skinning.md §9 (native up-axis LABEL = capture/debugger-pending) / §8(b)
+    ///     (up-axis remap is an importer-layer transform; verify tall-along-Y AABB) / §8(a)
+    ///     (cancellation preserved — orientation knob is the pivot only, not the deform math).
     /// </summary>
     internal static Vector3 UpAxisRemapDeg { get; set; } = new(0f, 0f, 90f);
 
@@ -204,6 +214,88 @@ public static class SkinnedCharacterBuilder
         return root;
     }
 
+    /// <summary>
+    ///     Builds the base skinned character (
+    ///     <see
+    ///         cref="Build(SkinnedMesh, Skeleton?, AnimationClip?, ImageTexture?, bool, float, out SkinnedCharacterNode?, string?)" />
+    ///     )
+    ///     and then attaches the resolved equipment <paramref name="parts" />: weapon parts (slot 14) are
+    ///     RIGIDLY attached to a hand bone of the shared skeleton (equipment_visuals.md §5), while
+    ///     non-weapon parts would be skinned-deform under the same skeleton (§4 — see the note below).
+    ///     ADDED as a NEW overload (the existing <c>Build</c> signatures are unchanged) so callers that do
+    ///     not yet supply equipment are unaffected.
+    ///     <para>
+    ///         WEAPON path: fully wired here — each weapon part is built as a static rigid mesh and bound
+    ///         to the inner <see cref="SkinnedCharacterNode" /> via
+    ///         <see cref="SkinnedCharacterNode.AttachHandWeapon" />, which re-places it from the hand
+    ///         bone's animated world pose every frame and applies the <c>Visual+100</c> scalar scale.
+    ///     </para>
+    ///     <para>
+    ///         NON-WEAPON path: STATUS — not yet rendered here. Per equipment_visuals.md §4 the head/face/
+    ///         body parts are skinned-deform parts sharing the ONE skeleton (no socket); reproducing them
+    ///         in this CPU-LBS node requires deforming several meshes against the shared <c>_world</c> pose
+    ///         (a multi-surface extension of <see cref="SkinnedCharacterNode" />). That extension is
+    ///         reported as the remaining work; non-weapon parts are skipped here (the body mesh passed as
+    ///         <paramref name="mesh" /> still renders). spec: equipment_visuals.md §4 / §9 item 1–2.
+    ///     </para>
+    ///     spec: Docs/RE/specs/equipment_visuals.md §1 (compose, don't swap) / §4 / §5 / §9.
+    /// </summary>
+    public static Node3D BuildWithEquipment(
+        SkinnedMesh mesh,
+        Skeleton? skeleton,
+        AnimationClip? clip,
+        ImageTexture? albedo,
+        bool externalDrive,
+        float startPhaseSeconds,
+        IReadOnlyList<EquipmentVisualPart> parts,
+        out SkinnedCharacterNode? lbsNode,
+        string? debugLabel)
+    {
+        var root = Build(mesh, skeleton, clip, albedo, externalDrive, startPhaseSeconds,
+            out lbsNode, debugLabel);
+
+        if (lbsNode is null || parts.Count == 0)
+            return root; // static fallback (no skeleton) or no equipment — body only.
+
+        foreach (var part in parts)
+            if (part.IsHandWeapon)
+                // WEAPON (slot 14): rigid single-bone attach. spec: equipment_visuals.md §5.
+                try
+                {
+                    lbsNode.AttachHandWeapon(part.Mesh, part.Albedo, part.BoneId, part.VisualScale,
+                        part.IsOffHand);
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[Skinning] Weapon attach failed (slot {part.Slot}, " +
+                                $"'{part.Mesh.Name}'): {ex.Message}");
+                }
+            else
+                // NON-WEAPON (head/face/body): skinned-deform under the shared skeleton (§4). Not yet
+                // reproduced by this single-mesh CPU-LBS node — reported as remaining work (§9 item 1–2).
+                GD.Print($"[Skinning] Non-weapon equipment part slot {part.Slot} ('{part.Mesh.Name}') " +
+                         "NOT rendered (skinned-deform shared-skeleton multi-surface path pending). " +
+                         "spec: equipment_visuals.md §4.");
+
+        return root;
+    }
+
+    /// <summary>
+    ///     Builds a static rigid rest-pose <see cref="MeshInstance3D" /> for a bone-attached part (e.g.
+    ///     a slot-14 weapon). Uses the SAME single handedness conversion + winding as the body's static
+    ///     path; the caller (<see cref="SkinnedCharacterNode.AttachHandWeapon" />) drives the node's
+    ///     transform from a hand bone each frame, so the mesh itself stays in its rest/grip geometry.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §5 (weapon = rigid single-bone attach, not skinned).
+    ///     spec: Docs/RE/specs/skinning.md §8(b) — single handedness conversion.
+    /// </summary>
+    public static (MeshInstance3D Inst, Aabb Aabb) BuildStaticRigidMesh(
+        SkinnedMesh mesh, ImageTexture? albedo, string nodeName)
+    {
+        var (inst, aabb) = BuildStaticMesh(mesh, albedo);
+        inst.Name = nodeName;
+        return (inst, aabb);
+    }
+
     // -------------------------------------------------------------------------
     // Static rest-pose ArrayMesh (uses the SAME unified handedness conversion)
     // -------------------------------------------------------------------------
@@ -308,7 +400,7 @@ public static class SkinnedCharacterBuilder
     /// <summary>Names the longest axis of an AABB size (diagnostic for the upright remap).</summary>
     private static string TallAxis(Vector3 s)
     {
-        return s.Y >= s.X && s.Y >= s.Z ? "Y" : (s.X >= s.Z ? "X" : "Z");
+        return s.Y >= s.X && s.Y >= s.Z ? "Y" : s.X >= s.Z ? "X" : "Z";
     }
 
     private static Aabb TransformAabb(Basis basis, Aabb aabb)
@@ -364,4 +456,27 @@ public static class SkinnedCharacterBuilder
             $"INV2 liveDelta={d.LivenessDelta:F4} @v{d.LivenessVertex} " +
             $"t{d.LivenessT0:F2}->{d.LivenessT1:F2} ({(liveOk ? "PASS" : "FAIL")})");
     }
+
+    /// <summary>
+    ///     A resolved equipment part ready to render: the weapon slot (14) is rigid-attached to a hand
+    ///     bone; non-weapon parts (head/face/body slots {2,3,4,6,11}) are skinned-deform under the shared
+    ///     skeleton. The caller (a VFS-aware renderer) resolves the part's mesh + texture via the
+    ///     appearance chain and hands the loaded resources here.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §3 (GID derivation) / §4 / §5 / §9.
+    /// </summary>
+    /// <param name="Slot">Visual part-slot id (14 = weapon; {2,3,4,6,11} = non-weapon).</param>
+    /// <param name="Mesh">The resolved part <c>.skn</c>.</param>
+    /// <param name="Albedo">Optional resolved part texture.</param>
+    /// <param name="IsHandWeapon">True for the weapon slot (rigid hand-bone attach).</param>
+    /// <param name="IsOffHand">True for the off-hand node of a dual / two-piece weapon (§5.1).</param>
+    /// <param name="BoneId">Hand bone-id for a weapon (default <see cref="SkinnedCharacterNode.DefaultHandBoneId" />).</param>
+    /// <param name="VisualScale">The <c>Visual+100</c> scalar scale for a weapon's grip (default 1.0).</param>
+    public readonly record struct EquipmentVisualPart(
+        int Slot,
+        SkinnedMesh Mesh,
+        ImageTexture? Albedo,
+        bool IsHandWeapon,
+        bool IsOffHand,
+        int BoneId,
+        float VisualScale);
 }

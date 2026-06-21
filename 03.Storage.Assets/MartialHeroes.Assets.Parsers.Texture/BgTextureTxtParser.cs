@@ -4,17 +4,25 @@ using MartialHeroes.Assets.Parsers.Texture.Models;
 namespace MartialHeroes.Assets.Parsers.Texture;
 
 /// <summary>
-///     Parser for <c>data/map{area}/texture/bgtexture.txt</c> — the plain-text companion to the
-///     binary <c>bgtexture.lst</c> background-texture pool. It is the preferred, robust source for
-///     the pool-index → texture-filename mapping (the binary GHTex record layout is UNVERIFIED).
+///     Parser for <c>data/map{area}/texture/bgtexture.txt</c> — the plain-text human-readable
+///     companion to the binary <c>bgtexture.lst</c> background-texture index.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §4.2 — bgtexture.txt text companion. CONFIRMED (observed).
+///     spec: Docs/RE/formats/bgtexture_lst.md §Relationship to bgtexture.txt:
+///     "bgtexture.txt is a HUMAN-READABLE MIRROR of the binary index — it exists as a
+///     development/debug aid. The shipping loader reads ONLY bgtexture.lst (the binary). The .txt
+///     is never opened at runtime." CONFIRMED (CYCLE 1, CODE-CONFIRMED).
+///     <para>
+///         This parser is provided for archival, debug, and interoperability purposes only.
+///         For a faithful 1:1 port, load <c>bgtexture.lst</c> via <see cref="BgtextureLstParser" />
+///         — that is the authoritative runtime source.
+///     </para>
 ///     <para>
 ///         Format (CP949, LF or CRLF lines), one entry per line, TAB-separated, no header:
 ///         <c>&lt;poolIndex:int&gt; \t &lt;typeFlag:int&gt; \t &lt;relPath&gt;</c>
-///         where <c>relPath</c> is the texture path relative to <c>data/map{area}/texture/</c> without the
-///         <c>.dds</c> extension (e.g. <c>terrain/g3</c>, <c>building/_castle</c>).
+///         where <c>relPath</c> is the texture path relative to <c>data/map{area}/texture/</c> without
+///         the <c>.dds</c> extension (e.g. <c>terrain/g3</c>, <c>building/_castle</c>).
+///         spec: Docs/RE/formats/bgtexture_lst.md §bgtexture.txt columns. CONFIRMED.
 ///     </para>
 ///     <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>

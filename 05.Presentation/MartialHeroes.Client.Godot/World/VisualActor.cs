@@ -34,7 +34,7 @@ public sealed partial class VisualActor : CharacterBody3D
     /// <summary>
     ///     Visual display scale applied to the attached skinned avatar (legacy unit → Godot). Matches
     ///     RealWorldRenderer/NpcRenderer's CharacterScale so the in-world player is the same size as the
-    ///     demo avatar and the spawned mobs/NPCs.
+    ///     spawned mobs/NPCs.
     ///     spec: World/RealWorldRenderer.cs CharacterScale = 5.0f / World/NpcRenderer.cs CharacterScale.
     /// </summary>
     private const float SkinnedAvatarScale = 5.0f;
@@ -90,15 +90,16 @@ public sealed partial class VisualActor : CharacterBody3D
     /// <summary>
     ///     Swaps the placeholder cyan capsule for a real skinned, idle-animated avatar (the in-world local
     ///     player). The <paramref name="skinnedRoot" /> is a <see cref="SkinnedCharacterBuilder.Build" />
-    ///     output — it already carries the single handedness conversion, the §7/§9 up-axis remap pivot, and
-    ///     an auto-engaged looping standing idle (the contained <c>SkinnedCharacterNode</c> self-ticks via
+    ///     output — it already carries the single handedness conversion, the §7/§8(b) IDENTITY up-axis import
+    ///     (no stand-up rotation; the data is Y-up), and an auto-engaged looping standing idle (the
+    ///     contained <c>SkinnedCharacterNode</c> self-ticks via
     ///     <c>_Process</c>). This node only re-parents and scales it; it adds NO game-rule authority.
     ///     Idempotent: a second call frees the prior avatar and attaches the new one. Safe to call before or
     ///     after <see cref="_Ready" /> (the placeholder is removed if present; otherwise just the avatar is
     ///     added). Main-thread only.
-    ///     spec: Docs/RE/specs/skinning.md §8(e) (the avatar resolves via the recovered skin/bind/idle chain),
-    ///     §10.5 (the col15 standing idle plays, looping); §8(b)/§7/§9 (handedness + up-axis remap done
-    ///     inside Build, identical to NPCs).
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (the avatar resolves via the recovered skin/bind/idle chain;
+    ///     idle = motion_ids_a[1] = col16 / record +0x44, NOT col15), §10.5 (the default idle plays, looping);
+    ///     §7/§8(b)/§9 (handedness conversion + IDENTITY up-axis done inside Build, identical to NPCs).
     ///     spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive rendering.
     /// </summary>
     /// <param name="skinnedRoot">The skinned-avatar root from SkinnedCharacterBuilder.Build.</param>

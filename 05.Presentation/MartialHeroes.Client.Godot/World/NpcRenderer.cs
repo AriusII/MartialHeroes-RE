@@ -14,10 +14,11 @@
 //          actormotion.txt: col1=mob_id → col2=skin_class
 //          skinlist.txt + SknParser: scan entries, first whose parsed IdB == skin_class
 //          skeleton path: data/char/bind/g{skin_class}.bnd  (not used for static build)
-//     4. Builds each character STATIC (skeleton=null, clip=null) via SkinnedCharacterBuilder.Build.
-//          The skinned path currently explodes the mesh; static mode is the safe fallback until
-//          the inverse-bind fix lands.  spec: RealWorldRenderer — "_ = skeleton; _ = clip;
-//          intentionally unused until the skinning fix lands."
+//     4. Builds each character via SkinnedCharacterBuilder.Build (CPU LBS skinned path when a
+//          skeleton + clip resolve, else the static rest-pose fallback). DEBT#1 (skinning math) is
+//          CLOSED: the linear-blend-skinning deform reproduces the recovered legacy pipeline and the
+//          §0 inverse-bind cancellation holds at rest (no explosion). spec: Docs/RE/specs/skinning.md
+//          §0 / §3.2 (DEBT#1 CLOSED) / §8(a).
 //     5. Places at Godot (WorldX, groundY(WorldX,WorldZ), -WorldZ).
 //          Coordinate negation: spec Helpers/WorldCoordinates.cs — ToGodot: "negate Z".
 //          spec: Docs/RE/formats/npc_spawns.md — world_x @4, world_z @8: CONFIRMED.
@@ -277,31 +278,6 @@ public sealed partial class NpcRenderer : Node3D
         var cellMapX = (int)Math.Floor(legacyX / 1024.0) + 10000;
         var cellMapZ = (int)Math.Floor(legacyZ / 1024.0) + 10000;
         _pendingSnaps.Add(new PendingSnap(node, legacyX, legacyZ, cellMapX, cellMapZ));
-    }
-
-    /// <summary>
-    ///     Prints the rest AABB of the first skinned mob (in the actor's local pivot space) so a headless
-    ///     run can confirm the deform is plausible (human-sized, finite) and not exploded (huge / NaN).
-    /// </summary>
-    private void PrintMobAabbSanity()
-    {
-        if (_skinnedActors.Count == 0)
-        {
-            GD.Print("[NpcRenderer] AABB sanity: no skinned mobs (all static-fallback).");
-            return;
-        }
-
-        var node = _skinnedActors[0].Node;
-        if (!IsInstanceValid(node)) return;
-
-        var a = node.GetMeshAabb();
-        var sz = a.Size;
-        var finite = !(float.IsNaN(sz.X) || float.IsNaN(sz.Y) || float.IsNaN(sz.Z) ||
-                       float.IsInfinity(sz.X) || float.IsInfinity(sz.Y) || float.IsInfinity(sz.Z));
-        var plausible = finite && sz.Length() > 0.001f && sz.Length() < 1e4f;
-        GD.Print($"[NpcRenderer] AABB sanity (first skinned mob '{node.GetParent()?.Name}'): " +
-                 $"size=({sz.X:F2},{sz.Y:F2},{sz.Z:F2}) finite={finite} " +
-                 $"plausible={(plausible ? "YES" : "NO — EXPLOSION?")}.");
     }
 
     // -------------------------------------------------------------------------

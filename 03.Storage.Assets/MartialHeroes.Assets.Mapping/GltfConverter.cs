@@ -502,7 +502,6 @@ public static class GltfConverter
             byte[] boneIds)>();
 
         var extraBinOffset = Align4(ibmOff + ibmLen);
-        var runningOffset = extraBinOffset;
 
         // We need to build all animation binary data, then concatenate with the main buffer.
         // Strategy: build anim binary separately, then append to bin.

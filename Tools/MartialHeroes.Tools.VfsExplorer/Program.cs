@@ -50,7 +50,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
         "dump-msgxdb" or "dump-uitex" or "scan-xeff" or "scan-sound" or "scan-fx" or
         "dump-do" or "scan-minimap" or "scan-quest" or
         // registry-driven file-understanding commands:
-        "decode" or "extract" or "convert" or "hexdump" or "coverage")
+        "decode" or "extract" or "extract-all" or "convert" or "hexdump" or "coverage")
 {
     // Subcommand routing; handle --inf / --vfs overrides from the tail of args first.
     var subcmd = args[0];
@@ -93,6 +93,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal) &&
         // registry-driven file-understanding commands:
         "decode" => Commands.Decode(archive, subcmdArgs, cp949),
         "extract" => Commands.Extract(archive, subcmdArgs),
+        "extract-all" => Commands.ExtractAll(archive, subcmdArgs),
         "convert" => Commands.Convert(archive, subcmdArgs),
         "hexdump" => Commands.Hexdump(archive, subcmdArgs, cp949),
         _ => 2
@@ -221,7 +222,7 @@ if (census || (substrings.Count == 0 && extensions.Count == 0 && !countOnly))
     // Fall through with no further listing when run with zero args (summary already shown).
     Console.WriteLine();
     Console.WriteLine("Pass substrings, --ext, --head, --contains or --count to drill in. --help for all.");
-    Console.WriteLine("Understand-a-file: decode | extract | convert | hexdump | coverage");
+    Console.WriteLine("Understand-a-file: decode | extract | extract-all | convert | hexdump | coverage");
     Console.WriteLine(
         "Census subcommands: scan-mot | scan-bnd | scan-skn | scan-ui | dump-msgxdb | dump-uitex | scan-xeff | scan-sound | scan-fx | dump-do | scan-minimap | scan-quest");
     return 0;

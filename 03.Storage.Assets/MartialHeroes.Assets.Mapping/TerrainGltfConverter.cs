@@ -17,7 +17,7 @@ namespace MartialHeroes.Assets.Mapping;
 ///     heights[row * 65 + col]  with  col → world X (inner/fast, stride 1)
 ///     row → world Z (outer/slow, stride 65)
 ///     spec: Docs/RE/formats/terrain.md §5.2 Axis orientation — PARSER-VERIFIED (CONFIRMED).
-///     spec: Docs/RE/formats/terrain.md §5.2 Block 1 — Heightmap: f32le, 65×65 = 4225. CONFIRMED.
+///     spec: Docs/RE/formats/terrain.md §5.4 Block 1 — Heightmap: f32le, 65×65 = 4225. CONFIRMED.
 ///     Coordinate-system conversion (identical to GltfConverter):
 ///     Legacy format: left-handed Y-up (D3D9 default).
 ///     glTF 2.0: right-handed Y-up, −Z forward.

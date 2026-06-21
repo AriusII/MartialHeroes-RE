@@ -3,6 +3,7 @@ using MartialHeroes.Assets.Parsers.Effects.Models;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Godot.Composition;
+using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -43,10 +44,10 @@ namespace MartialHeroes.Client.Godot.World;
 //   mobjointeff.txt  — mob joint-effect binding (§3/§9.3)
 //   spec: Docs/RE/specs/effects.md §3 — boot sequence; CODE-CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.9 / §F — xeffect.lst + binding tables.
-// MVP strategy: resolve the file directly as data/effect/xeff/{effectId}.xeff (decimal name).
-//   spec: Docs/RE/formats/effects.md §A.2 — "numeric-named files: value matches decimal filename"; SAMPLE-VERIFIED.
-// For non-numeric names the full xeffect.lst manifest lookup is required.
-//   MANIFEST-HOOK: labelled below — load xeffect.lst and build an id→name map at bind time.
+// Resolution strategy: the runtime resolves a .xeff ONLY through the xeffect.lst registry keyed by raw
+// effect_id (built at bind time). The original has NO numeric-name sprintf path (spec §C.2 Option A
+// REJECTED), so a registry miss renders nothing — no direct {effectId}.xeff probe.
+//   spec: Docs/RE/formats/effects.md §C.2 — "registry is the sole resolver; no numeric-name path in binary".
 //
 // Emitter types rendered
 // ──────────────────────
@@ -131,6 +132,11 @@ public sealed partial class EffectRenderer : Node3D
     // spec: Docs/RE/formats/effects.md §A.14 — XEFF_LST_NAME_LEN = 30 (0x1E).
     private const int XeffLstNameLen = 30; // spec: Docs/RE/formats/effects.md §A.14 XEFF_LST_NAME_LEN = 30
 
+    // VFS path for the GPU-particle emitter descriptor table.
+    // spec: Docs/RE/formats/effects.md §E.1 — "data/effect/particle/particleEmitter.eff": CONFIRMED.
+    // VFS-lowercased to "particleemitter.eff" by the VFS layer.
+    private const string ParticleEmitterEffPath = "data/effect/particle/particleemitter.eff";
+
     // ActorKey → live effect (at most one per actor, as per spec looping UserXEffect).
     // spec: Docs/RE/specs/effects.md §15.4 — one looping UserXEffect per cast; CODE-CONFIRMED.
     private readonly Dictionary<ActorKey, LiveEffect> _live = new();
@@ -146,7 +152,6 @@ public sealed partial class EffectRenderer : Node3D
     private RealClientAssets? _assets;
 
     private CancellationTokenSource? _cts;
-    private bool _demoMode;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Effect registry — effect_id → vfs path (keyed by header first u32)
@@ -165,6 +170,17 @@ public sealed partial class EffectRenderer : Node3D
     // ─────────────────────────────────────────────────────────────────────────
 
     private IHudEventHub? _hub;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GPU-particle emitter descriptor table (particleEmitter.eff)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Loaded lazily on first GPU-particle sub-effect spawn. Null = not yet loaded or VFS absent.
+    // spec: Docs/RE/formats/effects.md §E.1 — data/effect/particle/particleEmitter.eff: CONFIRMED.
+    private ParticleEmitterTable? _particleEmitterTable;
+
+    // Whether the table load has been attempted (prevents repeated VFS reads on miss).
+    private bool _particleEmitterTableAttempted;
 
     // Whether the registry build has been attempted (prevents repeated failures).
     private bool _registryBuildAttempted;
@@ -189,23 +205,7 @@ public sealed partial class EffectRenderer : Node3D
         }
         else
         {
-            GD.Print("[EffectRenderer] VFS unavailable — will use placeholder fallback.");
-        }
-
-        CallDeferred(MethodName.MaybeLaunchDemoEffect);
-    }
-
-    private void MaybeLaunchDemoEffect()
-    {
-        // No hub bound yet: the original client shows NO synthetic stand-in here, so we render nothing
-        // (faithfully empty) and merely log that Bind(hub) is pending. The former synthetic orange
-        // sphere-burst + invented "[EffectRenderer DEMO …]" English Label3D was presentation noise that
-        // could ship if the hub was late-bound — removed per the CAMPAIGN-9 no-invented-data doctrine.
-        // spec: CLAUDE.md — "NO invented English text, NO fake/demo data … NO procedural placeholders."
-        if (_hub is null && !_demoMode)
-        {
-            _demoMode = true;
-            GD.Print("[EffectRenderer] No hub bound yet — idle until Bind(hub) subscribes to cast-effect events.");
+            GD.Print("[EffectRenderer] VFS unavailable — effects disabled; renders nothing.");
         }
     }
 
@@ -243,8 +243,8 @@ public sealed partial class EffectRenderer : Node3D
             // Advance elapsed time.
             live.ElapsedMs += deltaMs;
 
-            // Update mesh positions to follow the anchor actor.
-            if (live.SubEffects is { } subEffects) TickXeffEffect(live, subEffects);
+            // Update mesh positions to follow the anchor actor; advance GPU particle sims.
+            if (live.SubEffects is { } subEffects) TickXeffEffect(live, subEffects, deltaMs);
         }
 
         if (toRemove is not null)
@@ -273,12 +273,6 @@ public sealed partial class EffectRenderer : Node3D
     {
         ArgumentNullException.ThrowIfNull(hub);
         _hub = hub;
-
-        if (_demoMode)
-        {
-            _demoMode = false;
-            ClearAllEffects();
-        }
 
         GD.Print("[EffectRenderer] Hub bound. Subscribed to CombatTexts channel.");
     }
@@ -385,18 +379,304 @@ public sealed partial class EffectRenderer : Node3D
         public uint EffectId;
         public double ElapsedMs; // running elapsed time in ms
 
-        // GPU-particle placeholders for resource_id >= 10000 sub-effects.
+        // GPU-particle simulation nodes for resource_id >= 10000 sub-effects.
+        // Now driven by GpuParticleSimNode (real stepwise Euler integration from particleEmitter.eff).
         // spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
+        // spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration; CODE-CONFIRMED.
         public GpuParticles3D?[]? GpuParticles;
 
         // Per-sub-effect: one MeshInstance3D per rendered sub-effect.
-        // Null entries indicate GPU-particle sub-effects (handled by GpuParticles3D below).
+        // Null entries indicate GPU-particle sub-effects (handled by GpuParticleSimNode below).
         public MeshInstance3D?[]? MeshInstances;
+
+        // GPU particle simulation nodes (one per GPU-particle sub-effect).
+        // Indexed parallel to SubEffects/MeshInstances; non-null only for resource_id >= 10000.
+        public GpuParticleSimNode?[]? SimNodes;
 
         // Real .xeff path (null → using placeholder).
         public SubEffectDesc[]? SubEffects;
 
         // Per-sub-effect loaded textures.
         public ImageTexture?[][]? Textures; // [subEffectIdx][frameIdx]
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GPU particle simulation node (Euler integration per §E.2.2)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Godot Node3D that simulates one <see cref="ParticleEmitterEntry" /> entry via stepwise
+    ///     Euler integration (spec §E.2.2 / §E.2.4). Each particle's state is an in-memory float
+    ///     array; per fixed sim step (~67 ms per §E.2.2) position/velocity/size/colour are advanced
+    ///     then written to per-particle <see cref="MeshInstance3D" /> nodes in the scene tree.
+    ///     Designed to be a child of the <see cref="EffectRenderer" /> node; parented before
+    ///     <see cref="_Ready" /> is called on the renderer.
+    ///     Threading contract: all mutation on the Godot main thread via parent's _Process.
+    ///     spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration: CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/effects.md §E.2.4 — global brightness alpha scale: CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/effects.md §11 — sim step ~67 ms.
+    /// </summary>
+    internal sealed partial class GpuParticleSimNode : Node3D
+    {
+        // Fixed simulation step in seconds (~67 ms = 15 Hz sim tick matching the original).
+        // spec: Docs/RE/specs/effects.md §11 — GPU particle sim step ~67 ms: CODE-CONFIRMED.
+        private const double SimStepSec = 0.067;
+
+        // Global brightness alpha scale floor.
+        // spec: Docs/RE/formats/effects.md §E.2.4 — factor = 0.05 + 0.95 × (brightness/100): CODE-CONFIRMED.
+        // Default brightness = 100 → factor = 1.0 (no dimming at max brightness).
+        private const float BrightnessAlphaFloor = 0.05f;
+        private readonly float[] _colA;
+        private readonly float[] _colB;
+        private readonly float[] _colG;
+        private readonly float[] _colR;
+        private readonly int[] _delayTick; // counts down from spawn_delay; particle active when 0
+
+        private readonly ParticleEmitterEntry _entry;
+        private readonly int[] _lifeTick; // counts down from lifetime; respawns at 0
+        private readonly MeshInstance3D[] _meshes; // one billboard quad per particle
+
+        // Per-particle mutable state arrays (indexed 0..numParticles-1).
+        private readonly float[] _posX;
+        private readonly float[] _posY;
+        private readonly float[] _posZ;
+        private readonly float[] _size;
+        private readonly ImageTexture? _texture;
+        private readonly float[] _velX;
+        private readonly float[] _velY;
+        private readonly float[] _velZ;
+
+        private double _accumSec; // elapsed time accumulator for fixed-step integration
+
+        internal GpuParticleSimNode(ParticleEmitterEntry entry, ImageTexture? texture)
+        {
+            _entry = entry;
+            _texture = texture;
+
+            var n = (int)entry.NumFrames;
+            _posX = new float[n];
+            _posY = new float[n];
+            _posZ = new float[n];
+            _velX = new float[n];
+            _velY = new float[n];
+            _velZ = new float[n];
+            _size = new float[n];
+            _colR = new float[n];
+            _colG = new float[n];
+            _colB = new float[n];
+            _colA = new float[n];
+            _lifeTick = new int[n];
+            _delayTick = new int[n];
+            _meshes = new MeshInstance3D[n];
+
+            // Initialise each particle from its sub-record (spawn state).
+            // spec: Docs/RE/formats/effects.md §E.2.2 — at spawn copy size_init, RGBA, spawn_pos, velocity: CODE-CONFIRMED.
+            for (var i = 0; i < n; i++)
+                SpawnParticle(i);
+        }
+
+        public override void _Ready()
+        {
+            // Build one billboard-quad MeshInstance3D per particle and add as children.
+            for (var i = 0; i < _meshes.Length; i++)
+            {
+                var mi = BuildParticleMesh(i);
+                _meshes[i] = mi;
+                AddChild(mi);
+            }
+        }
+
+        /// <summary>
+        ///     Advances the simulation by <paramref name="deltaSec" /> seconds, draining the
+        ///     fixed-step accumulator and updating all particle MeshInstance3D positions/colours.
+        ///     Called from EffectRenderer._Process on the Godot main thread.
+        /// </summary>
+        public void Tick(double deltaSec)
+        {
+            _accumSec += deltaSec;
+            while (_accumSec >= SimStepSec)
+            {
+                _accumSec -= SimStepSec;
+                StepAll((float)SimStepSec);
+            }
+
+            // Update mesh transforms / materials from current particle state (per-frame visual sync).
+            UpdateMeshes();
+        }
+
+        // ── Per-particle spawn init ────────────────────────────────────────────
+
+        private void SpawnParticle(int i)
+        {
+            var sr = _entry.SubRecords[i];
+            // spec: Docs/RE/formats/effects.md §E.2.2 — spawn state from sub-record: CODE-CONFIRMED.
+            _posX[i] = sr.SpawnPosX;
+            _posY[i] = sr.SpawnPosY;
+            _posZ[i] = sr.SpawnPosZ;
+            _velX[i] = sr.VelocityX;
+            _velY[i] = sr.VelocityY;
+            _velZ[i] = sr.VelocityZ;
+            _size[i] = sr.SizeInit;
+            _colR[i] = sr.ColorR;
+            _colG[i] = sr.ColorG;
+            _colB[i] = sr.ColorB;
+            _colA[i] = sr.ColorA;
+            // life_bonus added once at init.
+            // spec: Docs/RE/formats/effects.md §E.2.2 — life += life_bonus at init: CODE-CONFIRMED.
+            _lifeTick[i] = sr.Lifetime + sr.LifeBonus;
+            _delayTick[i] = sr.SpawnDelay;
+        }
+
+        // ── Fixed-step Euler integration (§E.2.2) ─────────────────────────────
+
+        private void StepAll(float dt)
+        {
+            for (var i = 0; i < _entry.NumFrames; i++)
+            {
+                // Count down delay; particle is dormant while delay > 0.
+                if (_delayTick[i] > 0)
+                {
+                    _delayTick[i]--;
+                    continue;
+                }
+
+                // Count down lifetime; respawn on expiry.
+                if (_lifeTick[i] <= 0)
+                {
+                    SpawnParticle(i);
+                    continue;
+                }
+
+                _lifeTick[i]--;
+
+                var sr = _entry.SubRecords[i];
+
+                // Velocity damping (applied before position update when non-zero).
+                // spec: Docs/RE/formats/effects.md §E.2.2 — if velocity_damp ≠ 0: velocity *= damp: CODE-CONFIRMED.
+                if (sr.VelocityDamp != 0f)
+                {
+                    _velX[i] *= sr.VelocityDamp;
+                    _velY[i] *= sr.VelocityDamp;
+                    _velZ[i] *= sr.VelocityDamp;
+                }
+
+                // Position integration: pos += vel × dt.
+                _posX[i] += _velX[i] * dt;
+                _posY[i] += _velY[i] * dt;
+                _posZ[i] += _velZ[i] * dt;
+
+                // Size rate: size += size_rate × dt.
+                _size[i] += sr.SizeRate * dt;
+                if (_size[i] < 0f) _size[i] = 0f;
+
+                // Colour rate integration: channel += rate × dt (signed i16 rates).
+                _colR[i] = Math.Clamp(_colR[i] + sr.ColorRRate * dt, 0f, 255f);
+                _colG[i] = Math.Clamp(_colG[i] + sr.ColorGRate * dt, 0f, 255f);
+                _colB[i] = Math.Clamp(_colB[i] + sr.ColorBRate * dt, 0f, 255f);
+
+                // Alpha rate + global brightness scale.
+                // spec: Docs/RE/formats/effects.md §E.2.4 — alpha scaled by brightness_factor each step: CODE-CONFIRMED.
+                var alpha = _colA[i] + sr.ColorARate * dt;
+                // Apply global brightness alpha scale (brightness=100 → factor=1.0).
+                // Aesthetic: use factor=1.0 (max brightness) — no user brightness option exposed yet.
+                // factor = 0.05 + 0.95 × (brightness/100). At 100 → 1.0 exactly.
+                var brightnessFactor =
+                    BrightnessAlphaFloor + (1f - BrightnessAlphaFloor) * 1.0f; // aesthetic: brightness=100
+                alpha *= brightnessFactor;
+                _colA[i] = Math.Clamp(alpha, 0f, 255f);
+            }
+        }
+
+        // ── Visual update (post-step) ─────────────────────────────────────────
+
+        private void UpdateMeshes()
+        {
+            for (var i = 0; i < _meshes.Length; i++)
+            {
+                var mi = _meshes[i];
+                if (!IsInstanceValid(mi)) continue;
+
+                var dormant = _delayTick[i] > 0 || _lifeTick[i] <= 0;
+                mi.Visible = !dormant;
+                if (dormant) continue;
+
+                // World position = emitter origin (this node's position) + spawn offset integrated so far.
+                // The spawn_pos is in emitter-local space; add to parent's world position.
+                mi.Position = new Vector3(_posX[i], _posY[i], _posZ[i]);
+
+                // Size drives the billboard quad scale (sprite_size_x/y from entry header).
+                // spec: Docs/RE/formats/effects.md §E.2.1 — sprite_size_x/y: size of the sprite quad: HIGH.
+                var sizeScale = _size[i] / 65535f; // normalise from u16 range to ~[0,1] for scale
+                var qw = _entry.SpriteSizeX * sizeScale;
+                var qh = _entry.SpriteSizeY * sizeScale;
+                mi.Scale = new Vector3(qw > 0f ? qw : 1f, qh > 0f ? qh : 1f, 1f);
+
+                // Per-particle colour update via material override.
+                if (mi.GetSurfaceOverrideMaterial(0) is StandardMaterial3D mat)
+                    mat.AlbedoColor = new Color(
+                        _colR[i] / 255f,
+                        _colG[i] / 255f,
+                        _colB[i] / 255f,
+                        _colA[i] / 255f);
+            }
+        }
+
+        // ── Mesh builder ─────────────────────────────────────────────────────
+
+        private MeshInstance3D BuildParticleMesh(int i)
+        {
+            var sr = _entry.SubRecords[i];
+
+            // Initial sprite size from entry header × initial size_init (normalised from u16).
+            // spec: Docs/RE/formats/effects.md §E.2.1 — sprite_size_x/y drive the sprite quad: HIGH.
+            var sizeScale = sr.SizeInit > 0 ? sr.SizeInit / 65535f : 1f / 65535f;
+            var hw = _entry.SpriteSizeX * sizeScale * 0.5f;
+            var hh = _entry.SpriteSizeY * sizeScale * 0.5f;
+            hw = MathF.Max(hw, 0.01f);
+            hh = MathF.Max(hh, 0.01f);
+
+            var arrays = new Array();
+            arrays.Resize((int)Mesh.ArrayType.Max);
+            arrays[(int)Mesh.ArrayType.Vertex] = new Vector3[]
+            {
+                new(-hw, hh, 0f),
+                new(hw, hh, 0f),
+                new(hw, -hh, 0f),
+                new(-hw, -hh, 0f)
+            };
+            arrays[(int)Mesh.ArrayType.TexUV] = new Vector2[]
+            {
+                new(0f, 0f), new(1f, 0f), new(1f, 1f), new(0f, 1f)
+            };
+            arrays[(int)Mesh.ArrayType.Index] = new[] { 0, 1, 2, 0, 2, 3 };
+
+            var mesh = new ArrayMesh();
+            mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+            var initColor = new Color(
+                sr.ColorR / 255f,
+                sr.ColorG / 255f,
+                sr.ColorB / 255f,
+                sr.ColorA / 255f);
+
+            var mat = new StandardMaterial3D
+            {
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                AlbedoColor = initColor,
+                AlbedoTexture = _texture,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
+                BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
+                TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
+            };
+
+            var mi = new MeshInstance3D();
+            mi.Mesh = mesh;
+            mi.SetSurfaceOverrideMaterial(0, mat);
+            // Initial local position = spawn_pos offset.
+            mi.Position = new Vector3(sr.SpawnPosX, sr.SpawnPosY, sr.SpawnPosZ);
+            mi.Visible = sr.SpawnDelay == 0; // dormant if delay > 0
+            return mi;
+        }
     }
 }

@@ -28,7 +28,10 @@
 //   - public void Initialise(RealClientAssets? assets)
 //   - public int TryHitTestSlot(global::Godot.Vector2 viewportLocalPos)
 //   - public void SetSelectedSlot(int slotIndex)
-//   - public (bool IsOccupied, uint SkinClassId)[] SlotDescriptors { get; set; }
+//   - public SlotDescriptor[] SlotDescriptors { get; set; }   (WAVE 2: widened from the old
+//       (bool IsOccupied, uint SkinClassId) tuple to the §3.2 descriptor shape — class (+0x34),
+//       variant (+0x2C), faceA (+0x2E), equip table (+0x58). The host (CharSelectWindow.ListView)
+//       fills the fields it actually has from the 3/1 roster.)
 //
 // COORDINATE CONVENTION: world geometry negates Z (Helpers/WorldCoordinates.ToGodot: (x,y,z) →
 //   (x,y,−z)). Every world position below is converted to Godot-space by negating Z exactly once.
@@ -51,7 +54,6 @@ using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Client.Presentation.Helpers;
 using MartialHeroes.Client.Presentation.Screens;
-using Environment = Godot.Environment;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
@@ -110,50 +112,17 @@ public sealed partial class CharSelectScene3D : Node3D
     private const float CameraFar = 15000.0f;
 
     // =========================================================================
-    // Environment (§3.6) — the recovered AREA-0 values. NO procedural sky, NO coloured lights.
+    // Environment (§3.6) — DATA-DRIVEN from area-0 sky .bin files, frozen at 14:30 (kf 29).
+    // spec: §3.6.1 — "No hard-coded ambient colour literal exists in the scene builder — the final
+    //   on-screen sun/ambient/fog colours are DATA-DRIVEN through the sky/time manager and the
+    //   area-0 sky data at the frozen 14:30 clock." CODE-CONFIRMED.
+    // spec: §3.6.3 — area-0 sky family: data/sky/dat/light0.bin, fog0.bin, material0.bin, etc.
+    // spec: §3.6.2 — fog-blend offset zeroed → distance fog OFF. CODE-CONFIRMED.
     // =========================================================================
 
-    // White ambient FLOOR (the scene's main illuminant): OPTION_BRIGHT/100 = 100/100 = 1.0 → white.
-    // spec: environment_bins.md §10.5/§11.5 + frontend_scenes.md §3.6.1/§3.6.2. CODE-CONFIRMED.
-    //
-    // RENDER-PARITY MITIGATION (the #1 "too dark" complaint): the legacy D3D9 fixed-function pipeline
-    // (rendering.md §1) applied the OPTION_BRIGHT ambient as a FULL-LUMINANCE per-vertex/material colour
-    // floor with NO energy attenuation, on NEUTRAL-WHITE (FF FF FF) geometry — i.e. the white ambient
-    // landed on the stone at unit weight. Godot's PBR ambient at energy 1.0 lands ~Lambert-attenuated on
-    // a default StandardMaterial3D (roughness 1 / metallic 0), so the same "1.0" reads darker than the
-    // original's flat full-bright floor. The scene authors NO scene point-lights (the original has none —
-    // §3.6.1 / §3.6.6) and the only directional is near-zero (0.047), so essentially ALL of the on-screen
-    // brightness comes from this ambient floor; under-driving it = the dark-cave look. We therefore drive
-    // the Godot AmbientLightEnergy ABOVE 1.0 so the white floor reaches the stone at the original's
-    // full-bright luminance (a Godot-side parity scalar, NOT a new asset constant — the asset value is
-    // still OPTION_BRIGHT = 1.0 white). spec: §3.6.1/§3.6.2 (white ambient = main illuminant) +
-    // rendering.md §1 (D3D9 flat full-bright ambient, no attenuation) — Godot parity mitigation.
-    private const float AmbientFloorEnergy = 1.0f; // the recovered asset value (OPTION_BRIGHT/100 = 1.0)
-
-    // Godot parity scalar: the energy actually fed to WorldEnvironment so the unit-white ambient floor
-    // lands on the neutral stone at the original D3D9 full-bright luminance (see AmbientFloorEnergy note).
-    //
-    // PASS-2 FINAL (2026-06-16): 0.65. The props .bud are now SHADED again (Unshaded was dropped because
-    // it ignores the ambient tint, producing cold-grey stone instead of warm tan). With Shaded + PBR, the
-    // Godot Lambert-attenuated ambient at energy 0.65 + warm amber tint (1.0, 0.72, 0.44) shifts the
-    // neutral stone textures to the warm tan of the official oracle, while the fog (density 0.010) handles
-    // the enclosure/dark-background effect. The scene reads "fairly dark warm stone temple" — matching the
-    // official oracle — not over-bright (1.10 blew out lateral walls) and not too dark (0.50 was too dim).
-    // aesthetic calibration — Godot rendering-parity mitigation; asset value stays OPTION_BRIGHT=1.0.
-    private const float AmbientFloorEnergyGodot = 0.65f;
-
-    // Achromatic dark background — the recovered area-0 keyframe-29 sky tone. The char-select scene
-    // consumes the area-0 set at keyframe 29 (environment_bins.md §11); its `sky_haze` group [0..3] is
-    // the achromatic near-zero value R=G=B = 0.004303 (float [0,1], applied directly — §11.6, §11.2
-    // STATIC+ACHROMATIC). There is no skybox file (§1.1 skybox always 0) and the scene builds no
-    // procedural sky, so the flat sky_haze tone is the faithful clear colour.
-    // spec: Docs/RE/formats/environment_bins.md §11.6 (sky_haze 0.004303) / §11.2 (achromatic).
-    private const float SkyHazeArea0Kf29 = 0.004303f; // spec: environment_bins.md §11.6 sky_haze [0..3]
-
-    // Faint achromatic DIRECTIONAL key — area-0 light-keyframe 29 (14:30) directional energy ≈0.047,
-    // achromatic (R=G=B). Light vector (−7, 7, 20) LEGACY world → Godot negates Z → (−7, 7, −20).
-    // spec: environment_bins.md §9.4/§10.6/§11.2/§11.3 SAMPLE-VERIFIED (read from light0.bin kf-29).
-    private const float DirectionalEnergy = 0.047f;
+    // The frozen time-of-day: 52 200 s = 14:30 → 48-keyframe-per-day table → kf index 29.
+    // spec: frontend_scenes.md §3.6.1 — "clock pinned to 14:30; keyframe 29 exactly".
+    private const int EnvFrozenKeyframe = 29; // spec: §3.6.1 CODE-CONFIRMED (52200 s / 1800 s = 29)
 
     // =========================================================================
     // Stage frame & per-slot placement (§3.3.1, §3.7.2). All in LEGACY world space; the
@@ -193,11 +162,6 @@ public sealed partial class CharSelectScene3D : Node3D
     // framing rather than inventing an orbit or an aesthetic aim point. spec: §3.5 / §3.6.5.
     internal static readonly Vector3 DollyLookAtGodot = ToGodotVec(RowPivotLegacyX, RowPivotLegacyY, RowPivotLegacyZ);
 
-    private static readonly Color BackgroundColorAchromatic =
-        new(SkyHazeArea0Kf29, SkyHazeArea0Kf29, SkyHazeArea0Kf29);
-
-    private static readonly Vector3 DirectionalDirGodot = ToGodotVec(-7.0f, 7.0f, 20.0f).Normalized();
-
     // =========================================================================
     // Ambient effect (§3.6.5) — the single code-spawned char_select-u.xeff (id 380003000).
     // =========================================================================
@@ -214,7 +178,12 @@ public sealed partial class CharSelectScene3D : Node3D
     // =========================================================================
 
     private Camera3D? _camera;
+
     private CharSelectCameraRig? _cameraRig;
+
+    // Data-driven environment node — resolves area-0 sky .bin files, frozen at kf 29 (14:30).
+    // spec: §3.6 / §3.6.3 (area-0 sky family). Null when VFS absent (graceful fallback in EnvironmentNode).
+    private EnvironmentNode? _environmentNode;
 
     // Whether Initialise has run (the one-time cell/env/camera/effects build). A RefreshSlotActors
     // call before init is a NO-OP — the descriptors will be picked up at init time. The assets handed
@@ -227,10 +196,14 @@ public sealed partial class CharSelectScene3D : Node3D
     // =========================================================================
 
     /// <summary>
-    ///     Per-slot descriptor array (max 5). Each entry: (IsOccupied, SkinClassId). Set before
-    ///     <see cref="Initialise" />. spec: §3.2 / §3.3.1 — the row is descriptor-driven.
+    ///     Per-slot descriptor array (max 5). Set before <see cref="Initialise" /> (and re-pushed on a
+    ///     later <c>ApplyCharacterList</c>). The row is descriptor-driven. WAVE 2: widened from the old
+    ///     <c>(bool IsOccupied, uint SkinClassId)</c> tuple to the §3.2 descriptor shape so the
+    ///     appearance/skeleton can be resolved faithfully — the §3.3.7 overlay build is driven by the raw
+    ///     880-byte spawn descriptor (class +0x34, variant +0x2C, faceA +0x2E, equip table +0x58).
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.2 / §3.3.1 / §3.3.7.
     /// </summary>
-    public (bool IsOccupied, uint SkinClassId)[] SlotDescriptors { get; set; } = new (bool, uint)[5];
+    public SlotDescriptor[] SlotDescriptors { get; set; } = new SlotDescriptor[5];
 
     private static float[] BuildSlotGodotZ()
     {
@@ -250,17 +223,20 @@ public sealed partial class CharSelectScene3D : Node3D
     // TryBuildSlotActor). The four §3.7.5 starter meshes (all default appearance IdA=1;
     // CONFIRMED-present in the VFS) live in ClassAppearanceResolver.
     //
-    // §3.3.7 OVERLAY BUILD — BLOCKED ON HOST-API PLUMBING (CYCLE 6b D6). The full per-part appearance
-    // build (equipment overlays {3,4,6,2,11} + non-starter slot-14 body + the rigid weapon) is RE-
-    // recovered and the resolver math is IMPLEMENTED in ClassAppearanceResolver, but it is driven by the
-    // server 880-byte spawn descriptor (equip table +0x58, appearance bytes +0x2C/+0x34, slot-14 +0x22).
-    // CharSelectScene3D.SlotDescriptors only carries (bool IsOccupied, uint SkinClassId) — the raw
-    // descriptor is NOT plumbed in by the host (CharSelectWindow, a DIFFERENT lane). Widening that tuple
-    // is a host-API change owned by the follow-up wave. So this lineup KEEPS the §3.7.5 starter-mesh
-    // fallback (class → base .skn at variant 0); an id outside 1..4 yields an empty candidate list →
-    // logged + skipped (no synthetic fallback, no fabricated equip ids).
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter fallback) / §3.3.7 (overlay build — host-API
-    //       plumbing pending) / Docs/RE/specs/skinning.md §3.5.2.
+    // §3.3.7 OVERLAY BUILD — descriptor WIDENED (WAVE 2), residual host-API gap on the equip bytes.
+    // The full per-part appearance build (equipment overlays {3,4,6,2,11} + non-starter slot-14 body +
+    // the rigid weapon) is RE-recovered and the resolver math is IMPLEMENTED in ClassAppearanceResolver;
+    // it is driven by the server 880-byte spawn descriptor (class +0x34, variant +0x2C, faceA +0x2E,
+    // equip table +0x58). SlotDescriptors is now the §3.2 SlotDescriptor record carrying those fields, so
+    // the class/variant ARE plumbed; the RESIDUAL gap is that the layer-04 CharacterListSlot event
+    // surface still decodes ONLY ServerClass (+0x74) — not +0x34/+0x2C/+0x2E/+0x58 — so the host fills
+    // InternalClass from the best class-like value it has and leaves Variant/FaceA/Equip at defaults.
+    // While Equip is empty this lineup KEEPS the §3.7.5 starter-mesh fallback (class → base .skn at
+    // variant 0); an id outside 1..4 yields an empty candidate list → logged + skipped (no synthetic
+    // fallback, no fabricated equip ids). The overlay loop becomes drivable, no code change here, the
+    // moment layer 04 surfaces the equip dwords on the event.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter fallback) / §3.3.7 (overlay build) /
+    //       Docs/RE/specs/skinning.md §3.5.2.
     private static string[] SknCandidatesForClass(uint skinClassId)
     {
         return ClassAppearanceResolver.SknCandidatesForClass((int)skinClassId);
@@ -278,8 +254,7 @@ public sealed partial class CharSelectScene3D : Node3D
             // frame or more after the deferred Initialise) can rebuild the actor row from the SAME VFS.
             _assets = assets;
 
-            BuildEnvironment();
-            BuildLighting();
+            BuildEnvironmentDataDriven(assets);
             BuildCamera();
 
             if (assets is not null)
@@ -319,7 +294,7 @@ public sealed partial class CharSelectScene3D : Node3D
     ///     path used at first build. The cell / environment / camera / ambient effect are NOT touched —
     ///     only the character actors. A call before <see cref="Initialise" /> is a no-op (the descriptors
     ///     are picked up at init). Called by the host's <c>ApplyCharacterList</c> after the 3/1 character
-    ///     list (or the dev seed) arrives a frame or more after the deferred init. spec: §3.3.1.
+    ///     list arrives a frame or more after the deferred init. spec: §3.3.1.
     /// </summary>
     /// <param name="assets">The VFS handle; if null the row is cleared (no actors built).</param>
     public void RefreshSlotActors(RealClientAssets? assets)
@@ -385,101 +360,79 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     // =========================================================================
-    // Environment — area-0 white ambient floor + achromatic dark BG + fog OFF (NO procedural sky).
+    // Environment — DATA-DRIVEN area-0 sky .bin files, frozen at keyframe 29 (14:30).
+    // spec: §3.6 — "The select scene activates the real area-0 world environment and freezes the
+    //   world clock at 14:30 (time-of-day value 52200, weather sub-index 48)." CODE-CONFIRMED.
+    // spec: §3.6.1 — "No hard-coded ambient colour literal; colours are DATA-DRIVEN from the area-0
+    //   sky data at the frozen 14:30 clock." CODE-CONFIRMED.
+    // spec: §3.6.3 — area-0 sky family: light0.bin / fog0.bin / material0.bin / clouddome0.bin /
+    //   stardome0.bin / wind0.bin / cloud_cycle0.bin / map_option0.bin. CODE-CONFIRMED.
+    // spec: §3.6.2 — fog-blend offset zeroed → distance fog OFF. CODE-CONFIRMED.
+    // Implementation: reuses the project's EnvironmentNode (World/EnvironmentNode.cs) which already
+    //   reads the per-area sky .bin family, applies the OPTION_BRIGHT=1.0 ambient floor
+    //   (spec: environment.md §6.2a), and builds star/cloud domes. We freeze it at keyframe 29.
     // =========================================================================
 
-    private void BuildEnvironment()
+    private void BuildEnvironmentDataDriven(RealClientAssets? assets)
     {
-        // global::Godot.Environment avoids the sibling-namespace collision (CS0234).
-        var env = new Environment();
+        // Instantiate the shared EnvironmentNode; it owns the WorldEnvironment + DirectionalLight3D.
+        // Configure with area 0 (char-select reuses the real area-0 world environment) and any VFS
+        // handle we have (null = graceful fallback: white ambient + neutral sky, logged).
+        // spec: §3.5.1 / §3.6 / §3.6.3 — area code 0, folder "000". CODE-CONFIRMED.
+        _environmentNode = new EnvironmentNode
+        {
+            Name = "CharSelectEnvironment",
+            // Cycle disabled: clock is frozen at 14:30 (keyframe 29). spec: §3.6 — "freezes the
+            // world clock at 14:30". CODE-CONFIRMED. The day/night cycle does NOT advance.
+            CycleEnabled = false
+        };
+        AddChild(_environmentNode);
 
-        // Achromatic dark background = the area-0 keyframe-29 sky_haze tone (R=G=B=0.004303). The
-        // area-0 sky is parametric (no skybox file; §1.1) and the builder authors NO procedural sky —
-        // a flat achromatic clear colour at the recovered sky_haze value is the faithful base.
-        // spec: environment_bins.md §11.6 (sky_haze 0.004303) / §11.2 (achromatic).
-        env.BackgroundMode = Environment.BGMode.Color;
-        env.BackgroundColor = BackgroundColorAchromatic;
+        // Configure loads the area-0 sky .bin files and seeds the day/night clock.
+        // spec: §3.6.3 — reads data/sky/dat/light0.bin, fog0.bin, material0.bin, etc.
+        _environmentNode.Configure(assets, BackdropAreaId);
 
-        // WHITE ambient FLOOR — the scene's MAIN illuminant (OPTION_BRIGHT/100 = 1.0 → white).
-        // spec: §3.6.1/§3.6.2 + environment_bins.md §10.5/§11.5. CODE-CONFIRMED.
-        // AmbientSource.Color (NOT Sky/Disabled) so the FLAT white colour is the ambient — and pin sky
-        // contribution to 0 so the achromatic dark BG can NOT bleed in and crush the floor. Energy is the
-        // Godot parity scalar (> 1.0) so the unit-white floor reaches the neutral stone at the original
-        // D3D9 full-bright luminance (the "too dark" fix — see AmbientFloorEnergyGodot note).
-        env.AmbientLightSource = Environment.AmbientSource.Color;
-        // Asset value = white (OPTION_BRIGHT/100 = 1.0 → white). spec: §3.6.1/§3.6.2 CODE-CONFIRMED.
-        // Godot-side warm tint mitigation: the "warm stone temple" look in the official screenshot comes
-        // from the additive xeff fire billboards (orange-warm, not a light source) heating the neutral-
-        // white geometry. Under Godot PBR the additive sprites add brightness but not ambient hue.
-        // A very slight warm-amber ambient floor tint (R=1.0, G=0.88, B=0.70) approximates the D3D9
-        // original's warm read without adding point-lights the spec forbids. The asset value stays
-        // OPTION_BRIGHT=1.0 white; this is a Godot-side parity mitigation, NOT a new asset constant.
-        // aesthetic choice — warm tint to match the official "dark warm stone temple" look (no spec constant)
-        // R=1.0 G=0.72 B=0.44: iter 5 — deep amber. Stone textures in this cell are neutral/grey;
-        // only a strongly-saturated amber ambient shifts them to the warm tan of the official oracle.
-        // The additive brazier sprites (xeff) ADD warmth on top of this base, so the ambient itself
-        // needn't reproduce the full fire warmth — just the warm stone base. aesthetic calibration.
-        env.AmbientLightColor = new Color(1.0f, 0.72f, 0.44f);
-        env.AmbientLightSkyContribution = 0.0f; // flat colour only — the dark BG must not dim the floor
-        env.AmbientLightEnergy = AmbientFloorEnergyGodot; // spec: §3.6.2 OPTION_BRIGHT (1.0) → parity-driven
+        // Freeze at keyframe 29 = 14:30 (52200 s ÷ 1800 s/kf = 29 exactly, interpolation frac 0).
+        // spec: §3.6.1 — "At the frozen char-select clock 52200 s = 14:30 the index is keyframe 29
+        //   exactly (interpolation fraction 0)." CODE-CONFIRMED.
+        _environmentNode.SetTimeOfDay(EnvFrozenKeyframe, true);
 
-        // Linear tonemap = a Godot-side MITIGATION (not an original asset value). The legacy renderer
-        // is a Direct3D 9 fixed-function pipeline with NO HDR tonemapper — it writes colours straight
-        // to the 8-bit backbuffer (rendering.md §1: thin D3D9 device wrapper; §6: the only post chain
-        // is glow/bloom, with no ACES/Reinhard stage). Godot defaults to a filmic/ACES tonemap that
-        // would darken the white ambient floor; selecting Linear + exposure 1.0 reproduces the D3D9
-        // no-tonemap behaviour. spec: Docs/RE/specs/rendering.md §1/§6 (D3D9 fixed-function, no HDR
-        // tonemapper) — Godot-side mitigation, NOT an original constant.
-        env.TonemapMode = Environment.ToneMapper.Linear;
-        env.TonemapExposure = 1.0f;
+        // Fog override: the select-scene build helper explicitly zeroes the fog-blend OFFSET field,
+        // turning distance fog OFF. EnvironmentNode's ApplyFog may re-enable it from the bin data;
+        // we must honour the spec's CODE-CONFIRMED fog-off directive for this scene.
+        // spec: §3.6.2 — "fog-blend OFFSET field … factor 0 → distance fog OFF." CODE-CONFIRMED.
+        // Access the WorldEnvironment through the EnvironmentNode's child list to apply the fog-off.
+        // If the WorldEnvironment cannot be found we log and continue (fog off is a fidelity note,
+        // not a crash-inducing defect).
+        var we = FindWorldEnvironmentChild(_environmentNode);
+        if (we?.Environment is { } env)
+        {
+            env.FogEnabled = false; // spec: §3.6.2 — fog-blend offset 0 → distance fog OFF. CODE-CONFIRMED.
+            GD.Print(
+                "[CharSelectScene3D] Environment fog forced OFF per §3.6.2 (fog-blend offset zeroed). CODE-CONFIRMED.");
+        }
+        else
+        {
+            GD.Print(
+                "[CharSelectScene3D] WARNING: could not locate WorldEnvironment child to apply fog-off override (§3.6.2).");
+        }
 
-        // Distance fog OFF — spec §3.6.2 CODE-CONFIRMED: the select-scene build helper zeroes the
-        // fog-blend OFFSET field (factor 0.0), which turns distance fog OFF behind the preview row so the
-        // row reads clearly. This matches the create preview (CharCreatePreview3D.BuildEnvironment also
-        // disables fog). spec: §3.6.2 (fog-blend offset zeroed → distance fog off). CODE-CONFIRMED.
-        //
-        // NOTE: a prior pass enabled Godot exponential "enclosure" fog as a Godot-side mitigation for a
-        // "bright floating island / grey void" defect (terrain .ted extending beyond the .bud walls). That
-        // was a NON-SPEC mitigation that contradicted the CODE-CONFIRMED fog-off directive and has been
-        // REMOVED. If the beyond-wall horizon needs masking, mitigate it geometrically (clip/cull the .ted
-        // mesh to the cell footprint) rather than re-introducing fog the original scene does not draw.
-        env.FogEnabled = false; // spec: §3.6.2 distance fog OFF (fog-blend offset zeroed)
-
-        var worldEnv = new WorldEnvironment { Environment = env };
-        AddChild(worldEnv);
-
-        GD.Print($"[CharSelectScene3D] Area-0 environment: achromatic dark BG + WHITE ambient floor " +
-                 $"(OPTION_BRIGHT=1.0, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + fog OFF " +
-                 "— spec: §3.6.2 (fog-blend offset zeroed → distance fog off) CODE-CONFIRMED. " +
-                 "NO procedural sky. spec: §3.6 + environment_bins.md.");
+        GD.Print(
+            $"[CharSelectScene3D] Data-driven environment: area 0, keyframe {EnvFrozenKeyframe} (14:30 = 52200 s). " +
+            "spec: §3.6 / §3.6.1 / §3.6.3 CODE-CONFIRMED. NO hardcoded ambient/fog literals.");
     }
 
-    // =========================================================================
-    // Lighting — ONLY the faint achromatic area-0 directional. NO point-lights.
-    // =========================================================================
-
-    private void BuildLighting()
+    /// <summary>
+    ///     Walks the immediate children of <paramref name="parent" /> to find the first
+    ///     <see cref="WorldEnvironment" /> child (the one created by <see cref="EnvironmentNode" />).
+    ///     Returns null when not found (node may not yet be in tree, or Configure not yet called).
+    /// </summary>
+    private static WorldEnvironment? FindWorldEnvironmentChild(Node parent)
     {
-        // The scene builder creates NO brazier/torch point-lights — the warm look is the additive
-        // fire texture in the ambient .xeff, not lights. spec: §3.6.1 / §3.6.6 CODE-CONFIRMED.
-        // The ONLY light authored here is the faint achromatic area-0 directional (kf-29, 14:30).
-        var sun = new DirectionalLight3D
-        {
-            Name = "Area0Directional",
-            LightEnergy = DirectionalEnergy, // spec: environment_bins.md §11.3 (area-0 kf-29 directional ≈0.047)
-            LightColor = new Color(1.0f, 1.0f, 1.0f), // achromatic — area-0 R=G=B. spec: §11.2
-            ShadowEnabled = false
-        };
-        AddChild(sun);
-
-        // Orient the directional along the recovered light vector. The pivot is just a placement
-        // origin for the parallel light's direction (a directional light has no position effect);
-        // the row centre at a raised Y is used so the LookAtFromPosition direction is well-defined.
-        var pivot = ToGodotVec(RowPivotLegacyX, 200.0f, RowPivotLegacyZ);
-        sun.LookAtFromPosition(pivot, pivot + DirectionalDirGodot, Vector3.Up);
-
-        GD.Print("[CharSelectScene3D] Lighting: faint achromatic directional (0.047) ONLY; " +
-                 "NO point-lights (the warm glow is the additive xeff fire texture). spec: §3.6.1 / §3.6.6.");
+        for (var i = 0; i < parent.GetChildCount(); i++)
+            if (parent.GetChild(i) is WorldEnvironment we)
+                return we;
+        return null;
     }
 
     // =========================================================================
@@ -605,21 +558,13 @@ public sealed partial class CharSelectScene3D : Node3D
 
             var propsRoot = BudMeshBuilder.Build(scene, budTexResolver);
 
-            // PASS-2 SHADING NOTE (2026-06-16): the previous pass forced Unshaded on all .bud props to
-            // approximate D3D9's flat device-ambient. However, Unshaded ignores ALL ambient contributions
-            // from the WorldEnvironment — including the warm amber tint (R=1.0, G=0.82, B=0.60) — which
-            // produced cold-grey stone walls instead of warm tan (the textures are neutral, so Unshaded
-            // strips out any ambient colour contribution). The correct parity mechanism is:
-            //   • Shaded (PerPixel) + warm AmbientLight colour + energy 0.90 → stone receives warm amber
-            //     from the WorldEnvironment ambient, closely replicating D3D9's device-ambient floor which
-            //     was also white × (OPTION_BRIGHT/100), but in Godot with a warm tint added for visual parity
-            //     against the official screenshot.
-            //   • The near-zero directional (0.047) barely contributes; top-facing normals get ~0.047 extra —
-            //     acceptable at this low energy.
-            // The D3D9 flat-ambient parity is now handled by AmbientFloorEnergyGodot=0.90 + sky-contrib=0,
-            // NOT by Unshaded (which disables ALL lighting). Unshaded is REMOVED.
-            // spec: §3.6.1 + rendering.md §1 (D3D9 flat device-ambient ≈ Godot ambient colour floor, Shaded)
-            // — Godot parity mitigation (Pass 2). BudMeshBuilder's default PerPixel shading is kept.
+            // SHADING NOTE: BudMeshBuilder uses PerPixel (Shaded) shading so the .bud props receive
+            // the ambient light from the WorldEnvironment (EnvironmentNode, data-driven from area-0
+            // light0.bin at keyframe 29 = 14:30). Unshaded is NOT used — it would suppress the ambient
+            // contribution entirely (D3D9 flat device-ambient = OPTION_BRIGHT/100 = 1.0 white, which
+            // reaches all geometry surfaces; Shaded + WorldEnvironment ambient reproduces that behaviour
+            // in Godot). spec: §3.6.1 + rendering.md §1 (D3D9 flat device-ambient → Godot ambient floor,
+            // Shaded). BudMeshBuilder's default PerPixel shading is kept.
 
             propsRoot.Name = "BackdropProps";
             AddChild(propsRoot);
@@ -709,7 +654,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             try
             {
-                var actor = TryBuildSlotActor(assets, i, SlotDescriptors[i].SkinClassId, rowY);
+                var actor = TryBuildSlotActor(assets, i, SlotDescriptors[i], rowY);
                 if (actor is not null)
                 {
                     _slotActors[i] = actor;
@@ -725,24 +670,32 @@ public sealed partial class CharSelectScene3D : Node3D
         }
     }
 
-    private Node3D? TryBuildSlotActor(RealClientAssets assets, int slotIdx, uint skinClassId, float rowY)
+    private Node3D? TryBuildSlotActor(RealClientAssets assets, int slotIdx, SlotDescriptor descriptor, float rowY)
     {
-        // §3.3.7 OVERLAY BUILD — host-API gap (CYCLE 6b D6). The faithful per-part build would, for this
-        // slot, read the descriptor equipment table (+0x58) and compose the {3,4,6,2,11,14} overlays via
-        // ClassAppearanceResolver (ResolvePartGid → DeformSkinPathForGid → g{gid}.skn) on the shared
-        // SkinnedCharacterBuilder factory (§3.3.6), plus the non-starter slot-14 body and the rigid hand
-        // weapon. That math is implemented in ClassAppearanceResolver, but SlotDescriptors only carries
-        // (IsOccupied, SkinClassId) — the raw 880-byte descriptor (equip table + appearance bytes +0x2C/
-        // +0x34 + slot-14 +0x22) is NOT plumbed into this node by the host (CharSelectWindow lane). We must
-        // NOT fabricate equip ids / appearance bytes (that would manufacture a missing fact), so this lane
-        // resolves only the spec-grounded §3.7.5 starter body per class. The overlay + non-starter-variant
-        // rendering is BLOCKED on a host-API change (widen SlotDescriptors) — a follow-up wave.
+        // SkinClassId resolves from the descriptor INTERNAL class (+0x34, {1..4}) used VERBATIM — never
+        // offset to 0. This is the §3.5.2 / §3.3.7 class arg and the §3.7.5 starter-body key. A value
+        // outside {1..4} yields no candidate (logged + skipped) — we do NOT fall back to a wrong class.
+        // spec: skinning.md §3.5.2 (model_class_id = 5*(class + 4*variant) - 24); frontend_scenes.md §3.7.5.
+        var skinClassId = descriptor.InternalClass; // VERBATIM — the +0x34 class id, NOT remapped to 0.
+
+        // §3.3.7 OVERLAY BUILD — partially plumbed (WAVE 2). The descriptor IS now carried (class +0x34,
+        // variant +0x2C, faceA +0x2E, equip +0x58), so the faithful per-part overlay build — compose the
+        // {3,4,6,2,11,14} gids via ClassAppearanceResolver (ResolvePartGid → DeformSkinPathForGid →
+        // g{gid}.skn) on the shared SkinnedCharacterBuilder factory (§3.3.6), plus the non-starter slot-14
+        // body and the rigid hand weapon — could run AS SOON AS the host surfaces the equip dwords. While
+        // the host-API gap remains (the layer-04 CharacterListSlot event surface decodes ONLY ServerClass
+        // +0x74, not +0x34/+0x2C/+0x2E/+0x58), descriptor.Equip is empty and Variant/FaceA are 0, so this
+        // lane resolves the spec-grounded §3.7.5 starter body per class (variant 0). We do NOT fabricate
+        // equip ids / appearance bytes (that would manufacture a missing fact). When descriptor.Equip is
+        // populated the overlay loop below becomes drivable without touching this file.
         // spec: frontend_scenes.md §3.3.7 (overlay build) / §3.7.5 (starter fallback) / §3.3.6 (factory).
         var sknPath = PickSknPath(assets, skinClassId);
         if (sknPath is null)
         {
             GD.PrintErr(
-                $"[CharSelectScene3D] Slot {slotIdx}: no .skn present for skinClassId={skinClassId} — skipped.");
+                $"[CharSelectScene3D] Slot {slotIdx}: no .skn present for class={skinClassId} " +
+                $"(variant={descriptor.Variant}) — skipped (no wrong-class fallback). " +
+                "spec: skinning.md §3.5.2 / frontend_scenes.md §3.7.5.");
             return null;
         }
 
@@ -765,7 +718,9 @@ public sealed partial class CharSelectScene3D : Node3D
         }
 
         // Skeleton + idle clip resolve from the MESH'S OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col15 (idle).
+        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b → col16 (idle).
+        // (col16 = record +0x44 = direction array A element 1; col15 / +0x40 is statically DEAD —
+        //  CYCLE 7 reversal of the earlier "col15" reading.)
         var skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
         var idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
         var albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
@@ -829,12 +784,16 @@ public sealed partial class CharSelectScene3D : Node3D
             foreach (var rawLine in text.Split('\n'))
             {
                 var cols = rawLine.Replace("\r", string.Empty).Split('\t');
-                if (cols.Length <= 15) continue;
+                if (cols.Length <= 16) continue;
                 if (!uint.TryParse(cols[2].Trim(), out var classId) || classId != idB) continue;
 
-                // Idle motion = motion_ids_a[0] = column 15 (0-based), record offset +0x40 — IDB-confirmed
-                // operand-for-operand. spec: formats/actormotion.md (col15 = +0x40 = idle / stand motion).
-                var idle = cols[15].Trim();
+                // Idle motion = motion_ids_a[1] = COLUMN 16 (0-based cols[16]), record offset +0x44 — the
+                // default stand idle the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is
+                // a file-source reference that is STATICALLY DEAD (zero runtime read-sites); the earlier
+                // "col15 / a[0] / +0x40" reading was wrong. spec: formats/actormotion.md §motion_ids_a
+                // slot table (a[1] = +0x44 = col16 = default stand idle; a[0]/+0x40/col15 dead at runtime);
+                // skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b).
+                var idle = cols[16].Trim();
                 if (idle.Length == 0 || idle == "0") return null;
 
                 var motPath = $"data/char/mot/g{idle}.mot";
@@ -954,4 +913,39 @@ public sealed partial class CharSelectScene3D : Node3D
     {
         return areaId.ToString("D3");
     }
+
+    /// <summary>
+    ///     One char-select slot's appearance descriptor, as much of the §3.2 / §3.3.7 880-byte spawn
+    ///     descriptor as the host can surface from the 3/1 roster. The skinning/skeleton chain needs the
+    ///     INTERNAL class (descriptor +0x34, {1..4} = Musa/Salsu/Dosa/Monk) and variant (+0x2C); the
+    ///     §3.3.7 per-part overlay build additionally needs faceA (+0x2E) and the equipment table (+0x58).
+    ///     <para>
+    ///         HOST-API GAP (reported, WAVE 2): the layer-04 <c>CharacterListSlot</c> event surface
+    ///         currently carries ONLY <c>ServerClass</c> (descriptor +0x74) — it does NOT decode +0x34,
+    ///         +0x2C, +0x2E, or +0x58. The host plumbs <see cref="InternalClass" /> from the best
+    ///         class-like value it has and leaves <see cref="Variant" />/<see cref="FaceA" />/
+    ///         <see cref="Equip" /> at their defaults until layer 04 surfaces those fields. We do NOT
+    ///         fabricate the missing bytes (that would manufacture a missing fact, forbidden).
+    ///     </para>
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.2 (descriptor: variant +0x2C, faceA +0x2E,
+    ///     class +0x34, equip +0x58) / §3.3.7; Docs/RE/specs/skinning.md §3.5.2.
+    /// </summary>
+    /// <param name="IsOccupied">True when the slot holds a character (a body is built).</param>
+    /// <param name="InternalClass">
+    ///     Internal class id (descriptor +0x34, {1,2,3,4}). Used VERBATIM as the §3.3.7 / §3.5.2 class
+    ///     arg — NEVER offset to 0. Drives the starter body and, with <see cref="Variant" />, the
+    ///     appearance key. spec: skinning.md §3.5.2; frontend_scenes.md §3.3.7.
+    /// </param>
+    /// <param name="Variant">Appearance variant (descriptor +0x2C). spec: §3.5.2 (variant arg).</param>
+    /// <param name="FaceA">Face / slot-14 'd' byte (descriptor +0x2E / +0x22). spec: §3.3.7.</param>
+    /// <param name="Equip">
+    ///     The §3.3.7 visible-gear part gids for slots {3,4,6,2,11,14} (descriptor +0x58 table leading
+    ///     dwords), or empty when the host could not surface them. spec: §3.3.7 (equip_ref_table).
+    /// </param>
+    public readonly record struct SlotDescriptor(
+        bool IsOccupied,
+        uint InternalClass,
+        uint Variant = 0,
+        uint FaceA = 0,
+        uint[]? Equip = null);
 }

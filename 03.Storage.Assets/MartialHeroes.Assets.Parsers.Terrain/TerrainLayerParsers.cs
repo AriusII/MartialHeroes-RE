@@ -25,7 +25,7 @@ public static class TerrainLayerParsers
 
     // ─── FX1/FX2/FX3 group-array sizes ───────────────────────────────────────
 
-    // FX1/FX2 per-group header: 20 bytes (5 × u32: group_flags_0, group_flags_1, render_state, vertex_count, index_count).
+    // FX1/FX2 per-group header: 20 bytes (5 × u32: texture_index (1-based), group_flags_1, render_state, vertex_count, index_count).
     // spec: Docs/RE/formats/terrain_layers.md §1.5 FX1 — group header 20 B: CONFIRMED.
     // spec: Docs/RE/formats/terrain_layers.md §1.1a — universal group-array model: CONFIRMED (two-witness).
     private const int FxShortGroupHeaderSize = 20; // FX1, FX2
@@ -332,14 +332,17 @@ public static class TerrainLayerParsers
         for (uint g = 0; g < groupCount; g++)
         {
             // Per-group header: 20 bytes.
-            // spec: Docs/RE/formats/terrain_layers.md §1.1a — per-group header: group_flags_0 @ +0x00,
-            //   group_flags_1 @ +0x04, render_state @ +0x08 (CONFIRMED-variable), vertex_count @ +0x0C, index_count @ +0x10.
+            // spec: Docs/RE/formats/terrain_layers.md §1.1a — per-group header: texture_index @ +0x00 (1-based, CODE-CONFIRMED),
+            //   group_flags_1 @ +0x04 (UNVERIFIED), render_state @ +0x08 (CONFIRMED-variable), vertex_count @ +0x0C, index_count @ +0x10.
             if (offset + FxShortGroupHeaderSize > span.Length)
                 throw new InvalidDataException(
                     $".fx1 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
 
-            var groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // +0x00 UNVERIFIED
+            // texture_index u32 @ group+0x00: 1-based into this channel's texture register.
+            // spec: Docs/RE/formats/terrain_layers.md §1.1a — texture_index CODE-CONFIRMED.
+            // spec: Docs/RE/formats/terrain_layers.md §1.4b — 1-based; consumer decrements to 0-based (idx-1).
+            var textureIndex1Based = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // +0x00 CODE-CONFIRMED
             var groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]); // +0x04 UNVERIFIED
             var renderState =
                 BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // +0x08 CONFIRMED-variable
@@ -360,7 +363,7 @@ public static class TerrainLayerParsers
 
             groups[g] = new Fx1Group
             {
-                GroupFlags0 = groupFlags0,
+                TextureIndex1Based = textureIndex1Based,
                 GroupFlags1 = groupFlags1,
                 RenderState = renderState,
                 RawHeaderExtra = ReadOnlyMemory<byte>.Empty, // no extra header for FX1
@@ -408,7 +411,10 @@ public static class TerrainLayerParsers
                     $".fx2 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.1a.");
 
-            var groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+            // texture_index u32 @ group+0x00: 1-based into this channel's texture register.
+            // spec: Docs/RE/formats/terrain_layers.md §1.1a — texture_index CODE-CONFIRMED.
+            // spec: Docs/RE/formats/terrain_layers.md §1.4b — 1-based; consumer decrements to 0-based (idx-1).
+            var textureIndex1Based = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // +0x00 CODE-CONFIRMED
             var groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
             var renderState = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // CONFIRMED-variable
             var vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
@@ -430,7 +436,7 @@ public static class TerrainLayerParsers
 
             groups[g] = new Fx2Group
             {
-                GroupFlags0 = groupFlags0,
+                TextureIndex1Based = textureIndex1Based,
                 GroupFlags1 = groupFlags1,
                 RenderState = renderState,
                 RawHeaderExtra = ReadOnlyMemory<byte>.Empty,
@@ -474,14 +480,18 @@ public static class TerrainLayerParsers
         {
             // Per-group header: 44 bytes (extended).
             // spec: Docs/RE/formats/terrain_layers.md §1.7 — group header 44 B: CONFIRMED.
-            //   group_flags_0 @ +0x00, group_flags_1 @ +0x04, render_state @ +0x08 (CONFIRMED-variable),
+            //   texture_index @ +0x00 (CODE-CONFIRMED 1-based), group_flags_1 @ +0x04 (UNVERIFIED),
+            //   render_state @ +0x08 (CONFIRMED-variable),
             //   unknown_3..unknown_8 @ +0x0C..+0x23 (UNVERIFIED), vertex_count @ +0x24, index_count @ +0x28.
             if (offset + Fx3GroupHeaderSize > span.Length)
                 throw new InvalidDataException(
                     $".fx3 parse error: group[{g}] header truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/terrain_layers.md §1.7.");
 
-            var groupFlags0 = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // +0x00 UNVERIFIED
+            // texture_index u32 @ group+0x00: 1-based into this channel's texture register.
+            // spec: Docs/RE/formats/terrain_layers.md §1.1a — texture_index CODE-CONFIRMED.
+            // spec: Docs/RE/formats/terrain_layers.md §1.4b — 1-based; consumer decrements to 0-based (idx-1).
+            var textureIndex1Based = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); // +0x00 CODE-CONFIRMED
             var groupFlags1 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]); // +0x04 UNVERIFIED
             var renderState =
                 BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]); // +0x08 CONFIRMED-variable
@@ -507,7 +517,7 @@ public static class TerrainLayerParsers
 
             groups[g] = new Fx3Group
             {
-                GroupFlags0 = groupFlags0,
+                TextureIndex1Based = textureIndex1Based,
                 GroupFlags1 = groupFlags1,
                 RenderState = renderState,
                 RawHeaderExtra = rawExtra,

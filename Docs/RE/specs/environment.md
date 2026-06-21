@@ -36,7 +36,7 @@ verification:
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
-  ida_reverified: 2026-06-20    # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk of the env/lighting constants
+  ida_reverified: 2026-06-21    # ASSET-FIDELITY (2026-06-21), IDB SHA 263bd994 — re-confirmed water RESOLVED-NEGATIVE (no renderer/loader), the ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0 (zero writers) and device-ambient render-state token 139, and the quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; prior CYCLE 7 (2026-06-20) static re-walk of the env/lighting constants
   ida_anchor: 263bd994
   evidence: [static-ida, sample-vfs]
   conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)

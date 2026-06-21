@@ -6,8 +6,9 @@
 > **Verification:** sample-verified (real-VFS samples corroborate every container + bgtexture.lst; DXT5,
 > large-texture mip chains, RAW-BGRA DDS, and the `data/effect/texture/` TGA directory promoted from
 > hypothesis to sample-verified this pass). Loader-control-flow facts (single auto-detecting create call,
-> separate shader-assembler path, two mounted-read mechanisms) are `confirmed` from the loader witness.
-> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
+> separate shader-assembler path, separate surface-load path, two mounted-read mechanisms + one ad-hoc
+> overlay create site) are `confirmed` from the loader witness.
+> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
 > conflicts: C1 — the "200+ call sites" figure is the fan-in of the single texture **wrapper**
 > (217 distinct call sites on this build), NOT 200+ raw D3DX import calls (the D3DX import itself has
 > only 2 direct callers). Reworded below; no structural conflicts remain.
@@ -53,6 +54,22 @@ codebase has two texture loaders that both terminate at `D3DXCreateTextureFromFi
 Both mechanisms produce identical results — they differ only in *how* the in-memory buffer is
 obtained, not in the decode. A re-implementation may model this as a single "load bytes → decode"
 path; the two-mechanism detail is recorded only so the loader fan-in counts below make sense.
+
+**Direct-caller census of the D3DX9 imports (CONFIRMED).** Cross-referencing each underlying D3DX9
+import pins exactly how many sites reach it directly:
+
+- `D3DXCreateTextureFromFileInMemoryEx` (the in-memory create) — **2 direct callers**: the central
+  texture wrapper and the inline UI/icon loader (matches the "two mechanisms" above).
+- `D3DXCreateTextureFromFileExA` (the disk-fallback create) — **2 direct callers**: the central
+  texture wrapper's disk fallback and a small ad-hoc FPS-overlay loader.
+- `D3DXCreateTextureFromFileInMemory` (the **non-Ex** in-memory create) — **exactly 1 direct caller**:
+  the same FPS-overlay loader (the only user of the non-Ex variant anywhere in the client).
+
+So besides the two main mechanisms there is a single third, ad-hoc create site (the FPS/diagnostic
+overlay) that loads its own texture directly through the D3DX imports rather than through the central
+wrapper. It is functionally identical — raw bytes (VFS read-entry chokepoint when mounted, disk read
+otherwise) handed to a D3DX9 in-memory/disk create with header auto-detect — and needs no special
+modelling beyond noting it exists.
 
 `Assets.Parsers` responsibilities for textures:
 
@@ -122,6 +139,19 @@ setup routine is a good example of the split: in the same routine it loads `toon
 *texture*) **through the central texture wrapper**, but loads `dotoonshading.psh`/`.vsh` (the
 *shaders*) through the assembler. Implementors: assemble `.psh`/`.vsh` as source; never route them
 through a texture decoder.
+
+### Surfaces are a SEPARATE D3DX9 API from textures (CONFIRMED)
+
+A small number of images are loaded as Direct3D **surfaces** rather than as textures, and these use
+the D3DX9 **surface** family — `D3DXLoadSurfaceFromFileInMemory` (VFS / mounted path) and
+`D3DXLoadSurfaceFromFileA` (disk fallback) — *not* the texture-creation call. The same
+VFS-or-disk passthrough applies (when mounted: VFS read-entry chokepoint → `{buffer, length}` →
+in-memory surface load, then free the buffer; otherwise: load the surface from the on-disk path),
+and the same container auto-detection by leading magic applies, so the on-disk file is still one of
+the standard raster containers. The witnessed input-side surface load is the **sky cloud surface**.
+This is the *load* (input) counterpart to the surface-save D3DX9 call the client uses for screenshot
+export. A re-implementation should expose surface-target loads through the same "load bytes → decode"
+core as textures, differing only in the destination resource type (surface vs. texture).
 
 ---
 
@@ -964,3 +994,15 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 > samples. Corrected the "200+ raw callers" wording to "200+ call sites funnel through the single
 > texture wrapper" (217 wrapper call sites on this build; the D3DX import itself has 2 direct callers).
 > Promoted as neutral prose; no addresses or decompiler output crossed the firewall.
+
+> **Provenance — refinement pass (static re-verification, ida_anchor 263bd994):** re-confirmed the
+> loader control flow against the binary witness — every layout offset, stride, count, formula, and
+> asset chain unchanged (no structural correction). Folded in three neutral refinements: (1) the
+> D3DX9 import direct-caller census (in-memory create = 2 callers, disk-fallback create = 2 callers,
+> non-Ex in-memory create = exactly 1 caller — the FPS/diagnostic overlay being a small third ad-hoc
+> create site beyond the two main mechanisms); (2) the input-side **surface** load path uses the D3DX9
+> surface family (`D3DXLoadSurfaceFromFileInMemory` / `D3DXLoadSurfaceFromFileA`, witnessed by the sky
+> cloud surface), distinct from the texture-creation call; (3) reaffirmed the VFS read chokepoint as
+> the shared mounted-path source (its TOC stride and lowercased-path binary search remain documented
+> in `formats/pak.md`). Promoted as neutral prose; no addresses or decompiler output crossed the
+> firewall.

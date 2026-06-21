@@ -152,17 +152,22 @@ public readonly record struct FxVertex32(
 /// </summary>
 /// <remarks>
 ///     spec: Docs/RE/formats/terrain_layers.md §1.1a Universal group-array model — CONFIRMED (two-witness).
-///     Per-group header fields: group_flags_0 @ +0x00 (UNVERIFIED), group_flags_1 @ +0x04 (UNVERIFIED),
+///     Per-group header fields: texture_index @ +0x00 (CODE-CONFIRMED 1-based), group_flags_1 @ +0x04 (UNVERIFIED),
 ///     render_state @ +0x08 (CONFIRMED-variable), vertex_count @ +0x0C (CONFIRMED), index_count @ +0x10 (CONFIRMED).
 ///     render_state is NOT constant — "constant=15" and "constant=5" readings are REFUTED.
 /// </remarks>
 public class FxGroup
 {
     /// <summary>
-    ///     group_flags_0 u32 @ group+0x00. Read-but-not-consumed; near-constant 1.
-    ///     spec: Docs/RE/formats/terrain_layers.md §1.1a — group_flags_0: UNVERIFIED (read-but-not-consumed).
+    ///     texture_index u32 @ group+0x00. 1-based index into this FX channel's own texture-id register.
+    ///     The build pass clamps index &lt; 1 || index &gt; count (substituting 1 on violation), then maps
+    ///     index to the registered texture id. Consumer code must decrement to 0-based (idx - 1) after
+    ///     clamping. Previously mislabelled as "group_flags_0" (near-constant 1 reading) — that near-constant
+    ///     value IS a 1-based texture index of 1, not a flags field.
+    ///     spec: Docs/RE/formats/terrain_layers.md §1.1a — texture_index u32 @ group+0x00: CODE-CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain_layers.md §1.4b — 1-based, clamp [1,count], then idx-1 for 0-based lookup.
     /// </summary>
-    public required uint GroupFlags0 { get; init; }
+    public required uint TextureIndex1Based { get; init; }
 
     /// <summary>
     ///     group_flags_1 u32 @ group+0x04. Read-but-not-consumed; mostly 0.

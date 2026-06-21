@@ -36,9 +36,10 @@ public static class SoundTableParser
     // spec: Docs/RE/formats/sound_tables.md §Per-record layout — sound_entry_id u32 @ +0x00: CONFIRMED
     private const int OffSoundEntryId = 0x00;
 
-    // hour_schedule u8×24 @ entry+0x04
-    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8×24 @ +0x04: CONFIRMED
-    private const int OffHourSchedule = 0x04;
+    // tod_enable u8×24 @ entry+0x04 — per-hour-of-day enable bitmap, hour 0..23
+    // spec: Docs/RE/formats/sound_tables.md §Per-record layout — tod_enable u8×24 @ +0x04: CONFIRMED;
+    // hour-of-day enable semantics CYCLE 7 control-flow-confirmed (2026-06-21, 3600 divisor + +0x04 base).
+    private const int OffTodEnable = 0x04;
 
     // weight f32 @ entry+0x1C
     // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
@@ -134,11 +135,13 @@ public static class SoundTableParser
         var soundEntryId = BinaryPrimitives.ReadUInt32LittleEndian(
             span[(entryBase + OffSoundEntryId)..]);
 
-        // hour_schedule u8×24 @ entry+0x04
-        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — hour_schedule u8×24 @ +0x04: CONFIRMED
-        var hourSchedule = new HourSchedule24();
-        span.Slice(entryBase + OffHourSchedule, SoundTableData.HoursPerDay)
-            .CopyTo(hourSchedule.AsSpan());
+        // tod_enable u8×24 @ entry+0x04 — per-hour-of-day enable bitmap
+        // spec: Docs/RE/formats/sound_tables.md §Per-record layout — tod_enable u8×24 @ +0x04: CONFIRMED;
+        // hour-of-day enable semantics CYCLE 7 control-flow-confirmed (2026-06-21): ambient driver reads
+        // record[+0x04 + hour] (hour = time_of_day_ms / 3600); zero suppresses, non-zero (re)starts.
+        var todEnable = new HourSchedule24();
+        span.Slice(entryBase + OffTodEnable, SoundTableData.HoursPerDay)
+            .CopyTo(todEnable.AsSpan());
 
         // weight f32 LE @ entry+0x1C
         // spec: Docs/RE/formats/sound_tables.md §Per-record layout — weight f32 @ +0x1C: SAMPLE-VERIFIED type/value; semantic UNVERIFIED
@@ -174,7 +177,7 @@ public static class SoundTableParser
         return new SoundTableEntry
         {
             SoundEntryId = soundEntryId,
-            HourSchedule = hourSchedule,
+            HourSchedule = todEnable,
             Weight = weight,
             PosX = posX,
             Unlabeled24 = unlabeled24,

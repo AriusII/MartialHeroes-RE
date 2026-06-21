@@ -336,15 +336,20 @@ Two text-entry boxes, both routed through the Korean IME composition (CP949):
 
 | Box | IME composition slot | Max length | Render | Validation field |
 |---|---|---|---|---|
-| ID / account | 16 | **6** characters | plain | length read for the ID-length rule |
-| Password | 12 | **129** characters | masked | length read for the empty-password rule |
+| ID / account | 16 | **16** characters | plain | length read for the ID-length rule |
+| Password | 12 | **12** characters | masked | length read for the empty-password rule |
 
 - Focus is **mutually exclusive**: focusing one clears the other (actions `m`/`n`, or keyboard
   id 9). Korean composition routes to whichever box holds focus.
-- The ID box max length of **6** and the PW box max length of **129** are genuine legacy constants.
-  They are recorded as the original values; **a revival may relax both** (the validation only
-  requires ID length ≥ 4 and password length ≥ 1, §1.4). Treat these caps as legacy trivia, not as
-  protocol limits. *(PLAUSIBLE that 6 was a fixed-width legacy account id — Open question 2.)*
+- The ID box max length is **16** and the PW box max length is **12** (CORRECTED, static IDA,
+  2026-06-21 — GAP-4 resolved). Both are read from the per-textbox max-length field set at login-window
+  construction (the GUTextbox length cap), honoured live by the per-keystroke and paste input handlers.
+  **The earlier "6 / 129" reading is dropped:** the ID "6" was the textbox's **character-filter / charset
+  mask** misread as a length, and the PW "129" was likewise not the length field. They are recorded as the
+  original caps; **a revival may relax both** (validation only requires ID length ≥ 4 and password length
+  ≥ 1, §1.4). The 20-byte account hand-off buffer at credential assembly (§2.6 of `frontend_layout_tables.md`)
+  is a **separate, looser** downstream copy bound, not the input cap — since the field already caps at 16
+  (< 20), that buffer never binds.
 - On scene build, if a saved id is present (§1.6) and is not the literal `"(null)"`, the ID box is
   pre-filled with it (the Save-ID round-trip).
 
@@ -1692,17 +1697,17 @@ then sets the camera eye to **`eye = orbitPoint + Rotate(orientationQuat, boom)`
 vector points from the target out to the eye and its length (the zoom distance) is hard-clamped on the
 manual-zoom path.
 
-> **CONFLICT C3 — boom-Z clamp literal: 26.0 vs 22 (manual-zoom path only, DEBUGGER-PENDING).**
-> A re-walk reads the **static clamp literal as `26.0`**, not the `22` recorded earlier in this
-> subsection. Record **`26.0` as the static literal** (with the note that an earlier reading said 22);
-> the **realised cap on the running client is DEBUGGER-PENDING**. Low impact: this only bounds how far
-> the player can wheel-zoom (the boom seed for keyframe 1 is **0**, so the static eye sits on the orbit
-> point regardless; the clamp only matters once the player drives the zoom). Other `[0, 22]`/`≤ 22`
-> mentions in §3.5.4 / §3.5.5 below are the earlier reading and are superseded by this C3 note for the
-> clamp magnitude.
+> **CONFLICT C3 — boom-Z clamp literal = `26.0` (RESOLVED, static IDA, 2026-06-21).**
+> A dedicated re-walk of the SelectCamera vtable handlers confirms the **static boom-Z clamp literal is
+> `26.0`** (the boom/zoom accumulator is clamped to `[0, 27]` in the wheel-boom and per-frame tick
+> handlers, with `26.0` as the boom-Z depth limit). The earlier `22` reading is **superseded and dropped**
+> — use **`26.0`** as the single authoritative clamp magnitude everywhere in §3.5. Low impact: this only
+> bounds how far the player can wheel-zoom (the boom seed for keyframe 1 is **0**, so the static eye sits
+> on the orbit point regardless; the clamp only matters once the player drives the zoom). The realised cap
+> on the running client is the only remaining DEBUGGER-PENDING nuance; the static literal is settled.
 
-(Below, `≤ 22` / `[0, 22]` refer to the older reading of this same clamp; see C3 — the static literal
-is now `26.0`.) **The look-at target is the active orbit point** (≈ world `(512, 87, −9652)` over the row
+(The boom-Z clamp magnitude below is `26.0`; the earlier `22` reading is dropped — see C3.) **The
+look-at target is the active orbit point** (≈ world `(512, 87, −9652)` over the row
 pivot ≈ `(508, 70, −9759)`) — *not* the stage origin (the stage origin is only the anchor the
 keyframes are added to). The base **pitch ≈ −30°** (downward), modulated by each keyframe's stored
 yaw/pitch; so the camera looks slightly **down at the standing row from in front**. The **live
@@ -1714,10 +1719,10 @@ locked / new / creating.)
   above and ~100 units in front of the standing row.
 - **Eye (CODE-CONFIRMED — eye = orbit point at zoom 0):** the boom (zoom vector) is seeded
   **(0,0,0)** with unit boom-direction **(0,0,1)** and the zoom accumulator at **0**; boom-Z is
-  hard-clamped to **[0,22]**. Therefore the **static eye at scene start equals the look-at orbit point
+  hard-clamped to **[0, 26.0]**. Therefore the **static eye at scene start equals the look-at orbit point
   exactly** (the camera sits on the orbit point, oriented by the −30° pitch / 0 yaw base) until the
-  player applies wheel/key zoom (which grows boom-Z from 0 to ≤ 22). Keyframe 1 = **(512, 87, −9652)
-  exactly**. The only runtime variable is the player's live zoom ∈ [0,22] (a preference, not a stored
+  player applies wheel/key zoom (which grows boom-Z from 0 to ≤ 26.0). Keyframe 1 = **(512, 87, −9652)
+  exactly**. The only runtime variable is the player's live zoom ∈ [0, 26.0] (a preference, not a stored
   value).
 - **Easing (CODE-CONFIRMED constants and duration):** when the active keyframe changes, the orbit
   point is **linearly interpolated** and the orientation **spherically interpolated (slerp)** over a
@@ -1741,13 +1746,13 @@ which the mouse wheel feeds (and which two zoom keys can also drive, damped towa
 arrives). It is **clamped to ±4**. This accumulator is the field whose role was previously ambiguous
 ("zoom or pitch"): it is now **definitively zoom/dolly, not pitch.** Each frame it scales the unit
 **boom direction** and is added into the **boom vector**, lengthening or shortening the boom; the
-boom's depth (Z) component is then **hard-clamped to the range [0, 22]** before the boom is rotated by
+boom's depth (Z) component is then **hard-clamped to the range [0, 26.0]** before the boom is rotated by
 the orientation and added to the orbit point to make the eye. Manual pitch and yaw are **separate**
 accumulators (each clamped ±1.0) layered on the −30° pitch base / 0 yaw base; they are not the +0x114
 field.
 
 So the **final eye distance = the keyframe-stored boom-depth seed, extended or retracted by the ±4
-wheel/key accumulator along the boom, hard-capped to [0, 22].** The **boom-depth seed for keyframe 1
+wheel/key accumulator along the boom, hard-capped to [0, 26.0].** The **boom-depth seed for keyframe 1
 is 0** (CODE-CONFIRMED: boom seeded (0,0,0), unit boom-direction (0,0,1), zoom accumulator 0), so the
 static eye sits **on** the orbit point until the player zooms — see §3.5.4 (Eye) / §3.5.5.
 
@@ -1775,7 +1780,7 @@ static eye sits **on** the orbit point until the player zooms — see §3.5.4 (E
   offset (= stage origin), the 12 π-scaled angle multipliers **and their axis split (0..5 pitch,
   6..11 yaw)**, FOV 50° / aspect-divided, near 5.0, far 15000.0, the `1.0` (input-time) / `10.0`
   (manual-zoom) scalars, scene name `"select"`, base world `map000`, the **live keyframe index = 1**,
-  the look-at target = active orbit point, the boom-zoom clamp ≤ 22, the base pitch ≈ −30°, the
+  the look-at target = active orbit point, the boom-zoom clamp ≤ 26.0, the base pitch ≈ −30°, the
   lerp/slerp + inner-keyframe quadratic-ease law, the **+0x114 manual accumulator = zoom/dolly
   (±4 clamp), not pitch**, the **no-auto-advance** rule, the **no-re-aim-on-slot-select** rule, and
   the **create-mode +56.5 actor-Z offset** (camera unchanged).
@@ -1786,11 +1791,11 @@ static eye sits **on** the orbit point until the player zooms — see §3.5.4 (E
     set by an explicit keyframe-apply at construction = 0 and row-build = 1; slot interaction never
     re-aims).
   - **The live boom-depth (zoom) seed for keyframe 1** → **seed = 0** (CODE-CONFIRMED: boom seeded
-    (0,0,0), unit boom-direction (0,0,1), zoom accumulator 0; boom-Z clamp [0,22]). The static eye
+    (0,0,0), unit boom-direction (0,0,1), zoom accumulator 0; boom-Z clamp [0, 26.0]). The static eye
     therefore sits **on** the orbit point at zoom 0 (§3.5.4).
   - **The precise eye world coordinate at scene start** → **= the look-at orbit point** = keyframe 1
     = **(512, 87, −9652)** exactly (boom = 0 at start); the only runtime variable is the player's live
-    zoom ∈ [0,22] (a preference, not a stored value).
+    zoom ∈ [0, 26.0] (a preference, not a stored value).
   - **The tween duration** → **2.0 s** (literal `0.0005` = 1/2000 over the ms clock, clamped at 1.0;
     the "0.5 s" annotation was stale). **Open question 12 → CLOSED** (§3.5.4).
 - **NOW CODE-CONFIRMED (was runtime-pending residual 1) — KF2..KF5 are never armed.**
@@ -2874,7 +2879,7 @@ the state-2 LOAD node in §10 and `client_runtime.md` §7). This sub-block is th
 catalogued in `formats/ui_manifests.md` as "Secondary password dialog"); used by the
 second-password / PIN modal (§1.4a).
 
-**Other pinned constants:** ID-box max length **6**; PW-box max length **129**; IME slots ID **16**
+**Other pinned constants:** ID-box max length **16**; PW-box max length **12**; IME slots ID **16**
 / PW **12**; face index range **1..7**; max slots **5**; preview stage X offsets
 {−1560, −1548, −1536, −1524, −1512}, preview Z offsets {−3593, −3594, −3594.5, −3594, −3593},
 preview scale **×3.0** (§3.3.1); preview yaw 0 = front / π = away (§3.3.2); stage origin
@@ -2945,7 +2950,7 @@ next scene.
    §1.9 / §11.4) — **not** an endpoint-fetch error, and **not** referenced by the login tick. The
    sub-state-39 endpoint wait has **no in-tick failure toast**. Resolved CODE-CONFIRMED; no capture
    needed.
-2. **ID-box max length 6.** Surprisingly short for an account name (validation only requires ≥ 4).
+2. **ID-box max length 16** (CORRECTED 2026-06-21 — GAP-4; the earlier "6" was the charset-filter mask, not a length). Validation only requires ≥ 4.
    Whether it reflects a legacy fixed-width account id, or is overwritten elsewhere, is unresolved.
    Wants a real `DoOption.ini` / capture. A revival may relax it.
 3. **Full server-emitted status enum (capture-bound).** The painter's status field branches on only

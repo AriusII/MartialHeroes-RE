@@ -53,6 +53,11 @@ public sealed class HudButton : HudWidget
     private readonly TextureButton _btn;
     private readonly Label _captionLabel;
 
+    // Per-widget caption tint for the normal/pressed state.
+    // Stored as a field so IsDisabled can restore it without requiring a MouseExited signal.
+    // spec: Docs/RE/specs/ui_system.md §1.5 — "+0x0C tint/colour, default 0xFFFFFFFF = white".
+    private readonly Color _captionTint;
+
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
@@ -121,8 +126,8 @@ public sealed class HudButton : HudWidget
             MouseFilter = Control.MouseFilterEnum.Ignore
         };
 
-        var tint = captionTint ?? Colors.White;
-        _captionLabel.AddThemeColorOverride("font_color", tint);
+        _captionTint = captionTint ?? Colors.White;
+        _captionLabel.AddThemeColorOverride("font_color", _captionTint);
 
         // Apply font slot (default 0 = DotumChe 12/6).
         // spec: §6.3 — "button caption font slot at +0xE8, default 0": CODE-CONFIRMED.
@@ -139,8 +144,9 @@ public sealed class HudButton : HudWidget
         _btn.MouseExited += () =>
         {
             // Restore tint or disabled colour.
+            // spec: §1.5 — "caption colour = grey when disabled, widget tint otherwise".
             _captionLabel.AddThemeColorOverride("font_color",
-                _btn.Disabled ? DisabledCaptionColor : tint);
+                _btn.Disabled ? DisabledCaptionColor : _captionTint);
         };
 
         // Click-release signal → ActionFired.
@@ -176,8 +182,11 @@ public sealed class HudButton : HudWidget
         set
         {
             _btn.Disabled = value;
-            if (value)
-                _captionLabel.AddThemeColorOverride("font_color", DisabledCaptionColor);
+            // spec: Docs/RE/specs/ui_system.md §1.5 — "disabled → grey 0xFF666666; normal/pressed → widget tint".
+            // Restore the per-widget caption tint on re-enable so the caption does not stay grey
+            // after a disable→enable cycle without an intervening MouseExited signal.
+            _captionLabel.AddThemeColorOverride("font_color",
+                value ? DisabledCaptionColor : _captionTint);
         }
     }
 

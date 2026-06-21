@@ -131,7 +131,7 @@ public sealed partial class HudTenderWindow : Control
         AddChild(new Label
         {
             Name = "PreviewLbl",
-            Text = "// TODO(world-campaign): 3D item preview (GUCanvas3D)",
+            Text = string.Empty,
             Position = new Vector2(10f, 42f),
             Size = new Vector2(200f, 20f),
             LabelSettings = new LabelSettings { FontSize = 9 },
@@ -143,9 +143,7 @@ public sealed partial class HudTenderWindow : Control
         var listStub = new Label
         {
             Name = "TenderListStub",
-            Text = "// TODO(capture): tender listing populate.\n" +
-                   "// Inbound S2C opcode unknown — populate residual (debugger/capture-pending).\n" +
-                   "// spec: Docs/RE/specs/ui_system.md §8.21.7 CODE-CONFIRMED residual.",
+            Text = string.Empty,
             Position = new Vector2(10f, 140f),
             Size = new Vector2(492f, 60f),
             AutowrapMode = TextServer.AutowrapMode.WordSmart,

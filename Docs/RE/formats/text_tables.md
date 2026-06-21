@@ -16,6 +16,14 @@
 > shared boot data-table corpus loader and its callees); no new IDA path-literal sweep was required for
 > this pass. No addresses or decompiler output appear below.
 >
+> **Sky-companion correction (static IDA, binary-won).** The `data/sky/` `.txt` family — `wind`,
+> `map`/`map_option`, and the wider colour/option companions — is **NOT loaded by the client**: the
+> runtime opens only the parallel `.bin` files. The `wind{N}.txt` shape documented earlier was wrong
+> (it is a `WIND_COUNT` keyword block, not a `WIND COUNT`/`WIND OBJECT` tabular table) and the loaded
+> form is `wind{N}.bin` (8-byte header + count × 24-byte records). §4 is re-tagged AUTHORING-SIDECAR /
+> NOT-LOADED accordingly (§4 intro, §4.1, §4.3 + new §4.3.1). The §1A tokenizer findings and the §2/§3/
+> §5/§6 *loaded* `.txt` tables (actormotion, skin, emoticon, effect/map, …) are unaffected.
+>
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary addresses. Consumed by `Assets.Parsers`. Every loader an engineer writes for a
 > table described here must cite `// spec: Docs/RE/formats/text_tables.md`.
@@ -375,17 +383,35 @@ not loaded by the shipping client. **Verification:** single file, multiple MAP r
 
 ---
 
-## 4. Sky / environment companions (`data/sky/dat/`, `data/sky/map/`)
+## 4. Sky / environment companions (`data/sky/dat/`, `data/sky/map/`) — AUTHORING SIDECARS (NOT LOADED)
 
-The `data/sky/` `.txt` files are **human-readable companions** to the binary sky/environment family.
+> **WHOLE-FAMILY CORRECTION (binary-won, static IDA).** The `data/sky/` `.txt` files are **authoring
+> sidecars the shipping client never opens.** The area-load hub and every sky/environment loader it
+> drives open only the parallel **binary** `.bin` files (`wind{N}.bin`, `map_option{N}.bin`,
+> `weather{N}.bin`, the sky dome/star/cloud set, …). A targeted sweep proved the `wind` keyword-block
+> (§4.3) is not loaded; the same hub-driven `.bin`-only load pattern governs the rest of the family,
+> and the one `.txt` literal that does appear in a path-format table (`data/sky/map/map{N}.txt`, see
+> §4.1) sits in a **data slot that no code path ever opens**. So this whole section documents files
+> that are **not parsed by the runtime**. The earlier per-table column tables below are kept for
+> archival/authoring reference but each is now tagged accordingly.
+
 **The authoritative byte/colour/option tables live in `formats/environment_bins.md`** (sample-verified
-against real archive bytes) and `formats/sky.md` (parser read-order). This section documents only the
-readable column ordering of the `.txt` companions so an engineer who prefers the text form can parse
-it. Where a column meaning is defined in `environment_bins.md`, that file wins.
+against real archive bytes) and `formats/sky.md` (parser read-order) — those describe the loaded
+`.bin` forms and are what a faithful loader must implement. This section documents only the readable
+column ordering of the `.txt` companions for archival reference; where a column meaning is defined in
+`environment_bins.md`, that file wins.
 
-All companions are TAB-separated, CRLF, CP949 (ASCII subset for the numeric/keyword data). Most
-sub-families are **time-keyed** (rows labelled `HH:MM` or `{day} Day`) and end each data row with an
-`end` sentinel token.
+**Caveat on the column shapes below.** The `wind` companion's documented text shape turned out to be
+wrong (§4.3 — it is a keyword block, not a tabular table). Several other companions here are likely
+the same keyword-block authoring style rather than the tabular form described, and **every text shape
+in §4.x is SAMPLE-UNVERIFIED against the binary** (the binary proves none are loaded, so none was
+re-confirmed via a loader). Treat the column tables in §4.2 / §4.4–§4.8 as best-effort archival
+readings, not load-bearing specs — defer to `environment_bins.md` / `sky.md` for anything the runtime
+actually consumes.
+
+The companions are TAB-separated, CRLF, CP949 (ASCII subset for the numeric/keyword data). Most
+sub-families are **time-keyed** (rows labelled `HH:MM` or `{day} Day`) and (in the tabular ones) end
+each data row with an `end` sentinel token.
 
 ### 4.1 `map_option{N}.txt` — sky/option flags (key-value)
 
@@ -407,6 +433,14 @@ to `map_option{N}.bin` (see `environment_bins.md §B.1`, authoritative).
 A variant under `data/sky/map/` named `map{N}.txt` uses the same key-value schema with a slightly
 different field-name set (`DUNGEON` in place of `MOVE_DUNGEON`/`SIGHT_FIX`) — likely an older format.
 
+> **`data/sky/map/map{N}.txt` — NOT LOADED (binary-won, static IDA).** The map-option loader builds
+> its path from `data/sky/dat/map_option{N}.bin`, not from any `.txt`. The literal
+> `data/sky/map/map{N}.txt` is the only `.txt` string in the whole sky family that the binary holds,
+> and it occupies a single slot in the loader's path-format table; **no code path ever opens it** (its
+> only reference is that data slot). It is therefore inert. The loaded form is the binary
+> `map_option{N}.bin` (authoritative in `environment_bins.md §B.1`); the `map_option{N}.txt` /
+> `map{N}.txt` text files are authoring sidecars only.
+
 ### 4.2 `fog{N}.txt` — time-keyed fog table
 
 Row label `HH:MM`, then three integer components, then `end`. Companion to `fog{N}.bin`.
@@ -419,20 +453,78 @@ Row label `HH:MM`, then three integer components, then `end`. Companion to `fog{
 
 **Proposed canonical name:** `sky_fog_table`.
 
-### 4.3 `wind{N}.txt` — wind-zone table
+### 4.3 `wind{N}.txt` — wind-zone authoring sidecar (NOT LOADED; corrected shape)
 
-Header lines `WIND COUNT {n}` and `WIND OBJECT {n}` give the record count, then a column-label line,
-then one data row per wind zone. Companion to `wind{N}.bin`.
+> **CORRECTED — wrong shape + NOT loaded (binary-won, static IDA).** The earlier reading of this
+> file (header lines `WIND COUNT {n}` / `WIND OBJECT {n}`, a column-label line, tabular data rows, an
+> `end` sentinel) was incorrect on two counts: the runtime never opens this `.txt`, and the file's
+> actual on-disk shape is a keyword-block authoring source, not a tabular table.
 
-| col# | type   | role                          | confidence |
-|------|--------|-------------------------------|------------|
-| 0    | float  | wind speed (1–10)             | HIGH       |
-| 1    | float  | wind init offset (0–2048)     | HIGH       |
-| 2    | float  | wind delay (1–20)             | HIGH       |
-| 3    | u32    | texture index (0 = none)      | HIGH       |
-| last | string | `end` sentinel                | HIGH       |
+**Load status — AUTHORING-SIDECAR / NOT-LOADED.** The shipping client loads wind data only from the
+parallel **binary** `data/sky/dat/wind{N}.bin`; it never opens any `wind{N}.txt`. None of the text
+keywords (`WIND_COUNT`, `WIND OBJECT`, `WIND … BEGIN/END`, `Speed`, `Init`, `Delay`) appears anywhere
+in the client binary — the keyword-block parser was a build tool, and the engine ingests only the
+compiled `.bin`. This is the same adjudication already recorded for `bgtexture.txt` (dead authoring
+sidecar) vs `bgtexture.lst` (the loaded binary) in §2. **A faithful loader reads `wind{N}.bin` and
+ignores `wind{N}.txt`.**
 
-**Record count source:** the `WIND COUNT` header line. **Proposed canonical name:** `sky_wind_table`.
+**Actual `.txt` shape (for archival reference only — not parsed).** A keyword block, CRLF, ASCII
+numeric content:
+
+| Element                  | Form                                          | Notes |
+|--------------------------|-----------------------------------------------|-------|
+| Header                   | `WIND_COUNT` (underscore) `<TAB><TAB>` `{n}`  | record count; the empty case is just `WIND_COUNT<TAB><TAB>0` |
+| Per-zone block delimiter | `WIND {n} BEGIN` … `WIND {n} END`             | one block per wind zone |
+| Field `Speed`            | `Speed<TAB><TAB><TAB>{float}`                 | labelled float (TAB-padded) |
+| Field `Init`             | `Init<TAB><TAB><TAB>{float}`                  | labelled init offset |
+| Field `Delay`            | `Delay<TAB><TAB><TAB>{float}`                 | labelled delay |
+
+There is **no** `WIND OBJECT` line, **no** column-label row, **no** `end` sentinel, and **no**
+texture-id field in the text (the texture id lives only in the `.bin`). The earlier table's field
+*content* (speed, init, delay, then a texture id) was nonetheless correct as to the per-record value
+set and matches the `.bin` record below — only the format kind and the load-status were wrong.
+
+#### 4.3.1 `wind{N}.bin` — the loaded runtime form (authoritative)
+
+Little-endian; no magic, no version. File size reconciles exactly as `8 + record_count × 24`.
+
+| Offset | Size | Type | Field          | Notes |
+|-------:|-----:|------|----------------|-------|
+| 0x00   | 4    | u32  | `record_count` | number of wind records |
+| 0x04   | 4    | u32  | `tex_flag`     | if non-zero, the per-record texture id is consumed into the runtime wind object |
+
+Record array — `record_count × 24` bytes, immediately after the 8-byte header:
+
+| Offset | Size | Type | Field             | `.txt` label | Notes |
+|-------:|-----:|------|-------------------|--------------|-------|
+| 0x00   | 4    | f32  | (reserved/unused) | —            | 0 in all samples; possibly a direction component — UNVERIFIED |
+| 0x04   | 4    | f32  | `wind_speed`      | `Speed`      | |
+| 0x08   | 4    | f32  | (reserved/unused) | —            | 0 in all samples — UNVERIFIED |
+| 0x0C   | 4    | f32  | `wind_init_offset`| `Init`       | |
+| 0x10   | 4    | f32  | `wind_delay`      | `Delay`      | |
+| 0x14   | 4    | u32  | `wind_tex_id`     | (none)       | consumed only when `tex_flag != 0`; indexes the wind texture pool `data/sky/texture/wind{N}.dds` |
+
+**Read algorithm (runtime):** select the file by current area id (the path is built from the format
+`data/sky/dat/wind{areaId}.bin`); open via the VFS file wrapper; read `record_count` (u32) then
+`tex_flag` (u32); if the count is zero,
+clear and return; otherwise allocate `24 × record_count` bytes and read them straight in as a raw
+struct array (no per-field transform); if `tex_flag != 0`, set the runtime wind object's texture count
+and copy each record's texture id (offset +0x14). Values are used as raw little-endian f32/u32; there
+is no validation beyond the read-success checks.
+
+**Join key:** `areaId` (current map id) — one wind file per area, the same key that drives
+`map_option`, `weather`, the sky `.bin` set, and the terrain `<id>.lst`. **Consumer/factory:** the
+area-load hub drives the wind loader, which populates the runtime wind/cloth animator object.
+**Authoritative companion spec:** `formats/environment_bins.md` / `formats/sky.md`.
+
+**Proposed canonical names:** `sky_wind_bin` (loaded binary) with fields `record_count`, `tex_flag`,
+`wind_speed`, `wind_init_offset`, `wind_delay`, `wind_tex_id`; `sky_wind_txt_sidecar` (the dead
+authoring `.txt`).
+
+**Verification:** static IDA (loader read-order; keyword-string regex sweep = 0 hits in the binary) +
+legally-owned VFS sample bytes (file size reconciles as `8 + count × 24`; empty area `wind0.bin` =
+8 bytes, count 0). The two reserved record floats (+0x00, +0x08) and the `tex_flag != 0` texture path
+are present in the loader's read order but were zero / unexercised in every sample — marked UNVERIFIED.
 
 ### 4.4 `point_light{N}.txt` — point-light table
 
@@ -650,9 +742,13 @@ Columns 6/7 semantics UNVERIFIED — IDA cross-check pending.
 - **`userjoint.txt` columns 1–4 semantics** — 5-column shape CONFIRMED; whether col 1 is a bone index
   or an offset, and the meaning of col 4, are UNVERIFIED. IMPACT: LOW.
 - **`data/sky/map/map{N}.txt` outlier file** — one file is far larger than the others and does not
-  match the small key-value schema; SAMPLE-UNVERIFIED. IMPACT: LOW.
+  match the small key-value schema; SAMPLE-UNVERIFIED. IMPACT: LOW (file is not loaded anyway — §4.1).
 - **Wide colour-grid companions** (`light`, `material`, `clouddome`, `stardome`) — exact column
-  counts not resolved from the census head; defer to `environment_bins.md`. IMPACT: LOW–MEDIUM.
+  counts not resolved from the census head; defer to `environment_bins.md`. IMPACT: LOW (not loaded;
+  the `.txt` shapes are likely keyword-block authoring sources, like `wind` — §4 caveat).
+- **`wind{N}.bin` reserved record floats (+0x00, +0x08)** — zero in all samples; possibly an
+  unused 2-float direction pair. The `tex_flag != 0` texture path is present in the loader's read
+  order but unexercised by the samples (flag was 0). IMPACT: LOW. Needs a live confirm.
 - **`product.txt` join semantics** — string-keyed by CP949 name; no numeric item id confirmed. IMPACT: LOW.
 - **`lensflare.txt` COLOR channel order** — RGBA vs ARGB ordering UNVERIFIED. IMPACT: LOW.
 - **`bmplist.txt` ↔ `.lst` count discrepancy** — the binary `.lst` carries 8 records the `.txt` does
@@ -661,6 +757,11 @@ Columns 6/7 semantics UNVERIFIED — IDA cross-check pending.
 > Resolved this sweep (no longer unknown): `emoticon.txt` column count (now 12), `userjoint.txt`
 > column count (now 5), `bmplist.txt` line model (alternating, even-line = sequential ordinal), and
 > `weather{N}_rain.txt` schema (identical to the base `weather{N}.txt`).
+>
+> Resolved by the sky-companion static-IDA pass: the whole `data/sky/` `.txt` family is **NOT loaded**
+> (authoring sidecars); `wind{N}.txt` is a keyword block (not the previously-documented tabular form),
+> and the loaded form is `wind{N}.bin` (8-byte header + count × 24-byte records — §4.3.1);
+> `data/sky/map/map{N}.txt` sits in an inert path-format slot no code opens (§4.1).
 
 No IDA cross-check was performed for this census (black-box lane). An IDA analyst should confirm
 `emoticon.txt` state-machine semantics, `userjoint.txt` joint-to-bone mapping, and `effect/map{N}.txt`

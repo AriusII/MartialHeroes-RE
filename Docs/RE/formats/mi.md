@@ -13,15 +13,15 @@
 
 ```
 verification: sample-verified            # mobinfo.mi IS in the VFS at data/ui/mobinfo.mi; 592 B = 4 + 21 x 28 confirmed by stride arithmetic and the count-header byte
-ida_reverified: 2026-06-16
-re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search)
+ida_reverified: 2026-06-21
+re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + 2026-06-21 re-pass   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search); record-field structure refined
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED and HARDENED (CYCLE 7: confirmed not read in build 263bd994).
 file_presence: PRESENT at data/ui/mobinfo.mi  # 592 bytes; the prior "ABSENT" verdict is WITHDRAWN/REVERTED
 loader: CONFIRMED NOT READ (build 263bd994)   # CYCLE 7 upgrade: no .mi path literal, not in the boot data-table corpus pointer table, not compiled in as a static array — proven by 4-way exhaustive static search (string index, case-insensitive regex, raw ASCII byte scan, UTF-16LE wide scan)
 container_layout: SAMPLE-VERIFIED            # 4-byte u32 count (=21) + 21 x 28-byte records; 7 u32 fields per record
-record_field_semantics: OUT-OF-CLIENT-SCOPE  # no client consumer => per-field meanings are not recoverable from the client (single-sample provisional reading only)
+record_field_semantics: OUT-OF-CLIENT-SCOPE  # no client consumer => per-field meanings are not recoverable from the client (single-sample provisional reading only; structural reading refined on the 2026-06-21 re-pass)
 ```
 
 > **CAMPAIGN 10 Block D re-verify (build 263bd994, 2026-06-16; two-witness: VFS sample + static IDA).
@@ -113,6 +113,15 @@ The mob data the client **does** read does not come from `mobinfo.mi`:
 - **`msg.xdb`** — mob name / portrait **strings** (the displayed names and portrait references the
   target-info panel shows) resolve through the message-string table, not through `.mi`.
 
+**The conceptual consumer-equivalent — the runtime info / target-info panel text builder — does not
+touch `.mi` either.** The mob-info / target-info HUD text the client actually renders is assembled by a
+category-dispatched **message-catalogue formatter**: it switches on a category byte, pulls
+**message-catalogue template strings** (the ~20000-band ids), and formats them with live game state
+(EXP / drop / gold rates, owned gold, item and skill names resolved through the actor/template lookup).
+Its only embedded literals are a format placeholder and a sync-error marker; it opens and indexes
+nothing named `mobinfo.mi`. So even the panel one would *expect* to consume `.mi` is
+message-catalogue + hard-coded-layout driven, which independently confirms the no-loader verdict.
+
 See **Cross-references** below.
 
 ---
@@ -139,30 +148,49 @@ the meanings cannot be confirmed from the client side.
 
 | Offset within record | Size | Type   | Proposed role (provisional)                                  | Confidence |
 |---------------------:|-----:|--------|--------------------------------------------------------------|------------|
-| +0  | 4 | u32 LE | entry index or resource id                                       | SINGLE-SAMPLE |
-| +4  | 4 | u32 LE | resource / text id A (e.g. a string-table reference)             | SINGLE-SAMPLE |
-| +8  | 4 | u32 LE | nullable field — `0xFFFFFFFF` observed as an absent/optional sentinel; otherwise a secondary resource id | SINGLE-SAMPLE |
-| +12 | 4 | u32 LE | sub-id or category code                                          | SINGLE-SAMPLE |
-| +16 | 4 | u32 LE | **paired field A** — large value; in every observed record this and the next field are **consecutive integers** (field[5] = field[4] + 1) | SINGLE-SAMPLE |
-| +20 | 4 | u32 LE | **paired field B** — `= field[4] + 1` across all observed records (a consecutive pair with +16) | SINGLE-SAMPLE |
-| +24 | 4 | u32 LE | **field6 (7th / last field)** — small optional id/index (`0xFFFFFFFF = -1 = none`; small values `99`/`103` observed). Role MOOT — no consumer read-site. | SINGLE-SAMPLE / HYPOTHESIS |
+| +0  | 4 | u32 LE | **entry id** — the row's own key; a **dense sequential** index running 101, 102, …, 121 across the 21 records | SAMPLE-VERIFIED (monotonic over the sample) |
+| +4  | 4 | u32 LE | **caption message id** — a message-catalogue id (~20000 band); the primary caption/name string for the row | SINGLE-SAMPLE |
+| +8  | 4 | u32 LE | **description message id** — a second message-catalogue id (~20000 band) for the optional secondary/description string, or `0xFFFFFFFF` when absent (null sentinel) | SINGLE-SAMPLE |
+| +12 | 4 | u32 LE | **small param** — a small sub-id / category code (observed values in the low tens to low hundreds) | SINGLE-SAMPLE |
+| +16 | 4 | u32 LE | **packed code A** — a **decimal-packed code** of the form `group × 10000 + index` (small index); NOT an opaque large id and NOT a code pointer (see note below) | SINGLE-SAMPLE |
+| +20 | 4 | u32 LE | **packed code B** — a **related** decimal-packed code (same encoding); usually close to code A but **not** uniformly `code A + 1` (see note below); `0xFFFFFFFF` in the final record | SINGLE-SAMPLE |
+| +24 | 4 | u32 LE | **aux field (7th / last)** — small optional id/index (`0xFFFFFFFF = -1 = none`; small populated values such as `99`/`103` observed). Role MOOT — no consumer read-site. | SINGLE-SAMPLE / HYPOTHESIS |
 
-- **Field[2] (+8)** frequently carries `0xFFFFFFFF`, consistent with an absent/optional reference
-  (a null sentinel). SINGLE-SAMPLE.
-- **Field[4] / field[5] (+16 / +20)** are a **consecutive pair** (the second equals the first plus 1)
-  across the observed records — the signature of a `[start, end)` index pair into a separate resource
-  array (e.g. a contiguous run of resource/text ids), though this cannot be confirmed without a
-  consumer. SINGLE-SAMPLE.
+- **Field[0] (+0) — dense sequential entry id.** Across the sample it is strictly monotonic
+  (101, 102, …, 121), i.e. the rows are an entry-indexed table keyed on this field, **not** an
+  arbitrary id set. This sharpens the earlier vaguer "entry index or resource id" reading: it is the
+  row key. SAMPLE-VERIFIED over the one file.
+- **Field[1] / field[2] (+4 / +8) — a message-catalogue id pair.** Both sit in the same
+  message-catalogue id band (~20000) the runtime info-panel formatter draws its template strings from,
+  reading as a **caption (primary) + description (optional secondary)** pair rather than generic
+  "resource id A" + "secondary resource id". The +8 field frequently carries `0xFFFFFFFF`, consistent
+  with an absent/optional secondary string (a null sentinel). The catalogue join itself cannot be
+  confirmed (no consumer). SINGLE-SAMPLE.
+- **Field[4] / field[5] (+16 / +20) — a related decimal-packed code pair, NOT a `[start, end)` run.**
+  Both read as decimal codes of the form `group × 10000 + index` (a small index within a group). They
+  are a **related** pair, but the earlier claim that the second equals the first **plus 1 across all
+  records is INCORRECT** and is **withdrawn**: the `+1` delta holds only for one group family; other
+  rows show a larger delta (e.g. a delta of 3), and the **final record's +20 is `0xFFFFFFFF`**. Read
+  them as a "related / consecutive code pair (start + a related index), delta NOT universally 1" — most
+  plausibly an icon/sprite or sub-page code pair — not a contiguous `[start, end)` index range.
+  SINGLE-SAMPLE.
+  > **Coincidence trap — +16 / +20 are NOT code pointers.** Decoded as raw integers, some of these
+  > packed codes happen to fall numerically inside the executable's loaded code address window, and a
+  > naive lookup will "resolve" them to *mid-function* offsets — a **false correlation**, not real
+  > pointers. Three independent tells confirm they are data, not addresses: (a) they land at arbitrary
+  > mid-function offsets, never at function starts; (b) several values fall in **unloaded** low address
+  > space that no pointer table could contain; (c) they decode cleanly as `group × 10000 + index`
+  > decimal codes. Recorded so the false "function-pointer table" reading is not rediscovered.
 - **Field6 (+0x18 / +24, the 7th and last field) — role MOOT.** Because the file has **no consumer
   read-site** (loader CONFIRMED not read, above), the meaning of this field cannot be pinned from
   client behaviour, so its role is **moot, not merely unresolved**. On the on-disk shape only it is a
   `u32`/`i32 LE` where **`0xFFFFFFFF = -1`** is the "none / not present" sentinel and the small
   populated values (`99`, `103`) read as an **optional small id/index** (HYPOTHESIS — an icon/sprite
   index, a secondary category key, or similar; the integer-with-`-1`-sentinel shape rules out a float
-  probability/scale and the small magnitude rules out the large adjacent portrait-resource IDs that
-  +16/+20 carry). Any earlier **"portrait_res_3"** labeling for this field is **withdrawn**: the small
-  `99`/`103` magnitudes are three orders of magnitude below the ~5.0e6-range portrait IDs and do not fit
-  that encoding. SINGLE-SAMPLE / HYPOTHESIS, unconfirmable without a reader.
+  probability/scale and the small magnitude rules out the large packed codes that +16/+20 carry). Any
+  earlier **"portrait_res_3"** labeling for this field is **withdrawn**: the small `99`/`103`
+  magnitudes are three orders of magnitude below the packed +16/+20 codes and do not fit that encoding.
+  SINGLE-SAMPLE / HYPOTHESIS, unconfirmable without a reader.
 
 > All record-field roles are **SINGLE-SAMPLE and UNVERIFIED** (one file, no second instance, no client
 > consumer). They are recorded for interoperability/archival completeness only. A port must **not**
@@ -185,13 +213,39 @@ the meanings cannot be confirmed from the client side.
 ## Known unknowns
 
 - **Per-record field semantics.** With **no client consumer**, the meaning of each of the 7 `u32`
-  fields is **OUT-OF-CLIENT-SCOPE / single-sample provisional** (the pointer/index-pair reading at
+  fields is **OUT-OF-CLIENT-SCOPE / single-sample provisional** (the decimal-packed-code reading at
   +16/+20 and the `0xFFFFFFFF` sentinel at +8 are inferences from one file). This includes
   **field6 (+0x18 / +24), whose role is MOOT** — there is no read-site to settle "small index" vs
   "small id" vs "small category". Likely un-recoverable from the client; would need the original
   content tool to confirm.
+- **The message-catalogue join is unconfirmed.** The +4 / +8 ids sit in the catalogue band but, with
+  no reader, the actual catalogue lookup cannot be exercised. The `group × 10000 + index` encoding of
+  +16 / +20 and the exact target table they index are likewise unconfirmable without a consumer.
+- **No `mob_id` join exists in the bytes.** The +0 entry ids (101..121) are this table's own row keys,
+  **not** mob ids, and nothing in the record cross-references the mob template tables. Any expectation
+  that `.mi` links to `mob_id` is **UNSUPPORTED by the binary** (negative result) — see **Linkages**.
 - **Whether the 21-record count is stable** across any other VFS revision (only one instance exists in
   this build). The container shape itself is sample-verified for this build.
+
+---
+
+## Linkages
+
+- **Internal join key:** the **+0 entry id** (dense sequential 101..121) is the table's own row key —
+  rows are addressed by this index.
+- **Outward references:** the **+4 / +8 message-catalogue ids** (~20000 band) are the only outward
+  join the bytes carry, pointing into the message-catalogue string store (the same band the runtime
+  info-panel formatter uses). The catalogue join is **inferred, not exercised** (no consumer).
+- **NO `mob_id` join.** The entry ids 101..121 are **not** mob ids, and no record field references the
+  mob template tables. There is **no** observed link from `.mi` to `mob_id`; the data does not support
+  one, and (the file being unread) nothing in the client would establish one. Negative result, recorded
+  so it is not re-derived as a presumed link.
+- **Referenced by:** **nothing in the shipped client** — there is no path literal, the file is not in
+  the boot data-table corpus, and it is not compiled in as a static array (dead VFS artefact).
+- **Builder / factory / manager:** **none in the shipped client.** No `.mi`-specific loader, parser,
+  factory, or manager exists. The conceptually-adjacent runtime component — the info / target-info
+  panel text builder (a message-catalogue formatter, see *Loader* above) — is the closest thing to a
+  consumer, but it sources the message catalogue and hard-coded layout, **not** `.mi`.
 
 ---
 
@@ -228,3 +282,19 @@ the meanings cannot be confirmed from the client side.
 > on-disk shape only — `u32`/`i32 LE`, `0xFFFFFFFF = -1 = none`, small values an optional small
 > id/index (HYPOTHESIS); any "portrait_res_3" labeling is WITHDRAWN. "Present" ≠ "read". No addresses,
 > no decompiler output, and no sample payload bytes crossed the firewall.
+>
+> **Provenance — 2026-06-21 re-pass (build 263bd994; static IDA + VFS sample).** RE-VERIFIED the
+> container (count = 21, 21 × 28-byte records, 7 `u32` per record) and the no-loader verdict (the four-
+> way absence search returned 0 hits again; the only `.mi` substring in the image is an unrelated CRT
+> section-name fragment). **REFINED the record-field reading** without changing the load-bearing
+> container shape: **+0** is a dense sequential **entry id** (101..121, the row key); **+4 / +8** are
+> both **message-catalogue ids** (~20000 band) — a caption + optional-description pair (+8 `0xFFFFFFFF`
+> = absent); **+16 / +20** are **decimal-packed codes** (`group × 10000 + index`), **not** opaque large
+> ids — and the prior "+20 = +16 + 1 across ALL records" claim is **CORRECTED/WITHDRAWN** (the `+1`
+> delta holds for only one group family; others differ, and the final record's +20 is `0xFFFFFFFF`).
+> Added the **coincidence-trap** note that +16 / +20 are NOT `.text` code pointers (mid-function /
+> unloaded-space tells), the explicit **Linkages** section (the +4/+8 catalogue ids are the only
+> outward join; **no `mob_id` join** exists in the bytes — negative result), and the cross-ref that the
+> runtime info-panel text builder (a message-catalogue formatter) is the conceptual consumer-equivalent
+> and does **not** touch `.mi`. Per-record meanings remain single-sample / OUT-OF-CLIENT-SCOPE. No
+> addresses, no decompiler output, and no sample payload bytes crossed the firewall.

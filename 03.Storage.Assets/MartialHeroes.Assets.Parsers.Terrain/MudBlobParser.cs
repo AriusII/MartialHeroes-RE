@@ -6,13 +6,14 @@ namespace MartialHeroes.Assets.Parsers.Terrain;
 ///     Parser for <c>.mud</c> ambient-sound tile blob files.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/terrain.md §6. Ambient-sound tile blob — .mud
+///     spec: Docs/RE/formats/mud.md — canonical source for .mud format.
 ///     <para>
-///         Fixed size: 32 768 bytes (0x8000) = 64 × 64 × 8 B. CONFIRMED (three samples).
+///         Fixed size: 32 768 bytes (0x8000) = 64 × 64 × 8 B. CONFIRMED.
 ///         Grid: 64 columns (X axis) × 64 rows (Z axis). Row-major (row = Z, col = X). CONFIRMED.
 ///         Record stride: 8 bytes. All fields: single bytes. CONFIRMED.
-///         spec: Docs/RE/formats/terrain.md §6.1 Grid dimensions: CONFIRMED.
-///         spec: Docs/RE/formats/terrain.md §6.2 Record layout: VERIFIED (all 3 samples, 12 288 tile observations).
+///         tile_index = col + (row &lt;&lt; 6). spec: Docs/RE/formats/mud.md §Indexing: CONFIRMED.
+///         spec: Docs/RE/formats/mud.md §Grid geometry: CONFIRMED.
+///         spec: Docs/RE/formats/mud.md §Tile record layout: CONFIRMED (all fields).
 ///     </para>
 ///     <para>ZERO rendering/engine dependencies.</para>
 /// </remarks>
@@ -33,11 +34,11 @@ public static class MudBlobParser
     public static MudBlob Parse(ReadOnlySpan<byte> span)
     {
         // Validate fixed size: 64 × 64 × 8 = 32768.
-        // spec: Docs/RE/formats/terrain.md §6 — "Total file size: exactly 32 768 bytes (0x8000)": CONFIRMED.
+        // spec: Docs/RE/formats/mud.md §Fixed size — "exactly 32 768 bytes (0x8000)": CONFIRMED.
         if (span.Length != MudBlob.FixedSize)
             throw new InvalidDataException(
                 $".mud parse error: expected exactly {MudBlob.FixedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain.md §6.");
+                "spec: Docs/RE/formats/mud.md §Fixed size.");
 
         var totalTiles = MudBlob.GridRows * MudBlob.GridCols; // 4096
         var tiles = new MudTileRecord[totalTiles];
@@ -45,20 +46,21 @@ public static class MudBlobParser
         for (var t = 0; t < totalTiles; t++)
         {
             var offset = t * MudBlob.RecordStride;
-            // spec: Docs/RE/formats/terrain.md §6.2 Record layout (8 bytes):
-            //   pad0 u8 @ +0: VERIFIED. pad1 u8 @ +1: VERIFIED.
-            //   music_group u8 @ +2: VERIFIED. ambient_idx_0 u8 @ +3: VERIFIED.
-            //   ambient_idx_1 u8 @ +4: VERIFIED. effect_idx_0 u8 @ +5: VERIFIED.
-            //   effect_idx_1 u8 @ +6: VERIFIED. effect_idx_2 u8 @ +7: VERIFIED (limited).
+            // spec: Docs/RE/formats/mud.md §Tile record layout (8-byte stride):
+            //   unread0 u8 @ +0 (never read — always zero): CONFIRMED.
+            //   unread1 u8 @ +1 (never read — always zero): CONFIRMED.
+            //   bgmZoneId u8 @ +2: CONFIRMED. bgeAmbientId0 u8 @ +3: CONFIRMED.
+            //   bgeAmbientId1 u8 @ +4: CONFIRMED. effId0 u8 @ +5: CONFIRMED.
+            //   effId1 u8 @ +6: CONFIRMED. effId2 u8 @ +7: CONFIRMED.
             tiles[t] = new MudTileRecord(
-                span[offset + 0], // pad0
-                span[offset + 1], // pad1
-                span[offset + 2], // music_group
-                span[offset + 3], // ambient_idx_0
-                span[offset + 4], // ambient_idx_1
-                span[offset + 5], // effect_idx_0
-                span[offset + 6], // effect_idx_1
-                span[offset + 7] // effect_idx_2
+                span[offset + 0], // unread0 (pad0)
+                span[offset + 1], // unread1 (pad1)
+                span[offset + 2], // bgmZoneId
+                span[offset + 3], // bgeAmbientId0
+                span[offset + 4], // bgeAmbientId1
+                span[offset + 5], // effId0
+                span[offset + 6], // effId1
+                span[offset + 7] // effId2
             );
         }
 

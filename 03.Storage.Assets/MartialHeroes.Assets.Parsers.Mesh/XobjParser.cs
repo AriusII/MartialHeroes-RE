@@ -9,12 +9,14 @@ namespace MartialHeroes.Assets.Parsers.Mesh;
 ///     Parser for <c>.xobj</c> ASCII static mesh files.
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/mesh.md §Format: .xobj — ASCII static mesh
+///     spec: Docs/RE/formats/xobj.md §Part 2 — .xobj mesh body (ASCII TEXT)
+///     spec: Docs/RE/formats/mesh.md §Format: .xobj — ASCII static mesh (supplementary corpus detail)
 ///     <para>
 ///         The file is whitespace-tokenized (no magic, no binary header).
-///         Read order: unused_token (discarded), num_triangles, (num_triangles×3) index tokens,
-///         num_vertices, then per-vertex 8 tokens (pos_x, pos_y, pos_z, norm_x, norm_y, norm_z — discarded,
-///         tex_u, tex_v).
+///         Read order: marker (token 1, discarded), tri_count (token 2),
+///         tri_count×3 index tokens (u16), vert_count, then per-vertex 8 float tokens
+///         (pos_x, pos_y, pos_z, norm_x, norm_y, norm_z — discarded, u, v).
+///         spec: Docs/RE/formats/xobj.md §Read order — "marker … discarded": parser-verified.
 ///     </para>
 ///     <para>
 ///         ZERO rendering/engine dependencies. Output is <see cref="StaticMesh" /> with plain float arrays.
@@ -53,67 +55,78 @@ public static class XobjParser
         var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var pos = 0;
 
-        // --- Token 1: unused_token (discard) ---
-        // spec: Docs/RE/formats/mesh.md §Preamble — unused_token: "Read and silently discarded."
-        // CONFIRMED (discard confirmed; meaning UNVERIFIED).
-        _ = NextU32(tokens, ref pos, "unused_token");
+        // --- Token 1: marker (discard) ---
+        // spec: Docs/RE/formats/xobj.md §Read order step 1 —
+        //   "First token. Read into a local and discarded — the parser keeps no copy.
+        //   Likely a format/version or vertex-format tag; the consumer does not use it."
+        //   parser-verified; observed value = 4 in the one real sample.
+        _ = NextU32(tokens, ref pos, "marker");
 
-        // --- Token 2: num_triangles ---
-        // spec: Docs/RE/formats/mesh.md §Preamble — num_triangles: CONFIRMED.
-        var numTriangles = NextU32(tokens, ref pos, "num_triangles");
+        // --- Token 2: tri_count ---
+        // spec: Docs/RE/formats/xobj.md §Read order step 2 — tri_count: parser-verified.
+        var numTriangles = NextU32(tokens, ref pos, "tri_count");
 
-        // --- Index list: num_triangles × 3 tokens, u32 → u16 ---
+        // --- Index list: tri_count × 3 tokens, parsed as int, narrowed to u16 on store ---
+        // spec: Docs/RE/formats/xobj.md §Read order step 4 —
+        //   "One index token per line; parsed as int, narrowed to u16 on store.
+        //    Total 3 × tri_count tokens, in order." parser-verified + sample-verified.
         // spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
         var indexCount = checked((int)(numTriangles * 3));
 
-        // Pre-loop bounds check for index block (includes num_vertices token at the end).
+        // Pre-loop bounds check for index block (includes vert_count token at the end).
         if (pos + indexCount + 1 > tokens.Length)
             throw new InvalidDataException(
-                $".xobj parse error: index block truncated — need {indexCount} index tokens + vertex_count, " +
+                $".xobj parse error: index block truncated — need {indexCount} index tokens + vert_count, " +
                 $"but only {tokens.Length - pos} tokens remain. " +
-                "spec: Docs/RE/formats/mesh.md §Index list.");
+                "spec: Docs/RE/formats/xobj.md §Read order step 3-4.");
 
         var indices = new ushort[indexCount];
         for (var i = 0; i < indexCount; i++)
             // Bounds checked above; read without per-element string allocation.
-            // Truncate from u32 to u16 as specified.
-            // spec: Docs/RE/formats/mesh.md §Index list: "in-memory representation stores each index as a u16".
+            // Narrowed to u16 on store.
+            // spec: Docs/RE/formats/xobj.md §Read order step 4 — "narrowed to u16": parser-verified.
             indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
 
-        // --- num_vertices ---
+        // --- vert_count ---
+        // spec: Docs/RE/formats/xobj.md §Read order step 5 — vert_count: parser-verified.
         // spec: Docs/RE/formats/mesh.md §Vertex count: CONFIRMED.
-        var numVertices = NextU32(tokens, ref pos, "num_vertices");
+        var numVertices = NextU32(tokens, ref pos, "vert_count");
 
         var positions = new Vec3[numVertices];
         var uvs = new Vec2[numVertices];
 
         // Pre-loop bounds check: each vertex needs 8 tokens.
-        // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each.
+        // spec: Docs/RE/formats/xobj.md §Per-vertex line — "8 float tokens (one per line)": parser-verified.
+        // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each: CONFIRMED.
         var tokensNeeded = pos + checked((int)numVertices * 8);
         if (tokensNeeded > tokens.Length)
             throw new InvalidDataException(
                 $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
                 $"({tokensNeeded} total), but only {tokens.Length} tokens available. " +
-                "spec: Docs/RE/formats/mesh.md §Vertex list.");
+                "spec: Docs/RE/formats/xobj.md §Per-vertex line.");
 
         for (uint v = 0; v < numVertices; v++)
         {
             // Tokens 1-3: position. Bounds checked above; read without per-element string allocation.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 1/2/3: pos.x/y/z @ vertex +0/4/8: parser-verified.
             // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x, pos_y, pos_z: CONFIRMED.
             var posX = NextF32Unchecked(tokens, ref pos);
             var posY = NextF32Unchecked(tokens, ref pos);
             var posZ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 4-6: normals — read and discard.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — tokens 4/5/6: n.x/y/z — DISCARDED.
             // spec: Docs/RE/formats/mesh.md §Vertex list — norm_x/y/z: "read then discarded; not kept in memory". CONFIRMED.
             _ = NextF32Unchecked(tokens, ref pos);
             _ = NextF32Unchecked(tokens, ref pos);
             _ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 7-8: UV coordinates.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 7: u @ vertex +0x10 (stored as-is).
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_u: CONFIRMED.
             var texU = NextF32Unchecked(tokens, ref pos);
-            // V-flip: engine stores 1.0 - tex_v in memory.
+            // V-flip: stored as 1.0 − v.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 8: v @ vertex +0x14 (stored as 1.0 − v).
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory". CONFIRMED.
             var texV = 1.0f - NextF32Unchecked(tokens, ref pos);
 
@@ -139,20 +152,21 @@ public static class XobjParser
     /// <param name="data">Raw file content from the VFS.</param>
     /// <returns>
     ///     Decoded mesh in the 24-byte stride layout:
-    ///     POSITION12 (3 × f32) + DIFFUSE4 (uninitialised, always 0) + TEXCOORD8 (2 × f32).
+    ///     POSITION12 (3 × f32) + DIFFUSE4 (0xFF000000 constructor default) + TEXCOORD8 (2 × f32).
     /// </returns>
     /// <exception cref="InvalidDataException">
     ///     Thrown on truncation, token under-run, or malformed float/integer tokens.
     /// </exception>
     /// <remarks>
-    ///     spec: Docs/RE/formats/effects.md §A.11 — .xobj files feed the shared mesh table at 24-byte stride
-    ///     for emitter_type == 1 mesh-particle objects (resource_id &lt; 10000): CONFIRMED.
-    ///     spec: Docs/RE/formats/mesh.md §In-memory vertex layout — 24 bytes per vertex
-    ///     (pos_x/y/z @ +0/4/8, uninitialised @ +12, tex_u @ +16, tex_v as 1.0−disk @ +20): CONFIRMED.
+    ///     spec: Docs/RE/formats/xobj.md §Part 2 — .xobj mesh body and §Part 3 — Runtime structures.
+    ///     spec: Docs/RE/formats/xobj.md §Named constants — XOBJ_VERTEX_DEFAULT_DIFFUSE = 0xFF000000
+    ///     (ARGB: opaque, black RGB). Not read from file — set by the vertex constructor.
+    ///     spec: Docs/RE/formats/xobj.md §Runtime Vertex @ +0x0C — "Set by the vertex constructor to
+    ///     opaque-default: 0xFF000000 (ARGB: opaque, black RGB)": parser-verified.
     ///     Normals are read from disk and discarded (not in the 24-byte in-memory layout).
-    ///     spec: Docs/RE/formats/mesh.md §Vertex list — norm_x/y/z: "read then discarded": CONFIRMED.
-    ///     DIFFUSE4 (@+12) is always zero (uninitialised by the loader per spec).
-    ///     spec: Docs/RE/formats/mesh.md §In-memory vertex layout — offset +12 "(uninitialised / padding)": CONFIRMED.
+    ///     spec: Docs/RE/formats/xobj.md §Per-vertex line — "tokens 4/5/6: n.x/y/z — DISCARDED": parser-verified.
+    ///     V-flip applied on store: tex_v = 1.0 − disk_v.
+    ///     spec: Docs/RE/formats/xobj.md §Per-vertex line — "token 8: v — stored as 1.0 − v": parser-verified.
     /// </remarks>
     public static XobjMeshData ParseAsMeshParticle(ReadOnlyMemory<byte> data)
     {
@@ -165,75 +179,90 @@ public static class XobjParser
     public static XobjMeshData ParseAsMeshParticle(ReadOnlySpan<byte> data)
     {
         // The file is pure ASCII text.
-        // spec: Docs/RE/formats/mesh.md — "pure ASCII with no binary header": CONFIRMED.
+        // spec: Docs/RE/formats/xobj.md §Part 2 — "plain ASCII text file — one numeric token per line,
+        //   whitespace/newline delimited": parser-verified.
         var text = Encoding.ASCII.GetString(data);
         var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         var pos = 0;
 
-        // Token 1: slot_id (discard).
-        // spec: Docs/RE/formats/mesh.md §Preamble — slot_id u32 @ token 1: CONFIRMED (discard confirmed).
-        _ = NextU32(tokens, ref pos, "slot_id");
+        // Token 1: marker (discard).
+        // spec: Docs/RE/formats/xobj.md §Read order step 1 —
+        //   "First token. Read into a local and discarded — the parser keeps no copy.
+        //   Likely a format/version or vertex-format tag; the consumer does not use it."
+        //   parser-verified; observed value = 4 in the one real sample.
+        _ = NextU32(tokens, ref pos, "marker");
 
-        // Token 2: face_count (num_triangles).
-        // spec: Docs/RE/formats/mesh.md §Preamble — face_count u32 @ token 2: CONFIRMED.
-        var numTriangles = NextU32(tokens, ref pos, "face_count");
+        // Token 2: tri_count.
+        // spec: Docs/RE/formats/xobj.md §Read order step 2 — tri_count: parser-verified.
+        var numTriangles = NextU32(tokens, ref pos, "tri_count");
 
-        // Index list: face_count × 3 tokens.
+        // Index list: tri_count × 3 tokens, narrowed to u16.
+        // spec: Docs/RE/formats/xobj.md §Read order step 4 — index_count = 3 × tri_count: parser-verified.
         // spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
         var indexCount = checked((int)(numTriangles * 3));
 
-        // Pre-loop bounds check for index block (includes vertex_count token at end).
+        // Pre-loop bounds check for index block (includes vert_count token at end).
         if (pos + indexCount + 1 > tokens.Length)
             throw new InvalidDataException(
-                $".xobj parse error: index block truncated — need {indexCount} index tokens + vertex_count, " +
+                $".xobj parse error: index block truncated — need {indexCount} index tokens + vert_count, " +
                 $"but only {tokens.Length - pos} tokens remain. " +
-                "spec: Docs/RE/formats/mesh.md §Index list.");
+                "spec: Docs/RE/formats/xobj.md §Read order step 3-4.");
 
         var indices = new ushort[indexCount];
         for (var i = 0; i < indexCount; i++)
-            // Bounds checked above; read without per-element string allocation.
+            // Bounds checked above; narrowed to u16 on store.
+            // spec: Docs/RE/formats/xobj.md §Read order step 4 — "narrowed to u16": parser-verified.
             indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
 
-        // vertex_count.
+        // vert_count.
+        // spec: Docs/RE/formats/xobj.md §Read order step 5 — vert_count: parser-verified.
         // spec: Docs/RE/formats/mesh.md §Vertex count: CONFIRMED.
-        var numVertices = NextU32(tokens, ref pos, "vertex_count");
+        var numVertices = NextU32(tokens, ref pos, "vert_count");
 
         var vertices = new XobjVertex[numVertices];
 
         // Pre-loop bounds check: each vertex needs 8 tokens.
-        // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each.
+        // spec: Docs/RE/formats/xobj.md §Per-vertex line — "8 float tokens (one per line)": parser-verified.
+        // spec: Docs/RE/formats/mesh.md §Vertex list — 8 tokens each: CONFIRMED.
         var vertexTokensNeeded = pos + checked((int)numVertices * 8);
         if (vertexTokensNeeded > tokens.Length)
             throw new InvalidDataException(
                 $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
                 $"({vertexTokensNeeded} total), but only {tokens.Length} tokens available. " +
-                "spec: Docs/RE/formats/mesh.md §Vertex list.");
+                "spec: Docs/RE/formats/xobj.md §Per-vertex line.");
 
         for (uint v = 0; v < numVertices; v++)
         {
             // Tokens 1-3: position. Bounds checked above; read without per-element string allocation.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 1/2/3: pos.x/y/z @ vertex +0/4/8: parser-verified.
             // spec: Docs/RE/formats/mesh.md §Vertex data rows — pos_x/y/z @ col 0/1/2: CONFIRMED.
             var px = NextF32Unchecked(tokens, ref pos);
             var py = NextF32Unchecked(tokens, ref pos);
             var pz = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 4-6: normals — read and discard.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — "tokens 4/5/6: n.x/y/z — DISCARDED": parser-verified.
             // spec: Docs/RE/formats/mesh.md §Vertex data rows — norm_x/y/z @ col 3/4/5: "discarded": CONFIRMED.
-            // spec: Docs/RE/formats/effects.md §A.11 — normals not in the shared mesh table: CONFIRMED.
             _ = NextF32Unchecked(tokens, ref pos);
             _ = NextF32Unchecked(tokens, ref pos);
             _ = NextF32Unchecked(tokens, ref pos);
 
             // Tokens 7-8: UV coordinates.
-            // spec: Docs/RE/formats/mesh.md §Vertex data rows — tex_u @ col 6, tex_v @ col 7: CONFIRMED.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 7: u @ vertex +0x10 (stored as-is): parser-verified.
+            // spec: Docs/RE/formats/mesh.md §Vertex data rows — tex_u @ col 6: CONFIRMED.
             var tu = NextF32Unchecked(tokens, ref pos);
-            // V-flip: in-memory tex_v = 1.0 − disk_tex_v.
+            // V-flip: stored as 1.0 − v.
+            // spec: Docs/RE/formats/xobj.md §Per-vertex line — token 8: v @ vertex +0x14 (stored as 1.0 − v): parser-verified.
             // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v in-memory": CONFIRMED.
             var tvMem = 1.0f - NextF32Unchecked(tokens, ref pos);
 
-            // DIFFUSE4 at in-memory offset +12 is uninitialised (always 0 per spec).
-            // spec: Docs/RE/formats/mesh.md §In-memory vertex layout — offset +12 "(uninitialised / padding)": CONFIRMED.
-            const uint diffuse = 0u;
+            // DIFFUSE4 at runtime vertex offset +0x0C: constructor-default opaque-black (ARGB).
+            // NOT read from disk. Set by the vertex constructor to 0xFF000000.
+            // spec: Docs/RE/formats/xobj.md §Runtime Vertex @ +0x0C —
+            //   "Set by the vertex constructor to opaque-default: 0xFF000000 (ARGB: opaque, black RGB).
+            //    Not read from file.": parser-verified.
+            // spec: Docs/RE/formats/xobj.md §Named constants — XOBJ_VERTEX_DEFAULT_DIFFUSE = 0xFF000000.
+            const uint diffuse = 0xFF000000u;
 
             vertices[v] = new XobjVertex(px, py, pz, diffuse, tu, tvMem);
         }

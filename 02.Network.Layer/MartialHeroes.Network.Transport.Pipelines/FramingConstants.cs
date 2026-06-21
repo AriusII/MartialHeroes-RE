@@ -31,14 +31,16 @@ internal static class FramingConstants
     internal const int MaxFrameSize = HeaderSize + 0x2DA0; // 8 + 11680 = 11688
 
     /// <summary>
-    ///     Default <see cref="System.IO.Pipelines.PipeOptions" /> pause-writer threshold (bytes).
-    ///     Once this many bytes are buffered in the receive pipe the socket-read loop pauses
-    ///     until the consumer catches up (backpressure).
+    ///     Default <see cref="System.IO.Pipelines.PipeOptions" /> resume-writer threshold (bytes).
+    ///     Once the buffered byte count drops to or below this level the socket-read loop resumes
+    ///     after having been paused by <see cref="PipePauseThreshold" /> (backpressure release).
     /// </summary>
     internal const long PipeResumeThreshold = 64 * 1024; // 64 KiB
 
     /// <summary>
-    ///     Default <see cref="System.IO.Pipelines.PipeOptions" /> resume-writer threshold (bytes).
+    ///     Default <see cref="System.IO.Pipelines.PipeOptions" /> pause-writer threshold (bytes).
+    ///     Once this many bytes are buffered in the receive pipe the socket-read loop pauses
+    ///     until the consumer catches up (backpressure).
     /// </summary>
     internal const long PipePauseThreshold = 128 * 1024; // 128 KiB
 

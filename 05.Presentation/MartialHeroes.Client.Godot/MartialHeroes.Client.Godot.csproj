@@ -21,6 +21,7 @@
       spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules; login_flow.md §2.
     -->
     <ItemGroup>
+        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
         <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj"/>
         <!-- 05 -> 04.x downward: engine-free presentation lib (view-adapters, layout tables,

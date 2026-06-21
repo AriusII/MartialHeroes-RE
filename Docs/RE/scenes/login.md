@@ -1,10 +1,15 @@
 ---
-verification: independently re-confirmed 2026-06-19 directly from the doida.exe binary (build 263bd994,
-  element-level front-end construction pass, static IDA) — the LoginWindow / PIN-keypad / server-list
-  construct routines were re-read at the element/asset/src-rect level and the credential-textbox mask
-  mechanism, curtain extent, PIN keypad grid + scramble + tags, and server-list plate/pager/status art
-  all CONFIRMED. (Prior basis: 2026-06-18 scene reconstruction campaign — action/event dispatch,
-  game.ver gate, server-list re-fetch throttle, plate-pick guard, pager arming, all CONFIRMED.)
+verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994, full 2D-GUI
+  cartography pass, static IDA). The LoginWindow construct routine (the single child-build virtual,
+  ~73 widgets), the credential-textbox mask mechanism, curtain extent, PIN scrambled-keypad grid +
+  scramble + tags, the server-list plate/pager/status painter, and the message-DB + 15-slot font
+  table were ALL re-read at the element / member-offset / atlas-src-rect level and CONFIRMED; this
+  pass adds the full COMPONENT TREE (member-offset map), the numbered CREATION ORDER with geometry +
+  action-ids, and the per-component 2D-ASSET LINKAGE table (§12), cross-referenced to the shared GU*
+  framework (structs/gucomponent.md, structs/guwindow.md, specs/ui_system.md). (Prior basis:
+  2026-06-19 element-level construction pass; 2026-06-18 scene reconstruction campaign — action/event
+  dispatch, game.ver gate, server-list re-fetch throttle, plate-pick guard, pager arming, all
+  CONFIRMED.)
 scene: Login (engine state 1)
 evidence: [static-ida, debugger-confirmed-handshake]
 capture_verified: false
@@ -14,6 +19,7 @@ sources:
   - Docs/RE/specs/frontend_layout_tables.md
   - Docs/RE/specs/crypto.md
   - Docs/RE/specs/ui_system.md
+  - Docs/RE/structs/gucomponent.md
   - Docs/RE/structs/guwindow.md
   - Docs/RE/opcodes.md
   - Docs/RE/packets/login.yaml
@@ -621,3 +627,330 @@ All committed, firewall-clean specs (front matter lists the exact set):
 - `Docs/RE/packets/3-1_character_list.yaml` — the 5-slot × 981-byte character list.
 - `Docs/RE/packets/lobby.yaml` — the two lobby queries, record shapes A/B/C, host-resolution order.
 - `Docs/RE/packets/0-0_key_exchange.yaml` — the 62-byte key-exchange payload.
+
+---
+
+## 12. 2D GUI component reference (full cartography)
+
+> **Scope of this section.** §5 above gives the architectural / visibility-band view; this section
+> is the **complete 2D-GUI element catalogue**: every widget with its role, widget class, parent, and
+> object member-offset; the exact numbered build sequence with literal geometry and action ids; the
+> per-component atlas / sub-rect / VFS linkage; the dynamic / modal / sub-state behaviour; and the
+> text / font / caption sourcing. It is built strictly on the shared `Diamond::GU*` widget framework
+> documented in `structs/gucomponent.md`, `structs/guwindow.md`, and `specs/ui_system.md`. Korean
+> text is CP949. Member offsets are byte offsets relative to the object start (interop facts), never
+> memory addresses. Every sub-rect below is a **1:1 atlas blit** (destination w/h equals source w/h;
+> no UV scaling) per the universal builder contract.
+
+### 12.0 Class identity & the shared GU* framework
+
+The whole 2D login GUI is one branch of the in-house `Diamond::GU*` widget toolkit (see
+`structs/gucomponent.md §hierarchy` and `specs/ui_system.md §1`). The scene's own RTTI-confirmed
+class chain:
+
+- `LoginWindow : CommonLoginWindow : GUWindow : GUPanel : GUComponent` (with the `EventHandler` /
+  `CmdHandler` MI base at +0xBC — see `structs/guwindow.md`).
+- `LoginSecondPassword : GUPanel : GUComponent` — the 2nd-password / PIN modal child.
+- `ExitPanel : GUPanel : GUComponent` — quit-game modal.
+- `ErrorPanel : GUPanel : GUComponent` — error / disconnect feedback modal.
+- Widget leaf classes used as children: `GUComponent` (plain image), `GUPanel` (container),
+  `GUButton` (3-state sprite + label), `GUCheckBox : GUButton` (toggle, off/on frames), `GULabel`
+  (static text), `GUTextbox` (editable input + password mask).
+
+There is **no dedicated MessageBox / Dialog / Toast / Gauge / Slider / Tooltip widget class** — every
+modal (Confirm-A/B, Exit, Error, the validation toast) is composed from `GUPanel` + `GULabel` +
+`GUButton` primitives. The only runtime input box is `GUTextbox` (which carries the password mask).
+The shared 13-slot `GUComponent` virtual interface (destructor · setVisible · setPosition ·
+getPosition · hitTest(vec) · hitTest(x,y) · onEvent · onDraw · onUpdate · computeTransform ·
+getHitActionId · onMouseEnter · onMouseLeave; container subclasses append a child-sweep slot) and the
+`GUButton` 3-state priority (disabled > pressed > hover > normal) and the `GUTextbox` password mask
+(style-flag bit `0x80` → render `*` per char) are all defined once in `specs/ui_system.md` /
+`structs/gucomponent.md` and are **not** re-specified per scene here.
+
+**Where the tree is built.** The `LoginWindow` / `CommonLoginWindow` constructors only set vtables,
+zero the FSM/thread state, build the `GUWindow` shell (window name `"Loginer"`), and spawn the two
+lobby worker threads — they create **no** children. The complete child set (~73 widgets) is created
+by **one** virtual build method on `LoginWindow` (invoked when the window is opened, not from the
+top-level WinMain state-1 `new`), which loads four atlases, allocates every widget with literal
+geometry + atlas src-rects, binds action ids, then installs the per-frame render callback and calls
+the relayout/refresh slot. A separate "server-list refresh" virtual only re-origins and re-captions
+**already-built** children (it is NOT creation). The §3 sub-FSM (`flowSubState` @ +0x238) then drives
+show/hide.
+
+### 12.1 COMPONENT TREE — every element (role · widget class · parent · member offset)
+
+Root `LoginWindow` child-pointer members (offsets are object-relative; `GUWindow` shell occupies the
+low region, the `+0x238` FSM cell sits inside the `CommonLoginWindow` base just below this block):
+
+| Member (canonical) | Offset | Widget class | Parent | Role |
+|---|---|---|---|---|
+| `bgFrameImage` | +0x270 | `GUComponent` (image) | window | Login background frame plate |
+| `bgTopPanel` | +0x274 | `GUPanel` | window | Full-width top backdrop / banner panel |
+| `serverListPanel` | +0x278 | `GUPanel` | window | Server-list root container |
+| `secondPwSetupPanel` | +0x284 | `GUPanel` | window | "register a 2nd-password?" yes/no prompt bar |
+| `accountTextbox` | +0x2A8 | `GUTextbox` | `loginFormPanel` | ID / account edit box (IME 16, maxlen 6) |
+| `passwordTextbox` | +0x2AC | `GUTextbox` | `loginFormPanel` | Password edit box (IME 12, maxlen 129, **masked**) |
+| `saveIdCheckbox` | +0x2B0 | `GUCheckBox` | `loginFormPanel` | Save-ID toggle (off/on frames) |
+| `loginOkBtn` | +0x2B4 | `GUButton` (3-state) | `loginFormPanel` | OK / Login submit |
+| `eulaPanel` | +0x2BC | `GUPanel` | window | Notice / agreement scroll panel (22 body lines) |
+| `eulaLine[22]` | +0x2C0.. | `GULabel` ×22 | `eulaPanel` | Notice body rows (msg 4001..4022) |
+| `serverGridPanel` | +0x328 | `GUPanel` | window | Server / channel select grid |
+| `serverNameStrip[10]` | +0x364.. | `GUButton` (3-state) ×10 | `serverGridPanel` | Page-jump name strips (act 115..124) |
+| `confirmPanelA` | +0x398 | `GUPanel` | window | Generic confirm dialog A (msg 4023 + OK 113) |
+| `confirmPanelB` | +0x3A4 | `GUPanel` | window | Generic confirm dialog B (msg 4024 + OK 114) |
+| `exitPanel` | +0x3B4 | `ExitPanel` | window | Quit-game modal (own button set) |
+| `errorPanel` | +0x3B8 | `ErrorPanel` | window | Error / disconnect feedback modal |
+| (CommonLoginWindow runtime state) | +0x3BC..+0x550 | — | — | FSM / worker-thread / host-buffer pad span |
+| `secondPwModal` | +0x550 | `LoginSecondPassword` | window | 2nd-password (PIN) scrambled-keypad modal (object size 0x2B8) |
+| `newServerIndex` | +0x554 | i32 | — | `NEW_SERVER_INDEX` from `uiconfig.lua` (last object slot; **not** an FSM seed — see §2/§3) |
+
+Sub-tree breakdown (children grouped by parent panel):
+
+- **`serverListPanel`** → server-list header image · `serverListEnterBtn` (act **102**) · `loginFormPanel` · `quitHelpBtn` (act **105**) · quit/help background image.
+- **`loginFormPanel`** → ID-label glyph image · PW-label glyph image · save-ID label glyph image · `accountTextbox` (act 109) · `passwordTextbox` (act 110) · `saveIdCheckbox` (act 104) · `loginOkBtn` (act 103).
+- **`eulaPanel`** (notice/agreement) → `eulaLine[22]` (msg 4001..4022) · `eulaScrollDownBtn` (act 106) · `eulaScrollUpBtn` (act 107) · `eulaThumbBtn` (act 108) · scroll-track image. *(Per §3 / GAP 2: 106 is a deliberate no-op and 107/108 fall through unhandled at the window level; any scroll is internal to the panel or inert.)*
+- **`serverGridPanel`** → `serverCell[2]` (each cell = name `GULabel` + flag `GUComponent` image + select `GUButton` act **400+i** + population `GULabel` + ping/status `GULabel`) · `serverStatusIcon[3]` (status quads) · grid divider image · `serverNameStrip[10]` (act 115..124) · grid title image.
+- **`secondPwSetupPanel`** → title image · body image · Yes `GUButton` (act **111**) · No `GUButton` (act **112**).
+- **`confirmPanelA` / `confirmPanelB`** → centered message `GULabel` (msg 4023 / 4024) + OK `GUButton` (act 113 / 114).
+- **`secondPwModal` (`LoginSecondPassword`)** → PIN-display `GULabel` (masked, rendered as N `*`) · scrambled digit keypad (up to 100 `GUButton` 3-state in a 5-col × 2-row visible grid; per cell a 0..9 stack, digit→glyph randomized per show) · OK `GUButton` (tag **11/12** submit) · Clear `GUButton` (tag **12**) · Cancel `GUButton` (tag **13**) · an embedded reused `ExitPanel`. *(Note on tags: §5.2 pins Reset=11 / OK=12 / Cancel=13 with 0..9 append; the dynamic-facet view of the same routing reads OK=11/Clear=12/Cancel=13 — the digit-append + three-control shape is CONFIRMED, the exact 11/12 assignment between Reset/OK is the one element-level ambiguity, flagged §10.)* Modal runtime flags read by the owner FSM: visible at modal +0x8C, submitted at modal +0x2B4.
+- **`exitPanel` (`ExitPanel`)** / **`errorPanel` (`ErrorPanel`)** → self-built Yes/No / OK button sets (composite sub-build), captions loaded internally.
+
+### 12.2 CREATION ORDER — the numbered build sequence
+
+The universal child builder arg shape is **`(textureId, x, y, w, h, srcX, srcY, color)`** — the
+trailing value is the **color/tint** (`-1` = no tint), **not** an action id. Panels insert one
+opaque/clip flag before color; 3-state buttons and checkboxes append extra source-origin pairs
+(normal/hover/pressed, or off/on) before color; `GULabel` carries no texture (text comes from the
+message DB). **Action ids are never ctor arguments** — they are bound by the add-child-with-action
+call or written to the child's action field (`+0x10`). Geometry below is `x,y,w,h` / src `srcX,srcY`;
+atlas keys per §6 (**A1** `login_slice1.dds`, **A2** `loginwindow.dds`, **A3** `InventWindow.dds`,
+**A4** `loginwindow_02.dds`; the atlases are preloaded in the order A1, A2, A3, A4 into the window
+texture list before any widget is built). *(Note: an internal load-order labelling A0..A3 was used in
+one facet; this dossier keeps the §6 A1..A4 convention — the file set and load order are identical.)*
+
+**Preamble.** Load `data/script/uiconfig.lua` (read `NEW_SERVER_INDEX` → +0x554); center the window
+for the 1024×768 canvas (`this+0x14 = screenW/2−512`, `this+0x18 = screenH/2−384`); preload A1, A2,
+A3, A4 into the texture list.
+
+| # | Widget [atlas] | x,y,w,h | src | Action / note |
+|---|---|---|---|---|
+| 1 | Image [A2] | 0,110,1024×490 | 0,0 | Main background; hidden; added to window |
+| 2 | Panel [A2] | 270,85,483×490 | 0,490 | Scrollable notice/body panel |
+| 3 | Button [A2] | 467,86,13×10 | 483,490 | act **106** scroll up |
+| 4 | Button [A2] | 467,455,13×10 | 505,490 | act **107** scroll down |
+| 5 | Button [A2] | 469,98,9×9 | 496,490 | act **108** thumb |
+| 6 | Image [A2] | 207,44,70×17 | 70,980 | Notice-panel title plate; child of body panel |
+| 7 | Label loop ×10 | x=50, y=100 step +18, 383×50 | — | Notice body label slots; children of body panel |
+| 8 | (caption fill) | — | — | 22 label slots receive msg 4001..4022 in order |
+| 9 | (assemble) | — | — | Body panel hidden; image + 3 scroll buttons (106/107/108) attached; panel added to window |
+| 10 | Panel [A1] | 0,0,1024×398 | 0,0 | Top banner; **visible**; added to window |
+| 11 | Panel [A2] | 270,85,483×490 | 0,490 | Server-select container |
+| 12 | Image [A2] | 207,44,70×17 | 0,980 | Server-select title ("서버선택"); hidden; child of server-select panel |
+| 13 | Server-row loop ×2 | per row: name Label (x,390,174×21) · Image [A4] (x+47,97,100×372) · Btn3 [A4] (x−6,97,202×372) act **400** then **401** · Label (x,410, font slot 4) · Label (x,430) | — | Plate rows; X step +233 |
+| 14 | Image [A2] | 0,0,60×39 | 500,786 | Status icon; hidden |
+| 15 | Image [A2] | 0,0,60×39 | 500,786 | Status icon; hidden |
+| 16 | Image [A2] | 0,0,60×39 | 500,786 | Status icon; hidden |
+| 17 | Image [A4] | 0,ydyn,46×168 | (row-derived) | Server marker / "new" cursor; hidden |
+| 18 | Name-strip loop ×10 | x=13+47·i, y=66, 47×18 | N 596,985 / H 643,985 | act **115+i** page-jump strips |
+| 19 | (re-set) | — | 690/737,985 and 784/831,985 | Two strip buttons get explicit frame origins re-set |
+| 20 | Btn3 [A1] | 456,−3,111×38 | N 792,398 / H 602,416 | act **105** quit/help (refresh) strip |
+| 21 | Image [A1] | 407,−3,210×70 | 743,398 | EVENT badge; hidden; server-select panel added to window |
+| 22 | Panel [A3] | 342,289,340×190 | 318,647 | Confirm sub-panel A |
+| 23 | Label | 10,100,330×20 (center) | — | Caption msg **4023** |
+| 24 | Btn3 [A3] | 120,136,113×40 | 302,900 | act **113**; panel hidden; added |
+| 25 | Panel [A3] | 342,289,340×190 | 318,647 | Confirm sub-panel B |
+| 26 | Label | 10,100,330×20 | — | Caption msg **4024** |
+| 27 | Btn3 [A3] | 120,136,113×40 | 302,860 | act **114**; panel hidden; added |
+| 28 | Panel [A1] | 0, 326·H/768, 1024×442 | 0,582 | Main login-form panel |
+| 29 | Btn3 [A1] | 456,166,112×39 | N 154,398 / H 378,398 | act **102** server-list open / enter |
+| 30 | Image [A1] | 265,0,494×113 | 0,469 | Form decorative plate; hidden; form made visible; quit/help img+btn(105) attached; form added to window |
+| 31 | Panel (no tex) | 0,0,1024×100 | — | Login input-row container; hidden |
+| 32 | Image [A1] | 340,30,38×13 | 0,398 | ID-label glyph |
+| 33 | Image [A1] | 507,30,49×13 | 38,398 | PW-label glyph |
+| 34 | Image [A1] | 619,86,67×13 | 87,398 | Save-ID label glyph |
+| 35 | **Textbox** [A1] | 390,32,102×13 | 615,404 | **ID/account** — IME 16, maxlen 6, act **109** |
+| 36 | **Textbox** [A1] | 568,32,102×13 | 615,404 | **Password** — IME 12, maxlen 129, masked, act **110** |
+| 37 | **Checkbox** [A1] | 694,86,13×13 | off 717,398 / on 730,398 | **Save-ID** act **104**; prefill ID + checked-state from saved-credentials singleton (skipped if stored value empty or `(null)`); a textbox is then given modal focus |
+| 38 | **Btn3** [A1] | 456,64,112×39 | N 266,398 / H 490,398 | **OK / Login** act **103**; all input-row children (glyphs, 109/110, 104, 103) attached to the container → main form panel |
+| 39 | SecondPassword keypad | 347,173,329×422 | — | PIN modal object; keypad built; hidden; added to window |
+| 40 | Panel (no tex) | 356,531,313×132 | — | Bottom button-bar / 2nd-pw setup container |
+| 41 | Image [A1] | 67,48,178×13 | 0,437 | Decorative |
+| 42 | Image [A1] | 0,100,313×32 | 289,437 | Decorative |
+| 43 | Btn3 [A2] | 40,82,110×38 | 520,492 | act **111** (Yes / setup) |
+| 44 | Btn3 [A2] | 164,82,110×38 | 750,492 | act **112** (No); bar hidden; added |
+| 45 | `ExitPanel` [A3] | 342,289,340×190 | 318,647 | Buttons built; hidden; added |
+| 46 | `ErrorPanel` [A3] | 342,289,340×190 | 318,647 | Reset; hidden; added |
+| — | (finalize) | — | — | Install render callback; call relayout/refresh virtual |
+
+**Action-id map (consolidated).** `101` app-quit · `102` server-list open / enter (and **also**
+opens the quit-confirm ExitPanel per GAP 1) · `103` OK/Login (→ game.ver gate → sub-state 29) ·
+`104` save-ID toggle · `105` throttled (~10 s) server-list re-fetch → sub-state 34 · `106` body-panel
+scroll-up (no-op at window level) · `107/108` scroll-down/thumb (unhandled at window level) ·
+`109/110` ID / password textbox focus (also reused as a modal-toggle in OnEvent) · `111/112`
+setup/option (Yes/No) buttons · `113/114` confirm-panel A/B OK (→ hide panel → sub-state 34) ·
+`115..124` server name-strip pagers (exactly 10; repaint only, sub-state 37, no commit) ·
+`400/401` server-plate select (sub-state 37; `record_index = (action−400) + 2·page`; guard
+`status_code == 0 && load < 2400` → sub-state 38; persist Lastserver). PIN keypad uses its own internal
+tags (0..9 digit-append + the three controls). Hover tooltips: `200..245` via OnNotice.
+
+### 12.3 2D ASSET LINKAGES — component → atlas / sub-rect / VFS path
+
+All atlases are DXT5/BC3 `.dds` under `data/ui/` in the user-supplied client VFS (never committed),
+loaded by the VFS texture loader (reads the entry bytes via VFS find-and-read, makes a D3D texture
+from memory with the `"DXT5"` four-CC, returns the handle that becomes the `textureId` first arg of
+every child builder). The login scene binds atlases by **hardcoded literal path** — it does **not**
+consult `data/ui/UiTex.txt` (that boot-time texture manifest is loaded by a different corpus loader).
+Every sub-rect is a **1:1 (w×h) copy** from the atlas origin `(srcX,srcY)` (the component stores
+`srcRight = srcX+w`, `srcBottom = srcY+h`; there is no independent source size).
+
+| Component | Atlas (VFS path) | Sub-rect (srcX,srcY) | Notes |
+|---|---|---|---|
+| Background frame | A2 `data/ui/loginwindow.dds` | 0,0 → dst 0,110 1024×490 | Main background plate |
+| Notice/body panel | A2 `data/ui/loginwindow.dds` | 0,490 | Scrollable notice frame |
+| Notice scroll up/down/thumb | A2 `data/ui/loginwindow.dds` | 483,490 / 505,490 / 496,490 | acts 106/107/108 |
+| Notice/server title plates | A2 `data/ui/loginwindow.dds` | 70,980 / 0,980 | "서버선택" baked image (not a msg string) |
+| Top banner | A1 `data/ui/login_slice1.dds` | 0,0 | dst 0,0 1024×398 |
+| Server-list enter / server-list-open Btn3 | A1 `data/ui/login_slice1.dds` | N 154,398 / H 378,398 | act 102 |
+| Quit/help (refresh) Btn3 | A1 `data/ui/login_slice1.dds` | N 792,398 / H 602,416 | act 105 |
+| EVENT badge | A1 `data/ui/login_slice1.dds` | 743,398 | dst 407,−3 210×70 |
+| ID-label / PW-label / save-ID-label glyphs | A1 `data/ui/login_slice1.dds` | 0,398 / 38,398 / 87,398 | label-strip glyphs |
+| ID textbox / password textbox | A1 `data/ui/login_slice1.dds` | 615,404 | 102×13 fields; PW masked via field flag |
+| Save-ID checkbox | A1 `data/ui/login_slice1.dds` | off 717,398 / on 730,398 | act 104 |
+| OK / Login Btn3 | A1 `data/ui/login_slice1.dds` | N 266,398 / H 490,398 | act 103 |
+| Form decorative plate / bottom-bar decor | A1 `data/ui/login_slice1.dds` | 0,469 / 0,437 / 289,437 | decorative |
+| Server name-strip pagers ×10 | A2 `data/ui/loginwindow.dds` | N 596,985 / H 643,985 (+690/737, +784/831) | acts 115..124 |
+| Server status icons ×3 | A2 `data/ui/loginwindow.dds` | 500,786 | 60×39 quads, hidden by default |
+| Server plate-face image | A4 `data/ui/loginwindow_02.dds` | 448+124·i, 6 | per-cell plate art (fixed; not per-server) |
+| Server select Btn3 | A4 `data/ui/loginwindow_02.dds` | N 9,6 / H 220,6 | acts 400/401 |
+| Server marker / "new" cursor | A4 `data/ui/loginwindow_02.dds` | 700,18 | hidden until used |
+| Confirm A / B panel + OK | A3 `data/ui/InventWindow.dds` | panel 318,647 · OK 302,900 / 302,860 | msg 4023 / 4024 |
+| Setup Yes / No Btn3 | A2 `data/ui/loginwindow.dds` | 520,492 / 750,492 | acts 111 / 112 |
+| ExitPanel / ErrorPanel | A3 `data/ui/InventWindow.dds` | 318,647 (340×190) | reused modal frame; Yes/No/OK button regions from A3 |
+| PIN keypad digit faces | `data/ui/password.dds` (1024×1024, DXT3) | srcX = d·52; state bands srcY **560** normal / **612** hover / **664** pressed | digit `d`; one digit per cell after scramble |
+| PIN OK / Clear / Cancel | `data/ui/password.dds` | OK 663,8/48/88 · Clear 330,0/58/116 · Cancel 486,0/58/116 | tags 11/12/13 |
+
+Config: `data/script/uiconfig.lua` (key `NEW_SERVER_INDEX`). The 2D atlases are plain screen-space
+pixels — the world Z-negate / mesh X-negate coordinate rules do **not** apply to UI atlases. (See §6
+for the full asset manifest incl. SFX and msg-DB ids; the table above adds the per-component sub-rect
+linkages.)
+
+### 12.4 DYNAMIC / MODAL / SUB-STATE behaviour
+
+The static tree is built once; four virtuals + one render callback drive it at runtime (full ladder
+in §3, action map §5.1 / §12.2). Summary of the dynamic / modal surfaces:
+
+- **Per-frame tick (sub-FSM advance).** Animates the intro curtain, walks `flowSubState` 1..41,
+  runs the connect hand-off (curtain → idle → credential validate → PIN → roster fetch → plate-pick
+  → channel fetch → join → connecting). Sub-states confirmed including the previously-missing
+  `3` (curtain finalize), `5` (reset-to-idle), `6` (error/rest); `29` = credential validate alone
+  (ID len ≥ 4 else toast 4025; PW present else 4026); `30` = abort to GameState 6/sub 8 (dead on the
+  normal path).
+- **OnEvent (click/key/plate/timer dispatcher).** Decodes action ids 101..114 + 115..124 +
+  400..(400+count), gated by message type **1=KEY** (keycode 9/TAB cycles the two modal panels,
+  keycode 10/ENTER = OK), **6=click**, **7=list/plate**, **13=TIMER** (id 10001). 103 runs the
+  `game.ver` index-5 gate (mismatch → the single hard Win32 `MessageBoxA` msg 2204 → relaunch).
+- **OnNotice (hover).** Action ids 16, 200..245 → tooltip / help-bubble strings; 202/203/232
+  additionally blur the input boxes and raise a 2-line in-engine notice; the tail doubles as the
+  "skip intro curtain / snap fully open" path on any non-modal hover.
+- **PaintServerList (repaint).** Repaints the **2 plates per page**; resets pager-button art
+  (active↔blank per page); applies the per-render row shuffle. NOT creation.
+- **2nd-password (PIN) modal — anti-keylogger scrambled keypad.** Built as a child at construct
+  (composite sub-build). 100 digit buttons in a 5-col × 2-row visible grid (one digit per cell after
+  scramble), **re-scrambled on every show / clear / submit** (whole-second `srand(time())` →
+  ascending uniform permutation of 0..9; a port MUST reshuffle on every open, never hard-code).
+  Digit-append + OK/Clear/Cancel; submit serializes ≤ 4 digits into the login singleton (+72), sets
+  the "submitted" byte (modal +0x2B4) that the owner polls in sub-state 32. The modal is **optional**,
+  gated by a per-account flag checked in sub-state 30/31.
+- **Server-select list (runtime, data-driven).** 8-byte records `{server_id, status_code, load,
+  open_time}` (count in a sibling field); paged at exactly **2 plates/page**;
+  `record_index = plate(0|1) + 2·page`; commit guard `status_code == 0 && load < 2400` → sub-state 38;
+  `NEW_SERVER_INDEX` highlight; traffic-light load colours (load ≤ 500 green `0xFFB5FF7A` / ≤ 800
+  yellow `0xFFFFFF00` / ≤ 1200 orange `0xFFED6806` / else red `0xFFFF0000`); status codes →
+  captions 6001/6002/6003, status 3 + sub 24 → maintenance 6004, else `%4d / %4d` count 6005;
+  fallback name 5901 for an out-of-range id; legend headers 4029..4032 (4 entries). The roster +
+  per-channel endpoint are fetched by two async worker threads; the painter only renders.
+- **Button 3-state behaviour.** Each button carries normal / hover / pressed source-UV pairs; the
+  pressed frame shows only while held, and on release the bound action id fires up through OnEvent.
+  `PaintServerList` re-points pager/plate frame origins to swap art per page.
+- **Error / disconnect feedback — three channels.** (1) **Timed toast** (errors 4025/4026/4027/4028):
+  a shared "show timed notice" helper, 3000 ms auto-dismiss, OK caption shows a live "확인 − N"
+  countdown from N=3 (not a Win32 box). (2) **Hover tooltip / 2-line in-engine notice** via OnNotice
+  + the `ErrorPanel` child. (3) **Hard Win32 `MessageBoxA`** — ONLY for the client version mismatch
+  (game.ver fail → msg 2204, "ERROR", icon-hand → relaunch/patch): the single true OS dialog in this
+  scene. Plus the in-engine `ExitPanel` (Yes/No quit confirm) and `ErrorPanel` (notice host), both
+  built at construct and hidden by default.
+- **Connect timeout.** A 30000 ms TimedEvent (id 10001) armed at sub-state 40 **terminates the
+  client** on expiry (clears the engine run flag) — it is NOT a soft retry.
+
+### 12.5 TEXT / FONT / CAPTIONS
+
+- **String source = `data/script/msg.xdb`.** Loaded in WinMain state-1 immediately **before** the
+  LoginWindow is built, so it is resident at scene build. The file is an array of fixed **516-byte**
+  records (`[i32 caption id][CP949 string]`), inserted into a sorted id→string map; the single
+  accessor is `MessageDB_GetString(id)` (returns the cached string or an `Id[%d] msg not found.`
+  placeholder). The login scene uses **no inline literal captions** — the only literal "text" assets
+  are an empty placeholder string (blank label / blank ID field) and a `(null)` sentinel meaning "no
+  saved account". Server names come from the server-roster name accessor (fallback caption **5901**),
+  not from inline strings. **All on-screen ornamentation that looks like text but is baked into the
+  atlas art** — the PIN modal's title "2차 비밀번호 입력", its red warning line and "번호입력" caption (baked
+  into `password.dds`), and the "서버선택" / EVENT plates — are **images, not `msg.xdb` text** (the PIN
+  constructor makes zero message lookups). A port must blit that chrome, not add Korean text labels
+  for it.
+- **Caption ids consumed by the login scene:** **4001..4022** notice/agreement body (22 rows),
+  **4023 / 4024** confirm panels, **4025/4026** credential errors (ID short / PW empty),
+  **4027/4028** channel/roster errors, **4029..4032** server-status legend headers (4-entry array
+  indexed by status), **5901** unknown-server fallback, **6001/6002/6003** server load tiers,
+  **6004** maintenance ("preparing"), **6005** count format `%4d / %4d`, **2204** version mismatch
+  (the Win32 box). Dynamically, server names resolve via `5000 + server_id` (ids 5001..5040). The
+  Exit / Error / second-password sub-panels load their own caption ids internally.
+- **Font system — 15 D3DX font slots, charset 129 (HANGUL).** A global table of 15 `D3DXFont` slots
+  is filled once in WinMain state-1 (right before the login loop) via `D3DXCreateFontA` with charset
+  129 hardcoded; a rebuilder loops exactly 15 times on device-lost. The login scene uses this global
+  table. The `GULabel` font-slot field is zero-initialised, so labels **default to slot 0** unless a
+  per-label set-font-slot call overrides it; the only explicit override seen in the login builder is
+  **slot 4** (bold 12px, DotumChe weight 800) on the per-server population/count label (#13). Face
+  families: `DotumChe`, `Dotum`, `BatangChe` (Windows system Gulim/Dotum-family fonts — not VFS
+  assets). Slot table (face / sizeA·B·C / weight):
+
+  | slot | face | A/B/C | weight | | slot | face | A/B/C | weight |
+  |---|---|---|---|---|---|---|---|---|
+  | 0 | DotumChe | 12/6/12 | 0 (label default) | | 8 | BatangChe | 12/6/12 | 700 |
+  | 1 | Dotum | 10/5/10 | 0 | | 9 | DotumChe | 12/6/12 | 700 |
+  | 2 | DotumChe | 32/16/32 | 800 | | 10 | Dotum | 16/10/20 | 800 |
+  | 3 | DotumChe | 18/12/24 | 800 | | 11 | DotumChe | 10/5/10 | 400 |
+  | 4 | DotumChe | 12/6/12 | 800 (server count) | | 12 | DotumChe | 12/6/12 | 400 |
+  | 5 | BatangChe | 12/6/12 | 0 | | 13 | DotumChe | 14/7/14 | 400 |
+  | 6 | BatangChe | 18/12/24 | 700 | | 14 | DotumChe | 16/8/16 | 400 |
+  | 7 | BatangChe | 12/6/12 | 700 | | | | | |
+
+- **Textbox text.** The ID/PW textboxes hold user-entered text (not captions): ID maxlen 6 / IME 16;
+  password maxlen 129 / IME 12, masked via the style-flag bit (renders `*` per char, not keyed to IME
+  mode); the ID box prefills from the saved-account name unless it is the `(null)` sentinel. (Mask
+  mechanism and the textbox layout are pinned in §5.1 and `structs/gucomponent.md`.)
+
+### 12.6 Cross-references (shared GUI framework)
+
+- **`structs/gucomponent.md`** — the `GUComponent` / `GUPanel` byte-offset model: geometry fields
+  (+0x14 srcX, +0x18 srcY, +0x1C width, +0x20 height, +0x24 posX, +0x28 posY, +0x3C/+0x40 extents),
+  action id +0x10, tint/alpha +0x0C, bound-texture handle +0x90, auto-hide timer block, parent
+  pointer, and the `GUPanel` child-vector region — the universal contract every login child obeys.
+- **`structs/guwindow.md`** — the `GUWindow` multiple-inheritance shape (primary vtable +0x00,
+  `CmdHandler`/`EventHandler` MI base +0xBC, embedded `GView` +0xE8, per-window texture/atlas list
+  +0x220, the panel-slot array base **+0x238**), the five-window roster, and the CODE-CONFIRMED
+  **1368-byte (0x558)** LoginWindow size that bounds the §12.1 member-offset map.
+- **`specs/ui_system.md`** — the widget-toolkit doctrine: full `GU*` class hierarchy, the 13/14-slot
+  virtual interface, the `GUButton` 3-state priority, the `GUTextbox` password-mask bit, the render /
+  hit-test / capture / drag model, the 15-slot font table, the `msg.xdb` lookup, and the master scene
+  state machine — the framework this scene specialises.
+- **`specs/frontend_layout_tables.md`** — the authoritative numeric oracle for the rects above
+  (credential-textbox mask §2.7, PIN keypad §3, server-list display §4, validation toast §2.1a).
+- **`specs/login_flow.md` / `specs/crypto.md`** — the non-GUI half (lobby mini-protocol, credential
+  staging, the `0/0 → 1/4` handshake) that the OK/Login button and server-select commit feed into.
+
+> **Element-level ambiguities (carried to §10, not blocking the layout).** (a) PIN control tags:
+> digit-append + three controls is CONFIRMED; the exact 11-vs-12 split between Reset/OK is the one
+> open assignment. (b) PIN digit-face hover-vs-pressed band (srcY 612 vs 664) — idle 560 confirmed,
+> the other two not disambiguated by the construct call. (c) The 73-widget count and a few member
+> offsets in the +0x3BC..+0x550 pad span are static reads; a live instance would byte-confirm the
+> modal visible/submitted flag widths and the textbox IME/maxlen field widths. None affects the
+> rendered layout.

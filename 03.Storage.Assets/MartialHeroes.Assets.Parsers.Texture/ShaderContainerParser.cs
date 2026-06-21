@@ -48,9 +48,21 @@ public static class ShaderContainerParser
 
     private static ShaderSource ParseCore(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> rawBytes)
     {
-        // Decode as 7-bit ASCII.
-        // spec: Docs/RE/formats/shaders.md — "No bytes above 0x7E observed": VERIFIED.
-        var text = Encoding.ASCII.GetString(span);
+        // Decode as Latin-1 (ISO-8859-1) — a byte-preserving 8-bit encoding.
+        // Shader CODE TOKENS are 7-bit ASCII (version line, mnemonics, registers, def literals).
+        // However COMMENT TEXT (everything after ';') may contain CP949/EUC-KR bytes above 0x7E:
+        // two verified cel pixel-shader samples open with a Korean comment line.
+        // Using ASCII would silently replace bytes > 0x7F with '?' and mangle those comments.
+        // Latin-1 maps bytes 0x00–0xFF to identical Unicode codepoints, so the ASCII code tokens
+        // round-trip exactly and the CP949 comment bytes are preserved (as Latin-1 surrogates).
+        // Since the assembler ignores everything after ';', this never affects correctness of the
+        // shader code; it only matters for faithful text representation and debug display.
+        // spec: Docs/RE/formats/shaders.md §Identification —
+        //   "Shader code tokens are 7-bit ASCII. Comment text is NOT guaranteed ASCII: two
+        //    verified cel pixel-shader samples open with a CP949/EUC-KR Korean comment line
+        //    (bytes above 0x7E). Do not assert no bytes above 0x7E; a faithful reader must
+        //    tolerate CP949 in comments." VERIFIED.
+        var text = Encoding.Latin1.GetString(span);
 
         // The first line is the version declaration.
         // spec: Docs/RE/formats/shaders.md §Version Declaration Line — first line: VERIFIED.

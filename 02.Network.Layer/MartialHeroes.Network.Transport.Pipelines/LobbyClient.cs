@@ -325,6 +325,13 @@ public sealed class LobbyClient : ILobbyClient
     ///     Opens a blocking TCP socket to <paramref name="host" />:<paramref name="port" /> and
     ///     returns it. If the connect fails the socket is returned disconnected; callers must
     ///     check <see cref="Socket.Connected" /> before use.
+    ///     <para>
+    ///         <b>inet_addr semantics (no DNS):</b> the lobby host must be a dotted-decimal IPv4 literal.
+    ///         The binary uses <c>inet_addr</c> (not <c>gethostbyname</c>) on the lobby connect path —
+    ///         DNS is absent from the lobby socket entirely (re-confirmed Phase 2b, build 263bd994).
+    ///         The game-server connect (via <c>gethostbyname</c> / DNS) is a separate, unrelated path.
+    ///         spec: Docs/RE/specs/login_flow.md §2.0 (inet_addr, no DNS on lobby); §3.0 (game server uses DNS).
+    ///     </para>
     ///     spec: Docs/RE/specs/login_flow.md §2.0 — "connection failure is non-fatal to the helper".
     /// </summary>
     private static Socket ConnectBlocking(
@@ -339,17 +346,21 @@ public sealed class LobbyClient : ILobbyClient
 
         try
         {
-            // Resolve the host to an IP address.
-            var addresses = Dns.GetHostAddresses(host);
-            if (addresses.Length == 0)
-                // Host unresolvable — return disconnected socket; caller handles.
+            // LOBBY: parse the dotted-quad literal directly via IPAddress.Parse — NO DNS lookup.
+            // The binary uses inet_addr (not gethostbyname) on the lobby socket path: the host
+            // must be a dotted-decimal IPv4 string (e.g. "211.196.150.4"), never a DNS hostname.
+            // The game-server connect (separate path) uses gethostbyname (DNS) and is not here.
+            // spec: Docs/RE/specs/login_flow.md §2.0 (inet_addr, no DNS); §3.0 (game server = DNS).
+            if (!IPAddress.TryParse(host, out var address))
+                // Not a valid dotted-quad — return disconnected socket; non-fatal per spec.
+                // spec: Docs/RE/specs/login_flow.md §2.0 — "connection failure is non-fatal".
                 return socket;
 
-            var endpoint = new IPEndPoint(addresses[0], port);
+            var endpoint = new IPEndPoint(address, port);
             // Synchronous connect — this is the intentionally-blocking lobby path.
             // Use the async-over-sync pattern with GetAwaiter().GetResult() so the caller's
             // blocking-thread semantics are preserved. The CancellationToken is forwarded so
-            // the caller can abort a stalled DNS/connect.
+            // the caller can abort a stalled connect.
             socket.ConnectAsync(endpoint, cancellationToken).AsTask().GetAwaiter().GetResult();
         }
         catch (SocketException)

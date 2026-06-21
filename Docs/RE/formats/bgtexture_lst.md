@@ -24,6 +24,16 @@
 > entry joins the shared texture scheduler pool regardless of kind. The §Cross-file join `-1`
 > inventory is re-confirmed exactly (no drift) — and the IDA addresses that had leaked into that note
 > are removed (functions are now named by role). [2026-06-19]
+>
+> **RE-CONFIRMED + FAMILY NOTE (2026-06-21, evidence [static-ida, vfs-sample]):** the loader
+> (`record_count` at +0 with **reject 0 / reject `>= 2000`** guard; single bulk read of
+> `48 × record_count`; 48-byte record = 1-byte `kind` + 47-byte relpath; the single `==1` vs `!=1`
+> render-object dispatch; the `data/map000/texture/<relpath>.dds` path build) was re-read and matches
+> this spec with **no layout drift, no correction needed**. Added to §Identification a `.lst`-family
+> orientation note (five binary `.lst` kinds: `d<area>.lst`, the two `bgtexture.lst`, `bmplist.lst`,
+> `xobj.lst`, `xeffect.lst`) and pinned that `motlist/skinlist/bindlist` are **`.txt`, not `.lst`**.
+> Recorded the concrete shared-scheduler lifetime value (**180000** terrain vs **120000** bmplist) as
+> informational. No addresses or decompiler output crossed the firewall.
 
 ---
 
@@ -49,8 +59,23 @@ array and no 76-byte record.
 ## Identification
 
 - **Extension:** `.lst` (this spec covers the `bgtexture.lst` files specifically; other `.lst`
-  files in the VFS — e.g. the per-area cell manifest `d<area>.lst` — are a different format,
-  documented in `terrain.md §1.2`).
+  files in the VFS are a different format — see the **`.lst` family note** below).
+- **The binary `.lst` family (orientation).** The client reads exactly **five logical kinds** of
+  binary `.lst`, all sharing the same outer shape (LE, **no magic / version**, a leading `u32`
+  count, then a fixed-stride record array immediately after the count). They differ only in record
+  body:
+  - `data/map<area>/dat/d<area>.lst` — per-area **cell manifest**; record = a 4-byte `u32` cell key
+    (no path). Documented in `area_inventory.md` / `terrain.md §1.2`.
+  - `data/map000/texture/bgtexture.lst` and `data/effect/texture/bgtexture.lst` — **this spec**;
+    48-byte record (1-byte `kind` + 47-byte relpath).
+  - `data/effect/bmplist.lst` — effect texture pool; 30-byte name record (implicit slot index).
+  - `data/effect/xobj.lst` — effect xobj manifest; 34-byte record (explicit `u32` id + 30-byte name).
+  - `data/effect/xeffect.lst` — effect xeff manifest; 30-byte name record (effect id sourced from the
+    referenced `.xeff` file, not the `.lst`).
+- **NOT `.lst` (recurring confusion).** `data/char/motlist.txt`, `data/char/bindlist.txt`,
+  `data/char/skinlist.txt`, and `data/item/skinlist.txt` are **CP949 delimited-text tables (`.txt`)**,
+  a different format family entirely — they are *not* binary `.lst` and must not be parsed with this
+  spec. (Listed here only to pin the distinction; their `lst`-suggesting names cause repeated mix-ups.)
 - **Found in:** the VFS (`data.inf` + `data/data.vfs`). Two known instances:
   - `data/map000/texture/bgtexture.lst` — terrain background textures (global for all areas;
     textures live under `map000`).
@@ -201,11 +226,14 @@ static ground).
   the original loader does not switch on it.
 - **Shared scheduler pool (CODE-CONFIRMED).** Every pool entry — **both** kinds — is registered into
   the engine's shared texture effect/scheduler pool with a fixed non-zero lifetime parameter at
-  per-entry init. The kind byte only changes **which** of the two render-object descriptor types the
-  entry carries, **not** whether it joins the pool. Even the static (`==1`) entries talk to that
-  shared pool for their per-frame texture handle. An engineer wiring the kind byte should treat
-  `0x01` as the default (static-ground) render-object type and route every other value to the
-  alternate (scroll/animated) type, then layer the render-mode bucket on top.
+  per-entry init. For these terrain/effect `bgtexture.lst` entries that lifetime parameter is
+  **180000** (informational, not an on-disk field; for contrast the sibling `bmplist.lst` effect-pool
+  loader uses lifetime **120000**, which is one cue that distinguishes the two effect loaders). The
+  kind byte only changes **which** of the two render-object descriptor types the entry carries,
+  **not** whether it joins the pool. Even the static (`==1`) entries talk to that shared pool for
+  their per-frame texture handle. An engineer wiring the kind byte should treat `0x01` as the default
+  (static-ground) render-object type and route every other value to the alternate (scroll/animated)
+  type, then layer the render-mode bucket on top.
 - The render-mode **categories** are HIGH confidence (the value→relpath-family correlation holds
   across the full scan of both files). The **exact rendering behaviour** behind each mode
   (scroll speed, sway parameters, alpha-test vs. billboard) is INFERRED from the relpath families
@@ -258,3 +286,12 @@ static ground).
   table); recorded that every entry joins the shared texture scheduler pool regardless of kind;
   re-confirmed the `-1` inventory and removed the IDA addresses that had leaked into the §Cross-file
   join note (functions named by role). No addresses or decompiler output crossed the firewall.
+- **`.lst`-family pass (2026-06-21, evidence [static-ida, vfs-sample]):** re-confirmed the
+  `bgtexture.lst` loader and layout with **no drift / no correction**; folded in a §Identification
+  orientation note placing `bgtexture.lst` within the five-kind binary `.lst` family
+  (`d<area>.lst`, the two `bgtexture.lst`, `bmplist.lst`, `xobj.lst`, `xeffect.lst`) and pinned that
+  `motlist/skinlist/bindlist` are `.txt`, not `.lst`; recorded the shared-scheduler lifetime value
+  (180000 terrain / 120000 bmplist) as informational. The four sibling `.lst` kinds warrant their own
+  family/per-kind spec (e.g. `manifests_lst.md`); they are out of scope for this `bgtexture`-only
+  spec and are only referenced here for orientation. No addresses or decompiler output crossed the
+  firewall.

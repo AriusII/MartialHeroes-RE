@@ -5,20 +5,24 @@
 
 <!--
 verification: sample-verified
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: none
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` · `ida_anchor: 263bd994` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-21` · `ida_anchor: 263bd994` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the `.skn` / `.bnd` byte parsers in the loader chain) AND a real VFS sample: a rigid
 > item skin (`data/item/skin/*.skn`), a weighted character skin (`data/char/skin/*.skn`), a player
 > rig (`data/char/bind/g1.bnd`), and `data/char/bindlist.txt`. Every prior offset, stride, count and
-> rule re-confirmed exactly; the only delta is a cosmetic ordering refinement in `formats/bindlist.md`
-> (lexicographic, not numeric). Tier policy: a fact also matched against the real VFS sample is
-> `[sample-verified]`; a loader-control-flow-only fact is `[confirmed]`.
+> rule re-confirmed exactly; the `.bnd` documentation is unchanged in substance and gained three
+> corroborating refinements (2026-06-21): the single-bone `g2036`/`g2039`/`g2040` samples are
+> reclassified into the +4-trailer group (52-byte payload in a 56-byte file); the per-bone disk order
+> is restated as the literal parser read order (self → parent → 12-byte translation → 16-byte
+> quaternion); and the former "multi-bone byte-level cross-check" Known Unknown is resolved on the
+> 84-bone `g1.bnd` rig. None contradicts a prior fact. Tier policy: a fact also matched against the
+> real VFS sample is `[sample-verified]`; a loader-control-flow-only fact is `[confirmed]`.
 
 ## Overview
 
@@ -363,7 +367,10 @@ item samples have exactly zero residual bytes after the weight table.
 - **sample_verified:** true · **ida_anchor:** `263bd994` · **ida_reverified:** 2026-06-16
 - **Samples analysed (byte-level):** 3 files (`g2036.bnd`, `g2039.bnd`, `g2040.bnd`) from
   `data/char/bind/`. All three are 56 bytes and contain exactly 1 bone each (root-only skeleton,
-  identity transform).
+  identity transform). Byte arithmetic re-confirmed: header `actor_id`(4) + `name_len`(4) +
+  `actor_name`(N) + `bone_count`(4) plus one 36-byte bone record accounts for 52 bytes, so the
+  56-byte file size means **all three carry the +4 trailing zero block** — they belong to the
+  "236 files with +4 trailer" group, NOT the "113 exact-end" group (see §File trailer).
 - **Re-verified two-witness (build `263bd994`):** the byte parser (header → bone records →
   hierarchy build) was walked in the loader and re-checked against a fresh **player rig** sample
   (`g1.bnd`). That sample reads `actor_id = 1`, an ASCII `actor_name` LenStr of length 10, and a
@@ -414,6 +421,13 @@ retained by the loader.
 
 **BndBone on-disk record — 36 bytes, little-endian:**
 
+> **Disk order proven by read sequence (not merely inferred from layout).** The per-bone parser
+> reads the four logical fields in this exact order: `self_id` (one int), then `parent_id` (one int),
+> then the **12-byte local translation** as one contiguous raw read (3×f32), then the **16-byte local
+> rotation quaternion** as one contiguous raw read (4×f32). The two integers are read individually
+> and the translation/quaternion as two bulk slurps, so the on-disk field order below is the literal
+> read order, not an offset guess. | Confidence: [confirmed].
+
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
 | 0 | 4 | u32 LE | `self_id` | Identifies this bone within the skeleton. The loader retains only the low byte; the upper three bytes are discarded after the read. This ID is the link target for `.skn` weight `bone_index` and `.mot` track `bone_id` (both resolve `id − base_id`). | CONFIRMED |
@@ -441,7 +455,7 @@ math (`specs/skinning.md` §7).
 
 | Confidence |
 |---|
-| [sample-verified] — the loader does not reorder components (confirmed by analysis of the quaternion multiply routine used during world-transform accumulation); on build `263bd994` the `g1.bnd` root bone is an identity rest quaternion whose **W (scalar) ≈ 1.0000 at sub-offset +32**, i.e. stored last, proving XYZW order on a real bone |
+| [sample-verified] — the loader does not reorder components (confirmed by analysis of the quaternion multiply routine used during world-transform accumulation); on build `263bd994` the `g1.bnd` root bone is an identity rest quaternion whose **W (scalar) ≈ 1.0000 at sub-offset +32**, i.e. stored last, proving XYZW order on a real bone. Additionally cross-checked on a **non-identity, multi-bone** rest pose: `g1.bnd` bone 1 (`self_id` 1, `parent_id` 0, child of root) reads a non-trivial quaternion whose magnitude is **exactly 1.0** under the XYZW reading, confirming both the component order and the 36-byte stride against a real animated bone (not just the identity root) |
 
 ### Root bone sentinel
 
@@ -512,13 +526,12 @@ None identified in these formats.
   it as an old-serializer name-terminator artifact (see §File trailer). What remains unverified is
   only the exact byte-generation provenance in the original export tool; the parser handling is
   settled (read `bone_count × 36`, ignore any trailing bytes).
-- **`.bnd` multi-bone byte-level cross-check:** the 36-byte stride per bone is confirmed by parser
-  analysis and the corpus census parses cleanly, but a full byte-level offset cross-check on a
-  multi-bone rig (e.g. the §canonical player trio in `specs/skinning.md`) is the recommended next
-  validation step.
 - **`.skn` per-vertex influence cap:** the format imposes no fixed cap; the corpus shows both
   variable (~2.6) and fixed (4.0) influence styles. Whether the engine enforces a maximum at load
   is not confirmed (it sums all influences). Importers capping to an engine limit must re-normalize.
+
+> Note: the former "`.bnd` multi-bone byte-level cross-check" Known Unknown is now **resolved** — see
+> the Resolved items table below.
 
 ### Resolved items (removed from the unknowns above)
 
@@ -531,6 +544,7 @@ None identified in these formats.
 | Weights addressing bones by index vs ID | RESOLVED — `bone_index` is a **bone ID** resolved by `id − base_id`, no indirection table (§Bone addressing). |
 | `.bnd` multi-bone skeletons exist | RESOLVED — 327 multi-bone `.bnd` files; player rigs g1–g4 (82–89 bones); largest 244 bones. |
 | `.bnd` trailing 4 bytes present-in-all? | RESOLVED (corpus) — present in 236/349 files; absent (exact end) in 113. Always all-zero, content-independent → old-serializer name terminator. Parser ignores it (§File trailer). Only the exact tool provenance remains unverified. |
+| `.bnd` multi-bone byte-level cross-check | RESOLVED — performed on the `g1.bnd` player rig (`actor_id` 1, 84 bones): the 84 records × 36 bytes walk exactly to the bone-array end (then the +4 trailer), and bone 1 (`self_id` 1, `parent_id` 0) reads a non-identity quaternion of magnitude exactly 1.0 in XYZW order — the 36-byte stride and XYZW order are now confirmed on a real multi-bone rig, not just on identity single-bone props (§Quaternion component order). |
 
 ---
 

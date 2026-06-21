@@ -712,7 +712,7 @@ public sealed partial class CharCreatePreview3D : Control
         }
 
         // Rig + idle clip resolve from the mesh's OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col15 (idle).
+        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col16 (idle).
         var skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
         var idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
 
@@ -781,12 +781,17 @@ public sealed partial class CharCreatePreview3D : Control
             foreach (var rawLine in text.Split('\n'))
             {
                 var cols = rawLine.Replace("\r", string.Empty).Split('\t');
-                if (cols.Length <= 15) continue;
+                if (cols.Length <= 16) continue;
                 if (!uint.TryParse(cols[2].Trim(), out var classId) || classId != idB) continue;
 
-                // idle = motion_ids_a[0] = column 15 (record +0x40), IDB-confirmed operand-for-operand.
-                // spec: Docs/RE/formats/actormotion.md §Per-record layout (col15=+0x40=idle); animation.md.
-                var idle = cols[15].Trim();
+                // Idle motion = motion_ids_a[1] = COLUMN 16 (0-based cols[16]), record offset +0x44 — the
+                // default stand idle the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is a
+                // file-source reference that is STATICALLY DEAD (zero runtime read-sites); the earlier
+                // "col15 / a[0] / +0x40" reading was wrong. This matches CharSelectScene3D so the create
+                // preview and the select row sample the IDENTICAL idle clip per class. spec:
+                // Docs/RE/formats/actormotion.md §motion_ids_a (a[1]=+0x44=col16=default stand idle;
+                // a[0]/+0x40/col15 dead at runtime); skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b).
+                var idle = cols[16].Trim();
                 if (idle.Length == 0 || idle == "0") return null;
 
                 var motPath = $"data/char/mot/g{idle}.mot";

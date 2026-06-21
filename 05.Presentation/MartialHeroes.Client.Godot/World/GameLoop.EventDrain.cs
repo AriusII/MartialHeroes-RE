@@ -252,15 +252,22 @@ public sealed partial class GameLoop
                     localSpawn.MaxHp,
                     localSpawn.ServerClass));
 
-                // Retire the static-capsule debt for the LOCAL PLAYER: build the skinned, idle-animated
-                // avatar from the player's class (ServerClass == .skn header SkinClassId / id_b ∈ {1..4})
-                // via the SAME recovered chain NpcRenderer uses (skin → bind → idle .mot), and swap it in
-                // for the placeholder capsule. Reuses the already-open VFS handle (no second mmap). When
-                // offline (RealWorldRenderer null / Assets null) the VisualActor keeps its capsule — no
-                // regression to the offline demo path. STRICTLY PASSIVE: which clip plays is the idle the
-                // chain resolves; PlayStandingIdle is auto-engaged inside Build.
+                // Register the live local player with RealWorldRenderer so the camera-follow and the
+                // player-following terrain streaming track the REAL (server-spawned) player. There is no
+                // offline demo character to follow; this is the sole follow target.
+                // spec: World/RealWorldRenderer.cs SetLocalPlayer; resource_pipeline.md §4.3.
+                var localVisual = _actorRegistry.TryGetActor(localSpawn.Key);
+                if (localVisual is not null)
+                    _realWorldRenderer?.SetLocalPlayer(localVisual);
+
+                // Build the skinned, idle-animated avatar for the LOCAL PLAYER from the player's class
+                // (ServerClass == .skn header SkinClassId / id_b ∈ {1..4}) via the SAME recovered chain
+                // NpcRenderer uses (skin → bind → idle .mot), and attach it to the VisualActor. Reuses the
+                // already-open VFS handle (no second mmap). When VFS is absent (RealWorldRenderer null /
+                // Assets null) the VisualActor renders nothing (no fallback geometry). STRICTLY PASSIVE:
+                // which clip plays is the idle the chain resolves; PlayStandingIdle is auto-engaged inside Build.
                 // spec: Docs/RE/specs/skinning.md §8(e) (skin/bind/idle chain; g{SkinClassId}.bnd for {1..4}),
-                //       §10.5 (col15 standing idle plays looping; static look is faithful data).
+                //       §10 (col16 default standing idle plays looping; static look is faithful data).
                 // spec: World/PlayerAvatarResolver.cs / World/VisualActor.cs (AttachSkinnedAvatar swap).
                 TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass);
 
@@ -345,18 +352,17 @@ public sealed partial class GameLoop
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     Builds the in-world local player's skinned, idle-animated avatar from its class and swaps it in
-    ///     for the placeholder capsule on the freshly-spawned <see cref="VisualActor" />.
+    ///     Builds the in-world local player's skinned, idle-animated avatar from its class and attaches it
+    ///     to the freshly-spawned <see cref="VisualActor" />.
     ///     Resolution: <paramref name="serverClass" /> is the wire character class == the .skn header
     ///     SkinClassId / id_b ∈ {1,2,3,4}; <see cref="PlayerAvatarResolver.TryBuild" /> walks the recovered
-    ///     chain (skinlist .skn whose IdB == class → g{class}.bnd → actormotion col2 == class → col15 idle
-    ///     .mot) and returns a <see cref="SkinnedCharacterBuilder.Build" /> root, which
-    ///     <see cref="VisualActor.AttachSkinnedAvatar" /> re-parents over the capsule.
-    ///     Offline-safe: when <see cref="RealWorldRenderer" /> is null or its VFS handle is null (offline /
-    ///     real assets disabled), this is a no-op and the VisualActor keeps its capsule — exactly the prior
-    ///     behaviour. Never throws (the resolver guards every step).
+    ///     chain (skinlist .skn whose IdB == class → g{class}.bnd → actormotion col2 == class → col16 idle
+    ///     .mot) and returns a <see cref="SkinnedCharacterBuilder.Build" /> root passed to
+    ///     <see cref="VisualActor.AttachSkinnedAvatar" />.
+    ///     VFS-safe: when <see cref="RealWorldRenderer" /> is null or its VFS handle is null (VFS absent),
+    ///     this is a no-op and the VisualActor renders nothing. Never throws (the resolver guards every step).
     ///     spec: Docs/RE/specs/skinning.md §8(e) (skin/bind/idle chain; g{SkinClassId}.bnd for {1,2,3,4}),
-    ///     §10.5 (the col15 standing idle plays, looping).
+    ///     §10 (the col16 default standing idle plays, looping).
     /// </summary>
     /// <param name="key">The local player's composite actor identity (looks up its VisualActor).</param>
     /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4}.</param>

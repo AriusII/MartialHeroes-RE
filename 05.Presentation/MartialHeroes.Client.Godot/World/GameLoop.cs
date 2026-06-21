@@ -7,7 +7,6 @@ using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Hud;
 using MartialHeroes.Shared.Kernel.Enums;
-using Environment = System.Environment;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -108,15 +107,6 @@ public sealed partial class GameLoop : Node
         // *** INCONTOURNABLE — ce log apparaît avant TOUT le reste ***
         GD.Print("===== [GameLoop] _Ready ENTERED =====");
 
-        // Spawn the debug baseline (green floor + emissive red cube) only when the dev baseline
-        // flag is set. The original world build contains NO such scaffolding geometry — it renders
-        // only the recovered scene graph (terrain/actors/effects). Gating this behind a dev flag,
-        // default OFF, keeps production / fidelity screenshots clean.
-        // spec: Docs/RE/specs/client_runtime.md §7.4 (BuildGameWorld has no debug primitives);
-        // spec: Docs/RE/specs/game_loop.md §3.5 (render = scene-graph cull walk only).
-        if (IsDevBaselineEnabled())
-            SpawnDebugBaseline();
-
         // The entire _Ready body is wrapped defensively: any exception in subsystem wiring,
         // context resolution, or real-asset initialisation must NOT crash the scene.
         // F5 must always produce a Godot window; the window may be in degraded mode.
@@ -131,124 +121,6 @@ public sealed partial class GameLoop : Node
         }
 
         GD.Print("===== [GameLoop] _Ready COMPLETED =====");
-    }
-
-    /// <summary>
-    ///     DEV-ONLY scaffolding: spawns a large green ground plane and an emissive red reference cube
-    ///     at the world origin. This is NOT part of the original world build — the recovered client
-    ///     renders only the scene graph (terrain/actors/effects) and contains no debug primitives. It is
-    ///     therefore gated behind <see cref="IsDevBaselineEnabled" /> (default OFF) so production /
-    ///     fidelity screenshots show only real geometry. When enabled it serves as a depth/orientation
-    ///     cue and a guaranteed visual proof that the Godot scene executes even if all asset loading fails.
-    ///     spec: Docs/RE/specs/client_runtime.md §7.4; game_loop.md §3.5.
-    /// </summary>
-    private void SpawnDebugBaseline()
-    {
-        try
-        {
-            // --- Large ground plane ---
-            var groundMesh = new MeshInstance3D();
-            var planeMesh = new PlaneMesh();
-            planeMesh.Size = new Vector2(200f, 200f);
-            groundMesh.Mesh = planeMesh;
-
-            var groundMat = new StandardMaterial3D();
-            // Checkerboard-style green ground so depth and scale are readable.
-            groundMat.AlbedoColor = new Color(0.22f, 0.55f, 0.22f);
-            groundMat.RoughnessTexture = null;
-            planeMesh.Material = groundMat;
-
-            groundMesh.Name = "DebugGround";
-            groundMesh.Position = Vector3.Zero;
-            AddChild(groundMesh);
-
-            // --- Reference cube (emissive red — visible even with no lighting) ---
-            var cubeMesh = new MeshInstance3D();
-            var boxMesh = new BoxMesh();
-            boxMesh.Size = new Vector3(1.5f, 1.5f, 1.5f);
-            cubeMesh.Mesh = boxMesh;
-
-            var cubeMat = new StandardMaterial3D();
-            cubeMat.AlbedoColor = new Color(1f, 0f, 0f);
-            cubeMat.EmissionEnabled = true;
-            cubeMat.Emission = new Color(1f, 0.1f, 0.1f);
-            cubeMat.EmissionEnergyMultiplier = 2.0f;
-            boxMesh.Material = cubeMat;
-
-            cubeMesh.Name = "DebugReferenceCube";
-            cubeMesh.Position = new Vector3(0f, 1.5f, 0f);
-            AddChild(cubeMesh);
-
-            GD.Print("[GameLoop] Debug baseline (ground+cube) spawned.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameLoop] SpawnDebugBaseline failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    ///     Returns true when the DEV-ONLY debug baseline (green plane + red origin cube) is enabled.
-    ///     Default OFF so the world renders only the recovered scene graph; enabled only via the
-    ///     <c>MH_DEV_BASELINE=1</c> environment variable or the <c>dev_baseline=1</c> key in
-    ///     <c>client_dir.cfg</c>. DEV_OFFLINE_FLOW must not add geometry to fidelity screenshots.
-    ///     spec: Docs/RE/specs/client_runtime.md §7.4 (no debug primitives in the original world build).
-    /// </summary>
-    private static bool IsDevBaselineEnabled()
-    {
-        // Dedicated env override — fastest to check.
-        var baselineEnv = Environment.GetEnvironmentVariable("MH_DEV_BASELINE");
-        if (baselineEnv is "1" or "true" or "yes")
-            return true;
-
-        return ReadCfgFlag("dev_baseline");
-    }
-
-    /// <summary>
-    ///     Reads a boolean flag from <c>client_dir.cfg</c> (res:// or cwd). Returns false on any error or
-    ///     when the key is absent — fail-open to OFF so a missing config never spawns scaffolding.
-    /// </summary>
-    private static bool ReadCfgFlag(string key)
-    {
-        try
-        {
-            var path = ResolveCfgPath();
-            if (path is null) return false;
-
-            foreach (var rawLine in File.ReadLines(path))
-            {
-                var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-
-                var eq = line.IndexOf('=');
-                if (eq < 0) continue;
-
-                var k = line[..eq].Trim();
-                var v = line[(eq + 1)..].Trim();
-                if (k.Equals(key, StringComparison.OrdinalIgnoreCase))
-                    return v is "1" or "true" or "yes";
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[GameLoop] ReadCfgFlag('{key}'): {ex.Message}");
-        }
-
-        return false;
-    }
-
-    private static string? ResolveCfgPath()
-    {
-        const string configResPath = "res://client_dir.cfg";
-        try
-        {
-            var abs = ProjectSettings.GlobalizePath(configResPath);
-            return File.Exists(abs) ? abs : null;
-        }
-        catch
-        {
-            return File.Exists("client_dir.cfg") ? "client_dir.cfg" : null;
-        }
     }
 
     /// <summary>

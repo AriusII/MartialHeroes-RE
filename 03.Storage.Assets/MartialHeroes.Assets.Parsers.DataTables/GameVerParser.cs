@@ -84,8 +84,9 @@ public static class GameVerParser
         // spec: Docs/RE/formats/game_ver.md §7 §Layout — "field2 @ 0x08: UNVERIFIED".
         var field2 = BinaryPrimitives.ReadUInt32LittleEndian(span[0x08..]);
 
-        // field3 @ 0x0C — possibly a build number; semantic UNVERIFIED.
-        // spec: Docs/RE/formats/game_ver.md §7 §Layout — "field3 @ 0x0C: UNVERIFIED".
+        // field3 @ 0x0C — consumed by a separate external (non-VFS) client system-info reader
+        // that seeks to byte offset 12 (= field index 3); SAMPLE-VERIFIED-as-consumed.
+        // spec: Docs/RE/formats/game_ver.md §7 §Layout — "field3 @ 0x0C: SAMPLE-VERIFIED-as-consumed (external reader seeks offset 12)".
         var field3 = BinaryPrimitives.ReadUInt32LittleEndian(span[0x0C..]);
 
         // field4 @ 0x10 — semantic UNVERIFIED.

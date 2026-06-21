@@ -14,9 +14,10 @@ public sealed partial class RealWorldRenderer
     /// <summary>
     ///     Calls <see cref="SectorStreamingService.UpdateCenterAsync" /> for the initial spawn-anchor
     ///     cell and arms the player-following streaming loop.
-    ///     Boot behaviour: the initial anchor is the spawn-density peak (already resolved by
-    ///     <see cref="ResolveTargetCell" /> before this method is called). This is unchanged from the
-    ///     pre-follow behaviour.
+    ///     Boot behaviour: the initial anchor is the spawn-density peak for the server-supplied area
+    ///     (resolved by <see cref="TryApplySpawnCell" /> / <see cref="ResolveTargetCellForServerArea" />
+    ///     in <see cref="OnWorldEntered" /> before this method is called — the world build is driven by
+    ///     the server 4/1, not by an offline config area).
     ///     Follow behaviour: after boot, <see cref="_Process" /> checks the player position each frame
     ///     and recenter the streaming ring whenever the player moves ≥ <see cref="HysteresisThresholdCells" />
     ///     cells (Chebyshev) from <see cref="_streamAnchor" />. Each recenter calls

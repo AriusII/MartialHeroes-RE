@@ -22,6 +22,13 @@ public sealed partial class GamePacketHandler
         }
 
         var replyBytes = _loginDriver.OnKeyExchange(payload);
+
+        // The 0/0 → 1/4 reactive secure-auth branch arms the single char-management in-flight latch on
+        // send (the keepalive timer suppresses the 20s idle heartbeat while the login reply is outstanding).
+        // It is cleared by the first char-mgmt result the server pushes next (3/1 success roster, etc.).
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (SET by … the (0,0)→1/4 inbound secure-auth branch).
+        _inFlightLatch?.Arm();
+
         _eventBus.Publish(new LoginHandshakeCompletedEvent(replyBytes));
     }
 

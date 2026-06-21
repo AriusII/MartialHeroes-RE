@@ -27,14 +27,20 @@ namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 ///             <item>Field 0 (WidgetId) is unambiguously a sequential per-record ordinal (strictly increasing, no gaps).</item>
 ///             <item>Fields 1+2 (FieldA0/FieldA1) co-vary as a ±1 caption-id couple: FieldA1 = FieldA0 − 1.</item>
 ///             <item>Fields 3+6 (FieldKind/FieldLink) co-vary as a kind/link couple: small repeated values.</item>
-///             <item>Fields 4+5 (FieldB0/FieldB1) co-vary as a decimal-packed icon-id pair: FieldB1 = FieldB0 + 1.</item>
+///             <item>
+///                 Fields 4+5 (FieldB0/FieldB1) co-vary as a decimal-packed icon-id pair: FieldB1 = FieldB0 + 1 in
+///                 MOST records, but NOT universally (the final record has FieldB1 = 0xFFFFFFFF while FieldB0 is
+///                 non-sentinel).
+///                 Treat as a related pair; do NOT assume delta = +1.
+///             </item>
 ///         </list>
 ///         spec: Docs/RE/formats/mi.md §Record layout §Structural signals — PLAUSIBLE.
 ///     </para>
 ///     <para>
-///         Do not implement business logic against these meanings until a live-debugger pass confirms
-///         the loader's field read order.
-///         spec: Docs/RE/formats/mi.md §Status — "loader: UNRESOLVED (static) — LIVE-DEBUGGER-PENDING".
+///         <b>CONFIRMED NOT READ in build 263bd994 (CYCLE 7 hardened, 2026-06-20).</b>
+///         There is no client consumer; per-field meanings are OUT-OF-CLIENT-SCOPE and cannot be
+///         confirmed from the client. Do NOT implement port behaviour driven by these provisional roles.
+///         spec: Docs/RE/formats/mi.md §Status — "loader: CONFIRMED NOT READ (4-way exhaustive static search = 0 hits)".
 ///     </para>
 /// </remarks>
 public sealed class MiWidgetRecord
@@ -76,14 +82,16 @@ public sealed class MiWidgetRecord
     /// <summary>
     ///     Field 4 (+0x10): PLAUSIBLE decimal-packed icon / sprite id (primary of a pair with
     ///     <see cref="FieldB1" />); confirmed NOT a pointer (values too small for a VAS address).
-    ///     Observed: FieldB1 = FieldB0 + 1.
+    ///     Observed: FieldB1 = FieldB0 + 1 in most records; NOT universal (final record: FieldB1 = 0xFFFFFFFF).
     ///     spec: Docs/RE/formats/mi.md §Record layout — field 4 u32 @ +0x10: PLAUSIBLE.
     /// </summary>
     public required uint FieldB0 { get; init; }
 
     /// <summary>
     ///     Field 5 (+0x14): PLAUSIBLE decimal-packed icon / sprite id (sibling of <see cref="FieldB0" />),
-    ///     or none-sentinel <c>0xFFFFFFFF</c>.  Observed: FieldB1 = FieldB0 + 1 when both are set.
+    ///     or none-sentinel <c>0xFFFFFFFF</c>. The delta FieldB1 = FieldB0 + 1 holds for some records
+    ///     but is NOT universal: the final record has FieldB1 = 0xFFFFFFFF while FieldB0 is non-sentinel.
+    ///     Treat as a related pair; do NOT assume delta = 1.
     ///     spec: Docs/RE/formats/mi.md §Record layout — field 5 u32 @ +0x14: PLAUSIBLE.
     /// </summary>
     public required uint FieldB1 { get; init; }

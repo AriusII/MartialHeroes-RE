@@ -9,8 +9,9 @@
 > `stardome%d.bin`, `clouddome%d.bin`, `cloud_cycle%d.bin`, `weather%d.bin`, and
 > `weather%d_rain.bin`. The closely related per-map directional-light, point-light, and wind
 > files (`light%d.bin`, `point_light%d.bin`, `wind%d.bin`) are formally specified in
-> `Docs/RE/formats/terrain_layers.md §6–8`; supplementary sample-verified corrections to
-> those sections are noted at the end of this document (§9). The **colour domains** of these
+> `Docs/RE/formats/terrain_layers.md §6–8`; supplementary sample-verified / loader-resolved
+> corrections to those sections are noted at the end of this document (§9 for `light%d.bin`,
+> §12 for `wind%d.bin`). The **colour domains** of these
 > fields (which colours are byte D3DCOLOR vs. float [0,1]) and how they feed the runtime
 > lighting/fog math are pinned in §10 and consumed by `Docs/RE/specs/environment.md`.
 
@@ -1006,6 +1007,112 @@ with the section 3.2 "loaded but usage not traced / proposed reserved" entries.
 
 ---
 
+## Section 12: Supplementary corrections to `terrain_layers.md §8` (`wind%d.bin`)
+
+`terrain_layers.md §8` documents `wind%d.bin` as an 8-byte header plus a `count`-long array of
+24-byte records (file size `8 + count × 24`). That overall layout is **CONFIRMED unchanged** by a
+loader re-walk and a full-corpus size scan. This section adds the **loader-resolved and
+sample-verified refinements** that §8 left open — the header `source_flag` semantics, the per-record
+texture-id join key, the proposed record field roles, and (importantly) the **fail-on-missing**
+exception to the family-wide sibling-tolerance rule. Where these refinements differ from the
+`terrain_layers.md §8` text, treat **this section as authoritative** (it is loader-proven against
+build `263bd994` plus the full 57-file VFS corpus).
+
+> **Loader vs. consumer (LOADER-RESOLVED).** The wind loader does **two** things: (1) it slurps the
+> whole `count × 24`-byte record block verbatim into one heap allocation (fields at +0x00..+0x10 stay
+> raw, decoded later by the foliage-sway update/draw path), and (2) it conditionally decodes **only**
+> the per-record texture id at +0x14 — and only when the header `source_flag` is non-zero. So the
+> record-field roles in §12.3 below are CONSUMER-side proposals (corroborated by constructor defaults),
+> while the header semantics and the texture-id join key in §12.1–§12.2 are loader-proven.
+
+### 12.1 Header semantics (8 bytes) — `source_flag` gates texture binding, NOT wind on/off
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | u32 | `record_count` | Number of 24-byte records. `0` ⇒ no record block; the file is exactly 8 bytes. The empty 8-byte form is a **valid, common shipping form** (whole 200-series areas ship it) — a parser must NOT treat an 8-byte file as truncated. | CONFIRMED (loader + 57 samples) |
+| 0x04 | 4 | u32 | `source_flag` | **Gates the per-record texture-binding loop only** — it is NOT a "wind enabled / disabled" flag. `0` ⇒ records are still read, but each record's `tex_id` (+0x14) is NOT registered as a texture. Non-zero ⇒ the loader walks the records and registers each `tex_id` as a `data/sky/texture/wind%d.dds` texture (§12.2). **`source_flag` is `0` in 100% of the 57-file corpus**, so the texture-binding path is effectively dead data in shipping. (This is the `flag2` of `terrain_layers.md §8.1`; its "activates foliage-sway curve seeding" gloss is refined here to "gates per-record texture registration".) | CONFIRMED (loader); SAMPLE-VERIFIED (always 0) |
+
+Two witnesses for the 8-byte header: the loader reads two consecutive u32 words before any record
+block, and every sample file size equals `8 + record_count × 24` exactly (57/57 files).
+
+### 12.2 Per-record texture-id join key (+0x14 → `wind%d.dds`)
+
+The word at record offset **+0x14** is the **texture id** (this matches `terrain_layers.md §8.2`'s
+CONFIRMED `texture_id` and supersedes its earlier `sway_seed` reading). The loader reads this dword
+and, **only when `source_flag` is non-zero**, registers it with the foliage-sway material lookup:
+
+- **Join key:** `record.tex_id` → **`data/sky/texture/wind<tex_id>.dds`** (the same `data/sky/texture/`
+  family as cloud/star/lensflare/moon/sun/rain textures — add `wind<id>.dds` to that chain).
+- The id is registered through a small per-area wind-texture set that is **clamped to a maximum of 16
+  textures** (ids beyond the 16th are dropped); duplicate ids are de-duplicated before the DDS is
+  built and cached.
+- **Float-vs-int duality:** the file stores the +0x14 word; the loader consumes it as an **integer**
+  texture id (with a `>= 1` validity check). In every sample the word is `0.0` (= integer 0), so even
+  if `source_flag` were set the texture path would be skipped. Whether the field is authored as a
+  float or an int on disk is **UNVERIFIED** — the corpus has no non-zero / `source_flag = 1` example.
+
+### 12.3 Proposed record field roles (consumer-side, +0x00..+0x10)
+
+The five words preceding `tex_id` are slurped raw and consumed by the foliage-sway update/draw path
+(not decoded at load time). Their roles are **PROPOSED** from observed value ranges plus the
+correlation with the per-emitter float defaults seeded in the wind-object constructor (the constructor
+seeds `speed`-like, world-coordinate-like, and `scale`-like immediates that line up with the populated
+record values). Records appear to **override** those constructor defaults per emitter:
+
+| Rec offset | Size | Type | Proposed field | Observed values (populated sample, count=4) | Confidence |
+|-----------:|-----:|------|----------------|----------------------------------------------|------------|
+| +0x00 | 4 | f32 | `_pad0` / unknown_0 | always `0.0` in samples | SAMPLE-VERIFIED (0.0) |
+| +0x04 | 4 | f32 | `speed` (proposed) | `3.0, 3.0, 4.0, 6.0` — matches the per-emitter speed defaults seeded in the constructor | PROPOSED |
+| +0x08 | 4 | f32 | `_pad2` / unknown_1 | always `0.0` in samples | SAMPLE-VERIFIED (0.0) |
+| +0x0C | 4 | f32 | `coord` (proposed) | `0.0, 1024.0, 512.0, 1536.0` — multiples of 512; 1024 = the MH cell unit; looks like a world coordinate / lane offset | PROPOSED |
+| +0x10 | 4 | f32 | `scale` (proposed) | `1.0, 1.0, 1.5, 1.0` — matches a scale default seeded in the constructor | PROPOSED |
+| +0x14 | 4 | u32 | `tex_id` | `0` in all samples | CONFIRMED (loader reads +0x14); SAMPLE-VERIFIED (0) |
+
+This refines `terrain_layers.md §8.2`'s "possibly time key / direction X/Y/Z / wind speed / frequency"
+guesses: +0x00 and +0x08 read as **pad** (always zero), +0x04 as **speed**, +0x0C as a **world
+coordinate / lane offset**, +0x10 as **scale**. These roles remain PROPOSED until the per-frame
+foliage-sway draw consumer is read (or confirmed live).
+
+### 12.4 ⚠️ FAIL-ON-MISSING — `wind%d.bin` is the EXCEPTION to family sibling-tolerance (LOADER-RESOLVED)
+
+> **The Overview "Sibling tolerance" rule (skip-and-default on an absent sibling) does NOT apply to
+> `wind%d.bin`.** Unlike the material/light loaders (which synthesise defaults on a missing file and
+> return success — §3.4, §9.5), the wind loader **returns failure (0) when the file cannot be opened**,
+> and the area-load hub **propagates that result as the area-load outcome** (the hub's final step is
+> "succeed only if the wind load succeeded"). So a *missing* `wind%d.bin` would **fail the area load**.
+
+In practice this never triggers, because **every shipping area ships a `wind%d.bin`** — at minimum the
+empty 8-byte form (§12.1). The port consequence is concrete: a faithful client must **ship/emit a
+per-area `wind%d.bin` for every area (the empty 8-byte form is sufficient)** rather than omitting the
+file. This also corrects `terrain_layers.md §8`'s "Missing file or zero-count file produces no foliage
+sway" — a *zero-count* file is fine (it is read successfully and yields no sway), but a *missing* file
+is a load failure, not a silent no-sway. (The empty-file vs. missing-file distinction is the load
+witness; the failure-propagation is flagged for a live `?ext=dbg` confirmation, though the static read
+is unambiguous.)
+
+### 12.5 Runtime ownership and load order
+
+- The wind data is owned by a **process-global wind manager singleton** (lazily constructed on first
+  use), not a per-area throwaway object. Besides the area-load hub, it is also pulled by the terrain
+  ring-streaming path, i.e. the wind/foliage geometry participates in the terrain/world draw.
+- In the per-area `.bin` load sequence the wind load runs **LAST**, after the map-option, fog,
+  material, sound, weather, and sky-system steps. The `%d` substitution is the **current area id**
+  (set by the hub) — there is no `.txt` companion that drives the binary (the `wind%d.txt` siblings
+  are editor exports only, per `terrain_layers.md §8`).
+
+### 12.6 Known unknowns (`wind%d.bin`)
+
+- **Record field roles (+0x04/+0x0C/+0x10 = speed/coord/scale):** PROPOSED from value ranges +
+  constructor-default correlation; not yet confirmed from the per-frame foliage-sway draw consumer.
+  Confirming +0x00/+0x08 are truly pad also awaits that consumer.
+- **`tex_id` authored type (float vs int):** all samples `0`, so the on-disk authoring convention is
+  unverified; the loader consumes the word as an int. Needs a non-zero / `source_flag = 1` sample.
+- **`source_flag` non-zero in production:** not observed in 57 files; whether any shipped area enables
+  the per-record texture-binding path is unverified (likely a never-shipped editor feature, like
+  `weather%d_rain.bin`).
+
+---
+
 ## Sky texture assets
 
 All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries in the VFS:
@@ -1017,6 +1124,7 @@ All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries 
 | `data/sky/texture/cloud%d.dds` | Cloud dome textures | Ping-pong 2-frame (layer 1) / 4-frame (layer 2) | Indexed by `cloud_cycle%d.bin` |
 | `data/sky/texture/star.dds` | Star point-sprite texture | No | Single file |
 | `data/sky/texture/lensflare%d.dds` | Lens-flare layers | No | Numbered; gated by `lensflare_enable` |
+| `data/sky/texture/wind%d.dds` | Foliage-sway / wind material | No | Indexed by `wind%d.bin` record `tex_id` (+0x14), bound only when `source_flag != 0` — §12.2; never exercised in the shipping corpus (`source_flag = 0` everywhere) |
 | `data/sky/texture/rain_drop.dds` | Rain drop splash | No | Weather only; rain built procedurally at runtime (§8) |
 | `data/sky/texture/rains.dds` | Rain streak | No | Weather only; rain built procedurally at runtime (§8) |
 | `data/sky/texture/snow.dds` | Snow particle | No | Weather only |
@@ -1053,8 +1161,12 @@ and therefore has no water texture assets (§1.4).
 6. **`weather%d.bin` full layout:** Zero-dominated samples; needs a rain/snow area sample for
    decode. (`weather%d_rain.bin` is NOT in this category — it has no loader and is dead editor data,
    §8.)
-7. **`wind%d.bin` keyframe field layout:** Documented in `terrain_layers.md §8`; no non-zero
-   samples available.
+7. **`wind%d.bin` record field roles:** RESOLVED — layout (8-byte header + 24-byte records,
+   `8 + count × 24`) is CONFIRMED, the header `source_flag` gates per-record texture binding (not
+   wind on/off), the +0x14 `tex_id` joins to `data/sky/texture/wind%d.dds`, and the loader
+   **fails-on-missing** (the family-wide sibling-tolerance exception) — see §12. Still open: the
+   consumer-side roles of record words +0x04/+0x0C/+0x10 (proposed speed/coord/scale) and whether any
+   shipped area sets `source_flag != 0` (none in the 57-file corpus).
 8. **`point_light%d.bin` record position fields (+0x24–+0x30):** Documented in
    `terrain_layers.md §7`; positional interpretation (scaled coordinates vs. normalised index)
    unverified.
@@ -1074,7 +1186,8 @@ and therefore has no water texture assets (§1.4).
 
 - **Related format specs:**
   - `Docs/RE/formats/terrain_layers.md §6–8` — formal specs for `light%d.bin`,
-    `point_light%d.bin`, `wind%d.bin` (§9 of this document adds sample-verified corrections)
+    `point_light%d.bin`, `wind%d.bin` (§9 of this document adds sample-verified corrections to the
+    `light%d.bin` section; §12 adds loader-resolved corrections to the `wind%d.bin` section)
   - `Docs/RE/formats/terrain.md` — terrain cell formats (`.ted`, `.map`, `.sod`)
   - `Docs/RE/formats/texture.md` — DDS texture container
 - **Runtime assembly spec:** `Docs/RE/specs/environment.md` (the runtime lighting/fog math, the
@@ -1091,6 +1204,18 @@ and therefore has no water texture assets (§1.4).
 ---
 
 ## Provenance note (this revision)
+
+**`wind%d.bin` loader-resolved promotion (build `263bd994`; wind loader re-walk + full 57-file VFS
+corpus).** Added §12 — supplementary loader-resolved / sample-verified corrections to
+`terrain_layers.md §8`: the 8-byte header `source_flag` **gates per-record texture binding only** (not
+wind on/off; `0` across all 57 samples); the per-record texture-id join key `tex_id (+0x14) →
+data/sky/texture/wind%d.dds` (clamped to 16, de-duplicated), with the int-vs-float authoring left
+UNVERIFIED; the proposed consumer-side record roles (+0x04 speed, +0x0C world coord, +0x10 scale,
++0x00/+0x08 pad); and the **fail-on-missing** carve-out — the wind loader is the EXCEPTION to the
+family sibling-tolerance rule (it returns failure on an absent file and the hub propagates it), so a
+faithful port must ship a per-area `wind%d.bin` (the empty 8-byte form suffices). Also: added
+`wind%d.dds` to the sky-texture asset table; refined family-level known-unknown #7; updated the scope
+note and cross-references. No addresses, no pseudo-code.
 
 **CAMPAIGN 10 — Block D6 two-witness re-verification (build `263bd994`; area/sky loaders + a full
 per-area VFS sample scan + a `DoOption.ini` sample).** NO conflicts found on any env-bin byte table;

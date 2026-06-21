@@ -11,7 +11,8 @@ namespace MartialHeroes.Assets.Parsers.Texture;
 ///     <c>discript.sc</c> (68B records, CP949).
 /// </summary>
 /// <remarks>
-///     spec: Docs/RE/formats/misc_data.md §2–§5.
+///     spec: Docs/RE/formats/mi.md — mobinfo.mi container + per-record layout (SAMPLE-VERIFIED).
+///     spec: Docs/RE/formats/misc_data.md §3–§5 — .tol + discript.sc layouts.
 ///     ZERO rendering/engine dependencies.
 /// </remarks>
 public static class MiscParser
@@ -20,8 +21,8 @@ public static class MiscParser
     // mobinfo.mi — Monster info table (4B header + 28B records)
     // =========================================================================
 
-    // Record stride: 28 bytes (7 × u32le). CONFIRMED (parser and stride).
-    // spec: Docs/RE/formats/misc_data.md §2 — "stride 28 bytes: HIGH".
+    // Record stride: 28 bytes (7 × u32le). SAMPLE-VERIFIED (4 + 21 × 28 = 592 bytes).
+    // spec: Docs/RE/formats/mi.md §Container layout — "fixed-stride 28 bytes per record: SAMPLE-VERIFIED".
     private const int MobInfoRecordStride = 28;
 
     // =========================================================================
@@ -57,11 +58,16 @@ public static class MiscParser
 
     /// <summary>
     ///     Parses <c>data/ui/mobinfo.mi</c> — monster info table.
-    ///     Header: count u32. Records: count × 28 bytes.
+    ///     Header: count u32le @ offset 0. Records: count × 28 bytes.
     /// </summary>
     /// <remarks>
-    ///     spec: Docs/RE/formats/misc_data.md §2: sample_verified (header + stride).
-    ///     File size = 4 + count × 28. CONFIRMED (4 + 21 × 28 = 592 bytes).
+    ///     spec: Docs/RE/formats/mi.md §Container layout — SAMPLE-VERIFIED (4B header + 28B stride).
+    ///     File size = 4 + count × 28. SAMPLE-VERIFIED (4 + 21 × 28 = 592 bytes on disk).
+    ///     <para>
+    ///         IMPORTANT: the shipping client has NO loader for this file (CONFIRMED NOT READ in build 263bd994).
+    ///         This parser is provided for archival/interoperability completeness only.
+    ///         spec: Docs/RE/formats/mi.md §Loader — "no path literal, not in boot corpus, not compiled in".
+    ///     </para>
     /// </remarks>
     public static MobInfoRecord[] ParseMobInfoMi(ReadOnlyMemory<byte> data)
     {
@@ -69,16 +75,16 @@ public static class MiscParser
         if (span.Length < 4)
             throw new InvalidDataException(
                 $"mobinfo.mi parse error: buffer too short for 4-byte header (got {span.Length}). " +
-                "spec: Docs/RE/formats/misc_data.md §2.");
+                "spec: Docs/RE/formats/mi.md §Container layout.");
 
-        // count u32le @ +0. HIGH.
-        // spec: Docs/RE/formats/misc_data.md §2 — "count u32 @ 0: HIGH".
+        // count u32le @ +0. SAMPLE-VERIFIED.
+        // spec: Docs/RE/formats/mi.md §Container layout — "count u32le @ 0: SAMPLE-VERIFIED".
         var count = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
         var expectedSize = 4 + (long)count * MobInfoRecordStride;
         if (span.Length < expectedSize)
             throw new InvalidDataException(
                 $"mobinfo.mi parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/misc_data.md §2.");
+                "spec: Docs/RE/formats/mi.md §Container layout.");
 
         var results = new MobInfoRecord[(int)count];
         for (var i = 0; i < (int)count; i++)
@@ -86,17 +92,22 @@ public static class MiscParser
             var offset = 4 + i * MobInfoRecordStride;
             var rec = span.Slice(offset, MobInfoRecordStride);
 
-            // All 7 fields: u32le × 7.
-            // spec: Docs/RE/formats/misc_data.md §2 — "7 × u32le: HIGH (layout); field semantics PARTIAL".
+            // All 7 fields are u32le; field widths are SAMPLE-VERIFIED; semantics SINGLE-SAMPLE.
+            // spec: Docs/RE/formats/mi.md §Per-record layout — "7 × u32le: SAMPLE-VERIFIED; field roles SINGLE-SAMPLE".
+            // NOTE: portrait_res_3 label WITHDRAWN per CYCLE 7 — field +24 renamed to aux_field.
+            // spec: Docs/RE/formats/mi.md §Per-record layout — "any portrait_res_3 label WITHDRAWN".
             results[i] = new MobInfoRecord
             {
-                MobClassId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]), // mob_class_id @ +0
-                NameStrId = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]), // name_str_id @ +4
-                AltNameStrId = BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]), // alt_name_str_id @ +8
-                IconIndex = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]), // icon_index @ +12
-                PortraitRes1 = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]), // portrait_res_1 @ +16
-                PortraitRes2 = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]), // portrait_res_2 @ +20
-                PortraitRes3 = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]) // portrait_res_3 @ +24
+                EntryId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]), // entry_id @ +0:  dense 101..121 (row key)
+                CaptionMsgId = BinaryPrimitives.ReadUInt32LittleEndian(rec[4..]), // caption_msg_id @ +4
+                DescriptionMsgId =
+                    BinaryPrimitives.ReadUInt32LittleEndian(rec[8..]), // description_msg_id @ +8; 0xFFFFFFFF = absent
+                SmallParam = BinaryPrimitives.ReadUInt32LittleEndian(rec[12..]), // small_param @ +12
+                PackedCodeA =
+                    BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]), // packed_code_a @ +16 (decimal-packed)
+                PackedCodeB =
+                    BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]), // packed_code_b @ +20 (decimal-packed)
+                AuxField = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]) // aux_field @ +24; 0xFFFFFFFF = none
             };
         }
 

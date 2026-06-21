@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -40,8 +40,13 @@ family. Key architectural facts:
 - **Rendering uses a single shared `ID3DXSprite`** per frame. Every visible widget submits exactly
   one textured-quad blit (atlas sub-rect + translation transform + ARGB tint). There is no custom
   vertex format for UI geometry.
-- **Text rendering** is GPU-side via `D3DXCreateFontA` with `HANGUL_CHARSET = 129`, using the
-  standard Korean Windows system fonts. There is no VFS-shipped glyph atlas for body text.
+- **Text rendering** is GPU-side via the D3DX font object's text-draw method (`HANGUL_CHARSET = 129`),
+  using the standard Korean Windows system fonts; there is no VFS-shipped glyph atlas for body text.
+  **15 font slots** are created at startup with common parameters (char-set 129, mip-levels 1,
+  italic off, default output-precision/quality, default pitch-and-family). Body-text layout is
+  **monospace per slot** (advance = the slot's character width) with **no kerning table**; the only
+  OS text measurement anywhere in the path is for the IME composition underline cursor. Full slot
+  table and metrics in §6.
 - **UI captions** are fetched by numeric ID from `data/script/msg.xdb`, encoded CP949.
 - The **master scene machine** has 9 primary states driven by a WinMain switch; in-game (state 5)
   returns to character-select (state 4), not to login.
@@ -125,9 +130,25 @@ These are instance-field offsets on the base `GUComponent`, shared by all subcla
 | +0x8C (byte) | 1 | u8 | Show/hide target (1 = visible/showing, 0 = hiding; alpha chases this) | CODE-CONFIRMED |
 | +0x8D (byte) | 1 | u8 | Remove-mark flag (1 = sweep this child out on the next RemoveMarkedChildren pass) | CODE-CONFIRMED |
 | +0x90 | 4 | u32 | Bound texture ID | CODE-CONFIRMED |
-| +0x98 | 4 | u32 | Timer expiry (ms) | CODE-CONFIRMED |
-| +0x9C | 4 | u32 | Timer interval (default 3000 ms) | CODE-CONFIRMED |
-| +0xA0 | 4 | ptr | Timer callback pointer (null if unused) | CODE-CONFIRMED |
+| +0x95 (byte) | 1 | u8 (bool) | **Auto-hide enable** — opt-in flag; zero-initialised by both base constructors (auto-hide OFF by default). Gates **both** the arm path (the show method) and the per-frame tick. A transient/auto-dismissing panel turns auto-hide on by writing 1 here. NOT a tooltip-armed latch, hover-state byte, or delay-mode selector (hover lives at +0x88/+0x89). | CODE-CONFIRMED |
+| +0x98 | 4 | u32 | **Auto-hide arm-start timestamp (ms)** — set to the current millisecond clock when the timer is armed (floored to 1; 0 = not armed). Elapsed time is computed each frame as `now - this`. Reset to 0 when the timer fires. *(Was previously labelled "Timer expiry"; the field holds the START time, and expiry is computed as start + interval.)* | CODE-CONFIRMED |
+| +0x9C | 4 | u32 | **Auto-hide timeout duration (ms)** — constructor default **3000**; per-instance overridable. The tick fires when `(now - start) >= this`. | CODE-CONFIRMED |
+| +0xA0 | 4 | ptr | **Auto-hide timeout callback** — function pointer fired on timeout (invoked with no arguments); null when unused. On fire the callback runs **first**, then the component hides itself, then +0x98 resets to 0. | CODE-CONFIRMED |
+
+> **Auto-hide timer mechanism (CODE-CONFIRMED, re-walked 2026-06-21 / 263bd994).** The +0x95..+0xA0
+> block is the shared auto-hide timer inherited by every widget. **Bytes +0x94, +0x96, +0x97 are
+> alignment padding - not fields** (no read or write touches them in any timer path; +0x95 is a lone
+> byte). **Arm:** the show method (vtable slot 1, the visibility setter) records the arm timestamp into
+> +0x98 only when all three conditions hold - the widget is being shown (+0x8C != 0), auto-hide is
+> enabled (+0x95 != 0), and a non-zero timeout (+0x9C) is set. Hiding clears the show-target, so the
+> timer is not re-armed. **Tick/fire:** the per-frame draw / alpha-fade method (vtable slot 7) checks
+> `(now - start) >= timeout` as an **unsigned millisecond** comparison; on fire it calls the +0xA0
+> callback (if non-null), then hides itself to begin the fade-out, then disarms (+0x98 = 0). The clock
+> is the OS millisecond timer scaled by the global time-scale, so both +0x98 and +0x9C are genuine
+> milliseconds. Observed timeout values: the default **3000 ms**; one panel overrides to **6000 ms**;
+> another derives the timeout from a config value (config-seconds x 1000). There is no separate
+> hover-delay or fade-duration constant in this block (the show/hide alpha chase toward +0x8C is the
+> unrelated fade, +/-64 per tick, +/-32 for the extended base).
 
 Per-text-widget font-slot fields (see §6.3):
 
@@ -728,6 +749,12 @@ Font objects are created at startup (master scene state 1 — Login) using the D
 - **charset = 129 = HANGUL_CHARSET** — the load-bearing Korean encoding constant. The client
   renders Korean glyphs through the OS Hangul code page (CP949). No bitmap glyph atlas is shipped
   in the VFS for body text.
+- **Common font-creation parameters for every slot** (CODE-CONFIRMED, identical across all 15
+  slots; only face / row-height / char-width / weight vary per slot, see §6.2): mip-levels = 1,
+  italic = off, output-precision = default, quality = default, pitch-and-family = default. No slot
+  sets an italic, underline, or strikeout style. When a slot's stored width or weight is 0 the
+  creation helper backfills it from the slot's fallback-size field, and a weight of 0 is treated by
+  the font API as "don't-care" (system default weight).
 - The creation call signature is `Font_Create(table, slotByteOffset, faceName, sizeFallback,
   charWidth, rowHeight, weight)` where the D3DX API receives **Height = rowHeight** and
   **Width = charWidth**. The `sizeFallback` field is stored in the slot descriptor but is not the
@@ -775,6 +802,15 @@ therefore **fixed-advance** (charWidth per character, not proportional metrics),
 laid out on a monospace grid even with proportional faces. This matters for matching legacy text
 positioning.
 
+> **No kerning table; one OS measurement only (CODE-CONFIRMED).** Widget body text uses the fixed
+> per-slot character width for every layout decision — drawn width = char-width x character count,
+> drawn height = row-height x line count, and the label ellipsize threshold = floor(box-width /
+> char-width). There is **no per-glyph kerning or proportional-metrics table** for body text. The
+> single place the client measures real glyph extents through the OS is the **IME composition
+> underline cursor** (a memory device-context text-extent query); everything else is the fixed
+> per-slot advance. Label truncation appends a 2-byte ellipsis marker at the cut point and is
+> CP949 lead-byte aware (it never cuts a 2-byte Korean character in half).
+
 **Per-widget font-slot index (CODE-CONFIRMED).** Each text widget stores its font slot as an
 instance field and supplies it to the shared text-draw helper at draw time:
 - `GULabel` — slot at **+0xE4**.
@@ -788,11 +824,14 @@ Both label and textbox constructors **zero-initialise** their slot field, so the
 **Front-end resolution (CODE-CONFIRMED — closes the long-open "per-widget font slot" question for
 login and character-select).** A full sweep of the login `BuildScene` found **no write** to any
 text widget's font-slot field after construction; the label/textbox slot fields are left at their
-ctor default. Therefore **every login label, caption, and textbox draws with font slot 0**
-(DotumChe 12 / 6 / weight 0). Button captions on the login window are mostly sprite-only or empty,
-so slot 0 is the default for any caption that does draw. The same field mechanism applies on the
-character-select scene; the front-end as a whole uses slot 0 universally for its text — there is
-no per-widget font differentiation on the login or character-select screens at the build level.
+ctor default. **Slot 0 (DotumChe 12 / 6 / weight 0) is therefore the default for any text widget
+whose font slot is never set** — and most front-end body labels stay at slot 0. *(Correction,
+2026-06-21: the login and character-select build routines DO call the font-slot setter on some
+controls, so it is not literally true that every front-end control draws with slot 0; the precise
+claim is "slot 0 when the slot is left unset.")* Button captions on the login window are mostly
+sprite-only or empty, so slot 0 is the default for any caption that does draw. The exact
+per-control slot map is a mechanical enumeration of the font-slot-setter call sites, not a runtime
+question.
 
 > **In-game caveat.** In-game windows (Section 8.7+) DO use larger / bold slots (e.g. titles via
 > slots 2 / 3 / 10 per §6.2); per-widget font variety lives in those builders, not the front-end.
