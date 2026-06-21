@@ -5,7 +5,7 @@ verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/
   structure, and the game-server DNS connect are all static-control-flow-confirmed against the
   binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
   (every on-wire byte VALUE -- no .pcapng present).
-ida_reverified: 2026-06-21   # CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
+ida_reverified: 2026-06-21   # CYCLE 9 Phase 1 (263bd994): server-list 8-byte record signedness CONFLICT corrected -- all four fields are signed i16 (server_id +0 was wrongly u16; binary reads sign-extending loads, commit gate load<2400 is a signed branch); channel-endpoint parse shape (single SPACE delim, 30=copy-cap, single endpoint), lobby host-resolution (ip.txt/list.dat/211.196.150.4 + inet_addr), login ladder (29->31 PIN / 32->33 fetch / 37->38 commit / 40 hand-off), PIN srand(time()) ascending shuffle, curtain +5/>222 + SFX 861010105, game.ver index-5 gate, Loading (2 ortho quads + BGM 920100100) and 3/1 char-select (hard 5-slot loop) all static-RE-CONFIRMED. CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
@@ -280,18 +280,28 @@ So: **server-list payload = `count` × 8-byte records, where `count = wrapper.ma
 
 #### Server-list record (8 bytes) — decoded
 
-Each record is four little-endian 16-bit fields (record stride 8). The meanings were recovered from
-the login window's server-list **render** path: a debug format literal of the shape
+Each record is four little-endian **signed** 16-bit fields (record stride 8), **all four `i16`**
+(SIGNEDNESS static-CONFIRMED CYCLE 9, 263bd994 — see the signedness note below). The meanings were
+recovered from the login window's server-list **render** path: a debug format literal of the shape
 `"i %d status %d count %d"` ties the fields at record offsets +2 and +4 to "status" and "count"
 (load), and the field at +0 is the index fed to the client-local server-name lookup. **Wire-relevant
 fields only** — the localized name itself is *not* on the wire (see the name-table note below).
 
 | Offset | Size | Field | Meaning | Confidence |
 |---|---|---|---|---|
-| +0 | 2 (u16) | `server_id` | Index **1..40** into the client-local localized server-name table. Values outside 1..40 are out of range. | HIGH |
-| +2 | 2 (i16) | `status_code` | Server availability state. A value `≤ 0` or `> 40` is treated as **invalid / unavailable** (an error label is shown). Special values: **3** = "open-time scheduled" (the open time is rendered from `open_time` at +6); **24** = a distinct "preparing / check" fixed label; **100** = "this is the connected / current selection" sentinel that, with a UI flag set, auto-advances into the channel-connect step. | MEDIUM–HIGH |
-| +4 | 2 (i16) | `load` | Population / load gauge. Compared against thresholds **1200 / 800 / 500** to choose a colored "load" label and text color (e.g. red above the high threshold, intermediate colors below). | MEDIUM–HIGH |
-| +6 | 2 (i16) | `open_time` | Used **only** when `status_code == 3`: rendered as a packed open-hour / open-minute schedule using a `×10` split (the field, and the `load` field, are each split as `value/10` and `value%10` to feed an `HH:MM`-style display). The exact packing is **inferred, not pinned**. | LOW–MEDIUM |
+| +0 | 2 (i16) | `server_id` | Index **1..40** into the client-local localized server-name table. Values outside 1..40 are out of range. Read **signed** at every value use (sign-extending load; the record base is read through a signed-16 element). | HIGH |
+| +2 | 2 (i16) | `status_code` | Server availability state. A value `≤ 0` or `> 40` is treated as **invalid / unavailable** (an error label is shown). Special values: **3** = "open-time scheduled" (the open time is rendered from `open_time` at +6); **24** = a distinct "preparing / check" fixed label; **100** = "this is the connected / current selection" sentinel that, with a UI flag set, auto-advances into the channel-connect step. (Loaded **signed**; its branches are equality / small-enum tests, so sign is behaviorally inert, but the field type is `i16`.) | MEDIUM–HIGH |
+| +4 | 2 (i16) | `load` | Population / load gauge. Compared against thresholds **1200 / 800 / 500** to choose a colored "load" label and text color (e.g. red above the high threshold, intermediate colors below). The commit gate's `load < 2400` comparison is a **signed strict-less-than** — this is the decisive evidence the field is `i16`. | MEDIUM–HIGH |
+| +6 | 2 (i16) | `open_time` | Used **only** when `status_code == 3`: rendered as a packed open-hour / open-minute schedule using a `×10` split (the field, and the `load` field, are each split as `value/10` and `value%10` to feed an `HH:MM`-style display). The exact packing is **inferred, not pinned**. (Read **signed** — the minute use is a signed load + signed division by 10.) | LOW–MEDIUM |
+
+> **Signedness (CONFLICT corrected — binary-won, CYCLE 9, 263bd994).** All four record fields are
+> **signed `i16`**. An earlier version of this table listed `server_id (+0)` as `u16`; the binary
+> reads it (and every record field) with a sign-extending load, and the only decisive numeric ordering
+> branch — the commit gate's `load < 2400` — is a **signed** comparison. The `server_id` **1..40**
+> range check is emitted as an unsigned-style range idiom (`(unsigned)(server_id − 1) > 39`), which is
+> the usual compiler form for a bounded range test; **do not infer `u16` from that guard** — the field
+> is `i16`. This makes the table agree with `packets/lobby.yaml` Record Shape A and
+> `specs/frontend_layout_tables.md §4.1`, which already record all four fields as `i16`.
 
 **Server-name table (client-local, NOT wire data).** The localized server name shown in the UI is
 **not** transmitted. The wire carries only the numeric `server_id` (+0); the client resolves it
@@ -934,7 +944,7 @@ The behavior-anchored opcode subset for this flow:
 
 | Opcode (major:minor) | Catalog name | Dir | Size | Behavior anchor |
 |---|---|---|---|---|
-| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count; 8-byte records {id u16, status u16, load u16, open-time u16} |
+| lobby (port 10000) | server-list | S2C | 8-byte wrapper + N×8 | `wrapper.major` = count (signed `>0` gate, stored in a signed slot with a `−1` sentinel on connect-fail); 8-byte records {id i16, status i16, load i16, open-time i16} (all four **signed**, CYCLE 9) |
 | lobby (port `10000+off`) | channel-endpoint | S2C | 8-byte wrapper + ≥30 | first 30 bytes = `host port` ASCII |
 | 0:0 | SmsgKeyExchange | S2C | 62 (cited) | RSA key material; triggers `1/4` (see `crypto.md`) |
 | 1:4 | CmsgAuthReply | C2S | var (cited) | **THE login credential send** — secure auth-reply to `0/0`; plaintext pre-image `[0x2B][u32len account\0]([u32len PIN\0])` + RSA ciphertext of the account password (runtime-confirmed) |
@@ -978,7 +988,7 @@ The behavior-anchored opcode subset for this flow:
 | PIN keypad scramble | **time-seeded Fisher-Yates shuffle of a 10-digit (0–9) permutation, per show** | Anti-keylogger random on-screen keypad layout; PIN masked with `*`, capped at 4 digits; submit → 3rd TAB token → optional `1/4` blob field. Static recovery, CAMPAIGN 9. See §4.2a. |
 | Channel-endpoint copy length | **30 (0x1E) bytes** | The leading `host port` ASCII string. |
 | Server-list record size | **8 bytes** | Count = `wrapper.major`. |
-| Server-list record fields | id u16 @+0 (1..40), status u16 @+2, load u16 @+4, open-time u16 @+6 | See Section 2.1. |
+| Server-list record fields | id i16 @+0 (1..40), status i16 @+2, load i16 @+4, open-time i16 @+6 — **all four signed** (CYCLE 9, 263bd994) | See Section 2.1. |
 | Server-list load thresholds (UI color) | **1200 / 800 / 500** | Client-side load-gauge coloring (presentation only). |
 | Server-list status sentinels (UI) | **3** (open-time scheduled), **24** (preparing/check), **100** (current selection) | Client-side render special cases (presentation only). |
 | Server-name table | **41 entries**, indexed by `server_id` (+0) | Client-local localized names; **not on the wire**. |

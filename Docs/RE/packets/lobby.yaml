@@ -2,7 +2,11 @@
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 #
 # verification:
-#   ida_reverified: 2026-06-18
+#   ida_reverified: 2026-06-21   # CYCLE 9 Phase 1 (263bd994): Record Shape A field SIGNEDNESS static-CONFIRMED
+#                                #   (all four 8-byte record fields are signed i16 -- sign-extending loads,
+#                                #   commit gate load<2400 is a signed branch); Record Shape B PARSE SHAPE
+#                                #   static-CONFIRMED (single-SPACE delimiter, 30=copy-cap not min, SINGLE
+#                                #   endpoint -- no trailing array). On-wire byte VALUES still capture-pending.
 #   ida_anchor: 263bd994
 #   evidence: [static-ida]
 #   capture_verified: false   # no .pcapng / list.dat sample present; on-wire byte VALUES and
@@ -197,11 +201,21 @@ notes: |
                                 NUL-terminated within the cap, consumed as one string token. The
                                 decompressed payload may be SHORTER than 30 (live: 23B).
 
-    NEEDS-CAPTURE on this record:
-      - host token form: LIVE shows a DOTTED-QUAD (211.196.150.4); the GAME connect uses
-        gethostbyname so a DNS name would also work, but the replica hands out a dotted quad;
-      - whether the payload carries a SINGLE endpoint or a trailing ARRAY of channel records --
-        only the first 30 bytes are read; the live 23-byte reply (< one 30B slot) indicates SINGLE.
+    PARSE SHAPE -- static-CONFIRMED (CYCLE 9, 263bd994): the host/port split is on a SINGLE SPACE
+    (0x20), the port tail parsed by atol (decimal ASCII) -- NOT colon, NOT NUL (the NUL only terminates
+    the whole token). The 30 (0x1E) is a fixed COPY CAP over a zero-filled destination with NO `len>=30`
+    guard (an unconditional 30-byte memcpy), so a shorter payload (live: 23B) is tolerated as a
+    NUL-terminated C string -- requiring `>=30` is a defect. The reply is a SINGLE endpoint: the channel
+    thread reads ONE fixed 30-byte token with NO count field and NO loop/stride -- decisively a single
+    endpoint, by direct contrast with the sibling server-roster thread, which DOES read a record count
+    and loops an 8-byte-stride array. Nothing past the first 30 bytes is ever read.
+
+    STILL CAPTURE-PENDING on this record (capture_verified: false -- no .pcapng of the
+    port-(10000+server_id) stream):
+      - host token FORM: LIVE shows a DOTTED-QUAD (211.196.150.4); the GAME connect uses gethostbyname
+        so a DNS name would also resolve, but the replica hands out a dotted quad -- which form the live
+        server emits is the only open question, and it does not change the parse (split-on-space) shape;
+      - the literal on-wire byte VALUES of the token.
 
     COUPLING: the connect target for THIS query is htons(10000 + selected server_id) against the
     resolved lobby host IP; the 30-byte endpoint token fetched here then feeds the subsequent

@@ -368,3 +368,93 @@ stayed in `_dirty/`. Recovery and promotion ran as separate sub-waves.
 matches the 28-byte / name@0x08 `fields:` layout — confirmed correct. Layer-02 `SmsgRenameCharResult` (3/6) struct is
 12 bytes — size correct; if it declares the two trailing dwords as integer SlotIndex/Unk, the network-engineer should
 retype them to two `float` placement values to match the binary (offsets 0x04/0x08), no size change.
+
+---
+
+## CYCLE 9 - Phase 1: static-IDA front-end confirm (Opening -> Login -> PIN -> Server list -> Channel -> Load -> CharSelect) - 2026-06-21
+
+**Ground truth:** `doida.exe` IDB SHA-256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
+imagebase 0x400000. **Mode:** STATIC ONLY (no debugger, no captures). **Scope:** Docs/RE-only (no C#/Godot touched).
+**Apparatus:** RE-orchestrator (dirty->spec firewall owner) -> 2x `re-protocol-analyst` + 3x `re-function-analyst` (READONLY
+recovery, massively parallel) -> orchestrator-applied promotion (single controlled crossing).
+Dirty staging (gitignored): `_dirty/protocol/cycle9_serverrecord_signedness.md`, `_dirty/protocol/cycle9_channel_endpoint.md`,
+`_dirty/recon/cycle9_lobby_hostresolve.md`, `_dirty/functions/cycle9_login_ladder_spotcheck.md`,
+`_dirty/functions/cycle9_loading_charselect_spotcheck.md`.
+
+This was a CONFIRM + sharpen pass over the already-mature front-end corpus, not a re-derivation. The overwhelming result is
+CONFIRMATION; one binary-won CONFLICT was corrected.
+
+**Binary-won CONFLICT (corrected - the binary wins):**
+
+1. **Server-list 8-byte record field SIGNEDNESS.** All four fields are **signed `i16`**, not mixed sign. The client reads
+   each field with a sign-extending load; the decisive numeric ordering branch - the plate-pick commit gate `load < 2400`
+   (0x960) - is a **signed** strict-less-than, and the painter's 1200/800/500 load-colour thresholds are signed branches.
+   `status_code (+2)` and the `+6` flag are loaded signed but tested only by equality / small-enum / `!= 0`, so sign is
+   behaviorally inert there; the `status==3` HH:MM minute use is a signed load + signed division by 10. The `server_id`
+   **1..40** range check is emitted as an unsigned-style range idiom (`(unsigned)(server_id - 1) > 39`) - the ordinary
+   compiler form for a bounded range test - which an earlier reading mistook for the field being `u16`. **`login_flow.md`
+   2.1 (record table), 6 (catalog row), and 7 (constants) previously listed `server_id (+0)` as `u16`; corrected to
+   `i16`.** This brings `login_flow.md` into agreement with `packets/lobby.yaml` Record Shape A and
+   `frontend_layout_tables.md 4.1`, which already record all four fields as `i16`. The wrapper **record_count** (wrapper +4,
+   the reused game-frame "major" slot) is read with a zero-extending load but gated by a signed `> 0` test, sign-extended for
+   the `8*count` allocation, and stored in a **signed** 32-bit slot that takes a `-1` sentinel on connect-failure. CONTROL-FLOW
+   CONFIRMED; on-wire byte VALUES capture-UNVERIFIED.
+
+**Sharpened (static-CONFIRMED this pass, previously carrying NEEDS-CAPTURE caveats):**
+
+2. **Channel-endpoint parse shape (`lobby.yaml` Record Shape B / `login_flow.md 2.2`).** The host/port split is on a
+   **SINGLE SPACE (0x20)**, port tail parsed by `atol` (NOT colon, NOT NUL); the **30 (0x1E)** byte field is a fixed **COPY CAP**
+   over a zero-filled destination with **no `len>=30` guard** (a shorter payload, e.g. 23 bytes, is tolerated as a
+   NUL-terminated C string - requiring `>=30` is a defect); the reply is a **SINGLE endpoint** (one fixed 30-byte token, no
+   count field, no loop) - decisively single by direct contrast with the sibling server-roster thread, which DOES read a count
+   and loops an 8-byte-stride array. The prior "single-vs-array / delimiter" NEEDS-CAPTURE caveats were downgraded to
+   static-CONFIRMED; `capture_verified` stays false (no `.pcapng`; only the host token FORM - DNS name vs dotted quad - and the
+   literal byte values remain capture-pending).
+
+**Re-confirmed unchanged (no churn - the specs were already correct):**
+
+- **Lobby host resolution** (`login_flow.md 2.0/3.0`, `lobby.yaml`): 3-tier `ip.txt` (<=19 chars) -> `list.dat` CIPList
+  (length invariant `768*count+4`, name match key at record +0, host at +256, selector = registry `servername`) -> fallback
+  `211.196.150.4` (referenced from **exactly one** function); lobby = `inet_addr` (no DNS; `getaddrinfo`/`gethostbyaddr` not
+  even imported), game = `gethostbyname`; base port 10000, channel port `10000 + server_id` (`htons`). `inet_ntoa` is
+  diagnostic-only.
+- **Login ladder + PIN + curtain + game.ver** (`frontend_layout_tables.md 2/3`, `login_flow.md 1/4`): 29->31 PIN raise
+  (ID >= 4 else msg 4025; PW != 0 else msg 4026); 32->33 fetch; 37->38 commit guard `status==0 && load<2400` -> persist
+  `Lastserver` -> channel fetch; 40 hand-off TAB string `account \t password \t PIN \t "host port"` + login sub-opcode `0x2B`
+  + 30 s connect timeout. PIN keypad `srand(time())` (whole-second CRT wall-clock - explicitly NOT GetTickCount/timeGetTime/
+  QPC/GetSystemTimeAsFileTime) ascending uniform shuffle of digits 0..9, one digit per cell, 4-digit cap, `*` mask, re-scramble
+  on open/Reset/OK/Cancel. Curtain offset +5/tick, top Y = -offset, bottom Y = offset+326, stop at offset>222, intro SFX
+  861010105 (category 2). game.ver field-index-5 u32 equality gate (mismatch -> msg 2204 + quit; runs only when VFS mounted;
+  gated by the OK/Login action 103).
+- **Loading + char-select** (`frontend_layout_tables.md 5`, `login_flow.md 3.2`): Loading = two ortho-projected textured
+  quads (immediate-mode, not a widget tree), `rand()%3` background `{loading.dds|loading06.dds|loading08.dds}`, looped 2D BGM
+  cue 920100100 (category 0), loading-active flag cleared by the background corpus loader after a 500 ms grace (the per-frame
+  ~100 ms loop is the "replay"), Opening-skip gate `GetPrivateProfileInt("OPENNING","SKIP",0, option.ini)`. Char-select forced
+  by inbound `3/1` (zeroes the five-slot scratch, populates per the slot mask, unconditionally forces GameState -> char-select)
+  with a **hard 5-slot loop** (`for i = 4..0`).
+
+**Committed files touched:** `specs/login_flow.md` (2.1 record table + new signedness note, 6 catalog row, 7 constants,
+verification banner), `packets/lobby.yaml` (Record Shape B parse-shape note, verification banner). Banners re-pinned to
+263bd994 / CYCLE 9 Phase 1 / 2026-06-21.
+
+**`names.yaml`:** no canonical name changed - not edited. **PROPOSED name (flagged, NOT applied):** the 30-byte
+channel-endpoint token field (login-object) -> suggested `channelEndpointToken[30]`; a future `ida-toolsmith` annotation pass
+owns any IDB rename + `names.yaml` sync.
+
+**Deferred GAPs (runtime-only / non-code-literal - NOT chased, already reflected in `login_flow.md 9`):**
+the `3/4` in-place refill handler (`form_byte0 == 1`) interior (the `3/1` forced path is fully confirmed); the char-select
+map000 14:30 time-of-day freeze (script/config-driven - the literal `"14:30"` has no code xref); the server-list fetch port
+10000 lives in the worker-proc (base port 10000 itself is confirmed elsewhere); all on-wire byte VALUES + the full
+`status_code` enum + the `open_time` packing remain capture-pending (`capture_verified: false`).
+
+**Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); all anchor addresses stayed
+in `_dirty/`. Recovery (5 READONLY analysts) and promotion (orchestrator rewrite) ran as separate sub-waves.
+
+**C# Phase-2 action items surfaced (NOT applied - Docs/RE-only):**
+(1) the layer-02 server-record wire struct + the layer-04 DTO must both type all four fields as **signed 16-bit** (`short`),
+removing the `short`/`ushort` mix - `ServerId`, `StatusCode`, `Load`, `OpenTime` are all `short`; selectable iff
+`StatusCode == 0 && Load < 2400` (signed compare); the record_count slot is a signed int holding `-1` on fetch-failure.
+(2) the channel-endpoint parser must copy up-to-30 bytes into a zero-filled `char[30]`, treat it as a NUL-terminated ASCII
+string (stop at first NUL), and split on a **single space** (host = before, port = `atol`/decimal of the tail) - requiring
+`>=30`, or splitting on `:`/NUL, is a bug; treat the reply as a single endpoint (do not loop for a trailing array).
+
