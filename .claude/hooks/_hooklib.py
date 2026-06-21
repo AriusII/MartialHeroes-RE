@@ -111,9 +111,25 @@ def state_dir(pdir):
     return d
 
 
+# Cap each state JSONL so the provenance/audit trail stays usable; at the cap the file is
+# rotated to <name>.1 (one generation kept) and a fresh file is started. Advisory state only.
+_JSONL_CAP_BYTES = 2 * 1024 * 1024
+
+
 def append_jsonl(pdir, filename, obj):
     try:
         path = os.path.join(state_dir(pdir), filename)
+        try:
+            if os.path.getsize(path) >= _JSONL_CAP_BYTES:
+                bak = path + ".1"
+                try:
+                    if os.path.exists(bak):
+                        os.remove(bak)
+                except Exception:
+                    pass
+                os.replace(path, bak)
+        except OSError:
+            pass  # file absent or stat failed — treat as first write
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(obj, ensure_ascii=False) + "\n")
     except Exception:
@@ -293,6 +309,42 @@ def staged_files(pdir):
         return []
 
 
+# --------------------------------------------------- forbidden artifacts + IDA target
+# Canonical copyrighted/captured artifact extensions (all gitignored by policy — see
+# CLAUDE.md "Non-distribution rules"). ONE source of truth so the firewall's write /
+# bash / git-add / git-commit checks never drift apart (they used to declare three
+# divergent lists).
+FORBIDDEN_EXTS = (
+    ".pak", ".vfs", ".exe", ".dll", ".pcapng", ".tsv", ".scr", ".mot", ".ted", ".bud",
+)
+_FORBIDDEN_EXT_ALT = "|".join(e[1:] for e in FORBIDDEN_EXTS)
+
+# A path or command string names a forbidden artifact: a forbidden extension, the .godot
+# editor-cache dir, or the legacy main.exe. Used on the Write/Bash firewall paths.
+FORBIDDEN_PATH_RE = re.compile(
+    r"(\.(?:" + _FORBIDDEN_EXT_ALT + r")\b|\bmain\.exe\b|(?:^|[\\/])\.godot[\\/])", re.I
+)
+# Bare forbidden-extension match (e.g. inside a `git add` command string).
+FORBIDDEN_EXT_RE = re.compile(r"\.(?:" + _FORBIDDEN_EXT_ALT + r")\b", re.I)
+
+
+def is_forbidden_artifact(path):
+    """True when `path` names a copyrighted/legacy artifact that must stay out of git."""
+    return bool(path) and bool(FORBIDDEN_PATH_RE.search(path))
+
+
+def ida_target_hint(ti):
+    """The smallest {key: value} identifying what an IDA MCP call targeted (for the
+    provenance breadcrumb). Shared by firewall_guard + re_provenance_logger so the two
+    audit records stay identical."""
+    if not isinstance(ti, dict):
+        return None
+    for k in ("name", "function_name", "function", "address", "ea", "offset", "symbol", "query"):
+        if k in ti and ti[k] not in (None, ""):
+            return {k: ti[k]}
+    return None
+
+
 # ------------------------------------------------------------- path classification
 
 def _low(path):
@@ -410,14 +462,23 @@ def has_uncited_magic(text):
     return bool(_MAGIC.search(text or "")) and not _SPEC_CITE.search(text or "")
 
 
+# Lines whose magic literals are self-evidently NOT spec offsets/opcodes: const/enum
+# declarations, lambda-returned constants, and array sizing/indexing (`new T[64]`, `buf[128]`).
+# Skipped by the spec-citation nudge to cut false positives on caps/versions/sizes.
+_MAGIC_BENIGN_LINE = re.compile(
+    r"\bconst\b|\benum\b|=>\s*-?\d|\[\s*\d+\s*\]|\bnew\s+\w[\w<>,. ]*\[\s*\d+\s*\]"
+)
+
+
 def uncited_magic_hits(raw_text):
     """Distinct genuinely-magic numeric literals in C# `raw_text` that lack a nearby
     `// spec:` citation — the list the clean-room spec-citation nudge interpolates into its
     message. Returns [] when the hunk is already cited or has no magic constants. The magic
     scan runs on comment/string-stripped text (so a literal quoted in a comment/string never
     trips it); the citation check runs on the RAW text (so an adjacent `// spec:` counts).
-    Small/common ints (0x0/0x01/0xFF) are treated as benign. Order-preserving + de-duplicated;
-    advisory helper, fail-open."""
+    Lines that are obviously const/enum declarations or array sizing/indexing are skipped (to
+    cut false positives on caps/versions/buffer sizes), and small/common ints (0x0/0x01/0xFF)
+    are treated as benign. Order-preserving + de-duplicated; advisory helper, fail-open."""
     raw = raw_text or ""
     if not raw.strip():
         return []
@@ -426,14 +487,17 @@ def uncited_magic_hits(raw_text):
         return []
     out = []
     seen = set()
-    for m in _MAGIC.finditer(strip_comments_strings(raw)):
-        tok = m.group(0)
-        if _BENIGN_MAGIC.fullmatch(tok):
+    for line in strip_comments_strings(raw).splitlines():
+        if not line.strip() or _MAGIC_BENIGN_LINE.search(line):
             continue
-        if tok in seen:
-            continue
-        seen.add(tok)
-        out.append(tok)
+        for m in _MAGIC.finditer(line):
+            tok = m.group(0)
+            if _BENIGN_MAGIC.fullmatch(tok):
+                continue
+            if tok in seen:
+                continue
+            seen.add(tok)
+            out.append(tok)
     return out
 
 
@@ -446,6 +510,43 @@ def mentions_korean_or_txt_read(text):
 
 def has_coordinate_math(text):
     return bool(_VECTOR3.search(text or ""))
+
+
+# ------------------------------------------------------------- zero-alloc hot path
+# ONE zero-allocation detector for Network/Assets (layers 2-3) hot paths — unifies the
+# previously divergent cs_post_edit / csharp_guard regex sets. Advisory only.
+_ALLOC_LINQ = re.compile(r"\.(?:Select|Where|OrderBy|GroupBy|Aggregate|ToDictionary)\(")
+_ALLOC_LINQ_USING = re.compile(r"using\s+System\.Linq\b")
+_ALLOC_TOARRAY = re.compile(r"\.To(?:Array|List)\(\)")
+_ALLOC_SPLIT = re.compile(r"\.Split\(")
+_ALLOC_NEW_ARRAY = re.compile(r"\bnew\s+\w[\w<>,. ]*\[")
+_ALLOC_NEW_COLL = re.compile(r"\bnew\s+(?:List|Dictionary|HashSet|StringBuilder)\s*<")
+_ALLOC_BITCONV = re.compile(r"\bBitConverter\.(?:To\w+|GetBytes)\b")
+_ALLOC_LOOP_KW = re.compile(r"\b(?:for|foreach|while)\s*\(")
+
+
+def alloc_hits(text, layer):
+    """Ordered, de-duplicated zero-alloc smells in a layer-2/3 hot-path hunk (`text` should
+    already be comment/string-stripped). Returns [] when clean or outside layers 2-3. LINQ is
+    only counted when System.Linq is imported in the hunk; new[]/new collection only when
+    inside a loop — both to keep false positives low."""
+    if layer not in (2, 3):
+        return []
+    t = text or ""
+    if not t.strip():
+        return []
+    hits = []
+    if _ALLOC_LINQ_USING.search(t) and _ALLOC_LINQ.search(t):
+        hits.append("LINQ on a hot path")
+    if _ALLOC_TOARRAY.search(t):
+        hits.append(".ToArray()/.ToList()")
+    if _ALLOC_SPLIT.search(t):
+        hits.append("string.Split (allocates)")
+    if _ALLOC_BITCONV.search(t):
+        hits.append("BitConverter (prefer BinaryPrimitives)")
+    if _ALLOC_LOOP_KW.search(t) and (_ALLOC_NEW_ARRAY.search(t) or _ALLOC_NEW_COLL.search(t)):
+        hits.append("array/collection allocation inside a loop")
+    return list(dict.fromkeys(hits))
 
 
 # ------------------------------------------------- .claude/ kit self-consistency

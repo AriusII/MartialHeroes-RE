@@ -16,6 +16,7 @@ systemMessage:
 Each detector keeps its source hook's gating and exact wording; fail-open.
 """
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -153,6 +154,33 @@ def _coordinate_msg(ev):
     return None
 
 
+# ----------------------------------------------------------- layer-05 authority leak
+# Game-rule authority leaking into a passive Godot node: a stat field being MUTATED (compound
+# assignment) inside layer 05. Authority belongs in Client.Domain/Application (04); the Godot
+# node should only RENDER the result it receives over an Application channel.
+_AUTHORITY_MUT = re.compile(
+    r"\b(?:Health|Hp|Mp|Mana|Stamina|Exp|Experience|Gold)\s*(?:\+=|-=|\*=|/=)"
+)
+
+
+def _authority_msg(ev):
+    path = h.file_path(ev)
+    if not h.is_godot_cs(path):
+        return None
+    stripped = h.strip_comments_strings(h.added_text(ev))
+    if not stripped.strip():
+        return None
+    if _AUTHORITY_MUT.search(stripped):
+        return (
+            "ℹ layer boundary: this Godot (05) node mutates what looks like a game-state/stat "
+            "field (compound assignment on Health/Hp/Mp/Exp/Gold/…). Layer 05 is PASSIVE "
+            "rendering with ZERO game-rule authority — compute the rule in Client.Domain/"
+            "Application (layer 04) and let the node render the result via an Application "
+            "channel/intent. Reminder only — nothing was blocked."
+        )
+    return None
+
+
 # ------------------------------------------------------------------------- dispatch
 
 def main():
@@ -162,7 +190,7 @@ def main():
         return
 
     msgs = []
-    for fn in (_tscn_msg, _namespace_msg, _gltf_msg, _uid_msg, _coordinate_msg):
+    for fn in (_tscn_msg, _namespace_msg, _gltf_msg, _uid_msg, _coordinate_msg, _authority_msg):
         m = fn(ev)
         if m:
             msgs.append(m)

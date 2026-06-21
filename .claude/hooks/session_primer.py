@@ -24,9 +24,9 @@ def main():
         h.ida_status_line(),
         "IDA reverse runs UNBRIDLED: fan out read analysts AND IDB writers massively in parallel — no ~3 cap, no one-writer rule; retry failed/conflicting calls (only the live MCP server's throughput limits you).",
         "Captures: {} .pcapng / {} .tsv present locally (protocol oracle; never read raw bytes into context, never commit).".format(pcap, tsv),
-        "Skeleton: {} Class1.cs placeholder(s) still present (12 = nothing implemented yet).".format(placeholders),
+        "Skeleton: {} Class1.cs placeholder(s) present (clean-room stubs; the client is largely built — trust Docs/ROADMAP.md for live state, not this count).".format(placeholders),
         h.CLEAN_ROOM_BLURB,
-        "RE knowledge lives in Docs/RE/ (firewall: _dirty/ is tainted & gitignored; specs are clean). Skills: /re-promote, /ida-mcp-connect, /pcap-extract. Agents via @ (3 orchestrators planning-/re-/port-; workers re-*-analyst, spec-author, *-engineer, code-reviewer).",
+        "RE knowledge lives in Docs/RE/ (firewall: _dirty/ is tainted & gitignored; specs are clean). Skills: /re-promote, /ida-mcp-connect, /pcap-extract. Agents via @ — 5 domain orchestrators: planning- (PLAN/workflow), re- (IDA liaison), csharp-port- (C# 00→04+Tools), godot- (layer 05), docs-tooling- (docs+tools+kit). Their workers: re-*-analyst/spec-author/ida-toolsmith/re-validator; network-/assets-/core-/dotnet-foundation-engineer + code-reviewer/test-engineer; godot-world-/ui-/character + render-reviewer; docs-engineer/tooling-engineer/kit-author/tooling-auditor.",
         "User prefers French for conversation; repo artifacts stay in English.",
     ]
     h.additional_context("SessionStart", "\n".join(lines))

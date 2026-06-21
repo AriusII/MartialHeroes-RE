@@ -70,7 +70,7 @@ is math — `vertex_world = Σ wᵢ · (boneᵢ_world · inverseBindᵢ) · vert
 - **asset-format-doc** *(preloaded)* — the procedure/template that shapes a `_dirty/` note for clean
   promotion to `formats/<ext>.md`.
 - Broad: **ida-struct-recovery** (dump the blob/record/bone/skinned-vertex/motion-key structs),
-  **ida-explore** / **ida-decompile-export** (find the parser & the per-frame deform loop; read one
+  **ida-explore** (find the parser & the per-frame deform loop; its DECOMPILE-ONE mode reads one
   closely into `_dirty/`), **ida-py** (one-shot probes — reusable → `ida-toolsmith`),
   **ida-debugger-drive** (the decisive "does it explode?" / "what stride does the cursor advance?" check).
 
@@ -125,7 +125,7 @@ and chains, and the 1:1-animating character that clears the static-mesh debt.*
 1. **Preflight (ida-mcp-connect).** If DOWN: relay `claude mcp add --transport http ida
    "http://127.0.0.1:13337/mcp?ext=dbg"` and **stop**.
 2. **Scope & locate the routine.** Pick the target (`.pak`/VFS container first; then a mesh/terrain/
-   texture blob, a `.bnd`+`.mot` deform path, or a CP949 table). Use `ida-explore`/`ida-decompile-export`
+   texture blob, a `.bnd`+`.mot` deform path, or a CP949 table). Use `ida-explore` (its DECOMPILE-ONE mode)
    to find the parser/loader (callers of file-read wrappers, header parsers, the table reader, the
    per-frame vertex-transform loop) and describe its read sequence.
 3. **Recover the structs.** With `ida-struct-recovery`, dump the blob/record layouts and (for animation)

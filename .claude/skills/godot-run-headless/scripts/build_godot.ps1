@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Runs `dotnet build` on MartialHeroes.Client.Godot.csproj — the assembly the engine loads at
-    runtime. Run this before /godot-run-headless or /godot-screenshot so you verify CURRENT code.
+    runtime. Run this before a headless run or a screenshot so you verify CURRENT code, not a stale DLL.
 
     -Clean first deletes Godot's generated mono glue (.godot/mono) plus bin/ and obj/, then rebuilds.
     Use it when `dotnet build` reports phantom errors on Godot types that clearly exist (stale glue
@@ -19,7 +19,7 @@
     Path to the Godot client csproj.
 
 .PARAMETER Dotnet
-    Path to the .NET 10 dotnet executable.
+    The dotnet executable — defaults to `dotnet` on PATH (a .NET 10 SDK must be resolvable there).
 
 .EXAMPLE
     pwsh -File build_godot.ps1
@@ -30,13 +30,15 @@
 param(
     [switch] $Clean,
     [string] $Csproj = "C:/Users/Arius/RiderProjects/MartialHeroes/05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj",
-    [string] $Dotnet = "C:/Program Files/dotnet/dotnet.EXE"
+    [string] $Dotnet = "dotnet"
 )
 
 $ErrorActionPreference = "Stop"
 
 if (-not (Test-Path $Csproj)) { Write-Error "csproj not found: $Csproj"; exit 2 }
-if (-not (Test-Path $Dotnet)) { Write-Error "dotnet not found: $Dotnet"; exit 2 }
+if (-not (Get-Command $Dotnet -ErrorAction SilentlyContinue)) {
+    Write-Error "dotnet not found on PATH (a .NET 10 SDK must be resolvable as '$Dotnet')"; exit 2
+}
 
 $projDir = Split-Path -Parent $Csproj
 
@@ -63,7 +65,7 @@ $code = $LASTEXITCODE
 
 Write-Host "-----------------------------------------------" -ForegroundColor Cyan
 if ($code -eq 0) {
-    Write-Host "BUILD SUCCEEDED. Next: /godot-run-headless (loads cleanly) and /godot-screenshot (looks right)." -ForegroundColor Green
+    Write-Host "BUILD SUCCEEDED. Next: headless run (loads cleanly) and screenshot (looks right)." -ForegroundColor Green
 } else {
     Write-Host "BUILD FAILED (exit $code)." -ForegroundColor Red
     Write-Host "If errors are on Godot types that clearly exist, the generated glue may be stale —" -ForegroundColor Yellow

@@ -1,12 +1,16 @@
 ---
 name: godot-run-headless
-description: Use to VERIFY the Martial Heroes Godot client without the user driving the editor — two modes. HEADLESS runs the Godot 4.6.3 console exe headless against the project, ticks a few frames, and captures all GD.Print output and engine errors from stdout (the fast inner loop for "does this scene/script/asset load cleanly?"). SCREENSHOT runs the client WINDOWED with a temporary GDScript autoload that grabs the viewport after a few frames, saves a PNG, and quits, so you can SEE what renders (is the terrain textured / town populated / character upright or mirrored?). Headless can't capture pixels; screenshot is the visual half of the verify loop.
-allowed-tools: Bash(pwsh *) Bash(powershell *) Read Write Edit
+description: Use to BUILD then VERIFY the Martial Heroes Godot client without the user driving the editor. First BUILDS the layer-05 C# assembly (MartialHeroes.Client.Godot.csproj — the managed DLL the engine loads, with the stale-glue clean-rebuild), then runs two verify modes. HEADLESS runs the Godot 4.6.3 console exe headless against the project, ticks a few frames, and captures all GD.Print output and engine errors from stdout (the fast inner loop for "does this scene/script/asset load cleanly?"). SCREENSHOT runs the client WINDOWED with a temporary GDScript autoload that grabs the viewport after a few frames, saves a PNG, and quits, so you can SEE what renders (is the terrain textured / town populated / character upright or mirrored?). Headless can't capture pixels; screenshot is the visual half of the verify loop.
+allowed-tools: Bash(pwsh *) Bash(powershell *) Bash(dotnet *) Read Write Edit
 model: sonnet
 effort: medium
 ---
 
-# godot-run-headless — verify scripts/assets without the user
+# godot-run-headless — build + verify scripts/assets without the user
+
+This skill owns the full inner loop: **build the C# assembly first, then verify** (headless and/or
+screenshot). Godot loads the **compiled** `MartialHeroes.Client.Godot.dll`, not the `.cs` sources — so
+any C# edit must be rebuilt here before either verify mode, or you silently verify stale code.
 
 The two halves of the Godot verify loop, in one skill:
 
@@ -35,10 +39,46 @@ character upright or exploded?*.
 
 ## Preconditions
 
-1. The C# assembly must be **built** first — a headless run uses the compiled managed DLL, not
-   source. If C# was just edited, run `/godot-build` (or `dotnet build` the csproj) before this.
-   A stale/missing build manifests as `Failed to load assembly` or missing script behaviour.
+1. The C# assembly must be **built** first — both verify modes use the compiled managed DLL, not
+   source. If C# was just edited, run **Mode 0 — BUILD** below before verifying. A stale/missing build
+   manifests as `Failed to load assembly` or missing script behaviour (a green load that doesn't
+   reflect your change).
 2. Nothing else should hold the project's `.godot/mono` build lock (close a running editor game).
+
+## Mode 0 — BUILD (compile the layer-05 assembly first)
+
+The Godot client is a C# project (`Godot.NET.Sdk/4.6.3`, `net10.0`, `LangVersion 14.0`,
+`EnableDynamicLoading`). Build the **Godot csproj** (not the whole `.slnx` — faster, and it is exactly
+what the engine loads) so you verify CURRENT code.
+
+- **csproj**: `05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj`. It
+  references layer 04 (`Client.Application`, `Client.Infrastructure`) and layer 03 (`Assets.Mapping`);
+  Network.*, Assets.Vfs/Parsers, Client.Domain arrive transitively — a build error there can originate
+  downstream, so read the full error, it names the file.
+
+1. **Normal build** — fast, incremental. Use the bundled helper (it pins the csproj; `dotnet` is taken
+   from PATH):
+   ```
+   pwsh -File ${CLAUDE_SKILL_DIR}/scripts/build_godot.ps1
+   ```
+   `Build succeeded` with `0 Error(s)` → proceed to Mode A / Mode B.
+2. **On compiler errors**, fix them in source. Two project-specific traps to recognise:
+   - `CS0234`/wrong-type on bare `Input.`, `Environment.`, `Time.` inside a `MartialHeroes.Client.Godot.*`
+     namespace — the bare name binds to the sibling project namespace, not the Godot class. Fix by
+     fully qualifying: `global::Godot.Input`, `global::Godot.Environment`, `global::Godot.Time`.
+   - `GltfDocument.AppendFromBuffer` — banned (native crash); use the `ArrayMesh` builders. Not a
+     compiler error, but flag it.
+3. **Clean rebuild — when bindings look stale.** If you get errors on Godot types that *should* exist
+   (editor is happy, API is real, but `dotnet build` disagrees), the generated glue is stale:
+   ```
+   pwsh -File ${CLAUDE_SKILL_DIR}/scripts/build_godot.ps1 -Clean
+   ```
+   It deletes only `.godot/mono/`, `bin/`, `obj/` (all gitignored editor cache / generated) then
+   rebuilds. If the glue files are missing entirely, open the project once in the Godot editor to
+   regenerate them, then build again. **Never** edit committed source or `project.godot` to "fix" a
+   stale-binding error — `-Clean` the glue instead.
+4. Report succeeded/failed, error count, and (on failure) the first errors with file:line. A green
+   build proves it *compiles*, not that it *renders* — that is what Mode A and Mode B verify next.
 
 ## Mode A — HEADLESS (steps)
 
@@ -106,8 +146,11 @@ camera via the `godot` MCP game tools (`/godot-mcp-connect`) instead of re-runni
 
 ## Decision points
 
-- **If C# was just edited** → `/godot-build` first, else you verify a stale DLL (a green load that
-  doesn't reflect your change).
+- **If C# was just edited** → run **Mode 0 — BUILD** first, else you verify a stale DLL (a green load
+  that doesn't reflect your change).
+- **If the build errors on a Godot type that genuinely exists** (editor happy, API real) → stale
+  generated glue → `build_godot.ps1 -Clean`; if glue files are missing entirely, open the editor once
+  to regenerate, then build.
 - **If the run hangs past `-TimeoutSec`** → an async asset load is wedged (VFS missing / wrong path);
   re-run with a `-Scene` override on a minimal scene to isolate the offending loader.
 - **If no errors but your expected `GD.Print`s are absent** → suspect the silent gray-screen
@@ -119,12 +162,17 @@ camera via the `godot` MCP game tools (`/godot-mcp-connect`) instead of re-runni
 
 ## Verify / Done when
 
+- The assembly built green (`0 Error(s)`) — OR the first build errors are reported with file:line and
+  the matching fix is named (qualify `global::Godot.*` / `-Clean` / downstream layer).
 - Exit code captured, log path reported, and EITHER the first real error (with file:line) OR the
   expected happy-path breadcrumbs are confirmed present — not merely "exit 0".
 - A "clean" verdict is only claimed after ruling out the silent gray-screen (expected prints present).
 
 ## Pitfalls
 
+- Never verify without building first — a stale DLL gives a green load that doesn't reflect your edit.
+- Never "fix" a stale-binding build error by editing committed source — `-Clean` the generated glue
+  (`.godot/mono`, `bin`, `obj`) instead; never delete anything outside those three.
 - Never trust a `0` exit code alone — gray-screen scenes load clean with no error.
 - Never use the non-console `.exe` (detaches, no stdout) or pass `--headless` when you actually need
   an image (Mode B requires the GPU — `--headless` gives a blank viewport).

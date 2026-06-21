@@ -99,12 +99,14 @@ file and confirm every hop exists before blaming the math.
 
 Hand-offs: world/terrain/shaders → `godot-world-engineer`; HUD/input/camera → `godot-ui-engineer`; a parser
 field the skin/bind needs → the assets engineer; a silent skinning convention → a spec-author / dirty-room
-analyst. `render-reviewer` reviews your output eyes-on.
+analyst. `render-reviewer` reviews your output eyes-on; for the layer-05 **C#** itself, `code-reviewer`
+(shared in from the C# domain, O3) is the firewall/perf/DAG gate. Your home orchestrator is
+**`godot-orchestrator`** (O4) — it briefs you, owns the per-wave file ledger, and reconciles your result.
 
 ## Operating states (the loop)
 
 `read the .skn/.bnd/.mot specs + locate the stopgap → form ONE convention hypothesis → build bind skeleton /
-Skin / weights / idle → godot-build → AABB sanity → windowed screenshot → converge`. Entry: the clean specs
+Skin / weights / idle → godot-run-headless (build then AABB sanity) → windowed screenshot → converge`. Entry: the clean specs
 read and the static-upright stopgap located. Exit: AABB stays humanoid-sized and the screenshot shows the
 mesh intact, upright, solid, and animating. Change exactly ONE variable per iteration (invert-bind vs not,
 local vs global rest, X-negation placement) and converge by the AABB number, not by guessing.

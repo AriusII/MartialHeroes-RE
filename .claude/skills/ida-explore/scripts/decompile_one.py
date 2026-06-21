@@ -1,7 +1,9 @@
-# decompile_one.py — IDAPython: decompile ONE function + its xrefs from the legacy Main.exe.
+# decompile_one.py — IDAPython: decompile ONE function + its xrefs from the legacy client.
 #
 # RUN THIS INSIDE IDA PRO 9.3 via the IDA MCP script-execution tool. Requires the Hex-Rays
-# decompiler. It imports ida_hexrays/idautils/ida_* which exist only inside IDA.
+# decompiler. It imports ida_hexrays/idautils/ida_* which exist only inside IDA. Backs the
+# DECOMPILE-ONE mode of the ida-explore skill (reference it via
+# ${CLAUDE_SKILL_DIR}/scripts/decompile_one.py).
 #
 # Edit the TARGET line below before sending the source to the exec tool:
 #   - a function name:  TARGET = "RecvPacketDispatch"
@@ -170,7 +172,7 @@ def main():
 
     doc = {
         "ok": True,
-        "schema": "ida-decompile-export/1",
+        "schema": "ida-explore/decompile-one/1",
         "sha256": _sha256_of_input(),
         "target": {
             "requested": str(TARGET),

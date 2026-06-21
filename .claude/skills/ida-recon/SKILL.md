@@ -1,7 +1,7 @@
 ---
 name: ida-recon
-description: Use when starting analysis of the legacy Martial Heroes client (Main.exe / doida.exe) and you need a baseline census — segments, imports, exports, entry points, strings, and named globals — before drilling into any single function. Produces a pinned SHA-256 and a navigable map of the binary. Includes a STRING-HUNT mode that censuses the full string + import table and tags candidate subsystems (networking, asset I/O, crypto, UI, scripting, config) by string + import evidence — the fastest way to locate a subsystem's entry point before reading any function.
-allowed-tools: Read Write
+description: Use when starting analysis of the legacy Martial Heroes client (doida.exe; Main.exe historical) and you need a baseline census — segments, imports, exports, entry points, strings, and named globals — before drilling into any single function. Produces a pinned SHA-256 and a navigable map of the binary. Includes a STRING-HUNT mode that censuses the full string + import table and tags candidate subsystems (networking, asset I/O, crypto, UI, scripting, config) by string + import evidence — the fastest way to locate a subsystem's entry point before reading any function.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---
@@ -120,14 +120,14 @@ to the subsystem you need. It is the natural second move after Mode A, and the i
 ## Pitfalls (never)
 
 - Never fabricate a census from memory when the MCP is red — STOP and surface the connect hint.
-- Never decompile or paste pseudo-C — that is `ida-decompile-export`. Recon is metadata only.
+- Never decompile or paste pseudo-C — that is `ida-explore` (DECOMPILE-ONE mode). Recon is metadata only.
 - Never reuse a stale `recon-<sha8>` filename for a different binary build.
 
 *North star N1: recon is the first, build-pinned map every later static-hypothesis (then debugger-confirm) pass navigates from.*
 
 ## Hard rules
 
-- **Do not** decompile or paste pseudo-C here — that is the `ida-decompile-export` skill's job.
+- **Do not** decompile or paste pseudo-C here — that is the job of `ida-explore` (DECOMPILE-ONE mode).
   This skill only enumerates metadata (names, addresses, strings, segment ranges).
 - Output paths must always be inside `Docs/RE/_dirty/recon/` (Mode A) or `Docs/RE/_dirty/static/`
   (Mode B). Never write under `Docs/RE/specs|packets|formats|structs|opcodes.md|names.yaml` from this skill.

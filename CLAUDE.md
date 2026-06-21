@@ -147,7 +147,7 @@ The local MCP servers are registered in the committed root `.mcp.json`. They con
 
 ## Tooling Map (`.claude/`)
 
-This repo ships a shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local), rationalized into **three domains** (Planning & Analysis · Reverse Engineering · C#/Godot Porting): **27 agents, 31 skills, 11 hook files** (10 advisory hooks + `_hooklib`). The bullet lists below are *representative* — `ls .claude/agents/` and `.claude/skills/` are the source of truth. The authoritative kit design — the **3 domain orchestrators**, the per-role **`model` + `effort`** policy, and the **agent↔skill linking fabric** (`skills:` preload + knowledge-skill `paths:`) — lives in **`.claude/KIT.md`**; read it before authoring or refining any agent/skill/hook. Every agent declares an explicit `model:` (`opus` for judgement/orchestration, `sonnet` for execution) and `effort:` (`high` for orchestrators/judgement/precision, `medium` for mechanical).
+This repo ships a shared Claude Code setup under `.claude/` (committed via `.gitignore` negations; only `settings.local.json` and `hooks/state/` stay local), rationalized into **five domain orchestrators** (Planning · Reverse Engineering · C# Porting [00→04 + Tools] · Godot [05] · Documentation & Tooling): **31 agents, 34 skills, 12 hook files** (11 advisory hooks + `_hooklib`). The bullet lists below are *representative* — `ls .claude/agents/` and `.claude/skills/` are the source of truth. The authoritative kit design — the **5 domain orchestrators**, the per-role **`model` + `effort`** policy, and the **agent↔skill linking fabric** (`skills:` preload + knowledge-skill `paths:`) — lives in **`.claude/KIT.md`**; read it before authoring or refining any agent/skill/hook. Every agent declares an explicit `model:` (`opus` for judgement/orchestration, `sonnet` for execution) and `effort:` (`high` for orchestrators/judgement/precision, `medium` for mechanical).
 
 ### Orchestration doctrine — prefer Tier-2 Orchestrator-Agents for big / simultaneous work
 
@@ -163,32 +163,35 @@ For any multi-lane objective (a research wave, a per-cluster sweep, a staged eng
 | Hook | When it fires |
 |---|---|
 | `session_primer` | Orientation context on session start |
-| `prompt_primer` | RE-intent + Godot-render-state context on each user prompt |
+| `prompt_primer` | RE-intent + Godot-render-state + planning-mode context on each user prompt |
 | `firewall_guard` | Flags pasted decompiler code / committing copyrighted artifacts / risky git / IDA provenance (PreToolUse) |
 | `layer_dependency_guard` | Flags upward refs / `using Godot;` in core layers |
-| `cs_post_edit` | Zero-alloc + `StructLayout` nudges (opt-in build check via `MH_BUILD_ON_EDIT=1`) |
-| `csharp_guard` | CP949 / zero-alloc / `// spec:` citation / test-after-core-edit nudges |
-| `godot_guard` | `.tscn` script-line / namespace-collision / `GltfDocument` / uid / coordinate nudges |
+| `cs_post_edit` | `StructLayout` + slnx-sync + breadcrumb nudges (opt-in build check via `MH_BUILD_ON_EDIT=1`) |
+| `csharp_guard` | CP949 / zero-alloc / `// spec:` citation (+ broken-citation) / test-after-core-edit nudges |
+| `godot_guard` | `.tscn` script-line / namespace / `GltfDocument` / uid / coordinate / layer-05 authority-leak nudges |
 | `kit_guard` | Keeps `.claude/` self-consistent (agent/skill frontmatter, advisory-only hooks, settings wiring) |
+| `python_tooling_lint` | `ast.parse` on edited `Tools/**` + `.claude/hooks/*.py` (syntax-error advisory) |
 | `re_provenance_logger` | Hashes IDA output for the audit trail |
 | `session_end` | Loose-end + persist-knowledge reminders (Stop / SubagentStop / PreCompact) |
 | `_hooklib.py` | Shared helpers — `import _hooklib as h` |
 
 ### Skills (`/name`)
-- **RE / IDA** (run IDAPython via the MCP, write only `_dirty/`): `ida-mcp-connect`, `ida-recon`, `ida-explore` (xref/callgraph/data-flow/batch), `ida-decompile-export`, `ida-struct-recovery`, `ida-annotate` (the IDB-write applier — dry-run→apply rename/comment/type; idempotent; firewall-safe), `ida-opcode-map`, `ida-crypto-hunt`, `ida-py`.
+- **RE / IDA** (run IDAPython via the MCP, write only `_dirty/`): `ida-mcp-connect` (+ the capability-map toolbox — categorized live `mcp__ida__*` + which tool per RE angle), `re-brainstorm` (RE ideation / attack-plan, gate G0), `ida-recon`, `ida-explore` (xref/callgraph/data-flow/batch/**decompile-one**), `ida-struct-recovery`, `ida-annotate` (the IDB-write applier — dry-run→apply rename/comment/type; idempotent; firewall-safe), `ida-opcode-map`, `ida-crypto-hunt`, `ida-py`.
 - **Protocol / captures:** `pcap-extract`, `packet-codegen`.
 - **Assets / VFS:** `pak-explore`, `asset-format-doc`.
-- **Scaffolding / build:** `scaffold-project` (layer/test project + reference wiring), `dotnet-build-test`, `godot-build`, `godot-run-headless`, `godot-scene-author`, `godot-mcp-connect`.
-- **Quality / docs:** `clean-room-check` (firewall + citation audit), `re-promote` (dirty→spec), `preservation` (READMEs + session logs), `memory-curate`.
-- **Knowledge** (auto-load via `paths:`, `user-invocable: false` — they surface conventions without being invoked): `dotnet-csharp14` (C#14/.NET10 core conventions), `godot-engine` (Godot 4.6 pitfalls + coordinate conventions), `ida-pro-re` (RE methodology + clean-room firewall), `martial-heroes-domain` (recovered protocol/asset-chain index).
+- **C# / scaffolding / build:** `scaffold-project` (layer / generator / Tools / test project + reference wiring), `dotnet-build-test`, `csharp-tooling` (build/validate/extend the `Tools/` projects + `00.SourcesGenerators`), `godot-run-headless` (builds layer 05 + headless/screenshot), `godot-scene-author`, `godot-mcp-connect`.
+- **Docs / tooling / quality:** `doc-authoring` (broad firewall-neutral doc corpus), `python-tooling` (std-lib scripts/harnesses + hooks), `preservation` (READMEs + session logs), `clean-room-check` (firewall + citation audit), `re-promote` (dirty→spec), `re-handoff` (the IDA→C# readiness gate G4 — STAMP/CHECK a spec is implementation-ready), `memory-curate`.
+- **Knowledge** (auto-load via `paths:`, `user-invocable: false` — they surface conventions without being invoked): `dotnet-csharp14` (C#14/.NET10 core conventions), `godot-engine` (Godot 4.6 pitfalls + coordinate conventions), `ida-pro-re` (RE methodology + clean-room firewall), `martial-heroes-domain` (recovered protocol/asset-chain index, `paths: Docs/RE/**`).
 - **North-star (the two goals — N1 live RE, N2 1:1 port):** `ida-debugger-drive` (pilot the **live** IDA debugger to confirm a static hypothesis against ground truth — never `dbg_start`), `godot-fidelity-check` (verify the Godot client renders/behaves **1:1** vs the original), `asset-chain-trace` (walk an asset id through its recovered mapping chain to the on-disk VFS file).
 - **Planning:** `plan-campaign` (turn a user mandate into an approve-ready plan — reformulated request + decomposition + the routing map; the `/plan-campaign` command the `planning-orchestrator` runs).
 
-### Agents (`@name`) — three domains
-- **Domain orchestrators** (hold the `Agent` tool, **`opus` + `effort: high`**, each with a linked roster — see `.claude/KIT.md` §2): `planning-orchestrator` (Planning & Analysis + kit-meta), `re-orchestrator` (clean-room RE — dirty→spec + IDB annotation), `port-orchestrator` (C#/Godot porting + validation). For a single-deliverable task, delegate straight to the worker; route an orchestrator only for a multi-worker objective. Two levels of orchestration max.
-- **Planning & Analysis** (clean, no IDA): `requirement-analyst` (reformulate/scope/risk), `todo-architect` (decompose → TODO tree + deps), `knowledge-gap-detector` (route RE/spec gaps), `plan-reviewer` (validate plans + docs/session logs), `kit-author` (author `.claude/` agents+skills+hooks), `tooling-auditor` (read-only kit audit).
-- **Reverse Engineering** (dirty-room `mcp__ida__*`, write only `_dirty/`): `re-function-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-analyst`, `re-asset-format-analyst`, `ida-toolsmith` (the only IDB-write agent — rename/comment/type); **bridge** `spec-author` (rewrite `_dirty/`→committed specs, no IDA); **debugger** `re-validator` (confirm vs the live `?ext=dbg` session — never `dbg_start`).
-- **C#/Godot Porting** (clean-room, no IDA, read only committed specs): engineers `network-engineer` (layer 02), `assets-engineer` (03), `core-engineer` (04), `dotnet-foundation-engineer` (01 + cross-layer + C#14 modernization), `godot-world-engineer` (terrain/world/shaders), `godot-ui-engineer` (HUD/menus/input), `godot-character-specialist` (skinning/bind/motion); quality `code-reviewer` (correctness + perf + layer-DAG + clean-room firewall + artifacts), `test-engineer` (xUnit + build), `render-reviewer` (Godot fidelity + live Godot MCP).
+### Agents (`@name`) — five domains
+- **Domain orchestrators** (hold the `Agent` tool, **`opus` + `effort: high`**, each with a linked roster — see `.claude/KIT.md` §2): `planning-orchestrator` (PLAN-mode: reformulate → decompose → FINAL PLAN as a phase/objective workflow), `re-orchestrator` (clean-room RE — the IDA liaison: dirty→spec + IDB annotation + batch IDAPython), `csharp-port-orchestrator` (C# layers 00→04 + Tools, **no Godot**), `godot-orchestrator` (layer 05 only + the godot MCP, wiring the C# seam), `docs-tooling-orchestrator` (documentation + C#/Python tools + the `.claude/` kit). For a single-deliverable task, delegate straight to the worker; route an orchestrator only for a multi-worker objective. Two levels of orchestration max.
+- **Planning & Analysis** (clean, no IDA): `requirement-analyst` (reformulate/scope/risk), `todo-architect` (decompose → phase/objective workflow tree + deps), `knowledge-gap-detector` (route RE/spec gaps), `plan-reviewer` (validate plans).
+- **Reverse Engineering** (dirty-room `mcp__ida__*`, write only `_dirty/`): `re-function-analyst`, `re-protocol-analyst`, `re-crypto-analyst`, `re-struct-analyst`, `re-asset-format-analyst`, `ida-toolsmith` (the only IDB-write agent — rename/comment/type + batch IDAPython); **bridge** `spec-author` (rewrite `_dirty/`→committed specs, no IDA); **debugger** `re-validator` (confirm vs the live `?ext=dbg` session — never `dbg_start`).
+- **C# Porting** (clean-room, no IDA, read only committed specs; layers 00→04 + Tools): `dotnet-foundation-engineer` (deputy — layer 01 + `00.SourcesGenerators` + Tools-as-code + slnx/csproj map), `network-engineer` (02), `assets-engineer` (03), `core-engineer` (04); quality `code-reviewer` (correctness + perf + layer-DAG + clean-room firewall + artifacts; **shared** with Godot for layer-05 C#), `test-engineer` (xUnit + whole-solution build; **shared**).
+- **Godot Porting** (clean-room, layer 05 only): `godot-world-engineer` (terrain/world/shaders), `godot-ui-engineer` (HUD/menus/input/camera), `godot-character-specialist` (skinning/bind/motion), `render-reviewer` (Godot fidelity + live Godot MCP); plus the shared `code-reviewer`.
+- **Documentation & Tooling** (clean, no IDA): `docs-engineer` (committed doc corpus, firewall-neutral), `tooling-engineer` (C# `Tools/` + `00.SourcesGenerators` + Python harnesses), `kit-author` (author `.claude/` agents+skills+hooks), `tooling-auditor` (read-only kit audit).
 
 ## Commit Discipline
 

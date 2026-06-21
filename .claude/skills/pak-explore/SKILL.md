@@ -1,7 +1,7 @@
 ---
 name: pak-explore
 description: Use to INSPECT Martial Heroes archives & asset data without ever exporting copyrighted payload — three modes. PAK-INDEX lists a legacy .pak archive's directory (name/offset/size only, never payload bytes) from the Docs/RE/formats/pak.md spec. VFS-INSPECT opens the REAL client VFS (data.inf + data/data.vfs) through the production Assets.Vfs/Parsers API via the bundled net10.0 vfsls harness — list/contains/census/head, plus decode/extract/convert/hexdump/coverage and 12 family-census subcommands (scan-mot/bnd/skn/ui/xeff/sound/fx/minimap/quest, dump-msgxdb/uitex/do). DATA-FORMAT recovers a CP949 text/tab data-file format (skin.txt, actormotion.txt, bgtexture.txt, *.csv, text *.scr) by observing real bytes through that harness — NOT by decompiling — and writes neutral column/delimiter findings to Docs/RE/_dirty/formats/<name>.raw.md for later promotion. Read-only over originals; metadata/counts/short previews only; no IDA, no _dirty/ decompiler output.
-allowed-tools: Read Write Bash(python *) Bash(dotnet *) Bash(mkdir *) Bash(copy *) Bash(xcopy *)
+allowed-tools: Read Write Bash(python *) Bash(dotnet *) Bash(mkdir *)
 model: sonnet
 effort: high
 ---

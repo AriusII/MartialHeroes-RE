@@ -22,12 +22,8 @@ def _digest(obj):
 
 
 def _hint(ti):
-    if not isinstance(ti, dict):
-        return None
-    for k in ("name", "function_name", "function", "address", "ea", "offset", "symbol"):
-        if k in ti and ti[k] not in (None, ""):
-            return {k: ti[k]}
-    return None
+    # Shared extractor in _hooklib (firewall_guard logs the identical target hint).
+    return h.ida_target_hint(ti)
 
 
 def main():

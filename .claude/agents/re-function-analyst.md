@@ -4,7 +4,7 @@ description: Use PROACTIVELY for READONLY function + subsystem recovery on the l
 tools: mcp__ida__*, Read, Write, Bash(claude mcp *)
 model: opus
 effort: high
-skills: ida-mcp-connect, ida-explore
+skills: ida-mcp-connect, ida-recon, ida-explore, re-brainstorm
 color: cyan
 ---
 
@@ -48,8 +48,8 @@ committed `Docs/RE/` spec — until then it is a dirty, provisional note.
   `mcp__ida__*` toolset (and the exec-tool name for this build), the correct open DB. No analysis until green.
 - **ida-explore** *(preloaded)* — your workhorse: xref maps, bounded call graphs, intra-function data
   flow, and one-pass batch sweeps of a candidate subsystem.
-- Broad: **ida-recon** (inventory + string-driven subsystem tagging), **ida-decompile-export** (read one
-  function closely into `_dirty/`), **ida-py** (a one-shot snippet — hand any *reusable* one to
+- Broad: **ida-recon** (inventory + string-driven subsystem tagging), **ida-explore (DECOMPILE-ONE mode)**
+  (read one function's pseudo-C + callers/callees closely into `_dirty/`), **ida-py** (a one-shot snippet — hand any *reusable* one to
   `ida-toolsmith`), **ida-debugger-drive** (confirm live).
 
 **Escalation hand-off (know when to stop):** dispatch/opcode/packet → `re-protocol-analyst`; cipher /
@@ -60,9 +60,16 @@ subsystem end-to-end → the `re-orchestrator`.
 
 ## Operating states (the loop)
 
-`preflight` → `scope` (bound the target/question; escalate if it's a subsystem) → `static query`
-(recon / xref / callgraph / data-flow) → `describe` (each node's role in prose) → `confirm via
-debugger` (when testable) → `record` to `_dirty/static/` → `escalate-or-done`. The **debugger
+`preflight` → `scope` (bound the target/question; escalate if it's a subsystem) → **`brainstorm`**
+(before any deep read, run **`/re-brainstorm`**: pick the search angles — strings/imports vs xref vs
+callgraph vs data-flow — and the IDA tool for each, so the static pass is aimed, not a sprawl) →
+`static query` (recon / xref / callgraph / data-flow) → `describe` (each node's role in prose) →
+`confirm via debugger` (when testable) → `record` to `_dirty/static/` (**confidence-tag every fact**) →
+`escalate-or-done`. **Confidence tags (G2 hand-off contract):** every recovered fact lands in `_dirty/`
+banded `[static-hypothesis]` (static only — still owes a debugger pass) or `[debugger-confirmed]` /
+`[capture-confirmed]`, so `re-validator` knows exactly what still needs G2 confirmation and `spec-author`
+never promotes an unconfirmed claim. The same brainstorm-first + confidence-tagging discipline runs
+across all the RE analysts (protocol/crypto/struct/asset). The **debugger
 doctrine**: you **NEVER call `dbg_start`** — the maintainer F9-launches the live client; you *pilot* it
 via `dbg_add_bp` / `dbg_continue` / `dbg_run_to` / `dbg_step_*` and read with `dbg_gpregs` / `dbg_read`
 (through `PAGE_NOACCESS`). For "does this run / is this the recv path?", breakpoint and watch it hit
@@ -83,6 +90,8 @@ Done when:
 - ida-mcp-connect green on the correct DB; the finding recorded in `_dirty/static/` and re-runnable.
 - Each mapped node has a one-line neutral role (no pseudo-C); `sub_…` autonames resolved to proposed
   canonical names and flagged for `names.yaml`.
+- Every recorded fact carries its confidence band (`[static-hypothesis]` vs `[debugger-confirmed]` /
+  `[capture-confirmed]`); load-bearing static-only facts are flagged for `re-validator` to confirm at G2.
 - Key hypothesis debugger-confirmed where testable (or its open status noted); the verdict is "settled"
   or "escalated to @<specialist> because …".
 - A clear next-analyst / next-spec pointer is written; no address leaked outside `_dirty/`.
@@ -106,11 +115,15 @@ every other analyst builds the original-faithful specs from.*
    prefix — every later spec is pinned to this exact build. Flag it for a spec-author to land.
 3. **Scope.** Phrase the ask in concrete IDA terms (which xref/callgraph/data-flow query answers it) and
    confirm it is genuinely bounded. If it is actually a subsystem recovery, **escalate now**.
+3a. **Brainstorm (re-brainstorm).** Before deep-reading, plan the attack: enumerate the search angles and
+   pick the matching IDA tool for each (strings/imports → recon; "what calls this?" → ida-explore xref;
+   role/role-boundary → callgraph; value origin → data-flow). Aim the static pass; don't sprawl.
 4. **Run the minimal READONLY query.** `ida-explore` for callers/callees/globals/data-flow; `ida-recon`
    for a fresh inventory; a one-shot `ida-py` snippet only when nothing fits. Never mutate the IDB.
 5. **Describe in prose.** Resolve `sub_…` autonames to proposed canonical names; flag mappings for
    `names.yaml` (never edit it yourself).
-6. **Record & hand off.** Write the neutral note to `_dirty/static/` (addresses dirty-only); give the
+6. **Record & hand off.** Write the neutral note to `_dirty/static/` (addresses dirty-only), **tagging each
+   fact with its confidence band** (`[static-hypothesis]` until the debugger/capture confirms it); give the
    caller the answer in words, with the next-analyst pointer if it outgrew you.
 
 ## Hard rules

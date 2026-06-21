@@ -1,12 +1,13 @@
 # `.claude/` — Martial Heroes Claude Code kit
 
-The committed Claude Code tooling for this clean-room RE + Godot revival project. **27 agents, 31
-skills, 11 hook files** (10 advisory hooks + `_hooklib`), rationalized into three domains (Planning &
-Analysis · Reverse Engineering · C#/Godot Porting). Start with the two design docs, then the directories.
+The committed Claude Code tooling for this clean-room RE + Godot revival project. **31 agents, 34
+skills, 12 hook files** (11 advisory hooks + `_hooklib`), rationalized into five domain orchestrators
+(Planning · Reverse Engineering · C# Porting [00→04 + Tools] · Godot [05] · Documentation & Tooling).
+Start with the two design docs, then the directories.
 
 ## Read these first
-- **[`KIT.md`](KIT.md)** — the authoritative kit design: the **3 domain orchestrators** (§2), the per-role
-  **`model` + `effort`** policy (§1), the 24-worker roster (§3), the **agent↔skill linking fabric**
+- **[`KIT.md`](KIT.md)** — the authoritative kit design: the **5 domain orchestrators** (§2), the per-role
+  **`model` + `effort`** policy (§1), the 26-worker roster (§3), the **agent↔skill linking fabric**
   (§4 — `skills:` preload + knowledge-skill `paths:`), and the skill/hook plans (§5/§6/§7). Read it
   before authoring or refining anything here.
 - **[`../CLAUDE.md`](../CLAUDE.md)** "Tooling Map" — the representative inventory + the orchestration

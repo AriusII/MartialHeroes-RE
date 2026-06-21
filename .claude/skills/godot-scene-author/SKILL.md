@@ -81,7 +81,7 @@ nothing", suspect this first.
 `[node]` header → move it to a property line. A scene that loads with no error yet does nothing → almost
 always this trap; run the DIAG dump rather than trusting the clean load. A node's C# references bare
 `Input.`/`Environment.`/`Time.` → a build-side namespace collision (use `global::Godot.*`), not a scene
-bug → `/godot-build`.
+bug → rebuild + re-run via `/godot-run-headless` (it builds layer 05 before it runs).
 
 # Mode B — CSPROJ-BOOTSTRAP (normalize the Godot-generated csproj)
 

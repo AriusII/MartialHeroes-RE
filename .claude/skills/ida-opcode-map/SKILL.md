@@ -1,7 +1,7 @@
 ---
 name: ida-opcode-map
-description: Use when you need to locate the packet dispatch table in the legacy Martial Heroes client (Main.exe) and recover the raw opcode -> handler-address map. Finds the large switch/jump table the network reader dispatches on, resolves each case to its handler function, and writes opcode/handler pairs to Docs/RE/_dirty/opcodes.raw.md. This is dirty-room recon only; promotion to the clean Docs/RE/opcodes.md is a separate step owned by the opcode-catalog skill.
-allowed-tools: 'Read Write'
+description: Use when you need to locate the packet dispatch table in the legacy Martial Heroes client (doida.exe; Main.exe historical) and recover the raw opcode -> handler-address map. Finds the large switch/jump table the network reader dispatches on, resolves each case to its handler function, and writes opcode/handler pairs to Docs/RE/_dirty/opcodes.raw.md. This is dirty-room recon only; promotion to the clean Docs/RE/opcodes.md is a separate step owned by the opcode-catalog skill.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---

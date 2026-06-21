@@ -4,8 +4,6 @@ description: Use to cross the clean-room firewall — take a raw finding sitting
 allowed-tools: Read Write Edit Grep Glob Bash(mkdir *)
 model: opus
 effort: high
-model: opus
-effort: high
 ---
 
 # re-promote — the dirty→clean firewall bridge

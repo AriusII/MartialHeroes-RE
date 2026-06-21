@@ -355,7 +355,7 @@ def main():
             "- object_size_hint: %d" % cls["object_size_hint"],
             "- slots: %d" % len(cls.get("slots", [])),
             "",
-            "> Slot roles are HEURISTIC hypotheses. Confirm via ida-decompile-export before spec promotion.",
+            "> Slot roles are HEURISTIC hypotheses. Confirm via ida-explore (DECOMPILE-ONE mode) before spec promotion.",
             "",
             "| Slot | Slot EA | Target EA | Current Name | In-deg | Role |",
             "|---|---|---|---|---|---|",
