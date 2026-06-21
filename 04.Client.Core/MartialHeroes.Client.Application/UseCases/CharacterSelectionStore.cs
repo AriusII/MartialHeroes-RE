@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.World;
 
 namespace MartialHeroes.Client.Application.UseCases;
@@ -109,6 +111,41 @@ public sealed class CharacterSelectionStore
     }
 
     /// <summary>
+    ///     Projects the currently-retained occupied slots into the SAME <see cref="CharacterListSlot" />
+    ///     shape the live 3/1 / 3/4 <c>CharacterListEvent</c> carries (including the appearance-driver fields
+    ///     InternalClass / AppearanceVariant / FaceA / EquipGids), so the layer-05 Select scene can REPLAY
+    ///     the roster on scene entry. The live event fires while the client is still in Load (before the
+    ///     Select drainer exists), so the event is never delivered; this pull lets the scene rebuild the
+    ///     roster from what was retained. The field mapping is byte-identical to
+    ///     <c>GamePacketHandler.DecodeAndRetainRoster</c>'s <see cref="CharacterListSlot" /> construction
+    ///     (SlotIndex, Name, Level, ServerClass, CurrentHp, PosX=WorldX, PosZ=WorldZ, InternalClass,
+    ///     AppearanceVariant, FaceA, EquipGids). One slot is emitted per RETAINED occupied slot (the live
+    ///     path emits one per mask-set bit regardless of the "@BLANK@" sentinel — the consumer decides
+    ///     empty), in ascending slot order. Returns empty when nothing is retained. spec:
+    ///     Docs/RE/specs/login_flow.md §5.1 / §1 step 7; Docs/RE/packets/3-1_character_list.yaml.
+    /// </summary>
+    public ImmutableArray<CharacterListSlot> ProjectRetainedRoster()
+    {
+        var builder = ImmutableArray.CreateBuilder<CharacterListSlot>();
+
+        // Hard, bounded iteration over the 5 fixed slots; a null entry is an unretained/unoccupied slot,
+        // omitted exactly as the live event omits a mask-clear bit. spec: login_flow.md §3.2 / §5.1.
+        for (var slot = 0; slot < MaxSlots; slot++)
+        {
+            var record = _slots[slot];
+            if (record is null) continue;
+
+            // Byte-identical field mapping to DecodeAndRetainRoster's CharacterListSlot construction.
+            builder.Add(new CharacterListSlot(
+                record.SlotIndex, record.Name, record.Level, record.ServerClass, record.CurrentHp,
+                record.WorldX, record.WorldZ,
+                record.InternalClass, record.AppearanceVariant, record.FaceA, record.EquipGids));
+        }
+
+        return builder.ToImmutable();
+    }
+
+    /// <summary>
     ///     Validates and confirms a slot selection. Enforces the slot-range guard (≤ 4), detects the
     ///     "@BLANK@" empty-slot sentinel, and on a real character caches the slot's record as
     ///     <see cref="Chosen" /> for the 3/14 spawn. spec: Docs/RE/specs/login_flow.md §3.3 / §3.5.
@@ -164,6 +201,19 @@ public sealed class CharacterSlotRecord
         CurrentStamina = reader.ReadCurrentStamina();
         WorldX = reader.ReadWorldX();
         WorldZ = reader.ReadWorldZ();
+
+        // Appearance-driver fields the layer-05 char-select preview row renders the REAL character from:
+        // internal_class is the skeleton driver (NOT server_class), plus the body/gender variant, faceA, and
+        // the six visible-gear gids for overlay slots {3,4,6,2,11,14} from the +0x58 equip table. Reused
+        // verbatim from SpawnDescriptorReader (which cites its own offsets). spec: Docs/RE/structs/spawn_descriptor.md
+        // (+0x34 internal_class, +0x2C variant, +0x2E faceA, +0x58 equip table);
+        // Docs/RE/packets/3-1_character_list.yaml (APPEARANCE DRIVER overlays {3,4,6,2,11,14}).
+        InternalClass = reader.ReadInternalClass();
+        AppearanceVariant = reader.ReadAppearanceVariant();
+        FaceA = reader.ReadFaceA();
+        Span<uint> gearScratch = stackalloc uint[SpawnDescriptorReader.VisibleGearSlots.Length];
+        reader.ReadVisibleGearGids(gearScratch);
+        EquipGids = [..gearScratch];
     }
 
     /// <summary>The slot index (0..4). spec: Docs/RE/specs/login_flow.md §3.2.</summary>
@@ -192,6 +242,25 @@ public sealed class CharacterSlotRecord
 
     /// <summary>World Z (float). spec: Docs/RE/structs/spawn_descriptor.md (+0x50).</summary>
     public float WorldZ { get; }
+
+    /// <summary>
+    ///     Internal class word {1,2,3,4} — THE skeleton driver and the <c>class</c> argument of the
+    ///     model-class formula; distinct from <see cref="ServerClass" />. spec:
+    ///     Docs/RE/structs/spawn_descriptor.md (+0x34); Docs/RE/packets/3-1_character_list.yaml (APPEARANCE DRIVER).
+    /// </summary>
+    public ushort InternalClass { get; }
+
+    /// <summary>Body / gender appearance variant. spec: Docs/RE/structs/spawn_descriptor.md (+0x2C).</summary>
+    public byte AppearanceVariant { get; }
+
+    /// <summary>faceA (face index / render-visibility). spec: Docs/RE/structs/spawn_descriptor.md (+0x2E).</summary>
+    public ushort FaceA { get; }
+
+    /// <summary>
+    ///     The six visible-gear part gids for overlay slots {3,4,6,2,11,14}, from the +0x58 equip table.
+    ///     spec: Docs/RE/structs/spawn_descriptor.md (+0x58); Docs/RE/packets/3-1_character_list.yaml.
+    /// </summary>
+    public ImmutableArray<uint> EquipGids { get; }
 
     /// <summary>
     ///     The raw 880-byte SpawnDescriptor + 96-byte stats block + 1 flag byte, copied verbatim from the

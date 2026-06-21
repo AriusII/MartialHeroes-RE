@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Scene;
@@ -51,6 +52,20 @@ public sealed partial class SelectScene : StubSceneController
 
         GD.Print("[SelectScene] State 4 Select built CharacterSelectScreen: roster UI, 3D preview actors, " +
                  "and Select camera dolly. spec: client_runtime.md §7.3/§7.4; frontend_scenes.md §3.");
+
+        // Roster catch-up replay: the live 3/4 CharacterListEvent fires during LOAD state (state 3),
+        // before this drainer is armed. If the Application store already retained the roster, replay
+        // it directly into ApplyCharacterList so the 5 preview actors build with the correct class.
+        // The drainer is still fully armed above — if a fresh 3/4 arrives later, ApplyCharacterList
+        // runs again (full rebuild). This replay is additive, not a drainer suppression.
+        // spec: Docs/RE/specs/frontend_scenes.md §3.1.
+        var retained = _ctx?.CharacterSelection?.ProjectRetainedRoster() ?? ImmutableArray<CharacterListSlot>.Empty;
+        if (retained.Length > 0)
+        {
+            _select.ApplyCharacterList(retained);
+            GD.Print($"[SelectScene] Replayed {retained.Length} retained roster slots into ApplyCharacterList " +
+                     "(live 3/4 CharacterListEvent fired pre-Select-drainer). spec: frontend_scenes.md §3.1.");
+        }
     }
 
     public override void _ExitTree()
