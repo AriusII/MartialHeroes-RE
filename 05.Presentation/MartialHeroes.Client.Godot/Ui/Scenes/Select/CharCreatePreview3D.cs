@@ -40,9 +40,9 @@
 // COORDINATE CONVENTION: world geometry negates Z (Helpers/WorldCoordinates.ToGodot).
 // NO FALLBACK (missing asset → log + skip, no crash, no synthetic data). PASSIVE: view state only.
 
-using System.Text;
 using Godot;
 using MartialHeroes.Assets.Mapping;
+using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Assets.Parsers.Terrain;
@@ -777,29 +777,30 @@ public sealed partial class CharCreatePreview3D : Control
 
         try
         {
-            var text = Encoding.GetEncoding(949).GetString(assets.GetRaw(tablePath).Span);
-            foreach (var rawLine in text.Split('\n'))
-            {
-                var cols = rawLine.Replace("\r", string.Empty).Split('\t');
-                if (cols.Length <= 16) continue;
-                if (!uint.TryParse(cols[2].Trim(), out var classId) || classId != idB) continue;
+            // Parse data/char/actormotion.txt via the layer-03 catalogue (CP949 registered internally
+            // by ActormotionParser). Key on skin_class (col2 = int_a @ 0x04), first-occurrence-wins —
+            // equivalent to the previous inline "first row whose cols[2] == id_b" linear scan. This
+            // matches CharSelectScene3D so the create preview and the select row sample the IDENTICAL
+            // idle clip per class.
+            // spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class.
+            var catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
+            var entry = catalogue.GetBySkinClass((int)idB);
+            if (entry is null) return null;
 
-                // Idle motion = motion_ids_a[1] = COLUMN 16 (0-based cols[16]), record offset +0x44 — the
-                // default stand idle the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is a
-                // file-source reference that is STATICALLY DEAD (zero runtime read-sites); the earlier
-                // "col15 / a[0] / +0x40" reading was wrong. This matches CharSelectScene3D so the create
-                // preview and the select row sample the IDENTICAL idle clip per class. spec:
-                // Docs/RE/formats/actormotion.md §motion_ids_a (a[1]=+0x44=col16=default stand idle;
-                // a[0]/+0x40/col15 dead at runtime); skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b).
-                var idle = cols[16].Trim();
-                if (idle.Length == 0 || idle == "0") return null;
+            // Idle motion = motion_ids_a[1] = COLUMN 16 (record offset +0x44) — the default stand idle
+            // the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is a file-source
+            // reference that is STATICALLY DEAD (zero runtime read-sites). IdleMotionId IS the parsed
+            // int of that same col16, so idle <= 0 is equivalent to the old empty/"0" string guard.
+            // spec: Docs/RE/formats/actormotion.md §motion_ids_a (a[1]=+0x44=col16=default stand idle;
+            // a[0]/+0x40/col15 dead at runtime); skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b).
+            var idle = entry.IdleMotionId;
+            if (idle <= 0) return null;
 
-                var motPath = $"data/char/mot/g{idle}.mot";
-                if (!assets.Contains(motPath)) return null;
+            var motPath = $"data/char/mot/g{idle}.mot";
+            if (!assets.Contains(motPath)) return null;
 
-                var motData = assets.GetRaw(motPath);
-                return motData.IsEmpty ? null : AnimationParser.Parse(motData);
-            }
+            var motData = assets.GetRaw(motPath);
+            return motData.IsEmpty ? null : AnimationParser.Parse(motData);
         }
         catch (Exception ex)
         {

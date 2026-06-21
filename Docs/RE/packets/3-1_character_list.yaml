@@ -6,7 +6,11 @@
 #                 the sub-block-3 occupied/facing marker and the sub-block-4 flags-word (bit 0 =
 #                 billing/premium) meanings are now RESOLVED (binary-won); other field VALUE semantics
 #                 (descriptor interior, ServerId/ChannelId real values) are capture/debugger-pending.
-#   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+#   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
+#                 CYCLE 9 Phase 3.1 (2026-06-21) static-confirmed the model-class inputs --
+#                 internal_class (u16 @ desc +0x34) and appearance_variant (u8 @ desc +0x2C) are the
+#                 class/variant args of the preview model formula, HIGH confidence (four independent
+#                 read sites; the in-world spawn path feeds the same two offsets to the same factory).
 #   ida_anchor: 263bd994
 #   evidence: [static-ida]
 #   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots
@@ -52,8 +56,19 @@ notes: |
       member map is owned by structs/actor.md -- decode from there. The fields that drive the
       char-select preview's REAL appearance are:
         +0x00  name (char[17], CP949/EUC-KR, NUL-terminated, <=16 bytes + terminator)
-        +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula
-        +0x34  internal_class (u16, {1,2,3,4})  -- THE skeleton driver; the 'class' arg of the formula
+        +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula.
+               STATIC-CONFIRMED HIGH (CYCLE 9 Phase 3.1): read zero-extended; this same byte doubles as
+               the per-slot occupied/body marker. Distinct from the render-occupancy gate at desc +0x2E.
+        +0x34  internal_class (u16, {1,2,3,4})  -- THE skeleton driver; the 'class' arg of the formula.
+               STATIC-CONFIRMED HIGH (CYCLE 9 Phase 3.1): read sign-extended; confirmed at four
+               independent read sites; the in-world spawn path (5/3, 5/1, snapshot, respawn,
+               game-state-tick) feeds the SAME +0x34/+0x2C offsets to the SAME actor factory.
+               PORT ACTION ITEM (alignment bug, NOT a layout error): a decoder that reads class == 0
+               at +0x34 for a real slot is reading from a MISALIGNED descriptor base -- the tell is
+               that level (u16 @ desc +0x3A) in the SAME descriptor copy decodes correctly. Re-base the
+               per-slot descriptor at the first byte of the slot record's 880-byte descriptor block;
+               then u16 @ +0x34 yields {1,2,3,4} and 5*(class + 4*variant) - 24 resolves. The live wire
+               VALUE byte-proof stays debugger-pending; the OFFSET is static-confirmed.
         +0x38/+0x39  level/state bytes  -- see level CONFLICT below
         +0x3C/+0x40/+0x44  current_hp / current_mp / current_stamina (u32 each)
         +0x4C/+0x50  world_x / world_z (f32 each)

@@ -50,8 +50,8 @@
 // spec: Docs/RE/formats/texture.md §PNG — character skin textures in data/char/tex*/
 // spec: Docs/RE/formats/mesh.md §.skn header (id_a/id_b).
 
-using System.Text;
 using Godot;
+using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Godot.Composition;
 
@@ -303,37 +303,20 @@ public static class CharacterTextureResolver
 
         try
         {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            var raw = assets.GetRaw(SkinTxtPath);
-            // spec: All game text is CP949 (per project brief).
-            var text = Encoding.GetEncoding(949).GetString(raw.Span);
+            // Parse data/char/skin.txt via the layer-03 catalogue (CP949 registered internally by
+            // SkinTxtParser). MeshGid = col4 = .skn IdA, TextureId = col5 = tex_id. Populating the
+            // existing skinId→texId map from the catalogue is behaviour-equivalent to the previous
+            // inline col4→col5 scan: filter MeshGid>0 && TextureId>0 (the old "skip zero" guard), and
+            // assign last-write-wins (the old map[skinId]=texId assignment).
+            // spec: Docs/RE/formats/texture.md §The skin chain — .skn IdA → skin.txt col4 → col5 tex_id.
+            // spec: Docs/RE/specs/skinning.md §3.5.3 — col4 is mesh gid, col5 is texture id.
+            var catalogue = SkinTxtParser.Parse(assets.GetRaw(SkinTxtPath));
 
-            var map = new Dictionary<uint, uint>(1400);
-            var firstLine = true;
-
-            foreach (var rawLine in text.Split('\n'))
+            var map = new Dictionary<uint, uint>(catalogue.Count);
+            foreach (var entry in catalogue.Entries)
             {
-                var line = rawLine.Trim('\r', '\n', ' ');
-                if (line.Length == 0) continue;
-
-                // Skip the first non-empty line (the entry-count header).
-                if (firstLine)
-                {
-                    firstLine = false;
-                    continue;
-                }
-
-                // All data rows are TAB-separated with exactly 6 columns.
-                // spec: Probed real VFS — 1351 6-column rows, zero rows with other column counts.
-                var cols = line.Split('\t');
-                if (cols.Length != 6) continue;
-
-                // col4 = skinId, col5 = texId.
-                // Skip zero entries (empty slot placeholders).
-                if (!uint.TryParse(cols[4], out var skinId) || skinId == 0) continue;
-                if (!uint.TryParse(cols[5], out var texId) || texId == 0) continue;
-
-                map[skinId] = texId;
+                if (entry.MeshGid <= 0 || entry.TextureId <= 0) continue; // skip zero/empty-slot rows
+                map[(uint)entry.MeshGid] = (uint)entry.TextureId;
             }
 
             _cachedSkinToTex = map;

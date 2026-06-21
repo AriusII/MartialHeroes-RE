@@ -1266,6 +1266,24 @@ floats above). Toggling the enter/create/delete buttons depends on the slot's lo
 > They are two separate reads, but they **agree on well-formed data** (an empty slot has both a zero
 > `faceA` and the `"@BLANK@"` name).
 
+> **Preview model inputs are `class` @ +0x34 and `variant` @ +0x2C — re-confirmed CYCLE 9 Phase 3.1
+> (static IDA, IDB SHA `263bd994`, HIGH confidence).** The model-class formula that selects the
+> preview skeleton/model takes its `class` argument from the descriptor `class` **u16 @ +0x34**
+> (PC value in `{1,2,3,4}`, read sign-extended) and its `variant` argument from the descriptor
+> `sex`/`variant` **u8 @ +0x2C** (read zero-extended; the same byte doubles as the slot-row
+> occupied/body marker). Both offsets are confirmed at **four independent read sites**, and the
+> in-world spawn path feeds the **same** offsets to the **same** actor factory. Keep them distinct from
+> the render-occupancy gate `faceA` @ **+0x2E** (a separate u16) — that gate decides *whether* to build
+> a preview actor, it is **not** a model input.
+>
+> **Port action item (alignment bug, not a layout error).** A decoder that reads `class == 0` at
+> +0x34 for a real (non-empty) slot is reading from a **misaligned descriptor base**, not from a wrong
+> offset: the tell is that the `level` u16 @ +0x3A in the **same** descriptor copy decodes correctly
+> (the real character levels appear). Fix the decoder so the per-slot descriptor base points at the
+> first byte of the slot record's 880-byte descriptor block; then u16 @ +0x34 yields the `{1,2,3,4}`
+> class and `model_class_id = 5*(class + 4*variant) - 24` resolves. The live wire VALUE byte-proof
+> stays **debugger-pending**; the *offset* is static-confirmed. spec: Docs/RE/structs/spawn_descriptor.md
+
 ## 3.3 The live 3D preview actors — placement, facing, pose (CODE-CONFIRMED)
 
 The select scene renders each occupied slot as a **live, animated 3D character** standing in a **row**

@@ -35,6 +35,7 @@ public sealed class ActormotionCatalogue
 {
     private readonly Dictionary<int, ActormotionEntry> _byIntraOffset;
     private readonly Dictionary<uint, ActormotionEntry> _byMotionKey;
+    private readonly Dictionary<int, ActormotionEntry> _bySkinClass;
 
     internal ActormotionCatalogue(Dictionary<uint, ActormotionEntry> byMotionKey)
     {
@@ -45,6 +46,15 @@ public sealed class ActormotionCatalogue
         _byIntraOffset = new Dictionary<int, ActormotionEntry>(byMotionKey.Count);
         foreach (var entry in byMotionKey.Values)
             _byIntraOffset.TryAdd(entry.Col1RawOffset, entry);
+
+        // Build a secondary index keyed by col2 (= int_a @ 0x04 = skin_class = SkinClassId).
+        // First-occurrence wins, mirroring the _byIntraOffset pattern, so the lookup returns the
+        // SAME first-in-file-order row a linear col2-match scan would return.
+        // spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class
+        // spec: Docs/RE/specs/skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b/skin_class)
+        _bySkinClass = new Dictionary<int, ActormotionEntry>(byMotionKey.Count);
+        foreach (var entry in byMotionKey.Values)
+            _bySkinClass.TryAdd(entry.IntA, entry);
     }
 
     /// <summary>Total number of parsed records.</summary>
@@ -79,5 +89,23 @@ public sealed class ActormotionCatalogue
     public ActormotionEntry? GetByIntraOffset(int col1Value)
     {
         return _byIntraOffset.TryGetValue(col1Value, out var e) ? e : null;
+    }
+
+    /// <summary>
+    ///     Looks up a record by its <c>skin_class</c> value (col2 = <see cref="ActormotionEntry.IntA" />
+    ///     = <see cref="ActormotionEntry.SkinClassId" />). For the player preview path this is the
+    ///     appearance-slot <c>id_b</c> key. When multiple records share the same skin_class the
+    ///     first-parsed (first-in-file-order) occurrence is returned — identical to a linear
+    ///     "first row whose col2 == skinClass" scan.
+    /// </summary>
+    /// <remarks>
+    ///     spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class.
+    ///     spec: Docs/RE/specs/skinning.md §8(e)/§10 — idle = actormotion col16, keyed by id_b/skin_class.
+    /// </remarks>
+    /// <param name="skinClass">The skin_class / SkinClassId (col2) to match.</param>
+    /// <returns>The first matching entry, or <see langword="null" /> when absent.</returns>
+    public ActormotionEntry? GetBySkinClass(int skinClass)
+    {
+        return _bySkinClass.TryGetValue(skinClass, out var e) ? e : null;
     }
 }

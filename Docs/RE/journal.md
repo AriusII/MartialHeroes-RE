@@ -458,3 +458,48 @@ removing the `short`/`ushort` mix - `ServerId`, `StatusCode`, `Load`, `OpenTime`
 string (stop at first NUL), and split on a **single space** (host = before, port = `atol`/decimal of the tail) - requiring
 `>=30`, or splitting on `:`/NUL, is a bug; treat the reply as a single endpoint (do not loop for a trailing array).
 
+## CYCLE 9 - Phase 3.1: tiny RE - settle the 3/1 SmsgCharacterList class/variant descriptor offset (static IDA) - 2026-06-21
+
+**Trigger.** The live char-select wire decode read `internal_class == 0` at SpawnDescriptor +0x34 for
+every real roster slot (chars of class {1,2,3,4}), so the model formula `5*(class + 4*variant) - 24`
+yielded a bad key and every preview actor was skipped (empty platform). The 3/1 record was banner-flagged
+`capture_verified: false`, so +0x34 was under suspicion.
+
+**Recovery (1 READONLY analyst, static-only, IDB SHA 263bd994).** The binary genuinely reads the
+model-class `class` argument from descriptor **+0x34** (u16, sign-extended) and the `variant` argument
+from descriptor **+0x2C** (u8, zero-extended). Confirmed at **four independent read sites**: the single
+shared spawn factory; the char-select preview-lineup spawn; the zoomed single-preview build; and the
+character-creation synthesizers (which `switch` on the {1,2,3,4} class value they write into +0x34). The
+in-world spawn path (5/3 CharSpawn, 5/1 ActorSpawnExtended, area snapshot, respawn, game-state-tick)
+feeds the **same** two offsets to the **same** factory - no per-caller remapping. So the spec offsets
+were already CORRECT; this pass raises them to STATIC-CONFIRMED HIGH.
+
+**The +0x34==0 puzzle - resolved as a port-side bug, not a spec error.** The `level` u16 at +0x3A in the
+SAME descriptor copy decodes the real character levels (L1/L3/L12), proving the descriptor block is
+intact and correctly based. A correct +0x3A next to a zero +0x34 in the same 0x370 block means the
+port's decoder read +0x34 from a **misaligned descriptor base**, not that the field moved. Static settles
+WHICH offset the client reads (conclusively +0x34/+0x2C); the live wire VALUE byte-proof stays
+debugger-pending.
+
+**Reconciliation of the near-by fields (was CAMPAIGN-16 open).** Four distinct roles near +0x2C..+0x36
+are now disambiguated, not conflated: variant/occupied byte (+0x2C, u8), preview occupied gate (+0x2E,
+u16), model class input (+0x34, u16), PC-spawn name-assign gate (+0x36, u16).
+
+**Committed files touched:** `packets/3-1_character_list.yaml` (banner + descriptor field notes raised
+to STATIC-CONFIRMED HIGH + alignment-bug port note), `structs/spawn_descriptor.md` (banner + the +0x2C /
++0x34 rows + the CAMPAIGN-16 +0x2E/+0x36 reconciliation), `specs/frontend_scenes.md` (3.2 preview model
+inputs confirmation + port action item). Banners re-pinned to 263bd994 / CYCLE 9 Phase 3.1 / 2026-06-21.
+`capture_verified: false` kept (offset is static-confirmed; live VALUE byte-proof debugger-pending).
+
+**`names.yaml`:** no canonical name changed - not edited.
+
+**C# action item surfaced (NOT applied - Docs/RE-only):** the Godot/C# SpawnDescriptor decoder for the
+3/1 per-slot record must base each per-slot descriptor at the FIRST byte of that slot's 880-byte (0x370)
+descriptor block, then read `internal_class` as a u16 at descriptor +0x34 and `appearance_variant` as a
+u8 at descriptor +0x2C, so `class in {1,2,3,4}` and `ModelClassId = 5*(class + 4*variant) - 24` resolves.
+The current decoder's class==0 read is a descriptor-base alignment bug (the +0x3A level field already
+decodes correctly), not a wrong offset - do NOT relocate the field.
+
+**Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); all
+anchor addresses stayed in `_dirty/protocol/3-1_class_variant_offset.md`. Recovery (1 READONLY analyst)
+and promotion (orchestrator rewrite via re-promote) ran as separate sub-waves.
