@@ -329,3 +329,42 @@ weapon hand bone-id, dormant terrain-worker spawn, 1/7 mode meaning; plus the co
 **Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); all raw findings
 (incl. anchor addresses) stayed in `_dirty/*_cycle8/`. Recovery and promotion ran as separate sub-waves. No IDB
 mutation this cycle (a future `ida-toolsmith` annotation pass owns the rename/comment/type apply).
+
+
+---
+
+## CYCLE 8 — Phase 2.1: tiny packet-spec reconciliation (3/23 name offset · 3/6 body size) — 2026-06-21
+
+**Ground truth:** `doida.exe` IDB SHA-256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
+imagebase 0x400000. **Mode:** STATIC ONLY (no debugger, no captures). **Scope:** Docs/RE-only (no C#/Godot touched).
+**Apparatus:** Tier-1 → `re-orchestrator` (Tier-2) → `re-protocol-analyst` (recovery) + orchestrator-applied promotion.
+Dirty staging: `_dirty/protocol/cycle8_3-23_3-6_reconcile.md` (gitignored).
+
+Two packet-spec consistency conflicts surfaced during the C# alignment were settled against the binary (the binary wins):
+
+1. **3/23 `SmsgCharStatusBytesByName` — name-key body offset.** The matched CP949 character-name key is read at
+   **body offset 0x08** (post-8-byte-header payload cursor), NOT 0x00 and NOT 0x02 (both prior readings refuted).
+   The leading 8-byte block @0x00 is copied but unused by the slot matcher/writer; status byte @0x19 (+25), level
+   byte @0x1A (+26), pad @0x1B; total body = 28 bytes (unchanged). Roster scratch: ~5 slots, slot stride 880 bytes,
+   slot name field at slot+0x3C. The packet YAML `fields:` block was already correct (CharacterName @0x08); the stale
+   `@ 0x02` line in its VERIFICATION header was corrected, and `login_flow.md §5.4`'s table (which placed the name at
+   0x00) was corrected to the 0x08 layout. CONTROL-FLOW CONFIRMED; field VALUE semantics capture-UNVERIFIED.
+
+2. **3/6 `SmsgRenameCharResult` — true body size.** The handler reads a single fixed **12-byte** block (NOT 19); the
+   earlier "19-byte / embedded up-to-18-byte CP949 name @+1" reading is refuted — the success path performs NO name
+   string-copy. Layout (body-relative): Result u8 @0 (0=fail/1=success), ErrorCode u8 @1 (failure-only, 0xC8..0xD4 →
+   UI message buckets), pad @0x02 (2B), then two IEEE-float placement values @0x04 and @0x08 forwarded to the
+   char-select slot-record writer (the YAML's prior `SlotIndex u32` / `Unk u32` are corrected to two `f32` placement
+   values). `opcodes.md` already carried 3/6 = 12 and 3/23 = 28B/name-keyed; both rows were refined with the now-specced
+   layouts. CONTROL-FLOW CONFIRMED; field VALUE semantics capture-UNVERIFIED.
+
+**Committed files touched:** `packets/3-23_char_select_status_update.yaml`, `packets/3-6_rename_char_result.yaml`,
+`specs/login_flow.md` (§5.4, §5.7), `opcodes.md` (header changelog + the 3/6 and 3/23 catalog rows). Banners re-pinned
+to 263bd994 / CYCLE 8 / 2026-06-21. **`names.yaml`:** no canonical names changed (both opcode names unchanged) — not edited.
+**Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); anchor addresses
+stayed in `_dirty/`. Recovery and promotion ran as separate sub-waves.
+
+**C# follow-up surfaced (NOT applied — Docs/RE-only):** layer-02 `SmsgCharStatusBytesByName` (3/23) struct already
+matches the 28-byte / name@0x08 `fields:` layout — confirmed correct. Layer-02 `SmsgRenameCharResult` (3/6) struct is
+12 bytes — size correct; if it declares the two trailing dwords as integer SlotIndex/Unk, the network-engineer should
+retype them to two `float` placement values to match the binary (offsets 0x04/0x08), no size change.

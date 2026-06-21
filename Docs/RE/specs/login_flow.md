@@ -821,11 +821,16 @@ correction note below). The handler matches the CP949 character-name key against
 slots and writes two trailing status bytes (a status/flag byte and the character level byte) into the
 matched record (and into the local-player globals when the key is the local player).
 
-| Offset | Size | Field | Meaning |
+| Offset (body) | Size | Field | Meaning |
 |---|---|---|---|
-| 0x00 | 17 | char[] (CP949) | Character-name key, matched against the roster names. |
-| (trailing) | 1 (u8) | Status flag byte | Written into the matched roster record (and the local flag global when it is the local player). |
-| (trailing) | 1 (u8) | Level byte | Written into the matched roster record (and the local-player level global when it is the local player). |
+| 0x00 | 8 | leading block | Copied but **not** used by the name matcher/writer. Its head bytes drive a custom-name-vs-code branch, but the by-name update keys on the name string below. |
+| 0x08 | 17 | char[] (CP949) | Character-name **key**, string-matched against the roster names. **(CYCLE 8 binary re-confirm: the name is at body offset 0x08, not 0x00.)** |
+| 0x19 (+25) | 1 (u8) | Status flag byte | Written into the matched roster record (and the local flag global when it is the local player). |
+| 0x1A (+26) | 1 (u8) | Level byte | Written into the matched roster record (and the local-player level global when it is the local player). |
+| 0x1B (+27) | 1 (u8) | Padding | Trailing reserved byte (unused). |
+
+> Offsets are **body-relative** (the payload cursor that begins after the 8-byte wire header).
+> Total body = 28 bytes. Roster scratch: ~5 slots, slot stride 880 bytes, name field at slot+0x3C.
 
 > **There is NO dedicated `3/23` create-result message.** An earlier reading modelled `3/23` as a
 > 12-byte `SmsgCharCreateResult`; the binary refutes this — the inbound major-3 dispatcher routes `3/23`
@@ -881,15 +886,21 @@ front-end deep-fidelity pass (campaign4/frontend-deep), dispatch-table-confirmed
 
 ### 5.7 Rename-character result — `3/6 SmsgRenameCharResult`
 
-A **19-byte (0x13)** payload:
+A **12-byte (0x0C)** payload:
 
-| Offset | Size | Field | Meaning |
+| Offset (body) | Size | Field | Meaning |
 |---|---|---|---|
-| 0 | 1 (u8) | Result | Nonzero = success. |
-| 1 | 18 | Name **or** error | On success: the new character name as a CP949 ASCIIZ string, up to 18 bytes including the NUL. On failure: an error code in byte +1 (range `0xC8..0xD4`, mapped to UI strings). |
+| 0x00 | 1 (u8) | Result | 0 = failure, 1 = success, other = no-op. |
+| 0x01 | 1 (u8) | ErrorCode | Failure-only error sub-code (range `0xC8..0xD4`, mapped to UI message buckets). |
+| 0x02 | 2 | Padding | Alignment / unused. |
+| 0x04 | 4 (f32) | PlacementValue0 | Loaded as an IEEE float on success; forwarded to the char-select slot-record writer. |
+| 0x08 | 4 (f32) | PlacementValue1 | Second IEEE-float placement value; forwarded to the slot-record writer. |
 
-> The 19-byte size is dispatch-confirmed. The success/failure discrimination is by the result byte at
-> offset 0.
+> **CYCLE 8 correction (binary-won):** the true body is **12 bytes**, not 19. The handler reads a
+> single fixed 12-byte block and performs **no** name string-copy on the success path — the earlier
+> 19-byte / embedded-CP949-name reading is refuted. Success/failure is discriminated by the result
+> byte at offset 0; the two trailing 4-byte values are IEEE floats (placement), not slot-index/unk
+> integers. Offsets are body-relative (post-8-byte-header).
 
 ### 5.8 Other major-3 responses (catalog cross-reference, not specced here)
 

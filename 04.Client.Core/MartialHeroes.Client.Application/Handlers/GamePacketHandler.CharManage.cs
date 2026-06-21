@@ -151,8 +151,8 @@ public sealed partial class GamePacketHandler
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     3/6 — rename-character result. A 12-byte block: result code, error code, padding, slot index, and an unverified
-    ///     dword.
+    ///     3/6 — rename-character result. A 12-byte block: result code, error code, padding, then two IEEE float
+    ///     placement values (binary-confirmed CYCLE 8 Phase 2.1; the prior "slot index + unverified dword" is refuted).
     ///     spec: Docs/RE/packets/3-6_rename_char_result.yaml.
     /// </summary>
     public void Handle(in SmsgRenameCharResult packet)
