@@ -17,7 +17,7 @@
   question #1 is RESOLVED statically** (see Section 5): the byte-cipher routine has **exactly one
   cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path;
   inbound is **LZ4-decompress only, then route**, with no inverse cipher.
-- **ida_reverified: 2026-06-16**
+- **ida_reverified: 2026-06-21** (CYCLE 8 re-confirmed CODE-CONFIRMED: 8-byte frame header [u32 size incl header LE][u16 major][u16 minor] no-bswap; C2S timestamp->keyless byte cipher->LZ4; S2C LZ4-decompress-only into the fixed 11680-byte buffer, the byte cipher has exactly ONE xref = the outbound send gate; size==8 header-only frames bypass all transforms; zero conflicts. Prior: 2026-06-16)
 - **ida_anchor: 263bd994**
 - **evidence: [static-ida]** (this campaign carried no live capture).
 - **capture/debugger-pending (the only residuals):** the **concrete server modulus `n` and exponent

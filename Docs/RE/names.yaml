@@ -14,6 +14,18 @@ binary:
   notes: "Legacy D.O. Online / Martial Heroes client; x86 32-bit; imagebase 0x400000. Re-anchored Campaign 7."
 
 functions:
+  # CYCLE 8 (2026-06-21, IDB SHA 263bd994): static "Truth pass" re-verified the Window/scene-FSM,
+  #   GUI framework (Diamond::GU*), HUD, asset/VFS assembly, and netcode clusters. All confirmed
+  #   function names already applied by prior cycles; NO renames applied this pass. Flags for a future
+  #   ida-toolsmith rename pass (cosmetic name-vs-note mismatches, not binary conflicts):
+  #     - "0x5e4436" Cmsg_MoveHeartbeat_Send / "0x5f6f79" *_Alt: the NAME reads like a keepalive but
+  #       the function emits the C2S 2/13 move-request body (its note already says "emits C2S 2/13");
+  #       a clearer name would be e.g. NetClient_SendProxyMoveFiller. The keepalive toggle is the
+  #       SEPARATE 2/112 opcode; the 20s compressed keepalive is 2/10000.
+  #     - GUI leaf/struct field-name proposals (GUButton normal/hover/pressed/disabled src + caption,
+  #       GUCheckBox.checked +0xFC, GUTextbox.mode_style/max_length/font_slot, GUList.selected_index,
+  #       GUScroll up/down/thumb sub-blocks, GUCanvas3D.drag_dx/dy, per-derived GUWindow secondary
+  #       slot-1 *_CmdEventSink) are in the CYCLE 8 dirty notes for an ida-toolsmith annotation pass.
   # CAMPAIGN 7 Phase E (2026-06-15): 3315 functions re-anchored to new build.
   # 2467 canonical game/project names + 848 library-tag names.
   # 2492 entries carry notes; 823 have blank notes.

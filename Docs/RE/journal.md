@@ -245,3 +245,87 @@ Committed files touched: `specs/ui_system.md`, `specs/rendering.md`, `specs/equi
 No `names.yaml` change applied this campaign (proposed canonical names left in the dirty notes for a later
 `ida-toolsmith` annotation pass). Firewall: zero addresses / pseudo-C / Hex-Rays autonames in any committed file
 (self-scrubbed); all raw findings stayed in `_dirty/`. Recovery and promotion ran as separate sub-waves.
+
+---
+
+## CYCLE 8 — GIGA STATIC-IDA "TRUTH PASS" (Window/scene FSM · GUI framework · HUD · asset/VFS assembly · netcode) (2026-06-21)
+
+**Ground truth:** `doida.exe` IDB, SHA-256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`
+(MD5 `a1437026…`); imagebase 0x400000; 25,792 funcs. **Mode:** STATIC ONLY (no debugger, no captures —
+maintainer chose static-only this cycle). **Scope:** `Docs/RE/**` only (no C#/Godot touched; that is Phase 2).
+**Method:** preflight → 5 parallel READONLY recovery lanes (1A scene FSM · 1B GUI struct + 1B GUI behaviour ·
+1C asset/VFS assembly · 1D netcode) → reconcile → promotion sub-wave (separate). Apparatus: Tier-1 →
+`re-orchestrator` (Tier-2) → re-*-analyst (Tier-3). Dirty staging: `_dirty/{scenes,gui_struct,gui_behavior,
+asset_assembly,net}_cycle8/` (gitignored). **This was a CONFIRM + DEEPEN + CLOSE pass over an already-mature
+corpus, not a from-scratch reverse.**
+
+### Phase 1 (recovery) — every load-bearing claim re-confirmed against the binary; ZERO structural conflicts
+- **1A scene/Window FSM:** the 8-case dispatch (bounds `state<=7`, value 8 = terminal exit sub-state, 3-int
+  record `[state,sub,reason]`), every per-state Window construction + ctor name + object size + pre-arm (incl.
+  the `5→4` world-exit pre-arm so logout returns to Select not Login), the `[OPENNING]/SKIP` gate (skip→4 else 3),
+  the keepalive enable on world-enter, and Error reading the reason field + closing the net client — all CODE-CONFIRMED.
+- **1B GUI struct:** the layered vtable chain (GUComponent 13 → GUPanel 14 → GUWindow 15 primary + 2-slot secondary)
+  and the headline sizes (leaf 0xF0, LoginWindow 0x558, MainWindow 0x5B8) re-confirmed; the full **leaf-widget
+  offset family** deepened (GUButton 3-state src-rects; GUCheckBox checked +0xFC; GULabel caption/aux + font +0xE4;
+  GUTextbox mode-style +0xA4 bit 0x80 = password / maxLength +0xD0 / font +0xDC; GUList selected-index +0xB8;
+  GUScroll up/down/thumb 24-byte sub-blocks; GUScrollEx derives GUPanel; GUCanvas3D 0xB0 drag-only).
+- **1B GUI behaviour:** the event-dispatch FSM (8 types, reverse-child topmost-first, single process-global
+  click-capture, synthetic CLICK, action-id→active-child→window switch, ESC=27/Tab=9/Enter=10), the single
+  shared `ID3DXSprite` render path (one `D3DXCreateSprite` call site; ARGB tint; forced-alpha +0x0F; auto-hide
+  timer block), the 15-slot HANGUL (charset 129) font table, and the 178-slot HUD roster (base +0x238; slots 35
+  MopGagePanel / 52 PetPanel / 110 Gamble / 135 UpgradeProcessPanel / 178 MainHandler lazy-filled) — all CODE-CONFIRMED.
+- **1C asset/VFS assembly:** the VFS mount (data.inf `FILE_FLAG_RANDOM_ACCESS`, header `entry_count @+0x0C`,
+  magic NOT validated / no FILETIME, 144-byte/entry TOC, retained data.vfs handle, **raw `ReadFile` — no codec**,
+  not memory-mapped), the find-and-read chokepoint (lowercased path → binary-searched TOC), the ~57-step fixed
+  boot-loader order, and the consolidated mount→boot-corpus→six-subsystem-chain assembly graph — all CODE-CONFIRMED;
+  47-format index audited complete (no orphan format, no missing loader).
+- **1D netcode:** the 8-byte frame header (`u32 size incl header` LE / `u16 major` / `u16 minor`, no bswap; inbound
+  reads a u16 length, send writes u32), the asymmetric transform (C2S timestamp→keyless byte cipher→LZ4; S2C
+  LZ4-decompress-only into the fixed 11680-byte buffer; the byte cipher has exactly ONE xref = the outbound send
+  gate; size==8 bypass), the 3-phase handshake (0/0→1/4, 1/6→3/1, 1/9→3/5), keepalive 2/10000=20s, move 2/13 (16B),
+  buff 5/31 (56B 30-slot), combat 2/52 server-authoritative, the major-4/major-5 154-slot tables (98 Response / 65
+  Push installed), and SO_RCVBUF-only / Nagle ON — all CODE-CONFIRMED.
+
+### Phase 2 (promotion) — firewall crossing (rewrite-not-copy; one writer per file; banners re-pinned 263bd994/CYCLE 8)
+**Five static GAPs CLOSED (binary-won, all upgrades from debugger-pending → CODE-CONFIRMED):**
+1. **Error sub-state 1-vs-3** (`scenes/scene_state_machine.md §9`, `scenes/login.md`): NOT an Init(0) failure —
+   it is in the **Login(1)** case: main-window-creation failure → Error sub 1; graphics-device init failure →
+   Error sub 3. Re-attributed and promoted to CODE-CONFIRMED.
+2. **GUWindow secondary 2-slot per-derived override** (`structs/guwindow.md §3.2`): all five derived windows
+   override BOTH secondary slots — slot 0 = base/dtor entry, slot 1 = the window's command/event sink (action-id
+   routing). The prior `[UNVERIFIED]` is closed.
+3. **GUCanvas3D render-target wiring** (`specs/ui_system.md §1.5a / open-item 9`): the canvas carries **no**
+   render-target/viewport field — its draw is an empty stub and it holds only a drag-orbit delta; the live preview
+   renders via the owner window's embedded GView (window +0xE8). The "untraced" conflict is closed.
+4. **+0x8D semantic** (`structs/gucomponent.md §8 / status / conflicts`): resolved to `remove_mark` — the deferred
+   child-removal flag consumed by GUPanel slot 13 (==1 ⇒ remove, cleared on survivors); `setVisible`'s co-write is
+   an incidental mirror of +0x8C that the panel-build path zeroes. The "enable/clip vs pending-removal" ambiguity
+   resolves to pending-removal; CODE-CONFIRMED.
+5. **World-entry state-2 replay vs cached short-circuit** (`specs/resource_pipeline.md §2.6 / §8 item 5`): REPLAY —
+   the full ~57-loader corpus re-runs on world entry (no cache gate; idempotent rebuilders); `msg.xdb` is the only
+   state-1-only non-reloaded table. Only the second pass's wall-clock timing remains runtime-only.
+
+**Refinements promoted:** per-leaf-class font-slot offsets (Button +0xE8 / Label +0xE4 / Textbox +0xDC — not a
+universal base field) added to `structs/gucomponent.md` + `specs/ui_system.md`; `GUShortLabel` recorded ABSENT as a
+distinct RTTI class (a GULabel/GULabels variant).
+
+**Phase 2 (C# alignment) action items surfaced (NOT applied this cycle — Docs/RE-only):** (a) re-affirm idle motion =
+`actormotion` **col16** (the owed C# + CLAUDE.md re-flip); (b) **retire `SmsgCharCreateResult`** — no 12-byte
+create-result opcode exists; 1/6 create is acked by `3/7` + `3/1` + `3/4` (re-confirmed); (c) **lobby/server-list
+connect uses `inet_addr` dotted-quad** (port 10000, no DNS) while the game socket uses `gethostbyname` (re-confirmed);
+(d) slot-35 placement rect VALUE stays deferred (D6).
+
+**Deferred register (D1–D13) re-affirmed unchanged** (do NOT chase statically): server-authored damage/crit/XP/HP +
+the opaque VALUE tails of 4/48·4/56·4/71, stat-grid f32→stat mapping, effect particle VALUE roles, PIN keypad seed,
+slot-35 rect, button caption font-slot byte, `[OPENNING]/SKIP` literal INI filename, fx UV encoding, UI blend pair,
+weapon hand bone-id, dormant terrain-worker spawn, 1/7 mode meaning; plus the concrete RSA `n`/`e` and the L1/L2 split
+(read live off the 0/0 wire).
+
+**Committed files touched:** `scenes/scene_state_machine.md`, `structs/gucomponent.md`, `structs/guwindow.md`,
+`specs/ui_system.md`, `specs/ui_event_dispatch.md`, `specs/ui_hud_layout.md`, `specs/resource_pipeline.md`,
+`specs/vfs_overview.md`, `specs/asset_linkages.md`, `specs/assembly_graph.md`, `specs/net_contracts.md`,
+`specs/network_dispatch.md`, `specs/login_flow.md`, `specs/crypto.md`, `specs/handlers.md`, plus `names.yaml`
+(CYCLE 8 re-verification note + rename-candidate flags; NO renames applied this READONLY pass).
+**Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); all raw findings
+(incl. anchor addresses) stayed in `_dirty/*_cycle8/`. Recovery and promotion ran as separate sub-waves. No IDB
+mutation this cycle (a future `ida-toolsmith` annotation pass owns the rename/comment/type apply).

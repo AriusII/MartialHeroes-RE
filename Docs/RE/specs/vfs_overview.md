@@ -1,7 +1,7 @@
 ---
 status: sample-verified
 verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-21   # CYCLE 8: data.inf FILE_FLAG_RANDOM_ACCESS open, entry_count @+0x0C, magic not validated / no FILETIME, 144B/entry TOC, retained data.vfs handle, raw ReadFile (no codec) re-confirmed CODE-CONFIRMED; prior 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # real data.inf (6,241,992 B) + data/data.vfs (3,802,182,193 B) corroborate header, TOC stride/offsets, RAW 100%-tiling
 sample_verified: yes        # tree, counts and extension census come from a real archive enumeration (43,347 entries, 49 extensions)

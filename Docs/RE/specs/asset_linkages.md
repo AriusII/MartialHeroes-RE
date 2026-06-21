@@ -9,7 +9,7 @@
 >               re-verification pass. Every individual link below is documented (and
 >               sample/parser-verified) in its source format spec; this file is the JOIN map that
 >               stitches them into the six working subsystems.
-> ida_reverified: 2026-06-21
+> ida_reverified: 2026-06-21   # CYCLE 8: the six subsystem join-chains + the VFS-mount/boot-corpus assembly story re-confirmed coherent (no orphan format, no missing loader); world-entry replay closed in resource_pipeline.md
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample] (per-format), [cross-format-synthesis] (this doc)
 > conflicts: none unresolved. Where a hint in the synthesis brief disagreed with the binary (e.g.

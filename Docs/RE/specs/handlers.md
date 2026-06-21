@@ -1,7 +1,7 @@
 ---
 status: routing-confirmed
 verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-21   # CYCLE 8 re-confirmation (263bd994): major-4/5 154-slot dispatch tables (98 Response / 65 Push installed) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 sample_verified: false

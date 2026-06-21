@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: none open. MainWindow size CODE-CONFIRMED at 0x5B8 = 1464 bytes (CYCLE 7, IDB SHA 263bd994) — the prior "not re-measured / capture-pending" item is RESOLVED. LoginWindow size CODE-CONFIRMED at 0x558 = 1368 bytes (scene-state-1 Login allocation).
@@ -33,7 +33,7 @@ of them.
 | Embedded sub-object byte spans | **CODE-CONFIRMED** — command-handler span +0xBC..+0xE7 (44B) and aux-view span +0xE8..+0x21F (312B) are derivable from the next sub-object's start; no longer "unknown". |
 | Inherited base-class region (GUPanel → GUComponent) | **CODE-CONFIRMED** — see `structs/gucomponent.md`. |
 | Window flag bit | **CODE-CONFIRMED** — the "is a window" mask 0x2000, OR-set **last** in the ctor. |
-| Primary vtable (15 slots) + secondary vtable (**2 slots**) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. The secondary (MI base) vtable holds **2 slots**; whether a given derived window overrides those 2 slots is **[UNVERIFIED]** this pass. |
+| Primary vtable (15 slots) + secondary vtable (**2 slots**) | **CODE-CONFIRMED** — slot roles tabled below; the small shared GUComponent accessor slots' exact role is [static-hypothesis]. The secondary (MI base) vtable holds **2 slots**; **CYCLE 8 closed the prior [UNVERIFIED]**: every one of the five derived windows OVERRIDES BOTH secondary slots (slot 0 = base/dtor entry, slot 1 = the derived window's command/event sink — action-id routing). |
 | `MainWindow` total size | **CODE-CONFIRMED** (CYCLE 7) — **1464 bytes (0x5B8)**, from the zero-init routine's highest writes (dword at +0x5B0, byte at +0x5B4 → end 0x5B5 → 4-aligned 0x5B8). |
 | `MainWindow` static-singleton construction | **CODE-CONFIRMED** (CYCLE 7) — Meyers-style accessor over a static buffer; one-shot guarded ctor, atexit-registered; primary vtable at +0x00, secondary (MI base) vtable at +0xBC, then the service block is zero-cleared. |
 | Panel-slot array mechanism | **CODE-CONFIRMED** (CYCLE 7) — base **+0x238**, pointer-sized entries, slot index `= (offset − 0x238) / 4`. (Slot→class roster contents live in `specs/ui_system.md`.) |
@@ -160,10 +160,19 @@ the class-layout record that immediately precedes the primary vtable, so the slo
 Slot 0 is the base event-handler entry; slot 1 is the window's event sink (the `SetVisible` / event
 delivery path on the MI-base subobject).
 
-Whether a given **derived window overrides** these 2 slots — and what each override does — is
-**[UNVERIFIED]** this pass. (A prior cycle reported the MainWindow's secondary vtable as carrying extra
-live/null/thunk entries; that count is **superseded** by the 2-slot bound recovered here, and any
-per-derived override behaviour is left unverified pending a dedicated walk.)
+**Per-derived override (CODE-CONFIRMED — CYCLE 8).** Every one of the five derived windows
+(`CommonLoginWindow`, `MainWindow`, `OpeningWindow`, `SelectWindow`, `TestWindow`) **overrides BOTH
+secondary slots** at +0xBC, in the standard MSVC multiple-inheritance pattern (the GUWindow base ctor
+installs the GUWindow command-handler vtable, then each derived ctor overwrites it with its own 2-slot
+table). **Slot 0** is the base event-handler / scalar-deleting-destructor entry; **slot 1 is the
+window-specific command/event sink**. The GUWindow base slot 1 walks the active panel's child vector,
+finds the visible child whose back-pointer matches the handler sub-object, routes the event into that
+child's onEvent (primary slot 6), reads the child's hit action id (primary slot 10) into the window's
+captured-action field, and returns "consumed" when an action id was captured; if no child captures, it
+falls back to the primary-object input dispatch. Each derived window replaces slot 1 with its own sink
+(e.g. the login-form logic vs the char-select logic) so the same 2-slot shape carries per-window
+behaviour. (This **supersedes** a prior cycle's report of extra live/null/thunk entries in the
+MainWindow secondary vtable — the bound is exactly 2 slots, both overridden.)
 
 Both the abstract `Diamond::EventHandler` base and the concrete `CmdHandler` base each expose a 2-slot
 vtable of their own (before any GUWindow override). The `CmdHandler` and `Diamond::EventHandler` class

@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-21   # CYCLE 8: 178-slot panel array base +0x238 + slot 35/52/110/135/178 re-confirmed; prior CYCLE 7 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: skill-hotbar overlay-rect VALUES (record layout recovered; only the authored rect values are data/debugger-pending); the unsited "226×54 top bar" (no build site found — demoted, debugger-pending); absolute pixel resolution of every screen-relative panel (needs a runtime screen-size read) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): the selected-target plate is now PINNED to the panel-slot roster — **target frame = slot 35 (MopGagePanel)**, **pet window = slot 52 (PetPanel)**; prior "MopGage = slot 177 / pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; full roster + verdicts in `ui_system.md §1.9`

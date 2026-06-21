@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-19
+ida_reverified: 2026-06-21   # CYCLE 8: mount->boot-corpus->six-chain assembly graph re-confirmed; prior 2026-06-19
 ida_anchor: 263bd994
 evidence: [static-ida]
 cycle: CYCLE 1 — Runtime Inter-Format Assembly Graph

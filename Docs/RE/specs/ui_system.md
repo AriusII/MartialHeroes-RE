@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring untraced; in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring RESOLVED CYCLE 8 (the canvas carries NO render-target/viewport field of its own — it is a thin 2D hit-region + drag-orbit-delta widget; the live preview renders via the owner window's embedded GView at window +0xE8); in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback — 2026-06-21 CYCLE 8 (IDB SHA 263bd994): event-dispatch / single-shared-ID3DXSprite render path / 15-slot HANGUL font table / 178-slot HUD roster (slot 35 MopGagePanel, 52 PetPanel, 110 Gamble, 135 UpgradeProcessPanel, 178 MainHandler) all re-confirmed CODE-CONFIRMED with zero conflicts; GUCanvas3D render-target gap CLOSED (no own RT field; owner GView renders the preview); leaf-widget offset tables deepened (font-slot is per-leaf-class: Button +0xE8 / Label +0xE4 / Textbox +0xDC; GUShortLabel absent as a distinct class)
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -231,6 +231,78 @@ So **all three constructors produce at most 3 distinct sprite frames** (normal, 
 Where HOVER equals NORMAL the button gives caption-only feedback on hover; where both equal
 NORMAL the sprite never changes. The "7-state" label refers to the state-count field value,
 not to a count of distinct sprites.
+
+### 1.5a Leaf-widget added-field offsets — the rest of the family (CODE-CONFIRMED — CYCLE 8)
+
+Beyond GUButton (§1.5), the other concrete leaves each add their own fields on the GUComponent base
+(byte offsets from the object base; all CODE-CONFIRMED CYCLE 8). The vtable stays the layered 13-slot
+interface for every direct GUComponent leaf — leaves **override** slots, none extends the table —
+except `GUScrollEx`, which derives `GUPanel` (14 slots). Each leaf OR-sets one kind bit into the
+capability-flags word at +0x08.
+
+**`GUCheckBox`** (derives **GUButton**; kind bit 0x10) — reuses the whole GUButton frame machinery:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| (inherits all GUButton fields +0xA4..+0xF8) | | | |
+| +0xFC | 1 | `checked` (toggle) | 0 → NORMAL frame; 1 → the **PRESSED** frame (the checked sprite reuses PRESSED); disabled → DISABLED. |
+
+**`GULabel` / `GULabels`** (kind bit 0x80; `GUShortLabel` is **absent** as a distinct RTTI class — it
+is a single-vs-multi-line variant of GULabel/GULabels):
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA4 | 16+ | `caption` (CP949 std::string) | primary text. |
+| +0xC0 | 16+ | `aux_text` (CP949 std::string) | secondary/auxiliary text. |
+| +0xE4 | 4 | `font_slot` | selects the font-table slot at draw time (label font slot — distinct from the button's +0xE8). |
+
+**`GUTextbox`** (kind bit 0x400) — the only editable widget:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0x8B | 1 | `caret_active` / focused | caret-blink runs only when set. |
+| +0xA4 | 4 | `mode_style_word` (init 1) | **bit 0x80 = password-mask** (draws "*" per char); other bits = IME mode. |
+| +0xA8 | 1 | `ime_compose_state` | value 3 selects the IME-composition caret placement. |
+| +0xB4 | 16+ | `text` (CP949 std::string) | the editable buffer. |
+| +0xC8 | 4 | `text_length` | char count (drives the password-mask loop + scroll math). |
+| +0xD0 | 4 | `max_length` (init 10) | edit cap. |
+| +0xD4 | 4 | `caret_blink_ms` | blink half-period 500 ms. |
+| +0xD8 | 4 | `scroll_start` | first visible char index. |
+| +0xDC | 4 | `font_slot` | textbox font slot (distinct from button +0xE8 and label +0xE4). |
+
+**`GUList`** (kind bit 0x200) — a GUComponent-derived listbox carrying its **own** row vector (it is
+**not** a GUPanel):
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA8 / +0xAC / +0xB0 | 4 ea | `rows_begin` / `rows_end` / `rows_capacity` | the row child-vector (zero-init). |
+| +0xB8 | 4 | `selected_index` | **−1** = no selection. |
+| +0xC4 | 4 | `row_state_count` | init 2. |
+
+**`GUScroll`** (kind bit 0x800) — a GUComponent-derived scrollbar embedding three 24-byte
+button/thumb sub-blocks:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xC0 | 24 | `up_button` sub-block | |
+| +0xD8 | 24 | `down_button` sub-block | |
+| +0xF0 | 24 | `thumb` sub-block | |
+| +0x108 | 4 | `step` | scroll step (seeded 20). |
+
+**`GUScrollEx`** (derives **GUPanel**, 14-slot vtable) — a panel-hosted scrollbar; adds a `mode`
+field (init 1, +0xBC) and a `dragging` byte (+0xDC) over the inherited GUPanel child vector.
+
+**`GUCanvas3D`** (kind bit 0x40) — a thin 2D widget, **176 bytes (0xB0)**: its draw virtual is an
+**empty stub** and it carries **no render-target/viewport field** (see §9 open-item 9, resolved). Its
+only added state is a drag-orbit delta captured on press/move:
+
+| Offset | Size | Field | Notes |
+|-------:|-----:|-------|-------|
+| +0xA8 | 4 | `drag_dx` | cursor X − world X (orbit delta consumed by the owner). |
+| +0xAC | 4 | `drag_dy` | cursor Y − world Y. |
+
+The live 3D preview into the canvas rectangle is rendered by the **owner window's embedded GView**
+(window +0xE8, `structs/guwindow.md §4`), not by the canvas.
 
 > **Front-end 3-state argument order (CODE-CONFIRMED).** The 3-state button builder used by the
 > login and character-select scenes takes its three frame origins in the order
@@ -3831,9 +3903,14 @@ the +6 open-time field is static-only and CAPTURE-UNVERIFIED.
 8. **`GULabels`, `GUScroll`, `GUScrollEx` internals.** The multi-line label and the two scrollbar
    widgets have their own draw/event virtuals that were not covered in this pass.
 
-9. **`GUCanvas3D` render-target wiring.** The mechanism by which the 3D preview widget binds a
-   render target / viewport for its live scene (the D3D device viewport/scene-graph wiring) was not
-   traced.
+9. **`GUCanvas3D` render-target wiring — RESOLVED (CODE-CONFIRMED, CYCLE 8).** The widget itself
+   binds **no** render target or viewport. Its draw virtual is an **empty stub**; its only added state
+   is a drag-orbit delta (the cursor-minus-world offset captured on press/move) consumed by the owner
+   to rotate the previewed model. The live 3D preview into the UI rectangle is therefore driven by the
+   **owning window's embedded auxiliary view** (the `GView` sub-object at window +0xE8, see
+   `structs/guwindow.md §4`) and the panel's own draw — **not** by any field on the canvas. So there
+   is no "untraced canvas render-target": the canvas is a thin 2D hit-region + drag-capture placeholder,
+   and the preview render target is the window's GView, already documented.
 
 10. **Tint field +0x0C per-widget provenance.** Confirmed as the low-24-bit RGB tint in the draw
     ARGB, but where each widget's tint is set (ctor default vs per-screen override) was not swept.

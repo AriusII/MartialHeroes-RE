@@ -5,7 +5,7 @@ verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/
   structure, and the game-server DNS connect are all static-control-flow-confirmed against the
   binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
   (every on-wire byte VALUE -- no .pcapng present).
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
+ida_reverified: 2026-06-21   # CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false

@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: +0x8D dual semantics (setVisible co-writes it AND the panel child-removal sweep treats ==1 as remove) — still capture/debugger-pending; +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded)
+conflicts: +0x8D dual semantics — RESOLVED CYCLE 8 (IDB SHA 263bd994): +0x8D is the `remove_mark` deferred-child-removal flag (the panel child-removal sweep removes children whose ==1 and clears it on survivors); setVisible's co-write is an incidental mirror of +0x8C that the panel-build path explicitly zeroes — the "enable/clip vs pending-removal" ambiguity resolves to pending-removal (the static role is CODE-CONFIRMED, only frame-by-frame coexistence is a non-load-bearing debugger nicety); +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded)
 ---
 
 # GUComponent / GUPanel byte-offset layout (clean-room spec)
@@ -39,7 +39,7 @@ in `structs/guwindow.md`.
 | GUPanel child-vector region | **CODE-CONFIRMED** — a `std::vector<GUComponent*>` (begin/end/capacity) plus the active-child sentinel. |
 | Capability-flag bit masks | **CODE-CONFIRMED** — the per-class OR-set bits are read directly from the base + leaf constructors. |
 | +0x8D size + setter/getter pair | **CODE-CONFIRMED** (CYCLE 7) — a single 1-byte boolean with a dedicated setter/getter, compared `== 1` to gate a branch in the panel-build path and forced to `0` at one site. |
-| +0x8D exact semantic | **capture/debugger-pending** — the panel removal-sweep reads `== 1` to remove; `setVisible` also co-writes it with the visible argument. Whether the build-path toggle is "enable / clip" or "pending removal" needs runtime confirmation. |
+| +0x8D exact semantic | **CODE-CONFIRMED (CYCLE 8)** — `remove_mark`, a deferred child-removal flag. The panel child-removal sweep (GUPanel slot 13) removes children whose +0x8D `== 1` and clears it to 0 on survivors; the panel-build path forces it to 0 to neutralise `setVisible`'s incidental co-write (which mirrors +0x8C). The "enable / clip vs pending removal" ambiguity resolves to **pending removal**; only the live frame-by-frame coexistence of the two writers is a non-load-bearing debugger nicety. |
 | +0xB8 = glyph/char-width step | **CODE-CONFIRMED** (CYCLE 7) — a 4-byte **signed integer** read predominantly as a dword and used as the per-character pixel width in the text-centering layout (`3 × value`, and `value × stanceScale × 3.0`, stanceScale ∈ {1.0, 2.7}). **Resolves the old `panel_kind` / pointer ambiguity: it is neither.** |
 | Class hierarchy (vtable-confirmed) | **CODE-CONFIRMED** (CYCLE 7) — `GUComponent` (13 vtable slots) → `GUPanel` (14) → `GUWindow` (15) → `MainWindow` (root HUD window-manager). Confirms the "LAYERED 13/14/15" reading. |
 | Packing / alignment | **CODE-CONFIRMED** — natural 4-byte alignment (legacy MSVC default), **not** byte-packed. |
@@ -126,9 +126,19 @@ widgets (CYCLE 7):
 
 | Offset | Size | Type | Field | Notes |
 |-------:|-----:|------|-------|-------|
-| +0xE8 | 4 | int/ptr | `font_slot` | Font handle / index slot (matches the prior "font-slot +0xE8" finding). |
+| +0xE8 | 4 | int/ptr | `font_slot` (button / image leaf) | Font handle / index slot on the **GUButton / image leaf** (matches the prior "font-slot +0xE8" finding). **Per-leaf-class, NOT a universal base field** — see the note below. |
 | +0xEC | 4 | i32 | `computed_x` | Computed X position written by the alignment/centering helper. |
 | +0xF0 | 4 | i32 | `computed_y` | Computed Y position. **Last dword of the base object.** |
+
+> **Font-slot offset is per-leaf-class (CODE-CONFIRMED — CYCLE 8).** There is **no single universal
+> base font-slot offset**. The +0xE8 above is the **GUButton / image-leaf** caption-font slot; the
+> other leaves carry their own: **GULabel** font slot = **+0xE4**, **GUTextbox** font slot = **+0xDC**.
+> A consumer must not assume +0xE8 for labels or textboxes. (The concrete leaf-widget offset tables —
+> GUButton 3-state sprite source-rects, GUCheckBox checked flag +0xFC, GULabel caption/aux text,
+> GUTextbox password-mask style word +0xA4 bit 0x80 / maxLength +0xD0, GUList selected-index +0xB8,
+> GUScroll embedded button/thumb sub-blocks, GUScrollEx deriving GUPanel, GUCanvas3D drag-only) are
+> tabulated in `specs/ui_system.md §1`. Note: **`GUShortLabel` is absent as a distinct RTTI class** —
+> the short-label behaviour is a GULabel / GULabels variant, not a separate type.)
 
 **Leaf widget size.** The concrete leaf widgets (a base `GULabel` and a base image `GUComponent`) are
 allocated at **0xF0 = 240 bytes** in the HUD-build path; +0xF0 is the last dword, so the base object
@@ -261,14 +271,15 @@ wire/asset structs, which are byte-packed).
 These are the only genuinely runtime-dependent items; the campaign is static-only and everything
 above is control-flow-confirmed.
 
-- **+0x8D dual semantics.** The size (1 byte), the boolean nature, and the dedicated setter/getter
-  pair are **CODE-CONFIRMED (CYCLE 7)**; only the exact semantic is pending. The panel-build path
-  compares +0x8D **== 1** to gate a branch and forces it to **0** at one site; the panel
-  child-removal sweep treats +0x8D **== 1** as "remove this child" (and clears it on survivors),
-  which supports a `remove_mark` reading. But `setVisible` **also co-writes +0x8D with its visible
-  argument**, so showing a widget would set +0x8D = 1. Whether the build-path toggle means
-  enable/clip or "pending state change / removal", and how these writers coexist, needs runtime
-  confirmation on a live session.
+- **+0x8D — RESOLVED (CYCLE 8), no longer pending.** The size (1 byte), the boolean nature, and the
+  dedicated setter/getter pair were **CODE-CONFIRMED (CYCLE 7)**; CYCLE 8 settled the exact semantic
+  **statically**: +0x8D is the **`remove_mark` deferred child-removal flag**. The panel child-removal
+  sweep (GUPanel slot 13) removes children whose +0x8D **== 1** and clears it to **0** on survivors;
+  the panel-build path forces +0x8D to **0** at the build site, which neutralises `setVisible`'s
+  **incidental co-write** (a harmless mirror of the +0x8C show byte). The "enable/clip vs pending
+  removal" ambiguity therefore resolves to **pending removal**. The only residual is the live
+  frame-by-frame coexistence of the two writers — a **non-load-bearing** debugger observation, not a
+  spec gap.
 - **+0xB8 — RESOLVED (CYCLE 7), no longer pending.** Previously logged here as an unconfirmed
   `panel_kind` subclass byte. It is now CODE-CONFIRMED as a **4-byte signed integer glyph/char-width
   step** used by the text-centering layout (§3.1). It is neither a pointer nor a one-byte kind tag;

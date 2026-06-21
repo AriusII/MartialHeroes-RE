@@ -1,6 +1,6 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-21
+ida_reverified: 2026-06-21   # CYCLE 8: event-dispatch FSM (8 types, reverse-child topmost-first, single global click-capture, synthetic CLICK, action-id->active-child->window switch, ESC=27/Tab=9/Enter=10) re-confirmed CODE-CONFIRMED, zero conflicts
 ida_anchor: 263bd994
 evidence: [static-ida]
 ---

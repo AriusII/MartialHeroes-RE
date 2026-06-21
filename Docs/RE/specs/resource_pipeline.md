@@ -1,9 +1,9 @@
 ---
-verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))    # the boot/loading orchestration load-bearing facts are recovered from control-flow; runtime replay & exact INI string remain capture/debugger-pending
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 8 (2026-06-21))    # the boot/loading orchestration load-bearing facts are recovered from control-flow; CYCLE 8 closed the world-entry replay question statically (REPLAY — §2.6); only the exact INI string + second-pass timing remain capture/debugger-pending
 ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # control-flow recovery + real-VFS file-coverage counts (§6) corroborated against the shipped archive
-conflicts: world-entry state-2 full-corpus replay vs cached short-circuit (§2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
+conflicts: world-entry state-2 full-corpus replay vs cached short-circuit — RESOLVED CYCLE 8 (REPLAY: full corpus re-runs; loaders are idempotent rebuilders with no cache gate; msg.xdb is the only state-1-only non-reloaded table — §2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
 status: confirmed
 sample_verified: partial   # VFS index lookup mechanics CODE-CONFIRMED; area file-coverage counts SAMPLE-VERIFIED; thread timing values CODE-CONFIRMED
 subsystems: [vfs_loader, boot_loader, loading_screen, terrain_streaming, subsystem_caches]
@@ -493,25 +493,40 @@ the load.
 > "reload forces Select / reload skips the INI read" rule; it re-reads SKIP and only omits the `msg.xdb`
 > reload.
 
-## 2.6 State 2 is entered twice per session — (CODE-CONFIRMED structure; world-entry replay capture/debugger-pending)
+## 2.6 State 2 is entered twice per session — REPLAY (CODE-CONFIRMED — CYCLE 8, the binary wins)
 
 The scene lifecycle enters state 2 both after login (the post-login global-table boot-load pass above)
 and on entering the world. The **same handler and worker-thread machinery runs for both passes** — the
 case-2 setup constructs the opening window first, then the loading window (= the `LoadHandler`), and
 the `OPENNING/SKIP` read (§2.5) is performed before both, fixing the post-load state (3 vs 4) up front.
 
-Whether the in-world (state-2) pass **replays the full table corpus** or **short-circuits
-already-loaded / cached entries** (the subsystem caches of §3 would make re-registration cheap) **could
-not be determined statically** — it depends on runtime control flow. Treat both passes as potentially
-running the full sequence and confirm against a live world-entry transition. *(capture/debugger-pending
-— see §8 open item 5; this is what determines whether the second loading screen is fast or full-length.)*
+**Resolved statically (CYCLE 8): the second (in-world) pass REPLAYS the full table corpus — it does
+NOT short-circuit to cached tables.** The "replay vs cached short-circuit" ambiguity is closed against
+the binary by a static chain of evidence, no debugger required:
 
-> **Pending / to confirm (Phase 5).** Whether the **second** load pass — the in-world reload
-> triggered via opcode **3/100** (the char-management reload path of §2.5) — **replays the full
-> boot corpus (§2.1a)** or **short-circuits to the already-cached subsystem tables (§3)**
-> remains open. The case-2 body is byte-for-byte identical between the two entries, but individual
-> table loaders may early-out when their registry is already populated, which would make the second
-> loading screen near-instant. Confirm against a live world-entry / reload transition (debugger).
+1. **The state-2 trigger carries no cache gate.** Both world-entry acks re-enter state 2 by writing the
+   scene state to 2 and breaking the inner scene loop (the enter-game ack `3/5` and the char-management
+   reload `3/100`); neither tests an "already loaded" flag.
+2. **Case 2 is unconditional.** The case-2 body always performs the `OPENNING/SKIP` read and always
+   constructs the loading handler + loading window (which launches the boot worker). There is no
+   "skip if already loaded" branch.
+3. **The boot worker is an unconditional flat call list.** It runs the whole ~57-step corpus (§2.1a) in
+   sequence with no internal guard and no replay short-circuit, then sleeps briefly, clears its busy
+   flag, and ends the thread.
+4. **The individual table loaders REBUILD, they do not early-out.** Representative loaders re-open their
+   file, reset their record store, bulk-read, and re-insert every record into their global map from
+   scratch — no "already populated" early-return. They are **idempotent rebuilders**: re-running the
+   worker re-reads the files and rebuilds the catalogues.
+
+**Therefore world entry (and the `3/100` reload) re-runs the full corpus — the second loading screen is
+a full-length reload, not a near-instant cached pass.** The **one documented exception** is the message
+string table (`msg.xdb`): it is a **state-1-only** synchronous main-thread preload, and because the
+`3/5` / `3/100` paths re-enter state 2 directly (never state 1), it is **not** re-loaded on a reload.
+
+> **Residual (timing only, not load-bearing).** The control-flow question is settled (REPLAY). The only
+> remaining runtime-only observation is the *wall-clock duration* of the second pass — the bytes are
+> physically re-read through the VFS each time, but exact timing/perf is a live measurement, not a spec
+> fact.
 
 ## 2.7 The stat-curve family loader (boot step 10) and the 0-HP/MP root cause — (CODE-CONFIRMED)
 
@@ -1101,12 +1116,14 @@ and `.ted` are required for a cell to be minimally renderable.
    the 3×3 default. The configuration value (a radius threshold > 1000) that selects between
    them was observed but its source (a graphics option, a map config entry, or a hard constant)
    was not traced.
-5. **Whether world-entry state-2 reloads all ~50 boot tables. *(capture/debugger-pending)*** State 2
-   is entered both after login and on entering the world. The same handler machinery runs both times.
-   Whether the in-world pass replays the full boot table sequence or short-circuits already-cached
-   entries depends on runtime control flow and **could not be determined statically**. This determines
-   whether the second loading screen is fast or full-length; confirm against a live world-entry
-   transition.
+5. **Whether world-entry state-2 reloads all ~57 boot tables — RESOLVED CYCLE 8 (REPLAY).** State 2
+   is entered both after login and on entering the world; the same handler machinery runs both times.
+   The static control flow now settles it: the in-world pass **replays the full boot table corpus** —
+   the state-2 trigger has no cache gate, the case-2 body is unconditional, the boot worker is an
+   unconditional flat call list, and the individual table loaders are idempotent rebuilders that
+   re-read and re-insert every record (no "already populated" early-return). `msg.xdb` is the only
+   table NOT re-loaded (it is a state-1-only synchronous preload; the reload paths re-enter state 2,
+   never state 1). Only the second pass's wall-clock **timing** remains a runtime-only observation.
 6. **`Map_LoadCellAssets` internal order and partial-failure behaviour.** The exact sequence in
    which `.map`, `.ted`, `.sod`, `.bud`, and texture files are opened within the cell bundle
    loader, and whether a missing `.sod` or `.bud` aborts or degrades the load, was not traced in

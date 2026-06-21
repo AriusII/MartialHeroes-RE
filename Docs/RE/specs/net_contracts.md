@@ -7,7 +7,7 @@ verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send s
   static-hypothesis (a best-consumer / in-flight-latch inference, not a captured round-trip);
   value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
   which result code is success vs fail — has no live capture this campaign).
-ida_reverified: 2026-06-20 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 7)
+ida_reverified: 2026-06-21 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 8; prior CYCLE 7 2026-06-20). CYCLE 8 re-confirmed: NO 12-byte create-result opcode exists (1/6 create acked by 3/7 + 3/1 + 3/4, 3/23 = 28B status-bytes-by-name) — the C# port must retire any SmsgCharCreateResult; and the lobby/server-list connect (port 10000) uses inet_addr on a dotted-quad while the game socket uses gethostbyname (DNS).
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false

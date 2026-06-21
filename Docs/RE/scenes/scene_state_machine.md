@@ -2,8 +2,13 @@
 verification: independently re-derived 2026-06-18 directly from the doida.exe binary (scene
   reconstruction campaign, static IDA) — the dispatch loop was read in full from the application
   entry point and every case/transition/teardown re-confirmed against the binary, not inherited from
-  the prior specs. Outcome: CONFIRMED, zero structural corrections. (Prior basis: build 263bd994
-  re-confirmation campaign, synthesised from committed specs.)
+  the prior specs. Outcome: CONFIRMED, zero structural corrections. Re-confirmed CYCLE 8 (2026-06-21,
+  IDB SHA 263bd994): the 8-case bounds, the value-8 terminal sub-state, the 3-int record field layout,
+  every per-state Window construction + pre-arm (incl. the 5->4 world-exit pre-arm), the OPENNING/SKIP
+  gate (skip->4 else 3), and the keepalive enable on world-enter all re-confirmed with zero conflicts;
+  one GAP closed (the Error sub-state 1-vs-3 distinction — see §9, now CODE-CONFIRMED and re-attributed
+  to the Login case, not Init). (Prior basis: build 263bd994 re-confirmation campaign, synthesised from
+  committed specs.)
 ---
 
 # Scene / Game State Machine — Cross-Cutting Dossier
@@ -352,7 +357,13 @@ Use this to verify the machine 1:1 against the binary / port:
 - **Form-arrival ordering of the world-entry `4/1` handler vs the major-1 billing family** on world
   entry is capture/debugger-pending (does not affect the spine's transition table, only the ordering
   of in-world packets after `5` is entered).
-- **Which Init failure raises which Error sub-state** (candidate codes 1 vs 3) is debugger-pending.
+- **Which failure raises which Error sub-state (1 vs 3) — CLOSED (CODE-CONFIRMED, CYCLE 8).** This is
+  **not** an Init (0) failure — case 0 (Init) has no Error-raise at all (it unconditionally pre-arms
+  state 1). The sub-state 1-vs-3 distinction lives in the **Login (1)** case: a **main-window creation
+  failure** raises Error with **sub-state 1**, and a **graphics-device init failure** raises Error with
+  **sub-state 3**. (Re-attributed from the earlier "Init failure" framing; the §3 transition rows
+  "window-config fail -> Error sub 1" and "device / secondary init fail -> Error sub 3" are now
+  CODE-CONFIRMED, not pending.)
 - **All packet field VALUE semantics** for the transition-driving opcodes (`3/5`, `3/1`, `3/100`,
   `4/1`) remain capture/debugger-pending — routing, sizes, and offsets are firm; byte meanings are
   not. Do not hard-code wire-byte values from this dossier.
