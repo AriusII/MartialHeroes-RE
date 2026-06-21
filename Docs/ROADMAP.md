@@ -42,12 +42,38 @@ stubbed in C# with a `// spec: … (value debugger-pending, CYCLE 8 deferred)` c
 
 | Phase | Title | Owner | Gate | Status |
 |---|---|---|---|---|
-| 0 | Checkpoint & Baseline | main session | build 0-err + headless + checkpoint commit | **IN PROGRESS** |
-| 1 | RE static — Truth pass | `re-orchestrator` | specs re-pinned + clean-room-check + deferred register | pending |
-| 2 | C# core alignment to specs | `port-orchestrator` | nuke build 0-err + headless + code-reviewer | pending |
-| 3 | C# cleanup & de-noising | `port-orchestrator` | nuke build 0-err + headless + clean-room-check + reviewer PASS | pending |
-| 4 | Godot 05 surgical refactor | `port-orchestrator` | godot-build + headless + screenshot + render-reviewer | pending |
-| 5 | Integration, verify & docs | main session | build 0-err + headless live + docs synced + commit | pending |
+| 0 | Checkpoint & Baseline | main session | build 0-err + headless + checkpoint commit | **DONE** (`a305035`,`ebd7282`) |
+| 1 | RE static — Truth pass | `re-orchestrator` | specs re-pinned + clean-room-check + deferred register | **DONE** (`3e3049d`,`7f9e104`) |
+| 2 | C# core alignment to specs | `port-orchestrator` | nuke build 0-err + headless + code-reviewer | **DONE** (`5f6e3c2`,`7f9e104`) |
+| 3 | C# cleanup & de-noising | `port-orchestrator` | nuke build 0-err + headless + clean-room-check + reviewer PASS | **DONE** (`1d87a78`) |
+| 4 | Godot 05 surgical refactor | `port-orchestrator` | godot-build + headless + screenshot + render-reviewer | **DONE** (`34564b1`) |
+| 5 | Integration, verify & docs | main session | build 0-err + headless live + docs synced + commit | **DONE** |
+
+## CYCLE 8 — CLOSED (2026-06-21)
+
+**Final gate: GREEN.** `dotnet build MartialHeroes.slnx` (nuked) = **0 errors / 0 warnings** (40 projects);
+`check_dag.py` OK (39 core projects, downward-only acyclic); headless boot → Login clean (VFS 43,347
+entries, 90,937 items / 2,000 skills / 3,997 mobs, no ERROR lines); clean-room firewall + non-distribution
+audits CLEAN across all CYCLE 8 commits.
+
+Outcomes per phase:
+- **P1 (RE, static-only):** Docs/RE re-verified vs `263bd994` — **zero structural conflicts** (corpus was
+  already correct); **5 static gaps CLOSED** (Error sub-state attribution, GUWindow secondary slots,
+  GUCanvas3D render-target, GUComponent +0x8D remove_mark, world-entry state-2 = idempotent REPLAY).
+  17 specs re-pinned; journal + names.yaml synced.
+- **P2 (C# align):** ItemsScrParser offsets (0x0BA/+0xCD); SQLite bumped → **NU1903 eliminated** (now 0
+  warnings); col16/lobby-inet_addr/SmsgCharCreateResult verified already-correct; ScrStatCatalogue HP/MP=0
+  confirmed **absent-by-design** (server-supplied, D3), not a bug. **P2.1:** 3/23 name @0x08 + 3/6 = 12B with
+  two `f32` placement values (the uint SlotIndex/Unk reading refuted) — specs + C# struct corrected.
+- **P3 (C# clean):** 3 empty re-arch dirs + 1 dangling comment removed; **zero provably-dead code** found
+  (core already lean); 0 uncited constants. Flagged (not churned): integration debt + 1 duplicate `.mi` parser.
+- **P4 (Godot surgical):** HudMaster → clean `AddPanel<T>()` builder (behavior-preserving); empty Debug/Helpers
+  removed; CameraController already unified; invariants hold (zero `using Godot;`<05, zero game-rule in 05,
+  passive rendering). `.render/` gitignored (screenshots carry client art). Login front-end render-reviewer 5/5.
+
+**Verification limit (honest):** with login creds absent, headless reaches **Login only** — the in-world
+render, in-game HUD, and char-select were **NOT visually verified** this cycle (build + behavior-preserving
+review only). See "Owed next" below.
 
 ## Phase 0 — record
 
@@ -97,9 +123,23 @@ fidelity (FSM, UI layout, wire routing, asset parsing). C# must stub them with a
 - **Godot legacy** to retire (Phase 4): non-composer `RealWorldRenderer` path; synthetic fallbacks (sky / toon-ramp
   / texture) now that the VFS is mandatory; unify `CameraController` free/orbital modes.
 
+## Owed next (out of CYCLE 8's static-only / headless-only scope)
+
+1. **Live-world verification wave (needs login creds + a running session).** The in-world render, in-game
+   HUD (the refactored 33 panels), and char-select are unverified headless. With creds (env `MH_LOGIN_*` or
+   `%LOCALAPPDATA%\MartialHeroes\login.creds`) a windowed login→enter-world screenshot pass would let
+   `render-reviewer` confirm 1:1 — and would unblock: (a) consolidating the legacy vs composer world-render
+   path, (b) the 3 inline lib-duplication fixes deferred in P4 (CharSelectScene3D / CharCreatePreview3D
+   actormotion + CharacterTextureResolver skin.txt → call the libs), (c) HUD visual parity.
+2. **Deferred runtime register D1–D13** (above) — a future `?ext=dbg` / capture pass (server magnitudes,
+   opaque 4/48·4/56·4/71 tails, stat-grid f32→stat, PIN seed, slot-35 rect, etc.).
+3. **C# integration debt** (P3/P4 flagged): wire the Infrastructure stores (Settings/Cache/Macros) +
+   Application spawn/stat seams (ActorSpawnService, CombatStatsRecomputer, AllocateStatAsync,
+   DeliveryClaimAsync, the 4/500·4/132·4/138 notice/popup sinks) through the composition root; de-dup the
+   `mobinfo.mi` parser (a DEAD authoring-only format).
+
 ## Resume pointer
 
-Phase 0 complete → **dispatch Phase 1 to `re-orchestrator`** (static-only Truth pass: 1A scene/Window FSM,
-1B GUI/`::Gu`/`::Components`, 1C VFS assembly & lifecycle, 1D networking confirm, 1E IDB legibility). Then
-Phases 2→3 (C# align→clean via `port-orchestrator`), Phase 4 (Godot surgical), Phase 5 (integration).
-Gate every phase with: nuke `bin/obj` → `dotnet build` 0-err + headless boot.
+CYCLE 8 closed (all phases committed on `major-campaign`, build 0/0, headless→Login green). Next cycle's
+highest-leverage move is the **live-world verification wave** (#1 above) — it is the only thing that can
+confirm the layer-05 in-world/HUD fidelity the headless gate cannot reach.
