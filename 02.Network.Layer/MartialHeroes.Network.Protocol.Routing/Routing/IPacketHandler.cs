@@ -3,7 +3,6 @@
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
-// Note: SmsgCharStatusBytesByName replaces the retired SmsgCharCreateResult (wrong 12-byte 3/23 binding).
 // spec: Docs/RE/specs/net_contracts.md §2.2 (binary wins — 3/23 is a 28-byte roster patch, not create-result).
 
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
