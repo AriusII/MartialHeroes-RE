@@ -266,7 +266,7 @@ public sealed partial class LoginWindow : Control
         // MEMBER ORDER: Background (+0x270) drawn first (behind), then Top curtain (+0x274),
         // then Bottom curtain (+0x278). Curtains frame/overlay the background art. spec §2.3.
         BuildBackgroundLayer(); // loginwindow.dds backdrop — member +0x270 (drawn behind curtains). spec §2.3.
-        BuildBannerFrame();    // static central banner frame + logo (loginwindow.dds) — always at fixed Y=85. spec §2.1/§2.3.
+        BuildBannerFrame(); // static central banner frame + logo (loginwindow.dds) — always at fixed Y=85. spec §2.1/§2.3.
         BuildCurtainPanels(); // curtain halves — member +0x274 (Top) / +0x278 (Bottom), over background.
         BuildNoticePanel(); // notice column (always hidden per spec)
         BuildServerListRoot(); // server-list container (hidden until 35..37)
@@ -296,6 +296,27 @@ public sealed partial class LoginWindow : Control
             GD.Print("[LoginWindow] OS window-close → QuitRequested.");
             EmitSignal(SignalName.QuitRequested);
         }
+    }
+
+    /// <summary>
+    ///     Offline/dev harness entry point: fast-tracks the login window to sub-state 35
+    ///     (server-list showing) WITHOUT credential validation or a real server fetch.
+    ///     Called via CallDeferred from the MH_OFFLINE_SERVERLIST harness in ClientContext.EnvLogin
+    ///     so the server-list sub-view is created and visible before the synthetic
+    ///     <c>ServerListReceivedEvent</c> is published. MUST be called on the main thread.
+    ///     <para>
+    ///         Passive: does NOT mutate domain state. Just advances the FSM sub-state so the
+    ///         presentation layer renders the correct panel. The synthetic server records arrive
+    ///         via <see cref="ServerListReceivedEvent" /> on the event bus (LoginScene._Process
+    ///         calls <c>ApplyServerList → _serverSelect.SetServers</c>).
+    ///     </para>
+    /// </summary>
+    public void ActivateOfflineServerList()
+    {
+        GD.Print("[LoginWindow] ActivateOfflineServerList — skipping credential validation; fast-tracking to state 33. " +
+                 "MH_OFFLINE_SERVERLIST dev harness only.");
+        DoEnsureServerSelect(); // creates ServerSelectSubView if not already created
+        RunState(33); // 33→34→35: CreateServerSelect + show server list root
     }
 
     public override void _ExitTree()

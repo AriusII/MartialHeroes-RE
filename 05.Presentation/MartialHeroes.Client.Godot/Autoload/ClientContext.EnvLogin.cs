@@ -29,9 +29,11 @@
 // spec: login_flow.md §4.2 — password never in a plaintext log.
 
 using System.Collections.Immutable;
+using System.Linq;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.UseCases;
+using MartialHeroes.Client.Godot.Ui.Scenes.Login;
 using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Shared.Kernel.Enums;
 using Environment = System.Environment;
@@ -108,6 +110,43 @@ public sealed partial class ClientContext
 
             _ = offlineTask.ContinueWith(
                 t => GD.PrintErr($"[ClientContext/EnvLogin] Offline-roster harness faulted: {t.Exception}"),
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            return; // do NOT proceed to the TCP harness
+        }
+        // -------------------------------------------------------------------------
+
+        // ---- MH_OFFLINE_SERVERLIST early-exit branch ----------------------------
+        // When MH_OFFLINE_SERVERLIST=1 is set, drive the login window to sub-state 35
+        // (server-list visible) and inject synthetic ServerListEntryView records so the
+        // ServerSelectSubView renders without a live lobby connection.  Used for layout
+        // verification (screenshot review against the oracle).
+        //
+        // Optional: MH_OFFLINE_SERVERLIST_COUNT=<N> overrides the number of synthetic
+        // server records injected (default = 2). Useful for verifying multi-page tab
+        // behaviour (e.g. N=3 → 2 plates on page 0, 1 plate on page 1, tabs 0 and 1 shown).
+        //
+        // Flow:
+        //   1. Wait for SceneMachine → Login (state 1).
+        //   2. CallDeferred ActivateOfflineServerList() on the LoginWindow node (main thread).
+        //   3. Wait 800 ms for the FSM to reach state 35 and for _serverSelect to exist.
+        //   4. Publish synthetic ServerListReceivedEvent into EventBus.
+        //      LoginScene._Process drains it → ApplyServerList → _serverSelect.SetServers.
+        //
+        // STRICTLY PASSIVE: does NOT call any TCP/login/server-select use cases.
+        // Inert by default; gated on the env flag.
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("MH_OFFLINE_SERVERLIST"), "1",
+                StringComparison.Ordinal))
+        {
+            GD.Print("[ClientContext/EnvLogin] MH_OFFLINE_SERVERLIST=1 — offline-server-list harness ACTIVE. " +
+                     "Driving LoginWindow to state 35 and injecting synthetic ServerListReceivedEvent.");
+
+            var ct2 = _loopCts?.Token ?? CancellationToken.None;
+            var serverListTask = RunOfflineServerListAsync(ct2);
+            _envLoginTask = serverListTask;
+
+            _ = serverListTask.ContinueWith(
+                t => GD.PrintErr($"[ClientContext/EnvLogin] Offline-server-list harness faulted: {t.Exception}"),
                 TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
             return; // do NOT proceed to the TCP harness
         }
@@ -697,5 +736,123 @@ public sealed partial class ClientContext
         }
 
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // Offline-server-list harness (MH_OFFLINE_SERVERLIST=1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Background task for the offline-server-list harness.  Drives LoginWindow to sub-state 35
+    ///     (server-list visible) WITHOUT a TCP lobby connection, then injects a synthetic
+    ///     <see cref="ServerListReceivedEvent" /> into <see cref="EventBus" /> so that
+    ///     <c>LoginScene._Process</c> can deliver it to <c>ServerSelectSubView.SetServers</c>.
+    ///     <para>
+    ///         No TCP socket is opened; no credential staging.  STRICTLY PASSIVE — the synthetic
+    ///         records are pure view-state injection used for layout screenshot verification.
+    ///     </para>
+    /// </summary>
+    private async Task RunOfflineServerListAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Phase 0: wait for SceneMachine → Login (state 1).
+            GD.Print("[ClientContext/EnvLogin/OfflineServerList] Phase 0: waiting for GameState=Login.");
+            await WaitForLoginStateAsync(ct).ConfigureAwait(false);
+            GD.Print("[ClientContext/EnvLogin/OfflineServerList] Phase 0 DONE: GameState=Login.");
+
+            ct.ThrowIfCancellationRequested();
+
+            // Phase 1: wait for LoginWindow to settle at state 6 (credential idle).
+            // The FSM auto-advances 1→2→...→6 within a few frames; 1 s is generous at 60 fps.
+            GD.Print("[ClientContext/EnvLogin/OfflineServerList] Phase 1: waiting 1 s for LoginWindow state 6.");
+            await Task.Delay(1000, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+
+            // Phase 2: find the LoginWindow node and call ActivateOfflineServerList on the main thread.
+            // ActivateOfflineServerList calls DoEnsureServerSelect() + RunState(33) → 34 → 35,
+            // which creates _serverSelect (ServerSelectSubView) and makes _serverListRoot visible.
+            GD.Print("[ClientContext/EnvLogin/OfflineServerList] Phase 2: scheduling ActivateOfflineServerList via CallDeferred.");
+            CallDeferred(MethodName.ActivateLoginWindowServerList);
+
+            // Phase 3: wait for _serverSelect to be created (state 35 reached, a few frames after CallDeferred).
+            await Task.Delay(500, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+
+            // Phase 4: publish a synthetic ServerListReceivedEvent.
+            // LoginScene._Process drains this and calls ApplyServerList → _serverSelect.SetServers(entries).
+            //
+            // MH_OFFLINE_SERVERLIST_COUNT=<N> controls the number of synthetic servers injected.
+            // Default = 2.  N=1 exercises the single-server one-plate path (oracle: single centred
+            // scroll, no second parchment, no page tabs).  N=3 exercises the 2-page path (2 plates
+            // on page 0, 1 plate on page 1, tab for page 1 shown, tabs 2..9 hidden).
+            var countStr = Environment.GetEnvironmentVariable("MH_OFFLINE_SERVERLIST_COUNT");
+            var serverCount = 2; // default
+            if (!string.IsNullOrWhiteSpace(countStr) &&
+                int.TryParse(countStr.Trim(), out var parsedCount) &&
+                parsedCount is >= 1 and <= 40)
+                serverCount = parsedCount;
+
+            GD.Print($"[ClientContext/EnvLogin/OfflineServerList] Phase 4: building {serverCount} synthetic server(s) " +
+                     "(MH_OFFLINE_SERVERLIST_COUNT).");
+
+            // Build a set of diverse synthetic server records to exercise all colour ladder branches.
+            // Loads used: 400 (≤500 green), 900 (801..1200 orange), 600 (501..800 yellow), 1300 (>1200 red).
+            static short SyntheticLoad(int idx) => (short)(idx switch
+            {
+                0 => 400,   // ≤500 → green   (OpenTimeFlag nonzero → threshold branch A)
+                1 => 900,   // 801..1200 → orange
+                2 => 600,   // 501..800 → yellow
+                3 => 1300,  // > 1200 → red
+                _ => 400    // default green for any further servers
+            });
+
+            // All ServerListEntryView fields are i16 (short) — cast int literals explicitly.
+            var syntheticServers = ImmutableArray.CreateRange(
+                Enumerable.Range(1, serverCount).Select(id =>
+                    new ServerListEntryView(
+                        ServerId: (short)id,
+                        StatusCode: (short)0,
+                        Load: SyntheticLoad(id - 1),
+                        OpenTime: (short)1, // nonzero → threshold branch A
+                        LoadHint: ServerLoadBand.Light,
+                        StatusHint: ServerStatusHint.Normal,
+                        DisplayName: string.Empty)));
+
+            var syntheticEvent = new ServerListReceivedEvent(syntheticServers);
+            var published = EventBus?.Publish(syntheticEvent) ?? false;
+            GD.Print($"[ClientContext/EnvLogin/OfflineServerList] Phase 4: synthetic ServerListReceivedEvent published " +
+                     $"(servers={syntheticServers.Length}, published={published}). " +
+                     "LoginScene._Process will deliver it to ServerSelectSubView.SetServers on next frame.");
+
+            GD.Print($"[ClientContext/EnvLogin/OfflineServerList] Offline-server-list harness COMPLETE. " +
+                     $"Expected: server-list at state 35, {Math.Min(2, serverCount)} plate(s) on page 0, " +
+                     $"{(serverCount > 2 ? "page-1 tab shown" : "no page tabs")}.");
+        }
+        catch (OperationCanceledException)
+        {
+            GD.Print("[ClientContext/EnvLogin/OfflineServerList] Harness cancelled (shutdown or _ExitTree).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext/EnvLogin/OfflineServerList] Harness unhandled exception: {ex}");
+        }
+    }
+
+    // Main-thread relay: finds the LoginWindow in the scene tree and calls ActivateOfflineServerList.
+    // Called via CallDeferred so it runs on the Godot main thread.
+    private void ActivateLoginWindowServerList()
+    {
+        // Find LoginWindow by its node name anywhere in the tree.
+        var loginNode = GetTree().Root.FindChild("LoginWindow", true, false) as LoginWindow;
+        if (loginNode is null || !IsInstanceValid(loginNode))
+        {
+            GD.PrintErr("[ClientContext/EnvLogin/OfflineServerList] LoginWindow not found in scene tree. " +
+                        "Cannot activate offline server list.");
+            return;
+        }
+
+        GD.Print("[ClientContext/EnvLogin/OfflineServerList] Found LoginWindow; calling ActivateOfflineServerList.");
+        loginNode.ActivateOfflineServerList();
     }
 }

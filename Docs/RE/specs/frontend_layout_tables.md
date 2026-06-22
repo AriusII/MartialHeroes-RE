@@ -1025,196 +1025,286 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
 - **Persist:** committing a server writes registry `HKLM\SOFTWARE\crspace\do : Lastserver` (REG_DWORD
   = server id); the next launch reads it back to pre-highlight the previously selected server.
 
-### 4.3 Server-list column layout — consolidated implementable reference (G2 debugger/decompile-confirmed 2026 / IDB 263bd994)
+### 4.3 Server-list window — full construction (binary-re-derived 2026, supersedes the prior partial §4.3)
 
-> **Verification:** G2 debugger/decompile-confirmed 2026 / IDB 263bd994. All geometry in this section
-> is **static-confirmed from the build and paint routines** (hard-coded literals, not data-driven). The
-> live debugger session that ran concurrently with this RE pass found the LoginWindow object already
-> freed at the Loading state (the login object is torn down before Loading is entered), so no live
-> widget-memory reads were obtainable; the authoritative source for this section is the static
-> binary, which is conclusive for a non-data-driven layout. Each fact below is labelled
-> **static-confirmed** or **to-confirm** accordingly. Reference: `Docs/RE/specs/frontend_layout_tables.md`.
+> **Supersedes the prior partial §4.3; binary-re-derived 2026 (IDB SHA 263bd994); exhaustive
+> from-scratch-rebuild reference.** This section was re-derived in full from the LoginWindow
+> construction routine, its server-list paint routine, and its handshake sub-state machine, after the
+> earlier §4.3 proved incomplete and produced a broken port (cluttered overlap, blank-white tabs,
+> duplicated chrome). Every geometry/atlas/action/font/colour fact here is **static-confirmed** from
+> hard-coded literals (the layout is **not** data-driven). Items that genuinely depend on runtime
+> server data or on the atlas pixels are explicitly flagged **live-pending** / **texture-oracle**. A
+> concurrent live `?ext=dbg` probe found **no live debuggee attached** (and in any case LoginWindow is
+> torn down before the Loading scene), so the static binary is the authoritative — and, for a
+> non-data-driven layout, conclusive — source. §4.1 (resolvers) and §4.2 (outer construction) remain
+> correct and are cross-referenced rather than restated.
 
-The server-list column occupies the central panel at canvas dst **(270, 85) 483 × 490** (atlas A2
-`loginwindow.dds`, source origin **(0, 490)**), itself a child of the server-list ROOT panel. Its paint
-routine fills this column with **two independent row systems** on each repaint.
-
----
-
-#### 4.3.1 Row system A — Name-strip page tabs (10 buttons across the top of the column)
-
-**Static-confirmed.**
-
-Ten 3-state buttons laid out horizontally inside the column, one per potential page entry. Built in the
-login-window construction routine by a loop (ten iterations while the running X remains within the
-column width). All buttons reside on atlas A2 (`loginwindow.dds`).
-
-| Property | Value |
-|---|---|
-| Count | **10** (fixed; loop stride 47, column width 483, starting x 13) |
-| localX | `13 + 47 · i` for i = 0..9 (i.e. 13, 60, 107, 154, 201, 248, 295, 342, 389, 436) |
-| localY | **66** (constant for all 10) |
-| Size (w × h) | **47 × 18** |
-| Atlas | A2 (`loginwindow.dds`) |
-| Normal src | **(596, 985)** — same for all 10 at build time |
-| Hover src | **(643, 985)** — same for all 10 at build time |
-| Pressed src | **(643, 985)** (equals hover; no distinct pressed face) |
-| Action id | **115 + i** (i.e. actions 115..124) — page-jump, page = action − 115 |
-
-On each repaint all 10 strips are first reset to a blank source origin `(500, 792)` / `(500, 810)` (erasing the
-prior active state), and then the strips corresponding to valid pages are given real art (see §4.2
-pager re-arm geometry). An unused strip slot is blanked at its source origin, not hidden. Two strips at
-build positions index 1 and 2 additionally receive alternate initial faces `(690, 985)` / `(737, 985)` and
-`(784, 985)` / `(831, 985)` respectively, which are the left and right end-cap or pager-flanking glyphs —
-their precise visual role (end caps vs. arrow/glyph pair) is inferred from the atlas UV positions;
-**to-confirm** against the atlas extract.
+All builder argument orders are confirmed: an **image** is `(atlas, dstX, dstY, w, h, srcX, srcY)` and a
+**1:1 atlas blit with NO scaling**; a **panel** adds an opaque/clip flag; a **3-state button** is
+`(atlas, dstX, dstY, w, h, Normal srcX, Normal srcY, Hover srcX, Hover srcY, Pressed srcX, Pressed srcY)`.
+Four atlases are preloaded, in this fixed order, and **no others** are used by the login window:
+**A1** = `data/ui/login_slice1.dds`, **A2** = `data/ui/loginwindow.dds`, **A3** = `data/ui/InventWindow.dds`,
+**A4** = `data/ui/loginwindow_02.dds`. There is **no** `server_<id>.dds`.
 
 ---
 
-#### 4.3.2 Row system B — Detail plates (2 per page, side-by-side)
+#### 4.3.0 The three near-overlapping backdrops — the double-draw resolution
 
-**Static-confirmed.**
+The single LoginWindow builds **three distinct backdrops that occupy nearly the same screen region** but
+belong to **three different, mutually-exclusive phases**. The broken port draws two or three of them at
+once; the binary shows exactly **one** at a time. A correct port MUST treat these as one-of-N, never
+stacked:
 
-Two full-height server-detail columns built by a 2-iteration loop (i = 0, 1). Each plate is a stack
-of five child widgets sharing the same X base `(30 + 233 · i)` — giving plate-0 at x = 30 and
-plate-1 at x = 263. The X stride between plates is **233 px**.
+| Backdrop (role) | Phase it belongs to | dst | size | atlas / src | Visible when |
+|---|---|---|---|---|---|
+| **Notice / agreement panel** | the notice/EULA sub-view | (270, 85) | 483 × 490 | A2 src (0, 490) | Notice phase only; **hidden** across the curtain, PIN, fetch, and server-list sub-states |
+| **Server-list content panel** | the server-list sub-view | (270, 85) | 483 × 490 | A2 src (0, 490) | **Server-list phase only** — shown at the fetch→show edge (sub-states 35..37) |
+| **Login banner frame** | the credential-form phase | (265, 0) | 494 × 113 | A1 src (0, 469) | During the curtain/credential form; **hidden** at the fetch→show edge (so it is gone once the server list appears) |
 
-**Per-plate widget inventory** (all coordinates local to the column panel; all are 1:1 atlas blits):
+> **Resolution of the double-draw the port suffers:** the notice panel and the server-list content panel
+> are **two separate widgets built with the identical `(270, 85) 483 × 490, A2 src (0, 490)` blit.** They
+> are never on screen together — the sub-state machine hides the notice panel before the server-list
+> phase and only then shows the content panel. The login banner at `(265, 0)` is a **third** widget on the
+> credential-form panel and is hidden once the list appears. **A port must render exactly one of these
+> backdrops per phase; drawing the notice backdrop and the list backdrop over the same rectangle (or
+> leaving the credential banner up under the list) is the observed clutter.** All three are built
+> initially **hidden** and toggled by the sub-state ladder in §4.3.7.
 
-| Widget | type | localX | localY | w | h | srcX | srcY | Atlas | Action | Notes |
+---
+
+#### 4.3.1 Server-list content panel — complete child inventory
+
+**Static-confirmed.** All children below are parented to the **server-list content panel** (the
+`(270, 85) 483 × 490` A2 backdrop of §4.3.0), are built **hidden** (visible-at-rest = no), and become
+visible only when the panel itself is shown in the server-list phase. Coordinates are **local to the
+content panel** unless noted. Two repeated systems (the two detail plates and the ten page tabs) are
+detailed in §4.3.2 / §4.3.3.
+
+| Widget | type | localX | localY | w | h | atlas | src tuple(s) | action | font | visible at rest |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Name label | label (center) | 30 + 233·i | **390** | 174 | 21 | — | — | text | 400+i | Font slot 0; center-aligned (align mode 2); msg text `5000 + ServerId`; also carries action 400+i |
-| Plate face image | image | 30 + 233·i + 47 | 97 | 100 | 372 | 448 + 124·i | 6 | A4 (`loginwindow_02.dds`) | — | Fixed per-column art (baked calligraphy candidate); src X = 448 for plate 0, 572 for plate 1; drawn **after** the select button (over the parchment) |
-| Select button (parchment) | button3 | 30 + 233·i − 6 | 97 | 202 | 372 | N(9,6) / H(220,6) | — | A4 | 400+i | Clickable parchment; action 400+i (LEFT=400, RIGHT=401); same action as name label |
-| Status / load caption | label (center) | 30 + 233·i | **410** | 174 | 20 | — | — | text | — | **Font slot 4** (DotumChe 12 px, weight 800); coloured per §4.3.4; carries the status or population string |
-| Spare label | label | 30 + 233·i | **430** | 174 | 20 | — | — | text | — | Set to an **empty string** by the painter; the earlier "class / population count" reading is superseded — this slot is not drawn |
+| Title "서버선택" | image | 207 | 44 | 70 | 17 | A2 | src (0, 980) | — | — | hidden |
+| Detail plate 0 (×5 widgets) | group | 30 | — | — | — | A4/text | see §4.3.2 | 400 | — | hidden |
+| Detail plate 1 (×5 widgets) | group | 263 | — | — | — | A4/text | see §4.3.2 | 401 | — | hidden |
+| Status-indicator quad ×3 | image | 0 | 0 | 60 | 39 | A2 | src (500, 786) | — | — | hidden |
+| Selection-highlight strip | image | 0 | plate-0 parchment top + 8 | 46 | 168 | A4 | src (700, 18) | — | — | hidden |
+| Page tab ×10 | button3 | 13 + 47·i | 66 | 47 | 18 | A2 | see §4.3.3 | 115 + i | — | **hidden** |
 
-**Text line Y positions within each plate** (relative to the column panel):
+The **three status-indicator quads** (the `60 × 39` A2 `src (500, 786)` images) are shown and re-anchored
+around the selected plate **only** when a record's `ServerId == 100` (the special-row sentinel) **and** the
+content-panel's internal sentinel flag is set; they are otherwise hidden. The **selection-highlight strip**
+is shown behind the plate whose `ServerId` equals the highlight key (§4.3.6). The **refresh / back controls
+and the EVENT badge are NOT in this panel** — they live on the credential-form panel and are covered in
+§4.3.4.
 
-| Line | localY | Content |
+---
+
+#### 4.3.2 The two detail plates — 2 slots per page, side-by-side
+
+**Static-confirmed.** A 2-iteration loop builds **two plate slots** at X base `30 + 233 · i` — plate 0 at
+local x = 30, plate 1 at local x = 263 (canvas x ≈ 300 and 533), X stride **233**. Each plate is a stack of
+**five** widgets, all built **hidden**:
+
+| Widget | type | localX | localY | w | h | atlas | src tuple(s) | action | font | notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Name label | label (center) | 30 + 233·i | **390** | 174 | 21 | text | — | 400 + i | slot 0 | msg `5000 + ServerId`; center align; also carries the plate action |
+| Plate-face image | image | 30 + 233·i + 47 | 97 | 100 | 372 | A4 | src (448 + 124·i, 6) | — | — | plate 0 src x = 448, plate 1 src x = 572; baked-calligraphy candidate; drawn **after / over** the select button |
+| Select button (parchment) | button3 | 30 + 233·i − 6 | 97 | 202 | 372 | A4 | N (9, 6) / H (220, 6) / P (220, 6) | 400 + i | — | clickable parchment; **both** this and the name label carry action 400 + i (LEFT = 400, RIGHT = 401) |
+| Status / load caption | label (center) | 30 + 233·i | **410** | 174 | 20 | text | — | — | **slot 4** | DotumChe 12 px weight 800; coloured per §4.3.5 |
+| Spare label | label | 30 + 233·i | **430** | 174 | 20 | text | — | — | slot 0 | painter sets an **empty string** — never drawn; the old "class/count" reading is dead-debug |
+
+**Z-order within a plate** (insertion = paint order): select button → name label → plate-face image →
+status caption → spare. The face quad is drawn **on top of** the parchment button (drawing it behind would
+hide it under the opaque parchment — the prior "empty scroll" bug). Text-line vertical stride = **20 px**
+(390 → 410 → 430).
+
+> **Scroll count / the "one centered scroll" oracle — resolution of the maintainer's count question:** the
+> engine **always lays out two plate SLOTS per page**, but the painter populates and shows a slot **only if
+> its record exists** (remaining-record guard, §4.3.3): with a single server on the page only **plate 0** is
+> populated and shown, and plate 1 stays hidden. So the official client's single centered scroll is the
+> **one-record case** (one plate rendered, the other hidden) — **not** a one-plate design. A port must build
+> two slots and gate each on record-availability; it must **not** render an empty second parchment.
+> **Texture-oracle item:** whether the single rendered plate should sit visually centered (vs. left at
+> x = 30) is a presentation detail confirmed against the captures, not the binary.
+
+---
+
+#### 4.3.3 Name-strip page tabs — HIDDEN, not blank-art
+
+**Static-confirmed.** Ten 3-state buttons are built by a loop while the running X stays inside the column:
+local x = `13 + 47 · i` (13, 60, 107, … 436), local y **66**, size **47 × 18**, atlas **A2**, build-time face
+Normal (596, 985) / Hover (643, 985) / Pressed (643, 985), action **115 + i** (page = action − 115). Two of
+them receive alternate build-time faces — tab 1 → N (690, 985) / H (737, 985), tab 2 → N (784, 985) /
+H (831, 985).
+
+> **THE TAB VISIBILITY RULE — resolution of the maintainer's white-box question:** **every one of the ten
+> tabs is built HIDDEN** (each gets a `SetVisible(false)` immediately after construction). They are
+> **not** blank art that always draws. On each repaint the painter **re-skins** all ten to a blank source
+> origin (Normal (500, 792) / Hover (500, 810) / Pressed (500, 810)) and then gives **only three** of them
+> real pager art (see §4.3.4). **Re-skinning a hidden widget's source UV does NOT make it visible** —
+> visibility is a separate flag the painter only sets for valid pages. **A port that renders all ten tabs
+> as opaque white boxes (the blank (500, 792) crop) is wrong: unused tabs stay hidden; only the pager
+> strips for pages that actually exist are shown.** The blank (500, 792) crop's pixel content is a
+> **texture-oracle** item, but it is irrelevant when the rule "hidden unless a valid page" is honoured.
+
+---
+
+#### 4.3.4 Refresh, back, EVENT badge, and the pager
+
+**Static-confirmed.** The **refresh** and **back** controls and the **EVENT badge** are children of the
+**credential-form panel** (the same panel that carries the login banner of §4.3.0), **not** of the
+content panel. They are shown at the fetch→show edge (server-list phase) and hidden during the
+curtain/credential phase.
+
+| Control | type | dst | size | atlas | src tuple(s) | action | role |
+|---|---|---|---|---|---|---|---|
+| **새로고침 / Refresh strip** | button3 | (456, −3) | 111 × 38 | A1 | N (792, 398) / H (602, 416) | **105** | re-fetch the list; **10 000 ms debounced** (no-op while already fetching or within 10 s of the last fetch) |
+| **Back / quit-confirm strip** | button3 | (456, 166) | 112 × 39 | A1 | N (154, 398) / H (378, 398) | **102** | raises the quit-confirm panel / leaves the list; always present at rest in the form phase |
+| **EVENT badge** | image | (407, −3) | 210 × 70 | A1 | src (743, 398) | — | decorative badge beside the refresh strip |
+
+> **The single refresh — resolution of the maintainer's duplicate-button question:** there is **exactly
+> one** refresh control (action **105**, at (456, −3)) and **exactly one** back/quit control (action **102**,
+> at (456, 166)). They are distinct controls at distinct positions; a port must render **one** of each and
+> never duplicate them. The visual oracle's single bottom-area refresh = the action-105 strip.
+
+**Pager re-arm geometry** (per repaint): all ten tabs are first reset to the blank face
+N (500, 792) / H (500, 810) / P (500, 810); then exactly three receive real pager art — tab 1 →
+N (500, 828) / H (500, 846); tab 2 → N (500, 864) / H (605, 985); tab 3 → N (710, 985) / H (815, 985). Only
+tabs that map to a **valid page** are made visible (§4.3.3); the remainder stay hidden on the blank face.
+Action range **115..124** (page = action − 115). No "N servers available" count text is rendered — the
+total count drives arithmetic only (remaining-plate bound, page math, §4.3.3).
+
+---
+
+#### 4.3.5 Record decode and the name / status / population resolvers
+
+**Static-confirmed.** The in-memory list is an array of **8-byte little-endian records**; the record-array
+pointer and the record count are **named object fields** of the server-list object (no fixed byte offset
+is cited). The page cursor (§4.3.3) selects two records per page.
+
+| offset | size | type | field | notes |
+|---|---|---|---|---|
+| +0 | 2 | i16 | `ServerId` | 1-based, valid **1..40**; name-lookup key and sentinel test; **== 100** = special display-only sentinel row (lights the three status quads of §4.3.1) |
+| +2 | 2 | i16 | `StatusCode` | status caption + selectable gate (§4.3.6) |
+| +4 | 2 | i16 | `LoadCount` | population; drives the colour ladder below |
+| +6 | 2 | i16 | `OpenTimeFlag` | when `StatusCode == 0`: **nonzero** ⇒ `LoadCount` is a raw threshold count, **zero** ⇒ `LoadCount` is a discrete level (4/3/2); when `StatusCode == 3`: scheduled-open minute component |
+
+> **Field order is binary-pinned: `+4` is the population `LoadCount` (the value compared to 1200 / 800 / 500)
+> and `+6` is the validity gate / open-time.** Do **not** swap them.
+
+**Name resolver (binary-confirmed):** `name_id = 5000 + ServerId` (ServerId 1 → msg 5001 … ServerId 40 →
+msg 5040), flat, **no** group/channel multiplier. Out-of-range `ServerId` → fallback msg **5901** ("unknown
+server #n", formatted with the id). The 5101 / 5201 / 5301 / 5401 / 5421 message blocks are **discarded
+cache warm-up** (their lookups are thrown away; only the 5001-block table is indexed) — **drop any "banked"
+or 5301-base name resolver**.
+
+**Status-caption resolver:** `caption_id = 4029 + StatusCode` (StatusCode 0..3 → msg 4029..4032), loaded
+into a 4-entry lookup at the top of the paint routine.
+
+**Population colour ladder (`StatusCode == 0` only)** — two sub-branches selected by `OpenTimeFlag (+6)`:
+
+*Branch A — `OpenTimeFlag != 0` (raw count, thresholded; tests `> 1200` first, then `<= 800`, then `<= 500`):*
+
+| LoadCount | caption msg id | label colour (ARGB) |
 |---|---|---|
-| Name | **390** | Server name (font slot 0, centered) |
-| Status/load | **410** | Status caption or colour-coded population (font slot 4) |
-| Spare | **430** | Empty string — not rendered |
+| `> 1200` | **6001** | `0xFFFF0000` red |
+| `801..1200` | **6002** | `0xFFED6806` orange |
+| `501..800` | **6003** | `0xFFFFFF00` yellow |
+| `<= 500` | `4029` (status caption reused) | `0xFFB5FF7A` green |
 
-Vertical stride between successive text lines = **20 px**.
+*Branch B — `OpenTimeFlag == 0` (discrete level, exact equality):*
 
----
+| LoadCount | caption msg id | label colour (ARGB) |
+|---|---|---|
+| `== 4` | **6001** | `0xFFFF0000` red |
+| `== 3` | **6002** | `0xFFED6806` orange |
+| `== 2` | **6003** | `0xFFFFFF00` yellow |
+| else (incl. 0/1) | `4029` (status caption reused) | `0xFFB5FF7A` green |
 
-#### 4.3.3 Record-to-plate mapping (page cursor)
-
-**Static-confirmed.**
-
-The paint routine accepts a page index `page` (0-based). It maps records to the two visible plates as
-follows:
-
-- **Start offset into the record array:** `16 · page` bytes (= 2 records × 8 bytes/record × page).
-- **Records consumed per page:** exactly **2** (one 8-byte record per plate; the loop breaks at 2 plates).
-- **Plate i on page `page` reads** record at byte offset `16 · page + 8 · i` in the array.
-- **Remaining-record guard:** the painter computes `total_record_count − 2 · page` to bound how many
-  plates get data; if fewer than 2 remain, only the available plates are populated.
-- Plate order is **stable** (raw record order, not shuffled — see §4.2 for the two-array resolution).
-
-**Server record format** (8-byte, little-endian, in-memory; one per server in the list):
-
-| Offset | Type | Field | Role |
-|---|---|---|---|
-| +0 | i16 | `ServerId` | 1-based server id (valid 1..40); key for name lookup and sentinel test |
-| +2 | i16 | `StatusCode` | Drives the status caption and the selectable gate |
-| +4 | i16 | `LoadCount` | Population count (threshold or discrete level; drives the colour ladder) |
-| +6 | i16 | `OpenTimeFlag` | When `StatusCode == 0`: nonzero → `LoadCount` is a raw threshold count; zero → `LoadCount` is a discrete level (4/3/2). When `StatusCode == 3`: scheduled-open minute component |
-
-The record-array pointer and total count are held as **named object fields** of the login/server-list
-object — no fixed byte offset should be cited for them (static confirmed: accessed via object fields,
-not raw pointer arithmetic with a literal index). For the authoritative resolver tables see §4.1.
-
-**Server name resolution** (static-confirmed):
-- `ServerId` in range 1..40 → `name_id = 5000 + ServerId` (msg bank 5001..5040, flat — no group
-  multiplier).
-- `ServerId` out of range → fallback caption id **5901** (a formatted "unknown server" template).
+**`StatusCode == 3` special caption:** if `LoadCount == 24` → msg **6004** (maintenance / check); otherwise a
+formatted open-time line via msg **6005** (a `cur / max`- or `HH:MM`-style string built from
+`LoadCount / 10`, `LoadCount % 10`, `OpenTimeFlag / 10`, `OpenTimeFlag % 10`). The colour ladder is not
+applied when `StatusCode != 0`. The literal CP949 text of every msg id lives in runtime `msg.xdb`, so the
+captions themselves are **live-pending**; the ids, colours, and selection logic are static-confirmed.
 
 ---
 
-#### 4.3.4 Population/load colour ladder (`StatusCode == 0`, load-valid branch)
+#### 4.3.6 Selectable gate, default highlight, stable plate order
 
-**Static-confirmed.** Applies when `StatusCode == 0` **and** `OpenTimeFlag != 0` (load-valid). The colour
-is written to the plate's status/load label (the y = 410 label, **font slot 4**). Lower `LoadCount`
-= greener = better. Boundaries are **inclusive** as tabulated.
+**Selectable gate (static-confirmed):** the paint routine renders a plate's select button and name label as
+**interactive when `StatusCode == 0`** (the open state), regardless of load. The **click-handler commit
+guard** additionally requires **`LoadCount < 2400`** before committing a selection. A port must apply
+**both**: paint activates on `StatusCode == 0`; the commit gate is `StatusCode == 0 && LoadCount < 2400`.
 
-| LoadCount | Caption msg id | Label colour (ARGB) | Meaning |
-|---|---|---|---|
-| `> 1200` | **6001** | `0xFFFF0000` (red) | Heavy / full |
-| `801..1200` | **6002** | `0xFFED6806` (orange) | Busy |
-| `501..800` | **6003** | `0xFFFFFF00` (yellow) | Moderate |
-| `<= 500` | `4029` (status caption reused) | `0xFFB5FF7A` (green) | Light / available |
+**Default highlight (static-confirmed):** the painter highlights the plate whose `ServerId` equals the
+highlight key `NEW_SERVER_INDEX` (a single integer read from `data/script/uiconfig.lua`). This is **not**
+the `Lastserver` registry value (that is written only on commit). The highlight is drawn with the
+selection-highlight strip of §4.3.1 (A4 src (700, 18), 46 × 168) behind the matching plate.
 
-Nesting direction: the code tests `> 1200` first; if false, tests `<= 800`; if true tests `<= 500`.
-The boundaries as tabulated are correct — the inclusive cutpoints are 1200 (red threshold), 800
-(orange/yellow boundary), and 500 (yellow/green boundary).
-
-**Discrete-level branch** (`StatusCode == 0`, `OpenTimeFlag == 0`): `LoadCount` is an exact equality
-— value 4 → red 6001, 3 → orange 6002, 2 → yellow 6003, otherwise green. Same ARGB constants as above.
-
-**When `StatusCode != 0`:** the load colour ladder is not applied. The status caption is keyed by
-`caption_id = 4029 + StatusCode` (for StatusCode 0..3 → ids 4029..4032). For `StatusCode == 3` a
-separate formatted caption path may apply (msg 6004 / 6005 for specific load values). See §4.1 for the
-full status-caption table.
+**Stable plate order (static-confirmed):** page i shows raw records **[2·page]** and **[2·page + 1]** in
+order — the page cursor starts at `16 · page` bytes, consumes **2** records, and plate i reads
+`16 · page + 8 · i`. The remaining-record guard `record_count − 2·page` bounds how many of the two slots are
+populated (so a final odd record shows only plate 0). The live painter is the **direct-index path** (no
+shuffle indirection) with **center-aligned** name labels. A per-render Fisher-Yates permutation exists but
+operates on a **separate parallel id-vector** whose only effect is the `Lastserver` value — it does **not**
+reorder the visible plates. **Draw plates in raw record order with centered names; do not shuffle the rows.**
 
 ---
 
-#### 4.3.5 Selectable gate and selection highlight
+#### 4.3.7 Sub-state visibility ladder (server-list relevant edges)
 
-**Selectable gate (static-confirmed):** a plate's select button and name label are rendered as
-interactive only when `StatusCode == 0` (the "open" server state). The paint routine enables plate
-interactivity in the `StatusCode == 0` branch.
+**Static-confirmed.** The handshake sub-state machine toggles the backdrops/controls. The server-list
+relevant edges:
 
-> **To-confirm:** the sub-gate `load < 2400` (present in the commit guard at OnEvent action 400/401,
-> see §2.2 action map) is **not enforced in the paint routine** — the paint path enables the plate
-> when `StatusCode == 0` regardless of `LoadCount`. The `< 2400` check appears in the click handler
-> (the commit guard). An implementation must apply both: **paint** gates on `StatusCode == 0`
-> (activates the widget), and the **click handler** gates on `StatusCode == 0 && LoadCount < 2400`
-> before committing. Do not rely on the paint-path alone to enforce the 2400 upper bound.
+| Sub-state edge | Visibility changes |
+|---|---|
+| 33 → 34 | hide the PIN keypad modal; arm the fetch |
+| 34 → 35 | **show the server-list content panel**; **hide the login banner**; **show the refresh/quit strip and the EVENT badge** |
+| 35 | fetching — progress shown |
+| 37 | plates shown — user picks a plate (action 400/401) or pages (action 115..124) |
 
-**Default-highlight key (static-confirmed):** the painter highlights the plate whose `ServerId` matches
-the value of `NEW_SERVER_INDEX` (a single integer read from `data/script/uiconfig.lua`). This is
-**not** the `Lastserver` registry value — that is written on commit but is not the painter's highlight
-key. To-confirm: whether `Lastserver` is read back on a subsequent session to pre-select a server (a
-separate code path not traced this pass).
-
-**Selection highlight strip (static-confirmed):** atlas A4 (`loginwindow_02.dds`), source origin
-**(700, 18)**, size **46 × 168**, drawn behind (under) the highlighted plate. Position is anchored to
-the plate whose `ServerId` equals the highlight key.
+The **notice panel** (the other `(270, 85)` backdrop) is hidden across sub-states 1 / 2 / 4 / 31 / 34; the
+**server-list content panel** is shown only across 35..37. This is the precise mechanism behind §4.3.0: the
+two same-rectangle backdrops are never co-visible.
 
 ---
 
-#### 4.3.6 Pager controls and record count
+#### 4.3.8 Connecting popup (sub-state 39)
 
-**Static-confirmed.**
-
-Three pager glyphs are repositioned on each repaint (see §4.2 pager re-arm geometry for their atlas
-source origins). They use action ids in the **115..124** range (page-jump strips, same as the name-strip
-tabs in §4.3.1 above — the pager advance is driven by re-arming a subset of the 10 strip buttons with
-page-navigation art). The current page drives the record-cursor via `16 · page`.
-
-No explicit "N servers available" count text is rendered by the paint routine. The total record count
-is used only for arithmetic (remaining-plate bound, page math). The list communicates available entries
-implicitly through which tabs receive real art vs. the blank/parking UV.
-
-**Status-caption vocabulary** (loaded at the top of the paint routine into a 4-entry lookup):
-caption ids **4029..4032** (status codes 0..3). These are the column status captions, not column
-headers and not the colour-ladder captions (6001..6003).
+**Static-confirmed.** When the join/connect worker is spawned (sub-state 39) a Confirm-style modal is
+raised: atlas **A3** (`InventWindow.dds`), panel src **(318, 647)**, dst **(342, 289) 340 × 190**, caption
+msg **4023** centered. It has a **single 3-state button** (action **113**, caption baked into the atlas);
+clicking it **aborts the join and returns to the server list** (sub-state 34) — it is **not** an OK button.
+On a successful handshake the character-list packet tears the login scene down (the popup dies with the
+scene). Connect/credential feedback is the separate auto-counting message box (§2.1a).
 
 ---
 
-#### 4.3.7 Implementation readiness note
+#### 4.3.9 Implementation-readiness note and live-pending list
 
-All geometry constants in §4.3.1–§4.3.6 are **static-confirmed** and are implementation-ready for a
-`ServerSelectSubView` 1:1 port. The single item requiring a separate live-debugger pass before
-treating as settled is the `load < 2400` click-handler sub-gate noted in §4.3.5 (confirm it is
-enforced in the OnEvent handler, not in a third location). All ARGB colour literals, text-line Y
-positions, atlas source origins, button action ids, font slots, and record-field offsets are directly
-usable from this section. Cross-reference §4.1 for the complete name/status/population resolver tables
-and §4.2 for the full outer-construction widget inventory and pager re-arm atlas origins.
+All geometry, atlas rects, action ids, font slots, colour literals, and record-field offsets in
+§4.3.0–§4.3.8 are **static-confirmed** (hard-coded, non-data-driven) and are directly implementable for a
+1:1 `ServerSelectSubView` rebuild. The non-negotiable rules a correct port MUST honour: (1) render **one**
+of the three near-overlapping backdrops per phase (§4.3.0); (2) build **two** plate slots but show each only
+if its record exists (§4.3.2); (3) keep the ten page tabs **hidden** unless they map to a valid page —
+never draw the blank (500, 792) crop as a white box (§4.3.3); (4) render **one** refresh (action 105) and
+**one** back (action 102), never duplicates (§4.3.4); (5) draw plates in raw record order with centered
+names (§4.3.6).
+
+**Live-pending / oracle items** (a concurrent live probe found **no debuggee attached**; LoginWindow is
+torn down at Loading — a maintainer-driven re-launch parked at the server-list screen is required to settle
+these):
+
+- the **server-record array contents** and the runtime **`StatusCode` integer semantics** (which value the
+  live server sends for "사용가능 / available" vs "full") — server-driven, **live-pending**;
+- the literal CP949 caption **text** for every msg id (4029..4032, 6001..6005, 5001..5040, 5901) — lives in
+  runtime `msg.xdb`, **live-pending**;
+- the **atlas pixel content** of the blank tab crop (500, 792) and the plate-face crop (448, 6) / (572, 6)
+  (whether the brush calligraphy is baked there) and the centered-single-plate presentation — **texture /
+  visual-oracle** items, not debugger-decidable.
+
+The future maintainer-driven session should breakpoint the server-list populate/paint site with the
+list received from a replica, read the record-array base + count and walk the 8-byte records to bind each
+runtime `StatusCode` integer to its on-screen available/full rendering.
 
 ---
 

@@ -89,7 +89,7 @@ public sealed partial class LoginWindow
         {
             Name = "BannerFrame",
             Position = new Vector2(LoginLayout.ServerListbox.X, LoginLayout.ServerListbox.Y), // (270,85) spec §2.1
-            Size = new Vector2(LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H),     // 483×490 spec §2.1
+            Size = new Vector2(LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H), // 483×490 spec §2.1
             MouseFilter = MouseFilterEnum.Ignore,
             Visible = false // init hidden; shown from state 2 via ApplyVisibility.
         };

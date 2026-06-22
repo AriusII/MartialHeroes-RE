@@ -1,42 +1,49 @@
 // Ui/Scenes/Login/ServerSelectSubView.cs
 //
-// Server-select sub-view for the Login(1) state.
+// Server-select sub-view for the Login(1) state — REBUILT from scratch per §4.3.
 //
-// Renders the server-list overlay (sub-states 35..37) as an internal sub-view of LoginWindow.
-// Backed entirely by HudAtlasLibrary + HudTextLibrary — no UiAssetLoader dependency.
+// Spec: Docs/RE/specs/frontend_layout_tables.md §4.3 (binary-re-derived 2026, IDB 263bd994).
 //
-// Layout (spec: Docs/RE/specs/frontend_layout_tables.md §4.3, G2 debugger/decompile-confirmed 2026 / IDB 263bd994):
+// ARCHITECTURAL CONTRACT (Rule 1 — ONE backdrop):
+//   This sub-view is parented to LoginWindow._serverListRoot (a transparent container shown at
+//   sub-state ≥ 35). The visual chrome frame behind the server list is:
+//     • loginwindow.dds src(0,490) at abs(270,85) 483×490 — owned by LoginWindow._bannerFrame
+//       (gated visible at state ≥ 35 by ApplyVisibility).
+//   ServerSelectSubView must NOT draw any backdrop/frame — doing so causes the documented
+//   double-draw white-box clutter.  It renders CONTENT ONLY:
+//     title image, detail plates (§4.3.2), page tabs (§4.3.3), status indicators (§4.3.1),
+//     and the selection highlight strip (§4.3.1).
+//   The refresh (action 105) and back (action 102) controls are children of LoginWindow._formGroup
+//   (§4.3.4) — this sub-view NEVER draws them.
 //
-// §4.3.1 NAME-STRIP TABS — 10 buttons localX=13+47·i, localY=66, 47×18, A2 src(596,985)/hover(643,985),
-//   actions 115..124 (page = action−115). All coords LOCAL to the column panel at (270,85).
+// RULE 2 — Two plate slots per page, each gated on record existence.
+//   plate[i] visible iff record (page*2 + i) exists.  Never render an empty second parchment.
 //
-// §4.3.2 DETAIL PLATES — 2 per page side-by-side, X base = 30+233·i (i=0,1):
-//   • Name label      (30+233·i, 390, 174×21) font slot 0, center-aligned, msg 5000+ServerId.
-//   • Plate face img  (30+233·i+47, 97, 100×372) A4 src(448+124·i, 6) — baked per-column calligraphy.
-//   • Select button   (30+233·i−6, 97, 202×372) A4 N(9,6)/H(220,6), action 400+i.
-//   • Status caption  (30+233·i, 410, 174×20) font slot 4, coloured per §4.3.4.
-//   • Spare label     (30+233·i, 430, 174×20) EMPTY STRING — not drawn.
+// RULE 3 — Tabs HIDDEN unless they map to a real page.
+//   All 10 tabs are built hidden.  On each repaint, re-arm three with real art, then show a tab
+//   only if its page index < pageCount.  Never leave unused tabs visible (white-box source).
 //
-// §4.3.3 RECORD→PAGE: 8-byte {ServerId i16, StatusCode i16, LoadCount i16, OpenTimeFlag i16};
-//   page cursor = 16·page bytes → record index 2·page; 2 records per page (loop guard: total−2·page).
-//   Server name: ServerId 1..40 → msg 5000+ServerId; out-of-range → fallback 5901.
+// RULE 4 — Exactly ONE refresh (action 105) + ONE back (action 102).
+//   These controls belong to LoginWindow._formGroup.  Not in this file.
 //
-// §4.3.4 POPULATION COLOUR LADDER (StatusCode==0 && OpenTimeFlag!=0, threshold branch):
-//   LoadCount > 1200 → red 0xFFFF0000; 801..1200 → orange 0xFFED6806; 501..800 → yellow 0xFFFFFF00;
-//   ≤500 → green 0xFFB5FF7A. Discrete branch (OpenTimeFlag==0): ==4 red / ==3 orange / ==2 yellow / else green.
+// RULE 5 — Plates in raw record order, centered server names.
+//   page i → records [2i] and [2i+1].  Name resolver: 5000+ServerId.  Center-aligned slot-0 label.
 //
-// §4.3.5 SELECTABLE GATE:
-//   Paint-time: StatusCode==0 → button enabled; StatusCode!=0 → button Disabled.
-//   Click handler: StatusCode==0 && LoadCount<2400 before commit (sub-gate 'to-confirm' in spec; apply both).
-//   Selection highlight: plate whose ServerId == NEW_SERVER_INDEX (uiconfig.lua). Lastserver is written on
-//   commit, NOT the painter highlight key.
+// Layout (all coords LOCAL to the server-list content panel at canvas (270,85)):
 //
-// §4.3.6 PAGER: 3 glyph controls using actions 115..124; no "N servers" count text.
+// §4.3.1 Title "서버선택": A2 src(0,980) at local(207,44) 70×17.
+// §4.3.2 DETAIL PLATES — 2 per page, X = 30+233·i (i=0,1):
+//   • Select button  (30+233·i−6,  97, 202×372) A4 N(9,6)/H(220,6), action 400+i.
+//   • Name label     (30+233·i,   390, 174×21)  font slot 0, center, msg 5000+ServerId.
+//   • Plate face     (30+233·i+47, 97, 100×372) A4 src(448+124·i, 6).
+//   • Status caption (30+233·i,   410, 174×20)  font slot 4, coloured per §4.3.5.
+//   • Spare label    (30+233·i,   430, 174×20)  EMPTY STRING.
+// §4.3.3 PAGE TABS — 10 built hidden; x=13+47·i, y=66, 47×18, A2.
+//   Re-arm 3 with real art each repaint; show tab i only if i < pageCount.
+// §4.3.6 Selection highlight: A4 src(700,18) 46×168 behind matching plate.
+// §4.3.5 Status indicators ×3: A2 src(500,786) 60×39, hidden; re-anchored for ServerId==100 row.
 //
-// spec: Docs/RE/specs/frontend_layout_tables.md §4.3 (consolidated implementable reference — G2 confirmed)
-// spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (name/status/population resolver tables)
-// spec: Docs/RE/specs/frontend_layout_tables.md §4.2 (pager re-arm geometry, commit guard)
-// spec: Docs/RE/specs/login_flow.md §2.1
+// spec: Docs/RE/specs/frontend_layout_tables.md §4 / §4.1 / §4.2 / §4.3
 
 using System.Globalization;
 using Godot;
@@ -44,28 +51,20 @@ using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Presentation.Screens.Layout;
 
-// ServerListEntryView (canonical published server-list view — Client.Application.Contracts.Events)
-
-// LoginLayout, WidgetRect (moved to engine-free layer)
-
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 /// <summary>
-///     Server-select sub-view for Login(1) sub-states 35..37.
+///     Server-select sub-view (Login sub-states 35..37) — rebuilt from §4.3 (IDB 263bd994).
 ///     <para>
-///         Renders TWO server "plate" sprites per page (§4.3.2), 10 name-strip page tabs (§4.3.1),
-///         a 3-glyph pager (§4.3.6), and per-plate population-colour status captions (§4.3.4).
-///         All atlas drawing comes from <see cref="HudAtlasLibrary" />; caption text from
-///         <see cref="HudTextLibrary" />. All coordinates are LOCAL to the server-list column panel at
-///         canvas (270,85) — <c>PanelPoint()</c> translates to absolute canvas positions.
+///         Renders content only (NO backdrop/frame — see §4.3.0): title, two plate slots gated
+///         on record existence, 10 page tabs kept hidden unless mapping to a valid page, status
+///         indicators, and selection highlight.  Refresh / back live in LoginWindow._formGroup.
 ///     </para>
 ///     <para>
-///         Plate interactivity: paint-time gate <c>StatusCode==0</c> (§4.3.5); click-handler gate
-///         <c>StatusCode==0 &amp;&amp; LoadCount&lt;2400</c> before commit (§4.3.5 to-confirm).
-///         Subscribe to <see cref="ServerSelected" /> to receive the chosen server id.
-///         Passive intent only — never mutates domain state.
+///         Strictly passive: all user gestures are translated to <see cref="ServerSelected" />
+///         signals.  No domain mutation.
 ///     </para>
-///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3 (G2 debugger/decompile-confirmed, IDB 263bd994)
+///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3 (binary-re-derived 2026, IDB 263bd994)
 /// </summary>
 public sealed partial class ServerSelectSubView : Control
 {
@@ -76,202 +75,217 @@ public sealed partial class ServerSelectSubView : Control
     [Signal]
     public delegate void ServerSelectedEventHandler(int serverId);
 
-    // Atlas paths. spec: Docs/RE/specs/frontend_layout_tables.md §1 / §4
-    private const string AtlasD = "data/ui/loginwindow_02.dds"; // A4 = loginwindow_02.dds
-    private const string AtlasB = "data/ui/loginwindow.dds"; // A2 = loginwindow.dds
-    private const string AtlasA1 = "data/ui/login_slice1.dds"; // A1 = login_slice1.dds
+    // -------------------------------------------------------------------------
+    // Atlas constants
+    // spec: Docs/RE/specs/frontend_layout_tables.md §1
+    // A2 = loginwindow.dds, A4 = loginwindow_02.dds
+    // -------------------------------------------------------------------------
 
-    // Full-screen A2 backdrop behind the list-box: dst(0,110,1024,490) src(0,0). spec §4.
-    // "Backdrop is TWO layers: a full-screen A2 image at (0,110) 1024×490, source (0,0), drawn FIRST"
-    private const int BackdropX = 0; // spec: frontend_layout_tables.md §4
-    private const int BackdropY = 110; // spec: frontend_layout_tables.md §4
-    private const int BackdropW = 1024; // spec: frontend_layout_tables.md §4
-    private const int BackdropH = 490; // spec: frontend_layout_tables.md §4
+    private const string AtlasA2 = "data/ui/loginwindow.dds";     // A2 spec: §1
+    private const string AtlasA4 = "data/ui/loginwindow_02.dds";  // A4 spec: §1
 
-    // Title "서버선택" image: A2 dst(207,44) 70×17 src(0,980). spec §4.
-    // Absolute canvas coords. "Title '서버선택' = baked A2 IMAGE … src(0,980)"
-    private const int TitleAbsX = 207; // spec: frontend_layout_tables.md §4
-    private const int TitleAbsY = 44; // spec: frontend_layout_tables.md §4
-    private const int TitleSrcX = 0; // spec: frontend_layout_tables.md §4 "source(0,980)"
-    private const int TitleSrcY = 980; // spec: frontend_layout_tables.md §4
+    // -------------------------------------------------------------------------
+    // Content-panel local-origin (the sub-view is full-canvas; these are the
+    // local offsets added to localX/localY per §0a.4 / §4.3.1).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 "local to the content panel at (270,85)"
+    // -------------------------------------------------------------------------
 
-    // Server-list panel shares the central notice/listbox area.
-    private const int PanelX = 270;
-    private const int PanelY = 85;
+    private const int PanelX = 270; // spec: §4.3.1 content panel dst(270,85)
+    private const int PanelY = 85;  // spec: §4.3.1
 
-    // Plate source rect in loginwindow_02.dds. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int PlateSrcX = 9;
-    private const int PlateSrcY = 6;
-    private const int PlateHoverSrcX = 220;
-    private const int PlateHoverSrcY = 6;
-    private const int PlateW = 202;
-    private const int PlateH = 372;
+    // -------------------------------------------------------------------------
+    // Title "서버선택" — baked A2 image at local(207,44) 70×17 src(0,980).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 "Title image | local(207,44) 70×17 A2 src(0,980)"
+    // -------------------------------------------------------------------------
 
-    // Two-plate layout, panel-local. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int PlateBaseX0 = 30;
-    private const int PlateBaseX1 = 263;
-    private const int PlateY = 97;
-    private const int PlateStripOffsetX = -6;
+    private const int TitleLocalX = 207; // spec: §4.3.1
+    private const int TitleLocalY = 44;  // spec: §4.3.1
+    private const int TitleSrcX   = 0;   // spec: §4.3.1
+    private const int TitleSrcY   = 980; // spec: §4.3.1
 
-    private const int StatusIconOffsetX = 47;
-    private const int StatusIconW = 100;
-    private const int StatusIconH = 372;
-    private const int StatusIconSrcY = 6;
-    private const int StatusIconSrcX0 = 448;
-    private const int StatusIconSrcX1 = 572;
+    // -------------------------------------------------------------------------
+    // Detail plates — 2-column loop, x = 30+233·i, action = 400+i.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2
+    // -------------------------------------------------------------------------
 
-    private const int RowLabelY0 = 390;
-    private const int RowLabelY1 = 410;
-    private const int RowLabelY2 = 430;
-    private const int RowLabelW = 174;
-    private const int RowLabelH0 = 21;
-    private const int RowLabelH = 20;
+    private const int PlateBaseX0       = 30;   // spec: §4.3.2 i=0
+    private const int PlateBaseX1       = 263;  // spec: §4.3.2 i=1 (30+233)
+    private const int PlateY            = 97;   // spec: §4.3.2
 
-    // Plate action ids. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int ActionPlate0 = 400;
-    private const int ActionPlate1 = 401;
+    // Select button (clickable parchment): (x−6, 97, 202×372) A4 N(9,6)/H(220,6)/P(220,6).
+    // spec: §4.3.2 "Select button (parchment)"
+    private const int PlateSelectOffX   = -6;   // spec: §4.3.2 "30+233·i−6"
+    private const int PlateSelectW      = 202;  // spec: §4.3.2
+    private const int PlateSelectH      = 372;  // spec: §4.3.2
+    private const int PlateNSrcX        = 9;    // spec: §4.3.2 Normal
+    private const int PlateNSrcY        = 6;    // spec: §4.3.2
+    private const int PlateHSrcX        = 220;  // spec: §4.3.2 Hover/Pressed
+    private const int PlateHSrcY        = 6;    // spec: §4.3.2
 
-    // Pager source rect in loginwindow.dds. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int PagerSrcX = 596;
-    private const int PagerSrcY = 985;
-    private const int PagerW = 47;
-    private const int PagerH = 18;
-    private const int PagerY = 66;
+    // Plate-face image: (x+47, 97, 100×372) A4 src(448+124·i, 6) — per-column calligraphy.
+    // spec: §4.3.2 "Plate-face image"
+    private const int PlateFaceOffX     = 47;   // spec: §4.3.2 "30+233·i+47"
+    private const int PlateFaceW        = 100;  // spec: §4.3.2
+    private const int PlateFaceH        = 372;  // spec: §4.3.2
+    private const int PlateFaceSrcX0   = 448;  // spec: §4.3.2 i=0 src(448,6)
+    private const int PlateFaceSrcX1   = 572;  // spec: §4.3.2 i=1 src(572,6) (448+124)
+    private const int PlateFaceSrcY    = 6;    // spec: §4.3.2
 
-    // Pager action ids 115..124. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int PagerActionBase = 115;
-    private const int PagerCount = 10;
+    // Name label: (x, 390, 174×21) font slot 0, center-aligned, msg 5000+ServerId.
+    // spec: §4.3.2 "Name label"
+    private const int NameLabelLocalY  = 390;  // spec: §4.3.2
+    private const int NameLabelW       = 174;  // spec: §4.3.2
+    private const int NameLabelH       = 21;   // spec: §4.3.2
 
-    // Population colour ladder thresholds (StatusCode==0, OpenTimeFlag!=0 threshold branch).
-    // Boundaries: >1200 red; 801..1200 orange; 501..800 yellow; ≤500 green.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 (G2 debugger/decompile-confirmed, IDB 263bd994)
-    private const int PopRedThreshold = 1200; // spec: frontend_layout_tables.md §4.3.4 LoadCount>1200 → red
-    private const int PopOrangeThreshold = 800; // spec: frontend_layout_tables.md §4.3.4 801..1200 → orange (>800 strict)
-    private const int PopYellowThreshold = 500; // spec: frontend_layout_tables.md §4.3.4 501..800 → yellow (>500 strict)
+    // Status/load caption: (x, 410, 174×20) font slot 4, centre, coloured per §4.3.5.
+    // spec: §4.3.2 "Status/load caption"
+    private const int StatusLabelLocalY = 410;  // spec: §4.3.2
+    private const int StatusLabelW      = 174;  // spec: §4.3.2
+    private const int StatusLabelH      = 20;   // spec: §4.3.2
 
-    // Discrete-level branch (StatusCode==0, OpenTimeFlag==0): exact-equality colour ladder.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 "Discrete-level branch"
-    private const int PopLevelRed = 4; // == 4 → msg 6001 red
-    private const int PopLevelOrange = 3; // == 3 → msg 6002 orange
-    private const int PopLevelYellow = 2; // == 2 → msg 6003 yellow
+    // Spare label: (x, 430, 174×20) empty string — never drawn.
+    // spec: §4.3.2 "Spare label — painter sets empty string"
+    private const int SpareLabelLocalY  = 430;  // spec: §4.3.2
 
-    // Special-row sentinel: a record whose SERVER-ID field (+0) == 100 is a display-only event row
-    // (out of the 1..40 name range → msg 5901; shows the 3 indicator quads). Tested on +0, NOT +2 status.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1/§4.2 "server_id == 100 gate" (CORRECTION 2026-06-20).
-    private const int SpecialRowServerId = 100;
+    // Plate action ids. spec: §4.3.2 action 400/401.
+    private const int ActionPlate0 = 400; // spec: §4.3.2
+    private const int ActionPlate1 = 401; // spec: §4.3.2
 
-    // Default-selection highlight strip: atlas A4 (loginwindow_02.dds) src(700,18) 46×168, drawn on the
-    // plate whose ServerId matches NEW_SERVER_INDEX (the single uiconfig.lua-sourced value).
-    // CORRECTION 2026-06-21: the highlight key is NEW_SERVER_INDEX, NOT the Lastserver registry value.
-    // Lastserver is written on commit (persist); whether it is read back to pre-highlight is done
-    // elsewhere and was not re-confirmed — do not assert it as this painter's behaviour.
-    // The painter repositions the strip to the plate's right edge (x = plate.dstX + plate.width − 48).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" (CORRECTION 2026-06-21).
-    private const int HighlightSrcX = 700;
-    private const int HighlightSrcY = 18;
-    private const int HighlightW = 46;
-    private const int HighlightH = 168;
-    private const int HighlightRightInset = 48; // plate-right − 48, per the painter
+    // -------------------------------------------------------------------------
+    // Page tabs — 10 built hidden; local x=13+47·i, y=66, 47×18, A2.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3
+    // -------------------------------------------------------------------------
 
-    // Status caption msg base: 4029 + status_code → caption text. spec: frontend_layout_tables.md §4
-    // "msg 4029/4030/4031/4032 are the STATUS CAPTIONS (keyed by status_code)"
-    private const int StatusCaptionMsgBase = 4029; // spec: frontend_layout_tables.md §4
+    private const int PagerBaseX    = 13;   // spec: §4.3.3 "13+47·i"
+    private const int PagerStrideX  = 47;   // spec: §4.3.3
+    private const int PagerLocalY   = 66;   // spec: §4.3.3
+    private const int PagerW        = 47;   // spec: §4.3.3
+    private const int PagerH        = 18;   // spec: §4.3.3
+    private const int PagerCount    = 10;   // spec: §4.3.3
+    private const int PagerActionBase = 115; // spec: §4.3.3 action 115+i (page=action−115)
 
-    // Server name caption id base. spec: Docs/RE/specs/frontend_layout_tables.md §4
-    private const int ServerNameCaptionBase = 5000; // server_id N → caption 5000+N
+    // Build-time blank art N(596,985)/H(643,985) — initial face (NOT displayed; tabs start hidden).
+    // spec: §4.3.3 "built with Normal(596,985)/Hover(643,985)/Pressed(643,985)"
+    private const int PagerBuildNSrcX = 596; // spec: §4.3.3
+    private const int PagerBuildNSrcY = 985; // spec: §4.3.3
+    private const int PagerBuildHSrcX = 643; // spec: §4.3.3
+    private const int PagerBuildHSrcY = 985; // spec: §4.3.3
 
-    // Pager re-arm blank-atlas source rects (loginwindow.dds A2).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2
-    //   "each repaint all 10 pager strips reset to blank atlas region N(500,792)/H(500,810)/P(500,810)"
-    private const int PagerBlankNSrcX = 500; // spec: frontend_layout_tables.md §4.2
-    private const int PagerBlankNSrcY = 792; // spec: frontend_layout_tables.md §4.2
-    private const int PagerBlankHSrcX = 500; // spec: frontend_layout_tables.md §4.2
-    private const int PagerBlankHSrcY = 810; // spec: frontend_layout_tables.md §4.2
-    private const int PagerBlankPSrcY = 810; // spec: frontend_layout_tables.md §4.2 (P same as H)
+    // Per-repaint blank reset: N(500,792)/H(500,810)/P(500,810).
+    // spec: §4.3.4 "each repaint all 10 tabs reset to blank N(500,792)/H(500,810)/P(500,810)"
+    private const int PagerBlankNSrcX = 500; // spec: §4.3.4
+    private const int PagerBlankNSrcY = 792; // spec: §4.3.4
+    private const int PagerBlankHSrcX = 500; // spec: §4.3.4
+    private const int PagerBlankHSrcY = 810; // spec: §4.3.4
 
-    // Pager re-arm real-art source rects for strips 1, 2, 3 (loginwindow.dds A2).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2
-    //   "strip[1] → N(500,828)/H(500,846)"
-    private const int Pager1NSrcX = 500; // spec: frontend_layout_tables.md §4.2
-    private const int Pager1NSrcY = 828; // spec: frontend_layout_tables.md §4.2
-    private const int Pager1HSrcX = 500; // spec: frontend_layout_tables.md §4.2
+    // Real pager art for tabs 1, 2, 3 (zero-indexed). spec: §4.3.4 "pager re-arm geometry".
+    private const int Pager1NSrcX = 500;  // spec: §4.3.4 strip[1] N(500,828)
+    private const int Pager1NSrcY = 828;  // spec: §4.3.4
+    private const int Pager1HSrcX = 500;  // spec: §4.3.4 strip[1] H(500,846)
+    private const int Pager1HSrcY = 846;  // spec: §4.3.4
+    private const int Pager2NSrcX = 500;  // spec: §4.3.4 strip[2] N(500,864)
+    private const int Pager2NSrcY = 864;  // spec: §4.3.4
+    private const int Pager2HSrcX = 605;  // spec: §4.3.4 strip[2] H(605,985)
+    private const int Pager2HSrcY = 985;  // spec: §4.3.4
+    private const int Pager3NSrcX = 710;  // spec: §4.3.4 strip[3] N(710,985)
+    private const int Pager3NSrcY = 985;  // spec: §4.3.4
+    private const int Pager3HSrcX = 815;  // spec: §4.3.4 strip[3] H(815,985)
+    private const int Pager3HSrcY = 985;  // spec: §4.3.4
 
-    private const int Pager1HSrcY = 846; // spec: frontend_layout_tables.md §4.2
+    // -------------------------------------------------------------------------
+    // Selection highlight strip — A4 src(700,18) 46×168, drawn behind the matching plate.
+    // Highlight key: ServerId == NEW_SERVER_INDEX (from uiconfig.lua), NOT Lastserver.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 / §4.3.6
+    // -------------------------------------------------------------------------
 
-    //   "strip[2] → N(500,864)/H(605,985)"
-    private const int Pager2NSrcX = 500; // spec: frontend_layout_tables.md §4.2
-    private const int Pager2NSrcY = 864; // spec: frontend_layout_tables.md §4.2
-    private const int Pager2HSrcX = 605; // spec: frontend_layout_tables.md §4.2
+    private const int HighlightSrcX = 700;  // spec: §4.3.1
+    private const int HighlightSrcY = 18;   // spec: §4.3.1
+    private const int HighlightW    = 46;   // spec: §4.3.1
+    private const int HighlightH    = 168;  // spec: §4.3.1
 
-    private const int Pager2HSrcY = 985; // spec: frontend_layout_tables.md §4.2
+    // -------------------------------------------------------------------------
+    // Special-row sentinel: record ServerId (+0) == 100 → display-only, lights indicator quads.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 (ServerId==100 sentinel, NOT StatusCode)
+    // -------------------------------------------------------------------------
 
-    //   "strip[3] → N(710,985)/H(815,985)"
-    private const int Pager3NSrcX = 710; // spec: frontend_layout_tables.md §4.2
-    private const int Pager3NSrcY = 985; // spec: frontend_layout_tables.md §4.2
-    private const int Pager3HSrcX = 815; // spec: frontend_layout_tables.md §4.2
-    private const int Pager3HSrcY = 985; // spec: frontend_layout_tables.md §4.2
+    private const int SpecialRowServerId = 100; // spec: §4.3.5 / §4.1
 
-    // Population colour DWORDs (ARGB). spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4
-    // 0xFFFF0000 red / 0xFFED6806 orange / 0xFFFFFF00 yellow / 0xFFB5FF7A green (G2-confirmed, IDB 263bd994)
-    private static readonly Color PopColorRed = Color.Color8(255, 0, 0); // spec: §4.3.4 0xFFFF0000
-    private static readonly Color PopColorOrange = Color.Color8(237, 104, 6); // spec: §4.3.4 0xFFED6806
-    private static readonly Color PopColorYellow = Color.Color8(255, 255, 0); // spec: §4.3.4 0xFFFFFF00
-    private static readonly Color PopColorGreen = Color.Color8(181, 255, 122); // spec: §4.3.4 0xFFB5FF7A
+    // -------------------------------------------------------------------------
+    // Name / status / population resolvers.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 / §4.1
+    // -------------------------------------------------------------------------
+
+    // Name: ServerId 1..40 → msg 5000+ServerId; out-of-range → msg 5901.
+    // spec: §4.3.5 "5000+ServerId (flat, no multiplier)"
+    private const int ServerNameMsgBase = 5000; // spec: §4.1 / §4.3.5
+
+    // Status caption: 4029+StatusCode (StatusCode 0..3 → 4029..4032).
+    // spec: §4.3.5 "caption_id = 4029+StatusCode"
+    private const int StatusCaptionMsgBase = 4029; // spec: §4.1 / §4.3.5
+
+    // Population colour thresholds (StatusCode==0, OpenTimeFlag!=0 branch A).
+    // spec: §4.3.5 "Branch A — LoadCount > 1200 red / 801..1200 orange / 501..800 yellow / ≤500 green"
+    private const int PopThreshRed    = 1200; // spec: §4.3.5
+    private const int PopThreshOrange = 800;  // spec: §4.3.5 (> 800 → orange)
+    private const int PopThreshYellow = 500;  // spec: §4.3.5 (> 500 → yellow)
+
+    // Discrete-level branch B (OpenTimeFlag==0): exact equality.
+    // spec: §4.3.5 "Branch B — ==4 red / ==3 orange / ==2 yellow / else green"
+    private const int PopLevelRed    = 4; // spec: §4.3.5
+    private const int PopLevelOrange = 3; // spec: §4.3.5
+    private const int PopLevelYellow = 2; // spec: §4.3.5
+
+    // Population colour ARGB DWORDs. spec: §4.3.5 (G2-confirmed, IDB 263bd994)
+    private static readonly Color PopColorRed    = Color.Color8(255, 0,   0);   // 0xFFFF0000 spec: §4.3.5
+    private static readonly Color PopColorOrange = Color.Color8(237, 104, 6);   // 0xFFED6806 spec: §4.3.5
+    private static readonly Color PopColorYellow = Color.Color8(255, 255, 0);   // 0xFFFFFF00 spec: §4.3.5
+    private static readonly Color PopColorGreen  = Color.Color8(181, 255, 122); // 0xFFB5FF7A spec: §4.3.5
 
     // -------------------------------------------------------------------------
     // Runtime state
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
+    private readonly HudTextLibrary  _text;
+
+    // Per-repaint pager tab node references (built once, updated each repaint).
+    // Stored so we can re-skin and re-show/hide without a full rebuild.
+    private readonly TextureButton?[] _pagerTabs = new TextureButton?[PagerCount];
 
     // Three status-color indicator quads (A2 src(500,786) 60×39), hidden by default.
-    // Re-anchored around a status==100 special row when present.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3"
+    // Re-anchored around a ServerId==100 special row when present.
+    // spec: §4.3.1 "Status-indicator quad ×3 | A2 src(500,786) 60×39 | hidden"
     private readonly TextureRect?[] _statusIndicators = new TextureRect?[3];
-    private readonly HudTextLibrary _text;
 
-    // Sub-state 35 loading sentinel: true from sub-view creation until SetServers() is called.
-    // Distinguishes the "fetching" state (35 — list not yet received) from the error state (36 —
-    // received zero records → msg 4027). Without this flag the empty-list breadcrumb would be
-    // incorrectly printed while the server-list worker is still running.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
+    // Sub-state 35 loading sentinel: true until SetServers() is called.
     private bool _loading = true;
-    private int _page;
+    private int  _page;
     private IReadOnlyList<ServerListEntryView> _servers = [];
 
     // -------------------------------------------------------------------------
     // Construction
     // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Creates the server-select sub-view.
-    /// </summary>
+    /// <summary>Creates the server-select sub-view.</summary>
     public ServerSelectSubView(HudAtlasLibrary atlas, HudTextLibrary text)
     {
         _atlas = atlas;
-        _text = text;
+        _text  = text;
 
         SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Pass;
     }
 
     /// <summary>
-    ///     The <c>NEW_SERVER_INDEX</c> value sourced from <c>uiconfig.lua</c>, used to pre-highlight the
-    ///     default server plate. <c>-1</c> = no highlight (default when uiconfig.lua does not supply a value).
-    ///     <para>
-    ///         The authoritative list painter compares each record's <c>ServerId</c> against this value —
-    ///         <strong>not</strong> against the <c>Lastserver</c> registry value. <c>Lastserver</c> is
-    ///         <em>written</em> on commit (persisted to registry); it is not the highlight key in this painter.
-    ///     </para>
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 "Default-highlight key" (static-confirmed)
+    ///     The <c>NEW_SERVER_INDEX</c> value from <c>uiconfig.lua</c>, used to pre-highlight
+    ///     the default server plate.  <c>-1</c> = no highlight.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.6 "Default highlight key"
     /// </summary>
     public int NewServerIndex { get; set; } = -1;
 
     /// <summary>
-    ///     Alias retained for call-site compatibility. Forwards to <see cref="NewServerIndex" />.
-    ///     The authoritative highlight key is <see cref="NewServerIndex" /> (NEW_SERVER_INDEX from
-    ///     uiconfig.lua); Lastserver is only written on commit — it is not read back by this painter.
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 "Default-highlight key" (static-confirmed)
+    ///     Alias for call-site compatibility — forwards to <see cref="NewServerIndex" />.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.6
     /// </summary>
     public int LastServerId
     {
@@ -284,30 +298,29 @@ public sealed partial class ServerSelectSubView : Control
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     Populates the server list. Rebuilds the 2-plate-per-page layout to match the record count.
-    ///     Clears the loading flag (transitions from sub-state 35 fetching to 36/37 resolved).
-    ///     Must be called on the main thread (Control mutation).
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 (2 detail plates per page)
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3 (record-to-plate mapping)
-    ///     spec: Docs/RE/specs/login_flow.md §2.1 (sub-states 35→36→37)
+    ///     Populates the server list. Clears the loading flag and rebuilds the layout.
+    ///     Must be called on the main thread.
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 / §4.3.3
     /// </summary>
     public void SetServers(IReadOnlyList<ServerListEntryView> servers)
     {
-        _loading = false; // spec: §4 sub-state 36 — fetch result received; transition from 35.
+        _loading = false;
         _servers = servers;
-        _page = 0;
+        _page    = 0;
         RebuildLayout();
     }
 
     // -------------------------------------------------------------------------
-    // Layout builder
+    // Layout builder — full rebuild on SetServers / page change
     // -------------------------------------------------------------------------
 
     private void RebuildLayout()
     {
-        // Reset indicator refs before freeing (they may be children).
+        // Reset indicator refs before freeing children.
         for (var i = 0; i < _statusIndicators.Length; i++)
             _statusIndicators[i] = null;
+        for (var i = 0; i < _pagerTabs.Length; i++)
+            _pagerTabs[i] = null;
 
         for (var i = GetChildCount() - 1; i >= 0; i--)
         {
@@ -316,586 +329,504 @@ public sealed partial class ServerSelectSubView : Control
             child.QueueFree();
         }
 
-        BuildPanelFrame();
-        BuildPagers();
-        BuildFlagImage();
+        // Build in z-order (add-order = paint order).
+        // §4.3.1: title image, then per-record plate groups (highlight behind plate), then overlays.
+        BuildTitle();
         BuildStatusIndicators();
-
+        BuildPagerTabs();
         RebuildVisiblePage();
     }
 
-    // Build 3 status-color indicator quads, hidden by default.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3:
-    //   atlas A2 (loginwindow.dds) src(500,786) 60×39, hidden by default"
+    // -------------------------------------------------------------------------
+    // Title "서버선택" — A2 local(207,44) 70×17 src(0,980). §4.3.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 "Title | local(207,44) 70×17 A2 src(0,980)"
+    // -------------------------------------------------------------------------
+
+    private void BuildTitle()
+    {
+        var tex = _atlas.SliceByPath(
+            AtlasA2,
+            TitleSrcX, TitleSrcY,
+            LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H); // 70×17 spec: §4.3.1
+        if (tex is null) return;
+
+        AddChild(new TextureRect
+        {
+            Position   = LocalToCanvas(TitleLocalX, TitleLocalY), // local(207,44) → canvas(477,129)
+            Size       = new Vector2(LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H),
+            Texture    = tex,
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            MouseFilter = MouseFilterEnum.Ignore
+        });
+    }
+
+    // -------------------------------------------------------------------------
+    // Status-indicator quads ×3 — A2 src(500,786) 60×39, hidden. §4.3.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1
+    // -------------------------------------------------------------------------
+
     private void BuildStatusIndicators()
     {
-        var tex = _atlas.SliceByPath(AtlasB,
+        var tex = _atlas.SliceByPath(
+            AtlasA2,
             LoginLayout.StatusIndicatorSrcX, LoginLayout.StatusIndicatorSrcY,
-            LoginLayout.StatusIndicatorW, LoginLayout.StatusIndicatorH);
+            LoginLayout.StatusIndicatorW,    LoginLayout.StatusIndicatorH);
 
-        for (var i = 0; i < LoginLayout.StatusIndicatorCount; i++) // spec: §4 (×3)
+        for (var i = 0; i < LoginLayout.StatusIndicatorCount; i++) // spec: §4.3.1 ×3
         {
             var rect = new TextureRect
             {
-                Texture = tex,
-                Size = new Vector2(LoginLayout.StatusIndicatorW, LoginLayout.StatusIndicatorH),
+                Texture     = tex,
+                Size        = new Vector2(LoginLayout.StatusIndicatorW, LoginLayout.StatusIndicatorH),
                 StretchMode = TextureRect.StretchModeEnum.Scale,
                 MouseFilter = MouseFilterEnum.Ignore,
-                Visible = false // hidden by default; shown when status==100 row present
+                Visible     = false // hidden by default. spec: §4.3.1.
             };
             _statusIndicators[i] = rect;
             AddChild(rect);
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Page tabs (10 built hidden) — A2, local x=13+47·i, y=66, 47×18. §4.3.3.
+    // All 10 start hidden; RebuildVisiblePage re-skins and re-shows the valid ones.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3
+    // -------------------------------------------------------------------------
+
+    private void BuildPagerTabs()
+    {
+        for (var i = 0; i < PagerCount; i++)
+        {
+            var localX  = PagerBaseX + i * PagerStrideX; // spec: §4.3.3 "13+47·i"
+            var actionId = PagerActionBase + i;           // spec: §4.3.3 "115+i"
+
+            // Build-time face art (tab 0 default / tabs 1,2 alternate as per §4.3.3).
+            // These are overwritten each repaint; the initial face doesn't matter because
+            // all tabs are built HIDDEN. spec: §4.3.3.
+            var buildN = _atlas.SliceByPath(AtlasA2, PagerBuildNSrcX, PagerBuildNSrcY, PagerW, PagerH);
+            var buildH = _atlas.SliceByPath(AtlasA2, PagerBuildHSrcX, PagerBuildHSrcY, PagerW, PagerH);
+
+            var btn = new TextureButton
+            {
+                Position         = LocalToCanvas(localX, PagerLocalY),
+                Size             = new Vector2(PagerW, PagerH),
+                CustomMinimumSize = new Vector2(PagerW, PagerH),
+                IgnoreTextureSize = true,
+                StretchMode      = TextureButton.StretchModeEnum.Scale,
+                TextureNormal    = buildN,
+                TextureHover     = buildH,
+                TexturePressed   = buildH,
+                // RULE 3: built HIDDEN — only shown when the page is valid. spec: §4.3.3.
+                Visible = false
+            };
+
+            var captured = actionId;
+            btn.Pressed += () => OnPagerClicked(captured);
+            _pagerTabs[i] = btn;
+            AddChild(btn);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Per-page repaint — plates, pager visibility, indicators.
+    // -------------------------------------------------------------------------
+
     private void RebuildVisiblePage()
     {
         _page = ClampPage(_page);
 
-        // Hide all status indicators by default; re-anchored if status==100 found.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads … hidden by default"
+        // Hide all status indicators by default. spec: §4.3.1.
         foreach (var ind in _statusIndicators)
-            if (ind is not null)
-                ind.Visible = false;
+            if (ind is not null) ind.Visible = false;
+
+        // RULE 3 — Re-arm pager tabs. §4.3.3 / §4.3.4.
+        RearmPagerTabs();
 
         if (_loading)
         {
-            // Sub-state 35: server-list fetch worker is still running; no records yet.
-            // Render an empty list and wait for SetServers() to supply records.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 35 "fetching: show progress"
-            GD.Print(
-                "[ServerSelectSubView] state 35 — loading server list (fetch worker running, waiting for SetServers).");
+            // Sub-state 35: fetch worker running, records not yet received.
+            // spec: §4.3.7 state 35 "fetching — progress shown"
+            GD.Print("[ServerSelectSubView] state 35 — loading server list (waiting for SetServers).");
             return;
         }
 
         if (_servers.Count == 0)
         {
-            // Sub-state 36 error branch: worker returned zero records → msg 4027.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4 sub-state 36 "0 records → msg 4027"
-            var msg = _text.GetCaption(LoginLayout.MsgErrNoServers, string.Empty);
-            GD.Print($"[ServerSelectSubView] state 36 error: no servers. msg {LoginLayout.MsgErrNoServers}: '{msg}'");
+            // Sub-state 36 error: 0 records → LoginWindow.RaiseServerListError (msg 4027).
+            // spec: §4.3.7 / §2.2 state 36 "0 records → msg 4027"
+            GD.Print($"[ServerSelectSubView] state 36 error — no servers (msg {LoginLayout.MsgErrNoServers}).");
             return;
         }
 
-        // STABLE PLATE ORDER: page i shows raw records [2i] and [2i+1] from the record array.
-        // Fisher-Yates permutation runs on a SEPARATE parallel server-id vector only (effect: Lastserver);
-        // it NEVER reorders the displayed plates. Must NOT shuffle displayed rows.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3 (record-to-plate mapping, page cursor = 16·page)
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "on-screen plate order is STABLE"
-        var firstIndex = _page * 2; // record index = 2·page (byte offset = 16·page; 8 bytes/record)
-        var visibleCount = Math.Min(2, _servers.Count - firstIndex);
+        // STABLE PLATE ORDER: page i → records [2i] and [2i+1]. §4.3.6.
+        // spec: §4.3.6 "page i shows raw records [2·page] and [2·page+1] in order"
+        var firstIdx     = _page * 2;
+        var visibleCount = Math.Min(2, _servers.Count - firstIdx); // RULE 2 gated.
 
-        int[] plateX = [PlateBaseX0, PlateBaseX1];
-        int[] statusSrcX = [StatusIconSrcX0, StatusIconSrcX1];
-        int[] actions = [ActionPlate0, ActionPlate1];
+        int[]  plateX    = [PlateBaseX0, PlateBaseX1];
+        int[]  faceSrcX  = [PlateFaceSrcX0, PlateFaceSrcX1];
+        int[]  actions   = [ActionPlate0, ActionPlate1];
 
         for (var slot = 0; slot < visibleCount; slot++)
         {
-            var idx = firstIndex + slot;
+            var idx = firstIdx + slot;
 
-            // Default-selection highlight (drawn BEHIND the plate): only when this plate's ServerId
-            // matches NEW_SERVER_INDEX (uiconfig.lua-sourced). CORRECTION 2026-06-21: highlight key is
-            // NewServerIndex, not the Lastserver registry value. Lastserver is written on commit.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Default-selection highlight" (CORRECTION 2026-06-21).
+            // Selection highlight — drawn BEFORE the plate so it sits behind it. §4.3.6.
+            // Highlight key = NEW_SERVER_INDEX (NOT Lastserver). spec: §4.3.6.
             if (NewServerIndex >= 0 && _servers[idx].ServerId == NewServerIndex)
                 BuildSelectionHighlight(plateX[slot], PlateY);
 
-            BuildPlate(plateX[slot], PlateY, actions[slot], idx, statusSrcX[slot]);
+            BuildPlate(plateX[slot], PlateY, actions[slot], idx, faceSrcX[slot]);
 
-            // Re-anchor the 3 status indicators around the SERVER-ID==100 special row.
-            // The painter (0x5fcd09) tests record[+0] (server id), NOT record[+2] (status).
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.1/§4.2 "server_id == 100 gate" (CORRECTION 2026-06-20)
+            // ServerId==100 special-row: re-anchor indicator quads. spec: §4.3.5 / §4.1.
             if (_servers[idx].ServerId == SpecialRowServerId)
                 AnchorStatusIndicators(plateX[slot], PlateY);
         }
 
-        GD.Print(BuildPageBreadcrumb(firstIndex, visibleCount));
+        GD.Print(BuildPageBreadcrumb(firstIdx, visibleCount));
     }
 
-    // Re-anchor and show the 3 status-color indicator quads around the status==100 special row.
-    // anchorX/anchorY = the plate's dst-X/dst-Y fields (the plate-widget destination corner).
-    // quad 0 → (anchorX−30, anchorY−13)
-    // quad 1 → (anchorX+139, anchorY+13)
-    // quad 2 → (anchorX+139, anchorY+13)  (faithful duplicate — overlaps quad 1 exactly)
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "Quad anchoring"
-    private void AnchorStatusIndicators(int anchorX, int anchorY)
+    // -------------------------------------------------------------------------
+    // Pager tab re-arm — RULE 3.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3 / §4.3.4
+    // -------------------------------------------------------------------------
+
+    private void RearmPagerTabs()
     {
-        // Quad 0: (anchorX−30, anchorY−13). spec: frontend_layout_tables.md §4
-        if (_statusIndicators[0] is { } ind0)
+        if (_servers.Count == 0 || _loading)
         {
-            ind0.Position = PanelPoint(anchorX - 30, anchorY - 13);
-            ind0.Visible = true;
+            // No valid pages — ensure all tabs hidden.
+            foreach (var t in _pagerTabs)
+                if (t is not null) t.Visible = false;
+            return;
         }
 
-        // Quads 1 and 2: (anchorX+139, anchorY+13) — overlap exactly (faithful duplicate).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "quads 1 and 2 overlap exactly"
-        for (var i = 1; i <= 2; i++)
-            if (_statusIndicators[i] is { } ind)
-            {
-                ind.Position = PanelPoint(anchorX + 139, anchorY + 13);
-                ind.Visible = true;
-            }
-    }
+        // Total pages: ceil(serverCount / 2). spec: §4.3.6 "remaining-record guard".
+        var pageCount = (_servers.Count + 1) / 2;
 
-    // Default-selection highlight strip: atlas A4 src(700,18) 46×168, drawn BEHIND the highlighted plate.
-    // Highlight key = ServerId matches NEW_SERVER_INDEX (uiconfig.lua-sourced) — NOT Lastserver.
-    // Lastserver is written on commit; it is not the painter highlight key (static-confirmed, §4.3.5).
-    // Draw order: called BEFORE BuildPlate so AddChild inserts the strip BEFORE the plate node — Godot
-    // draws earlier siblings behind later ones, placing the highlight under the selected plate.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 "Default-highlight key" (static-confirmed)
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Selection highlight strip"
-    private void BuildSelectionHighlight(int x, int y)
-    {
-        Texture2D? strip = _atlas.SliceByPath(AtlasD, HighlightSrcX, HighlightSrcY, HighlightW, HighlightH);
-        if (strip is null)
-            return;
-
-        var hx = x + PlateStripOffsetX + PlateW - HighlightRightInset; // plate-right − 48, per the painter
-        var hy = y + (PlateH - HighlightH) / 2; // y kept on the plate; strip is shorter than the plate
-        AddChild(new TextureRect
+        for (var i = 0; i < PagerCount; i++)
         {
-            Position = PanelPoint(hx, hy),
-            Size = new Vector2(HighlightW, HighlightH),
-            Texture = strip,
-            StretchMode = TextureRect.StretchModeEnum.Scale,
-            MouseFilter = MouseFilterEnum.Ignore
-        });
+            var tab = _pagerTabs[i];
+            if (tab is null) continue;
+
+            // Step 1: reset to blank art. spec: §4.3.4 "all 10 tabs reset to blank N(500,792)/H(500,810)/P(500,810)".
+            var blankN = _atlas.SliceByPath(AtlasA2, PagerBlankNSrcX, PagerBlankNSrcY, PagerW, PagerH);
+            var blankH = _atlas.SliceByPath(AtlasA2, PagerBlankHSrcX, PagerBlankHSrcY, PagerW, PagerH);
+            tab.TextureNormal  = blankN;
+            tab.TextureHover   = blankH;
+            tab.TexturePressed = blankH;
+
+            // Step 2: give real art to tabs 1, 2, 3. spec: §4.3.4 "three of them get real pager art".
+            switch (i)
+            {
+                case 1:
+                    // strip[1] → N(500,828)/H(500,846). spec: §4.3.4.
+                    tab.TextureNormal  = _atlas.SliceByPath(AtlasA2, Pager1NSrcX, Pager1NSrcY, PagerW, PagerH);
+                    tab.TextureHover   = _atlas.SliceByPath(AtlasA2, Pager1HSrcX, Pager1HSrcY, PagerW, PagerH);
+                    tab.TexturePressed = tab.TextureHover;
+                    break;
+                case 2:
+                    // strip[2] → N(500,864)/H(605,985). spec: §4.3.4.
+                    tab.TextureNormal  = _atlas.SliceByPath(AtlasA2, Pager2NSrcX, Pager2NSrcY, PagerW, PagerH);
+                    tab.TextureHover   = _atlas.SliceByPath(AtlasA2, Pager2HSrcX, Pager2HSrcY, PagerW, PagerH);
+                    tab.TexturePressed = tab.TextureHover;
+                    break;
+                case 3:
+                    // strip[3] → N(710,985)/H(815,985). spec: §4.3.4.
+                    tab.TextureNormal  = _atlas.SliceByPath(AtlasA2, Pager3NSrcX, Pager3NSrcY, PagerW, PagerH);
+                    tab.TextureHover   = _atlas.SliceByPath(AtlasA2, Pager3HSrcX, Pager3HSrcY, PagerW, PagerH);
+                    tab.TexturePressed = tab.TextureHover;
+                    break;
+            }
+
+            // Step 3: RULE 3 — show tab only when page i exists. spec: §4.3.3
+            // "only strips for valid pages are made visible; the remainder stay hidden"
+            tab.Visible = i < pageCount;
+        }
     }
 
-    private void BuildPlate(int x, int y, int actionId, int serverIndex, int statusSrcX)
+    // -------------------------------------------------------------------------
+    // Detail plate builder — 5 widgets per slot, insertion = paint order. §4.3.2.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2
+    // -------------------------------------------------------------------------
+
+    private void BuildPlate(int x, int y, int actionId, int serverIndex, int faceSrcX)
     {
         var e = _servers[serverIndex];
 
-        // Per-plate build/draw order is the binary's (CONFIRMED, element-level pass 2026-06-19):
-        //   (1) parchment select BUTTON → (2) NAME label → (3) calligraphy FACE → (4) STATUS caption →
-        //   (5) COUNT label. Insertion order IS paint order, so the FACE (added 3rd) draws ON TOP of the
-        //   parchment button (added 1st) — that is what makes the scroll calligraphy visible (the prior
-        //   order drew the opaque parchment over the face, hiding it → empty scroll).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 (plate widget inventory — G2-confirmed, IDB 263bd994)
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 (selectable gate)
+        // Insertion / paint order (§4.3.2):
+        //   (1) select button (parchment) → (2) name label → (3) face image → (4) status caption → (5) spare label.
+        // The face is drawn AFTER / ON TOP OF the button — that is the z-order that makes the
+        // baked calligraphy visible (opaque parchment would hide it if inserted later). §4.3.2.
 
-        // (1) Parchment select button (clickable). Drawn FIRST = bottom of the plate stack.
-        // Paint-time selectable gate (§4.3.5 static-confirmed): the paint routine enables plate
-        // interactivity only when StatusCode==0. When StatusCode!=0 the button is rendered as Disabled.
-        // The click handler ALSO enforces LoadCount<2400 (commit sub-gate, "to-confirm" in §4.3.5 —
-        // applied via entry.IsSelectable which checks both gates). See OnPlateClicked.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5
-        Texture2D? normal = _atlas.SliceByPath(AtlasD, PlateSrcX, PlateSrcY, PlateW, PlateH);
-        Texture2D? hover = _atlas.SliceByPath(AtlasD, PlateHoverSrcX, PlateHoverSrcY, PlateW, PlateH);
-
-        var btn = new TextureButton
+        // (1) Select button (parchment) — clickable; paint-time gate StatusCode==0. §4.3.5.
+        // spec: §4.3.2 "Select button (parchment) (x−6, 97, 202×372) A4 N(9,6)/H(220,6)/P(220,6)"
+        var btnN = _atlas.SliceByPath(AtlasA4, PlateNSrcX, PlateNSrcY, PlateSelectW, PlateSelectH);
+        var btnH = _atlas.SliceByPath(AtlasA4, PlateHSrcX, PlateHSrcY, PlateSelectW, PlateSelectH);
+        var btn  = new TextureButton
         {
-            Position = PanelPoint(x + PlateStripOffsetX, y),
-            Size = new Vector2(PlateW, PlateH),
-            CustomMinimumSize = new Vector2(PlateW, PlateH),
+            Position          = LocalToCanvas(x + PlateSelectOffX, y),
+            Size              = new Vector2(PlateSelectW, PlateSelectH),
+            CustomMinimumSize = new Vector2(PlateSelectW, PlateSelectH),
             IgnoreTextureSize = true,
-            StretchMode = TextureButton.StretchModeEnum.Scale,
-            TextureNormal = normal,
-            TextureHover = hover,
-            TexturePressed = hover,
-            TextureDisabled = normal,
-            // Paint-time gate: StatusCode!=0 → Disabled (non-interactive appearance).
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 "StatusCode==0 toggles plate interactivity"
+            StretchMode       = TextureButton.StretchModeEnum.Scale,
+            TextureNormal     = btnN,
+            TextureHover      = btnH,
+            TexturePressed    = btnH,
+            TextureDisabled   = btnN,
+            // Paint-time gate: StatusCode!=0 → Disabled (non-interactive). spec: §4.3.5.
             Disabled = e.StatusCode != 0
         };
         btn.Pressed += () => OnPlateClicked(actionId);
         AddChild(btn);
 
-        // (2) NAME label (behind the face).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 "Name label (30+233·i, 390, 174×21)"
-        AddPlateName(x, e);
+        // (2) Name label: font slot 0, center-aligned, msg 5000+ServerId. §4.3.2.
+        // spec: §4.3.2 "Name label (x, 390, 174×21) font slot 0 center-aligned"
+        AddRowLabel(ResolveServerName(e), x, NameLabelLocalY, NameLabelW, NameLabelH, Colors.White, fontSlot: 0);
 
-        // (3) Calligraphy FACE image (100×372 per-column quad, src(448+124·i, 6)), drawn ON TOP of the
-        // parchment button (z-order CONFIRMED 2026-06-19 — face inserted after the button).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 "Plate face image (30+233·i+47, 97, 100×372)"
-        Texture2D? face = _atlas.SliceByPath(AtlasD, statusSrcX, StatusIconSrcY, StatusIconW, StatusIconH);
+        // (3) Plate-face image: (x+47, 97, 100×372) A4 src(448+124·i, 6). §4.3.2.
+        // Drawn AFTER the button — ON TOP in paint order (face shows through). spec: §4.3.2 z-order.
+        var face = _atlas.SliceByPath(AtlasA4, faceSrcX, PlateFaceSrcY, PlateFaceW, PlateFaceH);
         if (face is not null)
             AddChild(new TextureRect
             {
-                Position = PanelPoint(x + StatusIconOffsetX, y),
-                Size = new Vector2(StatusIconW, StatusIconH),
-                Texture = face,
+                Position    = LocalToCanvas(x + PlateFaceOffX, y),
+                Size        = new Vector2(PlateFaceW, PlateFaceH),
+                Texture     = face,
                 StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore // decoration: never blocks button hit. spec §4.3.2.
+                MouseFilter = MouseFilterEnum.Ignore // decoration only — never blocks input. spec: §4.3.2.
             });
 
-        // (4) STATUS caption (§4.3.2 "Status/load caption", y=410, font slot 4, coloured per §4.3.4).
-        // (5) SPARE label (§4.3.2 "Spare label", y=430, EMPTY STRING).
-        AddPlateStatus(x, e);
-        AddPlateCount(x);
+        // (4) Status/load caption: font slot 4, center, coloured per §4.3.5. §4.3.2.
+        // spec: §4.3.2 "Status/load caption (x, 410, 174×20) font slot 4"
+        var statusText  = ResolveStatusCaption(e, out var statusColor);
+        AddRowLabel(statusText, x, StatusLabelLocalY, StatusLabelW, StatusLabelH, statusColor, fontSlot: 4);
+
+        // (5) Spare label: empty string — never drawn. §4.3.2.
+        // spec: §4.3.2 "Spare label (x, 430, 174×20) painter sets EMPTY STRING"
+        AddRowLabel(string.Empty, x, SpareLabelLocalY, StatusLabelW, StatusLabelH, Colors.White, fontSlot: 0);
     }
 
-    private void OnPlateClicked(int actionId)
+    // -------------------------------------------------------------------------
+    // Selection highlight strip — A4 src(700,18) 46×168, behind the plate. §4.3.1 / §4.3.6.
+    // Called BEFORE BuildPlate so the strip is inserted earlier (behind in paint order).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 "Selection-highlight strip"
+    // -------------------------------------------------------------------------
+
+    private void BuildSelectionHighlight(int plateLocalX, int plateLocalY)
     {
-        // Record index: (action−400) + 2·page. spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3
-        var idx = 2 * _page + (actionId - ActionPlate0);
-        if (idx >= 0 && idx < _servers.Count)
-        {
-            var entry = _servers[idx];
+        var tex = _atlas.SliceByPath(AtlasA4, HighlightSrcX, HighlightSrcY, HighlightW, HighlightH);
+        if (tex is null) return;
 
-            // Click-handler commit guard (§4.3.5): StatusCode==0 AND LoadCount<2400.
-            // The paint-time gate (Disabled=StatusCode!=0) already prevents most non-selectable clicks,
-            // but the spec says to apply BOTH gates in the handler as well ("to-confirm" sub-gate).
-            // ServerListEntryView.IsSelectable encodes StatusCode==0 && Load<2400.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.5 (selectable gate, commit guard)
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 "Commit guard"; login_flow.md §2.1.
-            if (!entry.IsSelectable)
-            {
-                GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
-                         $"unavailable (status={entry.StatusCode}, load={entry.Load}). " +
-                         "spec: frontend_layout_tables.md §4.3.5 commit guard: StatusCode==0 && LoadCount<2400.");
-                return;
-            }
-
-            // Intent only — passive view; LoginWindow lane wires SelectServerAsync → connect.
-            EmitSignal(SignalName.ServerSelected, entry.ServerId);
-        }
-    }
-
-    private void BuildPagers()
-    {
-        // §4.3.1 NAME-STRIP TABS: 10 buttons (115+i), localX=13+47·i, localY=66, 47×18, A2.
-        // §4.3.6 PAGER: 3 glyph controls repositioned each repaint using actions in 115..124.
-        // Per-repaint re-arm: all 10 strips reset to blank N(500,792)/H(500,810)/P(500,810);
-        // then strip[1]→N(500,828)/H(500,846), strip[2]→N(500,864)/H(605,985), strip[3]→N(710,985)/H(815,985).
-        // Strips with real art are shown; blank strips stay hidden.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.1 (name-strip tabs, G2-confirmed, IDB 263bd994)
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.6 (pager, no record-count text)
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 (pager re-arm geometry, CONFIRMED binary-exact)
-        for (var i = 0; i < PagerCount; i++)
-        {
-            var x = 13 + i * 47; // spec: frontend_layout_tables.md §4.3.1 "localX = 13+47·i" (G2-confirmed)
-            var actionId = PagerActionBase + i;
-
-            // All 10 strips start at the blank atlas region. spec: §4.2 "all 10 reset to blank".
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 N(500,792)/H(500,810)/P(500,810)
-            Texture2D? texN = _atlas.SliceByPath(AtlasB, PagerBlankNSrcX, PagerBlankNSrcY, PagerW, PagerH);
-            Texture2D? texH = _atlas.SliceByPath(AtlasB, PagerBlankHSrcX, PagerBlankHSrcY, PagerW, PagerH);
-            Texture2D? texP = _atlas.SliceByPath(AtlasB, PagerBlankHSrcX, PagerBlankPSrcY, PagerW, PagerH);
-            var hasRealArt = false;
-
-            // Three strips get real art after the blank reset. spec: §4.2.
-            switch (i)
-            {
-                case 1:
-                    // strip[1] → N(500,828)/H(500,846). spec: frontend_layout_tables.md §4.2
-                    texN = _atlas.SliceByPath(AtlasB, Pager1NSrcX, Pager1NSrcY, PagerW, PagerH);
-                    texH = _atlas.SliceByPath(AtlasB, Pager1HSrcX, Pager1HSrcY, PagerW, PagerH);
-                    texP = texH;
-                    hasRealArt = true;
-                    break;
-                case 2:
-                    // strip[2] → N(500,864)/H(605,985). spec: frontend_layout_tables.md §4.2
-                    texN = _atlas.SliceByPath(AtlasB, Pager2NSrcX, Pager2NSrcY, PagerW, PagerH);
-                    texH = _atlas.SliceByPath(AtlasB, Pager2HSrcX, Pager2HSrcY, PagerW, PagerH);
-                    texP = texH;
-                    hasRealArt = true;
-                    break;
-                case 3:
-                    // strip[3] → N(710,985)/H(815,985). spec: frontend_layout_tables.md §4.2
-                    texN = _atlas.SliceByPath(AtlasB, Pager3NSrcX, Pager3NSrcY, PagerW, PagerH);
-                    texH = _atlas.SliceByPath(AtlasB, Pager3HSrcX, Pager3HSrcY, PagerW, PagerH);
-                    texP = texH;
-                    hasRealArt = true;
-                    break;
-            }
-
-            var btn = new TextureButton
-            {
-                Position = PanelPoint(x, PagerY),
-                Size = new Vector2(PagerW, PagerH),
-                CustomMinimumSize = new Vector2(PagerW, PagerH),
-                IgnoreTextureSize = true,
-                StretchMode = TextureButton.StretchModeEnum.Scale,
-                TextureNormal = texN,
-                TextureHover = texH,
-                TexturePressed = texP,
-                // Strips with real art are shown; blank-UV strips stay hidden (the invisible hit-strip).
-                // spec: Docs/RE/specs/frontend_layout_tables.md §4.2 / §4 "hidden page-jump strip"
-                Visible = hasRealArt
-            };
-
-            var capturedAction = actionId;
-            btn.Pressed += () => OnPagerClicked(capturedAction);
-            AddChild(btn);
-        }
-    }
-
-    private void BuildPanelFrame()
-    {
-        // BACKDROP LAYER 1 (drawn first): full-screen A2 (loginwindow.dds) dst(0,110,1024,490) src(0,0).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4
-        //   "Backdrop is TWO layers: a full-screen A2 image at (0,110) 1024×490, source (0,0), drawn FIRST"
-        // Absolute canvas coords — not panel-relative. spec §4.
-        Texture2D? backdrop = _atlas.SliceByPath(AtlasB, 0, 0, BackdropW, BackdropH); // src(0,0)
-        if (backdrop is not null)
-            AddChild(new TextureRect
-            {
-                Position = new Vector2(BackdropX, BackdropY), // abs (0,110) spec §4
-                Size = new Vector2(BackdropW, BackdropH), // 1024×490 spec §4
-                Texture = backdrop,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore
-            });
-
-        // BACKDROP LAYER 2: list-box scroll panel (270,85,483,490) src(0,490). spec §4.
-        Texture2D? frame = _atlas.SliceByPath(AtlasB,
-            LoginLayout.ServerListbox.SrcX, LoginLayout.ServerListbox.SrcY,
-            LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H);
-        if (frame is not null)
-            AddChild(new TextureRect
-            {
-                Position = PanelPoint(0, 0),
-                Size = new Vector2(LoginLayout.ServerListbox.W, LoginLayout.ServerListbox.H),
-                Texture = frame,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore
-            });
-
-        // Title "서버선택": baked A2 image dst(207,44) 70×17 src(0,980). spec §4.
-        // "Title '서버선택' = a baked atlas image (not a msg string): atlas A2, dst(207,44) 70×17, source(0,980)"
-        // Absolute canvas coords — not panel-relative. spec §4.
-        Texture2D? title = _atlas.SliceByPath(AtlasB, TitleSrcX, TitleSrcY,
-            LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H);
-        if (title is not null)
-            AddChild(new TextureRect
-            {
-                Position = new Vector2(TitleAbsX, TitleAbsY), // abs (207,44) spec §4
-                Size = new Vector2(LoginLayout.ListboxHeader.W, LoginLayout.ListboxHeader.H),
-                Texture = title,
-                StretchMode = TextureRect.StretchModeEnum.Scale,
-                MouseFilter = MouseFilterEnum.Ignore
-            });
-    }
-
-    private void BuildFlagImage()
-    {
-        // EVENT badge: baked A1 (login_slice1.dds) dst(407,−3) 210×70 src(743,398).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4
-        //   "EVENT badge = a baked image: atlas A1, dst(407,−3) 210×70, source(743,398)"
-        // Uses LoginLayout.QuitDecoPlate which captures exactly this rect (A1 src 743,398 210×70 dst 407,−3).
-        // Absolute canvas coords — not panel-relative. spec §4.
-        var r = LoginLayout.QuitDecoPlate; // A1 dst(407,-3,210,70) src(743,398). spec §4.
-        Texture2D? tex = _atlas.SliceByPath(AtlasA1, r.SrcX, r.SrcY, r.W, r.H);
-        if (tex is null)
-            return;
-
+        // The highlight positions behind the plate. Use the parchment button origin for alignment.
+        // Centre the highlight strip vertically on the plate. spec: §4.3.1.
+        var hx = plateLocalX + PlateSelectOffX; // left-align with parchment button
+        var hy = plateLocalY + (PlateSelectH - HighlightH) / 2; // vertical centre on plate
         AddChild(new TextureRect
         {
-            Position = new Vector2(r.X, r.Y), // abs (407,-3) spec §4
-            Size = new Vector2(r.W, r.H), // 210×70 spec §4
-            Texture = tex,
+            Position    = LocalToCanvas(hx, hy),
+            Size        = new Vector2(HighlightW, HighlightH),
+            Texture     = tex,
             StretchMode = TextureRect.StretchModeEnum.Scale,
             MouseFilter = MouseFilterEnum.Ignore
         });
     }
 
-    private void OnPagerClicked(int actionId)
+    // -------------------------------------------------------------------------
+    // Status indicator re-anchor for ServerId==100 special row. §4.3.5 / §4.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 / §4.3.5
+    // anchorX/Y = the plate's local dst-X/dst-Y (the select-button origin).
+    // quad 0 → (anchorX−30, anchorY−13); quads 1 and 2 → (anchorX+139, anchorY+13).
+    // -------------------------------------------------------------------------
+
+    private void AnchorStatusIndicators(int anchorX, int anchorY)
     {
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 "page = action − 115 (absolute, not relative)"
-        _page = ClampPage(actionId - PagerActionBase);
-        GD.Print(
-            $"[ServerSelectSubView] Pager action {actionId} -> page {_page} (re-page only). spec: frontend_layout_tables.md §4.");
-        RebuildLayout();
+        // Quad 0. spec: §4.1 "(anchorX−30, anchorY−13)".
+        if (_statusIndicators[0] is { } ind0)
+        {
+            ind0.Position = LocalToCanvas(anchorX - 30, anchorY - 13);
+            ind0.Visible  = true;
+        }
+
+        // Quads 1 and 2 — overlap exactly (faithful duplicate). spec: §4.1 "(anchorX+139, anchorY+13)".
+        for (var i = 1; i <= 2; i++)
+            if (_statusIndicators[i] is { } ind)
+            {
+                ind.Position = LocalToCanvas(anchorX + 139, anchorY + 13);
+                ind.Visible  = true;
+            }
     }
 
-    // NAME label @ (30+233·i, 390, 174×21): font slot 0, center-aligned (align mode 2).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 "Name label (30+233·i, 390) font slot 0 center-aligned"
-    private void AddPlateName(int plateX, ServerListEntryView e)
+    // -------------------------------------------------------------------------
+    // Label helper — adds a row label as a child at LocalToCanvas(x, y).
+    // -------------------------------------------------------------------------
+
+    private void AddRowLabel(string text, int localX, int localY, int w, int h, Color color,
+        int fontSlot = 0, HorizontalAlignment align = HorizontalAlignment.Center)
     {
-        var name = ResolveServerName(e);
-        AddRowLabel(name, plateX, RowLabelY0, RowLabelH0, Colors.White);
+        var lbl = new Label
+        {
+            Text               = text,
+            Position           = LocalToCanvas(localX, localY),
+            Size               = new Vector2(w, h),
+            HorizontalAlignment = align,
+            VerticalAlignment  = VerticalAlignment.Center,
+            AutowrapMode       = TextServer.AutowrapMode.Off,
+            MouseFilter        = MouseFilterEnum.Ignore
+        };
+        lbl.AddThemeColorOverride("font_color", color);
+        HudFont.ApplyToLabel(lbl, fontSlot);
+        AddChild(lbl);
     }
 
-    // STATUS/LOAD CAPTION label @ (30+233·i, 410, 174×20): font slot 4, center-aligned, coloured per §4.3.4.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 "Status/load caption (30+233·i, 410) font slot 4"
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 (colour ladder — G2-confirmed, IDB 263bd994)
-    private void AddPlateStatus(int plateX, ServerListEntryView e)
+    // -------------------------------------------------------------------------
+    // Name resolver — §4.3.5 / §4.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 / §4.3.5
+    // ServerId 1..40 → msg 5000+ServerId; out-of-range → msg 5901 fallback.
+    // -------------------------------------------------------------------------
+
+    private string ResolveServerName(ServerListEntryView e)
     {
-        var statusCaption = ResolveStatusCaption(e, out var statusColor);
-        AddRowLabel(statusCaption, plateX, RowLabelY1, RowLabelH, statusColor, 4);
+        if (e.ServerId is >= 1 and <= 40)
+            return _text.GetCaption(ServerNameMsgBase + e.ServerId, string.Empty); // 5001..5040 spec: §4.1
+
+        // Out-of-range → fallback 5901. spec: §4.1 / §4.3.5.
+        var tmpl = _text.GetCaption(LoginLayout.MsgServerUnknown, string.Empty);
+        return FormatCaption(tmpl, e.ServerId, string.Empty);
     }
 
-    // SPARE label @ (30+233·i, 430, 174×20): EMPTY STRING — not drawn.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.2 "Spare label (30+233·i, 430) — empty string"
-    // The earlier "%4d / %4d population count" at +430 was dead-debug, never drawn (superseded 2026-06-19).
-    private void AddPlateCount(int plateX)
-    {
-        AddRowLabel(string.Empty, plateX, RowLabelY2, RowLabelH, Colors.White);
-    }
+    // -------------------------------------------------------------------------
+    // Status caption + colour resolver — §4.3.5 / §4.1.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 / §4.3.5
+    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Resolves the status-caption text and colour for the y=410 slot-4 label (§4.3.2).
-    ///     Implements the two colour branches from §4.3.4 and the status-3 scheduled-open path.
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 (colour ladder — G2-confirmed, IDB 263bd994)
-    ///     spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (status caption resolver 4029+StatusCode)
-    /// </summary>
     private string ResolveStatusCaption(ServerListEntryView e, out Color color)
     {
-        // OpenTimeFlag (+6): nonzero → LoadCount is a raw threshold count (Branch A);
-        // zero → LoadCount is a discrete level 4/3/2 (Branch B).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3 "OpenTimeFlag" / §4.3.4 "Discrete-level branch"
-        var loadValid = e.OpenTime != 0; // e.OpenTime = wire field +6 (OpenTimeFlag)
+        var loadValid = e.OpenTime != 0; // +6 != 0 → Branch A (threshold). spec: §4.3.5.
 
         if (e.StatusCode == 0)
         {
-            // Two colour ladders selected by OpenTimeFlag (+6).
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4
             if (loadValid)
             {
-                // Branch A: threshold ladder (LoadCount is raw count, strict greater-than).
-                // Boundaries: >1200 red / 801..1200 orange / 501..800 yellow / ≤500 green.
-                // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 (threshold branch, G2-confirmed)
-                if (e.Load > PopRedThreshold) // LoadCount > 1200 → red 0xFFFF0000
-                {
-                    color = PopColorRed;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
-                }
-
-                if (e.Load > PopOrangeThreshold) // LoadCount 801..1200 → orange 0xFFED6806
-                {
-                    color = PopColorOrange;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
-                }
-
-                if (e.Load > PopYellowThreshold) // LoadCount 501..800 → yellow 0xFFFFFF00
-                {
-                    color = PopColorYellow;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
-                }
+                // Branch A: raw threshold ladder. spec: §4.3.5.
+                if (e.Load > PopThreshRed)    { color = PopColorRed;    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed,    string.Empty); }
+                if (e.Load > PopThreshOrange) { color = PopColorOrange; return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty); }
+                if (e.Load > PopThreshYellow) { color = PopColorYellow; return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty); }
             }
             else
             {
-                // Branch B: discrete-level ladder (LoadCount is exact equality, OpenTimeFlag==0).
-                // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 "Discrete-level branch"
-                if (e.Load == PopLevelRed) // == 4 → red 0xFFFF0000
-                {
-                    color = PopColorRed;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed, string.Empty);
-                }
-
-                if (e.Load == PopLevelOrange) // == 3 → orange 0xFFED6806
-                {
-                    color = PopColorOrange;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty);
-                }
-
-                if (e.Load == PopLevelYellow) // == 2 → yellow 0xFFFFFF00
-                {
-                    color = PopColorYellow;
-                    return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty);
-                }
+                // Branch B: discrete equality. spec: §4.3.5.
+                if (e.Load == PopLevelRed)    { color = PopColorRed;    return _text.GetCaption((int)LoginLayout.MsgServerLoadRed,    string.Empty); }
+                if (e.Load == PopLevelOrange) { color = PopColorOrange; return _text.GetCaption((int)LoginLayout.MsgServerLoadOrange, string.Empty); }
+                if (e.Load == PopLevelYellow) { color = PopColorYellow; return _text.GetCaption((int)LoginLayout.MsgServerLoadYellow, string.Empty); }
             }
 
-            // Default (≤500 raw or discrete 0/1/5+) → status caption msg(4029+StatusCode), green 0xFFB5FF7A.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.4 "≤500 → 4029 (status caption reused)"
+            // Default (≤500 or discrete 0/1) → green, status caption 4029. spec: §4.3.5.
             color = PopColorGreen;
-            return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // 4029+StatusCode
+            return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // 4029+0=4029
         }
 
         if (e.StatusCode == 3)
         {
-            // Scheduled-open branch: LoadCount==24 → msg 6004; else msg 6005 HH:MM.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 "StatusCode==3: msg 6004 / 6005"
+            // Scheduled-open: LoadCount==24 → msg 6004; else msg 6005 HH:MM. spec: §4.1.
             color = Colors.White;
             if (e.Load == 24)
-                return _text.GetCaption((int)LoginLayout.MsgServerPreparing, string.Empty);
+                return _text.GetCaption((int)LoginLayout.MsgServerPreparing, string.Empty); // msg 6004
 
-            // msg 6005 snprintf'd as HH:MM: Load(+4)=hour, OpenTime(+6)=minute.
-            // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 "snprintf(msg 6005, …) HH:MM from +4/+6"
-            var template = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
-            return FormatScheduledTime(template, e.Load, e.OpenTime);
+            var tmpl = _text.GetCaption((int)LoginLayout.MsgServerClockFormat, "{0:00}:{1:00}");
+            return FormatScheduledTime(tmpl, e.Load, e.OpenTime);
         }
 
-        // Other StatusCodes → caption msg(4029+StatusCode), no colour override.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 "caption_id = 4029+StatusCode, StatusCode 0..3"
+        // Other StatusCodes: caption 4029+StatusCode, no colour override. spec: §4.1.
         color = Colors.White;
-        return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty); // 4029+StatusCode
+        return _text.GetCaption(StatusCaptionMsgBase + e.StatusCode, string.Empty);
     }
 
-    private void AddRowLabel(string text, int x, int y, int h, Color color,
-        int fontSlot = 0, HorizontalAlignment align = HorizontalAlignment.Center)
+    // -------------------------------------------------------------------------
+    // Click handlers
+    // -------------------------------------------------------------------------
+
+    private void OnPlateClicked(int actionId)
     {
-        var label = new Label
+        // Record index: (action−400) + 2·page. spec: §4.3.2 / §4.3.6.
+        var idx = 2 * _page + (actionId - ActionPlate0);
+        if (idx < 0 || idx >= _servers.Count) return;
+
+        var entry = _servers[idx];
+
+        // Click-handler commit guard: StatusCode==0 && LoadCount<2400. spec: §4.3.6.
+        if (!entry.IsSelectable)
         {
-            Text = text,
-            Position = PanelPoint(x, y),
-            Size = new Vector2(RowLabelW, h),
-            HorizontalAlignment = align,
-            VerticalAlignment = VerticalAlignment.Center,
-            AutowrapMode = TextServer.AutowrapMode.Off,
-            MouseFilter = MouseFilterEnum.Ignore
-        };
-        label.AddThemeColorOverride("font_color", color);
-        // Apply font slot override (slot 4 = DotumChe 12 w800 for population label).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4 (slot 4 = DotumChe 12 w800)
-        HudFont.ApplyToLabel(label, fontSlot);
-        AddChild(label);
+            GD.Print($"[ServerSelectSubView] Plate action {actionId} ignored: server {entry.ServerId} " +
+                     $"unavailable (status={entry.StatusCode}, load={entry.Load}). " +
+                     "spec: §4.3.6 commit guard StatusCode==0 && LoadCount<2400.");
+            return;
+        }
+
+        EmitSignal(SignalName.ServerSelected, entry.ServerId);
     }
 
-    private int ClampPage(int requestedPage)
+    private void OnPagerClicked(int actionId)
+    {
+        // page = action − 115 (absolute, not relative). spec: §4.3.3 / §4.3.4.
+        _page = ClampPage(actionId - PagerActionBase);
+        GD.Print($"[ServerSelectSubView] Pager action {actionId} → page {_page}. spec: §4.3.3.");
+        RebuildLayout();
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    private int ClampPage(int requested)
     {
         var pageCount = Math.Max(1, (_servers.Count + 1) / 2);
-        return Math.Clamp(requestedPage, 0, pageCount - 1);
+        return Math.Clamp(requested, 0, pageCount - 1);
     }
 
-    private string BuildPageBreadcrumb(int firstIndex, int visibleCount)
+    /// <summary>
+    ///     Converts content-panel local coordinates to canvas (absolute) coordinates.
+    ///     All positions in §4.3 are LOCAL to the content panel at canvas (270,85).
+    ///     spec: Docs/RE/specs/frontend_layout_tables.md §0a.2 / §0a.4 / §4.3.1
+    /// </summary>
+    private static Vector2 LocalToCanvas(int localX, int localY)
+        => new(PanelX + localX, PanelY + localY);
+
+    private string BuildPageBreadcrumb(int firstIdx, int visibleCount)
     {
-        var plate0 = DescribePlate(0, firstIndex);
-        var plate1 = visibleCount > 1 ? DescribePlate(1, firstIndex + 1) : "plate1=<none>";
-        return $"[ServerSelectSubView] page {_page}: {plate0}, {plate1}";
+        var sb = $"[ServerSelectSubView] page {_page}: ";
+        for (var slot = 0; slot < visibleCount; slot++)
+        {
+            var e    = _servers[firstIdx + slot];
+            var name = ResolveServerName(e);
+            sb += $"plate{slot}=srv{e.ServerId}'{name}' load={e.Load} sel={e.IsSelectable}; ";
+        }
+
+        if (visibleCount < 2) sb += "plate1=<none>;";
+        return sb.TrimEnd();
     }
 
-    private string DescribePlate(int plateSlot, int serverIndex)
-    {
-        var e = _servers[serverIndex];
-        var name = ResolveServerName(e);
-        return $"plate{plateSlot}=server {e.ServerId} '{name}' load {e.Load} selectable={e.IsSelectable}";
-    }
+    // -------------------------------------------------------------------------
+    // Status_code==3 HH:MM formatter. spec: §4.1 "msg 6005 snprintf".
+    // -------------------------------------------------------------------------
 
-    private static Vector2 PanelPoint(int x, int y)
-    {
-        return new Vector2(PanelX + x, PanelY + y);
-    }
-
-    private string ResolveServerName(ServerListEntryView e)
-    {
-        // Name resolver: ServerId 1..40 → name_id = 5000+ServerId (msg bank 5001..5040, flat, no multiplier).
-        // Out-of-range ServerId → fallback caption 5901 ("unknown server #n" template).
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.3.3 "Server name resolution"
-        // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 "Name resolver" (DROP 5301 base — superseded)
-        if (e.ServerId is >= 1 and <= 40)
-            return _text.GetCaption(ServerNameCaptionBase + e.ServerId, string.Empty);
-
-        // Out-of-range → fallback 5901. spec: §4.3.3 / §4.1
-        var template = _text.GetCaption(LoginLayout.MsgServerUnknown, string.Empty);
-        return FormatCaption(template, e.ServerId, string.Empty);
-    }
-
-
-    // Formats the status_code==3 scheduled-open caption (msg 6005). The painter snprintf's FOUR digit args
-    // in order (hourTens, hourOnes, minTens, minOnes). We honour whichever placeholder style the CP949
-    // msg uses: four single %d (the binary's exact form) → four digits; {0}/{0:00} or %02d → hour/minute;
-    // otherwise a plain HH:MM fallback. spec: frontend_layout_tables.md §4 (status_code==3 → msg 6005).
     private static string FormatScheduledTime(string template, int hour, int minute)
     {
-        int hourTens = hour / 10 % 10, hourOnes = hour % 10;
-        int minTens = minute / 10 % 10, minOnes = minute % 10;
+        int hh = hour / 10 % 10, hl = hour % 10;
+        int mh = minute / 10 % 10, ml = minute % 10;
         var fallback = $"{hour:00}:{minute:00}";
 
-        if (template.Length == 0)
-            return fallback;
+        if (template.Length == 0) return fallback;
 
-        // Four single %d (the binary's snprintf form): substitute the four digits in order.
+        // Four %d (binary's snprintf form): substitute four digit args in order.
         if (CountOccurrences(template, "%d") >= 4)
         {
             var s = template;
-            foreach (var d in (ReadOnlySpan<int>)[hourTens, hourOnes, minTens, minOnes])
+            foreach (var d in (ReadOnlySpan<int>)[hh, hl, mh, ml])
                 s = ReplaceFirst(s, "%d", d.ToString(CultureInfo.InvariantCulture));
             return s;
         }
 
-        // {0}/{0:00} or %02d styles take hour + minute as whole values.
         return FormatCaption(template, hour, minute, fallback);
     }
 
@@ -903,55 +834,38 @@ public sealed partial class ServerSelectSubView : Control
     {
         int count = 0, idx = 0;
         while ((idx = value.IndexOf(token, idx, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            idx += token.Length;
-        }
-
+        { count++; idx += token.Length; }
         return count;
     }
 
-    // Formats a caption template from msg.xdb that may use {0}/{0:00} or %02d placeholders.
-    // Only used for status_code==3 HH:MM (MsgServerClockFormat) and the out-of-range server name fallback.
-    private static string FormatCaption(string template, int value0, string fallback)
-    {
-        return FormatCaption(template, value0, 0, fallback);
-    }
+    private static string FormatCaption(string template, int v0, string fallback)
+        => FormatCaption(template, v0, 0, fallback);
 
-    private static string FormatCaption(string template, int value0, int value1, string fallback)
+    private static string FormatCaption(string template, int v0, int v1, string fallback)
     {
         if (template.Length == 0) return fallback;
         try
         {
             if (template.Contains("{0", StringComparison.Ordinal))
-                return string.Format(CultureInfo.InvariantCulture, template, value0, value1);
-
+                return string.Format(CultureInfo.InvariantCulture, template, v0, v1);
             if (template.Contains("%02d", StringComparison.Ordinal))
             {
-                var s = ReplaceFirst(template, "%02d",
-                    value0.ToString("00", CultureInfo.InvariantCulture));
-                return ReplaceFirst(s, "%02d",
-                    value1.ToString("00", CultureInfo.InvariantCulture));
+                var s = ReplaceFirst(template, "%02d", v0.ToString("00", CultureInfo.InvariantCulture));
+                return ReplaceFirst(s, "%02d", v1.ToString("00", CultureInfo.InvariantCulture));
             }
-
             if (template.Contains("%d", StringComparison.Ordinal))
             {
-                var s = ReplaceFirst(template, "%d",
-                    value0.ToString(CultureInfo.InvariantCulture));
-                return ReplaceFirst(s, "%d", value1.ToString(CultureInfo.InvariantCulture));
+                var s = ReplaceFirst(template, "%d", v0.ToString(CultureInfo.InvariantCulture));
+                return ReplaceFirst(s, "%d", v1.ToString(CultureInfo.InvariantCulture));
             }
         }
-        catch (FormatException)
-        {
-            return fallback;
-        }
-
+        catch (FormatException) { return fallback; }
         return template.Length > 0 ? template : fallback;
     }
 
-    private static string ReplaceFirst(string value, string oldValue, string newValue)
+    private static string ReplaceFirst(string value, string old, string replacement)
     {
-        var idx = value.IndexOf(oldValue, StringComparison.Ordinal);
-        return idx < 0 ? value : value[..idx] + newValue + value[(idx + oldValue.Length)..];
+        var idx = value.IndexOf(old, StringComparison.Ordinal);
+        return idx < 0 ? value : value[..idx] + replacement + value[(idx + old.Length)..];
     }
 }

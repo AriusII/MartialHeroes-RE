@@ -1031,3 +1031,58 @@ and promotion (orchestrator rewrite via re-promote) ran as separate sub-waves.
 - build result: `dotnet build MartialHeroes.slnx --no-incremental` (nuked bin/obj) = 0 errors / 0 warnings
   (40 projects); check_dag.py OK (39 core, downward-only acyclic); Godot headless clean; clean-room
   firewall CLEAN. CYCLE 12 BLOCK C GATE GREEN. CYCLE 12 FULLY CLOSED.
+
+## Server-list window — full from-scratch re-derivation (binary-won, static IDA, 263bd994) — 2026-06-22
+
+- trigger: maintainer reported the port server-list is rotten (cluttered overlap, blank-white tabs,
+  duplicated chrome, wrong scroll count/position) because the C# was patched instead of rebuilt from
+  the binary. Re-derived the ENTIRE server-list listbox construction from scratch, trusting the binary
+  over the prior incomplete §4.3.
+
+- method: exhaustive static decompile of the LoginWindow construction routine, its server-list paint
+  routine, and its handshake sub-state machine (all on doida.exe, IDB SHA 263bd994). Builder argument
+  orders (image / panel / 3-state button) confirmed against their constructors so every dst/src tuple
+  is unambiguous. The name resolver was read to ground truth. A field-index → widget map was produced
+  (dirty) to resolve which SetVisible() edges target which widget. A live ?ext=dbg probe found NO
+  debuggee attached (LoginWindow is torn down before Loading), so the static binary is the
+  authoritative source for this non-data-driven layout.
+
+- spec produced/updated:
+  - `Docs/RE/specs/frontend_layout_tables.md` §4.3 — REWRITTEN IN FULL as "Server-list window — full
+    construction (binary-re-derived 2026)", SUPERSEDING the prior partial §4.3. New subsections 4.3.0
+    (the three near-overlapping backdrops + the double-draw resolution), 4.3.1 (content-panel child
+    inventory), 4.3.2 (the two detail plate slots + scroll-count resolution), 4.3.3 (name-strip tabs:
+    HIDDEN-not-blank rule), 4.3.4 (single refresh/back + EVENT badge + pager), 4.3.5 (record decode +
+    name/status/population resolvers + colour ladder), 4.3.6 (selectable gate + default highlight +
+    stable plate order), 4.3.7 (sub-state visibility ladder), 4.3.8 (connecting popup), 4.3.9
+    (implementation-readiness + live-pending list). §4.1 and §4.2 left intact and cross-referenced.
+
+- binary corrections vs the prior §4.3 (all binary-won):
+  - DOUBLE-DRAW RESOLVED: the notice/EULA panel and the server-list content panel are TWO separate
+    widgets built with the IDENTICAL (270,85) 483x490 A2 src(0,490) blit; they are mutually exclusive
+    (notice hidden across the server-list sub-states; content shown only at the fetch->show edge). The
+    login banner at (265,0) 494x113 A1 src(0,469) is a THIRD widget on the credential-form panel,
+    hidden once the list appears. A port must render exactly one backdrop per phase.
+  - TAB VISIBILITY RESOLVED: the ten page tabs are built HIDDEN (SetVisible(false) at construction);
+    the painter re-skins all ten to a blank (500,792) UV and shows ONLY the pager strips for valid
+    pages. Re-skinning a hidden widget does not make it visible — so rendering the blank crop as white
+    boxes is the port bug.
+  - SINGLE REFRESH RESOLVED: exactly one refresh (action 105, (456,-3), A1 N(792,398)) and one
+    back/quit (action 102, (456,166), A1 N(154,398)) — no duplicates.
+  - SCROLL COUNT RESOLVED: two plate SLOTS per page (local x 30 / 263), each populated+shown only if
+    its record exists; the oracle's single centered scroll = the one-record case.
+  - RECORD FIELD ORDER PINNED: +4 = LoadCount (compared to 1200/800/500), +6 = OpenTimeFlag/gate —
+    NOT swapped (a dirty field-map note had them reversed; binary wins).
+  - NAME RESOLVER CONFIRMED: name_id = 5000 + ServerId (ServerId 1 -> msg 5001 .. 40 -> 5040); the
+    5101/5201/5301/5401/5421 blocks are discarded cache warm-up; drop any banked/5301-base resolver.
+
+- dirty provenance (gitignored): `_dirty/structs/loginwindow_field_map.md` (field-index -> widget
+  table), `_dirty/validation/serverlist_live_feasibility.md` (no-debuggee live-probe verdict).
+
+- live-pending (require a maintainer-driven ?ext=dbg re-launch parked at the server-list screen):
+  the runtime server-record array contents; the StatusCode integer semantics (which value = available
+  vs full); the CP949 caption text per msg id (msg.xdb). Texture/visual-oracle: the (500,792) blank
+  tab crop and the (448,6)/(572,6) plate-face crop pixel content.
+
+- firewall: committed §4.3 self-scrubbed CLEAN — zero addresses, zero Hex-Rays artifacts. Promotion
+  was a deliberate rewrite, never a copy.
