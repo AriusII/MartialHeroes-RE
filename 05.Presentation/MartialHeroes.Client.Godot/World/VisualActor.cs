@@ -1,6 +1,7 @@
 using Godot;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Domain.Actors.Actors;
+using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.Helpers;
 using MartialHeroes.Shared.Kernel.Numerics;
 
@@ -45,6 +46,11 @@ public sealed partial class VisualActor : CharacterBody3D
     // Whether we have at least one snapshot to interpolate from.
     private bool _hasSnapshot;
     private bool _hasTarget;
+
+    // True once PlayDeathMotion laid this actor's avatar into the death pose. VIEW state only (no
+    // game-rule authority — death is decided by the Application ActorDiedEvent, never here). Held so a
+    // re-attach (respawn re-build via AttachSkinnedAvatar) clears the recumbent pose.
+    private bool _isDead;
     private bool _isRunning;
 
     // -------------------------------------------------------------------------
@@ -125,6 +131,112 @@ public sealed partial class VisualActor : CharacterBody3D
         skinnedRoot.Scale = Vector3.One * SkinnedAvatarScale;
         AddChild(skinnedRoot);
         _skinnedAvatar = skinnedRoot;
+
+        // A freshly (re)attached avatar is upright/alive — a respawn rebuild clears any prior death pose.
+        _isDead = false;
+    }
+
+    /// <summary>
+    ///     Builds and attaches a NEARBY actor's BODY-ONLY skinned, idle-animated avatar from its server
+    ///     class, reusing the EXACT proven local-player chain (<see cref="PlayerAvatarResolver" />) with an
+    ///     EMPTY equipment list. The drain (the GameLoop event lane, which holds the open VFS handle) calls
+    ///     this right after <c>ActorRegistry</c> spawns this node, e.g.
+    ///     <c>visual.TryBuildBodyAvatar(rwr.Assets, evt.ServerClass)</c>.
+    ///     <para>
+    ///         <paramref name="serverClass" /> is the wire character class == the <c>.skn</c> header
+    ///         SkinClassId / id_b ∈ {1,2,3,4} (Musa/Salsu/Dosa/Monk) — the §8(e) skeleton-selection key used
+    ///         verbatim: <c>g{SkinClassId}.bnd</c>, idle = the <c>actormotion.txt</c> row whose col2 ==
+    ///         skin_class → motion_ids_a[1] (col16) → <c>data/char/mot/g{id}.mot</c>. The resolver auto-engages
+    ///         the looping standing idle inside Build.
+    ///     </para>
+    ///     <para>
+    ///         EQUIP OVERLAY is BODY-ONLY / DEFERRED here: <see cref="ActorSpawnedEvent" /> (from the 4/4 and
+    ///         5/3 nearby-actor paths) carries NO EquipGids (unlike <c>LocalPlayerSpawnedEvent</c>), so there
+    ///         is no gear data to resolve — the empty equip list renders the body alone, and the weapon
+    ///         hand-bone-id 0 stays deferred. This is faithful: no equip data on the event ⇒ no overlay.
+    ///     </para>
+    ///     VFS-safe: a null <paramref name="assets" /> or an unresolved body <c>.skn</c> is a no-op (the
+    ///     VisualActor renders nothing — the real client skips actors without a resolved skin). Never throws
+    ///     (the resolver guards every step). Main-thread only. STRICTLY PASSIVE: which clip plays is the idle
+    ///     the chain resolves — no game-rule authority.
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (skin/bind/idle chain; g{SkinClassId}.bnd for {1,2,3,4}),
+    ///     §10 (col16 default standing idle plays looping); Docs/RE/formats/animation.md, formats/skn.md.
+    /// </summary>
+    /// <param name="assets">Open VFS handle (shared with the world renderer — held by the drain).</param>
+    /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4}.</param>
+    /// <returns><see langword="true" /> when a skinned avatar resolved and was attached; otherwise false.</returns>
+    public bool TryBuildBodyAvatar(RealClientAssets assets, ushort serverClass)
+    {
+        if (assets is null)
+        {
+            GD.Print("[VisualActor] Body avatar: VFS handle unavailable — no skinned avatar attached. " +
+                     "spec: skinning.md §8(e).");
+            return false;
+        }
+
+        // Reuse the proven resolver chain with an EMPTY equip list (body only). NO second skinning path.
+        // spec: Docs/RE/specs/skinning.md §8(e); World/PlayerAvatarResolver.cs (the local-player twin path).
+        var avatar = PlayerAvatarResolver.TryBuild(assets, serverClass, []);
+        if (avatar is null)
+        {
+            // The body .skn for this class did not resolve — this actor renders nothing (faithful skip).
+            GD.Print($"[VisualActor] Body avatar: class={serverClass} did not resolve a skinned avatar " +
+                     $"(actor '{ActorName}') — rendering nothing. spec: skinning.md §8(e).");
+            return false;
+        }
+
+        AttachSkinnedAvatar(avatar);
+        GD.Print($"[VisualActor] Body avatar attached (class={serverClass}, skinned+idle, body-only — " +
+                 $"ActorSpawnedEvent carries no EquipGids, so equip overlay is deferred). " +
+                 "spec: skinning.md §8(e) / §10.");
+        return true;
+    }
+
+    /// <summary>
+    ///     Plays the VICTIM's death motion/pose on this actor's attached skinned avatar (the drain calls this
+    ///     off an <see cref="ActorDiedEvent" /> for the victim). STRICTLY the victim's motion/pose on its own
+    ///     VisualActor — the respawn modal and PK-effect anchoring are OTHER lanes, not owned here.
+    ///     <para>
+    ///         DEATH-CLIP STATUS: the death clip id is NOT recovered and is NOT carried by
+    ///         <see cref="ActorDiedEvent" /> — the 5/10 spec confirms the concrete death effect/sound/clip ids
+    ///         are capture/debugger-pending VALUE residuals (not statically settled). The recovered skin/bind
+    ///         chain resolves ONLY the standing idle (motion_ids_a[1] / col16); there is no recovered
+    ///         actormotion column / .mot id for "death" to feed the existing playback path. We therefore do
+    ///         NOT fabricate a clip id. Instead we apply a faithful, non-fabricated VISUAL DEATH CUE: lay the
+    ///         avatar flat (rotate the attached skinned root −90° about local X so the upright body falls
+    ///         forward to the ground). The contained idle keeps self-ticking, but the body is recumbent — a
+    ///         clear, honest death pose that needs no invented animation data.
+    ///     </para>
+    ///     Idempotent (a second call is a no-op while dead). A respawn re-build via
+    ///     <see cref="AttachSkinnedAvatar" /> clears the pose. No-op (logged) when no skinned avatar is
+    ///     attached. Main-thread only.
+    ///     spec: Docs/RE/packets/5-10_combat_death.yaml (death motion/effect; effect/sound/clip ids
+    ///     capture-pending VALUE residuals — not statically settled); Docs/RE/specs/skinning.md §8(e)/§10
+    ///     (the recovered chain resolves the standing idle only — no death column recovered).
+    /// </summary>
+    public void PlayDeathMotion()
+    {
+        if (_isDead) return; // idempotent — already in the death pose.
+
+        if (_skinnedAvatar is null || !IsInstanceValid(_skinnedAvatar))
+        {
+            GD.Print($"[VisualActor] PlayDeathMotion: no skinned avatar attached (actor '{ActorName}') — " +
+                     "no death pose applied. spec: 5-10_combat_death.yaml.");
+            return;
+        }
+
+        _isDead = true;
+
+        // FAITHFUL FALLBACK (death clip id pending): the recovered chain resolves no death .mot id and the
+        // event carries none, so we do NOT fabricate a clip. Lay the upright avatar flat: −90° about local X
+        // rotates the standing body forward onto the ground (a non-fabricated visual death cue). The
+        // contained SkinnedCharacterNode's idle keeps ticking; this is purely the root's death POSE.
+        // spec: Docs/RE/packets/5-10_combat_death.yaml (death motion — clip/effect ids capture-pending).
+        _skinnedAvatar.RotationDegrees = new Vector3(-90f, _skinnedAvatar.RotationDegrees.Y, 0f);
+
+        GD.Print($"[VisualActor] PlayDeathMotion (actor '{ActorName}'): death clip id pending — visual cue " +
+                 "only (avatar laid flat; idle still ticking). spec: 5-10_combat_death.yaml (death clip/" +
+                 "effect ids capture-pending); skinning.md §8(e)/§10 (only the standing idle is recovered).");
     }
 
     // -------------------------------------------------------------------------

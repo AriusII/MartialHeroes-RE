@@ -99,7 +99,7 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 ///     spec: Docs/RE/specs/ui_hud_layout.md §0.1 — 178 distinct slot stores (slot set confirmed).
 ///     spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won reversal of "slot 177").
 ///     spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED" (263bd994 RTTI pass).
-///     spec: Docs/RE/specs/ui_hud_layout.md §5.5b — MopGagePanel geometry (recovered HUD-II).
+///     spec: Docs/RE/scenes/ingame.md §5 — MopGagePanel geometry, HP bar formula, child widgets (recovered HUD-II).
 ///     spec: Docs/RE/specs/ui_system.md §8.6.1 — uitex integer id→DDS key table.
 /// </summary>
 public sealed partial class HudMaster : Control
@@ -197,6 +197,10 @@ public sealed partial class HudMaster : Control
     // spec: Docs/RE/specs/ui_system.md §8.26 CODE-CONFIRMED
     private HudPetPanel? _petPanel;
 
+    // PlayerStatusPanel — HP/MP/stamina gauges + portrait + condition bar + level (slot 15)
+    // spec: Docs/RE/scenes/ingame.md §2 — Core HUD group; §2.1 internal layout.
+    private HudPlayerStatusPanel? _playerStatusPanel;
+
     // ProductPanel — NPC production / crafting window (slot 230)
     // spec: Docs/RE/specs/ui_system.md §8.18 CODE-CONFIRMED
     private HudProductWindow? _productWindow;
@@ -234,7 +238,7 @@ public sealed partial class HudMaster : Control
     // Slot 177 is a plain GUComponent image (bottom command-bar trailing image, §2.3) — NOT this panel.
     // spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35.
     // spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
-    // spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
+    // spec: Docs/RE/scenes/ingame.md §5 — MopGagePanel child layout, HP bar, labels.
     private HudTargetFrame? _targetFrame;
 
     // TenderInfoPanel — consignment-purchase / info confirm (slot 118, centered 512×595)

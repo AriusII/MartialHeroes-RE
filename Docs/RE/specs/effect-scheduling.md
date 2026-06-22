@@ -36,15 +36,17 @@ subsystems: [effects, combat, game_loop]
 >   DRAIN/dispatch consumer was not isolated this pass); *capture/debugger-pending* where a runtime
 >   witness is needed (the two death-FSM in-state clock reads' precise role; the per-kind particle
 >   colour/semantic labels).
-> - **ida_reverified:** 2026-06-20 (CYCLE 7 runtime trigger-dispatch spine added; prior 2026-06-16)
+> - **ida_reverified:** 2026-06-22 (CYCLE 11: 10001 drain resolved — two-pass full-tree sweep; prior 2026-06-20 CYCLE 7)
 > - **ida_anchor:** 263bd994
+> - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the stated effect-list claims — the §3 "NOT a priority queue" model is
 >   correct **for the effect element lists**. The newly documented **universal 10001 timed-EVENT
 >   queue IS a sorted tree** keyed by fire-time; it is a **distinct sibling mechanism** hosted on the
 >   effect manager, not a contradiction of the effect-list model. §3 is now scoped accordingly and
 >   §5A documents the tree.
-> - **CYCLE 7 (2026-06-20, IDB SHA 263bd994):** added §10 — the **runtime trigger-dispatch chain**
+> - **CYCLE 11 (2026-06-22, IDB SHA 263bd994):** §5A.3 RESOLVED — 10001 drain is a two-pass full-tree sweep hosted in both loading-screen and in-world tick; does NOT stop at the first future entry; each record is six words. See §5A.3 and §8.
+ - **CYCLE 7 (2026-06-20, IDB SHA 263bd994):** added §10 — the **runtime trigger-dispatch chain**
 >   (server effect packet → handler → spawn factory → descriptor resolve → first-tick particle build
 >   → insert into the **owner-actor list** at +0x240, or **self-destruct** when the effective lifetime
 >   is zero). Confirms the shared central per-frame tick is **vtable slot 1**, driving all pooled
@@ -61,7 +63,7 @@ subsystems: [effects, combat, game_loop]
 |------|------------|
 | Single now-ms capture per frame, fanned by value to four managers | CODE-CONFIRMED |
 | Four managers are linear active-list walks (NOT a heap / priority queue) | CODE-CONFIRMED |
-| Universal 10001 timed-EVENT queue IS a sorted tree keyed by fire-time (distinct sibling of the effect lists) | CODE-CONFIRMED (enqueue + container) / drain UNVERIFIED |
+| Universal 10001 timed-EVENT queue IS a sorted tree keyed by fire-time (distinct sibling of the effect lists); drain = two-pass full-tree sweep per frame (CYCLE 11) | CODE-CONFIRMED (enqueue + container + drain) |
 | Deadline-arm primitive (`baseline = now + delay`) | CODE-CONFIRMED |
 | Effect-object `+64` elapsed-origin convention | CODE-CONFIRMED |
 | Particle-element `+48` start-gate + 1-second life convention | CODE-CONFIRMED |
@@ -334,15 +336,26 @@ The difference is the **container** — here the armed record is inserted into a
 fire-time**, so the earliest-due event is at the tree's front, whereas effect elements are appended to
 an **unordered** list and gated inline per element.
 
-### 5A.3 The drain/dispatch consumer — UNVERIFIED
+### 5A.3 The drain/dispatch consumer — RESOLVED (CYCLE 11)
 
-The per-frame consumer that **pops** entries whose `fire_time ≤ now_ms` and **dispatches** the
-`event_id` (advancing the scene/connection state for the 10001 trigger) was **not isolated** in this
-analysis pass — only the enqueue primitive and the tree container are confirmed. An interoperable
-reimplementation should model the queue as an ordered (by fire-time) collection on the effect manager,
-drained each frame against the single per-frame now-ms (§1) by popping all entries with
-`fire_time ≤ now_ms` and dispatching each. The exact pop/dispatch site and whether dispatch is
-in-order-only-until-the-first-future-entry remain **UNVERIFIED** (capture/debugger-pending). See §8.
+**RESOLVED (CYCLE 11, binary-won):** the scheduled-effect (transition id 10001) drain is a
+**per-frame routine hosted in BOTH the loading-screen tick and the in-world tick**. It performs a
+**TWO-PASS FULL-TREE SWEEP** of the timed-event tree:
+
+- **Pass 1** walks **EVERY node** in the ordered tree and fires every entry whose `fire_time` is
+  earlier than `now_ms` (it does **NOT** stop at the first future entry) by posting a deferred engine
+  event (the 10001 scene/connection-state transition).
+- **Pass 2** removes the fired nodes from the tree.
+
+The queue is an **unbounded ordered tree** (one allocation per record); each record is **six words**:
+`fire_time`, `event_id`, and four payload words. This is the concrete answer to the earlier
+"stops at the first future entry?" open question — it does NOT stop early: the drain is a full-tree
+sweep each frame, firing every past-due entry before removing them.
+
+An interoperable reimplementation should therefore model the queue as a sorted ordered collection
+(keyed by fire-time) on the effect manager, drained each frame against the single per-frame now-ms
+(§1) by visiting ALL entries with `fire_time < now_ms` in a first pass (dispatching each), then
+removing those entries in a second pass. See §8 (known unknowns, updated).
 
 ---
 
@@ -439,11 +452,11 @@ those two reads pace the death phase or merely seed a debounce is **MED** pendin
 - **The exact armed value of the particle `+48` start-deadline** relative to the captured now-ms,
   and that the `+45` clear fires ~1000 ms later, is statically derived; not live-confirmed.
 - **The two death-FSM clock reads (states 2/3):** death-phase pacing vs debounce is unresolved.
-- **The 10001 timed-EVENT queue drain (§5A.3):** the per-frame consumer that pops `fire_time ≤ now_ms`
-  entries from the sorted tree and dispatches `event_id 10001` (advancing the scene/connection state)
-  was not isolated this pass; only the enqueue primitive and the tree container are confirmed. The
-  exact pop/dispatch site and whether it stops at the first future-dated entry are
-  capture/debugger-pending.
+- **The 10001 timed-EVENT queue drain (§5A.3) — RESOLVED (CYCLE 11, binary-won).** The drain is a
+  per-frame two-pass full-tree sweep hosted in both the loading-screen tick and the in-world tick:
+  pass 1 walks every node and fires every entry with `fire_time < now_ms` (does NOT stop at the first
+  future entry); pass 2 removes the fired nodes. The queue is an unbounded ordered tree; each record
+  is six words (`fire_time`, `event_id`, four payload words). See §5A.3 for the complete resolution.
 - The per-kind RGBA constants and size tables are render detail and are not exhaustively documented
   here (they are FX tuning, not scheduling).
 

@@ -11,6 +11,7 @@
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.World;
 
@@ -100,6 +101,27 @@ public sealed partial class NpcRenderer
     private Node3D? TryBuildActorNode(
         RealClientAssets assets, string sknPath, int skinClass, int idleMotId, string debugLabel)
     {
+        // No-equip default: other actors built from a lean spawn descriptor (which carries no equip
+        // data — see the wave report's core-surface gap) render body-only. When the core later hands
+        // resolved EquipmentParts to this renderer, route through the equip-aware overload below.
+        return TryBuildActorNode(assets, sknPath, skinClass, idleMotId, [], debugLabel);
+    }
+
+    /// <summary>
+    ///     Equip-aware build: parses the body <c>.skn</c>, resolves its texture / <c>.bnd</c> / idle, and
+    ///     composes the OTHER-ACTOR equip overlay onto the shared skeleton via
+    ///     <see cref="SkinnedCharacterBuilder.BuildWithEquipment" />. The rebuild slot set is the
+    ///     resolver's other-actor set <c>{3,4,6,2,11}</c> (no weapon slot 14 on this path) —
+    ///     <see cref="EquipOverlayResolver.OtherActorRebuildSlots" />. The <paramref name="equipParts" />
+    ///     are the core's already catalogue-resolved parts; each part's mesh + texture is loaded by the
+    ///     shared <see cref="EquipmentPartResolver" /> (a miss is skipped, no crash).
+    ///     spec: Docs/RE/specs/equipment_visuals.md §1.1 (other-actor slot set, no slot 14) / §4.
+    /// </summary>
+    /// <param name="equipParts">The core's resolved overlay parts for this actor (empty ⇒ body only).</param>
+    private Node3D? TryBuildActorNode(
+        RealClientAssets assets, string sknPath, int skinClass, int idleMotId,
+        IReadOnlyList<EquipmentPart> equipParts, string debugLabel)
+    {
         SkinnedMesh mesh;
         try
         {
@@ -150,12 +172,39 @@ public sealed partial class NpcRenderer
             // town does not animate in lockstep.
             // spec: MISSION — skinned mob path, ~10 Hz staggered, randomized clip phase.
             var startPhase = clip is not null ? NextPhase(clip.FrameCount * SkinningMath.MotSecondsPerFrame) : 0f;
-            var root = SkinnedCharacterBuilder.Build(
-                mesh, skeleton, clip, albedo,
-                skeleton is not null,
-                startPhase,
-                out var lbs,
-                debugLabel);
+
+            // ── Equip-overlay wiring (EquipOverlayResolver, other-actor path) ──
+            // base_skin_id key = the resolved SkinClassId. Overlay resolution RUNS only when ≤1000;
+            // the other-actor rebuild slot set is {3,4,6,2,11} (no weapon slot 14 on this path).
+            // spec: Docs/RE/specs/equipment_visuals.md §1.1 / §3.4.
+            var baseSkinId = skinClass > 0 ? skinClass : (int)mesh.IdB;
+            var visualParts =
+                skeleton is not null
+                && EquipOverlayResolver.RunsOverlayResolution(baseSkinId)
+                && equipParts.Count > 0
+                    ? EquipmentPartResolver.Resolve(assets, equipParts,
+                        EquipOverlayResolver.OtherActorRebuildSlots(), debugLabel)
+                    : [];
+
+            Node3D root;
+            SkinnedCharacterNode? lbs;
+            if (visualParts.Count > 0)
+                // Compose, don't swap: body + resolved overlay parts under the ONE shared skeleton.
+                // spec: Docs/RE/specs/equipment_visuals.md §1 / §4.
+                root = SkinnedCharacterBuilder.BuildWithEquipment(
+                    mesh, skeleton, clip, albedo,
+                    skeleton is not null,
+                    startPhase,
+                    visualParts,
+                    out lbs,
+                    debugLabel);
+            else
+                root = SkinnedCharacterBuilder.Build(
+                    mesh, skeleton, clip, albedo,
+                    skeleton is not null,
+                    startPhase,
+                    out lbs,
+                    debugLabel);
 
             if (lbs is not null)
             {

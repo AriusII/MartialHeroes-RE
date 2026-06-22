@@ -25,13 +25,15 @@
 //   the shared cell identically — the "too dark" fix), a faint achromatic directional (≈0.047), fog
 //   OFF, an achromatic dark background. NO coloured lamps, NO procedural sky.
 //
-// ACTOR — CREATE CLOSE-UP (§4.2 / §3.5.4): ONE actor at world Z ≈ −9682 (~56u NEARER the lineup row),
-//   at the BIGGER create scale (the legacy 81/70 ratio over the lineup's Godot ×3.0 → ≈×3.471),
-//   rotated by a press-and-hold turntable (≈±2 rad/s) — NOT an auto-spin. It is built through the FULL
-//   skinned + animated path (real skeleton + idle clip resolved from the mesh's OWN id_b, per class) —
-//   exactly like CharSelectScene3D, no longer a static rest pose.
+// ACTOR — CREATE CLOSE-UP (§3.5.4 / charselect.md §6.2): ONE actor at world Z ≈ −9682 (~56u NEARER the
+//   lineup row), at the BIGGER create scale (the BINARY-CONFIRMED 81/70 scale-field ratio — create
+//   +1160/+1164 = 81.0 vs lineup +1160 = 70.0 — over the lineup's reconciled Godot ×6.0 → ≈×6.943,
+//   strictly LARGER than the lineup; the "3.0" in the original is the idle PLAYBACK-RATE @actor+100, NOT
+//   a scale. spec: Docs/RE/scenes/charselect.md §6.2), rotated by a press-and-hold turntable (≈±2 rad/s)
+//   — NOT an auto-spin. It is built through the FULL skinned + animated path (real skeleton + idle clip
+//   resolved from the mesh's OWN id_b, per class) — exactly like CharSelectScene3D, no static rest pose.
 //
-// HOST API PRESERVED (read by CharacterSelectScreen — keep these exact):
+// HOST API PRESERVED (read by the host CharSelectWindow — keep these exact):
 //   - public int InternalClassId { get; set; }
 //   - public RealClientAssets? SharedRealAssets { get; set; }
 //   - public void RebuildForClass()
@@ -60,7 +62,8 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 ///     The enlarged, turntable-rotatable character-creation preview, rendered in front of the real
 ///     carved-stone-relief temple backdrop (cell <c>d000x10000z9990</c> — the SAME cell as
 ///     character-select; §3.7.6). Set <see cref="InternalClassId" /> then call
-///     <see cref="RebuildForClass" />; the backdrop / camera / environment persist, only the actor rebuilds.
+///     <see cref="RebuildForClass" /> (the host CharSelectWindow drives this); the backdrop / camera /
+///     environment persist, only the actor rebuilds.
 ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.6 / §3.5.4 / §4.2.
 /// </summary>
 public sealed partial class CharCreatePreview3D : Control
@@ -109,21 +112,32 @@ public sealed partial class CharCreatePreview3D : Control
     // Actor scale & turntable.
     // =========================================================================
 
-    // Create-preview scale, reconciled against the legacy 81/70 ratio. The lineup's unit-reconciled
-    // Godot scale is ×3.0 for the LEGACY literal 70.0 (§3.3.1); the create actor's LEGACY literal is
-    // 81.0 (§4.2). Applying the SAME 70→3.0 reconciliation to 81 gives the spec-ratio Godot scale
-    // 3.0 × (81/70) ≈ 3.471. With the camera now held at KF1 (actor-only, ~30u away — the boom that
-    // overshot the figure is removed, frontend F4) the ratio-correct scale frames the full figure as
-    // the official captures show, so the prior aesthetic 1.8 is replaced by the spec ratio.
-    // spec: §4.2 (create scale 81) / §3.3.1 (lineup 70 → ×3.0; the 81/70 ratio preserved into create).
-    private const float LineupLegacyScale = 70.0f; // spec: §3.3.1 lineup scale literal
-    private const float CreateLegacyScale = 81.0f; // spec: §4.2 create scale literal
-    private const float LineupGodotScale = 3.0f; // spec: §3.3.1 lineup Godot equivalent (70 → 3.0)
+    // Create-preview scale, reconciled against the BINARY-CONFIRMED 81/70 scale-field ratio.
+    // BINARY GROUND TRUTH: the lineup actors get scale field +1160 = 70.0; the create/zoom actor gets
+    // +1160 AND +1164 = 81.0. (The "3.0" in the original is the idle-motion PLAYBACK-RATE multiplier at
+    // actor+100 — a motion-rate override, NOT a scale; it is applied via the AnimationPlayer, never here.)
+    // spec: Docs/RE/scenes/charselect.md §6.2 (lineup 70.0 @+1160; create 81.0 @+1160/+1164; idle
+    //       playback-rate 3.0 @actor+100 distinct from scale).
+    // 70.0 and 81.0 are LEGACY-space scale-field values, NOT ready-to-use Godot multipliers; the shared
+    // unit-reconcile factor maps the lineup 70.0 → Godot ×6.0 (matching CharSelectScene3D.PreviewScale).
+    // Applying the SAME reconcile factor to the create 81.0 gives 6.0 × (81/70) ≈ 6.943 — strictly LARGER
+    // than the lineup, exactly as the binary 81 > 70 demands. The 81/70 ratio is BINARY-CONFIRMED (§6.2);
+    // only the 70 → 6.0 Godot mapping is the shared port-side unit-reconciliation (oracle > spec for the
+    // on-screen size — do NOT blindly change this working value; visuals are not headless-verifiable).
+    // spec: Docs/RE/scenes/charselect.md §6.2 (create scale 81.0, lineup scale 70.0, BINARY-CONFIRMED).
+    private const float LineupLegacyScale = 70.0f; // spec: charselect.md §6.2 lineup scale field +1160 = 70.0
+    private const float CreateLegacyScale = 81.0f; // spec: charselect.md §6.2 create scale fields +1160/+1164 = 81.0
 
-    // Godot create scale = lineup Godot scale × (create legacy / lineup legacy) = 3.0 × (81/70) ≈ 3.471.
-    // The 81/70 ratio is CODE-CONFIRMED (§4.2 / §3.3.1); only the 70→3.0 unit reconciliation is the
-    // shared port choice (identical to CharSelectScene3D.PreviewScale). spec: §4.2 / §3.3.1.
-    private const float CreatePreviewScale = LineupGodotScale * (CreateLegacyScale / LineupLegacyScale);
+    // Shared lineup Godot-space baseline = 6.0 = reconcile(70.0), matching CharSelectScene3D.PreviewScale
+    // exactly (one shared unit-reconcile of the binary 70.0 lineup scale field).
+    // spec: Docs/RE/scenes/charselect.md §6.2 (lineup 70.0 @+1160).
+    private const float
+        LineupGodotScale = 6.0f; // = reconcile(70.0). spec: charselect.md §6.2; matches CharSelectScene3D.PreviewScale
+
+    // Godot create scale = lineup Godot scale × (create legacy / lineup legacy) = 6.0 × (81/70) ≈ 6.943.
+    // Strictly LARGER than the lineup (6.943 > 6.0), matching the binary 81 > 70 scale-field relationship.
+    // spec: Docs/RE/scenes/charselect.md §6.2 (create 81.0 / lineup 70.0, BINARY-CONFIRMED ratio).
+    private const float CreatePreviewScale = LineupGodotScale * (CreateLegacyScale / LineupLegacyScale); // ≈ 6.943
 
     // Turntable rate ≈±2 rad/s (press-and-hold, NOT auto-spin). spec: §4.2 CODE-CONFIRMED.
     private const float TurntableRadPerSec = 2.0f;
@@ -131,13 +145,12 @@ public sealed partial class CharCreatePreview3D : Control
     // Environment — the area-0 values (identical to select; §3.6).
     private const float AmbientFloorEnergy = 1.0f; // OPTION_BRIGHT/100 = 1.0 (the recovered asset value). spec: §3.6.2
 
-    // Godot parity scalar (same "too dark" fix as CharSelectScene3D): the legacy D3D9 pipeline applied the
-    // OPTION_BRIGHT ambient as a FLAT full-bright floor (no energy attenuation) on neutral-white stone, so
-    // the unit-white floor reads darker under Godot PBR ambient. UNIFIED with CharSelectScene3D
-    // (AmbientFloorEnergyGodot = 0.65, frontend F4): both 3D scenes light the SAME cell at the SAME energy,
-    // so create and select read identically — the prior divergent 2.0 had no spec basis. The asset value
-    // stays 1.0 white. spec: §3.6.1/§3.6.2 + rendering.md §1 (D3D9 full-bright) — Godot parity mitigation.
-    private const float AmbientFloorEnergyGodot = 0.65f; // unified with CharSelectScene3D (parity: asset=1.0 white)
+    // Godot parity scalar: the legacy D3D9 pipeline applied OPTION_BRIGHT as a FLAT full-bright floor (no
+    // energy attenuation) on neutral-white stone. Under Godot PBR the unit-white floor reads Lambert-
+    // attenuated → darker than the original. Raising the energy above 1.0 compensates. The asset value is
+    // 1.0 white (spec: rendering.md §9.3 / §3.6.1 CODE-CONFIRMED); the multiplier is aesthetic mitigation.
+    // Declared aesthetic: a value chosen for Godot D3D9 parity, not a spec-cited constant.
+    private const float AmbientFloorEnergyGodot = 0.65f; // aesthetic: Godot parity vs D3D9 flat white floor
 
     // Achromatic dark background = the area-0 keyframe-29 sky_haze tone R=G=B=0.004303 (float [0,1],
     // applied directly). spec: environment_bins.md §11.6 (sky_haze [0..3]) / §11.2 (achromatic).
@@ -164,6 +177,18 @@ public sealed partial class CharCreatePreview3D : Control
     private const int FallbackViewportHeight = ReferenceCanvasHeight; // 768
     private const int FallbackViewportWidth = ReferenceCanvasHeight * 3 / 4; // 576 — 3:4 portrait
 
+    // Face index range 1..7, default 1 (descriptor +0x2E faceA). spec: frontend_scenes.md §4.2 / §2674.
+    private const int FaceMinIndex = 1; // spec: frontend_scenes.md §4.2 (faceA range [1,7])
+    private const int FaceMaxIndex = 7; // spec: frontend_scenes.md §4.2 (faceA range [1,7])
+
+    private const string SkinTxtTablePath = "data/char/skin.txt";
+
+    // Appearance-seed view sinks (descriptor +0x2C sex / +0x30 faceB, plus the create form's extra
+    // appearance spinners). Recorded as passive view state ONLY — like FaceIndex, these do NOT
+    // re-spawn the 3D actor (face/appearance stepping is 2D-only; only a class change rebuilds the
+    // preview mesh). spec: Docs/RE/specs/frontend_scenes.md §4.2 (no rebuild on appearance step).
+    private const int AppearanceSeedCount = 6;
+
     // =========================================================================
     // Camera (held KF1) & row pivot — all from the spec, converted to Godot-space (Z negated once).
     // =========================================================================
@@ -183,6 +208,7 @@ public sealed partial class CharCreatePreview3D : Control
     private static readonly Color DirectionalColor = new(1.0f, 1.0f, 1.0f); // achromatic — area-0 R=G=B. spec: §11.2
 
     private static readonly Vector3 DirectionalDirGodot = ToGodotVec(-7.0f, 7.0f, 20.0f).Normalized(); // spec: §11.2
+    private readonly int[] _appearanceSeeds = new int[AppearanceSeedCount];
     private Node3D? _actorWrapper;
     private TerrainNode? _backdropTerrain;
     private bool _builtOnce;
@@ -197,11 +223,20 @@ public sealed partial class CharCreatePreview3D : Control
     private float _turntableYRot; // radians; view state only
 
     // =========================================================================
-    // Host API (read by CharacterSelectScreen).
+    // Host API (read by the host CharSelectWindow).
     // =========================================================================
 
     /// <summary>Internal class id 1..4. Changing it requires <see cref="RebuildForClass" />.</summary>
     public int InternalClassId { get; set; } = 1;
+
+    /// <summary>
+    ///     The current create-form face index (descriptor +0x2E <c>faceA</c>, range 1..7, default 1).
+    ///     Recorded here so the 2D <c>+</c>/<c>−</c> face steppers have a single passive sink on the 3D
+    ///     preview; it is NOT used to re-spawn the actor (see <see cref="UpdateFaceIndex" />). Read-only to
+    ///     callers — they mutate it through <see cref="UpdateFaceIndex" /> so the no-rebuild contract is
+    ///     enforced in one place. spec: Docs/RE/specs/frontend_scenes.md §4.2 (faceA 1..7) / §2674.
+    /// </summary>
+    public int FaceIndex { get; private set; } = FaceMinIndex;
 
     /// <summary>Optional shared VFS handle from the owning screen.</summary>
     public RealClientAssets? SharedRealAssets { get; set; }
@@ -210,16 +245,47 @@ public sealed partial class CharCreatePreview3D : Control
     // Per-class skin path (§4.2 / §3.7.5). Each mesh carries a DISTINCT id_b that drives its rig + clip.
     // =========================================================================
 
-    // Class → base-skin .skn resolved through the ONE shared ClassAppearanceResolver — the SAME
-    // table CharSelectScene3D uses, so a class shows the IDENTICAL body in both screens. The earlier
-    // create-only table invented stems (g202220001 / g202130001 / g202140001) that are absent from
-    // the VFS, so classes 2/3/4 rendered nothing — those invented stems are removed. Returns NULL for
-    // an unknown class (caller logs + skips, no wrong-class fallback). The four §3.7.5 starter meshes
-    // (IdA=1) are the spec-grounded stopgap for the full skin.txt appearance chain (skinning.md §3.5.2).
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / Docs/RE/specs/skinning.md §3.5.2.
-    private static string? SknPathForClass(int internalClass)
+    // Class → BODY .skn resolved through the §3.5.3 appearance catalogue (skin.txt) keyed by
+    // (slot=3, body model_class_id) — the SAME corrected per-class body CharSelectScene3D uses, so a
+    // class shows the IDENTICAL body in both screens. The body model_class_id = the §3.7.5 starter
+    // variant {1,2,1,1} -> IdB {1,26,11,16}, giving four DISTINCT bodies {g202110001, g202220001,
+    // g202130001, g202140001}. This retires the prior wrong-key path (col2={4,6,11} class-1-family
+    // rows) that collapsed every class onto a class-1 body. Returns NULL for an unknown class or a
+    // genuine DATA GAP (no skin.txt body row / absent .skn) — caller logs + skips, no wrong-class
+    // fallback, no fabricated geometry. The loaded .skn carries the class's own id_b -> its rig + idle.
+    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / Docs/RE/specs/skinning.md §3.5.3 / §3.5.1.
+    private static string? SknPathForClass(RealClientAssets assets, int internalClass)
     {
-        return ClassAppearanceResolver.SknPathForClass(internalClass);
+        var bodyModelClassId = ClassAppearanceResolver.StarterBodyModelClassId(internalClass);
+        if (bodyModelClassId <= 0) return null;
+
+        if (!assets.Contains(SkinTxtTablePath))
+        {
+            GD.PrintErr(
+                $"[CharCreatePreview3D] DATA GAP — '{SkinTxtTablePath}' absent; cannot resolve body for class={internalClass}. spec: skinning.md §3.5.3.");
+            return null;
+        }
+
+        int? meshGid;
+        try
+        {
+            meshGid = SkinTxtParser.Parse(assets.GetRaw(SkinTxtTablePath)).GetBodyMeshGid(bodyModelClassId);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr(
+                $"[CharCreatePreview3D] skin.txt body resolve failed (class={internalClass}, model_class_id={bodyModelClassId}): {ex.Message}");
+            return null;
+        }
+
+        if (meshGid is null)
+        {
+            GD.PrintErr(
+                $"[CharCreatePreview3D] DATA GAP — no skin.txt body row for (slot=3, model_class_id={bodyModelClassId}) class={internalClass} — skipped (no wrong-class fallback). spec: §3.7.5 / skinning.md §3.5.3.");
+            return null;
+        }
+
+        return ClassAppearanceResolver.BodySknPathForMeshGid(meshGid.Value);
     }
 
     // =========================================================================
@@ -251,6 +317,58 @@ public sealed partial class CharCreatePreview3D : Control
     {
         if (!_builtOnce) return; // the deferred build will pick up InternalClassId
         BuildActorInWrapper();
+    }
+
+    /// <summary>
+    ///     Records the create-form face index (descriptor <c>faceA</c>, clamped to [1, 7]) on the 3D
+    ///     preview. The 2D <c>+</c>/<c>−</c> face steppers call this so the preview's view state tracks
+    ///     the selected face.
+    ///     <para>
+    ///         FAITHFUL CONTRACT — face stepping does NOT rebuild the 3D actor. The original create form's
+    ///         face <c>+</c>/<c>−</c> handlers only increment / decrement the face index (clamped 1..7);
+    ///         ONLY a class change re-spawns the preview mesh. The face value feeds the create descriptor /
+    ///         the 2D portrait, never a live mesh rebuild. So this method only stores the value (and clamps
+    ///         it) — it does NOT call <see cref="RebuildForClass" /> or touch the actor wrapper. A future
+    ///         head-overlay-by-face edge would consume <see cref="FaceIndex" /> at the NEXT class rebuild,
+    ///         not by re-spawning on every face step.
+    ///     </para>
+    ///     Returns the clamped value actually stored. Strictly passive: view-state record only, no game
+    ///     logic, main thread only.
+    ///     spec: Docs/RE/specs/frontend_scenes.md §4.2 ("Face ± does NOT rebuild the 3D actor",
+    ///     CODE-CONFIRMED) / §2674 (faceA range [1,7], default 1).
+    /// </summary>
+    /// <param name="faceIndex">The new face index; clamped to [1, 7].</param>
+    public int UpdateFaceIndex(int faceIndex)
+    {
+        var clamped = Math.Clamp(faceIndex, FaceMinIndex, FaceMaxIndex);
+        if (clamped == FaceIndex) return clamped;
+
+        FaceIndex = clamped;
+        // Faithful: do NOT rebuild the 3D actor on a face step (frontend_scenes.md §4.2). The recorded
+        // value is consumed at the next class rebuild / by the create descriptor, not by a re-spawn.
+        GD.Print($"[CharCreatePreview3D] face index recorded = {FaceIndex} (range {FaceMinIndex}..{FaceMaxIndex}); " +
+                 "NO 3D actor rebuild (faithful). spec: frontend_scenes.md §4.2.");
+        return FaceIndex;
+    }
+
+    /// <summary>
+    ///     Records one create-form appearance-seed value (the appearance spinners' passive sink) on the
+    ///     3D preview WITHOUT rebuilding the actor — faithful to §4.2 (only a class change re-spawns the
+    ///     mesh). Returns the stored value. Strictly passive view-state record; main thread only.
+    ///     spec: Docs/RE/specs/frontend_scenes.md §4.2 (face/appearance ± is 2D-only, no 3D rebuild).
+    /// </summary>
+    /// <param name="seedIndex">Appearance-seed channel 0..5 (out-of-range is a no-op returning 0).</param>
+    /// <param name="delta">Increment / decrement applied to the channel (clamped ≥ 0).</param>
+    public int UpdateAppearanceSeed(int seedIndex, int delta)
+    {
+        if (seedIndex < 0 || seedIndex >= AppearanceSeedCount) return 0;
+        var next = Math.Max(0, _appearanceSeeds[seedIndex] + delta);
+        _appearanceSeeds[seedIndex] = next;
+        // Faithful: NO actor rebuild on an appearance step (frontend_scenes.md §4.2). The recorded
+        // value feeds the create descriptor / 2D portrait, consumed at the next class rebuild.
+        GD.Print($"[CharCreatePreview3D] appearance seed[{seedIndex}] recorded = {next} " +
+                 "(2D-only; NO 3D rebuild). spec: frontend_scenes.md §4.2.");
+        return next;
     }
 
     /// <summary>Rotates the preview left while held (≈±2 rad/s). spec: §4.2 CODE-CONFIRMED.</summary>
@@ -379,10 +497,12 @@ public sealed partial class CharCreatePreview3D : Control
             // AmbientSource.Color + sky contribution 0 so the FLAT white floor is the ambient and the dark
             // BG can NOT bleed in and crush it; energy is the Godot parity scalar (> 1.0). spec: §3.6.1/§3.6.2.
             AmbientLightSource = Environment.AmbientSource.Color,
-            // Warm amber ambient floor UNIFIED with CharSelectScene3D (R=1.0, G=0.72, B=0.44) so both
-            // 3D scenes shift the neutral stone to the same warm tan; the asset value stays
-            // OPTION_BRIGHT=1.0 white — the tint is the shared Godot parity mitigation. spec: §3.6.1/§3.6.2.
-            AmbientLightColor = new Color(1.0f, 0.72f, 0.44f),
+            // WHITE ambient floor — OPTION_BRIGHT default 100 → device ambient saturates to full white (1,1,1).
+            // spec: rendering.md §9.3 / §3.6.1 (sample-witnessed from light0.bin, keyframe 29 = 14:30):
+            //   "device-ambient floor is OPTION_BRIGHT / 100 → full white (1, 1, 1)". CODE-CONFIRMED.
+            // The prior warm amber (1.0, 0.72, 0.44) was an aesthetic divergence with no spec basis; it is
+            // replaced by the spec-faithful white to match the original's flat white ambient floor.
+            AmbientLightColor = new Color(1.0f, 1.0f, 1.0f), // spec: rendering.md §9.3 / §3.6.1 white (1,1,1)
             AmbientLightSkyContribution = 0.0f, // flat colour only — the dark BG must not dim the floor
             AmbientLightEnergy = AmbientFloorEnergyGodot, // spec: §3.6.2 OPTION_BRIGHT (1.0) → parity-driven
             // Linear tonemap = Godot-side MITIGATION (not an original constant): the legacy renderer
@@ -397,9 +517,9 @@ public sealed partial class CharCreatePreview3D : Control
         _subViewport.AddChild(worldEnv);
 
         GD.Print(
-            $"[CharCreatePreview3D] Area-0 environment: achromatic dark BG + WHITE ambient floor " +
-            $"(OPTION_BRIGHT=1.0, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + fog OFF. " +
-            "NO procedural sky. spec: §3.6 + environment_bins.md + rendering.md §1 (D3D9 full-bright).");
+            $"[CharCreatePreview3D] Area-0 environment: achromatic dark BG + WHITE (1,1,1) ambient floor " +
+            $"(OPTION_BRIGHT/100=1.0 white, Godot parity energy {AmbientFloorEnergyGodot}, sky-contrib 0) + fog OFF. " +
+            "NO warm tint. NO procedural sky. spec: rendering.md §9.3/§3.6.1 (white (1,1,1) CODE-CONFIRMED).");
     }
 
     // =========================================================================
@@ -622,10 +742,12 @@ public sealed partial class CharCreatePreview3D : Control
             child.QueueFree();
 
         // Position the wrapper at the create-actor world Z ≈ −9682 (~56u nearer the camera than the
-        // lineup row), at the row-pivot X, on the platform Y, at the BIGGER create scale (≈×3.471 — the
-        // 81/70 legacy ratio over the lineup's Godot 3.0) so ONE character fills the frame. The world Z is
-        // negated once to Godot-space. spec: §4.2 / §3.5.4 (create actor world Z ≈ −9682, scale 81). The
-        // wrapper carries the turntable rotation; the actor's own Position is the builder's recentre offset.
+        // lineup row), at the row-pivot X, on the platform Y, at the BIGGER create scale (≈×6.943 — the
+        // binary 81/70 scale-field ratio over the lineup's reconciled Godot ×6.0; the 81.0/70.0 are the
+        // scale fields, NOT the idle playback-rate 3.0) so ONE character fills the frame. The world Z is
+        // negated once to Godot-space. spec: Docs/RE/scenes/charselect.md §6.2 (create scale 81.0,
+        // lineup 70.0) / §3.5.4 (create actor world Z ≈ −9682). The wrapper carries the turntable
+        // rotation; the actor's own Position is the builder's recentre offset.
         var actorZ = ToGodotVec(0f, 0f, CreateActorLegacyZ).Z; // −9682 legacy → Godot Z
         _actorWrapper.Position = new Vector3(CreateActorGodotX, _rowGroundY, actorZ);
         _actorWrapper.Scale = Vector3.One * CreatePreviewScale;
@@ -684,11 +806,11 @@ public sealed partial class CharCreatePreview3D : Control
 
     private static Node3D? TryBuildActorForClass(RealClientAssets assets, int internalClass)
     {
-        var sknPath = SknPathForClass(internalClass);
+        var sknPath = SknPathForClass(assets, internalClass);
         if (sknPath is null)
         {
             GD.PrintErr(
-                $"[CharCreatePreview3D] No create-preview .skn defined for class={internalClass} — skipped (no wrong-class fallback). spec: §3.7.5 / §4.2.");
+                $"[CharCreatePreview3D] No create-preview body .skn for class={internalClass} — skipped (no wrong-class fallback, no fabrication). spec: §3.7.5 / skinning.md §3.5.3 / §4.2.");
             return null;
         }
 

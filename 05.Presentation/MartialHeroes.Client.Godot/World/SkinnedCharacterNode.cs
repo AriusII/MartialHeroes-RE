@@ -74,6 +74,17 @@ public sealed partial class SkinnedCharacterNode : Node3D
     /// </summary>
     public const int DefaultHandBoneId = 0;
 
+    // Additional skinned-deform OVERLAY parts {4,6,2,11} that share THIS node's ONE skeleton (the
+    // §3.5.1 model: a character is one skeleton + a fixed set of overlay .skn parts, the body being
+    // slot 3 = the primary surface; the rest are extra surfaces deformed against the SAME _bones /
+    // _world / id-resolve). Each part carries its own per-vertex influences (baked inverse-bind
+    // against the SHARED bind world), its own corner topology + UVs, and its own material. They are
+    // deformed in the SAME per-frame DeformAndUpload pass as the body, so every part animates with
+    // the idle and the §0 cancellation holds per-part (same shared bind world, same id_b rig).
+    // spec: Docs/RE/specs/skinning.md §3.5.1 (overlay parts share one skeleton; body = slot 3) /
+    //       §3.6.2 (the multi-part deform build) / §0 / §4 / §5.
+    private readonly List<DeformPart> _overlayParts = new();
+
     // Rigidly bone-attached weapon parts (slot 14). Each follows ONE shared-skeleton bone every frame
     // (no per-vertex skinning) — the recovered weapon attach model. spec: equipment_visuals.md §5.
     private readonly List<WeaponAttachment> _weapons = new();
@@ -550,6 +561,38 @@ public sealed partial class SkinnedCharacterNode : Node3D
         // Setup after the first DeformAndUpload, and it persists across ClearSurfaces).
         _arrayMesh.SurfaceSetMaterial(0, _material);
 
+        // OVERLAY PARTS {4,6,2,11}: deform each extra .skn against the SAME animated _world poses and
+        // append it as an additional surface (surface 1..N). One shared skeleton, one deform pass — no
+        // separate node, no double-attach. Each part's §0 cancellation holds because it was baked
+        // against the SAME shared bind world. spec: skinning.md §3.5.1 / §3.6.2 / §0.
+        for (var pi = 0; pi < _overlayParts.Count; pi++)
+        {
+            var part = _overlayParts[pi];
+
+            for (var v = 0; v < part.DeformedPos.Length; v++)
+                (part.DeformedPos[v], part.DeformedNrm[v]) = SkinningMath.DeformVertex(part.PerVertex[v], _world);
+
+            for (var c = 0; c < part.CornerVertex.Length; c++)
+            {
+                var vi = part.CornerVertex[c];
+                var pp = part.DeformedPos[vi];
+                var pn = part.DeformedNrm[vi];
+                var (pgx, pgy, pgz) = WorldCoordinates.SkinToGodot(pp.X, pp.Y, pp.Z);
+                var (pnx, pny, pnz) = WorldCoordinates.SkinToGodot(pn.X, pn.Y, pn.Z);
+                part.OutPos[c] = new Vector3(pgx, pgy, pgz);
+                part.OutNrm[c] = new Vector3(pnx, pny, pnz).Normalized();
+            }
+
+            var partArrays = new Array();
+            partArrays.Resize((int)Mesh.ArrayType.Max);
+            partArrays[(int)Mesh.ArrayType.Vertex] = part.OutPos;
+            partArrays[(int)Mesh.ArrayType.Normal] = part.OutNrm;
+            partArrays[(int)Mesh.ArrayType.TexUV] = part.Uvs;
+
+            _arrayMesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, partArrays);
+            _arrayMesh.SurfaceSetMaterial(pi + 1, part.Material);
+        }
+
         // Rigidly re-place any bone-attached weapon parts (slot 14) from the SAME animated bone world
         // poses (_world) computed above, so the weapon follows the hand exactly as the body deforms.
         // spec: Docs/RE/specs/equipment_visuals.md §5 (weapon = rigid single-bone follow).
@@ -628,6 +671,118 @@ public sealed partial class SkinnedCharacterNode : Node3D
             }
 
         _weapons.Clear();
+    }
+
+    // =========================================================================
+    // Overlay deform parts {4,6,2,11} — multi-surface skin on the SHARED skeleton (§3.5.1)
+    // =========================================================================
+
+    /// <summary>
+    ///     Attaches an additional skinned-deform overlay <c>.skn</c> part (a non-body slot {4,6,2,11})
+    ///     that shares THIS node's ONE skeleton. The part is NOT a separate node: its per-vertex
+    ///     influences are ID-resolved and inverse-bind-baked against the SAME shared bind world used for
+    ///     the body (§4), and it is deformed in the SAME per-frame pass as the body against the SAME
+    ///     animated <c>_world</c> poses, then appended as an extra ArrayMesh surface. This is the §3.5.1
+    ///     "one shared skeleton + a fixed set of overlay parts" model — there is no second base mesh and
+    ///     no double-attach. A part whose <c>.skn</c> declares a different <c>id_b</c> than the body's
+    ///     rig would be the §8(e) class-mismatch shatter, so the caller must only attach parts authored
+    ///     against the same class rig.
+    ///     <para>STRICTLY PASSIVE: builds + deforms geometry only. Main-thread only (Setup must have run).</para>
+    ///     spec: Docs/RE/specs/skinning.md §3.5.1 (overlay parts share one skeleton) / §3.6.2 (multi-part
+    ///     deform build) / §0 / §4 / §5; §8(e) (same id_b rig for every part).
+    /// </summary>
+    /// <param name="partMesh">Parsed overlay <c>.skn</c> (must be authored against this node's class rig).</param>
+    /// <param name="albedo">Optional resolved part texture; null → neutral material.</param>
+    /// <param name="debugLabel">Label printed with the attach diagnostic.</param>
+    public void AttachDeformPart(SkinnedMesh partMesh, ImageTexture? albedo, string debugLabel)
+    {
+        if (!_ready)
+        {
+            GD.PrintErr($"[Skinning] AttachDeformPart '{debugLabel}': node not Setup — part skipped.");
+            return;
+        }
+
+        var boneCount = _bones.Length;
+        var vertexCount = partMesh.Positions.Length;
+
+        // Influences (grouped, ID-resolved by id − base_id against the SHARED rig, normalized) + the
+        // inverse-bind bake against the SHARED bind world — exactly the body's Setup path (§4/§5). The
+        // bind world is recomputed here from the shared bones (cheap; a few hundred bones) so the part's
+        // §0 cancellation matches the body's. spec: skinning.md §3.2 / §4 / §5.2.
+        var bindWorld = SkinningMath.AccumulateBindWorld(_bones, _parentIndex);
+        var perVertex = SkinningMath.BuildInfluences(partMesh.Weights, vertexCount, _idToIndex, _baseId, boneCount);
+        SkinningMath.BakeInverseBind(perVertex, partMesh.Positions, partMesh.Normals, bindWorld);
+
+        // Render topology: flat unindexed corner list, CW→CCW swap [0,2,1] (Godot CCW).
+        // spec: Docs/RE/formats/mesh.md §Face table.
+        var faceCount = (int)partMesh.FaceCount;
+        var cornerCount = faceCount * 3;
+        var cornerVertex = new int[cornerCount];
+        var uvs = new Vector2[cornerCount];
+        var corners = partMesh.Corners;
+        for (var f = 0; f < faceCount; f++)
+        {
+            var cBase = f * 3;
+            int[] order = [cBase + 0, cBase + 2, cBase + 1];
+            for (var j = 0; j < 3; j++)
+            {
+                var corner = corners[order[j]];
+                var vi = corner.VertexIndex;
+                if (vi >= (uint)vertexCount) vi = 0;
+                cornerVertex[cBase + j] = (int)vi;
+                uvs[cBase + j] = new Vector2(corner.UvU, corner.UvV);
+            }
+        }
+
+        // Per-part material — same cel/PBR cascade as the body. spec: rendering.md §5.2.
+        Material partMat;
+        try
+        {
+            partMat = CelShadeMaterialFactory.CelEnabled
+                ? CelShadeMaterialFactory.Build(albedo)
+                : BuildStandardPartMaterial(albedo);
+        }
+        catch
+        {
+            partMat = BuildStandardPartMaterial(albedo);
+        }
+
+        _overlayParts.Add(new DeformPart(
+            perVertex,
+            cornerVertex,
+            uvs,
+            new Vec3[vertexCount],
+            new Vec3[vertexCount],
+            new Vector3[cornerCount],
+            new Vector3[cornerCount],
+            partMat));
+
+        // Re-upload immediately so the new surface appears this frame (rest pose; the next Advance
+        // re-deforms it from the current clip time, identical to the body path).
+        DeformAndUpload(_time, !_hasClip);
+
+        GD.Print($"[Skinning] Overlay deform part attached: '{partMesh.Name}' " +
+                 $"({vertexCount}v, surface {_overlayParts.Count}) on the shared {boneCount}-bone rig. " +
+                 "spec: skinning.md §3.5.1 / §3.6.2.");
+    }
+
+    /// <summary>Removes all overlay deform parts (e.g. on an appearance change / teardown, §3.6.2).</summary>
+    public void ClearOverlayParts()
+    {
+        _overlayParts.Clear();
+        if (_ready && _arrayMesh is not null) DeformAndUpload(_time, !_hasClip);
+    }
+
+    private static StandardMaterial3D BuildStandardPartMaterial(ImageTexture? albedo)
+    {
+        var std = new StandardMaterial3D
+        {
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
+        };
+        if (albedo is not null) std.AlbedoTexture = albedo;
+        else std.AlbedoColor = new Color(0.85f, 0.75f, 0.65f);
+        return std;
     }
 
     /// <summary>
@@ -806,6 +961,22 @@ public sealed partial class SkinnedCharacterNode : Node3D
         int BoneIndex,
         float VisualScale,
         bool OffHand);
+
+    /// <summary>
+    ///     One skinned-deform overlay part {4,6,2,11} sharing this node's skeleton. Carries its own
+    ///     baked influences, corner topology + UVs, per-frame deform scratch, output buffers, and
+    ///     material; it is deformed against the shared <c>_world</c> poses each frame and uploaded as an
+    ///     extra ArrayMesh surface. spec: Docs/RE/specs/skinning.md §3.5.1 / §3.6.2 / §0 / §4 / §5.
+    /// </summary>
+    private sealed record DeformPart(
+        SkinningMath.VertexInfluences[] PerVertex,
+        int[] CornerVertex,
+        Vector2[] Uvs,
+        Vec3[] DeformedPos,
+        Vec3[] DeformedNrm,
+        Vector3[] OutPos,
+        Vector3[] OutNrm,
+        Material Material);
 
     /// <summary>Diagnostic results for the mandatory skinning invariants.</summary>
     public sealed class SkinDiagnostics

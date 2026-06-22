@@ -1,14 +1,13 @@
 // Ui/Scenes/Select/CharSelectWindow.cs
 //
-// Character-select 2D chrome (state 4) — FROM SCRATCH on the Ui/ substrate.
-// Replaces the old Screens/CharacterSelectScreen.cs for layer-05 presentation only.
+// Character-select 2D chrome (state 4) — built on the Ui/ substrate.
 //
 // BUILD ON:
 //   HudAtlasLibrary   — VFS atlas slices (HudWidgetFactory uses this).
 //   HudTextLibrary    — msg.xdb CP949 caption lookup.
 //   HudWidgetFactory  — GU-faithful widget constructors.
 //   CharSelectScene3D / CharCreatePreview3D — REUSED 3D scene layer (unchanged).
-//   CharListEventDrainer (via CharSelectEventDrainer) — REUSED event pump.
+//   CharSelectEventDrainer — event pump (drains CharacterListEvent channel).
 //   ScreenHost.SetScreen — POINT-anchor root (no FullRect on root).
 //
 // WIDGET CONTRACT (state 4 SELECT view):
@@ -50,7 +49,7 @@
 // SIGNALS (identical surface to Screens/CharacterSelectScreen — allows SelectScene re-point):
 //   EnterGameRequested(characterName, slotIndex)
 //   BackRequested()
-//   CreateCharacterRequested(name, internalClass, faceIndex)
+//   CreateCharacterRequested(name, internalClass, faceIndex, stats)
 //   DeleteCharacterRequested(slotIndex, characterName)
 //
 // PUBLIC API (consumed by CharSelectEventDrainer and SelectScene):
@@ -90,10 +89,20 @@ public sealed partial class CharSelectWindow : Control
 
     /// <summary>
     ///     Raised when the player confirms the Create-character form.
+    ///     <para>
+    ///         <paramref name="stats" /> is a 5-entry array (Stat0..Stat4) holding the point-buy values
+    ///         the player has stepped on the create form.  Mapping per the binary-confirmed spinner pairing:
+    ///         Stat0 = spinners 25+/30−, Stat1 = 26+/31−, Stat2 = 27+/32−, Stat3 = 29+/34−, Stat4 = 28+/33−.
+    ///         Each entry is the raw display value (seeded 10, no domain math here — layer-04 Application
+    ///         validates/normalises before writing the 52-byte 1/6 body).
+    ///     </para>
     ///     spec: Docs/RE/specs/frontend_scenes.md §4/§8 — "send 1/6 (52B)". CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/character_creation.md §2.1 (point-buy: floor 10, seed budget 5, sum+budget=55).
+    ///     spec: Docs/RE/scenes/charselect.md §4.3 (spinner pairing — non-sequential, binary-confirmed).
     /// </summary>
     [Signal]
-    public delegate void CreateCharacterRequestedEventHandler(string name, int internalClass, int faceIndex);
+    public delegate void CreateCharacterRequestedEventHandler(string name, int internalClass, int faceIndex,
+        int[] stats);
 
     /// <summary>
     ///     Raised when the player presses Delete on an occupied slot.
@@ -111,6 +120,15 @@ public sealed partial class CharSelectWindow : Control
     /// </summary>
     [Signal]
     public delegate void EnterGameRequestedEventHandler(string characterName, int slotIndex);
+
+    /// <summary>
+    ///     Raised when the player confirms the Rename modal (act 59 OK) with a locally-valid new name.
+    ///     SelectScene forwards it to <c>UseCases.RenameCharacterAsync</c> (sends 1/13, 18-byte body).
+    ///     spec: Docs/RE/specs/frontend_scenes.md §6 (rename; same name rule as §4.4);
+    ///     Docs/RE/packets/cmsg_char_rename.yaml.
+    /// </summary>
+    [Signal]
+    public delegate void RenameCharacterRequestedEventHandler(int slotIndex, string newName);
 
     // =========================================================================
     // Constants (spec: Docs/RE/specs/ui_system.md §8.2+§8.4. CODE-CONFIRMED.)
@@ -164,6 +182,10 @@ public sealed partial class CharSelectWindow : Control
     // The SELECT view has NO stat grid — the 96-byte stats block is not consumed on select.
     // spec: Docs/RE/specs/ui_system.md §8.2+§8.4 (create form); CYCLE-6b fact 1 (select view).
     private const int StatGridRows = 5;
+
+    // Point-buy stat floor: each stat starts at 10 and may not go below it.
+    // spec: Docs/RE/specs/character_creation.md §2.1 — seed 10, floor 10, effective [10,15].
+    private const int StatFloor = 10; // spec: character_creation.md §2.1
     private const int StatGridStride = 24; // spec §8.2+§8.4. CODE-CONFIRMED.
     private const int StatIconW = 24;
     private const int StatIconH = 16;
@@ -212,11 +234,12 @@ public sealed partial class CharSelectWindow : Control
     private const float NameBoxW = 274f;
     private const float NameBoxH = 18f;
 
-    // Delete-confirm popup — actions Yes=54 / No=55, msgs 14001/14002.
+    // Delete-confirm popup — dismissed via ActPanelClose (64), msgs 14001/14002.
     // Dragon frame: inventwindow.dds src(318,647) 340×190, drawn centred at (342,289,340,190).
-    // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d (DELETE-confirm popup). CODE-CONFIRMED.
-    private const int ActionDeleteYes = 54;
-    private const int ActionDeleteNo = 55;
+    // NOTE: earlier reading used Yes=54/No=55; binary-confirmed map (create_flow_actions.md,
+    // SHA 263bd994) shows 54=slot-lock select confirm (1/7 mode0), 55=slot-select cancel,
+    // 64='@'=plain panel-close. These local constants are unused; ActPanelClose/ActSlotSelectConfirm
+    // in Actions.cs carry the authoritative values. spec: charselect.md §4.3.
     private const uint MsgDeleteConfirmBody = 14001u; // spec §11.5d. CODE-CONFIRMED.
     private const uint MsgDeleteConfirmTitle = 14002u; // spec §11.5d. CODE-CONFIRMED.
     private const float DeleteModalW = 340f; // spec §11.5d "340×190". CODE-CONFIRMED.
@@ -255,11 +278,13 @@ public sealed partial class CharSelectWindow : Control
 
     private readonly LiveSlot[] _slots = new LiveSlot[MaxSlots];
 
-    // D5: roster button Controls for occupancy-gated visibility.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.2/§3.4 / CYCLE-6b fact 3.
-    private Control? _btnCreate;
-    private Control? _btnDelete;
-    private Control? _btnEnter;
+    // Point-buy stat display values collected from the spinner presses (acts 25–34).
+    // Seeded at StatFloor (10) on create-form open; never touched by domain math here.
+    // NON-SEQUENTIAL binary-confirmed pairing: Stat0=25+/30−, Stat1=26+/31−, Stat2=27+/32−,
+    // Stat3=29+/34−, Stat4=28+/33−.  Passed verbatim in CreateCharacterRequested; layer-04
+    // Application validates and normalises before writing the 52-byte 1/6 body.
+    // spec: Docs/RE/scenes/charselect.md §4.3; Docs/RE/specs/character_creation.md §2.1.
+    private readonly int[] _statValues = new int[StatGridRows]; // indices 0..4 = Stat0..Stat4
 
     // Cached node references (UI widgets updated dynamically).
     // HudLabel wraps a Godot Label; use GetControl() to add to parent, and .Text for mutations.
@@ -269,14 +294,14 @@ public sealed partial class CharSelectWindow : Control
     private HudLabel? _createDescLine2Widget;
     private int _createFaceIndex = FaceMin;
     private HudLabel? _createFaceLabelWidget;
-    private Control? _createForm;
     private bool _createFormVisible;
     private CharCreatePreview3D? _createPreview3D;
-    private int _createUiClass; // 0..3
+    private double _createToastTimer;
 
-    // Delete-confirm modal (shown when Delete is pressed on an occupied slot).
-    // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
-    private Control? _deleteConfirmModal;
+    // Dedicated create-form feedback toast (face/appearance steps). A root overlay, distinct from the
+    // name-modal toast (_nameToastWidget) which is hidden while the create form is open. View state only.
+    private HudLabel? _createToastWidget;
+    private int _createUiClass; // 0..3
 
     private HudLabel? _infoLevelWidget;
     private HudLabel? _infoNameWidget;
@@ -286,7 +311,6 @@ public sealed partial class CharSelectWindow : Control
     private HudLabel? _infoPositionWidget;
     private LineEdit? _nameEntry;
 
-    private Control? _nameModal;
     private HudLabel? _nameModalTitleWidget;
     private HudLabel? _nameToastWidget;
 
@@ -296,6 +320,7 @@ public sealed partial class CharSelectWindow : Control
 
     // Shared assets for 3D previews.
     private RealClientAssets? _realAssets;
+
     private bool _rotatePressLeft;
     private bool _rotatePressRight;
 
@@ -316,6 +341,14 @@ public sealed partial class CharSelectWindow : Control
     /// <summary>Text library (from ClientContext.HudText). Null = offline.</summary>
     public HudTextLibrary? Text { get; set; }
 
+    /// <summary>
+    ///     Per-scene front-end audio node (owned by SelectScene, injected before _Ready). Used to
+    ///     play the generic UI click cue at the head of each action branch and the per-class preview
+    ///     BGM on a class change. Null = offline (clicks are silent, never crash).
+    ///     spec: Docs/RE/specs/sound.md §15.1 / §15.2 / §15.6b.
+    /// </summary>
+    public FrontEndAudio? Audio { get; set; }
+
     // Convenience accessors — resolve the backing Label from HudLabel for HorizontalAlignment etc.
     private Label? _charCountCaption => (Label?)_charCountCaptionWidget?.GetControl();
     private Label? _infoName => (Label?)_infoNameWidget?.GetControl();
@@ -327,6 +360,7 @@ public sealed partial class CharSelectWindow : Control
     private Label? _createDescLine2 => (Label?)_createDescLine2Widget?.GetControl();
     private Label? _nameModalTitle => (Label?)_nameModalTitleWidget?.GetControl();
     private Label? _nameToast => (Label?)_nameToastWidget?.GetControl();
+    private Label? _createToast => (Label?)_createToastWidget?.GetControl();
 
     // =========================================================================
     // Public API
@@ -389,14 +423,16 @@ public sealed partial class CharSelectWindow : Control
         CustomMinimumSize = new Vector2(RefW, RefH);
         MouseFilter = MouseFilterEnum.Ignore;
 
-        // Front-end overlay render state: alpha-blend ON, additive ONE/ONE.
-        // spec: Docs/RE/specs/rendering.md §4.2 — "UI/HUD front-end overlay (login/char-select/
-        //   opening): ONE/ONE (additive); additionally clears fog, dither, alpha-test;
-        //   stage 0 = select-arg-1/diffuse, stage 1 = disabled; linear/linear/mip-none sampling."
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add // spec: rendering.md §4.2 ONE/ONE additive
-        };
+        // spec: Docs/RE/specs/rendering.md §4.2 — the D3D9 front-end pipeline sets ONE/ONE additive
+        // globally before walking the widget tree. In Godot, applying BlendMode.Add to the root
+        // Control cascades to ALL children (tabs, char-count caption, info panel, Create/Delete/Enter
+        // roster buttons), causing additive washout over the bright 3D SubViewport backdrop.
+        // The D3D original's ONE/ONE works because UI textures are authored on black backgrounds;
+        // that constraint does NOT hold in Godot where Label nodes and white-bordered atlas slices
+        // produce cyan/off-white tint artefacts when additively composited over a lit 3D scene.
+        // FIX: the root uses NORMAL blend (Godot default = SRCALPHA/INVSRCALPHA). Additive is applied
+        // ONLY to individual child nodes proven to be transparent overlay sprites/effects
+        // (e.g. the action-61 overlay — attach a CanvasItemMaterial{BlendMode.Add} to THAT child).
 
         try
         {
@@ -411,11 +447,15 @@ public sealed partial class CharSelectWindow : Control
 
         try
         {
-            BuildUi();
+            // HARD TABLE-RASE: build the COMPLETE §11.5h 124-widget inventory (10 Panel +
+            // 37 Image + 46 Button3 + 29 Label + 2 Textbox) with EXACTLY 42 action bindings.
+            // spec: Docs/RE/specs/frontend_scenes.md §11.5h.
+            BuildInventory();
+            RefreshInfo();
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[CharSelectWindow] BuildUi failed: {ex.Message}");
+            GD.PrintErr($"[CharSelectWindow] BuildInventory failed: {ex.Message}");
         }
     }
 
@@ -435,7 +475,7 @@ public sealed partial class CharSelectWindow : Control
             if (_rotatePressRight) _createPreview3D.RotateRight(dt);
         }
 
-        // Toast timer.
+        // Name-modal toast timer.
         if (_toastTimer > 0.0)
         {
             _toastTimer -= delta;
@@ -444,6 +484,18 @@ public sealed partial class CharSelectWindow : Control
                 _toastTimer = 0.0;
                 if (_nameToast is not null && IsInstanceValid(_nameToast))
                     _nameToast.Visible = false;
+            }
+        }
+
+        // Create-form feedback-toast timer (face/appearance steps).
+        if (_createToastTimer > 0.0)
+        {
+            _createToastTimer -= delta;
+            if (_createToastTimer <= 0.0)
+            {
+                _createToastTimer = 0.0;
+                if (_createToast is not null && IsInstanceValid(_createToast))
+                    _createToast.Visible = false;
             }
         }
     }

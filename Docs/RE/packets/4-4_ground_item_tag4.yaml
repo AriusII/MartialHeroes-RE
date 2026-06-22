@@ -36,8 +36,11 @@ notes: |
   an area grid id, and an area-center Z/X pair -- only the two center floats are used, to recenter
   the actor grid; the rest are read and discarded) followed by a tag loop that runs until a zero
   tag. The tag-4 case reads this 24-byte body and hands it to the ground-item spawner. The full
-  area-snapshot framing belongs to the 4/4 SmsgAreaEntitySnapshot spec (not yet written); this file
-  documents the ground-item record so a codegen for the snapshot can embed it.
+  area-snapshot framing belongs to the 4/4 SmsgAreaEntitySnapshot parent spec
+  (packets/4-4_area_entity_snapshot.yaml); this file documents the ground-item record so a codegen
+  for the snapshot can embed it. (CYCLE 12 / Phase 3: the parent spec now exists and the opcodes.md
+  0x40004 row points at it -- the previously-dangling cross-reference is closed; tag-4 layout
+  re-confirmed LIVE on build 263bd994.)
 
   PARENT TAG SET (the 4/4 stream, for the snapshot-spec author -- CONFIRMED sizes, VALUE meanings
   pending): the tag loop dispatches on a leading tag byte and reads a tag-specific record:

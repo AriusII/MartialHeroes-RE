@@ -9,6 +9,7 @@ using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Audio;
 using MartialHeroes.Client.Godot.Composition;
@@ -317,6 +318,18 @@ public sealed partial class ClientContext : Node
     ///     spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — durable world-entry seam.
     /// </summary>
     public WorldEntryState WorldEntry { get; private set; } = null!;
+
+    /// <summary>
+    ///     The universal deferred timed-event queue (the "10001" queue). Drained each frame via
+    ///     <see cref="Domain.Simulation.Simulation.TimedEventQueue.Drain" /> (two-pass full-tree sweep); flushed by
+    ///     <see cref="InGameScene._ExitTree" /> on world → front-end scene transition so stale deferred
+    ///     triggers never fire into the next scene.
+    ///     Instantiated here (composition root) so layer-05 can call Drain/Flush without needing to
+    ///     own the queue's implementation. The queue itself is engine-free (Domain.Simulation).
+    ///     spec: Docs/RE/specs/effect-scheduling.md §5A (10001 deferred timed-event queue).
+    ///     spec: Docs/RE/specs/effect-scheduling.md §5A.3 — two-pass full-tree sweep; FlushOnSceneTransition.
+    /// </summary>
+    public TimedEventQueue TimedEventQueue { get; private set; } = null!;
 
     /// <summary>
     ///     Stamps the <see cref="ExpectedBakeAreaId" /> so the CellBake lambda rejects stale events

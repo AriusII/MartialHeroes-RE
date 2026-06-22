@@ -81,6 +81,28 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// <summary>The fixed 16-byte whisper target-name buffer at payload +0x02. spec: 2-7_whisper.yaml (TargetName).</summary>
     private const int WhisperTargetNameBytes = 16;
 
+    // -------------------------------------------------------------------------
+    // Point-buy — deterministic create-form stat allocator (§2.1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>Each of the five stats opens at 10 (= the per-stat floor). spec: character_creation.md §2.1.</summary>
+    public const uint PointBuyStatSeed = 10;
+
+    /// <summary>The per-stat floor (10). A stat is never decremented below this. spec: §2.1.</summary>
+    public const uint PointBuyStatFloor = 10;
+
+    /// <summary>The per-stat clamp ceiling (15). spec: character_creation.md §2.1 (clamp [10,15]).</summary>
+    public const uint PointBuyStatCeil = 15;
+
+    /// <summary>The point budget opens at 5. spec: character_creation.md §2.1.</summary>
+    public const uint PointBuyBudgetSeed = 5;
+
+    /// <summary>
+    ///     The point-buy invariant total: <c>sum(Stat0..4) + PointsRemaining</c> is always 55
+    ///     (5×10 seed + 5 budget). spec: Docs/RE/specs/character_creation.md §2.1.
+    /// </summary>
+    public const uint PointBuyInvariantTotal = 5 * PointBuyStatSeed + PointBuyBudgetSeed;
+
     /// <summary>
     ///     CP949 (code page 949 / EUC-KR) — the on-wire charset for ALL chat text (both the say-box body and
     ///     the whisper target name). The code-pages provider is registered once here (idempotent) so the
@@ -291,13 +313,15 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x00, 4), heading); // 0x00 Heading
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x04, 4), tgtX); // 0x04 TargetX
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x08, 4), tgtZ); // 0x08 TargetZ
-        // 0x0c ModeFlags: low byte is the click-to-move mode selector (1); a run bit packs into the
-        // same region. The sub-byte split is UNKNOWN, so we set mode=1 plus a run bit at 0x100.
-        // spec: 2-13_move_request.yaml (ModeFlags, byte split unconfirmed -> PROVISIONAL packing).
-        const uint moveModeClickToMove = 1u;
-        const uint runBit = 0x0000_0100u;
-        var modeFlags = moveModeClickToMove | (running ? runBit : 0u);
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x0c, 4), modeFlags); // 0x0c ModeFlags
+        // The 0x0c..0x0f region is NOT a packed u32: the shared move sender writes ModeByte as the
+        // hardcoded constant 3 @0x0c (the statically-decidable move-mode value space is the singleton
+        // {3}) and the RunFlag bool @0x0d (1 when running); bytes 0x0e/0x0f are reserved/undefined and
+        // stay zero from Clear(). The earlier "low byte = move-mode 1 + run bit at 0x100" packing is
+        // REFUTED by the binary. spec: 2-13_move_request.yaml (ModeByte = constant 3; RunFlag @0x0d).
+        const byte moveModeConstant = 3; // hardcoded literal 3 written unconditionally. spec: 2-13 (@0x0c = 3).
+        payload[0x0c] = moveModeConstant; // 0x0c ModeByte = 3. spec: 2-13_move_request.yaml.
+        payload[0x0d] = running ? (byte)1 : (byte)0; // 0x0d RunFlag (1 when running). spec: 2-13_move_request.yaml.
+        // 0x0e..0x0f Reserved0E stays zero from Clear(). spec: 2-13_move_request.yaml (reserved/pad).
 
         return SendAsync(2, 13, payload, cancellationToken);
     }
@@ -305,6 +329,13 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// <inheritdoc />
     public ValueTask SelectCharacterAsync(int slotIndex, CancellationToken cancellationToken = default)
     {
+        // PLAY-CONFIRM (the Enter / play button). CORRECTED (CYCLE 12 Phase 2): this no longer sends 1/9
+        // directly. It sends 1/7 CmsgSelectCharacterSlot with Mode = 1 (select-and-play) and CACHES the
+        // chosen slot; the server replies 3/14 SmsgCharSpawnResponse, and the 3/14 handler emits 1/9 from
+        // inside itself (EmitEnterWorldRequest). The @BLANK@ empty-slot routing and the 0..4 slot-range
+        // guard are preserved. spec: Docs/RE/specs/frontend_scenes.md §7 (1/7 mode 1 play-confirm →
+        // 3/14 → 1/9); Docs/RE/packets/cmsg_char_select.yaml (Mode 1 = select-and-play).
+        //
         // Slot-range guard: the char list supports a maximum of 5 slots (indices 0..4). spec:
         // login_flow.md §3.5 ("slot index ≤ 4") / §7 (Char-list maximum slots = 5).
         if (slotIndex is < 0 or > CharacterSelectionStore.MaxSlotIndex)
@@ -314,15 +345,15 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         cancellationToken.ThrowIfCancellationRequested();
 
         // Confirm the slot against the cached 3/1 roster: detect the "@BLANK@" empty-slot sentinel,
-        // re-check the range, and on a real character cache the chosen descriptor for the 3/14 spawn.
-        // spec: login_flow.md §3.3 / §3.5.
+        // re-check the range, and on a real character cache the chosen descriptor for the 4/1 spawn (the
+        // cache is also what EmitEnterWorldRequest / the 4/1 path read). spec: login_flow.md §3.3 / §3.5.
         if (_characterSelection is not null)
         {
             var outcome = _characterSelection.Confirm(slotIndex);
             switch (outcome)
             {
                 case CharacterSelectionStore.SelectOutcome.Blank:
-                    // Empty slot -> route to character creation; do NOT send 1/9. spec: §3.3 / §3.5.
+                    // Empty slot -> route to character creation; send NOTHING (no 1/7, no 1/9). spec: §3.3 / §3.5.
                     _eventBus?.Publish(new CreateCharacterRequestedEvent(slotIndex));
                     return ValueTask.CompletedTask;
 
@@ -332,28 +363,61 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
                 case CharacterSelectionStore.SelectOutcome.Confirmed:
                 default:
-                    break; // real character cached -> proceed to send 1/9.
+                    break; // real character cached -> proceed to send the 1/7 mode-1 play-confirm.
             }
         }
+
+        // Build the fixed 2-byte 1/7 play-confirm body. spec: cmsg_char_select.yaml.
+        Span<byte> payload = stackalloc byte[CmsgSelectCharacterSlot.WireSize];
+        payload[0x00] = (byte)slotIndex; // 0x00 SlotIndex (the committed slot). spec: cmsg_char_select.yaml.
+        // 0x01 Mode = 1 = select-and-play (play-confirm; elicits the 3/14 enter-trigger). spec:
+        // cmsg_char_select.yaml (Mode 1, binary-confirmed CYCLE 12 Phase 2); frontend_scenes.md §7.
+        const byte selectAndPlayMode = 1;
+        payload[0x01] = selectAndPlayMode;
+
+        // 1/7 is a char-mgmt send: arm the single char-mgmt latch (keepalive suppression; cleared by the
+        // major-3 result ladder). This is NOT the enter-in-flight signal — the ENTER latch is armed by the
+        // 1/9 emit in the 3/14 handler (EmitEnterWorldRequest). spec: net_contracts.md §1.3 (1/7 arms the
+        // single char-mgmt latch); frontend_scenes.md §7 (enter latch is the 1/9 emit, read at 4/1).
+        _inFlightLatch?.Arm();
+
+        // Send 1/7 mode 1. The server answers 3/14; the 3/14 handler emits 1/9. spec: frontend_scenes.md §7.
+        return SendAsync(1, 7, payload, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default)
+    {
+        // The 3/14-handler-triggered 1/9 enter send. This is the SECOND rung of the enter ladder (the
+        // play-confirm 1/7 mode 1 is the first; the server's positive-flag 3/14 triggers THIS). It builds
+        // the 40-byte 1/9 CmsgEnterGameRequest and ARMS the in-flight latch so the subsequent 4/1
+        // SmsgGameStateTick is recognized as the enter confirmation (and clears the latch). The composition
+        // root wires this method as the GamePacketHandler's enterWorldEmitter delegate. spec:
+        // Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted FROM the 3/14 handler);
+        // Docs/RE/packets/cmsg_char_enter.yaml (40-byte 1/9, ENTER SEQUENCE).
+        cancellationToken.ThrowIfCancellationRequested();
 
         // Build the fixed 40-byte 1/9 payload. spec: cmsg_char_enter.yaml.
         Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
         payload.Clear();
-        payload[0x00] = (byte)slotIndex; // 0x00 SlotIndex (HIGH CONFIDENCE)
-        // 0x01 SessionToken: launcher-supplied 33-byte identity token, not the typed account and not the
-        // derived version value. Core leaves it zero unless supplied by the composition root.
-        // spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
-        _sessionToken.CopyTo(payload.Slice(0x01, SessionTokenLength));
+        payload[0x00] = slotIndex; // 0x00 SlotIndex (the slot from the 3/14 body). spec: cmsg_char_enter.yaml.
+        // 0x01 SessionToken (33 bytes): the lowercase-hex MD5 self-checksum of our own executable (32 hex
+        // + NUL) — a build-integrity token, NOT a launcher/login session token. The layer-02 helper hashes
+        // OUR running exe (null/IO-safe: zero-fills on a null ProcessPath). spec: cmsg_char_enter.yaml
+        // (SessionToken @0x01 = self-MD5, CORRECTED CYCLE 12 Phase 2).
+        SessionTokenChecksum.WriteSelfChecksum(payload.Slice(0x01, SessionTokenChecksum.SessionTokenLength));
         // 0x22 Pad (2 bytes) stays zero from Clear(). spec: cmsg_char_enter.yaml (Pad @0x22).
         // 0x24 VersionToken: u32 LE token = 10 × game.ver field[5] + 9 (= 21149 for sampled data).
         // spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
         BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
 
-        // 1/9 is a char-mgmt send: arm the single in-flight latch (cleared by 4/1). spec: net_contracts.md §1.3.
+        // ARM the enter-in-flight latch: the 1/9 emit is the enter-world signal the 4/1 confirmation reads
+        // (and clears). spec: net_contracts.md §1.3 (1/9 arms the enter latch; 4/1 clears it);
+        // frontend_scenes.md §7.
         _inFlightLatch?.Arm();
 
-        // Online enter-world path is 4 (Select) → 2 (Load, via 3/5 EnterGameAck) → … → 5; the use-case
-        // only sends 1/9 and waits for 3/5. spec: client_runtime.md §7.5.3 / §7.9.5.
+        // Online enter-world path: 1/9 → 3/5 EnterGameAck → 4/1 world tick (the actual spawn). spec:
+        // client_runtime.md §7.5.3; frontend_scenes.md §7.
         return SendAsync(1, 9, payload, cancellationToken);
     }
 
@@ -361,30 +425,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     public IReadOnlyList<CharacterSlotRecord?> GetCharacterRoster()
     {
         return _characterSelection?.Snapshot() ?? Array.Empty<CharacterSlotRecord?>();
-    }
-
-    /// <inheritdoc />
-    public ValueTask<bool> SelectCharacterSlotAsync(int slotIndex, CancellationToken cancellationToken = default)
-    {
-        ValidateSlotIndex(slotIndex);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        var record = _characterSelection?.Get(slotIndex);
-        if (_characterSelection is not null &&
-            (record is null || string.Equals(record.Name, CharacterSelectionStore.BlankSlotSentinel,
-                StringComparison.Ordinal)))
-            return ValueTask.FromResult(false);
-
-        // spec: Docs/RE/packets/cmsg_char_select.yaml (CmsgSelectCharacterSlot, 2 bytes).
-        // Binary-confirmed (Phase 2b): mode 0 = slot-lock / pre-play; mode 1 = select-and-play.
-        // spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
-        Span<byte> payload = stackalloc byte[CmsgSelectCharacterSlot.WireSize];
-        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0x00.
-        payload[0x01] = 0; // spec: cmsg_char_select.yaml — Mode 0 = slot-lock / pre-play (binary-confirmed, Phase 2b).
-
-        // 1/7 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
-        _inFlightLatch?.Arm();
-        return SendBoolAsync(1, 7, payload, true, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -408,20 +448,34 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                 nameof(request.Face), request.Face,
                 "Face index must be 1..7 (spec: cmsg_char_create.yaml).");
 
+        // Deterministic point-buy validation (§2.1): each stat in [10,15], budget in [0,5], and the
+        // invariant sum(Stat0..4) + PointsRemaining = 55. A failed point-buy aborts the send (the create
+        // form only emits 1/6 once the local point-buy gate passes). The validation lives here in the
+        // use-case, NOT in a handler. spec: Docs/RE/specs/character_creation.md §2.1.
+        var pointBuy = BuildPointBuy(
+            request.Stat0, request.Stat1, request.Stat2, request.Stat3, request.Stat4,
+            request.PointsRemaining);
+        if (!pointBuy.IsValid)
+            return ValueTask.FromResult(new CharacterNameValidationResult(false, 12012));
+
         var payload = new byte[CmsgCreateCharacter.WireSize];
         Span<byte> p = payload;
         WriteFixedCp949(request.Name, p.Slice(0x00, 18)); // spec: cmsg_char_create.yaml — Name @0.
-        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x12, 2), request.Face);
-        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x14, 2), request.Sex);
-        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x16, 2), request.HairOrReserved);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x12, 2), request.Face); // Face @0x12. spec: §1.2.
+        // AppearanceA @0x14 / AppearanceB @0x16 (sex-vs-appearance meaning capture-pending; not stepped on
+        // the create path). spec: character_creation.md §1.2 (AppearanceA/AppearanceB).
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x14, 2), request.AppearanceA);
+        BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x16, 2), request.AppearanceB);
+        // ClassInternalId @0x18: the UI button index REMAPPED to the internal class id (§3). spec: §1.2 / §3.
         BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x18, 2), RemapCreateClass(request.UiClassIndex));
-        // 0x1A reserved gap stays zero. spec: cmsg_char_create.yaml.
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1C, 4), request.Stat0);
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x20, 4), request.Stat1);
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x24, 4), request.Stat2);
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x28, 4), request.Stat3);
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x2C, 4), request.Stat4);
-        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x30, 4), request.PointsRemaining);
+        // 0x1A Reserved1A pad (2 bytes) stays zero. spec: character_creation.md §1.2 (Reserved1A @0x1A).
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x1C, 4), pointBuy.Stat0); // Stat0 @0x1C. spec: §1.2.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x20, 4), pointBuy.Stat1); // Stat1 @0x20. spec: §1.2.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x24, 4), pointBuy.Stat2); // Stat2 @0x24. spec: §1.2.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x28, 4), pointBuy.Stat3); // Stat3 @0x28. spec: §1.2.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x2C, 4), pointBuy.Stat4); // Stat4 @0x2C. spec: §1.2.
+        // PointsRemaining @0x30: the trailing allocation budget. spec: character_creation.md §1.2 / §2.1.
+        BinaryPrimitives.WriteUInt32LittleEndian(p.Slice(0x30, 4), pointBuy.PointsRemaining);
 
         // 1/6 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
         _inFlightLatch?.Arm();
@@ -440,20 +494,23 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                 StringComparison.Ordinal)))
             return ValueTask.FromResult(false);
 
-        // TODO(spec): outbound char-delete opcode under RE confirmation
-        //   (1/7 mode=1 is select-and-play per binary, NOT delete — Phase 2b refutation,
-        //   build 263bd994). The real outbound delete opcode is under RE investigation.
-        //   The existing send behavior (1/7 mode=1) is left INTACT until the correct delete
-        //   opcode is identified and promoted via the spec pipeline.
-        //   spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
-        Span<byte> payload = stackalloc byte[CmsgSelectCharacterSlot.WireSize];
-        payload[0x00] = (byte)slotIndex; // spec: cmsg_char_select.yaml — SlotIndex @0x00.
-        payload[0x01] = 1; // PROVISIONAL: mode 1 kept as-is pending RE confirmation of delete opcode.
-        // Note: binary-confirmed mode 1 = select-and-play, NOT delete. spec: §2.2/§3.6.
-
-        // 1/7 is a char-mgmt send: arm the single in-flight latch. spec: net_contracts.md §1.3.
-        _inFlightLatch?.Arm();
-        return SendBoolAsync(1, 7, payload, true, cancellationToken);
+        // RE-GAP (escalate, do NOT invent): the CYCLE 11 frontend_scenes.md §A.2 now governs that a
+        // delete-confirm IS sent via 1/7 with the DELETE-CONTEXT flag set (the SAME opcode as a slot
+        // select; a context-flag byte distinguishes them). However the concrete flag-byte VALUE that
+        // marks the delete context is explicitly a runtime residual (capture-pending) in BOTH governing
+        // specs, and the 1/7 field spec (cmsg_char_select.yaml) documents ONLY [u8 SlotIndex][u8 Mode]
+        // with Mode ∈ {0 slot-lock, 1 select-and-play} — NO delete-context value is pinned. Emitting
+        // Mode 1 would be SELECT-AND-PLAY (entering the world on the doomed character — a silent
+        // behaviour divergence), and Mode 0 is slot-lock; neither is the delete context. Per the
+        // clean-room rule (a missing fact is escalated, never guessed) we send NOTHING and return false
+        // until the delete-context flag byte is recovered. The inbound 3/7 SmsgCharManageResult subtype 2
+        // delete-confirm handler is already wired (Handle(SmsgCharManageResult)).
+        // ESCALATION → RE / network-engineer: pin the 1/7 delete-context flag-byte value (§A.2) so the
+        // outbound delete send can be filled.
+        // spec: Docs/RE/specs/frontend_scenes.md §A.2 (delete = 1/7 + delete-context flag SET; flag VALUE
+        // capture-pending); Docs/RE/packets/cmsg_char_select.yaml (Mode ∈ {0,1} only, no delete value);
+        // Docs/RE/specs/login_flow.md §3.6 (delete surfaced via the inbound 3/7 result ladder).
+        return ValueTask.FromResult(false);
     }
 
     /// <inheritdoc />
@@ -760,12 +817,14 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// </summary>
     private static ServerLoadBand ClassifyLoad(short load)
     {
+        // Branch A (load-valid) threshold ladder, STRICT greater-than at 1200 / 800 / 500.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 Branch A; Docs/RE/scenes/login.md §5.3.
         return load switch
         {
-            > 1200 => ServerLoadBand.Full, // spec: Record Shape A +4 > 1200 -> red
-            > 800 => ServerLoadBand.Busy, // spec: Record Shape A +4 > 800 -> orange
-            > 500 => ServerLoadBand.Moderate, // spec: Record Shape A +4 > 500 -> yellow
-            _ => ServerLoadBand.Light // spec: Record Shape A +4 <= 500 -> green
+            > 1200 => ServerLoadBand.Full, // > 1200 -> red 6001
+            > 800 => ServerLoadBand.Busy, // 801..1200 -> orange 6002
+            > 500 => ServerLoadBand.Moderate, // 501..800 -> yellow 6003
+            _ => ServerLoadBand.Light // <= 500 -> green (status caption 4029 reused)
         };
     }
 
@@ -781,12 +840,15 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     /// </summary>
     private static ServerStatusHint ClassifyStatus(short statusCode)
     {
+        // Status caption = msg (4029 + StatusCode), StatusCode 0..3 -> ids 4029..4032.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (caption_id = 4029 + StatusCode);
+        //       Docs/RE/scenes/login.md §5.3.
         return statusCode switch
         {
-            0 => ServerStatusHint.Normal, // spec: §4.1 status_code == 0 -> caption 4029 (active/load branch)
-            3 => ServerStatusHint.Special, // spec: §4.1 status_code == 3 -> caption 4032 (scheduled-open HH:MM)
-            >= 1 and <= 39 => ServerStatusHint.Caption, // spec: §4.1 status caption family (1/2 -> 4030/4031)
-            _ => ServerStatusHint.Invalid // out-of-range status (full enum unverified; lobby.yaml UNKNOWNS)
+            0 => ServerStatusHint.Normal, // status 0 -> caption 4029 (active / load-band branch)
+            3 => ServerStatusHint.Special, // status 3 -> caption 4032 (scheduled-open HH:MM branch)
+            >= 1 and <= 39 => ServerStatusHint.Caption, // status caption family (1/2 -> 4030/4031)
+            _ => ServerStatusHint.Invalid // out-of-range status (full enum debugger-pending)
         };
     }
 
@@ -916,16 +978,123 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return CharacterNameValidationResult.Valid;
     }
 
+    /// <summary>
+    ///     Remaps the UI class-button index to the INTERNAL class id written into the 1/6 body (0x18) by
+    ///     explicit per-branch constants {0→4, 1→1, 2→3, 3→2} — NOT a verbatim copy and NOT arithmetic. The
+    ///     four internal ids are the canonical SkinClassId set {1 Musa, 2 Salsu, 3 Dosa, 4 Monk}. spec:
+    ///     Docs/RE/specs/character_creation.md §3 (UI index → internal class id remap).
+    /// </summary>
     private static ushort RemapCreateClass(byte uiClassIndex)
     {
         return uiClassIndex switch
         {
-            0 => 4,
-            1 => 1,
-            2 => 3,
-            3 => 2,
+            0 => 4, // UI 0 → Monk  (internal 4). spec: §3.
+            1 => 1, // UI 1 → Musa  (internal 1). spec: §3.
+            2 => 3, // UI 2 → Dosa  (internal 3). spec: §3.
+            3 => 2, // UI 3 → Salsu (internal 2). spec: §3.
             _ => throw new ArgumentOutOfRangeException(nameof(uiClassIndex), uiClassIndex,
-                "UI class index must be 0..3.")
+                "UI class index must be 0..3 (spec: character_creation.md §3).")
+        };
+    }
+
+    /// <summary>
+    ///     The fresh point-buy seed: every stat at <see cref="PointBuyStatSeed" /> (10) and the budget at
+    ///     <see cref="PointBuyBudgetSeed" /> (5). The create form steps from this seed via
+    ///     <see cref="PointBuyIncrement" /> / <see cref="PointBuyDecrement" />. spec: §2.1.
+    /// </summary>
+    public static PointBuyResult PointBuySeed()
+    {
+        return new PointBuyResult(
+            true,
+            PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed,
+            PointBuyBudgetSeed);
+    }
+
+    /// <summary>
+    ///     Validates a five-stat allocation against the §2.1 point-buy rules and echoes it back as a
+    ///     <see cref="PointBuyResult" />. <see cref="PointBuyResult.IsValid" /> is true only when every stat
+    ///     is in [10,15], the budget is in [0,5], and the invariant <c>sum(stats) + points = 55</c> holds.
+    ///     Deterministic and headless — no clock, no RNG. spec: Docs/RE/specs/character_creation.md §2.1.
+    /// </summary>
+    public static PointBuyResult BuildPointBuy(
+        uint stat0, uint stat1, uint stat2, uint stat3, uint stat4, uint pointsRemaining)
+    {
+        var statsInRange =
+            InClamp(stat0) && InClamp(stat1) && InClamp(stat2) && InClamp(stat3) && InClamp(stat4);
+        var budgetInRange = pointsRemaining <= PointBuyBudgetSeed;
+        // The invariant: sum(stats) + points = 55. With per-stat clamp [10,15] and budget [0,5] this is the
+        // exact gate the create form enforces before the 1/6 send. spec: §2.1.
+        var invariantHolds =
+            (ulong)stat0 + stat1 + stat2 + stat3 + stat4 + pointsRemaining == PointBuyInvariantTotal;
+
+        var valid = statsInRange && budgetInRange && invariantHolds;
+        return new PointBuyResult(valid, stat0, stat1, stat2, stat3, stat4, pointsRemaining);
+
+        static bool InClamp(uint v)
+        {
+            return v is >= PointBuyStatFloor and <= PointBuyStatCeil;
+        }
+    }
+
+    /// <summary>
+    ///     Applies one stat-increment stepper step (§2.1): allowed only while the budget is &gt; 0 (and the
+    ///     stat is below its ceiling); on success the budget is decremented and the chosen stat incremented.
+    ///     Returns the (possibly unchanged) allocation and whether it stepped. Deterministic; preserves the
+    ///     invariant. <paramref name="statIndex" /> selects 0..4. spec: Docs/RE/specs/character_creation.md §2.1.
+    /// </summary>
+    public static PointBuyResult PointBuyIncrement(in PointBuyResult current, int statIndex, out bool stepped)
+    {
+        stepped = false;
+        if ((uint)statIndex > 4) return current;
+        if (current.PointsRemaining == 0) return current; // budget exhausted. spec: §2.1.
+
+        var stat = StatAt(in current, statIndex);
+        if (stat >= PointBuyStatCeil) return current; // clamp ceiling. spec: §2.1 (clamp [10,15]).
+
+        stepped = true;
+        return WithStat(in current, statIndex, stat + 1, current.PointsRemaining - 1);
+    }
+
+    /// <summary>
+    ///     Applies one stat-decrement stepper step (§2.1): allowed only while the budget is &lt; 5 AND the
+    ///     stat is strictly above its floor; on success the budget is incremented and the chosen stat
+    ///     decremented. Returns the (possibly unchanged) allocation and whether it stepped. Deterministic;
+    ///     preserves the invariant. spec: Docs/RE/specs/character_creation.md §2.1.
+    /// </summary>
+    public static PointBuyResult PointBuyDecrement(in PointBuyResult current, int statIndex, out bool stepped)
+    {
+        stepped = false;
+        if ((uint)statIndex > 4) return current;
+        if (current.PointsRemaining >= PointBuyBudgetSeed) return current; // budget already full. spec: §2.1.
+
+        var stat = StatAt(in current, statIndex);
+        if (stat <= PointBuyStatFloor) return current; // floor. spec: §2.1 (strictly above floor).
+
+        stepped = true;
+        return WithStat(in current, statIndex, stat - 1, current.PointsRemaining + 1);
+    }
+
+    private static uint StatAt(in PointBuyResult r, int statIndex)
+    {
+        return statIndex switch
+        {
+            0 => r.Stat0,
+            1 => r.Stat1,
+            2 => r.Stat2,
+            3 => r.Stat3,
+            _ => r.Stat4
+        };
+    }
+
+    private static PointBuyResult WithStat(in PointBuyResult r, int statIndex, uint value, uint points)
+    {
+        return statIndex switch
+        {
+            0 => r with { Stat0 = value, PointsRemaining = points },
+            1 => r with { Stat1 = value, PointsRemaining = points },
+            2 => r with { Stat2 = value, PointsRemaining = points },
+            3 => r with { Stat3 = value, PointsRemaining = points },
+            _ => r with { Stat4 = value, PointsRemaining = points }
         };
     }
 

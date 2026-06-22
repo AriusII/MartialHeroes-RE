@@ -182,11 +182,14 @@ canvas. There is no widget tree to speak of — just a background and a progress
 - **Background quad — full-screen.** One of three DDS images is chosen at random (`rand() % 3`):
   `data/ui/loading.dds`, `data/ui/loading06.dds`, `data/ui/loading08.dds`. Drawn at
   `(0, 0, screenW, screenH)`.
-- **Progress-bar fill — a width fill.** Maximum drawn fill width is **223 px**;
-  `fill_px = clamp(223 · pct / 100, 0, 223)`, with UV scaling proportional (max `U = 223/1024 ≈
-  0.2178`). The bar height is constant; only the width grows (left → right). Because `pct` is the
-  near-static integer quotient of §1, the fill advances by at most a hair and **never fills** — it is
-  decorative.
+- **Progress-bar fill — a vertical, top→down fill (corrected; see §5A.4).** The gauge rect spans
+  design X[−499, −170] (width 329 ref-units), design Y[−363, −140] (height 223 ref-units). Each frame
+  the render proc computes `fill_px = clamp(223 · pct / 100, 0, 223)` ref-units and overwrites **only
+  the bottom-vertex Y and V-texcoord** (the top edge is fixed). The fill grows **downward from a fixed
+  top edge** (top Y = −363 fixed; bottom Y advances toward −140 as the bar fills). The U extents are
+  fixed throughout. Because `pct` is the near-static integer quotient of §1, the fill advances by at
+  most a hair and **never fills** — it is decorative. The bar is a UV sub-rect of the same background
+  DDS (no separate gauge texture).
 - **Loading SFX.** Sound cue **`920100100`** is played **looping** when the screen starts (category 0,
   a single direct voice, so it cannot double-stack).
 - **Completion is flag-driven.** The render callback polls the worker's done-flag; on completion it
@@ -196,7 +199,7 @@ canvas. There is no widget tree to speak of — just a background and a progress
 ```mermaid
 graph TD
     LW["LoadingWindow (1024×768 canvas)"] --> BG["Background quad (full-screen)<br/>rand()%3: loading.dds / loading06.dds / loading08.dds"]
-    LW --> FILL["Progress fill quad<br/>height = clamp(223·pct/100, 0, 223) ref-units<br/>(VERTICAL top→down fill; near-static — §5A)"]
+    LW --> FILL["Progress fill quad (vertical top→down)<br/>fill = clamp(223·pct/100, 0, 223) ref-units<br/>bottom-vertex Y + V animate; near-static — §5A.4"]
     LW --> CUE["Loading cue 920100100 (looping)"]
     LW --> POLL["Per-frame (~10 FPS): poll done-flag → emit completion (+500 ms grace)"]
 ```

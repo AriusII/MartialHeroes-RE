@@ -77,31 +77,44 @@ public interface IApplicationUseCases
     ValueTask RequestMoveAsync(Vector3Fixed target, bool running, CancellationToken cancellationToken = default);
 
     /// <summary>
-    ///     Selects a character slot and requests enter-game. Enforces the slot-range guard (0..4) and, when a
-    ///     character-selection store is wired, confirms the slot against the cached 3/1 roster: an
+    ///     <b>Play-confirm</b> — the intent the Enter / play button calls on the character-select screen.
+    ///     CORRECTED (CYCLE 12 Phase 2): this <b>sends 1/7 CmsgSelectCharacterSlot with Mode = 1</b>
+    ///     (select-and-play) and <b>caches the chosen slot</b>; it <b>does NOT send 1/9</b>. The server
+    ///     replies <c>3/14 SmsgCharSpawnResponse</c>, and the 3/14 handler emits the 1/9 enter request from
+    ///     inside itself (see <see cref="EmitEnterWorldRequest" />). Enforces the slot-range guard (0..4) and,
+    ///     when a character-selection store is wired, confirms the slot against the cached 3/1 roster: an
     ///     <b>"@BLANK@" empty slot routes to character creation</b> (publishes
-    ///     <see cref="Events.CreateCharacterRequestedEvent" />, sends NO 1/9), an unoccupied/unknown slot
-    ///     sends nothing, and a real character is cached as the chosen descriptor (consumed by the 3/7
-    ///     spawn). For a real character it builds and sends 1/9 CmsgEnterGameRequest (slot index + the
-    ///     derived version token, <c>10 × versionField + 9</c> = 21149 for the sampled game.ver); the 3/5
-    ///     EnterGameAck later drives the scene machine to Load (state 2), and the 3/7 result spawns the
-    ///     local player. spec:
-    ///     Docs/RE/specs/login_flow.md §3.3 / §3.5 / §7; Docs/RE/packets/1-9_enter_game_request.yaml.
+    ///     <see cref="Events.CreateCharacterRequestedEvent" />, sends nothing), an unoccupied/unknown slot
+    ///     sends nothing, and a real character is cached as the chosen descriptor (consumed by the 4/1 spawn).
+    ///     The actual local-player spawn happens later, ONCE, on 4/1 SmsgGameStateTick. Ladder:
+    ///     1/7(mode 1) → 3/14(flag≠0) → 1/9 → 3/5 → 4/1(spawn). spec:
+    ///     Docs/RE/specs/frontend_scenes.md §7 (play-confirm = 1/7 mode 1; spawn driver is 4/1);
+    ///     Docs/RE/packets/cmsg_char_select.yaml (Mode 1 = select-and-play); Docs/RE/specs/login_flow.md §3.5.
     /// </summary>
     /// <param name="slotIndex">The chosen character slot (0..4; out-of-range throws).</param>
     ValueTask SelectCharacterAsync(int slotIndex, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    ///     Emits the <c>1/9 CmsgEnterGameRequest</c> — the server-triggered second rung of the enter ladder.
+    ///     This is NOT called by the Enter button; the composition root wires it as the
+    ///     <c>GamePacketHandler</c>'s enter-world emitter delegate, and the <b>3/14 SmsgCharSpawnResponse</b>
+    ///     handler invokes it on a positive (non-zero) flag. It builds the 40-byte 1/9 (slot index at +0x00,
+    ///     the 33-byte self-MD5 SessionToken at +0x01, a 2-byte pad at +0x22, and the derived version token
+    ///     <c>10 × game.ver[5] + 9</c> = 21149 at +0x24) and <b>arms the in-flight latch</b> so the
+    ///     subsequent 4/1 SmsgGameStateTick is recognized as the enter confirmation (and clears the latch).
+    ///     The 4/1 then performs the single local-player spawn. spec:
+    ///     Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted FROM the 3/14 handler);
+    ///     Docs/RE/packets/cmsg_char_enter.yaml (40-byte 1/9, self-MD5 SessionToken);
+    ///     Docs/RE/specs/net_contracts.md §1.3 (1/9 arms the enter latch; 4/1 clears it).
+    /// </summary>
+    /// <param name="slotIndex">The slot to enter, taken from the 3/14 body's Slot field.</param>
+    ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     Returns the latest 3/1 character-list roster cached by the application, indexed by slot 0..4.
     ///     Empty entries are <see langword="null" />. spec: Docs/RE/packets/3-1_character_list.yaml.
     /// </summary>
     IReadOnlyList<CharacterSlotRecord?> GetCharacterRoster();
-
-    /// <summary>
-    ///     Sends the select/view pre-enter request <c>1/7 {slot, 0}</c> for an occupied slot.
-    ///     spec: Docs/RE/packets/cmsg_char_select.yaml.
-    /// </summary>
-    ValueTask<bool> SelectCharacterSlotAsync(int slotIndex, CancellationToken cancellationToken = default);
 
     /// <summary>
     ///     Validates locally and sends <c>1/6 CmsgCreateCharacter</c> when valid.
@@ -112,9 +125,23 @@ public interface IApplicationUseCases
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    ///     Sends the delete overload <c>1/7 {slot, 1}</c> for an occupied slot.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §5; Docs/RE/packets/cmsg_char_select.yaml.
+    ///     Requests deletion of the character in <paramref name="slotIndex" />.
+    ///     <b>RE-GAP — currently a guarded no-op that returns <see langword="false" /> and sends nothing.</b>
+    ///     The CYCLE 11 <c>frontend_scenes.md §A.2</c> governs that a delete-confirm rides <c>1/7</c> with a
+    ///     <b>delete-context flag set</b> (the same opcode as a slot select; a context-flag byte distinguishes
+    ///     them), but the concrete delete-context flag-byte VALUE is a capture-pending runtime residual in
+    ///     both governing specs, and <c>cmsg_char_select.yaml</c> pins only
+    ///     <c>
+    ///         Mode ∈ {0 slot-lock,
+    ///         1 select-and-play}
+    ///     </c>
+    ///     — no delete value. Emitting <c>Mode 1</c> would be select-and-play (entering
+    ///     the world on the doomed character); per the clean-room rule the flag is not invented. The inbound
+    ///     <c>3/7 SmsgCharManageResult</c> subtype 2 (delete-confirm) handler is already wired. spec:
+    ///     Docs/RE/specs/frontend_scenes.md §A.2 (delete = 1/7 + delete-context flag, value capture-pending);
+    ///     Docs/RE/packets/cmsg_char_select.yaml (Mode ∈ {0,1} only); Docs/RE/specs/login_flow.md §3.6.
     /// </summary>
+    /// <returns>Always <see langword="false" /> — no delete frame is sent (the delete-context flag is RE-blocked).</returns>
     ValueTask<bool> DeleteCharacterAsync(int slotIndex, CancellationToken cancellationToken = default);
 
     /// <summary>

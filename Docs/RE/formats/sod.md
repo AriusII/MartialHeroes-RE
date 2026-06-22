@@ -14,7 +14,9 @@ verification:   sample-verified   # container shape (u32 solidCount, 108-byte So
                                    #   the file-size formula, the world-XZ AABBs, and the line
                                    #   slope/intercept/axisFlag fields all matched against a real VFS
                                    #   sample AND the legacy cell-loader read path
-ida_reverified: 2026-06-21
+ida_reverified: 2026-06-21; CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): stale "ray-parity"
+                language in any prose that describes this file is SUPERSEDED — the collision method
+                is segment-intersection, as documented since the task-hint correction below.
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
 conflicts:      none on the on-disk layout. Two task-hint corrections folded in: (1) the geometry is a
@@ -42,8 +44,8 @@ loader_resolved: true             # the on-disk read-set (solidCount, SolidRecor
 A `.sod` file is a **per-terrain-cell wall-collision data set**: a small array of *solids*, each
 carrying an array of *wall segments* in the world XZ plane. It is the data behind the client's
 horizontal wall blocking / sliding — the thing that stops the player from walking through a wall and
-slides them along it. Ground **height** is a separate concern (`.ted` bilinear interpolation — see
-`terrain.md`); `.sod` deals only with vertical-wall collision in the XZ plane.
+slides them along it. Ground **height** is a separate concern (`.ted` per-triangle plane interpolation — see
+`terrain.md §5.4a`); `.sod` deals only with vertical-wall collision in the XZ plane.
 
 The on-disk content is intentionally minimal: a count, a flat array of solid bounding boxes, and per
 solid a flat array of segment records. All spatial values are **absolute world XZ coordinates** in the

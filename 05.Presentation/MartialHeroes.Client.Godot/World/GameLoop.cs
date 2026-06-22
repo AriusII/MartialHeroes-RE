@@ -3,6 +3,7 @@ using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Hud;
@@ -61,6 +62,10 @@ public sealed partial class GameLoop : Node
     [Signal]
     public delegate void WorldExitRequestedEventHandler(bool logout);
 
+    // Cached delegate for TimedEventQueue.Drain — avoids a per-frame method-group allocation.
+    // spec: Docs/RE/specs/effect-scheduling.md §5A.3 — two-pass full-tree sweep drain.
+    private readonly Action<TimedEventRecord> _onTimedEventDelegate;
+
     // -------------------------------------------------------------------------
     // Child node references (assigned in _Ready from the scene tree)
     // -------------------------------------------------------------------------
@@ -97,6 +102,18 @@ public sealed partial class GameLoop : Node
 
     private RealWorldRenderer? _realWorldRenderer;
     private TerrainNode _terrainNode = null!;
+
+    // -------------------------------------------------------------------------
+    // Constructor — initialize readonly delegate cache
+    // -------------------------------------------------------------------------
+
+    public GameLoop()
+    {
+        // Cache the delegate once so TimedEventQueue.Drain never allocates a new delegate object
+        // per frame when passed a method group.
+        // spec: Docs/RE/specs/effect-scheduling.md §5A.3 — two-pass full-tree sweep drain.
+        _onTimedEventDelegate = OnTimedEvent;
+    }
 
     // -------------------------------------------------------------------------
     // Godot lifecycle

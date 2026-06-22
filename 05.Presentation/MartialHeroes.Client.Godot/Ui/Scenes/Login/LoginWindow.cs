@@ -114,6 +114,12 @@ public sealed partial class LoginWindow : Control
 
     // loginwindow.dds backdrop (0,110,1024,490). spec §2.1 "Background | init hidden".
     private Control? _backgroundLayer;
+
+    // Static central banner frame: loginwindow.dds src(0,490) at abs (270,85) 483×490.
+    // STATIC — never animated, never hidden after the 1→2 edge. Contains the logo child
+    // at panel-local (207,44) = canvas (477,129). Debugger-confirmed IDB 263bd994.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 / §2.3
+    private Control? _bannerFrame;
     private string _collectedPin = "";
     private int _collectedServerId;
 
@@ -148,6 +154,15 @@ public sealed partial class LoginWindow : Control
 
     // flowSubState: single field, init=1. spec §2.2.
     private int _flowSubState;
+
+    // Form decorative plate (member +0x27C, A1 src(0,469,494,113)):
+    // Hidden until curtain offset>200, then snaps to absolute canvas (265,548).
+    // G2 DEBUGGER-CONFIRMED 2026 / IDB 263bd994: real dst=(265,548); prior "(494,469)" confused
+    // 494=width and 469=src-top for destination coordinates — CORRECTED.
+    // It is a child of formPanel so its position is PANEL-LOCAL; when the snap fires we set
+    // the panel-local position so that its canvas position = (265, 548) regardless of formPanel Y.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.3 "form decorative plate | hidden until offset>200; snaps once"
+    private TextureRect? _formDecoPlate;
 
     // Login-form host strip: always-present bottom bar (server-submit[102], help/quit[105], confirm
     // face-plate, help deco plate). Visible from state 2. spec §2.2 "Login-form host strip | always present".
@@ -184,6 +199,12 @@ public sealed partial class LoginWindow : Control
     // Confirm-A (msg 4023) also serves as the "connecting" popup raised at sub-state 40. spec §2.1.
     private Control? _quitModal;
     private Control? _quitModal2;
+
+    // Reserved for a future per-child CanvasItemMaterial (additive overlay sprites/effects only).
+    // The root Control uses NORMAL blend; additive is applied only to proven overlay sprite children.
+    // spec: Docs/RE/specs/rendering.md §4.2 — global ONE/ONE is D3D9 ground-truth; in Godot the root
+    // Control must use normal blend so opaque atlas panels are readable over the bright 3D backdrop.
+    private CanvasItemMaterial? _rootMaterial;
 
     // Save-ID: persisted account id loaded before the textbox is built.
     private string _savedId = "";
@@ -228,21 +249,25 @@ public sealed partial class LoginWindow : Control
 
     public override void _Ready()
     {
-        // Front-end overlay render state: alpha-blend ON, additive ONE/ONE.
-        // spec: Docs/RE/specs/rendering.md §4.2 — "UI/HUD front-end overlay: ONE/ONE (additive);
-        //   additionally clears fog, dither, alpha-test; stage 0 = select-arg-1/diffuse,
-        //   stage 1 = disabled; samplers = linear/linear/mip-none."
-        // In Godot this translates to BlendMode.Add on the root CanvasItem.
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add // spec: rendering.md §4.2 ONE/ONE additive
-        };
+        // spec: Docs/RE/specs/rendering.md §4.2 — the D3D9 front-end pipeline sets ONE/ONE additive
+        // globally before walking the widget tree. In Godot, applying BlendMode.Add to the root
+        // Control cascades to ALL children (including opaque atlas panels), causing additive washout
+        // against the bright 3D backdrop (cyan/off-white tint artefact on the bottom bar).
+        // The D3D original's ONE/ONE works because UI textures are authored on black backgrounds
+        // (adding near-black pixels changes nothing), a constraint that does NOT hold for Godot Label
+        // nodes or white-bordered atlas slices rendered over a SubViewport 3D scene.
+        // FIX: the root uses NORMAL blend (Godot default = SRCALPHA/INVSRCALPHA). Additive is applied
+        // ONLY to individual child nodes that are proven transparent overlay sprites/effects.
+        // (_rootMaterial stays null; _ExitTree null-check is a safe no-op.)
 
         LoadSaveId();
 
         // Build all layers back-to-front (Z-order = add-order).
-        BuildCurtainPanels(); // curtain halves (always-present Y-animated panels)
-        BuildBackgroundLayer(); // loginwindow.dds backdrop (hidden in state 1 only)
+        // MEMBER ORDER: Background (+0x270) drawn first (behind), then Top curtain (+0x274),
+        // then Bottom curtain (+0x278). Curtains frame/overlay the background art. spec §2.3.
+        BuildBackgroundLayer(); // loginwindow.dds backdrop — member +0x270 (drawn behind curtains). spec §2.3.
+        BuildBannerFrame();    // static central banner frame + logo (loginwindow.dds) — always at fixed Y=85. spec §2.1/§2.3.
+        BuildCurtainPanels(); // curtain halves — member +0x274 (Top) / +0x278 (Bottom), over background.
         BuildNoticePanel(); // notice column (always hidden per spec)
         BuildServerListRoot(); // server-list container (hidden until 35..37)
         BuildFormGroup(); // always-present host strip (visible from state 2)
@@ -255,7 +280,7 @@ public sealed partial class LoginWindow : Control
         // Enter state 1 — intro one-shot. spec §2.2.
         RunState(1);
 
-        GD.Print("[LoginWindow] Login(1) built. flowSubState=1. spec: frontend_layout_tables.md §2.");
+        GD.Print($"[LoginWindow] Login(1) built. flowSubState={_flowSubState}. spec: frontend_layout_tables.md §2.");
     }
 
     public override void _Process(double delta)
@@ -270,6 +295,19 @@ public sealed partial class LoginWindow : Control
         {
             GD.Print("[LoginWindow] OS window-close → QuitRequested.");
             EmitSignal(SignalName.QuitRequested);
+        }
+    }
+
+    public override void _ExitTree()
+    {
+        // Release the root CanvasItemMaterial by clearing the Material property.
+        // CanvasItemMaterial is a RefCounted Resource — never call .Free() on it; instead
+        // null-out the property so the engine's ref-count drops to zero and it self-frees.
+        // This avoids the 'N RID allocations of type TextureE were leaked' ERROR at exit.
+        if (_rootMaterial is not null)
+        {
+            Material = null;
+            _rootMaterial = null;
         }
     }
 }

@@ -1,9 +1,38 @@
 ---
-verification: confirmed
-ida_reverified: 2026-06-16
+verification: re-confirmed 2026-06-22 against doida.exe binary IDB SHA 263bd994 (static IDA).
+  Substate ladder re-keyed to binary-confirmed numbering (substates 1-5 corrected per dossier
+  reconciliation pass 2026-06-22): 1=intro-start+SFX→2; 2=curtain slide; 3=curtain snap; 4=auto-advance
+  (CORRECTED 2026-06-22 LOGIN-VISUAL: was "enter-edge" — binary-won, counter-check IDB 263bd994; state 4
+  is unconditionally auto-advancing in the tick; the opening is fully non-interactive 1→2→3→4→5→6);
+  5=show-form→6; 6=form active. Worker thread count corrected to TWO real procs + one NULL slot.
+  Field +0x554 / +341 clarified as the selected-server-index marker (not FSM seed). PIN keypad
+  build-order actions 0..99 clarified (digit mapping is handler-time, not action==digit). 22 notice
+  labels re-attributed to the notice panel (+0x2BC), distinct from the server-listbox container.
+  2026-06-22 field-cap correction (binary-won, IDB SHA 263bd994): ID textbox per-keystroke length cap
+  = 16 (GUTextbox field +0xD0); charset mask = 6 (field +0xA4, alphanumeric filter, NOT a length).
+  Password textbox per-keystroke length cap = 12 (GUTextbox field +0xD0). Prior readings of "6 chars"
+  for account and "129 chars" for password in §2.1 / §7.5 are corrected throughout this spec.
+  2026-06-22 LOGIN-LAYOUT promote: GU coordinate system (root-anchor centering formula, local-vs-absolute
+  cascade, top-left Y-down origin, 1:1 source-rect contract) promoted to
+  specs/frontend_layout_tables.md §0a; cross-reference added to §7 (IDB SHA 263bd994).
+ida_reverified: 2026-06-22
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: happy-path GameState=7 reachability (connect-watchdog vs connect-success race) is capture/debugger-pending; the credential wire opcode value is capture/debugger-pending
+conflicts: happy-path GameState=7 reachability (connect-watchdog vs connect-success race) is capture/debugger-pending; the credential wire opcode value is capture/debugger-pending; PIN scramble seed/permutation (clock-seeded, debugger-pending); 8-byte server-record field widths/signedness at roster breakpoint (debugger-pending); msg 4001..4022 semantic content (CP949 strings in data/script/msg.xdb — not statically recoverable)
+promoted_from: >
+  Dirty-room notes login_curtain_credentials.md, login_pin_modal.md, login_server_list.md
+  (2026-06-21): curtain animation positional-translate mechanics confirmed (sub-state slide dst_y
+  formulas, reveal/end thresholds, snap coordinates); GUComponent geometry field contract added;
+  credential-form widget construction order (build indices 56-65), IME charset modes 16/12,
+  shared src rect (615,404), three-branch saved-ID prefill logic documented; PIN modal lifecycle
+  call order, Reset=clear-and-reshuffle (not no-op), 100-button over-build structure, and
+  on-show clear-then-scramble-then-show ordering added. All load-bearing numeric values
+  pre-existing in the spec; this pass adds construction-order tables and mechanism clarifications.
+  mask glyph px/char advance and caret blink cadence remain render-path unknowns (not in BuildScene).
+  atlas sample cross-check (login_slice1.dds dimensions vs src rects) remains sample-unverified.
+  Reconciled dossier (login_reconciled_263bd994.md, 2026-06-22): substate ladder off-by-one corrected;
+  worker-thread count corrected; field +0x554 role clarified; PIN action-to-digit mapping clarified;
+  notice-label parent corrected.
 ---
 
 # Login Scene State Machine, Login-String Contract, and the Legacy Lobby Handshake
@@ -69,11 +98,11 @@ are the canonical scene substates the tick driver reads/writes.
 
 | Substate | Phase / screen | Action this tick | Network call | Next |
 |---|---|---|---|---|
-| 1 | initial / idle | set by ctor and by the cancel action; window left idle | -- | event-driven |
-| 2 | **connect / intro** | plays the intro stinger SFX id **861010105** (category 2), resets the two curtain images, sets the curtain offset to 0, hides widgets, kicks the effect manager | none (local) | 3 |
-| 3 | **curtain slide A** | adds **+5** per tick to the global curtain offset; slides the two curtain images apart (one up, one down); **clamps** when the offset exceeds ~222 (holds at 3); when it exceeds ~200 it reveals the next widget | -- | 3 (hold) -> 4 |
-| 4 | **curtain slide B** | positions elements, toggles widget visibility | -- | 5 |
-| 5 | hand-off to form | shows the login-form widgets + the cursor widget | -- | 6 |
+| 1 | **intro start** | plays the intro stinger SFX id **861010105** (category 2), resets the two curtain images, sets the curtain offset to 0, hides widgets, kicks the effect manager | none (local) | 2 |
+| 2 | **curtain slide** | adds **+5** per tick to the global curtain offset; slides the TOP curtain panel up (`dst_y = -offset`) and the BOTTOM curtain panel down (`dst_y = offset + 326`); when offset exceeds **200** snaps the **form decorative plate** (credential-area chrome, atlas A1 src 0,469 size 494×113) to screen position **(494, 469)** (CORRECTED 2026-06-22: was "login-background plate" — binary-won; the snap target is the form plate member +0x27C, not the background); when offset exceeds **222**, advances to 3 | -- | 3 |
+| 3 | **curtain snap / hide** | one-shot: snaps the TOP curtain to `dst_y = -222` and BOTTOM to `dst_y = 548`; resets the curtain offset to 0; hides the two curtain panels and several worker widgets; advances to 4 | -- | 4 |
+| 4 | **auto-advance** | the tick's substate-4 case **unconditionally writes 5** with no key check and no event guard — CORRECTED 2026-06-22 (was "Enter edge"; binary-won, counter-check IDB SHA 263bd994). The opening is fully non-interactive; state 4 is never dwell-occupied. | -- | 5 (auto) |
+| 5 | **show form** | shows the login-form widgets + the cursor widget; advances to 6 | -- | 6 |
 | 6 | **login form** (account/password entry) | waits for input. Enter / the Login button runs the **`game.ver` client-version gate** (Section 1.1) then advances to 29. Errors from later states land back here with a field-empty validation popup | -- | event-driven -> 29 |
 | **29** | **credential validation** | requires account length **>= 4** (else return to 6 with popup msg **4025**) and password length **>= 1** (else return to 6 with popup msg **4026**); if the save-ID checkbox is set, persists the account name to the INI (Section 1.3); on success advances to 31 | -- | 31 (ok) / 6 (reject) |
 | **30** | **quit** | sets the quit/teardown scene indices (drives GameState quit -> the terminal sub-state) | -- | exit |
@@ -93,7 +122,7 @@ Notes:
 - States 34..41 are the linear "lobby handshake -> endpoint -> submit" slice. The two lobby fetches
   (34/35/36 and 38/39) run on **dedicated worker threads** over **blocking** sockets (Section 3); only
   the **final** credential submit (41) goes through the real game-connection secure session.
-- The intro/animation states (2..5) are local UI only -- no socket traffic.
+- The intro/animation states (1..5) are local UI only -- no socket traffic.
 - **There is NO EULA / terms-agreement gate in this flow.** The previous revision modelled
   substates 32/33 as an "accept/OK gate (shows OK widget)"; that was wrong. 31 *shows* the PIN modal
   and 32 *polls* it. See Section 4 and the explicit no-EULA note in Section 1.5.
@@ -182,15 +211,18 @@ caps, and a faithful port must respect both:
 
 | Field | Text-input cap (BuildScene) | Submit-time cap (builder) | Net effective |
 |---|---|---|---|
-| account | textbox accepts up to **6** chars | validation requires >= 2 and <= 20 | account is effectively **2..6** chars (the textbox is the binding constraint) |
-| password | textbox accepts up to **129** chars (0x81, masked render) | validation rejects length >= 17; staged in the 17-byte RSA-M buffer | password is effectively **2..16** chars (validation is the binding constraint) |
+| account | textbox per-keystroke cap = **16** chars (GUTextbox field +0xD0; charset mask field +0xA4 = 6, meaning alphanumeric-only filter, NOT a length) | validation requires >= 2 and <= 20 | account is effectively **2..16** chars (textbox cap is the binding constraint) |
+| password | textbox per-keystroke cap = **12** chars (GUTextbox field +0xD0; masked render via mask bit) | validation rejects length >= 17; staged in the 17-byte RSA-M buffer | password is effectively **2..12** chars (textbox cap is the binding constraint) |
 
-> **Correction.** The previous revision wrote "password < 17 (staged in an exactly-17-byte buffer)"
-> as if the password *field* were capped at 17. It is not -- the password **textbox accepts up to 129
-> characters**; only the submit-time validation rejects >= 17. A faithful reimplementation validates
-> at submit and does NOT cap the password field at 17. Likewise the account field is capped by the
-> textbox at **6** characters, not by a "< 20" field limit (the 20 is a submit-time bound). The
-> 17/20 values are **submit-time validation only**.
+> **Correction (binary-won, static IDA, IDB SHA 263bd994).** Prior revisions recorded the account
+> textbox cap as 6 chars and the password textbox cap as 129 chars; those were wrong. The per-keystroke
+> length cap lives in GUTextbox field +0xD0 (offset 208): ID textbox has +0xD0 = **16**, password
+> textbox has +0xD0 = **12**. Both caps are enforced by the per-keystroke input handler and the paste
+> handler (a character or paste that would exceed the cap is rejected). The value **6** quoted by
+> earlier readings was the ID field's charset filter bitmask (+0xA4 = 0x06, alphanumeric-only), not a
+> length. The value **129** (0x81) was the password field's charset mask (+0xA4, with the allow-all bit
+> set so any printable character is accepted), not a length. A faithful reimplementation must cap the
+> ID field at 16 characters and the password field at 12 characters during input.
 
 ---
 
@@ -370,7 +402,7 @@ The login window dispatches on the widget's command/action id. The recovered act
 | Event class | Action id | Effect |
 |---|---|---|
 | key (1) | 9 | Tab: swap focus between the account and password field panels |
-| key (1) | 10 | Enter: if substate == 6, run the `game.ver` gate (Section 1.1) then set substate **29**; if substate == 4, set substate **5** |
+| key (1) | 10 | Enter: if substate == 6, run the `game.ver` gate (Section 1.1) then set substate **29**; if substate == 4, set substate **5** (dead path in practice — the tick auto-advances state 4 unconditionally before Enter could dwell there; see substate table row 4 CORRECTED 2026-06-22) |
 | click (6) | 101 | quit |
 | click (6) | 102 | reveal the server-list panel |
 | click (6) | 103 | **Login / OK**: run the `game.ver` gate, persist OPTION_ID if save-id set, set substate **29** |
@@ -393,27 +425,44 @@ The login window dispatches on the widget's command/action id. The recovered act
 
 ## 7. The code-baked LoginWindow element layout (73 widgets)
 
+> **GU coordinate system** (origin, local vs absolute, root anchor, 1:1 blit contract): see
+> `specs/frontend_layout_tables.md §0a` — the authoritative statement. Every `(x, y)` value in the
+> widget tables below is **LOCAL to the named parent panel**, not an absolute screen pixel. The root
+> anchor `(screenW/2−512, screenH/2−384)` is added to all children through the parent cascade.
+
 There is **no on-disk UI layout manifest** for the login window. The login window is a 1368-byte heap
 object built once from WinMain (GameState case 1): the ctor installs the two vtables (primary at
-object +0x00, secondary event-handler at +0xBC), seeds an init field (+0x554 = 5), and builds NO
-widgets; then BuildScene (the primary vtable's build slot, invoked once from WinMain) constructs every
-child with **integer-literal coordinates** via the shared GU builders. The tick and event routines
-only reference already-built children -- they build nothing.
+object +0x00, secondary event-handler at +0xBC), seeds the flow-substate field (+0x238) to **1** via
+the base ctor, seeds the selected-server-index marker (+0x554) to **5** (a placeholder — BuildScene
+overwrites it with `NEW_SERVER_INDEX`), seeds **TWO** real lobby worker proc slots (server-list worker
+at field+240 / `+0x3C0`, channel-endpoint worker at field+243 / `+0x3CC`) plus **one NULL slot**
+(field+246 / `+0x3D8`) — and builds NO widgets. BuildScene (the primary vtable's build slot, invoked
+once from WinMain) constructs every child with **integer-literal coordinates** via the shared GU
+builders. The tick and event routines only reference already-built children -- they build nothing.
+
+> **Field +0x554 — the selected-server-index marker (CORRECTED).** This field is seeded to 5 by the
+> ctor and then overwritten by BuildScene from `NEW_SERVER_INDEX` (the integer read from
+> `data/script/uiconfig.lua`). In `PaintServerList` it is compared against each record's `server_id`
+> to determine the selection highlight. **It is NOT a seed of the flow-substate field (+0x238)** — the
+> substate field is at a different offset and is seeded to 1 by the base ctor. Do not conflate the two.
 
 **Window-level facts (from the build head):**
 - **Canvas:** the window anchor is `(screenW/2 - 512, screenH/2 - 384)` -- a **1024x768** surface,
   centred on screen.
 - **Config read:** the build loads `data/script/uiconfig.lua` and reads the integer key
-  **`NEW_SERVER_INDEX`**, storing it on the window (object +0x554 region) and into a UI singleton slot;
-  it is the "NEW" server badge index used by the server plates.
+  **`NEW_SERVER_INDEX`**, storing it on the window (object +0x554) and into a UI singleton slot;
+  it is the "NEW" server badge index used by the server plates — it overwrites the ctor's placeholder 5.
+- **Worker threads seeded in the base ctor:** exactly **TWO** real blocking-socket worker procs (slot
+  field+240 = server-list fetch thread, field+243 = channel-endpoint fetch thread) plus **one NULL
+  slot** (field+246). The NULL slot is not a third worker. See Section 3.
 - **Atlas preload order** (4 textures into the window's texture list, each loaded from VFS-or-disk
   with format tag 894720068):
   1. `data/ui/login_slice1.dds` (atlas **A**)
   2. `data/ui/loginwindow.dds` (atlas **B**)
   3. `data/ui/InventWindow.dds` (atlas **C**)
   4. `data/ui/loginwindow_02.dds` (atlas **D**)
-- **No login BGM/SFX in the build.** The only LoginWindow sound is the substate-2 intro stinger
-  (SFX id **861010105**, category 2) emitted by the tick. The build emits no sound.
+- **No login BGM/SFX in the build.** The only LoginWindow sound is the substate-1 intro stinger
+  (SFX id **861010105**, category 2) emitted by the tick on the 1→2 edge. The build emits no sound.
 - **Fonts:** 15 font slots (0..14) are registered in WinMain (not in the build). Slot 0 = "DotumChe"
   12px. The build only ever overrides a label font once -- font **slot 4** on the channel-block body
   label; all other login labels/fields use the default slot 0.
@@ -424,6 +473,23 @@ widget W/H (NO scaling, NO separate src-W/src-H argument). 3-state buttons bake 
 (normal / hover / pressed). Checkboxes bake two (off / on). Labels carry no atlas. Children are added
 to a parent panel, optionally with an action id.
 
+**GUComponent geometry field contract.** The image builder writes positional and source-rect values
+into fixed fields of the GUComponent object. These are the fields the tick mutates at runtime (e.g.
+to slide the curtain panels) and the fields an implementation must mirror per-widget:
+
+| Field name | Meaning |
+|---|---|
+| `dst_x` | Destination X (left edge); runtime-mutable |
+| `dst_y` | Destination Y (top edge); runtime-mutable |
+| `dst_w` / `dst_h` | Destination width / height (equals source W/H; 1:1, no scaling) |
+| `src_u` / `src_v` | Source-rect top-left into the atlas |
+| `src_u_end` / `src_v_end` | Source-rect bottom-right (builder stores `src + wh`) |
+| `tex_handle` | Atlas/texture handle |
+
+The curtain animation is a **positional translate** of the two curtain panels every tick -- the tick
+writes only `dst_x`/`dst_y`; it does NOT change any source-rect field. This is confirmed by reading
+the image builder and the tick slide loop.
+
 Coordinates below are the literal builder arguments. Atlas A = `login_slice1.dds`, B = `loginwindow.dds`,
 C = `InventWindow.dds`, D = `loginwindow_02.dds`. "src" = (srcU, srcV) into that atlas; widget W/H = src
 W/H. "field" = the login-window object offset the handle is stored at.
@@ -433,16 +499,19 @@ W/H. "field" = the login-window object offset the handle is stored at.
 | # | element | type | parent | dest (X,Y,W,H) | atlas | src (U,V) | action | field | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 1 | main panel art | image | window | 0,110,1024,490 | B | 0,0 | -- | +0x270 | hidden at build |
-| 2 | server listbox container | panel | (held) | 270,85,483,490 | B | 0,490 | -- | +0x2BC | host of rows 3..6 + the 22 labels |
-| 3 | list scroll-UP arrow | button | listbox | 467,86,13,10 | B | 483,490 | 106 | +0x318 | |
-| 4 | list scroll-DOWN arrow | button | listbox | 467,455,13,10 | B | 505,490 | 107 | +0x31C | |
-| 5 | scrollbar thumb dot | button | listbox | 469,98,9,9 | B | 496,490 | 108 | +0x320 | |
-| 6 | listbox header strip | image | listbox | 207,44,70,17 | B | 70,980 | -- | +0x324 | |
-| 7..28 | **22 row captions** | label | listbox | X=50, Y=100 step **+18**, 383x50 | -- | -- | -- | +0x2C0 + 4*i | text = message-db id **4001 + i**, i = 0..21 (Y 100->478, < 496) |
+| 2 | notice / agreement panel (`eulaPanel`) | panel | (held) | 270,85,483,490 | B | 0,490 | -- | +0x2BC | host of rows 3..6 + the 22 notice labels (field 175 of the window object; DISTINCT from the server-select grid panel at +0x328 / field 202) |
+| 3 | notice scroll-UP arrow | button | notice panel | 467,86,13,10 | B | 483,490 | 106 | +0x318 | |
+| 4 | notice scroll-DOWN arrow | button | notice panel | 467,455,13,10 | B | 505,490 | 107 | +0x31C | |
+| 5 | notice scrollbar thumb dot | button | notice panel | 469,98,9,9 | B | 496,490 | 108 | +0x320 | |
+| 6 | notice panel header strip | image | notice panel | 207,44,70,17 | B | 70,980 | -- | +0x324 | |
+| 7..28 | **22 notice body labels** | label | notice panel (+0x2BC / field 175) | X=50, Y=100 step **+18**, 383x50 | -- | -- | -- | +0x2C0 + 4*i | text = message-db id **4001 + i**, i = 0..21 (Y 100->478, < 496) |
 
-> **The 22 labels (message ids 4001..4022) are the SERVER-LIST / channel ROW CAPTIONS**, parented to
-> the server-listbox container -- NOT EULA body text. See Section 1.5. There is no terms/agreement
-> panel constructed anywhere in the build.
+> **CORRECTION (reconciled dossier 2026-06-22, binary-won).** The 22 labels (message ids 4001..4022)
+> are a **static stacked notice/agreement text column** parented to the notice/agreement panel at
+> +0x2BC (object field 175). They are **NOT** server-list row captions, and their parent panel
+> (+0x2BC) is **DISTINCT** from the server-select grid panel (+0x328 / field 202). Actions 106/107/108
+> are the scroll controls for this notice panel, not EULA accept/scroll. There is no EULA gating in
+> the login flow. See `specs/frontend_scenes.md §1.4c`.
 
 ### 7.2 Backgrounds + the two channel-selector blocks
 
@@ -494,47 +563,136 @@ faces): one set to N(690,985)/H(737,985)/P(737,985), the other to N(784,985)/H(8
 
 ### 7.5 Bottom login bar + the ID/PW form
 
+Build-sequence index (the `v185` counter in BuildScene) for the form region runs from **56** (inner
+form sub-panel) to **64** (OK button + end of form children). This is the order in which widgets are
+constructed, which determines paint order within the panel:
+
+1. [56] Inner form sub-panel (+0x298) — built and set hidden.
+2. [57] ID-caption art (+0x29C).
+3. [58] PW-caption art (+0x2A0).
+4. [59] Small decoration plate (+0x2A4).
+5. [60] ID / account textbox (+0x2A8).
+6. [61] Password textbox (+0x2AC).
+7. [62] Save-ID checkbox (+0x2B0).
+8. [63/64] Saved-ID prefill branch (no new widget; sets checkbox state + ID box caption + initial
+   focus — see "Conditional default focus" below).
+9. [65] OK / Login button (+0x2B4) — built AFTER the checkbox and the prefill branch.
+
+Child-add order into the form panel (determines paint / z-order): ID-caption → PW-caption → deco
+plate → ID textbox (action 109) → PW textbox (action 110) → checkbox (action 104) → OK button
+(action 103). The form panel is then added to the bottom-bar panel.
+
 | # | element | type | parent | dest (X,Y,W,H) | atlas | src (U,V) N/H/P | action | field | notes |
 |---|---|---|---|---|---|---|---|---|---|
 | 51 | bottom login-bar panel | panel | window | 0, **326*screenH/768**, 1024,442 | A | 0,582 (flag=0) | -- | +0x278 | Y scales with screen height |
 | 52 | server-list reveal button | 3-state button | bar | 456,166,112,39 | A | N(154,398)/H(378,398)/P(378,398) | **102** | +0x280 | |
-| 53 | login background plate | image | bar | 265,0,494,113 | A | 0,469 | -- | +0x27C | the plate the ID/PW row sits on |
-| 54 | inner form sub-panel | panel | bar | 0,0,1024,100 | (none) | -- | -- | +0x298 | invisible layout container |
+| 53 | login background plate | image | bar | 265,0,494,113 | A | 0,469 | -- | +0x27C | the plate the ID/PW row sits on; repositioned to (494,469) by the curtain reveal edge (Section 1) |
+| 54 | inner form sub-panel | panel | bar | 0,0,1024,100 | (none) | -- | -- | +0x298 | invisible layout container; hidden at build |
 | 55 | account-label caption art | image | form | 340,30,38,13 | A | 0,398 | -- | +0x29C | baked Korean "ID" art |
 | 56 | password-label caption art | image | form | 507,30,49,13 | A | 38,398 | -- | +0x2A0 | baked art |
 | 57 | small decoration plate | image | form | 619,86,67,13 | A | 87,398 | -- | +0x2A4 | baked art |
-| 58 | **ID / account textbox** | text box | form | 390,32,102,13 | A | 615,404 | **109** | +0x2A8 | text-input cap **6** chars, plain charset |
-| 59 | **password textbox** | text box | form | 568,32,102,13 | A | 615,404 | **110** | +0x2AC | text-input cap **129** chars (0x81, masked render `*`) |
+| 58 | **ID / account textbox** | text box | form | 390,32,102,13 | A | 615,404 | **109** | +0x2A8 | per-keystroke length cap **16** chars (GUTextbox +0xD0 = 208); charset mask +0xA4 = 6 (alphanumeric-only filter, NOT a length); IME mode 16; both textboxes share the same src rect (615,404) |
+| 59 | **password textbox** | text box | form | 568,32,102,13 | A | 615,404 | **110** | +0x2AC | per-keystroke length cap **12** chars (GUTextbox +0xD0 = 208); charset mask +0xA4 = 129 / 0x81 (allow-all, NOT a length); IME mode 12; masked render (mask bit set — renders each entered character as `*`); same src rect (615,404) as the ID box |
 | 60 | **Save-ID checkbox** | 3-state checkbox | form | 694,86,13,13 | A | off(717,398)/on(730,398) | **104** | +0x2B0 | initial checked state + ID prefill (Section 1.3) |
-| 61 | **OK / Login button** | 3-state button | form | 456,64,112,39 | A | N(266,398)/H(490,398)/P(490,398) | **103** | +0x2B4 | baked "Login" face |
+| 61 | **OK / Login button** | 3-state button | form | 456,64,112,39 | A | N(266,398)/H(490,398)/P(490,398) | **103** | +0x2B4 | baked "Login" face; built after the checkbox and the prefill branch |
 
 (The Refresh/Help strip button #43 is added to the bar with action 105; the bar is then added to the
 window.)
 
-**Conditional default focus (the saved-id branch).** After the checkbox is built, the build reads the
-persisted account id from a UI singleton. If absent/empty -> checkbox unchecked, focus to the **ID**
-textbox. If present and **not** the sentinel `"(null)"` -> checkbox checked, the ID box caption is set
-to the saved id, focus to the **password** textbox. The `"(null)"` sentinel branch sets the ID box to
-empty and focuses the ID box. (See Section 1.3.)
+> **IME mode vs charset mask vs length cap.** Three separate GUTextbox fields govern different
+> aspects of each credential box:
+> - **+0xD0 (offset 208) — per-keystroke length cap:** ID = **16**, password = **12** (binary-won;
+>   these are the caps enforced at every keystroke and on paste). The earlier readings of "6" for ID
+>   and "129" for password were the charset mask, not the length.
+> - **+0xA4 (offset 164) — charset filter bitmask:** ID = **6** (bits 1+2 = digits + letters,
+>   i.e. alphanumeric-only); password = **129 / 0x81** (bit 0 = allow-all, so any printable character
+>   is accepted regardless of the other bits).
+> - **IME mode field:** ID = 16 (plain-charset entry); password = 12 (masked render mode).
+> The masked-render behaviour is a property of the mask bit in the length/flags field (see §2.1
+> correction note), not of the IME mode. The mask glyph and its per-character pixel advance are
+> internal to the GUTextbox draw path and are not BuildScene constants.
+
+**Conditional default focus (the saved-id branch).** After the checkbox is built [62], and before
+the OK button is built [65], the build reads the persisted account id from a UI singleton. Three
+branches:
+- **Absent / empty:** checkbox unchecked (checked-flag = 0); focus to the **ID** textbox.
+- **Present and not `"(null)"`:** checkbox checked (checked-flag = 1); the ID box caption is set to
+  the saved account id; focus to the **password** textbox.
+- **Present and equal to `"(null)"`:** checkbox checked; ID box caption set to empty; focus to the
+  **ID** textbox.
+
+The chosen focus target is passed to the modal-focus call immediately, before the OK button is built.
+(See Section 1.3.)
 
 ### 7.6 The PIN / second-password modal (child at +0x550)
 
 The PIN modal is a 696-byte aux child window built at object offset **+0x550** with its own texture
 list, positioned at dest `(347, 173, 329, 422)`, initially hidden. Its keypad build loads its OWN two
-atlases into the modal's texture list: `data/ui/password.dds` (digit/button art) and
-`data/ui/InventWindow.dds` (frame). It then builds, in order:
+atlases into the modal's texture list: `data/ui/password.dds` (digit/button art, atlas **P**) and
+`data/ui/InventWindow.dds` (dragon-frame, atlas **I**), in that order. It then builds, in order:
+
+**Construction order (BuildKeypad):**
+
+1. Masked-echo label (built first; passive).
+2..101. 100 digit buttons (double loop: 10 positions × 10 digit glyphs).
+102. Reset button (action 11).
+103. OK button (action 12).
+104. Cancel button (action 13).
+105. Nested close panel (atlas I; built hidden; added last, topmost).
+
+Each child is added to the modal panel immediately after it is built (paint / z-order = construction
+order).
+
+**Lifecycle (call order):**
+
+- **On LoginWindow build:** modal is constructed, `BuildKeypad` runs, the modal is hidden (via its
+  vtable hide slot), and it is added as a child of the LoginWindow. It is built hidden and parented.
+- **On show (substate 31):** `SetVisible(true)` first hides the nested close panel, then clears the
+  entered-digit collection, then clears the submitted flag, then calls `ScrambleKeypad`, then chains
+  to the base widget show. The order is **clear → scramble → show** and must be reproduced faithfully
+  (a freshly-shown modal always starts empty with a fresh random layout).
+- **Per click:** `OnEvent` runs the base window input dispatch first, then -- only for a click event
+  whose qualifier is a confirmed click -- switches on the pressed button's action id (see dispatch
+  table below).
+- **On poll (substate 32):** the login tick reads both the modal's visible flag and its submitted
+  flag; both set ⇒ PIN committed ⇒ advance.
+
+**Action dispatch:**
+
+| Action id | Route | Effect |
+|---|---|---|
+| 0..99 (build-order) | digit-press handler (OnEvent) | the keypad's own OnEvent resolves the pressed button's build-order action to a digit value via the live scramble permutation; guards < 4 digits; appends the resolved digit; rebuilds the `*`-masked echo. **Do not infer the digit from `action mod 10`** — the mapping is permutation-time, not action-time. |
+| **11** | `ScrambleKeypad` | **clear-AND-reshuffle** (clears the entered collection, then re-randomizes the digit layout) — NOT a no-op "reset" |
+| **12** | `SubmitOk` | serialize ≤ 4 digits into the PIN string, write to the session PIN slot (max 4 chars + NUL into a 5-byte slot), set submitted flag, re-scramble |
+| **13** | `Cancel` | clear entered-digit collection, re-scramble, hide the modal (submitted flag stays 0; login tick will not advance) |
+
+**Scramble mechanism (per show / per Reset / per OK / per Cancel):**
+
+1. Seed the C runtime random generator with wall-clock time (`srand(time(NULL))`; 1-second
+   granularity — reproduce as a per-show/per-action reshuffle).
+2. Fisher-Yates shuffle a 10-integer digit permutation (one entry per keypad position, values 0..9).
+3. For each of the 10 positions, of the 10 stacked buttons at that position, set visible only the one
+   whose digit value equals `permutation[position]`; hide the other 9.
+
+**Placement table:**
 
 | sub-element | type | dest (X,Y,W,H) | atlas | src (U,V) N/H/P | tag/action | notes |
 |---|---|---|---|---|---|---|
-| masked-echo label | label | 81,138,150,22 | -- | -- | (none) | built FIRST; echoes the typed PIN as `*` (passive) |
-| **100 digit buttons** | 3-state button x100 | X = **55*(p%5) + 28**, Y = **170** (p<5) / **230** (p>=5), 52x52 | password | for digit glyph d in {0,52,...,468}: N(d,560) / H(d,664) / P(d,612) | action = digit value 0..9 | outer loop over 10 keypad positions (p = 0..9) x inner loop over the 10 digit glyphs -> 100 buttons; each carries the digit value as its action; tiled in a 5-wide x 2-row pad |
-| Reset | 3-state button | 243,133,58,30 | password | N(663,8)/H(663,88)/P(663,48) | **11** | |
-| OK | 3-state button | 90,290,154,58 | password | N(330,0)/H(330,116)/P(330,58) | **12** | |
-| Cancel | 3-state button | 90,350,154,58 | password | N(486,0)/H(486,116)/P(486,58) | **13** | |
-| nested close panel | close/exit panel | ((W-340)/2, (H-190)/2, 340,190) | C (InventWindow) | 318,647 (flag=1) | -- | a centred dragon-frame close panel built INSIDE the keypad (its own X-button) |
+| masked-echo label | label | 81,138,150,22 | -- | -- | (none) | built FIRST; echoes the typed PIN as `*` per entered digit; cleared on show |
+| **100 digit buttons** | 3-state button ×100 | X = **55*(p%5) + 28**, Y = **170** (p<5) / **230** (p≥5), 52×52 | P (password) | for digit value v (0..9): N(52*v,560) / H(52*v,664) / P(52*v,612) | build-order action = outer_pos × 10 + inner_digit (range 0..99) | outer loop over 10 keypad positions p=0..9 × inner loop over 10 digit glyphs v=0..9 → 100 buttons total; the 2×5 visible grid is realized at runtime by the scramble (one button visible per position); srcU = `v×52` selects the glyph face; srcV selects the state band. **The digit a button press appends is decided by the keypad's own OnEvent handler consulting the live scramble permutation — it is NOT simply `action mod 10` or `action == digit`.** A port must track which digit each visible button represents via the scramble, not infer it from the action value. |
+| Reset | 3-state button | 243,133,58,30 | P | N(663,8)/H(663,88)/P(663,48) | **11** | routes to ScrambleKeypad (clears + reshuffles) |
+| OK | 3-state button | 90,290,154,58 | P | N(330,0)/H(330,116)/P(330,58) | **12** | |
+| Cancel | 3-state button | 90,350,154,58 | P | N(486,0)/H(486,116)/P(486,58) | **13** | |
+| nested close panel | close/exit panel | ((329-340)/2, (422-190)/2, 340,190) ≈ (-5, 116, 340, 190) | I (InventWindow) | 318,647 (flag=1) | -- | centred on the modal's own dims (340 wide > 329 modal width, so overhangs left); built hidden; added last |
 
-> Digit-glyph axis: `srcU = d * 52` varies along X with the digit value; `srcV` varies along Y with
-> the button STATE (560 normal / 664 hover / 612 pressed); tile 52x52.
+> **The "100 digit buttons" are a 10×10 over-build, not a flat grid of 10.** There are 10 keypad
+> positions (a 5-column × 2-row pad) and at each position 10 stacked buttons (one per digit glyph
+> 0..9); the scramble shows exactly ONE of the 10 stacked buttons per position and hides the other 9.
+> The port should replicate this structure so the scramble can swap visible/hidden without rebuilding
+> buttons.
+
+> Digit-glyph axis: `srcU = digit_value * 52` selects the glyph column (digit art); `srcV` selects
+> the button STATE row (560 = normal / 664 = hover / 612 = pressed); tile 52×52.
 
 ### 7.7 Small option sub-panel + trailing 111/112 buttons
 

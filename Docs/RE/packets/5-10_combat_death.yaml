@@ -1,0 +1,83 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Push table-driven (major-5 / minor-10).
+# size: 20 bytes (0x14) fixed-size block read via the sequential field reader.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing via the major-5 push table (minor 10), the
+#                 single 20-byte read, the (victim id, victim sort) and (killer id, killer sort)
+#                 composite-key lookups, the five field offsets, and the deathCause switch structure
+#                 with the actor/world fields each arm writes are control-flow-confirmed on IDB SHA
+#                 263bd994; field VALUE semantics (death-penalty magnitudes, effect/message ids,
+#                 level threshold) are capture/debugger-pending)
+#   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]
+#   readiness: IMPLEMENTATION-READY for the C# rebuild (layout + dispatch control-flow-confirmed); the
+#              death-penalty magnitudes and the effect/message-id meanings are NON-blocking runtime residuals.
+#   conflicts: none (first pin; counter-confirmed CYCLE 12 / Phase 3 -- routing minor=10 re-proved from
+#              the table install displacement and its neighbours; PK effects anchor on the VICTIM pair,
+#              not the killer).
+
+name: SmsgCharDeath
+opcode: 0x5000a           # major 5 (Push), minor 10 -> (5 << 16) | 10
+direction: S2C
+size: 20                  # fixed 20-byte payload (0x14)
+spec: packets/5-10_combat_death.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Character/actor death push. The server announces that an actor has died and who killed it. The
+  client resolves the dying actor and the killer by their composite keys, clears the victim's
+  combat and buff state, plays the death motion and death/PK effect, and -- for the local player --
+  opens the respawn UI and enqueues the respawn-countdown timer. A leading cause selector chooses
+  between a normal death and two player-kill variants.
+
+# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 20.
+# The sort fields are consumed as a single low byte each; the upper 3 bytes of each sort dword are
+# modelled as padding (the handler reads only the low byte).
+fields:
+  - { name: VictimSort,  type: u8,  offset: 0 }   # 0x00  dying actor sort byte (low byte of the key); 1 = player
+  - { name: VictimPad,   type: "u8[3]", offset: 1 } # 0x01  upper bytes of the sort dword (not consumed)
+  - { name: VictimId,    type: u32, offset: 4 }   # 0x04  dying actor id (the other half of the victim key)
+  - { name: DeathCause,  type: i32, offset: 8 }   # 0x08  cause/result selector switched by the handler: 0 normal, 1 PK type A, 2 PK type B, 3 special/no-modal
+  - { name: KillerSort,  type: u8,  offset: 12 }  # 0x0c  killer actor sort byte (low byte of the killer key)
+  - { name: KillerPad,   type: "u8[3]", offset: 13 } # 0x0d  upper bytes of the killer sort dword (not consumed)
+  - { name: KillerId,    type: u32, offset: 16 }  # 0x10  killer actor id (the other half of the killer key)
+
+notes: |
+  Static analysis only; no capture available. Total = 20 bytes (0x14), matching the handler's single
+  20-byte read. Field widths sum exactly to 20 (1+3 + 4 + 4 + 1+3 + 4 = 20).
+
+  COMPOSITE KEYS:
+    - The victim is resolved by (VictimId, VictimSort) -- id from wire +0x04, sort (low byte) from +0x00.
+    - The killer is resolved by (KillerId, KillerSort) -- id from wire +0x10, sort (low byte) from +0x0c.
+    Both are the standard (id, sort) actor-manager lookup pair used across the spawn family.
+
+  COMMON ARM (runs for every DeathCause value, on the victim actor):
+    - Clears the locked battle target on the battle-controller singleton when it matches the victim key.
+    - Zeroes the victim's two combat-resource fields.
+    - Plays the death motion: sets the actor action-state to the death value, clears the alive flag,
+      and records a death timestamp; plays the death clip and its sound.
+    - Clears the victim's active buff-slot array.
+    - A local-player victim additionally enters the "dead" battle submode.
+
+  DEATHCAUSE SWITCH (selector at wire +0x08; all arms statically closed):
+    - 0  Normal           : local victim opens the respawn modal (a fixed modal slot); broadcasts the
+                            death/killed-by notice messages; the modal opens in mode 1 when the local
+                            player level is at or above a fixed threshold, otherwise mode 3; enqueues
+                            the respawn-countdown timed event. (Default respawn delay; a PvP-zone region
+                            branch uses a much shorter delay.)
+    - 1  PK type A        : spawns a player-kill death effect and its sound, anchored on the VICTIM pair
+                            (victim sort + victim id).
+    - 2  PK type B        : spawns a different player-kill death effect and sound, plus a tracked-panel
+                            cleanup for mob/secondary victims; also anchored on the victim.
+    - 3  Special/no-modal : local victim opens the respawn modal in mode 3 only (no town-respawn path),
+                            skipping the full normal-death UI; uses a one-shot short respawn timer.
+
+  CAPTURE-PENDING (VALUE-only, NON-blocking runtime residuals -- do not chase statically):
+    - All death-penalty magnitudes (experience loss, durability loss, item drops) are server-authored;
+      the client only formats text and applies the visual/state changes above.
+    - The concrete effect ids, sound ids, message-string ids, and the exact level threshold that
+      selects respawn-modal mode 1 vs 3 are data-driven value semantics, confirmed only by their use,
+      not by a labelled wire meaning.
+    - Whether DeathCause is a full 4-byte selector on the wire vs a single byte plus padding (the
+      handler switches on the low part) is a wire-VALUE detail to confirm against a capture.

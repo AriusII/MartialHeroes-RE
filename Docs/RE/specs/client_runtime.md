@@ -1,6 +1,6 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
+ida_reverified: 2026-06-22   # CYCLE 12 Phase 0 (263bd994): SECTION 7.5.2 network-driven transitions corrected -- 3/100 select-mode codes 22/23 are RECOVERABLE (7/5), not the fatal out-of-range 7/8 arm; table now cross-references handlers.md SECTION 23.1 as the canonical 3/100 code table. prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]   # sound tables, toonramp LUT, npc.arr, .sod/.ted byte-samples corroborate; the boot/loop/scene-machine/world-scene backbone is static-IDA CODE-CONFIRMED
 conflicts: frame-limiter target-FPS source RESOLVED (display FRAMERATE config is dead — two writers, zero readers — cap is hardcoded 60.0; CYCLE 7); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — remaining items (capture/debugger-pending)
@@ -1413,16 +1413,26 @@ Written by the network-receive path; each also clears the run-flag.
 > select scene) and **writes NO engine-state field** — it must not be wired to any scene transition.
 > The "result code" rows below are `CharActionResult` (3/100) codes. See `opcodes.md` (3/7, 3/100).
 
+> **Canonical 3/100 code table: see `handlers.md` §23.1** (anchor `263bd994`) for the complete
+> per-code (state, sub-state, error-detail, side effect, string-id, timer-arm) mapping in BOTH
+> modes. The rows below are the engine-state-transition VIEW only — they group 3/100 codes by the
+> engine state they write; they are NOT a re-listing of the code set. **Critical (corrected
+> 2026-06-22):** in **select-mode** the recoverable error family is **{1,2,3,4,5,7,22,23} → 7/5**,
+> NOT just 1..4/7 — codes **22 and 23 are RECOVERABLE (7/5), not the fatal 7/8 out-of-range arm.**
+> The 7/8 "hard error" select-mode row is the TRUE default/out-of-range set only (the jumptable
+> default codes 212-219/228-231 and any code with no arm). In-world, every non-zero code → 7/8.
+
 | Live scene | Trigger | Next state | Sub-state | Notes |
 |---|---|---:|---:|---|
 | 1 Login | **EnterGameAck (3/5)** received | 2 | — | auth OK → begin load. **State-agnostic:** the handler forces state 2 unconditionally; "from Login" is just where it is observed to arrive |
 | 4/2 Select/Load | **CharacterList (3/1)** received | 4 | 8 | (re)enter select with fresh character list |
 | 5 In-game (bootstrap) | **GameStateTick (4/1)**, no local player **and re-spawn from the descriptor FAILED** | 4 | — | world-state pre-spawn fallback; reached only when the local-player object is absent *and* descriptor spawn returns null (on success it builds the world and does not change state) |
 | 4 Select | **CharActionResult (3/100) code = 0**, no local player | 6 | 8 | char op succeeded → quit/return path |
-| 4 Select | **CharActionResult (3/100) code 1..4 or 7** | 7 | 5 | char operation failed → error |
+| 4 Select | **CharActionResult (3/100) recoverable error: code ∈ {1,2,3,4,5,7,22,23}** | 7 | 5 | char operation failed → **recoverable** Error sub-state; error-detail = code. **Code 23 also shows notice string-id 1604 and is excluded from the retry timer.** This is NOT the fatal 7/8 arm — see §23.1 |
 | 4 Select | **CharActionResult (3/100) code 202/203/232** | 2 | — | create/rename/billing accepted → reload |
-| 4 Select | **CharActionResult (3/100) code out-of-range** | 7 | 8 | hard char-op error; error-detail = result code |
-| 5 In-game | **CharActionResult (3/100) code ≠ 0**, local player present | 7 | 8 | in-game char error; error-detail = result code |
+| 4 Select | **CharActionResult (3/100) publish-only: code ∈ {10,11,16,200,201,204-211,220-227}** | (no state write) | — | publish-code only; no engine-state transition (see §23.1) |
+| 4 Select | **CharActionResult (3/100) true default/out-of-range: code ∈ {212-219,228-231} or no arm** | 7 | 8 | hard char-op error; error-detail = result code |
+| 5 In-game | **CharActionResult (3/100) code ≠ 0**, local player present | 7 | 8 | in-game char error; error-detail = result code (tooltip set {1-7,22} per §23.1) |
 | 5 In-game | **CharActionResult (3/100) code = 0**, local player present | 6 | 8 | in-game char op succeeded |
 | any (state 2) | connection/handshake error during load | 7 | 2 | load-time disconnect |
 | any (state 4/5/6/other) | disconnect | 7 | 8 (or 6) | generic disconnect → error / quit |

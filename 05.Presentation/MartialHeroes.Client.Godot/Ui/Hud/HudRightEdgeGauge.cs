@@ -119,6 +119,9 @@ public sealed partial class HudRightEdgeGauge : Control
         _hpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _hpLabel.OffsetTop = 0f;
         _hpLabel.OffsetBottom = GaugeH;
+        // Caption font slot 4 — dominant in-game HUD caption font.
+        // spec: Docs/RE/specs/ui_hud_layout.md CYCLE 11 — "dominant HUD caption font slot 4"
+        HudFont.ApplyToLabel(_hpLabel, 4); // spec: ui_hud_layout.md CYCLE 11 — slot 4
         AddChild(_hpLabel);
 
         // MP value label
@@ -133,6 +136,9 @@ public sealed partial class HudRightEdgeGauge : Control
         _mpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _mpLabel.OffsetTop = MpY - HpY;
         _mpLabel.OffsetBottom = MpY - HpY + GaugeH;
+        // Caption font slot 4 — dominant in-game HUD caption font.
+        // spec: Docs/RE/specs/ui_hud_layout.md CYCLE 11 — "dominant HUD caption font slot 4"
+        HudFont.ApplyToLabel(_mpLabel, 4); // spec: ui_hud_layout.md CYCLE 11 — slot 4
         AddChild(_mpLabel);
 
         GD.Print("[HudRightEdgeGauge] Built — two 140×35 strips at screen_width−135, Y=200/250. " +

@@ -48,6 +48,45 @@ public sealed partial class CameraController
 
                 break;
 
+            // ── View-mode hotkeys (spec §A.2.2 call site 1 — "View menu / hotkey dispatcher").
+            // The five in-world modes (Third/First/Static/Gamble/Event) are selected by the
+            // original client's keyboard hotkey path; only the three user-selectable modes
+            // (Third/First/Static) are persisted (OPTION_VIEW_CHAR 1..3) and reachable here.
+            // spec: Docs/RE/specs/camera_movement.md §A.2.1 — "clamped to range 1..3 on load". CODE-CONFIRMED.
+            // spec: Docs/RE/specs/camera_movement.md §A.2.2 call site 1 — hotkey dispatcher. CODE-CONFIRMED.
+            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F1:
+                // Third-person (OPTION_VIEW_CHAR = 1). Default.
+                // spec: Docs/RE/specs/camera_movement.md §A.5.2 — Third. CODE-CONFIRMED.
+                SetViewMode(ViewMode.Third);
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F2:
+                // First-person (OPTION_VIEW_CHAR = 2). Eye at player head.
+                // spec: Docs/RE/specs/camera_movement.md §A.5.2 — First. CODE-CONFIRMED.
+                SetViewMode(ViewMode.First);
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F3:
+                // Static fixed-angle follow (OPTION_VIEW_CHAR = 3).
+                // spec: Docs/RE/specs/camera_movement.md §A.5.2 — Static. CODE-CONFIRMED.
+                SetViewMode(ViewMode.Static);
+                GetViewport().SetInputAsHandled();
+                break;
+
+            // ── Gamble / Event modes — DEFERRED.
+            // Gamble requires a fixed world-coordinate eye (X=24097.46, Z=55694.43) and
+            // no user-input; it frames the cube-gamble mini-game location only.
+            // Event is a scripted/cutscene mode driven by a MotionClip (2-track eye/look-at
+            // track) or player-orbit sub-mode — neither is driveable by a runtime hotkey in
+            // normal play; it is activated by a cinematic-lock flag, not by user selection.
+            // Both are NON-PERSISTED (not part of OPTION_VIEW_CHAR 1..3).
+            // spec: Docs/RE/specs/camera_movement.md §A.2.1 — Gamble/Event not persisted. CODE-CONFIRMED.
+            // spec: Docs/RE/specs/camera_movement.md §A.5.2 — Gamble fixed eye / Event cinematic. CODE-CONFIRMED.
+            // TODO: implement Gamble + Event when the world-scene provides a cinematic trigger
+            //       and the gamble location is known at runtime.
+
             // ── Right mouse button: start / stop look drag ────────────────────
             case InputEventMouseButton mb when mb.ButtonIndex == MouseButton.Right:
                 _rightMouseHeld = mb.Pressed;

@@ -22,8 +22,8 @@ namespace MartialHeroes.Client.Godot.World;
 // • On StopCast(actor), the live effect is soft-stopped (active flag cleared) and removed
 //   on the following frame — matching the original runtime semantics.
 //   spec: Docs/RE/specs/effects.md §15.5 — soft-stop; CODE-CONFIRMED.
-// • If the VFS is absent, the .xeff file is missing, or parsing fails, we fall back to the
-//   original GpuParticles3D placeholder so the node is never visually silent.
+// • If the VFS is absent, the .xeff file is missing, or parsing fails, no effect is rendered
+//   (no-placeholder doctrine; see PlayCast implementation).
 //
 // Parser note
 // ────────────────────────────────────────
@@ -60,7 +60,7 @@ namespace MartialHeroes.Client.Godot.World;
 // type 2 — Directional billboard; same as type 0 plus 90° Y pre-rotation.
 //   spec: Docs/RE/specs/effects.md §17.2 — oriented-quad; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
-// GPU-particle (resource_id >= 10000): bridged to GpuParticles3D placeholder only.
+// GPU-particle (resource_id >= 10000): driven by GpuParticleSimNode (stepwise Euler integration).
 //   spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.14 — XEFF_RESOURCE_PARTICLE_THRESHOLD = 10000; CONFIRMED.
 //
@@ -379,11 +379,12 @@ public sealed partial class EffectRenderer : Node3D
         public uint EffectId;
         public double ElapsedMs; // running elapsed time in ms
 
-        // GPU-particle simulation nodes for resource_id >= 10000 sub-effects.
-        // Now driven by GpuParticleSimNode (real stepwise Euler integration from particleEmitter.eff).
-        // spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration; CODE-CONFIRMED.
+        // Legacy GpuParticles3D slot — superseded by GpuParticleSimNode; kept for null-safe
+        // teardown compat in EmitterRenderer and KeyframeAnimator (always null, never assigned).
+        // spec: Docs/RE/specs/effects.md §17.2 — GPU particle now via GpuParticleSimNode; CONFIRMED.
+#pragma warning disable CS0649 // field always null; intentional (compat guard, never assigned)
         public GpuParticles3D?[]? GpuParticles;
+#pragma warning restore CS0649
 
         // Per-sub-effect: one MeshInstance3D per rendered sub-effect.
         // Null entries indicate GPU-particle sub-effects (handled by GpuParticleSimNode below).

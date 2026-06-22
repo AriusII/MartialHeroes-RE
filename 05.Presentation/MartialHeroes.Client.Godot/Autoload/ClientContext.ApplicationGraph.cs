@@ -320,11 +320,21 @@ public sealed partial class ClientContext
         //     Wire the catalogue vitals resolver (real stat curves) at construction.
         //     spec: CatalogueVitalsResolver.Create — builds the seam from the catalogue.
         //     spec: Docs/RE/formats/config_tables.md §2.4.
+        //
+        //     ENTER-WORLD EMITTER RELAY (CYCLE 12 Phase 2):
+        //     ApplicationUseCases is not yet constructed at this point (ordering constraint), so we
+        //     cannot pass useCases.EmitEnterWorldRequest directly.  Instead we create a deferred-relay
+        //     whose target is set after useCases is constructed — the same pattern as the
+        //     RelayInputHandler / _setWorldHandler wiring above.  The relay's Invoke delegate is passed
+        //     now; SetTarget is called below once useCases exists.
+        //     spec: Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted from the 3/14 handler).
+        var enterWorldRelay = new RelayEnterWorldEmitter();
         var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver,
             characterSelection: characterSelection,
             accountCharacters: accountCharacters,
             sceneStateMachine: sceneMachine,
-            worldEntry: worldEntry)
+            worldEntry: worldEntry,
+            enterWorldEmitter: enterWorldRelay.Invoke)
         {
             VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
         };
@@ -447,9 +457,23 @@ public sealed partial class ClientContext
             $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
             " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
 
+        // CYCLE 12 Phase 2 — wire the deferred enter-world emitter relay now that useCases exists.
+        // The relay was passed to GamePacketHandler at construction (above); pointing it here at the
+        // real emitter completes the 3/14 → 1/9 enter ladder seam without violating ordering.
+        // spec: Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted from the 3/14 handler).
+        enterWorldRelay.SetTarget(useCases.EmitEnterWorldRequest);
+        GD.Print("[ClientContext] enterWorldRelay → useCases.EmitEnterWorldRequest wired. " +
+                 "spec: frontend_scenes.md §7 (3/14 → 1/9 enter ladder seam).");
+
         // 21. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.
         var engineLoop = new GameEngineLoop(world, bus, inputBus);
+
+        // 21b. Timed-event queue — the universal "10001" deferred event queue. Engine-free; drained
+        //      per-frame in GameLoop._Process and flushed in InGameScene._ExitTree on world-leave.
+        //      spec: Docs/RE/specs/effect-scheduling.md §5A (two-pass full-tree sweep; FlushOnSceneTransition).
+        var timedEventQueue = new TimedEventQueue();
+        GD.Print("[ClientContext] TimedEventQueue constructed. spec: Docs/RE/specs/effect-scheduling.md §5A.");
 
         // Publish to fields.
         EventBus = bus;
@@ -461,6 +485,7 @@ public sealed partial class ClientContext
         EngineLoop = engineLoop;
         StreamingService = streamingService;
         WorldEntry = worldEntry; // spec: Docs/RE/specs/world_entry.md §2.3 / §3.1 — durable seam.
+        TimedEventQueue = timedEventQueue; // spec: Docs/RE/specs/effect-scheduling.md §5A.
 
         // Store the relay setter so InputRouter can set the real handler later.
         _setWorldHandler = worldRelay.SetTarget;

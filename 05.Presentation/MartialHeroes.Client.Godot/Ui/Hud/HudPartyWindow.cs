@@ -33,6 +33,7 @@
 // PASSIVE: zero game logic; emits invite/leave/kick as use-case calls (TODO world-campaign stubs).
 
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -369,18 +370,89 @@ public sealed partial class HudPartyWindow : Control
     }
 
     // -------------------------------------------------------------------------
+    // Roster ingest (4/1 world-entry snapshot)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Fills visible member rows from the 4/1 WorldEntryTableA roster snapshot.
+    ///     Each <see cref="RosterMember" /> carries ActorId (nonzero = occupied), KeepGuard (doubles
+    ///     as the displayed member number), and Aux (value meaning capture-pending).
+    ///     Name / class / vitals are NOT on this event (those come from S2C 5/21 + 5/38, still TODO).
+    ///     We render what we have: member NUMBER (#&lt;KeepGuard&gt;) and ActorId into the name label;
+    ///     bars remain at 0; level and class labels left blank.
+    ///     Retires the BindHub "deferred (TODO world-campaign)" stub for roster-number population —
+    ///     the GameLoop drain now calls this directly.
+    ///     spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A 16-byte record; KeepGuard = member number).
+    ///     spec: Docs/RE/specs/world_systems.md §13.3 — WorldEntryTableA roster model.
+    /// </summary>
+    public void OnRosterSnapshot(RosterSnapshotEvent evt)
+    {
+        // Clear all member rows first so a re-init from a new world-entry is clean.
+        for (var k = 0; k < MemberCount; k++)
+        {
+            if (_nameLabels[k] is not null) _nameLabels[k].Text = "";
+            if (_levelLabels[k] is not null) _levelLabels[k].Text = "";
+            if (_classLabels[k] is not null) _classLabels[k].Text = "";
+            if (_hpBars[k] is not null) _hpBars[k].Value = 0.0;
+            if (_mpBars[k] is not null) _mpBars[k].Value = 0.0;
+            if (_expBars[k] is not null) _expBars[k].Value = 0.0;
+        }
+
+        if (evt.Members.IsDefaultOrEmpty)
+        {
+            GD.Print("[HudPartyWindow] OnRosterSnapshot: empty roster. " +
+                     "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
+                     "Docs/RE/specs/world_systems.md §13.3.");
+            return;
+        }
+
+        var rowsFilled = 0;
+        foreach (var member in evt.Members)
+        {
+            // Roster entries are sorted by KeepGuard (member number) in the original; we trust
+            // the Application layer's ordering (non-empty ActorId sweep).
+            // spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A — ActorId nonzero = occupied).
+            var rowIndex = rowsFilled; // pack into rows 0..MemberCount-1 in arrival order
+            if (rowIndex >= MemberCount) break; // cap at 8 visible rows
+
+            // Render member number and ActorId — name/class/vitals feed-pending (S2C 5/21 + 5/38).
+            // spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A: KeepGuard = displayed member number).
+            // spec: Docs/RE/specs/world_systems.md §13.3 — "KeepGuard doubles as the member number".
+            var displayText = $"#{member.KeepGuard} [id:{member.ActorId}]";
+            if (_nameLabels[rowIndex] is not null) _nameLabels[rowIndex].Text = displayText;
+            // Bars remain at 0; level/class remain blank pending S2C 5/21 + 5/38.
+
+            GD.Print(
+                $"[HudPartyWindow] row {rowIndex}: member #{member.KeepGuard} ActorId={member.ActorId} Aux={member.Aux} — " +
+                "name/class/vitals roster-feed-pending (S2C 5/21 + 5/38). " +
+                "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
+                "Docs/RE/specs/world_systems.md §13.3.");
+            rowsFilled++;
+        }
+
+        GD.Print($"[HudPartyWindow] OnRosterSnapshot: {rowsFilled} member row(s) populated with member# + ActorId. " +
+                 "Name/class/vitals feed-pending (S2C 5/21 + 5/38 channels — TODO world-campaign). " +
+                 "spec: Docs/RE/packets/4-1_game_state_tick.yaml (Table A); " +
+                 "Docs/RE/specs/world_systems.md §13.3.");
+    }
+
+    // -------------------------------------------------------------------------
     // Hub binding
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     No hub channel exists for party roster yet.
-    ///     TODO(world-campaign): party populate when hub exposes S2C 5/21 + 5/38 channels.
+    ///     Binds hub channels that are already available. The roster-number population is now
+    ///     wired via the GameLoop drain calling <see cref="OnRosterSnapshot" /> directly.
+    ///     Name/class/vitals remain pending S2C 5/21 + 5/38 channels (TODO world-campaign).
+    ///     spec: Docs/RE/specs/ui_system.md §8.12 — populate via S2C 5/21 + 5/38.
     /// </summary>
     public void BindHub(IHudEventHub hub)
     {
-        // TODO(world-campaign): wire party roster events (S2C 5/21 SmsgPartyRosterEvent + 5/38 SmsgPartyMemberStats)
+        // Roster-number population: now wired via OnRosterSnapshot (GameLoop drain).
+        // Name / class / vitals remain TODO(world-campaign): S2C 5/21 SmsgPartyRosterEvent + 5/38 SmsgPartyMemberStats.
         // spec: Docs/RE/specs/ui_system.md §8.12 — populate via S2C 5/21 + 5/38
-        GD.Print("[HudPartyWindow] BindHub: party roster populate deferred (TODO world-campaign: S2C 5/21 + 5/38).");
+        GD.Print("[HudPartyWindow] BindHub: roster-number population wired via OnRosterSnapshot (GameLoop drain). " +
+                 "Name/class/vitals remain TODO(world-campaign): S2C 5/21 + 5/38.");
     }
 
     // -------------------------------------------------------------------------

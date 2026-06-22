@@ -2,11 +2,13 @@
 
 ```
 verification: confirmed
-ida_reverified: 2026-06-19
+ida_reverified: 2026-06-22
+reconciled: 2026-06-22
 anchor: 263bd994
-evidence: [static-ida]
+promoted: 2026-06-22 (LOGIN-LAYOUT lanes A/B/C promoted; GU coordinate system section added — IDB SHA 263bd994)
+evidence: [static-ida, debugger-confirmed-g2]
 capture_verified: false
-status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending); SERVER-LIST NAME/STATUS/POPULATION RESOLVERS CORRECTED 2026-06-20 (see §4.1) — name bank is FLAT 5001+ServerId (the prior "5301-5440 banked resolver" is DROPPED; 5301/5101/5201/5401/5421 = discarded cache warm-up), status caption = 4029+StatusCode (4029..4032), population colour keyed on LoadCount (1200/800/500 → 6001 red / 6002 orange / 6003 yellow / green default, siblings 6004 maintenance + 6005 cur/max), 8-byte record {ServerId i16@+0, StatusCode i16@+2, LoadCount i16@+4, gate/flag i16@+6} with array ptr + count as OBJECT FIELDS (stale "+388" count offset DROPPED), StatusCode 100 = selectable sentinel (display-only); SERVER-LIST per-render SHUFFLE + Lastserver vs connected-id RESOLVED 2026-06-21 (visible plates are STABLE raw records [2i]/[2i+1]; the Fisher-Yates permutation hits a parallel id-vector whose only effect is the Lastserver value; the old "ServerId-vs-ServerId-1 off-by-one" was two different arrays, not an off-by-one; default-highlight key = NEW_SERVER_INDEX, not Lastserver); residual live-pending (6-D) = runtime StatusCode value semantics only
+status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + login visibility edges + opening fade mechanism, CYCLE 18 Phase A static IDA; element/asset/src-rect construction re-confirmed + deepened against the LoginWindow / PIN keypad / server-list / Opening construct routines, 2026-06-19 element-level pass — PIN digit-face state bands + credential mask mechanism + curtain extent + server-list plate/pager/status art all pinned); PIN second-password window CHROME CORRECTED 2026-06-19 chrome re-trace — the window backdrop blits password.dds (0,0)-(329,422), supplying the frame/title/red-warning/번호입력/field as baked art, superseding the earlier "no chrome" reading (see §0.7, §3); residual = opening final-fade armed-flag producer site only, and the exact pixel sub-layout inside the password.dds 329x422 backdrop (texture fact, VFS extract pending); SERVER-LIST NAME/STATUS/POPULATION RESOLVERS CORRECTED 2026-06-20 (see §4.1) — name bank is FLAT 5001+ServerId (the prior "5301-5440 banked resolver" is DROPPED; 5301/5101/5201/5401/5421 = discarded cache warm-up), status caption = 4029+StatusCode (4029..4032), population colour keyed on LoadCount (1200/800/500 → 6001 red / 6002 orange / 6003 yellow / green default, siblings 6004 maintenance + 6005 cur/max), 8-byte record {ServerId i16@+0, StatusCode i16@+2, LoadCount i16@+4, gate/flag i16@+6} with array ptr + count as OBJECT FIELDS (stale "+388" count offset DROPPED), StatusCode 100 = selectable sentinel (display-only); SERVER-LIST per-render SHUFFLE + Lastserver vs connected-id RESOLVED 2026-06-21 (visible plates are STABLE raw records [2i]/[2i+1]; the Fisher-Yates permutation hits a parallel id-vector whose only effect is the Lastserver value; the old "ServerId-vs-ServerId-1 off-by-one" was two different arrays, not an off-by-one; default-highlight key = NEW_SERVER_INDEX, not Lastserver); residual live-pending (6-D) = runtime StatusCode value semantics only; 2026-06-22 reconciled-dossier cross-check: existing content confirmed correct — substate ladder (1=intro+SFX, 2=curtain slide, 3/4/5 settle, 6=form), notice panel vs server-select grid distinction, PIN action range 0..99, ID textbox maxlen=16 (the dossier's "maxlen 6" was the old charset-mask reading, corrected here at §2.7 2026-06-21; spec wins); 2026-06-22 field-cap correction propagated (binary-won, IDB SHA 263bd994): ID per-keystroke cap=16 (GUTextbox +0xD0), charset mask=6 (+0xA4, NOT a length); PW per-keystroke cap=12 (GUTextbox +0xD0), charset mask=0x81 (+0xA4, NOT a length) — §2.1 PW row updated with maxlen 12; §2.7 already stated both correct values. LOGIN-VISUAL PROMOTE 2026-06-22 (IDB SHA 263bd994, counter-check reconciled): CONFLICT RESOLVED — sub-state 4→5 is AUTOMATIC (no Enter gate; binary-won, counter-check); form-plate snap corrected (200-threshold snaps the form decorative plate member +0x27C, not the ID textbox; binary-won); OnAction_Notice reset corrected (resets to CLOSED seam top=0/bottom=326, not "open"; binary-won); curtain quad atlas tuples promoted to §2.3 table; server-list painter-slot STATICALLY RESOLVED (direct-index path, CENTER name align); PIN Cancel-raises-ExitPanel and tag-11=re-scramble confirmed; load-colour dual-branch confirmed; pager re-arm geometry confirmed. G2 DEBUGGER-CONFIRMED PROMOTE 2026-06-22 (IDB SHA 263bd994, live doida.exe ?ext=dbg session): FULL-FRAME LOGIN MODEL at credential-freeze state promoted — (A) form-deco plate real dst CORRECTED to (265,548) 494×113 src(0,469) (supersedes the prior (494,469) value which confused the 494 width and 469 src-top for a destination; binary-won, G2 debugger-confirmed); (B) Connexion/Quitter control group real origin CORRECTED to X=356 (absolute group origin (356,531) 313×132; the prior (0,356) 531×313 panel coordinates were wrong — G2 debugger-confirmed, supersedes); curtain two-half model (top login_slice1.dds dstY=−222 / bottom login_slice1.dds dstY=+548) CONFIRMED ground-truth; the top curtain at −222 is the real animated curtain top half, NOT a port phantom — any prior note calling it a phantom is REVERSED. See §2.1 (Connexion/Quitter group) and §2.3 (form-deco snap dst).
 ```
 
 > This is the authoritative numeric oracle for the pre-character-select front end. Every constant here
@@ -69,6 +71,111 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
     frame. On most front-end buttons PRESSED equals NORMAL, so the only distinct extra frame is HOVER;
     the PIN digit faces are an exception that use all three bands (see §3).
 
+## 0a. GU COORDINATE SYSTEM — implementers read this before placing any widget
+
+> **This section is the single authoritative statement of the Diamond::GU widget coordinate system.**
+> Every widget position in §2–§4 (and in `specs/login.md §7`) must be interpreted under these rules.
+> Getting any one of these rules wrong causes a uniform mis-placement of every affected widget group —
+> the "desaxage" / piled-up-form disorder reported on the login screen is a direct consequence of
+> violating rule (3) below. Binary-confirmed from the recovered builder, transform, and render routines.
+> (IDB SHA 263bd994, static IDA, promoted 2026-06-22.)
+
+### 0a.1 Coordinate origin and axis direction
+
+- **Origin: top-left corner of the back buffer, (0, 0).**
+- **+Y is downward.** The UI orthographic projection maps pixel (0,0) to the top-left corner and the
+  screen-height value to the bottom, so increasing Y moves a widget toward the bottom of the screen.
+  This matches the standard DirectX screen-space convention.
+- There is no centre-origin, no per-widget DPI scale, and no half-texel offset anywhere in the GU
+  render path. One widget unit = one back-buffer pixel.
+
+### 0a.2 Local vs absolute position — every coordinate in the tables is LOCAL
+
+Every position value stored in a widget at construction is **LOCAL to its immediate parent's resolved
+(absolute) origin**. The builder stores a widget's `localX` / `localY`; these are **NOT** direct
+screen coordinates. The render system resolves absolute screen coordinates at draw time by the
+additive cascade in §0a.4.
+
+> **Critical implementation rule:** treat every `(x, y)` value in §2–§4 as the widget's offset
+> within its named parent panel — NOT as the widget's absolute screen pixel.
+
+### 0a.3 The root anchor — the centering offset applied to the entire login window
+
+The `LoginWindow` object is itself a GU widget. At construction it is placed at:
+
+```
+rootLocalX = screenWidth  / 2 − 512
+rootLocalY = screenHeight / 2 − 384
+```
+
+This centers a fixed **1024 × 768 logical canvas** inside the actual back buffer using integer
+division. At the native 1024 × 768 resolution the anchor is (0, 0); at any larger resolution it is a
+positive constant vector (for example, at 1920 × 1080 the anchor is (448, 156)).
+
+Because every login widget is a transitive child of the `LoginWindow` root, **this anchor is added to
+every login widget** through the parent cascade (§0a.4). A port that omits the anchor or applies it
+with incorrect screen dimensions will shift every widget by the same constant vector — the classic
+uniform desaxage.
+
+### 0a.4 The parent cascade (computeTransform) — how absolute position is resolved
+
+At draw time, each widget's absolute screen position is computed as:
+
+```
+absX = localX + parent.absX
+absY = localY + parent.absY
+```
+
+For the root widget (no parent): `absX = localX`, `absY = localY`.
+
+The cascade is applied recursively, parent-first: the root is resolved first, then each child uses the
+already-resolved parent absolute. The resulting absolute (absX, absY) is the screen-pixel position of
+the widget's top-left corner.
+
+For any login widget the full expansion is:
+
+```
+absX = rootAnchorX + Σ(ancestor local x values) + widget.localX
+absY = rootAnchorY + Σ(ancestor local y values) + widget.localY
+
+rootAnchorX = screenWidth  / 2 − 512
+rootAnchorY = screenHeight / 2 − 384
+```
+
+A widget's parent chain may include one or more intermediate panels. Each panel's own `localX` /
+`localY` is included in the sum. A panel at `localX=0, localY=0` contributes nothing; a panel placed
+at a nonzero local origin shifts all its children by that amount.
+
+### 0a.5 Source-rect sampling — top-left origin, exact pixels, 1:1
+
+- **Source-rect origin: top-left corner of the atlas texture, (0, 0).**
+- The source rect for a widget is `(srcX, srcY, w, h)` — the rectangle from `(srcX, srcY)` inclusive
+  to `(srcX+w, srcY+h)` exclusive. The builder stores the derived right and bottom edges directly.
+- **No scaling, no UV inset, no half-texel offset.** The destination width/height equals the source
+  width/height for every login widget — the blit is exactly 1:1.
+- For 3-state buttons each state has its own `(srcX, srcY)` origin but shares the same `(w, h)`.
+
+### 0a.6 Draw / z-order — insertion order, parent-first
+
+- Draw order = AddChild order (first-added drawn behind later-added siblings).
+- A parent draws itself first, then draws its children in insertion order.
+- The per-widget depth field (default 3000) exists but is never reordered during the login build, so
+  paint order equals build order throughout the login window.
+- Visibility is governed by a per-widget boolean flag (`visibleFlag`). Invisible widgets and their
+  children are skipped entirely.
+
+### 0a.7 Common desaxage causes — diagnostic guide
+
+| Symptom | Most likely cause |
+|---|---|
+| Every widget in a group shifted by the same constant vector | Root anchor omitted or computed with wrong screen dimensions (§0a.3) |
+| A sub-group of widgets shifted uniformly | A panel's `localX`/`localY` wrong or the panel parented to the wrong container (§0a.4) |
+| Individual widget in wrong position | The widget's own `(x, y)` treated as absolute instead of local (§0a.2) |
+| Entire login canvas shifted from screen centre | Root anchor formula error — should be `(screenW/2−512, screenH/2−384)` |
+| Atlas sprite wrong (correct position, wrong graphic) | `srcX`/`srcY` or atlas file wrong (§0a.5 / §1 atlas table) |
+
+---
+
 ## 1. Conventions
 
 - **Reference canvas: 1024 × 768**, top-left origin, +Y down. The GU windows are authored in this
@@ -110,7 +217,7 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | Server-list root | panel (opaque) | 0 | 0 | 1024 | 398 | 0 | 0 | A1 | — | hidden |
 | Login-form host strip | panel | 0 | 326 / 768 | 1024 | 442 | 0 | 582 | A1 | — | — |
 | PIN keypad panel | panel | 347 | 173 | 329 | 422 | 0 | 0 | password.dds | — | hidden | backdrop blits password.dds (0,0)-(329,422) = the ornate frame+title+warning+번호입력+field (baked); see §3 |
-| PIN yes/no panel | panel | 0 | 356 | 531 | 313 | 132 | 0 | — | — | hidden |
+| Connexion/Quitter panel | panel | 356 | 531 | 313 | 132 | — | — | — | — | hidden (G2 debugger-confirmed 2026 / IDB 263bd994 — supersedes prior (0,356) 531×313 reading) |
 | Exit (quit) modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
 | Error modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
 
@@ -136,12 +243,12 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 | Widget | type | x | y | w | h | srcX | srcY | atlas | action | notes |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Quit/exit-confirm button | button3 | 456 | 166 | 112 | 39 | N154,398 / H378,398 | A1 | 102 | opens the quit/exit-confirm panel (NOT the server-list); always visible at rest |
-| Server-list plate | image | 265 | 0 | 494 | 113 | 0 | 469 | A1 | — | shown (decoration banner of the form strip) |
+| Form decorative plate | image | 265 | 0 | 494 | 113 | 0 | 469 | A1 | — | form-deco rod (decoration banner of the form strip, carried by the bottom curtain); rests at dst (265,0) local to the bottom-bar panel, resolves to abs (265,548) when the curtain is open — see §2.3 |
 | ID label plate | image | 340 | 30 | 38 | 13 | 0 | 398 | A1 | — | "ID" caption graphic |
 | PW label plate | image | 507 | 30 | 49 | 13 | 38 | 398 | A1 | — | "Password" caption graphic |
 | Save-ID label plate | image | 619 | 86 | 67 | 13 | 87 | 398 | A1 | — | small notice/caption strip |
 | **ID textbox** | textbox | 390 | 32 | 102 | 13 | 615 | 404 | A1 | 109 | IME mode 16; **maxlen 16** (GAP-4, §2.7); **unmasked** (mask bit clear); font slot 0 |
-| **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; **masked** (mask bit set; `*` glyph, 6 px/char); font slot 0 — see §2.7 |
+| **PW textbox** | textbox | 568 | 32 | 102 | 13 | 615 | 404 | A1 | 110 | IME mode 12; **maxlen 12** (GUTextbox +0xD0; binary-won 2026-06-22); charset mask 0x81 (+0xA4, allow-all, NOT a length); **masked** (mask bit set; `*` glyph, 6 px/char); font slot 0 — see §2.7 |
 | **Save-ID checkbox** | checkbox | 694 | 86 | 13 | 13 | off 717,398 / on 730,398 | A1 | 104 | 13×13; initial state seeded from saved-id (see §2.5) |
 | **OK / Login button** | button3 | 456 | 64 | 112 | 39 | N266,398 / H490,398 | A1 | 103 | gated on the game.ver index-5 check before advancing to validate (§2.4) |
 | Server-list open/refresh strip | button3 | 456 | −3 | 111 | 38 | N792,398 / H602,416 | A1 | 105 | opens/refreshes the server-list (→ sub-state 34); HIDDEN at rest, shown only with the server-list (states 35..37) |
@@ -164,14 +271,22 @@ status: CODE-CONFIRMED (geometry literals + PIN scramble seed + load-bar rect + 
 > The login **form host strip + credential group RIDE the bottom curtain to canvas Y=548** (the closed build Y is
 > 326); freezing them at 326 puts the whole form ~222 px too high (the "piled-up" disorder). Oracle-verified.
 
-**PIN yes/no panel children** (the "use second password?" prompt):
+**Connexion/Quitter panel children** (the control group at abs origin (356,531) — G2 debugger-confirmed 2026 / IDB 263bd994):
 
-| Widget | type | x | y | w | h | srcX | srcY | atlas | action |
-|---|---|---|---|---|---|---|---|---|---|
-| Prompt plate A | image | 67 | 48 | 178 | 13 | 0 | 437 | A1 | — |
-| Prompt plate B | image | 0 | 100 | 313 | 32 | 289 | 437 | A1 | — |
-| Yes button | button3 | 40 | 82 | 110 | 38 | N520,492 / P635,492 | A2 | 111 |
-| No button | button3 | 164 | 82 | 110 | 38 | N750,492 / P865,492 | A2 | 112 |
+> All `(x,y)` values below are **LOCAL to the panel origin (356,531)**. Absolute positions are the sum
+> of the panel origin and the local offset. G2 live session confirms: strip abs (356,631) = panel+(0,100);
+> Connexion abs (396,613) = panel+(40,82); Quitter abs (520,613) = panel+(164,82).
+
+| Widget | type | x (local) | y (local) | w | h | srcX | srcY | atlas | action | abs dst (canvas) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Background strip | image | 0 | 100 | 313 | 32 | 289 | 437 | A1 | — | abs (356,631) |
+| Connexion button | button3 | 40 | 82 | 110 | 38 | N520,492 | A2 | 111 | abs (396,613) — G2 confirmed |
+| Quitter button | button3 | 164 | 82 | 110 | 38 | N750,492 | A2 | 112 | abs (520,613) — G2 confirmed |
+
+> **Defect note (the prior port error):** the Connexion/Quitter group was previously placed too far RIGHT
+> (against the OK-button X=456 or derived from a wrong origin). The real group origin is X=356 — not
+> X≈456 or any other value derived from the OK button. The absolute destinations above (G2 debugger-confirmed)
+> are the authoritative reference for the port. Supersedes all prior coordinates for this group.
 
 **Confirm modals A/B** (single-OK message popups, msg 4023 / 4024):
 
@@ -232,6 +347,76 @@ origin `(342,289)` + local `(125,151)`. The four spare labels are pre-built empt
   binary → **UNVERIFIED** (debugger-confirmable). This **supersedes** any prior assumption that the
   validation error reused the Confirm-A/B popup: it is its own message-box object with a live countdown.
 
+### 2.1b Credential form — consolidated per-widget table (the desaxage reference)
+
+> This table is the single authoritative per-widget reference for the login credential form. Every
+> column value was recovered from the binary builder (IDB SHA 263bd994, static IDA, promoted
+> 2026-06-22 — LOGIN-LAYOUT lanes A/B/C). Implementers MUST read §0a before placing any widget:
+> all `(x, y)` values are **LOCAL to the named parent panel** (§0a.2), not absolute screen pixels.
+>
+> **Prior value corrections (binary-won 2026, supersede prior login-visual values):**
+> - ID textbox `maxlen` was previously recorded as **6** — corrected to **16** (binary-won 2026-06-22;
+>   the value 6 was the charset-filter bitmask at a different field, not the length cap).
+> - PW textbox `maxlen` was previously recorded as **129** — corrected to **12** (binary-won
+>   2026-06-22; 129/0x81 was the allow-all charset mask, not the length cap).
+> - Action on the "server-list toggle" / "select server" button (now correctly §2.1 action **102**)
+>   was previously mis-labelled as "server-list open" in early notes — binary-won; the §2.1
+>   action-semantics correction applies.
+
+**Panel hierarchy for the credential form** (each level is LOCAL within its parent):
+
+```
+LoginWindow root  (absX = screenW/2−512,  absY = screenH/2−384)
+  └─ Bottom login-bar panel (A)     localX=0, localY=326·screenH/768, w=1024, h=442
+       └─ Credential sub-panel (B)  localX=0, localY=0, w=1024, h=100, tex=0 (no atlas)
+            └─ [credential widgets — x/y below are relative to panel B]
+```
+
+**Credential sub-panel (B) itself** — tex=0, transparent, no atlas, no action:
+
+| Widget | Parent | x | y | w | h | srcX | srcY | Atlas (.dds) | Action | Font slot | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Credential sub-panel | Bottom bar (A) | 0 | 0 | 1024 | 100 | 0 | 0 | none (tex=0) | — | — | Transparent layout container; opaque flag=0; hidden at build; origin LOCAL to the bottom bar |
+
+**Widgets inside credential sub-panel (B)** — all `(x,y)` LOCAL to panel B:
+
+| Widget | Parent | x | y | w | h | srcX | srcY | Atlas (.dds) | Action | Font slot | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| "ID" caption image | Credential sub-panel (B) | 340 | 30 | 38 | 13 | 0 | 398 | `login_slice1.dds` (A1) | — | — | Baked "ID" art; NOT a text label |
+| "PW" caption image | Credential sub-panel (B) | 507 | 30 | 49 | 13 | 38 | 398 | `login_slice1.dds` (A1) | — | — | Baked password label art; NOT a text label |
+| Save-ID hint image | Credential sub-panel (B) | 619 | 86 | 67 | 13 | 87 | 398 | `login_slice1.dds` (A1) | — | — | Small decorative caption strip |
+| **ID / account textbox** | Credential sub-panel (B) | **390** | **32** | **102** | **13** | **615** | **404** | **`login_slice1.dds` (A1)** | **109** | 0 | IME mode 16; per-keystroke cap **16** chars (**binary-won 2026**, supersedes prior "6"); charset mask=6 (alphanumeric); unmasked |
+| **Password textbox** | Credential sub-panel (B) | **568** | **32** | **102** | **13** | **615** | **404** | **`login_slice1.dds` (A1)** | **110** | 0 | IME mode 12; per-keystroke cap **12** chars (**binary-won 2026**, supersedes prior "129"); charset mask=0x81 (allow-all); masked — renders `*` per char |
+| **Save-ID checkbox** | Credential sub-panel (B) | **694** | **86** | **13** | **13** | off **717**,**398** / on **730**,**398** | — | **`login_slice1.dds` (A1)** | **104** | — | Unchecked src (717,398,13,13); checked src (730,398,13,13); initial state seeded from saved-id |
+| **OK / Login button** | Credential sub-panel (B) | **456** | **64** | **112** | **39** | N **266**,**398** / H **490**,**398** | — | **`login_slice1.dds` (A1)** | **103** | — | 3-state; pressed=normal; gated on game.ver index-5 check; builds AFTER the checkbox and saved-id branch |
+
+> **All four credential input widgets (ID textbox, PW textbox, checkbox, OK button) bind exclusively
+> to `login_slice1.dds` (atlas A1).** The ID and PW textboxes share the SAME atlas region
+> `(615, 404, 102×13)`. Binding either field to `loginwindow.dds` (A2) or to any other atlas will
+> produce a wrong background sprite — this is the single most common atlas-binding desaxage for
+> credential fields.
+
+**Bottom login-bar panel (A)** — children other than the credential sub-panel:
+
+| Widget | Parent | x | y | w | h | srcX | srcY | Atlas (.dds) | Action | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Server-list reveal button | Bar (A) | 456 | 166 | 112 | 39 | N 154,398 / H 378,398 | `login_slice1.dds` (A1) | **102** | Always visible at rest; opens quit-confirm ExitPanel (NOT the server list) |
+| Form decorative plate | Bar (A) | 265 | 0 | 494 | 113 | 0 | 469 | `login_slice1.dds` (A1) | — | Snaps to **(265,548)** at curtain offset>200 (§2.3; G2 debugger-confirmed 2026 / IDB 263bd994 — supersedes prior "(494,469)" value) |
+
+**Msg.xdb caption-id references for the credential form area:**
+
+| Caption id | Widget | Role |
+|---|---|---|
+| 4001..4022 | 22 notice-panel body label rows | Notice/agreement text column (NOT server-list rows) |
+| 4023 | Confirm-A label | Connecting dialog body |
+| 4024 | Confirm-B label | Second confirm dialog body |
+| 4025 | Error-msgbox | ID empty or length < 4 |
+| 4026 | Error-msgbox | PW empty |
+| 4027 | Error-msgbox | No servers returned |
+| 4028 | Error-msgbox | Fetch error |
+
+(All text is CP949. Caption text lives in `data/script/msg.xdb`. Reference captions by id only — see `formats/msg_xdb.md`.)
+
 ### 2.2 Sub-state machine (`flowSubState`, init = 1)
 
 > **Single 32-bit integer field, written = 1 at construction (CONFIRMED, static IDA, CYCLE 18 Phase A).**
@@ -244,11 +429,16 @@ origin `(342,289)` + local `(125,151)`. The four spare labels are pre-built empt
    two curtain host panels to their closed positions; hide notice / server-list-content / quit-strip /
    help-plate / credential-group / PIN keypad; show the server-list submit plate.       → 2
 2  curtain opening: each frame offset += 5; top curtain Y = −offset; bottom curtain Y = offset+326;
-   at offset>200 snap the server-list submit plate to (494,469); at offset>222 → 3
+   at offset>200 snap the **form decorative plate** (credential-area chrome, member +0x27C) to dst
+   **(265,548)** (G2 debugger-confirmed 2026 / IDB 263bd994 — supersedes the earlier "(494,469)" value,
+   which mistook the 494 width and 469 src-top for a destination; see §2.3); at offset>222 → 3
 3  curtain done: clear curtain offset 0; reposition curtains; show submit plate; hide notice; show the
    server-list ROOT panel; hide quit-strip/help-plate. Does NOT yet show the credential group.  → 4
-4  form idle (steady "enter credentials"); Enter → 5                              (event)
-5  advance/commit (also reached by action 111 and the notice-OK paths).            → 6
+4  curtain settled: **immediately and automatically → 5** (the tick's substate-4 case writes
+   5 unconditionally, with no key check and no event guard — CONFIRMED binary-exact, counter-check
+   2026-06-22; the earlier "Enter → 5 (event)" reading is CORRECTED). The opening is fully
+   non-interactive from 1 through to 5.                                            → 5 (auto)
+5  reveal form: child[161] hide, credential-group child[166] show(1), PIN modal hide → 6 (auto)
 6  validate-armed idle: OK button (103) or Enter, requires flowSubState==6, runs the game.ver gate.
    Entering 6 shows the inner credential group; hides the PIN keypad and PIN-yes/no panel.   → 29
 29 validate (game.ver index-5 gate runs only when VFS mounted; mismatch msg 2204, can quit): ID length
@@ -320,26 +510,103 @@ of sub-states across which the group is continuously visible:
 |---|---|---|
 | Background | **visible from state 2** | Shown on the 1→2 edge (and by the instant-open reset for any state ≠ 1); never hidden afterward. **Off-by-one fix** from the prior "≥ 3". |
 | Curtains | **not a hideable widget** | The "curtain" is **not** a separate object hidden after the raise. It is the **animated Y of two always-present host panels**: top Y = −offset, bottom Y = offset + 326. They slide off-canvas / are overpainted, but their visible flag stays set across all states. The prior "visible when ≤ 2" describes when the panels are in their CLOSED position, not an object's visibility. |
-| Interactive credential group (ID/PW textboxes, Save-ID checkbox, OK button) | **state 6 (interval [6, 28])** | Built hidden; hidden at states 3/4. **Shown entering state 6** (the validate-armed idle where the user types); **hidden entering 29** (validate hides it and raises the PIN), and re-hidden at 31 and 33 — see the §2.2 EDGE LADDER, which is authoritative here. In practice only state 6 is occupied in this interval. This **supersedes the earlier "≈ 5..33" envelope**: the ladder's explicit per-edge hide calls at 29/31/33 are the precise truth, so the credential group is NOT visible under the PIN modal (31/32) or during the server-list fetch (33+). **NOT 3..32** — the inputs do not appear at 3/4 (the curtain has opened but the credential inputs stay hidden until the user advances 4→5→6). |
+| Interactive credential group (ID/PW textboxes, Save-ID checkbox, OK button) | **state 6 (interval [6, 28])** | Built hidden; hidden at states 3/4. **Shown entering state 6** (the validate-armed idle where the user types); **hidden entering 29** (validate hides it and raises the PIN), and re-hidden at 31 and 33 — see the §2.2 EDGE LADDER, which is authoritative here. In practice only state 6 is occupied in this interval. This **supersedes the earlier "≈ 5..33" envelope**: the ladder's explicit per-edge hide calls at 29/31/33 are the precise truth, so the credential group is NOT visible under the PIN modal (31/32) or during the server-list fetch (33+). **NOT 3..32** — the inputs do not appear at 3/4 (the curtain has opened but the credential inputs stay hidden; the transition 4→5→6 is fully automatic so the form becomes visible at end-of-curtain with no user input). |
 | Login-form host strip | always present | A distinct object from the credential group; visible as an object from build through the whole scene (its Y animates). |
 | Server-list submit plate | states 1..~34 | Shown at 1/2/3/4 (and on instant-open); hidden on the 34→35 edge. |
 | Server-list CONTENT panel | **state 35..37** | Turned on at the **34→35 edge** (shown entering 35; records painted at 37). **NOT 33..37.** Object-identity nuance: state 33 only *starts* the fetch worker; state 35 is "fetching: show the content panel". What the prior spec called "server-list root, 33..37" was actually this content panel. The genuine root background panel is visible far earlier (from build). |
 | Quit/help strip + help plate | state 35 onward | Hidden at 1/2/3 + instant-open; shown on the 34→35 edge (server-list phase). |
 | PIN keypad | **states 31/32 (CONFIRMED)** | Built hidden; raised on the 29→31 edge; kept shown on 31→32; hidden on the 33→34 edge. Technically still flagged visible through state 33, but 33 is a one-tick fetch-start that immediately advances; a port gating on {31, 32} is faithful. |
 | Notice panel | always hidden (by the flow) | Built hidden; explicitly hidden on the 1→2, 29→31, and instant-open edges; the sub-state machine never shows it (only a separate notice/tooltip action can). CONFIRMED. |
-| PIN yes/no panel | always hidden (by the flow) | Built hidden; explicitly hidden on the 5→6 edge; never shown by the tick machine. CONFIRMED. |
+| Connexion/Quitter panel | always hidden (by the flow) | Built hidden; explicitly hidden on the 5→6 edge; never shown by the tick machine. CONFIRMED. (G2 debugger-confirmed panel origin (356,531) 313×132; see §2.1 children table.) |
 | Confirm-A/B popups, Exit panel, Error panel | always hidden (by the flow) | Built hidden; raised only by action ids 102/112/113/114 or message popups, outside this machine. CONFIRMED. |
 
 ### 2.3 Curtain geometry
 
-Two full-width host panels driven by one offset (start 0, +5/tick): **top** curtain Y = −offset;
-**bottom** curtain Y = offset + 326. At offset > 200 snap the server-list submit plate to **(494, 469)**.
-Stop at offset > 222 (→ sub-state 3). No alpha animation. These are not hideable curtain widgets — they
-are always-present panels whose Y animates (see §2.2 bands). **Start positions: top Y = 0, bottom
-Y = 326; end positions: top Y = −222, bottom Y = 548 (= 222 + 326); per-tick step = +5; total
-extent = 222 px each way; direction = top up, bottom down** (element-level pass, 2026-06-19). The two
-animated panels are the front curtain panel and the body strip panel. Curtain start SFX = 2D cue
-**861010105** (category 2).
+Two full-width host panels driven by one offset accumulator (start 0, +5/tick, no easing, no dt, no
+clamp — frame-rate-dependent). **Top** curtain Y = −offset; **bottom** curtain Y = offset + 326.
+At offset > 200 snap the **form decorative plate** (member +0x27C, atlas A1 src 0,469 size 494×113) to
+canvas dst **(265, 548)** — the credential-area form-deco rod arriving near the end of the slide
+(G2 debugger-confirmed 2026 / IDB 263bd994; supersedes the prior "(494, 469)" value, which confused
+the 494-pixel width and 469 src-top for a destination coordinate — CORRECTED. The snap target is the
+form plate, NOT the ID textbox; binary-won, counter-check 2026-06-22).
+Stop at offset > 222 (→ sub-state 3 snap). At sub-state 3 the accumulator is **cleared to 0** and end
+positions are hard-set: top = −222, bottom = 548 (not left at +5 overshoot). No alpha animation. The
+four curtain/background quads are always-present panels (their visible flag stays set; Y animates).
+
+**Full curtain quad inventory — G2 DEBUGGER-CONFIRMED (live doida.exe ?ext=dbg, IDB SHA 263bd994):**
+
+> **CURTAIN TWO-HALF MODEL CONFIRMED, GROUND TRUTH.** Both curtain halves are real `login_slice1.dds`
+> quads: the TOP half at rest dstY = −222 (slides upward off the top edge); the BOTTOM half at rest
+> dstY = +548 (slides down off the bottom edge). This is the authoritative full-frame model read live
+> from the running `doida.exe`. **Any prior note calling the top panel at −222 a "port phantom" is
+> REVERSED — it is the real animated curtain top half, confirmed by the G2 live session.**
+
+| Role | atlas (literal VFS path) | src (X,Y,W,H) | dst at rest (x,y,w,h) | animated quantity | build# |
+|---|---|---|---|---|---|
+| Background plate | `data/ui/loginwindow.dds` (A2) | 0,0,1024,490 | 0,110,1024,490 | static (not animated) | member +0x270 |
+| **TOP curtain** | `data/ui/login_slice1.dds` (A1) | 0,0,1024,398 | 0,0,1024,398 | **dstY = −offset** (0 → −222, slides off top) — G2 confirmed, real animated curtain top half | member +0x274 |
+| **BOTTOM curtain** (form host) | `data/ui/login_slice1.dds` (A1) | 0,582,1024,442 | 0,326,1024,442 | **dstY = offset+326** (326 → 548, slides off bottom); carries the form-deco rod — G2 confirmed | member +0x278 |
+| Form decorative plate | `data/ui/login_slice1.dds` (A1) | 0,469,494,113 | 265,0,494,113 → **snaps to (265,548)** when offset>200 (G2 debugger-confirmed 2026 / IDB 263bd994; supersedes prior "(494,469)") | hidden until offset>200; snaps once | member +0x27C |
+
+- All four quads are 1:1 atlas blits (dst w/h == src w/h, no UV scaling).
+- `dstX` is held = 0 for both curtain panels every tick (X never animates).
+- The background plate (A2, member +0x270) and the three A1 quads are loaded by LITERAL VFS path,
+  NOT via UiTex.txt id.
+- The form decorative plate is a child of the BOTTOM curtain host (member +0x278), not the window root.
+- No action id is bound to any of these four curtain/background quads.
+- **BOTTOM build-time dst-Y** = `326 × screenH / 768` (resolution-scaled at construction); the per-tick
+  law overwrites dstY each frame with the flat literal `offset + 326`, so the scaled build value only
+  governs the single pre-tick frame. (capture-pending: runtime confirmation; tick literal is authoritative
+  for the animated portion.)
+
+**Start/end state summary:**
+
+| Quantity | Value |
+|---|---|
+| Accumulator start | 0 (seeded at sub-state 1) |
+| Per-tick delta | +5 (linear, no dt, no easing, no clamp) |
+| End threshold (→ sub-state 3) | offset > 222 (≈ 45 ticks) |
+| End positions (hard-set at sub-state 3) | TOP dstY = −222; BOTTOM dstY = 548 |
+| Mid-threshold (form-plate snap) | offset > 200 → form plate snapped to **(265,548)** (G2 debugger-confirmed 2026 / IDB 263bd994; supersedes prior "(494,469)") |
+| Accumulator reset at sub-state 3 | yes, cleared to 0 |
+| Cadence | once per render frame (frame-rate-dependent) |
+
+**G2 DEBUGGER-CONFIRMED FULL-FRAME MODEL at credential-freeze (sub-state 6 rest) — back-to-front draw order (IDB SHA 263bd994, live doida.exe):**
+
+> This is the authoritative layer stack for the LoginWindow at the credential-idle state (sub-state 6),
+> read live from the running `doida.exe` via the `?ext=dbg` session. It supersedes any static guess
+> about element order or position. The form-deco plate destination and the Connexion/Quitter origin
+> are the two defects corrected by this session; all other layers are confirmed KEEP.
+
+| # | Layer | Atlas / src | Dst (canvas abs) | Status |
+|---|---|---|---|---|
+| 1 (back) | STATIC backdrop — loginwindow.dds | src (0,0) | dst (0,110) 1024×490 | CONFIRMED KEEP |
+| 2 | STATIC central banner frame — loginwindow.dds | src (0,490) | dst (270,85) 483×490 | CONFIRMED KEEP |
+| 2a | — logo/dragon/rings child | loginwindow.dds src (70,980) | abs (477,129) 70×17 | CONFIRMED KEEP — must stay visible (carries baked art) |
+| 3 | STATIC server-name plate — loginwindow.dds | src (0,490) | dst (270,85) 483×490 | CONFIRMED KEEP |
+| 4 | ANIMATED curtain TOP half — login_slice1.dds | 1024×398 | rest dstY = **−222** | CONFIRMED KEEP (real animated top half — not a phantom) |
+| 5 | ANIMATED curtain BOTTOM half — login_slice1.dds | rest dstY = **+548**; carries form-deco rod | dst (265,548) 494×113 src(0,469) | CONFIRMED KEEP |
+| 6 | Credential form | ID textbox dst(390,~612 region) + PW textbox dst(568,…) | — | CONFIRMED KEEP (already correct) |
+| 7 | OK/Login button (action 103) | login_slice1.dds src(266,398) | abs (456,612) 112×39 | CONFIRMED KEEP |
+| 8 (front) | Connexion/Quitter control group, origin (356,531) | shared strip abs (356,631) 313×32 src(289,437) A1; Connexion (act 111) abs (396,613) 110×38 src(520,492) A2; Quitter (act 112) abs (520,613) 110×38 src(750,492) A2 | — | G2 CORRECTED — real group origin X=356, not against OK-button X=456 |
+
+**DEFECTS corrected by this G2 session (the two active port errors):**
+- **(A) Form-deco plate destination:** port placed it at canvas `(494,469)` — WRONG. Real dst = `(265,548)` (the port mistook the 494 width and 469 src-top for a destination). G2 debugger-confirmed supersedes.
+- **(B) Connexion/Quitter group placement:** port placed the group too far RIGHT (against the OK-button X=456 or a wrong origin). Real group origin is X=356; Connexion abs X=396, Quitter abs X=520. G2 debugger-confirmed supersedes.
+
+**Opening is FULLY AUTOMATIC (CONFIRMED, binary-exact, counter-check 2026-06-22):** sub-states 1→2→3→4→5→6
+chain with no user input at any edge. The credential form goes live automatically at end-of-curtain settle.
+No Enter key or any other input is required to advance past sub-state 4.
+
+**OnAction_Notice reset path (CORRECTION 2026-06-22):** any hover/notice dispatch when not in a modal
+state resets the two curtain panels to their **closed/seamed layout** (TOP dstY=0 / BOTTOM dstY=326) and
+re-shows the page chrome. This path does **NOT** snap the curtain to its open positions (−222/548) — it
+resets to CLOSED. An earlier spec wording "snaps fully OPEN" is incorrect; the binary writes the closed
+positions. (This covers the "instant-open reset for any state ≠ 1" reference in §2.2 bands.)
+
+Curtain start SFX = 2D cue **861010105** (category 2), one-shot, fired on the 1→2 edge only. No BGM in
+the login window (no BGM/music start was found anywhere in the login tick or its state-enter branches).
+See §7 for the full front-end audio cue table.
 
 ### 2.4 Version & length gates
 
@@ -456,17 +723,21 @@ their dest X (ID at 390, PW at 568), their IME-mode field, and their mask flag:
     cell. Each digit-button's action id = the digit value `d` (0..9).
 - **Reset** button `(243, 133, 58, 30)` tag **11** (source origins on `password.dds` near X 663);
   **OK** `(90, 290, 154, 58)` tag **12** (source origins near X 330); **Cancel** `(90, 350, 154, 58)`
-  tag **13** (source origins near X 486). **Tag roles (CONFIRMED, element-level pass): 11 = Reset/Clear
-  (re-scramble + blank entry), 12 = OK / submit, 13 = Cancel.** Digit tags are **0..9** (not 1..10);
-  tag 10 is unused.
+  tag **13** (source origins near X 486). **Tag roles (CONFIRMED, counter-check 2026-06-22): 11 = Reset
+  (re-scramble + blank entry — NOT merely "clear"; re-randomises the keypad face layout), 12 = OK /
+  submit, 13 = Cancel.** Digit tags are **0..9** (not 1..10); tag 10 is unused.
+  - **Cancel (tag 13) raises the cancel-confirm ExitPanel** (CONFIRMED, counter-check 2026-06-22): the
+    Cancel handler clears the entry string, re-scrambles, then explicitly calls `SetVisible(1)` on the
+    reused ExitPanel child (see below) as a "really cancel?" confirm overlay. The ExitPanel is built
+    hidden but is not dead chrome — Cancel shows it.
 - **Masked input field:** a text-only label (no atlas, font slot 0) at panel-relative
   `(81, 138, 150, 22)`, rendered as N literal `*` characters, one per entered digit (digits never
-  drawn; no dot-sprite asset). **Max length 4.**
+  drawn; no dot-sprite asset). **Max length 4** (enforced by the per-digit append handler).
 - **Hidden reused ExitPanel child:** the keypad constructor also builds an `InventWindow.dds` panel sized
-  **340 × 190**, source origin `(318, 647)`, **centered** in the parent — but this is a **reused
-  quit-confirm ExitPanel** (its caption is msg **2007**), built then **kept hidden** (`SetVisible(false)`).
-  It is genuinely hidden in the shipped modal; it is not drawn. This is distinct from the **visible**
-  `password.dds` window backdrop described above — do not confuse the two.
+  **340 × 190**, source origin `(318, 647)`, **centered** in the parent — a **reused quit-confirm
+  ExitPanel** built then **kept hidden** (`SetVisible(false)`) at construction. It is raised by Cancel
+  (tag 13 — see above) as the cancel-confirm. This is distinct from the **visible** `password.dds` window
+  backdrop described above — do not confuse the two.
 - **Draw order:** the `password.dds` window backdrop (the chrome, `(0,0)-(329,422)` → `(347,173)`) first,
   then the masked-entry echo label, then the 100 digit-face buttons (cell 0 → cell 9), then Reset (11),
   OK (12), Cancel (13). (The reused ExitPanel child stays hidden.)
@@ -672,6 +943,27 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
     (CORRECTION 2026-06-19: the prior "%4d / %4d population count, font slot 4 at +430" was wrong — the
     slot-4 label is the STATUS caption at +410; +430 is left blank; the `%4d / %4d` and `i %d status %d
     count %d` lines are dead-debug stubs, never drawn.)
+  - **Both the select button AND the name label carry action 400+i** (confirmed binary-exact, counter-check
+    2026-06-22): `AddChildWithAction` is called for the name label with `v179` AND for the select button
+    with `v179` — either clicking the parchment or clicking the name text fires the plate-pick.
+- **Painter slot STATICALLY RESOLVED (counter-check 2026-06-22, IDB SHA 263bd994):** the derived-class
+  vtable's last slot is the **direct-index painter** (`record[2·page + i]` — NO shuffle indirection).
+  The base-class vtable's last slot is the **shuffle-order painter** (reads through the `+0x438` order
+  array). The shipped `LoginWindow` construction uses the derived class, so the **live painter is the
+  direct-index path** and **name alignment is CENTER** (the base variant's LEFT alignment is on the dead
+  path). The `+0x438` render-order array is still built each repaint (by the Lastserver-aware or plain
+  shuffle builders), but it is NOT consulted by the live painter. A port must draw plates in raw record
+  order with **centered name labels**.
+- **Pager re-arm geometry (CONFIRMED binary-exact, counter-check 2026-06-22):** each repaint all 10 pager
+  strips are reset to a blank atlas region `N(500,792)/H(500,810)/P(500,810)`, then three of them get
+  real art: strip[1] → `N(500,828)/H(500,846)`, strip[2] → `N(500,864)/H(605,985)`, strip[3] →
+  `N(710,985)/H(815,985)`. The two strips that got alternate faces at build time keep those as the
+  starting blank-art frame, overridden each repaint. Pager action arm range: **115..124** (10 strips),
+  action = page index + 115; only strips for valid pages get real art; unused strips park on the blank
+  origin.
+- **Refresh debounce: 10 000 ms** (CONFIRMED binary-exact, counter-check 2026-06-22). Action 105 is a
+  no-op if the current sub-state is 35 (already fetching) OR if the last fetch timestamp is less than
+  10 000 ms ago. The throttle timestamp field is in the login-window object.
 - **Selection highlight strip** (drawn behind the selected plate): atlas A4, source origin `(700,18)`,
   46 × 168. **Status-color indicator quads ×3:** atlas A2, source origin `(500,786)`, 60 × 39, hidden by
   default and re-anchored around a special row (see the status==100 gate).
@@ -732,6 +1024,199 @@ load-valid flag (CORRECTION, static IDA, 2026-06-20 — the painter has two colo
   it as this painter's behaviour.)
 - **Persist:** committing a server writes registry `HKLM\SOFTWARE\crspace\do : Lastserver` (REG_DWORD
   = server id); the next launch reads it back to pre-highlight the previously selected server.
+
+### 4.3 Server-list column layout — consolidated implementable reference (G2 debugger/decompile-confirmed 2026 / IDB 263bd994)
+
+> **Verification:** G2 debugger/decompile-confirmed 2026 / IDB 263bd994. All geometry in this section
+> is **static-confirmed from the build and paint routines** (hard-coded literals, not data-driven). The
+> live debugger session that ran concurrently with this RE pass found the LoginWindow object already
+> freed at the Loading state (the login object is torn down before Loading is entered), so no live
+> widget-memory reads were obtainable; the authoritative source for this section is the static
+> binary, which is conclusive for a non-data-driven layout. Each fact below is labelled
+> **static-confirmed** or **to-confirm** accordingly. Reference: `Docs/RE/specs/frontend_layout_tables.md`.
+
+The server-list column occupies the central panel at canvas dst **(270, 85) 483 × 490** (atlas A2
+`loginwindow.dds`, source origin **(0, 490)**), itself a child of the server-list ROOT panel. Its paint
+routine fills this column with **two independent row systems** on each repaint.
+
+---
+
+#### 4.3.1 Row system A — Name-strip page tabs (10 buttons across the top of the column)
+
+**Static-confirmed.**
+
+Ten 3-state buttons laid out horizontally inside the column, one per potential page entry. Built in the
+login-window construction routine by a loop (ten iterations while the running X remains within the
+column width). All buttons reside on atlas A2 (`loginwindow.dds`).
+
+| Property | Value |
+|---|---|
+| Count | **10** (fixed; loop stride 47, column width 483, starting x 13) |
+| localX | `13 + 47 · i` for i = 0..9 (i.e. 13, 60, 107, 154, 201, 248, 295, 342, 389, 436) |
+| localY | **66** (constant for all 10) |
+| Size (w × h) | **47 × 18** |
+| Atlas | A2 (`loginwindow.dds`) |
+| Normal src | **(596, 985)** — same for all 10 at build time |
+| Hover src | **(643, 985)** — same for all 10 at build time |
+| Pressed src | **(643, 985)** (equals hover; no distinct pressed face) |
+| Action id | **115 + i** (i.e. actions 115..124) — page-jump, page = action − 115 |
+
+On each repaint all 10 strips are first reset to a blank source origin `(500, 792)` / `(500, 810)` (erasing the
+prior active state), and then the strips corresponding to valid pages are given real art (see §4.2
+pager re-arm geometry). An unused strip slot is blanked at its source origin, not hidden. Two strips at
+build positions index 1 and 2 additionally receive alternate initial faces `(690, 985)` / `(737, 985)` and
+`(784, 985)` / `(831, 985)` respectively, which are the left and right end-cap or pager-flanking glyphs —
+their precise visual role (end caps vs. arrow/glyph pair) is inferred from the atlas UV positions;
+**to-confirm** against the atlas extract.
+
+---
+
+#### 4.3.2 Row system B — Detail plates (2 per page, side-by-side)
+
+**Static-confirmed.**
+
+Two full-height server-detail columns built by a 2-iteration loop (i = 0, 1). Each plate is a stack
+of five child widgets sharing the same X base `(30 + 233 · i)` — giving plate-0 at x = 30 and
+plate-1 at x = 263. The X stride between plates is **233 px**.
+
+**Per-plate widget inventory** (all coordinates local to the column panel; all are 1:1 atlas blits):
+
+| Widget | type | localX | localY | w | h | srcX | srcY | Atlas | Action | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Name label | label (center) | 30 + 233·i | **390** | 174 | 21 | — | — | text | 400+i | Font slot 0; center-aligned (align mode 2); msg text `5000 + ServerId`; also carries action 400+i |
+| Plate face image | image | 30 + 233·i + 47 | 97 | 100 | 372 | 448 + 124·i | 6 | A4 (`loginwindow_02.dds`) | — | Fixed per-column art (baked calligraphy candidate); src X = 448 for plate 0, 572 for plate 1; drawn **after** the select button (over the parchment) |
+| Select button (parchment) | button3 | 30 + 233·i − 6 | 97 | 202 | 372 | N(9,6) / H(220,6) | — | A4 | 400+i | Clickable parchment; action 400+i (LEFT=400, RIGHT=401); same action as name label |
+| Status / load caption | label (center) | 30 + 233·i | **410** | 174 | 20 | — | — | text | — | **Font slot 4** (DotumChe 12 px, weight 800); coloured per §4.3.4; carries the status or population string |
+| Spare label | label | 30 + 233·i | **430** | 174 | 20 | — | — | text | — | Set to an **empty string** by the painter; the earlier "class / population count" reading is superseded — this slot is not drawn |
+
+**Text line Y positions within each plate** (relative to the column panel):
+
+| Line | localY | Content |
+|---|---|---|
+| Name | **390** | Server name (font slot 0, centered) |
+| Status/load | **410** | Status caption or colour-coded population (font slot 4) |
+| Spare | **430** | Empty string — not rendered |
+
+Vertical stride between successive text lines = **20 px**.
+
+---
+
+#### 4.3.3 Record-to-plate mapping (page cursor)
+
+**Static-confirmed.**
+
+The paint routine accepts a page index `page` (0-based). It maps records to the two visible plates as
+follows:
+
+- **Start offset into the record array:** `16 · page` bytes (= 2 records × 8 bytes/record × page).
+- **Records consumed per page:** exactly **2** (one 8-byte record per plate; the loop breaks at 2 plates).
+- **Plate i on page `page` reads** record at byte offset `16 · page + 8 · i` in the array.
+- **Remaining-record guard:** the painter computes `total_record_count − 2 · page` to bound how many
+  plates get data; if fewer than 2 remain, only the available plates are populated.
+- Plate order is **stable** (raw record order, not shuffled — see §4.2 for the two-array resolution).
+
+**Server record format** (8-byte, little-endian, in-memory; one per server in the list):
+
+| Offset | Type | Field | Role |
+|---|---|---|---|
+| +0 | i16 | `ServerId` | 1-based server id (valid 1..40); key for name lookup and sentinel test |
+| +2 | i16 | `StatusCode` | Drives the status caption and the selectable gate |
+| +4 | i16 | `LoadCount` | Population count (threshold or discrete level; drives the colour ladder) |
+| +6 | i16 | `OpenTimeFlag` | When `StatusCode == 0`: nonzero → `LoadCount` is a raw threshold count; zero → `LoadCount` is a discrete level (4/3/2). When `StatusCode == 3`: scheduled-open minute component |
+
+The record-array pointer and total count are held as **named object fields** of the login/server-list
+object — no fixed byte offset should be cited for them (static confirmed: accessed via object fields,
+not raw pointer arithmetic with a literal index). For the authoritative resolver tables see §4.1.
+
+**Server name resolution** (static-confirmed):
+- `ServerId` in range 1..40 → `name_id = 5000 + ServerId` (msg bank 5001..5040, flat — no group
+  multiplier).
+- `ServerId` out of range → fallback caption id **5901** (a formatted "unknown server" template).
+
+---
+
+#### 4.3.4 Population/load colour ladder (`StatusCode == 0`, load-valid branch)
+
+**Static-confirmed.** Applies when `StatusCode == 0` **and** `OpenTimeFlag != 0` (load-valid). The colour
+is written to the plate's status/load label (the y = 410 label, **font slot 4**). Lower `LoadCount`
+= greener = better. Boundaries are **inclusive** as tabulated.
+
+| LoadCount | Caption msg id | Label colour (ARGB) | Meaning |
+|---|---|---|---|
+| `> 1200` | **6001** | `0xFFFF0000` (red) | Heavy / full |
+| `801..1200` | **6002** | `0xFFED6806` (orange) | Busy |
+| `501..800` | **6003** | `0xFFFFFF00` (yellow) | Moderate |
+| `<= 500` | `4029` (status caption reused) | `0xFFB5FF7A` (green) | Light / available |
+
+Nesting direction: the code tests `> 1200` first; if false, tests `<= 800`; if true tests `<= 500`.
+The boundaries as tabulated are correct — the inclusive cutpoints are 1200 (red threshold), 800
+(orange/yellow boundary), and 500 (yellow/green boundary).
+
+**Discrete-level branch** (`StatusCode == 0`, `OpenTimeFlag == 0`): `LoadCount` is an exact equality
+— value 4 → red 6001, 3 → orange 6002, 2 → yellow 6003, otherwise green. Same ARGB constants as above.
+
+**When `StatusCode != 0`:** the load colour ladder is not applied. The status caption is keyed by
+`caption_id = 4029 + StatusCode` (for StatusCode 0..3 → ids 4029..4032). For `StatusCode == 3` a
+separate formatted caption path may apply (msg 6004 / 6005 for specific load values). See §4.1 for the
+full status-caption table.
+
+---
+
+#### 4.3.5 Selectable gate and selection highlight
+
+**Selectable gate (static-confirmed):** a plate's select button and name label are rendered as
+interactive only when `StatusCode == 0` (the "open" server state). The paint routine enables plate
+interactivity in the `StatusCode == 0` branch.
+
+> **To-confirm:** the sub-gate `load < 2400` (present in the commit guard at OnEvent action 400/401,
+> see §2.2 action map) is **not enforced in the paint routine** — the paint path enables the plate
+> when `StatusCode == 0` regardless of `LoadCount`. The `< 2400` check appears in the click handler
+> (the commit guard). An implementation must apply both: **paint** gates on `StatusCode == 0`
+> (activates the widget), and the **click handler** gates on `StatusCode == 0 && LoadCount < 2400`
+> before committing. Do not rely on the paint-path alone to enforce the 2400 upper bound.
+
+**Default-highlight key (static-confirmed):** the painter highlights the plate whose `ServerId` matches
+the value of `NEW_SERVER_INDEX` (a single integer read from `data/script/uiconfig.lua`). This is
+**not** the `Lastserver` registry value — that is written on commit but is not the painter's highlight
+key. To-confirm: whether `Lastserver` is read back on a subsequent session to pre-select a server (a
+separate code path not traced this pass).
+
+**Selection highlight strip (static-confirmed):** atlas A4 (`loginwindow_02.dds`), source origin
+**(700, 18)**, size **46 × 168**, drawn behind (under) the highlighted plate. Position is anchored to
+the plate whose `ServerId` equals the highlight key.
+
+---
+
+#### 4.3.6 Pager controls and record count
+
+**Static-confirmed.**
+
+Three pager glyphs are repositioned on each repaint (see §4.2 pager re-arm geometry for their atlas
+source origins). They use action ids in the **115..124** range (page-jump strips, same as the name-strip
+tabs in §4.3.1 above — the pager advance is driven by re-arming a subset of the 10 strip buttons with
+page-navigation art). The current page drives the record-cursor via `16 · page`.
+
+No explicit "N servers available" count text is rendered by the paint routine. The total record count
+is used only for arithmetic (remaining-plate bound, page math). The list communicates available entries
+implicitly through which tabs receive real art vs. the blank/parking UV.
+
+**Status-caption vocabulary** (loaded at the top of the paint routine into a 4-entry lookup):
+caption ids **4029..4032** (status codes 0..3). These are the column status captions, not column
+headers and not the colour-ladder captions (6001..6003).
+
+---
+
+#### 4.3.7 Implementation readiness note
+
+All geometry constants in §4.3.1–§4.3.6 are **static-confirmed** and are implementation-ready for a
+`ServerSelectSubView` 1:1 port. The single item requiring a separate live-debugger pass before
+treating as settled is the `load < 2400` click-handler sub-gate noted in §4.3.5 (confirm it is
+enforced in the OnEvent handler, not in a third location). All ARGB colour literals, text-line Y
+positions, atlas source origins, button action ids, font slots, and record-field offsets are directly
+usable from this section. Cross-reference §4.1 for the complete name/status/population resolver tables
+and §4.2 for the full outer-construction widget inventory and pager re-arm atlas origins.
+
+---
 
 ## 5. Loading window (scene state 2) — immediate-mode, NOT a widget tree
 

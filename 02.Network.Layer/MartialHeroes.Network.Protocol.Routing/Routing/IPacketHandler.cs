@@ -4,6 +4,15 @@ using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
 // spec: Docs/RE/specs/net_contracts.md §2.2 (binary wins — 3/23 is a 28-byte roster patch, not create-result).
+// spec: Docs/RE/opcodes.md (0/0 hardwired branch; 3/1 and 3/4 share the 981-byte per-slot record format).
+//
+// DESIGN NOTE — variable-length opcodes 3/1 and 3/4:
+//   SmsgCharacterListHeader and SmsgSceneEntityUpdate are variable-length packets (3-byte fixed header +
+//   N×981-byte per-slot records). The source-generated typed-dispatch seam can only reinterpret the fixed
+//   header (3 bytes), but the handlers for 3/1 and 3/4 MUST read the full payload to walk the per-slot
+//   records via DecodeAndRetainRoster. Placing these in IPacketHandler typed dispatch would strip the
+//   variable tail from the handler. They remain correctly in OnUnhandled where the full payload span is
+//   available. spec: Docs/RE/packets/3-1_character_list.yaml; Docs/RE/packets/3-4_scene_entity_update.yaml.
 
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
 
@@ -28,8 +37,53 @@ namespace MartialHeroes.Network.Protocol.Routing.Routing;
 /// </remarks>
 public interface IPacketHandler
 {
+    // --- major 0: KeyExchange (hardwired S2C handshake branch) ---
+
+    /// <summary>
+    ///     0/0 — RSA key-exchange handshake (62 bytes). The first frame of the secure session. On receipt
+    ///     the application must immediately reply with the C2S 1/4 credential send (via Network.Crypto).
+    ///     spec: Docs/RE/packets/0-0_key_exchange.yaml; Docs/RE/specs/crypto.md §6.
+    ///     NOTE: the original major-0 handler is a hardwired branch (NOT a switch). Routing here preserves
+    ///     that semantic via the packed-opcode 0x0.
+    /// </summary>
+    void Handle(in SmsgKeyExchange packet); // spec: Docs/RE/opcodes.md row 0/0; packets/0-0_key_exchange.yaml
+
+    // --- major 4: Response table-driven ---
+
+    /// <summary>
+    ///     4/1 — game-state tick and world-entry snapshot (9100-byte fixed body). Form 0 = periodic tick;
+    ///     form 1 = world-entry seed (AreaId + SpawnX/Z; 3088+4044+1920-byte interior blocks).
+    ///     Use <see cref="SmsgGameStateTick.TryReadWorldEntrySeed" /> to extract the world-entry seed.
+    ///     spec: Docs/RE/packets/4-1_game_state_tick.yaml; Docs/RE/specs/handlers.md §4/1.
+    /// </summary>
+    void Handle(in SmsgGameStateTick packet); // spec: Docs/RE/opcodes.md row 4/1; packets/4-1_game_state_tick.yaml
+
+    /// <summary>
+    ///     4/13 — local player state synchronization (56-byte fixed block). Gated to the local player
+    ///     ((TargetSort, TargetId) must match the local actor). Reads X/Z (Y forced 0), the heading,
+    ///     and the sync-mode byte at wire offset 33 (NOT 32; wire bytes 24..32 are an unconsumed
+    ///     reserved gap — CONFLICT RESOLVED, binary wins). Mode 1 = BattleController sync; mode 5 =
+    ///     no-state-write. Publishes <c>LocalPlayerStateSyncedEvent</c>.
+    ///     spec: Docs/RE/opcodes.md row 4/13; Docs/RE/packets/4-13_local_player_state_sync.yaml.
+    /// </summary>
+    void
+        Handle(in SmsgLocalPlayerStateSync packet); // spec: Docs/RE/opcodes.md row 4/13 (0x4000d); packets/4-13_local_player_state_sync.yaml
+
+    // --- major 5: Push table-driven world events ---
+
     /// <summary>5/0 — actor despawn. spec: packets/5-0_char_despawn.yaml.</summary>
     void Handle(in SmsgCharDespawn packet);
+
+    /// <summary>
+    ///     5/10 — actor death push. The server announces that an actor has died and who killed it.
+    ///     Resolves victim and killer by their composite (id, sort) keys, applies common death state
+    ///     (clear locked battle target, zero combat resources, play death motion, clear buff array),
+    ///     then switches on <see cref="SmsgCharDeath.DeathCause" /> (0 normal / 1 PK-A / 2 PK-B /
+    ///     3 special-no-modal). Publishes <c>ActorDiedEvent</c>; layer 05 plays the death motion /
+    ///     effect and opens the respawn modal off it.
+    ///     spec: Docs/RE/opcodes.md row 5/10; Docs/RE/packets/5-10_combat_death.yaml.
+    /// </summary>
+    void Handle(in SmsgCharDeath packet); // spec: Docs/RE/opcodes.md row 5/10 (0x5000a); packets/5-10_combat_death.yaml
 
     /// <summary>3/5 — enter-world ack. spec: packets/3-5_enter_game_response.yaml.</summary>
     void Handle(in SmsgEnterGameAck packet);

@@ -27,8 +27,12 @@
 //   (SetVisible(false)) — it is NOT drawn and NOT added here.
 //   spec: Docs/RE/specs/frontend_layout_tables.md §3 — Reset=11, OK=12, Cancel=13.
 //
-// Fisher-Yates scramble: seeded from wall-clock milliseconds, scrambles digit position array.
-// spec: Docs/RE/specs/frontend_scenes.md §11.3e "Fisher-Yates seed from wall-clock ms". CODE-CONFIRMED.
+// Fisher-Yates scramble: seeded from wall-clock WHOLE SECONDS (srand(time()) granularity — two opens
+// within the same calendar second produce an identical keypad). Scrambles digit position array.
+// spec: Docs/RE/specs/frontend_layout_tables.md §3 "srand(time()) whole-second CRT seed". CODE-CONFIRMED.
+// GAP-3: intentionally uses whole-second granularity (Math.Floor) to match the original's CRT srand(time())
+// behaviour. Do NOT switch to millisecond-precision (GetTicksMsec / GetUnixTimeFromSystem fractional).
+// spec: Docs/RE/scenes/login.md §5.2 "srand(time()) — two opens within the same second produce an IDENTICAL keypad".
 //
 // Signals:
 //   PinSubmitted(string pin) — fired when OK (tag 11) is pressed.
@@ -128,11 +132,41 @@ public sealed partial class PinSubView : Control
     private const int PinDisplayW = 150;
     private const int PinDisplayH = 22;
 
+    // Hidden reused ExitPanel child ("really cancel?" confirm overlay).
+    // InventWindow.dds (A3) src(318,647) 340×190, centered in the parent panel.
+    // Built hidden at construction; revealed by Cancel (tag 13). spec §3.
+    // canvas position: parent (347,173) + center offset → (347+(329-340)/2, 173+(422-190)/2) = (341,289)
+    // Approximated as panel-local (−6, 116) to achieve a centered appearance.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 "Hidden reused ExitPanel child | built hidden"
+    private const int ExitPanelW = 340; // spec §3 "sized 340×190". CODE-CONFIRMED.
+    private const int ExitPanelH = 190; // spec §3. CODE-CONFIRMED.
+    private const int ExitPanelSrcX = 318; // spec §3 "source origin (318,647)". CODE-CONFIRMED.
+
+    private const int ExitPanelSrcY = 647; // spec §3. CODE-CONFIRMED.
+
+    // Panel-local position to center the 340×190 ExitPanel within the 329×422 PIN panel.
+    // centered X = (329−340)/2 = −5.5 ≈ −6; centered Y = (422−190)/2 = 116. spec §3.
+    private const int ExitPanelLocalX = -6; // spec §3 "centered in the parent". Approx.
+    private const int ExitPanelLocalY = 116; // spec §3. Approx.
+
+    // ExitPanel "yes" / "no" button tags (action ids for cancel-confirm). spec §3.
+    // The same A3 button art used by Confirm-A/B (src 302,900/415,900). spec §3.
+    private const int ExitPanelYesAction = 201; // local — "yes, cancel PIN" (dismiss + emit Cancelled).
+    private const int ExitPanelNoAction = 202; // local — "no, go back" (hide ExitPanel, resume PIN).
+
     // -------------------------------------------------------------------------
     // State
     // -------------------------------------------------------------------------
 
     private readonly HudAtlasLibrary _atlas;
+
+    // 100 digit-face buttons, indexed [position 0..9][face 0..9].
+    // Built ONCE in BuildKeypad(); scramble re-arms only toggle Visible per slot.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 "100 buttons total, build once then toggle visibility"
+    private readonly TextureButton?[,] _digitButtons = new TextureButton?[10, 10];
+
+    // The hidden ExitPanel confirm overlay (Cancel → shows this). spec §3.
+    private Control? _exitPanel;
     private string _pin = "";
 
     // PIN display label.
@@ -193,6 +227,10 @@ public sealed partial class PinSubView : Control
 
         // Reset(11) / OK(12) / Cancel(13) control buttons.
         BuildControlButtons();
+
+        // Hidden reused ExitPanel (cancel-confirm overlay). Built hidden, raised by Cancel (tag 13).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 "Hidden reused ExitPanel child"
+        BuildHiddenExitPanel();
     }
 
     // -------------------------------------------------------------------------
@@ -251,13 +289,15 @@ public sealed partial class PinSubView : Control
 
     private void BuildKeypad()
     {
-        // 2 × 5 grid positions, each with 10 overlapping digit-face buttons.
-        // Position 0..4 = top row (Y=Row0Y), Position 5..9 = bottom row (Y=Row1Y).
-        // Digit assigned via _scrambled[position].
+        // Build the 100 digit-face buttons ONCE (10 positions × 10 face-buttons each).
+        // The original builds all 100 buttons once at construction then shows exactly one face
+        // per position based on the scramble. Subsequent scrambles ONLY toggle Visible — no
+        // QueueFree/rebuild, no per-scramble allocation.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3
+        //   "100 buttons total, build once then toggle visibility per scramble"
         // spec: Docs/RE/specs/frontend_scenes.md §11.3a "100 buttons total, actions 0..99".
         for (var pos = 0; pos < 10; pos++)
         {
-            var digit = _scrambled[pos];
             var col = pos % 5;
             var row = pos / 5;
 
@@ -273,7 +313,6 @@ public sealed partial class PinSubView : Control
                 Texture2D? normal = _atlas.SliceByPath(AtlasPassword, srcU, DigitNormalV, TileW, TileH);
                 Texture2D? pressed = _atlas.SliceByPath(AtlasPassword, srcU, DigitPressedV, TileW, TileH);
                 Texture2D? hover = _atlas.SliceByPath(AtlasPassword, srcU, DigitHoverV, TileW, TileH);
-                var shown = face == digit;
 
                 var btn = new TextureButton
                 {
@@ -286,13 +325,38 @@ public sealed partial class PinSubView : Control
                     TextureHover = hover,
                     TexturePressed = pressed,
                     TextureDisabled = normal,
-                    Visible = shown,
-                    MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore
+                    Visible = false, // all hidden initially; ApplyScramble() reveals exactly one per pos
+                    MouseFilter = MouseFilterEnum.Ignore // ApplyScramble() arms the visible one
                 };
 
                 var actionId = pos * 10 + face;
                 btn.Pressed += () => OnDigitFaceAction(actionId);
                 AddChild(btn);
+                _digitButtons[pos, face] = btn;
+            }
+        }
+
+        // Apply the initial scramble to set exactly one face visible per position.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 "exactly one digit-button visible per cell"
+        ApplyScramble();
+    }
+
+    // Toggle visibility on the 100 pre-built digit-face buttons so exactly one face is shown per
+    // keypad position. No allocation — all 100 buttons are already in the scene tree.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3
+    //   "build once then only toggle visibility after the Fisher-Yates scramble"
+    private void ApplyScramble()
+    {
+        for (var pos = 0; pos < 10; pos++)
+        {
+            var shownFace = _scrambled[pos];
+            for (var face = 0; face < 10; face++)
+            {
+                var btn = _digitButtons[pos, face];
+                if (btn is null) continue;
+                var shown = face == shownFace;
+                btn.Visible = shown;
+                btn.MouseFilter = shown ? MouseFilterEnum.Stop : MouseFilterEnum.Ignore;
             }
         }
     }
@@ -377,14 +441,19 @@ public sealed partial class PinSubView : Control
                 break;
 
             case TagCancel:
-                // Cancel tag 13: close the modal, then re-scramble (re-roll on Cancel per spec §3).
-                // spec: frontend_layout_tables.md §3 "re-roll: the scramble re-seeds and re-shuffles on
-                //   open (SetVisible-show), Reset, OK, and Cancel."
-                GD.Print("[PinSubView] Cancel (tag 13): Cancelled. spec: frontend_layout_tables.md §3.");
+                // Cancel tag 13: clear entry, re-scramble, then raise the hidden ExitPanel as a
+                // "really cancel?" confirm overlay. spec §3 (CONFIRMED, counter-check 2026-06-22):
+                //   "the Cancel handler clears the entry string, re-scrambles, then explicitly calls
+                //    SetVisible(1) on the reused ExitPanel child as a 'really cancel?' confirm overlay."
+                // The user must then press "Yes" in the ExitPanel to actually emit Cancelled.
+                // spec: Docs/RE/specs/frontend_layout_tables.md §3 "Cancel (tag 13) raises the cancel-confirm ExitPanel"
+                GD.Print("[PinSubView] Cancel (tag 13): clear entry + re-scramble + raise ExitPanel. spec: §3.");
                 _pin = "";
+                UpdatePinDisplay();
                 Scramble();
                 RebuildKeypad();
-                EmitSignal(SignalName.Cancelled);
+                // Show the hidden ExitPanel confirm overlay. spec §3.
+                if (_exitPanel is not null) _exitPanel.Visible = true;
                 break;
         }
     }
@@ -414,8 +483,13 @@ public sealed partial class PinSubView : Control
     {
         _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-        // Seed from the whole-second wall clock (CRT time()). spec §3.
-        var seed = (int)((long)Time.GetUnixTimeFromSystem() & 0x7FFF_FFFF);
+        // Seed from the whole-second wall clock (CRT srand(time()) — whole-second granularity,
+        // explicitly NOT GetTickCount/QueryPerformanceCounter). spec §3.
+        // GetUnixTimeFromSystem() returns a double with sub-second precision; floor first so that
+        // two opens within the same calendar second produce the IDENTICAL seed — matching the CRT
+        // srand(time()) behaviour: time() returns whole seconds. spec §3.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3 "srand(time()) whole-second CRT seed"
+        var seed = (int)((long)Math.Floor(Time.GetUnixTimeFromSystem()) & 0x7FFF_FFFF);
         var rng = new Random(seed);
 
         // Ascending Fisher-Yates (MSVC random_shuffle): for i = 1..9, swap a[i] with a[rand() mod (i+1)].
@@ -429,31 +503,110 @@ public sealed partial class PinSubView : Control
 
     private void RebuildKeypad()
     {
-        // Remove existing keypad buttons (100 digit-face buttons after the dim overlay).
-        // We can't safely iterate-and-remove; just rebuild all children.
-        // Store non-keypad children, clear, re-add.
-        // Simpler: just free keypad-tagged buttons. Since we added dim+keypad+display+buttons
-        // in a known order, re-add everything.
-        foreach (var child in GetChildren())
-            child.QueueFree();
-        _pinDisplay = null;
+        // The 100 digit-face buttons and all chrome are BUILT ONCE in _Ready.
+        // On each scramble (Reset/OK/Cancel/re-open) only flip Visible flags — no QueueFree, no rebuild,
+        // no per-scramble allocation. This matches the original, which builds the button array once in
+        // the constructor and only shows/hides the scrambled face per slot on each re-roll.
+        // spec: Docs/RE/specs/frontend_layout_tables.md §3
+        //   "BUILD ONCE then only TOGGLE VISIBILITY — exactly one face visible per position after scramble"
+        ApplyScramble();
+        UpdatePinDisplay(); // reflect the current _pin (may have been cleared before calling)
+    }
 
-        // Re-run the full build (same as _Ready, no DEV prefill auto-submit on reset).
-        BuildModalChrome();
-
-        BuildKeypad();
-
-        _pinDisplay = new Label
+    // Builds the hidden reused ExitPanel cancel-confirm overlay.
+    // Called once from _Ready (and NOT from RebuildKeypad — the ExitPanel persists across re-scrambles).
+    // Revealed by Cancel (tag 13); dismissed by its own Yes/No buttons.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3
+    //   "Hidden reused ExitPanel child: InventWindow.dds 340×190 src(318,647) centered in parent; built
+    //    hidden (SetVisible(false)); raised by Cancel (tag 13) as the cancel-confirm."
+    private void BuildHiddenExitPanel()
+    {
+        // Panel chrome: InventWindow.dds (A3) src(318,647,340,190) → centered in the 329×422 parent.
+        // Panel-local position: (−6, 116) ≈ centered. spec §3.
+        var panel = new Control
         {
-            Text = new string('*', _pin.Length),
-            Position = new Vector2(PinDisplayX, PinDisplayY),
-            Size = new Vector2(PinDisplayW, PinDisplayH),
-            HorizontalAlignment = HorizontalAlignment.Center
+            Name = "PinExitPanel",
+            Position = new Vector2(ExitPanelLocalX, ExitPanelLocalY),
+            Size = new Vector2(ExitPanelW, ExitPanelH),
+            Visible = false, // hidden at construction. spec §3.
+            MouseFilter = MouseFilterEnum.Pass
         };
-        _pinDisplay.AddThemeColorOverride("font_color", Colors.White);
-        AddChild(_pinDisplay);
 
-        BuildControlButtons();
+        // Chrome blit: A3 (InventWindow.dds) src(318,647,340,190) at panel-local (0,0). spec §3.
+        Texture2D? chrome = _atlas.SliceByPath(
+            LoginLayout.AtlasInventWindow,
+            ExitPanelSrcX, ExitPanelSrcY, ExitPanelW, ExitPanelH);
+        if (chrome is not null)
+            panel.AddChild(new TextureRect
+            {
+                Position = Vector2.Zero,
+                Size = new Vector2(ExitPanelW, ExitPanelH),
+                Texture = chrome,
+                StretchMode = TextureRect.StretchModeEnum.Scale,
+                MouseFilter = MouseFilterEnum.Ignore
+            });
+
+        // "Yes, cancel" button — uses A3 Confirm-A OK art (302,900/415,900) at (120,136,113,40). spec §3.
+        // Clears entry + re-scrambles then emits Cancelled → LoginWindow returns to credential form.
+        Texture2D? yesN = _atlas.SliceByPath(LoginLayout.AtlasInventWindow, 302, 900, 113, 40);
+        Texture2D? yesH = _atlas.SliceByPath(LoginLayout.AtlasInventWindow, 415, 900, 113, 40);
+        var yesBtn = new TextureButton
+        {
+            Name = "ExitYes",
+            Position = new Vector2(40, 136),
+            Size = new Vector2(113, 40),
+            CustomMinimumSize = new Vector2(113, 40),
+            IgnoreTextureSize = true,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = yesN,
+            TextureHover = yesH,
+            TexturePressed = yesN
+        };
+        yesBtn.Pressed += OnExitPanelYes;
+        panel.AddChild(yesBtn);
+
+        // "No, go back" button — uses A3 Confirm-B OK art (302,860/415,860) at (190,136,113,40). spec §3.
+        Texture2D? noN = _atlas.SliceByPath(LoginLayout.AtlasInventWindow, 302, 860, 113, 40);
+        Texture2D? noH = _atlas.SliceByPath(LoginLayout.AtlasInventWindow, 415, 860, 113, 40);
+        var noBtn = new TextureButton
+        {
+            Name = "ExitNo",
+            Position = new Vector2(190, 136),
+            Size = new Vector2(113, 40),
+            CustomMinimumSize = new Vector2(113, 40),
+            IgnoreTextureSize = true,
+            StretchMode = TextureButton.StretchModeEnum.Scale,
+            TextureNormal = noN,
+            TextureHover = noH,
+            TexturePressed = noN
+        };
+        noBtn.Pressed += OnExitPanelNo;
+        panel.AddChild(noBtn);
+
+        AddChild(panel);
+        _exitPanel = panel;
+    }
+
+    private void OnExitPanelYes()
+    {
+        // "Yes, cancel PIN entry": hide ExitPanel, re-scramble for next use, emit Cancelled.
+        // spec §3 "Cancel handler … SetVisible(1) on ExitPanel". The Yes path confirms cancel.
+        // LoginWindow.OnPinCancelled will hide the whole PinKeypadRoot → no need to hide ExitPanel here,
+        // but we do it anyway for cleanliness and re-scramble for the next open.
+        if (_exitPanel is not null) _exitPanel.Visible = false;
+        _pin = "";
+        UpdatePinDisplay();
+        Scramble();
+        RebuildKeypad(); // re-scramble the keypad for the next open. spec §3 "re-roll on Cancel".
+        GD.Print("[PinSubView] ExitPanel Yes: confirmed cancel; emitting Cancelled. spec: §3.");
+        EmitSignal(SignalName.Cancelled);
+    }
+
+    private void OnExitPanelNo()
+    {
+        // "No, go back": hide ExitPanel and resume PIN entry. spec §3.
+        if (_exitPanel is not null) _exitPanel.Visible = false;
+        GD.Print("[PinSubView] ExitPanel No: resume PIN entry. spec: §3.");
     }
 
     // Reset(11) / OK(12) / Cancel(13) control buttons.

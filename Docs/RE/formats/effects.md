@@ -16,7 +16,7 @@
 > particleEmitter walk reaches its `num_frames == 0` tail over 146 variable-length entries, and every
 > manifest / `.xdb` size formula is byte-exact. The Section B `.eff` geometry shape and Section F
 > link-tables remain at their prior sample-verified status (not re-walked this pass).
-> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change.
+> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change. CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): weapon bone-slot attach confirmed — when `bone_name_mode = 1` (CATALOG mode), the AnimCatalog resolves bone ids for slots 902..905; which slot maps to which hand/weapon is DEFERRED (debugger-pending). Recorded in §A.16.2.
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida, vfs-sample]
 > **conflicts:** NONE structural — the loader and the real sample contradict no committed claim on this
@@ -561,8 +561,17 @@ above:
 
 The runtime copies the resolved bone's world translation into `world_pos` (+0x10) and a quaternion
 into `world_rot` (+0x1C) each tick. The full bone-resolution behaviour, including the AnimCatalog
-weapon-hand slot lookup (PLAUSIBLE which slot is which hand/weapon), is specified in
-`specs/effects.md §17.4`; the bone world-transform layout is owned by `specs/skinning.md`.
+weapon-hand slot lookup, is specified in `specs/effects.md §17.4`; the bone world-transform layout is
+owned by `specs/skinning.md`.
+
+> **CYCLE 12 Block B (IDB SHA 263bd994, 2026-06-22) — weapon bone-slot attach CONFIRMED.**
+> When `bone_name_mode` = 1 (`XEFF_BONE_MODE_CATALOG`), the AnimCatalog lookup resolves bone ids
+> for **weapon attachment slots 902, 903, 904, and 905**. These four slots are the confirmed
+> range used for weapon bone-attachment; the lookup is CODE-CONFIRMED by the binary's AnimCatalog
+> dispatch path. **Which slot maps to which hand/weapon position** (e.g. right-hand vs left-hand
+> vs off-hand vs two-hand) is **DEFERRED — debugger-pending** (requires a live-session register
+> read to observe which slot id is passed for each weapon-type equip). Do not hard-code a
+> slot→hand mapping until the debugger pass confirms it. Cite: `// spec: Docs/RE/formats/effects.md §A.16.2`.
 
 ### A.16.3 Named constants (Campaign-5 runtime element)
 

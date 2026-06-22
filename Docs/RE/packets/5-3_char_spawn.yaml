@@ -5,8 +5,9 @@
 #                 880-byte SpawnDescriptor @ frame +0x08 / 20-byte trailer split, and world_x/world_z at
 #                 WIRE +0x54 / +0x58 are control-flow-confirmed; descriptor interior member meanings are
 #                 a struct-cartographer task; VALUE semantics capture/debugger-pending)
-#   ida_reverified: 2026-06-20
+#   ida_reverified: 2026-06-22  (CYCLE 12 / Phase 3 -- 908-byte read + prefix/trailer/world-float offsets re-confirmed unchanged)
 #   ida_anchor: 263bd994
+#   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 #   evidence: [static-ida]
 #   conflicts: RESOLVED the prior "+0x44/+0x48 vs +0x4c/+0x50" world-coordinate ambiguity. Within the
 #              SpawnDescriptor, world_x is at descriptor +0x4C and world_z at descriptor +0x50; with the
@@ -28,7 +29,7 @@ fields:
   - { name: Sort,            type: u32 }          # 0x000  actor category (1=PC, 2=Mob/NPC); low byte is the real sort
   - { name: ActorId,         type: u32 }          # 0x004  actor id
   - { name: SpawnDescriptor, type: "bytes[880]" } # 0x008  embedded 880-byte (0x370) SpawnDescriptor; see structs/spawn_descriptor.md
-  - { name: Trailer,         type: "bytes[20]" }  # 0x37c  trailer; visual/combat flag bytes (copied, partly consumed)
+  - { name: Trailer,         type: "bytes[20]" }  # 0x378  trailer; visual/combat flag bytes (copied, partly consumed)
 
 notes: |
   CONTROL-FLOW CONFIRMED: the fixed 908-byte body (single 0x38C read), the 8 + 880 + 20 split, and the
@@ -49,16 +50,29 @@ notes: |
     Other descriptor landmarks (name region, model id, vitals, class/race) belong to
     structs/spawn_descriptor.md -- do not duplicate their interior offsets here.
 
-  TRAILER (20 bytes, frame 0x37c..0x38f): visual / combat flag bytes consumed individually toward the
-  trailer tail. Not all bytes decoded.
+  TRAILER (20 bytes, frame 0x37c..0x38f): the 20 bytes are consumed individually after the
+  descriptor. Refined structure (CYCLE 11):
+    - trailer[0]  (1B)  clone/name-rebuild byte: signals the client to rebuild the display name
+                        using the clone-discriminator (feeds the same logic as the name-clone path
+                        in the player-branch spawn; see structs/spawn_descriptor.md +0x22).
+    - trailer[1..17] (17B) secondary CP949 name region: a 17-byte CP949 / EUC-KR character buffer
+                        (NUL-terminated, up to 16 bytes + terminator) carrying a secondary name or
+                        title string for the spawned actor.
+    - trailer[18] (1B)  relation byte: guild / relation flag for the spawned actor.
+    - trailer[19] (1B)  tail byte: remaining flag / reserved byte at the end of the trailer.
+  Not all bytes are fully value-decoded (capture/debugger-pending).
 
   NOTE (per-opcode wire offset): the world-coordinate WIRE offset is +0x54/+0x58 for THIS opcode (8-byte
   prefix) and for the 4/4 tag-1/2/3 records (also 8-byte prefix); it is +0x58/+0x5C for 5/1
   SmsgActorSpawnExtended, whose 12-byte prefix shifts the descriptor. Do not apply a single rule across
   all three.
 
-  UNKNOWNS to resolve with a capture / struct pass: the descriptor's full member map and the 20-byte
-  trailer's per-byte meaning.
+  CYCLE 11 (2026-06-22): Σ re-confirmed 8 + 880 + 20 = 908. Trailer refined: clone/name-rebuild byte
+  at trailer[0], 17-byte secondary CP949 name region at trailer[1..17], relation byte at trailer[18],
+  tail byte at trailer[19]. Descriptor interior VALUES remain server-authored / capture-pending.
+
+  UNKNOWNS to resolve with a capture / struct pass: the descriptor's full member map and the full
+  value semantics of the 20-byte trailer.
 
   RELATED: 5/1 SmsgActorSpawnExtended (packets/5-1_actor_spawn_extended.yaml) carries the same descriptor
   with a 12-byte prefix; 4/4 carries it inside its tag-1/2/3 records.

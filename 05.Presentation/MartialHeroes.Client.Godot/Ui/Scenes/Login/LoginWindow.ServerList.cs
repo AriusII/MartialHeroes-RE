@@ -14,12 +14,6 @@ public sealed partial class LoginWindow
     // Server-select management
     // -------------------------------------------------------------------------
 
-    private void DoOpenServerSelect()
-    {
-        DoEnsureServerSelect();
-        RunState(33); // ApplyVisibility(35..37) shows _serverListRoot — the sole gate. spec: frontend_layout_tables.md §2.2.
-    }
-
     private void DoEnsureServerSelect()
     {
         if (_serverListRoot is null) return;
@@ -36,9 +30,11 @@ public sealed partial class LoginWindow
     /// <summary>
     ///     Raises the validation-error message box with the server-list fetch error message.
     ///     Called by the fetch-result path at sub-state 36 when the server list is empty (msg 4027)
-    ///     or the fetch failed (msg 4028). First resets to sub-state 6 per spec §2.2 (state 36 → 37,
-    ///     then the error panel rides over the idle credential form).
+    ///     or the fetch failed (msg 4028). Returns to CREDENTIAL FORM sub-state 6 per the binary's
+    ///     state-diagram edge: S36 → S6 on empty / fetch error (login.md §3 stateDiagram "S36 --> S6:
+    ///     empty / fetch error"). The error panel is then shown over the credential form backdrop.
     ///     spec: Docs/RE/specs/frontend_layout_tables.md §2.1a / §2.2 state 36
+    ///     spec: Docs/RE/scenes/login.md §3 "S36 --> S6: empty / fetch error"
     /// </summary>
     public void RaiseServerListError(bool fetchFailed)
     {
@@ -46,7 +42,13 @@ public sealed partial class LoginWindow
         var msgId = fetchFailed
             ? (int)LoginLayout.MsgErrConnectFail // 4028 — fetch error (−1)
             : (int)LoginLayout.MsgErrNoServers; // 4027 — zero records returned
-        RunState(37); // advance to the "list shown" idle (credential form shows). spec §2.2.
+        // Return to the credential form (sub-state 6) so the error panel's backdrop is the
+        // credential form, not the server-list overlay. Per the state-machine diagram in login.md §3:
+        //   S36 --> S6: empty / fetch error
+        // GAP-2: the previous RunState(37) was wrong — it left _serverListRoot visible as the backdrop.
+        // spec: Docs/RE/scenes/login.md §3 "S36 --> S6: empty / fetch error"
+        // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 36
+        RunState(6); // return to credential-form idle. spec: login.md §3 "S36 --> S6".
         ShowErrorPanel(msgId);
     }
 

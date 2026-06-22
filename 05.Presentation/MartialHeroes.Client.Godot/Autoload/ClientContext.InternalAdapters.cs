@@ -133,6 +133,31 @@ internal sealed class VfsLoadResourceSource : ILoadResourceSource
 // RealWorldRenderer can down-cast to the concrete type for 9-slot access without reflection.
 // spec: Docs/RE/specs/assembly_graph.md §4 — layer-05 composition root adapts AssembledCell as IAssembledCellView.
 
+/// <summary>
+///     A late-binding relay for the 3/14 → 1/9 enter-world emitter seam.
+///     The relay is passed to <see cref="GamePacketHandler" /> at construction (before
+///     <see cref="UseCases.ApplicationUseCases" /> exists); once <c>ApplicationUseCases</c>
+///     is constructed the composition root calls <see cref="SetTarget" /> to point the relay at
+///     <c>useCases.EmitEnterWorldRequest</c>. Matches the <see cref="RelayInputHandler" /> idiom.
+///     spec: Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted from the 3/14 handler).
+/// </summary>
+internal sealed class RelayEnterWorldEmitter
+{
+    private volatile Func<byte, CancellationToken, ValueTask>? _target;
+
+    /// <summary>Invokes the target if it has been set; otherwise returns a completed task (no-op).</summary>
+    public ValueTask Invoke(byte slotIndex, CancellationToken cancellationToken)
+    {
+        return _target is { } t ? t(slotIndex, cancellationToken) : ValueTask.CompletedTask;
+    }
+
+    /// <summary>Points the relay at the real emitter. Thread-safe (volatile write).</summary>
+    public void SetTarget(Func<byte, CancellationToken, ValueTask> target)
+    {
+        _target = target;
+    }
+}
+
 internal sealed class GodotLoadingSoundSink : ILoadingSoundSink
 {
     public void PlayLooping(int soundCueId)

@@ -31,26 +31,28 @@ public sealed partial class HudMaster
         switch (key.Keycode)
         {
             case Key.I:
-                // 'i' (ASCII 105) — Inventory open (group-toggle), slot 146/158 group.
-                // spec: Docs/RE/specs/ui_system.md §8.17.1 — "105 'i' = inventory group-toggle CODE-CONFIRMED".
-                // Also backfills Wave-1 TODO: §8.10.1 "[I] toggles slots 158+159 together".
+                // 'i' — inventory/character group.
+                // spec: Docs/RE/scenes/ingame.md §13.1 — "i = inventory/character group" (ingame.md wins over ui_system.md).
+                // spec: Docs/RE/specs/ui_system.md §8.17.1 — "105 'i' = inventory group-toggle CODE-CONFIRMED" (corroborating).
                 ToggleInventory();
                 GetViewport().SetInputAsHandled();
                 break;
 
             case Key.B:
-                // 'b' (ASCII 98) — Inventory bag (ItemPanel), slot 158.
-                // spec: Docs/RE/specs/ui_system.md §8.17.1 — "98 'b' = ItemPanel slot 158 CODE-CONFIRMED".
-                // Backfills Wave-1 hotkey TODO on inventory.
-                ToggleInventory();
+                // 'b' — war list (BroodWarListPanel, slot 235).
+                // spec: Docs/RE/scenes/ingame.md §13.1 — "b = war list" (ingame.md §13.1 WINS over ui_system.md §8.17.1).
+                // NOTE: ui_system.md §8.17.1 "98 'b' = ItemPanel slot 158" is SUPERSEDED by ingame.md §13.1.
+                // 'b' must NOT toggle inventory or skill — it opens the war list.
+                ToggleGuildDiplomacy(); // war list = BroodWarListPanel (slot 235, key 'b' per §13.1)
+                GD.Print("[HudMaster] 'b' → war list (BroodWarListPanel §13.1). " +
+                         "spec: Docs/RE/scenes/ingame.md §13.1 — 'b = war list' (wins over ui_system.md §8.17.1).");
                 GetViewport().SetInputAsHandled();
                 break;
 
             case Key.S:
-                // 's' (ASCII 115) — Skill window (SkillPanel) toggle group, slot 159.
-                // spec: Docs/RE/specs/ui_system.md §8.17.1 — "115 's' = SkillPanel slot 159 CODE-CONFIRMED".
-                // Backfills Wave-1 hotkey TODO on skill.
-                ToggleSkill();
+                // 's' — inventory group.
+                // spec: Docs/RE/scenes/ingame.md §13.1 — "s = inventory group" (ingame.md wins over ui_system.md).
+                ToggleInventory();
                 GetViewport().SetInputAsHandled();
                 break;
 
@@ -63,10 +65,13 @@ public sealed partial class HudMaster
                 break;
 
             case Key.K:
-                // 'k' (ASCII 107) — Party open (PartyPanel) + close-others, slot 220.
-                // spec: Docs/RE/specs/ui_system.md §8.17.1 — "107 'k' = PartyPanel slot 220 CODE-CONFIRMED".
-                // Backfills Wave-1 hotkey TODO on party.
-                ToggleParty();
+                // 'k' — close-many-panels (and skill-window family).
+                // spec: Docs/RE/scenes/ingame.md §13.1 — "k = close-many-panels (and skill-window family)" (wins).
+                // NOTE: ui_system.md §8.17.1 "107 'k' = PartyPanel slot 220" is SUPERSEDED by ingame.md §13.1.
+                // Per §13.1 'k' toggles the skill window family (SkillPanel); close-many handled by ESC chain.
+                ToggleSkill();
+                GD.Print("[HudMaster] 'k' → skill-window family (§13.1). " +
+                         "spec: Docs/RE/scenes/ingame.md §13.1 — 'k = close-many-panels (and skill-window family)' (wins over ui_system.md §8.17.1).");
                 GetViewport().SetInputAsHandled();
                 break;
 

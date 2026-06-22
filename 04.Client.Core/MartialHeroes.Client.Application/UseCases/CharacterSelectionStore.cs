@@ -119,7 +119,8 @@ public sealed class CharacterSelectionStore
     ///     roster from what was retained. The field mapping is byte-identical to
     ///     <c>GamePacketHandler.DecodeAndRetainRoster</c>'s <see cref="CharacterListSlot" /> construction
     ///     (SlotIndex, Name, Level, ServerClass, CurrentHp, PosX=WorldX, PosZ=WorldZ, InternalClass,
-    ///     AppearanceVariant, FaceA, EquipGids). One slot is emitted per RETAINED occupied slot (the live
+    ///     AppearanceVariant, FaceA, EquipGids, SlotFlag, BillingFlags). One slot is emitted per RETAINED occupied slot (the
+    ///     live
     ///     path emits one per mask-set bit regardless of the "@BLANK@" sentinel — the consumer decides
     ///     empty), in ascending slot order. Returns empty when nothing is retained. spec:
     ///     Docs/RE/specs/login_flow.md §5.1 / §1 step 7; Docs/RE/packets/3-1_character_list.yaml.
@@ -135,11 +136,13 @@ public sealed class CharacterSelectionStore
             var record = _slots[slot];
             if (record is null) continue;
 
-            // Byte-identical field mapping to DecodeAndRetainRoster's CharacterListSlot construction.
+            // Byte-identical field mapping to DecodeAndRetainRoster's CharacterListSlot construction
+            // (including the server-supplied SlotFlag at +0x148C source and the billing FlagsWord).
             builder.Add(new CharacterListSlot(
                 record.SlotIndex, record.Name, record.Level, record.ServerClass, record.CurrentHp,
                 record.WorldX, record.WorldZ,
-                record.InternalClass, record.AppearanceVariant, record.FaceA, record.EquipGids));
+                record.InternalClass, record.AppearanceVariant, record.FaceA, record.EquipGids,
+                record.SlotFlag, record.BillingFlags));
         }
 
         return builder.ToImmutable();
@@ -183,11 +186,20 @@ public sealed class CharacterSlotRecord
     /// </summary>
     /// <param name="slotIndex">The slot index (0..4).</param>
     /// <param name="rawDescriptorAndStats">The 880-byte descriptor + 96-byte stats block (raw); copied.</param>
-    /// <param name="slotFlag">The per-slot flag byte (+976 in the 3/1 record).</param>
-    public CharacterSlotRecord(int slotIndex, ReadOnlySpan<byte> rawDescriptorAndStats, byte slotFlag)
+    /// <param name="slotFlag">
+    ///     The server-supplied per-slot occupied/selectable flag byte (3/1 sub-block 3, record +0x3D0 / +976);
+    ///     the byte the select window mirrors at its +0x148C field. spec: frontend_scenes.md §3.4.
+    /// </param>
+    /// <param name="billingFlags">
+    ///     The per-slot FLAGS WORD (3/1 sub-block 4, record +0x3D1, LE u32; bit 0 = billing/premium). spec:
+    ///     Docs/RE/packets/3-1_character_list.yaml (sub-block 4).
+    /// </param>
+    public CharacterSlotRecord(
+        int slotIndex, ReadOnlySpan<byte> rawDescriptorAndStats, byte slotFlag, uint billingFlags = 0)
     {
         SlotIndex = slotIndex;
         SlotFlag = slotFlag;
+        BillingFlags = billingFlags;
         RawDescriptor = rawDescriptorAndStats.ToArray();
 
         // Decode the display fields from the embedded 880-byte descriptor (the first part of the blob).
@@ -196,9 +208,11 @@ public sealed class CharacterSlotRecord
         Name = reader.ReadName();
         Level = reader.ReadLevel();
         ServerClass = reader.ReadServerClass();
-        CurrentHp = reader.ReadCurrentHp();
-        CurrentMp = reader.ReadCurrentMp();
-        CurrentStamina = reader.ReadCurrentStamina();
+        // HP-qword correction: HP is ONE int64 @ +0x3C (+0x40 is HP-HIGH, NOT MP). The store retains only
+        // the clamped current HP for display; the descriptor's second vital (vital_b @ +0x44) is read
+        // straight off the raw descriptor by the 4/1 spawn path (TryCreateLocalPlayerFromCachedDescriptor),
+        // so it is not duplicated as a store field. spec: Docs/RE/structs/spawn_descriptor.md (HP-qword).
+        CurrentHp = reader.ReadCurrentHpClamped();
         WorldX = reader.ReadWorldX();
         WorldZ = reader.ReadWorldZ();
 
@@ -228,14 +242,11 @@ public sealed class CharacterSlotRecord
     /// <summary>Server-assigned class id. spec: Docs/RE/structs/spawn_descriptor.md (+0x74).</summary>
     public ushort ServerClass { get; }
 
-    /// <summary>Current hit points from the descriptor. spec: Docs/RE/structs/spawn_descriptor.md (+0x3C).</summary>
+    /// <summary>
+    ///     Current hit points (the SINGLE 64-bit HP qword @ +0x3C, clamped into u32 for the Domain vital
+    ///     slot). +0x40 is the HP-HIGH dword, NOT MP. spec: Docs/RE/structs/spawn_descriptor.md (HP-qword).
+    /// </summary>
     public uint CurrentHp { get; }
-
-    /// <summary>Current mana / ki. spec: Docs/RE/structs/spawn_descriptor.md (+0x40).</summary>
-    public uint CurrentMp { get; }
-
-    /// <summary>Current stamina. spec: Docs/RE/structs/spawn_descriptor.md (+0x44).</summary>
-    public uint CurrentStamina { get; }
 
     /// <summary>World X (float). spec: Docs/RE/structs/spawn_descriptor.md (+0x4C).</summary>
     public float WorldX { get; }
@@ -269,6 +280,16 @@ public sealed class CharacterSlotRecord
     /// </summary>
     public ReadOnlyMemory<byte> RawDescriptor { get; }
 
-    /// <summary>The per-slot flag byte (state / availability class). spec: login_flow.md §3.2 (+976).</summary>
+    /// <summary>
+    ///     The server-supplied per-slot occupied/selectable flag byte (3/1 sub-block 3, record +0x3D0 / +976);
+    ///     the byte the select window mirrors at its +0x148C field (gates the 1/7 select/manage click). spec:
+    ///     login_flow.md §3.2 (+976); Docs/RE/specs/frontend_scenes.md §3.4 (+0x148C = server-supplied flag).
+    /// </summary>
     public byte SlotFlag { get; }
+
+    /// <summary>
+    ///     The per-slot FLAGS WORD (3/1 sub-block 4, record +0x3D1, LE u32; bit 0 = billing/premium). spec:
+    ///     Docs/RE/packets/3-1_character_list.yaml (sub-block 4 — RESOLVED FlagsWord, bit 0 = billing/premium).
+    /// </summary>
+    public uint BillingFlags { get; }
 }

@@ -5,12 +5,18 @@ size: 16                  # 16-byte fixed payload
 spec: packets/3-14_char_spawn_response.yaml
 status: confirmed
 capture_verified: false
+# ida_reverified: 2026-06-22 (CYCLE 12 Phase 2, IDB 263bd994): role corrected to the enter-ladder TRIGGER
+#   (3/14 precedes and triggers 1/9, not vice versa).
 
 summary: >
-  Lobby enter-game spawn confirmation / bridge message. Emitted by the server in response to the
-  C2S 1/9 enter world request. This is the lobby bridge confirmation, NOT the actual local player
-  spawn (which is driven by 4/1 SmsgGameStateTick). If successful, it passes arguments to transition
-  the select window state; on failure, it triggers a fallback error notice.
+  Lobby enter-game spawn confirmation / bridge message, and the ENTER-LADDER TRIGGER. CORRECTED
+  (CYCLE 12 Phase 2): this is the server's reply to the C2S 1/7 play-confirm (mode 1,
+  select-and-play) -- it PRECEDES and TRIGGERS the 1/9 enter send, it does NOT respond to 1/9. When
+  Result (the leading flag byte) is non-zero, the 3/14 handler reads the slot + spawn coords and
+  emits the C2S 1/9 CmsgEnterGameRequest from inside itself (server-triggered enter). When Result
+  is zero, it arms a timeout and emits no 1/9. This is the lobby bridge confirmation, NOT the actual
+  local-player spawn (driven by 4/1 SmsgGameStateTick). Ladder: 1/7(mode 1) -> 3/14(flag!=0) -> 1/9
+  -> 3/5. See specs/frontend_scenes.md §7, cmsg_char_enter.yaml ENTER SEQUENCE.
 
 fields:
   - { name: Result,     type: u8 }          # 0x00  result status: 1 = success, 0 = failure

@@ -172,7 +172,6 @@ public sealed partial class EffectRenderer
             // Build one MeshInstance3D per CPU sub-effect (billboard/mesh geometry)
             // and one GpuParticleSimNode per GPU-particle sub-effect.
             var meshInstances = new MeshInstance3D?[subEffects.Length];
-            var gpuParticles = new GpuParticles3D?[subEffects.Length]; // kept for teardown compat; always null
             var simNodes = new GpuParticleSimNode?[subEffects.Length];
             var textures = new ImageTexture?[subEffects.Length][];
 
@@ -197,9 +196,6 @@ public sealed partial class EffectRenderer
                         simNodes[i] = simNode;
                         AddChild(simNode);
                     }
-
-                    // GpuParticles3D slot kept null (teardown compat) — SimNodes[i] carries the node.
-                    gpuParticles[i] = null;
                 }
                 else
                 {
@@ -217,7 +213,8 @@ public sealed partial class EffectRenderer
                 Anchor = actor,
                 SubEffects = subEffects,
                 MeshInstances = meshInstances,
-                GpuParticles = gpuParticles,
+                // GpuParticles: null (field left default) — the legacy GpuParticles3D placeholder
+                // is fully superseded by SimNodes (GpuParticleSimNode). Teardown guards null.
                 SimNodes = simNodes,
                 Textures = textures,
                 ElapsedMs = 0

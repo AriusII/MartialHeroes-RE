@@ -36,7 +36,9 @@ using Godot;
 using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -60,6 +62,37 @@ internal static class PlayerAvatarResolver
     /// <param name="assets">Open VFS handle (shared with the rest of the world renderer).</param>
     /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4}.</param>
     public static Node3D? TryBuild(RealClientAssets assets, ushort serverClass)
+    {
+        // No-equip overload: delegate with an empty equipment list (body only). The GameLoop call-site
+        // (owned by the world engineer) still compiles unchanged; once the core hands the local player's
+        // resolved EquipmentParts to layer 05 (see the CORE-SURFACE GAP in the wave report), the call-site
+        // switches to the parts-aware overload below.
+        return TryBuild(assets, serverClass, []);
+    }
+
+    /// <summary>
+    ///     Equip-aware overload: builds the local-player avatar and, when the equip-overlay resolution
+    ///     RUNS for this character (<see cref="EquipOverlayResolver.RunsOverlayResolution" /> ⇒
+    ///     <c>base_skin_id &lt;= 1000</c>), composes the resolved <paramref name="equipParts" /> onto the
+    ///     shared skeleton via <see cref="SkinnedCharacterBuilder.BuildWithEquipment" /> using the
+    ///     local-player rebuild slot set (<see cref="EquipOverlayResolver.LocalPlayerRebuildSlots" />,
+    ///     the full <c>{3,4,6,2,11,14}</c> when ≤1000, else reduced <c>{3}</c>). The parts are already the
+    ///     core's catalogue-resolved EquipmentParts (the per-part GID / key64 math ran in the layer-04
+    ///     <c>ActorComposer</c>); a part whose mesh <c>.skn</c> does not load is skipped (null mesh → no
+    ///     crash). The weapon (slot 14) attaches at the DEFERRED hand bone-id 0 (DBG-PENDING — flagged,
+    ///     never fabricated).
+    ///     spec: Docs/RE/specs/equipment_visuals.md §1.1 / §3.4 (slot-set + threshold) / §4 (deform parts) /
+    ///     §5 (weapon hand-bone, bone-id 0 deferred). spec: Docs/RE/specs/skinning.md §8(e).
+    /// </summary>
+    /// <param name="assets">Open VFS handle (shared with the rest of the world renderer).</param>
+    /// <param name="serverClass">Wire character class == SkinClassId ∈ {1,2,3,4} == base_skin_id key.</param>
+    /// <param name="equipParts">
+    ///     The core's catalogue-resolved equipment overlay parts for this actor (from
+    ///     <c>AssembledActor.EquipmentParts</c>). Empty ⇒ body only (faithful when nothing is worn / the
+    ///     core surface does not yet carry equip data — see the wave report's core-surface gap).
+    /// </param>
+    public static Node3D? TryBuild(
+        RealClientAssets assets, ushort serverClass, IReadOnlyList<EquipmentPart> equipParts)
     {
         // The wire class is the SkinClassId used verbatim as the §8(e) skeleton-selection key.
         // spec: Docs/RE/specs/skinning.md §8(e) — id_b (SkinClassId) is the pose-pool key, no transform.
@@ -133,17 +166,47 @@ internal static class PlayerAvatarResolver
         // spec: CLAUDE.md "Known Godot Pitfalls" — NEVER GltfDocument; build ArrayMesh directly.
         try
         {
-            var root = SkinnedCharacterBuilder.Build(
-                mesh, skeleton, clip, albedo,
-                false,
-                0f,
-                out var lbs,
-                $"local-player class={skinClass}");
+            // ── Equip-overlay wiring (EquipOverlayResolver) ──
+            // base_skin_id key = the SkinClassId (ServerClass). The overlay resolution RUNS only when
+            // base_skin_id <= 1000 (always true for a class id 1..4); above the threshold only slot 3
+            // would be bound. The local-player rebuild slot set is the resolver's full {3,4,6,2,11,14}
+            // (≤1000) vs reduced {3} (>1000). We honour that slot gate before composing parts.
+            // spec: Docs/RE/specs/equipment_visuals.md §1.1 / §3.4 (threshold 1000; full vs reduced).
+            var baseSkinId = skinClass;
+            var runsOverlay = EquipOverlayResolver.RunsOverlayResolution(baseSkinId);
+            var rebuildSlots = EquipOverlayResolver.LocalPlayerRebuildSlots(baseSkinId);
+
+            var visualParts =
+                runsOverlay && equipParts.Count > 0
+                    ? EquipmentPartResolver.Resolve(assets, equipParts, rebuildSlots,
+                        $"local-player class={skinClass}")
+                    : [];
+
+            Node3D root;
+            SkinnedCharacterNode? lbs;
+            if (visualParts.Count > 0)
+                // Compose, don't swap: body + resolved overlay parts under the ONE shared skeleton.
+                // spec: Docs/RE/specs/equipment_visuals.md §1 / §4 / §5.
+                root = SkinnedCharacterBuilder.BuildWithEquipment(
+                    mesh, skeleton, clip, albedo,
+                    false,
+                    0f,
+                    visualParts,
+                    out lbs,
+                    $"local-player class={skinClass}");
+            else
+                root = SkinnedCharacterBuilder.Build(
+                    mesh, skeleton, clip, albedo,
+                    false,
+                    0f,
+                    out lbs,
+                    $"local-player class={skinClass}");
 
             GD.Print($"[PlayerAvatar] Built class={skinClass} from '{sknPath}' " +
                      $"(skeleton={skeleton is not null}, idleMot={idleMotId}, " +
-                     $"skinned={lbs is not null}, idlePlaying={lbs?.IsIdlePlaying ?? false}). " +
-                     "spec: skinning.md §8(e).");
+                     $"skinned={lbs is not null}, idlePlaying={lbs?.IsIdlePlaying ?? false}, " +
+                     $"runsOverlay={runsOverlay}, equipParts={equipParts.Count}->{visualParts.Count} rendered). " +
+                     "spec: skinning.md §8(e) / equipment_visuals.md §3.4.");
             return root;
         }
         catch (Exception ex)
@@ -288,5 +351,121 @@ internal static class PlayerAvatarResolver
             GD.PrintErr($"[PlayerAvatar] .mot load failed '{motPath}': {ex.Message}");
             return null;
         }
+    }
+}
+
+/// <summary>
+///     Shared layer-05 helper that turns the core's catalogue-resolved
+///     <see cref="EquipmentPart" />s (from <c>AssembledActor.EquipmentParts</c>) into renderable
+///     <see cref="SkinnedCharacterBuilder.EquipmentVisualPart" />s for both the local player
+///     (<see cref="PlayerAvatarResolver" />) and other actors (<see cref="NpcRenderer" />).
+///     <para>
+///         The deterministic equip math (GID derivation, the 64-bit catalogue key, the slot-set
+///         selection) lives in the engine-free <see cref="EquipOverlayResolver" /> and ran upstream in
+///         the layer-04 <c>ActorComposer</c>; this helper performs ONLY the layer-05 IO the resolver
+///         delegates to its caller: load each resolved part's <c>.skn</c> mesh
+///         (<c>data/char/skin/g{MeshGid}.skn</c>) and its albedo (<c>TextureId</c> via
+///         <see cref="CharacterTextureResolver" />), gated by the resolver's rebuild slot set. A part
+///         whose mesh does not load is skipped (null mesh → no crash). It holds NO game state and
+///         decides NO rule — strictly the build-time translation of an Application-supplied part list.
+///     </para>
+///     spec: Docs/RE/specs/equipment_visuals.md §3 (GID/key64 upstream) / §4 (non-weapon deform parts) /
+///     §5 / §5.1 (weapon hand-bone + dual-wield; bone-id 0 DEFERRED). spec: skinning.md §3.5.3
+///     (mesh_gid → data/char/skin/g{MeshGid}.skn; tex_id → texture).
+/// </summary>
+internal static class EquipmentPartResolver
+{
+    /// <summary>
+    ///     Resolves the renderable overlay parts for an actor: for each <paramref name="rebuildSlots" />
+    ///     slot that the core supplied a part for, loads the part <c>.skn</c> + texture and emits an
+    ///     <see cref="SkinnedCharacterBuilder.EquipmentVisualPart" />. Weapon parts (slot 14) carry the
+    ///     DEFERRED hand bone-id 0 (<see cref="SkinnedCharacterNode.DefaultHandBoneId" /> — DBG-PENDING,
+    ///     never fabricated) and the §5.1 off-hand flag; non-weapon parts are skinned-deform under the
+    ///     shared skeleton (§4). Never throws — a part that fails to load is skipped.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §3.4 (rebuild slot set) / §4 / §5 / §5.1.
+    /// </summary>
+    /// <param name="assets">Open VFS handle (main thread).</param>
+    /// <param name="coreParts">The core's catalogue-resolved parts (Slot/MeshGid/TextureId/weapon flags).</param>
+    /// <param name="rebuildSlots">
+    ///     The resolver-selected rebuild slot set (local-player full/reduced, or other-actor). Only parts
+    ///     whose <see cref="EquipmentPart.Slot" /> is in this set are rendered — the resolver owns which
+    ///     slots a given actor rebuilds. spec: equipment_visuals.md §1.1 / §3.4.
+    /// </param>
+    /// <param name="debugLabel">Label for diagnostics.</param>
+    public static IReadOnlyList<SkinnedCharacterBuilder.EquipmentVisualPart> Resolve(
+        RealClientAssets assets,
+        IReadOnlyList<EquipmentPart> coreParts,
+        ReadOnlySpan<int> rebuildSlots,
+        string debugLabel)
+    {
+        var result = new List<SkinnedCharacterBuilder.EquipmentVisualPart>(coreParts.Count);
+
+        foreach (var part in coreParts)
+        {
+            // The resolver owns the rebuild slot set; only render a part whose slot is in it.
+            // spec: Docs/RE/specs/equipment_visuals.md §1.1 / §3.4.
+            if (!SlotInSet(part.Slot, rebuildSlots)) continue;
+            if (part.MeshGid <= 0) continue; // catalogue miss / empty slot → no node (faithful skip).
+
+            // Load the part mesh: data/char/skin/g{MeshGid}.skn.
+            // spec: Docs/RE/specs/skinning.md §3.5.3 (mesh_gid → data/char/skin/g{MeshGid}.skn).
+            var sknPath = $"data/char/skin/g{part.MeshGid}.skn";
+            if (!assets.Contains(sknPath))
+            {
+                GD.Print($"[EquipPart] slot {part.Slot} mesh '{sknPath}' absent — skipped ({debugLabel}). " +
+                         "spec: equipment_visuals.md §3.2 (catalogue miss → null mesh, no crash).");
+                continue;
+            }
+
+            SkinnedMesh partMesh;
+            try
+            {
+                var raw = assets.GetRaw(sknPath);
+                if (raw.IsEmpty) continue;
+                partMesh = SknParser.Parse(raw);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[EquipPart] slot {part.Slot} SknParser.Parse failed '{sknPath}': {ex.Message}");
+                continue;
+            }
+
+            // Albedo: tex_id via the skin chain (CharacterTextureResolver). Null → neutral material.
+            // spec: Docs/RE/specs/skinning.md §3.5.3 (tex_id → texture).
+            ImageTexture? albedo = null;
+            try
+            {
+                albedo = part.TextureId > 0
+                    ? CharacterTextureResolver.Resolve(assets, (uint)part.TextureId)
+                    : CharacterTextureResolver.Resolve(assets, partMesh);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[EquipPart] slot {part.Slot} texture resolve failed '{sknPath}': {ex.Message}");
+            }
+
+            result.Add(new SkinnedCharacterBuilder.EquipmentVisualPart(
+                part.Slot,
+                partMesh,
+                albedo,
+                part.IsHandWeapon,
+                part.IsOffHand,
+                // Hand bone-id stays the DEFERRED default (0) — DBG-PENDING; never fabricated.
+                // spec: Docs/RE/specs/equipment_visuals.md §5 / §3.4 (hand bone-id debugger-pending).
+                SkinnedCharacterNode.DefaultHandBoneId,
+                // Visual+100 scalar scale: 1.0 until the core surfaces the per-weapon grip scale.
+                // spec: Docs/RE/specs/equipment_visuals.md §5 (Visual+100 scalar scale).
+                1.0f));
+        }
+
+        return result;
+    }
+
+    private static bool SlotInSet(int slot, ReadOnlySpan<int> set)
+    {
+        foreach (var s in set)
+            if (s == slot)
+                return true;
+        return false;
     }
 }

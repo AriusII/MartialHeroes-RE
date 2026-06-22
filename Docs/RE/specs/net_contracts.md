@@ -7,7 +7,7 @@ verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send s
   static-hypothesis (a best-consumer / in-flight-latch inference, not a captured round-trip);
   value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
   which result code is success vs fail — has no live capture this campaign).
-ida_reverified: 2026-06-21 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 8; prior CYCLE 7 2026-06-20). CYCLE 8 re-confirmed: NO 12-byte create-result opcode exists (1/6 create acked by 3/7 + 3/1 + 3/4, 3/23 = 28B status-bytes-by-name) — the C# port must retire any SmsgCharCreateResult; and the lobby/server-list connect (port 10000) uses inet_addr on a dotted-quad while the game socket uses gethostbyname (DNS).
+ida_reverified: 2026-06-22 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 12 Phase 0; prior CYCLE 8 2026-06-21). CYCLE 12 Phase 0: §A.4 3/100 SmsgCharActionResult code set reconciled -> canonical set {0,1-5,7,10,11,16,22,23,200-211,220-227,202/203/232} (no case 9, no case 32); select-mode codes 22/23 RECOVERABLE (state 7/sub 5), not fatal; cross-ref handlers.md §23.1 as canonical 3/100 table. CYCLE 8 re-confirmed: NO 12-byte create-result opcode exists (1/6 create acked by 3/7 + 3/1 + 3/4, 3/23 = 28B status-bytes-by-name) — the C# port must retire any SmsgCharCreateResult; and the lobby/server-list connect (port 10000) uses inet_addr on a dotted-quad while the game socket uses gethostbyname (DNS).
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
@@ -567,21 +567,23 @@ for 5000 ms):
 
 ### A.4 Family — the 3/100 SmsgCharActionResult code set
 
-`3/100` reads one 4-byte action/result code and runs a large switch with **two top-level modes**: a
-**lobby/select-screen mode** (local player not yet present — the connect/char-action path that primes
-the conn-state machine) and an **in-world mode** (local player present — small switch {1,2,3,4,5,7,22}
-→ in-game tooltip popups). The full set is `{0, 1–5, 7, 9–11, 16, 22, 23, 200–211, 220–227,
-202/203/232}`:
+`3/100` reads one 4-byte action/result code at payload offset 0 and runs a large switch with **two
+top-level modes**: a **lobby/select-screen mode** (local player not yet present — the
+connect/char-action path that primes the conn-state machine) and an **in-world mode** (local player
+present — switch {1,2,3,4,5,6,7,22} → in-game tooltip popups). The full set is
+`{0, 1–5, 7, 10, 11, 16, 22, 23, 200–211, 220–227, 202/203/232}` (no `case 9` — a `> 9` guard; no
+`case 32`). **The CANONICAL per-code (state, sub-state, error-detail, side effect, string-id,
+timer-arm) table for both modes is `handlers.md` §23.1 — see there.** Summary of the lobby-mode
+structural roles:
 
 | code(s) | structural role (lobby mode) |
 |---|---|
 | 0 | "return to prior scene" → GameState 6 / sub-state 8. |
-| 1, 2, 3, 4, 7 | advance scene → GameState 7 / sub-state 5. (in-world: each is a distinct tooltip popup.) |
-| 5, 22 | (in-world: distinct tooltip popups; lobby 22 falls to the 7/5 advance.) |
-| 9, 10, 11, 16 | PUBLISH outward via the select-screen handler's publish-code method (mid-range publish set). |
+| 1, 2, 3, 4, 5, 7, 22, 23 | **recoverable** char-op error → GameState 7 / sub-state 5 (error-detail = code). **Code 23 also shows status string-id 1604 and is EXCLUDED from the retry-timer arm.** Recoverable, NOT a fatal hard error. (in-world: 1-7/22 are distinct tooltip popups; 23 falls through.) |
+| 10, 11, 16 | PUBLISH outward via the select-screen handler's publish-code method (mid-range publish set). |
 | 200, 201, 204–211, 220–227 | PUBLISH outward via the same publish method — the largest cluster, one contiguous fan to the publisher (no GameState change). |
 | 202, 203, 232 | PUBLISH outward AND set the connect-progress state (GameState=2) — these are the codes the conn-state machine later CONSUMES/CLEARS from its pending slot. |
-| 23 | select a status string and show it on the select-screen status line; explicitly EXCLUDED from the trailing retry-timer arm. |
+| 212–219, 228–231 | jumptable default — no publish-code call (the true out-of-range tail). |
 
 *Cross-link:* the same numbers 201/202/203/232 also appear as conn-state-machine state codes — they
 **share the numbers, not the code path**. 3/100 PRIMES/publishes; the conn-state machine RESOLVES. The
@@ -668,7 +670,7 @@ structural items still worth flagging here:
 | R | Opcode(s) | Pending VALUE |
 |---|---|---|
 | R-01 | 0/0 | meaning of the two trailing u32 server scalars A/B (handshake) |
-| R-02 | 3/100 | full action-result-code → user-meaning map (`{0,1-5,7,9-11,16,22,23,200-211,220-227,232}`) |
+| R-02 | 3/100 | full action-result-code → user-meaning map (`{0,1-5,7,10,11,16,22,23,200-211,220-227,202/203/232}`; structural roles confirmed in handlers.md §23.1 — only the human VALUE meaning of each code is pending) |
 | R-03 | 3/7 | Result(0/1) and Subtype(0=refresh/1=rename-applied/2=delete) polarity confirmation |
 | R-04 | 3/6 | ErrorCode bucket strings (`{0xC8/0xC9}/{0xCC..0xD2}/{0xCE}/{0xD4}`) |
 | R-05 | 3/5 | BillingFlag enum @+0x1C |

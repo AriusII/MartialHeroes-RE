@@ -28,7 +28,9 @@
 // MH_SESSION_TOKEN values are always redacted in logs.
 // spec: login_flow.md §4.2 — password never in a plaintext log.
 
+using System.Collections.Immutable;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Network.Abstractions.Lobby;
 using MartialHeroes.Shared.Kernel.Enums;
@@ -62,6 +64,55 @@ public sealed partial class ClientContext
     /// </summary>
     internal void MaybeStartEnvLogin()
     {
+        // ---- MH_OFFLINE_ROSTER early-exit branch --------------------------------
+        // When MH_OFFLINE_ROSTER=1 is set, inject a synthetic CharacterListEvent
+        // directly into the event bus WITHOUT a TCP connection to the dead original
+        // server (211.196.150.4:11407). This lets the headless verify loop reach
+        // CharSelectWindow._Ready → BuildInventory and print its structural
+        // breadcrumb WITHOUT needing a live replica server.
+        //
+        // Flow (fully async, no TCP):
+        //   1. Wait for SceneMachine → Login (state 1, same as real harness).
+        //   2. Set SkipOpening = true; AdvanceScene twice (Login→Load→Select or
+        //      Login→Load then OnCharacterListReceived() → Select).
+        //   3. Wait 1 s for the presentation SceneHost to swap in SelectScene and
+        //      arm its CharSelectEventDrainer on the main thread.
+        //   4. Publish a synthetic CharacterListEvent (2 dummy slots with class 1
+        //      and class 2 so the slot-actor row has something to render) to
+        //      EventBus. The CharSelectEventDrainer drains it on the next _Process
+        //      tick and calls CharSelectWindow.ApplyCharacterList — which triggers
+        //      the '[CharSelectWindow] inventory built: ...' breadcrumb.
+        //
+        // STRICTLY PASSIVE: does NOT call any TCP/login/server-select use cases.
+        // Does NOT modify domain state (CharacterSelectionStore not populated —
+        // the slot actors build from the event; the store is unused offline).
+        // Does NOT advance the engine state beyond what the SceneMachine permits
+        // (AdvanceScene + OnCharacterListReceived are the spec state transitions).
+        //
+        // OPEN@DEBUGGER: the per-slot +0x1548 flag semantic and the exact slot
+        // descriptor byte layout are debugger-pending; the synthetic slots use
+        // InternalClass 1/2 (Musa/Salsu) as sensible defaults for visual verification.
+        if (string.Equals(
+                Environment.GetEnvironmentVariable("MH_OFFLINE_ROSTER"), "1",
+                StringComparison.Ordinal))
+        {
+            GD.Print("[ClientContext/EnvLogin] MH_OFFLINE_ROSTER=1 — offline-roster harness ACTIVE. " +
+                     "Bypassing TCP; injecting synthetic CharacterListEvent into EventBus. " +
+                     "spec: frontend_scenes.md §3.1 / §11.5h (CharSelectWindow breadcrumb target).");
+
+            // Capture locals for the task closure.
+            var ct = _loopCts?.Token ?? CancellationToken.None;
+            var offlineTask = RunOfflineRosterAsync(ct);
+            // Store alongside the real env-login task (same drain in _ExitTree).
+            _envLoginTask = offlineTask;
+
+            _ = offlineTask.ContinueWith(
+                t => GD.PrintErr($"[ClientContext/EnvLogin] Offline-roster harness faulted: {t.Exception}"),
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+            return; // do NOT proceed to the TCP harness
+        }
+        // -------------------------------------------------------------------------
+
         // Read once at startup; never re-read mid-session.
         // Env var is the primary source; the creds file is the fallback for any key not set in env.
         var loginId = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
@@ -69,6 +120,11 @@ public sealed partial class ClientContext
         var loginPin = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
         var sessionToken = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
         var enterSlotStr = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
+
+        // Auto-login DISABLE toggle (env wins; creds-file "AUTOLOGIN" key is the fallback below).
+        // When off, the harness stays inert so the maintainer can drive the UI login MANUALLY,
+        // step by step — the creds file is kept untouched. Re-enable by removing the flag / setting 1.
+        var autoLoginFlag = Environment.GetEnvironmentVariable("MH_AUTOLOGIN");
 
         // ---- creds-file fallback -----------------------------------------------
         // File: %LOCALAPPDATA%\MartialHeroes\login.creds
@@ -117,10 +173,22 @@ public sealed partial class ClientContext
                         fileDict.TryGetValue("MH_SESSION_TOKEN", out var fTok)) sessionToken = fTok;
                     if (string.IsNullOrWhiteSpace(enterSlotStr) &&
                         fileDict.TryGetValue("MH_LOGIN_ENTER_SLOT", out var fSlot)) enterSlotStr = fSlot;
+                    if (string.IsNullOrWhiteSpace(autoLoginFlag) &&
+                        fileDict.TryGetValue("AUTOLOGIN", out var fAuto)) autoLoginFlag = fAuto;
                 }
             }
         }
         // -------------------------------------------------------------------------
+
+        // Auto-login DISABLE gate: drive the UI login MANUALLY, step by step.
+        // Set env MH_AUTOLOGIN=0  OR  add a line "AUTOLOGIN=0" to login.creds → harness stays
+        // inert (creds file kept; interactive UI login path used). Re-enable: set 1 / remove the line.
+        if (IsAutoLoginOff(autoLoginFlag))
+        {
+            GD.Print("[ClientContext/EnvLogin] Auto-login DISABLED (MH_AUTOLOGIN/AUTOLOGIN=0) — harness inert; " +
+                     "drive the login flow MANUALLY through the UI. spec: login_flow.md §1.");
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(loginId) || string.IsNullOrWhiteSpace(loginPw))
         {
@@ -161,6 +229,18 @@ public sealed partial class ClientContext
         _ = envLoginTask.ContinueWith(
             t => GD.PrintErr($"[ClientContext/EnvLogin] Harness faulted: {t.Exception}"),
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+    }
+
+    // Returns true when the auto-login toggle string disables the harness ("0"/"false"/"off"/"no").
+    // A null/absent flag means "not disabled" → the harness runs as before when creds are present.
+    private static bool IsAutoLoginOff(string? flag)
+    {
+        if (string.IsNullOrWhiteSpace(flag)) return false;
+        var t = flag.Trim();
+        return t == "0"
+               || t.Equals("false", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("off", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("no", StringComparison.OrdinalIgnoreCase);
     }
 
     // -------------------------------------------------------------------------
@@ -401,6 +481,153 @@ public sealed partial class ClientContext
         catch (Exception ex)
         {
             GD.PrintErr($"[ClientContext/EnvLogin] Harness unhandled exception: {ex}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Offline-roster harness (MH_OFFLINE_ROSTER=1)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Background task for the offline-roster harness. Drives the SceneMachine from
+    ///     Login → Select WITHOUT a TCP connection, then injects a synthetic
+    ///     <see cref="CharacterListEvent" /> into <see cref="EventBus" /> so the
+    ///     <c>CharSelectEventDrainer</c> can deliver it to <c>CharSelectWindow.ApplyCharacterList</c>,
+    ///     printing the structural breadcrumb that proves the 124-widget inventory was built.
+    ///     <para>
+    ///         No TCP socket is opened; no credential staging; no server-list fetch. STRICTLY PASSIVE:
+    ///         the synthetic event is purely a view-state injection (two placeholder
+    ///         <see cref="CharacterListSlot" /> records with InternalClass 1/2) — no real domain
+    ///         mutation occurs. <c>CharacterSelectionStore</c> is NOT populated (offline harness
+    ///         only targets the structural count breadcrumb, not the enter-game flow).
+    ///     </para>
+    ///     OPEN@DEBUGGER: synthetic slot InternalClass values (1=Musa, 2=Salsu) are sensible
+    ///     defaults; actual class IDs are debugger-pending for offline slots.
+    /// </summary>
+    private async Task RunOfflineRosterAsync(CancellationToken ct)
+    {
+        try
+        {
+            // ------------------------------------------------------------------
+            // Phase 0: wait for SceneMachine → Login (state 1).
+            // spec: client_runtime.md §7.1 — Init(0) → Login(1) on first SceneHost._Ready.
+            // ------------------------------------------------------------------
+            GD.Print("[ClientContext/EnvLogin/Offline] Phase 0: waiting for GameState=Login.");
+            await WaitForLoginStateAsync(ct).ConfigureAwait(false);
+            GD.Print("[ClientContext/EnvLogin/Offline] Phase 0 DONE: GameState=Login.");
+
+            ct.ThrowIfCancellationRequested();
+
+            // ------------------------------------------------------------------
+            // Phase 1: advance to Load, skip Opening, then force to Select.
+            // spec: client_runtime.md §7.1 Login(1)→Load(2); §7.5.2 CharacterList → Select.
+            // ------------------------------------------------------------------
+            // Set SkipOpening so Load→Select directly (not Load→Opening→Select).
+            // spec: client_runtime.md §7.3 — OPENNING/SKIP true → 2→4 (Load→Select direct).
+            SceneMachine.SkipOpening = true;
+            GD.Print("[ClientContext/EnvLogin/Offline] Phase 1: SkipOpening=true; advancing Login→Load.");
+
+            // Advance Login(1)→Load(2). This triggers SceneStateChangedEvent on the bus,
+            // which SceneHost drains and calls SyncToCurrentState → LoadScene.OnEnter.
+            SceneMachine.AdvanceScene(); // Login → Load
+            GD.Print("[ClientContext/EnvLogin/Offline] Phase 1: SceneMachine at Load. " +
+                     "Waiting 500 ms for LoadScene to initialise.");
+
+            // Brief wait for LoadScene._Ready to fire on the main thread.
+            await Task.Delay(500, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+
+            // Force Load → Select via OnCharacterListReceived (spec §7.5.2: the 3/1 receipt
+            // during Load forces Load→Select transition). This commits SceneStateChangedEvent.
+            SceneMachine.OnCharacterListReceived();
+            GD.Print(
+                "[ClientContext/EnvLogin/Offline] Phase 1: OnCharacterListReceived() → Select transition committed.");
+
+            // ------------------------------------------------------------------
+            // Phase 2: wait for the SelectScene to be active and its drainer armed.
+            // The SceneStateChangedEvent is drained by SceneHost._Process on the next
+            // main-thread frame; SyncToCurrentState → SelectScene.OnEnter runs there.
+            // 1 s is generous for a headless run at 60 fps (= ~60 frames). spec: §7.3.
+            // ------------------------------------------------------------------
+            GD.Print("[ClientContext/EnvLogin/Offline] Phase 2: waiting 1 s for SelectScene drainer to arm.");
+            await Task.Delay(1000, ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+
+            // ------------------------------------------------------------------
+            // Phase 3: publish a synthetic CharacterListEvent into EventBus.
+            // The CharSelectEventDrainer (armed by SelectScene.OnEnter) drains this on
+            // the next _Process tick and calls CharSelectWindow.ApplyCharacterList,
+            // which prints the structural breadcrumb.
+            // Synthetic slots: slot 0 = InternalClass 1 (Musa), slot 1 = InternalClass 2 (Salsu), slot 2 = InternalClass 3 (Dosa).
+            // OPEN@DEBUGGER: class IDs for offline slots are sensible defaults (1/2 = Musa/Salsu).
+            // spec: frontend_scenes.md §3.1 (ApplyCharacterList contract).
+            // spec: ClientEvents.cs (CharacterListEvent / CharacterListSlot).
+            // ------------------------------------------------------------------
+            // Synthetic slots use the §3.7.5 starter AppearanceVariant per class so
+            // model_class_id = 5*(class + 4*variant) - 24 is POSITIVE (not sentinel):
+            //   Musa  class=1, variant=1 → 5*(1+4)  - 24 =  1  ✓
+            //   Salsu class=2, variant=2 → 5*(2+8)  - 24 = 26  ✓
+            //   Dosa  class=3, variant=1 → 5*(3+4)  - 24 = 11  ✓
+            // Variant=0 for any class yields model_class_id ≤ -19 → invisible sentinel (no mesh).
+            // spec: skinning.md §3.5.2 (appearance_key = 5*(class+4*variant)-24, {1,11,16,26}).
+            // spec: frontend_scenes.md §3.7.5 (starter variants {1,2,1,1} for classes {1,2,3,4}).
+            var syntheticSlots = ImmutableArray.Create(
+                new CharacterListSlot(
+                    0,
+                    "TestMusa",
+                    10,
+                    1,
+                    100,
+                    512f,
+                    512f,
+                    1, // Musa skeleton (g1.bnd).
+                    1, // §3.7.5 starter variant → model_class_id=1. CODE-CONFIRMED.
+                    1),
+                new CharacterListSlot(
+                    1,
+                    "TestSalsu",
+                    5,
+                    2,
+                    80,
+                    524f,
+                    512f,
+                    2, // Salsu skeleton (g2.bnd).
+                    2, // §3.7.5 starter variant → model_class_id=26. CODE-CONFIRMED.
+                    1),
+                new CharacterListSlot(
+                    2,
+                    "TestDosa",
+                    8,
+                    3,
+                    90,
+                    512f,
+                    512f,
+                    3, // Dosa skeleton (g3.bnd).
+                    1, // §3.7.5 starter variant → model_class_id=11. CODE-CONFIRMED.
+                    1));
+
+            var syntheticEvent = new CharacterListEvent(
+                0,
+                0,
+                syntheticSlots);
+
+            var published = EventBus?.Publish(syntheticEvent) ?? false;
+            GD.Print($"[ClientContext/EnvLogin/Offline] Phase 3: synthetic CharacterListEvent published " +
+                     $"({syntheticSlots.Length} slots, published={published}). " +
+                     "CharSelectWindow.ApplyCharacterList will print the structural breadcrumb on next _Process. " +
+                     "spec: frontend_scenes.md §3.1 / §11.5h.");
+
+            GD.Print("[ClientContext/EnvLogin/Offline] Offline-roster harness COMPLETE. " +
+                     "Expected next log line: '[CharSelectWindow] inventory built: panels=10 images=37 " +
+                     "buttons=46 labels=29 textboxes=2 (total=124); actionBindings=42'. spec: frontend_scenes.md §11.5h.");
+        }
+        catch (OperationCanceledException)
+        {
+            GD.Print("[ClientContext/EnvLogin/Offline] Offline-roster harness cancelled (shutdown or _ExitTree).");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext/EnvLogin/Offline] Harness unhandled exception: {ex}");
         }
     }
 

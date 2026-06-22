@@ -397,22 +397,20 @@ public sealed class Fx4Layer
 /// <remarks>
 ///     spec: Docs/RE/formats/terrain_layers.md §1.8 FX5 Format: CONFIRMED (single-section).
 ///     Multi-section boundary UNVERIFIED for sections beyond section 0.
-///     Section_Header: 40 bytes; SubChunk_Header: 12 bytes (section 0 confirmed).
+///     Section_Header: 48 bytes (the universal group-array header per §1.4a/§1.1a);
+///     the older "Section_Header 40 + SubChunk_Header 12" decomposition was a prior reading —
+///     the corrected universal model treats the 48-byte block as one group header.
+///     spec: Docs/RE/formats/terrain_layers.md §1.4a — FX5: 48B header, vc@+0x28, ic@+0x2C.
 /// </remarks>
 public sealed class Fx5Section
 {
     /// <summary>
-    ///     Raw 40-byte section header. All fields UNVERIFIED except direction_x/y/z (f32).
-    ///     spec: Docs/RE/formats/terrain_layers.md §1.8 Section_Header (40 bytes): UNVERIFIED (semantic).
+    ///     Raw 48-byte group header (the corrected universal model: one block, not 40+12).
+    ///     All fields UNVERIFIED except vertex_count (@+0x28) and index_count (@+0x2C) which drive the read.
+    ///     spec: Docs/RE/formats/terrain_layers.md §1.4a — FX5 header 48 bytes: CONFIRMED.
+    ///     spec: Docs/RE/formats/terrain_layers.md §1.8 Section_Header — corrected to 48-byte single block.
     /// </summary>
     public required ReadOnlyMemory<byte> RawSectionHeader { get; init; }
-
-    /// <summary>
-    ///     Raw 12-byte sub-chunk header.
-    ///     Confirmed for section 0; layout UNVERIFIED for sections > 0.
-    ///     spec: Docs/RE/formats/terrain_layers.md §1.8 SubChunk_Header (12 bytes): CONFIRMED (section 0).
-    /// </summary>
-    public required ReadOnlyMemory<byte> RawSubChunkHeader { get; init; }
 
     /// <summary>Vertex array (VF_36). spec: §1.8 CONFIRMED.</summary>
     public required FxVertex36[] Vertices { get; init; }

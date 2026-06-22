@@ -1,5 +1,8 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Network.Protocol.Core.Opcodes;
+using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 
 namespace MartialHeroes.Client.Application.Handlers;
 
@@ -8,6 +11,22 @@ public sealed partial class GamePacketHandler
     // -------------------------------------------------------------------------
     // 0/0 — login key exchange -> 1/4 Auth reply
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     0/0 — typed typed IPacketHandler seam. Reinterprets the 62-byte struct as a raw span so the
+    ///     existing payload-based handler can walk the RSA blob without copying. The struct is reinterpreted
+    ///     in place over the frame buffer by the PacketRouter — no allocation, no copy.
+    ///     spec: Docs/RE/packets/0-0_key_exchange.yaml; Docs/RE/specs/crypto.md §6.
+    /// </summary>
+    public void Handle(in SmsgKeyExchange packet) // spec: Docs/RE/opcodes.md row 0/0; IPacketHandler seam
+    {
+        // Reconstruct the raw byte span from the Pack=1 struct reinterpreted in the frame buffer.
+        // Unsafe.SizeOf<SmsgKeyExchange>() == SmsgKeyExchange.WireSize == 62. spec: packets/0-0_key_exchange.yaml.
+        var payload = MemoryMarshal.CreateReadOnlySpan(
+            ref Unsafe.As<SmsgKeyExchange, byte>(ref Unsafe.AsRef(in packet)),
+            Unsafe.SizeOf<SmsgKeyExchange>()); // spec: Docs/RE/packets/0-0_key_exchange.yaml (size: 62)
+        HandleKeyExchange(payload);
+    }
 
     /// <summary>
     ///     0/0 — server KeyExchange. Delegates to the injected login driver, which parses the payload,

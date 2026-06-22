@@ -12,7 +12,7 @@ verification: confirmed (the enter-world opcode ladder 1/9 -> 3/5 -> 4/1, the si
   cadence, which UI control fires 1/0 vs 2/0 and where the socket closes, the per-area/per-dungeon
   cell counts that live in each VFS .lst, and the data-driven walk/run speeds).
 ida_anchor: 263bd994
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-22  # CYCLE 12 / Phase 3 -- 4/1 interior tables (roster A, scene-entity B, hotbar init) + 4/4 892B actor-record framing folded in (263bd994)
 evidence: [static-ida]
 sample_verified: false
 note: CYCLE 7 (2026-06-20) -- folded the world-entry-relevant region/zone-state resolution and the
@@ -181,6 +181,41 @@ selector; the date/time block drives the clock.)
 > renders nothing. That mechanism is owned by `specs/client_workflow.md §5.4.7` and
 > `specs/camera_movement.md §A.4.1`; it is noted here only as a workflow dependency.
 
+### 2.3a `4/1` interior tables — roster, scene-entity slots, hotbar init — CONFIRMED
+
+The three interior blocks the `4/1` world-entry form copies into globals (step 4, last bullet of
+§2.3) are no longer opaque. Their internal record strides and roles are recovered from the consumers
+the form runs immediately after each copy (two stale-slot sweeps and the verbatim hotbar copy);
+control-flow-confirmed and counter-confirmed on IDB SHA 263bd994 (CYCLE 12 / Phase 3). Byte offsets
+are owned by **`packets/4-1_game_state_tick.yaml`**; this is the behavioural summary.
+
+- **World-entry table A — the roster table.** A flat array of **16-byte** records (capacity 193; the
+  world-entry sweep walks 120). Each record carries an **actor id** and a **keep-guard** value; the
+  sweep evicts a slot only when its keep-guard is 0 *and* its referenced actor's stale flag is set.
+  The keep-guard value doubles as a displayed member number — this table feeds the roster/label panel.
+
+- **World-entry table B — the scene tracked-entity / actor-slot table.** A **heterogeneous** block,
+  not one flat array: a **240 × 16-byte** record array (same record shape and the same eviction
+  predicate as table A) followed by a small unswept gap, a **21 × 8-byte** category-entry tail list
+  (each entry pairs a category code with a value), and a 16-byte world-target selection record. This
+  is the table the scene uses to track the actors/objects present in the active area; party and
+  spawn-group queries also read from it. Role detail in `specs/world_systems.md`.
+
+- **Hotbar init — the quick-slot bar seed.** The 1920-byte hotbar block is copied **verbatim** into
+  the hotbar global, restoring the player's quick-slot bar on entry. It is **240 slots of 8 bytes**.
+  Each slot carries an **entry key** (a value of 0 marks an empty slot) and a **count** (quantity or
+  charge). There is **no inline type byte** — whether a slot is a skill or an item is decided by
+  looking its entry key up in the skill/action catalogue and reading that catalogue record's category
+  field (category value 5 means skill; the meaning of the other non-skill families is data-driven and
+  capture-pending). The in-game hotbar therefore initialises directly from this `4/1` block; an
+  engineer rebuilds it as a fixed 240-slot array of `{ entryKey, count }` and resolves the slot kind
+  via the skill catalogue, not from any wire flag.
+
+The eviction predicate shared by tables A and B: a slot is cleared only when its id is non-zero, its
+referenced actor resolves, that actor's stale flag is set, and its keep-guard is 0. (The concrete
+meaning of a category code, a hotbar non-skill family, or a keep-guard value beyond the membership
+display is a data-driven VALUE detail, capture-pending — not blocking the layout.)
+
 ### 2.4 `4/4` SmsgAreaEntitySnapshot — actors + overlays
 
 **S2C `4/4` SmsgAreaEntitySnapshot** populates the area's actors and overlays. After a short area
@@ -203,6 +238,15 @@ tag. Each iteration reads a **tag byte** and dispatches on it. Handler behaviour
 The tag set carried by the loop is **{0,1,2,3,4,6,9}**. The overlay tags (6 = guild-name, 9 =
 title/relation) attach display strings/flags to an actor already introduced by an actor tag. The
 **value semantics** of the overlay codes are not yet pinned — see §4.
+
+> **Area-snapshot framing + records (CYCLE 12 / Phase 3).** The full `4/4` framing — a 17-byte area
+> header (only its two center floats are used, to recenter the actor grid) then this tag loop — is
+> owned by **`packets/4-4_area_entity_snapshot.yaml`**. The actor record carried by tags **1/2/3** is
+> a fixed **892-byte** record (an 8-byte prefix + the 880-byte SpawnDescriptor + a 4-byte trailer);
+> its full field table and the key point — the prefix has **no sort dword**, so the actor sort comes
+> from the **tag byte** (tag 1 ⇒ player), with the composite key being (actor id from the prefix,
+> sort from the tag) — are owned by **`structs/actor.md`** (the 4/4 area-actor record section). The
+> tag-9 record is a 24-byte actor-state update, distinct from the tag-4 ground item of the same length.
 
 ### 2.5 `2/112` ENABLE — keepalive toggle on
 

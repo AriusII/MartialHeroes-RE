@@ -267,6 +267,16 @@ public static class SkinnedCharacterBuilder
         if (lbsNode is null || parts.Count == 0)
             return root; // static fallback (no skeleton) or no equipment — body only.
 
+        // PART-BUILD ORDER / NO DOUBLE-ATTACH (§3.6.2 "1:1 port guidance (b)"): the recovered lineup
+        // build runs two passes with a FULL skin-list teardown between them, so only the final pass's
+        // parts survive. We build that final set ONCE on a freshly-created node (Build above made a new
+        // SkinnedCharacterNode with empty overlay/weapon lists), then append the body's overlays + the
+        // weapon in slot order — no part is attached twice and nothing is overwritten. Clear first so a
+        // re-used node (defensive) also starts empty, exactly reproducing the teardown semantics.
+        // spec: Docs/RE/specs/skinning.md §3.6.2 (PASS-2 tears PASS-1 down; build the PASS-2 set directly).
+        lbsNode.ClearOverlayParts();
+        lbsNode.ClearWeapons();
+
         foreach (var part in parts)
             if (part.IsHandWeapon)
                 // WEAPON (slot 14): rigid single-bone attach. spec: equipment_visuals.md §5.
@@ -281,11 +291,20 @@ public static class SkinnedCharacterBuilder
                                 $"'{part.Mesh.Name}'): {ex.Message}");
                 }
             else
-                // NON-WEAPON (head/face/body): skinned-deform under the shared skeleton (§4). Not yet
-                // reproduced by this single-mesh CPU-LBS node — reported as remaining work (§9 item 1–2).
-                GD.Print($"[Skinning] Non-weapon equipment part slot {part.Slot} ('{part.Mesh.Name}') " +
-                         "NOT rendered (skinned-deform shared-skeleton multi-surface path pending). " +
-                         "spec: equipment_visuals.md §4.");
+                // NON-WEAPON overlay {4,6,2,11}: skinned-deform under the SHARED skeleton (§3.5.1 / §4) —
+                // now reproduced as an additional ArrayMesh surface on the same SkinnedCharacterNode (one
+                // skeleton, one deform pass, no second base mesh, no double-attach). The part is baked
+                // against the shared bind world so its §0 cancellation holds; it animates with the idle.
+                // spec: Docs/RE/specs/skinning.md §3.5.1 / §3.6.2 / equipment_visuals.md §4.
+                try
+                {
+                    lbsNode.AttachDeformPart(part.Mesh, part.Albedo, $"slot{part.Slot}:{part.Mesh.Name}");
+                }
+                catch (Exception ex)
+                {
+                    GD.PrintErr($"[Skinning] Overlay deform part attach failed (slot {part.Slot}, " +
+                                $"'{part.Mesh.Name}'): {ex.Message}");
+                }
 
         return root;
     }

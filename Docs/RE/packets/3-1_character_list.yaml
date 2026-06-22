@@ -12,6 +12,7 @@
 #                 class/variant args of the preview model formula, HIGH confidence (four independent
 #                 read sites; the in-world spawn path feeds the same two offsets to the same factory).
 #   ida_anchor: 263bd994
+#   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots
 #              (the account character-slot count); the 5x981 record model is confirmed.
@@ -77,9 +78,13 @@ notes: |
         +0x74  server_class (u16) -- server-assigned style id, distinct from internal_class.
 
     Sub-block 2 -- StatBlock (96 bytes, record-relative 0x370..0x3cf):
-      Per-character primary-stat record. On enter-character the chosen slot's 96 bytes are copied
-      verbatim into the local-player stat globals, so this IS the character's stat record. Block
-      offsets are relative to the StatBlock start (record-relative 0x370 + the value below):
+      Per-character primary-stat record. Read as ONE opaque unit by the list handler -- its interior
+      is decoded later at enter-game, copied verbatim into the stat globals. The 96-byte interior is
+      SERVER-AUTHORED / VALUE-RUNTIME: the wire reach is CLOSED (96 bytes read sequentially), the
+      interior field meanings are RD (runtime-dependent) pending a live capture / enter-game trace.
+      On enter-character the chosen slot's 96 bytes are copied verbatim into the local-player stat
+      globals, so this IS the character's stat record. Block offsets below are relative to the
+      StatBlock start (record-relative 0x370 + the value below):
         +0x00 (4B u32) primary_stat_0  : 1st of the 5 allocatable primaries (STR-family).
         +0x04 (4B u32) primary_stat_1
         +0x08 (4B u32) primary_stat_2
@@ -130,8 +135,14 @@ notes: |
       error codes (one of those error codes is the cooldown refusal); the cooldown value itself never
       reaches the 3/1 record.
 
-    Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame
-    = 3 + 2*981 (two populated slots), capture-unverified here.
+    Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. Σ confirmed. A prior analyst observed a 1965-byte
+    frame = 3 + 2*981 (two populated slots), capture-unverified here.
+
+  CYCLE 11 (2026-06-22): Σ re-confirmed 880 + 96 + 1 + 4 = 981 per slot. The handler iterates a
+  5-bit occupancy mask (bits 0..4, LSB-first). The 96-byte interior (sub-block 2) is read as one opaque
+  unit -- its wire reach is CLOSED, its interior values are RD (server-authored, decoded at enter-game,
+  never decoded by the list handler itself). SlotFlag (sub-block 3) and FlagsWord (sub-block 4)
+  meanings confirmed RESOLVED (see sub-blocks 3 and 4 above).
 
   APPEARANCE DRIVER (how a list slot renders the REAL character, not a placeholder):
     For an existing character the rendered appearance comes ENTIRELY from the server-supplied

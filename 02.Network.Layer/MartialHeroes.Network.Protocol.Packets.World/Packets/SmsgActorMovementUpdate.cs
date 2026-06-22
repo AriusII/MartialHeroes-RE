@@ -62,8 +62,15 @@ public readonly struct SmsgActorMovementUpdate
     private readonly byte _pad1_1;
     private readonly byte _pad1_2;
 
-    /// <summary>0x20 — speed/scale float, ~1.0 default. spec: packets/5-13_actor_movement_update.yaml.</summary>
-    public readonly float SpeedScale;
+    /// <summary>
+    ///     0x20 — RESERVED: this dword is within the 40-byte read but is NOT consumed as a speed
+    ///     scalar by the handler. Interpolation speeds are compiled-in constants (1.5 / 3.0) selected
+    ///     by squared-distance thresholds and RunFlag — there is no wire speed field. The prior
+    ///     "SpeedScale@0x20" label is UNSUPPORTED. Role unconfirmed (capture-pending).
+    ///     spec: packets/5-13_actor_movement_update.yaml (NOT a speed; interp speeds are
+    ///     compiled-in constants, debugger-pending).
+    /// </summary>
+    public readonly uint Reserved0x20;
 
     /// <summary>0x24 — motion/action code; 5 =&gt; instant snap branch. spec: same.</summary>
     public readonly byte MotionCode;

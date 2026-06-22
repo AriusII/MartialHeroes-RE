@@ -503,3 +503,531 @@ decodes correctly), not a wrong offset - do NOT relocate the field.
 **Firewall:** zero addresses / pseudo-C / Hex-Rays autonames in any committed file (self-scrubbed); all
 anchor addresses stayed in `_dirty/protocol/3-1_class_variant_offset.md`. Recovery (1 READONLY analyst)
 and promotion (orchestrator rewrite via re-promote) ran as separate sub-waves.
+
+---
+
+## 2026-06-22 — Login + CharSelect from-scratch rebuild (RE spec corrections + C# 02/04 + Godot 05)
+
+- binary: doida.exe @ 263bd994
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*) — static analysis only; no debugger session this entry
+- analyzed: LoginScene widget builder (msg.xdb caption loop, notice-panel structure); PIN keypad
+  control-button element walker (Reset/OK/Cancel tag roles, source rects); UI render-state bucket
+  entry path (front-end overlay vs in-game HUD blend modes); char-select preview body resolver
+  (AnimCatalog body-key formula, per-class InternalClass → IdB → body key64); SpawnDescriptor
+  `SkinClassId` vs `model_class_id` disambiguation at the skeleton/idle lookup sites
+- specs produced/updated:
+  - `formats/msg_xdb.md` — CORRECTED: IDs 4001–4022 are the static notice/agreement text column
+    labels, not EULA / Terms-of-Service body text; no scroll/accept gate exists anywhere in the login
+    scene builder. Prior "EULA overlay" reading refuted CODE-CONFIRMED.
+  - `specs/client_workflow.md` — cross-reference updated to agree with the msg_xdb correction; EULA
+    references removed.
+  - `specs/frontend_layout_tables.md §3` — PIN keypad control-button rects and tag roles confirmed
+    CODE-CONFIRMED: Reset = tag 11, OK = tag 12, Cancel = tag 13; source rect bands on `password.dds`
+    recorded (panel-relative coordinates carried).
+  - `specs/rendering.md §4.1/§4.2` — UI blend-state reconciliation, binary-won: front-end overlay
+    bucket uses a global additive ONE/ONE blend (not per-quad opt-in); in-game HUD bucket leaves
+    alpha-blend disabled at bucket-enter with per-quad opt-in. Two rows now explicitly split.
+  - `specs/frontend_scenes.md §3.7.5` — per-class starter-body table rewritten from the
+    binary-confirmed resolver math: body selected via AnimCatalog lookup keyed by
+    `(slot=3, IdB)` where `IdB = 5*(InternalClass + 4*variant) - 24`; starter variants
+    `{1, 2, 1, 1}` for classes `{1, 2, 3, 4}`; resulting IdB values `{1, 26, 11, 16}`
+    CODE-CONFIRMED. Concrete `g{skinId}.skn` per class remains SAMPLE-UNVERIFIED. Prior VFS-only
+    observation (wrong class-tag mapping, wrong .skn path structure) refuted.
+- notes: This entry covers RE-side spec corrections that unblocked the C# 02/04 and Godot 05
+  from-scratch rebuild of the Login and CharSelect scenes. The msg.xdb mislabel (EULA) was a
+  long-standing doc error: the binary's login scene builder constructs no terms/agreement panel and
+  gates on no accept action — the 4001–4022 caption band is a purely decorative stacked notice
+  column. The UI blend-state reconciliation resolved a conflict between the in-game HUD (per-quad
+  opt-in) and the front-end overlay (global ONE/ONE additive) that had been conflated in the prior
+  rendering.md row. The starter-body table rewrite fixed a VFS-observation-driven error: the binary
+  resolver ignores the part-id mantissa and keys exclusively on `(slot=3, IdB)` via the AnimCatalog,
+  not on a direct VFS class-tag scan. The slot-2 skeleton/idle bug (Dosa avatar falling back to
+  static bind pose) was a port-side misuse of the appearance key as a `.bnd` filename number —
+  corrected in `SlotAppearanceResolver` to use `SkinClassId = InternalClass ∈ {1,2,3,4}` (the
+  proven path; `g1..g4.bnd` are the only skeletons that exist). All findings crossed the firewall as
+  neutral prose; no addresses or pseudo-C in any committed file.
+- build result: `dotnet build MartialHeroes.slnx` 0 errors / 0 warnings; Godot headless exit 0;
+  loginPass + charSelectPass verified live (windowed). Remaining residuals are data gaps (equip .skn
+  + effect.cache absent from local VFS) and the §3.3.7 multi-surface deform overlay, both recorded in
+  ROADMAP CYCLE 10.
+
+## CYCLE 11 — « CharSelect → World — Evidence-Driven Reforge » (static IDA, 263bd994) — 2026-06-22
+
+- date: 2026-06-22
+- analyst: AriusII (Tier-1 main session orchestrating re-orchestrator / csharp-port-orchestrator / godot-orchestrator)
+- binary: `doida.exe` @ IDB `263bd994` (SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`)
+- tool: IDA Pro 9.3 via MCP — **STATIC ONLY** (no `?ext=dbg`, no captures; user decision). NO tests this cycle.
+- scope: evidence-driven reforge of the two largest scenes — CharSelect (Block A) then World/InGame (Block B) —
+  in the 5-stage rhythm DeepAnalyse → Counter-DeepAnalyse → C# rebuild 00–04 → VERIFY → Godot 05 rewire.
+  Existing code treated as candidates only; unjustified code deleted. Branch `cycle9-charselect-world` off `master`.
+
+- **Scene-state numbering settled in the binary (headline).** The app-entry `while(1) switch(game-state value)`
+  pre-writes the NEXT value on case ENTRY. **CharSelect = switch case-index 4 → writes value 5**; **World/InGame =
+  switch case-index 5 → writes value 4** (the no-network default = return to CharSelect); the leave-world/logout
+  path overrides value-4 with the quit-prep value (client EXITS, no auto-return). Corrects the older loose
+  "state 5 = in-game" doc and the misattribution of the value-4 write to teardown. Now unambiguous in
+  `world_systems.md §13.1` (+ a cross-ref caveat in `frontend_scenes.md`). The C# SceneStateMachine encodes both.
+
+- Block A — CharSelect specs promoted/updated (all G4-stamped, banner-pinned 263bd994):
+  - `packets/cmsg_char_create.yaml` — full 52-byte 1/6 create payload byte-pinned LE (name[18]@0, Face u8@0x12,
+    AppearanceA u16@0x14, AppearanceB u16@0x16, ClassInternalId u8@0x18, Reserved1A[2]@0x1A, Stat0..4 u32@0x1C..0x2C,
+    PointsRemaining u32@0x30); Σ=52.
+  - `specs/character_creation.md` — class remap {UI 0→internal 4, 1→1, 2→3, 3→2}; point-buy = 5-point budget, all
+    five stats floor 10, clamp [10,15], invariant Σstats+points=55; the "fifth-stat-floor" reading REFUTED (the 5
+    is the budget); npc.scr class-description binding (record +20/+84/+148); per-class create BGM 910062000/3/4/5.
+  - `specs/rendering.md` — preview camera (FOV 50, near 5, far 15000), KF0→KF1 2.0 s dolly (KF0 yaw +2.4°/pitch −6.0°,
+    KF1 yaw ~π/4/pitch −2.67°, dt=elapsed×0.0005 clamp 1), standard char material (SRC_ALPHA/INV_SRC_ALPHA), ambient
+    effect id 380003000 at (508.483, 69.887, −9758.569). Filter/cull = runtime residual.
+  - `specs/environment.md` — preview fog resolved OFF (overturns the §6.4a "do not assert" caveat: the build helper
+    calls the fog-blend setter with literal 0.0; the char-select tick never re-pushes fog). Binary wins over spec.
+  - `structs/spawn_descriptor.md` — 96-byte info-block static reach (7 create-path dword writes + constant-7 marker,
+    rest runtime-filled); facing flag at +0x1548 (refutes the +0x148C side-claim).
+  - `specs/frontend_scenes.md` — action dispatch table, delete-via-1/7-flag, the enter-world ladder (slot-pick →
+    1/7 select → 3/14 bridge confirm → enter-ready gate → 1/9 enter → loop-exit; local player spawns on 4/1, not 3/14).
+  - C# (02–04) real fixes found while rebuilding: NpcScrParser off-by-4 (paragraph offsets 0x050/0x090→0x054/0x094,
+    width 60→64 — was reading corrupt class-description lines 2/3); HP corrected to i64 qword @descriptor+0x3C (the
+    +0x40 "CurrentMp" was a misread; removed across 6 callers); point-buy validator + class remap made spec-exact.
+  - Godot (05): KF1 yaw was authored in degrees not radians (→ Mathf.Pi/4); preview actor Y 69.89→0.0 (the ~70 was
+    an invented platform-top offset; 70 is the camera look-at pivot + ambient-effect Y, not actor placement);
+    create-preview scale ratio (81/70) was inverted; SlotAppearanceResolver slot-2 Dosa (InternalClass 3 → g3.bnd
+    + col16 idle) confirmed correct.
+
+- Block B — World/InGame specs promoted/updated (16, all G4-stamped, banner-pinned 263bd994): world_systems.md,
+  frontend_scenes.md, rendering.md, environment.md, formats/terrain_layers.md, formats/sky.md, ui_hud_layout.md,
+  equipment_visuals.md, chat.md, effects.md, effect-scheduling.md, structs/spawn_descriptor.md,
+  packets/5-3_char_spawn.yaml, packets/5-1_actor_spawn_extended.yaml, packets/3-1_character_list.yaml,
+  packets/5-7_chat_broadcast.yaml. Key facts:
+  - Scene build = 17-step case-5 sequence; per-frame loop = 4 phases (input pump → per-render-view device step+present
+    → round-robin scheduler → frame-rate limiter); 5 view-platforms; GScene root + terrain-manager singleton + **5
+    layer nodes** (msg ids 2006/2004/2005/2148/2148 — 2148 reused; corrects an earlier "4 layer nodes"). Streaming:
+    camera frustum copied into terrain each frame; stream radius clamped to 1000 at the far plane. Keepalive ENABLE
+    on entry; DISABLE on logout (C2S 2/112, 1-byte body).
+  - Spawn wire (Σ-balanced): 5/3 = 908 B (8-byte prefix + 880 descriptor + 20 trailer); 5/1 = 912 B (12-byte prefix
+    incl. title-state/title-slot/relation-flag + descriptor + trailer; player-branch 64-bit HP); 3/1 = 981 B/slot
+    (880 descriptor + opaque 96-byte stats + 1 flag + 4 flags-word, 5-bit mask).
+  - Chat 5/7 body = [u32 len][len CP949 bytes] (client NUL-appends; the YAML old size−8−36 over-counted by 4);
+    sender name in the 36-byte header; channel byte selects routing + an ARGB colour ladder — **code 7 = pink
+    0xFFFF797C** (NOT red; the dirty "code 7 = red" mis-read was reverted — red is codes 16/17 0xFFFF4040), **code 10
+    = yellow 0xFFFFFF00** (49079 notice; not code 8).
+  - Lighting/sky: brightness = pixel-shader composite constants (defaults 1.0), **NOT a gamma ramp** (the 0.5 was an
+    FP-stack artifact); DISPLAY_LIGHT_RATIO is parsed-but-never-read (DEAD); 9-state character tint applied at the
+    cel draw via a 9-entry table. Sun/moon orbit = closed-form trigonometry (cos/sin), **NOT a log curve and NOT a
+    stored keyframe track**; moon is a flat circle (no Z), only the sun carries a Z term; fog LINEAR, range=s×3,
+    near=1/s, enabled when s>0. (Corrects sky.md §D.2 "natural-log curve"/"millisecond"/moon-vertical-arc.)
+  - Render state: particle/UI vertex stride 24; in-world UI via the D3DX sprite helper; in-game HUD bucket leaves
+    alpha-blend OFF at bucket-enter, each panel opts in per-quad. Terrain fx1–7 = 7 channels (fx3/fx5 water), indexed
+    meshes with on-disk UVs, 16×16 cull, 1-based texture remap. Actor visual: skin-level threshold 1000 (gates
+    equip-overlay catalog + full vs reduced slot binding), non-weapon GID scale 10000, categoryBase[47], dual-wield
+    node flags 2/1. Effects: the 10001 scheduled-effect drain is a TWO-PASS full-tree sweep (fire ALL due events, no
+    early stop — resolves the open spec question); scene-transition reset = a timed-event-queue flush (not a full
+    effect reset); bone-source→name is data-driven (no compiled table).
+  - C# (02–04): new spec-faithful modules WorldSceneContract, TimedEventQueue (two-pass drain), EquipOverlayResolver;
+    deleted SkyBoxParser (.box absent from VFS, spec says no loader), a stale chat-body heuristic, a vestigial
+    terrain field. Closeout wired two dangling connections: 5/53 vitals → IHudEventHub.PublishVitals (local player),
+    and the local player six visible-gear EquipGids → LocalPlayerSpawnedEvent → in-world equip overlay (GID→part
+    bridge single-sourced with the char-select SlotAppearanceResolver path; weapon slot-14 hand-bone-id 0 deferred).
+  - Godot (05): sun/moon trig billboards on SkyDomeNode; HUD geometry corrected (skill-hotbar container 349,13,7,504
+    inner-x 982 two 9-slot loops, target plate 226×54 top-flush centred, caption font slot 4); chat colour authority
+    moved to the core (deleted a duplicate hardcoded-white publish path).
+
+- conflicts arbitrated against the binary (binary wins, all journaled in the dirty ARBITRATION records): facing flag
+  +0x148C→+0x1548; rig node offset +6204→+6196 (world-mgr node = +6204); camera +544=yaw/+520=pitch; preview fog OFF
+  (overturned the spec caveat); chat code-7 pink (dirty mis-read reverted, the committed chat.md was already right);
+  5/7 body framing (explicit u32 len prefix); layer-node count 4→5; sky log→trig + moon-no-Z; DISPLAY_LIGHT_RATIO
+  dead; composite-brightness defaults 1.0. A NEW conflict downgraded rendering.md §4.2 front-end blend (the CYCLE-10
+  "one/one additive binary-won" claim) to DEBUGGER-PENDING — the front-end leaf quads route through the sprite
+  helper Begin(alpha-blend) which may override the global one/one per draw; the in-game HUD per-quad opt-in is
+  unaffected and stays CONFIRMED. (Registered as RD-render-blend; load-bearing but presentation-only, non-blocking.)
+
+- IDB legibility annotations applied (idempotent, neutral, idb_save OK): CharSelect — SelectWindow_ApplyClassSelection
+  (+ a renamed singleton local); World — MainWindow_SceneInit, MainWindow_SceneTeardown, MainWindow_PerFrameUiHook,
+  Terrain_WireCameraFrustum, Terrain_SetStreamRadius, EffectSchedule_DrainDueEvents, EffectManager_FlushTimedEventQueue,
+  Actor_DrawSkinnedCelWithTint, ActorVisualGlobal_Init (+ globals ActorVisualGlobal[3]=skin-level-threshold(1000),
+  [2]=non-weapon-GID-scale(10000), categoryBase[47]).
+
+- doc reconciliations (prose only; C# already followed the authoritative reading): formats/terrain_layers.md fx7
+  group-header width 48→52 B (reconciled §1.4a/§1.10/§1.12 to the §1.13 census); packets/5-3_char_spawn.yaml
+  trailer offset comment 0x37c→0x378 (correct Pack=1 sum 8+880=888).
+
+- deferred (STATIC-ONLY → owed to a future ?ext=dbg/capture pass): 11 RD-* residuals registered in ROADMAP CYCLE 11
+  (RD-render-blend, RD-hand-bone, RD-chat-u32, RD-create, RD-action [1/7 delete-context flag — delete path is a
+  guarded no-op until pinned], RD-spawn-values, RD-effect-pools, RD-light-ratio, RD-xeffname, RD-mat, RD-vitals-hp
+  [5/53 HP exposed as u32 while descriptor HP is i64 — low-impact, values fit 32-bit]). None block structural fidelity.
+
+- build result: `dotnet build MartialHeroes.slnx --no-incremental` (nuked bin/obj) = 0 errors / 0 warnings (39 core
+  projects + Tools + layer-05); check_dag.py OK (downward-only acyclic); Godot headless --quit-after 150 exit 0,
+  clean to Login; code-reviewer PASS (0 blockers, zero-alloc world packet path confirmed); render-reviewer structural
+  PASS for both scenes; clean-room-check PASS (no decompiler artifacts; firewall held). FINAL GATE A and FINAL GATE B
+  both GREEN. **Live runtime-pixel fidelity (terrain streaming, spawned/equipped actors, live HUD/chat) is the
+  maintainer visual oracle on the Auth replica — not claimed here.** No commit made (awaiting user request).
+
+## CYCLE 12 — PHASE 2 « select→enter ladder root-cause » (static IDA, 263bd994) — 2026-06-22
+
+- Mandate: statically determine WHY a char-enter at char-select drew a genuine server 3/100 result
+  code 23 reject. Phase 0 had proved the wire LAYOUT byte-correct (1/7, 1/9) and the 3/100 Result
+  decode correct, so the reject is provoked by a VALUE or ORDERING, not a layout defect. IDA STATIC
+  ONLY; no debugger, no captures.
+
+- Recovery (dirty, gitignored): three READONLY analyst lanes, reconciled:
+  - the 1/9 enter-request FIELD VALUE SOURCES;
+  - the select→enter EMISSION ORDERING + the 1/7 mode-byte → UI-action table;
+  - the char-select inbound flow CONFIRM/DELTA (3/1, 3/4, 3/7, 3/14, 1/6, drain mechanism, descriptor).
+
+- Binary-won findings promoted (rewrite-not-copy; firewall held; no addresses/pseudo-C crossed):
+  1. ENTER IS A SERVER ROUND-TRIP (load-bearing correction). The normal play flow is
+     1/7 (mode 1, select-and-play / play-confirm) → 3/14 SmsgCharSpawnResponse (positive flag) →
+     1/9 CmsgEnterGameRequest emitted FROM the 3/14 handler (server-triggered) → 3/5 SmsgEnterGameAck.
+     A client firing 1/9 unilaterally off the Enter button (no mode-1 1/7, no positive-flag 3/14 wait)
+     sends 1/9 out of sequence — the leading static hypothesis for the genuine code-23 reject.
+  2. 1/7 MODE TABLE corrected: mode 1 = select-and-play (the play-confirm that drives the ladder);
+     mode 0 = slot-lock / pre-play (also stamps the chosen name into the HUD). The earlier
+     "mode 0 = select, mode 1 = delete" reading is corrected; the DELETE-confirm mode byte is NOT
+     statically provable and is capture/debugger-pending.
+  3. 1/9 SessionToken (33 B @ +0x01) corrected: it is the lowercase-hex MD5 digest of the client's
+     OWN executable file (argv[0] path through an MD5-of-file hasher; 32 hex + NUL) — a build-integrity
+     self-checksum, NOT a launcher/login session token. Always present in a normal launch. The exact
+     digest bytes are runtime (capture-pending); the source + format are static-HIGH. Supersedes the
+     prior "launcher command-line token" reading.
+  4. 1/9 other fields confirmed: SlotIndex @0x00; 2-byte zero Pad @0x22; VersionToken @0x24 =
+     10*(game.ver field 5)+9. No 1/9 field echoes any prior inbound packet (the C# echoing nothing is
+     correct).
+  5. Char-select flow CONFIRMED: 3/1 SmsgCharacterList (5-slot roster cache; 880-byte spawn descriptor
+     + 96-byte stats + flag + timing; class/variant/level offsets match); 3/4 SmsgSceneEntityUpdate
+     in-place refill; 3/7 SmsgCharManageResult (8-byte UI result, no engine state, subtype 2 =
+     delete-confirmed, clears the select-window latch); 3/14 = the enter-trigger; 1/6 create (52-byte
+     body, CP949 name @0). Inbound char-select packets are dispatched SYNCHRONOUSLY in wire-arrival
+     order via the shared NetHandler singleton (no deferred drain/replay queue). Terminology DELTA:
+     there is no separate "96-byte descriptor" at select — appearance fields come from the 880-byte
+     spawn descriptor; the 96-byte block is the stats block.
+
+- Committed specs corrected + banners re-pinned 263bd994 / 2026-06-22:
+  specs/frontend_scenes.md (§7 enter-world handoff rewritten to the server round-trip ladder; §8
+  send-map mode bytes corrected; banner), packets/cmsg_char_enter.yaml (SessionToken self-checksum +
+  ENTER SEQUENCE ladder), packets/cmsg_char_select.yaml (mode roles per UI action), packets/
+  3-14_char_spawn_response.yaml (role corrected to the enter-ladder TRIGGER), packets/
+  3-100_char_action_result.yaml (enter-ordering hypothesis for the code-23 reject).
+
+- Implied C# fix (route-ready; NOT applied here): the SelectScene Enter button currently calls the
+  enter use-case which sends ONLY 1/9 (mode-byte select sends 0, SessionToken zero-filled). To match
+  the original: (a) send 1/7 mode=1 on play-confirm; (b) gate 1/9 on the positive-flag 3/14 and emit
+  it from the 3/14 handler; (c) fill the 33-byte token with a valid-shaped 32-hex string + NUL rather
+  than 33 zeros. Routed to csharp-port-orchestrator (02/04) + godot-orchestrator (05).
+
+- Capture-pending residuals (static boundary stated, NOT guessed into specs): the exact MD5-digest
+  bytes; the concrete VersionToken integer; the delete-confirm 1/7 mode byte (0 vs 1); whether the
+  server strictly requires the mode-0→mode-1 two-step or only the mode-1 play-confirm; and the exact
+  server rule that maps to result code 23. All owed to a future ?ext=dbg/capture pass.
+
+- Firewall: clean-room held — promotions are neutral rewrites; no Hex-Rays artifact, pseudo-C, or
+  address crossed into a committed spec. Dirty sources left intact under Docs/RE/_dirty/protocol/.
+
+
+---
+
+## CYCLE 12 — PHASE 3 « in-game WIRE + STRUCT deepening » (static IDA, 263bd994) — 2026-06-22
+
+- Mandate: statically deepen the in-game packet + struct corpus the live world consumes once the
+  player enters — the 4/1 world-entry snapshot internals, the 4/4 area-snapshot actor record, and the
+  position/combat sync packets — so spawned actors, the hotbar, and movement render/track correctly.
+  IDA STATIC ONLY on doida.exe, IDB SHA 263bd994; no debugger, no captures. DeepAnalyse → Counter-check
+  → promote → STAMP.
+
+- Recovery (dirty, gitignored): six READONLY analyst lanes (massively parallel), each independently
+  counter-checked by a fresh analyst; reconciled, binary wins:
+  - 4/1 WorldEntryTableA / TableB internal strides + roles (the two stale-slot sweep consumers);
+  - 4/1 HotbarSlots stride + per-slot layout (the verbatim hotbar-copy consumer);
+  - 4/4 area-snapshot 892-byte actor record (prefix + descriptor + trailer + composite key);
+  - 5/10 SmsgCharDeath body + deathCause switch map;
+  - 5/3 / 4/13 / 5/13 / 2/13 re-confirm sweep;
+  - 4/4 tag-4 ground-item LIVE/orphaned verdict + the dangling cross-ref fix.
+
+- Binary-won findings (control-flow-confirmed + counter-confirmed on 263bd994):
+  1. 4/1 table A = a flat 16-byte-record roster table (cap 193, 120 swept): each record = an actor id
+     + a keep-guard (eviction gate; doubles as the displayed member number) + an aux value. Role =
+     the membership/roster panel slot source.
+  2. 4/1 table B = a HETEROGENEOUS 4044-byte block: 240 × 16-byte scene tracked-entity / actor-slot
+     records (same shape + evict predicate as table A) + a 20-byte gap + a 21 × 8-byte category-entry
+     tail list (category code + value) + a 16-byte world-target selection record (3840+20+168+16=4044).
+     Role = the scene's tracked-entity/actor-slot table (party & spawn-group queries read it).
+     Shared evict predicate: clear a slot only when id != 0 AND the actor resolves AND its stale flag
+     is set AND keep-guard == 0.
+  3. 4/1 HotbarSlots = 240 × 8-byte slots: entry key (0 = empty) + count; NO inline type byte —
+     skill-vs-item resolved by a skill-catalogue lookup (catalogue category 5 = skill).
+  4. 4/4 area-actor record = exactly 892 bytes = 8-byte prefix (actor id u32 @+0, kind byte @+4
+     [value 5 = visual-only refresh], relation/visual byte @+5, 2 pad) + 880-byte SpawnDescriptor @+8
+     + a 4-byte trailer @+0x378 (visual byte, pad, combat-timer flag, pad). NO sort dword in the
+     prefix — the actor SORT is carried out-of-band by the leading TAG byte (tag 1 ⇒ player); the
+     composite key is (actor id from +0, sort from the tag byte). The 4/4 record is the shortest
+     spawn carrier; its name update arrives via the separate 36-byte tag-6 record.
+  5. 5/10 SmsgCharDeath = a 20-byte body: victim sort/id @+0/+4, deathCause i32 @+8, killer sort/id
+     @+0xC/+0x10. deathCause switch {0 normal, 1 PK-A, 2 PK-B, 3 special/no-modal}; the common arm
+     clears the locked battle target, zeroes combat resources, plays the death motion (action-state +
+     alive flag + timestamp), and clears the buff-slot array. PK effects anchor on the VICTIM pair,
+     not the killer (counter-refined from the Stage-1 reading).
+  6. 4/4 tag-4 ground item = LIVE (handler reads the 24-byte record; layout confirmed unchanged). The
+     dangling cross-ref is closed: the parent 4/4 framing spec now exists and opcodes.md 0x40004
+     points at it.
+
+- CONFLICTS resolved (binary wins):
+  - 4/13 SmsgLocalPlayerStateSync: the sync-mode byte is at wire offset 33 (0x21), NOT 32 — wire
+    bytes 24..32 are an unconsumed reserved gap. The committed yaml was corrected.
+  - Stage-1 "table B 12-byte selection record" → counter corrected to 16 bytes (the 4044 arithmetic
+    only closes with a 16-byte selection record).
+  - 5/10 PK effect anchor → victim pair (not killerId).
+  - 2/13 move-mode wire value space = the SINGLETON {3} (the mode byte is a hardcoded literal in a
+    shared sender, not a parameter); no second statically-decidable arm.
+
+- Committed specs created / corrected / re-pinned 263bd994 / 2026-06-22:
+  - CREATED packets/5-10_combat_death.yaml (5/10 SmsgCharDeath body + deathCause switch map).
+  - CREATED packets/4-4_area_entity_snapshot.yaml (the parent 4/4 framing: 17-byte header + tag loop;
+    closes the dangling cross-ref).
+  - CORRECTED packets/4-13_local_player_state_sync.yaml (Mode byte → offset 33; banner).
+  - EXTENDED packets/4-1_game_state_tick.yaml (interior record strides for tables A/B + hotbar).
+  - structs/actor.md (new "4/4 area-entity-snapshot actor record" section + status-header row).
+  - specs/world_entry.md (new §2.3a interior tables + hotbar init; §2.4 4/4 framing note; banner).
+  - specs/world_systems.md (new §13.3 the 4/1 world-entry seed tables).
+  - Banners re-pinned on packets/5-3_char_spawn.yaml, packets/5-13_actor_movement_update.yaml,
+    packets/2-13_move_request.yaml (re-confirmed unchanged; 2/13 move-mode singleton note added).
+  - opcodes.md: 0x40004 and 0x5000a spec-path columns now point at the new specs.
+
+- Capture-pending residuals (static boundary stated, NOT guessed into specs): all 5/10 death-penalty
+  magnitudes (xp/durability/drop) and its effect/message-id + level-threshold value meanings; the
+  4/1 category-code and hotbar non-skill-family semantics; the 4/4 kind/relation/trailer byte VALUE
+  meanings; whether 4/13 Mode / 5/10 deathCause is a full dword vs a byte+pad on the wire. All owed
+  to a future ?ext=dbg / capture pass — none block the in-game world-handler layout work.
+
+- G4 readiness: every touched/created in-game wire+struct spec is STAMPED implementation-ready for
+  the C# world-handler fixes (control-flow-confirmed against 263bd994); the residuals above are
+  NON-blocking runtime confirmations. GATE: GREEN.
+
+- Proposed names.yaml glossary additions (orchestrator to apply via ida-toolsmith, NOT applied here):
+  structs PartyMemberSlot/RosterSlot, SceneEntitySlot, TargetCategoryEntry, HotbarSlot,
+  AreaActorRecord; fields actorId/keepGuard/auxValue, EntryKey/Count, victimSort/victimId/deathCause/
+  killerSort/killerId; enum DeathCause{Normal,PkTypeA,PkTypeB,SpecialNoModal}; globals
+  g_PartyMemberSlots/g_RosterSlots, g_SceneEntitySlots, g_HotbarSlots.
+
+- Firewall: clean-room held — every promotion is a neutral rewrite; no Hex-Rays artifact, pseudo-C,
+  mangled name, or binary address crossed into a committed spec. Dirty sources (Stage 1 + Stage 2
+  counter) left intact under Docs/RE/_dirty/world/ and Docs/RE/_dirty/world/counter/.
+
+---
+
+## CYCLE 12 — Block A « CharSelect deep+counter recon » (static IDA, 263bd994) — 2026-06-22
+
+- date: 2026-06-22
+- analyst: AriusII (Tier-1 main session orchestrating re-orchestrator / csharp-port-orchestrator / godot-orchestrator)
+- binary: doida.exe @ 263bd994 (SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`)
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*) — STATIC ONLY (no `?ext=dbg`, no captures; user decision). NO tests this cycle.
+- analyzed: SelectWindow build path (virtual slot 14, 127-widget census); keyframed free-look 3D preview camera;
+  3/1 880-byte roster descriptor; create flow and its 1/6 send path; SceneStateMachine select-mode dispatch table
+  (handlers.md §23.1 full set vs the stale §7.5.2 subset); C2S opcode builder family (1/0, 1/6, 1/7, 1/9, 1/13,
+  1/14) confirmed via twin forward+backward static reads; SelectWindow command-dispatcher action-id model (full
+  roster 10–73 incl. spinner ids 25–34, create 35/36, yaw 66–73); spinner display fields as 1/6 create-blob wire
+  fields; 3/7 SmsgCharManageResult sub=2 delete+cooldown semantics; charselect.md §4.3/§4.4/§6.1/§6.2/§7.4/§7.5
+  spec corrections; scene_state_machine.md dual Select→InGame bridge + post-1/9-send globals copy.
+
+- binary-won findings (control-flow-confirmed via twin forward+backward read + reconcile):
+  1. C2S opcode map definitively settled: create=1/6 (52B), select-slot=1/7 (2B [slot, mode]; mode 0 = slot-lock,
+     mode 1 = select-and-play), enter-world=1/9 (40B; SessionToken = client-executable MD5 33B @+0x01;
+     VersionToken = 10×game.ver[5]+9), rename=1/13 (18B), logout=1/0 (0B). Earlier hypotheses enter=1/8 and
+     create=1/9 are REFUTED. All C# [PacketOpcode] bindings were already correct.
+  2. SelectWindow action-id roster recovered: spinners 25–34 (10 ids, non-sequential +/− pairing; spinner display
+     fields ARE the 1/6 create-blob wire fields); create-confirm 35 (sends 1/6); create-cancel 36 (inferred,
+     C12-D2); face +/− 21/22; class pick 10=Monk(4)/11=Musa(1)/12=Dosa(3)/13=Salsu(2); select-slot confirm/cancel
+     54/55; rename 59/60; conditional play overlay 61; delete/move-out 62/63 (1/14, gated); plain panel-close 64;
+     actor-yaw buttons 66–69; actor-yaw drag 70/71; camera boom-zoom drag 72/73.
+  3. 3/100 select-mode inert band {212–219, 228–231} in SceneStateMachine was routing to the fatal Error(7/8)
+     arm. Per handlers.md §23.1 this band is inert no-op in select-mode; corrected to a no-op. The in-world 3/100
+     branch was rekeyed on local-player presence per §23.1. The fatal code-23 exit is fixed; the residual latent
+     crash (inert-band mis-routing) is also fixed.
+  4. Enter ladder confirmed: 1/7 mode-1 → 3/14 SmsgCharSpawnResponse (positive flag) → 1/9 from the 3/14 handler
+     → 4/1 sole spawn. Opcode 1/14 = 1-byte [slot] behind the confirm modal; move-vs-delete label CONTESTED
+     (send-site debug strings say "move/relocate"; 3/7 sub=2 performs deletion+cooldown). Label deferred (C12-D1).
+
+- specs produced/updated (all banner-pinned to 263bd994 / CYCLE 12 / 2026-06-22):
+  - `Docs/RE/scenes/charselect.md` — §7.5 3/5↔3/7 swap removed + fictitious IDB-mislabel note deleted;
+    §6.1 keyframed camera + ambient XEffect 380003000 pos; §6.2 scales 70 lineup / 81 create with
+    3.0 = idle playback-rate; §7.4 enter ordering; §4.3/§4.4 full action-id roster incl. 35/36 create,
+    25–34 spinners, 66–73 yaw/zoom.
+  - `Docs/RE/specs/character_creation.md` — implicit ceiling-15 via 5-point budget; @BLANK@-name vs
+    880-byte record separated; both create latches.
+  - `Docs/RE/scenes/scene_state_machine.md` — re-stamped CYCLE 12; dual Select→InGame bridge;
+    post-1/9-send globals copy.
+  - `Docs/RE/opcodes.md` — 1/14 contested-label note added.
+  - `Docs/RE/packets/SmsgCharManageResult` citation repointed to `3-7_char_manage_result.yaml`.
+  - `Docs/RE/packets/SmsgCharSpawnResult` citation repointed to `3-14_char_spawn_response.yaml`.
+
+- notes: This entry covers the Block A CharSelect deep+counter recon pass. The primary outcome is the
+  definitive C2S opcode map (1/6/7/9/13/14), settling long-standing static hypotheses. The full action-id
+  roster (25–34 spinners, 35/36 create, 66–73 yaw/zoom) was recovered and the Godot action model rebuilt
+  to it — a create-unreachable regression (action 35/36 swallowed by the spinner range) was found and fixed.
+  The 3/100 inert-band fix in SceneStateMachine closed a latent crash that existed alongside the original
+  fatal code-23 bug fixed in Phase 0. The spinner display fields being the 1/6 wire fields is a key
+  structural finding: the create modal is not a separate encoding; the widget values ARE the wire values.
+  All findings crossed the firewall as neutral prose; no addresses or pseudo-C in any committed file.
+  Dirty sources under Docs/RE/_dirty/cycle12/charselect/ (gitignored).
+
+- deferred (static boundary stated, capture/debugger-pending; registered in ROADMAP CYCLE 12 deferred register):
+  C12-D1 (1/14 move-vs-delete label), C12-D2 (action id-36 create-cancel inference), C12-D3 (id-4/id-61 button
+  binding), C12-D4 (66–69 vs 70–73 live widget binding), C12-D5 (Stat0..4 named-stat mapping), C12-D6
+  (SessionToken digest bytes), C12-D7 (1/7 mode server interpretation), C12-D8 (3/7 ready_time epoch),
+  C12-D9 (3/100 full code enum), C12-D10 (3/14 flag/pos value semantics), C12-D11 (visual fidelity of
+  rebuilt create flow).
+
+- build result: `dotnet build MartialHeroes.slnx --no-incremental` (nuked bin/obj) = 0 errors / 0 warnings
+  (40 projects); check_dag.py OK (39 core, downward-only acyclic); Godot headless boot exit 0 clean through
+  login → server-select → game-connection → char-select; clean-room firewall audit CLEAN. BLOCK A GATE GREEN.
+
+---
+
+## CYCLE 12 — Block B « World/InGame deep+counter recon + layer-05 correctness » (static IDA, 263bd994) — 2026-06-22
+
+- date: 2026-06-22
+- analyst: AriusII (Tier-1 main session orchestrating re-orchestrator / csharp-port-orchestrator / godot-orchestrator)
+- binary: doida.exe @ 263bd994 (SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`)
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*) — STATIC ONLY (no `?ext=dbg`, no captures; user decision). NO tests.
+- analyzed: world loop exception handling path (OnUnhandled / Handle overloads / _Process-drain try/catch);
+  terrain height sampling (triangle selection + plane interpolation vs bilinear); pixel-shader brightness
+  constants (BASE_BRIGHT_MULTI c0, GLOW_BRIGHT_MULTI c1; DISPLAY_LIGHT_RATIO read-site sweep);
+  sky orbit math (cos/sin thunk bodies; sun Z term; moon flat-circle shape); camera near/far + height
+  sampler; SelectWindow enter-committed latch (scene member vs NetClient); enter-world descriptor/stats/level
+  copy sequence; spawn-opcode census (908 / 912 confirmed; 981 = roster slot byte-size, not a spawn opcode);
+  weapon bone-slots 902..905; ingame.md HUD cartography scope; HudTargetFrame chrome rect + label slots;
+  Key.B vs Key.I disambiguation; camera eye-offset legacy model; EffectRenderer dead array path;
+  GameLoop.EventDrain delegate caching.
+
+- binary-won findings (control-flow-confirmed on 263bd994, counter-confirmed by fresh analyst pass):
+  1. NO P0 live-crash exists in the in-world loop. The world loop is fail-soft by design: all unhandled
+     paths route through OnUnhandled + Handle overloads; _Process and drain paths carry try/catch guards.
+     GUARDRAIL: the _unhandled.Record diagnostic must be preserved; a fatal 3/100 classifier must NOT be
+     added to the in-world path.
+  2. Opcode 981 is the byte-count of a 3/1 SmsgCharacterList slot record (roster data, not a spawn).
+     The only spawn opcodes are 908 (5/3 SmsgCharSpawn) and 912 (5/1 SmsgActorSpawnExtended).
+  3. Ground height = per-triangle plane interpolation, NOT 4-corner bilinear averaging. The height-map
+     supplies vertex Z values; the sampler identifies the correct triangle within the cell and evaluates
+     the plane equation for the query point. Corrects a prior spec reading.
+  4. DISPLAY_LIGHT_RATIO: CONFIRMED DEAD on the world-geometry path (no live read site reaches it).
+     BASE_BRIGHT_MULTI and GLOW_BRIGHT_MULTI are pixel-shader constants c0/c1, not CPU-side scalars
+     (environment.md §9.2/§9.4 corrected).
+  5. Sky helpers are cos/sin thunks (closed-form orbit). The prior "natural-log curve" and
+     "millisecond-resolution keyframe track" readings are refuted. Moon = flat circle (no Z term);
+     only the sun carries a Z component in its orbit math. Corrects sky.md §D.2.
+  6. Camera near/far CONFIRMED; terrain-height sampler pinned to camera_movement.md §A.7.1/§B.6.
+  7. The enter-committed latch is a SelectWindow scene member (NOT a NetClient keepalive-suppress).
+     Entering copies descriptor + stats + level into live-player globals; 4/1 reuses the descriptor
+     as the spawn seed; 3/5 is the ack, NOT the spawn trigger. Corrects scene_state_machine.md §3.1/§3.2.
+  8. Weapon bone-slots 902..905 confirmed as the weapon-attachment range. Which-hand assignment within
+     that range is runtime-selected (debugger-pending; registered as C12-D16).
+  9. ingame.md rescoped as HUD cartography. Entries for opcodes 981/2/12 removed (not world-build
+     opcodes). The fabricated §5.5b anchor in the spec was flagged as non-existent.
+
+- specs produced/updated (all banner-pinned to 263bd994 / CYCLE 12 / 2026-06-22):
+  - `specs/terrain-streaming.md §6.5` — ground height corrected to per-triangle plane interpolation.
+  - `formats/terrain.md` (new §5.4a) — per-triangle height-sampling algorithm recorded.
+  - `formats/sod.md` — cross-reference to per-triangle height updated.
+  - `specs/environment.md §9.2 / §9.4` — DISPLAY_LIGHT_RATIO CONFIRMED DEAD; BASE/GLOW_BRIGHT_MULTI
+    recorded as pixel-shader constants c0/c1.
+  - `specs/sky.md §D.2` — sky orbit corrected to closed-form cos/sin; moon flat-circle (no Z);
+    natural-log and keyframe-track readings refuted.
+  - `specs/camera_movement.md §A.7.1 / §B.6` — near/far confirmed; terrain-height sampler pinned.
+  - `scenes/scene_state_machine.md §3.1 / §3.2` — enter-committed latch corrected to SelectWindow
+    scene member; enter copy sequence + spawn-trigger (4/1 not 3/5) corrected.
+  - `specs/effects.md §A.16.2` — weapon bone-slots 902..905 confirmed; which-hand deferred.
+  - `scenes/ingame.md` — rescoped to HUD cartography; 981/2/12 removed; §5.5b flagged non-existent.
+  - Dirty sources: `Docs/RE/_dirty/cycle12/world/` (gitignored).
+
+- firewall integrity fix: 52 fabricated `§5.5b` citations were identified in `HudTargetFrame.cs`,
+  `HudMaster.cs`, and `HudMaster.Builder.cs` and stripped. Re-pointed to real committed anchors:
+  `ingame.md §5 / §5.4 / §5.5a` and `ui_hud_layout.md §5.5a`. Zero §5.5b citations remain in
+  any committed file.
+
+- layer-05 fixes applied (Godot layer 05, all spec-cited):
+  - TerrainNode.cs: ground-height sampler → per-triangle plane interpolation (terrain.md §5.4a).
+  - HudPlayerStatusPanel.cs (NEW, slot 15): player-vitals panel built (was previously ABSENT);
+    displays HP / MP / stamina / condition / portrait / level; drains from the vitals hub.
+  - HudTargetFrame.cs: chrome rect corrected to 226×54; PercentLabel populated from HpRatio;
+    label font slots corrected (ui_hud_layout.md §5.5a).
+  - HudMaster.cs / HudMaster.Builder.cs: Key.B no longer toggles the skill window (ingame.md §13.1).
+  - HUD command bar: CP949 literals replaced with msg.xdb IDs.
+  - CameraController.cs: F1/F2/F3 view-mode hotkeys (Third/First/Static); Gamble/Event deferred;
+    eye-offset switched to the legacy rotated model (camera_movement.md §A.5).
+  - EffectRenderer.cs: vestigial gpuParticles array + placeholder-fallback removed.
+  - GameLoop.EventDrain.cs: OnTimedEvent delegate cached.
+  - World.tscn env + PlayerController.cs deletion: confirmed already done by prior campaign (no-op).
+
+- deferred (static boundary stated, NOT guessed into specs; registered in ROADMAP CYCLE 12 deferred
+  register as C12-D12 through C12-D18):
+  WaterRenderer keep-vs-remove (non-original; visual-oracle pending); RealWorldRenderer dual-path
+  merge (deferred refactor); ~20 secondary HUD windows without hub channels; camera Gamble/Event modes;
+  weapon which-hand bone (C12-D16); 5/53 VitalB/VitalC + level boundary, chat 5/7 endianness/ARGB
+  band, 3/100 in-world code value map, 3/5-vs-4/1 arrival order (all capture/?ext=dbg-pending; C12-D17);
+  visual fidelity of terrain height, vitals panel, camera framing — spec-faithful but not
+  screenshot-verifiable this cycle (C12-D18).
+
+- build result: `dotnet build MartialHeroes.slnx --no-incremental` (nuked bin/obj) = 0 errors / 0 warnings
+  (40 projects); check_dag.py OK (39 core, downward-only acyclic); Godot headless boot World.tscn exit 0
+  clean (VFS 43,347 / catalogues 90,937 items / 2,000 skills / 3,997 mobs; no SCRIPT ERROR / ERROR /
+  Parse Error / Failed to load); clean-room firewall CLEAN (zero decompiler artifacts, zero raw addresses,
+  zero §5.5b residue). CYCLE 12 BLOCK B GATE GREEN. CYCLE 12 CLOSED.
+
+---
+
+## CYCLE 12 — Block C « static-only deferred sweep » (static IDA, 263bd994) — 2026-06-22
+
+- date: 2026-06-22
+- analyst: AriusII (Tier-1 main session; docs-engineer consolidation pass)
+- binary: doida.exe @ 263bd994 (SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`)
+- tool: IDA Pro 9.3 via MCP (mcp__ida__*) — STATIC ONLY (no `?ext=dbg`, no captures; user decision).
+- analyzed: 1/6 CmsgCreateCharacter stat-field layout and data-flow (all five stat wire fields, their
+  action-id spinner pairings, and the PointsRemaining derivation); RealWorldRenderer dual build-path
+  runtime-flag mechanism; secondary HUD window inbound-feed audit (all ~20 windows checked for
+  recovered-but-disconnected channels).
+
+- binary-won findings (static IDA, 263bd994):
+  1. **1/6 stat fields are `u32`, not single bytes.** The committed `CmsgCreateCharacter` struct and
+     `cmsg_char_create.yaml` already record Stat0–Stat4 as `u32` at offsets `0x1C / 0x20 / 0x24 /
+     0x28 / 0x2C` (4 bytes each); PointsRemaining is `u32 @0x30`. An earlier implementation assumed
+     byte-wide stat fields; that assumption is corrected by the static recovery. Total payload = 52 bytes
+     (layout confirmed from the 263bd994 IDB across multiple read sites).
+  2. **Non-sequential spinner action-id mapping** confirmed from the Block A action-id roster:
+     Stat0 ↔ ids 25/30 (+/−); Stat1 ↔ 26/31; Stat2 ↔ 27/32; Stat3 ↔ 29/34; Stat4 ↔ 28/33.
+     The ids are non-sequential: the +/− pairs for Stat3 and Stat4 swap the tens digit (29/34 vs 28/33).
+  3. **No msg.xdb stat-name table exists** (negative finding). The five stat-row labels are `.gui`
+     widget-name driven at the layout-resource level; there is no opcode-level or `msg.xdb`-id-level
+     mapping from an integer index to a named stat (STR/CON/…). The search for such a table is closed.
+  4. **RealWorldRenderer build-path split is intentional, not dead code.** The `_composeRender` runtime
+     flag (env `MH_COMPOSE_RENDER` / `client_dir.cfg` key `compose_render`, default OFF) gates two
+     distinct paths in one partial class. The legacy path (`BuildLegacyAreaContent`) is the shipped
+     canonical; the composer path is dormant pending three preconditions (per-cell `.map` cache, ring-wide
+     building-texture coverage, windowed FX-slot validation). Neither branch is deletable now. Three
+     `TODO(C12-D13)` breadcrumbs document the preconditions at the fork sites.
+  5. **Secondary HUD windows: no wiring is possible without RE.** Full audit of all ~20 secondary windows
+     found that every one carries a `TODO(capture)` or `TODO(world-campaign)` on its inbound feed. There
+     is no recovered-but-disconnected layer-04 channel for any of them. `HudPartyWindow` (via
+     `RosterSnapshotEvent`) and `HudSkillHotbar` (via `HotbarInitializedEvent`) are already wired and
+     correct. All others need their feed opcode and handler recovered before wiring can proceed.
+
+- specs produced/updated:
+  - `Docs/RE/packets/cmsg_char_create.yaml` — no structural change required (layout already correct);
+    the stat-field `u32` types and the PointsRemaining derivation are already recorded. This entry
+    confirms the implementation is now consistent with the committed spec.
+  - Dirty source for the stat data-flow finding: `Docs/RE/_dirty/cycle12/charselect/create_payload_layout.md`
+    (gitignored).
+  - No other committed spec was changed this block (audit findings; no new binary facts to promote).
+
+- notes: This was a consolidation / actionable-deferred sweep, not a new RE pass. The primary outcome
+  is the point-buy data-flow wiring (Outcome 1): the signal, use-case, and 1/6 packet now carry the
+  real player-allocated stat values instead of a fixed seed. The build-path finding (Outcome 2) confirms
+  that no code should be deleted from `RealWorldRenderer` at this stage; the deferred register entry
+  C12-D13 is unchanged in scope. The HUD audit (Outcome 3) is a clean negative: no hidden wiring
+  opportunities exist in the current corpus; secondary HUD windows are a future-campaign RE task
+  (registered as C12-D19). All three outcomes closed GREEN; no spec values were invented or changed
+  without binary backing.
+
+- deferred (registered in ROADMAP CYCLE 12 deferred register):
+  C12-D13 (composer path merge — three preconditions unmet; gated on windowed visual oracle);
+  C12-D19 (secondary HUD window feed RE — ~20 windows, future world-campaign).
+
+- build result: `dotnet build MartialHeroes.slnx --no-incremental` (nuked bin/obj) = 0 errors / 0 warnings
+  (40 projects); check_dag.py OK (39 core, downward-only acyclic); Godot headless clean; clean-room
+  firewall CLEAN. CYCLE 12 BLOCK C GATE GREEN. CYCLE 12 FULLY CLOSED.

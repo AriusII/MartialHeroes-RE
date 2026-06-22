@@ -21,12 +21,15 @@ public sealed partial class LoginWindow
 
     private void BuildPinYesNoPanel()
     {
-        // spec: §2.1 "PIN yes/no panel | panel | 0,356,531,313 | 132,0 | init hidden".
+        // Connexion/Quitter panel: origin (356,531) size 313×132 — G2 debugger-confirmed 2026 / IDB 263bd994.
+        // Supersedes prior (0,356) 531×313 reading which confused the panel dimensions with its position.
+        // Children (local coords): strip abs(356,631)=panel+(0,100); Connexion abs(396,613)=panel+(40,82);
+        // Quitter abs(520,613)=panel+(164,82). spec: Docs/RE/specs/frontend_layout_tables.md §2.1.
         _pinYesNoPanel = new Control
         {
             Name = "PinYesNoPanel",
-            Position = new Vector2(0f, 356f),
-            Size = new Vector2(531f, 313f),
+            Position = new Vector2(356f, 531f), // spec: frontend_layout_tables.md §2.1 G2-confirmed origin (356,531)
+            Size = new Vector2(313f, 132f), // spec: frontend_layout_tables.md §2.1 G2-confirmed size 313×132
             MouseFilter = MouseFilterEnum.Pass,
             Visible = false // always hidden per spec §2.1.
         };
@@ -133,6 +136,11 @@ public sealed partial class LoginWindow
         panel.AddChild(promptLabel);
 
         // Yes button (action 101 → quit) — yes/no plate art (loginwindow.dds 520,492 / 635,492).
+        // Positioning: (40,136,110,38). The ExitPanel is distinct from Confirm-A/B (whose OK is at
+        // (120,136,113,40)). The ExitPanel Yes/No pair geometry (40/190) is a port choice — the spec
+        // (frontend_layout_tables.md §2.1) pins the YES/NO art from the "PIN yes/no panel" children
+        // at (40,82)/(164,82) but does not separately pin the ExitPanel Yes/No absolute positions.
+        // No capture to verify; marked provisional. spec: frontend_layout_tables.md §2.1 (partial).
         var yes = HudWidgetFactory.MakeButton3(_atlas,
             LoginLayout.AtlasLoginWindow,
             40, 136, 110, 38,
@@ -144,6 +152,8 @@ public sealed partial class LoginWindow
         if (yesCtrl is not null) panel.AddChild(yesCtrl);
 
         // No button (action 51 → close) — plate art (loginwindow.dds 750,492 / 865,492).
+        // Positioning: (190,136,110,38). Same ExitPanel provisional geometry note as Yes above.
+        // spec: frontend_layout_tables.md §2.1 (partial — ExitPanel Yes/No positions not pinned by spec).
         var no = HudWidgetFactory.MakeButton3(_atlas,
             LoginLayout.AtlasLoginWindow,
             190, 136, 110, 38,

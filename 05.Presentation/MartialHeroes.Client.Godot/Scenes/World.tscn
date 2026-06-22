@@ -22,8 +22,12 @@ ambient_light_source = 3
 ambient_light_color = Color(1, 1, 1, 1)
 ambient_light_sky_contribution = 0.5
 ambient_light_energy = 1.0
-tonemap_mode = 2
-tonemap_exposure = 1.1
+; Tonemap: Linear pass-through (mode 0), exposure identity — the original DX8 client has NO
+; tonemap/exposure pass; EnvironmentNode.Configurator forces these same values at runtime, so the
+; frame-0 .tscn values must match to avoid a brief Filmic/over-exposed first frame.
+; spec: Docs/RE/specs/rendering.md §6 — post chain is bright-copy → blur → composite → present; NO tonemap.
+tonemap_mode = 0
+tonemap_exposure = 1.0
 tonemap_white = 6.0
 glow_enabled = false
 ssao_enabled = false
@@ -41,16 +45,17 @@ script = ExtResource("4")
 
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
 transform = Transform3D(0.707107, -0.5, 0.5, 0, 0.707107, 0.707107, -0.707107, -0.5, 0.5, 0, 50, 0)
-light_energy = 1.8
+; light_energy 1.0: the original applies the directional color_A RAW at energy 1.0 (no multiplier);
+; EnvironmentNode.Configurator sets LightEnergy = 1.0f at runtime, so align frame-0 to match.
+; spec: Docs/RE/specs/environment.md §6.2a — directional light applied RAW, energy 1.0.
+light_energy = 1.0
 light_color = Color(1, 0.96, 0.88, 1)
 shadow_enabled = true
 directional_shadow_max_distance = 2000.0
 
-[node name="Camera3D" type="Camera3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0.707107, -0.707107, 0, 0.707107, 0.707107, 0, 25, 25)
-fov = 60.0
-near = 0.5
-far = 5000.0
-
+; No static Camera3D: RealWorldRenderer.SpawnCamera removes any pre-existing static camera and
+; installs the spec-faithful CameraController (Third-person orbit, FOV 65 / near 5 / far 15000) at
+; runtime. A static camera here would be dead (immediately QueueFree'd) and only contradict the spec.
+; spec: Docs/RE/specs/camera_movement.md §A.7 — in-world gameplay camera FOV 65, near 5, far 15000.
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_1")

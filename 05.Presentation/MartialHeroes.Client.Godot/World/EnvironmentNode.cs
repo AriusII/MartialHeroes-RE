@@ -237,7 +237,7 @@ public sealed partial class EnvironmentNode : Node3D
         // Build sky domes (star + cloud) when their flags allow.
         // spec: Docs/RE/specs/environment.md §3.1 steps 4–5 — gated by stardome_enable / clouddome_enable.
         // Domes are suppressed for indoor areas (spec §5.1) and when the parsed flags are absent.
-        BuildSkyDomes();
+        BuildSkyDomes(assets);
 
         // Seed at noon and apply once immediately so the first rendered frame is daylight.
         // The original always runs the day/night cycle — there is no dev freeze toggle.
@@ -261,6 +261,7 @@ public sealed partial class EnvironmentNode : Node3D
         _clockMs = keyframeIndex * KeyframeMs;
         _appliedKeyframe = -1;
         ApplyKeyframe(keyframeIndex, 0f);
+        GD.Print($"[Environment] SetTimeOfDay applied keyframe={keyframeIndex} freeze={freeze}");
     }
 
     // -------------------------------------------------------------------------

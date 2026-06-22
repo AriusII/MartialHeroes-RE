@@ -9,6 +9,16 @@ verification: independently re-derived 2026-06-18 directly from the doida.exe bi
   one GAP closed (the Error sub-state 1-vs-3 distinction — see §9, now CODE-CONFIRMED and re-attributed
   to the Login case, not Init). (Prior basis: build 263bd994 re-confirmation campaign, synthesised from
   committed specs.)
+  Re-confirmed CYCLE 12 Block A (2026-06-22, IDB SHA 263bd994): the 8 cases 0..7, value-8 terminal
+  sub-state, 0->1->2->3/4->4->5 ordering, Login-before-Load, OPENNING/SKIP gate, case-5 pre-arm-4
+  world-exit->Select, 3/1 forced Select re-entry at sub 8 — all re-confirmed, zero structural drift.
+  REFINED: the bridge OUT (state 4->5) is DUAL — (1) case-4 entry pre-arms state 5 as its post-loop
+  intent, AND (2) the SelectWindow teardown path contains an explicit state-5 write gated on the
+  "enter committed" latch; the live-player descriptor and stats copy into globals occurs POST-1/9-send.
+  CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): PRECISION CORRECTIONS — the "enter committed"
+  latch is a SelectWindow scene member field (NOT the NetClient keepalive-suppress field); the enter
+  copy destinations are descriptor+stats+level into live-player globals; the 4/1 (SmsgCharSpawnResponse)
+  packet reuses the copied descriptor as its spawn seed; 3/5 is the enter-ack (NOT the spawn trigger).
 ---
 
 # Scene / Game State Machine — Cross-Cutting Dossier
@@ -203,6 +213,56 @@ Transition triggers, condensed (authoritative table: `client_workflow.md §4.3`)
 > refresh / rename / delete subtypes and writes no scene state). Wire-byte *value* semantics for these
 > opcodes are capture/debugger-pending; the routing/targets above are static CODE-CONFIRMED.
 
+### 3.1 Refinement — the Select (4) → In-game (5) bridge is DUAL (CYCLE 12)
+
+The `Select (4) → In-game (5)` transition is not a simple single write. Two distinct mechanisms both
+participate, and **both are required** for the transition to complete:
+
+1. **Case-4 entry pre-arm (standard contract).** As with every case, case 4 writes its post-loop
+   intent state — `5` (In-game) — before constructing `SelectWindow` and entering the shared loop.
+   This is the ordinary pre-arm described in §4.
+
+2. **`SelectWindow` teardown explicit state-5 write (gated on the "enter committed" latch).** Inside
+   the `SelectWindow` teardown path, there is an **additional explicit write of state 5**, gated on
+   an "enter committed" latch. This latch records that an enter-game request (`1/9` or the equivalent)
+   was actually dispatched and accepted. If the latch is not set (e.g. the player quit or was
+   disconnected without committing an enter), the teardown does **not** write state 5, and the
+   pre-armed value (from mechanism 1) governs — which may be overwritten by a different exit path
+   (Quit, Error, etc.). The "enter committed" latch is what turns a normal teardown into a
+   confirmed enter-game transition.
+
+   > **CYCLE 12 precision (IDB SHA 263bd994) — latch ownership and identity.** The "enter
+   > committed" latch is a **`SelectWindow` scene member field** — it lives on the `SelectWindow`
+   > object itself, NOT on the `NetClient` keepalive-suppress field or any network-layer object.
+   > Do not conflate the enter-committed latch with any keepalive suppression or network-state
+   > flag. The latch is set when the enter-world send path completes successfully (after `1/9` is
+   > dispatched), and the `SelectWindow` teardown checks it before writing state 5.
+   > CODE-CONFIRMED, IDB SHA 263bd994.
+
+*([CONFIRMED CYCLE 12]* both the case-4 entry pre-arm and the SelectWindow teardown explicit state-5
+write gated on the enter-committed latch; latch is a SelectWindow member field.)*
+
+### 3.2 Refinement — live-player descriptor/stats/level globals copy is POST-`1/9`-send (CYCLE 12)
+
+When the player commits an enter-game request, the copy of the selected character's data into
+the global live-player fields occurs **after** the `1/9` enter-world request has been dispatched —
+not before. The sequence is: (1) validate and prepare the enter, (2) send `1/9`, (3) copy the
+selected character's **descriptor, stats, and level** into the live-player globals. The globals are
+not populated until the send is already in flight.
+
+> **CYCLE 12 precision (IDB SHA 263bd994) — copy destinations and the `4/1` spawn seed.**
+> The three fields copied are: **descriptor**, **stats**, and **level** — into the corresponding
+> live-player global slots. These copied values are **subsequently used as the spawn seed** when
+> the `4/1` (`SmsgCharSpawnResponse`) packet arrives: the world-enter handler reads the descriptor
+> and stats from these globals to populate the local player's in-world record. **`3/5`
+> (`SmsgEnterGameAck` or equivalent) is the server acknowledgment of the enter-world request,
+> NOT the spawn trigger** — the actual in-world character appearance is driven by `4/1`, which
+> reuses the descriptor/stats already copied into the globals. Do not model `3/5` as the spawn
+> initiator. CODE-CONFIRMED, IDB SHA 263bd994.
+
+*([CONFIRMED CYCLE 12]* POST-send ordering of descriptor+stats+level copy; `4/1` reuses the
+copied descriptor as the spawn seed; `3/5` is the enter-ack, not the spawn trigger.)*
+
 ---
 
 ## 4. Execution flow
@@ -308,12 +368,14 @@ redundant second FSM was **removed** — see the reconstruction note below):
 > `SceneStateMachine` / `EngineSceneState` / `SceneStateChangedEvent`. The port no longer carries a
 > redundant copy of the engine switch — `SceneStateMachine` is the **sole** scene FSM.
 
-**Verdict: MATCH — zero corrections.** Every load-bearing spine fact this dossier encodes is reflected
-in the C#/Godot model: 8 cases 0..7, `8` = exit sub-state (not a case), `0 → 1 → 2 → 3/4 → 4 → 5`,
-Login-before-Load, Opening gated by `SkipOpening`, the `5 → 4` (NOT `5 → 1`) world-exit edge, the
-forced Select re-entry on `3/1`, and the `3/100`-vs-`3/7` distinction. The port now keeps a **single
-faithful FSM** (the redundant `ClientStateMachine` having been removed). The campaign re-confirmed U0
-against build `263bd994` with no structural corrections.
+**Verdict: MATCH — zero structural corrections.** Every load-bearing spine fact this dossier encodes is
+reflected in the C#/Godot model: 8 cases 0..7, `8` = exit sub-state (not a case), `0 → 1 → 2 → 3/4 →
+4 → 5`, Login-before-Load, Opening gated by `SkipOpening`, the `5 → 4` (NOT `5 → 1`) world-exit edge,
+the forced Select re-entry on `3/1`, and the `3/100`-vs-`3/7` distinction. The port now keeps a
+**single faithful FSM** (the redundant `ClientStateMachine` having been removed). Re-confirmed CYCLE 12
+(2026-06-22) against build `263bd994` with no structural corrections; the CYCLE 12 refinements
+(dual Select→InGame bridge, §3.1; POST-`1/9` globals copy, §3.2) are fidelity items for the
+`SelectWindow` / enter-game path that implementors should verify in the port.
 
 ---
 
@@ -344,6 +406,11 @@ Use this to verify the machine 1:1 against the binary / port:
       to another case directly.
 - [ ] The port keeps a **single faithful FSM** (`SceneStateMachine`); the redundant `ClientStateMachine`
       has been removed and no second scene FSM remains.
+- [ ] The Select (4) → In-game (5) bridge is **DUAL**: case-4 entry pre-arms state 5, AND the
+      `SelectWindow` teardown contains an explicit state-5 write gated on the "enter committed" latch
+      (§3.1). Both mechanisms must be modelled; a teardown without the latch set must NOT write state 5.
+- [ ] The live-player descriptor/stats copy into globals is **POST-`1/9`-send** — the copy happens
+      after the enter-world request is dispatched, not before (§3.2).
 
 ---
 

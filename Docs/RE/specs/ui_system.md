@@ -3,7 +3,7 @@ verification: confirmed
 ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring RESOLVED CYCLE 8 (the canvas carries NO render-target/viewport field of its own — it is a thin 2D hit-region + drag-orbit-delta widget; the live preview renders via the owner window's embedded GView at window +0xE8); in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback — 2026-06-21 CYCLE 8 (IDB SHA 263bd994): event-dispatch / single-shared-ID3DXSprite render path / 15-slot HANGUL font table / 178-slot HUD roster (slot 35 MopGagePanel, 52 PetPanel, 110 Gamble, 135 UpgradeProcessPanel, 178 MainHandler) all re-confirmed CODE-CONFIRMED with zero conflicts; GUCanvas3D render-target gap CLOSED (no own RT field; owner GView renders the preview); leaf-widget offset tables deepened (font-slot is per-leaf-class: Button +0xE8 / Label +0xE4 / Textbox +0xDC; GUShortLabel absent as a distinct class)
+conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring RESOLVED CYCLE 8 (the canvas carries NO render-target/viewport field of its own — it is a thin 2D hit-region + drag-orbit-delta widget; the live preview renders via the owner window's embedded GView at window +0xE8); in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed); GUTextbox max_length/mode_style_word field-swap RESOLVED (2026-06-21, IDB SHA 263bd994): §1.5a corrected — +0xA4 = max_length, +0xD0 = mode_style_word (earlier table had these reversed); password-mask bit within mode_style_word is UNKNOWN pending re-pin — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback — 2026-06-21 CYCLE 8 (IDB SHA 263bd994): event-dispatch / single-shared-ID3DXSprite render path / 15-slot HANGUL font table / 178-slot HUD roster (slot 35 MopGagePanel, 52 PetPanel, 110 Gamble, 135 UpgradeProcessPanel, 178 MainHandler) all re-confirmed CODE-CONFIRMED with zero conflicts; GUCanvas3D render-target gap CLOSED (no own RT field; owner GView renders the preview); leaf-widget offset tables deepened (font-slot is per-leaf-class: Button +0xE8 / Label +0xE4 / Textbox +0xDC; GUShortLabel absent as a distinct class)
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -261,14 +261,23 @@ is a single-vs-multi-line variant of GULabel/GULabels):
 | Offset | Size | Field | Notes |
 |-------:|-----:|-------|-------|
 | +0x8B | 1 | `caret_active` / focused | caret-blink runs only when set. |
-| +0xA4 | 4 | `mode_style_word` (init 1) | **bit 0x80 = password-mask** (draws "*" per char); other bits = IME mode. |
+| +0xA4 | 4 | `max_length` (ctor init 1) | Edit cap. The login `BuildScene` writes 6 here for the ID textbox and 129 for the password textbox — confirming this is the max-length field. (Ctor default 1 is the initial single-char cap before the form overrides it.) See field-swap correction note below. |
 | +0xA8 | 1 | `ime_compose_state` | value 3 selects the IME-composition caret placement. |
 | +0xB4 | 16+ | `text` (CP949 std::string) | the editable buffer. |
 | +0xC8 | 4 | `text_length` | char count (drives the password-mask loop + scroll math). |
-| +0xD0 | 4 | `max_length` (init 10) | edit cap. |
+| +0xD0 | 4 | `mode_style_word` (ctor init 10) | IME mode / style bits. The login `BuildScene` writes 16 here for the ID textbox (word-input IME) and 12 for the password textbox. The password-mask bit (draws `'*'` per char) is a flag within this word; the specific bit is UNKNOWN pending a re-walk of the draw path with the corrected field mapping. See field-swap correction note below. |
 | +0xD4 | 4 | `caret_blink_ms` | blink half-period 500 ms. |
 | +0xD8 | 4 | `scroll_start` | first visible char index. |
 | +0xDC | 4 | `font_slot` | textbox font slot (distinct from button +0xE8 and label +0xE4). |
+
+> **Field-swap correction (CODE-CONFIRMED from the login `BuildScene` call sites — see `Docs/RE/_dirty/gu_widget_contract.md` §7).**
+> An earlier version of this table had `mode_style_word` at +0xA4 and `max_length` at +0xD0. The static
+> re-walk of the login `BuildScene` call sites shows that the form writes the IME-mode values (16 / 12)
+> to **+0xD0** and the max-length values (6 / 129) to **+0xA4** — the reverse of the earlier naming.
+> The constructor initialises +0xA4 = 1 and +0xD0 = 10. The table above reflects the corrected mapping.
+> The password-mask bit (which the draw path checks to activate `'*'` masking) is a bit in the +0xD0
+> `mode_style_word`; the exact bit mask was reported relative to the old (incorrect) field name and is
+> marked UNKNOWN pending re-pinning against the corrected +0xD0 location.
 
 **`GUList`** (kind bit 0x200) — a GUComponent-derived listbox carrying its **own** row vector (it is
 **not** a GUPanel):
@@ -798,8 +807,9 @@ at a time.
 
 ### 5.2 Draw — password mask, scroll, and caret blink
 
-- **Password mode** (flag bit at +0xA4-region): draws one `'*'` glyph per character, advancing
-  **6 pixels** per character (fixed, regardless of actual glyph metrics).
+- **Password mode** (a mode bit within the `mode_style_word` at +0xD0 — see §1.5a field-swap
+  correction; the specific bit is UNKNOWN pending re-pin): draws one `'*'` glyph per character,
+  advancing **6 pixels** per character (fixed, regardless of actual glyph metrics).
 - **Normal mode**: draws the visible substring from a scroll offset (+0xD8), starting at
   `fieldX + pad (+0xAC)`, `fieldY + pad (+0x30) + 2`.
 - **Caret**: when focused (+0x8B == 1), a blink toggle (flips sign every **500 ms**) gates the

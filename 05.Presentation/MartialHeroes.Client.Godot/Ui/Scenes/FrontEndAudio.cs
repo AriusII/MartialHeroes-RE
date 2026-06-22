@@ -35,10 +35,32 @@ public sealed partial class FrontEndAudio : Node
     private const string LoginCurtainPath = "data/sound/2d/861010105.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
     private const string CursorPath = "data/cursor/stand.dds"; // spec: frontend_scenes.md §11.
 
+    // Generic front-end UI click cue — the project-wide "a button did something" sound,
+    // fired by the char-create / char-select action handler at the head of every action branch
+    // (appearance steppers, name/create/delete/rename confirms, slot-select confirm, back/cancel).
+    // Played on the category-2 multi-voice 2D SFX path (NOT the single category-0 BGM slot), so
+    // a click never displaces the lobby BGM and consecutive clicks can overlap.
+    // spec: Docs/RE/specs/sound.md §15.1 (silent buttons; owner-window plays the cue) +
+    //       §15.2 / §15.6 (cue id 861010101, category 2, data/sound/2d/<id>.ogg). CODE-CONFIRMED.
+    private const string UiClickPath = "data/sound/2d/861010101.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
+
+    // Per-class character-creation preview BGM — replaces the scene BGM on the single category-0
+    // music slot, selected by the create-form class button (UI index, NON-identity crossover).
+    // UI 0 -> 910065000 (Monk), UI 1 -> 910062000 (Musa), UI 2 -> 910064000 (Salsu), UI 3 -> 910063000 (Dosa).
+    // spec: Docs/RE/specs/sound.md §15.6b + §4.1 voice-SFX table. CODE-CONFIRMED.
+    private static readonly string[] ClassPreviewBgmByUiIndex =
+    [
+        "data/sound/2d/910065000.ogg", // UI 0 -> Monk  (internal 4). spec §15.6b. CODE-CONFIRMED.
+        "data/sound/2d/910062000.ogg", // UI 1 -> Musa  (internal 1). spec §15.6b. CODE-CONFIRMED.
+        "data/sound/2d/910064000.ogg", // UI 2 -> Salsu (internal 3). spec §15.6b. CODE-CONFIRMED.
+        "data/sound/2d/910063000.ogg" // UI 3 -> Dosa  (internal 2). spec §15.6b. CODE-CONFIRMED.
+    ];
+
     // Players are created lazily on first play call.
     private AudioStreamPlayer? _bgmPlayer;
     private AudioStreamPlayer? _curtainPlayer;
     private AudioStreamPlayer? _introPlayer;
+    private AudioStreamPlayer? _uiClickPlayer;
 
     public override void _Ready()
     {
@@ -90,6 +112,48 @@ public sealed partial class FrontEndAudio : Node
     }
 
     /// <summary>
+    ///     Plays the generic front-end UI click cue (861010101) as a one-shot on the category-2
+    ///     2D SFX path. The owner window calls this at the head of each char-select / char-create
+    ///     action branch (the buttons themselves are silent — spec §15.1). Restarts the player so a
+    ///     rapid second click re-triggers the cue rather than being swallowed mid-play; it never
+    ///     touches the category-0 BGM slot, so the lobby music is undisturbed.
+    ///     spec: Docs/RE/specs/sound.md §15.1 / §15.2. CODE-CONFIRMED.
+    /// </summary>
+    public void PlayUiClick()
+    {
+        EnsureUiClickPlayer();
+        if (_uiClickPlayer is null || _uiClickPlayer.Stream is null) return;
+        if (_uiClickPlayer.Playing) _uiClickPlayer.Stop();
+        _uiClickPlayer.Play();
+    }
+
+    /// <summary>
+    ///     Plays the per-class character-creation preview BGM for the given create-form UI class
+    ///     index (0..3) on the single category-0 music slot — it REPLACES the lobby BGM rather than
+    ///     overlaying it (the same single-voice slot that carries 920100200). spec §15.6b.
+    /// </summary>
+    /// <param name="uiClassIndex">Create-form class button index 0..3 (UI order, not internal id).</param>
+    public void PlayClassPreviewBgm(int uiClassIndex)
+    {
+        if (uiClassIndex < 0 || uiClassIndex >= ClassPreviewBgmByUiIndex.Length) return;
+        EnsureBgmPlayer();
+        if (_bgmPlayer is null) return;
+
+        using var ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        // Replace-not-overlay: the single category-0 slot frees the prior track as the new one is
+        // acquired (free-on-id-mismatch). We model that by swapping the one BGM player's stream.
+        // spec: Docs/RE/specs/sound.md §15.6b (single category-0 slot, replace not overlay). CODE-CONFIRMED.
+        var s = LoadOgg(ra, ClassPreviewBgmByUiIndex[uiClassIndex], true);
+        if (s is null) return;
+        _bgmPlayer.Stop();
+        _bgmPlayer.Stream = s;
+        _bgmPlayer.Play();
+        GD.Print($"[FrontEndAudio] Class-preview BGM (UI {uiClassIndex}) started on category-0 slot " +
+                 "(replaced lobby BGM). spec: sound.md §15.6b.");
+    }
+
+    /// <summary>
     ///     Plays the login curtain SFX (861010105) as a one-shot. Login (state 1) only.
     ///     Fired at login sub-state 1→2.
     ///     spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
@@ -127,6 +191,17 @@ public sealed partial class FrontEndAudio : Node
         if (ra is null) return;
         var s = LoadOgg(ra, IntroBgmPath, true);
         if (s is not null) _introPlayer.Stream = s;
+    }
+
+    private void EnsureUiClickPlayer()
+    {
+        if (_uiClickPlayer is not null) return;
+        _uiClickPlayer = new AudioStreamPlayer { Name = "UiClickPlayer", VolumeDb = 0f };
+        AddChild(_uiClickPlayer);
+        using var ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        var s = LoadOgg(ra, UiClickPath, false); // one-shot, never looped
+        if (s is not null) _uiClickPlayer.Stream = s;
     }
 
     private void EnsureCurtainPlayer()

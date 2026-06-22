@@ -17,13 +17,20 @@ namespace MartialHeroes.Network.Protocol.Packets.Login.Packets;
 
 /// <summary>
 ///     1/9 — client enter-world request. A 40-byte zero-initialised buffer: the chosen character slot
-///     index, a 33-byte launcher-supplied session/identity token string (copied from the process
-///     command-line / argv0 global, NUL-bounded within — NOT the typed account text), a 2-byte
-///     alignment gap, and a derived 32-bit version token. The version token is NOT a hardcoded
-///     constant: it is <c>10 × (field 5 of the on-disk data/cursor/game.ver) + 9</c>. The enter path
-///     sends ONLY this 1/9 (the 1/7 manage was already sent at slot click); the server replies with
-///     S2C 3/5 <see cref="SmsgEnterGameAck" /> (scene → loading) and the world self-snapshot arrives
-///     separately on S2C 4/1.
+///     index, a 33-byte build-integrity self-checksum token, a 2-byte alignment gap, and a derived
+///     32-bit version token. The version token is NOT a hardcoded constant: it is
+///     <c>10 × (field 5 of the on-disk data/cursor/game.ver) + 9</c>. The enter path sends ONLY this
+///     1/9 (triggered from the 3/14 handler after the server replies to the mode-1 1/7); the server
+///     replies with S2C 3/5 <see cref="SmsgEnterGameAck" /> (scene → loading) and the world
+///     self-snapshot arrives separately on S2C 4/1.
+///     <para>
+///         <b>SessionToken (CORRECTED — CYCLE 12 Phase 2):</b> the 33-byte field at +0x01 is the
+///         <b>lowercase-hex MD5 digest of the client's OWN executable file</b> (argv[0] path run
+///         through an MD5-of-file hasher): 32 lowercase-hex ASCII chars + a NUL terminator.
+///         It is a build-integrity self-checksum, NOT a launcher/login session token and NOT the
+///         typed account text. Populate it via <see cref="SessionTokenChecksum.WriteSelfChecksum" />.
+///         spec: Docs/RE/packets/cmsg_char_enter.yaml field SessionToken @0x01.
+///     </para>
 ///     spec: Docs/RE/packets/cmsg_char_enter.yaml. CAPTURE-UNVERIFIED value semantics.
 /// </summary>
 [PacketOpcode(1, 9)]
@@ -40,12 +47,17 @@ public readonly struct CmsgEnterGameRequest
     public readonly byte SlotIndex;
 
     /// <summary>
-    ///     0x01 — 33-byte launcher-supplied session/identity token string (asciiz within). Copied from
-    ///     the process command-line / argv0 global — NOT the typed account text. Decode as this
-    ///     inline-array blob, trim at the first NUL — never a managed string on the wire. CODE-CONFIRMED
-    ///     source + 33-byte width.
-    ///     Offset is pinned at +0x01; token byte values remain capture-pending.
-    ///     spec: cmsg_char_enter.yaml.
+    ///     0x01 — 33-byte build-integrity self-checksum: the
+    ///     <b>
+    ///         lowercase-hex MD5 digest of the
+    ///         client's own executable file
+    ///     </b>
+    ///     (argv[0] path), formatted as 32 lowercase-hex ASCII
+    ///     chars + a NUL terminator. It is NOT a launcher/login session token and NOT the typed
+    ///     account text. CODE-CONFIRMED source, format, and 33-byte width (CYCLE 12 Phase 2).
+    ///     Offset is pinned at +0x01; exact digest bytes remain capture-pending (runtime-dependent).
+    ///     Populate via <see cref="SessionTokenChecksum.WriteSelfChecksum" />.
+    ///     spec: Docs/RE/packets/cmsg_char_enter.yaml field SessionToken @0x01.
     /// </summary>
     public readonly SessionTokenBuffer SessionToken;
 
@@ -65,8 +77,12 @@ public readonly struct CmsgEnterGameRequest
     /// </summary>
     public readonly uint VersionToken;
 
-    /// <summary>0x01 — 33-byte launcher session/identity token string (asciiz within). spec: packets/cmsg_char_enter.yaml.</summary>
-    [InlineArray(33)]
+    /// <summary>
+    ///     0x01 — 33-byte self-checksum field: 32 lowercase-hex MD5 chars + NUL terminator.
+    ///     Populate via <see cref="SessionTokenChecksum" />.
+    ///     spec: Docs/RE/packets/cmsg_char_enter.yaml field SessionToken @0x01, "bytes[33]".
+    /// </summary>
+    [InlineArray(33)] // spec: Docs/RE/packets/cmsg_char_enter.yaml — "bytes[33]"
     public struct SessionTokenBuffer
     {
         private byte _element0;

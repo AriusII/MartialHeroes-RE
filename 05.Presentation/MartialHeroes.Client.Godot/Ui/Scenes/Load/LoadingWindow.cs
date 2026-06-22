@@ -45,12 +45,27 @@ public sealed partial class LoadingWindow : Control
     // spec: Docs/RE/scenes/load.md §5A.4; frontend_layout_tables.md §5 "fill_px = clamp(223·pct/100,0,223)".
     private const float FillMaxPx = 223f; // spec §5 / load.md §5A.4 "max 223 ref-units".
 
-    // UV sub-rect of the bg DDS for the gauge fill band (pixels, before normalization).
-    // U: 443..772 (329 src px wide, fixed). V-top: 576 (fixed). V-bottom: 576+fill_px (animated).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §5 "U 443/1024..772/1024, V 576/768..744/768".
-    // The DDS is 1024×1024 (inferred V=0.75=768/1024 per load.md §5A.3); pixel coords are into that DDS.
+    // UV sub-rect of the bg DDS for the gauge fill band (pixels in the 1024×1024 DDS).
+    // U: 443..772 (329 src px wide, fixed). V-top: 768 px (fixed). V-bottom animates downward.
+    //
+    // The spec (frontend_layout_tables.md §5) expresses V as fractions of the 768-unit DESIGN height:
+    //   "V 576/768..744/768"
+    // These fractions must be multiplied by the actual DDS height (1024 px, VFS-confirmed) to get
+    // the DDS pixel row:
+    //   V-top  = (576 / 768) × 1024 = 0.75 × 1024 = 768 DDS px  (NOT the raw value 576)
+    //   V-full = (744 / 768) × 1024 = 0.96875 × 1024 = 992 DDS px
+    //   V-extent at full fill = 992 − 768 = 224 DDS px (≈ 223 design-unit fill_px × 1024/768)
+    // The spec also confirms: "texcoord delta = fill_px · (1/1024)" — divisor is the DDS height 1024.
+    // GAP-8: the prior value 576f treated the fraction NUMERATOR as a raw DDS pixel row, which is wrong.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §5 "V 576/768..744/768" (fractions of 768 design height)
+    // spec: Docs/RE/scenes/load.md §5A.3 "1024×1024 DDS (inferred V=0.75=768/1024)"
+    // spec: Docs/RE/scenes/load.md §5A.4 "texcoord delta = fill_px · (1/1024)"
     private const float GaugeSrcULeft = 443f; // spec §5.
-    private const float GaugeSrcVTop = 576f; // spec §5 "V 576/768" → pixel row 576 in the 1024×1024 DDS.
+    private const float GaugeSrcVTop = 768f; // spec §5 "V 576/768" → (576/768)×1024 = 768 DDS px. GAP-8.
+
+    // DDS height for texcoord scaling. VFS-confirmed: all three loading*.dds are 1024×1024 DXT3.
+    // spec: Docs/RE/scenes/load.md §5A.3; Docs/RE/specs/frontend_layout_tables.md §5 "divisor 1024".
+    private const float DdsHeight = 1024f; // VFS-confirmed 1024×1024; spec: load.md §5A.3.
 
     // BGM. spec: frontend_layout_tables.md §5/§7 "920100100 looped category 0".
     private const uint BgmSoundId = 920100100u;
@@ -69,7 +84,13 @@ public sealed partial class LoadingWindow : Control
     // ── View state ───────────────────────────────────────────────────────────
 
     private TextureRect? _bgRect;
+
     private Texture2D? _chosenTex;
+
+    // Cached AtlasTexture reused every frame — mutate Region in-place to avoid per-frame heap allocation.
+    // GAP-7: original used direct D3D vertex writes (zero-alloc); we approximate with a single allocation
+    // at Ready and per-frame mutation of the cached object (no new Resource per frame).
+    private AtlasTexture? _fillAtlas;
     private float _fillPx;
     private TextureRect? _fillRect;
     private bool _gracePending;
@@ -190,6 +211,11 @@ public sealed partial class LoadingWindow : Control
         };
         AddChild(_fillRect);
 
+        // Allocate the AtlasTexture ONCE; subsequent frames mutate Region in-place (zero additional alloc).
+        // GAP-7: avoids per-frame heap allocation on the hot _Process path. spec: load.md §5A.4.
+        _fillAtlas = new AtlasTexture { FilterClip = false };
+        _fillRect.Texture = _fillAtlas;
+
         ApplyFillTexture();
     }
 
@@ -223,20 +249,23 @@ public sealed partial class LoadingWindow : Control
 
     private void ApplyFillTexture()
     {
-        if (_fillRect is null || _chosenTex is null) return;
+        if (_fillAtlas is null || _chosenTex is null) return;
 
         // V-axis fill: sample a fixed U band [443..772] and animate the V-bottom downward.
-        // U extents are fixed at 329 source pixels: U-left=443, U-width=329.
-        // V-top is fixed at pixel row 576. V-height = fill_px (grows 0..223).
-        // The DDS is 1024×1024 (see load.md §5A.3); texcoord delta = fill_px / 1024.
-        // spec: Docs/RE/specs/frontend_layout_tables.md §5 "U 443/1024..772/1024, V 576/768..744/768";
-        //        Docs/RE/scenes/load.md §5A.4 "V texcoord of the two moving vertices shifts by fill_px·(1/1024)".
-        _fillRect.Texture = new AtlasTexture
-        {
-            Atlas = _chosenTex,
-            Region = new Rect2(GaugeSrcULeft, GaugeSrcVTop, TrackCanvasWidth, _fillPx),
-            FilterClip = false
-        };
+        // U extents are fixed at 329 DDS pixels: U-left=443, U-width=329.
+        // V-top is fixed at DDS pixel row 768 (= 576/768 × 1024).
+        // V-height in DDS pixels = _fillPx (design units 0..223) × (DdsHeight / RefHeight) = × (1024/768).
+        // This converts design-unit fill extent to the DDS pixel extent — the same scaling that maps
+        // the design V fractions (denominator 768) to DDS pixel rows (denominator 1024).
+        // spec: Docs/RE/specs/frontend_layout_tables.md §5 "V 576/768..744/768" (fractions of 768 design ht)
+        // spec: Docs/RE/scenes/load.md §5A.4 "texcoord delta = fill_px · (1/1024)"; §5A.3 DDS is 1024 tall.
+        // GAP-8: _fillPx must be scaled by (1024/768) before being passed as Region height, because
+        //   _fillPx is in 768-basis design units and AtlasTexture.Region uses DDS pixel coords.
+        //   Prior code passed _fillPx directly, sampling 224 design units as 224 DDS pixels — wrong band.
+        // GAP-7: mutate the cached AtlasTexture in-place — no heap allocation per frame.
+        var fillDssPx = _fillPx * (DdsHeight / RefHeight); // convert design-unit fill to DDS pixels
+        _fillAtlas.Atlas = _chosenTex;
+        _fillAtlas.Region = new Rect2(GaugeSrcULeft, GaugeSrcVTop, TrackCanvasWidth, fillDssPx);
     }
 
     // ── BGM ──────────────────────────────────────────────────────────────────

@@ -78,6 +78,29 @@ notes: |
     - Ordering is table A (3088) @ 24, then table B (4044) @ 3112, then hotbar (1920) @ 7156.
       The earlier inverted note (table A ~0xFCC / table B ~0xC10) is REFUTED.
 
+  Interior record strides (CYCLE 12 / Phase 3, control-flow-confirmed + counter-confirmed on 263bd994):
+    The three interior blocks are NOT opaque -- their internal record layouts are now recovered from
+    the Form-1 consumers (the two stale-slot sweeps and the verbatim hotbar copy):
+    - WorldEntryTableA (3088 bytes @ 24): a flat array of 16-byte records (capacity 193; the sweep
+      walks 120 records). Per record: lead group bytes +0..3; an actor-id u32 @+4; a keep-guard u32
+      @+8 (the sweep evicts a slot only when this is 0; the same dword doubles as the displayed
+      member number); an aux value u32 @+12. Role: the roster-panel slot source (a label grid).
+    - WorldEntryTableB (4044 bytes @ 3112): a HETEROGENEOUS block, not one flat array --
+      240 x 16-byte scene tracked-entity / actor-slot records (first 3840 bytes; same
+      {lead / id@+4 / keep-guard@+8 / aux@+12} record shape and the same evict predicate as table A)
+      + a 20-byte unswept gap + a 21 x 8-byte category-entry tail list (each entry = a u32 category +
+      an i32 value) + a 16-byte world-target selection record. 3840 + 20 + 168 + 16 = 4044 exactly.
+      Role: the scene's tracked-entity / actor-slot table (party / spawn-group queries also key off
+      it). See specs/world_systems.md and specs/world_entry.md for the table roles.
+    - HotbarSlots (1920 bytes @ 7156): 240 slots of 8 bytes, copied verbatim into the hotbar global.
+      Per slot: an entry key u32 @+0 (0 = empty slot); a count u16 @+4 (quantity / charge); 2 trailing
+      bytes unused. There is NO inline type byte -- skill-vs-item is decided by looking the entry key
+      up in the skill/action catalogue and reading the catalogue record's category field (value 5 =
+      skill; other small values = non-skill families, whose human meaning is capture-pending). See
+      specs/world_entry.md (hotbar init).
+    The eviction predicate for both 16-byte tables: a slot is evicted only when its id is non-zero AND
+    the referenced actor resolves AND that actor's stale flag is set AND the keep-guard is 0.
+
   live-pending (6-D) — value-only items not settled by static analysis:
     - The concrete AreaId value the replica sends, and confirmation that its 3-digit directory
       form resolves to a real <id>.lst on the VFS.

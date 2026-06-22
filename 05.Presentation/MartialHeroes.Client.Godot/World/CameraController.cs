@@ -7,7 +7,8 @@
 //
 // ARCHITECTURE
 // ─────────────
-// This is a pure VIEW node: it reads PlayerController.TargetForCamera and translates raw input
+// This is a pure VIEW node: it reads PlayerGodotPosition (pushed each frame by RealWorldRenderer
+// from the live local-player node) and translates raw input
 // into camera transform mutations only. It calls no use-case, owns no domain state, and never
 // decides whether a position is legal. It may freely mutate its own Camera3D / Node3D each frame.
 //
@@ -17,13 +18,17 @@
 // Docs/RE/specs/camera_movement.md §A — every constant is cited inline.
 // Where spec says "(INFERRED/configurable)", the field is [Export]-able so it can be tuned.
 //
-// FIXED-RADIUS ORBIT MODEL
-// ────────────────────────
+// FIXED-RADIUS ORBIT MODEL — ROTATED EYE-OFFSET
+// ──────────────────────────────────────────────
 // The camera is a FIXED-RADIUS orbit (not a spring-arm).
-// Eye position = focus + eye-offset rotated by the current (yaw, elevation).
-// The eye-offset vector magnitude is constant ≈ 901.39 world units.
-// "Zoom" keys change the elevation angle, not the orbit radius.
+// Eye position = focus + Rotate(eyeOffsetSeed, yaw, elevation)
+// where eyeOffsetSeed = (−750, 0, −500) in Godot space (= legacy (−750,0,+500) with Z negated).
+// Magnitude ≈ 901.39 world units = fixed orbit radius; NEVER scaled.
+// Yaw and elevation rotate this seed vector directly — no spherical-polar approximation.
+// "Zoom" / elevation keys change the elevation angle, not the orbit radius.
 // spec: Docs/RE/specs/camera_movement.md §A.4 "Fixed-radius orbit model — important correction".
+// spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Eye-offset vector (−750.0, 0.0, +500.0)". CODE-CONFIRMED.
+// spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
 //
 // COORDINATE CONVENTION
 // ──────────────────────
@@ -46,10 +51,15 @@ namespace MartialHeroes.Client.Godot.World;
 /// <summary>
 ///     Faithful Martial Heroes camera controller.
 ///     <para>
-///         Three original modes (selectable by the user):
-///         <b>Third</b> (default) — fixed-radius orbit follow, full input, terrain collision.<br />
-///         <b>First</b> — first-person view; eye at player head.<br />
-///         <b>Static</b> — fixed-angle follow; tracks position without orbiting.<br />
+///         Three original modes (selectable by the user via F1/F2/F3):
+///         <b>Third</b> (default, F1) — fixed-radius orbit follow, full input, terrain collision.<br />
+///         <b>First</b> (F2) — short-boom view from player head; Focus Z −55, yaw seed π.<br />
+///         <b>Static</b> (F3) — fixed-angle follow; tracks position, yaw from player facing.<br />
+///     </para>
+///     <para>
+///         Eye placement uses the legacy rotated eye-offset model for all three modes:
+///         eye = focus + Rotate((−750,0,−500)_Godot, yaw, elevation).
+///         spec: Docs/RE/specs/camera_movement.md §A.5.1 — Eye-offset seed (−750,0,+500) legacy. CODE-CONFIRMED.
 ///     </para>
 ///     <para>
 ///         One developer-only mode (non-original):
@@ -246,10 +256,49 @@ public sealed partial class CameraController : Camera3D
     private const float TerrainHitYawKill = -0.01f;
 
     /// <summary>
-    ///     Focus look-at Z offset for Third-person mode.
-    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 — "Focus Z −40". CODE-CONFIRMED.
+    ///     Focus look-at Z offset for Third-person mode (legacy space).
+    ///     The focus is the player position plus this Z offset in legacy space.
+    ///     Legacy Z → Godot Z conversion: Godot Z = −legacy Z, so the applied Godot shift = +40.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Focus / look-at Z −40.0". CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 — Third Focus Z −40. CODE-CONFIRMED.
     /// </summary>
     private const float FocusZThird = -40f;
+
+    /// <summary>
+    ///     Focus look-at Z offset for First-person mode (legacy space).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 — First Focus Z −55. CODE-CONFIRMED.
+    /// </summary>
+    private const float FocusZFirst = -55f;
+
+    /// <summary>
+    ///     Focus look-at Z offset for Static mode (legacy space).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 — Static Focus Z −55. CODE-CONFIRMED.
+    /// </summary>
+    private const float FocusZStatic = -55f;
+
+    // =========================================================================
+    // § EYE-OFFSET SEED — CODE-CONFIRMED per spec §A.5.1
+    // =========================================================================
+
+    /// <summary>
+    ///     Eye-offset seed vector X component in legacy world space.
+    ///     In Godot space, X is unchanged (world coordinates negate only Z).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Eye-offset vector (−750.0, 0.0, +500.0)". CODE-CONFIRMED.
+    /// </summary>
+    private const float EyeOffsetSeedLegacyX = -750f;
+
+    /// <summary>
+    ///     Eye-offset seed vector Y component in legacy world space (= 0; no vertical bias in the seed).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Eye-offset vector (−750.0, 0.0, +500.0)". CODE-CONFIRMED.
+    /// </summary>
+    private const float EyeOffsetSeedLegacyY = 0f;
+
+    /// <summary>
+    ///     Eye-offset seed vector Z component in Godot space (legacy +500 negated to Godot −500).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Eye-offset vector (−750.0, 0.0, +500.0)". CODE-CONFIRMED.
+    ///     spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
+    /// </summary>
+    private const float EyeOffsetSeedGodotZ = -500f; // legacy +500 → Godot -500
 
     // =========================================================================
     // § FREE-FLY constants (DEVELOPER-ONLY, non-original)
@@ -384,10 +433,11 @@ public sealed partial class CameraController : Camera3D
         // spec: Docs/RE/specs/camera_movement.md §A.4 — elev clamp [−90°,−12°], yaw clamp Third [−90°,+81°≈+1.4137rad]. CODE-CONFIRMED.
         GD.Print(
             "[Camera] mode=Third | FOV=65deg near=5 far=15000 | " +
+            $"eyeSeed=({EyeOffsetSeedLegacyX},{EyeOffsetSeedLegacyY},{EyeOffsetSeedGodotZ}) Godot | " +
             $"radius={OrbitRadius:F1}u | elev_default={Mathf.RadToDeg(DefaultElevationRad):F1}deg | " +
             $"elev_clamp=[{Mathf.RadToDeg(ElevationMinRad):F0}deg,{Mathf.RadToDeg(ElevationMaxRad):F0}deg] | " +
             $"yaw_clamp_third=[{Mathf.RadToDeg(YawMin):F1}deg,{Mathf.RadToDeg(YawMaxThird):F1}deg ({YawMaxThird:F4}rad)] | " +
-            "RMB=orbit wheel=elevation ESC=reset-to-Third Tab=devFreeFly");
+            "RMB=orbit wheel=elevation ESC=reset-to-Third F1=Third F2=First F3=Static Tab=devFreeFly");
     }
 
     public override void _ExitTree()

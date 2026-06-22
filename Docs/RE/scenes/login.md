@@ -1,17 +1,25 @@
 ---
-verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994, full 2D-GUI
-  cartography pass, static IDA). The LoginWindow construct routine (the single child-build virtual,
-  ~73 widgets), the credential-textbox mask mechanism, curtain extent, PIN scrambled-keypad grid +
-  scramble + tags, the server-list plate/pager/status painter, and the message-DB + 15-slot font
-  table were ALL re-read at the element / member-offset / atlas-src-rect level and CONFIRMED; this
-  pass adds the full COMPONENT TREE (member-offset map), the numbered CREATION ORDER with geometry +
-  action-ids, and the per-component 2D-ASSET LINKAGE table (§12), cross-referenced to the shared GU*
-  framework (structs/gucomponent.md, structs/guwindow.md, specs/ui_system.md). (Prior basis:
-  2026-06-19 element-level construction pass; 2026-06-18 scene reconstruction campaign — action/event
-  dispatch, game.ver gate, server-list re-fetch throttle, plate-pick guard, pager arming, all
-  CONFIRMED.)
+verification: re-pinned 2026-06-22 against doida.exe binary IDB SHA 263bd994 (reconciled dossier
+  promotion pass). Substate ladder re-keyed to binary-confirmed numbering: 1=intro-start+SFX,
+  2=curtain-slide, 3=curtain-snap, 4=enter-edge, 5=show-form, 6=form-active (prior §12.4 described
+  3 as "curtain finalize" and 5 as "reset-to-idle" — corrected). Worker thread ctor seeds TWO real
+  procs + one NULL slot. Field +0x554 confirmed as selected-server-index marker. 22 notice labels
+  confirmed as children of the notice panel (+0x2BC / field 175), distinct from server-select grid
+  (+0x328 / field 202). PIN keypad build-order actions 0..99 clarified; digit mapping is handler-time.
+  2026-06-22 field-cap correction (binary-won, IDB SHA 263bd994): ID textbox per-keystroke length cap
+  = 16 (GUTextbox +0xD0); charset mask = 6 (GUTextbox +0xA4, alphanumeric filter, NOT a length).
+  Password textbox per-keystroke length cap = 12 (GUTextbox +0xD0). Prior "maxlen 6" / "maxlen 129"
+  readings in §5.1 / §12.1 are corrected throughout.
+  G2 DEBUGGER-CONFIRMED PROMOTE 2026-06-22 (IDB SHA 263bd994, live doida.exe ?ext=dbg session):
+  full-frame model at credential-freeze state promoted — (A) form-deco plate real dst corrected to
+  (265,548) 494×113 src(0,469), supersedes prior (494,469); (B) Connexion/Quitter panel real origin
+  confirmed (356,531) 313×132, supersedes prior (0,356) 531×313 secondPwSetupPanel coordinates;
+  curtain two-half model (TOP login_slice1.dds dstY=−222 / BOTTOM login_slice1.dds dstY=+548)
+  confirmed ground truth — the top curtain at −222 is the real animated half, not a port phantom.
+  (Prior basis: 2026-06-21 full 2D-GUI cartography pass; 2026-06-19 element-level construction pass;
+  2026-06-18 scene reconstruction campaign — all previously confirmed facts remain valid.)
 scene: Login (engine state 1)
-evidence: [static-ida, debugger-confirmed-handshake]
+evidence: [static-ida, debugger-confirmed-handshake, debugger-confirmed-g2]
 capture_verified: false
 sources:
   - Docs/RE/specs/login_flow.md
@@ -266,7 +274,7 @@ solid panel / text-only label. Default label/textbox font slot = 0.
 | ROOT | background image (A2), full-width top panel | background **from state 2** onward |
 | Curtains | two always-present host panels (animated Y) | not a hideable widget — top Y = −offset, bottom Y = offset+326 |
 | Notice column | 22 stacked labels (msg **4001..4022**, X=50, Y=100+18·i, 383×50), scroll up/down/thumb (106/107/108), title plate | always hidden by the flow (no EULA, no accept gate) |
-| Credential group | ID textbox (action 109, maxlen 6, IME 16), PW textbox (action 110, maxlen 129, IME 12, masked), Save-ID checkbox (104), **OK/Login** (103) | **state 6** only (built hidden; shown entering 6; hidden entering 29/31/33) |
+| Credential group | ID textbox (action 109, per-keystroke cap **16** chars, charset mask 6 / alphanumeric, IME 16), PW textbox (action 110, per-keystroke cap **12** chars, charset mask 0x81 / allow-all, IME 12, masked), Save-ID checkbox (104), **OK/Login** (103) | **state 6** only (built hidden; shown entering 6; hidden entering 29/31/33) |
 | Login-form host strip | the bottom credential strip (rides the curtain to canvas Y=548) | present from build; Y animates |
 | Server-list submit plate | the rest-state plate | states 1..~34 (hidden on 34→35) |
 | Server-list content | 2 plates/page + 10 pagers + scroll arrows (§5.3) | **state 35..37** |
@@ -274,13 +282,16 @@ solid panel / text-only label. Default label/textbox font slot = 0.
 | PIN keypad | the scrambled-keypad child panel (§5.2) | **states 31/32** |
 | Modals | quit-confirm `ExitPanel`, `ErrorPanel`, Confirm-A/B (msg 4023/4024, OK 113/114) | hidden; raised only by action ids / message popups |
 
-> **Credential textbox construction (element-level pass, 2026-06-19).** Both boxes are 102 × 13 fields
-> on A1 sampling source origin `(615, 404)`, built in the construct routine (not the later secondary
-> init), font slot 0. **The PW box is masked because its length/flags field has the mask (high) bit
-> set — NOT because of its IME mode.** The mask renders the literal glyph `*` once per character at
-> 6 px advance; the ID box's mask bit is clear so it shows the typed text. The IME-mode values (ID 16,
-> PW 12) only select IME conversion behavior. The construct routine focuses the ID box at show time.
-> See `frontend_layout_tables.md §2.7`.
+> **Credential textbox construction (element-level pass, 2026-06-19; field-cap correction 2026-06-22,
+> binary-won, IDB SHA 263bd994).** Both boxes are 102 × 13 fields on A1 sampling source origin
+> `(615, 404)`, built in the construct routine (not the later secondary init), font slot 0.
+> **Per-keystroke length caps (GUTextbox field +0xD0):** ID = **16** chars; PW = **12** chars.
+> **Charset mask (GUTextbox field +0xA4):** ID = **6** (alphanumeric-only filter); PW = **129 / 0x81**
+> (allow-all — any printable character accepted). **The PW box is masked because its length/flags field
+> has the mask (high) bit set — NOT because of its IME mode.** The mask renders the literal glyph `*`
+> once per character at 6 px advance; the ID box's mask bit is clear so it shows the typed text. The
+> IME-mode values (ID 16, PW 12) only select IME conversion behavior. The construct routine focuses the
+> ID box at show time. See `frontend_layout_tables.md §2.7`.
 
 **OnEvent action map (legacy ids = ASCII codes; a fresh impl may use any enum):** `101` app quit ·
 `102` open quit-confirm ExitPanel (does **NOT** open server-list) · `103` OK/login (game.ver gate →
@@ -326,8 +337,8 @@ graph TD
   TOP["full-width top panel (y=0)"]
   BG["background image (A2, y=110)"]
   FORM["login-form host strip<br/>(rides curtain to Y=548)"]
-  ID["ID textbox (109, maxlen6)"]
-  PW["PW textbox (110, masked, maxlen129)"]
+  ID["ID textbox (109, cap16)"]
+  PW["PW textbox (110, masked, cap12)"]
   SAVE["Save-ID checkbox (104)"]
   OK["OK / Login (103)"]
   SRV["server-list content panel"]
@@ -531,9 +542,11 @@ all **CONFIRMED to match** the implementation. Each constant in the C# should ca
 ## 9. Validation checklist
 
 - [ ] `flowSubState` is **one** field; the `+0x554` page counter is never read by the login machine.
-- [ ] Intro curtain: two always-present panels, top Y = −offset / bottom Y = offset+326, +5/tick to
-      offset > 222 (end top Y = −222 / bottom Y = 548); ID box snaps to (494, 469) at offset > 200;
-      SFX **861010105** on the 1→2 edge.
+- [ ] Intro curtain: two always-present panels (both `login_slice1.dds` — confirmed ground truth),
+      top Y = −offset / bottom Y = offset+326, +5/tick to offset > 222 (end top Y = −222 / bottom
+      Y = 548); **form-deco plate snaps to (265,548)** 494×113 src(0,469) at offset > 200 (G2
+      debugger-confirmed 2026 / IDB 263bd994 — supersedes prior "(494,469)"); SFX **861010105** on
+      the 1→2 edge.
 - [ ] OK/Enter runs the **game.ver index-5 (byte 20) single-u32 equality** gate (mismatch → msg 2204
       + quit); then ID len ≥ 4 (msg 4025) and PW len ≥ 1 (msg 4026).
 - [ ] PW box masked via the **length/flags mask bit** (`*`, 6 px/char), NOT via IME mode; ID box clear.
@@ -687,9 +700,9 @@ low region, the `+0x238` FSM cell sits inside the `CommonLoginWindow` base just 
 | `bgFrameImage` | +0x270 | `GUComponent` (image) | window | Login background frame plate |
 | `bgTopPanel` | +0x274 | `GUPanel` | window | Full-width top backdrop / banner panel |
 | `serverListPanel` | +0x278 | `GUPanel` | window | Server-list root container |
-| `secondPwSetupPanel` | +0x284 | `GUPanel` | window | "register a 2nd-password?" yes/no prompt bar |
-| `accountTextbox` | +0x2A8 | `GUTextbox` | `loginFormPanel` | ID / account edit box (IME 16, maxlen 6) |
-| `passwordTextbox` | +0x2AC | `GUTextbox` | `loginFormPanel` | Password edit box (IME 12, maxlen 129, **masked**) |
+| `secondPwSetupPanel` (Connexion/Quitter panel) | +0x284 | `GUPanel` | window | Connexion/Quitter control group — G2 confirmed abs origin (356,531) 313×132; children: background strip (289,437) A1, Connexion btn act 111 abs (396,613) A2 src(520,492), Quitter btn act 112 abs (520,613) A2 src(750,492). Supersedes prior "(0,356) 531×313" reading. |
+| `accountTextbox` | +0x2A8 | `GUTextbox` | `loginFormPanel` | ID / account edit box (IME 16; per-keystroke cap **16** chars at +0xD0; charset mask 6 at +0xA4) |
+| `passwordTextbox` | +0x2AC | `GUTextbox` | `loginFormPanel` | Password edit box (IME 12; per-keystroke cap **12** chars at +0xD0; charset mask 0x81 at +0xA4; **masked**) |
 | `saveIdCheckbox` | +0x2B0 | `GUCheckBox` | `loginFormPanel` | Save-ID toggle (off/on frames) |
 | `loginOkBtn` | +0x2B4 | `GUButton` (3-state) | `loginFormPanel` | OK / Login submit |
 | `eulaPanel` | +0x2BC | `GUPanel` | window | Notice / agreement scroll panel (22 body lines) |
@@ -710,7 +723,7 @@ Sub-tree breakdown (children grouped by parent panel):
 - **`loginFormPanel`** → ID-label glyph image · PW-label glyph image · save-ID label glyph image · `accountTextbox` (act 109) · `passwordTextbox` (act 110) · `saveIdCheckbox` (act 104) · `loginOkBtn` (act 103).
 - **`eulaPanel`** (notice/agreement) → `eulaLine[22]` (msg 4001..4022) · `eulaScrollDownBtn` (act 106) · `eulaScrollUpBtn` (act 107) · `eulaThumbBtn` (act 108) · scroll-track image. *(Per §3 / GAP 2: 106 is a deliberate no-op and 107/108 fall through unhandled at the window level; any scroll is internal to the panel or inert.)*
 - **`serverGridPanel`** → `serverCell[2]` (each cell = name `GULabel` + flag `GUComponent` image + select `GUButton` act **400+i** + population `GULabel` + ping/status `GULabel`) · `serverStatusIcon[3]` (status quads) · grid divider image · `serverNameStrip[10]` (act 115..124) · grid title image.
-- **`secondPwSetupPanel`** → title image · body image · Yes `GUButton` (act **111**) · No `GUButton` (act **112**).
+- **`secondPwSetupPanel`** (Connexion/Quitter panel, G2-confirmed origin (356,531) 313×132) → decorative image (local 67,48) · background strip A1 src(289,437) (local 0,100 → abs y=631) · Connexion `GUButton` A2 src(520,492) act **111** (local 40,82 → abs (396,613)) · Quitter `GUButton` A2 src(750,492) act **112** (local 164,82 → abs (520,613)).
 - **`confirmPanelA` / `confirmPanelB`** → centered message `GULabel` (msg 4023 / 4024) + OK `GUButton` (act 113 / 114).
 - **`secondPwModal` (`LoginSecondPassword`)** → PIN-display `GULabel` (masked, rendered as N `*`) · scrambled digit keypad (up to 100 `GUButton` 3-state in a 5-col × 2-row visible grid; per cell a 0..9 stack, digit→glyph randomized per show) · OK `GUButton` (tag **11/12** submit) · Clear `GUButton` (tag **12**) · Cancel `GUButton` (tag **13**) · an embedded reused `ExitPanel`. *(Note on tags: §5.2 pins Reset=11 / OK=12 / Cancel=13 with 0..9 append; the dynamic-facet view of the same routing reads OK=11/Clear=12/Cancel=13 — the digit-append + three-control shape is CONFIRMED, the exact 11/12 assignment between Reset/OK is the one element-level ambiguity, flagged §10.)* Modal runtime flags read by the owner FSM: visible at modal +0x8C, submitted at modal +0x2B4.
 - **`exitPanel` (`ExitPanel`)** / **`errorPanel` (`ErrorPanel`)** → self-built Yes/No / OK button sets (composite sub-build), captions loaded internally.
@@ -763,21 +776,21 @@ A3, A4 into the texture list.
 | 27 | Btn3 [A3] | 120,136,113×40 | 302,860 | act **114**; panel hidden; added |
 | 28 | Panel [A1] | 0, 326·H/768, 1024×442 | 0,582 | Main login-form panel |
 | 29 | Btn3 [A1] | 456,166,112×39 | N 154,398 / H 378,398 | act **102** server-list open / enter |
-| 30 | Image [A1] | 265,0,494×113 | 0,469 | Form decorative plate; hidden; form made visible; quit/help img+btn(105) attached; form added to window |
+| 30 | Image [A1] | 265,0,494×113 | 0,469 | Form decorative plate (form-deco rod); hidden until offset>200; snaps to canvas **(265,548)** when curtain crosses threshold (G2 debugger-confirmed 2026 / IDB 263bd994 — supersedes prior "(494,469)"); quit/help img+btn(105) attached; form added to window |
 | 31 | Panel (no tex) | 0,0,1024×100 | — | Login input-row container; hidden |
 | 32 | Image [A1] | 340,30,38×13 | 0,398 | ID-label glyph |
 | 33 | Image [A1] | 507,30,49×13 | 38,398 | PW-label glyph |
 | 34 | Image [A1] | 619,86,67×13 | 87,398 | Save-ID label glyph |
-| 35 | **Textbox** [A1] | 390,32,102×13 | 615,404 | **ID/account** — IME 16, maxlen 6, act **109** |
-| 36 | **Textbox** [A1] | 568,32,102×13 | 615,404 | **Password** — IME 12, maxlen 129, masked, act **110** |
+| 35 | **Textbox** [A1] | 390,32,102×13 | 615,404 | **ID/account** — IME 16, per-keystroke cap **16** (+0xD0), charset mask 6 (+0xA4), act **109** |
+| 36 | **Textbox** [A1] | 568,32,102×13 | 615,404 | **Password** — IME 12, per-keystroke cap **12** (+0xD0), charset mask 0x81 (+0xA4), masked, act **110** |
 | 37 | **Checkbox** [A1] | 694,86,13×13 | off 717,398 / on 730,398 | **Save-ID** act **104**; prefill ID + checked-state from saved-credentials singleton (skipped if stored value empty or `(null)`); a textbox is then given modal focus |
 | 38 | **Btn3** [A1] | 456,64,112×39 | N 266,398 / H 490,398 | **OK / Login** act **103**; all input-row children (glyphs, 109/110, 104, 103) attached to the container → main form panel |
 | 39 | SecondPassword keypad | 347,173,329×422 | — | PIN modal object; keypad built; hidden; added to window |
-| 40 | Panel (no tex) | 356,531,313×132 | — | Bottom button-bar / 2nd-pw setup container |
-| 41 | Image [A1] | 67,48,178×13 | 0,437 | Decorative |
-| 42 | Image [A1] | 0,100,313×32 | 289,437 | Decorative |
-| 43 | Btn3 [A2] | 40,82,110×38 | 520,492 | act **111** (Yes / setup) |
-| 44 | Btn3 [A2] | 164,82,110×38 | 750,492 | act **112** (No); bar hidden; added |
+| 40 | Panel (no tex) | 356,531,313×132 | — | Connexion/Quitter control group (G2 debugger-confirmed 2026 / IDB 263bd994 — origin (356,531) 313×132; supersedes any prior wrong coordinates) |
+| 41 | Image [A1] | 67,48,178×13 | 0,437 | Decorative strip (local to panel; abs 356+67=423, 531+48=579) |
+| 42 | Image [A1] | 0,100,313×32 | 289,437 | Background strip (local y=100 → abs y=631; G2 confirmed abs (356,631) 313×32) |
+| 43 | Btn3 [A2] | 40,82,110×38 | 520,492 | act **111** Connexion (abs (396,613) 110×38; G2 confirmed) |
+| 44 | Btn3 [A2] | 164,82,110×38 | 750,492 | act **112** Quitter (abs (520,613) 110×38; G2 confirmed); panel hidden; added |
 | 45 | `ExitPanel` [A3] | 342,289,340×190 | 318,647 | Buttons built; hidden; added |
 | 46 | `ErrorPanel` [A3] | 342,289,340×190 | 318,647 | Reset; hidden; added |
 | — | (finalize) | — | — | Install render callback; call relayout/refresh virtual |
@@ -840,11 +853,12 @@ The static tree is built once; four virtuals + one render callback drive it at r
 in §3, action map §5.1 / §12.2). Summary of the dynamic / modal surfaces:
 
 - **Per-frame tick (sub-FSM advance).** Animates the intro curtain, walks `flowSubState` 1..41,
-  runs the connect hand-off (curtain → idle → credential validate → PIN → roster fetch → plate-pick
-  → channel fetch → join → connecting). Sub-states confirmed including the previously-missing
-  `3` (curtain finalize), `5` (reset-to-idle), `6` (error/rest); `29` = credential validate alone
-  (ID len ≥ 4 else toast 4025; PW present else 4026); `30` = abort to GameState 6/sub 8 (dead on the
-  normal path).
+  runs the connect hand-off (curtain → form → credential validate → PIN → roster fetch → plate-pick
+  → channel fetch → join → connecting). Sub-state ladder (binary-confirmed, re-keyed 2026-06-22):
+  `1` = intro start + SFX 861010105 → 2; `2` = curtain slide (+5/tick); `3` = curtain snap (TOP
+  to −222, BOTTOM to 548); `4` = Enter-edge; `5` = show-form → 6; `6` = form idle / error rest;
+  `29` = credential validate (ID len ≥ 4 else toast 4025; PW present else 4026); `30` = abort to
+  GameState 6/sub 8 (dead on the normal path — nothing writes substate 30).
 - **OnEvent (click/key/plate/timer dispatcher).** Decodes action ids 101..114 + 115..124 +
   400..(400+count), gated by message type **1=KEY** (keycode 9/TAB cycles the two modal panels,
   keycode 10/ENTER = OK), **6=click**, **7=list/plate**, **13=TIMER** (id 10001). 103 runs the
@@ -923,10 +937,12 @@ in §3, action map §5.1 / §12.2). Summary of the dynamic / modal surfaces:
   | 6 | BatangChe | 18/12/24 | 700 | | 14 | DotumChe | 16/8/16 | 400 |
   | 7 | BatangChe | 12/6/12 | 700 | | | | | |
 
-- **Textbox text.** The ID/PW textboxes hold user-entered text (not captions): ID maxlen 6 / IME 16;
-  password maxlen 129 / IME 12, masked via the style-flag bit (renders `*` per char, not keyed to IME
-  mode); the ID box prefills from the saved-account name unless it is the `(null)` sentinel. (Mask
-  mechanism and the textbox layout are pinned in §5.1 and `structs/gucomponent.md`.)
+- **Textbox text.** The ID/PW textboxes hold user-entered text (not captions): ID per-keystroke cap
+  **16** chars (GUTextbox +0xD0), charset mask **6** (+0xA4, alphanumeric filter), IME 16; password
+  per-keystroke cap **12** chars (GUTextbox +0xD0), charset mask **0x81** (+0xA4, allow-all), IME 12,
+  masked via the style-flag bit (renders `*` per char, not keyed to IME mode); the ID box prefills from
+  the saved-account name unless it is the `(null)` sentinel. (Binary-won 2026-06-22, IDB SHA 263bd994.
+  Mask mechanism and the textbox layout are pinned in §5.1 and `structs/gucomponent.md`.)
 
 ### 12.6 Cross-references (shared GUI framework)
 

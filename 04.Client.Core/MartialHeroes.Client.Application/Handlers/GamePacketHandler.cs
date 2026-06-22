@@ -1,4 +1,3 @@
-using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -48,6 +47,19 @@ public sealed partial class GamePacketHandler : IPacketHandler
 {
     private readonly AccountCharacterState? _accountCharacters;
     private readonly CharacterSelectionStore? _characterSelection;
+
+    /// <summary>
+    ///     The enter-world emitter seam the 3/14 handler fires on a positive spawn-response flag to emit the
+    ///     1/9 CmsgEnterGameRequest. The handler itself holds no <c>_outbound</c>/<c>_sessionId</c>, so it
+    ///     cannot build/send 1/9 directly; the 1/9 build+send (and the in-flight latch arm) lives in
+    ///     <see cref="UseCases.ApplicationUseCases.EmitEnterWorldRequest" />, which the composition root wires
+    ///     here. The byte argument is the slot to enter. Engine-free, optional (null in tests / when unwired):
+    ///     when null, the positive 3/14 path records the opcode via <c>_unhandled</c> rather than emitting
+    ///     (the wired delegate is the real ladder). spec: Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted FROM
+    ///     the 3/14 handler); Docs/RE/packets/cmsg_char_enter.yaml (ENTER SEQUENCE).
+    /// </summary>
+    private readonly Func<byte, CancellationToken, ValueTask>? _enterWorldEmitter;
+
     private readonly IClientEventBus _eventBus;
     private readonly IHudEventHub? _hudEventHub;
     private readonly InFlightLatch? _inFlightLatch;
@@ -69,7 +81,8 @@ public sealed partial class GamePacketHandler : IPacketHandler
         SceneStateMachine? sceneStateMachine = null,
         IHudEventHub? hudEventHub = null,
         InFlightLatch? inFlightLatch = null,
-        WorldEntryState? worldEntry = null)
+        WorldEntryState? worldEntry = null,
+        Func<byte, CancellationToken, ValueTask>? enterWorldEmitter = null)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
@@ -82,6 +95,8 @@ public sealed partial class GamePacketHandler : IPacketHandler
         _hudEventHub = hudEventHub; // optional: combat-text / buff HUD stream sink (5/52, 4/102)
         _inFlightLatch = inFlightLatch; // optional: the single in-flight latch (cleared by 3/x results + 4/1)
         _worldEntry = worldEntry; // optional: durable 4/1 world-entry holder the InGame scene recovers from
+        _enterWorldEmitter =
+            enterWorldEmitter; // optional: the 3/14→1/9 emitter seam (wired to ApplicationUseCases.EmitEnterWorldRequest)
     }
 
     /// <summary>
@@ -278,29 +293,6 @@ public sealed partial class GamePacketHandler : IPacketHandler
     private static string DecodeFixedText(ReadOnlySpan<byte> buffer)
     {
         return Cp949Text.Decode(buffer);
-    }
-
-    /// <summary>
-    ///     Decodes the variable chat-body region: a leading length-prefixed <c>[u32 len][text]</c> block when
-    ///     the prefix is plausible, else the printable run from the start of the body. spec:
-    ///     Docs/RE/specs/handlers.md §17.12 (body length encoding unconfirmed).
-    /// </summary>
-    private static string DecodeChatBody(ReadOnlySpan<byte> body)
-    {
-        if (body.IsEmpty) return string.Empty;
-
-        // Try the length-prefixed form (matching the C2S chat senders): [u32 len incl NUL][text].
-        // spec: handlers.md §17.12 / 2-7 / 3-21 framing.
-        if (body.Length >= sizeof(uint))
-        {
-            var len = BinaryPrimitives.ReadUInt32LittleEndian(body[..sizeof(uint)]);
-            if (len >= 1 && len <= (uint)(body.Length - sizeof(uint)))
-                // Cp949Text.Decode trims at the first NUL and decodes via the registered code page 949.
-                return Cp949Text.Decode(body.Slice(sizeof(uint), (int)len));
-        }
-
-        // Fall back to the printable run from the body start.
-        return DecodeFixedText(body);
     }
 
     private static EntitySort ToEntitySort(byte sort)

@@ -548,6 +548,28 @@ block 3 (texture index) has no error string. No drift from this layout.
 - Sample observed height ranges: flat sea tiles hold a constant value near +26 world units;
   hilly tiles span approximately −160 to +380 world units.
 
+### 5.4a Ground-height sampler method (CYCLE 12 CORRECTION, binary-won)
+
+> **CYCLE 12 CORRECTION (IDB SHA 263bd994, 2026-06-22) — the terrain height sampler uses
+> PER-TRIANGLE PLANE interpolation, NOT 4-corner bilinear lerp.** Any prior doc or comment
+> (including the `CLAUDE.md` summary line "Ground height from `.ted` bilinear interpolation")
+> that says "bilinear interpolation" for ground height is incorrect and is superseded here.
+>
+> **What the binary does:** the sampler determines the quad (4 vertices from the 65×65 grid)
+> that the query XZ falls in, then **picks the triangle** within that quad (using the quad's
+> diagonal split — driven by the block-4 direction/UV flags, §5.7), and **evaluates the plane
+> equation of that triangle** to obtain Y. This is per-triangle plane interpolation
+> (equivalently, barycentric interpolation over the triangle), NOT a 4-corner bilinear blend.
+>
+> **Why it matters:** the two methods give different Y values near the quad diagonal. The
+> bilinear shortcut must NOT be used for collision height, camera height clamp, or entity
+> grounding — those paths must use the triangle-plane method to match the original.
+>
+> **Implementation:** (1) convert world XZ to a fractional quad coordinate; (2) determine
+> which triangle (two sub-triangles per quad, split on the diagonal direction from block-4);
+> (3) solve the plane of that triangle's three vertices for Y.
+> Confidence: CODE-CONFIRMED (IDB SHA 263bd994). Cite: `// spec: Docs/RE/formats/terrain.md §5.4a`.
+
 ### 5.5 Block 2 — Vertex normals
 
 - 4 225 packed RGB triples, one per vertex, same row-major order as block 1.

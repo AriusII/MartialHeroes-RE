@@ -9,35 +9,22 @@
 //     reduction + the {3,4,6,2,11} worn-item gid reduction + the g{gid}.skn load path).
 //
 // ───────────────────────────────────────────────────────────────────────────────────────────────
-// CYCLE 6b D6 — §3.3.7 RESOLVER MATH IMPLEMENTED; OVERLAY RENDERING BLOCKED ON HOST-API PLUMBING.
+// Pure, engine-free, headless resolver. Every formula/constant below is verified against the cited
+// spec text. For the PLAYER (PC) path the appearance key is the PURE formula
+//   appearance_key = 5*(class + 4*variant) - 24   (no categoryBase term; §3.5.2 / §3.3.7)
+// and the per-part overlay uses the 64-bit catalogue key + per-slot gid reduction (implemented below).
 //
-// §3.3.7 RE-CORRECTS the old blocker. The prior header here claimed the gate was "categoryBase[]
-// pending". §3.3.7 says verbatim that for the PLAYER (PC) path the appearance key is the PURE formula
-//   appearance_key = 5*(class + 4*variant) - 24
-// with NO categoryBase term — so "categoryBase[] pending" is the WRONG blocker for the player path.
-// The real recovered edge is the per-part 64-bit catalogue key + the per-slot gid reduction, all of
-// which is implemented below (ResolvePartGid / ResolvePartSknPath / ComposeCatalogueKey64).
+// The per-class BODY resolves through the §3.5.3 appearance catalogue (keyed by (slot=3,
+// model_class_id)) via the §3.7.5 starter variant {1,2,1,1} -> IdB {1,26,11,16}; this file owns the
+// pure key inputs (StarterAppearanceVariant / StarterBodyModelClassId) + the gid -> .skn path
+// (BodySknPathForMeshGid). The caller (layer 05) does the IO-bearing catalogue lookup with the actual
+// per-slot descriptor bytes; this layer never reads a descriptor or invents an equipment id.
 //
-// WHAT IS STILL BLOCKED (and why) — NOT a missing RE fact, a missing HOST-API edge (a FOLLOW-UP wave):
-//   The §3.3.7 overlays + non-starter-variant body are driven by the server 880-byte spawn descriptor:
-//     * class       = descriptor +0x34       (one appearance byte)
-//     * variant     = descriptor +0x2C       (the other appearance byte)
-//     * slot-14 'd'  = descriptor +0x22
-//     * equipment table = descriptor +0x58 (20 entries x 16 bytes, leading dword = worn-item id)
-//   None of those raw bytes are plumbed into CharSelectScene3D: the host (CharSelectWindow, a DIFFERENT
-//   lane) populates CharSelectScene3D.SlotDescriptors with only (bool IsOccupied, uint SkinClassId).
-//   The resolver math below is therefore READY but cannot be FED the equipment/appearance bytes without
-//   widening the SlotDescriptors tuple — a host-API change that belongs to the other lane / a follow-up
-//   wave. Inventing equipment ids or appearance bytes would manufacture a missing fact (forbidden), so
-//   the select lineup KEEPS the §3.7.5 starter-mesh fallback (class -> base .skn at variant 0) until the
-//   raw descriptor is plumbed in. SknPathForClass / SknCandidatesForClass preserve that working path.
-//
-// WEAPON (slot 14 hand-weapon) — RIGID ATTACH FLAGGED, NOT WIRED. §3.3.7: the hand-weapon worn-item id
-//   resolves to a STATIC item-skin attached to the HAND BONE (NOT a g{gid}.skn deform skin), dual-weapon
-//   aware. The shared SkinnedCharacterBuilder (§3.3.6 factory) has NO rigid-attach entry point (it
-//   composes ONE deform mesh + skeleton + idle clip). The rigid weapon attach is recovered-but-not-wired;
-//   see the FLAG on ResolvePartSknPath. Implementing it would require a new builder entry point and the
-//   hand-bone id — out of this lane's file set; do NOT fabricate it.
+// FLAG (spec-justified, recovered-but-NOT-wired) — RIGID WEAPON ATTACH. §3.3.7: the slot-14 HAND-WEAPON
+// worn-item id resolves to a STATIC item-skin attached to the HAND BONE (NOT a g{gid}.skn deform skin),
+// dual-weapon aware. The shared SkinnedCharacterBuilder (§3.3.6 factory) has NO rigid-attach entry
+// point, so the rigid weapon attach is recovered-but-not-wired (a follow-up wave). Do NOT fabricate it;
+// it needs a new builder entry point + the hand-bone id. See the FLAG on DeformSkinPathForGid.
 // ───────────────────────────────────────────────────────────────────────────────────────────────
 //
 // spec: Docs/RE/specs/frontend_scenes.md §3.3.7 — per-part appearance resolution math (the new edge):
@@ -48,11 +35,17 @@
 //         skin load: data/char/skin/g{gid}.skn (deform); weapon = SEPARATE rigid hand-bone attach.
 // spec: Docs/RE/specs/frontend_scenes.md §3.3.1 — per-slot placement; scales 70 (lineup) / 81 (create).
 // spec: Docs/RE/specs/frontend_scenes.md §3.3.6 — shared actor factory (list slots + create + player).
-// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 — the four confirmed-present starter meshes (IdA=1):
-//         class 1 (tag 3,  Bichimi / Dosa)      -> g202110001
-//         class 2 (tag 4,  Monk)                -> g203110001
-//         class 3 (tag 6,  Archer)              -> g209110001
-//         class 4 (tag 11, Sorceress/Summoner)  -> g206110001
+// spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (CORRECTED 2026-06-22, binary wins) — the per-class
+//         BODY is resolved through the §3.5.3 appearance catalogue keyed by (slot=3, model_class_id),
+//         NOT a hard-coded class->skn table. The four starter classes carry variants {1,2,1,1} for
+//         classes {1,2,3,4} -> model_class_id (IdB) {1,26,11,16} -> four DISTINCT body mesh gids:
+//         class 1 Musa  (variant 1, IdB 1)  -> g202110001  (skin.txt col0=0,col2=3,col1=1)
+//         class 2 Salsu (variant 2, IdB 26) -> g202220001  (skin.txt col0=0,col2=3,col1=26)
+//         class 3 Dosa  (variant 1, IdB 11) -> g202130001  (skin.txt col0=0,col2=3,col1=11)
+//         class 4 Monk  (variant 1, IdB 16) -> g202140001  (skin.txt col0=0,col2=3,col1=16)
+//         The PRIOR table (g203110001 / g209110001 / g206110001) read the col2={4,6,11} class-1-family
+//         OUTFIT rows (all col1==1 / Musa) — the wrong-key bug that made every slot a class-1 body
+//         (slot-2 Dosa = a flat Musa slab). spec: frontend_scenes.md §3.7.5 "Port bug diagnosis".
 // spec: Docs/RE/specs/skinning.md §3.5.2 — model_class_id = 5*(class + 4*variant) - 24, in {1,11,16,26};
 //       variant == 3 -> 0 == invisible-actor sentinel.
 // spec: Docs/RE/specs/login_flow.md §3.2.1 — IdB skeleton edge {1->g1, 26->g2, 11->g3, 16->g4}.
@@ -64,14 +57,10 @@ namespace MartialHeroes.Client.Presentation.Screens;
 ///     Resolves character appearance for the 3D front-end screens. Exposes the §3.3.7 per-part resolution
 ///     math (the appearance key, the per-slot gid reduction, the 64-bit catalogue key, the
 ///     <c>g{gid}.skn</c> load path), the model_class_id -&gt; skeleton edge, and the §3.7.5 starter-mesh
-///     fallback shared by select and create so a class shows the identical body in both.
-///     <para>
-///         CYCLE 6b D6: the §3.3.7 resolver math is implemented and ready, but the equipment-overlay +
-///         non-starter-variant lineup is BLOCKED on plumbing the raw 880-byte spawn descriptor (equip table
-///         +0x58, appearance bytes +0x2C/+0x34, slot-14 +0x22) into <c>CharSelectScene3D.SlotDescriptors</c>
-///         — a host-API change owned by another lane. Until then the lineup keeps the §3.7.5 starter fallback.
-///         See the file header for the precise host-API gap and the rigid-weapon FLAG.
-///     </para>
+///     body resolution shared by select and create so a class shows the identical body in both. All members
+///     are pure, engine-free, headless functions of their explicit inputs — the IO-bearing catalogue lookup
+///     and the actual per-slot descriptor bytes belong to the caller (layer 05). The rigid slot-14 weapon
+///     attach is a spec-justified FLAG (recovered-but-not-wired) — see the file header.
 ///     spec: Docs/RE/specs/frontend_scenes.md §3.3.7 / §3.3.1 / §3.3.6 / §3.7.5; skinning.md §3.5.2 / §8(e);
 ///     login_flow.md §3.2.1.
 /// </summary>
@@ -99,8 +88,13 @@ public static class ClassAppearanceResolver
     /// </summary>
     public static int ModelClassId(int internalClass, int appearanceVariant)
     {
+        // variant == 3 is the reserved INVISIBLE-ACTOR sentinel: it resolves to 0 (no mesh), NOT the raw
+        // formula output. This is an explicit spec rule, not a natural formula result. spec:
+        // Docs/RE/specs/skinning.md §3.5.2 (variant == 3 -> 0, invisible sentinel).
+        if (appearanceVariant == 3) return 0;
+
         return 5 * (internalClass + 4 * appearanceVariant) - 24;
-        // spec: frontend_scenes.md §3.3.7 / skinning.md §3.5.2
+        // spec: frontend_scenes.md §3.3.7 / skinning.md §3.5.2 (model_class_id = 5*(class + 4*variant) - 24)
     }
 
     /// <summary>
@@ -205,69 +199,57 @@ public static class ClassAppearanceResolver
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────
-    // §3.7.5 starter-mesh fallback (the spec-grounded path the select lineup uses until the raw
-    // descriptor is plumbed in so the §3.3.7 overlay build above can run). KEEP working.
+    // §3.7.5 per-class BODY resolution (CORRECTED 2026-06-22). The body is NOT a hard-coded class->skn
+    // table; it is the §3.5.3 appearance-catalogue body row keyed by (slot=3, model_class_id), found
+    // via SkinTxtCatalog.GetBodyMeshGid (the catalogue layer owns the table). This file owns only the
+    // pure inputs to that key: the per-class starter variant (so the model_class_id / IdB is correct)
+    // and the gid -> .skn path formatting. The caller does the IO-bearing catalogue lookup.
     // ─────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    ///     Base-skin <c>.skn</c> path for an (internalClass, appearanceVariant) appearance.
-    ///     Until the raw 880-byte spawn descriptor is plumbed into the select scene, the per-part §3.3.7
-    ///     overlay build cannot be FED its equipment/appearance bytes, so any appearance resolves to its
-    ///     class's §3.7.5 starter body (variant 0, IdA=1). This is the spec-grounded fallback — NOT an
-    ///     invented catalogue row. The <see cref="ModelClassId" /> selector and the full §3.3.7 math above
-    ///     are ready for the follow-up wave that widens <c>SlotDescriptors</c>.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter set) / §3.3.7 (overlay build — host-API
-    ///     plumbing pending; see file header).
+    ///     The §3.7.5 starter appearance variant for internal class 1..4, as stamped by the client
+    ///     (<c>SelectWindow_WriteSlotRecord</c>): variant <c>{1, 2, 1, 1}</c> for classes
+    ///     <c>{1, 2, 3, 4}</c>. With <see cref="ModelClassId" /> this yields the four DISTINCT starter
+    ///     IdBs <c>{1, 26, 11, 16}</c> — the corrected per-class body key. Returns <c>0</c> for an
+    ///     unknown class (caller treats as no body). NOTE: the host currently leaves the descriptor
+    ///     <c>variant</c> (+0x2C) at 0 (host-API gap), so this spec-documented starter variant is used
+    ///     for the select lineup until the raw descriptor is plumbed in — it is NOT an invented value.
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter variants {1,2,1,1}).
     /// </summary>
-    public static string? SknPathForAppearance(int internalClass, int appearanceVariant)
+    public static int StarterAppearanceVariant(int internalClass)
     {
-        // appearance_key is computed (and surfaced for the rig via ModelClassId), but the per-part
-        // catalogue select needs the equipment table + appearance bytes, none of which is plumbed into
-        // the select scene yet. So resolve only the spec-grounded starter body for the class.
-        // spec: frontend_scenes.md §3.3.7 (do NOT invent the equipment ids / appearance bytes).
-        _ = appearanceVariant; // variant is reserved for the §3.3.7 overlay build (host-API pending)
-        return StarterSknForClass(internalClass);
-    }
-
-    /// <summary>
-    ///     Returns the base-skin <c>.skn</c> path for class id 1..4, or <c>null</c> for any other id
-    ///     (the caller logs + skips — never substitutes a wrong-class mesh). Routes through the
-    ///     appearance path at variant 0 (the starter appearance). Each mesh carries its OWN id_b which
-    ///     then drives its rig (<c>g{id_b}.bnd</c>, see <see cref="SkeletonBndForModelClassId" />) and
-    ///     idle clip (actormotion col16 = motion_ids_a[1] = record +0x44; col15 / a[0] / +0x40 is DEAD at runtime — CYCLE 7
-    ///     reversal).
-    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5.
-    /// </summary>
-    public static string? SknPathForClass(int classId)
-    {
-        return SknPathForAppearance(classId, 0);
-    }
-
-    /// <summary>
-    ///     Candidate list form (single confirmed mesh) for the select-screen path that probes
-    ///     <c>assets.Contains</c> over a candidate set. Returns an empty array for an unknown id.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5.
-    /// </summary>
-    public static string[] SknCandidatesForClass(int classId)
-    {
-        var path = SknPathForClass(classId);
-        return path is null ? [] : [path];
-    }
-
-    /// <summary>
-    ///     The §3.7.5 confirmed-present starter mesh for internal class 1..4 (default appearance IdA=1),
-    ///     or <c>null</c> for an unknown id. Internal class 1..4 corresponds to select tags {3,4,6,11}.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5.
-    /// </summary>
-    private static string? StarterSknForClass(int classId)
-    {
-        return classId switch
+        return internalClass switch
         {
-            1 => "data/char/skin/g202110001.skn", // §3.7.5 (tag 3)  Bichimi / Dosa starter mesh
-            2 => "data/char/skin/g203110001.skn", // §3.7.5 (tag 4)  Monk starter mesh
-            3 => "data/char/skin/g209110001.skn", // §3.7.5 (tag 6)  Archer starter mesh
-            4 => "data/char/skin/g206110001.skn", // §3.7.5 (tag 11) Sorceress / Summoner starter mesh
-            _ => null // unknown class -> caller logs + skips (no fallback)
+            1 => 1, // Musa  -> model_class_id 1
+            2 => 2, // Salsu -> model_class_id 26
+            3 => 1, // Dosa  -> model_class_id 11
+            4 => 1, // Monk  -> model_class_id 16
+            _ => 0 // unknown class -> caller logs + skips
         };
+    }
+
+    /// <summary>
+    ///     The body <c>model_class_id</c> (IdB) for internal class 1..4 at its §3.7.5 starter variant —
+    ///     the catalogue body key. Composes <see cref="StarterAppearanceVariant" /> with
+    ///     <see cref="ModelClassId" />: <c>{1→1, 2→26, 3→11, 4→16}</c>. Returns <c>0</c> for an unknown
+    ///     class. This is the value handed to <c>SkinTxtCatalog.GetBodyMeshGid</c> (slot 3 implied).
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / skinning.md §3.5.2 / §3.5.3.
+    /// </summary>
+    public static int StarterBodyModelClassId(int internalClass)
+    {
+        var variant = StarterAppearanceVariant(internalClass);
+        return variant == 0 ? 0 : ModelClassId(internalClass, variant);
+    }
+
+    /// <summary>
+    ///     The body <c>.skn</c> VFS path for a resolved body mesh gid: <c>data/char/skin/g{gid}.skn</c>.
+    ///     The gid comes from <c>SkinTxtCatalog.GetBodyMeshGid(model_class_id)</c> (§3.5.3). Distinct per
+    ///     class: <c>{1→g202110001, 26→g202220001, 11→g202130001, 16→g202140001}</c>.
+    ///     spec: Docs/RE/specs/frontend_scenes.md §3.7.5 / skinning.md §3.5.3.
+    /// </summary>
+    public static string BodySknPathForMeshGid(int meshGid)
+    {
+        return $"data/char/skin/g{meshGid}.skn";
+        // spec: frontend_scenes.md §3.7.5 (body .skn load path)
     }
 }

@@ -501,7 +501,9 @@ public sealed partial class TerrainNode : Node3D
 
     /// <summary>
     ///     Returns the terrain Y (world-space height) at the given legacy world position
-    ///     by bilinear-sampling the resident sector's .ted heightmap.
+    ///     by per-triangle plane interpolation of the resident sector's .ted heightmap.
+    ///     spec: Docs/RE/formats/terrain.md §5.4a — PER-TRIANGLE PLANE interpolation; CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/terrain-streaming.md §6.5 — CYCLE 12 correction (bilinear is wrong).
     ///     <para>
     ///         Coordinate convention: <paramref name="worldX" /> and <paramref name="worldZ" /> are
     ///         <b>legacy</b> world coordinates (not Godot Godot-space). The caller passes the
@@ -543,24 +545,30 @@ public sealed partial class TerrainNode : Node3D
     }
 
     /// <summary>
-    ///     Attempts to bilinear-sample the terrain height at the given legacy world position.
+    ///     Attempts to sample the terrain height at the given legacy world position using
+    ///     per-triangle plane interpolation.
     ///     Returns <see langword="true" /> when the sector is resident and the sample succeeded;
     ///     <see langword="false" /> when the cell is not loaded (height is set to
     ///     <paramref name="fallbackY" />).
-    ///     Bilinear formula over the 65×65 grid (spacing 16 wu):
-    ///     lx = (worldX - (cellMapX - 10000) × 1024) / 16
-    ///     lz = (worldZ - (cellMapZ - 10000) × 1024) / 16
-    ///     c0 = clamp(floor(lx), 0, 63),  fx = lx - c0
-    ///     r0 = clamp(floor(lz), 0, 63),  fz = lz - r0
-    ///     h = lerp(
-    ///     lerp(H[r0,c0],   H[r0,c0+1],   fx),
-    ///     lerp(H[r0+1,c0], H[r0+1,c0+1], fx),
-    ///     fz)
+    ///     Algorithm (per-triangle plane interpolation):
+    ///     1. Convert world XZ to fractional quad coordinates within the cell.
+    ///     lx = (worldX - cellOriginX) / 16,  lz = (worldZ - cellOriginZ) / 16
+    ///     c0 = floor(lx),  r0 = floor(lz),  fx = lx - c0,  fz = lz - r0
+    ///     2. Determine which of the two triangles the point falls in (\\-diagonal split,
+    ///     matching the mesh winding in BuildMultiSurfaceMesh):
+    ///     if fz &lt;= fx  → Triangle A (TL, TR, BR):  y = h00 + (h01-h00)·fx + (h11-h01)·fz
+    ///     else           → Triangle B (TL, BL, BR):  y = h00 + (h10-h00)·fz + (h11-h10)·fx
+    ///     (These are the plane equations evaluated at (fx, fz), giving exact vertex values at corners.)
+    ///     3. The block-4 DirectionFlags drive the UV/texture orientation (§5.7); the split diagonal
+    ///     also follows those flags. Since §5.7 is PARTIAL on which flag bit re-selects the
+    ///     triangulation diagonal (vs. only re-orienting the texture UV), the \\-diagonal is used
+    ///     consistently, matching the current mesh winding. PARTIAL noted below.
+    ///     spec: Docs/RE/formats/terrain.md §5.4a — PER-TRIANGLE PLANE interpolation; CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/terrain-streaming.md §6.5 — CYCLE 12 correction; bilinear is WRONG.
+    ///     spec: Docs/RE/formats/terrain.md §5.7 — block-4 diagonal flags; split interaction PARTIAL.
     ///     spec: Docs/RE/formats/terrain.md §5.2 — row=Z, col=X: CONFIRMED.
     ///     spec: Docs/RE/formats/terrain.md §5.4 — Heights[] direct world-space Y: CONFIRMED.
     ///     spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024, origin bias 10000: CONFIRMED.
-    ///     VERIFIED reference: cell (10000, 9990) is flat at ~26 wu; GetGroundHeight(474, -10101)
-    ///     falls inside that cell (cellMapZ = floor(-10101/1024)+10000 = 9990) and returns ≈ 25.978.
     /// </summary>
     /// <param name="worldX">Legacy world-space X (not negated).</param>
     /// <param name="worldZ">Legacy world-space Z (not negated).</param>
@@ -589,29 +597,42 @@ public sealed partial class TerrainNode : Node3D
         var lx = (worldX - (cellMapX - 10000) * 1024.0f) / spacing;
         var lz = (worldZ - (cellMapZ - 10000) * 1024.0f) / spacing;
 
-        // --- Step 3: find the four corner vertices ---
-        // c0/r0: integer grid column/row of the lower-left quad corner.
+        // --- Step 3: find the quad corner indices ---
+        // c0/r0: integer grid column/row of the top-left quad corner.
         // Clamp to [0,63] so the +1 neighbour is always valid (max grid index is 64).
+        // spec: terrain.md §5.1 — 65×65 vertices, 64×64 quads: CONFIRMED.
         var c0 = Math.Clamp((int)Math.Floor(lx), 0, TerrainCell.GridSize - 2); // [0, 63]
         var r0 = Math.Clamp((int)Math.Floor(lz), 0, TerrainCell.GridSize - 2); // [0, 63]
-        var fx = lx - c0; // fractional X [0,1]
-        var fz = lz - r0; // fractional Z [0,1]
+        var fx = lx - c0; // fractional X within quad [0,1]
+        var fz = lz - r0; // fractional Z within quad [0,1]
 
-        // --- Step 4: bilinear interpolation ---
-        // Grid index: [row * 65 + col].
-        // spec: terrain.md §5.2 — row=Z, col=X, row-major: CONFIRMED.
+        // --- Step 4: per-triangle plane interpolation ---
+        // Read the four corner heights.
+        // spec: terrain.md §5.2 — row=Z, col=X, row-major index = row*65+col: CONFIRMED.
         // spec: terrain.md §5.4 — Heights[] direct world-space Y, no scale: CONFIRMED.
+        // spec: terrain.md §5.4a — PER-TRIANGLE PLANE interpolation (not bilinear): CODE-CONFIRMED.
+        // spec: terrain-streaming.md §6.5 — CYCLE 12 correction: bilinear is incorrect; use per-triangle.
         const int gs = TerrainCell.GridSize; // 65
         var h = cell.Heights;
-        var h00 = h[r0 * gs + c0]; // (r0,   c0)
-        var h01 = h[r0 * gs + c0 + 1]; // (r0,   c0+1)
-        var h10 = h[(r0 + 1) * gs + c0]; // (r0+1, c0)
-        var h11 = h[(r0 + 1) * gs + c0 + 1]; // (r0+1, c0+1)
+        var h00 = h[r0 * gs + c0]; // TL: (r0,   c0)
+        var h01 = h[r0 * gs + c0 + 1]; // TR: (r0,   c0+1)
+        var h10 = h[(r0 + 1) * gs + c0]; // BL: (r0+1, c0)
+        var h11 = h[(r0 + 1) * gs + c0 + 1]; // BR: (r0+1, c0+1)
 
-        // Bilinear: lerp along X for each Z row, then lerp along Z.
-        var topRow = h00 + (h01 - h00) * fx; // lerp at r0
-        var bottomRow = h10 + (h11 - h10) * fx; // lerp at r0+1
-        height = topRow + (bottomRow - topRow) * fz;
+        // Diagonal split: \\-diagonal (TL→BR), consistent with mesh winding in BuildMultiSurfaceMesh.
+        // spec: terrain.md §5.7 — block-4 flags drive the diagonal; flag↔diagonal interaction is PARTIAL.
+        // Triangle A (TL, TR, BR): contains points where fz <= fx.
+        //   Plane: y = h00 + (h01 - h00) * fx + (h11 - h01) * fz
+        // Triangle B (TL, BL, BR): contains points where fz > fx.
+        //   Plane: y = h00 + (h10 - h00) * fz + (h11 - h10) * fx
+        // Both formulas give exact vertex values at their respective corners.
+        if (fz <= fx)
+            // Triangle A — TL, TR, BR
+            height = h00 + (h01 - h00) * fx + (h11 - h01) * fz;
+        else
+            // Triangle B — TL, BL, BR
+            height = h00 + (h10 - h00) * fz + (h11 - h10) * fx;
+
         return true;
     }
 }

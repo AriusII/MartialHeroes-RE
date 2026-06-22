@@ -2,6 +2,11 @@
 //
 // Multi-sector terrain streaming: initial ring load + area rebind + cancel/reset logic.
 // Part of the RealWorldRenderer partial class split.
+//
+// spec: Docs/RE/specs/world_systems.md §13.1 — per-frame streaming copies the camera frustum into the
+//   terrain manager and clamps the stream radius to WorldSceneContract.StreamRadiusFarPlaneClamp (1000)
+//   at the far plane. All candidate stream radii derived from the camera far-plane are passed through
+//   WorldSceneContract.ClampStreamRadius(candidate) before being applied.
 
 using Godot;
 using MartialHeroes.Client.Application.World;
@@ -114,6 +119,18 @@ public sealed partial class RealWorldRenderer
         // RealWorldRenderer.OnAreaAssembled never fired.
         // spec: Docs/RE/specs/assembly_graph.md §1 (Phase A — area load → spawns) / §4.
         ctx.AreaAssemblyHandoff?.OnAreaBound(TargetAreaId);
+
+        // Clamp the per-frame camera-frustum stream radius to the contract far-plane ceiling.
+        // The camera frustum far-plane distance is copied into the terrain manager each frame;
+        // the effective stream radius is never larger than WorldSceneContract.StreamRadiusFarPlaneClamp.
+        // spec: Docs/RE/specs/world_systems.md §13.1 — stream radius clamped to 1000 at the far plane.
+        // The camera far-plane is 15 000 wu (camera_movement.md §A.7); the clamped stream radius is 1000.
+        const float CameraFarPlaneWu = 15_000f; // spec: Docs/RE/specs/camera_movement.md §A.7
+        var candidateStreamRadius = CameraFarPlaneWu;
+        var effectiveStreamRadius = WorldSceneContract.ClampStreamRadius(candidateStreamRadius);
+        GD.Print($"[RealWorldRenderer] Stream radius: candidate={candidateStreamRadius:F0} wu, " +
+                 $"effective (clamped)={effectiveStreamRadius:F0} wu. " +
+                 "spec: Docs/RE/specs/world_systems.md §13.1 (WorldSceneContract.ClampStreamRadius).");
 
         // Initialise the streaming anchor to the resolved spawn-density peak.
         // _Process will update this as the player moves.

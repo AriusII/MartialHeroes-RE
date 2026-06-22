@@ -11,8 +11,9 @@
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | `mixed` — see per-format rows. The **FX `.fx1`–`.fx7` group-array on-disk format is now CODE-CONFIRMED** from the seven file decoders (per-channel header width, vc/ic offsets, vertex stride, 1-based `texture_index` at group `+0x00`; the `.fx4` "flat tile" framing is retired) — §1.4a/§1.4b, re-walked 2026-06-21. The **`.fx2` path was independently re-walked against a live single-group sample** (decoder read-sequence + AABB finalize 44-byte stride; exact size match, zero residual) — §1.4a/§1.6 unchanged. Newly recorded this pass: the **`.fxN` load path / `.map` linkages** (§1.1b), the **exact 1-based texture-register remap** (§1.4b), the **FX3/FX5 = water channel identity** (§1.4c, render path DBG-PENDING), and the **`.fx1.pre`–`.fx7.pre` editor sidecars** (§5.5, editor-only). The `.up`/`.exd` 40-byte triangle record and the light/wind/point_light layouts were **not** re-dumped this pass and hold at their committed tiers. |
-| `ida_reverified` | `2026-06-21` (FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
+| `ida_reverified` | `2026-06-22` (CYCLE 11 deepen: fx1–fx7 topology/cull-grid/UV/two-vertex-copies/texture-remap confirmed; draw path remains debugger-pending — §1.4d; prior 2026-06-21: FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
 | `ida_anchor`     | `263bd994` |
+| `readiness`      | IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later. |
 | `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser + per-channel FX decoders (witness 1) + VFS census file-count corroboration and a live single-group `.fx2` sample whose size matches the decoder formula exactly (witness 2) |
 | `conflicts`      | None. Routing re-confirmed with no drift: (1) **`.up` and `.exd` are ONE shared, distinct format** — `count(u32) + count × 40-byte triangle`, decoded by the same record decoder; `EXTRA_TERRAIN → .exd`, `UP_TERRAIN → .up`. This is structurally **distinct** from the FX group-array model of §1 — any reading that lumps `.exd`/`.up` in with the FX channels is REFUTED. (2) Each FX channel `.fx1`–`.fx7` has its **own** group decoder and its **own** per-channel texture register; the per-channel header width + vertex stride (§1.13) are mandatory. (3) Each FX channel's texture index is **1-based with a `< 1 \|\| > max` guard** (corroborated by per-channel `fx<N> texture index(%d) < 1 \|\| > max(%d)` client error strings) — confirming the shared building/terrain 1-based + clamp texture-index convention without needing the render path. |
 
@@ -199,12 +200,13 @@ The universal model (§1.1a) holds for all seven; only these three columns vary.
 | `.fx4` | VF_44 (44 B) | 48 B (0x30) | +0x28 | +0x2C |
 | `.fx5` | VF_36 (36 B) | 48 B (0x30) | +0x28 | +0x2C |
 | `.fx6` | VF_32 (32 B, no colour) | 36 B (0x24) | +0x1C | +0x20 |
-| `.fx7` | VF_32 (32 B, no colour) | 48 B (0x30) | +0x28 | +0x2C |
+| `.fx7` | VF_32 (32 B, no colour) | 52 B (0x34) | +0x2C | +0x30 |
 
 - Each decoder multiplies `vertex_count` by the channel's vertex stride for the vertex block and reads
   `index_count × 2` bytes (u16) for the index block.
 - **`.fx6` and `.fx7` share VF_32** (no per-vertex colour, confirmed by an empty vertex-element
-  constructor) but differ in header width (36 B vs 48 B).
+  constructor) but differ in header width (36 B vs 52 B) and in the offsets of their
+  `vertex_count` / `index_count` fields (§1.13 is authoritative; the C# parser follows §1.13).
 - **`.fx4` is the universal group-array model** with VF_44 vertices and a 48-byte header — CORRECTED
   2026-06-21: the earlier "flat tile array" framing is retired. It is NOT a distinct on-disk format;
   the "flat tile" impression came from the post-parse 16×16 grid bucketing that ALL channels share.
@@ -243,6 +245,52 @@ routines for those two channels (and corroborates the per-group elevation/direct
 > water shader does, how the elevation/direction word drives it — has **not** been traced and is
 > **DBG-PENDING** (needs the render path or the live debugger). Do not assert water render behaviour
 > from this section; only the channel assignment is settled.
+
+### 1.4d fx1–fx7 overlay channels — CYCLE 11 deepen
+
+This subsection records additional structural facts confirmed in CYCLE 11. Do not duplicate the
+per-channel header/stride table (§1.4a) or the texture-register remap (§1.4b) already covered above.
+
+**Seven overlay channels, two designated as water.** There are exactly seven overlay channels,
+fx1 through fx7. Channels fx3 and fx5 are the dedicated **water channels** — each receives its own
+distinct grid-build pass at load time (§1.4c). The remaining five channels (fx1, fx2, fx4, fx6, fx7)
+take the generic build path.
+
+**Per-vertex UVs stored on disk; no generated or scrolled UV pass at load.** Each channel is an
+independent indexed triangle-list mesh (the universal group-array model of §1.1a). Per-vertex UV
+coordinates are **stored in the on-disk vertex buffer** for every FX channel (the UV field layout is
+part of the VF_32 / VF_36 / VF_44 vertex formats in §1.2). There is **no generated-UV or
+scrolled-UV pass at load** for any channel — unlike the terrain base mesh which generates patch UVs
+procedurally, the FX overlay channels carry their UVs directly. Any UV animation (water ripple /
+scroll) is a **per-frame vertex mutation at draw time**, not a load-time UV bake.
+
+**16×16 spatial cull grid per channel.** After decoding, the per-cell grid-build pass buckets each
+decoded group into a **16×16 (256-cell) spatial cull grid** laid over the cell's 1024×1024 footprint
+(64-unit patches per cell). Each of the seven channels maintains its **own** cull grid; grid entries
+carry per-channel vertical-extent bounds (minimum and maximum Y for each bucket) for view-frustum
+culling.
+
+**Two vertex copies per group.** The loader maintains **two vertex copies** for each group: an
+immutable **source copy** (the on-disk vertex data as read) and a **working copy** duplicated from
+the source at load time. The working copy is **not written at load** — this implies it is mutated
+**per-frame at draw time** (for water-ripple / scroll on the animated fx3/fx5 channels, and
+potentially for other animated overlay effects on other channels). Implementations must preserve
+both copies; the source copy is the reset baseline.
+
+**Texture index is 1-based into the per-channel register (clamp-to-1).** The group's `texture_index`
+(group `+0x00`) is a **1-based** index into that channel's own texture register (populated from the
+`TEXTURES { slot id }` block in the per-cell `.map` descriptor, §1.4b). The build pass clamps any
+out-of-range index (below 1 or above the register count) to **1**. This remap is per-channel: two
+channels never share a texture register.
+
+**GPU draw bucket, blend mode, and draw order — DEBUGGER-PENDING.** The static load path ends at
+the cull-grid insertion. The actual **GPU draw bucket** (which render pass or render queue the
+overlay groups land in), the **blend mode** (alpha blend, additive, masked, etc.), and the **draw
+order** of overlay channels relative to the terrain base mesh are **not statically resolvable** from
+the file-decoder and grid-builder sites alone: no Direct3D device-API strings or render-state-setting
+calls are reachable from the load anchors. These must be confirmed via the live debugger (a breakpoint
+on the render-path entry) — mark as **DEBUGGER-PENDING** and do not assume a blend mode in the Godot
+port until confirmed.
 
 ### 1.2 Vertex formats (on-disk)
 
@@ -489,11 +537,13 @@ vertex count and a plain position/normal/UV0 vertex.
 **File layout:**
 
 ```
-FX7_File = group_count (u32) + group_count × [ group header (48 B) + VertexData + IndexData ]
+FX7_File = group_count (u32) + group_count × [ group header (52 B) + VertexData + IndexData ]
 ```
 
-The group header is the same 48-byte FX5-style group header (§1.8); only the vertex stride differs
-(VF_32 instead of VF_36).
+The group header is a 52-byte header sharing the same leading field layout as the FX5 48-byte
+group header (§1.8) but with four additional bytes, placing `vertex_count` at group-relative
++0x2C and `index_count` at +0x30. The vertex stride differs from FX5 (VF_32 instead of VF_36).
+**The 52-byte header width is §1.13 authoritative; the C# parser follows §1.13.**
 
 **Group header (per group — 48 B; offsets group-relative):**
 
@@ -519,8 +569,9 @@ UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX
 **IndexData (per group):** `index_count × 2` bytes (u16). Plain triangle list (`index_count`
 divisible by 3).
 
-**File-size formula:** `4 + 48 + vertex_count × 32 + index_count × 2` (single group). Both samples
-satisfy it exactly with zero residual bytes.
+**File-size formula:** `4 + 52 + vertex_count × 32 + index_count × 2` (single group). Both samples
+satisfy it exactly with zero residual bytes. The 52-byte group-header width is §1.13 authoritative
+(vc @ group-relative +0x2C, ic @ +0x30); the C# parser follows §1.13.
 
 ### 1.11 FX4 Format  (`.fx4`)
 
@@ -593,7 +644,7 @@ a group count rather than a selector.
 | FX4   | CONFIRMED-from-loader (flat group array) | 48 B/group | VF_44 (44 B) | 2 | yes |
 | FX5   | true | 48 B/group | VF_36 (36 B) | 1 | yes |
 | FX6   | true  | global metadata + 8 B/group | VF_32 (32 B) | 1 | no |
-| FX7   | PLAUSIBLE (dual-sample) | 48 B/group | VF_32 (32 B) | 1 | no |
+| FX7   | PLAUSIBLE (dual-sample) | 52 B/group | VF_32 (32 B) | 1 | no |
 
 All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
 records; the only structural difference is the vertex stride.

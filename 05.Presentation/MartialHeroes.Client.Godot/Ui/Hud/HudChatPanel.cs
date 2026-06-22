@@ -190,6 +190,9 @@ public sealed partial class HudChatPanel : Control
         _input.OffsetRight = EditLocalX + EditW;
         _input.OffsetBottom = LogBgH + EditLocalY + EditH;
         _input.TextSubmitted += OnTextSubmitted;
+        // Apply HUD caption font slot 4 to the chat input box.
+        // spec: Docs/RE/specs/ui_hud_layout.md CYCLE 11 — "dominant HUD caption font slot 4"
+        HudFont.ApplyToLineEdit(_input, 4); // spec: ui_hud_layout.md CYCLE 11 — slot 4
         AddChild(_input);
 
         GD.Print("[HudChatPanel] Built — 448×324 output window + 330×20 input box. " +
@@ -282,11 +285,19 @@ public sealed partial class HudChatPanel : Control
         _log.ParseBbcode(_sb.ToString());
     }
 
+    /// <summary>
+    ///     FALLBACK-ONLY colour table. The authoritative colour is <c>ChatLineEvent.ColorArgb</c>
+    ///     decided by the core (<c>GamePacketHandler.Chat.ResolveChatColour</c>). This method is used
+    ///     ONLY when <c>ev.ColorArgb == 0</c> (i.e., the producer did not supply a colour — e.g., a
+    ///     locally-echoed say line). The core is the authority; this is a defensive fallback.
+    ///     spec: Docs/RE/specs/chat.md §3 — channel code → ARGB (authoritative source = core layer).
+    /// </summary>
     private static uint ArgbForChannel(int ch)
     {
         return ch switch
         {
             // spec: Docs/RE/specs/chat.md §3 — channel code → ARGB table (CAPTURE-UNVERIFIED values)
+            // NOTE: These are FALLBACK values only. The core (GamePacketHandler.Chat) is authoritative.
             0 => ColorSay,
             1 => ColorShout,
             2 => ColorParty,

@@ -208,7 +208,7 @@ public sealed partial class EnvironmentNode
             : "no map_option";
         var sunDir = _hasSunDir ? $"{_sunDirGodot.Normalized()}" : "default";
 
-        GD.Print($"[Environment] area={_areaId} keyframe={kf}(noon) {skyGate} " +
+        GD.Print($"[Environment] area={_areaId} keyframe={kf} {skyGate} " +
                  $"material={_env?.Material is not null} cycle={CycleEnabled}@{CycleSpeed:F0}ms/s " +
                  $"tonemap=Linear/1.0 glow=Screen | fog: {fogStr} | light: {lightStr} | sunDirGodot={sunDir}");
     }

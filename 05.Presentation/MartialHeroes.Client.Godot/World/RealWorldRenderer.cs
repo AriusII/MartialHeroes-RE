@@ -129,7 +129,8 @@ public sealed partial class RealWorldRenderer : Node3D
     //       Docs/RE/formats/terrain.md §3.5 (.map TEXTURES) + §5.6 (render-domain idx). CONFIRMED.
     private BgTextureCatalog? _bgTextures; // global pool: intTexId → relPath
 
-    // Kept for PlayerController → camera position update wiring (set in SpawnCamera).
+    // The CameraController this renderer drives; each frame _Process pushes the live local-player's
+    // GlobalPosition into its PlayerGodotPosition so the camera follows the server-driven avatar.
     private CameraController? _cameraController;
     private MapDescriptor? _cellMap; // the target cell's .map (TERRAIN/BUILDING TEXTURES lists)
 
@@ -148,6 +149,15 @@ public sealed partial class RealWorldRenderer : Node3D
     ///     Set to true via client_dir.cfg key "compose_render=1" or env "MH_COMPOSE_RENDER=1".
     ///     This flag is the only gate between the old and new path; no code is removed while both
     ///     paths coexist. spec: Docs/RE/specs/assembly_graph.md §1 — AreaComposer owns the assembled cell.
+    ///     <para>
+    ///         TODO (C12-D13 deferred merge): The <b>legacy</b> path (false) is canonical at runtime
+    ///         today — <c>client_dir.cfg</c> ships no <c>compose_render</c> key and no env var is set.
+    ///         The <b>composer</b> path (true) is the intended future canonical (ROADMAP §C12-D13) but is
+    ///         currently dormant and has a known building-texture fidelity gap (per-cell .map cache, see
+    ///         Composer.cs OnCellAssembled TODO). Retire this flag and the legacy branch only AFTER:
+    ///         (1) per-cell .map cache lands; (2) ring-wide building coverage is confirmed; (3) FX slots
+    ///         2-8 pass a windowed visual-oracle check. Until then BOTH paths MUST be kept.
+    ///     </para>
     /// </summary>
     private bool _composeRender;
 

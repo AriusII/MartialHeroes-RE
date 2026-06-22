@@ -2,10 +2,11 @@
 //   opcode: 0x30017   major 3 / minor 23   direction: S2C   size: 28
 //   CLEAN ROOM: re-implemented from a neutral spec; no decompiler output.
 //
-// Binary-confirmed (Phase 2b, build 263bd994): 3/23 = SmsgCharStatusBytesByName, 28-byte fixed
-// payload (8-byte frame header + 28 bytes).  This is NOT a 12-byte char-create result.
-// Create is acked via 3/7 SmsgCharManageResult + a refreshed 3/4 char list.
-// spec: Docs/RE/specs/net_contracts.md §2.2; Docs/RE/specs/login_flow.md §3.6.
+// Binary-confirmed (Phase 2b / CYCLE 11 Block A, IDB 263bd994): 3/23 = SmsgCharStatusBytesByName,
+// 28-byte fixed payload (8-byte frame header + 28 bytes).  This is NOT a 12-byte char-create result.
+// Create is acked via 3/7 SmsgCharManageResult (latch-clear) + a refreshed 3/1 SmsgCharacterList.
+// There is NO dedicated create-result packet; 3/23 is a by-name status/level patch, NOT a create
+// result. spec: Docs/RE/specs/character_creation.md §5 and §5.1; Docs/RE/opcodes.md.
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;

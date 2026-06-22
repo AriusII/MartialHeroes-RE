@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Input;
 using MartialHeroes.Client.Godot.Ui.Assets;
@@ -91,15 +92,28 @@ public sealed partial class InGameScene : StubSceneController
                 GD.PrintErr($"[InGameScene] HudMaster build failed (degraded mode): {ex.Message}");
             }
 
-        GD.Print("[InGameScene] State 5 BuildGameWorld built: charater scene root, five view-platform slots, " +
+        GD.Print($"[InGameScene] State 5 BuildGameWorld built: charater scene root, " +
+                 $"{WorldSceneContract.ViewPlatformCount} view-platform slots (WorldSceneContract.ViewPlatformCount), " +
+                 $"{WorldSceneContract.LayerNodeCount} layer nodes (WorldSceneContract.LayerNodeCount; ids 2006/2004/2005/2148/2148), " +
                  "terrain stream node, real-asset renderer (world build deferred to the server 4/1 world-entry), " +
-                 "camera/HUD wiring. spec: client_runtime.md §7.4/§9.");
+                 "camera/HUD wiring. spec: Docs/RE/specs/world_systems.md §13.1 / client_runtime.md §7.4/§9.");
     }
 
     public override void _ExitTree()
     {
         if (_worldLoop is not null && IsInstanceValid(_worldLoop))
             _worldLoop.WorldExitRequested -= OnWorldExitRequested;
+
+        // Flush the timed-event queue so no stale deferred trigger fires into the next scene.
+        // spec: Docs/RE/specs/effect-scheduling.md §5A.3 — FlushOnSceneTransition discards all
+        //       pending records; prevents a stale 10001 connection/scene trigger from crossing
+        //       the World → front-end boundary.
+        if (_ctx?.TimedEventQueue is { } tq)
+        {
+            var discarded = tq.FlushOnSceneTransition();
+            GD.Print($"[InGameScene] _ExitTree: TimedEventQueue flushed ({discarded} pending events discarded). " +
+                     "spec: Docs/RE/specs/effect-scheduling.md §5A.3 (scene-transition flush).");
+        }
 
         _worldLoop = null;
         _host = null;
@@ -118,6 +132,7 @@ public sealed partial class InGameScene : StubSceneController
         };
 
         world.AddChild(BuildViewPlatformSlots());
+        world.AddChild(BuildLayerNodes());
         world.AddChild(new ActorRegistry { Name = "ActorRegistry" });
         // GameHud { Name="HUD" } removed (CAMPAIGN 17 Wave 2b) — HudMaster is the sole HUD.
         // spec: Docs/RE/specs/ui_hud_layout.md §0.
@@ -133,13 +148,38 @@ public sealed partial class InGameScene : StubSceneController
     private static Node3D BuildViewPlatformSlots()
     {
         var slots = new Node3D { Name = "GViewPlatformSlots" };
-        // The legacy builder allocates five in-world view-platform slots: Third, First, Static,
-        // Gamble, Event. CameraController owns the active Godot camera and implements the playable
-        // manipulators; these passive markers preserve the recovered scene-graph shape.
+        // The legacy builder allocates WorldSceneContract.ViewPlatformCount (5) in-world view-platform
+        // slots: Third, First, Static, Gamble, Event. CameraController owns the active Godot camera
+        // and implements the playable manipulators; these passive markers preserve the recovered
+        // scene-graph shape.
         // spec: Docs/RE/specs/client_runtime.md §9.1 / §9.5; camera_movement.md §A.
-        foreach (var name in new[] { "Third", "First", "Static", "Gamble", "Event" })
-            slots.AddChild(new Node3D { Name = $"GViewPlatform_{name}" });
+        // spec: Docs/RE/specs/world_systems.md §13.1 — 5 view-platform objects: WorldSceneContract.ViewPlatformCount.
+        ReadOnlySpan<string> names = ["Third", "First", "Static", "Gamble", "Event"];
+        // Guard: name count must match the contract's ViewPlatformCount.
+        // spec: Docs/RE/specs/world_systems.md §13.1 — ViewPlatformCount = 5.
+        if (names.Length != WorldSceneContract.ViewPlatformCount)
+            GD.PushError($"[InGameScene] ViewPlatformSlots name count {names.Length} != " +
+                         $"WorldSceneContract.ViewPlatformCount {WorldSceneContract.ViewPlatformCount}. " +
+                         "spec: Docs/RE/specs/world_systems.md §13.1.");
+        for (var i = 0; i < names.Length; i++)
+            slots.AddChild(new Node3D { Name = $"GViewPlatform_{names[i]}" });
         return slots;
+    }
+
+    /// <summary>
+    ///     Builds the 5 layer-node children of the GScene root captioned by message-table ids
+    ///     2006 / 2004 / 2005 / 2148 / 2148 (id 2148 reused for the last two = 5 nodes / 4 distinct ids).
+    ///     spec: Docs/RE/specs/world_systems.md §13.1 — 5 layer nodes; WorldSceneContract.LayerNodeCount /
+    ///     WorldSceneContract.LayerNodeMessageIds.
+    /// </summary>
+    private static Node3D BuildLayerNodes()
+    {
+        var root = new Node3D { Name = "GLayerNodes" };
+        // spec: Docs/RE/specs/world_systems.md §13.1 — LayerNodeCount = 5; LayerNodeMessageIds = [2006,2004,2005,2148,2148].
+        var msgIds = WorldSceneContract.LayerNodeMessageIds;
+        for (var i = 0; i < WorldSceneContract.LayerNodeCount; i++)
+            root.AddChild(new Node3D { Name = $"GLayer_{msgIds[i]}_{i}" });
+        return root;
     }
 
     private static DirectionalLight3D BuildDirectionalLight()

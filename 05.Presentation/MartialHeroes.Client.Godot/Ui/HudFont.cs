@@ -54,13 +54,14 @@ public static class HudFont
         ["BatangChe", "Batang", "Gulim", "Malgun Gothic"];
 
     // spec: Docs/RE/specs/frontend_scenes.md — 15-slot table: face, size, advanceWidth, cellHeight, weight.
+    // spec: Docs/RE/specs/ui_hud_layout.md CYCLE 11 — "dominant in-game HUD caption and button font slot is slot 4"
     private static readonly SlotDescriptor[] Slots =
     [
         new(DotumCheFaces, 12, 6, 12, 0), // 0
         new(DotumFaces, 10, 5, 10, 0), // 1
         new(DotumCheFaces, 32, 16, 32, 800), // 2
         new(DotumCheFaces, 18, 12, 24, 800), // 3
-        new(DotumCheFaces, 12, 6, 12, 800), // 4
+        new(DotumCheFaces, 12, 6, 12, 800), // 4 ← DOMINANT HUD CAPTION FONT (spec: ui_hud_layout.md CYCLE 11)
         new(BatangCheFaces, 12, 6, 12, 0), // 5
         new(BatangCheFaces, 18, 12, 24, 700), // 6
         new(BatangCheFaces, 12, 6, 12, 700), // 7

@@ -1,9 +1,13 @@
 ---
-verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
+verification: confirmed against IDB SHA 263bd994; reconciled dossier promotion pass 2026-06-22 —
+  cross-checked against Login and Loading reconciled dossiers; §1.5 substate ladder and §1.4c no-EULA
+  reading confirmed as already correct (binary-agrees). LOGIN-VISUAL PROMOTE 2026-06-22: §1.5a "ID
+  textbox snap" CORRECTED to "form decorative plate snap" (binary-won, counter-check IDB SHA 263bd994).
+ida_reverified: 2026-06-22   # 2026-06-21 dirty-note promotion confirmed §1/§3/§11.2–§11.5; 2026-06-22 reconciled-dossier cross-check: substate ladder (1=intro+SFX, 2=slide, 3=snap, 4=auto-advance, 5=show-form, 6=form) confirmed; §1.5a form-plate-snap CORRECTED (was "ID textbox snap" — binary-won per counter-check). CYCLE 12 Phase 2 (2026-06-22, IDB 263bd994): §7 enter-world handoff CORRECTED to the server round-trip ladder (1/7 mode-1 play-confirm -> 3/14 flag!=0 -> 1/9 emitted by the 3/14 handler -> 3/5); §8 send-map 1/7 mode bytes corrected (mode 1 = select-and-play, mode 0 = slot-lock; delete mode byte capture-pending); 1/9 self-checksum token clarified (MD5-hex of the client exe). CYCLE 11: added the scene-state-value vs case-index caveat (in-game = value 4 via case-index 5; cross-ref world_systems §13.1).
 ida_anchor: 263bd994
+readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]
-conflicts: KF2..5 camera-keyframe arming (camera dolly) and the digit→slot PIN scramble seed/permutation remain debugger-pending; the EXE-window-close quit edge at Login is debugger-pending; which physical credential box is account vs password (join-string field #1 vs #2) is a static-hypothesis pending a capture
+conflicts: KF2..5 camera-keyframe arming (camera dolly) and the digit→slot PIN scramble seed/permutation remain debugger-pending; the EXE-window-close quit edge at Login is debugger-pending; which physical credential box is account vs password (join-string field #1 vs #2) is a static-hypothesis pending a capture; ActorVisualGlobal[3] high-tier threshold and catalog categoryBase[] values are data-pending
 status: confirmed
 sample_verified: partial   # game.ver version-token sample-verified (login_flow.md); all UI flow/constants are CODE-CONFIRMED; wire bytes capture-unverified
 subsystems: [login_scene, server_select, character_select, enter_world, frontend_state_flow]
@@ -122,6 +126,8 @@ The login window carries **two independent internal counters** that must not be 
 > conflated "login/char-select" — corrected here: Login is state 1, char-select is state 4.) Full
 > ownership of the engine state ladder and the launcher gate stays in `client_runtime.md` §7; this is a
 > cross-reference only.
+
+> **Scene-state vs in-game caveat (CYCLE 11, binary-confirmed).** The app entry is a single `while(1) switch(game-state value)` where each case pre-writes the NEXT value on ENTRY before building its scene. The CHARACTER-SELECT scene is switch case-index 4 and writes value 5 on entry; the WORLD / IN-GAME scene is switch case-index 5 and writes value 4 on entry (the no-network default = return to character-select). So the in-game World scene runs at game-state VALUE 4 reached via CASE-INDEX 5 — do NOT read this document's front-end 'state 4' (the interactive front-end form) as the in-game scene; that 'state 4' is a front-end engine state, a different axis. The authoritative in-game scene-state mapping lives in `specs/world_systems.md §13.1`. An explicit leave-world/logout overrides the default value-4 with the quit-prep value, so a deliberate logout exits the client and never returns to character-select.
 
 ### 1.0.0 Launch gate — the opening can be skipped at boot (CODE-CONFIRMED)
 
@@ -682,8 +688,11 @@ of **222**. The two panels are placed at the SAME offset each tick from this one
 - The per-tick offset `C` (0, **+5/tick**) drives **TOP Y = −C** and **BOTTOM Y = C + 326**; the curtain
   **completes when the offset exceeds 222** (≈ **45 ticks** at +5/tick). At completion the end positions
   are TOP Y = −222, BOTTOM Y = 548.
-- **ID textbox reveal seat.** Once the offset exceeds **200**, the ID/account textbox **snaps to
-  (494, 469)** (its open-state seat) — a single reposition late in the sweep, not a per-tick slide.
+- **Form decorative plate snap seat.** Once the offset exceeds **200**, the **form decorative plate**
+  (the credential-area chrome image, atlas A1 src 0,469 size 494×113) **snaps to screen position
+  (494, 469)** — a single reposition late in the sweep, not a per-tick slide. (CORRECTION 2026-06-22:
+  the snap target is the form plate, NOT the ID textbox. The ID textbox is not built or visible until
+  the credential group reveal at sub-state 5/6. Binary-won, counter-check IDB SHA 263bd994.)
 - **Sub-state binding (tick/drive substate, §1.5):** drive state **1** seeds the closed/start positions
   **and plays the login-enter SFX id 861010105** (a sound id, not a VFX id); state **2** runs the slide
   until offset > 222; states **3/4** settle; state **5** reveals the ID/PW boxes + buttons and **stops**
@@ -708,9 +717,11 @@ Each login widget fades its own alpha independently of the curtain slide:
   and **overrides** the ±64/tick fade entirely (the fade does not run while the override is engaged).
 
 **Confidence:** CODE-CONFIRMED (the two panels, the 0 → −222 / 326 → 548 endpoints, the shared
-**+5/tick** global accumulator bound 222 with **completion at offset > 222** (≈ 45 ticks), the ID-box
-snap to (494, 469) at offset > 200, the open-outward motion, the **±64/tick alpha fade with forced-alpha
-override**, and the drive-state 1 → 5 binding). The flat-vs-scaled 326 base is DEBUGGER-PENDING (above).
+**+5/tick** global accumulator bound 222 with **completion at offset > 222** (≈ 45 ticks), the
+**form-decorative-plate** snap to (494, 469) at offset > 200 (CORRECTED from "ID-box snap" 2026-06-22 —
+binary-won, counter-check IDB SHA 263bd994), the open-outward motion, the **±64/tick alpha fade with
+forced-alpha override**, and the drive-state 1 → 5 binding — all fully automatic with no user input at
+any edge). The flat-vs-scaled 326 base is DEBUGGER-PENDING (above).
 
 ## 1.6 Save-ID persistence (CODE-CONFIRMED)
 
@@ -1134,55 +1145,87 @@ entry" idea is **not** supported — both load the same global tables.
 
 # 3. Character selection
 
-**Engine state: 4 (Select)** — entered when the character-list packet arrives. The select scene is
-owned by a dedicated **select window** object. Its widget tree and the 5 live 3D preview actors are
-**built only when the character-list packet (`3/1 SmsgCharacterList`) arrives** — the scene does not
-exist until then (a quirk also noted in `ui_system.md` §6.4 and `client_runtime.md` §7).
+**Engine state: 4 (Select)** — entered when the character-list packet (`3/1 SmsgCharacterList`)
+arrives. The select scene is owned by a single 6280-byte (`0x1888`) **select window** object
+(`SelectWindow`). Its widget tree and the 3D preview actors are built once, at packet arrival; the
+object does not exist before that point.
 
-> **CYCLE 6b CONFIRMATION (2026-06-20) -- zero-trust re-confront of the state-4 char-select.**
-> A fresh static re-walk of the select handler, info-row, appearance, camera, and action functions on
-> build `263bd994` re-confirmed section 3 in full and pins five precision facts a faithful port must
-> honour. `// confirmed: static IDA 2026-06-20`
-> 1. **The per-slot 96-byte stats block is NOT consumed on the char-select screen.** The info row
->    reads name / level / position from the **descriptor only** (3.2). The 96-byte block is parsed by
->    `3/1`, stored per slot, carried through, and copied wholesale into the in-game live-stat globals
->    **only on Enter** -- it feeds the **in-game** character window, never a select-screen stat grid.
->    A select-screen "stat grid (2x5)" populated from the stats block is a port fabrication; the only
->    per-slot text on select is the three labels of 3.2. (The create form's 18-cell point-buy grid,
->    4.1.1, is unrelated and uses keyed-string lookups, not the wire stats block.)
-> 2. **Info-row line 3 = world POSITION, never a class label.** The third label formats the literal
->    string `"%d , %d"` (space-comma-space) over the two position floats (descriptor +0xA0 / +0xA4,
->    here = X and Z) truncated to int. There is no class label on the row; the class value (descriptor
->    +0x34) drives the 3D preview visual only. (Axis X/Z vs X/Y is a strong inference; value-axis is
->    debugger-pending.)
-> 3. **Three info-row labels + four selectable-gated slot buttons are distinct widget blocks.** The
->    select window holds a contiguous **3-pointer label block** (name / level / position) and, adjacent
->    to it, **four 3-state buttons** with action ids **4 / 5 / 6 / 61**. Default after build: the locked
->    base button (id 4) and the highlight art (id 61) shown; the two enter/confirm buttons (ids 5, 6)
->    hidden. The per-slot selectable byte (the server-supplied per-slot flag array, 3.4) flips them:
->    selectable => {id 61, 5, 6 shown; id 4 hidden}; not-selectable => inverse. A freshly created
->    character forces its selectable byte clear until the server resolves location/spawn. (Role names --
->    locked base / enter-confirm / highlight art -- are inferred from action-id + atlas + polarity; the
->    show/hide behaviour is confirmed.)
-> 4. **The char-select preview renders the REAL account character through the full appearance chain,
->    not a starter placeholder.** 3.1 / 3.3.6 already say this; CYCLE 6b additionally recovered the
->    per-part resolution math the port still omits -- see the new **3.3.7**.
-> 5. **The action model is message-TYPE x widget-COMMAND, not a flat action table.** The handler
->    decodes a message type (click / point-buy drag / system event) and a per-widget command id; the
->    create/delete/enter/select/rename/move behaviours are command ids under the click type. The opcode
->    pairings (Create `1/6`, Select/Delete `1/7 {slot,mode}`, Enter `1/9`, Rename `1/13`, Move `1/14`,
->    result `3/7`) and the no-corner-X / system-close to state 6 rule (5 below, 11.5) are all
->    re-confirmed. The local slot writers run **only** from S2C result handlers, never optimistically on
->    the C2S send. `// confirmed: static IDA 2026-06-20`
+## 3.0 Build and initialisation call sequence (CODE-CONFIRMED)
 
-> **The char-select scene is a full 3D world, not a 2D screen.** The select window does **not**
-> paint a flat backdrop behind a 2D character portrait; it **builds a named 3D scene ("select") on
-> the real game world `data/map000`, frozen at afternoon (14:30), with up to five live, animated 3D
-> character models standing on a stage in front of a perspective camera.** The 2D chrome (slot
-> frames, Create/Delete/Enter buttons, info plates — §11.5) only *dresses* that 3D scene; selection
-> itself is the 3D row (§3.3). The 3D composition (world, cell, coordinates, assets) is specified in
-> **§3.7**; the environment/lighting in **§3.6**; the camera in **§3.5**; per-slot placement/pose in
-> **§3.3**.
+> **The 3D preview is not a 2D sub-viewport.** `SelectWindow` builds one full-screen 3D scene
+> (named `"select"`, on the real `map000` area) behind the 2D chrome. There is no
+> `GUCanvas3D`-style rect-anchored viewport in the char-select window; placement is world-space
+> throughout. The `GUCanvas3D` widget class exists in the binary but none of its construction
+> sites belong to `SelectWindow` — all are shop/trade/info panels.
+
+The char-select window is realised in this fixed call sequence (CODE-CONFIRMED from build
+`263bd994`):
+
+1. **`SelectWindow_ctor`** — allocates the 6280-byte (`0x1888`) object; installs the vtable;
+   runs a 5-iteration initialisation loop over the five 880-byte per-slot spawn descriptors
+   at object offset `+0x238` (stride `0x370`); zeroes the 5 × 96-byte stat-block array at
+   `+0x1368`, the 5-byte per-slot flag array at `+0x1548`, and all selection-state and 3D-scene
+   pointer fields. No widgets, no textures, no 3D objects are built here.
+
+2. **`SelectWindow_BuildAndInit`** (the window's **build/init virtual — vtable slot 14**, invoked once
+   from the engine state-4 dispatch right after construction) — runs in this order:
+   a. Snapshot-copies the server character list from the net-handler object:
+      **5 × 880 bytes** of spawn descriptors, **5 × 96 bytes** of stat blocks, and **5 bytes**
+      of per-slot state/lock flags (index-preserving block moves, slot k → slot k).
+      Initialises the selected-slot index to `0` and the mode/visible byte to `1`.
+   b. Loads **8 texture-atlas handles** (7 distinct `.dds` files; `InventWindow.dds` is
+      registered twice for two sub-panels): `loginwindow.dds`, `mainwindow.dds`,
+      `InventWindow.dds`, `CarrierPigeonPerson.dds`, `CarrierPigeonAll.dds`,
+      `tradekeepwindow.dds`, `blacksheet.dds`.
+   c. Builds the complete **2D widget tree** in a single straight-line construct pass —
+      **279 GUI-builder calls** producing **127 heap-allocated widgets**, attached via
+      **113 parent-add operations** across ~14 parent panels (the build order = paint / Z
+      order). This is the load-bearing count: **279 build calls / 127 widgets / 113 adds**.
+      Two of those widgets are dedicated child sub-panels — an **ErrorPanel** (the error/notice
+      host, also reused by the tick as the tooltip host) and an **ExitPanel** (the exit/quit
+      confirm dialog) — plus one **Descriptor** object; their own internal widgets are built by
+      the panels' own builders (the ExitPanel and ErrorPanel inventories are enumerated in §11.5).
+      See §11.5 for the full ordered widget inventory and the complete button set.
+   d. Broadcasts `SetChildrenVisible(0)` (the show/hide virtual, vtable slot 1) over **exactly 12
+      child widgets** — a **4-pointer contiguous block** plus **8 individually-referenced**
+      chrome/dialog widgets — so these are built but start hidden. (The `GUCanvas3D` widget class
+      exists in the binary but **no `GUCanvas3D` construction site belongs to this window**; the
+      char-select 3D preview is a full-screen world scene, not a rect-anchored sub-viewport.)
+   e. Calls `SelectWindow_RefreshSlotCountLabel` — sets the char-count label (msg 2209).
+   f. As its penultimate call, invokes `SelectWindow_BuildScene` — the 3D scene
+      (§3.5–§3.7): env load, terrain cold-start, camera, scene root "select", ambient effect.
+   g. As its last call, starts the char-select BGM track **920100200** on the single
+      category-0 music slot, looped. **The 2D widget tree is built before the 3D scene,
+      the BGM starts after both.**
+
+3. **Per-frame `SelectWindow_Tick`** runs every frame. On **frame 5** (a frame-counter field
+   on the window object) it performs, in order:
+   a. `SelectWindow_ResetScene` → `SelectWindow_SpawnPreviewLineup` — populates the
+      5-slot roster row (§3.3) and arms camera keyframe 1 (§3.5.2), starting the
+      KF0→KF1 entry dolly (2000 ms blend duration).
+   From frame 6 onward the tick drives the camera boom/zoom accumulator, the
+   selected-slot yaw turntable, and the per-frame sound tick.
+
+4. **Roster refresh.** `SelectWindow_ResetScene` (and therefore `SelectWindow_SpawnPreviewLineup`)
+   is also re-invoked from `SelectWindow_WriteSlotRecord` (new slot record from server),
+   specific `SelectWindow_HandleCommand` cases, and `SmsgCharManageResult_Handler`.
+
+> **Realised sequence:** ctor → 2D widget tree (8 atlas handles → 279 builder calls / 127 widgets /
+> 113 parent-adds) → `BuildScene` (env/terrain/camera/effect) → BGM start → [frame 5] → ResetScene
+> (lineup + KF1 arm) → [frames 6+] → per-frame tick.
+
+> **The char-select scene is a full 3D world, not a 2D screen.** The select window builds a
+> named 3D scene `"select"` on the real game world `data/map000`, frozen at afternoon (14:30),
+> with up to five live, animated 3D character models on a stage in front of a perspective
+> camera. The 2D chrome (§11.5) only dresses that 3D scene; selection itself is performed via
+> 3D ray-pick (§3.3.3). The 3D composition is specified in §3.7; environment/lighting in §3.6;
+> camera in §3.5; per-slot placement/pose in §3.3.
+
+> **96-byte stat block is NOT consumed on the select screen.** The info row reads name /
+> level / position from the spawn descriptor only (§3.2). The 96-byte block is carried
+> through and copied into in-game live-stat globals only on Enter. A select-screen stat grid
+> driven from that block is a port fabrication; the only per-slot text on select is the three
+> labels of §3.2.
 
 ## 3.1 Where the slots come from & the per-slot record (CODE-CONFIRMED)
 
@@ -1452,8 +1495,10 @@ with the **body as overlay slot 3** (the `202`/"b" family) — there is no separ
   node).
 - **Idle motion is actormotion-driven by `id_b`** for both forms: the actor's idle clip is selected
   from `data/char/actormotion.txt` keyed by the actor's `id_b` (col2), then resolved through the motion
-  id registry (`formats/animation.md`). For the `IdA = 1` starter set all four classes share `id_b = 1`,
-  hence the same "peace" idle (§3.7.5); higher-tier appearances carry class-distinct idles. No
+  id registry (`formats/animation.md`). The four starter classes have **distinct** IdB values
+  (1/26/11/16) and therefore key **distinct** `actormotion.txt` rows; whether all four rows resolve
+  to the same "peace" idle clip (`g111100010.mot`) is sample-unverified — confirmed only for the
+  Musa / IdB=1 row (§3.7.5). Higher-tier appearances carry class-distinct idles. No
   char-select-specific idle asset exists.
 - **Rotation differs by form, not by factory.** The list slots do **not** auto-rotate (§3.3.1). The
   single create preview *does* turn so the player can inspect the would-be character — the concrete
@@ -1497,6 +1542,67 @@ be rendered. `// confirmed: static IDA 2026-06-20`
 > channel and a distinct gender field were NOT isolated statically -- candidates (per-equip-entry tail
 > bytes; descriptor low byte at +0x14) are debugger-pending.
 
+**Overlay slot order and the lineup-vs-in-world split (CODE-CONFIRMED — two independent driver walks).**
+Three sibling driver routines build overlay parts; all share the same fixed slot order and the same
+high-tier collapse guard:
+
+- **Lineup actor driver** (called from `SelectWindow_SpawnPreviewLineup`): builds slots
+  **`{3, 4, 6, 2, 11}`** then calls separate weapon/hand sub-routines. **Slot 14 (weapon) is NOT
+  in the lineup's overlay loop** — it is invoked through a separate hand-attach path after the loop.
+- **In-world / shared rebind drivers** (`ActorVisual_RebindLocalPlayerParts` and its sibling): build
+  slots **`{3, 4, 6, 2, 11, 14}`** in that order, then the weapon-node attach.
+
+Slot family mapping: slot **3** = BODY (`202`/"b"), slot **4** = `203`/"p", slot **6** = `206`/"s",
+slot **2** = `209`/"a", slot **11** = head/hair/face, slot **14** = WEAPON. There is **no separate
+base body mesh** — the body is overlay slot 3.
+
+**High-tier collapse guard (CODE-CONFIRMED — both drivers share this entry check).** Every driver
+opens with: `if (appearance_key > ActorVisualGlobal[3])` → build **only slot 3** (body); skip
+`{4, 6, 2, 11, 14}`. Above the registry threshold `ActorVisualGlobal[3]` the actor is reduced to a
+**body-only** high-tier mesh — no other overlays are applied. `ActorVisualGlobal[3]` is a data-driven
+boot value (read from the visual-catalog singleton; its concrete integer value is not static-settleable
+here — do not invent it). This guard fires for appearances whose `model_class_id` exceeds the
+threshold, which can produce a body-only preview for non-starter / high-tier slots.
+
+### 3.3.8 Scenery prop actor — the static decorative prop (CODE-CONFIRMED)
+
+The char-select scene includes one **static decorative prop actor** distinct from the five preview
+lineup actors and from the single create-preview actor. It is spawned at **tick-frame 5** (after the
+3D scene graph is built) by `SelectWindow_SpawnSceneryActor`, using spawn mode **2 (static scenery)**:
+
+| Property | Value | Confidence |
+|---|---|---|
+| Spawn mode | **2** (static scenery, not a player/mob actor) | CODE-CONFIRMED |
+| World position (X, Y, Z) | **(511.5, 0.0, −9684.0)** (= stage anchor 2048,0,−6144 + Δ −1536.5,0,−3540) | CODE-CONFIRMED |
+| Scale | **50.0** (legacy scale literal, same reconciliation note as §3.3.1) | CODE-CONFIRMED |
+| Orientation | identity (Euler 0, 0, 0) | CODE-CONFIRMED |
+| Role | decorative scene prop; no per-slot logic, no idle-motion swap, no hover/select behaviour | CODE-CONFIRMED |
+
+The scenery prop sits at world Z ≈ −9684, which is **~50 units nearer** the camera than the preview
+row (Z ≈ −9737 to −9738) and **~32 units further** than the create-preview actor's forward placement
+(Z ≈ −9684 vs create ≈ −9682 — within the same Z band). It is registered to the scenery/world-manager
+node and is destroyed and rebuilt only when `SelectWindow_ResetScene` tears down the whole scene.
+
+### 3.3.9 Appearance-debt diagnostic — why a slot renders the wrong mesh (CODE-CONFIRMED)
+
+Every mesh a slot shows is a **pure function of the bytes at the slot's 880-byte descriptor**
+(`window + descriptor_base + 880·slot`) fed through the shared actor factory (§3.3.6 / §3.3.7).
+No per-slot appearance value is hardcoded in the scene builder. A wrong or missing mesh on a specific
+slot can only come from one of five causes, listed in diagnostic order:
+
+| # | Cause | Tell | Fix |
+|---|---|---|---|
+| 1 | **Misaligned descriptor base** — the factory reads `class` @ descriptor +0x34 and `variant` @ +0x2C from the wrong byte offset because the per-slot base is computed with a wrong stride or block origin. | `class == 0` / garbage while `level` @ +0x3A decodes correctly (the level and class are nearby in the same block; if only class is wrong, the base is misaligned). | Ensure each slot's descriptor base = `descriptor_block_start + 880·k` (index-preserving; confirmed stride is 880 bytes; see §3.2). |
+| 2 | **Non-zero `variant` or `variant == 3` sentinel** — `appearance_key = 5·(class + 4·variant) − 24`; `variant == 3` yields key 0 (the invisible-actor sentinel, §3.3.7), and a non-zero `variant` legitimately resolves to a key outside the starter set (e.g. `{11, 16, 26, …}`), which may trip the high-tier collapse guard (§3.3.7). | Slot renders nothing when it should, or renders only a body-only (slot 3) mesh for a non-starter character. | Faithfully decode `variant` @ descriptor +0x2C; treat `variant == 3` as no-render (invisible); pass `variant` to the formula; implement the high-tier collapse guard against `ActorVisualGlobal[3]`. |
+| 3 | **Equip-table overlays skipped** — the visible outfit comes from the 20×16-byte equipment table at descriptor +0x58 via the per-part 64-bit key lookup (§3.3.7). A port that loads only the base body `.skn` and skips the `{3, 4, 6, 2, 11}` overlay loop shows only the bare skeleton body for any equipped character. | Slot renders a naked/default body instead of the character's worn gear. | Implement the per-part `key64 = gid + 1e9·(slot + 100·appearance_key)` lookup for all overlay slots `{3, 4, 6, 2, 11}`, plus the separate rigid weapon attach for slot 14 (§3.3.7). |
+| 4 | **Occupancy-gate mismatch** — the render path builds an actor only when `faceA` (u16 @ descriptor +0x2E) is nonzero (§3.2); the enter/create-route path tests `name != "@BLANK@"` (§3.1). If the two fields disagree (stale or garbage data) a preview is built for a logically-empty slot, or omitted for a real character. | Actor appears at an empty slot, or a real slot is dark/empty. | Keep both occupancy signals in sync with the server-supplied data; render iff `faceA != 0`. |
+| 5 | **Catalog miss or collapse fallthrough** — if `AnimCatalog_LookupByKey` (skeleton/visual record) or `AnimCatalog_FindSkinByKey64` (per-part skin) misses for the resolved key, the actor or the part is destroyed / silently skipped, surfacing as a missing or substitute mesh. The two data-driven values that govern these lookups — `ActorVisualGlobal[3]` (the high-tier threshold) and the concrete `model_class_id → bind-pose handle` map — are recovered in mechanism but their runtime values are data-pending; do not invent them. | A specific class or outfit variant is invisible or shows a substitute mesh while the formula and equip table are otherwise correct. | Feed the correct `model_class_id` and verify the per-part `key64`; the catalog contents are VFS-data (asset-analyst lane, see `specs/skinning.md`). |
+
+**The slot-k wrong-mesh problem is always an *input* problem** (causes 1–4) or a *catalog-miss* (cause 5),
+not a skinning-math error — the deform chain is settled (see `specs/skinning.md` §0). The diagnostic
+sequence: confirm the descriptor base is aligned → confirm `class`/`variant` reads → confirm overlay
+slots are iterated → confirm `faceA` gate → confirm catalog entries are populated.
+
 ## 3.4 Slot availability vs lock flags (CODE-CONFIRMED byte source)
 
 Two per-slot flag arrays gate enter/render, now pinned to their byte source on the select-window
@@ -1510,6 +1616,23 @@ object:
 **Selectable-for-enter = lock clear AND occupied; creating/locked = lock flag set.** (The exact
 **wire** semantics of the server slot-flag — delete-pending vs rename-cooldown — remain
 capture-pending; Open question 6.)
+
+**The `+0x1548` per-slot byte also gates the per-slot info-row overlay (CODE-CONFIRMED mechanism).**
+The per-slot roster-row refresh (`SelectWindow_RefreshSlotInfoRow`) reads `this + 0x1548 + slotIndex`
+and swaps a small **mutually-exclusive overlay set** accordingly:
+
+- **byte nonzero** → the conditional **action-61 overlay button** (§11.5c) is **hidden** (`SetVisible 0`),
+  and the sibling triad takes one state arrangement (one sibling off, two on);
+- **byte zero** → the action-61 button is **shown** (`SetVisible 1`), and the sibling triad takes the
+  opposite arrangement.
+
+Just before this branch the same refresh unconditionally **shows the three per-slot name / level /
+position labels** in a 3-iteration loop. The flag is written by the slot-management routines
+(slot-record write sets it to 0 when a character is populated; create / delete / reset paths also
+mutate it), so the show/hide decision is **genuinely runtime-data-driven** off the live roster, not a
+compile-time constant. **OPEN@DEBUGGER:** the exact semantic of the `+0x1548` byte (occupied vs locked
+vs selected vs deletion-pending) and the action-61 button's on-screen role/click handler — both owe a
+live-debugger confirm (no debugger this campaign).
 
 ## 3.5 The character-select preview camera — ENTRY DOLLY KF0→KF1 (CODE-CONFIRMED)
 
@@ -2270,36 +2393,85 @@ the per-area sky-parameter `.bin` files (§3.6.3) and the frozen 14:30 clock —
 texture. A revival must render the sky parametrically (or substitute an equivalent), not look for a
 skybox asset.
 
-### 3.7.5 Preview-character assets — the four starter classes (black-box VFS; CONFIRMED present)
+### 3.7.5 Preview-character assets — the four starter classes (RESOLVER CODE-CONFIRMED; body skinId SAMPLE-UNVERIFIED)
 
-All four playable starter classes use the **default appearance `IdA = 1`**, which shares a single
-**skeleton** and a single **idle motion**; only the mesh and texture differ per class:
+> **CORRECTED (binary wins, 2026-06-22).** The prior version of this section derived class tags
+> and `.skn` paths from a production-parser VFS observation with no IDA cross-check. That observation
+> was wrong in two ways: (1) the class tags (3/4/6/11) do not map to `InternalClass` 1/2/3/4; (2) the
+> listed `.skn` paths are not the body-resolver output — they are outfit-family skin gids from the
+> equipped-gear key path, which carries a non-zero part-id mantissa. The body resolver ignores the
+> mantissa and keys exclusively on `(slot=3, IdB)`. This section is rewritten from the binary-confirmed
+> resolver math; see `Docs/RE/_dirty/starter_body_resolution.md` for the full static analysis.
 
-| Class (tag) | Mesh `.skn` | Texture (1024²) |
-|---|---|---|
-| 3 — Bichimi / Dosa (`b`) | `data/char/skin/g202110001.skn` | `data/char/tex10241024/402110001.png` |
-| 4 — Monk (`p`) | `data/char/skin/g203110001.skn` | `data/char/tex10241024/403110001.png` |
-| 6 — Archer (`a`) | `data/char/skin/g209110001.skn` | `data/char/tex10241024/409110001.png` |
-| 11 — Sorceress / Summoner (`s`) | `data/char/skin/g206110001.skn` | `data/char/tex10241024/406110001.png` |
+#### Body resolver — how the preview body `.skn` is selected (CODE-CONFIRMED, static IDA `263bd994`)
 
-Shared across all four starter previews:
+The char-select preview body mesh is **not** resolved through `skin.txt` (that chain delivers the
+texture id, not the geometry). The body resolver keys an **AnimCatalog lookup on `(slot=3, IdB)`**
+with the part-id mantissa zeroed, where:
 
-- **Skeleton (bind):** `data/char/bind/g1.bnd` — **84 bones**, 1 root.
-- **Idle motion:** `data/char/mot/g111100010.mot` — "peace", **30 frames @ 10 fps** (3.0 s loop). This
-  is the in-world idle clip the preview plays by default (§3.3.4); there is **no dedicated char-select
-  clip**. (The reference/bind-pose clip `g101100001.mot`, 3 frames, is the rest-state anchor, **not**
-  the visible idle.)
+```
+IdB = 5 * (InternalClass + 4 * AppearanceVariant) − 24        (see specs/skinning.md §3.5.2)
+bodyKey64 = 1_000_000_000 * (slot + 100 * IdB)                slot = 3 for the body part
+```
 
-The class → skin → texture / bind / motion chain is the normal in-world chain (owned by
-`specs/skinning.md`, `formats/mesh.md`); char-select adds no new asset. Higher-tier appearances
-(`IdA` 11/16/26) have distinct skeletons and idle clips, but the **char-select preview uses only
-`IdA=1`** (simplest mesh/rig).
+The catalog payload yields a numeric **`skinId`**, and the body file loads from **`data/char/skin/g{skinId}.skn`**. The loaded `.skn` carries its own `id_b` header which selects the bind skeleton (`g{id_b}.bnd`) via the verbatim pool-key rule (`specs/skinning.md` §8(e)).
 
-> **Note (single-source).** The preview-asset chain above is a **black-box VFS / production-parser
-> observation** (no IDA cross-check yet for this specific lookup chain). The per-class mesh/texture
-> paths and the shared `g1.bnd` / `g111100010.mot` are confirmed present and decode cleanly; treat the
-> chain as CONFIRMED-present, the col-index → role mapping of `skin.txt` / `actormotion.txt` as owned
-> by the data-table / skinning specs.
+#### Per-class IdB and body key for the four starter classes (CODE-CONFIRMED)
+
+The four starter classes have `InternalClass` 1..4 with appearance variants stamped by the client
+(`SelectWindow_WriteSlotRecord`) as variant = {1, 2, 1, 1} for classes {1, 2, 3, 4} respectively:
+
+| InternalClass | Class name | Starter variant | IdB | Body key64 | Body `.skn` path |
+|---:|---|---:|---:|---:|---|
+| 1 | Musa | 1 | 1 | 103 000 000 000 | `data/char/skin/g{skinId}.skn` — skinId **SAMPLE-UNVERIFIED** |
+| 2 | Salsu | 2 | 26 | 2 603 000 000 000 | `data/char/skin/g{skinId}.skn` — skinId **SAMPLE-UNVERIFIED** |
+| 3 | Dosa | 1 | 11 | 1 103 000 000 000 | `data/char/skin/g{skinId}.skn` — skinId **SAMPLE-UNVERIFIED** |
+| 4 | Monk | 1 | 16 | 1 603 000 000 000 | `data/char/skin/g{skinId}.skn` — skinId **SAMPLE-UNVERIFIED** |
+
+The four IdB values (1/26/11/16) are **distinct**, so a correct resolver returns four **different** body
+skinIds and attaches four **different** body meshes to four **different** skeletons (`g1.bnd`,
+`g26.bnd`, `g11.bnd`, `g16.bnd` respectively — selected by the loaded skin's `id_b`, per
+`specs/skinning.md` §8(e)).
+
+> **The concrete `g{N}.skn` per class is sample-unverified.** The resolver math and key64 values
+> above are CODE-CONFIRMED from static IDA analysis. The numeric `skinId` the AnimCatalog returns for
+> each key — and therefore the literal VFS path — requires a live read of the catalog source table or
+> a debugger confirmation (breakpoint on the body resolver with a Dosa slot; read the returned skinId
+> and verify `g{skinId}.skn` in the VFS). Do not invent these values.
+
+#### Port bug diagnosis: "class-1 body for every class / flat Dosa sliver" (CODE-CONFIRMED root cause)
+
+The symptom "every class renders with a class-1 body / Dosa shows a near-flat sliver" is a
+**SPEC/RESOLVER bug in the port — wrong key**, NOT a VFS data gap:
+
+- The correct resolver keys `(slot=3, IdB)` with **IdB = 5*(InternalClass + 4*variant) − 24**.
+  Four distinct IdBs → four distinct body skinIds → four distinct body meshes.
+- A port that resolves the body through `skin.txt` (the texture chain, keyed by IdA), or hardcodes a
+  single body gid, or uses the part-id mantissa instead of zeroing it, collapses all classes onto
+  IdB=1 (Musa body) — the class-1 slab symptom.
+- The "flat Dosa sliver" is the signature of loading the Musa body (IdB=1 skinId) and deforming it
+  against the Dosa skeleton (IdB=11 / `g11.bnd`): mesh–skeleton mismatch, not a missing VFS file.
+  A missing VFS file would fault or blank, not produce a consistent class-1-shaped result.
+
+Fix the port: resolve the body via `(slot=3, IdB = 5*(InternalClass + 4*variant) − 24)` → AnimCatalog
+skinId → `g{skinId}.skn` (NOT via `skin.txt` / IdA). The variant sentinel guard (`Appearance_ResolveKey`
+returns 0 when `variant == 3`) should also be mirrored in the port (`specs/skinning.md` §3.5.2).
+
+#### Idle motion (VFS-confirmed for Musa / Musa-rig; other classes pending)
+
+The idle clip `data/char/mot/g111100010.mot` ("peace", **30 frames @ 10 fps**, 3.0 s loop) is
+VFS-confirmed present and is the class-1 / Musa-rig (IdB=1) standing idle. Whether Salsu/Dosa/Monk
+(IdB 26/11/16) resolve the same "peace" clip from their respective `actormotion.txt` rows, or
+distinct idles, is **sample-unverified** — the resolver path (`actormotion.txt` column 16 / field
+`+0x44`, keyed by IdB=col2) is CODE-CONFIRMED (`specs/skinning.md` §8(e); §10 of this spec), but the
+per-IdB row values are a VFS data read. Do not assume a shared idle across all four starter classes.
+
+- **No dedicated char-select idle clip exists.** The preview plays the same in-world idle the actor
+  would play (§3.3.4).
+- The reference/bind-pose clip `g101100001.mot` (3 frames) is the rest-state anchor, not the visible idle.
+
+The class → body → skeleton → texture → motion chain is the normal in-world chain (`specs/skinning.md`,
+`formats/mesh.md`); char-select adds no new asset type.
 
 ### 3.7.6 Character-creation backdrop — the SAME cell as selection (VFS-VERIFIED)
 
@@ -2328,58 +2500,50 @@ CODE-CONFIRMED "create moves the actor, not the camera" verdict.)
 
 ## 3.8 Char-select sound, music & the "character count : N" caption (CODE-CONFIRMED)
 
-### 3.8.1 BGM cue & the double-music defect — REAL (the loading→select handoff) (CODE-CONFIRMED)
+### 3.8.1 BGM cue & the single-BGM contract — EXACTLY ONE looping voice (CODE-CONFIRMED)
 
-The char-select **BGM** is sound cue **920100200**, started **unconditionally** by the select-window
-constructor (the state-4 enter / build path), with the **loop flag set**, on the single **category-0**
-(kind-0) music slot of the global sound manager. That slot is a **single direct voice** — at most one
-voice at a time.
+The char-select **BGM** is sound cue **920100200**. It is started **exactly once per scene build**:
+the final tail call of `SelectWindow_BuildAndInit` (the build/init virtual) invokes the sound manager's
+create-and-play method with `category = 0`, `soundId = 920100200`, `loop = 1`. The arguments are
+**compile-time immediates** in the instruction stream — the **loop flag is a hard-coded `1`**, so the
+voice is **LOOPING**, not data-driven. The trigger is straight-line code (no loop, no conditional wraps
+it), and the per-frame tick installed two instructions later does **not** re-issue it; it only pumps the
+global sound manager each frame. The play return value is **discarded** — there is **no retained audio
+handle field** on the select-window object; the BGM is owned by the process-global sound manager, not by
+a window field. **The earlier "no audio on char-select" reading is WRONG — there is one looping
+category-0 BGM voice.**
 
-> **CORRECTION — the persistent double-music is REAL (un-refute).** A prior pass concluded the
-> double-voice defect was REFUTED because, *within* the SelectWindow, all music is category 0 on one
-> slot so two SelectWindow tracks cannot persistently stack. That within-SelectWindow fact still holds,
-> but the prior pass **missed the cross-scene loading handoff** — which is where the double actually
-> comes from. The double-music is **REAL**.
+> **DOUBLE-BGM VERDICT — exactly ONE voice (CODE-CONFIRMED, no debugger needed).** A char-select entry
+> yields **exactly one BGM voice**, and a second category-0 BGM **cannot** coexist. The create-and-play
+> method's category-0 path enforces this with **two independent structural guards**, plus an enable gate:
+>
+> 1. **Single shared slot.** Categories 0 and 1 share **exactly one** voice-pointer field in the sound
+>    manager. A subsequent category-0 start **reuses/overwrites that same pointer** (re-binding the id,
+>    or tearing the slot down and recreating it) — it can never hold two voices simultaneously. There is
+>    exactly **one** category-0/1 concurrent voice slot.
+> 2. **Per-id dedup.** Before (re)using the slot, the `soundId` is looked up in the manager's tracking
+>    map; if the id is **already present** (already playing/tracked), the call **returns without creating
+>    any voice**. The same id therefore never stacks.
+> 3. **Enable gate.** A category-0-enabled byte must be set, or no voice is created at all.
+>
+> The 4th argument's meaning is settled statically: it is the **DirectSound loop flag** (`0` = one-shot,
+> `1` = looping) — proven by the two distinct error strings on the play path (the one-shot vs looping
+> branches) — and it maps straight to the buffer-play loop parameter. At the char-select trigger it is
+> the immediate `1`, so the BGM loops. This loop-bit question is **NOT** OPEN@DEBUGGER — it is a
+> hard-coded immediate, fully resolved in the binary.
+>
+> **OPEN@DEBUGGER (not load-bearing for the single-voice verdict):** the once-per-entry firing cadence of
+> `SelectWindow_BuildAndInit` and whether the enable byte is set in practice are structurally implied but
+> only runtime-observable; neither is required to confirm the single-looping-voice verdict.
 
-**The real source — the loading screen's looping BGM contends across the scene boundary (CODE-CONFIRMED):**
-
-- The **loading screen** (engine state 2, §9.1) plays cue **920100100 as a category-0 LOOP** (loop = 1)
-  — **not** a category-2 SFX (an earlier note that called 920100100 a "cat-2 SFX" is corrected). It is
-  started on a **background loading-audio worker thread** and is **never explicitly stopped** anywhere
-  in the binary; its only release is the implicit free when something else seizes the category-0 slot.
-- When char-select starts **920100200** it relies on simply **overwriting** the single category-0 slot.
-  But the still-looping 920100100 is being driven by a **detached loading-audio worker thread that is
-  not joined** when the loading screen ends. The overwrite **frees** the 920100100 buffer and returns
-  without immediately acquiring the new one (the next event re-acquires it) — and a freed *looping*
-  voice can still be **draining** in the mixer, or be left **orphaned** if the un-joined worker thread
-  interleaves with the main-thread slot-replace.
-- For a short (or, if the worker interleaves, lasting) window **both** the dying 920100100 and the new
-  920100200 are audible → the **intermittent / occasional double BGM**. The non-determinism is exactly
-  why the maintainer observes it only sometimes: it depends on the timing of the free vs the mixer
-  release vs the next re-acquire, and on whether the loading worker outlived the modal screen.
-
-So the defect is **not** two SelectWindow voices (those overwrite one slot and cannot persistently
-stack) — it is the **un-stopped, un-joined looping LOADING track (920100100, category-0 loop)
-contending with char-select's 920100200** across the loading→select boundary.
-
-> **Confidence.** That 920100100 is a category-0 loop started on an un-joined worker and never
-> explicitly stopped, and that char-select overwrites the same single category-0 slot, are
-> **CODE-CONFIRMED** (static). *Which* exact route manifests — a brief free/acquire overlap vs a
-> persistent orphaned voice when the worker interleaves — is **DEBUGGER-PENDING**; but the double **is
-> real**, not refuted.
-
-**Fix contract for a faithful rebuild (un-refute and restate):** the front-end music state machine must
-**explicitly STOP the previous track at each scene boundary** — specifically **stop 920100100 before
-char-select starts 920100200** (and **quiesce/join the loading-audio worker thread** on a single thread
-before the next scene's BGM starts) — rather than relying on the unsynchronized single-slot overwrite.
-Then treat **920100200** as **one owned BGM voice on one slot**: make PLAY **idempotent** (if already
-playing, do nothing) and **stop it on char-select scene-exit** (the stop the original omits). This
-removes the audible double without changing the audible track. char-select BGM remains **920100200**;
-the per-class create-form preview cues are **91006xxxx** (§4.1), which play on the same single category-0
-slot and therefore **replace** the scene BGM rather than overlay it.
-
-> The separate ambient sound cue **924000001** (§3.6.5c, kind-3 channel) is **not** the BGM and is not
-> audible in char-select; do not conflate the two.
+**Single-BGM contract for a faithful rebuild.** Treat **920100200** as **one owned, looping BGM voice on
+one slot**: make PLAY **idempotent** (if 920100200 is already playing, do nothing — mirroring the
+binary's per-id dedup), keep it on a single shared music channel that any new category-0 cue **replaces**
+rather than overlays, and **stop it on char-select scene-exit**. The per-class create-form preview cues
+**91006xxxx** (§4.1) play on the **same single category-0 slot** and therefore **replace** the scene BGM
+rather than overlay it. The separate ambient cue **924000001** (§3.6.5c) and the scene-ambient VFX path
+are not the BGM and do not contend with it. (The kind-3-channel ambient cue **924000001** is not
+audible as BGM in char-select — do not conflate the two.)
 
 ### 3.8.2 The "character count : N" top caption (CODE-CONFIRMED)
 
@@ -2693,28 +2857,46 @@ This is the load-bearing transition out of the front-end.
 empty and the action instead **opens the character-creation form** (§4). So "enter on an empty slot"
 == "create a character".
 
-**For a real character**, the sequence is (CODE-CONFIRMED, version token SAMPLE-VERIFIED):
+**For a real character**, world entry is a **SERVER ROUND-TRIP ladder**, not a single local send.
+The corrected sequence (CODE-CONFIRMED, CYCLE 12 Phase 2; version token SAMPLE-VERIFIED) is:
 
 1. Play the **enter SFX 920100200**.
-2. Guard: the slot is valid (≤ 4), not locked, and not already entering.
-3. Latch "entering" so further confirms are ignored.
-4. Build the **40-byte** enter-game request: **slot index at +0**, and a **client-version token**
-   stamped into the buffer. The token is computed live from the version file as
-   **`10 × game.ver[field 5] + 9`**; for the sampled `game.ver` (`field 5 = 2114`) the token is
-   **21149** (SAMPLE-VERIFIED — see `login_flow.md` §3.3). Send the **`1/9 CmsgEnterGameRequest`**
-   message (40-byte body; owned by `login_flow.md` / `packets`).
+2. **Confirm the occupied slot ("play / select this character").** This emits **`1/7
+   CmsgSelectCharacterSlot` with the play-confirm mode byte = `1`** (the *select-and-play* sub-mode —
+   **not** mode `0`, which is the slot-lock / pre-play step). The 2-byte body is `{slot, mode}`.
+3. **Wait for the server's `3/14 SmsgCharSpawnResponse`.** This 16-byte reply carries a **leading flag
+   byte**: when that flag is **non-zero (success)**, the client reads the slot and spawn coordinates
+   and **re-enters its enter-builder**. When the flag is **zero**, the client arms a timeout and
+   **does not** emit `1/9`.
+4. **The `1/9 CmsgEnterGameRequest` is emitted from *inside* the `3/14` handler** (server-triggered),
+   **not** directly from the Enter/OK button on the normal play path. The Enter button merely confirms
+   the slot (step 2); the actual world-entry send is gated on the positive-flag `3/14`. Build the
+   **40-byte** request: **slot index at +0**, a **33-byte self-checksum token** at +0x01 (the
+   lowercase-hex **MD5 digest of the client’s own executable file** — 32 hex chars + NUL; a
+   build-integrity token, **not** a launcher/login session token — see `login_flow.md` §7 and
+   `cmsg_char_enter.yaml`), a 2-byte zero pad at +0x22, and a **client-version token** u32 at +0x24
+   computed as **`10 × game.ver[field 5] + 9`** (for the sampled `game.ver` `field 5 = 2114` → token
+   **21149**, SAMPLE-VERIFIED). No `1/9` field echoes any prior inbound packet.
 5. **Cache the chosen slot locally for the world load (the only "preload" char-select performs):**
    - the **880-byte spawn descriptor** is copied to a global local-player descriptor, and
    - the **96-byte stats block** is copied to a global stats cache.
    Asset (skin/terrain) loading happens **later**, in the load/in-game states, fed by this cache.
-6. Set the select window's **confirm-enter flag**. On teardown, the select window writes engine
+6. Set the select window’s **confirm-enter flag**. On teardown, the select window writes engine
    state **5 (In-game) / substate 8**, and the 5 preview actors + select camera are destroyed
    (`client_runtime.md` §5).
 
-**What the client waits for after the send** (owned by `login_flow.md` / `client_runtime.md` §7.4):
+> **THE ENTER LADDER (load-bearing — CYCLE 12 Phase 2, CODE-CONFIRMED):**
+> `1/7 (mode 1, play-confirm) → 3/14 (flag ≠ 0, in) → 1/9 (out, emitted by the 3/14 handler) → 3/5 (in)`.
+> A client that fires `1/9` *unilaterally* off the Enter button — without the **mode-1** `1/7`
+> play-confirm and without waiting for the **positive-flag `3/14`** — sends `1/9` out of sequence;
+> this is the leading static hypothesis for a genuine **`3/100` select-mode result code 23** server
+> reject (notice id 1604; recoverable, not fatal — see `packets/3-100_char_action_result.yaml`). A
+> secondary, purely client-gated direct route from the Enter button to the enter-builder also exists
+> (it checks only: a modal byte clear, the slot is a real `0..4`, and the op-pending latch not set),
+> but the **server-triggered `3/14` path is the normal play flow**.
 
-- It does **not** block — it sends `1/9` and the engine advances to **state 2 (Load)** then **state 5
-  (In-game)** which builds the real world.
+**What the client waits for after the `1/9` send** (owned by `login_flow.md` / `client_runtime.md` §7.4):
+
 - The select → In-game scene exit is **client-local** (the select-window teardown sets engine state
   5/8 on the confirm-enter flag), **not** opcode-driven.
 - **`3/5 SmsgEnterGameAck`** independently sets **Load (state 2)** and re-syncs the account char count
@@ -2724,21 +2906,19 @@ empty and the action instead **opens the character-creation form** (§4). So "en
   server world-state packet (`4/1`), Y forced to 0, and the 3×3 terrain ring streams around the spawn
   (owned by `client_runtime.md` §7.4).
 
-> **⚠️ CROSS-SPEC note — spawn driver corrected + arrival order (route to the protocol-author; I do
-> not own `opcodes.md`).** Any earlier §7 text attributing the local-player spawn to "`3/7
-> SmsgCharSpawnResult`" is **wrong**: per the dispatch-ladder verdict (§5), **`3/7` is the 8-byte
-> char-manage result** (delete/select/rename), the **local-player spawn is driven by `4/1`**, and the
-> 16-byte server enter-confirm is **`3/14`** (which re-enters the select enter-builder). The major-3
-> ladder renumbering (`3/4` = SceneEntityUpdate var, `3/7` = SmsgCharManageResult 8B, `3/14` =
-> CharSpawnResponse 16B) is the protocol-author's job in `opcodes.md`. The client enforces **NO fixed
-> receive order** between `3/5` and `4/1` (neither handler gates on the other); the strict **wire**
+> **⚠️ CROSS-SPEC note — spawn driver + ladder (route to the protocol-author for `opcodes.md`).** Per
+> the dispatch-ladder verdict (§5): **`3/7` is the 8-byte char-manage result** (delete/select/rename),
+> the **local-player spawn is driven by `4/1`**, and the 16-byte **`3/14 SmsgCharSpawnResponse`** is
+> the server enter-confirm that **re-enters the select enter-builder and emits `1/9`** (the ladder
+> above). The client enforces **NO fixed receive order** between `3/5` and `4/1`; the strict **wire**
 > arrival order of `3/5` vs `4/1` is **server-determined** and remains **DEBUGGER-PENDING** — settle
-> it by breakpointing the receive dispatcher and the `3/5` / `4/1` handlers and reading engine-state +
-> the local-player pointer before/after each (live pilot only; never `dbg_start`).
+> it by breakpointing the receive dispatcher and the `3/5` / `4/1` handlers (live pilot only; never
+> `dbg_start`).
 
-> A `1/7 CmsgSelectCharacter` (2-byte `{slot, flag}`) send also exists on the select path; whether it
-> must precede every `1/9` enter, or only the first selection, is **not** resolved without a capture
-> (Open question 8). Its catalog is owned by the protocol author.
+> **OPEN (capture/debugger-pending):** whether the server strictly requires the two-step
+> `1/7 mode 0 (slot-lock) → 1/7 mode 1 (play)` ordering or only the mode-1 play-confirm; and whether
+> the delete-confirm 1/7 uses mode `0` or `1` (the delete-context mode byte is **not** statically
+> provable — see §8 and §5). These are the only enter-ladder unknowns left.
 
 ## 7.1 In-game vs char-select scene graphs — view-platform count (CODE-CONFIRMED, CYCLE 7)
 
@@ -2777,17 +2957,22 @@ matching inbound result clears it.
 | Action | Message (`major/minor`) | Body size | Trigger |
 |---|---|---|---|
 | Create character | `1/6` (create-only — collision REFUTED, §4.5) | 52 bytes | Create form confirm (valid name) |
-| Select character | `1/7` `{slot, 0}` | 2 bytes | slot select / pre-enter step (mode byte = 0) |
-| Delete character | `1/7` `{slot, 1}` | 2 bytes | delete confirm (mode byte = 1; §5) |
-| Enter game | `1/9` | 40 bytes | confirm a real (non-blank) slot |
+| Slot-lock / pre-play | `1/7` `{slot, 0}` | 2 bytes | slot-lock / pre-play confirm (mode byte = **0**; also stamps the chosen name into the HUD) |
+| Play-confirm (select-and-play) | `1/7` `{slot, 1}` | 2 bytes | "play / select this character" occupied-slot confirm (mode byte = **1**; elicits the `3/14` enter-trigger — see §7) |
+| Enter game | `1/9` | 40 bytes | emitted by the **`3/14` handler** on a positive flag (server-triggered), not by the Enter button directly (§7) |
 | Rename character | `1/13` | 18 bytes | rename confirm (valid name) |
 | Slot-move ("location") | `1/14` | 1 byte | move/commit slot (single slot index; "is sending location") |
 
-> **`1/7` carries select *and* delete** — same opcode, distinguished by the 2-byte body's **mode
-> byte** (`0` = select, `1` = delete; §5). **`1/14` is a separate slot-move / "location" send** (1-byte
-> single slot index), **not** delete. The two `1/14` emitters both print the "is sending location"
-> debug string; whether they represent a drag-to-empty vs a reorder is not decidable from the 1-byte
-> body and stays capture-pending.
+> **`1/7` mode byte (CYCLE 12 Phase 2 correction):** the two static emit sites are **mode `1` =
+> select-and-play** (the occupied-slot play-confirm that drives the enter ladder of §7) and **mode `0`
+> = slot-lock / pre-play**. The **delete-confirm** action ALSO rides `1/7 {slot, mode}` (there is no
+> dedicated major-1 delete opcode; delete *results* arrive on `3/7` subtype 2, §5), but **which mode
+> byte the Delete-Yes button emits (`0` vs `1`) is NOT statically provable** — it depends on the
+> confirm-popup → command-code wiring and is **capture/debugger-pending** (breakpoint the 1/7 builder
+> on Delete-Yes and read the 2 bytes). The earlier "`0` = select, `1` = delete" reading is therefore
+> **corrected**: mode `1` is the play-confirm, mode `0` the slot-lock, and the delete mode byte is
+> open. **`1/14` is a separate slot-move / "location" send** (1-byte single slot index), **not**
+> delete.
 
 
 ---
@@ -3457,6 +3642,56 @@ without their backdrop dest/src spelled out as explicit rows; they are spelled o
 > **582..1024** = lower backdrop / bottom-panel art (the lower-backdrop row above). An engineer must
 > slice the atlas along these three bands.
 
+### 11.2i Login widget construction order (CODE-CONFIRMED — full 73-widget sequential build walk)
+
+> A full element-by-element walk of the login scene builder confirms the §11.2a–§11.2h tables byte-for-
+> byte and establishes the exact build sequence. Build order = z/paint order (first built = bottommost);
+> the z-order column in §11.2g is the direct consequence of this sequence. All 73 widgets are built by
+> the single builder; none is built by the constructor (the constructor only seeds the init/idle field).
+>
+> **4-atlas preload order** (loaded into the window's `GUTextureList` at the very top of the builder,
+> before any widget is constructed, in this order):
+>
+> | Handle | VFS path |
+> |---|---|
+> | A | `data/ui/login_slice1.dds` |
+> | B | `data/ui/loginwindow.dds` |
+> | C | `data/ui/InventWindow.dds` |
+> | D | `data/ui/loginwindow_02.dds` |
+>
+> **Grouped build sequence (73 widgets, in build order):**
+>
+> | Phase | Widgets | Description |
+> |---|---|---|
+> | 1 | 1–9 | Server-list listbox container (atlas B): main panel bg, listbox container panel, scroll-up arrow (action 106), scroll-down arrow (action 107), scrollbar thumb (action 108), header chrome strip; then 22 static notice/agreement text labels (msg ids 4001..4022, stacked at x=50, y=100..478 step 18). Parented into window; hidden at build. |
+> | 2 | 10 | Full background art panel (atlas A, src 0,0,1024,398) — the resting login backdrop; shown at build. |
+> | 3 | 11–35 | Server-list overlay panel (atlas B/D): overlay container, header strip, TWO-PLATE LOOP (2 iterations, actions 400/401): per plate — header label, parchment body image, 3-state plate button, caption label #1, caption label #2; parchment scrollbar thumb (dynamic Y); 3 status/indicator images; PAGER BUTTON LOOP (10 buttons, actions 115..124). Then: the refresh button (action 105, atlas A) and its gold label plate. |
+> | 4 | 36–37 | Notice dialog #1 (action 113, atlas C) and Error dialog #2 (action 114, atlas C) — built hidden, each with body label and OK button. |
+> | 5 | 38 | Bottom-bar band panel (atlas A, src 0,582,1024,442; Y scales with screen): hosts the server-list reveal button (action 102), the gold refresh label plate, and the refresh button (action 105). |
+> | 6 | 39–47 | Top form / inner-form sub-panel (layout only, invisible): ID caption art (action −), PW caption art (−), small deco plate (−), ID textbox (action 109, IME 16, maxlen 16), PW textbox (action 110, IME 12, maxlen 12, masked), Save-ID checkbox (action 104), OK/Login button (action 103). Parented into bottom-bar panel. |
+> | 7 | 48 | PIN / second-password keypad sub-window (dst 347,173,329,422, built hidden). |
+> | 8 | 49–50 | Option-strip panel (dst 356,531,313,132, hidden): two art plates + two tab buttons (actions 111, 112). |
+> | 9 | 51–52 | ExitPanel and ErrorPanel (shared quit/error dragon-frame dialogs, atlas C, built hidden). |
+>
+> **Inner form construction order (widgets 39–47, the credential form).** The exact sub-sequence
+> within the inner-form sub-panel (widget 39) is, in build order:
+> 1. Inner form sub-panel (invisible layout container, dst 0,0,1024,100) — parent of the form row.
+> 2. ID caption art plate (atlas A, dst 340,30,38,13, src 0,398).
+> 3. PW caption art plate (atlas A, dst 507,30,49,13, src 38,398).
+> 4. Small deco plate (atlas A, dst 619,86,67,13, src 87,398).
+> 5. **ID / account textbox** (atlas A, dst 390,32,102,13, src 615,404; IME 16; maxlen 16; action 109).
+> 6. **Password textbox** (atlas A, dst 568,32,102,13, src 615,404; IME 12; maxlen 12; masked; action 110).
+> 7. **Save-ID checkbox** (atlas A, dst 694,86,13,13; off src 717,398; on src 730,398; action 104).
+> 8. Saved-id **prefill branch** — runs after the checkbox is built; reads the persisted saved id,
+>    sets checkbox state and pre-fills the ID box if applicable, selects initial focus target (§1.3 /
+>    §11.2e). No new widget built in this step.
+> 9. **OK / Login button** (atlas A, dst 456,64,112,39; N src 266,398 / H+P src 490,398; action 103).
+>    Built AFTER the checkbox and the prefill branch.
+>
+> **Parenting order into the inner form panel** (determines paint/z order within the form):
+> ID-caption → PW-caption → deco → ID textbox (action 109) → PW textbox (action 110) →
+> checkbox (action 104) → OK button (action 103). The inner form panel is then parented into the
+> bottom-bar band panel as its last child.
 
 ## 11.3 PIN / second-password modal - layout & keypad behaviour (CODE-CONFIRMED)
 
@@ -3465,6 +3700,16 @@ It uses two atlases only: **`password.dds`** (all digit-tile and reset/OK/cancel
 shared dialog/frame atlas (`InventWindow.dds`) for the framed background quad - source rect
 `(318, 647, 340, 190)` (`srcU=318, srcV=647, W=340, H=190`), the same notice/error/quit frame
 (section 11.2d). This is the dragon-frame background quad described in the table below.
+
+**Build call order (CODE-CONFIRMED).** The modal is constructed by the login-window builder as a
+sub-object (an operator-new allocation of 696 bytes), in this exact sequence: (1) construct the
+modal object and install its vtable; (2) call `BuildKeypad` — which loads the two own atlases
+(`password.dds` → primary handle, `InventWindow.dds` → secondary handle) and builds **all keypad
+children** in order: masked-echo label → 100 digit buttons (10 positions × 10 digit-glyph stacks)
+→ Reset button (tag 11) → OK button (tag 12) → Cancel button (tag 13) → nested close panel; (3)
+call the modal's vtable hide slot (argument 0) — the modal is **built hidden**; (4) parent the
+modal into the LoginWindow. The `BuildKeypad` child-add order equals the paint order within the
+modal; the masked-echo label is built and added first, behind the digit tiles and buttons.
 
 - **Modal panel rect:** `347, 173, 329, 422` on the canvas. **Panel origin = `(347, 173)`**; every
   panel-local child rect below maps to the canvas as **`(347 + Xlocal, 173 + Ylocal)`** (the panel-
@@ -3548,6 +3793,19 @@ Result: a **fresh random permutation of 0-9 every time the modal opens and every
 pressed**. Both the on-open re-roll AND the on-Reset re-roll are now **CODE-CONFIRMED** — the keypad
 OnEvent tag-11 (Reset) handler re-invokes the scramble routine (CAMPAIGN 9b, IDA re-walk).
 
+**Show-time ordering (CODE-CONFIRMED — load-bearing for a faithful port).** The modal's
+`SetVisible(true)` call runs the following steps in strict order before the base `SetVisible` show:
+1. Hide the nested close-panel child (sets its visible flag to false).
+2. **Clear the entered-digit collection** (resets any previously typed PIN).
+3. **Clear the submitted flag** (`submitted = 0`).
+4. If the masked-echo label exists: run the **scramble** (re-randomise the layout).
+5. Call the base widget `SetVisible(true)` to actually show the modal.
+
+A port must **clear-then-scramble-then-show** in exactly that order. Scrambling before clearing the
+entry collection would leave stale entry state; showing before scrambling would briefly display the
+prior layout. The submitted flag clears before scramble so a double-show cannot carry a stale "already
+submitted" state into the newly-shown modal.
+
 - **Digit-key behaviour — the TAG is the true digit, the POSITION is scrambled.** The on-screen digit
   positions are re-rolled on open and on Reset, but each digit button's **tag is its true digit value
   `d` (0..9)** — set when the 10 overlapping digit-glyph buttons are built for each position (the inner
@@ -3626,6 +3884,7 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
 | List scroll-UP arrow | B | 483,490,13,10 | 467,86,13,10 | 1-state button | - |
 | List scroll-DOWN arrow | B | 505,490,13,10 | 467,455,13,10 | 1-state button | - |
 | Scrollbar thumb / commit dot | B | 496,490,9,9 | 469,98,9,9 | 1-state button | - |
+| **Server-list reveal button** (on bottom-bar) | A | 154,398,112,39 normal / 378,398 H+P | 456,166,112,39 | 3-state button | **102** — arms the server-list overlay (distinct from the refresh button below; also reachable via action 112 / 'p') |
 | **Refresh button** | A | 792,398,111,38 | 456,-3,111,38 | button (+2nd UV rect) | **105** (10 s cooldown -> re-enter fetch) |
 | Refresh-button label plate | A | 743,398,210,70 | 407,-3,210,70 | image (gold plate) | **baked art** |
 | List column header labels | (text) | - | in scroll | label | captions 4029..4032 |
@@ -3633,6 +3892,14 @@ build. Shorthand: **A**=`login_slice1.dds`, **B**=`loginwindow.dds`, **C**=`Inve
 | Notice dialog #1 FRAME | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel (hidden) | runtime body caption (msg.xdb id) + OK button |
 | Error dialog #2 FRAME | C | 318,647,340,190 (== shared notice panel) | 342,289,340,190 (centered) | panel (hidden) | runtime body caption (msg.xdb id) + OK button |
 | Sword/arrow cursor | `data/cursor/stand.dds` | - | follows mouse | sprite | verified vs `data/cursor/game.ver` |
+
+> **Server-list reveal vs refresh — two distinct widgets (CODE-CONFIRMED).** The **server-list reveal
+> button** (action **102**, bottom-bar dst `456,166,112,39`, atlas A src normal `154,398` / hover+pressed
+> `378,398`) is the control that **arms the overlay** (shows the parchment-plate server selector). The
+> **refresh button** (action **105**, bottom-bar dst `456,−3,111,38`, atlas A src normal `792,398` /
+> hover+pressed `602,416`) **re-fetches the server list** (throttled to ~10 s). They sit at very similar
+> X positions (`456`) but at different Y values (`166` vs `−3`) on the bottom-bar panel, and carry
+> different art and different handlers. Do not conflate them.
 
 - **Pager-button count = exactly 10 (CODE-CONFIRMED).** The button loop runs X from 13 in steps of
   +47 while X < 483 → 10 iterations → X ∈ {13,60,107,154,201,248,295,342,389,436}, each at dst
@@ -3721,13 +3988,18 @@ Rect = `(X, Y, W, H)`.
 | Centered char-info panel | (none) | X=(W-215)/2, 0, 244,187 | - | panel |
 | Char-info background art | T1 | (centered),0,215,147 | 556,542 | image |
 
-### 11.5b Character SLOT tabs (the per-slot frame art) - 3 slots, 113x40, all from `loginwindow.dds`
+### 11.5b Character SLOT tabs (the per-slot frame art) - 113x40, all from `loginwindow.dds`
 
-Each slot-select button **is** the per-slot frame art; its normal-state source rect gives the slot
-frame graphic. Slot occupancy and the per-slot 3D preview / name-level-class display are
-descriptor-driven (sections 3.2-3.3), not layout art.
+> **The slot model is FIVE slots (CODE-CONFIRMED).** The select-window object holds **exactly 5**
+> per-slot spawn descriptors (`5 × 880 bytes`, stride `0x370`, built by a 5-iteration ctor loop;
+> §3.0 / §3.1) and renders up to **5 live 3D preview actors** in a row (§3.3) — this is the
+> authoritative **5-slot grid**. Slot occupancy, the per-slot 3D preview and the name / level / class
+> display are descriptor-driven (§3.2–§3.3), not layout art. The 2D **slot-select buttons** below are
+> the per-slot frame art; each slot-select button **is** the frame graphic (its normal-state source
+> rect). The byte-exact tab rects recovered so far cover slots 1–3 (actions **1, 2, 3**); the
+> slots 4–5 tab rects are not yet enumerated byte-exact in 2D, but the underlying slot count is 5.
 
-| Slot | Action id | Rect (X,Y,W,H) | Normal (U,V) | Hover (U,V) | Pressed (U,V) |
+| Slot tab | Action id | Rect (X,Y,W,H) | Normal (U,V) | Hover (U,V) | Pressed (U,V) |
 |---|---|---|---|---|---|
 | Slot 1 | 1 | 67,17,113,40 | 675,795 | 675,795 | 483,883 |
 | Slot 2 | 2 | 232,7,113,40 | 640,742 | 640,742 | 483,923 |
@@ -3740,12 +4012,29 @@ descriptor-driven (sections 3.2-3.3), not layout art.
 | **Create** | **4** | 130,112,59,20 | 0,1004 | 0,1004 | 59,1004 |
 | **Delete** | **5** | 42,112,59,20 | 118,1004 | 118,1004 | 177,1004 |
 | **Enter** | **6** | 112,112,59,20 | 236,1004 | 236,1004 | 295,1004 |
-| Conditional overlay button | 61 | 20,112,95,20 | (T2 `mainwindow.dds`, computed) | - | pressed V=500 |
+| **Conditional overlay** | **61** | 20,112,95,20 | 405,466 | 405,466 | 500,466 |
 
-The conditional overlay button (action 61, from `mainwindow.dds`) is built only when a slot condition
-holds; its role (a "select/play" overlay on the active slot) is **UNVERIFIED**. The Create/Delete/
-Enter rects/actions agree with the section 4/section 5 correction (action ids 4/5/6, not atlas-X
-coordinates).
+All four buttons draw from the **same atlas row** for their src origin. Action 61 draws from
+`data/ui/mainwindow.dds` (T2); the other three draw from `data/ui/loginwindow.dds` (T1, row V=1004).
+All source rects in the action-61 row are byte-exact literals recovered from the builder call site in
+`SelectWindow_BuildAndInit`; the prior placeholder "pressed V=500" was a mis-labelled column value —
+the full origin pair for PRESSED is U=500, V=466 (same row as NORMAL/HOVER). NORMAL and HOVER share
+origin (405,466); PRESSED alone shifts the atlas column to U=500. Width=95, height=20 for all states.
+
+Prior build-order note item #33 (`dst(reg,500) wh(20,95) press(112,20)`) mis-paired the operands;
+the corrected operand order is dstX=20, dstY=112, W=95, H=20.
+
+Show/hide trigger (RESOLVED STATICALLY). The action-61 child is created **unconditionally** at build
+time (only the standard allocation null-guard wraps it) and carries no static `SetVisible(false)`
+call. Its **visibility is driven per slot** by `SelectWindow_RefreshSlotInfoRow`, which reads the
+per-slot byte at select-window field **`+0x1548 + slotIndex`**: byte **nonzero → HIDE** action 61 (and
+flips a sibling overlay triad to one arrangement); byte **zero → SHOW** action 61 (sibling triad to the
+opposite arrangement). The byte is populated from the live character roster, so the toggle is genuinely
+runtime-data-driven (full mechanism in §3.4). **OPEN@DEBUGGER:** the exact byte semantic and the
+action-61 button's on-screen role / click handler.
+
+The Create/Delete/Enter rects/actions agree with the section 4/section 5 correction (action ids
+4/5/6, not atlas-X coordinates).
 
 ### 11.5d Per-slot info plates + number cells (chrome detail)
 
@@ -3888,6 +4177,400 @@ calls the **3D scene builder** (scene "select", map000 area 0, clock 52200 s = 1
 camera, single ambient effect id **380003000** — §3.5 / §3.6.5 / §3.7) and starts the char-select BGM
 on the kind-0 music slot (§3.8.1).
 
+### 11.5g Child-panel inventories, total count, duplicate verdict & action gating (CODE-CONFIRMED)
+
+The select window's top-level build pass attaches two dedicated child sub-panels — an **ExitPanel** and
+an **ErrorPanel** — each of which builds its own widgets in its own builder. Both are enumerated
+element-by-element below (static-confirmed, byte-exact build order).
+
+**ExitPanel — exit/quit-confirm dialog (built by the panel's own button-builder).** A single
+straight-line pass, no loops, no conditionals beyond the standard allocation null-guards:
+
+| # | Kind | Action id | Rect (X,Y,W,H) | Normal (U,V) | Hover (U,V) | Pressed (U,V) | Text |
+|---|---|---|---|---|---|---|---|
+| 1 | Label (caption, no texture) | none (plain add) | — | — | — | — | msg.xdb **2007** |
+| 2 | 3-state button | **50** | 55,136,113,40 | 302,860 | 302,860 | 415,860 | — |
+| 3 | 3-state button | **51** | 174,136,113,40 | 302,900 | 302,900 | 415,900 | — |
+
+ExitPanel total: **2 clickable buttons** (actions **50**, **51**) + **1 caption label** = 3 widgets.
+Nothing built twice, nothing conditional, nothing unexplained.
+
+**ErrorPanel — error/notice host (built by the panel's own build/init virtual, NOT its constructor).**
+Note the base constructor builds **zero** widgets (it only installs the vtable and zero-inits ~10
+fields); the actual widgets are created in the class's build/init virtual:
+
+| # | Kind | Action id | Rect (X,Y,W,H) | Atlas origin(s) | Note |
+|---|---|---|---|---|---|
+| 1 | Multi-line label | **670** | 0,0, (panel-width/2 − 6), — | — | text set at runtime |
+| 2 | 2-state button | **671** | 125,151,90,25 | 417,943 / 507,943 | OK / dismiss |
+| 3–6 | Label ×4 (4-iteration loop) | none (plain add) | 0,0 | — | text set at runtime |
+
+ErrorPanel total: **1 clickable button** (action **671**) + **5 text labels** (action **670** on the
+first label; the 4 loop labels are actionless) = 6 widgets. Button **671 is the dismiss control** — its
+input virtual hides the panel (`SetVisible 0`) on a click hitting action 671; an on-tick countdown can
+also auto-dismiss.
+
+> **Duplicate-bar / built-twice verdict (CODE-CONFIRMED): NOTHING is built twice.** Across the select
+> window and its two child panels there is **no accidental duplicate widget**. The only repeated builds
+> are **deliberate and explained**: ErrorPanel's **4-iteration label loop** (a `do/while` of exactly 4,
+> the four runtime-filled body labels), and two benign ctor-side **double zero-clears** of internal
+> field blocks (the 5-slot descriptor span is bulk-`memset` and then per-slot re-zeroed; the four scene
+> pointers are zeroed by both the ctor and a near-end ctor loop before the 3D builder assigns them) —
+> belt-and-braces, not duplicate widgets. There is **no duplicate slot bar / duplicate button row**.
+
+**Total widget count (CODE-CONFIRMED).** The select window's own build pass = **279 GUI-builder calls →
+127 heap-allocated widgets, attached via 113 parent-add operations across ~14 parent panels** (§3.0c).
+Of those 127, the **`SetChildrenVisible(0)` broadcast hides exactly 12 child widgets at build** — a
+**4-pointer contiguous block** plus **8 individually-referenced** chrome/dialog widgets — built then
+hidden until raised. The ExitPanel (3 widgets) and ErrorPanel (6 widgets) inventories above are the
+two named child sub-panels' own contents, built by their own builders. (The flat §11.5f ledger folds in
+the broader 279-element walk; the §11.5a–§11.5f rect tables are confirmed byte-for-byte by it.)
+
+**Complete top-level button / action set (with show/hide trigger).** Actions bound in the select window
+and its create sub-tree, with their show/hide trigger where known:
+
+| Action | Role | Show/hide trigger |
+|---|---|---|
+| **1, 2, 3** | Slot-select tabs (slots 1–3; model is 5 slots, §11.5b) | always shown |
+| **4** | Create | shown on select screen |
+| **5** | Delete | hidden at build; raised by selection state |
+| **6** | Enter | hidden at build; raised by selection state |
+| **10, 11, 12, 13** | Class-pick strip (create form; UI index = action − 10) | create sub-form only |
+| **21, 22** | Face appearance steppers (create form, 2D-only) | create sub-form only |
+| **25–36** | Appearance / stat sub-stepper matrix (create form; bindings static-hypothesis) | create sub-form only |
+| **50, 51** | ExitPanel choice buttons | shown when ExitPanel raised |
+| **54, 55** | DELETE-confirm Yes / No | shown when delete-confirm modal raised |
+| **59, 60** | Second confirm Yes / No | shown when that modal raised |
+| **61** | Conditional overlay button | per-slot: shown iff `+0x1548+slot` byte is **0**, hidden if nonzero (§3.4 / §11.5c) — **OPEN@DEBUGGER** for the byte semantic + the button's role |
+| **62, 63** | Generic 2-button confirm Yes / No | shown when that modal raised |
+| **64** | Single-action confirm | shown when that modal raised |
+| **65** | Name-edit host panel (create form) | create sub-form only |
+| **66, 67 · 68, 69** | Class-detail stepper pairs (create form) | create sub-form only |
+| **70, 71, 72, 73** | Carrier-pigeon / letter (mail) cluster (role debugger-pending) | **OPEN@DEBUGGER** |
+| **74** | 1-button notice OK | shown when notice modal raised |
+| **670, 671** | ErrorPanel label / dismiss button | shown when ErrorPanel raised; 671 click dismisses |
+
+**HandleCommand action → button gating (CODE-CONFIRMED routes; one-line roles).** UI events / button
+actions are dispatched by the window's command handler (`SelectWindow_HandleCommand`, the secondary
+event-handler vtable's command slot). Its top-level routes (from callee scan, not transcription):
+
+- **Class-pick (10–13)** → apply the chosen class to the active slot (`SelectWindow_ApplyClassSelection`)
+  and rebuild the create-preview actor (§3.3).
+- **Slot-select (1–3)** → begin per-slot preview or confirm the selection
+  (`SelectSlot_BeginPreviewOrConfirm`), refresh the slot info row and appearance strings, and re-run the
+  per-slot overlay gating (action-61 show/hide, §3.4).
+- **Create (4) / class chosen** → open the create / name-entry sub-form on demand
+  (`SelectWindow_ShowCreateNameModalForClass`); the confirm path emits the create-character packet
+  (`Cmsg_CreateCharacter_Send`).
+- **Enter (6)** → proceed into the world (`SelectWindow_EnterGame`).
+- **Delete path** → no dedicated delete-modal child is constructed in the builder; the delete-confirm
+  (actions 54/55) and its full route are **OPEN@DEBUGGER** (deletion path not resolved this campaign).
+- UI click / confirm SFX are issued by the sound manager's create-and-play method along these routes
+  (category-0/1 single-slot path, §3.8.1).
+
+> **Create / name modal is built ON DEMAND, not retained.** No persistent create-name-modal pointer
+> field was observed on the window in the constructor or build pass — the name-entry sub-form is opened
+> when a class is chosen via HandleCommand. Whether a pointer is retained vs. constructed-on-click is
+> **OPEN** (static-only this campaign).
+
+### 11.5h Char-select builder — complete element-by-element widget inventory (CODE-CONFIRMED immediates)
+
+> A full call-by-call walk of the char-select window's open/init builder confirms and **refines** the
+> §11.5a–§11.5g tables: it pins every builder call's literal arguments in build (= paint / Z) order,
+> settles the per-call duplicate question at the **window level**, and pins the canonical clickable-button
+> set. Where this subsection's per-call immediates and the rounded §11.5f/§11.5g counts differ, **this
+> walk's literals are the precise reading**. The builder constructs **124 visual widgets** (the GU-ctor
+> sites) via **268 GU/UI-construction calls** out of **489 total calls** in the routine; the §11.5g
+> "279 → 127 widgets" framing additionally counts the 11 message-database string lookups as construction
+> steps and folds in the ExitPanel/ErrorPanel/Descriptor child sub-panels (built by their own builders,
+> §11.5g) — both framings are consistent, and the load-bearing figures are **124 in-routine widgets** and
+> **489 total calls**.
+
+**GU/UI-construction call breakdown (CODE-CONFIRMED counts).**
+
+| Builder call | Count | Role |
+|---|---|---|
+| Panel ctor | 10 | GU panel widget |
+| Image-component ctor | 37 | static 1:1 atlas-blit image widget |
+| 3-state button ctor | 46 | normal / hover / pressed button widget |
+| Label ctor | 29 | text-label widget |
+| Textbox ctor | 2 | editable text-field widget |
+| — visual-widget subtotal | **124** | (10 + 37 + 46 + 29 + 2) |
+| Parent-add (no action) | 71 | parents a child; paint order = insertion order |
+| Parent-add-with-action | 42 | parents a child **and** binds its click action id |
+| Atlas texture load | 8 | per-window `.dds` atlas binds (§11.5f list) |
+| Label text + align set | 15 | label text / alignment |
+| Textbox caption set | 2 | textbox caption |
+| Font-slot select | 2 | font-slot assignment |
+| Visibility broadcast (terminal) | 1 | shows the roster set at open |
+| Slot-count label refresh (terminal) | 1 | "x/5 characters" count |
+| 3D scene build (terminal) | 1 | builds the 5-slot preview scene (§3.5) |
+| Scene BGM start (terminal) | 1 | SFX 920100200 (§3.8.1) |
+| — UI-construction total | **268** | |
+
+**Argument contract (how to read the rect tables).** Builders take, after the implicit `this` widget:
+Panel `(tex, dstX, dstY, w, h, srcX, srcY, opaqueFlag, color)`; Image-component
+`(tex, dstX, dstY, w, h, srcX, srcY, color)` — a 1:1 atlas blit, so the source rect is `(srcX, srcY)`
+with the **same** `w×h` as the destination (`srcRight = srcX+w`, `srcBottom = srcY+h`); 3-state button
+`(tex, dstX, dstY, w, h, …)` with three atlas origins for normal / hover / pressed; Label and Textbox
+`(tex, dstX, dstY, w, h, …)`. The active atlas is whichever the most recent texture load bound. A field
+shown as **Reg** below is **computed at open from layout state — its exact pixel is [OPEN@DEBUGGER]**;
+the constant fields beside it are CODE-CONFIRMED. Every `color` argument was a zeroed register at every
+call site walked (default color); any non-default color is **[OPEN]** (none observed statically).
+
+**Ordered widget table (build index `bi` = ordinal among the 124 widgets; dst = `(x,y,w,h)`; src =
+`(x,y)` into the named atlas, decimal; act = action id bound by the matching parent-add-with-action,
+`—` = plain parent-add / structural).**
+
+*Group 1 — roster frame + top command-button strip (loginwindow / mainwindow atlases):*
+
+| bi | class | dst (x,y,w,h) | src (atlas) | act | role |
+|----|----|----|----|----|----|
+| 1 | Panel | (Reg,Reg,577,58) | (Reg,Reg) login | — | top header bar (opaque=0) |
+| 2 | Panel | (0,0,244,187) | (0,0) login | — | left roster panel 244×187 |
+| 3 | Image | (0,12,200,46) | (608,793) login | — | header art L |
+| 4 | Image | (200,0,176,58) | (608,735) login | — | header art C |
+| 5 | Image | (376,12,201,46) | (608,689) login | — | header art R |
+| 6 | Button3 | (67,17,113,40) | (483,883) login | **1** | command "create new character" |
+| 7 | Button3 | (232,7,113,40) | (483,923) login | **2** | command "enter game" |
+| 8 | Button3 | (393,17,113,40) | (483,963) login | **3** | command "create" (alt) |
+| 9 | Image | (0,0,215,147) | (556,542) login | — | slot-info backing |
+| 10 | Image | (215,0,29,22) | (556,729) login | — | corner art TR |
+| 11 | Image | (0,147,29,40) | (556,689) login | — | corner art BL |
+| 12 | Image | (20,33,34,18) | (771,542) login | — | info icon row 1 |
+| 13 | Image | (20,57,34,18) | (771,560) login | — | info icon row 2 |
+| 14 | Image | (20,81,34,18) | (771,578) login | — | info icon row 3 |
+| 15 | Image | (50,33,157,18) | (140,980) login | — | value bar row 1 |
+| 16 | Image | (50,57,157,18) | (140,980) login | — | value bar row 2 |
+| 17 | Image | (50,81,157,18) | (140,980) login | — | value bar row 3 |
+| 18 | Label | (60,37,70,12) | — login | — | info label 1 |
+| 19 | Label | (60,61,70,12) | — login | — | info label 2 |
+| 20 | Label | (60,85,70,12) | — login | — | info label 3 |
+
+*Group 2 — create-class modal A (InventWindow atlas), one of the five 340×190 modals:*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 21 | Panel | (Reg,Reg,340,190) | (318,647) opaque=1 | — | modal 340×190 #1 |
+| 22 | Label | (35,60,12,12) | — | — | |
+| 23 | Label | (10,100,12,12) | — | — | |
+| 24 | Button3 | (55,136,113,40) | (415,Reg) | **62** | OK (create-class confirm) |
+| 25 | Button3 | (174,136,113,40) | (415,Reg) | **63** | Cancel |
+
+*Group 3 — caption-only notice modal B (InventWindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 26 | Panel | (Reg,Reg,340,190) | (318,647) op=1 | — | modal 340×190 #2 |
+| 27 | Label | (0,0,340,190) | — | — | full-panel caption (message-db text) |
+| 28 | Button3 | (230,150,113,40) | (415,Reg) | **74** | OK (re-arm all 5 slot actors) |
+
+*Group 4 — delete-confirm-style modal C (InventWindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 29 | Panel | (Reg,Reg,340,190) | (318,647) op=1 | — | modal 340×190 #3 |
+| 30 | Label | (24,60,12,12) | — | — | |
+| 31 | Label | (20,100,12,12) | — | — | |
+| 32 | Button3 | (120,133,113,40) | (415,Reg) | **64** | confirm |
+
+*Group 5 — bottom roster action-button row (loginwindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 33 | Button3 | (20,112,95,20) | (500,Reg) | **61** | delete / conditional overlay (per-slot gated, §11.5c) |
+| 34 | Button3 | (130,112,59,20) | (59,Reg) | **4** | bottom-row button |
+| 35 | Button3 | (42,112,59,20) | (118,Reg) | **5** | bottom-row button (no-op pass-through) |
+| 36 | Button3 | (112,112,59,20) | (295,Reg) | **6** | move / relocate select |
+
+*Group 6 — right detail panel 244×474 + stat icon / value column (loginwindow; one image on mainwindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 37 | Panel | (0,0,244,474) | (Reg,Reg) login | — | right detail panel 244×474 |
+| 38 | Image | (0,0,215,93) | (809,543) login | — | portrait backing |
+| 39 | Image | (0,93,215,49) | (Reg,730) mainwindow | — | uses mainwindow atlas |
+| 40 | Image | (0,142,215,210) | (809,768) login | — | body art |
+| 41 | Image | (215,0,29,22) | (556,729) login | — | corner TR |
+| 42 | Image | (0,352,29,40) | (556,689) login | — | corner BL |
+| 43 | Image | (12,33,34,18) | (771,596) login | — | stat icon 1 |
+| 44 | Image | (12,57,34,18) | (771,542) login | — | stat icon 2 |
+| 45 | Image | (12,109,34,18) | (771,614) login | — | stat icon 3 |
+| 46 | Image | (12,73,34,18) | (771,632) login | — | stat icon 4 |
+| 47 | Image | (12,190,34,18) | (771,650) login | — | stat icon 5 |
+| 48 | Image | (12,214,34,18) | (771,668) login | — | stat icon 6 |
+| 49 | Image | (12,238,34,18) | (297,980) login | — | stat icon 7 |
+| 50 | Image | (12,262,34,18) | (331,980) login | — | stat icon 8 |
+| 51 | Image | (12,286,34,18) | (365,980) login | — | stat icon 9 |
+| 52–58 | Image ×7 | (46, 33/57/190/214/238/262/286, 157,18) | (140,980) login | — | stat value bars 1–7 (placeholder) |
+| 59–64 | Label ×6 | (51 or 118, 193/217/241/265/289/155, 35 or 26, 12) | — | — | stat values 1–6 (runtime-substituted) |
+| 65 | Label | (51,36,26,12) | — | — | name / title label |
+
+*Group 7 — per-slot mini controls (the appearance / slot buttons):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 66 | Button3 | (48,109,25,18) | (Reg,551) | **22** | face − |
+| 67 | Button3 | (73,109,25,18) | (Reg,576) | **21** | face + |
+| 68 | Button3 | (48,153,25,18) | (Reg,551) | **25** | spinner |
+| 69 | Button3 | (73,153,25,18) | (Reg,576) | **26** | spinner |
+| 70–74 | Button3 ×5 | (154, 191/215/239/263/287, 24,16) | (Reg,548) | **27,28,29,30,31** | column-A rows 1–5 |
+| 75–79 | Button3 ×5 | (178, 191/215/239/263/287, 24,16) | (Reg,572) | **32,33,34,35,36** | column-B rows 1–5 |
+| 80 | Button3 | (42,325,59,20) | (Reg,413) | — | bottom OK (plain parent-add) |
+| 81 | Button3 | (112,325,59,20) | (Reg,531) | — | bottom Cancel (plain parent-add) |
+
+*Group 8 — inner sub-panel group (the SECOND 244×187 panel: class-pick + appearance spinners):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 82 | Panel | (Reg,Reg,244,187) | (Reg,Reg) login | — | second 244×187 panel |
+| 83 | Image | (Reg,0,215,147) | (556,542) login | — | mirror of bi#9 art |
+| 84 | Image | (Reg,0,29,22) | (556,729) login | — | mirror of bi#10 |
+| 85 | Image | (Reg,147,29,40) | (556,689) login | — | mirror of bi#11 |
+| 86 | Button3 | (Reg,30,45,19) | (Reg,Reg) | **10** | class tab 1 |
+| 87 | Button3 | (Reg,30,45,19) | (Reg,815) | **11** | class tab 2 |
+| 88 | Button3 | (Reg,30,45,19) | (Reg,860) | **12** | class tab 3 |
+| 89 | Button3 | (Reg,30,45,19) | (Reg,905) | **13** | class tab 4 |
+| 90–92 | Label ×3 | (Reg, 72/86/100, 12,12) | — | — | stacked labels 1–3 |
+| 93 | Button3 | (Reg,110,59,20) | (Reg,413) | — | OK pair (plain parent-add) |
+| 94 | Button3 | (Reg,110,59,20) | (Reg,531) | — | Cancel pair (plain parent-add) |
+| 95 | Label | (Reg,148,215,274) | (405,600) | — | big caption block |
+| 96 | Label | (Reg,Reg,12,12) | — | — | caption value |
+| 97 | Button3 | (Reg,388,27,18) | (Reg,674) | **66** | appearance spinner − |
+| 98 | Button3 | (Reg,388,27,18) | (Reg,701) | **67** | appearance spinner + |
+| 99 | Label | (Reg,410,190,Reg) | (320,790) | — | caption block 2 |
+| 100 | Button3 | (Reg,576,27,18) | (Reg,674) | **68** | appearance spinner − |
+| 101 | Button3 | (Reg,576,27,18) | (Reg,701) | **69** | appearance spinner + |
+| 102 | Button3 | (Reg,Reg,80,60) | (Reg,820) | **70** | nav / sort-filter |
+| 103 | Button3 | (Reg,Reg,Reg,60) | (Reg,820) | **71** | nav / sort-filter |
+| 104 | Button3 | (Reg,Reg,30,30) | (Reg,600) | **72** | toggle / sort-filter |
+| 105 | Button3 | (Reg,Reg,30,30) | (Reg,600) | **73** | toggle / sort-filter |
+
+(The single in-builder visibility broadcast fires here, after Group 8 — it shows the roster set at open;
+all per-modal show/hide thereafter is driven by the command handler.)
+
+*Group 9 — close button + notice panel + textbox + exit / dim-sheet chrome (late atlas re-binds):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 106 | Button3 | (971,610,23,23) | (Reg,Reg) tradekeep | — | corner CLOSE (plain parent-add; **[OPEN]** action binding) |
+| 107 | Panel | (430,100,176,42) | (132,295) op=1 | **65** | small notice panel |
+| 108 | Textbox | (54,60,140,12) | — | — | editable field #1 (caption from message-db) |
+| 109 | Label | (Reg,Reg,Reg,12) | — | — | exit-panel caption (font slot 4) |
+
+(Group 9 also re-binds the CarrierPigeonPerson / CarrierPigeonAll / tradekeep / blacksheet atlases and
+constructs three auxiliary child sub-panels by their own constructors — a descriptor panel, the ErrorPanel
+and the ExitPanel — whose own widgets are **not** among the 124 in-routine widgets and are inventoried in
+§11.5g. The exit-dialog button set is built inside the ExitPanel's own button-builder; its action ids are
+in that callee — see §11.5g for the ExitPanel/ErrorPanel sets.)
+
+*Group 10 — create-NAME modal D (InventWindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 110 | Panel | (Reg,Reg,340,190) | (318,647) op=1 | — | modal 340×190 #4 (create-NAME) |
+| 111 | Label | (70,70,12,12) | — | — | |
+| 112 | Button3 | (55,136,113,40) | (415,Reg) | **54** | OK (slot-select send) |
+| 113 | Button3 | (174,136,113,40) | (415,Reg) | **55** | Cancel |
+| 114 | Label | (Reg,100,12,12) | — | — | value label |
+| 115 | Label | (Reg,100,12,12) | — | — | value label 2 |
+
+*Group 11 — rename modal E (InventWindow):*
+
+| bi | class | dst | src | act | role |
+|----|----|----|----|----|----|
+| 116 | Panel | (Reg,Reg,340,190) | (318,647) op=1 | — | modal 340×190 #5 (rename) |
+| 117 | Button3 | (55,Reg,113,40) | (415,Reg) | **59** | OK (rename send) |
+| 118 | Button3 | (174,Reg,113,40) | (415,Reg) | **60** | Cancel |
+| 119 | Label | (Reg,Reg,Reg,12) | — | — | label |
+| 120 | Label | (25,77,12,12) | — | — | label 2 |
+| 121 | Image | (55,75,274,18) | (419,1003) InventWindow | — | name-field underline strip |
+| 122 | Textbox | (60,80,274,18) | — | — | editable NAME field (caption from message-db) |
+| 123 | Label | (Reg,20,300,20) | — | — | wide status line (font slot 2) |
+
+*Terminal sequence (after all widgets):* the slot-count label refresh ("x/5 characters"), the **3D
+5-slot preview scene build** (§3.5), and the **char-select BGM** start (SFX 920100200, kind-0 single
+voice, §3.8.1).
+
+**Window-level duplicate verdict (CODE-CONFIRMED at this granularity): no bar / strip / tab / panel is
+built more than once as a redundant within-window duplicate.** Repeated *shapes* exist, but every repeat
+is a **distinct widget** parented to a **distinct window field** and gated visible by a **distinct
+action** — siblings sharing one atlas sprite, never the same bar drawn twice into the same parent:
+
+- The **340×190 panel** from InventWindow src `(318,647)` is constructed **five** times (bi#21, #26, #29,
+  #110, #116) — the five separate modal dialogs (create-class, caption-only notice, delete-confirm,
+  create-NAME, rename), each parented into a different child field and bound to a different OK/Cancel
+  action pair (62/63 · 74 · 64 · 54/55 · 59/60), with mutually exclusive visibility.
+- The **244×187 panel** from loginwindow is built **twice** (bi#2 left roster panel src `(0,0)`, and bi#82
+  the inner class-pick / appearance sub-panel). bi#82 also re-blits the same three corner-art sprites
+  (bi#83–85, mirroring bi#9–11) — one sprite reused in a second, different panel. This is the most likely
+  origin of any earlier "duplicate bar" observation: shared sprite art legitimately reused, not one bar
+  drawn twice.
+- The **113×40 OK/Cancel button** from InventWindow src `(415,*)` and the **157×18 value bar** from login
+  src `(140,980)` likewise recur across sibling panels — one sprite reused per modal / per panel.
+
+So the only "built more than once" facts are **shared atlas sprites reused across sibling panels**, all
+with mutually-exclusive runtime visibility, by design. This agrees with the §11.5g "nothing built twice"
+verdict at finer granularity.
+
+**Complete clickable-button set — 42 action bindings (CODE-CONFIRMED).** Every parent-add-with-action
+binding, with its widget build index and the role; a rebuild that wires exactly these renders zero
+phantom buttons and zero orphaned bindings. The count is exactly the 42 parent-add-with-action calls.
+
+| act | bi | role | gating / when shown |
+|----|----|----|----|
+| 1 | bi#6 | command "create new character" (top strip) | always shown while window open |
+| 2 | bi#7 | command "enter game" (top strip) | always shown |
+| 3 | bi#8 | command "create" alt (top strip) | always shown |
+| 4 | bi#34 | bottom-row button | shown with roster |
+| 5 | bi#35 | bottom-row button (no-op pass-through) | shown with roster |
+| 6 | bi#36 | move / relocate select | shown with roster |
+| 10,11,12,13 | bi#86–89 | class-pick tabs (UI index = act − 10) | create sub-form only |
+| 21 | bi#67 | face + | create sub-form only |
+| 22 | bi#66 | face − | create sub-form only |
+| 25,26 | bi#68,69 | appearance spinners | create sub-form only |
+| 27,28,29,30,31 | bi#70–74 | create appearance/stat sub-steppers (column A) | create sub-form only |
+| 32,33,34,35 | bi#75–78 | create appearance/stat sub-steppers (column B) | create sub-form only |
+| 36 | bi#79 | scene reset / re-arm | create sub-form only |
+| 54 | bi#112 | create-NAME OK (slot-select send) | create-NAME modal raised |
+| 55 | bi#113 | create-NAME Cancel | create-NAME modal raised |
+| 59 | bi#117 | rename OK (rename send) | rename modal raised |
+| 60 | bi#118 | rename Cancel | rename modal raised |
+| 61 | bi#33 | delete / conditional overlay | per-slot: shown iff `+0x1548+slot` byte is 0 (§11.5c) |
+| 62 | bi#24 | create-class OK | create-class modal raised |
+| 63 | bi#25 | create-class Cancel | create-class modal raised |
+| 64 | bi#32 | delete-confirm | delete-confirm modal raised |
+| 65 | bi#107 | notice / debug panel | notice panel raised |
+| 66,67 | bi#97,98 | appearance spinner −/+ | create sub-form only |
+| 68,69 | bi#100,101 | appearance spinner −/+ | create sub-form only |
+| 70,71,72,73 | bi#102–105 | nav / sort-filter set | create sub-form only |
+| 74 | bi#28 | notice-modal OK (re-arm 5 slot actors) | notice modal raised |
+
+That is **42** bindings — none missing, none duplicated. **Non-clickable buttons (plain parent-add, no
+action bound at build):** bi#80/81 and bi#93/94 (the two inner-panel OK/Cancel pairs) — structural /
+visual, their click handling (if any) routed by the parent panel's own logic; **[OPEN@DEBUGGER]** whether
+they are wired live. The corner CLOSE button (bi#106) is also a plain parent-add — its action binding is
+**[OPEN]** (not a parent-add-with-action site in this routine). The exit-dialog button set is built inside
+the ExitPanel's own button-builder (its actions inventoried in §11.5g, actions 50/51).
+
+**The per-slot 880-byte descriptor IS the SmsgCharacterList server record (CODE-CONFIRMED copy).** At
+builder entry, three block-copies move the live server char-list out of the network handler into the
+window object: a **5 × 880-byte** block (the per-slot character records), a **5 × 96-byte** block (the
+per-slot secondary/stat blocks), and a **5 × 1-byte** block (the per-slot state / lock flags). The
+5 × 880-byte block is the cached **`SmsgCharacterList`** payload — each 880-byte unit is the
+`SpawnDescriptor` portion of that packet's 981-byte per-slot record (981 = 880 descriptor + 96 stat
+block + 1 occupied/facing marker + 4 flags word). The copy source / size / stride are CODE-CONFIRMED
+here; the per-byte field meanings **inside** each 880-byte record (name / class / level / appearance
+offsets) are owned by the packet spec — cross-reference **`packets/3-1_character_list.yaml`** (and §3.1 /
+§3.4 here). The exact `Reg`-computed modal X/Y values, the live wiring of the four plain-parent-add
+OK/Cancel buttons, the corner-CLOSE action binding, and the 5 per-slot flag-byte semantics remain
+**[OPEN@DEBUGGER]** (no live-debugger campaign on this routine yet).
+
+> **Cross-ref — slot-23 secondary-parts double-build:** the per-slot static walk corroborates
+> `skinning.md` §3.6 (the former OPEN-4, now **RESOLVED static**): the two slot-23-family secondary
+> deform builders compute **distinct** catalogue keys via different formulas reading different actor
+> fields, so they are a legitimate multi-part attach, **not** a redundant within-pass double-build.
+
 ## 11.6 Intro / opening sequence (CODE-CONFIRMED art; sequencing per §1.0 and §1.5)
 
 > **Two distinct intros — do not conflate them (CODE-CONFIRMED).** There are **two** separate intro
@@ -3934,8 +4617,8 @@ on the kind-0 music slot (§3.8.1).
 - **Refresh / Cancel server-list button text:** baked atlas art vs caption id - UNVERIFIED.
 - **Server-list calligraphy header caption id:** an integer caption id, exact value needs a `msg.xdb`
   extract.
-- **Char-select conditional overlay button (action 61):** role (select vs play overlay) UNVERIFIED;
-  its `mainwindow.dds` source rect is computed at runtime, not a literal.
+- **Char-select conditional overlay button (action 61):** source rects now confirmed — see §11.5c.
+  Role (select vs play overlay) and exact runtime show/hide trigger remain UNVERIFIED (debugger-pending).
 - **Char-select number-glyph runtime mapping:** the build-time cell source rects are placeholders;
   the per-digit atlas mapping at runtime (analogous to the PIN digit/row scheme) was not chased.
 - **2D class-icon-by-index widget:** absent in the char-select 2D builder (descriptor-driven instead)
@@ -4063,3 +4746,87 @@ hidden at build time and shown only in the sub-state that needs them.** Sub-stat
 C# parity: the notice panel must be `Visible=false` at rest (never restored), and the form container must
 **track the bottom curtain to Y=548** (not be frozen at Y=326). Freezing the form at 326 with the notice
 shown was the cause of the "everything piled in the centre" disorder.
+
+---
+
+## Addendum — CYCLE 11 / Block A: char-select action dispatch, enter-world ladder & scene-state numbering (binary-confirmed, static)
+
+> Verification refresh, IDB SHA **263bd994**, static-only (CYCLE 11 / Block A, 2026-06-22).
+> Deepens the character-select section (§3) with the action-dispatch table, the create steppers, the
+> delete semantics, the enter-world ladder, and an important scene-state numbering clarification.
+
+### A.1 Action dispatch — the selector and the two handler groups
+
+Character-select UI commands are dispatched by the **firing widget's bound action id** (each interactive
+widget carries an action id; activating it routes through the window's command handler on that id). The
+handler resolves the id through two grouped jump tables — a **create-form group** (face + stat steppers)
+and a **roster/preview group** (select, delete, enter, preview-orbit). *([CONFIRMED]* the selector is
+the widget action id, not a window state byte.)*
+
+| action group | effect | packet / state |
+|---|---|---|
+| **face stepper** | adjusts the create-form face index, clamped **1..7** | none (local; staged into the create blob) |
+| **stat steppers** | the point-buy +/- controls (see `character_creation.md §2.1`) | none (local) |
+| **slot select** | commit a roster slot for preview/enter | `1/7` with the select-context flag |
+| **delete-confirm** | confirm deletion of the committed slot | `1/7` with the **delete-context flag set** |
+| **delete-cancel** | dismiss the delete-confirm modal | none |
+| **preview-orbit** | latch a preview turntable axis direction | none (local) |
+| **exit-preview** | leave the preview sub-mode; re-idle the five preview actors | none (local) |
+
+### A.2 Delete uses `1/7` with a flag — not a dedicated delete opcode
+
+Both an ordinary **slot select** and a **delete-confirm** send the **same `1/7`** character-management
+message; they differ only by a **context flag byte** in the payload (select-context vs delete-context).
+The delete path is gated on a busy latch being clear and on a slot being committed; the delete-cancel
+action only hides the confirm modal and sends nothing. *([CONFIRMED]* the shared `1/7` opcode, the
+flag-byte discriminator, and the confirm/cancel split.)* The flag-byte value meaning on the wire is a
+runtime residual (capture-pending) — see `packets/cmsg_char_select.yaml`.
+
+### A.3 Enter-world ladder (the reach into the in-world scene)
+
+The transition from character-select into the world runs as an ordered ladder:
+
+1. **slot pick** — a local screen-ray test against the five preview actors selects a slot;
+2. **`1/7` select-and-play** — sent for the committed slot (sets the net-busy latch);
+3. **server** replies; **`3/14`** (the lobby-bridge spawn confirm) advances the window's latch;
+4. an **enter-ready gate** is satisfied;
+5. **`1/9` enter-game request** is sent;
+6. the character-select scene loop **exits** and the **in-world scene is built**.
+
+The **local-player spawn happens later** (on the in-world spawn message `4/1`), **not** on `3/14` —
+`3/14` is only the lobby bridge confirm. *([CONFIRMED]* the ordered sends and the loop-exit-driven
+transition; the enter-ready gate origin and the enter token contents are runtime residuals.)*
+
+### A.4 Scene-state numbering — the case index vs the game-state value (IMPORTANT for the port)
+
+The engine scene-state machine's **switch case index** and the **running game-state value** it writes
+are **not the same number** for these two scenes — a subtlety that will cause an off-by-one if the C#
+scene state machine conflates them:
+
+| switch case index | builds | sets running game-state value to |
+|---|---|---|
+| **4** | the **character-select** window | **5** |
+| **5** | the **in-world** window | **4** |
+
+So **character-select runs while the running game-state value == 5** (reached via case index 4), and the
+in-world scene runs while the value == 4 (via case index 5). State both meanings explicitly in any port
+of the scene state machine. *([CONFIRMED]* the case→game-state writes.)*
+
+### A.5 Per-class description binding & credential order (cross-reference)
+
+- The character-select / create class strip binds its three description labels from the
+  **`data/script/npc.scr`** keyed-node table (record offsets +20/+84/+148), and plays per-class create
+  BGM cues — see `character_creation.md §3.1`.
+- The login credential field order (account first, then optional PIN, then password) remains the
+  **static hypothesis** already recorded in §1.3/§1.4 of this spec — unchanged this cycle, still
+  capture-pending for the on-wire bytes.
+
+### A.6 Preview lineup placement (cross-reference)
+
+The five preview actors are placed at per-slot X offsets **−1560, −1548, −1536, −1524, −1512** (step
+**+12**) over the scene anchor, with a slight bowed Z (slot 2 deepest), **base scale 70.0 × runtime
+scale 3.0**, and per-slot facing from the facing-flag byte (value 1 → faces away). The camera/material
+details are in `rendering.md` (CYCLE 11 addendum); the facing flag is in `structs/spawn_descriptor.md`
+(CYCLE 11 addendum). *([CONFIRMED]* the placement deltas and the scale chain.)*
+
+> spec path: `// spec: Docs/RE/specs/frontend_scenes.md`

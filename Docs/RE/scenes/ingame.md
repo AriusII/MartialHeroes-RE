@@ -1,6 +1,11 @@
 ---
 verification: written 2026-06-21 against the doida.exe binary (build 263bd994, full in-game 2D-HUD
-  cartography pass, static IDA). The in-game HUD root (the MainWindow singleton "MainMaster"), its
+  cartography pass, static IDA). CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): dossier scope
+  clarified — this file is the in-game HUD cartography (engine state 5 panel/widget inventory), NOT
+  a world-build sequence. No opcode 981 exists in the HUD spawn path (only 908/912 are the
+  character-spawn opcodes, and they belong to the login/char-select flow, not this dossier).
+  Fabricated anchor §5.5b does not exist; real anchors are §5 / §5.4 / §5.5a (or whichever are
+  present — verify with the TOC). The in-game HUD root (the MainWindow singleton "MainMaster"), its
   178-slot panel-pointer array (base = MainWindow+0x238, slot = (memberOffset − 0x238) / 4), the single
   HUD builder virtual (MainHud_BuildAndRegisterPanels) and its complete ordered build sequence, the
   per-panel RTTI class identities (178/178 slots now resolved to concrete classes), the CORE-HUD member
@@ -31,6 +36,17 @@ sources:
 > offsets relative to an object start), never memory addresses. Korean text is **CP949**. Where a
 > per-panel internal field layout is still unrecovered (RTTI identity + slot + size only), the gap is
 > flagged §12.
+
+> **CYCLE 12 Block B scope note (IDB SHA 263bd994, 2026-06-22).** This dossier covers the
+> **in-game HUD cartography** — the `MainWindow` panel/widget inventory for engine state 5. It is
+> **NOT** a world-build sequence, a network-enter flow, or a character-spawn record. Any code or
+> comment that cites **opcode 981** in connection with this file is **incorrect** — opcode 981
+> does not appear in the HUD spawn path; character-spawn opcodes 908 and 912 belong to the
+> login/char-select flow (see `scenes/charselect.md` and `packets/char_spawn.yaml`), not to this
+> dossier. Any citation of a **`§5.5b` subsection** in this file is a **fabricated anchor** — it
+> does not exist. The real anchors in §5 are those explicitly present in the TOC below (§5
+> "Target group"). Similarly, any reference to `2/12` as a world-build step within this file is
+> erroneous; this dossier predates and is independent of packet-flow numbering.
 
 ---
 

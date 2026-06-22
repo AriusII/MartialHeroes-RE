@@ -763,14 +763,20 @@ public sealed class NpcScrRecord
     public required string Paragraph0 { get; init; }
 
     /// <summary>
-    ///     Description paragraph 1 (CP949, second paragraph).
-    ///     spec: Docs/RE/formats/config_tables.md §2.17.3 — paragraph_1 char[] @ 0x050: SAMPLE-VERIFIED.
+    ///     Description paragraph 1 / string field 1 (CP949, second class description line).
+    ///     Offset +0x054 (84 dec), 64 bytes wide.
+    ///     spec: Docs/RE/formats/config_tables.md §2.17.3 — string field 1 @ +0x054, 64 bytes: CONFIRMED.
+    ///     CORRECTED: was documented as 0x050 — the spec layout is 20-byte header + six 64-byte fields
+    ///     (0x14, 0x54, 0x94, 0xD4, 0x114, 0x154); fields 1 and 2 each start 4 bytes later than previously coded.
     /// </summary>
     public required string Paragraph1 { get; init; }
 
     /// <summary>
-    ///     Description paragraph 2 (CP949, third paragraph).
-    ///     spec: Docs/RE/formats/config_tables.md §2.17.3 — paragraph_2 char[] @ 0x090: SAMPLE-VERIFIED.
+    ///     Description paragraph 2 / string field 2 (CP949, third class description line).
+    ///     Offset +0x094 (148 dec), 64 bytes wide.
+    ///     spec: Docs/RE/formats/config_tables.md §2.17.3 — string field 2 @ +0x094, 64 bytes: CONFIRMED.
+    ///     CORRECTED: was documented as 0x090 — the spec layout is 20-byte header + six 64-byte fields
+    ///     (0x14, 0x54, 0x94, 0xD4, 0x114, 0x154); fields 1 and 2 each start 4 bytes later than previously coded.
     /// </summary>
     public required string Paragraph2 { get; init; }
 

@@ -19,20 +19,21 @@
 //   4. AMBIENT EFFECT — the real char_select-u.xeff (id 380003000) at the row-centre anchor, as
 //      alpha-blended camera-facing billboards (XeffSceneEffect). spec: §3.6.5 / §3.6.6.
 //   5. ACTORS — up to 5 preview actors via SkinnedCharacterBuilder at the spec per-slot positions
-//      (the slightly-bowed Z), on the platform Y≈70, PreviewScale ×6.0. spec: §3.3.1 / §3.7.5.
+//      (the slightly-bowed Z), at stage-origin Y=0.0 (§3.3.1 hard 0.0 immediate), PreviewScale ×6.0.
+//      spec: §3.3.1 (Y=0.0 CODE-CONFIRMED) / §3.7.5.
 //      Selection-facing is actor-local: selected slot snaps front (yaw 0), non-selected slots face
 //      back (yaw π), and ui_left/ui_right manually yaw only the selected preview at 2 rad/s.
 //      spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
 //      doida.exe SelectWindow_FaceActiveSlotFront/TickSelectedPreviewYaw.
 //
-// HOST API PRESERVED (read by Lane D's CharacterSelectScreen — keep these signatures EXACT):
+// HOST API PRESERVED (read by the host CharSelectWindow — keep these signatures EXACT):
 //   - public void Initialise(RealClientAssets? assets)
 //   - public int TryHitTestSlot(global::Godot.Vector2 viewportLocalPos)
 //   - public void SetSelectedSlot(int slotIndex)
-//   - public SlotDescriptor[] SlotDescriptors { get; set; }   (WAVE 2: widened from the old
+//   - public SlotDescriptor[] SlotDescriptors { get; set; }   (widened from the old
 //       (bool IsOccupied, uint SkinClassId) tuple to the §3.2 descriptor shape — class (+0x34),
-//       variant (+0x2C), faceA (+0x2E), equip table (+0x58). The host (CharSelectWindow.ListView)
-//       fills the fields it actually has from the 3/1 roster.)
+//       variant (+0x2C), faceA (+0x2E), equip table (+0x58). The host CharSelectWindow
+//       (PushSlotDescriptors) fills these PER-SLOT from the 3/1 roster's surfaced descriptor fields.)
 //
 // COORDINATE CONVENTION: world geometry negates Z (Helpers/WorldCoordinates.ToGodot: (x,y,z) →
 //   (x,y,−z)). Every world position below is converted to Godot-space by negating Z exactly once.
@@ -45,16 +46,12 @@
 
 using Godot;
 using MartialHeroes.Assets.Mapping;
-using MartialHeroes.Assets.Parsers.Character;
-using MartialHeroes.Assets.Parsers.Mesh;
-using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Assets.Parsers.Terrain;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Client.Presentation.Helpers;
-using MartialHeroes.Client.Presentation.Screens;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
@@ -81,12 +78,13 @@ public sealed partial class CharSelectScene3D : Node3D
     private const int BackdropMapX = 10000; // spec: §3.7.1 cell d000x10000z9990
     private const int BackdropMapZ = 9990; // spec: §3.7.1 cell d000x10000z9990
 
-    // Row platform Y. spec §3.3.1 says slot ΔY is a hard 0.0 on the stage-origin plane (no terrain
-    // sample on the placement path); spec §3.6.5 records the row-pivot / look-at anchor lifted to
-    // Y≈69.89 (the .bud platform top). The actors stand on that platform, so the placement Y is the
-    // spec row-pivot Y (≈70). The terrain .ted sampler returns the raw soil/rock floor, NOT the
-    // platform top, so it is used for diagnostics only. spec: §3.6.5 row pivot (508.48, 69.89, …).
-    private const float RowPlatformY = 69.89f; // spec: §3.6.5 row pivot Y. CODE-CONFIRMED.
+    // Row platform Y. spec §3.3.1 (CODE-CONFIRMED) — "Y is exactly 0.0 for every slot; a hard 0.0
+    // immediate (stage-origin Y 0.0 + slot ΔY 0.0), with no terrain sample and no per-slot ground
+    // lookup on the placement path." The §3.6.5 Y≈69.89 value is the ambient-effect / look-at anchor
+    // (the xeff spawn position), NOT the actor placement Y. The hit-test rig (CharSelectCameraRig.HitTest)
+    // reads actor.Position.Y dynamically, so it adapts to Y=0 automatically.
+    // spec: §3.3.1 CODE-CONFIRMED hard 0.0 immediate.
+    private const float RowPlatformY = 0.0f; // spec: §3.3.1 CODE-CONFIRMED — stage-origin Y 0.0, no terrain sample.
 
     // Row pivot (LEGACY world) — the focal point of the backdrop and the camera look-at anchor.
     // spec: §3.6.5 / §3.7.2 — row pivot world (508.48, 69.89, −9758.57). CODE-CONFIRMED.
@@ -94,19 +92,22 @@ public sealed partial class CharSelectScene3D : Node3D
     private const float RowPivotLegacyY = 69.89f;
     private const float RowPivotLegacyZ = -9758.57f;
 
-    // Preview scale — a PORT UNIT-RECONCILIATION against the §3.3.1 legacy lineup scale literal ≈70
-    // (which is LEGACY-space, explicitly NOT a ready-to-use Godot multiplier; §3.3.1 flags this as a
-    // fidelity-reconciliation item, not a binary unknown). The deformed actor is only ≈11 Godot units
-    // tall, and at the §3.5 KF1 camera distance (≈85 units) with FOV 50° an ×3.0 actor filled ~14% of
-    // frame height — too small to read as a prominent character preview (the oracle: the original
-    // char-select shows the lineup filling a meaningful fraction of the lower frame). Raised to ×6.0 so
-    // each avatar fills ~25-30% of frame height — clearly visible as a prominent character preview
-    // WITHOUT the ×9 overshoot that made the front-facing selected avatar dominate/overlap the frame.
-    // NOT a spec change — the spec already flags the 70-literal as needing unit-reconciliation against
-    // the importer mesh scale; ×6.0 is that reconciliation, measured empirically from the framed AABB at
-    // the §3.5 KF1 distance (≈85 units, FOV 50°). spec: §3.3.1 (legacy scale ≈70, LEGACY-space,
-    // fidelity-reconciliation item).
-    private const float PreviewScale = 6.0f;
+    // Preview scale — a PORT UNIT-RECONCILIATION of the BINARY-CONFIRMED lineup scale literal.
+    // BINARY GROUND TRUTH: each lineup actor is spawned with scale field +1160 = 70.0 (the create/zoom
+    // actor uses 81.0 in +1160 AND +1164); the "3.0" that appears in the original is the idle-motion
+    // PLAYBACK-RATE multiplier (written to actor+100), NOT a scale — do NOT conflate the two.
+    // spec: Docs/RE/scenes/charselect.md §6.2 (lineup scale 70.0 @+1160; create scale 81.0 @+1160/+1164;
+    //       idle playback-rate 3.0 @actor+100 is a motion-rate override, distinct from scale).
+    // The 70.0 (and 81.0) are LEGACY-space scale-field values, NOT ready-to-use Godot multipliers, so a
+    // unit-reconcile factor maps them to Godot units. The deformed actor is only ≈11 Godot units tall;
+    // at the §3.5 KF1 camera distance (≈85 units) with FOV 50° an unscaled-ish actor read too small. The
+    // chosen reconcile factor maps the legacy 70.0 → Godot ×6.0 (i.e. factor ≈ 6.0/70 ≈ 0.0857), so each
+    // avatar fills ~25-30% of frame height — a prominent preview, matching the captures oracle (visuals
+    // are not headless-verifiable; oracle > spec for pixels — do NOT blindly change this working value).
+    // This ×6.0 IS the shared lineup baseline: CharCreatePreview3D derives the create scale by applying
+    // the SAME reconcile factor to the binary 81.0 → 6.0 × (81/70) ≈ 6.943, strictly larger by the
+    // spec-confirmed 81/70 ratio. spec: Docs/RE/scenes/charselect.md §6.2 (lineup 70.0 / create 81.0).
+    private const float PreviewScale = 6.0f; // = reconcile(70.0 lineup scale @+1160). spec: charselect.md §6.2
 
     // Slot-selection visual yaw — actor rotates, camera stays fixed.
     // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
@@ -200,7 +201,7 @@ public sealed partial class CharSelectScene3D : Node3D
     private int _selectedSlot;
 
     // =========================================================================
-    // Public host API — DO NOT change these signatures (CharacterSelectScreen calls them).
+    // Public host API — DO NOT change these signatures (the host CharSelectWindow calls them).
     // =========================================================================
 
     /// <summary>
@@ -222,33 +223,17 @@ public sealed partial class CharSelectScene3D : Node3D
     }
 
     // =========================================================================
-    // Preview-character assets (§3.7.5) — the four starter classes (IdA=1).
+    // Preview-character assets (§3.7.5) — appearance resolution delegated to SlotAppearanceResolver.
     // =========================================================================
-
-    // Per starter class → its base-skin .skn, resolved through the ONE shared
-    // ClassAppearanceResolver so the select and create screens show the IDENTICAL body per class.
-    // Each mesh carries a DISTINCT id_b that drives its OWN rig + idle clip (resolved per slot in
-    // TryBuildSlotActor). The four §3.7.5 starter meshes (all default appearance IdA=1;
-    // CONFIRMED-present in the VFS) live in ClassAppearanceResolver.
-    //
-    // §3.3.7 OVERLAY BUILD — descriptor WIDENED (WAVE 2), residual host-API gap on the equip bytes.
-    // The full per-part appearance build (equipment overlays {3,4,6,2,11} + non-starter slot-14 body +
-    // the rigid weapon) is RE-recovered and the resolver math is IMPLEMENTED in ClassAppearanceResolver;
-    // it is driven by the server 880-byte spawn descriptor (class +0x34, variant +0x2C, faceA +0x2E,
-    // equip table +0x58). SlotDescriptors is now the §3.2 SlotDescriptor record carrying those fields, so
-    // the class/variant ARE plumbed; the RESIDUAL gap is that the layer-04 CharacterListSlot event
-    // surface still decodes ONLY ServerClass (+0x74) — not +0x34/+0x2C/+0x2E/+0x58 — so the host fills
-    // InternalClass from the best class-like value it has and leaves Variant/FaceA/Equip at defaults.
-    // While Equip is empty this lineup KEEPS the §3.7.5 starter-mesh fallback (class → base .skn at
-    // variant 0); an id outside 1..4 yields an empty candidate list → logged + skipped (no synthetic
-    // fallback, no fabricated equip ids). The overlay loop becomes drivable, no code change here, the
-    // moment layer 04 surfaces the equip dwords on the event.
-    // spec: Docs/RE/specs/frontend_scenes.md §3.7.5 (starter fallback) / §3.3.7 (overlay build) /
-    //       Docs/RE/specs/skinning.md §3.5.2.
-    private static string[] SknCandidatesForClass(uint skinClassId)
-    {
-        return ClassAppearanceResolver.SknCandidatesForClass((int)skinClassId);
-    }
+    // Slot actor building is now ENTIRELY handled by SlotAppearanceResolver.BuildSlotActor, which:
+    //   - keys the ONE shared deform skeleton g{SkinClassId}.bnd by SkinClassId = descriptor
+    //     InternalClass ∈ {1,2,3,4} (the §8(e) verbatim rig key, same as PlayerAvatarResolver),
+    //   - builds the body as overlay slot 3 (the §3.5.3 catalogue body — NO separate base mesh),
+    //   - multi-surface-deforms the overlays {4,6,2,11} onto that SAME skeleton (one pass, full
+    //     teardown semantics — no double-attach / no exploded mesh, §3.6.2), the weapon (slot 14)
+    //     rigid hand-attached, any absent gear .skn LOGGED-and-SKIPPED (no fabrication), and
+    //   - keys the idle .mot by actormotion col2 == SkinClassId -> col16 so every slot animates.
+    // spec: Docs/RE/specs/skinning.md §3.5.1 / §3.5.2 / §3.6.2 / §8(e); frontend_scenes.md §3.3.7 / §3.7.5.
 
     /// <summary>
     ///     Builds the whole 3D scene from real VFS assets. Call AFTER the node is in the scene tree.
@@ -298,8 +283,9 @@ public sealed partial class CharSelectScene3D : Node3D
 
     /// <summary>
     ///     Rebuilds the per-slot character actor ROW from the CURRENT <see cref="SlotDescriptors" />:
-    ///     frees any existing slot-actor nodes, then rebuilds them via the same <c>TryBuildSlotActor</c>
-    ///     path used at first build. The cell / environment / camera / ambient effect are NOT touched —
+    ///     frees any existing slot-actor nodes, then rebuilds them via <c>TryBuildSlotActorViaResolver</c>
+    ///     (which calls <see cref="SlotAppearanceResolver.BuildSlotActor" />). The cell / environment / camera / ambient
+    ///     effect are NOT touched —
     ///     only the character actors. A call before <see cref="Initialise" /> is a no-op (the descriptors
     ///     are picked up at init). Called by the host's <c>ApplyCharacterList</c> after the 3/1 character
     ///     list arrives a frame or more after the deferred init. spec: §3.3.1.
@@ -327,7 +313,7 @@ public sealed partial class CharSelectScene3D : Node3D
                 _slotActors[i] = null;
             }
 
-            // (b) Rebuild from the CURRENT descriptors via the existing TryBuildSlotActor path.
+            // (b) Rebuild from the CURRENT descriptors via TryBuildSlotActorViaResolver → SlotAppearanceResolver.
             if (assets is not null)
             {
                 BuildCharacterRow(assets);
@@ -646,13 +632,13 @@ public sealed partial class CharSelectScene3D : Node3D
 
     private void BuildCharacterRow(RealClientAssets assets)
     {
-        // Placement Y = the spec row-pivot platform Y (≈70); the .ted sampler returns the raw soil
-        // floor (NOT the .bud platform top) so it is read for diagnostics only. spec: §3.3.1 / §3.6.5.
+        // Placement Y = 0.0 (spec §3.3.1 CODE-CONFIRMED hard immediate; no terrain sample, no per-slot
+        // ground lookup). The terrain sampler at the pivot is run for diagnostics only. spec: §3.3.1.
         var rowY = RowPlatformY;
         if (_backdropTerrain is not null &&
-            _backdropTerrain.TryGetGroundHeight(RowPivotLegacyX, RowPivotLegacyZ, out var sampledY, RowPlatformY))
-            GD.Print($"[CharSelectScene3D] Terrain sampler at pivot = {sampledY:F3} (soil floor, NOT platform top); " +
-                     $"placing actors on platform Y={rowY:F2}. spec: §3.6.5.");
+            _backdropTerrain.TryGetGroundHeight(RowPivotLegacyX, RowPivotLegacyZ, out var sampledY))
+            GD.Print($"[CharSelectScene3D] Terrain sampler at pivot = {sampledY:F3} (diagnostic only); " +
+                     $"placing actors on stage-origin Y={rowY:F2} per §3.3.1. spec: §3.3.1 CODE-CONFIRMED.");
 
         for (var i = 0; i < 5; i++)
         {
@@ -661,7 +647,7 @@ public sealed partial class CharSelectScene3D : Node3D
 
             try
             {
-                var actor = TryBuildSlotActor(assets, i, SlotDescriptors[i], rowY);
+                var actor = TryBuildSlotActorViaResolver(assets, i, SlotDescriptors[i], rowY);
                 if (actor is not null)
                 {
                     _slotActors[i] = actor;
@@ -677,68 +663,36 @@ public sealed partial class CharSelectScene3D : Node3D
         }
     }
 
-    private Node3D? TryBuildSlotActor(RealClientAssets assets, int slotIdx, SlotDescriptor descriptor, float rowY)
+    /// <summary>
+    ///     Builds one preview slot's actor via <see cref="SlotAppearanceResolver.BuildSlotActor" />,
+    ///     which resolves the skeleton + idle from the descriptor-derived <c>model_class_id</c>
+    ///     (the AUTHORITATIVE appearance key) — NOT the blindly-parsed <c>mesh.IdB</c>.
+    ///     Placement (position/scale/facing) is applied here as a wrapper Node3D.
+    ///     spec: Docs/RE/specs/skinning.md §3.5.2 / §8(e); frontend_scenes.md §3.3.7 / §3.7.5.
+    /// </summary>
+    private Node3D? TryBuildSlotActorViaResolver(
+        RealClientAssets assets, int slotIdx, SlotDescriptor descriptor, float rowY)
     {
-        // SkinClassId resolves from the descriptor INTERNAL class (+0x34, {1..4}) used VERBATIM — never
-        // offset to 0. This is the §3.5.2 / §3.3.7 class arg and the §3.7.5 starter-body key. A value
-        // outside {1..4} yields no candidate (logged + skipped) — we do NOT fall back to a wrong class.
-        // spec: skinning.md §3.5.2 (model_class_id = 5*(class + 4*variant) - 24); frontend_scenes.md §3.7.5.
-        var skinClassId = descriptor.InternalClass; // VERBATIM — the +0x34 class id, NOT remapped to 0.
+        // Map the host SlotDescriptor to the engine-free SlotAppearance record that
+        // SlotAppearanceResolver consumes (same fields, engine-free primitives only).
+        // spec: frontend_scenes.md §3.2 (descriptor shape: class +0x34, variant +0x2C, faceA +0x2E, equip +0x58).
+        var appearance = new SlotAppearanceResolver.SlotAppearance(
+            descriptor.InternalClass,
+            descriptor.Variant,
+            descriptor.FaceA,
+            descriptor.Equip);
 
-        // §3.3.7 OVERLAY BUILD — partially plumbed (WAVE 2). The descriptor IS now carried (class +0x34,
-        // variant +0x2C, faceA +0x2E, equip +0x58), so the faithful per-part overlay build — compose the
-        // {3,4,6,2,11,14} gids via ClassAppearanceResolver (ResolvePartGid → DeformSkinPathForGid →
-        // g{gid}.skn) on the shared SkinnedCharacterBuilder factory (§3.3.6), plus the non-starter slot-14
-        // body and the rigid hand weapon — could run AS SOON AS the host surfaces the equip dwords. While
-        // the host-API gap remains (the layer-04 CharacterListSlot event surface decodes ONLY ServerClass
-        // +0x74, not +0x34/+0x2C/+0x2E/+0x58), descriptor.Equip is empty and Variant/FaceA are 0, so this
-        // lane resolves the spec-grounded §3.7.5 starter body per class (variant 0). We do NOT fabricate
-        // equip ids / appearance bytes (that would manufacture a missing fact). When descriptor.Equip is
-        // populated the overlay loop below becomes drivable without touching this file.
-        // spec: frontend_scenes.md §3.3.7 (overlay build) / §3.7.5 (starter fallback) / §3.3.6 (factory).
-        var sknPath = PickSknPath(assets, skinClassId);
-        if (sknPath is null)
-        {
-            GD.PrintErr(
-                $"[CharSelectScene3D] Slot {slotIdx}: no .skn present for class={skinClassId} " +
-                $"(variant={descriptor.Variant}) — skipped (no wrong-class fallback). " +
-                "spec: skinning.md §3.5.2 / frontend_scenes.md §3.7.5.");
+        var result = SlotAppearanceResolver.BuildSlotActor(assets, appearance, $"slot{slotIdx}");
+
+        if (result.ActorRoot is null)
+            // SlotAppearanceResolver already logged the specific reason (invisible sentinel, absent .skn, etc.).
             return null;
-        }
 
-        SkinnedMesh mesh;
-        try
-        {
-            var sknData = assets.GetRaw(sknPath);
-            if (sknData.IsEmpty)
-            {
-                GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: .skn empty '{sknPath}' — skipped.");
-                return null;
-            }
-
-            mesh = SknParser.Parse(sknData);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] Slot {slotIdx}: .skn parse failed '{sknPath}': {ex.Message}");
-            return null;
-        }
-
-        // Skeleton + idle clip resolve from the MESH'S OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b → col16 (idle).
-        // (col16 = record +0x44 = direction array A element 1; col15 / +0x40 is statically DEAD —
-        //  CYCLE 7 reversal of the earlier "col15" reading.)
-        var skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
-        var idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
-        var albedo = CharacterTextureResolver.Resolve(assets, mesh.IdA);
-
-        // SkinnedCharacterBuilder applies the upright stand-up pivot + recentre (feet at local Y=0);
-        // its returned Position is the recentre offset — keep it, and place the slot via a wrapper.
-        var actorRoot = SkinnedCharacterBuilder.Build(mesh, skeleton, idleClip, albedo);
-
+        // Wrap the recentred actor root in a placement Node3D (position / scale / facing).
+        // The actor root is already recentred (feet at local Y=0) by SkinnedCharacterBuilder.
         var slotWrapper = new Node3D { Name = $"Slot{slotIdx}Actor" };
         slotWrapper.Position = new Vector3(SlotLegacyX[slotIdx], rowY, SlotGodotZ[slotIdx]);
-        slotWrapper.Scale = Vector3.One * PreviewScale; // spec: §3.3.1 ×6.0 (unit-reconciled)
+        slotWrapper.Scale = Vector3.One * PreviewScale; // reconcile(70.0 lineup scale @+1160). spec: charselect.md §6.2
 
         // Facing is selection-driven: selected preview snaps front; every other built preview faces back.
         // spec: Docs/RE/specs/frontend_scenes.md §3.3.2 / §3.3.4; recovered manual-yaw,
@@ -748,82 +702,8 @@ public sealed partial class CharSelectScene3D : Node3D
             slotIdx == _selectedSlot ? SelectedActorFrontYaw : DeselectedActorBackYaw,
             0f);
 
-        slotWrapper.AddChild(actorRoot);
+        slotWrapper.AddChild(result.ActorRoot);
         return slotWrapper;
-    }
-
-    // =========================================================================
-    // Asset helpers — all existence-checked, no synthetic fallback.
-    // =========================================================================
-
-    private static Skeleton? TryLoadSkeletonForIdB(RealClientAssets assets, uint idB)
-    {
-        if (idB == 0) return null;
-        var bndPath = $"data/char/bind/g{idB}.bnd";
-        if (!assets.Contains(bndPath))
-        {
-            GD.PrintErr($"[CharSelectScene3D] .bnd absent for id_b={idB}: {bndPath} — rest pose.");
-            return null;
-        }
-
-        try
-        {
-            var data = assets.GetRaw(bndPath);
-            return data.IsEmpty ? null : BndParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] BndParser failed '{bndPath}': {ex.Message}");
-            return null;
-        }
-    }
-
-    private static AnimationClip? TryLoadIdleClipForIdB(RealClientAssets assets, uint idB)
-    {
-        if (idB == 0) return null;
-        const string tablePath = "data/char/actormotion.txt";
-        if (!assets.Contains(tablePath)) return null;
-
-        try
-        {
-            // Parse data/char/actormotion.txt via the layer-03 catalogue (CP949 registered internally
-            // by ActormotionParser). Key on skin_class (col2 = int_a @ 0x04), first-occurrence-wins —
-            // equivalent to the previous inline "first row whose cols[2] == id_b" linear scan.
-            // spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class.
-            var catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
-            var entry = catalogue.GetBySkinClass((int)idB);
-            if (entry is null) return null;
-
-            // Idle motion = motion_ids_a[1] = COLUMN 16 (record offset +0x44) — the default stand idle
-            // the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is a file-source
-            // reference that is STATICALLY DEAD (zero runtime read-sites). IdleMotionId IS the parsed
-            // int of that same col16, so idle <= 0 is equivalent to the old empty/"0" string guard.
-            // spec: formats/actormotion.md §motion_ids_a slot table (a[1] = +0x44 = col16 = default
-            // stand idle; a[0]/+0x40/col15 dead at runtime); skinning.md §8(e)/§10 (idle = actormotion
-            // col16, keyed by id_b).
-            var idle = entry.IdleMotionId;
-            if (idle <= 0) return null;
-
-            var motPath = $"data/char/mot/g{idle}.mot";
-            if (!assets.Contains(motPath)) return null;
-
-            var motData = assets.GetRaw(motPath);
-            return motData.IsEmpty ? null : AnimationParser.Parse(motData);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharSelectScene3D] TryLoadIdleClipForIdB(id_b={idB}) failed: {ex.Message}");
-        }
-
-        return null;
-    }
-
-    private static string? PickSknPath(RealClientAssets assets, uint skinClassId)
-    {
-        foreach (var p in SknCandidatesForClass(skinClassId))
-            if (assets.Contains(p))
-                return p;
-        return null; // absent → caller logs + skips (no synthetic substitution)
     }
 
     // ── Terrain/building texture two-hop chain (terrain.md §5.6 / §3.5 / §4.2) ───────────────────

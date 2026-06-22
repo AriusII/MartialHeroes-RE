@@ -99,8 +99,16 @@ public sealed partial class RealWorldRenderer
             // The building texture resolver uses the legacy _cellMap+_bgTextures two-hop chain
             // (same as LoadAndSpawnBudScene) so buildings get their correct textures.
             // For non-target cells (streaming ring), _cellMap may belong to the target cell;
-            // this is acceptable for A.3 (single-cell demo parity). A per-cell .map cache
-            // is a follow-on improvement.
+            // this is acceptable for A.3 (single-cell demo parity).
+            //
+            // TODO (C12-D13 deferred merge — COMPOSER GAP #1): Per-cell .map cache required.
+            // Currently _cellMap is the target-cell's .map (loaded once in LoadTextureResolutionInputs
+            // for TargetMapX/Z). When OnCellAssembled fires for a NON-target cell in the streaming ring,
+            // this resolver silently returns textures keyed from the WRONG cell's BUILDING TEXTURES list.
+            // Fix: load and cache each cell's .map lazily inside OnCellAssembled, keyed by (MapX,MapZ),
+            // and pass the correct per-cell MapDescriptor to ResolveSectionTexture. This must pass a
+            // windowed visual-oracle check before this composer path can replace the legacy path.
+            // See ROADMAP.md §C12-D13 and Initializer.cs BuildLegacyAreaContent gate comment.
             // spec: Docs/RE/structs/terrain-manager.md slot 1 — "mass/building-object placement grid (.bud)": CONFIRMED.
             if (cell.Slot1BuildingObjectGrid is not null)
             {

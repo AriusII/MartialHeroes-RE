@@ -14,7 +14,7 @@
 
 ```
 verification: sample-verified            # stride, record count, file size, +0x000 id, +0x004 CP949 text, 0xEE padding all byte-exact against the real VFS sample
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: none
@@ -104,23 +104,35 @@ actual CP949 text is read from `msg.xdb` at runtime and is intentionally NOT rep
 
 | caption_id | Scene | Role | Confidence |
 |---:|-------|------|------------|
-| 4001–4021 | login / EULA gate | The 21 sequential lines of the Terms-of-Service / EULA passage shown in the scrollable agreement panel that gates login. Displayed in order as a continuous block. | RESOLVED (VFS-harness) |
-| 4022 | login / EULA gate | Trailing blank line of the EULA block (empty string). | RESOLVED |
+| 4001–4022 | login notice panel | The 22 labels of the **static stacked notice/agreement text column** on the login notice panel. Built in a loop (`caption_id = 4001 + i`, `i = 0..21`); each label seat is `(X = 50, Y = 100 + 18·i, W = 383, H = 50)`. The labels overlap vertically (50 px tall, 18 px stride) to form a single tall left-aligned paragraph block. There is **no EULA/terms panel and no scroll/accept gate** anywhere in the login construct. | RESOLVED (CODE-CONFIRMED — `specs/frontend_scenes.md §1.4c / §11.2i`; `specs/login.md §1.5 / §7.1`) |
 | 4023 | login / server-list | Body text of the "connecting to server" wait dialog. | RESOLVED |
 | 4024 | login / server-list | Body text of the "could not connect to server" failure dialog. | RESOLVED |
 
-> **Semantic note (important reconciliation):** IDs 4001–4022 are the **EULA / Terms-of-Service
-> text**, NOT server-name or channel-row labels. Server and channel names are received dynamically
-> from the server-list fetch (network), and are never sourced from this catalogue. Only 4023–4024
-> are dynamic dialog bodies.
+> **Correction (CODE-CONFIRMED — IDB SHA 263bd994):** IDs 4001–4022 are the labels of a
+> **static stacked notice/agreement text column on the login notice panel** — they are NOT EULA /
+> Terms-of-Service body text, NOT server-name or channel-row labels, and NOT gated by any
+> scroll/accept step. An element-by-element walk of the login scene builder (73 widgets, in build
+> order) confirms no terms/agreement panel is constructed anywhere in the login build, and no
+> substate ever shows or gates on one. Server and channel names are received dynamically from the
+> server-list fetch (network) and are never sourced from this catalogue. Sources:
+> `specs/frontend_scenes.md §1.4c / §11.2i` and `specs/login.md §1.5 / §7.1`.
 
 ### Character-select scene
 
 | caption_id | Scene | Role | Confidence |
 |---:|-------|------|------------|
 | 2206 | char-select | Healthy-game-use advisory notice (regulatory welfare message), shown in the char-select area. | RESOLVED |
+| 2209 | char-select | Slot-count caption (the per-slot occupancy label; the builder copies it once and writes the per-slot occupancy word at +0x66). | RESOLVED |
 | 14001 | char-select | Generic input-field placeholder label ("please enter"-style prompt). | RESOLVED |
 | 14002 | char-select | Body text of the delete-character confirmation dialog. | RESOLVED |
+| 14003 | char-select / create-form | Per-class name caption for class Musa — set on the corresponding class-select button click. | RESOLVED |
+| 14004 | char-select / create-form | Per-class name caption for class Salsu (Assassin). | RESOLVED |
+| 14005 | char-select / create-form | Per-class name caption for class Dosa (Wizard). | RESOLVED |
+| 14006 | char-select / create-form | Per-class name caption for class Monk. | RESOLVED |
+| 14007 | char-select / create-form | Per-class name caption for the fifth class slot (additional class if present). | RESOLVED |
+| 2190 | char-select / create-form | Character-name validation failure: name field is empty. | RESOLVED |
+| 2075 | char-select / create-form | Character-name validation failure: name contains a banned word. | RESOLVED |
+| 12012 | char-select / create-form | Character-name validation failure: name fails charset or length check. | RESOLVED |
 | 46001 | char-select | Instruction label of the name-change sub-dialog (prompt to type the new name). | RESOLVED |
 | 46002 | char-select | Field label ("Name") for the name-change input box. | RESOLVED |
 | 48001 | char-select | Emergency-teleport confirmation prompt (force-move the character to the main town). | RESOLVED |
@@ -129,8 +141,12 @@ actual CP949 text is read from `msg.xdb` at runtime and is intentionally NOT rep
 | 48005 | char-select | Emergency-teleport fallback-advice line. | RESOLVED |
 | 63030 | char-select | Tutorial-gate blocking notice (char-select entry blocked until tutorial is completed). | RESOLVED |
 
-> **Out of scope here:** caption IDs 14003–14007 (the character-creation form labels) and ID 48002
-> (unreferenced) belong to separate creation-form lanes and are not indexed in this front-end set.
+> **Class-name captions (14003–14007):** the class-button order left → right in the create form is
+> Monk / Musa / Dosa / Salsu (enum 4 / 1 / 3 / 2); the captions 14003–14007 are assigned per
+> button click, not in display order. Class-name text is read at runtime from the VFS — not
+> reproduced here. (Source: `Docs/RE/_dirty/shared_assets_pipeline.md §5`.)
+
+> **ID 48002** (unreferenced in the observed build-scene call sites) is not indexed here.
 
 ### PIN modal — NO catalogue entries (by design)
 
@@ -158,7 +174,8 @@ that texture, not from a caption lookup. CONFIRMED (absence).
 
 - **Container:** `formats/pak.md` (the VFS that delivers `msg.xdb`).
 - **Front-end scene flow** that consumes these captions: `specs/frontend_scenes.md` (login state
-  machine, EULA gate, char-select chrome — parallel lane).
+  machine, login notice panel static text column — no EULA/accept gate, see `§1.4c / §11.2i` —
+  and char-select chrome).
 - **PIN modal** (which has no catalogue entries — labels are baked art): see the PIN / second-
   password coverage in the front-end scene spec.
 - **Encoding:** all caption text is CP949; register the code-page provider once and decode with
@@ -178,3 +195,10 @@ that texture, not from a caption lookup. CONFIRMED (absence).
 > buffer with `0xEE` fill after, ascending ids. New fact folded in: `msg.xdb` is loaded **directly from
 > the main-window startup path** (not through the shared boot data-table corpus loader that handles the
 > five small `.xdb` tables — see `xdb_tables.md`). No addresses or decompiler output crossed the firewall.
+>
+> **Provenance — 2026-06-21 (IDB SHA 263bd994, static-only re-walk; source `Docs/RE/_dirty/shared_assets_pipeline.md`):**
+> front-end caption-ID index extended. Re-walk of the login and char-select `BuildScene` call sites confirmed
+> `msg.xdb` load ordering (loaded once at state-1 entry, before the login window ctor and before
+> `BuildScene`). New char-select caption IDs added: 2209 (slot-count), 14003–14007 (per-class create
+> labels), 2190 / 2075 / 12012 (name-validation failure responses). All other claims re-confirmed with
+> zero drift. No addresses or decompiler output crossed the firewall.

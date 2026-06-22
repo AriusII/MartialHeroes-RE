@@ -17,16 +17,22 @@
 >   recovered by following the static control flow. *sample-verified* for the
 >   `data/script/display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI=0.3, GLOW_RANGE 1×1,
 >   POWER=2→power2dx8.psh) and the `DISPLAY_CHAR_BRIGHT_*` 9-state character-tint table (§6.6,
->   §6.7) — read verbatim from the real VFS file. *static-hypothesis* for the c0/c1 ×0.5
->   derivation and 1.0 defaults, the per-scene frame-rate field's per-window default value, the
->   particle/UI vertex strides. *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note
->   below and §6.4.)*
+>   §6.7) — read verbatim from the real VFS file. *static-hypothesis* for the per-scene frame-rate
+>   field's per-window default value. *(CYCLE 11: c0/c1 defaults corrected to 1.0 / 1.0 — the
+>   earlier ×0.5 derivation was an FP-stack artifact, not a real code-side halving; particle/UI
+>   vertex strides upgraded to CONFIRMED; apply-site for 9-state character tint pinned. See §6.3,
+>   §5.2, §6.7.) *(2026-06-21: the glow `.psh` question is RESOLVED — see the C5 note below and §6.4.)*
 >   *capture/debugger-pending* for the present-time blend bytes (ONE/ZERO), the matrix major-order /
->   up-axis, and any on-screen colour verdict. *(2026-06-21 ASSET-FIDELITY re-walk: the 18-slot
->   render-state cache mechanism is re-confirmed, and the UI/HUD row of the per-bucket matrix is
->   re-walked and split into the in-game-HUD vs. front-end-overlay entry paths — see §4.1 / §4.2.)*
-> - **ida_reverified:** 2026-06-21    *(ASSET-FIDELITY 2026-06-21 — UI render-state row split, auto-hide timer, glow `.psh` conflict resolved; on CYCLE 7 2026-06-20 glow/toon post chain; IDB SHA 263bd994)*
+>   up-axis, any on-screen colour verdict, and the front-end blend final confirmation (§4.2, CYCLE 11
+>   DOWNGRADED to DEBUGGER-PENDING — see §4.2 CYCLE 11 re-open note); in-game HUD per-quad
+>   opt-in stays CONFIRMED. *(2026-06-21 ASSET-FIDELITY re-walk: the 18-slot render-state cache
+>   mechanism is re-confirmed, and the UI/HUD row split into in-game-HUD vs. front-end-overlay entry
+>   paths. 2026-06-22: §4.2 front-end blend reconciled — global ONE/ONE additive binary-won,
+>   opaque-panel SRCALPHA hypothesis refuted — see §4.2. CYCLE 11: front-end verdict DOWNGRADED to
+>   DEBUGGER-PENDING as noted above.)*
+> - **ida_reverified:** 2026-06-22    *(CYCLE 11 World block (263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. Prior: 2026-06-22 — §4.2 UI blend reconciled: front-end ONE/ONE global additive confirmed binary-won, opaque-panel SRCALPHA hypothesis refuted; contrast with in-game HUD per-class switching made explicit. §9 CharSelect 3D pipeline added (static-hypothesis, literal values promoted from dirty RE). ASSET-FIDELITY 2026-06-21 — UI render-state row split, glow `.psh` conflict resolved; CYCLE 7 2026-06-20 glow/toon post chain. IDB SHA 263bd994)*
 > - **ida_anchor:** 263bd994
+> - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida, sample-vfs]
 > - **cycle7_additions:** glow blur uses a **fixed pass-loop count of 16** (single small 2×2 box blur,
 >   one power-shader pass — NOT a multi-tap pyramid) — §6.4; the **toon ramp light-direction constant
@@ -68,7 +74,7 @@
 | Per-object material/texture binding (cel = skinned actors only, gated on post-process flag) | CONFIRMED. See §5. |
 | Cel shader binding (cel VS gets light/luma constants in regs 4..10, NOT a WVP matrix) | CONFIRMED. See §5.1a. |
 | Shader set (5 shaders: 2 cel PS + cel VS + composite + editable glow; VFS-first load) | CONFIRMED. See §6 / §6.5. |
-| Per-class vertex stride / FVF | CONFIRMED for world geometry (terrain/building/static/skinned = 32-byte XYZ+N+UV) and FX (24-byte XYZ+DIFFUSE+UV). Particle/UI strides PLAUSIBLE. See §5.2. |
+| Per-class vertex stride / FVF | CONFIRMED for world geometry (terrain/building/static/skinned = 32-byte XYZ+N+UV) and FX (24-byte XYZ+DIFFUSE+UV). Particle stride CONFIRMED (CYCLE 11, 24 bytes). UI/HUD CONFIRMED-via-sprite-helper (CYCLE 11, 24 bytes, no client vertex buffer). See §5.2. |
 | Glow/bloom post chain (3 render targets, ordered pass list) | CONFIRMED (load + execution). No bright-pass threshold; single blur pass; present is an opaque copy; composite weights config-driven. See §6. |
 | `display.lua` glow/bloom config values (GLOW_BRIGHT_MULTI, GLOW_RANGE, glow-shader filename) | SAMPLE-VERIFIED values; the §6.4 conflict is **RESOLVED (2026-06-21, binary-won)** — the glow shader is `power1dx8.psh` (the `DISPLAY_POWERSHADER` key is a filename string, no `power-N` construction exists in the binary), composite is `finaldx8.psh`. See §6.3 / §6.4 / §6.6. |
 | `DISPLAY_CHAR_BRIGHT_*` 9-state character tint table | SAMPLE-VERIFIED values; **recovered, NOT-YET-PORTED feature**. See §6.7. |
@@ -381,21 +387,64 @@ particles. So the opaque bucket is **not the sole Z-writer** — the 2×/multipl
 FX buckets also write depth, deliberately letting those surfaces occlude later transparent FX, while
 billboards and particles remain depth-read-only.
 
-**UI / HUD bucket (re-walked 2026-06-21, CODE-CONFIRMED).** The UI bucket has two distinct entry
-paths and they differ in their blend setup, so the single "UI / HUD" row was split above. The
-**in-game HUD panels** run a 2D-ortho enter at the head of every panel draw: depth test OFF, depth
+**UI / HUD bucket (re-walked 2026-06-21 / reconciled 2026-06-22, binary-won).** The UI bucket has
+two distinct entry paths that differ fundamentally in their blend setup; the single "UI / HUD" row
+is therefore split above.
+
+**In-game HUD panels** run a 2D-ortho enter at the head of every panel draw: depth test OFF, depth
 write OFF, lighting OFF, cull clockwise, fill solid, an orthographic projection (near/far roughly
 −300 .. +300) over identity world/view, and **alpha-blend left disabled at bucket-enter** — each
 quad or glyph opts into translucency itself through its own blend state (the canonical translucent
 pair being source-alpha / inverse-source-alpha). No alpha-reference is written (alpha-test stays
-disabled). The **front-end overlay** (login, character-select, opening windows) instead enters with
-alpha-blend ON and an **additive** source = ONE / destination = ONE pair, and additionally clears
-fog, dither, and alpha-test and configures texture stage 0 = select-arg-1 / diffuse with stage 1
-disabled and linear/linear/mip-none sampling. A 3D item-preview inset embedded inside an inventory
-panel temporarily re-enables depth test and then restores it on the way out — confirming that
-"no depth" is the UI default that the inset deviates from. The per-quad translucent source/dest
-pair for the in-game panels and the effective depth-write state at the very first UI draw are
-**DBG-PENDING** (a live device render-state read during a panel draw).
+disabled). This per-class blend switching is the correct reading for the in-game HUD path; it is
+confirmed by the observation that in-game panel draw routines (for link/inventory-type panels)
+explicitly set SRCALPHA / INVSRCALPHA for their atlas content and only switch to additive for
+specific overlay sub-draws.
+
+**Front-end overlay (login, character-select, opening windows) — global ONE/ONE additive
+(binary-won, 2026-06-22).** The front-end is a single global additive batch. A dedicated per-frame
+state-setup entry point (canonical name `Diamond_UI_SetRenderStateAndDraw`) runs **once** before
+the entire window/widget tree is walked. In order it: disables Z-write, lighting, fog, and
+last-pixel; enables alpha-blend (`ALPHABLENDENABLE = TRUE`); and sets `SRCBLEND = ONE` /
+`DESTBLEND = ONE`. Then it calls the window draw. **The per-element draw path — every widget
+subclass (`GUPanel`, `GUButton`, `GUList`, `GUTextbox`, `GULabel`, `GUShortLabel`, `GUCheckBox`,
+`GUScroll`) and the leaf batch submitter (`UI_SpriteBatch_SubmitQuad`) — issues zero
+`SetRenderState` calls for blend.** Every front-end element inherits the global ONE/ONE state.
+
+Consequence: **every class of front-end UI element — background atlas panels, framed window art,
+buttons, labels, list rows, text fields, checkboxes, scrollbars, and overlay sprites — draws with
+ONE/ONE additive**. The hypothesis that "opaque background atlas panels = SRCALPHA/INVSRCALPHA,
+overlay sprites/effects = ONE/ONE additive" is **refuted for the front-end** — the binary confirms
+global additive applies to every element, including opaque-looking atlas panels. Per-element
+opacity is expressed through the vertex diffuse alpha byte (`alpha<<24 | rgb`), not through a
+per-class blend-mode change. The art convention that makes this correct is that UI atlas panels are
+authored on a black background, so ONE/ONE additive composites them cleanly over a black backdrop
+or the rendered 3D scene.
+
+Additionally, the front-end entry clears fog, dither, and alpha-test and configures texture stage
+0 = select-arg-1 / diffuse with stage 1 disabled and linear/linear/mip-none sampling.
+
+A 3D item-preview inset embedded inside an inventory panel (in-game, not front-end) temporarily
+re-enables depth test and then restores it on the way out — confirming that "no depth" is the
+in-game HUD default that the inset deviates from.
+
+**Contrast: where per-draw blend switching exists (NOT the front-end).** Per-class blend
+switching is real for world particle/effect drawers (which switch SRCBLEND/DESTBLEND per item via
+a blend-mode field: mode 0 → SRCALPHA/INVSRCALPHA, mode 1 → SRCALPHA/ONE, mode 2 → ONE/ZERO)
+and for the in-game HUD path (which sets SRCALPHA/INVSRCALPHA at atlas-panel level and may switch
+to additive for specific overlay sub-draws). A spec that applies the per-class rule
+(opaque = SRCALPHA, overlay = ONE/ONE) to the **front-end** is the mistranslation; a spec that
+applies global ONE/ONE to the **in-game HUD** would be the inverse error.
+
+The per-quad translucent source/dest pair for the in-game panels and the effective depth-write
+state at the very first in-game UI draw remain **DBG-PENDING** (a live device render-state read
+during a panel draw is required to fully confirm the in-game HUD per-quad pair). The front-end
+ONE/ONE verdict is static-only; the decisive live confirmation (breakpoint
+`Diamond_UI_SetRenderStateAndDraw`, read live render-state 19/20/27 at the login/char-select
+screen) is recommended as a `re-validator` (`?ext=dbg`) pass before promotion to implementation.
+See `Docs/RE/_dirty/ui_blend_state.md` (static analysis notes, dirty-room, gitignored).
+
+> **CYCLE 11 re-open (front-end blend).** The front-end UI leaf quads are submitted through the D3DX sprite helper's Begin(alpha-blend) call WITHOUT the do-not-modify-render-state flag — which reprograms the device to source-alpha / inverse-source-alpha for each Begin/End at draw time, potentially OVERRIDING the global one/one the front-end wrapper sets once before the window tree. The static path cannot finish this (the device writes happen inside the sprite-helper runtime). Therefore the '§4.2 front-end = global one/one additive' verdict is DOWNGRADED to **DEBUGGER-PENDING** (needs a live render-state read of source-blend / dest-blend / alpha-blend-enable at a front-end sprite-quad draw). The IN-GAME HUD per-quad opt-in (alpha-blend disabled at bucket-enter, each panel opting in source-alpha / inverse-source-alpha) is UNAFFECTED and stays CONFIRMED.
 
 ---
 
@@ -465,7 +514,7 @@ skinned actors. This matters for Godot fidelity.
 
 ### 5.2 Vertex declaration / FVF per object type
 
-**Confidence: CONFIRMED for world geometry and FX strides; particle/UI strides PLAUSIBLE.**
+**Confidence: CONFIRMED for world geometry and FX strides; particle stride CONFIRMED (CYCLE 11); UI/HUD CONFIRMED-via-sprite-helper (CYCLE 11).**
 
 All world geometry shares a single **32-byte** vertex contract — `position | normal | 1 texcoord` =
 XYZ (12 bytes) + NORMAL (12 bytes) + UV (8 bytes). The FX bucket uses a **24-byte**
@@ -479,8 +528,8 @@ XYZ (12 bytes) + NORMAL (12 bytes) + UV (8 bytes). The FX bucket uses a **24-byt
 | **Building / static world mesh** | `position | normal | 1 texcoord` — XYZ + NORMAL + UV. | **32** | CONFIRMED (format); stride consistent with the 32-byte contract |
 | **Static posed mesh** | `position | normal | 1 texcoord` — XYZ + NORMAL + UV. | **32** | CONFIRMED (literal 32 stride to the draw call) |
 | **FX / fog / terrain-overlay** | `position | diffuse | 1 texcoord` — XYZ (12) + DIFFUSE (4) + UV (8). | **24** | CONFIRMED (declared format) |
-| **Billboard / particle / water** | Inherits the FX `position | diffuse | 1 texcoord` format within the FX overlay; particles batch through a shared dynamic vertex buffer. | ~24 | PLAUSIBLE (no separate per-bucket override observed; particle VB stride not byte-read) |
-| **UI / 2D HUD** | Pre-transformed (RHW) position + diffuse + texcoord, drawn under an orthographic projection. | — | PLAUSIBLE (not opened this pass) |
+| **Billboard / particle / water** | Inherits the FX `position | diffuse | 1 texcoord` format within the FX overlay; particles batch through a shared dynamic vertex buffer. | **24** | CONFIRMED (CYCLE 11): particle/FX vertex stride = 24 bytes (position + diffuse + one UV) — consistent with the FX 24-byte declaration; particle VB uses the same layout. |
+| **UI / 2D HUD (in-world 2D overlays and text quads)** | Drawn through the D3DX sprite helper — NO client-side UI vertex buffer. The sprite helper's own vertex format is transformed-position + diffuse + one UV = 24 bytes. | **24** | CONFIRMED-via-sprite-helper (CYCLE 11): the in-world 2D UI/HUD and text quads are submitted through the D3DX sprite helper; there is no client-authored UI vertex buffer. |
 
 > The skinned-character cel layout is the contract for the cel toon shader — see
 > `formats/shaders.md` (TEXCOORD1 carries the interpolated N·L luminance that keys the toon ramp
@@ -553,36 +602,19 @@ each axis.
 > or the binary's ÷2 fallback dominates is part of the IDA-pending reconciliation (§6.4 / C5).
 > `// spec: Docs/RE/specs/rendering.md §6.3`
 
-**Composite weights c0 / c1.** The composite pass uploads two pixel-shader scalar constants from code
-(reads them off the scene/post object and broadcasts each one 4-wide to a register): stage 0 binds
-the bright/edge-extract RT, stage 1 binds the bloom RT, and the two scalars weight them. **The upload
-itself is CONFIRMED.** The interpretation of the two scalars as
+**Composite weights c0 / c1 — apply path and defaults (CYCLE 11, binary-won).** In-world scene brightness is applied as **pixel-shader constants in the offscreen composite stage** — there is **no device gamma-ramp call** (no SetGammaRamp / SetDeviceGammaRamp path exists in the binary). The composite pass uploads two scalar pixel-shader constants from code (reads them off the scene/post object and broadcasts each one 4-wide to a register): **a base-brightness multiplier feeds composite pixel-shader constant slot 0 (c0)** and **a glow-brightness multiplier feeds slot 1 (c1)**, both uploaded just before the fullscreen toon/glow composite quad. Stage 0 binds the bright/edge-extract RT, stage 1 binds the bloom RT, and the two scalars weight them. **The upload itself is CONFIRMED.**
 
-- **c0** = (base-bright-multiplier × 0.5)
-- **c1** = (glow-bright-multiplier × 0.5)
-
-— with both multipliers defaulting to **1.0** (so the uploaded defaults are **c0 = c1 = 0.5**),
-sourced from the external display config, and the ×0.5 being a real code-side multiply — is
-**static-hypothesis**: the scalars are read pre-computed from the scene object and the **producer site
-that writes them was not opened this lane**, so the half-scaling and the 1.0 default are inferred from
-the prior pass, not re-derived. Either way these are the **two tunable knobs** for the glow (base
-brightness and glow brightness) — they are **not** hardwired white. The binding is consistent with a
-`saturate(2·edge·c0 + bloom·c1)`-style composite. The exact pixel-shader arithmetic (the `2×`, the
-`saturate`, any embedded constants) lives in the external `.psh` and is documented in
-`formats/shaders.md` — only the c0 / c1 scalars come from code.
+**Constructor defaults are 1.0 / 1.0 (CYCLE 11 binary-won).** An earlier reading reported uploaded defaults of **c0 = c1 = 0.5**, derived from an inferred ×0.5 code-side half-scaling applied to 1.0 base multipliers. CYCLE 11 re-walk found this ×0.5 was a **floating-point-stack decompiler artifact, not a real halving** — the constructor seeds both multipliers at **1.0** and there is no code-side ×0.5 divide in the producer site. The correct binary defaults are therefore **c0 = 1.0** (base-brightness) and **c1 = 1.0** (glow-brightness). These are the **two tunable knobs** for the glow — they are **not** hardwired white. The binding is consistent with a `saturate(edge·c0 + bloom·c1)`-style composite. The exact pixel-shader arithmetic lives in the external `.psh` and is documented in `formats/shaders.md` — only the c0 / c1 scalars come from code.
 
 > **Config source (SAMPLE-VERIFIED) — `data/script/display.lua` glow brightness.** The shipped
 > `data/script/display.lua` sets `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` and `DISPLAY_BASE_BRIGHT_MULTI =
 > 1.05` (SAMPLE-VERIFIED values; the world-geometry `DISPLAY_BASE_BRIGHT_MULTI` is owned by
 > `environment.md §9`). `DISPLAY_GLOW_BRIGHT_MULTI = 0.3` is the **glow/bloom post-pass multiplier**
-> — intentionally dim (30%). This is the live `glow-bright-multiplier` that the c1 derivation above
-> describes: with the binary's ×0.5 code-side multiply this would yield `c1 = 0.3 × 0.5 = 0.15`,
-> **differing from the §6.3 default-1.0 → c1 = 0.5** computed from the binary defaults. The base
-> multiplier the c0 derivation uses is `DISPLAY_BASE_BRIGHT_MULTI = 1.05` (→ `c0 = 1.05 × 0.5 =
-> 0.525` if the ×0.5 holds). Both the binary-default reading (1.0 → 0.5) and the shipped-config
-> reading (0.3 / 1.05) are recorded; the reconciliation (whether the ×0.5 code-side multiply is
-> applied to the config values, and the producer site that writes c0/c1) is **IDA-pending** (§6.4 /
-> C5). `// spec: Docs/RE/specs/rendering.md §6.3`
+> — intentionally dim (30%). This is the live glow-brightness that feeds c1 at runtime. With the CYCLE
+> 11 binary-won defaults of 1.0 / 1.0, the shipped config values (base ≈ 1.05, glow 0.3) are read
+> verbatim from the VFS file and overwrite the defaults — so the live uploaded values are approximately
+> `c0 = 1.05` and `c1 = 0.3` (capture/config-sourced). The producer site that writes c0/c1 onto the
+> scene object from the display config is **IDA-pending** (§6.4 / C5). `// spec: Docs/RE/specs/rendering.md §6.3`
 
 **Present blend (corrects earlier "additive present" wording).** Structurally the present pass blits
 the composited TEX0 to the backbuffer as a straight **opaque copy** — **source = ONE, destination =
@@ -727,13 +759,13 @@ own cel slot (see §6.1 / `formats/shaders.md`).
 
 ### 6.7 `DISPLAY_CHAR_BRIGHT_*` — per-state character tint table (recovered, NOT-YET-PORTED)
 
-> **Status: `sample-verified` VALUES; RECOVERED, NOT-YET-PORTED FEATURE.** The shipping
+> **Status: `sample-verified` VALUES; APPLY-SITE CONFIRMED (CYCLE 11); NOT-YET-PORTED FEATURE.** The shipping
 > `data/script/display.lua` defines a per-state **character render tint / alpha** table —
 > a colour-grade applied to character meshes depending on the character's gameplay state (idle,
 > selected, hit, poisoned, etc.). This is a distinct render feature from the world-geometry and
-> glow brightness scalars; it is **not yet reproduced in the Godot port**. The **apply-path**
-> (which render stage applies the per-state tint to character meshes, and how the active state is
-> selected at runtime) is **`static-hypothesis / IDA-pending`** — only the values are recovered.
+> glow brightness scalars; it is **not yet reproduced in the Godot port**.
+>
+> **Apply mechanism (CYCLE 11: apply site + state→tint mapping confirmed).** The per-actor tint is applied at the skinned-actor cel draw as **two pixel-shader constants — a multiply colour in slot 0 (alpha 1) and an add colour in slot 1 (with alpha)** — giving `out = multiply·in + add`. The active tint is selected by a per-actor state field decoded one-hot to an ordinal 0..8 (nine states: default / choice / hit / alpha / hidden / poison / type / anger / auto) indexing the nine-entry tint table (4-byte stride). (CYCLE 11: apply site + state→tint mapping confirmed; the nine tint VALUES were already sample-verified.)
 
 Each of the 9 states defines a per-channel multiply (`MULTI_R/G/B`), a per-channel add
 (`ADD_R/G/B`), and an `ALPHA`. The applied formula is per-channel `y = MULTI · x + ADD`, where `x` is
@@ -757,24 +789,18 @@ Notes:
 - **`DEFAULT = 1.3×` all channels** is the baseline tint every character receives in the normal
   state — characters are rendered ~30% brighter than their source texture/lighting even when idle.
 - The tint is a **character-only** colour grade; it does not affect terrain, buildings, or FX.
-- **`DISPLAY_LIGHT_RATIO = 0.5`** (owned by `environment.md §9.2`) applies to **character lighting
-  only** — it is the character light-colour correction factor that composes with this per-state tint
-  layer. Cross-reference: `environment.md §9`.
+- **`DISPLAY_LIGHT_RATIO` — PARSED BUT NOT CONSUMED (CYCLE 11, binary-won).** A full code scan found a constructor default and a config-parser write for `DISPLAY_LIGHT_RATIO` but **no reader** — the same dead signature as the confirmed-dead framerate field. It does not affect character lighting in the shipped client. (CYCLE 11 binary-won; a remote struct-copy edge case is the only residual, flagged for a debugger pass.) Cross-reference: `environment.md §9`. (Note: earlier readings in `environment.md §9.2` described `DISPLAY_LIGHT_RATIO = 0.5` as a live character light-colour correction — that characterization is superseded by this CYCLE 11 finding for purposes of this spec.)
 
 > **Citation breadcrumb.** A C# constant carrying any of these values cites this section:
 > `// spec: Docs/RE/specs/rendering.md §6.7`. **Source citation:** all values are from the
-> `data/script/display.lua` config layer. **Apply-path (which render stage tints character meshes,
-> and the state-selection logic) is IDA-pending** — see §7 Known unknowns.
+> `data/script/display.lua` config layer. **Apply-path:** CYCLE 11 pinned — see apply mechanism note above. State-selection logic (the runtime per-actor state field decode) is confirmed; the nine tint VALUES are SAMPLE-VERIFIED.
 
 ---
 
 ## 7. Known unknowns
 
-- **Particle vertex-buffer stride (exact bytes)** — the particle batch uses a shared dynamic vertex
-  buffer; its format is assumed to inherit the FX 24-byte `position | diffuse | 1 texcoord` layout,
-  but the particle VB's own stride was not byte-read. PLAUSIBLE.
-- **UI / 2D HUD FVF + stride** — the pre-transformed (RHW) position + diffuse + texcoord format is
-  the standard assumption but was not byte-confirmed this pass. PLAUSIBLE.
+- **Particle vertex-buffer stride** — RESOLVED (CYCLE 11): stride = 24 bytes (position + diffuse + one UV), confirmed consistent with the FX 24-byte contract. See §5.2.
+- **UI / 2D HUD FVF + stride** — RESOLVED (CYCLE 11): the in-world 2D UI/HUD and text quads are drawn through the D3DX sprite helper with no client-side UI vertex buffer; stride = 24 bytes (transformed-position + diffuse + one UV). See §5.2.
 - **Skinned-actor fixed-function fallback stride (post-OFF path)** — the cel-off fallback draw likely
   reuses the same 32-byte skinned vertex buffer, but its draw routine was not separately opened.
   PLAUSIBLE.
@@ -797,15 +823,13 @@ Notes:
   `DISPLAY_GLOW_RANGE_X/Y = 1`, `DISPLAY_FRAMERATE = 0` — values SAMPLE-VERIFIED; the exact
   render-pipeline field / D3D state each maps into is not yet recovered (the dirty IDA lane crashed
   before reaching the render-stage reads). See §6.6.
-- **`DISPLAY_CHAR_BRIGHT_*` per-state character tint apply-path (IDA-PENDING — NOT-YET-PORTED).** The
-  9-state tint/alpha values (§6.7) are SAMPLE-VERIFIED, but the render stage that applies the
-  per-state colour grade to character meshes, and the runtime logic that selects the active state
-  (idle / selected / hit / poison / buff / anger / auto / hidden), are not yet recovered. This is a
-  recovered-but-unported character render feature. See §6.7.
+- **`DISPLAY_CHAR_BRIGHT_*` per-state character tint apply-path (CYCLE 11 CONFIRMED — NOT-YET-PORTED).** The 9-state tint/alpha values (§6.7) are SAMPLE-VERIFIED; the apply-site and state→tint mapping are now CONFIRMED (CYCLE 11): two pixel-shader constants at the skinned-actor cel draw (multiply slot 0, add slot 1), state decoded one-hot to ordinal 0..8 indexing the nine-entry table (4-byte stride). This remains a **recovered-but-unported** character render feature. See §6.7.
 - **Live display-config values** — the actual shipped glow-range divisors, base/glow brightness
   multipliers, and the power-shader override are now SAMPLE-VERIFIED from `data/script/display.lua`
-  (§6.6); the binary defines only the defaults (2,2 / 1.0 / `power1dx8`) and the ×0.5 scaling. The
-  reconciliation between the shipped config and the binary defaults is IDA-PENDING (§6.4).
+  (§6.6); the binary defines the defaults (2,2 / 1.0 / `power1dx8`). Note: the ×0.5 code-side scaling
+  previously inferred is RETRACTED (CYCLE 11: FP-stack artifact — binary defaults are 1.0 / 1.0 with
+  no halving). The reconciliation between the shipped config and the binary defaults is IDA-PENDING
+  (§6.4).
 - **Internal per-primitive logic of the opaque sub-draws** (terrain / buildings / objects / actors)
   — their role and order in the opaque bucket is confirmed; their internal logic was out of scope.
 - **Whether terrain actually populates the NORMAL field** — the world geometry format declares a
@@ -837,8 +861,9 @@ Notes:
   (downscaled ÷2) → composite into the scene RT → opaque present. A Godot `WorldEnvironment` Glow can
   stand in: set the glow **HDR threshold ≈ 0** (there is no bright cutoff in the original), use
   **one** effective blur level (a single half-res blur — do not stack a multi-level Gaussian
-  pyramid), and treat the glow base/intensity knobs as the two composite scalars (base-bright and
-  glow-bright, default 0.5 each after the ×0.5). The additive "glow add" happens inside the composite
+  pyramid), and treat the glow base/intensity knobs as the two composite scalars (base-bright c0 and
+  glow-bright c1, binary defaults **1.0 / 1.0** — CYCLE 11 binary-won; the earlier "0.5 each" was a
+  decompiler artifact; shipped config values are base ≈ 1.05, glow 0.3 — SAMPLE-VERIFIED). The additive "glow add" happens inside the composite
   before present, so use the additive glow blend for the contribution but do **not** double-add at
   present. The cel/toon look needs the toon ramp material from `formats/shaders.md`.
   > **Shipped display-config (SAMPLE-VERIFIED, §6.6):** the real `data/script/display.lua` sets glow
@@ -855,11 +880,8 @@ Notes:
   as the idle baseline and distinct tints for selected / hit / poison / buff / anger / auto / hidden.
   A faithful port should apply this per-state `y = MULTI·x + ADD` tint + alpha to character materials;
   the values are SAMPLE-VERIFIED but the render-stage apply-path and state-selection logic are
-  IDA-pending. `DISPLAY_LIGHT_RATIO = 0.5` (character light correction, `environment.md §9`) composes
-  with this layer.
-- Mesh stride contract: **world geometry** (terrain / building / static / skinned) = **32-byte**
-  XYZ (12) + NORMAL (12) + UV (8); **FX / billboard / particle** = **24-byte** XYZ (12) + DIFFUSE (4)
-  + UV (8).
+  IDA-pending. **`DISPLAY_LIGHT_RATIO` is confirmed parsed-but-dead in this build (§6.7, CYCLE 11)** — it does not compose with this layer in the shipped client.
+- Mesh stride contract: **world geometry** (terrain / building / static / skinned) = **32-byte** XYZ (12) + NORMAL (12) + UV (8); **FX / billboard / particle** = **24-byte** XYZ (12) + DIFFUSE (4) + UV (8) (CONFIRMED CYCLE 11). **UI/HUD quads** use the D3DX sprite helper (no client vertex buffer) — also 24-byte transformed-position + diffuse + UV (CONFIRMED CYCLE 11).
 - Reproduce the **draw order** exactly: opaque (Z-test on, Z-write on, lighting on) → transparent
   buckets in the order fog/terrain-overlay → billboard → 2× → water → particle, with **no
   back-to-front sort** and **additive particles**. Reproduce the **per-bucket Z-write**: opaque ON;
@@ -887,15 +909,248 @@ Notes:
 
 ---
 
-## Cross-references
+## 9. Character-select 3D preview pipeline
+
+> **Verification banner (this section)**
+> - **verification:** *static-hypothesis* for the scene-construction call sequence, the six-slot
+>   camera-manipulator layout, the scene-root selector flag, and the overlay-callback slot
+>   population. *literal* for the camera FOV / near / far, the world anchor, the terrain
+>   cold-start centre, the environment area id and time-of-day, the ambient-effect id and its
+>   world position, the light fallback direction and scale, the fog file layout, and the
+>   actor-preview scale. *sample-witnessed* (2026-06-22, decoded from the production VFS and
+>   matching the committed format specs byte-for-byte) for the map000 fog parameters, the
+>   directional/ambient light values, and the `map_option0.bin` skybox/sky-element flags (§9.3,
+>   resolving open items O-1 / O-2 / O-3). *file* (still open — values live in VFS assets, not the
+>   binary) for the sky-dome `.bin` colour tables, the sun/moon keyframe positions, and the
+>   ambient-effect identity. Recovery based on static analysis of `doida.exe` against IDB `263bd994`,
+>   plus VFS sample-witnessing of the map000 environment binaries. No debugger confirmation yet for
+>   the remaining runtime open items in §9.5.
+> - **ida_anchor:** 263bd994
+> - **evidence:** [static-ida]
+
+### 9.1 Architectural shape — one shared view, one scene
+
+The character-select 3D preview is **not** a dedicated render target, a separate sub-viewport, or
+an offscreen texture widget. The client uses the **single shared engine view** (the same engine
+view object the main game world uses) and its **single engine scene root**. The character-select
+builder seeds that shared scene with a new scene named `"select"` (the in-game world scene is
+named `"charater scene"` — note the typo is original), a character-select camera, a
+character-select camera manipulator, and one ambient effect. The same per-frame draw path
+(device-step → camera/cull setup → scene-draw fork → Present) renders it, unchanged.
+
+The 2D chrome (the front-end UI panels: slot portraits, confirm dialog, class/name labels) is
+drawn as screen-space ortho overlays inside the **same** BeginScene / EndScene span, after the 3D
+scene-root draw, using the front-end `ONE / ONE` additive blend state (§4.2). There is **no**
+offscreen render-to-texture dedicated to character-select; the only RT path is the engine-wide
+glow/bloom compositor (§6), shared with every scene when the post-process flag is set.
+
+Consequence for a 1:1 port: one 3D viewport fills the window; the same scene-draw fork (§2)
+renders it with the character-select camera's FOV and the six-slot manipulator; the 2D chrome
+draws over the top via the front-end UI overlay path — **not** a separate sub-viewport or RT.
+
+### 9.2 Scene construction — element inventory
+
+The character-select 3D scene is built by a single dedicated function (canonical name:
+`SelectWindow_BuildScene`). It is called exactly once from the larger character-select window
+initialiser (`SelectWindow_BuildAndInit`) when the client enters game-state character-select.
+Every element listed below is created **exactly once**; none is duplicated.
+
+**Environment load (literal values):**
+| Parameter | Value | Confidence |
+|-----------|-------|------------|
+| Area id | **0** (directory token `"000"` — map000) | literal |
+| Date seed | 0 | literal |
+| Time-of-day (TOD) | **52,200 seconds = 14:30** | literal |
+| Environment flags | 0x30 (decimal 48) | literal |
+
+The environment load runs the same engine path the live game uses
+(`Env_MapSetAndLoadArea`). It is a **pinned** literal TOD — the character-select screen always
+renders at 14:30, it is not a live wall-clock.
+
+**Camera (literal values):**
+| Parameter | Value | Confidence |
+|-----------|-------|------------|
+| Type | Perspective | confirmed |
+| Vertical FOV | **50.0°** (converted to radians; divided by aspect ratio) | literal |
+| Near plane | **5.0** | literal |
+| Far plane | **15,000.0** | literal |
+| Aspect ratio | backbuffer width ÷ height (runtime) | parser |
+
+Note: the in-game world scene uses FOV **65°** — the two FOVs must not be cross-wired.
+
+**World anchor and terrain stream (literal values):**
+| Parameter | Value | Confidence |
+|-----------|-------|------------|
+| World anchor (X, Y, Z) | **(2048.0, 0.0, −6144.0)** | literal |
+| Terrain cold-start centre (X, Z) | **(508.0, −9734.0)** (anchor minus offsets 1540 / 3590) | literal |
+| Terrain cold-start ring | 3×3 or forward 5×5 cells around the centre | parser |
+
+**Camera manipulator — six-slot presets:**
+The scene uses a dedicated `SelectCameraManipulator` with **exactly six slot anchors** arranged
+around the world anchor. Each anchor position is stored relative to the origin and offset by the
+world anchor (+2048.0, +0.0, −6144.0) to produce the six character-slot stage positions. Each
+slot carries two angle-channel presets and shares a common distance scalar of **10.0**. The
+initial active slot is **0**. The per-slot position vectors and angle-channel values are recovered
+but classified as file-tier literals needing spec-author promotion; the rebuild requires exactly
+these six anchors and twelve angle constants (see open item O-7 in §9.5).
+
+**Ambient XEffect (literal values):**
+| Parameter | Value | Confidence |
+|-----------|-------|------------|
+| Effect id | **380003000** | literal |
+| World position (X, Y, Z) | **(508.483, 69.887, −9758.569)** | literal |
+| Direction | identity (0, 0, 0) | literal |
+| Scale | **1.0** | literal |
+| Loop | **1** (looping) | literal |
+
+The effect manager is cleared of all active user effects immediately before this spawn, guaranteeing
+a single-instance ambient effect. The position sits near the terrain cold-start centre (508, −9734)
+but at Y ≈ 69.9, placing the effect as a floor-level ambient in front of the character row rather
+than as a background element.
+
+**Scene-graph children:** the scene root receives exactly **two** children — the camera manipulator
+node and a global light/scene node (sourced from an engine singleton). No additional scene children
+are created by the character-select builder.
+
+**Preview actors** are spawned by a separate per-actor function (`ActorPreview_CreateAndConfigureRender`),
+not by the scene builder. Each preview actor: spawns from a character descriptor, receives a scale of
+**35.0**, has its idle motion applied immediately (via the actormotion idle chain — see
+`specs/skinning.md` and CLAUDE.md's motion-chain recovery notes), and is configured with a
+distinct texture-stage material state (see §9.3). The number of simultaneous preview actors (one
+per slot vs. one selected slot only) is an open item (§9.5 O-6).
+
+### 9.3 Sky, light, and fog — map000 environment at TOD 14:30
+
+> **Status update (2026-06-22): the map000 environment binaries are now sample-witnessed.** The
+> `fog0.bin` / `light0.bin` / `map_option0.bin` literals below were decoded from the user's mounted
+> production VFS and **match the committed format specs byte-for-byte** — they resolve the former
+> file-tier open items O-1 / O-2 / O-3 (§9.5). The recovered values and layouts are owned by
+> `formats/environment_bins.md` and `formats/sky.md`; cite those for any constant.
+> `// spec: Docs/RE/formats/environment_bins.md`  `// spec: Docs/RE/formats/sky.md`
+
+The character-select backdrop is the **ordinary map000 environment rendered at a pinned
+time-of-day**, not a bespoke skybox or dedicated interior cell. `Env_MapSetAndLoadArea` (called
+with area id 0) runs the full sky-system initialisation, loading the sun, moon, star-dome,
+cloud-dome, material, directional and ambient light, and fog from the map000 `data/sky/dat/`
+asset files. The sky dome is **procedural** (sun + moon + star-dome + cloud-dome); the static
+enclosure mesh (`sky0.box`) is **off** for map000 (see below).
+
+**`map_option0.bin` per-area flags (40 B = 10× u32; sample-witnessed for map000).** Decoded
+pattern `[0, 0, 1, 1, 1, 1, 1, 0, 0, 0]` = the **standard outdoor area** row.
+| Flag | Value | Effect |
+|------|:-----:|--------|
+| `is_dungeon` / `sight_distance` | 0 / 0 | outdoor, free sight range |
+| `lensflare` / `stardome` / `clouddome` | **1 / 1 / 1** | lens-flare, star-dome, cloud-dome **on** |
+| `sun` / `moon` | **1 / 1** | sun + moon billboards **on** |
+| `skybox` (SKYBOX) | **0** | static `sky0.box` dome **NOT loaded** for map000 |
+| `indoor` / reserved | 0 / 0 | not an interior |
+
+So the procedural sky (lens-flare + star-dome + cloud-dome + sun + moon) is fully enabled and the
+static skybox is disabled for character-select. `// spec: Docs/RE/formats/environment_bins.md §1`
+
+> **Static skybox is a confirmed-absent feature, not just disabled.** No `sky0.box` exists in the
+> production VFS for map000 — nor any `.box` asset in any area (a census of the full archive found
+> **zero** `.box` files). The map000 `SKYBOX` flag being 0 keeps the load path gated off, and there
+> is no asset to load even if it were on. There is **no "cavern backdrop" skybox**: any enclosed look
+> comes from terrain geometry plus the fog / ambient / sky-colour data, not a static mesh. A faithful
+> port should **not** implement a `.box` loader — use a synthetic sky-dome tinted by the colour
+> tables. `// spec: Docs/RE/formats/sky.md §A`
+
+**Directional and ambient light (sample-witnessed from `light0.bin`, keyframe 29 = TOD 14:30).**
+Light colours are read directly in the **[0, 1] float domain (no /255)**.
+- **Directional colour:** a very dark grey diffuse, **(0.047, 0.047, 0.047)**, applied raw — so the
+  scene is **not** lit primarily by the directional term.
+- **Light direction:** there is **no per-keyframe direction** in the light data; the only direction
+  is the static fallback vector **(−7.0, 7.0, 20.0)** (normalised ≈ **(−0.314, 0.314, 0.896)**). The
+  day/night cycle does **not** rotate this vector in the light file (sun/moon orbiting is the separate
+  billboard system).
+- **Ambient floor:** the per-keyframe ambient table in the file is **inert at runtime** — it is
+  multiplied by a global ambient gate that is **0.0**, so its contribution is zero. The actual
+  device-ambient floor is the additive brightness offset from the user `OPTION_BRIGHT` setting
+  (default 100 → device ambient saturates to **full white (1, 1, 1)**). The character-select scene is
+  therefore lit primarily by this **white ambient floor**, not by the dark directional colour. A
+  user-saved lower `OPTION_BRIGHT` would lower this floor (a per-machine runtime residual, §9.5 O-4).
+
+`// spec: Docs/RE/formats/environment_bins.md §9`
+
+**Fog (sample-witnessed from `fog0.bin`, 204 B).** The applied fog path is **LINEAR** (the D3D fog
+type is not stored in the file; the observed applied path is linear). The fog colour is
+**synthesised** from the sky-material LUT — the file's `data_load_flag` is **0**, so the on-disk
+`fog_colors[]` table is **not consumed** (the table present in the file is an unused editorial
+artefact). The static start / end fractions (0.5 / 0.9) are a **baseline only**: the live fog range
+is driven per-tick from the `light0.bin` fog scalar (keyframe-29 scalar 25.0 × 3.0 = a **75.0-world-
+unit** LINEAR range); the secondary haze scalar is 0.0 (no haze). LINEAR-path density is 0.
+`// spec: Docs/RE/formats/environment_bins.md §2`  `// spec: Docs/RE/formats/sky.md §B`
+
+> **Read-from-data, do not hardcode.** Every decoded byte matched the committed specs, so a faithful
+> port should **parse** `fog0.bin` / `light0.bin` / `map_option0.bin` and drive the look from those
+> values rather than baking colours in. The two facts most likely to be wrongly hardcoded are the
+> **white ambient floor** (from `OPTION_BRIGHT`, not from the inert in-file ambient table) and the
+> **static light direction (−7, 7, 20)** (there is no per-keyframe sun direction).
+
+The OPTION_SKY quality setting (ini-driven, values 1 / 2 / 3, maps to sky-brightness scales
+1.0 / 0.71 / 2.0) also applies to the character-select sky but is user-dependent (§9.5 O-4).
+
+### 9.4 Per-frame render path for character-select
+
+Character-select participates in the **standard per-frame device-step loop** (§2.0) with exactly
+**one active view** (the shared engine view). The per-frame sequence is therefore identical to the
+general pipeline (§2) with the character-select camera's 50° FOV and the "select" scene root.
+
+**Draw order** (consistent with the general pipeline §3):
+1. Clear (TARGET | ZBUFFER, depth 1.0) — background clear colour `0xFF505050` (dark grey ARGB).
+2. Sky-callback pass (sky-dome draw: sun/moon/star-dome/cloud-dome if enabled).
+3. Scene-root draw: terrain tiles around (508, −9734) + preview actor(s) + ambient XEffect 380003000.
+4. Front-end UI overlay: character-slot chrome, portrait panels, confirm dialog — via the
+   `Diamond_UI_SetRenderStateAndDraw` entry point using the **ONE / ONE additive** blend state (§4.2
+   front-end row). All 2D panels inherit this global additive state.
+5. EndScene → Present (single Present per frame, inside the device-step).
+
+The glow/bloom post chain (§6) runs if the global post-process flag is set; whether it is enabled
+during character-select is a runtime open item (§9.5 O-5).
+
+**Scene-root selector.** The engine view holds two candidate cull-root pointers, selected by a
+per-view byte flag. The character-select scene is installed into one of those slots; which slot it
+occupies and which flag value the view carries during character-select are runtime open items
+(§9.5 O-5).
+
+**Preview actor material.** The preview actor configuration applies a distinct texture-stage and
+sampler block — different from the opaque-world pass block (§4.2) — to the actor at spawn time.
+The exact wrapper enum values for this actor material state are catalogued in the dirty-room RE
+notes; they must not be conflated with the in-world material state. The actor draws with the cel
+shader path if the post-process flag is set (§5.1a applies to skinned preview actors equally).
+
+### 9.5 Open items (debugger / file-witnessing required)
+
+These items are unresolved static hypotheses or file-tier values that must not be invented:
+
+| ID | Item | How to resolve |
+|----|------|----------------|
+| O-1 | ~~`fog0.bin` for map000: fog type, colour, start/end, density~~ | **RESOLVED (2026-06-22, sample-witnessed):** LINEAR applied path; colour synthesised from the sky LUT (`data_load_flag = 0`, in-file table unused); baseline start/end 0.5 / 0.9 overwritten by the live `light0.bin` scalar (75.0-unit range); density 0. See §9.3. |
+| O-2 | ~~`light0.bin` for map000: directional colour, direction vector, ambient floor at TOD 52,200~~ | **RESOLVED (2026-06-22, sample-witnessed):** directional (0.047, 0.047, 0.047) raw; static direction (−7, 7, 20); in-file ambient table inert (gate 0) — ambient floor is white (1,1,1) from `OPTION_BRIGHT` default 100. See §9.3. |
+| O-3 | ~~Does `map_option0.bin` enable the static skybox? Does `sky0.box` exist for map000?~~ | **RESOLVED (2026-06-22, sample-witnessed):** SKYBOX flag = 0 (disabled); `sky0.box` is CONFIRMED-ABSENT (no `.box` asset in any area). No skybox to load — use a synthetic dome. See §9.3. |
+| O-4 | Effective OPTION_SKY quality (1/2/3) on the reference machine → sky-brightness scale | ini / session config |
+| O-5 | Post-process fork path during character-select (direct vs. offscreen), scene-root selector flag value, overlay callback slot population | Live `?ext=dbg` session |
+| O-6 | Preview actor count / per-slot spawn loop: one actor per slot (up to six simultaneous) vs. single selected actor? | Live `?ext=dbg` session or slot-switch trace |
+| O-7 | Six-slot camera anchor positions and twelve angle-channel constants (the float literals): ready for spec-author promotion once O-5 confirmed | Static (literals recovered; promotion pending re-validator sign-off) |
+| O-8 | XEffect 380003000 → asset identity and visual appearance (per-character glow? floor ring?) | XEffect table trace from sample VFS |
+| O-9 | Sun and moon literal positions at TOD 52,200 (interpolated from `sun0.bin` keyframes) | Witness from sample VFS |
+
+The map000 environment binaries (O-1 / O-2 / O-3) are now **sample-witnessed** and match the
+committed format specs byte-for-byte (§9.3) — the fog / light / skybox values are resolved. The
+guidance to **read these files at runtime rather than hardcode** still holds (they are data, not
+binary constants): parse `fog0.bin` / `light0.bin` / `map_option0.bin` and drive the look from them.
+The remaining unwitnessed file-tier items are the sun/moon keyframe positions (O-9) and the XEffect
+identity (O-8), plus the user-dependent OPTION_SKY quality (O-4). The binary literals in §9.2
+(camera, anchor, XEffect spawn) are implementation-ready.
+
+---
 
 - `specs/game_loop.md`, `specs/client_runtime.md` — the **per-scene-state run loop** and the
   **frame-rate field** (the +48 / +0x30 rate seeded 60 and unoverwritten); §2.0 here describes only
   the render side of that loop (the device-step + Present + device-lost recovery) and is reconciled
   with — not contradicting — those specs.
-- `specs/environment.md` — the **world-brightness scalars** (`DISPLAY_BASE_BRIGHT_MULTI = 1.05`,
-  `DISPLAY_LIGHT_RATIO = 0.5`) from the same `data/script/display.lua` config layer (`environment.md
-  §9`); this spec owns the glow/bloom (§6.6) and per-state character-tint (§6.7) keys from that file.
+- `specs/environment.md` — the **world-brightness scalar** (`DISPLAY_BASE_BRIGHT_MULTI = 1.05`) from the same `data/script/display.lua` config layer (`environment.md §9`); this spec owns the glow/bloom (§6.6) and per-state character-tint (§6.7) keys from that file. Note: `DISPLAY_LIGHT_RATIO` is parsed but confirmed dead in this build (§6.7, CYCLE 11 binary-won) — `environment.md §9` should be updated to reflect that finding.
 - `formats/shaders.md` — the cel / composite / glow shader roles, the toon ramp LUT, and the
   recovered vertex-shader constants (including the BT.601 luma weights that key the ramp). It owns the
   canonical on-disk shader **filename list**; note this lane re-confirmed there are **two** cel pixel
@@ -906,7 +1161,92 @@ Notes:
 - `specs/skinning.md` — how the skinned-character vertex buffer this pipeline draws is produced.
 - `specs/effects.md`, `specs/world_systems.md` — the FX/particle and world buckets this loop draws
   (owned by other authors).
+- **§9 CharSelect 3D pipeline** depends on `specs/skinning.md` (idle-motion and actor-preview
+  chains), `specs/environment.md` (map000 sky/light/fog — §9.3), `formats/animation.md`
+  (actormotion idle column), and `formats/skn.md` (preview actor class/variant). Open items O-1
+  through O-9 (§9.5) must be resolved by a sample-witnessing pass (O-1 / O-2 / O-3 / O-8 / O-9)
+  and a live `?ext=dbg` session (O-5 / O-6) before the §9 camera literals are promoted to
+  implementation. Flag for `names.yaml`: `SelectWindow_BuildScene`, `SelectWindow_BuildAndInit`,
+  `SelectCameraManipulator`, `ActorPreview_CreateAndConfigureRender`, `Env_MapSetAndLoadArea`,
+  `SkySystem_Init`, `Diamond_UI_SetRenderStateAndDraw`.
 - Glossary: see `Docs/RE/names.yaml` (flag for canonicalisation: `DISPLAY_GLOW_BRIGHT_MULTI`,
   `DISPLAY_GLOW_RANGE_X/Y`, `DISPLAY_POWER` / `DISPLAY_POWERSHADER`, `DISPLAY_FRAMERATE`,
-  `DISPLAY_CHAR_BRIGHT_*` state table).
+  `DISPLAY_CHAR_BRIGHT_*` state table; and the §9 canonical names above).
 - Provenance: see `Docs/RE/journal.md`.
+
+---
+
+## Addendum — CYCLE 11 / Block A: char-select preview camera, material & ambient effect (binary-reconciled, static)
+
+> Verification refresh, IDB SHA **263bd994**, static-only (CYCLE 11 / Block A, 2026-06-22).
+> Reconciles two analyst passes against the binary (a yaw/pitch labelling that was swapped, then
+> re-swapped, then settled by reading the orientation-arm consumption directly). The values below are
+> the **binary-decided** final reading.
+
+### A.1 Preview camera projection & scene fork
+
+- **Projection:** vertical field of view **50 degrees** (then divided by the viewport aspect ratio),
+  near plane **5.0**, far plane **15000.0**. *([CONFIRMED]* immediates.)*
+- **Scene anchor:** the preview world is anchored at **(2048, 0, −6144)**; the terrain cold-start is
+  centred near **(508, −9734)**; one ambient effect sits at **(508.483, 69.887, −9758.569)**.
+- **Render fork:** the preview does **not** use a separate render target or a distinct post-process
+  chain — it renders through the **shared** UI/world render-state-and-draw path into the same back
+  buffer. The only things that make it a "preview" are a dedicated scene root + camera/rig, fog forced
+  off (see `environment.md` addendum), a fixed time-of-day, and one ambient effect. *([CONFIRMED]* by
+  absence — no offscreen-surface / set-render-target call on the path.)*
+
+### A.2 The six-keyframe camera path (final yaw/pitch reading)
+
+The preview camera is driven by a **6-slot keyframe table** plus **two parallel 6-element angle arrays**
+— one **pitch** array and one **yaw** array (the earlier "12 angle channels" reading was a miscount;
+it is 6 + 6). The orientation-arm step feeds the **yaw** array into the yaw-rotation quaternion and the
+**pitch** array into the pitch (side-axis) quaternion — that consumption is what fixes the labelling.
+
+| keyframe | role | armed? |
+|---|---|---|
+| **KF0** | initial pose: **yaw +2.4°**, **pitch −6.0°** | YES — armed at rig construction |
+| **KF1** | settle pose: **yaw +0.785 rad (≈ π/4)**, **pitch −2.67°** | YES — armed at scene reset (the deferred populate) |
+| KF2 … KF5 | further absolute poses exist in the table | **NO — statically dead** (never armed in this scene) |
+
+*([CONFIRMED]* exactly two arm sites exist — one at rig construction (index 0), one at scene reset
+(index 1); the keyframe-index field has no other writer, so KF2…KF5 are unreachable in char-select.)*
+
+### A.3 Entry dolly & manual camera controls
+
+- **Entry dolly:** a single **~2.0-second** blend from KF0 to KF1. The blend parameter advances as
+  `elapsed × 0.0005` and clamps at 1.0; **position is linearly interpolated and orientation is
+  spherically interpolated (slerp)**. A parabolic "bow" arc exists in the code but is gated on **both**
+  the previous and current keyframe indices being ≥ 2 — which never happens here — so the char-select
+  dolly is a **straight** KF0→KF1 ease, no bow. *([CONFIRMED]* the dt scaling, the lerp+slerp, and the
+  bow gate.)*
+- **Manual boom (dolly):** a wheel/key zoom accumulator moves the rig at **±10.0 units/second** with
+  **no clamp**, gated by the boom action. *([CONFIRMED]* immediates.)*
+- **Preview turntable:** the selected/created preview rotates at **±2.0 radians/second** — applied to
+  the **previewed actor**, not the camera — and is zeroed on a slot change. *([CONFIRMED]*.)*
+- **Free-look rate clamps:** the free-look is a **rate accumulator** with clamps **boom ±4**,
+  **yaw-rate ±1**, **pitch-rate ±1** and a small dead-zone; there is **no fixed absolute Euler
+  min/max** — the absolute orientation is bounded only by easing back toward the armed keyframe target.
+  *([CONFIRMED]* the clamp magnitudes.)*
+
+### A.4 Preview actor material / sampler
+
+The preview actors use the **standard character material** — there is **no** preview-only material.
+The character draw is shader-lit (fixed-function lighting off), renders with **fog off**, uses
+**alpha blend SRC_ALPHA / INV_SRC_ALPHA** with **alpha-test off**, and draws as a **triangle list**.
+*([CONFIRMED]* the render-state block on the character draw path.)*
+
+> **UNVERIFIED (runtime residuals):** the texture **filter** mode actually bound at the character draw
+> (a point-filter default is set at preview-create time while the world toon pass uses linear — the
+> effective filter at the char-select draw is debugger-pending) and the **cull** mode (no explicit cull
+> state is set on the path, so backface-cull-default vs two-sided is unconfirmed). These do not change
+> the material's blend/lighting shape.
+
+### A.5 Ambient effect
+
+The char-select scene clears all active user effects and then spawns exactly **one** ambient effect,
+**id 380003000**, at **(508.483, 69.887, −9758.569)**, identity direction, **scale 1.0**, **looping**.
+It is spawned at a single site image-wide (single-spawn guarantee). *([CONFIRMED]* the id, position,
+loop, scale, and the clear-then-spawn sequence.)* The effect's on-disk filename is VFS-derived (there is
+no in-binary filename string) — treat the asset filename as an external mapping, not a recovered string.
+
+> spec path: `// spec: Docs/RE/specs/rendering.md`

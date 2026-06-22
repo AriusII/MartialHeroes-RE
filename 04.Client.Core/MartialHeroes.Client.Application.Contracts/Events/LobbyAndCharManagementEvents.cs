@@ -94,8 +94,12 @@ public enum ServerLoadBand
 public enum ServerStatusHint
 {
     /// <summary>
-    ///     StatusCode &lt; 1 or &gt; 39 (and not the special 3): fallback caption 5901 ("unknown id").
-    ///     spec: Docs/RE/packets/lobby.yaml Record Shape A (else → 5901).
+    ///     StatusCode &lt; 1 or &gt; 39 (and not the special 3): an out-of-range / unknown status branch
+    ///     with no per-StatusCode status caption. NOTE: the display-NAME fallback to msg 5901 is keyed on
+    ///     an out-of-range <see cref="ServerListEntryView.ServerId" /> (not 1..40), NOT on StatusCode — see
+    ///     <see cref="ServerListEntryView.DisplayName" />. spec:
+    ///     Docs/RE/specs/frontend_layout_tables.md §4.1 (name fallback 5901 is ServerId-keyed; status
+    ///     caption = 4029 + StatusCode for StatusCode 0..3).
     /// </summary>
     Invalid,
 

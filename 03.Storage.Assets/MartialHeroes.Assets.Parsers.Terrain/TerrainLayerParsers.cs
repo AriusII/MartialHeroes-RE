@@ -707,8 +707,6 @@ public static class TerrainLayerParsers
             sections[g] = new Fx5Section
             {
                 RawSectionHeader = rawGroupHdr,
-                // RawSubChunkHeader is vestigial in the corrected model; store empty.
-                RawSubChunkHeader = ReadOnlyMemory<byte>.Empty,
                 Vertices = vertices,
                 Indices = indices
             };

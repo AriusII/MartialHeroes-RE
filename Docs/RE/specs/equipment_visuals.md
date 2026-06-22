@@ -15,8 +15,9 @@ verification: confirmed (per-part rebuild model, GID formulas + the digit→lane
   opcode pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔
   static enchant level` mapping, the subtype 53-vs-55 meaning, the per-tier glow VISUAL and the tooltip
   loc-strings).
-ida_reverified: 2026-06-21
+ida_reverified: 2026-06-22   # CYCLE 11: skin-level threshold = 1000; non-weapon GID scale = 10000; categoryBase 47-entry array; hand bone-id stays debugger-pending
 ida_anchor: 263bd994
+readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]
 conflicts: none open. RECON#F4 RESOLVED the prior off-hand-flag inversion — the off-hand node carries
   node flag = 1; node flag = 2 selects the MAIN-hand catalog columns (was stated backwards as
@@ -228,6 +229,42 @@ characters therefore use a reduced composition. Keep this short-circuit.
 > This GID→skin indirection is the same animation-catalog map that the `id_b ↔ .bnd` and skin-class
 > chains use elsewhere; see `formats/mesh.md` (id_b ↔ skeleton bijection) and `specs/skinning.md` (bone
 > addressing) for how a resolved skin then binds to its skeleton.
+
+### 3.4 CYCLE 11 pin — skin-level threshold, GID scale, categoryBase, and hand bone-id
+
+This subsection pins previously-unnamed constants confirmed in CYCLE 11. Do not duplicate the GID
+formula tables of §3.1–§3.3 already above.
+
+**Skin-level threshold = 1000 (CODE-CONFIRMED).** The animation/visual catalog singleton holds a
+base-skin-id threshold of exactly **1000**. Equip-overlay catalog resolution runs only when an
+actor's `base_skin_id` (Visual `+108`) is **≤ 1000**; above 1000 the resolution is skipped entirely.
+For the **local-player rebuild** specifically: when `base_skin_id ≤ 1000` the full visual slot set
+`{3, 4, 6, 2, 11, 14}` is rebound (§1.1); when `base_skin_id > 1000` only slot 3 is bound (reduced
+high-tier composition). This pins the previously-unnamed "skin-level cap" in §3.3 to the literal
+value **1000**.
+
+**Non-weapon GID scale = 10000 (CODE-CONFIRMED).** The non-weapon GID formula (§3.2) uses an integer
+scale of **10000** — `gid = 10000 · (part_actor_id / 10000) + (part_actor_id mod 100)`. The 10000
+factor is a discrete constant in the animation-catalog GID computation path; it is distinct from the
+weapon formula's base-1000 scale (§3.1).
+
+**categoryBase — 47-entry array (CODE-CONFIRMED shape; values data-driven).** The animation/visual
+catalog singleton holds a **47-entry array** (referred to here as `categoryBase`) used to resolve
+equip-overlay category to a base term. Each entry begins with a text field (the category key). The
+array has exactly 47 entries and is indexed by the equip-overlay category at resolution time. The
+**per-row values** — the base terms that entries map to — are **loaded from the item/skin script at
+startup** and are therefore **data-driven**: the array shape (47 entries, text-field-first) is
+confirmed; the authored per-row values must be read from the data script, not from the code path.
+
+**Weapon attach / hand bone-id — DEBUGGER-PENDING (stance unchanged).** The weapon mesh is attached
+to the actor skeleton via an attach-host node. The bone-id on that node is built as **0** (the
+default root/first bone) and **no static non-zero write to that id is reachable** on the build path
+(§5). No bone-name string exists in the binary. Therefore the exact hand bone-id that the weapon
+actually hangs from at runtime — and whether a non-zero id is supplied by the `.skn` attach metadata
+or by a runtime init path not yet reached — remains **DEBUGGER-PENDING**. This is consistent with
+§5 and the §8 open-items table; no change to that stance. For dual-wield (skin bind class == 3):
+the main-hand node carries **node flag 2**; the off-hand node carries **node flag 1** (§5.1 —
+unchanged, included here for completeness).
 
 ---
 

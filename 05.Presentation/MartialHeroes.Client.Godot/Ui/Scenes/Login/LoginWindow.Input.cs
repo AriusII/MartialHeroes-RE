@@ -98,6 +98,18 @@ public sealed partial class LoginWindow
 
             case LoginLayout.ActionOk: // 103 — OK / Login button
                 // spec: §2.2 "103 OK/login requires flowSubState==6, runs the game.ver gate → 29".
+                // KNOWN DELIBERATE DIVERGENCE — game.ver index-5 equality gate is intentionally NOT enforced.
+                // The original gate (action-103 / Enter at sub-state 6) parses data/cursor/game.ver (VFS)
+                // and a launcher-maintained on-disk game.ver (next to the exe, maintained by dostart.exe
+                // patcher), then compares field index-5 of each: equal → proceed to sub-state 29;
+                // mismatch or either file absent → show msg 2204 via native MessageBox and quit.
+                // The revival port has no dostart.exe patcher and generates no disk game.ver, so enforcing
+                // the gate faithfully would always fail (absent disk file = mismatch = quit) and block every
+                // login. A relaxed "compare only when disk file is present" form is a port option, not
+                // strict 1:1 fidelity; intentionally absent here.
+                // spec: Docs/RE/specs/frontend_layout_tables.md §2.4 "version gate = single u32 equality"
+                // spec: Docs/RE/scenes/login.md §1.1 "Overview — game.ver index-5 gate before sub-state 29"
+                // spec: Docs/RE/scenes/login.md §8 "Known port divergence (action-103 game.ver gate) — intentionally not enforced"
                 if (_flowSubState == 6) RunState(29);
                 break;
 

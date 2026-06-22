@@ -146,11 +146,14 @@ public sealed partial class HudCommandBar : Control
 
     /// <summary>
     ///     Geometry pass: builds the bottom command strip at its confirmed bottom-anchor.
+    ///     Button captions are resolved from <paramref name="text" /> (msg.xdb id lookup) per §14.1;
+    ///     caption ids pending RE are 0-keyed with the legacy string as fallback.
     ///     spec: Docs/RE/specs/ui_system.md §8.23 CODE-CONFIRMED.
     ///     spec: Docs/RE/specs/ui_system.md §8.23.1 CODE-CONFIRMED — geometry.
+    ///     spec: Docs/RE/scenes/ingame.md §14.1 — all localized labels resolve via msg.xdb numeric id.
     ///     spec: Docs/RE/specs/ui_hud_layout.md §5.13 — slot 148, always-built.
     /// </summary>
-    public void Build(HudAtlasLibrary atlas)
+    public void Build(HudAtlasLibrary atlas, HudTextLibrary? text = null)
     {
         Name = "HudCommandBar";
 
@@ -195,26 +198,36 @@ public sealed partial class HudCommandBar : Control
 
         // ── Left cluster entry buttons ──
         // spec: §8.23.1 — "left cluster ≈ 218..373, 29×29 at y=10"
+        // spec: ingame.md §14.1 — all labels resolve via msg.xdb numeric id; caption ids pending RE use 0+fallback.
         // Map: 4001=Inventory, 4002=Relation, 4003=Skill, 4004=Quest, 4005=Status
-        BuildEntryButton("BtnInventory", LeftClusterX[0], EntryBtnY, "목록", 4001, OnAction); // Inventory
-        BuildEntryButton("BtnRelation", LeftClusterX[1], EntryBtnY, "관계", 4002,
-            OnAction); // Relation (slot 185, TODO world-campaign)
-        BuildEntryButton("BtnSkill", LeftClusterX[2], EntryBtnY, "스킬", 4003, OnAction); // Skill
-        BuildEntryButton("BtnQuest", LeftClusterX[3], EntryBtnY, "퀘스트", 4004, OnAction); // Quest
-        BuildEntryButton("BtnStatus", LeftClusterX[4], EntryBtnY, "상태", 4005, OnAction); // Status
+        // TODO(world-campaign): recover exact caption ids for each button from the msg.xdb scan.
+        BuildEntryButton("BtnInventory", LeftClusterX[0], EntryBtnY,
+            text?.GetCaption(0, "목록") ?? "목록", 4001, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnRelation", LeftClusterX[1], EntryBtnY,
+            text?.GetCaption(0, "관계") ?? "관계", 4002, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnSkill", LeftClusterX[2], EntryBtnY,
+            text?.GetCaption(0, "스킬") ?? "스킬", 4003, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnQuest", LeftClusterX[3], EntryBtnY,
+            text?.GetCaption(0, "퀘스트") ?? "퀘스트", 4004, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnStatus", LeftClusterX[4], EntryBtnY,
+            text?.GetCaption(0, "상태") ?? "상태", 4005, OnAction); // spec: ingame.md §14.1 — id TBD
 
         // ── Right cluster entry buttons ──
         // spec: §8.23.1 — "right cluster ≈ 622..808, 29×29 at y=10"
+        // spec: ingame.md §14.1 — captions via msg.xdb; ids pending RE use 0+fallback.
         // Map: 4011=Help, 4012=Party, 4013=Product, 4022=Warstone, 4009=slot161, 4010=slot164
-        BuildEntryButton("BtnHelp", RightClusterX[0], EntryBtnY, "도움말", 4011, OnAction); // Help §8.24
-        BuildEntryButton("BtnParty", RightClusterX[1], EntryBtnY, "파티", 4012, OnAction); // Party
-        BuildEntryButton("BtnProduct", RightClusterX[2], EntryBtnY, "제작", 4013, OnAction); // Product
-        BuildEntryButton("BtnSlot161", RightClusterX[3], EntryBtnY, "[161]", 4009,
-            OnAction); // slot 161 (TODO world-campaign)
-        BuildEntryButton("BtnSlot164", RightClusterX[4], EntryBtnY, "[164]", 4010,
-            OnAction); // slot 164 (TODO world-campaign)
-        BuildEntryButton("BtnWarstone", RightClusterX[5], EntryBtnY, "전투석", 4022,
-            OnAction); // Warstone (TODO world-campaign)
+        BuildEntryButton("BtnHelp", RightClusterX[0], EntryBtnY,
+            text?.GetCaption(0, "도움말") ?? "도움말", 4011, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnParty", RightClusterX[1], EntryBtnY,
+            text?.GetCaption(0, "파티") ?? "파티", 4012, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnProduct", RightClusterX[2], EntryBtnY,
+            text?.GetCaption(0, "제작") ?? "제작", 4013, OnAction); // spec: ingame.md §14.1 — id TBD
+        BuildEntryButton("BtnSlot161", RightClusterX[3], EntryBtnY,
+            text?.GetCaption(0, "[161]") ?? "[161]", 4009, OnAction); // slot 161 — id TBD
+        BuildEntryButton("BtnSlot164", RightClusterX[4], EntryBtnY,
+            text?.GetCaption(0, "[164]") ?? "[164]", 4010, OnAction); // slot 164 — id TBD
+        BuildEntryButton("BtnWarstone", RightClusterX[5], EntryBtnY,
+            text?.GetCaption(0, "전투석") ?? "전투석", 4022, OnAction); // spec: ingame.md §14.1 — id TBD
 
         // ── Attack/Peace mode buttons (128×46, x=448, y=0) ──
         // spec: §8.23.1 — "attack/peace mode buttons 128×46 at x=448, y=0, uitex 1"

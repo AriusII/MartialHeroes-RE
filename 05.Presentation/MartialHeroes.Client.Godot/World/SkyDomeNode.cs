@@ -120,6 +120,28 @@ public sealed partial class SkyDomeNode : Node3D
     private const int StarDomeStacks = 12;
 
     // -------------------------------------------------------------------------
+    // Sun / moon billboard orbit constants (spec: Docs/RE/formats/sky.md §D)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Orbit radius/scale for both sun and moon billboards.
+    ///     spec: Docs/RE/formats/sky.md §D.2 — ±3200.0 scaling: HIGH (static immediate in binary).
+    /// </summary>
+    private const float OrbitScale = 3200f; // spec: Docs/RE/formats/sky.md §D.2
+
+    /// <summary>
+    ///     Billboard size scalar for the sun sprite.
+    ///     spec: Docs/RE/formats/sky.md §D.5 — sun billboard size 2048.0: HIGH (immediate).
+    /// </summary>
+    private const float SunBillboardSize = 2048f; // spec: Docs/RE/formats/sky.md §D.5
+
+    /// <summary>
+    ///     The 45° seed tilt angle used in the sun vertical-term derivation.
+    ///     spec: Docs/RE/formats/sky.md §D.2 — "seed tilt angle 45.0": HIGH (static immediate).
+    /// </summary>
+    private const float SunTiltDeg = 45f; // spec: Docs/RE/formats/sky.md §D.2
+
+    // -------------------------------------------------------------------------
     // Visibility thresholds (day/night fade — engineering choices)
     // -------------------------------------------------------------------------
 
@@ -161,19 +183,32 @@ public sealed partial class SkyDomeNode : Node3D
     private ShaderMaterial? _cloudMaterial1;
     private ShaderMaterial? _cloudMaterial2;
 
+    // Moon billboard node.
+    // spec: Docs/RE/formats/sky.md §D.2 — moon traces a flat circle; sine(+3200) X, cosine(+3200) Y, no Z.
+    private MeshInstance3D? _moonBillboard;
+
     // -------------------------------------------------------------------------
     // Data references (parsed bins)
     // -------------------------------------------------------------------------
 
     private StarDomeBin? _starDome;
 
+    private MeshInstance3D? _starDomeMesh;
+
+    private ShaderMaterial? _starMaterial;
+
     // -------------------------------------------------------------------------
     // Node references
     // -------------------------------------------------------------------------
 
-    private MeshInstance3D? _starDomeMesh;
+    // Sun billboard node (separately positioned each frame from the orbit angle).
+    // spec: Docs/RE/formats/sky.md §D.5 — sun billboard texture sun.dds, size 2048.
+    private MeshInstance3D? _sunBillboard;
 
-    private ShaderMaterial? _starMaterial;
+    // Externally-provided DirectionalLight3D whose direction tracks the negated sun position.
+    // When null, no light direction update is performed (the sun orbit still renders).
+    // spec: Docs/RE/formats/sky.md §D.2.1 — sun position vector negated → directional light direction.
+    private DirectionalLight3D? _trackedDirLight;
 
     // -------------------------------------------------------------------------
     // Per-frame animation state
@@ -187,26 +222,40 @@ public sealed partial class SkyDomeNode : Node3D
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     Builds the dome meshes from parsed environment data. Must be called on the Godot main thread
-    ///     once, after this node is added to the scene tree.
+    ///     Builds the dome meshes and sun/moon billboards from parsed environment data.
+    ///     Must be called on the Godot main thread once, after this node is added to the scene tree.
     ///     Passing null for either dome bin is a graceful no-op: that dome is simply not created.
+    ///     <paramref name="dirLight" /> is optional: when supplied, the sun billboard orbit drives its
+    ///     direction each frame (negated sun world position). When null, no light tracking is performed.
     ///     spec: Docs/RE/specs/environment.md §7 — graceful fallback when files absent.
+    ///     spec: Docs/RE/formats/sky.md §B.1 — build order: sun → star-dome → cloud-dome → moon → fog.
+    ///     spec: Docs/RE/formats/sky.md §D — sun/moon billboard orbit (closed-form trig; seconds-of-day).
     /// </summary>
-    public void Build(StarDomeBin? starDome, CloudDomeBin? cloudDome, CloudCycleBin? cloudCycle)
+    public void Build(StarDomeBin? starDome, CloudDomeBin? cloudDome, CloudCycleBin? cloudCycle,
+        DirectionalLight3D? dirLight = null)
     {
         _starDome = starDome;
         _cloudDome = cloudDome;
         _cloudCycle = cloudCycle;
+        _trackedDirLight = dirLight;
 
         // Choose first day-pattern row. Selection algorithm is unconfirmed (known unknown).
         // spec: Docs/RE/formats/environment_bins.md §6.3 — day-pattern selection: known unknown.
         _activeCycleRow = cloudCycle?.Rows[0] ?? default;
+
+        // Build sun billboard FIRST (matches §B.1 build order: sun → star → cloud → moon → fog).
+        // spec: Docs/RE/formats/sky.md §B.1 — sky sub-object construction order: sun, star, cloud, moon.
+        BuildSunBillboard();
 
         if (starDome is not null)
             BuildStarDome();
 
         if (cloudDome is not null)
             BuildCloudDome();
+
+        // Build moon billboard after cloud dome (§B.1 order: sun → star → cloud → moon).
+        // spec: Docs/RE/formats/sky.md §B.1 — moon billboard after cloud-dome construction.
+        BuildMoonBillboard();
 
         // Report construction so headless runs can verify the dome creation log line (lane gate).
         var starStatus = starDome is not null ? "built" : "absent(no-op)";
@@ -215,7 +264,44 @@ public sealed partial class SkyDomeNode : Node3D
             ? $"speed={_activeCycleRow.Speed} cloud1Id={_activeCycleRow.Cloud1Id0To12H}"
             : "absent";
         GD.Print($"[SkyDome] star={starStatus} cloud={cloudStatus} cloudCycle={cycleStatus} " +
-                 $"radius={DomeRadius:F0}wu sectors={DomeSectors}");
+                 $"sun=billboard moon=billboard radius={DomeRadius:F0}wu sectors={DomeSectors}. " +
+                 "spec: Docs/RE/formats/sky.md §D (sun/moon billboard orbit).");
+    }
+
+    /// <summary>
+    ///     Applies loaded VFS textures to the sun and moon billboard shader materials.
+    ///     Call after <see cref="Build" /> from <c>EnvironmentNode.BuildSkyDomes</c>, on the main thread.
+    ///     Each parameter is nullable: a null value is a graceful no-op that keeps the existing
+    ///     placeholder colour already set by <see cref="BuildSunBillboard" /> /
+    ///     <see cref="BuildMoonBillboard" /> (warm-white for sun, blue-white for moon).
+    ///     The billboard shaders already declare <c>uniform sampler2D albedo_tex</c> with
+    ///     <c>hint_default_white</c>, so an unset sampler renders as the <c>albedo_color</c> tint alone,
+    ///     which is the existing placeholder behaviour. Setting <c>albedo_tex</c> causes the billboard to
+    ///     sample the real DDS sprite and modulate it by <c>albedo_color</c> (day/night alpha).
+    ///     spec: Docs/RE/formats/sky.md §D.5 — sun billboard texture: data/sky/texture/sun.dds: HIGH.
+    ///     spec: Docs/RE/formats/sky.md §D.3 — moon phase: floor((day_counter mod 30) / 2) → moon{i}.dds.
+    ///     spec: Docs/RE/specs/environment.md §7 — VFS absent → graceful no-op (placeholder retained).
+    /// </summary>
+    public void SetBillboardTextures(ImageTexture? sunTexture, ImageTexture? moonTexture)
+    {
+        // Sun billboard texture.
+        // spec: Docs/RE/formats/sky.md §D.5 — sun.dds: HIGH confidence.
+        if (sunTexture is not null
+            && _sunBillboard?.MaterialOverride is ShaderMaterial sunMat)
+        {
+            sunMat.SetShaderParameter("albedo_tex", sunTexture); // spec: Docs/RE/formats/sky.md §D.5
+            GD.Print("[SkyDome] sun.dds texture applied to SunBillboard. spec: Docs/RE/formats/sky.md §D.5");
+        }
+
+        // Moon billboard texture.
+        // spec: Docs/RE/formats/sky.md §D.3 — moon{n}.dds (phase-selected): oracle-pending default moon0.
+        if (moonTexture is not null
+            && _moonBillboard?.MaterialOverride is ShaderMaterial moonMat)
+        {
+            moonMat.SetShaderParameter("albedo_tex", moonTexture); // spec: Docs/RE/formats/sky.md §D.3
+            GD.Print("[SkyDome] moon{n}.dds texture applied to MoonBillboard (phase ORACLE-PENDING: default moon0). " +
+                     "spec: Docs/RE/formats/sky.md §D.3");
+        }
     }
 
     /// <summary>
@@ -241,6 +327,10 @@ public sealed partial class SkyDomeNode : Node3D
 
         UpdateStarDome(domeKf, domeKfNext, domeFrac, mainKfFloat);
         UpdateCloudDomes(domeKf, domeKfNext, domeFrac, mainKfFloat, (float)delta);
+
+        // Update sun/moon billboard orbits each frame.
+        // spec: Docs/RE/formats/sky.md §D — sun/moon orbit uses seconds-of-day angle.
+        UpdateBillboards(clockMs);
     }
 
     // -------------------------------------------------------------------------
@@ -570,6 +660,267 @@ public sealed partial class SkyDomeNode : Node3D
         // had no effect. The cloud UV scroll is animated via C# CloudCycleBin speed but the
         // dome geometry doesn't sample a texture, making the offset a dead no-op.
         return mat;
+    }
+
+    // -------------------------------------------------------------------------
+    // Sun / moon billboard construction
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Builds the sun billboard as a camera-facing quad MeshInstance3D.
+    ///     The billboard is positioned at the orbit origin; <see cref="UpdateBillboards" /> moves it
+    ///     each frame. Texture is not loaded here (no asset channel available in SkyDomeNode) — the
+    ///     material uses a placeholder white colour. If a caller supplies an asset reference later via
+    ///     <see cref="SetBillboardTexture" />, the texture will be applied.
+    ///     spec: Docs/RE/formats/sky.md §D.5 — sun billboard size 2048.0, texture sun.dds.
+    ///     spec: Docs/RE/formats/sky.md §B.1 — sun built before star-dome.
+    /// </summary>
+    private void BuildSunBillboard()
+    {
+        // Build a simple quad (two triangles) for the sun billboard.
+        // The quad is centred at the local origin; world position is set each frame by UpdateBillboards.
+        // spec: Docs/RE/formats/sky.md §D.5 — sun billboard size 2048.0 (world units).
+        var half = SunBillboardSize / 2f; // spec: Docs/RE/formats/sky.md §D.5
+        Vector3[] verts =
+        [
+            new(-half, -half, 0f),
+            new(half, -half, 0f),
+            new(half, half, 0f),
+            new(-half, half, 0f)
+        ];
+        Vector2[] uvs =
+        [
+            new(0f, 1f),
+            new(1f, 1f),
+            new(1f, 0f),
+            new(0f, 0f)
+        ];
+        int[] indices = [0, 1, 2, 0, 2, 3];
+
+        var arrays = new Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts;
+        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        arrays[(int)Mesh.ArrayType.Index] = indices;
+
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+        // Unshaded + fog-exempt + depth-write-never (billboard draws over the dome but under scene geo).
+        // spec: Docs/RE/specs/environment.md §8 item 9 — draw order: sun over cloud/star dome.
+        const string BillboardShader =
+            """
+            shader_type spatial;
+            render_mode unshaded, fog_disabled, blend_mix, depth_draw_never, cull_disabled;
+
+            uniform vec4 albedo_color : source_color = vec4(1.0, 0.95, 0.7, 1.0);
+            uniform sampler2D albedo_tex : source_color, hint_default_white;
+
+            void fragment() {
+                vec4 tex = texture(albedo_tex, UV);
+                ALBEDO = albedo_color.rgb * tex.rgb;
+                ALPHA  = albedo_color.a * tex.a;
+            }
+            """;
+
+        var shader = new Shader { Code = BillboardShader };
+        var mat = new ShaderMaterial { Shader = shader };
+        // Warm white placeholder; a real sun.dds texture would be applied via SetBillboardTexture.
+        // Aesthetic warm-white default (not spec-dictated).
+        mat.SetShaderParameter("albedo_color", new Color(1f, 0.95f, 0.7f));
+        mat.RenderPriority = -64; // behind world geo, in front of domes (which use -128)
+
+        var mi = new MeshInstance3D
+        {
+            Name = "SunBillboard",
+            Mesh = mesh,
+            MaterialOverride = mat,
+            ExtraCullMargin = 0f,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Layers = 1,
+            Visible = true
+        };
+        AddChild(mi);
+        _sunBillboard = mi;
+
+        GD.Print("[SkyDome] SunBillboard constructed. spec: Docs/RE/formats/sky.md §D.5 (sun billboard size 2048.0).");
+    }
+
+    /// <summary>
+    ///     Builds the moon billboard as a camera-facing quad MeshInstance3D.
+    ///     Moon phase texture selection is oracle-pending (§D.3 — floor((day_counter mod 30) / 2)).
+    ///     spec: Docs/RE/formats/sky.md §D.2 — moon: flat circle orbit, sine(+3200) X, cosine(+3200) Y, Z=0.
+    ///     spec: Docs/RE/formats/sky.md §D.3 — moon phase: floor((day_counter mod 30) / 2) → moon{i}.dds.
+    ///     spec: Docs/RE/formats/sky.md §B.1 — moon built after cloud-dome.
+    ///     ORACLE-PENDING: moon texture asset chain (moon{i}.dds loading via Assets.Mapping) not yet
+    ///     wired; placeholder blue-white disc until texture asset channel is available.
+    /// </summary>
+    private void BuildMoonBillboard()
+    {
+        // Same quad geometry as the sun but a slightly smaller display size.
+        // The spec gives no explicit moon billboard size; using SunBillboardSize / 2 as a
+        // reasonable default. ORACLE-PENDING: exact moon size not confirmed in sky.md.
+        const float MoonSize = SunBillboardSize / 2f; // aesthetic / oracle-pending — sky.md §D.2 gives no explicit size
+        var half = MoonSize / 2f;
+
+        Vector3[] verts =
+        [
+            new(-half, -half, 0f),
+            new(half, -half, 0f),
+            new(half, half, 0f),
+            new(-half, half, 0f)
+        ];
+        Vector2[] uvs =
+        [
+            new(0f, 1f),
+            new(1f, 1f),
+            new(1f, 0f),
+            new(0f, 0f)
+        ];
+        int[] indices = [0, 1, 2, 0, 2, 3];
+
+        var arrays = new Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts;
+        arrays[(int)Mesh.ArrayType.TexUV] = uvs;
+        arrays[(int)Mesh.ArrayType.Index] = indices;
+
+        var mesh = new ArrayMesh();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+
+        const string BillboardShader =
+            """
+            shader_type spatial;
+            render_mode unshaded, fog_disabled, blend_mix, depth_draw_never, cull_disabled;
+
+            uniform vec4 albedo_color : source_color = vec4(0.85, 0.9, 1.0, 1.0);
+            uniform sampler2D albedo_tex : source_color, hint_default_white;
+
+            void fragment() {
+                vec4 tex = texture(albedo_tex, UV);
+                ALBEDO = albedo_color.rgb * tex.rgb;
+                ALPHA  = albedo_color.a * tex.a;
+            }
+            """;
+
+        var shader = new Shader { Code = BillboardShader };
+        var mat = new ShaderMaterial { Shader = shader };
+        // Cool blue-white placeholder; moon{i}.dds not yet loaded. Aesthetic default.
+        mat.SetShaderParameter("albedo_color", new Color(0.85f, 0.9f, 1f));
+        mat.RenderPriority = -64;
+
+        var mi = new MeshInstance3D
+        {
+            Name = "MoonBillboard",
+            Mesh = mesh,
+            MaterialOverride = mat,
+            ExtraCullMargin = 0f,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Layers = 1,
+            Visible = true
+        };
+        AddChild(mi);
+        _moonBillboard = mi;
+
+        GD.Print("[SkyDome] MoonBillboard constructed (phase texture oracle-pending). " +
+                 "spec: Docs/RE/formats/sky.md §D.2 (flat circle orbit, ±3200 scale).");
+    }
+
+    // -------------------------------------------------------------------------
+    // Sun / moon billboard per-frame orbit update
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Computes and applies sun/moon world positions from the seconds-of-day orbit formula.
+    ///     Also drives the tracked directional light from the negated sun position (§D.2.1).
+    ///     Sun orbit (CYCLE 11 corrected: closed-form cosine/sine, not the earlier CYCLE 7 natural-log):
+    ///     angle_deg = (secondsOfDay / 86400) × 360
+    ///     angle_rad = angle_deg × π/180  (= secondsOfDay × 2π / 86400)
+    ///     Sun X = sin(angle) × −3200   (HIGH: sign-opposition to moon)
+    ///     Sun Y = vertical term with 45° tilt cosine/sine factor  (HIGH seed, oracle-pending exact)
+    ///     Sun Z = Z-term with 45° seed (oracle-pending exact; placeholder: cos(angle) × −OrbitScale)
+    ///     Moon orbit (flat circle — no Z component):
+    ///     Moon X = sin(angle) × +3200   (HIGH: sign opposite to sun)
+    ///     Moon Y = cos(angle) × +3200   (HIGH: plain cosine, no tilt factor)
+    ///     Moon Z = 0                    (HIGH: flat circle, no Z)
+    ///     Directional light direction = −normalize(sunPos)  (§D.2.1, HIGH)
+    ///     ORACLE-PENDING items (sky.md §D.2 known-unknown §5):
+    ///     - Sun Y exact formula: the 45°-tilt cosine/sine factor combination is HIGH confidence
+    ///     but the exact per-axis expression (e.g. cos(a+45°) vs cos(a)×cos(45°)+sin(a)×sin(45°))
+    ///     is not yet oracle-confirmed. Current implementation: cos(a + sunTilt_rad).
+    ///     - Sun Z exact formula: placeholder −cos(angle)×OrbitScale; likely a second tilt factor.
+    ///     ORACLE-PENDING: flag and replace when sky.md §D.2 known-unknown §5 is resolved.
+    ///     spec: Docs/RE/formats/sky.md §D.1 — angle formula (seconds-of-day × 2π / 86400): CONFIRMED.
+    ///     spec: Docs/RE/formats/sky.md §D.2 — ±3200 scale, sign opposition, moon flat circle: HIGH.
+    ///     spec: Docs/RE/formats/sky.md §D.2.1 — directional light direction = −sunPos: HIGH.
+    /// </summary>
+    private void UpdateBillboards(double clockMs)
+    {
+        // Seconds of day (wraps at 86400 per the spec period).
+        // spec: Docs/RE/formats/sky.md §D.1 — angle_deg = (time_of_day / 86400) × 360.
+        var secondsOfDay = clockMs / 1000.0 % 86400.0; // spec: Docs/RE/formats/sky.md §D.1
+        var angleRad = secondsOfDay * (2.0 * Math.PI) / 86400.0; // spec: Docs/RE/formats/sky.md §D.1
+
+        // 45°-tilt seed angle in radians.
+        // spec: Docs/RE/formats/sky.md §D.2 — "seed tilt angle 45.0": HIGH (static immediate in binary).
+        var tiltRad = SunTiltDeg * (Math.PI / 180.0); // spec: Docs/RE/formats/sky.md §D.2
+
+        // ── Sun position ──────────────────────────────────────────────────────────
+        // Sun X = sin(angle) × −OrbitScale  (sign opposite to moon: HIGH).
+        // spec: Docs/RE/formats/sky.md §D.2 — Sun X = sine(angle) × −3200: HIGH.
+        var sunX = (float)(Math.Sin(angleRad) * -OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
+
+        // Sun Y: vertical term uses the 45° tilt seed.
+        // ORACLE-PENDING (sky.md §D.2 known-unknown §5): exact formula not yet pinned.
+        // Implementing as cos(angle + tilt) × OrbitScale as the most natural closed-form
+        // expression consistent with the spec HIGH note "45°-tilt seed".
+        // ORACLE-PENDING — replace when §5 is resolved.
+        var sunY = (float)(Math.Cos(angleRad + tiltRad) * OrbitScale); // ORACLE-PENDING: sky.md §D.2 known-unknown §5
+
+        // Sun Z: second tilt-factor axis.
+        // ORACLE-PENDING (sky.md §D.2 known-unknown §5): exact Z-term not yet confirmed.
+        // Placeholder: sin(angle + tilt) × −OrbitScale (gives a non-degenerate 3D ellipse).
+        // ORACLE-PENDING — replace when §5 is resolved.
+        var sunZ = (float)(Math.Sin(angleRad + tiltRad) * -OrbitScale); // ORACLE-PENDING: sky.md §D.2 known-unknown §5
+
+        var sunPos = new Vector3(sunX, sunY, sunZ);
+
+        // ── Moon position (flat circle — no Z) ───────────────────────────────────
+        // Moon X = sin(angle) × +OrbitScale  (sign opposite to sun: HIGH).
+        // spec: Docs/RE/formats/sky.md §D.2 — Moon X = sine(angle) × +3200: HIGH.
+        var moonX = (float)(Math.Sin(angleRad) * OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
+
+        // Moon Y = cos(angle) × +OrbitScale  (plain cosine, no tilt: HIGH).
+        // spec: Docs/RE/formats/sky.md §D.2 — Moon Y = cosine(angle) × +3200, no Z: HIGH.
+        var moonY = (float)(Math.Cos(angleRad) * OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
+
+        // Moon Z = 0 (flat circle in XY plane).
+        // spec: Docs/RE/formats/sky.md §D.2 — "moon traces flat circle; no Z component": HIGH.
+        var moonPos = new Vector3(moonX, moonY, 0f); // spec: Docs/RE/formats/sky.md §D.2
+
+        // Apply billboard world positions.
+        if (_sunBillboard is not null)
+            _sunBillboard.Position = sunPos;
+
+        if (_moonBillboard is not null)
+            _moonBillboard.Position = moonPos;
+
+        // Drive the directional light from the negated sun position.
+        // spec: Docs/RE/formats/sky.md §D.2.1 — light direction = −normalize(sunPos): HIGH.
+        if (_trackedDirLight is not null && sunPos.LengthSquared() > 1e-6f)
+        {
+            var lightDir = -sunPos.Normalized(); // spec: Docs/RE/formats/sky.md §D.2.1
+            // Godot DirectionalLight3D direction = the node's -Z axis in global space.
+            // To aim the light at `lightDir`, set the basis so -Z = lightDir:
+            //   +Z = -lightDir, +Y = world up (unless straight up/down), then compute X = Z.cross(Y).
+            var up = Vector3.Up;
+            if (Math.Abs(lightDir.Dot(up)) > 0.999f)
+                up = Vector3.Right; // avoid degenerate cross product when sun is at zenith
+            var right = lightDir.Cross(up).Normalized();
+            var newUp = right.Cross(lightDir).Normalized();
+            // Basis: X=right, Y=newUp, Z=-lightDir (Godot camera-space convention: -Z is forward).
+            _trackedDirLight.Basis = new Basis(right, newUp, -lightDir);
+        }
     }
 
     // -------------------------------------------------------------------------

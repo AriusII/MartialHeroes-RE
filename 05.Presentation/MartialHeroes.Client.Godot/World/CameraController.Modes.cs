@@ -124,40 +124,33 @@ public sealed partial class CameraController
     }
 
     /// <summary>
-    ///     Third-person: fixed-radius orbit + terrain collision.
-    ///     Eye = focus + eyeOffset(yaw, elevation)
-    ///     where |eyeOffset| = OrbitRadius (fixed; no scale).
+    ///     Third-person: fixed-radius orbit + terrain collision using the legacy rotated eye-offset model.
+    ///     Eye = focus + Rotate(eyeOffsetSeed, yaw, elevation)
+    ///     where eyeOffsetSeed = (−750, 0, −500) in Godot space (legacy (−750,0,+500) with Z negated).
+    ///     |eyeOffsetSeed| ≈ 901.39 = fixed orbit radius (no scaling).
     ///     spec: Docs/RE/specs/camera_movement.md §A.4 Fixed-radius orbit model. CODE-CONFIRMED.
-    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 Third — terrain collision. CODE-CONFIRMED.
-    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — focus Z = −40 (base / Third). CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — Eye-offset seed (−750,0,+500) legacy / (−750,0,−500) Godot.
+    ///     CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 Third — Focus Z −40 / terrain collision. CODE-CONFIRMED.
+    ///     spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
     /// </summary>
     private void ApplyThirdPersonTransform()
     {
-        // Build focus point: player position + the spec "Focus Z −40" vertical/focus offset.
+        // Build focus point: player position + the spec "Focus Z −40" offset in legacy space.
+        // Legacy Z = −40 → Godot Z = −(−40) = +40. Applied as a +Z shift in Godot space.
         // spec: Docs/RE/specs/camera_movement.md §A.5.1 — "Focus / look-at Z −40.0". CODE-CONFIRMED.
-        // In Godot space the legacy Z-40 offset is applied as a Godot +Z shift (Z negated).
-        // We apply it as a Y bias so the camera looks at a point 40 units above the ground
-        // (approximately head-height), which is the standard over-the-shoulder feel.
-        var focusPoint = _focus + new Vector3(0f, -FocusZThird, 0f); // −(−40) = +40 on Y
+        // spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
+        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZThird); // −(−40) = +40 on Godot Z
 
-        // Compute eye offset for the fixed-radius orbit.
-        // In legacy-space the eye-offset is (−750, 0, +500); its magnitude ≈ 901.39.
-        // We represent it as (yaw, elevation) polar coordinates at radius OrbitRadius.
-        // Convention: elevation < 0 → camera is above the focus looking downward.
-        var cosEl = Mathf.Cos(_elevation);
-        var sinEl = Mathf.Sin(_elevation);
-        var cosYaw = Mathf.Cos(_yaw);
-        var sinYaw = Mathf.Sin(_yaw);
-
-        // Spherical → Cartesian eye offset (Godot right-handed Y-up):
-        //   x = r · cos(elev) · sin(yaw)
-        //   y = −r · sin(elev)     [negative elev → positive y, camera above focus]
-        //   z = r · cos(elev) · cos(yaw)
-        var eyeOffset = new Vector3(
-            OrbitRadius * cosEl * sinYaw,
-            -OrbitRadius * sinEl,
-            OrbitRadius * cosEl * cosYaw
-        );
+        // Compute eye offset using the legacy rotated eye-offset model.
+        // The seed vector in Godot space is (EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ)
+        // = (−750, 0, −500). Rotate it by yaw (about Y-up), then by elevation (about the yaw-rotated X).
+        // spec: Docs/RE/specs/camera_movement.md §A.5.1 — seed (−750,0,+500) legacy → (−750,0,−500) Godot. CODE-CONFIRMED.
+        // spec: Docs/RE/specs/camera_movement.md §A.4 — "compose orientation from yaw quaternion + pitch component". CODE-CONFIRMED.
+        var eyeOffsetSeed = new Vector3(EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ);
+        var yawBasis = Basis.Identity.Rotated(Vector3.Up, _yaw);
+        var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
+        var eyeOffset = orbitBasis * eyeOffsetSeed;
 
         var eyePos = focusPoint + eyeOffset;
 
@@ -196,53 +189,70 @@ public sealed partial class CameraController
     }
 
     /// <summary>
-    ///     First-person: eye collapses to player head position; yaw/pitch look.
-    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 First — "Eye sits at the player's head". CODE-CONFIRMED.
+    ///     First-person: short-boom from head position, orientation × player heading.
+    ///     Focus Z = −55 (legacy space) → Godot Z = +55.
+    ///     Yaw-orbit seeded to π (180° flip so the player faces the camera on first-person entry).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 First — Focus Z −55, yaw seed π. CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — shared eye-offset seed (−750,0,+500). CODE-CONFIRMED.
+    ///     spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
     ///     No terrain collision.
     /// </summary>
     private void ApplyFirstPersonTransform()
     {
-        // In first-person the follow radius collapses to 0 — eye is at the player.
-        // We approximate "player head" as the player position + some height offset.
-        const float HeadHeight = 15f; // rough head height in world units (legacy scale)
-        var eyePos = _focus + new Vector3(0f, HeadHeight, 0f);
+        // Focus Z −55 in legacy space → +55 in Godot Z.
+        // spec: Docs/RE/specs/camera_movement.md §A.5.2 — First Focus Z −55. CODE-CONFIRMED.
+        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZFirst); // −(−55) = +55 on Godot Z
+
+        // Rotate the shared eye-offset seed by yaw + elevation (same orbital machinery as Third).
+        // The yaw seed for First is π (180° flip), already encoded in _yaw at mode-switch time
+        // if needed; the seed vector is (−750, 0, −500) in Godot space.
+        // spec: Docs/RE/specs/camera_movement.md §A.5.2 — First yaw seed π. CODE-CONFIRMED.
+        var eyeOffsetSeed = new Vector3(EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ);
+        var yawBasis = Basis.Identity.Rotated(Vector3.Up, _yaw);
+        var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
+        var eyeOffset = orbitBasis * eyeOffsetSeed;
+        var eyePos = focusPoint + eyeOffset;
 
         if (!IsFiniteVector(eyePos)) return;
+        if ((eyePos - focusPoint).LengthSquared() < 1e-6f) return;
 
-        // Build basis from yaw/elevation (like free-fly but from the player eye).
-        var yawBasis = Basis.Identity.Rotated(Vector3.Up, _yaw);
-        var fullBasis = yawBasis.Rotated(yawBasis.X, _elevation);
-
-        Transform = new Transform3D(fullBasis, eyePos);
+        Position = eyePos;
+        LookAt(focusPoint, Vector3.Up);
     }
 
     /// <summary>
     ///     Static: fixed-angle follow. Tracks position, never orbits.
-    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 Static — "follows position, never rotates". CODE-CONFIRMED.
-    ///     Yaw is fixed; only elevation key is polled (see _Process).
+    ///     Focus Z = −55 (legacy space) → Godot Z = +55.
+    ///     Yaw is locked (taken from player facing per spec; here fixed at 0 — player heading not
+    ///     yet exposed to the camera view; TODO: wire player facing when Application exposes it).
+    ///     Only pitch / elevation key is polled (see _Process).
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.2 Static — Focus Z −55, non-mouse yaw. CODE-CONFIRMED.
+    ///     spec: Docs/RE/specs/camera_movement.md §A.5.1 — shared eye-offset seed (−750,0,+500). CODE-CONFIRMED.
+    ///     spec: WorldCoordinates.ToGodot — legacy Z negated to Godot Z.
     /// </summary>
     private void ApplyStaticTransform()
     {
-        // Static uses a fixed yaw (locked at its initial seed = 0).
-        // Only the elevation is updateable.
+        // Focus Z −55 in legacy space → +55 in Godot Z.
+        // spec: Docs/RE/specs/camera_movement.md §A.5.2 — Static Focus Z −55. CODE-CONFIRMED.
+        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZStatic); // −(−55) = +55 on Godot Z
+
+        // Static yaw is taken from the player's facing/heading field (not mouse-driven).
+        // The player heading is not yet exposed through Application; fixed to 0 until it is.
+        // spec: Docs/RE/specs/camera_movement.md §A.5.2 — Static: "yaw from player facing, not mouse". CODE-CONFIRMED.
         const float FixedYaw = 0f;
 
-        var cosEl = Mathf.Cos(_elevation);
-        var sinEl = Mathf.Sin(_elevation);
-        var cosYaw = Mathf.Cos(FixedYaw);
-        var sinYaw = Mathf.Sin(FixedYaw);
+        // Rotate the shared eye-offset seed by the fixed yaw + current elevation.
+        // spec: Docs/RE/specs/camera_movement.md §A.5.1 — seed (−750,0,+500) legacy → (−750,0,−500) Godot. CODE-CONFIRMED.
+        var eyeOffsetSeed = new Vector3(EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ);
+        var yawBasis = Basis.Identity.Rotated(Vector3.Up, FixedYaw);
+        var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
+        var eyeOffset = orbitBasis * eyeOffsetSeed;
 
-        var eyeOffset = new Vector3(
-            OrbitRadius * cosEl * sinYaw,
-            -OrbitRadius * sinEl,
-            OrbitRadius * cosEl * cosYaw
-        );
-
-        var eyePos = _focus + eyeOffset;
+        var eyePos = focusPoint + eyeOffset;
         if (!IsFiniteVector(eyePos)) return;
-        if ((eyePos - _focus).LengthSquared() < 1e-6f) return;
+        if ((eyePos - focusPoint).LengthSquared() < 1e-6f) return;
 
         Position = eyePos;
-        LookAt(_focus, Vector3.Up);
+        LookAt(focusPoint, Vector3.Up);
     }
 }

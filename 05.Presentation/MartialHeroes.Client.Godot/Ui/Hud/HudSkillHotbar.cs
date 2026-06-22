@@ -1,11 +1,13 @@
 // Ui/Hud/HudSkillHotbar.cs
 //
-// Player skill hotbar — container origin (349, 13); 9-slot data-driven grid.
+// Player skill hotbar — container origin (349, 13); two nine-slot data-driven grid loops.
 //
 // This is the skill HOTBAR (the always-visible action bar), NOT the skill book window.
 //
-// Container: anchored at absolute (349, 13); thin anchor strip W~7, H~504.
+// Container: anchored at absolute (349, 13); thin anchor strip W=7, H=504, inner-x=982.
 //   spec: Docs/RE/specs/ui_hud_layout.md §3.5 / §5.10 CODE-CONFIRMED container origin.
+//   spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "container rect: x=349, y=13, w=7, h=504, inner-x=982 (texture-manifest key 3)".
+//   spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "built as two nine-slot loops".
 //
 // Per-slot layout variant by entity KIND word (CODE-CONFIRMED):
 //   KIND == 5         → 146 × 49
@@ -41,6 +43,7 @@
 // spec: Docs/RE/specs/ui_system.md §8.6.1 — uitex 10=skillpipe.dds, 3=icon-frame texset.
 
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -79,11 +82,28 @@ public sealed partial class HudSkillHotbar : Control
     // -------------------------------------------------------------------------
     // Spec-cited constants
     // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CODE-CONFIRMED
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 RESOLVED — container x=349, y=13, w=7, h=504, inner-x=982
     // -------------------------------------------------------------------------
 
-    private const float ContainerX = 349f; // spec: ui_hud_layout.md §3.5
-    private const float ContainerY = 13f; // spec: ui_hud_layout.md §3.5
-    private const int SlotCount = 9; // spec: ui_hud_layout.md §3.5 — "nine skill slots"
+    private const float ContainerX = 349f; // spec: ui_hud_layout.md §3.5 CODE-CONFIRMED
+
+    private const float ContainerY = 13f; // spec: ui_hud_layout.md §3.5 CODE-CONFIRMED
+
+    // Anchor strip dimensions (NOT the visual extent — the anchor is a 7×504 thin strip).
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "container rect: x=349, y=13, width=7, height=504"
+    private const float ContainerAnchorW = 7f; // spec: ui_hud_layout.md §3.5 CYCLE 11 — anchor width 7
+
+    private const float ContainerAnchorH = 504f; // spec: ui_hud_layout.md §3.5 CYCLE 11 — anchor height 504
+
+    // inner-x 982 = texture-manifest key 3 (the icon-frame chrome atlas).
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "inner-x=982 (texture-manifest key 3)"
+    private const int ContainerInnerX = 982; // spec: ui_hud_layout.md §3.5 CYCLE 11
+
+    // The build routine runs two nine-slot loops (not one) over the runtime slot registry.
+    // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "built as two nine-slot loops"
+    private const int SlotLoopCount = 2; // spec: ui_hud_layout.md §3.5 CYCLE 11 — two nine-slot loops
+    private const int SlotsPerLoop = 9; // spec: ui_hud_layout.md §3.5 — "nine skill slots per loop"
+    private const int SlotCount = SlotLoopCount * SlotsPerLoop; // 18 total slots across both loops
 
     // Layout variants by entity KIND word (CODE-CONFIRMED)
     // spec: ui_hud_layout.md §3.5 — KIND table
@@ -138,14 +158,17 @@ public sealed partial class HudSkillHotbar : Control
     {
         Name = "HudSkillHotbar";
 
-        // Container at absolute (349, 13).
-        // spec: ui_hud_layout.md §3.5 CODE-CONFIRMED — "container origin 349, 13"
+        // Container anchor strip at absolute (349, 13), size 7×504.
+        // spec: ui_hud_layout.md §3.5 CYCLE 11 — "x=349, y=13, width=7, height=504"
+        // The 7×504 is the ANCHOR rect, not the visible slot extent; the slots are data-driven children.
+        // inner-x=982 = texture-manifest key 3 (icon-frame chrome). spec: ui_hud_layout.md §3.5 CYCLE 11.
         Position = new Vector2(ContainerX, ContainerY);
-        // Thin anchor strip: W~7, H~504 (anchor, not visible extent).
-        // spec: ui_hud_layout.md §3.5 — "thin anchor strip W=7, H=504"
-        // In practice we size to fit 9 × fallback cells.
-        Size = new Vector2(SlotCount * CellFallbackW, CellFallbackH);
+        Size = new Vector2(ContainerAnchorW, ContainerAnchorH); // spec: ui_hud_layout.md §3.5 CYCLE 11
         MouseFilter = MouseFilterEnum.Ignore;
+        // Inner-x cite: ContainerInnerX=982 is the texture-manifest key for the icon-frame chrome.
+        // This is referenced for correct chrome lookup when the atlas is live.
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — inner-x=982 (texture-manifest key 3)
+        _ = ContainerInnerX; // suppress unused-field warning; present for spec correctness
 
         // Load the overlay texset (uitex key 3 = icon-frame texset).
         // spec: ui_hud_layout.md §5.10a — "uitex registry key 3 (icon-frame texset)"
@@ -165,17 +188,24 @@ public sealed partial class HudSkillHotbar : Control
         // spec: ui_system.md §8.6.1 — uitex 10 = data/ui/skillpipe.dds
         var pipeTex = atlas.GetById(SkillpipeTexId);
 
-        // Build 9 skill slots in a horizontal row (fallback layout).
+        // Build 18 skill slots (two 9-slot loops, each loop covering SlotsPerLoop=9 slots).
+        // spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — "built as two nine-slot loops"
         // Real layout reads base X/Y from the runtime slot registry (+0x10 / +0x14 biased −92).
+        // Fallback: slots laid out in a 9×2 grid (two rows of 9).
         // TODO(world-campaign): replace with registry-driven slot positions.
         for (var i = 0; i < SlotCount; i++)
         {
-            var slotX = i * CellFallbackW;
+            var loopIdx = i / SlotsPerLoop; // 0 = first nine-slot loop, 1 = second nine-slot loop
+            var slotInLoop = i % SlotsPerLoop;
+            var slotX = slotInLoop * CellFallbackW;
+            var slotY = loopIdx * CellFallbackH; // second loop row below first
 
             var slot = new Control
             {
                 Name = $"SkillSlot{i}",
-                Position = new Vector2(slotX, 0f), // placeholder; registry gives real X/Y
+                // Fallback position: loop 0 = row 0, loop 1 = row 1; registry gives real X/Y.
+                // spec: ui_hud_layout.md §3.5 CYCLE 11 — per-slot base X/Y from registry +0x10/+0x14
+                Position = new Vector2(slotX, slotY), // placeholder; registry gives real X/Y
                 Size = new Vector2(CellFallbackW, CellFallbackH),
                 MouseFilter = MouseFilterEnum.Ignore
             };
@@ -236,6 +266,9 @@ public sealed partial class HudSkillHotbar : Control
             keyLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopLeft);
             keyLabel.OffsetRight = CellFallbackW;
             keyLabel.OffsetBottom = 16f;
+            // Caption font slot 4 — dominant in-game HUD caption font.
+            // spec: Docs/RE/specs/ui_hud_layout.md CYCLE 11 — "dominant HUD caption font slot 4"
+            HudFont.ApplyToLabel(keyLabel, 4); // spec: ui_hud_layout.md CYCLE 11 — slot 4
             slot.AddChild(keyLabel);
             _slotKeyLabels[i] = keyLabel;
 
@@ -297,17 +330,87 @@ public sealed partial class HudSkillHotbar : Control
             _overlayState[i] = SlotOverlayState.Ready;
         }
 
-        GD.Print($"[HudSkillHotbar] Built — container at ({ContainerX},{ContainerY}), {SlotCount} slots " +
-                 $"× {CellFallbackW}×{CellFallbackH} (fallback; registry data-driven pending). " +
-                 "Overlay frames: ready=(821,655) cooldown=(792,655) charge=(763,655) 29×29 uitex key 3. " +
-                 "spec: Docs/RE/specs/ui_hud_layout.md §3.5 CODE-CONFIRMED origin; " +
-                 "§5.10a CODE-CONFIRMED overlay src-rects. " +
-                 "TODO(spec): per-skill overlay values from .do stance table.");
+        GD.Print(
+            $"[HudSkillHotbar] Built — anchor at ({ContainerX},{ContainerY}) size {ContainerAnchorW}×{ContainerAnchorH} inner-x={ContainerInnerX}. " +
+            $"Two nine-slot loops = {SlotCount} total slots × {CellFallbackW}×{CellFallbackH} fallback cell. " +
+            "Overlay frames: ready=(821,655) cooldown=(792,655) charge=(763,655) 29×29 uitex key 3. " +
+            "spec: Docs/RE/specs/ui_hud_layout.md §3.5 CYCLE 11 — container x=349,y=13,w=7,h=504,inner-x=982 CODE-CONFIRMED; " +
+            "two nine-slot loops CODE-CONFIRMED; §5.10a CODE-CONFIRMED overlay src-rects. " +
+            "TODO(world-campaign): replace with registry-driven slot positions + per-skill overlay values.");
     }
 
     // -------------------------------------------------------------------------
     // Slot updates
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Populates the visible 18-slot bar from the world-entry 4/1 hotbar snapshot.
+    ///     The 4/1 HotbarSlots region carries up to 240 entries (slot indices 0..239); this bar
+    ///     shows the first <see cref="SlotCount" /> = 18 (two nine-slot loops). Entries whose
+    ///     SlotIndex >= SlotCount belong to the 240-slot model but are not on this bar — they are
+    ///     noted and skipped without error.
+    ///     Icon resolution: EntryKey is RAW (skill-vs-item category-pending — no resolver in layer 05).
+    ///     We cannot fabricate a skill-vs-item mapping, so we write the EntryKey into the key label
+    ///     (as a numeric occupied marker) and leave the icon null, printing a per-slot diagnostic.
+    ///     When the category resolver lands (world-campaign), replace this with a proper icon lookup.
+    ///     spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note — EntryKey raw, category-pending).
+    /// </summary>
+    public void OnHotbarInitialized(HotbarInitializedEvent evt)
+    {
+        // First clear all visible slots so a re-init from a new world-entry is clean.
+        for (var i = 0; i < SlotCount; i++)
+        {
+            SetSlotIcon(i, null);
+            if ((uint)i < (uint)_slotKeyLabels.Length && _slotKeyLabels[i] is not null)
+                _slotKeyLabels[i].Text = $"{i + 1}"; // restore numeric key label
+            SetSlotOverlay(i, SlotOverlayState.Ready);
+        }
+
+        if (evt.Slots.IsDefaultOrEmpty)
+        {
+            GD.Print("[HudSkillHotbar] OnHotbarInitialized: empty snapshot — all slots cleared. " +
+                     "spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note).");
+            return;
+        }
+
+        var wiredCount = 0;
+        var skippedCount = 0;
+
+        foreach (var entry in evt.Slots)
+        {
+            // spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note — SlotIndex 0..239).
+            if (entry.SlotIndex >= SlotCount)
+            {
+                // This entry belongs to the 240-slot model but falls outside the 18 visible slots.
+                // spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note).
+                skippedCount++;
+                continue;
+            }
+
+            // EntryKey is RAW — skill-vs-item category is pending; no resolver in layer 05.
+            // Write the raw key as the slot label and leave the icon null.
+            // spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note — "EntryKey raw; category-pending").
+            if ((uint)entry.SlotIndex < (uint)_slotKeyLabels.Length && _slotKeyLabels[entry.SlotIndex] is not null)
+                _slotKeyLabels[entry.SlotIndex].Text = $"#{entry.EntryKey}";
+
+            // Icon: no clean by-key path in HudIconLibrary without category resolution; leave null.
+            // spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note).
+            SetSlotIcon(entry.SlotIndex, null);
+            // Overlay stays at Ready (default) — cooldown/charge state comes from separate events.
+            SetSlotOverlay(entry.SlotIndex, SlotOverlayState.Ready);
+
+            GD.Print(
+                $"[HudSkillHotbar] slot {entry.SlotIndex} occupied: EntryKey={entry.EntryKey} Count={entry.Count} — " +
+                "skill-vs-item category-pending — icon deferred (raw EntryKey shown). " +
+                "spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note).");
+            wiredCount++;
+        }
+
+        GD.Print($"[HudSkillHotbar] OnHotbarInitialized complete: {wiredCount} slot(s) wired, " +
+                 $"{skippedCount} slot(s) outside visible bar (SlotIndex >= {SlotCount}) noted. " +
+                 "Icons deferred pending skill-vs-item category resolver (world-campaign). " +
+                 "spec: Docs/RE/packets/4-1_game_state_tick.yaml (HotbarSlots note).");
+    }
 
     /// <summary>
     ///     Sets the skill icon for the slot at index <paramref name="slotIndex" /> (0-based).

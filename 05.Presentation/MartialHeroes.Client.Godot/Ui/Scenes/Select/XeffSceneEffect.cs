@@ -1,4 +1,4 @@
-// Screens/XeffSceneEffect.cs
+// Ui/Scenes/Select/XeffSceneEffect.cs
 //
 // Faithful Godot renderer for a parsed XeffData instance.
 //

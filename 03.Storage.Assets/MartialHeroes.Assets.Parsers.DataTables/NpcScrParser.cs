@@ -22,13 +22,23 @@ public static class NpcScrParser
     private const int RecordStride = 404; // 0x194
 
     // Paragraph buffer boundaries (offsets and widths from spec).
-    // spec: Docs/RE/formats/config_tables.md §2.17.3 — layout table: SAMPLE-VERIFIED.
-    private const int Paragraph0Offset = 0x014; // ≤36 bytes
-    private const int Paragraph0Width = 60; // conservative; buffer ends before 0x050
-    private const int Paragraph1Offset = 0x050; // ≤28 bytes
-    private const int Paragraph1Width = 64; // conservative; buffer ends before 0x090
-    private const int Paragraph2Offset = 0x090; // ≤28 bytes
-    private const int Paragraph2Width = 64; // conservative; buffer ends before 0x0D0
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 §npc.scr layout table — CONFIRMED (two-witness).
+    // Layout: 20-byte header followed by six 64-byte CP949 string fields.
+    // Field 0 @ +0x014 (20), field 1 @ +0x054 (84), field 2 @ +0x094 (148), each 64 bytes wide.
+    // The create form reads string fields 0/1/2 for class description lines 1/2/3.
+    // spec: Docs/RE/formats/config_tables.md §2.17.3 — "offsets +0x14/+0x54/+0x94, 64 bytes each": CONFIRMED.
+    private const int Paragraph0Offset = 0x014; // +20 dec — string field 0; spec: §2.17.3 +0x014
+    private const int Paragraph0Width = 64; // 64 bytes — spec: §2.17.3 "six 64-byte CP949 string fields"
+
+    private const int
+        Paragraph1Offset = 0x054; // +84 dec — string field 1; spec: §2.17.3 +0x054 (was 0x050 — CORRECTED)
+
+    private const int Paragraph1Width = 64; // 64 bytes — spec: §2.17.3
+
+    private const int
+        Paragraph2Offset = 0x094; // +148 dec — string field 2; spec: §2.17.3 +0x094 (was 0x090 — CORRECTED)
+
+    private const int Paragraph2Width = 64; // 64 bytes — spec: §2.17.3
 
     static NpcScrParser()
     {
@@ -79,16 +89,18 @@ public static class NpcScrParser
             // spec: Docs/RE/formats/config_tables.md §2.17.3 — "reserved 8 bytes @ 0x008 (zero): SAMPLE-VERIFIED".
             // (not exposed in the model; silently skipped)
 
-            // paragraph_0 CP949 @ 0x014. First archetype paragraph. SAMPLE-VERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "paragraph_0 char[] @ 0x014: SAMPLE-VERIFIED".
+            // paragraph_0 (string field 0) CP949 @ +0x014 (20 dec), 64 bytes wide. First class description line.
+            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "string field 0 @ +0x014, 64 bytes: CONFIRMED".
             var para0 = ReadNullTerminatedCp949(rec.Slice(Paragraph0Offset, Paragraph0Width), cp949);
 
-            // paragraph_1 CP949 @ 0x050. Second paragraph. SAMPLE-VERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "paragraph_1 char[] @ 0x050: SAMPLE-VERIFIED".
+            // paragraph_1 (string field 1) CP949 @ +0x054 (84 dec), 64 bytes wide. Second class description line.
+            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "string field 1 @ +0x054, 64 bytes: CONFIRMED".
+            // CORRECTED: was 0x050 (off by 4); spec layout = 20-byte header + six 64-byte fields (0x14,0x54,0x94,0xD4,0x114,0x154).
             var para1 = ReadNullTerminatedCp949(rec.Slice(Paragraph1Offset, Paragraph1Width), cp949);
 
-            // paragraph_2 CP949 @ 0x090. Third paragraph. SAMPLE-VERIFIED.
-            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "paragraph_2 char[] @ 0x090: SAMPLE-VERIFIED".
+            // paragraph_2 (string field 2) CP949 @ +0x094 (148 dec), 64 bytes wide. Third class description line.
+            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "string field 2 @ +0x094, 64 bytes: CONFIRMED".
+            // CORRECTED: was 0x090 (off by 4); spec layout = 20-byte header + six 64-byte fields (0x14,0x54,0x94,0xD4,0x114,0x154).
             var para2 = ReadNullTerminatedCp949(rec.Slice(Paragraph2Offset, Paragraph2Width), cp949);
 
             results[i] = new NpcScrRecord

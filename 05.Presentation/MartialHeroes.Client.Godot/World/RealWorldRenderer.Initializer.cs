@@ -240,6 +240,17 @@ public sealed partial class RealWorldRenderer
             // This is REAL VFS data for the server-supplied area (the static map scenery the original
             // loads on area entry) — not fabricated. Dynamic actors still arrive via the 4/4 stream.
             // spec: Docs/RE/specs/world_entry.md §3.1; Docs/RE/specs/assembly_graph.md §1.
+            //
+            // TODO (C12-D13 deferred merge): This legacy gate remains the CANONICAL runtime path
+            // (compose_render defaults to false; client_dir.cfg ships no compose_render key).
+            // Before this gate is removed and BuildLegacyAreaContent() is deleted, the composer path
+            // (OnCellAssembled / OnAreaAssembled) must pass a windowed visual-oracle check with:
+            //   (1) Per-cell .map cache for building texture resolution (see Composer.cs OnCellAssembled
+            //       comment — currently reuses target-cell _cellMap for ALL streamed cells).
+            //   (2) Ring-wide building coverage confirmed to match or exceed legacy spawn-cell coverage.
+            //   (3) FX slots 2-8 (SlotRenderer.RenderFxSlots) visually validated, not just compiled.
+            // Only after those three gates pass: set compose_render=1 as default and retire this block,
+            // BuildLegacyAreaContent(), LoadAndSpawnBudScene(), and _areaContentBuilt. See ROADMAP.md §C12-D13.
             if (!_composeRender && !_areaContentBuilt)
             {
                 BuildLegacyAreaContent();

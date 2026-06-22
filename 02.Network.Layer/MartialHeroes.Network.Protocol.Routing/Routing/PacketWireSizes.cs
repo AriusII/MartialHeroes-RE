@@ -12,6 +12,8 @@ using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.Social.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
+// auto-generated stubs in the codegen namespace
+
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
 
 /// <summary>
@@ -31,6 +33,10 @@ public static class PacketWireSizes
         switch (packedOpcode)
         {
             // --- fixed-size S2C packets ---
+            case Opcodes.SmsgKeyExchange: // spec: Docs/RE/packets/0-0_key_exchange.yaml (62-byte key-exchange)
+                size = SmsgKeyExchange.WireSize;
+                isVariableLength = false;
+                return true;
             case Opcodes.SmsgCharDespawn: // spec: packets/5-0_char_despawn.yaml
                 size = SmsgCharDespawn.WireSize;
                 isVariableLength = false;
@@ -41,6 +47,15 @@ public static class PacketWireSizes
                 return true;
             case Opcodes.SmsgActorMovementUpdate: // spec: packets/5-13_actor_movement_update.yaml
                 size = SmsgActorMovementUpdate.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgCharDeath: // spec: Docs/RE/packets/5-10_combat_death.yaml (20-byte fixed block)
+                size = SmsgCharDeath.WireSize;
+                isVariableLength = false;
+                return true;
+            case Opcodes.SmsgLocalPlayerStateSync
+                : // spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (56-byte fixed block)
+                size = SmsgLocalPlayerStateSync.WireSize;
                 isVariableLength = false;
                 return true;
             case Opcodes.SmsgCharSpawn: // spec: packets/5-3_char_spawn.yaml
@@ -128,6 +143,11 @@ public static class PacketWireSizes
                 return true;
 
             // --- variable-length packets: only the fixed header is modelled ---
+            case Opcodes.SmsgAreaEntitySnapshot
+                : // spec: Docs/RE/packets/4-4_area_entity_snapshot.yaml (17-byte header + variable tag loop)
+                size = SmsgAreaEntitySnapshot.HeaderSize;
+                isVariableLength = true;
+                return true;
             case Opcodes.SmsgGameStateTick: // spec: handlers.md §4/1; client_runtime.md §9.4
                 size = SmsgGameStateTick.WireSize;
                 isVariableLength = true;
@@ -149,7 +169,8 @@ public static class PacketWireSizes
                 isVariableLength = true;
                 return true;
             case Opcodes.SmsgSceneEntityUpdate: // spec: packets/3-4_scene_entity_update.yaml
-                size = 3;
+                size = SmsgSceneEntityUpdate
+                    .HeaderSize; // spec: Docs/RE/packets/3-4_scene_entity_update.yaml (3-byte header)
                 isVariableLength = true;
                 return true;
             case Opcodes.SmsgGmChatMessage: // spec: packets/3-50000_gm_chat_message.yaml

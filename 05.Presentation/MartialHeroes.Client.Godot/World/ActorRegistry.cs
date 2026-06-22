@@ -277,6 +277,143 @@ public sealed partial class ActorRegistry : Node
     }
 
     // -------------------------------------------------------------------------
+    // 4/4 KindByte==5 — lightweight in-place visual refresh
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Applies a lightweight visual-only refresh to an already-spawned actor.
+    ///     KindByte == 5 means the actor is NOT removed or rebuilt — only its
+    ///     visual attributes are updated in place.
+    ///     RelationVisual byte meaning is capture-pending; no game-rule value is
+    ///     stored here. If the actor is not yet in the registry (refresh-before-spawn),
+    ///     the call is a no-op.
+    ///     Main-thread only. PASSIVE: no respawn, no node removal.
+    ///     spec: Docs/RE/structs/actor.md (4/4 record: KindByte == 5 visual-only refresh).
+    /// </summary>
+    public void OnActorVisualRefreshed(ActorVisualRefreshedEvent evt)
+    {
+        if (!_actors.TryGetValue(evt.Key, out var visual) || !IsInstanceValid(visual))
+        {
+            // Refresh-before-spawn — silently skip; spawn event will register the node.
+            // spec: Docs/RE/structs/actor.md (KindByte==5: actor must already exist; no respawn).
+            GD.Print($"[ActorRegistry] ActorVisualRefreshed: actor {evt.Key.RawId} not in registry " +
+                     "(refresh-before-spawn) — no-op. spec: Docs/RE/structs/actor.md (KindByte==5).");
+            return;
+        }
+
+        // Lightweight in-place refresh: do NOT remove/re-add the node, do NOT rebuild the avatar.
+        // RelationVisual meaning is capture-pending — log it faithfully, store nothing game-relevant.
+        // TODO(world-campaign): when RelationVisual meaning is recovered, apply a relation tint here.
+        // spec: Docs/RE/structs/actor.md (KindByte==5: visual-only refresh; RelationVisual capture-pending).
+        GD.Print($"[ActorRegistry] ActorVisualRefreshed: actor {evt.Key.RawId} " +
+                 $"relationVisual={evt.RelationVisual} (meaning capture-pending). " +
+                 "In-place only — no respawn. spec: Docs/RE/structs/actor.md (KindByte==5).");
+    }
+
+    // -------------------------------------------------------------------------
+    // 5/10 death — play victim death motion (no despawn; server sends 5/0 separately)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Plays the death motion/pose on the VICTIM's VisualActor (5/10 SmsgCharDeath).
+    ///     Does NOT despawn the actor — the server sends a separate 5/0 despawn.
+    ///     Clear-locked-target UI is a HUD concern (not owned here).
+    ///     If the victim is not in the registry (death before spawn), the call is a no-op.
+    ///     Main-thread only. PASSIVE: no domain mutation.
+    ///     spec: Docs/RE/packets/5-10_combat_death.yaml (death: play motion; despawn via 5/0 separately).
+    /// </summary>
+    public void OnActorDied(ActorDiedEvent evt)
+    {
+        if (!_actors.TryGetValue(evt.VictimKey, out var visual) || !IsInstanceValid(visual))
+        {
+            // Death arrived before spawn or after despawn — no-op.
+            GD.Print($"[ActorRegistry] ActorDied: victim {evt.VictimKey.RawId} not in registry — " +
+                     "no-op. spec: Docs/RE/packets/5-10_combat_death.yaml.");
+            return;
+        }
+
+        // Play the death pose on the victim's visual. PlayDeathMotion is idempotent.
+        // spec: Docs/RE/packets/5-10_combat_death.yaml (5/10 = play death; no despawn here).
+        visual.PlayDeathMotion();
+        GD.Print($"[ActorRegistry] ActorDied: victim={evt.VictimKey.RawId} cause={evt.DeathCause} " +
+                 $"isPkA={evt.IsPkA} isPkB={evt.IsPkB} — death motion played. " +
+                 "spec: Docs/RE/packets/5-10_combat_death.yaml.");
+    }
+
+    // -------------------------------------------------------------------------
+    // 4/13 local-player state sync — snap or glide reconcile
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    ///     Reconciles the local player's transform from a 4/13 SmsgLocalPlayerStateSync.
+    ///     Mode 5 = no state write (early return — spec-faithful).
+    ///     A squared position delta &gt; 200² (legacy units) is a teleport — SNAP GlobalPosition.
+    ///     Otherwise, smooth glide via the existing SetMoveTarget path.
+    ///     Heading: raw Q16.16 heading — the yaw convention is facing-pending (not statically recovered);
+    ///     GD.Print the value for diagnostics rather than fabricating a rotation.
+    ///     Main-thread only. PASSIVE: no domain mutation.
+    ///     spec: Docs/RE/packets/4-13_local_player_state_sync.yaml
+    ///     (&gt;200-unit delta = teleport; mode 5 = no write; heading = raw Q16.16).
+    /// </summary>
+    public void OnLocalPlayerStateSynced(LocalPlayerStateSyncedEvent evt)
+    {
+        // Mode 5 = no state write. spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (mode 5 = no write).
+        if (evt.Mode == 5)
+        {
+            GD.Print("[ActorRegistry] LocalPlayerStateSynced: mode=5 (no-write) — skipped. " +
+                     "spec: Docs/RE/packets/4-13_local_player_state_sync.yaml.");
+            return;
+        }
+
+        if (!_actors.TryGetValue(evt.Key, out var visual) || !IsInstanceValid(visual))
+        {
+            // Local player not yet registered — silently skip.
+            GD.Print($"[ActorRegistry] LocalPlayerStateSynced: local player {evt.Key.RawId} not in " +
+                     "registry — skip. spec: Docs/RE/packets/4-13_local_player_state_sync.yaml.");
+            return;
+        }
+
+        // Convert the synced position to Godot world space using the SAME boundary as OnActorSpawned/OnActorMoved.
+        // Step 1: Q16.16 → float at the presentation boundary. spec: Vector3Fixed.ToVector3Float().
+        // Step 2: legacy left-handed → Godot right-handed (negate Z). spec: WorldCoordinates.ToGodot.
+        var (fx, fy, fz) = evt.Position.ToVector3Float();
+        var (gx, gy, gz) = WorldCoordinates.ToGodot(fx, fy, fz);
+        var syncedPos = new Vector3(gx, gy, gz);
+
+        // Teleport threshold: >200 legacy units squared.
+        // spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (">200-unit delta is a teleport").
+        const float TeleportThresholdSq = 200f * 200f; // spec: 4-13_local_player_state_sync.yaml
+        var delta = syncedPos - visual.GlobalPosition;
+        var squaredDelta = delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z;
+
+        if (squaredDelta > TeleportThresholdSq)
+        {
+            // Large delta — teleport: snap GlobalPosition directly.
+            // spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (">200-unit delta is a teleport").
+            visual.GlobalPosition = syncedPos;
+            GD.Print($"[ActorRegistry] LocalPlayerStateSynced: TELEPORT snap to {syncedPos} " +
+                     $"(delta²={squaredDelta:F0} > {TeleportThresholdSq:F0}). " +
+                     "spec: Docs/RE/packets/4-13_local_player_state_sync.yaml.");
+        }
+        else
+        {
+            // Small delta — smooth glide via the existing SetMoveTarget path (not running for a state sync).
+            // spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (small delta = smooth correction).
+            visual.SetMoveTarget(syncedPos, false);
+            GD.Print($"[ActorRegistry] LocalPlayerStateSynced: smooth glide to {syncedPos} " +
+                     $"mode={evt.Mode} heading={evt.Heading} (yaw convention facing-pending — not fabricated). " +
+                     "spec: Docs/RE/packets/4-13_local_player_state_sync.yaml.");
+        }
+
+        // Heading: raw Q16.16 — the heading→yaw convention is facing-pending (not statically recovered).
+        // We GD.Print the raw value for diagnostics rather than fabricating a rotation convention.
+        // spec: Docs/RE/packets/4-13_local_player_state_sync.yaml (heading = raw Q16.16; convention pending).
+        GD.Print($"[ActorRegistry] LocalPlayerStateSynced: heading={evt.Heading} (facing-pending — " +
+                 "not applied; convention not statically recovered). " +
+                 "spec: Docs/RE/packets/4-13_local_player_state_sync.yaml.");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 

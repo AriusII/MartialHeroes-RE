@@ -38,6 +38,13 @@ public sealed partial class HudMaster
         // Invariant: insertion order here == AddChild order == z/paint order.
         // -----------------------------------------------------------------------
 
+        // 0. PlayerStatusPanel — HP/MP/stamina gauges + portrait + condition bar + level (slot 15)
+        //    "Built top-left (dst 0,0; w=285, h=88); base atlas = UI-manifest key 4."
+        //    PASSIVE: drains IHudEventHub.Vitals; updates only fills and labels.
+        //    spec: Docs/RE/scenes/ingame.md §2 — Core HUD group; §2.1 internal layout; §2.4 src-rects.
+        _playerStatusPanel = AddPanel<HudPlayerStatusPanel>();
+        _playerStatusPanel.Build(atlas);
+
         // 1. Right-edge HP/MP gauge composite
         //    spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula
         //    Strips at screen_width−135, Y=200 / Y=250, W=140, H=35
@@ -88,7 +95,7 @@ public sealed partial class HudMaster
         //    Children bind uitex id 1 chrome; HP fill = min(172, 172·hpRatio) px wide.
         //    spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel = slot 35 (binary-won).
         //    spec: Docs/RE/specs/ui_system.md §1.9.4 — "prior 'MopGage = slot 177' REFUTED".
-        //    spec: Docs/RE/specs/ui_hud_layout.md §5.5b CODE-CONFIRMED.
+        //    spec: Docs/RE/scenes/ingame.md §5 — MopGagePanel geometry, HP bar formula, child widgets.
         _targetFrame = AddPanel<HudTargetFrame>();
         _targetFrame.Build(atlas);
 
@@ -184,7 +191,9 @@ public sealed partial class HudMaster
             ToggleRelation // DefaultMenu 4002 → RelationPanel(193) + BuddyRelation(185 interim)
             // spec: ui_system.md §8.28.5 CODE-CONFIRMED — "4002 group-open opens BOTH 185+193"
         );
-        _commandBar.Build(atlas);
+        // Pass text library so button captions resolve from msg.xdb (ingame.md §14.1).
+        // spec: Docs/RE/scenes/ingame.md §14.1 — all localized HUD labels resolve via msg.xdb numeric id.
+        _commandBar.Build(atlas, text);
 
         // 23. HudVendorWindow — NPC vendor / item-shop buy/sell (slot 259)
         //     spec: Docs/RE/specs/ui_system.md §8.22 CODE-CONFIRMED.
@@ -265,8 +274,9 @@ public sealed partial class HudMaster
         _relationPanel = AddPanel<HudRelationPanel>();
         _relationPanel.Build(atlas, text);
 
-        GD.Print("[HudMaster] Build complete — ~33 panels total " +
-                 "(10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E, + HelpOverlay member). " +
+        GD.Print("[HudMaster] Build complete — ~34 panels total " +
+                 "(1 PlayerStatus/slot15 + 10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E, + HelpOverlay member). " +
+                 "PlayerStatusPanel(§2.1/slot15): HP/MP/Stamina fills + condition bar + portrait + level label. " +
                  "Wave-1 E: Options(§8.9.1) Party(§8.12) Trade(§8.13) Friend(§8.14) Guild(§8.15) Quest(§8.16). " +
                  "Wave-2 E: Message(§8.20) Product(§8.18) Emoticon(§8.19) Tender(§8.21.1) Mail(§8.21.2-4) Delivery(§8.21.5). " +
                  "Wave-3 E: CommandBar(§8.23) Vendor(§8.22) HelpOverlay(§8.24) Announce(§8.25.1) Error(§8.25.2) Pet(§8.26). " +
@@ -304,6 +314,7 @@ public sealed partial class HudMaster
     public void BindHub(ClientContext ctx)
     {
         var hub = ctx.HudEventHub;
+        _playerStatusPanel?.BindHub(hub);
         _rightEdgeGauge?.BindHub(hub);
         _chatPanel?.BindHub(hub);
         _chatPanel?.WireSendIntent(ctx);
@@ -322,7 +333,7 @@ public sealed partial class HudMaster
         // spec: Docs/RE/specs/ui_system.md §8.26.4 — PetPanel open via 5/53 (world-campaign).
 
         GD.Print(
-            "[HudMaster] BindHub: ~33 panels connected (10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E). " +
+            "[HudMaster] BindHub: ~34 panels connected (1 PlayerStatus/slot15 + 10 core + 6 Wave-1 E + 6 Wave-2 E + 6 Wave-3 E + 6 Wave-4 E). " +
             "Party hub wired (stub). Wave-3/4 panels have no hub channel yet " +
             "(TODO world-campaign: global notice sink, 5/53 pair-relation, S2C 4/74/4/81/5/73, relation roster push). " +
             "spec: Docs/RE/specs/ui_system.md §1.9.3 — MopGagePanel slot 35 (binary-won; 'slot 177' REFUTED §1.9.4). " +

@@ -56,6 +56,12 @@ internal sealed class NpcScrDescriptions
     // Populated by Load(); null means the VFS was not available.
     private readonly string?[] _resolved = new string?[4];
 
+    // The three CP949 description lines VERBATIM per UI class index 0..3 (fields 0/1/2 at
+    // +0x14/+0x54/+0x94), with NO empty-line filtering — each line maps 1:1 onto its own label so a
+    // blank middle line does NOT collapse line 3 up onto line 2 (the 3-line render-polish edge).
+    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 (three lines, top to bottom).
+    private readonly string[][] _resolvedLines = new string[4][];
+
     // Whether the VFS load succeeded (used for diagnostics).
 
     private NpcScrDescriptions()
@@ -119,7 +125,11 @@ internal sealed class NpcScrDescriptions
                 // spec: Docs/RE/formats/config_tables.md §2.17.3 — "fields 0/1/2 = description lines": CONFIRMED.
                 // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — "three CP949 lines at +0x14/+0x54/+0x94": CONFIRMED.
                 // NpcScrParser already decoded CP949 → .NET string; we only need to join non-empty lines.
-                string[] lines = [rec.Paragraph0, rec.Paragraph1, rec.Paragraph2];
+                // VERBATIM three lines (no filtering) for the per-label 3-line render; the joined form
+                // (empties dropped) is kept for any single-blob consumer. spec frontend_scenes.md §4.1.1.
+                string[] lines =
+                    [rec.Paragraph0 ?? string.Empty, rec.Paragraph1 ?? string.Empty, rec.Paragraph2 ?? string.Empty];
+                inst._resolvedLines[uiIdx] = lines;
                 var joined = string.Join("\n", lines.Where(l => !string.IsNullOrWhiteSpace(l)));
 
                 if (string.IsNullOrWhiteSpace(joined))
@@ -165,5 +175,19 @@ internal sealed class NpcScrDescriptions
         // Return the VFS-loaded CP949 text, or empty string when offline.
         // spec: No English fallback — faithfully empty when npc.scr is absent.
         return _resolved[uiClassIndex] ?? string.Empty;
+    }
+
+    /// <summary>
+    ///     Returns the three CP949 description lines (fields 0/1/2 at +0x14/+0x54/+0x94) VERBATIM for
+    ///     the given UI class index, as a 3-element array (each element maps 1:1 onto one of the three
+    ///     description labels, top to bottom). Empty lines are preserved (NOT filtered) so a blank
+    ///     middle line keeps line 3 on label 3 rather than collapsing it up. Always exactly 3 elements;
+    ///     all-empty offline. spec: Docs/RE/specs/frontend_scenes.md §4.1.1 (three lines, top to bottom).
+    /// </summary>
+    public string[] GetDescriptionLines(int uiClassIndex)
+    {
+        if (uiClassIndex < 0 || uiClassIndex >= 4 || _resolvedLines[uiClassIndex] is not { } lines)
+            return ["", "", ""];
+        return lines;
     }
 }

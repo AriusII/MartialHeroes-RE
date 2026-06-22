@@ -1,4 +1,4 @@
-// Screens/CharSelectCameraRig.cs
+// Ui/Scenes/Select/CharSelectCameraRig.cs
 //
 // The character-select preview camera rig — REWRITTEN FROM SCRATCH against the recovered spec
 // (CAMPAIGN 9 WAVE 3). Every constant is a spec-cited IDA value; there are NO hand-tuned numbers.
@@ -16,9 +16,10 @@
 //      inner keyframes ≥ 2, which are dormant in this scene). After t = 1.0 the camera holds KF1.
 //      spec: Docs/RE/specs/frontend_scenes.md §3.5 (free-look Euler headline) / §3.5.2 / §3.5.3
 //            (the 12 PI-scaled angle multipliers) / §3.5.4 CODE-CONFIRMED.
-//   2. MANUAL BOOM-ZOOM: after the dolly, a hold-to-zoom moves the camera along its forward view
-//      axis; the boom depth is HARD-CLAMPED to [0, 22] (boom seed = 0 → eye sits on KF1 at rest).
-//      spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
+//   2. ACTION BOOM-ZOOM: after the dolly, actions 72/73 (SetZoomAction) move the camera along its
+//      forward view axis by dt×10 per frame; NO clamp on the action path (spec §6.3).
+//      A keyboard dev-fallback (PageUp/PageDown) retains the static [0,26] clamp from §3.5.4.
+//      spec: charselect.md §6.3 (no clamp); §3.5.4 C3 RESOLVED — keyboard fallback clamp 26.0.
 //   3. SLOT RAY-PICK: a 3D world-space ray-pick (Camera3D unproject) against per-slot AABBs
 //      (X ± 6, Z ± 6, Y band 70..92), nearest hit → slot index (0..4) or −1. spec: §3.3.3.
 //
@@ -41,15 +42,22 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 /// <summary>
 ///     The entry-dolly camera rig for the character-select preview: drives the KF0→KF1 dolly over
-///     ~2.0 s on scene enter, then the manual camera boom-zoom and the per-slot ray-pick. Slot selection
-///     never re-aims this camera; actor-local selection yaw is owned by <see cref="CharSelectScene3D" />.
+///     ~2.0 s on scene enter, then the action-driven camera boom-zoom (actions 72/73) and the per-slot
+///     ray-pick. Slot selection never re-aims this camera; actor-local selection yaw is owned by
+///     <see cref="CharSelectScene3D" />.
 ///     <para>
 ///         Owned by <see cref="CharSelectScene3D" />, which constructs the camera at KF0 then calls
-///         <see cref="Configure" /> with the camera, the dolly keyframes, the row-pivot look-at, the
-///         per-slot Godot-space XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly
+///         <see cref="Configure" /> with the camera, the two dolly keyframe positions, the per-slot
+///         Godot-space XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly
 ///         runs in <see cref="_Process" /> against the engine ms clock.
 ///     </para>
+///     <para>
+///         Boom-zoom (actions 72/73): call <see cref="SetZoomAction" /> with the action id on
+///         button-press and with 0 on button-release. The rig increments/decrements the camera
+///         distance by dt×10 per frame with NO clamp while the action is non-zero.
+///     </para>
 ///     spec: Docs/RE/specs/frontend_scenes.md §3.5 (entry dolly KF0→KF1) / §3.3.3 (hit-test).
+///     spec: Docs/RE/scenes/charselect.md §6.3 (boom-zoom: dt×10, no clamp, reset on mouse-up).
 /// </summary>
 public sealed partial class CharSelectCameraRig : Node
 {
@@ -76,10 +84,21 @@ public sealed partial class CharSelectCameraRig : Node
     private const float Kf0PitchRad = -0.03333334f * Mathf.Pi; // ≈ −0.104720 rad (−6.000°)
     private const float Kf0YawRad = 0.01333333f * Mathf.Pi; // ≈ +0.041888 rad (+2.400°)
 
-    // KF1 orientation (the RESTING pose the player holds). spec: §3.5.3 — idx 1 PITCH mult
-    //   −0.01483333 (= −2.670°); idx 7 YAW mult 0.00436111 (= +0.785°). CODE-CONFIRMED.
-    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi; // ≈ −0.046600 rad (−2.670°)
-    private const float Kf1YawRad = 0.00436111f * Mathf.Pi; // ≈ +0.013701 rad (+0.785°)
+    // KF1 orientation (the RESTING pose the player holds).
+    // spec: rendering.md Addendum A.2 (CYCLE 11, binary-reconciled, 2026-06-22, IDB 263bd994) —
+    //   KF1 settle pose: yaw +0.785 rad (≈ π/4 ≈ 45°), pitch −2.67°. The §3.5.3 table's
+    //   "0.785" entry appears in the DEGREES column (= 0.785°), but the CYCLE-11 addendum's
+    //   exhaustive re-walk confirms the consumed value is +0.785 RAD (≈ π/4) — this reconciles the
+    //   "yaw/pitch labelling that was swapped, then re-swapped, then settled by reading the
+    //   orientation-arm consumption directly" (Addendum intro). Follow the Addendum A.2
+    //   binary-decided reading; do not use the §3.5.3 multiplier row for KF1 yaw.
+    //   KF1 PITCH: §3.5.3 idx 1 mult −0.01483333 → −0.046600 rad → −2.670°; consistent with A.2.
+    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi; // ≈ −0.046600 rad (−2.670°). spec: §3.5.3 idx 1 PITCH.
+
+    // spec: rendering.md Addendum A.2 — KF1 yaw = +0.785 rad ≈ π/4 ≈ 45°. Binary-decided (CYCLE 11).
+    // Delta vs the brief's inline table: brief listed §3.5.3 multiplier 0.00436111 (= 0.785 DEGREES);
+    // Addendum A.2 wins as the later, binary-reconciled, CYCLE-11 reading.
+    private const float Kf1YawRad = Mathf.Pi / 4.0f; // +0.785398 rad ≈ +45°. spec: rendering.md Addendum A.2.
 
     // Base heading that turns the free-look Euler so the camera's −Z view axis points at the actor
     // row IN GODOT-SPACE. The §3.5.3 angles were authored in legacy LEFT-handed space, where the
@@ -92,8 +111,9 @@ public sealed partial class CharSelectCameraRig : Node
     // flips the realized heading) / Helpers/WorldCoordinates (world geometry negates Z).
     private const float BaseHeadingYawRad = Mathf.Pi;
 
-    // Manual boom-zoom (a forward/back dolly on the view axis); boom depth clamped [0, 22].
-    // spec: §3.5.4 — boom-Z clamp [0,22], boom seed 0. CODE-CONFIRMED.
+    // Manual boom-zoom (a forward/back dolly on the view axis); boom depth clamped [0, 26].
+    // spec: §3.5.4 C3 RESOLVED — boom-Z clamp 26.0. CODE-CONFIRMED. (The earlier "[0,22]" reading
+    //   was superseded by C3; the literal in the binary is 26.0 — see BoomMaxZ below.)
     private const float BoomZoomUnitsPerSecond = 10.0f; // the §3.5.3 manual-zoom input-rate scalar (10.0)
 
     private const float BoomMinZ = 0.0f; // spec: §3.5.4 CODE-CONFIRMED
@@ -111,6 +131,11 @@ public sealed partial class CharSelectCameraRig : Node
     // Per-slot pick-box extents. spec: §3.3.3 — X ± 6, Z ± 6, Y band 70..92 (= +22). CODE-CONFIRMED.
     private const float HitBoxHalfExtentXZ = 6.0f;
     private const float HitBoxYHeight = 22.0f;
+
+    // Active boom-zoom action id (0 = none, 72 = zoom-in, 73 = zoom-out).
+    // Set by SetZoomAction(id) on button-press; cleared to 0 on button-release.
+    // spec: charselect.md §6.3 — field at main+6276; reset to 0 on mouse-up.
+    private int _activeZoomAction; // spec: charselect.md §6.3
     private float _boomZ; // boom depth accumulator, seed 0. spec: §3.5.4 CODE-CONFIRMED.
 
     // =========================================================================
@@ -139,9 +164,10 @@ public sealed partial class CharSelectCameraRig : Node
     private float[] _slotGodotZ = [];
 
     /// <summary>
-    ///     Wires the rig to the scene camera, the two dolly keyframes, the row-pivot look-at, the
-    ///     per-slot Godot-space XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly
-    ///     timer starts from this call.
+    ///     Wires the rig to the scene camera, the two dolly keyframe positions, the per-slot Godot-space
+    ///     XZ arrays, and the slot-actor accessor (used by the ray-pick). The dolly timer starts from
+    ///     this call. There is NO look-at point — orientation is free-look Euler per keyframe.
+    ///     spec: §3.5 (HEADLINE CORRECTION — free-look, no look-at).
     /// </summary>
     public void Configure(
         Camera3D camera,
@@ -173,8 +199,20 @@ public sealed partial class CharSelectCameraRig : Node
         GD.Print(
             $"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
             $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
-            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}°/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
-            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: §3.5.3/§3.5.4.");
+            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}° (≈π/4 rad, binary-reconciled A.2)/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
+            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: rendering.md Addendum A.2 (CYCLE 11) / §3.5.3/§3.5.4.");
+    }
+
+    /// <summary>
+    ///     Sets the active boom-zoom action (72 = zoom-in, 73 = zoom-out, 0 = release / stop).
+    ///     Call with the action id on button-press and with 0 on button-release.
+    ///     The rig accumulates distance by dt×10 per frame while the action is non-zero; NO clamp.
+    ///     spec: Docs/RE/scenes/charselect.md §6.3 — "field at main+6276; reset to 0 on mouse-up;
+    ///     no clamp applied". spec: §4.3 — actions 72/73 (+0x1688/+0x168C).
+    /// </summary>
+    public void SetZoomAction(int actionId)
+    {
+        _activeZoomAction = actionId; // 72 = in, 73 = out, 0 = stop. spec: charselect.md §6.3
     }
 
     /// <inheritdoc />
@@ -211,24 +249,45 @@ public sealed partial class CharSelectCameraRig : Node
     }
 
     // =========================================================================
-    // Manual boom-zoom — active only after the dolly holds KF1.
-    // Hold keys: PageUp = zoom in (forward), PageDown = zoom out (backward). Boom-Z clamp [0,22].
+    // Camera boom-zoom — driven by action ids 72/73 (SetZoomAction), active only after dolly.
+    // Action 72 increments distance by dt×10, action 73 decrements; NO clamp per spec §6.3.
+    // A keyboard dev-fallback (PageUp/PageDown) applies the same rate WITH the [0,26] clamp
+    // from the static dolly spec (§3.5.4 C3 RESOLVED) as a safety net — not spec'd for actions.
+    // spec: charselect.md §6.3 — "increments (72) / decrements (73) distance by dt×10; no clamp".
     // =========================================================================
 
     private void ApplyCameraBoomZoom(float dt)
     {
         if (!_dollyComplete || _camera is null) return;
 
-        var dir = 0.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pageup)) dir += 1.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pagedown)) dir -= 1.0f;
-        if (dir == 0.0f) return;
+        // --- ACTION-DRIVEN path (actions 72/73) — NO clamp per spec §6.3. ---
+        var actionDir = _activeZoomAction switch
+        {
+            72 => 1.0f, // zoom in  spec: charselect.md §6.3 / §4.3 +0x1688
+            73 => -1.0f, // zoom out spec: charselect.md §6.3 / §4.3 +0x168C
+            _ => 0.0f
+        };
 
-        // Grow/shrink the boom depth, clamped [0, 22], then re-derive the eye along camera forward.
-        // spec: §3.5.4 — eye = orbit point + boom along the view axis; boom-Z clamp [0,22]. CODE-CONFIRMED.
-        _boomZ = Mathf.Clamp(_boomZ + dir * BoomZoomUnitsPerSecond * dt, BoomMinZ, BoomMaxZ);
-        var forward = -_camera.GlobalTransform.Basis.Z.Normalized();
-        _camera.GlobalPosition = _kf1Pos + forward * _boomZ;
+        if (actionDir != 0.0f)
+        {
+            // No clamp — spec §6.3 states explicitly that no clamp is applied to the action path.
+            _boomZ += actionDir * BoomZoomUnitsPerSecond * dt; // spec: charselect.md §6.3
+            var forward = -_camera.GlobalTransform.Basis.Z.Normalized();
+            _camera.GlobalPosition = _kf1Pos + forward * _boomZ;
+            return;
+        }
+
+        // --- KEYBOARD dev-fallback (PageUp/PageDown) — retains the dolly-spec [0,26] clamp. ---
+        // Not spec'd for the action path; kept as a dev convenience only.
+        // spec: §3.5.4 C3 RESOLVED — boom-Z clamp 26.0 applies to the KEYBOARD path only here.
+        var keyDir = 0.0f;
+        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pageup)) keyDir += 1.0f;
+        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pagedown)) keyDir -= 1.0f;
+        if (keyDir == 0.0f) return;
+
+        _boomZ = Mathf.Clamp(_boomZ + keyDir * BoomZoomUnitsPerSecond * dt, BoomMinZ, BoomMaxZ);
+        var fwd = -_camera.GlobalTransform.Basis.Z.Normalized();
+        _camera.GlobalPosition = _kf1Pos + fwd * _boomZ;
     }
 
     // =========================================================================

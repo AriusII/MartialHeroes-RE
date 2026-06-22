@@ -1,0 +1,79 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# ROUTING: Response table-driven (major-4 / minor-4).
+# This is the PARENT framing spec for the 4/4 area entity snapshot stream. It owns the area header
+# and the typed-record tag loop. The per-tag record bodies are owned by their own specs:
+#   - tag 1/2/3 actor spawn record (892 bytes) -> structs/actor.md (the 4/4 area-actor record table)
+#   - tag 4 ground-item record (24 bytes)      -> packets/4-4_ground_item_tag4.yaml
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (the 17-byte area header, the use of only the two center floats to
+#                 recenter the actor grid, the 1-byte tag dispatch loop until a zero terminator, and
+#                 the tag-record sizes {1/2/3 => 892, 4 => 24, 6 => 36, 9 => 24} are
+#                 control-flow-confirmed on IDB SHA 263bd994; record VALUE semantics are
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]
+#   readiness: IMPLEMENTATION-READY for the C# snapshot decoder (framing control-flow-confirmed);
+#              per-record value semantics are NON-blocking runtime residuals.
+#   conflicts: none (CYCLE 12 / Phase 3 -- authored to resolve the dangling cross-ref: the tag-4
+#              sub-record spec referenced a parent 4/4 spec that did not previously exist).
+
+name: SmsgAreaEntitySnapshot
+opcode: 0x40004           # major 4 (Response), minor 4 -> (4 << 16) | 4
+direction: S2C
+size: variable            # 17-byte header + a variable tag-record stream terminated by a zero tag byte
+spec: packets/4-4_area_entity_snapshot.yaml
+status: confirmed
+capture_verified: false
+
+summary: >
+  Area entity snapshot stream. On (re)entry or refresh of a visible area, the server streams the
+  set of entities present so the client can populate the local area: a fixed area header, then a
+  loop of typed records. Each record is introduced by a single tag byte; the loop runs until a zero
+  tag. The tag selects a fixed-size record body (an actor spawn record, a ground item, or two other
+  record kinds). This is how nearby actors and ground items appear when the player enters or an area
+  refreshes.
+
+# --- Area header (17 bytes, wire offset 0). Only the two center floats are used; the flag byte and
+# --- the two id fields are read and discarded.
+header:
+  - { name: Flag,         type: u8,  offset: 0 }   # 0x00  header flag byte (read, not used downstream)
+  - { name: ViewerId,     type: u32, offset: 1 }   # 0x01  viewer entity id (read, not used downstream)
+  - { name: AreaGridId,   type: u32, offset: 5 }   # 0x05  area grid id (read, not used downstream)
+  - { name: CenterZ,      type: f32, offset: 9 }   # 0x09  area-center Z; used to recenter the actor grid
+  - { name: CenterX,      type: f32, offset: 13 }  # 0x0d  area-center X; used to recenter the actor grid
+
+# --- Tag loop. After the header, repeat: read one tag byte, then the tag-specific body, until tag 0.
+tag_loop:
+  terminator: 0           # a zero tag byte ends the stream
+  tags:
+    - { tag: 1, body_size: 892, record: "actor spawn record (sort 1 = player)",       spec: "structs/actor.md" }
+    - { tag: 2, body_size: 892, record: "actor spawn record (sort carried by the tag)", spec: "structs/actor.md" }
+    - { tag: 3, body_size: 892, record: "actor spawn record (sort carried by the tag)", spec: "structs/actor.md" }
+    - { tag: 4, body_size: 24,  record: "ground-item record",                          spec: "packets/4-4_ground_item_tag4.yaml" }
+    - { tag: 6, body_size: 36,  record: "area-name / secondary record" }
+    - { tag: 9, body_size: 24,  record: "actor-state update record (NOT the ground item)" }
+
+notes: |
+  Static analysis only; no capture available. Framing is control-flow-confirmed.
+
+  HEADER: 17 bytes. The handler reads the flag byte, the viewer id, and the area grid id but does not
+  use them; it uses only the two center floats (CenterZ, CenterX) to recenter the local actor grid
+  before the tag loop runs.
+
+  TAG LOOP: after the header the handler repeatedly reads one tag byte and dispatches on it. A zero
+  tag ends the stream. Each non-zero tag reads a fixed-size body:
+    - tags 1, 2, 3 -> the 892-byte actor spawn record. The body is an 8-byte prefix
+      (actor id u32 @+0x00; a kind byte @+0x04 whose value 5 gates a visual-only refresh; a
+      relation/visual byte @+0x05; two pad bytes) + the 880-byte SpawnDescriptor core @+0x08
+      + a 4-byte trailer @+0x378. The actor SORT comes from the tag byte itself (tag 1 implies sort 1;
+      tags 2/3 carry the sort), NOT from a sort dword in the prefix -- this differs from the 5/3
+      CharSpawn prefix shape. The composite key used to insert/evict the actor is (id from +0x00,
+      sort from the tag byte). Full record table: structs/actor.md (the 4/4 area-actor record).
+    - tag 4 -> the 24-byte ground-item record. Body owned by packets/4-4_ground_item_tag4.yaml.
+    - tag 6 -> a 36-byte record (area-name / secondary update).
+    - tag 9 -> a 24-byte record; this is an actor-state update record and must NOT be conflated with
+      the tag-4 ground-item record of the same length.
+
+  This parent spec exists to give the tag-4 sub-record and the actor record a real framing home and
+  to close the previously-dangling cross-reference. The opcode catalogue (opcodes.md) row for 0x40004
+  points here.

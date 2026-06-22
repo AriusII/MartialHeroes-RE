@@ -135,7 +135,13 @@ public static class LoginLayout
     public const int BottomBarCanvasY = 326; // = 326 × 768 / 768 — canvas-local Y. CODE-CONFIRMED.
     public const int ConfirmHoverSrcX = 378;
     public const int ConfirmHoverSrcY = 398;
-    public const int ActionConfirm = 102; // spec §1.2 "Server-list button". CODE-CONFIRMED.
+
+    // Action 102 = OPEN THE QUIT-CONFIRM ExitPanel modal (a child object); it does NOT open the
+    // server-list (the server-list is reached ONLY through the sub-state machine, never by a form
+    // button). CORRECTED vs the old "Server-list button" reading. spec:
+    // Docs/RE/specs/frontend_layout_tables.md §2.2 (OnEvent map: 102 = open quit-confirm ExitPanel);
+    // Docs/RE/scenes/login.md §5.1 (102 open quit-confirm ExitPanel — does NOT open server-list).
+    public const int ActionConfirm = 102;
 
     // ATLAS CORRECTION (§11.2e, IDA pass 2026-06-14):
     // The edit-field frames sample ATLAS A (login_slice1.dds), NOT loginwindow.dds.
@@ -147,13 +153,29 @@ public static class LoginLayout
     public const int EditFieldFrameSrcX = 615; // shared source U in atlas A. spec §11.2e. CODE-CONFIRMED.
     public const int EditFieldFrameSrcY = 404; // shared source V in atlas A. spec §11.2e. CODE-CONFIRMED.
 
+    // WIRE / hand-off credential caps (sub-state-40 TAB-string copy buffers, §2.6). These are the
+    // downstream credential staging caps, NOT the per-keystroke textbox input limits below. They never
+    // bind because the textbox per-keystroke caps (16 / 12) are smaller.
     public const int
         IdMaxLength =
-            19; // spec §2.6 "account < 20" — the input handler enforces account length < 20, so max typed chars = 19. CODE-CONFIRMED.
+            19; // spec §2.6 "account < 20" — the hand-off buffer caps account length < 20, so max typed chars = 19. CODE-CONFIRMED.
 
     public const int
         PwMaxLength =
-            17; // spec: frontend_layout_tables.md §2.6 "password = 17". CORRECTED from 129 (was wrong). CODE-CONFIRMED.
+            17; // spec: frontend_layout_tables.md §2.6 "password = 17" — RSA staging hand-off cap. CODE-CONFIRMED.
+
+    // UI textbox PER-KEYSTROKE length caps (GUTextbox field +0xD0) — the live input limits enforced by
+    // each credential box on every keystroke / paste. DISTINCT from the wire caps above (IdMaxLength=19
+    // account<20; PwMaxLength=17 RSA staging). Binary-won 2026-06-22, IDB SHA 263bd994.
+    // ID textbox per-keystroke cap = 16 chars (charset mask 6 = alphanumeric is a SEPARATE field +0xA4,
+    // not a length). spec: Docs/RE/scenes/login.md §5.1; Docs/RE/specs/frontend_layout_tables.md §2.7
+    // (GUTextbox +0xD0, binary-won 2026-06-22, IDB SHA 263bd994).
+    public const int IdTextboxKeystrokeCap = 16;
+
+    // PW textbox per-keystroke cap = 12 chars (charset mask 0x81 = allow-all is field +0xA4, not a length;
+    // mask bit set → '*' glyph). spec: Docs/RE/scenes/login.md §5.1;
+    // Docs/RE/specs/frontend_layout_tables.md §2.7 (GUTextbox +0xD0, binary-won 2026-06-22, IDB SHA 263bd994).
+    public const int PwTextboxKeystrokeCap = 12;
 
     public const int SaveIdCheckedSrcX = 730; // PRESSED (checked) src X. spec §11.2e.
     public const int SaveIdCheckedSrcY = 398; // PRESSED (checked) src Y.
@@ -191,24 +213,34 @@ public static class LoginLayout
     // password.dds atlas path (§11.1). 1024×1024 DXT3. CODE-CONFIRMED.
     public const string AtlasPassword = "data/ui/password.dds";
 
-    // Keypad tile layout (panel-local). spec §11.3a. CODE-CONFIRMED.
+    // Keypad tile layout (panel-local). 10 cells in 5 columns × 2 rows, each 52×52.
     // Tile X: 55*(p%5)+28  → columns 28, 83, 138, 193, 248.
-    // Tile Y: 170 for top row (p<5), 230 for bottom row (p>=5).
-    // Tile size: 52×52. Column spacing: 55. Row spacing: 60.
-    public const int PinKeypadColSpacing = 55; // spec §11.3a. CODE-CONFIRMED.
-    public const int PinKeypadCol0X = 28; // spec §11.3a. CODE-CONFIRMED.
-    public const int PinKeypadRow0Y = 170; // spec §11.3a. CODE-CONFIRMED.
-    public const int PinKeypadRow1Y = 230; // spec §11.3a. CODE-CONFIRMED.
-    public const int PinKeypadTileW = 52; // spec §11.3a. CODE-CONFIRMED.
-    public const int PinKeypadTileH = 52; // spec §11.3a. CODE-CONFIRMED.
+    // Tile Y: 170 for top row (cells 0..4), 230 for bottom row (cells 5..9).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 ("Digit positions: 10 cells, 5 columns × 2 rows,
+    //       each cell 52 × 52; column X = 55·col + 28; row Y ∈ {170, 230}"); Docs/RE/scenes/login.md §5.2.
+    public const int PinKeypadColSpacing = 55; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+    public const int PinKeypadCol0X = 28; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+    public const int PinKeypadRow0Y = 170; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+    public const int PinKeypadRow1Y = 230; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+    public const int PinKeypadTileW = 52; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
+    public const int PinKeypadTileH = 52; // spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
 
-    // Digit glyph source rects in password.dds. spec §11.3b. CODE-CONFIRMED.
-    // AXIS CONVENTION (§11.3b CORRECTED): digit d varies along U/X, state varies along V/Y.
+    // Keypad cell counts (the 10×10 over-build: 10 cells, each a stack of 10 digit-buttons 0..9 → 100
+    // buttons total; the scramble shows exactly ONE digit-button per cell). A port replicates this
+    // structure so the scramble can swap visible/hidden without rebuilding buttons.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3 ("10 cells … each cell is a stack of 10
+    //       digit-buttons … 100 buttons total"); Docs/RE/scenes/login.md §5.2.
+    public const int PinKeypadCellCount = 10; // 10 keypad cells (5×2)
+    public const int PinKeypadDigitsPerCell = 10; // digits 0..9 stacked per cell
+
+    // Digit glyph source rects in password.dds.
+    // AXIS CONVENTION: digit value d varies along U/X (srcU = d·52); the BUTTON STATE selects the V band.
     //   srcU = d * 52  (X column = digit index × tile width)
-    //   srcV = 560 (normal) | 612 (pressed) | 664 (hover)
-    // "digit d's normal-state glyph is password.dds source rect (d*52, 560, 52, 52)".
-    // spec §11.3b. CODE-CONFIRMED. Previous revision had axes swapped; corrected.
-    public const int PinDigitColWidth = 52; // per-digit X stride: srcU = d*52. spec §11.3b. CODE-CONFIRMED.
+    //   srcV = 560 (normal) | 612 (hover) | 664 (pressed)  ← builder order NORMAL,PRESSED,HOVER
+    // "the face of digit d samples atlas source X = d·52; the button state selects the source Y band".
+    // spec: Docs/RE/specs/frontend_layout_tables.md §3; Docs/RE/scenes/login.md §5.2 (srcX = d·52,
+    //       state bands 560/612/664).
+    public const int PinDigitColWidth = 52; // per-digit X stride: srcU = d·52. spec: frontend_layout_tables.md §3.
 
     public const int
         PinDigitNormalSrcY = 560; // state normal  → srcV=560. spec: frontend_layout_tables.md §3. CODE-CONFIRMED.
@@ -270,28 +302,71 @@ public static class LoginLayout
     // Version-gate error box (shown before credential checks). spec §1.4 / §1.8 / §1.9. CODE-CONFIRMED.
     public const uint MsgVersionMismatch = 2204; // game.ver mismatch → show this, then quit. spec §1.4. CODE-CONFIRMED.
 
-    // Quit-confirm prompts. spec §1.9. CODE-CONFIRMED.
-    // NOTE (A1 IDA, §1.8): 4023/4024 + buttons 113/114 are actually the SERVER-LIST RE-FETCH popup
-    // (advance to tick substate 34), NOT the client-quit confirm. The genuine quit-confirm is the
-    // shared ExitPanel (caption msg 2007, Yes=action 50 / No=action 51). At the login GameState the
-    // original ExitPanel "Yes" is INERT (no GameState-1 case → real quit was the OS window-close edge,
-    // debugger-pending).
-    public const uint MsgQuitConfirm1 = 4023; // server-list re-fetch popup #1 (NOT quit). spec §1.8.
-    public const uint MsgQuitConfirm2 = 4024; // server-list re-fetch popup #2 (NOT quit). spec §1.8.
+    // Confirm-A / Confirm-B single-OK message popups (msg 4023 / 4024). These are NOT the quit-confirm:
+    // the genuine quit-confirm is the shared ExitPanel (caption MsgExitConfirm = 2007), opened by action
+    // 102/112. Confirm-A (4023) is also the "서버에 접속중입니다…" CONNECTING popup raised at sub-state 39/40
+    // before the join hand-off; its OK button (action 113) hides the popup and re-enters the fetch (→ 34).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.1 (Confirm-A label msg 4023 = connecting popup);
+    //       §2.2 OnEvent map (113/114 = hide Confirm-A/B then re-fetch); Docs/RE/scenes/login.md §5.1.
+    public const uint MsgQuitConfirm1 = 4023; // Confirm-A: connecting / single-OK popup. spec §2.1.
+    public const uint MsgQuitConfirm2 = 4024; // Confirm-B: single-OK popup. spec §2.1.
 
     // Login validation error toasts. spec §1.4 / §1.9. CODE-CONFIRMED.
     public const uint MsgErrShortId = 4025; // ID length < 4
     public const uint MsgErrEmptyPassword = 4026; // password empty
     public const uint MsgErrNoServers = 4027; // server list empty
     public const uint MsgErrConnectFail = 4028; // server-list connection failed
-    public const uint MsgServerHeaderFirst = 4029; // server-list column/status captions start
-    public const uint MsgServerHeaderLast = 4032; // server-list column/status captions end
     public const uint MsgServerUnknown = 5901; // server id outside 1..40 formatted fallback
     public const uint MsgServerLoadRed = 6001; // > 1200
     public const uint MsgServerLoadOrange = 6002; // > 800
     public const uint MsgServerLoadYellow = 6003; // > 500
     public const uint MsgServerPreparing = 6004; // scheduled-open preparing caption
     public const uint MsgServerClockFormat = 6005; // scheduled-open HH:MM format
+
+    // =========================================================================
+    // Server-list record -> row projection: caption-id resolvers + load-colour rule.
+    // The select screen resolves a plate's NAME / STATUS caption / population colour from the decoded
+    // 8-byte record through the message bank using these flat bases + thresholds. These are the
+    // spec-exact constants behind the layer-05 ServerSelectSubView projection; expose them here so the
+    // rule is a single cited surface, not inlined magic.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1; Docs/RE/scenes/login.md §5.3.
+    // =========================================================================
+
+    // Server display NAME = msg bank id (ServerNameMsgBase + ServerId), flat base 5000 (ServerId 1..40 ->
+    // ids 5001..5040), NO group/channel multiplier; out-of-range ServerId -> fallback MsgServerUnknown
+    // (5901). The "5301/5101/5201/5401/5421" banks are DISCARDED cache warm-up, NOT the name bank.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (name_id = 5000 + ServerId; DROP 5301 base);
+    //       Docs/RE/scenes/login.md §5.3 (id 5000 + server_id, fallback 5901).
+    public const int ServerNameMsgBase = 5000;
+
+    // Server STATUS caption = msg bank id (StatusCaptionMsgBase + StatusCode), StatusCode 0..3 -> ids
+    // 4029..4032 (four contiguous entries). This replaces the old MsgServerHeader{First,Last} pair (which
+    // were never read): the captions are a per-StatusCode lookup, not a fixed [first,last] range.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 (caption_id = 4029 + StatusCode).
+    public const int StatusCaptionMsgBase = 4029;
+
+    // Population (LoadCount) colour rule for StatusCode == 0, Branch A (load-valid): the load is a raw
+    // count thresholded with STRICT greater-than at 1200 / 800 / 500. > 1200 -> red (6001); 801..1200 ->
+    // orange (6002); 501..800 -> yellow (6003); <= 500 -> the green status caption (4029) default.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 Branch A (1200/800/500 ladder).
+    public const int PopulationRedThreshold = 1200; // > 1200 -> red 6001
+    public const int PopulationOrangeThreshold = 800; // 801..1200 -> orange 6002
+    public const int PopulationYellowThreshold = 500; // 501..800 -> yellow 6003
+
+    // Population label ARGB colours (the slot-4 status-caption colour, written to GULabel +0x0C).
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4.1 / §4.2 (ARGB DWORDs re-confirmed).
+    public const uint PopulationRedArgb = 0xFFFF0000; // red   (> 1200 / discrete level 4)
+    public const uint PopulationOrangeArgb = 0xFFED6806; // orange (801..1200 / discrete level 3)
+    public const uint PopulationYellowArgb = 0xFFFFFF00; // yellow (501..800 / discrete level 2)
+    public const uint PopulationGreenArgb = 0xFFB5FF7A; // green  (<= 500 / "available" 사용가능 default)
+
+    // Selectability commit guard: a server plate commits only when StatusCode == 0 AND LoadCount < 2400
+    // (0x960, signed strict less-than). The ServerId == 100 sentinel is a DISPLAY-ONLY special row, NOT a
+    // selectability gate. Mirrors ServerListEntryView.IsSelectable.
+    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 sub-state 37 / §4.1; Docs/RE/scenes/login.md §5.3.
+    public const int SelectableStatusCode = 0; // StatusCode must equal 0 to commit
+    public const int SelectableLoadCeiling = 2400; // LoadCount must be strictly < this to commit
+    public const int SpecialRowServerId = 100; // ServerId == 100 -> display-only special row (NOT a gate)
 
     // Login form static labels (4001–4022 range). spec §1.9. CODE-CONFIRMED.
     public const uint MsgLabelFirst = 4001;
@@ -367,11 +442,10 @@ public static class LoginLayout
 
     // =========================================================================
     // §11.2c Decoration sprites. CODE-CONFIRMED.
+    // (The 3 small status-color badge quads — B src(500,786) 60×39 — are exposed once via the
+    //  StatusIndicator* constants above; the duplicate SmallBadges WidgetRect was removed.)
+    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "status-color indicator quads ×3".
     // =========================================================================
-
-    // B@(0,0,60,39) src(500,786) — 3x small badges / arrows.
-    // spec §11.2c "3 x small badges / arrows". CODE-CONFIRMED.
-    public static readonly WidgetRect SmallBadges = new(0, 0, 60, 39, 500, 786);
 
     // Dialog #1 OK button — C@(120,136,113,40) NORMAL src(302,900), HOVER src(415,900), action 113.
     // spec §11.2d "Dialog #1 OK". CODE-CONFIRMED.
@@ -405,16 +479,18 @@ public static class LoginLayout
     // A@(619,86,67,13) src(87,398). spec §11.2e. CODE-CONFIRMED.
     public static readonly WidgetRect SmallDecorPlate = new(619, 86, 67, 13, 87, 398);
 
-    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 19. action 109.
+    // ID input field — dest (390,32,102,13); frame src = AtlasLoginSlice1 (615,404). action 109.
+    // Per-keystroke input cap = IdTextboxKeystrokeCap (16); the hand-off/wire cap is IdMaxLength (19).
     // NOTE: SrcX/SrcY on this WidgetRect are intentionally set to the shared edit-field frame source,
     // NOT to the dest origin; and the atlas is EditFieldFrameAtlas (A), not AtlasLoginWindow (B).
     // spec §11.2e "ID input field atlas correction". CODE-CONFIRMED.
-    // NOTE: §2.6 "account < 20" — the binary caps at 19 typed chars at the input-handler hand-off.
+    // spec: Docs/RE/scenes/login.md §5.1 (ID textbox per-keystroke cap 16, GUTextbox +0xD0).
     public static readonly WidgetRect AccountBox = new(390, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
 
-    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). max length 17, masked. action 110.
+    // Password input field — dest (568,32,102,13); frame src = AtlasLoginSlice1 (615,404). masked. action 110.
+    // Per-keystroke input cap = PwTextboxKeystrokeCap (12); the RSA-staging/wire cap is PwMaxLength (17).
     // Same shared source rect as ID field (both at login_slice1.dds src 615,404). spec §11.2e. CODE-CONFIRMED.
-    // NOTE: §1.3 lists IME composition slot 12 for PW; the effective cap is 17 (credential hand-off, §2.6).
+    // spec: Docs/RE/scenes/login.md §5.1 (PW textbox per-keystroke cap 12, GUTextbox +0xD0; mask bit set).
     public static readonly WidgetRect PasswordBox = new(568, 32, 102, 13, EditFieldFrameSrcX, EditFieldFrameSrcY);
 
     // Save-ID checkbox — A@(694,86,13,13). NORMAL src(717,398), PRESSED/checked src(730,398). action 104.

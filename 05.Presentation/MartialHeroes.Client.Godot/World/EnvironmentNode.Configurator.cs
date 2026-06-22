@@ -11,6 +11,7 @@
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.Helpers;
 using Environment = Godot.Environment;
 
@@ -293,9 +294,25 @@ public sealed partial class EnvironmentNode
         // spec: Docs/RE/specs/rendering.md §8 — "use Screen/Mix; Additive over-brightens at present."
         env.GlowBlendMode = Environment.GlowBlendModeEnum.Screen; // spec: rendering.md §6.2/§8
 
-        // HDR threshold = 0: no bright-pass cutoff — CONFIRMED (every pixel feeds the blur).
-        // spec: Docs/RE/specs/rendering.md §6.4 — "no luminance cutoff; BLOOM_BRIGHT_THRESHOLD = NONE".
-        env.GlowHdrThreshold = 0.0f; // spec: Docs/RE/specs/rendering.md §6.4 — no threshold CONFIRMED
+        // HDR threshold — Godot pipeline correction (aesthetic engineering choice, declared):
+        // The spec records that the DX8 bright-extract had NO luminance cutoff (spec §6.4:
+        // "BLOOM_BRIGHT_THRESHOLD = NONE"). In DX8 the pre-glow frame was LDR-clamped (output per
+        // stage saturates at 1.0), so "no cutoff" = every pixel up to 1.0 feeds the blur at
+        // exactly its clamped value — effectively zero extra energy from the clamp ceiling.
+        // In Godot's HDR pipeline the additive xeff quads (BlendMode.Add, 68 sub-effects) accumulate
+        // BEYOND 1.0 before clamping, and GlowHdrThreshold=0 feeds that unbounded HDR energy into
+        // the glow blur with no cutoff — causing the entire 3D SubViewport to white-out
+        // (confirmed: shot_charselect.png overexposure). Setting the threshold to 1.0 reproduces
+        // the DX8 LDR-clamp semantic: only pixels genuinely exceeding 1.0 (the additive saturated
+        // fire/glow emitters) generate bloom, while the rest of the geometry (which is LDR in the
+        // original DX8 frame) does not receive extra glow. The bloom is still present; it is just
+        // gated at the LDR boundary rather than at zero.
+        // AESTHETIC ENGINEERING CHOICE: threshold=1.0 is the Godot-side approximation of DX8's
+        // LDR-clamp semantic. The spec records the DX8 PASS ORDER and blend factors; it does not
+        // specify a Godot knob value. Declared aesthetic; calibrate against oracle captures.
+        // spec: Docs/RE/specs/rendering.md §6.4 — no luminance cutoff in DX8 (LDR context).
+        // spec: Docs/RE/specs/rendering.md §6 — DX8 pipeline is LDR-clamped per-stage.
+        env.GlowHdrThreshold = 1.0f; // aesthetic: Godot-HDR LDR-clamp approximation (see above)
 
         // HDR scale: how aggressively pixels above threshold feed the blur (moot with threshold=0 but
         // still scales the blur kernel energy). Aesthetic: 1.0 = neutral.
@@ -417,7 +434,8 @@ public sealed partial class EnvironmentNode
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     Creates and builds the <see cref="SkyDomeNode" /> child from the loaded area environment.
+    ///     Creates and builds the <see cref="SkyDomeNode" /> child from the loaded area environment,
+    ///     then wires the sun and moon billboard textures from the VFS.
     ///     Suppressed when:
     ///     - VFS data is absent (_env is null).
     ///     - The area is indoor (indoor_flag = 1 suppresses all sky domes — spec §5.1).
@@ -425,8 +443,10 @@ public sealed partial class EnvironmentNode
     ///     spec: Docs/RE/specs/environment.md §5.1 — indoor areas suppress cloud dome, star dome.
     ///     spec: Docs/RE/specs/environment.md §3.1 steps 4–5 — star/clouddome gated by enable flags.
     ///     spec: Docs/RE/specs/environment.md §7 — fallback: domes absent → graceful no-op.
+    ///     spec: Docs/RE/formats/sky.md §D.5 — sun billboard texture: data/sky/texture/sun.dds.
+    ///     spec: Docs/RE/formats/sky.md §D.3 — moon phase: floor((day_counter mod 30) / 2) → moon{i}.dds.
     /// </summary>
-    private void BuildSkyDomes()
+    private void BuildSkyDomes(RealClientAssets? assets)
     {
         if (_env is null) return;
 
@@ -450,6 +470,44 @@ public sealed partial class EnvironmentNode
         AddChild(_skyDome);
 
         // Build the dome meshes from parsed data (graceful when either bin is null).
-        _skyDome.Build(_env.StarDome, _env.CloudDome, _env.CloudCycle);
+        // Pass _dirLight so the sun billboard orbit drives the scene directional light each frame.
+        // spec: Docs/RE/formats/sky.md §D.2.1 — sun position negated → directional light direction: HIGH.
+        _skyDome.Build(_env.StarDome, _env.CloudDome, _env.CloudCycle, _dirLight);
+
+        // Wire sun and moon billboard textures from the VFS.
+        // spec: Docs/RE/formats/sky.md §D.5 — sun billboard texture: data/sky/texture/sun.dds: HIGH.
+        // spec: Docs/RE/formats/sky.md §D.3 — moon phase: floor((day_counter mod 30) / 2) → moon{i}.dds.
+        // VFS-safe: if assets is null or the file is absent, SetBillboardTexture receives null and
+        // gracefully keeps the placeholder warm-white / blue-white colour already set by Build().
+        // spec: Docs/RE/specs/environment.md §7 — VFS absent → graceful no-op (placeholder colour retained).
+        if (assets is not null)
+        {
+            // Sun texture: data/sky/texture/sun.dds.
+            // spec: Docs/RE/formats/sky.md §D.5 — path confirmed HIGH confidence.
+            const string SunDdsPath = "data/sky/texture/sun.dds"; // spec: Docs/RE/formats/sky.md §D.5
+            var sunTex = assets.Contains(SunDdsPath) ? assets.LoadTexture(SunDdsPath) : null;
+            if (sunTex is null)
+                GD.Print("[SkyDome] sun.dds absent from VFS — placeholder colour retained. " +
+                         "spec: Docs/RE/formats/sky.md §D.5");
+
+            // Moon phase texture: data/sky/texture/moon{n}.dds.
+            // spec: Docs/RE/formats/sky.md §D.3 — phase index n = floor((day_counter mod 30) / 2).
+            // ORACLE-PENDING: day_counter source not reachable from EnvironmentNode; using phase 0
+            // (full moon / moon0.dds) as the safe default until the day-counter channel is wired.
+            // spec: Docs/RE/formats/sky.md §D.3 — phase selection: ORACLE-PENDING (day counter unavailable).
+            const int MoonPhase = 0; // ORACLE-PENDING: sky.md §D.3 — defaults to phase 0 (moon0.dds)
+            var moonDdsPath = $"data/sky/texture/moon{MoonPhase}.dds"; // spec: Docs/RE/formats/sky.md §D.3
+            var moonTex = assets.Contains(moonDdsPath) ? assets.LoadTexture(moonDdsPath) : null;
+            if (moonTex is null)
+                GD.Print($"[SkyDome] {moonDdsPath} absent from VFS — placeholder colour retained. " +
+                         "spec: Docs/RE/formats/sky.md §D.3");
+
+            _skyDome.SetBillboardTextures(sunTex, moonTex);
+        }
+        else
+        {
+            GD.Print("[SkyDome] assets null — billboard textures not loaded; placeholder colours retained. " +
+                     "spec: Docs/RE/formats/sky.md §D.5/§D.3");
+        }
     }
 }

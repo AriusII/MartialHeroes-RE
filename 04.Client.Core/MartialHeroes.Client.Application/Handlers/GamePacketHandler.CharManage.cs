@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Runtime.InteropServices;
 using MartialHeroes.Client.Application.Contracts.Events;
@@ -56,55 +57,57 @@ public sealed partial class GamePacketHandler
     // -------------------------------------------------------------------------
 
     /// <summary>
-    ///     3/14 — enter-game spawn result. On Result != 0 the client materializes the local player from the
-    ///     slot descriptor cached at select time (Section 3.5) and publishes <see cref="LocalPlayerSpawnedEvent" />;
-    ///     on Result == 0 it publishes <see cref="LocalPlayerSpawnFailedEvent" /> (a timed failure message).
-    ///     The local player is registered as the controlled actor (<see cref="ClientWorld.LocalActorKey" />),
-    ///     so the move/skill use cases can source its position. spec: Docs/RE/specs/login_flow.md §3.5 / §5.3.
+    ///     3/14 — SmsgCharSpawnResponse, the ENTER-LADDER TRIGGER (NOT the spawn). CORRECTED (CYCLE 12 Phase 2):
+    ///     this 16-byte reply is the server's answer to the C2S 1/7 mode-1 play-confirm; it PRECEDES and
+    ///     TRIGGERS the 1/9 enter send rather than responding to 1/9. On <c>Result != 0</c> (the leading flag
+    ///     byte = "go") the client emits the 1/9 CmsgEnterGameRequest FROM INSIDE this handler (server-triggered)
+    ///     via the injected <see cref="_enterWorldEmitter" /> seam — which ARMS the in-flight latch — and does
+    ///     NOT spawn here. On <c>Result == 0</c> the server has armed a timeout: the client emits NO 1/9 and
+    ///     surfaces the existing <see cref="LocalPlayerSpawnFailedEvent" /> (the C# scene machine does not model
+    ///     that timer). The ACTUAL local-player spawn happens EXACTLY ONCE, later, on 4/1 SmsgGameStateTick
+    ///     (HandleGameStateTick / TryCreateLocalPlayerFromCachedDescriptor) — 3/14 no longer materializes the
+    ///     player. Ladder: 1/7(mode 1) → 3/14(flag≠0) → 1/9 → 3/5 → 4/1(spawn). spec:
+    ///     Docs/RE/specs/frontend_scenes.md §7 (1/9 emitted from the 3/14 handler; spawn driver is 4/1);
+    ///     Docs/RE/packets/3-14_char_spawn_response.yaml (Result flag = enter-ladder trigger);
+    ///     Docs/RE/packets/cmsg_char_enter.yaml (ENTER SEQUENCE).
     /// </summary>
     public void Handle(in SmsgCharSpawnResult packet)
     {
-        // 3/14 is a char-mgmt result handler: clear the single in-flight latch.
-        // spec: Docs/RE/specs/net_contracts.md §1.3 (CLEARED by 3/14).
-        _inFlightLatch?.Clear();
-
-        // Result 0 = failure (a timed message is shown). spec: login_flow.md §5.3.
+        // Result 0 = failure (the server armed a timeout; no 1/9). spec: 3-14_char_spawn_response.yaml.
         if (packet.Result == 0)
         {
+            // Zero-flag path: no enter is pending — clear the single in-flight latch (a faithful char-mgmt
+            // result-handler clear, per the census) and surface the existing failure event. No 1/9 is emitted.
+            // spec: Docs/RE/specs/net_contracts.md §1.3 (3/14 among the latch-clearers — applies on the
+            // zero-flag path only; the positive path re-arms via the 1/9 emit below).
+            _inFlightLatch?.Clear();
             _eventBus.Publish(new LocalPlayerSpawnFailedEvent(packet.Slot));
             return;
         }
 
-        // Success: materialize the local player from the CACHED slot descriptor (Section 3.5). Without a
-        // cache (no store wired, or no slot confirmed) there is nothing to spawn from; record and bail.
-        var cached = _characterSelection?.Chosen;
-        if (cached is null)
+        // Positive flag = "go": EMIT 1/9 from inside the 3/14 handler (server-triggered enter). The
+        // emitter (ApplicationUseCases.EmitEnterWorldRequest) builds the 40-byte 1/9 AND arms the in-flight
+        // latch, so the subsequent 4/1 is correctly recognized as the enter confirmation and clears it.
+        //
+        // LATCH RECONCILIATION (deliberate, NOT a regression of the census). net_contracts.md §1.3 lists
+        // 3/14 among the latch-clearers, but under the corrected ladder the 3/14 handler immediately
+        // EMITS 1/9 which RE-ARMS the latch. So on the positive-flag path we DO NOT clear-then-leave-cleared:
+        // we let the 1/9 emit Arm() the latch. Net result: after a positive 3/14 the latch is ARMED (a 1/9
+        // is in flight), exactly as the 4/1 enter-confirmation read expects. The spawn is NOT done here.
+        // spec: Docs/RE/specs/net_contracts.md §1.3 (3/14-emits-1/9-which-arms; the latch is the
+        // enter-in-flight primitive that 4/1 clears); Docs/RE/specs/frontend_scenes.md §7.
+        if (_enterWorldEmitter is not null)
         {
-            _unhandled.Record(Opcodes.SmsgCharSpawnResult, SmsgCharSpawnResult.WireSize);
+            // Fire-and-forget the server-triggered 1/9 (a low-rate enter send). The slot to enter is the
+            // 3/14 body's Slot field. The emitter arms the latch internally. spec: cmsg_char_enter.yaml.
+            _ = _enterWorldEmitter(packet.Slot, CancellationToken.None);
             return;
         }
 
-        // The local player's actor id is not carried by the 16-byte 3/14 block (only result + slot + 3
-        // opaque spawn-param u32s; their meaning is UNVERIFIED — spec §5.3). Key the local player on the
-        // PlayerCharacter sort with the unassigned-id sentinel until a self-spawn (5/3) supplies the real
-        // id. spec: Docs/RE/structs/actor.md (id initialised to 0xFFFFFFFF before spawn).
-        var key = new ActorKey(ActorKey.UnassignedRawId, EntitySort.PlayerCharacter);
-
-        // Float -> fixed at the boundary; world Y forced to 0. spec: actor.md (coords float, Y = 0).
-        var position = Vector3Fixed.FromFloat(cached.WorldX, 0f, cached.WorldZ);
-
-        var spawnInfo = new SpawnInfo(
-            key, cached.Level, cached.CurrentHp, cached.CurrentMp, cached.CurrentStamina, cached.ServerClass);
-        var vitals = VitalsResolver(spawnInfo);
-
-        var actor = new Actor(
-            key, cached.Level, vitals, cached.CurrentHp, cached.CurrentMp, cached.CurrentStamina, position);
-        _world.Add(actor);
-        _world.LocalActorKey = key; // mark the controlled actor for the move/skill use cases.
-
-        _eventBus.Publish(new LocalPlayerSpawnedEvent(
-            key, packet.Slot, cached.Name, cached.Level, actor.Position, actor.CurrentHp, actor.MaxHp,
-            cached.ServerClass));
+        // Fallback (emitter unwired — e.g. core tests with no use-case facade): nothing can send 1/9, so
+        // record the opcode rather than crash. The WIRED path (composition root passes
+        // ApplicationUseCases.EmitEnterWorldRequest) is the real ladder. spec: frontend_scenes.md §7.
+        _unhandled.Record(Opcodes.SmsgCharSpawnResult, SmsgCharSpawnResult.WireSize);
     }
 
     // -------------------------------------------------------------------------
@@ -306,18 +309,32 @@ public sealed partial class GamePacketHandler
             reader.ReadVisibleGearGids(gearScratch);
             var equipGids = ImmutableArray.Create(gearScratch);
 
+            // Sub-block 3 (record +0x3D0, 1 byte): the server-supplied per-slot occupied/selectable flag — the
+            // byte the select window mirrors at its +0x148C field (gates the 1/7 select/manage click). Sub-block
+            // 4 (record +0x3D1, LE u32): the per-slot FLAGS WORD (bit 0 = billing/premium). Both are surfaced on
+            // the slot so layer 05 has the server flags end-to-end. spec: Docs/RE/packets/3-1_character_list.yaml
+            // (sub-blocks 3/4); Docs/RE/specs/frontend_scenes.md §3.4 (+0x148C = server-supplied per-slot flag).
+            const int descriptorAndStatsSize = SpawnDescriptorReader.Size + 96; // 976 = SlotFlag offset (+0x3D0)
+            const int flagsWordOffset = descriptorAndStatsSize + 1; // 977 = FlagsWord offset (+0x3D1)
+            var slotFlag = record.Length > descriptorAndStatsSize ? record[descriptorAndStatsSize] : (byte)0;
+            var billingFlags = record.Length >= flagsWordOffset + sizeof(uint)
+                ? BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(flagsWordOffset, sizeof(uint)))
+                : 0u;
+
+            // CurrentHp is the u32-clamped value of the SINGLE 64-bit HP qword (+0x3C); +0x40 is HP-HIGH,
+            // not MP. spec: Docs/RE/structs/spawn_descriptor.md (HP-qword correction).
             builder.Add(new CharacterListSlot(
-                slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(), reader.ReadCurrentHp(),
+                slot, reader.ReadName(), reader.ReadLevel(), reader.ReadServerClass(),
+                reader.ReadCurrentHpClamped(),
                 reader.ReadWorldX(), reader.ReadWorldZ(),
-                reader.ReadInternalClass(), reader.ReadAppearanceVariant(), reader.ReadFaceA(), equipGids));
+                reader.ReadInternalClass(), reader.ReadAppearanceVariant(), reader.ReadFaceA(), equipGids,
+                slotFlag, billingFlags));
 
             // Retain the RAW per-slot record (880 descriptor + 96 stats + 1 flag byte) so SelectCharacterAsync
             // can detect "@BLANK@", and the 3/14 handler can materialize the local player. spec: login_flow.md §3.5.
             // The 880 + 96 = 976-byte descriptor+stats span; the flag byte is at record +976. spec: §3.2.
-            const int descriptorAndStatsSize = SpawnDescriptorReader.Size + 96; // 976
-            var slotFlag = record.Length > descriptorAndStatsSize ? record[descriptorAndStatsSize] : (byte)0;
             _characterSelection?.Retain(
-                new CharacterSlotRecord(slot, record[..descriptorAndStatsSize], slotFlag));
+                new CharacterSlotRecord(slot, record[..descriptorAndStatsSize], slotFlag, billingFlags));
         }
 
         return builder.ToImmutable();
@@ -376,12 +393,14 @@ public sealed partial class GamePacketHandler
         out Actor? actor,
         out int slotIndex,
         out string name,
-        out ushort serverClass)
+        out ushort serverClass,
+        out ImmutableArray<uint> equipGids)
     {
         actor = null;
         slotIndex = -1;
         name = string.Empty;
         serverClass = 0;
+        equipGids = [];
 
         var cached = _characterSelection?.Chosen;
         if (cached is null || cached.RawDescriptor.Length < SpawnDescriptorReader.Size) return false;
@@ -389,19 +408,26 @@ public sealed partial class GamePacketHandler
         var key = new ActorKey(ActorKey.UnassignedRawId, EntitySort.PlayerCharacter);
         var reader = new SpawnDescriptorReader(cached.RawDescriptor.Span[..SpawnDescriptorReader.Size]);
         var level = reader.ReadLevel();
-        var currentHp = reader.ReadCurrentHp();
-        var currentMp = reader.ReadCurrentMp();
-        var currentStamina = reader.ReadCurrentStamina();
+        // HP-qword correction: HP is ONE int64 @ +0x3C (clamped to u32); the single MP/stamina-class vital
+        // is @ +0x44 (vital_b). The former +0x40 "MP" was the HP-HIGH dword. The 3-vital Actor shape is
+        // seeded from (hp, vital_b, vital_b) — both lower vital slots take the single vital_b rather than a
+        // fabricated stamina the descriptor no longer supplies. spec: Docs/RE/structs/spawn_descriptor.md.
+        var currentHp = reader.ReadCurrentHpClamped();
+        var vitalB = reader.ReadVitalB();
         serverClass = reader.ReadServerClass();
 
-        var spawnInfo = new SpawnInfo(key, level, currentHp, currentMp, currentStamina, serverClass);
+        var spawnInfo = new SpawnInfo(key, level, currentHp, vitalB, vitalB, serverClass);
         var vitals = VitalsResolver(spawnInfo);
 
-        actor = new Actor(key, level, vitals, currentHp, currentMp, currentStamina, spawnPosition);
+        actor = new Actor(key, level, vitals, currentHp, vitalB, vitalB, spawnPosition);
         _world.Add(actor);
         _world.LocalActorKey = key;
         slotIndex = cached.SlotIndex;
         name = cached.Name;
+        // The six visible-gear GIDs ({3,4,6,2,11,14}) from the cached descriptor's +0x58 equip table, so
+        // the 4/1 world-entry spawn carries the same equip-overlay input the 3/14 path does. spec:
+        // Docs/RE/structs/spawn_descriptor.md (+0x58 equip table).
+        equipGids = cached.EquipGids;
         return true;
     }
 }

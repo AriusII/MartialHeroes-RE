@@ -106,9 +106,14 @@ public readonly struct CharacterListSlotRecord
     private const int SdStateByte = 0x38; // u8
     private const int SdSubLevelByte = 0x39; // u8
     private const int SdLevel = 0x3A; // u16 (boundary unresolved — see TODO)
-    private const int SdCurrentHp = 0x3C; // u32
-    private const int SdCurrentMp = 0x40; // u32
-    private const int SdCurrentStamina = 0x44; // u32
+
+    private const int
+        SdCurrentHp =
+            0x3C; // i64 — ONE 64-bit HP qword (+0x3C = low, +0x40 = high); spec: Docs/RE/structs/spawn_descriptor.md HP-qword correction
+
+    private const int
+        SdVitalB = 0x44; // u32 — MP/stamina-class vital (NOT MP-specific; semantics capture-pending); spec: Docs/RE/structs/spawn_descriptor.md vital_b
+
     private const int SdWorldX = 0x4C; // f32
     private const int SdWorldZ = 0x50; // f32
     private const int SdEquipRefTable = 0x58; // 20 x 16 bytes
@@ -184,14 +189,20 @@ public readonly struct CharacterListSlotRecord
     /// </summary>
     public readonly ushort LevelRaw => ReadU16(SdLevel);
 
-    /// <summary>SD +0x3C — current HP (u32). spec: Docs/RE/structs/actor.md (current_hp).</summary>
-    public readonly uint CurrentHp => ReadU32(SdCurrentHp);
+    /// <summary>
+    ///     SD +0x3C — current HP as a single signed 64-bit qword (HP-low at +0x3C, HP-high at +0x40).
+    ///     +0x40 is the HP-HIGH dword, NOT an independent MP value — the 5/53 vitals path clamps the
+    ///     full qword together. Do NOT split into two u32s. spec: Docs/RE/structs/spawn_descriptor.md
+    ///     HP-qword correction (binary-won, IDB 263bd994); current_hp (i64) @+0x3C.
+    /// </summary>
+    public readonly long CurrentHp => ReadI64(SdCurrentHp);
 
-    /// <summary>SD +0x40 — current MP / ki (u32). spec: Docs/RE/structs/actor.md (current_mp).</summary>
-    public readonly uint CurrentMp => ReadU32(SdCurrentMp);
-
-    /// <summary>SD +0x44 — current stamina (u32). spec: Docs/RE/structs/actor.md (current_stamina).</summary>
-    public readonly uint CurrentStamina => ReadU32(SdCurrentStamina);
+    /// <summary>
+    ///     SD +0x44 — the MP/stamina-class vital: the separate dword immediately after the HP qword.
+    ///     MP-vs-stamina meaning is capture/debugger-pending. spec: Docs/RE/structs/spawn_descriptor.md
+    ///     vital_b @+0x44 (HP-qword correction, binary-won, IDB 263bd994).
+    /// </summary>
+    public readonly uint VitalB => ReadU32(SdVitalB);
 
     /// <summary>SD +0x4C — world X (f32). World Y is always 0. spec: Docs/RE/structs/actor.md (world_x).</summary>
     public readonly float WorldX => ReadF32(SdWorldX);
@@ -266,9 +277,12 @@ public readonly struct CharacterListSlotRecord
     // ----------------------------------------------------------------------
 
     /// <summary>
-    ///     Record +0x3D0 — per-slot availability/relation flag byte. The original clears it to 0 on a
-    ///     successful read. TODO needs-capture: exact relation semantics (locked / deletion-pending)
-    ///     UNRESOLVED. spec: Docs/RE/packets/3-1_character_list.yaml (sub-block 3).
+    ///     Record +0x3D0 — per-slot occupied/UI-facing marker byte. RESOLVED (CYCLE 11, binary-won).
+    ///     Semantics: ENTER GAME requires this byte == 0. Doubles as the char-select facing state:
+    ///     0 = face-back (enter allowed), 1 = face-front (preview confirm gate), 2 = deletion-pending clear.
+    ///     A freshly created/renamed character is written back as 0; the preview-lineup and slot-select-confirm
+    ///     paths compare it == 1. There is NO rename-cooldown stored here.
+    ///     spec: Docs/RE/packets/3-1_character_list.yaml (sub-block 3 — RESOLVED, CYCLE 11).
     /// </summary>
     public readonly byte SlotFlag => ReadU8(SlotFlagOffset);
 
