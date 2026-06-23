@@ -738,6 +738,32 @@ final skin list holds **exactly one pass's parts**:
   resolves to a live part-actor with a qualifying part-flag) runs `ActorVisual_RebuildLineupParts`
   (the mantissa-zeroed 8-part build, §3.6.2 above); an **unequipped** slot (all 20 entries miss)
   runs the fallback driver that simply re-runs `ActorVisual_RebindLocalPlayerParts`.
+
+> **RECONCILE — the equip-validity scan polarity, and EQUIPPED lineup slots CAN show a weapon
+> (binary-won, counter-check IDB SHA 263bd994, static-only).** A static re-walk of the lineup loop's
+> per-slot equip-validity scan pins the two-way branch precisely, and reverses the polarity above:
+> the scan walks the 20 equip-table entries and, for each that names a live actor, tests a per-class
+> flag at `*(byte)(class@actor+168 + foundActor+204)`. The branch is:
+> - **ALL 20 entries valid** (scan completes without an "invalid" break) → tear down PASS-1, then
+>   **re-run the equip-driven in-world driver `ActorVisual_RebindLocalPlayerParts`** (slots
+>   `{3,4,6,2,11,14}` + weapon). The fully-valid-equip lineup actor therefore looks **exactly like the
+>   in-world actor and CAN show a weapon** (slot 14).
+> - **ANY entry invalid** (early break) → tear down PASS-1, then build the **mantissa-zeroed default
+>   driver** (slots `{3,4,6,2,11}`, the gid term = 0, keyed purely by `(slot, model_class_id)`) plus
+>   the secondary/face builders — **NO weapon (no slot 14) in this branch.**
+>
+> This **reverses** the "equipped slot runs the mantissa-zeroed lineup driver; unequipped re-runs the
+> in-world driver" framing in this subsection and in the table/notes below: it is the **fully-valid-equip**
+> slot that re-runs the weapon-bearing in-world driver, and the **default (any-invalid)** slot that runs
+> the mantissa-zeroed, weapon-less driver. Consequently the **"equipped lineup slot shows no weapon"
+> open item is revised** — an equipped lineup slot whose 20 equip entries are all valid goes through the
+> WEAPON-bearing driver, so it can show a weapon; the no-weapon outcome is specific to the **default
+> (invalid-equip)** branch. Both branches still tear PASS-1 down first, so the no-double-attach verdict
+> is unaffected. A faithful port must reproduce **both** branches and the equip-validity scan that
+> selects between them — using the in-world (gid-bearing, weapon) key on the fully-valid branch and the
+> mantissa-zeroed `1e9·(slot + 100·model_class_id)` key on the default branch. The exact byte semantic
+> of the per-class equip-validity flag (what makes an entry "valid") is the only residual here —
+> mechanism confirmed, meaning **debugger-pending** (do not invent).
 - **The decisive fact: BOTH PASS-2 drivers begin with a full skin-list teardown.** Each PASS-2
   driver first calls the shared skin-list teardown (`ActorVisual_TeardownSkinList`; name pending
   `names.yaml`), which iterates the entire current skin list, decrements each bound pose's refcount,
@@ -769,7 +795,12 @@ full skin-list teardown between them, OR equivalently (b) build **only the PASS-
 slot), since PASS 1 is always discarded.
 
 > **Fidelity consequence for EQUIPPED lineup slots (a faithful behaviour, NOT a bug to fix).**
-> The winning PASS-2 build for an equipped lineup slot is the lineup driver, which keys parts
+> *(Polarity caveat: per the RECONCILE note above, the mantissa-zeroed lineup driver is the **default
+> (any-invalid-equip)** branch; a slot whose 20 equip entries are ALL valid instead re-runs the
+> weapon-bearing in-world driver and shows its real equip meshes. The paragraph below describes the
+> **default-branch** outcome — read "equipped lineup slot" here as a slot taking the mantissa-zeroed
+> default driver.)*
+> The winning PASS-2 build for a default-branch lineup slot is the lineup driver, which keys parts
 > `#1–#5` with the **mantissa-zeroed `(slot, model_class_id)`** catalogue key — i.e. it drops the
 > equip-item gid mantissa and resolves the **default body for the appearance class**. So even when
 > a roster character IS equipped, the lineup row shows the **default-body silhouette** for its

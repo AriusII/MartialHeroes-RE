@@ -5,7 +5,7 @@ verification: confirmed (lobby host-resolution order, registry keys, the 0/0->1/
   structure, and the game-server DNS connect are all static-control-flow-confirmed against the
   binary); static-hypothesis (in-record field order; full status enum); capture/debugger-pending
   (every on-wire byte VALUE -- no .pcapng present).
-ida_reverified: 2026-06-21   # CYCLE 9 Phase 1 (263bd994): server-list 8-byte record signedness CONFLICT corrected -- all four fields are signed i16 (server_id +0 was wrongly u16; binary reads sign-extending loads, commit gate load<2400 is a signed branch); channel-endpoint parse shape (single SPACE delim, 30=copy-cap, single endpoint), lobby host-resolution (ip.txt/list.dat/211.196.150.4 + inet_addr), login ladder (29->31 PIN / 32->33 fetch / 37->38 commit / 40 hand-off), PIN srand(time()) ascending shuffle, curtain +5/>222 + SFX 861010105, game.ver index-5 gate, Loading (2 ortho quads + BGM 920100100) and 3/1 char-select (hard 5-slot loop) all static-RE-CONFIRMED. CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
+ida_reverified: 2026-06-23   # server-list re-derive (263bd994, static IDA): server-list §2.1 reconfirmed end-to-end; added the empty/error count branches (0->msg 4027, -1 sentinel->msg 4028, >0->show), the single-server (count==1) auto-select path, and the 10000 ms refresh debounce. No wire-byte change; the 8-byte record decode + commit gate + channel-endpoint shape all reconfirmed against the binary. # CYCLE 9 Phase 1 (263bd994): server-list 8-byte record signedness CONFLICT corrected -- all four fields are signed i16 (server_id +0 was wrongly u16; binary reads sign-extending loads, commit gate load<2400 is a signed branch); channel-endpoint parse shape (single SPACE delim, 30=copy-cap, single endpoint), lobby host-resolution (ip.txt/list.dat/211.196.150.4 + inet_addr), login ladder (29->31 PIN / 32->33 fetch / 37->38 commit / 40 hand-off), PIN srand(time()) ascending shuffle, curtain +5/>222 + SFX 861010105, game.ver index-5 gate, Loading (2 ortho quads + BGM 920100100) and 3/1 char-select (hard 5-slot loop) all static-RE-CONFIRMED. CYCLE 8 (263bd994): lobby inet_addr (dotted-quad, port 10000, no DNS) vs game gethostbyname re-confirmed; 0/0->1/4 handshake re-confirmed. Prior: scene re-confirmation campaign 2026-06-18
 ida_anchor: 263bd994
 evidence: [static-ida]
 capture_verified: false
@@ -318,6 +318,24 @@ identically, but they are **not** part of decoding the 8 wire bytes.
 > decode is a static read of the render path corroborated by the debug literal; the `open_time`
 > packing and the full `status_code` enum (beyond the special-cased 3 / 24 / 100) are
 > **capture-unverified**. A live lobby capture is still required to confirm record internals.
+
+> **Empty / error handling (static-CONFIRMED, server-list re-derive 2026-06-23).** The worker stores
+> the count and the consuming UI tick branches on it: **count == 0** ⇒ a "no servers" message (UI msg
+> id **4027**); **count == −1** (the connect/recv-failure sentinel the worker writes) ⇒ a "fetch error"
+> message (UI msg id **4028**); **count > 0** ⇒ the list is shown. Both messages route through the
+> auto-counting message box, not the connecting popup. (These ids are presentation; the wire fact is the
+> `−1` failure sentinel and the `> 0` gate.)
+
+> **Single-server auto-select (static-CONFIRMED, server-list re-derive 2026-06-23).** When the stored
+> count is exactly **1**, the client **skips the manual pick**: it reads record[0], writes its `server_id`
+> (+0) into the selected-id / channel-port field, and — if `status_code (+2) == 0` — advances directly to
+> the channel-endpoint fetch (§2.2) and persists `Lastserver`. A single-entry roster therefore connects
+> with no user interaction.
+
+> **Refresh debounce (static-CONFIRMED).** The list re-fetch control is **debounced to 10 000 ms**: a
+> refresh request is a no-op while a fetch is already in flight or if the last fetch completed within the
+> last 10 s; otherwise it re-arms the server-list fetch. (Render-side throttle; documented for a faithful
+> re-implementation.)
 
 ### 2.2 Channel-endpoint fetch (port `10000 + selected server_id`)
 

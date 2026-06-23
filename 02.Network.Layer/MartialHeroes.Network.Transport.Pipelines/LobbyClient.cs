@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using MartialHeroes.Network.Abstractions.Lobby;
 
@@ -37,6 +38,21 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 /// </remarks>
 public sealed class LobbyClient : ILobbyClient
 {
+    /// <summary>
+    ///     Registers the CP949 (EUC-KR) code page once for the whole lobby surface. Code page 949 is
+    ///     not built into .NET core; all game text (incl. the list.dat server-NAME match key and any
+    ///     localized lobby string) is CP949, so the provider must be registered exactly once before
+    ///     any <c>Encoding.GetEncoding(949)</c> call. The channel-endpoint token itself is pure ASCII
+    ///     (dotted-quad host + decimal port — a subset of CP949), but the registration is performed
+    ///     here so the lobby layer honors the project-wide CP949 mandate from a single site.
+    ///     spec: Docs/RE/packets/lobby.yaml RECORD SHAPE C (CP949 server name); CLAUDE.md (register the
+    ///     code-pages provider once).
+    /// </summary>
+    static LobbyClient()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); // spec: CLAUDE.md (CP949, register once)
+    }
+
     // -----------------------------------------------------------------------
     // Constants
     // -----------------------------------------------------------------------
@@ -60,10 +76,11 @@ public sealed class LobbyClient : ILobbyClient
     public const int IpTextMaxLength = 19; // spec: Docs/RE/specs/login_flow.md §7
 
     /// <summary>
-    ///     Byte length of each server-list record.
+    ///     Byte length of each server-list record. Mirrors <see cref="LobbyServerRecordWire.WireSize" />
+    ///     (the Pack=1 wire struct is the authoritative layout; this alias is kept for callers).
     ///     spec: Docs/RE/packets/lobby.yaml — "Per-record total = 8 bytes".
     /// </summary>
-    public const int ServerRecordSize = 8; // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A
+    public const int ServerRecordSize = LobbyServerRecordWire.WireSize; // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A
 
     /// <summary>
     ///     Byte length of the channel-endpoint text field in the decompressed payload.
@@ -168,28 +185,32 @@ public sealed class LobbyClient : ILobbyClient
         using var socket = ConnectBlocking(_lobbyHost, LobbyBasePort, cancellationToken);
         if (!socket.Connected) return [];
 
-        var (decompressed, _) = ReceiveAndDecompress(socket, out var major);
-        // spec: Docs/RE/specs/login_flow.md §2.1 — "count = wrapper.major" on the server-list query.
-        // The count is a SIGNED int: on connect-failure the legacy client stores −1 as a sentinel.
-        // Cast the u16 wire value to signed int so that a −1 sentinel (0xFFFF on wire) is handled
-        // correctly by the `count <= 0` guard below. spec: Docs/RE/specs/login_flow.md §2.1.
-        int count = (short)major; // treat as signed i16 → int; −1 sentinel safe via count<=0 guard
+        var (decompressed, _) = ReceiveAndDecompress(socket, out var countWord);
+        // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A / COMMON LOBBY FRAME WRAPPER:
+        //   the wrapper's +4 word (the game frame's "major" slot) IS the record count on the
+        //   server-list query. The consumer stores it SIGNED and branches:
+        //     count == 0  => "no servers"   (empty list);
+        //     count == -1 => connect/recv failure sentinel (the worker writes -1) => fetch error;
+        //     count >  0  => parse the list.
+        //   Cast the +4 u16 to signed i16 so the -1 sentinel (0xFFFF on wire) folds into the
+        //   `count <= 0` guard below. spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A (COUNT BRANCHES).
+        int count = (short)countWord; // signed i16 → int; -1/0 sentinels are caught by count <= 0
 
-        if (count <= 0 || decompressed.Length < count * ServerRecordSize) return [];
+        if (count <= 0 || decompressed.Length < count * LobbyServerRecordWire.WireSize) return [];
+
+        // Zero-alloc reinterpret: the decompressed payload is `count` packed 8-byte LE records with
+        // no padding (allocation = copy = stride = 8). Reinterpret the span as a packed array of the
+        // Pack=1 wire struct in place — no per-field BinaryPrimitives reads, no intermediate copy.
+        // The protocol is little-endian and the host is x86/LE, so the blittable view is byte-exact.
+        // spec: Docs/RE/packets/lobby.yaml RECORD SHAPE A (8-byte LE records, no padding).
+        var wire = MemoryMarshal.Cast<byte, LobbyServerRecordWire>(
+            decompressed.Span[..(count * LobbyServerRecordWire.WireSize)]);
 
         var records = new LobbyServerRecord[count];
-        var data = decompressed.Span;
         for (var i = 0; i < count; i++)
-        {
-            var rec = data.Slice(i * ServerRecordSize, ServerRecordSize);
-            // spec: Docs/RE/specs/login_flow.md §2.1 (CYCLE 9 signedness correction, binary-won, 263bd994):
-            //   +0 i16 server_id (signed — CYCLE 9 signedness correction; was wrongly u16), +2 i16 status_code, +4 i16 load, +6 i16 open_time
-            records[i] = new LobbyServerRecord(
-                BinaryPrimitives.ReadInt16LittleEndian(rec[..]),
-                BinaryPrimitives.ReadInt16LittleEndian(rec[2..]),
-                BinaryPrimitives.ReadInt16LittleEndian(rec[4..]),
-                BinaryPrimitives.ReadInt16LittleEndian(rec[6..]));
-        }
+            // +0 i16 server_id, +2 i16 status_code, +4 i16 load, +6 i16 open_time (all signed —
+            // CYCLE 9 signedness correction, binary-won, 263bd994). spec: lobby.yaml RECORD SHAPE A.
+            records[i] = wire[i].ToRecord();
 
         return records;
     }
@@ -263,7 +284,7 @@ public sealed class LobbyClient : ILobbyClient
     /// <summary>
     ///     Reads the 8-byte lobby wrapper then the <c>size - 8</c> compressed payload bytes from
     ///     <paramref name="socket" />, LZ4-decompresses the payload, and returns the decompressed
-    ///     bytes together with the <c>major</c> field from the wrapper.
+    ///     bytes together with the wrapper's +4 word (the record COUNT on the server-list query).
     /// </summary>
     /// <remarks>
     ///     The receive loop uses a cooperative blocking read with back-off, consistent with the spec:
@@ -271,7 +292,7 @@ public sealed class LobbyClient : ILobbyClient
     /// </remarks>
     private (ReadOnlyMemory<byte> Decompressed, int DecompressedLength) ReceiveAndDecompress(
         Socket socket,
-        out ushort major)
+        out ushort countWord)
     {
         // --- Read the 8-byte wrapper ---
         Span<byte> wrapper = stackalloc byte[WrapperSize];
@@ -279,8 +300,9 @@ public sealed class LobbyClient : ILobbyClient
 
         // +0: u32 LE total frame size (spec: Docs/RE/packets/lobby.yaml — "COMMON LOBBY FRAME WRAPPER" +0 (u32) size [CODE-CONFIRMED])
         var totalSize = BinaryPrimitives.ReadUInt32LittleEndian(wrapper[..]);
-        // +4: u16 LE count (= record count on server-list query; reuses the game frame "major" slot)
-        major = BinaryPrimitives.ReadUInt16LittleEndian(wrapper[WrapperCountOffset..]);
+        // +4: u16 LE record count on the server-list query (reuses the game frame "major" slot;
+        // unused on the channel-endpoint query). spec: lobby.yaml COMMON LOBBY FRAME WRAPPER +4.
+        countWord = BinaryPrimitives.ReadUInt16LittleEndian(wrapper[WrapperCountOffset..]);
 
         // Guard: totalSize must be at least WrapperSize (8 bytes). The u32 read could produce
         // a very large value on a malformed frame — clamp before subtraction to avoid underflow.

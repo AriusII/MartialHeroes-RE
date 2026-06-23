@@ -9,6 +9,21 @@ namespace MartialHeroes.Client.Application.Handlers;
 public sealed partial class GamePacketHandler
 {
     // -------------------------------------------------------------------------
+    // LOGIN wire path on the GAME connection (the (major:minor) opcode surface).
+    //
+    // SCOPE NOTE — the SERVER LIST is NOT handled here. The server-list query and the
+    // channel-endpoint query ride a SEPARATE, synchronous lobby surface (port 10000 /
+    // 10000+serverId) that does NOT use the 8-byte (major:minor) opcode header and carries
+    // no byte cipher. Its parse lives entirely in Network.Transport.Pipelines/LobbyClient
+    // (server-list -> LobbyServerRecordWire/LobbyServerRecord; channel-endpoint -> the game
+    // host:port). GamePacketHandler only sees the GAME connection that BEGINS after the lobby
+    // hands over the endpoint: the 0/0 key exchange below drives the reactive 1/4 credential.
+    // Do NOT add a 3/x "server list" opcode here — there is none.
+    // spec: Docs/RE/packets/lobby.yaml (LOGIN-SERVER vs GAME-SERVER SPLIT — lobby is a separate
+    // wire surface, NOT a (major:minor) opcode); Docs/RE/specs/login_flow.md §2.
+    // -------------------------------------------------------------------------
+
+    // -------------------------------------------------------------------------
     // 0/0 — login key exchange -> 1/4 Auth reply
     // -------------------------------------------------------------------------
 

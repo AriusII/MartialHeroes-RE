@@ -2,9 +2,10 @@
 
 ```
 verification: confirmed
-ida_reverified: 2026-06-22
+ida_reverified: 2026-06-23
 reconciled: 2026-06-22
 anchor: 263bd994
+serverlist_promoted: 2026-06-23 (server-list re-derive — IDB SHA 263bd994, static IDA: §2.1 "server-list root" row CORRECTED to TOP curtain member +0x274; §4.3.2 spare label sharpened to a throwaway scratch buffer at font slot 14; §4.3.6 two-painter/vtable + Lastserver-registry runtime selector sharpened; §4.3.10 construction-order + member-offset cross-reference added. No numeric/geometry disagreement with §4.3 was found — the binary corroborates §4.3 in full; these are clarifications/cross-references, not corrections to any rect/atlas/action/colour.)
 promoted: 2026-06-22 (LOGIN-LAYOUT lanes A/B/C promoted; GU coordinate system section added — IDB SHA 263bd994)
 evidence: [static-ida, debugger-confirmed-g2]
 capture_verified: false
@@ -214,12 +215,19 @@ at a nonzero local origin shifts all its children by that amount.
 |---|---|---|---|---|---|---|---|---|---|---|
 | Background | image | 0 | 110 | 1024 | 490 | 0 | 0 | A2 | — | hidden |
 | Notice panel | panel | — | — | — | — | 0 | 490 | A2 | — | hidden |
-| Server-list root | panel (opaque) | 0 | 0 | 1024 | 398 | 0 | 0 | A1 | — | hidden |
+| Top curtain panel (member +0x274) | panel (opaque) | 0 | 0 | 1024 | 398 | 0 | 0 | A1 | — | visible (animated Y=−offset) |
 | Login-form host strip | panel | 0 | 326 / 768 | 1024 | 442 | 0 | 582 | A1 | — | — |
 | PIN keypad panel | panel | 347 | 173 | 329 | 422 | 0 | 0 | password.dds | — | hidden | backdrop blits password.dds (0,0)-(329,422) = the ornate frame+title+warning+번호입력+field (baked); see §3 |
 | Connexion/Quitter panel | panel | 356 | 531 | 313 | 132 | — | — | — | — | hidden (G2 debugger-confirmed 2026 / IDB 263bd994 — supersedes prior (0,356) 531×313 reading) |
 | Exit (quit) modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
 | Error modal | panel | 342 | 289 | 340 | 190 | 318 | 647 | A3 | — | hidden |
+
+> **MIS-LABEL CORRECTED (server-list re-derive 2026-06-23):** the `(0,0) 1024×398 A1 src(0,0)` opaque
+> panel (member **+0x274**) is the **TOP CURTAIN**, NOT the "server-list root". An earlier construct-
+> routine annotation called it the server-list root panel; that is wrong. The tick animates this panel
+> as the top curtain half (Y = −offset, slides off the top edge — see §2.3). The genuine server-list
+> backdrop is the **content panel at member +0x328** (A2 dst (270,85) 483×490 src (0,490)), built hidden
+> and shown only in the server-list phase (§4.3.0/§4.3.1). See the §4.3 member-offset cross-reference.
 
 **NOTICE panel children** (the central notice/agreement column):
 
@@ -1110,7 +1118,7 @@ local x = 30, plate 1 at local x = 263 (canvas x ≈ 300 and 533), X stride **23
 | Plate-face image | image | 30 + 233·i + 47 | 97 | 100 | 372 | A4 | src (448 + 124·i, 6) | — | — | plate 0 src x = 448, plate 1 src x = 572; baked-calligraphy candidate; drawn **after / over** the select button |
 | Select button (parchment) | button3 | 30 + 233·i − 6 | 97 | 202 | 372 | A4 | N (9, 6) / H (220, 6) / P (220, 6) | 400 + i | — | clickable parchment; **both** this and the name label carry action 400 + i (LEFT = 400, RIGHT = 401) |
 | Status / load caption | label (center) | 30 + 233·i | **410** | 174 | 20 | text | — | — | **slot 4** | DotumChe 12 px weight 800; coloured per §4.3.5 |
-| Spare label | label | 30 + 233·i | **430** | 174 | 20 | text | — | — | slot 0 | painter sets an **empty string** — never drawn; the old "class/count" reading is dead-debug |
+| Spare label | label | 30 + 233·i | **430** | 174 | 20 | text | — | — | slot 14 | painter feeds it a **throwaway global scratch buffer** (the registry-create `lpClass` out-arg, effectively empty) at font slot 14 — renders no meaningful text; the old "class/count" reading is dead-debug |
 
 **Z-order within a plate** (insertion = paint order): select button → name label → plate-face image →
 status caption → spare. The face quad is drawn **on top of** the parchment button (drawing it behind would
@@ -1245,8 +1253,21 @@ order — the page cursor starts at `16 · page` bytes, consumes **2** records, 
 `16 · page + 8 · i`. The remaining-record guard `record_count − 2·page` bounds how many of the two slots are
 populated (so a final odd record shows only plate 0). The live painter is the **direct-index path** (no
 shuffle indirection) with **center-aligned** name labels. A per-render Fisher-Yates permutation exists but
-operates on a **separate parallel id-vector** whose only effect is the `Lastserver` value — it does **not**
-reorder the visible plates. **Draw plates in raw record order with centered names; do not shuffle the rows.**
+operates on a **separate parallel id-vector** (a window object field, conceptually ~+0x438) whose only effect
+is the `Lastserver` value — it does **not** reorder the visible plates. **Draw plates in raw record order
+with centered names; do not shuffle the rows.**
+
+> **The two painter variants + the runtime selector (server-list re-derive 2026-06-23, sharpening):** the
+> direct-index painter and the shuffled painter are **two separate window vtable methods** living in **two
+> distinct LoginWindow vtable variants** (the shipped derived class uses the direct-index slot; the base
+> class carries the shuffle slot). Independently, **both** painters internally call the same
+> **Lastserver-registry predicate** — it opens/creates `HKLM\software\crspace\do` and queries the
+> `Lastserver` value; when the value is present (returns 1) the painter indexes through the parallel
+> permuted id-vector (~+0x438), otherwise it uses the direct index. So the shuffle is **selected at runtime
+> by the presence of the `Lastserver` registry value**, not by a build flag. Either way the **visible plate
+> order is the raw record order** — the permutation only changes which id is persisted to `Lastserver`. A
+> port that draws plates in raw record order and persists the clicked record's `ServerId` on commit is
+> faithful for the common case; the parallel-vector divergence is the corner case noted in §4.1.
 
 ---
 
@@ -1305,6 +1326,47 @@ these):
 The future maintainer-driven session should breakpoint the server-list populate/paint site with the
 list received from a replica, read the record-array base + count and walk the 8-byte records to bind each
 runtime `StatusCode` integer to its on-screen available/full rendering.
+
+---
+
+#### 4.3.10 Construction order + member-offset cross-reference (server-list re-derive 2026-06-23)
+
+**Static-confirmed.** The entire login window — including the whole server-list sub-tree — is built **inline**
+by the single LoginWindow construct routine (there is **no** separate server-list constructor; only the PIN
+keypad and the Exit/Error panels have their own sub-ctors). The construct routine builds ~73 widgets with
+literal rects and the four atlases of §4.3 (no `server_<id>.dds`). Groups are built in this order, and each
+widget pointer is stored into a fixed object field. The byte offsets below are a **cross-reference index**
+into the construct routine (not numbers a port needs to encode — encode the geometry tables above instead);
+they exist to disambiguate which member is which when correlating with the tick visibility ladder (§4.3.7,
+which addresses members as `dword index = byteOffset / 4`).
+
+| Build order | Member (byte offset) | Role | Atlas / dst / src | Built |
+|---|---|---|---|---|
+| 1 | +0x270 (624) | Background plate | A2 dst (0,110) 1024×490 src (0,0) | shown later |
+| 2 | +0x2BC (700) | Notice panel | A2 dst (270,85) 483×490 src (0,490) | hidden |
+| 3 | +0x274 (628) | **TOP curtain** (mis-labelled "server-list root" in stale notes) | A1 dst (0,0) 1024×398 src (0,0), animated Y=−offset | visible |
+| 4 | +0x328 (808) | **Server-list CONTENT panel** (the real list backdrop) | A2 dst (270,85) 483×490 src (0,490) | hidden |
+| 5 | +812 + 4·k | Two detail plates (5 widgets each, §4.3.2) | A4 / text | hidden |
+| 6 | +852/+856/+860 | Three status-indicator quads | A2 60×39 src (500,786) | hidden |
+| 7 | +864 | Selection-highlight strip | A4 46×168 src (700,18) | hidden |
+| 8 | +868..+904 | Ten page tabs (§4.3.3) | A2 | hidden |
+| 9 | +908 | Refresh/help strip (action 105) | A1 dst (456,−3) 111×38 | hidden |
+| 10 | +912 | EVENT deco plate (action —) | A1 dst (407,−3) 210×70 src (743,398) | hidden |
+| 11 | +916 | Content-panel title "서버선택" | A2 dst (207,44) 70×17 src (0,980) | hidden |
+| 12 | +920 | Confirm-A connecting popup | A3 dst (342,289) 340×190 src (318,647), msg 4023, button action 113 | hidden |
+| 13 | +0x278 (632) | **BOTTOM curtain / form host** | A1 dst (0,326·screenH/768) 1024×442 src (0,582), animated Y=offset+326 | visible |
+| 14 | +0x27C (636) | Form-deco plate | A1 dst (265,0) 494×113 src (0,469), snaps to (265,548) | shown by tick |
+| 15 | +640 | Server-list reveal/back button (action **102** = quit-confirm, NOT list-open) | A1 dst (456,166) 112×39 | — |
+| 16 | +664 | Credential sub-panel (§2.1b) | tex=0 | hidden |
+| 17 | +0x550 (1360) | PIN keypad object | password.dds | hidden |
+| — | +0x554 | `NEW_SERVER_INDEX` (the only `uiconfig.lua` value; default-highlight key §4.3.6) | — | read at construct |
+| — | ~+0x438 | parallel permuted id-vector (Lastserver source §4.3.6) | — | rebuilt each repaint |
+| — | +0x238 | the single `flowSubState` field (init 1; tick switch §2.2) | — | — |
+| — | +0x425 | "show special" sentinel byte (gates the status quads §4.3.1) | — | — |
+
+The construct routine's **only** data-file read is the single integer `NEW_SERVER_INDEX` (from
+`data/script/uiconfig.lua` into +0x554, mirrored to a game singleton). Everything else is hard-coded — the
+layout is **not** data-driven.
 
 ---
 

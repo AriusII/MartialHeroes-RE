@@ -1309,6 +1309,24 @@ floats above). Toggling the enter/create/delete buttons depends on the slot's lo
 > They are two separate reads, but they **agree on well-formed data** (an empty slot has both a zero
 > `faceA` and the `"@BLANK@"` name).
 
+> **THIRD occupancy witness — the 2D info-row gates on `sex` @ +0x2C (binary-won, counter-check IDB
+> SHA 263bd994, static-only).** The per-slot info-row writer (`SelectWindow_RefreshSlotInfoRow`) draws
+> the name / level / position labels **only when the descriptor byte @ +0x2C (the `sex`/`variant`
+> marker) is nonzero**. This is a third distinct occupancy read, alongside the render gate (`faceA`
+> @ +0x2E) and the enter gate (`name == "@BLANK@"`); it agrees with the §3.3 model-input byte and with
+> the other two on well-formed data. Read the "two occupancy tests" note above as **three witnesses**:
+> render → `faceA` @ +0x2E; info-row → `sex` @ +0x2C; enter → `name` @ +0x00.
+
+> **RECONCILE — the info-line "X , Y" text reads two floats at descriptor `+0x4C / +0x50`, not
+> `+0xA0 / +0xA8` (binary-won, counter-check IDB SHA 263bd994, static-only).** Re-derived three ways
+> from the info-row writer (slot stride 880; the active slot's descriptor base is `window + 880·slot`;
+> name at base +0x00; the two displayed position floats land at float indices 161/162 = byte offsets
+> **+0x4C / +0x50**). The `+0xA0 / +0xA8` pair in the table above describes a **different** descriptor
+> position field (e.g. the spawn coordinate fed to the in-world actor); the **2D slot info-line "X , Y"
+> shown on the select screen reads +0x4C / +0x50.** Flagged for the struct cartographer to reconcile
+> which float pair is the *displayed last-location* vs the *spawn coordinate* — until then a port that
+> populates the info line must read **+0x4C / +0x50**.
+
 > **Preview model inputs are `class` @ +0x34 and `variant` @ +0x2C — re-confirmed CYCLE 9 Phase 3.1
 > (static IDA, IDB SHA `263bd994`, HIGH confidence).** The model-class formula that selects the
 > preview skeleton/model takes its `class` argument from the descriptor `class` **u16 @ +0x34**
@@ -1573,14 +1591,21 @@ lineup actors and from the single create-preview actor. It is spawned at **tick-
 | Property | Value | Confidence |
 |---|---|---|
 | Spawn mode | **2** (static scenery, not a player/mob actor) | CODE-CONFIRMED |
-| World position (X, Y, Z) | **(511.5, 0.0, −9684.0)** (= stage anchor 2048,0,−6144 + Δ −1536.5,0,−3540) | CODE-CONFIRMED |
+| World position (X, Y, Z) | **(512.0, 0.0, −9738.5)** (= stage anchor 2048,0,−6144 + Δ −1536.0,0,−3594.5) | CODE-CONFIRMED |
 | Scale | **50.0** (legacy scale literal, same reconciliation note as §3.3.1) | CODE-CONFIRMED |
 | Orientation | identity (Euler 0, 0, 0) | CODE-CONFIRMED |
 | Role | decorative scene prop; no per-slot logic, no idle-motion swap, no hover/select behaviour | CODE-CONFIRMED |
 
-The scenery prop sits at world Z ≈ −9684, which is **~50 units nearer** the camera than the preview
-row (Z ≈ −9737 to −9738) and **~32 units further** than the create-preview actor's forward placement
-(Z ≈ −9684 vs create ≈ −9682 — within the same Z band). It is registered to the scenery/world-manager
+> **CORRECTION — scenery prop Z (binary-won, counter-check IDB SHA 263bd994, static-only).** A static
+> re-walk of the scenery routine read the raw local offset added to the stage anchor as
+> **(−1536.0, 0.0, −3594.5)**, giving the anchored world position **(512.0, 0.0, −9738.5)**. The prior
+> figures **(511.5, 0.0, −9684.0)** / raw Δ **(−1536.5, 0, −3540)** are **superseded** (Z was off by
+> ~54.5 units, X by 0.5). The downstream "~50 units nearer the camera than the preview row" framing is
+> consequently **wrong**: at Z = −9738.5 the prop sits essentially **inside** the preview-row Z band
+> (≈ −9737 to −9738.5), not in front of it.
+
+The scenery prop sits at world Z ≈ −9738.5, which places it **in the same Z band as the preview row**
+(Z ≈ −9737 to −9738.5) rather than nearer the camera. It is registered to the scenery/world-manager
 node and is destroyed and rebuilt only when `SelectWindow_ResetScene` tears down the whole scene.
 
 ### 3.3.9 Appearance-debt diagnostic — why a slot renders the wrong mesh (CODE-CONFIRMED)
@@ -1604,6 +1629,25 @@ sequence: confirm the descriptor base is aligned → confirm `class`/`variant` r
 slots are iterated → confirm `faceA` gate → confirm catalog entries are populated.
 
 ## 3.4 Slot availability vs lock flags (CODE-CONFIRMED byte source)
+
+> **HEADLINE CORRECTION — there are NO 2D slot-select tabs; slot selection is 3D ray-pick
+> (binary-won, counter-check IDB SHA 263bd994, static-only).** A static walk of the command-handler
+> dispatch settled what the three top-strip buttons actually do, and how a slot is picked:
+> - **Actions 1 / 2 / 3 are the three top-strip COMMAND buttons**, NOT slot-1/2/3 tabs:
+>   **action 1 = create-new-character** (reveals the create sub-tree), **action 2 = enter-game**
+>   (gated on `*(detail+0x1BC) == *(detail+0x1B8)`, then sends the enter-game packet),
+>   **action 3 = sub-panel / class-info toggle** (reveals `this+5816`, plays the UI click SFX).
+> - **There are no 2D slot-select tab widgets at all.** Selection is done **entirely by 3D ray-pick**
+>   over the five preview actors (§3.3.3 / §3.5.5): the command handler's mouse branch
+>   (event type 4, non-command subtype) unprojects the click pixel to a world ray, places each actor
+>   at its baked stage offset, builds a per-actor AABB (±6 X/Z, world-Y band [70, 92]), and ray-tests;
+>   the first hit writes the picked slot. The picked index → committed-slot field → the `1/7` packet
+>   byte 0 (§3.1 / §4 of the roster packet spec).
+> - **Supersede:** any earlier "Slot 1/2/3 tabs (slots 4–5 not yet enumerated)" framing of actions
+>   1/2/3 is **wrong and retired** — the 5-slot model has **no** 2D tabs, so there is no missing 4th/5th
+>   tab to enumerate. The 5-slot count comes from the descriptor block / 3D row, not from tab art
+>   (§3.1 / §3.3). The §11.5b "slot tab" labelling of actions 1/2/3 is corrected by this note; treat
+>   the 113×40 art rows there as the **top-strip command-button art**, not per-slot frame tabs.
 
 Two per-slot flag arrays gate enter/render, now pinned to their byte source on the select-window
 object:
@@ -1959,6 +2003,30 @@ static eye sits **on** the orbit point until the player zooms — see §3.5.4 (E
   The scene BGM is sound **category 0**, single-voice by construction: a second BGM start on a
   mismatched id **frees + replaces** the prior voice (a matching id does nothing) — it **overwrites,
   does not stack**. The guard is the category-0 single-slot replace semantics, not a window flag.
+- **Manual input overlay — exact app-input codes, rates, decay & clamps (CODE-CONFIRMED — NEW).**
+  The per-frame tick folds three small accumulators on top of the resting keyframe pose; `dt =
+  frameMs × 0.001`. Each accumulator is driven by a held app-input code, decays when no input arrives,
+  and is hard-clamped:
+  - **Zoom** (codes **1028 = in / 1029 = out**): boom accumulator (camera field +0x114, byte +276)
+    `+= / −= dt × 10.0`; decays `× 0.8` per idle frame; clamped to **[−4.0, +4.0]**.
+  - **Yaw nudge** (codes **1003 / 1002**): yaw-input accumulator (+288) `−= / += dt × 0.1`; decays
+    `× 0.5`; clamped to **[−1.0, +1.0]**.
+  - **Pitch nudge** (codes **1000 / 1001**): pitch-input accumulator (+284) `−= / += dt × 0.1`; decays
+    `× 0.8`; clamped to **[−1.0, +1.0]**.
+  The live yaw/pitch chase the armed keyframe's yaw/pitch with these accumulators added, and the
+  orientation quaternions are rebuilt each frame from the resulting live angles (tiny ~0.001 deadbands
+  prevent residual drift). A separate two-key boom helper on the select window adds `dt × 10.0` to the
+  same boom field on keyboard scancodes **72 / 73** (with no clamp in that helper — the [−4, +4] clamp
+  is enforced by the tick).
+- **Wheel boom-Z depth — gate 27.0, cap 26.0, floor 0.0, seed 10.0 (CODE-CONFIRMED — refines C3).**
+  The mouse-wheel handler (message type 8) adds `wheelDelta × 1e-6` to the boom accumulator (+0x114).
+  When that accumulator passes **+4.0** the separate boom-Z depth field (camera byte +572) steps
+  **down by 2.0**, floored at **0.0**; when it passes **−4.0** the depth steps **up by 2.0**, capped so
+  that once it would exceed the gate **27.0** it is written to **26.0** (the depth saturates at 26.0).
+  The boom-Z depth field is **seeded to 10.0** in the rig constructor — so the "10.0 scalar" of §3.5.3
+  is specifically this boom-Z depth SEED (camera byte +572), distinct from the manual-key/zoom boom
+  rate (also magnitude 10.0). This refines §3.5.3 / C3: clamp value 26.0, gate 27.0, floor 0.0, seed
+  10.0; the boom accumulator itself stays clamped to [−4, +4].
 - **Runtime-pending (still NOT confirmed — debugger-pending, do not invent):** none remaining for the
   keyframe-arm question (it is now CODE-CONFIRMED above). The manual-zoom boom-Z realised cap is the
   only residual (§3.5.4 / C3 below).
@@ -2030,6 +2098,16 @@ child (the same manager the main world uses). That manager builds the lighting r
   table structure** and the **14:30 → keyframe 29** index are CODE-CONFIRMED; the per-keyframe
   **colour/direction VALUES remain data-driven** — read `light0.bin` keyframe 29, an **asset-analyst
   lane**, not static-settleable.)
+
+> **Env-loader code-level facts (binary-won, counter-check IDB SHA 263bd994, static-only).** For area 0
+> at 14:30 the env loader sets a small block of dome/sky enables before loading the data-driven
+> environment binaries: **stardome enabled = 1** and **clouddome enabled = 1** (the sky-dome system is
+> on), with **four adjacent env flags also set to 1**; the sky is then initialised by the sky-system
+> init from the area's sky data, **weather** from the area weather `.bin` (with the weather sub-index
+> 48 selected), and **wind** from the area wind data. So the only code-level lighting facts are these
+> enables plus the weather/wind init — the concrete **ambient / directional / fog RGB are read from the
+> map000 env data evaluated at the 14:30 keyframe**, never from code literals. A faithful port reads the
+> map000 env / `light0.bin` keyframe 29 with stardome + clouddome both on.
 
 **CAMPAIGN 9c — the warm/bright recipe + the "too dark" cause (IDA two-witness).** The scene has ZERO
 light objects; the dominant light is a near-WHITE DEVICE AMBIENT floor: `floor = (OPTION_BRIGHT/100) ×
@@ -2117,9 +2195,17 @@ areas; the char-select cell's is present.)
 The char-select scene's fixed ambient FX come from **two distinct mechanisms**, both feeding the same
 pooled map-effect spawner; the scene also pushes one ambient **sound** cue.
 
-**(a) The single code-spawned ambient effect (CODE-CONFIRMED — re-confirmed: sole spawn, no second).**
+> **CAVEAT — `380003000` is CODE-CONFIRMED; the `char_select-u.xeff` FILENAME is data-pending
+> (binary-won, counter-check IDB SHA 263bd994, static-only).** The effect **id 380003000** appears as a
+> single code immediate in the scene builder and is settled. Its on-disk filename, however, is **not
+> statically provable from code**: the id → file edge resolves through the xeffect list
+> `data/effect/xeffect.lst` → a file under `data/effect/xeff/`. The `char_select-u.xeff` mapping below
+> is a **plausible reading carried as DATA-PENDING**, to be confirmed by reading the `.lst` entry for
+> 380003000 — do not treat the filename as code-confirmed.
+
+**(a) The single code-spawned ambient effect (CODE-CONFIRMED id; filename data-pending — re-confirmed: sole spawn, no second).**
 The scene builder spawns **exactly one** ambient map effect from a code immediate: effect id
-**380003000**, which is the internal id of **`char_select-u.xeff`** (the composite torch/brazier corona
+**380003000**, which (per the data-pending mapping above) is read as **`char_select-u.xeff`** (the composite torch/brazier corona
 effect, 68 sub-effects). It is spawned at world **(508.483, 69.887, −9758.569)** — the **centre of the
 preview character row**, framed dead-centre by the camera (the same point as the terrain-init pivot,
 §3.7.2) — with **identity orientation (0,0,0 / quaternion 0,0,0,1)**, **scale 1.0**, and **loop = 1** (a

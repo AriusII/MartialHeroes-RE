@@ -298,27 +298,6 @@ public sealed partial class LoginWindow : Control
         }
     }
 
-    /// <summary>
-    ///     Offline/dev harness entry point: fast-tracks the login window to sub-state 35
-    ///     (server-list showing) WITHOUT credential validation or a real server fetch.
-    ///     Called via CallDeferred from the MH_OFFLINE_SERVERLIST harness in ClientContext.EnvLogin
-    ///     so the server-list sub-view is created and visible before the synthetic
-    ///     <c>ServerListReceivedEvent</c> is published. MUST be called on the main thread.
-    ///     <para>
-    ///         Passive: does NOT mutate domain state. Just advances the FSM sub-state so the
-    ///         presentation layer renders the correct panel. The synthetic server records arrive
-    ///         via <see cref="ServerListReceivedEvent" /> on the event bus (LoginScene._Process
-    ///         calls <c>ApplyServerList → _serverSelect.SetServers</c>).
-    ///     </para>
-    /// </summary>
-    public void ActivateOfflineServerList()
-    {
-        GD.Print("[LoginWindow] ActivateOfflineServerList — skipping credential validation; fast-tracking to state 33. " +
-                 "MH_OFFLINE_SERVERLIST dev harness only.");
-        DoEnsureServerSelect(); // creates ServerSelectSubView if not already created
-        RunState(33); // 33→34→35: CreateServerSelect + show server list root
-    }
-
     public override void _ExitTree()
     {
         // Release the root CanvasItemMaterial by clearing the Material property.

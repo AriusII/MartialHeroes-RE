@@ -153,15 +153,10 @@ public sealed partial class LoginScene : StubSceneController
             Name = "ServerSelectSubView"
         };
 
-        // Skip the real lobby fetch when the offline-server-list harness is active —
-        // the harness injects its own synthetic ServerListReceivedEvent via EventBus,
-        // and a concurrent real FetchServerListAsync call would race to publish a second
-        // event from the live replica, overwriting the synthetic list.
-        // MH_OFFLINE_SERVERLIST is a dev-only env var; absent in prod → no-op.
-        if (!string.Equals(
-                System.Environment.GetEnvironmentVariable("MH_OFFLINE_SERVERLIST"), "1",
-                StringComparison.Ordinal))
-            _ = FetchServerListAsync();
+        // The REAL lobby fetch ALWAYS runs. The view is strictly passive: it renders only the
+        // ServerListReceivedEvent records that the lobby fetch publishes — it never synthesizes
+        // servers. spec: Docs/RE/specs/login_flow.md §2.1 (server-list fetch, port 10000).
+        _ = FetchServerListAsync();
 
         GD.Print(
             "[LoginScene] Created in-login ServerSelectSubView (sub-states 34..41) on HudAtlasLibrary. " +

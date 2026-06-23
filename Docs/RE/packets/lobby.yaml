@@ -2,6 +2,13 @@
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 #
 # verification:
+#   ida_reverified: 2026-06-23   # server-list re-derive (263bd994, static IDA): Record Shape A field order +
+#                                #   commit gate + Record Shape B parse shape ALL reconfirmed end-to-end against
+#                                #   the binary -- no field/offset change. Added (notes): count==0 => empty (UI
+#                                #   msg 4027), count==-1 connect/recv-failure sentinel => fetch error (UI msg
+#                                #   4028), count>0 => show; and the single-server count==1 auto-select path
+#                                #   (skip the manual pick, commit record[0] if status_code==0). On-wire byte
+#                                #   VALUES still capture-pending.
 #   ida_reverified: 2026-06-21   # CYCLE 9 Phase 1 (263bd994): Record Shape A field SIGNEDNESS static-CONFIRMED
 #                                #   (all four 8-byte record fields are signed i16 -- sign-extending loads,
 #                                #   commit gate load<2400 is a signed branch); Record Shape B PARSE SHAPE
@@ -79,6 +86,17 @@ notes: |
                             client allocates 8 * record_count bytes and copies that many bytes from
                             the decompressed payload. This reuses the game frame's "major" word as
                             a count -- a quirk of the shared wrapper. [CODE-CONFIRMED]
+                            COUNT BRANCHES (server-list re-derive 2026-06-23, static-CONFIRMED): the
+                            consumer stores the count signed and branches -- count == 0 => "no servers"
+                            (UI msg 4027); count == -1 (the worker writes -1 on a connect/recv failure)
+                            => "fetch error" (UI msg 4028); count > 0 => show the list. AUTO-SELECT:
+                            when count == 1 the client SKIPS the manual pick -- it reads record[0],
+                            writes its server_id (+0) as the selected id / channel port, and (if
+                            record[0].status_code == 0) advances directly to the channel-endpoint query
+                            (Record Shape B) and persists Lastserver. The list re-fetch control is
+                            debounced to 10000 ms (no-op while fetching or within 10 s of the last
+                            fetch). These are render/flow facts; the wire fact is the -1 sentinel and
+                            the > 0 gate. [STATIC-CONFIRMED]
       +6 (u16) unused     : reuses the game frame's "minor" word; preserved through decompression
                             but NOT read by either lobby thread. Believed unused here.
                             [CODE-CONFIRMED present; role = unused]
@@ -264,10 +282,11 @@ notes: |
     (RESOLVED this pass, no longer unknown: the in-record FIELD ORDER -- +0 server_id, +2
      status_code, +4 load, +6 open_time -- and the commit gate are static-CONFIRMED.)
 
-  TODO (Tier-1): frontend_layout_tables.md §4 (server-list) is owned by another author this wave.
-    A cross-note there should record that the §4 record map and commit gate are now
-    static-CONFIRMED (field order +0 server_id firmly established; +6 = open_time not a flag;
-    no server_id == 100 selection rule).
+  RESOLVED (server-list re-derive 2026-06-23): frontend_layout_tables.md §4.3.5/§4.3.6 now record the
+    §4 record map and commit gate as static-CONFIRMED (field order +0 server_id firmly established; +6 =
+    open_time/load-valid; commit gate status==0 && load<2400; the server_id == 100 literal is display-only,
+    NOT a selection rule), and §4.3.10 adds the construction-order + member-offset cross-reference. The
+    cross-note is in place.
 
   UNBLOCKS: Network.Protocol lobby client (server-list + channel-endpoint queries), the
   login-server/game-server split, and the local host-resolution order (ip.txt -> list.dat ->
