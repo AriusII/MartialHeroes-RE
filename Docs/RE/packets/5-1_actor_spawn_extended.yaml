@@ -8,6 +8,7 @@ size: 912                # fixed 912-byte payload block
 spec: packets/5-1_actor_spawn_extended.yaml
 status: hypothesis
 capture_verified: false
+readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 
 summary: Server pushes an extended actor spawn (player, mob/NPC, or ground item). A 12-byte prefix, an 880-byte SpawnDescriptor record, and a 20-byte trailer of visual/combat flags.
 
@@ -49,11 +50,25 @@ notes: |
   vs 5/3 / 4/4 (which use an 8-byte prefix, world at wire +0x54/+0x58) is exactly what shifts them. Do
   not apply a single +0x54/+0x58 rule across all three spawn carriers.
 
+  HP QWORD WIRE OFFSET (player branch, CYCLE 11): on the Sort==1 (player) branch the handler reads a
+  64-bit HP value from the descriptor HP qword (descriptor +0x3C lo / +0x40 hi). With the descriptor at
+  frame +0x0C, these land at WIRE +0x48 (HP-low dword) and WIRE +0x4C (HP-high dword). This is ONE
+  64-bit HP qword consumed on the player branch -- NOT two independent vitals. See structs/spawn_descriptor.md
+  (HP-qword note) and the 96-byte stats block in 3-1_character_list.yaml. The sort selector (low byte
+  of the Sort u32 at +0x00) drives the branch: 1 = player, 2 = mob/NPC, 3 = ground item.
+
   TRAILER (20 bytes, 0x37c..0x38f): visual / combat flag bytes consumed individually (a combat flag
   near the start of the trailer, then visual / stealth state bytes toward the tail).
 
   The 12 + 880 + 20 split is high confidence from the read size and the field stores; the meanings
   of individual trailer bytes are not all decoded.
+
+  CYCLE 11 (2026-06-22): Σ re-confirmed 12 + 880 + 20 = 912. HP qword wire offset added for the
+  player branch (descriptor +0x3C/+0x40 = wire +0x48/+0x4C). Sort low-byte branch confirmed:
+  1=player (HP qword consumed) / 2=mob/NPC / 3=ground-item, each with distinct handling. 12-byte
+  prefix fields (sort u8 + 3B pad + actorId u32 + titleState u8 + titleSlot u8 + relationFlag u8 +
+  pad u8) confirmed; descriptor at frame +0x0C; trailer at frame +0x37C. Descriptor interior VALUES
+  remain server-authored / capture-pending.
 
   UNKNOWNS to resolve with a capture of player / mob / item spawns and a struct-cartographer pass:
     - the internal SpawnDescriptor member map;

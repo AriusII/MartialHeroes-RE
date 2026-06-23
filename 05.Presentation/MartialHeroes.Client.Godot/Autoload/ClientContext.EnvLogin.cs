@@ -1,33 +1,3 @@
-// ClientContext.EnvLogin.cs — env-gated "copie conforme" verification harness.
-//
-// Drives the REAL login flow (same use-case intents as LoginScene's OK button) when the
-// maintainer sets the appropriate environment variables OR the creds file:
-//
-//   STEP 1 — login → char-select (roster printed, no enter-world):
-//     MH_LOGIN_ID=<account>
-//     MH_LOGIN_PW=<password>
-//     MH_SESSION_TOKEN=<token>    (optional; zero-filled when absent)
-//
-//   STEP 2 — full enter-world (adds slot selection after the roster arrives):
-//     + MH_LOGIN_ENTER_SLOT=<0..4>
-//
-// Credentials can also be supplied via a gitignored creds file:
-//   %LOCALAPPDATA%\MartialHeroes\login.creds
-//   Format: KEY=VALUE lines; lines starting with '#' are comments; blank lines skipped.
-//   Keys: MH_LOGIN_ID, MH_LOGIN_PW, MH_LOGIN_PIN, MH_SESSION_TOKEN, MH_LOGIN_ENTER_SLOT
-//   Precedence: env var WINS over creds file; file value is the fallback only when env is absent.
-//
-// When NONE of the env vars or creds-file keys supply MH_LOGIN_ID + MH_LOGIN_PW the harness
-// is FULLY INERT — the interactive UI login path is completely unchanged.
-//
-// spec: Docs/RE/specs/login_flow.md §1 / §2 / §3 / §4 — the ordered lifecycle this harness
-//        exercises via the exact same IApplicationUseCases calls the UI makes.
-//
-// SECURITY NOTE: credentials come from env vars or the gitignored creds file; they are logged
-// as "present/absent + length + source" but their VALUES are never printed. MH_LOGIN_PW and
-// MH_SESSION_TOKEN values are always redacted in logs.
-// spec: login_flow.md §4.2 — password never in a plaintext log.
-
 using Godot;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Network.Abstractions.Lobby;
@@ -38,43 +8,19 @@ namespace MartialHeroes.Client.Godot.Autoload;
 
 public sealed partial class ClientContext
 {
-    // -------------------------------------------------------------------------
-    // Env-harness task state
-    // -------------------------------------------------------------------------
-
-    // The background task for the env-login harness. Started in _Ready alongside the
-    // engine loop when MH_LOGIN_ID is present. Drained in _ExitTree alongside _loopTask.
     private Task? _envLoginTask;
 
-    // -------------------------------------------------------------------------
-    // Public entry point — called from _Ready after BuildApplicationGraph
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Reads the env-gated credentials and, if present, spawns a background task that drives
-    ///     the real login flow through IApplicationUseCases (same intents as LoginScene). When the
-    ///     env vars are absent this method is a no-op and the interactive UI path is untouched.
-    ///     <para>
-    ///         spec: Docs/RE/specs/login_flow.md §1 — ordered lifecycle;
-    ///         §4.2 — credential staging (LoginAsync); §2 — lobby (FetchServerListAsync /
-    ///         SelectServerAsync); §3.3 — enter-game (SelectCharacterAsync).
-    ///     </para>
-    /// </summary>
     internal void MaybeStartEnvLogin()
     {
-        // Read once at startup; never re-read mid-session.
-        // Env var is the primary source; the creds file is the fallback for any key not set in env.
         var loginId = Environment.GetEnvironmentVariable("MH_LOGIN_ID");
         var loginPw = Environment.GetEnvironmentVariable("MH_LOGIN_PW");
         var loginPin = Environment.GetEnvironmentVariable("MH_LOGIN_PIN");
         var sessionToken = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
         var enterSlotStr = Environment.GetEnvironmentVariable("MH_LOGIN_ENTER_SLOT");
 
-        // ---- creds-file fallback -----------------------------------------------
-        // File: %LOCALAPPDATA%\MartialHeroes\login.creds
-        // Format: KEY=VALUE lines; '#'-prefixed lines are comments; blank lines skipped.
-        // Only falls back when the corresponding env var is null/whitespace.
-        // Fail-open: a missing, unreadable, or malformed file behaves like "env-only".
+        var autoLoginFlag = Environment.GetEnvironmentVariable("MH_AUTOLOGIN");
+
         {
             var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var credsPath = Path.Combine(localAppData, "MartialHeroes", "login.creds");
@@ -90,7 +36,7 @@ public sealed partial class ClientContext
                         if (line.Length == 0 || line.StartsWith('#'))
                             continue;
                         var eq = line.IndexOf('=');
-                        if (eq <= 0) continue; // malformed — no key
+                        if (eq <= 0) continue;
                         var key = line[..eq].Trim();
                         var val = line[(eq + 1)..].Trim();
                         if (key.Length > 0)
@@ -106,7 +52,6 @@ public sealed partial class ClientContext
 
                 if (fileDict is not null)
                 {
-                    // Env var WINS; file is the fallback only when env is absent/whitespace.
                     if (string.IsNullOrWhiteSpace(loginId) && fileDict.TryGetValue("MH_LOGIN_ID", out var fId))
                         loginId = fId;
                     if (string.IsNullOrWhiteSpace(loginPw) && fileDict.TryGetValue("MH_LOGIN_PW", out var fPw))
@@ -117,22 +62,27 @@ public sealed partial class ClientContext
                         fileDict.TryGetValue("MH_SESSION_TOKEN", out var fTok)) sessionToken = fTok;
                     if (string.IsNullOrWhiteSpace(enterSlotStr) &&
                         fileDict.TryGetValue("MH_LOGIN_ENTER_SLOT", out var fSlot)) enterSlotStr = fSlot;
+                    if (string.IsNullOrWhiteSpace(autoLoginFlag) &&
+                        fileDict.TryGetValue("AUTOLOGIN", out var fAuto)) autoLoginFlag = fAuto;
                 }
             }
         }
-        // -------------------------------------------------------------------------
+
+        if (IsAutoLoginOff(autoLoginFlag))
+        {
+            GD.Print("[ClientContext/EnvLogin] Auto-login DISABLED (MH_AUTOLOGIN/AUTOLOGIN=0) — harness inert; " +
+                     "drive the login flow MANUALLY through the UI. spec: login_flow.md §1.");
+            return;
+        }
 
         if (string.IsNullOrWhiteSpace(loginId) || string.IsNullOrWhiteSpace(loginPw))
         {
-            // No credentials from env OR creds file — interactive UI path unchanged.
             GD.Print("[ClientContext/EnvLogin] MH_LOGIN_ID / MH_LOGIN_PW absent from env AND " +
                      "%LOCALAPPDATA%\\MartialHeroes\\login.creds — harness inactive; " +
                      "interactive UI login path unchanged. spec: login_flow.md §1.");
             return;
         }
 
-        // Log presence + length + source only; never log the raw credential values.
-        // spec: login_flow.md §4.2 — password is never in a plaintext log.
         int? enterSlot = null;
         if (!string.IsNullOrWhiteSpace(enterSlotStr)
             && int.TryParse(enterSlotStr.Trim(), out var parsedSlot)
@@ -147,8 +97,6 @@ public sealed partial class ClientContext
                  $"MH_LOGIN_ENTER_SLOT={(enterSlot.HasValue ? enterSlot.Value.ToString() : "absent (stop at char-select)")}. " +
                  "spec: login_flow.md §1.");
 
-        // Capture local copies so the task closure never touches the mutable member.
-        // _loopCts is already created by BuildApplicationGraph before this is called.
         var id = loginId.Trim();
         var pw = loginPw.Trim();
         var pin = string.IsNullOrWhiteSpace(loginPin) ? null : loginPin.Trim();
@@ -157,20 +105,22 @@ public sealed partial class ClientContext
         var envLoginTask = RunEnvLoginAsync(id, pw, pin, slot, _loopCts!.Token);
         _envLoginTask = envLoginTask;
 
-        // Observe faults (fire-and-forget; not the drain handle).
         _ = envLoginTask.ContinueWith(
             t => GD.PrintErr($"[ClientContext/EnvLogin] Harness faulted: {t.Exception}"),
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
     }
 
-    // -------------------------------------------------------------------------
-    // Harness drain (called from _ExitTree)
-    // -------------------------------------------------------------------------
+    private static bool IsAutoLoginOff(string? flag)
+    {
+        if (string.IsNullOrWhiteSpace(flag)) return false;
+        var t = flag.Trim();
+        return t == "0"
+               || t.Equals("false", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("off", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("no", StringComparison.OrdinalIgnoreCase);
+    }
 
-    /// <summary>
-    ///     Drains the env-login background task if it was started, as part of the _ExitTree
-    ///     cleanup. The task shares _loopCts so it is already cancelled before this is called.
-    /// </summary>
+
     internal void DrainEnvLogin()
     {
         if (_envLoginTask is null) return;
@@ -180,7 +130,6 @@ public sealed partial class ClientContext
         }
         catch (AggregateException)
         {
-            // Expected: OperationCanceledException wraps the cancellation.
         }
         finally
         {
@@ -188,43 +137,7 @@ public sealed partial class ClientContext
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Core harness logic
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Background task that drives the real login flow via IApplicationUseCases.
-    ///     This is the exact same sequence LoginScene + LoginWindow perform via user gestures —
-    ///     no bypass, no fake path.
-    ///     Flow:
-    ///     <list type="number">
-    ///         <item>
-    ///             Wait for the SceneMachine to reach Login (GameState 1). The lobby is already
-    ///             resolved by the composition root; the server list is fetched and a server is
-    ///             selected (first selectable server in the list). spec: login_flow.md §2.
-    ///         </item>
-    ///         <item>
-    ///             Stage credentials: LoginAsync(id, pw) — same call as LoginScene.OnLoginAccepted.
-    ///             spec: login_flow.md §4.2.
-    ///         </item>
-    ///         <item>
-    ///             Open the TCP game connection (same as LoginScene.SelectServerAsync).
-    ///             spec: login_flow.md §3.0.
-    ///         </item>
-    ///         <item>
-    ///             Wait for the char-select roster (3/1 or 3/4 → CharacterListReceivedEvent).
-    ///             Print slot count and first-slot name. spec: login_flow.md §7.
-    ///         </item>
-    ///         <item>
-    ///             If MH_LOGIN_ENTER_SLOT is set: SelectCharacterAsync(slot) — same call as the
-    ///             char-select OK button. spec: login_flow.md §3.3.
-    ///         </item>
-    ///     </list>
-    /// </summary>
-    /// <param name="loginId">Account name from MH_LOGIN_ID env var.</param>
-    /// <param name="loginPw">Password from MH_LOGIN_PW env var (never logged as a value).</param>
-    /// <param name="enterSlot">Slot index from MH_LOGIN_ENTER_SLOT, or null to stop at char-select.</param>
-    /// <param name="ct">Linked to _loopCts; cancelled on _ExitTree.</param>
     private async Task RunEnvLoginAsync(
         string loginId,
         string loginPw,
@@ -234,20 +147,12 @@ public sealed partial class ClientContext
     {
         try
         {
-            // ------------------------------------------------------------------
-            // Phase 0: wait for GameState → Login (state 1).
-            // spec: login_flow.md §1 (the Login form is state 1 of the 8-state spine).
-            // ------------------------------------------------------------------
             GD.Print("[ClientContext/EnvLogin] Phase 0: waiting for GameState=Login.");
             await WaitForLoginStateAsync(ct).ConfigureAwait(false);
             GD.Print("[ClientContext/EnvLogin] Phase 0 DONE: GameState=Login.");
 
             ct.ThrowIfCancellationRequested();
 
-            // ------------------------------------------------------------------
-            // Phase 1: fetch server list and select the first available server.
-            // spec: login_flow.md §2.1 / §2.2 / §3.0.
-            // ------------------------------------------------------------------
             GD.Print("[ClientContext/EnvLogin] Phase 1: FetchServerListAsync.");
             IReadOnlyList<LobbyServerRecord> servers;
             try
@@ -263,12 +168,10 @@ public sealed partial class ClientContext
 
             ct.ThrowIfCancellationRequested();
 
-            // Select the first server that passes the canonical selectability gate.
-            // spec: login_flow.md §2.1 — IsSelectable: status==0 && load<2400.
             LobbyServerRecord selectedRecord = default;
             var foundServer = false;
             foreach (var r in servers)
-                if (r.IsSelectable) // spec: login_flow.md §2.1
+                if (r.IsSelectable)
                 {
                     selectedRecord = r;
                     foundServer = true;
@@ -285,10 +188,6 @@ public sealed partial class ClientContext
             GD.Print($"[ClientContext/EnvLogin] Phase 1: selected server_id={selectedRecord.ServerId}, " +
                      $"status={selectedRecord.StatusCode}, load={selectedRecord.Load}. spec: login_flow.md §2.1.");
 
-            // ------------------------------------------------------------------
-            // Phase 2: resolve channel endpoint for the selected server.
-            // spec: login_flow.md §2.2 — "port = 10000 + selected server_id".
-            // ------------------------------------------------------------------
             GD.Print($"[ClientContext/EnvLogin] Phase 2: SelectServerAsync(server_id={selectedRecord.ServerId}).");
             LobbyChannelEndpoint endpoint;
             try
@@ -306,12 +205,6 @@ public sealed partial class ClientContext
             GD.Print($"[ClientContext/EnvLogin] Phase 2 DONE: game endpoint={endpoint.Host}:{endpoint.Port}. " +
                      "spec: login_flow.md §2.2 / §3.0.");
 
-            // ------------------------------------------------------------------
-            // Phase 3: stage credentials.
-            // spec: login_flow.md §4.2 — credential staging via LoginAsync. The password goes
-            //        into LoginCredentialStore and later into the RSA 1/4 ciphertext; it is NEVER
-            //        printed and NEVER placed in a plaintext log.
-            // ------------------------------------------------------------------
             GD.Print($"[ClientContext/EnvLogin] Phase 3: staging credentials (account present len={loginId.Length}, " +
                      $"password=**REDACTED**, pin={(loginPin is null ? "none" : "**REDACTED** (a7-gated)")}). " +
                      "spec: login_flow.md §4.2.");
@@ -321,10 +214,6 @@ public sealed partial class ClientContext
 
             ct.ThrowIfCancellationRequested();
 
-            // ------------------------------------------------------------------
-            // Phase 4: open the TCP game connection.
-            // spec: login_flow.md §3.0 — game server connect via gethostbyname (DNS allowed).
-            // ------------------------------------------------------------------
             GD.Print($"[ClientContext/EnvLogin] Phase 4: OpenGameConnectionAsync({endpoint.Host}:{endpoint.Port}). " +
                      "spec: login_flow.md §3.0.");
             await OpenGameConnectionAsync(endpoint.Host, endpoint.Port).ConfigureAwait(false);
@@ -333,11 +222,6 @@ public sealed partial class ClientContext
 
             ct.ThrowIfCancellationRequested();
 
-            // ------------------------------------------------------------------
-            // Phase 5: wait for the character roster (3/1 or 3/4).
-            // spec: login_flow.md §6 — "SUCCESS => unsolicited 3/1 SmsgCharacterList push".
-            //       Also 3/4 SmsgSceneEntityUpdate carries the roster (CYCLE 4 live observation).
-            // ------------------------------------------------------------------
             GD.Print("[ClientContext/EnvLogin] Phase 5: waiting for CharacterListReceivedEvent. " +
                      "Expected inbound sequence: 0/0 KeyExchange → 1/4 AuthReply (auto) → 3/4 or 3/1 roster. " +
                      "spec: login_flow.md §6 / §7.");
@@ -365,11 +249,6 @@ public sealed partial class ClientContext
 
             ct.ThrowIfCancellationRequested();
 
-            // ------------------------------------------------------------------
-            // Phase 6 (optional): enter-world.
-            // spec: login_flow.md §9 — "player confirms slot; client sends 1/9; server answers 3/5".
-            // Gated by MH_LOGIN_ENTER_SLOT. When absent, harness stops here (STEP 1 only).
-            // ------------------------------------------------------------------
             if (!enterSlot.HasValue)
             {
                 GD.Print("[ClientContext/EnvLogin] MH_LOGIN_ENTER_SLOT absent — stopping at char-select. " +
@@ -404,16 +283,7 @@ public sealed partial class ClientContext
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Wait helpers (pure async, no Godot main-thread mutation)
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Polls SceneMachine until GameState == Login (state 1) or cancellation.
-    ///     The SceneMachine boots at Init (0) and advances to Login on the first
-    ///     <c>Advance()</c> call from SceneHost._Ready.
-    ///     spec: Docs/RE/specs/client_runtime.md §7.1 — Init(0) → Login(1) on first advance.
-    /// </summary>
     private async Task WaitForLoginStateAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -426,20 +296,6 @@ public sealed partial class ClientContext
         ct.ThrowIfCancellationRequested();
     }
 
-    /// <summary>
-    ///     Polls the CharacterSelectionStore until at least one slot is populated (roster arrived),
-    ///     with a bounded timeout. Returns a snapshot of the roster or null on timeout.
-    ///     <para>
-    ///         The 3/1 or 3/4 handler populates CharacterSelectionStore (via GamePacketHandler) and
-    ///         publishes a CharacterListReceivedEvent. We poll the store because
-    ///         EventBus is a SingleReader channel (LoginScene drains it); reading it here would
-    ///         starve the UI. Polling the store is race-free: once populated it stays populated
-    ///         until a new roster replaces it.
-    ///         spec: login_flow.md §7 — roster drives char-select; store spec: login_flow.md §3.5.
-    ///     </para>
-    /// </summary>
-    /// <param name="timeout">Maximum time to wait before returning null.</param>
-    /// <param name="ct">Cancellation token.</param>
     private async Task<IReadOnlyList<CharacterSlotRecord?>?> WaitForCharacterListAsync(
         TimeSpan timeout,
         CancellationToken ct)
@@ -450,11 +306,6 @@ public sealed partial class ClientContext
             var snapshot = UseCases?.GetCharacterRoster();
             if (snapshot is { Count: > 0 })
             {
-                // At least one slot is populated (non-null entry or roster count > 0).
-                // The store returns CharacterSlotRecord?[] where non-null = occupied slot.
-                // A fully blank roster (all nulls) still has Count > 0 but no occupied slots;
-                // check for at least one non-null record before declaring success.
-                // spec: login_flow.md §3.5 — roster populated by 3/1 or 3/4 handler.
                 var hasAny = false;
                 foreach (var r in snapshot)
                     if (r is not null)

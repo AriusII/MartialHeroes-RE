@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="MartialHeroes.Client.Godot"
-run/main_scene="res://Scenes/SceneHostBoot.tscn"
+run/main_scene="uid://ftdqt2j1mmt8"
 config/features=PackedStringArray("4.6", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 
@@ -38,6 +38,12 @@ enabled=PackedStringArray("res://addons/mcp_bridge/plugin.cfg")
 [environment]
 
 defaults/default_clear_color=Color(0, 0, 0, 1)
+
+[importer_defaults]
+
+animation_library={
+&"animation/fps": 60.0
+}
 
 [physics]
 

@@ -1,7 +1,8 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-21   # CYCLE 8: 178-slot panel array base +0x238 + slot 35/52/110/135/178 re-confirmed; prior CYCLE 7 2026-06-20
+ida_reverified: 2026-06-22   # CYCLE 11: slot-35 MopGagePanel 226×54 rect resolved + retired from §5.4 demotion; dominant caption font slot 4 pinned; skill-hotbar container rect + overlay sub-widget breakdown confirmed; prior CYCLE 8 2026-06-21
 ida_anchor: 263bd994
+readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]
 conflicts: skill-hotbar overlay-rect VALUES (record layout recovered; only the authored rect values are data/debugger-pending); the unsited "226×54 top bar" (no build site found — demoted, debugger-pending); absolute pixel resolution of every screen-relative panel (needs a runtime screen-size read) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): the selected-target plate is now PINNED to the panel-slot roster — **target frame = slot 35 (MopGagePanel)**, **pet window = slot 52 (PetPanel)**; prior "MopGage = slot 177 / pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; full roster + verdicts in `ui_system.md §1.9`
 ---
@@ -559,7 +560,7 @@ the trade panel, the quest panel, and a guild panel (the 697-tall variant).
 |---|---|---|---|---|---|---|
 | Minimap (MapPanel, corner radar) **[§3]** | screen_width − 135 | 0 | 135 | 195 | Screen-width-rel (top-right corner) | High (call site re-pinned: 135 × 195, body 133 × 133, collapsed height 16, actions 5000–5003) |
 | Top full-width status bar | 0 | 120 | screen_width | 20 | Screen-width-rel (spans full width) | High |
-| ~~Wide thin top bar~~ (DEMOTED — unsited) | centerX(226) | 0 | 226 | 54 | Centred-X, top | **Unsited / debugger-pending** (no 226 × 54 build site found; 226 only recurs as element widths) |
+| **Selected-target plate (MopGagePanel, slot 35) — RESOLVED** | centerX(226) | 0 | 226 | 54 | Centred-X, top-flush | **RESOLVED — this is slot-35 `MopGagePanel`**, rect 226 × 54, centred on X, top-flush (Y = 0). The earlier "226 × 54 top bar" demotion is retired — the panel identity and rect are now pinned (CYCLE 11). See §5.5a and the §4 known-unknowns reconciliation. |
 | Right-edge square button #1 | screen_width − 200 | 0 | 64 | 64 | Screen-width-rel | High |
 | Right-edge square button #2 | screen_width − 200 | 0 | 64 | 64 | Screen-width-rel (toggled-state pair with #1) | High |
 | Right-anchored panel | screen_width − 406 | 0 | 406 | 119 | Screen-width-rel (content 618×468; texture idx 1) | High |
@@ -573,10 +574,11 @@ the trade panel, the quest panel, and a guild panel (the 697-tall variant).
 > exists on disk — but the binary does not bind it by that literal; the marker is a manifest-driven blip
 > glyph, not a "64 × 64 tga marker source.")
 
-> **Phantom "226 × 54 top bar" (DEMOTED).** No `226 × 54` literal-rect build site exists in the binary.
-> The value 226 recurs only as element widths (HP/MP text-label rows, gauge fills), never paired with a
-> height of 54. This row is **demoted to unsited / debugger-pending** — a concrete build site or a
-> runtime read would be needed to confirm any such bar exists.
+> **"226 × 54 top bar" — RESOLVED (CYCLE 11).** The earlier demotion of this row is now retired. The
+> 226 × 54 rect is the **selected-target plate (`MopGagePanel`, slot 35)**: X centred at half-width
+> (`centerX(226)`), Y = 0 (top-flush), width 226, height 54. The prior mystery arose from searching for
+> a named "top bar" rather than for the target-plate panel; once the slot-35 identity was pinned
+> (§5.5a), the rect matched exactly. The demotion note in §4 known-unknowns is correspondingly retired.
 
 ### 5.5 Stats / actor-state cluster (top-left HUD area)
 
@@ -884,17 +886,57 @@ pixels for screen-relative rows are CONFIRMED-formula / pixel-pending (§5.11).
 
 ## 4. Known unknowns
 
+### CYCLE 11 resolutions (three items retired)
+
+**MopGagePanel rect — RESOLVED (CYCLE 11).** The selected-target plate (`MopGagePanel`, slot 35)
+has rect: X = `centerX(226)` (centred at half-width), Y = 0 (top-flush), width 226, height 54. This
+resolves and retires the "226 × 54 top bar" demotion that was listed here since the panel's build
+site had not been matched to its class identity. The §5.4 row is updated and the §5.4 demotion note
+is retired. Only the §5.5a §4 note about the target-plate rect being a "HUD-II follow-up" is now
+also retired — both the class/slot AND the rect are pinned.
+
+**Button-caption font slot — RESOLVED (CYCLE 11).** A label's font slot is stored in the label
+object itself. The **dominant in-game HUD caption and button font slot is slot 4** — the
+overwhelming majority of HUD labels, button captions, and status-text widgets use font slot 4.
+Exceptions: some panels use slots 0, 2, 3, 10, or 12 (depending on panel class and text role). A
+small number of level-band and title labels **compute their font slot at runtime** from the
+player-level / title data — those are **runtime/data-driven** and cannot be pinned to a single static
+slot. Most in-game HUD captions are **numeric message-table ids** (looked up from the CP949 message
+database at the per-state reconfigure pass); the in-source literal strings are **upgrade-percentage
+strings** (the `"%6.2f %%"` family used by `UpgradeProcessPanel` and peers). The level-title selector
+returns computed message ids `{14011, 14035, 14055, 14086}`.
+
+**Skill-hotbar container rect and overlay sub-widget breakdown — RESOLVED (CYCLE 11).** The hotbar
+container rect is: x = 349, y = 13, width = 7, height = 504, inner-x = 982 (texture-manifest key 3).
+The container is built as **two nine-slot loops**. Per-slot overlays include:
+- an icon backdrop;
+- a **three-state main button** (normal / hover / pressed);
+- a **count strip / label**;
+- **three mutually-exclusive small status frames** sourced at atlas x-offsets 763, 792, and 821
+  (each 29 × 29, sharing one destination cell — not three separate destinations);
+- a cooldown tick;
+- progress bars; and
+- optional A / B / C status overlays.
+
+The **per-slot base origin** (base X at registry record `+0x10`, base Y at `+0x14` biased −92) and
+the **optional-overlay deltas** are **runtime/data-driven** — read from the populated slot registry
+record via the live debugger for 1:1 placement. The record layout shape is recovered (§3.5); only
+the authored VALUES in the `+0x2C..+0x70` overlay-rect block remain data/debugger-pending.
+
+---
+
+### Remaining open items
+
 - **Skill-hotbar overlay-rect VALUES** (§3.5) — the `+0x2C..+0x70` overlay-rect block SHAPE is
-  recovered, but the authored rect VALUES are data-driven and need a live-debugger read of a populated
+  recovered; the authored rect VALUES are data-driven and need a live-debugger read of a populated
   record for 1:1 overlay placement **(data/debugger-pending)**. The record layout itself is no longer
   unknown.
-- **The actual selected-target name/HP/MP plate** (§5.5a) — **CLASS + SLOT now pinned (CYCLE 7):** the
-  target frame is **`MopGagePanel` at slot 35** (`ui_system.md §1.9`); slot 135 is `UpgradeProcessPanel`
-  (not a target plate) and the alternate "MopGage = slot 177" claim is **refuted** (slot 177 = base
-  `GUComponent` image). The pet window is **`PetPanel` at slot 52**; "pet = slot 110" is **refuted**
-  (slot 110 = `Gamble`). Only the target frame's placement **rect** remains a HUD-II follow-up.
-- **The unsited "226 × 54 top bar"** (§5.4) — no `226 × 54` build site was found; the row is demoted to
-  unsited and needs a concrete site or a runtime read to confirm it exists at all **(debugger-pending)**.
+- **The actual selected-target name/HP/MP plate** (§5.5a) — **CLASS + SLOT + RECT now fully pinned
+  (CYCLE 11):** the target frame is **`MopGagePanel` at slot 35**, rect 226 × 54 top-flush centred
+  (`ui_system.md §1.9`); slot 135 is `UpgradeProcessPanel` (not a target plate) and the alternate
+  "MopGage = slot 177" claim is **refuted** (slot 177 = base `GUComponent` image). The pet window is
+  **`PetPanel` at slot 52**; "pet = slot 110" is **refuted** (slot 110 = `Gamble`). No follow-up remains
+  for the target plate.
 - **Absolute pixel resolution for every screen-relative panel** — the minimap (`screen_width − 135`),
   party (`screen_width + 318`), and all screen-centred / screen-height-relative / full-width-bar
   panels of §5 have **confirmed formulas** but their resolved pixel values depend on the runtime

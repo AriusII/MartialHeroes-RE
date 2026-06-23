@@ -11,8 +11,10 @@
 > files (`light%d.bin`, `point_light%d.bin`, `wind%d.bin`) are formally specified in
 > `Docs/RE/formats/terrain_layers.md §6–8`; supplementary sample-verified / loader-resolved
 > corrections to those sections are noted at the end of this document (§9 for `light%d.bin`,
-> §12 for `wind%d.bin`). The **colour domains** of these
-> fields (which colours are byte D3DCOLOR vs. float [0,1]) and how they feed the runtime
+> §12 for `wind%d.bin`, §13 for `point_light%d.bin`). **Section 7** (`weather%d.bin`) is now
+> fully decoded: the 10×24 u8 weather-code grid, selection logic, code decode, and particle
+> asset paths are CONFIRMED from the loader and a 95-file corpus. The **colour domains** of
+> these fields (which colours are byte D3DCOLOR vs. float [0,1]) and how they feed the runtime
 > lighting/fog math are pinned in §10 and consumed by `Docs/RE/specs/environment.md`.
 
 ---
@@ -541,27 +543,103 @@ Cloud texture IDs index into `data/sky/texture/cloud%d.dds`:
 
 ---
 
-## Section 7: `weather%d.bin` — Weather Parameters
+## Section 7: `weather%d.bin` — Weather Code Grid
 
-**Status:** PARTIAL — file size confirmed, content not decoded  
+**Status:** CONFIRMED (grid layout, selection logic, code decode, particle asset paths);
+SAMPLE-VERIFIED (95-file corpus — weather and weather-rain families across all areas).
+Debugger-pending items noted per field.
 **File size:** exactly **240 bytes** (fixed)
+**Loader:** `Weather_InitFromBin` (canonical name); called as part of the per-area sky-system
+init sequence. Fully optional — absent-file → per-loader default + success.
 
-### 7.1 File layout
+### 7.1 File layout — 10 × 24 u8 grid (no header)
 
-No header magic, no version field. The 240-byte body is expected to encode rain or snow type,
-particle intensity, and related parameters. All sampled files (areas 0 and 1) contain only zeros.
+No header magic, no version field. The entire 240-byte body is read verbatim into the weather
+object starting at offset 0. Layout:
 
-| Offset | Size | Type | Field | Notes | Confidence |
-|-------:|-----:|------|-------|-------|------------|
-| 0x00 | 240 | u8[240] | _body_ | Content entirely unknown — all zeros in areas 0–1 | SAMPLE-VERIFIED (size only) |
+```
+10 rows × 24 columns = 240 bytes, all u8, row-major
+Row r, column c → byte offset (r × 24 + c)
+```
 
-### 7.2 Known unknowns
+| Field | Encoding | Notes | Confidence |
+|-------|----------|-------|------------|
+| `body[r][c]` — 10 rows × 24 columns of `u8` weather codes | `code / 10` = weather type (0 = clear, 1 = RAIN, 2 = SNOW); `(code % 10) × 0.1` = intensity 0.0–0.9 | See §7.2 for type/intensity decode and §7.3 for row/column selection. | CONFIRMED (loader + 95-file corpus) |
 
-- **Full field layout:** No populated sample has been decoded. At minimum 60 u32 or 60 f32 values
-  fit in 240 bytes; the actual type and semantics are unverified.
-- **Relationship to `weather%d_rain.bin`:** none at runtime — the `_rain.bin` companion has **no
-  loader** and is never read by the shipping client (§8). Whether `weather%d.bin` itself has a live
-  runtime consumer is unverified (its samples are all-zero).
+Total: 240 bytes.
+
+The weather object also maintains two runtime bytes (not on-disk fields): `this+240` (current
+active code) and `this+241` (last-applied code, used for hysteresis to avoid redundant
+weather-system switches). Both are set by the selection routine (§7.3) and are not part of the
+on-disk record.
+
+### 7.2 Weather code decode (`Weather_ApplyCode`, canonical name)
+
+| Expression | Meaning | Confidence |
+|:----------:|---------|------------|
+| `code / 10` == 0 | **clear** — no precipitation system | CONFIRMED |
+| `code / 10` == 1 | **RAIN** — rain particle system active | CONFIRMED |
+| `code / 10` == 2 | **SNOW** — snow particle system active | CONFIRMED (code path present; see §7.5 for sample coverage) |
+| `(code % 10) × 0.1` | **intensity** in range 0.0–0.9 | CONFIRMED |
+
+**Sample-verified code values (95-file corpus):** the only non-zero bytes across all sampled
+weather files are `{11, 12, 13, 15}` = RAIN at intensity 0.1 / 0.2 / 0.3 / 0.5. No SNOW (2x)
+codes appear in the sampled areas — the snow code path is present in the loader but absent from
+the shipped area set covered by this corpus.
+
+### 7.3 Row/column selection (`Weather_SelectDayRow`, canonical name)
+
+The active weather code is selected from the grid as:
+
+```
+row    = timeBlock % 10
+column = TODms / 3600     (integer divide; selects the simulated hour bucket 0–23)
+
+active_code = body[row][column]
+```
+
+- **`timeBlock`:** a day-count or day-pattern integer tracked by the weather manager. `% 10`
+  cycles through the 10 rows, giving ten distinct weather day-patterns.
+- **`TODms`:** current time-of-day in some millisecond-scale unit. Divided by 3600 yields the
+  simulated hour bucket (0–23). The exact unit of `TODms` and whether the 0–23 column index is
+  clamped are **DEBUGGER-PENDING** (confirm at the `Weather_SelectDayRow` column derivation).
+- The selected code is stored at `this+240`; the previous code at `this+241` gates hysteresis
+  (the weather system only re-applies when the code changes).
+
+### 7.4 Particle assets — hardcoded, NOT data-driven
+
+The weather type drives activation of one of two **hardcoded** particle systems. The bin chooses
+which system and at what intensity; it does not name any texture asset:
+
+| Type | Particle textures (hardcoded) |
+|------|-------------------------------|
+| RAIN | `data/sky/texture/rains.dds` + `data/sky/texture/rain_drop.dds` |
+| SNOW | `data/sky/texture/snow.dds` |
+
+These paths are fixed in the loader — they are not read from `weather%d.bin`.
+
+### 7.5 Quality-tier scalars — hardcoded, NOT file fields
+
+The weather initialiser applies three quality-tier scalars that dim rain/snow particle alpha and
+sky transparency at lower quality settings. These scalars are **hardcoded immediates** (not
+on-disk fields in `weather%d.bin`):
+
+| Quality tier (`OPTION_WEATHER`) | Rain/snow alpha | Sky alpha |
+|:--------------------------------|:---------------:|:---------:|
+| Tier 1 (highest) | 1.0 | 1.0 |
+| Tier 2 | 0.7 (rain/snow) / 0.7 (alt) | 0.825 |
+| Tier 3 (lowest) | 0.65 (rain/snow) / 0.65 (alt) | 0.8125 |
+
+### 7.6 Known unknowns
+
+- **`TODms` unit and 0–23 column clamp:** the exact time-unit of `TODms` and whether the
+  column index derivation clamps to the 23-column range before the table lookup are
+  **DEBUGGER-PENDING** — confirm at the `Weather_SelectDayRow` column arithmetic.
+- **SNOW code family (2x codes):** the snow code path is parser-present, but no snow areas
+  appear in the 95-file corpus. Snow behaviour (particle density scaling, sky-alpha interaction)
+  awaits a shipped area with a non-zero snow code.
+- **`timeBlock` semantics:** whether it is incremented per in-game day, on area load, or by
+  some other trigger is not confirmed statically.
 
 ---
 
@@ -1113,6 +1191,102 @@ is unambiguous.)
 
 ---
 
+## Section 13: `point_light%d.bin` — Per-Area Dynamic Point-Light Seed Pool
+
+**Status:** CONFIRMED (path, 8-byte header, 60-byte record stride, count source, position XYZ,
+range, type-gate, diffuse triplet, 5-slot selection model, ambient resolution).
+MED: colour-B and colour-C D3D roles.
+DEBUGGER-PENDING fields noted per field below.
+**File size:** 8 bytes + `count × 60` bytes (variable; absent-on-open → return 0, world still
+runs — fully optional).
+**Loader:** `PointLight_LoadMapData` (canonical name). Not a keyframe file; a flat pool of
+candidate lights from which the runtime selects the **5 player-nearest** each tick. Fully
+optional: an open failure returns 0 and the world runs without dynamic point lights.
+**Path:** `data/sky/dat/point_light%d.bin`, keyed by the current area id.
+
+> **No compression / encryption.** Raw little-endian slurp of the whole file into one heap
+> allocation. No magic number, no version field.
+
+### 13.1 Header (8 bytes)
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| 0x00 | 4 | f32 | `proximity_radius` | Read as f32; **functionally proven as the proximity-selection threshold** in log-space (the 5-nearest XZ selection compares against this value). Whether it also acts as a brightness multiplier is DEBUGGER-PENDING. | HIGH (use as selection threshold); DEBUGGER-PENDING (brightness role) |
+| 0x04 | 4 | i32 | `record_count` | Number of 60-byte records that follow. | HIGH |
+
+### 13.2 Record (60 bytes) — stride confirmed: `count × 60` bytes after the header
+
+The record block is allocated as `60 × record_count` bytes on load. Each record is 60 bytes,
+stride 60.
+
+| Offset | Size | Type | Field | Notes | Confidence |
+|-------:|-----:|------|-------|-------|------------|
+| +0x00 | 12 | f32[3] | `color_diffuse` RGB | Primary diffuse colour. Scaled at runtime by a master-dim scalar on the light manager. **This triplet is the confirmed diffuse contributor.** | HIGH |
+| +0x0C | 12 | f32[3] | `color_b` RGB | Second colour triplet. D3D channel role (e.g. specular, ambient) is DEBUGGER-PENDING. | MED |
+| +0x18 | 12 | f32[3] | `color_c` RGB | Third colour triplet. D3D channel role is DEBUGGER-PENDING. | MED |
+| +0x24 | 4 | f32 | `position_x` | World-space X position. Also used in the per-tick XZ proximity test vs player position. | HIGH |
+| +0x28 | 4 | f32 | `position_y` | World-space Y position. | HIGH |
+| +0x2C | 4 | f32 | `position_z` | World-space Z position. Also used in the per-tick XZ proximity test vs player position. | HIGH |
+| +0x30 | 4 | f32 | `range` | D3D9 point-light attenuation radius. Consumed by the D3D9 light-apply routine (feeds `Range`, `Attenuation1`, and `Attenuation2` from this value). NOT a brightness scalar. | HIGH |
+| +0x34 | 4 | ? | `unknown_34` | **Not read by any confirmed static path.** Meaning is DEBUGGER-PENDING. | UNKNOWN |
+| +0x38 | 4 | i32 | `type_flag` | Value `== 1` gates the per-tick **flicker pass** (`FlickerAnimRange`, canonical name) that animates the light's range. Other values are DEBUGGER-PENDING. | HIGH (== 1 gates flicker); PENDING (other values) |
+
+Total per record: 12 + 12 + 12 + 4 + 4 + 4 + 4 + 4 + 4 = 60 bytes.
+
+### 13.3 5-nearest runtime selection model
+
+The per-area pool is **not** statically placed — each tick the runtime selects **at most 5 player-nearest**
+lights from the pool:
+
+1. The selection routine iterates all records and computes a log-space XZ distance from the player
+   position to `(position_x, position_z)` for each record.
+2. Only records whose log-space distance is within `proximity_radius` (the header f32) are
+   candidates.
+3. Up to 5 candidates are bound into 5 D3D9 light slots (mgr+368, stride 184; the index map is
+   reset to −1 on load). Excess candidates beyond 5 are dropped.
+4. Type-flag == 1 records additionally pass through the flicker pass each tick (range-animation).
+
+**The C# parser must implement this 5-nearest model**, not static placement of all records.
+
+### 13.4 Ambient resolution — `K_ambient` is 0.0; ambient from `OPTION_BRIGHT`
+
+The point-light loader path does not interact with the `light%d.bin` ambient. The same global
+ambient resolution applies (§10.4–§10.5): `K_ambient = 0.0` (no writer), so the per-frame
+ambient term is inert; device ambient comes from the `OPTION_BRIGHT` brightness slider floor.
+Any C# applying a `light%d.bin` ambient term must honour this zero gate.
+
+### 13.5 Load order
+
+`PointLight_LoadMapData` is called after `Light_LoadBin` (which loads `light%d.bin` and handles
+directional vectors) in the per-area environment init sequence. It resets the 5-slot index map
+to −1 before reading the new pool.
+
+### 13.6 Known unknowns
+
+- **D3D channel mapping of `color_b` (+0x0C) and `color_c` (+0x18):** DEBUGGER-PENDING.
+  Confirm which D3D9 `D3DLIGHT9` struct fields receive these triplets (specular, ambient, etc.)
+  by breakpointing the D3D light-apply routine under a live area load.
+- **`unknown_34` (+0x34):** Present in every record; never read by any confirmed static path.
+  Confirm at the per-record consumer in the D3D light-apply routine.
+- **`type_flag` values ≠ 1:** Whether values other than 0 or 1 carry additional semantics is
+  DEBUGGER-PENDING.
+- **`proximity_radius` as brightness multiplier:** The header f32 is confirmed as the selection
+  threshold; whether it is also multiplied against the diffuse colour at bind time is
+  DEBUGGER-PENDING.
+- **Shipped header float values:** The actual numeric range of `proximity_radius` in shipped
+  areas is not confirmed from a sample (requires a non-empty `point_light%d.bin` from the VFS
+  corpus).
+
+> **C# contract note.** `point_light%d.bin` requires its own parser separate from the
+> `light%d.bin` keyframe parser (8-byte header + 60-byte records per this section, not the
+> 5312-byte slurp of §9). The master-dim scalar (a runtime slot on the light manager) that
+> scales `color_diffuse` is not an on-disk field — a port must replicate the scale-at-bind step,
+> not the
+> raw on-disk triplet. Cite this section as
+> `// spec: Docs/RE/formats/environment_bins.md §13` in the parser.
+
+---
+
 ## Sky texture assets
 
 All sky textures are **DDS** files under `data/sky/texture/`. Confirmed entries in the VFS:
@@ -1158,18 +1332,23 @@ and therefore has no water texture assets (§1.4).
    an unknown but a resolved no-op.)
 5. **`cloud_cycle%d.bin` cloud ID 101:** No matching texture found. Likely a "no cloud" sentinel
    but unconfirmed.
-6. **`weather%d.bin` full layout:** Zero-dominated samples; needs a rain/snow area sample for
-   decode. (`weather%d_rain.bin` is NOT in this category — it has no loader and is dead editor data,
-   §8.)
+6. **`weather%d.bin` full layout:** RESOLVED — the 10×24 u8 grid, selection logic
+   (`row = timeBlock % 10`, `column = TODms / 3600`), and code decode (`code/10` = type 0/1/2,
+   `(code%10)×0.1` = intensity) are CONFIRMED (§7). Particle assets are hardcoded paths. Remaining
+   open items: `TODms` exact unit and 0–23 column clamp (DEBUGGER-PENDING §7.6); SNOW code
+   in-area behaviour (no sample); `timeBlock` increment trigger. (`weather%d_rain.bin` has no loader
+   and is dead editor data — §8.)
 7. **`wind%d.bin` record field roles:** RESOLVED — layout (8-byte header + 24-byte records,
    `8 + count × 24`) is CONFIRMED, the header `source_flag` gates per-record texture binding (not
    wind on/off), the +0x14 `tex_id` joins to `data/sky/texture/wind%d.dds`, and the loader
    **fails-on-missing** (the family-wide sibling-tolerance exception) — see §12. Still open: the
    consumer-side roles of record words +0x04/+0x0C/+0x10 (proposed speed/coord/scale) and whether any
    shipped area sets `source_flag != 0` (none in the 57-file corpus).
-8. **`point_light%d.bin` record position fields (+0x24–+0x30):** Documented in
-   `terrain_layers.md §7`; positional interpretation (scaled coordinates vs. normalised index)
-   unverified.
+8. **`point_light%d.bin`:** RESOLVED — fully specified in §13. 8-byte header (proximity-radius
+   f32 + record_count i32), 60-byte records (three RGB f32 triplets, XYZ position, range, unknown_34,
+   type_flag), 5-nearest XZ selection model, master-dim scale at bind. Remaining open items: D3D
+   channel roles of `color_b` / `color_c`; `unknown_34` meaning; non-1 type_flag values; whether
+   `proximity_radius` also scales brightness — all DEBUGGER-PENDING (§13.6).
 9. **Indoor area lighting path:** When `indoor_flag = 1`, the exact ambient-only lighting
    configuration has not been fully traced in the binary. One indoor area's sky-init fog-absent
    bypass is DBG-pending (§1.5, §10.7).
@@ -1187,7 +1366,8 @@ and therefore has no water texture assets (§1.4).
 - **Related format specs:**
   - `Docs/RE/formats/terrain_layers.md §6–8` — formal specs for `light%d.bin`,
     `point_light%d.bin`, `wind%d.bin` (§9 of this document adds sample-verified corrections to the
-    `light%d.bin` section; §12 adds loader-resolved corrections to the `wind%d.bin` section)
+    `light%d.bin` section; §12 adds loader-resolved corrections to the `wind%d.bin` section;
+    §13 of this document is the authoritative full spec for `point_light%d.bin`)
   - `Docs/RE/formats/terrain.md` — terrain cell formats (`.ted`, `.map`, `.sod`)
   - `Docs/RE/formats/texture.md` — DDS texture container
 - **Runtime assembly spec:** `Docs/RE/specs/environment.md` (the runtime lighting/fog math, the
@@ -1204,6 +1384,22 @@ and therefore has no water texture assets (§1.4).
 ---
 
 ## Provenance note (this revision)
+
+**CYCLE 11 — `weather%d.bin` full decode + `point_light%d.bin` new section (build `263bd994`;
+`Weather_InitFromBin` loader walk + 95-file weather corpus; `PointLight_LoadMapData` loader walk
++ slot-fill and selection-routine analysis).** Added §13 (`point_light%d.bin`): 8-byte header
+(proximity-radius f32 + record_count i32), 60-byte record layout (three RGB f32 triplets at
++0x00/+0x0C/+0x18, XYZ position at +0x24/+0x28/+0x2C, range at +0x30, unknown_34 at +0x34,
+type_flag at +0x38), 5-nearest XZ selection model, master-dim scale at bind, ambient resolution
+(same `K_ambient = 0` / `OPTION_BRIGHT` floor as §10), fail-tolerate on absent file. Replaced §7
+(`weather%d.bin`) from PARTIAL/zero-dominated to CONFIRMED full decode: the 240-byte body is a
+10×24 u8 grid of weather codes; `code/10` = type (0 clear, 1 RAIN, 2 SNOW), `(code%10)×0.1` =
+intensity 0.0–0.9; row = `timeBlock % 10`, column = `TODms / 3600`; particle assets are hardcoded
+paths (not data-driven); quality-tier alpha scalars are hardcoded immediates. Debugger-pending
+items marked explicitly: `TODms` unit + column clamp, SNOW area behaviour, `point_light`
+`color_b`/`color_c` D3D roles, `unknown_34`, non-1 `type_flag`, `proximity_radius` as multiplier.
+Updated scope note, known-unknowns #6 and #8, cross-references, and sky-texture table. No
+addresses, no pseudo-code.
 
 **`wind%d.bin` loader-resolved promotion (build `263bd994`; wind loader re-walk + full 57-file VFS
 corpus).** Added §12 — supplementary loader-resolved / sample-verified corrections to

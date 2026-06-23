@@ -6,24 +6,13 @@ using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Login;
 using MartialHeroes.Shared.Kernel.Enums;
 
-// FrontEndAudio, ScreenHost
-// LoginWindow, PinSubView, ServerSelectSubView
-
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
-/// <summary>
-///     State 1 — LoginWindow. Builds the real 1024×768 login form and owns the in-login PIN/server-list
-///     sub-views (sub-states 31/32 and 34..41) before the scene advances to Load.
-///     spec: Docs/RE/specs/client_runtime.md §7.3 / §7.6; Docs/RE/specs/frontend_scenes.md §1 / §11.
-/// </summary>
 public sealed partial class LoginScene : StubSceneController
 {
     private string _account = "";
     private FrontEndAudio? _audio;
 
-    // CancellationTokenSource for the in-flight SelectServer/OpenGameConnection attempt.
-    // Cancelled when the user presses Cancel (action 113) on the connecting popup.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join"
     private CancellationTokenSource? _connectCts;
     private ClientContext? _ctx;
     private SceneHost? _host;
@@ -33,10 +22,8 @@ public sealed partial class LoginScene : StubSceneController
     private ServerSelectSubView? _serverSelect;
     private bool _syncingScene;
 
-    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Login;
 
-    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -83,12 +70,6 @@ public sealed partial class LoginScene : StubSceneController
                     ApplyServerList(serverList);
                     break;
                 case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
-                    // Out-of-band committed transition: the Application scene machine (e.g. 3/5
-                    // OnEnterGameAck) already pre-committed a new state, so CurrentState ≠ Login.
-                    // Calling Advance() here would be WRONG (it would advance from the already-committed
-                    // state and skip intermediate scenes). Instead, converge the visible controller to
-                    // the committed state without re-advancing the machine.
-                    // spec: Docs/RE/specs/client_runtime.md §7.5.2 (3/5 forces Load state-agnostically).
                     GD.Print(
                         $"[LoginScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
                         "out-of-band committed transition — calling SyncToCurrentState. spec: client_runtime.md §7.5.2.");
@@ -125,7 +106,6 @@ public sealed partial class LoginScene : StubSceneController
         _account = account;
         _password = password;
 
-        // spec: Docs/RE/specs/login_flow.md §4.2; Docs/RE/specs/crypto.md §6.1.
         if (_ctx?.UseCases is { } useCases)
             _ = useCases.LoginAsync(account, password, cancellationToken: CancellationToken.None);
 
@@ -179,24 +159,17 @@ public sealed partial class LoginScene : StubSceneController
     {
         if (_serverSelect is null || !IsInstanceValid(_serverSelect)) return;
 
-        // Pass the published ServerListEntryView records straight through (no view-model conversion hop):
-        // ServerSelectSubView.SetServers now consumes ServerListEntryView directly and resolves each
-        // server's localized DisplayName itself via the msg bank (5000+ServerId). spec: login_flow.md §2.1.
         _serverSelect.SetServers(serverList.Servers);
         GD.Print(
             $"[LoginScene] Applied ServerListReceivedEvent ({serverList.Servers.Length} entries) to state-1 server-list. " +
             "spec: login_flow.md §2.1.");
     }
 
-    // LoginFlowCompleted is now emitted by LoginWindow.NotifyConnectSuccess → state 41.
-    // It means the scene should tear down and advance to Load.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 41 / §4 "SUCCESS = char-list → state 4"
     private void OnLoginFlowCompleted(int serverId, string pin)
     {
         GD.Print($"[LoginScene] LoginFlowCompleted (server_id={serverId}, pin_len={pin.Length}). " +
                  "Advancing state 1→2 Load. spec: client_runtime.md §7.5.1 / §7.9.5.");
 
-        // Re-login with collected pin for the full credential string. spec: login_flow.md §4.2.
         if (_ctx?.UseCases is { } useCases)
             _ = useCases.LoginAsync(_account, _password, pin, CancellationToken.None);
 
@@ -204,21 +177,15 @@ public sealed partial class LoginScene : StubSceneController
             _host?.Advance();
     }
 
-    // Called when LoginWindow reaches sub-state 39 (connecting popup shown).
-    // Starts the real connect; on success calls NotifyConnectSuccess; on failure calls NotifyConnectFailed.
-    // spec: Docs/RE/specs/frontend_layout_tables.md §2.2 state 39 / §4
     private void OnConnectRequested(int serverId, string pin)
     {
         GD.Print($"[LoginScene] ConnectRequested (server_id={serverId}). Spawning SelectServerAsync. spec: §2.2/§4.");
-        // Cancel any previous in-flight attempt.
         _connectCts?.Cancel();
         _connectCts?.Dispose();
         _connectCts = new CancellationTokenSource();
         _ = SelectServerAsync((ushort)serverId, pin, _connectCts.Token);
     }
 
-    // Called when the user cancels the connecting popup (action 113).
-    // spec: Docs/RE/specs/frontend_layout_tables.md §4 "clicking Cancel aborts the join"
     private void OnConnectCancelled()
     {
         GD.Print("[LoginScene] ConnectCancelled: cancelling in-flight connect. spec: §4.");
@@ -244,41 +211,33 @@ public sealed partial class LoginScene : StubSceneController
 
             ct.ThrowIfCancellationRequested();
 
-            // spec: Docs/RE/specs/login_flow.md §2.2 — lobby resolves the game-server host:port.
             if (_ctx is not null)
                 await _ctx.OpenGameConnectionAsync(endpoint.Host, endpoint.Port).ConfigureAwait(false);
 
             ct.ThrowIfCancellationRequested();
 
-            // Success: notify LoginWindow to advance to state 41 (LoginFlowCompleted).
-            // spec: frontend_layout_tables.md §4 "successful handshake → char-list → advance scene"
             GD.Print($"[LoginScene] SelectServerAsync({serverId}): connect SUCCESS. Notifying LoginWindow. spec: §4.");
             CallDeferred(MethodName.ReportConnectSuccess);
         }
         catch (OperationCanceledException)
         {
-            // Cancelled by the user via action 113 — already handled by OnConnectCancelled.
             GD.Print($"[LoginScene] SelectServerAsync({serverId}): cancelled by user. spec: §4.");
         }
         catch (Exception ex)
         {
             GD.PrintErr($"[LoginScene] SelectServerAsync({serverId}) failed: {ex.Message}");
-            // Connect failure: notify LoginWindow to show the §2.1a countdown error box (msg 4028).
-            // spec: frontend_layout_tables.md §2.1a "connect failure → msg 4028 countdown error → return to list"
             CallDeferred(MethodName.ReportConnectFailed);
         }
     }
 
-    // Must run on the main thread (Control mutation via LoginWindow). Called via CallDeferred.
     private void ReportConnectSuccess()
     {
-        _login?.NotifyConnectSuccess(); // → state 41 → LoginFlowCompleted. spec: §2.2/§4.
+        _login?.NotifyConnectSuccess();
     }
 
-    // Must run on the main thread (Control mutation via LoginWindow). Called via CallDeferred.
     private void ReportConnectFailed()
     {
-        _login?.NotifyConnectFailed(); // → hide popup → msg 4028 countdown → state 34/37. spec: §2.1a/§4.
+        _login?.NotifyConnectFailed();
     }
 
     private void OnQuitRequested()

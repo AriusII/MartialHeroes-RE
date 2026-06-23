@@ -12,6 +12,7 @@
 #                 class/variant args of the preview model formula, HIGH confidence (four independent
 #                 read sites; the in-world spawn path feeds the same two offsets to the same factory).
 #   ida_anchor: 263bd994
+#   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots
 #              (the account character-slot count); the 5x981 record model is confirmed.
@@ -56,6 +57,9 @@ notes: |
       member map is owned by structs/actor.md -- decode from there. The fields that drive the
       char-select preview's REAL appearance are:
         +0x00  name (char[17], CP949/EUC-KR, NUL-terminated, <=16 bytes + terminator)
+        +0x22  body/appearance byte (u8)  -- feeds a digit of the WEAPON-slot (slot 14) overlay gid
+               recomposition (the base-1000 digit-recompose; see frontend_scenes.md SS3.3.7 / skinning.md
+               equipment-visuals). Read on the per-part build path, not by the list handler itself.
         +0x2C  appearance_variant (u8)  -- body/gender variant; the 'variant' arg of the model formula.
                STATIC-CONFIRMED HIGH (CYCLE 9 Phase 3.1): read zero-extended; this same byte doubles as
                the per-slot occupied/body marker. Distinct from the render-occupancy gate at desc +0x2E.
@@ -77,9 +81,13 @@ notes: |
         +0x74  server_class (u16) -- server-assigned style id, distinct from internal_class.
 
     Sub-block 2 -- StatBlock (96 bytes, record-relative 0x370..0x3cf):
-      Per-character primary-stat record. On enter-character the chosen slot's 96 bytes are copied
-      verbatim into the local-player stat globals, so this IS the character's stat record. Block
-      offsets are relative to the StatBlock start (record-relative 0x370 + the value below):
+      Per-character primary-stat record. Read as ONE opaque unit by the list handler -- its interior
+      is decoded later at enter-game, copied verbatim into the stat globals. The 96-byte interior is
+      SERVER-AUTHORED / VALUE-RUNTIME: the wire reach is CLOSED (96 bytes read sequentially), the
+      interior field meanings are RD (runtime-dependent) pending a live capture / enter-game trace.
+      On enter-character the chosen slot's 96 bytes are copied verbatim into the local-player stat
+      globals, so this IS the character's stat record. Block offsets below are relative to the
+      StatBlock start (record-relative 0x370 + the value below):
         +0x00 (4B u32) primary_stat_0  : 1st of the 5 allocatable primaries (STR-family).
         +0x04 (4B u32) primary_stat_1
         +0x08 (4B u32) primary_stat_2
@@ -130,8 +138,20 @@ notes: |
       error codes (one of those error codes is the cooldown refusal); the cooldown value itself never
       reaches the 3/1 record.
 
-    Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. A prior analyst observed a 1965-byte frame
-    = 3 + 2*981 (two populated slots), capture-unverified here.
+    NAME TRIM ON LOAD (CODE-CONFIRMED, static re-walk IDB SHA 263bd994): after each per-slot record is
+    read, the per-slot name string is trimmed of LEADING and TRAILING spaces and copied into the slot's
+    17-byte (0x11) name field. The "@BLANK@" empty-slot sentinel is NOT tested by this list handler --
+    that test lives on the ENTER path (the enter-game routine), not here. (The render-occupancy gate the
+    list scene uses is the descriptor faceA u16 @ +0x2E; see frontend_scenes.md SS3.2.)
+
+    Per-slot total = 880 + 96 + 1 + 4 = 981 bytes. Σ confirmed. A prior analyst observed a 1965-byte
+    frame = 3 + 2*981 (two populated slots), capture-unverified here.
+
+  CYCLE 11 (2026-06-22): Σ re-confirmed 880 + 96 + 1 + 4 = 981 per slot. The handler iterates a
+  5-bit occupancy mask (bits 0..4, LSB-first). The 96-byte interior (sub-block 2) is read as one opaque
+  unit -- its wire reach is CLOSED, its interior values are RD (server-authored, decoded at enter-game,
+  never decoded by the list handler itself). SlotFlag (sub-block 3) and FlagsWord (sub-block 4)
+  meanings confirmed RESOLVED (see sub-blocks 3 and 4 above).
 
   APPEARANCE DRIVER (how a list slot renders the REAL character, not a placeholder):
     For an existing character the rendered appearance comes ENTIRELY from the server-supplied
@@ -152,6 +172,12 @@ notes: |
   IMPLEMENTATION GUIDANCE: read the 3-byte header, then for each set bit in SlotMask (LSB-first,
   scan bits 0..4 -- 5 slots) decode one 981-byte record by stepping the four sub-blocks above. Drive
   the SpawnDescriptor decode from structs/actor.md.
+
+  ENGINE-STATE TRANSITION ON LOAD (CODE-CONFIRMED, static re-walk IDB SHA 263bd994): after the loop
+  completes, the handler drives the engine to the char-select scene by setting GameState = 4 and
+  substate = 8 (the char-select state pair). The select-window builder then block-copies the 5 decoded
+  records out of the net-handler scratch (the 5 x 880 descriptors, 5 x 96 stat blocks, 5 x 1 slot
+  flags) into the window object before building any widget. See frontend_scenes.md SS3.0 / SS3.1.
 
   PER-SLOT SCRATCH GEOMETRY (corroboration, CONFIRMED control-flow; NOT wire fields): the 5 decoded
   slot records land in distinct scratch regions of the char-select handler singleton -- the 880-byte

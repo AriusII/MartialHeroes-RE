@@ -7,10 +7,14 @@
 #   intra-buffer offsets: confirmed   (slot@0x00, 33B token@0x01, 2B pad@0x22, version dword@0x24 -- all read off the
 #                        enter builder's stack frame; sum 1+33+2+4 = 40)
 #   VersionToken formula: confirmed   (= 10*(data/cursor/game.ver field index 5)+9; on-disk source + arithmetic in code)
-#   SessionToken source: confirmed   (33B memcpy from the launcher command-line/argv0 global, NOT the typed account)
+#   SessionToken source: confirmed   (33B = lowercase-hex MD5 digest of the client's OWN exe file: argv[0] path fed
+#                        through an MD5-of-file hasher; 32 hex chars + NUL. A build-integrity self-checksum, NOT a
+#                        launcher/login session token. CORRECTED CYCLE 12 Phase 2 — supersedes the prior 'launcher token' reading.)
 #   wire VALUE semantics: capture/debugger-pending (the 33-byte token's exact format/content; whether Pad ever carries a field)
-#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
-#   conflicts: none (cmsg_char_enter.yaml re-confirmed FULLY CONFIRMED)
+#   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]   # CYCLE 12 Phase 2
+#   conflicts: SUPERSEDES the prior 'launcher command-line session token' reading of SessionToken — it is the
+#              lowercase-hex MD5 digest of the client executable itself (a self-checksum). The enter SEQUENCE is
+#              also corrected to a server round-trip (1/7 mode-1 -> 3/14 flag!=0 -> 1/9 from the 3/14 handler -> 3/5).
 
 name: CmsgEnterGameRequest
 opcode: 0x10009           # major 1, minor 9 -> (1 << 16) | 9
@@ -23,8 +27,9 @@ capture_verified: false
 summary: >
   Enter-world request. Built by the enter-selected-character helper into a zero-initialised 40-byte
   buffer: the chosen slot index, a 33-byte launcher-supplied session/identity token string, and a
-  4-byte derived version token. The session token is copied from the process command-line/argv0
-  global (a launcher-supplied login token, NUL-bounded), not from the account text field. The
+  4-byte derived version token. The session token is the lowercase-hex MD5 digest of the
+  client's own executable file (argv[0] path run through an MD5-of-file hasher; 32 hex chars + NUL) — a
+  build-integrity self-checksum, NOT a launcher/login token and not the account text field. The
   version token is NOT a hardcoded constant: it is 10 x (field 5 of the on-disk data/cursor/game.ver)
   + 9, derived on-disk. The enter path sends ONLY this 1/9 (it does not re-send a select first; the
   slot was already managed via 1/7 at slot click). The server first replies with S2C 3/5
@@ -40,7 +45,7 @@ summary: >
 #
 fields:
   - { name: SlotIndex,    type: u8 }            # 0x00  selected character slot (0..4)  -- CODE-CONFIRMED
-  - { name: SessionToken, type: "bytes[33]" }   # 0x01  33B launcher session/identity token string (asciiz within) -- offset PINNED @0x01 (code-confirmed)
+  - { name: SessionToken, type: "bytes[33]" }   # 0x01  33B self-checksum: lowercase-hex MD5 of the client EXE (32 hex + NUL) -- offset PINNED @0x01 (code-confirmed)
   - { name: Pad,          type: "bytes[2]" }    # 0x22  alignment gap before the version dword (observed zero) -- offset PINNED @0x22 (code-confirmed)
   - { name: VersionToken, type: u32 }           # 0x24  derived version token = 10*(game.ver field 5)+9 -- offset PINNED @0x24 (code-confirmed)
 
@@ -52,13 +57,19 @@ notes: |
     0x00 (1B)  SlotIndex     : the chosen character slot, range 0..4. CODE-CONFIRMED. The slot must
                                hold a real (non-blank) character before this fires; the entering
                                latch is set so the request cannot re-fire.
-    0x01 (33B) SessionToken  : a 33-byte session/identity token string copied from the process
-                               command-line / first-argument global -- i.e. a launcher-supplied login
-                               token, NUL-bounded within the 33-byte field. This is NOT the account
-                               text the user typed; it is the token the launcher passes on the
-                               command line. CODE-CONFIRMED source + 33-byte width; the
-                               intra-buffer OFFSET is now PINNED at +0x01 (read off the stack
-                               frame: the 33-byte memcpy target sits one byte after the slot).
+    0x01 (33B) SessionToken  : a 33-byte build-integrity self-checksum. CORRECTED (CYCLE 12 Phase 2):
+                               it is the lowercase-hex MD5 digest of the CLIENT'S OWN EXECUTABLE FILE.
+                               The first program argument (argv[0] = the running exe's path) is fed
+                               into an MD5-of-file hasher; the resulting 32 hex characters plus a NUL
+                               terminator fill the 33-byte field. It is NOT a launcher/login session
+                               token and NOT the account text. It is always present in any normal
+                               launch (no launcher argument required). CODE-CONFIRMED source + format
+                               + 33-byte width; OFFSET PINNED at +0x01. The exact digest BYTES on the
+                               wire are runtime (depend on the shipped binary) -> capture-pending.
+                               NOTE for the re-implementation: a fresh clean-room client cannot
+                               reproduce MD5(original-exe) byte-identically; if the server validates
+                               this field's SHAPE (a present 32-char lowercase-hex string), send a
+                               valid-shaped 32-hex token + NUL rather than 33 zero bytes.
     0x22 (2B)  Pad           : a 2-byte alignment gap before the version dword; observed zero (from the memset). Offset PINNED at +0x22.
     0x24 (4B)  VersionToken  : a 4-byte version/build token. DERIVED, not constant: the client opens
                                data/cursor/game.ver from the VFS, reads field index 5, and computes
@@ -69,9 +80,16 @@ notes: |
                                Cross-ref specs/login.md (enter-world handshake) and
                                login_flow.md version handling.
 
-  ENTER SEQUENCE (load-bearing): selecting a filled slot already emitted a 1/7 manage; pressing
-  Enter emits ONLY this 1/9 (the enter handler does NOT re-send a select). So the whole select->enter
-  flow is two packets: 1/7 at slot click, then 1/9 at Enter.
+  ENTER SEQUENCE (load-bearing -- CORRECTED CYCLE 12 Phase 2): world entry is a SERVER ROUND-TRIP,
+  not two independent local presses. The occupied-slot "play / select this character" confirm emits
+  1/7 CmsgSelectCharacterSlot with mode = 1 (select-and-play); the server replies 3/14
+  SmsgCharSpawnResponse (16-byte body, leading flag byte); when that flag is non-zero the client
+  emits THIS 1/9 FROM INSIDE its 3/14 handler (server-triggered) carrying the slot + spawn coords;
+  the server then replies 3/5 SmsgEnterGameAck. Ladder: 1/7(mode 1) -> 3/14(flag!=0) -> 1/9 -> 3/5.
+  A client that fires 1/9 unilaterally off the Enter button -- without the mode-1 1/7 and without the
+  positive-flag 3/14 -- sends 1/9 out of sequence; this is the leading static hypothesis for a genuine
+  3/100 select-mode result code 23 reject. (A secondary, purely client-gated direct Enter->enter route
+  exists, but the 3/14-gated path is the normal play flow.) See specs/frontend_scenes.md §7.
 
   POST-SEND LOCAL HANDOFF: before any ack, the client caches the chosen slot's per-slot spawn
   descriptor and stat block into globals, tears down the select scene, then awaits the reply pair:

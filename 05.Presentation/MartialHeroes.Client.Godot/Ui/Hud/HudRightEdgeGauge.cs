@@ -1,113 +1,54 @@
-// Ui/Hud/HudRightEdgeGauge.cs
-//
-// Right-edge stacked HP/MP gauge composite.
-//
-// Two gauge strips stacked at the right edge form one composite widget.
-// Source texture: data/ui/chunrihojung.dds (loaded by path, not via uitex.txt).
-//
-// Placement (CONFIRMED-formula):
-//   Gauge strip A (HP):  screen_width − 135, Y = 200, W = 140, H = 35
-//   Gauge strip B (MP):  screen_width − 135, Y = 250, W = 140, H = 35
-//
-// In Godot terms: AnchorLeft = 1, AnchorRight = 1
-//   OffsetLeft  = -135, OffsetRight = 5 (=−135+140)
-//   Strip A: OffsetTop = 200, OffsetBottom = 235
-//   Strip B: OffsetTop = 250, OffsetBottom = 285
-//
-// spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
-// spec: Docs/RE/specs/ui_hud_layout.md §5.3 — "chunrihojung.dds" source texture.
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
-/// <summary>
-///     Right-edge stacked HP/MP gauge composite. Two 140×35 strips at screen_width−135.
-///     <para>
-///         PASSIVE: reads <see cref="IHudEventHub" /> ExpLevels for vitals; renders ProgressBar fills.
-///         Zero game logic. Degrades gracefully when VFS is offline.
-///     </para>
-///     spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
-/// </summary>
 public sealed partial class HudRightEdgeGauge : Control
 {
-    // -------------------------------------------------------------------------
-    // Spec-cited placement constants
-    // spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula
-    // -------------------------------------------------------------------------
+    private const float OffsetFromRight = 135f;
+    private const float GaugeW = 140f;
+    private const float GaugeH = 35f;
+    private const float HpY = 200f;
+    private const float MpY = 250f;
 
-    private const float OffsetFromRight = 135f; // spec: ui_hud_layout.md §5.6
-    private const float GaugeW = 140f; // spec: ui_hud_layout.md §5.6
-    private const float GaugeH = 35f; // spec: ui_hud_layout.md §5.6
-    private const float HpY = 200f; // spec: ui_hud_layout.md §5.6 strip A
-    private const float MpY = 250f; // spec: ui_hud_layout.md §5.6 strip B (+50)
+    private const string GaugeDdsPath = "data/ui/chunrihojung.dds";
 
-    // Atlas: chunrihojung.dds (the right-edge gauge chrome).
-    // spec: Docs/RE/specs/ui_hud_layout.md §5.3 / §5.6 — source texture "chunrihojung.dds".
-    private const string GaugeDdsPath = "data/ui/chunrihojung.dds"; // spec: ui_hud_layout.md §5.3
-
-    // -------------------------------------------------------------------------
-    // Child controls
-    // -------------------------------------------------------------------------
 
     private ProgressBar _hpBar = null!;
     private Label _hpLabel = null!;
 
-    // -------------------------------------------------------------------------
-    // Hub drain state
-    // -------------------------------------------------------------------------
 
-    // The Vitals channel is drained every frame in _Process.
-    // spec: MartialHeroes.Client.Application.Contracts.Hud.IHudEventHub.Vitals
-    // spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
     private IHudEventHub? _hub;
     private ProgressBar _mpBar = null!;
     private Label _mpLabel = null!;
 
-    // -------------------------------------------------------------------------
-    // Build (geometry pass)
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Geometry pass: positions the two gauge strips at screen_width−135, Y=200 and Y=250.
-    ///     spec: Docs/RE/specs/ui_hud_layout.md §5.6 CONFIRMED-formula.
-    /// </summary>
     public void Build(HudAtlasLibrary atlas)
     {
         Name = "HudRightEdgeGauge";
         MouseFilter = MouseFilterEnum.Ignore;
 
-        // Container: right-anchored, spans Y=200..285.
-        // AnchorLeft=1, AnchorRight=1 → right edge relative.
-        // The two strips sit inside at their Y offsets.
         AnchorLeft = 1f;
         AnchorRight = 1f;
         AnchorTop = 0f;
         AnchorBottom = 0f;
-        OffsetLeft = -OffsetFromRight; // spec: ui_hud_layout.md §5.6
-        OffsetRight = -OffsetFromRight + GaugeW; // spec: ui_hud_layout.md §5.6
-        OffsetTop = HpY; // spec: ui_hud_layout.md §5.6 strip A Y
-        OffsetBottom = MpY + GaugeH; // spec: ui_hud_layout.md §5.6 strip B bottom
+        OffsetLeft = -OffsetFromRight;
+        OffsetRight = -OffsetFromRight + GaugeW;
+        OffsetTop = HpY;
+        OffsetBottom = MpY + GaugeH;
 
-        // Try to load chunrihojung.dds as the gauge backdrop.
-        // spec: ui_hud_layout.md §5.3 / §5.6 — "chunrihojung.dds" source texture.
         var gaugeTex = atlas.GetByPath(GaugeDdsPath);
         if (gaugeTex is null)
             GD.PrintErr("[HudRightEdgeGauge] chunrihojung.dds unavailable — gauge chrome absent (VFS offline). " +
                         "spec: Docs/RE/specs/ui_hud_layout.md §5.6.");
 
-        // HP strip (strip A)
         _hpBar = BuildGaugeStrip(gaugeTex, 0f,
             new Color(0.9f, 0.1f, 0.1f, 0.85f));
 
-        // MP strip (strip B)  — positioned +50 from HP strip
-        // spec: ui_hud_layout.md §5.6 — "Y+50 for strip B"
-        _mpBar = BuildGaugeStrip(gaugeTex, MpY - HpY, // = 50
+        _mpBar = BuildGaugeStrip(gaugeTex, MpY - HpY,
             new Color(0.1f, 0.3f, 0.9f, 0.85f));
 
-        // HP value label
         _hpLabel = new Label
         {
             Name = "HpLabel",
@@ -119,9 +60,9 @@ public sealed partial class HudRightEdgeGauge : Control
         _hpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _hpLabel.OffsetTop = 0f;
         _hpLabel.OffsetBottom = GaugeH;
+        HudFont.ApplyToLabel(_hpLabel, 4);
         AddChild(_hpLabel);
 
-        // MP value label
         _mpLabel = new Label
         {
             Name = "MpLabel",
@@ -133,6 +74,7 @@ public sealed partial class HudRightEdgeGauge : Control
         _mpLabel.SetAnchorsAndOffsetsPreset(LayoutPreset.TopWide);
         _mpLabel.OffsetTop = MpY - HpY;
         _mpLabel.OffsetBottom = MpY - HpY + GaugeH;
+        HudFont.ApplyToLabel(_mpLabel, 4);
         AddChild(_mpLabel);
 
         GD.Print("[HudRightEdgeGauge] Built — two 140×35 strips at screen_width−135, Y=200/250. " +
@@ -150,13 +92,9 @@ public sealed partial class HudRightEdgeGauge : Control
         };
         AddChild(container);
 
-        // Chrome backdrop
         if (chromeTex is not null)
         {
-            // Strip A and B are two 140×35 regions; strip A at srcY=0, strip B at srcY=35.
-            // Exact source coordinates are not byte-confirmed; the chrome is applied as full-strip.
-            // TODO(spec): chunrihojung.dds internal source rects are debugger-pending.
-            var chromeSrcY = (int)(localY / GaugeH) * (int)GaugeH; // 0 or 35
+            var chromeSrcY = (int)(localY / GaugeH) * (int)GaugeH;
             var chrome = new TextureRect
             {
                 Name = "Chrome",
@@ -173,7 +111,6 @@ public sealed partial class HudRightEdgeGauge : Control
             container.AddChild(chrome);
         }
 
-        // Progress fill bar
         var bar = new ProgressBar
         {
             Name = "Bar",
@@ -193,15 +130,7 @@ public sealed partial class HudRightEdgeGauge : Control
         return bar;
     }
 
-    // -------------------------------------------------------------------------
-    // Hub binding
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Binds to the HUD event hub so the gauge drains <see cref="IHudEventHub.Vitals" /> each frame.
-    ///     spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.
-    ///     spec: MartialHeroes.Client.Application.Contracts.Hud.IHudEventHub.Vitals.
-    /// </summary>
     public void BindHub(IHudEventHub hub)
     {
         _hub = hub;
@@ -213,14 +142,12 @@ public sealed partial class HudRightEdgeGauge : Control
     {
         if (_hub is null) return;
 
-        // Drain latest-wins Vitals channel; apply the last received value per frame.
         HudVitalsEvent? latest = null;
         while (_hub.Vitals.TryRead(out var v))
             latest = v;
 
         if (latest is null) return;
 
-        // Update HP bar
         if (latest.MaxHp > 0)
         {
             _hpBar.MaxValue = latest.MaxHp;
@@ -229,7 +156,6 @@ public sealed partial class HudRightEdgeGauge : Control
 
         _hpLabel.Text = $"HP {latest.CurrentHp}/{latest.MaxHp}";
 
-        // Update MP bar
         if (latest.MaxMp > 0)
         {
             _mpBar.MaxValue = latest.MaxMp;

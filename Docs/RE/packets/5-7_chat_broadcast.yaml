@@ -1,39 +1,56 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# Header + channel routing are control-flow-confirmed (static IDA, IDB SHA 263bd994); the on-wire
+# byte-order of the body length prefix and the server-defined channel-code VALUE semantics stay
+# capture/debugger-pending. capture_verified: false.
 
 name: SmsgChatBroadcast
 opcode: 0x50007           # major 5 (Push), minor 7 -> (5 << 16) | 7
 direction: S2C
-size: var                 # 36-byte fixed header + variable text body
+size: var                 # 36-byte fixed header + [u32 len][len CP949 bytes] body
 spec: packets/5-7_chat_broadcast.yaml
-status: hypothesis
+status: confirmed-routing  # routing/sizes/framing control-flow-confirmed; body VALUES server-authored
 capture_verified: false
+readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 
-summary: Server broadcasts a chat message. A 36-byte header (sender + routing) followed by variable message text.
+summary: >
+  Server broadcasts a chat message. A 36-byte fixed header (sender + routing + channel) followed by a
+  single length-prefixed CP949 message-text segment.
 
-# Fixed 36-byte header. The trailing message text is variable (see notes).
+# Fixed 36-byte header. The message text body that follows is length-prefixed (see notes).
 fields:
-  - { name: SenderSort,  type: u8 }         # 0x00  sender actor sort
-  - { name: Pad0,        type: "bytes[3]" }   # 0x01  padding
-  - { name: SenderId,    type: u32 }        # 0x04  sender actor id
-  - { name: ContextId,   type: u32 }        # 0x08  context id (target / room / whisper-peer id)
-  - { name: Reserved0C,  type: u8 }         # 0x0c  reserved / sub-field
-  - { name: SubCommand,  type: u8 }         # 0x0d  chat verb / sub-command
-  - { name: Channel,     type: u8 }         # 0x0e  channel (6 or 7 routed as whisper)
-  - { name: Reserved0F,  type: u8 }         # 0x0f  reserved
-  - { name: SenderName,  type: "bytes[20]" }  # 0x10  sender display name (fixed buffer, asciiz, 0x10..0x23)
+  - { name: SenderKeyA,  type: u32 }          # 0x00  sender composite-key word A (low byte = sender sort selector)
+  - { name: SenderId,    type: u32 }          # 0x04  sender composite-key word B / sender actor id
+  - { name: ContextId,   type: u32 }          # 0x08  context id (target / room / whisper-peer id; channel-0 gates on == 301)
+  - { name: Reserved0C,  type: u8 }           # 0x0c  reserved / sub-field
+  - { name: SubCommand,  type: u8 }           # 0x0d  chat verb / sub-command (0/1 branch right after the header read)
+  - { name: Channel,     type: u8 }           # 0x0e  channel code (drives the routing + colour ladder, see notes)
+  - { name: Reserved0F,  type: u8 }           # 0x0f  reserved
+  - { name: SenderName,  type: "bytes[20]" }  # 0x10  sender display name (fixed CP949 buffer, asciiz, 0x10..0x23)
+
+# Body (after the 36-byte header): one length-prefixed text segment.
+body:
+  - { name: BodyLength,  type: u32 }          # 0x24  byte count of the CP949 text that follows
+  - { name: BodyText,    type: "bytes[BodyLength]" }  # 0x28  CP949 message text (client NUL-terminates after; NUL not counted)
 
 notes: |
-  Static inference only; no capture available. VARIABLE-LENGTH packet.
+  CONTROL-FLOW-CONFIRMED (static IDA, IDB SHA 263bd994), not yet capture-verified.
 
-  Header = 36 bytes (0x00..0x23), matching the handler's single 0x24-byte read. The message text
-  body follows the header.
-    0x00 (1B) sender sort, 0x04 (4B) sender id, 0x08 (4B) context id.
-    0x0d (1B) sub-command (chat verb); 0x0e (1B) channel (==6/==7 => whisper).
-    0x10..0x23 (20B) sender display name, NUL-terminated.
+  HEADER = 36 bytes (0x00..0x23), matching the handler's single 0x24-byte read. The sender display
+  name lives IN the header at 0x10 (20-byte fixed CP949 buffer) — it is NOT a separate body segment.
 
-  BODY (after the 36-byte header): variable-length chat text. The length encoding is NOT confirmed
-  statically (length-prefixed vs NUL-terminated vs "rest of frame"). Reasonable default hypothesis
-  for the engineer until a capture lands:
-    body_length = frame.size - 8 (frame header) - 36 (chat header), then NUL-trimmed.
-  UNKNOWN: body framing, charset of the text, meaning of the reserved bytes. Capture required.
+  BODY framing (CORRECTED): past the 36-byte header the body is exactly ONE length-prefixed segment:
+  a u32 byte-count followed by that many CP949 bytes. The client copies exactly that many bytes and
+  appends its own NUL (the NUL is client-added and is NOT part of the counted length). Therefore:
+
+      frame.size == 8 (frame header) + 36 (chat header) + 4 (body length word) + BodyLength
+
+  This SUPERSEDES the earlier "body_length = frame.size - 8 - 36" hypothesis, which over-counted by the
+  4-byte length word — the explicit [u32 len] prefix exists; the body is not "rest of frame".
+
+  Channel routing + colour ladder (the channel byte at header +0x0e selects both): see
+  Docs/RE/specs/chat.md (the S2C channel-code -> routing -> ARGB colour table). The everyday channel
+  codes route < 100 into the chat-log ring; codes > 100 route into a secondary system/notice list.
+
+  CAPTURE/DEBUGGER-PENDING (RD): the on-wire byte-order/endianness of the u32 body length word and
+  whether the server's count ever includes a NUL; the server-defined VALUE meanings of the
+  system/notice channel band; the channel-0 context==301 + name-masking content path.

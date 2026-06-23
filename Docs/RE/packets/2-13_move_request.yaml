@@ -8,7 +8,7 @@
 #   ModeFlags split:     confirmed   (byte @0x0c = constant 3; byte @0x0d = run-flag bool from the player run state;
 #                        bytes @0x0e/0x0f undefined -- the prior "low byte = move-mode 1" reading is REFINED)
 #   wire VALUE semantics: capture/debugger-pending (Heading angular unit; exact @0x0c mode-byte semantics across callers)
-#   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]
 #   conflicts: none (size + first 3 floats re-confirmed; ModeFlags sub-layout refined to the @0x0c=3 / @0x0d run-flag split)
 
 name: CmsgMoveRequest
@@ -45,7 +45,14 @@ notes: |
                          also XZ-only). CONFIRMED.
     0x0c (1B) ModeByte : a move-mode byte. CONTROL-FLOW CONFIRMED to be written as the constant 3 at
                          this send site (the earlier "low byte = move-mode 1" reading is corrected).
-                         Whether the value varies by caller is a WIRE VALUE -> capture/debugger-pending.
+                         MOVE-MODE VALUE SPACE (CYCLE 12 / Phase 3, counter-confirmed on 263bd994):
+                         the body builder is a single shared sender and ModeByte is NOT a parameter --
+                         it is a hardcoded literal 3 written unconditionally, even though every caller
+                         passes a mode argument that the builder ignores. So the statically-decidable
+                         move-mode wire value space is the SINGLETON {3}; there is no second
+                         statically-closeable arm on this byte. Any other server-side mode value is
+                         capture/debugger-pending. (RunFlag @0x0d is the only mode-like field that
+                         statically varies.)
     0x0d (1B) RunFlag  : a run/walk flag, written from the local player's run state (1 when running).
                          CONTROL-FLOW CONFIRMED as a distinct byte at @0x0d.
     0x0e (2B) Reserved0E : the trailing two bytes of the old 0x0c..0x0f region; not written by the

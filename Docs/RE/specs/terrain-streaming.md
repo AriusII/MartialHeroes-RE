@@ -11,6 +11,9 @@ verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06
                           # queue/signal hop) and the worker apparatus is present-but-dormant; three
                           # runtime items (worker count==0 / a runtime worker spawn, dispatcher is sole
                           # driver, frustum matrix-major / up-axis) remain capture/debugger-pending — see §9
+                          # CYCLE 12 (2026-06-22, IDB SHA 263bd994): §6.5 ground-height feed CORRECTED —
+                          # the terrain-height sampler uses PER-TRIANGLE PLANE interpolation, NOT 4-corner
+                          # bilinear lerp.  See §6.5 correction note.
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
 # CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
@@ -374,6 +377,19 @@ sequence, not two independent ones:
 - A **visible-cell list rebuild** refreshes the resident/visible set.
 - A **height/elevation feed** reads an elevation value off the **new center cell** and pushes it to
   a downstream consumer every shift (so the consumer always tracks the player-cell ground height).
+
+> **CYCLE 12 CORRECTION (binary-won, IDB SHA 263bd994) — terrain ground height uses PER-TRIANGLE
+> PLANE interpolation, NOT 4-corner bilinear lerp.**
+> The terrain-height sampler that this feed (and the camera height-clamp of §A.6 in
+> `specs/camera_movement.md`) calls does NOT perform a 4-corner bilinear interpolation. It
+> **determines which of the two triangles in the quad the query XZ falls in, then evaluates the
+> plane equation of that triangle** — standard barycentric/plane height. The bilinear-lerp reading
+> in any prior note or in `CLAUDE.md` is incorrect and is superseded by this correction. A faithful
+> reimplementation MUST use per-triangle plane interpolation: find the quad, determine the triangle
+> (by the diagonal split direction — see `formats/terrain.md §5.7` for the split/UV-direction
+> flags), and solve for Y from the plane of that triangle's three vertices. The 4-corner bilinear
+> shortcut gives different results near the diagonal and must NOT be used.
+> (Confidence: CODE-CONFIRMED, IDB SHA 263bd994. cite: `// spec: Docs/RE/specs/terrain-streaming.md §6.5`)
 
 ### 6.6 Stream-radius selection, override, and clamp
 

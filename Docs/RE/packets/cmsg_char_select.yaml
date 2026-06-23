@@ -1,6 +1,7 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED field internals; size + builder identity + the two select sub-modes are
-# static-HIGH; the mode-byte VALUE meaning (select-and-play vs slot-lock) is capture/debugger-pending.
+# CAPTURE-UNVERIFIED field internals; size + builder identity + the two static emit-site modes are
+# static-HIGH; mode 2 (delete-confirm) is INFERRED from the S2C 3/7 subtype-2 pairing and is
+# DEBUGGER-PENDING (not yet witnessed live).
 # capture_verified: false.
 #
 # VERIFICATION (CYCLE 4 W1.3 re-confrontation -- the binary wins):
@@ -8,13 +9,16 @@
 #   field split:         confirmed   ([u8 slot][u8 mode]; both emit sites build the same 2-byte body)
 #   mode-byte LITERALS:  confirmed   (site A "play/select this character" writes mode = 1; site B the
 #                        slot-lock/pre-play path writes mode = 0)
-#   delete-mode reading: REFUTED     (both call sites are character-SELECT paths -- there is no delete
-#                        verb, no delete payload, and no "mode==1 means delete" semantic in either
-#                        emitter; the earlier "{slot,1} = delete" reading is corrected)
-#   wire VALUE semantics: capture/debugger-pending (the runtime meaning of mode 1 vs mode 0)
-#   ida_reverified: 2026-06-20   ida_anchor: 263bd994   evidence: [static-ida]
-#   conflicts: SUPERSEDES the earlier "CmsgManageCharacter / delete-overload" reading of this file --
-#              1/7 is CmsgSelectCharacterSlot, NOT a delete carrier. See "DELETE RESOLUTION" below.
+#   delete-mode reading: UPDATED     (mode 2 = delete-confirm inferred from 3/7 SmsgCharManageResult
+#                        subtype-2 request<->result pairing; the earlier REFUTE applied only to the
+#                        "mode==1 means delete" mis-reading, not to the existence of a delete mode.
+#                        Mode 2 literal: DEBUGGER-PENDING -- not witnessed live as of IDB 263bd994.)
+#   wire VALUE semantics: mode 0 and mode 1 CODE-CONFIRMED; mode 2 INFERRED/DEBUGGER-PENDING.
+#   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]   # CYCLE 12 Phase 2:
+#                        mode roles pinned to UI actions -- mode 1 = select-and-play (play-confirm, drives
+#                        the enter ladder); mode 0 = slot-lock/pre-play. Mode 2 = delete-confirm (inferred).
+#   conflicts: SUPERSEDES the earlier "CmsgManageCharacter / delete-overload" reading of this file;
+#              1/7 carries select (mode 0/1) AND delete (mode 2, debugger-pending). See "DELETE RESOLUTION".
 
 name: CmsgSelectCharacterSlot
 opcode: 0x10007           # major 1, minor 7 -> (1 << 16) | 7
@@ -26,19 +30,21 @@ capture_verified: false
 
 summary: >
   Character-select / slot-confirm commit on the character-select screen -- a 2-byte body of a slot
-  index plus a MODE byte that distinguishes two select sub-actions on the same connection. The
-  "play / select this character" confirm path sends mode 1; the slot-lock / pre-play confirm path
-  sends mode 0. Both emit sites live in the character-select command handler and are SELECT paths.
-  The earlier "1/7 = delete-mode" reading is REFUTED: there is no delete payload, no delete verb,
-  and no "mode==1 means delete" semantic in either emitter. On this build there is NO dedicated
-  major-1 character-delete opcode -- delete outcomes ride the server's major-3 result ladder (3/7
-  SmsgCharManageResult subtype 2). The builder sets the select-window in-flight latch while the
-  request is outstanding.
+  index plus a MODE byte that distinguishes three sub-actions on the same connection. Mode 0 =
+  deselect / slot-lock / pre-play confirm; mode 1 = select-and-play (the play-confirm that drives
+  world entry via the 3/14 enter-trigger); mode 2 = delete-confirm (inferred from the 3/7
+  SmsgCharManageResult subtype-2 delete-confirmed result pairing -- the S2C result handler for
+  subtype 2 is the logical counterpart to a C2S delete request on 1/7; the mode-2 literal is
+  DEBUGGER-PENDING, not yet witnessed live). Both statically-observable emit sites are SELECT
+  paths (modes 0 and 1); there is no directly visible delete-emitter in static analysis. On this
+  build there is NO dedicated major-1 character-delete opcode -- delete outcomes ride the server's
+  major-3 result ladder (3/7 SmsgCharManageResult subtype 2). The builder sets the select-window
+  in-flight latch while the request is outstanding.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 2.
 fields:
   - { name: SlotIndex, type: u8 }   # 0x00  selected character slot (0..4; the highlighted/committed slot)
-  - { name: Mode,      type: u8 }   # 0x01  select sub-mode: 1 = select-and-play, 0 = slot-lock (value meaning capture/debugger-pending)
+  - { name: Mode,      type: u8 }   # 0x01  select sub-mode: 0 = deselect/slot-lock/pre-play, 1 = select-and-play (play-confirm; elicits 3/14 enter-trigger), 2 = delete-confirm (debugger-pending: inferred from 3/7 subtype-2 pairing; not yet witnessed live)
 
 notes: |
   Static analysis only; no capture. Frame = 8-byte header + 2 = 10 bytes on the wire. Width sum
@@ -46,21 +52,34 @@ notes: |
 
     0x00 (1B) SlotIndex : the chosen/committed character slot index (0..4), taken from the window's
                           committed-slot field. STATIC HIGH.
-    0x01 (1B) Mode      : a select sub-mode byte. Two emit sites build the identical 2-byte body and
-                          differ ONLY in this byte:
-                            - Site A (command id 6, the "play / select this character" confirm):
-                              writes the literal 1.
-                            - Site B (command id 54, the slot-lock / pre-play confirm path):
-                              writes the literal 0.
-                          The mode-byte LITERALS (1 vs 0) are confirmed; their runtime MEANING
-                          (select-and-play vs slot-lock) is capture/debugger-pending.
+    0x01 (1B) Mode      : a select sub-mode byte. Three values are now identified:
+                            - Mode = 0 (the slot-lock / pre-play confirm; also stamps the chosen
+                              character NAME into the HUD): a pre-play slot-lock step. CODE-CONFIRMED.
+                            - Mode = 1 (the occupied-slot "play / select this character" confirm):
+                              this is the PLAY-CONFIRM that drives world entry -- the server answers
+                              it with 3/14 SmsgCharSpawnResponse, whose positive flag triggers the
+                              1/9 enter send (see specs/frontend_scenes.md §7 and cmsg_char_enter.yaml).
+                              CODE-CONFIRMED.
+                            - Mode = 2 (the delete-confirm action): inferred from the request<->
+                              result-subtype pairing -- the S2C 3/7 SmsgCharManageResult subtype-2
+                              delete-confirmed handler is the logical counterpart to a C2S delete
+                              request carried on opcode 1/7; mode 2 is the only unassigned value in
+                              a 3-action slot-manage scheme. The mode-2 literal has NOT been
+                              witnessed live (DEBUGGER-PENDING: no capture of the delete flow).
+                          Mode literals 0 and 1 are CODE-CONFIRMED. Mode 2 is INFERRED / DEBUGGER-
+                          PENDING. Remaining capture-pending facts: whether the server strictly
+                          requires the mode-0 -> mode-1 two-step or only the mode-1 play-confirm.
 
-  DELETE RESOLUTION (load-bearing, binary-won): 1/7 is NOT a delete carrier. Both emit sites are
-  character-SELECT code paths (the slot-pick confirm in the character-select window), not deletion
-  code. On this build there is NO dedicated C2S character-delete opcode in the major-1 family;
-  character removal is a server-side decision surfaced by the major-3 char-mgmt result ladder
-  (3/7 SmsgCharManageResult subtype 2 = delete-confirmed; see packets/3-7_char_manage_result.yaml).
-  This corrects the earlier "delete overloads 1/7 with mode byte" reading.
+  DELETE RESOLUTION (updated): 1/7 carries slot-management for select AND delete, distinguished by
+  the mode byte. Both statically-observable emit sites are character-SELECT code paths (modes 0 and
+  1). The delete-confirm path is inferred from the C2S<->S2C pairing: 3/7 SmsgCharManageResult
+  subtype-2 (delete-confirmed) is the server-side counterpart to a delete request sent as 1/7 with
+  mode = 2. There is NO dedicated C2S character-delete opcode in the major-1 family; delete is a
+  mode-byte variant of this same 2-byte payload on opcode 1/7. The mode-2 literal is DEBUGGER-
+  PENDING (not yet witnessed live). See packets/3-7_char_manage_result.yaml for the S2C shape.
+  This supersedes the earlier "delete overloads 1/7 with mode byte" REFUTE -- delete DOES ride 1/7,
+  as mode 2, though the static emit site was not found (likely guarded behind the delete-confirm
+  modal path not fully walked in static analysis).
 
   CONTRACT / SEQUENCE: Request -> Response. Each site guards on the per-window "already-sending" UI
   flag, plays a 2D cue, sets the committed-slot field, then calls the builder. The builder appends
@@ -71,7 +90,10 @@ notes: |
   (packets/cmsg_char_enter.yaml).
 
   UNKNOWNS (capture/debugger required):
-    - the runtime meaning of mode 1 (select-and-play) vs mode 0 (slot-lock);
+    - whether the server requires the mode-0 (slot-lock) -> mode-1 (play) two-step or only mode-1;
+    - live confirmation that mode 2 is the actual wire byte for the delete-confirm flow (inferred
+      from the S2C 3/7 subtype-2 pairing; the mode-2 literal has NOT been witnessed in a live
+      capture as of IDB 263bd994);
     - which major-3 result the server returns for each mode (none is a dedicated per-opcode reply).
 
   RELATED major-1 char-management builders: 1/0 logout (cmsg_logout.yaml), 1/6 create

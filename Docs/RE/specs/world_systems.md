@@ -4,8 +4,9 @@
 verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
                        against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
                        wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
-ida_reverified:        2026-06-20
+ida_reverified:        2026-06-22
 ida_anchor:            263bd994
+readiness:             IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:              [static-ida]
 this_pass:             IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the movement / targeting / pathfinding
                        model (Ch. 18), the death / respawn flow (Ch. 19, with a concise cross-ref to
@@ -15,6 +16,7 @@ this_pass:             IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the move
                        movement/combat-gate census. Offsets / opcodes / payload sizes CONFIRMED via static
                        IDA; on-wire VALUE meanings and exact thresholds beyond those listed stay
                        capture/debugger-pending.
+CYCLE 11 World block (263bd994): §13.1 scene-state corrected — World is switch case-index 5 / writes value 4 on ENTRY, CharSelect is case-index 4 / writes value 5; layer-node count corrected 4→5 (id 2148 reused). Per-frame loop = 4 phases (input pump → per-view device step+present → round-robin scheduler → frame-rate limiter); the in-game scene-graph camera is FOV 65 / near 5 / far 15000 with 5 view-platforms (re-confirmed).
 conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the recovered handler NAME is contested —
                            the IDB emphasises an actor-pair-relation role, this index emphasises absolute vitals
                            (HP/MP/stamina). Routing is settled; the canonical NAME + the body's full semantics are
@@ -487,10 +489,7 @@ character-select (state 4).
 
 The program entry point is a single **`while(1) switch(GameState)`** scene machine over **states
 0..8** (the ~9 states above). The VFS is mounted once before the loop; each state builds (and on
-exit tears down) its scene. State **4** is character-select, which sets the state to **5** and
-builds the in-game HUD host; state **5** is the in-game World scene and, on teardown, **sets the
-state back to 4** (return to character-select). States **6** (quit-prep → 8), **7** (error → 8), and
-**8** (exit) close the machine. This is the same entry-point state machine the front-end specs
+exit tears down) its scene. The dispatcher selects the case whose **index equals the stored game-state value**, and each case **pre-writes the next value on ENTRY** before building its scene. **CharSelect is switch case-index 4 and writes value 5 on entry**; **the World/in-game scene is switch case-index 5 and writes value 4 on entry** (the no-network default = return to character-select). So 'state 5 = in-game' is loosely 'value 5 selects case-index 5' — but case-index 5 also leaves value 4 behind, so on a normal scene-loop exit the machine re-enters case-index 4 (character-select). The value-4 write happens on ENTRY (pre-loop), not on teardown. An explicit leave-world/logout overrides this default with the exit value (the logout path writes the quit-prep value, so a deliberate logout exits the client and never returns to character-select). States **6** (quit-prep → exit), **7** (error → exit), and **8** (exit) close the machine. This is the same entry-point state machine the front-end specs
 describe — see `specs/game_loop.md` / `specs/client_runtime.md`; this chapter records only the
 in-game (state-5) members. [CONFIRMED]
 
@@ -500,7 +499,7 @@ The in-game scene is built from a small set of cooperating objects:
 |---|---|---|---|
 | **HUD host window** (the in-game `MainWindow`) | 6280-byte object | The retained-mode root that hosts every World-scene panel in Chapters 1–12 (chat, inventory, stat window, minimap, buff bar, …). Built in the char-select→in-game transition; the buff/state window is one of its children (the `4/102` rebuild target — see §9, §13.2). | CONFIRMED |
 | **In-game handler** (`MainHandler`) | 200-byte object | Constructed last in the scene sequence and attached to the HUD host; drives the in-game frame logic. | CONFIRMED |
-| **In-game scene-graph builder** | — | A separate routine that allocates the 3D scene: a perspective camera (**FOV 65°, near 5, far 15000**), **5 view-platform objects** (consistent with the 5 camera view modes — Chapter 15 / `specs/camera_movement.md`), a GScene root, the terrain-manager singleton, and **4 layer nodes resolved by `msg.xdb` ids 2004 / 2005 / 2006 / 2148**. | CONFIRMED (count + constants); view-mode semantics owned by `camera_movement.md` |
+| **In-game scene-graph builder** | — | A separate routine that allocates the 3D scene: a perspective camera (**FOV 65°, near 5, far 15000**), **5 view-platform objects** (consistent with the 5 camera view modes — Chapter 15 / `specs/camera_movement.md`), a GScene root, the terrain-manager singleton, and **5 layer nodes captioned by message-table ids 2006 / 2004 / 2005 / 2148 / 2148** (five distinct node objects; id 2148 is reused for the last two, so the node COUNT is 5 while the DISTINCT-id count is 4 — corrects the earlier '4 layer nodes' reading). | CONFIRMED (count + constants); view-mode semantics owned by `camera_movement.md` |
 | **Local-player actor singleton** | pointer | The hub the Actor family (visual refresh, motion, buff release) reads; destroyed on scene exit. The combat / movement / chat / buff chapters all converge on this actor. | CONFIRMED (local-player/Actor singleton) |
 | **Skill/hotbar state hub** | global | The table the HUD skill/hotbar panels (skill-panel toggle, combo / link panels) read; consistent with the one 240×8-byte hotbar record array (id @+0, points @+4 — Tier-1 fact). | CONFIRMED (HUD skill-panel hub) |
 
@@ -525,6 +524,24 @@ handler reaches by fixed child index, **clears, then rebuilds** from the 476-byt
 - **See also:** `specs/ui_system.md` (widget hierarchy, render path, input/capture, per-screen
   layouts, scene state machine); `formats/ui_manifests.md` (the UI texture-id resolver); the
   `specs/frontend_scenes.md` / `specs/client_workflow.md` front-end counterparts.
+
+### 13.3 The `4/1` world-entry seed tables — roster, scene-entity slots, hotbar — CONFIRMED
+
+The in-game scene's three big in-memory tables are seeded in one shot by the `4/1` world-entry form
+(`specs/world_entry.md §2.3a`; byte offsets in `packets/4-1_game_state_tick.yaml`). Internal strides
+were recovered from the form's own consumers (two stale-slot sweeps + the verbatim hotbar copy),
+control-flow-confirmed and counter-confirmed on build 263bd994 (CYCLE 12 / Phase 3):
+
+| Seed table | Stride / shape | Role | Confidence |
+|---|---|---|---|
+| **Roster table (4/1 table A)** | 16-byte records (cap 193; 120 swept); each = an actor id + a keep-guard (eviction gate, also the displayed member number) + an aux value | The membership/roster panel slot source (the GameState-5 in-game roster of §13.1). | CONFIRMED (stride + evict predicate) |
+| **Scene-entity table (4/1 table B)** | heterogeneous: 240 × 16-byte actor-slot records (same shape as table A) + a small gap + a 21 × 8-byte category-entry list (category code + value) + a 16-byte world-target selection record | The scene's tracked-entity / actor-slot table; party & spawn-group queries read it. | CONFIRMED (stride + sub-region arithmetic 3840+20+168+16=4044) |
+| **Hotbar (4/1 hotbar block)** | 240 × 8-byte slots; each = an entry key (0 = empty) + a count; **no inline type byte** | The quick-slot bar restored on entry — the same 240×8 hotbar record array §13.1 names as the skill/hotbar state hub. Skill-vs-item is resolved by a skill-catalogue lookup (catalogue category 5 = skill). | CONFIRMED (stride + catalogue discriminator) |
+
+The shared eviction predicate for the two 16-byte tables: a slot is cleared only when its id is
+non-zero, its referenced actor resolves, that actor's stale flag is set, and its keep-guard is 0.
+Category codes, hotbar non-skill family meanings, and keep-guard values beyond the membership display
+are data-driven VALUE details (capture-pending) — they do not block the table layouts.
 
 ## 14. Consolidated opcode table (all World-scene rows)
 

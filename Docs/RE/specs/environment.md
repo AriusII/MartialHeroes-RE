@@ -36,8 +36,9 @@ verification:
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
-  ida_reverified: 2026-06-21    # ASSET-FIDELITY (2026-06-21), IDB SHA 263bd994 — re-confirmed water RESOLVED-NEGATIVE (no renderer/loader), the ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0 (zero writers) and device-ambient render-state token 139, and the quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; prior CYCLE 7 (2026-06-20) static re-walk of the env/lighting constants
+  ida_reverified: 2026-06-22    # CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
   ida_anchor: 263bd994
+  readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
   evidence: [static-ida, sample-vfs]
   conflicts: none of substance (one §3.1/§1.1 wording tightening — material + light are hub-internal)
   cycle7_additions:        # CYCLE 7 static re-walk landed (all static-settled HIGH unless noted)
@@ -267,6 +268,16 @@ Each game tick (or each rendered frame):
    per-keyframe ambient term is multiplied by `K_ambient = 0` and therefore contributes nothing; the
    live device ambient is the additive `OPTION_BRIGHT` floor over the ambient base; fog colour as
    byte D3DCOLOR; fog range = `s × 3.0`). See §6 for Godot mappings.
+6. Update sun and moon billboard positions from the **closed-form trigonometric orbit** of the current
+   time-of-day angle — see `formats/sky.md §D.1/§D.2`.
+
+> **Sun/moon billboard orbit — closed-form trig, seconds-of-day (CYCLE 11 correction, binary-won).**
+> The sun and moon billboard positions are a **closed-form trigonometric (cosine/sine) orbit** of a
+> time-of-day angle measured in seconds-of-day — NOT a stored keyframe track and NOT a logarithmic
+> curve (corrects an earlier CYCLE 7 reading). Day-cycle index 29 corresponds to 52200 s (14:30) =
+> orbit angle 217.5°; the directional-light direction is the negated sun position. The moon is a flat
+> circle (no depth-axis component); only the sun carries a depth-axis term.
+> See `Docs/RE/formats/sky.md §D.2` for the full orbit spec.
 
 ---
 
@@ -450,8 +461,14 @@ The `s > 0` guard means a non-positive `s` leaves the fog struct untouched — f
 disabled until a positive `s` is sampled. **EXP/EXP2 modes are confirmed NOT driven on the lighting
 tick:** the distance setter only ever writes the LINEAR shape (it sets the mode field to LINEAR and the
 density field to 0.0). The struct still carries `type` (1 = EXP, 2 = EXP2, 3 = LINEAR) and a density
-field, so the modes exist in layout, but no quality tier was observed switching to exponential density
-on this path — see §8.
+field, but no quality tier was observed switching to exponential density on this path — see §8.
+
+> **In-world fog config summary (CODE-CONFIRMED).** In-world fog is configured from the per-keyframe
+> environment-bin scalar `s` (from `light%d.bin` section C): the fog colour is written via the device
+> fog-colour render-state (byte-lerped from a BGRA source to ARGB with the alpha forced opaque), and
+> the fog distance/mode come from the shared setter — fog **range = s × 3.0**, **near = 1 / s**,
+> density 0, **LINEAR** mode, **enabled when s > 0**. This in-world configuration is distinct from
+> the character-select scene, which forces fog OFF (see the Addendum).
 
 **Directional light — float, applied RAW (CONFIRMED).** The directional sampler interpolates the
 float32 `color_A` of `light%d.bin` section A and writes it to the render globals **without any
@@ -723,13 +740,22 @@ into the render pipeline's display-config fields.
 
 | Key | Value | Role | Formula | Confidence (value) |
 |-----|------:|------|---------|--------------------|
-| `DISPLAY_BASE_BRIGHT_MULTI` | **1.05** | World / background **geometry** brightness multiplier (terrain + buildings + static world meshes — the opaque world bucket). | `y = a·x + b`, with `a = 1.05`, `b = 0` (the file comment notes "default 1"). | SAMPLE-VERIFIED |
-| `DISPLAY_LIGHT_RATIO` | **0.5** | **Character** light-colour correction factor only — half-scales character lighting. **NOT a world-geometry amplifier.** | Scalar in range `0.0 .. 1.0` (file default 1.0). | SAMPLE-VERIFIED |
+| `DISPLAY_BASE_BRIGHT_MULTI` | **1.05** | World / background **geometry** brightness multiplier (terrain + buildings + static world meshes — the opaque world bucket). Applied as pixel-shader constant **c0** on the world-geometry pass. | `y = a·x + b`, with `a = 1.05`, `b = 0` (the file comment notes "default 1"). | SAMPLE-VERIFIED |
+| `GLOW_BRIGHT_MULTI` | (see `rendering.md`) | Glow / bloom brightness multiplier. Applied as pixel-shader constant **c1**. | see `rendering.md` | SAMPLE-VERIFIED |
+| `DISPLAY_LIGHT_RATIO` | **0.5** | **Character** light-colour correction factor only — half-scales character lighting. **NOT a world-geometry amplifier.** **DEAD for any world-geometry render path** — no live world-geometry read path consumes this field; see §9.4. | Scalar in range `0.0 .. 1.0` (file default 1.0). | SAMPLE-VERIFIED (value); CONFIRMED-DEAD (world-geometry read path) |
 
 > **Citation breadcrumb.** A C# constant carrying either value cites this section:
 > `// spec: Docs/RE/specs/environment.md §9.2`. `DISPLAY_LIGHT_RATIO` belongs to character lighting
 > and is cross-referenced from the character-tint layer in `rendering.md`; it is recorded here for
 > completeness because both scalars live in the same `display.lua` config layer.
+>
+> **CYCLE 12 NOTE (IDB SHA 263bd994, 2026-06-22) — pixel-shader constant assignments.**
+> `DISPLAY_BASE_BRIGHT_MULTI` (1.05) and `GLOW_BRIGHT_MULTI` are the **pixel-shader constants c0
+> and c1** respectively on the world-geometry / background render pass. `DISPLAY_LIGHT_RATIO` is
+> confirmed to have **no live read path** on any world-geometry render pass — it is loaded from the
+> script but never consumed by the world render pipeline. It remains active only for the character
+> lighting correction path (see §9.4 and `rendering.md`). Do NOT pass `DISPLAY_LIGHT_RATIO` as a
+> world-scene shader constant.
 
 ### 9.3 Relationship to the existing lighting model (§6)
 
@@ -743,23 +769,27 @@ These scalars are an **additional config layer on top of** the per-area lighting
   world-geometry path and to the `OPTION_BRIGHT` ambient floor. See `rendering.md` for the
   character-tint layer (`DISPLAY_CHAR_BRIGHT_*`) that the same `display.lua` defines.
 
-### 9.4 Apply-path — `static-hypothesis / IDA-pending`
+### 9.4 Apply-path — PARTIALLY RESOLVED (CYCLE 12)
 
-**The exact render-stage read of each scalar is NOT yet recovered.** The dirty-room IDA lane that
-would have pinned which D3D render-state token / shader constant each scalar multiplies into
-(the display-config loader and the three render-pipeline fields it populates) **crashed before
-recovering the render-stage reads** (the IDA MCP was down during the observing session). What is
-known:
+> **CYCLE 12 CORRECTION (IDB SHA 263bd994, 2026-06-22).** The apply-path for the two main scalars
+> is now partially resolved:
+>
+> - **`DISPLAY_BASE_BRIGHT_MULTI = 1.05`** is written as **pixel-shader constant c0** on the
+>   world/background geometry render pass. This is CODE-CONFIRMED (§9.2).
+> - **`GLOW_BRIGHT_MULTI`** is written as **pixel-shader constant c1** on the same pass.
+>   CODE-CONFIRMED (§9.2).
+> - **`DISPLAY_LIGHT_RATIO`** — CONFIRMED **DEAD** for the world-geometry render path. No live
+>   read path consumes this field on the world-geometry render pipeline. It is present in the
+>   script and loaded into a display-config field, but nothing in the world-render pass reads it.
+>   Its only live consumer is the **character-lighting** correction path (see `rendering.md`).
+>   Do NOT use `DISPLAY_LIGHT_RATIO` as a world-geometry shader constant.
 
-- The values are literal scalars in the config text and are SAMPLE-VERIFIED (§9.2).
-- The loader copies them into three adjacent display-config fields consumed by the D3D9 render
-  pipeline (a `static-hypothesis` carried from the dirty note — **the consuming render stage is not
-  yet confirmed**).
-
-A resumed IDA pass must confirm: (a) the loader entry point for `display.lua`; (b) the three
-display-config fields it writes; (c) **which render stage / D3D state / shader constant** each of
-`DISPLAY_BASE_BRIGHT_MULTI` and `DISPLAY_LIGHT_RATIO` is read into and multiplied by. Until then,
-treat the **apply path** as `static-hypothesis / IDA-pending` and the **values** as SAMPLE-VERIFIED.
+The prior "IDA-pending" status for `DISPLAY_BASE_BRIGHT_MULTI` and the pixel-shader constant
+assignments is resolved. What remains open is the **full enumeration** of every display-config
+field the loader writes and which render stage reads each (specifically the glow/bloom chain and
+the character-tint scalars from the same file — those belong to `rendering.md`). The three-field
+"adjacent display-config fields" hypothesis is superseded for c0/c1 by the concrete constant
+assignments above; the remaining fields stay `static-hypothesis` until a resumed IDA pass confirms.
 
 ### 9.5 NOTE — `DISPLAY_BASE_BRIGHT_MULTI = 1.05` is NOT the cause of the near-black world
 
@@ -828,12 +858,14 @@ config-driven; the apparent 0.5 is spurious). The per-state character-tint *tabl
       setter only ever writes the LINEAR shape — LINEAR mode + density 0.0). The modes exist in the
       runtime struct layout, but no path was observed switching to exponential density on this tick;
       whether any other quality-tier path does remains unverified.
-12. **`display.lua` brightness-scalar apply-path (§9.4): IDA-PENDING.** The values
-    `DISPLAY_BASE_BRIGHT_MULTI = 1.05` and `DISPLAY_LIGHT_RATIO = 0.5` are SAMPLE-VERIFIED, but which
-    render stage / D3D state / shader constant each multiplies into is not yet recovered (the IDA lane
-    crashed before reaching the render-stage reads). A resumed IDA pass must pin the loader entry, the
-    three display-config fields it writes, and the consuming render stage. NOTE: the 1.05 multiplier is
-    a ~neutral +5% uplift and is **not** the cause of the dark world (§9.5).
+12. **`display.lua` brightness-scalar apply-path (§9.4): PARTIALLY RESOLVED (CYCLE 12).**
+    `DISPLAY_BASE_BRIGHT_MULTI = 1.05` → **pixel-shader constant c0** (world/background geometry
+    pass, CODE-CONFIRMED). `GLOW_BRIGHT_MULTI` → **pixel-shader constant c1** (same pass,
+    CODE-CONFIRMED). `DISPLAY_LIGHT_RATIO = 0.5` — **DEAD on the world-geometry path** (no live
+    world-geometry read path, CONFIRMED). Its only live consumer is the character-lighting
+    correction path (see `rendering.md`). The full character-tint / glow chain enumeration from the
+    same `display.lua` remains open (see `rendering.md §6.7`). NOTE: the 1.05 multiplier is a
+    ~neutral +5% uplift and is **not** the cause of the dark world (§9.5).
 
 ---
 
@@ -854,3 +886,43 @@ config-driven; the apparent 0.5 is spurious). The per-state character-tint *tabl
 - **Provenance:** `Docs/RE/journal.md`
 - **Godot implementation files:** `05.Presentation/MartialHeroes.Client.Godot/World/EnvironmentNode.cs`,
   `05.Presentation/MartialHeroes.Client.Godot/World/WaterRenderer.cs`
+
+---
+
+## Addendum — CYCLE 11 / Block A: char-select preview fog is forced OFF (binary-confirmed, static)
+
+> Verification refresh, IDB SHA **263bd994**, static-only (CYCLE 11 / Block A, 2026-06-22).
+> This addendum **resolves the open question** previously logged in §6.4a (the "whether fog is forced
+> OFF for the char-preview row" item, formerly LOW / DBG-pending). The binary now settles it
+> **statically**: **fog is forced fully off** in the character-select preview scene. The earlier
+> "do NOT assert fog OFF on char-select" caveat is **superseded** — the binary wins.
+
+**What the binary shows.** The character-select 3D scene builder, at the very top of its build, calls a
+char-select-specific environment helper that does three things in order:
+
+1. stops the ambient map sound cue (id **924000001**) on its channel;
+2. zeroes two scene-environment fields; and
+3. calls the **fog-blend setter** with a literal factor of **0.0**.
+
+The fog-blend setter computes `fog_blend = base × factor × 1.4` (the same `base·factor·1.4` setter the
+in-world weather tick uses). With the factor pinned to **0.0**, the resulting blend is **0.0** — fog
+contributes nothing. *([CONFIRMED]* the literal-0.0 call and the multiply form.)*
+
+**Why it stays off (the part §6.4a could not previously rule out).** The concern was that a per-frame
+fog apply might re-push LINEAR fog at keyframe 29 and override the build-time 0.0. The character-select
+per-frame tick was re-walked: it drives only the scene render, the deferred populate, the camera
+boom/zoom, the preview turntable, tooltips and the sound tick — it does **not** call the in-world
+weather/fog tick at all. The in-world dynamic-fog ramp lives on a **different scene's** per-frame tick.
+Therefore the build-time `fog_blend = 0.0` **holds for the entire char-select scene lifetime**.
+*([CONFIRMED]* the char-select tick's callee set contains no fog re-apply.)*
+
+**Contrast with the in-world path.** In-world, the same fog-blend setter is driven from the weather tick
+with a **live, ramped factor** (so fog is dynamic). Char-select is the only path that pins the factor to
+a literal 0.0 at build. The two paths share the setter but differ entirely in the factor they feed it.
+
+**Net for the Godot port.** The char-select preview renders with **no fog** (alongside the already-pinned
+area-0 map, fixed time-of-day ≈ 14:30, and the single ambient effect). A fog-free char-select also
+matches the dark-stone-temple visual oracle. Implement char-select with fog disabled; do not apply the
+in-world weather fog ramp to it.
+
+> spec path: `// spec: Docs/RE/specs/environment.md`

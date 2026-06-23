@@ -16,7 +16,9 @@ func _ready() -> void:
 	tcp_server = TCPServer.new()
 	var err := tcp_server.listen(port, "127.0.0.1")
 	if err != OK:
-		push_error("MCP Bridge Game: Failed to listen on port %d (error %d)" % [port, err])
+		# Port already held (e.g. by the Godot editor game bridge when running headless alongside the
+		# editor) — non-fatal: the MCP game bridge is unavailable but the client still boots.
+		push_warning("MCP Bridge Game: Could not listen on port %d (error %d) — bridge unavailable." % [port, err])
 	else:
 		print("MCP Bridge Game: Listening on 127.0.0.1:%d" % port)
 	RenderingServer.frame_post_draw.connect(_on_frame_post_draw)

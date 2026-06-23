@@ -1,25 +1,34 @@
-// Ui/Scenes/Select/CharSelectWindow.Input.cs
-//
-// Character-select window — button callbacks, input handlers, name validation.
-// Part of the CharSelectWindow partial class split (Wave 4b).
-//
-// Covers: OnTabButtonFired(), OnRosterButtonFired(), OnEnterPressed(), OnDeletePressed(),
-//         OnCreateClassAction(), OnFaceAction(), OnCreateConfirmAction(), OnModalConfirm(),
-//         OnViewport3DGuiInput(), ValidateName(), ShowToast().
-//
-// PASSIVE: zero game logic, zero domain state. Turns gestures into signals (intents).
-// spec: Docs/RE/specs/ui_system.md §8.2/§8.4.
-// spec: Docs/RE/specs/frontend_scenes.md §3/§4/§11.
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectWindow
 {
-    // =========================================================================
-    // 3D ray-pick. spec: frontend_scenes.md §3.3.3. CODE-CONFIRMED.
-    // =========================================================================
+    public void OnCharManageResult(bool success, string manageMsg)
+    {
+        if (success) return;
+        if (_noticeBody is not null && IsInstanceValid(_noticeBody))
+            _noticeBody.Text = manageMsg;
+        if (_modalNotice is not null && IsInstanceValid(_modalNotice))
+            _modalNotice.Visible = true;
+    }
+
+    public void OnCharRenameResult(bool success, string newName)
+    {
+        if (!success) return;
+        var slot = _lastRenameSentSlot;
+        if (slot >= 0 && slot < MaxSlots && !_slots[slot].IsEmpty)
+        {
+            var old = _slots[slot];
+            _slots[slot] = new LiveSlot(
+                false, newName, old.Level, old.ServerClass, old.CurrentHp,
+                old.SlotIndex, old.PosX, old.PosZ, old.InternalClass,
+                old.AppearanceVariant, old.FaceA, old.EquipGids);
+            _lastRenameSentSlot = -1;
+            RefreshInfo();
+            GD.Print($"[CharSelectWindow] rename applied in view: slot {slot} name → '{newName}'.");
+        }
+    }
 
     private void OnViewport3DGuiInput(InputEvent ev)
     {
@@ -40,52 +49,27 @@ public sealed partial class CharSelectWindow
                 _selectedSlot = hit;
                 RefreshInfo();
                 _scene3D?.SetSelectedSlot(hit);
-                GD.Print($"[CharSelectWindow] 3D ray-pick → slot {hit}. spec: frontend_scenes.md §3.3.3.");
+                GD.Print($"[CharSelectWindow] 3D ray-pick → slot {hit}. spec §3.3.3.");
             }
         }
     }
 
-    // =========================================================================
-    // Action handlers
-    // =========================================================================
 
-    private void OnTabButtonFired(int actionId)
+    internal void OnActorYawLeftReleased()
     {
-        switch (actionId)
-        {
-            case ActionBack:
-                // D11: Back tab (action 3) is a create-panel back/cancel, NOT a scene-level back.
-                // Server-list/login transition via Back tab is REFUTED by static IDA 2026-06-20.
-                // If the create form is open, close it; otherwise this is a no-op.
-                // spec: Docs/RE/specs/frontend_scenes.md §11.5 / CYCLE-6b fact 5 (Back tab =
-                //       create-cancel, NOT scene back; server-list transition REFUTED).
-                GD.Print("[CharSelectWindow] Back tab (action 3) — create-cancel / no-op. " +
-                         "BackRequested NOT emitted. spec: frontend_scenes.md §11.5 / CYCLE-6b fact 5.");
-                if (_createFormVisible)
-                    HideCreateForm();
-                break;
-            default:
-                GD.Print($"[CharSelectWindow] Tab action {actionId} — stub (offline/server-select pending).");
-                break;
-        }
+        _rotatePressLeft = false;
     }
 
-    private void OnRosterButtonFired(int actionId)
+    internal void OnActorYawRightReleased()
     {
-        switch (actionId)
-        {
-            case ActionCreate:
-                GD.Print("[CharSelectWindow] Create (action 4).");
-                ShowCreateForm();
-                break;
-            case ActionDelete:
-                OnDeletePressed();
-                break;
-            case ActionEnter:
-                OnEnterPressed();
-                break;
-        }
+        _rotatePressRight = false;
     }
+
+    internal void OnBoomZoomReleased()
+    {
+        GetCameraRig()?.SetZoomAction(0);
+    }
+
 
     private void OnEnterPressed()
     {
@@ -110,86 +94,137 @@ public sealed partial class CharSelectWindow
             return;
         }
 
-        // Delete requires a confirm popup (Yes=54/No=55, msgs 14001/14002).
-        // spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
-        ShowDeleteConfirmModal(_selectedSlot);
+        _pendingDeleteSlot = _selectedSlot;
+        if (_deleteTitleWidget?.GetControl() is Label t)
+            t.Text = Text?.GetCaption(MsgDeleteConfirmTitle, string.Empty) ?? string.Empty;
+        if (_deleteBodyWidget?.GetControl() is Label b)
+            b.Text = Text?.GetCaption(MsgDeleteConfirmBody, string.Empty) ?? string.Empty;
+        if (_modalDeleteCfm is not null) _modalDeleteCfm.Visible = true;
+        GD.Print($"[CharSelectWindow] delete-confirm modal raised for slot {_selectedSlot}. spec §11.5h G4.");
     }
 
-    /// <summary>
-    ///     Handles the Yes button (action 54) in the delete-confirm modal.
-    ///     Emits <see cref="DeleteCharacterRequested" /> only after explicit user confirmation.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §5 + §11.5d. CODE-CONFIRMED.
-    /// </summary>
     private void OnDeleteConfirmYes(int _)
     {
         var slot = _pendingDeleteSlot;
-        HideDeleteConfirmModal();
+        if (_modalDeleteCfm is not null) _modalDeleteCfm.Visible = false;
+        _pendingDeleteSlot = -1;
 
         if (slot < 0 || slot >= MaxSlots) return;
         var ls = _slots[slot];
         if (ls.IsEmpty) return;
 
-        GD.Print($"[CharSelectWindow] Delete confirmed by user: name='{ls.Name}' slot={slot}; " +
-                 "emitting DeleteCharacterRequested. spec: frontend_scenes.md §5.");
+        GD.Print($"[CharSelectWindow] delete confirmed: name='{ls.Name}' slot={slot}; " +
+                 "emitting DeleteCharacterRequested. spec §5.");
         EmitSignal(SignalName.DeleteCharacterRequested, slot, ls.Name);
     }
 
+
+    private void ShowRenameModal()
+    {
+        var ls = _slots[_selectedSlot];
+        if (ls.IsEmpty)
+        {
+            GD.Print($"[CharSelectWindow] Rename on empty slot {_selectedSlot} ignored. spec §6.");
+            return;
+        }
+
+        _pendingRenameSlot = _selectedSlot;
+        if (_renameModalTitle is not null && IsInstanceValid(_renameModalTitle))
+            _renameModalTitle.Text = ls.Name;
+        if (_renameEntry is not null && IsInstanceValid(_renameEntry))
+            _renameEntry.Text = ls.Name;
+        if (_renameToast is not null && IsInstanceValid(_renameToast))
+            _renameToast.Visible = false;
+        if (_modalRename is not null) _modalRename.Visible = true;
+
+        GD.Print(
+            $"[CharSelectWindow] rename modal raised for slot {_selectedSlot} ('{ls.Name}'). spec §6 / §11.5h G11.");
+    }
+
+    private void OnRenameConfirm()
+    {
+        var slot = _pendingRenameSlot;
+        if (slot < 0 || slot >= MaxSlots || _slots[slot].IsEmpty)
+        {
+            HideModal(_modalRename);
+            _pendingRenameSlot = -1;
+            return;
+        }
+
+        var newName = _renameEntry?.Text.Trim() ?? string.Empty;
+        if (!ValidateName(newName, out var toastMsg))
+        {
+            if (_renameToast is not null && IsInstanceValid(_renameToast))
+            {
+                _renameToast.Text = toastMsg;
+                _renameToast.Visible = true;
+            }
+
+            GD.Print($"[CharSelectWindow] rename rejected: '{newName}' → toast (no send). spec §6/§4.4.");
+            return;
+        }
+
+        _lastRenameSentSlot = slot;
+        GD.Print($"[CharSelectWindow] RenameCharacterRequested: slot={slot} newName='{newName}'; emitting.");
+        EmitSignal(SignalName.RenameCharacterRequested, slot, newName);
+        HideModal(_modalRename);
+        _pendingRenameSlot = -1;
+    }
+
+
     private void OnCreateClassAction(int actionId)
     {
-        var uiIndex = actionId - ActionClass0; // 10-13 → 0-3.
+        var uiIndex = actionId - ActClass0;
         if (uiIndex >= 0 && uiIndex < 4) SetCreateClass(uiIndex);
     }
 
     private void OnFaceAction(int actionId)
     {
-        // ActionId 21 = increment, 22 = decrement. spec §8.2. CODE-CONFIRMED.
-        var delta = actionId == ActionFaceIncr ? +1 : -1;
+        var delta = actionId == ActFacePlus ? +1 : -1;
+        var before = _createFaceIndex;
         _createFaceIndex = Math.Clamp(_createFaceIndex + delta, FaceMin, FaceMax);
-        GD.Print($"[CharSelectWindow] face={_createFaceIndex} " +
-                 $"(range {FaceMin}..{FaceMax}). spec: frontend_scenes.md §4.2. CODE-CONFIRMED.");
+
+        if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
+            _createFaceIndex = _createPreview3D.UpdateFaceIndex(_createFaceIndex);
+
         if (_createFaceLabel is not null && IsInstanceValid(_createFaceLabel))
             _createFaceLabel.Text = _createFaceIndex.ToString();
+        ShowCreateToast(_createFaceIndex == before
+            ? $"FACE {_createFaceIndex} ({FaceMin}..{FaceMax})"
+            : $"FACE {_createFaceIndex}");
+
+        GD.Print($"[CharSelectWindow] face={_createFaceIndex} (range {FaceMin}..{FaceMax}); " +
+                 "2D-only (no 3D rebuild). spec §4.2.");
     }
 
-    private void OnCreateConfirmAction(int _)
+    private void OnAppearanceStep(int actionId, int seedIndex, int delta, string label)
     {
-        // Confirm (35) on the create form itself opens the name modal.
-        // spec: frontend_scenes.md §4/§4.1.1. CODE-CONFIRMED.
-        ShowNameModal();
-    }
-
-    private void OnModalConfirm(int _)
-    {
-        var name = _nameEntry?.Text.Trim() ?? string.Empty;
-        if (!ValidateName(name, out var toastMsg))
+        var stored = 0;
+        if (seedIndex >= 0 && seedIndex < StatGridRows)
         {
-            ShowToast(toastMsg);
-            GD.Print($"[CharSelectWindow] Create name rejected: '{name}' → toast.");
-            return;
+            var next = Math.Max(StatFloor, _statValues[seedIndex] + delta);
+            _statValues[seedIndex] = next;
+            stored = next;
         }
 
-        var internalClass = UiToInternal[_createUiClass];
-        GD.Print($"[CharSelectWindow] CreateCharacterRequested: name='{name}' " +
-                 $"class={internalClass} face={_createFaceIndex}. spec: frontend_scenes.md §4/§8.");
-        EmitSignal(SignalName.CreateCharacterRequested, name, internalClass, _createFaceIndex);
-        HideCreateForm();
-        RefreshCharCountCaption();
+        if (_createPreview3D is not null && IsInstanceValid(_createPreview3D))
+            _createPreview3D.UpdateAppearanceSeed(seedIndex, delta);
+
+        ShowCreateToast($"{label} {stored}");
+        GD.Print($"[CharSelectWindow] appearance step action {actionId}: seed[{seedIndex}] " +
+                 $"{(delta >= 0 ? "+" : "")}{delta} → _statValues[{seedIndex}]={stored} (2D-only; no 3D rebuild). " +
+                 "spec charselect.md §4.3; character_creation.md §2.1.");
     }
 
-    // =========================================================================
-    // Name validation. spec: frontend_scenes.md §4.4. CODE-CONFIRMED.
-    // =========================================================================
 
     private bool ValidateName(string name, out string toastMsg)
     {
-        // Empty → msg 2190. spec §4.4/§8.2. CODE-CONFIRMED.
         if (name.Length < 2)
         {
             toastMsg = Text?.GetCaption(2190u, string.Empty) ?? string.Empty;
             return false;
         }
 
-        // Charset: a-z + 0-9 + CP949 Hangul. spec §4.4. CODE-CONFIRMED.
         foreach (var c in name)
         {
             if (c >= 'a' && c <= 'z') continue;
@@ -197,7 +232,6 @@ public sealed partial class CharSelectWindow
             if (c >= '가' && c <= '힣') continue;
             if (c >= 'ᄀ' && c <= 'ᇿ') continue;
             if (c >= '㄰' && c <= '㆏') continue;
-            // Charset violation → msg 12012. spec §8.2. CODE-CONFIRMED.
             toastMsg = Text?.GetCaption(12012, string.Empty) ?? string.Empty;
             return false;
         }
@@ -212,5 +246,13 @@ public sealed partial class CharSelectWindow
         _nameToast.Text = message;
         _nameToast.Visible = true;
         _toastTimer = 3.0;
+    }
+
+    private void ShowCreateToast(string message)
+    {
+        if (_createToast is null || !IsInstanceValid(_createToast)) return;
+        _createToast.Text = message;
+        _createToast.Visible = true;
+        _createToastTimer = 2.0;
     }
 }

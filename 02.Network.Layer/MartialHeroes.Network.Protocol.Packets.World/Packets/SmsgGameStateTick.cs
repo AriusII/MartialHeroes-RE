@@ -1,7 +1,3 @@
-// spec: Docs/RE/opcodes.md; Docs/RE/specs/handlers.md §4/1; Docs/RE/specs/client_runtime.md §9.1/§9.4.
-// 4/1 is the 9100-byte world-state tick / world-entry payload. Routing and the fixed read size are
-// confirmed; interior value semantics remain capture/debugger-pending.
-
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -9,57 +5,74 @@ using MartialHeroes.Network.Protocol.Core.Opcodes;
 
 namespace MartialHeroes.Network.Protocol.Packets.World.Packets;
 
-/// <summary>
-///     4/1 — server game-state tick and world-entry snapshot. Fixed 9100-byte body in the recovered
-///     handler, modelled as an opaque payload with accessor helpers for the pinned world-entry seed.
-///     spec: Docs/RE/specs/handlers.md §4/1; Docs/RE/specs/client_runtime.md §9.1/§9.4.
-/// </summary>
-/// <remarks>
-///     The handler branches on body byte +0; form <c>1</c> is the world-entry path. The only payload
-///     fields this clean slice consumes are area id at +0x00C (absolute area index; 3-digit decimal
-///     directory selects &lt;id&gt;.lst) and spawn X/Z at +0x2374/+0x2378.
-///     World Y is not on the wire and is forced to zero by Application.
-/// </remarks>
 [PacketOpcode(4, 1)]
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct SmsgGameStateTick
 {
-    /// <summary>Packed opcode 0x40001 (4/1). spec: Docs/RE/opcodes.md.</summary>
     public const uint OpcodeId = Opcodes.SmsgGameStateTick;
 
-    /// <summary>Fixed body read size: 9100 bytes (0x238C). spec: handlers.md §4/1.</summary>
     public const int WireSize = 0x238C;
 
-    /// <summary>Minimum length needed to read form, scenario, and spawn X/Z. spec: client_runtime.md §9.4.</summary>
     public const int WorldEntrySeedSize = SpawnZOffset + sizeof(float);
 
-    /// <summary>Body byte +0 selector; value 1 is the world-entry form. spec: handlers.md §4/1.</summary>
     public const int FormOffset = 0x0000;
 
-    /// <summary>Body byte +0 value for the world-entry branch. spec: handlers.md §4/1.</summary>
     public const byte WorldEntryForm = 1;
 
-    /// <summary>
-    ///     Area id at body +0x00C — absolute area index; its 3-digit decimal directory form
-    ///     (&lt;id&gt;.lst, e.g. id 6 → "006", id 12 → "012") selects the on-disk area.
-    ///     spec: Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12);
-    ///     Docs/RE/specs/handlers.md §4/1.
-    /// </summary>
     public const int AreaIdOffset = 0x000C;
 
-    /// <summary>Spawn X at body +0x2374. spec: client_runtime.md §9.1 step 5 / §9.4.</summary>
     public const int SpawnXOffset = 0x2374;
 
-    /// <summary>Spawn Z at body +0x2378. spec: client_runtime.md §9.1 step 5 / §9.4.</summary>
     public const int SpawnZOffset = 0x2378;
 
-    /// <summary>Opaque 9100-byte tick body. Interior sections are not decomposed in this clean slice.</summary>
+
+    public const int TableAOffset = 24;
+
+    public const int TableASize = 3088;
+
+    public const int TableARecordStride = 16;
+
+    public const int TableACapacity = 193;
+
+    public const int TableASweepCount = 120;
+
+    public const int TableARecordActorIdOffset = 4;
+
+    public const int
+        TableARecordKeepGuardOffset =
+            8;
+
+    public const int TableARecordAuxOffset = 12;
+
+
+    public const int TableBOffset = 3112;
+
+    public const int TableBSize = 4044;
+
+    public const int TableBActorSlotCount = 240;
+
+    public const int TableBActorSlotsBytes = 3840;
+
+
+    public const int HotbarOffset = 7156;
+
+    public const int HotbarSize = 1920;
+
+    public const int HotbarSlotCount = 240;
+
+    public const int HotbarSlotStride = 8;
+
+    public const int
+        HotbarSlotEntryKeyOffset = 0;
+
+    public const int HotbarSlotCountOffset = 4;
+
+    public const int
+        HotbarSkillCategoryValue =
+            5;
+
     public readonly PayloadBuffer Payload;
 
-    /// <summary>
-    ///     Reads the pinned world-entry seed from a raw 4/1 payload. Returns false if the frame is too
-    ///     short or is not the world-entry form.
-    /// </summary>
     public static bool TryReadWorldEntrySeed(ReadOnlySpan<byte> payload, out SmsgGameStateTickSeed seed)
     {
         seed = default;
@@ -74,7 +87,6 @@ public readonly struct SmsgGameStateTick
         return true;
     }
 
-    /// <summary>Opaque 9100-byte (0x238C) game-state tick body. spec: handlers.md §4/1.</summary>
     [InlineArray(WireSize)]
     public struct PayloadBuffer
     {
@@ -82,17 +94,4 @@ public readonly struct SmsgGameStateTick
     }
 }
 
-/// <summary>
-///     The decoded 4/1 world-entry seed: form byte, area id, and X/Z spawn position. World Y is
-///     not on the wire. spec: Docs/RE/specs/client_runtime.md §9.1/§9.4;
-///     Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12).
-/// </summary>
-/// <param name="Form">Leading form-selector byte (value 1 = world-entry path).</param>
-/// <param name="AreaId">
-///     Absolute area index at body +0x00C. Its 3-digit decimal directory form (&lt;id&gt;.lst,
-///     e.g. id 6 → "006", id 12 → "012") selects the on-disk area.
-///     spec: Docs/RE/packets/4-1_game_state_tick.yaml (field AreaId, offset 12).
-/// </param>
-/// <param name="SpawnX">Local-player spawn X; feeds position set and terrain cold-start.</param>
-/// <param name="SpawnZ">Local-player spawn Z; feeds position set and terrain cold-start.</param>
 public readonly record struct SmsgGameStateTickSeed(byte Form, int AreaId, float SpawnX, float SpawnZ);

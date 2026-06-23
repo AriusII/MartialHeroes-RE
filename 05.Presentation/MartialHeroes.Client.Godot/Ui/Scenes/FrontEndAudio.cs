@@ -1,61 +1,38 @@
-// Screens/FrontEndAudio.cs
-//
-// Per-scene audio node: loads and plays exactly the cue(s) required by its owning scene.
-// Each scene creates its own instance and calls only the play method(s) it needs;
-// streams are loaded lazily on first play so no scene touches another scene's cues.
-//
-// Scene cue assignments (spec: Docs/RE/specs/sound.md §15.2 / §15.6c):
-//   Login  (state 1): 861010105 login curtain SFX only — no BGM, no lobby cue.
-//   Opening(state 3): 910061000 opening BGM (looped) only.
-//   Select (state 4): 920100200 lobby BGM (looped) — PlayBgm().
-//
-// Sound path rule: category < 5 → data/sound/2d/<id>.ogg.
-//   spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/. CODE-CONFIRMED.
-//
-// Cursor: data/cursor/stand.dds — set in _Ready for all front-end scenes.
-//   spec: Docs/RE/specs/frontend_scenes.md §11. CODE-CONFIRMED.
-//
-// THREADING: all Godot node mutation on the main thread. PASSIVE: reads VFS, plays audio.
-
 using Godot;
 using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes;
 
-/// <summary>
-///     Node that manages per-scene front-end audio and the custom mouse cursor.
-///     Each consuming scene creates one instance and calls only its required cue(s).
-///     Streams are loaded lazily on first play — no scene loads another scene's cue.
-/// </summary>
 public sealed partial class FrontEndAudio : Node
 {
-    // VFS paths. spec: Docs/RE/specs/sound.md §BGM in data/sound/2d/.
-    private const string BgmPath = "data/sound/2d/920100200.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
-    private const string IntroBgmPath = "data/sound/2d/910061000.ogg"; // spec: sound.md §15.6c. CODE-CONFIRMED.
-    private const string LoginCurtainPath = "data/sound/2d/861010105.ogg"; // spec: sound.md §15.2. CODE-CONFIRMED.
-    private const string CursorPath = "data/cursor/stand.dds"; // spec: frontend_scenes.md §11.
+    private const string BgmPath = "data/sound/2d/920100200.ogg";
+    private const string IntroBgmPath = "data/sound/2d/910061000.ogg";
+    private const string LoginCurtainPath = "data/sound/2d/861010105.ogg";
+    private const string CursorPath = "data/cursor/stand.dds";
 
-    // Players are created lazily on first play call.
+    private const string UiClickPath = "data/sound/2d/861010101.ogg";
+
+    private static readonly string[] ClassPreviewBgmByUiIndex =
+    [
+        "data/sound/2d/910065000.ogg",
+        "data/sound/2d/910062000.ogg",
+        "data/sound/2d/910064000.ogg",
+        "data/sound/2d/910063000.ogg"
+    ];
+
     private AudioStreamPlayer? _bgmPlayer;
     private AudioStreamPlayer? _curtainPlayer;
     private AudioStreamPlayer? _introPlayer;
+    private AudioStreamPlayer? _uiClickPlayer;
 
     public override void _Ready()
     {
-        // Cursor is scene-global; set it immediately.
         using var ra = RealClientAssets.TryOpen();
         if (ra is not null)
             LoadCursor(ra);
     }
 
-    // -------------------------------------------------------------------------
-    // Public API — call only the method(s) your scene requires.
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Starts the lobby BGM loop (920100200). Select (state 4) only.
-    ///     spec: Docs/RE/specs/sound.md §15.2. CODE-CONFIRMED.
-    /// </summary>
     public void PlayBgm()
     {
         EnsureBgmPlayer();
@@ -65,10 +42,6 @@ public sealed partial class FrontEndAudio : Node
         GD.Print("[FrontEndAudio] Lobby BGM 920100200 started (loop).");
     }
 
-    /// <summary>
-    ///     Stops the lobby BGM. Called when the world scene is entered.
-    ///     spec: Docs/RE/specs/sound.md §15.2.
-    /// </summary>
     public void StopBgm()
     {
         _bgmPlayer?.Stop();
@@ -76,10 +49,6 @@ public sealed partial class FrontEndAudio : Node
         GD.Print("[FrontEndAudio] BGM stopped (entering world).");
     }
 
-    /// <summary>
-    ///     Starts the looped opening BGM (910061000). Opening (state 3) only.
-    ///     spec: Docs/RE/specs/sound.md §15.6c. CODE-CONFIRMED.
-    /// </summary>
     public void PlayIntroBgm()
     {
         EnsureIntroPlayer();
@@ -89,11 +58,31 @@ public sealed partial class FrontEndAudio : Node
         GD.Print("[FrontEndAudio] Opening BGM 910061000 started (loop).");
     }
 
-    /// <summary>
-    ///     Plays the login curtain SFX (861010105) as a one-shot. Login (state 1) only.
-    ///     Fired at login sub-state 1→2.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §1.5 sub-state 1. CODE-CONFIRMED.
-    /// </summary>
+    public void PlayUiClick()
+    {
+        EnsureUiClickPlayer();
+        if (_uiClickPlayer is null || _uiClickPlayer.Stream is null) return;
+        if (_uiClickPlayer.Playing) _uiClickPlayer.Stop();
+        _uiClickPlayer.Play();
+    }
+
+    public void PlayClassPreviewBgm(int uiClassIndex)
+    {
+        if (uiClassIndex < 0 || uiClassIndex >= ClassPreviewBgmByUiIndex.Length) return;
+        EnsureBgmPlayer();
+        if (_bgmPlayer is null) return;
+
+        using var ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        var s = LoadOgg(ra, ClassPreviewBgmByUiIndex[uiClassIndex], true);
+        if (s is null) return;
+        _bgmPlayer.Stop();
+        _bgmPlayer.Stream = s;
+        _bgmPlayer.Play();
+        GD.Print($"[FrontEndAudio] Class-preview BGM (UI {uiClassIndex}) started on category-0 slot " +
+                 "(replaced lobby BGM). spec: sound.md §15.6b.");
+    }
+
     public void PlayLoginCurtainSfx()
     {
         EnsureCurtainPlayer();
@@ -103,9 +92,6 @@ public sealed partial class FrontEndAudio : Node
         GD.Print("[FrontEndAudio] Login curtain SFX 861010105 played.");
     }
 
-    // -------------------------------------------------------------------------
-    // Lazy player initialisation
-    // -------------------------------------------------------------------------
 
     private void EnsureBgmPlayer()
     {
@@ -127,6 +113,17 @@ public sealed partial class FrontEndAudio : Node
         if (ra is null) return;
         var s = LoadOgg(ra, IntroBgmPath, true);
         if (s is not null) _introPlayer.Stream = s;
+    }
+
+    private void EnsureUiClickPlayer()
+    {
+        if (_uiClickPlayer is not null) return;
+        _uiClickPlayer = new AudioStreamPlayer { Name = "UiClickPlayer", VolumeDb = 0f };
+        AddChild(_uiClickPlayer);
+        using var ra = RealClientAssets.TryOpen();
+        if (ra is null) return;
+        var s = LoadOgg(ra, UiClickPath, false);
+        if (s is not null) _uiClickPlayer.Stream = s;
     }
 
     private void EnsureCurtainPlayer()
@@ -160,7 +157,6 @@ public sealed partial class FrontEndAudio : Node
 
     private static void LoadCursor(RealClientAssets ra)
     {
-        // spec: Docs/RE/specs/frontend_scenes.md §11 — data/cursor/stand.dds. CODE-CONFIRMED.
         try
         {
             Texture2D? cursor = ra.LoadTexture(CursorPath);

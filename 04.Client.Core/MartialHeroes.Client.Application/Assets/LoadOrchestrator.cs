@@ -12,38 +12,28 @@ public enum LoadOrchestratorState
     Faulted
 }
 
-/// <summary>
-///     Engine-free analogue of state 2's LoadHandler: pre-decides Opening vs Select, starts the looping
-///     loading SFX, and runs the fixed boot-resource worker behind the loading screen.
-///     spec: Docs/RE/specs/resource_pipeline.md §2; Docs/RE/specs/client_runtime.md §7.3.
-/// </summary>
-public sealed class LoadOrchestrator
+public sealed class LoadOrchestrator(
+    SceneStateMachine scene,
+    ILoadResourceSource resourceSource,
+    IOpeningSkipReader openingSkipReader,
+    ILoadingSoundSink? soundSink = null)
 {
     private const int
-        LoadingSoundCueId = 920100100; // spec: Docs/RE/specs/resource_pipeline.md §2.3; client_runtime.md §7.4.
+        LoadingSoundCueId = 920100100;
 
-    private const long LegacyProgressDenominatorBytes = 9_395_240; // spec: Docs/RE/specs/resource_pipeline.md §2.4.
+    private const long LegacyProgressDenominatorBytes = 9_395_240;
     private readonly object _gate = new();
-    private readonly IOpeningSkipReader _openingSkipReader;
-    private readonly ILoadResourceSource _resourceSource;
 
-    private readonly SceneStateMachine _scene;
-    private readonly ILoadingSoundSink? _soundSink;
+    private readonly IOpeningSkipReader _openingSkipReader =
+        openingSkipReader ?? throw new ArgumentNullException(nameof(openingSkipReader));
+
+    private readonly ILoadResourceSource _resourceSource =
+        resourceSource ?? throw new ArgumentNullException(nameof(resourceSource));
+
+    private readonly SceneStateMachine _scene = scene ?? throw new ArgumentNullException(nameof(scene));
     private Task _completion = Task.CompletedTask;
     private long _cumulativeBytes;
     private bool _startedAsReload;
-
-    public LoadOrchestrator(
-        SceneStateMachine scene,
-        ILoadResourceSource resourceSource,
-        IOpeningSkipReader openingSkipReader,
-        ILoadingSoundSink? soundSink = null)
-    {
-        _scene = scene ?? throw new ArgumentNullException(nameof(scene));
-        _resourceSource = resourceSource ?? throw new ArgumentNullException(nameof(resourceSource));
-        _openingSkipReader = openingSkipReader ?? throw new ArgumentNullException(nameof(openingSkipReader));
-        _soundSink = soundSink;
-    }
 
     public LoadOrchestratorState State { get; private set; } = LoadOrchestratorState.NotStarted;
 
@@ -64,12 +54,6 @@ public sealed class LoadOrchestrator
 
     public int ProgressQuotient => (int)(CumulativeBytes / LegacyProgressDenominatorBytes);
 
-    /// <summary>
-    ///     Post-load destination: follows the <c>OPENNING/SKIP</c> gate unconditionally, even on a
-    ///     reload. A reload reaches Select only because <c>option.ini</c> already has <c>SKIP=1</c>
-    ///     after the first opening — NOT because the reload forces Select.
-    ///     spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
-    /// </summary>
     public EngineSceneState DestinationAfterLoad =>
         _scene.SkipOpening ? EngineSceneState.Select : EngineSceneState.Opening;
 
@@ -88,23 +72,12 @@ public sealed class LoadOrchestrator
             Fault = null;
             _cumulativeBytes = 0;
             _startedAsReload = _scene.LoadIsReload;
-            // Re-read OPENNING/SKIP unconditionally on every state-2 entry, including reloads.
-            // The binary case-2 body re-reads the INI key every time it runs; there is no
-            // reload-specific "skip the INI read" path. spec: resource_pipeline.md §2.5 (CAMPAIGN 16).
             _scene.SkipOpening = _openingSkipReader.ReadSkipOpening();
 
-            _soundSink?.PlayLooping(LoadingSoundCueId);
+            soundSink?.PlayLooping(LoadingSoundCueId);
             State = LoadOrchestratorState.Running;
-            _completion = Task.Run(() => RunWorkerAsync(cancellationToken));
+            _completion = Task.Run(() => RunWorkerAsync(cancellationToken), cancellationToken);
         }
-    }
-
-    public bool AdvanceSceneWhenComplete()
-    {
-        if (State != LoadOrchestratorState.Completed)
-            return false;
-
-        return _scene.AdvanceScene();
     }
 
     private async Task RunWorkerAsync(CancellationToken cancellationToken)
@@ -113,8 +86,6 @@ public sealed class LoadOrchestrator
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // msg.xdb is a case-1-only synchronous pre-load; NOT re-loaded on a reload (3/100 codes
-            // 202/203/232). spec: Docs/RE/specs/resource_pipeline.md §2.2 / §2.5.
             if (!_startedAsReload)
                 await LoadAndTrackAsync(LoadResourcePlan.MessageCataloguePath, cancellationToken).ConfigureAwait(false);
 

@@ -5,88 +5,68 @@
 // SCOPE: skinned characters ONLY.
 // spec: Docs/RE/specs/rendering.md §5.2 — the cel/dotoonshading vertex path is the SKINNED-CHARACTER
 //   pipeline (stride-32 XYZ/NORMAL/TEXCOORD0/TEXCOORD1_N·L). Terrain, buildings, and static meshes
-//   draw through a vertex-color-lit opaque bucket (§3.2) that does NOT use dotoonshading — they are
-//   NOT cel-shaded.
+//   draw through a vertex-color-lit opaque bucket (§3.2) that does NOT use dotoonshading.
 //
-// ALGORITHM (from spec):
-//   1. Two-light Lambert: for each light, dp3(normal, lightDir), clamp [0,1], accumulate diffuse.
-//      spec: Docs/RE/formats/shaders.md — dotoonshading.vsh semantics.
-//   2. BT.601 luminance projection: luminance = dot(diffuse_rgb, c9)
-//      where c9 = [0.299, 0.587, 0.114, 1.0] (ITU-R BT.601 luma coefficients, HIGH confidence).
-//      spec: Docs/RE/formats/shaders.md §C5.4 register c9 — "Luminance weights — exactly the
-//      ITU-R BT.601 luma coefficients (R, G, B)."
-//   3. Toon ramp lookup: sample a 1-D ramp texture (toonramp.bmp, stage 1) at UV (luminance, 0.5).
-//      spec: Docs/RE/formats/shaders.md §C5.3 — "1-D lookup into the ramp by the interpolated
-//      N·L luminance." The light-step quantisation lives entirely in the ramp file, NOT in code.
-//   4. Output: albedo × ramp_tone (multiply albedo by the quantised tone from the ramp).
+// ALGORITHM (IDA-confirmed, spec: Docs/RE/formats/shaders.md §C5 / Re-authoring Guidance):
+//   dotoonshading.psh  (normal):  out.rgb = (base × toonRamp) × 2 × c0 + c1 ; out.a = lit.a
+//   dotoonshading2.psh (stealth): identical RGB, out.a = c1.w
+//   VS uses a SINGLE light; light dir is NEGATED (c4 default [-1,0,0,0]); c7=[0,0,0,0] so light2
+//   is DEAD. BT.601 luma via c9=[0.299,0.587,0.114,1.0].
+//   Per-state c0=MULTI rgb, c1=ADD rgb[.w] from data/script/display.lua DISPLAY_CHAR_BRIGHT_* (9 states).
+//   spec: Docs/RE/formats/shaders.md §C5.4 c4=[-1,0,0,0], c7=[0,0,0,0], c9=[0.299,0.587,0.114,1.0]
+//   spec: Docs/RE/formats/shaders.md §C5.5 per-state brightness/tint system; state indices 0..8.
 //
-// FALLBACK ramp (VFS absent): a procedural 3-step ramp is generated in the shader via smoothstep.
-//   This is an aesthetic engineering choice; when toonramp.bmp is loaded via CelShadeMaterialFactory
-//   the ramp sampler overrides it. Declared as aesthetic, not spec-dictated.
-//
-// spec: Docs/RE/formats/shaders.md §C5.4 — BT.601 c9 constant [0.299, 0.587, 0.114, 1.0] HIGH.
-// spec: Docs/RE/specs/rendering.md §5.2 — stride-32 cel skinned-character vertex declaration.
-// spec: Docs/RE/formats/shaders.md §C5.3 — toon ramp LUT on texture stage 1.
+// FALLBACK ramp (VFS absent): procedural 3-step ramp via smoothstep.
+//   Aesthetic choice; overridden when toonramp.bmp loads via CelShadeMaterialFactory.
 
 shader_type spatial;
 
-// Disable Godot's built-in lighting model — we implement our own N·L → ramp tone.
 render_mode unshaded, cull_disabled, depth_draw_always;
 
 // ---- Uniforms ----
 
-// Post-process gate: the original DX8 engine couples cel/dotoonshading to the offscreen post-process
-// path. When the post-process flag is off, the client falls back to a plain diffuse draw (no ramp).
-// spec: Docs/RE/specs/rendering.md §5.1a — cel gated on the offscreen post-process flag.
-// Wired by CelShadeMaterialFactory.CelEnabled; default true (post-process on).
-uniform bool cel_enabled = true; // spec: Docs/RE/specs/rendering.md §5.1a
+// spec: Docs/RE/specs/rendering.md §5.1a — cel gated on offscreen post-process flag.
+uniform bool cel_enabled = true;
 
-// Albedo texture (character skin, bound by CelShadeMaterialFactory from skin.txt chain).
+// Albedo texture (character skin, bound from skin.txt chain).
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap;
 uniform vec4 albedo_color : source_color = vec4(0.85, 0.75, 0.65, 1.0);
 uniform bool use_albedo_texture = false;
 
-// Ambient floor — reproduces the D3DRS_AMBIENT full-white additive floor at OPTION_BRIGHT = 100.
-// The original DX9 device sets device-ambient = (255,255,255) at default OPTION_BRIGHT = 100, which
-// adds a full-white constant to every surface independently of the toon N·L term. Without this floor,
-// surfaces whose toon ramp evaluates near 0 appear black in the Godot port because the shader runs
-// render_mode unshaded and does NOT pick up WorldEnvironment ambient.
+// Ambient floor — D3DRS_AMBIENT full-white at OPTION_BRIGHT=100.
 // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient = (255,255,255).
-// spec: Docs/RE/specs/environment.md §6.2b — "Set ambient_light_energy = OPTION_BRIGHT/100 = 1.0 (full)."
-// Wired by CelShadeMaterialFactory from EnvironmentNode.OptionBrightFloor; default = 1.0 (full white).
-uniform float ambient_floor_energy = 1.0; // spec: Docs/RE/specs/environment.md §6.2a, default OPTION_BRIGHT=100 → 1.0
-uniform vec4 ambient_floor_color : source_color = vec4(1.0, 1.0, 1.0, 1.0); // spec: environment.md §6.2a — achromatic white
+// spec: Docs/RE/specs/environment.md §6.2b — ambient_light_energy = OPTION_BRIGHT/100 = 1.0.
+uniform float ambient_floor_energy = 1.0;
+uniform vec4 ambient_floor_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 
 // Toon ramp LUT — 1-D ramp, sampled at (luminance, 0.5).
 // spec: Docs/RE/formats/shaders.md §C5.3 — toonramp.bmp, stage 1, 1-D N·L cel ramp.
 uniform sampler2D toon_ramp : filter_linear, repeat_disable;
 uniform bool use_toon_ramp = false;
 
-// Primary toon light direction (world space, pointing FROM surface TO light, normalized).
-// Corresponds to c4 = [-1, 0, 0, 0]: default toon light pointing along the −X world axis.
-// spec: Docs/RE/formats/shaders.md §C5.4 — "c4: default [-1, 0, 0, 0] — toon light direction."
-// NOTE: this is the TOON light (uploaded each frame from the renderer slot); it is DISTINCT from
-// the scene DirectionalLight3D (which models the ambient sun). The toon light controls the N·L
-// shading that feeds the BT.601 ramp lookup; the scene light is for shadow casting only.
-// Default: -X axis (c4 default); editable via CelShadeMaterialFactory.SetToonLightDir.
-uniform vec3 light_dir = vec3(-1.0, 0.0, 0.0); // spec: Docs/RE/formats/shaders.md §C5.4 c4 = [-1,0,0,0]
+// Single toon light direction (world space, FROM surface TO light, normalized).
+// VS negates the incoming c4 for the dp3 — so light_dir here is the pre-negation direction.
+// spec: Docs/RE/formats/shaders.md §C5.4 c4 default [-1,0,0,0]; light dir is NEGATED in the VS.
+uniform vec3 light_dir = vec3(-1.0, 0.0, 0.0);
 
-// Second light direction (the fixed view-Z axis c5 = [0,0,-1,0], negated for an ambient fill).
-// spec: Docs/RE/formats/shaders.md §C5.4 c5 = [0, 0, -1, 0].
-// In world space as a fill light contribution, aesthetic choice for second-light intensity.
-uniform vec3 light2_dir = vec3(0.0, 1.0, 0.0);
-
-// Per-light colours (c6 = [1,1,1,1] white main, second aesthetic warm fill).
-// spec: Docs/RE/formats/shaders.md §C5.4 c6 = [1, 1, 1, 1].
+// spec: Docs/RE/formats/shaders.md §C5.4 c6=[1,1,1,1] white main light.
 uniform vec4 light_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
-uniform vec4 light2_color : source_color = vec4(0.5, 0.5, 0.6, 1.0);
+
+// Per-state brightness MULTI and ADD (c0 and c1 in dotoonshading.psh).
+// spec: Docs/RE/formats/shaders.md §C5.5 — 9-state DISPLAY_CHAR_BRIGHT_* table from display.lua.
+// state_add.w is used as alpha in the stealth (dotoonshading2.psh) variant.
+uniform vec3 state_multi = vec3(1.3, 1.3, 1.3); // spec: display.lua DISPLAY_CHAR_BRIGHT_MULTI_*_DEFAULT
+uniform vec4 state_add   = vec4(0.0, 0.0, 0.0, 1.0); // spec: display.lua DISPLAY_CHAR_BRIGHT_ADD_*_DEFAULT + ALPHA
+
+// Stealth flag: selects dotoonshading2.psh alpha path (out.a = c1.w = state_add.w).
+// spec: Docs/RE/formats/shaders.md §C5.5, C5.1 — dotoonshading2.psh is the stealth variant.
+uniform bool stealth = false;
 
 // ---- Vertex ----
 
 varying vec3 v_normal_world;
 
 void vertex() {
-    // Normal in world space for per-pixel N·L.
     v_normal_world = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 }
 
@@ -101,68 +81,45 @@ void fragment() {
         base = albedo_color;
     }
 
-    // ---- Two-light Lambert accumulation ----
-    // spec: Docs/RE/formats/shaders.md — dotoonshading.vsh: "Two-light Lambert accumulation:
-    //   for each light, dp3(normal, lightDir), clamp to [0, 1] with max, modulate by light colour,
-    //   accumulate."
+    // ---- Single-light Lambert ----
+    // spec: Docs/RE/formats/shaders.md Re-authoring Guidance — dotoonshading.vsh single light,
+    //   light dir negated (c4 default [-1,0,0,0]). c7=[0,0,0,0] so light2 is DEAD.
     vec3 n = normalize(v_normal_world);
-
-    float ndl1 = max(dot(n, normalize(light_dir)), 0.0);
-    float ndl2 = max(dot(n, normalize(light2_dir)), 0.0);
-
-    vec3 diffuse1 = ndl1 * light_color.rgb;
-    vec3 diffuse2 = ndl2 * light2_color.rgb;
-    vec3 diffuse_total = diffuse1 + diffuse2;
+    float ndl = max(dot(n, normalize(-light_dir)), 0.0);
+    vec3 diffuse = ndl * light_color.rgb;
 
     // ---- BT.601 luminance projection ----
-    // spec: Docs/RE/formats/shaders.md §C5.4 c9 = [0.299, 0.587, 0.114, 1.0]
-    //   "dp3 oT1.xyz, r1, c9 — dot the accumulated diffuse colour against a luminance-weight
-    //    vector (in c9) to produce a scalar luminance value; write to the x-component of output
-    //    texcoord 1. This value indexes the 1D toon LUT texture."
-    // ITU-R BT.601 luma coefficients (R, G, B).
-    // spec: Docs/RE/formats/shaders.md §C5.4 — HIGH confidence, decoded from IEEE-754 literals.
+    // spec: Docs/RE/formats/shaders.md §C5.4 c9=[0.299,0.587,0.114,1.0] HIGH (bit-pattern confirmed).
     const vec3 BT601 = vec3(0.299, 0.587, 0.114);
-    float luminance = clamp(dot(diffuse_total, BT601), 0.0, 1.0);
+    float luminance = clamp(dot(diffuse, BT601), 0.0, 1.0);
 
     // ---- Toon ramp lookup ----
-    // spec: Docs/RE/formats/shaders.md §C5.3 — "1-D lookup into the ramp by the interpolated
-    //   N·L luminance." The ramp file converts smooth 0..1 into hard tone bands (the stepped look).
-    //   "The light-step lives in the ramp file, not in code."
+    // spec: Docs/RE/formats/shaders.md §C5.3 — 1-D lookup into the ramp by interpolated N·L luminance.
     vec3 tone;
     if (use_toon_ramp) {
-        // Sample the 1-D ramp at (luminance, 0.5) — same as a 1-D texture on stage 1 keyed by lum.
         tone = texture(toon_ramp, vec2(luminance, 0.5)).rgb;
     } else {
-        // FALLBACK procedural ramp (3 bands): dark shadow / mid tone / bright lit.
-        // Aesthetic choice: 3 stepped bands approximating a typical toon ramp.
-        // Not spec-dictated — the spec says the quantisation lives in toonramp.bmp.
+        // Fallback procedural ramp (3 bands). Aesthetic; not spec-dictated.
         float band = smoothstep(0.05, 0.15, luminance) * 0.35
                    + smoothstep(0.35, 0.45, luminance) * 0.35
                    + smoothstep(0.65, 0.75, luminance) * 0.30;
-        band = clamp(band + 0.10, 0.0, 1.0); // floor ambient so shadow areas aren't pure black
+        band = clamp(band + 0.10, 0.0, 1.0);
         tone = vec3(band);
     }
 
-    // ---- Ambient floor (additive white base lift) ----
-    // The original DX9 device-ambient is a full-white additive constant at OPTION_BRIGHT = 100:
-    //   device_ambient = (255,255,255) → adds base.rgb * 1.0 to every surface every frame.
-    // This shader runs render_mode unshaded so it does NOT pick up WorldEnvironment ambient; we
-    // must inject it explicitly. The ambient contribution is albedo × ambient_color × energy, which
-    // is added to the toon-modulated output so shadowed surfaces (tone ≈ 0.1) are still lifted.
-    // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient white.
-    // spec: Docs/RE/specs/environment.md §6.2b — "ambient_light_energy = OPTION_BRIGHT/100 = 1.0".
+    // ---- dotoonshading.psh arithmetic ----
+    // spec: Docs/RE/formats/shaders.md Re-authoring Guidance:
+    //   out.rgb = (base × toonRamp) × 2 × c0 + c1
+    //   dotoonshading.psh:  out.a = lit.a  (base alpha passes through)
+    //   dotoonshading2.psh: out.a = c1.w   (state_add.w drives stealth fade)
+    vec3 lit_rgb = (base.rgb * tone) * 2.0 * state_multi + state_add.rgb;
+
+    // ---- Ambient floor (additive, keeps shadowed surfaces from going pure black) ----
+    // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT=100 → device_ambient white.
     vec3 ambient = base.rgb * ambient_floor_color.rgb * ambient_floor_energy;
 
-    // ---- Composite (with the post-process gate) ----
-    // cel_enabled true  → albedo × toon_tone + ambient_floor (reproduces D3D ambient + toon).
-    // cel_enabled false → albedo + ambient_floor (plain diffuse fallback + ambient, no ramp).
-    // Expressed as a select (NOT an early return — Godot's fragment() processor forbids 'return').
-    // spec: Docs/RE/specs/rendering.md §5.1a — cel gated on post-process flag.
-    // spec: Docs/RE/specs/environment.md §6.2a — ambient is additive, not multiplicative by toon.
-    //
-    // clamp to [0,1]: the D3D9 backbuffer write saturates at 255 per channel. With ambient=1.0,
-    // the sum (tone + 1.0) * base can exceed 1.0 in an HDR linear Godot pipeline; clamping here
-    // reproduces the D3D saturation. Toon banding still reads as subtle variation near 1.0.
-    ALBEDO = clamp(cel_enabled ? base.rgb * tone + ambient : base.rgb + ambient, vec3(0.0), vec3(1.0));
-    ALPHA  = base.a;
+    float lit_alpha = stealth ? state_add.w : base.a;
+
+    ALBEDO = clamp(cel_enabled ? lit_rgb + ambient : base.rgb + ambient, vec3(0.0), vec3(1.0));
+    ALPHA  = lit_alpha;
 }

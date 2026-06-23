@@ -507,17 +507,450 @@ family: the weapon slot (14) uses a wider reduction with a base-1000 slot multip
 slots use a base-100 multiplier — both are deterministic reductions of the slot gid. Empty slots
 (e.g. no head overlay, no weapon) resolve to no node and are skipped.
 
-### 3.5.5 Pending value-edges (do NOT invent)
+### 3.5.5 Data value-edges — PINNED from the real client VFS (no debugger needed)
 
-Two data-driven edges are CODE-CONFIRMED in mechanism but their concrete values await a live-debugger
-confirm and must not be invented:
+> **Provenance.** The mechanism (catalogue key formula, `model_class_id`-keyed lookup) stays
+> CODE-CONFIRMED. The concrete value-edges below were **pinned by direct observation of the real
+> client VFS** (`05.Presentation/.../clientdata/` — `.bnd`/`.skn`/`.mot` decode headers + the CP949
+> `skin.txt`/`actormotion.txt`/`bindlist.txt`/`motlist.txt` tables), without a debugger. Every asset
+> was verified to EXIST in the VFS (existence + size; no payload). The earlier "await a live-debugger
+> confirm / do not invent" framing is SUPERSEDED for the `model_class_id → bind-pose` edge.
 
-- the **`categoryBase[]`** array contents (the per-category base offsets used in both the catalogue
-  key and the actormotion key);
-- the concrete **`model_class_id` -> bind-pose handle** mapping (which loaded `.bnd` each of
-  `{1, 11, 16, 26}` selects — the data-driven `{1->g1, 26->g2, 11->g3, 16->g4}` edge of §8(e)).
+**`model_class_id` → bind-pose skeleton (PINNED, VFS-verified).** Only the four player rigs
+`g1..g4.bnd` exist (`g11.bnd`/`g16.bnd` are CONFIRMED ABSENT from the VFS); each is preloaded by name
+from `bindlist.txt` and filed under its parsed `actor_id`. The mapping resolves through the verbatim
+`id_b` rule (§8(e)) and is confirmed end-to-end by each body `.skn`'s decoded `id_b`:
 
-<!-- pending live-debugger value-edges: catalogue categoryBase[] contents; model_class_id -> concrete bind-pose handle -->
+| `model_class_id` | class (internal 1..4 / role) | skeleton (`actor_id`, bones) | body `.skn` (slot 3, `id_b`) | idle clip (REAL, 30f) |
+|---:|---|---|---|---|
+| 1  | 1 / Musa (`M_musa`)  | `g1.bnd` (`actor_id 1`, 84 bones) | `g202110001.skn` (`id_b=1`) | `g111100010.mot` (84 tracks) |
+| 26 | 2 / Salsu (`salsu`)  | `g2.bnd` (`actor_id 2`, 87 bones) | `g202220001.skn` (`id_b=2`) | `g112200010.mot` (87 tracks) |
+| 11 | 3 / Dosa (`dosa`)    | `g3.bnd` (`actor_id 3`, 82 bones) | `g202130001.skn` (`id_b=3`) | `g111300010.mot` (82 tracks) |
+| 16 | 4 / Monk (`Monk`)    | `g4.bnd` (`actor_id 4`, 89 bones) | `g202140001.skn` (`id_b=4`) | `g111400010.mot` (89 tracks) |
+
+So the long-documented `{1→g1, 26→g2, 11→g3, 16→g4}` edge is now **PINNED from VFS data**: each body
+skin's `id_b` (1/2/3/4) equals the target skeleton's `actor_id`, and the per-class idle clip's track
+count equals that skeleton's bone count (84/87/82/89 — exact), so the trio is self-consistent.
+
+**`skin.txt` body chain (PINNED).** `skin.txt` is tab-delimited (line 1 = row count `1352`). Columns
+(0-based): `[0]` appearance group, `[1]` class key = `model_class_id` (the value filed under the
+catalogue, ∈ `{1, 11, 16, 26, …}` for players), `[2]` catalogue slot, `[3]` a flag (0 on body rows),
+`[4]` **mesh gid** (`g{gid}.skn`), `[5]` **tex id**. The `group 0` body rows (catalogue slot 3) are
+exactly the four `202{1..}0001` meshes tabulated above (e.g. `0\t1\t3\t0\t202110001\t402110001`).
+
+**Catalogue slot column ≠ engine equip-slot index.** The `skin.txt` catalogue-slot column (`[2]`)
+takes values `{0, 3, 4, 6, 11, 40}` in the data, with these family bindings (VFS-observed): slot 3 →
+`202` (body "b"), slot 4 → `203` ("p"), slot 6 → `209` ("a"), slot 11 → `206` ("s"), slot 0 → `210`/`273`
+(head/face), slot 40 → `218` (face/anim-class — the §3.6.2 build-#8 family). This is **distinct** from
+the engine equip-table slot list `{3, 4, 6, 2, 11, 14}` of §3.5.1/§3.6.2 — the equip-slot indices are
+mapped into the catalogue key via the formula `catalog_key = gid_reduced + 1e9·(slot + 100·model_class_id)`
+(§3.5.3), and there is **no catalogue-slot value `2`** in `skin.txt` (the equip family `209`/"a" is
+filed under catalogue slot 6). A port must key the catalogue by the formula's `slot`, not assume the
+two slot numberings coincide.
+
+**`categoryBase[]` array contents — STILL a value-edge (do NOT invent).** The per-appearance-group
+base-offset table held on the catalogue object (used in both the catalogue key and the actormotion key)
+is **not** recoverable from the table data alone — its contents are computed/held in code and not
+emitted to any observed text table. This edge remains open and **must not be invented**; route to RE if
+needed. The `group` column (`skin.txt[0]`) is observed to take values `0, 1, 2, …` (multiple appearance
+groups per class), which is the index `categoryBase[]` is keyed by — but the offset *values* are not in
+the VFS text tables.
+
+<!-- VFS-PINNED: model_class_id->bnd {1->g1,26->g2,11->g3,16->g4} (id_b verbatim); body skin chain; idle clips. STILL OPEN: categoryBase[] offset values (in-code, not in tables) -->
+
+---
+
+## 3.6 Char-select 3D actor assembly — complete build chain (CODE-CONFIRMED, static)
+
+> **Provenance.** Promoted and rewritten from a dirty-room static-analysis note (`_dirty/`,
+> gitignored). Every element enumerated here was read from the function bodies of the relevant
+> routines in `doida.exe` IDB SHA 263bd994 during the CYCLE 10 / 2026-06-21 pass. The note
+> contains no Hex-Rays text; addresses and raw offset constants exist only in the gitignored
+> dirty note and do not appear here. Promotion target is this section only; world-placement
+> coordinates and window-level call sequences are owned by `specs/frontend_scenes.md §3.x`.
+> See §3.6.7 for the consolidated open-item list for this section.
+>
+> **Relationship to §3.5.** Section §3.5 documents the **general** character appearance assembly
+> (the shared skeleton + overlay part model, the appearance catalogue, the `model_class_id`
+> formula). This section documents the **char-select-specific** two-path actor build — which
+> part driver runs on each path, the exact deform-part slot lists, the weapon rigid-attach,
+> and the idle-apply mechanics. The §3.5 facts (skeleton, catalogue, `model_class_id` formula,
+> slot family map) apply here without modification.
+>
+> **Update (static, 2026-06-22).** A dedicated static re-walk of the lineup two-pass build and
+> the slot-23 secondary builders **resolved** the former OPEN-1 (lineup weapon), OPEN-4 (slot-23
+> builds #6/#7 same-or-different), and the primary OPEN-6 (the "horrible assembly" / double-build
+> suspect). The verdict: the second pass fully **tears down** the first pass's skin list before
+> building, so there is **no double-attach and no in-place overwrite** — PASS 2 always wins, and the
+> append-only linker means parts never replace each other within a pass. The "double-build →
+> exploding/duplicated mesh" hypothesis is statically REFUTED. See §3.6.2 for the full verdict and
+> the surviving low-priority [OPEN@DEBUGGER] residuals. Still STATIC ONLY — no live debugger this
+> campaign; items requiring a live read are tagged [OPEN@DEBUGGER].
+
+### 3.6.0 Two distinct preview paths — do not conflate
+
+The char-select scene builds 3D preview actors via two separate entry points, each with a
+different purpose, part driver, and equip source. Both paths call the shared actor factory
+`ActorManager_SpawnActorFromDescriptor` (mode arg 1 = player), but they differ in everything
+that follows:
+
+| Path | Purpose | Actors per build | Equip source | Notes |
+|------|---------|-----------------|-------------|-------|
+| **Roster lineup** | The 5-slot row of existing characters | Up to 5 (slots 0..4) | Server-supplied equip table from the slot's spawn descriptor | Part driver `ActorVisual_RebuildLineupParts` runs after the factory; see §3.6.2 |
+| **Zoom / single preview** | Enlarged view of the just-created or selected character | 1 | Synthesised descriptor with 4 per-class **preview-only starter equip ids** injected (see §3.6.1) | Factory's `ActorVisual_RebindLocalPlayerParts` driver runs and is not overridden |
+
+The two actor sets are **mutually exclusive at runtime**: the lineup build tears down the prior
+zoom actor, and the zoom build tears down all 5 lineup actors before spawning its single actor.
+A 1:1 port must replicate this teardown sequence or stale ghost actors accumulate.
+
+> **RESOLVED static (was OPEN-1) — an EQUIPPED lineup slot shows NO weapon from PASS 1.** The
+> factory's PASS-1 in-world driver attaches weapon nodes, but the equipped-slot PASS-2 driver
+> (`ActorVisual_RebuildLineupParts`) begins with the full skin-list teardown (it destroys and
+> clears the entire list built by PASS 1 — see §3.6.2) and then does NOT re-invoke the weapon-node
+> builder. So PASS 1's weapon does not survive: the equipped-lineup final list holds only the
+> mantissa-zeroed deform parts, no weapon. (The **unequipped** PASS-2 fallback re-runs the in-world
+> driver, which DOES rebuild weapon nodes, so an unequipped lineup actor can carry the in-world
+> driver's weapon.) **[OPEN@DEBUGGER]** corroborate by enumerating the skin/node list of an equipped
+> lineup actor after PASS 2 — low priority, the teardown is statically unambiguous.
+
+### 3.6.1 Zoom-path synthesised descriptor and preview-only equip ids
+
+The zoom build constructs a local 880-byte descriptor (zeroed), copies three appearance words
+from the select window's internal state, and injects **4 preview-only starter equip ids** per
+class via a class-switch. These ids exist solely for this preview actor; they are not the
+character's real equipment and must not be used for in-world spawning.
+
+The class selector and the four injected equip-slot ids (using the slot-family numbering from
+§3.5.1: slots 3/4/6/2 = families 202/"b" / 203/"p" / 206/"s" / 209/"a") per class are:
+
+| Class (server-supplied class selector, 1..4) | Slot 3 (body) | Slot 4 ("p") | Slot 6 ("s") | Slot 2 ("a") |
+|------|------------|------------|------------|------------|
+| 1 | 202110003 | 203110002 | 206110002 | 209110001 |
+| 2 | 202220003 | 203220002 | 206220002 | 209220001 |
+| 3 | 202130003 | 203130002 | 206130002 | 209130001 |
+| 4 | 202140003 | 203140002 | 206140002 | 209140001 |
+
+A body-family byte is also set per class (classes 1, 3, and 4 set it to 1; class 2 sets it to
+2). The zoom actor is then placed at a single anchor offset (documented in
+`specs/frontend_scenes.md §3.7`) and given its idle via the standard in-world idle path (§3.6.5).
+
+> **OPEN (§3.6 OPEN-2):** the class-2 body-family byte value (2 vs. 1 for every other class)
+> is unexplained. The most plausible interpretation is a gender or body-family marker specific
+> to class 2 (Salsu), but this is not confirmed in the binary. Do not hard-code an assumption;
+> carry as OPEN pending a live read or a cross-reference to the body-family byte's consumer.
+
+### 3.6.2 Deform-part enumeration — two drivers with different part sets
+
+A char-select preview actor is a set of independently-loaded deform `.skn` parts each bound to
+the shared actor pose (§3.5.1). Two part drivers exist with different part counts and catalogue
+key sources.
+
+#### Roster-lineup driver (working name: `ActorVisual_RebuildLineupParts`; name pending `names.yaml`) — 8 deform-part builds
+
+This driver runs as a second pass after the factory (§3.6.3), on lineup actors only. It opens
+with a **high-tier collapse guard**: when the actor's `model_class_id` exceeds a per-session
+threshold read from the global visual object, only the body slot (slot 3) is built. Below the
+threshold it builds the following 8 deform parts in order:
+
+| Build # | Slot | Key source | Part identity |
+|---------|------|-----------|--------------|
+| 1 | 3 | `(slot, model_class_id)`, reduced-gid mantissa zeroed | **Body** (family 202/"b") default for this `model_class_id` |
+| 2 | 4 | `(slot, model_class_id)`, mantissa zeroed | Family 203/"p" default |
+| 3 | 6 | `(slot, model_class_id)`, mantissa zeroed | Family 206/"s" default |
+| 4 | 2 | `(slot, model_class_id)`, mantissa zeroed | Family 209/"a" default |
+| 5 | 11 | `(slot, model_class_id)`, mantissa zeroed | Head / hair / face default |
+| 6 | (slot-23 family) | Secondary appearance field (`actor.secondaryAppearanceId`) | Secondary deform part, slot-23-family key seed |
+| 7 | (slot-23 family) | `actor.secondaryAppearanceId` + `model_class_id` + variant/class terms | Secondary deform part (variant-tinted), same family as #6 |
+| 8 | (slot-40 family) | Face/anim-class field from the actor descriptor (`desc+offset0x36`) + `model_class_id` | Face/anim-class part |
+
+Parts #1–#5 use the default `(slot, model_class_id)` catalogue key with the reduced-gid
+mantissa zeroed — they produce the default appearance for the appearance class, ignoring any
+equip-mantissa on the server descriptor. Parts #6–#8 key off two additional actor fields
+(`secondaryAppearanceId` and `desc+0x36` respectively) whose exact semantic meanings are not
+yet confirmed (see OPEN-3 below). Each of #6, #7, and #8 is conditional on a catalogue hit;
+a miss silently skips that part.
+
+> **OPEN (§3.6 OPEN-3):** the semantic meanings of the actor fields driving builds #6 (secondary
+> appearance id), #7 (secondary + variant/class), and #8 (face/anim-class field at
+> `desc+offset0x36`) are unverified. Only their offsets and use are confirmed. Candidates
+> include face sub-mesh id, head decoration, hair variant, or sub-class. Do not invent the
+> semantics; carry as OPEN pending AnimCatalog data or a live read.
+
+> **RESOLVED static (was OPEN-4) — builds #6 and #7 request DIFFERENT catalogue keys; legitimate
+> multi-part, NOT a redundant double-build.** The two slot-23-family secondary builders run as an
+> adjacent pair on the same actor, build #6 then build #7. Each computes its own 64-bit AnimCatalog
+> lookup key by a **different formula reading different actor fields**, then attaches the single skin
+> part its key resolves to (or nothing, on a catalogue miss). The keys cannot collide:
+> - **build #6** computes its key with one **fixed secondary sub-id additive tag**, applied to a
+>   single appearance field on the actor;
+> - **build #7** computes its key with a **different additive tag** and a branch that, in its main
+>   case, derives the multiplicand from the actor's class/variant slot fields via the familiar
+>   `5·(class + 4·variant) − 24` `model_class_id` form (§3.5.2) plus a distinct additive tag.
+>
+> Because #6's and #7's additive tags differ (and #7's multiplicand differs in its slot-id branch),
+> the two keys resolve to **distinct catalogue entries** — two different skin parts (e.g. a face base
+> and a face-detail / variant-tinted sub-mesh), not the same part built twice. Each is independently
+> conditional on a catalogue hit, so a real run attaches 0, 1, or 2 of them. Both builders share the
+> same scaffolding (a lazily-cached per-builder pointer to the shared visual singleton, a find-then-get
+> double *lookup* of the same key — benign intra-routine idiom, not a second part — and a single
+> `ActorVisual_AttachSkinPart` with a 0.0 scale override). Treat as legitimate multi-part assembly.
+> The precise **semantics** of the driving actor fields remain OPEN-3; only that #6 ≠ #7 is now settled.
+> A live-debugger read of the two concrete key values on an equipped actor would byte-prove
+> non-collision, but the static additive-tag delta already settles it. **[OPEN@DEBUGGER]** byte-prove
+> the two resolved record ids on a live actor (low priority — non-collision is statically proven).
+> Independently corroborated by the char-select per-slot static walk
+> (`frontend_scenes.md` §11.5h cross-ref): the two slot-23-family secondary builders carry distinct
+> additive tags / multiplicands, confirming a legitimate two-part attach rather than a double-build.
+
+> **OPEN (§3.6 OPEN-5):** the concrete value of the high-tier collapse threshold is data-driven
+> (read from the global visual object at runtime), not a static constant. It is not recovered.
+> Do not invent a value; the effect — only slot 3 is built above the threshold — is confirmed.
+
+#### In-world / factory part driver (working name: `ActorVisual_RebindLocalPlayerParts`; name pending `names.yaml`) — 6 deform parts + face builders + weapon
+
+This driver runs inside the shared actor factory (§3.6.3) for both the lineup and zoom paths.
+The same high-tier collapse guard applies. Below the threshold it builds via the
+equip-mantissa-carrying per-part builder (working names: `ActorVisual_BuildPart` /
+`ActorVisual_AttachSkinPart`; names pending `names.yaml` — see §3.6.4) in slot order:
+
+**Slots `{3, 4, 6, 2, 11, 14}`** — six deform parts — then two additional face-part builders
+(one for the equip-table entry 0 / face slot, one for the `desc+0x36`-keyed face part), and
+finally the weapon rigid-attach builder (`ActorVisual_AttachHandWeaponNodes`, §3.6.4).
+
+The per-part catalogue key for slots other than 14 uses the formula from §3.5.3:
+`catalog_key = gid_reduced + 1e9 * (slot + 100 * model_class_id)`. The weapon slot (14) uses
+a wider reduction with a base-1000 slot multiplier; see `specs/equipment_visuals.md §3`.
+
+There is also a near-identical sibling driver used in the high-tier case that builds only slot 3.
+
+**The two-pass build on the lineup path — RESOLVED static (no double-attach).** Every lineup
+actor is built in **two sequential passes**, and the verdict that matters for a 1:1 port is that
+they do **NOT** co-reside — the second pass tears the first one down before it builds, so the
+final skin list holds **exactly one pass's parts**:
+
+- **PASS 1 — inside the factory, at spawn (always the in-world driver).** The factory runs
+  `ActorVisual_RebindLocalPlayerParts` (equip-mantissa-carrying, slots `{3,4,6,2,11,14}` + two
+  face parts + weapon nodes), appending each part onto the actor's (initially empty) skin list.
+  This driver does **not** tear down — it only appends — which is correct at PASS 1 because the
+  list starts empty.
+- **PASS 2 — back in the lineup loop, after the factory returns.** An equip-walk over the actor's
+  20-entry equip table selects ONE PASS-2 driver: an **equipped** slot (the first equip entry that
+  resolves to a live part-actor with a qualifying part-flag) runs `ActorVisual_RebuildLineupParts`
+  (the mantissa-zeroed 8-part build, §3.6.2 above); an **unequipped** slot (all 20 entries miss)
+  runs the fallback driver that simply re-runs `ActorVisual_RebindLocalPlayerParts`.
+
+> **RECONCILE — the equip-validity scan polarity, and EQUIPPED lineup slots CAN show a weapon
+> (binary-won, counter-check IDB SHA 263bd994, static-only).** A static re-walk of the lineup loop's
+> per-slot equip-validity scan pins the two-way branch precisely, and reverses the polarity above:
+> the scan walks the 20 equip-table entries and, for each that names a live actor, tests a per-class
+> flag at `*(byte)(class@actor+168 + foundActor+204)`. The branch is:
+> - **ALL 20 entries valid** (scan completes without an "invalid" break) → tear down PASS-1, then
+>   **re-run the equip-driven in-world driver `ActorVisual_RebindLocalPlayerParts`** (slots
+>   `{3,4,6,2,11,14}` + weapon). The fully-valid-equip lineup actor therefore looks **exactly like the
+>   in-world actor and CAN show a weapon** (slot 14).
+> - **ANY entry invalid** (early break) → tear down PASS-1, then build the **mantissa-zeroed default
+>   driver** (slots `{3,4,6,2,11}`, the gid term = 0, keyed purely by `(slot, model_class_id)`) plus
+>   the secondary/face builders — **NO weapon (no slot 14) in this branch.**
+>
+> This **reverses** the "equipped slot runs the mantissa-zeroed lineup driver; unequipped re-runs the
+> in-world driver" framing in this subsection and in the table/notes below: it is the **fully-valid-equip**
+> slot that re-runs the weapon-bearing in-world driver, and the **default (any-invalid)** slot that runs
+> the mantissa-zeroed, weapon-less driver. Consequently the **"equipped lineup slot shows no weapon"
+> open item is revised** — an equipped lineup slot whose 20 equip entries are all valid goes through the
+> WEAPON-bearing driver, so it can show a weapon; the no-weapon outcome is specific to the **default
+> (invalid-equip)** branch. Both branches still tear PASS-1 down first, so the no-double-attach verdict
+> is unaffected. A faithful port must reproduce **both** branches and the equip-validity scan that
+> selects between them — using the in-world (gid-bearing, weapon) key on the fully-valid branch and the
+> mantissa-zeroed `1e9·(slot + 100·model_class_id)` key on the default branch. The exact byte semantic
+> of the per-class equip-validity flag (what makes an entry "valid") is the only residual here —
+> mechanism confirmed, meaning **debugger-pending** (do not invent).
+- **The decisive fact: BOTH PASS-2 drivers begin with a full skin-list teardown.** Each PASS-2
+  driver first calls the shared skin-list teardown (`ActorVisual_TeardownSkinList`; name pending
+  `names.yaml`), which iterates the entire current skin list, decrements each bound pose's refcount,
+  detaches and virtual-destroys every skin object, frees the pooled dynamic vertex/index buffers,
+  and **clears the skin-list vector to empty** (and resets the pooled vertex/index counts to 0).
+  Only then does it append its own parts onto the now-empty list.
+
+**The per-part linker is APPEND-ONLY.** Each successful attach calls a list linker that wires the
+skin's pose/owner/pooled-base-index, bumps the pooled vertex/index counts, and does a vector
+`push_back` of the new skin entry — there is **no search-by-slot, no key compare, no
+replace-in-place**. Within a single pass parts therefore accumulate (they never overwrite each
+other); across passes the only thing that prevents accumulation is the PASS-2 teardown above.
+
+**Verdict (RESOLVES the former OPEN-6 "horrible assembly" suspect):**
+
+1. **Order is fixed** — PASS 1 = the factory in-world driver (at spawn), then PASS 2 = the lineup
+   driver (equipped) or the re-run of the in-world driver (unequipped), after the factory returns.
+2. **No part is attached twice in the final list, and no part is overwritten in place.** PASS 2
+   destroys PASS 1's entire skin list before appending its own parts. The earlier
+   "double-build → duplicated / overwriting / exploding mesh" hypothesis is **statically REFUTED**
+   — the mesh is not doubled by this two-pass structure.
+3. **PASS 2 wins, unconditionally**, because it tears PASS 1 down first. For an **equipped** lineup
+   slot the winner is the lineup driver's **mantissa-zeroed default-body** 8-part build; for an
+   **unequipped** slot the winner is the second run of the in-world (equip-mantissa) driver.
+
+**1:1 port guidance.** A faithful port may either (a) reproduce the two passes literally with a
+full skin-list teardown between them, OR equivalently (b) build **only the PASS-2 set** directly
+(the lineup driver's parts for an equipped slot, the in-world driver's parts for an unequipped
+slot), since PASS 1 is always discarded.
+
+> **Fidelity consequence for EQUIPPED lineup slots (a faithful behaviour, NOT a bug to fix).**
+> *(Polarity caveat: per the RECONCILE note above, the mantissa-zeroed lineup driver is the **default
+> (any-invalid-equip)** branch; a slot whose 20 equip entries are ALL valid instead re-runs the
+> weapon-bearing in-world driver and shows its real equip meshes. The paragraph below describes the
+> **default-branch** outcome — read "equipped lineup slot" here as a slot taking the mantissa-zeroed
+> default driver.)*
+> The winning PASS-2 build for a default-branch lineup slot is the lineup driver, which keys parts
+> `#1–#5` with the **mantissa-zeroed `(slot, model_class_id)`** catalogue key — i.e. it drops the
+> equip-item gid mantissa and resolves the **default body for the appearance class**. So even when
+> a roster character IS equipped, the lineup row shows the **default-body silhouette** for its
+> `(slot, model_class_id)`, discarding the equip-item meshes that PASS 1 built with the equip
+> mantissa. The equip-walk uses equipment only to DECIDE which PASS-2 driver runs; the lineup
+> driver itself then ignores the equip mantissa. A 1:1 lineup port should render the default-body
+> parts for equipped slots, matching this — it is the as-built behaviour, not a defect. (The zoom /
+> single-preview path never runs PASS 2, so it keeps the factory's equip-mantissa parts — its
+> synthetic starter gear shows; §3.6.0.)
+>
+> **OPEN@DEBUGGER (residual, do NOT guess — none affects the no-double-attach verdict):**
+> (1) the COUNT of *successful* attaches per pass (each attach is gated on an AnimCatalog hit, and
+> the catalogue is VFS/data-driven, not in the binary) — breakpoint the per-part attach routine on
+> a char-select with an equipped slot and count the skin-list entries after PASS 2 settles;
+> (2) corroborate the skin list is empty immediately after the teardown returns at PASS-2 entry
+> (the static read is unambiguous; listed for completeness);
+> (3) the exact semantic of the equip-walk part-flag byte that decides equipped-vs-fallback (it
+> does not affect the duplication verdict either way).
+
+### 3.6.3 Shared actor factory — call sequence
+
+`ActorManager_SpawnActorFromDescriptor` (mode 1 = player) is the single convergence point for
+all char-select preview actors (and all in-world spawns). For the char-select paths it:
+
+1. Allocates the actor object and copies the 880-byte descriptor into it.
+2. Resolves the **appearance key** (`model_class_id = 5·(class + 4·variant) − 24`; variant 3
+   resolves to 0 — the invisible sentinel, no mesh rendered). See §3.5.2.
+3. Looks up the **AnimCatalog record** by appearance key. A miss or empty part list destroys
+   the actor — no preview for that slot.
+4. From the catalog record, acquires the **bind-pose handle** (the actor's deform skeleton) and
+   sets the base motion-rate scalar and the mesh import-scale base.
+5. Runs player-kind name/relation fixups (same-named-clone display rebuild).
+6. Runs the in-world part driver `ActorVisual_RebindLocalPlayerParts` (§3.6.2 above) and
+   applies the idle motion (§3.6.5).
+
+The lineup path then additionally runs `ActorVisual_RebuildLineupParts` as a second pass
+(§3.6.2), producing the double-build described there.
+
+### 3.6.4 Per-part attach mechanics (`ActorVisual_AttachSkinPart`)
+
+For each deform part (slots other than the weapon), the per-part attach routine:
+
+1. Resolves the catalogue key to a `(skinId, poseId)` pair.
+2. Fetches the `.skn` from the skin cache (path `data/char/skin/g{skinId}.skn`), loading and
+   running the inverse-bind bake (§4) if not already cached.
+3. Allocates a deform scratch vertex buffer (`32 · vertCount` bytes) and memcpys the 32-byte
+   rest vertices into it.
+4. Binds the skin part to its pose skeleton by `poseId` via the bind-pose pool (`id_b` verbatim
+   key — §8(e)).
+5. Computes the per-mesh scale as `nodeScale · meshScale` (× optional gid-scale override if
+   non-zero).
+6. Links the skin into the actor's skin list (see §3.5.4) and adds its vertex/index counts to
+   the actor's pooled totals.
+
+The vertex stride is 32 bytes (position vec3 + normal vec3 + uv2; §2.1). The deform mode
+(LBS / rigid-major / rigid-fast) is a per-actor word that dispatches the deform variant each
+frame (§1, §5.3).
+
+**Weapon rigid-attach (working name: `ActorVisual_AttachHandWeaponNodes`; name pending `names.yaml`).** The weapon is a **static
+(rigid) item skin attached to a hand bone**, not a deform skin. This builder runs only for
+player-kind actors via the factory's in-world part driver. It:
+
+1. Reads the weapon item-actor id from the actor's weapon slot.
+2. Shifts a bone-index field by a per-subtype offset (the shift selects the hand-bone attach
+   node for the weapon sub-type: two-handed sword vs. bow vs. staff, etc.).
+3. Looks up the weapon item skin record and, if found, builds a `StaticSkin` node (not a
+   deform `Skin`) attached to the selected hand-bone node.
+4. For dual-weapon items (identified by a weapon-bind-class field == 3), builds a **second**
+   StaticSkin node: one for the main hand (node flag 2) and one for the off hand (node flag 1).
+5. Assigns each weapon node's bone-matrix index from attack-mode tables keyed by the
+   actor-mode columns; flag 2 (main hand) and flag 1 (off hand) select different table rows.
+
+The concrete hand bone-id is **debugger-pending** (see `specs/equipment_visuals.md §3` and its
+`DBG-PENDING` note). Do not hard-code a bone id; resolve it through the table mechanism above.
+
+### 3.6.5 Idle motion application on preview actors
+
+Two idle entry points apply to preview actors; both resolve the same catalogue slot.
+
+**Factory / in-world path (`ActorVisual_ApplyIdleMotionByKind`).** For motion-kind 0
+(stand/idle), reads the AnimCatalog record at **+0x44 (direction array A element 1 = column 16
+of actormotion.txt)** and applies that clip at rate 1.0. The idle clip is resolved through
+the `motlist.txt` clip registry (the column-16 value is a motion id equal to a `.mot` file's
+header `id_b`). See §10 for the full standing-idle analysis. The lookup key is the actor's
+stored **appearance key** (`model_class_id`), not the skin-class / `id_b` field from
+`actormotion.txt` column 2.
+
+**Lineup-direct path (working name: `Actor_ApplyIdleMotion_Direct`; name pending `names.yaml`).** Recomputes a **normalised lineup idle key** by
+bucketing the `model_class_id` into 5-wide families: `key' = 5·((model_class_id % 40 − 1)/5) + 1`.
+Looks up the catalog by `key'` and applies **record +0x44** (the same column-16 stand slot)
+at rate 1.0. The effect is that lineup actors from the same class family share one idle bucket.
+
+Both paths read the same column-16 catalogue slot. Record +0x40 (column 15, array A element 0)
+has no read-sites and is statically dead — see §10.
+
+> **OPEN (§3.6 OPEN-7):** the normalized key `5·((model_class_id % 40 − 1)/5) + 1` used on the
+> lineup path differs from the raw `model_class_id` used on the zoom/in-world path. Whether
+> the two expressions select the same catalogue record (and therefore the same `.mot` clip) for
+> the four starter classes (whose `model_class_id` values are 1, 26, 11, and 16) is unverified.
+> Both read column 16, so the bucket difference only matters if bucketing produces a different
+> row from a raw lookup. Carry as OPEN pending a live check or an AnimCatalog data dump.
+
+**Scale applied before idle on the lineup path.** The lineup driver multiplies the actor's
+base motion-rate scalar (`actor.motionRateBase`, set from `catalogRecord.motionRateBase`) by
+a fixed multiplier of **3.0** before calling the idle applicator. The zoom/in-world path uses
+the catalog value without this multiplier.
+
+> **Note for the port.** The 3.0 multiplier and the scale literal 72.0 written to the actor's
+> scale fields by the select window are **legacy engine-unit artefacts** tied to the importer
+> mesh scale and the catalog-record scale fields. A Godot port must reconcile against the
+> actual `.skn`/`.bnd` import scale rather than transplanting those literals.
+
+### 3.6.6 Skeleton selection in the char-select context
+
+Two skeleton-selection events occur per preview actor and must not be confused:
+
+1. **The actor pose skeleton** (the shared deform skeleton all parts bind into) is selected by
+   the AnimCatalog record's bind-pose handle, keyed by the appearance key `model_class_id`
+   (§3.6.3 step 3–4). This is one of the four `g1..g4.bnd` player rigs, reached through the
+   catalog indirection, not by a literal `g{model_class_id}.bnd` path format.
+2. **Each loaded `.skn`'s own skeleton for the inverse-bind bake**: when a part's `.skn` is
+   loaded, the bake routine reads the `.skn` header's `id_b` field, resolves the matching
+   preloaded skeleton by that `id_b` used verbatim as the pool key (§8(e)), and bakes the
+   inverse-bind against that skeleton's world transforms (§4). For a consistent character all
+   parts' `.skn` `id_b` must match the actor pose skeleton's `id_b`; a mismatch is the
+   class-mismatch shatter described in §8(e).
+
+> **RESOLVED (§3.6 OPEN-8) — VFS-PINNED.** The concrete `model_class_id → bind-pose handle`
+> mapping for the four player values `{1, 11, 16, 26}` is **pinned from the real client VFS**
+> (§3.5.5): `1→g1.bnd` (84 bones), `26→g2.bnd` (87), `11→g3.bnd` (82), `16→g4.bnd` (89). It is
+> confirmed by each body `.skn`'s decoded `id_b` (which equals the target skeleton's `actor_id`)
+> and by each per-class idle clip's track count exactly matching the skeleton's bone count. The
+> four `g1..g4.bnd` are preloaded by name from `bindlist.txt`; `g11.bnd`/`g16.bnd` are CONFIRMED
+> ABSENT from the VFS (so the appearance-slot values `11`/`16` are NOT filenames — they resolve to
+> `g3`/`g4` through the `id_b` verbatim rule). No live read was needed.
+
+### 3.6.7 Open-item summary for §3.6
+
+| Id | Item | Impact |
+|----|------|--------|
+| ~~OPEN-1~~ **RESOLVED** | Whether lineup actors show weapons | **RESOLVED static (§3.6.2):** an EQUIPPED lineup slot shows NO weapon — its PASS-2 driver tears the whole list down (incl. PASS-1 weapon) and omits the weapon-node builder; an UNEQUIPPED slot's PASS-2 fallback re-runs the in-world driver and rebuilds weapon nodes. Low-priority [OPEN@DEBUGGER] corroboration only |
+| OPEN-2 | Class-2 body-family byte = 2 (vs. 1 for classes 1/3/4) in the zoom synthesised descriptor | May affect which body-family mesh is loaded for the zoom class-2 actor; unexplained |
+| OPEN-3 | Semantic meaning of `secondaryAppearanceId` (builds #6/#7) and `desc+0x36` (build #8) | Needed to correctly populate these actor fields on spawn; currently offsets/use are confirmed but semantics are not |
+| ~~OPEN-4~~ **RESOLVED** | Builds #6 and #7 — same or different skin ids? | **RESOLVED static (§3.6.2):** DIFFERENT keys — each builder uses a different additive tag (and #7 a different multiplicand branch), so the two resolve to distinct catalogue entries (two sub-meshes), NOT a redundant build. Both are needed in a 1:1 port. Low-priority [OPEN@DEBUGGER] byte-proof only |
+| OPEN-5 | Concrete value of the high-tier collapse threshold | Needed to reproduce the body-only fallback on actors above the threshold |
+| ~~OPEN-6~~ **RESOLVED** | Two-pass build on the lineup: which build's parts win for an equipped slot? | **RESOLVED static (§3.6.2):** PASS 2 tears PASS 1 fully down first (shared teardown clears the skin-list vector), so NO part is attached twice and nothing is overwritten in place — the "double-build / exploding mesh" hypothesis is REFUTED. PASS 2 wins: an equipped lineup slot shows the lineup driver's mantissa-zeroed **default body** (discarding PASS 1's equip-item parts — faithful, not a bug). Residual [OPEN@DEBUGGER]: count of *successful* (catalogue-hit) attaches per pass only |
+| OPEN-7 | Lineup normalized idle key `5·((model_class_id%40−1)/5)+1` vs. zoom raw `model_class_id` — same catalogue row for the four starters? | If they differ, lineup actors may idle differently than zoom; carry until an AnimCatalog row dump or live check |
+| ~~OPEN-8~~ **RESOLVED (VFS-PINNED)** | Concrete `model_class_id → bind-pose handle` data values for `{1, 11, 16, 26}` | **PINNED from the real client VFS (§3.5.5):** `1→g1.bnd` (84 bones), `26→g2.bnd` (87), `11→g3.bnd` (82), `16→g4.bnd` (89); confirmed via each body `.skn`'s decoded `id_b` (= skeleton `actor_id`) and matching idle-clip track counts. `g11.bnd`/`g16.bnd` confirmed ABSENT. No live read needed |
+
+---
 
 ## 4. Inverse bind — computed at load, never stored
 

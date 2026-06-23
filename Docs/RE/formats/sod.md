@@ -9,31 +9,43 @@
 ## Status
 
 ```
-verification:   sample-verified   # container shape (u32 solidCount, 108-byte SolidRecord array in one
-                                   #   pass, then per-solid u32 quadCount + 48-byte QuadRecord array),
-                                   #   the file-size formula, the world-XZ AABBs, and the line
-                                   #   slope/intercept/axisFlag fields all matched against a real VFS
-                                   #   sample AND the legacy cell-loader read path
-ida_reverified: 2026-06-21
+verification:   partial           # container shape (u32 solidCount, 108-byte SolidRecord array in one
+                                   #   pass, then per-solid u32 quadCount + 48-byte QuadRecord array)
+                                   #   and the file-size formula confirmed. World-XZ AABBs of the
+                                   #   SolidRecord confirmed against a real VFS sample.
+                                   #   QuadRecord on-disk layout: the first 16 bytes (four XZ corner
+                                   #   floats) are confirmed; the trailing 32 bytes are read opaquely
+                                   #   and are NOT field-consumed by the loader. Earlier claims about
+                                   #   slope/intercept/axisFlag fields at +0x20–+0x2C and the runtime
+                                   #   line/segment intersector reading those offsets are REFUTED by
+                                   #   the loader trace (see QuadRecord section below).
+ida_reverified: 2026-06-22 (CYCLE 12 Block B, IDB SHA 263bd994): prior "segment/slope-intercept"
+                QuadRecord reading REFUTED by loader trace. The loader reads the quad block as an
+                opaque 48-byte record; only the first 16 bytes (4 XZ corner floats) are consumed.
+                Runtime collision query not yet located — marked DEBUGGER-PENDING.
 ida_anchor:     263bd994
-evidence:       [static-ida, vfs-sample]
-conflicts:      none on the on-disk layout. Two task-hint corrections folded in: (1) the geometry is a
-                line/SEGMENT intersection, not classic point-in-polygon ray-parity; (2) there is NO
-                `.sod.pre` / `.pre` sidecar — the acceleration structure is built in memory at load.
-loader_resolved: true             # the on-disk read-set (solidCount, SolidRecord array, per-solid
-                                   #   quadCount + quad array) and every runtime field consumer
-                                   #   (line intersector reads +32/+36/+40/+44) are pinned to the loader.
+evidence:       [static-ida, vfs-sample] (on-disk container + SolidRecord AABB confirmed;
+                QuadRecord trailing fields loader-disproven; runtime query DEBUGGER-PENDING)
+conflicts:      Prior "wall SEGMENT / slope-intercept z=m·x+b / axisFlag" QuadRecord reading REFUTED
+                (loader-disproven). Prior "runtime move/slide line/line intersection" section REFUTED
+                (no static runtime query was located; see DEBUGGER-PENDING note).
+                Residual confirmed: (1) no `.sod.pre` / `.pre` sidecar; (2) no ray-parity polygon.
+loader_resolved: partial          # on-disk read-set (solidCount, SolidRecord array, per-solid
+                                   #   quadCount + quad block) is confirmed. Runtime field consumers
+                                   #   of the QuadRecord content are NOT pinned — DEBUGGER-PENDING.
 ```
 
-> **Task-hint corrections (CYCLE, anchor 263bd994).** Two prior assumptions are corrected here:
-> 1. **It IS 2D-XZ wall geometry, but the test is a line/segment intersection, not ray-parity
->    point-in-polygon.** Each record stores a single wall **segment** as a slope-intercept line
->    `z = m·x + b` (with a vertical-axis special case), and the runtime finds the nearest segment a
->    movement segment crosses. There is no closed polygon loop and no even/odd crossing count.
-> 2. **There is NO `.sod.pre` (or any `.pre`) sidecar.** No `.pre` / `.sod.pre` path or string exists
->    in the binary. The `.sod` is opened directly from the cell `.map` descriptor parse, and the
->    pre-computed acceleration structure (a per-solid quadtree over a 16×16 grid) is built **at load
->    time in memory**, not read from disk.
+> **Correction record (anchor 263bd994).**
+> 1. **Ray-parity point-in-polygon is REFUTED** — the `.sod` does not use even/odd ray-crossing
+>    against closed polygon loops. (The geometry is 2D-XZ wall data, not a polygon hull.)
+> 2. **There is NO `.sod.pre` (or any `.pre`) sidecar** — no `.pre` / `.sod.pre` path or string was
+>    located in the binary. The `.sod` is opened directly from the cell `.map` descriptor parse.
+> 3. **LOADER-DISPROVEN (QuadRecord):** The earlier claim that the QuadRecord stores a wall segment as
+>    a slope-intercept line `z = m·x + b` with an `axisFlag` at +0x2C, and that the runtime
+>    intersector field-reads offsets +0x20/+0x24/+0x28/+0x2C, is REFUTED by the loader trace. The
+>    loader reads the 48-byte quad block as one opaque unit; only the first 16 bytes (four XZ-corner
+>    floats) are consumed by the on-disk parse. The remaining 32 bytes and the runtime collision query
+>    are DEBUGGER-PENDING — no static runtime query was located.
 
 ---
 
@@ -42,8 +54,8 @@ loader_resolved: true             # the on-disk read-set (solidCount, SolidRecor
 A `.sod` file is a **per-terrain-cell wall-collision data set**: a small array of *solids*, each
 carrying an array of *wall segments* in the world XZ plane. It is the data behind the client's
 horizontal wall blocking / sliding — the thing that stops the player from walking through a wall and
-slides them along it. Ground **height** is a separate concern (`.ted` bilinear interpolation — see
-`terrain.md`); `.sod` deals only with vertical-wall collision in the XZ plane.
+slides them along it. Ground **height** is a separate concern (`.ted` per-triangle plane interpolation — see
+`terrain.md §5.4a`); `.sod` deals only with vertical-wall collision in the XZ plane.
 
 The on-disk content is intentionally minimal: a count, a flat array of solid bounding boxes, and per
 solid a flat array of segment records. All spatial values are **absolute world XZ coordinates** in the
@@ -126,41 +138,33 @@ and that the **second axis is Z, not Y**.
 
 ---
 
-## QuadRecord — stride 48 (0x30) — a single wall SEGMENT in XZ
+## QuadRecord — stride 48 (0x30) — a wall-geometry entry in XZ
 
-Each "quad" record is one **wall segment** in the world XZ plane: a 2D AABB bounding the segment, the
-two segment endpoints, and the segment's line in slope-intercept form plus a vertical/axis flag.
+> **LOADER-DISPROVEN CORRECTION.** The earlier description of this record as a "wall SEGMENT stored
+> as slope-intercept `z = m·x + b` with axisFlag" is **REFUTED** by the loader trace (anchor
+> 263bd994). The loader reads the 48-byte block as one opaque unit: only the first 16 bytes (four
+> XZ-corner floats bounding the entry's footprint) are consumed by the on-disk parse. The trailing
+> 32 bytes are read into memory but are **not field-accessed** by any statically-located consumer.
+> The runtime collision query that uses these records was **not statically located** and is
+> **DEBUGGER-PENDING**. Do not assert field meanings for offsets +0x10 and above.
+
+Each QuadRecord is one **wall-geometry entry** in the world XZ plane. The on-disk parse confirms four
+XZ corner floats at the start of each record; everything else is opaque trailing data whose runtime
+interpretation has not been traced.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0x00 | 4 | f32 | `aabbMinX` | Segment 2D-AABB minimum X. | parser + sample |
-| +0x04 | 4 | f32 | `aabbMinZ` | Segment 2D-AABB minimum Z. | parser + sample |
-| +0x08 | 4 | f32 | `aabbMaxX` | Segment 2D-AABB maximum X. | parser + sample |
-| +0x0C | 4 | f32 | `aabbMaxZ` | Segment 2D-AABB maximum Z. | parser + sample |
-| +0x10 | 4 | f32 | `p0x` | Endpoint 0, X. | parser (impl) + sample |
-| +0x14 | 4 | f32 | `p0z` | Endpoint 0, Z. | sample |
-| +0x18 | 4 | f32 | `p1x` | Endpoint 1, X. | sample |
-| +0x1C | 4 | f32 | `p1z` | Endpoint 1, Z. | sample |
-| +0x20 (+32) | 4 | f32 | `slope` (m) | Line slope in `z = m·x + b`. | parser + sample |
-| +0x24 (+36) | 4 | f32 | `xConst` | Constant X used when the line is parallel to the Z axis (i.e. when `slope == 0` / the vertical-axis case). | parser + sample |
-| +0x28 (+40) | 4 | f32 | `intercept` (b) | Line intercept in `z = m·x + b`. | parser + sample |
-| +0x2C (+44) | 4 | u32 | `axisFlag` | `== 1` marks the vertical / axis-aligned special case (line parallel to an axis); otherwise the slope/intercept form is used. Only value 0 seen in the available sample. | parser + sample |
+| +0x00 | 4 | f32 | `cornerMinX` | Footprint XZ minimum X. | parser + sample |
+| +0x04 | 4 | f32 | `cornerMinZ` | Footprint XZ minimum Z. | parser + sample |
+| +0x08 | 4 | f32 | `cornerMaxX` | Footprint XZ maximum X. | parser + sample |
+| +0x0C | 4 | f32 | `cornerMaxZ` | Footprint XZ maximum Z. | parser + sample |
+| +0x10 | 32 | — | (opaque trailing data) | Read into the in-memory record but **not field-consumed** by any statically-located runtime path. Prior names (`p0x`/`p0z`/`p1x`/`p1z`/`slope`/`xConst`/`intercept`/`axisFlag`) are REFUTED — do not use them. Semantics are DEBUGGER-PENDING. | REFUTED / DEBUGGER-PENDING |
 
-**Endpoints + line are both meaningful on disk.** The two-endpoint pair at `+0x10..+0x1F` bounds the
-segment (the same two XZ points as the AABB corners, but in segment order); the runtime intersector
-reads the **line form** (`slope`, `xConst`, `intercept`, `axisFlag`) for the actual math, then clamps
-the intersection point onto both segments using the AABBs. So `+0x20..+0x2F` are real, consumed fields,
-not padding.
-
-**Line math verified on a sample segment:** for one segment, `m = (zMax − zMin) / (xMax − xMin)`
-matches the stored slope, and `b = zMin − m·xMin` matches the stored intercept (`z = m·x + b`). Other
-sampled segments include a near-vertical wall (large-magnitude slope) and an ordinary diagonal — all
-consistent with the slope-intercept reading and the `axisFlag` special case for axis-aligned walls.
-
-> **Endpoint order.** Whether `+0x10` is "p0" vs "p1" is cosmetic: the intersector uses the
-> slope/intercept line form for the geometry, with the endpoints and AABB only bounding the segment.
-> Treat the endpoints as `p0 / p1` segment-bounding values; their precise ordering is unverified and
-> does not affect the math.
+> **What was disproven.** The earlier field table named offsets +0x10–+0x2C as endpoint pairs and a
+> slope-intercept line (`slope`, `xConst`, `intercept`, `axisFlag`), and asserted the runtime
+> intersector consumed those four offsets. The loader trace does not support this: no static field
+> access at +0x10 or above was located. An engineer must **not** write a parser that reads named
+> fields beyond +0x0C until the runtime consumer is confirmed via the live debugger.
 
 ---
 
@@ -180,10 +184,11 @@ consistent with the slope-intercept reading and the `axisFlag` special case for 
      length word), and store the segment-array pointer at the solid's `+64` (overwriting the on-disk
      `+60` / `+64` slots).
    - Read `48 × quadCount` bytes directly into the segment array.
-   - **Build the per-solid quadtree:** partition this solid's segments into the 16×16 grid; where a
-     grid cell accumulates many refs (split threshold = 16) it splits into a sub-quadtree (four child
-     quadrants, each child carrying its own AABB and center). This is pure in-memory acceleration —
-     **nothing here is written to disk.**
+   - **Build the per-solid grid:** partition this solid's quad records into the 16×16 spatial grid by
+     their corner XZ footprints; where a grid cell accumulates many refs (split threshold = 16) it
+     splits into a sub-tree (four child quadrants, each with its own AABB and center). This is pure
+     in-memory acceleration — **nothing here is written to disk.** How the grid entries are queried
+     at movement time is DEBUGGER-PENDING (see Runtime collision query section).
 6. **Mark ready** (`true` iff at least one solid was loaded) and return.
 
 There is no magic, no version field, and no checksum to validate; the heap allocations guard against
@@ -191,23 +196,29 @@ There is no magic, no version field, and no checksum to validate; the heap alloc
 
 ---
 
-## Runtime collision query (informative — behaviour, not file layout)
+## Runtime collision query — DEBUGGER-PENDING
 
-At movement time the move/slide resolver sweeps a movement segment against the cell's collision data:
+> **No static runtime query was located.** The earlier description of a "move/slide resolver that
+> sweeps a movement segment using slope-intercept line/line intersection" was derived from the prior
+> (now-refuted) QuadRecord field table. Because the trailing 32 bytes of each QuadRecord are opaque
+> and no runtime consumer was statically traced, the actual collision algorithm is **unknown** and
+> must be confirmed via the live debugger.
 
-1. The query entry sets the nearest-hit distance to `+∞` and dispatches the sweep AABB into the 16×16
-   grid.
-2. The grid query maps the query AABB onto its grid cells and visits each cell's bucket (deduplicated
-   per query via a global frame counter, so a segment shared across cells is tested once).
-3. Where a grid cell holds a sub-quadtree, the query recurses by node-AABB center toward the relevant
-   quadrant; at a leaf it iterates the leaf's solid refs and, per solid, its `quadCount` segments.
-4. For each candidate segment it does: 2D-AABB cull → slope-intercept **line/line intersection**
-   between the movement segment and the wall segment → two point-in-AABB containment checks to clamp
-   the intersection onto both segments. It keeps the nearest hit (squared distance to the query origin)
-   and returns the hit XZ plus which segment was struck.
+What is confirmed from the static loader trace:
+- The 16×16 grid is built at load time over the cell bounds (acceleration structure, in-memory only).
+- Each solid's quad block is loaded into the in-memory record array.
+- The in-memory record stores the four XZ corner floats per entry and 32 opaque trailing bytes.
 
-This is the wall-collision used to block / slide the player along walls in XZ. Ground height is solved
-separately (`.ted` bilinear — see `terrain.md`).
+What is NOT confirmed:
+- How the runtime tests a movement vector against a quad record.
+- Whether the test uses the corner floats, the opaque bytes, or both.
+- Whether it is a segment intersection, a point-in-polygon test, a signed-distance test, or another algorithm.
+- What "blocking" and "sliding" look like at the algorithm level.
+
+A debugger breakpoint on the collision-query entry (when the player walks into a wall) is required to
+settle this. Mark as **DEBUGGER-PENDING**; do not implement a collision algorithm from this spec until confirmed.
+
+Ground height is a separate concern (`.ted` per-triangle plane interpolation — see `terrain.md §5.4a`).
 
 ---
 
@@ -222,8 +233,14 @@ separately (`.ted` bilinear — see `terrain.md`).
   that names the cell's `.ted` / `.map` / `.mud` / `.gad`. One `.sod` per terrain cell. World units:
   cell origin = `((cellX − 10000)·1024, (cellZ − 10000)·1024)`; cell span 1024 units (the same cell
   coordinate model as `terrain.md`).
-- **It references — nothing external.** `.sod` is self-contained geometry; the AABBs and endpoints are
+- **It references — nothing external.** `.sod` is self-contained geometry; the corner XZ values are
   **absolute world XZ** coordinates in the same space as the cell `.map` geometry and player movement.
+- **Vertical bounds context (`.up` / `.exd`).** The companion terrain formats supply the vertical
+  extents that bracket wall collision: `.up` (UP_TERRAIN) carries the **minimum / floor** surface
+  triangles (see `terrain_layers.md` §2), and `.exd` (EXTRA_TERRAIN) carries the **maximum / ceiling**
+  surface triangles (see `terrain_layers.md` §3). Wall collision in `.sod` operates in the XZ plane;
+  the `.up`/`.exd` triangle meshes supply the Y bounds that determine the active vertical range for
+  that wall geometry.
 - **Runtime consumer / manager — the embedded per-cell collision manager.** The move/slide resolver
   sweeps a movement segment through the manager's quadtree query (see Runtime collision query) to get
   the nearest wall crossing and resolve blocking/sliding.
@@ -245,12 +262,13 @@ Z negation consistently), or walls will not line up with the rendered world.
    `108 × solidCount` solid array is read before the loop that reads each `quadCount` + quad block, i.e.
    all-solids-then-all-quad-blocks. Only a 1-solid sample is on disk to confirm this; a multi-solid
    sample (or a debugger trace on a cell with multiple solids) would settle the exact interleaving.
-2. **Endpoint order (`+0x10` = p0 vs p1).** Cosmetic — the intersector uses the slope/intercept line
-   form, with endpoints + AABB only bounding the segment. Marked as `p0 / p1` segment-bounding values,
-   order unverified.
-3. **`axisFlag` (+0x2C) value range.** The `== 1` branch (vertical / axis-aligned line case) is
-   confirmed, but a full enumeration of its values across many cells is unverified — only `0` is seen
-   in the available sample.
+2. **QuadRecord trailing bytes (+0x10–+0x2F) — DEBUGGER-PENDING.** The 32 bytes after the four XZ
+   corner floats are read into the in-memory record but no static field consumer was located. Their
+   meaning (possible endpoint pair, line parameters, flags, or other encoding) is unknown. The prior
+   slope-intercept / axisFlag reading is REFUTED; do not use it. Confirm via debugger.
+3. **Runtime collision query algorithm — DEBUGGER-PENDING.** No static movement/slide resolver that
+   consumes the quad records was located. Whether the test is segment-intersection, point-in-AABB,
+   or another algorithm is unknown. A live debugger breakpoint on the collision path is required.
 
 ---
 
@@ -271,7 +289,7 @@ Z negation consistently), or walls will not line up with the rendered world.
 
 - Format: `sod` → "Cell Wall-Collision Segments (2D XZ)"
 - Structs: `SodSolidRecord` (108 bytes): `aabbMinX/Z`, `aabbMaxX/Z`, `quadCount`;
-  `SodQuadRecord` (48 bytes): `aabbMinX/Z`, `aabbMaxX/Z`, `p0x/p0z`, `p1x/p1z`, `slope`, `xConst`,
-  `intercept`, `axisFlag`
+  `SodQuadRecord` (48 bytes): `cornerMinX/Z`, `cornerMaxX/Z` (confirmed); trailing 32 bytes opaque
+  (DEBUGGER-PENDING — prior names `p0x/p0z/p1x/p1z/slope/xConst/intercept/axisFlag` are REFUTED)
 - Constants: `SOD_SOLID_STRIDE = 108`, `SOD_QUAD_STRIDE = 48`, `SOD_GRID_DIM = 16`,
   `SOD_LEAF_SPLIT_THRESHOLD = 16`

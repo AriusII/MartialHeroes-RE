@@ -6,11 +6,18 @@
 #                 field-layout: only the leading 4-byte action/result code is recovered; the rest of
 #                 the body is consumed by a code switch and is NOT a promotable fixed offset table;
 #                 wire VALUE semantics: capture/debugger-pending (no live capture this campaign).
-#   ida_reverified: 2026-06-17
+#   ida_reverified: 2026-06-22   # CYCLE 12 Phase 0: 3/100 code table fully re-read + counter-checked;
+#                                # CYCLE 12 Phase 2: enter-ladder ordering (1/7 mode-1 -> 3/14 -> 1/9 -> 3/5) added as
+#                                # the leading static hypothesis for the genuine select-mode code-23 reject.
+#                                # select-mode code 23 confirmed RECOVERABLE (7/5 + string 1604), not fatal.
+#                                # prior ida_reverified: 2026-06-17
 #   ida_anchor: 263bd994
 #   conflicts: RESOLVES the prior 3/7-vs-3/100 mislabel -- the table-driven engine-state transition
 #              that earlier specs ascribed to 3/7 lives HERE at (3:100) SmsgCharActionResult; (3:7)
 #              SmsgCharManageResult is a Select-scene UI result that writes NO engine state.
+#              CYCLE 12 also RESOLVES the internal handlers.md-vs-client_runtime.md inconsistency:
+#              select-mode codes 22 and 23 are RECOVERABLE (engine state 7 / sub-state 5), NOT the
+#              fatal out-of-range 7/8 arm. The canonical per-code table is handlers.md SECTION 23.1.
 
 name: SmsgCharActionResult
 opcode: 0x30064           # major 3 (CharacterMgmt), minor 100 -> (3 << 16) | 100
@@ -22,11 +29,12 @@ capture_verified: false
 
 summary: >
   The table-driven engine-state transition handler for the character / lobby flow. Opcode (3:100).
-  The inbound dispatcher routes this through the major-3 inline minor switch. Its handler reads a
-  leading 4-byte action/result code and, via a large code switch, writes the engine GameState and
-  enqueues timed UI events. This -- NOT 3/7 -- is the major-3 message that drives the engine scene
-  state. Routing (opcode -> handler) and the GameState write targets are control-flow-confirmed; the
-  full code -> state/message mapping VALUES are capture/debugger-pending.
+  The inbound dispatcher routes this through the major-3 inline minor switch (single dispatch arm; no
+  misroute). Its handler reads a leading 4-byte action/result code at payload offset 0 and, via a large
+  dual-mode code switch (select-mode vs in-world-mode, keyed on whether a local player exists), writes
+  the engine GameState and enqueues timed UI events. This -- NOT 3/7 -- is the major-3 message that
+  drives the engine scene state. Routing (opcode -> handler) and the GameState write targets are
+  control-flow-confirmed; the human meaning of each code value is capture/debugger-pending.
 
 # No generatable fixed struct. Only the leading action/result code is recovered as a fixed field;
 # the remainder of the body is consumed by the code switch, not read as one packed struct at the
@@ -34,38 +42,73 @@ summary: >
 fields: []
 
 notes: |
-  Routing CONFIRMED (control-flow). GameState write targets CONFIRMED (control-flow). Body field
-  layout beyond the leading action code NOT decoded. Wire VALUE semantics capture/debugger-pending.
-  No live capture available this campaign.
+  Routing CONFIRMED (control-flow; single dispatch arm, no aliasing/misroute). GameState write targets
+  CONFIRMED (control-flow). Body field layout beyond the leading action code NOT decoded. Human VALUE
+  meaning of each code capture/debugger-pending. No live capture available this campaign.
+
+  CANONICAL CODE TABLE: the complete code -> (engine state, sub-state, error-detail operand, side
+  effect, notice/tooltip string-id, deferred-timer arming) mapping for BOTH modes lives in
+  handlers.md SECTION 23.1. Do not re-list a subset here; cross-reference 23.1.
 
   KNOWN LEADING FIELD (control-flow-confirmed):
-    - Action  u32 @0x00  -- the action/result code the code switch dispatches on.
+    - Action  u32 @0x00  -- the action/result code the code switch dispatches on. Read once, at
+                            payload offset 0, as a 4-byte little-endian unsigned int. Unambiguous; a
+                            benign value cannot structurally read as 23 from a wrong offset.
 
-  ENGINE GameState TRANSITIONS (control-flow-confirmed targets; the code->target mapping VALUES are
-  capture-pending):
-    - billing / retry codes (202, 203, 232) -> GameState 2 (Load)
-    - code 0                                 -> GameState 6 (Quit)
-    - error codes                            -> GameState 7 (Error), carrying the code as the
-                                                error-detail field
-    The code is also passed through as a detail value, and timed UI events are enqueued. The handler
-    branches on whether a local player object is present.
+  RECOVERED ACTION CODE SET (re-confirmed build 263bd994, CYCLE 12):
+    {0, 1-5, 7, 10, 11, 16, 22, 23, 200-211, 220-227}, plus the specials {202, 203, 232}.
+    There is NO case 32, and NO case 9 (a "> 9" guard drops the value 9). The 200-block jumptable
+    spans codes 200..232 inclusive (33 cases). (Earlier "9-11" readings are corrected to "10, 11".)
 
-  RECOVERED ACTION CODE SET (re-confirmed build 263bd994, Campaign 10):
-    {0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227}, plus the specials 202/203/232.
-    There is NO case 32 (an earlier doc reading that listed code 32 is corrected).
+  DUAL-MODE OUTCOME (control-flow-confirmed structure; see 23.1 for the full table):
+    SELECT-MODE (no local player -- the character-select / lobby path reached BEFORE entering world):
+      - code 0                              -> engine state 6 / sub-state 8 (quit/return)
+      - codes 1,2,3,4,5,7,22,23 (RECOVERABLE) -> engine state 7 / sub-state 5; error-detail = the code.
+            Code 23 additionally shows notice string-id 1604 (a compiled constant, not wire-read) and
+            is EXCLUDED from the deferred retry/timeout timer. THIS IS RECOVERABLE -- NOT the fatal 7/8.
+      - codes 202,203,232                   -> publish-code method AND engine state 2 (Load) -- reload path
+      - codes 10,11,16,200,201,204-211,220-227 -> publish-code method only; NO engine-state write
+      - codes 212-219,228-231 (true default/out-of-range) -> engine state 7 / sub-state 8 (hard error)
+    IN-WORLD MODE (local player present):
+      - non-zero code -> engine state 7 / sub-state 8; error-detail = the code. Tooltip popups for the
+            set {1,2,3,4,5,6,7,22} -> string-ids 1201..1208 (code 6 IS handled here -> 1206). Code 23
+            has NO case in-world: no tooltip, falls through, still writes 7/8 and arms the timer.
+      - code 0 -> engine state 6 / sub-state 8.
+      - the deferred timer is armed UNCONDITIONALLY in-world (the 23 / {202,203,232} timer exclusions
+        are SELECT-MODE-ONLY).
 
-  OPCODE / LADDER (RESOLVED, dispatch-confirmed -- Campaign 16):
+  ENGINE GameState RECORD: three 32-bit slots -- [0] state, [1] sub-state, [2] detail. The detail slot
+  carries the result code itself on error arms (it is the error-detail value, not a fixed immediate).
+
+  OPCODE / LADDER (RESOLVED, dispatch-confirmed):
     - 3/7   = SmsgCharManageResult  -- Select-scene char delete/rename/select UI result; 8-byte block;
                                        writes NO engine GameState. (see 3-4_char_manage_result.yaml,
                                        legacy filename)
     - 3/100 = SmsgCharActionResult  -- THIS message; the table-driven engine-state transitioner.
     Any doc/YAML that places the table-driven engine-state transition at 3/7 is WRONG -- it is 3/100.
+    Note: "minor 23" (SmsgCharStatusBytesByName) is a DIFFERENT opcode from the result-CODE value 23
+    carried inside a 3/100 packet -- different axes.
+
+  EMISSION CROSS-CHECK (the wire LAYOUT is byte-correct; code 23 is provoked by a VALUE/ORDERING --
+  CYCLE 12 Phase 2): the outbound 1/7 (2-byte [u8 SlotIndex][u8 Mode]) and 1/9 (40-byte) frames match
+  packets/cmsg_char_select.yaml and packets/cmsg_char_enter.yaml byte-for-byte, and 3/100 reads its
+  Result correctly as a u32 at payload+0. So code 23 is NOT a malformed-send and NOT a mis-read -- it
+  is a GENUINE server reject (recoverable 7/5 + notice id 1604). LEADING STATIC HYPOTHESIS for what
+  provokes it: the original enters the world via a SERVER ROUND-TRIP ladder --
+  1/7 (mode 1, select-and-play / play-confirm) -> 3/14 SmsgCharSpawnResponse (positive flag) ->
+  1/9 emitted FROM the 3/14 handler -> 3/5. A client that fires 1/9 unilaterally off its Enter button
+  (no mode-1 1/7, no positive-flag 3/14 wait) sends 1/9 OUT OF SEQUENCE, the most likely cause of the
+  code-23 reject (see specs/frontend_scenes.md §7, cmsg_char_enter.yaml ENTER SEQUENCE). Whether the
+  server's exact code-23 rule is the ordering, the mode byte, or a field value is the runtime-only
+  residual; the static boundary is: emission layout correct, enter ORDERING is the prime suspect.
 
   WHY NO FIELD TABLE: beyond the leading 4-byte action code, the body is consumed by the code switch
   rather than read as a single fixed struct at the dispatch site, so no further fixed offset table is
   promotable from the routing handler alone. A capture of a char/lobby action result is required to
-  decode the rest of the body and to confirm the code -> state/message mapping values.
+  decode the rest of the body and to confirm the code -> human-meaning mapping values.
 
-  UNKNOWNS to resolve with a capture:
+  CAPTURE/DEBUGGER-PENDING residuals:
     - the body layout past the leading action code (no fixed offset table recovered statically);
-    - the exact code -> GameState/message-id mapping (only the 2/6/7 target buckets are confirmed).
+    - the human meaning of each code value (which code = "name taken" / "slot locked" / etc.);
+    - the 1/7 Mode-byte meaning (mode 0 vs 1) and whether a 1/7 must precede every accepted 1/9
+      (ordering/mode rule) -- the prime suspects if the server's code-23 reject is an ordering rule.

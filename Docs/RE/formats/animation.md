@@ -810,6 +810,24 @@ state-8 special idle; a[6] (+0x58, col21) = alt-idle (motion-kind byte == 1). So
 slot: the standing/stand-still idle is a[1] (+0x44, col16); the default-idle-cycle is a[5]; the
 alt/combat idle is a[6].
 
+> **Motion-kind dispatch — only kinds 0 and 1 read the AnimCatalog record (binary-won, counter-check
+> IDB SHA 263bd994, static-only).** The idle/stand dispatcher switches on the actor's **motion-kind
+> byte (actor field +964)** and reads the per-appearance AnimCatalog record **only for two kinds**:
+> - **kind 0 (stand/idle)** → `record + 0x44` (array-A element 1 = column 16), the single idle read
+>   site (record +0x40 / column 15 is NOT read);
+> - **kind 1 (alt-idle)** → `record + 0x58` (a[6]).
+>
+> All **other** motion kinds (**4, 0x13, 0x2D, and the default case**) do **not** index the
+> per-appearance AnimCatalog record at all — they index a **flat per-class motion array held on the
+> `ActorVisualGlobal` singleton** (the global motion-kind table), addressed by a per-kind base offset
+> (the four base offsets are **352 / 1492 / 3468 / 48**) with a **19·kind** stride and a **4·class**
+> step (class read from actor +168 = descriptor +0x34). So the per-appearance `actormotion` record
+> governs only the stand (kind 0) and alt-idle (kind 1) clips; the remaining motion kinds resolve
+> through the global table, not this 136-byte record. The chosen clip handle is fed to the per-actor
+> mixer at rate 1.0; the char-select lineup additionally scales idle playback ×3 (actor playback-rate
+> field ×= 3.0). The semantics of the 4 / 0x13 / 0x2D global-table kinds are out of scope here
+> (mechanism confirmed; per-kind meaning carried OPEN — do not invent).
+
 **The runtime idle catalogue lookup is keyed by the APPEARANCE KEY, NOT col2/skin_class (CYCLE 7).**
 At play time the idle dispatchers look the actor's animation record up by the actor's stored
 **appearance key** (for a player, `key = 5·(class + 4·variant) − 24`), via an ordered-map lookup over

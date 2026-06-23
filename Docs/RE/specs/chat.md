@@ -5,7 +5,9 @@
 > per-opcode text-length-prefix NUL convention; capture/debugger-pending for the absolute on-wire
 > byte-order/endianness of every length prefix, the (5:7) text-body framing, and the channel-code
 > VALUE meanings (which routing/colour a given code drives on the live wire).
-> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida].
+> ida_reverified: 2026-06-22 · ida_anchor: 263bd994 · evidence: [static-ida].
+> readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
+> CYCLE 11 World block (263bd994): the (5:7) S2C body framing is RESOLVED to an explicit `[u32 len][len CP949 bytes]` prefix (§8.2) — superseding the "rest of frame" hypothesis; the S2C-only notice codes 8/10/16/17 were added; code 7 = pink `0xFFFF797C` (§3) re-confirmed against the binary (a dirty mis-read was caught and reverted).
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL (the earlier
 > "believed to include NUL" reading was wrong); (b) (3:21) is a genuine length-prefixed channel-chat
 > sender, not merely a "special announce" — the earlier "NOT a chat carrier" framing understated it;
@@ -533,16 +535,32 @@ The 36-byte header is, payload-relative:
 | `+0x0E` | 1  | channel     | channel code; `6` / `7` ⇒ whisper route, then the channel-dispatch switch (CONFIRMED) |
 | `+0x10` | 20 | sender name | sender display name, fixed buffer NUL-terminated (`+0x10..+0x24`; STATIC-HYPOTHESIS — header size firm, exact name span inferred) |
 
-The **text body** that follows is read by the same length-prefixed field reader into a 120/127-byte
-buffer and then `strlen`-measured — so the body IS length-prefixed in the reader's view, but its
-**absolute on-wire byte-order/framing is not pinned statically** (length-prefixed vs NUL-terminated vs
-"rest of frame"). Reasonable default hypothesis until a capture lands:
-`body_length = frame.size − 8 (frame header) − 36 (chat header)`, then NUL-trimmed. See
-`Docs/RE/packets/5-7_chat_broadcast.yaml`. **Capture-pending.**
+The **text body** that follows is now resolved (CYCLE 11 re-walk): past the 36-byte header the body is
+exactly **one length-prefixed segment — a `u32` byte-count followed by that many CP949 bytes**. The
+client copies exactly that many bytes and appends its **own NUL** (the NUL is client-added and is NOT
+part of the counted length). So the framing is `[u32 len][len CP949 bytes]`, NOT "rest of frame", and
+the total frame size is:
 
-> **Channel routing on the S2C side.** The same `channel > 100` rule from the append sink applies:
-> a channel above 100 routes to the **separate floating notice-text system**, not the chat log
-> (Section 6.3).
+`frame.size == 8 (frame header) + 36 (chat header) + 4 (body length word) + body_len`.
+
+This **SUPERSEDES** the earlier `body_length = frame.size − 8 − 36` hypothesis, which over-counted by
+the 4-byte length word. Only the **absolute on-wire byte-order/endianness of the `u32` length word**
+(and whether the server's count ever includes a NUL) stays **capture-pending**. See
+`Docs/RE/packets/5-7_chat_broadcast.yaml`.
+
+> **Channel routing on the S2C side (re-walked).** The inbound channel switch carries its own code
+> space (distinct from the C2S input enum of Section 3 — see the note above). Beyond the
+> say/whisper/party/guild/alliance arms it has a **system/notice band**: codes **below 100** route to
+> the chat-log ring (code `11` is a distinct insert); codes **above 100** (a contiguous `102..117`
+> band) route to the **separate floating notice-text system**, not the chat log (Section 6.3); codes
+> `100` and `110` are dropped by the client. Three S2C-only notice arms were confirmed this pass and
+> are NOT C2S input codes: code **10** = yellow `0xFFFFFF00` event notice (message-template id
+> `49079`); code **8** = a separate notice-composer arm; codes **16/17** = a red/orange `0xFFFF4040`
+> notice tail. (Reconciliation note: a CYCLE 11 dirty pass briefly mis-read code `7` as red and code
+> `8` as the yellow `49079` arm; the fresh counter-walk confirmed the binary keeps code `7` = pink
+> `0xFFFF797C` — matching Section 3 — and puts the yellow `49079` notice on code **10**. Section 3 was
+> already correct; the per-code routing/colour **VALUE meanings of the `102..117` notice band remain
+> capture-pending**.)
 
 ---
 

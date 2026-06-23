@@ -8,19 +8,6 @@ namespace MartialHeroes.Client.Godot.Autoload;
 
 public sealed partial class ClientContext
 {
-    // -------------------------------------------------------------------------
-    // VFS / catalogue helpers
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    ///     Builds a <see cref="VfsCatalogueLoader" /> using <see cref="ClientPathResolver.ResolveClientDir" />.
-    ///     Throws <see cref="InvalidOperationException" /> when no valid client directory is found;
-    ///     the client requires the real VFS.
-    ///     Path resolution is delegated entirely to <see cref="ClientPathResolver" /> (env-var override,
-    ///     then client_dir.cfg, then auto-detection). No direct environment-variable read here.
-    ///     spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules (user supplies originals).
-    ///     spec: Docs/RE/formats/pak.md §Two-file scheme.
-    /// </summary>
     private static VfsCatalogueLoader BuildCatalogueLoader()
     {
         var clientDir = ClientPathResolver.ResolveClientDir()
@@ -34,12 +21,6 @@ public sealed partial class ClientContext
         return new VfsCatalogueLoader(infPath, vfsPath);
     }
 
-    /// <summary>
-    ///     Opens the VFS archive for terrain sector streaming using <see cref="ClientPathResolver.ResolveClientDir" />.
-    ///     Throws when no valid client directory is found; the client requires the real VFS.
-    ///     spec: Docs/RE/formats/terrain.md §1.2 / §1.3.
-    ///     spec: PRESERVATION_AND_ARCHITECTURE.md §Non-distribution rules.
-    /// </summary>
     private static MappedVfsArchive OpenVfsForTerrain()
     {
         var clientDir = ClientPathResolver.ResolveClientDir()
@@ -73,8 +54,6 @@ public sealed partial class ClientContext
     {
         try
         {
-            // spec: Docs/RE/specs/resource_pipeline.md §2.5 — OPENNING/SKIP is read from the
-            // per-account/config-singleton INI path, not the dev VFS locator client_dir.cfg.
             return ProjectSettings.GlobalizePath(OpeningWindow
                 .SkipCfgPath);
         }

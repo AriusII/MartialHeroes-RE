@@ -7,70 +7,24 @@ using MartialHeroes.Assets.Parsers.Mesh.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
-/// <summary>
-///     Converts <see cref="StaticMesh" /> (and optionally <see cref="SkinnedMesh" /> + <see cref="Skeleton" />)
-///     to a self-contained GLB (binary glTF 2.0) stream.
-///     Coordinate-system conventions handled:
-///     Legacy format uses a left-handed Y-up coordinate system (matches D3D9 default).
-///     glTF 2.0 mandates right-handed Y-up.
-///     STATIC MESH path (<see cref="WriteGlb(StaticMesh,Stream)" />):
-///     Handedness flip: negate the X component of every position — a standalone static mesh
-///     with no skeleton to mirror against. Winding swap (i1↔i2) restores CCW front faces.
-///     spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED positions.
-///     SKINNED MESH path (<see cref="WriteGlb(SkinnedMesh,Skeleton?,Stream,AnimationClip[])" />):
-///     Handedness flip: uniform Z-negate (x,y,z) → (x,y,−z), applied identically to bone
-///     bind translations, mesh vertex positions, and keyframe translations. Quaternions map
-///     as (x,y,z,w) → (−x,−y,z,w) (negate the two components orthogonal to Z).
-///     Winding swap (i1↔i2) still required — Z-negate also has det = −1.
-///     spec: Docs/RE/specs/skinning.md §7 'no axis negation inside skinning math'; §8(b)
-///     'Pick one handedness conversion — the world Z-negate — and apply it uniformly'.
-///     Mirrors Helpers/WorldCoordinates.SkinToGodot / SkinQuatToGodot in the Godot layer.
-///     NOTE: the static mesh X-negate is INTENTIONALLY DIFFERENT from the skinned Z-negate.
-///     See skinning.md §8(b) for rationale. Do not unify without a deliberate spec decision.
-///     UV origin: the parser already stores V = 1.0 - v_on_disk so the UV origin is
-///     bottom-left, which matches glTF / OpenGL convention. No further V-flip is needed.
-///     spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: "engine transforms it to 1.0 - tex_v". CONFIRMED.
-///     Index representation: parser carries u16 indices (max 65535 per mesh).
-///     If any index exceeds 65535 the emitter upgrades to u32 automatically.
-///     spec: Docs/RE/formats/mesh.md §Index list — vertex_index[n]: CONFIRMED.
-///     Output is DETERMINISTIC: no timestamps, no GUIDs, no random ordering.
-/// </summary>
 public static class GltfConverter
 {
-    // -------------------------------------------------------------------------
-    // glTF / GLB constants
-    // glTF 2.0 spec §binary-gltf §chunks
-    // -------------------------------------------------------------------------
+    private const uint GlbMagic = 0x46546C67u;
 
-    /// <summary>GLB magic = ASCII "glTF" (LE u32). glTF 2.0 spec §binary-gltf §Header.</summary>
-    private const uint GlbMagic = 0x46546C67u; // 'glTF'
-
-    /// <summary>GLB version = 2. glTF 2.0 spec §binary-gltf §Header.</summary>
     private const uint GlbVersion = 2u;
 
-    /// <summary>GLB chunk type for JSON. glTF 2.0 spec §binary-gltf §Chunks.</summary>
-    private const uint ChunkTypeJson = 0x4E4F534Au; // 'JSON'
+    private const uint ChunkTypeJson = 0x4E4F534Au;
 
-    /// <summary>GLB chunk type for binary buffer. glTF 2.0 spec §binary-gltf §Chunks.</summary>
-    private const uint ChunkTypeBin = 0x004E4942u; // 'BIN\0'
+    private const uint ChunkTypeBin = 0x004E4942u;
 
-    // glTF accessor componentType constants — glTF 2.0 spec §Accessor.componentType
     private const int ComponentTypeUnsignedShort = 5123;
     private const int ComponentTypeUnsignedInt = 5125;
     private const int ComponentTypeFloat = 5126;
 
-    // glTF buffer view target constants — glTF 2.0 spec §BufferView.target
     private const int TargetArrayBuffer = 34962;
     private const int TargetElementArrayBuffer = 34963;
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Writes a GLB containing the given static mesh to <paramref name="output" />.
-    ///     The stream does not need to be seekable.
-    /// </summary>
     public static void WriteGlb(StaticMesh mesh, Stream output)
     {
         ArgumentNullException.ThrowIfNull(mesh);
@@ -89,14 +43,7 @@ public static class GltfConverter
         WriteGlbChunks(output, json, binaryBuffer);
     }
 
-    // -------------------------------------------------------------------------
-    // Binary buffer construction
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Packs positions (VEC3 f32), UVs (VEC2 f32), and indices (u16 or u32) into one buffer.
-    ///     Each section is 4-byte aligned as required by glTF 2.0 spec §BufferView.byteOffset alignment.
-    /// </summary>
     private static byte[] BuildBinaryBuffer(
         StaticMesh mesh, bool use32Bit,
         out int posOffset, out int posLength,
@@ -106,12 +53,11 @@ public static class GltfConverter
         var vertexCount = mesh.Positions.Length;
         var indexCount = mesh.Indices.Length;
 
-        posLength = vertexCount * 3 * sizeof(float); // VEC3 f32
-        uvLength = vertexCount * 2 * sizeof(float); // VEC2 f32
+        posLength = vertexCount * 3 * sizeof(float);
+        uvLength = vertexCount * 2 * sizeof(float);
         var indexStride = use32Bit ? sizeof(uint) : sizeof(ushort);
         idxLength = indexCount * indexStride;
 
-        // Align each section to 4 bytes
         posOffset = 0;
         var posEnd = posOffset + posLength;
         uvOffset = Align4(posEnd);
@@ -121,23 +67,16 @@ public static class GltfConverter
 
         var buf = new byte[bufSize];
 
-        // Write positions
-        // Coordinate flip: negate X to convert left-handed D3D9 → right-handed glTF.
-        // spec: Docs/RE/formats/mesh.md §Vertex list — pos_x/y/z: CONFIRMED.
-        // glTF 2.0 spec §3.4: right-handed Y-up.
         var cursor = posOffset;
         for (var i = 0; i < vertexCount; i++)
         {
             var p = mesh.Positions[i];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -p.X); // flip X
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -p.X);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), p.Y);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), p.Z);
             cursor += 12;
         }
 
-        // Write UVs
-        // V is already bottom-left (parser applied 1.0 - v_on_disk).
-        // spec: Docs/RE/formats/mesh.md §Vertex list — tex_v: CONFIRMED.
         cursor = uvOffset;
         for (var i = 0; i < vertexCount; i++)
         {
@@ -147,12 +86,6 @@ public static class GltfConverter
             cursor += 8;
         }
 
-        // Write indices
-        // Winding order: the handedness flip (negate X) also reverses winding order.
-        // To maintain counter-clockwise front faces in glTF we swap index[1] and index[2]
-        // in each triangle, reversing the winding.
-        // spec: Docs/RE/formats/mesh.md §Index list — "winding order as stored; no winding reversal on load". CONFIRMED.
-        // glTF 2.0 spec §3.7.2.1: counter-clockwise winding defines the front face.
         cursor = idxOffset;
         for (var tri = 0; tri < indexCount / 3; tri++)
         {
@@ -163,15 +96,15 @@ public static class GltfConverter
             if (use32Bit)
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor), i0);
-                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 4), i2); // swapped
-                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 8), i1); // swapped
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 4), i2);
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.AsSpan(cursor + 8), i1);
                 cursor += 12;
             }
             else
             {
                 BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), i0);
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), i2); // swapped
-                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), i1); // swapped
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), i2);
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), i1);
                 cursor += 6;
             }
         }
@@ -179,9 +112,6 @@ public static class GltfConverter
         return buf;
     }
 
-    // -------------------------------------------------------------------------
-    // glTF JSON construction
-    // -------------------------------------------------------------------------
 
     private static string BuildJson(
         StaticMesh mesh, int bufferByteLength, bool use32Bit,
@@ -192,7 +122,6 @@ public static class GltfConverter
         var vertexCount = mesh.Positions.Length;
         var indexCount = mesh.Indices.Length;
 
-        // Compute accessor min/max for positions (required by glTF spec §Accessor).
         ComputePositionMinMax(mesh.Positions,
             out var minX, out var minY, out var minZ,
             out var maxX, out var maxY, out var maxZ);
@@ -200,40 +129,32 @@ public static class GltfConverter
         var sb = new StringBuilder(512);
         sb.Append('{');
 
-        // asset
         sb.Append("\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping\"},");
 
-        // scene
         sb.Append("\"scene\":0,");
         sb.Append("\"scenes\":[{\"nodes\":[0]}],");
         sb.Append("\"nodes\":[{\"mesh\":0}],");
 
-        // meshes — one primitive with POSITION, TEXCOORD_0, and indices
         sb.Append("\"meshes\":[{\"primitives\":[{");
         sb.Append("\"attributes\":{");
-        sb.Append("\"POSITION\":0,"); // accessor 0
-        sb.Append("\"TEXCOORD_0\":1"); // accessor 1
+        sb.Append("\"POSITION\":0,");
+        sb.Append("\"TEXCOORD_0\":1");
         sb.Append("},");
-        sb.Append("\"indices\":2"); // accessor 2
+        sb.Append("\"indices\":2");
         sb.Append("}]}],");
 
-        // accessors
         sb.Append("\"accessors\":[");
 
-        // accessor 0 — positions VEC3 f32
-        // X has been negated; update min/max accordingly.
         sb.Append('{');
         sb.Append("\"bufferView\":0,");
         sb.Append("\"byteOffset\":0,");
         sb.Append($"\"componentType\":{ComponentTypeFloat},");
         sb.Append($"\"count\":{vertexCount},");
         sb.Append("\"type\":\"VEC3\",");
-        // min/max: X was negated so swap and negate
         sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],");
         sb.Append($"\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
         sb.Append("},");
 
-        // accessor 1 — UVs VEC2 f32  (no min/max required for TEXCOORD)
         sb.Append('{');
         sb.Append("\"bufferView\":1,");
         sb.Append("\"byteOffset\":0,");
@@ -242,7 +163,6 @@ public static class GltfConverter
         sb.Append("\"type\":\"VEC2\"");
         sb.Append("},");
 
-        // accessor 2 — indices SCALAR u16 or u32
         var indexComponentType = use32Bit ? ComponentTypeUnsignedInt : ComponentTypeUnsignedShort;
         sb.Append('{');
         sb.Append("\"bufferView\":2,");
@@ -252,12 +172,10 @@ public static class GltfConverter
         sb.Append("\"type\":\"SCALAR\"");
         sb.Append('}');
 
-        sb.Append("],"); // end accessors
+        sb.Append("],");
 
-        // bufferViews
         sb.Append("\"bufferViews\":[");
 
-        // bufferView 0 — positions
         sb.Append('{');
         sb.Append("\"buffer\":0,");
         sb.Append($"\"byteOffset\":{posOffset},");
@@ -265,7 +183,6 @@ public static class GltfConverter
         sb.Append($"\"target\":{TargetArrayBuffer}");
         sb.Append("},");
 
-        // bufferView 1 — UVs
         sb.Append('{');
         sb.Append("\"buffer\":0,");
         sb.Append($"\"byteOffset\":{uvOffset},");
@@ -273,7 +190,6 @@ public static class GltfConverter
         sb.Append($"\"target\":{TargetArrayBuffer}");
         sb.Append("},");
 
-        // bufferView 2 — indices
         sb.Append('{');
         sb.Append("\"buffer\":0,");
         sb.Append($"\"byteOffset\":{idxOffset},");
@@ -281,33 +197,21 @@ public static class GltfConverter
         sb.Append($"\"target\":{TargetElementArrayBuffer}");
         sb.Append('}');
 
-        sb.Append("],"); // end bufferViews
+        sb.Append("],");
 
-        // buffer
         sb.Append($"\"buffers\":[{{\"byteLength\":{bufferByteLength}}}]");
 
         sb.Append('}');
         return sb.ToString();
     }
 
-    // -------------------------------------------------------------------------
-    // GLB container writing
-    // glTF 2.0 spec §binary-gltf
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Writes the 12-byte GLB header followed by the JSON chunk and BIN chunk.
-    ///     Chunk data is padded to 4-byte boundaries (JSON with 0x20 spaces, BIN with 0x00 bytes).
-    ///     glTF 2.0 spec §binary-gltf §Padding.
-    /// </summary>
     private static void WriteGlbChunks(Stream output, string json, byte[] binaryBuffer)
     {
         var jsonBytes = Encoding.UTF8.GetBytes(json);
         var jsonPadded = Align4(jsonBytes.Length);
         var binPadded = Align4(binaryBuffer.Length);
 
-        // Total file length:
-        // 12 (header) + 8 (JSON chunk header) + jsonPadded + 8 (BIN chunk header) + binPadded
         var totalLength = (uint)(12 + 8 + jsonPadded + 8 + binPadded);
 
         Span<byte> hdr = stackalloc byte[12];
@@ -316,21 +220,19 @@ public static class GltfConverter
         BinaryPrimitives.WriteUInt32LittleEndian(hdr[8..], totalLength);
         output.Write(hdr);
 
-        // JSON chunk
         Span<byte> jsonChunkHdr = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(jsonChunkHdr, (uint)jsonPadded);
         BinaryPrimitives.WriteUInt32LittleEndian(jsonChunkHdr[4..], ChunkTypeJson);
         output.Write(jsonChunkHdr);
         output.Write(jsonBytes);
-        WritePadding(output, jsonBytes.Length, jsonPadded, 0x20); // space-padded
+        WritePadding(output, jsonBytes.Length, jsonPadded, 0x20);
 
-        // BIN chunk
         Span<byte> binChunkHdr = stackalloc byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(binChunkHdr, (uint)binPadded);
         BinaryPrimitives.WriteUInt32LittleEndian(binChunkHdr[4..], ChunkTypeBin);
         output.Write(binChunkHdr);
         output.Write(binaryBuffer);
-        WritePadding(output, binaryBuffer.Length, binPadded, 0x00); // zero-padded
+        WritePadding(output, binaryBuffer.Length, binPadded, 0x00);
     }
 
     private static void WritePadding(Stream output, int actualLength, int paddedLength, byte padByte)
@@ -342,9 +244,6 @@ public static class GltfConverter
         output.Write(p);
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int Align4(int value)
@@ -352,12 +251,6 @@ public static class GltfConverter
         return (value + 3) & ~3;
     }
 
-    /// <summary>
-    ///     Computes min/max of the original (pre-conversion) positions.
-    ///     The caller is responsible for applying the handedness conversion (X-negate for
-    ///     static meshes; Z-negate for skinned meshes) to the min/max values before emitting
-    ///     the glTF accessor.
-    /// </summary>
     private static void ComputePositionMinMax(
         Vec3[] positions,
         out float minX, out float minY, out float minZ,
@@ -386,53 +279,12 @@ public static class GltfConverter
         }
     }
 
-    /// <summary>Formats a float with enough precision to be round-trippable in JSON.</summary>
     private static string F(float v)
     {
         return v.ToString("G9", CultureInfo.InvariantCulture);
     }
 
-    // -------------------------------------------------------------------------
-    // SkinnedMesh overload — FULL skinning (wave-7 stub replaced)
-    //
-    // Skinning conventions resolved from spec:
-    //   - Bone record on-disk: 36 bytes. self_id, parent_id (u32 LE, low byte used),
-    //     local_translation (f32[3]), local_rotation XYZW (f32[4]).
-    //     spec: Docs/RE/formats/mesh.md §BndBone on-disk record — 36 bytes: CONFIRMED.
-    //   - Quaternion order: XYZW (scalar W last).
-    //     spec: Docs/RE/formats/mesh.md §Quaternion component order: CONFIRMED.
-    //   - Root bone sentinel: self_id==0 && parent_id==0 (low bytes).
-    //     spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
-    //   - Weight normalization: per-vertex sum must equal 1.0; enforced by the parser.
-    //     spec: Docs/RE/formats/mesh.md §Weight record — "engine normalises weights per vertex": CONFIRMED.
-    //   - glTF skinning: JOINTS_0 (VEC4 UNSIGNED_SHORT) + WEIGHTS_0 (VEC4 FLOAT normalised).
-    //     Up to 4 influences per vertex; unused slots get joint index 0 and weight 0.
-    //     glTF 2.0 spec §Skins, §Accessor.
-    //   - Inverse-bind matrices: computed from the bone rest-pose world transform.
-    //     The .bnd file does NOT store pre-computed inverse-bind matrices — they are derived.
-    //     spec: Docs/RE/formats/mesh.md §Bone array —
-    //       "remaining fields … computed by post-load routines": CONFIRMED.
-    //     Computation: accumulate parent chain (root→bone) to get world transform,
-    //     then invert that 4×4 matrix. glTF 2.0 spec §Skins — inverseBindMatrices.
-    //   - JOINTS_0 contains per-vertex bone indices into the skeleton's joint array
-    //     (glTF joint array index, not self_id). SknWeight.BoneIndex is the zero-based
-    //     index into the Skeleton.Bones array.
-    //     spec: Docs/RE/formats/mesh.md §Weight record — bone_index: CONFIRMED.
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Writes a GLB containing the skinned mesh with full skeleton and optional animations.
-    /// </summary>
-    /// <param name="mesh">Parsed skinned mesh from <c>SknParser</c>.</param>
-    /// <param name="skeleton">
-    ///     Bind-pose skeleton from <c>BndParser</c>. If null, only base geometry is emitted
-    ///     (no JOINTS_0/WEIGHTS_0, no skin node).
-    /// </param>
-    /// <param name="clips">
-    ///     Optional animation clips to embed. Each clip becomes one glTF animation.
-    ///     Pass null or empty to omit the animations section.
-    /// </param>
-    /// <param name="output">Destination stream (does not need to be seekable).</param>
     public static void WriteGlb(SkinnedMesh mesh, Skeleton? skeleton, Stream output,
         AnimationClip[]? clips = null)
     {
@@ -441,7 +293,6 @@ public static class GltfConverter
 
         if (skeleton is null)
         {
-            // Fallback: emit only base geometry (no skinning data).
             var staticView = ExpandSkinnedMeshToStatic(mesh);
             WriteGlb(staticView, output);
             return;
@@ -450,24 +301,16 @@ public static class GltfConverter
         WriteGlbSkinned(mesh, skeleton, clips, output);
     }
 
-    // -------------------------------------------------------------------------
-    // Full skinned GLB emission
-    // -------------------------------------------------------------------------
 
     private static void WriteGlbSkinned(
         SkinnedMesh mesh, Skeleton skeleton,
         AnimationClip[]? clips,
         Stream output)
     {
-        // ---- Step 1: Expand corner table → unique (position, uv, boneWeights) vertices ----
-        // Each corner references a vertex index for position; bone weights are per-vertex.
-        // We expand to a flat vertex list keyed on (vertexIndex, u, v) so each unique
-        // position+UV combination gets its own entry with the correct bone influences.
-
         ExpandSkinnedVertices(mesh, out var positions, out var uvs,
             out var indices,
-            out var jointIndices, // [newVertex, 0..3]
-            out var weights); // [newVertex, 0..3]
+            out var jointIndices,
+            out var weights);
 
         var vertexCount = positions.Length;
         var indexCount = indices.Length;
@@ -475,12 +318,8 @@ public static class GltfConverter
 
         var use32BitIdx = vertexCount > ushort.MaxValue;
 
-        // ---- Step 2: Compute inverse-bind matrices (one per bone) ----
-        // spec: Docs/RE/formats/mesh.md §Bone array — local_translation, local_rotation XYZW: CONFIRMED.
-        // glTF 2.0 spec §Skins — inverseBindMatrices: one MAT4 per joint.
-        var invBindData = ComputeInverseBindMatrices(skeleton); // boneCount × 16 floats
+        var invBindData = ComputeInverseBindMatrices(skeleton);
 
-        // ---- Step 3: Build binary buffer ----
         var bin = BuildSkinnedBinaryBuffer(
             positions, uvs, indices, jointIndices, weights, invBindData,
             use32BitIdx,
@@ -491,10 +330,6 @@ public static class GltfConverter
             out var idxOff, out var idxLen,
             out var ibmOff, out var ibmLen);
 
-        // ---- Step 4: Build animation binary data (samplers input/output) ----
-        // Each clip → one glTF animation.
-        // spec: Docs/RE/formats/animation.md §Timing — "Fixed frame rate: 10 fps": CONFIRMED.
-        // Time in seconds = keyframe_index / 10.0f.
         var animBufferParts = new List<(byte[] data, int timeOff, int timeLen,
             int transOff, int transLen,
             int rotOff, int rotLen,
@@ -503,11 +338,8 @@ public static class GltfConverter
 
         var extraBinOffset = Align4(ibmOff + ibmLen);
 
-        // We need to build all animation binary data, then concatenate with the main buffer.
-        // Strategy: build anim binary separately, then append to bin.
         var animBin = BuildAnimationBinaryData(clips, skeleton, out var animParts);
 
-        // Merge buffers
         byte[] fullBin;
         if (animBin.Length > 0)
         {
@@ -515,7 +347,6 @@ public static class GltfConverter
             fullBin = new byte[baseSize + animBin.Length];
             bin.AsSpan(0, bin.Length).CopyTo(fullBin.AsSpan(0));
             animBin.AsSpan().CopyTo(fullBin.AsSpan(baseSize));
-            // Adjust anim part offsets by baseSize
             for (var i = 0; i < animParts.Count; i++)
             {
                 var p = animParts[i];
@@ -532,7 +363,6 @@ public static class GltfConverter
             fullBin = bin;
         }
 
-        // ---- Step 5: Build JSON ----
         var json = BuildSkinnedJson(
             positions, vertexCount, indexCount, boneCount, use32BitIdx,
             posOff, posLen, uvOff, uvLen,
@@ -540,13 +370,9 @@ public static class GltfConverter
             idxOff, idxLen, ibmOff, ibmLen,
             fullBin.Length, skeleton, animParts, clips);
 
-        // ---- Step 6: Write GLB ----
         WriteGlbChunks(output, json, fullBin);
     }
 
-    // -------------------------------------------------------------------------
-    // Vertex expansion (corner table → flat arrays with bone influences)
-    // -------------------------------------------------------------------------
 
     private static void ExpandSkinnedVertices(
         SkinnedMesh mesh,
@@ -556,9 +382,6 @@ public static class GltfConverter
         out ushort[,] outJointIndices,
         out float[,] outWeights)
     {
-        // Collect per-original-vertex weight lists (up to 4 influences per vertex).
-        // spec: Docs/RE/formats/mesh.md §Weight record — vertex_index, bone_index, weight: CONFIRMED.
-        // glTF 2.0 spec §Meshes §Skins: JOINTS_0 and WEIGHTS_0 carry up to 4 influences.
         var origVertexCount = mesh.Positions.Length;
         var perVertexWeights = new List<(uint boneIndex, float weight)>[origVertexCount];
         for (var i = 0; i < origVertexCount; i++)
@@ -571,12 +394,10 @@ public static class GltfConverter
                 perVertexWeights[vi].Add((w.BoneIndex, w.Weight));
         }
 
-        // Expand corners → unique (vertexIndex, u, v) entries.
         var vertexMap = new Dictionary<(uint vi, float u, float v), ushort>(mesh.Corners.Length);
         var positions = new List<Vec3>(mesh.Corners.Length);
         var uvs = new List<Vec2>(mesh.Corners.Length);
         var indexList = new List<ushort>(mesh.Corners.Length);
-        // Store the original vertex index for each new vertex so we can copy bone weights.
         var origVertexMapping = new List<uint>(mesh.Corners.Length);
 
         foreach (var corner in mesh.Corners)
@@ -605,7 +426,6 @@ public static class GltfConverter
         {
             var origVi = (int)origVertexMapping[ni];
             var wList = perVertexWeights[origVi];
-            // Sort by weight descending, take up to 4.
             wList.Sort((a, b) => b.weight.CompareTo(a.weight));
 
             var totalWeight = 0f;
@@ -626,42 +446,18 @@ public static class GltfConverter
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Inverse-bind matrix computation
-    // glTF 2.0 spec §Skins — inverseBindMatrices: one column-major MAT4 per joint.
-    // spec: Docs/RE/formats/mesh.md §Bone array — local_translation @ +8, local_rotation XYZW @ +20: CONFIRMED.
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Computes the inverse bind-pose world transform for each bone.
-    ///     Returns a flat array of <c>boneCount × 16</c> floats in column-major (glTF) order.
-    ///     Implementation note — scale omission:
-    ///     The spec (skinning.md §5.3/§9) states per-mesh and per-node scales are generally
-    ///     non-unit and must be applied. However, for this glTF dev-tool export, scale is
-    ///     intentionally omitted (assumed 1.0) because the parsed <see cref="Skeleton" /> type
-    ///     does not carry per-node scale fields — scale values live on the runtime skin object,
-    ///     not in the .bnd file. A future importer feeding these GLBs into Godot Skeleton3D
-    ///     would need the parser to expose scale before this can be corrected.
-    ///     spec: Docs/RE/specs/skinning.md §3.1 quaternion world walk; §5.3/§9 per-mesh/node scale.
-    /// </summary>
     private static float[] ComputeInverseBindMatrices(Skeleton skeleton)
     {
         var n = skeleton.Bones.Length;
         var result = new float[n * 16];
 
-        // Build a lookup from self_id (low byte) to index in the Bones array.
-        // spec: Docs/RE/formats/mesh.md §BndBone — self_id low byte only: CONFIRMED.
         var idToIndex = new Dictionary<byte, int>(n);
         for (var i = 0; i < n; i++)
             idToIndex[(byte)(skeleton.Bones[i].SelfId & 0xFF)] = i;
 
-        // Compute world transforms by traversing the parent chain.
-        // Each world transform is Translation × Rotation (no scale in spec).
-        // Store as column-major 4×4 float matrices.
-        var worldTx = new float[n * 16]; // world transform per bone
+        var worldTx = new float[n * 16];
 
-        // Process bones: we need to ensure parents are processed before children.
-        // The spec says parent_id → self_id linkage; we do a simple dependency-ordered pass.
         var computed = new bool[n];
 
         void ComputeBone(int idx)
@@ -672,13 +468,6 @@ public static class GltfConverter
             var parentByte = (byte)(b.ParentId & 0xFF);
             var selfByte = (byte)(b.SelfId & 0xFF);
 
-            // Local transform: Translation + Rotation (XYZW).
-            // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8, local_rotation XYZW @ +20: CONFIRMED.
-            // Uniform Z-negate convention: (x,y,z) → (x,y,−z); quaternion (x,y,z,w) → (−x,−y,z,w).
-            // spec: Docs/RE/specs/skinning.md §7 'No axis negation or mirroring happens inside the
-            //   skinning math'; §8(b) 'Pick one handedness conversion — the world Z-negate — and apply
-            //   it uniformly to bone bind translations, mesh vertex positions, AND keyframe translations.'
-            // glTF 2.0 spec §3.4: right-handed Y-up.
             var tx = b.Translation.X;
             var ty = b.Translation.Y;
             var tz = -b.Translation.Z;
@@ -688,7 +477,6 @@ public static class GltfConverter
             var qz = b.Rotation.Z;
             var qw = b.Rotation.W;
 
-            // Normalise quaternion.
             var qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
             if (qlen > 1e-6f)
             {
@@ -705,18 +493,15 @@ public static class GltfConverter
                 qw = 1f;
             }
 
-            // Build local 4×4 column-major TRS matrix (rotation + translation, no scale).
             var localM = QuatToMatrix(qx, qy, qz, qw, tx, ty, tz);
 
             if (b.IsRoot || !idToIndex.TryGetValue(parentByte, out var parentIdx))
             {
-                // Root bone: world == local.
                 localM.AsSpan().CopyTo(worldTx.AsSpan(idx * 16));
             }
             else
             {
-                ComputeBone(parentIdx); // ensure parent is ready
-                // World = Parent.World × Local
+                ComputeBone(parentIdx);
                 MatMul4x4(worldTx.AsSpan(parentIdx * 16), localM,
                     worldTx.AsSpan(idx * 16));
             }
@@ -727,38 +512,27 @@ public static class GltfConverter
         for (var i = 0; i < n; i++)
             ComputeBone(i);
 
-        // Invert each world transform to get inverse-bind matrix.
         for (var i = 0; i < n; i++) InvertTrsMatrix(worldTx.AsSpan(i * 16), result.AsSpan(i * 16));
 
         return result;
     }
 
-    /// <summary>
-    ///     Builds a column-major 4×4 TRS matrix from a rotation quaternion (XYZW) and translation.
-    ///     No scale component.
-    ///     glTF 2.0 spec §Nodes and Hierarchy — TRS decomposition.
-    /// </summary>
     private static float[] QuatToMatrix(float qx, float qy, float qz, float qw,
         float tx, float ty, float tz)
     {
-        // Column-major: [col0.xyzw, col1.xyzw, col2.xyzw, col3.xyzw]
-        // Rotation from quaternion (standard derivation, right-handed).
         float x2 = qx * qx, y2 = qy * qy, z2 = qz * qz;
         float xy = qx * qy, xz = qx * qz, yz = qy * qz;
         float wx = qw * qx, wy = qw * qy, wz = qw * qz;
 
         return
         [
-            1f - 2f * (y2 + z2), 2f * (xy + wz), 2f * (xz - wy), 0f, // col0
-            2f * (xy - wz), 1f - 2f * (x2 + z2), 2f * (yz + wx), 0f, // col1
-            2f * (xz + wy), 2f * (yz - wx), 1f - 2f * (x2 + y2), 0f, // col2
-            tx, ty, tz, 1f // col3
+            1f - 2f * (y2 + z2), 2f * (xy + wz), 2f * (xz - wy), 0f,
+            2f * (xy - wz), 1f - 2f * (x2 + z2), 2f * (yz + wx), 0f,
+            2f * (xz + wy), 2f * (yz - wx), 1f - 2f * (x2 + y2), 0f,
+            tx, ty, tz, 1f
         ];
     }
 
-    /// <summary>
-    ///     Multiplies two 4×4 column-major matrices: result = a × b.
-    /// </summary>
     private static void MatMul4x4(ReadOnlySpan<float> a, float[] b, Span<float> result)
     {
         for (var col = 0; col < 4; col++)
@@ -771,25 +545,17 @@ public static class GltfConverter
         }
     }
 
-    /// <summary>
-    ///     Inverts a 4×4 TRS column-major matrix (assumes only rotation + translation, no scale).
-    ///     For a pure rotation-translation matrix: inv(M) = [R^T | -R^T * t].
-    /// </summary>
     private static void InvertTrsMatrix(ReadOnlySpan<float> m, Span<float> inv)
     {
-        // Extract rotation (upper-left 3×3) and translation (column 3, rows 0-2).
-        // Column-major: m[col*4+row].
-        float r00 = m[0], r10 = m[1], r20 = m[2]; // col0
-        float r01 = m[4], r11 = m[5], r21 = m[6]; // col1
-        float r02 = m[8], r12 = m[9], r22 = m[10]; // col2
-        float tx = m[12], ty = m[13], tz = m[14]; // col3
+        float r00 = m[0], r10 = m[1], r20 = m[2];
+        float r01 = m[4], r11 = m[5], r21 = m[6];
+        float r02 = m[8], r12 = m[9], r22 = m[10];
+        float tx = m[12], ty = m[13], tz = m[14];
 
-        // Transpose of rotation block.
         float ir00 = r00, ir01 = r10, ir02 = r20;
         float ir10 = r01, ir11 = r11, ir12 = r21;
         float ir20 = r02, ir21 = r12, ir22 = r22;
 
-        // -R^T * t
         var itx = -(ir00 * tx + ir01 * ty + ir02 * tz);
         var ity = -(ir10 * tx + ir11 * ty + ir12 * tz);
         var itz = -(ir20 * tx + ir21 * ty + ir22 * tz);
@@ -812,9 +578,6 @@ public static class GltfConverter
         inv[15] = 1f;
     }
 
-    // -------------------------------------------------------------------------
-    // Skinned binary buffer construction
-    // -------------------------------------------------------------------------
 
     private static byte[] BuildSkinnedBinaryBuffer(
         Vec3[] positions, Vec2[] uvs, ushort[] indices,
@@ -831,13 +594,13 @@ public static class GltfConverter
         var indexCount = indices.Length;
         var boneCount = invBindData.Length / 16;
 
-        posLen = vertexCount * 3 * sizeof(float); // VEC3 f32
-        uvLen = vertexCount * 2 * sizeof(float); // VEC2 f32
-        jntLen = vertexCount * 4 * sizeof(ushort); // VEC4 UNSIGNED_SHORT
-        wgtLen = vertexCount * 4 * sizeof(float); // VEC4 f32
+        posLen = vertexCount * 3 * sizeof(float);
+        uvLen = vertexCount * 2 * sizeof(float);
+        jntLen = vertexCount * 4 * sizeof(ushort);
+        wgtLen = vertexCount * 4 * sizeof(float);
         var idxStride = use32BitIdx ? sizeof(uint) : sizeof(ushort);
         idxLen = indexCount * idxStride;
-        ibmLen = boneCount * 16 * sizeof(float); // MAT4 f32 per bone
+        ibmLen = boneCount * 16 * sizeof(float);
 
         posOff = 0;
         uvOff = Align4(posOff + posLen);
@@ -849,11 +612,6 @@ public static class GltfConverter
 
         var buf = new byte[bufSize];
 
-        // ---- Positions (Z-negated) ----
-        // Skinned meshes use the uniform Z-negate convention: (x,y,z) → (x,y,−z).
-        // spec: Docs/RE/specs/skinning.md §7 'No axis negation … skinning math'; §8(b) 'world Z-negate
-        //   applied uniformly to bone bind translations, mesh vertex positions, AND keyframe translations.'
-        // glTF 2.0 spec §3.4: right-handed Y-up.
         var cursor = posOff;
         for (var i = 0; i < vertexCount; i++)
         {
@@ -864,9 +622,6 @@ public static class GltfConverter
             cursor += 12;
         }
 
-        // ---- UVs ----
-        // V already bottom-left from parser.
-        // spec: Docs/RE/formats/mesh.md §Face record — uv_v: "engine applies 1.0 - uv_v". CONFIRMED.
         cursor = uvOff;
         for (var i = 0; i < vertexCount; i++)
         {
@@ -876,8 +631,6 @@ public static class GltfConverter
             cursor += 8;
         }
 
-        // ---- JOINTS_0 (VEC4 UNSIGNED_SHORT) ----
-        // glTF 2.0 spec §Meshes — JOINTS_0: four joint indices per vertex.
         cursor = jntOff;
         for (var i = 0; i < vertexCount; i++)
         {
@@ -888,8 +641,6 @@ public static class GltfConverter
             cursor += 8;
         }
 
-        // ---- WEIGHTS_0 (VEC4 f32) ----
-        // glTF 2.0 spec §Meshes — WEIGHTS_0: four bone weights per vertex, summing to ≤ 1.0.
         cursor = wgtOff;
         for (var i = 0; i < vertexCount; i++)
         {
@@ -900,10 +651,6 @@ public static class GltfConverter
             cursor += 16;
         }
 
-        // ---- Indices (winding-reversed) ----
-        // Z-negate (det = −1) reverses winding; swap i1↔i2 to restore CCW front faces in glTF.
-        // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
-        // spec: Docs/RE/formats/mesh.md §Index list: CONFIRMED. glTF 2.0 §3.7.2.1.
         cursor = idxOff;
         for (var tri = 0; tri < indexCount / 3; tri++)
         {
@@ -927,8 +674,6 @@ public static class GltfConverter
             }
         }
 
-        // ---- Inverse-bind matrices (MAT4 f32, column-major) ----
-        // glTF 2.0 spec §Skins — inverseBindMatrices accessor: MAT4 FLOAT.
         cursor = ibmOff;
         for (var i = 0; i < invBindData.Length; i++)
         {
@@ -948,23 +693,18 @@ public static class GltfConverter
         if (clips is null || clips.Length == 0)
             return [];
 
-        // Build a set of valid bone self_ids for quick lookup.
         var validBoneIds = new HashSet<byte>(skeleton.Bones.Length);
         foreach (var b in skeleton.Bones)
             validBoneIds.Add((byte)(b.SelfId & 0xFF));
 
-        // First pass: compute total byte size needed.
         var totalSize = 0;
         foreach (var clip in clips)
         foreach (var track in clip.Tracks)
         {
             var kc = track.Keyframes.Length;
             if (kc == 0) continue;
-            // time: kc × f32
             totalSize = Align4(totalSize + kc * sizeof(float));
-            // translation: kc × VEC3 f32
             totalSize = Align4(totalSize + kc * 3 * sizeof(float));
-            // rotation: kc × VEC4 f32
             totalSize = Align4(totalSize + kc * 4 * sizeof(float));
         }
 
@@ -989,12 +729,10 @@ public static class GltfConverter
 
                 if (kc == 0) continue;
 
-                // Time accessor (input sampler).
-                // spec: Docs/RE/formats/animation.md §Timing — frame_index / 10.0f = seconds: CONFIRMED.
                 var thisTimeOff = cursor;
                 for (var k = 0; k < kc; k++)
                 {
-                    var t = k / 10.0f; // 10 fps fixed rate
+                    var t = k / 10.0f;
                     BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), t);
                     cursor += 4;
                 }
@@ -1002,11 +740,6 @@ public static class GltfConverter
                 cursor = Align4(cursor);
 
                 var thisTransOff = cursor;
-                // Translation accessor (output).
-                // Uniform Z-negate convention: (x,y,z) → (x,y,−z).
-                // spec: Docs/RE/specs/skinning.md §8(b) 'apply [Z-negate] uniformly … keyframe translations.'
-                // spec: Docs/RE/formats/animation.md §Keyframe record — translation_x/y/z: CONFIRMED.
-                // glTF 2.0 §3.4: right-handed.
                 for (var k = 0; k < kc; k++)
                 {
                     var tr = track.Keyframes[k].Translation;
@@ -1019,17 +752,6 @@ public static class GltfConverter
                 cursor = Align4(cursor);
 
                 var thisRotOff = cursor;
-                // Rotation accessor (output), quaternion XYZW → glTF stores XYZW too.
-                // spec: Docs/RE/formats/animation.md §Keyframe record — rotation XYZW: CONFIRMED.
-                // glTF 2.0 §Animations: rotation accessor stores XYZW (scalar W last).
-                // Uniform Z-negate convention: quaternion (x,y,z,w) → (−x,−y,z,w).
-                // spec: Docs/RE/specs/skinning.md §8(b) 'under [Z-negate] a quaternion (x,y,z,w)
-                //   maps to (−x,−y,z,w)'.
-                // Note on interpolation: glTF LINEAR interpolation for quaternion channels is
-                //   defined by the glTF spec as nlerp (not strict slerp). The original engine
-                //   used slerp (spec: Docs/RE/formats/animation.md §Rotation interpolation: CONFIRMED).
-                //   glTF viewers implementing the spec will apply nlerp; the visual difference is
-                //   negligible for small angular deltas between keyframes.
                 for (var k = 0; k < kc; k++)
                 {
                     var q = track.Keyframes[k].Rotation;
@@ -1037,7 +759,6 @@ public static class GltfConverter
                     var qy = -q.Y;
                     var qz = q.Z;
                     var qw = q.W;
-                    // Normalise
                     var qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
                     if (qlen > 1e-6f)
                     {
@@ -1063,7 +784,6 @@ public static class GltfConverter
 
                 cursor = Align4(cursor);
 
-                // One AnimPart per track: each track has its own time/translation/rotation buffer views.
                 parts.Add(new AnimPart(
                     parts.Count,
                     thisTimeOff,
@@ -1081,9 +801,6 @@ public static class GltfConverter
         return buf;
     }
 
-    // -------------------------------------------------------------------------
-    // Skinned glTF JSON construction
-    // -------------------------------------------------------------------------
 
     private static string BuildSkinnedJson(
         Vec3[] positions, int vertexCount, int indexCount, int boneCount,
@@ -1099,21 +816,15 @@ public static class GltfConverter
         List<AnimPart> animParts,
         AnimationClip[]? clips)
     {
-        // Compute position min/max (original space; Z-negate is applied by the caller's min/max expr).
-        // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
         ComputePositionMinMax(positions, out var minX, out var minY, out var minZ,
             out var maxX, out var maxY, out var maxZ);
 
         var indexComponentType = use32BitIdx ? ComponentTypeUnsignedInt : ComponentTypeUnsignedShort;
 
-        // Build bone → node index map.
-        // glTF nodes: index 0 = mesh node, indices 1..boneCount = bone nodes.
-        // spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
         var boneNodeIndex = new int[boneCount];
         for (var i = 0; i < boneCount; i++)
-            boneNodeIndex[i] = i + 1; // node 0 = mesh node, nodes 1..N = bones
+            boneNodeIndex[i] = i + 1;
 
-        // Build parent → children map (by index in Bones array).
         var idToIndex = new Dictionary<byte, int>(boneCount);
         for (var i = 0; i < boneCount; i++)
             idToIndex[(byte)(skeleton.Bones[i].SelfId & 0xFF)] = i;
@@ -1122,9 +833,6 @@ public static class GltfConverter
         sb.Append('{');
         sb.Append("\"asset\":{\"version\":\"2.0\",\"generator\":\"MartialHeroes.Assets.Mapping.GltfConverter\"},");
 
-        // ---- Accessor indices bookkeeping ----
-        // 0: POSITION, 1: TEXCOORD_0, 2: JOINTS_0, 3: WEIGHTS_0, 4: indices, 5: IBM,
-        // then animation time/translation/rotation accessors follow.
         const int accPosition = 0;
         const int accUv = 1;
         const int accJoints = 2;
@@ -1133,7 +841,6 @@ public static class GltfConverter
         const int accIbm = 5;
         var nextAcc = 6;
 
-        // BufferView indices:
         const int bvPos = 0;
         const int bvUv = 1;
         const int bvJnt = 2;
@@ -1142,15 +849,11 @@ public static class GltfConverter
         const int bvIbm = 5;
         var nextBv = 6;
 
-        // scene / nodes
         sb.Append("\"scene\":0,");
         sb.Append("\"scenes\":[{\"nodes\":[0]}],");
 
-        // Nodes: 0 = mesh node (with skin ref), 1..N = bone nodes.
         sb.Append("\"nodes\":[");
 
-        // Node 0: mesh node, references skin 0 and mesh 0.
-        // Find root bone node index.
         var rootNodeIndex = -1;
         for (var i = 0; i < boneCount; i++)
             if (skeleton.Bones[i].IsRoot)
@@ -1168,14 +871,12 @@ public static class GltfConverter
 
         sb.Append("},");
 
-        // Bone nodes.
         for (var i = 0; i < boneCount; i++)
         {
             var b = skeleton.Bones[i];
             var selfByte = (byte)(b.SelfId & 0xFF);
             var parentByte = (byte)(b.ParentId & 0xFF);
 
-            // Children of this bone (other bones whose parent_id == this bone's self_id).
             var children = new List<int>();
             for (var j = 0; j < boneCount; j++)
             {
@@ -1185,16 +886,10 @@ public static class GltfConverter
                     children.Add(boneNodeIndex[j]);
             }
 
-            // Apply uniform Z-negate convention to bone translation: (x,y,z) → (x,y,−z).
-            // spec: Docs/RE/specs/skinning.md §8(b) 'apply [Z-negate] uniformly to bone bind translations'.
-            // spec: Docs/RE/formats/mesh.md §BndBone — local_translation @ +8: CONFIRMED.
             var bTx = b.Translation.X;
             var bTy = b.Translation.Y;
             var bTz = -b.Translation.Z;
 
-            // Apply uniform Z-negate convention to bone rotation: (x,y,z,w) → (−x,−y,z,w).
-            // spec: Docs/RE/specs/skinning.md §8(b) 'under [Z-negate] a quaternion (x,y,z,w)
-            //   maps to (−x,−y,z,w)'.
             var bQx = -b.Rotation.X;
             var bQy = -b.Rotation.Y;
             var bQz = b.Rotation.Z;
@@ -1235,9 +930,8 @@ public static class GltfConverter
             if (i < boneCount - 1) sb.Append(',');
         }
 
-        sb.Append("],"); // end nodes
+        sb.Append("],");
 
-        // Mesh
         sb.Append("\"meshes\":[{\"primitives\":[{");
         sb.Append("\"attributes\":{");
         sb.Append($"\"POSITION\":{accPosition},");
@@ -1248,7 +942,6 @@ public static class GltfConverter
         sb.Append($"\"indices\":{accIndices}");
         sb.Append("}]}],");
 
-        // Skin
         sb.Append("\"skins\":[{");
         sb.Append($"\"inverseBindMatrices\":{accIbm},");
         sb.Append("\"joints\":[");
@@ -1263,11 +956,8 @@ public static class GltfConverter
             sb.Append($",\"skeleton\":{rootNodeIndex}");
         sb.Append("}],");
 
-        // Animations
         if (animParts.Count > 0)
         {
-            // Build accessor and bufferView indices for animation data.
-            // We emit one accessor+bufferView per data segment (time, trans, rot) per track.
             var animAccessors = new StringBuilder();
             var animBufferViews = new StringBuilder();
             var animAccStart = nextAcc;
@@ -1280,7 +970,6 @@ public static class GltfConverter
                 var kc = part.KeyCounts[0];
                 var boneId = part.BoneIds[0];
 
-                // BufferView: time
                 animBufferViews.Append(',');
                 animBufferViews.Append('{');
                 animBufferViews.Append("\"buffer\":0,");
@@ -1288,7 +977,6 @@ public static class GltfConverter
                 animBufferViews.Append($"\"byteLength\":{part.TimeLen}");
                 animBufferViews.Append('}');
 
-                // Accessor: time (input, SCALAR f32, min/max required by glTF spec)
                 var maxTime = (kc - 1) / 10.0f;
                 animAccessors.Append(',');
                 animAccessors.Append('{');
@@ -1302,7 +990,6 @@ public static class GltfConverter
                 var timeAccIdx = nextAcc++;
                 nextBv++;
 
-                // BufferView: translation
                 animBufferViews.Append(',');
                 animBufferViews.Append('{');
                 animBufferViews.Append("\"buffer\":0,");
@@ -1310,7 +997,6 @@ public static class GltfConverter
                 animBufferViews.Append($"\"byteLength\":{part.TransLen}");
                 animBufferViews.Append('}');
 
-                // Accessor: translation (VEC3 f32)
                 animAccessors.Append(',');
                 animAccessors.Append('{');
                 animAccessors.Append($"\"bufferView\":{nextBv},");
@@ -1322,7 +1008,6 @@ public static class GltfConverter
                 var transAccIdx = nextAcc++;
                 nextBv++;
 
-                // BufferView: rotation
                 animBufferViews.Append(',');
                 animBufferViews.Append('{');
                 animBufferViews.Append("\"buffer\":0,");
@@ -1330,7 +1015,6 @@ public static class GltfConverter
                 animBufferViews.Append($"\"byteLength\":{part.RotLen}");
                 animBufferViews.Append('}');
 
-                // Accessor: rotation (VEC4 f32)
                 animAccessors.Append(',');
                 animAccessors.Append('{');
                 animAccessors.Append($"\"bufferView\":{nextBv},");
@@ -1345,17 +1029,12 @@ public static class GltfConverter
                 animSamplerDescs.Add((timeAccIdx, transAccIdx, rotAccIdx, boneId));
             }
 
-            // Build animations array: group tracks by clip.
-            // For now we group all tracks into a single glTF animation named after clip[0].
-            // (A more sophisticated grouping would use clip boundaries; since we flatten
-            //  per-track into animParts, we emit one animation per track here.)
             sb.Append("\"animations\":[");
             for (var pi = 0; pi < animSamplerDescs.Count; pi++)
             {
                 if (pi > 0) sb.Append(',');
                 var (inputAcc, transAcc, rotAcc, boneId) = animSamplerDescs[pi];
 
-                // Find the node index for this bone_id.
                 var targetNode = 0;
                 if (idToIndex.TryGetValue(boneId, out var boneIdx))
                     targetNode = boneNodeIndex[boneIdx];
@@ -1363,13 +1042,6 @@ public static class GltfConverter
                 sb.Append('{');
                 sb.Append($"\"name\":\"bone_{boneId}_anim\",");
 
-                // Samplers: 0 = translation, 1 = rotation.
-                // glTF 2.0 spec §Animations — samplers interpolation = "LINEAR".
-                // Translation uses LINEAR (spec: Docs/RE/formats/animation.md §Translation interpolation: CONFIRMED).
-                // Rotation: the original engine uses SLERP; glTF LINEAR for quaternions is nlerp per spec.
-                // spec: Docs/RE/formats/animation.md §Rotation interpolation: CONFIRMED (SLERP in engine).
-                // glTF 2.0 spec §Animations: rotation LINEAR = nlerp/slerp as implemented by viewer.
-                // We emit LINEAR for both as glTF has no explicit SLERP sampler type.
                 sb.Append("\"samplers\":[");
                 sb.Append($"{{\"input\":{inputAcc},\"interpolation\":\"LINEAR\",\"output\":{transAcc}}},");
                 sb.Append($"{{\"input\":{inputAcc},\"interpolation\":\"LINEAR\",\"output\":{rotAcc}}}");
@@ -1384,17 +1056,11 @@ public static class GltfConverter
 
             sb.Append("],");
 
-            // Append animation accessors and bufferViews to main strings.
-            // We'll build the full accessors/bufferViews sections below including these.
-            // Pass them into the final sections.
 
-            // Accessors
             sb.Append("\"accessors\":[");
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            // Z-negate: emitted positions are (x,y,−z), so accessor min/max reflect that.
-            // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
             sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
             sb.Append("},");
             sb.Append(
@@ -1410,7 +1076,6 @@ public static class GltfConverter
             sb.Append(animAccessors);
             sb.Append("],");
 
-            // BufferViews
             sb.Append("\"bufferViews\":[");
             sb.Append(
                 $"{{\"buffer\":0,\"byteOffset\":{posOff},\"byteLength\":{posLen},\"target\":{TargetArrayBuffer}}},");
@@ -1428,13 +1093,10 @@ public static class GltfConverter
         }
         else
         {
-            // Accessors (no animations)
             sb.Append("\"accessors\":[");
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            // Z-negate: emitted positions are (x,y,−z), so accessor min/max reflect that.
-            // spec: Docs/RE/specs/skinning.md §8(b) Z-negate convention.
             sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
             sb.Append("},");
             sb.Append(
@@ -1449,7 +1111,6 @@ public static class GltfConverter
                 $"{{\"bufferView\":{bvIbm},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{boneCount},\"type\":\"MAT4\"}}");
             sb.Append("],");
 
-            // BufferViews
             sb.Append("\"bufferViews\":[");
             sb.Append(
                 $"{{\"buffer\":0,\"byteOffset\":{posOff},\"byteLength\":{posLen},\"target\":{TargetArrayBuffer}}},");
@@ -1465,23 +1126,13 @@ public static class GltfConverter
             sb.Append("],");
         }
 
-        // Buffer
         sb.Append($"\"buffers\":[{{\"byteLength\":{bufferByteLength}}}]");
         sb.Append('}');
         return sb.ToString();
     }
 
-    /// <summary>
-    ///     Expands the face/corner table of a skinned mesh into a flat array of unique
-    ///     (position, UV) vertices suitable for static mesh emission.
-    ///     The corner table uses an index into the vertex array for position, while UV
-    ///     is stored per-corner; this produces a deduplication by (vertexIndex, u, v).
-    /// </summary>
     private static StaticMesh ExpandSkinnedMeshToStatic(SkinnedMesh mesh)
     {
-        // Each corner has a vertex index (position) and its own UV.
-        // Multiple corners can reference the same vertex with different UVs.
-        // Build a deduplicated (vertexIndex, u, v) → new index map.
         var vertexMap = new Dictionary<(uint vi, float u, float v), ushort>(mesh.Corners.Length);
         var positions = new List<Vec3>(mesh.Corners.Length);
         var uvs = new List<Vec2>(mesh.Corners.Length);
@@ -1509,24 +1160,16 @@ public static class GltfConverter
         };
     }
 
-    // -------------------------------------------------------------------------
-    // Animation binary data construction
-    // spec: Docs/RE/formats/animation.md §Timing — 10 fps: CONFIRMED.
-    // spec: Docs/RE/formats/animation.md §Keyframe record — translation XYZ + rotation XYZW: CONFIRMED.
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Holds per-clip byte ranges within the animation binary buffer.
-    /// </summary>
     internal readonly record struct AnimPart(
         int ClipIndex,
         int TimeOff,
-        int TimeLen, // input sampler (time in seconds)
+        int TimeLen,
         int TransOff,
-        int TransLen, // output translation VEC3
+        int TransLen,
         int RotOff,
-        int RotLen, // output rotation VEC4 (quaternion)
+        int RotLen,
         int TrackCount,
-        int[] KeyCounts, // keyframe count per track
-        byte[] BoneIds); // bone_id per track
+        int[] KeyCounts,
+        byte[] BoneIds);
 }

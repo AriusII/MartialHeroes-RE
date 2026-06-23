@@ -2,10 +2,11 @@
 
 ```
 verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; sun→screen→flare transform + lensflare.txt carried [confirmed] from CYCLE 7 static IDA; orbit/day-cycle math carried [confirmed] from prior IDA
-ida_reverified: 2026-06-21         # IDB SHA 263bd994 — ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE: the .box by-name open path is wired but gated by the map_option SKYBOX flag (reset to 0 before each area load); the sun/moon orbiting billboards are a separate system (Section D); prior CYCLE 7 (2026-06-20) added the sun→screen→lens-flare transform + lensflare.txt
+ida_reverified: 2026-06-22         # IDB SHA 263bd994 — CYCLE 12 (2026-06-22): §D.2 thunk mechanism recorded — the "logf_1/logf_2" helpers are cosine/sine thunks (NOT natural-log); the orbit is closed-form trig, the moon is a flat circle (no Z term). ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE: the .box by-name open path is wired but gated by the map_option SKYBOX flag (reset to 0 before each area load); the sun/moon orbiting billboards are a separate system (Section D); prior CYCLE 7 (2026-06-20) added the sun→screen→lens-flare transform + lensflare.txt
 ida_anchor:     263bd994
+readiness:      IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:       [static-ida, vfs-sample]
-conflicts:      none-open         # campaign-10 conflict C5 (fog "12 or 204 bytes") RESOLVED into §B.2 below; CYCLE 7 refined the §D.2 sun-orbit model (log-curve, not sin) and resolved the §D.4 flare transform
+conflicts:      none-open  # CYCLE 12 (263bd994, 2026-06-22): logf_1/logf_2 helper thunks confirmed as cosine/sine — NOT natural-log — the CYCLE-7 "natural-log curve" misidentification is fully resolved. CYCLE 11 (263bd994, 2026-06-22): §D.2 sun/moon orbit CORRECTED — the CYCLE-7 "natural-log curve" was a thunk misidentification; the math is ordinary cosine/sine (closed-form trig), the day angle is seconds-of-day (index 29 = 217.5°), and the MOON has no depth-axis (Z) term (flat circle; only the sun carries Z). Prior: campaign-10 C5 fog RESOLVED.
 ```
 
 > Two-witness re-verification on build `263bd994` (fog loader read-sequence + VFS sample scans)
@@ -337,36 +338,41 @@ angle_rad = angle_deg * DEG2RAD                 # DEG2RAD = pi/180 ≈ 0.0174533
 
 ### D.2 Billboard position (sun vs moon, mirrored) — REFINED (CYCLE 7)
 
-> **CYCLE 7 refinement.** A closer static re-walk of the sun-orbit update on build `263bd994` shows the
-> orbit is driven by a **natural-log curve of a time-of-day angle**, NOT a plain sine. The earlier
-> `sin`-based reading is superseded for the per-axis math; what survives unchanged is the **±3200
-> scaling and the sun/moon X-sign opposition** (the sun and moon ride opposite sides of the sky).
+> **CYCLE 11 correction (binary-won).** The CYCLE 7 "natural-log curve" reading was a misidentification:
+> a fresh disassembly of the per-axis math thunks shows they call **cosine and sine** — the orbit is
+> ordinary trigonometry, not a logarithmic curve. The celestial bodies follow a **closed-form trig
+> orbit of a time-of-day angle** (not a stored keyframe track, not a log curve). What survives unchanged
+> is the **±3200 scaling and the sun/moon horizontal-sign opposition**.
+>
+> **CYCLE 12 note (IDB SHA 263bd994) — thunk mechanism recorded.** The helpers that the CYCLE 7
+> pass labelled `logf_1` and `logf_2` are **cosine and sine thunks**, not natural-log helpers. The
+> binary routes the per-axis trig through named indirection thunks; the thunk names in the IDB were
+> misleading. The **mathematical identity** is confirmed ordinary cosine/sine; the sun follows
+> a closed-form trig orbit and the moon is a flat circle (cosine only, no Z/depth component). No
+> keyframe track and no logarithmic curve are involved anywhere in the orbit computation.
 
-The billboard position is computed from a finer time-of-day angle than the 86400 s second-of-day used
-for colour: a **millisecond-resolution** day angle, scaled by a day-speed factor:
-
-```
-dayAngle = time_ms × 360.0 × 0.00001157407405116828        # constant ≈ 360 / 86,400,000 = one revolution per 24 h (in ms)
-dayAngle = dayAngle × day_speed_factor                      # per-area / global day-speed scalar
-```
-
-The position is then a **log-curve of `dayAngle` scaled by ±3200 world units**; the **sun uses −3200**
-and the **moon uses +3200**:
+The billboard position is computed from a **time-of-day angle in SECONDS-of-day** (the CYCLE 7
+"millisecond-resolution" note is corrected): the day cycle is indexed in whole seconds, so time of day
+`52200 s` (14:30) resolves to **day-cycle index 29** = orbit angle **217.5°**. The position is then a
+**trigonometric function of that angle scaled by ±3200 world units**; the sun and moon ride opposite
+horizontal sides:
 
 | Axis | Sun billboard | Moon billboard | Confidence |
 |------|---------------|----------------|------------|
-| X (horizontal) | `log_curve(dayAngle) × −3200.0` | `log_curve(dayAngle) × +3200.0` | **HIGH** (the ±3200 scale and the sun/moon −/+ sign opposition) |
-| vertical arc | `log_curve(dayAngle) × −3200.0`, further scaled by precomputed **log-trig seeds** | the same curve scaled by `+3200.0` | **MED** (an asymmetric arc, not a clean semicircle) |
+| X (horizontal) | `sine(angle) × −3200.0` | `sine(angle) × +3200.0` | **HIGH** (±3200 scale + sun/moon sign opposition) |
+| Y (vertical) | a cosine term seeded with 45°-tilt cosine/sine factors, plus a depth-axis (Z) component | plain `cosine(angle) × +3200.0`, **no depth-axis (Z) component** | **HIGH** (re-confirmed: the moon is a FLAT circle; only the sun carries a Z term) |
 
-- The horizontal term `±3200 · log_curve(dayAngle)` is **HIGH**: the sun and moon trace **opposite**
+The computed sun position on the first map at day-cycle index 29 is approximately
+`(+1948, +1795, +1269)`; the directional-light direction is this vector negated (see §D.2.1).
+
+- The horizontal term `sine(angle) × ±3200` is **HIGH**: the sun and moon trace **opposite**
   horizontal arcs (sun negative, moon positive).
-- The **vertical arc** uses the same `−3200.0`-scaled log curve, further multiplied by a pair of
-  **precomputed log-trig seeds**; those seeds are initialised **once** from `day_speed_factor × 45.0`
-  (the `45.0` is a fixed tilt-angle seed). So the path is an **asymmetric arc, not a perfect
-  semicircle**. The per-axis exact math is **MED** (it may be a cheap developer shortcut, not true
-  astronomy).
-- **Constants (HIGH, static immediates):** orbit radius/scale **±3200.0**; day-angle constant
-  **0.00001157407405116828** (≈ 360 / 86 400 000); seed tilt angle **45.0**.
+- The **sun vertical term** uses a cosine of the day angle seeded with a pair of fixed 45°-tilt
+  cosine/sine factors and carries a depth-axis (Z) component; the **moon vertical term is a plain
+  cosine** with no Z, so the moon traces a flat circle. The horizontal sign opposition (sun negative,
+  moon positive) stands. (Re-confirmed binary-won, CYCLE 11.)
+- **Constants (HIGH, static immediates):** orbit radius/scale **±3200.0**; the day-angle is derived in
+  seconds-of-day (day-cycle index = whole seconds; index 29 = 217.5°); seed tilt angle **45.0**.
 - The static default orientation the billboard is seeded with is overwritten by this per-frame orbit
   update each tick.
 
@@ -386,10 +392,11 @@ sun-orbit path is not driving the light; when the sky/sun subsystem is live, the
 drives the light direction. (HIGH for the coupling and the negate; the precedence between the
 orbit-driven direction and the per-area `light%d.bin` direction is **MED** — sample/runtime-pending.)
 
-> **Porting guidance.** A faithful port reproduces the `±3200 · log_curve(dayAngle)` arc with the
-> sun/moon sign opposition, drives the **directional light direction from the negated sun position**,
-> and may treat the exact vertical-arc seeding as a tunable (a smooth asymmetric arc is acceptable
-> given the MED tag). The moon rides the opposite side on the same curve.
+> **Porting guidance.** A faithful port reproduces the closed-form trig orbit (`sine`/`cosine` of the
+> seconds-of-day angle, scaled ±3200) with the sun/moon sign opposition, drives the **directional
+> light direction from the negated sun position**, and seeds the sun vertical term with the 45°-tilt
+> factors. The moon traces a flat circle (cosine only, no Z term). (CYCLE 11 correction — see the
+> blockquote above.)
 
 ### D.3 Moon phase — 30-day, 15-texture lunar cycle (HIGH)
 
@@ -533,12 +540,12 @@ paths are load-bearing.
    is MED.
 4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
-5. **Sun/moon billboard vertical-arc math (§D.2, REFINED CYCLE 7)** — the orbit is a **natural-log
-   curve** of a millisecond day angle (`dayAngle = time_ms × 360 × 0.00001157407405116828 ×
-   day_speed`), scaled by **±3200.0** with the sun/moon X-sign opposition (HIGH). The vertical arc uses
-   the same `−3200.0` curve further scaled by precomputed log-trig seeds (seeds from `day_speed × 45.0`)
-   — an asymmetric arc, MED. A port may treat the vertical arc as a tunable (smooth asymmetric arc
-   acceptable). (Supersedes the earlier `sin`-based reading.)
+5. **Sun/moon billboard vertical-arc math (§D.2, CORRECTED CYCLE 11, binary-won)** — the orbit is
+   **closed-form trigonometry** (cosine and sine) of a seconds-of-day angle, scaled by **±3200.0**
+   with the sun/moon horizontal-sign opposition (HIGH). The sun vertical term is seeded with fixed
+   45°-tilt cosine/sine factors and carries a Z component; the moon vertical term is a plain cosine
+   with no Z (flat circle). The CYCLE 7 "natural-log curve" reading is superseded. The exact 45°-seed
+   scaling factors are HIGH; the precise per-frame formula is confirmed closed-form, not keyframe-driven.
 6. **Sun-position ↔ directional-light precedence (§D.2.1)** — the negated sun orbit vector is stored
    both as the directional-light direction and the sun-direction global (coupling + negate are HIGH);
    whether the orbit-driven direction or a per-area `light%d.bin` direction wins when both are present
@@ -581,5 +588,7 @@ paths are load-bearing.
   draw + terrain-occlusion + screen-edge brightness (§D.4.2), the `data/sky/lensflare.txt` config
   layout (§D.4.3, 20-byte spot records, caps 16), the sun billboard texture/size constants
   (§D.5: `sun.dds`, size 2048.0, buffer 4096.0×512.0), the sky data-file family enumeration (§B.1a),
-  the build order sun→star→cloud→moon→material→light→fog (§B.1), and refined the sun/moon orbit (§D.2)
-  to the natural-log-curve model with the negate-and-store directional-light coupling (§D.2.1).
+  the build order sun→star→cloud→moon→material→light→fog (§B.1), and initially refined the sun/moon
+  orbit (§D.2) to a "natural-log-curve" model (now superseded by the CYCLE 11 binary-won correction —
+  the orbit is ordinary cosine/sine; see §D.2 correction block) with the negate-and-store
+  directional-light coupling (§D.2.1).

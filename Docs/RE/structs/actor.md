@@ -55,6 +55,7 @@ specified — those are layout facts, not code locations.
 | Local-player Actor pointer | **confirmed** — a single client global (the busiest entity reference in the client), **not** an Actor field. See "Local-player global slot" below. |
 | Spatial cell index | **confirmed** — a per-actor cached grid-cell handle at Actor +0x3EC, computed from world X/Z. See the live-state table. |
 | Stat-slot table | **confirmed-as-external** — it is **not** an Actor field; see "Stat-slot table" below. |
+| 4/4 area-actor wire record | **confirmed** — the 892-byte on-area-entry spawn carrier (8-byte prefix + 880-byte descriptor + 4-byte trailer); prefix has NO sort dword (sort = the tag byte); composite key = (ActorId @+0, tag-byte sort). Control-flow + counter-confirmed CYCLE 12 / Phase 3. See the "4/4 area-entity-snapshot actor record" section. |
 
 Confidence per field is given inline in each table (`confirmed`, `high`, `partial`, `draft`).
 The full open list is at the end.
@@ -457,6 +458,49 @@ absolute Actor offset (= SD offset + 0x74) for the fields the live Actor uses di
   block** (SD +0xD4) are largely opaque. Only the three interior points listed (`aura_pct_value`,
   `buff_kind`, `skill_state_word`) and the per-slot item-id dword in the equip table are located.
   Engineers should treat the rest as a reserved blob inside the 880-byte descriptor.
+
+---
+
+## 4/4 area-entity-snapshot actor record (the on-area-entry spawn carrier)
+
+> **Verification:** confirmed — the exact 892-byte read, the 8-byte prefix split, the 880-byte
+> descriptor offset, the 4-byte trailer, and the composite-key derivation are control-flow-confirmed
+> and independently counter-confirmed on IDB SHA 263bd994 (CYCLE 12 / Phase 3). VALUE meanings of the
+> kind/relation/trailer bytes are capture-pending. Spec path to cite: `// spec: Docs/RE/structs/actor.md`.
+
+When the player enters or refreshes a visible area, each nearby actor arrives as one **892-byte**
+record inside the 4/4 SmsgAreaEntitySnapshot tag loop (tags 1, 2, and 3 all carry this record;
+framing is owned by `packets/4-4_area_entity_snapshot.yaml`). The record wraps the shared 880-byte
+SpawnDescriptor with an 8-byte prefix and a 4-byte trailer. This is the wrapper only — the 880-byte
+interior is the SpawnDescriptor documented above and in `structs/spawn_descriptor.md`.
+
+| Record off | Size | Type | Field | Notes |
+|-----------|------|------|-------|-------|
+| +0x000 | 4 | u32 | ActorId | actor id; the id half of the (id, sort) actor-manager key. Stored to the Actor identity id field. |
+| +0x004 | 1 | u8 | KindByte | a kind/variant byte; value 5 gates a visual-only refresh of an existing actor (weapon/joint refresh) rather than a full spawn. VALUE-pending. |
+| +0x005 | 1 | u8 | RelationVisual | a relation / visual byte; copied to the Actor relation/visual field. VALUE-pending. |
+| +0x006 | 2 | — | pad | two padding bytes (not consumed). |
+| +0x008 | 880 | — | SpawnDescriptor | the 880-byte descriptor core; copied wholesale into the Actor at Actor +0x74. World X/Z land at record +0x54 / +0x58. |
+| +0x378 | 1 | u8 | TrailerVisual | a visual byte; copied to an Actor visual field (with companion propagation). VALUE-pending. |
+| +0x379 | 1 | — | pad | not consumed. |
+| +0x37A | 1 | u8 | CombatTimerFlag | when non-zero, arms the Actor combat timer to a fixed duration. VALUE-pending. |
+| +0x37B | 1 | — | pad | final read byte, not consumed. |
+
+Σ = 8 + 880 + 4 = 892 (0x37C), the exact tag-1/2/3 read length.
+
+**No Sort dword in the prefix.** Unlike the 5/3 SmsgCharSpawn carrier (whose prefix is
+`Sort u32 @+0 / ActorId u32 @+4`), the 4/4 record's first dword IS the ActorId, and there is **no
+sort field in the body**. The actor **sort** is carried out-of-band by the **leading tag byte**:
+tag 1 implies sort 1 (player); tags 2/3 pass the tag value as the sort. The composite key used to
+evict an existing same-key actor and to insert the new one is therefore
+**(ActorId from record +0x00, sort from the tag byte)**. This is how nearby actors populate on area
+entry: evict same key → spawn factory copies the 880-byte descriptor into the Actor → store id/sort
+→ insert keyed by (id, sort) → seed world XZ from record +0x54 / +0x58 (world Y forced 0).
+
+The 4/4 record is the **shortest** member of the spawn-carrier family — its 4-byte trailer holds only
+a visual byte and a combat-timer flag, with **no** 17-byte CP949 name region (the 5/3 carrier's
+trailer has one). On the 4/4 path, an actor's secondary name/area-name update arrives instead via the
+separate 36-byte tag-6 record.
 
 ---
 

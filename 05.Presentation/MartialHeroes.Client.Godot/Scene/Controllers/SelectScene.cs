@@ -10,27 +10,18 @@ using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
-/// <summary>
-///     State 4 — SelectWindow. Builds the character-list UI, 3D preview actor row, and the dedicated
-///     Select preview camera; all flow intents are forwarded to Application use-cases.
-///     Now uses the new Ui/Scenes substrate (CharSelectWindow + CharSelectEventDrainer).
-///     The 3D scene layer (CharSelectScene3D/CharCreatePreview3D) is REUSED unchanged.
-///     spec: Docs/RE/specs/client_runtime.md §7.3 / §7.4; Docs/RE/specs/frontend_scenes.md §3–§8.
-/// </summary>
 public sealed partial class SelectScene : StubSceneController
 {
     private FrontEndAudio? _audio;
     private bool _confirmInFlight;
     private ClientContext? _ctx;
-    private CharSelectEventDrainer? _drainer; // NEW: typed for CharSelectWindow
+    private CharSelectEventDrainer? _drainer;
     private SceneHost? _host;
     private ScreenHost? _screenHost;
-    private CharSelectWindow? _select; // NEW: Ui/Scenes substrate
+    private CharSelectWindow? _select;
 
-    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Select;
 
-    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -53,12 +44,6 @@ public sealed partial class SelectScene : StubSceneController
         GD.Print("[SelectScene] State 4 Select built CharacterSelectScreen: roster UI, 3D preview actors, " +
                  "and Select camera dolly. spec: client_runtime.md §7.3/§7.4; frontend_scenes.md §3.");
 
-        // Roster catch-up replay: the live 3/4 CharacterListEvent fires during LOAD state (state 3),
-        // before this drainer is armed. If the Application store already retained the roster, replay
-        // it directly into ApplyCharacterList so the 5 preview actors build with the correct class.
-        // The drainer is still fully armed above — if a fresh 3/4 arrives later, ApplyCharacterList
-        // runs again (full rebuild). This replay is additive, not a drainer suppression.
-        // spec: Docs/RE/specs/frontend_scenes.md §3.1.
         var retained = _ctx?.CharacterSelection?.ProjectRetainedRoster() ?? ImmutableArray<CharacterListSlot>.Empty;
         if (retained.Length > 0)
         {
@@ -70,12 +55,15 @@ public sealed partial class SelectScene : StubSceneController
 
     public override void _ExitTree()
     {
+        _audio?.StopBgm();
+
         if (_select is not null)
         {
             _select.EnterGameRequested -= OnEnterGameRequested;
             _select.BackRequested -= OnBackRequested;
             _select.CreateCharacterRequested -= OnCreateCharacterRequested;
             _select.DeleteCharacterRequested -= OnDeleteCharacterRequested;
+            _select.RenameCharacterRequested -= OnRenameCharacterRequested;
             _select = null;
         }
 
@@ -88,7 +76,6 @@ public sealed partial class SelectScene : StubSceneController
 
     private CharSelectWindow BuildSelectScreen()
     {
-        // Resolve HudAtlasLibrary + HudTextLibrary from ClientContext (null if not yet ready).
         var atlas = _ctx?.HudAtlas;
         var text = _ctx?.HudText;
 
@@ -96,13 +83,15 @@ public sealed partial class SelectScene : StubSceneController
         {
             Name = "CharSelectWindow",
             Atlas = atlas,
-            Text = text
+            Text = text,
+            Audio = _audio
         };
 
         select.EnterGameRequested += OnEnterGameRequested;
         select.BackRequested += OnBackRequested;
         select.CreateCharacterRequested += OnCreateCharacterRequested;
         select.DeleteCharacterRequested += OnDeleteCharacterRequested;
+        select.RenameCharacterRequested += OnRenameCharacterRequested;
         return select;
     }
 
@@ -132,10 +121,6 @@ public sealed partial class SelectScene : StubSceneController
                          $"error={rename.ErrorCode}. spec: frontend_scenes.md §6.");
                 break;
             case SceneStateChangedEvent stateChange when stateChange.Next.State != State:
-                // Out-of-band committed transition (e.g. 3/5 Select→InGame, or 3/100 Select→Quit/Error).
-                // The Application scene machine already pre-committed the new state; converge the visible
-                // controller without re-advancing the machine (Advance() would jump past the target).
-                // spec: Docs/RE/specs/client_runtime.md §7.5.3.
                 GD.Print(
                     $"[SelectScene] SceneStateChangedEvent {stateChange.Previous.State}→{stateChange.Next.State}; " +
                     "out-of-band committed transition — calling SyncToCurrentState. spec: client_runtime.md §7.5.3.");
@@ -174,11 +159,12 @@ public sealed partial class SelectScene : StubSceneController
         }
     }
 
-    private void OnCreateCharacterRequested(string name, int internalClass, int faceIndex)
+    private void OnCreateCharacterRequested(string name, int internalClass, int faceIndex, int[] stats)
     {
-        GD.Print($"[SelectScene] CreateCharacterRequested(name='{name}', class={internalClass}, face={faceIndex}); " +
-                 "forwarding to UseCases.CreateCharacterAsync. spec: frontend_scenes.md §4/§8.");
-        _ = CreateCharacterAsync(name, internalClass, faceIndex);
+        GD.Print($"[SelectScene] CreateCharacterRequested(name='{name}', class={internalClass}, face={faceIndex}, " +
+                 $"stats=({stats[0]},{stats[1]},{stats[2]},{stats[3]},{stats[4]})); " +
+                 "forwarding to UseCases.CreateCharacterAsync. spec: frontend_scenes.md §4/§8; character_creation.md §2.1.");
+        _ = CreateCharacterAsync(name, internalClass, faceIndex, stats);
     }
 
     private void OnDeleteCharacterRequested(int slotIndex, string characterName)
@@ -188,7 +174,7 @@ public sealed partial class SelectScene : StubSceneController
         _ = DeleteCharacterAsync(slotIndex);
     }
 
-    private async Task CreateCharacterAsync(string name, int internalClass, int faceIndex)
+    private async Task CreateCharacterAsync(string name, int internalClass, int faceIndex, int[] stats)
     {
         if (_ctx?.UseCases is not { } useCases)
         {
@@ -198,21 +184,38 @@ public sealed partial class SelectScene : StubSceneController
 
         try
         {
+            const uint statFloor = 10u;
+            var s0 = stats is { Length: >= 1 } ? (uint)Math.Max(0, stats[0]) : statFloor;
+            var s1 = stats is { Length: >= 2 } ? (uint)Math.Max(0, stats[1]) : statFloor;
+            var s2 = stats is { Length: >= 3 } ? (uint)Math.Max(0, stats[2]) : statFloor;
+            var s3 = stats is { Length: >= 4 } ? (uint)Math.Max(0, stats[3]) : statFloor;
+            var s4 = stats is { Length: >= 5 } ? (uint)Math.Max(0, stats[4]) : statFloor;
+
+            var sum = s0 + s1 + s2 + s3 + s4;
+            var pts = sum <= 55u ? 55u - sum : 0u;
+
+            var safeFace = (ushort)Math.Clamp(faceIndex, 1, 7);
+
             var request = new CharacterCreateRequest(
                 name,
                 InternalClassToUiIndex(internalClass),
-                checked((ushort)faceIndex),
+                safeFace,
+                1,
                 0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0);
+                s0,
+                s1,
+                s2,
+                s3,
+                s4,
+                pts
+            );
 
-            var result =
-                await useCases.CreateCharacterAsync(request, CancellationToken.None);
+            GD.Print($"[SelectScene] CreateCharacterAsync: name='{name}' uiClass={request.UiClassIndex} " +
+                     $"face={request.Face} appA={request.AppearanceA} appB={request.AppearanceB} " +
+                     $"stats=({request.Stat0},{request.Stat1},{request.Stat2},{request.Stat3},{request.Stat4}) " +
+                     $"pts={request.PointsRemaining}. spec: charselect.md §4.3; character_creation.md §1.2/§2.1/§3.");
+
+            var result = await useCases.CreateCharacterAsync(request, CancellationToken.None);
             if (!result.IsValid)
                 GD.Print($"[SelectScene] Create rejected by Application validation; msgId={result.MessageId}. " +
                          "spec: frontend_scenes.md §4.4.");
@@ -220,6 +223,34 @@ public sealed partial class SelectScene : StubSceneController
         catch (Exception ex)
         {
             GD.PrintErr($"[SelectScene] CreateCharacterAsync failed/skipped: {ex.Message}");
+        }
+    }
+
+    private void OnRenameCharacterRequested(int slotIndex, string newName)
+    {
+        GD.Print($"[SelectScene] RenameCharacterRequested(slot={slotIndex}, newName='{newName}'); " +
+                 "forwarding to UseCases.RenameCharacterAsync. spec: frontend_scenes.md §6; cmsg_char_rename.yaml.");
+        _ = RenameCharacterAsync(slotIndex, newName);
+    }
+
+    private async Task RenameCharacterAsync(int slotIndex, string newName)
+    {
+        if (_ctx?.UseCases is not { } useCases)
+        {
+            GD.PushWarning("[SelectScene] Rename skipped: ClientContext.UseCases unavailable.");
+            return;
+        }
+
+        try
+        {
+            var result = await useCases.RenameCharacterAsync(slotIndex, newName, CancellationToken.None);
+            if (!result.IsValid)
+                GD.Print($"[SelectScene] Rename rejected by Application validation; msgId={result.MessageId}. " +
+                         "spec: frontend_scenes.md §6/§4.4.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[SelectScene] RenameCharacterAsync({slotIndex}) failed/skipped: {ex.Message}");
         }
     }
 

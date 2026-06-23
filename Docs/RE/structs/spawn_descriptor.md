@@ -15,8 +15,9 @@
 > - **capture/debugger-pending** — every *wire VALUE meaning*; the `level`/state bytes at +0x38/+0x39
 >   (written by the runtime-table-dispatched 5/53 vitals handler, null at static time); the
 >   `scenario_state` dword (+0x48); and the `mob_pair_partner_id` (+0x354), not re-witnessed.
-> - **ida_reverified:** 2026-06-20  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-22 (CYCLE 11 prefix/trailer sharpening); prior 2026-06-20  **ida_anchor:** 263bd994  **evidence:** [static-ida]
 >   **layout/offsets:** confirmed · **value-semantics:** capture/debugger-pending.
+> - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **CYCLE 9 Phase 3.1 (2026-06-21, IDB SHA 263bd994):** static re-confirmation of the two model-class
 >   inputs — `appearance_variant` (u8 @ +0x2C, read zero-extended) and `internal_class` (u16 @ +0x34,
 >   read sign-extended). HIGH confidence: confirmed at **four independent read sites**, and the
@@ -162,6 +163,23 @@ world floats differs per opcode — there is **no single "+0x54/+0x58" rule** fo
 
 The 4-byte-longer 5/1 prefix shifts its world floats to wire **+0x58 / +0x5C**. Promote the WIRE
 offset **per opcode** into the packet specs; promote SD +0x4C / +0x50 into this file.
+
+> **CYCLE 11 prefix/trailer sharpening (2026-06-22).** The per-opcode prefix and trailer fields are
+> now sharpened in the respective packet specs:
+>
+> - **5/3 SmsgCharSpawn (8-byte prefix):** Sort u32 at frame +0x00 (low byte is the real sort selector;
+>   1=PC, 2=Mob/NPC), ActorId u32 at frame +0x04. The 20-byte trailer at frame +0x37C carries:
+>   trailer[0] = clone/name-rebuild byte; trailer[1..17] = 17-byte secondary CP949 name region;
+>   trailer[18] = relation byte; trailer[19] = tail byte. See `packets/5-3_char_spawn.yaml`.
+>
+> - **5/1 SmsgActorSpawnExtended (12-byte prefix):** Sort u8 at frame +0x00 (low byte only; 1=player,
+>   2=mob/NPC, 3=ground-item), 3B pad at +0x01, ActorId u32 at +0x04, TitleState u8 at +0x08,
+>   TitleSlot u8 at +0x09, RelationFlag u8 at +0x0A, pad u8 at +0x0B. On the Sort==1 (player) branch
+>   a 64-bit HP qword is consumed at descriptor +0x3C/+0x40 = wire +0x48/+0x4C. The 20-byte trailer
+>   at frame +0x37C carries visual/combat flags (per-byte value meanings capture-pending). See
+>   `packets/5-1_actor_spawn_extended.yaml`.
+>
+> Descriptor interior VALUES remain server-authored / capture-pending across all three spawn carriers.
 
 ### Caveat — `level` byte boundary (soft conflict, carried)
 
@@ -336,3 +354,70 @@ field:
 - All offsets are static control-flow inferences; no live capture was available to confirm any
   *wire VALUE meaning* — those stay capture/debugger-pending throughout.
 </content>
+
+---
+
+## Addendum — CYCLE 11 / Block A: the 96-byte info/stats block & the per-slot facing flag (static reach)
+
+> Verification refresh, IDB SHA **263bd994**, static-only (CYCLE 11 / Block A, 2026-06-22).
+> Pins the per-slot array layout of the character-select window and the static reach into the
+> 96-byte info/stats block, with an explicit static-vs-runtime boundary.
+
+### A.1 The three per-slot arrays (canonical, from the window block-copy)
+
+When the character-list message populates the select window, it block-copies three parallel per-slot
+arrays out of the network handler into the window object. The sizes/strides are static-confirmed:
+
+| array | per-slot size | count | role |
+|---|---|---|---|
+| character descriptor | **880 bytes** | 5 | the full per-slot descriptor (this struct) |
+| info / stats block | **96 bytes** (0x60) | 5 | backs the 2D info rows (name/level/position labels) |
+| facing flag | **1 byte** | 5 | per-slot preview facing flag (see A.3) |
+
+*([CONFIRMED]* the three block-copies and their per-slot strides.)* The 880-byte descriptor and the
+96-byte block are **distinct regions** — do not conflate them.
+
+### A.2 The 96-byte info/stats block — static interior reach
+
+Statically, the only code path that writes the 96-byte block field-by-field is the **local
+create-character synthesizer** (used when a freshly created character is staged into a slot). It writes
+seven dwords; the rest of the block is filled only by the inbound character-list copy (so those bytes'
+sizes/positions are static but their **values are runtime**).
+
+| block off | size | type | field (static reach) | status |
+|---|---|---|---|---|
+| +0x00 | 4 | dword | synthesized field (create path) | static-confirmed offset, value runtime |
+| +0x04 | 4 | dword | synthesized field (create path) | static-confirmed offset, value runtime |
+| +0x08 | 4/qword-lo | dword | mirrors the descriptor HP (low) — derived from a `10·(1+x)` synth | static-confirmed linkage |
+| +0x0C | 4 | dword | mirrors a descriptor vital — same `10·(1+x)` synth | static-confirmed linkage |
+| +0x10 | 4 | dword | synthesized field (create path) | static-confirmed offset, value runtime |
+| +0x30 | 4 | dword | synthesized field (create path) | static-confirmed offset, value runtime |
+| +0x34 | 4 | dword | **constant 7** — freshly-created marker (same magic as the descriptor's freshly-created/locked state) | static-confirmed value |
+| +0x14 … +0x2F, +0x38 … +0x5F | — | — | not touched by any static window path; filled only by the inbound character-list copy | RUNTIME-ONLY |
+
+*([CONFIRMED]* the seven create-path dword writes, the two HP/vital linkages, and the constant-7 marker;
+the untouched span is runtime-filled.)*
+
+### A.3 The per-slot facing flag (binary-decided)
+
+The 1-byte per-slot flag array is the **preview FACING** flag, not an occupancy flag. Its values:
+
+| value | meaning |
+|---|---|
+| **0** | preview faces front (yaw 0) — set on create and on deselect |
+| **1** | preview faces away / back-turned (yaw π) — the lineup spawn reads this |
+| **2** | deletion-pending — set on the delete path |
+
+**Occupancy is carried by the descriptor**, not by this flag (the roster-occupancy gate and the
+preview-spawn gate are separate descriptor fields). *([CONFIRMED]* all five touch sites of the flag.)*
+
+### A.4 Static-vs-runtime boundary (runtime residuals)
+
+| id | item | boundary |
+|---|---|---|
+| RD-D1 | the inbound character-list (3/1) fills the descriptor + 96-byte block | offsets/sizes static; **VALUES runtime** |
+| RD-D2 | the delete reply (3/5) updates a slot's flag + roster entry | handler reach is static; the slot index + result code are **runtime** |
+| RD-D3 | the 3/7 manage-result sequence semantics | dispatch lives in the network handler; **not statically resolvable** — do not chase |
+| RD-D4 | vitals values patched by the status/level messages | offsets static; **values runtime** |
+
+> spec path: `// spec: Docs/RE/structs/spawn_descriptor.md`

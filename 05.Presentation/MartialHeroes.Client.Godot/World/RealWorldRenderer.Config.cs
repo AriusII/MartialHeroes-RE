@@ -1,8 +1,3 @@
-// World/RealWorldRenderer.Config.cs
-//
-// Config readers, target cell discovery, spawn-anchor computation, ring-center selection.
-// Part of the RealWorldRenderer partial class split.
-
 using Godot;
 using MartialHeroes.Assets.Parsers.World;
 using MartialHeroes.Client.Godot.Composition;
@@ -11,35 +6,12 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
-    // -------------------------------------------------------------------------
-    // Target cell discovery
-    // -------------------------------------------------------------------------
-
-    /// <summary>
-    ///     Computes a spawn-density anchor by reading the area's <c>mob{tag}.arr</c> and
-    ///     <c>npc{tag}.arr</c> files and finding the cell that maximises the number of spawn
-    ///     records that fall within a neighbourhood of <paramref name="ringRadius" /> cells
-    ///     (matching the streaming ring size).
-    ///     Using the density-peak cell (rather than the simple centroid) handles the common case
-    ///     where the game content (NPC clusters, the walled town) is concentrated in one corner
-    ///     of the area's spawn grid.  The centroid can be pulled toward a sparse but large
-    ///     peripheral region and land far from the actual player-visible cluster.
-    ///     Falls back to the terrain centroid when no spawn data is available.
-    ///     Cell key formula (matches <see cref="TerrainNode.TryGetGroundHeight" />):
-    ///     mapX = floor(worldX / 1024) + 10000
-    ///     mapZ = floor(worldZ / 1024) + 10000
-    ///     spec: Docs/RE/formats/terrain.md §1.4 — origin bias 10000, cell size 1024. CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ring radius 2). CONFIRMED.
-    ///     spec: Docs/RE/formats/npc_spawns.md — world_x f32@4, world_z f32@8. CONFIRMED.
-    ///     spec: MISSION B — mob{tag}.arr world_x f32@4, world_z f32@8. CONFIRMED.
-    /// </summary>
     private static (double AnchorMapX, double AnchorMapZ) ComputeSpawnAnchor(
         RealClientAssets assets,
         int areaId,
         List<(int MapX, int MapZ)> terrainCells,
         int ringRadius = 2)
     {
-        // Fallback: terrain centroid.
         long sumX = 0, sumZ = 0;
         foreach (var (x, z) in terrainCells)
         {
@@ -51,20 +23,12 @@ public sealed partial class RealWorldRenderer
         var fallbackZ = sumZ / (double)terrainCells.Count;
 
         if (areaId == 0)
-            // Area 0 has no spawn data.
-            // spec: Docs/RE/formats/npc_spawns.md §Anomaly: map 000 — 0 records: CONFIRMED.
             return (fallbackX, fallbackZ);
 
         var tag = AreaTag(areaId);
 
-        // Accumulate per-cell spawn count in a dictionary.
-        // Key: (cellMapX, cellMapZ). Value: number of spawn records in that cell.
-        // spec: terrain.md §1.4 — cellMapX = floor(worldX/1024)+10000. CONFIRMED.
         var cellCounts = new Dictionary<(int, int), int>(64);
 
-        // ── mob{tag}.arr ──────────────────────────────────────────────────────
-        // 20-byte records; world_x f32@4, world_z f32@8.
-        // spec: MISSION B — mob record layout; world_x @4, world_z @8. CONFIRMED.
         var mobPath = $"data/map{tag}/mob{tag}.arr";
         if (assets.Contains(mobPath))
             try
@@ -81,12 +45,8 @@ public sealed partial class RealWorldRenderer
             }
             catch
             {
-                // Parse failure: ignore, use what we have.
             }
 
-        // ── npc{tag}.arr ──────────────────────────────────────────────────────
-        // 28-byte records; world_x f32@4, world_z f32@8.
-        // spec: Docs/RE/formats/npc_spawns.md — world_x @4, world_z @8. CONFIRMED.
         var npcPath = $"data/map{tag}/npc{tag}.arr";
         if (assets.Contains(npcPath))
             try
@@ -104,16 +64,11 @@ public sealed partial class RealWorldRenderer
             }
             catch
             {
-                // Parse failure: ignore, use what we have.
             }
 
         if (cellCounts.Count == 0)
-            // No usable spawn data — fall back to terrain centroid.
             return (fallbackX, fallbackZ);
 
-        // Find the cell whose (2r+1)×(2r+1) neighbourhood (the streaming ring at ringRadius)
-        // covers the most spawns. This is an O(spawnerCells × (2r+1)²) pass — small for typical areas.
-        // spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ringRadius=2). CONFIRMED.
         var bestNeighbourCount = -1;
         (int BestCX, int BestCZ) bestDensityCell = (0, 0);
         foreach (var (cx, cz) in cellCounts.Keys)
@@ -141,62 +96,23 @@ public sealed partial class RealWorldRenderer
         return (bestDensityCell.BestCX, bestDensityCell.BestCZ);
     }
 
-    /// <summary>
-    ///     Picks the cell to centre the streaming ring on, given every <c>.ted</c> cell present in an
-    ///     area.
-    ///     Strategy (two-pass):
-    ///     Pass 1 — full-ring preference: find the complete-ring candidate (all neighbours at
-    ///     Chebyshev radius <paramref name="ringRadius" /> present) nearest to the anchor.
-    ///     A full ring guarantees all (2r+1)² sectors render without holes.
-    ///     Pass 2 — fallback to any cell: if no full-ring cell exists, OR if the nearest full-ring
-    ///     cell is more than <c>MaxFullRingFallbackDistance</c> cells away from the anchor (meaning
-    ///     the NPC/spawn cluster lives outside all complete-ring areas), pick the available cell that
-    ///     is simply nearest to the anchor, even if its ring is incomplete.
-    ///     The fallback matters when spawn data is dense in a region where the terrain edge cells
-    ///     don't have enough neighbours to form a complete ring (e.g. the walled town is near the
-    ///     edge of the map grid).  In that case it is better to centre the stream on the actual
-    ///     content and accept a few missing border sectors than to centre it on a geometrically-
-    ///     perfect but content-empty region far away.
-    ///     spec: Docs/RE/formats/terrain.md §12.3 — eviction: absent keys yield empty loads, not crashes.
-    ///     The anchor point is the spawn-weighted centroid (from <see cref="ComputeSpawnAnchor" />)
-    ///     so the ring centers on where the game content actually is.
-    ///     spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (ringRadius=2). CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §1.3 (per-cell path). CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024 wu. CONFIRMED.
-    /// </summary>
-    /// <param name="cells">All cell coordinates available for the area (may be unsorted).</param>
-    /// <param name="anchorMapX">Target mapX to stay near (e.g. spawn centroid cell X).</param>
-    /// <param name="anchorMapZ">Target mapZ to stay near (e.g. spawn centroid cell Z).</param>
-    /// <param name="ringRadius">
-    ///     Chebyshev radius of the streaming ring (1 = 3×3, 2 = 5×5).
-    ///     spec: Docs/RE/formats/terrain.md §12.2 — High quality → radius 2. CONFIRMED.
-    /// </param>
-    /// <returns>The chosen centre cell and whether its full ring exists.</returns>
     private static (int MapX, int MapZ, bool FullRing) PickRingCenter(
         List<(int MapX, int MapZ)> cells,
         double anchorMapX,
         double anchorMapZ,
         int ringRadius = 2)
     {
-        // When the nearest full-ring cell exceeds this Chebyshev distance from the anchor,
-        // we prefer a partial-ring cell that is actually near the content.
-        // A value of 2 means: "the full-ring center is more than 2 cells away from the NPC
-        // cluster — prefer proximity to content over a perfect ring".
-        // spec: Docs/RE/formats/terrain.md §1.4 — cell size 1024 wu per cell. CONFIRMED.
         const double MaxFullRingFallbackDistance = 2.0;
 
-        // Deterministic order so a tie resolves the same way every run.
         cells.Sort((a, b) => a.MapX != b.MapX ? a.MapX.CompareTo(b.MapX) : a.MapZ.CompareTo(b.MapZ));
 
         var present = new HashSet<(int, int)>(cells.Count);
         foreach (var (x, z) in cells) present.Add((x, z));
 
-        // ── Pass 1: nearest full-ring candidate ───────────────────────────────
         var bestFullFound = false;
         var bestFull = cells[cells.Count / 2];
         var bestFullDist = double.MaxValue;
 
-        // ── Pass 2: nearest any-cell candidate ───────────────────────────────
         var bestAny = cells[cells.Count / 2];
         var bestAnyDist = double.MaxValue;
 
@@ -204,18 +120,14 @@ public sealed partial class RealWorldRenderer
         {
             var ddx = cx - anchorMapX;
             var ddz = cz - anchorMapZ;
-            var dist = ddx * ddx + ddz * ddz; // squared distance in cell units
+            var dist = ddx * ddx + ddz * ddz;
 
-            // Any-cell pass: always track the nearest cell regardless of ring completeness.
             if (dist < bestAnyDist)
             {
                 bestAny = (cx, cz);
                 bestAnyDist = dist;
             }
 
-            // Full-ring pass: a full ring requires all (2r+1)² cells at Chebyshev radius r.
-            // For r=2 (5×5) that is 25 cells including the centre itself.
-            // spec: Docs/RE/formats/terrain.md §12.2 — High quality = 5×5 ring (r=2). CONFIRMED.
             var full = true;
             for (var dz = -ringRadius; dz <= ringRadius && full; dz++)
             for (var dx = -ringRadius; dx <= ringRadius; dx++)
@@ -235,12 +147,6 @@ public sealed partial class RealWorldRenderer
             }
         }
 
-        // ── Decision: use full-ring if it is close enough to the anchor ───────
-        // If the best full-ring center is within MaxFullRingFallbackDistance cells of the anchor,
-        // it is likely covering the content region too — use it for the perfect terrain ring.
-        // If it is farther away, the content (NPCs/spawns) lives outside the complete-ring area;
-        // use the nearest available cell so the streaming ring at least overlaps the content.
-        // spec: Docs/RE/formats/terrain.md §12.3 — absent cells load empty without crash: CONFIRMED.
         var bestFullChebyshev = bestFullFound
             ? Math.Max(Math.Abs(bestFull.MapX - anchorMapX), Math.Abs(bestFull.MapZ - anchorMapZ))
             : double.MaxValue;
@@ -251,16 +157,9 @@ public sealed partial class RealWorldRenderer
         return (chosen.MapX, chosen.MapZ, useFullRing);
     }
 
-    /// <summary>
-    ///     Reads the "ring_radius=" integer key from client_dir.cfg.
-    ///     Valid values: 1 (3×3 ring, Medium quality) or 2 (5×5 ring, High quality).
-    ///     Returns 2 (the high-quality default) when the key is absent, out-of-range, or unparseable.
-    ///     spec: Docs/RE/formats/terrain.md §12.2 — High quality = ring radius 2 (5×5). CONFIRMED.
-    ///     spec: Docs/RE/formats/terrain.md §12.2 — Medium/Low quality = ring radius 1 (3×3). CONFIRMED.
-    /// </summary>
     private static int ReadRingRadiusFromConfig()
     {
-        const int DefaultRingRadius = 2; // spec: terrain.md §12.2 — High quality = radius 2 (5×5). CONFIRMED.
+        const int DefaultRingRadius = 2;
         try
         {
             var absPath = ProjectSettings.GlobalizePath("res://client_dir.cfg");
@@ -282,19 +181,14 @@ public sealed partial class RealWorldRenderer
         }
         catch
         {
-            // Any I/O error → default radius 2.
         }
 
         return DefaultRingRadius;
     }
 
-    // -------------------------------------------------------------------------
-    // Path helpers
-    // -------------------------------------------------------------------------
 
     private static string AreaTag(int areaId)
     {
-        // spec: Docs/RE/formats/terrain.md §1.1 — digit decomposition. CONFIRMED.
         var d0 = areaId / 100;
         var d1 = areaId / 10 % 10;
         var d2 = areaId % 10;

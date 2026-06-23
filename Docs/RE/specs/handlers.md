@@ -1,7 +1,7 @@
 ---
 status: routing-confirmed
 verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-21   # CYCLE 8 re-confirmation (263bd994): major-4/5 154-slot dispatch tables (98 Response / 65 Push installed) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
+ida_reverified: 2026-06-22   # CYCLE 12 Phase 0 (263bd994): 3/100 SmsgCharActionResult full dual-mode code table re-read + double counter-checked -> select-mode codes 22/23 RECOVERABLE (state 7/sub 5 + string 1604), in-world adds code 6 (1206) and reclassifies in-world 23 as fall-through; SECTION 23.1 is now the CANONICAL 3/100 table. prior CYCLE 8 2026-06-21: major-4/5 154-slot dispatch tables (98 Response / 65 Push installed) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 sample_verified: false
@@ -589,11 +589,12 @@ truly empty). **Each individual `NN` was sampled, not exhaustively decoded** (`U
     Any doc/YAML that puts `SmsgSceneEntityUpdate` at 3/14, or `SmsgCharManageResult` at 3/4,
     is wrong (this includes the misnamed `packets/3-4_char_manage_result.yaml` — 3/4 is
     `SmsgSceneEntityUpdate`; the char-manage-result packet is 3/7). See §2 and §12.
-- **3/100 code set `[confirmed]` (control-flow): there is NO `case 32`.** The 3/100
-  `SmsgCharActionResult` switch handles codes `{0, 1-5, 7, 9-11, 16, 22, 23, 200-211,
-  220-227, +202/203/232}` (the 202/203/232 trio additionally drives `GameState = LOADING`).
-  The first recon pass's "32" is spurious and the set it listed was a too-narrow subset — see
-  §12.
+- **3/100 code set `[confirmed]` (control-flow): there is NO `case 32` and NO `case 9`.** The 3/100
+  `SmsgCharActionResult` switch handles codes `{0, 1-5, 7, 10, 11, 16, 22, 23, 200-211,
+  220-227, +202/203/232}` (a `> 9` guard drops value 9; the 202/203/232 trio additionally drives
+  `GameState = 2` Load). The first recon pass's "32" is spurious and the set it listed was a
+  too-narrow subset. **The canonical dual-mode code table is §23.1; select-mode code 23 is
+  recoverable (state 7 / sub-state 5 + string-id 1604), not fatal — see §23.1 and §12.**
 - **4/143 + 4/144 share one handler — `SmsgTrackedItemPanelPair`.** Both Response minors 143
   and 144 are installed to the same handler (this is why the distinct-slot count is 96 while
   98 handler entry points are counted). The first recon pass listed neither minor; they are
@@ -919,14 +920,17 @@ note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
   (Name proposal flagged for the names.yaml curator — not applied here.)
 
 ### 3/100 — `SmsgCharActionResult`
-- **Fixed read: 4 bytes `[confirmed]`** = a single action/result `u32` code. A large switch
-  maps the code to select-screen / generic action outcomes; shows messages (id ranges near
-  5000 / 10000 / 10001) and can refresh game state / textures / the main handler. A catch-all
-  lobby action ack; no actor key, no name field. **Code set `[confirmed]` (control-flow):**
-  `{0, 1-5, 7, 9-11, 16, 22, 23, 200-211, 220-227, +202/203/232}`. **There is NO `case 32`** —
-  the first recon pass's "32" was spurious and its set was a too-narrow subset. The `202 /
-  203 / 232` codes additionally drive `GameState = LOADING`. The code→message mapping
-  (which code shows which string) is `[capture/debugger-pending]`.
+- **Fixed read: 4 bytes `[confirmed]`** = a single action/result `u32` code at payload offset 0.
+  A large dual-mode switch (select-mode vs in-world-mode, keyed on local-player presence) maps the
+  code to engine-state writes / tooltip popups / publish-code calls. A catch-all char-action ack;
+  no actor key, no name field. **Code set `[confirmed]` (control-flow):**
+  `{0, 1-5, 7, 10, 11, 16, 22, 23, 200-211, 220-227, +202/203/232}` — **no `case 9`** (a `> 9`
+  guard means value 9 falls through; read the former "9-11" as **10, 11** only) and **no `case 32`**.
+  The `202 / 203 / 232` codes additionally drive `GameState = 2` (Load). **The complete
+  code→(state, sub-state, error-detail, side effect, string-id, timer-arm) table for BOTH modes is
+  the CANONICAL §23.1 — see there.** In particular **select-mode code 23 → engine state 7 /
+  sub-state 5 (recoverable) + notice string-id 1604**, NOT a fatal hard error. The human meaning of
+  each code value is `[capture/debugger-pending]`.
 
 ### 3/50000 — `SmsgGmChatMessage`
 - **Variable: a channel/kind `u8`, then a length-prefixed text body.** Posts a GM / system chat
@@ -1932,56 +1936,89 @@ The sizes match §13/§14/§16 exactly (binary == doc); these are their consumer
 > `network_dispatch.md` (which owns the conn-state machine and the connection-state code
 > semantics) — recorded here, not duplicated.
 
-### 23.1 — 3/100 `SmsgCharActionResult` code set & dual-mode behaviour `[confirmed]` (control-flow)
-3/100 reads a single 4-byte action/result code (§12) and runs a large switch with **two top-level
-modes**, keyed on whether the local player exists yet:
+### 23.1 — 3/100 `SmsgCharActionResult` code set & dual-mode behaviour — CANONICAL `[confirmed]` (control-flow)
+
+> **THIS SECTION IS THE CANONICAL 3/100 CODE TABLE** (re-reconciled 2026-06-22, anchor
+> `263bd994`, double counter-checked). Every other doc that touches 3/100 — `client_runtime.md`
+> §7.5.2 (engine-state-transition view), `net_contracts.md` §A.4, and
+> `packets/3-100_char_action_result.yaml` — must **cross-reference this table**, not re-list a
+> subset. The structural facts (engine-state value, sub-state, error-detail operand, side effect,
+> string-id, timer-arming, the full code set) are `[confirmed]` control-flow; the **human meaning**
+> of each code value stays `[capture/debugger-pending]`.
+
+3/100 reads a single 4-byte action/result code (§12) at payload offset 0 and runs a large switch
+with **two top-level modes**, keyed on whether the local player exists yet:
 - **lobby / select-screen mode** (no local player): the big numeric switch below — the
   connection / char-action-result path that drives the select screen and primes the connect state.
-- **in-world mode** (local player present): a small set `{1,2,3,4,5,7,22}` each selects its own
-  in-game tooltip popup, then arms a deferred timer.
+  This is the mode reached at character-select **before** entering the world.
+- **in-world mode** (local player present): the set `{1,2,3,4,5,6,7,22}` each selects its own
+  in-game tooltip popup; **every** code then arms a deferred timer and writes engine state.
 
 The complete code set is **`{0, 1-5, 7, 10, 11, 16, 22, 23, 200-211, 220-227, 202/203/232}`** —
 **there is NO `case 32`** (the first recon pass's "32" was spurious), and **there is NO `case 9`**:
 the guard is `code > 9` (so the value 9 hits no special arm and falls through), which means the
-former "9-11" must be read as **10, 11** only (plus the separate 16). Grouped by structural role:
+former "9-11" must be read as **10, 11** only (plus the separate 16). The 200-block jumptable spans
+codes **200..232 inclusive** (33 cases).
 
-| code(s) | structural role (lobby / select-screen path unless noted) | meaning |
-|---|---|---|
-| **0** | select-screen state ← 6 / sub-state ← 8; one path also enqueues the deferred timed event | pending |
-| **1-4, 7** | select-screen state ← 7 / sub-state ← 5; **in-world mode** instead maps each to a distinct tooltip popup — same number, two behaviours keyed by local-player presence | pending |
-| **5** | in-world mode: a tooltip popup (no lobby advance) | pending |
-| **10, 11, 16** | **smaller publish set** — call the **select-screen handler's publish-code method** with the code (the same publish method the conn-state machine uses) | pending |
-| **22, 23** | select-screen state ← 7 / sub-state ← 5; in-world mode: a tooltip popup. `23` additionally shows a status string on the status line (notice string-id **1604**) and is **explicitly excluded** from the deferred-timer arm | pending |
-| **200, 201, 204-211, 220-227** | **the biggest cluster** — all publish outward via the same select-screen publish-code method, with no other side effect (the connect/char-action outcome class) | pending |
-| **202, 203, 232** | publish outward via the publish method **AND** set the game state to the loading/connecting state (prime the connect-progress state) | pending |
-| **212-219, 228-231** | jumptable default — no publish-code call (falls through to the common tail) | pending |
+**The engine-state record is three 32-bit slots: `[0] = state`, `[1] = sub-state`, `[2] = detail`.**
+For every error arm the **error-detail operand `[2]` is the result code itself** (not a fixed
+immediate).
 
-- **The single biggest cluster `{200/201/204-211/220-227}` all do the same thing** — call the
-  select-screen handler's publish-code method with no other side effect. `{202,203,232}` are a
-  deliberate gap in that fan: they additionally **prime the connecting state**. `{212-219,228-231}`
-  exist only as the jumptable default (no publish-code action).
-- **`{10,11,16}`** publish via the **same** method as the 200/220 block — a smaller mid-range
-  publish set (the value 9 is **not** in this set — see the `> 9` guard above).
-- **Tail:** any non-zero code that is not `23` and not in `{202,203,232}` also arms the deferred
-  retry/timeout timer and stores the code into the pending slot the connection-state machine
-  watches.
-- **Common-tail notice (select-screen / lobby regime):** the generic notice shown after the
-  publish path uses string-id **1604** for code `23`, and string-id **1107** for the handler set
-  otherwise.
-- **In-game regime tooltip string-ids (`STRUCTURE-HIGH`; the id *values* are
-  `[capture/debugger-pending]`).** When a local player exists, each in-game code selects its own
-  tooltip popup id, arms a deferred timer, and stores the code into the game state:
+#### Select-mode (lobby / character-select — no local player) — per-code outcome
 
-  | code | tooltip string-id |
-  |---|---|
-  | 1 | **1201** |
-  | 2 | **1202** |
-  | 3 | **1203** |
-  | 4 | **1204** |
-  | 5 | **1205** |
-  | 6 | **1206** |
-  | 7 | **1207** |
-  | 22 | **1208** |
+| code(s) | engine state `[0]` | sub-state `[1]` | error-detail `[2]` | side effect | timer-arm |
+|---|---|---|---|---|---|
+| **0** | 6 | 8 | (unset) | "return to prior scene" / quit-return path | own dedicated timed-event enqueue |
+| **1, 2, 3, 4, 5, 7** | 7 | 5 | = code | recoverable char-operation error → Error scene at the **recoverable** sub-state 5 | armed (non-zero, not 23, not {202,203,232}) |
+| **22** | 7 | 5 | = code | recoverable (reached via the `code >= 22` guard) | armed |
+| **23** | 7 | 5 | = 23 | **recoverable** — additionally shows a status/notice line with **string-id 1604** (a compiled constant, not wire-read) | **EXCLUDED** from the timer (explicit) |
+| **10, 11, 16** | (no state write) | — | — | publish outward via the select-screen **publish-code method** with the code (mid-range publish set) | armed |
+| **200, 201, 204-211, 220-227** | (no state write) | — | — | the largest cluster — publish-code method only, no other side effect | armed |
+| **202, 203, 232** | **2** | — | — | publish-code method **AND** set engine state = 2 (Load / connecting) → the **reload** path that primes the connect-progress state | **EXCLUDED** from the timer |
+| **212-219, 228-231** | (no state write) | — | — | jumptable default — no publish-code call (inert tail) | armed if non-zero |
+
+- **Recoverable family (select-mode):** codes **{1,2,3,4,5,7,22,23}** all land on **engine state 7 /
+  sub-state 5** — the *recoverable* Error sub-state — carrying the code as the error-detail. **Select-mode
+  code 23 is therefore RECOVERABLE (7/5), NOT a fatal hard error (7/8).** A re-implementation classifier
+  that drops 22/23 into a "hard error → 7/8" out-of-range bucket diverges from the binary.
+- **Reload family (select-mode):** **{202,203,232}** additionally set engine state = 2 (Load) — the
+  create/rename/billing-accepted reload path.
+- **Common-tail notice (select-mode):** the generic notice shown after the publish path uses
+  string-id **1604** for code `23`, and string-id **1107** for the other non-zero set (both compiled
+  constants, not wire-read).
+- **Select-mode timer:** the deferred retry/timeout timer (duration 10000) is armed for any non-zero
+  code that is **not 23** and **not** in **{202,203,232}**, and stores the code into the pending slot
+  the connection-state machine watches.
+
+#### In-world mode (local player present) — per-code outcome
+
+When a local player exists, the handler runs the in-world tooltip block. **Code 6 IS handled in-world**
+(→ tooltip 1206) — this corrects the older prose that listed `{1,2,3,4,5,7,22}` without 6. **Code 23 is
+NOT handled in-world** — it has no switch case, shows no tooltip and no 1604 notice, and falls through
+to the common tail (the 1604 notice and the 23-timer-exclusion are **select-mode-only**).
+
+| code(s) | engine state `[0]` | sub-state `[1]` | error-detail `[2]` | tooltip string-id | timer-arm |
+|---|---|---|---|---|---|
+| **1** | 7 | 8 | = 1 | **1201** | armed |
+| **2** | 7 | 8 | = 2 | **1202** | armed |
+| **3** | 7 | 8 | = 3 | **1203** | armed |
+| **4** | 7 | 8 | = 4 | **1204** | armed |
+| **5** | 7 | 8 | = 5 | **1205** | armed |
+| **6** | 7 | 8 | = 6 | **1206** | armed |
+| **7** | 7 | 8 | = 7 | **1207** | armed |
+| **22** | 7 | 8 | = 22 | **1208** | armed |
+| **23** | 7 | 8 | = 23 | (none — no case) | armed |
+| **0** | 6 | 8 | (unset) | (none) | armed |
+| any other non-zero | 7 | 8 | = code | (none) | armed |
+
+- **In-world GameState:** every non-zero code writes **state 7 / sub-state 8** (detail = code); code 0
+  writes **state 6 / sub-state 8**. (Note the asymmetry: in-world error sub-state is **8**, not the
+  select-mode recoverable **5**.)
+- **In-world tooltip string-ids (`STRUCTURE-HIGH`; the id *values* are `[capture/debugger-pending]`).**
+  Each id is a compiled constant (code-selected, not wire-read).
+- **In-world timer:** the deferred timer (duration 5000) is armed **unconditionally** for all in-world
+  codes — there is **no** 23 / {202,203,232} exclusion in this mode (those exclusions are select-mode-only).
+
 - **Cross-reference (not duplicated):** the codes `{202,203,232}` that 3/100 *primes* are exactly
   the codes the **connection-state machine consumes/clears** from its pending slot on the next
   connection event; and `201` is also published by that machine. They **share the numbers, not the

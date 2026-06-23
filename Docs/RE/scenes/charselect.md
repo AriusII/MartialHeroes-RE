@@ -27,8 +27,11 @@ sources:
   - Docs/RE/specs/skinning.md                 # preview actor skin/skeleton/idle-motion chain
   - Docs/RE/specs/equipment_visuals.md        # preview per-class starter gear / worn-gear visuals
   - Docs/RE/structs/spawn_descriptor.md       # 880-byte per-slot descriptor parsed from 3/1
-  - Docs/RE/opcodes.md                        # 3/1, 3/5, 3/6, 1/6, 1/9 opcode catalogue
+  - Docs/RE/opcodes.md                        # 3/1, 3/5, 3/6, 3/7, 1/6, 1/7, 1/9, 1/13, 1/14 opcode catalogue
   - Docs/RE/packets/3-1_character_list.yaml   # roster-population wire spec
+  - Docs/RE/packets/3-5_enter_game_response.yaml  # SmsgEnterGameAck (reply to 1/9)
+  - Docs/RE/packets/3-6_rename_char_result.yaml   # SmsgRenameCharResult (12-byte, create-success slot-write)
+  - Docs/RE/packets/3-7_char_manage_result.yaml   # SmsgCharManageResult (8-byte, delete-confirm + cooldown)
 ---
 
 # Character-Select Scene Dossier — Engine State 4 (`SelectWindow` / "Selecter")
@@ -60,8 +63,8 @@ top-level windows in the client. Its responsibilities, end to end:
   pass, and send the create-character request (`1/6`, see `character_creation.md`);
 - **delete** — a delete-confirm modal that issues a slot-keyed "move-out" delete request, honouring a
   server-side delete cooldown;
-- **rename** — a rename panel (a shared global modal, not a SelectWindow child) reusing the same
-  name-validation checks;
+- **rename** — a rename panel (a SelectWindow child at +0x179C/+0x17AC) that runs banned-word /
+  charset / duplicate checks and sends opcode 1/13 directly;
 - **enter world** — commit the selected slot, settle the camera, copy the slot's descriptor/stats to
   the live-player globals, and send the enter-game request (`1/9`).
 
@@ -116,25 +119,25 @@ in §4.3. The **container** panels and the standalone class objects:
 |---|---|---|
 | +0x1550 | `slotFrameGroupA` — character-slot frame group A (3 slot image frames + 3 ENTER buttons) | `GUPanel` |
 | +0x1554 | `slotFrameGroupB` — character-slot frame group B (frames + class icons) | `GUPanel` |
-| +0x15B0 | `createFormNavPanel` — create-form class strip / nav (actions 62/63) | `GUPanel` |
-| +0x15C8 | `createFormConfirmPanel` — create-form back/confirm (action 64) | `GUPanel` |
+| +0x15B0 | `relocateOverlayPanel` — move/relocate overlay (actions 62/63: confirm = send opcode 1/14 MoveCharacter; cancel = hide) | `GUPanel` |
+| +0x15C8 | `overlayClosePanel` — plain overlay panel (action 64: close/hide only; no message send) | `GUPanel` |
 | +0x1604 | `createFormInputPanel` — create-form input: name label + class buttons (actions 10/11/12/13) | `GUPanel` |
 | +0x16AC | `appearanceGridPanel` — main appearance/stat grid (image cells + 14 adjust buttons + value labels) | `GUPanel` |
 | +0x16B0 | `nameInputTextbox` — masked character-name input (parent = appearanceGridPanel) | `GUTextbox` |
 | +0x1770 | `errorPanel` — Error dialog sub-panel (class object) | `ErrorPanel` |
 | +0x1774 | `exitPanel` — Exit/quit-confirm dialog sub-panel (class object) | `ExitPanel` |
-| +0x179C | `nameConfirmPanel` — name/confirm sub-panel (masked textbox + buttons, actions 59/60) | `GUPanel` |
-| +0x17AC | create-form textbox (parent = nameConfirmPanel) | `GUTextbox` |
+| +0x179C | `renameConfirmPanel` — rename panel (own textbox + buttons, actions 59/60: confirm = send opcode 1/13 RenameCharacter; cancel = hide) | `GUPanel` |
+| +0x17AC | rename panel textbox (parent = renameConfirmPanel; source of 17-byte name payload for opcode 1/13) | `GUTextbox` |
 | +0x17B8 | extra create sub-panel (action 74) | `GUPanel` |
-| +0x17D0 | error/confirm sub-panel (actions 54/55) | `GUPanel` |
+| +0x17D0 | select-slot confirm panel (actions 54/55: confirm = send opcode 1/7 SelectCharacterSlot + hide; cancel = hide) | `GUPanel` |
 | +0x1868 | `tooltipDescriptor` — hover tooltip/description panel (added directly to window) | `Descriptor` |
 
 > **Distinction (completeness-confirmed).** `errorPanel` (the `ErrorPanel` **class object** at +0x1770)
-> and the **error/confirm sub-panel** (a plain `GUPanel` at +0x17D0, holding action buttons 54/55) are
+> and the **select-slot confirm panel** (a plain `GUPanel` at +0x17D0, holding action buttons 54/55) are
 > **two different objects** — an earlier reading that placed "errorConfirmPanel" at +0x17D0 conflated
-> them. Likewise the **rename panel** is **not** a SelectWindow child: `SelectWindow` builds exactly
-> **two** textboxes (+0x16B0, +0x17AC); the rename modal is a separate shared global `NameInputPanel`
-> raised over the scene and reused by many scenes (see §4.5 and §9).
+> them. The **rename panel** (+0x179C) is a `SelectWindow` child textbox panel (not a shared global
+> singleton): `SelectWindow` owns the rename input at +0x17AC and sends opcode 1/13 directly from it
+> (see §4.3 and §7.4).
 
 The window drives its sub-views by **visibility toggling**, not by spawning separate scenes — all
 children are built once at scene build and shown/hidden by the build/reset routine and per-frame tick.
@@ -197,17 +200,17 @@ not widget counts.
 | **Slot-frame group B** | frames + class icons + class buttons | `slotFrameGroupB` (+0x1554) | 4, 5, 6 |
 | **Left nameplate frame** | 3 image frames + 2 digit/icon strips (6 images) + 3 nameplate labels | window | — |
 | **Class-select buttons** | 3 buttons (create-form class choice) | window | 4, 5, 6 |
-| **Create-form nav** | class strip / nav | `createFormNavPanel` (+0x15B0) | 62, 63 |
-| **Create-form confirm** | back / confirm | `createFormConfirmPanel` (+0x15C8) | 64 |
+| **Move/relocate overlay** | move/relocate confirm + cancel | `relocateOverlayPanel` (+0x15B0) | 62, 63 |
+| **Overlay-close panel** | plain close / back button | `overlayClosePanel` (+0x15C8) | 64 |
 | **Create-form input** | name label + class buttons | `createFormInputPanel` (+0x1604) | 10, 11, 12, 13 |
 | **Extra create sub-panel** | one button | extra create panel (+0x17B8) | 74 |
-| **Appearance/stat grid** | rows of small image cells (digits/value tiles) + 9 stat-icon images + 7 stat-value bar images + 7 stat-value labels + 14 adjust/spinner buttons + 2 page-nav buttons + masked name textbox | `appearanceGridPanel` (+0x16AC) | 21, 22, 25–36 |
-| **Name/confirm** | masked textbox + 2 buttons | `nameConfirmPanel` (+0x179C) | 59, 60 |
-| **Error/confirm sub-panel** | 2 buttons | error/confirm panel (+0x17D0) | 54, 55 |
-| **Server / world nav** | server-list buttons + world/channel buttons + page arrows + small nav buttons | window | 66, 67, 68, 69, 72, 73 |
-| **Create / Delete character** | 2 large (≈60×80) buttons at x≈880 | window | 70, 71 |
-| **Carrier-pigeon / mail cluster** | button cluster + close button + carrier panel + textbox | window | 65, 70, 71, 72, 73 |
-| **ENTER WORLD** | 1 button (window level) | window | 61 |
+| **Appearance/stat grid** | rows of small image cells (digits/value tiles) + 9 stat-icon images + 7 stat-value bar images + 7 stat-value labels + 14 adjust/spinner buttons + 2 page-nav buttons + masked name textbox | `appearanceGridPanel` (+0x16AC) | 21, 22, 25–34 (face ±, stat spinners), 35 (create-confirm), 36 (create-cancel) |
+| **Rename confirm panel** | rename textbox + 2 buttons | `renameConfirmPanel` (+0x179C) | 59, 60 |
+| **Select-slot confirm panel** | 2 buttons | select-slot confirm (+0x17D0) | 54, 55 |
+| **Actor-yaw button cluster** | 4 small +/− yaw buttons (normal + hold variants) | window | 66, 67, 68, 69 |
+| **Actor-yaw drag / camera-zoom drag** | actor-yaw drag-hold (2 dir) + camera boom-zoom drag-hold (2 dir) | window | 70, 71, 72, 73 |
+| **Carrier-pigeon / mail cluster** | button cluster + close button + carrier panel + textbox | window | 65 |
+| **Relocate/open-overlay** | 1 button (window level, opens `relocateOverlayPanel` when slot picked) | window | 61 |
 | **Tooltip** | `Descriptor` hover panel | window | — |
 | **Error dialog** | `ErrorPanel` class object | window | — |
 | **Exit/confirm dialog** | `ExitPanel` class object (own OK/Cancel) | window | 50, 51 |
@@ -271,49 +274,72 @@ current-action field; the dispatcher then resolves the action to its bound membe
 | 1 | +0x1564 | slot-A ENTER button 1 |
 | 2 | +0x1568 | slot-A ENTER button 2 |
 | 3 | +0x156C | slot-A ENTER button 3 |
-| 4, 5, 6 | (local) | class-select buttons (create-form class choice) |
-| 10 | +0x1690 | create-form class button 1 |
-| 11 | +0x1694 | create-form class button 2 |
-| 12 | +0x1698 | create-form class button 3 |
-| 13 | +0x169C | create-form class button 4 |
-| 21 | +0x1714 | appearance/stat adjust |
-| 22 | +0x1710 | appearance/stat adjust |
-| 25 | +0x1720 | stat spinner |
-| 26 | +0x1724 | stat spinner |
-| 27 | +0x1728 | stat spinner |
-| 28 | +0x172C | stat spinner |
-| 29 | +0x1730 | stat spinner |
-| 30 | +0x1734 | stat spinner |
-| 31 | +0x1738 | stat spinner |
-| 32 | +0x173C | stat spinner |
-| 33 | +0x1740 | stat spinner |
-| 34 | +0x1744 | stat spinner |
-| 35 | +0x1748 | stat spinner |
-| 36 | +0x174C | stat spinner |
+| 4 | +0x15A0 (parent `slotFrameGroupB` +0x1554) | class-select / slot button — create-form class choice |
+| 5 | +0x15A4 (parent `slotFrameGroupB` +0x1554) | class-select / slot button — create-form class choice |
+| 6 | +0x15A8 (parent `slotFrameGroupB` +0x1554) | class-select / slot button — create-form class choice |
+| 10 | +0x1690 | class pick MONK — `ApplyClassSelection(0)` → internal class id 4 |
+| 11 | +0x1694 | class pick MUSA — `ApplyClassSelection(1)` → internal class id 1 |
+| 12 | +0x1698 | class pick DOSA — `ApplyClassSelection(2)` → internal class id 3 |
+| 13 | +0x169C | class pick SALSU — `ApplyClassSelection(3)` → internal class id 2 |
+| 21 | +0x1714 | FACE+ — increments face index, clamped max 7; 2D portrait only, no 3D rebuild |
+| 22 | +0x1710 | FACE− — decrements face index, clamped min 1; 2D portrait only, no 3D rebuild |
+| 25 | +0x1720 | Stat0 INCREMENT — edit `createBlob+0x1C`; requires budget > 0 |
+| 26 | +0x1724 | Stat1 INCREMENT — edit `createBlob+0x20`; requires budget > 0 |
+| 27 | +0x1728 | Stat2 INCREMENT — edit `createBlob+0x24`; requires budget > 0 |
+| 28 | +0x172C | Stat4 INCREMENT — edit `createBlob+0x2C`; requires budget > 0 |
+| 29 | +0x1730 | Stat3 INCREMENT — edit `createBlob+0x28`; requires budget > 0 |
+| 30 | +0x1734 | Stat0 DECREMENT — floor 10; requires budget < 5 |
+| 31 | +0x1738 | Stat1 DECREMENT — floor 10; requires budget < 5 |
+| 32 | +0x173C | Stat2 DECREMENT — floor 10; requires budget < 5 |
+| 33 | +0x1740 | Stat4 DECREMENT — floor 10; requires budget > 0 (guard differs) |
+| 34 | +0x1744 | Stat3 DECREMENT — floor 10; requires budget < 5 |
+| 35 | +0x1748 | CREATE-CONFIRM — name validate (non-empty / reserved / banned-word / charset / min-len 2) → stage name+appearance to createBlob → busy-latch → send `Cmsg_CreateCharacter_Send` (`1/6`, 52 B). The create send. |
+| 36 | +0x174C | CREATE-CANCEL / reset-to-select-scene — calls `SelectWindow_ResetScene` + restarts scene BGM; no send. |
 | 50 | (ExitPanel-internal) | quit-confirm OK |
 | 51 | (ExitPanel-internal) | quit-confirm Cancel |
-| 54 | +0x17D8 | error-confirm OK |
-| 55 | +0x17DC | error-confirm Cancel |
-| 59 | +0x17B0 | name-confirm OK |
-| 60 | +0x17B4 | name-confirm Cancel |
-| 61 | (local) | ENTER WORLD |
-| 62 | +0x17D8 | create-form nav (next) |
-| 63 | +0x17DC | create-form nav (prev) |
-| 64 | +0x15D4 | create-form back/confirm |
+| 54 | +0x17D8 | select-slot CONFIRM: sends opcode 1/7 SelectCharacterSlot ([committed-slot, 0]), copies picked char name to MainWindow, hides panel |
+| 55 | +0x17DC | select-slot CANCEL: hides the select-slot confirm panel |
+| 59 | +0x17B0 | rename CONFIRM: runs banned-word/charset/duplicate checks then sends opcode 1/13 RenameCharacter (18-byte payload: 1-byte target slot + 17-byte name from +0x17AC textbox) |
+| 60 | +0x17B4 | rename CANCEL: blur + disable-IME, hide rename input panel |
+| 61 | +0x15AC (parent `slotFrameGroupB` +0x1554) | conditionally OPENS the move/relocate overlay (`relocateOverlayPanel`, +0x15B0) when a slot is currently picked; otherwise shows error tooltip |
+| 62 | +0x17D8 | move/relocate CONFIRM: hides panel then sends opcode 1/14 MoveCharacter/slot-reorder (1-byte slot) |
+| 63 | +0x17DC | move/relocate CANCEL: hide the relocate overlay panel |
+| 64 | +0x15D4 | plain panel-close: hides overlay panel +0x15C8 (cancel/back; no message send) |
 | 65 | +0x15D8 | carrier-pigeon textbox / close |
-| 66 | +0x1654 | server-list button |
-| 67 | +0x1658 | server-list button |
-| 68 | +0x1678 | world/channel button |
-| 69 | +0x167C | world/channel button |
-| 70 | +0x1680 | create-character / page |
-| 71 | +0x1684 | delete-character / page |
-| 72 | +0x1688 | small nav button (camera zoom in) |
-| 73 | +0x168C | small nav button (camera zoom out) |
+| 66 | +0x1654 | actor-yaw button + (writes `this+6068`; button press, positive yaw) |
+| 67 | +0x1658 | actor-yaw button + hold (writes `this+6068`; hold variant) |
+| 68 | +0x1678 | actor-yaw button − (writes `this+6072`; button press, negative yaw) |
+| 69 | +0x167C | actor-yaw button − hold (writes `this+6072`; hold variant) |
+| 70 | +0x1680 | actor-yaw drag-hold direction A (writes `this+6084 = 70`; cleared on drag-release type-5/6) |
+| 71 | +0x1684 | actor-yaw drag-hold direction B (writes `this+6084 = 71`; cleared on drag-release type-5/6) |
+| 72 | +0x1688 | camera boom-zoom drag-hold direction A (writes `this+6088 = 72`; press-and-hold) |
+| 73 | +0x168C | camera boom-zoom drag-hold direction B (writes `this+6088 = 73`; press-and-hold) |
 | 74 | +0x17C0 | extra create sub-panel button |
 
-> **Shared-slot fact (confirmed real).** Members **+0x17D8 / +0x17DC** are reused by the create-form
-> nav (actions 62/63) **and** the error-confirm modal (actions 54/55). The two panels are mutually
-> exclusive (never visible at once), so they deliberately share the same two bound-pointer cells.
+> **Shared-slot fact (confirmed real).** Members **+0x17D8 / +0x17DC** are reused by the
+> move/relocate overlay (actions 62/63) **and** the select-slot confirm panel (actions 54/55). The two
+> panels are mutually exclusive (never visible at once), so they deliberately share the same two
+> bound-pointer cells.
+
+> **Action-id reconciliation (build 263bd994, static dispatcher read).** 54/55 operate on the
+> select-slot confirm panel and send opcode 1/7, not an error-confirm; 59/60 operate on the rename
+> panel (+0x17AC) and send opcode 1/13; 62/63 operate on the relocate overlay and send opcode 1/14;
+> 64 is a plain close with no send; 61 opens the relocate overlay (no enter-world). Enter-world is
+> reached via `SelectWindow_EnterGame` on message type-4 / secondary-codes 99, 120, or 10 — not via
+> an action-id button. Actions **66–69** are actor-yaw **button** presses (two +/− buttons × normal/hold
+> variants, writing `this+6068`/`this+6072`); actions **70/71** are actor-yaw **drag-hold** accumulators
+> (writing `this+6084`, cleared on drag-release type-5/6, read by `SelectWindow_TickSelectedPreviewYaw`);
+> actions **72/73** are camera boom-zoom **drag-hold** accumulators (writing `this+6088`, read by
+> `SelectWindow_TickCameraBoomZoom`). These are three distinct widgets and three distinct tick functions.
+>
+> **CYCLE-12 correction (create-confirm/cancel mis-listing).** Prior to the CYCLE-12 dispatcher walk,
+> actions 35 and 36 were listed among the point-buy stat spinners (as if the spinner block ran 25–36).
+> The complete `SelectWindow_HandleCommand` switch body confirms: spinner ids run **25–34** only (10
+> ids, five stats × +/−); **35 = CREATE-CONFIRM** (the sole send site for opcode 1/6, 52 B); **36 =
+> CREATE-CANCEL** (`SelectWindow_ResetScene` + scene BGM restart, no send). The prior listing was
+> erroneous. Note also that the +/− spinner pairs are NOT sequentially paired: Stat0=(25+,30−),
+> Stat1=(26+,31−), Stat2=(27+,32−), Stat3=(29+,34−), Stat4=(28+,33−). Source: CYCLE-12 dirty-room
+> recovery `Docs/RE/_dirty/cycle12/charselect/create_flow_actions.md`, build 263bd994.
 
 ### 4.4 Creation order (≈127 top-level widgets, in insertion order)
 
@@ -326,19 +352,19 @@ w, h, atlas)`):
 4. left nameplate frame (3 images)
 5. two digit/icon strips (6 images)
 6. three nameplate labels
-7. create-form popup #1 (actions **62, 63**)
-8. create-form popup #2 (action **74**)
-9. create-form popup #3 (action **64**)
+7. move/relocate overlay (actions **62, 63**)
+8. extra create sub-panel (action **74**)
+9. overlay-close panel (action **64**)
 10. nav/action cluster (actions **61, 4, 5, 6**)
 11. lower portrait/stat frame panel + 5 frame images
 12. 9 stat-icon images
 13. 7 stat-value bar images
 14. 7 stat-value labels
-15. stat +/- spinner grid: **13 buttons** (actions **22, 21, 25–36**) + 2 page-nav buttons
+15. appearance/stat grid buttons: face-adjust (actions **22, 21**) + stat spinners (actions **25–34**, 10 ids) + create-confirm/cancel (actions **35, 36**) + 2 page-nav buttons
 16. detail sub-panel (nameplate + 3 labels + actions **10, 11, 12, 13**)
-17. confirm/cancel + name label + page arrows (actions **66, 67, 68, 69**)
-18. carrier-pigeon button cluster (actions **70, 71, 72, 73**)
-19. close/corner button + carrier panel + textbox (action **65**)
+17. actor-yaw button cluster (actions **66, 67, 68, 69**)
+18. actor-yaw drag-hold + camera boom-zoom drag-hold widgets (actions **70, 71, 72, 73**)
+19. carrier-pigeon button cluster + close/corner button + carrier panel + textbox (action **65**)
 20. error/confirm popup (actions **54, 55**)
 21. name/confirm popup (actions **59, 60**)
 22. name-entry image frame + textbox + label
@@ -406,11 +432,18 @@ through the frame).
   `terrain_layers.md`, `bgtexture_lst.md`; `specs/terrain-streaming.md`, `rendering.md`.)
 - **Camera** — a perspective camera (same class as in-game) with **vertical FOV overridden to 50°**
   (the class default is 60°), aspect from the screen-dimension globals, **near = 5.0, far = 15000.0**.
+  The camera rig is a **6-keyframe free-look dolly**: six keyframes store independent Euler angles
+  (pitch in indices 0–5, yaw in indices 6–11) with no look-at target; the pivot is baked to world
+  origin (0, 0, 0). An entry dolly plays from keyframe 0 (set at ctor) to keyframe 1 (set at each
+  scene reset) — the dolly holds at KF1 thereafter. No further keyframes are driven during normal
+  char-select idling; the boom-zoom tick (actions 72/73, see §4.3) modifies the camera distance
+  field independently.
 - **Lighting** — the shared global `EnvironmentLightScene` singleton (the same object the live world
   uses); preview lighting is the standard environment/sky model at the pinned 14:30 hour, **no bespoke
   studio rig** (`specs/environment.md`).
 - **Ambient effect** — a single user XEffect (**id 380003000**, the char-select ambient effect) is
-  spawned at a fixed world position after clearing all other user effects (`specs/effects.md`).
+  spawned **after `ClearAllUserXEffects`** at world position **(508.483, 69.887, −9758.569)** with
+  identity direction, scale 1.0, and loop = 1 (`specs/effects.md`).
 - **Scene anchor** (world origin for all preview placement) — **X = 2048.0, Y = 0.0, Z = −6144.0**.
 
 ### 6.2 Character placement & rendering
@@ -422,21 +455,28 @@ See `specs/skinning.md`, `specs/equipment_visuals.md`, `structs/spawn_descriptor
 
 - **Lineup (existing characters)** — five actors spawned from their stored **880-byte** spawn
   descriptors, laid out in a single **row of five**, **12-unit** horizontal spacing, the row slightly
-  bowed toward the camera in the middle, each rendered at **3× base scale**, idle motion applied,
-  weapon/joint effects refreshed. The per-slot facing byte selects yaw **0** (front) or **π / 180°**
-  (back).
+  bowed toward the camera in the middle, each spawned with scale field +1160 = **70.0** (confirmed:
+  `SelectWindow_SpawnPreviewLineup` writes 70.0 to each lineup actor's scale field). The idle-motion
+  playback-rate multiplier on each lineup actor is **3.0** (written separately to actor+100) — this is
+  a motion-rate override, distinct from the scale value. Weapon/joint effects refreshed. The per-slot
+  facing byte selects yaw **0** (front) or **π / 180°** (back).
 - **Zoom / create preview** — a single actor synthesised from the chosen **class + body**, with
   per-class **starter gear baked into the descriptor** (preview-only cosmetic item ids — see
   `equipment_visuals.md`). Placed centred, ≈**56 units closer** to the camera than the lineup row,
-  rendered at **2× scale** plus an extra zoom transform. Initial facing from the stored preview-yaw.
+  scale fields +1160 and +1164 both set to **81.0** (confirmed: `SelectWindow_BuildZoomPreviewActor`
+  writes 81.0 to both scale fields). Initial facing from the stored preview-yaw.
 
 ### 6.3 Interaction (per-frame tick)
 
 - **Drag-to-rotate spins the model, not the camera** — input maps to `yaw −= 2·dt` or `yaw += 2·dt`,
   applied only to the selected / zoom actor's facing direction + quaternion (camera and lineup
   untouched).
-- **Manual zoom** — while a panel is focused, the two small nav keys add/subtract `dt·10` to the
-  camera boom-distance (no clamp); these are the action-72 / action-73 small nav buttons.
+- **Camera boom-zoom** — actions 72 / 73 store the action-id into a tick-state field (main+6276);
+  `SelectWindow_TickCameraBoomZoom` reads that field each frame and increments (72) or decrements (73)
+  the camera object's distance field (+276) by `dt × 10`; the press-and-hold is released by resetting
+  the field to 0 on mouse-up. No clamp is applied. Camera object pointer is held at main+6204. (Distinct
+  from actions 70/71, which store into main+6272 and drive `SelectWindow_TickSelectedPreviewYaw` — the
+  yaw of the selected create-preview actor.)
 - **The 2D UI overlay** is drawn after the scene, inside the same D3D fixed-function render-state pass
   (texture-stage / alpha-blend states programmed on the device wrapper, then the window draw vtable
   entry).
@@ -496,43 +536,57 @@ floor of 10 for variants 1..4); a **class/appearance-variant selector** over the
 ### 7.4 Create / Delete / Enter / Rename
 
 - **Create** — an empty-slot or class button opens the class strip + the create-name modal. The
-  create-confirm action validates the typed name (non-empty, not a reserved/placeholder name, passes a
-  banned-word table check, passes a charset validator, minimum length 2), stages name + appearance
-  into a create blob, and sends the **create-character** request (`1/6`, a 52-byte appearance body —
-  see `character_creation.md`). The in-flight latch blocks duplicate sends.
+  create-confirm button (**action 35**) validates the typed name (non-empty, not a reserved/placeholder
+  name, passes a banned-word table check, passes a charset validator, minimum length 2), stages name +
+  appearance into a create blob, and sends the **create-character** request (`1/6`, a 52-byte appearance
+  body — see `character_creation.md`). The in-flight latch blocks duplicate sends. The create-cancel
+  button (**action 36**) calls `SelectWindow_ResetScene` and restarts the scene BGM without sending.
 - **Enter / Select** — the select-confirm action (gated by the busy guard and the slot-occupied flag)
-  sends the **select-character-slot** request. The actual world entry commits once the camera
-  boom/zoom has settled: stop the scene BGM, copy the chosen slot's descriptor/stats into the
-  live-player globals, read the game version (`data/cursor/game.ver`), and send the **enter-game**
-  request (`1/9`). A blank/placeholder slot (`@BLANK@` descriptor name — the empty-slot sentinel, cf.
-  `character_creation.md`) re-opens the create modal instead of entering.
+  sends the **select-character-slot** request (opcode 1/7, via action 54). The actual world entry
+  commits once the camera boom/zoom has settled, in this order: (1) stop the scene BGM (id 920100200);
+  (2) guard against an `@BLANK@` descriptor name (the empty-slot sentinel — re-opens the create modal
+  instead of entering, cf. `character_creation.md`); (3) build the 40-byte enter-game body; (4) read
+  the game version from `data/cursor/game.ver`; (5) **send the enter-game request** (opcode `1/9`);
+  (6) **then** copy the chosen slot's 880-byte descriptor + 96-byte stats block + level into the
+  live-player globals (the copy is POST-send).
 - **Delete** — implemented as a slot-keyed **"move-out"** request, gated behind a delete-confirm modal
   (requires a valid highlighted slot with an actor present; otherwise an error is shown). A server-side
   **delete cooldown** can defer it.
-- **Rename** — the rename-confirm action runs the same banned-word / reserved-name / length checks and
-  sends the rename-character request from the **shared `NameInputPanel`** modal (its own input field +
-  IME) — a sibling global modal, **not** a SelectWindow child (§2.2, §9).
+- **Rename** — the rename-confirm action (action 59) runs banned-word / charset / duplicate checks and
+  sends opcode **1/13 RenameCharacter** (18-byte payload: 1-byte target slot from main+6252, then the
+  17-byte CP949 name strcpy'd from the +0x17AC textbox). The rename panel is a **SelectWindow child**
+  at +0x179C / +0x17AC — not a shared global `NameInputPanel` singleton (§2.2).
 
 ### 7.5 Server result feedback & scene refresh
 
-- **Create-result** (minor **5**) — on success, places the new character into the **first empty slot**
-  (writing class-specific **default-equipment id blocks** per class 1..4), bumps the account character
-  count, refreshes the slot-count label, and replays the scene BGM; on failure, maps an error code to a
-  localized message shown in the char-select status line.
-  > **IDB mislabel flagged:** the IDB symbol calls this handler a "rename result" — it is the **create
-  > result**; flagged for the protocol analyst (see also `character_creation.md`, which notes the
-  > create-ack path is latch + roster-refresh, no dedicated create-result body).
-- **Manage-result** (minor **6**) — reads an 8-byte block `{type, subtype, ready-time}`: faces the
-  active slot front/back on select/deselect; on a delete-confirm wipes the slot (zeroes descriptor +
-  stats, despawns the actor, marks the slot deleted-this-session, decrements the account char count);
-  a not-yet-ready delete cooldown formats an **HH:MM** "try again later" notice into the status line.
-- Both result handlers always end by **resetting the scene** and **clearing the in-flight latch**.
+There is **no standalone create-result opcode**. Create success surfaces via the rename-apply path
+(3/6) that writes the new name into the slot record, followed by a refreshed `3/1` roster and the
+`3/23 SmsgCharStatusBytesByName` status update — there is no dedicated create-ack body.
+
+- **Enter-game ack** (minor **5**, `SmsgEnterGameAck`) — **44 bytes** (40-byte account/billing
+  confirm block + trailing 4-byte char-count). This is the **direct reply to C2S 1/9**: it sets the
+  client engine GameState to `LOADING` and ends the char-select scene. It is NOT a create-result. See
+  `opcodes.md` `0x30005` and `packets/3-5_enter_game_response.yaml`.
+- **Rename-char result** (minor **6**, `SmsgRenameCharResult`) — **12 bytes** (result u8 @0,
+  error-code u8 @1, pad @0x02, two IEEE-float placement values @0x04/@0x08). On success (result = 1,
+  subtype 1), applies the new name to the slot record via the slot writer; on failure, maps the
+  error-code to a localized message shown in the char-select status line. Also carries the
+  create-success slot-write path (places the new character's name into the first empty slot, writes
+  class-specific default-equipment id blocks per class 1..4, bumps the account character count,
+  refreshes the slot-count label, and replays the scene BGM). See `opcodes.md` `0x30006`.
+- **Char-manage result** (minor **7**, `SmsgCharManageResult`) — **8 bytes** `{result u8 @0,
+  reserved @1, subtype u8 @2, reserved @3, ready_time u32 @4}`. Subtype 2 = delete-confirmed: wipes
+  the slot (zeroes descriptor + stats, despawns the actor, marks the slot deleted-this-session,
+  decrements the account char count); a not-yet-ready delete cooldown formats an **HH:MM** same-day
+  "try again later" notice from `ready_time`. See `opcodes.md` `0x30007`.
+- All three result handlers end by **resetting the scene** and **clearing the in-flight latch**.
 
 ### 7.6 Modals & error/feedback
 
 Modals are GU panels raised with a generic **show-as-modal-and-grab-focus** call. The recovered modals:
-**create-name** modal, **class-selection** strip, **rename** panel (shared `NameInputPanel`, with IME
-blur on cancel), **delete-confirm** panel, **select/enter-confirm** panel, the **status-line / tooltip**
+**create-name** modal, **class-selection** strip, **rename panel** (SelectWindow child at +0x179C,
+action 59 confirm / action 60 cancel with IME blur), **move/relocate overlay** (+0x15B0, actions
+62/63), **select-slot confirm panel** (+0x17D0, actions 54/55), the **status-line / tooltip**
 banner (`Descriptor`), the **`ErrorPanel`** notice host, and the **`ExitPanel`** quit-confirm
 (its own OK/Cancel, actions 50/51, caption msg.xdb id 2007). Errors and feedback go through a
 multi-line message-box / status-banner helper that resolves localized message ids (default display
@@ -557,11 +611,13 @@ id 920100200) started on entry/reset and stopped on leave.
    delete-confirm, select/enter-confirm), each raised via show-modal-and-grab-focus.
 6. A confirm action validates locally (name checks for create/rename), sets the in-flight latch, and
    sends the matching C2S message.
-7. The server result (`3/5` create-result, or `3/6` manage-result for select/deselect/delete) mutates
-   the slot model (place/clear/face), shows any error/cooldown in the status line, resets the scene,
-   and clears the latch — returning the UI to step 3.
-8. On enter confirm, once the camera boom/zoom settles, the enter-game routine stops the BGM, copies
-   the chosen slot into the live-player globals, and sends `1/9`, leaving the scene.
+7. The server result (`3/6` rename/create-name-apply, or `3/7` manage-result for select/deselect/delete)
+   mutates the slot model (place/clear/face), shows any error/cooldown in the status line, resets the
+   scene, and clears the latch — returning the UI to step 3.
+8. On enter confirm, once the camera boom/zoom settles, the enter-game routine: stops the BGM
+   (920100200), guards against `@BLANK@`, builds the 40-byte body, reads `game.ver`, sends `1/9`
+   (`SmsgEnterGameAck` 3/5 confirms), then copies the chosen slot descriptor + stats into the
+   live-player globals (post-send), leaving the scene.
 
 ---
 
@@ -627,9 +683,12 @@ msg.xdb-sized captions). Hand to `re-validator` via the live `?ext=dbg` session 
 4. **The non-array `SelectWindow` member semantics** (the init-only 0 / −1 fields outside the five
    `0x370` sub-records) — count vs handle vs sub-struct — want a `dbg_read` of a live instance (§2.1).
 
-Settled hand-offs that are **not** open: the create-result IDB mislabel (→ protocol analyst, §7.5);
-msg.xdb id → CP949 string extraction (→ asset/format lane, §8.1); the per-pixel atlas sub-rect tables
-(→ `asset_linkages.md`, §5.3); proposed canonical names (→ names.yaml via `ida-toolsmith`).
+Settled hand-offs that are **not** open: msg.xdb id → CP949 string extraction (→ asset/format lane,
+§8.1); the per-pixel atlas sub-rect tables (→ `asset_linkages.md`, §5.3); proposed canonical names
+(→ names.yaml via `ida-toolsmith`): `SelectWindow_HandleCommand`, `SelectWindow_TickCameraBoomZoom`,
+`SelectWindow_TickSelectedPreviewYaw`, `SelectWindow_BuildZoomPreviewActor`,
+`SelectWindow_SpawnPreviewLineup`, `Cmsg_RenameCharacter_Send`, `Cmsg_MoveCharacter_Send`,
+`Cmsg_SelectCharacterSlot_Send`.
 
 ---
 
@@ -647,6 +706,6 @@ msg.xdb id → CP949 string extraction (→ asset/format lane, §8.1); the per-p
 | Preview per-class starter gear / worn-gear visuals | [`specs/equipment_visuals.md`](../specs/equipment_visuals.md) |
 | 880-byte per-slot spawn descriptor (parsed from `3/1`) | [`structs/spawn_descriptor.md`](../structs/spawn_descriptor.md) |
 | Roster wire spec | [`packets/3-1_character_list.yaml`](../packets/3-1_character_list.yaml) |
-| Opcodes (`3/1`, `3/5`, `3/6`, `1/6`, `1/9`) | [`opcodes.md`](../opcodes.md) |
+| Opcodes (`3/1`, `3/5` SmsgEnterGameAck, `3/6` SmsgRenameCharResult, `3/7` SmsgCharManageResult, `1/7`, `1/9`, `1/13`, `1/14`) | [`opcodes.md`](../opcodes.md) |
 | Login scene (state 1) — companion front-end dossier | [`scenes/login.md`](login.md) |
 | Cross-scene front-end GUI index | [`scenes/frontend_ui_components.md`](frontend_ui_components.md) |

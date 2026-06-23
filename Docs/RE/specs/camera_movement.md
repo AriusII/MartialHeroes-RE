@@ -4,8 +4,8 @@ sample_verified: false
 subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
-verification: confirmed   # control-flow-confirmed where noted; CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
-ida_reverified: 2026-06-20
+verification: confirmed   # control-flow-confirmed where noted; CYCLE 12 (2026-06-22): near/far slots CONFIRMED (§A.7.1); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
+ida_reverified: 2026-06-22
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
@@ -645,12 +645,18 @@ live on the projection object. Offsets (bytes from the projection object) are la
 | **+0xA4** | float | ortho top | CONFIRMED |
 | **+0xA8** | float | **fovy** (perspective vertical field-of-view) | CONFIRMED |
 | **+0xB0** | float | aspect ratio | CONFIRMED |
-| **+0xAC** | float | near plane (inferred adjacency to fovy/aspect) | MEDIUM |
-| **+0xB4** | float | far plane (inferred adjacency to fovy/aspect) | MEDIUM |
+| **+0xAC** | float | **near plane** — CONFIRMED at this slot (CYCLE 12); lives in an early slot of the projection-object field block | CONFIRMED |
+| **+0xB4** | float | **far plane** — CONFIRMED at this slot (CYCLE 12); lives in an early slot of the projection-object field block | CONFIRMED |
 
-> The ortho/fovy/aspect offsets are CODE-CONFIRMED (recovered from the projection object's
-> field-describe routine); the near/far offsets at +0xAC/+0xB4 are **MEDIUM** (inferred by
-> adjacency to the fovy/aspect block, not directly named by the field-describe routine).
+> **CYCLE 12 (IDB SHA 263bd994, 2026-06-22).** The near/far plane slots at +0xAC/+0xB4 are now
+> CONFIRMED (upgraded from MEDIUM). Near and far **live in early slots** of the
+> `GPerspectiveCamera` field block, not as inline immediates in any manipulator update or
+> projection setter (consistent with the CYCLE 7 finding that the ~5/~15000 values are loaded
+> from read-only data at scene-construction, not as code immediates). The field-describe routine
+> confirms the layout. The literal FOV/near/far *values* (65° / 5.0 / 15000.0 for in-world;
+> 50° / 5.0 / 15000.0 for char-select) remain carried-forward from prior cycles and are
+> **DBG-confirmable by reading these fields at runtime**, not inline immediate operands.
+> `// spec: Docs/RE/specs/camera_movement.md §A.7.1`
 
 ## A.8 Camera persistence (local config, not networked)
 
@@ -960,9 +966,24 @@ World vertical (Y) is **forced to 0 for simulation** and **never sent by the ser
 The terrain heightmap (a 65 × 65 = 4225-vertex f32 grid spanning one 1024-unit cell →
 **16-unit vertex spacing**) is used for **rendering / visual vertical placement** (and
 for the camera height clamp of §A.6), **not** for the XZ collision, which is the
-2D solid quadtree only. The runtime function that bilinearly samples Y for an arbitrary
-XZ was **not pinned** — **(UNVERIFIED)**; flag for a focused pass if visual height is
-needed. (CODE-CONFIRMED for the model; sampler UNVERIFIED)
+2D solid quadtree only.
+
+> **CYCLE 12 (IDB SHA 263bd994, 2026-06-22) — terrain-height sampler IS PINNED and uses
+> PER-TRIANGLE PLANE interpolation.** The terrain-height sampler is the **same dispatcher
+> function** the camera height clamp (§A.6) and the click-to-move ground-marker placement
+> (§B.2 step 4) both call. It is **not** a 4-corner bilinear lerp. The sampler:
+> 1. Maps world XZ to a cell and finds the quad.
+> 2. Determines which of the two triangles in the quad the query point falls in (using the
+>    quad's diagonal split from the `.ted` block-4 direction flags — see
+>    `formats/terrain.md §5.7`).
+> 3. Evaluates the plane equation of that triangle to obtain Y.
+>
+> This is per-triangle plane interpolation (barycentric over the triangle). The former
+> "(UNVERIFIED)" status for the sampler is **CLEARED** — it is confirmed pinned at the
+> dispatcher. The "bilinear" description in any prior note is superseded.
+> `// spec: Docs/RE/specs/camera_movement.md §B.6` and `Docs/RE/formats/terrain.md §5.4a`.
+
+(CODE-CONFIRMED for the model; sampler now CONFIRMED pinned and per-triangle plane method)
 
 ---
 

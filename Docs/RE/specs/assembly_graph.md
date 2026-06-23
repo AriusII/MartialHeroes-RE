@@ -58,8 +58,13 @@ Authoritative detail: `specs/terrain-streaming.md` (streaming), `formats/area_in
 **Per cell — find/load (the streaming gate).** For each cell in radius: a membership gate
 (`mapZ + 100000·mapX`) checks the **34-slot loader pool** (the pool **owns** the live cells, with
 cache/recycle); a miss acquires a pool slot and opens the cell files in this synchronous order:
-`.mud` → `.gad` (stub) → `.map`. The **25-slot manager ring** is a *borrowed-pointer* moving 5×5
+`.mud` → `.gad` → `.map`. The **25-slot manager ring** is a *borrowed-pointer* moving 5×5
 spatial view over the pool; the **live centre cell = ring slot 12**.
+
+> **`.gad` is an intentional dead stub.** The loader opens the `.gad` path as part of the
+> synchronous cell-open sequence, but no parser or consumer of its content was located in the client.
+> This is a deliberate no-op: the file path is opened and then discarded without any data being read
+> into a sub-manager. Do not implement a `.gad` decoder — the file slot is inert in the runtime.
 
 **Per cell — the `.map` parse fans the sub-assets.** Inside the `.map` parse, `DATAFILE` tokens
 scoped to each section pull `.ted` / `.sod` / `.bud` / `.up` / `.fx1`–`.fx7` / `.exd` and route each
@@ -73,6 +78,21 @@ into one of the **9 per-cell sub-manager slots** (`structs/terrain-manager.md`):
 
 (Collision `.sod`, height/`.mud`, region and the texture grid are held in the cell's other
 sub-objects; the build/render is a separate post-parse pass.)
+
+**Per cell — finalize order (post-parse pass).** After the `.map` parse completes, the cell finalize
+pass runs sub-manager setup in this order:
+
+1. `.ted` ground-texture grid build
+2. `.bud` building/object grid build
+3. `.fx1`–`.fx7` per-channel cull-grid build (seven channels in extension order)
+4. **`EXTRA_TERRAIN` → `.exd`** — extra collision triangle mesh finalize (see `formats/terrain_layers.md` §3)
+5. **`UP_TERRAIN` → `.up`** — upper/overhanging collision triangle mesh finalize (see `formats/terrain_layers.md` §2)
+6. `.sod` collision grid finalize
+
+The `.exd` and `.up` formats share the same 40-byte triangle record decoder (`count(u32) + count × 40B`);
+they are structurally distinct from the FX group-array channels and must not be confused with them.
+See `formats/terrain_layers.md` §2/§3 for their on-disk layout. Vertical role: `.up` supplies the
+**floor / minimum** surface (UP_TERRAIN), `.exd` supplies the **ceiling / maximum** surface (EXTRA_TERRAIN).
 
 **Texture resolution (global under `map000`).** `.ted` `TextureIndexGrid` byte → **idx-1 finalize**
 (the −1 applies to the `.ted` texture-index byte ONLY; pool/`intTexId` accessors have no −1; clamp
