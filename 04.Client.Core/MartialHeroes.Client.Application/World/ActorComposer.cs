@@ -361,9 +361,18 @@ public sealed class ActorComposer
         List<EquipmentPart> parts,
         List<int> emittedGids)
     {
+        // Slot-gate the binary applies (ActorVisual_RebindLocalPlayerParts): when the appearance key
+        // exceeds the player/mob boundary, only slot 3 (the body) is rebuilt; otherwise the full
+        // {3,4,6,2,11,14} set. The boundary corresponds to categoryBase[3] = 1000 (player keys
+        // {1,11,16,26} <= 1000 → full set; mob keys > 1000 → slot 3 only). This matches the existing
+        // EquipOverlayResolver.RunsOverlayResolution(1000) threshold so the composer converges with the
+        // binary. spec: equipment_visuals.md §1.1/§3.4 (threshold 1000; full vs reduced).
+        var bodyOnly = modelClassId > 1000; // > categoryBase[3] → slot 3 only (mob/general)
+
         for (var i = 0; i < OverlaySlots.Length; i++)
         {
             var slot = OverlaySlots[i];
+            if (bodyOnly && slot != 3) continue; // reduced rebuild set {3} above the boundary
             var equipGid = gids[i];
             if (equipGid == 0) continue; // empty slot → no node (spec: skinning.md §3.5.4 "Empty slots … are skipped")
 
@@ -393,9 +402,16 @@ public sealed class ActorComposer
     }
 
     /// <summary>
-    ///     The per-slot GID reduction: weapon slot 14 uses the base-1000 reduction
-    ///     (<c>10000·(gid/10000) + gid%100</c> wider family), others base-100 (<c>10000·(gid/10000) + gid%100</c>).
-    ///     spec: Docs/RE/specs/skinning.md §3.5.4; Docs/RE/specs/equipment_visuals.md §3.1/§3.2.
+    ///     The per-slot GID reduction. Non-weapon slots {3,4,6,2,11}:
+    ///     <c>gid_reduced = 10000·(gid/10000) + gid%100</c>. The weapon (slot 14) digit-packing is
+    ///     UPSTREAM/caller-supplied — the binary's ActorVisual_BuildPart weapon branch builds the weapon
+    ///     gid from per-character appearance digits as
+    ///     <c>gid_reduced = 1000·(faceA + 10·(mobid + 10·(b + 10·(gid/1000000)))) + gid%1000</c>
+    ///     (faceA = +0x22, b = +0x34) BEFORE this composer sees it; at this level the slot's equipment gid
+    ///     is already the resolved weapon gid, so the shared non-weapon reduction is applied for the
+    ///     catalogue key and the <c>slot</c> term (14) in §3.5.3 keeps the weapon key distinct.
+    ///     spec: Docs/RE/specs/equipment_visuals.md §3.1 (weapon digit-packing is upstream of the catalogue key)
+    ///     / §3.2 (non-weapon reduction); Docs/RE/specs/skinning.md §3.5.4.
     /// </summary>
     private static int ReduceGid(int gid, int slot)
     {

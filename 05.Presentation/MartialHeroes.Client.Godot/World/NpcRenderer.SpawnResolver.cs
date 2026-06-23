@@ -6,7 +6,10 @@
 // spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
 // spec: Docs/RE/formats/mesh.md §.skn header — id_b; §actormotion.txt. CONFIRMED.
 // spec: Docs/RE/specs/skinning.md §8(e)/§10 — idle = motion_ids_a[1] = column 16 (record +0x44);
-//       column 15 / motion_ids_a[0] (record +0x40) is statically DEAD.
+//       column 15 / motion_ids_a[0] (record +0x40) is statically DEAD. Skeleton + idle .mot resolve
+//       through the shared CharVisualRegistry (bind-pose pool by verbatim id_b, motlist by header id_b),
+//       NOT g{n}.bnd / g{id}.mot. The faithful mob key is motion_key = col1 + CategoryBase[(byte)(col0+1)];
+//       the mob lookup below uses GetByIntraOffset(mob_id), which equals GetByMotionKey only for col0=0 mobs.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
@@ -29,8 +32,8 @@ public sealed partial class NpcRenderer
     ///     rest-pose node when any piece is missing:
     ///     actormotion.txt col1==mob_id → col2=skin_class (and col16 = default idle .mot id)
     ///     skinlist.txt scan → first .skn whose parsed IdB == skin_class
-    ///     data/char/bind/g{skin_class}.bnd → skeleton (.bnd)
-    ///     data/char/mot/g{idle}.mot → idle clip (.mot)
+    ///     BindPosePool.TryGetByIdB(skin_class) → skeleton (.bnd, by parsed actor_id; no g{n}.bnd)
+    ///     MotlistRegistry.ResolvePath(idle) → idle clip (.mot, by header id_b; no g{id}.mot)
     ///     CharacterTextureResolver → albedo texture
     ///     SkinnedCharacterBuilder.Build (skinned when bnd present; static otherwise)
     ///     Returns null when even the .skn cannot be resolved; never throws.
@@ -46,7 +49,8 @@ public sealed partial class NpcRenderer
             return null;
 
         // Step 1: actormotion.txt lookup: mob_id → skin_class + idle motion id.
-        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id, col15=idle motion.
+        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id; idle = motion_ids_a[1] =
+        //       col16 (record +0x44), NOT col15 (motion_ids_a[0]/+0x40, statically dead).
         if (!_actorMotionLookup.TryGetValue(mobId, out var entry))
             return null; // mob_id not in actormotion.txt — silently skip
 
@@ -97,7 +101,7 @@ public sealed partial class NpcRenderer
     ///     is missing, the builder degrades to a static rest pose (counted as a static fallback).
     /// </summary>
     /// <param name="skinClass">SkinClassId from actormotion (the .bnd g-id), or -1 to derive from mesh IdB.</param>
-    /// <param name="idleMotId">Idle .mot id_a (col15), or 0 for none.</param>
+    /// <param name="idleMotId">Idle .mot id (motion_ids_a[1] = col16, record +0x44), or 0 for none.</param>
     private Node3D? TryBuildActorNode(
         RealClientAssets assets, string sknPath, int skinClass, int idleMotId, string debugLabel)
     {
@@ -160,7 +164,8 @@ public sealed partial class NpcRenderer
         var skeleton = TryLoadSkeleton(assets, bndId, debugLabel);
 
         // Resolve the idle .mot clip. Only when we have a skeleton to drive it.
-        // spec: Docs/RE/formats/animation.md §col15 — idle motion id → data/char/mot/g{id}.mot.
+        // spec: actormotion.md — idle motion id = col16 (motion_ids_a[1]); resolved via the motlist
+        //       registry (id_b → 'data/char/mot/'+filename), NOT g{id}.mot.
         var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, idleMotId, debugLabel)
             : null;
@@ -228,37 +233,39 @@ public sealed partial class NpcRenderer
     }
 
     /// <summary>
-    ///     Loads the <c>.bnd</c> skeleton at <c>data/char/bind/g{bndId}.bnd</c>, or returns null
-    ///     (→ static rest pose) when absent / unparseable. Never throws.
-    ///     spec: Docs/RE/formats/mesh.md §.bnd — path g{id}.bnd; id == skin id_b == skin_class. CONFIRMED.
+    ///     Resolves the <c>.bnd</c> skeleton through the bind-pose pool by the verbatim <c>id_b</c> (the
+    ///     parsed <c>.bnd</c> header actor_id), or returns null (→ static rest pose) when not registered.
+    ///     The bnd is named in <c>bindlist.txt</c> with NO derivable <c>g{n}.bnd</c> filename rule.
+    ///     spec: Docs/RE/specs/skinning.md §8(e) (verbatim pose-pool key); formats/bindlist.md.
     /// </summary>
     private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int bndId, string debugLabel)
     {
         if (bndId <= 0) return null;
-        var bndPath = $"data/char/bind/g{bndId}.bnd";
-        if (!assets.Contains(bndPath)) return null;
-        try
-        {
-            var data = assets.GetRaw(bndPath);
-            if (data.IsEmpty) return null;
-            return BndParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[NpcRenderer] .bnd load failed '{bndPath}' ({debugLabel}): {ex.Message}");
-            return null;
-        }
+        var registry = CharVisualRegistry.GetOrBuild(assets);
+        var skeleton = registry?.TryGetSkeletonByIdB(bndId);
+        if (skeleton is null)
+            GD.Print($"[NpcRenderer] no .bnd registered with parsed actor_id={bndId} ({debugLabel}) — rest pose. " +
+                     "spec: skinning.md §8(e) / formats/bindlist.md.");
+        return skeleton;
     }
 
     /// <summary>
-    ///     Loads the idle <c>.mot</c> clip at <c>data/char/mot/g{idleMotId}.mot</c>, or returns null
-    ///     (→ rest pose, no animation) when absent / unparseable. Never throws.
-    ///     spec: Docs/RE/formats/animation.md §col15 — idle motion id → data/char/mot/g{id}.mot. CONFIRMED.
+    ///     Resolves the idle <c>.mot</c> clip through the motlist registry by the motion id (clip header
+    ///     <c>id_b</c>), or returns null (→ rest pose, no animation) when not registered / unparseable.
+    ///     NOT <c>g{idleMotId}.mot</c> — the registry is keyed by the clip header id_b. Never throws.
+    ///     spec: MotList_LoadAndRegister (id_b registry); Docs/RE/formats/animation.md (header id_b @ +4).
     /// </summary>
     private static AnimationClip? TryLoadAnimation(RealClientAssets assets, int idleMotId, string debugLabel)
     {
-        var motPath = $"data/char/mot/g{idleMotId}.mot";
-        if (!assets.Contains(motPath)) return null;
+        var registry = CharVisualRegistry.GetOrBuild(assets);
+        var motPath = registry?.ResolveMotPath(idleMotId);
+        if (motPath is null || !assets.Contains(motPath))
+        {
+            GD.Print($"[NpcRenderer] idle .mot not registered for id_b={idleMotId} ({debugLabel}) — rest pose. " +
+                     "spec: MotList_LoadAndRegister (id_b registry).");
+            return null;
+        }
+
         try
         {
             var data = assets.GetRaw(motPath);

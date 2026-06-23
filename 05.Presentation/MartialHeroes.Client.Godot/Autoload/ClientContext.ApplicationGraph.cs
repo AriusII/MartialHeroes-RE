@@ -11,6 +11,7 @@ using MartialHeroes.Client.Application.Handlers;
 using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
 using MartialHeroes.Client.Application.Login;
+using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
@@ -77,6 +78,18 @@ public sealed partial class ClientContext
 
         // 6. Session id — starts as None; updated when the game connection is opened.
         var sessionId = SessionId.None;
+
+        // 6b. The single global in-flight latch — the ONLY pending-request primitive in the protocol.
+        //     ARMED by the char-management send builders (1/6, 1/7, 1/9, 1/13, 1/14, 2/2) in
+        //     ApplicationUseCases; CLEARED by the major-3 result ladder + 4/1 in GamePacketHandler; READ
+        //     by KeepaliveDriver (suppress the idle 2/10000 while a request is outstanding) AND by the
+        //     3/5 enter-ladder discriminator (an armed latch at 3/5 = a genuine 1/9 enter is pending →
+        //     the load terminates at InGame; a disarmed latch = the unsolicited post-login 3/5 → load
+        //     lands at Select). ONE shared instance across all three consumers.
+        //     CYCLE-10 fix 1: previously this latch was never constructed (null everywhere) → the
+        //     enter-ladder discrimination and the keepalive suppression were both inert.
+        //     spec: Docs/RE/specs/net_contracts.md §1.3; world_entry.md §3.3; charselect.md §7.4.
+        var inFlightLatch = new InFlightLatch();
 
         // 7. Login credential store.
         //    spec: Docs/RE/specs/crypto.md §6.1.
@@ -333,6 +346,7 @@ public sealed partial class ClientContext
             characterSelection: characterSelection,
             accountCharacters: accountCharacters,
             sceneStateMachine: sceneMachine,
+            inFlightLatch: inFlightLatch, // CYCLE-10 fix 1: clears on 3/x results + 4/1; read by 3/5 discriminator + keepalive.
             worldEntry: worldEntry,
             enterWorldEmitter: enterWorldRelay.Invoke)
         {
@@ -374,8 +388,8 @@ public sealed partial class ClientContext
         //     spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01, 33 bytes).
         //     spec: Docs/RE/specs/login_flow.md §3.3.
         //
-        //     IMPORTANT: versionSource remains null (→ DefaultClientVersionSource) so the u32
-        //     VersionToken at payload +0x24 is ALWAYS derived independently as 10×2114+9 = 21149.
+        //     NOTE: the u32 VersionToken at payload +0x24 is derived independently from the
+        //     asset-sourced game.ver field5 (10×field5+9) — see GameVerClientVersionSource.Resolve below.
         //     Passing a non-empty sessionToken span does NOT disturb the +0x24 derivation — see
         //     ApplicationUseCases ctor: _versionToken is derived from versionSource unconditionally.
         //     spec: Docs/RE/packets/cmsg_char_enter.yaml (VersionToken @0x24); login_flow.md §7.
@@ -440,22 +454,31 @@ public sealed partial class ClientContext
             : $"[ClientContext] SessionToken wired (source={sessionTokenSource}, len={sessionTokenStr!.Length}, 33B). " +
               "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
 
+        // 19c. Version source — read the REAL data/cursor/game.ver via the VFS (CYCLE-10 fix 2).
+        //      Replaces the prior `versionSource: null → DefaultClientVersionSource` (constant 2114),
+        //      which was correct only by coincidence. The binary loads game.ver at enter time and derives
+        //      the 1/9 token as 10×field5+9; we source field5 from the asset and fall back to the default
+        //      (logged) only when the file is absent/unreadable. spec: login_flow.md §3.3 / §7; game_ver.md.
+        var gameVerVersionSource = GameVerClientVersionSource.Resolve(_uiAssets);
+
         // 20. Use-case facade — presentation calls these for input intents.
         //     versionToken: the resolved 33-byte SessionToken span → ApplicationUseCases stamps it at
         //     payload +0x01 of 1/9. spec: Docs/RE/packets/cmsg_char_enter.yaml (SessionToken @0x01).
-        //     versionSource: null → DefaultClientVersionSource.Instance → field 2114 → token 21149
-        //     at payload +0x24. spec: Docs/RE/specs/login_flow.md §3.3 / §7.
+        //     versionSource: the asset-sourced game.ver field5 → token 10×field5+9 at payload +0x24.
+        //     spec: Docs/RE/specs/login_flow.md §3.3 / §7.
+        //     inFlightLatch: the shared single latch (armed by the char-mgmt sends here, cleared by the
+        //     handler's result ladder, read by the 3/5 discriminator + keepalive). spec: net_contracts.md §1.3.
         //     eventBus, lobbyClient, lastServerStore wired so FetchServerListAsync / SelectServerAsync
         //     publish ServerListReceivedEvent and persist Lastserver.
         //     characterSelection: same instance as the handler's store (shared cache).
         //     spec: Docs/RE/specs/login_flow.md §3.5 / §5.2.
         var useCases = new ApplicationUseCases(noopSink, world, credentialStore, sessionId,
-            sessionTokenBytes.AsSpan(), versionSource: null, sceneStateMachine: sceneMachine,
+            sessionTokenBytes.AsSpan(), versionSource: gameVerVersionSource, sceneStateMachine: sceneMachine,
             eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore,
-            characterSelection: characterSelection);
+            characterSelection: characterSelection, inFlightLatch: inFlightLatch);
         GD.Print(
-            $"[ClientContext] Version token derived: {ClientVersionToken.Derive(DefaultClientVersionSource.Instance.VersionField)}" +
-            " (= 10 × 2114 + 9; sample_verified). spec: login_flow.md §3.3 / §7.");
+            $"[ClientContext] Version token derived: {ClientVersionToken.Derive(gameVerVersionSource.VersionField)}" +
+            $" (= 10 × {gameVerVersionSource.VersionField} + 9; asset-sourced from game.ver). spec: login_flow.md §3.3 / §7.");
 
         // CYCLE 12 Phase 2 — wire the deferred enter-world emitter relay now that useCases exists.
         // The relay was passed to GamePacketHandler at construction (above); pointing it here at the
@@ -464,6 +487,17 @@ public sealed partial class ClientContext
         enterWorldRelay.SetTarget(useCases.EmitEnterWorldRequest);
         GD.Print("[ClientContext] enterWorldRelay → useCases.EmitEnterWorldRequest wired. " +
                  "spec: frontend_scenes.md §7 (3/14 → 1/9 enter ladder seam).");
+
+        // 20b. Keepalive driver (CYCLE-10 fix 1) — the in-session heartbeat that keeps the LIVE link alive.
+        //      Shares the relay sink (so 2/10000 / 2/112 reach the live socket) and the single in-flight
+        //      latch (suppress the idle heartbeat while a char-mgmt request is outstanding). It is ticked
+        //      from ClientContext._Process with a wall-clock ms stamp and armed/disarmed on world enter/exit
+        //      (polled via WorldEntry.IsActive). Without this the client sent NO idle heartbeat after
+        //      enter-world and was at risk of a server-side timeout drop.
+        //      spec: Docs/RE/specs/world_entry.md §2.5 / §3.2; net_contracts.md §1.3 / §2.15.
+        Keepalive = new KeepaliveDriver(noopSink, sessionId, inFlightLatch);
+        GD.Print("[ClientContext] KeepaliveDriver constructed (idle 2/10000 @20s + 2/112 world toggle). " +
+                 "spec: world_entry.md §2.5/§3.2; net_contracts.md §2.15.");
 
         // 21. Fixed-tick GameEngineLoop — 30 Hz.
         //     spec: Docs/RE/specs/game_loop.md §6 ("e.g. 30 Hz via a PeriodicTimer"). CONFIRMED.

@@ -35,12 +35,15 @@
 //        path uses InternalClass verbatim as the SkinClassId (PlayerAvatarResolver does the same with
 //        serverClass). The §3.7.5 starter bodies are class-1-family parts (all id_b==1), so the descriptor
 //        InternalClass — NOT the parsed body id_b — is the rig key.
-//     3. skeleton = data/char/bind/g{SkinClassId}.bnd (§8(e) — g1..g4.bnd, the ONLY .bnd that exist).
-//        This is the SAME rule PlayerAvatarResolver uses; it makes every occupied slot (incl. slot 2
-//        Dosa, SkinClassId 3 → g3.bnd) resolve its real rig instead of a non-existent g{model_class_id}.bnd.
-//     4. idle .mot = actormotion.txt row keyed by SkinClassId (col2 == skin_class) -> col16
-//        (motion_ids_a[1], record +0x44; col15/+0x40 is statically DEAD — CYCLE 7) -> g{id}.mot. Keying
-//        by SkinClassId (3) not model_class_id (11) is what makes slot 2 ANIMATE like slots 0/1.
+//     3. skeleton = BindPosePool.TryGetByIdB(id_b) (§8(e) verbatim pose-pool key — the bnd is resolved by
+//        the parsed .bnd header actor_id, named in bindlist.txt with NO derivable g{n}.bnd filename rule).
+//        For the four players id_b == model_class_id reduced to {1,2,3,4} (g1..g4.bnd parse to actor_id
+//        1..4); every occupied slot (incl. slot 2 Dosa, pool key 3) resolves its real rig.
+//     4. idle .mot = actormotion GetByMotionKey(model_class_id) -> col16 (motion_ids_a[1], record +0x44;
+//        col15/+0x40 is statically DEAD — CYCLE 7), then MotlistRegistry.ResolvePath(id_b) (id_b ->
+//        'data/char/mot/'+filename), NOT g{id}.mot. With the recovered CategoryBase the player appearance
+//        keys {1,11,16,26} ARE the motion_key for their rows (col0=0 -> base 0), so the idle is keyed by
+//        the appearance key directly.
 //     5. equip overlays {3,4,6,2,11,14} from the now-surfaced EquipGids: weapon (slot 14) = RIGID
 //        hand-bone attach via the kept SkinnedCharacterBuilder.BuildWithEquipment; non-weapon overlays
 //        are RESOLVED (gid -> g{gid}.skn) but the shared-skeleton multi-surface deform path is not yet
@@ -104,7 +107,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 /// </summary>
 public static class SlotAppearanceResolver
 {
-    private const string ActormotionTablePath = "data/char/actormotion.txt";
     private const string SkinTxtTablePath = "data/char/skin.txt";
 
     /// <summary>
@@ -231,15 +233,25 @@ public static class SlotAppearanceResolver
                 "(layer-04 §3.7.5 starter table returns a class-1-family mesh) — rig + idle keyed by the descriptor " +
                 "SkinClassId (g{n}.bnd + col2==n idle), per §8(e). spec: skinning.md §8(e) / frontend_scenes.md §3.7.5.");
 
-        // 3) skeleton — g{SkinClassId}.bnd (§8(e); SkinClassId ∈ {1,2,3,4} → g1..g4.bnd, the only .bnd
-        //    that exist). NOT g{model_class_id}.bnd (there is no g11.bnd/g16.bnd — that was the slot-2
-        //    bind-pose bug). Same rule as PlayerAvatarResolver. spec: skinning.md §8(e) step 1.
-        var skeleton = TryLoadSkeleton(assets, skinClassId, debugLabel);
+        // Shared layer-05 catalogues (built once, cached): the bind-pose pool (skeleton by verbatim id_b
+        // = parsed .bnd actor_id), the motlist registry (.mot by header id_b), and the actormotion
+        // catalogue parsed WITH the recovered CategoryBase. spec: skinning.md §8(e); CharVisualRegistry.
+        var registry = CharVisualRegistry.GetOrBuild(assets);
 
-        // 4) idle .mot — actormotion col2 == SkinClassId -> col16 (motion_ids_a[1], record +0x44).
-        //    Keyed by SkinClassId ∈ {1,2,3,4}, NOT model_class_id — this is what makes EVERY occupied slot
-        //    (incl. slot 2 Dosa) animate. spec: skinning.md §8(e) step 2 / §10; actormotion.md §motion_ids_a.
-        var idleClip = TryLoadIdleClip(assets, skinClassId, debugLabel);
+        // The pose-pool key for the four players: model_class_id {1,11,16,26} reduces to the pooled
+        // actor_id {1,2,3,4} (g1..g4.bnd parse to actor_id 1..4). spec: skinning.md §8(e) / login_flow §3.2.1.
+        var poolKey = ClassAppearanceResolver.SkeletonIdBForModelClassId(modelClassId);
+        if (poolKey == 0) poolKey = skinClassId; // fallback id_b when model_class_id is unmapped
+
+        // 3) skeleton — BindPosePool.TryGetByIdB(id_b) (§8(e) verbatim pose-pool key; the bnd is named in
+        //    bindlist.txt with NO derivable g{n}.bnd filename rule). spec: skinning.md §8(e) step 1.
+        var skeleton = TryLoadSkeleton(registry, poolKey, debugLabel);
+
+        // 4) idle .mot — actormotion GetByMotionKey(model_class_id) -> IdleMotionId (col16, record +0x44),
+        //    resolved through MotlistRegistry.ResolvePath (id_b -> 'data/char/mot/'+filename). The player
+        //    appearance keys {1,11,16,26} ARE the motion_key for their rows (col0=0 -> base 0), so this
+        //    keys the idle by the appearance key directly. spec: skinning.md §8(e) step 2 / §10; actormotion.md.
+        var idleClip = TryLoadIdleClip(assets, registry, modelClassId, skinClassId, debugLabel);
 
         // 5) texture — by the body skin's IdA through the kept CharacterTextureResolver chain.
         ImageTexture? albedo = null;
@@ -288,7 +300,7 @@ public static class SlotAppearanceResolver
         GD.Print(
             $"[SlotAppearanceResolver] {debugLabel}: built class={appearance.InternalClass} variant={appearance.AppearanceVariant} " +
             $"-> model_class_id={modelClassId} body='{bodySknPath}' (IdA={bodyMesh.IdA}, parsed-id_b={bodyMesh.IdB}) " +
-            $"SkinClassId={skinClassId} rig={(skeleton is not null ? "g" + skinClassId + ".bnd" : "REST")} idle={(idleClip is not null ? "col16" : "BIND")} " +
+            $"SkinClassId={skinClassId} rig={(skeleton is not null ? "pool[id_b=" + poolKey + "]" : "REST")} idle={(idleClip is not null ? "col16" : "BIND")} " +
             $"equip={parts.Count}.{missingReport} spec: skinning.md §3.5.2/§8(e); frontend_scenes.md §3.3.7/§3.7.5.");
 
         return new SlotBuildResult(actorRoot, modelClassId, bodyMesh.IdB, skeleton is not null, idleClip is not null);
@@ -326,65 +338,59 @@ public static class SlotAppearanceResolver
     }
 
     // =========================================================================
-    // Skeleton — g{SkinClassId}.bnd (§8(e); SkinClassId == descriptor InternalClass ∈ {1,2,3,4} →
-    // g1..g4.bnd, the only .bnd that exist). NOT g{model_class_id}.bnd — there is no g11.bnd / g16.bnd.
-    // Same rule as World/PlayerAvatarResolver.TryLoadSkeleton.
+    // Skeleton — BindPosePool.TryGetByIdB(id_b). The bnd is resolved by the parsed .bnd header actor_id
+    // (the verbatim §8(e) pose-pool key), NOT by a g{n}.bnd filename: the bnd is named in bindlist.txt
+    // with no derivable filename rule. For the four players id_b == model_class_id reduced to {1,2,3,4}.
     // =========================================================================
 
-    private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int skinClassId, string debugLabel)
+    private static Skeleton? TryLoadSkeleton(CharVisualRegistry? registry, int idB, string debugLabel)
     {
-        if (skinClassId <= 0)
+        if (idB <= 0)
         {
             GD.PrintErr(
-                $"[SlotAppearanceResolver] {debugLabel}: invalid SkinClassId={skinClassId} — static rest pose. spec: skinning.md §8(e).");
+                $"[SlotAppearanceResolver] {debugLabel}: invalid pose-pool id_b={idB} — static rest pose. spec: skinning.md §8(e).");
             return null;
         }
 
-        // g{SkinClassId}.bnd. spec: skinning.md §8(e) step 1 (for players the pose-pool lookup ==
-        // loading g{SkinClassId}.bnd; each g{n}.bnd parses to actor_id n).
-        var bndPath = $"data/char/bind/g{skinClassId}.bnd";
-
-        if (!assets.Contains(bndPath))
+        if (registry is null)
         {
             GD.PrintErr(
-                $"[SlotAppearanceResolver] {debugLabel}: .bnd absent '{bndPath}' (SkinClassId={skinClassId}) — rest pose.");
+                $"[SlotAppearanceResolver] {debugLabel}: no CharVisualRegistry (VFS registries absent) — rest pose. spec: skinning.md §8(e).");
             return null;
         }
 
-        try
-        {
-            var data = assets.GetRaw(bndPath);
-            return data.IsEmpty ? null : BndParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[SlotAppearanceResolver] {debugLabel}: BndParser failed '{bndPath}': {ex.Message}");
-            return null;
-        }
+        var skeleton = registry.TryGetSkeletonByIdB(idB);
+        if (skeleton is null)
+            GD.PrintErr(
+                $"[SlotAppearanceResolver] {debugLabel}: DATA GAP — no .bnd registered with parsed actor_id={idB} in bindlist.txt — " +
+                "rest pose (NOT a g{n}.bnd coincidence). spec: skinning.md §8(e) / formats/bindlist.md.");
+        return skeleton;
     }
 
     // =========================================================================
-    // Idle clip — actormotion.txt row keyed by SkinClassId (col2 == skin_class) -> col16 -> g{id}.mot.
-    // Keyed by SkinClassId ∈ {1,2,3,4}, NOT model_class_id {1,11,16,26} (col2 IS the SkinClassId, so
-    // GetBySkinClass(model_class_id) would miss / mis-match — that was the slot-2 no-animation bug).
-    // Same rule as World/PlayerAvatarResolver.ResolveIdleMotionId.
+    // Idle clip — actormotion GetByMotionKey(model_class_id) -> IdleMotionId (col16, record +0x44),
+    // resolved through MotlistRegistry.ResolvePath (id_b -> 'data/char/mot/'+filename), NOT g{id}.mot.
+    // With the recovered CategoryBase the player appearance keys {1,11,16,26} ARE the motion_key for
+    // their rows (col0=0 -> base 0), so the idle is keyed by the appearance key directly. GetBySkinClass
+    // is kept as a defensive fallback only.
     // =========================================================================
 
-    private static AnimationClip? TryLoadIdleClip(RealClientAssets assets, int skinClassId, string debugLabel)
+    private static AnimationClip? TryLoadIdleClip(
+        RealClientAssets assets, CharVisualRegistry? registry, int modelClassId, int skinClassId, string debugLabel)
     {
-        if (!assets.Contains(ActormotionTablePath)) return null;
+        if (registry is null) return null;
 
         try
         {
-            // Key the actormotion row on SkinClassId (col2 == skin_class), first-occurrence-wins — the
-            // SAME SkinClassId that selects the rig. spec: actormotion.md §Per-record layout (int_a @ 0x04);
-            // skinning.md §8(e) (idle = actormotion col2 == SkinClassId -> col16).
-            var catalogue = ActormotionParser.Parse(assets.GetRaw(ActormotionTablePath));
-            var entry = catalogue.GetBySkinClass(skinClassId);
+            // Authoritative: GetByMotionKey(model_class_id). Defensive fallback: GetBySkinClass (legacy/
+            // coincidental col2 path) only if the appearance-key row is absent.
+            // spec: skinning.md §8(e)/§10; actormotion.md (motion_key = col1 + CategoryBase[(byte)(col0+1)]).
+            var entry = registry.GetByMotionKey(modelClassId)
+                        ?? registry.ActorMotion.GetBySkinClass(skinClassId);
             if (entry is null)
             {
                 GD.Print(
-                    $"[SlotAppearanceResolver] {debugLabel}: no actormotion row with col2==SkinClassId={skinClassId} — bind pose (no idle). " +
+                    $"[SlotAppearanceResolver] {debugLabel}: no actormotion row for motion_key={modelClassId} (or col2==SkinClassId={skinClassId}) — bind pose. " +
                     "spec: skinning.md §8(e)/§10.");
                 return null;
             }
@@ -395,16 +401,19 @@ public static class SlotAppearanceResolver
             if (idle <= 0)
             {
                 GD.Print(
-                    $"[SlotAppearanceResolver] {debugLabel}: actormotion row col2==SkinClassId={skinClassId} has empty col16 idle — bind pose. " +
+                    $"[SlotAppearanceResolver] {debugLabel}: actormotion row motion_key={modelClassId} has empty col16 idle — bind pose. " +
                     "spec: skinning.md §10.");
                 return null;
             }
 
-            var motPath = $"data/char/mot/g{idle}.mot";
-            if (!assets.Contains(motPath))
+            // Resolve the .mot path through the motlist registry (id_b -> path), NOT g{id}.mot.
+            // spec: MotList_LoadAndRegister (id_b key); formats/animation.md (header id_b @ +4).
+            var motPath = registry.ResolveMotPath(idle);
+            if (motPath is null || !assets.Contains(motPath))
             {
                 GD.PrintErr(
-                    $"[SlotAppearanceResolver] {debugLabel}: idle .mot absent '{motPath}' (SkinClassId={skinClassId}, col16={idle}) — bind pose.");
+                    $"[SlotAppearanceResolver] {debugLabel}: idle .mot not registered for id_b={idle} (model_class_id={modelClassId}) — bind pose. " +
+                    "spec: MotList_LoadAndRegister (id_b registry).");
                 return null;
             }
 
@@ -414,7 +423,7 @@ public static class SlotAppearanceResolver
         catch (Exception ex)
         {
             GD.PrintErr(
-                $"[SlotAppearanceResolver] {debugLabel}: idle resolve failed (SkinClassId={skinClassId}): {ex.Message}");
+                $"[SlotAppearanceResolver] {debugLabel}: idle resolve failed (model_class_id={modelClassId}): {ex.Message}");
             return null;
         }
     }

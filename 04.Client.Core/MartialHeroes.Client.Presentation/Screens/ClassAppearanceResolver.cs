@@ -3,7 +3,9 @@
 // ONE shared appearance resolver for BOTH 3D front-end screens (character-select and
 // character-create). It owns:
 //   * the appearance/skeleton selector formula (ModelClassId, §3.3.7 / §3.5.2),
-//   * the model_class_id -> skeleton edge (IdB -> g{n}.bnd, login_flow.md §3.2.1 / skinning.md §8(e)),
+//   * the model_class_id -> skeleton POOL-KEY edge (IdB -> bind-pose-pool actor_id {1,2,3,4};
+//     login_flow.md §3.2.1 / skinning.md §8(e)). The g{n}.bnd literal is a COINCIDENCE (g1..g4.bnd
+//     parse to actor_id 1..4) superseded by the pose-pool key — see SkeletonIdBForModelClassId,
 //   * the §3.7.5 confirmed starter-mesh table (the spec-grounded fallback body per class), AND
 //   * the FULL §3.3.7 per-part appearance resolution math (the 64-bit catalogue key + slot-14 gid
 //     reduction + the {3,4,6,2,11} worn-item gid reduction + the g{gid}.skn load path).
@@ -98,22 +100,40 @@ public static class ClassAppearanceResolver
     }
 
     /// <summary>
-    ///     Maps a <see cref="ModelClassId" /> (the skin's <c>id_b</c>) to its deform skeleton
-    ///     <c>data/char/bind/g{n}.bnd</c> via the data-driven edge {1-&gt;g1, 26-&gt;g2, 11-&gt;g3, 16-&gt;g4}.
-    ///     This is the verbatim pose-pool key (the skin's <c>id_b</c> selects the rig, §8(e)). Returns
-    ///     <c>null</c> for an unmapped id (incl. the <c>0</c> invisible sentinel) — caller logs + skips.
+    ///     Maps a <see cref="ModelClassId" /> (the skin's <c>id_b</c>) to the integer bind-pose-pool key
+    ///     used to look up its deform skeleton: <c>{1-&gt;1, 26-&gt;2, 11-&gt;3, 16-&gt;4}</c>. The runtime
+    ///     resolves the rig through the bind-pose pool keyed by each preloaded <c>.bnd</c>'s parsed
+    ///     <c>actor_id</c> (skinning §8(e)); for the four players the pooled actor_id equals these small
+    ///     ids (g1..g4.bnd parse to actor_id 1..4), so this is the verbatim pose-pool key — NOT a derived
+    ///     <c>g{n}.bnd</c> filename. Returns <c>0</c> for an unmapped id (incl. the <c>0</c> invisible
+    ///     sentinel) — caller logs + skips.
     ///     spec: Docs/RE/specs/login_flow.md §3.2.1 / Docs/RE/specs/skinning.md §8(e).
     /// </summary>
-    public static string? SkeletonBndForModelClassId(int modelClassId)
+    public static int SkeletonIdBForModelClassId(int modelClassId)
     {
         return modelClassId switch
         {
-            1 => "data/char/bind/g1.bnd", // spec: login_flow.md §3.2.1  {1->g1}
-            26 => "data/char/bind/g2.bnd", // spec: login_flow.md §3.2.1  {26->g2}
-            11 => "data/char/bind/g3.bnd", // spec: login_flow.md §3.2.1  {11->g3}
-            16 => "data/char/bind/g4.bnd", // spec: login_flow.md §3.2.1  {16->g4}
-            _ => null // 0 = invisible sentinel / unmapped -> caller skips
+            1 => 1, // pose_pool key 1 (Musa;  g1.bnd actor_id 1)
+            26 => 2, // pose_pool key 2 (Salsu; g2.bnd actor_id 2)
+            11 => 3, // pose_pool key 3 (Dosa;  g3.bnd actor_id 3)
+            16 => 4, // pose_pool key 4 (Monk;  g4.bnd actor_id 4)
+            _ => 0 // 0 = invisible sentinel / unmapped -> caller skips
         };
+    }
+
+    /// <summary>
+    ///     LEGACY/COINCIDENTAL. Maps a <see cref="ModelClassId" /> to the literal
+    ///     <c>data/char/bind/g{n}.bnd</c> path. The faithful resolution is the bind-pose POOL keyed by the
+    ///     preloaded <c>.bnd</c>'s parsed <c>actor_id</c> (see <see cref="SkeletonIdBForModelClassId" />):
+    ///     the <c>g{n}.bnd</c> filename only happens to coincide because g1..g4.bnd parse to actor_id 1..4
+    ///     and there is NO derivable filename rule (the bnd is named in bindlist.txt). Prefer
+    ///     <see cref="SkeletonIdBForModelClassId" /> + a pose-pool lookup. Kept for back-compat only.
+    ///     spec: Docs/RE/specs/login_flow.md §3.2.1 / Docs/RE/specs/skinning.md §8(e) (pool key supersedes filename).
+    /// </summary>
+    public static string? SkeletonBndForModelClassId(int modelClassId)
+    {
+        var idB = SkeletonIdBForModelClassId(modelClassId);
+        return idB == 0 ? null : $"data/char/bind/g{idB}.bnd";
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────

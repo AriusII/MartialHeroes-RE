@@ -82,8 +82,10 @@ namespace MartialHeroes.Assets.Parsers.Character;
 ///     </para>
 ///     <para>
 ///         The computed <c>motion_key = col1 + base_table[(uint8)(col0 + 1)]</c> requires an external
-///         per-category base table. When none is supplied, the raw col1 value is used as the key
-///         (base contribution = 0).
+///         per-category base table. The DEFAULT overloads supply the recovered CategoryBase header (the
+///         unconditional ActorVisualGlobal ctor header { 0, 0, 10000, 1000 }, IDA-recovered) so
+///         cat0/cat1/cat2 keys fall in three disjoint partitions. The explicit-base-table overloads
+///         remain for test injection; an empty span there yields motion_key = col1.
 ///         spec: Docs/RE/formats/actormotion.md §Computed lookup key.
 ///     </para>
 ///     <para>ZERO rendering/engine dependencies.</para>
@@ -129,14 +131,35 @@ public static class ActormotionParser
     /// </summary>
     private const float FpsBase = 15.0f; // spec: Docs/RE/formats/actormotion.md §Per-frame rate fields
 
+    /// <summary>
+    ///     The RECOVERED per-category base-offset header indexed by <c>(uint8)(col0 + 1)</c>, used to
+    ///     compute <c>motion_key = col1 + CategoryBase[(byte)(col0 + 1)]</c>. This is NOT data-driven,
+    ///     NOT a running sum and NOT a file column: it is the four-dword header the
+    ///     <c>ActorVisualGlobal</c> singleton sets UNCONDITIONALLY in its constructor
+    ///     (this[0]=0, this[1]=0, this[2]=10000, this[3]=1000 — IDA-recovered, ActorVisualGlobal_Init).
+    ///     Both <c>actormotion.txt</c> and <c>skin.txt</c> index it by the same <c>(uint8)(col0 + 1)</c>.
+    ///     In shipped data col0 ∈ {0,1,2}, so the indexed value is one of {0, 10000, 1000}: cat0 keys
+    ///     1..80, cat1 keys 10001..10998, cat2 keys 1001..1986 — three disjoint key partitions.
+    ///     The four player appearance keys {1,11,16,26} fall in the cat0 partition (col0=0, base 0), so
+    ///     <see cref="ActormotionCatalogue.GetByMotionKey" />(model_class_id) is the authoritative idle
+    ///     key for players. A modded row with col0 >= 3 would index past this header (engine quirk, not
+    ///     reachable from shipped data), so the four-element constant is complete and exact for real rows.
+    /// </summary>
+    public static readonly uint[] CategoryBase = [0, 0, 10000, 1000];
+
     // ----------------------------------------------------------------
     // Public API
     // ----------------------------------------------------------------
 
-    /// <inheritdoc cref="Parse(ReadOnlySpan{byte},ReadOnlySpan{uint})" />
+    /// <summary>
+    ///     Parses <c>data/char/actormotion.txt</c> using the recovered <see cref="CategoryBase" /> header
+    ///     so that <c>motion_key = col1 + CategoryBase[(byte)(col0 + 1)]</c> (the key the runtime's own
+    ///     ordered map uses). For an explicit base-table (test injection) use the
+    ///     <see cref="Parse(ReadOnlyMemory{byte},ReadOnlySpan{uint})" /> overload.
+    /// </summary>
     public static ActormotionCatalogue Parse(ReadOnlyMemory<byte> fileBytes)
     {
-        return Parse(fileBytes.Span, ReadOnlySpan<uint>.Empty);
+        return Parse(fileBytes.Span, CategoryBase);
     }
 
     /// <summary>
@@ -194,11 +217,12 @@ public static class ActormotionParser
     }
 
     /// <summary>
-    ///     Overload accepting pre-decoded text (for testing and diagnostics).
+    ///     Overload accepting pre-decoded text. Uses the recovered <see cref="CategoryBase" /> header as
+    ///     the default base-table (motion_key = col1 + CategoryBase[(byte)(col0+1)]).
     /// </summary>
     public static ActormotionCatalogue ParseText(string text)
     {
-        return ParseText(text, ReadOnlySpan<uint>.Empty);
+        return ParseText(text, CategoryBase);
     }
 
     /// <summary>

@@ -833,10 +833,19 @@ public sealed partial class CharCreatePreview3D : Control
             return null;
         }
 
-        // Rig + idle clip resolve from the mesh's OWN id_b (per class) — never a shared rig.
-        // spec: skinning.md §8(e) — data/char/bind/g{id_b}.bnd + actormotion.txt col2==id_b→col16 (idle).
-        var skeleton = TryLoadSkeletonForIdB(assets, mesh.IdB);
-        var idleClip = TryLoadIdleClipForIdB(assets, mesh.IdB);
+        // Rig + idle resolve through the shared data-driven CharVisualRegistry (bind-pose pool by verbatim
+        // id_b, motlist by header id_b, actormotion with the recovered CategoryBase) — no g{n}.bnd /
+        // g{id}.mot sprintf. The pose-pool key + idle key are the §3.7.5 starter-variant appearance key
+        // for this class (model_class_id ∈ {1,11,16,26}; pool key reduces to {1,2,3,4}); the mesh's own
+        // id_b is used only as a fallback pool key.
+        // spec: skinning.md §8(e) (verbatim pose-pool key) / §10 (idle col16); login_flow §3.2.1.
+        var registry = CharVisualRegistry.GetOrBuild(assets);
+        var appearanceKey = ClassAppearanceResolver.StarterBodyModelClassId(internalClass);
+        var poolKey = ClassAppearanceResolver.SkeletonIdBForModelClassId(appearanceKey);
+        if (poolKey == 0) poolKey = (int)mesh.IdB; // fallback id_b = mesh header id_b
+
+        var skeleton = TryLoadSkeletonForIdB(registry, poolKey);
+        var idleClip = TryLoadIdleClipForIdB(assets, registry, appearanceKey, (int)mesh.IdB);
 
         ImageTexture? albedo = null;
         try
@@ -869,64 +878,48 @@ public sealed partial class CharCreatePreview3D : Control
         }
     }
 
-    private static Skeleton? TryLoadSkeletonForIdB(RealClientAssets assets, uint idB)
+    private static Skeleton? TryLoadSkeletonForIdB(CharVisualRegistry? registry, int idB)
     {
-        if (idB == 0) return null;
-        var bndPath = $"data/char/bind/g{idB}.bnd";
-        if (!assets.Contains(bndPath))
-        {
-            GD.PrintErr($"[CharCreatePreview3D] .bnd absent for id_b={idB}: {bndPath} — rest pose.");
-            return null;
-        }
-
-        try
-        {
-            var data = assets.GetRaw(bndPath);
-            return data.IsEmpty ? null : BndParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[CharCreatePreview3D] BndParser failed '{bndPath}': {ex.Message}");
-            return null;
-        }
+        if (idB <= 0 || registry is null) return null;
+        var skeleton = registry.TryGetSkeletonByIdB(idB);
+        if (skeleton is null)
+            GD.PrintErr($"[CharCreatePreview3D] no .bnd registered with parsed actor_id={idB} in bindlist.txt — rest pose. " +
+                        "spec: skinning.md §8(e) / formats/bindlist.md.");
+        return skeleton;
     }
 
-    private static AnimationClip? TryLoadIdleClipForIdB(RealClientAssets assets, uint idB)
+    private static AnimationClip? TryLoadIdleClipForIdB(
+        RealClientAssets assets, CharVisualRegistry? registry, int appearanceKey, int meshIdB)
     {
-        if (idB == 0) return null;
-        const string tablePath = "data/char/actormotion.txt";
-        if (!assets.Contains(tablePath)) return null;
+        if (registry is null) return null;
 
         try
         {
-            // Parse data/char/actormotion.txt via the layer-03 catalogue (CP949 registered internally
-            // by ActormotionParser). Key on skin_class (col2 = int_a @ 0x04), first-occurrence-wins —
-            // equivalent to the previous inline "first row whose cols[2] == id_b" linear scan. This
-            // matches CharSelectScene3D so the create preview and the select row sample the IDENTICAL
-            // idle clip per class.
-            // spec: Docs/RE/formats/actormotion.md §Per-record layout — int_a @ 0x04, col2 = skin_class.
-            var catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
-            var entry = catalogue.GetBySkinClass((int)idB);
+            // Authoritative idle key: GetByMotionKey(appearanceKey). With the recovered CategoryBase the
+            // player appearance keys {1,11,16,26} ARE the motion_key for their rows (col0=0 → base 0).
+            // Defensive fallback: GetBySkinClass(meshIdB) (legacy/coincidental col2 path).
+            // spec: skinning.md §8(e)/§10; actormotion.md (motion_key = col1 + CategoryBase[(byte)(col0+1)]).
+            var entry = registry.GetByMotionKey(appearanceKey)
+                        ?? registry.ActorMotion.GetBySkinClass(meshIdB);
             if (entry is null) return null;
 
             // Idle motion = motion_ids_a[1] = COLUMN 16 (record offset +0x44) — the default stand idle
-            // the runtime actually plays. CYCLE 7 REVERSAL: col15 (a[0], +0x40) is a file-source
-            // reference that is STATICALLY DEAD (zero runtime read-sites). IdleMotionId IS the parsed
-            // int of that same col16, so idle <= 0 is equivalent to the old empty/"0" string guard.
-            // spec: Docs/RE/formats/actormotion.md §motion_ids_a (a[1]=+0x44=col16=default stand idle;
-            // a[0]/+0x40/col15 dead at runtime); skinning.md §8(e)/§10 (idle = actormotion col16, keyed by id_b).
+            // the runtime actually plays. col15 (a[0], +0x40) is STATICALLY DEAD (CYCLE 7 reversal).
+            // spec: actormotion.md §motion_ids_a; skinning.md §8(e)/§10.
             var idle = entry.IdleMotionId;
             if (idle <= 0) return null;
 
-            var motPath = $"data/char/mot/g{idle}.mot";
-            if (!assets.Contains(motPath)) return null;
+            // Resolve the .mot through the motlist registry (id_b → path), NOT g{id}.mot.
+            // spec: MotList_LoadAndRegister (id_b registry); formats/animation.md (header id_b @ +4).
+            var motPath = registry.ResolveMotPath(idle);
+            if (motPath is null || !assets.Contains(motPath)) return null;
 
             var motData = assets.GetRaw(motPath);
             return motData.IsEmpty ? null : AnimationParser.Parse(motData);
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[CharCreatePreview3D] TryLoadIdleClipForIdB(id_b={idB}) failed: {ex.Message}");
+            GD.PrintErr($"[CharCreatePreview3D] TryLoadIdleClipForIdB(appearanceKey={appearanceKey}) failed: {ex.Message}");
         }
 
         return null;

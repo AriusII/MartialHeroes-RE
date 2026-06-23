@@ -135,6 +135,14 @@ public sealed partial class ActorRegistry : Node
             // Duplicate spawn — remove and re-create (server can resend on reconnect).
             RemoveActor(evt.Key);
 
+        // LIVE-SPAWN CONVERGENCE GAP (logged, NOT fabricated): the descriptor-driven 3D spawn factory
+        // (ActorSpawn → ActorComposer.Compose → AssembledActor → the shared layer-05 IO builder that the
+        // char-select / local-player path uses) needs the descriptor-derived identity — appearance
+        // variant, skin id_b, motion key, and equipment gids. ActorSpawnedEvent currently carries only
+        // Key/Name/Position/HP/ServerClass, so the full live 5/3 path cannot be driven here without a
+        // cross-layer event-shape change (flagged as a follow-up dependency). Until the event carries the
+        // descriptor identity we keep the placeholder VisualActor and DO NOT fabricate class/variant/gids.
+        // spec: assembly_graph §2/§4 (ActorComposer); skinning §3.5.2 (model_class_id from class+variant).
         var visual = new VisualActor();
 
         // Convert Q16.16 fixed-point position to Godot float world space.

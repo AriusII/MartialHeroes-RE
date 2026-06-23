@@ -5,12 +5,16 @@
 // SkinnedCharacterBuilder / SkinnedCharacterNode pipeline. ZERO new skinning path; NO GltfDocument.
 //
 // The local player is a class, not a mob: the wire ServerClass IS the .skn header SkinClassId
-// (id_b) ∈ {1,2,3,4} = Musa/Salsu(Jagaek)/Dosa/Monk → g{SkinClassId}.bnd. From the SkinClassId
-// alone the full chain resolves:
+// (id_b) ∈ {1,2,3,4} = Musa/Salsu(Jagaek)/Dosa/Monk. From the SkinClassId the full chain resolves
+// through the shared data-driven CharVisualRegistry (no g{n}.bnd / g{id}.mot sprintf):
 //   - body .skn  : data/char/skinlist.txt scan → first entry whose parsed IdB == SkinClassId
-//   - skeleton   : data/char/bind/g{SkinClassId}.bnd
-//   - idle .mot  : data/char/actormotion.txt row whose col2 (skin_class) == SkinClassId →
-//                  motion_ids_a[1] (col16, record +0x44 = default idle) → data/char/mot/g{id}.mot
+//   - skeleton   : BindPosePool.TryGetByIdB(id_b) — the bnd resolved by its parsed actor_id (the bnd is
+//                  named in bindlist.txt with no derivable filename rule); for the four players id_b
+//                  reduces to the pooled actor_id {1,2,3,4}
+//   - idle .mot  : actormotion GetByMotionKey(appearanceKey) → motion_ids_a[1] (col16, record +0x44 =
+//                  default idle) → MotlistRegistry.ResolvePath(id_b) (id_b → 'data/char/mot/'+filename).
+//                  With the recovered CategoryBase the player appearance keys {1,11,16,26} ARE the
+//                  motion_key for their rows (col0=0 → base 0)
 //   - albedo     : CharacterTextureResolver (skin.txt: mesh.IdA → tex id → PNG)
 //   - build      : SkinnedCharacterBuilder.Build (skinned when the .bnd resolves; static otherwise)
 //
@@ -22,14 +26,14 @@
 // advances it per frame independently. NpcRenderer's ~10 Hz
 // staggered scheduler is for the town of mobs only and does not apply here.
 //
-// spec: Docs/RE/specs/skinning.md §8(e) — skeleton = g{SkinClassId}.bnd for {1,2,3,4}; idle clip =
-//       actormotion col2 == skin_class → motion_ids_a[1] (col16, +0x44 = default idle); skin .skn =
-//       skinlist entry whose id_b == SkinClassId. §10 / §10.2 — the human stand idle is static data,
-//       render faithfully. col15/motion_ids_a[0] (+0x40) is the statically DEAD file-source ref.
-// spec: Docs/RE/formats/actormotion.md — col2 = skin_class (int_a @ +0x04); col16 = motion_ids_a[1]
-//       (+0x44) = default idle; col15 = motion_ids_a[0] (+0x40) = dead file-source ref.
-// spec: CLAUDE.md "Recovered asset mappings" — skin (.skn IdA → skin.txt), skeleton (g{SkinClassId}.bnd),
-//       idle motion via actormotion.txt.
+// spec: Docs/RE/specs/skinning.md §8(e) — skeleton = BindPosePool[id_b] (verbatim pose-pool key); idle
+//       clip = actormotion GetByMotionKey(appearanceKey) → motion_ids_a[1] (col16, +0x44 = default idle)
+//       → MotlistRegistry[id_b]; skin .skn = skinlist entry whose id_b == SkinClassId. §10 / §10.2 — the
+//       human stand idle is static data, render faithfully. col15/motion_ids_a[0] (+0x40) is the DEAD ref.
+// spec: Docs/RE/formats/actormotion.md — motion_key = col1 + CategoryBase[(byte)(col0+1)]; col16 =
+//       motion_ids_a[1] (+0x44) = default idle; col15 = motion_ids_a[0] (+0x40) = dead file-source ref.
+// spec: CLAUDE.md "Recovered asset mappings" — skin (.skn IdA → skin.txt), skeleton (pose pool by id_b),
+//       idle motion via actormotion.txt + motlist registry.
 
 using System.Text;
 using Godot;
@@ -38,6 +42,7 @@ using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -144,15 +149,27 @@ internal static class PlayerAvatarResolver
             GD.PrintErr($"[PlayerAvatar] Texture resolve failed for '{sknPath}': {ex.Message} — neutral material.");
         }
 
-        // ── Step 3: skeleton — data/char/bind/g{SkinClassId}.bnd ──
-        // spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4} is the direct rule.
-        var skeleton = TryLoadSkeleton(assets, skinClass);
+        // ── Shared layer-05 catalogues (bind-pose pool by verbatim id_b, motlist by header id_b,
+        //    actormotion with the recovered CategoryBase). spec: skinning.md §8(e); CharVisualRegistry. ──
+        var registry = CharVisualRegistry.GetOrBuild(assets);
 
-        // ── Step 4: idle .mot — actormotion row col2 == skinClass → motion_ids_a[1] (col16, default idle) ──
-        // spec: skinning.md §8(e) item 2; formats/actormotion.md — col2 = skin_class, col16 = default idle.
-        var idleMotId = skeleton is not null ? ResolveIdleMotionId(assets, skinClass) : 0;
+        // The appearance key for the in-world player: the §3.7.5 starter-variant model_class_id in
+        // {1,11,16,26}. Its pose-pool key reduces to {1,2,3,4} (== skinClass for the four players).
+        // spec: skinning.md §3.5.2 / §8(e); login_flow §3.2.1.
+        var appearanceKey = ClassAppearanceResolver.StarterBodyModelClassId(skinClass);
+        var poolKey = ClassAppearanceResolver.SkeletonIdBForModelClassId(appearanceKey);
+        if (poolKey == 0) poolKey = skinClass; // fallback id_b
+
+        // ── Step 3: skeleton — BindPosePool.TryGetByIdB(id_b) (verbatim §8(e) pose-pool key; the bnd is
+        //    named in bindlist.txt with NO derivable g{n}.bnd filename rule). ──
+        var skeleton = TryLoadSkeleton(registry, poolKey);
+
+        // ── Step 4: idle .mot — actormotion GetByMotionKey(appearanceKey) → motion_ids_a[1] (col16),
+        //    resolved through MotlistRegistry.ResolvePath(id_b), NOT g{id}.mot. ──
+        // spec: skinning.md §8(e) item 2; formats/actormotion.md — col16 = default idle; MotList_LoadAndRegister.
+        var idleMotId = skeleton is not null ? ResolveIdleMotionId(registry, appearanceKey, skinClass) : 0;
         var clip = skeleton is not null && idleMotId > 0
-            ? TryLoadAnimation(assets, idleMotId)
+            ? TryLoadAnimation(assets, registry, idleMotId)
             : null;
 
         // ── Step 5: build via SkinnedCharacterBuilder (skinned when .bnd present; static otherwise) ──
@@ -270,75 +287,58 @@ internal static class PlayerAvatarResolver
     }
 
     /// <summary>
-    ///     Loads <c>data/char/bind/g{SkinClassId}.bnd</c>, or null (→ static rest pose) when absent.
-    ///     spec: skinning.md §8(e) — g{SkinClassId}.bnd for {1,2,3,4}. CONFIRMED.
+    ///     Resolves the skeleton through the bind-pose pool by the verbatim <c>id_b</c> (= the parsed
+    ///     <c>.bnd</c> header actor_id), or null (→ static rest pose) when not registered. The bnd is named
+    ///     in <c>bindlist.txt</c> with NO derivable <c>g{n}.bnd</c> filename rule.
+    ///     spec: skinning.md §8(e) (verbatim pose-pool key); formats/bindlist.md.
     /// </summary>
-    private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int skinClass)
+    private static Skeleton? TryLoadSkeleton(CharVisualRegistry? registry, int idB)
     {
-        var bndPath = $"data/char/bind/g{skinClass}.bnd";
-        if (!assets.Contains(bndPath))
+        if (registry is null)
         {
-            GD.Print($"[PlayerAvatar] No skeleton g{skinClass}.bnd — static rest pose. spec: skinning.md §8(e).");
+            GD.Print("[PlayerAvatar] No CharVisualRegistry (VFS registries absent) — static rest pose. spec: skinning.md §8(e).");
             return null;
         }
 
-        try
-        {
-            var data = assets.GetRaw(bndPath);
-            if (data.IsEmpty) return null;
-            return BndParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[PlayerAvatar] .bnd load failed '{bndPath}': {ex.Message}");
-            return null;
-        }
+        var skeleton = registry.TryGetSkeletonByIdB(idB);
+        if (skeleton is null)
+            GD.Print($"[PlayerAvatar] No .bnd registered with parsed actor_id={idB} in bindlist.txt — static rest pose. " +
+                     "spec: skinning.md §8(e) / formats/bindlist.md.");
+        return skeleton;
     }
 
     /// <summary>
-    ///     Finds the <c>actormotion.txt</c> row whose <c>col2</c> (skin_class) == <paramref name="skinClass" />
-    ///     and returns its <c>motion_ids_a[1]</c> (col16, record +0x44) — the DEFAULT idle the runtime uses
-    ///     (col15/[0] @ +0x40 is the statically DEAD file-source ref; fall back to [0] only if [1] is absent).
+    ///     Resolves the idle motion id via <c>actormotion GetByMotionKey(appearanceKey)</c> →
+    ///     <c>motion_ids_a[1]</c> (col16, record +0x44) — the DEFAULT idle the runtime uses. With the
+    ///     recovered CategoryBase the player appearance keys {1,11,16,26} ARE the motion_key for their
+    ///     rows (col0=0 → base 0). Defensive fallback: <c>GetBySkinClass(skinClass)</c> (legacy col2 path).
     ///     Returns 0 when no row matches or the slot is empty.
-    ///     spec: skinning.md §8(e) item 2 / §10; formats/actormotion.md — col2 = skin_class, col16 = default idle.
+    ///     spec: skinning.md §8(e) item 2 / §10; formats/actormotion.md — col16 = default idle.
     /// </summary>
-    private static int ResolveIdleMotionId(RealClientAssets assets, int skinClass)
+    private static int ResolveIdleMotionId(CharVisualRegistry? registry, int appearanceKey, int skinClass)
     {
-        const string tablePath = "data/char/actormotion.txt";
-        if (!assets.Contains(tablePath)) return 0;
+        if (registry is null) return 0;
 
-        try
-        {
-            var catalogue = ActormotionParser.Parse(assets.GetRaw(tablePath));
-            foreach (var entry in catalogue.AllEntries)
-            {
-                // col2 == skin_class is the player idle key (the player IS a class, not a mob_id).
-                // spec: skinning.md §8(e) — actormotion col2 == id_b → default idle.
-                if (entry.SkinClassId != skinClass) continue;
-                // col16 = motion_ids_a[1] (record +0x44) = the DEFAULT idle the runtime uses; col15/[0]
-                // (+0x40) is the statically DEAD file-source ref. Prefer [1]; fall back to [0]; 0 = empty.
-                // spec: skinning.md §8(e) item 2 / §10; formats/actormotion.md — col16 = default idle.
-                return entry.MotionIds.Length > 1 ? entry.MotionIds[1]
-                    : entry.MotionIds.Length > 0 ? entry.MotionIds[0] : 0;
-            }
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[PlayerAvatar] actormotion.txt parse failed: {ex.Message}");
-        }
-
-        return 0;
+        var entry = registry.GetByMotionKey(appearanceKey)
+                    ?? registry.ActorMotion.GetBySkinClass(skinClass);
+        // col16 = motion_ids_a[1] (record +0x44); 0 = empty slot. spec: actormotion.md — col16 = default idle.
+        return entry?.IdleMotionId ?? 0;
     }
 
     /// <summary>
-    ///     Loads the idle <c>.mot</c> at <c>data/char/mot/g{idleMotId}.mot</c>, or null (→ rest pose) when
-    ///     absent / unparseable. Never throws.
-    ///     spec: skinning.md §8(e); formats/actormotion.md — motion_ids_a[0] → data/char/mot/g{id}.mot.
+    ///     Loads the idle <c>.mot</c> resolved through the motlist registry (id_b → path), NOT
+    ///     <c>g{idleMotId}.mot</c>. Returns null (→ rest pose) when absent / unparseable. Never throws.
+    ///     spec: skinning.md §8(e); MotList_LoadAndRegister (id_b registry); formats/animation.md (header id_b).
     /// </summary>
-    private static AnimationClip? TryLoadAnimation(RealClientAssets assets, int idleMotId)
+    private static AnimationClip? TryLoadAnimation(RealClientAssets assets, CharVisualRegistry? registry, int idleMotId)
     {
-        var motPath = $"data/char/mot/g{idleMotId}.mot";
-        if (!assets.Contains(motPath)) return null;
+        var motPath = registry?.ResolveMotPath(idleMotId);
+        if (motPath is null || !assets.Contains(motPath))
+        {
+            GD.Print($"[PlayerAvatar] idle .mot not registered for id_b={idleMotId} — rest pose. " +
+                     "spec: MotList_LoadAndRegister (id_b registry).");
+            return null;
+        }
 
         try
         {

@@ -7,6 +7,7 @@ using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.Ingestion;
 using MartialHeroes.Client.Application.Input;
+using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
@@ -320,6 +321,15 @@ public sealed partial class ClientContext : Node
     public WorldEntryState WorldEntry { get; private set; } = null!;
 
     /// <summary>
+    ///     The in-session keepalive driver: emits the idle <c>2/10000</c> heartbeat (≈20 s of outbound
+    ///     silence) and the <c>2/112</c> world enter/leave toggle so the LIVE link is not dropped for
+    ///     outbound silence after world-enter. Ticked from <see cref="_Process" /> and armed/disarmed by
+    ///     polling <see cref="WorldEntry" />.<see cref="WorldEntryState.IsActive" />.
+    ///     spec: Docs/RE/specs/world_entry.md §2.5 / §3.2; net_contracts.md §1.3 / §2.15.
+    /// </summary>
+    public KeepaliveDriver Keepalive { get; private set; } = null!;
+
+    /// <summary>
     ///     The universal deferred timed-event queue (the "10001" queue). Drained each frame via
     ///     <see cref="Domain.Simulation.Simulation.TimedEventQueue.Drain" /> (two-pass full-tree sweep); flushed by
     ///     <see cref="InGameScene._ExitTree" /> on world → front-end scene transition so stale deferred
@@ -369,6 +379,49 @@ public sealed partial class ClientContext : Node
         // INERT when env vars are absent — interactive UI path is completely unchanged.
         // spec: Docs/RE/specs/login_flow.md §1 (same flow as LoginScene, driven via use-cases).
         MaybeStartEnvLogin();
+    }
+
+    /// <summary>
+    ///     Per-frame keepalive pump (CYCLE-10 fix 1). Drives the in-session heartbeat with a wall-clock
+    ///     millisecond stamp and arms/disarms the driver on the world enter/exit edge (polled via
+    ///     <see cref="WorldEntry" />.<see cref="WorldEntryState.IsActive" />). The driver no-ops until
+    ///     in-world, so this runs harmlessly on every front-end scene too. Sends are fire-and-forget
+    ///     (faults logged, never crash the frame). spec: world_entry.md §2.5 / §3.2; net_contracts.md §2.15.
+    /// </summary>
+    public override void _Process(double delta)
+    {
+        var keepalive = Keepalive;
+        if (keepalive is null) return; // graph not built yet.
+
+        var nowMs = (long)Time.GetTicksMsec();
+        var inWorld = WorldEntry is { IsActive: true };
+
+        if (inWorld && !keepalive.IsInWorld)
+            // World-enter edge: 2/112 ENABLE + begin the idle heartbeat. spec: world_entry.md §2.5.
+            FireAndForget(keepalive.OnWorldEnteredAsync(nowMs));
+        else if (!inWorld && keepalive.IsInWorld)
+            // World-leave edge: 2/112 DISABLE; idle heartbeat stops. spec: world_exit.md §1.2.
+            FireAndForget(keepalive.OnWorldExitedAsync());
+        else
+            // Steady state: fire 2/10000 after the idle interval (no-op until in-world / not yet idle).
+            FireAndForget(keepalive.Tick(nowMs));
+    }
+
+    /// <summary>
+    ///     Observes a fire-and-forget keepalive <see cref="ValueTask" /> so a faulted outbound send is
+    ///     logged rather than left unobserved (which could surface on the finalizer). Runs on the Godot
+    ///     main thread (called from <see cref="_Process" />).
+    /// </summary>
+    private static async void FireAndForget(ValueTask sendTask)
+    {
+        try
+        {
+            await sendTask.ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[ClientContext] keepalive send faulted: {ex.Message}");
+        }
     }
 
     public override void _ExitTree()

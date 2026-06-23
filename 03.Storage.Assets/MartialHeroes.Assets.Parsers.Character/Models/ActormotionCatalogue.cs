@@ -104,6 +104,15 @@ public sealed class ActormotionCatalogue
     /// </remarks>
     /// <param name="skinClass">The skin_class / SkinClassId (col2) to match.</param>
     /// <returns>The first matching entry, or <see langword="null" /> when absent.</returns>
+    /// <remarks>
+    ///     LEGACY/COINCIDENTAL path. The authoritative player idle key is
+    ///     <see cref="GetByMotionKey" />(model_class_id): with the recovered CategoryBase
+    ///     <c>{ 0, 0, 10000, 1000 }</c> wired into the parser, the four player appearance keys
+    ///     {1,11,16,26} ARE the motion_key for their rows (col0=0 → base 0 → motion_key = col1, and the
+    ///     four player rows carry col1 ∈ {1,11,16,26}). This col2-keyed lookup happens to agree for the
+    ///     four players only because col2 == SkinClassId there; prefer <see cref="GetByMotionKey" /> for
+    ///     the appearance-key idle. Kept for back-compat and existing callers/tests.
+    /// </remarks>
     public ActormotionEntry? GetBySkinClass(int skinClass)
     {
         return _bySkinClass.TryGetValue(skinClass, out var e) ? e : null;
