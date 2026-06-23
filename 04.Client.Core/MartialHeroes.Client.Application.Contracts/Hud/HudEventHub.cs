@@ -8,27 +8,20 @@ public sealed class HudEventHub : IHudEventHub
 
     public const int LatestWinsCapacity = 1;
 
-    private readonly Channel<BuffStateEvent> _buffStates;
+    private readonly Channel<BuffStateEvent> _buffStates = CreateBounded<BuffStateEvent>(LatestWinsCapacity);
 
-    private readonly Channel<ChatLineEvent> _chatLines;
-    private readonly Channel<CombatTextEvent> _combatTexts;
-    private readonly Channel<ExpLevelEvent> _expLevels;
-    private readonly Channel<StatAllocationView> _statAllocations;
-    private readonly Channel<TargetChangedEvent> _targetChanges;
-    private readonly Channel<HudVitalsEvent> _vitals;
-    private readonly Channel<ZoneChangedEvent> _zoneChanges;
+    private readonly Channel<ChatLineEvent> _chatLines = CreateBounded<ChatLineEvent>(AppendCapacity);
+    private readonly Channel<CombatTextEvent> _combatTexts = CreateBounded<CombatTextEvent>(AppendCapacity);
+    private readonly Channel<ExpLevelEvent> _expLevels = CreateBounded<ExpLevelEvent>(LatestWinsCapacity);
 
-    public HudEventHub()
-    {
-        _chatLines = CreateBounded<ChatLineEvent>(AppendCapacity);
-        _combatTexts = CreateBounded<CombatTextEvent>(AppendCapacity);
-        _buffStates = CreateBounded<BuffStateEvent>(LatestWinsCapacity);
-        _targetChanges = CreateBounded<TargetChangedEvent>(LatestWinsCapacity);
-        _expLevels = CreateBounded<ExpLevelEvent>(LatestWinsCapacity);
-        _statAllocations = CreateBounded<StatAllocationView>(LatestWinsCapacity);
-        _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
-        _vitals = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
-    }
+    private readonly Channel<StatAllocationView> _statAllocations =
+        CreateBounded<StatAllocationView>(LatestWinsCapacity);
+
+    private readonly Channel<TargetChangedEvent> _targetChanges = CreateBounded<TargetChangedEvent>(LatestWinsCapacity);
+    private readonly Channel<HudVitalsEvent> _vitals = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
+    private readonly Channel<ZoneChangedEvent> _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
+
+    public ChannelReader<ExpLevelEvent> ExpLevels => _expLevels.Reader;
 
 
     public bool PublishChatLine(ChatLineEvent line)
@@ -49,22 +42,10 @@ public sealed class HudEventHub : IHudEventHub
         return _combatTexts.Writer.TryWrite(text);
     }
 
-    public bool PublishTargetChanged(TargetChangedEvent target)
-    {
-        ArgumentNullException.ThrowIfNull(target);
-        return _targetChanges.Writer.TryWrite(target);
-    }
-
     public bool PublishExpLevel(ExpLevelEvent exp)
     {
         ArgumentNullException.ThrowIfNull(exp);
         return _expLevels.Writer.TryWrite(exp);
-    }
-
-    public bool PublishStatAllocation(StatAllocationView view)
-    {
-        ArgumentNullException.ThrowIfNull(view);
-        return _statAllocations.Writer.TryWrite(view);
     }
 
     public bool PublishZoneChanged(ZoneChangedEvent zoneChanged)
@@ -88,8 +69,6 @@ public sealed class HudEventHub : IHudEventHub
 
     public ChannelReader<TargetChangedEvent> TargetChanges => _targetChanges.Reader;
 
-    public ChannelReader<ExpLevelEvent> ExpLevels => _expLevels.Reader;
-
     public ChannelReader<StatAllocationView> StatAllocations => _statAllocations.Reader;
 
     public ChannelReader<ZoneChangedEvent> ZoneChanges => _zoneChanges.Reader;
@@ -106,6 +85,18 @@ public sealed class HudEventHub : IHudEventHub
         _statAllocations.Writer.TryComplete();
         _zoneChanges.Writer.TryComplete();
         _vitals.Writer.TryComplete();
+    }
+
+    public bool PublishTargetChanged(TargetChangedEvent target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return _targetChanges.Writer.TryWrite(target);
+    }
+
+    public bool PublishStatAllocation(StatAllocationView view)
+    {
+        ArgumentNullException.ThrowIfNull(view);
+        return _statAllocations.Writer.TryWrite(view);
     }
 
     private static Channel<T> CreateBounded<T>(int capacity)

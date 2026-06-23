@@ -3,7 +3,6 @@ using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Stats.Stats;
-using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Shared.Kernel.Numerics;
 
@@ -113,7 +112,7 @@ public sealed partial class GamePacketHandler
         var key = new ActorKey(packet.ActorId, ToEntitySort(rawSort));
         if (!_world.TryGet(key, out var actor))
         {
-            _unhandled.Record(Opcodes.SmsgActorVitalsAndPairState, SmsgActorVitalsAndPairState.WireSize);
+            _unhandled.Record();
             return;
         }
 

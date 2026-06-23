@@ -1,5 +1,4 @@
 using MartialHeroes.Client.Domain.Stats.Stats;
-using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Domain.Inventory.Inventory;
 
@@ -17,24 +16,16 @@ public enum EquipCheckResult
 public readonly record struct EquipStateGates
 {
     public bool InGame { get; init; }
-
     public bool NotBusy { get; init; }
-
     public bool NotDead { get; init; }
-
     public bool AllPass => InGame && NotBusy && NotDead;
-
-    public static EquipStateGates AllClear => new() { InGame = true, NotBusy = true, NotDead = true };
 }
 
 public readonly record struct EquipRelationContext
 {
     public bool BothActorsExist { get; init; }
-
     public bool ActorsAreDifferent { get; init; }
-
     public int SlotActorContextId { get; init; }
-
     public int OtherActorContextId { get; init; }
 
     public bool ShareSameNonZeroContext =>
@@ -62,19 +53,6 @@ public static class EquipRules
         return EquipCheckResult.Allowed;
     }
 
-    public static bool CheckRequirements(in EquipRequirement requirement, in EquipCandidateStats stats)
-    {
-        if (requirement.RequiredLevel > stats.Level) return false;
-
-        if (requirement.RequiredClass is { } cls && cls != stats.Class) return false;
-
-        return stats.Str >= requirement.RequiredStr
-               && stats.Dex >= requirement.RequiredDex
-               && stats.Agi >= requirement.RequiredAgi
-               && stats.Con >= requirement.RequiredCon
-               && stats.Int >= requirement.RequiredInt;
-    }
-
     public static int RecomputeEquipmentContributions(
         ReadOnlySpan<SlottedEquipmentContribution> wornBySlot,
         Span<EquipmentContribution> destination)
@@ -96,31 +74,5 @@ public static class EquipRules
         return written;
     }
 }
-
-public readonly record struct EquipRequirement
-{
-    public ushort RequiredLevel { get; init; }
-
-    public CharacterClass? RequiredClass { get; init; }
-
-    public int RequiredStr { get; init; }
-
-    public int RequiredDex { get; init; }
-
-    public int RequiredAgi { get; init; }
-
-    public int RequiredCon { get; init; }
-
-    public int RequiredInt { get; init; }
-}
-
-public readonly record struct EquipCandidateStats(
-    ushort Level,
-    CharacterClass Class,
-    int Str,
-    int Dex,
-    int Agi,
-    int Con,
-    int Int);
 
 public readonly record struct SlottedEquipmentContribution(int Slot, EquipmentContribution Contribution);

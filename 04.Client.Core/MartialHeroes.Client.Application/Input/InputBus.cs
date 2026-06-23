@@ -15,8 +15,6 @@ public sealed class InputBus
         foreach (var handler in _handlers) ArgumentNullException.ThrowIfNull(handler);
     }
 
-    public int PendingCount => _pending.Count;
-
     public bool Dispatch(in InputEvent e)
     {
         if (e.Type == InputType.MouseMove)
@@ -47,19 +45,6 @@ public sealed class InputBus
         while (_pending.TryDequeue(out var e))
         {
             Dispatch(in e);
-            count++;
-        }
-
-        return count;
-    }
-
-    public int DrainInto(ICollection<InputEvent> destination)
-    {
-        ArgumentNullException.ThrowIfNull(destination);
-        var count = 0;
-        while (_pending.TryDequeue(out var e))
-        {
-            destination.Add(e);
             count++;
         }
 

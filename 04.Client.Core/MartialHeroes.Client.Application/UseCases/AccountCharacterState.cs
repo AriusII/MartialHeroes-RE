@@ -1,25 +1,14 @@
 namespace MartialHeroes.Client.Application.UseCases;
 
-public sealed class AccountCharacterState
+public sealed class AccountCharacterState(int initialCount = 0)
 {
     public const int MaxCount = CharacterSelectionStore.MaxSlots;
 
-    public AccountCharacterState(int initialCount = 0)
-    {
-        CharacterCount = Clamp(initialCount);
-    }
-
-    public int CharacterCount { get; private set; }
+    public int CharacterCount { get; private set; } = Clamp(initialCount);
 
     public void Set(int count)
     {
         CharacterCount = Clamp(count);
-    }
-
-    public int Increment()
-    {
-        CharacterCount = Clamp(CharacterCount + 1);
-        return CharacterCount;
     }
 
     public int Decrement()

@@ -18,6 +18,8 @@ public sealed partial class EnvironmentNode : Node3D
 
     private const int NoonKeyframe = 24;
 
+    private readonly List<OmniLight3D> _pointLights = new();
+
     private int _appliedKeyframe = -1;
     private int _areaId;
 
@@ -35,11 +37,9 @@ public sealed partial class EnvironmentNode : Node3D
 
     private Vector3 _sunDirGodot = Vector3.Zero;
 
-    private WorldEnvironment? _worldEnv;
-
-    private readonly List<OmniLight3D> _pointLights = new();
-
     private GpuParticles3D? _weatherParticles;
+
+    private WorldEnvironment? _worldEnv;
 
     public double ClockMs { get; private set; } = NoonKeyframe * KeyframeMs;
 

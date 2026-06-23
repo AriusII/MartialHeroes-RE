@@ -5,7 +5,7 @@ using Microsoft.Win32;
 
 namespace MartialHeroes.Client.Infrastructure.Lobby;
 
-public sealed class LobbyHostResolver : ILobbyHostResolver
+public sealed class LobbyHostResolver(string? clientRoot = null) : ILobbyHostResolver
 {
     private const string FallbackHost = "211.196.150.4";
 
@@ -22,14 +22,9 @@ public sealed class LobbyHostResolver : ILobbyHostResolver
 
     private static readonly Encoding Cp949 = CreateCp949();
 
-    private readonly string _clientRoot;
-
-    public LobbyHostResolver(string? clientRoot = null)
-    {
-        _clientRoot = string.IsNullOrWhiteSpace(clientRoot)
-            ? Directory.GetCurrentDirectory()
-            : clientRoot;
-    }
+    private readonly string _clientRoot = string.IsNullOrWhiteSpace(clientRoot)
+        ? Directory.GetCurrentDirectory()
+        : clientRoot;
 
     public string Resolve()
     {
@@ -41,15 +36,13 @@ public sealed class LobbyHostResolver : ILobbyHostResolver
                 return host;
         }
 
-        if (OperatingSystem.IsWindows())
+        if (!OperatingSystem.IsWindows()) return FallbackHost;
         {
             var listDatPath = Path.Combine(_clientRoot, ListDatFileName);
-            if (File.Exists(listDatPath))
-            {
-                var host = TryReadListDat(listDatPath);
-                if (!string.IsNullOrWhiteSpace(host))
-                    return host;
-            }
+            if (!File.Exists(listDatPath)) return FallbackHost;
+            var host = TryReadListDat(listDatPath);
+            if (!string.IsNullOrWhiteSpace(host))
+                return host;
         }
 
         return FallbackHost;
@@ -86,7 +79,7 @@ public sealed class LobbyHostResolver : ILobbyHostResolver
 
 
     [SupportedOSPlatform("windows")]
-    private string? TryReadListDat(string path)
+    private static string? TryReadListDat(string path)
     {
         try
         {
@@ -108,9 +101,8 @@ public sealed class LobbyHostResolver : ILobbyHostResolver
 
                 var recordName = ReadNulTerminatedCp949(data, recordStart, ListDatHostOffset);
 
-                var matches = registryName is not null
-                    ? string.Equals(recordName, registryName, StringComparison.Ordinal)
-                    : false;
+                var matches = registryName is not null &&
+                              string.Equals(recordName, registryName, StringComparison.Ordinal);
 
                 if (!matches)
                     continue;

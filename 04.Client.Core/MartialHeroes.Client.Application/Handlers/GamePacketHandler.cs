@@ -127,7 +127,7 @@ public sealed partial class GamePacketHandler(
                 break;
         }
 
-        _unhandled.Record(packedOpcode, payload.Length);
+        _unhandled.Record();
     }
 
 

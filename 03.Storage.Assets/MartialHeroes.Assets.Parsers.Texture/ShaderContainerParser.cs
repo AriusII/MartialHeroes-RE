@@ -13,11 +13,6 @@ public static class ShaderContainerParser
         return ParseCore(data.Span, data);
     }
 
-    public static ShaderSource Parse(ReadOnlySpan<byte> span)
-    {
-        return ParseCore(span, new ReadOnlyMemory<byte>(span.ToArray()));
-    }
-
     private static ShaderSource ParseCore(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> rawBytes)
     {
         var text = Encoding.Latin1.GetString(span);

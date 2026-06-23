@@ -39,12 +39,6 @@ public readonly record struct InputEvent(
     int ButtonOrDelta,
     int Modifiers)
 {
-    public bool IsLeftButtonDown =>
-        Type == InputType.MouseButtonDown && ButtonOrDelta == MouseButton.Left;
-
-    public bool IsLeftButtonUp =>
-        Type == InputType.MouseButtonUp && ButtonOrDelta == MouseButton.Left;
-
     public bool IsLeftButtonClick =>
         Type == InputType.MouseButtonClick && ButtonOrDelta == MouseButton.Left;
 }

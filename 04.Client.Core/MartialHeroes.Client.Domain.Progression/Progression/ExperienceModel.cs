@@ -11,11 +11,6 @@ public readonly record struct ExperienceModel
         return this with { CurrentXp = unchecked(CurrentXp + amount), LifetimeXp = unchecked(LifetimeXp + amount) };
     }
 
-    public ExperienceModel ResyncCurrentXp(long currentXp)
-    {
-        return this with { CurrentXp = currentXp };
-    }
-
     public static (long ShownBase, long Bonus) SplitBonus(long amount, long ratePercent)
     {
         var denominator = ratePercent + 100L;

@@ -44,7 +44,7 @@ public sealed class Actor
 
     public ushort Level { get; private set; }
 
-    public VitalStats Vitals { get; private set; }
+    public VitalStats Vitals { get; }
 
     public uint CurrentHp { get; private set; }
 
@@ -58,7 +58,7 @@ public sealed class Actor
 
     public int Yaw { get; private set; }
 
-    public long MoveSpeedRawPerSecond { get; private set; }
+    public long MoveSpeedRawPerSecond { get; }
 
     public uint TargetRawId { get; private set; }
 
@@ -78,16 +78,6 @@ public sealed class Actor
 
     public uint MaxStamina => Vitals.MaxStamina;
 
-    public bool HasArrived => Position == MoveTarget;
-
-
-    public void SetVitals(VitalStats vitals)
-    {
-        Vitals = vitals;
-        CurrentHp = Math.Min(CurrentHp, vitals.MaxHp);
-        CurrentMp = Math.Min(CurrentMp, vitals.MaxMp);
-        CurrentStamina = Math.Min(CurrentStamina, vitals.MaxStamina);
-    }
 
     public void SetCurrentHp(uint value)
     {
@@ -104,52 +94,6 @@ public sealed class Actor
     {
         CurrentStamina = Math.Min(value, MaxStamina);
     }
-
-    public void ApplyDamage(uint amount)
-    {
-        if (!IsAlive) return;
-
-        CurrentHp = amount >= CurrentHp ? 0 : CurrentHp - amount;
-        if (CurrentHp == 0) Kill();
-    }
-
-    public void Heal(uint amount)
-    {
-        if (!IsAlive) return;
-
-        var healed = (ulong)CurrentHp + amount;
-        CurrentHp = healed > MaxHp ? MaxHp : (uint)healed;
-    }
-
-    public void RestoreMp(uint amount)
-    {
-        var restored = (ulong)CurrentMp + amount;
-        CurrentMp = restored > MaxMp ? MaxMp : (uint)restored;
-    }
-
-    public void RestoreStamina(uint amount)
-    {
-        var restored = (ulong)CurrentStamina + amount;
-        CurrentStamina = restored > MaxStamina ? MaxStamina : (uint)restored;
-    }
-
-
-    public RegenTicker TickHpRegen(RegenTicker ticker, uint deltaMs)
-    {
-        var (next, steps) = ticker.Advance(deltaMs);
-        if (steps > 0 && IsAlive) Heal(ticker.AmountFor(steps));
-
-        return next;
-    }
-
-    public RegenTicker TickMpRegen(RegenTicker ticker, uint deltaMs)
-    {
-        var (next, steps) = ticker.Advance(deltaMs);
-        if (steps > 0) RestoreMp(ticker.AmountFor(steps));
-
-        return next;
-    }
-
 
     public void SetMoveTarget(Vector3Fixed target)
     {
@@ -168,14 +112,6 @@ public sealed class Actor
         Yaw = yaw;
     }
 
-    public void SetMoveSpeed(long rawPerSecond)
-    {
-        if (rawPerSecond < 0)
-            throw new ArgumentOutOfRangeException(nameof(rawPerSecond), "Speed must be non-negative.");
-
-        MoveSpeedRawPerSecond = rawPerSecond;
-    }
-
     public bool AdvanceMovement(uint deltaMs)
     {
         if (!IsAlive || Position == MoveTarget) return Position == MoveTarget;
@@ -190,16 +126,6 @@ public sealed class Actor
     public void SetTarget(uint rawId)
     {
         TargetRawId = rawId;
-    }
-
-    public void SetPkEnabled(bool enabled)
-    {
-        IsPkEnabled = enabled;
-    }
-
-    public void SetInCombat(bool inCombat)
-    {
-        IsInCombat = inCombat;
     }
 
     public void SetLevel(ushort level)
@@ -229,16 +155,5 @@ public sealed class Actor
         IsInCombat = false;
         Lifecycle = LifecycleState.Dead;
         MoveTarget = Position;
-    }
-
-    public bool Revive(uint hp)
-    {
-        if (IsAlive) return false;
-
-        IsAlive = true;
-        var clamped = Math.Min(hp == 0 ? 1u : hp, MaxHp);
-        CurrentHp = clamped == 0 ? 0 : clamped;
-        Lifecycle = LifecycleState.Refreshing;
-        return true;
     }
 }

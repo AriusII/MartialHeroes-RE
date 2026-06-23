@@ -30,5 +30,3 @@ public readonly record struct AreaSpawnDescriptor(
 public sealed record AreaAssembledEvent(IAssembledAreaView Area) : IClientEvent;
 
 public sealed record CellAssembledEvent(IAssembledCellView Cell) : IClientEvent;
-
-public sealed record ActorAssembledEvent(AssembledActor Actor) : IClientEvent;

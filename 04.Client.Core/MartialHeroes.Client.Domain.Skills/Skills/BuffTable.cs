@@ -3,14 +3,7 @@ namespace MartialHeroes.Client.Domain.Skills.Skills;
 public sealed class BuffTable
 {
     public const int SlotCount = 31;
-
     private readonly BuffDebuff[] _slots = new BuffDebuff[SlotCount];
-
-    public BuffDebuff this[int slotIndex] => _slots[slotIndex];
-
-    public int Count => _slots.Length;
-
-    public bool IsRooted => HasActiveEffect(BuffEffectCode.RootSnare);
 
     public void Apply(int slotIndex, int effectCode, int durationTicks, int param, ushort magnitude)
     {
@@ -31,14 +24,7 @@ public sealed class BuffTable
         };
     }
 
-    public void Clear(int slotIndex)
-    {
-        if ((uint)slotIndex >= (uint)_slots.Length) throw new ArgumentOutOfRangeException(nameof(slotIndex));
-
-        _slots[slotIndex] = BuffDebuff.Empty;
-    }
-
-    public int Tick()
+    public void Tick()
     {
         var expired = 0;
         for (var i = 0; i < _slots.Length; i++)
@@ -47,29 +33,6 @@ public sealed class BuffTable
             _slots[i] = next;
             if (slotExpired) expired++;
         }
-
-        return expired;
-    }
-
-    public void Dispel()
-    {
-        for (var i = 0; i < _slots.Length; i++)
-        {
-            var code = _slots[i].EffectCode;
-            if (code == (int)BuffEffectCode.EnterStance
-                || code == (int)BuffEffectCode.AppearanceSwap
-                || code == (int)BuffEffectCode.RootSnare)
-                _slots[i] = BuffDebuff.Empty;
-        }
-    }
-
-    public bool HasActiveEffect(BuffEffectCode effect)
-    {
-        for (var i = 0; i < _slots.Length; i++)
-            if (_slots[i].IsActive && _slots[i].EffectCode == (int)effect)
-                return true;
-
-        return false;
     }
 
     public void ClearAll()

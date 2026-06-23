@@ -6,25 +6,14 @@ namespace MartialHeroes.Assets.Parsers.Texture;
 public static class EnvironmentBinParsers
 {
     private const int LightSectionAOffset = 0x0000;
-    private const int LightSectionASize = 2304;
-
-
     private const int LightSectionBOffset = 0x0930;
-    private const int LightSectionBSize = 2304;
-
-
     private const int LightSectionCOffset = 0x1260;
     private const int LightSectionCCount = 48;
-
     private const int LightSectionDOffset = 0x1320;
     private const int LightSectionDCount = 48;
-
     private const int LightSectionEOffset = 0x13E0;
     private const int LightSectionESize = 200;
-
-
     private const int LightFallbackOffset = 0x14B0;
-
     private const int LightKeyframeStride = 48;
 
     public static MapOptionBin ParseMapOption(ReadOnlyMemory<byte> data)
@@ -67,13 +56,6 @@ public static class EnvironmentBinParsers
         };
     }
 
-    public static MapOptionBin? TryParseMapOption(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseMapOption(data.Span);
-    }
-
-
     public static FogBin ParseFog(ReadOnlyMemory<byte> data)
     {
         return ParseFog(data.Span);
@@ -112,12 +94,6 @@ public static class EnvironmentBinParsers
         };
     }
 
-    public static FogBin? TryParseFog(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseFog(data.Span);
-    }
-
 
     public static MaterialBin ParseMaterial(ReadOnlyMemory<byte> data)
     {
@@ -147,20 +123,9 @@ public static class EnvironmentBinParsers
         return new MaterialBin { ColorTable = table };
     }
 
-    public static MaterialBin? TryParseMaterial(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseMaterial(data.Span);
-    }
-
     public static LightBin ParseLight(ReadOnlyMemory<byte> data)
     {
         return ParseLight(data.Span, data);
-    }
-
-    public static LightBin ParseLight(ReadOnlySpan<byte> span)
-    {
-        return ParseLight(span, ReadOnlyMemory<byte>.Empty);
     }
 
     private static LightBin ParseLight(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
@@ -211,12 +176,6 @@ public static class EnvironmentBinParsers
             FallbackDirZ = fallbackDirZ,
             RawBytes = rawBytes
         };
-    }
-
-    public static LightBin? TryParseLight(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseLight(data.Span, data);
     }
 
     private static LightingKeyframe[] ReadLightKeyframes(
@@ -291,13 +250,6 @@ public static class EnvironmentBinParsers
         return new StarDomeBin { StarColors = starColors };
     }
 
-    public static StarDomeBin? TryParseStarDome(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseStarDome(data.Span);
-    }
-
-
     public static CloudDomeBin ParseCloudDome(ReadOnlyMemory<byte> data)
     {
         return ParseCloudDome(data.Span);
@@ -320,12 +272,6 @@ public static class EnvironmentBinParsers
             Layer1Colors = layer1,
             Layer2Colors = layer2
         };
-    }
-
-    public static CloudDomeBin? TryParseCloudDome(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseCloudDome(data.Span);
     }
 
     private static BgraColor[][] ReadCloudDomeLayer(ReadOnlySpan<byte> span, int offset)
@@ -381,21 +327,10 @@ public static class EnvironmentBinParsers
         return new CloudCycleBin { Rows = rows };
     }
 
-    public static CloudCycleBin? TryParseCloudCycle(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseCloudCycle(data.Span);
-    }
-
 
     public static PointLightBin ParsePointLight(ReadOnlyMemory<byte> data)
     {
         return ParsePointLight(data.Span, data);
-    }
-
-    public static PointLightBin ParsePointLight(ReadOnlySpan<byte> span)
-    {
-        return ParsePointLight(span, ReadOnlyMemory<byte>.Empty);
     }
 
     private static PointLightBin ParsePointLight(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
@@ -405,7 +340,7 @@ public static class EnvironmentBinParsers
                 $"point_light*.bin parse error: need at least {PointLightBin.HeaderSize} bytes for header, " +
                 $"got {span.Length}.");
 
-        var intensityScale = BinaryPrimitives.ReadSingleLittleEndian(span[0x00..]);
+        var intensityScale = BinaryPrimitives.ReadSingleLittleEndian(span[..]);
         var recordCount = BinaryPrimitives.ReadInt32LittleEndian(span[0x04..]);
 
         if (recordCount < 0)
@@ -473,72 +408,6 @@ public static class EnvironmentBinParsers
         };
     }
 
-    public static PointLightBin? TryParsePointLight(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParsePointLight(data.Span, data);
-    }
-
-
-    public static WindBin ParseWind(ReadOnlyMemory<byte> data)
-    {
-        return ParseWind(data.Span, data);
-    }
-
-    public static WindBin ParseWind(ReadOnlySpan<byte> span)
-    {
-        return ParseWind(span, ReadOnlyMemory<byte>.Empty);
-    }
-
-    private static WindBin ParseWind(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
-    {
-        if (span.Length < WindBin.HeaderSize)
-            throw new InvalidDataException(
-                $"wind*.bin parse error: need at least {WindBin.HeaderSize} bytes for header, " +
-                $"got {span.Length}.");
-
-        var recordCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x00..]);
-        var sourceFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
-
-        var expectedSize = (int)(WindBin.HeaderSize + recordCount * WindRecord.Stride);
-        if (span.Length < expectedSize)
-            throw new InvalidDataException(
-                $"wind*.bin parse error: declared count={recordCount} requires {expectedSize} bytes, " +
-                $"got {span.Length}.");
-
-        var records = new WindRecord[(int)recordCount];
-        for (var i = 0; i < (int)recordCount; i++)
-        {
-            var recBase = WindBin.HeaderSize + i * WindRecord.Stride;
-
-            var texId = BinaryPrimitives.ReadUInt32LittleEndian(span[(recBase + 0x14)..]);
-
-            var rawBytes = backing.IsEmpty
-                ? span.Slice(recBase, WindRecord.Stride).ToArray()
-                : backing.Slice(recBase, WindRecord.Stride);
-
-            records[i] = new WindRecord
-            {
-                TexId = texId,
-                RawBytes = rawBytes
-            };
-        }
-
-        return new WindBin
-        {
-            RecordCount = recordCount,
-            SourceFlag = sourceFlag,
-            Records = records
-        };
-    }
-
-    public static WindBin? TryParseWind(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseWind(data.Span, data);
-    }
-
-
     public static WeatherBin ParseWeather(ReadOnlyMemory<byte> data)
     {
         return ParseWeather(data.Span);
@@ -554,11 +423,5 @@ public static class EnvironmentBinParsers
         var grid = span.ToArray();
 
         return new WeatherBin { Grid = grid };
-    }
-
-    public static WeatherBin? TryParseWeather(ReadOnlyMemory<byte> data)
-    {
-        if (data.IsEmpty) return null;
-        return ParseWeather(data.Span);
     }
 }

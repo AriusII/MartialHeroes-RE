@@ -55,7 +55,6 @@ public sealed class AssembledCell
         float v0X, v0Y, v0Z, v1X, v1Y, v1Z, v2X, v2Y, v2Z;
         if (fx + fz < 1f)
         {
-
             v0X = 0f;
             v0Y = h00;
             v0Z = 0f;
@@ -68,7 +67,6 @@ public sealed class AssembledCell
         }
         else
         {
-
             v0X = 1f;
             v0Y = h10;
             v0Z = 0f;

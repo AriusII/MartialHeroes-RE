@@ -8,9 +8,7 @@ public sealed class VfsCatalogueLoader : IDisposable
 {
     private const string UserLevelScrPath = "data/script/userlevel.scr";
     private const string SkillsScrPath = "data/script/skills.scr";
-
     private const string MobsScrPath = "data/script/mobs.scr";
-
     private const string ItemsScrPath = "data/script/items.scr";
 
     private readonly MappedVfsArchive? _archive;

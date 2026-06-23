@@ -282,7 +282,7 @@ public sealed partial class GamePacketHandler
 
     private void PublishGroundItem(ReadOnlySpan<byte> record)
     {
-        var key = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint)));
+        var key = BinaryPrimitives.ReadUInt32LittleEndian(record[..sizeof(uint)]);
         var templateId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x04, sizeof(uint)));
         var worldX = BinaryPrimitives.ReadSingleLittleEndian(record.Slice(0x10, sizeof(float)));
         var worldZ = BinaryPrimitives.ReadSingleLittleEndian(record.Slice(0x14, sizeof(float)));
@@ -293,14 +293,14 @@ public sealed partial class GamePacketHandler
 
     private void PublishGuildOverlay(ReadOnlySpan<byte> record)
     {
-        var entityId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint)));
+        var entityId = BinaryPrimitives.ReadUInt32LittleEndian(record[..sizeof(uint)]);
         var guildName = Cp949Text.Decode(record[0x05..]);
         _eventBus.Publish(new GuildOverlayEvent(entityId, guildName));
     }
 
     private void PublishTitleOverlay(ReadOnlySpan<byte> record)
     {
-        var entityId = BinaryPrimitives.ReadUInt32LittleEndian(record.Slice(0x00, sizeof(uint)));
+        var entityId = BinaryPrimitives.ReadUInt32LittleEndian(record[..sizeof(uint)]);
         var relationState = record[0x04];
         var overlaySubCode =
             record[0x05];

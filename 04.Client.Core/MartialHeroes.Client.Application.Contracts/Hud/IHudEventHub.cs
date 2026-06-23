@@ -12,8 +12,6 @@ public interface IHudEventHub
 
     ChannelReader<TargetChangedEvent> TargetChanges { get; }
 
-    ChannelReader<ExpLevelEvent> ExpLevels { get; }
-
     ChannelReader<StatAllocationView> StatAllocations { get; }
 
     ChannelReader<ZoneChangedEvent> ZoneChanges { get; }
@@ -26,11 +24,7 @@ public interface IHudEventHub
 
     bool PublishCombatText(CombatTextEvent text);
 
-    bool PublishTargetChanged(TargetChangedEvent target);
-
     bool PublishExpLevel(ExpLevelEvent exp);
-
-    bool PublishStatAllocation(StatAllocationView view);
 
     bool PublishZoneChanged(ZoneChangedEvent zoneChanged);
 

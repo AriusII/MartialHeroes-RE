@@ -31,31 +31,18 @@ public static class MapSettingScrParser
         {
             var recBase = i * RecordStride;
             var rec = span.Slice(recBase, RecordStride);
-
             var zoneId = BinaryPrimitives.ReadInt32LittleEndian(rec[..]);
-
             var zoneName = ReadNullTerminatedCp949(rec.Slice(0x04, 36), cp949);
-
             var worldMinX = BinaryPrimitives.ReadInt32LittleEndian(rec[0x28..]);
-
             var worldMinZ = BinaryPrimitives.ReadInt32LittleEndian(rec[0x2C..]);
-
             var worldMaxX = BinaryPrimitives.ReadInt32LittleEndian(rec[0x30..]);
-
             var worldMaxZ = BinaryPrimitives.ReadInt32LittleEndian(rec[0x34..]);
-
             var flagsA = BinaryPrimitives.ReadInt32LittleEndian(rec[0x38..]);
-
             var flagsB = BinaryPrimitives.ReadInt32LittleEndian(rec[0x3C..]);
-
             var fogDensity = BinaryPrimitives.ReadSingleLittleEndian(rec[0x40..]);
-
             var unknown44 = BinaryPrimitives.ReadInt32LittleEndian(rec[0x44..]);
-
             var unknown48 = BinaryPrimitives.ReadInt32LittleEndian(rec[0x48..]);
-
             var unknown4C = BinaryPrimitives.ReadInt32LittleEndian(rec[0x4C..]);
-
             var unknown50 = BinaryPrimitives.ReadInt32LittleEndian(rec[0x50..]);
 
             results[i] = new MapZoneRecord
@@ -84,7 +71,6 @@ public static class MapSettingScrParser
     {
         var len = field.IndexOf((byte)0);
         if (len < 0) len = field.Length;
-        if (len == 0) return string.Empty;
-        return cp949.GetString(field[..len]);
+        return len == 0 ? string.Empty : cp949.GetString(field[..len]);
     }
 }

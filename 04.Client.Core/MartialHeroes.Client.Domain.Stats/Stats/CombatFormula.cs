@@ -7,29 +7,18 @@ public static class CombatFormula
     private const float AttackWeightAgi = 2.299999952316284f;
     private const float AttackWeightCon = 1.0f;
     private const float AttackWeightInt = 1.0f;
-
-
     private const float SecondaryWeightStr = 1.399999976158142f;
     private const float SecondaryWeightDex = 2.650000095367432f;
     private const float SecondaryWeightAgi = 1.5f;
     private const float SecondaryWeightCon = 2.099999904632568f;
     private const float SecondaryWeightInt = 1.100000023841858f;
-
     private const float BaseScale = 0.20000000298023224f;
-
-
     private const double WeaponGradeScale = 0.1;
-
     private const double LevelTermScale = 0.5;
-
     private const double GradeBonus = 2.0;
-
     private const int GradeBonusThreshold = 8;
-
     private const double HitAccuracyBaseline = 300.0;
-
     private const double HitPercentPivot = 100.0;
-
 
     public static double AttackBase(in PrimaryStats stats)
     {
@@ -79,7 +68,6 @@ public static class CombatFormula
         return value * (1.0 - penaltyPercent / 100.0);
     }
 
-
     public static int AttackRating(in AttackRatingInputs inputs)
     {
         double total =
@@ -102,7 +90,6 @@ public static class CombatFormula
 
         return FloorToInt(total);
     }
-
 
     public static int HitRating(in HitRatingInputs inputs)
     {

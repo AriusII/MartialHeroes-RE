@@ -23,6 +23,4 @@ public readonly record struct AttackRatingInputs
     public int Slot83 { get; init; }
 
     public int Slot61 { get; init; }
-
-    public static AttackRatingInputs Empty => new() { Stats = PrimaryStats.Zero };
 }

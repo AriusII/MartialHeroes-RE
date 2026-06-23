@@ -4,11 +4,6 @@ namespace MartialHeroes.Client.Domain.Skills.Skills;
 
 public static class BuffStatBridge
 {
-    public static BuffContribution? ToContribution(in BuffDebuff buff, StatKey statKey, int value)
-    {
-        return buff.IsActive ? new BuffContribution(statKey, value) : null;
-    }
-
     public static int BuildContributions(
         ReadOnlySpan<BuffStatGrant> source,
         Span<BuffContribution> destination)

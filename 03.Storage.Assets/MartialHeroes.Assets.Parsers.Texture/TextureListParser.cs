@@ -17,11 +17,6 @@ public static class TextureListParser
         return Parse(data.Span);
     }
 
-    public static TextureListManifest Parse(ReadOnlyMemory<byte> data, string vfsPathPrefix)
-    {
-        return Parse(data.Span, vfsPathPrefix);
-    }
-
     public static TextureListManifest Parse(ReadOnlySpan<byte> span)
     {
         var text = Encoding.GetEncoding(949).GetString(span);
@@ -33,11 +28,6 @@ public static class TextureListParser
         ArgumentException.ThrowIfNullOrEmpty(vfsPathPrefix);
         var text = Encoding.GetEncoding(949).GetString(span);
         return ParseText(text, vfsPathPrefix);
-    }
-
-    public static TextureListManifest ParseText(string text)
-    {
-        return ParseText(text, VfsPathPrefix);
     }
 
     public static TextureListManifest ParseText(string text, string vfsPathPrefix)
@@ -78,7 +68,7 @@ public static class TextureListParser
         for (var i = 0; i < name.Length; i++)
         {
             var c = name[i];
-            if (c < '0' || c > '9') break;
+            if (c is < '0' or > '9') break;
             value = value * 10 + (c - '0');
         }
 

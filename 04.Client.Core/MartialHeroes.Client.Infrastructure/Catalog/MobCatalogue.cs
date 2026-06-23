@@ -37,11 +37,6 @@ public sealed class MobCatalogue
         ArgumentNullException.ThrowIfNull(loader);
         return new MobCatalogue(loader.LoadMobsScr());
     }
-
-    public MobRecord? TryGet(ushort mobId)
-    {
-        return _byId.TryGetValue(mobId, out var r) ? r : null;
-    }
 }
 
 public sealed record MobRecord

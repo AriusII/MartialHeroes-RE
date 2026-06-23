@@ -3,14 +3,9 @@ using MartialHeroes.Client.Application.World;
 
 namespace MartialHeroes.Client.Presentation.Adapters;
 
-public sealed class AssembledCellViewAdapter : IAssembledCellView
+public sealed class AssembledCellViewAdapter(AssembledCell cell) : IAssembledCellView
 {
-    public AssembledCellViewAdapter(AssembledCell cell)
-    {
-        ConcreteCell = cell ?? throw new ArgumentNullException(nameof(cell));
-    }
-
-    public AssembledCell ConcreteCell { get; }
+    public AssembledCell ConcreteCell { get; } = cell ?? throw new ArgumentNullException(nameof(cell));
 
     public int MapX => ConcreteCell.MapX;
 

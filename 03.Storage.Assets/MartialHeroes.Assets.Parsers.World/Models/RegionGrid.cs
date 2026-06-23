@@ -3,17 +3,11 @@ namespace MartialHeroes.Assets.Parsers.World.Models;
 public sealed class RegionGrid
 {
     public const int CellWorldSize = 256;
-
     public required int Width { get; init; }
-
     public required int Height { get; init; }
-
     public required byte[] Cells { get; init; }
-
     public required int OriginX { get; init; }
-
     public required int OriginZ { get; init; }
-
 
     public byte GetRegionId(int worldX, int worldZ)
     {

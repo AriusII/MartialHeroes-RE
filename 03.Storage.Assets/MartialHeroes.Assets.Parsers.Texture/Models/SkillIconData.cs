@@ -20,7 +20,7 @@ public sealed class SkillIconManifest
 
     public SkillIconEntry? GetEntry(int skillId, int jobId, int kindId)
     {
-        return _map.TryGetValue((skillId, jobId, kindId), out var e) ? e : null;
+        return _map.GetValueOrDefault((skillId, jobId, kindId));
     }
 
     public IEnumerable<SkillIconEntry> GetEntriesForJob(int jobId)

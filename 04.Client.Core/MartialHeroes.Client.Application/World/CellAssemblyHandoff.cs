@@ -23,9 +23,6 @@ public sealed class CellAssemblyHandoff
         ArgumentNullException.ThrowIfNull(loaded);
 
         var cell = _bake(loaded.MapX, loaded.MapZ, loaded.Payload);
-        if (cell is null)
-            return false;
-
-        return _eventBus.Publish(new CellAssembledEvent(cell));
+        return cell is not null && _eventBus.Publish(new CellAssembledEvent(cell));
     }
 }

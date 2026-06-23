@@ -63,9 +63,4 @@ public sealed class BgtextureLstCatalog
     public int Count => _records.Length;
 
     public IReadOnlyList<BgtextureLstRecord> Records => _records;
-
-    public BgtextureLstRecord? GetByPoolSlot(int poolSlot)
-    {
-        return (uint)poolSlot < (uint)_records.Length ? _records[poolSlot] : null;
-    }
 }

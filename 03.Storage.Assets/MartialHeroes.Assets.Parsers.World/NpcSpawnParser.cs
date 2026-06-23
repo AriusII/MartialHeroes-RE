@@ -21,21 +21,13 @@ public static class NpcSpawnParser
         {
             var offset = i * RecordStride;
             var rec = span.Slice(offset, RecordStride);
-
             var mobId = BinaryPrimitives.ReadUInt16LittleEndian(rec[..]);
-
             var field02Inert = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
-
             var worldX = BinaryPrimitives.ReadSingleLittleEndian(rec[4..]);
-
             var worldZ = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]);
-
             var facing = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);
-
             var spawnType = BinaryPrimitives.ReadUInt32LittleEndian(rec[16..]);
-
             var field20Inert = BinaryPrimitives.ReadUInt32LittleEndian(rec[20..]);
-
             var field24Inert = BinaryPrimitives.ReadUInt32LittleEndian(rec[24..]);
 
             records[i] = new NpcSpawnRecord

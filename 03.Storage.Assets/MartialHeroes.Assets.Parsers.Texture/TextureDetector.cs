@@ -8,7 +8,7 @@ public static class TextureDetector
 
     private static ReadOnlySpan<byte> DdsMagic => "DDS "u8;
 
-    private static ReadOnlySpan<byte> PngMagic => new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
+    private static ReadOnlySpan<byte> PngMagic => [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
     private static ReadOnlySpan<byte> BmpMagic => "BM"u8;
 
@@ -26,22 +26,6 @@ public static class TextureDetector
             Payload = data
         };
     }
-
-    public static TextureDescriptor Detect(ReadOnlySpan<byte> data)
-    {
-        var header = data.Length >= MinHeaderBytes
-            ? data[..MinHeaderBytes]
-            : data;
-
-        var format = DetectFormat(header, data.Length);
-
-        return new TextureDescriptor
-        {
-            Format = format,
-            Payload = data.ToArray()
-        };
-    }
-
 
     private static TextureFormat DetectFormat(ReadOnlySpan<byte> header, int totalLength)
     {

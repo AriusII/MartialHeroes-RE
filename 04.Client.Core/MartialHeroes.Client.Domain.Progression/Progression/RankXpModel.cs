@@ -38,11 +38,6 @@ public readonly record struct RankXpModel
         };
     }
 
-    public RankXpModel Resync(long rankAccumulator, long withinRank)
-    {
-        return this with { RankAccumulator = rankAccumulator, WithinRank = withinRank };
-    }
-
     private static long LookupOrZero(IReadOnlyList<long>? table, int index)
     {
         if (table is null || index < 0 || index >= table.Count) return 0L;

@@ -5,16 +5,10 @@ namespace MartialHeroes.Assets.Parsers.World;
 
 public static class RegionGridParser
 {
-    private const int WidthOffset = 0;
-
     private const int HeightOffset = 4;
-
     private const int CellsOffset = 8;
-
     private const int OriginSize = 4;
-
     private const int MinFileSize = 16;
-
 
     public static RegionGridData Parse(ReadOnlyMemory<byte> data)
     {

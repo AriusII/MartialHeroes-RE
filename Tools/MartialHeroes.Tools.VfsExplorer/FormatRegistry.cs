@@ -1,4 +1,3 @@
-
 using System.Buffers.Binary;
 using System.Text;
 using MartialHeroes.Assets.Mapping;
@@ -39,7 +38,6 @@ internal sealed class CapabilityEntry
 
 internal static class FormatRegistry
 {
-
     private const uint DdsMagic = 0x20534444;
 
     private const uint BaniMagic = 0x494E4142;
@@ -63,12 +61,12 @@ internal static class FormatRegistry
 
     private const int WeatherBinSize = 240;
 
-        private static readonly Dictionary<string, CapabilityEntry> ByExt = BuildTable();
+    private static readonly Dictionary<string, CapabilityEntry> ByExt = BuildTable();
 
-        public static IEnumerable<CapabilityEntry> All =>
+    public static IEnumerable<CapabilityEntry> All =>
         ByExt.Values.OrderBy(e => e.Extension, StringComparer.Ordinal);
 
-        public static CapabilityEntry? Lookup(string vfsPath, ReadOnlyMemory<byte> content)
+    public static CapabilityEntry? Lookup(string vfsPath, ReadOnlyMemory<byte> content)
     {
         var ext = ExtOf(vfsPath);
 
@@ -89,7 +87,7 @@ internal static class FormatRegistry
         return ByExt.GetValueOrDefault(ext);
     }
 
-        public static string ExtOf(string name)
+    public static string ExtOf(string name)
     {
         var dot = name.LastIndexOf('.');
         var slash = name.LastIndexOf('/');
@@ -97,7 +95,7 @@ internal static class FormatRegistry
         return name[dot..].ToLowerInvariant();
     }
 
-        private static string ResolveBinKey(string vfsPath, ReadOnlyMemory<byte> content)
+    private static string ResolveBinKey(string vfsPath, ReadOnlyMemory<byte> content)
     {
         var file = vfsPath[(vfsPath.LastIndexOf('/') + 1)..];
 
@@ -119,7 +117,7 @@ internal static class FormatRegistry
         return ".bin";
     }
 
-        public static string RunConvert(
+    public static string RunConvert(
         CapabilityEntry entry, string vfsPath, ReadOnlyMemory<byte> content,
         VfsBndResolver resolveBnd, Stream outStream)
     {
@@ -337,7 +335,6 @@ internal static class FormatRegistry
         var c = TedTerrainParser.Parse(raw);
         return
         [
-
             $"height_samples={c.Heights.Length:N0}  normals={c.Normals.Length:N0}",
             $"texture_index_grid={c.TextureIndexGrid.Length:N0}  " +
             $"direction_flags={c.DirectionFlags.Length:N0}  diffuse_colours={c.DiffuseColours.Length:N0}"
@@ -374,7 +371,6 @@ internal static class FormatRegistry
         var b = SodBlobParser.Parse(raw);
         return
         [
-
             $"solid_count={b.SolidCount}  solids={b.Solids.Length:N0}  " +
             $"quad_groups={b.QuadCounts.Length:N0}"
         ];
@@ -389,7 +385,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeArr(string path, ReadOnlyMemory<byte> raw)
     {
-
         var name = path[(path.LastIndexOf('/') + 1)..];
         if (name.StartsWith("npc", StringComparison.Ordinal))
         {
@@ -408,7 +403,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeDds(string path, ReadOnlyMemory<byte> raw)
     {
-
         const int MinHeader = 0x58;
         if (raw.Length < MinHeader ||
             BinaryPrimitives.ReadUInt32LittleEndian(raw.Span[..4]) != DdsMagic)
@@ -463,7 +457,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeEffShape(string path, ReadOnlyMemory<byte> raw)
     {
-
         if (raw.Length < 4) return ["truncated .eff shape"];
         var indexCount = BinaryPrimitives.ReadUInt32LittleEndian(raw.Span[..4]);
         return [$"effect-object shape  index_count={indexCount:N0}  triangles={indexCount / 3:N0}"];
@@ -499,7 +492,6 @@ internal static class FormatRegistry
         var tbl = DoStanceParser.Parse(raw);
         return
         [
-
             $"stance icon table  records={tbl.TotalRecordCount:N0}  trailing_bytes={tbl.TrailingByteCount}"
         ];
     }
@@ -603,7 +595,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeBinWeather(string path, ReadOnlyMemory<byte> raw)
     {
-
         var isRain = path.Contains("_rain", StringComparison.Ordinal);
         var variant = isRain ? "weather_rain" : "weather";
         if (raw.Length != WeatherBinSize)
@@ -632,7 +623,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeBinCompanion(string path, ReadOnlyMemory<byte> raw)
     {
-
         var file = path[(path.LastIndexOf('/') + 1)..];
         var kind = file.StartsWith("map", StringComparison.Ordinal)
             ? "map<NNN>.bin (fixed 520B)"
@@ -642,7 +632,6 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeLst(string path, ReadOnlyMemory<byte> raw)
     {
-
         var file = path[(path.LastIndexOf('/') + 1)..];
         var isAreaManifest = path.Contains("/dat/", StringComparison.Ordinal) &&
                              file.StartsWith("d", StringComparison.Ordinal);
@@ -652,7 +641,6 @@ internal static class FormatRegistry
 
         if (!isAreaManifest)
         {
-
             var hdrCount = BinaryPrimitives.ReadUInt32LittleEndian(raw.Span[..4]);
             return
             [

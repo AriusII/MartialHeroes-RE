@@ -13,8 +13,6 @@ public sealed class ClientWorld
     public Actor? LocalActor =>
         LocalActorKey is { } key && _actors.TryGetValue(key, out var actor) ? actor : null;
 
-    public IReadOnlyCollection<Actor> Actors => _actors.Values;
-
     public Dictionary<ActorKey, Actor>.ValueCollection ActorValues => _actors.Values;
 
     public void Add(Actor actor)
@@ -31,10 +29,5 @@ public sealed class ClientWorld
     public bool Remove(ActorKey key)
     {
         return _actors.Remove(key);
-    }
-
-    public void Clear()
-    {
-        _actors.Clear();
     }
 }

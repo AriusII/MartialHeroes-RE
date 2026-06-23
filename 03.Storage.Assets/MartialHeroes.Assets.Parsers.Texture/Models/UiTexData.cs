@@ -31,6 +31,6 @@ public sealed class UiTexManifest
 
     public UiTexEntry? GetById(int texId)
     {
-        return _byId.TryGetValue(texId, out var e) ? e : null;
+        return _byId.GetValueOrDefault(texId);
     }
 }

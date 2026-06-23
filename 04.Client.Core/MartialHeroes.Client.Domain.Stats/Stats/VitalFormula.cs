@@ -15,9 +15,7 @@ public static class VitalFormula
     private const float MpWeightInt = 3.5f;
 
     private const double ScoreConstant = 30.0;
-
     public const byte HpAuraKind = 1;
-
     public const byte MpAuraKind = 2;
 
     public static (long MaxHp, long MaxMp) Compute(in VitalFormulaInputs inputs)

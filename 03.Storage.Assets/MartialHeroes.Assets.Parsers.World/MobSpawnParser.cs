@@ -24,17 +24,11 @@ public static class MobSpawnParser
         {
             var offset = i * RecordStride;
             var rec = span.Slice(offset, RecordStride);
-
             var mobId = BinaryPrimitives.ReadUInt16LittleEndian(rec[..]);
-
             var pad = BinaryPrimitives.ReadUInt16LittleEndian(rec[2..]);
-
             var worldX = BinaryPrimitives.ReadSingleLittleEndian(rec[4..]);
-
             var worldZ = BinaryPrimitives.ReadSingleLittleEndian(rec[8..]);
-
             var fieldC = BinaryPrimitives.ReadSingleLittleEndian(rec[12..]);
-
             var field10 = BinaryPrimitives.ReadSingleLittleEndian(rec[16..]);
 
             results[i] = new MobSpawnRecord

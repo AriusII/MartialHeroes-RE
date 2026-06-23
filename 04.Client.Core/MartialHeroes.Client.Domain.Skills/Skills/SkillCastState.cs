@@ -17,8 +17,6 @@ public readonly record struct SkillCastState
 
     public static SkillCastState Idle => default;
 
-    public bool IsIdle => Phase == SkillCastPhase.Idle;
-
     public (SkillCastState Next, SkillCastResult Result) TryBeginCast(
         in SkillDefinition skill,
         in CasterState caster,
@@ -47,31 +45,6 @@ public readonly record struct SkillCastState
         return (next, SkillCastResult.Ok);
     }
 
-    public SkillCastState ConfirmCast(in SkillDefinition skill, CooldownTable cooldowns, long now)
-    {
-        ArgumentNullException.ThrowIfNull(cooldowns);
-
-        if (Phase != SkillCastPhase.Casting || ActiveSkill != skill.Id) return this;
-
-        var cooldownEnd = now;
-
-        if (!skill.IsCooldownExempt)
-        {
-            cooldowns.Arm(skill.Id, now);
-            cooldownEnd = now + skill.CooldownMs;
-        }
-
-        if (cooldownEnd <= now) return Idle;
-
-        return new SkillCastState
-        {
-            Phase = SkillCastPhase.Cooldown,
-            ActiveSkill = skill.Id,
-            CastEndMs = 0,
-            CooldownEndMs = cooldownEnd
-        };
-    }
-
     public SkillCastState Tick(long now)
     {
         switch (Phase)
@@ -85,10 +58,5 @@ public readonly record struct SkillCastState
             default:
                 return this;
         }
-    }
-
-    public SkillCastState Cancel()
-    {
-        return Phase == SkillCastPhase.Casting ? Idle : this;
     }
 }

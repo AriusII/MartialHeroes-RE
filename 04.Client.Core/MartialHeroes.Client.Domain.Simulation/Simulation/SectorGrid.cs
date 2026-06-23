@@ -2,8 +2,6 @@ namespace MartialHeroes.Client.Domain.Simulation.Simulation;
 
 public enum StreamQuality
 {
-    Low = 0,
-
     Medium = 1,
 
     High = 2
@@ -33,8 +31,6 @@ public static class SectorGrid
         return quality switch
         {
             StreamQuality.High => 2,
-            StreamQuality.Medium => 1,
-            StreamQuality.Low => 1,
             _ => 1
         };
     }
@@ -66,15 +62,6 @@ public static class SectorGrid
             destination[index++] = (centerX + dx, centerZ + dz);
 
         return count;
-    }
-
-    public static int RequiredSectors(
-        int centerX,
-        int centerZ,
-        StreamQuality quality,
-        Span<(int MapX, int MapZ)> destination)
-    {
-        return RequiredSectors(centerX, centerZ, RingRadiusFor(quality), destination);
     }
 
     public static bool ShouldEvict(int centerX, int centerZ, int cellX, int cellZ)

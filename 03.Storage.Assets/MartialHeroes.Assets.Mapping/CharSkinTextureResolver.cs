@@ -1,4 +1,5 @@
-#nullable enable
+using System.Globalization;
+
 namespace MartialHeroes.Assets.Mapping;
 
 public static class CharSkinTextureResolver
@@ -8,14 +9,14 @@ public static class CharSkinTextureResolver
         "data/char/tex10241024/",
         "data/char/tex512512/",
         "data/char/tex256512/",
-        "data/char/tex256256/",
+        "data/char/tex256256/"
     ];
 
     private static readonly string[] ProbeExtensions =
     [
         ".png",
         ".dds",
-        ".bmp",
+        ".bmp"
     ];
 
     public static string? Resolve(
@@ -25,16 +26,14 @@ public static class CharSkinTextureResolver
     {
         ArgumentNullException.ThrowIfNull(vfsContains);
 
-        var name = texId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var name = texId.ToString(CultureInfo.InvariantCulture);
 
         foreach (var bucket in BucketDirs)
+        foreach (var ext in ProbeExtensions)
         {
-            foreach (var ext in ProbeExtensions)
-            {
-                var candidate = string.Concat(bucket, name, ext);
-                if (vfsContains(candidate))
-                    return candidate;
-            }
+            var candidate = string.Concat(bucket, name, ext);
+            if (vfsContains(candidate))
+                return candidate;
         }
 
         onMissing?.Invoke(

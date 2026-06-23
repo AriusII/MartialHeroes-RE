@@ -1,18 +1,9 @@
 namespace MartialHeroes.Client.Domain.Stats.Stats;
 
-public readonly struct StatBaseCurve
+public readonly struct StatBaseCurve(IReadOnlyList<long>? baseByLevel)
 {
-    private readonly IReadOnlyList<long>? _baseByLevel;
-
-    public StatBaseCurve(IReadOnlyList<long>? baseByLevel)
-    {
-        _baseByLevel = baseByLevel is { Count: > 0 } ? baseByLevel : null;
-    }
-
+    private readonly IReadOnlyList<long>? _baseByLevel = baseByLevel is { Count: > 0 } ? baseByLevel : null;
     public static StatBaseCurve Empty => default;
-
-    public bool IsEmpty => _baseByLevel is null;
-
     public int Count => _baseByLevel?.Count ?? 0;
 
     public long BaseForLevel(int level)

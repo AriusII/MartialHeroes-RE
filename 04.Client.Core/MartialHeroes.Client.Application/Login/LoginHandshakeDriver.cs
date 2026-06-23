@@ -5,28 +5,22 @@ using MartialHeroes.Network.Crypto;
 
 namespace MartialHeroes.Client.Application.Login;
 
-public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
+public sealed class LoginHandshakeDriver(
+    IOutboundPacketSink outbound,
+    LoginCredentialStore credentials,
+    SessionId sessionId,
+    IPaddingRandom? paddingRandom = null)
+    : ILoginHandshakeDriver
 {
     private const ushort AuthReplyMajor = 1;
 
     private const ushort AuthReplyMinor = 4;
 
-    private readonly LoginCredentialStore _credentials;
-    private readonly IOutboundPacketSink _outbound;
-    private readonly IPaddingRandom _paddingRandom;
-    private readonly SessionId _sessionId;
+    private readonly LoginCredentialStore _credentials =
+        credentials ?? throw new ArgumentNullException(nameof(credentials));
 
-    public LoginHandshakeDriver(
-        IOutboundPacketSink outbound,
-        LoginCredentialStore credentials,
-        SessionId sessionId,
-        IPaddingRandom? paddingRandom = null)
-    {
-        _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
-        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
-        _sessionId = sessionId;
-        _paddingRandom = paddingRandom ?? CryptoPaddingRandom.Shared;
-    }
+    private readonly IOutboundPacketSink _outbound = outbound ?? throw new ArgumentNullException(nameof(outbound));
+    private readonly IPaddingRandom _paddingRandom = paddingRandom ?? CryptoPaddingRandom.Shared;
 
     public int OnKeyExchange(ReadOnlySpan<byte> keyExchangePayload)
     {
@@ -40,7 +34,7 @@ public sealed class LoginHandshakeDriver : ILoginHandshakeDriver
             _credentials.StagedPasswordM,
             _paddingRandom);
 
-        _ = _outbound.SendAsync(_sessionId, AuthReplyMajor, AuthReplyMinor, reply);
+        _ = _outbound.SendAsync(sessionId, AuthReplyMajor, AuthReplyMinor, reply);
 
         _credentials.Clear();
 

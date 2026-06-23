@@ -5,7 +5,6 @@ using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
-using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Shared.Kernel.Numerics;
 
@@ -39,7 +38,7 @@ public sealed partial class GamePacketHandler
             return;
         }
 
-        _unhandled.Record(Opcodes.SmsgCharSpawnResult, SmsgCharSpawnResult.WireSize);
+        _unhandled.Record();
     }
 
 

@@ -41,11 +41,6 @@ public sealed class ItemCatalogue
         ArgumentNullException.ThrowIfNull(loader);
         return new ItemCatalogue(loader.LoadItemsScr());
     }
-
-    public ItemCatalogueRecord? TryGet(uint itemId)
-    {
-        return _byId.TryGetValue(itemId, out var r) ? r : null;
-    }
 }
 
 public sealed record ItemCatalogueRecord

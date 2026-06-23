@@ -4,28 +4,13 @@ using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Application.World;
 
-public sealed class RegionService
+public sealed class RegionService(IRegionSource source, IHudEventHub hub)
 {
-    private readonly IHudEventHub _hub;
-
-    private readonly IRegionSource _source;
-
-
+    private readonly IHudEventHub _hub = hub ?? throw new ArgumentNullException(nameof(hub));
+    private readonly IRegionSource _source = source ?? throw new ArgumentNullException(nameof(source));
     private RegionCatalog? _catalog;
-
     private bool _everPublished;
-
     private ZoneType _lastPublished;
-
-
-    public RegionService(IRegionSource source, IHudEventHub hub)
-    {
-        _source = source ?? throw new ArgumentNullException(nameof(source));
-        _hub = hub ?? throw new ArgumentNullException(nameof(hub));
-    }
-
-    public ZoneType CurrentZone => _everPublished ? _lastPublished : ZoneType.Safe;
-
 
     public async ValueTask LoadAreaAsync(int areaId, CancellationToken cancellationToken = default)
     {

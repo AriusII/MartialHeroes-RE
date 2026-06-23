@@ -24,11 +24,6 @@ public sealed class InboundFrameDispatcher(IPacketHandler handler)
         _frames.Writer.TryComplete();
     }
 
-    public bool RouteNow(ReadOnlySpan<byte> frame)
-    {
-        return PacketRouter.Route(frame, _handler);
-    }
-
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         await foreach (var frame in _frames.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))

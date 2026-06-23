@@ -4,17 +4,11 @@ using MartialHeroes.Shared.Kernel.State;
 
 namespace MartialHeroes.Client.Application.Contracts.Scene;
 
-public sealed class SceneStateMachine
+public sealed class SceneStateMachine(IClientEventBus eventBus, GameState? initial = null)
 {
-    private readonly IClientEventBus _eventBus;
+    private readonly IClientEventBus _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
 
-    public SceneStateMachine(IClientEventBus eventBus, GameState? initial = null)
-    {
-        _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
-        Current = initial ?? GameState.Initial;
-    }
-
-    public GameState Current { get; private set; }
+    public GameState Current { get; private set; } = initial ?? GameState.Initial;
 
     public bool SkipOpening { get; set; }
 
@@ -49,13 +43,9 @@ public sealed class SceneStateMachine
 
     public bool OnCharacterListReceived()
     {
-        if (Current.State is EngineSceneState.Load or EngineSceneState.Select)
-        {
-            EnteringWorld = false;
-            return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), true);
-        }
-
-        return false;
+        if (Current.State is not (EngineSceneState.Load or EngineSceneState.Select)) return false;
+        EnteringWorld = false;
+        return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), true);
     }
 
     public bool OnGameStateTickNoLocalPlayer()
@@ -76,25 +66,25 @@ public sealed class SceneStateMachine
 
     public bool OnCharActionResult(int result, bool hasLocalPlayer)
     {
-        if (Current.State == EngineSceneState.Load && EnteringWorld)
+        switch (Current.State)
         {
-            EnteringWorld = false;
-            return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), true);
+            case EngineSceneState.Load when EnteringWorld:
+                EnteringWorld = false;
+                return Commit(Current.To(EngineSceneState.Select, GameState.SubStateNone), true);
+            case EngineSceneState.Select when !hasLocalPlayer:
+                return result switch
+                {
+                    0 => Commit(Current.To(EngineSceneState.Quit, GameState.SubStateNone)),
+                    1 or 2 or 3 or 4 or 5 or 7 or 22 or 23 => Commit(Current.ToError(5, result)),
+                    202 or 203 or 232 => CommitReloadLoad(),
+                    10 or 11 or 16 or 200 or 201 => false,
+                    >= 204 and <= 211 => false,
+                    >= 220 and <= 227 => false,
+                    >= 212 and <= 219 => false,
+                    >= 228 and <= 231 => false,
+                    _ => Commit(Current.ToError(GameState.SubStateNone, result))
+                };
         }
-
-        if (Current.State == EngineSceneState.Select && !hasLocalPlayer)
-            return result switch
-            {
-                0 => Commit(Current.To(EngineSceneState.Quit, GameState.SubStateNone)),
-                1 or 2 or 3 or 4 or 5 or 7 or 22 or 23 => Commit(Current.ToError(5, result)),
-                202 or 203 or 232 => CommitReloadLoad(),
-                10 or 11 or 16 or 200 or 201 => false,
-                >= 204 and <= 211 => false,
-                >= 220 and <= 227 => false,
-                >= 212 and <= 219 => false,
-                >= 228 and <= 231 => false,
-                _ => Commit(Current.ToError(GameState.SubStateNone, result))
-            };
 
         if (hasLocalPlayer)
             return result == 0

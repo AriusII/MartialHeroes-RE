@@ -30,7 +30,7 @@ public sealed class OpeningSkipIniReader : IOpeningSkipReader
             if (line.Length == 0 || line[0] is ';' or '#')
                 continue;
 
-            if (line[0] == '[' && line.EndsWith("]", StringComparison.Ordinal))
+            if (line[0] == '[' && line.EndsWith(']'))
             {
                 var section = line[1..^1].Trim();
                 inSection = string.Equals(section, SectionName, StringComparison.OrdinalIgnoreCase);

@@ -213,6 +213,6 @@ public sealed class WeatherBin
 
     public float GetIntensity(int timeBlockMod10, int hourColumn)
     {
-        return (GetCode(timeBlockMod10, hourColumn) % 10) * 0.1f;
+        return GetCode(timeBlockMod10, hourColumn) % 10 * 0.1f;
     }
 }

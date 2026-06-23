@@ -6,15 +6,10 @@ namespace MartialHeroes.Assets.Parsers.World;
 public static class RegionZoneTableParser
 {
     public const int RecordCount = 32;
-
     public const int RecordStride = 48;
-
     public const int ExpectedTableSize = RecordCount * RecordStride;
-
     private const int OpaqueLeadingSize = 40;
-
     private const int ZoneTypeOffset = 40;
-
     private const int OpaqueTrailingOffset = 44;
     private const int OpaqueTrailingSize = 4;
 

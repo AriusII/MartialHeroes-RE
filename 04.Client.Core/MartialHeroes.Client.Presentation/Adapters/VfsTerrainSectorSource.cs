@@ -4,20 +4,11 @@ using MartialHeroes.Client.Application.World;
 
 namespace MartialHeroes.Client.Presentation.Adapters;
 
-public sealed class VfsTerrainSectorSource : ITerrainSectorSource
+public sealed class VfsTerrainSectorSource(MappedVfsArchive? vfs, int areaId) : ITerrainSectorSource
 {
-    private readonly MappedVfsArchive? _vfs;
+    private int _areaId = areaId;
 
-    private int _areaId;
-
-    private HashSet<uint>? _manifestKeys;
-
-    public VfsTerrainSectorSource(MappedVfsArchive? vfs, int areaId)
-    {
-        _vfs = vfs;
-        _areaId = areaId;
-        _manifestKeys = vfs is not null ? TryLoadManifest(vfs, areaId) : null;
-    }
+    private HashSet<uint>? _manifestKeys = vfs is not null ? TryLoadManifest(vfs, areaId) : null;
 
     public void SetArea(int areaId)
     {
@@ -25,7 +16,7 @@ public sealed class VfsTerrainSectorSource : ITerrainSectorSource
             _manifestKeys is not null) return;
 
         _areaId = areaId;
-        _manifestKeys = _vfs is not null ? TryLoadManifest(_vfs, areaId) : null;
+        _manifestKeys = vfs is not null ? TryLoadManifest(vfs, areaId) : null;
     }
 
     public ValueTask<ReadOnlyMemory<byte>> LoadSectorAsync(
@@ -35,14 +26,14 @@ public sealed class VfsTerrainSectorSource : ITerrainSectorSource
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_vfs is null || _manifestKeys is null) return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
+        if (vfs is null || _manifestKeys is null) return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
 
         var key = LstManifestParser.ComputeKey(mapX, mapZ);
         if (!_manifestKeys.Contains(key)) return ValueTask.FromResult(ReadOnlyMemory<byte>.Empty);
 
         var tedPath = BuildTedPath(_areaId, mapX, mapZ);
 
-        var bytes = TryGetContent(_vfs, tedPath);
+        var bytes = TryGetContent(vfs, tedPath);
         return ValueTask.FromResult(bytes);
     }
 
@@ -95,9 +86,7 @@ public sealed class VfsTerrainSectorSource : ITerrainSectorSource
     {
         try
         {
-            if (!vfs.Contains(path)) return ReadOnlyMemory<byte>.Empty;
-
-            return vfs.GetFileContent(path);
+            return !vfs.Contains(path) ? ReadOnlyMemory<byte>.Empty : vfs.GetFileContent(path);
         }
         catch (Exception)
         {

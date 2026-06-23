@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Collections.Immutable;
 using System.Text;
 using MartialHeroes.Client.Application.Contracts.Events;
-using MartialHeroes.Client.Application.Contracts.Scene;
 using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.World;
@@ -21,36 +20,18 @@ namespace MartialHeroes.Client.Application.UseCases;
 public sealed class ApplicationUseCases : IApplicationUseCases
 {
     public const int SessionTokenLength = 33;
-
-    public const int VersionTokenLength = SessionTokenLength;
-
-
     private const int EquipChangeWireSize = 12;
-
     private const int TradeRequestWireSize = 8;
-
     private const int PartyInviteWireSize = 8;
-
-
     private const byte WhisperChannelCode = 9;
-
     private const int WhisperBodyByteCap = 119;
-
     private const int WhisperTargetNameBytes = 16;
-
-
     public const uint PointBuyStatSeed = 10;
-
     public const uint PointBuyStatFloor = 10;
-
     public const uint PointBuyStatCeil = 15;
-
     public const uint PointBuyBudgetSeed = 5;
-
     public const uint PointBuyInvariantTotal = 5 * PointBuyStatSeed + PointBuyBudgetSeed;
-
     private static readonly Encoding Cp949 = CreateCp949();
-
     private readonly CharacterSelectionStore? _characterSelection;
     private readonly LoginCredentialStore _credentials;
     private readonly IClientEventBus? _eventBus;
@@ -60,7 +41,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private readonly ILobbyClient? _lobbyClient;
     private readonly LocalPlayerState? _localPlayer;
     private readonly IOutboundPacketSink _outbound;
-    private readonly SceneStateMachine? _sceneStateMachine;
 
     private readonly CooldownTable _scratchCooldowns = new();
 
@@ -80,7 +60,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         CharacterSelectionStore? characterSelection = null,
         IClientEventBus? eventBus = null,
         ILobbyClient? lobbyClient = null,
-        SceneStateMachine? sceneStateMachine = null,
         ILastServerStore? lastServerStore = null,
         InFlightLatch? inFlightLatch = null,
         KeepaliveDriver? keepaliveDriver = null)
@@ -94,7 +73,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         _eventBus = eventBus;
         _lobbyClient = lobbyClient;
         _lastServerStore = lastServerStore;
-        _sceneStateMachine = sceneStateMachine;
         _inFlightLatch = inFlightLatch;
         _keepaliveDriver = keepaliveDriver;
 
@@ -168,7 +146,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
         Span<byte> payload = stackalloc byte[CmsgMoveRequest.WireSize];
         payload.Clear();
-        BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x00, 4), heading);
+        BinaryPrimitives.WriteSingleLittleEndian(payload[..4], heading);
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x04, 4), tgtX);
         BinaryPrimitives.WriteSingleLittleEndian(payload.Slice(0x08, 4), tgtZ);
         const byte moveModeConstant = 3;
@@ -214,26 +192,9 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendAsync(1, 7, payload, cancellationToken);
     }
 
-    public ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
-        payload.Clear();
-        payload[0x00] = slotIndex;
-        SessionTokenChecksum.WriteSelfChecksum(payload.Slice(0x01, SessionTokenChecksum.SessionTokenLength));
-        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
-
-        _inFlightLatch?.Arm();
-
-        SeedEnterTimeLocalPlayer(slotIndex);
-
-        return SendAsync(1, 9, payload, cancellationToken);
-    }
-
     public IReadOnlyList<CharacterSlotRecord?> GetCharacterRoster()
     {
-        return _characterSelection?.Snapshot() ?? Array.Empty<CharacterSlotRecord?>();
+        return _characterSelection?.Snapshot() ?? [];
     }
 
     public ValueTask<CharacterNameValidationResult> CreateCharacterAsync(
@@ -264,7 +225,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
         var payload = new byte[CmsgCreateCharacter.WireSize];
         Span<byte> p = payload;
-        WriteFixedCp949(request.Name, p.Slice(0x00, 18));
+        WriteFixedCp949(request.Name, p[..18]);
         BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x12, 2), request.Face);
         BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x14, 2), request.AppearanceA);
         BinaryPrimitives.WriteUInt16LittleEndian(p.Slice(0x16, 2), request.AppearanceB);
@@ -385,6 +346,23 @@ public sealed class ApplicationUseCases : IApplicationUseCases
             return ValueTask.CompletedTask;
 
         return SendChat27Async(channel, isWhisper ? recipientName : null, text, cancellationToken);
+    }
+
+    public ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
+        payload.Clear();
+        payload[0x00] = slotIndex;
+        SessionTokenChecksum.WriteSelfChecksum(payload.Slice(0x01, SessionTokenChecksum.SessionTokenLength));
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
+
+        _inFlightLatch?.Arm();
+
+        SeedEnterTimeLocalPlayer(slotIndex);
+
+        return SendAsync(1, 9, payload, cancellationToken);
     }
 
     public async ValueTask<SkillCastResult> CastSkillAsync(
@@ -587,8 +565,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
             WriteFixedCp949(recipientName, p.Slice(0x02, WhisperTargetNameBytes));
 
 
-        var tail = p.Slice(CmsgWhisperHeader.HeaderSize);
-        BinaryPrimitives.WriteUInt32LittleEndian(tail.Slice(0, sizeof(uint)), (uint)bodyByteCount);
+        var tail = p[CmsgWhisperHeader.HeaderSize..];
+        BinaryPrimitives.WriteUInt32LittleEndian(tail[..sizeof(uint)], (uint)bodyByteCount);
         Cp949.GetBytes(text.AsSpan(0, Cp949CharCountForBytes(text, bodyByteCount)),
             tail.Slice(sizeof(uint), bodyByteCount));
 
@@ -650,7 +628,7 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
         foreach (var ch in name)
         {
-            if (ch is >= 'a' and <= 'z' || ch is >= '0' and <= '9') continue;
+            if (ch is >= 'a' and <= 'z' or >= '0' and <= '9') continue;
 
             if (ch is >= '\uAC00' and <= '\uD7A3') continue;
 
@@ -673,14 +651,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         };
     }
 
-    public static PointBuyResult PointBuySeed()
-    {
-        return new PointBuyResult(
-            true,
-            PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed, PointBuyStatSeed,
-            PointBuyBudgetSeed);
-    }
-
     public static PointBuyResult BuildPointBuy(
         uint stat0, uint stat1, uint stat2, uint stat3, uint stat4, uint pointsRemaining)
     {
@@ -699,57 +669,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         }
     }
 
-    public static PointBuyResult PointBuyIncrement(in PointBuyResult current, int statIndex, out bool stepped)
-    {
-        stepped = false;
-        if ((uint)statIndex > 4) return current;
-        if (current.PointsRemaining == 0) return current;
-
-        var stat = StatAt(in current, statIndex);
-        if (stat >= PointBuyStatCeil) return current;
-
-        stepped = true;
-        return WithStat(in current, statIndex, stat + 1, current.PointsRemaining - 1);
-    }
-
-    public static PointBuyResult PointBuyDecrement(in PointBuyResult current, int statIndex, out bool stepped)
-    {
-        stepped = false;
-        if ((uint)statIndex > 4) return current;
-        if (current.PointsRemaining >= PointBuyBudgetSeed) return current;
-
-        var stat = StatAt(in current, statIndex);
-        if (stat <= PointBuyStatFloor) return current;
-
-        stepped = true;
-        return WithStat(in current, statIndex, stat - 1, current.PointsRemaining + 1);
-    }
-
-    private static uint StatAt(in PointBuyResult r, int statIndex)
-    {
-        return statIndex switch
-        {
-            0 => r.Stat0,
-            1 => r.Stat1,
-            2 => r.Stat2,
-            3 => r.Stat3,
-            _ => r.Stat4
-        };
-    }
-
-    private static PointBuyResult WithStat(in PointBuyResult r, int statIndex, uint value, uint points)
-    {
-        return statIndex switch
-        {
-            0 => r with { Stat0 = value, PointsRemaining = points },
-            1 => r with { Stat1 = value, PointsRemaining = points },
-            2 => r with { Stat2 = value, PointsRemaining = points },
-            3 => r with { Stat3 = value, PointsRemaining = points },
-            _ => r with { Stat4 = value, PointsRemaining = points }
-        };
-    }
-
-
     private ValueTask SendAsync(ushort major, ushort minor, ReadOnlySpan<byte> payload, CancellationToken ct)
     {
         var owned = payload.ToArray();
@@ -759,13 +678,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     private ValueTask SendAsync(ushort major, ushort minor, ReadOnlyMemory<byte> payload, CancellationToken ct)
     {
         return _outbound.SendAsync(_sessionId, major, minor, payload, ct);
-    }
-
-    private ValueTask<bool> SendBoolAsync(
-        ushort major, ushort minor, ReadOnlySpan<byte> payload, bool result, CancellationToken ct)
-    {
-        var owned = payload.ToArray();
-        return SendResultAsync(major, minor, owned, result, ct);
     }
 
     private async ValueTask<T> SendResultAsync<T>(

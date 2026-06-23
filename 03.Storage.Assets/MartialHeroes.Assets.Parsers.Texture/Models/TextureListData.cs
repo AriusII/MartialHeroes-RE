@@ -20,6 +20,6 @@ public sealed class TextureListManifest
 
     public TextureListEntry? GetById(int texId)
     {
-        return _byTexId.TryGetValue(texId, out var e) ? e : null;
+        return _byTexId.GetValueOrDefault(texId);
     }
 }

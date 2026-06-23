@@ -3,10 +3,6 @@ namespace MartialHeroes.Client.Presentation.Screens;
 public static class ClassAppearanceResolver
 {
     private const long Slot14BodySlot = 14;
-    private const long CatalogueKeyGidRadix = 1_000_000_000L;
-
-    private const long CatalogueKeySlotRadix = 100L;
-
     public static readonly int[] OverlaySlots = [3, 4, 6, 2, 11, 14];
 
     public static int ModelClassId(int internalClass, int appearanceVariant)
@@ -28,13 +24,6 @@ public static class ClassAppearanceResolver
         };
     }
 
-    public static string? SkeletonBndForModelClassId(int modelClassId)
-    {
-        var idB = SkeletonIdBForModelClassId(modelClassId);
-        return idB == 0 ? null : $"data/char/bind/g{idB}.bnd";
-    }
-
-
     public static long ResolveBodyGidSlot14(int d, int a, int b, int partId)
     {
         return 1000L * (d + 10L * (a + 10L * (b + 10L * (partId / 1_000_000L))));
@@ -43,11 +32,6 @@ public static class ClassAppearanceResolver
     public static long ResolveWornItemGid(int partId)
     {
         return 10000L * (partId / 10000) + partId % 100;
-    }
-
-    public static long ComposeCatalogueKey64(int slot, int appearanceKey, long gid)
-    {
-        return gid + CatalogueKeyGidRadix * (slot + CatalogueKeySlotRadix * appearanceKey);
     }
 
     public static long ResolvePartGid(int slot, int partId, int d, int a, int b)
@@ -61,7 +45,6 @@ public static class ClassAppearanceResolver
     {
         return $"data/char/skin/g{gid}.skn";
     }
-
 
     public static int StarterAppearanceVariant(int internalClass)
     {

@@ -3,26 +3,17 @@ using MartialHeroes.Client.Application.World;
 
 namespace MartialHeroes.Client.Presentation.Adapters;
 
-public sealed class AssembledAreaViewAdapter : IAssembledAreaView
+public sealed class AssembledAreaViewAdapter(AssembledArea area) : IAssembledAreaView
 {
-    private readonly AssembledArea _area;
-
-    private IReadOnlyList<AreaSpawnDescriptor>? _spawns;
-
-    public AssembledAreaViewAdapter(AssembledArea area)
-    {
-        _area = area ?? throw new ArgumentNullException(nameof(area));
-    }
-
+    private readonly AssembledArea _area = area ?? throw new ArgumentNullException(nameof(area));
     public int AreaId => _area.AreaId;
-
     public int CellKeyCount => _area.CellKeys.Count;
 
     public IReadOnlyList<AreaSpawnDescriptor> Spawns
     {
         get
         {
-            if (_spawns is not null) return _spawns;
+            if (field is not null) return field;
 
             var src = _area.Spawns;
             var projected = new AreaSpawnDescriptor[src.Count];
@@ -37,8 +28,8 @@ public sealed class AssembledAreaViewAdapter : IAssembledAreaView
                     s.IsNpc);
             }
 
-            _spawns = projected;
-            return _spawns;
+            field = projected;
+            return field;
         }
     }
 }

@@ -8,22 +8,3 @@ public interface IStatCatalogueSource
 
     StatBaseCurve GetMpBaseCurve();
 }
-
-public sealed class EmptyStatCatalogueSource : IStatCatalogueSource
-{
-    public static readonly EmptyStatCatalogueSource Instance = new();
-
-    private EmptyStatCatalogueSource()
-    {
-    }
-
-    public StatBaseCurve GetHpBaseCurve()
-    {
-        return StatBaseCurve.Empty;
-    }
-
-    public StatBaseCurve GetMpBaseCurve()
-    {
-        return StatBaseCurve.Empty;
-    }
-}

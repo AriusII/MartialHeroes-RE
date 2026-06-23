@@ -12,33 +12,28 @@ public enum LoadOrchestratorState
     Faulted
 }
 
-public sealed class LoadOrchestrator
+public sealed class LoadOrchestrator(
+    SceneStateMachine scene,
+    ILoadResourceSource resourceSource,
+    IOpeningSkipReader openingSkipReader,
+    ILoadingSoundSink? soundSink = null)
 {
     private const int
         LoadingSoundCueId = 920100100;
 
     private const long LegacyProgressDenominatorBytes = 9_395_240;
     private readonly object _gate = new();
-    private readonly IOpeningSkipReader _openingSkipReader;
-    private readonly ILoadResourceSource _resourceSource;
 
-    private readonly SceneStateMachine _scene;
-    private readonly ILoadingSoundSink? _soundSink;
+    private readonly IOpeningSkipReader _openingSkipReader =
+        openingSkipReader ?? throw new ArgumentNullException(nameof(openingSkipReader));
+
+    private readonly ILoadResourceSource _resourceSource =
+        resourceSource ?? throw new ArgumentNullException(nameof(resourceSource));
+
+    private readonly SceneStateMachine _scene = scene ?? throw new ArgumentNullException(nameof(scene));
     private Task _completion = Task.CompletedTask;
     private long _cumulativeBytes;
     private bool _startedAsReload;
-
-    public LoadOrchestrator(
-        SceneStateMachine scene,
-        ILoadResourceSource resourceSource,
-        IOpeningSkipReader openingSkipReader,
-        ILoadingSoundSink? soundSink = null)
-    {
-        _scene = scene ?? throw new ArgumentNullException(nameof(scene));
-        _resourceSource = resourceSource ?? throw new ArgumentNullException(nameof(resourceSource));
-        _openingSkipReader = openingSkipReader ?? throw new ArgumentNullException(nameof(openingSkipReader));
-        _soundSink = soundSink;
-    }
 
     public LoadOrchestratorState State { get; private set; } = LoadOrchestratorState.NotStarted;
 
@@ -79,18 +74,10 @@ public sealed class LoadOrchestrator
             _startedAsReload = _scene.LoadIsReload;
             _scene.SkipOpening = _openingSkipReader.ReadSkipOpening();
 
-            _soundSink?.PlayLooping(LoadingSoundCueId);
+            soundSink?.PlayLooping(LoadingSoundCueId);
             State = LoadOrchestratorState.Running;
-            _completion = Task.Run(() => RunWorkerAsync(cancellationToken));
+            _completion = Task.Run(() => RunWorkerAsync(cancellationToken), cancellationToken);
         }
-    }
-
-    public bool AdvanceSceneWhenComplete()
-    {
-        if (State != LoadOrchestratorState.Completed)
-            return false;
-
-        return _scene.AdvanceScene();
     }
 
     private async Task RunWorkerAsync(CancellationToken cancellationToken)

@@ -60,8 +60,6 @@ public static class ChatRouting
 
             ChatChannel.Channel => textLength >= ChatTextLimit ? ChatRouteResult.TooLong : ChatRouteResult.Send,
 
-            ChatChannel.Context82 or ChatChannel.Variant84 => ChatRouteResult.Send,
-
             _ => ChatRouteResult.Send
         };
     }

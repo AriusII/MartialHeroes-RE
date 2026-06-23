@@ -109,6 +109,7 @@ public sealed partial class CharSelectWindow
                 {
                     if (_noticeSmall is not null) _noticeSmall.Visible = true;
                 }
+
                 break;
 
             case >= ActClass0 and <= ActClass0 + 3:

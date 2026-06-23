@@ -7,16 +7,11 @@ namespace MartialHeroes.Assets.Parsers.World;
 public static class RegionTableParser
 {
     private const int RecordStride = 48;
-
     private const int RecordCount = 32;
-
     private const int ExpectedMinSize = RecordCount * RecordStride;
-
     private const int ZoneNameOffset = 0x00;
     private const int ZoneNameSize = 40;
-
     private const int ZoneTypeOffset = 0x28;
-
     private const int TailOffset = 0x2C;
 
     static RegionTableParser()

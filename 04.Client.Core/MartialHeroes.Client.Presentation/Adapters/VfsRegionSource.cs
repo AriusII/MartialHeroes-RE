@@ -5,18 +5,11 @@ using MartialHeroes.Client.Domain.Simulation.Simulation;
 
 namespace MartialHeroes.Client.Presentation.Adapters;
 
-public sealed class VfsRegionSource : IRegionSource
+public sealed class VfsRegionSource(MappedVfsArchive? vfs) : IRegionSource
 {
     private const string RegionGridPathFmt = "data/map{0:D3}/region{0:D3}.bin";
 
     private const string RegionTablePathFmt = "data/map{0:D3}/regiontable{0:D3}.bin";
-
-    private readonly MappedVfsArchive? _vfs;
-
-    public VfsRegionSource(MappedVfsArchive? vfs)
-    {
-        _vfs = vfs;
-    }
 
     public ValueTask<RegionCatalog?> LoadRegionCatalogAsync(
         int areaId,
@@ -24,26 +17,26 @@ public sealed class VfsRegionSource : IRegionSource
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (_vfs is null)
+        if (vfs is null)
             return ValueTask.FromResult<RegionCatalog?>(null);
 
         try
         {
             var gridPath = string.Format(RegionGridPathFmt, areaId);
-            if (!_vfs.Contains(gridPath))
+            if (!vfs.Contains(gridPath))
                 return ValueTask.FromResult<RegionCatalog?>(null);
 
-            var gridBytes = _vfs.GetFileContent(gridPath);
+            var gridBytes = vfs.GetFileContent(gridPath);
             if (gridBytes.IsEmpty)
                 return ValueTask.FromResult<RegionCatalog?>(null);
 
             var grid = RegionGridParser.Parse(gridBytes);
 
             var tablePath = string.Format(RegionTablePathFmt, areaId);
-            if (!_vfs.Contains(tablePath))
+            if (!vfs.Contains(tablePath))
                 return ValueTask.FromResult<RegionCatalog?>(null);
 
-            var tableBytes = _vfs.GetFileContent(tablePath);
+            var tableBytes = vfs.GetFileContent(tablePath);
             if (tableBytes.IsEmpty)
                 return ValueTask.FromResult<RegionCatalog?>(null);
 

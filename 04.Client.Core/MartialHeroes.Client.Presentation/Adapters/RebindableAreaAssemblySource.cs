@@ -4,16 +4,10 @@ using MartialHeroes.Assets.Vfs;
 
 namespace MartialHeroes.Client.Presentation.Adapters;
 
-public sealed class RebindableAreaAssemblySource : IAreaAssemblySource
+public sealed class RebindableAreaAssemblySource(MappedVfsArchive vfs, int initialAreaId) : IAreaAssemblySource
 {
-    private readonly MappedVfsArchive _vfs;
-    private VfsAreaAssemblySource _inner;
-
-    public RebindableAreaAssemblySource(MappedVfsArchive vfs, int initialAreaId)
-    {
-        _vfs = vfs ?? throw new ArgumentNullException(nameof(vfs));
-        _inner = new VfsAreaAssemblySource(vfs, initialAreaId);
-    }
+    private readonly MappedVfsArchive _vfs = vfs ?? throw new ArgumentNullException(nameof(vfs));
+    private VfsAreaAssemblySource _inner = new(vfs, initialAreaId);
 
 
     public int AreaId => _inner.AreaId;

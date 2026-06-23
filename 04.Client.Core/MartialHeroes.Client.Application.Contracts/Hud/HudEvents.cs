@@ -94,8 +94,4 @@ public sealed record ZoneChangedEvent(
 public sealed record ExpLevelEvent(
     long CurrentXp,
     long XpForLevel,
-    ushort Level) : IHudEvent
-{
-    public float Ratio =>
-        XpForLevel <= 0 ? 0f : Math.Clamp((float)((double)CurrentXp / XpForLevel), 0f, 1f);
-}
+    ushort Level) : IHudEvent;

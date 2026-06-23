@@ -258,7 +258,7 @@ public sealed partial class ClientContext
         var gameVerVersionSource = GameVerClientVersionSource.Resolve(_uiAssets);
 
         var useCases = new ApplicationUseCases(noopSink, world, credentialStore, sessionId,
-            sessionTokenBytes.AsSpan(), versionSource: gameVerVersionSource, sceneStateMachine: sceneMachine,
+            sessionTokenBytes.AsSpan(), versionSource: gameVerVersionSource,
             eventBus: bus, lobbyClient: lobbyClient, lastServerStore: lastServerStore,
             characterSelection: characterSelection, inFlightLatch: inFlightLatch);
         GD.Print(

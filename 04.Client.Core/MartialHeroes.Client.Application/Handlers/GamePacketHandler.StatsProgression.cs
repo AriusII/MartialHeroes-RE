@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Progression.Progression;
-using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 
 namespace MartialHeroes.Client.Application.Handlers;
@@ -48,7 +47,7 @@ public sealed partial class GamePacketHandler
         const byte valid = 1;
         if (packet.Valid != valid)
         {
-            _unhandled.Record(Opcodes.SmsgSkillPointUpdate, SmsgSkillPointUpdateHeader.HeaderSize);
+            _unhandled.Record();
             return;
         }
 
@@ -118,7 +117,7 @@ public sealed partial class GamePacketHandler
         const int minSize = 20;
         if (payload.Length < minSize) return false;
 
-        var actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload.Slice(0x00, 4));
+        var actorId = BinaryPrimitives.ReadUInt32LittleEndian(payload[..4]);
         var sort = payload[0x04];
         var amount = unchecked((long)BinaryPrimitives.ReadUInt64LittleEndian(payload.Slice(0x08, 8)));
         var mode = payload[0x10];

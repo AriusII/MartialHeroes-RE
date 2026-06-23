@@ -17,8 +17,6 @@ public sealed class LoginCredentialStore
 
     public string Username { get; private set; } = string.Empty;
 
-    public bool HasStagedCredential => _stagedPasswordM.Length > 0;
-
     public bool IncludePin { get; private set; }
 
     public ReadOnlySpan<byte> AccountBytes => _accountBytes;

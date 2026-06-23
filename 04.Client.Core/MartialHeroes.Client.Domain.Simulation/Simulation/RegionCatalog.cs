@@ -5,16 +5,11 @@ namespace MartialHeroes.Client.Domain.Simulation.Simulation;
 public sealed class RegionCatalog
 {
     private const int CellSize = 256;
-
     private const int MaxRegionId = 31;
     private readonly byte[] _cells;
-
     private readonly uint _height;
-
     private readonly int _originX;
     private readonly int _originZ;
-
-
     private readonly uint _width;
     private readonly ZoneType[] _zoneTypes;
 
@@ -68,13 +63,6 @@ public sealed class RegionCatalog
         if (regionId > MaxRegionId)
             return ZoneType.OpenPvp;
 
-        return _zoneTypes[regionId];
-    }
-
-    public ZoneType ZoneTypeForRegion(int regionId)
-    {
-        if (regionId < 0 || regionId > MaxRegionId)
-            return ZoneType.OpenPvp;
         return _zoneTypes[regionId];
     }
 

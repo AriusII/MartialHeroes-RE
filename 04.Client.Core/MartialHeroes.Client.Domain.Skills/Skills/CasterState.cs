@@ -29,22 +29,4 @@ public readonly record struct CasterState
     public bool CastWindowOpen { get; init; }
 
     public bool HasTargets { get; init; }
-
-    public static CasterState AllClear => new()
-    {
-        PartyRelationAllied = true,
-        BillingRankOk = true,
-        IsBusyCasting = false,
-        IsMounted = false,
-        MapModeForbidsCasting = false,
-        IsStunnedOrSilenced = false,
-        IsAlive = true,
-        IsActionLocked = false,
-        TargetInBlockingHostileState = false,
-        WeaponRequirementSatisfied = true,
-        SelfCastEligible = true,
-        AvailableMp = int.MaxValue,
-        CastWindowOpen = true,
-        HasTargets = true
-    };
 }

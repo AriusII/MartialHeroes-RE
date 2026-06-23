@@ -8,33 +8,19 @@ namespace MartialHeroes.Client.Infrastructure.Catalog;
 public sealed class SkillCatalogue
 {
     private const int SkillIdOffset = 0;
-
     private const int SkillSortOffset = 1306;
-
     private const int TargetShapeModeOffset = 1308;
-
     private const int BaseRangeOffset = 1312;
-
     private const int AoeRadiusOffset = 1316;
-
     private const int MaxTargetHitsOffset = 1330;
-
     private const int MpCostGateFactorOffset = 1332;
-
     private const int CombatRecastOffset = 1334;
-
     private const int WeaponReqAOffset = 1344;
-
     private const int WeaponReqBOffset = 1348;
-
     private const int WeaponReqActiveFlagOffset = 1352;
-
     private const int CastCostOffset = 1368;
-
     private const int StaminaCostOffset = 1370;
-
     private const int SkillScrMinRecordSize = 1372;
-
     private readonly Dictionary<uint, SkillDefinition> _byId;
 
     public SkillCatalogue(SkillCatalogEntry[] entries)
@@ -106,11 +92,6 @@ public sealed class SkillCatalogue
     {
         ArgumentNullException.ThrowIfNull(loader);
         return new SkillCatalogue(loader.LoadSkillsScr());
-    }
-
-    public SkillDefinition? TryGet(uint skillId)
-    {
-        return _byId.TryGetValue(skillId, out var d) ? d : null;
     }
 
 

@@ -2,8 +2,6 @@ namespace MartialHeroes.Client.Domain.Skills.Skills;
 
 public readonly record struct BuffDebuff
 {
-    public const int PercentGateThreshold = 100;
-
     public int EffectCode { get; init; }
 
     public int DurationTicks { get; init; }
@@ -15,13 +13,6 @@ public readonly record struct BuffDebuff
     public static BuffDebuff Empty => default;
 
     public bool IsActive => DurationTicks > 0;
-
-    public bool IsEmpty => EffectCode == 0 && DurationTicks <= 0;
-
-    public bool IsPercentGatedFlagSet =>
-        EffectCode == (int)BuffEffectCode.PercentGatedFlag
-        && IsActive
-        && Magnitude < PercentGateThreshold;
 
     public (BuffDebuff Next, bool Expired) TickOnce()
     {

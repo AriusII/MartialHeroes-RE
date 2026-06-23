@@ -14,19 +14,7 @@ public readonly record struct CooldownSlot
 
     public bool Armed { get; init; }
 
-    public static CooldownSlot Empty => default;
-
     public bool IsReady => !Armed || RemainingMs <= 0;
-
-    public CooldownSlot Arm(long now)
-    {
-        return this with
-        {
-            SetTimeMs = now,
-            RemainingMs = DurationMs,
-            Armed = DurationMs > 0
-        };
-    }
 
     public CooldownSlot Tick(long now)
     {

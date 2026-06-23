@@ -9,13 +9,10 @@ namespace MartialHeroes.Client.Application.Engine;
 public sealed class GameEngineLoop
 {
     public const int DefaultTickRateHz = 30;
-
     private readonly IClientEventBus _eventBus;
     private readonly InputBus _inputBus;
     private readonly LocalPlayerState? _localPlayer;
-
     private readonly ClientWorld _world;
-
     private long _clockMs;
 
     public GameEngineLoop(

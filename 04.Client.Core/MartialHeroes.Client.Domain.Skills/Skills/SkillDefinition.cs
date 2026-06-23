@@ -6,11 +6,7 @@ public readonly record struct SkillDefinition
 {
     public const ushort BasicAttackCategory = 1;
 
-    public const ushort CooldownArmExemptCategory = 5;
-
     public const ushort ReviveCategory = 14;
-
-    public const int MaxTargetCap = 40;
 
     public const float MinEffectiveRange = 1.0f;
 
@@ -19,8 +15,6 @@ public readonly record struct SkillDefinition
     public required SkillId Id { get; init; }
 
     public required ushort Category { get; init; }
-
-    public ushort Rank { get; init; }
 
     public required SkillTargetMode TargetMode { get; init; }
 
@@ -44,11 +38,7 @@ public readonly record struct SkillDefinition
 
     public ushort StaminaCost { get; init; }
 
-    public int CooldownMs => CooldownCentiseconds * 100;
-
     public bool IsRevive => Category == ReviveCategory;
-
-    public bool IsCooldownExempt => Category is BasicAttackCategory or CooldownArmExemptCategory;
 
     public bool IsCastGateCooldownExempt => Category == BasicAttackCategory;
 }

@@ -63,14 +63,14 @@ internal static class VfsEnvironmentSource
         }
 
         var pointLights = TryParse(assets, $"data/sky/dat/point_light{areaId}.bin",
-            EnvironmentBinParsers.ParsePointLight, "point_light")
-            ?? TryParse(assets, "data/sky/dat/point_light0.bin",
-                EnvironmentBinParsers.ParsePointLight, "point_light(fallback area0)");
+                              EnvironmentBinParsers.ParsePointLight, "point_light")
+                          ?? TryParse(assets, "data/sky/dat/point_light0.bin",
+                              EnvironmentBinParsers.ParsePointLight, "point_light(fallback area0)");
 
         var weather = TryParse(assets, $"data/sky/dat/weather{areaId}.bin",
-            EnvironmentBinParsers.ParseWeather, "weather")
-            ?? TryParse(assets, "data/sky/dat/weather0.bin",
-                EnvironmentBinParsers.ParseWeather, "weather(fallback area0)");
+                          EnvironmentBinParsers.ParseWeather, "weather")
+                      ?? TryParse(assets, "data/sky/dat/weather0.bin",
+                          EnvironmentBinParsers.ParseWeather, "weather(fallback area0)");
 
         return new AreaEnvironment(mapOption, fog, light, material, starDome, cloudDome, cloudCycle,
             pointLights, weather);

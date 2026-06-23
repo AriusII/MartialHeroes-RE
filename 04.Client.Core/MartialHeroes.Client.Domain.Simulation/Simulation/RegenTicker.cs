@@ -16,9 +16,7 @@ public readonly record struct RegenTicker
     }
 
     public uint AccumulatedMs { get; }
-
     public uint StepIntervalMs { get; }
-
     public uint AmountPerStep { get; }
 
     public (RegenTicker Next, uint StepsCompleted) Advance(uint deltaMs)

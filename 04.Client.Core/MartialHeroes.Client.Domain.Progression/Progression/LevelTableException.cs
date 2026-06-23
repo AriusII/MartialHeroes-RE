@@ -1,12 +1,7 @@
 namespace MartialHeroes.Client.Domain.Progression.Progression;
 
-public sealed class LevelTableException : Exception
+public sealed class LevelTableException(int levelIndex)
+    : Exception($"leveltable error: rank-XP divisor is 0 for level index {levelIndex}.")
 {
-    public LevelTableException(int levelIndex)
-        : base($"leveltable error: rank-XP divisor is 0 for level index {levelIndex}.")
-    {
-        LevelIndex = levelIndex;
-    }
-
-    public int LevelIndex { get; }
+    public int LevelIndex { get; } = levelIndex;
 }

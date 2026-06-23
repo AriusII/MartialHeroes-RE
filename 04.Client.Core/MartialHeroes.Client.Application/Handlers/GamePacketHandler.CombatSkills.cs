@@ -5,7 +5,6 @@ using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Skills.Skills;
-using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Shared.Kernel.Ids;
 
@@ -60,7 +59,7 @@ public sealed partial class GamePacketHandler
     {
         if (packet.HotbarSlot >= SmsgSkillHotbarSlotSet.HotbarSlotCount)
         {
-            _unhandled.Record(Opcodes.SmsgSkillHotbarSlotSet, SmsgSkillHotbarSlotSet.WireSize);
+            _unhandled.Record();
             return;
         }
 

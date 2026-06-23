@@ -9,9 +9,7 @@ public sealed class CharacterSelectionStore
     public enum SelectOutcome
     {
         Invalid,
-
         Blank,
-
         Confirmed
     }
 

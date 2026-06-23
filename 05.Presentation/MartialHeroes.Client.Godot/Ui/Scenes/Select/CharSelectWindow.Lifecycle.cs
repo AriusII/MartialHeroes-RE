@@ -8,11 +8,11 @@ public sealed partial class CharSelectWindow
     private const string AtlasTradeKeep = "data/ui/tradekeep.dds";
     private HudLabel? _deleteBodyWidget;
     private HudLabel? _deleteTitleWidget;
+    private int _lastRenameSentSlot = -1;
 
     private HudLabel? _noticeBodyWidget;
 
     private int _pendingRenameSlot = -1;
-    private int _lastRenameSentSlot = -1;
 
     private LineEdit? _renameEntry;
     private HudLabel? _renameModalTitleWidget;

@@ -105,15 +105,6 @@ public static class SkinningMath
         Bone[] bones,
         out int[] parentIndex,
         out int[] idToIndex,
-        out int baseId)
-    {
-        ResolveHierarchy(bones, out parentIndex, out idToIndex, out baseId, out _);
-    }
-
-    public static void ResolveHierarchy(
-        Bone[] bones,
-        out int[] parentIndex,
-        out int[] idToIndex,
         out int baseId,
         out bool[] hasChild)
     {
@@ -195,7 +186,7 @@ public static class SkinningMath
             if ((uint)vi >= (uint)vertexCount) continue;
 
             var bid = (int)(wr.BoneIndex & 0xFF);
-            var bIdx = bid >= 0 && bid < 256 ? idToIndex[bid] : -1;
+            var bIdx = bid is >= 0 and < 256 ? idToIndex[bid] : -1;
             if (bIdx < 0)
             {
                 var off = (int)wr.BoneIndex - baseId;
@@ -204,7 +195,7 @@ public static class SkinningMath
 
             if (bIdx < 0 || bIdx >= boneCount) continue;
 
-            (raw[vi] ??= new List<(int, float)>()).Add((bIdx, wr.Weight));
+            raw[vi].Add((bIdx, wr.Weight));
         }
 
         var result = new VertexInfluences[vertexCount];
@@ -312,7 +303,7 @@ public static class SkinningMath
                 var parent = parentIndex[i];
                 var hasParent = parent >= 0;
                 var hasGrandparent = hasParent && parentIndex[parent] >= 0;
-                var boneHasChild = hasChild is not null ? hasChild[i] : false;
+                var boneHasChild = hasChild is not null && hasChild[i];
                 var interior = hasParent && hasGrandparent && boneHasChild;
                 if (!interior)
                     localT = sT;

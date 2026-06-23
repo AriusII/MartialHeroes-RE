@@ -74,7 +74,7 @@ public sealed unsafe class MappedVfsArchive : IDisposable
             return new MappedVfsArchive(directory, null, null);
 
         MemoryMappedFile? mmf = null;
-        MemoryMappedViewAccessor? view = null;
+        MemoryMappedViewAccessor? view;
         try
         {
             mmf = MemoryMappedFile.CreateFromFile(
