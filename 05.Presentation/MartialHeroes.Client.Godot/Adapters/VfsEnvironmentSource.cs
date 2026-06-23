@@ -12,7 +12,9 @@ internal sealed record AreaEnvironment(
     MaterialBin? Material,
     StarDomeBin? StarDome = null,
     CloudDomeBin? CloudDome = null,
-    CloudCycleBin? CloudCycle = null);
+    CloudCycleBin? CloudCycle = null,
+    PointLightBin? PointLights = null,
+    WeatherBin? Weather = null);
 
 internal static class VfsEnvironmentSource
 {
@@ -60,7 +62,18 @@ internal static class VfsEnvironmentSource
                              EnvironmentBinParsers.ParseCloudCycle, "cloud_cycle(fallback area0)");
         }
 
-        return new AreaEnvironment(mapOption, fog, light, material, starDome, cloudDome, cloudCycle);
+        var pointLights = TryParse(assets, $"data/sky/dat/point_light{areaId}.bin",
+            EnvironmentBinParsers.ParsePointLight, "point_light")
+            ?? TryParse(assets, "data/sky/dat/point_light0.bin",
+                EnvironmentBinParsers.ParsePointLight, "point_light(fallback area0)");
+
+        var weather = TryParse(assets, $"data/sky/dat/weather{areaId}.bin",
+            EnvironmentBinParsers.ParseWeather, "weather")
+            ?? TryParse(assets, "data/sky/dat/weather0.bin",
+                EnvironmentBinParsers.ParseWeather, "weather(fallback area0)");
+
+        return new AreaEnvironment(mapOption, fog, light, material, starDome, cloudDome, cloudCycle,
+            pointLights, weather);
     }
 
     private static T? TryParse<T>(

@@ -631,7 +631,7 @@ public static class TerrainLayerParsers
             };
         }
 
-        return new PointLightBinData { IntensityScale = intensityScale, Records = records };
+        return new PointLightBinData { ProximityRadius = intensityScale, Records = records };
     }
 
     public static WindBinData ParseWindBin(ReadOnlyMemory<byte> data)

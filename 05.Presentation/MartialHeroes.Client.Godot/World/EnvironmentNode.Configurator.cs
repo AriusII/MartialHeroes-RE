@@ -96,7 +96,6 @@ public sealed partial class EnvironmentNode
             return;
         }
 
-
         var light = _env?.Light;
         var fogScalar = 0f;
         if (light is { FogDistanceScalars.Length: >= LightBin.KeyframeCount })
@@ -115,8 +114,16 @@ public sealed partial class EnvironmentNode
         env.FogEnabled = true;
         env.FogMode = Environment.FogModeEnum.Depth;
 
-        env.FogDepthEnd = fogScalar * 3.0f;
-        env.FogDepthBegin = 1.0f / fogScalar;
+        var fogStart = fog.StartDist * ViewRange;
+        var fogEnd = fog.EndDist * ViewRange;
+        if (fogEnd <= fogStart || fogEnd <= 0f)
+        {
+            fogStart = 1.0f / fogScalar;
+            fogEnd = fogScalar * 3.0f;
+        }
+
+        env.FogDepthBegin = fogStart;
+        env.FogDepthEnd = fogEnd;
         env.FogDepthCurve = 1.0f;
 
         env.FogLightColor = LerpFogColor(fog, kf, kfNext, frac);
@@ -136,27 +143,7 @@ public sealed partial class EnvironmentNode
 
     private static void ApplyGlow(Environment env)
     {
-        env.GlowEnabled = true;
-
-        env.GlowBlendMode = Environment.GlowBlendModeEnum.Screen;
-
-        env.GlowHdrThreshold = 1.0f;
-
-        env.GlowHdrScale = 1.0f;
-
-        env.GlowIntensity = 0.5f;
-
-        env.GlowBloom = 0.0f;
-
-        env.SetGlowLevel(0, 0.0f);
-        env.SetGlowLevel(1, 1.0f);
-        env.SetGlowLevel(2, 0.0f);
-        env.SetGlowLevel(3, 0.0f);
-        env.SetGlowLevel(4, 0.0f);
-        env.SetGlowLevel(5, 0.0f);
-        env.SetGlowLevel(6, 0.0f);
-
-        env.GlowStrength = 1.0f;
+        env.GlowEnabled = false;
     }
 
     private void ApplyDirectional(int kf, int kfNext, float frac)
@@ -204,6 +191,124 @@ public sealed partial class EnvironmentNode
         _dirLight.ShadowEnabled = true;
     }
 
+
+    private void SpawnPointLights()
+    {
+        foreach (var existing in _pointLights)
+            if (IsInstanceValid(existing))
+                existing.QueueFree();
+        _pointLights.Clear();
+
+        var bin = _env?.PointLights;
+        if (bin is null || bin.RecordCount == 0)
+        {
+            GD.Print("[Environment] no point_light bin or empty — no OmniLight3D spawned.");
+            return;
+        }
+
+        var scale = 1f;
+
+        var spawned = 0;
+        for (var i = 0; i < bin.Records.Length; i++)
+        {
+            var rec = bin.Records[i];
+
+            if (rec.Range <= 0f)
+                continue;
+
+            var (gx, gy, gz) = WorldCoordinates.ToGodot(rec.PositionX, rec.PositionY, rec.PositionZ);
+
+            var light = new OmniLight3D
+            {
+                Name = $"PointLight_{i}",
+                Position = new Vector3(gx, gy, gz),
+                OmniRange = rec.Range,
+                LightColor = new Color(
+                    Math.Clamp(rec.ColorDiffuseR, 0f, 1f),
+                    Math.Clamp(rec.ColorDiffuseG, 0f, 1f),
+                    Math.Clamp(rec.ColorDiffuseB, 0f, 1f)),
+                LightEnergy = scale,
+                ShadowEnabled = false
+            };
+
+            AddChild(light);
+            _pointLights.Add(light);
+            spawned++;
+        }
+
+        GD.Print($"[Environment] point_light: spawned {spawned}/{bin.RecordCount} OmniLight3D nodes " +
+                 $"(proximityRadius={bin.ProximityRadius:F3}; skipped {bin.RecordCount - spawned} zero-range).");
+    }
+
+    private void ConfigureWeather(RealClientAssets? assets)
+    {
+        if (_weatherParticles is not null && IsInstanceValid(_weatherParticles))
+        {
+            _weatherParticles.QueueFree();
+            _weatherParticles = null;
+        }
+
+        var weather = _env?.Weather;
+        if (weather is null)
+        {
+            GD.Print("[Environment] no weather bin — weather effects disabled.");
+            return;
+        }
+
+        var nowHour = DateTime.UtcNow.Hour;
+        var timeBlock = (int)(ClockMs / (KeyframeMs * 4.8)) % WeatherBin.RowCount;
+        var weatherType = weather.GetWeatherType(timeBlock, nowHour % WeatherBin.ColumnsPerRow);
+        var intensity = weather.GetIntensity(timeBlock, nowHour % WeatherBin.ColumnsPerRow);
+
+        if (weatherType == 0)
+        {
+            GD.Print("[Environment] weather bin present but current slot=clear — no particles.");
+            return;
+        }
+
+        var particles = new GpuParticles3D
+        {
+            Name = "WeatherParticles",
+            Amount = weatherType == 1 ? 2000 : 1200,
+            Lifetime = weatherType == 1 ? 2.0 : 4.0,
+            VisibilityAabb = new Aabb(new Vector3(-4000f, -100f, -4000f), new Vector3(8000f, 4000f, 8000f)),
+            Emitting = true
+        };
+
+        var pm = new ParticleProcessMaterial
+        {
+            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
+            EmissionBoxExtents = new Vector3(4000f, 100f, 4000f)
+        };
+
+        if (weatherType == 1)
+        {
+            pm.Gravity = new Vector3(0f, -980f * intensity, 0f);
+            pm.InitialVelocityMin = 200f * intensity;
+            pm.InitialVelocityMax = 400f * intensity;
+            pm.Color = new Color(0.7f, 0.85f, 1.0f, 0.7f);
+            pm.ScaleMin = 2f;
+            pm.ScaleMax = 6f;
+        }
+        else
+        {
+            pm.Gravity = new Vector3(0f, -120f * intensity, 0f);
+            pm.InitialVelocityMin = 30f * intensity;
+            pm.InitialVelocityMax = 80f * intensity;
+            pm.Color = new Color(1.0f, 1.0f, 1.0f, 0.85f);
+            pm.ScaleMin = 4f;
+            pm.ScaleMax = 10f;
+        }
+
+        particles.ProcessMaterial = pm;
+
+        AddChild(particles);
+        _weatherParticles = particles;
+
+        var typeName = weatherType == 1 ? "rain" : "snow";
+        GD.Print($"[Environment] weather: type={typeName} intensity={intensity:F2} " +
+                 $"timeBlock={timeBlock} hour={nowHour} — GpuParticles3D spawned.");
+    }
 
     private void ResolveSunDirection()
     {

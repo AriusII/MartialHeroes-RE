@@ -37,6 +37,10 @@ public sealed partial class EnvironmentNode : Node3D
 
     private WorldEnvironment? _worldEnv;
 
+    private readonly List<OmniLight3D> _pointLights = new();
+
+    private GpuParticles3D? _weatherParticles;
+
     public double ClockMs { get; private set; } = NoonKeyframe * KeyframeMs;
 
 
@@ -83,6 +87,10 @@ public sealed partial class EnvironmentNode : Node3D
         ResolveSunDirection();
 
         BuildSkyDomes(assets);
+
+        SpawnPointLights();
+
+        ConfigureWeather(assets);
 
         ClockMs = NoonKeyframe * KeyframeMs;
         _appliedKeyframe = -1;

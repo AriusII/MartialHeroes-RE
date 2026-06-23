@@ -52,12 +52,10 @@ public sealed class AssembledCell
         var h01 = h[(iz + 1) * TerrainCell.GridSize + ix];
         var h11 = h[(iz + 1) * TerrainCell.GridSize + ix + 1];
 
-        // spec: Docs/RE/formats/terrain.md §5.4a — split quad into two triangles, pick containing triangle,
-        // evaluate its plane equation: n = cross(e1,e2), D = -dot(n,v0), y = (-D - n.X*x - n.Z*z) / n.Y
         float v0X, v0Y, v0Z, v1X, v1Y, v1Z, v2X, v2Y, v2Z;
         if (fx + fz < 1f)
         {
-            // upper-left triangle: (ix,iz)=h00, (ix+1,iz)=h10, (ix,iz+1)=h01
+
             v0X = 0f;
             v0Y = h00;
             v0Z = 0f;
@@ -70,7 +68,7 @@ public sealed class AssembledCell
         }
         else
         {
-            // lower-right triangle: (ix+1,iz)=h10, (ix+1,iz+1)=h11, (ix,iz+1)=h01
+
             v0X = 1f;
             v0Y = h10;
             v0Z = 0f;
@@ -82,7 +80,6 @@ public sealed class AssembledCell
             v2Z = 1f;
         }
 
-        // n = cross(v1-v0, v2-v0)
         var e1X = v1X - v0X;
         var e1Y = v1Y - v0Y;
         var e1Z = v1Z - v0Z;
@@ -105,17 +102,13 @@ public sealed class AssembledArea
 {
     public required int AreaId { get; init; }
 
-
     public required IReadOnlyList<(int MapX, int MapZ)> CellKeys { get; init; }
-
 
     public int? MapOptionValue { get; init; }
 
     public int? RegionValue { get; init; }
 
-
     public required IReadOnlyList<SpawnDescriptor> Spawns { get; init; }
-
 
     public required IReadOnlyDictionary<(int MapX, int MapZ), AssembledCell> Cells { get; init; }
 }

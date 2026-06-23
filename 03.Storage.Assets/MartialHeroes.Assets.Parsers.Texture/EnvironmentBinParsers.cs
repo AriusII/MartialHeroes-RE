@@ -386,4 +386,179 @@ public static class EnvironmentBinParsers
         if (data.IsEmpty) return null;
         return ParseCloudCycle(data.Span);
     }
+
+
+    public static PointLightBin ParsePointLight(ReadOnlyMemory<byte> data)
+    {
+        return ParsePointLight(data.Span, data);
+    }
+
+    public static PointLightBin ParsePointLight(ReadOnlySpan<byte> span)
+    {
+        return ParsePointLight(span, ReadOnlyMemory<byte>.Empty);
+    }
+
+    private static PointLightBin ParsePointLight(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    {
+        if (span.Length < PointLightBin.HeaderSize)
+            throw new InvalidDataException(
+                $"point_light*.bin parse error: need at least {PointLightBin.HeaderSize} bytes for header, " +
+                $"got {span.Length}.");
+
+        var intensityScale = BinaryPrimitives.ReadSingleLittleEndian(span[0x00..]);
+        var recordCount = BinaryPrimitives.ReadInt32LittleEndian(span[0x04..]);
+
+        if (recordCount < 0)
+            throw new InvalidDataException(
+                $"point_light*.bin parse error: negative record_count {recordCount}.");
+
+        var expectedSize = PointLightBin.HeaderSize + recordCount * PointLightRecord.Stride;
+        if (span.Length < expectedSize)
+            throw new InvalidDataException(
+                $"point_light*.bin parse error: declared count={recordCount} requires {expectedSize} bytes, " +
+                $"got {span.Length}.");
+
+        var records = new PointLightRecord[recordCount];
+        for (var i = 0; i < recordCount; i++)
+        {
+            var recBase = PointLightBin.HeaderSize + i * PointLightRecord.Stride;
+
+            var colorDiffuseR = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x00)..]);
+            var colorDiffuseG = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x04)..]);
+            var colorDiffuseB = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x08)..]);
+
+            var colorBR = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x0C)..]);
+            var colorBG = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x10)..]);
+            var colorBB = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x14)..]);
+
+            var colorCR = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x18)..]);
+            var colorCG = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x1C)..]);
+            var colorCB = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x20)..]);
+
+            var posX = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x24)..]);
+            var posY = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x28)..]);
+            var posZ = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x2C)..]);
+
+            var range = BinaryPrimitives.ReadSingleLittleEndian(span[(recBase + 0x30)..]);
+
+            var rawAt34 = BinaryPrimitives.ReadUInt32LittleEndian(span[(recBase + 0x34)..]);
+
+            var typeFlag = BinaryPrimitives.ReadInt32LittleEndian(span[(recBase + 0x38)..]);
+
+            records[i] = new PointLightRecord
+            {
+                ColorDiffuseR = colorDiffuseR,
+                ColorDiffuseG = colorDiffuseG,
+                ColorDiffuseB = colorDiffuseB,
+                ColorBR = colorBR,
+                ColorBG = colorBG,
+                ColorBB = colorBB,
+                ColorCR = colorCR,
+                ColorCG = colorCG,
+                ColorCB = colorCB,
+                PositionX = posX,
+                PositionY = posY,
+                PositionZ = posZ,
+                Range = range,
+                RawU32At0x34 = rawAt34,
+                TypeFlag = typeFlag
+            };
+        }
+
+        return new PointLightBin
+        {
+            ProximityRadius = intensityScale,
+            RecordCount = recordCount,
+            Records = records
+        };
+    }
+
+    public static PointLightBin? TryParsePointLight(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParsePointLight(data.Span, data);
+    }
+
+
+    public static WindBin ParseWind(ReadOnlyMemory<byte> data)
+    {
+        return ParseWind(data.Span, data);
+    }
+
+    public static WindBin ParseWind(ReadOnlySpan<byte> span)
+    {
+        return ParseWind(span, ReadOnlyMemory<byte>.Empty);
+    }
+
+    private static WindBin ParseWind(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    {
+        if (span.Length < WindBin.HeaderSize)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: need at least {WindBin.HeaderSize} bytes for header, " +
+                $"got {span.Length}.");
+
+        var recordCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x00..]);
+        var sourceFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
+
+        var expectedSize = (int)(WindBin.HeaderSize + recordCount * WindRecord.Stride);
+        if (span.Length < expectedSize)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: declared count={recordCount} requires {expectedSize} bytes, " +
+                $"got {span.Length}.");
+
+        var records = new WindRecord[(int)recordCount];
+        for (var i = 0; i < (int)recordCount; i++)
+        {
+            var recBase = WindBin.HeaderSize + i * WindRecord.Stride;
+
+            var texId = BinaryPrimitives.ReadUInt32LittleEndian(span[(recBase + 0x14)..]);
+
+            var rawBytes = backing.IsEmpty
+                ? span.Slice(recBase, WindRecord.Stride).ToArray()
+                : backing.Slice(recBase, WindRecord.Stride);
+
+            records[i] = new WindRecord
+            {
+                TexId = texId,
+                RawBytes = rawBytes
+            };
+        }
+
+        return new WindBin
+        {
+            RecordCount = recordCount,
+            SourceFlag = sourceFlag,
+            Records = records
+        };
+    }
+
+    public static WindBin? TryParseWind(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseWind(data.Span, data);
+    }
+
+
+    public static WeatherBin ParseWeather(ReadOnlyMemory<byte> data)
+    {
+        return ParseWeather(data.Span);
+    }
+
+    public static WeatherBin ParseWeather(ReadOnlySpan<byte> span)
+    {
+        if (span.Length != WeatherBin.FixedSize)
+            throw new InvalidDataException(
+                $"weather*.bin parse error: expected {WeatherBin.FixedSize} bytes, " +
+                $"got {span.Length}.");
+
+        var grid = span.ToArray();
+
+        return new WeatherBin { Grid = grid };
+    }
+
+    public static WeatherBin? TryParseWeather(ReadOnlyMemory<byte> data)
+    {
+        if (data.IsEmpty) return null;
+        return ParseWeather(data.Span);
+    }
 }

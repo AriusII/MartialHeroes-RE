@@ -207,7 +207,7 @@ public sealed class PointLightRecord
 
 public sealed class PointLightBinData
 {
-    public required uint IntensityScale { get; init; }
+    public required uint ProximityRadius { get; init; }
 
     public required PointLightRecord[] Records { get; init; }
 }

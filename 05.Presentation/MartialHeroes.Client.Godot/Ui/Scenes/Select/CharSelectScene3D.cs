@@ -229,7 +229,6 @@ public sealed partial class CharSelectScene3D : Node3D
         GD.Print(
             $"[CharSelectScene3D] Camera STATIC: eye={StaticEyeGodot} " +
             $"FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
-            "No dolly — sub_404EE8 is a discrete-index selector, NOT a keyframe-dolly. " +
             "spec: Docs/RE/scenes/charselect.md §6.1 §6.3");
     }
 

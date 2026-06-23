@@ -1,23 +1,3 @@
-// AssetPreviewNode.cs — TEMPORARY single-asset preview harness for the Martial Heroes client.
-//
-// Purpose: load ONE real asset from the VFS, build Godot geometry from the PARSED data using the
-// project's own ArrayMesh builders (NEVER GltfDocument — it crashes natively on this project), and
-// frame it with a camera + key light so a screenshot shows the parser's output.
-//
-// Lifecycle (managed by the godot-asset-preview skill):
-//   1. Copy to res://Dev/AssetPreviewNode.cs.
-//   2. Attach to a one-node res://Dev/AssetPreview.tscn (script as a PROPERTY LINE — see
-//      godot-scene-author) OR register as a temporary autoload.
-//   3. Set env vars MH_PREVIEW_PATH (VFS path) and MH_PREVIEW_KIND (bud|skn|ted), build, screenshot.
-//   4. *** REMOVE the node/scene/autoload + this file afterwards. ***
-//
-// THIS IS A TEMPLATE. The exact VFS-open and parse calls depend on the project's current
-// Assets.Vfs / Assets.Parsers API surface — adjust the two clearly-marked TODO regions to the
-// real method names. The coordinate handling is delegated to BudMeshBuilder / SknMeshBuilder, which
-// already encode the confirmed conventions:
-//   * WORLD geometry (.bud, terrain) negates Z   — Helpers/WorldCoordinates.ToGodot: (x,y,z)->(x,y,-z)
-//   * MESH-LOCAL geometry (.skn) negates X        — SknMeshBuilder (plus CW->CCW + UV v-flip)
-// Do NOT re-apply a second flip here; the builders own it.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Models;
@@ -25,10 +5,6 @@ using MartialHeroes.Client.Godot.World;
 
 namespace MartialHeroes.Client.Godot.Dev;
 
-/// <summary>
-/// One-shot preview node: builds a single VFS asset into an <see cref="ArrayMesh"/> scene graph and
-/// frames it for a screenshot. Temporary diagnostic — not a shipped node.
-/// </summary>
 public partial class AssetPreviewNode : Node3D
 {
     public override void _Ready()
@@ -47,29 +23,23 @@ public partial class AssetPreviewNode : Node3D
         Node3D? built = null;
         try
         {
-            // ---- TODO(adjust to current API): open the VFS and read the asset bytes -------------
-            // Use the project's VFS catalogue/loader (arrives transitively via Assets.Mapping).
-            // Example shape (rename to the real types/methods):
-            //     var vfs = VfsCatalogueLoader.Open("D:/MartialHeroesClient");
-            //     ReadOnlyMemory<byte> bytes = vfs.Read(vfsPath);
-            // -------------------------------------------------------------------------------------
+
             ReadOnlyMemory<byte> bytes = LoadAssetBytes(vfsPath);
 
-            // ---- TODO(adjust to current API): parse + build with the matching builder -----------
             switch (kind)
             {
                 case "bud":
                 {
-                    // BudScene scene = BudParser.Parse(bytes.Span);   // rename to real parser
+
                     BudScene scene = ParseBud(bytes);
-                    built = BudMeshBuilder.Build(scene, textureResolver: null); // null => grey fallback
+                    built = BudMeshBuilder.Build(scene, textureResolver: null);
                     break;
                 }
                 case "skn":
                 {
-                    // SkinnedMesh mesh = SknParser.Parse(bytes.Span); // rename to real parser
+
                     SkinnedMesh mesh = ParseSkn(bytes);
-                    built = SknMeshBuilder.Build(mesh, albedoTexture: null); // static bind pose (TODO: skinning)
+                    built = SknMeshBuilder.Build(mesh, albedoTexture: null);
                     break;
                 }
                 case "ted":
@@ -96,9 +66,6 @@ public partial class AssetPreviewNode : Node3D
         GD.Print("[AssetPreview] built + framed — ready for screenshot.");
     }
 
-    // -------------------------------------------------------------------------
-    // Camera + light so the screenshot is lit and the mesh fills the frame.
-    // -------------------------------------------------------------------------
     private void FrameWithCameraAndLight(Node3D meshRoot)
     {
         Aabb bounds = ComputeAabb(meshRoot);
@@ -106,7 +73,7 @@ public partial class AssetPreviewNode : Node3D
         float radius = MathF.Max(bounds.Size.Length() * 0.5f, 1f);
 
         var cam = new Camera3D { Name = "PreviewCamera" };
-        // Pull back along +Z/+Y by a few radii and look at the mesh centre.
+
         Vector3 camPos = center + new Vector3(radius * 1.2f, radius * 0.9f, radius * 2.2f);
         cam.GlobalPosition = camPos;
         cam.LookAtFromPosition(camPos, center, Vector3.Up);
@@ -140,7 +107,7 @@ public partial class AssetPreviewNode : Node3D
             if (child is MeshInstance3D mi && mi.Mesh is not null)
             {
                 Aabb local = mi.GetAabb();
-                // Transform the local AABB into the mesh root's space via the instance transform.
+
                 Aabb world = mi.Transform * local;
                 acc = acc is null ? world : acc.Value.Merge(world);
             }
@@ -156,10 +123,6 @@ public partial class AssetPreviewNode : Node3D
                 yield return d;
     }
 
-    // -------------------------------------------------------------------------
-    // TODO stubs — replace with the project's real VFS/parser calls.
-    // These throw so the harness fails loudly until wired to the current API.
-    // -------------------------------------------------------------------------
     private static ReadOnlyMemory<byte> LoadAssetBytes(string vfsPath)
         => throw new NotImplementedException(
             "Wire to the project's VFS loader (e.g. VfsCatalogueLoader / Assets.Vfs). "

@@ -17,7 +17,6 @@ public sealed partial class CharSelectCameraRig : Node
 
     private float _boomZ;
 
-    // ── runtime state ─────────────────────────────────────────────────────────
     private Camera3D? _camera;
     private Func<int, Node3D?>? _slotActorProvider;
     private float[] _slotGodotX = [];
@@ -44,10 +43,8 @@ public sealed partial class CharSelectCameraRig : Node
         GD.Print(
             $"[CharSelectCameraRig] Static rig placed: eye={staticEyeGodot} " +
             $"FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
-            "sub_404EE8 = discrete-index selector, no dolly. " +
             "spec: Docs/RE/scenes/charselect.md §6.1 §6.3");
     }
-
 
     public void SetZoomAction(int actionId)
     {

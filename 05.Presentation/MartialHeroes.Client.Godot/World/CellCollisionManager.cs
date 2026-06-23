@@ -7,7 +7,6 @@ public sealed class CellCollisionManager
 {
     private const int GridDim = 16;
 
-    // spec: Docs/RE/formats/terrain.md §2 — cell is 1024 world units
     private const float CellSpan = 1024f;
 
     private readonly Dictionary<(int MapX, int MapZ), CellCollision> _cells = new();
@@ -170,7 +169,6 @@ public sealed class CellCollisionManager
         }
     }
 
-    // spec: Docs/RE/formats/terrain_layers.md §3 — EXTRA_TERRAIN (.exd) gives ceiling geometry
     private static void AppendCeilingOverhangs(CellCollision cell, CollisionTriangleList list)
     {
         foreach (var t in list.Triangles)
@@ -218,7 +216,6 @@ public sealed class CellCollisionManager
             return (px - v.X) * (u.Y - v.Y) - (u.X - v.X) * (pz - v.Y);
         }
     }
-
 
     private sealed class CellCollision
     {

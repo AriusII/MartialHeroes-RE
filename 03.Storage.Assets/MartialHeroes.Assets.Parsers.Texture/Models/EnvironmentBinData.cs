@@ -132,3 +132,87 @@ public sealed class CloudCycleBin
 
     public required CloudCycleRow[] Rows { get; init; }
 }
+
+public sealed class PointLightRecord
+{
+    public const int Stride = 60;
+
+    public required float ColorDiffuseR { get; init; }
+    public required float ColorDiffuseG { get; init; }
+    public required float ColorDiffuseB { get; init; }
+
+    public required float ColorBR { get; init; }
+    public required float ColorBG { get; init; }
+    public required float ColorBB { get; init; }
+
+    public required float ColorCR { get; init; }
+    public required float ColorCG { get; init; }
+    public required float ColorCB { get; init; }
+
+    public required float PositionX { get; init; }
+    public required float PositionY { get; init; }
+    public required float PositionZ { get; init; }
+
+    public required float Range { get; init; }
+
+    public required uint RawU32At0x34 { get; init; }
+
+    public required int TypeFlag { get; init; }
+}
+
+public sealed class PointLightBin
+{
+    public const int HeaderSize = 8;
+
+    public required float ProximityRadius { get; init; }
+
+    public required int RecordCount { get; init; }
+
+    public required PointLightRecord[] Records { get; init; }
+}
+
+public sealed class WindRecord
+{
+    public const int Stride = 24;
+
+    public required ReadOnlyMemory<byte> RawBytes { get; init; }
+
+    public required uint TexId { get; init; }
+}
+
+public sealed class WindBin
+{
+    public const int HeaderSize = 8;
+
+    public required uint RecordCount { get; init; }
+
+    public required uint SourceFlag { get; init; }
+
+    public required WindRecord[] Records { get; init; }
+}
+
+public sealed class WeatherBin
+{
+    public const int FixedSize = 240;
+
+    public const int RowCount = 10;
+
+    public const int ColumnsPerRow = 24;
+
+    public required byte[] Grid { get; init; }
+
+    public byte GetCode(int timeBlockMod10, int hourColumn)
+    {
+        return Grid[timeBlockMod10 * ColumnsPerRow + hourColumn];
+    }
+
+    public int GetWeatherType(int timeBlockMod10, int hourColumn)
+    {
+        return GetCode(timeBlockMod10, hourColumn) / 10;
+    }
+
+    public float GetIntensity(int timeBlockMod10, int hourColumn)
+    {
+        return (GetCode(timeBlockMod10, hourColumn) % 10) * 0.1f;
+    }
+}

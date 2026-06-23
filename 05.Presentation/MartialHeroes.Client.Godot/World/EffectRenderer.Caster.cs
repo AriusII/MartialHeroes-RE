@@ -259,7 +259,7 @@ public sealed partial class EffectRenderer
             var gpuCount = simNodes.Count(s => s is not null);
             GD.Print($"[EffectRenderer] PlayAmbient: idx={descriptorIndex} effectId={effectId} " +
                      $"— loaded real .xeff ({subEffects.Length} sub-effects, {gpuCount} GPU-particle sims) pos={godotPos}. " +
-                     "spec: IDA MapXEffect_SpawnFactory_Ambient @0x49e4ef.");
+                     "spec: Docs/RE/specs/effect-scheduling.md (ambient spawn).");
         }
         else
         {
@@ -292,7 +292,7 @@ public sealed partial class EffectRenderer
             anchor.QueueFree();
 
         GD.Print($"[EffectRenderer] StopAmbient: idx={descriptorIndex} effectId={live.EffectId} stopped. " +
-                 "spec: IDA sub_49E5A1 @0x49e6f8 despawn.");
+                 "spec: Docs/RE/specs/effect-scheduling.md (ambient despawn).");
     }
 
 

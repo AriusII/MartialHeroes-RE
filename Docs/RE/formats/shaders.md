@@ -22,7 +22,7 @@
 > `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
 >
 > **spec_status:** sample_verified (7 samples cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23)
 
 ---
 
@@ -499,6 +499,73 @@ each light direction before the `dp3` Lambert accumulation (the `c4` direction c
 a negated direction, not a raw world-space vector). A second light (`light2`) is structurally wired in
 the shader source but its colour constant is zero in all confirmed samples — it contributes nothing to
 the diffuse accumulation and is effectively dead for the shipped client.
+
+### C5.6b Post-chain render-pass flow and enable-flag analysis (CYCLE 11 addition)
+
+> The pass-order, RT sizes, composite weights, and bright-pass behaviour are documented in full in
+> `Docs/RE/specs/rendering.md §6`. This subsection records two CYCLE 11 findings that are
+> **shader-file-scoped** (they directly govern which `.psh` files are used and when they run) plus
+> the decisive proof that the post chain is **permanently inactive in the shipped build**.
+
+**Pass flow (summary — see `specs/rendering.md §6` for the full ordered pass list):**
+
+Three render targets are used when the post chain is active:
+
+| Canonical name | Dimensions | Role |
+|:---------------|:----------:|------|
+| Scene RT (TEX0) | screenW × screenH | Cel/toon scene capture; also composite destination and present source |
+| Bright RT (TEX1) | screenW × screenH | Plain fixed-function copy of TEX0 — **no pixel shader, no threshold** |
+| Glow RT (TEX2) | screenW ÷ glowX × screenH ÷ glowY (default ÷2, ÷2) | Downscaled blur result |
+
+The format for all three is the device backbuffer adapter format. Pass order:
+
+1. Draw cel/toon world → TEX0.
+2. Clear to black; plain fixed-function fullscreen quad TEX0 → TEX1 (**bright-pass is a copy, not a threshold**; no pixel shader on this pass).
+3. Downscaled ortho quad TEX0 → TEX2; bind **the glow pixel shader** (`power1dx8.psh` by default, configurable via `DISPLAY_POWERSHADER` string — see §C5.1 and `specs/rendering.md §6.4`). Exactly **one** downscale tap; no multi-pass power chain in the binary.
+4. TEX1 (stage 0) + TEX2 (stage 1) → TEX0; bind **`finaldx8.psh`**; upload c0 = `BASE_BRIGHT` (≈1.05 from `display.lua`), c1 = `GLOW_BRIGHT` (≈0.3 from `display.lua`). Then run the FX overlay callback into TEX0.
+5. Present TEX0 → backbuffer; opaque blit (ONE / ZERO blend, not additive).
+6. UI / HUD callback; end scene.
+
+Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. See §C5.6 step 4 and the Re-authoring Guidance.
+
+**Post-chain enable flag — CONFIRMED forced off in the shipped build (CYCLE 11, binary-won):**
+
+The per-frame fork that selects the offscreen RT path over the direct path reads an enable flag on
+the scene/post object (constructor default: 0 = off). The flag is set to 2 at exactly one site
+(the device-creation routine), gated by two conditions:
+
+1. The cel/glow shader initialiser must return success.
+2. The toon-shading option flag (a field of the options singleton, option index 12) must equal 0.
+
+In the options loader the toon-shading option (option index 12) is the **only** option that is
+**hardcoded to 1** (the value is written unconditionally in code and is never overwritten by an INI
+key — there is no INI read-site for this slot; the value is clamped to 1–2 and always exits as 1).
+Because condition 2 requires this field to equal 0, and the field is always 1, **the `mov flag,2`
+assignment at the device-creation site is never reached**. The enable flag stays at its constructor
+default of 0 for the lifetime of every run of `doida.exe`.
+
+Consequence: **`Renderer_DrawScene_Direct` (the direct path) is always taken.** The three render
+targets, all five shader objects, and the composite/glow machinery are all allocated and compiled at
+startup but **no frame ever passes through the offscreen/cel/bloom path in the shipped client.** The
+cel/toon look and the bloom post chain are both dead per-frame features — the cel shaders bind only
+if the post flag is on (§C5.6 step 5), so characters fall back to fixed-function shading.
+
+> **Debugger-pending confirm:** a breakpoint at the per-frame flag-read (inside the scene-draw fork)
+> should read 0; the device-creation site that conditionally sets the flag to 2 should never fire.
+> These are the two confirmation points for a live `?ext=dbg` session.
+
+**Implication for Godot fidelity:**
+
+- The faithful default is **no bloom/glow post-process enabled** — the shipped client never runs
+  any bloom. Do not enable `WorldEnvironment` glow by default.
+- Characters in the original shipped client always render via **fixed-function (no cel shader, no
+  toon ramp)**, because the cel bind is gated on the post-process flag being on.
+- The cel/glow shaders are present in the VFS and fully specified here (§C5.1–§C5.4, Re-authoring
+  Guidance); a port may optionally implement them as a toggleable quality feature, but the
+  **faithful default state has the cel/post chain off**.
+- The Godot `CelShade` material (which attempts the per-character cel look) diverges from the
+  shipped client's actual behaviour when post is off; this is a known fidelity delta, not a bug in
+  the spec recovery. `// spec: Docs/RE/formats/shaders.md §C5.6b`
 
 ### C5.7 Campaign 5 / 5B known unknowns
 

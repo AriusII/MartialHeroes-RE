@@ -191,7 +191,7 @@ public sealed partial class MapXEffectScheduler : Node3D
 
         _descriptors = list;
         GD.Print($"[MapXEffectScheduler] Loaded {count} ambient descriptors for area {areaId} from {path}. " +
-                 "spec: IDA sub_49E2A4 (u32 count + 32-byte records).");
+                 "spec: Docs/RE/specs/effect-scheduling.md (u32 count + 32-byte records).");
     }
 
     private void DespawnAll()
