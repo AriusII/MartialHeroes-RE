@@ -50,6 +50,7 @@
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
+using MartialHeroes.Client.Presentation.Helpers;
 using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -833,70 +834,65 @@ public sealed partial class SkyDomeNode : Node3D
     /// <summary>
     ///     Computes and applies sun/moon world positions from the seconds-of-day orbit formula.
     ///     Also drives the tracked directional light from the negated sun position (§D.2.1).
-    ///     Sun orbit (CYCLE 11 corrected: closed-form cosine/sine, not the earlier CYCLE 7 natural-log):
-    ///     angle_deg = (secondsOfDay / 86400) × 360
-    ///     angle_rad = angle_deg × π/180  (= secondsOfDay × 2π / 86400)
-    ///     Sun X = sin(angle) × −3200   (HIGH: sign-opposition to moon)
-    ///     Sun Y = vertical term with 45° tilt cosine/sine factor  (HIGH seed, oracle-pending exact)
-    ///     Sun Z = Z-term with 45° seed (oracle-pending exact; placeholder: cos(angle) × −OrbitScale)
-    ///     Moon orbit (flat circle — no Z component):
-    ///     Moon X = sin(angle) × +3200   (HIGH: sign opposite to sun)
-    ///     Moon Y = cos(angle) × +3200   (HIGH: plain cosine, no tilt factor)
-    ///     Moon Z = 0                    (HIGH: flat circle, no Z)
-    ///     Directional light direction = −normalize(sunPos)  (§D.2.1, HIGH)
-    ///     ORACLE-PENDING items (sky.md §D.2 known-unknown §5):
-    ///     - Sun Y exact formula: the 45°-tilt cosine/sine factor combination is HIGH confidence
-    ///     but the exact per-axis expression (e.g. cos(a+45°) vs cos(a)×cos(45°)+sin(a)×sin(45°))
-    ///     is not yet oracle-confirmed. Current implementation: cos(a + sunTilt_rad).
-    ///     - Sun Z exact formula: placeholder −cos(angle)×OrbitScale; likely a second tilt factor.
-    ///     ORACLE-PENDING: flag and replace when sky.md §D.2 known-unknown §5 is resolved.
+    ///     FIX 15c — IDA-CONFIRMED (SkySun_UpdateBillboardOrbit @0x44987c; the decompiler's "logf_1 /
+    ///     logf_2" autonames are MISNOMERS — _logf_1 @0x401647 is cos, _logf_2 @0x401661 is sin):
+    ///       flt_7961F8 = 0x3c8efa35 = π/180; dbl_720988 = −3200.0; dbl_720820 = 360.0;
+    ///       dbl_720818 = 1/86400; dbl_720990 = 45.0.
+    ///       angle_deg = secondsOfDay × 360 × (1/86400); angle_rad = angle_deg × (π/180)
+    ///                 = secondsOfDay × 2π / 86400.
+    ///       flt_7B1288 = cos(45° × π/180) = cos(45°); flt_7B1284 = sin(45° × π/180) = sin(45°)
+    ///                 (computed once at runtime; both static-init to 0 in the IDB).
+    ///       sunX = sin(angle) × −3200                                 (@0x44996f, esi+10h)
+    ///       sunY = cos(angle) × −3200 × flt_7B1288  (= ×cos45°)       (@0x4499a2, esi+8)
+    ///       sunZ = sunY × flt_7B1284                (= ×sin45°)       (@0x4499ae, esi+0Ch)
+    ///     Moon orbit (SkyMoon_UpdateBillboardOrbit @0x447ca8, IDA-CONFIRMED):
+    ///       moonX = sin(angle) × +3200; moonY = cos(angle) × +3200; moonZ = 0 (flat circle, no Z).
+    ///     Sun/moon positions are computed in LEGACY world space then routed through
+    ///     WorldCoordinates.ToGodot (single Z-negate). Directional light direction = −normalize(sunPos)
+    ///     (sub_44966F @0x44966F: negates the orbit pos into light dir obj+184 + global sun triple,
+    ///     gated *(this+6704)==0 — the sole per-frame owner of the light direction).
     ///     spec: Docs/RE/formats/sky.md §D.1 — angle formula (seconds-of-day × 2π / 86400): CONFIRMED.
-    ///     spec: Docs/RE/formats/sky.md §D.2 — ±3200 scale, sign opposition, moon flat circle: HIGH.
-    ///     spec: Docs/RE/formats/sky.md §D.2.1 — directional light direction = −sunPos: HIGH.
+    ///     spec: Docs/RE/formats/sky.md §D.2 — ±3200 scale, sign opposition, moon flat circle.
+    ///     spec: Docs/RE/formats/sky.md §D.2.1 — directional light direction = −sunPos.
     /// </summary>
     private void UpdateBillboards(double clockMs)
     {
         // Seconds of day (wraps at 86400 per the spec period).
-        // spec: Docs/RE/formats/sky.md §D.1 — angle_deg = (time_of_day / 86400) × 360.
+        // IDA: angle_deg = secondsOfDay × 360 × (1/86400); angle_rad = angle_deg × (π/180).
+        // This collapses to secondsOfDay × 2π / 86400. spec: Docs/RE/formats/sky.md §D.1.
         var secondsOfDay = clockMs / 1000.0 % 86400.0; // spec: Docs/RE/formats/sky.md §D.1
-        var angleRad = secondsOfDay * (2.0 * Math.PI) / 86400.0; // spec: Docs/RE/formats/sky.md §D.1
+        var angleRad = secondsOfDay * (2.0 * Math.PI) / 86400.0; // IDA: SkySun_UpdateBillboardOrbit @0x44993d..0x449949
 
-        // 45°-tilt seed angle in radians.
-        // spec: Docs/RE/formats/sky.md §D.2 — "seed tilt angle 45.0": HIGH (static immediate in binary).
-        var tiltRad = SunTiltDeg * (Math.PI / 180.0); // spec: Docs/RE/formats/sky.md §D.2
+        var sinA = Math.Sin(angleRad);
+        var cosA = Math.Cos(angleRad);
 
-        // ── Sun position ──────────────────────────────────────────────────────────
-        // Sun X = sin(angle) × −OrbitScale  (sign opposite to moon: HIGH).
-        // spec: Docs/RE/formats/sky.md §D.2 — Sun X = sine(angle) × −3200: HIGH.
-        var sunX = (float)(Math.Sin(angleRad) * -OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
+        // 45° tilt factors — IDA flt_7B1288 = cos(45°), flt_7B1284 = sin(45°)
+        // (= cos/sin of SunTiltDeg × π/180). spec: Docs/RE/formats/sky.md §D.2.
+        var cos45 = Math.Cos(SunTiltDeg * (Math.PI / 180.0)); // IDA flt_7B1288
+        var sin45 = Math.Sin(SunTiltDeg * (Math.PI / 180.0)); // IDA flt_7B1284
 
-        // Sun Y: vertical term uses the 45° tilt seed.
-        // ORACLE-PENDING (sky.md §D.2 known-unknown §5): exact formula not yet pinned.
-        // Implementing as cos(angle + tilt) × OrbitScale as the most natural closed-form
-        // expression consistent with the spec HIGH note "45°-tilt seed".
-        // ORACLE-PENDING — replace when §5 is resolved.
-        var sunY = (float)(Math.Cos(angleRad + tiltRad) * OrbitScale); // ORACLE-PENDING: sky.md §D.2 known-unknown §5
+        // ── Sun position (LEGACY space) ───────────────────────────────────────────
+        // IDA SkySun_UpdateBillboardOrbit @0x44987c:
+        //   sunX = sin(angle) × −3200            (@0x44996f)
+        //   sunY = cos(angle) × −3200 × cos45°   (@0x4499a2)
+        //   sunZ = sunY × sin45°                 (@0x4499ae)
+        var sunXLegacy = sinA * -OrbitScale; // IDA @0x44996f (sin = _logf_2)
+        var sunYLegacy = cosA * -OrbitScale * cos45; // IDA @0x4499a2 (cos = _logf_1, × flt_7B1288)
+        var sunZLegacy = sunYLegacy * sin45; // IDA @0x4499ae (× flt_7B1284)
 
-        // Sun Z: second tilt-factor axis.
-        // ORACLE-PENDING (sky.md §D.2 known-unknown §5): exact Z-term not yet confirmed.
-        // Placeholder: sin(angle + tilt) × −OrbitScale (gives a non-degenerate 3D ellipse).
-        // ORACLE-PENDING — replace when §5 is resolved.
-        var sunZ = (float)(Math.Sin(angleRad + tiltRad) * -OrbitScale); // ORACLE-PENDING: sky.md §D.2 known-unknown §5
+        // Route through the single Z-negate world convention. spec: WorldCoordinates.ToGodot.
+        var (sgx, sgy, sgz) = WorldCoordinates.ToGodot((float)sunXLegacy, (float)sunYLegacy, (float)sunZLegacy);
+        var sunPos = new Vector3(sgx, sgy, sgz);
 
-        var sunPos = new Vector3(sunX, sunY, sunZ);
+        // ── Moon position (LEGACY space; flat circle — no Z) ──────────────────────
+        // IDA SkyMoon_UpdateBillboardOrbit @0x447ca8:
+        //   moonX = sin(angle) × +3200 (@0x447d15); moonY = cos(angle) × +3200 (@0x447d3c); moonZ = 0.
+        var moonXLegacy = sinA * OrbitScale; // IDA @0x447d15 (sin = _logf_2)
+        var moonYLegacy = cosA * OrbitScale; // IDA @0x447d3c (cos = _logf_1)
 
-        // ── Moon position (flat circle — no Z) ───────────────────────────────────
-        // Moon X = sin(angle) × +OrbitScale  (sign opposite to sun: HIGH).
-        // spec: Docs/RE/formats/sky.md §D.2 — Moon X = sine(angle) × +3200: HIGH.
-        var moonX = (float)(Math.Sin(angleRad) * OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
-
-        // Moon Y = cos(angle) × +OrbitScale  (plain cosine, no tilt: HIGH).
-        // spec: Docs/RE/formats/sky.md §D.2 — Moon Y = cosine(angle) × +3200, no Z: HIGH.
-        var moonY = (float)(Math.Cos(angleRad) * OrbitScale); // spec: Docs/RE/formats/sky.md §D.2
-
-        // Moon Z = 0 (flat circle in XY plane).
-        // spec: Docs/RE/formats/sky.md §D.2 — "moon traces flat circle; no Z component": HIGH.
-        var moonPos = new Vector3(moonX, moonY, 0f); // spec: Docs/RE/formats/sky.md §D.2
+        // Route through the single Z-negate convention (Z=0 negates to 0). spec: WorldCoordinates.ToGodot.
+        var (mgx, mgy, mgz) = WorldCoordinates.ToGodot((float)moonXLegacy, (float)moonYLegacy, 0f);
+        var moonPos = new Vector3(mgx, mgy, mgz);
 
         // Apply billboard world positions.
         if (_sunBillboard is not null)

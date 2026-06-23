@@ -135,14 +135,20 @@ public sealed partial class ActorRegistry : Node
             // Duplicate spawn — remove and re-create (server can resend on reconnect).
             RemoveActor(evt.Key);
 
-        // LIVE-SPAWN CONVERGENCE GAP (logged, NOT fabricated): the descriptor-driven 3D spawn factory
-        // (ActorSpawn → ActorComposer.Compose → AssembledActor → the shared layer-05 IO builder that the
-        // char-select / local-player path uses) needs the descriptor-derived identity — appearance
-        // variant, skin id_b, motion key, and equipment gids. ActorSpawnedEvent currently carries only
-        // Key/Name/Position/HP/ServerClass, so the full live 5/3 path cannot be driven here without a
-        // cross-layer event-shape change (flagged as a follow-up dependency). Until the event carries the
-        // descriptor identity we keep the placeholder VisualActor and DO NOT fabricate class/variant/gids.
-        // spec: assembly_graph §2/§4 (ActorComposer); skinning §3.5.2 (model_class_id from class+variant).
+        // LIVE-SPAWN (FIX 8): the descriptor-derived appearance identity is now CARRIED by the event —
+        // ActorSpawnedEvent gained InternalClass (+0x34), AppearanceVariant (+0x2C) and EquipGids (+0x58)
+        // (GamePacketHandler.World surfaces them from the 4/4 tag-1/2/3 SpawnDescriptor). The SKINNED-PLAYER
+        // avatar build (PlayerAvatarResolver.TryBuild → the SAME shared chain the local player uses, mode 1 =
+        // player per ActorManager_SpawnActorFromDescriptor @0x423fe9) is driven by the GameLoop event-drain
+        // seam, NOT here: that seam owns the world VFS handle (RealWorldRenderer.Assets) which this registry
+        // does not hold (it has only _clientContext, whose RealClientAssets is the UI-catalog handle, not the
+        // world VFS). The drain calls visual.TryBuildBodyAvatar / the equip-aware build right after this
+        // OnActorSpawned places the node, GATED on evt.Key.Sort == EntitySort.PlayerCharacter (mob/NPC tags
+        // 2/3 take Appearance_ResolveKey's mob branch — MobInfo_LookupByMobId — and keep the NpcRenderer
+        // path, never a player skinned avatar). This registry stays asset-free and just places the node +
+        // owns ground-snap; a class/variant/gid that does not resolve keeps the placeholder (logged in the
+        // drain, never fabricated). spec: assembly_graph §2/§4 (ActorComposer); skinning §3.5.2
+        // (model_class_id from class+variant); ActorManager_SpawnActorFromDescriptor @0x423fe9 (mode 1 = player).
         var visual = new VisualActor();
 
         // Convert Q16.16 fixed-point position to Godot float world space.

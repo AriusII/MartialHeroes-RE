@@ -47,10 +47,13 @@ public sealed partial class EffectRenderer
         hh = MathF.Max(hh, 0.05f);
 
         // Build quad in local XY plane; BillboardMode in the material makes it camera-facing.
-        // For directional (type 2) we conceptually apply a 90° Y pre-rotation;
-        // in practice we swap X↔Z to approximate the effect without camera-basis math.
-        // spec: Docs/RE/specs/effects.md §17.2 emitter_type 1 (oriented-quad) —
-        //   "extra fixed 90° rotation about Y applied before the camera-facing transform"; CONFIRMED.
+        // FIX 14b — the fixed +90° Y pre-rotation belongs to emitter_type 1 (MESH), not type 2.
+        //   In practice we swap X↔Z to approximate the rotation without camera-basis math.
+        // IDA: sub_4A5E0D v29==1 @0x4a62ae — Quat_SetYawRotationFromAngle((float*)a2, 1.5707964)
+        //   (1.5707964 rad = +90° Y) is called on the mesh-particle (type 1) branch; the type-2
+        //   branch @0x4a64be runs the oriented mesh loop with NO yaw pre-rotation.
+        // spec: Docs/RE/specs/effects.md §17.2 emitter_type 1 (mesh-particle) —
+        //   "extra fixed +90° Y rotation applied before the per-vertex transform"; CONFIRMED.
         var (aX, aY, bX, bY, cX, cY, dX, dY) = preRotate90Y
             ? (-hh, hw, hh, hw, hh, -hw, -hh, -hw) // rotated 90°
             : (-hw, hh, hw, hh, hw, -hh, -hw, -hh); // standard

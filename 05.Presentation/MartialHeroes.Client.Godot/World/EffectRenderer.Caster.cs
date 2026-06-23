@@ -3,6 +3,7 @@ using System.Text;
 using Godot;
 using MartialHeroes.Assets.Parsers.Effects;
 using MartialHeroes.Assets.Parsers.Effects.Models;
+using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -267,6 +268,135 @@ public sealed partial class EffectRenderer
 
         GD.Print($"[EffectRenderer] StopCast: actor={key.RawId} effectId={live.EffectId} soft-stopped. " +
                  "spec: Docs/RE/specs/effects.md §15.5 soft-stop; CODE-CONFIRMED.");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Map ambient effects — position-anchored UserXEffect (FIX 15a)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Synthetic ActorKey discriminator for map ambient effects. The legacy MapXEffect spawn
+    // (MapXEffect_SpawnFactory_Ambient @0x49e4ef) is anchored at a FIXED world position with an
+    // identity orientation — it is NOT actor-anchored. Our LiveEffect.Anchor is a Node3D, so we
+    // wrap each descriptor world position in a lightweight static Node3D anchor and key it in the
+    // shared _live dictionary using EntitySort.None + the descriptor index as the raw id. Real
+    // actors always carry a server-assigned (id, sort) with sort PC/Mob/NPC, so the None-sort key
+    // space is collision-free for ambient effects.
+    // spec: IDA MapXEffect_SpawnFactory_Ambient @0x49e4ef — UserXEffect_setupTimedWithPos at a4=pos,
+    //   identity quat {0,0,0,1}, type tag *(slot+4)=2, descriptor index *(slot+84)=idx.
+    private static ActorKey AmbientKey(int descriptorIndex)
+    {
+        return new ActorKey((uint)descriptorIndex, EntitySort.None);
+    }
+
+    /// <summary>
+    ///     Spawns a position-anchored ambient map effect (the same .xeff path as a cast effect),
+    ///     keyed by the descriptor index. Idempotent: a second call for the same index restarts it.
+    ///     Renders nothing when the .xeff is missing or parse fails (no-placeholder doctrine).
+    ///     spec: IDA sub_49E5A1 @0x49e6e0 — MapXEffect_SpawnFactory_Ambient on proximity+TOD gate.
+    ///     spec: IDA MapXEffect_SpawnFactory_Ambient @0x49e4ef — UserXEffect_setupTimedWithPos reuses
+    ///       the .xeff parser + GPU particle sim, identical to a cast effect (just position-anchored).
+    /// </summary>
+    /// <param name="descriptorIndex">The map<N>.txt descriptor index (stable identity for stop).</param>
+    /// <param name="godotPos">Anchor world position in Godot-space (legacy Z already negated).</param>
+    /// <param name="effectId">The descriptor's effectId (raw, resolved via the xeffect.lst registry).</param>
+    public void PlayAmbient(int descriptorIndex, Vector3 godotPos, uint effectId)
+    {
+        var key = AmbientKey(descriptorIndex);
+        StopAmbient(descriptorIndex); // idempotent restart
+
+        // Lightweight static anchor at the descriptor world position (identity orientation, no lift).
+        // Unlike a cast effect, an ambient effect does NOT add EmitterHeightOffset — it sits exactly
+        // at the authored descriptor position (sub_49E5A1 passes the descriptor pos vec3 verbatim).
+        var anchor = new Node3D { Name = $"MapAmbientAnchor{descriptorIndex}", GlobalPosition = godotPos };
+        AddChild(anchor);
+
+        var subEffects = TryLoadXeff(effectId);
+
+        LiveEffect live;
+        if (subEffects is { Length: > 0 })
+        {
+            var meshInstances = new MeshInstance3D?[subEffects.Length];
+            var simNodes = new GpuParticleSimNode?[subEffects.Length];
+            var textures = new ImageTexture?[subEffects.Length][];
+
+            for (var i = 0; i < subEffects.Length; i++)
+            {
+                var se = subEffects[i];
+                textures[i] = LoadSubEffectTextures(se) ?? Array.Empty<ImageTexture?>();
+
+                if (se.ResourceId >= XeffResourceParticleThreshold)
+                {
+                    var simNode = TryBuildParticleSimNode(se.ResourceId, godotPos);
+                    if (simNode is not null)
+                    {
+                        simNodes[i] = simNode;
+                        AddChild(simNode);
+                    }
+                }
+                else
+                {
+                    meshInstances[i] = BuildSubEffectMesh(se, godotPos, textures[i], 0);
+                    if (meshInstances[i] is not null)
+                        AddChild(meshInstances[i]!);
+                }
+            }
+
+            live = new LiveEffect
+            {
+                EffectId = effectId,
+                Active = true,
+                Anchor = anchor,
+                AmbientAnchorOwned = true,
+                SubEffects = subEffects,
+                MeshInstances = meshInstances,
+                SimNodes = simNodes,
+                Textures = textures,
+                ElapsedMs = 0
+            };
+
+            var gpuCount = simNodes.Count(s => s is not null);
+            GD.Print($"[EffectRenderer] PlayAmbient: idx={descriptorIndex} effectId={effectId} " +
+                     $"— loaded real .xeff ({subEffects.Length} sub-effects, {gpuCount} GPU-particle sims) pos={godotPos}. " +
+                     "spec: IDA MapXEffect_SpawnFactory_Ambient @0x49e4ef.");
+        }
+        else
+        {
+            // No-placeholder doctrine: missing/parse-failed .xeff renders nothing (anchor kept for stop).
+            live = new LiveEffect
+            {
+                EffectId = effectId,
+                Active = true,
+                Anchor = anchor,
+                AmbientAnchorOwned = true,
+                ElapsedMs = 0
+            };
+
+            GD.Print($"[EffectRenderer] PlayAmbient: idx={descriptorIndex} effectId={effectId} " +
+                     $"— .xeff unavailable or parse failed; rendering nothing (no-placeholder doctrine). pos={godotPos}.");
+        }
+
+        _live[key] = live;
+    }
+
+    /// <summary>
+    ///     Soft-stops and tears down an ambient map effect by its descriptor index, including the
+    ///     owned static anchor node. No-op when the index is not currently playing.
+    ///     spec: IDA sub_49E5A1 @0x49e6f8 — sub_49D7C2 despawns the slot when the gate goes false.
+    /// </summary>
+    public void StopAmbient(int descriptorIndex)
+    {
+        var key = AmbientKey(descriptorIndex);
+        if (!_live.Remove(key, out var live))
+            return;
+
+        live.Active = false;
+        TeardownLiveEffect(live);
+
+        if (live.AmbientAnchorOwned && live.Anchor is { } anchor && IsInstanceValid(anchor))
+            anchor.QueueFree();
+
+        GD.Print($"[EffectRenderer] StopAmbient: idx={descriptorIndex} effectId={live.EffectId} stopped. " +
+                 "spec: IDA sub_49E5A1 @0x49e6f8 despawn.");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

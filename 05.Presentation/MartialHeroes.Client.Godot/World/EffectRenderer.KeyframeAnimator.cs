@@ -14,7 +14,12 @@ public sealed partial class EffectRenderer
     {
         if (!IsInstanceValid(live.Anchor)) return;
 
-        var anchorPos = live.Anchor.GlobalPosition + new Vector3(0f, EmitterHeightOffset, 0f);
+        // Cast effects lift from the actor's feet toward the body (EmitterHeightOffset). Map ambient
+        // effects (FIX 15a) are anchored at the EXACT authored descriptor world position with no lift
+        // (sub_49E5A1 @0x49e6e0 passes the descriptor pos vec3 verbatim to the spawn factory).
+        var anchorPos = live.AmbientAnchorOwned
+            ? live.Anchor.GlobalPosition
+            : live.Anchor.GlobalPosition + new Vector3(0f, EmitterHeightOffset, 0f);
         var elapsedMs = live.ElapsedMs;
 
         for (var i = 0; i < subEffects.Length; i++)
@@ -154,10 +159,19 @@ public sealed partial class EffectRenderer
         var tint = new Color(diffR, diffG, diffB, alpha);
 
         // ── Geometry by emitter type ─────────────────────────────────────────
+        // FIX 14b — dispatch corrected to match sub_4A5E0D (switch on v29 = emitter_type):
+        //   type 0 @0x4a610d — camera-facing billboard (no pre-rotation).
+        //   type 1 @0x4a62ae — mesh-particle WITH a fixed +90° Y pre-rotation
+        //     (Quat_SetYawRotationFromAngle(a2, 1.5707964)); preRotate90Y:true.
+        //   type 2 @0x4a64be — oriented mesh, NO yaw pre-rotation; preRotate90Y:false.
+        // The previous mapping was inverted (it gave the +90° Y to type 2 and dropped type 1 through
+        // BuildMeshParticle with no yaw). The +90° Y belongs to the mesh path (type 1).
         var mesh = se.EmitterType switch
         {
             EmitterBillboard => BuildBillboardQuad(sx, sy, tint, uOff, vOff, false),
-            EmitterDirectional => BuildBillboardQuad(sx, sy, tint, uOff, vOff, true),
+            // type 1 (mesh): +90° Y pre-rotation per sub_4A5E0D v29==1 @0x4a62ae.
+            EmitterMesh => BuildBillboardQuad(sx, sy, tint, uOff, vOff, true),
+            // type 2+ (oriented mesh): no yaw pre-rotation per sub_4A5E0D v29>=2 @0x4a64be.
             _ => BuildMeshParticle(kA, kB, frac, sx, sy, sz, tint, uOff, vOff)
         };
 
@@ -193,7 +207,10 @@ public sealed partial class EffectRenderer
                 AlbedoColor = tint,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                 BlendMode = BaseMaterial3D.BlendModeEnum.Mix, // spec: rendering.md §4.2 — default alpha
-                BillboardMode = se.EmitterType <= EmitterDirectional
+                // FIX 14b — only type 0 (billboard) and type 1 (mesh quad with +90° Y) use the
+                // camera-facing material billboard; type 2+ (oriented mesh) is NOT camera-facing.
+                // IDA: sub_4A5E0D v29==0 @0x4a610d camera basis; v29>=2 @0x4a64be oriented, no camera basis.
+                BillboardMode = se.EmitterType < EmitterDirectional
                     ? BaseMaterial3D.BillboardModeEnum.Enabled
                     : BaseMaterial3D.BillboardModeEnum.Disabled
             };

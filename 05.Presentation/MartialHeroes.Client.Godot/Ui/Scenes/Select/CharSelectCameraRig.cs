@@ -85,31 +85,26 @@ public sealed partial class CharSelectCameraRig : Node
     private const float Kf0YawRad = 0.01333333f * Mathf.Pi; // ≈ +0.041888 rad (+2.400°)
 
     // KF1 orientation (the RESTING pose the player holds).
-    // spec: rendering.md Addendum A.2 (CYCLE 11, binary-reconciled, 2026-06-22, IDB 263bd994) —
-    //   KF1 settle pose: yaw +0.785 rad (≈ π/4 ≈ 45°), pitch −2.67°. The §3.5.3 table's
-    //   "0.785" entry appears in the DEGREES column (= 0.785°), but the CYCLE-11 addendum's
-    //   exhaustive re-walk confirms the consumed value is +0.785 RAD (≈ π/4) — this reconciles the
-    //   "yaw/pitch labelling that was swapped, then re-swapped, then settled by reading the
-    //   orientation-arm consumption directly" (Addendum intro). Follow the Addendum A.2
-    //   binary-decided reading; do not use the §3.5.3 multiplier row for KF1 yaw.
-    //   KF1 PITCH: §3.5.3 idx 1 mult −0.01483333 → −0.046600 rad → −2.670°; consistent with A.2.
-    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi; // ≈ −0.046600 rad (−2.670°). spec: §3.5.3 idx 1 PITCH.
+    // IDA-CONFIRMED (sub_40566E @0x405a27, IDB 263bd994): the per-keyframe orientation table is built
+    // with the SAME multiplier×π form as KF0. KF1 yaw = 3.1415927 * 0.004361111205071211 = 0.013701 rad
+    // (= +0.785 DEGREES, NOT +0.785 rad / NOT π/4). The earlier "Addendum A.2 → π/4" reading was a
+    // mislabelled degrees/radians confusion: the binary writes the multiplier form verbatim
+    // (this+137 = 3.1415927 * 0.004361111), identical in shape to the KF0 yaw write
+    // (this+136 = 3.1415927 * 0.01333333). Keyframe-apply sub_404EE8 builds toQuat = yawQuat × pitchQuat
+    // (Quat_SetYawRotationFromAngle @0x402650 about Y, sub_404189 @0x404189 about X) with NO base-heading
+    // term — so the consumed yaw is exactly this 0.785° value, with facing derived from the single
+    // Z-negate convention.
+    //   KF1 PITCH: sub_40566E this+131 = 3.1415927 * −0.01483333 → −0.046600 rad → −2.670°.
+    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi; // ≈ −0.046600 rad (−2.670°). IDA: sub_40566E this+131.
 
-    // spec: rendering.md Addendum A.2 — KF1 yaw = +0.785 rad ≈ π/4 ≈ 45°. Binary-decided (CYCLE 11).
-    // Delta vs the brief's inline table: brief listed §3.5.3 multiplier 0.00436111 (= 0.785 DEGREES);
-    // Addendum A.2 wins as the later, binary-reconciled, CYCLE-11 reading.
-    private const float Kf1YawRad = Mathf.Pi / 4.0f; // +0.785398 rad ≈ +45°. spec: rendering.md Addendum A.2.
+    // IDA-CONFIRMED: KF1 yaw multiplier = 0.004361111205071211 (× π). sub_40566E @0x405a27 writes
+    // this+137 = 3.1415927 * 0.004361111205071211 = 0.013701 rad = +0.785°. Same multiplier×π form as KF0.
+    private const float Kf1YawRad = 0.004361111f * Mathf.Pi; // ≈ +0.013701 rad (+0.785°). IDA: sub_40566E this+137.
 
-    // Base heading that turns the free-look Euler so the camera's −Z view axis points at the actor
-    // row IN GODOT-SPACE. The §3.5.3 angles were authored in legacy LEFT-handed space, where the
-    // KF1 camera at Z=−9652 looks in −Z toward the row at Z≈−9738 (§3.3.2 / §3.5.4). The single
-    // world Z-negate (Helpers/WorldCoordinates) flips that inequality: in Godot-space the camera at
-    // Z=+9652 must look toward GREATER Z (+9738) to face the row, i.e. +Z — but a Godot camera's
-    // default view axis is its local −Z. A π base yaw turns the rig so the small per-keyframe yaw/
-    // pitch then frame the row from in front. The sign is VERIFIED EMPIRICALLY from the screenshot
-    // (row IN FRONT, not behind the camera). spec: §3.5.4 (KF1 looks in −Z toward the row; Z-negate
-    // flips the realized heading) / Helpers/WorldCoordinates (world geometry negates Z).
-    private const float BaseHeadingYawRad = Mathf.Pi;
+    // No base-heading term. IDA-CONFIRMED: keyframe-apply sub_404EE8 @0x404f92 builds
+    // toQuat = Quat_SetYawRotationFromAngle(yaw) × sub_404189(pitch) — i.e. yawQuat × pitchQuat about
+    // (Y, X) — with NO additional π / base-heading rotation. The camera facing comes from the single
+    // world Z-negate convention (Helpers/WorldCoordinates), not from a fabricated +π yaw.
 
     // Manual boom-zoom (a forward/back dolly on the view axis); boom depth clamped [0, 26].
     // spec: §3.5.4 C3 RESOLVED — boom-Z clamp 26.0. CODE-CONFIRMED. (The earlier "[0,22]" reading
@@ -186,9 +181,9 @@ public sealed partial class CharSelectCameraRig : Node
         _kf1Pos = kf1Pos;
 
         // FREE-LOOK Euler endpoints — NO look-at point (§3.5 HEADLINE CORRECTION). Each keyframe's
-        // orientation is its explicit per-keyframe Euler (yaw, pitch) from §3.5.3, turned by the
-        // π base heading so the camera's −Z view axis faces the actor row in Godot-space (the world
-        // Z-negate flips the legacy −Z heading). spec: §3.5.3 (angle multipliers) / §3.5.4.
+        // orientation is its explicit per-keyframe Euler (yaw, pitch). IDA-CONFIRMED (sub_404EE8):
+        // toQuat = yawQuat × pitchQuat with NO base-heading term; the actor row is faced via the
+        // single world Z-negate convention. spec: §3.5.3 (angle multipliers) / §3.5.4.
         _kf0Orientation = EulerOrientation(Kf0YawRad, Kf0PitchRad);
         _kf1Orientation = EulerOrientation(Kf1YawRad, Kf1PitchRad);
 
@@ -199,8 +194,8 @@ public sealed partial class CharSelectCameraRig : Node
         GD.Print(
             $"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
             $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
-            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}° (≈π/4 rad, binary-reconciled A.2)/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (+π base heading); " +
-            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. spec: rendering.md Addendum A.2 (CYCLE 11) / §3.5.3/§3.5.4.");
+            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}° (0.004361111×π, IDA sub_40566E)/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (no base heading); " +
+            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. IDA: sub_40566E (KF table) / sub_404EE8 (yawQuat×pitchQuat, no +π).");
     }
 
     /// <summary>
@@ -335,21 +330,20 @@ public sealed partial class CharSelectCameraRig : Node
     // =========================================================================
 
     /// <summary>
-    ///     Builds a keyframe's FREE-LOOK orientation from its explicit Euler (yaw, pitch), per
-    ///     spec §3.5.3: a YAW quaternion about world-up Y composed with a PITCH quaternion about the
-    ///     camera's local X ("builds a pitch quaternion from the 0..5 value and a yaw quaternion from
-    ///     the matching 6..11 value, multiplies them into that keyframe's orientation"). A π base
-    ///     heading is folded into the yaw so the camera's local −Z view axis faces the actor row in
-    ///     Godot-space (the world Z-negate flips the legacy −Z heading — verified on-screen).
+    ///     Builds a keyframe's FREE-LOOK orientation from its explicit Euler (yaw, pitch).
+    ///     IDA-CONFIRMED (keyframe-apply sub_404EE8 @0x404f92): toQuat = yawQuat × pitchQuat, where
+    ///     yawQuat = Quat_SetYawRotationFromAngle (@0x402650) about Y and pitchQuat = sub_404189
+    ///     (@0x404189) about X. There is NO base-heading / no +π term in the binary — the camera facing
+    ///     comes from the single world Z-negate convention (Helpers/WorldCoordinates), so the small
+    ///     per-keyframe yaw/pitch alone frame the actor row.
     ///     spec: Docs/RE/specs/frontend_scenes.md §3.5.3 (yaw∘pitch) / §3.5 (free-look, no look-at).
     /// </summary>
     private static Quaternion EulerOrientation(float yawRad, float pitchRad)
     {
         // Yaw about world-up Y (azimuth), then pitch about the local X (elevation). Composing
-        // yaw ∘ pitch (yaw on the LEFT) rotates the local pitch axis by the yaw — matching the
-        // spec's "yaw quaternion × pitch quaternion" multiply order. The π base heading turns the
-        // default −Z view axis toward the row in Godot-space.
-        var yaw = new Quaternion(Vector3.Up, yawRad + BaseHeadingYawRad);
+        // yaw ∘ pitch (yaw on the LEFT) matches the binary's yawQuat × pitchQuat multiply order
+        // (sub_404EE8 @0x404fb0). No base-heading term — IDA-confirmed (no +π in the apply path).
+        var yaw = new Quaternion(Vector3.Up, yawRad);
         var pitch = new Quaternion(Vector3.Right, pitchRad);
         return (yaw * pitch).Normalized();
     }

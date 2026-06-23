@@ -362,20 +362,30 @@ public sealed partial class EnvironmentNode
 
         _dirLight.Visible = true;
 
-        // Direction: fixed fallback vector (no per-keyframe direction — §8.4).
-        if (_hasSunDir && _sunDirGodot.LengthSquared() > 1e-6f)
-            if (!_sunDirGodot.IsZeroApprox())
-                try
-                {
-                    var dir = _sunDirGodot.Normalized();
-                    var up = Math.Abs(dir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
-                    _dirLight.Basis = Basis.LookingAt(dir, up);
-                }
-                catch (Exception ex)
-                {
-                    // Degenerate direction after normalization — leave the existing basis.
-                    GD.PrintErr($"[EnvironmentNode] degenerate sun dir: {ex.Message}");
-                }
+        // FIX 10 — directional-light DIRECTION ownership (IDA sub_44966F @0x44966F, reached per-frame
+        // from SkySun_UpdateBillboardOrbit @0x4499b1): the sun ORBIT is the SOLE per-frame owner of the
+        // light direction. It negates the orbit position into the light dir (obj+184) and the global sun
+        // triple (dword_8C3ACC/AD0/AD4), gated by *(this+6704)==0. Cross-ref confirms those globals are
+        // written per-frame ONLY by sub_44966F; the load-time paths (Light_LoadOrSynthDefault @0x45a4fe,
+        // from SkySystem_Init) set the direction ONCE at light.bin load. In this port,
+        // SkyDomeNode.UpdateBillboards is the per-frame owner. So when a sky dome exists, this method
+        // must NOT write _dirLight.Basis (a competing second per-frame owner would fight the dome).
+        // Apply the fixed fallback vector ONCE (set-once), only when no dome owns the direction — matching
+        // the load-time set-once paths above. spec: environment.md §8.4 (fixed fallback dir, no per-kf dir).
+        if (_skyDome is null && !_fallbackDirApplied
+            && _hasSunDir && _sunDirGodot.LengthSquared() > 1e-6f && !_sunDirGodot.IsZeroApprox())
+            try
+            {
+                var dir = _sunDirGodot.Normalized();
+                var up = Math.Abs(dir.Dot(Vector3.Up)) > 0.99f ? Vector3.Forward : Vector3.Up;
+                _dirLight.Basis = Basis.LookingAt(dir, up);
+                _fallbackDirApplied = true; // set-once fallback; the orbit owns per-frame when a dome exists
+            }
+            catch (Exception ex)
+            {
+                // Degenerate direction after normalization — leave the existing basis.
+                GD.PrintErr($"[EnvironmentNode] degenerate sun dir: {ex.Message}");
+            }
 
         var light = _env?.Light;
         if (light is not null && light.DirectionalKeyframes.Length == KeyframeCount)

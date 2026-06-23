@@ -18,6 +18,31 @@ namespace MartialHeroes.Client.Application.Contracts.Events;
 /// <param name="CurrentHp">Current hit points at spawn.</param>
 /// <param name="MaxHp">Computed maximum hit points.</param>
 /// <param name="ServerClass">Server-assigned class id (martial-arts style).</param>
+/// <param name="InternalClass">
+///     The descriptor's internal class word {1,2,3,4} (+0x34) — the <c>class</c> argument of the
+///     skinned-avatar model-class formula <c>5*(InternalClass + 4*AppearanceVariant) - 24</c>, distinct
+///     from <see cref="ServerClass" />. The live skinned-player factory
+///     (<c>ActorManager_SpawnActorFromDescriptor @0x423fe9</c>, mode 1 = player → <c>Appearance_ResolveKey
+///     @0x422631</c>) drives appearance from this; mob/NPC tags carry the raw field but take a different
+///     resolve branch. Optional/defaulted so existing publishers keep compiling; the live 4/4 tag-1 path
+///     fills it. spec: Docs/RE/structs/spawn_descriptor.md (+0x34);
+///     Docs/RE/specs/assembly_graph.md §2/§4; Appearance_ResolveKey @0x422631.
+/// </param>
+/// <param name="AppearanceVariant">
+///     The descriptor's body / gender appearance variant (+0x2C) — the <c>variant</c> argument of the
+///     model-class formula (variant 3 ⇒ invisible). Optional/defaulted. spec:
+///     Docs/RE/structs/spawn_descriptor.md (+0x2C); Appearance_ResolveKey @0x422631
+///     (<c>if(a4==3) return 0; else return 5*(a3+4*a4)-24</c>).
+/// </param>
+/// <param name="EquipGids">
+///     The six visible-gear part GIDs for the fixed overlay slots <c>{3,4,6,2,11,14}</c> (slot id ==
+///     array index), decoded from the descriptor's +0x58 equip table (leading dword of each 16-byte
+///     entry). The SAME six-slot decode <see cref="CharacterListSlot.EquipGids" /> and
+///     <see cref="LocalPlayerSpawnedEvent.EquipGids" /> carry. Defaults to empty (body-only) for actors
+///     that genuinely carry no gear or whose kind lacks the field. spec:
+///     Docs/RE/structs/spawn_descriptor.md (+0x58 equip table); Docs/RE/specs/assembly_graph.md §4;
+///     ActorVisual_RebindLocalPlayerParts ({3,4,6,2,11,14}).
+/// </param>
 public sealed record ActorSpawnedEvent(
     ActorKey Key,
     string Name,
@@ -25,7 +50,10 @@ public sealed record ActorSpawnedEvent(
     Vector3Fixed Position,
     uint CurrentHp,
     uint MaxHp,
-    ushort ServerClass) : IClientEvent;
+    ushort ServerClass,
+    ushort InternalClass = 0,
+    byte AppearanceVariant = 0,
+    ImmutableArray<uint> EquipGids = default) : IClientEvent;
 
 /// <summary>
 ///     Published when an actor's movement state changes. Immutable snapshot. spec: Docs/RE/opcodes.md

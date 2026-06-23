@@ -416,9 +416,62 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         // frontend_scenes.md §7.
         _inFlightLatch?.Arm();
 
+        // FIX 4 — enter-time local-player seed. The binary's CharSelect-leave handler
+        // (SelectWindow_EnterGame @0x546256) seeds the local-player globals IMMEDIATELY AFTER the 1/9 send
+        // (Cmsg_EnterGame_Send(&Src) @0x5463ca + MainWindow_SceneTeardown @0x5463d8): the 880-byte
+        // descriptor → ::Src (@0x5463fb), the 96-byte stats → dword_7AC404 (@0x546418), the status byte
+        // byte_7AC393 = HIBYTE(NetHandler[220*slot+206]) (@0x546438), and g_LocalPlayerLevel =
+        // NetHandler[220*slot+207] (@0x546455). The descriptor/stats are already cached in
+        // _characterSelection.Chosen, so we seed _localPlayer with the two ROSTER-sourced scalars (level +
+        // status) and the chosen slot so the later 4/1 spawn agrees on level/status with the enter-time
+        // choice instead of re-decoding level independently. Done AFTER the SendAsync queue arm, exactly as
+        // the binary seeds AFTER the send. spec: SelectWindow_EnterGame @0x546256
+        // (@0x546438 status / @0x546455 level / this+6120 chosen slot).
+        SeedEnterTimeLocalPlayer(slotIndex);
+
         // Online enter-world path: 1/9 → 3/5 EnterGameAck → 4/1 world tick (the actual spawn). spec:
         // client_runtime.md §7.5.3; frontend_scenes.md §7.
         return SendAsync(1, 9, payload, cancellationToken);
+    }
+
+    /// <summary>
+    ///     FIX 4 — seeds <see cref="_localPlayer" /> from the cached chosen descriptor at the 1/9 emit (the
+    ///     binary's post-send seed in <c>SelectWindow_EnterGame @0x546256</c>). The level mirrors the
+    ///     descriptor's <c>+0x3A</c> (the only authority the port retains; the binary reads
+    ///     <c>NetHandler[220*slot+207]</c> @0x546455 from the roster). The status byte has NO descriptor
+    ///     carrier (binary reads <c>HIBYTE(NetHandler[220*slot+206])</c> @0x546438 from the roster, which the
+    ///     port does not cache) — it is seeded as the faithful default <c>0</c>, NEVER fabricated. When no
+    ///     local-player holder or no cached descriptor is wired (core tests), the seed is skipped. spec:
+    ///     SelectWindow_EnterGame @0x546256 (@0x546438 status, @0x546455 level);
+    ///     Docs/RE/structs/spawn_descriptor.md (+0x3A level).
+    /// </summary>
+    private void SeedEnterTimeLocalPlayer(byte slotIndex)
+    {
+        if (_localPlayer is null) return; // no holder wired (tests) — nothing to seed.
+
+        var chosen = _characterSelection?.Chosen;
+        if (chosen is null || chosen.RawDescriptor.Length < SpawnDescriptorReader.Size)
+        {
+            // No cached descriptor (the 1/7 → 3/14 ladder normally caches it before this 1/9 emit). Seed the
+            // slot only and leave level/status at their defaults; do NOT fabricate roster values. spec:
+            // login_flow.md §3.5 (descriptor cached on Confirm); SelectWindow_EnterGame @0x546256.
+            _localPlayer.SeedEnterChoice(slotIndex, 0, 0);
+            return;
+        }
+
+        // Level mirrors the cached descriptor's +0x3A (the binary's NetHandler[..207] roster source has no
+        // carrier in the port). spec: spawn_descriptor.md (+0x3A); SelectWindow_EnterGame @0x546455.
+        var reader = new SpawnDescriptorReader(chosen.RawDescriptor.Span[..SpawnDescriptorReader.Size]);
+        var level = reader.ReadLevel();
+
+        // ROSTER-GAP (flagged, NOT fabricated): byte_7AC393 = HIBYTE(NetHandler[220*slot+206]) @0x546438 is
+        // sourced ONLY from the NetHandler roster row, which CharacterSelectionStore does not retain (it
+        // caches the descriptor, not the roster). There is no clean carrier at the 1/9 emit, so the status
+        // byte is seeded as the faithful default 0. The 3/23 CharStatusBytesByNameEvent.StatusValue is the
+        // roster status authority; threading it into CharacterSelectionStore would let this seed carry the
+        // real value (see coordinationNeeds). spec: SelectWindow_EnterGame @0x546438 (roster-sourced status).
+        const byte statusByteGapDefault = 0;
+        _localPlayer.SeedEnterChoice(slotIndex, level, statusByteGapDefault);
     }
 
     /// <inheritdoc />

@@ -15,8 +15,11 @@
 //
 // FIX — THREE RENDER PATHS (spec: Docs/RE/specs/frontend_scenes.md §3.6.7):
 //   emitter_type 0 (billboard): camera-facing quad, per-axis size (NOT a square max()).
-//   emitter_type 1 (mesh-particle): oriented quad, NOT camera-facing, Euler rotation from kf.
-//   emitter_type 2 (directional billboard): oriented quad with +90° Y pre-rotation + kf Euler.
+//   emitter_type 1 (mesh-particle): oriented quad, NOT camera-facing, +90° Y pre-rotation + kf Euler.
+//   emitter_type 2 (oriented mesh): oriented quad, NO yaw pre-rotation, kf Euler only.
+// FIX 14b — the fixed +90° Y pre-rotation belongs to emitter_type 1 (mesh-particle), NOT type 2.
+//   IDA: sub_4A5E0D v29==1 @0x4a62ae calls Quat_SetYawRotationFromAngle(a2, 1.5707964) (+90° Y) on
+//   the mesh branch; the type-2 branch @0x4a64be runs the oriented mesh loop with NO yaw.
 //
 // EXPECTED DISTRIBUTION for char_select-u.xeff (spec: §3.6.6 VFS-VERIFIED):
 //   6 billboard / 51 mesh-particle / 11 directional → 68 total.
@@ -258,9 +261,12 @@ public sealed partial class XeffSceneEffect : Node3D
                 }
 
                 // ------------------------------------------------------------------
-                // emitter_type 1 — MESH-PARTICLE (oriented quad, NOT camera-facing)
+                // emitter_type 1 — MESH-PARTICLE (oriented quad, NOT camera-facing, +90° Y pre-rot)
                 // spec: §3.6.7 — "real ORIENTED quad/mesh tile, oriented by keyframe Euler rotation"
                 //   "The 28 waterfall tiles are oriented quads forming a flat curtain sheet."
+                // FIX 14b — type 1 also receives a fixed +90° Y pre-rotation composed before the
+                //   keyframe orientation (IDA: sub_4A5E0D v29==1 @0x4a62ae Quat_SetYawRotationFromAngle
+                //   1.5707964). This is the corona/oriented pre-rotation formerly mis-assigned to type 2.
                 // spec: §A.12 — XEFF_EMITTER_MESH = 1
                 // Rotation: kf0.Rotation = Quat from Euler XYZ (spec: effects.md §A.7 CONFIRMED).
                 // Handedness: world geometry negates Z (CLAUDE.md + Helpers/WorldCoordinates.ToGodot).
@@ -292,12 +298,20 @@ public sealed partial class XeffSceneEffect : Node3D
                     //   [negate the X and Y imaginary parts, keep Z and W].
                     // spec: CLAUDE.md "Coordinate conventions" — world negates Z.
                     // spec: §3.6.7 — orientation debugger-pending; size/placement fix is dominant.
-                    var godotQ = new Quaternion(-legacyQ.X, -legacyQ.Y, legacyQ.Z, legacyQ.W);
+                    var godotKfQ = new Quaternion(-legacyQ.X, -legacyQ.Y, legacyQ.Z, legacyQ.W);
                     // Normalise to guard against near-identity quaternion numerical drift.
-                    if (godotQ.LengthSquared() > 0.0001f)
-                        godotQ = godotQ.Normalized();
+                    if (godotKfQ.LengthSquared() > 0.0001f)
+                        godotKfQ = godotKfQ.Normalized();
                     else
-                        godotQ = Quaternion.Identity;
+                        godotKfQ = Quaternion.Identity;
+
+                    // FIX 14b — the fixed +90° Y pre-rotation belongs to emitter_type 1 (MESH),
+                    // not type 2. Compose: pre-rotation first, then the keyframe orientation.
+                    // IDA: sub_4A5E0D v29==1 @0x4a62ae — Quat_SetYawRotationFromAngle((float*)a2,
+                    //   1.5707964) (1.5707964 rad = +90° Y) is applied on the mesh (type 1) branch
+                    //   before the per-vertex transform loop; the type-2 branch @0x4a64be has NO yaw.
+                    var preRot = new Quaternion(Vector3.Up, Mathf.Pi * 0.5f); // +90° around Y
+                    var godotQ = (preRot * godotKfQ).Normalized();
 
                     mi = new MeshInstance3D
                     {
@@ -313,10 +327,12 @@ public sealed partial class XeffSceneEffect : Node3D
                 }
 
                 // ------------------------------------------------------------------
-                // emitter_type 2 — DIRECTIONAL BILLBOARD (oriented quad, +90° Y pre-rotation)
-                // spec: §3.6.7 — "oriented quad with an explicit +90° Y pre-rotation plus the
-                //   keyframe Euler rotation (used here for the large imot-gu-tung06-01 corona glows)."
-                // spec: §A.12 — XEFF_EMITTER_DIRECTIONAL = 2
+                // emitter_type 2 — ORIENTED MESH (oriented quad, NO yaw pre-rotation)
+                // FIX 14b — type 2 is the oriented mesh with NO +90° Y pre-rotation; the +90° Y
+                //   belongs to type 1 (mesh-particle). Only the keyframe orientation is applied here.
+                // IDA: sub_4A5E0D v29>=2 @0x4a64be runs the oriented mesh vertex loop WITHOUT any
+                //   Quat_SetYawRotationFromAngle call (only the type-1 branch @0x4a62ae has the yaw).
+                // spec: §A.12 — XEFF_EMITTER_DIRECTIONAL = 2 (oriented mesh, no yaw)
                 // ------------------------------------------------------------------
                 case EmitterDirectional:
                 {
@@ -328,26 +344,19 @@ public sealed partial class XeffSceneEffect : Node3D
                         Material = mat
                     };
 
-                    // Apply +90° Y pre-rotation then compose with keyframe Euler.
-                    // spec: §3.6.7 — "+90° Y pre-rotation composed with the keyframe rotation".
-                    var preRot = new Quaternion(Vector3.Up, Mathf.Pi * 0.5f); // +90° around Y
-
                     var legacyQ = kf0.Rotation;
-                    // Apply same Z-negate handedness conversion as type-1.
+                    // Apply same Z-negate handedness conversion as type-1; NO +90° Y pre-rotation.
                     var godotKfQ = new Quaternion(-legacyQ.X, -legacyQ.Y, legacyQ.Z, legacyQ.W);
                     if (godotKfQ.LengthSquared() > 0.0001f)
                         godotKfQ = godotKfQ.Normalized();
                     else
                         godotKfQ = Quaternion.Identity;
 
-                    // Compose: pre-rotation first, then keyframe.
-                    var combined = (preRot * godotKfQ).Normalized();
-
                     mi = new MeshInstance3D
                     {
                         Name = $"XeffDir{i}",
                         Position = offset,
-                        Quaternion = combined,
+                        Quaternion = godotKfQ,
                         Mesh = quad
                     };
 

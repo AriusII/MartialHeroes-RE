@@ -29,6 +29,19 @@ namespace MartialHeroes.Client.Application.World;
 // PENDING a live debugger (skinning §3.5.5) — they are NEVER invented here; the
 // caller supplies the resolved id_b and the equipment gids.
 //
+// LIVE-SPAWN ANCHOR (FIX 8): the live skinned-avatar factory
+// ActorManager_SpawnActorFromDescriptor @0x423fe9 (mode a2==1 = player) memcpy's the
+// 880-byte descriptor into the actor (+116) then calls Appearance_ResolveKey @0x422631,
+// AnimCatalog_LookupByKey, the bind-pose bake, ActorVisual_RebindLocalPlayerParts
+// ({3,4,6,2,11,14}+weapon) and ActorVisual_ApplyIdleMotionByKind — the SAME identity →
+// model-class → skeleton → equip pipeline this composer bakes. The player formula here
+// 5·(class + 4·variant) − 24 (variant 3 ⇒ 0 invisible) is byte-identical to
+// Appearance_ResolveKey @0x422631 (a2==1 branch: if(a4==3) return 0; else 5*(a3+4*a4)-24,
+// a3=class@+0x34, a4=variant@+0x2C). The live 4/4 tag-1 path feeds this same composer via
+// the FIX-8 ActorSpawnedEvent.InternalClass/AppearanceVariant/EquipGids — no second
+// factory is introduced. spec: assembly_graph §2/§4; ActorManager_SpawnActorFromDescriptor
+// @0x423fe9; Appearance_ResolveKey @0x422631.
+//
 // Engine-free: float Vec3/Quat helpers below — NO Godot.Quaternion/Vector3.
 // =============================================================================
 

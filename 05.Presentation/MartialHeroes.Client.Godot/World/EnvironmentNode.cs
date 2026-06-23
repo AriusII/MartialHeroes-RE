@@ -106,6 +106,12 @@ public sealed partial class EnvironmentNode : Node3D
     private Environment? _environment;
     private bool _hasSunDir;
 
+    // FIX 10 (IDA sub_44966F @0x44966F): the sun ORBIT is the SOLE per-frame owner of the directional
+    // light direction (SkyDomeNode.UpdateBillboards → negated orbit pos → light.Basis). When a sky
+    // dome exists it drives the direction every frame; this node must NOT also write the Basis per
+    // frame. The fallback set-once write (no dome / no light.bin) is applied at most once, guarded here.
+    private bool _fallbackDirApplied;
+
     // Sky dome rendering node (star + cloud domes). Null when VFS absent or domes not enabled.
     // Owned by this node; created and parented in Configure.
     // spec: Docs/RE/specs/environment.md §6 — Godot reconstruction guidance for sky domes.

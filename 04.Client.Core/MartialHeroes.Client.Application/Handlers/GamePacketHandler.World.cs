@@ -275,6 +275,12 @@ public sealed partial class GamePacketHandler
 
         var cursor = SmsgAreaEntitySnapshot.HeaderSize;
         const int maxIterations = 256; // bound the loop; tag == 0 normally terminates. spec: §10 (loop ends on tag 0).
+
+        // CA2014: visible-gear scratch hoisted out of the tag loop (no stackalloc-in-loop). Reuse is safe —
+        // ReadVisibleGearGids fully overwrites all 6 entries each call and ImmutableArray.Create snapshots
+        // them before the next iteration overwrites the buffer. spec: spawn_descriptor.md (+0x58 equip table).
+        Span<uint> gearScratch = stackalloc uint[SpawnDescriptorReader.VisibleGearSlots.Length];
+
         for (var i = 0; i < maxIterations; i++)
         {
             if (cursor >= payload.Length) break; // short read — stop.
@@ -334,6 +340,22 @@ public sealed partial class GamePacketHandler
                     var vitalB = reader.ReadVitalB();
                     var serverClass = reader.ReadServerClass();
 
+                    // FIX 8 — surface the descriptor-derived APPEARANCE IDENTITY the live skinned-avatar
+                    // factory needs (ActorManager_SpawnActorFromDescriptor @0x423fe9, mode 1 = player →
+                    // Appearance_ResolveKey @0x422631): internal_class (+0x34), appearance_variant (+0x2C),
+                    // and the six visible-gear gids ({3,4,6,2,11,14}) from the +0x58 equip table. Only PC
+                    // actors (sort tag 1) carry a meaningful PLAYER class/variant — for mob/NPC (tags 2/3)
+                    // Appearance_ResolveKey takes a DIFFERENT branch (mob: MobInfo_LookupByMobId), so the raw
+                    // fields are surfaced but layer 05 gates the skinned-PLAYER build on sort ==
+                    // PlayerCharacter. The empty default is kept for kinds that genuinely lack the field
+                    // (logged + skipped, never fabricated). spec: Docs/RE/structs/spawn_descriptor.md
+                    // (+0x34 / +0x2C / +0x58); ActorManager_SpawnActorFromDescriptor @0x423fe9;
+                    // Appearance_ResolveKey @0x422631.
+                    var internalClass = reader.ReadInternalClass();
+                    var appearanceVariant = reader.ReadAppearanceVariant();
+                    reader.ReadVisibleGearGids(gearScratch);
+                    var equipGids = ImmutableArray.Create(gearScratch);
+
                     // Float -> fixed at the boundary; world Y forced to 0. spec: spawn_descriptor.md (coords float, Y = 0).
                     var position =
                         Vector3Fixed.FromFloat(reader.ReadWorldX(), 0f, reader.ReadWorldZ());
@@ -345,7 +367,8 @@ public sealed partial class GamePacketHandler
                     _world.Add(actor);
 
                     _eventBus.Publish(new ActorSpawnedEvent(
-                        key, name, level, actor.Position, actor.CurrentHp, actor.MaxHp, serverClass));
+                        key, name, level, actor.Position, actor.CurrentHp, actor.MaxHp, serverClass,
+                        internalClass, appearanceVariant, equipGids));
                     spawnedActorCount++;
                     break;
 

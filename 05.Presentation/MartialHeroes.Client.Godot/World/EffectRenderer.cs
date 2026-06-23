@@ -51,15 +51,19 @@ namespace MartialHeroes.Client.Godot.World;
 //
 // Emitter types rendered
 // ──────────────────────
-// type 0 — Billboard (camera-facing quad); half-extents from keyframe size_x/size_y.
+// type 0 — Billboard (camera-facing quad); half-extents = ±0.5·size against the camera basis.
 //   spec: Docs/RE/specs/effects.md §17.2 — billboard; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_BILLBOARD = 0; CONFIRMED.
-// type 1 — Mesh-particle; per-vertex transform from the sub-effect velocity/size.
+//   IDA: sub_4A5E0D v29==0 @0x4a610d — corners at ±0.5·size vs Matrix4_CopyClearTranslation (camera basis).
+// type 1 — Mesh-particle; per-vertex transform PLUS a fixed +90° Y pre-rotation.
 //   spec: Docs/RE/specs/effects.md §17.2 — mesh-particle; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED.
-// type 2 — Directional billboard; same as type 0 plus 90° Y pre-rotation.
-//   spec: Docs/RE/specs/effects.md §17.2 — oriented-quad; CONFIRMED.
+//   FIX 14b — IDA: sub_4A5E0D v29==1 @0x4a62ae — Quat_SetYawRotationFromAngle(a2, 1.5707964) (+90° Y)
+//     then the per-vertex mesh transform loop. The +90° Y belongs HERE, not to type 2.
+// type 2 — Oriented mesh; per-vertex transform with NO yaw pre-rotation.
+//   spec: Docs/RE/specs/effects.md §17.2 — oriented mesh; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
+//   FIX 14b — IDA: sub_4A5E0D v29>=2 @0x4a64be — mesh vertex loop with NO Quat_SetYawRotationFromAngle.
 // GPU-particle (resource_id >= 10000): driven by GpuParticleSimNode (stepwise Euler integration).
 //   spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
 //   spec: Docs/RE/formats/effects.md §A.14 — XEFF_RESOURCE_PARTICLE_THRESHOLD = 10000; CONFIRMED.
@@ -110,9 +114,15 @@ public sealed partial class EffectRenderer : Node3D
 
     // emitter_type enum values.
     // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_BILLBOARD = 0; CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED (type 1 not yet rendered; no separate const needed).
+    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED.
     // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
+    // FIX 14b — emitter-type dispatch corrected to match sub_4A5E0D (switch on v29 = *element):
+    //   v29==0 @0x4a610d → camera-facing billboard (corners at ±0.5*size against the camera basis).
+    //   v29==1 @0x4a62ae → mesh-particle WITH +90° Y pre-rotation (Quat_SetYawRotationFromAngle 1.5707964).
+    //   v29>=2 @0x4a64be → oriented mesh, NO yaw pre-rotation.
+    // i.e. the +90° Y belongs to emitter_type 1 (mesh), NOT type 2 (directional/oriented).
     private const uint EmitterBillboard = 0;
+    private const uint EmitterMesh = 1;
     private const uint EmitterDirectional = 2;
 
     // UV scroll loop period in milliseconds.
@@ -375,6 +385,11 @@ public sealed partial class EffectRenderer : Node3D
 
         public Node3D Anchor = null!; // the actor node being followed
 
+        // FIX 15a — when true, Anchor is a static Node3D the renderer created for a map ambient effect
+        // (position-anchored, NOT actor-anchored) and owns; StopAmbient QueueFrees it. Cast effects
+        // anchor to an externally-owned actor node and leave this false.
+        public bool AmbientAnchorOwned;
+
         // Shared fields (both real and placeholder).
         public uint EffectId;
         public double ElapsedMs; // running elapsed time in ms
@@ -605,12 +620,21 @@ public sealed partial class EffectRenderer : Node3D
                 // The spawn_pos is in emitter-local space; add to parent's world position.
                 mi.Position = new Vector3(_posX[i], _posY[i], _posZ[i]);
 
-                // Size drives the billboard quad scale (sprite_size_x/y from entry header).
-                // spec: Docs/RE/formats/effects.md §E.2.1 — sprite_size_x/y: size of the sprite quad: HIGH.
-                var sizeScale = _size[i] / 65535f; // normalise from u16 range to ~[0,1] for scale
-                var qw = _entry.SpriteSizeX * sizeScale;
-                var qh = _entry.SpriteSizeY * sizeScale;
-                mi.Scale = new Vector3(qw > 0f ? qw : 1f, qh > 0f ? qh : 1f, 1f);
+                // FIX 14a — the per-particle size is the WORLD quad size, read directly.
+                // IDA: sub_62FC4A @0x62fc72 copies the i16 size_init straight into the per-particle
+                //   size float — (*(this+1))[3] = (float)*((__int16*)*this + 3) — with NO /65535
+                //   normalisation. The earlier '/ 65535f' divisor here was fabricated.
+                // IDA: sub_60C26C @0x60c311 (GParticleBuffer_fillVertices) uses the per-particle size
+                //   directly as the quad metric: v19 = *v7 * 0.5 (half-extent = size*0.5), where v7
+                //   points at the per-particle size float (a2+12, +20B stride). There is NO SpriteSize
+                //   multiply and NO /65535 anywhere in the fill loop, so the quad's full extent IS the
+                //   size and the half-extent is size*0.5. SpriteSizeX/Y are the base sprite dimensions
+                //   that feed size_init upstream, not an extra runtime multiplier — drop them here.
+                // Visibility floor: keep a minimum visible scale (aesthetic, not spec-dictated) so a
+                // near-zero integrated size does not collapse the quad to an invisible point.
+                var qw = MathF.Max(_size[i], 0.01f);
+                var qh = MathF.Max(_size[i], 0.01f);
+                mi.Scale = new Vector3(qw, qh, 1f);
 
                 // Per-particle colour update via material override.
                 if (mi.GetSurfaceOverrideMaterial(0) is StandardMaterial3D mat)
@@ -628,13 +652,17 @@ public sealed partial class EffectRenderer : Node3D
         {
             var sr = _entry.SubRecords[i];
 
-            // Initial sprite size from entry header × initial size_init (normalised from u16).
-            // spec: Docs/RE/formats/effects.md §E.2.1 — sprite_size_x/y drive the sprite quad: HIGH.
-            var sizeScale = sr.SizeInit > 0 ? sr.SizeInit / 65535f : 1f / 65535f;
-            var hw = _entry.SpriteSizeX * sizeScale * 0.5f;
-            var hh = _entry.SpriteSizeY * sizeScale * 0.5f;
-            hw = MathF.Max(hw, 0.01f);
-            hh = MathF.Max(hh, 0.01f);
+            // FIX 14a — build a UNIT quad (half-extent 0.5, full width 1.0); the per-particle world
+            // size is applied at runtime via mi.Scale in UpdateMeshes (Scale = size → full quad = size,
+            // half-extent = size*0.5). This matches the binary exactly:
+            //   sub_62FC4A @0x62fc72 — i16 size_init copied directly to the per-particle size float,
+            //     NO /65535 (the former '/ 65535f' divisor was fabricated).
+            //   sub_60C26C @0x60c311 — half-extent = size*0.5 (v19 = *v7 * 0.5), size used directly,
+            //     no SpriteSize multiply and no /65535 in the fill loop.
+            // SpriteSizeX/Y are the base sprite dimensions feeding size_init upstream, not a runtime
+            // multiplier, so they are NOT applied to the quad metric here.
+            const float hw = 0.5f; // unit half-extent; runtime Scale = size
+            const float hh = 0.5f;
 
             var arrays = new Array();
             arrays.Resize((int)Mesh.ArrayType.Max);
