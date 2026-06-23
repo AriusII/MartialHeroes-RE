@@ -2,7 +2,6 @@ using System.IO.MemoryMappedFiles;
 
 namespace MartialHeroes.Assets.Vfs;
 
-
 public sealed unsafe class MappedVfsArchive : IDisposable
 {
     private readonly VfsDirectory _directory;

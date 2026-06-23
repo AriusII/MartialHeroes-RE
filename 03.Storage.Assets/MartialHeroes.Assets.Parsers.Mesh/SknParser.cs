@@ -43,7 +43,6 @@ public static class SknParser
         for (var f = 0; f < (int)faceCount; f++)
         for (var c = 0; c < 3; c++)
         {
-
             var vIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
             var uvU = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
@@ -95,7 +94,6 @@ public static class SknParser
         var weights = new SknWeight[weightCount];
         for (var w = 0; w < (int)weightCount; w++)
         {
-
             var wVertIdx = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
 

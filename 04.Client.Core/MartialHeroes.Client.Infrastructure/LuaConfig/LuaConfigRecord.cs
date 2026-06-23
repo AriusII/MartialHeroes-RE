@@ -1,9 +1,7 @@
 namespace MartialHeroes.Client.Infrastructure.LuaConfig;
 
-
 public sealed record LuaConfigRecord
 {
-
     public int VfsMode { get; init; } = 1;
 
     public int Launcher { get; init; } = 1;

@@ -57,7 +57,6 @@ public sealed class MacroFileParser : IMacroFileParser
 
             if (currentName is not null)
                 currentCmds.Add(line);
-
         }
 
         if (currentName is not null)

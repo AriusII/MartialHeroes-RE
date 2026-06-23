@@ -3,11 +3,9 @@ using System.Runtime.InteropServices;
 
 namespace MartialHeroes.Assets.Parsers.Audio.Models;
 
-
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct MudSoundTile
 {
-
     public readonly byte Unread0;
 
     public readonly byte Unread1;
@@ -27,7 +25,6 @@ public readonly struct MudSoundTile
 
 public sealed class MudSoundGrid
 {
-
     public const int Cols = 64;
 
     public const int Rows = 64;

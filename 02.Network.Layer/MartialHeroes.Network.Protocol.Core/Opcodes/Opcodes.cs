@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Network.Protocol.Core.Opcodes;
 
 public static class Opcodes

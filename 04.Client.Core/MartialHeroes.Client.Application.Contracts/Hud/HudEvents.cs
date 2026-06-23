@@ -4,7 +4,6 @@ using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Application.Contracts.Hud;
 
-
 public sealed record ChatLineEvent(
     int ChannelCode,
     string Text,

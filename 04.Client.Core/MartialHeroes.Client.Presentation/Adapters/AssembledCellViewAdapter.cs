@@ -1,4 +1,3 @@
-
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Client.Application.World;
 

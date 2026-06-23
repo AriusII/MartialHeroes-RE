@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.World.Models;
 
-
 public sealed class RegionTableRecord
 {
     public required int RegionId { get; init; }

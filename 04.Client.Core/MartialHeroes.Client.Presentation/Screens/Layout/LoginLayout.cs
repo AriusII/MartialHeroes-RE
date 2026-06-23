@@ -1,11 +1,9 @@
-
 namespace MartialHeroes.Client.Presentation.Screens.Layout;
 
 public readonly record struct WidgetRect(int X, int Y, int W, int H, int SrcX, int SrcY);
 
 public static class LoginLayout
 {
-
     public const int RefWidth = 1024;
     public const int RefHeight = 768;
 

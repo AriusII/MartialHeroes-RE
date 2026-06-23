@@ -3,7 +3,6 @@ using MartialHeroes.Assets.Parsers.Audio.Models;
 
 namespace MartialHeroes.Assets.Parsers.Audio;
 
-
 public static class MudSoundGridParser
 {
     private const int ExpectedFileSize = MudSoundGrid.FixedFileSize;

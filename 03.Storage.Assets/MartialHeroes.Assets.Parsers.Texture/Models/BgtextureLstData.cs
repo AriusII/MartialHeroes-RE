@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Texture.Models;
 
-
 public enum BgTextureRenderBucket
 {
     Static,

@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class DoStanceParser
 {
-
     private const int OffInstanceKey = 0x00;
 
     private const int OffGroupSubIndex = 0x04;

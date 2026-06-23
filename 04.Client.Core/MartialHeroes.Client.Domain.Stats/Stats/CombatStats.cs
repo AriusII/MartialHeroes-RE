@@ -2,7 +2,6 @@ namespace MartialHeroes.Client.Domain.Stats.Stats;
 
 public readonly record struct CombatStats
 {
-
     public int Str { get; init; }
 
     public int Dex { get; init; }

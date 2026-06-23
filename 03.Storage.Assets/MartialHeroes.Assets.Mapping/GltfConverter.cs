@@ -9,7 +9,6 @@ namespace MartialHeroes.Assets.Mapping;
 
 public static class GltfConverter
 {
-
     private const uint GlbMagic = 0x46546C67u;
 
     private const uint GlbVersion = 2u;
@@ -308,7 +307,6 @@ public static class GltfConverter
         AnimationClip[]? clips,
         Stream output)
     {
-
         ExpandSkinnedVertices(mesh, out var positions, out var uvs,
             out var indices,
             out var jointIndices,

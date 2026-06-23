@@ -6,46 +6,26 @@ namespace MartialHeroes.Assets.Parsers.Terrain;
 
 public static class TerrainLayerParsers
 {
-
     private const int TriangleRecordStride = 40;
-
-
     private const int FxShortGroupHeaderSize = 20;
-
     private const int Fx3GroupHeaderSize = 44;
-
-
     private const int Fx4FileTileCountSize = 4;
-
     private const int Fx4TileHeaderSize = 48;
-
     private const int Fx4TileVertexCountOffset = 0x28;
-
     private const int Fx4TileIndexCountOffset = 0x2C;
-
     private const int Fx4VertexStride = 44;
-
-
     private const int Fx5GroupHeaderSize = 48;
     private const int Fx5VertexCountOffset = 0x28;
     private const int Fx5IndexCountOffset = 0x2C;
-
-
-    private const int Fx7GroupHeaderSize = 52;
-    private const int Fx7VertexCountOffset = 0x2C;
-    private const int Fx7IndexCountOffset = 0x30;
+    private const int Fx7GroupHeaderSize = 48;
+    private const int Fx7VertexCountOffset = 0x28;
+    private const int Fx7IndexCountOffset = 0x2C;
     private const int Fx7VertexStride = 32;
-
-
-    private const int Fx6GlobalHeaderSize = 32;
-    private const int Fx6SubChunkHeaderSize = 8;
-    private const int Fx6FooterSize = 28;
-
-
-
+    private const int Fx6GroupHeaderSize = 36;
+    private const int Fx6VertexCountOffset = 0x1C;
+    private const int Fx6IndexCountOffset = 0x20;
+    private const int Fx6VertexStride = 32;
     private const int PointLightRecordStride = 60;
-
-
     private const int WindKeyframeStride = 24;
 
     public static CollisionTriangleList ParseUpOrExd(ReadOnlyMemory<byte> data)
@@ -109,18 +89,18 @@ public static class TerrainLayerParsers
                 ".sod.pre parse error: buffer too short for 8-byte header. " +
                 "spec: Docs/RE/formats/terrain_layers.md §4.1.");
 
-        var version = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
-        var vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
+        var solidCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var quadCount = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
 
-        var expectedSize = 8 + (long)vertexCount * 8;
+        var expectedSize = 8 + (long)quadCount * 8;
         if (span.Length < expectedSize)
             throw new InvalidDataException(
-                $".sod.pre parse error: expected {expectedSize} bytes for {vertexCount} vertices, " +
+                $".sod.pre parse error: expected {expectedSize} bytes for {quadCount} vertices, " +
                 $"got {span.Length}. spec: Docs/RE/formats/terrain_layers.md §4.1.");
 
-        var vertices = new (float WorldX, float WorldZ)[(int)vertexCount];
+        var vertices = new (float WorldX, float WorldZ)[(int)quadCount];
         var offset = 8;
-        for (var i = 0; i < (int)vertexCount; i++)
+        for (var i = 0; i < (int)quadCount; i++)
         {
             var wx = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
             var wz = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
@@ -128,7 +108,7 @@ public static class TerrainLayerParsers
             offset += 8;
         }
 
-        return new SodPreCache { Version = version, Vertices = vertices };
+        return new SodPreCache { SolidCount = solidCount, QuadCount = quadCount, Vertices = vertices };
     }
 
 
@@ -545,72 +525,58 @@ public static class TerrainLayerParsers
 
     private static Fx6Layer ParseFx6(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
     {
-        if (span.Length < Fx6GlobalHeaderSize)
-            throw new InvalidDataException(
-                $".fx6 parse error: buffer too short for 32-byte global header (got {span.Length}). " +
-                "spec: Docs/RE/formats/terrain_layers.md §1.9.");
+        EnsureFx("fx6", span, 4);
+        var groupCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var offset = 4;
 
-        var subChunkCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
-        var rawGlobalRest = backing.IsEmpty
-            ? span.Slice(4, 28).ToArray()
-            : backing.Slice(4, 28);
-        var offset = Fx6GlobalHeaderSize;
-
-        var subChunks = new Fx6SubChunk[(int)subChunkCount];
-        for (var s = 0; s < (int)subChunkCount; s++)
+        var groups = new Fx6Group[(int)groupCount];
+        for (uint g = 0; g < groupCount; g++)
         {
-            var isFinal = s == (int)subChunkCount - 1;
-
-            if (offset + Fx6SubChunkHeaderSize > span.Length)
+            if (offset + Fx6GroupHeaderSize > span.Length)
                 throw new InvalidDataException(
-                    $".fx6 parse error: sub-chunk[{s}] header truncated at offset {offset}. " +
-                    "spec: Docs/RE/formats/terrain_layers.md §1.9.");
+                    $".fx6 parse error: group[{g}] header truncated at offset {offset} " +
+                    $"(need {Fx6GroupHeaderSize}, remaining {span.Length - offset}). " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.4a §1.9.");
 
-            var vertCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-            var idxCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
-            offset += Fx6SubChunkHeaderSize;
+            var textureIndex1Based = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
 
-            var geoBytes = (long)vertCount * 32 + (long)idxCount * 2;
-            if (offset + geoBytes + (isFinal ? 0 : Fx6FooterSize) > span.Length)
+            var rawHdrExtra = backing.IsEmpty
+                ? span.Slice(offset + 4, Fx6GroupHeaderSize - 4).ToArray()
+                : backing.Slice(offset + 4, Fx6GroupHeaderSize - 4);
+
+            var vertCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx6VertexCountOffset, 4));
+            var idxCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                span.Slice(offset + Fx6IndexCountOffset, 4));
+
+            offset += Fx6GroupHeaderSize;
+
+            var geoBytes = (long)vertCount * Fx6VertexStride + (long)idxCount * 2;
+            if (offset + geoBytes > span.Length)
                 throw new InvalidDataException(
-                    $".fx6 parse error: sub-chunk[{s}] geometry or footer truncated at offset {offset}. " +
-                    "spec: Docs/RE/formats/terrain_layers.md §1.9.");
+                    $".fx6 parse error: group[{g}] geometry truncated at offset {offset} — " +
+                    $"need {geoBytes} bytes (vertCount={vertCount}×32 + idxCount={idxCount}×2), " +
+                    $"remaining {span.Length - offset}. " +
+                    "spec: Docs/RE/formats/terrain_layers.md §1.4a §1.9.");
 
             var vertices = new FxVertex32[(int)vertCount];
             for (var v = 0; v < (int)vertCount; v++)
-                vertices[v] = ReadFxVertex32(span.Slice(offset + v * 32, 32));
-            offset += (int)vertCount * 32;
+                vertices[v] = ReadFxVertex32(span.Slice(offset + v * Fx6VertexStride, Fx6VertexStride));
+            offset += (int)vertCount * Fx6VertexStride;
 
             var indices = ReadU16Indices(span, offset, (int)idxCount);
             offset += (int)idxCount * 2;
 
-            ReadOnlyMemory<byte> rawFooter;
-            if (!isFinal)
+            groups[g] = new Fx6Group
             {
-                rawFooter = backing.IsEmpty
-                    ? span.Slice(offset, Fx6FooterSize).ToArray()
-                    : backing.Slice(offset, Fx6FooterSize);
-                offset += Fx6FooterSize;
-            }
-            else
-            {
-                rawFooter = ReadOnlyMemory<byte>.Empty;
-            }
-
-            subChunks[s] = new Fx6SubChunk
-            {
+                TextureIndex1Based = textureIndex1Based,
+                RawHeaderExtra = rawHdrExtra,
                 Vertices = vertices,
-                Indices = indices,
-                RawFooter = rawFooter
+                Indices = indices
             };
         }
 
-        return new Fx6Layer
-        {
-            SubChunkCount = subChunkCount,
-            RawGlobalHeaderRest = rawGlobalRest,
-            SubChunks = subChunks
-        };
+        return new Fx6Layer { GroupCount = groupCount, Groups = groups };
     }
 
     public static PointLightBinData ParsePointLightBin(ReadOnlyMemory<byte> data)

@@ -6,7 +6,6 @@ namespace MartialHeroes.Assets.Parsers.Texture;
 
 public static class MiscParser
 {
-
     private const int MobInfoRecordStride = 28;
 
 

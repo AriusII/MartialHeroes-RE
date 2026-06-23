@@ -1,13 +1,10 @@
-
 using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
-
 
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
 
 public interface IPacketHandler
 {
-
     void Handle(in SmsgKeyExchange packet);
 
 

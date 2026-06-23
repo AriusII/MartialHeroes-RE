@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Mapping;
 
 public static class AssetPassthrough
 {
-
     private static ReadOnlySpan<byte> PngMagic =>
         [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -133,7 +132,6 @@ public static class AssetPassthrough
         return sb.ToString();
     }
 }
-
 
 public enum ImageFormat
 {

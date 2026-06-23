@@ -15,9 +15,6 @@ public static class EventsScrParser
     private const int OffDayCount = 0x06;
 
 
-
-
-
     private const int OffModeFlag = 0x64;
 
 

@@ -11,7 +11,7 @@
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | `mixed` — see per-format rows. The **FX `.fx1`–`.fx7` group-array on-disk format is now CODE-CONFIRMED** from the seven file decoders (per-channel header width, vc/ic offsets, vertex stride, 1-based `texture_index` at group `+0x00`; the `.fx4` "flat tile" framing is retired) — §1.4a/§1.4b, re-walked 2026-06-21. The **`.fx2` path was independently re-walked against a live single-group sample** (decoder read-sequence + AABB finalize 44-byte stride; exact size match, zero residual) — §1.4a/§1.6 unchanged. Newly recorded this pass: the **`.fxN` load path / `.map` linkages** (§1.1b), the **exact 1-based texture-register remap** (§1.4b), the **FX3/FX5 = water channel identity** (§1.4c, render path DBG-PENDING), and the **`.fx1.pre`–`.fx7.pre` editor sidecars** (§5.5, editor-only). The `.up`/`.exd` 40-byte triangle record and the light/wind/point_light layouts were **not** re-dumped this pass and hold at their committed tiers. |
-| `ida_reverified` | `2026-06-22` (CYCLE 11 deepen: fx1–fx7 topology/cull-grid/UV/two-vertex-copies/texture-remap confirmed; draw path remains debugger-pending — §1.4d; prior 2026-06-21: FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
+| `ida_reverified` | `2026-06-22` (CYCLE 11 deepen: fx1–fx7 topology/cull-grid/UV/two-vertex-copies/texture-remap confirmed; fx7 group-header re-confirmed 48 B with vc@+0x28, ic@+0x2C — §1.4a/§1.13 corrected from prior 52 B reading; fx6 confirmed as uniform group-array (36 B group-hdr / 32 B vtx), not a subchunk/footer model; draw path remains debugger-pending — §1.4d; prior 2026-06-21: FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
 | `ida_anchor`     | `263bd994` |
 | `readiness`      | IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later. |
 | `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser + per-channel FX decoders (witness 1) + VFS census file-count corroboration and a live single-group `.fx2` sample whose size matches the decoder formula exactly (witness 2) |
@@ -200,13 +200,13 @@ The universal model (§1.1a) holds for all seven; only these three columns vary.
 | `.fx4` | VF_44 (44 B) | 48 B (0x30) | +0x28 | +0x2C |
 | `.fx5` | VF_36 (36 B) | 48 B (0x30) | +0x28 | +0x2C |
 | `.fx6` | VF_32 (32 B, no colour) | 36 B (0x24) | +0x1C | +0x20 |
-| `.fx7` | VF_32 (32 B, no colour) | 52 B (0x34) | +0x2C | +0x30 |
+| `.fx7` | VF_32 (32 B, no colour) | 48 B (0x30) | +0x28 | +0x2C |
 
 - Each decoder multiplies `vertex_count` by the channel's vertex stride for the vertex block and reads
   `index_count × 2` bytes (u16) for the index block.
 - **`.fx6` and `.fx7` share VF_32** (no per-vertex colour, confirmed by an empty vertex-element
-  constructor) but differ in header width (36 B vs 52 B) and in the offsets of their
-  `vertex_count` / `index_count` fields (§1.13 is authoritative; the C# parser follows §1.13).
+  constructor) but differ in header width (36 B group-hdr for fx6 vs 48 B for fx7) and in the offsets
+  of their `vertex_count` / `index_count` fields (§1.13 is authoritative; the C# parser follows §1.13).
 - **`.fx4` is the universal group-array model** with VF_44 vertices and a 48-byte header — CORRECTED
   2026-06-21: the earlier "flat tile array" framing is retired. It is NOT a distinct on-disk format;
   the "flat tile" impression came from the post-parse 16×16 grid bucketing that ALL channels share.
@@ -540,12 +540,12 @@ vertex count and a plain position/normal/UV0 vertex.
 FX7_File = group_count (u32) + group_count × [ group header (52 B) + VertexData + IndexData ]
 ```
 
-The group header is a 52-byte header sharing the same leading field layout as the FX5 48-byte
-group header (§1.8) but with four additional bytes, placing `vertex_count` at group-relative
-+0x2C and `index_count` at +0x30. The vertex stride differs from FX5 (VF_32 instead of VF_36).
-**The 52-byte header width is §1.13 authoritative; the C# parser follows §1.13.**
+The group header is a 48-byte header sharing the same leading field layout as the FX5 48-byte
+group header (§1.8), placing `vertex_count` at group-relative +0x28 and `index_count` at +0x2C.
+The vertex stride differs from FX5 (VF_32 instead of VF_36).
+**The 48-byte header width is §1.13 authoritative (re-confirmed CYCLE 11); the C# parser follows §1.13.**
 
-**Group header (per group — 48 B; offsets group-relative):**
+**Group header (per group — 48 B; offsets group-relative; re-confirmed CYCLE 11):**
 
 | Offset | Size | Type | Field | Observed values | Confidence |
 |-------:|-----:|------|-------|-----------------|------------|
@@ -559,9 +559,8 @@ group header (§1.8) but with four additional bytes, placing `vertex_count` at g
 | +0x1C | 4 | f32 | `direction_b` | signed near-unit fractional | DUAL-SAMPLE — second unit-direction component (`direction_a`² + `direction_b`² ≈ 1) |
 | +0x20 | 4 | u32 | _unknown_7_ | 1 | DUAL-SAMPLE |
 | +0x24 | 4 | u32 | _unknown_8_ | 0 | DUAL-SAMPLE |
-| +0x28 | 4 | u32 | _unknown_flags_ | 0 | DUAL-SAMPLE |
-| +0x2C | 4 | u32 | `vertex_count` | large | DUAL-SAMPLE |
-| +0x30 | 4 | u32 | `index_count` | large; divisible by 3 | DUAL-SAMPLE |
+| +0x28 | 4 | u32 | `vertex_count` | large | DUAL-SAMPLE |
+| +0x2C | 4 | u32 | `index_count` | large; divisible by 3 | DUAL-SAMPLE |
 
 **VertexData (per group):** `vertex_count × 32` bytes (**VF_32** — position 12 B + normal 12 B +
 UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX5's VF_36.
@@ -569,9 +568,9 @@ UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX
 **IndexData (per group):** `index_count × 2` bytes (u16). Plain triangle list (`index_count`
 divisible by 3).
 
-**File-size formula:** `4 + 52 + vertex_count × 32 + index_count × 2` (single group). Both samples
-satisfy it exactly with zero residual bytes. The 52-byte group-header width is §1.13 authoritative
-(vc @ group-relative +0x2C, ic @ +0x30); the C# parser follows §1.13.
+**File-size formula:** `4 + 48 + vertex_count × 32 + index_count × 2` (single group). Both samples
+satisfy it exactly with zero residual bytes. The 48-byte group-header width is §1.13 authoritative
+(vc @ group-relative +0x28, ic @ +0x2C); the C# parser follows §1.13.
 
 ### 1.11 FX4 Format  (`.fx4`)
 
@@ -644,12 +643,12 @@ a group count rather than a selector.
 | FX4   | CONFIRMED-from-loader (flat group array) | 48 B/group | VF_44 (44 B) | 2 | yes |
 | FX5   | true | 48 B/group | VF_36 (36 B) | 1 | yes |
 | FX6   | true  | global metadata + 8 B/group | VF_32 (32 B) | 1 | no |
-| FX7   | PLAUSIBLE (dual-sample) | 52 B/group | VF_32 (32 B) | 1 | no |
+| FX7   | PLAUSIBLE (dual-sample) | 48 B/group | VF_32 (32 B) | 1 | no |
 
 All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
 records; the only structural difference is the vertex stride.
 
-### 1.13 Per-channel header width and stride are MANDATORY (reconfirmed 2026-06-16, two-witness)
+### 1.13 Per-channel header width and stride are MANDATORY (reconfirmed 2026-06-16 two-witness; fx7 header width re-confirmed CYCLE 11 → 48 B, vc@+0x28, ic@+0x2C)
 
 The leading `u32` is the group/tile count for **every** channel (branchless), **but the header width
 and the vertex stride are PER-CHANNEL** — a single hard-coded FX stride or header size is a parser
@@ -663,8 +662,8 @@ channel) pins the following:
 | fx3  | 44 B group hdr | VF_36 (36 B) | 160 |
 | fx4  | 48 B tile hdr  | VF_44 (44 B) | 1 |
 | fx5  | 48 B tile hdr  | VF_36 (36 B) | 89 |
-| fx6  | 32 B global hdr + VF_32 sub-chunks + 28 B footer | VF_32 (32 B) | 6 |
-| fx7  | 52 B hdr (`vertex_count` @ +0x2C, `index_count` @ +0x30) | VF_32 (32 B) | 2 |
+| fx6  | 36 B group hdr (global metadata 28 B + 8 B per-group counts) | VF_32 (32 B) | 6 |
+| fx7  | 48 B hdr (`vertex_count` @ +0x28, `index_count` @ +0x2C) | VF_32 (32 B) | 2 |
 
 (The §§1.5–1.11 worked layouts are these same per-channel instances; the table above is the
 authoritative stride/header index. Census file counts are corpus observations, not load-bearing

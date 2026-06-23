@@ -263,7 +263,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
 
             await SetUserVersionAsync(conn, SchemaVersion, ct);
         }
-
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection conn, CancellationToken ct)

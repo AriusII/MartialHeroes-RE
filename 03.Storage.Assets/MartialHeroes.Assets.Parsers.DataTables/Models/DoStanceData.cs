@@ -4,7 +4,6 @@ using System.Runtime.InteropServices;
 
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 [InlineArray(DoStanceRecord.TailByteCount)]
 public struct DoStanceTail72
 {
@@ -23,7 +22,6 @@ public struct DoStanceTail72
 
 public sealed class DoStanceRecord
 {
-
     public const int Stride = 116;
 
     public const int TailByteCount = 76;
@@ -55,7 +53,6 @@ public sealed class DoStanceRecord
 
 public sealed class DoStanceTable
 {
-
     public const int RecordStride = DoStanceRecord.Stride;
 
     private readonly Dictionary<uint, DoStanceRecord> _byInstanceKey;

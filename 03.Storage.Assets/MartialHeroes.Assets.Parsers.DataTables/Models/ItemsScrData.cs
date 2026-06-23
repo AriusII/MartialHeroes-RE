@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 public sealed class ItemEffectEntry
 {
     public required ushort EffectA { get; init; }
@@ -10,7 +9,6 @@ public sealed class ItemEffectEntry
     public required ushort EffectC { get; init; }
 
     public required byte EffectD { get; init; }
-
 }
 
 public sealed class ItemsScrRecord

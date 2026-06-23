@@ -132,7 +132,6 @@ public static class ItemsCsvParser
 
     private static ItemCsvRow BuildRow(string name, uint itemId, string desc, string[] tail)
     {
-
         static uint GetU(string[] t, int i)
         {
             return i < t.Length ? ParseUInt(t[i]) : 0u;

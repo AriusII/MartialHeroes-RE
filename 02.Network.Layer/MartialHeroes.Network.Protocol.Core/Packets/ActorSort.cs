@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Network.Protocol.Core.Packets;
 
 public enum ActorSort : byte

@@ -1,4 +1,3 @@
-using MartialHeroes.Assets.Parsers.DataTables;
 using MartialHeroes.Assets.Parsers.DataTables.Models;
 
 namespace MartialHeroes.Client.Infrastructure.Catalog;

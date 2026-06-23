@@ -1,4 +1,3 @@
-
 using System.Buffers.Binary;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -25,7 +24,6 @@ public readonly struct SmsgGameStateTick
     public const int SpawnXOffset = 0x2374;
 
     public const int SpawnZOffset = 0x2378;
-
 
 
     public const int TableAOffset = 24;

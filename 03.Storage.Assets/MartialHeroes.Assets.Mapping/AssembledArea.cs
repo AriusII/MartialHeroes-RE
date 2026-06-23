@@ -3,47 +3,26 @@ using MartialHeroes.Assets.Parsers.Terrain.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
-
 public sealed class AssembledCell
 {
-
     public required int MapX { get; init; }
-
     public required int MapZ { get; init; }
-
     public long CellKey => MapZ + 100000L * MapX;
-
-
     public TerrainCell? Slot0GroundTexGrid { get; init; }
-
     public BudScene? Slot1BuildingObjectGrid { get; init; }
-
     public Fx1Layer? Slot2Fx1 { get; init; }
-
     public Fx2Layer? Slot3Fx2 { get; init; }
-
     public Fx3Layer? Slot4Fx3 { get; init; }
-
     public Fx4Layer? Slot5Fx4 { get; init; }
-
     public Fx5Layer? Slot6Fx5 { get; init; }
-
     public Fx6Layer? Slot7Fx6 { get; init; }
-
     public Fx7Layer? Slot8Fx7 { get; init; }
-
-
     public string?[]? ResolvedTexturePaths { get; init; }
-
-
     public string?[]? ResolvedBuildingTexturePaths { get; init; }
-
-
     public SodBlob? Collision { get; init; }
-
-
+    public CollisionTriangleList? ExtraTerrainTriangles { get; init; }
+    public CollisionTriangleList? OverhangTriangles { get; init; }
     public MudSoundGrid? SoundGrid { get; init; }
-
 
     public float? SampleHeight(float localX, float localZ)
     {
@@ -73,16 +52,57 @@ public sealed class AssembledCell
         var h01 = h[(iz + 1) * TerrainCell.GridSize + ix];
         var h11 = h[(iz + 1) * TerrainCell.GridSize + ix + 1];
 
-        return h00 * (1f - fx) * (1f - fz)
-               + h10 * fx * (1f - fz)
-               + h01 * (1f - fx) * fz
-               + h11 * fx * fz;
+        // spec: Docs/RE/formats/terrain.md §5.4a — split quad into two triangles, pick containing triangle,
+        // evaluate its plane equation: n = cross(e1,e2), D = -dot(n,v0), y = (-D - n.X*x - n.Z*z) / n.Y
+        float v0X, v0Y, v0Z, v1X, v1Y, v1Z, v2X, v2Y, v2Z;
+        if (fx + fz < 1f)
+        {
+            // upper-left triangle: (ix,iz)=h00, (ix+1,iz)=h10, (ix,iz+1)=h01
+            v0X = 0f;
+            v0Y = h00;
+            v0Z = 0f;
+            v1X = 1f;
+            v1Y = h10;
+            v1Z = 0f;
+            v2X = 0f;
+            v2Y = h01;
+            v2Z = 1f;
+        }
+        else
+        {
+            // lower-right triangle: (ix+1,iz)=h10, (ix+1,iz+1)=h11, (ix,iz+1)=h01
+            v0X = 1f;
+            v0Y = h10;
+            v0Z = 0f;
+            v1X = 1f;
+            v1Y = h11;
+            v1Z = 1f;
+            v2X = 0f;
+            v2Y = h01;
+            v2Z = 1f;
+        }
+
+        // n = cross(v1-v0, v2-v0)
+        var e1X = v1X - v0X;
+        var e1Y = v1Y - v0Y;
+        var e1Z = v1Z - v0Z;
+        var e2X = v2X - v0X;
+        var e2Y = v2Y - v0Y;
+        var e2Z = v2Z - v0Z;
+        var nX = e1Y * e2Z - e1Z * e2Y;
+        var nY = e1Z * e2X - e1X * e2Z;
+        var nZ = e1X * e2Y - e1Y * e2X;
+
+        if (Math.Abs(nY) < 1e-8f)
+            return h00;
+
+        var d = -(nX * v0X + nY * v0Y + nZ * v0Z);
+        return (-d - nX * fx - nZ * fz) / nY;
     }
 }
 
 public sealed class AssembledArea
 {
-
     public required int AreaId { get; init; }
 
 

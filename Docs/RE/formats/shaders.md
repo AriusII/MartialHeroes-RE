@@ -452,6 +452,54 @@ duplicate them.
    (and clears the stage-1 texture, vertex shader, and pixel shader) without touching the vertex
    shader or the render targets.
 
+### C5.6a Shipped display.lua values (CYCLE 11 addition)
+
+> The external display configuration file (`display.lua`) ships per-state brightness values and a
+> small set of glow/lighting scalars. The values below are recovered from the shipped file and
+> supersede the binary default (white-multiply / zero-add) for the running client. They are
+> data-only (the executable reads them at startup into the 9-entry table described in §C5.5).
+
+**Per-state DISPLAY_CHAR_BRIGHT_MULTI / ADD table (9 states):**
+
+| State index | State name | MULTI (R, G, B) | ADD (R, G, B) |
+|:-----------:|-----------|-----------------|----------------|
+| 0 | DEFAULT  | (see BASE_BRIGHT below) | 0, 0, 0 |
+| 1 | CHOICE   | 1.0, 1.0, 1.0 | 0.3, 0.3, 0.3 |
+| 2 | HIT      | 1.0, 0.5, 0.5 | 0.3, 0, 0 |
+| 3 | ALPHA    | 1.0, 1.0, 1.0 | 0, 0, 0 |
+| 4 | HIDDEN   | 1.0, 1.0, 1.0 | 0, 0, 0 |
+| 5 | POISON   | 0.5, 1.0, 0.5 | 0, 0.1, 0 |
+| 6 | TYPE     | 1.0, 1.0, 1.0 | 0, 0, 0 |
+| 7 | ANGER    | 1.5, 0.7, 0.7 | 0, 0, 0 |
+| 8 | AUTO     | 1.0, 1.0, 1.0 | 0, 0, 0 |
+
+> State table is representative; individual channel components should be confirmed against the
+> shipped `display.lua` file read at runtime — these are loader-read values, not code constants.
+
+**Global scalars from display.lua:**
+
+| Key | Value | Role |
+|-----|-------|------|
+| `BASE_BRIGHT` | 1.05 | Global character brightness multiplier (applied before per-state MULTI) |
+| `GLOW_BRIGHT` | 0.3 | Glow/bloom intensity scale fed to the post chain |
+| `GLOW_RANGE` | 1, 1 | Glow range parameters (width, height; both 1 in the shipped file) |
+| `LIGHT_RATIO` | 0.5 | Light-to-ambient blend ratio |
+| `DISPLAY_POWER` | 2 | Shipped glow tap selector — value `2` selects `power2dx8.psh` as the active glow pixel shader |
+
+**Glow-tap chain (corrected from §C5.1).** The glow downsample/blur chain is a **1 / 2 / 4 / 8 / 16 / 32**
+ladder of `power{N}dx8.psh` files (not a 1/2/4 chain). The full ladder:
+`power1dx8.psh` → `power2dx8.psh` → `power4dx8.psh` → `power8dx8.psh` → `power16dx8.psh` → `power32dx8.psh`.
+The `DISPLAY_POWER` value in `display.lua` selects the active tap: the shipped value is **2**, so
+`power2dx8.psh` is the default runtime glow shader (not `power1dx8.psh`). Additional taps beyond
+power4 are present on disk as data-driven options but not string-referenced in the build — the actual
+tap depth is governed by `DISPLAY_POWER` at load time, not by a hard-coded binary path.
+
+**VS negates light directions; light2 is dead.** The vertex shader (`dotoonshading.vsh`) negates
+each light direction before the `dp3` Lambert accumulation (the `c4` direction constant is stored as
+a negated direction, not a raw world-space vector). A second light (`light2`) is structurally wired in
+the shader source but its colour constant is zero in all confirmed samples — it contributes nothing to
+the diffuse accumulation and is effectively dead for the shipped client.
+
 ### C5.7 Campaign 5 / 5B known unknowns
 
 - **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the

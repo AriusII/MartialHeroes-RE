@@ -3,7 +3,6 @@ using MartialHeroes.Assets.Parsers.DataTables.Models;
 
 namespace MartialHeroes.Assets.Parsers.DataTables;
 
-
 public static class MobInfoPanelParser
 {
     private const int HeaderSize = 4;

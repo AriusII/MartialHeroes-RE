@@ -1,4 +1,3 @@
-
 using MartialHeroes.Assets.Parsers.Core.Models;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 

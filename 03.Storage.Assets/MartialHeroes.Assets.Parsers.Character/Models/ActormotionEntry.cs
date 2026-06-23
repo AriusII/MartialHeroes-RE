@@ -2,7 +2,6 @@ namespace MartialHeroes.Assets.Parsers.Character.Models;
 
 public sealed class ActormotionEntry
 {
-
     public uint MotionKey { get; init; }
 
 

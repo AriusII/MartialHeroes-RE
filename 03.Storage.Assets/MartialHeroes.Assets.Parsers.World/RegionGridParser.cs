@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.World;
 
 public static class RegionGridParser
 {
-
     private const int WidthOffset = 0;
 
     private const int HeightOffset = 4;

@@ -4,7 +4,6 @@ namespace MartialHeroes.Shared.Kernel.Numerics;
 
 public readonly struct Vector3Fixed : IEquatable<Vector3Fixed>
 {
-
     public const int One = 1 << 16;
 
     public static readonly Vector3Fixed Zero = new(0, 0, 0);

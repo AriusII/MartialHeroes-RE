@@ -8,7 +8,6 @@ namespace MartialHeroes.Assets.Mapping;
 
 public static class PngConverter
 {
-
     private const uint DdsMagic = 0x20534444u;
 
     private const uint DdpfFourCC = 0x00000004u;

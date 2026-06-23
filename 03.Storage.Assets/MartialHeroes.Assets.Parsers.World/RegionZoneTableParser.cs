@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.World;
 
 public static class RegionZoneTableParser
 {
-
     public const int RecordCount = 32;
 
     public const int RecordStride = 48;

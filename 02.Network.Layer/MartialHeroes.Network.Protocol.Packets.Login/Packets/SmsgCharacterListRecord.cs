@@ -1,4 +1,3 @@
-
 using System.Buffers.Binary;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -25,7 +24,6 @@ public readonly struct EquipRefEntry
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public readonly struct CharacterListSlotRecord
 {
-
     public const int DescriptorSize = 880;
 
     public const int StatBlockSize = 96;
@@ -145,7 +143,6 @@ public readonly struct CharacterListSlotRecord
     public readonly uint WithinRankXp => ReadU32(StatBlockOffset + SbWithinRankXp);
 
     public readonly uint RemainingStatPoints => ReadU32(StatBlockOffset + SbRemainingStatPoints);
-
 
 
     public readonly byte SlotFlag => ReadU8(SlotFlagOffset);

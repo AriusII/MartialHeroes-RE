@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.World.Models;
 
-
 public sealed class RegionGrid
 {
     public const int CellWorldSize = 256;

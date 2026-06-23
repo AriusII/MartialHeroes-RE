@@ -2,7 +2,6 @@ namespace MartialHeroes.Client.Domain.Stats.Stats;
 
 public static class VitalFormula
 {
-
     private const float HpWeightStr = 2.2f;
     private const float HpWeightDex = 2.5f;
     private const float HpWeightAgi = 2.4f;

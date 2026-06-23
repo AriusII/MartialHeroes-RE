@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.Audio;
 
 public static class SoundTableParser
 {
-
     private const int OffSoundEntryId = 0x00;
 
     private const int OffTodEnable = 0x04;

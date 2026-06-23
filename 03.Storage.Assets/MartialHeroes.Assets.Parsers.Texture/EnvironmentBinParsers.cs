@@ -5,8 +5,6 @@ namespace MartialHeroes.Assets.Parsers.Texture;
 
 public static class EnvironmentBinParsers
 {
-
-
     private const int LightSectionAOffset = 0x0000;
     private const int LightSectionASize = 2304;
 

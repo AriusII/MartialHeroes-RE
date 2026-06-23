@@ -6,7 +6,6 @@ namespace MartialHeroes.Assets.Parsers.Character;
 
 public static class ActormotionParser
 {
-
     private const int ColCategory = 0;
     private const int ColIntraOffset = 1;
     private const int ColIntA = 2;

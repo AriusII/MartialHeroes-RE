@@ -3,7 +3,6 @@ using MartialHeroes.Assets.Parsers.World.Models;
 
 namespace MartialHeroes.Assets.Parsers.World;
 
-
 public static class RegionBinParser
 {
     private const int MinFileSize = 16;

@@ -8,7 +8,6 @@ namespace MartialHeroes.Assets.Mapping;
 
 public static class CollisionLayerGltfConverter
 {
-
     private const uint GlbMagic = 0x46546C67u;
     private const uint GlbVersion = 2u;
     private const uint ChunkTypeJson = 0x4E4F534Au;

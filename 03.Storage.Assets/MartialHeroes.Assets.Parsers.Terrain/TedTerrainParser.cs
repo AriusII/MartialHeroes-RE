@@ -6,7 +6,6 @@ namespace MartialHeroes.Assets.Parsers.Terrain;
 
 public static class TedTerrainParser
 {
-
     private const int VertexCount = TerrainCell.VertexCount;
 
     private const int HeightmapOffset = 0;

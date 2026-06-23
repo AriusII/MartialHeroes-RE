@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Texture.Models;
 
-
 public sealed class MapOptionBin
 {
     public const int FixedSize = 40;
@@ -26,7 +25,6 @@ public sealed class MapOptionBin
     public required uint Reserved { get; init; }
 }
 
-
 public readonly record struct BgraColor(byte B, byte G, byte R, byte A);
 
 public sealed class FogBin
@@ -44,7 +42,6 @@ public sealed class FogBin
     public required BgraColor[] FogColors { get; init; }
 }
 
-
 public sealed class MaterialBin
 {
     public const int FixedSize = 9792;
@@ -55,7 +52,6 @@ public sealed class MaterialBin
 
     public required float[][] ColorTable { get; init; }
 }
-
 
 public sealed class LightingKeyframe
 {
@@ -93,7 +89,6 @@ public sealed class LightBin
     public required ReadOnlyMemory<byte> RawBytes { get; init; }
 }
 
-
 public sealed class StarDomeBin
 {
     public const int FixedSize = 9216;
@@ -104,7 +99,6 @@ public sealed class StarDomeBin
 
     public required BgraColor[][] StarColors { get; init; }
 }
-
 
 public sealed class CloudDomeBin
 {
@@ -118,7 +112,6 @@ public sealed class CloudDomeBin
 
     public required BgraColor[][] Layer2Colors { get; init; }
 }
-
 
 public readonly record struct CloudCycleRow(
     byte Speed,

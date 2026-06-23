@@ -3,7 +3,6 @@ using System.Text;
 
 namespace MartialHeroes.Assets.Vfs;
 
-
 public readonly struct VfsEntry : IComparable<VfsEntry>
 {
     internal const int RecordSize = 144;

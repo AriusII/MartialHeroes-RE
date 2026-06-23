@@ -4,7 +4,6 @@ namespace MartialHeroes.Shared.Diagnostics.Logging;
 
 public static partial class AssetLog
 {
-
     [LoggerMessage(
         EventId = 2001,
         Level = LogLevel.Information,

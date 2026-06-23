@@ -5,7 +5,6 @@ using MartialHeroes.Client.Infrastructure.Exceptions;
 
 namespace MartialHeroes.Client.Infrastructure.LuaConfig;
 
-
 public sealed partial class LuaConfigReader
 {
     [GeneratedRegex(

@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Client.Presentation.Screens;
 
 public static class ClassAppearanceResolver

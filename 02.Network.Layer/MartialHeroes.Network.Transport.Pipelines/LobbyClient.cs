@@ -9,7 +9,6 @@ namespace MartialHeroes.Network.Transport.Pipelines;
 
 public sealed class LobbyClient : ILobbyClient
 {
-
     public const int LobbyBasePort = 10000;
 
     public const string FallbackHost = "211.196.150.4";
@@ -43,7 +42,6 @@ public sealed class LobbyClient : ILobbyClient
         _lobbyHost = lobbyHost;
         _decompress = decompress;
     }
-
 
 
     public Task<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(

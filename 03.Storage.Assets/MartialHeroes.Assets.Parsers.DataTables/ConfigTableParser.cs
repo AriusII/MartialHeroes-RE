@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class ConfigTableParser
 {
-
     private const int ExpScrStride = 20;
 
 
@@ -13,7 +12,6 @@ public static class ConfigTableParser
 
 
     private const int UserPointScrStride = 32;
-
 
 
     private const int SkillScrMainStride = 1504;

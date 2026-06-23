@@ -4,8 +4,6 @@ namespace MartialHeroes.Shared.Diagnostics.Logging;
 
 public static partial class NetworkLog
 {
-
-
     [LoggerMessage(
         EventId = 1001,
         Level = LogLevel.Trace,

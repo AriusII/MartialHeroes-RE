@@ -5,7 +5,6 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class XdbParser
 {
-
     private const int ActorSizeStride = 12;
 
 

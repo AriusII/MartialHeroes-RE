@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Client.Presentation.Screens.Layout;
 
 public sealed class PinKeypadScramble

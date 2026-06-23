@@ -2,10 +2,8 @@ using MartialHeroes.Assets.Parsers.Core.Models;
 
 namespace MartialHeroes.Assets.Parsers.Effects.Models;
 
-
 public sealed class XeffSubEffect
 {
-
     public required uint EmitterType { get; init; }
 
     public required uint ResourceId { get; init; }
@@ -96,7 +94,6 @@ public sealed class XeffData
     public required XeffSubEffect[] SubEffects { get; init; }
 }
 
-
 public readonly record struct EffVertex(
     float PosX,
     float PosY,
@@ -114,10 +111,8 @@ public sealed class EffObjectShape
     public required EffVertex[] Vertices { get; init; }
 }
 
-
 public sealed class ParticleSubRecord
 {
-
     public required ushort LifeBonus { get; init; }
 
     public required ushort Lifetime { get; init; }

@@ -2,7 +2,6 @@ namespace MartialHeroes.Client.Infrastructure.Settings;
 
 public sealed record ClientSettingsDto
 {
-
     public int? ResolutionWidth { get; init; }
 
     public int? ResolutionHeight { get; init; }

@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Mesh.Models;
 
-
 public readonly record struct XobjVertex(
     float PosX,
     float PosY,

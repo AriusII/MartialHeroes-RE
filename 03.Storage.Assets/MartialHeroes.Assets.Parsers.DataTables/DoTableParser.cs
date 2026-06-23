@@ -6,7 +6,6 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class DoTableParser
 {
-
     private const int TextCommandStride = 52;
 
 

@@ -1,9 +1,7 @@
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 public sealed class EventsScrRecord
 {
-
     public required uint EventId { get; init; }
 
     public required ushort ModeFlag { get; init; }

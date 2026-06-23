@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Network.Protocol.Core.Opcodes;
 
 public readonly record struct PacketOpcode(ushort Major, ushort Minor)

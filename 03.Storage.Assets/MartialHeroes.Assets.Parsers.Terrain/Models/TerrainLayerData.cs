@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Terrain.Models;
 
-
 public readonly record struct CollisionTriangle(
     float V1X,
     float V1Y,
@@ -18,14 +17,13 @@ public sealed class CollisionTriangleList
     public required CollisionTriangle[] Triangles { get; init; }
 }
 
-
 public sealed class SodPreCache
 {
-    public required uint Version { get; init; }
+    public required uint SolidCount { get; init; }
+    public required uint QuadCount { get; init; }
 
     public required (float WorldX, float WorldZ)[] Vertices { get; init; }
 }
-
 
 public readonly record struct FxVertex36(
     float X,
@@ -67,7 +65,6 @@ public readonly record struct FxVertex32(
     float U0,
     float V0);
 
-
 public class FxGroup
 {
     public required uint TextureIndex1Based { get; init; }
@@ -93,7 +90,6 @@ public sealed class Fx1Layer
     public required Fx1Group[] Groups { get; init; }
 }
 
-
 public sealed class Fx2Group : FxGroup
 {
     public required FxVertex44[] Vertices { get; init; }
@@ -108,7 +104,6 @@ public sealed class Fx2Layer
     public required Fx2Group[] Groups { get; init; }
 }
 
-
 public sealed class Fx3Group : FxGroup
 {
     public required FxVertex36[] Vertices { get; init; }
@@ -122,7 +117,6 @@ public sealed class Fx3Layer
 
     public required Fx3Group[] Groups { get; init; }
 }
-
 
 public sealed class Fx4Tile
 {
@@ -144,7 +138,6 @@ public sealed class Fx4Layer
     public required Fx4Tile[] Tiles { get; init; }
 }
 
-
 public sealed class Fx5Section
 {
     public required ReadOnlyMemory<byte> RawSectionHeader { get; init; }
@@ -158,7 +151,6 @@ public sealed class Fx5Layer
 {
     public required Fx5Section[] Sections { get; init; }
 }
-
 
 public sealed class Fx7Group
 {
@@ -180,26 +172,23 @@ public sealed class Fx7Layer
     public required Fx7Group[] Groups { get; init; }
 }
 
-
-public sealed class Fx6SubChunk
+public sealed class Fx6Group
 {
+    public required uint TextureIndex1Based { get; init; }
+
+    public required ReadOnlyMemory<byte> RawHeaderExtra { get; init; }
+
     public required FxVertex32[] Vertices { get; init; }
 
     public required ushort[] Indices { get; init; }
-
-    public required ReadOnlyMemory<byte> RawFooter { get; init; }
 }
 
 public sealed class Fx6Layer
 {
-    public required uint SubChunkCount { get; init; }
+    public required uint GroupCount { get; init; }
 
-    public required ReadOnlyMemory<byte> RawGlobalHeaderRest { get; init; }
-
-    public required Fx6SubChunk[] SubChunks { get; init; }
+    public required Fx6Group[] Groups { get; init; }
 }
-
-
 
 public sealed class PointLightRecord
 {

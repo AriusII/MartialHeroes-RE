@@ -7,26 +7,7 @@ public static class SodBlobParser
 {
     private const int SolidRecordStride = 108;
 
-    private const int WallSegmentStride = 48;
-
-    private const int SolidAabbMinXOffset = 0x00;
-    private const int SolidAabbMinZOffset = 0x04;
-    private const int SolidAabbMaxXOffset = 0x08;
-
-    private const int SolidAabbMaxZOffset = 0x0C;
-
-    private const int SegAabbMinXOffset = 0x00;
-    private const int SegAabbMinZOffset = 0x04;
-    private const int SegAabbMaxXOffset = 0x08;
-    private const int SegAabbMaxZOffset = 0x0C;
-    private const int SegP0XOffset = 0x10;
-    private const int SegP0ZOffset = 0x14;
-    private const int SegP1XOffset = 0x18;
-    private const int SegP1ZOffset = 0x1C;
-    private const int SegSlopeOffset = 0x20;
-    private const int SegXConstOffset = 0x24;
-    private const int SegInterceptOffset = 0x28;
-    private const int SegAxisFlagOffset = 0x2C;
+    private const int QuadRecordStride = 48;
 
     public static SodBlob Parse(ReadOnlyMemory<byte> data)
     {
@@ -66,17 +47,16 @@ public static class SodBlobParser
             var solidSpan = span.Slice(offset, SolidRecordStride);
 
             solidAabbMinX[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[..]);
-            solidAabbMinZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMinZOffset..]);
-            solidAabbMaxX[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMaxXOffset..]);
-            solidAabbMaxZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[SolidAabbMaxZOffset..]);
-
+            solidAabbMinZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[0x04..]);
+            solidAabbMaxX[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[0x08..]);
+            solidAabbMaxZ[s] = BinaryPrimitives.ReadSingleLittleEndian(solidSpan[0x0C..]);
 
             offset += SolidRecordStride;
         }
 
-        var segmentCounts = new uint[(int)solidCount];
-        var rawSegmentData = new ReadOnlyMemory<byte>[(int)solidCount];
-        var decodedSegmentsPerSolid = new WallSegment[(int)solidCount][];
+        var quadCounts = new uint[(int)solidCount];
+        var rawQuadData = new ReadOnlyMemory<byte>[(int)solidCount];
+        var decodedQuadsPerSolid = new SodQuad[(int)solidCount][];
 
         for (var s = 0; s < (int)solidCount; s++)
         {
@@ -85,60 +65,58 @@ public static class SodBlobParser
                     $".sod parse error: quadCount for solid[{s}] truncated at offset {offset}. " +
                     "spec: Docs/RE/formats/sod.md §Container structure.");
 
-            var segCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+            var quadCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
             offset += 4;
-            segmentCounts[s] = segCount;
+            quadCounts[s] = quadCount;
 
-            var segBlockBytes = (long)segCount * WallSegmentStride;
-            if (offset + segBlockBytes > span.Length)
+            var quadBlockBytes = (long)quadCount * QuadRecordStride;
+            if (offset + quadBlockBytes > span.Length)
                 throw new InvalidDataException(
-                    $".sod parse error: WallSegment data for solid[{s}] truncated — " +
-                    $"quadCount={segCount} requires {segBlockBytes} bytes at offset {offset}, " +
+                    $".sod parse error: QuadRecord data for solid[{s}] truncated — " +
+                    $"quadCount={quadCount} requires {quadBlockBytes} bytes at offset {offset}, " +
                     $"but buffer length is {span.Length}. " +
                     "spec: Docs/RE/formats/sod.md §QuadRecord.");
 
-            rawSegmentData[s] = backing.IsEmpty
-                ? (ReadOnlyMemory<byte>)span.Slice(offset, (int)segBlockBytes).ToArray()
-                : backing.Slice(offset, (int)segBlockBytes);
+            rawQuadData[s] = backing.IsEmpty
+                ? (ReadOnlyMemory<byte>)span.Slice(offset, (int)quadBlockBytes).ToArray()
+                : backing.Slice(offset, (int)quadBlockBytes);
 
-            var segs = new WallSegment[(int)segCount];
-            for (var q = 0; q < (int)segCount; q++)
+            var quads = new SodQuad[(int)quadCount];
+            for (var q = 0; q < (int)quadCount; q++)
             {
-                var qOff = offset + q * WallSegmentStride;
-                var qSpan = span.Slice(qOff, WallSegmentStride);
+                var qOff = offset + q * QuadRecordStride;
+                var qSpan = span.Slice(qOff, QuadRecordStride);
 
-                segs[q] = new WallSegment
+                quads[q] = new SodQuad
                 {
-                    AabbMinX = BinaryPrimitives.ReadSingleLittleEndian(qSpan[..]),
-                    AabbMinZ = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMinZOffset..]),
-                    AabbMaxX = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMaxXOffset..]),
-                    AabbMaxZ = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegAabbMaxZOffset..]),
-
-                    P0X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP0XOffset..]),
-                    P0Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP0ZOffset..]),
-                    P1X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP1XOffset..]),
-                    P1Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegP1ZOffset..]),
-
-                    Slope = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegSlopeOffset..]),
-                    XConst = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegXConstOffset..]),
-                    Intercept = BinaryPrimitives.ReadSingleLittleEndian(qSpan[SegInterceptOffset..]),
-                    AxisFlag = BinaryPrimitives.ReadUInt32LittleEndian(qSpan[SegAxisFlagOffset..])
+                    C0X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[..]),
+                    C0Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x04..]),
+                    C1X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x08..]),
+                    C1Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x0C..]),
+                    C2X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x10..]),
+                    C2Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x14..]),
+                    C3X = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x18..]),
+                    C3Z = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x1C..]),
+                    Opaque0 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x20..]),
+                    Opaque1 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x24..]),
+                    Opaque2 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x28..]),
+                    Opaque3 = BinaryPrimitives.ReadSingleLittleEndian(qSpan[0x2C..])
                 };
             }
 
-            decodedSegmentsPerSolid[s] = segs;
-            offset += (int)segBlockBytes;
+            decodedQuadsPerSolid[s] = quads;
+            offset += (int)quadBlockBytes;
         }
 
-        var solids = new SolidRecord[(int)solidCount];
+        var solids = new SodSolid[(int)solidCount];
         for (var s = 0; s < (int)solidCount; s++)
-            solids[s] = new SolidRecord
+            solids[s] = new SodSolid
             {
                 AabbMinX = solidAabbMinX[s],
                 AabbMinZ = solidAabbMinZ[s],
                 AabbMaxX = solidAabbMaxX[s],
                 AabbMaxZ = solidAabbMaxZ[s],
-                Segments = decodedSegmentsPerSolid[s],
+                Quads = decodedQuadsPerSolid[s],
                 RawRecord = rawSolids[s]
             };
 
@@ -147,8 +125,8 @@ public static class SodBlobParser
             SolidCount = solidCount,
             Solids = solids,
             RawSolidRecords = rawSolids,
-            TriangleCounts = segmentCounts,
-            RawTriangleData = rawSegmentData
+            QuadCounts = quadCounts,
+            RawQuadData = rawQuadData
         };
     }
 }

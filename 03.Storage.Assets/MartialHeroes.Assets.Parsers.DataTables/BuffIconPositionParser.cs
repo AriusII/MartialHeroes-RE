@@ -4,7 +4,6 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public sealed class BuffIconPositionTable
 {
-
     private readonly Dictionary<uint, BuffIconPositionRecord> _byBuffId;
 
     private BuffIconPositionTable(BuffIconPositionRecord[] records)
@@ -31,7 +30,6 @@ public sealed class BuffIconPositionTable
 
 public static class BuffIconPositionParser
 {
-
     public static BuffIconPositionTable Parse(ReadOnlyMemory<byte> data)
     {
         return BuffIconPositionTable.Parse(data);

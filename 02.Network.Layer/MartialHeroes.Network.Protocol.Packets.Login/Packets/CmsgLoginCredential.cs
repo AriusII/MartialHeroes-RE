@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Network.Protocol.Packets.Login.Packets;
 
 public static class CmsgLoginCredential

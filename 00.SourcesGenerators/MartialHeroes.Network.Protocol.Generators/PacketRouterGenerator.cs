@@ -109,7 +109,7 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
             spc.AddSource("PacketRouter.g.cs", SourceText.From(sb.ToString(), Encoding.UTF8));
         });
     }
-    
+
     private static void CollectTaggedStructs(
         INamespaceSymbol ns,
         INamedTypeSymbol? opcodeAttrSymbol,
@@ -133,7 +133,7 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
     {
         if (type.TypeKind != TypeKind.Struct)
             return;
-        
+
         AttributeData? attr = null;
         foreach (var a in type.GetAttributes())
         {
@@ -166,7 +166,7 @@ public sealed class PacketRouterGenerator : IIncrementalGenerator
 
         if (!seenOpcodes.Add(packed))
             return;
-        
+
         var fqn = type.ToDisplayString(
             new SymbolDisplayFormat(
                 SymbolDisplayGlobalNamespaceStyle.Omitted,

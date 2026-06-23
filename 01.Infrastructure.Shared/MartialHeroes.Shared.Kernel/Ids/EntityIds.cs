@@ -1,6 +1,5 @@
 namespace MartialHeroes.Shared.Kernel.Ids;
 
-
 [StronglyTypedId]
 public readonly partial record struct PlayerId(uint Value);
 

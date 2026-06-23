@@ -1,4 +1,3 @@
-
 using System.Security.Cryptography;
 
 namespace MartialHeroes.Network.Protocol.Packets.Login.Packets;
@@ -35,7 +34,6 @@ public static class SessionTokenChecksum
         }
 
         WriteHexLower(digest, destination33);
-
     }
 
     private static void WriteHexLower(ReadOnlySpan<byte> source, Span<byte> destination)

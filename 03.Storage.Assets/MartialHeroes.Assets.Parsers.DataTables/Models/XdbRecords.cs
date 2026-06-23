@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 public sealed class ActorSizeRecord
 {
     public required uint ActorClassId { get; init; }
@@ -25,7 +24,6 @@ public sealed class EffectScaleRecord
 
     public required float Scale { get; init; }
 }
-
 
 public sealed class VehicleXdbRecord
 {
@@ -55,7 +53,6 @@ public sealed class VehicleXdbRecord
 
     public required float SeatYFacing4 { get; init; }
 }
-
 
 public sealed class CreatureItemXdbRecord
 {
@@ -88,9 +85,5 @@ public sealed class CreatureItemXdbRecord
     public required byte Flag3 { get; init; }
 
     public required uint
-        Probability
-    {
-        get;
-        init;
-    }
+        Probability { get; init; }
 }

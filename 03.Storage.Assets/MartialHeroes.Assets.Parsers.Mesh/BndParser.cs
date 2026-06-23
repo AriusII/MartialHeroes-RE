@@ -36,7 +36,6 @@ public static class BndParser
 
         for (var b = 0; b < boneCount; b++)
         {
-
             var selfId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
 

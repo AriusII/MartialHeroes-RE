@@ -4,7 +4,6 @@ namespace MartialHeroes.Client.Application.Contracts.Hud;
 
 public interface IHudEventHub
 {
-
     ChannelReader<ChatLineEvent> ChatLines { get; }
 
     ChannelReader<BuffStateEvent> BuffStates { get; }

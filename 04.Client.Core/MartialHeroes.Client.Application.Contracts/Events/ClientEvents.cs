@@ -52,7 +52,6 @@ public sealed record ActorLeveledUpEvent(
 
 public sealed record LoginHandshakeCompletedEvent(int ReplyByteCount) : IClientEvent;
 
-
 public sealed record EquipResultEvent(
     bool Success,
     byte FromSlot,
@@ -74,7 +73,6 @@ public sealed record NpcAcquireResultEvent(
     int ItemActorId,
     int GoldLow) : IClientEvent;
 
-
 public sealed record SkillHotbarSlotSetEvent(
     byte HotbarSlot,
     SkillId Skill,
@@ -88,7 +86,6 @@ public sealed record SkillHotbarAssignResultEvent(
     uint SkillPointPool) : IClientEvent;
 
 public sealed record SkillPointUpdateEvent(uint Mode, uint Value) : IClientEvent;
-
 
 public sealed record BuffSlotChangedEvent(
     ActorKey Key,
@@ -108,7 +105,6 @@ public sealed record ActorStatSyncEvent(
 
 public sealed record CombatStatsRecomputedEvent(ActorKey Key, CombatStats Stats) : IClientEvent;
 
-
 public sealed record CombatAttackUpdateEvent(
     byte Phase,
     sbyte SubKind,
@@ -122,7 +118,6 @@ public sealed record ChatBroadcastEvent(
     byte Channel,
     uint ContextId,
     string Text) : IClientEvent;
-
 
 public sealed record CharacterListEvent(
     byte ServerId,
@@ -151,7 +146,6 @@ public readonly record struct CharacterListSlot(
 
     public bool IsSelectableForEnter => LockFlag == 0 && SlotFlag != 0;
 }
-
 
 public sealed record LocalPlayerSpawnedEvent(
     ActorKey Key,
@@ -193,7 +187,6 @@ public sealed record LocalPlayerSpawnFailedEvent(byte SlotIndex) : IClientEvent;
 
 public sealed record CreateCharacterRequestedEvent(int SlotIndex) : IClientEvent;
 
-
 public readonly record struct RosterMember(uint ActorId, uint KeepGuard, uint Aux);
 
 public sealed record RosterSnapshotEvent(ImmutableArray<RosterMember> Members) : IClientEvent;
@@ -208,9 +201,7 @@ public readonly record struct HotbarSlotEntry(int SlotIndex, uint EntryKey, usho
 
 public sealed record HotbarInitializedEvent(ImmutableArray<HotbarSlotEntry> Slots) : IClientEvent;
 
-
 public sealed record ActorVisualRefreshedEvent(ActorKey Key, byte RelationVisual) : IClientEvent;
-
 
 public sealed record ActorDiedEvent(
     ActorKey VictimKey,

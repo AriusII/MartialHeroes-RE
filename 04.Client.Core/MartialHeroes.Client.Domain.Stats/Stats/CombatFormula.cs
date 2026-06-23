@@ -2,7 +2,6 @@ namespace MartialHeroes.Client.Domain.Stats.Stats;
 
 public static class CombatFormula
 {
-
     private const float AttackWeightStr = 2.5f;
     private const float AttackWeightDex = 2.0f;
     private const float AttackWeightAgi = 2.299999952316284f;

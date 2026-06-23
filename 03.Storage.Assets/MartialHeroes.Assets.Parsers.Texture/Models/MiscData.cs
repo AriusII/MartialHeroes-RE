@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Texture.Models;
 
-
 public sealed class MobInfoRecord
 {
     public required uint EntryId { get; init; }
@@ -18,7 +17,6 @@ public sealed class MobInfoRecord
     public required uint AuxField { get; init; }
 }
 
-
 public sealed class TolMapData
 {
     public required uint WorldOriginX { get; init; }
@@ -32,7 +30,6 @@ public sealed class TolMapData
     public required ReadOnlyMemory<byte> TileGrid { get; init; }
 }
 
-
 public sealed class DescriptorRecord
 {
     public required uint DescriptorId { get; init; }
@@ -45,7 +42,6 @@ public sealed class DescriptorRecord
 
     public required ReadOnlyMemory<byte> Reserved { get; init; }
 }
-
 
 public sealed class MapZoneRecord
 {

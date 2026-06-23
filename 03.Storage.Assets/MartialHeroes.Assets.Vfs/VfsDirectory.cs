@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 
 namespace MartialHeroes.Assets.Vfs;
 
-
 internal sealed class VfsDirectory
 {
     private const int HeaderSize = 24;

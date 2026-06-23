@@ -1,9 +1,7 @@
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 public sealed class MiWidgetRecord
 {
-
     public required uint WidgetId { get; init; }
 
     public required uint FieldA0 { get; init; }

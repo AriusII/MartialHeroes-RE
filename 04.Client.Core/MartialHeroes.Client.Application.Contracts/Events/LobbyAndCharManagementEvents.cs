@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 
 namespace MartialHeroes.Client.Application.Contracts.Events;
 
-
 public readonly record struct ServerListEntryView(
     short ServerId,
     short StatusCode,
@@ -45,7 +44,6 @@ public sealed record ChannelEndpointResolvedEvent(
     ushort ServerId,
     string Host,
     int Port) : IClientEvent;
-
 
 public enum CharManageSubtype
 {

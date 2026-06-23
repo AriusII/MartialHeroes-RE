@@ -89,7 +89,6 @@ public sealed class UsersBlock
     public required ReadOnlyMemory<byte> RawData { get; init; }
 }
 
-
 public sealed class SkillCatalogEntry
 {
     public required ReadOnlyMemory<byte> RawRecord { get; init; }
@@ -111,7 +110,6 @@ public sealed class MobCatalogEntry
 
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
-
 
 public sealed class TextCommandRecord
 {
@@ -195,10 +193,8 @@ public sealed class ItemsExtraRecord
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
 
-
 public sealed class ItemCsvRow
 {
-
     public required string NameCp949 { get; init; }
 
     public required uint ItemId { get; init; }
@@ -315,7 +311,6 @@ public sealed class ItemCsvRow
     public required string[] RawColumns { get; init; }
 }
 
-
 public sealed class NpcScrRecord
 {
     public required uint Id { get; init; }
@@ -330,7 +325,6 @@ public sealed class NpcScrRecord
 
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
-
 
 public sealed class QuestScrRecord
 {

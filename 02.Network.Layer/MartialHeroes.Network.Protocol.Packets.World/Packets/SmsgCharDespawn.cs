@@ -1,4 +1,3 @@
-
 using System.Runtime.InteropServices;
 using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Core.Packets;

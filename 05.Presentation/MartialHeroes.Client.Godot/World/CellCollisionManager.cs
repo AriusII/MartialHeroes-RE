@@ -7,8 +7,7 @@ public sealed class CellCollisionManager
 {
     private const int GridDim = 16;
 
-    private const int LeafSplitThreshold = 16;
-
+    // spec: Docs/RE/formats/terrain.md §2 — cell is 1024 world units
     private const float CellSpan = 1024f;
 
     private readonly Dictionary<(int MapX, int MapZ), CellCollision> _cells = new();
@@ -27,17 +26,20 @@ public sealed class CellCollisionManager
             for (var s = 0; s < sod.Solids.Length; s++)
             {
                 var solid = sod.Solids[s];
-                for (var q = 0; q < solid.Segments.Length; q++)
+                for (var q = 0; q < solid.Quads.Length; q++)
                 {
-                    var seg = ToGodotSegment(solid.Segments[q]);
-                    cell.Insert(seg);
+                    var quad = solid.Quads[q];
+                    cell.Insert(ToGodotSegment(quad.C0X, quad.C0Z, quad.C1X, quad.C1Z));
+                    cell.Insert(ToGodotSegment(quad.C1X, quad.C1Z, quad.C2X, quad.C2Z));
+                    cell.Insert(ToGodotSegment(quad.C2X, quad.C2Z, quad.C3X, quad.C3Z));
+                    cell.Insert(ToGodotSegment(quad.C3X, quad.C3Z, quad.C0X, quad.C0Z));
                 }
             }
 
         if (upTriangles is not null)
-            AppendOverhang(cell, upTriangles);
+            AppendFloorOverhangs(cell, upTriangles);
         if (exdTriangles is not null)
-            AppendOverhang(cell, exdTriangles);
+            AppendCeilingOverhangs(cell, exdTriangles);
 
         _cells[(mapX, mapZ)] = cell;
     }
@@ -108,54 +110,75 @@ public sealed class CellCollisionManager
         return true;
     }
 
-    public bool OverhangTest(Vector3 atGodot, out float overhangGodotY)
+    public bool OverhangTest(Vector3 atGodot, out float floorGodotY, out float ceilingGodotY)
     {
-        overhangGodotY = 0f;
+        floorGodotY = float.NegativeInfinity;
+        ceilingGodotY = float.PositiveInfinity;
+
         var px = atGodot.X;
         var pz = atGodot.Z;
 
-        var found = false;
-        var best = float.NegativeInfinity;
-        foreach (var cell in _cells.Values)
-        foreach (var tri in cell.Overhangs)
-            if (PointInTriangleXz(px, pz, tri.A, tri.B, tri.C))
-                if (tri.PlaneGodotY > best)
-                {
-                    best = tri.PlaneGodotY;
-                    found = true;
-                }
+        var foundFloor = false;
+        var foundCeiling = false;
 
-        if (found)
-            overhangGodotY = best;
-        return found;
+        foreach (var cell in _cells.Values)
+        {
+            foreach (var tri in cell.FloorOverhangs)
+                if (PointInTriangleXz(px, pz, tri.A, tri.B, tri.C))
+                    if (tri.PlaneGodotY > floorGodotY)
+                    {
+                        floorGodotY = tri.PlaneGodotY;
+                        foundFloor = true;
+                    }
+
+            foreach (var tri in cell.CeilingOverhangs)
+                if (PointInTriangleXz(px, pz, tri.A, tri.B, tri.C))
+                    if (tri.PlaneGodotY < ceilingGodotY)
+                    {
+                        ceilingGodotY = tri.PlaneGodotY;
+                        foundCeiling = true;
+                    }
+        }
+
+        return foundFloor || foundCeiling;
     }
 
-
-    private static GodotWallSegment ToGodotSegment(WallSegment w)
+    private static GodotWallSegment ToGodotSegment(
+        float p0LegX, float p0LegZ, float p1LegX, float p1LegZ)
     {
-        var p0 = new Vector2(w.P0X, -w.P0Z);
-        var p1 = new Vector2(w.P1X, -w.P1Z);
-        var minZ = Math.Min(-w.AabbMinZ, -w.AabbMaxZ);
-        var maxZ = Math.Max(-w.AabbMinZ, -w.AabbMaxZ);
+        var p0 = new Vector2(p0LegX, -p0LegZ);
+        var p1 = new Vector2(p1LegX, -p1LegZ);
         return new GodotWallSegment
         {
-            AabbMinX = w.AabbMinX,
-            AabbMaxX = w.AabbMaxX,
-            AabbMinZ = minZ,
-            AabbMaxZ = maxZ,
+            AabbMinX = Math.Min(p0.X, p1.X),
+            AabbMaxX = Math.Max(p0.X, p1.X),
+            AabbMinZ = Math.Min(p0.Y, p1.Y),
+            AabbMaxZ = Math.Max(p0.Y, p1.Y),
             P0 = p0,
             P1 = p1
         };
     }
 
-    private static void AppendOverhang(CellCollision cell, CollisionTriangleList list)
+    private static void AppendFloorOverhangs(CellCollision cell, CollisionTriangleList list)
     {
         foreach (var t in list.Triangles)
         {
             var a = new Vector2(t.V1X, -t.V1Z);
             var b = new Vector2(t.V2X, -t.V2Z);
             var c = new Vector2(t.V3X, -t.V3Z);
-            cell.Overhangs.Add(new GodotOverhangTri { A = a, B = b, C = c, PlaneGodotY = t.PlaneHeight });
+            cell.FloorOverhangs.Add(new GodotOverhangTri { A = a, B = b, C = c, PlaneGodotY = t.PlaneHeight });
+        }
+    }
+
+    // spec: Docs/RE/formats/terrain_layers.md §3 — EXTRA_TERRAIN (.exd) gives ceiling geometry
+    private static void AppendCeilingOverhangs(CellCollision cell, CollisionTriangleList list)
+    {
+        foreach (var t in list.Triangles)
+        {
+            var a = new Vector2(t.V1X, -t.V1Z);
+            var b = new Vector2(t.V2X, -t.V2Z);
+            var c = new Vector2(t.V3X, -t.V3Z);
+            cell.CeilingOverhangs.Add(new GodotOverhangTri { A = a, B = b, C = c, PlaneGodotY = t.PlaneHeight });
         }
     }
 
@@ -200,12 +223,11 @@ public sealed class CellCollisionManager
     private sealed class CellCollision
     {
         private readonly List<int>[] _buckets;
-
         private readonly float _gridMinX;
         private readonly float _gridMinZ;
         private readonly List<GodotWallSegment> _segments = new();
-
-        public readonly List<GodotOverhangTri> Overhangs = new();
+        public readonly List<GodotOverhangTri> CeilingOverhangs = new();
+        public readonly List<GodotOverhangTri> FloorOverhangs = new();
 
         public CellCollision(float legacyOriginX, float legacyOriginZ)
         {

@@ -8,7 +8,6 @@ namespace MartialHeroes.Assets.Mapping;
 
 public static class TerrainGltfConverter
 {
-
     private const int GridSize = TerrainCell.GridSize;
 
     private const int QuadSize = GridSize - 1;

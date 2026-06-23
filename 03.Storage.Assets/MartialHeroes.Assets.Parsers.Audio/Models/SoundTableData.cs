@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 
 namespace MartialHeroes.Assets.Parsers.Audio.Models;
 
-
 public enum SoundTableExtension : byte
 {
     Bgm,
@@ -56,7 +55,6 @@ public sealed class SoundTableEntry
 
 public sealed class SoundTableData
 {
-
     public const int FixedFileSize = 0x3400;
 
     public const int EntryCount = 256;

@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.Texture.Models;
 
-
 public sealed record TextureListEntry(int TexId, string VfsPath);
 
 public sealed class TextureListManifest

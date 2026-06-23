@@ -1,4 +1,3 @@
-
 namespace MartialHeroes.Client.Presentation.World;
 
 public static class EquipOverlayResolver

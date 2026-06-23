@@ -6,29 +6,17 @@ using MartialHeroes.Assets.Parsers.World;
 
 namespace MartialHeroes.Assets.Mapping;
 
-
 public sealed class AreaComposer
 {
-
     public const int PoolSize = 34;
-
     public const int RingSize = 25;
-
     public const int RingEdge = 5;
-
     public const int CenterSlot = 12;
-
-
     private readonly PoolEntry[] _pool = CreatePool();
-
-
     private readonly int[] _ring = CreateRing();
-
-
     private int _centerMapX;
     private int _centerMapZ;
     private bool _ringInitialized;
-
 
     public AssembledCell? CenterCell
     {
@@ -114,6 +102,8 @@ public sealed class AreaComposer
         Fx6Layer? slot7Fx6 = null;
         Fx7Layer? slot8Fx7 = null;
         SodBlob? collision = null;
+        CollisionTriangleList? extraTerrainTriangles = null;
+        CollisionTriangleList? overhangTriangles = null;
         (int Flag, int TexId)[]? terrainTextures = null;
         (int Flag, int TexId)[]? buildingTextures = null;
 
@@ -149,6 +139,14 @@ public sealed class AreaComposer
                         collision = SodBlobParser.Parse(subBytes);
                         break;
 
+                    case "EXTRA_TERRAIN":
+                        extraTerrainTriangles = TerrainLayerParsers.ParseUpOrExd(subBytes);
+                        break;
+
+                    case "UP_TERRAIN":
+                        overhangTriangles = TerrainLayerParsers.ParseUpOrExd(subBytes);
+                        break;
+
                     case "FX1":
                         slot2Fx1 = TerrainLayerParsers.ParseFx1(subBytes);
                         break;
@@ -176,7 +174,6 @@ public sealed class AreaComposer
                     case "FX7":
                         slot8Fx7 = TerrainLayerParsers.ParseFx7(subBytes);
                         break;
-
                 }
             }
             catch (InvalidDataException)
@@ -208,6 +205,8 @@ public sealed class AreaComposer
             Slot7Fx6 = slot7Fx6,
             Slot8Fx7 = slot8Fx7,
             Collision = collision,
+            ExtraTerrainTriangles = extraTerrainTriangles,
+            OverhangTriangles = overhangTriangles,
             SoundGrid = soundGrid,
             ResolvedTexturePaths = resolvedPaths,
             ResolvedBuildingTexturePaths = resolvedBuildingPaths
@@ -418,9 +417,7 @@ public sealed class AreaComposer
         public int MapX { get; set; }
         public int MapZ { get; set; }
         public int AreaId { get; set; }
-
         public bool Loaded { get; set; }
-
         public AssembledCell? Cell { get; set; }
     }
 }

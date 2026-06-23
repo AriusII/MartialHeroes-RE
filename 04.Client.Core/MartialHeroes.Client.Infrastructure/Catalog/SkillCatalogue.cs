@@ -7,7 +7,6 @@ namespace MartialHeroes.Client.Infrastructure.Catalog;
 
 public sealed class SkillCatalogue
 {
-
     private const int SkillIdOffset = 0;
 
     private const int SkillSortOffset = 1306;

@@ -63,7 +63,6 @@ public static class AnimationParser
 
             for (var k = 0; k < (int)keyCount; k++)
             {
-
                 var tx = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
                 offset += 4;
 

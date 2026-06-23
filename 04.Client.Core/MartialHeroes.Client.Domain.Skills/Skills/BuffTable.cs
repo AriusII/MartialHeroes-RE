@@ -1,5 +1,3 @@
-using MartialHeroes.Client.Domain.Stats.Stats;
-
 namespace MartialHeroes.Client.Domain.Skills.Skills;
 
 public sealed class BuffTable

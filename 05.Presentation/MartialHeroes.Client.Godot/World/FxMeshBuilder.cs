@@ -8,7 +8,6 @@ internal static class FxMeshBuilder
 {
     public delegate ImageTexture? FxTextureResolver(int channel, uint texIndex1Based);
 
-
     public static Node3D BuildFx1(Fx1Layer layer, FxTextureResolver? resolver)
     {
         var root = new Node3D { Name = "FxLayer_fx1" };
@@ -74,10 +73,10 @@ internal static class FxMeshBuilder
     public static Node3D BuildFx6(Fx6Layer layer, FxTextureResolver? resolver)
     {
         var root = new Node3D { Name = "FxLayer_fx6" };
-        for (var s = 0; s < layer.SubChunks.Length; s++)
+        for (var g = 0; g < layer.Groups.Length; g++)
         {
-            var sub = layer.SubChunks[s];
-            AddGroupVf32(root, 6, s, 1u, sub.Vertices, sub.Indices, resolver);
+            var grp = layer.Groups[g];
+            AddGroupVf32(root, 6, g, grp.TextureIndex1Based, grp.Vertices, grp.Indices, resolver);
         }
 
         return root;

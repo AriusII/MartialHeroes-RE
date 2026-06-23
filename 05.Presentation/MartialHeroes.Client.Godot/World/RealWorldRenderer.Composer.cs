@@ -13,7 +13,9 @@ public sealed partial class RealWorldRenderer
         var cellForCollision = (cellView as AssembledCellViewAdapter)?.ConcreteCell;
         _cellCollisionManager?.RegisterCell(
             cellView.MapX, cellView.MapZ,
-            cellForCollision?.Collision);
+            cellForCollision?.Collision,
+            cellForCollision?.ExtraTerrainTriangles,
+            cellForCollision?.OverhangTriangles);
 
         if (!_composeRender) return;
 

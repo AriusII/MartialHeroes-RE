@@ -1,6 +1,5 @@
 namespace MartialHeroes.Assets.Parsers.DataTables.Models;
 
-
 public sealed class CitemsRecord
 {
     public required uint ItemId { get; init; }
