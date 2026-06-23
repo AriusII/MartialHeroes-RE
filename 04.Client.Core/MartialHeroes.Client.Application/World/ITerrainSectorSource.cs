@@ -1,5 +1,3 @@
-using MartialHeroes.Client.Domain.Simulation.Simulation;
-
 namespace MartialHeroes.Client.Application.World;
 
 public interface ITerrainSectorSource

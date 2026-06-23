@@ -1,81 +1,53 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectCameraRig : Node
 {
-
-    private const float DollyRatePerMs = 0.0005f;
-
-
-    private const float Kf0PitchRad = -0.03333334f * Mathf.Pi;
-    private const float Kf0YawRad = 0.01333333f * Mathf.Pi;
-
-    private const float Kf1PitchRad = -0.01483333f * Mathf.Pi;
-
-    private const float Kf1YawRad = 0.004361111f * Mathf.Pi;
-
+    public const float CameraFov = 50.0f;
+    public const float CameraNear = 5.0f;
+    public const float CameraFar = 15000.0f;
 
     private const float BoomZoomUnitsPerSecond = 10.0f;
-
-    private const float BoomMinZ = 0.0f;
-
-    private const float BoomMaxZ = 26.0f;
-
 
     private const float HitBoxHalfExtentXZ = 6.0f;
     private const float HitBoxYHeight = 22.0f;
 
     private int _activeZoomAction;
+
     private float _boomZ;
 
-
+    // ── runtime state ─────────────────────────────────────────────────────────
     private Camera3D? _camera;
-    private bool _dollyComplete;
-
-    private float _dollyElapsedMs;
-    private Quaternion _kf0Orientation;
-
-
-    private Vector3 _kf0Pos;
-    private Quaternion _kf1Orientation;
-    private Vector3 _kf1Pos;
-
     private Func<int, Node3D?>? _slotActorProvider;
     private float[] _slotGodotX = [];
-
     private float[] _slotGodotZ = [];
+    private Vector3 _staticEyeGodot;
 
     public void Configure(
         Camera3D camera,
+        Vector3 staticEyeGodot,
         float[] slotGodotX,
         float[] slotGodotZ,
-        Func<int, Node3D?> slotActorProvider,
-        Vector3 kf0Pos,
-        Vector3 kf1Pos)
+        Func<int, Node3D?> slotActorProvider)
     {
         _camera = camera;
+        _staticEyeGodot = staticEyeGodot;
         _slotGodotX = slotGodotX;
         _slotGodotZ = slotGodotZ;
         _slotActorProvider = slotActorProvider;
 
-        _kf0Pos = kf0Pos;
-        _kf1Pos = kf1Pos;
-
-        _kf0Orientation = EulerOrientation(Kf0YawRad, Kf0PitchRad);
-        _kf1Orientation = EulerOrientation(Kf1YawRad, Kf1PitchRad);
-
-        _dollyElapsedMs = 0.0f;
-        _dollyComplete = false;
         _boomZ = 0.0f;
+        _activeZoomAction = 0;
 
+        _camera.GlobalPosition = staticEyeGodot;
         GD.Print(
-            $"[CharSelectCameraRig] Entry dolly armed (FREE-LOOK Euler, NO look-at): KF0={kf0Pos} → KF1={kf1Pos}; " +
-            $"KF0 yaw {Mathf.RadToDeg(Kf0YawRad):F3}°/pitch {Mathf.RadToDeg(Kf0PitchRad):F3}°, " +
-            $"KF1 yaw {Mathf.RadToDeg(Kf1YawRad):F3}° (0.004361111×π, IDA sub_40566E)/pitch {Mathf.RadToDeg(Kf1PitchRad):F3}° (no base heading); " +
-            $"t = clamp(elapsedMs × 0.0005, 0, 1) → 2.0 s. IDA: sub_40566E (KF table) / sub_404EE8 (yawQuat×pitchQuat, no +π).");
+            $"[CharSelectCameraRig] Static rig placed: eye={staticEyeGodot} " +
+            $"FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
+            "sub_404EE8 = discrete-index selector, no dolly. " +
+            "spec: Docs/RE/scenes/charselect.md §6.1 §6.3");
     }
+
 
     public void SetZoomAction(int actionId)
     {
@@ -85,35 +57,12 @@ public sealed partial class CharSelectCameraRig : Node
     public override void _Process(double delta)
     {
         if (_camera is null) return;
-        var dt = (float)delta;
-
-        if (!_dollyComplete) TickDolly(dt);
-        ApplyCameraBoomZoom(dt);
+        ApplyCameraBoomZoom((float)delta);
     }
-
-
-    private void TickDolly(float dt)
-    {
-        _dollyElapsedMs += dt * 1000.0f;
-        var t = Mathf.Clamp(_dollyElapsedMs * DollyRatePerMs, 0.0f, 1.0f);
-
-        _camera!.Position = _kf0Pos.Lerp(_kf1Pos, t);
-        _camera.Quaternion = _kf0Orientation.Slerp(_kf1Orientation, t);
-
-        if (t >= 1.0f)
-        {
-            _dollyComplete = true;
-            _camera.Position = _kf1Pos;
-            _camera.Quaternion = _kf1Orientation;
-            GD.Print(
-                "[CharSelectCameraRig] Entry dolly complete — holding KF1. spec: §3.5.2 (only indices 0/1 armed).");
-        }
-    }
-
 
     private void ApplyCameraBoomZoom(float dt)
     {
-        if (!_dollyComplete || _camera is null) return;
+        if (_camera is null) return;
 
         var actionDir = _activeZoomAction switch
         {
@@ -122,24 +71,12 @@ public sealed partial class CharSelectCameraRig : Node
             _ => 0.0f
         };
 
-        if (actionDir != 0.0f)
-        {
-            _boomZ += actionDir * BoomZoomUnitsPerSecond * dt;
-            var forward = -_camera.GlobalTransform.Basis.Z.Normalized();
-            _camera.GlobalPosition = _kf1Pos + forward * _boomZ;
-            return;
-        }
+        if (actionDir == 0.0f) return;
 
-        var keyDir = 0.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pageup)) keyDir += 1.0f;
-        if (global::Godot.Input.IsPhysicalKeyPressed(Key.Pagedown)) keyDir -= 1.0f;
-        if (keyDir == 0.0f) return;
-
-        _boomZ = Mathf.Clamp(_boomZ + keyDir * BoomZoomUnitsPerSecond * dt, BoomMinZ, BoomMaxZ);
-        var fwd = -_camera.GlobalTransform.Basis.Z.Normalized();
-        _camera.GlobalPosition = _kf1Pos + fwd * _boomZ;
+        _boomZ += actionDir * BoomZoomUnitsPerSecond * dt;
+        var forward = -_camera.GlobalTransform.Basis.Z.Normalized();
+        _camera.GlobalPosition = _staticEyeGodot + forward * _boomZ;
     }
-
 
     public int HitTest(Vector2 viewportLocalPos)
     {
@@ -158,9 +95,13 @@ public sealed partial class CharSelectCameraRig : Node
             if (actor is null) continue;
 
             var rowBaseY = actor.Position.Y;
-            var boxMin = new Vector3(_slotGodotX[i] - HitBoxHalfExtentXZ, rowBaseY,
+            var boxMin = new Vector3(
+                _slotGodotX[i] - HitBoxHalfExtentXZ,
+                rowBaseY,
                 _slotGodotZ[i] - HitBoxHalfExtentXZ);
-            var boxMax = new Vector3(_slotGodotX[i] + HitBoxHalfExtentXZ, rowBaseY + HitBoxYHeight,
+            var boxMax = new Vector3(
+                _slotGodotX[i] + HitBoxHalfExtentXZ,
+                rowBaseY + HitBoxYHeight,
                 _slotGodotZ[i] + HitBoxHalfExtentXZ);
 
             if (TryRayAabb(rayOrigin, rayDir, boxMin, boxMax, out var t) && t < bestT)
@@ -173,15 +114,10 @@ public sealed partial class CharSelectCameraRig : Node
         return bestSlot;
     }
 
-
-    private static Quaternion EulerOrientation(float yawRad, float pitchRad)
-    {
-        var yaw = new Quaternion(Vector3.Up, yawRad);
-        var pitch = new Quaternion(Vector3.Right, pitchRad);
-        return (yaw * pitch).Normalized();
-    }
-
-    private static bool TryRayAabb(Vector3 origin, Vector3 dir, Vector3 boxMin, Vector3 boxMax, out float tHit)
+    private static bool TryRayAabb(
+        Vector3 origin, Vector3 dir,
+        Vector3 boxMin, Vector3 boxMax,
+        out float tHit)
     {
         tHit = 0.0f;
         var tEnter = float.NegativeInfinity;

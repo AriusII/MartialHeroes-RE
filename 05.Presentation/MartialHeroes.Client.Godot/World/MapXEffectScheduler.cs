@@ -1,4 +1,3 @@
-
 using System.Buffers.Binary;
 using Godot;
 using MartialHeroes.Client.Godot.Composition;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class MapXEffectScheduler : Node3D
 {
-
     private const string MapTxtPathFormat = "data/effect/map{0}.txt";
 
     private const int DescriptorRecordSize = 0x20;

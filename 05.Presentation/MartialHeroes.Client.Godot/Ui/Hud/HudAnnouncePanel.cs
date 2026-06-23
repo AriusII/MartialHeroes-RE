@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudAnnouncePanel : Control
 {
-
     private const int LabelCount = 8;
     private const float LabelW = 110f;
     private const float LabelH = 12f;

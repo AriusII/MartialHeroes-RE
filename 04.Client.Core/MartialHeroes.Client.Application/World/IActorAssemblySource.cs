@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 
 namespace MartialHeroes.Client.Application.World;
 
-
 public interface IActorAssemblySource
 {
     bool TryResolveActorMotion(int motionKey, out ActorMotionView motion);
@@ -13,7 +12,6 @@ public interface IActorAssemblySource
 
     bool TryResolveEquipmentPart(long catalogKey, out EquipmentPartView part);
 }
-
 
 public readonly struct ActorMotionView
 {
@@ -99,7 +97,6 @@ public readonly struct EquipmentPartView
 
     public required int BindPosePoolId { get; init; }
 }
-
 
 public readonly record struct Vec3(float X, float Y, float Z);
 

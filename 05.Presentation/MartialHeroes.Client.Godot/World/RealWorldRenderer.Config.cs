@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.World;
 using MartialHeroes.Client.Godot.Composition;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
-
     private static (double AnchorMapX, double AnchorMapZ) ComputeSpawnAnchor(
         RealClientAssets assets,
         int areaId,

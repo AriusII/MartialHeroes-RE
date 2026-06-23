@@ -1,6 +1,5 @@
 namespace MartialHeroes.Client.Application.World;
 
-
 public sealed class AssembledActor
 {
     public required int SkinIdB { get; init; }
@@ -28,7 +27,6 @@ public sealed class AssembledActor
     public required float Yaw { get; init; }
 
     public required bool IsInvisible { get; init; }
-
 }
 
 public readonly struct BakedInfluence

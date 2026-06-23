@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Character.Models;

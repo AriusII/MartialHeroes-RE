@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
 

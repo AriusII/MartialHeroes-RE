@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudKeepNpcDialog : Control
 {
-
     private const float PanelW = 167f;
     private const float PanelH = 239f;
 

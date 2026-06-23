@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Audio;
 
 public sealed partial class AudioService
 {
-
     private AudioStreamOggVorbis? GetOrLoadStream2d(uint id)
     {
         if (_streamCache2d.TryGetValue(id, out var cached))

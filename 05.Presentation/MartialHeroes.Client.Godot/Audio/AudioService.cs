@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Autoload;
@@ -10,11 +9,9 @@ namespace MartialHeroes.Client.Godot.Audio;
 
 public sealed partial class AudioService : Node
 {
-
     private const uint UiClickSfxId = 861010101u;
 
     private const uint CharSelectEnterSfxId = 920100200u;
-
 
 
     private const uint IndoorBgmOverrideId = 863500002u;

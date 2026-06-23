@@ -1,4 +1,3 @@
-
 using System.Globalization;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
@@ -9,7 +8,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 public sealed partial class ServerSelectSubView : Control
 {
-
     [Signal]
     public delegate void ServerSelectedEventHandler(int serverId);
 
@@ -369,7 +367,7 @@ public sealed partial class ServerSelectSubView : Control
         btn.Pressed += () => OnPlateClicked(actionId);
         AddChild(btn);
 
-        AddRowLabel(ResolveServerName(e), x, NameLabelLocalY, NameLabelW, NameLabelH, Colors.White, 0);
+        AddRowLabel(ResolveServerName(e), x, NameLabelLocalY, NameLabelW, NameLabelH, Colors.White);
 
         var face = _atlas.SliceByPath(AtlasA4, faceSrcX, PlateFaceSrcY, PlateFaceW, PlateFaceH);
         if (face is not null)
@@ -385,7 +383,7 @@ public sealed partial class ServerSelectSubView : Control
         var statusText = ResolveStatusCaption(e, out var statusColor);
         AddRowLabel(statusText, x, StatusLabelLocalY, StatusLabelW, StatusLabelH, statusColor, 4);
 
-        AddRowLabel(string.Empty, x, SpareLabelLocalY, StatusLabelW, StatusLabelH, Colors.White, 0);
+        AddRowLabel(string.Empty, x, SpareLabelLocalY, StatusLabelW, StatusLabelH, Colors.White);
     }
 
 

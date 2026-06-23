@@ -14,7 +14,6 @@ using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Network.Protocol.Routing.Routing;
 using MartialHeroes.Shared.Kernel.Ids;
-using MartialHeroes.Shared.Kernel.Numerics;
 
 namespace MartialHeroes.Client.Application.Handlers;
 

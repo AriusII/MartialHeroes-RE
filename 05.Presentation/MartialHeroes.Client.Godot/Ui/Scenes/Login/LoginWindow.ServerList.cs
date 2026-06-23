@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Presentation.Screens.Layout;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 public sealed partial class LoginWindow
 {
-
     private void DoEnsureServerSelect()
     {
         if (_serverListRoot is null) return;

@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 using MartialHeroes.Client.Godot.Adapters;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
-
     private void WireEnvironmentAndWater()
     {
         if (Assets is null) return;

@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudPetPanel : Control
 {
-
     private const float WinX = 80f;
     private const float WinY = 200f;
     private const float WinW = 228f;

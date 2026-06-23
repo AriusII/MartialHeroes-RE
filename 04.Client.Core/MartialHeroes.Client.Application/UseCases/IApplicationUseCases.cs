@@ -1,4 +1,3 @@
-using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Domain.Inventory.Inventory;
 using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Network.Abstractions.Lobby;

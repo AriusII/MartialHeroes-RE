@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class CameraController
 {
-
     public override void _UnhandledInput(InputEvent @event)
     {
         switch (@event)

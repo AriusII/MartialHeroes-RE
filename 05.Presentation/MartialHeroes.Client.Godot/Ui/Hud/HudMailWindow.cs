@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudMailWindow : Control
 {
-
     private const float MenuW = 140f;
     private const float MenuH = 195f;
 

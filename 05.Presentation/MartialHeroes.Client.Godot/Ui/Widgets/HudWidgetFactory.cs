@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 public static class HudWidgetFactory
 {
-
     public static HudButton MakeButton(
         HudAtlasLibrary atlas,
         string vfsPath,

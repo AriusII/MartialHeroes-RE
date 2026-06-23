@@ -1,4 +1,3 @@
-
 using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudTargetFrame : Control
 {
-
     private const float FrameW = 226f;
     private const float FrameH = 54f;
     private const float HpBarDstX = 35f;

@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Core.Models;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
@@ -10,7 +9,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class SkinnedCharacterNode : Node3D
 {
-
     public enum VisualState
     {
         Standing = 0,

@@ -5,7 +5,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
     public void Handle(in SmsgEquipItemResult packet)
     {
         const byte ok = 1;

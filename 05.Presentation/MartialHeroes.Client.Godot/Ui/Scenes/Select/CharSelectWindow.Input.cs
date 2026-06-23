@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectWindow
 {
-
     private void OnViewport3DGuiInput(InputEvent ev)
     {
         if (_scene3D is null || _scene3DViewport is null || _scene3DContainer is null) return;

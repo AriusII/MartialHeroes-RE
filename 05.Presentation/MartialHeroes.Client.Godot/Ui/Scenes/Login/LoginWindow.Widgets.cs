@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Widgets;
 using MartialHeroes.Client.Presentation.Screens.Layout;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
 public sealed partial class LoginWindow
 {
-
     private void BuildCurtainPanels()
     {
         var top = HudWidgetFactory.MakeAtlasRect(_atlas,

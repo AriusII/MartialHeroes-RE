@@ -291,7 +291,14 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                 StringComparison.Ordinal)))
             return ValueTask.FromResult(false);
 
-        return ValueTask.FromResult(false);
+        var payload = new byte[CmsgSelectCharacterSlot.WireSize];
+        payload[0x00] = (byte)slotIndex;
+        const byte deleteMode = 2;
+        payload[0x01] = deleteMode;
+
+        _inFlightLatch?.Arm();
+
+        return SendResultAsync(1, 7, payload, true, cancellationToken);
     }
 
     public ValueTask<CharacterNameValidationResult> RenameCharacterAsync(

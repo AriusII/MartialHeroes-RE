@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Autoload;

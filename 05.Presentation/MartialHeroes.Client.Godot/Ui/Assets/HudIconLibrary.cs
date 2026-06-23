@@ -1,4 +1,3 @@
-
 using System.Buffers.Binary;
 using Godot;
 using MartialHeroes.Assets.Parsers.DataTables;
@@ -11,7 +10,6 @@ namespace MartialHeroes.Client.Godot.Ui.Assets;
 
 public sealed class HudIconLibrary : IDisposable
 {
-
     public const int SkillIconW = 23;
     public const int SkillIconH = 23;
 

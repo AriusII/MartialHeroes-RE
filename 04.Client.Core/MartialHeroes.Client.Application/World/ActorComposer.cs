@@ -2,7 +2,6 @@ using System.Runtime.CompilerServices;
 
 namespace MartialHeroes.Client.Application.World;
 
-
 public readonly struct ActorSpawn
 {
     public int PlayerClass { get; init; }

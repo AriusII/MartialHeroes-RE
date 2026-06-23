@@ -1,4 +1,3 @@
-
 using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudMinimapPanel : Control
 {
-
     private const float MinimapW = 135f;
     private const float MinimapH = 195f;
     private const float CollapsedH = 16f;

@@ -1,8 +1,6 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Presentation.Screens.Layout;
-
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
@@ -134,7 +132,6 @@ public sealed partial class PinSubView : Control
                 ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
                 MouseFilter = MouseFilterEnum.Ignore
             });
-
     }
 
 

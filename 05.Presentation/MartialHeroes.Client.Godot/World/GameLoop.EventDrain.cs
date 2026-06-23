@@ -1,4 +1,3 @@
-
 using System.Collections.Immutable;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
@@ -8,14 +7,12 @@ using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
-using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class GameLoop
 {
-
     public override void _Process(double delta)
     {
         if (_clientContext is null) return;

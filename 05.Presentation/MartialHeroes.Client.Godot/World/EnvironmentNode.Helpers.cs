@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
 using Environment = Godot.Environment;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EnvironmentNode
 {
-
     private static Color ColorAOf(LightingKeyframe kf)
     {
         var c = kf.ColorA;

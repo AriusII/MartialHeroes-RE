@@ -2,7 +2,6 @@ using MartialHeroes.Client.Application.Contracts.Events;
 
 namespace MartialHeroes.Client.Application.World;
 
-
 public sealed class AreaAssemblyHandoff
 {
     public delegate IAssembledAreaView? AreaBake(int AreaId);

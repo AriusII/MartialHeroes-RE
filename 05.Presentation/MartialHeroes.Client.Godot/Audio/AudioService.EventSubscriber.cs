@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Audio;
 using MartialHeroes.Assets.Parsers.Audio.Models;
@@ -10,7 +9,6 @@ namespace MartialHeroes.Client.Godot.Audio;
 
 public sealed partial class AudioService
 {
-
     private ClientContext? _clientContextRef;
 
     private void PollStateMachineForAudio()

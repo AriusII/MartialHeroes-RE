@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.DataTables;
 using MartialHeroes.Client.Godot.Composition;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Adapters;
 
 public sealed class BuffIconCatalog : IDisposable
 {
-
     private const string StateIconAtlasPath = "data/ui/skillicon/stateicon.dds";
 
     private const string BuffIconPositionXdbPath = "data/script/buff_icon_position.xdb";

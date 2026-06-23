@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;

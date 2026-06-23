@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudGuildWarInfoWindow : Control
 {
-
     private const float PanelW = 618f;
     private const float PanelH = 309f;
 

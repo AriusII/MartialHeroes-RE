@@ -1,4 +1,3 @@
-
 using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudPlayerStatusPanel : Control
 {
-
     private const float PanelW = 285f;
     private const float PanelH = 88f;
     private const float GaugeMaxW = 172f;
@@ -181,7 +179,6 @@ public sealed partial class HudPlayerStatusPanel : Control
 
         if (_staminaLabel is not null)
             _staminaLabel.Text = $"{ev.CurrentStamina}/{ev.MaxStamina}";
-
     }
 
 

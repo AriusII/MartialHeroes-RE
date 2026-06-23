@@ -14,22 +14,15 @@ public sealed partial class VisualActor : CharacterBody3D
 
     private const float SkinnedAvatarScale = 5.0f;
 
+
+    private CellCollisionManager? _cellCollisionManager;
+
     private Vector3 _currPosition;
 
     private bool _hasSnapshot;
     private bool _hasTarget;
 
     private bool _isDead;
-
-
-    private CellCollisionManager? _cellCollisionManager;
-
-    public bool IsLocalPlayer { get; set; }
-
-    public void SetCollisionManager(CellCollisionManager mgr)
-    {
-        _cellCollisionManager = mgr;
-    }
     private bool _isRunning;
 
     private Vector3 _moveTarget;
@@ -46,9 +39,16 @@ public sealed partial class VisualActor : CharacterBody3D
 
     private double _timeSinceSnapshot;
 
+    public bool IsLocalPlayer { get; set; }
+
     public ActorKey ActorKey { get; set; }
 
     public string ActorName { get; set; } = string.Empty;
+
+    public void SetCollisionManager(CellCollisionManager mgr)
+    {
+        _cellCollisionManager = mgr;
+    }
 
     public void AttachSkinnedAvatar(Node3D skinnedRoot)
     {

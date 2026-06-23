@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
@@ -11,7 +10,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer : Node3D
 {
-
     private const int HysteresisThresholdCells = 1;
 
     private readonly HashSet<(int MapX, int MapZ)> _composedBuildingsSpawned = new();
@@ -29,6 +27,8 @@ public sealed partial class RealWorldRenderer : Node3D
     private BgTextureCatalog? _bgTextures;
 
     private CameraController? _cameraController;
+
+    private CellCollisionManager? _cellCollisionManager;
     private MapDescriptor? _cellMap;
 
     private int _composerActorsAreaId = -1;
@@ -38,22 +38,20 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private ClientContext? _ctx;
 
+    private EnvironmentNode? _environmentNode;
+
     private bool _followAnchorArmed;
 
     private volatile bool _isRecentering;
 
     private Node3D? _localPlayerNode;
 
+    private MapXEffectScheduler? _mapXEffectScheduler;
+
     private (int MapX, int MapZ) _streamAnchor;
 
     private CancellationTokenSource? _streamingCts;
     private TerrainNode? _terrainNode;
-
-    private CellCollisionManager? _cellCollisionManager;
-
-    private MapXEffectScheduler? _mapXEffectScheduler;
-
-    private EnvironmentNode? _environmentNode;
 
     private volatile bool _worldEntryInProgress;
 
@@ -80,7 +78,10 @@ public sealed partial class RealWorldRenderer : Node3D
     public RealClientAssets? Assets { get; private set; }
 
 
-    public CellCollisionManager? GetCellCollisionManager() => _cellCollisionManager;
+    public CellCollisionManager? GetCellCollisionManager()
+    {
+        return _cellCollisionManager;
+    }
 
     public void SetLocalPlayer(Node3D playerNode)
     {
@@ -107,7 +108,6 @@ public sealed partial class RealWorldRenderer : Node3D
 
         if (_environmentNode is not null && IsInstanceValid(_environmentNode))
             _mapXEffectScheduler.TimeOfDayMs = (uint)Math.Round(_environmentNode.ClockMs);
-
     }
 
 

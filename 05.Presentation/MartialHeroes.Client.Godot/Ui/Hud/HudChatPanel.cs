@@ -1,4 +1,3 @@
-
 using System.Text;
 using System.Threading.Channels;
 using Godot;
@@ -10,7 +9,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudChatPanel : Control
 {
-
     private const int PanelW = 448;
     private const int PanelH = 324;
     private const int LogBgH = 227;

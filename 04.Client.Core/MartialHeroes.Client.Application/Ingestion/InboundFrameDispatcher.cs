@@ -11,6 +11,7 @@ public sealed class InboundFrameDispatcher(IPacketHandler handler)
         SingleReader = true,
         SingleWriter = true
     });
+
     private readonly IPacketHandler _handler = handler ?? throw new ArgumentNullException(nameof(handler));
 
     public bool Enqueue(ReadOnlySpan<byte> frame)

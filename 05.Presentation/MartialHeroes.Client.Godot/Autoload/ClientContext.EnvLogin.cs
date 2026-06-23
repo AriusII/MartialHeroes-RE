@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Network.Abstractions.Lobby;
@@ -9,7 +8,6 @@ namespace MartialHeroes.Client.Godot.Autoload;
 
 public sealed partial class ClientContext
 {
-
     private Task? _envLoginTask;
 
 

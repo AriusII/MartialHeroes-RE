@@ -9,7 +9,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
     private bool HandleChatBroadcast(ReadOnlySpan<byte> payload)
     {
         if (payload.Length < SmsgChatBroadcastHeader.HeaderSize) return false;

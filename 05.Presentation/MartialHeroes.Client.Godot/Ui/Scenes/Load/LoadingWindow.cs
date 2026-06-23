@@ -6,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Load;
 
 public sealed partial class LoadingWindow : Control
 {
-
     [Signal]
     public delegate void LoadingCompleteEventHandler();
 

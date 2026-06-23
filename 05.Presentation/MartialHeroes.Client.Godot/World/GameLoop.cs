@@ -1,8 +1,5 @@
 using Godot;
-using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
-using MartialHeroes.Client.Application.Engine;
-using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Input;
@@ -13,7 +10,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class GameLoop : Node
 {
-
     [Signal]
     public delegate void WorldExitRequestedEventHandler(bool logout);
 

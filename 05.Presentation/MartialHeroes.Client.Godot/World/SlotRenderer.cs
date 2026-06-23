@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 internal static class SlotRenderer
 {
-
     public static bool RenderSlot1Buildings(
         Node3D parent,
         AssembledCell cell,

@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 public sealed partial class MaskedTextField : Control
 {
-
     private const float StarAdvance = 6f;
 
     private const float TextOffsetY = 0f;

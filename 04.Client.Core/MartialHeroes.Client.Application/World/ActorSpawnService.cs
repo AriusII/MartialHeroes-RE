@@ -3,7 +3,6 @@ using MartialHeroes.Client.Domain.Actors.Actors;
 
 namespace MartialHeroes.Client.Application.World;
 
-
 public sealed class ActorSpawnService
 {
     private readonly ActorComposer _composer;

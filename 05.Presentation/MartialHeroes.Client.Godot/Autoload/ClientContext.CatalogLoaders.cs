@@ -8,7 +8,6 @@ namespace MartialHeroes.Client.Godot.Autoload;
 
 public sealed partial class ClientContext
 {
-
     private static VfsCatalogueLoader BuildCatalogueLoader()
     {
         var clientDir = ClientPathResolver.ResolveClientDir()

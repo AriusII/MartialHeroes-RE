@@ -1,4 +1,3 @@
-
 using System.Collections.Immutable;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;

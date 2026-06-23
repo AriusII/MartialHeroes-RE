@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudOptionsWindow : Control
 {
-
     private const float OptW = 215f;
     private const float OptH = 204f;
 
@@ -161,10 +159,7 @@ public sealed partial class HudOptionsWindow : Control
                 MouseFilter = MouseFilterEnum.Stop
             };
             var checkIdx = i;
-            cb.Toggled += pressed =>
-            {
-                _checkState[checkIdx] = pressed;
-            };
+            cb.Toggled += pressed => { _checkState[checkIdx] = pressed; };
             panel.AddChild(cb);
             _checkBoxes[i] = cb;
         }

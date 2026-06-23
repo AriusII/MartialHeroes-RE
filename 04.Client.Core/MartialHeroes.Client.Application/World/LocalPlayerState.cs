@@ -1,4 +1,3 @@
-using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Client.Domain.Stats.Stats;
 using MartialHeroes.Shared.Kernel.Ids;

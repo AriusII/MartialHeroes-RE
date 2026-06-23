@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 public abstract class HudWidget
 {
-
     private readonly List<HudWidget> _children = [];
 
     public int ActionId { get; set; } = -1;

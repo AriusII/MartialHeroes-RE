@@ -8,8 +8,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
-
     public void Handle(in SmsgKeyExchange packet)
     {
         var payload = MemoryMarshal.CreateReadOnlySpan(

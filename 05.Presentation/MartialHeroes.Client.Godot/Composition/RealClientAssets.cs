@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Terrain;
@@ -9,7 +8,6 @@ namespace MartialHeroes.Client.Godot.Composition;
 
 public sealed class RealClientAssets : IDisposable
 {
-
     private readonly MappedVfsArchive _vfs;
     private bool _disposed;
 
@@ -52,7 +50,6 @@ public sealed class RealClientAssets : IDisposable
             return null;
         }
     }
-
 
 
     public (string? TedPath, string? BudPath) LoadMapDatafilePaths(int areaId, int mapX, int mapZ)

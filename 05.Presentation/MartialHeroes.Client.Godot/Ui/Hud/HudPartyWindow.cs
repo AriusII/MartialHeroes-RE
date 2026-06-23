@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudPartyWindow : Control
 {
-
     private const float PartyW = 318f;
     private const float PartyH = 732f;
 
@@ -213,7 +211,6 @@ public sealed partial class HudPartyWindow : Control
 
     private void BuildActionButtons(HudAtlasLibrary atlas, HudTextLibrary text)
     {
-
         (float x, float y, float w, float h, int action, string label)[] buttons =
         {
             (8f, 600f, 90f, 25f, 8, "Invite"),

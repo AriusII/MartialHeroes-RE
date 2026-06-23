@@ -1,4 +1,3 @@
-
 using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudBuffBar : Control
 {
-
     private const int SlotCount = BuffStateEvent.SlotCount;
     private const int FlowingIconSide = 23;
     private const int FixedIconSide = 25;

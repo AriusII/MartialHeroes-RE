@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
 using MartialHeroes.Client.Presentation.Helpers;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class SkyDomeNode : Node3D
 {
-
     private const int DomeKfCount = StarDomeBin.KeyframeCount;
 
     private const double DomeKfMs = 7200.0;
@@ -30,9 +28,6 @@ public sealed partial class SkyDomeNode : Node3D
     private const float SunBillboardSize = 2048f;
 
     private const float SunTiltDeg = 45f;
-
-
-
 
 
     private const float StarFullNightKf = 8f;
@@ -64,8 +59,6 @@ public sealed partial class SkyDomeNode : Node3D
     private MeshInstance3D? _sunBillboard;
 
     private DirectionalLight3D? _trackedDirLight;
-
-
 
 
     public void Build(StarDomeBin? starDome, CloudDomeBin? cloudDome, CloudCycleBin? cloudCycle,
@@ -217,7 +210,6 @@ public sealed partial class SkyDomeNode : Node3D
 
     private void BuildCloudDome()
     {
-
         var mesh1 = BuildHemisphereMesh(DomeRadius * 0.97f, CloudDomeStacks, DomeSectors, true);
         _cloudMaterial1 = BuildDomeMaterial(true);
         var mi1 = new MeshInstance3D
@@ -251,7 +243,6 @@ public sealed partial class SkyDomeNode : Node3D
 
     private static ArrayMesh BuildHemisphereMesh(float radius, int stacks, int sectors, bool inverted)
     {
-
         var stride = sectors + 1;
         var vertCount = (stacks + 1) * stride;
         var indexCount = stacks * sectors * 6;

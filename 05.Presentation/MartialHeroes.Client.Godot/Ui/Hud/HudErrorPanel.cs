@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudErrorPanel : Control
 {
-
     private const float PanelW = 330f;
     private const float PanelH = 100f;
     private const int DefaultTimeoutMs = 5000;

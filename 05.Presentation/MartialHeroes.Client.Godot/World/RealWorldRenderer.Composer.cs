@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Client.Application.World;
@@ -9,14 +8,12 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
-
     public void OnCellAssembled(IAssembledCellView cellView)
     {
         var cellForCollision = (cellView as AssembledCellViewAdapter)?.ConcreteCell;
         _cellCollisionManager?.RegisterCell(
             cellView.MapX, cellView.MapZ,
-            cellForCollision?.Collision,
-            null, null);
+            cellForCollision?.Collision);
 
         if (!_composeRender) return;
 

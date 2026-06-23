@@ -1,9 +1,6 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Widgets;
-
-
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Login;
 
@@ -114,7 +111,6 @@ public sealed partial class LoginWindow : Control
 
     public override void _Ready()
     {
-
         LoadSaveId();
 
         BuildBackgroundLayer();

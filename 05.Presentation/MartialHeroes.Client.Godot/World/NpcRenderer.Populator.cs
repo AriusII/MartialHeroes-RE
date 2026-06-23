@@ -1,4 +1,3 @@
-
 using System.Text;
 using Godot;
 using MartialHeroes.Assets.Parsers.Character;
@@ -13,7 +12,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class NpcRenderer
 {
-
     public void PopulateFromArea(RealClientAssets assets, int areaId)
     {
         ClearChildren();

@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class CameraController : Camera3D
 {
-
     public enum ViewMode
     {
         Third = 1,
@@ -109,11 +107,9 @@ public sealed partial class CameraController : Camera3D
     private float _yawRate;
 
 
-    [Export]
-    public float ElevationKeyPolarity { get; set; } = 1f;
+    [Export] public float ElevationKeyPolarity { get; set; } = 1f;
 
-    [Export]
-    public float PitchDragPolarity { get; set; } = 1f;
+    [Export] public float PitchDragPolarity { get; set; } = 1f;
 
 
     public Func<float, float, float>? GroundHeightFunc { get; set; }

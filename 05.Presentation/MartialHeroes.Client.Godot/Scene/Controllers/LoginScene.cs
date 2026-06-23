@@ -6,7 +6,6 @@ using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Login;
 using MartialHeroes.Shared.Kernel.Enums;
 
-
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 public sealed partial class LoginScene : StubSceneController

@@ -1,4 +1,3 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;

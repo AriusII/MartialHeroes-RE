@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Character;
@@ -17,7 +16,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharCreatePreview3D : Control
 {
-
     private const int BackdropAreaId = 0;
     private const int BackdropMapX = 10000;
     private const int BackdropMapZ = 9990;

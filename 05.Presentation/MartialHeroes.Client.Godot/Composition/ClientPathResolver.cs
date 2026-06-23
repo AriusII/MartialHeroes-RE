@@ -1,4 +1,3 @@
-
 using Godot;
 using Environment = System.Environment;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Composition;
 
 public static class ClientPathResolver
 {
-
     private const string ClientDataResPath = "res://clientdata";
 
     private const string ConfigResPath = "res://client_dir.cfg";

@@ -10,7 +10,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EffectRenderer
 {
-
     private Dictionary<uint, string>? BuildEffectRegistry(RealClientAssets assets)
     {
         if (_registryBuildAttempted) return _effectRegistry;

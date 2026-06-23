@@ -8,7 +8,6 @@ using MartialHeroes.Client.Godot.Ui.Scenes;
 using MartialHeroes.Client.Godot.Ui.Scenes.Select;
 using MartialHeroes.Shared.Kernel.Enums;
 
-
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
 public sealed partial class SelectScene : StubSceneController

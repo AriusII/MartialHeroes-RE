@@ -7,7 +7,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
     public void Handle(in SmsgCharDeath packet)
     {
         var victimKey = new ActorKey(packet.VictimId, ToEntitySort(packet.VictimSort));

@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class CameraController
 {
-
     private void ProcessFreeFly(float dt)
     {
         var fast = global::Godot.Input.IsKeyPressed(Key.Shift);

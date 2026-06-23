@@ -9,7 +9,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
     public void Handle(in SmsgStatUpdate packet)
     {
         const byte applied = 1;

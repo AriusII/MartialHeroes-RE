@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
@@ -10,7 +9,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class NpcRenderer
 {
-
     private Node3D? TryBuildFromMobId(RealClientAssets assets, ushort mobId)
     {
         if (_actorMotionLookup is null || _skinClassToSknPath is null)

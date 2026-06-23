@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudRightEdgeGauge : Control
 {
-
     private const float OffsetFromRight = 135f;
     private const float GaugeW = 140f;
     private const float GaugeH = 35f;

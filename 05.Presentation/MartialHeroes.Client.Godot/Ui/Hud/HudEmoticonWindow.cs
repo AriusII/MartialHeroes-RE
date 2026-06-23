@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Ui.Assets;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudEmoticonWindow : Control
 {
-
     private const float EmoW = 318f;
     private const float EmoH = 732f;
 

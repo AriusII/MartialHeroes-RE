@@ -5,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Opening;
 
 public sealed partial class OpeningWindow : Control
 {
-
     [Signal]
     public delegate void IntroFinishedEventHandler();
 

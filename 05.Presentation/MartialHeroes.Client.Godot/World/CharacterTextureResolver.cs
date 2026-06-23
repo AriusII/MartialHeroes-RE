@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public static class CharacterTextureResolver
 {
-
     private const string SkinTxtPath = "data/char/skin.txt";
 
     private static readonly string[] TexBuckets =

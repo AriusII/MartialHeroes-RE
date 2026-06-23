@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Autoload;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudInventoryPanel : Control
 {
-
     private const float InvW = 318f;
 
     private const float InvH = 732f;

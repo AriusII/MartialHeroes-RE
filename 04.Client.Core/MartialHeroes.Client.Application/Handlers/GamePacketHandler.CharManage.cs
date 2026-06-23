@@ -13,7 +13,6 @@ namespace MartialHeroes.Client.Application.Handlers;
 
 public sealed partial class GamePacketHandler
 {
-
     public void Handle(in SmsgEnterGameAck packet)
     {
         _ = packet.BillingFlag;

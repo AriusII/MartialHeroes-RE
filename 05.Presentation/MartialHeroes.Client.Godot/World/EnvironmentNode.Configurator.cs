@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Texture.Models;
 using MartialHeroes.Client.Godot.Composition;
@@ -9,7 +8,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EnvironmentNode
 {
-
     private void ApplyKeyframe(int kf, float frac)
     {
         var kfNext = (kf + 1) % KeyframeCount;
@@ -70,7 +68,6 @@ public sealed partial class EnvironmentNode
                 env.BackgroundColor = new Color(hazeColor.R * 0.6f, hazeColor.G * 0.6f, hazeColor.B * 0.6f);
                 return;
             }
-
         }
 
         if (_env?.Fog is { } fog)
@@ -129,7 +126,6 @@ public sealed partial class EnvironmentNode
 
     private void ApplyAmbient(Environment env, int kf, int kfNext, float frac)
     {
-
         env.AmbientLightSource = Environment.AmbientSource.Color;
         env.AmbientLightColor = Colors.White;
         env.AmbientLightEnergy = OptionBrightFloor;

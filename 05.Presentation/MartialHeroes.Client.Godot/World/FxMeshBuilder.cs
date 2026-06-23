@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 using Array = Godot.Collections.Array;

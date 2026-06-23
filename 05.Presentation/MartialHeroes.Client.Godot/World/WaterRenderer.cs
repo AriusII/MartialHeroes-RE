@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 using MartialHeroes.Assets.Parsers.Texture.Models;
@@ -16,7 +15,6 @@ internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
 
 public sealed partial class WaterRenderer : Node3D
 {
-
     public const float WaterOffsetAboveFloor = 2.0f;
 
     public const float FallbackWaterY = 0f;

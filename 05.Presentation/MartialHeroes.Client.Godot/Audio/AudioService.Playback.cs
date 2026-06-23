@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Audio;
 
 public sealed partial class AudioService
 {
-
     public void PlayUiClick()
     {
         Play2dById(UiClickSfxId);

@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Widgets;
 
 public sealed class HudButton : HudWidget
 {
-
     private static readonly Color DisabledCaptionColor = new(0x66 / 255f, 0x66 / 255f, 0x66 / 255f);
 
     private static readonly Color HoveredCaptionColor = new(1f, 1f, 0f);
@@ -59,10 +57,7 @@ public sealed class HudButton : HudWidget
 
         _btn.AddChild(_captionLabel);
 
-        _btn.MouseEntered += () =>
-        {
-            _captionLabel.AddThemeColorOverride("font_color", HoveredCaptionColor);
-        };
+        _btn.MouseEntered += () => { _captionLabel.AddThemeColorOverride("font_color", HoveredCaptionColor); };
         _btn.MouseExited += () =>
         {
             _captionLabel.AddThemeColorOverride("font_color",

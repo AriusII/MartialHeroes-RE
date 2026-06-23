@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.DataTables;
 using MartialHeroes.Assets.Parsers.DataTables.Models;

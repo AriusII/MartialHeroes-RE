@@ -4,7 +4,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EffectRenderer
 {
-
     private void TickXeffEffect(LiveEffect live, SubEffectDesc[] subEffects, double deltaMs = 0)
     {
         if (!IsInstanceValid(live.Anchor)) return;

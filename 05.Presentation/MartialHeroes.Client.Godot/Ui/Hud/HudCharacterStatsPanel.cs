@@ -1,4 +1,3 @@
-
 using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -9,7 +8,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudCharacterStatsPanel : Control
 {
-
     private const float StatsX = 180f;
     private const float StatsY = 95f;
     private const float StatsW = 130f;
@@ -197,7 +195,6 @@ public sealed partial class HudCharacterStatsPanel : Control
 
             rowIdx++;
         }
-
     }
 
 
@@ -227,7 +224,6 @@ public sealed partial class HudCharacterStatsPanel : Control
         SetStatLabel(2, view.BaseAgi, view.DeltaAgi);
         SetStatLabel(3, view.BaseDex, view.DeltaDex);
         SetStatLabel(4, view.BaseCon, view.DeltaCon);
-
     }
 
     private void SetStatLabel(int idx, uint baseVal, uint delta)

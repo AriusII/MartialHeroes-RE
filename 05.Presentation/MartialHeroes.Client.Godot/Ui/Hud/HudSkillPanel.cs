@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudSkillPanel : Control
 {
-
     private const float SkillPanelW = 964f;
     private const float SkillPanelH = 655f;
     private const float ParkX = 43f;
@@ -29,8 +27,6 @@ public sealed partial class HudSkillPanel : Control
     private bool _open;
     private VBoxContainer _skillList = null!;
     private Label _titleLabel = null!;
-
-
 
 
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)

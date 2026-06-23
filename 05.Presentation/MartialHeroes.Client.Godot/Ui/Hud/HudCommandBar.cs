@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudCommandBar : Control
 {
-
     private const float BarHeight = 45f;
     private const float SubStripH = 20f;
     private const float EntryBtnSize = 29f;

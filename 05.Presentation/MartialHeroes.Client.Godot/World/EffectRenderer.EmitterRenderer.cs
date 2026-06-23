@@ -6,7 +6,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EffectRenderer
 {
-
     private MeshInstance3D? BuildSubEffectMesh(
         SubEffectDesc se,
         Vector3 origin,

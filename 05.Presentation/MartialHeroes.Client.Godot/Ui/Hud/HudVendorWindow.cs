@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
@@ -6,7 +5,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudVendorWindow : Control
 {
-
     private const float BackdropW = 360f;
     private const float BackdropH = 280f;
 
@@ -188,7 +186,6 @@ public sealed partial class HudVendorWindow : Control
         GD.Print($"[HudVendorWindow] Row selected: {rowIdx} (action {actionId}). " +
                  "TODO(world-campaign): C2S CmsgShopBuy (2/115) on confirm. " +
                  "spec: Docs/RE/specs/ui_system.md §8.22.4 CODE-CONFIRMED.");
-
     }
 
     public override void _Input(InputEvent @event)

@@ -83,7 +83,6 @@ internal sealed class VfsLoadResourceSource : ILoadResourceSource
     }
 }
 
-
 internal sealed class RelayEnterWorldEmitter
 {
     private volatile Func<byte, CancellationToken, ValueTask>? _target;

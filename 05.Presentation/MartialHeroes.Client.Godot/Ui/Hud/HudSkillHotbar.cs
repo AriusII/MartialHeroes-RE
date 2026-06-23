@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
 using MartialHeroes.Client.Godot.Ui.Assets;
@@ -7,7 +6,6 @@ namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudSkillHotbar : Control
 {
-
     public enum SlotOverlayState
     {
         Ready,

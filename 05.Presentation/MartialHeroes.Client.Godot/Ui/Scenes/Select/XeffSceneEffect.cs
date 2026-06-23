@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Parsers.Effects;
 using MartialHeroes.Assets.Parsers.Effects.Models;
@@ -8,7 +7,6 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class XeffSceneEffect : Node3D
 {
-
     private const string XeffTexturePath = "data/effect/texture/";
 
     private const string CharSelectXeffPath = "data/effect/xeff/char_select-u.xeff";

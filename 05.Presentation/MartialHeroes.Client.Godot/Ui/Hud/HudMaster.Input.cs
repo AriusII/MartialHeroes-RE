@@ -1,4 +1,3 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -94,7 +93,6 @@ public sealed partial class HudMaster
 
     private void OnEscapeKey()
     {
-
         if (_keepNpcDialog?.Visible == true)
             return;
 

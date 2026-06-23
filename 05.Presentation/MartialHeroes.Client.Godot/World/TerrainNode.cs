@@ -8,7 +8,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class TerrainNode : Node3D
 {
-
     private const int PatchGrid = 16;
 
     private const int QuadsPerPatch = 4;

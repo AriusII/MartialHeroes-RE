@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectWindow
 {
-
     private void BuildGroup7PerSlotControls()
     {
         _perSlotControls = NewContainer("PerSlotControls", 8, 46, 244, 360, false);

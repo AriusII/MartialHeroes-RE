@@ -1,11 +1,9 @@
-
 using Godot;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectWindow
 {
-
     private const int ActCmdCreateNew = 1;
     private const int ActCmdEnterGame = 2;
     private const int ActCmdCreateAlt = 3;

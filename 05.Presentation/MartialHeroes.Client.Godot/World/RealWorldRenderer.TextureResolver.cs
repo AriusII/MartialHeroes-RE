@@ -1,4 +1,3 @@
-
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Terrain;

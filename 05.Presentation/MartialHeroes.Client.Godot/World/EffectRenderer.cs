@@ -7,10 +7,8 @@ using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
-
 public sealed partial class EffectRenderer : Node3D
 {
-
     private const uint XeffResourceParticleThreshold = 10000;
 
     private const uint EmitterBillboard = 0;
