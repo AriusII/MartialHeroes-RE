@@ -125,7 +125,31 @@ public sealed partial class GameLoop
                 if (assets is not null)
                 {
                     var nearbyVisual = _actorRegistry.TryGetActor(spawned.Key);
-                    if (nearbyVisual is not null) nearbyVisual.TryBuildBodyAvatar(assets, spawned.ServerClass);
+                    if (nearbyVisual is not null)
+                    {
+                        // Nearby PLAYER actors (4/4 tag 1) now carry the surfaced descriptor identity
+                        // (InternalClass/AppearanceVariant/EquipGids, cycle10 cluster D): build the FULL
+                        // equip-aware skinned avatar via the SAME chain the local player uses
+                        // (PlayerAvatarResolver.TryBuild + BridgeEquipGidsToParts over the +0x58 gids), so
+                        // other players render body+gear, not body-only. Non-player actors (mobs/NPCs, tags
+                        // 2/3) keep the body-only build — their appearance resolves via the MobInfo branch,
+                        // not the player rig. A class .skn that does not resolve falls back to body-only.
+                        // spec: skinning.md §8(e); equipment_visuals.md §1.1/§3 (six-slot {3,4,6,2,11,14}).
+                        if (spawned.Key.Sort == EntitySort.PlayerCharacter)
+                        {
+                            var skinClass = spawned.InternalClass != 0 ? spawned.InternalClass : spawned.ServerClass;
+                            var avatar = PlayerAvatarResolver.TryBuild(
+                                assets, skinClass, BridgeEquipGidsToParts(spawned.EquipGids, skinClass));
+                            if (avatar is not null)
+                                nearbyVisual.AttachSkinnedAvatar(avatar);
+                            else
+                                nearbyVisual.TryBuildBodyAvatar(assets, spawned.ServerClass);
+                        }
+                        else
+                        {
+                            nearbyVisual.TryBuildBodyAvatar(assets, spawned.ServerClass);
+                        }
+                    }
                 }
             }
 

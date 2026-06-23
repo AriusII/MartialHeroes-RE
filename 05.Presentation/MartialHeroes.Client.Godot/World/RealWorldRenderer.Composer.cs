@@ -88,11 +88,19 @@ public sealed partial class RealWorldRenderer
                 // spec: WorldCoordinates.ToGodot — (x,y,z) → (x,y,-z): CONFIRMED.
                 var cellOriginGodot = new Vector3(cellLegacyX, 0f, -cellLegacyZ);
 
+                // FX texture resolver (cycle10 wiring): each FX group's 1-based texture_index resolves
+                // through the SAME two-hop chain as terrain/buildings — ResolveSectionTexture("FX"+channel,
+                // idx) -> the cell .map FX<channel> TEXTURES list -> bgtexture pool -> data/map000/texture/<rel>.dds.
+                // A group whose texture does not resolve is logged + skipped inside FxMeshBuilder (no
+                // placeholder). NOTE: ResolveSectionTexture uses the target-cell _cellMap (COMPOSER GAP #1,
+                // same caveat as the building path) so non-target ring cells may key the wrong FX list until
+                // the per-cell .map cache lands. spec: terrain_layers.md §1.1a; bgtexture_lst.md (two-hop join).
                 SlotRenderer.RenderFxSlots(
                     this,
                     cell,
                     cellOriginGodot,
-                    (cellView.MapX, cellView.MapZ));
+                    (cellView.MapX, cellView.MapZ),
+                    (channel, texIdx) => ResolveSectionTexture("FX" + channel, (int)texIdx));
             }
 
             // A.3: render slot 1 buildings from the assembled cell using SlotRenderer.
