@@ -4,6 +4,32 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 public sealed partial class CharSelectWindow
 {
+    public void OnCharManageResult(bool success, string manageMsg)
+    {
+        if (success) return;
+        if (_noticeBody is not null && IsInstanceValid(_noticeBody))
+            _noticeBody.Text = manageMsg;
+        if (_modalNotice is not null && IsInstanceValid(_modalNotice))
+            _modalNotice.Visible = true;
+    }
+
+    public void OnCharRenameResult(bool success, string newName)
+    {
+        if (!success) return;
+        var slot = _lastRenameSentSlot;
+        if (slot >= 0 && slot < MaxSlots && !_slots[slot].IsEmpty)
+        {
+            var old = _slots[slot];
+            _slots[slot] = new LiveSlot(
+                false, newName, old.Level, old.ServerClass, old.CurrentHp,
+                old.SlotIndex, old.PosX, old.PosZ, old.InternalClass,
+                old.AppearanceVariant, old.FaceA, old.EquipGids);
+            _lastRenameSentSlot = -1;
+            RefreshInfo();
+            GD.Print($"[CharSelectWindow] rename applied in view: slot {slot} name → '{newName}'.");
+        }
+    }
+
     private void OnViewport3DGuiInput(InputEvent ev)
     {
         if (_scene3D is null || _scene3DViewport is null || _scene3DContainer is null) return;
@@ -138,8 +164,8 @@ public sealed partial class CharSelectWindow
             return;
         }
 
-        GD.Print($"[CharSelectWindow] RenameCharacterRequested: slot={slot} newName='{newName}'; " +
-                 "emitting (→ UseCases.RenameCharacterAsync, 1/13). spec §6.");
+        _lastRenameSentSlot = slot;
+        GD.Print($"[CharSelectWindow] RenameCharacterRequested: slot={slot} newName='{newName}'; emitting.");
         EmitSignal(SignalName.RenameCharacterRequested, slot, newName);
         HideModal(_modalRename);
         _pendingRenameSlot = -1;

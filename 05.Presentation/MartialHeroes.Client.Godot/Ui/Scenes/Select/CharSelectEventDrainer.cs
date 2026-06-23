@@ -24,12 +24,22 @@ public sealed partial class CharSelectEventDrainer : Node
         {
             EventDrained?.Invoke(evt);
 
-            if (evt is CharacterListEvent charList)
+            switch (evt)
             {
-                GD.Print($"[CharSelectEventDrainer] CharacterListEvent ({charList.Characters.Length} slots) " +
-                         "→ CharSelectWindow.ApplyCharacterList. " +
-                         "spec: frontend_scenes.md §3.1. CODE-CONFIRMED.");
-                _window.ApplyCharacterList(charList.Characters);
+                case CharacterListEvent charList:
+                    GD.Print($"[CharSelectEventDrainer] CharacterListEvent ({charList.Characters.Length} slots) → ApplyCharacterList.");
+                    _window.ApplyCharacterList(charList.Characters);
+                    break;
+
+                case CharManageResultEvent manage:
+                    GD.Print($"[CharSelectEventDrainer] CharManageResultEvent success={manage.Success} subtype={manage.Subtype}.");
+                    _window.OnCharManageResult(manage.Success, string.Empty);
+                    break;
+
+                case CharRenameResultEvent rename:
+                    GD.Print($"[CharSelectEventDrainer] CharRenameResultEvent success={rename.Success} newName='{rename.NewName}'.");
+                    _window.OnCharRenameResult(rename.Success, rename.NewName);
+                    break;
             }
         }
     }

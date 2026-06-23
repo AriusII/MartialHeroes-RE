@@ -82,8 +82,10 @@ public sealed partial class CharSelectWindow
         AddPanel(_modalDeleteCfm, AtlasInventWindow, 0, 0, 340, 190, 318, 647, true);
         _deleteTitleWidget = AddLabel(_modalDeleteCfm, 24, 60, 292, 12, string.Empty, LblWarm);
         _deleteBodyWidget = AddLabel(_modalDeleteCfm, 20, 100, 300, 12, string.Empty, LblWhite);
-        AddButtonAction(_modalDeleteCfm, AtlasInventWindow, 120, 133, 113, 40,
+        AddButtonAction(_modalDeleteCfm, AtlasInventWindow, 55, 136, 113, 40,
             415, 860, 415, 860, 415, 900, ActDeleteConfirm);
+        AddButtonAction(_modalDeleteCfm, AtlasInventWindow, 174, 136, 113, 40,
+            415, 860, 415, 860, 415, 900, ActDeleteCancel);
         _modalDeleteCfm.Visible = false;
     }
 

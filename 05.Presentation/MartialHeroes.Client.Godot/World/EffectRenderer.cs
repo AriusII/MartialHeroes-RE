@@ -170,7 +170,7 @@ public sealed partial class EffectRenderer : Node3D
         public uint EffectId;
         public double ElapsedMs;
 
-#pragma warning disable CS0649 // field always null; intentional (compat guard, never assigned)
+#pragma warning disable CS0649
         public GpuParticles3D?[]? GpuParticles;
 #pragma warning restore CS0649
 

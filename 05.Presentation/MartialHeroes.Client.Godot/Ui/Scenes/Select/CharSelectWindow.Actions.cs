@@ -9,7 +9,6 @@ public sealed partial class CharSelectWindow
     private const int ActCmdCreateAlt = 3;
     private const int ActBottom4 = 4;
     private const int ActBottom5 = 5;
-
     private const int ActBottom6 = 6;
 
     private const int ActConditionalOverlay = 61;
@@ -22,7 +21,6 @@ public sealed partial class CharSelectWindow
     private const int ActSpinner25 = 25;
     private const int ActSpinner26 = 26;
     private const int ActColA0 = 27;
-
     private const int ActColB0 = 30;
 
     private const int ActCreateConfirm = 35;
@@ -38,7 +36,6 @@ public sealed partial class CharSelectWindow
     private const int ActRelocateCancel = 63;
 
     private const int ActPanelClose = 64;
-
     private const int ActNoticePanel = 65;
 
     private const int ActAppSpin66 = 66;
@@ -53,6 +50,7 @@ public sealed partial class CharSelectWindow
     private const int ActBoomZoomOut = 73;
 
     private const int ActNoticeOk = 74;
+    private const int ActDeleteCancel = 76;
 
     private const int ActCornerClose = 1000;
 
@@ -62,7 +60,6 @@ public sealed partial class CharSelectWindow
     private const int ActNav70 = ActActorYawLeft;
     private const int ActNav71 = ActActorYawRight;
     private const int ActToggle72 = ActBoomZoomIn;
-
     private const int ActToggle73 = ActBoomZoomOut;
 
     private CharSelectCameraRig? _cameraRig;
@@ -96,7 +93,7 @@ public sealed partial class CharSelectWindow
                 break;
 
             case ActBottom5:
-                GD.Print("[CharSelectWindow] action 5 (select-and-play / no-op). spec charselect.md §4.3.");
+                OnDeletePressed();
                 break;
 
             case ActBottom6:
@@ -107,16 +104,11 @@ public sealed partial class CharSelectWindow
                 if (_selectedSlot >= 0 && _selectedSlot < MaxSlots && !_slots[_selectedSlot].IsEmpty)
                 {
                     if (_modalCreateClass is not null) _modalCreateClass.Visible = true;
-                    GD.Print($"[CharSelectWindow] action 61 → open relocate overlay for slot {_selectedSlot}. " +
-                             "spec charselect.md §4.3.");
                 }
                 else
                 {
                     if (_noticeSmall is not null) _noticeSmall.Visible = true;
-                    GD.Print("[CharSelectWindow] action 61 → no slot selected → error tooltip. " +
-                             "spec charselect.md §4.3.");
                 }
-
                 break;
 
             case >= ActClass0 and <= ActClass0 + 3:
@@ -166,50 +158,37 @@ public sealed partial class CharSelectWindow
             case ActCreateCancel:
                 HideModal(_modalCreateName);
                 HideCreateForm();
-                GD.Print("[CharSelectWindow] action 36 → CREATE-CANCEL: hide modal + reset to select. " +
-                         "spec charselect.md §4.3.");
                 break;
 
             case ActAppSpin66:
             case ActAppSpin67:
                 _rotatePressLeft = true;
-                GD.Print($"[CharSelectWindow] action {actionId} → actor-yaw button + (this+6068). " +
-                         "spec charselect.md §4.3/§6.3.");
                 break;
             case ActAppSpin68:
             case ActAppSpin69:
                 _rotatePressRight = true;
-                GD.Print($"[CharSelectWindow] action {actionId} → actor-yaw button − (this+6072). " +
-                         "spec charselect.md §4.3/§6.3.");
                 break;
 
             case ActActorYawLeft:
                 _rotatePressLeft = true;
-                GD.Print("[CharSelectWindow] action 70 → actor-yaw drag-hold dir A. spec charselect.md §6.3.");
                 break;
             case ActActorYawRight:
                 _rotatePressRight = true;
-                GD.Print("[CharSelectWindow] action 71 → actor-yaw drag-hold dir B. spec charselect.md §6.3.");
                 break;
 
             case ActBoomZoomIn:
                 GetCameraRig()?.SetZoomAction(ActBoomZoomIn);
-                GD.Print("[CharSelectWindow] action 72 → boom-zoom IN (no clamp). spec charselect.md §6.3.");
                 break;
             case ActBoomZoomOut:
                 GetCameraRig()?.SetZoomAction(ActBoomZoomOut);
-                GD.Print("[CharSelectWindow] action 73 → boom-zoom OUT (no clamp). spec charselect.md §6.3.");
                 break;
 
             case ActRelocateConfirm:
                 HideModal(_modalCreateClass);
-                GD.Print("[CharSelectWindow] action 62 (move/relocate confirm) GATED — " +
-                         "1/14 MoveCharacter send stubbed; move-vs-delete label CONTESTED. " +
-                         "spec: charselect.md §4.3. Resolve via live dbg before un-gating.");
+                GD.Print("[CharSelectWindow] action 62 (relocate confirm) gated — debugger-pending.");
                 break;
             case ActRelocateCancel:
                 HideModal(_modalCreateClass);
-                GD.Print("[CharSelectWindow] action 63 → relocate CANCEL. spec charselect.md §4.3.");
                 break;
 
             case ActSlotSelectConfirm:
@@ -218,12 +197,18 @@ public sealed partial class CharSelectWindow
                 break;
             case ActSlotSelectCancel:
                 HideModal(_modalCreateName);
-                GD.Print("[CharSelectWindow] action 55 → slot-select CANCEL. spec charselect.md §4.3.");
                 break;
 
             case ActPanelClose:
+                if (_pendingDeleteSlot >= 0)
+                    OnDeleteConfirmYes(0);
+                else
+                    HideModal(_modalDeleteCfm);
+                break;
+
+            case ActDeleteCancel:
                 HideModal(_modalDeleteCfm);
-                GD.Print("[CharSelectWindow] action 64 → plain panel-close (no send). spec charselect.md §4.3.");
+                _pendingDeleteSlot = -1;
                 break;
 
             case ActRenameOk:
@@ -247,7 +232,7 @@ public sealed partial class CharSelectWindow
                 break;
 
             default:
-                GD.Print($"[CharSelectWindow] unbound action {actionId} (no route). spec charselect.md §4.3.");
+                GD.Print($"[CharSelectWindow] unbound action {actionId}.");
                 break;
         }
     }

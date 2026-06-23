@@ -12,6 +12,7 @@ public sealed partial class CharSelectWindow
     private HudLabel? _noticeBodyWidget;
 
     private int _pendingRenameSlot = -1;
+    private int _lastRenameSentSlot = -1;
 
     private LineEdit? _renameEntry;
     private HudLabel? _renameModalTitleWidget;
