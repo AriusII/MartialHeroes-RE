@@ -2,13 +2,10 @@ using System.Text;
 
 namespace MartialHeroes.Client.Application.Assets;
 
-/// <summary>
-///     Minimal private-profile-compatible reader for the state-2 <c>OPENNING/SKIP</c> decision.
-/// </summary>
 public sealed class OpeningSkipIniReader : IOpeningSkipReader
 {
-    private const string SectionName = "OPENNING"; // spec: Docs/RE/specs/resource_pipeline.md §2.5.
-    private const string KeyName = "SKIP"; // spec: Docs/RE/specs/resource_pipeline.md §2.5.
+    private const string SectionName = "OPENNING";
+    private const string KeyName = "SKIP";
 
     private readonly string _iniPath;
 

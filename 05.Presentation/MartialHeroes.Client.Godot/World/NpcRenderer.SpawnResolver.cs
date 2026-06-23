@@ -1,15 +1,3 @@
-// World/NpcRenderer.SpawnResolver.cs
-//
-// Partial class — spawn-record → skin/skeleton resolution, the mob→actormotion→skin chain.
-// See NpcRenderer.cs for the full file description and all spec cites.
-//
-// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
-// spec: Docs/RE/formats/mesh.md §.skn header — id_b; §actormotion.txt. CONFIRMED.
-// spec: Docs/RE/specs/skinning.md §8(e)/§10 — idle = motion_ids_a[1] = column 16 (record +0x44);
-//       column 15 / motion_ids_a[0] (record +0x40) is statically DEAD. Skeleton + idle .mot resolve
-//       through the shared CharVisualRegistry (bind-pose pool by verbatim id_b, motlist by header id_b),
-//       NOT g{n}.bnd / g{id}.mot. The faithful mob key is motion_key = col1 + CategoryBase[(byte)(col0+1)];
-//       the mob lookup below uses GetByIntraOffset(mob_id), which equals GetByMotionKey only for col0=0 mobs.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
@@ -22,54 +10,20 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class NpcRenderer
 {
-    // -------------------------------------------------------------------------
-    // Model resolution — mob_id → skin chain
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Resolves a model for the given mob_id via the confirmed chain and builds a SKINNED +
-    ///     idle-animated CPU-LBS node (the same pipeline the player uses), falling back to a static
-    ///     rest-pose node when any piece is missing:
-    ///     actormotion.txt col1==mob_id → col2=skin_class (and col16 = default idle .mot id)
-    ///     skinlist.txt scan → first .skn whose parsed IdB == skin_class
-    ///     BindPosePool.TryGetByIdB(skin_class) → skeleton (.bnd, by parsed actor_id; no g{n}.bnd)
-    ///     MotlistRegistry.ResolvePath(idle) → idle clip (.mot, by header id_b; no g{id}.mot)
-    ///     CharacterTextureResolver → albedo texture
-    ///     SkinnedCharacterBuilder.Build (skinned when bnd present; static otherwise)
-    ///     Returns null when even the .skn cannot be resolved; never throws.
-    ///     spec: MISSION — "resolve each actor's skin/bind/idle-mot via the existing actormotion chain,
-    ///     build the skinned node, fall back to the static path when any piece is missing."
-    ///     spec: Docs/RE/specs/skinning.md §8(e)/§10 — col2=SkinClassId; idle = motion_ids_a[1] = col16
-    ///     (record +0x44), NOT col15/motion_ids_a[0] (record +0x40, statically dead).
-    ///     spec: Docs/RE/specs/skinning.md §8(d) — mob trio g2048.bnd + g219000630.skn + g182006900.mot.
-    /// </summary>
     private Node3D? TryBuildFromMobId(RealClientAssets assets, ushort mobId)
     {
         if (_actorMotionLookup is null || _skinClassToSknPath is null)
             return null;
 
-        // Step 1: actormotion.txt lookup: mob_id → skin_class + idle motion id.
-        // spec: ActormotionParser — col1=actor_class_id, col2=skin_class_id; idle = motion_ids_a[1] =
-        //       col16 (record +0x44), NOT col15 (motion_ids_a[0]/+0x40, statically dead).
         if (!_actorMotionLookup.TryGetValue(mobId, out var entry))
-            return null; // mob_id not in actormotion.txt — silently skip
+            return null;
 
         var skinClass = entry.SkinClassId;
 
-        // Step 2: skinlist.txt scan → .skn path.
-        // spec: MISSION — "body .skn = the entry in skinlist.txt whose parsed .skn IdB == skin_class."
         if (!_skinClassToSknPath.TryGetValue(skinClass, out var sknPath))
-            return null; // no .skn with matching IdB — silently skip
+            return null;
 
-        // Idle motion id = motion_ids_a[1] = column 16 (in-memory record +0x44 = direction array A
-        // element 1) — the DEFAULT IDLE slot. NOT motion_ids_a[0] / column 15 (record +0x40), which is
-        // STATICALLY DEAD (zero read-sites) — selecting it (the off-by-one) plays the file-source idle
-        // ref, frequently a fixed-stand snapshot, producing a frozen-looking mob (the liveDelta=0
-        // diagnostic on the 120-frame mob trio). The first CONSUMED element of motion_ids_a is element 1.
-        // Fall back to element 0 only if the array has no element 1 (defensive; the array is 9-wide).
-        // spec: Docs/RE/specs/skinning.md §8(e) item 2 / §10 / §10.3.1 — stand/default idle = column 16
-        //       (record +0x44, array A element 1); record +0x40 (col15, element 0) is statically DEAD.
-        // spec: Docs/RE/formats/actormotion.md §The two 9-element sub-arrays — motion_ids_a a[1]=default idle.
         var idleMotId = entry.MotionIds.Length > 1 ? entry.MotionIds[1]
             : entry.MotionIds.Length > 0 ? entry.MotionIds[0]
             : 0;
@@ -78,50 +32,21 @@ public sealed partial class NpcRenderer
             $"mob_id={mobId} skin_class={skinClass}");
     }
 
-    /// <summary>
-    ///     Fallback path: probe <c>data/char/skin/g{mobId}.skn</c> directly (NPCs not in actormotion.txt).
-    ///     Builds skinned if a <c>.bnd</c> can be derived from the parsed mesh's IdB; static otherwise.
-    ///     Returns null (silent skip) when the probe path does not exist in the VFS.
-    /// </summary>
     private Node3D? TryBuildDirectSkinProbe(RealClientAssets assets, ushort mobId)
     {
         var sknPath = $"data/char/skin/g{mobId}.skn";
         if (!assets.Contains(sknPath))
             return null;
-        // No actormotion row → no skin_class hint, no idle id; the builder derives the .bnd from
-        // the parsed mesh IdB and renders a static rest pose (skeleton may still resolve).
         return TryBuildActorNode(assets, sknPath, -1, 0,
             $"direct-probe mob_id={mobId}");
     }
 
-    /// <summary>
-    ///     Parses the .skn, resolves its texture, loads the .bnd skeleton and idle .mot clip (when
-    ///     available), and builds a skinned CPU-LBS node via <see cref="SkinnedCharacterBuilder" />.
-    ///     Registers the resulting skinned node with the ~10 Hz stagger scheduler. When the skeleton
-    ///     is missing, the builder degrades to a static rest pose (counted as a static fallback).
-    /// </summary>
-    /// <param name="skinClass">SkinClassId from actormotion (the .bnd g-id), or -1 to derive from mesh IdB.</param>
-    /// <param name="idleMotId">Idle .mot id (motion_ids_a[1] = col16, record +0x44), or 0 for none.</param>
     private Node3D? TryBuildActorNode(
         RealClientAssets assets, string sknPath, int skinClass, int idleMotId, string debugLabel)
     {
-        // No-equip default: other actors built from a lean spawn descriptor (which carries no equip
-        // data — see the wave report's core-surface gap) render body-only. When the core later hands
-        // resolved EquipmentParts to this renderer, route through the equip-aware overload below.
         return TryBuildActorNode(assets, sknPath, skinClass, idleMotId, [], debugLabel);
     }
 
-    /// <summary>
-    ///     Equip-aware build: parses the body <c>.skn</c>, resolves its texture / <c>.bnd</c> / idle, and
-    ///     composes the OTHER-ACTOR equip overlay onto the shared skeleton via
-    ///     <see cref="SkinnedCharacterBuilder.BuildWithEquipment" />. The rebuild slot set is the
-    ///     resolver's other-actor set <c>{3,4,6,2,11}</c> (no weapon slot 14 on this path) —
-    ///     <see cref="EquipOverlayResolver.OtherActorRebuildSlots" />. The <paramref name="equipParts" />
-    ///     are the core's already catalogue-resolved parts; each part's mesh + texture is loaded by the
-    ///     shared <see cref="EquipmentPartResolver" /> (a miss is skipped, no crash).
-    ///     spec: Docs/RE/specs/equipment_visuals.md §1.1 (other-actor slot set, no slot 14) / §4.
-    /// </summary>
-    /// <param name="equipParts">The core's resolved overlay parts for this actor (empty ⇒ body only).</param>
     private Node3D? TryBuildActorNode(
         RealClientAssets assets, string sknPath, int skinClass, int idleMotId,
         IReadOnlyList<EquipmentPart> equipParts, string debugLabel)
@@ -144,8 +69,6 @@ public sealed partial class NpcRenderer
             return null;
         }
 
-        // Resolve texture — CharacterTextureResolver handles skin.txt + derivation fallback.
-        // spec: World/CharacterTextureResolver.cs — Resolve(assets, mesh). CONFIRMED.
         ImageTexture? albedo = null;
         try
         {
@@ -154,34 +77,19 @@ public sealed partial class NpcRenderer
         catch (Exception ex)
         {
             GD.PrintErr($"[NpcRenderer] Texture resolve failed for '{sknPath}': {ex.Message}");
-            // Albedo stays null — neutral material will be applied by builder.
         }
 
-        // Resolve the .bnd skeleton. The skin_class IS the .bnd g-id (== mesh IdB); fall back to
-        // the mesh's own IdB when no actormotion row gave a skin_class.
-        // spec: Docs/RE/formats/mesh.md §.bnd — actor_id == skin .skn id_b; path g{id}.bnd. CONFIRMED.
         var bndId = skinClass > 0 ? skinClass : (int)mesh.IdB;
         var skeleton = TryLoadSkeleton(assets, bndId, debugLabel);
 
-        // Resolve the idle .mot clip. Only when we have a skeleton to drive it.
-        // spec: actormotion.md — idle motion id = col16 (motion_ids_a[1]); resolved via the motlist
-        //       registry (id_b → 'data/char/mot/'+filename), NOT g{id}.mot.
         var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, idleMotId, debugLabel)
             : null;
 
         try
         {
-            // Skinned when a skeleton resolved; static rest pose otherwise. Mobs are externally
-            // driven (the ~10 Hz scheduler pumps them) with a randomized clip start phase so the
-            // town does not animate in lockstep.
-            // spec: MISSION — skinned mob path, ~10 Hz staggered, randomized clip phase.
             var startPhase = clip is not null ? NextPhase(clip.FrameCount * SkinningMath.MotSecondsPerFrame) : 0f;
 
-            // ── Equip-overlay wiring (EquipOverlayResolver, other-actor path) ──
-            // base_skin_id key = the resolved SkinClassId. Overlay resolution RUNS only when ≤1000;
-            // the other-actor rebuild slot set is {3,4,6,2,11} (no weapon slot 14 on this path).
-            // spec: Docs/RE/specs/equipment_visuals.md §1.1 / §3.4.
             var baseSkinId = skinClass > 0 ? skinClass : (int)mesh.IdB;
             var visualParts =
                 skeleton is not null
@@ -194,8 +102,6 @@ public sealed partial class NpcRenderer
             Node3D root;
             SkinnedCharacterNode? lbs;
             if (visualParts.Count > 0)
-                // Compose, don't swap: body + resolved overlay parts under the ONE shared skeleton.
-                // spec: Docs/RE/specs/equipment_visuals.md §1 / §4.
                 root = SkinnedCharacterBuilder.BuildWithEquipment(
                     mesh, skeleton, clip, albedo,
                     skeleton is not null,
@@ -213,7 +119,6 @@ public sealed partial class NpcRenderer
 
             if (lbs is not null)
             {
-                // Skinned: register with the stagger scheduler in a round-robin bucket.
                 var bucket = _skinnedActors.Count % SkinTickGroups;
                 _skinnedActors.Add(new SkinnedActor(lbs, bucket));
                 _totalSkinned++;
@@ -232,12 +137,6 @@ public sealed partial class NpcRenderer
         }
     }
 
-    /// <summary>
-    ///     Resolves the <c>.bnd</c> skeleton through the bind-pose pool by the verbatim <c>id_b</c> (the
-    ///     parsed <c>.bnd</c> header actor_id), or returns null (→ static rest pose) when not registered.
-    ///     The bnd is named in <c>bindlist.txt</c> with NO derivable <c>g{n}.bnd</c> filename rule.
-    ///     spec: Docs/RE/specs/skinning.md §8(e) (verbatim pose-pool key); formats/bindlist.md.
-    /// </summary>
     private static Skeleton? TryLoadSkeleton(RealClientAssets assets, int bndId, string debugLabel)
     {
         if (bndId <= 0) return null;
@@ -249,12 +148,6 @@ public sealed partial class NpcRenderer
         return skeleton;
     }
 
-    /// <summary>
-    ///     Resolves the idle <c>.mot</c> clip through the motlist registry by the motion id (clip header
-    ///     <c>id_b</c>), or returns null (→ rest pose, no animation) when not registered / unparseable.
-    ///     NOT <c>g{idleMotId}.mot</c> — the registry is keyed by the clip header id_b. Never throws.
-    ///     spec: MotList_LoadAndRegister (id_b registry); Docs/RE/formats/animation.md (header id_b @ +4).
-    /// </summary>
     private static AnimationClip? TryLoadAnimation(RealClientAssets assets, int idleMotId, string debugLabel)
     {
         var registry = CharVisualRegistry.GetOrBuild(assets);
@@ -279,21 +172,15 @@ public sealed partial class NpcRenderer
         }
     }
 
-    /// <summary>
-    ///     Deterministic pseudo-random clip start phase in [0, duration). Uses a cheap xorshift so it
-    ///     allocates nothing and stays reproducible across runs (no System.Random per actor).
-    ///     spec: MISSION — "randomize each actor's clip start phase so the town doesn't move in lockstep."
-    /// </summary>
     private float NextPhase(float durationSeconds)
     {
         if (durationSeconds <= 0f) return 0f;
-        // xorshift32
         var x = _phaseRng;
         x ^= x << 13;
         x ^= x >> 17;
         x ^= x << 5;
         _phaseRng = x;
-        var u = (x & 0xFFFFFF) / (float)0x1000000; // [0,1)
+        var u = (x & 0xFFFFFF) / (float)0x1000000;
         return u * durationSeconds;
     }
 }

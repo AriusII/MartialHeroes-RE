@@ -1,12 +1,3 @@
-// World/CameraController.Orbit.cs
-//
-// Partial class — free-fly math (ProcessFreeFly, ApplyFlyTransform, SyncFlyAnglesFromCurrentBasis,
-// ClampFlyPitch), yaw-clamp helper (ApplyYawClamp), and guard utilities (IsFiniteVector,
-// ClampToFinite).
-// See CameraController.cs for the full file description and all spec cites.
-//
-// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
-// spec: Docs/RE/specs/camera_movement.md §A.4 / §A.5 — orbit math.
 
 using Godot;
 
@@ -14,9 +5,6 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class CameraController
 {
-    // =========================================================================
-    // § FREE-FLY (developer mode, non-original)
-    // =========================================================================
 
     private void ProcessFreeFly(float dt)
     {
@@ -65,20 +53,13 @@ public sealed partial class CameraController
         _flyPitch = Mathf.Clamp(_flyPitch, -limit, limit);
     }
 
-    // =========================================================================
-    // § CLAMP HELPERS
-    // =========================================================================
 
     private void ApplyYawClamp()
     {
         var yawMax = _mode == ViewMode.Third ? YawMaxThird : YawMaxSymmetric;
-        // spec: Docs/RE/specs/camera_movement.md §A.4 — Third upper eased +1.4137; base ±π/2. CODE-CONFIRMED.
         _yaw = Mathf.Clamp(_yaw, YawMin, yawMax);
     }
 
-    // =========================================================================
-    // § GUARD UTILITIES
-    // =========================================================================
 
     private static bool IsFiniteVector(Vector3 v)
     {

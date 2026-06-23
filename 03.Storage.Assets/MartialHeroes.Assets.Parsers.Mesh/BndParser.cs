@@ -5,80 +5,27 @@ using MartialHeroes.Assets.Parsers.Mesh.Models;
 
 namespace MartialHeroes.Assets.Parsers.Mesh;
 
-/// <summary>
-///     Parser for <c>.bnd</c> binary bind-pose skeleton files.
-/// </summary>
-/// <remarks>
-///     spec: Docs/RE/formats/mesh.md §Format: .bnd — binary bind-pose skeleton
-///     <para>
-///         All fields little-endian.  No magic bytes at file start.
-///         Layout: actor_id u32 | actor_name LenStr | bone_count u32 | bone_count × 36-byte bone records.
-///     </para>
-///     <para>
-///         spec: Docs/RE/formats/mesh.md §Bone array — CORRECTION:
-///         "The on-disk record is 36 bytes. There is no uncharacterized trailing region on disk.
-///         Any parser code written against the 72-byte on-disk assumption will over-read by 36 bytes
-///         per bone and must be corrected." CONFIRMED.
-///     </para>
-///     <para>
-///         spec: Docs/RE/formats/mesh.md §Header — bone_count:
-///         "On-disk representation is a full u32; only the low byte is stored to the in-memory count
-///         field, giving an effective maximum of 255 bones." CONFIRMED.
-///     </para>
-///     <para>
-///         ZERO rendering/engine dependencies.
-///     </para>
-/// </remarks>
 public static class BndParser
 {
-    // On-disk bone record is 36 bytes — all fields characterized.
-    // spec: Docs/RE/formats/mesh.md §Bone array — "Total on-disk per bone: 36 bytes." CONFIRMED.
     private const int BoneRecordStride = 36;
 
-    /// <summary>
-    ///     Parses the raw bytes of a <c>.bnd</c> file into a <see cref="Skeleton" />.
-    /// </summary>
-    /// <param name="data">Raw file content from the VFS.</param>
-    /// <returns>Decoded skeleton.</returns>
-    /// <exception cref="InvalidDataException">
-    ///     Thrown on truncation or buffer overrun.
-    /// </exception>
     public static Skeleton Parse(ReadOnlyMemory<byte> data)
     {
         return Parse(data.Span);
     }
 
-    /// <summary>
-    ///     Parses from a <see cref="ReadOnlySpan{byte}" />.
-    /// </summary>
     public static Skeleton Parse(ReadOnlySpan<byte> data)
     {
         var offset = 0;
 
-        // --- Header ---
 
-        // actor_id u32 LE @ +0
-        // spec: Docs/RE/formats/mesh.md §Header — actor_id @ +0 u32 LE: CONFIRMED.
         var actorId = ReadU32LE(data, ref offset, "actor_id");
 
-        // actor_name LenStr — 4-byte u32 LE prefix + N bytes of body, no null terminator.
-        // spec: Docs/RE/formats/mesh.md §Header — actor_name LenStr: CONFIRMED.
-        // spec: Docs/RE/formats/mesh.md §String encoding (LenStr):
-        //   "The prefix is a 4-byte little-endian u32." CONFIRMED.
         var actorName = LenStrReader.Read(data, ref offset);
 
-        // bone_count u32 LE — full 4-byte read; only the low byte is the effective count.
-        // spec: Docs/RE/formats/mesh.md §Header — bone_count:
-        //   "On-disk representation is a full u32; only the low byte is stored to the in-memory
-        //    count field, giving an effective maximum of 255 bones." CONFIRMED.
-        // spec: Docs/RE/formats/mesh.md §Header — NOTE:
-        //   "A previous revision described bone_count as a 1-byte on-disk field. That was
-        //    incorrect. The loader reads a full 4-byte u32 in binary mode." CONFIRMED.
         var boneCountRaw = ReadU32LE(data, ref offset, "bone_count");
-        var boneCount = (int)(boneCountRaw & 0xFF); // low byte only
+        var boneCount = (int)(boneCountRaw & 0xFF);
 
-        // Validate buffer length for bone records (single pre-loop bounds check).
-        // spec: Docs/RE/formats/mesh.md §Bone array — "36 bytes per record": CONFIRMED.
         var boneDataBytes = (long)boneCount * BoneRecordStride;
         if (offset + boneDataBytes > data.Length)
             throw new InvalidDataException(
@@ -89,22 +36,13 @@ public static class BndParser
 
         for (var b = 0; b < boneCount; b++)
         {
-            // Bounds already validated above; read 9 fields (2×u32 + 7×f32) without per-element strings.
 
-            // sub-offset 0: self_id u32 LE (low byte is the effective bone ID)
-            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — self_id @ +0: CONFIRMED.
             var selfId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
 
-            // sub-offset 4: parent_id u32 LE (low byte is the effective parent ID)
-            // Root bone: self_id == 0 && parent_id == 0 (both low bytes zero).
-            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — parent_id @ +4: CONFIRMED.
-            // spec: Docs/RE/formats/mesh.md §Root bone sentinel: CONFIRMED.
             var parentId = BinaryPrimitives.ReadUInt32LittleEndian(data[offset..]);
             offset += 4;
 
-            // sub-offset 8: local_translation f32[3] LE — X at +8, Y at +12, Z at +16
-            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_translation @ +8: CONFIRMED.
             var tX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
             var tY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
@@ -112,10 +50,6 @@ public static class BndParser
             var tZ = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
 
-            // sub-offset 20: local_rotation f32[4] LE — XYZW order (scalar W at +32)
-            // spec: Docs/RE/formats/mesh.md §BndBone on-disk record — local_rotation @ +20: CONFIRMED.
-            // spec: Docs/RE/formats/mesh.md §Quaternion component order:
-            //   "XYZW order: X at sub-offset +20, Y at +24, Z at +28, W (scalar) at +32." CONFIRMED.
             var rX = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
             var rY = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
@@ -140,10 +74,6 @@ public static class BndParser
         };
     }
 
-    // -------------------------------------------------------------------------
-    // Private binary reader helpers (little-endian, bounds-checked)
-    // Used for header-level fields only (not the hot per-bone loop).
-    // -------------------------------------------------------------------------
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
     {

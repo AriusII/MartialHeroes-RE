@@ -2,34 +2,10 @@ using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Domain.Inventory.Inventory;
 
-/// <summary>
-///     A fixed rectangular grid of inventory slots with deterministic add / remove / move / stack
-///     operations.
-/// </summary>
-/// <remarks>
-///     <para>
-///         The backing store is a single flat array sized <c>columns * rows</c>, allocated once at
-///         construction. No operation allocates beyond that store; every mutation is an in-place slot
-///         assignment. All operations are pure functions of the current grid state and their arguments
-///         (no clock, no RNG), so they are exhaustively unit-testable.
-///     </para>
-///     <para>
-///         <b>Modeling choice (ours).</b> The legacy inventory grid dimensions and the per-item maximum
-///         stack size are not published in the actor spec (the equipment/stat block is unmapped — spec:
-///         Docs/RE/structs/actor.md "Unverified / open questions"). They are therefore caller-supplied
-///         parameters rather than hard-coded constants; no original-game number is invented here.
-///     </para>
-/// </remarks>
 public sealed class InventoryGrid
 {
     private readonly InventorySlot[] _slots;
 
-    /// <summary>
-    ///     Creates an empty grid.
-    /// </summary>
-    /// <param name="columns">Grid width; must be &gt; 0.</param>
-    /// <param name="rows">Grid height; must be &gt; 0.</param>
-    /// <param name="maxStackSize">Maximum stack size per slot; must be &gt; 0.</param>
     public InventoryGrid(int columns, int rows, uint maxStackSize)
     {
         if (columns <= 0) throw new ArgumentOutOfRangeException(nameof(columns), "Columns must be greater than zero.");
@@ -45,34 +21,26 @@ public sealed class InventoryGrid
         _slots = new InventorySlot[columns * rows];
     }
 
-    /// <summary>Number of columns (width).</summary>
     public int Columns { get; }
 
-    /// <summary>Number of rows (height).</summary>
     public int Rows { get; }
 
-    /// <summary>Maximum quantity a single slot may hold for one item kind.</summary>
     public uint MaxStackSize { get; }
 
-    /// <summary>Total number of slots (<see cref="Columns" /> * <see cref="Rows" />).</summary>
     public int Capacity => _slots.Length;
 
-    /// <summary>Reads the slot at a flat index.</summary>
     public InventorySlot this[int index] => _slots[index];
 
-    /// <summary>Reads the slot at (column, row).</summary>
     public InventorySlot At(int column, int row)
     {
         return _slots[ToIndex(column, row)];
     }
 
-    /// <summary>True when the slot at <paramref name="index" /> holds no item.</summary>
     public bool IsEmpty(int index)
     {
         return _slots[index].IsEmpty;
     }
 
-    /// <summary>Converts a (column, row) coordinate into a flat slot index.</summary>
     public int ToIndex(int column, int row)
     {
         if ((uint)column >= (uint)Columns) throw new ArgumentOutOfRangeException(nameof(column));
@@ -82,16 +50,6 @@ public sealed class InventoryGrid
         return row * Columns + column;
     }
 
-    /// <summary>
-    ///     Adds <paramref name="quantity" /> of <paramref name="item" />, first topping up existing
-    ///     stacks of the same item (up to <see cref="MaxStackSize" />), then filling empty slots.
-    /// </summary>
-    /// <param name="item">Item to add; must not be <see cref="ItemId.None" />.</param>
-    /// <param name="quantity">Amount to add; must be &gt; 0.</param>
-    /// <returns>
-    ///     The amount that did not fit (0 when everything was placed). The grid is only mutated for the
-    ///     portion that fit; the unplaced remainder leaves earlier writes intact (partial add).
-    /// </returns>
     public uint Add(ItemId item, uint quantity)
     {
         if (item == ItemId.None) throw new ArgumentException("Cannot add the empty item id.", nameof(item));
@@ -101,7 +59,6 @@ public sealed class InventoryGrid
 
         var remaining = quantity;
 
-        // Pass 1: top up existing stacks of the same item.
         for (var i = 0; i < _slots.Length && remaining > 0; i++)
         {
             var slot = _slots[i];
@@ -113,7 +70,6 @@ public sealed class InventoryGrid
             remaining -= take;
         }
 
-        // Pass 2: fill empty slots with new stacks.
         for (var i = 0; i < _slots.Length && remaining > 0; i++)
         {
             if (!_slots[i].IsEmpty) continue;
@@ -126,11 +82,6 @@ public sealed class InventoryGrid
         return remaining;
     }
 
-    /// <summary>
-    ///     Removes up to <paramref name="quantity" /> of <paramref name="item" /> across all stacks,
-    ///     lowest index first.
-    /// </summary>
-    /// <returns>The amount actually removed (may be less than requested if not enough was held).</returns>
     public uint Remove(ItemId item, uint quantity)
     {
         if (item == ItemId.None) throw new ArgumentException("Cannot remove the empty item id.", nameof(item));
@@ -156,7 +107,6 @@ public sealed class InventoryGrid
         return removed;
     }
 
-    /// <summary>Total quantity of <paramref name="item" /> held across the whole grid.</summary>
     public uint CountOf(ItemId item)
     {
         if (item == ItemId.None) return 0;
@@ -171,22 +121,6 @@ public sealed class InventoryGrid
         return total;
     }
 
-    /// <summary>
-    ///     Moves the contents of <paramref name="fromIndex" /> into <paramref name="toIndex" />.
-    /// </summary>
-    /// <remarks>
-    ///     Rules, applied deterministically:
-    ///     <list type="bullet">
-    ///         <item>Empty source: nothing happens, returns <c>true</c> (no-op success).</item>
-    ///         <item>Empty destination: the whole stack moves.</item>
-    ///         <item>
-    ///             Same item, destination not full: merge up to <see cref="MaxStackSize" />; any overflow
-    ///             stays in the source slot.
-    ///         </item>
-    ///         <item>Different items (or same item but destination full): the two slots swap.</item>
-    ///     </list>
-    /// </remarks>
-    /// <returns><c>true</c> when a move/merge/swap occurred or the source was empty.</returns>
     public bool Move(int fromIndex, int toIndex)
     {
         if ((uint)fromIndex >= (uint)_slots.Length) throw new ArgumentOutOfRangeException(nameof(fromIndex));
@@ -217,18 +151,11 @@ public sealed class InventoryGrid
             return true;
         }
 
-        // Swap (different items, or same item with a full destination).
         _slots[fromIndex] = dest;
         _slots[toIndex] = source;
         return true;
     }
 
-    /// <summary>
-    ///     Overwrites the slot at <paramref name="index" /> with <paramref name="slot" />. A low-level
-    ///     primitive used by the pure stack operations in <see cref="ItemStackOps" />; the caller is
-    ///     responsible for any stack-size invariant beyond the per-slot normalisation in
-    ///     <see cref="InventorySlot" />.
-    /// </summary>
     public void SetSlot(int index, InventorySlot slot)
     {
         if ((uint)index >= (uint)_slots.Length) throw new ArgumentOutOfRangeException(nameof(index));
@@ -236,7 +163,6 @@ public sealed class InventoryGrid
         _slots[index] = slot;
     }
 
-    /// <summary>Clears every slot.</summary>
     public void Clear()
     {
         Array.Clear(_slots);

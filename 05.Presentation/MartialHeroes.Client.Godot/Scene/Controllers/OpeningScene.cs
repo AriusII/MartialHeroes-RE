@@ -6,14 +6,6 @@ using NewOpeningWindow = MartialHeroes.Client.Godot.Ui.Scenes.Opening.OpeningWin
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
-/// <summary>
-///     State 3 — Opening. Builds the post-login intro window (Ui/Scenes substrate). There is NO
-///     auto-finish: the slideshow holds panel 4 indefinitely and the ONLY exit is an explicit skip
-///     (Enter/ESC/Space or the skip button), which persists OPENNING/SKIP=1 and advances to Select.
-///     <para>Uses <see cref="NewOpeningWindow" /> on the Ui/Scenes substrate.</para>
-///     spec: Docs/RE/specs/intro_sequence.md §3.1 (no auto-finish; skip is the sole exit — CAMPAIGN 16);
-///     Docs/RE/specs/client_runtime.md §7.3.
-/// </summary>
 public sealed partial class OpeningScene : StubSceneController
 {
     private bool _advanceRequested;
@@ -23,17 +15,13 @@ public sealed partial class OpeningScene : StubSceneController
     private NewOpeningWindow? _opening;
     private ScreenHost? _screenHost;
 
-    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Opening;
 
-    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
         _host = host;
 
-        // Resolve the HudAtlasLibrary from the composition root.
-        // spec: Docs/RE/specs/intro_sequence.md §1 — textures loaded via VFS atlas. SAMPLE-VERIFIED.
         _ctx = GetNodeOrNull<ClientContext>("/root/ClientContext");
 
         _screenHost = new ScreenHost { Name = "OpeningScreenHost" };
@@ -42,8 +30,6 @@ public sealed partial class OpeningScene : StubSceneController
         _audio = new FrontEndAudio { Name = "OpeningFrontEndAudio" };
         AddChild(_audio);
 
-        // Build the new Ui/Scenes substrate OpeningWindow.
-        // Atlas comes from ClientContext.HudAtlas (Phase-A substrate, shared handle).
         _opening = new NewOpeningWindow
         {
             Name = "OpeningWindow",
@@ -54,7 +40,6 @@ public sealed partial class OpeningScene : StubSceneController
         _screenHost.SetScreen(_opening);
 
         GD.Print("[OpeningScene] State 3 built.");
-        // Opening has NO self-advance: the only exit is an explicit skip. spec: Docs/RE/specs/intro_sequence.md §2.4.
     }
 
     public override void _ExitTree()

@@ -7,12 +7,6 @@ using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Scene.Controllers;
 
-/// <summary>
-///     State 2 — Load. Builds the Diamond_LoadingWindow analogue and advances only after the
-///     loading window reports preload-done + the 500 ms grace; the application scene machine then
-///     chooses 2→3 or 2→4 from its OPENNING/SKIP policy.
-///     spec: Docs/RE/specs/client_runtime.md §7.3; Docs/RE/specs/frontend_scenes.md §2L / §9.1.
-/// </summary>
 public sealed partial class LoadScene : StubSceneController
 {
     private bool _advanceRequested;
@@ -23,10 +17,8 @@ public sealed partial class LoadScene : StubSceneController
     private ScreenHost? _screenHost;
     private bool _syncingScene;
 
-    /// <inheritdoc />
     public override EngineSceneState State => EngineSceneState.Load;
 
-    /// <inheritdoc />
     public override void OnEnter(SceneHost host)
     {
         Name = $"Scene{(int)State}_{State}";
@@ -63,18 +55,6 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts = null;
     }
 
-    /// <summary>
-    ///     Drains the SingleReader event bus while Load is the active scene, converging the visible
-    ///     controller when the Application scene machine commits an OUT-OF-BAND transition away from Load.
-    ///     The load-bearing case is an enter-phase REJECTION: a 1/9 was sent, the server answered
-    ///     <c>3/100 SmsgCharActionResult</c> instead of the <c>4/1</c> world tick, so the machine returns
-    ///     to char-select (Load → Select) — the world must NOT be entered via the loading-grace timer
-    ///     without the server's enter sequence. Calling <see cref="SceneHost.Advance" /> here would be
-    ///     wrong (it would advance from the already-committed state); we converge to the committed state
-    ///     instead. The grace-timer advance is independently guarded in <see cref="OnLoadingComplete" />
-    ///     (it no-ops once SceneHost has left Load). spec: Docs/RE/specs/client_runtime.md §7.5.2;
-    ///     Docs/RE/specs/login_flow.md §1 step 9 / §3.4 (enter only on 3/5 → 4/1).
-    /// </summary>
     public override void _Process(double delta)
     {
         if (_ctx is null || _syncingScene) return;
@@ -106,8 +86,6 @@ public sealed partial class LoadScene : StubSceneController
         _loadCts = new CancellationTokenSource();
 
         load.Start(_loadCts.Token);
-        // Start() synchronously applies the OPENNING/SKIP decision to SceneMachine.SkipOpening.
-        // spec: Docs/RE/specs/resource_pipeline.md §2.5; client_runtime.md §7.5.1.
         GD.Print($"[LoadScene] LoadOrchestrator started; destination={load.DestinationAfterLoad}, " +
                  $"skipOpening={load.ShouldSkipOpening}. spec: resource_pipeline.md §2.");
         _ = AwaitCoreLoadAsync(load.Completion);
@@ -133,8 +111,6 @@ public sealed partial class LoadScene : StubSceneController
         }
         catch (Exception ex)
         {
-            // Real load fault → error state (state 7). Do not advance to next scene.
-            // spec: Docs/RE/scenes/load.md §3 "Load → Error: load fault (state 7)".
             Callable.From(() =>
             {
                 GD.PrintErr($"[LoadScene] LoadOrchestrator faulted: {ex.Message}; routing to error.");

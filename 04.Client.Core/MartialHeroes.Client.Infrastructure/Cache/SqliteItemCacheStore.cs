@@ -4,43 +4,26 @@ using Microsoft.Data.Sqlite;
 
 namespace MartialHeroes.Client.Infrastructure.Cache;
 
-/// <summary>
-///     SQLite-backed implementation of <see cref="IItemCacheStore" />.
-///     <para>
-///         Schema versioning uses <c>PRAGMA user_version</c>.
-///         All SQL uses parameterized queries — no value interpolation into SQL text.
-///     </para>
-/// </summary>
-/// <remarks>
-///     Pass <c>Data Source=:memory:</c> (or a shared-cache URI) for unit tests.
-/// </remarks>
 public sealed class SqliteItemCacheStore : IItemCacheStore
 {
-    // ── Schema version ────────────────────────────────────────────────────────
     private const int SchemaVersion = 1;
 
     private readonly string _connectionString;
     private bool _initialised;
 
-    /// <param name="connectionString">
-    ///     A <c>Microsoft.Data.Sqlite</c> connection string.
-    /// </param>
     public SqliteItemCacheStore(string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _connectionString = connectionString;
     }
 
-    // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
     }
 
-    // ── IItemCacheStore ───────────────────────────────────────────────────────
 
-    /// <inheritdoc />
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -56,7 +39,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc />
     public async Task<CachedItemDto?> TryGetAsync(ItemId itemId, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -68,7 +50,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
             cmd.CommandText =
                 "SELECT item_id, name, description, item_type_code " +
                 "FROM item_cache WHERE item_id = @id LIMIT 1;";
-            cmd.Parameters.AddWithValue("@id", (long)itemId.Value); // SQLite has no uint; store as signed int64
+            cmd.Parameters.AddWithValue("@id", (long)itemId.Value);
             await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken)) return null;
             return ReadRow(reader);
@@ -79,7 +61,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc />
     public async Task UpsertAsync(CachedItemDto item, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -96,7 +77,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc />
     public async Task BulkUpsertAsync(IEnumerable<CachedItemDto> items, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -117,7 +97,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    /// <inheritdoc />
     public async Task ClearAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -135,7 +114,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
         }
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
 
     private SqliteConnection OpenConnection()
     {
@@ -174,7 +152,7 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
     private static CachedItemDto ReadRow(SqliteDataReader r)
     {
-        var rawId = (ulong)r.GetInt64(0); // cast back: stored as int64, re-interpret as uint
+        var rawId = (ulong)r.GetInt64(0);
         return new CachedItemDto(
             new ItemId((uint)rawId),
             r.GetString(1),
@@ -188,10 +166,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
         if (currentVersion < SchemaVersion)
         {
-            // ── Migration v0 → v1 ────────────────────────────────────────────
-            // Creates the item_cache table.
-            // item_id is stored as INTEGER (SQLite int64) because SQLite has no
-            // unsigned integer type; we cast to/from uint in C#.
             const string v1Ddl =
                 """
                 CREATE TABLE IF NOT EXISTS item_cache (
@@ -208,7 +182,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
             await SetUserVersionAsync(conn, SchemaVersion, ct);
         }
-        // Future migrations: increment SchemaVersion above and add `if (currentVersion < 2) { ... }`.
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection conn, CancellationToken ct)
@@ -221,7 +194,6 @@ public sealed class SqliteItemCacheStore : IItemCacheStore
 
     private static async Task SetUserVersionAsync(SqliteConnection conn, int version, CancellationToken ct)
     {
-        // PRAGMA user_version only accepts an integer literal, not a parameter.
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"PRAGMA user_version = {version};";
         await cmd.ExecuteNonQueryAsync(ct);

@@ -1,18 +1,3 @@
-// Screens/NpcScrDescriptions.cs
-//
-// Thin adapter: loads data/script/npc.scr via RealClientAssets, parses it with the
-// existing NpcScrParser, and exposes the three CP949 class-description lines for UI
-// class indices 0..3 (the create-form right panel).
-//
-// PASSIVE: zero game logic. Read-only loader; returns strings that the UI renders.
-//
-// Mapping (UI slot → npc.scr key → internal class):
-//   UI 0 → key 1 → Monk   (internal 4)
-//   UI 1 → key 2 → Musa   (internal 1)
-//   UI 2 → key 4 → Dosa   (internal 3)
-//   UI 3 → key 3 → Salsu  (internal 2)
-// spec: Docs/RE/formats/config_tables.md §2.17.3 — UI-slot vs npc.scr key crossover: CONFIRMED.
-// spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description source = npc.scr keys 1..4: CONFIRMED.
 
 using Godot;
 using MartialHeroes.Assets.Parsers.DataTables;
@@ -21,60 +6,24 @@ using MartialHeroes.Client.Godot.Composition;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
-/// <summary>
-///     Loads the CP949 class-description text from <c>data/script/npc.scr</c> and provides
-///     it indexed by UI class index (0..3).
-///     <para>
-///         Reuses <see cref="NpcScrParser" /> from <c>Assets.Parsers</c> — no raw byte
-///         parsing in the UI layer.
-///     </para>
-///     <para>
-///         VFS path: <c>data/script/npc.scr</c>.
-///         spec: Docs/RE/formats/config_tables.md §2.17.3 — stride 404 bytes, 2510 records: CONFIRMED.
-///     </para>
-///     <para>
-///         When the VFS is absent, returns empty strings (faithfully empty offline — no
-///         invented English fallback text).
-///     </para>
-/// </summary>
 internal sealed class NpcScrDescriptions
 {
-    // VFS path for npc.scr.
-    // spec: Docs/RE/formats/config_tables.md §2.17.3 — "data/script/npc.scr": CONFIRMED.
     private const string NpcScrVfsPath = "data/script/npc.scr";
 
-    // UI class index (0..3) → npc.scr record key.
-    // spec: Docs/RE/formats/config_tables.md §2.17.3 — key↔UI crossover table: CONFIRMED.
-    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — "UI 0→key 1, UI 1→key 2, UI 2→key 4, UI 3→key 3": CONFIRMED.
-    private static readonly uint[] UiIndexToNpcKey = [1u, 2u, 4u, 3u]; // spec: config_tables.md §2.17.3
+    private static readonly uint[] UiIndexToNpcKey = [1u, 2u, 4u, 3u];
 
-    // No English fallback descriptions — when npc.scr is absent the description is empty.
-    // spec: Docs/RE/formats/config_tables.md §2.17.3 — text is CP949 VFS-only; no hardcoded strings.
-    // Faithfully EMPTY offline: render nothing rather than inventing text.
 
-    // Resolved descriptions (three lines joined with \n), indexed by UI class index 0..3.
-    // Populated by Load(); null means the VFS was not available.
     private readonly string?[] _resolved = new string?[4];
 
-    // The three CP949 description lines VERBATIM per UI class index 0..3 (fields 0/1/2 at
-    // +0x14/+0x54/+0x94), with NO empty-line filtering — each line maps 1:1 onto its own label so a
-    // blank middle line does NOT collapse line 3 up onto line 2 (the 3-line render-polish edge).
-    // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 (three lines, top to bottom).
     private readonly string[][] _resolvedLines = new string[4][];
 
-    // Whether the VFS load succeeded (used for diagnostics).
 
     private NpcScrDescriptions()
     {
     }
 
-    /// <summary>True when the descriptions were loaded from the real VFS npc.scr.</summary>
     public bool LoadedFromVfs { get; private set; }
 
-    /// <summary>
-    ///     Attempts to load npc.scr from the VFS. Returns a ready instance.
-    ///     On any failure, returns an instance with empty strings — faithfully empty offline; never throws.
-    /// </summary>
     public static NpcScrDescriptions Load(RealClientAssets? realAssets)
     {
         var inst = new NpcScrDescriptions();
@@ -89,7 +38,6 @@ internal sealed class NpcScrDescriptions
         try
         {
             var raw = realAssets.GetRaw(NpcScrVfsPath);
-            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "data/script/npc.scr": CONFIRMED.
 
             if (raw.IsEmpty)
             {
@@ -99,20 +47,14 @@ internal sealed class NpcScrDescriptions
             }
 
             var records = NpcScrParser.Parse(raw);
-            // spec: Docs/RE/formats/config_tables.md §2.17.3 — "stride 404, 2510 records": CONFIRMED.
 
-            // Build a key→first-record map (take first occurrence; npc.scr key IDs are sequential
-            // but duplicate key values may occur in the tail of the table — skip duplicates, keep first).
-            // spec: config_tables.md §2.17.3 — "sequential 1..2510; class records at keys 1..4": CONFIRMED.
             var byKey = new Dictionary<uint, NpcScrRecord>(records.Length);
             foreach (var r in records)
-                byKey.TryAdd(r.Id, r); // keep first occurrence; silently skip duplicates
+                byKey.TryAdd(r.Id, r);
 
-            // Resolve descriptions for each UI slot.
             for (var uiIdx = 0; uiIdx < 4; uiIdx++)
             {
                 var key = UiIndexToNpcKey[uiIdx];
-                // spec: config_tables.md §2.17.3 — UI-slot vs npc.scr key crossover: CONFIRMED.
 
                 if (!byKey.TryGetValue(key, out var rec))
                 {
@@ -121,12 +63,6 @@ internal sealed class NpcScrDescriptions
                     continue;
                 }
 
-                // String fields 0/1/2 at offsets +0x14 / +0x54 / +0x94 are the three CP949 lines.
-                // spec: Docs/RE/formats/config_tables.md §2.17.3 — "fields 0/1/2 = description lines": CONFIRMED.
-                // spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — "three CP949 lines at +0x14/+0x54/+0x94": CONFIRMED.
-                // NpcScrParser already decoded CP949 → .NET string; we only need to join non-empty lines.
-                // VERBATIM three lines (no filtering) for the per-label 3-line render; the joined form
-                // (empties dropped) is kept for any single-blob consumer. spec frontend_scenes.md §4.1.1.
                 string[] lines =
                     [rec.Paragraph0 ?? string.Empty, rec.Paragraph1 ?? string.Empty, rec.Paragraph2 ?? string.Empty];
                 inst._resolvedLines[uiIdx] = lines;
@@ -157,33 +93,14 @@ internal sealed class NpcScrDescriptions
         return inst;
     }
 
-    /// <summary>
-    ///     Returns the CP949-decoded description text (three lines joined with newlines) for the
-    ///     given UI class index (0..3).
-    ///     <para>
-    ///         Returns <see cref="string.Empty" /> when npc.scr was unavailable or the record
-    ///         was absent — faithfully empty offline; no invented fallback text.
-    ///     </para>
-    ///     spec: Docs/RE/formats/config_tables.md §2.17.3 — string fields 0/1/2 for keys 1..4: CONFIRMED.
-    ///     spec: Docs/RE/specs/frontend_scenes.md §4.1.1 — class description from npc.scr: CONFIRMED.
-    /// </summary>
     public string GetDescription(int uiClassIndex)
     {
         if (uiClassIndex < 0 || uiClassIndex >= 4)
             return string.Empty;
 
-        // Return the VFS-loaded CP949 text, or empty string when offline.
-        // spec: No English fallback — faithfully empty when npc.scr is absent.
         return _resolved[uiClassIndex] ?? string.Empty;
     }
 
-    /// <summary>
-    ///     Returns the three CP949 description lines (fields 0/1/2 at +0x14/+0x54/+0x94) VERBATIM for
-    ///     the given UI class index, as a 3-element array (each element maps 1:1 onto one of the three
-    ///     description labels, top to bottom). Empty lines are preserved (NOT filtered) so a blank
-    ///     middle line keeps line 3 on label 3 rather than collapsing it up. Always exactly 3 elements;
-    ///     all-empty offline. spec: Docs/RE/specs/frontend_scenes.md §4.1.1 (three lines, top to bottom).
-    /// </summary>
     public string[] GetDescriptionLines(int uiClassIndex)
     {
         if (uiClassIndex < 0 || uiClassIndex >= 4 || _resolvedLines[uiClassIndex] is not { } lines)

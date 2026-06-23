@@ -3,49 +3,26 @@ using Microsoft.Data.Sqlite;
 
 namespace MartialHeroes.Client.Infrastructure.Settings;
 
-/// <summary>
-///     SQLite-backed implementation of <see cref="ISettingsStore" />.
-///     <para>
-///         Schema versioning uses SQLite's built-in <c>PRAGMA user_version</c>.
-///         All SQL uses parameterized queries — no value interpolation into SQL text.
-///     </para>
-/// </summary>
-/// <remarks>
-///     Pass <c>Data Source=:memory:</c> (or a shared-cache in-memory URI such as
-///     <c>Data Source=file:settings_test?mode=memory&amp;cache=shared</c>) for
-///     unit tests so no real file is created.
-/// </remarks>
 public sealed class SqliteSettingsStore : ISettingsStore
 {
-    // ── Schema version ────────────────────────────────────────────────────────
-    // Increment this constant whenever a migration adds or alters a table.
-    // Each version step must have a corresponding migration block in ApplyMigrationsAsync.
     private const int SchemaVersion = 1;
 
     private readonly string _connectionString;
     private bool _initialised;
 
-    /// <param name="connectionString">
-    ///     A <c>Microsoft.Data.Sqlite</c> connection string, e.g.
-    ///     <c>"Data Source=/path/to/settings.db"</c> or
-    ///     <c>"Data Source=:memory:"</c> for tests.
-    /// </param>
     public SqliteSettingsStore(string connectionString)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
         _connectionString = connectionString;
     }
 
-    // ── IAsyncDisposable ──────────────────────────────────────────────────────
 
     public ValueTask DisposeAsync()
     {
         return ValueTask.CompletedTask;
     }
 
-    // ── ISettingsStore ────────────────────────────────────────────────────────
 
-    /// <inheritdoc />
     public async Task InitialiseAsync(CancellationToken cancellationToken = default)
     {
         try
@@ -61,7 +38,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc />
     public async Task<ClientSettingsDto> LoadSettingsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -70,7 +46,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
             await using var conn = OpenConnection();
             await conn.OpenAsync(cancellationToken);
 
-            // Read all rows from the key/value table into a dictionary.
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             await using (var cmd = conn.CreateCommand())
             {
@@ -106,13 +81,11 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc />
     public async Task SaveSettingsAsync(ClientSettingsDto settings, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
         ArgumentNullException.ThrowIfNull(settings);
 
-        // Build the list of (key, value) pairs for non-null fields.
         var pairs = new List<(string Key, string Value)>(12);
 
         if (settings.ResolutionWidth.HasValue)
@@ -162,7 +135,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc />
     public async Task<IReadOnlyList<KeybindDto>> LoadKeybindsAsync(CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -186,7 +158,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc />
     public async Task SaveKeybindAsync(string actionName, string keyCode, CancellationToken cancellationToken = default)
     {
         EnsureInitialised();
@@ -211,7 +182,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    /// <inheritdoc />
     public async Task ReplaceAllKeybindsAsync(IEnumerable<KeybindDto> keybinds,
         CancellationToken cancellationToken = default)
     {
@@ -254,7 +224,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
         }
     }
 
-    // ── Private helpers ───────────────────────────────────────────────────────
 
     private SqliteConnection OpenConnection()
     {
@@ -269,20 +238,12 @@ public sealed class SqliteSettingsStore : ISettingsStore
                 $"Call {nameof(InitialiseAsync)} before any other method.");
     }
 
-    /// <summary>
-    ///     Creates the schema idempotently and applies any outstanding migrations.
-    ///     Migration history is tracked via SQLite <c>PRAGMA user_version</c>.
-    /// </summary>
     private static async Task ApplyMigrationsAsync(SqliteConnection conn, CancellationToken ct)
     {
         var currentVersion = await GetUserVersionAsync(conn, ct);
 
         if (currentVersion < SchemaVersion)
         {
-            // ── Migration v0 → v1 ────────────────────────────────────────────
-            // Creates the client_settings key/value store and the keybinds table.
-            // Both tables use idempotent CREATE TABLE IF NOT EXISTS so re-running
-            // on an already-initialised database is safe.
             const string v1Ddl =
                 """
                 CREATE TABLE IF NOT EXISTS client_settings (
@@ -303,8 +264,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
             await SetUserVersionAsync(conn, SchemaVersion, ct);
         }
 
-        // Future migrations: add `if (currentVersion < 2) { ... }` blocks here.
-        // Increment SchemaVersion above and add the matching migration block.
     }
 
     private static async Task<int> GetUserVersionAsync(SqliteConnection conn, CancellationToken ct)
@@ -317,8 +276,6 @@ public sealed class SqliteSettingsStore : ISettingsStore
 
     private static async Task SetUserVersionAsync(SqliteConnection conn, int version, CancellationToken ct)
     {
-        // PRAGMA user_version does not accept parameters — the value is an integer literal,
-        // not user-supplied text, so interpolation here is safe (integer, not string).
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = $"PRAGMA user_version = {version};";
         await cmd.ExecuteNonQueryAsync(ct);

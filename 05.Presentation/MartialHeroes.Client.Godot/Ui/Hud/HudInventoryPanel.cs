@@ -1,34 +1,3 @@
-// Ui/Hud/HudInventoryPanel.cs
-//
-// In-game inventory bag — `ItemPanel` (key I toggle, right-anchored).
-//
-// Placement (CODE-CONFIRMED):
-//   W = 318, H = 732, X = screen_width + 318, Y = 0 (right-anchored, slides in).
-//   spec: Docs/RE/specs/ui_hud_layout.md §1.1 / §5.3 CODE-CONFIRMED.
-//
-// Item grid — ItemPanel 8×5 = 40 cells (CODE-CONFIRMED 2026-06-17):
-//   - 8 columns × 5 rows = 40 cells; each cell 38 × 38 px.
-//   - Cell pitch = +38 px on both axes (flush, no gutter).
-//   - Cell action ids: 0..39.
-//   - 318 × 623 backdrop body.
-//   spec: Docs/RE/specs/ui_system.md §8.10.1 CODE-CONFIRMED.
-//
-// Equip sub-grid: 20 cells (action ids 50..69), 38×38 buttons.
-//   spec: Docs/RE/specs/ui_system.md §8.10.1 CODE-CONFIRMED.
-//
-// Equipment paperdoll: hand-placed per-slot (explicit per-slot x,y).
-//   spec: Docs/RE/specs/ui_system.md §8.10.1 CODE-CONFIRMED.
-//
-// Chrome atlas: data/ui/inventwindow.dds (uitex 2).
-//   spec: Docs/RE/specs/ui_system.md §8.6.1 — uitex 2 = inventwindow.dds.
-//   Cell overlays: uitex 14 (count/qty), 69 (state), 71 (rarity), 78 (highlight).
-//
-// Toggle: hotkey I — toggled together with the skill panel (slots 158+159).
-//   spec: Docs/RE/specs/ui_system.md §8.10.1 — "[I] toggles slots 158+159 + sound 862020102".
-//
-// PASSIVE: reads ClientContext.ItemCatalogue for item names/icons; zero game logic.
-//   Drag/drop intent → use-case call (no local mutation).
-//   TODO(world-campaign): live inventory-contents event wiring.
 
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
@@ -37,92 +6,52 @@ using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
-/// <summary>
-///     In-game inventory bag (ItemPanel). 318×732 right-anchored; key-I toggles it.
-///     <para>
-///         PASSIVE: reads item catalogue for display; emits equip/move intents as use-case calls.
-///         Zero game logic — no validation, no optimistic state mutation.
-///     </para>
-///     spec: Docs/RE/specs/ui_hud_layout.md §1.1 / §5.3 CODE-CONFIRMED.
-///     spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5/40-cell grid CODE-CONFIRMED.
-/// </summary>
 public sealed partial class HudInventoryPanel : Control
 {
-    // -------------------------------------------------------------------------
-    // Spec-cited placement constants
-    // spec: Docs/RE/specs/ui_hud_layout.md §1.1 CODE-CONFIRMED
-    // -------------------------------------------------------------------------
 
-    private const float InvW = 318f; // spec: ui_hud_layout.md §1.1 — W=318 CODE-CONFIRMED
+    private const float InvW = 318f;
 
-    private const float InvH = 732f; // spec: ui_hud_layout.md §1.1 — H=732 CODE-CONFIRMED
-    // X = screen_width + 318 → off-screen right anchor until revealed.
-    // spec: ui_hud_layout.md §1.1 — "Anchor X = screen_width + 318 (right-anchored)"
+    private const float InvH = 732f;
 
-    // Item grid constants (CODE-CONFIRMED §8.10.1)
-    private const int GridCols = 8; // spec: ui_system.md §8.10.1 — 8 columns
-    private const int GridRows = 5; // spec: ui_system.md §8.10.1 — 5 rows = 40 cells
-    private const int CellSide = 38; // spec: ui_system.md §8.10.1 — 38×38 px, +38 pitch
-    private const int GridCellCount = GridCols * GridRows; // = 40
+    private const int GridCols = 8;
+    private const int GridRows = 5;
+    private const int CellSide = 38;
+    private const int GridCellCount = GridCols * GridRows;
 
-    private const int EquipCellCount = 20; // spec: ui_system.md §8.10.1 — equip sub-grid 20 cells
+    private const int EquipCellCount = 20;
 
-    // Action ids: main grid 0..39, equip 50..69.
-    private const int ActionIdEquipStart = 50; // spec: ui_system.md §8.10.1
+    private const int ActionIdEquipStart = 50;
 
-    // Chrome atlas
-    // spec: ui_system.md §8.6.1 — uitex 2 = data/ui/inventwindow.dds
-    private const int InvTexId = 2; // spec: ui_system.md §8.6.1
+    private const int InvTexId = 2;
     private readonly TextureRect[] _equipCells = new TextureRect[EquipCellCount];
 
-    // -------------------------------------------------------------------------
-    // Child controls
-    // -------------------------------------------------------------------------
 
     private readonly TextureRect[] _gridCells = new TextureRect[GridCellCount];
 
-    // -------------------------------------------------------------------------
-    // View state (not domain state)
-    // -------------------------------------------------------------------------
 
     private bool _visible;
 
-    // -------------------------------------------------------------------------
-    // Build (geometry pass)
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Geometry pass: builds the 318×732 right-anchored panel with the 8×5 item grid.
-    ///     Initially hidden (off-screen); revealed by key-I toggle.
-    ///     spec: Docs/RE/specs/ui_hud_layout.md §1.1 — "X=screen_width+318, Y=0, W=318, H=732".
-    ///     spec: Docs/RE/specs/ui_system.md §8.10.1 — ItemPanel 8×5 grid CODE-CONFIRMED.
-    /// </summary>
     public void Build(HudAtlasLibrary atlas, ClientContext ctx)
     {
         Name = "HudInventoryPanel";
 
-        // Right-anchored, off-screen until toggled.
-        // screen_width + 318 → AnchorLeft=1, OffsetLeft=+318 (past the right edge)
-        // spec: ui_hud_layout.md §1.1 CODE-CONFIRMED
         AnchorLeft = 1f;
         AnchorTop = 0f;
         AnchorRight = 1f;
         AnchorBottom = 0f;
-        OffsetLeft = InvW; // +318 beyond right edge → off-screen
+        OffsetLeft = InvW;
         OffsetTop = 0f;
-        OffsetRight = InvW + InvW; // +636
+        OffsetRight = InvW + InvW;
         OffsetBottom = InvH;
-        Visible = false; // hidden by default; key-I reveals it
+        Visible = false;
         MouseFilter = MouseFilterEnum.Stop;
 
-        // Load chrome texture (inventwindow.dds, uitex 2)
-        // spec: ui_system.md §8.6.1 — uitex 2 = data/ui/inventwindow.dds
         var chromeTex = atlas.GetById(InvTexId);
         if (chromeTex is null)
             GD.PrintErr("[HudInventoryPanel] inventwindow.dds (uitex 2) unavailable (VFS offline). " +
                         "spec: Docs/RE/specs/ui_system.md §8.6.1.");
 
-        // Window backdrop (318×732 background)
         var backdrop = new Panel { Name = "Backdrop" };
         backdrop.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
         var bdStyle = new StyleBoxFlat();
@@ -132,7 +61,6 @@ public sealed partial class HudInventoryPanel : Control
         backdrop.AddThemeStyleboxOverride("panel", bdStyle);
         AddChild(backdrop);
 
-        // Chrome overlay from inventwindow.dds
         if (chromeTex is not null)
         {
             var chrome = new TextureRect
@@ -146,11 +74,10 @@ public sealed partial class HudInventoryPanel : Control
             AddChild(chrome);
         }
 
-        // Title label
         var titleLbl = new Label
         {
             Name = "TitleLabel",
-            Text = "인벤토리", // CP949 — "Inventory" (will be replaced by msg.xdb if available)
+            Text = "인벤토리",
             HorizontalAlignment = HorizontalAlignment.Center,
             MouseFilter = MouseFilterEnum.Ignore
         };
@@ -158,20 +85,13 @@ public sealed partial class HudInventoryPanel : Control
         titleLbl.OffsetBottom = 30f;
         AddChild(titleLbl);
 
-        // 8×5 item grid — 40 cells, 38×38 each, flush +38 pitch
-        // spec: ui_system.md §8.10.1 CODE-CONFIRMED — "8×5=40 cells, 38×38 px, +38 pitch, action 0..39"
-        const int GridStartX = 8; // modest inset
-        const int GridStartY = 36; // below header area
+        const int GridStartX = 8;
+        const int GridStartY = 36;
         BuildItemGrid(atlas, GridStartX, GridStartY);
 
-        // 20-cell equip sub-grid (action ids 50..69)
-        // spec: ui_system.md §8.10.1 CODE-CONFIRMED — "20 cells, 38×38, action ids 50..69"
-        // Placed below the main grid
         var equipStartY = GridStartY + GridRows * CellSide + 10;
         BuildEquipGrid(atlas, GridStartX, equipStartY);
 
-        // Equipment paperdoll placeholder (hand-placed per-slot; exact positions not recovered)
-        // spec: ui_system.md §8.10.1 — "hand-placed per-slot (x,y) coordinates"
         BuildPaperdoll(GridStartX, equipStartY + EquipCellCount / 4 * CellSide + 10);
 
         GD.Print("[HudInventoryPanel] Built — 318×732 right-anchored (off-screen). " +
@@ -182,7 +102,6 @@ public sealed partial class HudInventoryPanel : Control
 
     private void BuildItemGrid(HudAtlasLibrary atlas, int startX, int startY)
     {
-        // spec: ui_system.md §8.10.1 CODE-CONFIRMED — 8×5 main grid, 38×38 cells, +38 pitch
         for (var row = 0; row < GridRows; row++)
         for (var col = 0; col < GridCols; col++)
         {
@@ -199,18 +118,6 @@ public sealed partial class HudInventoryPanel : Control
                 MouseFilter = MouseFilterEnum.Stop
             };
 
-            // Cell background — dark with border.
-            // In the original client each 38×38 cell button draws its background from a
-            // sub-rect of inventwindow.dds (uitex 2); the exact (srcX, srcY, 38, 38) origin
-            // has NOT been recovered from the spec yet — the §8.10.1 description lists the
-            // full set of atlas ids used (uitex 2/14/69/71/78) but does not enumerate the
-            // per-element sub-rect coordinates.
-            // spec: Docs/RE/specs/ui_system.md §8.10.1 — "cells resolve texture handles by
-            //   uitex.txt id 2 (inventory body + cells), 14 (count/qty), 69/71/78 (glyphs)".
-            // TODO(spec): once the cell-bg sub-rect coordinates are recovered from the IDA
-            //   builder (the multi-layered cell construction site in the ItemPanel builder),
-            //   replace this StyleBoxFlat placeholder with:
-            //   atlas.SliceById(InvTexId, srcX, srcY, CellSide, CellSide)
             var cellPanel = new Panel { Name = "CellBg" };
             cellPanel.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
             var cs = new StyleBoxFlat();
@@ -227,7 +134,6 @@ public sealed partial class HudInventoryPanel : Control
 
     private void BuildEquipGrid(HudAtlasLibrary atlas, int startX, int startY)
     {
-        // spec: ui_system.md §8.10.1 CODE-CONFIRMED — equip sub-grid 20 cells, 38×38, action 50..69
         for (var i = 0; i < EquipCellCount; i++)
         {
             var col = i % GridCols;
@@ -260,10 +166,6 @@ public sealed partial class HudInventoryPanel : Control
 
     private void BuildPaperdoll(int x, int y)
     {
-        // spec: ui_system.md §8.10.1 — "hand-placed equipment paperdoll"
-        // Exact per-slot coordinates are NOT recovered (hand-placed = no uniform grid).
-        // This placeholder marks the paperdoll area.
-        // TODO(spec): recover per-slot paperdoll (x,y) positions from the builder.
         var paperdollPlaceholder = new Label
         {
             Name = "PaperdollPlaceholder",
@@ -275,44 +177,24 @@ public sealed partial class HudInventoryPanel : Control
         AddChild(paperdollPlaceholder);
     }
 
-    // -------------------------------------------------------------------------
-    // Hub binding
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Binds to the HUD event hub.
-    ///     TODO(world-campaign): wire inventory-contents events when the hub publishes them.
-    /// </summary>
     public void BindHub(IHudEventHub hub)
     {
-        // IHudEventHub does not yet expose an inventory-contents channel.
-        // TODO(world-campaign): add inventory event channel to IHudEventHub; drain here.
         GD.Print("[HudInventoryPanel] BindHub: inventory-contents event wiring deferred (TODO world-campaign).");
     }
 
-    // -------------------------------------------------------------------------
-    // Toggle
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Toggles the inventory panel visibility and slides it in/out.
-    ///     Called by HudMaster on key-I press.
-    ///     spec: ui_system.md §8.10.1 — "[I] toggles slots 158+159 (inventory+skill) together".
-    /// </summary>
     public void Toggle()
     {
         _visible = !_visible;
 
         if (_visible)
         {
-            // Slide in: move from off-screen (OffsetLeft=+318) to on-screen (OffsetLeft=−318).
-            // spec: ui_hud_layout.md §1.1 — "X=screen_width+318 (off-screen); reveal = X=screen_width−318"
             OffsetLeft = -InvW;
             OffsetRight = 0f;
         }
         else
         {
-            // Slide out back to off-screen position.
             OffsetLeft = InvW;
             OffsetRight = InvW + InvW;
         }

@@ -5,51 +5,8 @@ using MartialHeroes.Network.Abstractions.Session;
 
 namespace MartialHeroes.Network.Transport.Pipelines;
 
-/// <summary>
-///     Pure, socket-free framing logic.  Consumes a <see cref="System.IO.Pipelines.PipeReader" />
-///     and dispatches complete, length-prefixed frames to an <see cref="IFrameSink" />.
-/// </summary>
-/// <remarks>
-///     Framing spec: Docs/RE/opcodes.md — Wire frame header (+ Docs/RE/specs/crypto.md §2).
-///     <list type="bullet">
-///         <item>Header is 8 bytes, little-endian.</item>
-///         <item>
-///             Bytes +0..+3: u32 <c>size</c> = total frame length including the 8-byte header. The size
-///             field is a TRUE u32 (the u16-vs-u32 question is RESOLVED in favour of u32).
-///         </item>
-///         <item>Bytes +4..+5: u16 <c>major</c> opcode.</item>
-///         <item>Bytes +6..+7: u16 <c>minor</c> opcode.</item>
-///         <item>Bytes +8..: payload, (size - 8) bytes.</item>
-///     </list>
-///     A frame whose <c>size</c> field is less than <see cref="FramingConstants.HeaderSize" /> or
-///     greater than <see cref="FramingConstants.MaxFrameSize" /> is treated as a framing violation
-///     and the loop returns <see cref="FrameLoopResult.FramingError" />.
-///     <para>
-///         <b>Inbound decompression</b> (spec: Docs/RE/specs/crypto.md §5):
-///         The server→client path is compressed-only (no inverse byte cipher in this client build).
-///         When a <see cref="DecompressPayloadDelegate" /> is supplied to <see cref="RunAsync" />, each
-///         non-empty payload is LZ4-decompressed before being handed to the <see cref="IFrameSink" />.
-///         Header-only frames (zero-length payload) bypass decompression. The decompressed span
-///         satisfies the same zero-copy contract as the raw span: it must not outlive the
-///         <see cref="IFrameSink.OnFrame" /> call.
-///     </para>
-/// </remarks>
 internal static class FrameSplitter
 {
-    /// <summary>
-    ///     Reads frames from <paramref name="reader" /> until the pipe completes, is cancelled, or a
-    ///     framing error occurs.  For each complete frame, optionally decompresses the payload
-    ///     (spec: Docs/RE/specs/crypto.md §5 — inbound is compressed-only, no inverse cipher),
-    ///     then calls <see cref="IFrameSink.OnFrame" />.
-    /// </summary>
-    /// <remarks>
-    ///     The <paramref name="sink" /> receives the full frame bytes starting at offset 0 (i.e. the
-    ///     header is included). The packed opcode <c>(major &lt;&lt; 16 | minor)</c> is pre-computed here
-    ///     so the sink does not re-parse the header.  The span passed to <see cref="IFrameSink.OnFrame" />
-    ///     covers <b>payload only</b> (header stripped), consistent with the <see cref="IFrameSink" />
-    ///     contract. When <paramref name="decompress" /> is non-null the span covers the <i>decompressed</i>
-    ///     payload bytes.
-    /// </remarks>
     internal static async ValueTask<FrameLoopResult> RunAsync(
         PipeReader reader,
         SessionId sessionId,
@@ -66,7 +23,6 @@ internal static class FrameSplitter
             }
             catch (OperationCanceledException)
             {
-                // Cancellation is a clean exit.
                 return FrameLoopResult.Completed;
             }
 
@@ -75,37 +31,24 @@ internal static class FrameSplitter
             var examined = buffer.End;
             var framingError = false;
 
-            // Process as many complete frames as are currently buffered.
             while (TryParseFrameLength(buffer, out var frameLength))
             {
                 if (frameLength < FramingConstants.HeaderSize
                     || frameLength > FramingConstants.MaxFrameSize)
                 {
-                    // spec: Docs/RE/opcodes.md (size is a u32 incl. the 8-byte header) +
-                    // crypto.md §3/§5 (sanity bound = 8 + 0x2DA0 inbound LZ4 capacity); any value
-                    // outside [HeaderSize, MaxFrameSize] is illegal.
                     framingError = true;
                     break;
                 }
 
                 if (buffer.Length < frameLength)
-                    // We know how large the frame will be but don't have all the bytes yet.
-                    // Leave `examined` at buffer.End so the next ReadAsync waits for more data;
-                    // do NOT advance `consumed` past the incomplete frame.
                     break;
 
-                // We have a complete frame in the buffer.
                 var frameSeq = buffer.Slice(buffer.Start, frameLength);
 
-                // Parse opcode from header.
-                // spec: Docs/RE/opcodes.md — major at +4 (u16 LE), minor at +6 (u16 LE).
                 var packedOpcode = ReadPackedOpcode(frameSeq);
 
-                // Dispatch payload (header stripped, optionally decompressed) to sink.
-                // IFrameSink contract: span is only valid during the call.
                 DispatchFrame(frameSeq, sessionId, packedOpcode, sink, decompress);
 
-                // Advance past the frame we just consumed.
                 consumed = frameSeq.End;
                 examined = consumed;
                 buffer = buffer.Slice(consumed);
@@ -119,14 +62,6 @@ internal static class FrameSplitter
         }
     }
 
-    /// <summary>
-    ///     Attempts to read the u32 total-frame-size field from the front of <paramref name="buffer" />.
-    ///     Returns <see langword="false" /> (and leaves <paramref name="frameLength" /> at 0) when fewer
-    ///     than <see cref="FramingConstants.HeaderSize" /> bytes are available — the prefix is split
-    ///     across reads.
-    ///     spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — "Offset +0, Width 4 bytes (u32, LE),
-    ///     total frame size."
-    /// </summary>
     private static bool TryParseFrameLength(ReadOnlySequence<byte> buffer, out int frameLength)
     {
         if (buffer.Length < FramingConstants.HeaderSize)
@@ -135,34 +70,22 @@ internal static class FrameSplitter
             return false;
         }
 
-        // Use SequenceReader for zero-alloc prefix parsing across segment boundaries.
         var seqReader = new SequenceReader<byte>(buffer);
-        // spec: Docs/RE/opcodes.md + Docs/RE/specs/crypto.md §2 — size field at +0, u32, little-endian.
         if (!seqReader.TryReadLittleEndian(out int rawSize))
         {
             frameLength = 0;
             return false;
         }
 
-        // Reinterpret as the unsigned 32-bit wire value, then clamp into int so an out-of-range
-        // (e.g. > int.MaxValue) frame size resolves to a value the caller's MaxFrameSize bound
-        // rejects rather than wrapping negative. spec: crypto.md §3/§5 — sanity-bounded by MaxFrameSize.
         var sizeU32 = (uint)rawSize;
         frameLength = sizeU32 > int.MaxValue ? int.MaxValue : (int)sizeU32;
         return true;
     }
 
-    /// <summary>
-    ///     Reads major/minor opcodes from a <see cref="ReadOnlySequence{T}" /> that is guaranteed to
-    ///     contain at least <see cref="FramingConstants.HeaderSize" /> bytes.
-    ///     spec: Docs/RE/opcodes.md — major at +4 (u16 LE), minor at +6 (u16 LE).
-    ///     Packed opcode = (major &lt;&lt; 16) | minor.
-    /// </summary>
     private static uint ReadPackedOpcode(ReadOnlySequence<byte> frameSeq)
     {
         var seqReader = new SequenceReader<byte>(frameSeq);
-        // Skip to +4 (past the u32 size field at +0..+3).
-        seqReader.Advance(FramingConstants.MajorOpcodeOffset); // advance 4 bytes
+        seqReader.Advance(FramingConstants.MajorOpcodeOffset);
 
         seqReader.TryReadLittleEndian(out short rawMajor);
         seqReader.TryReadLittleEndian(out short rawMinor);
@@ -172,23 +95,6 @@ internal static class FrameSplitter
         return ((uint)major << 16) | minor;
     }
 
-    /// <summary>
-    ///     Dispatches the payload portion of <paramref name="frameSeq" /> to <paramref name="sink" />,
-    ///     optionally running LZ4 decompression before dispatch.
-    /// </summary>
-    /// <remarks>
-    ///     <para>
-    ///         Inbound decompression path (spec: Docs/RE/specs/crypto.md §5):
-    ///         The server→client inbound path is <b>compressed-only</b> in this client build — there is
-    ///         no inverse byte cipher call on the receive path. When <paramref name="decompress" /> is
-    ///         non-null, every non-empty payload is decompressed before <see cref="IFrameSink.OnFrame" />
-    ///         is called. The decompressed span is valid only for the duration of the call.
-    ///     </para>
-    ///     <para>
-    ///         Avoids a heap allocation when the sequence is already contiguous; rents a pooled bounce
-    ///         buffer only when the frame straddles two or more pipe segments.
-    ///     </para>
-    /// </remarks>
     private static void DispatchFrame(
         ReadOnlySequence<byte> frameSeq,
         SessionId sessionId,
@@ -196,22 +102,16 @@ internal static class FrameSplitter
         IFrameSink sink,
         InboundDecompressDelegate? decompress)
     {
-        // Payload starts after the 8-byte header.
-        // spec: Docs/RE/opcodes.md — "Bytes +8..: payload".
         var payloadSeq = frameSeq.Slice(FramingConstants.HeaderSize);
 
         if (payloadSeq.IsEmpty)
         {
-            // Header-only frame (e.g. keepalive): bypass decompression.
-            // spec: Docs/RE/specs/crypto.md §2 — header-only packets are pass-through.
             sink.OnFrame(sessionId, packedOpcode, ReadOnlySpan<byte>.Empty);
             return;
         }
 
         if (decompress is not null)
         {
-            // Decompression path: materialise the payload into a contiguous span, decompress,
-            // dispatch the decompressed bytes, then release both rentals.
             var rawPayload = GetContiguousPayload(payloadSeq, out var rawRented);
             try
             {
@@ -226,15 +126,12 @@ internal static class FrameSplitter
             return;
         }
 
-        // No decompression — raw payload fast path.
         if (payloadSeq.IsSingleSegment)
         {
-            // Zero-copy fast path: the payload is already contiguous in the pipe buffer.
             sink.OnFrame(sessionId, packedOpcode, payloadSeq.FirstSpan);
             return;
         }
 
-        // Multi-segment slow path: copy into a pooled bounce buffer.
         var rented = ArrayPool<byte>.Shared.Rent((int)payloadSeq.Length);
         try
         {
@@ -247,12 +144,6 @@ internal static class FrameSplitter
         }
     }
 
-    /// <summary>
-    ///     Returns a contiguous <see cref="ReadOnlySpan{T}" /> over the payload sequence.
-    ///     When the sequence is already single-segment, returns <see cref="ReadOnlySequence{T}.FirstSpan" />
-    ///     directly with <paramref name="rented" /> set to <see langword="null" />.
-    ///     When the sequence spans multiple segments, copies into a rented array (caller must return).
-    /// </summary>
     private static ReadOnlySpan<byte> GetContiguousPayload(
         ReadOnlySequence<byte> payloadSeq,
         out byte[]? rented)
@@ -269,15 +160,10 @@ internal static class FrameSplitter
         return rented.AsSpan(0, length);
     }
 
-    /// <summary>
-    ///     Outcome of a single <see cref="RunAsync" /> invocation.
-    /// </summary>
     internal enum FrameLoopResult
     {
-        /// <summary>The pipe was completed cleanly (remote EOF or local cancel).</summary>
         Completed,
 
-        /// <summary>A malformed or oversized frame was detected.</summary>
         FramingError
     }
 }

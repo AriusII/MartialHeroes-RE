@@ -7,210 +7,55 @@ using Array = Godot.Collections.Array;
 
 namespace MartialHeroes.Client.Godot.World;
 
-// =============================================================================
-// EffectRenderer — real .xeff-driven visual effect renderer
-// =============================================================================
-//
-// CAMPAIGN 5 rewrite: replaces the placeholder GpuParticles3D sphere-burst with real
-// per-keyframe billboard/mesh geometry driven directly from parsed .xeff descriptors.
-//
-// Architecture overview
-// ─────────────────────
-// • On PlayCast(actor, effectId), this node tries to load and parse the .xeff file from
-//   the VFS using RealClientAssets (if available).  On parse success it creates a
-//   LiveXeffEffect that ticks per-frame in _Process.
-// • On StopCast(actor), the live effect is soft-stopped (active flag cleared) and removed
-//   on the following frame — matching the original runtime semantics.
-//   spec: Docs/RE/specs/effects.md §15.5 — soft-stop; CODE-CONFIRMED.
-// • If the VFS is absent, the .xeff file is missing, or parsing fails, no effect is rendered
-//   (no-placeholder doctrine; see PlayCast implementation).
-//
-// Parser note
-// ────────────────────────────────────────
-// XeffParser.cs (layer 03, Assets.Parsers) implements the corrected 8-byte header spec:
-// effect_id u32 + sub_effect_count u32; block 0 starts at offset 0x08.
-//   spec: Docs/RE/formats/effects.md §A.2 — header 8 bytes (CORRECTED 2026-06-14); VERIFIED.
-//   spec: Docs/RE/formats/effects.md §A.14 — XEFF_HEADER_SIZE = 8.
-// EffectRenderer calls XeffParser.ParseXeff() and maps XeffData/XeffSubEffect/XeffKeyframe
-// into SubEffectDesc (a thin presentation view-model).  The former XeffMiniParser private
-// class has been removed — XeffParser is the single byte-level .xeff parsing point.
-//
-// Effect resolution chain (§F hook)
-// ──────────────────────────────────
-// The spec documents three link tables in data/effect/:
-//   xeffect.lst      — name→file manifest (§A.9 / §A.14: XEFF_LST_NAME_LEN = 30)
-//   totalmugong.txt  — skill cast-channel sound overlay (§3/§13)
-//   itemjointeff.txt — item joint-effect binding (§3/§9.3)
-//   mobjointeff.txt  — mob joint-effect binding (§3/§9.3)
-//   spec: Docs/RE/specs/effects.md §3 — boot sequence; CODE-CONFIRMED.
-//   spec: Docs/RE/formats/effects.md §A.9 / §F — xeffect.lst + binding tables.
-// Resolution strategy: the runtime resolves a .xeff ONLY through the xeffect.lst registry keyed by raw
-// effect_id (built at bind time). The original has NO numeric-name sprintf path (spec §C.2 Option A
-// REJECTED), so a registry miss renders nothing — no direct {effectId}.xeff probe.
-//   spec: Docs/RE/formats/effects.md §C.2 — "registry is the sole resolver; no numeric-name path in binary".
-//
-// Emitter types rendered
-// ──────────────────────
-// type 0 — Billboard (camera-facing quad); half-extents = ±0.5·size against the camera basis.
-//   spec: Docs/RE/specs/effects.md §17.2 — billboard; CONFIRMED.
-//   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_BILLBOARD = 0; CONFIRMED.
-//   IDA: sub_4A5E0D v29==0 @0x4a610d — corners at ±0.5·size vs Matrix4_CopyClearTranslation (camera basis).
-// type 1 — Mesh-particle; per-vertex transform PLUS a fixed +90° Y pre-rotation.
-//   spec: Docs/RE/specs/effects.md §17.2 — mesh-particle; CONFIRMED.
-//   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED.
-//   FIX 14b — IDA: sub_4A5E0D v29==1 @0x4a62ae — Quat_SetYawRotationFromAngle(a2, 1.5707964) (+90° Y)
-//     then the per-vertex mesh transform loop. The +90° Y belongs HERE, not to type 2.
-// type 2 — Oriented mesh; per-vertex transform with NO yaw pre-rotation.
-//   spec: Docs/RE/specs/effects.md §17.2 — oriented mesh; CONFIRMED.
-//   spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
-//   FIX 14b — IDA: sub_4A5E0D v29>=2 @0x4a64be — mesh vertex loop with NO Quat_SetYawRotationFromAngle.
-// GPU-particle (resource_id >= 10000): driven by GpuParticleSimNode (stepwise Euler integration).
-//   spec: Docs/RE/specs/effects.md §17.2 — resource_id >= 10000 → GPU particle; CONFIRMED.
-//   spec: Docs/RE/formats/effects.md §A.14 — XEFF_RESOURCE_PARTICLE_THRESHOLD = 10000; CONFIRMED.
-//
-// Keyframe sampling
-// ─────────────────
-//   i = floor(elapsed_ms / anim_stride_ms)         — frame index
-//   frac = (elapsed_ms mod anim_stride_ms) / anim_stride_ms  — interpolation factor
-//   alpha = lerp(alpha[i], alpha[i+1], frac)       — linear
-//   size  = lerp(size[i],  size[i+1],  frac)       — linear (Vec3)
-//   (rotation slerp is approximated as nlerp for MVP; exact slerp needs Quaternion.Slerp)
-//   spec: Docs/RE/specs/effects.md §17.3 — piecewise-linear with slerp rotation; CONFIRMED.
-//   spec: Docs/RE/specs/effects.md §8.2 step 6 — keyframe interpolation; CODE-CONFIRMED.
-//
-// Alpha inversion
-// ───────────────
-// On-disk: file 0.0 = fully opaque, file 1.0 = fully transparent.
-// At load time the mini-parser applies: in_memory = 1.0 − file_value.
-//   spec: Docs/RE/formats/effects.md §A.6 — alpha inversion; CONFIRMED.
-//
-// Threading
-// ─────────
-// All Node mutations are on the Godot main thread (_Process / CallDeferred).
-// VFS loads happen synchronously in PlayCast (main thread, one-off on cast start).
-//
-// spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — strictly passive.
-// spec: Docs/RE/specs/effects.md §15 — skill-cast effect chain.
 
-/// <summary>
-///     Spawns and tears-down actor-anchored .xeff-driven visual effects in response to cast
-///     lifecycle events.  When the VFS is absent or the .xeff cannot be parsed the effect is
-///     silent (no synthetic placeholder — the no-placeholder doctrine; spec: effects.md §17.2).
-///     Lifecycle driven by action codes from the network:
-///     0xC8 = cast-enable  → PlayCast(actor, effectId)  — starts a looping effect
-///     0xC9 = cast-disable → StopCast(actor)             — soft-stops the running effect
-///     0xCB = secondary disable → StopCast(actor)        — same teardown
-///     spec: Docs/RE/specs/effects.md §15.3 — action codes 0xC8/0xC9/0xCB; CODE-CONFIRMED.
-/// </summary>
 public sealed partial class EffectRenderer : Node3D
 {
-    // ─────────────────────────────────────────────────────────────────────────
-    // Constants from spec
-    // ─────────────────────────────────────────────────────────────────────────
 
-    // Resource id threshold: below this → CPU mesh; at or above → GPU particle.
-    // spec: Docs/RE/formats/effects.md §A.14 — XEFF_RESOURCE_PARTICLE_THRESHOLD = 10000; CONFIRMED.
     private const uint XeffResourceParticleThreshold = 10000;
 
-    // emitter_type enum values.
-    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_BILLBOARD = 0; CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_MESH = 1; CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.12 — XEFF_EMITTER_DIRECTIONAL = 2; CONFIRMED.
-    // FIX 14b — emitter-type dispatch corrected to match sub_4A5E0D (switch on v29 = *element):
-    //   v29==0 @0x4a610d → camera-facing billboard (corners at ±0.5*size against the camera basis).
-    //   v29==1 @0x4a62ae → mesh-particle WITH +90° Y pre-rotation (Quat_SetYawRotationFromAngle 1.5707964).
-    //   v29>=2 @0x4a64be → oriented mesh, NO yaw pre-rotation.
-    // i.e. the +90° Y belongs to emitter_type 1 (mesh), NOT type 2 (directional/oriented).
     private const uint EmitterBillboard = 0;
     private const uint EmitterMesh = 1;
     private const uint EmitterDirectional = 2;
 
-    // UV scroll loop period in milliseconds.
-    // spec: Docs/RE/formats/effects.md §A.14 — XEFF_UV_SCROLL_PERIOD_MS = 5000; CONFIRMED.
     private const float UvScrollPeriodMs = 5000f;
 
-    // Actor height lift applied to the emitter origin (actor-anchored effects sit at body/feet).
-    // spec: Docs/RE/specs/effects.md §15.4 — "effect origin follows the caster's world position"; CODE-CONFIRMED.
-    // Aesthetic: 0.9 world units lifts from feet to approximate waist height.
     private const float EmitterHeightOffset = 0.9f;
 
-    // VFS path for the xeffect manifest.
-    // spec: Docs/RE/formats/effects.md §A.9 — "data/effect/xeffect.lst".
-    private const string XeffectLstPath = "data/effect/xeffect.lst"; // spec: Docs/RE/formats/effects.md §A.9
+    private const string XeffectLstPath = "data/effect/xeffect.lst";
 
-    // Bytes per name record in xeffect.lst.
-    // spec: Docs/RE/formats/effects.md §A.14 — XEFF_LST_NAME_LEN = 30 (0x1E).
-    private const int XeffLstNameLen = 30; // spec: Docs/RE/formats/effects.md §A.14 XEFF_LST_NAME_LEN = 30
+    private const int XeffLstNameLen = 30;
 
-    // VFS path for the GPU-particle emitter descriptor table.
-    // spec: Docs/RE/formats/effects.md §E.1 — "data/effect/particle/particleEmitter.eff": CONFIRMED.
-    // VFS-lowercased to "particleemitter.eff" by the VFS layer.
     private const string ParticleEmitterEffPath = "data/effect/particle/particleemitter.eff";
 
-    // ActorKey → live effect (at most one per actor, as per spec looping UserXEffect).
-    // spec: Docs/RE/specs/effects.md §15.4 — one looping UserXEffect per cast; CODE-CONFIRMED.
     private readonly Dictionary<ActorKey, LiveEffect> _live = new();
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Asset access
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    ///     VFS access (null when the real client directory is not present).
-    ///     Populated in _Ready or Bind().  Disposed with EffectRenderer.
-    /// </summary>
     private RealClientAssets? _assets;
 
     private CancellationTokenSource? _cts;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Effect registry — effect_id → vfs path (keyed by header first u32)
-    // ─────────────────────────────────────────────────────────────────────────
 
-    // Registry populated lazily on first TryLoadXeff call (or eagerly in _Ready when VFS available).
-    // Keys are raw effect_id values (first u32 of .xeff header, NOT filenames).
-    // Values are VFS paths: "data/effect/xeff/<name>" (NUL-trimmed, CP949 name from xeffect.lst).
-    // spec: Docs/RE/formats/effects.md §C.2 — runtime registry keyed by RAW effect_id; CONFIRMED.
-    // spec: Docs/RE/formats/effects.md §A.9 — xeffect.lst = u32 count + count × char[30] CP949 name.
-    // spec: Docs/RE/specs/effects.md §15.1 — resolve cast_effect_id through registry; CODE-CONFIRMED.
     private Dictionary<uint, string>? _effectRegistry;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // HUD hub subscription
-    // ─────────────────────────────────────────────────────────────────────────
 
     private IHudEventHub? _hub;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GPU-particle emitter descriptor table (particleEmitter.eff)
-    // ─────────────────────────────────────────────────────────────────────────
 
-    // Loaded lazily on first GPU-particle sub-effect spawn. Null = not yet loaded or VFS absent.
-    // spec: Docs/RE/formats/effects.md §E.1 — data/effect/particle/particleEmitter.eff: CONFIRMED.
     private ParticleEmitterTable? _particleEmitterTable;
 
-    // Whether the table load has been attempted (prevents repeated VFS reads on miss).
     private bool _particleEmitterTableAttempted;
 
-    // Whether the registry build has been attempted (prevents repeated failures).
     private bool _registryBuildAttempted;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Godot lifecycle
-    // ─────────────────────────────────────────────────────────────────────────
 
     public override void _Ready()
     {
         GD.Print("[EffectRenderer] _Ready.");
 
-        // Open VFS access if real client assets are available.
         _assets = RealClientAssets.TryOpen();
         if (_assets is not null)
         {
             GD.Print("[EffectRenderer] VFS available — real .xeff loading enabled.");
-            // Build the effect registry eagerly at boot from xeffect.lst.
-            // spec: Docs/RE/formats/effects.md §C.2 — registry keyed by RAW effect_id; CONFIRMED.
-            // spec: Docs/RE/specs/effects.md §3 step 3 — manifest loaded at boot; CODE-CONFIRMED.
             BuildEffectRegistry(_assets);
         }
         else
@@ -219,26 +64,17 @@ public sealed partial class EffectRenderer : Node3D
         }
     }
 
-    /// <summary>
-    ///     Per-frame tick: update all live .xeff effects (keyframe animation, billboard rebuild).
-    ///     Also drains the CombatTexts channel from the hub.
-    ///     All Node mutations happen on the main thread here.
-    ///     spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation — drain channels each frame.
-    /// </summary>
     public override void _Process(double delta)
     {
-        // Drain CombatTexts channel (non-blocking TryRead loop).
         if (_hub is not null)
         {
             var reader = _hub.CombatTexts;
             while (reader.TryRead(out var ev))
-                _ = ev; // FUTURE-HOOK: forward to floating combat-text sub-node
+                _ = ev;
         }
 
-        // Advance and rebuild all live .xeff effects.
         var deltaMs = delta * 1000.0;
 
-        // Collect expired keys so we can remove them after iteration.
         List<ActorKey>? toRemove = null;
         foreach (var kv in _live)
         {
@@ -250,10 +86,8 @@ public sealed partial class EffectRenderer : Node3D
                 continue;
             }
 
-            // Advance elapsed time.
             live.ElapsedMs += deltaMs;
 
-            // Update mesh positions to follow the anchor actor; advance GPU particle sims.
             if (live.SubEffects is { } subEffects) TickXeffEffect(live, subEffects, deltaMs);
         }
 
@@ -271,14 +105,7 @@ public sealed partial class EffectRenderer : Node3D
         _assets = null;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Public API — Bind
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    ///     Binds this renderer to the application <see cref="IHudEventHub" />.
-    ///     Must be called on the Godot main thread.
-    /// </summary>
     public void Bind(IHudEventHub hub)
     {
         ArgumentNullException.ThrowIfNull(hub);
@@ -287,9 +114,6 @@ public sealed partial class EffectRenderer : Node3D
         GD.Print("[EffectRenderer] Hub bound. Subscribed to CombatTexts channel.");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Teardown helpers (used by Caster partial and lifecycle)
-    // ─────────────────────────────────────────────────────────────────────────
 
     private void ClearAllEffects()
     {
@@ -298,161 +122,85 @@ public sealed partial class EffectRenderer : Node3D
         _live.Clear();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Actor key resolution
-    // ─────────────────────────────────────────────────────────────────────────
 
     private static ActorKey ResolveActorKey(Node3D actor)
     {
         if (actor is VisualActor va)
             return va.ActorKey;
 
-        // Fallback: use the Godot instance id as a synthetic raw id.
         var instanceId = actor.GetInstanceId();
         return new ActorKey((uint)(instanceId & 0xFFFF_FFFF), default);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Parsed sub-effect descriptor (owned by this layer only — not in layer 03)
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    ///     Presentation view-model for one sub-effect element, populated from
-    ///     <see cref="XeffSubEffect" /> (layer-03 shared parser output).
-    ///     Contains only the fields consumed by EffectRenderer at runtime.
-    ///     Alpha in AlphaKeys is already un-inverted: 0=transparent, 1=opaque.
-    ///     TotalTime, ScrollU, ScrollV are derived values computed at mapping time.
-    ///     spec: Docs/RE/formats/effects.md §A.4 — sub-effect block structure; CONFIRMED.
-    ///     spec: Docs/RE/formats/effects.md §A.6 — alpha inversion (applied at mapping boundary); CONFIRMED.
-    /// </summary>
     internal sealed class SubEffectDesc
     {
-        // Alpha curve (already un-inverted: 0=transparent, 1=opaque after parse).
-        // spec: Docs/RE/formats/effects.md §A.6 — stored as 1.0 − opacity; CONFIRMED.
         public float[] AlphaKeys = [];
-        public uint AnimBaseTime; // ms base offset
-        public uint AnimFlag; // bool: animated path enabled
+        public uint AnimBaseTime;
+        public uint AnimFlag;
 
-        // Track header.
-        // spec: Docs/RE/formats/effects.md §A.4.3 — track header (13 bytes fixed); CONFIRMED.
-        public byte AnimLoop; // non-zero = animated
-        public uint AnimStride; // ms per keyframe frame
+        public byte AnimLoop;
+        public uint AnimStride;
         public float[] DiffuseB = [];
         public float[] DiffuseG = [];
 
-        // Per-keyframe diffuse-RGB tint curve (NOT a scale). Assembled R/G/B-per-key by the
-        // layer-03 parser (curve passes 2/3/4 → R/G/B). Sampled linearly per-frame; default 1.0
-        // (white) when a curve is empty. Fed into the billboard vertex Color and the material
-        // AlbedoColor — this is the warm-brazier / blue-waterfall tint.
-        // spec: Docs/RE/specs/effects.md §17.3 — "The colour channel is a per-keyframe diffuse
-        //       tint, not a scale"; assembled R/G/B order; defaults to (1,1,1); CONFIRMED.
-        // spec: Docs/RE/formats/effects.md §A.4.2 — curve passes 2/3/4 = per-keyframe diffuse R/G/B.
         public float[] DiffuseR = [];
 
-        // spec: Docs/RE/formats/effects.md §A.4.0 — element fixed head (24 bytes on disk).
-        public uint EmitterType; // 0=billboard, 1=mesh, 2=directional
+        public uint EmitterType;
 
-        // Keyframes.
-        // spec: Docs/RE/formats/effects.md §A.4.4 — keyframe 9-float layout; CONFIRMED.
         public XeffKeyframe[] Keyframes = [];
-        public uint ResourceId; // < 10000 CPU mesh; >= 10000 GPU particle
+        public uint ResourceId;
 
-        // UV-scroll flags from low byte of TexCount.
-        // spec: Docs/RE/formats/effects.md §A.13 — bit 0 = scroll U, bit 1 = scroll V; MEDIUM.
         public bool ScrollU;
         public bool ScrollV;
-        public uint TexCount; // number of keyframes (also frames alias)
+        public uint TexCount;
 
-        // Texture names (resolved to data/effect/texture/<name>.tga).
-        // spec: Docs/RE/formats/effects.md §A.4.1 — name table entry_count × 64 bytes; CONFIRMED.
         public string[] TextureNames = [];
 
-        // Derived total time (ms).
-        // spec: Docs/RE/formats/effects.md §A.4.3 — total_time = tex_count × anim_stride + anim_base_time; CONFIRMED.
         public uint TotalTime;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Live effect state
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    ///     View-state record for one live effect (real .xeff or placeholder fallback).
-    /// </summary>
     private sealed class LiveEffect
     {
-        public bool Active = true; // cleared by soft-stop
+        public bool Active = true;
 
-        public Node3D Anchor = null!; // the actor node being followed
-
-        // FIX 15a — when true, Anchor is a static Node3D the renderer created for a map ambient effect
-        // (position-anchored, NOT actor-anchored) and owns; StopAmbient QueueFrees it. Cast effects
-        // anchor to an externally-owned actor node and leave this false.
         public bool AmbientAnchorOwned;
 
-        // Shared fields (both real and placeholder).
-        public uint EffectId;
-        public double ElapsedMs; // running elapsed time in ms
+        public Node3D Anchor = null!;
 
-        // Legacy GpuParticles3D slot — superseded by GpuParticleSimNode; kept for null-safe
-        // teardown compat in EmitterRenderer and KeyframeAnimator (always null, never assigned).
-        // spec: Docs/RE/specs/effects.md §17.2 — GPU particle now via GpuParticleSimNode; CONFIRMED.
+        public uint EffectId;
+        public double ElapsedMs;
+
 #pragma warning disable CS0649 // field always null; intentional (compat guard, never assigned)
         public GpuParticles3D?[]? GpuParticles;
 #pragma warning restore CS0649
 
-        // Per-sub-effect: one MeshInstance3D per rendered sub-effect.
-        // Null entries indicate GPU-particle sub-effects (handled by GpuParticleSimNode below).
         public MeshInstance3D?[]? MeshInstances;
 
-        // GPU particle simulation nodes (one per GPU-particle sub-effect).
-        // Indexed parallel to SubEffects/MeshInstances; non-null only for resource_id >= 10000.
         public GpuParticleSimNode?[]? SimNodes;
 
-        // Real .xeff path (null → using placeholder).
         public SubEffectDesc[]? SubEffects;
 
-        // Per-sub-effect loaded textures.
-        public ImageTexture?[][]? Textures; // [subEffectIdx][frameIdx]
+        public ImageTexture?[][]? Textures;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GPU particle simulation node (Euler integration per §E.2.2)
-    // ─────────────────────────────────────────────────────────────────────────
 
-    /// <summary>
-    ///     Godot Node3D that simulates one <see cref="ParticleEmitterEntry" /> entry via stepwise
-    ///     Euler integration (spec §E.2.2 / §E.2.4). Each particle's state is an in-memory float
-    ///     array; per fixed sim step (~67 ms per §E.2.2) position/velocity/size/colour are advanced
-    ///     then written to per-particle <see cref="MeshInstance3D" /> nodes in the scene tree.
-    ///     Designed to be a child of the <see cref="EffectRenderer" /> node; parented before
-    ///     <see cref="_Ready" /> is called on the renderer.
-    ///     Threading contract: all mutation on the Godot main thread via parent's _Process.
-    ///     spec: Docs/RE/formats/effects.md §E.2.2 — per-particle Euler integration: CODE-CONFIRMED.
-    ///     spec: Docs/RE/formats/effects.md §E.2.4 — global brightness alpha scale: CODE-CONFIRMED.
-    ///     spec: Docs/RE/specs/effects.md §11 — sim step ~67 ms.
-    /// </summary>
     internal sealed partial class GpuParticleSimNode : Node3D
     {
-        // Fixed simulation step in seconds (~67 ms = 15 Hz sim tick matching the original).
-        // spec: Docs/RE/specs/effects.md §11 — GPU particle sim step ~67 ms: CODE-CONFIRMED.
         private const double SimStepSec = 0.067;
 
-        // Global brightness alpha scale floor.
-        // spec: Docs/RE/formats/effects.md §E.2.4 — factor = 0.05 + 0.95 × (brightness/100): CODE-CONFIRMED.
-        // Default brightness = 100 → factor = 1.0 (no dimming at max brightness).
         private const float BrightnessAlphaFloor = 0.05f;
         private readonly float[] _colA;
         private readonly float[] _colB;
         private readonly float[] _colG;
         private readonly float[] _colR;
-        private readonly int[] _delayTick; // counts down from spawn_delay; particle active when 0
+        private readonly int[] _delayTick;
 
         private readonly ParticleEmitterEntry _entry;
-        private readonly int[] _lifeTick; // counts down from lifetime; respawns at 0
-        private readonly MeshInstance3D[] _meshes; // one billboard quad per particle
+        private readonly int[] _lifeTick;
+        private readonly MeshInstance3D[] _meshes;
 
-        // Per-particle mutable state arrays (indexed 0..numParticles-1).
         private readonly float[] _posX;
         private readonly float[] _posY;
         private readonly float[] _posZ;
@@ -462,7 +210,7 @@ public sealed partial class EffectRenderer : Node3D
         private readonly float[] _velY;
         private readonly float[] _velZ;
 
-        private double _accumSec; // elapsed time accumulator for fixed-step integration
+        private double _accumSec;
 
         internal GpuParticleSimNode(ParticleEmitterEntry entry, ImageTexture? texture)
         {
@@ -485,15 +233,12 @@ public sealed partial class EffectRenderer : Node3D
             _delayTick = new int[n];
             _meshes = new MeshInstance3D[n];
 
-            // Initialise each particle from its sub-record (spawn state).
-            // spec: Docs/RE/formats/effects.md §E.2.2 — at spawn copy size_init, RGBA, spawn_pos, velocity: CODE-CONFIRMED.
             for (var i = 0; i < n; i++)
                 SpawnParticle(i);
         }
 
         public override void _Ready()
         {
-            // Build one billboard-quad MeshInstance3D per particle and add as children.
             for (var i = 0; i < _meshes.Length; i++)
             {
                 var mi = BuildParticleMesh(i);
@@ -502,11 +247,6 @@ public sealed partial class EffectRenderer : Node3D
             }
         }
 
-        /// <summary>
-        ///     Advances the simulation by <paramref name="deltaSec" /> seconds, draining the
-        ///     fixed-step accumulator and updating all particle MeshInstance3D positions/colours.
-        ///     Called from EffectRenderer._Process on the Godot main thread.
-        /// </summary>
         public void Tick(double deltaSec)
         {
             _accumSec += deltaSec;
@@ -516,16 +256,13 @@ public sealed partial class EffectRenderer : Node3D
                 StepAll((float)SimStepSec);
             }
 
-            // Update mesh transforms / materials from current particle state (per-frame visual sync).
             UpdateMeshes();
         }
 
-        // ── Per-particle spawn init ────────────────────────────────────────────
 
         private void SpawnParticle(int i)
         {
             var sr = _entry.SubRecords[i];
-            // spec: Docs/RE/formats/effects.md §E.2.2 — spawn state from sub-record: CODE-CONFIRMED.
             _posX[i] = sr.SpawnPosX;
             _posY[i] = sr.SpawnPosY;
             _posZ[i] = sr.SpawnPosZ;
@@ -537,26 +274,21 @@ public sealed partial class EffectRenderer : Node3D
             _colG[i] = sr.ColorG;
             _colB[i] = sr.ColorB;
             _colA[i] = sr.ColorA;
-            // life_bonus added once at init.
-            // spec: Docs/RE/formats/effects.md §E.2.2 — life += life_bonus at init: CODE-CONFIRMED.
             _lifeTick[i] = sr.Lifetime + sr.LifeBonus;
             _delayTick[i] = sr.SpawnDelay;
         }
 
-        // ── Fixed-step Euler integration (§E.2.2) ─────────────────────────────
 
         private void StepAll(float dt)
         {
             for (var i = 0; i < _entry.NumFrames; i++)
             {
-                // Count down delay; particle is dormant while delay > 0.
                 if (_delayTick[i] > 0)
                 {
                     _delayTick[i]--;
                     continue;
                 }
 
-                // Count down lifetime; respawn on expiry.
                 if (_lifeTick[i] <= 0)
                 {
                     SpawnParticle(i);
@@ -567,8 +299,6 @@ public sealed partial class EffectRenderer : Node3D
 
                 var sr = _entry.SubRecords[i];
 
-                // Velocity damping (applied before position update when non-zero).
-                // spec: Docs/RE/formats/effects.md §E.2.2 — if velocity_damp ≠ 0: velocity *= damp: CODE-CONFIRMED.
                 if (sr.VelocityDamp != 0f)
                 {
                     _velX[i] *= sr.VelocityDamp;
@@ -576,34 +306,25 @@ public sealed partial class EffectRenderer : Node3D
                     _velZ[i] *= sr.VelocityDamp;
                 }
 
-                // Position integration: pos += vel × dt.
                 _posX[i] += _velX[i] * dt;
                 _posY[i] += _velY[i] * dt;
                 _posZ[i] += _velZ[i] * dt;
 
-                // Size rate: size += size_rate × dt.
                 _size[i] += sr.SizeRate * dt;
                 if (_size[i] < 0f) _size[i] = 0f;
 
-                // Colour rate integration: channel += rate × dt (signed i16 rates).
                 _colR[i] = Math.Clamp(_colR[i] + sr.ColorRRate * dt, 0f, 255f);
                 _colG[i] = Math.Clamp(_colG[i] + sr.ColorGRate * dt, 0f, 255f);
                 _colB[i] = Math.Clamp(_colB[i] + sr.ColorBRate * dt, 0f, 255f);
 
-                // Alpha rate + global brightness scale.
-                // spec: Docs/RE/formats/effects.md §E.2.4 — alpha scaled by brightness_factor each step: CODE-CONFIRMED.
                 var alpha = _colA[i] + sr.ColorARate * dt;
-                // Apply global brightness alpha scale (brightness=100 → factor=1.0).
-                // Aesthetic: use factor=1.0 (max brightness) — no user brightness option exposed yet.
-                // factor = 0.05 + 0.95 × (brightness/100). At 100 → 1.0 exactly.
                 var brightnessFactor =
-                    BrightnessAlphaFloor + (1f - BrightnessAlphaFloor) * 1.0f; // aesthetic: brightness=100
+                    BrightnessAlphaFloor + (1f - BrightnessAlphaFloor) * 1.0f;
                 alpha *= brightnessFactor;
                 _colA[i] = Math.Clamp(alpha, 0f, 255f);
             }
         }
 
-        // ── Visual update (post-step) ─────────────────────────────────────────
 
         private void UpdateMeshes()
         {
@@ -616,27 +337,12 @@ public sealed partial class EffectRenderer : Node3D
                 mi.Visible = !dormant;
                 if (dormant) continue;
 
-                // World position = emitter origin (this node's position) + spawn offset integrated so far.
-                // The spawn_pos is in emitter-local space; add to parent's world position.
                 mi.Position = new Vector3(_posX[i], _posY[i], _posZ[i]);
 
-                // FIX 14a — the per-particle size is the WORLD quad size, read directly.
-                // IDA: sub_62FC4A @0x62fc72 copies the i16 size_init straight into the per-particle
-                //   size float — (*(this+1))[3] = (float)*((__int16*)*this + 3) — with NO /65535
-                //   normalisation. The earlier '/ 65535f' divisor here was fabricated.
-                // IDA: sub_60C26C @0x60c311 (GParticleBuffer_fillVertices) uses the per-particle size
-                //   directly as the quad metric: v19 = *v7 * 0.5 (half-extent = size*0.5), where v7
-                //   points at the per-particle size float (a2+12, +20B stride). There is NO SpriteSize
-                //   multiply and NO /65535 anywhere in the fill loop, so the quad's full extent IS the
-                //   size and the half-extent is size*0.5. SpriteSizeX/Y are the base sprite dimensions
-                //   that feed size_init upstream, not an extra runtime multiplier — drop them here.
-                // Visibility floor: keep a minimum visible scale (aesthetic, not spec-dictated) so a
-                // near-zero integrated size does not collapse the quad to an invisible point.
                 var qw = MathF.Max(_size[i], 0.01f);
                 var qh = MathF.Max(_size[i], 0.01f);
                 mi.Scale = new Vector3(qw, qh, 1f);
 
-                // Per-particle colour update via material override.
                 if (mi.GetSurfaceOverrideMaterial(0) is StandardMaterial3D mat)
                     mat.AlbedoColor = new Color(
                         _colR[i] / 255f,
@@ -646,22 +352,12 @@ public sealed partial class EffectRenderer : Node3D
             }
         }
 
-        // ── Mesh builder ─────────────────────────────────────────────────────
 
         private MeshInstance3D BuildParticleMesh(int i)
         {
             var sr = _entry.SubRecords[i];
 
-            // FIX 14a — build a UNIT quad (half-extent 0.5, full width 1.0); the per-particle world
-            // size is applied at runtime via mi.Scale in UpdateMeshes (Scale = size → full quad = size,
-            // half-extent = size*0.5). This matches the binary exactly:
-            //   sub_62FC4A @0x62fc72 — i16 size_init copied directly to the per-particle size float,
-            //     NO /65535 (the former '/ 65535f' divisor was fabricated).
-            //   sub_60C26C @0x60c311 — half-extent = size*0.5 (v19 = *v7 * 0.5), size used directly,
-            //     no SpriteSize multiply and no /65535 in the fill loop.
-            // SpriteSizeX/Y are the base sprite dimensions feeding size_init upstream, not a runtime
-            // multiplier, so they are NOT applied to the quad metric here.
-            const float hw = 0.5f; // unit half-extent; runtime Scale = size
+            const float hw = 0.5f;
             const float hh = 0.5f;
 
             var arrays = new Array();
@@ -702,9 +398,8 @@ public sealed partial class EffectRenderer : Node3D
             var mi = new MeshInstance3D();
             mi.Mesh = mesh;
             mi.SetSurfaceOverrideMaterial(0, mat);
-            // Initial local position = spawn_pos offset.
             mi.Position = new Vector3(sr.SpawnPosX, sr.SpawnPosY, sr.SpawnPosZ);
-            mi.Visible = sr.SpawnDelay == 0; // dormant if delay > 0
+            mi.Visible = sr.SpawnDelay == 0;
             return mi;
         }
     }

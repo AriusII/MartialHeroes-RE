@@ -6,83 +6,35 @@ using MartialHeroes.Assets.Parsers.Texture.Models;
 
 namespace MartialHeroes.Assets.Mapping;
 
-/// <summary>
-///     Converts a <see cref="TextureDescriptor" /> (whose payload is a DDS or raw RGBA8 buffer)
-///     to a PNG byte stream.
-///     Supported DDS surface formats (detected from the DDPF flags / fourCC in the DDS header):
-///     DXT1 (BC1) — fully implemented (opaque and 1-bit alpha).
-///     DXT3 (BC2) — partially implemented: alpha block decoded, colour block shared with DXT1 path.
-///     DXT5 (BC3) — partially implemented: alpha block interpolated, colour block shared with DXT1 path.
-///     Uncompressed RGBA8 (DDPF_RGBA, 32-bit) — pass-through decode.
-///     DDS header layout sourced from the public DirectDraw Surface (DDS) file specification
-///     (Microsoft Learn "DDS File Layout" / DXGI SDK docs), which is an open published format.
-///     No proprietary game-specific knowledge is used here.
-///     PNG output:
-///     Hand-rolled minimal PNG (IHDR + IDAT + IEND).
-///     IDAT payload is zlib-wrapped Deflate via <see cref="ZLibStream" /> (BCL).
-///     CRC32 computed inline (ISO 3309 / ITU-T V.42 polynomial 0xEDB88320).
-///     Color type 6 (RGBA, 8-bit channels).
-///     No ancillary chunks (no gAMA, no tEXt, etc.) to keep output minimal and deterministic.
-///     PNG spec: ISO/IEC 15948:2004 / libpng-manual §4 File Structure.
-/// </summary>
 public static class PngConverter
 {
-    // -------------------------------------------------------------------------
-    // DDS header constants
-    // Source: public Microsoft DDS documentation (not game-specific).
-    // -------------------------------------------------------------------------
 
-    /// <summary>DDS magic bytes: ASCII "DDS " = 0x20534444 LE. Public DDS spec §DDS_HEADER.</summary>
     private const uint DdsMagic = 0x20534444u;
 
-    // DDS pixel format flags (DDPF_*). Public DDS spec §DDPIXELFORMAT.dwFlags.
     private const uint DdpfFourCC = 0x00000004u;
     private const uint DdpfRgb = 0x00000040u;
     private const uint DdpfAlphaPixels = 0x00000001u;
 
-    // DDS_HEADER size = 124 bytes. Public DDS spec §DDS_HEADER.dwSize.
     private const int DdsHeaderSize = 124;
 
-    // DDS file starts with 4-byte magic, then 124-byte header.
-    private const int DdsDataOffset = 4 + DdsHeaderSize; // 128
+    private const int DdsDataOffset = 4 + DdsHeaderSize;
 
-    // Color type 6 = RGBA (4 channels, 8 bits each). PNG spec §4.1.2 "Color types".
     private const byte PngColorTypeRgba = 6;
 
-    // Filter type 0 = None. PNG spec §9.2 "Filter types for filter method 0".
     private const byte PngFilterNone = 0;
 
-    // Common FourCC codes. Public DDS spec §DDPIXELFORMAT.dwFourCC.
     private static readonly uint FourCcDxt1 = FourCC('D', 'X', 'T', '1');
     private static readonly uint FourCcDxt3 = FourCC('D', 'X', 'T', '3');
     private static readonly uint FourCcDxt5 = FourCC('D', 'X', 'T', '5');
 
-    // -------------------------------------------------------------------------
-    // CRC-32 — ISO 3309 / ITU-T V.42, polynomial 0xEDB88320 (reflected).
-    // PNG spec §5.3 cites ISO 3309. The table approach is the standard implementation.
-    // -------------------------------------------------------------------------
 
     private static readonly uint[] Crc32Table = BuildCrc32Table();
 
-    // -------------------------------------------------------------------------
-    // PNG constants — ISO/IEC 15948 §4
-    // -------------------------------------------------------------------------
 
-    // PNG signature: 8 bytes. PNG spec §5.2 "PNG signature".
     private static ReadOnlySpan<byte> PngSignature =>
         [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
-    // -------------------------------------------------------------------------
-    // Public API
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Decodes the texture described by <paramref name="descriptor" /> and encodes it as PNG,
-    ///     writing the result to <paramref name="output" />.
-    /// </summary>
-    /// <exception cref="NotSupportedException">
-    ///     Thrown for unrecognized source formats (e.g. TGA, BMP, unknown DDS surface format).
-    /// </exception>
     public static void WritePng(TextureDescriptor descriptor, Stream output)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
@@ -101,35 +53,24 @@ public static class PngConverter
         }
     }
 
-    // -------------------------------------------------------------------------
-    // DDS decode entry
-    // -------------------------------------------------------------------------
 
     private static void WritePngFromDds(ReadOnlySpan<byte> dds, Stream output)
     {
         if (dds.Length < DdsDataOffset)
             throw new InvalidDataException("DDS payload is too short to contain a valid header.");
 
-        // Verify magic. Public DDS spec §DDS_HEADER.
         var magic = BinaryPrimitives.ReadUInt32LittleEndian(dds);
         if (magic != DdsMagic)
             throw new InvalidDataException("DDS magic bytes missing.");
 
-        // DDS_HEADER starts at offset 4.
-        // dwSize @ +0, dwFlags @ +4, dwHeight @ +8, dwWidth @ +12
-        // Public DDS spec §DDS_HEADER field offsets.
         var hdr = dds.Slice(4, DdsHeaderSize);
         var height = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[8..]);
         var width = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr[12..]);
 
-        // DDS_PIXELFORMAT is embedded at file offset 0x4C.
-        // Since hdr = dds.Slice(4, 124), the struct begins at hdr[0x4C - 4] = hdr[72].
-        // spec: Docs/RE/formats/texture.md §DDS_PIXELFORMAT (embedded at offset 0x4C, 32 bytes)
-        //   +0x00 dwSize, +0x04 dwFlags, +0x08 dwFourCC, +0x0C dwRGBBitCount.
-        var pf = hdr[72..]; // DDPIXELFORMAT (32 bytes); file offset 0x4C
-        var pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]); // dwFlags @ pf+0x04 = file 0x50
-        var fourCC = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]); // dwFourCC @ pf+0x08 = file 0x54
-        var rgbBitCount = BinaryPrimitives.ReadUInt32LittleEndian(pf[12..]); // dwRGBBitCount @ pf+0x0C = file 0x58
+        var pf = hdr[72..];
+        var pfFlags = BinaryPrimitives.ReadUInt32LittleEndian(pf[4..]);
+        var fourCC = BinaryPrimitives.ReadUInt32LittleEndian(pf[8..]);
+        var rgbBitCount = BinaryPrimitives.ReadUInt32LittleEndian(pf[12..]);
 
         var pixels = dds[DdsDataOffset..];
 
@@ -148,8 +89,6 @@ public static class PngConverter
         }
         else if ((pfFlags & DdpfRgb) != 0 && rgbBitCount == 32 && (pfFlags & DdpfAlphaPixels) != 0)
         {
-            // Uncompressed RGBA8: read masks to determine channel layout.
-            // Masks: dwRBitMask @ pf+16, dwGBitMask @ pf+20, dwBBitMask @ pf+24, dwABitMask @ pf+28.
             var rMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[16..]);
             var gMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[20..]);
             var bMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[24..]);
@@ -165,12 +104,6 @@ public static class PngConverter
         WritePngRgba8(rgba, width, height, output);
     }
 
-    // -------------------------------------------------------------------------
-    // DXT1 (BC1) decoder
-    // Spec: public "BC1 Block Compression" algorithm (OpenGL EXT_texture_compression_s3tc,
-    //       S3TC licence is expired / broadly public).
-    // Each 4×4 block is encoded in 8 bytes: 2×u16 colour endpoints + 4 bytes of 2-bit selectors.
-    // -------------------------------------------------------------------------
 
     private static byte[] DecodeDxt1(ReadOnlySpan<byte> data, int width, int height)
     {
@@ -179,30 +112,24 @@ public static class PngConverter
         var blocksY = (height + 3) / 4;
         var src = 0;
 
-        // palette and alphas allocated once outside the block loop — CA2014 fix.
         var palette = new uint[4];
 
         for (var by = 0; by < blocksY; by++)
         for (var bx = 0; bx < blocksX; bx++)
         {
-            // 8 bytes per DXT1 block.
             var c0Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[src..]);
             var c1Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 2)..]);
             var selectors = BinaryPrimitives.ReadUInt32LittleEndian(data[(src + 4)..]);
             src += 8;
 
-            // Unpack RGB565 → R8G8B8.
             Rgb565ToRgb8(c0Raw, out var r0, out var g0, out var b0);
             Rgb565ToRgb8(c1Raw, out var r1, out var g1, out var b1);
 
-            // Build colour palette.
-            // BC1 spec: if c0 > c1 (as unsigned 16-bit), 4-colour mode; else 3-colour + transparent.
             palette[0] = Pack(r0, g0, b0, 255);
             palette[1] = Pack(r1, g1, b1, 255);
 
             if (c0Raw > c1Raw)
             {
-                // 4-colour mode (opaque). BC1 spec §"4-color block".
                 palette[2] = Pack(
                     (byte)((2 * r0 + r1 + 1) / 3),
                     (byte)((2 * g0 + g1 + 1) / 3),
@@ -216,27 +143,20 @@ public static class PngConverter
             }
             else
             {
-                // 3-colour + transparent. BC1 spec §"3-color block".
                 palette[2] = Pack(
                     (byte)((r0 + r1) / 2),
                     (byte)((g0 + g1) / 2),
                     (byte)((b0 + b1) / 2),
                     255);
-                palette[3] = 0u; // transparent black
+                palette[3] = 0u;
             }
 
-            // Write 4×4 texels to output.
             WriteDxtBlock(rgba, bx, by, width, height, palette, selectors, 2);
         }
 
         return rgba;
     }
 
-    // -------------------------------------------------------------------------
-    // DXT3 (BC2) decoder
-    // Spec: public "BC2 Block Compression" (S3TC / Microsoft DX compression docs).
-    // 16 bytes per block: 8 bytes explicit 4-bit alpha + 8 bytes BC1 colour block.
-    // -------------------------------------------------------------------------
 
     private static byte[] DecodeDxt3(ReadOnlySpan<byte> data, int width, int height)
     {
@@ -245,23 +165,19 @@ public static class PngConverter
         var blocksY = (height + 3) / 4;
         var src = 0;
 
-        // Allocate per-block working arrays once outside the loop — CA2014 fix.
         var alphas = new byte[16];
         var palette = new uint[4];
 
         for (var by = 0; by < blocksY; by++)
         for (var bx = 0; bx < blocksX; bx++)
         {
-            // First 8 bytes: 4-bit alpha for each of the 16 texels (row-major, low nibble first).
-            // BC2 spec: each byte holds two 4-bit alpha values; expand to 8-bit by mult×17.
             for (var i = 0; i < 8; i++)
             {
                 var ab = data[src + i];
-                alphas[i * 2] = (byte)((ab & 0x0F) * 17); // 0x0F → 0xFF, linear scale
+                alphas[i * 2] = (byte)((ab & 0x0F) * 17);
                 alphas[i * 2 + 1] = (byte)((ab >> 4) * 17);
             }
 
-            // Next 8 bytes: BC1 colour block.
             var c0Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
             var c1Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
             var selectors = BinaryPrimitives.ReadUInt32LittleEndian(data[(src + 12)..]);
@@ -270,8 +186,6 @@ public static class PngConverter
             Rgb565ToRgb8(c0Raw, out var r0, out var g0, out var b0);
             Rgb565ToRgb8(c1Raw, out var r1, out var g1, out var b1);
 
-            // BC2 always uses 4-colour mode for the colour block regardless of c0/c1 order.
-            // BC2 spec §"Colour information".
             palette[0] = Pack(r0, g0, b0, 255);
             palette[1] = Pack(r1, g1, b1, 255);
             palette[2] = Pack(
@@ -285,18 +199,12 @@ public static class PngConverter
                 (byte)((b0 + 2 * b1 + 1) / 3),
                 255);
 
-            // Write pixels with explicit alpha override.
             WriteDxtBlockWithAlpha(rgba, bx, by, width, height, palette, selectors, alphas);
         }
 
         return rgba;
     }
 
-    // -------------------------------------------------------------------------
-    // DXT5 (BC3) decoder
-    // Spec: public "BC3 Block Compression" (S3TC / Microsoft DX compression docs).
-    // 16 bytes per block: 8 bytes interpolated alpha + 8 bytes BC1 colour block.
-    // -------------------------------------------------------------------------
 
     private static byte[] DecodeDxt5(ReadOnlySpan<byte> data, int width, int height)
     {
@@ -305,7 +213,6 @@ public static class PngConverter
         var blocksY = (height + 3) / 4;
         var src = 0;
 
-        // Allocate per-block working arrays once outside the loop — CA2014 fix.
         var alphaPalette = new byte[8];
         var alphas = new byte[16];
         var palette = new uint[4];
@@ -313,17 +220,14 @@ public static class PngConverter
         for (var by = 0; by < blocksY; by++)
         for (var bx = 0; bx < blocksX; bx++)
         {
-            // BC3 alpha block: 2 reference values + 48 bits (6 bytes) of 3-bit selectors.
             var a0 = data[src];
             var a1 = data[src + 1];
 
-            // Build 8-entry alpha palette. BC3 spec §"Alpha information".
             alphaPalette[0] = a0;
             alphaPalette[1] = a1;
 
             if (a0 > a1)
             {
-                // 8-alpha mode
                 alphaPalette[2] = (byte)((6 * a0 + 1 * a1 + 3) / 7);
                 alphaPalette[3] = (byte)((5 * a0 + 2 * a1 + 3) / 7);
                 alphaPalette[4] = (byte)((4 * a0 + 3 * a1 + 3) / 7);
@@ -333,7 +237,6 @@ public static class PngConverter
             }
             else
             {
-                // 6-alpha + 0/255 endpoints mode
                 alphaPalette[2] = (byte)((4 * a0 + 1 * a1 + 2) / 5);
                 alphaPalette[3] = (byte)((3 * a0 + 2 * a1 + 2) / 5);
                 alphaPalette[4] = (byte)((2 * a0 + 3 * a1 + 2) / 5);
@@ -342,8 +245,6 @@ public static class PngConverter
                 alphaPalette[7] = 255;
             }
 
-            // 6 bytes of 3-bit alpha selectors (48 bits, 16 × 3-bit).
-            // Pack into a ulong for easy bit extraction.
             var alphaBits = data[src + 2]
                             | ((ulong)data[src + 3] << 8)
                             | ((ulong)data[src + 4] << 16)
@@ -357,7 +258,6 @@ public static class PngConverter
                 alphas[i] = alphaPalette[idx];
             }
 
-            // BC1 colour block at src+8.
             var c0Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 8)..]);
             var c1Raw = BinaryPrimitives.ReadUInt16LittleEndian(data[(src + 10)..]);
             var selectors = BinaryPrimitives.ReadUInt32LittleEndian(data[(src + 12)..]);
@@ -366,7 +266,6 @@ public static class PngConverter
             Rgb565ToRgb8(c0Raw, out var r0, out var g0, out var b0);
             Rgb565ToRgb8(c1Raw, out var r1, out var g1, out var b1);
 
-            // BC3 colour block also always uses 4-colour mode.
             palette[0] = Pack(r0, g0, b0, 255);
             palette[1] = Pack(r1, g1, b1, 255);
             palette[2] = Pack(
@@ -386,9 +285,6 @@ public static class PngConverter
         return rgba;
     }
 
-    // -------------------------------------------------------------------------
-    // Uncompressed RGBA32 decode
-    // -------------------------------------------------------------------------
 
     private static byte[] DecodeUncompressedRgba32(
         ReadOnlySpan<byte> data, int width, int height,
@@ -413,19 +309,13 @@ public static class PngConverter
     {
         if (mask == 0) return 0;
         var bits = pixel & mask;
-        // Shift right to align to LSB.
         var shift = BitOperations.TrailingZeroCount(mask);
         bits >>= shift;
-        // Scale to 8-bit.
         var maskBits = 32 - BitOperations.LeadingZeroCount(mask >> shift);
         if (maskBits >= 8) return (byte)(bits >> (maskBits - 8));
-        // Replicate MSBs for correct 8-bit range.
         return (byte)(bits * 255 / ((1u << maskBits) - 1u));
     }
 
-    // -------------------------------------------------------------------------
-    // DXT block write helpers
-    // -------------------------------------------------------------------------
 
     private static void WriteDxtBlock(
         byte[] rgba, int bx, int by, int width, int height,
@@ -480,21 +370,15 @@ public static class PngConverter
                 rgba[dst + 0] = (byte)(packed & 0xFF);
                 rgba[dst + 1] = (byte)((packed >> 8) & 0xFF);
                 rgba[dst + 2] = (byte)((packed >> 16) & 0xFF);
-                rgba[dst + 3] = alphas[texelIndex]; // override alpha from block
+                rgba[dst + 3] = alphas[texelIndex];
             }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // RGB565 → RGB888 expansion
-    // BC1 colour endpoint format. Public S3TC spec.
-    // -------------------------------------------------------------------------
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Rgb565ToRgb8(ushort v, out byte r, out byte g, out byte b)
     {
-        // R: bits 15..11 (5 bits), G: bits 10..5 (6 bits), B: bits 4..0 (5 bits).
-        // Scale: 5-bit → 8-bit by (x << 3) | (x >> 2);  6-bit → 8-bit by (x << 2) | (x >> 4).
         var ri = (v >> 11) & 0x1F;
         var gi = (v >> 5) & 0x3F;
         var bi = (v >> 0) & 0x1F;
@@ -515,50 +399,32 @@ public static class PngConverter
         return (byte)a | ((uint)(byte)b << 8) | ((uint)(byte)c << 16) | ((uint)(byte)d << 24);
     }
 
-    // -------------------------------------------------------------------------
-    // PNG encoder — hand-rolled minimal implementation
-    // PNG spec: ISO/IEC 15948:2004.
-    // -------------------------------------------------------------------------
 
-    /// <summary>
-    ///     Encodes an RGBA8 pixel array as a minimal PNG and writes it to <paramref name="output" />.
-    ///     Color type 6 (RGBA), bit depth 8, no interlacing.
-    ///     PNG spec §4.1 "Critical chunks", §9 "Filtering", §12 "Compression".
-    /// </summary>
     public static void WritePngRgba8(byte[] rgba, int width, int height, Stream output)
     {
-        // Signature
         output.Write(PngSignature);
 
-        // IHDR chunk (13 bytes of data)
         Span<byte> ihdrData = stackalloc byte[13];
         BinaryPrimitives.WriteUInt32BigEndian(ihdrData, (uint)width);
         BinaryPrimitives.WriteUInt32BigEndian(ihdrData[4..], (uint)height);
-        ihdrData[8] = 8; // bit depth = 8
-        ihdrData[9] = PngColorTypeRgba; // color type 6 = RGBA
-        ihdrData[10] = 0; // compression method 0 (Deflate)
-        ihdrData[11] = 0; // filter method 0
-        ihdrData[12] = 0; // interlace method 0 (none)
+        ihdrData[8] = 8;
+        ihdrData[9] = PngColorTypeRgba;
+        ihdrData[10] = 0;
+        ihdrData[11] = 0;
+        ihdrData[12] = 0;
         WriteChunk(output, "IHDR"u8, ihdrData);
 
-        // IDAT chunk — filter then compress
         var filtered = FilterRgbaImage(rgba, width, height);
         var compressed = ZlibDeflate(filtered);
         WriteChunk(output, "IDAT"u8, compressed);
 
-        // IEND chunk (no data)
         WriteChunk(output, "IEND"u8, ReadOnlySpan<byte>.Empty);
     }
 
-    /// <summary>
-    ///     Applies PNG filter type 0 (None) to each scanline.
-    ///     Each scanline is prefixed with a filter byte (0x00).
-    ///     PNG spec §9.2 "Filter types for filter method 0".
-    /// </summary>
     private static byte[] FilterRgbaImage(byte[] rgba, int width, int height)
     {
         var stride = width * 4;
-        var filtered = new byte[height * (stride + 1)]; // +1 per row for filter byte
+        var filtered = new byte[height * (stride + 1)];
 
         for (var row = 0; row < height; row++)
         {
@@ -570,11 +436,6 @@ public static class PngConverter
         return filtered;
     }
 
-    /// <summary>
-    ///     Wraps <paramref name="raw" /> in a zlib container (CMF + FLG header, Deflate data, Adler-32 checksum)
-    ///     using <see cref="ZLibStream" /> from BCL (System.IO.Compression).
-    ///     PNG spec §12: IDAT uses the zlib compression format (RFC 1950 wrapper, Deflate RFC 1951).
-    /// </summary>
     private static byte[] ZlibDeflate(byte[] raw)
     {
         using var ms = new MemoryStream();
@@ -586,11 +447,6 @@ public static class PngConverter
         return ms.ToArray();
     }
 
-    /// <summary>
-    ///     Writes one PNG chunk: [length u32BE][type 4B][data][CRC u32BE].
-    ///     CRC covers the type bytes + data bytes.
-    ///     PNG spec §5.3 "Chunk layout".
-    /// </summary>
     private static void WriteChunk(Stream output, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
     {
         Span<byte> lengthBytes = stackalloc byte[4];
@@ -599,7 +455,6 @@ public static class PngConverter
         output.Write(type);
         if (data.Length > 0) output.Write(data);
 
-        // CRC32 of type + data. PNG spec §5.3 "CRC algorithm".
         var crc = Crc32Update(0xFFFFFFFFu, type);
         crc = Crc32Update(crc, data);
         crc ^= 0xFFFFFFFFu;
