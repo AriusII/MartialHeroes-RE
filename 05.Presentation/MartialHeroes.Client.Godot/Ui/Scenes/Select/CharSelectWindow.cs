@@ -25,6 +25,9 @@ public sealed partial class CharSelectWindow : Control
     [Signal]
     public delegate void RenameCharacterRequestedEventHandler(int slotIndex, string newName);
 
+    [Signal]
+    public delegate void MoveCharacterSlotRequestedEventHandler(int fromSlot, int toSlot);
+
 
     private const int MaxSlots = 5;
     private const string BlankSentinel = "@BLANK@";
@@ -35,6 +38,8 @@ public sealed partial class CharSelectWindow : Control
     private const string AtlasLoginWindow = "data/ui/loginwindow.dds";
     private const string AtlasInventWindow = "data/ui/inventwindow.dds";
     private const string AtlasMainWindow = "data/ui/mainwindow.dds";
+    private const string AtlasCarrierPigeonPerson = "data/ui/CarrierPigeonPerson.dds";
+    private const string AtlasCarrierPigeonAll = "data/ui/CarrierPigeonAll.dds";
 
     private const int ActionServer = 1;
     private const int ActionChannel = 2;
@@ -146,6 +151,7 @@ public sealed partial class CharSelectWindow : Control
 
     private NpcScrDescriptions _npcScrDesc = null!;
     private int _pendingDeleteSlot = -1;
+    private int _pendingRelocateToSlot = -1;
 
     private RealClientAssets? _realAssets;
 

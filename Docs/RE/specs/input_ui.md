@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: Ctrl-vs-Shift identity of modifier slots 1012/1013, and the exact call site that registers a text field's HWND into the IME focused-field slot, remain capture/debugger-pending. — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §3d behavioural note on the widget on-event dispatch (vtable slot 6) + hit-test slots (4 = vector/point-in, 5 = bool) and the click→action→click-cue path; struct vtable slot numbers are owned by `structs/gucomponent.md`.
+conflicts: Ctrl-vs-Shift identity of modifier slots 1012/1013, and the exact call site that registers a text field's HWND into the IME focused-field slot, remain capture/debugger-pending. — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §3d behavioural note on the widget on-event dispatch (vtable slot 6) + hit-test slots (4 = vector/point-in, 5 = bool) and the click→action→click-cue path; struct vtable slot numbers are owned by `structs/gucomponent.md`. — 2026-06-24 (IDB SHA 263bd994): §4 widget table corrected — +0x0C = packed tint word (not "parent id"), +0x10 = action_id (not "UNVERIFIED"), +0x08 capability bits downgraded from [static-hypothesis] to CODE-CONFIRMED; all three now agree with `structs/gucomponent.md`.
 ---
 
 # Input & UI Tree — Clean-Room Specification
@@ -319,10 +319,10 @@ byte-granular and were re-confirmed by the hit-test and the per-handler gate che
 | Offset | Size | Type | Role |
 |---|---|---|---|
 | +0x00 | 4 | ptr | vtable pointer |
-| +0x04 | 4 | u32 | flags / alpha (init = 255) |
-| +0x08 | 4 | u32 | capability flags (bit0 = enabled; a "panel" bit set on panels; a high bit set on windows) [static-hypothesis] |
-| +0x0C | 4 | i32 | parent index / id (init = -1) |
-| +0x10 | 4 | i32 | init = -1 (role UNVERIFIED) |
+| +0x04 | 4 | u32 | alpha (init = 255) |
+| +0x08 | 4 | u32 | **capability flags** — bit 0 = "is a component" (GUComponent ctor); bit 2 = "is a panel" (GUPanel ctor); bit 3 = "is a button" (GUButton ctor); bit 7 = "is a label" (GULabel ctor); bit 9 = "is a list" (GUList ctor); bit 10 = 0x0400 = "is a textbox" (GUTextbox ctor); bit 13 = "is a window" (GUWindow ctor). **CODE-CONFIRMED** — see `structs/gucomponent.md §4`. |
+| +0x0C | 4 | u32 | **packed tint / forced-alpha word** — low 24 bits = RGB tint; top byte = forced-alpha override (0xFF = disabled). Default **0xFFFFFFFF**. **(Corrected: the earlier "parent index / id" label is wrong — CODE-CONFIRMED, `structs/gucomponent.md §2`.)** |
+| +0x10 | 4 | i32 | **`action_id`** — the per-widget action identifier; default **−1** sentinel (no action). Set by `AddChildWithAction`; read by the panel router to identify the consuming child. **(Corrected: the earlier "UNVERIFIED" label is wrong — CODE-CONFIRMED, `structs/gucomponent.md §2`.)** |
 | +0x14 | 4 | i32 | local x [from GUComponent geometry layout] |
 | +0x18 | 4 | i32 | local y |
 | +0x1C | 4 | i32 | **WIDTH** (also the hit-rect width `w`) |
@@ -350,6 +350,11 @@ byte-granular and were re-confirmed by the hit-test and the per-handler gate che
 >   doc separately, and correctly, called "enabled").
 > - `+0x98`/`+0x9C` are a separate clamp range, **not** the live hit rect. The live
 >   hit rect is `(rectX = +0x2C, rectY = +0x30, w = +0x1C, h = +0x20)`.
+> - **(2026-06-24)** `+0x0C` is the **packed tint / forced-alpha word** (low 24 bits = RGB tint,
+>   top byte = forced-alpha), **not** a "parent index / id". `+0x10` is the **action_id** (default
+>   −1), **not** "UNVERIFIED". Both are now CODE-CONFIRMED; see `structs/gucomponent.md §2`. The
+>   `+0x08` capability-flag bit layout is also CODE-CONFIRMED (not a static hypothesis); see
+>   `structs/gucomponent.md §4` for the full per-class bit table.
 
 The hit-test rule (rectangular) is: a point `(x, y)` is inside iff
 `rectX ≤ x < rectX + w  &&  rectY ≤ y < rectY + h` (half-open on the high edges). On a
@@ -483,5 +488,6 @@ analysis; everything else in this spec is control-flow confirmed against the IDB
 - Which exact consumer handles the **mouse wheel (type 8)** (UI/camera, not the world
   click chain).
 - The precise **per-entity field offsets** in the world entity-pick record.
-- The role of widget `+0x10`, the `+0x08` capability-bit layout, and the **stride** of
-  the child-manipulator pointer array in the main window.
+- The **stride** of the child-manipulator pointer array in the main window.
+  (Widget +0x10 = `action_id` and +0x08 capability-bit layout are now CODE-CONFIRMED — see §4 and
+  `structs/gucomponent.md §2 / §4`.)

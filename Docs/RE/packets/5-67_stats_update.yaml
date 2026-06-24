@@ -1,5 +1,20 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing, the fixed 36-byte body, and the full offset
+#                 table -- sort@0x00, id@0x04, stat@0x08, stat@0x0C, CurrentXp i64@0x10..0x17,
+#                 stat@0x18, stat@0x1C, stat@0x20 -- are control-flow-confirmed via handler stack frame;
+#                 the identity of each stat value (which of STR/INT/AGI/DEX/CON maps to which offset)
+#                 is capture-pending)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+#   evidence: [static-ida]
+#   conflicts: CORRECTED. The prior layout placed five contiguous u32 stats at 0x08..0x18 with CurrentXp
+#              i64 at 0x1C (and total stat+XP region 0x08..0x23). The binary refutes this: the CurrentXp
+#              qword sits at 0x10..0x17 (splitting the stat values), stat values occupy 0x08/0x0C/0x18/
+#              0x1C/0x20, and the assumed STR/INT/AGI/DEX/CON ordering is also refuted. Four of the five
+#              stats are pushed to actor stat channels {0, 2, 6, 5}; the value at 0x1C is written only to
+#              the actor with no channel push. BINARY WINS.
 
 name: SmsgStatsUpdate
 opcode: 0x50043           # major 5 (Push), minor 67 -> (5 << 16) | 67
@@ -9,44 +24,51 @@ spec: packets/5-67_stats_update.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server pushes an authoritative resync of the local player's five primary stats and current XP. This is the world-entry stat sync that also primes the exp bar; it overwrites the client's cached stats/XP wholesale and refreshes the character window.
+summary: >
+  Server pushes an authoritative resync of the local player's five primary stats and current XP.
+  A fixed 36-byte body: an actor key header, five stat values interleaved around a 64-bit current-XP
+  qword, pushed to actor stat channels and the XP accumulator. Local-player gated; primes the exp bar
+  on world entry and overwrites cached stats wholesale.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 36.
-# IMPORTANT: the handler reads a single 36-byte block and writes five primary stats + current XP, but
-# the source note does NOT give a byte-level offset table for this message. The field PLACEMENT below
-# is a reconstruction chosen so the widths sum to exactly 36; the SET of carried values (five stats +
-# current XP, local-player-gated) is CODE-CONFIRMED, the per-offset placement is a hypothesis.
+# The CurrentXp i64 sits at 0x10..0x17, splitting the stat values into two groups (0x08/0x0C before,
+# 0x18/0x1C/0x20 after). Four stats are pushed to actor channels {0,2,6,5}; the stat at 0x1C is
+# written only to the actor with no channel push. Stat identity (which named stat maps to which offset)
+# is capture-pending.
 fields:
-  - { name: Sort,    type: u8 }          # 0x00  actor sort (placement hypothesis)
-  - { name: Pad0,    type: "bytes[3]" }    # 0x01  alignment padding
-  - { name: ActorId, type: u32 }         # 0x04  actor id (placement hypothesis)
-  - { name: Str,     type: u32 }         # 0x08  primary stat STR
-  - { name: Int,     type: u32 }         # 0x0c  primary stat INT
-  - { name: Agi,     type: u32 }         # 0x10  primary stat AGI
-  - { name: Dex,     type: u32 }         # 0x14  primary stat DEX
-  - { name: Con,     type: u32 }         # 0x18  primary stat CON
-  - { name: CurrentXp, type: i64 }       # 0x1c  current experience (i64), primes the exp bar
+  - { name: Sort,    type: u8 }           # 0x00  actor sort / class key (read into a dword for the lookup)
+  - { name: Pad0,    type: "bytes[3]" }   # 0x01  alignment padding
+  - { name: ActorId, type: u32 }          # 0x04  actor id (local-player gate: matches localplayer+92)
+  - { name: StatA,   type: u32 }          # 0x08  stat value -> actor+880; pushed to stat channel 0
+  - { name: StatB,   type: u32 }          # 0x0C  stat value -> actor+900; pushed to stat channel 2
+  - { name: CurrentXp, type: i64 }        # 0x10  current-XP qword -> actor+152; primes the exp bar
+  - { name: StatC,   type: u32 }          # 0x18  stat value -> actor+916; pushed to stat channel 6
+  - { name: StatD,   type: u32 }          # 0x1C  stat value -> actor+892; NO channel push (actor-only write)
+  - { name: StatE,   type: u32 }          # 0x20  stat value -> actor+885 (byte); pushed to stat channel 5
+  # widths: 1 + 3 + 4 + 4 + 4 + 8 + 4 + 4 + 4 = 36
 
 notes: |
-  CODE-CONFIRMED set, CAPTURE-UNVERIFIED layout. Total = 36 bytes (matches the handler's single
-  36-byte read). The handler writes five primary-stat fields into the actor descriptor and the
-  current-XP accumulator, then refreshes the character/stat window. Local-player gated; this is the
-  authoritative world-entry stat sync.
+  CONTROL-FLOW CONFIRMED: the fixed 36-byte body and the complete offset table. CAPTURE-UNVERIFIED for
+  the mapping from wire offsets to named primary stats (STR / INT / AGI / DEX / CON).
 
-  WHAT IS CONFIRMED (the carried values): the handler resyncs the five primary stats AND the current
-  XP accumulator (the same XP accumulator that 5/9 ExpGain increments). Because it writes XP, it also
-  re-primes the on-HUD exp bar -- this is the message that seeds the bar on world entry.
+  WIRE LAYOUT (36-byte body):
+    0x00 (1B) Sort     : actor sort / class key; read into a dword for the actor lookup.
+    0x01 (3B) Pad0     : alignment padding.
+    0x04 (4B) ActorId  : actor id; the local-player gate compares this to localplayer+92.
+    0x08 (4B) StatA    : stat value written to actor+880 and pushed to actor stat channel 0.
+    0x0C (4B) StatB    : stat value written to actor+900 and pushed to actor stat channel 2.
+    0x10 (8B) CurrentXp: current-XP qword written to actor+152 (same accumulator as 5/9 SmsgExpGain);
+                         also copied to g_CurrentStanceTier and localplayer+152. Primes the exp bar.
+    0x18 (4B) StatC    : stat value written to actor+916 and pushed to actor stat channel 6.
+    0x1C (4B) StatD    : stat value written to actor+892. NO actor stat channel push -- actor-only write.
+    0x20 (4B) StatE    : stat value written to actor+885 (byte field) and pushed to actor stat channel 5.
 
-  WHAT IS A HYPOTHESIS (the offsets): the source note does not enumerate the 36 bytes offset-by-offset.
-  The layout above (sort + pad, id, five u32 stats, i64 current XP -> 4 + 4 + 20 + 8 = 36) is a
-  reconstruction that fits the 36-byte total and the (sort, id)-keyed actor lookup convention used by
-  sibling push messages. The five-stat ORDER is modelled STR, INT, AGI, DEX, CON to match the 2/29
-  StatAllocate / 4/29 StatUpdate wire order, but this packet's own ordering is unconfirmed.
+  STAT CHANNEL SUMMARY: four of the five stat values are pushed to channels {0, 2, 6, 5} (in wire order).
+  The value at 0x1C (StatD -> actor+892) is written only to the actor struct; no channel notification.
 
-  UNKNOWNS to resolve with a world-entry / stats-resync capture (verify FIRST before implementing):
-    - the exact byte offsets of the five stats and the current-XP qword within the 36-byte block;
-    - whether the leading bytes are (sort + pad + id) as modelled, or a different header;
-    - the on-wire stat order for THIS message (vs the assumed STR, INT, AGI, DEX, CON).
+  STAT IDENTITY (CAPTURE-PENDING): the exact mapping of StatA..StatE to named stats (STR / INT / AGI /
+  DEX / CON) is unconfirmed. The earlier model of STR/INT/AGI/DEX/CON in wire order and five contiguous
+  u32s is refuted by the binary. Resolve with a world-entry stat resync capture.
 
   RELATED: 4/29 SmsgStatUpdate (packets/4-29_stat_update.yaml) is the allocation ACK (echoes the five
   stats + remaining points); this 5/67 is the unsolicited authoritative resync. 5/9 SmsgExpGain

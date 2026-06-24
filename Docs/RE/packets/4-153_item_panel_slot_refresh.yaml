@@ -1,3 +1,17 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing confirmed; PlayerId u32@+0x04 (local-player
+#                 gated), Action i8@+0x08 (-1=close panel / 0=forward to slot-refresh routine /
+#                 other=no-op). NOTE: this handler does NOT validate Guard@0 (unlike 4/149 which
+#                 requires Guard==1); Guard is modelled without an ==1 assertion. StartSlot@+0x09,
+#                 Count@+0x0A, Records[Count]@+0x0C consumed in the forwarded routine.
+#                 Size 12+16*Count byte-exact.)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none.
+
 name: SmsgItemPanelSlotRefresh
 opcode: 0x40099           # major 4, minor 153
 direction: S2C

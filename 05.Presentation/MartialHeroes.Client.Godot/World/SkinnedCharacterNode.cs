@@ -45,6 +45,12 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private AnimationClip? _idleClip;
 
+    private AnimationClip? _actionClip;
+    private float _actionDuration;
+    private bool _actionPlaying;
+    private float _actionTime;
+    private AnimationTrack?[] _actionTrackByBoneIndex = [];
+
     private int[] _idToIndex = [];
 
     private Material? _material;
@@ -94,32 +100,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
         _idleClip = clip;
 
-        _trackByBoneIndex = new AnimationTrack?[boneCount];
+        _trackByBoneIndex = BindClipTracks(clip, idToIndex, boneCount, baseId, mesh.Name);
         if (clip is not null && clip.FrameCount > 0)
         {
-            var boundTracks = 0;
-            var skippedTracks = 0;
-            foreach (var tr in clip.Tracks)
-            {
-                var bid = tr.BoneId & 0xFF;
-                var bIdx = bid >= 0 && bid < 256 ? idToIndex[bid] : -1;
-
-                if (bIdx >= 0 && bIdx < boneCount)
-                {
-                    _trackByBoneIndex[bIdx] = tr;
-                    boundTracks++;
-                }
-                else
-                {
-                    skippedTracks++;
-                }
-            }
-
-            if (skippedTracks > 0)
-                GD.PrintErr($"[Skinning] '{mesh.Name}': SKIPPED {skippedTracks} clip track(s) whose " +
-                            $"bone_id is not a bone of this {boneCount}-bone rig (base_id={baseId}); " +
-                            $"bound {boundTracks}. spec: skinning.md §8(e) item 4 — skip, do not clamp.");
-
             _clipDuration = clip.FrameCount * SkinningMath.MotSecondsPerFrame;
             _hasClip = _clipDuration > 0f;
         }
@@ -195,6 +178,68 @@ public sealed partial class SkinnedCharacterNode : Node3D
         PlayStandingIdle();
     }
 
+    private AnimationTrack?[] BindClipTracks(
+        AnimationClip? clip, int[] idToIndex, int boneCount, int baseId, string label)
+    {
+        var bound = new AnimationTrack?[boneCount];
+        if (clip is null || clip.FrameCount == 0)
+            return bound;
+
+        var boundTracks = 0;
+        var skippedTracks = 0;
+        foreach (var tr in clip.Tracks)
+        {
+            var bid = tr.BoneId & 0xFF;
+            var bIdx = bid >= 0 && bid < 256 ? idToIndex[bid] : -1;
+
+            if (bIdx >= 0 && bIdx < boneCount)
+            {
+                bound[bIdx] = tr;
+                boundTracks++;
+            }
+            else
+            {
+                skippedTracks++;
+            }
+        }
+
+        if (skippedTracks > 0)
+            GD.PrintErr($"[Skinning] '{label}': SKIPPED {skippedTracks} clip track(s) whose " +
+                        $"bone_id is not a bone of this {boneCount}-bone rig (base_id={baseId}); " +
+                        $"bound {boundTracks}. spec: skinning.md §8(e) item 4 — skip, do not clamp.");
+
+        return bound;
+    }
+
+    public bool PlayActionClip(AnimationClip? clip)
+    {
+        if (!_ready || clip is null || clip.FrameCount == 0)
+            return false;
+
+        var boneCount = _bones.Length;
+        _actionTrackByBoneIndex = BindClipTracks(clip, _idToIndex, boneCount, _baseId, $"action:{clip.IdB}");
+        _actionClip = clip;
+        _actionDuration = clip.FrameCount * SkinningMath.MotSecondsPerFrame;
+        _actionTime = 0f;
+        _actionPlaying = _actionDuration > 0f;
+
+        if (_actionPlaying)
+            GD.Print($"[Skinning] Action clip engaged (id_b={clip.IdB}, one-shot, " +
+                     $"duration={_actionDuration:F2}s) — reverts to idle on completion. " +
+                     "spec: skinning.md §10.5 / §3.6.5 (per-actor motion-kind selects clip).");
+
+        return _actionPlaying;
+    }
+
+    public void StopAction()
+    {
+        _actionPlaying = false;
+        _actionClip = null;
+        _actionTime = 0f;
+    }
+
+    public bool IsActionPlaying => _actionPlaying;
+
     private AnimationClip? SelectVisualStateClip(VisualState state)
     {
         return state switch
@@ -259,7 +304,23 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private void Advance(float dtSeconds)
     {
-        if (!_ready || !_hasClip || _arrayMesh is null) return;
+        if (!_ready || _arrayMesh is null) return;
+
+        if (_actionPlaying && _actionDuration > 0f)
+        {
+            _actionTime += dtSeconds;
+            if (_actionTime >= _actionDuration)
+            {
+                StopAction();
+            }
+            else
+            {
+                DeformAndUpload(_actionTime, false);
+                return;
+            }
+        }
+
+        if (!_hasClip) return;
 
         _time += dtSeconds;
         if (_clipDuration > 0f && _time >= _clipDuration)
@@ -475,7 +536,11 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private void ComputeWorldPoses(float t, bool restPose)
     {
-        var tracks = restPose ? _noTracks : _trackByBoneIndex;
+        var tracks = restPose
+            ? _noTracks
+            : _actionPlaying
+                ? _actionTrackByBoneIndex
+                : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(
             _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta,
             _hasChild, _nodeScale);

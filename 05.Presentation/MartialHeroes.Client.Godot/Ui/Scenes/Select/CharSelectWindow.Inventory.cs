@@ -6,6 +6,7 @@ namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 public sealed partial class CharSelectWindow
 {
     private Control? _bottomRow;
+    private Control? _carrierPigeonPanel;
     private Control? _innerSubPanel;
     private Control? _modalCreateClass;
     private Control? _modalCreateName;
@@ -46,6 +47,7 @@ public sealed partial class CharSelectWindow
         BuildGroup6RightDetail();
         BuildGroup7PerSlotControls();
         BuildGroup8InnerSubPanel();
+        BuildGroupCarrierPigeon();
         ApplyOpenVisibility();
         BuildGroup9CloseAndChrome();
         BuildGroup10CreateNameModal();

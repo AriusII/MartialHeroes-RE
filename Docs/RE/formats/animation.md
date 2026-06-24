@@ -7,8 +7,9 @@
 > verification: sample-verified (layout, incl. BANI body); confirmed (loader-control-flow facts); handedness capture/debugger-pending
 > re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20): runtime stand idle = actormotion col16 (record +0x44, direction-array-A element 1), NOT col15/+0x40; death SFX/effect = motion_ids_b element b[4] (+0x74), NOT b[5]; the runtime idle catalogue lookup is keyed by the APPEARANCE KEY (player = 5·(class+4·variant)−24), NOT col2/skin_class; the a[1] motion id joins to a `.mot` clip through the motlist.txt-seeded clip registry keyed by the `.mot` header `id_b` (no `g{id}.mot` runtime sprintf exists).
 > re-verified again (2026-06-21): BANI body is now DECODED (identical standard track/keyframe layout, sample residual 0); the BANI "all-files-constant" claims are CORRECTED (the `unknown_field` and `track_count` are NOT constant — three rig groups exist); the oversized standard clip is identified. See §BANI variant and §Oversized standard clip.
-> ida_reverified: 2026-06-16; CYCLE 7 (2026-06-20); 2026-06-21
-> ida_anchor: 263bd994
+> re-verified (2026-06-24): static-analysis + five-sample on-disk re-confirmation pass (IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee). Zero structural drift. Confirmed: header read order (id_a → id_b → name LenStr → frame_count), 10-fps duration rule, track-array layout (8-byte preamble + key_count×28 keyframes), keyframe 7 f32 vec3+quat XYZW, track_descriptor low-byte=bone_id (upper 3 bytes reserved/zero on all observed tracks), id_b load-time registry key, motlist.txt → data/char/mot/ prefix + id_b-keyed registry (no g{id}.mot sprintf), 80-byte clip object. Five standard samples parsed to zero residual. BANI variant accepted from prior pass (one g170350513 file confirmed BANI by magic). No corrections required.
+> ida_reverified: 2026-06-16; CYCLE 7 (2026-06-20); 2026-06-21; 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > status: sample_verified
 > sample_verified: true

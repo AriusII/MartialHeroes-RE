@@ -5,13 +5,25 @@
 
 ---
 
+## Re-verification banner (2026-06-24 — independent byte-census re-confirmation, no layout corrections)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — full independent byte-census re-confirmation; **zero contradictions** with the layout below |
+| `ida_reverified` | `2026-06-24` |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = IDA string recovery (path templates `npc/npc%s.arr`, `mob/mob%s.arr`); witness 2 = byte-exact on-disk census of all 58 `npc*.arr` + 52 `mob*.arr` entries direct from the VFS |
+| `conflicts`      | None. This pass is a byte-census re-confirmation only. Every load-bearing structural fact re-verified: 28-byte headerless stride (56/58 exact), sentinel slot 0, identity index, field offsets (+0 id u16 / +4 x / +8 z / +12 facing / +16 spawn_type), facing corpus range −π/2..≈6.20, spawn_type {0..11} with 7 special, 20-byte mob.arr stride (52/52 exact). Loader control-flow was NOT re-walked this pass (string xrefs did not resolve in this IDB index); loader-behaviour claims rest on prior code-confirmed cycles. Two minor additions folded in: total mob corpus record count (~309,351) and mob.arr field0 packed-value note (high 16 bits constant per file but vary across files). |
+
+---
+
 ## Status
 
 ```
 verification:   sample-verified   # stride 28, +0 id / +4 x / +8 z / +12 facing / +16 spawn_type,
                                    #   facing math, +20/+24 inert, mob.arr 20-byte stride, map000 anomaly
                                    #   all matched against the real VFS sample (43,347 entries)
-ida_reverified: 2026-06-21        # re-confirmed in full on the doida.exe build (no layout corrections)
+ida_reverified: 2026-06-24        # re-confirmed in full on the doida.exe build (no layout corrections)
 ida_anchor:     263bd994          # primary anchor; also re-verified against the active doida.exe build
 evidence:       [static-ida, vfs-sample, doida.exe-reverify]
 conflicts:      spawn_type enumeration is 0..11 (not {0,7}); field_02 frequently non-zero on disk
@@ -317,7 +329,12 @@ partial / mis-aligned record set rather than meaningful spawns. A faithful port 
 
 > **Corpus-scale fact (for test fixtures).** The whole client carries **56 div-28 `npc*.arr` files,
 > 559 total 28-byte records**, plus the two anomalies above; and **52 `mob*.arr` files** (all 20-byte
-> stride). These are useful scale figures when building reimplementation test fixtures.
+> stride, approximately **309,351 total records** — e.g. `mob014.arr` alone is 322,000 bytes = 16,100
+> records). These are useful scale figures when building reimplementation test fixtures.
+> Additionally, within `mob*.arr` files the high 16 bits of field0 at +0 are **constant within a file
+> but vary across files** (consistent with a content-tool packed map/zone tag, not a global constant);
+> the low 16 bits carry a small sequential id. This observation is recorded for archival completeness —
+> field semantics remain out-of-client-scope (no client loader).
 
 ---
 

@@ -68,9 +68,9 @@
 >   **SUPERSEDED by CYCLE 7**: the runtime stand slot is **column 16 (record +0x44, array A element 1)**,
 >   keyed by the **appearance key**, resolved via the **motlist.txt registry** (not `g{id}.mot`), and the
 >   slot question is RESOLVED static (col15 / element 0 is statically dead). See §8(e) and §10.
-> - **ida_reverified:** 2026-06-20 (CYCLE 7)
+> - **ida_reverified:** 2026-06-24 (audit pass — TWO distinct bone resolvers with different out-of-range behaviour; commit/accumulate denominator guard is a genuine `logf` call, not a decompiler mis-symbol; VB lock budget and bone-id read-width nuances recorded; all prior load-bearing facts re-confirmed with no drift)
 > - **spec_corrected:** 2026-06-21 (visual-oracle — `.skn` geometry height-axis = native X; +90°-Z importer remap)
-> - **ida_anchor:** 263bd994
+> - **ida_anchor:** 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > - **evidence:** [static-ida, vfs-sample, visual-oracle]
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
@@ -281,13 +281,22 @@ normal from its **first** three floats (the disk record is normal-then-position)
 ≈ 0.001 per axis) so shared triangle corners collapse to one skinned vertex; a corner→unique-vertex
 index map and a vertex→owner (rigid-merge) table are built at load.
 
-> **Epsilon-test caveat (capture/debugger-pending).** Three epsilon tests in this pipeline — the
-> per-axis vertex-dedup tolerance here, the accumulate-blend denominator floor (§6.2), and the commit
-> denominator floor (§6.2) — surface in disassembly as a log-shaped intrinsic compared against 0.001.
-> An absolute-value epsilon clamp at 0.001 is the engineering-sensible reading (a literal log of a
-> near-zero delta is not), so this spec treats all three as **absolute-value clamps at 0.001** and
-> flags the log-shaped appearance as almost certainly a decompiler mis-symbol; a debugger step over
-> one site would settle the exact intrinsic.
+> **Epsilon-test note (partially resolved).** Three epsilon tests in this pipeline:
+>
+> - The **accumulate-blend denominator floor** (§6.2) and the **commit denominator floor** (§6.2) are
+>   now **confirmed to use a genuine `logf` call** (real CRT logarithm function, static-confirmed):
+>   the floor branch is taken when `logf(committedWeight + accumWeight) < 0.001`, and the denominator
+>   is floored to `0.001` in that branch. The 0.001 floor is real; the guard that selects it is the
+>   log of the total accumulated weight. The earlier "almost certainly a decompiler mis-symbol of an
+>   absolute-value epsilon clamp" framing for these two floors is **dropped** — the `logf` is genuine.
+>   Practical effect: at vanishing accumulated weight the denominator is floored to 0.001, avoiding
+>   divide-by-zero; the blending outcome is behaviorally equivalent to an epsilon clamp for typical
+>   weights. See §6.2.
+>
+> - The **per-axis vertex-dedup tolerance here** (this §2.1 test) still surfaces as a log-shaped
+>   intrinsic compared against 0.001 and has **not** been re-checked this audit pass. Whether it is
+>   also a genuine `logf` or a plain absolute-value compare remains `capture/debugger-pending`; treat
+>   it as a 0.001 per-axis absolute-value tolerance until confirmed.
 
 ### 2.2 Runtime influence (weight) record
 
@@ -383,11 +392,25 @@ the skinning explosion** (CONFIRMED static, CYCLE 1):
 For the recovered sample skeletons `base_id == 0`, so ID equals array index — but the importer **must
 not assume** `base_id == 0` in general. Always resolve `bone_array[id − base_id]`.
 
-> **The legacy resolver CLAMPS out-of-range ids to the last bone.** When `id − base_id ≥ bone_count`
-> the resolver returns the **last** bone (`bone_base + stride · bone_count − stride`) rather than null
-> or an error. Downstream null-guards therefore never fire on a clamp, so an out-of-range `.mot` track
-> id or `.skn` weight id silently binds the last bone. This is a faithful-behaviour fact; an importer
-> should prefer to **skip** such an influence instead (§8(e) step 4).
+> **Two distinct resolvers exist with DIFFERENT out-of-range behaviour — use the right one per context.**
+>
+> - **Runtime pose resolver (88-byte stride) — CLAMPS.** Used by the deform loop (Mode 0/1/2), the
+>   `.mot` track binders, and the attach-point composers. When `id − base_id ≥ bone_count` it returns
+>   the **last** bone (`pose_bone_base + 88 · bone_count − 88`). Downstream null-guards never fire on
+>   a clamp, so an out-of-range `.mot` track id or `.skn` weight id silently drives the last bone.
+>   This is a faithful-behaviour fact for the deform/.mot path; an importer should prefer to **skip**
+>   such an influence instead (§8(e) step 4).
+>
+> - **Bake-time bind resolver (72-byte stride) — returns NULL (no clamp).** Used exclusively by the
+>   inverse-bind bake (§4) and by the bind-pose hierarchy builder. When `id − base_id ≥ bone_count`
+>   it returns NULL. The bake has **no null guard** at the call site, so a `.skn` weight whose bone id
+>   falls outside the bind skeleton's id window is a hard fault at bake time, not a silent clamp. An
+>   importer must skip such records defensively (§8(e) step 4).
+>
+> The deform loop reads the influence bone id as a **full 32-bit value** before passing it to the
+> runtime resolver. The bake reads the same field as a **single byte**. Both treat the field as a
+> small unsigned bone id (the u8 domain of §3.4 — valid bone ids fit in one byte), so there is no
+> behavioral difference for well-formed skins; only the read width differs per code path.
 
 ### 3.3 Composition order (multiply convention)
 
@@ -989,8 +1012,9 @@ bone world transform. The cancellation in §0 is the direct consequence.
 >
 > This pass — its existence, location, and math — is now **CONFIRMED static** (no longer a hypothesis,
 > no debugger needed). It loops the MAJOR influence array first then the MINOR array (same body),
-> stride 36 bytes per record, and per influence reads the bone id (byte) and vertex index, resolves
-> the bind bone via the base-relative ID resolver (§3.2), reads the 32-byte render vertex's position
+> stride 36 bytes per record, and per influence reads the bone id as a **single byte** and the vertex
+> index, resolves the bind bone via the **72-byte bake-time bind resolver** (§3.2 — returns NULL
+> out-of-range, no clamp; the bake has no null guard at the call site), reads the 32-byte render vertex's position
 > (first three floats) and normal (next three floats), and writes the two baked fields exactly as the
 > equations above:
 > - `localPos` = subtract the bind-world translation from the rest position **first**, then rotate by
@@ -1092,6 +1116,13 @@ active rotation `q ⊗ v ⊗ q⁻¹` for a unit quaternion.
 > animated **local translation** in the world walk (§6.6). Both are uniform scalars but they apply to
 > different quantities; an importer that bakes scale into its skeleton must apply the per-node scale in
 > the bone world transform and the per-mesh scale to the skinned positions.
+>
+> **VB lock budget (port detail).** The deform upload routine locks the dynamic vertex buffer with a
+> size cap and copies exactly **32 × vertCount** bytes per skin part into the locked region. This
+> confirms the 32-byte upload vertex stride and bounds the per-skin vertex count: a skin part may not
+> exceed the lock cap in total deformed bytes. A faithful port that manages its own CPU-side vertex
+> buffer should budget accordingly; the cap is a structural constraint of the legacy upload path, not
+> an artifact to work around.
 
 ### 5.4 Influences per vertex are unbounded by the format
 
@@ -1150,7 +1181,8 @@ Each frame the mixer builds the animated pose in passes:
 1. **Reset** every pose node's per-pass accumulators.
 2. **Action-layer pass:** sample each one-shot clip's tracks and blend each sample into the matching
    bone with a running normalized weighted average (first contributor assigns; later contributors
-   LERP/SLERP by `w_new / (w_acc + w_new)`, the denominator floored at 0.001).
+   LERP/SLERP by `w_new / (w_acc + w_new)`, the denominator floored at 0.001 — see note below on
+   the `logf` guard that selects the floor branch).
 3. **Commit pass:** fold the accumulated sample into each node's **local animated** translation/rotation
    slots, blended against any previously committed value. **Interior-bone translation lock:** the local
    **translation is forced to the bind-pose local translation** only for an **interior** bone — one
@@ -1158,7 +1190,19 @@ Each frame the mixer builds the animated pose in passes:
    fixed bind-pose bone length and only rotate. The **root**, the root's **direct children**, and the
    **leaf** bones instead take the blended (LERP'd) accumulator translation. (This is narrower than the
    prior phrasing "every non-root bone is locked" — see §6.3.) The first contributor assigns; later
-   contributors blend by `w_new / (w_acc + w_new)` with the denominator floored at 0.001.
+   contributors blend by `w_new / (w_acc + w_new)` with the denominator floored at 0.001 — same `logf`
+   guard as the accumulate pass.
+
+> **The 0.001 denominator floor uses a genuine `logf` guard (static-confirmed).** The floor branch is
+> taken when `logf(committedWeight + accumWeight) < 0.001`; in that branch the denominator is forced to
+> `0.001` and `frac = accumWeight / 0.001`. Otherwise `frac = accumWeight / (committedWeight + accumWeight)`.
+> The 0.001 floor value is real. The earlier "almost certainly a decompiler mis-symbol of an
+> absolute-value epsilon clamp" framing for these two floors is **dropped** — the logarithm call is a
+> genuine CRT function. For a 1:1 port: the guard fires only at vanishing accumulated weight, so the
+> practical effect (prevent divide-by-zero on the first contributor) is unchanged regardless of whether
+> the port reproduces the `logf` guard or uses a simpler `< 0.001` direct compare on the sum — but the
+> faithful behaviour is the `logf` form. (The §2.1 vertex-dedup epsilon has not been re-checked and
+> remains capture/debugger-pending separately.)
 4. **Cycle-layer pass:** same accumulate-then-commit for the looping clips, using the sync-mode sample
    time where applicable (computed as `key_count · clip_field / sync_denominator` when the clip's sync
    flag is set, else a stored clip time; detail owned by `formats/animation.md` §Sync-phase mechanism).
@@ -1512,19 +1556,20 @@ class renders correctly purely because its shared default choice coincided with 
    carry the class's `id_b`). Apply the **+90°-about-Z stand-up remap** (§8(b)) uniformly across all
    parts + bones + keyframes so the geometry stands upright (native-X height → Godot +Y) without
    breaking the §0 cancellation.
-4. **Defensive guard (importer hardening — NOT legacy parity).** The legacy bone resolver
-   **CLAMPS** an out-of-range id to the **last bone**: when `id − base_id ≥ bone_count` it returns
-   `pose_bone_base + 88 · bone_count − 88`, and the mixer's non-null guard never fires because the
-   clamped result is non-null. So in the original, an out-of-range `.mot` track id drives the **last
-   bone** and an out-of-range `.skn` weight id binds the **last bone** — it does not skip. This clamp
-   is just as wrong for a mismatched rig as skipping would be (a redirected influence is wrong either
-   way), so the §8(e) rig-identity invariant is what actually matters; clamp-vs-skip only changes the
-   *visual signature* of a mismatch (clamp piles geometry onto the last bone; skip freezes that
-   vertex/track). For a robust importer we therefore **recommend SKIPPING** any track/weight whose
-   `bone_id` falls outside `[base_id, base_id + bone_count)` rather than reproducing the legacy clamp —
-   a skipped influence is at least inert, whereas a clamp actively drags the mesh onto one bone. Treat
-   "skip" as the recommended hardening, "clamp-to-last-bone" as the faithful legacy behaviour
-   (`formats/animation.md` §Bone-track linkage).
+4. **Defensive guard (importer hardening — NOT legacy parity).** Two distinct resolvers handle
+   out-of-range ids differently (§3.2):
+   - The **runtime 88-byte resolver** (used by the deform loop and `.mot` track binders) **CLAMPS** to
+     the last bone — when `id − base_id ≥ bone_count` it returns `pose_bone_base + 88 · bone_count − 88`.
+     The downstream non-null guard never fires on a clamp, so an out-of-range `.mot` track id drives the
+     last bone and an out-of-range `.skn` weight id at deform time binds the last bone.
+   - The **bake-time 72-byte bind resolver** (used by the inverse-bind bake, §4) returns **NULL** with
+     no clamp when `id − base_id ≥ bone_count`. The bake has no null guard at the call site — a `.skn`
+     weight whose bone id is out of range is a hard fault at bake time.
+   Both outcomes are wrong for a mismatched rig; the rig-identity invariant is what actually matters.
+   For a robust importer **recommend SKIPPING** any track/weight whose `bone_id` falls outside
+   `[base_id, base_id + bone_count)` rather than reproducing either legacy behaviour — a skipped
+   influence is inert, whereas a clamp piles geometry onto one bone and a NULL dereference faults the
+   bake. Treat "skip" as the recommended hardening (`formats/animation.md` §Bone-track linkage).
 5. **Honour §6.3 (secondary hazard, not the cause):** idle clips store a **non-zero translation on
    nearly every child track on disk**, which the legacy engine ignores — child bones rotate only and
    keep their bind-pose local translation; only the root translates. Feed **rotation tracks for child
@@ -1548,7 +1593,8 @@ shared default. This is the recovered cause of the char-create preview shatter c
 | Skeleton-selection key + skeleton preload (§8(e)) | RESOLVED (CONFIRMED static, CYCLE 1) — the `.skn` `id_b` is the verbatim pose-pool key (no `g{N}.bnd` formatting / slot transform at the resolve site); all listed `.bnd` are eager-preloaded at boot keyed by parsed `actor_id`; mobs reach the same pool via the animation-catalogue indirection | None for the resolve mechanism; the concrete `model_class_id → loaded `.bnd`` value-edge + the per-category base-offset table remain value-edges (§3.5.5) |
 | Exact Godot quaternion remap under Z-negation | PROPOSED — `(x,y,z,w) → (−x,−y,z,w)` is the expected mapping but must be checked against one real bone rotation | Get it wrong and the rig twists; validate before mass import |
 | `.skn` GEOMETRY height-axis + importer stand-up remap | **CORRECTED 2026-06-21 (visual-oracle): native X → +90°-about-Z importer remap.** The rest-mesh is authored X-TALL (height along native X), measured against the visual oracle (raw rest-mesh bytes tall-along-X *pre-deform*, e.g. g1 body ≈ X 5.0 > Y 2.4 > Z 1.7; deformed frame-0 AABB recumbent at an identity pivot). It is a pure asset-orientation property — the inverse-bind cancellation passes at the float-noise floor — so a faithful import applies a **+90°-about-Z importer (display-node) stand-up remap** (native +X height → Godot +Y), applied uniformly to bones+verts+keyframes. SUPERSEDES the prior "RESOLVED to Y-up / identity import" reading. The world-PLACEMENT / HEADING up axis stays Y (yaw about Y), a separate quantity that is unaffected | The "avatar lies on X" symptom is the as-authored geometry axis — **ADD** the +90°-Z stand-up remap (§8(b)); do NOT remove a non-existent upstream rotation. Verify with the deformed-pose AABB (tall along Y with the remap applied). A future engineer MUST NOT re-zero `UpAxisRemapDeg` on stale "identity" wording |
-| Log-shaped epsilon tests (dedup §2.1; accumulate / commit floors §6.2) | CAPTURE/DEBUGGER-PENDING — the three tests disassemble as a logarithm-shaped intrinsic compared against 0.001, almost certainly a decompiler mis-symbol of an absolute-value epsilon clamp; behaviourally treated as a 0.001 clamp | A debugger step over one site confirms the intrinsic; no importer impact (treat as a 0.001 clamp) |
+| Epsilon tests — accumulate / commit denominator floors (§6.2) | **RESOLVED (static-confirmed)** — both floors use a **genuine `logf` call** (real CRT logarithm): the floor branch is taken when `logf(committedWeight + accumWeight) < 0.001`; denominator is forced to `0.001` in that branch. The "decompiler mis-symbol of an abs-value clamp" framing is dropped. See §6.2 note | No importer impact in practice (floor fires only at vanishing weight); a faithful port reproduces the `logf` form |
+| Epsilon test — per-axis vertex-dedup tolerance (§2.1) | CAPTURE/DEBUGGER-PENDING — surfaces as a log-shaped intrinsic compared against 0.001; not re-checked this audit pass; whether it is a genuine `logf` or a plain absolute-value compare is open | Treat as a 0.001 per-axis absolute-value tolerance until confirmed; no importer impact |
 | Per-mesh + per-node `scale` (§3.4, §5.3, §6.6) | RESOLVED (CAMPAIGN 9, re-confirmed CAMPAIGN 10) — per-mesh scale is a skin-object field set at attach as `nodeScale · meshScale` (× optional non-zero override); a separate per-node scale lives at runtime bone +84; both generally non-unit | The importer **must read and apply** the per-mesh scale to positions and the per-node scale to bone-local translation (not normals, not rotations); do NOT assume 1.0 |
 | Faithful vs. renormalized interpolation alpha (§6.1) | PROPOSED choice — both are documented; pick one per project taste | Affects playback feel, not correctness; document the choice |
 | `actormotion.txt` columns 3–14 semantics | PROPOSED — offsets/types confirmed, meanings inferred (see `formats/animation.md` §`actormotion.txt` layout) | Not needed to deform; do not branch on these until confirmed |

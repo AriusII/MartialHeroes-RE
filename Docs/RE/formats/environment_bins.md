@@ -16,6 +16,16 @@
 > asset paths are CONFIRMED from the loader and a 95-file corpus. The **colour domains** of
 > these fields (which colours are byte D3DCOLOR vs. float [0,1]) and how they feed the runtime
 > lighting/fog math are pinned in §10 and consumed by `Docs/RE/specs/environment.md`.
+>
+> **Out of scope — per-map region group (`data/map<NNN>/`):** the per-area area-metadata files
+> `map<NNN>.bin` (520 B flat), `regiontable<NNN>.bin` (32 × 48 B region-properties table; only
+> first 1 536 B of the 1 664 B on-disk file are read), and `region<NNN>.bin` (u32 gridWidth +
+> u32 gridHeight + w×h region-id bytes + u32 originX + u32 originZ) are loaded by a distinct
+> per-area region loader and form a **separate sibling family** — they share the area-id integer
+> key but live under a different VFS path and carry no sky/dat data. They are fully specified in
+> `Docs/RE/formats/region_grid.md` (region%03d.bin and regiontable%03d.bin) and
+> `Docs/RE/formats/misc_data.md §7` (mapsetting / regiontable cross-reference). Do not look to
+> this document for their field tables.
 
 ---
 
@@ -23,10 +33,11 @@
 
 ```
 verification:   sample-verified   # all 8 env-bin family sizes + fog start/end + ambient-floor chain matched against a real VFS sample
-ida_reverified: 2026-06-20         # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
+ida_reverified: 2026-06-24         # CYCLE 11 archive pass (2026-06-24), IDB SHA 263bd994 — static re-walk confirmed all sky/dat sizes byte-exact; point_light header f32 type re-confirmed; map-region group confirmed as separate family (→ region_grid.md)
+ida_reverified_prev: 2026-06-20   # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
 ida_anchor:     263bd994
 evidence:       [static-ida, vfs-sample]
-conflicts:      none-open         # campaign-10 D6 found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
+conflicts:      none-open         # campaign-10 D6 + cycle-11 archive pass found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
 cycle7_additions:                  # CYCLE 7 static re-walk (all HIGH immediates unless noted)
   - in-memory engine fog struct layout pinned: type@+44 (1=EXP/2=EXP2/3=LINEAR), colour@+48 (4-byte ARGB), start@+52 f32, end@+56 f32, density@+60 f32 (§10.3)
   - material SYNTH default (missing material.bin): ambient 0.30000001, diffuse 0.8, specular 0.0, emissive 0.0 (§3.4)
@@ -1370,6 +1381,12 @@ and therefore has no water texture assets (§1.4).
     §13 of this document is the authoritative full spec for `point_light%d.bin`)
   - `Docs/RE/formats/terrain.md` — terrain cell formats (`.ted`, `.map`, `.sod`)
   - `Docs/RE/formats/texture.md` — DDS texture container
+  - `Docs/RE/formats/region_grid.md` — the per-map region sibling family (`region<NNN>.bin`,
+    `regiontable<NNN>.bin`): region-id grid, 32-slot region-properties table, zoneType enum;
+    loaded by the same per-area chain as `map<NNN>.bin` but scoped to spatial region partitioning,
+    not sky/environment data (see scope note above)
+  - `Docs/RE/formats/misc_data.md §7` — `mapsetting.scr` and `regiontable<NNN>.bin`
+    cross-reference (sub-zone label / zone-type context)
 - **Runtime assembly spec:** `Docs/RE/specs/environment.md` (the runtime lighting/fog math, the
   asymmetric ambient gate `K_ambient` = 0.0, the `OPTION_BRIGHT` brightness slider default 100, and
   the "too-dark" fix; §6 there consumes the colour domains and apply-path fields pinned in §10 here)
@@ -1434,3 +1451,20 @@ files are dead editor data, do not parse (§8); (4) stardome tint is PER-STAR (c
 bytes BGRA per star), CONFIRMED, refuting the "uniform per keyframe" reading (§4.3); (5) environment
 hub default-tolerates absent siblings (skip-and-default), with the single indoor-area sky-init bypass
 marked DBG-pending (Overview, §1.5, §10.7). No addresses, no pseudo-code.
+
+**CYCLE 11 archive pass (build `263bd994`; static IDA re-walk + full sky/dat VFS corpus +
+`extract/data/{sky/dat,map000}/` sample bytes).** RE-CONFIRMATION pass against the archive
+sample set. No layout changes: all core numerics stand confirmed. Prose additions only:
+(1) Scope note extended to call out the per-map **region sibling family** (`map<NNN>.bin`,
+`regiontable<NNN>.bin`, `region<NNN>.bin`) as an out-of-scope distinct family with pointers to
+`Docs/RE/formats/region_grid.md` and `Docs/RE/formats/misc_data.md §7` — the group shares the
+area-id key but lives under `data/map<NNN>/`, not `data/sky/dat/`, and was correctly absent from
+this spec. (2) Cross-references extended with entries for `region_grid.md` and `misc_data.md §7`.
+(3) Verification banner updated: `ida_reverified` timestamp advanced to 2026-06-24; prior
+timestamp preserved as `ida_reverified_prev`. All sky/dat file sizes re-confirmed byte-exact
+against sample data (map_option 40 B, fog 204 B, material 9 792 B, stardome 9 216 B,
+clouddome 23 040 B, cloud_cycle 70 B, weather 240 B, weather_rain 240 B, light 5 312 B,
+point_light 308 B / 5-record sample, wind 8 B / 104 B per §12.1 corpus). `point_light%d.bin`
+header field confirmed f32 (IEEE-754 float 1 000.0 from sample bytes), consistent with §13.1
+naming of `proximity_radius` as f32; no conflict with `terrain_layers.md §7.1` which already
+calls the field f32. No addresses, no pseudo-code.

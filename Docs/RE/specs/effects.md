@@ -215,7 +215,7 @@ All three spawn paths call the same **lazy-load resolver**. The resolver:
 
 1. Looks up the requested `effect_id` in the manager's sorted map.
 2. If not found → writes an invalid flag into the new instance object, calls its destructor (returns to pool without entering the active list), and the spawn is silently abandoned.
-3. If found but `CoreXEffect.loaded_flag` is clear → calls the load callback via the virtual dispatch table. This triggers the full element parse: reads all sub-effect elements, resolves textures, loads alpha and scale curves, and reads the keyframe array into heap-allocated arrays within the `CoreXEffect`. The parser reads the **first u32 of the file header as the `effect_id` directly** — the header is **id-first, NOT magic-prefixed**. A loader that begins the file with a literal `"XEFF"` ASCII magic is treated as an **error**: if that first u32 equals the little-endian value of the four bytes `"XEFF"`, the parser emits an "id error … maybe start with XEFF" diagnostic and aborts the parse. A faithful reimplementation must NOT expect or skip an `"XEFF"` magic; it must read the id-first header. (Block D owns the byte layout in `formats/effects.md §A.2`; this is the behavioural rejection rule.) CONFIRMED.
+3. If found but `CoreXEffect.loaded_flag` is clear → calls the load callback via the virtual dispatch table. This triggers the full element parse: reads all sub-effect elements, resolves textures, loads alpha and scale curves, and reads the keyframe array into heap-allocated arrays within the `CoreXEffect`. The parser reads the **first u32 of the file header as the `effect_id` directly** — the header is **id-first, NOT magic-prefixed**. A loader that begins the file with a literal `"XEFF"` ASCII magic is treated as an **error**: if that first u32 equals the little-endian value of the four bytes `"XEFF"` (the concrete compare sentinel is the decimal integer **1179010392**, which is the four ASCII bytes `X`, `E`, `F`, `F` packed little-endian), the parser emits an "id error … maybe start with XEFF" diagnostic and aborts the parse. A faithful reimplementation must NOT expect or skip an `"XEFF"` magic; it must read the id-first header and reject any file whose first u32 equals 1179010392. (Block D owns the byte layout in `formats/effects.md §A.2`; this is the behavioural rejection rule.) CONFIRMED.
 4. On success → records the load timestamp in the `CoreXEffect`, applies the `effectscale.xdb` override as a REPLACE of `scale_default` (§14.9), and returns the descriptor pointer.
 
 ### 5.2 Active-list management — a per-actor list, not a single global pool (CYCLE 7)
@@ -949,10 +949,12 @@ components). The per-frame sampler then lerps that assembled `Vec3` linearly, de
 `(1, 1, 1)` when a key count is 0. The colour channel is a **per-keyframe diffuse tint**, not a scale.
 
 **Rotation keys are stored as Euler degrees (CONFIRMED).** Each rotation key is read as an Euler
-triple in **degrees** and multiplied by `π/180` (≈ 0.0174532925) to radians, then converted to a
-**quaternion** in **XYZW (scalar-last, `w` in the 4th lane)** order before the slerp above. A faithful
-reimplementation must convert degrees → radians and build an XYZW quaternion from the Euler triple; it
-must not treat the stored values as radians or as a quaternion directly.
+triple in **degrees** and multiplied by `π/180` to radians, then converted to a
+**quaternion** in **XYZW (scalar-last, `w` in the 4th lane)** order before the slerp above. The
+degrees-to-radians factor is the bit-exact single-precision constant **0.017453292** (the same value
+is reused for all per-key rotation triples and for the extra rotation triple read when `emitter_type
+== 2`). A faithful reimplementation must convert degrees → radians and build an XYZW quaternion from
+the Euler triple; it must not treat the stored values as radians or as a quaternion directly.
 
 **Texture scroll (independent of keyframes):** a per-component render flag byte enables a continuous
 texture scroll on top of the keyframes — if its low bit is set, each vertex's U texture coordinate is

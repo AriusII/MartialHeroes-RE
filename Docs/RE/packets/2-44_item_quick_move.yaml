@@ -1,40 +1,45 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED VALUE semantics; the fixed 12-byte body size is control-flow CONFIRMED from the
-# shared item-model quick-move sender. capture_verified: false.
+# CAPTURE-UNVERIFIED VALUE semantics; the fixed 12-byte body size and 5+3+4 field shape are
+# control-flow CONFIRMED from the item-model quick-move body packer.
+# verification: doida.exe sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
 name: CmsgItemQuickMove
 opcode: 0x2002c           # major 2 (GameAction), minor 44 -> (2 << 16) | 44
 direction: C2S
-size: 12                  # fixed 12-byte body built by the shared item-model quick-move body packer
+size: 12                  # fixed 12-byte body: 5 written bytes + 3-byte reserved gap + u32
 spec: packets/2-44_item_quick_move.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Client item quick-move / shift-transfer -- the shared item-model "quick move" send that moves an item to-or-from a container in one shortcut action (no held-item drag). A fixed 12-byte body with the same shape as the plain move (2/46): a leading mode/selector and container/slot parameters plus a context word. The storage ("keep") grid uses it to quick-transfer items into / out of its 60-cell storage grid.
+summary: Client item quick-move / shift-transfer -- the item-model quick-move send that moves an item to-or-from a container in one shortcut action (no held-item drag). A fixed 12-byte body: five leading parameter bytes (Mode + B1..B4), a 3-byte unwritten reserved gap, then a 4-byte context word. The storage ("keep") grid uses it to quick-transfer items into / out of its 60-cell storage grid.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 12.
-# CONTROL-FLOW CONFIRMED: the shared item-model quick-move sender packs a 12-byte body (six leading
-# single bytes, a 2-byte gap, then a 4-byte context word) and appends it after the 8-byte frame header.
+# CONTROL-FLOW CONFIRMED: the item-model quick-move body packer writes 5 bytes at +0x00..+0x04,
+# leaves +0x05..+0x07 unwritten (3-byte reserved gap), then writes a u32 at +0x08.
 fields:
   - { name: Mode,    type: u8 }          # 0x00  mode / selector byte (quick-move parameters)
   - { name: B1,      type: u8 }          # 0x01  container / slot parameter
   - { name: B2,      type: u8 }          # 0x02  container / slot parameter
   - { name: B3,      type: u8 }          # 0x03  container / slot parameter
   - { name: B4,      type: u8 }          # 0x04  container / slot parameter
-  - { name: B5,      type: u8 }          # 0x05  container / slot parameter
-  - { name: Pad0,    type: "bytes[2]" }  # 0x06  2-byte gap before the context word
+  - { name: Pad0,    type: "bytes[3]" }  # 0x05  3-byte unwritten reserved gap before the context word
   - { name: Context, type: u32 }         # 0x08  context word (held item-model id; 0 in the keep-open path)
 
 notes: |
-  CONTROL-FLOW CONFIRMED body size (a fixed 12-byte send) and the 6-byte + gap + 4-byte shape;
+  CONTROL-FLOW CONFIRMED body size (a fixed 12-byte send) and the 5-byte + 3-byte-gap + 4-byte shape;
   CAPTURE-UNVERIFIED in the exact VALUE meaning of each leading byte. The shape mirrors 2/46
   CmsgItemMove -- the leading bytes encode a mode/selector and a source/destination container & slot
   set. The precise per-byte assignment is capture-pending; model them as raw bytes and do NOT hardcode
   a deposit/withdraw constant.
 
+  CORRECTED (lane-03 audit): the YAML previously listed six leading single bytes (Mode + B1..B5) and
+  a 2-byte Pad0 at 0x06. The packer only writes five bytes (+0x00..+0x04); +0x05..+0x07 are unwritten
+  stack bytes (3-byte reserved gap). B5 at 0x05 was incorrect and has been removed; Pad0 is 3 bytes
+  starting at 0x05, not 2 bytes at 0x06.
+
     0x00 (1B)  Mode    : the quick-move mode / selector byte.
-    0x01..0x05 (5x u8) : the source/destination container & slot parameters.
-    0x06 (2B)  Pad0    : a 2-byte gap before the context word; alignment/stack bytes, should be zeroed.
+    0x01..0x04 (4x u8) : the source/destination container & slot parameters (B1..B4).
+    0x05 (3B)  Pad0    : 3-byte unwritten reserved gap; treat as zeroed on encode.
     0x08 (4B)  Context : a context word -- the held item-model id, 0 when the keep (storage) window is
                          open. CONTROL-FLOW CONFIRMED as the trailing 4-byte field; meaning is a static
                          inference.
@@ -52,7 +57,7 @@ notes: |
 
   UNKNOWNS to resolve with an item-quick-move / storage capture (body size is settled at 12; these are
   VALUE questions):
-    - the per-byte assignment of Mode + B1..B5 (mode vs source container/slot vs destination slot);
+    - the per-byte assignment of Mode + B1..B4 (mode vs source container/slot vs destination slot);
     - confirm Context = held item-model id (0 when keep open) on the wire;
     - whether Pad0 is always zero.
 

@@ -5,10 +5,10 @@ build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wav
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
 verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read")
-ida_reverified: 2026-06-21   # CYCLE 8 (263bd994): frame header, asymmetric transform (C2S cipher+LZ4 / S2C LZ4-only, cipher single-xref), 3-phase handshake, keepalive 2/10000=20s, major-4/major-5 154-slot tables (98 Response / 65 Push installed), SO_RCVBUF-only / Nagle ON — all re-confirmed CODE-CONFIRMED, zero conflicts. Prior: §4.5 keepalive cadence re-verified CYCLE 7 (2026-06-20)
+ida_reverified: 2026-06-24   # network-dispatch audit (263bd994): §1.4 (0,0) branch step-3 corrected — sets suppress latch at +0x141BC, not a distinct key-exchange-complete flag; §4.5a 5/146 system-message resolved to string id 51027 (was capture-pending); 2/146 reply local_counter sourced from 16-bit global counter/state; §4.4a recv buffer geometry added (buffer at conn+100, fill at dword[23], consumed at dword[24], 4 events at dwords 20512-20515, IO-thread handle at dword[20548]); §5.1 10001 timer two-interval fact confirmed (5000 ms / 10000 ms on state-2 non-clear branch, not a single ~5000 ms). Prior: CYCLE 8 2026-06-21
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) the open "second worker" item is RESOLVED — there is a THREE-thread model (recv consumer + keepalive timer on the NetClient side, and a THIRD socket-I/O thread spawned by the connection's connect routine that does WSARecv-completion → frame reassembly → recv queue → re-arm, and also services the send-signal → WSASend); (e) the 2/10000 keepalive body is 4 bytes (one zero u32), NOT header-only; (f) the exhaustive Response/Push install slot maps are folded in (§2a/§2b), cross-referencing opcodes.md for handler NAMES; (g) the 5/146→C2S 2/146 ack-request handshake is recorded; (h) {202/203/232} 3/100 codes prime GameState=2 (cross-link to §5); (i) PHANTOM REFUTED — there is NO 5000/10000/10001 string-id class (5000=display-duration ms; 10000=keepalive minor + 10 s timer; 10001=timed-event tag)
+conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) THREE-thread model resolved; (e) 2/10000 body = 4 bytes; (f) Response/Push install slot maps folded in (§2a/§2b); (g) 5/146→C2S 2/146 ack-request handshake recorded; (h) {202/203/232} 3/100 codes prime GameState=2; (i) PHANTOM REFUTED — no 5000/10000/10001 string-id class. 2026-06-24 network-dispatch audit: (j) §1.4 step-3 corrected — (0,0) branch sets suppress latch +0x141BC, not a separate key-exchange-complete flag; (k) §4.5a 5/146 system-message string id resolved to 51027; (l) §5.1 10001 timer two-interval fact (5000 ms / 10000 ms); (m) §4.4a recv buffer geometry added
 ---
 
 # Network Dispatch & Connection Lifecycle — Clean-Room Specification
@@ -206,7 +206,7 @@ handshake**. *([confirmed]* control flow; the *meaning* of each blob field is
    convergence (§6.1). This is the structural link **dispatch `(0,0)` → emits the `1/4` login
    credential** — the same `1/4` opcode the login-credential spec documents. *([confirmed]* routing /
    send path; payload field semantics are `[capture/debugger-pending]`.)
-3. **Sets a "key-exchange complete" flag** on the network-client object.
+3. **Sets the suppress latch (`+0x141BC`) on the network-client object** (corrected 2026-06-24 — confirmed by the binary's terminal store on the (0,0) branch). The latch set here is the **same `request_in_flight_latch`** byte at `+0x141BC` that the keepalive timer reads (see §4.5b); the (0,0) branch arms the suppress, and the `1/4` reactive send clears it. There is **no** distinct "key-exchange complete flag" at `+0x141FC`.
 
 > **S2C `(0,0)` body — interoperability summary** (read order; sizes confirmed, semantics pending):
 >
@@ -515,6 +515,17 @@ The thread then loops on a wait over those events: *([confirmed]; build 263bd994
   > the high word of the size is always zero. The header layout owned by `opcodes.md` is unaffected:
   > on the wire the size is a u32; the reassembler simply uses its low half as the frame length.
   > *([confirmed].)*
+
+  > **Reassembly buffer geometry (confirmed 2026-06-24).** The receive reassembly buffer starts at
+  > `conn + 100` bytes from the connection sub-object base. The I/O thread tracks two cursor fields
+  > inside the connection object: **fill count** at connection dword index `[23]` (bytes currently
+  > buffered) and **consumed offset** at connection dword index `[24]` (bytes already delivered to
+  > the receive queue). The frame-size u16 is read at `conn + consumed + 100`. The four auto-reset
+  > I/O events (receive-completion, send-signal, shutdown, graceful-close) reside at connection
+  > dword indices `[20512]` through `[20515]`. The I/O thread handle itself is at connection dword
+  > index `[20548]`. These are **struct/layout facts for the connection sub-object**, not wire fields.
+  > *([confirmed] from the reassembly routines; see `structs/net_client.md` for the full object
+  > layout.)*
 - **Send-signal event** → under the send-queue lock, if a frame is queued, perform the actual
   `WSASend` of the head frame (fill a socket buffer descriptor from the frame pointer and the frame's
   u32 size word, post the overlapped send, then free the frame). This is the same send-drain step
@@ -666,16 +677,19 @@ sizes / reply opcode; the field VALUE meanings are `[capture/debugger-pending]`.
   fixed-size records keyed on the token, with a state filter). **If no matching pending request is
   found, the handler does nothing — no reply is sent.** The client only acks requests it actually has
   outstanding.
-- On a match it surfaces a preset coloured system message (a message-DB string, id `[capture-pending]`)
-  and then **builds and sends a C2S `2/146` reply** with an **8-byte body**: `[u32 echoed request id]`
-  (the inbound id echoed back) followed by `[u32 local counter / state]` (a local ack counter). The
-  reply goes out through the normal send convergence (§6.1 — cipher + compress + queue).
+- On a match it surfaces a preset coloured system message from the message database — **string id
+  `51027`** (resolved 2026-06-24; previously capture-pending) — and then **builds and sends a C2S
+  `2/146` reply** with an **8-byte body**: `[u32 echoed request id]` (the inbound id echoed back)
+  followed by `[u32 local counter / state]` (a local ack counter; sourced from a 16-bit global
+  counter/state word). The reply goes out through the normal send convergence (§6.1 — cipher +
+  compress + queue).
 
 > **One-line summary.** Server sends **`5/146`** `[u32 req_id][u32 token]`; the client, *iff* it has
 > that request pending, replies with **C2S `2/146`** `[u32 echoed_req_id][u32 local_counter]`. So
-> **`5/146`'s reply opcode is `2/146`.** `opcodes.md` owns both catalogue rows; `handlers.md` owns
-> the per-handler behaviour. *([confirmed]* shape; the meaning of `token`, `local_counter` and the
-> system message id are `[capture/debugger-pending]`.)
+> **`5/146`'s reply opcode is `2/146`.** The system message surfaced on a match is message-DB string
+> **`51027`**. `opcodes.md` owns both catalogue rows; `handlers.md` owns the per-handler behaviour.
+> *([confirmed]* shape + message id; the meaning of `token` and `local_counter` are
+> `[capture/debugger-pending]`.)
 
 ### 4.6 Disconnect
 
@@ -707,8 +721,10 @@ the game-state code, the timed-event tag, and the numeric state codes, never a w
 ### 5.1 Inputs
 
 - A **timed-event tag `10001`** drives the time-based transitions (e.g. a connection-attempt
-  timeout / retry tick); the machine arms `10001` timers (recovered as a ~5000 ms tick) on several
-  state branches. *(LIKELY role; meaning `[capture/debugger-pending]`.)*
+  timeout / retry tick); the machine arms `10001` timers on several state branches. The arm uses
+  **two distinct intervals**: **5000 ms on most branches** and **10000 ms on the state-2 non-clear
+  branch** (corrected 2026-06-24 — earlier "~5000 ms" was a single-interval approximation; binary
+  proves both values). *(LIKELY role; meaning `[capture/debugger-pending]`.)*
 - The **current game-state code** selects which transition branch runs (the top-level switch).
 - A small set of **numeric state codes** (§5.2) select the transition outcome. These codes are the
   recovered facts; their precise game-state meaning is inferred.

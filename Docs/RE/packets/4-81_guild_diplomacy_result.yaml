@@ -51,8 +51,19 @@ notes: |
   feedback used across subsystems. (Guild diplomacy/state outcomes ride 4/61
   SmsgGuildStateChangeResult.)
 
+  STATIC-CONFIRMED ERROR -> NOTICE-STRING MAP (message-database keys, NOT addresses):
+    1->21074, 2->21075, 3->21076, 4->21077, 5->2163, 6->21097, 7->2164, 8->2165,
+    9->2166, 0xA->2167, 0xB->2168, 0xC->2169 (+ extra UI call), 0xD->2170, 0xE->2171,
+    0xF->51016, 0x10->51017, 0x11->51018+51019, 0x12->51020, 0x13->51023, 0x14->51019,
+    0x15->mm:ss (reads seconds byte @+0x0A; string id 51024 with minutes / 51025 without),
+    0x17->percent (reads server-config percent, no wire byte; string id 51029),
+    0x18->51033, default->no-op.
+  (Status @+0x08 == 1 -> success forward: passes body+8 onward to an action sub-handler; if
+   Error byte == 100 (0x64) it additionally shows message id 51026. Error == 255 (0xFF) ->
+   generic default notice, string id 21078.)
+
   UNKNOWNS to resolve with a capture:
-    - the full Error -> notice-string map and the exact codes that consume the extra trailing field;
+    - value meanings for each Error code in context;
     - the internal fields of the 8-byte leading Head region.
 
   IMPLEMENTATION NOTE: decode Status + Error; for the two extra-byte codes read the trailing seconds /

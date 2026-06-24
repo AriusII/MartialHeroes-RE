@@ -1,25 +1,28 @@
 name: SmsgItemUseResult
 opcode: 0x40005           # major 4, minor 5
 direction: S2C
-size: 44                  # fixed 44-byte body
+size: 44                  # fixed 44-byte body (0x2C)
 spec: packets/4-5_item_use_result.yaml
 status: confirmed
 capture_verified: false
+verification: idb-sha256:263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
-summary: Server response to an item use request. Reports whether the item use succeeded and triggers local client animations and sounds, or surfaces failure cooldowns and error logs.
+summary: Server response to an item use request. Reports whether the item use succeeded and triggers local client animations and sounds, or surfaces failure error messages derived from item category via the message DB.
 
 fields:
-  - { name: Header,      type: "bytes[8]" }   # 0x00 Opaque / Header region
-  - { name: ActorId,     type: u32 }          # 0x08 Target / Actor Composite Key
-  - { name: Success,     type: u8 }           # 0x0c 1 = success, 0 = failure / cooldown
-  - { name: ResultCode,  type: u8 }           # 0x0d Failure reason / Message DB code index
-  - { name: Mode,        type: u8 }           # 0x0e Mode / visual context flag
-  - { name: SlotIndex,   type: u8 }           # 0x0f Inventory slot index of the item used
-  - { name: ItemActorId, type: u32 }          # 0x10 Id of the item actor template
-  - { name: Cooldown,    type: u32 }          # 0x14 Cooldown remaining time in seconds / ms
-  - { name: Trailer,     type: "bytes[20]" }  # 0x18 Opaque trailer
+  - { name: Opaque0,    type: "bytes[4]" }   # 0x00 Opaque header region (not gated)
+  - { name: ActorKey,   type: u32 }          # 0x04 Actor composite key
+  - { name: Success,    type: u8 }           # 0x08 Gate: 1 = success, 0 = failure
+  - { name: ResultCode, type: u8 }           # 0x09 Failure selector / message DB code index
+  - { name: Mode,       type: u8 }           # 0x0a Mode / visual context flag
+  - { name: SlotIndex,  type: u8 }           # 0x0b Inventory slot index of the item used
+  - { name: Trailer,    type: "bytes[32]" }  # 0x0c Opaque trailer — NOT read by this handler
 
 notes: |
-  The handler reads a fixed 44-byte body. Frame = 8-byte header + 44 = 52 bytes on the wire.
-  On success (Success == 1), it plays the item use SFX and spawns anchors based on the ItemId.
-  On failure (Success == 0), it reads ResultCode and prints category-specific error formatting (e.g. cooldown time remaining) from Message DB.
+  The handler reads a fixed 44-byte body (0x2C). Frame = 8-byte wire header + 44 = 52 bytes on the wire.
+  Gate field is Success at body+8 (0x08), not offset 0.
+  On success (Success == 1), the handler plays the item use SFX and spawns anchors based on the item slot.
+  On failure (Success == 0), ResultCode at 0x09 selects a category-specific error string from the message DB.
+  Cooldown text is derived from item category via message DB lookup — no cooldown value field is present in
+  this packet. The prior field map (ActorId@0x08, Success@0x0c, ItemActorId@0x10, Cooldown@0x14) was
+  incorrect; all fields were shifted ~4 bytes late and ItemActorId/Cooldown are not read by the handler.

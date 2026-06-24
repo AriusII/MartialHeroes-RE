@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Client.Presentation.Helpers;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -15,6 +16,12 @@ public sealed partial class CameraController
         }
 
         _focus = PlayerGodotPosition;
+
+        if (_mode is ViewMode.Gamble or ViewMode.Event)
+        {
+            ApplyCurrentModeTransform();
+            return;
+        }
 
 
         var anyKey = false;
@@ -79,6 +86,12 @@ public sealed partial class CameraController
                 break;
             case ViewMode.Static:
                 ApplyStaticTransform();
+                break;
+            case ViewMode.Gamble:
+                ApplyGambleTransform();
+                break;
+            case ViewMode.Event:
+                ApplyEventTransform();
                 break;
             case ViewMode.FreeFly:
                 ApplyFlyTransform();
@@ -157,5 +170,48 @@ public sealed partial class CameraController
 
         Position = eyePos;
         LookAt(focusPoint, Vector3.Up);
+    }
+
+    private void ApplyGambleTransform()
+    {
+        var (gx, _, gz) = WorldCoordinates.ToGodot(GambleEyeLegacyX, 0f, GambleEyeLegacyZ);
+
+        var eyeY = GambleEyeHeightBias;
+        if (GroundHeightFunc is not null)
+            try
+            {
+                var terrainY = GroundHeightFunc(GambleEyeLegacyX, GambleEyeLegacyZ);
+                if (float.IsFinite(terrainY)) eyeY = terrainY + GambleEyeHeightBias;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[Camera] Gamble GroundHeightFunc threw: {ex.Message}");
+            }
+
+        var eyePos = new Vector3(gx, eyeY, gz);
+        var lookAt = _focus + new Vector3(0f, 0f, -GambleFocusZ);
+
+        if (!IsFiniteVector(eyePos)) return;
+        if ((eyePos - lookAt).LengthSquared() < 1e-6f) return;
+
+        Position = eyePos;
+        LookAt(lookAt, Vector3.Up);
+    }
+
+    private void ApplyEventTransform()
+    {
+        var lookAt = _focus + new Vector3(0f, EventLookAtLift, 0f);
+
+        var orbitBasis = Basis.Identity
+            .Rotated(Vector3.Up, _yaw)
+            .Rotated(Basis.Identity.Rotated(Vector3.Up, _yaw).X, EventElevationRad);
+        var eyeOffset = orbitBasis * new Vector3(0f, 0f, EventOrbitBoomDistance);
+        var eyePos = lookAt + eyeOffset;
+
+        if (!IsFiniteVector(eyePos)) return;
+        if ((eyePos - lookAt).LengthSquared() < 1e-6f) return;
+
+        Position = eyePos;
+        LookAt(lookAt, Vector3.Up);
     }
 }

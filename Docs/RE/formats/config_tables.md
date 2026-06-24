@@ -8,7 +8,9 @@
 >   `.scr`/`.do` corpus); loader control-flow facts (the items.scr dispatch discriminator/flags,
 >   the citems billing filter, the .do streaming stride, the class/stance/tier selector) are
 >   [confirmed]; field SEMANTICS that need a live consumer remain capture/debugger-pending.
-> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994 (CYCLE 7 2026-06-20;
+>   config_tables correction pass 2026-06-24: dashs.scr stride corrected 199→796, discript.sc and
+>   assasinjung.do strides re-confirmed, dashs.scr body layout and discript.sc field detail added)
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > conflicts: RESOLVED — citems.scr description-paragraph count (6 vs 10) is settled in favour of **10**
@@ -72,8 +74,12 @@
 >     witnesses; the 166-byte estimate is REFUTED (no loader constant; 166 divides none of the 12
 >     files). The class/stance/tier file selector and its three runtime selection globals are now
 >     documented (§3.5).
->   • dashs.scr / minds.scr (§2.17.5) — **dashs.scr stride is 199 B / 28 records** (file size divides
->     exactly only by 199); the prior "796 B / 7 records" is REFUTED by VFS geometry.
+>   • dashs.scr / minds.scr (§2.17.5) — **dashs.scr stride is 796 B (0x31C) / 7 records** (CORRECTED;
+>     the prior "199 B / 28 records" entry is REFUTED by structural byte analysis: both 199 and 796
+>     divide file-size 5,572 exactly, so divisibility alone is ambiguous; structure decides it — an
+>     incrementing u32 id and a CP949 name sit at every 796-byte boundary while 199-byte boundaries
+>     are 3/4 all-zero; the claim that 5,572 / 796 leaves a non-zero remainder was factually false).
+>     See §2.17.5 for the per-record layout.
 >   • userlevel.scr — stride **60 B / 300 records** re-confirmed sample-verified (a stale "120/150"
 >     estimate elsewhere is refuted).
 
@@ -176,6 +182,7 @@ traced.
 | `data/script/mapsetting.scr` | 84 (0x54) | none | SAMPLE-VERIFIED | Per-zone map settings (52 records: zone id + CP949 name + XZ bounds; see §2.17.6) |
 | `data/script/events.scr` | 520 (0x208) | none | SAMPLE-VERIFIED (two-witness) | Event table — flat fixed-stride array, 1848 records (corrected from the earlier "variable-length / offset-table" framing); 4 consumed fields, rest blob. Authoritative spec: `formats/events_scr.md` (see §2.17.5) |
 | `data/script/helps.scr` | two-level hierarchical | per-page sub-entries | SAMPLE-VERIFIED (first page) | Help text — outer 16-byte page header + N × 48-byte sub-entries (see §2.17 note) |
+| `data/script/dashs.scr` | 796 (0x31C) | none | SAMPLE-VERIFIED (CORRECTED from 199) | Movement-skill reference table, 7 records; `u32` id @ +0, CP949 short name @ +4, long CP949 description ~+0x100, numeric tail +0x304..+0x310; see §2.17.5 |
 | `data/item/items_extra.do` | 48 | none | CONFIRMED | Item extended / 3D-attachment data |
 | `data/script/textcommand.do` | 52 | none | CONFIRMED | Chat command definitions |
 | `data/script/emoticon.do` | 40 | none | CONFIRMED | Emoticon sprite-sheet definitions |
@@ -1116,7 +1123,7 @@ interaction UI menus (party/guild actions, currency names, window toggles, schoo
 | `events.scr` | **flat stride 520 B (0x208) / 1848 records** — sample-verified two-witness (build 263bd994); the earlier "variable-length, indexed / offset-table at +0x64" framing is **CORRECTED** (it is a flat fixed-stride array, not an offset-indexed container). Four fields are consumed by the client (event_id @+0x00, mode_flag @+0x64, a zero-terminated rate array @+0x68, a zero-terminated 9-digit actor-id array @+0x130); the rest is present-but-unread blob. **Authoritative spec: `formats/events_scr.md`** |
 | `helps.scr` | two-level hierarchical | Outer 16-byte page header (`page_id`, `section_id`, reserved, `entry_count`) + `entry_count` × 48-byte sub-entries; first page sample-verified, full page-walk UNVERIFIED |
 | `tiphelp.scr` | variable-length | Loading-screen tip records; `u32` body-size + tip-count header then CP949 tip text; not flat-stride |
-| `dashs.scr` | stride **199 B (0xC7) / 28 records** — sample-verified; the prior "796 B / 7 records" is **REFUTED** (file size 5,572 divides exactly only by 199; 5,572 / 796 leaves a non-zero remainder) | Movement-skill reference table; `u32` id @ +0, CP949 name begins immediately at +4; body layout beyond +0 UNVERIFIED |
+| `dashs.scr` | stride **796 B (0x31C) / 7 records** — SAMPLE-VERIFIED (CORRECTED: the prior "199 B / 28 records" entry is REFUTED; both 199 and 796 divide file-size 5,572 exactly, but structural byte analysis is decisive — a clean incrementing u32 id and a CP949 skill name appear at every 796-byte boundary, while 199-byte boundaries are 3/4 all-zero; 796 = 4 × 199). Per-record layout (sample-verified rec 0): `u32` id (+0x00, sequential from base, +1 per record), CP949 short skill name null-term (+0x04), long CP949 description paragraph (onset ~+0x100), u32 constant 24 (+0x304), u32 1 (+0x308), u32 1 (+0x30C), f32 25.0 (+0x310), zero tail to 796 B. Semantics of body fields beyond id/name are DBG-pending. No `dashs.scr` path string exists in the binary string table — path is data-driven at runtime. | Movement-skill reference table |
 | `minds.scr` | stride 808 (UNVERIFIED) | Inner-cultivation skill reference table; `u32` id @ +0, CP949 name; ~9 records; stride not re-derived against the VFS sample in this pass |
 
 #### 2.17.6 mapsetting.scr — per-zone map settings (stride: 84 bytes, 52 records)
@@ -1271,7 +1278,7 @@ BST uses dual indexing: primary key on `emote_id`, secondary key on `secondary_k
 | +4 | 1 | u8 | Category flag | 0 for records 1–9; 1 for records 10–21; semantic UNVERIFIED | CONFIRMED (value pattern); UNVERIFIED (semantic) |
 | +5 | 3 | — | Alignment padding | Debug 0xCC fill | CONFIRMED (pad) |
 | +8 | 4 | u32 | Secondary key (secondary BST key) | Sequential 0..20; confirmed by dual-insert into secondary index | CONFIRMED |
-| +12 | 4 | u32 | Action link field | For records with flag=0: always 0; for flag=1 records: matches `sub_command_id` values from `textcommand.do`, strongly suggesting a cross-table link | CONFIRMED (value pattern); UNVERIFIED (name) |
+| +12 | 4 | u32 | Action link field | For records with flag=0: always 0; for flag=1 records: matches the command_id field of `textcommand.do`, strongly suggesting a cross-table link | CONFIRMED (value pattern); UNVERIFIED (name) |
 | +16 | 4 | u32 | Frame count or frame delay | 10 for first 9 records and some later records; 160 for others; alternates by record tier | UNVERIFIED |
 | +20 | 4 | u32 | Sprite Y origin (pixels) | Increments in fixed steps correlated with sprite_h progression; consistent with sprite-sheet row coordinate | CONFIRMED (pattern); UNVERIFIED (name) |
 | +24 | 4 | u32 | Sprite X sub-offset | Mostly 0; small integers (23, 46, 69 …) for later records; increments by 23 | UNVERIFIED |

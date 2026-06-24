@@ -17,7 +17,7 @@
   question #1 is RESOLVED statically** (see Section 5): the byte-cipher routine has **exactly one
   cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path;
   inbound is **LZ4-decompress only, then route**, with no inverse cipher.
-- **ida_reverified: 2026-06-21** (CYCLE 8 re-confirmed CODE-CONFIRMED: 8-byte frame header [u32 size incl header LE][u16 major][u16 minor] no-bswap; C2S timestamp->keyless byte cipher->LZ4; S2C LZ4-decompress-only into the fixed 11680-byte buffer, the byte cipher has exactly ONE xref = the outbound send gate; size==8 header-only frames bypass all transforms; zero conflicts. Prior: 2026-06-16)
+- **ida_reverified: 2026-06-24** (spec-audit re-confirmation: all byte-cipher, LZ4, handshake, and lifecycle facts re-confirmed; cipher control-flow obfuscation noted; SEED-128 non-wire cipher documented §7.2; staged-M width confirmed as static literal; `structs/secure_context.md` DRIFT-1/DRIFT-2 corrected. Prior: 2026-06-21)
 - **ida_anchor: 263bd994**
 - **evidence: [static-ida]** (this campaign carried no live capture).
 - **capture/debugger-pending (the only residuals):** the **concrete server modulus `n` and exponent
@@ -189,6 +189,14 @@ This forward-then-backward pair is **one round**; the whole round repeats `R = 3
 > sweep (rotate-left 4, add the counter, fold feedback, XOR `0x13` then rotate-right 3). The
 > rotation amounts, the `0x48`/`0x13` whitening constants, the remaining-length countdown, and the
 > 3-round count all match this section exactly.
+
+> **Provenance note — control-flow obfuscation (build 263bd994).** The cipher routine body is
+> **control-flow-obfuscated**: its implementation is flattened with junk-jump chains, opaque
+> predicate branches, and no-op filler instructions interspersed between the real operations,
+> producing a large basic-block count for a short loop. It is the **only** crypto routine in this
+> binary so treated — an evident anti-RE measure. The obfuscation has **no wire effect**: the
+> de-obfuscated transform is exactly as described in this section. An analyst re-reading this
+> routine should expect the spaghetti control-flow and not mistake it for a more complex algorithm.
 
 ### 3.2 LZ4 compression
 
@@ -636,14 +644,15 @@ These debugger-verified facts **take precedence** over any static reading; the C
 
 ---
 
-## 7. CryptoAPI is NOT the network layer (out of scope)
+## 7. Non-wire crypto (out of scope for `Network.Crypto`)
 
-The Windows ADVAPI32 / Microsoft Base Cryptographic Provider cluster is **anti-cheat support plus a
-signed/encrypted local config-file loader**. It is **not** the wire cipher and **not** the login key
-exchange. It is mentioned here **only** so the engineer does not mistake it for the protocol cipher.
-**Do not implement any of this in `Network.Crypto`.**
+The binary contains several cryptographic subsystems that are **not** the wire cipher and **not** the
+login key exchange. They are described here so an engineer does not mistake any of them for the
+protocol cipher. **Do not implement any of this in `Network.Crypto`.**
 
-What it actually is:
+### 7.1 Windows CryptoAPI cluster (anti-cheat + config)
+
+The Windows ADVAPI32 / Microsoft Base Cryptographic Provider cluster covers:
 
 - An anti-cheat orchestrator (X-Trap support): reads local files, writes an obfuscated cheat-log
   file using its own trivial position-keyed XOR-over-text scheme (a **log obfuscation**, not a wire
@@ -660,6 +669,27 @@ What it actually is:
 
 All key/seed material in this cluster is **embedded in the binary** (the opposite of the handshake's
 server-exchanged keys), consistent with offline file authentication. Out of interop scope.
+
+### 7.2 Keyed SEED-128 block cipher (non-wire)
+
+The binary also ships a distinct, **keyed** symmetric block cipher — the Korean **SEED-128** block
+cipher — entirely separate from the keyless wire cipher of Section 3.1. It consists of:
+
+- A **core encrypt block** routine implementing a 16-round Feistel network. Each round applies a
+  round function built from four 256-entry S-box dword-table lookups (an SS0–SS3 "G-function"
+  layout), XOR and add mixing, against a 32-dword round-key schedule.
+- **CBC-mode wrappers** (several chaining variants) and two top-level encrypt/decrypt driver
+  routines that chain blocks with an initialization vector.
+
+This cipher is **definitively NON-WIRE** — it has no connection to the socket send/receive pipeline
+and must not be confused with `Net_Cipher_OutboundXorRol3Round` (Section 3.1). Its call sites are
+in non-wire subsystem regions; the exact subsystem (configuration-blob decryption, anti-tamper
+content check, or a billing side channel) is not fully pinned as of this writing — it is a known
+open item for a follow-up RE pass. The S-box table bytes are **not transcribed** here (out of
+clean-room scope); the cipher is characterized by algorithm family and role only.
+
+**Do not implement this cipher in `Network.Crypto`.** Document it if its exact call-site subsystem
+becomes relevant to another domain (e.g., `Assets` or `Client.Infrastructure` config loading).
 
 ---
 
@@ -707,7 +737,7 @@ server-exchanged keys), consistent with offline file authentication. Out of inte
 | Context page size | **`0x2E20` = 11808 bytes** (committed read-write; distinct from the `0x2DA0`/11680 inbound LZ4 capacity). Re-confirmed build 263bd994. |
 | Bignum word buffer | `0x202`-byte fixed buffer (scrubbed before free) — implementation detail of the binary's big-integer library, no wire effect. |
 | Login-form input | A **TAB-delimited key string** split into account / password / optional PIN; account & password each **≥ 2 chars and below cap** or the login build fails (build 263bd994). |
-| Staged-`M` (RSA plaintext) buffer width | **Parameter-driven** = the password-field cap (a caller-supplied argument, not a literal). Runtime cap **17 bytes** in the debugger-observed session (§6b). Zero-filled, password-copied, consumed in full by the RSA pad/modexp (6.3). |
+| Staged-`M` (RSA plaintext) buffer width | **Parameter-driven** = the password-field cap passed to the login builder. The cap value **17 (0x11)** is a **static literal** on this build's login-key parse path (the same immediate is latched into `pad_width_latch` at context +0x2E18 — confirmed by control-flow, build 263bd994). Corroborated by the debugger-observed session (§6b). Zero-filled, password-copied in full without trailing NUL, consumed in full by the RSA pad/modexp (6.3). |
 
 **Handshake structure & reply build (now fully pinned — no capture needed for the algorithm):**
 
@@ -736,7 +766,6 @@ modular parameters live from the `0/0` wire, so only the **concrete server value
 | Individual `L1`/`L2` split | Only the **sum** `L1 + L2 = 42` is a client constant; the modulus/exponent byte split is server wire data. | Same live `0/0` capture (the split is implied by the captured `n`/`e` lengths). |
 | Meaning of the two server scalars (#1 / #2) | Read and stored by the client (token / nonce / session-id / timestamp class) but their server-side use cannot be inferred from the client. | Behavioral / capture. |
 | Inbound "no inverse cipher" — *wire-semantics* generalization only | The **client-side** fact is now `[confirmed]`: the cipher has a single send-side caller, so the client provably never inverts it on receive (Section 5). What remains open is whether **server→client payloads were enciphered server-side** across **all** inbound packet types — a wire-VALUE statement the static binary cannot settle. `0/0` is corroborated plain-after-decompress by a single capture; multi-packet generalization is still open. | A **multi-packet** inbound capture oracle (Section 5). |
-| Literal staged-`M` width (`17`) | Structurally the staged-credential buffer is sized to the **password-field cap** (caller-supplied); the concrete value `17` is debugger-observed, not a static literal. The algorithm does not depend on it. | Debugger / capture (value only). |
 
 These open items do **not** block `Network.Crypto` from implementing `Encrypt` / `Decrypt`, the LZ4
 codec, the reply whitening, **or the full handshake reply build** — the build reads `n`, `e`, and the
@@ -813,3 +842,30 @@ Overall this campaign's confidence is **control-flow-confirmed static** for ever
 field offset, size, and routing fact; only the concrete server key values, the `L1`/`L2` split, the
 two server scalars' meanings, and multi-packet inbound wire-semantics remain `[capture-pending]`,
 exactly as the banner and Section 8.2 state.
+
+### 9.3 Spec-audit re-verification (build 263bd994, static-only, 2026-06-24)
+
+A **fourth** independent static audit re-confronted every load-bearing claim in this spec and in
+`structs/secure_context.md` to the binary by control flow + operands. **No wire constant or
+structure was contradicted.** The following refinements were integrated:
+
+1. **Cipher control-flow obfuscation noted** (§3.1 provenance note): the wire cipher routine body is
+   control-flow-obfuscated (junk-jump flattening, opaque predicates, no-op filler), the only crypto
+   routine so treated. No wire effect; transform unchanged.
+2. **SEED-128 block cipher documented** (§7.2): the binary ships a keyed SEED-128 block cipher (16-round
+   Feistel, four 256-entry S-box tables, 32-dword round-key schedule, CBC-mode wrappers and
+   encrypt/decrypt drivers) in a non-wire subsystem. It is definitively out of `Network.Crypto` scope
+   and must not be confused with the wire cipher. Its precise call-site subsystem is a known open item.
+3. **Staged-`M` width confirmed as a static literal** (§8.1): the password cap `17 (0x11)` is a
+   hard-coded immediate on the login-key parse path (the same literal is latched into `pad_width_latch`)
+   — the "parameter-driven, runtime cap 17" framing in §9.2 is correct, and the binary additionally
+   confirms the literal source. No wire-fact change.
+4. **`structs/secure_context.md` DRIFT items corrected** (see that file): DRIFT-1 (block size sourced
+   from `key_header_2`, not the modulus word-count) and DRIFT-2 (modexp argument order promoted from
+   UNVERIFIED/PENDING to CONFIRMED). Both corrections are consistent with this spec's §6.2.2 and §6.2.3.
+5. **Keepalive bypass confirmed**: the keepalive frame is enqueued directly to the transport without
+   passing through the cipher or compress stages — consistent with the header-only pass-through
+   semantics of §2, and now confirmed as a concrete pre-compressed cached frame path.
+6. **Inbound no-cipher path confirmed by positive control-flow**: the inbound dispatcher calls the LZ4
+   decompress stage then routes to message handlers with **no cipher call between decompress and
+   dispatch** — positive control-flow confirmation consistent with Section 5.

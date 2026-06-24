@@ -8,6 +8,11 @@
 >   loader-control-flow facts: confirmed; genuinely ambiguous body fields: capture/debugger-pending
 > ida_reverified: 2026-06-16
 > re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee (2026-06-24):
+>   dashs.scr STRIDE CORRECTED: 796 B / 7 records (CONFIRMED by monotonic per-record key at exact 796-byte
+>   intervals); the CYCLE-10/D9 "199 B / 28 records" reversal and its "796 B REFUTED" claim are OVERTURNED.
+>   userlevel.scr 60 B / 300 records RE-CONFIRMED unchanged. Family shape, no-magic, LE, CP949, count =
+>   size/stride, defensive short-read tail — all re-confirmed.
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): citems.scr description paragraph count
@@ -124,7 +129,7 @@ internal-layout conflict. **(other lane)** files are large catalogues documented
 | `data/script/guildposname.scr` | 88 B flat | 9 | yes | VERIFIED | Guild position (rank) name table |
 | `data/script/itemeffect.scr` | 4 B flat (u32 list) | 793 | no | VERIFIED | Item-effect type-code list |
 | `data/script/chivalry.scr` | 24 B flat | 16 | yes | VERIFIED (stride) | Chivalry/honor rank records |
-| `data/script/dashs.scr` | 199 B flat | 28 | yes | SAMPLE-VERIFIED (stride; body UNVERIFIED) | Dash/evasion skill table |
+| `data/script/dashs.scr` | 796 B flat | 7 | yes | CONFIRMED (stride; body fields sample-observed, MED/LOW) | Dash/light-body movement-skill table |
 | `data/script/helps.scr` | 1696 B (0x6A0) flat | `file_size / 1696` | yes | CONFIRMED (loader stride 1696; 48 / 64 refuted) | In-game help text |
 | `data/script/helps_1.scr` | n/a — client-unconsumed (no loader) | n/a | — | CONFIRMED unconsumed (no loader / no helps_%d filename) | DEAD; not parsed by the client (see note) |
 | `data/script/discript.sc` | 68 B flat | 33 | yes | VERIFIED (stride) | UI context-menu label table |
@@ -329,30 +334,32 @@ Record count source: `file_size / 24`. No header. Embeds short CP949 syllables.
 The 24-byte stride is clean, but the regions at +9 and +18 are UNVERIFIED — they may be padding,
 a numeric field, or additional short name slots.
 
-### dashs.scr — Dash/evasion skill table (stride 199 B, 28 records) — stride SAMPLE-VERIFIED
+### dashs.scr — Dash/light-body movement-skill table (stride 796 B, 7 records) — CONFIRMED
 
-Record count source: `file_size / 199` (= 28 exactly). Embeds a CP949 short name and a long
-description.
+Record count source: `file_size / 796` (= 7 exactly; file size 5572 B). Embeds a CP949 short name
+(classical wuxia light-body technique names) and a longer CP949 description, followed by numeric
+parameters in the latter half of the record.
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| +0 | 4 | u32 | skill id / hash | Map key candidate | MED |
-| +4 | (≥8) | char[] | Short skill name (CP949, null-padded) | Begins immediately at +4; width UNVERIFIED — see caveat | MED |
-| ~+? | (≤187) | char[] | Long description (CP949, null-padded) | Begins well past +12; exact offset UNVERIFIED | LOW |
+| +0x000 | 4 | u32 | `skill_id` (MAP KEY) | Monotonic ascending across the 7 records; confirmed as the record key by an unbroken +1 increment at each 796-byte interval | HIGH |
+| +0x004 | (CP949) | char[] | Short skill name (CP949, null-terminated) | Begins immediately at +4; field width extends to the long-description block; exact null-pad boundary UNVERIFIED | HIGH (start offset) / MED (width) |
+| ~+0x100 | (CP949) | char[] | Long description (CP949, null-terminated) | A second CP949 text block sits well into the record; approximate offset only from the sample window | MED (approx offset) / LOW (exact boundary) |
+| ~+0x300 | 4 | u32 | Numeric parameter (small int) | Sample value 24 (0x18); semantic UNVERIFIED (range/cooldown/distance?) | MED (value) / LOW (semantic) |
+| ~+0x304 | 4 | u32 | Flag | Sample value 1 | LOW |
+| ~+0x308 | 4 | u32 | Flag | Sample value 1 | LOW |
+| ~+0x30C | 4 | f32 | Numeric parameter (float) | Sample value 25.0; semantic UNVERIFIED | MED (value) / LOW (semantic) |
 
-> **STRIDE RESOLVED (sample-verified); BODY LAYOUT still UNVERIFIED.** The file size is an exact
-> multiple of 199 (`size / 199 = 28` remainder 0), and 199 is the only clean divisor above 4. The
-> competing **796 B / 7-record** reading from `config_tables.md §2.17.5` is **REFUTED** by VFS
-> geometry — `size / 796` does NOT divide evenly (it leaves a 796-byte remainder, i.e. it is not an
-> integer count). The formerly-unreconciled stride conflict is therefore **closed in favour of
-> 199 B / 28 records** (`config_tables.md §2.17.5` should be corrected to match). The id at +0 and a
-> CP949 short name beginning at +4 are observed; however, the long description appears roughly 252
-> bytes from the record start in the observed window, which a simple 4 + 8 + 187 layout cannot
-> account for — there is an unexplained gap (the short-name field may be far wider than 8 bytes, or
-> there is intermediate binary data between name and description). A per-record harness pass at
-> 199-byte intervals is still required to confirm the internal field boundaries. Do NOT implement
-> body-field offsets beyond the id-at-+0 from this spec yet; the stride (199) is the only
-> body-independent fact that is fully settled.
+> **STRIDE CONFIRMED; BODY FIELD OFFSETS sample-observed only.** The stride is proved by the record
+> key: an ascending u32 at +0 of each record lands at **exact 796-byte intervals** (offsets 0, 796,
+> 1592, 2388, 3184, 3980, 4776) with the key incrementing by exactly 1 each time. The false divisor
+> 199 (`5572 / 199 = 28`) is not the stride — at a 199-byte stride the id would appear on only
+> every 4th "record"; the apparent gap in the earlier body reading (a long description appearing ~252 B
+> into the window) was an artifact of slicing a 796-byte record at the wrong boundary. The
+> **CYCLE-10/D9 "199 B / 28 records VERIFIED; 796 B REFUTED"** conclusion is therefore **OVERTURNED
+> by ground truth**; the config_tables.md §2.17.5 reading of 796 B / 7 records was the correct one
+> all along. Body field offsets beyond id-at-+0 and name-at-+4 are **sample-observed and should not
+> be used for a production parser** until a loader-pinned pass confirms the field widths.
 
 ### helps.scr — In-game help text (1696 B flat, stride CONFIRMED)
 
@@ -479,11 +486,12 @@ u32. The only non-trivial step is the **load-time selector filter** (step 2.2).
 
 ## Known unknowns
 
-- **dashs.scr** body layout: the **199-byte stride is now SAMPLE-VERIFIED** (28 records, exact) and
-  the competing 796-byte reading is REFUTED — the stride conflict is closed. What remains UNVERIFIED
-  is only the internal body field sequence: the long-description offset cannot be explained by a
-  simple 4 + 8 + 187 layout (unexplained gap). `config_tables.md §2.17.5` should be corrected to the
-  199-byte stride.
+- **dashs.scr** body field layout: the **796-byte stride / 7 records is CONFIRMED** (monotonic key at
+  exact 796-byte intervals; the CYCLE-10/D9 "199 B / 28 records" reversal is OVERTURNED). The record
+  key (`skill_id` u32 at +0) and the CP949 name starting at +4 are HIGH-confidence. The long-description
+  offset (~+0x100) and the numeric parameter fields (~+0x300..) are sample-observed (MED/LOW); a
+  loader-pinned pass is needed to confirm exact field widths and boundaries. `config_tables.md §2.17.5`
+  should be reconciled to the 796-byte stride.
 - **helps.scr** stride: **RESOLVED (CYCLE 7) — 1696 B (0x6A0) flat**, `record_count = file_size /
   1696`, u32 `help_id` map key at +0, CP949 title/text from +29. The earlier "48 B / 1378 records"
   and "64-byte" readings are **REFUTED** by the loader (single 1696-byte read + verbatim copy, no
@@ -536,7 +544,7 @@ u32. The only non-trivial step is the **load-time selector filter** (step 2.2).
   - `formats/pak.md` — the VFS container that delivers all `.scr` files.
 - Proposed canonical names (flag for `names.yaml`, orchestrator-owned): `exp_level_record` (20 B),
   `guild_crest_record` (20 B), `guild_pos_record` (88 B), `item_effect_id_entry` (4 B),
-  `chivalry_rank_record` (24 B), `dash_skill_record` (199 B), `help_record` (1696 B, `help_id` u32
+  `chivalry_rank_record` (24 B), `dash_skill_record` (796 B), `help_record` (1696 B, `help_id` u32
   @ +0, `help_title` CP949 @ +29), `district_desc_record` (68 B), `npcs_stat_record` (1916 B),
   `oblist_record` (12 B: `value` u32 @ +0, `id` u32 @ +4, `selector` u32 @ +8).
 - Glossary: see Docs/RE/names.yaml
@@ -550,8 +558,9 @@ u32. The only non-trivial step is the **load-time selector filter** (step 2.2).
     record body authority moved to `misc_data.md §5`.
   - CAMPAIGN 10 / D9 (ida_reverified 2026-06-16, ida_anchor 263bd994; two-witness: static loader +
     VFS sample): family-level shape re-confirmed (no magic, LE, CP949, count = size/stride, no tail
-    fires) across the 44 `.scr` entries [sample-verified]. **Three conflicts resolved:** `dashs.scr`
-    stride = **199 B / 28 records** (796 B REFUTED); `helps.scr` stride = **48 B / 1378 records**
+    fires) across the 44 `.scr` entries [sample-verified]. ~~`dashs.scr` stride = 199 B / 28 records
+    (796 B REFUTED)~~ — **THIS CONCLUSION IS OVERTURNED** by the 2026-06-24 re-analysis (see banner
+    above); the correct stride is 796 B / 7 records. `helps.scr` stride = **48 B / 1378 records**
     (64 B arithmetically impossible — REFUTED); `userlevel.scr` = **60 B / 300 records** (the 120 B /
     150-record estimate is REFUTED). **Six record counts newly sample-verified:** `statue.scr` 430,
     `skillcategory.scr` 17, `tutor.scr` 86, `playtime_reward.scr` 5, `viplevels.scr` 9,

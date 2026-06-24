@@ -6,8 +6,7 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class CitemsParser
 {
-    private const int RecordStride = 1052;
-
+    private const int RecordStride = 0x41C;
 
     private const int OffItemId = 0x00;
 
@@ -16,11 +15,15 @@ public static class CitemsParser
 
     private const int OffUnknown36 = 0x36;
 
+    private const int OffItemCategory = 0x37;
+
     private const int OffCashPriceNx = 0x38;
 
     private const int OffSlotSeq2 = 0x3C;
 
-    private const int OffItemUid = 0x48;
+    private const int OffIconIdA = 0x40;
+
+    private const int OffIconIdB = 0x48;
 
     private const int OffFlag4C = 0x4C;
 
@@ -28,8 +31,18 @@ public static class CitemsParser
     private const int DescParaWidth = 81;
     private const int DescParaCount = 10;
 
-    private const int OffRemainder = 0x40E;
-    private const int RemainderLen = 14;
+    private const int OffRemainderUnmapped = 0x40E;
+    private const int RemainderLen = 10;
+
+    private const int OffTailFlag418 = 0x418;
+
+    private static readonly Encoding Cp949;
+
+    static CitemsParser()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Cp949 = Encoding.GetEncoding(949);
+    }
 
     public static CitemsCatalog Parse(ReadOnlyMemory<byte> data)
     {
@@ -37,15 +50,9 @@ public static class CitemsParser
 
         if (span.Length % RecordStride != 0)
             throw new InvalidDataException(
-                $"citems.scr parse error: buffer length {span.Length} is not an exact multiple of " +
-                $"stride {RecordStride}. " +
-                "spec: Docs/RE/formats/items_scr.md §2.3.");
+                $"citems.scr: buffer length {span.Length} is not an exact multiple of stride {RecordStride}.");
 
         var count = span.Length / RecordStride;
-
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var cp949 = Encoding.GetEncoding(949);
-
         var records = new CitemsRecord[count];
 
         for (var i = 0; i < count; i++)
@@ -53,21 +60,25 @@ public static class CitemsParser
             var recBase = i * RecordStride;
             var rec = span.Slice(recBase, RecordStride);
 
-            var itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
+            var itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffItemId..]);
 
             var nameBytes = rec.Slice(OffItemName, ItemNameLen);
             var nameNul = nameBytes.IndexOf((byte)0);
             var itemName = nameNul >= 0
-                ? cp949.GetString(nameBytes[..nameNul])
-                : cp949.GetString(nameBytes);
+                ? Cp949.GetString(nameBytes[..nameNul])
+                : Cp949.GetString(nameBytes);
 
-            var unknown36 = BinaryPrimitives.ReadUInt16LittleEndian(rec[OffUnknown36..]);
+            var unknown36 = rec[OffUnknown36];
+
+            var itemCategory = rec[OffItemCategory];
 
             var cashPriceNx = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffCashPriceNx..]);
 
             var slotSeq2 = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffSlotSeq2..]);
 
-            var itemUid = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffItemUid..]);
+            var iconIdA = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffIconIdA..]);
+
+            var iconIdB = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffIconIdB..]);
 
             var flag4C = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffFlag4C..]);
 
@@ -76,29 +87,34 @@ public static class CitemsParser
             {
                 var paraOff = OffDescBlock + p * DescParaWidth;
                 var paraBytes = rec.Slice(paraOff, DescParaWidth);
-                if (paraBytes[0] == 0x23)
+                if (paraBytes[0] == (byte)'#')
                     break;
                 var paraNul = paraBytes.IndexOf((byte)0);
                 descParaList.Add(paraNul >= 0
-                    ? cp949.GetString(paraBytes[..paraNul])
-                    : cp949.GetString(paraBytes));
+                    ? Cp949.GetString(paraBytes[..paraNul])
+                    : Cp949.GetString(paraBytes));
             }
 
             var descParagraphs = descParaList.ToArray();
 
-            var remainderRaw = data.Slice(recBase + OffRemainder, RemainderLen);
+            var remainderRaw = data.Slice(recBase + OffRemainderUnmapped, RemainderLen);
+
+            var tailFlag418 = rec[OffTailFlag418];
 
             records[i] = new CitemsRecord
             {
                 ItemId = itemId,
                 ItemName = itemName,
                 Unknown36 = unknown36,
+                ItemCategory = itemCategory,
                 CashPriceNx = cashPriceNx,
                 SlotSeq2 = slotSeq2,
-                ItemUid = itemUid,
+                IconIdA = iconIdA,
+                IconIdB = iconIdB,
                 Flag4C = flag4C,
                 DescParagraphs = descParagraphs,
-                RemainderRaw = remainderRaw
+                RemainderRaw = remainderRaw,
+                TailFlag418 = tailFlag418
             };
         }
 

@@ -223,13 +223,13 @@ public sealed partial class CharSelectWindow
         if (_nameModalTitle is not null && IsInstanceValid(_nameModalTitle))
             _nameModalTitle.Text = ClassCaption(_createUiClass);
 
-        var lines = GetDescLines(_createUiClass);
+        var desc = _npcScrDesc.GetDescription(_createUiClass);
         if (_createDescLine0 is not null && IsInstanceValid(_createDescLine0))
-            _createDescLine0.Text = lines.Length > 0 ? lines[0] : string.Empty;
+            _createDescLine0.Text = desc;
         if (_createDescLine1 is not null && IsInstanceValid(_createDescLine1))
-            _createDescLine1.Text = lines.Length > 1 ? lines[1] : string.Empty;
+            _createDescLine1.Text = string.Empty;
         if (_createDescLine2 is not null && IsInstanceValid(_createDescLine2))
-            _createDescLine2.Text = lines.Length > 2 ? lines[2] : string.Empty;
+            _createDescLine2.Text = string.Empty;
     }
 
     private string ClassCaption(int uiIndex)

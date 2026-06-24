@@ -7,8 +7,8 @@
 >               exactly, AND the loader control flow (count validation, 48-byte record stride,
 >               kind byte at +0, 47-byte relpath at +1, path construction) was independently
 >               re-confirmed in the IDB.
-> ida_reverified: 2026-06-16
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > conflicts: none unresolved.
 > sample_verified: true — both shipped `bgtexture.lst` instances verify the size formula
@@ -34,6 +34,14 @@
 > `xobj.lst`, `xeffect.lst`) and pinned that `motlist/skinlist/bindlist` are **`.txt`, not `.lst`**.
 > Recorded the concrete shared-scheduler lifetime value (**180000** terrain vs **120000** bmplist) as
 > informational. No addresses or decompiler output crossed the firewall.
+>
+> **HISTOGRAM CORRECTION (2026-06-24, evidence [vfs-sample], ida_anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee):**
+> a full byte scan of every record across both shipped instances (2,330 records total) established the
+> correct per-file non-`0x01` counts: **122** in `map000` and **105** in `effect`. The previous figure
+> of **227** for `map000` (§Enumerations) was a stale mis-count — corrected in §Enumerations body and
+> in the per-file count note. The kind value set `{1, 2, 10, 11, 12, 20}`, the six-entry enumeration,
+> and the `0x01`-majority claim all remain correct. No layout or loader semantics changed. No addresses
+> or decompiler output crossed the firewall.
 
 ---
 
@@ -194,9 +202,9 @@ The record index is the global pool slot that terrain and building geometry refe
 
 **`kind` (record +0) — material render-mode tag.** A full scan of every record in both shipped
 instances (2,330 records total) found the byte is **not constant**: `0x01` is the majority, but
-227 records carry a value other than `0x01`. At least six distinct values occur. The earlier
-"animated vs static boolean" reading is retired — a single bit would not produce a value as high
-as `0x14`. Each value correlates with a recognisable family of texture relpaths, so the byte is a
+122 records in `map000` (and 105 in `effect`) carry a value other than `0x01`. At least six distinct
+values occur. The earlier "animated vs static boolean" reading is retired — a single bit would not
+produce a value as high as `0x14`. Each value correlates with a recognisable family of texture relpaths, so the byte is a
 **material / shader render-mode selector**, not a boolean. The default mode is `0x01` (plain
 static ground).
 
@@ -241,7 +249,7 @@ static ground).
   engineer must not treat the proposed labels as confirmed shader semantics; treat them as a
   render-mode bucket and tune behaviour from the family.
 - The two instances have overlapping but not identical relpath populations, so the per-file count
-  of non-`0x01` records differs (105 in `effect`, 227 in `map000`). The value set is shared.
+  of non-`0x01` records differs (105 in `effect`, 122 in `map000`). The value set is shared.
 - The same correction applies to **`bgtexture.txt` col1**: it is the same render-mode tag, not a
   `0`/`1` animated flag. Do not read col1 as a boolean.
 

@@ -1,8 +1,8 @@
 ---
 status: confirmed
 sample_verified: partial
-verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); confirmed (client-side routing/sizes/offsets/control-flow); capture/debugger-pending (server-authored quest values + on-wire VALUE meanings)
-ida_reverified: 2026-06-20
+verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + spec-audit pass (2026-06-24); confirmed (client-side routing/sizes/offsets/control-flow); capture/debugger-pending (server-authored quest values + on-wire VALUE meanings)
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts:
@@ -11,7 +11,7 @@ conflicts:
 
 # Quest & NPC Dialog — Clean-Room Specification
 
-> **Verification banner — re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)** (static IDA only — no live capture/debugger this pass).
+> **Verification banner — re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24) confirmed no drift** (static IDA only — no live capture/debugger either pass).
 > - **[confirmed]** (control-flow-confirmed at the handler/sender/panel/loader sites on `263bd994`): the opcode routing (2/28 C2S, 5/68 + 5/73 S2C, 2/152 second C2S channel), the 2/28 **12-byte** body, the 5/68 **452-byte** parse + every snapshot offset, the 5/73 **344-byte** parse, the accept-gate **threshold 26** and its branch polarity, the give-up `abandonable` gate, the quest-log window action map, the runtime quest-record gate-field map, the **single 4960-byte (0x1360) quest-record stride** (on-disk == runtime, loader-proven), the eligibility status-state evaluator gate chain, the requirement-type → notice-id taxonomy, the **240-byte objective sub-record stride**, and that **5/73 = SmsgQuestComplete** (the completion reward-result panel; GuildWar refuted).
 > - **[static-hypothesis]** (single inference, not control-flow-locked): the 2/28 body field split beyond the leading bytes, the 5/68 `+0` header / `+4` owner_id semantics, the meaning of `panel_b`/`panel_c`.
 > - **[capture/debugger-pending]** (server-authored magnitudes + on-wire VALUE meanings need a live capture): the 2/28 & 2/152 framed wire sizes and `quest_id` endianness, the **exact wire byte offsets of the ≤10-entry reward list inside the 5/73 body** (the client renders it, but the wire→panel field mapping is runtime-only), the exact provenance of the level-gate word, and the literal integer values of the eligibility status states (runtime-resolved globals).
@@ -45,12 +45,16 @@ conflicts:
 
 ## Status & confidence
 
-- **Re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) (static IDA only).**
+- **Re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24) found no drift (static IDA only).**
   The opcode routing, the message body **sizes** (2/28 = 12 B, 5/68 = 452 B, 5/73 = 344 B),
   every 5/68 / 5/73 parse offset, the **single 4960-byte quest-record stride** (loader-proven),
   the eligibility evaluator gate chain, and the **240-byte objective sub-record stride** were read
   directly at the loader / handler / sender / panel / evaluator sites and are **CONFIRMED** for the
-  client side. **No live network capture or debugger was used this pass:** the on-wire *framed*
+  client side. The spec-audit pass additionally confirmed: the quest-template map lookup routing
+  (via `KeyedRegistry_FindValueByKey` + secondary `KeyedNodeMap_FindValueByKey`), the
+  AVAILABLE-tab population bound (the active-quest-range count global), the ActorManager vtbl
+  slot +72 hook identity in the 5/73 grant path, and the step-ordinal lookup as a statically-dumpable
+  word array. **No live network capture or debugger was used either pass:** the on-wire *framed*
   total sizes, `quest_id` endianness, the **exact wire offsets of the 5/73 reward list**, and any
   server-authored quest *values* (reward magnitudes, level thresholds beyond the literal compares
   below) remain **capture/debugger-pending**.
@@ -461,7 +465,7 @@ field mapping needs a live capture).
 
 | Value | Meaning | Client reaction | Conf |
 |------:|---------|-----------------|------|
-| 1 | **Grant** | Call the actor-manager hook, then **play** the completion sound (`910036000`, positive variant). | CONFIRMED |
+| 1 | **Grant** | Invoke the ActorManager singleton via vtbl slot +72 with arg 1 (the grant side-effect hook), then **play** the completion sound (`910036000`, positive variant). | CONFIRMED |
 | 2 | **Deny / fail** | **STOP** the matching completion sound (`910036000`) — it does **not** play a negative cue. | CONFIRMED |
 
 > *(corrected 2026-06-16)* The earlier text said `reward_state == 2` "plays the negative
@@ -537,6 +541,7 @@ access point used across the quest-dialog cluster.
 | Logical path | `data/script/quests.scr` | CONFIRMED |
 | Record size | **4960 bytes (0x1360), fixed** — on-disk == runtime, byte-for-byte (loader-proven) | CONFIRMED |
 | Lookup key | `quest_id` (sparse `u16`, range 1..617; the file is a sparse flat array, not index-keyed — the runtime keys a map on the id; a slot is empty when its leading `u16` quest id is 0) | CONFIRMED |
+| Map lookup routing | `quest_id`-keyed lookups route through `KeyedRegistry_FindValueByKey`; a secondary `KeyedNodeMap_FindValueByKey` is used to reach the objective/dialogue node (seen at the ACTIVE-tab detail renderer). | CONFIRMED (routing); static-hypothesis (node semantics) |
 | Title | Localized message-string id **18022** (not stored inline as text) | LIKELY |
 | Full byte layout | See **`structs/quest_record.md`** (4960-byte record offset table) | CONFIRMED |
 
@@ -745,10 +750,13 @@ Tutorials are a parallel system to quests, summarised here; full Lua linkage is 
    decode to label KIND values.
 8. **`quests.scr` record layout** *(CYCLE 7)* — the stride is now CONFIRMED as a **single
    4960-byte (0x1360) record** (on-disk == runtime, loader-proven); the full offset table lives in
-   `structs/quest_record.md`. Still unresolved (UNVERIFIED): what the six step-code bytes at
-   +0x040 index, the **interior of the 240-byte objective sub-record** (reward item ids, objective
-   NPC / kill / collect targets, the objective action-type — which the client does *not* switch on
-   locally), and the meaning of the constant 2 at +0x064. See §8.1, §19.
+   `structs/quest_record.md`. Partially resolved (spec-audit pass): the step-code bytes at +0x040
+   are mapped through a confirmed step-ordinal word array (`current_step_code` at +0x065); the
+   routing mechanism is CONFIRMED but the array contents (code → ordinal mapping) are UNVERIFIED
+   (statically dumpable — deferred). Still UNVERIFIED: the **interior of the 240-byte objective
+   sub-record** (reward item ids, objective NPC / kill / collect targets, the objective action-type
+   — which the client does *not* switch on locally), and the meaning of the constant 2 at +0x064.
+   See §8.1, §19.
 9. **`npc.scr` record layout** *(updated 2026-06-13)* — stride 404 B, the `u32` id mirrored
    at +4, and the three CP949 description paragraphs at +0x14/+0x50/+0x90 are sample-verified
    (§9.1). Still unresolved: the key that links `npc.scr` (2510 descriptor records) to
@@ -881,6 +889,12 @@ a **tertiary-stat bound**, a scan over the active-quest id table for a same-cate
 already active, a scan over a second active range for the same quest id, and finally a
 **prerequisite-chain** compare. This is the single best map of the **runtime** quest-record
 gate fields. CONFIRMED on `263bd994`.
+
+The **AVAILABLE-tab populator** iterates the quest registry bounded by the **active-quest-range
+count** (a global word that caps iteration to the active range), matching records whose chapter
+id (`prereq_chain_id` at +0x1348) equals the selected chapter index. The populator also reads
+`category` (+0x002) and `quest_name` (+0x003) from each matched record, and caps the display
+list at **10 rows** (§15.1). CONFIRMED on `263bd994`.
 
 The quest-record gate fields (offsets into the **single 4960-byte record**, the same object the
 give-up gate reads — full table in `structs/quest_record.md §4`):
@@ -1067,8 +1081,13 @@ them (§9.1). This is the **dialogue-body / archetype-description store** (§17.
 from the `npcs.scr` catalogue.
 
 ### 19.4 Open data items (carried forward)
-- The six `quests.scr` step-code bytes at +0x040 — index into a step-type enum, or objective
-  template references? (Three distinct patterns observed.)
+- **Step-code lookup — PARTIALLY RESOLVED.** `current_step_code` (+0x065) is mapped through a
+  **step-ordinal word array** (a statically-dumpable global, CONFIRMED as present and keyed by the
+  step-code byte) to a contiguous ordinal; the ACTIVE-tab renderer selects the active objective
+  sub-record by matching that ordinal against `step_key` (sub-record +0x3E). The *contents* of the
+  step-ordinal array (the full code → ordinal mapping table) are statically dumpable and would
+  resolve the "what do the six step-code bytes at +0x040 index?" question without a capture; this
+  is deferred as a dedicated RE task. CONFIRMED (routing mechanism); UNVERIFIED (table contents).
 - The **interior of the 240-byte objective sub-record** (record +0x68, 240-byte stride) — objective
   NPC ids, kill/collect counts, reward item ids and EXP are the expected contents but are **not yet
   field-decoded** (UNVERIFIED); the client does **not** switch on an objective-action-type enum

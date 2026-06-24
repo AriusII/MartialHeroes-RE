@@ -10,19 +10,22 @@
 > placeholder note in `effects.md §A.11` (which only flagged `.xobj` as ASCII text without the
 > full layout); for the broader effect subsystem context see `effects.md` Section A.
 >
-> verification: parser-verified — the `.xobj` body field order/types, the V-flip, the discarded
->               leading marker, the discarded per-vertex normal triplet, the u16 indices, and the
->               24-byte runtime XObj / 24-byte runtime vertex layouts were all recovered from the
->               loader control flow. The `.xobj` body is ALSO sample-verified against one real file
->               (`(0004)-triangurate.xobj`: marker 4 / 1 triangle / indices 1,0,2 / 3 vertices —
->               byte-exact). The `xobj.lst` binary layout (count header + 34-byte records) is
->               parser-verified but sample-unverified (no `xobj.lst` instance was on disk to walk).
-> ida_anchor: 263bd994
+> verification: fully verified — the `.xobj` body field order/types, the V-flip, the discarded
+>               leading marker (now confirmed to be the slot-id echo, not a format tag), the discarded
+>               per-vertex normal triplet, the u16 indices, and the 24-byte runtime XObj / 24-byte
+>               runtime vertex layouts were all recovered from the loader control flow. The `.xobj`
+>               body is sample-verified against 30 real files (including `(0000)-plane.xobj`,
+>               `(0001)-spear.xobj`, `(0004)-triangurate.xobj`, `(0002)-cone.xobj` — all byte-exact).
+>               The `xobj.lst` binary layout (count header + 34-byte records) is ALSO sample-confirmed:
+>               the real `xobj.lst` is 1092 bytes = 4 + 34 × 32, with records 0..5 matching slot
+>               indices 0..5 and filenames `(0000)-plane.xobj` .. `(0005)-squarehorn.xobj`. The
+>               leading `(NNNN)` filename prefix == `xobj.lst` slot_index == body marker line is
+>               byte-confirmed across all 30 bodies and 32 lst records.
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> ida_reverified: 2026-06-24
 > evidence: [static-ida, vfs-sample]
-> conflicts: none structural. Two carried open items: (1) whether the leading `(NNNN)` in an on-disk
->            `.xobj` filename equals the `xobj.lst` slot index — strongly implied, sample-unverified;
->            (2) the exact `.xeff` body field that stores the referenced xobj slot index is NOT yet
->            recovered (see Linkages → "xeff ↔ xobj join (OPEN)").
+> conflicts: none. One remaining open item: the exact `.xeff` body field that stores the referenced
+>            xobj slot index (see Linkages → "xeff ↔ xobj join (OPEN)").
 
 ---
 
@@ -77,8 +80,11 @@ A flat array of `count` fixed-size records, concatenated with no inter-record pa
 - **Slot index = runtime id.** The parsed `.xobj` is stored at `xobjArray[slot_index]`, so the
   `xobj.lst` `slot_index` IS the integer id by which any other code (notably an `.xeff` mesh-particle
   element) references a given mesh. This is the JOIN KEY (see Linkages).
-- **Status:** parser-verified (count header, 34-byte stride, slot-index range check); the on-disk
-  `xobj.lst` bytes were not available to walk, so the binary layout is **sample-unverified**.
+- **Status:** parser-verified and sample-confirmed. The real on-disk `xobj.lst` is 1092 bytes
+  (= 4 + 34 × 32), records 0..5 carry slot indices 0..5 with names `(0000)-plane.xobj` through
+  `(0005)-squarehorn.xobj`. The manifest holds 32 entries; 30 corresponding `.xobj` bodies were
+  present in the extract (the last 2 entries are absent from this extract but irrelevant to the
+  layout). The `slot_index` field is byte-confirmed to equal the leading `(NNNN)` filename prefix.
 
 ---
 
@@ -93,7 +99,7 @@ no encryption.
 
 | Step | Token kind | Field | Type | Notes |
 |------|-----------|-------|------|-------|
-| 1 | int | `marker` (unused) | int | First token. Read into a local and **discarded** — the parser keeps no copy. Likely a format/version or vertex-format tag; the consumer does not use it. Observed value in the sample = `4`. |
+| 1 | int | `marker` (unused) | int | First token. Read into a local and **discarded** — the parser keeps no copy. Byte-confirmed to equal the file's `xobj.lst` slot index (which also equals the leading `(NNNN)` filename prefix): it is the object's own slot-id echoed into the body as an author-aid, not a format/version tag. Values observed across all 30 samples match their respective slot indices exactly. |
 | 2 | int | `tri_count` | int | Triangle count. `index_count = 3 × tri_count`. |
 | 3 | (allocate) | — | — | Allocates `2 × index_count` bytes for the u16 index buffer. |
 | 4 | int × `index_count` | `indices[i]` | u16 | One index token per line; parsed as int, **narrowed to u16** on store. Total `3 × tri_count` tokens, in order. |
@@ -201,9 +207,11 @@ Effect-subsystem boot
   `xobj.lst` `slot_index`**: whatever value the manifest record carries is the index at which the
   parsed mesh lands in `XObjArray`. Effect descriptors that draw a mesh reference an xobj by this
   integer index.
-- Filename convention (sample-unverified): the observed file `(0004)-triangurate.xobj` carries a
-  leading `(0004)` that is strongly implied to be its `xobj.lst` slot index (a human-readable author
-  hint). This was not byte-confirmed against an `xobj.lst` instance and is flagged OPEN.
+- Filename convention (byte-confirmed): the leading `(NNNN)` in every `.xobj` filename equals
+  the file's `xobj.lst` `slot_index`, which also equals the body's opening `marker` integer. This
+  is a human-readable author hint embedded in the filename; it is not load-critical (the manifest
+  `slot_index` field drives the runtime slot, not the filename). Confirmed across all 30 bodies
+  and all 32 lst records in the real extract.
 
 ### xeff ↔ xobj join (OPEN)
 
@@ -245,16 +253,12 @@ Effect-subsystem boot
 
 ## Known unknowns
 
-- The on-disk `xobj.lst` bytes (count header + 34-byte records) are **sample-unverified** — only the
-  loader's read pattern was recovered. Confirm against a real `xobj.lst` instance at implementation.
-- Whether the leading `(NNNN)` in an `.xobj` filename equals its `xobj.lst` slot index (strongly
-  implied; not byte-confirmed).
-- The semantic of the discarded leading `marker` token (format/version vs vertex-format tag) — the
-  parser does not use it, so it is unrecoverable from the load path alone.
 - The exact `.xeff` field that stores the referenced `.xobj` slot index, and the `XObjArray` draw-site
-  index expression (see Linkages → "xeff ↔ xobj join (OPEN)").
+  index expression (see Linkages → "xeff ↔ xobj join (OPEN)"). This is the one remaining open item
+  for the format family.
 - The exact ARGB byte order of the default diffuse dword and whether any path overwrites it (the
-  geometry is expected to be texture/material-modulated).
+  geometry is expected to be texture/material-modulated; in-memory only, not independently
+  sample-checkable).
 
 ---
 

@@ -16,10 +16,11 @@ summary: Server updates ONE slot of the player-to-player trade window. A single 
 # widths equal size: 44. Only the fields the handler reads are named; the rest is filler the trade
 # path does not consume. The handler reads a fixed 44-byte record, then routes by the category byte
 # and the owner-id side discriminator.
+# verification: ida_anchor 263bd994 — Result@+0x08 and Subtype@+0x09 confirmed; 8-byte head precedes.
 fields:
-  - { name: Result,    type: u8 }          # 0x00  result/ack byte: 0 = teardown / notice path, 1 = apply this slot
-  - { name: Subtype,   type: u8 }          # 0x01  sub-selector (on the teardown path 1/2 pick a decline-reason notice)
-  - { name: Pad0,      type: "bytes[8]" }    # 0x02  filler up to the category byte (not consumed by the trade path)
+  - { name: Head,      type: "bytes[8]" }   # 0x00  8-byte frame head (payload-cursor convention; consumed before the gate bytes)
+  - { name: Result,    type: u8 }          # 0x08  result/ack byte: 0 = teardown / notice path, 1 = apply this slot
+  - { name: Subtype,   type: u8 }          # 0x09  sub-selector (on the teardown path 1/2 pick a decline-reason notice)
   - { name: Category,  type: u8 }          # 0x0a  slot category: 0..2 = item, 3 = alt, 4 = special, 255 (0xFF) = money/zeny
   - { name: SlotFlag,  type: u8 }          # 0x0b  per-slot flag / state byte
   - { name: ItemId,    type: u32 }         # 0x0c  item id / key (nonzero -> draw the slot icon)
@@ -36,11 +37,14 @@ fields:
 notes: |
   CODE-CONFIRMED record size (a fixed 44-byte / 0x2C read) and the field OFFSETS the handler reads;
   CAPTURE-UNVERIFIED in VALUE meaning. The handler reads the full 44-byte record, then routes by the
-  Category byte at 0x0A and the OwnerId side discriminator at 0x28. Padding regions (Pad0/Pad1/Pad2)
-  cover bytes the trade path does not consume; they are modelled only so the widths sum to 44.
+  Category byte at 0x0A and the OwnerId side discriminator at 0x28. The 8-byte Head covers the
+  frame-header region consumed before the gate bytes (payload-cursor convention: buf[index] = payload
+  offset). Pad1/Pad2 cover bytes the trade path does not consume; modelled only so the widths sum to 44.
 
-    0x00 (1B) Result    : 0 = teardown / notice path (the slot is not applied; Subtype selects a
+    0x00 (8B) Head      : frame head bytes consumed before the gate bytes (payload-cursor convention).
+    0x08 (1B) Result    : 0 = teardown / notice path (the slot is not applied; Subtype selects a
                           decline-reason notice); 1 = apply this slot to the trade grid.
+    0x09 (1B) Subtype   : consulted on the teardown path; 1 / 2 select a decline-reason notice.
     0x0a (1B) Category  : what the slot holds. 0..2 = an item slot, 3 = an alternate item form,
                           4 / -1 = a special form, 255 (0xFF) = a money / zeny slot.
     0x0c (4B) ItemId    : the item id / key. A nonzero value drives the slot icon. (For a money slot

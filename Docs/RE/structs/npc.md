@@ -1,16 +1,18 @@
 # NPC / Monster struct, spawn record, npc.scr interaction record, and mobs.scr linkage (clean-room spec)
 
-> **Verification banner: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20),
-> evidence [static-ida].** verification: **confirmed** for the loader-exercised facts (the 488-byte
-> `mobs.scr` record stride, the u16 `mob_id` primary key at +0x00, the +0xF8 u64 HP qword with its
-> load-time `+= 10` mutation, the +0x144 `mob_type` boss discriminator `== 11` and its second lookup
-> map; **CYCLE 7**: the 404-byte `npc.scr` interaction record with `KIND` u8 @+0x22 and `JOB` i16
-> @+0x34, and the separate 1916-byte `npcs.scr` relationship table — see §1A); **static-hypothesis**
-> for every other `mobs.scr` field (on-disk/sample inferences the loader never reads) and for the
-> `npc.arr` spawn record carried from `formats/npc_spawns.md`; **capture/debugger-pending** for the
-> in-game HP *scale factor* that converts the raw `base_max_hp` template input to the displayed HP
-> pool (distinct from the offset/mutation, which are confirmed).
-> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
+> **Verification banner: re-verified against doida.exe IDB SHA 263bd994, actor-world audit
+> (2026-06-24), evidence [static-ida].** verification: **confirmed** for the loader-exercised facts
+> (the 488-byte `mobs.scr` record stride, the u16 `mob_id` primary key at +0x00, the +0xF8 u64 HP
+> qword with its load-time `+= 10` mutation, the +0x144 `mob_type` boss discriminator `== 11` and its
+> second lookup map; **CYCLE 7**: the 404-byte `npc.scr` interaction record with `KIND` u8 @+0x22 and
+> `JOB` i16 @+0x34, and the separate 1916-byte `npcs.scr` relationship table — see §1A;
+> **actor-world audit**: `npc.arr rotation_y` (+0x0C) is **confirmed consumed** by the 4/4 NPC branch
+> — the applied yaw is **π/2 − stored_value**, i.e. the stored value is a yaw offset from the +X
+> axis); **static-hypothesis** for every other `mobs.scr` field (on-disk/sample inferences the loader
+> never reads); **capture/debugger-pending** for the in-game HP *scale factor* that converts the raw
+> `base_max_hp` template input to the displayed HP pool (distinct from the offset/mutation, which are
+> confirmed).
+> ida_reverified: 2026-06-24 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
 > (the loader **confirms** §1.3's resolution of the prior `config_tables.md §2.9` +0xF4/+0xF8
 > "level/spawn-timer" mislabel — see §3.2).
 
@@ -323,7 +325,7 @@ boss from a normal mob in the sample:
 | +0x02 | 2 | u16 | `field_02` | UNVERIFIED | 67 in both 28-byte samples. Candidate: level override / sub-type / faction. No confirmed consumer. |
 | +0x04 | 4 | f32 | `world_x` | CONFIRMED | World-space X. Samples: 24836.0, 25278.0. |
 | +0x08 | 4 | f32 | `world_z` | CONFIRMED | World-space Z. Samples: 64680.0, 39052.0. Y (height) is not stored; the terrain system supplies ground height. |
-| +0x0C | 4 | f32 | `rotation_y` | PARTIAL | Facing yaw in radians, Y-axis. Samples: 1.541043 (≈π/2), 1.680247. Sample-inference only — no confirmed consumer reading this offset by name. |
+| +0x0C | 4 | f32 | `rotation_y` | CONFIRMED | Facing yaw. **Confirmed consumed** by the 4/4 NPC spawn branch (actor-world audit 2026-06-24): the handler reads this float and sets the actor yaw as **π/2 − stored_value** (a yaw offset from the +X axis, not a raw heading). Samples: 1.541043 (≈π/2), 1.680247. |
 | +0x10 | 4 | u32 | `spawn_type` | CONFIRMED | Spawn-group / modifier. Value 7 = elite/boss modifier (a +10% bonus branch); also matched against an in-scene actor's spawn-group id. Both 28-byte samples: 0 (standard). |
 | +0x14 | 4 | u32 | `unknown_14` | UNVERIFIED | Zero in all 28-byte samples. Candidate: respawn delay (s) or max live count. |
 | +0x18 | 4 | u32 | `unknown_18` | UNVERIFIED | Zero in all 28-byte samples. Candidate: spawn radius or group size. |
@@ -424,8 +426,10 @@ separate analysis targets and are **not** specified by this document:
 6. **`npc.arr` `field_02` (= 67), `unknown_14`, `unknown_18`.** No confirmed consumers; `field_02`
    constant 67 and the two unknowns are zero in all available samples. Needs a sample with non-zero
    data (or an editor/tool format reference).
-7. **`npc.arr` `rotation_y` (+0x0C).** Yaw interpretation rests on sample bytes clustering near π/2;
-   no confirmed consumer reading this offset by name. Verify against a non-default-facing sample.
+7. **`npc.arr` `rotation_y` (+0x0C) — RESOLVED (actor-world audit 2026-06-24).** The 4/4 NPC branch
+   **confirms** consumption of this float. The applied yaw is **π/2 − stored_value** (yaw offset from
+   the +X axis). Sample values near π/2 correspond to a near-zero heading offset, consistent with
+   north-facing default spawns. No further capture needed for the consumer identity or the yaw formula.
 8. **mobs.scr drop cross-references (+0x1D2 / +0x1E0 and their type bytes).** The drop-item ids and
    type bytes are cross-checked against item templates at runtime, but the exact drop-condition logic
    and the meaning of `drop_param_a/b` (+0x148 / +0x14C) and `drop_rate_pct` (+0x1D0) are untraced.

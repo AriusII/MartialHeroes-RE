@@ -26,7 +26,9 @@
 > field meanings; `capture/debugger-pending` for server-authored magnitudes (skill damage, cooldown
 > wall-clock, skill-point/XP rates, HP/stamina scale) and the actual on-wire VALUE bytes of 5/33, 4/41,
 > 4/150, 5/52, 5/31.
-> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
+> spec-audit corrections applied 2026-06-24 (reversed +1368/+1370 timed-charge framing; pinned boost
+> flag offset +1516; added AoE actor offsets +1828/+1832; noted executor-direct vs UI-wrapper string sets).
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida]
 > **conflicts:** none — Campaign-10 Lane-F2 re-verification reproduced every framing constant
@@ -39,10 +41,11 @@
 > battle controller's cast gate, the AoE target resolver, the 2/52 builder), which consumer-confirms
 > the `skills.scr` combat-stat columns (see `structs/skill.md §A.2.5`). Corrections applied below:
 > the **+1332 field is the cast-CADENCE / cooldown gate** (blocked while elapsed `< 100 ms × (+1332)`),
-> NOT an MP-pool subtract; **+1368 / +1370 are timed-charge gates** (compared against running global
-> clocks), NOT a flat HP/MP/stamina pool subtract on the cast-gate path; the **event-boost flag is the
-> local-player record's boost flag**; the **default basic-attack skill id is 121100050**; the AoE cone
-> (mode 4) is a circular SECTOR whose half-angle is `+1316` in DEGREES (× π/180). The earlier "4/102 is
+> NOT an MP-pool subtract; **+1368 is an HP cost (i16) and +1370 is a stamina cost (u16)** — both
+> affordability-gated and subtracted on the 5/52 cast-confirm path (the CYCLE 7 "timed-charge gate"
+> framing was wrong and is reversed here); the **event-boost flag is at local-player record +1516
+> (u8 == 1)**; the **default basic-attack skill id is 121100050**; the AoE cone (mode 4) is a circular
+> SECTOR whose half-angle is `+1316` in DEGREES (× π/180 = 0.0174533). The earlier "4/102 is
 > the buff opcode" framing is superseded: the canonical live buff-slot stream is **5/31
 > `SmsgBuffSlotUpdate`** (4/102 is a 476-byte skill-window snapshot rebuild — a different thing). The
 > 30-slot per-actor buff table is now owned by the dedicated `specs/buffs.md`; §6 here cross-references
@@ -73,16 +76,18 @@ decode accordingly.
 > its high word (record +6) is pad. See §1.5. The per-rank sub-row count byte was also pinned to
 > fixed-block **+1500** (see §1.2).
 
-1. **Cast cost field — HP or MP? (REFRAMED, CYCLE 7.)** The cost magnitude is server-authored and
-   remains `CAPTURE-PENDING`, but the *client-side cast-gate* behavior is now understood: the gate
-   does **NOT** subtract MP, HP, or stamina from a pool. The two cost-region fields read by the gate
-   (skill-data +1368 and +1370) are **timed-charge gates** — each is compared against a running global
-   clock, and the cast is blocked while the clock delta is negative (a recharge / charge-timer that
-   has not yet elapsed), not affordability against a numeric pool. The cadence field +1332 (the cast
-   "cooldown" cadence) is `100 ms × (+1332)` elapsed-time gate, also not a pool subtract. **Do not
-   model +1368 / +1370 as a flat numeric pool cost** from this evidence. Whether the server applies a
-   real HP/MP/stamina subtract elsewhere still needs a capture of a known-cost cast (`CAPTURE-PENDING`).
-   (The §5.2 cast-confirm path subtracts a value into a vital — see that section's reframed caveat.)
+1. **Cast cost semantics — HP and stamina costs (corrected).** Skill-data field **+1368 is an HP
+   cost (i16)** and **+1370 is a stamina cost (u16)**. The cast gate blocks the cast if the local
+   player's current HP is less than the +1368 value (with a `< 30000` client guard, to skip
+   abnormally large values) or current stamina is less than the +1370 value; string ids 3011 / 3012
+   are shown for the respective block. On 5/52 cast-confirm the handler subtracts +1368 from the
+   player's current-HP field (+176, 64-bit) and subtracts `+1370 × target_count × buff_factor`
+   (floored at the base +1370 value) from the player's current-stamina field (+184). The "running
+   global clocks" referenced in the CYCLE 7 reframe (the current-HP global, 64-bit, and the
+   current-stamina global, 32-bit) are **the
+   current HP and current stamina globals** — written by 5/52, 5/32, 5/53, and the death handler —
+   not timers. The CYCLE 7 "timed-charge gate" framing is **reversed**. The +1332 cadence gate
+   framing is correct and unchanged. Server-authored magnitude scaling remains `CAPTURE-PENDING`.
 2. **`skills.scr` per-rank sub-rows.** Each skill record ends with a count-prefixed table of small
    fixed-width sub-rows (per-rank / per-level effect rows). Their individual fields were not decoded;
    they are most likely per-rank coefficients / durations. Needs the data file or a dedicated parser
@@ -178,13 +183,12 @@ binary addresses. They are read directly by the cast / effect / cooldown logic.
 | +1344 | u16 | `weapon_req_a` | CONFIRMED | Weapon / stance requirement A (weapon-class id). Observed values 53, 55. `0` = no requirement. Also (with +1348) the shape-3 enemy-radius-halving trigger. |
 | +1348 | u32 | `weapon_req_b` | CONFIRMED | Secondary weapon / stance requirement id, matched against the worn-weapon field. |
 | +1352 | u8 | `weapon_req_active` | CONFIRMED | Flag enabling the +1344 special-weapon requirement check. |
-| +1368 | i16 | `cast_cost_timer_threshold` | CONFIRMED (structure); CAPTURE-PENDING (magnitude) | A **timed-charge gate**: the gate blocks when `> 0`, the running-clock delta is negative, and the value `< 30000`. **NOT a flat pool subtract on the cast-gate path** (corrected CYCLE 7). See open question 1. |
-| +1370 | u16 | `stamina_cost_timer_threshold` | CONFIRMED (structure); CAPTURE-PENDING (magnitude) | A **timed-charge gate** compared against a separate running global clock; blocks when `> 0` and the clock delta is negative. **NOT a flat pool subtract on the cast-gate path** (corrected CYCLE 7). |
+| +1368 | i16 | `hp_cost` | CONFIRMED | Flat HP cost. Cast gate blocks if current HP `< hp_cost` (with a `< 30000` client guard). On 5/52 cast-confirm the value is subtracted from the player current-HP field (+176, 64-bit). Magnitude is `CAPTURE-PENDING`. |
+| +1370 | u16 | `stamina_cost` | CONFIRMED | Flat stamina cost (base). Cast gate blocks if current stamina `< stamina_cost`. On 5/52 cast-confirm the effective cost is `stamina_cost × target_count × buff_factor`, floored at the base value, subtracted from the player current-stamina field (+184). Magnitude is `CAPTURE-PENDING`. |
 
-> The +1368 / +1370 fields are the timed-charge gates described above: each is compared against a
-> running global clock, and an unelapsed charge blocks the cast (with the soft-fail behavior in §2.1
-> — the cast falls back to the basic attack rather than hard-erroring). They are NOT the cast-window
-> warm-up timers nor a numeric pool cost (CYCLE 7).
+> The +1368 and +1370 fields are flat resource costs checked at cast time and consumed on 5/52
+> cast-confirm. The CYCLE 7 "timed-charge gate against running global clocks" framing was wrong
+> (those "clocks" are the current HP and current stamina globals). See open question 1.
 
 ### 1.5 Skill hotbar — ONE 240×8-byte record array (was "two parallel arrays")
 
@@ -250,10 +254,11 @@ short-circuit chain. The order and codes below are consumer-confirmed (CYCLE 7).
     local player.
 15. **Range / line-of-sight** (§2.2). Out of range → move-closer (code **8**) or code **21**; terrain
     blocked → code **9**; invalid target-state → code **10**.
-16. **Cast-cost timer gates** (skill-data +1368 / +1370). Each is a **timed-charge gate** compared
-    against a running global clock; an unelapsed charge is a **soft-fail** — it does not hard-error but
-    falls the cast back to the basic attack (skill id 121100050). (Localized notices for these soft
-    states are issued from the message database.)
+16. **Cast-cost affordability gates** (skill-data +1368 / +1370). The gate blocks if current HP
+    `< hp_cost (+1368)` (string id 3011; with a `< 30000` client guard) or current stamina
+    `< stamina_cost (+1370)` (string id 3012). These are **flat resource-affordability checks**, not
+    timer comparisons. Both use the executor-direct string ids 3011/3012 (see §2.3 note on the two
+    string-id layers).
 17. **Build target arrays** (§3) — fills the ally/PC id array and the enemy id array. If **neither**
     is populated → code **12**.
 18. **Success.** Face the player toward the aim point, **record the cast time as "now"** (the
@@ -290,6 +295,12 @@ approach/move-closer instead).
 | 7 | 44014 | 17 | 59002 |
 | 8 | *(no toast — triggers approach / move-closer)* | | |
 
+> **Two string-id layers.** The table above is from the **UI wrapper** that displays user-facing
+> toasts. The **executor itself** (the battle controller's action executor and the AoE collector)
+> emits a different set of MessageDB ids directly: 3001/3002/3003/3004/3005/3007/3009/3010/3011/3012/
+> 3030/2157/59006/74307/41001/41002/4050/2162/3006. Both layers are real and distinct. The 3011/3012
+> ids correspond to the +1368 HP cost and +1370 stamina cost gates respectively.
+>
 > Recommended for the domain layer: lift these into a `SkillCastResult` enum in `Shared.Kernel`
 > (0 = `Ok`, plus the named failure reasons), with the localization mapping held in the UI layer.
 
@@ -328,11 +339,7 @@ is capped at **40**; the per-skill base cap comes from `max_targets` (+1330).
 
 > Modes 8 and 12+ were not observed in this subsystem; treat any unseen mode value as `UNVERIFIED`.
 
-**Boost-doubling rule** (applies in every AoE branch): when the event-boost flag — a boolean in the
-**local-player record** — is set **and** the base hit count ≥ 2, the **hit count doubles** (×2) and
-the **area quadruples** (radius ×2, area ×4). The combined count is then clamped to **40**. The
-consuming flag location is pinned (CYCLE 7); the *origin* of the flag is still `UNVERIFIED` (open
-question 5).
+**Boost-doubling rule** (applies in every AoE branch): when the event-boost flag — **`*(u8*)(g_LocalPlayer+1516) == 1`** — is set **and** the base hit count ≥ 2, the **hit count doubles** (×2) and the **area quadruples** (radius ×2, area ×4). The combined count is then clamped to **40**. The offset +1516 is pinned (CONFIRMED); the *origin* of the flag (world buff / event toggle) is still `UNVERIFIED` (open question 5).
 
 Distance math throughout uses **planar (XZ) squared distance**; radius squaring uses
 exponentiate-by-squaring helpers. There is no need to compute true Euclidean distance for the gating.
@@ -426,16 +433,16 @@ treated as a continuation/cancel rather than a real cast.
 When the caster is the **local player** and the action is a *real* cast (not a continuation):
 
 - Set a UI cast time-out (≈ now + 550 ms).
-- **Resource consumption:**
-  - The 5/52 cast-confirm path applies a value read from the +1368 / +1370 region to a local vital
-    (the current-HP 64-bit vital was the observed sink). **See open question 1 (REFRAMED, CYCLE 7):**
-    on the separate *cast-gate* path, +1368 / +1370 act as **timed-charge gates** (not pool subtracts)
-    and +1332 is the cast-**cadence** gate (not an MP-affordability check) — do not conflate the two
-    code paths, and do not model +1368 / +1370 as a single flat numeric pool cost. The actual consumed
-    magnitude is server-authored — `CAPTURE-PENDING`.
-  - A **stamina** value derived from `stamina_cost_timer_threshold` (+1370) × `target_count` × a
-    factor read from a buff slot, floored at the base value, is written to the current-stamina field
-    on this confirm path; the magnitude is `CAPTURE-PENDING`.
+- **Resource consumption (CONFIRMED):**
+  - **HP cost:** `hp_cost` (+1368, i16) is subtracted from the player's current-HP field (+176,
+    64-bit). The same +1368 value that gated the cast (§2.1 gate 16) is now the consumed amount.
+    Magnitude is server-authored — `CAPTURE-PENDING`.
+  - **Stamina cost:** `stamina_cost` (+1370, u16) × `target_count` × `buff_factor` (a value from
+    a buff slot keyed on buff key 76, field +4; else 0), floored at the base +1370 value, is
+    subtracted from the player's current-stamina field (+184). Magnitude is `CAPTURE-PENDING`.
+  - Both HP and stamina globals (the current-HP global, 64-bit, and the current-stamina global,
+    32-bit) are mirrored back from the actor
+    fields after subtraction.
   - Mirror current HP / MP / stamina into the local-player spawn descriptor.
 - **Arm the cooldown** (§4) — **unless** the skill's category is 5 (cooldown-exempt).
 
@@ -465,7 +472,8 @@ no extra wire fields. The handler:
   visual multi-hit / clone / summon effect).
 - Sets each sub-actor's transform, resets its motion, and re-emits the action into that sub-actor's
   animation pipeline.
-- Marks the caster's "AoE-active" visual state.
+- Marks the caster's AoE-active state: sets **actor+1828 (dword idx 457)** to 3 (AoE-active); the
+  clone count comes from **actor+1832 (dword idx 458)**. `CONFIRMED` (see `specs/buffs.md §3.2`).
 
 > **Teleport / blink** has **no dedicated opcode.** It is the ground/point target mode (mode 5) plus
 > the move applied directly to the caster's transform — the ground-point cast moves the caster.
@@ -689,12 +697,13 @@ feed the max-HP/MP multiplier, buff slots drive visual / control state).
   skill-point / window pushes per their `packets/*.yaml`; cite `// spec: Docs/RE/packets/<name>.yaml`
   on each offset. The 4/41 reason→string-id table (§6A.2) and the 4/150 level-up message ids (§6A.3)
   map to the project's own message-DB / string table.
-- **Do not** model the cast cost (§5.2 / +1368 / +1370) as a flat numeric pool subtract — on the
-  cast-gate path they are **timed-charge gates** and +1332 is the cast-**cadence** gate, not an MP
-  affordability check (CYCLE 7). Do not implement the `skills.scr` per-rank rows (§1.3) or any
-  effect-code meaning beyond the table in §6.2 without first resolving the corresponding UNVERIFIED
-  item. Implement the cast-cadence gate as `elapsed_ms < 100 × cast_cadence_factor (+1332)`, the range
-  floor as **1.0**, the default basic-attack skill id as **121100050**, and clamp the AoE hit count to
-  **40**. The actual on-wire VALUE bytes (5/33, 4/41, 4/150, 5/52, 5/31) and all server-authored
-  magnitudes are `CAPTURE-PENDING` — gate any magnitude assumption on a capture. Mark them as TODO with
-  a pointer back to this spec.
+- **Model the cast costs (§5.2 / +1368 / +1370) as flat resource-affordability checks**: gate on
+  `current_hp >= hp_cost (+1368)` (with a `< 30000` guard) and `current_stamina >= stamina_cost (+1370)`;
+  subtract the confirmed amounts on the 5/52 confirm path. The +1332 field is the cast-**cadence**
+  gate (`elapsed_ms < 100 × cast_cadence_factor`), not an HP/MP affordability check. Do not implement
+  the `skills.scr` per-rank rows (§1.3) or any effect-code meaning beyond the table in §6.2 without
+  first resolving the corresponding UNVERIFIED item. Implement the range floor as **1.0**, the default
+  basic-attack skill id as **121100050**, and clamp the AoE hit count to **40**. The boost flag is at
+  local-player +1516 (u8 == 1). The actual on-wire VALUE bytes (5/33, 4/41, 4/150, 5/52, 5/31) and
+  all server-authored magnitudes are `CAPTURE-PENDING` — gate any magnitude assumption on a capture.
+  Mark them as TODO with a pointer back to this spec.

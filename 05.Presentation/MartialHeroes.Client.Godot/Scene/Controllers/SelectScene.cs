@@ -64,6 +64,7 @@ public sealed partial class SelectScene : StubSceneController
             _select.CreateCharacterRequested -= OnCreateCharacterRequested;
             _select.DeleteCharacterRequested -= OnDeleteCharacterRequested;
             _select.RenameCharacterRequested -= OnRenameCharacterRequested;
+            _select.MoveCharacterSlotRequested -= OnMoveCharacterSlotRequested;
             _select = null;
         }
 
@@ -92,6 +93,7 @@ public sealed partial class SelectScene : StubSceneController
         select.CreateCharacterRequested += OnCreateCharacterRequested;
         select.DeleteCharacterRequested += OnDeleteCharacterRequested;
         select.RenameCharacterRequested += OnRenameCharacterRequested;
+        select.MoveCharacterSlotRequested += OnMoveCharacterSlotRequested;
         return select;
     }
 
@@ -283,6 +285,31 @@ public sealed partial class SelectScene : StubSceneController
             2 => 3,
             _ => 0
         };
+    }
+
+    private void OnMoveCharacterSlotRequested(int fromSlot, int toSlot)
+    {
+        GD.Print($"[SelectScene] MoveCharacterSlotRequested(from={fromSlot}, to={toSlot}); " +
+                 "forwarding to UseCases.MoveCharacterSlotAsync. spec: opcodes.md 1/14 CmsgMoveCharacterSlot; packets/cmsg_char_move.yaml.");
+        _ = MoveCharacterSlotAsync(fromSlot, toSlot);
+    }
+
+    private async Task MoveCharacterSlotAsync(int fromSlot, int toSlot)
+    {
+        if (_ctx?.UseCases is not { } useCases)
+        {
+            GD.PushWarning("[SelectScene] MoveCharacterSlot skipped: ClientContext.UseCases unavailable.");
+            return;
+        }
+
+        try
+        {
+            await useCases.MoveCharacterSlotAsync(fromSlot, toSlot, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[SelectScene] MoveCharacterSlotAsync({fromSlot}->{toSlot}) failed/skipped: {ex.Message}");
+        }
     }
 
     private void OnBackRequested()

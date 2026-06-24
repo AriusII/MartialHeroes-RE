@@ -13,8 +13,8 @@
 >   field-consumption contract is established from neutral static control-flow notes). Genuinely
 >   ambiguous items (mode_flag's exact 0/1 semantics; the 5 anomalous records' @0x08 sub-block) stay
 >   capture/debugger-pending.
-> ida_reverified: 2026-06-20
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): events.scr runtime linkage = event_id→record
 >   exact-match map, consumed by item/shop/exchange UI only (NOT timer/zone/captcha; captcha =
@@ -22,6 +22,14 @@
 > CYCLE 7 note (verification: IDB SHA 263bd994, CYCLE 7 (2026-06-20)): disambiguated the table's `event_id` keys from the
 >   runtime timed-event ENGINE ids (e.g. 10003 = death-respawn countdown, 10001 = engine-quit); those
 >   engine ids are NOT events.scr records — see §1.10. No byte-layout change.
+> RE-VERIFIED (2026-06-24, ida_anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee,
+>   evidence [static-ida, vfs-sample]): independent full-file re-confirmation against the 960960-byte
+>   sample (1848 records, remainder 0). Every field offset/size/type in §1.3, the four CONSUMED fields,
+>   the 5 anomalous records (event_ids 30133–30137, @0x08 = 1,000,000/500,000, @0x0C = 20/50/200,
+>   zeroed trailer), and the day-window distribution (14 distinct (start,end) pairs; see §1.4 wording
+>   correction below) all re-confirmed with zero contradictions. The "/script/events.scr" path string
+>   location inside the script-path pool consumed by the master bulk-asset loader is re-confirmed
+>   (static, same IDB SHA). No layout correction; §1.4 wording tightened (13→14 distinct pairs).
 > conflicts: none open in §1/§2. §3 is an estimate index only — its `userlevel.scr` stride estimate
 >   (120) is REFUTED (see §3); the authoritative value is 60 B / 300 records (scr.md / config_tables.md).
 >
@@ -116,8 +124,9 @@ required to parse what the client consumes — the client does not read the day-
 - **Day window (`day_window_start` @0x54, `day_window_end` @0x56):** when non-zero, the pair encodes
   an inclusive day range within a repeating 144-day cycle. Observed combinations partition the cycle
   into twelve consecutive 12-day windows (1–12, 13–24, …, 133–144), plus a full-cycle variant
-  (start = 1, end = 144) and a no-restriction state (both 0). 13 distinct pair combinations seen
-  across all 1848 records. HIGH (deterministic across the sample).
+  (start = 1, end = 144) and a no-restriction state (both 0). 14 distinct (start, end) pairs seen
+  across all 1848 records: the 12 window pairs, (1, 144) full-cycle, and (0, 0) no-restriction.
+  HIGH (deterministic across the sample).
 - **`event_id` allocation epochs:** the early ~144 records use a step of 10 between consecutive IDs;
   after a single large jump, the later ~1700 records use a step of 1 (dense consecutive IDs). The
   early step-10 epoch's record count aligns with the 144-day cycle length. SAMPLE-VERIFIED.

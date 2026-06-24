@@ -6,6 +6,18 @@
 
 ---
 
+## Re-verification banner (2026-06-24, corpus re-confirm — 1578-file census)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — full-corpus re-verification (1578 `.mud` files) plus static loader/indexer/consumer read-path re-walk. All layout claims and behavioral notes below RE-CONFIRMED with no drift. |
+| `ida_reverified` | `2026-06-24` |
+| `ida_anchor`     | `263bd994` |
+| `evidence`       | `[static-ida, vfs-sample]` — full-corpus census (1578 files, all exactly 0x8000 B) + static read-path (loader → tile indexer → sole ambient-sound consumer); per-byte value distribution corroborates the byte-map independently |
+| `conflicts`      | None. All claims re-confirmed. One label nuance noted and applied: the BGM override (byte 2 consumer, Runtime usage §3) is keyed on a player-state flag rather than strictly an interior/exterior flag — the label is adjusted from "indoor override" to "player-state override" throughout. This is a behavioral-wording refinement only; no layout fact changes. |
+
+---
+
 ## Re-verification banner (2026-06-21, refinement pass)
 
 | Attribute        | Value |
@@ -199,8 +211,9 @@ well under the 256 records per table). Full table layout and chain detail: `soun
 2. The 32 KiB blob is retained as the terrain world's per-cell audio grid.
 3. Each frame the sound manager takes the local player's world `(X, Z)`, computes the current
    tile via the indexing above, and compares the tile's indices against what is currently playing:
-   - **BGM (byte 2):** selects the music zone via the `.bgm` table. An indoor override substitutes
-     a fixed indoor music id when the player is flagged as indoors.
+   - **BGM (byte 2):** selects the music zone via the `.bgm` table. A player-state override substitutes
+     a fixed music cue when the player-state flag is set (keyed on a player-state field, not strictly
+     an interior/exterior test).
    - **BGE (bytes 3, 4):** two ambient/environment sound layers via the `.bge` table, started and
      stopped as the player crosses tiles.
    - **EFF (bytes 5, 6, 7):** up to three 3D positional sound effects via the `.eff` table;
@@ -229,7 +242,7 @@ sound-subsystem spec, not to this format doc.
 - **Bytes 0 and 1:** not read by the located consumer; their meaning is unknown. The former
   walk/run footstep reading is REFUTED — do not reintroduce it. A faithful port treats these two
   bytes as opaque/ignored.
-- **Exact crossfade / stop semantics and the indoor override id:** observed but behavioural; out
+- **Exact crossfade / stop semantics and the player-state override cue id:** observed but behavioural; out
   of scope for this format spec.
 
 ---
@@ -274,6 +287,12 @@ sound-subsystem spec, not to this format doc.
   the loader reports success with a null blob and the cell's `.gad`/`.map` still load, whereas only
   an allocation failure or a read error on an *opened* file is a hard load failure. Added a
   consolidated §Read algorithm. (No change to the on-disk layout or geometry.)
+- **Corpus re-confirm** (2026-06-24, anchor 263bd994): full-corpus census (1578 `.mud` files, all
+  exactly 0x8000 B) plus re-walk of the static loader/indexer/consumer read-path. All claims
+  re-confirmed with no drift. Per-byte value distribution (6 463 488 tiles) independently
+  corroborates the byte-map: bytes 0–1 universally `0x00`, bytes 2–7 carry small-index values
+  consistent with the BGM/BGE/EFF role. BGM override label refined from "indoor override" to
+  "player-state override" to better reflect the binary evidence (keyed on a player-state flag).
 
 ---
 

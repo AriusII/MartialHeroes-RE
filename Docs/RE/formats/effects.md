@@ -16,7 +16,7 @@
 > particleEmitter walk reaches its `num_frames == 0` tail over 146 variable-length entries, and every
 > manifest / `.xdb` size formula is byte-exact. The Section B `.eff` geometry shape and Section F
 > link-tables remain at their prior sample-verified status (not re-walked this pass).
-> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change. CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): weapon bone-slot attach confirmed — when `bone_name_mode = 1` (CATALOG mode), the AnimCatalog resolves bone ids for slots 902..905; which slot maps to which hand/weapon is DEFERRED (debugger-pending). Recorded in §A.16.2.
+> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); the `particleEmitter.eff` 52-byte sub-record ROLES resolved to CODE-CONFIRMED on 2026-06-21 (ASSET-FIDELITY, §E.2.2 / §E.2.4); a static re-walk of the `.xeff` body loader on 2026-06-21 re-confirmed every Section A claim and upgraded two mechanisms to CODE-CONFIRMED — the animated keyframe count is the element count of the already-built texture-handle vector (== `tex_count`, A.4.4), and the boot-path `xeffect.lst` reader reads the documented `u32 count` + 30-byte records end-to-end (A.9). No structural change. CYCLE 12 Block B (2026-06-22, IDB SHA 263bd994): weapon bone-slot attach confirmed — when `bone_name_mode = 1` (CATALOG mode), the AnimCatalog resolves bone ids for slots 902..905; which slot maps to which hand/weapon is DEFERRED (debugger-pending). Recorded in §A.16.2. CYCLE 12 Block C (2026-06-24, IDB SHA 263bd994): byte-walk of a 4th `.xeff` file (34,000 B, 8 blocks) and all 146 `particleEmitter.eff` entries both returned RESIDUAL = 0, independently re-confirming the structural models. ONE CORRECTION applied: the `xeffect.lst` 30-byte name record includes the `.xeff` extension (3625 of 3669 records end in `.xeff`); the loader concatenates `data/effect/xeff/` + record-name verbatim — it does NOT append an extension. The prior "without extension" claim (A.9) is corrected. `xobj.lst` (effect/xobj.lst, 32 records, 34-byte stride, 1,092 bytes) added to §A.11 as a newly confirmed structured companion list.
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida, vfs-sample]
 > **conflicts:** NONE structural — the loader and the real sample contradict no committed claim on this
@@ -362,8 +362,11 @@ The six floats form two 3-component vectors. Both are HIGH confidence (parser la
 
 **Confidence: SAMPLE-VERIFIED** (build 263bd994: `entry_count = 3669`, record stride 30; the size
 formula `4 + 3669 × 30 = 110,074` matches the on-disk file size exactly). The boot loader reads the
-`u32` count, then `count` 30-byte NUL-padded name records, building `data/effect/xeff/<name>` per
-record. (The 85-entry surplus over the 3,584 `.xeff` files in the VFS is recorded in Open Questions
+`u32` count, then `count` 30-byte NUL-padded name records. The full path is built as a verbatim
+concatenation of the directory prefix and the record name: `data/effect/xeff/<name>` — no extension
+is appended by the loader. The record name already carries the extension in 3,625 of 3,669 records
+(typically `.xeff`); 44 records lack it (likely directory entries or alternate-handled stems).
+(The 85-entry surplus over the 3,584 `.xeff` files in the VFS is recorded in Open Questions
 — stale manifest rows or names served from a secondary archive; the structure itself is exact.)
 
 **Boot-path reader confirmed (CODE-CONFIRMED, static re-walk):** the manifest reader actually invoked
@@ -386,7 +389,7 @@ path and resolves to the identical on-disk structure, so it imposes no separate 
 
 | Sub-offset | Size | Type | Field | Notes |
 |---:|---:|------|-------|-------|
-| +0 | 30 | char[30] | `name` | Base filename without path prefix and without `.xeff` extension. Full path: `data/effect/xeff/<name>.xeff`. CP949 for Korean. |
+| +0 | 30 | char[30] | `name` | Filename including extension (typically `.xeff`), no path prefix. Full path: `data/effect/xeff/<name>` (verbatim, no extension appended by the loader). **CORRECTED (CYCLE 12 Block C):** the prior "without extension" claim was wrong — 3,625 of 3,669 on-disk records carry the `.xeff` extension; the loader never appends one. CP949 for Korean. |
 
 ## A.10 Companion: `bmplist.lst` — Texture Name Pool
 
@@ -408,6 +411,29 @@ path and resolves to the identical on-disk structure, so it imposes no separate 
 **Confidence: CONFIRMED** (3 sample files verified)
 
 These files in `data/effect/xobj/` are **plain text** (CRLF line endings), not binary. Each file begins with integer line counts followed by tab-separated floating-point vertex/UV data rows. They define the emitter shape referenced by `emitter_type == 1` through the shared mesh table (selected by `resource_id`). Parsers for `.xobj` must use a text reader.
+
+### A.11.1 Companion: `xobj.lst` — Primitive Mesh Boot Manifest
+
+**Confidence: SAMPLE-VERIFIED** (build 263bd994: `entry_count = 32`, record stride 34; the size
+formula `4 + 32 × 34 = 1,092` matches the on-disk file size exactly).
+
+- **Path:** `data/effect/xobj.lst`
+- **Endianness:** Little-endian
+- **Layout:** `u32 count` prefix + `count × 34-byte` NUL-padded name records — the same counted-array
+  pattern as `xeffect.lst` (A.9) and `bmplist.lst` (A.10), but with a 34-byte record stride.
+- **Role:** boot manifest enumerating the `.xobj` ASCII primitive meshes; each record provides a base
+  name resolved to the `.xobj` file path. Populates the shared mesh table used when `resource_id < 10000`.
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| 0x00 | 4 | u32 LE | `entry_count` | Number of mesh name records. SAMPLE-VERIFIED = 32 on this build. |
+| 0x04 | `entry_count × 34` | Record[] | `entries[]` | One 34-byte record per mesh |
+
+**Name record (34 bytes, zero-padded):**
+
+| Sub-offset | Size | Type | Field | Notes |
+|---:|---:|------|-------|-------|
+| +0 | 34 | char[34] | `name` | Base name (numeric/control-char stems observed in sample). Full path resolution pending — likely `data/effect/xobj/<name>` by analogy with sibling manifests. CP949 for Korean. |
 
 ## A.12 Enumerations / Flags
 
@@ -1460,6 +1486,8 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 8. **9-digit naming scheme `[CCC][SSS][AB][N]`** — PLAUSIBLE from pattern observation; no manifest confirms the digit-group semantics.
 9. **Keyframe index prefix — RESOLVED (CAMPAIGN VFS-MASTERY).** The earlier "frame 0 has no index prefix (36 B)" reading is corrected: every animated keyframe, frame 0 included, is `u32 index + 9 × f32` = 40 B (A.4.4). The parser reads `tex_count` uniform 40-byte entries with no frame-0 special case. No open question remains.
 10. **High-`sub_effect_count` front-end files — RESOLVED (2026-06-14).** `char_select-u.xeff` (68 sub-effects, block-0 `tex_count` = 2) and `zone_sel_u.xeff` / `zone_sel2-u.xeff` (11 sub-effects, block-0 `tex_count` = 20) now parse successfully. Root cause was a mislabelled header: the header is 8 bytes and EVERY block (block 0 included) is parsed by the same element read sequence — a 24-byte fixed head (A.4.0) then the variable body — with each block's entry count being its own `tex_count` at element offset +0x14. There is no header `first_entry_count` and no distinct per-block prefix.
+11. **Anti-magic sentinel `0x46464558` (A.1, A.14) — carry-forward.** The CYCLE 12 Block C static re-walk of the boot loader and the register-from-file helper did NOT encounter this constant as a code immediate — the helper simply stores the first u32 as the `effect_id` without any sentinel comparison. The comparison, if present, must reside in the lazy body parser (not traced this pass). Status: NOT RE-CONFIRMED this session. The prior CONFIRMED status (§A.1, §A.14) is carried forward from earlier sessions. Scheduled for re-confirmation in the next body-parser trace.
+12. **`xobj.lst` name resolution** — the 34-byte records carry numeric/control-char stems in the build 263bd994 sample; the full path built from each record name is presumed to be `data/effect/xobj/<name>` by analogy with the sibling `.lst` files, but the boot loader read-site for `xobj.lst` was not traced this pass. **DBG-pending** (body-parser / boot-path trace required).
 
 ## From `.eff` geometry (Section B)
 
@@ -1531,7 +1559,8 @@ The June 2026 black-box pass analyzed both known FX7 files (both exactly 35,202 
 - **Related formats:** `pak.md` (container), `sound_tables.md` (the other `.eff` variant), `mesh.md` (shares 32-byte vertex record convention), `terrain_layers.md` (FX layer formats; authoritative for `.fx1`–`.fx7` byte layouts)
 - **Related runtime spec:** `specs/effects.md` — the authoritative effects system behavioral spec (boot manifests, object pools, trigger dispatch table, per-frame tick math, bone attachment, damage-number renderer, sword-light sub-system)
 - **Related specs:** `specs/combat.md` (server-authoritative damage; effects here are presentation-only), `specs/skinning.md` (bone hierarchy used by bone-attached effects)
-- **Companion plain-text files:** `xeffect.lst`, `bmplist.lst` (boot manifests, see `specs/effects.md §3`); the effect-link tables `totalmugong.txt`, `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt` are documented in **Section F** above (all under `data/effect/`, corrected 2026-06-13 from the prior `data/script/` implication; only `effectscale.xdb` is under `data/script/`)
+- **Companion binary manifests:** `xeffect.lst` (3,669 records × 30 bytes, §A.9), `bmplist.lst` (1,526 records × 30 bytes, §A.10), `xobj.lst` (32 records × 34 bytes, §A.11.1) — all at `data/effect/`; see `specs/effects.md §3` for boot loading sequence
+- **Companion plain-text tables:** `totalmugong.txt`, `itemjointeff.txt`, `mobjointeff.txt`, `itemswordlight.txt`, `mobswordlight.txt` — documented in **Section F** above (all under `data/effect/`, corrected 2026-06-13 from the prior `data/script/` implication; only `effectscale.xdb` is under `data/script/`)
 - **Companion ASCII format:** `.xobj` files in `data/effect/xobj/` — plain-text primitive meshes
 - **Companion binary tables:** `effectscale.xdb` (Section D), `particleEmitter.eff` (Section E)
 - **Glossary:** see `Docs/RE/names.yaml`

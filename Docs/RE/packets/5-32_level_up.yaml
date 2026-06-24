@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# verification: idb sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 
 name: SmsgLevelUp
@@ -12,21 +13,18 @@ capture_verified: false
 summary: Server notifies that an actor levelled up. Carries the new level, refreshed vitals (HP/MP/stamina), and (for the local player) remaining stat points and rank-XP progress.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 48.
-# NOTE: the tail (rank-XP region) packing is uncertain -- see notes. The widths below are chosen so
-# the modelled fields sum to exactly 48; treat the last two regions as provisional.
 fields:
-  - { name: Sort,            type: u8 }       # 0x00  actor sort
-  - { name: Pad0,            type: "bytes[3]" } # 0x01  alignment padding
-  - { name: ActorId,         type: u32 }      # 0x04  actor id
-  - { name: NewLevel,        type: u16 }      # 0x08  new level
-  - { name: Pad1,            type: "bytes[2]" } # 0x0a  alignment padding to the next dword
-  - { name: RemainingStatPoints, type: i32 }  # 0x0c  remaining stat points (local player)
-  - { name: Value,           type: i32 }      # 0x10  secondary value (local player)
-  - { name: HpMpPacked,      type: i64 }      # 0x14  HP:MP packed (current HP i32 : current MP i32)
-  - { name: Stamina,         type: i32 }      # 0x1c  current stamina
-  - { name: Tail20,          type: "bytes[4]" } # 0x20  tail word (read into the struct; not decoded)
-  - { name: RankXpWithin,    type: i64 }      # 0x24  rank-XP within current rank (local player)
-  - { name: RankXpTailHi,    type: "bytes[4]" } # 0x2c  tail of the rank-XP region (see notes)
+  - { name: Sort,                 type: u8 }        # 0x00  actor sort
+  - { name: Pad0,                 type: "bytes[3]" } # 0x01  alignment padding
+  - { name: ActorId,              type: u32 }       # 0x04  actor id
+  - { name: NewLevel,             type: u16 }       # 0x08  new level
+  - { name: Pad1,                 type: "bytes[2]" } # 0x0a  alignment padding to the next dword
+  - { name: RemainingStatPoints,  type: i32 }       # 0x0c  remaining stat points (local player)
+  - { name: Value,                type: i32 }       # 0x10  secondary value (local player)
+  - { name: HpMpPacked,           type: i64 }       # 0x14  HP:MP packed (current HP i32 : current MP i32)
+  - { name: Stamina,              type: i32 }       # 0x1c  current stamina
+  - { name: RankXpA,              type: i64 }       # 0x20  first rank-XP qword (local player)
+  - { name: RankXpB,              type: i64 }       # 0x28  second rank-XP qword (local player)
 
 notes: |
   Static inference only; no capture available. Total = 48 bytes (matches the handler's single
@@ -43,14 +41,16 @@ notes: |
                                      qword (the handler stores this as a single 8-byte value).
                                      HIGH CONFIDENCE for the HP/MP core.
     0x1c (4B) Stamina              : current stamina. HIGH CONFIDENCE.
-    0x20..0x2f (16B)               : a rank-XP region. The handler reads two 64-bit rank-XP values
-                                     here (a within-rank value and a total), but the exact packing
-                                     against the 48-byte boundary is ambiguous (the reads overlap
-                                     the tail of the block). It is modelled above as a 4-byte tail
-                                     word + one i64 (within-rank) + a 4-byte high tail so the fields
-                                     sum to 48. PROVISIONAL.
+    0x20 (8B) RankXpA              : first rank-XP i64 value read by the handler (local player).
+    0x28 (8B) RankXpB              : second rank-XP i64 value read by the handler (local player).
+                                     Both reads are clean i64 reads at these offsets -- no 4-byte
+                                     split at 0x20/0x2c. HIGH CONFIDENCE.
 
   UNKNOWNS to resolve with a capture of a level-up:
-    - the precise layout of the 16-byte rank-XP tail (two i64 values vs the modelled split);
-    - whether Tail20 is part of the rank-XP region or a separate field.
-  The HP/MP/stamina/level core is high confidence; the rank-XP tail is the part to verify first.
+    - the semantic distinction between RankXpA and RankXpB (within-rank vs total accumulator, or
+      two separate rank channels);
+    - whether RemainingStatPoints / Value are gated only on the local-player path.
+  The HP/MP/stamina/level core and the two clean i64 reads at 0x20/0x28 are high confidence.
+
+  RELATED: 5/11 SmsgRankXpGain (packets/5-11_rank_xp_gain.yaml) is the incremental rank-XP push;
+  5/9 SmsgExpGain (packets/5-9_exp_gain.yaml) is the character-XP channel.

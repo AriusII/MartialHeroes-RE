@@ -36,7 +36,7 @@ verification:
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
-  ida_reverified: 2026-06-22    # CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
+  ida_reverified: 2026-06-24    # CYCLE 12 audit (2026-06-24, 263bd994): DisplayConfig_ParseFramerate confirmed as the display.lua loader (§9.1); OPTION_BRIGHT read/write confirmed (§6.2a). Prior CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
   ida_anchor: 263bd994
   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
   evidence: [static-ida, sample-vfs]
@@ -735,6 +735,12 @@ shipping client's tunable display-config layer: every value below is a literal s
 text, so the values themselves need no binary confirmation — they are read directly from the file.
 The client loads this script through a Lua-config loader at start-up and copies the recovered scalars
 into the render pipeline's display-config fields.
+
+**Loader canonical name (CONFIRMED, CYCLE 12 audit, IDB SHA 263bd994).** The display.lua config
+loader is `DisplayConfig_ParseFramerate` — a shared display-config routine that parses both the
+framerate key (`DISPLAY_FRAMERATE`) and `DISPLAY_BASE_BRIGHT_MULTI` in one pass, confirming the
+shared display-config apply-path provenance that §6.3 and `rendering.md §6.6` both reference for
+those two keys. Per-stage shader-constant reads remain IDA-pending (§9.4).
 
 ### 9.2 World / background brightness scalars (SAMPLE-VERIFIED values)
 

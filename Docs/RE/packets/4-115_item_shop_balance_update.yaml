@@ -1,3 +1,14 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 24-byte (0x18) body -- Header[8]@0,
+#                 Success u8@+0x08, FailCode u8@+0x09, Pad[2]@+0x0A, Gold i64@+0x0C (low/high dwords),
+#                 Points u32@+0x14 -- are control-flow-confirmed)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none.
+
 name: SmsgItemShopBalanceUpdate
 opcode: 0x40073           # major 4 (Response), minor 115 -> (4 << 16) | 115
 direction: S2C

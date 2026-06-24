@@ -5,42 +5,50 @@
 > reference this file.
 
 <!--
-verification: confirmed (loader-control-flow)
-ida_anchor: 263bd994
-evidence: [static-ida]
+verification: confirmed (loader-control-flow + sample-verified)
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+evidence: [static-ida, sample-byte]
 conflicts: none
 -->
 
-> **Verification banner.** `confirmed (loader-control-flow + sample-verified)` · `ida_anchor: 263bd994` ·
-> `evidence: [static-ida, sample-byte]` · `conflicts: none`. Re-verified against doida.exe IDB SHA `263bd994`,
-> CYCLE 7 (2026-06-20) and re-walked + byte-verified against a real item-skin sample (2026-06-21):
-> both the item byte parser and the character byte parser were walked end-to-end in the loader
-> (header → face section → vertex section → influence section, each as a `count` u32 followed by a
-> bulk `count × stride` raw block), and the per-vertex influence packing (drop / normalize /
-> major-minor split) and the verbatim coordinate handling were read directly. The on-disk strides
-> (36-byte face, 24-byte vertex, 12-byte influence) and the 4-byte LenStr name prefix re-confirmed
-> exactly. The 2026-06-21 sample pass corrected two earlier framings that the bytes disprove (see the
-> corrections box below): the face-corner first field and the influence first field are both **plain
-> `u32` vertex indices**, and face dedup is by **(vertex index, UV)** — not by inline corner
-> positions. No structural drift in the section/stride layout.
+> **Verification banner.** `confirmed (loader-control-flow + sample-verified)` ·
+> `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> `evidence: [static-ida, sample-byte]` · `conflicts: none`. Re-verified against doida.exe IDB SHA
+> `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`, CYCLE 7 (2026-06-20),
+> re-walked + byte-verified against a rigid item-skin sample (2026-06-21), and re-confirmed against
+> two further samples (item: `gi201011001.skn`, 2593 bytes, Nface 46 / Nvtx 25 / Nweight 25;
+> character: `g200002620.skn`, 84083 bytes, Nface 1432 / Nvtx 786 / Nweight 1136 — both exhaust at
+> EOF with zero residual). Both the item byte parser and the character byte parser were walked
+> end-to-end in the loader (header → face section → vertex section → influence section, each as a
+> `count` u32 followed by a bulk `count × stride` raw block), and the per-vertex influence packing
+> (drop / normalize / major-minor split) and the verbatim coordinate handling were read directly.
+> The on-disk strides (36-byte face, 24-byte vertex, 12-byte influence) and the 4-byte LenStr name
+> prefix re-confirmed exactly. Earlier framings corrected by the sample passes (see the corrections
+> box below): the face-corner first field and the influence first field are both **plain `u32` vertex
+> indices**, and face dedup is by **(vertex index, UV)** — not by inline corner positions. No
+> structural drift in the section/stride layout.
 >
-> **Corrections applied this pass (binary-won, sample-verified).**
+> **Corrections applied (binary-won, sample-verified).**
 > - The influence record's first field is a **plain `u32` vertex index** (sample = `0,1,…,Nvtx−1`,
 >   one per vertex in the rigid sample), **not** a "position key / raw float-bit position compare".
 >   The loader matches it (as a raw `u32` equality) against the **face-corner's `u32` vertex index** —
 >   an index-to-index match, not a position-float compare.
 > - The 36-byte face record is **3 corners × {`u32` vertex_index, `f32` uv_u, `f32` uv_v}**, **not**
->   "3 inline corner positions (9 floats)". Render-vertex dedup is by the tuple
->   `(vertex_index, uv_u, uv_v)` — by index + UV, **not** by position. (Sample face0 corner indices =
->   `2,3,4`: small integers that are valid indices into the 8-vertex section, proving index, not
->   position — read as `f32` those bits would be denormals ≈ 2.8e-45.)
-> - The raw disk order of the two vertex triples is now **sample-confirmed**: triple 0 = **normal**
+>   "3 inline corner positions (9 floats)". Render-vertex dedup is nominally by `(vertex_index, uv_u,
+>   uv_v)` (unique render vertices that differ by index or UV); however, the loader's actual collapse
+>   test uses **vertex_index equality plus a 0.001 position epsilon** (and a separate coarser ~0.2
+>   position-proximity weld over major-bone groups), with UV carried per render vertex — see the
+>   dedup footnote in §Face section. (Sample face0 corner indices = `2, 3, 4` in the small item skin,
+>   `4, 5, 9` in the character skin: small integers valid as indices, not denormal floats.)
+> - The raw disk order of the two vertex triples is **sample-confirmed**: triple 0 = **normal**
 >   (unit length), triple 1 = **position** (mesh extent). Upgraded from MEDIUM to CONFIRMED.
 >
-> **Sample witness:** a 466-byte rigid item skin (`id_a` = filename numeric suffix, `id_b = 0`,
-> `name` length 10 ASCII, `Nface = 4`, `Nvtx = 8`, `Nweight = 8`, single bone, unit weights, EOF
-> residual 0). Source-file provenance for the character skinning math: `coreskin.cpp` (the load-time
-> normalize / major-bone-select asserts).
+> **Sample witnesses:** rigid item skin `gi201011001.skn` (`id_a` = 201011001, `id_b = 0`,
+> `name` = "gum_201011001" 13 bytes ASCII, `Nface = 46`, `Nvtx = 25`, `Nweight = 25`, single bone
+> weight 1.0, EOF residual 0); character skin `g200002620.skn` (`id_a` = 200002620, `id_b = 3045`,
+> `name` = "s_200002620" 11 bytes ASCII, `Nface = 1432`, `Nvtx = 786`, `Nweight = 1136`,
+> multi-bone, EOF residual 0). Source-file provenance for the character skinning math: `coreskin.cpp`
+> (the load-time normalize / major-bone-select asserts at lines 294, 306, 333).
 
 ## Scope
 
@@ -70,7 +78,7 @@ file, not the structures built from them.
 | Header `id_b` (u32, skeleton / skin-class key, used verbatim as the pose-pool lookup key) | Resolved | CONFIRMED (loader-control-flow) |
 | Header `name` (LenStr — 4-byte u32 LE length + body, no on-disk terminator; discarded for math) | Resolved | CONFIRMED (loader-control-flow; same LenStr as `.mot`/`.bnd`) |
 | Face section: `u32 Nface` + `36 × Nface` bytes (3 corners × {u32 vertex_index, f32 uv_u, f32 uv_v}) | Resolved | CONFIRMED (loader-control-flow + sample) |
-| Face corner first field = `u32` vertex index (NOT inline position floats); dedup by (index, UV) | Resolved | CONFIRMED (sample-verified) |
+| Face corner first field = `u32` vertex index (NOT inline position floats); dedup collapse test = vertex_index equality + 0.001 position epsilon (net effect: unique by index and UV) | Resolved | CONFIRMED (sample-verified + loader-control-flow) |
 | Vertex section: `u32 Nvtx` + `24 × Nvtx` bytes (2 × vec3 f32: disk order normal then position) | Resolved | CONFIRMED (loader-control-flow + sample) |
 | Influence section: `u32 Nweight` + `12 × Nweight` bytes (12-byte records) | Resolved | CONFIRMED (loader-control-flow) |
 | Influence record = {u32 vertex_index, u32 bone id, f32 weight} | Resolved | CONFIRMED (sample-verified) |
@@ -167,9 +175,13 @@ Immediately follows the header (after the variable-length `name`).
 Each face record is one triangle stored as three consecutive corner sub-records; each corner is a
 `u32` **vertex index** (into the vertex section that follows) plus the per-corner texture coordinates.
 The face section is an **index / triangle soup** — vertex positions are stored once in the vertex
-section, not inlined per corner. The loader walks all `3 × Nface` corners and **deduplicates by the
-tuple `(vertex_index, uv_u, uv_v)`** to build the unique render-vertex list (a single mesh vertex
-referenced from corners with different UVs becomes distinct render vertices).
+section, not inlined per corner. The loader walks all `3 × Nface` corners and deduplicates to build
+the unique render-vertex list. The effective dedup key is **vertex_index equality plus a 0.001
+position epsilon** on the vertex position components; a separate coarser weld (~0.2 units) runs
+over major-bone groups. UV is stored per render vertex, so a single mesh vertex referenced from
+corners with different UVs becomes distinct render vertices. The shorthand `(vertex_index, uv_u,
+uv_v)` captures the net result (unique by index and UV); the underlying collapse test is the
+position-epsilon variant above.
 
 | Sub-offset within corner | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
@@ -177,14 +189,16 @@ referenced from corners with different UVs becomes distinct render vertices).
 | 4 | 4 | f32 LE | `uv_u` | Per-corner texture U. | CONFIRMED |
 | 8 | 4 | f32 LE | `uv_v` | Per-corner texture V (the engine applies `1.0 − uv_v` when building the render vertex — the v-flip lives in the parser's render-vertex assembly, not in the bytes). | CONFIRMED |
 
-> **Dedup is by index + UV, not by position (correction).** The 36-byte face record is **3 corners ×
-> {`u32` vertex_index, `f32` uv_u, `f32` uv_v}**. An earlier reading framed the 36 bytes as "three
-> inline corner positions (9 floats)" deduplicated by position — the bytes disprove this: the
-> first 4 bytes of each corner are a small `u32` index (sample face0 = `2, 3, 4`, valid indices into
-> the 8-vertex section; read as `f32` they would be denormals ≈ 2.8e-45). Render-vertex dedup compares
-> the corner's `u32` vertex index (raw equality) and its two UV floats (near-equal within tolerance) —
-> i.e. unique by `(vertex_index, uv_u, uv_v)`. See `formats/mesh.md` §Face table for the
-> sample-verified item-skin witnesses.
+> **Dedup correction and refinement.** The 36-byte face record is **3 corners × {`u32` vertex_index,
+> `f32` uv_u, `f32` uv_v}**. An earlier reading framed the 36 bytes as "three inline corner positions
+> (9 floats)" deduplicated by position — the bytes disprove this: the first 4 bytes of each corner
+> are a small `u32` index (item sample face0 = `2, 3, 4`, valid indices into the 25-vertex section;
+> character sample face0 = `4, 5, 9`, valid into the 786-vertex section; read as `f32` those integers
+> would be denormals ≈ 2.8e-45). The effective collapse test is vertex_index equality **plus a 0.001
+> position epsilon** on the vertex position, with UV carried per render vertex; a separate coarser
+> ~0.2-unit weld runs over major-bone groups. The net result: render vertices are unique by index and
+> UV, with position proximity breaking ties. See `formats/mesh.md` §Face table for additional
+> sample-verified witnesses.
 
 ---
 
@@ -358,11 +372,14 @@ a plain `u32` **vertex index** (not a position key).)
 - **Canonical names:** see `Docs/RE/names.yaml` (`SkinFile`, `SknFace`, `SknCorner`, `SknVertex`,
   `SknWeight`; the `id_b` skeleton-key vs `skin.txt col2` class-tag split is owned by Tier-1).
 - **Provenance:** see `Docs/RE/journal.md`. The format (four count-prefixed sections, strides
-  36/24/12, LenStr name, drop-below-0.01 + per-vertex normalize-to-1.0, verbatim Y-up coordinates with
-  the `−X` flip identified as a port convention) was recovered from doida.exe IDB SHA `263bd994`,
-  static analysis, 2026-06-20, and re-walked + byte-verified against a real item-skin sample,
-  2026-06-21. The 2026-06-21 sample pass corrected two earlier framings: the face-corner first field
-  and the influence first field are both plain `u32` vertex indices (face dedup is by
-  `(vertex_index, uv_u, uv_v)`, not by inline corner positions; the influence match is index-to-index,
-  not a position-key float compare), and the vertex disk-triple order was confirmed as normal then
-  position.
+  36/24/12, LenStr name, drop-below-0.01 + per-vertex normalize-to-1.0, verbatim Y-up coordinates
+  with the `−X` flip identified as a port convention) was recovered from doida.exe IDB SHA
+  `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`, static analysis, 2026-06-20,
+  and re-walked + byte-verified against two samples (item `gi201011001.skn` 2593 bytes Nface 46 /
+  Nvtx 25 / Nweight 25; character `g200002620.skn` 84083 bytes Nface 1432 / Nvtx 786 / Nweight
+  1136 — both EOF residual 0). Those sample passes corrected two earlier framings: the face-corner
+  first field and the influence first field are both plain `u32` vertex indices (face dedup collapse
+  test is vertex_index equality + 0.001 position epsilon, not a position-float key compare; the
+  influence match is index-to-index, not a position-key float compare); and the vertex disk-triple
+  order was confirmed as normal then position. The `id_b = 3045` witness from the character sample
+  confirms `id_b` is a verbatim pose-pool key, not a small 1..4 class index at this layer.

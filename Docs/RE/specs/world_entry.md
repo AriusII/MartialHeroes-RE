@@ -12,7 +12,7 @@ verification: confirmed (the enter-world opcode ladder 1/9 -> 3/5 -> 4/1, the si
   cadence, which UI control fires 1/0 vs 2/0 and where the socket closes, the per-area/per-dungeon
   cell counts that live in each VFS .lst, and the data-driven walk/run speeds).
 ida_anchor: 263bd994
-ida_reverified: 2026-06-22  # CYCLE 12 / Phase 3 -- 4/1 interior tables (roster A, scene-entity B, hotbar init) + 4/4 892B actor-record framing folded in (263bd994)
+ida_reverified: 2026-06-24  # CYCLE 12 / Phase 3 -- 4/1 interior tables (roster A, scene-entity B, hotbar init) + 4/4 892B actor-record framing folded in (263bd994); 2026-06-24 audit: Cmsg_KeepaliveToggle_Send tri-valued arg convention documented (§2.5)
 evidence: [static-ida]
 sample_verified: false
 note: CYCLE 7 (2026-06-20) -- folded the world-entry-relevant region/zone-state resolution and the
@@ -259,6 +259,21 @@ path (§3.4). See `specs/client_workflow.md §5.4.1` (step 0 of the world build)
 This `2/112` toggle is **independent** of the periodic idle heartbeat whose suppress flag `4/1`
 clears (§2.3): the toggle is enabled by the scene machine; the suppress flag is cleared by the
 packet handler. A faithful port must wire both, separately.
+
+> **`Cmsg_KeepaliveToggle_Send` is tri-valued.** The underlying send routine accepts an argument
+> that selects one of three behaviours — it is **not** a simple boolean enable/disable:
+>
+> | Argument | Behaviour |
+> |---|---|
+> | **1** | **Enable** — set `g_KeepaliveEnabled = 1`, then transmit the `2/112` frame immediately |
+> | **2** | **Disable** — clear `g_KeepaliveEnabled` (no transmission; suppresses if already off) |
+> | **other** | **Conditional send** — transmit the `2/112` frame **only if `g_KeepaliveEnabled` is already 1** (the periodic keepalive poll path); does not change the flag |
+>
+> The scene state machine calls with arg **1** on case-5 entry (this section). The leave-world /
+> logout path calls with arg **2** (§3.4). The periodic keepalive timer calls with a non-1/non-2
+> argument to send the heartbeat without changing the toggle state. A faithful port must model all
+> three paths; do not reduce this to a boolean set/clear. *([confirmed]* static control-flow,
+> build 263bd994.)*
 
 ### 2.6 In-world — the persistent connection continues
 

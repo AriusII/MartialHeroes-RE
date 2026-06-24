@@ -13,6 +13,9 @@ verification: re-confirmed 2026-06-21 directly from the doida.exe binary (IDB SH
   (GAP-1). Outcome CONFIRMED, no other drift; the second-load-pass replay question and the byte-exact
   quad vertex stride remain debugger-pending (§9).
   (Prior basis: build 263bd994 re-confirmation campaign, synthesised from committed specs.)
+  2026-06-24 audit: added cross-link in §5A.4 noting NetClient +82364 is the same physical byte as
+  character_creation.md §5 Latch B (network-client create in-flight marker); one byte, two roles.
+  Validation checklist updated correspondingly. IDB SHA 263bd994; no structural drift.
 
 # Scene Dossier — Load (engine state 2)
 
@@ -418,6 +421,13 @@ only *releases* the transition.
   0**. So entering Load **re-enables keepalive transmission** for the duration of the load — the one and
   only network behaviour this otherwise-passive screen has. (It is a flag write, not a `GUComponent`
   action.)
+  > **Cross-link (`specs/character_creation.md §5`, Latch B).** `NetClient +82364` is the **same byte**
+  > as the "Latch B — network-client create in-flight marker" documented in `character_creation.md §5`.
+  > The char-management/create/enter builders (including the `1/6` create sender) **set** this byte to 1
+  > when dispatching a request; the keepalive timer reads it to suppress transmit while a request is
+  > outstanding; Load's visual-init **clears** it (= 0) when entering the load phase — re-enabling
+  > keepalive. Both specs describe the same physical byte, one byte serving two roles. A faithful port
+  > must model a single shared flag, not two independent booleans.
 - **No in-scene error modal.** A data-load failure surfaces only as empty tables; the error MessageBox
   belongs to the separate **state 7** (§5A.1), and this repo's strict-1:1 reconstruction routes a real
   fault there rather than swallowing it (§7).
@@ -540,7 +550,8 @@ divergence — the corpus had only ~10 entries instead of the full 48 — was **
       and it renders **no text** (§5A).
 - [ ] Entering Load **re-enables keepalive transmission** (clears the NetClient keepalive-suppress flag
       `+82364`); the 20 s keepalive timer sends the `2/10000` frame only while that flag is 0 (§5A.4) —
-      a port that models the keepalive timer must honour this gate.
+      a port that models the keepalive timer must honour this gate. This byte is **shared** with the
+      char-management in-flight marker (`character_creation.md §5` Latch B) — model one flag, not two.
 - [ ] Godot does not choose the post-load route — the **SceneStateMachine** does (2→3 vs 2→4).
 
 ---

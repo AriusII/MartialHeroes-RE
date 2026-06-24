@@ -19,6 +19,9 @@ verification: independently re-derived 2026-06-18 directly from the doida.exe bi
   latch is a SelectWindow scene member field (NOT the NetClient keepalive-suppress field); the enter
   copy destinations are descriptor+stats+level into live-player globals; the 4/1 (SmsgCharSpawnResponse)
   packet reuses the copied descriptor as its spawn seed; 3/5 is the enter-ack (NOT the spawn trigger).
+  2026-06-24 audit (IDB SHA 263bd994): §3.2 extended with additional precision — the enter-game commit
+  also writes an extra NetHandler flag byte to live-player globals post-send (semantic capture-pending;
+  see charselect.md §7.4 for the authoritative detail). No structural drift.
 ---
 
 # Scene / Game State Machine — Cross-Cutting Dossier
@@ -262,6 +265,13 @@ not populated until the send is already in flight.
 
 *([CONFIRMED CYCLE 12]* POST-send ordering of descriptor+stats+level copy; `4/1` reuses the
 copied descriptor as the spawn seed; `3/5` is the enter-ack, not the spawn trigger.)*
+
+> **2026-06-24 precision addition.** Beyond the three documented blocks (descriptor/stats/level), the
+> enter-game commit writes one additional value: the high byte of a NetHandler roster word and a boolean
+> from a second NetHandler field are written to live-player globals at the same time, post-send. The
+> semantic of this extra flag byte is capture-pending (likely a PvP/relation or appearance flag). The
+> POST-send ordering and the three primary copy destinations are unaffected; this is an additional
+> detail. See `scenes/charselect.md §7.4` (the authoritative per-scene record).
 
 ---
 

@@ -156,7 +156,9 @@ public sealed record LocalPlayerSpawnedEvent(
     uint CurrentHp,
     uint MaxHp,
     ushort ServerClass,
-    ImmutableArray<uint> EquipGids = default) : IClientEvent;
+    ImmutableArray<uint> EquipGids = default,
+    ushort InternalClass = 0,
+    byte AppearanceVariant = 0) : IClientEvent;
 
 public sealed record InGameWorldBootstrappedEvent(
     ActorKey Key,
@@ -196,6 +198,10 @@ public readonly record struct SceneCategoryEntry(uint Category, int Value);
 public sealed record SceneEntitySnapshotEvent(
     ImmutableArray<RosterMember> ActorSlots,
     ImmutableArray<SceneCategoryEntry> Categories) : IClientEvent;
+
+public sealed record ActorSkillActionEvent(
+    ActorKey AttackerKey,
+    uint SkillId) : IClientEvent;
 
 public readonly record struct HotbarSlotEntry(int SlotIndex, uint EntryKey, ushort Count);
 

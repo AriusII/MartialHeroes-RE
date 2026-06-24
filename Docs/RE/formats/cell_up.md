@@ -5,11 +5,13 @@
 > C# parsers MUST cite `// spec: Docs/RE/formats/cell_up.md` on every magic constant / offset.
 
 <!--
-verification: sample-verified (header + 40-byte triangle record layout, the file-size formula, and
-              the world-space coordinates cross-checked against real VFS cell samples AND the legacy
-              cell-loader read path). The per-triangle attribute at +0x24 is sample-OBSERVED but its
-              meaning is UNVERIFIED.
-ida_anchor: 263bd994
+verification: parser + sample — full on-disk population (222 .up, 1384 .exd, 1606 files total, 0
+              size mismatches) confirms the file-size formula 4 + 40×count. The triangle-decoder
+              read-path (count → allocate → 40-byte per-record read → 40→72 expansion) is
+              confirmed by static analysis of the cell-loader. The per-triangle attribute at +0x24
+              is parser-confirmed as a single f32 copied verbatim into the runtime triangle and NOT
+              consumed by the AABB or plane math; its semantic meaning remains UNVERIFIED.
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 conflicts: refines the +0x24 / "byte 36" field reading in formats/terrain.md §9.2 — that field is an
            independent per-triangle attribute, NOT a "surface Y-level": the earlier "10th float == Y"
@@ -18,10 +20,38 @@ conflicts: refines the +0x24 / "byte 36" field reading in formats/terrain.md §9
 source-format: derived from Docs/RE/_dirty/formats/cell_up.raw.md (dirty-room RE of doida.exe).
 -->
 
-> **status: sample-verified** — the header (`u32 triangleCount`), the 40-byte triangle record stride,
-> the file-size formula (`4 + 40 × triangleCount`), and the world-space coordinates are matched against
-> real VFS cell samples and against the legacy cell-loader read path. The format and decoder are
-> **byte-identical** to the `.exd` sibling ("EXTRA_TERRAIN"); everything below applies verbatim to both.
+---
+
+## Re-verification banner (CYCLE 11 — full-population census + parser confirmation)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `parser + sample` — full on-disk population confirmed; decoder read-path confirmed by static analysis |
+| `ida_reverified` | 2026-06-24 |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = static trace of the cell-loader triangle decoder (count read, allocation with overflow guard, 40-byte per-record read, 40→72 converter, plane builder); witness 2 = full on-disk population scan |
+| `conflicts`      | None. This pass adds confirmations only; no prior value or claim was contradicted. |
+
+**Census (CYCLE 11, witness 2 — full `data.vfs` population):** **222 `.up`** files + **1384 `.exd`**
+files = **1606 files total**. The formula `fileSize = 4 + 40 × triangleCount` held for 100 % of both
+populations (0 size mismatches). The `.up` and `.exd` decoders are byte-identical functions in the
+client (same instructions; distinction is only the destination slot on the cell object) — CONFIRMED.
+
+**Parser facts confirmed this pass (witness 1):** (a) single `u32` header word; (b) 40-byte per-record
+read, stride literal in the decoder; (c) runtime allocation of `72 × count` bytes with a saturating
+overflow guard — the count itself is not otherwise bounds-checked; (d) 40→72 converter copies the three
+disk vertices verbatim, copies `+0x24` f32 verbatim as the tail `attr`, computes XZ AABB (min/max of
+v0/v1/v2 over X and Z only; Y not bounded), and builds a normalized plane
+(`edge1 = v0 − v1`, `edge2 = v2 − v1`, `normal = normalize(cross(edge1, edge2))`,
+`d = −dot(normal, v1)`); normalize also serves as the degenerate-triangle guard.
+
+---
+
+> **status: parser + sample** — the header (`u32 triangleCount`), the 40-byte triangle record stride,
+> the file-size formula (`4 + 40 × triangleCount`), the world-space coordinates, and the 40→72 runtime
+> expansion (AABB + plane) are confirmed by both the static decoder trace and the full on-disk population.
+> The format and decoder are **byte-identical** to the `.exd` sibling ("EXTRA_TERRAIN"); everything below
+> applies verbatim to both.
 
 ---
 

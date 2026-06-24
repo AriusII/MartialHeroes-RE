@@ -103,6 +103,19 @@ public sealed partial class ActorRegistry : Node
     }
 
 
+    public void PlayActorAttack(ActorKey attackerKey)
+    {
+        if (!_actors.TryGetValue(attackerKey, out var visual) || !IsInstanceValid(visual))
+        {
+            GD.Print($"[ActorRegistry] PlayActorAttack: attacker {attackerKey.RawId} not in registry — " +
+                     "no-op. spec: skinning.md §10.5 (combat clip one-shot on the attacker's avatar).");
+            return;
+        }
+
+        visual.PlayAttackMotion();
+    }
+
+
     private void OnSectorBecameResident(int mapX, int mapZ)
     {
         if (_terrainNode is null) return;

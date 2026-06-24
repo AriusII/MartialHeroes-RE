@@ -210,8 +210,44 @@ public sealed partial class GameLoop : Node
 
         switch (key.Keycode)
         {
+            case Key.Escape:
+                break;
+
+            case Key.Space:
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.B:
+                _hudMaster?.ToggleGuildDiplomacy();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.C:
+                _hudMaster?.ToggleStats();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.F:
+                _hudMaster?.ToggleRelation();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.G:
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.H:
+                _hudMaster?.ToggleHelp();
+                GetViewport().SetInputAsHandled();
+                break;
+
             case Key.I:
                 _hudMaster?.ToggleInventory();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.J:
+                _hudMaster?.ToggleGuildWarInfo();
                 GetViewport().SetInputAsHandled();
                 break;
 
@@ -220,12 +256,53 @@ public sealed partial class GameLoop : Node
                 GetViewport().SetInputAsHandled();
                 break;
 
-            case Key.O:
+            case Key.L:
+                _hudMaster?.ToggleStallList();
                 GetViewport().SetInputAsHandled();
                 break;
 
-            case Key.C:
-                _hudMaster?.ToggleStats();
+            case Key.M:
+                _hudMaster?.ToggleMap();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.N:
+                _hudMaster?.ToggleGuildN();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.O:
+                _hudMaster?.ToggleNpcDialog();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.P:
+                _hudMaster?.CloseAll();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.Q:
+                _hudMaster?.ToggleQuest();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.S:
+                _hudMaster?.ToggleInventory();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.U:
+                _hudMaster?.ToggleGuildDiplomacy();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.W:
+                _hudMaster?.ToggleMiscW();
+                GetViewport().SetInputAsHandled();
+                break;
+
+            case Key.Z:
+                _hudMaster?.ToggleMiscZ();
                 GetViewport().SetInputAsHandled();
                 break;
         }

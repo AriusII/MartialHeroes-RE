@@ -1,17 +1,24 @@
 # Quest record layout (clean-room spec)
 
 > **Verification banner.** verification: **control-flow-confirmed (static)** on doida.exe IDB SHA
-> 263bd994, CYCLE 7 (2026-06-20). The record stride (**4960 bytes / 0x1360**, on-disk == runtime
-> byte-for-byte), the eligibility/availability gate fields and their evaluation order, the embedded
-> objective sub-array base (record +0x68) and **240-byte objective sub-record stride**, the dialogue
-> handle offsets (offer +0x54, turn-in +0x58), the `abandonable` flag (+0x1329), and the high-region
-> gate fields (+0x1348 .. +0x135C) are all **CONFIRMED** at the loader, the eligibility evaluator,
-> the requirement-notice renderer, and the quest-log detail renderer on `263bd994`.
+> 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24) confirmed no drift. The record
+> stride (**4960 bytes / 0x1360**, on-disk == runtime byte-for-byte), the eligibility/availability
+> gate fields and their evaluation order, the embedded objective sub-array base (record +0x68) and
+> **240-byte objective sub-record stride**, the dialogue handle offsets (offer +0x54, turn-in +0x58),
+> the `abandonable` flag (+0x1329), and the high-region gate fields (+0x1348 .. +0x135C) are all
+> **CONFIRMED** at the loader, the eligibility evaluator, the requirement-notice renderer, and the
+> quest-log detail renderer on `263bd994`. The spec-audit pass additionally confirmed: the
+> step-ordinal lookup routing (`current_step_code` +0x065 mapped through a statically-dumpable word
+> array), the AVAILABLE-tab populator's use of `prereq_chain_id` (+0x1348) as the chapter-match key
+> bounded by the active-quest-range count global, and the ActorManager vtbl slot +72 call in the
+> 5/73 grant path (see `specs/quests.md §7.2`).
 > - **UNVERIFIED** — the full **interior layout of the 240-byte objective sub-record** (the
 >   kill / collect / talk action-type plus its target NPC / item / count fields). The client does
 >   **not** switch on an objective-action-type enum locally; that taxonomy is data-driven inside the
 >   objective blocks and is **server-tracked**. Only two interior points of the objective sub-record
 >   are located: a key word at sub-record +0x3E and a per-step reward-value array at sub-record +0x4C.
+>   The step-ordinal word array contents (code → ordinal mapping) are also UNVERIFIED (statically
+>   dumpable; deferred).
 > - **capture/debugger-pending** — the literal integer values of the eligibility status states (they
 >   are runtime-resolved globals initialised once at startup), and the exact wire byte offsets of the
 >   completion reward list (the ≤10-entry reward record set the 5/73 completion verdict carries).
@@ -72,10 +79,10 @@ A record slot is **empty when its leading `u16` quest id (+0) is 0**; the regist
 | +0x000 | u16 | `quest_id` | CONFIRMED | Quest id and registry map key. **0 = empty slot.** The evaluator reads `*(u16)` here. |
 | +0x002 | u8 | `category` | CONFIRMED | Category / class byte. Used by the "same-category quest already active" eligibility scan and as the quest-grade key. |
 | +0x003 | char[..] | `quest_name` | CONFIRMED | CP949 quest name, NUL-terminated. Read from `record + 3` by the list builders and the grade-label setter. Occupies the name buffer up to roughly +0x3F. |
-| +0x040 | u8[6] | `step_codes` | CONFIRMED | Six step-code bytes. A raw step code is mapped through a small step-ordinal lookup table to a contiguous ordinal used for objective matching and the 1-based progress display. The meaning of each individual step code is **UNVERIFIED** (data-side). |
+| +0x040 | u8[6] | `step_codes` | CONFIRMED | Six step-code bytes. A raw step code is mapped through a **step-ordinal word array** (a statically-dumpable global, CONFIRMED as present; keyed by the step-code byte value) to a contiguous ordinal used for objective matching and the 1-based progress display. The meaning of each individual step code and the full contents of the step-ordinal array are **UNVERIFIED** (data-side; deferred static-dump task). |
 | +0x054 | u32 | `offer_dialogue_handle` | CONFIRMED | Offer dialogue handle / chain reference A. The quest-log AVAILABLE-tab (detail mode 2) reaches the offer dialogue body through this handle. |
 | +0x058 | u32 | `turnin_dialogue_handle` | CONFIRMED | Turn-in dialogue handle / chain reference B. The quest-log COMPLETABLE-tab (detail mode 1) reaches the turn-in dialogue body through this handle. (The ACTIVE-tab active dialogue + objective progress is reached through the objective sub-array at +0x68.) |
-| +0x065 | u8 | `current_step_code` | CONFIRMED | Current step code, mapped through the step-ordinal lookup to select the active objective sub-record and to render the 1-based current-step counter. |
+| +0x065 | u8 | `current_step_code` | CONFIRMED | Current step code. Mapped through the step-ordinal word array (keyed by this byte value) to a contiguous ordinal used to select the active objective sub-record (the sub-record whose `step_key` at sub-record +0x3E matches the ordinal) and to render the 1-based current-step counter. |
 | +0x068 | objective_record[..] | `objectives` | CONFIRMED (base) / UNVERIFIED (interior) | Embedded objective sub-array. **240-byte stride** per objective sub-record. See §3. |
 
 > The dialogue **handles** at +0x54 / +0x58 are references into the NPC-script dialogue store, not
@@ -111,7 +118,7 @@ requirement-notice renderer.
 | Offset (hex / dec) | Type | Field | Confidence | Meaning |
 |-------------------:|------|-------|------------|---------|
 | +0x1329 / 4905 | u8 | `abandonable_flag` | CONFIRMED | Give-up gate. The abandon-confirm panel opens (and a give-up action can be sent) **only when this flag is set**; otherwise the window shows a "cannot abandon" notice. |
-| +0x1348 / 4936 | u32 | `prereq_chain_id` | CONFIRMED | Prerequisite-chain / chapter id. The eligibility evaluator compares it against the global chapter-progress state; the AVAILABLE-tab detail renderer (mode 2) walks the registry selecting records whose chapter id matches the selected chapter index. |
+| +0x1348 / 4936 | u32 | `prereq_chain_id` | CONFIRMED | Prerequisite-chain / chapter id. The eligibility evaluator compares it against the global chapter-progress state. The AVAILABLE-tab populator iterates the quest registry — bounded by the **active-quest-range count global** (caps iteration to the active range) — selecting records whose `prereq_chain_id` matches the selected chapter index; matched records contribute a row to the AVAILABLE display list (cap 10 rows). Also read by the AVAILABLE-tab detail renderer (mode 2) to confirm the chapter match before populating the detail panel. |
 | +0x1350 / 4944 | u16 | `min_level` | CONFIRMED | Minimum character level. The evaluator returns "too low" when the character level word is below this. |
 | +0x1352 / 4946 | u16 | `max_level` | CONFIRMED | Maximum character level. The evaluator returns "too high" when the character level word exceeds this. |
 | +0x1354 / 4948 | u8[..] | `accepted_flags` | CONFIRMED | Accepted / availability flags, indexed (by an active-quest index). A zero at the indexed slot means "not available to this character slot". |

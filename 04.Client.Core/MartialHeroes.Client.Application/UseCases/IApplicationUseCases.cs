@@ -31,6 +31,8 @@ public interface IApplicationUseCases
         string newName,
         CancellationToken cancellationToken = default);
 
+    ValueTask MoveCharacterSlotAsync(int fromSlot, int toSlot, CancellationToken cancellationToken = default);
+
     ValueTask UseSkillAsync(
         byte slot,
         ReadOnlyMemory<uint> targetsA = default,

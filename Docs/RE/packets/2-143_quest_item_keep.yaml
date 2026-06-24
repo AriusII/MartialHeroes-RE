@@ -1,35 +1,40 @@
-# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# TOMBSTONE — misattributed duplicate. Do not use for implementation.
+#
+# This file described opcode 2/143 as CmsgQuestItemKeep (a 4-byte u32 Word0 sent from a KIND-0x23
+# NPC path). That reading is refuted by lane-07 audit: the single builder for minor 143 writes
+# 4 DISTINCT u8 bytes (Mode/SlotOrFlag/Param1/Param2), and the only live callers are the playtime
+# panel (PlaytimePanel__onEvent) — there is no KIND-0x23 NPC code path. The u32-as-one-word
+# field split is wrong; the quest-item-keep role attribution is incorrect.
+#
+# CANONICAL SPEC for opcode 2/143: packets/2-143_playtime_action.yaml (CmsgPlaytimeAction).
+# That file is control-flow confirmed and caller-verified; use it for implementation.
+#
+# This tombstone is retained for audit traceability; the implementation lane reads only
+# 2-143_playtime_action.yaml.
+#
+# verification: sha256:263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
-name: CmsgQuestItemKeep
+name: CmsgQuestItemKeep_TOMBSTONE
 opcode: 0x2008f           # major 2 (GameAction), minor 143 -> (2 << 16) | 143
 direction: C2S
-size: 4                   # fixed 4-byte body
+size: 4
 spec: packets/2-143_quest_item_keep.yaml
-status: hypothesis
+status: refuted
 capture_verified: false
 
-summary: Open request for the quest-item-keep (quest-item hold) service, sent when the player clicks an NPC whose descriptor KIND byte is 0x23 (35). A short fixed 4-byte body that asks the server to open the quest-item-hold panel.
+summary: >
+  REFUTED. This was a misattribution of opcode 2/143 to a quest-item-keep (KIND-0x23 NPC) path with
+  a single u32 body. The builder and caller evidence disprove this reading. Canonical spec:
+  packets/2-143_playtime_action.yaml (CmsgPlaytimeAction, 4x u8 body, PlaytimePanel__onEvent caller).
 
-# Wire order, offset 0 = first payload byte. Pack=1; the field width sums to size: 4.
-fields:
-  - { name: Word0, type: u32 }           # 0x00  single 4-byte word — meaning not yet pinned
+fields: []
 
 notes: |
-  Static inference only; no capture available. The KIND-0x23 NPC path emits this 4-byte open
-  request to ask the server to open the quest-item-keep panel. Body length is CODE-CONFIRMED (the
-  send-wrapper writes a fixed 4-byte body).
+  Tombstone only. All claims in this file are superseded by 2-143_playtime_action.yaml.
 
-    0x00 (4B) Word0 : a single 4-byte word. The most likely content is the active-target field (the
-                      clicked NPC id), by analogy with the other open/interact senders in this lane,
-                      but this is NOT yet pinned. Modelled as one u32 so the struct matches the
-                      confirmed 4-byte size.
+  Original claim: a KIND-0x23 NPC path sends a 4-byte body modelled as a single u32 Word0 (NPC id
+  or request marker). Refutation: no KIND-0x23 NPC caller exists for this builder; the builder
+  writes 4 distinct u8 bytes, not one u32 write; the sole live callers are PlaytimePanel__onEvent
+  (the playtime/energy-bar panel). The u32 field split and the quest-item-keep role are both wrong.
 
-  fields not yet pinned — needs npc.scr sample / capture: confirm whether Word0 is the NPC id, a
-  fixed request marker, or a sub-action selector; and whether the response is server-driven panel
-  open (no separate id needed because the target is tracked from the click).
-
-  RELATIONSHIP: this is an OPEN request only; any subsequent deposit/withdraw of quest items into
-  the hold (if it uses a distinct opcode) was not isolated this pass and is an open question.
-
-  UNBLOCKS: Client.Application QuestItemKeepOpen use-case.
+  DO NOT IMPLEMENT FROM THIS FILE. Implement from packets/2-143_playtime_action.yaml.

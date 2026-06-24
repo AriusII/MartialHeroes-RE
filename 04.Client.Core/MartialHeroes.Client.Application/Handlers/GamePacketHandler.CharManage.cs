@@ -191,13 +191,17 @@ public sealed partial class GamePacketHandler
         out int slotIndex,
         out string name,
         out ushort serverClass,
-        out ImmutableArray<uint> equipGids)
+        out ImmutableArray<uint> equipGids,
+        out ushort internalClass,
+        out byte appearanceVariant)
     {
         actor = null;
         slotIndex = -1;
         name = string.Empty;
         serverClass = 0;
         equipGids = [];
+        internalClass = 0;
+        appearanceVariant = 0;
 
         var cached = characterSelection?.Chosen;
         if (cached is null || cached.RawDescriptor.Length < SpawnDescriptorReader.Size) return false;
@@ -208,6 +212,8 @@ public sealed partial class GamePacketHandler
         var currentHp = reader.ReadCurrentHpClamped();
         var vitalB = reader.ReadVitalB();
         serverClass = reader.ReadServerClass();
+        internalClass = reader.ReadInternalClass();
+        appearanceVariant = reader.ReadAppearanceVariant();
 
         var spawnInfo = new SpawnInfo(key, level, currentHp, vitalB, vitalB, serverClass);
         var vitals = VitalsResolver(spawnInfo);

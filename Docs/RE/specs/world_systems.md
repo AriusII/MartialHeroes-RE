@@ -4,7 +4,7 @@
 verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
                        against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
                        wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
-ida_reverified:        2026-06-22
+ida_reverified:        2026-06-24
 ida_anchor:            263bd994
 readiness:             IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:              [static-ida]
@@ -1120,11 +1120,15 @@ motion plays:
 |---:|---|---|---|---|
 | **+1424** | alive / active gate flag | **0 = dead** | `1` = alive | CONFIRMED |
 | **+1420** | action / motion-state | **8 = death** | `1` = idle / normal | CONFIRMED |
-| +1480 | death timestamp (ms) | set at the moment of death | — | CONFIRMED |
+| **+1484** | death timestamp (ms) | set at the moment of death | — | CONFIRMED (actor-world audit 2026-06-24; corrects earlier "+1480" reading) |
 
 - `+1420 == 8` is the canonical "is this actor dead" test; `+1424` is the generic "alive & interactable"
   guard — the movement, targeting, and pickup paths all early-return when it is `0`, which is the
   implicit input lockout while dead (there is no separate "input disabled" boolean). [CONFIRMED]
+- The full `lifecycle_state` (+1420) value set confirmed by the actor-world audit includes values
+  **0** (uninit), **1** (idle), **2** (walk), **3** (run), **4** (motion state), **8** (dead), **11/12/13**
+  (buff-transform poses), **15** (relation-refresh), and **17** (special-sort/motion). Only value 8 is
+  relevant to the death path; the others govern motion gating. See `structs/actor.md`.
 - These fields are (re)set alive (`+1424 = 1`, `+1420 = 1`) by the spawn / respawn / network handlers
   when an actor (re)enters the world alive. [CONFIRMED]
 
@@ -1139,10 +1143,15 @@ that selects the local reaction:
 | `1` / `2` | PK-type death (player-kill) — drives the PK death VFX and notice text | CONFIRMED |
 | `3` | special death — no town-respawn option (modal mode 3 only) | CONFIRMED |
 
-On death the handler plays the death motion (setting the §19.1 fields), clears the dying actor's timed
-buffs and combat target, and — if the dying actor is the local player — opens the death/respawn modal
-and enqueues the respawn countdown (§19.3). Death notices and "killed by &lt;name&gt;" lines are localized
-`msg.xdb` ids; the exact wording is CP949 table data = RUNTIME-ONLY.
+On death the handler plays the death motion (setting the §19.1 fields), **partially clears** the
+dying actor's buff table — slots with buff_id in the protected range **[80..130] ∪ {13} ∪ [132..134]**
+are preserved; all others are cleared (buff_id 131 additionally sets the motion-suppress flag); the
+same clear is applied to the local buff-bar mirror — and clears the combat target. If the dying actor
+is the local player, the handler opens the death/respawn modal and enqueues the respawn countdown
+(§19.3). The battle-controller's locked target (BC+9 / BC+40) is also cleared if the dying actor
+matches it, and BC+16 is set to 2 (death state) with BC+68/+70 zeroed. Death notices and
+"killed by &lt;name&gt;" lines are localized `msg.xdb` ids; the exact wording is CP949 table data =
+RUNTIME-ONLY.
 
 ### 19.3 Local death modal + respawn countdown — CONFIRMED
 

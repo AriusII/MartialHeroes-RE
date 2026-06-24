@@ -1,9 +1,9 @@
 ---
 status: confirmed
-verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))    # control-flow + operand facts; the bgtexture/msg.xdb byte layouts also corroborated against a real VFS sample (sample-verified, see banner)
+verification: confirmed (re-confirmed against IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)); CYCLE 11 spec-audit (2026-06-24): §3 chain B bgtexture kind polarity corrected to binary truth (kind==1 ⇒ static; other non-zero ⇒ non-static); all other confirmed claims re-confirmed
 sample_verified: partial   # loader-selection mechanism, cache model and table strides CODE-CONFIRMED; the progress-bar visual outcome is debugger-pending
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
+ida_reverified: 2026-06-24   # CYCLE 11 spec-audit: §3 chain B kind polarity drift corrected; prior 2026-06-16
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 subsystems: [loader_dispatch, ghtex_cache, asset_linkage, bulk_loader]
 networked: false           # the asset pipeline is entirely client-side; no wire traffic
@@ -32,8 +32,8 @@ conflicts: progress-bar visual outcome (does the ~9 MB boot set ever visibly fil
 
 ## Verification banner
 
-- **verification: confirmed** — `ida_reverified: 2026-06-16` against `ida_anchor: 263bd994`;
-  `evidence: [static-ida, vfs-sample]`.
+- **verification: confirmed** — `ida_reverified: 2026-06-24` against `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
+  `evidence: [static-ida, vfs-sample]`. CYCLE 11 spec-audit: §3 chain B bgtexture kind polarity corrected (binary wins — kind==1 ⇒ static); prior reverification 2026-06-16.
 - Tiers used inline below:
   - **[confirmed]** — recovered directly from control-flow + operand facts (the dispatch verdict,
     the cache model, the global wiring, the boot-thread order, the progress arithmetic).
@@ -275,9 +275,12 @@ cell (area, cx, cz)
   reads `48 * count` bytes of disk records, then constructs one 76-byte pool element per non-zero
   record. Do **not** conflate the two strides: parse the file with a 48-byte stride; the 76 is purely
   the runtime object size and never appears on disk. [confirmed]
-- Kind selector: 1 ⇒ animated texture options; ≥ 2 ⇒ static options; 0 ⇒ slot skipped (no element
-  built). The `count` is propagated to the terrain layer renderers (the loader passes it to all nine
-  tile / mass / overlay layer-renderer inits). [confirmed]
+- **Kind selector: `1` ⇒ static-render-object; any other non-zero value ⇒ non-static (scroll/animated);
+  `0` ⇒ slot skipped (no element built).** Binary-confirmed: `kind == 1` selects the static branch;
+  other non-zero values select the non-static branch. The earlier "1 = animated; ≥ 2 = static" wording
+  was backwards — the binary wins and is corrected here. (`specs/asset_linkages.md §5` has always
+  stated the correct polarity.) The `count` is propagated to the terrain layer renderers (the loader
+  passes it to all nine tile / mass / overlay layer-renderer inits). [confirmed]
 - **Cell index byte is `idx-1` (RESOLVED in favour of `idx-1`).** The earlier raw-vs-`idx-1`
   question is settled: the per-cell `.ted` texture-index byte is **1-based**, and the texture is
   resolved as `per_cell_texture_list[byte - 1]`, with byte value **0 = no-texture sentinel**. The

@@ -1,9 +1,9 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-21
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: +0x8D dual semantics — RESOLVED CYCLE 8 (IDB SHA 263bd994): +0x8D is the `remove_mark` deferred-child-removal flag (the panel child-removal sweep removes children whose ==1 and clears it on survivors); setVisible's co-write is an incidental mirror of +0x8C that the panel-build path explicitly zeroes — the "enable/clip vs pending-removal" ambiguity resolves to pending-removal (the static role is CODE-CONFIRMED, only frame-by-frame coexistence is a non-load-bearing debugger nicety); +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded)
+conflicts: +0x8D dual semantics — RESOLVED CYCLE 8 (IDB SHA 263bd994): +0x8D is the `remove_mark` deferred-child-removal flag (the panel child-removal sweep removes children whose ==1 and clears it on survivors); setVisible's co-write is an incidental mirror of +0x8C that the panel-build path explicitly zeroes — the "enable/clip vs pending-removal" ambiguity resolves to pending-removal (the static role is CODE-CONFIRMED, only frame-by-frame coexistence is a non-load-bearing debugger nicety); +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded); +0x8B — RESOLVED (IDB SHA 263bd994): the focused/caret-active flag (GUTextbox draw gates caret blink on +0x8B==1; LoginWindow Tab toggles it between credential fields); the earlier "role unpinned" label is superseded
 ---
 
 # GUComponent / GUPanel byte-offset layout (clean-room spec)
@@ -40,6 +40,7 @@ in `structs/guwindow.md`.
 | Capability-flag bit masks | **CODE-CONFIRMED** — the per-class OR-set bits are read directly from the base + leaf constructors. |
 | +0x8D size + setter/getter pair | **CODE-CONFIRMED** (CYCLE 7) — a single 1-byte boolean with a dedicated setter/getter, compared `== 1` to gate a branch in the panel-build path and forced to `0` at one site. |
 | +0x8D exact semantic | **CODE-CONFIRMED (CYCLE 8)** — `remove_mark`, a deferred child-removal flag. The panel child-removal sweep (GUPanel slot 13) removes children whose +0x8D `== 1` and clears it to 0 on survivors; the panel-build path forces it to 0 to neutralise `setVisible`'s incidental co-write (which mirrors +0x8C). The "enable / clip vs pending removal" ambiguity resolves to **pending removal**; only the live frame-by-frame coexistence of the two writers is a non-load-bearing debugger nicety. |
+| +0x8B = focused / caret-active flag | **CODE-CONFIRMED** (IDB SHA 263bd994) — 1 = this widget holds keyboard/IME focus. The GUTextbox draw gates caret blink on +0x8B == 1; LoginWindow Tab toggles it between the two credential textboxes. Supersedes the earlier "role unpinned" label. |
 | +0xB8 = glyph/char-width step | **CODE-CONFIRMED** (CYCLE 7) — a 4-byte **signed integer** read predominantly as a dword and used as the per-character pixel width in the text-centering layout (`3 × value`, and `value × stanceScale × 3.0`, stanceScale ∈ {1.0, 2.7}). **Resolves the old `panel_kind` / pointer ambiguity: it is neither.** |
 | Class hierarchy (vtable-confirmed) | **CODE-CONFIRMED** (CYCLE 7) — `GUComponent` (13 vtable slots) → `GUPanel` (14) → `GUWindow` (15) → `MainWindow` (root HUD window-manager). Confirms the "LAYERED 13/14/15" reading. |
 | Packing / alignment | **CODE-CONFIRMED** — natural 4-byte alignment (legacy MSVC default), **not** byte-packed. |
@@ -112,7 +113,7 @@ ordering; the IDB control-flow does not support any such ctor, and that narrativ
 | +0x88 | 1 | u8 | `hovered` | **Steady** hover state, zero-initialised; the hit-test sets **1** while the point is inside, **0** outside. It is distinct from the edge latch at +0x89, which is what actually gates the enter/leave callbacks (see +0x89). |
 | +0x89 | 1 | u8 | `hover_edge` | **Hover enter/leave EDGE latch**, zero-initialised — a distinct field from the steady `hovered` at +0x88 (previously folded into it). It is the edge memory that fires the enter/leave callbacks exactly once per transition. In the hit-test (slot 5): when the point is **inside**, if `hover_edge == 0` this is the **enter** edge -> it sets `hover_edge = 1` and fires `onMouseEnter` (slot 11); when the point goes **outside**, if `hover_edge == 1` this is the **leave** edge -> it sets `hover_edge = 0`, fires `onMouseLeave` (slot 12), and clears the steady `hovered` at +0x88. So +0x88 carries the moment-to-moment hover state and +0x89 carries the latched edge that prevents the enter/leave callbacks from re-firing every frame. |
 | +0x8A | 1 | u8 | `interactive` | Set to **1** at construction; the **interactive / clickable gate** — `onEvent` only captures press/release on a widget whose +0x8A is set. **(Role pinned: previously value-only `flag_8A`.)** |
-| +0x8B | 1 | u8 | `flag_8B` | Zero-initialised. Role unpinned. |
+| +0x8B | 1 | u8 | `focused` | Zero-initialised. **Focused / caret-active flag** — 1 = this widget holds keyboard/IME focus. The GUTextbox draw path gates caret blink on +0x8B == 1; LoginWindow Tab (key 9) clears it on the losing field and sets it on the gaining field. Agrees with `specs/ui_system.md §1.2` ("+0x8B Focused flag") and §1.5a. **(Corrected: the earlier "role unpinned" label is superseded — CODE-CONFIRMED IDB SHA 263bd994.)** |
 | +0x8C | 1 | u8 | `show_target` | Set to **1** at construction; the show/hide alpha-fade target (1 = showing, 0 = hiding). The draw/fade path chases the +0x04 alpha toward it; `setVisible` writes it. |
 | +0x8D | 1 | u8 (bool) | `remove_mark` / build toggle | Zero-initialised; a **single 1-byte boolean** with a dedicated **setter/getter pair** (CYCLE 7). The panel-build path compares it **== 1** to gate a branch and one site forces it to **0**; the panel child-removal sweep removes children whose +0x8D **== 1** and clears it on survivors. **Note:** `setVisible` also co-writes +0x8D with its visible argument — see the dual-semantics item in §8. Size + accessor-pair are confirmed; the exact build-path semantic (enable/clip vs pending-removal) is the only residual. |
 | +0x90 | 4 | ptr | `draw_handle` | **Bound drawable / texture handle.** The draw path submits it as the sprite texture; if **0**, nothing is drawn. The ctor zeroes it. **(Refined from the generic `id_or_index`.)** |
@@ -135,7 +136,7 @@ widgets (CYCLE 7):
 > other leaves carry their own: **GULabel** font slot = **+0xE4**, **GUTextbox** font slot = **+0xDC**.
 > A consumer must not assume +0xE8 for labels or textboxes. (The concrete leaf-widget offset tables —
 > GUButton 3-state sprite source-rects, GUCheckBox checked flag +0xFC, GULabel caption/aux text,
-> GUTextbox password-mask style word +0xA4 bit 0x80 / maxLength +0xD0, GUList selected-index +0xB8,
+> GUTextbox charset/filter+mask byte +0xA4 (bit 0x80 = password mask) / IME-mode word +0xD0, GUList selected-index +0xB8,
 > GUScroll embedded button/thumb sub-blocks, GUScrollEx deriving GUPanel, GUCanvas3D drag-only) are
 > tabulated in `specs/ui_system.md §1`. Note: **`GUShortLabel` is absent as a distinct RTTI class** —
 > the short-label behaviour is a GULabel / GULabels variant, not a separate type.)
@@ -284,6 +285,10 @@ above is control-flow-confirmed.
   `panel_kind` subclass byte. It is now CODE-CONFIRMED as a **4-byte signed integer glyph/char-width
   step** used by the text-centering layout (§3.1). It is neither a pointer nor a one-byte kind tag;
   the prior reading is superseded.
+- **+0x8B — RESOLVED (IDB SHA 263bd994), no longer pending.** Previously labelled "role unpinned."
+  The GUTextbox draw path gates caret blink on +0x8B == 1 (static control-flow-confirmed); LoginWindow
+  Tab toggles +0x8B between the two credential textbox fields (also control-flow-confirmed). Role is
+  **CODE-CONFIRMED** as the focused / caret-active flag. See §2 and the status table.
 
 ---
 

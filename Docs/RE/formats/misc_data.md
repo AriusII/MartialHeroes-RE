@@ -11,7 +11,7 @@ verification: sample-verified (every documented format re-decoded against the re
               263bd994 — strides divide file sizes with zero remainder, CP949 text decodes
               coherently); a handful of field semantics remain capture/debugger-pending;
               re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-16
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida, vfs-sample]
 conflicts: (RESOLVED, CYCLE 7) mobinfo.mi field6 (was portrait_res_3) — RESOLVED: mobinfo.mi is
@@ -19,6 +19,12 @@ conflicts: (RESOLVED, CYCLE 7) mobinfo.mi field6 (was portrait_res_3) — RESOLV
            boot data-table corpus pointer table, not compiled in as a static array), so field6
            has no consumer read-site to pin. The portrait_res_3 label is withdrawn; field6 is a
            4-byte u32/i32 LE with 0xFFFFFFFF = -1 = "none". See §2.
+           (RESOLVED, CYCLE 11) §1.5 actor_size.xdb / effectscale.xdb loader provenance —
+           RESOLVED: path string literals for both ARE present in build 263bd994 and are
+           registered in the boot data-table filename pointer array (loaded at startup alongside
+           buff_icon_position.xdb, vehicle.xdb, creature_item.xdb). The prior "no loader / path
+           strings not found" claim is withdrawn. Record layouts in §1.2 and §1.4 are unchanged.
+           See §1.5 and cross-format summary.
 -->
 
 > **status: sample_verified** — every format below was re-confronted with the real VFS mount
@@ -175,12 +181,21 @@ associated particle or effect mesh at runtime.
   key is always u32LE at offset 0 within the record.
 - File size must be an exact multiple of the stride; if not, the file is malformed.
 
-**Known unknowns:**
-- No loader routine located for `actor_size.xdb` or `effectscale.xdb`; path strings were not
-  found as string literals in the binary. The strides are confirmed by sample arithmetic alone for
-  these two variants.
-- Whether additional named `.xdb` variants exist beyond the three documented here is unknown.
-- Whether `.xdb` files carry a version across different game patches is unknown (single samples only).
+**Loader provenance (RESOLVED, CYCLE 11, build `263bd994`):**
+
+| Variant | Path literal present | Boot data-table registration |
+|---|---|---|
+| `actor_size.xdb` | YES | YES — registered in the boot data-table filename pointer array (adjacent to `buff_icon_position.xdb`, `vehicle.xdb`, `creature_item.xdb`) |
+| `buff_icon_position.xdb` | YES | YES — previously CODE-CONFIRMED; this pass corroborates it |
+| `effectscale.xdb` | YES | YES — registered in the same boot data-table filename pointer array (one slot before `actor_size.xdb`) |
+| `discript.sc` | YES | YES — registered in the same boot data-table pointer array |
+| `msg.xdb` | YES | YES — referenced directly from the scene-state-machine startup routine |
+
+The prior claim that `actor_size.xdb` and `effectscale.xdb` had "no loader / path strings not found" is **withdrawn**. All five path literals are present as string literals in the binary. The exact per-variant consume routine off the boot data-table was not deep-read in the confirming pass; the strides and record layouts in §1.2 and §1.4 are unchanged.
+
+**Remaining unknowns:**
+- Whether additional named `.xdb` variants exist beyond those in the §1.1 census.
+- Whether `.xdb` files carry a version across different game patches (single samples only).
 
 ---
 
@@ -1135,9 +1150,9 @@ be an exact multiple of 52; any remainder is an error.
 
 | Format          | Header          | Stride | Count source          | Text encoding | Loader confirmed |
 |-----------------|-----------------|--------|-----------------------|---------------|---------------|
-| `actor_size.xdb` | none           | 12 B   | `file_size / 12` = 15 records | none      | stride only   |
-| `buff_icon_position.xdb` | none  | 12 B   | `file_size / 12` = 134 records | none     | YES (loader + stride) |
-| `effectscale.xdb` | none          | 8 B    | `file_size / 8` = 2 records | none        | stride only   |
+| `actor_size.xdb` | none           | 12 B   | `file_size / 12` = 15 records | none      | PARTIAL — path literal + boot data-table registration confirmed (CYCLE 11); consume routine not deep-read |
+| `buff_icon_position.xdb` | none  | 12 B   | `file_size / 12` = 134 records | none     | YES (loader + stride; path literal + boot data-table corroborated CYCLE 11) |
+| `effectscale.xdb` | none          | 8 B    | `file_size / 8` = 2 records | none        | PARTIAL — path literal + boot data-table registration confirmed (CYCLE 11); consume routine not deep-read |
 | `creature_item.xdb` | none        | 48 B   | `file_size / 48` = 921 records | none (numeric) | NO (head-only; sample-verified stride) |
 | `vehicle.xdb`   | none            | 52 B   | `file_size / 52` = 58 records | none (numeric) | NO (head-only; sample-verified stride) |
 | `mobinfo.mi`    | 4-byte u32 count | 28 B  | stored `count` field (= 21) | none (refs only) | NO — DEAD (confirmed not read; present on disk, no loader) |

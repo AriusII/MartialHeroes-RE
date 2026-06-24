@@ -6,22 +6,28 @@
 
 <!--
 verification: sample-verified
-ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)
+ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 11 (static-only; all prior claims CONFIRMED, no corrections)
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 conflicts: none
 note: PINNED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): preload-vs-lazy = EAGER boot preload (file opened+parsed in the boot loop); selection key = .skn id_b used verbatim (no g{N}.bnd formatting)
 note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimCatalog map key vs skin_class skeleton selector vs .skn id_b pool key) and added the motlist.txt-registry parallel for .mot (no g{id}.mot rule)
+note: CYCLE 11 (2026-06-24): re-verification pass — all claims confirmed against build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee. Added: the "bindlist.txt" literal string is passed to the loader as a parameter (the caller assembles the full path); the loader does not hold a hard-coded full-path constant for it. No structural corrections.
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-16` (re-verified against
-> doida.exe IDB SHA `263bd994`, CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24` (most-recent re-verification
+> against doida.exe IDB SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`,
+> CYCLE 11, 2026-06-24; prior re-verification CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the bindlist load-and-register loop and the per-skeleton register-by-`actor_id` path) AND
 > the real `data/char/bindlist.txt` VFS sample. The 349-entry count, the 348-CRLF-plus-final-line-
 > without-CRLF structure, the bare-stem single-column shape, the ASCII-only encoding, and registration
 > by parsed `actor_id` all re-confirmed exactly. **One cosmetic refinement (DRIFT D-1):** the list is
 > **lexicographically (byte-string) sorted ascending**, not numerically sorted — see §Naming convention.
+> CYCLE 11 adds: the loader receives the manifest filename as a **parameter** from its caller; it does
+> not hold a hard-coded full-path constant for `bindlist.txt` (the caller assembles the full path and
+> passes it in). No structural corrections.
 >
 > **Why this matters:** this file is the authoritative skeleton registry. It CONFIRMS the
 > correction recorded in `CLAUDE.md`: a skeleton is registered via this explicit catalogue (and via
@@ -48,6 +54,12 @@ note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimC
   not by the order or numeric stem of the line. | Re-verified [sample-verified] on build `263bd994`:
   the load loop is an EOF-bounded line reader that prepends `data/char/bind/` then registers, and the
   real `bindlist.txt` sample contains no slash in any line (bare stems, the loader supplies the dir).
+- **Loader invocation:** the `data/char/bindlist.txt` full path is assembled by the **caller** (the boot
+  char-manifest aggregate loader) and passed to the load-and-register routine as a parameter — the
+  routine itself does not reference a hard-coded full-path constant. The literal `"bindlist.txt"` string
+  in the binary is the filename component only; the full `"data/char/bindlist.txt"` path is constructed
+  at the call site. This has no effect on the format or the registration logic. | Confirmed CYCLE 11,
+  build `263bd994` (static analysis).
 - **Container family:** plain delimited **text** (not a binary record file).
 - **Encoding:** ASCII only — every byte observed is within the printable range `0x20`–`0x7E` plus
   the line terminators. No CP949 / Korean codepoints appear in this file (unlike most game text

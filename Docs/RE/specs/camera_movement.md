@@ -4,8 +4,8 @@ sample_verified: false
 subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
-verification: confirmed   # control-flow-confirmed where noted; CYCLE 12 (2026-06-22): near/far slots CONFIRMED (§A.7.1); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
-ida_reverified: 2026-06-22
+verification: confirmed   # control-flow-confirmed where noted; CYCLE 12 audit (2026-06-24): lower-level renderer camera object (near/far +36/+40, frustum L/R/B/T +152..+164, renderer ptr +180) confirmed alongside GPerspectiveCamera (§A.7.2); prior CYCLE 12 (2026-06-22): near/far slots CONFIRMED (§A.7.1); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
@@ -657,6 +657,35 @@ live on the projection object. Offsets (bytes from the projection object) are la
 > 50° / 5.0 / 15000.0 for char-select) remain carried-forward from prior cycles and are
 > **DBG-confirmable by reading these fields at runtime**, not inline immediate operands.
 > `// spec: Docs/RE/specs/camera_movement.md §A.7.1`
+
+### A.7.2 Lower-level renderer camera object — candidate struct note (CYCLE 12 audit — CONFIRMED offsets)
+
+A **second, lower-level renderer camera object** sits in the projection chain alongside the
+`GPerspectiveCamera` node of §A.7.1. This is a **separate object** — the off-center perspective
+builder (`Camera_BuildAndApplyPerspectiveProjection`) reads its fields directly:
+
+| Offset | Role | Confidence |
+|---:|---|---|
+| **+36** | near plane | CONFIRMED (operand at the off-center builder call site) |
+| **+40** | far plane | CONFIRMED |
+| **+152** | frustum L (left) | CONFIRMED |
+| **+156** | frustum R (right) | CONFIRMED |
+| **+160** | frustum B (bottom) | CONFIRMED |
+| **+164** | frustum T (top) | CONFIRMED |
+| **+180** | renderer device pointer | CONFIRMED |
+
+This object is consumed by the off-center builder to call `D3DXMatrixPerspectiveOffCenterRH(out, L, R,
+B, T, near, far)` and then `SetTransform`. It is NOT the `GPerspectiveCamera` node — that node holds
+fovy/aspect/near/far/ortho at the offsets in §A.7.1 and is further up the chain; the builder operates
+on already-derived frustum extents from this lower-level object.
+
+> **No contradiction between the two camera objects.** The `GPerspectiveCamera` (§A.7.1) owns the
+> high-level projection parameters (fovy, aspect, near, far); the projection chain derives the
+> explicit L/R/B/T extents from those and passes them to this lower-level object, which the off-center
+> builder then consumes. A faithful port may model this as a single camera that computes L/R/B/T from
+> fovy/aspect/near/far internally — the split is a legacy implementation detail, not a behavioural
+> requirement. (CONFIRMED offsets from the off-center builder call site; the exact struct name and
+> allocation site are dirty-room concerns.)
 
 ## A.8 Camera persistence (local config, not networked)
 

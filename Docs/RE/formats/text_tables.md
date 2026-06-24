@@ -1,12 +1,18 @@
 # Format: .txt (bulk CP949 data tables — census + per-table column specs)
 
 > ```
-> verification: sample-verified            # 619-file .txt census re-confirmed against the real VFS; key paths present; tokenizer rules CONFIRMED (prior IDA, carried)
-> ida_reverified: 2026-06-16
-> ida_anchor: 263bd994
+> verification: sample-verified            # 619-file .txt census re-confirmed against the real VFS; key paths present; tokenizer rules CONFIRMED (static-ida + vfs-sample, two-witness)
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > conflicts: none
 > ```
+>
+> **RE-CONFIRMED (build 263bd994, 2026-06-24, two-witness: static IDA + VFS sample).** Tokenizer rules
+> (§1A), count-prefixed record shapes (skin.txt / actormotion.txt / emoticon.txt), the char-asset boot
+> batch load order (bindlist → motlist → emoticon → skin → actormotion → userjoint → gmmapmove), the
+> mode-9 text-flag path, and the sky `.txt` NOT-LOADED status — all CONFIRMED against the IDB at this
+> anchor. No layout drift, no new conflicts. See §10 provenance note for session detail.
 >
 > **CAMPAIGN 10 Block D re-verify (build 263bd994, 2026-06-16, two-witness: VFS sample + carried IDA).**
 > The `.txt` population total RE-CONFIRMED at **619 files** [sample-verified] (exact match); the key
@@ -581,6 +587,16 @@ colour values. Exact total column counts for these wide tables are UNVERIFIED at
 from the census head and should be confirmed against `environment_bins.md` before a text-form loader
 is written — preferring the `.bin` form is recommended.
 
+**`clouddome{N}.txt` archival header shape (SAMPLE-OBSERVED, non-load-bearing).** On-disk the file
+begins with a textual keyword header `CLOUDn<TAB><CR><LF>` (where `n` matches the file variant index)
+followed by a column-index map line of the form `[0:0-9]<TAB>[1:0-10]<TAB>[2:0-11]<TAB>…` (each
+bracket token defines `[col_index:range_start-range_end]`, TAB-separated with extra TABs between
+tokens). Data rows are wide TAB-separated integer grids; each row ends with an `end` sentinel token
+and CRLF. The `CLOUDn` keyword and `[i:a-b]` column-map line are authoring-tool artefacts that the
+client binary never parses (the `clouddome`/`stardome` path literals have zero xrefs in the loader —
+confirmed by static analysis at this anchor). A faithful renderer reads only the binary `.bin` form
+(authoritative in `environment_bins.md`).
+
 ### 4.8 `data/sky/map/` unique sub-families
 
 The `data/sky/map/` directory holds world-map / lobby-backdrop sky data. Most sub-families share the
@@ -798,3 +814,15 @@ These files were packed into the VFS during asset compilation and are not consum
 > `skin.txt`, `emoticon.txt` and the other count-prefixed tables present at their documented paths;
 > no drift, no new conflict. Tokenizer / count-prefix findings carried [confirmed] from prior campaigns.
 > No addresses or decompiler output crossed the firewall.
+>
+> **Provenance — 2026-06-24 (build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee;
+> two-witness: static IDA + VFS sample):** re-verification pass against the full IDB anchor.
+> Confirmed: shared tokenizer (§1A) TAB+LF terminators, CR normalisation, space-as-data, high-byte
+> pass-through; mode-9 text-flag open path; char-asset boot batch load order (bindlist, motlist,
+> emoticon, skin, actormotion, userjoint, gmmapmove — all from `data/char/`); skin.txt 6-token
+> count-prefixed record, col0 = category index (col2-correction carried); actormotion.txt 33-token
+> count-prefixed record; emoticon.txt mixed int/string/int count-prefixed record, 47-slot cap; sky
+> `.txt` family NOT-LOADED status re-confirmed (clouddome/stardome path literals = zero xrefs).
+> Net additions: verification banner pinned to full SHA; §4.7 enriched with `CLOUDn` +
+> `[i:a-b]` archival header shape (SAMPLE-OBSERVED, non-load-bearing). No corrections to existing
+> spec content. No addresses or decompiler output crossed the firewall.

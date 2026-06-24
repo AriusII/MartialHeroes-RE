@@ -1,8 +1,8 @@
 ---
 status: sample-verified
-verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-21   # CYCLE 8: data.inf FILE_FLAG_RANDOM_ACCESS open, entry_count @+0x0C, magic not validated / no FILETIME, 144B/entry TOC, retained data.vfs handle, raw ReadFile (no codec) re-confirmed CODE-CONFIRMED; prior 2026-06-16
-ida_anchor: 263bd994
+verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 11 spec-audit (2026-06-24): §4 bgtexture kind polarity corrected to binary truth (kind==1 ⇒ static; other non-zero ⇒ non-static); all other claims re-confirmed
+ida_reverified: 2026-06-24   # CYCLE 11 spec-audit: bgtexture kind polarity drift corrected (§4); prior 2026-06-21 (CYCLE 8), 2026-06-16
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]   # real data.inf (6,241,992 B) + data/data.vfs (3,802,182,193 B) corroborate header, TOC stride/offsets, RAW 100%-tiling
 sample_verified: yes        # tree, counts and extension census come from a real archive enumeration (43,347 entries, 49 extensions)
 subsystems: [vfs_structure, vfs_io_subsystem, extension_census, manifest_linkage]
@@ -377,9 +377,12 @@ The runtime terrain-texture index the client actually loads is the **binary `bgt
 `data/map000/texture/`, **not** the text `bgtexture.txt`:
 
 - `bgtexture.lst` layout: a u32 `count`, then `count` records of **48 bytes** each — record byte[0] is
-  a **kind** selector (1 = animated texture options, ≥ 2 = static, 0 = slot skipped), bytes[1..] are a
-  NUL-terminated **relative name**. The loader resolves each to `data/map000/texture/<rel>.dds` and
-  builds an **index-keyed** terrain texture pool (distinct from the name-keyed texture cache).
+  a **kind** selector (**1 = static render object; any other non-zero value = non-static / scroll-animated;
+  0 = slot skipped**), bytes[1..] are a NUL-terminated **relative name**. The loader resolves each
+  non-zero record to `data/map000/texture/<rel>.dds` and builds an **index-keyed** terrain texture
+  pool (distinct from the name-keyed texture cache). Binary-confirmed: `kind == 1` selects the
+  static-render-object branch; any other non-zero value selects the non-static (scroll/animated) branch;
+  `kind == 0` is skipped entirely. (`specs/asset_linkages.md §5` agrees with this reading.)
 - `bgtexture.txt` is the text **authoring mirror** of the same index; it is not what the loader reads
   at runtime.
 - **Action:** the terrain spec (`formats/terrain.md`) and any terrain consumer must **follow the

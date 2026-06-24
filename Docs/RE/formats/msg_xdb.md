@@ -14,15 +14,15 @@
 
 ```
 verification: sample-verified            # stride, record count, file size, +0x000 id, +0x004 CP949 text, 0xEE padding all byte-exact against the real VFS sample
-ida_reverified: 2026-06-21
-ida_anchor: 263bd994
+ida_reverified: 2026-06-24
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 conflicts: none
 ```
 
 | Item | Value |
 |------|-------|
-| `sample_verified` | **true** — record stride, record count, and file size are byte-exact from VFS-harness observation; record layout cross-checked against the targeted front-end caption IDs. RE-CONFIRMED on build 263bd994 (2026-06-16): size 1,364,304 = 2,644 × 516 exactly; record 0 `caption_id = 1`, CP949 text at +0x004 with a `0x00` terminator inside the buffer and `0xEE` fill after. |
+| `sample_verified` | **true** — record stride, record count, and file size are byte-exact from VFS-harness observation; record layout cross-checked against the targeted front-end caption IDs. RE-CONFIRMED on build 263bd994 (2026-06-16): size 1,364,304 = 2,644 × 516 exactly; record 0 `caption_id = 1`, CP949 text at +0x004 with a `0x00` terminator inside the buffer and `0xEE` fill after. FULL-SAMPLE RE-CONFIRMED 2026-06-24 (IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee): all 2,644 records have `0xEE` post-terminator fill; id range min=1, max=74509; ids are strictly ascending, sparse, and unique with no duplicates and no id==0; observed maximum text length 240 bytes (well under the 512-byte cap). |
 | Endianness | Little-endian |
 | Magic / signature | **None** — there is no file header; the first record begins at byte 0 |
 | Version field | None |
@@ -53,9 +53,17 @@ byte 0. There is no count prefix, no directory, and no footer.
 - **Record stride:** **516 bytes** (0x204). CONFIRMED.
 - **Record count source:** derived from file size — `record_count = file_size / 516`. CONFIRMED
   (file size is an exact integer multiple of the stride with zero remainder).
-- **File size:** **1,364,304 bytes** in the sampled VFS. SAMPLE-VERIFIED (build 263bd994).
+- **File size:** **1,364,304 bytes** in the sampled VFS. SAMPLE-VERIFIED (build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee).
 - **Observed record count:** exactly **2,644** records (`1,364,304 / 516 = 2,644`, zero remainder).
   SAMPLE-VERIFIED. Record 0 carries `caption_id = 1`; the first IDs ascend `1, 2, 3, 4, …`.
+- **Observed caption_id range:** min **1**, max **74509**. IDs are strictly ascending, sparse (non-contiguous),
+  and unique across all 2,644 records; no duplicate IDs and no ID==0 are present. SAMPLE-VERIFIED
+  (full-file scan, 2026-06-24).
+- **All 2,644 records** in this sample carry `0xEE` post-terminator fill (no exceptions). SAMPLE-VERIFIED
+  (full-file scan, 2026-06-24).
+- **Observed maximum text payload:** 240 bytes (within the 512-byte buffer). The "full 512 bytes,
+  no NUL terminator" case was NOT observed across any of the 2,644 records in this sample; the
+  conservative decode rule (CP949 up to first `0x00`, else whole field) remains correct and safe.
 
 ---
 
@@ -159,12 +167,13 @@ that texture, not from a caption lookup. CONFIRMED (absence).
 
 ## Known unknowns
 
-- The **full caption-ID range** of the catalogue beyond the targeted front-end set is not
-  enumerated here. The ~2,644-record count is observed, but a complete ID census is out of scope
-  for this front-end spec.
-- Whether any caption record uses the **full 512 bytes** without a null terminator (i.e. an exactly
-  512-byte non-terminated string) was not observed in the targeted set; treat the field as
-  "CP949 up to the first null, else the whole field" to be safe.
+- The **full caption-ID mapping** beyond the targeted front-end set (login and char-select IDs
+  documented above) is not enumerated here. The observed bounds are min=1, max=74509 across 2,644
+  records; a complete ID→role census is out of scope for this front-end spec.
+- Whether any caption record ever uses the **full 512 bytes without a null terminator** (a
+  non-terminated string exactly filling the buffer) was **not observed** in the full 2,644-record
+  sample examined. The conservative decode rule — CP949 up to the first `0x00`, else the whole
+  field — remains the safe implementation choice.
 - Any **secondary message catalogue** (a second `.xdb` with the same record shape for other locales
   or subsystems) was not surveyed; this spec covers `data/script/msg.xdb` only.
 
@@ -202,3 +211,13 @@ that texture, not from a caption lookup. CONFIRMED (absence).
 > `BuildScene`). New char-select caption IDs added: 2209 (slot-count), 14003–14007 (per-class create
 > labels), 2190 / 2075 / 12012 (name-validation failure responses). All other claims re-confirmed with
 > zero drift. No addresses or decompiler output crossed the firewall.
+>
+> **Provenance — 2026-06-24 (IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee,
+> full-sample re-verify; two witnesses: static loader re-read + full byte-scan of all 2,644 records):**
+> all load-bearing facts RE-CONFIRMED with zero drift. New facts folded in from a full-file scan:
+> id range min=1, max=74509; ids are strictly ascending, sparse, unique, no duplicates, no id==0;
+> all 2,644 records carry `0xEE` post-terminator fill (no exceptions); observed maximum text length
+> 240 bytes (no record uses the full 512-byte non-terminated form). The loader role — direct load at
+> WinMain state-1, not via the shared small-xdb boot corpus loader — and the unsigned ordered-map
+> lower-bound runtime model re-confirmed from the static loader read path. Known-unknowns section
+> updated to reflect the full-sample scan result. No addresses or decompiler output crossed the firewall.

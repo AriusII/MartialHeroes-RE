@@ -3,11 +3,23 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary code addresses. Consumed by `Assets.Parsers`. Every offset an engineer cites must
 > reference this file.
->
-> verification: confirmed-by-use-site (slot roles, rate semantics, motion_ids_b consumer) + sample-verified (col2 / motion-id slots) + confirmed (read-order, offsets, key math, rate math)
-> ida_reverified: 2026-06-19; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-> ida_anchor: 263bd994
-> evidence: [static-ida, vfs-sample]
+
+<!--
+verification: confirmed-by-use-site (slot roles, rate semantics, motion_ids_b consumer) + sample-verified (col2 / motion-id slots) + confirmed (read-order, offsets, key math, rate math)
+ida_reverified: 2026-06-19; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)
+ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 11 (static + vfs-sample; all prior claims CONFIRMED, no corrections; sibling manifest load order confirmed: bindlist → motlist → emoticon → skin → actormotion → userjoint → gmmapmove)
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+evidence: [static-ida, vfs-sample]
+conflicts: none
+-->
+
+> **Verification banner.** `confirmed-by-use-site` · `sample-verified` · `ida_reverified: 2026-06-24`
+> (most-recent re-verification against doida.exe IDB SHA
+> `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`, CYCLE 11, 2026-06-24;
+> prior re-verification CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> `evidence: [static-ida, vfs-sample]` · `conflicts: none`. All load-bearing claims (read-order,
+> offsets, key math, rate math, dual text/binary reader, slot roles, motion_ids_b semantics)
+> re-confirmed against build `263bd994` in CYCLE 11. No structural corrections.
 >
 > **CORRECTED CYCLE 7 (ida_anchor 263bd994, 2026-06-20):** B-array slot labelling de-shifted to the
 > loader's own indexing — **death effect/sound = b[4] = +0x74** (was mislabelled "b[5]"), dead trailing
@@ -301,6 +313,10 @@ category base table is **MED**.
 ## Cross-references
 
 - **Container:** `Docs/RE/formats/pak.md` (how the file bytes are obtained).
+- **Manifest load order (CONFIRMED, CYCLE 11, build `263bd994`):** `actormotion.txt` is the fifth
+  file loaded by the char-asset manifest batch loader. The confirmed sequential order is:
+  `bindlist.txt` → `motlist.txt` → `emoticon.txt` → `skin.txt` → **`actormotion.txt`** →
+  `userjoint.txt` → `gmmapmove.txt`. All are read from under `data/char/`.
 - **Skeleton registry:** `Docs/RE/formats/bindlist.md` — the authoritative list of registered
   `.bnd` skeletons. The `skin_class` column here joins to `data/char/bind/g<skin_class>.bnd`,
   whose validity is the membership test in `bindlist.txt`. There is NO computed `g{N}.bnd`

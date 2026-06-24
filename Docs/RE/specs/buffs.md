@@ -27,7 +27,9 @@
 > (2026-06-20). The 30-slot count, the 12-byte slot stride, the actor +520 array base, the **4000 ms**
 > tick interval, the buff-id effect-kind dispatch branches, the EffectManager visual-resolution index,
 > the icon-position disk table layout, and the local-player mirror tables are all **read directly from
-> the binary's structure and control flow** (no debugger, no captures this cycle).
+> the binary's structure and control flow** (no debugger, no captures this cycle). Spec-audit
+> corrections applied 2026-06-24: added §3.3 nuance distinguishing the gameplay state (+1420) from the
+> per-frame computed display-state (+1280 / dword idx 320).
 > **ida_anchor:** 263bd994  **evidence:** [static-ida]
 > **conflicts:** none.
 >
@@ -179,6 +181,15 @@ actual movement / cast prohibition is enforced **server-side** (the client is to
 plus the motion-state). One protected value is pinned: **`+1420` value 8 is a death / special state the
 buff dispatch never overwrites.** `CONFIRMED` (behaviour). **The precise input-gating semantics of each
 `+1420` value are RUNTIME-ONLY.**
+
+> **Two distinct actor state words — do not conflate.** The **gameplay / CC state** is at actor **+1420**
+> (value 8 = death, set by the death-reset routine; the alive/can-act word is at +1424). Separately, the
+> per-frame display routine computes a **display-state word at actor +1280 (dword idx 320)** each frame
+> from the flag bytes: +1836 → display-state 8 (stealth), +1837 → 16 (id-47 DoT flag), +1838 → 32 (id-64
+> threshold flag), +1844 → 64, anim-count > 0 → 128; the motion-lockout field at actor +1488 (dword idx
+> 372) additionally contributes state 2 within a 500 ms post-action display window. This computed
+> display-state drives the visual state icon only; it is **not** the `+1420` gameplay state and must not
+> be used as the CC / death gate. `CONFIRMED` (both words exist; their roles are distinct).
 
 ### 3.4 UI visibility filter
 

@@ -147,6 +147,16 @@ public sealed partial class HudMinimapPanel : Control
     }
 
 
+    public void OnSectorLoaded(int mapX, int mapZ)
+    {
+        LoadMosaic(_currentAreaId, _playerWorldX, _playerWorldZ);
+    }
+
+    public void OnSectorUnloaded(int mapX, int mapZ)
+    {
+        LoadMosaic(_currentAreaId, _playerWorldX, _playerWorldZ);
+    }
+
     private void LoadMosaic(int areaId, float worldX, float worldZ)
     {
         if (_atlas is null || _mosaicContainer is null) return;
@@ -191,7 +201,7 @@ public sealed partial class HudMinimapPanel : Control
     }
 
 
-    private void ToggleCollapse()
+    public void ToggleCollapse()
     {
         _collapsed = !_collapsed;
         OffsetBottom = _collapsed ? CollapsedH : MinimapH;

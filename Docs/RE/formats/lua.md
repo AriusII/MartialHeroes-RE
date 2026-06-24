@@ -3,18 +3,22 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset / constant an engineer cites must reference this file.
 >
-> verification: sample-verified (loader control flow read from the binary; the two shipped scripts
->   `data/script/uiconfig.lua` and `data/script/display.lua` corroborate that the on-disk artifact is
->   plain Lua 5.1 source text in CP949 — metadata / short windows only, no payload copied). The
->   embedded-interpreter identification is [confirmed] (the PUC-Rio Lua 5.1.2 copyright banner and the
->   `lua_tinker` binding strings are present in the binary, and the standard Lua 5.1 pseudo-indices /
->   type tags are observed at the read/set/call sites). Per-file global key SETS are [confirmed] for
->   `game.lua`, `uiconfig.lua`, and `display.lua`; `tutor.lua`'s key set is unverified (no sample).
-> ida_anchor: 263bd994
+> verification: sample-verified (loader control flow read from the binary; the three shipped scripts
+>   `data/script/uiconfig.lua`, `data/script/display.lua`, and `data/script/config.lua` corroborate
+>   that the on-disk artifact is plain Lua 5.1 source text in CP949 — metadata / short windows only,
+>   no payload copied). The embedded-interpreter identification is [confirmed] (the PUC-Rio Lua 5.1.2
+>   copyright banner and the `lua_tinker` binding strings are present in the binary, and the standard
+>   Lua 5.1 pseudo-indices / type tags are observed at the read/set/call sites). Per-file global key
+>   SETS are [confirmed] for `game.lua`, `uiconfig.lua`, and `display.lua`; `config.lua` sample-
+>   observed keys are noted (consumer read-back site not yet chased); `tutor.lua`'s key set is
+>   unverified (no sample).
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > conflicts: none.
 > status: sample_verified
-> sample_verified: true (uiconfig.lua, display.lua — confirmed plain Lua 5.1 source text, CP949)
+> sample_verified: true (uiconfig.lua, display.lua, config.lua — confirmed plain Lua 5.1 source
+>   text, CP949)
 
 ---
 
@@ -48,7 +52,8 @@ comments, numeric/float literals, and a one-argument function call form).
     prefix** and loaded **before** the VFS is mounted (see §4 — it is the file that decides whether
     the VFS is even mounted).
   - `data/script/*.lua` — VFS-resident config scripts, loaded **after** the VFS mount and resolved
-    through the VFS by-name open. Known instances: `uiconfig.lua`, `display.lua`, `tutor.lua`.
+    through the VFS by-name open. Known instances: `uiconfig.lua`, `display.lua`, `config.lua`,
+    `tutor.lua`.
 - **Magic / signature:** none. No file-level magic bytes, no version header, no checksum. The file
   is a Lua chunk and is passed verbatim to the Lua loader.
 - **Endianness:** N/A (the artifact is text; the only structure is Lua syntax).
@@ -140,7 +145,8 @@ the **one** singleton `lua_State`, so they are not independent of one another (l
 |---|---|---|
 | Scene / boot state machine (WinMain-side) | `game.lua` (loose, **pre-VFS-mount**) | `vfsmode`, `launcher`, `debugmode` (each read as `!= 0` → bool). `vfsmode` selects the VFS mount mode and then drives the VFS mount itself. The same consumer later reads `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` from the already-loaded display config. |
 | Login window scene builder | `data/script/uiconfig.lua` | `NEW_SERVER_INDEX` — selects which entry in the login server-list strip is the highlighted "new" server. Ties `uiconfig.lua` to the login server name-strip (captions are MessageDB ids 4001..4022). |
-| Display / framerate config parser | `data/script/display.lua` | `DISPLAY_GLOW_RANGE_X`, `DISPLAY_GLOW_RANGE_Y`, `DISPLAY_FRAMERATE` (the `DISPLAY_FRAMERATE` read is a **dead store** — the frame rate is hard-coded to 60), plus the full `DISPLAY_CHAR_BRIGHT_MULTI_{R,G,B}_{DEFAULT,CHOICE,HIT,ALPHA,HIDDEN}` (and the `..._ADD_...` / `..._ALPHA_...`) **float family** for character brightness / glow tuning. |
+| Display / framerate config parser | `data/script/display.lua` | `DISPLAY_GLOW_RANGE_X`, `DISPLAY_GLOW_RANGE_Y`, `DISPLAY_FRAMERATE` (dead store — frame rate hard-coded to 60), `DISPLAY_BASE_BRIGHT_MULTI`, `DISPLAY_GLOW_BRIGHT_MULTI`, `DISPLAY_LIGHT_RATIO` (floats), `DISPLAY_POWERSHADER` (string), plus the full 72-key `DISPLAY_CHAR_BRIGHT_{MULTI,ADD}_{R,G,B}_<STATE>` and `DISPLAY_CHAR_BRIGHT_ALPHA_<STATE>` float family for character brightness / glow tuning. The 9 state suffixes are: `DEFAULT`, `CHOICE`, `HIT`, `ALPHA`, `HIDDEN`, `POISON`, `TYPE`, `ANGER`, `AUTO`. |
+| Debug / VFS mode config | `data/script/config.lua` | `CONFIG_NO_VFS` (bool, mirrors the `game.lua` `vfsmode` decision family — VFS vs loose-disk), `CONFIG_DEBUG_LEVEL` (integer, CP949 comments indicate range 0–3). Consumer read-back site not yet chased; keys are sample-observed (MEDIUM confidence). |
 | Game-addiction-warning panel | `data/script/tutor.lua` (resolved via a config global) | tutorial config — the specific global key set is **not yet captured** (no sample in the extract set). |
 
 ### Reverse / structural linkage
@@ -178,12 +184,18 @@ the **one** singleton `lua_State`, so they are not independent of one another (l
 - The exact internals of the **float accessor** (`GetFloat`) are assumed to be the same
   global-lookup + `lua_tonumber`-as-float path as the integer accessor; safe to assume but not fully
   dumped — marked UNVERIFIED.
+- The **`config.lua`** consumer read-back site (the C++ code that calls `GetInt`/`GetFloat` for
+  `CONFIG_NO_VFS` and `CONFIG_DEBUG_LEVEL`) has not been chased in IDA; the key names are
+  sample-observed only (MEDIUM confidence). The relationship between `CONFIG_NO_VFS` and
+  `game.lua`'s `vfsmode` flag is inferred from key naming and CP949 comments, not confirmed at
+  the binary consumer.
 - The **`tutor.lua`** global key set is not captured (no sample in the extract).
 - Whether any **shipped** `.lua` actually uses the **function-valued** config path. The client
-  supports it (the function-call accessors exist), but both extracted samples (`uiconfig.lua`,
-  `display.lua`) use plain literals only.
-- The **chunkname** passed to `luaL_loadbuffer` (used only for error-message context) is not
-  confirmed.
+  supports it (the function-call accessors exist), but all three extracted samples (`uiconfig.lua`,
+  `display.lua`, `config.lua`) use plain literals only.
+- The **chunkname** passed to `luaL_loadbuffer` is confirmed: it is the literal string
+  **`"lua_tinker::dobuffer()"`**, used for error-message context only. This is set inside the
+  `dobuffer` runner and is identical for every config-script load.
 
 ---
 

@@ -14,8 +14,8 @@
 ```
 verification: sample-verified            # mobinfo.mi IS in the VFS at data/ui/mobinfo.mi; 592 B = 4 + 21 x 28 confirmed by stride arithmetic and the count-header byte
 ida_reverified: 2026-06-21
-re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + 2026-06-21 re-pass   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search); record-field structure refined
-ida_anchor: 263bd994
+re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + 2026-06-21 re-pass + 2026-06-24 re-pass   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search); record-field structure refined; +4/+8 Δ=+1 fact recorded; cross-group +16/+20 observation added; +12 always-populated noted
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED and HARDENED (CYCLE 7: confirmed not read in build 263bd994).
 file_presence: PRESENT at data/ui/mobinfo.mi  # 592 bytes; the prior "ABSENT" verdict is WITHDRAWN/REVERTED
@@ -151,7 +151,7 @@ the meanings cannot be confirmed from the client side.
 | +0  | 4 | u32 LE | **entry id** — the row's own key; a **dense sequential** index running 101, 102, …, 121 across the 21 records | SAMPLE-VERIFIED (monotonic over the sample) |
 | +4  | 4 | u32 LE | **caption message id** — a message-catalogue id (~20000 band); the primary caption/name string for the row | SINGLE-SAMPLE |
 | +8  | 4 | u32 LE | **description message id** — a second message-catalogue id (~20000 band) for the optional secondary/description string, or `0xFFFFFFFF` when absent (null sentinel) | SINGLE-SAMPLE |
-| +12 | 4 | u32 LE | **small param** — a small sub-id / category code (observed values in the low tens to low hundreds) | SINGLE-SAMPLE |
+| +12 | 4 | u32 LE | **small param** — a small sub-id / category code (observed range 55..173); **always populated** — no sentinel observed across any row | SINGLE-SAMPLE |
 | +16 | 4 | u32 LE | **packed code A** — a **decimal-packed code** of the form `group × 10000 + index` (small index); NOT an opaque large id and NOT a code pointer (see note below) | SINGLE-SAMPLE |
 | +20 | 4 | u32 LE | **packed code B** — a **related** decimal-packed code (same encoding); usually close to code A but **not** uniformly `code A + 1` (see note below); `0xFFFFFFFF` in the final record | SINGLE-SAMPLE |
 | +24 | 4 | u32 LE | **aux field (7th / last)** — small optional id/index (`0xFFFFFFFF = -1 = none`; small populated values such as `99`/`103` observed). Role MOOT — no consumer read-site. | SINGLE-SAMPLE / HYPOTHESIS |
@@ -160,20 +160,25 @@ the meanings cannot be confirmed from the client side.
   (101, 102, …, 121), i.e. the rows are an entry-indexed table keyed on this field, **not** an
   arbitrary id set. This sharpens the earlier vaguer "entry index or resource id" reading: it is the
   row key. SAMPLE-VERIFIED over the one file.
-- **Field[1] / field[2] (+4 / +8) — a message-catalogue id pair.** Both sit in the same
+- **Field[1] / field[2] (+4 / +8) — a consecutive message-catalogue id pair.** Both sit in the same
   message-catalogue id band (~20000) the runtime info-panel formatter draws its template strings from,
-  reading as a **caption (primary) + description (optional secondary)** pair rather than generic
-  "resource id A" + "secondary resource id". The +8 field frequently carries `0xFFFFFFFF`, consistent
-  with an absent/optional secondary string (a null sentinel). The catalogue join itself cannot be
-  confirmed (no consumer). SINGLE-SAMPLE.
+  reading as a **caption (primary) + description (optional secondary)** pair. **When both fields are
+  present (neither is `0xFFFFFFFF`), the difference between them is exactly 1** — 18 of 18 such rows
+  verify this δ=1 relationship in the single sample. One field is `field[1]`, the other is `field[1] − 1`
+  (equivalently `field[2] + 1 = field[1]`). The `0xFFFFFFFF` sentinel appears in either slot
+  independently (`idx 0, 1` have `+8 = 0xFFFFFFFF`; `idx 10` has `+4 = 0xFFFFFFFF`). The catalogue
+  join itself cannot be confirmed (no consumer). SINGLE-SAMPLE.
 - **Field[4] / field[5] (+16 / +20) — a related decimal-packed code pair, NOT a `[start, end)` run.**
   Both read as decimal codes of the form `group × 10000 + index` (a small index within a group). They
   are a **related** pair, but the earlier claim that the second equals the first **plus 1 across all
   records is INCORRECT** and is **withdrawn**: the `+1` delta holds only for one group family; other
   rows show a larger delta (e.g. a delta of 3), and the **final record's +20 is `0xFFFFFFFF`**. Read
-  them as a "related / consecutive code pair (start + a related index), delta NOT universally 1" — most
-  plausibly an icon/sprite or sub-page code pair — not a contiguous `[start, end)` index range.
-  SINGLE-SAMPLE.
+  them as a "related code pair (start + a related index), delta NOT universally 1" — most plausibly an
+  icon/sprite or sub-page code pair — not a contiguous `[start, end)` index range. SINGLE-SAMPLE.
+  **The two codes are NOT guaranteed to share a group.** At least one row in the sample carries codes
+  from different groups entirely (e.g. group 101 paired with group 111); assuming same-group for both
+  fields is incorrect. Group families observed in the sample: low band (101..106) and high band
+  (501..513, 523); index magnitudes 4..11.
   > **Coincidence trap — +16 / +20 are NOT code pointers.** Decoded as raw integers, some of these
   > packed codes happen to fall numerically inside the executable's loaded code address window, and a
   > naive lookup will "resolve" them to *mid-function* offsets — a **false correlation**, not real
@@ -298,3 +303,5 @@ the meanings cannot be confirmed from the client side.
 > runtime info-panel text builder (a message-catalogue formatter) is the conceptual consumer-equivalent
 > and does **not** touch `.mi`. Per-record meanings remain single-sample / OUT-OF-CLIENT-SCOPE. No
 > addresses, no decompiler output, and no sample payload bytes crossed the firewall.
+>
+> **Provenance — 2026-06-24 re-pass (build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee; static IDA + VFS sample).** All prior structural and no-loader verdicts re-confirmed unchanged. **Three targeted refinements promoted** from fresh analyst re-analysis: (1) the **+4/+8 message-catalogue pair carries an exact δ=1 relationship** when both fields are present — this is a byte-verified fact across 18/18 such rows in the sample (not merely "same band"); the sentinel `0xFFFFFFFF` appears independently in either slot; (2) **+16/+20 packed codes are NOT guaranteed to share a group** — at least one cross-group row observed in the sample (group 101 paired with group 111), so a reader must not assume same-group for both codes; (3) **+12 is always populated** (no sentinel across any row; observed range 55..173). The IDB SHA is pinned in full. No addresses, no decompiler output, and no sample payload bytes crossed the firewall.

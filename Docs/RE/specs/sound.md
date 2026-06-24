@@ -239,12 +239,15 @@ theme that must always play at full volume regardless of the music slider.
 - the `createSound` `type_flags` 2D/3D bit (§2) — that picks the directory and the DirectSound buffer kind; and
 - the `SOUND_KIND` record byte (§9) — that picks the *loader family* and, indirectly, which category bus a record's id is played on (§9.1).
 
-> **Category-5 router caveat (capture/debugger-pending).** The actor-anchored event-SFX path (§8)
-> is reached through a **distinct router overload** that uses a category argument of **5** for 3D
-> positional event SFX. Whether that `5` lives in the same numeric space as the 0..4 categories here
-> (and is simply above the multi-voice cap) or is a separate router's own argument is **not settled
-> statically** — treat the actor-event router (§8) as a different entry point from the 0..4
-> play-by-id primitive. (DBG-pending.)
+> **Category-5 router caveat (static-confirmed entry-point separation).** The 0..4
+> play-by-id primitive **hard-rejects any category argument greater than 4** — unless the id is
+> one of the two music-exempt cues (861010109 / 861010110) AND options index 27 is set.
+> This means a caller cannot reach the actor-event SFX path by simply passing `category = 5`
+> to this primitive: the value would be rejected outright. The actor-anchored event-SFX path
+> (§8) is a **genuinely separate entry point** with its own router function, not a numeric
+> extension of the 0..4 space. Treat the actor-event router as a distinct entry point from
+> this play-by-id primitive. (The exact internal argument shape of the actor-event router
+> remains DBG-pending; the entry-point separation is static-confirmed.)
 
 ---
 
@@ -366,6 +369,13 @@ else:
 The expression uses two nested `logf` (natural logarithm) calls with a scale factor of **3000.0**
 and a bias of **0.5** before integer truncation. This is a steep perceptual taper; near-silence
 values map to deeply negative millibel values very quickly.
+
+**This is the single shared volume converter.** There is exactly one implementation of this
+curve in the client. Every audio play path — the 2D play-by-id primitive (§2.1), the BGM
+crossfade (§6.6a), the actor-event SFX router (§8), the worker-thread opcodes (§7), and any
+other path that calls `setVolume` — routes through this same function. There is no second
+volume-conversion implementation. The −10000 silence floor and the nested-log taper therefore
+apply universally across all buses and categories.
 
 **Implementation contract:**
 - Reproduce the **silence endpoint exactly**: amplitude `0.0` must map to `−10000` mB (full silence).

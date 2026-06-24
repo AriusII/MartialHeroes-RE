@@ -45,8 +45,13 @@
    C function was located at the global table. Additional gameplay bindings (UI / quest / item
    APIs), if any, would arrive via `lua_tinker` per-type registration that has not been mapped.
 4. Whether shipped `.lua` files are source text or precompiled Lua 5.1 bytecode (`luac`). No
-   sample was inspected. If precompiled, they would be standard Lua 5.1 bytecode
-   (header `\x1bLua`, version byte `0x51`); not confirmed.
+   sample was inspected. **VM capability is now confirmed:** the embedded interpreter contains the
+   standard Lua 5.1 precompiled-chunk loader (the `%s: %s in precompiled chunk` error string from
+   `luaU_undump` is present in the binary), so the VM accepts both plain Lua 5.1 source text and
+   standard Lua 5.1 bytecode (header `\x1bLua`, version byte `0x51`). Whether the *shipped*
+   files are source or bytecode is still unconfirmed by sample; the extracted samples inspected
+   in `specs/lua-config.md §9` are readable source text, but the full shipped set is not
+   uniformly verified.
 5. The **shipped `.lua` file source encoding is CP949** (code page 949 / EUC-KR), confirmed by the
    on-disk file inspection in `specs/lua-config.md §0/§9`. Note the encoding **split**: the
    in-binary tutorial row-decode path on the *name-based* table loader runs each returned row

@@ -7,6 +7,7 @@ using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
+using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -80,11 +81,18 @@ public sealed partial class GameLoop
                         {
                             var skinClass = spawned.InternalClass != 0 ? spawned.InternalClass : spawned.ServerClass;
                             var avatar = PlayerAvatarResolver.TryBuild(
-                                assets, skinClass, BridgeEquipGidsToParts(spawned.EquipGids, skinClass));
+                                assets, skinClass,
+                                BridgeEquipGidsToParts(assets, spawned.EquipGids, skinClass,
+                                    spawned.AppearanceVariant, skinClass));
                             if (avatar is not null)
+                            {
                                 nearbyVisual.AttachSkinnedAvatar(avatar);
+                                WireCombatClipSource(nearbyVisual, assets, skinClass);
+                            }
                             else
+                            {
                                 nearbyVisual.TryBuildBodyAvatar(assets, spawned.ServerClass);
+                            }
                         }
                         else
                         {
@@ -152,6 +160,7 @@ public sealed partial class GameLoop
 
             case SectorLoadedEvent loaded:
                 _terrainNode.OnSectorLoaded(loaded);
+                _hudMaster?.OnSectorLoaded(loaded.MapX, loaded.MapZ);
 
                 try
                 {
@@ -167,6 +176,7 @@ public sealed partial class GameLoop
             case SectorUnloadedEvent unloaded:
                 _terrainNode.OnSectorUnloaded(unloaded);
                 _realWorldRenderer?.OnSectorUnloaded(unloaded);
+                _hudMaster?.OnSectorUnloaded(unloaded.MapX, unloaded.MapZ);
                 break;
 
             case CellAssembledEvent cellEvt:
@@ -258,7 +268,7 @@ public sealed partial class GameLoop
                         localVisual.SetCollisionManager(collMgr);
                 }
 
-                TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass, localSpawn.EquipGids);
+                TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass, localSpawn.InternalClass, localSpawn.AppearanceVariant, localSpawn.EquipGids);
 
                 GD.Print($"[GameLoop] LocalPlayerSpawnedEvent: name='{localSpawn.Name}' " +
                          $"level={localSpawn.Level} pos=({localSpawn.Position.RawX},{localSpawn.Position.RawZ}) " +
@@ -279,6 +289,10 @@ public sealed partial class GameLoop
                     GD.Print("[GameLoop] InGameWorldBootstrappedEvent: RealWorldRenderer is null " +
                              "— server AreaId noted but no area re-target performed (VFS required).");
 
+                break;
+
+            case ActorSkillActionEvent skillAction:
+                _actorRegistry.PlayActorAttack(skillAction.AttackerKey);
                 break;
 
             case EquipResultEvent:
@@ -311,7 +325,7 @@ public sealed partial class GameLoop
     }
 
 
-    private void TryAttachLocalPlayerAvatar(ActorKey key, ushort serverClass, ImmutableArray<uint> equipGids)
+    private void TryAttachLocalPlayerAvatar(ActorKey key, ushort serverClass, ushort internalClass, byte appearanceVariant, ImmutableArray<uint> equipGids)
     {
         var assets = _realWorldRenderer?.Assets;
         if (assets is null)
@@ -329,8 +343,9 @@ public sealed partial class GameLoop
             return;
         }
 
-        var equipParts = BridgeEquipGidsToParts(equipGids, serverClass);
-        var avatar = PlayerAvatarResolver.TryBuild(assets, serverClass, equipParts);
+        var skinClass = internalClass != 0 ? internalClass : serverClass;
+        var equipParts = BridgeEquipGidsToParts(assets, equipGids, serverClass, appearanceVariant, skinClass);
+        var avatar = PlayerAvatarResolver.TryBuild(assets, skinClass, equipParts);
         if (avatar is null)
         {
             GD.Print($"[GameLoop] Local-player avatar: class={serverClass} did not resolve a skinned " +
@@ -339,12 +354,21 @@ public sealed partial class GameLoop
         }
 
         visual.AttachSkinnedAvatar(avatar);
-        GD.Print($"[GameLoop] Local-player avatar attached (class={serverClass}, skinned+idle, " +
+        WireCombatClipSource(visual, assets, skinClass);
+        GD.Print($"[GameLoop] Local-player avatar attached (class={skinClass}, skinned+idle, " +
                  $"equipParts={equipParts.Count}). spec: skinning.md §8(e) / §10.5; equipment_visuals.md §1.1.");
     }
 
+    private static void WireCombatClipSource(VisualActor visual, RealClientAssets assets, int skinClass)
+    {
+        var appearanceKey = MartialHeroes.Client.Presentation.Screens.ClassAppearanceResolver
+            .StarterBodyModelClassId(skinClass);
+        visual.SetCombatClipSource(assets, appearanceKey, skinClass);
+    }
+
     private static IReadOnlyList<EquipmentPart> BridgeEquipGidsToParts(
-        ImmutableArray<uint> equipGids, ushort serverClass)
+        RealClientAssets assets, ImmutableArray<uint> equipGids, ushort serverClass,
+        int variantField, int classField)
     {
         if (equipGids.IsDefaultOrEmpty) return [];
 
@@ -359,9 +383,26 @@ public sealed partial class GameLoop
 
             if (slot == EquipOverlayResolver.WeaponSlot)
             {
-                GD.Print($"[GameLoop] Local-player weapon (slot 14, gid={equipGid}) DEFERRED — needs §3.1 " +
-                         $"appearance digits not on LocalPlayerSpawnedEvent (class={serverClass}); not fabricated. " +
-                         "spec: equipment_visuals.md §3.1/§5.");
+                var weaponGid = WeaponGidResolver.Resolve(equipGid, variantField, classField);
+                var weaponSkn = $"data/char/skin/g{weaponGid}.skn";
+                if (weaponGid <= 0 || !assets.Contains(weaponSkn))
+                {
+                    GD.Print($"[GameLoop] Weapon (slot 14, equipGid={equipGid}) resolved gid={weaponGid} " +
+                             $"-> '{weaponSkn}' absent in VFS (the B weapon-appearance digit is not surfaced " +
+                             $"on the spawn event; class={classField} variant={variantField}); not fabricated. " +
+                             "spec: equipment_visuals.md §3.1/§5.");
+                    continue;
+                }
+
+                parts.Add(new EquipmentPart
+                {
+                    Slot = slot,
+                    EquipmentGid = equipGid,
+                    MeshGid = weaponGid,
+                    TextureId = 0,
+                    IsHandWeapon = true,
+                    IsOffHand = false
+                });
                 continue;
             }
 
@@ -379,5 +420,21 @@ public sealed partial class GameLoop
         }
 
         return parts;
+    }
+
+    private static class WeaponGidResolver
+    {
+        public static int Resolve(int partActorId, int variantField, int classField)
+        {
+            if (partActorId <= 0) return 0;
+
+            var b = 0;
+            var c = variantField;
+            var d = classField;
+
+            var weaponGid = 1000L * (b + 10L * (c + 10L * (d + 10L * (partActorId / 1000000L))));
+            var gid = weaponGid + partActorId % 1000L;
+            return gid is > 0 and < int.MaxValue ? (int)gid : 0;
+        }
     }
 }

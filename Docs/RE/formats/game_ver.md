@@ -13,8 +13,13 @@
 >   client system-info object whose two `game.ver` slots default to 1/1 when the file is missing; the
 >   enter-game token is built immediately before the enter-game packet send; the login gate is skipped
 >   when the VFS is not mounted.
-> ida_reverified: 2026-06-21
-> ida_anchor: 263bd994
+>   2026-06-24 re-verification: no corrections required. One access-mechanism distinction made
+>   explicit: the login gate fetches index 5 via a positional list-walk (head-to-ordinal-5 traversal),
+>   while the system-info reader fetches index 3 and index 5 via fixed byte seeks (fseek 12 / fseek 20);
+>   the two paths yield the same values for the canonical 7-element file but would diverge on a
+>   non-canonical-length file. IDB anchor pinned to full SHA-256.
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
 > conflicts: none unresolved. The single-sample semantics of the five opaque fields
 >   (index 0/1/2/4/6) remain capture/debugger-pending — only one effective on-disk sample exists and
@@ -188,6 +193,14 @@ fetched at list index 5) is CODE-CONFIRMED by the comparison routine; the **>= 7
 guarding both the VFS and external read paths is likewise CODE-CONFIRMED. Source: dirty-room IDA notes
 (CAMPAIGN 9b), the campaign-10 two-witness re-verification, and the 2026-06-21 re-verification.
 
+**Access-mechanism note:** the login gate extracts `version_source` via a **positional list-walk** —
+it walks the parsed token container from its head to ordinal position 5 and returns that u32. The
+separate system-info reader extracts index 3 and index 5 via **fixed byte seeks** (`fseek(12)` and
+`fseek(20)`). Both mechanisms resolve to the same field values for the canonical 7-element, 28-byte
+file, but they would diverge if the file held more or fewer elements: the list-walk always finds
+logical position 5; the byte-seek always reads bytes 12 and 20. Only the canonical 7-element form has
+been observed. — 2026-06-24 re-verification, HIGH confidence.
+
 ### External reader = client system-info object (defaults 1/1 on missing file)
 
 The external (non-VFS) reader of `game.ver` is not a free-standing routine: it is a member read of a
@@ -232,5 +245,13 @@ capture/debugger-pending.
   (`10 × index5 + 9`, confirmed at the instruction level) computed **immediately before the enter-game
   packet is built and sent**; (3) the login version gate is **skipped entirely when the VFS is not
   mounted** (both call sites are guarded by a VFS-mounted check). Held capture/debugger-pending: the
+  semantics of fields 0/1/2/4/6 and the meaning of field3. No addresses, decompiler output, or sample
+  bytes crossed the firewall.
+- **2026-06-24 re-verification (IDB anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee):**
+  no corrections required. One access-mechanism distinction made explicit: the login gate fetches
+  index 5 via a **positional list-walk** (head-to-ordinal-5 traversal of the parsed token container),
+  while the system-info reader fetches index 3 and index 5 via **fixed byte seeks** (fseek 12 and
+  fseek 20). Both yield the same values for the canonical 7-element file; they would diverge on a
+  non-canonical-length file. IDB anchor expanded to full SHA-256. Held capture/debugger-pending: the
   semantics of fields 0/1/2/4/6 and the meaning of field3. No addresses, decompiler output, or sample
   bytes crossed the firewall.

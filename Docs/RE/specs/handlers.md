@@ -1,12 +1,12 @@
 ---
 status: routing-confirmed
 verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-22   # CYCLE 12 Phase 0 (263bd994): 3/100 SmsgCharActionResult full dual-mode code table re-read + double counter-checked -> select-mode codes 22/23 RECOVERABLE (state 7/sub 5 + string 1604), in-world adds code 6 (1206) and reclassifies in-world 23 as fall-through; SECTION 23.1 is now the CANONICAL 3/100 table. prior CYCLE 8 2026-06-21: major-4/5 154-slot dispatch tables (98 Response / 65 Push installed) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
+ida_reverified: 2026-06-24   # network-dispatch audit (263bd994): §1 Response install counts corrected — binary proves 102 raw stores / 100 occupied slots / 99 distinct handlers / 2 NULL (minors 0, 27); prior CYCLE 12 2026-06-22: 3/100 SmsgCharActionResult full dual-mode code table re-read; prior CYCLE 8 2026-06-21: major-4/5 154-slot dispatch tables (98 Response / 65 Push installed — now superseded by 102/100/99 figures) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
 ida_anchor: 263bd994
 evidence: [static-ida]
 sample_verified: false
 struct_cross_ref_verified: true
-conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at SmsgCharManageResult, 3/100 "case 32" removed, 4/143+4/144 added (shared handler), major-0 (0,0) handshake branch added, keepalive 2/112 distinguished from the (2,10000) handshake-arm. CYCLE 4 netcode deep-cartography (W3/W4) folded the per-handler behaviour + read-map + latch-clear corrections: 3/6=12B (was 19), 3/13 summary row de-mislabelled (19B gate@0/subcode@1), 4/4 892-framing, 4/48 236B no-overrun, 4/56/4/71 structured panels, the major-4 size/role refinements, the in-flight-latch census, and the runtime-offset hygiene marks (4/109/5/53/5/147/5/121/5/136 destinations are live-Actor offsets, DO-NOT-PROMOTE-AS-WIRE)
+conflicts: resolved against the IDB — 3/4<->3/14 swap fixed, 3/7 re-pointed at SmsgCharManageResult, 3/100 "case 32" removed, 4/143+4/144 added (shared handler), major-0 (0,0) handshake branch added, keepalive 2/112 distinguished from the (2,10000) handshake-arm. CYCLE 4 netcode deep-cartography (W3/W4) folded the per-handler behaviour + read-map + latch-clear corrections: 3/6=12B (was 19), 3/13 summary row de-mislabelled (19B gate@0/subcode@1), 4/4 892-framing, 4/48 236B no-overrun, 4/56/4/71 structured panels, the major-4 size/role refinements, the in-flight-latch census, and the runtime-offset hygiene marks (4/109/5/53/5/147/5/121/5/136 destinations are live-Actor offsets, DO-NOT-PROMOTE-AS-WIRE). 2026-06-24 network-dispatch audit: §1 Response install count corrected from "98/96 distinct" to 102 raw stores / 100 occupied slots / 99 distinct / 2 NULL (minors 0, 27) — binary wins; neighbours (network_dispatch.md, net_contracts.md) already carried the correct figures
 ---
 
 # Inbound Handler Behaviour Catalogue — Clean-Room Specification
@@ -127,9 +127,14 @@ Routing below is `[confirmed]` (control-flow):
   and not dispatched). Both tables are pre-filled in the NetHandler constructor with a single
   inert **no-op handler** (a concrete shared function that does nothing); the install routines
   then overwrite that default at each installed minor. So an unset minor below the bound
-  resolves to the no-op, never a null/crash. The install-routine parse counted **98 Response**
-  (96 distinct table slots — 4/143 and 4/144 share one handler — plus the 2 specials below)
-  and **65 Push** slots installed; the rest stay inert no-ops. The Response slot index is
+  resolves to the no-op, never a null/crash. The Response installer emits **102 raw store
+  instructions** — 2 explicit zero-clears (minors **0** and **27**) plus 100 handler-pointer
+  stores — yielding **100 occupied slots with 99 distinct handler functions** (minors **143**
+  and **144** share one handler, two stores). The Push installer emits **65 stores**, all live,
+  no zero-clears, giving **65 distinct Push handlers**. So the full picture is: **102 raw
+  Response stores / 100 occupied slots / 99 distinct handlers / 2 NULL slots (minors 0, 27) /
+  65 Push slots**. (Earlier "98 Response / 96 distinct" figures were stale — binary wins.) The
+  rest of each 154-slot table stays inert no-ops. The Response slot index is
   `NetHandler-base + 1246 + minor` (dwords) and the Push slot index is `+ 1400 + minor`; the
   two tables are contiguous (Response ends just before Push begins). These base figures are
   control-flow facts useful to the struct cartographer mapping the NetHandler layout; they are
@@ -1053,7 +1058,7 @@ social/party/rank panel from the block; show a result string on the failure bran
 | 4/125| `SmsgResponseSlot125`       | **none** | **Corrected: reads NOTHING (was "var")** — a pure UI refresh pulse on one main-window service-slot panel; no payload consumed. |
 | 4/132| `SmsgGMNoticeError`         | 12  | gate 16; GM notice/error → main UI. |
 | 4/134| `SmsgStatChangeNotify`      | var (12 hdr) | gate 7; stat-change notify. |
-| 4/143 + 4/144 | `SmsgTrackedItemPanelPair` | var | **both minors share ONE installed handler that self-dispatches on the frame minor** (`[confirmed]`): minor 143 reads a fixed 16-byte block (local-player-gated panel show/hide toggle + slot refresh); minor 144 reads a fixed 36-byte block (gate byte @+8; folds a 16-byte tracked-item record into a global table at `slot_index@+18`, composes an item-name notice via message id 10006, refreshes the panel). This is why the Response table holds 96 distinct slots but 98 entry points. **Neither clears a latch.** Behaviour values `[capture/debugger-pending]`. |
+| 4/143 + 4/144 | `SmsgTrackedItemPanelPair` | var | **both minors share ONE installed handler that self-dispatches on the frame minor** (`[confirmed]`): minor 143 reads a fixed 16-byte block (local-player-gated panel show/hide toggle + slot refresh); minor 144 reads a fixed 36-byte block (gate byte @+8; folds a 16-byte tracked-item record into a global table at `slot_index@+18`, composes an item-name notice via message id 10006, refreshes the panel). This is why the Response installer writes 100 occupied slots with only 99 distinct handler functions (two stores, one handler). **Neither clears a latch.** Behaviour values `[capture/debugger-pending]`. |
 | 4/146| `SmsgShowMessage51027`      | **none** | **Reads no payload** — shows the compile-time message string id 51027 (route code 13, colour 0xFFFFFF00) via main UI. |
 | 4/150| `SmsgSkillPointUpdate`      | var (16B prefix) | gates Success@+8 + local-player id@+12; Mode@+16: `1` = set the local player's skill-point TOTAL, `2` = skill level-up notice. Mutates the skill-point total — distinct from the 4/41 hotbar quick-slot. |
 | 4/153| `SmsgItemPanelSlotRefresh`  | var | **tri-branch on code @+8:** `255` = close item panel, `0` = run the slot refresh, **any other nonzero = no-op return**; refreshes the same bag slot array as 4/149 chunk-type 1; a second `0xFF` sentinel at start-index @+9 = full-bag clear. Clears the busy latch on both acting paths (255 and 0). |
@@ -1622,8 +1627,9 @@ struct. Layout: `+0` container/target id `u32`; **`+4` op `u8` = (widget-action-
 - **Charset confirmation (CP949)** for all name/text fields needs a capture with Korean content.
 - **Structural facts considered safe to rely on:** the major-3/major-1 inline switches are fully
   enumerated (no hidden minors); each major-4/major-5 table is bounded at 154 slots with inert
-  no-op fill for unset minors and no dispatch at or above 154; the install routines installed
-  98 Response and 65 Push handlers.
+  no-op fill for unset minors and no dispatch at or above 154; the Response installer emits
+  102 raw stores (100 occupied slots / 99 distinct handlers / 2 NULL at minors 0, 27) and the
+  Push installer emits 65 live handler stores.
 
 ---
 

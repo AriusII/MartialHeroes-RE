@@ -20,9 +20,9 @@
 | Attribute | Value |
 |---|---|
 | `verification` | **confirmed** for both radar/big-map UI surfaces, the projection math, the per-cell tile-streaming model, blip selection, the per-area map-binary loader, the `region*.bin` grid layout, the `regiontable*.bin` 32×48 attribute-table layout, and the BroodWar full-screen-map texture/landmark chain (all control-flow-confirmed + operands byte-present). **sample-verified** for the on-disk map-art inventory and the `mapsetting.scr` zone table. **capture/debugger-pending** for: the precise semantics of the region-attribute enum values `{0,1,2}` (safe / PvP-open / closed are control-flow-inferred labels, not server-confirmed), whether actor world-pos `+1064` is exactly the last-packet value vs a post-integration value, the writers of the current-area / current-sub-region ids (world-state packet origin), and the player-arrow rotation handedness vs the world Z-negation. |
-| `ida_reverified` | 2026-06-20 (IDB SHA 263bd994, CYCLE 7) |
+| `ida_reverified` | 2026-06-24 (IDB SHA 263bd994, CYCLE 12 sign-correction audit) |
 | `ida_anchor` | 263bd994 |
-| `evidence` | [static-ida] (IDA static control-flow + operand reading; no debugger, no live capture in this lane — the VFS §6 facts reuse the prior sample-verified census. CYCLE 7 (2026-06-20) re-confirmed the corner-minimap / total-map world→pixel transform, the player-centred mosaic-scroll math, the total-map arrow-key pan, and the BroodWar authored-pixel marker records against build 263bd994, byte-present operands — see §2.2a, §3.1a, §5.6, §5.7) |
+| `evidence` | [static-ida] (IDA static control-flow + operand reading; no debugger, no live capture in this lane — the VFS §6 facts reuse the prior sample-verified census. CYCLE 7 (2026-06-20) re-confirmed the corner-minimap / total-map world→pixel transform, the player-centred mosaic-scroll math, the total-map arrow-key pan, and the BroodWar authored-pixel marker records against build 263bd994, byte-present operands — see §2.2a, §3.1a, §5.6, §5.7. CYCLE 12 audit (2026-06-24): mosaic-scroll sign corrected — scale operand is −0.125 on BOTH world X and Z; §2.7 updated; §3.1a formula updated.) |
 | `conflicts` | RESOLVED against build 263bd994: (1) §6.4 `regiontable*.bin` is the **32×48 region-ATTRIBUTE table** loaded straight into the in-memory region table, NOT a 52×32 sub-zone label table — the old layout was a different/conflated file; (2) the **`region*.bin` region GRID** file (width/height/byte-grid/origin, 256-unit cells) was entirely undocumented and is now §6.4; (3) the radar footer-state colour order is **0=yellow, 1=white, 2=red(gated)**, not the prior "white/yellow/red for safe/contested/war"; (4) the "+96 class-byte bias" was a misreading — `+96` is the class-byte **offset**, no additive bias exists; (5) the party blip id is the set **{29,30,51,52}**, not a single `30`; (6) the tile-prefix token is a **`%s` string** (the area-tag), not a single `%c`; (7) open-question #8 RESOLVED — the in-memory region/attribute table is loaded from `regiontable*.bin`, independent of `mapsetting.scr`; (8) a **second** zoomable/scrolling tiled big-map surface (distinct from the BroodWar full-screen map) exists and is now §5.6. |
 
 > **Status legend.** Per-claim tags inline: **CONFIRMED** (IDA control-flow + operands on build
@@ -195,15 +195,23 @@ citing any of these must reference this spec.
 (The BroodWar 40-byte marker record layout is in §5.7. The +0x428/+0x430 actor offsets are consistent
 with the §2.4 / §3.7 actor-struct facts elsewhere in this spec.)
 
-### 2.7 Z-convention port note (CYCLE 7 — MEDIUM)
+### 2.7 Coordinate-convention port note (CYCLE 7/12 — CONFIRMED sign, handedness DBG-pending)
 
 The minimap math is computed in **engine-Z**: the binary reads the world **Z** component directly
 (Vec3 index 2) and applies no negation. The Godot port negates Z for world geometry
 (`Helpers/WorldCoordinates.ToGodot`, `(x,y,z) → (x,y,−z)`), so a faithful port must apply the **same
 Z convention it uses for actor positions** *before* this transform, then compute `0.125 · Z + 66.5`.
+
+**Mosaic-scroll sign — CONFIRMED BOTH axes (CYCLE 12 audit, binary-won).** The background-scroll
+path (§3.1a) uses `−0.125` as the multiplier operand on **both** world X and world Z — not Z only.
+The §2.2a blip-projection helper (which places actor dots and the player arrow at the 0..133 px
+cull space) is a **separate routine** and was not re-derived this pass; its `+0.125` form is carried
+and treated as CONFIRMED from the CYCLE 7 pass. The sign divergence between the mosaic-scroll path
+(`−0.125` operand, `−66/67` origin) and the blip-projection helper (`+0.125`, `+66.5` origin) is
+a real architectural split — the two paths are distinct, not contradictory.
+
 The player-arrow rotation uses a Z-rotation matrix (compass-like); the exact rotation-angle source is
-not fully traced (likely the camera yaw) — **MEDIUM / DBG-pending** (see §3.5). (MEDIUM — static
-cannot show the camera frame.)
+not fully traced (likely the camera yaw) — **DBG-pending** (see §3.5). (Static cannot show the camera frame.)
 
 ## 3. HUD radar — background streaming and live blips
 
@@ -267,13 +275,17 @@ cellZ = ((int)(worldZ + 20480.0) >> 10) + 9980
 **(ii) Sub-cell pixel scroll offset — so the player stays centred between tiles:**
 
 ```
-subPixX = worldX × 0.125 − 66        // integer-truncated; same 1/8 scale as §2.2a
-subPixZ = worldZ × 0.125 − 66
+subPixX = −66 − (int)(worldX × −0.125)        // integer-truncated; scale operand is −0.125 on both axes
+subPixZ = −66 − (int)(worldZ × −0.125)
 ```
 
-The `−66` centring constant is the same offset family as `+66.5` (integer-truncated); the two
-derivations agree. So the background mosaic **scrolls by `worldPos × 0.125` modulo the 128-px cell
-tile**, the tile grid is **indexed by `worldPos / 1024`**, and the player arrow is drawn at the panel
+The binary's actual multiplier operand is **−0.125** on both world X and world Z (CONFIRMED, operands
+byte-present). Because the formula is `−66 − (int)(pos × −0.125)`, it is arithmetically equivalent to
+`(int)(pos × 0.125) − 66`, so the magnitude 1:8 and the −66 origin are unchanged — only the sign of
+the operand itself differs from the `+0.125` form. The `−66` centring constant is the same offset
+family as `+66.5` (integer-truncated); the two derivations agree. So the background mosaic **scrolls
+by `worldPos × 0.125` modulo the 128-px cell tile** (driven by a `−0.125` operand and a `−66/67`
+origin), the tile grid is **indexed by `worldPos / 1024`**, and the player arrow is drawn at the panel
 centre (~`66.5, 66.5`) via the §2.2a transform.
 
 **On-screen tile blit — the corner-minimap window size.** After computing the cell indices and the

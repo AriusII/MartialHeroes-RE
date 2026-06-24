@@ -49,7 +49,7 @@ public sealed partial class GamePacketHandler
 
         if (!TryCreateLocalPlayerFromCachedDescriptor(
                 position, out var actor, out var slotIndex, out var name, out var serverClass,
-                out var equipGids))
+                out var equipGids, out var internalClass, out var appearanceVariant))
         {
             sceneStateMachine?.OnGameStateTickNoLocalPlayer();
             return;
@@ -59,7 +59,7 @@ public sealed partial class GamePacketHandler
         _eventBus.Publish(new LocalPlayerSpawnedEvent(
             localActor.Key, slotIndex, name, localActor.Level, localActor.Position, localActor.CurrentHp,
             localActor.MaxHp,
-            serverClass, equipGids));
+            serverClass, equipGids, internalClass, appearanceVariant));
         worldEntry?.Record(seed.AreaId, position);
         _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.AreaId));
         PublishInteriorSnapshot(payload);

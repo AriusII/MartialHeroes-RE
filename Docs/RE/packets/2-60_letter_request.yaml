@@ -2,47 +2,64 @@
 # CAPTURE-UNVERIFIED: the body SIZE (8 bytes) is control-flow CONFIRMED from the send builder;
 # the intra-field split and all VALUE semantics are capture/debugger-pending. capture_verified: false.
 #
-# NEW opcode (HUD-II Wave 2): the LetterPanel request, not previously catalogued.
+# RE-ATTRIBUTED (CYCLE 7): formerly labelled CmsgLetterRequest / "LetterPanel request" — the binary
+# re-attribution (opcodes.md) establishes this as the COUPLE / MARRIAGE relation request. The filename
+# retains the stale "letter" pre-attribution slug per the opcodes.md note; the canonical name and all
+# semantic labels below reflect the corrected attribution.
+#
+# verification: doida.exe sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
-name: CmsgLetterRequest
+name: CmsgCcoupleRelationRequest
 opcode: 0x2003c           # major 2 (GameAction), minor 60 -> (2 << 16) | 60
 direction: C2S
 size: 8                   # FIXED 8-byte body: the send builder appends exactly 8 bytes
 spec: packets/2-60_letter_request.yaml
-status: confirmed
+status: draft
 capture_verified: false
 
-summary: Client request raised by the compact LetterPanel (a small letter-view window). A send-only message carrying an 8-byte fixed body, most likely a letter-id plus a mode/flag -- the open / read / acknowledge round-trip for a single letter. Major 2 is C2S-only, so there is no inbound dispatch slot for this opcode by design.
+summary: >
+  Client request raised by the couple / partner UI. A send-only message carrying an 8-byte fixed body
+  encoding a relation action (mode 0..4) and the target partner actor id. Covers the open / propose /
+  accept / break-link round-trip for a couple or marriage partner link. Major 2 is C2S-only, so there
+  is no inbound dispatch slot for this opcode by design. Its server reply is S2C 5/53
+  SmsgActorVitalsAndPairState. The earlier "LetterPanel request" / CmsgLetterRequest reading was the
+  dev autoname; the binary re-attribution (CYCLE 7) identifies this as the couple-relation opcode.
+  Real mail rides C2S 2/70 CmsgCarrierPigeonSend and C2S 2/71 CmsgDeliveryClaim.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 8.
 # CONTROL-FLOW CONFIRMED: the send builder appends a fixed 8-byte body. The split into two 4-byte
-# values below is the LEADING HYPOTHESIS (letter-id + mode), NOT a captured fact.
+# values below is the LEADING HYPOTHESIS (relation mode + partner actor id), NOT a captured fact.
 fields:
-  - { name: LetterId, type: u32 }   # 0x00  the target letter's id/key (hypothesis)
-  - { name: Mode,     type: u32 }   # 0x04  a mode/flag selector (open vs acknowledge vs reply) (hypothesis)
+  - { name: RelationMode,    type: u32 }   # 0x00  mode/action byte (0..4): propose/accept/break/open (hypothesis)
+  - { name: PartnerActorId,  type: u32 }   # 0x04  target couple partner actor id (hypothesis)
 
 notes: |
   CONTROL-FLOW CONFIRMED body size (8 bytes); the field split and VALUE semantics are
-  capture/debugger-pending. The send is emitted from the LetterPanel's confirm/action path.
+  capture/debugger-pending. The send is emitted from the couple / partner UI on a relation action.
 
-    0x00 (4B) LetterId : the addressed letter's id/key. HYPOTHESIS.
-    0x04 (4B) Mode     : a mode/flag selector for the round-trip. HYPOTHESIS.
+    0x00 (4B) RelationMode   : relation action selector (mode 0..4). HYPOTHESIS.
+    0x04 (4B) PartnerActorId : target actor's id for the relation link. HYPOTHESIS.
 
-  The two-u32 split is the most likely shape for an 8-byte letter round-trip but is NOT pinned; a
-  debugger read of the 8-byte frame is the clean way to confirm the offsets. Treat the field model as
-  provisional and resolve it from a capture.
+  The two-u32 split is the most probable shape for an 8-byte couple-relation command, matching the
+  opcodes.md description (mode byte 0..4 + partner actor id), but is NOT pinned; a debugger read of
+  the 8-byte frame is the clean way to confirm the offsets. Treat the field model as provisional and
+  resolve it from a capture.
 
-  RELATIONSHIP: part of the mail / carrier-pigeon family. Mail-arrival notification rides S2C 1/20
-  SmsgSrvLetterReceived. The mail COMPOSE-SEND is the distinct C2S 2/70 CmsgCarrierPigeonSend
-  (packets/2-70_carrier_pigeon_send.yaml); the delivery-box claim is C2S 2/71 CmsgDeliveryClaim
-  (packets/2-71_delivery_claim.yaml). The LetterPanel itself is a compact letter view distinct from
-  the larger send/read carrier-pigeon panels.
+  RE-ATTRIBUTION NOTE: the dev autoname (and the prior "LetterPanel request" / CmsgLetterRequest
+  spec) was misleading. CYCLE 7 binary analysis established 2/60 as the couple/marriage relation
+  request. The IDB-named couple window (PetPanel) is the couple/partner UI, not a tamed-creature
+  pet panel — this build has no pet-taming feature. See opcodes.md row 0x2003c.
 
-  RESIDUAL: the S2C mailbox-list and delivery-box POPULATE opcodes + record layouts are NOT yet
-  pinned (debugger/capture-pending) -- the inbound mail-list / delivery-list dispatch slot was not
-  walked to the dispatch table this lane.
+  RELATIONSHIP: the couple-state response is S2C 5/53 SmsgActorVitalsAndPairState, which drives the
+  couple/partner window. Real mail (carrier-pigeon + delivery-box): compose-send is C2S 2/70
+  CmsgCarrierPigeonSend (packets/2-70_carrier_pigeon_send.yaml); delivery-box claim is C2S 2/71
+  CmsgDeliveryClaim (packets/2-71_delivery_claim.yaml); delivery-box record is S2C 4/70.
 
-  UNKNOWNS (capture-pending): the LetterId vs Mode split; the full mode enum; the matching S2C reply.
+  RESIDUAL: the exact mode-byte vs partner-id field split and the full mode enum (0..4 labels) are
+  capture/debugger-pending.
 
-  UNBLOCKS: the Client.Application letter-request use-case (send-only), pending a capture to pin the
-  8-byte body's two fields.
+  UNKNOWNS (capture-pending): the RelationMode vs PartnerActorId field sizes within the 8 bytes
+  (one may be narrower than u32 with padding); the full mode enum; the full S2C reply layout.
+
+  UNBLOCKS: the Client.Application couple-relation request use-case (send-only), pending a capture
+  to pin the 8-byte body's two fields.

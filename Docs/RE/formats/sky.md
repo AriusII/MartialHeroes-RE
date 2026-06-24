@@ -2,11 +2,11 @@
 
 ```
 verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; sun→screen→flare transform + lensflare.txt carried [confirmed] from CYCLE 7 static IDA; orbit/day-cycle math carried [confirmed] from prior IDA
-ida_reverified: 2026-06-22         # IDB SHA 263bd994 — CYCLE 12 (2026-06-22): §D.2 thunk mechanism recorded — the "logf_1/logf_2" helpers are cosine/sine thunks (NOT natural-log); the orbit is closed-form trig, the moon is a flat circle (no Z term). ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE: the .box by-name open path is wired but gated by the map_option SKYBOX flag (reset to 0 before each area load); the sun/moon orbiting billboards are a separate system (Section D); prior CYCLE 7 (2026-06-20) added the sun→screen→lens-flare transform + lensflare.txt
+ida_reverified: 2026-06-24         # IDB SHA 263bd994 — CYCLE 13 (2026-06-24): on-disk sample census (1005 dat/ files) byte-confirmed all .bin strides; IDA path-template table (printf format-string block) confirmed verbatim; cloud_cycle 7-column layout named HIGH (resolves KU #3); lensflare.txt on-disk text format confirmed + POSITION negative-value range witnessed (resolves KU #8); weather_rain.bin and light_map<n>.txt authoring mirrors documented. CYCLE 12 (2026-06-22): §D.2 thunk mechanism recorded — the "logf_1/logf_2" helpers are cosine/sine thunks (NOT natural-log); the orbit is closed-form trig, the moon is a flat circle (no Z term). ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE. CYCLE 7 (2026-06-20) added sun→screen→lens-flare transform + lensflare.txt.
 ida_anchor:     263bd994
 readiness:      IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:       [static-ida, vfs-sample]
-conflicts:      none-open  # CYCLE 12 (263bd994, 2026-06-22): logf_1/logf_2 helper thunks confirmed as cosine/sine — NOT natural-log — the CYCLE-7 "natural-log curve" misidentification is fully resolved. CYCLE 11 (263bd994, 2026-06-22): §D.2 sun/moon orbit CORRECTED — the CYCLE-7 "natural-log curve" was a thunk misidentification; the math is ordinary cosine/sine (closed-form trig), the day angle is seconds-of-day (index 29 = 217.5°), and the MOON has no depth-axis (Z) term (flat circle; only the sun carries Z). Prior: campaign-10 C5 fog RESOLVED.
+conflicts:      none-open  # CYCLE 13 (263bd994, 2026-06-24): on-disk census finds no conflicts against committed doc; KU #3 and KU #8 resolved. CYCLE 12 (263bd994, 2026-06-22): logf_1/logf_2 helper thunks confirmed as cosine/sine — NOT natural-log — the CYCLE-7 "natural-log curve" misidentification fully resolved. CYCLE 11 (263bd994, 2026-06-22): §D.2 sun/moon orbit CORRECTED — closed-form trig, MOON flat circle (no Z). Prior: campaign-10 C5 fog RESOLVED.
 ```
 
 > Two-witness re-verification on build `263bd994` (fog loader read-sequence + VFS sample scans)
@@ -189,26 +189,46 @@ and the fog parameters and colour table are stored inline on it.
 > it. The two are consistent: the dome objects come up first — sun, star, cloud, moon — then the
 > colour/shading data — material, light, fog — is loaded onto them.)
 
-### B.1a Sky data-file family (all `<n>` = active area id) — CONFIRMED (CYCLE 7)
+### B.1a Sky data-file family (all `<n>` = active area id) — CONFIRMED (CYCLE 7 + CYCLE 13)
 
 The sky system references the following per-area data files (`<n>` is the active integer area id) and
 shared textures. The byte layouts of the `.bin` files are canonical in `environment_bins.md`; this
 table is the **file-family enumeration** that belongs to `formats/sky.md`.
 
-| Data file (`data/sky/dat/`) | Role | Byte layout |
+> **IDA path-template table (CONFIRMED, CYCLE 13).** The sky loader resolves all file paths from a
+> centralized global string-pointer table whose `printf`-style templates are read verbatim from the
+> binary. The block holds the following templates in order (substitution variable `%d` = active area
+> id): `data/sky/texture/sun.dds`, `data/sky/dat/sky%d.box`, `data/sky/dat/wind%d.bin`,
+> `data/sky/dat/weather%d.bin`, `data/sky/dat/point_light%d.bin`, `data/sky/dat/cloud_cycle%d.bin`,
+> `data/sky/dat/material%d.bin`, `data/sky/dat/light%d.bin`, `data/sky/dat/fog%d.bin`,
+> `data/sky/dat/clouddome%d.bin`, `data/sky/dat/stardome%d.bin`, `data/sky/map/map%d.txt`,
+> `data/sky/dat/map_option%d.bin`, `data/sky/lensflare.txt`. Every on-disk `.bin` file name matches
+> one of these templates 1:1. The `sky%d.box` template is present in the table and is wired in the
+> loader, but no `.box` file exists in the production VFS and the SKYBOX flag is 0 in every area (see
+> §A). The `sun.dds` slot feeds the sun billboard particle-buffer constructor directly from this table.
+
+| Data file (`data/sky/dat/`) | Role | Byte size | Byte layout |
+|---|---|---:|---|
+| `sky<n>.box` | sky-dome geometry (CONFIRMED-ABSENT in shipping VFS) | — | §A (UNVERIFIED) |
+| `wind<n>.bin` | wind | 8 (empty) / varies | `environment_bins.md §9` |
+| `weather<n>.bin` | weather code grid | 240 | `environment_bins.md §7` |
+| `weather<n>_rain.bin` | rain code grid | 240 | `environment_bins.md §8` |
+| `point_light<n>.bin` | point lights | 308 (typical; 8-byte header: f32 VIEW + u32 COUNT, then COUNT × 60-byte records) | `environment_bins.md §13` |
+| `cloud_cycle<n>.bin` | per-step cloud texture-id table | 70 | §B.3 / `environment_bins.md §6` |
+| `material<n>.bin` | sky/colour material table | 9792 | `environment_bins.md §3` |
+| `light<n>.bin` | directional/ambient light table | 5312 | `environment_bins.md §10` |
+| `fog<n>.bin` | fog near/far + colour table | 204 | §B.2 / `environment_bins.md §2` |
+| `clouddome<n>.bin` | two-tier cloud colour grid | 23040 | §B.3 / `environment_bins.md §5` |
+| `stardome<n>.bin` | star colour grid | 9216 | §B.4 / `environment_bins.md §4` |
+| `map_option<n>.bin` | per-area option flags (skybox, lens-flare, …) | 40 | `environment_bins.md §1` |
+
+Text authoring mirrors under `data/sky/map/` (human-editable sources compiled to `.bin`):
+
+| Text file | Role | Mirrors |
 |---|---|---|
-| `sky<n>.box` | sky-dome geometry (CONFIRMED-ABSENT in shipping VFS) | §A (UNVERIFIED) |
-| `wind<n>.bin` | wind | `environment_bins.md §9` |
-| `weather<n>.bin` | weather | `environment_bins.md` (weather) |
-| `point_light<n>.bin` | point lights | `environment_bins.md` |
-| `cloud_cycle<n>.bin` | per-step cloud texture-id table | §B.3 / `environment_bins.md §6` |
-| `material<n>.bin` | sun/colour material table | `environment_bins.md` (material) |
-| `light<n>.bin` | directional/ambient light table | `environment_bins.md §10` |
-| `fog<n>.bin` | fog near/far + colour table | §B.2 / `environment_bins.md §2` |
-| `clouddome<n>.bin` | two-tier cloud colour grid | §B.3 / `environment_bins.md §5` |
-| `stardome<n>.bin` | star colour grid | §B.4 / `environment_bins.md §4` |
-| `map_option<n>.bin` | per-area option flags (skybox, lens-flare, …) | `environment_bins.md §1` |
-| `map/map<n>.txt` | map text (referenced by the sky load) | — |
+| `map/map<n>.txt` | per-area sky feature gates (DUNGEON, LENSFLARE, STARDOME, CLOUDDOME, SUN, MOON, SKYBOX, MAPHIDE) | `map_option<n>.bin` |
+| `map/light_map<n>.txt` | per-area point-light authoring source (LIGHT_COUNT + LIGHT blocks: Ambient, Diffuse, Specular, Position, Range, Always, Swing) | `point_light<n>.bin` |
+| `lensflare.txt` | global lens-flare config script (shared, not per-area) | in-memory flare struct (see §D.4.3) |
 
 Shared textures under `data/sky/texture/`:
 
@@ -265,10 +285,12 @@ sampled per day slot. The structure is HIGH; the exact channel grouping of the s
   day). The canonical sizes are in `environment_bins.md §5` (`clouddome%d.bin` is 23040 bytes —
   two 11520-byte halves).
 - `cloud_cycle%d.bin` is read as a single **70-byte (0x46)** per-step cloud texture-id table. The
-  per-cloud row is consumed at a **7-wide stride** (`base + 7×row + col`); `70 = 10 × 7` (the
-  7-column stride is HIGH; the "10 variants" reading is MED). Cloud textures are
-  `data/sky/texture/cloud%d.dds`, ping-pong animated across two surfaces. Canonical table:
-  `environment_bins.md §6`.
+  per-cloud row is consumed at a **7-wide stride** (`base + 7×row + col`); `70 = 10 × 7`. The
+  **7 columns** are (in order): `Speed`, `Cloud_1[0–12h]`, `Cloud_1[12–24h]`, `Cloud_2[0–6h]`,
+  `Cloud_2[6–12h]`, `Cloud_2[12–18h]`, `Cloud_2[18–24h]` — **HIGH** (confirmed from on-disk
+  `.txt` authoring mirror, CYCLE 13; resolves prior known-unknown #3). The 10 rows index day
+  variants (`0 Day` .. `9 Day`). Cloud textures are `data/sky/texture/cloud%d.dds`, ping-pong
+  animated across two surfaces. Canonical byte table: `environment_bins.md §6`.
 
 > **Correction carried forward:** the cloud-dome loader was previously mislabelled as a wind loader
 > in an older note. It loads `clouddome%d.bin` + `cloud_cycle%d.bin`, **not** wind. Wind is a
@@ -475,27 +497,45 @@ Given the sun screen anchor `(screen_x, screen_y)` and world position `S`:
 
 #### D.4.3 Lens-flare config file `data/sky/lensflare.txt` (HIGH)
 
-A key/value text script, parsed once at flare load. Header keys followed by a packed per-spot record
-array:
+> **On-disk format: text key/value script** (CONFIRMED, CYCLE 13 on-disk sample). The file is NOT a
+> binary record file on disk — it is a human-readable text script. The **20-byte per-spot record** below
+> is the **in-memory struct** that the text parser populates (the parser allocates `20 × SPOT_COUNT`
+> bytes for the spot array and fills it from the parsed text fields). Engineers reading the on-disk
+> file see plain text; engineers reading the spec here for the in-memory layout see the 20-byte stride.
 
-| Field | Type | Meaning | Confidence |
+A key/value text script, parsed once at flare load. Global header keys followed by `SPOT_COUNT`
+per-spot blocks (`SPOT N BEGIN` … `SPOT END`):
+
+**Global header keys (text):**
+
+| Key | Type | Meaning | Confidence |
 |---|---|---|---|
 | `SPOT_COUNT` | int | number of flare ghost sprites (**cap 16**) | HIGH |
 | `TEXTURE_COUNT` | int | number of flare textures (**cap 16**) | HIGH |
 | `INTENSITY_BORDER` | f32 | fade border; the reciprocal `1.0 / INTENSITY_BORDER` is **cached at load** (used in the §D.4.2 brightness formula) | HIGH |
 
-Then **`SPOT_COUNT` per-spot records of 20 bytes each**:
+**Per-spot block keys (text, within `SPOT N BEGIN` … `SPOT END`):**
+
+| Key | Type | Meaning | Confidence |
+|---|---|---|---|
+| `TEXTURE_ID` | int | 1-based flare-texture index → `data/sky/texture/lensflare<n>.dds` | HIGH |
+| `RADIUS` | f32 | sprite radius `RADIUS[i]` | HIGH |
+| `POSITION` | f32 | fraction along the anchor → centre line `POSITION[i]`; **can be negative** (negative values place sprites beyond the screen centre, creating ghost-past-centre effects; witnessed in production data, CYCLE 13) | HIGH |
+| `COLOR` | r,g,b,a (0–255) | per-spot tint → packed ARGB in-memory | HIGH |
+
+**In-memory per-spot struct (20 bytes, filled by the text parser):**
 
 | Sub-offset | Size | Type | Field | Notes | Confidence |
 |-----------:|-----:|------|-------|-------|------------|
-| +0x04 | 4 | int | `TEXTURE_ID` | 1-based flare-texture index → `data/sky/texture/lensflare<n>.dds` | HIGH |
-| — | 4 | f32 | `RADIUS` | sprite radius `RADIUS[i]` | HIGH |
-| — | 4 | f32 | `POSITION` | fraction along the anchor → centre line `POSITION[i]` | HIGH |
-| — | 4 | u32 | `colour` | per-spot tint (ARGB) | HIGH |
+| +0x00 | 4 | — | (padding / reserved) | sub-offset +0x00 is not a text-parsed field; `TEXTURE_ID` is written at +0x04 | HIGH |
+| +0x04 | 4 | int | `TEXTURE_ID` | 1-based flare-texture index | HIGH |
+| +0x08 | 4 | f32 | `RADIUS` | sprite radius | HIGH (field order confirmed) |
+| +0x0C | 4 | f32 | `POSITION` | anchor→centre fraction; negative values confirmed | HIGH (field order confirmed) |
+| +0x10 | 4 | u32 | `colour` | per-spot tint (ARGB) | HIGH (field order confirmed) |
 
-- **Record stride: 20 bytes** (the parser allocates `20 × SPOT_COUNT` for the spot array). `TEXTURE_ID`
-  sits at sub-offset `+0x04`; the remaining `RADIUS` / `POSITION` / `colour` fields fill the record (the
-  field ordering after `+0x04` is HIGH; the precise sub-offset of each is parser-derived).
+- **In-memory record stride: 20 bytes.** `TEXTURE_ID` at sub-offset `+0x04` (HIGH); the `RADIUS` /
+  `POSITION` / `colour` field order is HIGH (confirmed from on-disk text key order, CYCLE 13; resolves
+  prior known-unknown #8). The leading 4-byte gap at `+0x00` is not a text-parsed field.
 - **Flare textures:** `data/sky/texture/lensflare<n>.dds`, **1-based** index.
 
 #### D.4.4 Gating
@@ -536,8 +576,9 @@ paths are load-bearing.
    engineering path (see §A status block).
 2. **Fog source-band channel grouping** in the 0.75/0.25 blend (MED) — which bytes of the 192-byte
    sky-colour-table slot are the "high" and "low" source bands.
-3. **Cloud `cloud_id_table` row count** — the 7-wide stride is HIGH; the "10 rows / variants" reading
-   is MED.
+3. ~~**Cloud `cloud_id_table` row count**~~ — **RESOLVED (CYCLE 13, HIGH).** 10 day rows × 7 columns;
+   columns named: Speed, Cloud_1[0–12h], Cloud_1[12–24h], Cloud_2[0–6h], Cloud_2[6–12h],
+   Cloud_2[12–18h], Cloud_2[18–24h]. See §B.3.
 4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
 5. **Sun/moon billboard vertical-arc math (§D.2, CORRECTED CYCLE 11, binary-won)** — the orbit is
@@ -554,9 +595,10 @@ paths are load-bearing.
    (HIGH): row-vector × 4×4 multiply, 3rd-row `w` term, `Sy < 0` horizon cull, `clip.w < 0` visible
    test, X-by-`−w` / Y-by-`+w` divide. The exact `scaleX/Y` (half-viewport extents) and `biasX/Y`
    (viewport-centre pixels) come from the runtime viewport — **DBG-pending** (no static immediate).
-8. **`lensflare.txt` per-spot sub-field offsets (§D.4.3)** — record stride 20 bytes and `TEXTURE_ID` at
-   `+0x04` are HIGH; the precise sub-offsets of `RADIUS` / `POSITION` / `colour` within the record are
-   parser-derived (a real `lensflare.txt` sample would pin them).
+8. ~~**`lensflare.txt` per-spot sub-field offsets (§D.4.3)**~~ — **RESOLVED (CYCLE 13, HIGH).** On-disk
+   format confirmed text key/value script; the 20-byte in-memory per-spot struct is populated by the
+   text parser. Field order confirmed: TEXTURE_ID (+0x04), RADIUS (+0x08), POSITION (+0x0C), colour
+   (+0x10). POSITION can be negative (ghost-past-centre; witnessed in production). See §D.4.3.
 9. **Moon-phase day-counter source (§D.3)** — confirmed a day index distinct from the time-of-day
    angle, and the `floor((day mod 30)/2)` 15-phase scheme is HIGH; the exact day-counter derivation
    is not fully pinned.
@@ -575,18 +617,22 @@ paths are load-bearing.
   CYCLE 7 adds the sun-orbit update, the lens-flare project-and-draw host, the flare ghost-chain
   draw, the lens-flare config reader, and the negate-and-store light coupling — flag these canonical
   names for the glossary, do not edit it here).
-- **Provenance:** see `Docs/RE/journal.md` (add an entry for this spec). **CAMPAIGN 10 Block D6
-  two-witness re-verification (build `263bd994`)** RE-CONFIRMED: `.box` absent (0 of 43,347 VFS
-  entries); the fog colour-derivation loop (48 iterations, 192-byte per-slot stride, 0.75/0.25 blend);
-  `cloud_cycle%d.bin` = 70 bytes (10 × 7). One wording correction (C5): fog files are **always 204
-  bytes on disk**; the "12-byte" form is the loader's read volume when `data_load_flag = 0`, not an
-  on-disk size — and `data_load_flag = 1` is now witnessed in real data (`fog11.bin`). The day-cycle
-  (§C) and sun/moon orbit (§D) facts were not re-traced this lane and are carried [confirmed] from the
-  prior IDA reading.
+- **Provenance:** see `Docs/RE/journal.md`. **CYCLE 13 (2026-06-24, IDB SHA `263bd994`)** — on-disk
+  sample census (1005 `dat/` files): all `.bin` strides byte-confirmed against committed tables; IDA
+  path-template table confirmed verbatim (§B.1a); `cloud_cycle` 7-column layout named HIGH (resolves
+  KU #3, §B.3); `lensflare.txt` on-disk text format confirmed + POSITION negative-value range witnessed
+  (resolves KU #8, §D.4.3); `weather<n>_rain.bin` and `map/light_map<n>.txt` added to the file-family
+  table (§B.1a). **CAMPAIGN 10 Block D6 two-witness re-verification (build `263bd994`)** RE-CONFIRMED:
+  `.box` absent (0 of 43,347 VFS entries); the fog colour-derivation loop (48 iterations, 192-byte
+  per-slot stride, 0.75/0.25 blend); `cloud_cycle%d.bin` = 70 bytes (10 × 7). One wording correction
+  (C5): fog files are **always 204 bytes on disk**; the "12-byte" form is the loader's read volume when
+  `data_load_flag = 0`, not an on-disk size — and `data_load_flag = 1` is now witnessed in real data
+  (`fog11.bin`). The day-cycle (§C) and sun/moon orbit (§D) facts were not re-traced that lane and are
+  carried [confirmed] from the prior IDA reading.
   **CYCLE 7 (2026-06-20, build `263bd994`, static-only)** added the sun → screen → lens-flare anchor
   transform (§D.4.1, transform shape HIGH; viewport scale/bias DBG-pending), the flare ghost-chain
   draw + terrain-occlusion + screen-edge brightness (§D.4.2), the `data/sky/lensflare.txt` config
-  layout (§D.4.3, 20-byte spot records, caps 16), the sun billboard texture/size constants
+  layout (§D.4.3, 20-byte in-memory spot records, caps 16), the sun billboard texture/size constants
   (§D.5: `sun.dds`, size 2048.0, buffer 4096.0×512.0), the sky data-file family enumeration (§B.1a),
   the build order sun→star→cloud→moon→material→light→fog (§B.1), and initially refined the sun/moon
   orbit (§D.2) to a "natural-log-curve" model (now superseded by the CYCLE 11 binary-won correction —

@@ -110,6 +110,22 @@ public sealed partial class CharSelectWindow
     }
 
 
+    private void BuildGroupCarrierPigeon()
+    {
+        _carrierPigeonPanel = NewContainer("CarrierPigeonPanel", 590, 90, 200, 300, false);
+
+        AddPanel(_carrierPigeonPanel, AtlasCarrierPigeonAll, 0, 0, 200, 300, 0, 0, true);
+        AddImage(_carrierPigeonPanel, AtlasCarrierPigeonPerson, 4, 4, 80, 80, 0, 0);
+        AddButtonAction(_carrierPigeonPanel, AtlasCarrierPigeonAll, 160, 4, 32, 32,
+            0, 0, 0, 0, 0, 0, ActNoticePanel);
+        AddTextbox(_carrierPigeonPanel, 8, 90, 184, 16, 128, 0);
+
+        _carrierPigeonPanel.Visible = false;
+
+        GD.Print("[CharSelectWindow] CarrierPigeonPanel built (action 65 = close). spec: charselect.md §4.3 action 65 / §5.2.");
+    }
+
+
     private void BuildGroup6RightDetail()
     {
         const int rx = 772;

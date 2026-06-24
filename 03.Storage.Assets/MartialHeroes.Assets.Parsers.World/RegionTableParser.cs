@@ -10,7 +10,9 @@ public static class RegionTableParser
     private const int RecordCount = 32;
     private const int ExpectedMinSize = RecordCount * RecordStride;
     private const int ZoneNameOffset = 0x00;
-    private const int ZoneNameSize = 40;
+    private const int ZoneNameSize = 0x20;
+    private const int LabelXOffset = 0x20;
+    private const int LabelZOffset = 0x24;
     private const int ZoneTypeOffset = 0x28;
     private const int TailOffset = 0x2C;
 
@@ -39,6 +41,10 @@ public static class RegionTableParser
 
             var zoneName = ReadNullTerminatedCp949(rec.Slice(ZoneNameOffset, ZoneNameSize), cp949);
 
+            var labelX = BinaryPrimitives.ReadSingleLittleEndian(rec[LabelXOffset..]);
+
+            var labelZ = BinaryPrimitives.ReadSingleLittleEndian(rec[LabelZOffset..]);
+
             var zoneType = BinaryPrimitives.ReadUInt32LittleEndian(rec[ZoneTypeOffset..]);
 
             var tail = BinaryPrimitives.ReadUInt32LittleEndian(rec[TailOffset..]);
@@ -47,6 +53,8 @@ public static class RegionTableParser
             {
                 RegionId = i,
                 ZoneName = zoneName,
+                LabelX = labelX,
+                LabelZ = labelZ,
                 ZoneType = zoneType,
                 TailOpaque = tail
             };

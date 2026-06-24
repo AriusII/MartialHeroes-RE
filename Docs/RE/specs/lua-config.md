@@ -4,11 +4,11 @@ verification: confirmed   # the entire C++ consumption surface (VM, single bindi
 ida_reverified: 2026-06-16
 ida_anchor: 263bd994
 evidence: [static-ida]
-sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples inspected on disk (§9). NOTE: config.lua / tableString / CONFIG_* are NOT host-referenced by name in this build — they arrive only via cpp_load (see §2.3)
+sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples inspected on disk (§9). NOTE: config.lua / tableString / CONFIG_* are NOT host-referenced by name in this build — they arrive only via cpp_load (see §2.3). DRIFT (build 263bd994): §4.2 DISPLAY_POWER / _COMBO_COOL_TIME / _GAME_CLASS_VIEW_TIME absent from binary; §4.3 DISPLAY_POWERSHADER is a plain string read, not host-derived (see conflicts).
 subsystems: [lua_vm, config_scripts, string_tables, boot_flags]
 networked: false          # Lua is a client-side config/text-table engine; nothing on the wire
 encoding_note: The shipped .lua source files are CP949 (code page 949), NOT UTF-8 — this CORRECTS the earlier UTF-8 claim. The in-binary tutorial row-decode runs code page 65001 ONLY on the name-based loader; the ID-based loader pushes raw bytes. See §0, §5.2, §9.
-conflicts: lua_scripting.md §6.2's old "plain on-disk, NOT the VFS" claim is refuted (this file's §2.2 was already correct and lua_scripting.md is now reconciled to it); the int-reader "bool" name is a misnomer (§6). RESOLVED this pass (F11 re-verification): the two addiction-timing knobs are disentangled (§3 — the ×1000 site reads the DISPLAY_* key, not a game.lua global); the name-vs-ID decode asymmetry and the 102400-byte name-loader scratch buffer pinned (§5.1); msg.xdb boot adjacency noted (§8 item 7).
+conflicts: lua_scripting.md §6.2's old "plain on-disk, NOT the VFS" claim is refuted (this file's §2.2 was already correct and lua_scripting.md is now reconciled to it); the int-reader "bool" name is a misnomer (§6). RESOLVED this pass (F11 re-verification): the two addiction-timing knobs are disentangled (§3 — the ×1000 site reads the DISPLAY_* key, not a game.lua global); the name-vs-ID decode asymmetry and the 102400-byte name-loader scratch buffer pinned (§5.1); msg.xdb boot adjacency noted (§8 item 7). DRIFT CORRECTED (build 263bd994): (1) §4.2 — DISPLAY_POWER, DISPLAY_COMBO_COOL_TIME, DISPLAY_GAME_CLASS_VIEW_TIME are NOT present in this build's binary and are not read by the display parser; those rows are removed/marked (see §4.2). (2) §4.3 — DISPLAY_POWERSHADER is read by C++ as a plain string global, not host-derived from DISPLAY_POWER; any power-level-to-shader mapping is script-side only; the only compiled-in shader path literal is data/shader/power1dx8.psh (see §4.3).
 ---
 
 # Lua configuration & string-table engine (in-process VM, config scripts, table API)
@@ -90,7 +90,7 @@ the inline Korean comments and any Korean string literal.
 | Four named config scripts (`game.lua`, `uiconfig.lua`, `display.lua`, `tutor.lua`) + their loader call sites | CODE-CONFIRMED |
 | Boot globals `vfsmode` / `launcher` / `debugmode` (read, gate, and downstream effect) | CODE-CONFIRMED |
 | `uiconfig.lua` global `NEW_SERVER_INDEX` | CODE-CONFIRMED / SAMPLE-CONFIRMED |
-| `display.lua` `DISPLAY_*` global set (~71 keys: ints, the per-status float brightness matrix, one string) | CODE-CONFIRMED / SAMPLE-CONFIRMED |
+| `display.lua` `DISPLAY_*` global set (79 keys as read by C++: 72 brightness-matrix keys [9 states × 8], `GLOW_RANGE_X`/`_Y`, `FRAMERATE` [dead store], `BASE_BRIGHT_MULTI`, `GLOW_BRIGHT_MULTI`, `LIGHT_RATIO`, `POWERSHADER` — NOTE: `DISPLAY_POWER`, `DISPLAY_COMBO_COOL_TIME`, `DISPLAY_GAME_CLASS_VIEW_TIME` are NOT present in build 263bd994) | CODE-CONFIRMED / SAMPLE-CONFIRMED |
 | `getTableSize` / `getTableString` / `getTableStringByID` Lua API contract | CODE-CONFIRMED |
 | **Shipped `.lua` source files are CP949 (code page 949), NOT UTF-8** (corrects prior claim) | SAMPLE-CONFIRMED |
 | **Encoding split: in-binary 65001 (UTF-8) round-trip is applied ONLY on the name-based table loader; the ID-based loader pushes raw bytes** | CODE-CONFIRMED |
@@ -291,33 +291,50 @@ The status variants and their inline-documented triggers:
 
 ### 4.2 Global display scalars
 
-| Global | Type | Effect |
-|---|---|---|
-| `DISPLAY_BASE_BRIGHT_MULTI` | float | Global background (terrain / scene) brightness multiplier (the `MULTI` factor of the affine model). |
-| `DISPLAY_GLOW_BRIGHT_MULTI` | float | Glow-pass brightness multiplier. |
-| `DISPLAY_GLOW_RANGE_X` | int | Horizontal glow downsample factor (valid set: 1, 2, 4, 8; higher = coarser). |
-| `DISPLAY_GLOW_RANGE_Y` | int | Vertical glow downsample factor (same scale). |
-| `DISPLAY_FRAMERATE` | int | Show FPS counter: `0` = off, `1` = on. |
-| `DISPLAY_POWER` | int | Glow shader intensity level (valid set: 1, 2, 4, 8, 16, 32); selects which glow pixel-shader file is used (§4.3). |
-| `DISPLAY_LIGHT_RATIO` | float | Character light colour-correction factor (range 0.0–1.0). |
-| `DISPLAY_GAME_CLASS_VIEW_TIME` | int | Minutes between game-rating (age-rating) UI notifications. |
-| `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` | int | Seconds between addiction-warning UI checks. |
-| `DISPLAY_GAME_ADDICTION_WARNING_VIEW_TIME` | int | Seconds the addiction-warning UI stays visible. |
-| `DISPLAY_COMBO_COOL_TIME` | int | Combo-chain cooldown, in seconds. |
-| `DISPLAY_POWERSHADER` | string | Path to the active glow pixel-shader `.psh` file — **derived, not a bare assignment** (§4.3). |
+> **Build-263bd994 note:** `DISPLAY_POWER`, `DISPLAY_COMBO_COOL_TIME`, and `DISPLAY_GAME_CLASS_VIEW_TIME`
+> do **NOT** exist as strings in build 263bd994 and are not read by the display parser. They may be
+> present only in the on-disk `.lua` sample (script-side only) but are never consumed by C++ in this build.
+> They are listed below for documentation completeness but are marked accordingly.
 
-### 4.3 The derived `DISPLAY_POWERSHADER` key
+| Global | Type | Effect | Build status |
+|---|---|---|---|
+| `DISPLAY_BASE_BRIGHT_MULTI` | float | Global background (terrain / scene) brightness multiplier (the `MULTI` factor of the affine model). | CODE-CONFIRMED |
+| `DISPLAY_GLOW_BRIGHT_MULTI` | float | Glow-pass brightness multiplier. | CODE-CONFIRMED |
+| `DISPLAY_GLOW_RANGE_X` | int | Horizontal glow downsample factor (valid set: 1, 2, 4, 8; higher = coarser). Host falls back to `2` when the read value is 0. | CODE-CONFIRMED |
+| `DISPLAY_GLOW_RANGE_Y` | int | Vertical glow downsample factor (same scale). Host falls back to `2` when the read value is 0. | CODE-CONFIRMED |
+| `DISPLAY_FRAMERATE` | int | FPS display toggle. **Dead store in this build** — the parsed value is stored but has no reader; FPS is hard-coded to 60. | CODE-CONFIRMED (dead store) |
+| `DISPLAY_LIGHT_RATIO` | float | Character light colour-correction factor (range 0.0–1.0). | CODE-CONFIRMED |
+| `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` | int | Seconds between addiction-warning UI checks. Read in the boot/login glue and scaled ×1000. | CODE-CONFIRMED |
+| `DISPLAY_GAME_ADDICTION_WARNING_VIEW_TIME` | int | Seconds the addiction-warning UI stays visible. | SAMPLE-CONFIRMED |
+| `DISPLAY_POWERSHADER` | string | Path to the active glow pixel-shader `.psh` file. Read as a plain string global by C++ (§4.3). | CODE-CONFIRMED |
+| `DISPLAY_POWER` | int | Glow shader intensity level. **NOT PRESENT IN BUILD 263bd994** — the string does not exist in the binary and is not read by the display parser. Script-side only if present. | NOT-PRESENT-IN-BUILD-263bd994 |
+| `DISPLAY_COMBO_COOL_TIME` | int | Combo-chain cooldown, in seconds. **NOT PRESENT IN BUILD 263bd994** — not in the binary string table, not read by C++. | NOT-PRESENT-IN-BUILD-263bd994 |
+| `DISPLAY_GAME_CLASS_VIEW_TIME` | int | Minutes between game-rating UI notifications. **NOT PRESENT IN BUILD 263bd994** — not in the binary string table, not read by C++. | NOT-PRESENT-IN-BUILD-263bd994 |
 
-`DISPLAY_POWERSHADER` is **computed** at the end of the file by an `if`/`elseif` chain over
-`DISPLAY_POWER`, mapping the power level to a glow pixel-shader path of the form
-`data/shader/power<N>dx8.psh`. It is the only `DISPLAY_*` key that is set programmatically rather
-than as a bare scalar assignment; a config author must not pre-assign it. The host reads it back via
-the string reader (§6) and copies it into a fixed-size buffer. This establishes a dependency from
-`display.lua` onto the shader assets under `data/shader/`.
+### 4.3 `DISPLAY_POWERSHADER` — a plain string global read by C++
 
-The integer members are read by the number-as-int reader (§6); the float members by the float reader
-sibling; `DISPLAY_POWERSHADER` by the string reader. `display.lua` must define each member as the
-appropriate Lua value type.
+> **Drift correction (build 263bd994).** A prior note implied that `DISPLAY_POWERSHADER` is
+> *host-derived* from `DISPLAY_POWER` via a C++ if/elseif mapping. **That is wrong.** The display
+> parser reads `DISPLAY_POWERSHADER` as a **plain string global** — it calls the string reader (§6),
+> copies the returned string into a fixed-size 260-byte (MAX_PATH) buffer via a bounded string copy,
+> and stores it in the display singleton. There is no C++ code that reads `DISPLAY_POWER` and derives
+> a shader path from it (and `DISPLAY_POWER` itself is not present in this build — see §4.2).
+>
+> The only compiled-in shader path literal in this build is `data/shader/power1dx8.psh`, which is
+> referenced by the renderer post-engine-constructor path — **not** by the display config parser.
+>
+> Any `if`/`elseif` mapping of a power level to a shader path (such as `data/shader/power<N>dx8.psh`)
+> is **script-side only** — it would exist inside `display.lua` itself as a Lua expression that sets
+> the `DISPLAY_POWERSHADER` global before C++ reads it. C++ never inspects a power level; it only
+> reads the final string.
+
+`DISPLAY_POWERSHADER` is a string global that `display.lua` must set before the display parser reads
+it. A config author must ensure the key is assigned; C++ will copy whatever string is present into its
+260-byte buffer. The value must be a valid shader path.
+
+The integer members of §4.2 are read by the number-as-int reader (§6); the float members by the float
+reader sibling; `DISPLAY_POWERSHADER` by the string reader. `display.lua` must define each member as
+the appropriate Lua value type.
 
 ---
 
@@ -428,7 +445,7 @@ integer"**, not as a 0/1 boolean. For 0/1 flags, compare the returned integer `!
 | Boot flags | `vfsmode` (VFS vs loose), `launcher` (launcher bounce unless `-Start`), `debugmode` (windowed vs fullscreen). Read as ints; default each to `1` if absent; interpret as `!= 0`. |
 | Developer flags | `config.lua` defines `CONFIG_NO_VFS` / `CONFIG_DEBUG_LEVEL` / `CONFIG_LOAD_SIMPLE_EFFECT` / `CONFIG_LOAD_MESH` / `CONFIG_SAVE_MESH` (§3.1) — read as ints; these are developer defaults. |
 | Config globals | Read each as the correct Lua type (int / float / string). The integer reader returns the **full int**, never a clamped bool. |
-| `DISPLAY_POWERSHADER` | Treat as **derived** from `DISPLAY_POWER`; do not pre-assign. Maps to `data/shader/power<N>dx8.psh`. |
+| `DISPLAY_POWERSHADER` | Read as a **plain string global** (string reader, 260-byte copy). Any power-level-to-shader mapping is script-side (inside `display.lua`); C++ reads the final string only. The only compiled-in shader path literal in this build is `data/shader/power1dx8.psh`. |
 | String tables | The script must define `getTableSize` / `getTableString` / `getTableStringByID`. Decode every returned row using the file's CP949 encoding (§0/§5.2). |
 | Interpreter vs. direct-parse | The data-vs-logic trade-off (embed a managed Lua 5.1 interpreter vs. direct-parse the data tables) is unchanged from `specs/lua_scripting.md` §7 — gated on recovering real `.lua` samples (now partially available, §9). |
 

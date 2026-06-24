@@ -1,10 +1,10 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 #
 # VERIFICATION BANNER
-#   verification: confirmed  (opcode->handler routing, the fixed 184-byte (0xB8) body, and the
-#                 success@+0x00 / fail_sub@+0x01 gate bytes are control-flow-confirmed; the 184-byte
-#                 product-result record interior is forwarded to a product-apply sub-handler; every
-#                 VALUE meaning is capture/debugger-pending)
+#   verification: confirmed  (opcode->handler routing, the fixed 184-byte (0xB8) body, the 8-byte
+#                 head@+0x00, and the success@+0x08 / fail_sub@+0x09 gate bytes are
+#                 control-flow-confirmed; the product-result record interior from +0x0a is forwarded
+#                 to a product-apply sub-handler; every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
 #   evidence: [static-ida]
@@ -25,20 +25,25 @@ summary: Server pushes a product / cash-item purchase result with an on-screen r
 # Wire order, offset 0 = first payload byte. Pack=1; only the two gate bytes are interpreted by THIS
 # handler; the rest of the 184-byte record is forwarded to the product-apply sub-handler. Widths sum
 # to size: 184. (A small pre-init helper scrubs the first 8 bytes of the destination before the read;
-# the success/fail bytes are read at payload +0x00 / +0x01.)
+# the success/fail bytes are read at payload +0x08 / +0x09; an 8-byte head precedes.)
+# verification: ida_anchor 263bd994 — Success@+0x08 and FailSub@+0x09 confirmed; 8-byte head precedes.
 fields:
-  - { name: Success, type: u8 }            # 0x00  != 0 => success path (forward block); == 0 => failure path
-  - { name: FailSub, type: u8 }            # 0x01  failure path only: 101 = show an error string; 102 = decrement the local-player character count by 1
-  - { name: Body,    type: "bytes[182]" }  # 0x02  remainder of the 184-byte product-result record, forwarded to the product-apply sub-handler
-  # widths: 1 + 1 + 182 = 184
+  - { name: Head,    type: "bytes[8]" }    # 0x00  8-byte head scrubbed by the pre-init helper before the gate bytes are read
+  - { name: Success, type: u8 }            # 0x08  != 0 => success path (forward block); == 0 => failure path
+  - { name: FailSub, type: u8 }            # 0x09  failure path only: 101 = show an error string; 102 = decrement the local-player character count by 1
+  - { name: Body,    type: "bytes[174]" }  # 0x0a  remainder of the 184-byte product-result record, forwarded to the product-apply sub-handler
+  # widths: 8 + 1 + 1 + 174 = 184
 
 notes: |
-  CONTROL-FLOW CONFIRMED: the fixed 184-byte (0xB8) body and the two gate bytes (success @+0x00,
-  fail_sub @+0x01). CAPTURE-UNVERIFIED for VALUE meanings; the record interior is forwarded opaquely.
+  CONTROL-FLOW CONFIRMED: the fixed 184-byte (0xB8) body, the 8-byte head, and the two gate bytes
+  (Success @+0x08, FailSub @+0x09). CAPTURE-UNVERIFIED for VALUE meanings; the record interior is
+  forwarded opaquely. The pre-init helper scrubs the first 8 payload bytes (Head) before the gate
+  bytes are read (payload-cursor convention).
 
-    0x00 (1B) Success : nonzero => the success path, which forwards the whole 184-byte block to a
+    0x00 (8B) Head    : scrubbed by the pre-init helper; not field-read by this handler.
+    0x08 (1B) Success : nonzero => the success path, which forwards the whole 184-byte block to a
                         product-apply sub-handler; 0 => the failure path.
-    0x01 (1B) FailSub : consulted only on the failure path. 101 = surface an error string; 102 =
+    0x09 (1B) FailSub : consulted only on the failure path. 101 = surface an error string; 102 =
                         decrement the local player's character count by 1 (a cash product that consumes
                         a character slot).
 

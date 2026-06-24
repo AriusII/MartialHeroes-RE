@@ -13,7 +13,7 @@ verification: confirmed (control-flow-confirmed) for the production subsystem on
   The unread record regions (between the key and the result field, and the tail after the NPC field)
   are UNVERIFIED — no on-disk sample row was available; the client never reads them.
 ida_anchor: 263bd994
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-24
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -21,6 +21,10 @@ note: |
   products.scr recipe table, the gather-vs-NPC-built result split, the C2S production request/commit
   opcodes, and the S2C SmsgCraftingResult layout. This is a single production system; there is NO
   separate alchemy subsystem.
+  Spec-audit pass (2026-06-24) — control-flow re-confirmed products.scr loader end-to-end: 212-byte
+  (0xD4) verbatim record, operator-new per row, inserted into an ordered map keyed on record +0x00
+  (confirms §2.1 stride/key/single-system claims; §2.3 column offsets and §3/§4 opcode flow carried
+  from prior cycles, no drift found).
 -->
 
 # Crafting / Production — Recipe Table & Make-Item Flow — Clean-Room Specification

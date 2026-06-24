@@ -15,6 +15,18 @@
 
 ---
 
+## Re-verification banner (2026-06-24 — path-template confirmation, no layout corrections)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — independent re-confirmation pass (witness 1 = `.bud` loader read-sequence; witness 2 = 420,965-byte 17-object real VFS sample + three 195-byte byte-identical single-object samples). **Zero contradictions** with the layout below. New finding incorporated: per-cell scene file path templates recovered from `.rdata` strings (§3.0 table). The map-level `.bin` family (`data/map%s/map%s.bin`) was also encountered but is **out of scope** for this document — see gap note in §11. |
+| `ida_reverified` | `2026-06-24` |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = `.bud` and `.sod` loader read-sequences (confirmed field-by-field); witness 2 = byte-exact real VFS samples (object_count, vertex/index blocks, file-size formula); witness 3 = `.rdata` path-template strings for per-cell file naming. |
+| `conflicts`      | None. All layout fields confirmed correct. Per-cell path templates (§3.0) added from `.rdata` discovery; no existing field changed. |
+
+---
+
 ## Re-verification banner (2026-06-21)
 
 | Attribute        | Value |
@@ -156,6 +168,24 @@ error.)
   **never opens `.bud.pre`** — it only ever loads the `.bud` named explicitly by the `.map`
   `DATAFILE`. `.bud.pre` is a content-build artifact, not a runtime format; a parser should
   ignore `.pre` siblings (this parallels the `.ted` / `.ted.post` pair).
+
+**Per-cell scene file path templates (recovered from client path-template strings, CONFIRMED):**
+
+The client constructs per-cell file paths from a cell base of the form `d<area>x<mapX>z<mapZ>` where
+`<area>` is the zero-padded area ID, `<mapX>` and `<mapZ>` are the cell grid indices.
+Note that the `.bud` path is **not** one of these templates — it is never a stored literal in the
+client; it is always named by the `.map` `BUILDING { DATAFILE … }` stanza at runtime.
+
+| Path template (printf-style) | Produces |
+|------------------------------|----------|
+| `/dat/d%sx%dz%d.sod` | Per-cell solid-collision blob |
+| `/dat/d%sx%dz%d.ted` | Per-cell heightmap blob |
+| `/dat/d%sx%dz%d.ted.post` | Post-bake heightmap sibling (content-build artifact; not loaded at runtime) |
+| `/dat/d%s.lst` | Per-cell object/scene list |
+
+The `.bud` name comes only from the `.map` `DATAFILE` stanza (no client-side template for it). The
+area component in the path base is formatted with `%s` (string), accepting the three-character zero-padded
+area string (e.g. `000`, `001`) passed in by the cell streamer, not an integer printf directly.
 
 ### 3.1 File-level header
 
@@ -571,4 +601,20 @@ in the legacy asset set.
   two-witness gate (loader read-sequence + black-box sampling): the `vertex_count` cap is
   warn-and-continue on the full count (loader-resolved), and `type_byte` is confirmed-variable
   over {0, 1, 2} with no consumer branch.
-```
+
+**Known gap — map-level `.bin` descriptor family (out of scope for this document):**
+
+The client loads a family of per-MAP binary descriptors via the path template
+`data/map%s/map%s.bin` (e.g. `data/map001/map001.bin`). A sibling family of per-map
+environment/scene-config tables is loaded via templates of the form `/dat/<name>%d.bin`
+(covering wind, weather, point-light, cloud-cycle, material, light, fog, clouddome, stardome, and
+sky configurations). These are per-map tables, NOT per-cell geometry. They are loaded by dedicated
+loaders (e.g. `Wind_LoadMapData`, `PointLight_LoadMapData`) and are entirely independent of the
+`.map`/`.bud`/`.sod` per-cell model described in this document.
+
+The `data/map%s/map%s.bin` file observed (520 bytes) contains world-space XZ coordinate pairs
+and small-integer region/zone IDs in a fixed-size table. Its exact record layout is a known gap:
+the loader was not isolated in the current RE pass (the path is constructed dynamically with no
+direct static cross-reference), so the internal field semantics are LOW-confidence hypotheses
+only. A dedicated spec (e.g. `map_bin.md` or a section in a region-descriptor document) should be
+authored once the loader is recovered. Do not fold map-level `.bin` coverage into this document.

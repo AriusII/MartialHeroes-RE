@@ -6,15 +6,15 @@
 
 ---
 
-## Re-verification banner (2026-06-16, CAMPAIGN 10 / Block D)
+## Re-verification banner (2026-06-24, ANALYZE re-walk)
 
 | Attribute        | Value |
 |------------------|-------|
-| `verification`   | `mixed` — see per-format rows. The **FX `.fx1`–`.fx7` group-array on-disk format is now CODE-CONFIRMED** from the seven file decoders (per-channel header width, vc/ic offsets, vertex stride, 1-based `texture_index` at group `+0x00`; the `.fx4` "flat tile" framing is retired) — §1.4a/§1.4b, re-walked 2026-06-21. The **`.fx2` path was independently re-walked against a live single-group sample** (decoder read-sequence + AABB finalize 44-byte stride; exact size match, zero residual) — §1.4a/§1.6 unchanged. Newly recorded this pass: the **`.fxN` load path / `.map` linkages** (§1.1b), the **exact 1-based texture-register remap** (§1.4b), the **FX3/FX5 = water channel identity** (§1.4c, render path DBG-PENDING), and the **`.fx1.pre`–`.fx7.pre` editor sidecars** (§5.5, editor-only). The `.up`/`.exd` 40-byte triangle record and the light/wind/point_light layouts were **not** re-dumped this pass and hold at their committed tiers. |
-| `ida_reverified` | `2026-06-22` (CYCLE 11 deepen: fx1–fx7 topology/cull-grid/UV/two-vertex-copies/texture-remap confirmed; fx7 group-header re-confirmed 48 B with vc@+0x28, ic@+0x2C — §1.4a/§1.13 corrected from prior 52 B reading; fx6 confirmed as uniform group-array (36 B group-hdr / 32 B vtx), not a subchunk/footer model; draw path remains debugger-pending — §1.4d; prior 2026-06-21: FX `.fx1`–`.fx7` on-disk file decoders re-walked: per-channel group-header width, vc/ic offsets, vertex stride, and the 1-based `texture_index` at group `+0x00` — §1.4a/§1.4b; `.fx2` decoder re-walked + live-sample byte-exact; load-path linkages §1.1b; texture-register remap §1.4b; FX3/FX5 water-channel identity §1.4c; `.fxN.pre` sidecars §5.5; prior routing re-confirm `2026-06-16`) |
-| `ida_anchor`     | `263bd994` |
-| `readiness`      | IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later. |
-| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser + per-channel FX decoders (witness 1) + VFS census file-count corroboration and a live single-group `.fx2` sample whose size matches the decoder formula exactly (witness 2) |
+| `verification`   | `mixed` — see per-format rows. The **FX `.fx1`–`.fx7` group-array on-disk format is CODE-CONFIRMED** from the seven file decoders (per-channel header width, vc/ic offsets, vertex stride, 1-based `texture_index` at group `+0x00`; the `.fx4` "flat tile" framing is retired) — §1.4a/§1.4b, re-walked 2026-06-21. The **`.fx2` and `.fx7` decoders were re-walked byte-for-byte** this pass against three on-disk VFS samples (`.fx2`, `.fx1`, `.fx7`) — all parse to **exactly zero residual** (§1.4a/§1.6/§1.10 confirmed). The **`.fxN` load path / `.map` linkages** (§1.1b), the **exact 1-based texture-register remap** (§1.4b), the **FX3/FX5 = water channel identity** (§1.4c, render path DBG-PENDING), and the **`.fx1.pre`–`.fx7.pre` editor sidecars** (§5.5, editor-only) hold as previously recorded. The `.up`/`.exd` 40-byte triangle record and the light/wind/point_light layouts were **not** re-dumped this pass and hold at their committed tiers. **`light%d.bin` upgraded to sample-verified 2026-06-24 (sky_environment_spec archive pass); `point_light%d.bin` record body upgraded to CONFIRMED; `wind%d.bin` header semantics refined — see `environment_bins.md §9`, §12, §13 for the authoritative sample-verified / loader-resolved details.** |
+| `ida_reverified` | `2026-06-24` (ANALYZE re-walk: FX2 decoder byte-for-byte re-confirmed 20 B group-hdr/VF_44; FX7 decoder byte-for-byte re-confirmed 48 B group-hdr/VF_32, vc@+0x28, ic@+0x2C; three on-disk samples decode to exactly zero residual — §1.4a/§1.6/§1.10/§1.13. Wording tightened in §1.4d. FX7 sample_verified upgraded from PLAUSIBLE to CONFIRMED. FX1 §1.5 group-header table field labels corrected to match the authoritative §1.1a table. `light%d.bin` / `point_light%d.bin` / `wind%d.bin` sky_environment_spec archive pass 2026-06-24 — sample-verified corrections and full record body promotions via `environment_bins.md §9/§12/§13`. Prior: `2026-06-22` CYCLE 11 deepen: fx7 header re-confirmed 48 B; fx6 uniform group-array; prior `2026-06-21`: per-channel decoders re-walked; `.fx2` byte-exact sample; prior `2026-06-16`: routing re-confirm.) |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `readiness`      | IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994…); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later. |
+| `evidence`       | `[static-ida, vfs-sample]` — routing/dispatch from the located runtime `.map` parser + per-channel FX decoders (witness 1) + VFS census file-count corroboration + three on-disk samples (`.fx1`, `.fx2`, `.fx7`) each parsing to exactly zero residual (witness 2, 2026-06-24) |
 | `conflicts`      | None. Routing re-confirmed with no drift: (1) **`.up` and `.exd` are ONE shared, distinct format** — `count(u32) + count × 40-byte triangle`, decoded by the same record decoder; `EXTRA_TERRAIN → .exd`, `UP_TERRAIN → .up`. This is structurally **distinct** from the FX group-array model of §1 — any reading that lumps `.exd`/`.up` in with the FX channels is REFUTED. (2) Each FX channel `.fx1`–`.fx7` has its **own** group decoder and its **own** per-channel texture register; the per-channel header width + vertex stride (§1.13) are mandatory. (3) Each FX channel's texture index is **1-based with a `< 1 \|\| > max` guard** (corroborated by per-channel `fx<N> texture index(%d) < 1 \|\| > max(%d)` client error strings) — confirming the shared building/terrain 1-based + clamp texture-index convention without needing the render path. |
 
 **Census this pass (witness 2, full VFS mount, routing-level corroboration):** `.up` 222 files,
@@ -28,7 +28,7 @@ ballpark as §1.13's table. File counts are corpus observations, not load-bearin
 | Attribute         | Value |
 |-------------------|-------|
 | `status`          | `mixed` — see per-format status rows below |
-| `sample_verified` | `true` for `.fx1`–`.fx6`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header, and the `.fx{N}.pre` sidecar's existence + leading group-count word; `false` for `light%d.bin`, `point_light%d.bin`; `.fx7` size-formula PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array; internal header fields sample-unverified). `.fx{N}.pre` body is **editor-only and not decoded** (§5.5). |
+| `sample_verified` | `true` for `.fx1`–`.fx7`, `.up`, `.exd`, `.sod.pre`, `.ted.post`, `wind%d.bin` header, `light%d.bin` (5312-byte corpus, 61 files confirmed — `environment_bins.md §9`), `point_light%d.bin` record body (CONFIRMED via sample + `.txt` — `environment_bins.md §13`), and the `.fx{N}.pre` sidecar's existence + leading group-count word; `.fx4` structure CONFIRMED-from-loader (flat group array; internal header fields sample-unverified). `.fx{N}.pre` body is **editor-only and not decoded** (§5.5). |
 | `binary_analysed` | `doida.exe` (legacy 32-bit client, x86 LE) |
 | `confidence`      | Fields annotated CONFIRMED are corroborated by parser read-sequence and/or real sample bytes. Fields annotated UNVERIFIED are structurally inferred or parser-only, without sample cross-check. |
 
@@ -50,9 +50,9 @@ The formats are grouped as follows:
 | 4       | `.sod.pre` | Per terrain cell | Collision polygon vertex cache (editor sidecar) |
 | 5       | `.ted.post`| Per terrain cell | Full terrain snapshot (editor sidecar) |
 | 5.5     | `.fx1.pre`–`.fx7.pre` | Per terrain cell | FX layer editor sidecars (editor-only; not read at runtime) |
-| 6       | `light%d.bin` | Per map       | Directional and ambient light keyframe table |
-| 7       | `point_light%d.bin` | Per map | Point light array |
-| 8       | `wind%d.bin` | Per map        | Foliage-sway / wind keyframe array |
+| 6       | `light%d.bin` | Per map       | Directional and ambient light keyframe table (5312 B, 48 keyframes). **See `Docs/RE/formats/environment_bins.md §9` for the authoritative sample-verified field map and apply-path corrections.** |
+| 7       | `point_light%d.bin` | Per map | Dynamic point-light pool (8-byte header + `count × 60` B records). **See `Docs/RE/formats/environment_bins.md §13` for the full authoritative spec; §7 below is the structural summary.** |
+| 8       | `wind%d.bin` | Per map        | Foliage-sway / wind keyframe array (8 + `count × 24` B). **See `Docs/RE/formats/environment_bins.md §12` for loader-resolved corrections; §8 below is the structural summary.** |
 
 **Coordinate system (all formats):** Y-up world space. The world origin is at cell index
 `(10000, 10000)`; each cell spans 1024 × 1024 world units. Cell coordinates encode as:
@@ -93,7 +93,7 @@ else structurally; there is no per-extension sub-format selector and no branch o
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` PLAUSIBLE (dual-sample); `.fx4` structure CONFIRMED-from-loader (flat tile array) |
+| `fx_layer` | `true` for `.fx1`–`.fx3`, `.fx5`, `.fx6`; `.fx7` CONFIRMED (decoder re-walked + zero-residual sample, 2026-06-24); `.fx4` structure CONFIRMED-from-loader (flat group array) |
 
 **Path pattern:** `data/map{MAP}/dat/d{MAP}x1{TX:04d}z1{TZ:04d}.fx{N}` where `N` is 1–7.
 
@@ -271,11 +271,11 @@ carry per-channel vertical-extent bounds (minimum and maximum Y for each bucket)
 culling.
 
 **Two vertex copies per group.** The loader maintains **two vertex copies** for each group: an
-immutable **source copy** (the on-disk vertex data as read) and a **working copy** duplicated from
-the source at load time. The working copy is **not written at load** — this implies it is mutated
-**per-frame at draw time** (for water-ripple / scroll on the animated fx3/fx5 channels, and
-potentially for other animated overlay effects on other channels). Implementations must preserve
-both copies; the source copy is the reset baseline.
+immutable **source copy** (the on-disk vertex data as read) and a **working copy** that is a
+**load-time duplicate of the source** (populated by `memcpy` at parse time, not re-read from
+disk). The working copy is the per-frame-mutable buffer, mutated at draw time (for water-ripple /
+scroll on the animated fx3/fx5 channels, and potentially other animated overlay effects); the
+source copy is the immutable reset baseline. Implementations must preserve both copies.
 
 **Texture index is 1-based into the per-channel register (clamp-to-1).** The group's `texture_index`
 (group `+0x00`) is a **1-based** index into that channel's own texture register (populated from the
@@ -347,8 +347,8 @@ FX1_File = group_count (u32) + group_count × [ group header (20 B) + VertexData
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | u32 | `group_count` | File-level group count (§1.1a). Not a constant, not a selector. | CONFIRMED (two-witness) |
-| +0x00 | 4 | u32 | `group_flags_0` | Read-but-not-consumed; near-constant 1. | UNVERIFIED |
-| +0x04 | 4 | u32 | `group_flags_1` | Read-but-not-consumed; mostly 0. | UNVERIFIED |
+| +0x00 | 4 | u32 | `texture_index` | **1-based** index into this channel's per-channel texture register (§1.4b). Commonly observed as 1 in single-texture groups. | CODE-CONFIRMED (§1.1a) |
+| +0x04 | 4 | u32 | _inter_header_word_ | Read into group struct; not consumed for parsing. | UNVERIFIED (mostly 0) |
 | +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — earlier "constant=15" claim REFUTED. | CONFIRMED-variable |
 | +0x0C | 4 | u32 | `vertex_count` | Count of vertices in this group. | CONFIRMED |
 | +0x10 | 4 | u32 | `index_count` | Count of u16 indices in this group. | CONFIRMED |
@@ -403,8 +403,8 @@ FX3_File = group_count (u32) + group_count × [ group header (44 B) + VertexData
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | 0x00 | 4 | u32 | `group_count` | File-level group count (§1.1a). | CONFIRMED |
-| +0x00 | 4 | u32 | `group_flags_0` | Read-but-not-consumed; near-constant 1. | UNVERIFIED |
-| +0x04 | 4 | u32 | `group_flags_1` | Read-but-not-consumed; mostly 0. | UNVERIFIED |
+| +0x00 | 4 | u32 | `texture_index` | **1-based** index into this channel's per-channel texture register (§1.4b). | CODE-CONFIRMED (§1.1a) |
+| +0x04 | 4 | u32 | _inter_header_word_ | Read into group struct; not consumed for parsing. | UNVERIFIED (mostly 0) |
 | +0x08 | 4 | u32 | `render_state` | Per-group render-state word. **Variable** — earlier "constant=5" claim REFUTED. | CONFIRMED-variable |
 | +0x0C | 4 | u32 | _unknown_3_ | Read-but-not-consumed. | UNVERIFIED |
 | +0x10 | 4 | f32 | _unknown_4_ | A float; candidate scale factor. | UNVERIFIED |
@@ -529,21 +529,20 @@ where each non-final group block is `8 + 20 × 32 + 30 × 2 + 28 = 736` and the 
 
 ### 1.10 FX7 Format  (`.fx7`)
 
-**Status:** PLAUSIBLE — group-array model (§1.1a); 2 byte-identical samples, size formula exact.
-**Semantic:** Single-group terrain overlay mesh using the **FX5-style group header** but the
-**VF_32** vertex format (no per-vertex colour). The two observed files are a single group with a high
-vertex count and a plain position/normal/UV0 vertex.
+**Status:** CONFIRMED — group-array model (§1.1a); decoder re-walked byte-for-byte 2026-06-24; on-disk sample decodes to exactly zero residual.
+**Semantic:** Terrain overlay mesh using the **48-byte group header** (shared leading field layout
+with the FX5 group header, §1.8) but the **VF_32** vertex format (no per-vertex colour). Observed
+files are a single group with a large vertex and index count.
 
 **File layout:**
 
 ```
-FX7_File = group_count (u32) + group_count × [ group header (52 B) + VertexData + IndexData ]
+FX7_File = group_count (u32) + group_count × [ group header (48 B) + VertexData + IndexData ]
 ```
 
-The group header is a 48-byte header sharing the same leading field layout as the FX5 48-byte
-group header (§1.8), placing `vertex_count` at group-relative +0x28 and `index_count` at +0x2C.
-The vertex stride differs from FX5 (VF_32 instead of VF_36).
-**The 48-byte header width is §1.13 authoritative (re-confirmed CYCLE 11); the C# parser follows §1.13.**
+The group header is a 48-byte block, placing `vertex_count` at group-relative +0x28 and
+`index_count` at +0x2C. The vertex stride differs from FX5 (VF_32 instead of VF_36).
+**The 48-byte header width is §1.13 authoritative (re-confirmed CYCLE 11 and 2026-06-24); the C# parser follows §1.13.**
 
 **Group header (per group — 48 B; offsets group-relative; re-confirmed CYCLE 11):**
 
@@ -559,8 +558,8 @@ The vertex stride differs from FX5 (VF_32 instead of VF_36).
 | +0x1C | 4 | f32 | `direction_b` | signed near-unit fractional | DUAL-SAMPLE — second unit-direction component (`direction_a`² + `direction_b`² ≈ 1) |
 | +0x20 | 4 | u32 | _unknown_7_ | 1 | DUAL-SAMPLE |
 | +0x24 | 4 | u32 | _unknown_8_ | 0 | DUAL-SAMPLE |
-| +0x28 | 4 | u32 | `vertex_count` | large | DUAL-SAMPLE |
-| +0x2C | 4 | u32 | `index_count` | large; divisible by 3 | DUAL-SAMPLE |
+| +0x28 | 4 | u32 | `vertex_count` | large | CONFIRMED (zero-residual sample, 2026-06-24) |
+| +0x2C | 4 | u32 | `index_count` | large; divisible by 3 | CONFIRMED (zero-residual sample, 2026-06-24) |
 
 **VertexData (per group):** `vertex_count × 32` bytes (**VF_32** — position 12 B + normal 12 B +
 UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX5's VF_36.
@@ -568,9 +567,10 @@ UV0 8 B; **no per-vertex colour field**). Same VF_32 used by FX6 (§1.2), not FX
 **IndexData (per group):** `index_count × 2` bytes (u16). Plain triangle list (`index_count`
 divisible by 3).
 
-**File-size formula:** `4 + 48 + vertex_count × 32 + index_count × 2` (single group). Both samples
-satisfy it exactly with zero residual bytes. The 48-byte group-header width is §1.13 authoritative
-(vc @ group-relative +0x28, ic @ +0x2C); the C# parser follows §1.13.
+**File-size formula:** `4 + 48 + vertex_count × 32 + index_count × 2` (single group). All observed
+samples satisfy it exactly with zero residual bytes (re-confirmed 2026-06-24). The 48-byte
+group-header width is §1.13 authoritative (vc @ group-relative +0x28, ic @ +0x2C); the C# parser
+follows §1.13.
 
 ### 1.11 FX4 Format  (`.fx4`)
 
@@ -643,7 +643,7 @@ a group count rather than a selector.
 | FX4   | CONFIRMED-from-loader (flat group array) | 48 B/group | VF_44 (44 B) | 2 | yes |
 | FX5   | true | 48 B/group | VF_36 (36 B) | 1 | yes |
 | FX6   | true  | global metadata + 8 B/group | VF_32 (32 B) | 1 | no |
-| FX7   | PLAUSIBLE (dual-sample) | 48 B/group | VF_32 (32 B) | 1 | no |
+| FX7   | CONFIRMED (decoder re-walked + zero-residual sample, 2026-06-24) | 48 B/group | VF_32 (32 B) | 1 | no |
 
 All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
 records; the only structural difference is the vertex stride.
@@ -663,7 +663,7 @@ channel) pins the following:
 | fx4  | 48 B tile hdr  | VF_44 (44 B) | 1 |
 | fx5  | 48 B tile hdr  | VF_36 (36 B) | 89 |
 | fx6  | 36 B group hdr (global metadata 28 B + 8 B per-group counts) | VF_32 (32 B) | 6 |
-| fx7  | 48 B hdr (`vertex_count` @ +0x28, `index_count` @ +0x2C) | VF_32 (32 B) | 2 |
+| fx7  | 48 B group hdr (`vertex_count` @ +0x28, `index_count` @ +0x2C) | VF_32 (32 B) | 2 |
 
 (The §§1.5–1.11 worked layouts are these same per-channel instances; the table above is the
 authoritative stride/header index. Census file counts are corpus observations, not load-bearing
@@ -909,77 +909,116 @@ runtime FX group layout of Section 1.
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `bin_light_dir` | `false` — no samples available; parser analysis only |
+| `bin_light_dir` | `true` — 61 files, all exactly 5312 bytes (sky_environment_spec archive pass, 2026-06-24). **Authoritative sample-verified spec in `Docs/RE/formats/environment_bins.md §9`.** The layout below is the structural summary; `environment_bins.md §9` carries the confirmed field map, apply-path facts, and loader corrections. |
+
+> **⚠️ Parser action required.** The field names in §6.2 and §6.3 below use the earlier parser-analysis
+> names (`sun_colour`, `moon_colour`, `sky_colour`). The sample-verified view from
+> `environment_bins.md §9.2` recasts each 48-byte slot as **three `float4` colour groups** (`color_A`
+> at +0x00 = primary diffuse/ambient, `color_B` at +0x10 = secondary specular, `color_C` at +0x20 =
+> present-but-**unread**). The sun/moon names below remain a best-effort parser interpretation and are
+> not contradicted by sample bytes, but `color_A`/`color_B`/`color_C` is the confirmed structural view.
+> **`color_C` (+0x20) has NO read-site and must NOT be fed to the lighting math.** See
+> `environment_bins.md §9.2` (LOADER-RESOLVED).
+>
+> **Loader is a verbatim slurp.** The `light%d.bin` loader performs a single 5312-byte opaque slurp
+> into a memory block and stops — it does not parse fields at load time. Fields below describe how
+> the downstream CONSUMER interprets the blob at runtime, not what the loader reads.
+> (Two witnesses: the loader's single bounded read of 5312 bytes + the constant 5312-byte size across
+> 61 sampled files.) See `environment_bins.md §9.0`.
+>
+> **Synth fallback on absent file:** the light loader synthesises a 48-keyframe colour ramp (scale
+> 80.0; per-keyframe `intensity = kf_idx × 0.04`, `colour = 1.0 − intensity`) plus the static
+> fallback direction `(−7, 7, 20)` and returns success — it never hard-fails on a missing file.
+> See `environment_bins.md §9.5`.
 
 **Purpose:** Stores a 48-step day/night cycle of directional and ambient sky-light colours, plus
-a per-step fog scalar, for one map. The client interpolates between adjacent time steps to produce
-continuously changing lighting.
+per-step fog-distance scalars, for one map. The client interpolates between adjacent time steps to
+produce continuously changing lighting.
 
 **Path pattern:** `data/sky/dat/light{MAP}.bin`
 
 **File size:** exactly **5312 bytes** (0x14C0). Fixed-size, no count field.
 
-**No magic number, no version field.** If the file is absent, the client uses hard-coded fallback
-lighting values.
+**No magic number, no version field.** If the file is absent, the client synthesises a fallback
+ramp and returns success (see note above).
 
-> **Sibling note:** `data/sky/dat/` also holds `light{MAP}.txt` text siblings with sizes that do
-> **not** equal 5312 bytes. They are editor-source / text exports and are **not** parseable as this
-> binary format; the binary reader should open only the `.bin` files.
+> **Sibling note:** `data/sky/dat/` also holds `light{MAP}.txt` text siblings. They are editor-source
+> / text exports and are **not** parseable as this binary format. The authoring `.txt` and the `.bin`
+> colour tables diverge for some areas (notably area 0); the `.bin` is authoritative.
+> See `environment_bins.md §11.7`.
 
 ### 6.1 Blob layout
 
-The 5312-byte file is divided into three contiguous sections:
+The 5312-byte file is divided into six identified regions (revised from the earlier three-section
+reading — see `environment_bins.md §9.1` for the sample-verified authority):
 
-| Byte range | Size | Section | Description |
-|:----------:|-----:|---------|-------------|
-| 0x0000–0x08FF | 2304 | A — Directional | 48 keyframe slots × 48 bytes |
-| 0x0900–0x092F | 48 | _gap / extra slot_ | Purpose UNVERIFIED (see Known Unknowns) |
-| 0x0930–0x122F | 2304 | B — Ambient | 48 keyframe slots × 48 bytes |
-| 0x1230–0x125F | 48 | _gap / extra slot_ | Purpose UNVERIFIED |
-| 0x1260–0x131F | 192 | C — Fog scalar | 48 keyframe slots × 4 bytes |
-| 0x1320–0x14BF | 416 | _trailing region_ | Not accessed by analysed functions; UNVERIFIED |
+| Byte range | Size | Region | Description | Confidence |
+|:----------:|-----:|--------|-------------|------------|
+| 0x0000–0x08FF | 2304 | A — Directional light | 48 keyframes × 48 bytes | CONFIRMED |
+| 0x0900–0x092F | 48   | Gap A | All zeros in sampled data; likely wrap-around interpolation slot or alignment pad | SAMPLE-VERIFIED (all zeros) |
+| 0x0930–0x122F | 2304 | B — Ambient light | 48 keyframes × 48 bytes | CONFIRMED |
+| 0x1230–0x125F | 48   | Gap B | All zeros; same interpretation as Gap A | SAMPLE-VERIFIED (all zeros) |
+| 0x1260–0x131F | 192  | C — Fog-distance scalar | 48 keyframes × 1 f32; world-unit fog scalar `s` driving LINEAR fog range `= s × 3.0`. **NOT a normalised density and NOT fog colour** — fog colour is `fog%d.bin`'s domain. | CONFIRMED |
+| 0x1320–0x13DF | 192  | D — Secondary fog scalar | 48 keyframes × 1 f32; values near 0.0 in all sampled areas (haze intensity) | SAMPLE-VERIFIED |
+| 0x13E0–0x14A7 | 200  | E — Reserved f32 array | All zeros in all sampled data | SAMPLE-VERIFIED (all zeros) |
+| 0x14A8–0x14AF | 8    | Padding | All zeros | SAMPLE-VERIFIED (all zeros) |
+| 0x14B0–0x14BF | 16   | Fallback light | f32[4]: scale (1.0), dir_X (−7.0), dir_Y (7.0), dir_Z (20.0) | CONFIRMED |
+
+Total: 2304 + 48 + 2304 + 48 + 192 + 192 + 200 + 8 + 16 = 5312 bytes.
+
+> **Section C correction.** The earlier §6.4 description of section C as "fog_density" with 1.0 as a
+> "no-override sentinel" is **REVISED**. Section C is the per-keyframe **world-unit fog scalar `s`**
+> (sample range approximately 8–43 world units) that drives the LINEAR fog range (`range = s × 3.0`,
+> `near-scale = 1.0 / s`, fog enabled when `s > 0`) — see `environment_bins.md §9.3`. The static
+> `fog%d.bin` `start_dist` / `end_dist` are overwritten by this per-frame derivation each tick.
 
 ### 6.2 Section A — Directional light keyframe slot (48 bytes)
 
 Slot `i` starts at byte offset `48 × i` within section A (absolute: `48 × i`).
 
-| Slot offset | Size | Type | Field | Confidence |
-|:-----------:|-----:|------|-------|------------|
-| +0x00 | 4 | f32 | sun_colour[0] | CONFIRMED (written to live sun_colour field by time-update) |
-| +0x04 | 4 | f32 | sun_colour[1] | CONFIRMED |
-| +0x08 | 4 | f32 | sun_colour[2] | CONFIRMED |
-| +0x0C | 4 | f32 | _unknown_0_ | UNVERIFIED (not read by main update path) |
-| +0x10 | 4 | f32 | _unknown_1_ | UNVERIFIED |
-| +0x14 | 4 | f32 | moon_colour[1] | CONFIRMED as read from current slot (index 5) |
-| +0x18 | 4 | f32 | moon_colour[2] | CONFIRMED as read from current slot (index 6) |
-| +0x1C | 4 | f32 | _unknown_2_ | UNVERIFIED |
-| +0x20 | 4 | f32 | sky_colour[0] | CONFIRMED (written to third live colour field) |
-| +0x24 | 4 | f32 | sky_colour[1] | CONFIRMED |
-| +0x28 | 4 | f32 | sky_colour[2] | CONFIRMED |
-| +0x2C | 4 | f32 | _unknown_3_ | UNVERIFIED |
+**Structural view (sample-verified, `environment_bins.md §9.2`):** each 48-byte slot is three
+`f32[4]` colour groups. Only the first two groups are consumed at runtime; the third is unread.
 
-**Phase-offset note:** `moon_colour[0]` is read from **slot `(i + 30) mod 48`** of section A
-(not the current slot), producing a half-cycle phase offset. `moon_colour[1]` and `moon_colour[2]`
-are read from the current slot at offsets +0x14 and +0x18. This asymmetry is confirmed by the
-client time-update function.
+| Slot offset | Size | Type | Structural field | Parser interpretation | Confidence |
+|:-----------:|-----:|------|------------------|-----------------------|------------|
+| +0x00 | 16 | f32[4] | `color_A` (RGBA) | `sun_colour[0..2]` at +0x00..+0x08; alpha at +0x0C | CONFIRMED (color_A consumed as primary diffuse) |
+| +0x10 | 16 | f32[4] | `color_B` (RGBA) | `moon_colour[1]` at +0x14, `moon_colour[2]` at +0x18 in the parser reading; remainder unverified | CODE-CONFIRMED (color_B consumed as secondary specular) |
+| +0x20 | 16 | f32[4] | `color_C` (RGBA) | `sky_colour[0..2]` in the earlier parser reading — **but `color_C` has NO read-site and is unconsumed at runtime**. All zeros in all sampled data. Do NOT feed to the lighting math. | LOADER-RESOLVED (no read-site; unread) |
+
+**Phase-offset note (parser-analysis, CODE-CONFIRMED):** `moon_colour[0]` is read from **slot
+`(i + 30) mod 48`** of section A (not the current slot), producing a half-cycle phase offset.
+`moon_colour[1]` and `moon_colour[2]` are read from the current slot at offsets +0x14 and +0x18.
+This asymmetry is confirmed by the client time-update function.
+
+**All fields are float32 in the [0, 1] domain** — applied directly to the lighting math (no /255).
+See `environment_bins.md §10.1` for the colour-domain distinction between these float light colours
+and the byte-encoded fog/sky-material colour tables.
 
 **Cycle:** 48 steps spanning one full day/night cycle; interpolation period between adjacent slots
 is 1800 ms.
 
 ### 6.3 Section B — Ambient light keyframe slot (48 bytes)
 
-Structurally identical to section A. Slot `i` starts at absolute offset `0x0930 + 48 × i`.
-The update function writes to separate `ambient_*` live fields in the lighting manager. The
-same field positions (0–2, 5–6, 8–10) are read; offsets +0x0C, +0x10, +0x1C, +0x2C are not
-read by the analysed function.
+Structurally identical to section A (three `f32[4]` colour groups per slot). Slot `i` starts at
+absolute offset `0x0930 + 48 × i`. `color_A` at +0x00 is the ambient primary (CONSUMED but gated
+at runtime by the global ambient multiplier `K_ambient`, which is CONFIRMED 0.0 with no writer in
+the shipping binary — so the per-keyframe ambient contributes nothing to the device). `color_C`
+at +0x20 is present-but-unread (LOADER-RESOLVED, all zeros in samples). See `environment_bins.md
+§9.2` and §10.4 for the confirmed `K_ambient = 0.0` and its consequence for the ambient floor.
 
-### 6.4 Section C — Fog scalar (4 bytes per slot)
+### 6.4 Section C — Fog-distance scalar (4 bytes per slot)
 
 Slot `i` at absolute offset `0x1260 + 4 × i`. One `f32` value per time step.
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x1260 + 4i | 4 | f32 | `fog_density` | MEDIUM — confirmed as a single float that conditionally triggers fog parameter update; `1.0` is the no-override sentinel |
+| 0x1260 + 4i | 4 | f32 | `fog_scalar_s` | CONFIRMED — a world-unit fog scalar `s`; when `s > 0` the runtime sets LINEAR fog range `= s × 3.0`, near-scale `= 1.0 / s`. Sample range approximately 8–43 world units. **The earlier "fog_density / 1.0 sentinel" reading is revised.** See `environment_bins.md §9.3`. |
+
+Section D (secondary fog scalar, 0x1320–0x13DF, 48 × f32) and sections E + padding (0x13E0–0x14AF,
+all zeros in samples) and the fallback light vector (0x14B0–0x14BF: f32[4] = scale 1.0, dir_X −7.0,
+dir_Y 7.0, dir_Z 20.0) are documented in `environment_bins.md §9.1` and §9.4 — consult those
+sections for the confirmed field details. The fallback direction `(−7, 7, 20)` is the **only** sun
+direction the client uses; the day/night cycle does not rotate the sun (§10.6 there).
 
 ---
 
@@ -987,52 +1026,69 @@ Slot `i` at absolute offset `0x1260 + 4 × i`. One `f32` value per time step.
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `bin_light_point` | header partially corpus-confirmed (intensity scale as f32, count); record body parser-only |
+| `bin_light_point` | CONFIRMED — header (8 bytes), record layout (60 bytes), stride, count, and all record fields. **Authoritative full spec in `Docs/RE/formats/environment_bins.md §13`.** The field table below is the confirmed structural summary; consult `environment_bins.md §13` for the 5-nearest runtime selection model, load-order, known unknowns, and C# contract note. |
 
-**Purpose:** Stores a variable-count array of Direct3D point lights for one map, with a global
-intensity scale applied to all lights.
+> **⚠️ Corrections from the earlier revision.**
+> - Header field `intensity_scale` (0x00) is **renamed** to `proximity_radius`. It is confirmed as the
+>   proximity-selection threshold (the 5-nearest XZ selection compares against it), not a colour
+>   multiplier — see `environment_bins.md §13.1`. Whether it also acts as a brightness multiplier is
+>   DEBUGGER-PENDING.
+> - Record fields +0x24..+0x38 are now **CONFIRMED** (no longer UNVERIFIED) — see §7.2 below.
+> - Record field +0x34 (`enabled_flag`) is **relabelled** to `unknown_34`; it has no confirmed read-site
+>   in any static path (DEBUGGER-PENDING).
+> - Record field +0x38 is `type_flag`; value `== 1` gates the per-tick flicker pass.
+> - The colour group labels `colour_group_1/2/3` are refined: group 1 (+0x00) is `color_diffuse`,
+>   the confirmed primary diffuse. Groups 2 and 3 (+0x0C, +0x18) are confirmed as colour triplets
+>   but their D3D channel roles (specular, ambient) are DEBUGGER-PENDING.
+
+**Purpose:** Stores a variable-count pool of Direct3D point lights for one map. The runtime selects
+the **5 player-nearest** lights from the pool each tick using a log-space XZ proximity test against
+the header `proximity_radius`.
 
 **Path pattern:** `data/sky/dat/point_light{MAP}.bin`
 
-**File size:** `8 + count × 60` bytes. No magic, no version.
+**File size:** `8 + count × 60` bytes. No magic, no version. Absent file → loader returns 0 and the
+world runs without dynamic point lights (fully optional).
 
 > **Sibling note:** `point_light{MAP}.txt` text siblings coexist in `data/sky/dat/`; they are editor
-> text exports, not this binary format. Open only the `.bin` files.
+> text exports. Cross-referencing the `.txt` against `.bin` sample bytes CONFIRMED the full record
+> layout (see `environment_bins.md §13`). Open only the `.bin` files at runtime.
 
 ### 7.1 File header (8 bytes)
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | f32 | `intensity_scale` | CONFIRMED — a **u32 read then reinterpreted as f32**; the loader treats the 4 bytes as a float colour multiplier (observed whole-number float values across the corpus). Store and use it as an f32, not an integer. |
-| 0x04 | 4 | u32 | `count` | CONFIRMED — number of point-light entries |
+| 0x00 | 4 | f32 | `proximity_radius` | CONFIRMED as f32 — functionally proven as the proximity-selection threshold in the 5-nearest XZ selection. Whether it also scales brightness is DEBUGGER-PENDING. (Was previously named `intensity_scale` — that label is REVISED.) |
+| 0x04 | 4 | i32 | `record_count` | CONFIRMED — number of point-light records |
 
-### 7.2 Point-light record (60 bytes, repeated `count` times)
+### 7.2 Point-light record (60 bytes, repeated `record_count` times)
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| +0x00 | 4 | f32 | `colour_group_1[0]` | CONFIRMED (scaled by `intensity_scale` at runtime) |
-| +0x04 | 4 | f32 | `colour_group_1[1]` | CONFIRMED |
-| +0x08 | 4 | f32 | `colour_group_1[2]` | CONFIRMED |
-| +0x0C | 4 | f32 | `colour_group_2[0]` | CONFIRMED |
-| +0x10 | 4 | f32 | `colour_group_2[1]` | CONFIRMED |
-| +0x14 | 4 | f32 | `colour_group_2[2]` | CONFIRMED |
-| +0x18 | 4 | f32 | `colour_group_3[0]` | CONFIRMED |
-| +0x1C | 4 | f32 | `colour_group_3[1]` | CONFIRMED |
-| +0x20 | 4 | f32 | `colour_group_3[2]` | CONFIRMED |
-| +0x24 | 4 | f32 | _unknown_0_ | UNVERIFIED (possibly position X) |
-| +0x28 | 4 | f32 | _unknown_1_ | UNVERIFIED (possibly position Y) |
-| +0x2C | 4 | f32 | _unknown_2_ | UNVERIFIED (possibly position Z) |
-| +0x30 | 4 | f32 | _unknown_3_ | UNVERIFIED (possibly light range) |
-| +0x34 | 4 | u32 | `enabled_flag` | CONFIRMED — 0 = active; non-zero = skip this entry |
-| +0x38 | 4 | u32 | _unknown_4_ | UNVERIFIED (possibly padding or light type) |
+| +0x00 | 12 | f32[3] | `color_diffuse` RGB | CONFIRMED primary diffuse — confirmed via sample + `.txt` cross-reference (AMBIENT RGB in the `.txt` maps here). Scaled at runtime by a master-dim scalar on the light manager. |
+| +0x0C | 12 | f32[3] | `color_b` RGB | CONFIRMED as a colour triplet (DIFFUSE RGB in the `.txt`). D3D channel role (specular, ambient) is DEBUGGER-PENDING. |
+| +0x18 | 12 | f32[3] | `color_c` RGB | CONFIRMED as a colour triplet (SPECULAR RGB in the `.txt`). D3D channel role is DEBUGGER-PENDING. |
+| +0x24 | 4 | f32 | `position_x` | CONFIRMED — world-space X. Used in the per-tick XZ proximity test vs player position. |
+| +0x28 | 4 | f32 | `position_y` | CONFIRMED — world-space Y. |
+| +0x2C | 4 | f32 | `position_z` | CONFIRMED — world-space Z. Used in the per-tick XZ proximity test vs player position. |
+| +0x30 | 4 | f32 | `range` | CONFIRMED — D3D9 point-light attenuation radius. Feeds `Range`, `Attenuation1`, and `Attenuation2` in the D3D9 light-apply routine. NOT a brightness scalar. |
+| +0x34 | 4 | ? | `unknown_34` | No read-site confirmed in any static path. Meaning is DEBUGGER-PENDING. (Was previously called `enabled_flag` — that reading is REVISED; `0 = active / non-zero = skip` was a parser guess, not a confirmed consumer.) |
+| +0x38 | 4 | i32 | `type_flag` | CONFIRMED — value `== 1` gates the per-tick flicker pass (`FlickerAnimRange`) that animates the light's range. Other values are DEBUGGER-PENDING. (Was previously called `_unknown_4_`.) |
 
 Record stride: **60 bytes**.
 
-The three colour groups may correspond to D3D diffuse, specular, and ambient channels, or to three
-separate light sources — this cannot be determined from parser evidence alone.
+Up to **5** point lights from the pool are simultaneously active; the runtime selects the
+5 player-nearest by log-space XZ proximity and binds them into 5 D3D9 light slots.
 
-Up to 5 point lights from the array may be simultaneously active; the lighting manager maintains
-5 per-slot state blocks of 184 bytes each.
+**Colour confirmation source.** The `.txt` sibling schema:
+```
+AMBIENT rgb | DIFFUSE rgb | SPECULAR rgb | X | Y | Z | Range | Always | Swing
+```
+maps field +0x00 to AMBIENT (= `color_diffuse` here; NOTE the `.txt` labels invert the D3D sense
+— the confirmed diffuse is what the `.txt` calls "AMBIENT"), field +0x0C to DIFFUSE (= `color_b`),
+and field +0x18 to SPECULAR (= `color_c`). The `Always` field (+0x34) and `Swing` field (+0x38)
+resolve: `Always` = `unknown_34` (no confirmed reader in static analysis); `Swing` = `type_flag`
+(gates flicker). See `environment_bins.md §13` for the full loader-confirmed spec.
 
 ---
 
@@ -1040,15 +1096,23 @@ Up to 5 point lights from the array may be simultaneously active; the lighting m
 
 | Format key | sample_verified |
 |-----------|-----------------|
-| `bin_light_wind` | `true` for header; `false` for entry body (observed samples are zero- or low-count) |
+| `bin_light_wind` | `true` — 57-file corpus, sizes all equal `8 + record_count × 24`. **Authoritative loader-resolved / sample-verified details in `Docs/RE/formats/environment_bins.md §12`.** The layout below is confirmed; consult §12 for the `source_flag` semantics, `tex_id` join key, proposed record field roles, and the FAIL-ON-MISSING exception. |
+
+> **⚠️ Corrections from the earlier revision.**
+> - Header field `flag2` (0x04) is **renamed** to `source_flag`. It **gates per-record texture binding
+>   only**, not foliage-sway on/off — see `environment_bins.md §12.1`. It is 0 in all 57 sampled files.
+> - **`wind%d.bin` is FAIL-ON-MISSING** (the exception to the family-wide sibling-tolerance rule). An
+>   absent file fails the area load; the empty 8-byte form is the minimum required. See §12.4 there.
+>   The earlier "Missing file produces no foliage sway" gloss is REVISED — a missing file fails the
+>   area load; a *zero-count* file is fine and produces no sway.
 
 **Purpose:** Stores keyframe entries that drive foliage-sway animations for one map.
 
 **Path pattern:** `data/sky/dat/wind{MAP}.bin`
 
-**File size:** `8 + count × 24` bytes (or exactly 8 bytes when `count = 0`).
+**File size:** `8 + record_count × 24` bytes (or exactly 8 bytes when `record_count = 0`).
 
-**No magic, no version.** Missing file or zero-count file produces no foliage sway.
+**No magic, no version.** Every shipping area ships at least the empty 8-byte form.
 
 > **Sibling note:** `wind{MAP}.txt` text siblings coexist in `data/sky/dat/`; they are editor text
 > exports, not this binary format. Open only the `.bin` files.
@@ -1057,24 +1121,23 @@ Up to 5 point lights from the array may be simultaneously active; the lighting m
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| 0x00 | 4 | u32 | `count` | CONFIRMED — zero-entry samples verify 8-byte header |
-| 0x04 | 4 | u32 | `flag2` | CONFIRMED — non-zero activates foliage-sway curve seeding |
+| 0x00 | 4 | u32 | `record_count` | CONFIRMED — zero-entry samples verify 8-byte header; the empty 8-byte form is the valid minimum. |
+| 0x04 | 4 | u32 | `source_flag` | CONFIRMED — **gates per-record texture-binding loop only** (not wind on/off). Non-zero → loader walks records and registers each `tex_id` (+0x14) as a `data/sky/texture/wind<id>.dds` texture. Always 0 in all 57 corpus files; the texture-binding path is effectively dead data in shipping. (Was previously labelled `flag2` with an incorrect "foliage-sway curve seeding" gloss.) |
 
-### 8.2 Wind keyframe record (24 bytes, repeated `count` times)
-
-Six consecutive 4-byte values. Field [5] (offset +0x14) is the texture id; the remaining fields are
-structurally inferred.
+### 8.2 Wind keyframe record (24 bytes, repeated `record_count` times)
 
 | Offset | Size | Type | Field | Confidence |
 |-------:|-----:|------|-------|------------|
-| +0x00 | 4 | f32 | _unknown_0_ | UNVERIFIED (possibly time key or direction X) |
-| +0x04 | 4 | f32 | _unknown_1_ | UNVERIFIED (possibly direction Y) |
-| +0x08 | 4 | f32 | _unknown_2_ | UNVERIFIED (possibly direction Z) |
-| +0x0C | 4 | f32 | _unknown_3_ | UNVERIFIED (possibly wind speed) |
-| +0x10 | 4 | f32 | _unknown_4_ | UNVERIFIED (possibly frequency or phase) |
-| +0x14 | 4 | u32 | `texture_id` | CONFIRMED — this word is a **texture id**, the argument the loader passes to the foliage-sway material lookup. The earlier `sway_seed` reading is REFUTED. |
+| +0x00 | 4 | f32 | `_pad0` | SAMPLE-VERIFIED (always 0.0 in populated samples) |
+| +0x04 | 4 | f32 | `speed` (proposed) | PROPOSED — observed `3.0, 3.0, 4.0, 6.0`; correlates with per-emitter speed defaults in the wind-object constructor. |
+| +0x08 | 4 | f32 | `_pad2` | SAMPLE-VERIFIED (always 0.0 in populated samples) |
+| +0x0C | 4 | f32 | `coord` (proposed) | PROPOSED — observed `0.0, 1024.0, 512.0, 1536.0` (multiples of 512; 1024 = MH cell unit); candidate world coordinate / lane offset. |
+| +0x10 | 4 | f32 | `scale` (proposed) | PROPOSED — observed `1.0, 1.0, 1.5, 1.0`; correlates with scale default in constructor. |
+| +0x14 | 4 | u32 | `tex_id` | CONFIRMED — texture id integer (validity check `>= 1`); joins to `data/sky/texture/wind<tex_id>.dds`. Always 0 in all corpus samples (because `source_flag = 0` everywhere). |
 
-Record stride: **24 bytes**.
+Record stride: **24 bytes**. The loader slurps the full `record_count × 24`-byte block verbatim;
+consumer-side field roles (+0x04/+0x0C/+0x10 = speed/coord/scale) are PROPOSED from observed values
+and constructor defaults, not yet confirmed from the per-frame foliage-sway draw consumer.
 
 ---
 
@@ -1127,35 +1190,56 @@ these without further evidence.
 9. **`.sod.pre` multiple solids per cell** and **runtime loading:** All samples are single-solid;
    no runtime loader found (likely editor-only).
 
-10. **`light%d.bin` gaps at 0x0900 and 0x1230 (48 bytes each):** May be a 49th wrap-around
-    interpolation slot, or alignment padding.
+10. **`light%d.bin` gaps at 0x0900 and 0x1230 (48 bytes each) — PARTIALLY RESOLVED:** Both are
+    all-zero in all sampled data. Likely wrap-around interpolation slots or alignment padding.
+    See `environment_bins.md` Known Unknown #3.
 
-11. **`light%d.bin` trailing 416 bytes (0x1320–0x14BF):** Not accessed by any analysed function.
+11. **`light%d.bin` trailing region — REVISED:** The 416-byte trailing region of the earlier reading
+    is now recategorised as four named regions: section D (secondary fog scalar, 48 × f32,
+    0x1320–0x13DF), section E (reserved f32 array, all-zero, 0x13E0–0x14A7), padding (8 B), and
+    the fallback light vector `(scale 1.0, dir_X −7.0, dir_Y 7.0, dir_Z 20.0)` at 0x14B0–0x14BF.
+    See §6.1 and `environment_bins.md §9.1`.
 
-12. **`light%d.bin` four unread floats per slot (+0x0C, +0x10, +0x1C, +0x2C):** Present but not read
-    by the main time-update path.
+12. **`light%d.bin` colour group structure — REVISED:** The four "unread floats" at +0x0C, +0x10,
+    +0x1C, +0x2C are part of the `color_B` group (+0x10..+0x1C) and the `color_C` group
+    (+0x20..+0x2C). `color_C` is present-but-unread (LOADER-RESOLVED); `color_B` is consumed as
+    the specular colour. See §6.2 and `environment_bins.md §9.2`.
 
-13. **`point_light%d.bin` record offsets +0x24–+0x30:** Most likely position (XYZ) and range; not
-    confirmed.
+13. **`point_light%d.bin` record offsets +0x24–+0x30 — CONFIRMED:** XYZ world position at
+    +0x24/+0x28/+0x2C and D3D9 attenuation range at +0x30. See §7.2 and `environment_bins.md §13`.
 
-14. **`point_light%d.bin` three colour groups:** Could be D3D diffuse/specular/ambient channels or
-    three independent light sources.
+14. **`point_light%d.bin` three colour groups — PARTIALLY RESOLVED:** Group 1 (+0x00) = primary
+    diffuse CONFIRMED. Groups 2 and 3 (+0x0C, +0x18) are confirmed as colour triplets; their exact
+    D3D9 channel roles (specular, ambient) are DEBUGGER-PENDING. See `environment_bins.md §13.6`.
 
-15. **`wind%d.bin` entry fields [0–4]:** Field [5] is the texture id (§8.2); the remaining five
-    floats' semantics are unverified (no non-zero corpus rows decoded this pass).
+15. **`wind%d.bin` entry fields [0–4] — REVISED:** Field [5] (+0x14) is the `tex_id` (CONFIRMED);
+    fields +0x00 and +0x08 are SAMPLE-VERIFIED as pad (always 0.0); +0x04 is PROPOSED `speed`,
+    +0x0C is PROPOSED world coordinate / lane offset, +0x10 is PROPOSED `scale`. See §8.2 and
+    `environment_bins.md §12.3`.
 
 16. **sky/dat `.txt` siblings:** `light{N}.txt` / `point_light{N}.txt` / `wind{N}.txt` coexist with
-    the `.bin` files but are editor text exports, not the binary format. The binary reader must skip
-    them.
+    the `.bin` files but are editor text exports, not the binary format. The binary reader must open
+    only the `.bin` files. Note: the `.txt` siblings are authoritative field-order oracles used to
+    cross-confirm the `.bin` field tables (see §7.2 and `environment_bins.md §12/§13`).
 
 ---
 
 ## Cross-references
 
-- **Related formats:** `Docs/RE/formats/terrain.md` — base terrain formats (`.ted`, `.sod`, `.map`);
-  the `.ted.post` block layout is identical to `.ted` block layout documented there.
+- **Related formats:**
+  - `Docs/RE/formats/terrain.md` — base terrain formats (`.ted`, `.sod`, `.map`); the `.ted.post`
+    block layout is identical to `.ted` block layout documented there.
+  - `Docs/RE/formats/environment_bins.md` — **authoritative sample-verified / loader-resolved specs**
+    for the full `data/sky/dat/` environment binary family. This document's §§9, 12, and 13 are the
+    authoritative sources for `light%d.bin`, `wind%d.bin`, and `point_light%d.bin` respectively,
+    superseding the parser-only entries in §§6–8 of this document where they conflict. Also covers
+    `map_option%d.bin`, `fog%d.bin`, `material%d.bin`, `stardome%d.bin`, `clouddome%d.bin`,
+    `cloud_cycle%d.bin`, and `weather%d.bin`.
+  - `Docs/RE/specs/environment.md` — runtime lighting/fog math, ambient gate, brightness slider.
 - **Glossary:** `Docs/RE/names.yaml`
 - **Provenance:** `Docs/RE/journal.md`
 - **Implementation target:** `Assets.Parsers` (layer 03.Storage.Assets). This file must be cited as
-  `// spec: Docs/RE/formats/terrain_layers.md` on every offset reference in the parser.
+  `// spec: Docs/RE/formats/terrain_layers.md` on every offset reference in the FX/UP/EXD/SOD/TED
+  parser. For the sky/dat binaries (§§6–8) cite `// spec: Docs/RE/formats/environment_bins.md §9`,
+  `§12`, or `§13` as appropriate — those sections are the authoritative specs.
   Conversion of vertex data to engine types is `Assets.Mapping`'s responsibility, not `Assets.Parsers`.

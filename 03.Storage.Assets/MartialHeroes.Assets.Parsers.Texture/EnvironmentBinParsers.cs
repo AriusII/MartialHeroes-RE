@@ -424,4 +424,56 @@ public static class EnvironmentBinParsers
 
         return new WeatherBin { Grid = grid };
     }
+
+    public static WindBin ParseWind(ReadOnlyMemory<byte> data)
+    {
+        return ParseWind(data.Span, data);
+    }
+
+    public static WindBin ParseWind(ReadOnlySpan<byte> span)
+    {
+        return ParseWind(span, default);
+    }
+
+    private static WindBin ParseWind(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    {
+        if (span.Length < WindBin.HeaderSize)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: need at least {WindBin.HeaderSize} bytes for header, " +
+                $"got {span.Length}.");
+
+        var recordCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var sourceFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
+
+        var expectedSize = WindBin.HeaderSize + (int)recordCount * WindRecord.Stride;
+        if (span.Length < expectedSize)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: declared count={recordCount} requires {expectedSize} bytes, " +
+                $"got {span.Length}.");
+
+        var records = new WindRecord[recordCount];
+        for (var i = 0; i < (int)recordCount; i++)
+        {
+            var recBase = WindBin.HeaderSize + i * WindRecord.Stride;
+
+            var rawSlice = backing.IsEmpty
+                ? (ReadOnlyMemory<byte>)span.Slice(recBase, WindRecord.Stride).ToArray()
+                : backing.Slice(recBase, WindRecord.Stride);
+
+            var texId = BinaryPrimitives.ReadUInt32LittleEndian(span[(recBase + 0x14)..]);
+
+            records[i] = new WindRecord
+            {
+                RawBytes = rawSlice,
+                TexId = texId
+            };
+        }
+
+        return new WindBin
+        {
+            RecordCount = recordCount,
+            SourceFlag = sourceFlag,
+            Records = records
+        };
+    }
 }

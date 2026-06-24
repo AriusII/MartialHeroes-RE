@@ -7,13 +7,15 @@
 > on every magic constant, stride, and byte offset.
 >
 > ```
-> verification: sample-verified            # every stride/count below confirmed by exact divisibility of the real VFS file size; head records byte-decoded on build 263bd994; loaders/consumers re-read 2026-06-21
-> ida_reverified: 2026-06-21
+> verification: sample-verified            # every stride/count below confirmed by exact divisibility of the real VFS file size; head records byte-decoded on build 263bd994; loaders/consumers re-read 2026-06-21; all facts re-confirmed 2026-06-24
+> ida_reverified: 2026-06-24
 > ida_anchor: 263bd994
 > evidence: [static-ida, vfs-sample]
+> confidence: HIGH on all load-bearing facts (loader sequence, strides/counts, field types, actor_size never-loaded verdict) as of 2026-06-24 re-verification pass
 > conflicts: buff_icon_position origin spacing CORRECTED 27 -> 25 (sample shows step 25 on both axes); 21x21 draw-cell needs the sprite sheet to adjudicate
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): creature_item.xdb RELABELLED = creature held-item VISUAL attachment keyed by creature_key (NOT a loot/drop table); vehicle.xdb keyed by vehicle_id (mount-visual + per-facing seat-Y); both §4/§5 DBG-pending runtime-use notes RESOLVED to STATIC-CONFIRMED.
 > CORRECTED 2026-06-21: (a) loader mechanism = FOUR distinct, individually-named per-format loaders called DIRECTLY in sequence from the boot data-table thread (NOT an indirect loader-pointer dispatch table); (b) actor_size.xdb is FULLY DEAD — its path constant sits in the data-side pointer table but is NEVER passed to any loader (no actor_size loader exists), so it is never opened at runtime, sharper than the prior "opened but result unused" verdict; (c) vehicle per-facing seat-Y floats pinned to byte offsets +0x24/+0x28/+0x2C/+0x30 (facing 1..4).
+> REVERIFIED 2026-06-24 (ida_anchor 263bd994, static-only): full re-check of all five small tables against both the on-disk samples and the IDA static analysis. Result: NO corrections. Every stride, count, field type, documented constant (vehicle tag_b constant, creature_item +32 ∈ {3.0,8.0}, +44=100, buff sprite_x step 25, sprite_y=401 blank-tile), loader sequence (four direct named loaders: effectscale/creature_item/vehicle/buff_icon_position), and actor_size never-loaded verdict confirmed exact. Confidence raised to HIGH on all load-bearing loader-mechanism and sample-verified facts.
 > ```
 >
 > status: sample_verified

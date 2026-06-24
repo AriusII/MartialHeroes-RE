@@ -1,11 +1,11 @@
 ---
 status: confirmed
 sample_verified: false
-verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-20
+verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24): upgradeitems.scr container corrected (ordered-map/tree keyed on +0x00; +0x04/+0x08 are lookup-time keys; binary wins); upgrade-result display message-db ids 33007/33008 added to §10
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
-conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned)
+conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned; upgradeitems.scr container key corrected this pass)
 ---
 
 # Inventory, Equipment, Shop & Trade — Clean-Room Specification
@@ -696,6 +696,8 @@ walks to build its per-occupied-slot record list (§8.1).
 | 4/23 two-level selector: outer `select` at **+8** (1 = accept→run +10 phase, 0 = decline→reason@+9 cases 1–5), inner `phase` at **+10** (0 = cancel, 2 = incoming, 3 = accepted→open) | S2C trade-request-result. BOTH bytes live: +8/+9 = accept-vs-decline gate, +10 = window phase; trader ids at +4/+12/+16 (re-pinned 2026-06-16, restoring the +8/+9 outer selector dropped in 2026-06-13). | CONFIRMED |
 | 2/30 op pair: `op`@+0, `id`@+4 | Guild / relation action channel; not a trade op (added 2026-06-13). | CODE-CONFIRMED |
 | Upgrade motion 8 = success, 9 = fail | 4/50 enchant/upgrade animation. | LIKELY |
+| Message id 33007 | Upgrade-result success display: broadcast in green (CP949). Read by the 4/50 panel/result handler alongside sound cue 862100101 (added 2026-06-24). | CONFIRMED |
+| Message id 33008 | Upgrade-result failure display: broadcast in orange (CP949). Read by the 4/50 panel/result handler alongside sound cue 862100102 (added 2026-06-24). | CONFIRMED |
 | Repair divisors 60 and 12 | 4/19 repair time = value/60 min (rem value%60); value/12, value%12. | LIKELY |
 | Message id 59003 | Equip-onto-other rejection (slot-8 relation guard). CP949. | LIKELY |
 | Message id 36003 | Item-shop-expired. CP949. | CONFIRMED |

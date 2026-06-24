@@ -13,17 +13,23 @@
 >   the live HP/MP/yaw/move-target writes (driven by the runtime-table-dispatched 5/53 vitals and
 >   5/13 movement handlers, whose dispatch table is null at static time), and the role of the
 >   `partial`/`draft` auxiliary fields.
-> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> - **ida_reverified:** 2026-06-24; re-verified against doida.exe IDB SHA 263bd994 (actor-world audit)
 >   **ida_anchor:** 263bd994  **evidence:** [static-ida]
 > - **CYCLE 7 (2026-06-20):** added the 30-slot buff-slot array at Actor +0x208 (520), the
 >   buff-related actor state fields it drives (+1013, +1420 enrichment, +1764, +1828, +1832, +1836,
->   +1837, +1838), and the death-state fields (+1424 alive semantics, +1420 value 8, +1480 death
->   timestamp). `specs/buffs.md` is the authority for the buff model. The earlier C7 "locked battle
->   target id at Actor +444" reading has been **resolved (re-verified in IDA, CYCLE 7)**: there is
->   **no** actor-side +444 battle-target field — the locked battle target lives on the
->   **battle-controller singleton** (controller +9 = target id dword, controller +40 = target sort
->   byte), distinct from the actor's UI/current `target_id` at +0x6E8. See `specs/combat.md` and the
->   settled note at item 12.
+>   +1837, +1838), and the death-state fields (+1424 alive semantics, +1420 value 8). `specs/buffs.md`
+>   is the authority for the buff model. The earlier C7 "locked battle target id at Actor +444"
+>   reading has been **resolved (re-verified in IDA, CYCLE 7)**: there is **no** actor-side +444
+>   battle-target field — the locked battle target lives on the **battle-controller singleton**
+>   (controller +9 = target id dword, controller +40 = target sort byte), distinct from the actor's
+>   UI/current `target_id` at +0x6E8. See `specs/combat.md` and the settled note at item 12.
+> - **actor-world audit (2026-06-24):** corrected `death_time_ms` offset from +0x5C8 (1480) to
+>   **+0x5CC (1484)** (binary wins — the death-motion routine writes the timestamp to offset 1484);
+>   widened `lifecycle_state` enum to include values **4** (motion state), **15** (relation-refresh),
+>   and **17** (special-sort / motion state); corrected `spawn_extra` (+0x740) constructor init to
+>   **0xFF / 255** (was "unverified"); added buff-death protected range
+>   **[80..130] ∪ {13} ∪ [132..134]** (death clears only non-protected slots); added
+>   `prev_hp`/`prev_mp` (+0x4E8/+0x4EC) zeroed-on-death note.
 > - **conflicts:** no hard conflicts; two soft divergences carried as open items — (a) the `level`
 >   byte boundary (clean u16 @ SD +0x3A for the display path vs. straddling the SD +0x38/+0x39
 >   state bytes on the wire), (b) the +0x488/+0x48C region used as `last_state_ms` (int32) in one
@@ -147,7 +153,7 @@ slots, render flags) are summarized later but omitted here.
 | `move_target`    | +0x450 | f32[3] | confirmed  | Destination position for movement interpolation (x, y=0, z). |
 | `interp_pos`     | +0x47C | f32[3] | confirmed  | Smoothed position used during interpolation. |
 | `yaw`            | +0x4C0 | f32    | confirmed  | Facing; fed into a yaw quaternion built from the movement packet's yaw float. |
-| `lifecycle_state`| +0x58C | int32  | confirmed  | Lifecycle / motion state (see enum below). |
+| `lifecycle_state`| +0x58C | int32  | confirmed  | Lifecycle / motion state (see enum below). Known values: 0 uninit, 1 idle, 2 walk, 3 run, 4 motion, 8 dead, 11/12/13 buff-transform, 15 relation-refresh, 17 special-sort/motion. |
 | `target_id`      | +0x6E8 | int32  | confirmed  | Id of the current target actor. Default 0. |
 | `alive`          | +0x6EC | uint8  | confirmed  | Alive flag. Default 1. |
 | `pk_flag`        | +0x704 | uint8  | confirmed  | PK (player-kill) mode flag. Default 0. |
@@ -159,10 +165,13 @@ slots, render flags) are summarized later but omitted here.
 |---|---|
 | 0 | Uninitialised. |
 | 1 | Refreshing / active (live, accepting updates); also the idle/normal action-state. |
-| 2 | Walk. |
-| 3 | Run. |
-| 8 | **Dead / knockdown** — the canonical "is this actor dead" test (the respawn countdown re-checks `lifecycle_state != 8` to abort). The buff dispatch treats value 8 as a **protected** state it never overwrites. Set by the death-motion routine alongside `alive = 0` and the death timestamp (`+0x5C8`). See the death-state note below and `specs/buffs.md §3.3`. |
+| 2 | Walk. Motion state (the motion-state gate treats {2, 3, 4, 17} as motion-active). |
+| 3 | Run. Motion state. |
+| 4 | **Motion state** — treated as a motion-active value by the same motion-state gate ({2,3,4,17}). Distinct from run/walk; exact trigger context capture-pending. `confirmed` (actor-world audit). |
+| 8 | **Dead / knockdown** — the canonical "is this actor dead" test (the respawn countdown re-checks `lifecycle_state != 8` to abort). The buff dispatch treats value 8 as a **protected** state it never overwrites. Set by the death-motion routine alongside `alive = 0` and the death timestamp (`+0x5CC`). See the death-state note below and `specs/buffs.md §3.3`. |
 | 11 / 12 / 13 | **Buff-driven transform / stance poses** — written by the buff effect-kind dispatch (buff_id 43 → 11, 46 → 12, 131 → 13; cleared back to 1 by the cleanse path). See the buff-slot table below and `specs/buffs.md §3.1`. |
+| 15 | **Relation-refresh state** — observed on the 4/4 tag-9 relation-update path. `confirmed` (actor-world audit). Exact semantic beyond "actor was just relation-refreshed" is capture-pending. |
+| 17 | **Special-sort / motion state** — the spawn factory's sort-17 branch and the motion-state gate both recognise this value. In combination with the 0xFF motion-state-byte sentinel, the sort-17 path reuses `world_x`/`world_z` as move-speed / animation-tag overrides. Motion state ({2,3,4,17}). `confirmed` (actor-world audit). |
 
 Notes for the domain engineer:
 - **`max_hp` / `max_mp` are NOT stored as fields.** They are computed on demand for the **local
@@ -247,7 +256,7 @@ See the dedicated SpawnDescriptor table below.
 | +0x524 | 48   | bytes  | `mixer_head`          | confirmed  | Animation-mixer list/queue head. Opaque to the domain model. |
 | +0x554 | 56   | bytes  | (mixer state)         | partial    | Animation-mixer state fields. `lifecycle_state` sits at byte +56 of this region (= +0x58C). |
 | +0x588 | 4    | int32  | `anim_cycle_timer`    | partial    | Timer (set to 60 by the vitals handler for the pair-state path). Distinct role unverified. |
-| +0x58C | 4    | int32  | `lifecycle_state`     | confirmed  | Lifecycle / motion state enum (0/1/2/3/8 — see table above). Heavily used as a gate in skill and movement handlers. |
+| +0x58C | 4    | int32  | `lifecycle_state`     | confirmed  | Lifecycle / motion state enum (0/1/2/3/4/8/11/12/13/15/17 — see table above). Heavily used as a gate in skill and movement handlers. |
 | +0x590 | 4    | int32  | `dirty_flag`          | confirmed  | Set to 1 in constructor; non-zero means the actor still needs refresh and is not yet accepting network updates. Checked as a precondition in the skill handler. |
 | +0x594 | 16   | bytes  | (gap)                 | partial    | Interior dwords zeroed in constructor. |
 | +0x5A4 | 4    | int32  | (gap)                 | partial    | Zeroed in constructor. |
@@ -257,9 +266,10 @@ See the dedicated SpawnDescriptor table below.
 | +0x5BC | 4    | int32  | (gap)                 | partial    | Init -1. |
 | +0x5C0 | 4    | int32  | (gap)                 | partial    | Init 0. |
 | +0x5C4 | 4    | int32  | `respawn_state`       | partial    | Respawn / warp state during zone transitions. |
-| +0x5C8 | 1    | uint8  | `respawn_flag`        | partial    | Respawn flag (set from the movement-predict path). |
+| +0x5C8 | 1    | uint8  | `respawn_flag`        | partial    | Respawn flag (set from the movement-predict path). Distinct from the death timestamp dword at +0x5CC. |
 | +0x5C9 | 3    | —      | (pad)                 | —          | Alignment. |
-| +0x5CC | 12   | bytes  | (gap)                 | partial    | Interior: a millisecond timestamp at +0. |
+| +0x5CC | 4    | int32  | `death_time_ms`       | confirmed  | Millisecond timestamp written at the moment of death (see death-state table below). The 4 bytes +0x5CC..+0x5CF are this dword; +0x5D0..+0x5D7 follow. |
+| +0x5D0 | 8    | bytes  | (gap)                 | partial    | Remainder of the gap region up to the animation-state block. |
 | +0x5D8 | 12   | bytes  | `anim_state`          | confirmed  | Animation state machine (3 dwords). The dword at +8 (= +0x5E0) is checked == 0 as a movement-permission precondition. |
 | +0x5E4 | 12   | bytes  | `event_outlet`        | confirmed  | Event-outlet / callback chain. Opaque to the domain model. |
 | +0x5F0 | 8    | bytes  | (gap)                 | partial    | Two dwords zeroed in constructor. |
@@ -312,7 +322,7 @@ domain model should treat them as engine-side and decode the wire `name` field i
 | +0x735 | 3    | —      | (pad)              | low        | Alignment. |
 | +0x738 | 4    | int32  | `world_state_server` | partial  | Server-supplied world / zone state value (written by the game-tick config handler). |
 | +0x73C | 4    | int32  | (gap)              | low        | Unknown. |
-| +0x740 | 4    | int32  | `spawn_extra`      | partial    | Written on snapshot for both PC and mob actors from a trailing snapshot byte. Semantics unverified. |
+| +0x740 | 4    | int32  | `spawn_extra`      | partial    | Written on snapshot for both PC and mob actors from a trailing snapshot byte. Constructor-initialised to **0xFF / 255** (actor-world audit 2026-06-24). Value semantics unverified beyond the init. |
 | +0x744 | 4    | bytes  | (pad)              | low        | Trailing bytes to the 0x748 boundary. |
 
 ---
@@ -324,6 +334,10 @@ slot (360 bytes total, spanning Actor +0x208 .. +0x36F). **`specs/buffs.md` is t
 model** (tick, effect-kind dispatch, icon/visual resolution, the buff push); this table records only
 the *layout* on the actor. `confirmed` (CYCLE 7 — slot count and stride corroborated by the per-tick
 loop, the cleanse loop, and the 360-byte local-player mirror).
+
+**Local buff-bar mirror:** a 360-byte global mirrors the local player's buff-bar state. On death the
+same protected-range clear is applied to this mirror (the clear loop uses the same id-range gate on
+both the actor table and the mirror). See the death-state section below for the protected range.
 
 Per-slot record (naturally aligned; offsets within the slot are 0 / 4 / 8):
 
@@ -358,7 +372,7 @@ motion-state values are RUNTIME-ONLY (see `buffs.md §3.3`).
 | Actor offset | Size | Type | Field | Confidence | Meaning |
 |---|---|---|---|---|---|
 | +0x3F5 (1013) | 1 | u8 | `motion_suppress_flag` | confirmed | Toggled 0/1 by stun/stance buffs (cleared by buff_id 43 / 131). |
-| +0x58C (1420) | 4 | int32 | `lifecycle_state` / action-motion-state | confirmed | Same field as `lifecycle_state` above — the buff dispatch sets it to **1 / 11 / 12 / 13** (transform/stance poses); value **8** is the protected death/special state the buff code never overwrites. See the lifecycle enum. |
+| +0x58C (1420) | 4 | int32 | `lifecycle_state` / action-motion-state | confirmed | Same field as `lifecycle_state` above — the buff dispatch sets it to **1 / 11 / 12 / 13** (transform/stance poses); value **8** is the protected death/special state the buff code never overwrites. See the lifecycle enum (values 0, 1, 2, 3, 4, 8, 11, 12, 13, 15, 17). |
 | +0x6E4 (1764) | 1 | u8 | `disguise_outfit_id` | confirmed | Outfit/disguise id read by the buff_id 44 (disguise/polymorph) path to restore appearance on expiry. **Overlap:** the live-state table lists `title_slot` (uint32) at +0x6E4; this disguise byte is the low byte of that 4-byte region on the buff path — carried as a context-dependent overlay, not a hard conflict. |
 | +0x724 (1828) | 4 | int32 | `summon_state` | confirmed | Set on buff_id 57 expiry (mirror-clone summon state). |
 | +0x728 (1832) | 4 | int32 | `clone_count` | confirmed | Number of mirror clones for buff_id 57, derived from the slot's `param`. (This is the AoE-member-count dword the AoE/split-clone loop reads — see the live-state table's +0x70C region note.) |
@@ -369,14 +383,19 @@ motion-state values are RUNTIME-ONLY (see `buffs.md §3.3`).
 ## Death-state fields (CYCLE 7)
 
 The death-motion routine (invoked from the inbound death handler) writes the death state onto the
-actor. `confirmed` (CYCLE 7). On death the actor's 30-slot buff table (Actor +0x208) is **cleared** —
-timed buffs are removed (see `specs/buffs.md` and the death/respawn behaviour in `world_systems.md`).
+actor. `confirmed` (CYCLE 7, refined actor-world audit 2026-06-24). On death the actor's 30-slot buff
+table (Actor +0x208) is **partially cleared** — the death handler preserves slots whose `buff_id` is
+in the protected range **[80..130] ∪ {13} ∪ [132..134]** and clears the rest (buff_id 131 also sets
+`motion_suppress_flag` at +0x3F5 to 1). The same protected-range clear is applied to the local
+buff-bar mirror. See `specs/buffs.md` and the death/respawn behaviour in `world_systems.md`.
 
 | Actor offset | Size | Type | Field | Confidence | Meaning |
 |---|---|---|---|---|---|
 | +0x590 (1424) | 4 | int32 | `alive` | confirmed | Alive/active gate: **0 = dead**, 1 = alive. (Reconciles the quick-reference `alive` at +0x6EC, which is the constructor-default alive byte; this +0x590 dword is the death-handler's authoritative alive gate that the movement/targeting/pickup paths early-return on. Carried as the death gate.) Set to 1 on spawn / visual revive. |
 | +0x58C (1420) | 4 | int32 | `lifecycle_state` | confirmed | Action/motion-state — **8 = death/knockdown**, 1 = idle. Same field as above; the death value is the authoritative "is dead" test. |
-| +0x5C8 (1480) | 4 | int32 | `death_time_ms` | confirmed | Millisecond timestamp set at the moment of death (engine ms clock). |
+| +0x5CC (1484) | 4 | int32 | `death_time_ms` | confirmed | Millisecond timestamp set at the moment of death (engine ms clock). **Correction (actor-world audit 2026-06-24):** this field is at +0x5CC (1484), not +0x5C8 (1480) as an earlier draft stated. The byte at +0x5C8 (1480) is a distinct `respawn_flag` (uint8); the death timestamp dword is 4 bytes higher at +0x5CC. |
+| +0x4E8 (1256) | 4 | uint32 | `prev_hp` | confirmed | Previous-HP mirror — zeroed on death for both the dying actor and the local player. Also written from spawn-descriptor fields on the 5/1 spawn-extended (player) branch. |
+| +0x4EC (1260) | 4 | uint32 | `prev_mp` | confirmed | Previous-MP mirror — zeroed on death (same paths as `prev_hp`). |
 
 > HP/MP vitals are the 8-byte (qword) block at **Actor +0xB0** (`current_hp` / `current_mp`, see the
 > quick-reference and SpawnDescriptor tables) — server-set; the death handler does not compute any

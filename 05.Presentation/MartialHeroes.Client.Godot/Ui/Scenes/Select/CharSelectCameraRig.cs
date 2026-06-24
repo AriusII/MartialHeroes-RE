@@ -13,11 +13,19 @@ public sealed partial class CharSelectCameraRig : Node
     private const float HitBoxHalfExtentXZ = 6.0f;
     private const float HitBoxYHeight = 22.0f;
 
+    private const float DollyDurationSeconds = 2.5f;
+
     private int _activeZoomAction;
 
     private float _boomZ;
 
     private Camera3D? _camera;
+    private Vector3 _dollyKf0;
+    private Vector3 _dollyKf1;
+    private float _dollyT;
+    private bool _dollyActive;
+    private Vector3 _dollyKf0Look;
+    private Vector3 _dollyKf1Look;
     private Func<int, Node3D?>? _slotActorProvider;
     private float[] _slotGodotX = [];
     private float[] _slotGodotZ = [];
@@ -28,7 +36,10 @@ public sealed partial class CharSelectCameraRig : Node
         Vector3 staticEyeGodot,
         float[] slotGodotX,
         float[] slotGodotZ,
-        Func<int, Node3D?> slotActorProvider)
+        Func<int, Node3D?> slotActorProvider,
+        Vector3 kf0Eye,
+        Vector3 kf0LookAt,
+        Vector3 kf1LookAt)
     {
         _camera = camera;
         _staticEyeGodot = staticEyeGodot;
@@ -39,11 +50,20 @@ public sealed partial class CharSelectCameraRig : Node
         _boomZ = 0.0f;
         _activeZoomAction = 0;
 
-        _camera.GlobalPosition = staticEyeGodot;
+        _dollyKf0 = kf0Eye;
+        _dollyKf1 = staticEyeGodot;
+        _dollyKf0Look = kf0LookAt;
+        _dollyKf1Look = kf1LookAt;
+        _dollyT = 0.0f;
+        _dollyActive = true;
+
+        _camera.GlobalPosition = kf0Eye;
+        _camera.LookAt(kf0LookAt, Vector3.Up);
+
         GD.Print(
-            $"[CharSelectCameraRig] Static rig placed: eye={staticEyeGodot} " +
-            $"FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
-            "spec: Docs/RE/scenes/charselect.md §6.1 §6.3");
+            $"[CharSelectCameraRig] Dolly KF0→KF1 started: kf0={kf0Eye} kf1={staticEyeGodot} " +
+            $"duration={DollyDurationSeconds}s FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
+            "spec: charselect.md §6.1 (entry dolly KF0→KF1).");
     }
 
     public void SetZoomAction(int actionId)
@@ -54,7 +74,31 @@ public sealed partial class CharSelectCameraRig : Node
     public override void _Process(double delta)
     {
         if (_camera is null) return;
-        ApplyCameraBoomZoom((float)delta);
+        var dt = (float)delta;
+        if (_dollyActive)
+            ApplyDollyTick(dt);
+        else
+            ApplyCameraBoomZoom(dt);
+    }
+
+    private void ApplyDollyTick(float dt)
+    {
+        if (_camera is null) return;
+
+        _dollyT = Math.Min(_dollyT + dt / DollyDurationSeconds, 1.0f);
+        var t = Mathf.SmoothStep(0.0f, 1.0f, _dollyT);
+        var pos = _dollyKf0.Lerp(_dollyKf1, t);
+        var look = _dollyKf0Look.Lerp(_dollyKf1Look, t);
+        _camera.GlobalPosition = pos;
+        if (look.DistanceSquaredTo(pos) > 0.01f)
+            _camera.LookAt(look, Vector3.Up);
+
+        if (_dollyT >= 1.0f)
+        {
+            _dollyActive = false;
+            _camera.GlobalPosition = _dollyKf1;
+            GD.Print("[CharSelectCameraRig] Dolly KF0→KF1 complete; holding at KF1. spec: charselect.md §6.1.");
+        }
     }
 
     private void ApplyCameraBoomZoom(float dt)

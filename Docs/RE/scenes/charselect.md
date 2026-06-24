@@ -14,6 +14,9 @@ verification: written 2026-06-21 against the doida.exe binary (build 263bd994, f
   (structs/gucomponent.md, structs/guwindow.md, specs/ui_system.md) and to the character-render chains
   (specs/skinning.md, specs/equipment_visuals.md). (Companion: scenes/login.md for state-1 Login,
   scenes/frontend_ui_components.md for the cross-scene GUI index.)
+  2026-06-24 audit: §7.4 enter-game copy sequence extended with the extra NetHandler flag byte (high
+  byte of roster word 206 + boolean from field 1237) written post-send alongside descriptor/stats/level;
+  semantic is capture-pending (§9 item 5). IDB SHA 263bd994 re-confirmed; no structural drift.
 scene: Character Select (engine state 4)
 evidence: [static-ida]
 capture_verified: false
@@ -548,7 +551,15 @@ floor of 10 for variants 1..4); a **class/appearance-variant selector** over the
   instead of entering, cf. `character_creation.md`); (3) build the 40-byte enter-game body; (4) read
   the game version from `data/cursor/game.ver`; (5) **send the enter-game request** (opcode `1/9`);
   (6) **then** copy the chosen slot's 880-byte descriptor + 96-byte stats block + level into the
-  live-player globals (the copy is POST-send).
+  live-player globals (the copy is POST-send). Beyond those three documented blocks, the commit also
+  writes an **additional flag byte** from the NetHandler roster into the live-player globals: the high
+  byte of NetHandler roster word 206 is written to a live-player global immediately after the stats
+  copy, and a boolean derived from NetHandler field 1237 is written to a derived slot in the live
+  MainWindow. The semantic of this flag (likely a PvP/relation or appearance flag seeded for the live
+  session) is not yet pinned — flagged as an open item (§9). *([CONFIRMED]* the extra write occurs
+  after the `1/9` send, co-located with the descriptor/stats/level copy, static control-flow on build
+  263bd994; `scenes/scene_state_machine.md §3.2` and the entry-order summary in §7.8 below list only
+  descriptor/stats/level — this addition supersedes that summary for completeness.)*
 - **Delete** — implemented as a slot-keyed **"move-out"** request, gated behind a delete-confirm modal
   (requires a valid highlighted slot with an actor present; otherwise an error is shown). A server-side
   **delete cooldown** can defer it.
@@ -616,8 +627,9 @@ id 920100200) started on entry/reset and stopped on leave.
    scene, and clears the latch — returning the UI to step 3.
 8. On enter confirm, once the camera boom/zoom settles, the enter-game routine: stops the BGM
    (920100200), guards against `@BLANK@`, builds the 40-byte body, reads `game.ver`, sends `1/9`
-   (`SmsgEnterGameAck` 3/5 confirms), then copies the chosen slot descriptor + stats into the
-   live-player globals (post-send), leaving the scene.
+   (`SmsgEnterGameAck` 3/5 confirms), then copies the chosen slot descriptor + stats + level **and
+   one additional NetHandler flag byte** into the live-player globals (post-send), leaving the scene
+   (see §7.4 for the complete copy sequence).
 
 ---
 
@@ -682,6 +694,9 @@ msg.xdb-sized captions). Hand to `re-validator` via the live `?ext=dbg` session 
    the children-visibility gate.
 4. **The non-array `SelectWindow` member semantics** (the init-only 0 / −1 fields outside the five
    `0x370` sub-records) — count vs handle vs sub-struct — want a `dbg_read` of a live instance (§2.1).
+5. **The semantic of the extra enter-game flag byte** (§7.4) — the high byte of NetHandler roster word
+   206 and the boolean from NetHandler field 1237, both written to live-player globals post-send.
+   Likely a PvP/relation or appearance flag; the exact meaning is capture/debugger-pending.
 
 Settled hand-offs that are **not** open: msg.xdb id → CP949 string extraction (→ asset/format lane,
 §8.1); the per-pixel atlas sub-rect tables (→ `asset_linkages.md`, §5.3); proposed canonical names

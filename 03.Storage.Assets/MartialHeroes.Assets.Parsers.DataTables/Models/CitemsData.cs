@@ -6,21 +6,25 @@ public sealed class CitemsRecord
 
     public required string ItemName { get; init; }
 
+    public required byte Unknown36 { get; init; }
 
-    public required ushort Unknown36 { get; init; }
+    public required byte ItemCategory { get; init; }
 
     public required uint CashPriceNx { get; init; }
 
     public required uint SlotSeq2 { get; init; }
 
+    public required uint IconIdA { get; init; }
 
-    public required uint ItemUid { get; init; }
+    public required uint IconIdB { get; init; }
 
     public required uint Flag4C { get; init; }
 
     public required string[] DescParagraphs { get; init; }
 
     public required ReadOnlyMemory<byte> RemainderRaw { get; init; }
+
+    public required byte TailFlag418 { get; init; }
 
     public string? GetParagraph(int index)
     {
@@ -31,20 +35,20 @@ public sealed class CitemsRecord
 
 public sealed class CitemsCatalog
 {
-    private readonly Dictionary<uint, CitemsRecord> _byUid;
+    private readonly Dictionary<uint, CitemsRecord> _byId;
 
     internal CitemsCatalog(CitemsRecord[] records)
     {
         Records = records;
-        _byUid = new Dictionary<uint, CitemsRecord>(records.Length);
+        _byId = new Dictionary<uint, CitemsRecord>(records.Length);
         foreach (var r in records)
-            _byUid.TryAdd(r.ItemUid, r);
+            _byId.TryAdd(r.ItemId, r);
     }
 
     public IReadOnlyList<CitemsRecord> Records { get; }
 
-    public CitemsRecord? TryGetByUid(uint itemUid)
+    public CitemsRecord? TryGetById(uint itemId)
     {
-        return _byUid.TryGetValue(itemUid, out var r) ? r : null;
+        return _byId.TryGetValue(itemId, out var r) ? r : null;
     }
 }

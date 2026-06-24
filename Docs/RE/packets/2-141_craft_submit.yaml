@@ -1,56 +1,68 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# ROLE CORRECTION (lane-07 audit): sole caller is CubeGamble_ClearAndSubmit (Cube-Gamble minigame
+# panel). Body layout is 56-byte block A (panel+2140) + 16-byte block B (panel+2196) + 1-byte
+# local-player flag + 3 pad. No material slots, no NPC actor index. Both prior readings
+# (CmsgCraftSubmit / CmsgCharStatusSubmit) are refuted for the field split; size 76 and direction
+# C2S are confirmed. Proposed rename: CmsgCubeGambleSubmit.
+# The inner field layout of block A (56B) and block B (16B) is pending re-struct-analyst.
+# capture_verified: false.
+#
+# verification: sha256:263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
-name: CmsgCraftSubmit
+name: CmsgCubeGambleSubmit
 opcode: 0x2008d           # major 2 (GameAction), minor 141 -> (2 << 16) | 141
 direction: C2S
-size: 76                  # fixed 76-byte payload (56 + 16 + 4)
+size: 76                  # fixed 76-byte payload (56 + 16 + 1 + 3)
 spec: packets/2-141_craft_submit.yaml
 status: confirmed
 capture_verified: false
 
-summary: Crafting/production recipe submission. Carries 14 material slot values, 4 extra parameter dwords, and the NPC actor index.
+summary: >
+  Cube-Gamble minigame submission, sent when CubeGamble_ClearAndSubmit fires. Carries a 56-byte panel
+  data block A (panel+2140 region), a 16-byte panel data block B (panel+2196 region), a 1-byte
+  local-player flag, and 3 bytes of padding. The inner field layout of block A and block B is pending
+  re-struct-analyst work. Size 76 and direction C2S are binary-confirmed. The prior readings as a
+  crafting recipe submission (CmsgCraftSubmit) and as a character-status panel submit (CmsgCharStatusSubmit)
+  are both refuted: no material slots and no NPC actor index are present.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 76.
+# Binary-accurate outer layout per CubeGamble_ClearAndSubmit builder (lane-07 audit).
+# Inner field splits for BlockA and BlockB are pending re-struct-analyst.
 fields:
-  - { name: MaterialSlots, type: "u32[14]" }      # 0x00  56 bytes: 14 material slot values
-  - { name: ExtraParams,   type: "u32[4]" }       # 0x38  16 bytes: 4 extra parameters
-  - { name: NpcActorIndex, type: u8 }              # 0x48  NPC actor index
-  - { name: Padding,       type: "u8[3]" }        # 0x49  padding to 76 bytes
+  - { name: BlockA,          type: "u8[56]" }   # 0x00  56 bytes blitted from panel+2140 region [inner layout pending]
+  - { name: BlockB,          type: "u8[16]" }   # 0x38  16 bytes blitted from panel+2196 region [inner layout pending]
+  - { name: LocalPlayerFlag, type: u8 }          # 0x48  local-player flag (1-byte; source is a local state field)
+  - { name: Pad49,           type: "u8[3]" }    # 0x49  padding to 76 bytes
 
 notes: |
-  Static inference only; no capture available. CODE-CONFIRMED layout (76 bytes),
-  CAPTURE-UNVERIFIED meaning.
+  CONTROL-FLOW CONFIRMED body size (76 bytes). Sole builder/caller: CubeGamble_ClearAndSubmit.
+  Role and field-split corrected per lane-07 audit.
 
-    0x00 (56B) MaterialSlots : 14 little-endian u32 values, one per material slot in the
-                               crafting grid. Each slot holds either a material item id or
-                               zero if the slot is empty.
-    0x38 (16B) ExtraParams   : 4 little-endian u32 values for extra crafting parameters.
-                               Their individual meanings are not yet enumerated.
-    0x48 (1B)  NpcActorIndex : the NPC actor index the player is interacting with for
-                               crafting (le u8).
-    0x49 (3B)  Padding       : padding to bring total to 76 bytes.
+    0x00 (56B) BlockA          : opaque 56-byte block blitted from the Cube-Gamble panel state
+                                  at panel+2140. Inner field layout: pending re-struct-analyst.
+    0x38 (16B) BlockB          : opaque 16-byte block blitted from the Cube-Gamble panel state
+                                  at panel+2196. Inner field layout: pending re-struct-analyst.
+    0x48 (1B)  LocalPlayerFlag : a 1-byte flag sourced from a local player state field; exact
+                                  semantic meaning is capture/debugger-pending.
+    0x49 (3B)  Pad49           : padding to bring the total to 76 bytes.
 
-  CONTEXT: sent when the player confirms a crafting recipe at a crafting NPC.
-  The MaterialSlots array corresponds to the 14-slot crafting panel grid in the UI.
+  CONTEXT: fires from the Cube-Gamble minigame panel's clear-and-submit action. The 56+16+1+3 outer
+  block split is binary-accurate; individual field decomposition within block A and block B requires
+  a re-struct-analyst pass.
 
-  UNKNOWNS to resolve with a capture:
-    - the meaning of each ExtraParams dword;
-    - whether MaterialSlots holds item ids, slot indices, or quantity-packed values;
-    - whether NpcActorIndex is an index or a truncated actor id.
+  PRIOR READINGS (refuted):
+    CmsgCraftSubmit  : u32[14] material slots + u32[4] extra params + u8 NPC actor index — no
+                       crafting NPC caller exists for this opcode; refuted.
+    CmsgCharStatusSubmit : character status/stat-panel snapshot — also refuted by caller identity;
+                           the 56+16+1 outer split is shared but the role attribution is wrong.
 
-  UNBLOCKS: Client.Application crafting/production submission flow.
+  PROPOSED RENAME: CmsgCubeGambleSubmit. Opcode catalog entry 0x2008d carries a name + field
+  description drift candidate; see opcodesCatalogCorrections from lane-07 audit.
 
-  ALTERNATE-ROLE NOTE (B9 unknown-sweep, source c2s_unknown_sweep_band5.md §2/141): a separate static
-  lane reads opcode 2/141 as a CHARACTER STATUS / STAT-PANEL SNAPSHOT SUBMIT (proposed name
-  CmsgCharStatusSubmit), NOT a crafting submit. Both readings agree on the 76-byte fixed size; they
-  DISAGREE on the internal field split:
-    - this file's craft reading: u32[14] material slots (0x00) + u32[4] params (0x38) + u8 npc index
-      (0x48) + 3B pad.
-    - the status-submit reading: a 56-byte status/stat block A (0x00), a 16-byte status/stat block B
-      (0x38), a 1-byte local-player flag (0x48), + 3B pad. Its trigger is a character status/vitals
-      panel refresh+submit gated by a "changed/dirty" flag (it also rewrites the panel's vitals labels).
-  The two are CONFLICTING interpretations of the same minor [collision -- pending Tier-1 arbitration].
-  The 56+16+1 split is itself a candidate for re-struct-analyst (inner field layout pending). Both
-  readings are flagged here; neither is silently dropped. The canonical 2/141 role/name (CmsgCraftSubmit
-  vs CmsgCharStatusSubmit) is a Tier-1 reconciliation. capture/debugger-pending either way.
+  UNKNOWNS to resolve (re-struct-analyst + capture):
+    - inner field layout of BlockA (56 bytes, panel+2140 region);
+    - inner field layout of BlockB (16 bytes, panel+2196 region);
+    - the LocalPlayerFlag semantics;
+    - the server-side response opcode.
+
+  UNBLOCKS: Client.Application Cube-Gamble minigame submission path (76-byte fixed C2S).

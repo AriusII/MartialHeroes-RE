@@ -12,6 +12,10 @@ public sealed partial class CameraController : Camera3D
 
         Static = 3,
 
+        Gamble = 4,
+
+        Event = 5,
+
         FreeFly = 99
     }
 
@@ -80,6 +84,24 @@ public sealed partial class CameraController : Camera3D
     private const float FlyFastSpeed = 2000f;
 
     private const float FlyMouseSensitivity = 0.004f;
+
+
+    private const float GambleEyeLegacyX = 24097.46484375f;
+
+    private const float GambleEyeLegacyZ = 55694.4296875f;
+
+    private const float GambleElevationRad = -Mathf.Pi / 3f;
+
+    private const float GambleEyeHeightBias = 80f;
+
+    private const float GambleFocusZ = -160f;
+
+
+    private const float EventOrbitBoomDistance = 12.0f;
+
+    private const float EventLookAtLift = 8.0f;
+
+    private const float EventElevationRad = -Mathf.Pi / 6f;
 
     private float _elevation = DefaultElevationRad;
 

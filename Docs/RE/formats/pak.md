@@ -5,21 +5,27 @@
 >
 > **Verification:** **sample-verified** (the strongest tier — facts established by control-flow +
 > operand evidence AND matched byte-for-byte against a real VFS sample).
-> ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
-> re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> ida_reverified: 2026-06-24 · ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee · evidence: [static-ida, vfs-sample]
+> Prior re-verifications: 2026-06-16 (CYCLE 7), 2026-06-20 (CYCLE 7 final), 2026-06-24 (CYCLE 11 spec-audit: open-flags 0x10000001 instruction-confirmed; all other structural claims re-confirmed); 2026-06-24 (CYCLE 11 pak-family pass: full 43,347-entry scan — zero gaps, zero overlaps, 100% contiguous coverage; de-dup statement updated below)
 > Conflicts: none vs the committed structural claims (the campaign-10 re-verification supplies a
 > real sample that *promotes* the previously-"unknown content" header/TOC-trailing fields — those
 > are additions, not corrections; every prior CONFIRMED offset/size/stride re-verified true).
+> The earlier "small number of entries share/overlap a payload offset" de-duplication note is
+> updated by the full 43,347-entry scan: zero shared offsets were found in the reference archive —
+> entries tile perfectly contiguously with no gaps and no overlaps. The de-dup framing has been
+> revised to reflect this (see §Two-witness result below).
 >
 > **Two-witness result.** The reference implementation (`MappedVfsArchive`) parsed a real
 > `data.inf` (**6,241,992 bytes**) + `data/data.vfs` (**3,802,182,193 bytes**) cleanly: exactly
 > **43,347 entries** (`6,241,992 = 24 + 144 × 43,347`, byte-exact), the declared payload extents
 > tile the data blob to **100.0% coverage** (the last entry's `dataOffset + dataSize` equals the
 > data.vfs length exactly), **zero** out-of-bounds offsets, **zero** TOC name-ordering violations
-> (the binary-search key invariant holds), and every `dataSize` high dword is zero across the full
-> 43,347-entry scan (low-32-bit size confirmed). A small number of entries share/overlap a payload
-> offset — benign de-duplication of identical files. The static-IDA read of the mount routine and
-> the read primitive corroborates every structural field independently.
+> (the binary-search key invariant holds), **zero gaps**, **zero shared/overlapping offsets** (all
+> 43,347 entries tile perfectly contiguously — entries are 1:1, not de-duplicated in this archive),
+> and every `dataSize` high dword is zero across the full 43,347-entry scan (low-32-bit size
+> confirmed). The static-IDA read of the mount routine and the read primitive corroborates every
+> structural field independently. (An earlier draft noted "a small number of entries share/overlap a
+> payload offset"; the full 43,347-entry scan found zero such cases — that framing is withdrawn.)
 
 ## Identification
 
@@ -52,11 +58,12 @@ The archive is split across two physical files:
 | Data blob | `data/data.vfs` | Opened for read at startup; handle kept alive for the entire process lifetime. |
 
 Opening sequence:
-1. Read the 24-byte header from `data.inf` in a single bulk read; extract `entry_count` at offset 12.
-2. Allocate `144 × entry_count` bytes on the heap.
-3. Read `144 × entry_count` bytes from `data.inf` starting at offset 24; populate the TOC array.
-4. Close `data.inf`.
-5. Open `data/data.vfs` and retain the handle.
+1. Open `data.inf` with `CreateFileA` flags `0x10000001` (`FILE_FLAG_RANDOM_ACCESS | FILE_ATTRIBUTE_READONLY`), read-only access, no write share.
+2. Read the 24-byte header from `data.inf` in a single bulk read; extract `entry_count` at offset 12.
+3. Allocate `144 × entry_count` bytes on the heap.
+4. Read `144 × entry_count` bytes from `data.inf` starting at offset 24; populate the TOC array.
+5. Close `data.inf`.
+6. Open `data/data.vfs` with the same `CreateFileA` flags `0x10000001` (`FILE_FLAG_RANDOM_ACCESS | FILE_ATTRIBUTE_READONLY`) and retain the handle.
 
 All subsequent asset reads seek within `data/data.vfs` using offsets recorded in the TOC.
 
@@ -426,11 +433,12 @@ texture spec (`formats/terrain.md`) should follow the `.lst` binary, not the `.t
 | TOC sort order at build time | sample-verified — ascending by lowercased name; binary-search usage + 200-entry sort-order sample, zero out-of-order |
 | `dataSize` high dword always zero in practice | sample-verified — zero across the full 43,347-entry scan; a non-zero high dword causes the read to fail |
 | `bgtexture.lst` (binary) is the runtime terrain-texture index; `.txt` is an authoring mirror | CONFIRMED — see CONFLICT note above |
+| `data.inf` / `data/data.vfs` open flags | CONFIRMED — `CreateFileA` flags `0x10000001` = `FILE_FLAG_RANDOM_ACCESS \| FILE_ATTRIBUTE_READONLY`, instruction-confirmed in the mount routine (`Vfs_Mount`) for both opens |
 
 The campaign-10 two-witness re-verification resolved the structural questions AND the header/TOC
-field content. The only residuals are runtime/ambiguous: the **meaning** of `field_08` (= 39) and
-whether **any** consumer ever selects the bit2 = 1 raw-seek streaming branch — both
-**(capture/debugger-pending)**.
+field content. The campaign-11 re-verification added the concrete open-flag value. The only residuals
+are runtime/ambiguous: the **meaning** of `field_08` (= 39) and whether **any** consumer ever selects
+the bit2 = 1 raw-seek streaming branch — both **(capture/debugger-pending)**.
 
 ## Cross-references
 

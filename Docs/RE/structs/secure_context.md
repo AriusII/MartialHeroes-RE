@@ -1,10 +1,10 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-19
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 ida_cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 evidence: [static-ida]
-conflicts: the modulus-vs-exponent argument order into the modular-exponentiation call is mildly ambiguous (resolved here from the assignment evidence — first-read bignum → +0x08 = modulus, second-read → +0x00 = exponent — but the exact modexp argument positions stay PENDING); the embedded packet-buffer internal header/body split is PENDING (only the major/minor header words are proven); the bignum digit encodings are PENDING
+conflicts: the embedded packet-buffer internal header/body split is PENDING (only the major/minor header words are proven); the bignum digit encodings are PENDING
 ---
 
 # SecureContext object layout (clean-room spec)
@@ -20,6 +20,9 @@ The object is reached only via `NetClient.secure_context_ptr` (`structs/net_clie
 it is **not** embedded in `NetClient`. The whole object lives on a **guarded memory page** that is
 toggled read-write ↔ no-access around each access (an anti-tamper measure) — a re-implementation
 does not reproduce the page guard, only the field layout.
+
+Refs: `specs/crypto.md` §6.2.2 (header B as PKCS#1 block size `k`), §6.2.3 (modexp argument order),
+§6.3 (reply build), §6a (lifecycle).
 
 All offsets are expressed **relative to the start of the object** (the `SecureContext` instance,
 addressed as `this`). They are never binary addresses. The decimal column is provided because the
@@ -39,7 +42,7 @@ behaviour); `structs/net_client.md` (the owning connection object).
 | Server scalars / staged credential | **CONFIRMED** — two 4-byte server scalars at +0x2E08/+0x2E0C, a recv-key timestamp at +0x2E10, and a staged-password pointer/pad-width pair at +0x2E14/+0x2E18 (pad width = 17 = 0x11). |
 | Object allocation | **CONFIRMED (CYCLE 7)** — a fresh 0x2E20-byte secure-context page is allocated per login attempt by the key-string→secure-context builder. |
 | Credential plaintext layout | **CONFIRMED (CYCLE 7)** — the 1/4 login-packet builder writes the plaintext region as `SubOpcode 0x2B` + `[u32 LE len] ACCOUNT(+NUL)` + optional `[u32 LE len] PIN(+NUL)`; PASSWORD is staged separately at +0x2E14 as the RSA plaintext M (appended later as ciphertext). |
-| Modexp argument order | **UNVERIFIED** — modulus-vs-exponent positions mildly ambiguous; resolved here from the assignment evidence but the exact modexp argument roles stay PENDING. |
+| Modexp argument order | **CONFIRMED** — `Bignum_ModExp` is `base^exp mod modulus`; `Rsa_PadAndModExp` passes exponent = key_object+0x00 (second-read), modulus = key_object+0x08 (first-read), base = padded message. Confirmed by control-flow + operand mapping in the current IDB. |
 | Bignum digit encodings | **PENDING** — the on-the-wire digit encoding inside each bignum and inside the key-exchange blob is not byte-decoded here. |
 
 Confidence per field is given inline in each table (`CONFIRMED`, `UNVERIFIED`). Field VALUE
@@ -88,15 +91,16 @@ Offsets relative to the start of the object.
 Offsets below are **relative to the key-object base** (= SecureContext +0x2DA8). Each bignum slot is
 a fixed inline arbitrary-precision-integer **structure** of ~8 bytes — a {digit-buffer pointer +
 word-count} pair; the public-key material is a pointer+length bignum, **not** a raw fixed-byte
-buffer. The two 2-byte headers carry opaque per-value header words (one of which is also read as the
-modulus word-count by the padder).
+buffer. The two 2-byte headers are per-value header words from the blob; header B (`+0x12`) is
+read by the padder as the PKCS#1 block size `k` (see `specs/crypto.md` §6.2.2). The padder reads
+`key_header_2` directly — it does **not** derive `k` from the modulus bignum's word-count.
 
 | Rel offset | Abs offset | Size | Type | Field | Confidence | Notes |
 |------------|-----------|------|------|-------|------------|-------|
-| +0x00 | +0x2DA8 | ~8 | bignum struct | `exponent_bignum` | CONFIRMED (store) / role PENDING | The importer assigns the **second-read** bignum to the key-object base (+0x00). In the modular-exponentiation call it is the base operand argument. Whether it is the exponent vs the modulus is the ambiguity noted below (resolved here as exponent). |
-| +0x08 | +0x2DB0 | ~8 | bignum struct | `modulus_bignum` | CONFIRMED (store) / role CF via padding | The importer assigns the **first-read** bignum to +0x08. Its word-count sizes the padded block (as modulus-bytes − 1) and it is the modulus passed to the modular-exponentiation routine. The modulus role is control-flow-confirmed via the padded-block sizing. |
-| +0x10 | +0x2DB8 | 2 | uint16 | `key_header_1` | CONFIRMED | Opaque 2-byte per-value header, copied from the blob (bytes +0). Value meaning PENDING. |
-| +0x12 | +0x2DBA | 2 | uint16 | `key_header_2` | CONFIRMED | Opaque 2-byte per-value header, copied from the blob (bytes +2). Also read as the modulus word-count by the padder. Value meaning PENDING. |
+| +0x00 | +0x2DA8 | ~8 | bignum struct | `exponent_bignum` | CONFIRMED | The importer assigns the **second-read** bignum here. `Rsa_PadAndModExp` passes this slot as the exponent argument to `Bignum_ModExp`. Role confirmed by control-flow operand mapping (see `specs/crypto.md` §6.2.3). |
+| +0x08 | +0x2DB0 | ~8 | bignum struct | `modulus_bignum` | CONFIRMED | The importer assigns the **first-read** bignum here. `Rsa_PadAndModExp` passes this slot as the modulus argument to `Bignum_ModExp`. Supplies the modular-reduction operand only — **does not** size the padded block (see key_header_2 below). |
+| +0x10 | +0x2DB8 | 2 | uint16 | `key_header_1` | CONFIRMED | Opaque 2-byte per-value header, copied from the blob (bytes 0–1). Value meaning PENDING. |
+| +0x12 | +0x2DBA | 2 | uint16 | `key_header_2` | CONFIRMED | 2-byte per-value header, copied from the blob (bytes 2–3). **Read as a little-endian u16 by `Rsa_PadAndModExp` to derive the PKCS#1 block size `k`** (block is built to `key_header_2 − 1` bytes). This is header B of the blob as described in `specs/crypto.md` §6.2.2. The padder reads this field directly, **not** the modulus bignum's word-count. Value meaning PENDING beyond its role as `k`. |
 
 > **Key-exchange blob layout (for reference — NOT a SecureContext field).** The importer consumes
 > the 54-byte `key_exchange_blob` as: 2-byte header 1 + 2-byte header 2 + 4-byte little-endian
@@ -150,10 +154,10 @@ mis-size the field from the UI control width.
 - **The key material is a pointer+length bignum pair, not raw bytes.** Model `exponent_bignum` and
   `modulus_bignum` with an arbitrary-precision-integer type; do not assume a fixed byte buffer. The
   digit encoding (word size, endianness within the digit array) is PENDING.
-- **Modexp argument order is resolved-but-PENDING.** The assignment evidence places the first-read
-  bignum at +0x08 (modulus, confirmed via padded-block sizing) and the second-read at +0x00
-  (exponent). The exact argument positions in the modular-exponentiation call are mildly ambiguous
-  and stay PENDING.
+- **Modexp argument order is CONFIRMED.** `Bignum_ModExp` is `base^exp mod modulus`. `Rsa_PadAndModExp`
+  passes: base = padded message, exponent = bignum at key_object+0x00 (second-read), modulus = bignum
+  at key_object+0x08 (first-read). Confirmed by control-flow + FLINT-primitive operand mapping (see
+  `specs/crypto.md` §6.2.3).
 - **The staged credential is a separate allocation** referenced by
   `staged_password_ptr`/`pad_width_latch` (+0x2E14/+0x2E18); it is the zero-padded RSA plaintext M
   (pad width 17, password `memcpy`d with no trailing NUL), modular-exponentiated, then appended as
@@ -164,13 +168,12 @@ mis-size the field from the UI control width.
 
 ---
 
-## Open questions (UNVERIFIED / PENDING)
+## Open questions (PENDING)
 
-1. **Modexp argument order (UNVERIFIED).** Which inline bignum is the modulus vs the exponent in the
-   modular-exponentiation call order is mildly ambiguous; resolved here from the assignment evidence
-   (first-read → modulus @ +0x08, second-read → exponent @ +0x00) but the exact argument positions
-   stay PENDING.
-2. **Embedded packet-buffer internal split (PENDING).** The buffer's exact header/body field shape
+1. **Embedded packet-buffer internal split (PENDING).** The buffer's exact header/body field shape
    (beyond the major/minor header words at +0x04/+0x06) is not decoded.
-3. **Bignum digit encodings (PENDING).** The on-the-wire and in-memory digit encoding inside each
+2. **Bignum digit encodings (PENDING).** The on-the-wire and in-memory digit encoding inside each
    bignum, and inside the 54-byte key-exchange blob, is not byte-decoded here.
+
+Previously listed: modexp argument order — **RESOLVED CONFIRMED** (see key-object sub-table and
+`specs/crypto.md` §6.2.3).

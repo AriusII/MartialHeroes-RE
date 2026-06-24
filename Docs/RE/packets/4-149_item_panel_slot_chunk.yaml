@@ -1,3 +1,16 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing confirmed; Guard u8@0 (==1 required),
+#                 PlayerId u32@+0x04 (local-player gated), ChunkType u8@+0x08 (0=equip/1=bag),
+#                 StartIndex u8@+0x09, Count u8@+0x0A, Records[Count] 16-byte stride@+0x0C.
+#                 Equip cap 20 records confirmed (equip table = 320 bytes / 16 = 20).
+#                 Size 12+16*Count byte-exact.)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none.
+
 name: SmsgItemPanelSlotChunk
 opcode: 0x40095           # major 4, minor 149
 direction: S2C

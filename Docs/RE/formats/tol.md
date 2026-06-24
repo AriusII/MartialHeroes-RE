@@ -1,4 +1,4 @@
-# Format: `.tol`  (per-area authoring grid — tool-side region/walk grid; NOT loaded by the shipped client)
+# Format: `.tol`  (per-area authoring grid — tool-side fine-resolution boolean grid; NOT loaded by the shipped client)
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed (optionally) by Assets.Parsers. Every offset an engineer cites must reference this file:
@@ -10,24 +10,35 @@
 
 ```
 verification:   sample-verified   # 16-byte front header + width×height byte grid body, the
-                                   #   16 + W×H size formula, and the front-origin == region.bin
-                                   #   trailing-origin cross-match — all matched against real VFS samples
-ida_reverified: 2026-06-21
-ida_anchor:     263bd994
+                                   #   16 + W×H size formula, the front-origin == region.bin
+                                   #   trailing-origin cross-match, the 0/1-only cell value, and
+                                   #   the 64×-finer resolution vs region.bin — all matched against
+                                   #   real VFS samples (map009/013/100) by byte-exact arithmetic.
+ida_reverified: 2026-06-24
+ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence:       [static-ida (absence proof), vfs-sample]
-conflicts:      none-open
+conflicts:      CORRECTED (2026-06-24) — two prior doc errors overturned by byte evidence:
+                  (1) cell values: the doc previously asserted region-record index 0..31 and
+                      refuted a 0/1 mask reading; byte data show .tol cells are 0/1 only across
+                      both the 2048² and 256² samples (a mask reading; the 0..31 range lives
+                      in region<NNN>.bin, NOT in .tol). Semantic of 0 vs 1 remains unknown.
+                  (2) relationship: the doc previously stated .tol and region<NNN>.bin encode
+                      "the same logical content … same width×height byte grid"; the grids
+                      differ in resolution by 64× per axis (.tol = 4 wu/cell; region.bin =
+                      256 wu/cell) over the same world extent — they share only the origin
+                      anchor. The "same grid, two header arrangements" framing is withdrawn.
 # The shipped client contains NO reference to the .tol extension — proven absent by an exhaustive
 # byte scan of every segment. The layout below is recovered from VFS sample bytes plus a structural
 # cross-match to the sibling region<NNN>.bin (whose loader IS in the binary). See region_grid.md for
 # the runtime counterpart and the full region/zone subsystem.
 ```
 
-> **⚠️ HEADLINE — the shipped client does NOT load `.tol`.** The legacy client references **no `.tol`
+> **HEADLINE — the shipped client does NOT load `.tol`.** The legacy client references **no `.tol`
 > path literal anywhere** (an exhaustive byte scan of `.text` / `.rdata` / `.data` / `.idata` / `.rsrc`
 > for the `.tol` extension in ASCII, uppercase, and UTF-16LE returns **zero hits**). The map subsystem's
 > complete per-area / per-cell file-path table enumerates every asset the engine opens
 > (`map<NNN>.bin`, `regiontable<NNN>.bin`, `region<NNN>.bin`, `npc<NNN>.arr`, the per-cell
-> `.ted`/`.ted.post`/`.sod`, the cell-list `d<NNN>.lst`, sky/effect/sound paths, and the `tool/…` editor
+> `.ted`/`.sod`, the cell-list `d<NNN>.lst`, sky/effect/sound paths, and the `tool/…` editor
 > variants) — and it contains **no `.tol`** entry and **no generic `%s.tol` builder**. `.tol` is therefore
 > an **authoring / tool-side artifact** that rides inside the VFS but has **no runtime read-site**. For the
 > C#/Godot port this format is **OPTIONAL / informational** — the runtime spatial data the client actually
@@ -40,20 +51,21 @@ conflicts:      none-open
 ## Identification
 
 - **Extension:** `.tol`
-- **Logical role:** a single per-area 2D grid of one-byte cell values — the **authoring / tool-side
-  counterpart of the runtime `region<NNN>.bin`** region/zone grid. It is the fine-grained source grid the
-  area-build toolchain emits; the runtime `region<NNN>.bin` is the repacked product of the same logical
-  content (same four integers + a `width × height` byte grid, differing only in where the integers sit
-  relative to the body — see "Relationship to `region<NNN>.bin`" below).
+- **Logical role:** a single per-area 2D grid of one-byte cell values — a **fine-resolution boolean
+  grid** (cells are `0` or `1` only) used by the area-build toolchain. It is an authoring / tool-side
+  artifact for the same world extent as the runtime `region<NNN>.bin`, but at **64× the linear
+  resolution** (4 world units per cell vs region.bin's 256 world units per cell). The two files share
+  only their world-space origin anchor and the area id; they are not the same grid at different header
+  arrangements. See "Relationship to `region<NNN>.bin`" below.
 - **File path:** `data/map<NNN>/<NNN>.tol` (`<NNN>` is the area / map number). The file rides **inside
   `data/data.vfs`** for the maps that carry one; the extension was preserved by the VFS index, **not** by
   any path builder in the binary.
 - **Magic / signature:** none — no magic value, no version field.
 - **Endianness:** little-endian throughout (x86 client). All multi-byte fields decode sanely as LE.
 - **Compression / encryption:** none observed — the body is a raw byte raster.
-- **Cell type:** single unsigned byte (`u8`).
+- **Cell type:** single unsigned byte (`u8`), values observed: `0` and `1` only (boolean).
 
-> **⚠️ No client loader exists.** Because the shipped client never opens a `.tol`, there is **no
+> **No client loader exists.** Because the shipped client never opens a `.tol`, there is **no
 > client-side read path** to describe — the layout below is recovered from VFS sample bytes plus a
 > structural cross-match to the sibling `region<NNN>.bin`, whose loader IS in the binary. Any read
 > algorithm here is for a **port that chooses** to consume `.tol`, never a transcription of client code.
@@ -78,19 +90,18 @@ total size     = 16 + (width × height)
 
 | Offset | Size | Type | Field     | Notes                                                                 | Confidence |
 |-------:|-----:|------|-----------|-----------------------------------------------------------------------|------------|
-| +0x00  | 4    | i32  | `originX` | World-space X origin (signed). Cross-matched to the same map's `region<NNN>.bin` trailing `originX`. | CONFIRMED (cross-match) |
-| +0x04  | 4    | i32  | `originZ` | World-space Z origin (signed). Cross-matched to the same map's `region<NNN>.bin` trailing `originZ`. | CONFIRMED (cross-match) |
-| +0x08  | 4    | u32  | `width`   | Grid columns (cells along X).                                         | HIGH (sample) |
-| +0x0C  | 4    | u32  | `height`  | Grid rows (cells along Z).                                            | HIGH (sample) |
+| +0x00  | 4    | i32  | `originX` | World-space X origin (signed). Cross-matched byte-for-byte to the same map's `region<NNN>.bin` trailing `originX` (3 areas). | CONFIRMED (cross-match) |
+| +0x04  | 4    | i32  | `originZ` | World-space Z origin (signed). Cross-matched byte-for-byte to the same map's `region<NNN>.bin` trailing `originZ` (3 areas). | CONFIRMED (cross-match) |
+| +0x08  | 4    | u32  | `width`   | Grid columns (cells along X). Per-area — do not assume a fixed dimension. | HIGH (sample) |
+| +0x0C  | 4    | u32  | `height`  | Grid rows (cells along Z). Per-area; equals `width` in both samples (square grid, not guaranteed). | HIGH (sample) |
 
-- The four header integers **lead** the file; the grid body follows immediately at `+0x10`. This **header
-  arrangement is the only structural difference** from `region<NNN>.bin`, where the same four integers split
-  around the body (`width`/`height` at the front, origins trailing the body) — see the relationship section.
-- **Origin signedness.** The origin fields are signed 32-bit integers so an area whose authored extent
-  begins at negative world coordinates is addressed correctly. (The runtime `region<NNN>.bin` indexer
-  computes `(coord − origin)` with signed arithmetic; the `.tol` origins are the same values.)
-- The sampled origins are multiples of 256 (the region-grid cell stride), consistent with the region grid
-  being anchored on whole region cells.
+- The four header integers **lead** the file; the grid body follows immediately at `+0x10`. This is the
+  opposite field-placement convention from `region<NNN>.bin`, where `width`/`height` lead but the origin
+  pair trails the body — see "Relationship to `region<NNN>.bin`" below.
+- **Origin signedness.** The origin fields are signed 32-bit integers; a map whose authored extent
+  begins at negative world coordinates is addressed correctly. The sampled origins are multiples of 256.
+- The sampled origins are multiples of 256 world units, consistent with both `.tol` and region.bin being
+  anchored on whole region-grid cells.
 
 ### Body — the cell grid (`width × height` bytes)
 
@@ -99,27 +110,76 @@ total size     = 16 + (width × height)
 | +0x10.. | width × height | u8[h][w]  | `cellGrid` | Row-major raster (row stride = `width`). One unsigned byte per cell.   | HIGH (sample) |
 
 - **Indexing:** `value = cellGrid[row * width + col]`, where `col` runs along X and `row` runs along Z
-  (row-major, Z-major) — the same convention as the runtime region indexer
-  (`index = (X − originX)/256 + (Z − originZ)/256 × width`).
-- **Element stride:** 1 byte. The body is a flat raster bitmap, **not** a record array — there is no per-cell
-  struct and no stride beyond the single byte.
-- **Cell value = region-record INDEX (`0..31`).** The cell byte is a **region-record index** into the
-  area's 32-slot region table (`regiontable<NNN>.bin`; `0` = none/no-region, `1..31` = a region record
-  slot) — identical in meaning to the runtime `region<NNN>.bin` cell byte. An earlier reading of `.tol`
-  alone observed only the values `0` and `1` and proposed a walkable/blocked **mask**; that mask reading is
-  **REFUTED** — the runtime `region<NNN>.bin` corpus exercises the full `0..31` range across many maps,
-  proving the cell byte is an INDEX, not a `0/1` mask. The `0`/`1`-only appearance was an artifact of the
-  few `.tol` samples available, whose authored areas happened to use only region IDs `0` and `1`.
+  (row-major, Z-major).
+- **Element stride:** 1 byte. The body is a flat raster bitmap, **not** a record array.
+- **Cell value — 0/1 boolean (CORRECTED).** Byte evidence from both the 2048×2048 sample (map009/013)
+  and the independent 256×256 sample (map100) shows `.tol` cells contain **only the values `0` and
+  `1`**. This is a **boolean grid**, not a region-record index grid. The earlier doc claim that `.tol`
+  cells equal the region-record index range `0..31` and that a mask reading was "REFUTED" is
+  **overturned by the byte data** — the multi-valued `0..31` range lives in `region<NNN>.bin`, not
+  in `.tol`. The **semantic meaning** of `0` vs `1` (walkable/blocked, in-bounds/out-of-bounds,
+  authored/empty, or another authoring flag) is a **known unknown**: no client read-site exists to
+  reveal it, and the two samples do not vary enough to resolve it. Do not hard-code a semantic
+  interpretation.
 - **No magic / version / compression / encryption** in the body — raw bytes are the grid.
 
 ### Size derivation
 
-- `total = 16 + width × height` (1 byte per cell) — sample-verified.
-- World span along X = `width × 256` world units (the region grid uses a **256 world units per cell**
-  stride); world span along Z = `height × 256`.
+- `total = 16 + width × height` (1 byte per cell) — sample-verified across both sample sizes.
+- World span along X = `width × 4` world units (`.tol` cell stride = 4 wu — see "Resolution" below);
+  world span along Z = `height × 4`. This span equals the same map's `region<NNN>.bin` extent
+  (`region_width × 256` wu), because `.tol` is 64× finer over the same world coverage.
 - The body length **must** equal `width × height` and reconciles with the on-disk file size as
   `16 + width × height`. A `.tol` whose declared `width × height` does not match `fileSize − 16` is
   malformed.
+
+### Observed samples
+
+| File                  | File size | originX | originZ | width | height | Cell values |
+|-----------------------|----------:|--------:|--------:|------:|-------:|-------------|
+| `data/map009/009.tol` | 4,194,320 | 8192    | 57344   | 2048  | 2048   | 0 and 1 only |
+| `data/map013/013.tol` | 4,194,320 | 8192    | 57344   | 2048  | 2048   | 0 and 1 only (byte-identical to map009) |
+| `data/map100/100.tol` | 65,552    | 23552   | 55296   | 256   | 256    | 0 and 1 only |
+
+Note: `map009/009.tol` and `map013/013.tol` are byte-identical (same content under two area numbers).
+`map100/100.tol` provides the independent second data point.
+
+---
+
+## Resolution and relationship to `region<NNN>.bin`
+
+### Cell strides — three distinct grids, three strides
+
+Do not conflate the three grid resolutions present in the per-area data set:
+
+| Grid                   | Cell stride   | Typical grid size | Doc |
+|------------------------|:-------------:|:-----------------:|-----|
+| `.ted` terrain         | 1024 wu/cell  | 65×65             | `terrain.md` |
+| `region<NNN>.bin`      | 256 wu/cell   | 32×32 (typical)   | `region_grid.md` |
+| `.tol`                 | 4 wu/cell     | 2048×2048 (typical) | this doc |
+
+The `.tol` cell stride of **4 world units** is derived from the confirmed world-span equality:
+`tol_width × 4 == region_width × 256` (verified on both samples: 2048×4 = 8192 = 32×256; 256×4 = 1024 = 4×256).
+
+### Relationship to `region<NNN>.bin` — shared origin anchor only (CORRECTED)
+
+`.tol` and `region<NNN>.bin` are **not** the same grid re-headered. They share the world-space origin
+anchor and the area id; everything else differs:
+
+| Aspect              | `.tol` (authoring)                          | `region<NNN>.bin` (runtime)                    |
+|---------------------|---------------------------------------------|------------------------------------------------|
+| Read by client?     | **No** — never opened by the engine         | **Yes** — the shipped client loads this        |
+| Cell stride         | **4 world units** (fine resolution)         | **256 world units** (coarse resolution)        |
+| Grid size (map009)  | 2048 × 2048                                 | 32 × 32                                        |
+| Linear ratio        | 64× finer per axis over the same world span | —                                              |
+| Cell semantics      | **0/1 boolean** (meaning unknown)           | **region-record INDEX 0..31**                  |
+| Origin placement    | FRONT, leading a 16-byte header             | END, trailing the grid body                    |
+| Field order         | `originX, originZ, width, height, grid`     | `width, height, grid, originX, originZ`        |
+| Total size          | `16 + W×H`                                  | `16 + W×H` (same total for the header bytes; body size differs because W×H differs) |
+| Origins match?      | front origins **equal** the same map's runtime trailing origins (CONFIRMED, 3 areas, byte-exact) | trailing origins are the source of truth |
+
+The earlier "same grid, two header arrangements" framing in this doc is **withdrawn**. The shared-origin
+confirmation (re-confirmed here) is correct; the body-identity claim is not.
 
 ---
 
@@ -129,46 +189,18 @@ The shipped client has no `.tol` read path. A port that chooses to consume `.tol
 
 1. Read `i32 originX`, `i32 originZ`, `u32 width`, `u32 height` (little-endian) from the 16-byte front
    header.
-2. Read `width × height` bytes into a row-major (Z-major) byte grid.
-3. To map a world position `(X, Z)` to a cell: subtract the signed origin, divide each axis by the
-   **256-unit** region cell stride, compute the row-major index `(X − originX)/256 + (Z − originZ)/256 ×
-   width`, bounds-check against `width × height`, and read the cell byte as a **region-record index**.
+2. Validate `fileSize == 16 + width × height`; reject malformed files.
+3. Read `width × height` bytes into a row-major (Z-major) byte grid.
+4. To map a world position `(X, Z)` to a cell: subtract the signed origin, divide each axis by the
+   **4-unit** `.tol` cell stride, compute the row-major index `(X − originX)/4 + (Z − originZ)/4 ×
+   width`, bounds-check against `width × height`, and read the cell byte (`0` or `1`).
 
-There is no decode, transform, checksum, or validation step — the raw bytes are the grid. Note that for the
-**runtime** game a port should read the equivalent values from `region<NNN>.bin` (the format the engine
-actually loads), not from `.tol`.
+There is no decode, transform, checksum, or validation step — the raw bytes are the grid. Use the
+**4-wu** stride for `.tol`; use the **256-wu** stride only for `region<NNN>.bin`; use the
+**1024-wu** stride only for `.ted` terrain cells. Never mix them.
 
-> **⚠️ Do NOT confuse the region cell size with the terrain cell size.** The `.tol` / region grid cell is
-> **256 world units**. This is **distinct** from the **terrain** cell, which is **1024 world units** on a
-> 65×65 grid (see `terrain.md` and the coordinate conventions). Index `.tol` with the 256-unit stride,
-> never the 1024-unit terrain stride.
-
----
-
-## Relationship to `region<NNN>.bin` — same grid, two header arrangements
-
-`.tol` (authoring) and `region<NNN>.bin` (runtime) encode the **same logical content**: four 32-bit
-integers (origin X, origin Z, width, height) plus a `width × height` byte grid of region-record indices at
-256 world units per cell. They differ **only in where the four integers sit relative to the grid body**.
-
-| Aspect           | `.tol` (authoring)                                | `region<NNN>.bin` (runtime)                          |
-|------------------|---------------------------------------------------|------------------------------------------------------|
-| Read by client?  | **No** — never opened by the engine               | **Yes** — the shipped client loads this              |
-| Origin placement | FRONT, leading a 16-byte header                   | END, trailing the grid body                          |
-| Field order      | `originX, originZ, width, height, grid`            | `width, height, grid, originX, originZ`              |
-| Total size       | `16 + W×H`                                         | `16 + W×H` (same total)                              |
-| Grid size/meaning| identical (region-record index, row-major)        | identical                                            |
-| Cell stride      | 256 world units                                   | 256 world units                                      |
-| On disk          | inside `data.vfs` for the maps that carry one; never *opened* by the engine | loaded by name per active map area |
-| Origins match?   | front origins **equal** the same map's runtime trailing origins (CONFIRMED cross-match) | trailing origins are the source of truth |
-
-- The `.tol` front origins were cross-matched, byte-for-byte, against the same map's `region<NNN>.bin`
-  trailing origins, which **confirms** that the leading two `.tol` integers are `originX` / `originZ`
-  (resolving the earlier "header order proposed by analogy" doubt). A full grid-body byte-match was not
-  performed; the size and origin agreement suffice for the layout claim.
-- Treat them as **two formats**, not one: the tool-side source (`.tol`) and the runtime-repacked product
-  (`region<NNN>.bin`). An engineer implementing the live game reads `region<NNN>.bin` (Layout A in
-  `region_grid.md`), whose origins are parser-confirmed and signed.
+> For the **runtime** game a port should read zone/region data from `region<NNN>.bin` (the format the
+> engine actually loads — see `region_grid.md`), not from `.tol`.
 
 ---
 
@@ -176,20 +208,17 @@ integers (origin X, origin Z, width, height) plus a `width × height` byte grid 
 
 - **JOIN KEY — the area id `<NNN>` + the shared (originX, originZ) anchor.** A `<NNN>.tol` describes the
   same area, anchored at the same world origin, as that area's `region<NNN>.bin` and the rest of the
-  `data/map<NNN>/…` set; the origins are cross-confirmed equal.
+  `data/map<NNN>/…` set; the origins are cross-confirmed equal (byte-exact, 3 areas).
 - **Referenced BY the shipped client — NOTHING.** No `.tol` path literal is referenced by the engine
   (proven absent). The only thing that "references" a `.tol` is the VFS index that stores it.
 - **It references — nothing external.** `.tol` is self-contained: the four header integers plus a raw byte
-  grid. The cell bytes are region-record **indices** that (for the runtime equivalent) index
-  `regiontable<NNN>.bin`.
-- **Producer / consumer — the area-build / map-editor toolchain.** `.tol` is most plausibly emitted and
-  consumed by the same authoring toolchain that produces the `tool/region/…` and `tool/mob/…` editor
-  variants seen in the map path table; the runtime `region<NNN>.bin` is the repacked product the shipped
-  client loads. (Producer/consumer identity is structural inference, not a binary read — no client read-site
-  exists.)
+  grid.
+- **Producer / consumer — the area-build / map-editor toolchain.** `.tol` is most plausibly emitted by
+  the same authoring toolchain that produces the `tool/region/…` and `tool/mob/…` editor variants seen in
+  the map path table. (Producer/consumer identity is structural inference — no client read-site exists.)
 - **Runtime equivalent the engine actually loads:** `region<NNN>.bin` (see `region_grid.md`), loaded once
-  per active map area and queried by world position to answer "which region/zone is this point in?", driving
-  spawn rules, gather points, sound zones, and movement / region-state / combat-mode validation.
+  per active map area and queried by world position to answer "which region/zone is this point in?",
+  driving spawn rules, gather points, sound zones, and movement / region-state / combat-mode validation.
 
 ---
 
@@ -207,20 +236,18 @@ not line up with the rendered world.
 
 The following remain unresolved and must not be guessed at during implementation:
 
-1. **Cell-value polarity for region IDs `0` vs non-zero.** The byte is a region-record **index** (refuting
-   the earlier walkable/blocked-mask reading); the per-region semantics (safe / PvP / closed) come from the
-   indexed `regiontable<NNN>.bin` record's `zoneType`, not from the `.tol` byte itself. The mapping of
-   `zoneType` to behaviour is documented in `region_grid.md`.
-2. **Whether `width`/`height` are constant across all areas.** Sampled `.tol` files include both small
-   (256×256) and large (2048×2048) grids — `width`/`height` are **per-area**, read from the header, not a
-   global constant. Do not assume any fixed dimension.
-3. **Endianness.** Assumed little-endian (x86 MSVC client); all fields decode sanely as LE. Not
-   independently confirmed by a big-endian counter-sample (none exists for this platform).
-4. **Full grid-body byte-match `.tol` ↔ `region<NNN>.bin`.** RESOLVED for the **origin** fields (front
-   origins equal the runtime trailing origins, cross-matched); a complete body-vs-body byte comparison was
-   not performed. The size and origin agreement suffice for the layout claim.
-5. **Whether the engine ever consumes `.tol` directly.** None found — no `.tol` path literal is referenced
-   by the loader. `.tol` is the tool/source artifact later repacked into the runtime `region<NNN>.bin`.
+1. **Semantic meaning of cell value `0` vs `1`.** The `.tol` body is a boolean grid (`0`/`1` only,
+   confirmed across two independent area sizes). What `0` and `1` mean — walkable/blocked,
+   in-bounds/out-of-bounds, authored/empty, or another authoring flag — is **unknown**: no client
+   read-site exists and the two samples do not vary enough to resolve the polarity. Do not hard-code a
+   semantic.
+2. **Whether `width`/`height` are always equal (square grid).** Both samples are square, but this is not
+   guaranteed by the format. Read both from the header.
+3. **Whether the cell stride is always exactly 4 wu.** Derived consistently across both samples (4 wu =
+   span / tol_width, where span = region_width × 256). Treat as HIGH-confidence but not formally proven
+   by a third independent area with a different resolution.
+4. **Whether the engine ever consumed `.tol` directly in an earlier build.** None found — no `.tol` path
+   literal is referenced in `doida.exe`. A different (earlier/later) client build is unverified.
 
 ---
 
@@ -228,10 +255,10 @@ The following remain unresolved and must not be guessed at during implementation
 
 | Format / file       | File                                | Relationship                                                                 |
 |---------------------|-------------------------------------|------------------------------------------------------------------------------|
-| `region_grid.md`    | `data/map<NNN>/region<NNN>.bin`     | The **runtime** counterpart — same logical grid, origins trailing the body; this is the format the shipped client actually loads. Also documents `regiontable<NNN>.bin` (the 32×48 region record table the cell byte indexes), the `zoneType` enum, and the combat-mode resolution rule. |
-| `region_grid.md`    | `data/map<NNN>/regiontable<NNN>.bin`| The 32-slot × 48-byte region-properties table the `.tol` cell byte (a region index `0..31`) selects into. |
-| `sod.md`            | `data/map<area>/dat/*.sod`          | The runtime **wall-collision** data the client actually uses (XZ wall segments) — distinct from any walkability reading of `.tol`. |
-| `terrain.md`        | `data/map<NNN>/*.ted` etc.          | Per-cell terrain; the region/`.tol` grid (256-unit cell) is the **coarser** map-wide partition — do not conflate it with the 1024-unit / 65×65 terrain cell grid. |
+| `region_grid.md`    | `data/map<NNN>/region<NNN>.bin`     | The **runtime** counterpart — coarse 256-wu cell, region-record INDEX `0..31`; loaded by the shipped client. Shares only the world-space origin anchor with `.tol`. |
+| `region_grid.md`    | `data/map<NNN>/regiontable<NNN>.bin`| The 32-slot × 48-byte region-properties table whose cell indices the runtime `region<NNN>.bin` grid selects into (not `.tol` — `.tol` cells are boolean, not region indices). |
+| `sod.md`            | `data/map<area>/dat/*.sod`          | The runtime **wall-collision** data the client actually uses (XZ wall segments). |
+| `terrain.md`        | `data/map<NNN>/*.ted` etc.          | Per-cell terrain (1024-wu cell, 65×65 grid) — the coarsest per-area grid. Do not conflate the three cell strides (1024 / 256 / 4 wu). |
 | `npc_spawns.md`     | `data/map<NNN>/npc<NNN>.arr`        | Spawn placement in the same per-area set anchored at the shared (originX, originZ). |
 | `pak.md`            | `data.inf` / `data/data.vfs`        | VFS container that holds the `.tol` files (which the engine never opens). |
 
@@ -245,9 +272,10 @@ The following remain unresolved and must not be guessed at during implementation
 
 ## Names flagged for names.yaml (orchestrator to record)
 
-- Format: `tol` → "Per-area authoring region/walk grid (tool-side; NOT loaded by the shipped client)"
+- Format: `tol` → "Per-area authoring boolean grid (tool-side, fine 4-wu resolution; NOT loaded by the shipped client)"
 - Struct: `TolFile` (front-origin layout): `originX` (i32), `originZ` (i32), `width` (u32), `height` (u32),
-  `cellGrid` (u8[height][width], row-major region-record indices)
-- Constants: `TOL_HEADER_SIZE = 16`, region cell stride `= 256` world units (shared with `region<NNN>.bin`)
-- Relation: `tol.origin == region<NNN>.bin.origin` (shared per-area anchor); `.tol` = authoring grid,
-  `region<NNN>.bin` = runtime grid (same content, different header arrangement)
+  `cellGrid` (u8[height][width], row-major boolean 0/1 values)
+- Constants: `TOL_HEADER_SIZE = 16`, `.tol` cell stride `= 4` world units
+- Relation: `tol.originX == region<NNN>.bin.originX` and `tol.originZ == region<NNN>.bin.originZ`
+  (shared per-area world anchor; confirmed byte-exact on 3 areas); `.tol` = fine 4-wu boolean grid,
+  `region<NNN>.bin` = coarse 256-wu region-index grid (different resolution, different cell semantics)

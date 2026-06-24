@@ -2,14 +2,19 @@
 #
 # VERIFICATION BANNER
 #   verification: confirmed  (opcode->handler routing and the fixed 32-byte body (ONE roster entry) --
-#                 member-key@0x00 / sort@0x04 / rank-flag@0x08 / CP949 name @0x09 -- are
-#                 control-flow-confirmed; every VALUE meaning is capture/debugger-pending)
-#   ida_reverified: 2026-06-20
-#   ida_anchor: 263bd994
+#                 member-key@0x00 / sort@0x04 / rank-flag@0x08 / CP949 name @0x09 / NameGate i16@0x1A /
+#                 byte@0x1C / byte@0x1D -- are control-flow-confirmed; every VALUE meaning is
+#                 capture/debugger-pending)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 #   evidence: [static-ida]
-#   conflicts: CORRECTED. A prior reading marked 5/65 "var (32 body)" implying a stride-32 multi-record
-#              body. The handler reads a single fixed 32-byte block = ONE member update (one packet =
-#              one member), NOT a variable count of stride-32 records. BINARY WINS.
+#   conflicts: CORRECTED (round 1). A prior reading marked 5/65 "var (32 body)" implying a stride-32
+#              multi-record body. The handler reads a single fixed 32-byte block = ONE member update (one
+#              packet = one member), NOT a variable count of stride-32 records. BINARY WINS.
+#              CORRECTED (round 2). The Tail[7]@0x19 field was opaque/NUL-pad. The binary reveals three
+#              real sub-fields inside that region: NameGate i16@0x1A (nonzero = assign Name to actor,
+#              zero = clear it), a byte@0x1C (-> actor+1764, set branch), and byte@0x1D (-> actor+173).
+#              Not all of 0x19..0x1F is trailing pad.
 
 name: SmsgGuildMemberRosterUpdate
 opcode: 0x50041           # major 5 (Push), minor 65 -> (5 << 16) | 65
@@ -19,26 +24,36 @@ spec: packets/5-65_guild_member_roster_update.yaml
 status: hypothesis
 capture_verified: false
 
-summary: Server assigns or clears one guild member's name and rank/flag on the resolved actor (and mirrors onto the local player when the local player is the affected member). A fixed 32-byte block carrying ONE roster entry -- one packet updates one member, NOT a multi-record list.
+summary: Server assigns or clears one guild member's name and rank/flag on the resolved actor (and mirrors onto the local player when the local player is the affected member). A fixed 32-byte block carrying ONE roster entry -- one packet updates one member, NOT a multi-record list. A name-present gate at +0x1A controls whether the name is assigned or cleared.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 32.
 fields:
   - { name: MemberKey, type: u32 }          # 0x00  actor composite key low (member id)
   - { name: Sort,      type: u32 }          # 0x04  actor composite key high (sort)
   - { name: RankFlag,  type: u8 }           # 0x08  rank / flag byte
-  - { name: Name,      type: "bytes[16]" }  # 0x09  member guild-name string (CP949, 16-char field, NUL at +0x19)
-  - { name: Tail,      type: "bytes[7]" }   # 0x19  remainder of the 32-byte block (NUL terminator + trailing pad)
-  # widths: 4 + 4 + 1 + 16 + 7 = 32
+  - { name: Name,      type: "bytes[16]" }  # 0x09  member guild-name string (CP949, 16-char field)
+  - { name: NulTerm,   type: u8 }           # 0x19  forced NUL terminator for Name
+  - { name: NameGate,  type: i16 }          # 0x1A  name-present gate: nonzero = assign Name to actor; zero = clear it (-> actor+170)
+  - { name: ByteC,     type: u8 }           # 0x1C  byte field (-> actor+1764, set branch)
+  - { name: ByteD,     type: u8 }           # 0x1D  byte field (-> actor+173)
+  - { name: Pad0,      type: "bytes[2]" }   # 0x1E  trailing pad / opaque remainder
+  # widths: 4 + 4 + 1 + 16 + 1 + 2 + 1 + 1 + 2 = 32
 
 notes: |
-  CONTROL-FLOW CONFIRMED: the fixed 32-byte body (a SINGLE roster entry) and the field offsets.
+  CONTROL-FLOW CONFIRMED: the fixed 32-byte body (a SINGLE roster entry) and all field offsets including
+  the three sub-fields recovered from inside the prior Tail region.
   CAPTURE-UNVERIFIED for the VALUE meanings.
 
     0x00 (4B) MemberKey : actor composite key low (the member id used to resolve the actor).
     0x04 (4B) Sort      : actor composite key high (the sort half of the key).
     0x08 (1B) RankFlag  : a rank / flag byte (assigned onto the resolved actor's guild rank field).
-    0x09 (16B) Name     : the member's guild-name string, a NUL-bounded CP949 field (16 usable chars,
-                          forced NUL at +0x19).
+    0x09 (16B) Name     : the member's guild-name string, CP949, 16 usable chars.
+    0x19 (1B) NulTerm   : forced NUL terminator for the Name field.
+    0x1A (2B) NameGate  : i16 name-present gate. Nonzero = assign Name to the resolved actor (actor+170);
+                          zero = clear the name field on the actor.
+    0x1C (1B) ByteC     : written to actor+1764 (set branch). Meaning capture-pending.
+    0x1D (1B) ByteD     : written to actor+173. Meaning capture-pending.
+    0x1E (2B) Pad0      : trailing pad / opaque remainder (not field-read by the handler).
 
   ONE-ENTRY SEMANTICS: this packet updates exactly one guild member; it is NOT a stride-32 array. A
   full roster comes through the guild full-sync (4/65), not by repeating this packet's body.
@@ -46,7 +61,8 @@ notes: |
   RUNTIME-OFFSET HYGIENE: the rank/flag and name are written onto live-actor guild fields (and mirrored
   onto the local player when applicable); those runtime field offsets are not wire fields.
 
-  UNKNOWN to resolve with a capture: the RankFlag's enum meaning.
+  UNKNOWNS to resolve with a capture: the RankFlag's enum meaning; the roles of ByteC (actor+1764) and
+  ByteD (actor+173).
 
   RELATED: the full guild roster snapshot is 4/65 SmsgGuildInfoFullSync
   (packets/4-65_guild_info_full_sync.yaml).

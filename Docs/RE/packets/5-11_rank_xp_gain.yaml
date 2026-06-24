@@ -1,5 +1,6 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is a static inference. capture_verified: false.
+# verification: idb sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+# CAPTURE-UNVERIFIED: routing is a static fact; the field layout is binary-confirmed. capture_verified: false.
 
 name: SmsgRankXpGain
 opcode: 0x5000b           # major 5 (Push), minor 11 -> (5 << 16) | 11
@@ -13,8 +14,8 @@ summary: Server pushes a rank / honor experience gain for the local player. This
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 20.
 fields:
-  - { name: ActorId,   type: u32 }   # 0x00  recipient actor id
-  - { name: ActorSort, type: u32 }   # 0x04  recipient actor sort
+  - { name: ActorSort, type: u32 }   # 0x00  recipient actor sort
+  - { name: ActorId,   type: u32 }   # 0x04  recipient actor id
   - { name: Amount,    type: u64 }   # 0x08  rank/honor XP amount
   - { name: Mode,      type: u8 }    # 0x10  add mode: 2 = add directly to the rank accumulator (no level math)
   - { name: Pad0,      type: "bytes[3]" }  # 0x11  alignment padding to 20 bytes
@@ -24,9 +25,9 @@ notes: |
   is a DISTINCT channel from character XP (5/9 SmsgExpGain): rank/honor XP feeds a rank progression
   system, not the character exp bar. Local-player gated.
 
-    0x00 (4B) ActorId   : the recipient actor id.
-    0x04 (4B) ActorSort : the recipient actor sort. NOTE the field order here is (id, sort) -- the
-                          reverse of the (sort, id) order used by 5/9 ExpGain. Trust this order.
+    0x00 (4B) ActorSort : the recipient actor sort. Binary lookup confirms wire+0 is sort,
+                          wire+4 is id -- matching the (sort, id) order of 5/9 and 5/10.
+    0x04 (4B) ActorId   : the recipient actor id.
     0x08 (8B) Amount    : the rank/honor XP amount, added to the rank accumulator and the within-rank
                           progress value.
     0x10 (1B) Mode      : add mode. A value of 2 adds the amount DIRECTLY to the rank accumulator with
@@ -41,8 +42,7 @@ notes: |
   global, not part of this packet.
 
   UNKNOWNS to resolve with a rank-XP capture:
-    - confirm the (id, sort) field order vs 5/9's (sort, id);
-    - the full Mode enum beyond the named "2 = direct add";
+    - confirm the full Mode enum beyond the named "2 = direct add";
     - whether the 3 bytes at 0x11 are pure padding or carry sub-fields.
 
   RELATED: 5/9 SmsgExpGain (packets/5-9_exp_gain.yaml) is the character-XP channel; 5/32 SmsgLevelUp

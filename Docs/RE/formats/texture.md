@@ -8,10 +8,16 @@
 > hypothesis to sample-verified this pass). Loader-control-flow facts (single auto-detecting create call,
 > separate shader-assembler path, separate surface-load path, two mounted-read mechanisms + one ad-hoc
 > overlay create site) are `confirmed` from the loader witness.
-> ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida, vfs-sample]
+> ida_reverified: 2026-06-24 · ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee · evidence: [static-ida, vfs-sample]
 > conflicts: C1 — the "200+ call sites" figure is the fan-in of the single texture **wrapper**
 > (217 distinct call sites on this build), NOT 200+ raw D3DX import calls (the D3DX import itself has
 > only 2 direct callers). Reworded below; no structural conflicts remain.
+> refinements (2026-06-24): (A) second `bgtexture.lst` under `data/effect/texture/` (count 1108, same
+> 48-byte record model) added; (B) 24bpp BGR RAW DDS variant (DDPF_RGB only, flags 0x40, no alpha) noted
+> alongside the 32bpp BGRA form; (C) DXT3 outside UI confirmed from a terrain sample — known unknown
+> closed; (D) per-pool DXT census for `data/map000/texture/` added (1127 DXT1 / 117 DXT3 / 2 DXT2 /
+> 4 RAW / 3 anomalous out of 1251 files). No structural corrections; all prior offsets, strides, and
+> formulae re-confirmed.
 
 ## Identification
 
@@ -177,9 +183,21 @@ byte-verified this pass)
 
 DDS is the dominant container. DXT5 is now byte-level sample-verified from an item/effect texture;
 DXT1 is sample-verified from both UI palette swatches *and* a large character texture with a full
-mip chain. DXT2/DXT3 are sample-verified from the front-end UI atlases. RAW (uncompressed BGRA8888)
-DDS is sample-verified from effect and front-end surfaces. No DXT3-with-non-UI-asset category has
-been individually sampled, but the DXT3 BC2 layout is verified from UI atlases.
+mip chain. DXT2/DXT3 are sample-verified from the front-end UI atlases. RAW (uncompressed)
+DDS is sample-verified from effect and front-end surfaces.
+
+**Per-pool DXT variant census for `data/map000/texture/` (SAMPLE-VERIFIED — 1251 files total):**
+
+| Variant / flags | FOURCC | Count | Notes |
+|-----------------|--------|------:|-------|
+| DXT1 (BC1) | `DXT1` | 1127 | Dominant; 8 bytes/block |
+| DXT3 (BC2 straight) | `DXT3` | 117 | Second-most-common; terrain and building textures confirmed |
+| DXT2 (BC2 premult) | `DXT2` | 2 | BC2 premultiplied-alpha; 16 bytes/block |
+| RAW uncompressed | (none) | 4 | See RAW variant detail below |
+| Anomalous / truncated | — | 3 | Files shorter than a valid header; not parsed |
+
+DXT5 is NOT present in the `data/map000/texture/` pool (0 files). DXT5 is used in item/effect
+textures and UI atlases (see the atlas table below). Engineers should not assume DXT5 for terrain.
 
 ### DDS_HEADER layout (128 bytes total: 4-byte magic + 124-byte DDS_HEADER)
 
@@ -220,13 +238,13 @@ All integer fields are little-endian unsigned 32-bit unless otherwise noted.
 | Rel offset | Size | Type | Field | Notes / observed values | Confidence |
 |-----------:|-----:|------|-------|-------------------------|------------|
 | +0x00 | 4 | u32-LE | dwSize | 32; invariant per MS spec | SAMPLE-VERIFIED |
-| +0x04 | 4 | u32-LE | dwFlags | 0x00000004 (DDPF_FOURCC) in block-compressed samples; **0x00000041** (DDPF_RGB\|DDPF_ALPHAPIXELS) in RAW uncompressed BGRA8888 samples | SAMPLE-VERIFIED |
-| +0x08 | 4 | ASCII | dwFourCC | `44 58 54 31` ("DXT1"), `DXT2`, and `DXT5` all observed across samples; **`00 00 00 00`** (zero, no FourCC) in RAW BGRA8888 samples | SAMPLE-VERIFIED (DXT1, DXT2, DXT5, RAW); DXT3 verified from UI atlases |
-| +0x0C | 4 | u32-LE | dwRGBBitCount | 0 for block-compressed formats; **32** for RAW BGRA8888 (A8R8G8B8) | SAMPLE-VERIFIED |
-| +0x10 | 4 | u32-LE | dwRBitMask | 0 for block-compressed; 0x00FF0000 for A8R8G8B8 | SAMPLE-VERIFIED |
-| +0x14 | 4 | u32-LE | dwGBitMask | 0 for block-compressed; 0x0000FF00 for A8R8G8B8 | SAMPLE-VERIFIED |
-| +0x18 | 4 | u32-LE | dwBBitMask | 0 for block-compressed; 0x000000FF for A8R8G8B8 | SAMPLE-VERIFIED |
-| +0x1C | 4 | u32-LE | dwABitMask | 0 for block-compressed; 0xFF000000 for A8R8G8B8 | SAMPLE-VERIFIED |
+| +0x04 | 4 | u32-LE | dwFlags | 0x00000004 (DDPF_FOURCC) in block-compressed samples; **0x00000041** (DDPF_RGB\|DDPF_ALPHAPIXELS) in RAW 32bpp BGRA samples; **0x00000040** (DDPF_RGB only) in RAW 24bpp BGR samples | SAMPLE-VERIFIED |
+| +0x08 | 4 | ASCII | dwFourCC | `44 58 54 31` ("DXT1"), `DXT2`, and `DXT5` all observed across samples; **`00 00 00 00`** (zero, no FourCC) in all RAW uncompressed samples | SAMPLE-VERIFIED (DXT1, DXT2, DXT5, RAW); DXT3 verified from UI atlases and terrain samples |
+| +0x0C | 4 | u32-LE | dwRGBBitCount | 0 for block-compressed formats; **32** for RAW BGRA8888 (A8R8G8B8); **24** for RAW BGR (B8G8R8, no alpha) | SAMPLE-VERIFIED |
+| +0x10 | 4 | u32-LE | dwRBitMask | 0 for block-compressed; 0x00FF0000 for both RAW variants (R channel) | SAMPLE-VERIFIED |
+| +0x14 | 4 | u32-LE | dwGBitMask | 0 for block-compressed; 0x0000FF00 for both RAW variants (G channel) | SAMPLE-VERIFIED |
+| +0x18 | 4 | u32-LE | dwBBitMask | 0 for block-compressed; 0x000000FF for both RAW variants (B channel) | SAMPLE-VERIFIED |
+| +0x1C | 4 | u32-LE | dwABitMask | 0 for block-compressed; 0xFF000000 for A8R8G8B8; **0x00000000** (no alpha) for the 24bpp BGR variant | SAMPLE-VERIFIED |
 
 ### DXT block layout and file-size formula
 
@@ -279,7 +297,8 @@ Corner texels of each palette swatch are transparent; interior texels carry the 
 | DXT1 | SAMPLE-VERIFIED | `data/ui/` palette/color-swatch textures (single-mip, punch-through alpha active) **and** large character textures in `data/char/tex10241024/` (1024² with a full 11-level mip chain). |
 | DXT2 | SAMPLE-VERIFIED | Front-end UI atlases (see front-end atlas table below). FourCC `DXT2`; same 16-byte BC2 block as DXT3, but with **premultiplied alpha** semantics. |
 | DXT3 | SAMPLE-VERIFIED | Front-end UI atlases (see front-end atlas table below) and HUD chrome. FourCC `DXT3`; 16-byte BC2 block with **straight (non-premultiplied) alpha**. |
-| DDS uncompressed (RAW) | SAMPLE-VERIFIED | Uncompressed BGRA8888 (A8R8G8B8). Found in front-end surfaces (login base plate, character-window backing) **and** in the effects directory (`data/effect/tex/`). pf_flags = DDPF_RGB\|DDPF_ALPHAPIXELS (0x41), FourCC = `00 00 00 00`, caps 0x1002, no FourCC. Requires a BGRA→RGBA swap on import (see RAW-DDS note in the front-end atlas section). |
+| DDS uncompressed RAW 32bpp | SAMPLE-VERIFIED | BGRA8888 (A8R8G8B8). Found in front-end surfaces (login base plate, character-window backing) **and** in `data/effect/tex/`. pf_flags = DDPF_RGB\|DDPF_ALPHAPIXELS (0x41), FourCC = `00 00 00 00`, dwRGBBitCount = 32. Requires a BGRA→RGBA swap on import. |
+| DDS uncompressed RAW 24bpp | SAMPLE-VERIFIED | BGR (B8G8R8, no alpha). Found in `data/map000/texture/building/`. pf_flags = DDPF_RGB only (0x40), FourCC = `00 00 00 00`, dwRGBBitCount = 24, dwABitMask = 0. Requires a BGR→RGB swap on import; no alpha channel. |
 
 ### DXT2 vs DXT3 — both are BC2, alpha convention differs (CONFIRMED)
 
@@ -741,7 +760,10 @@ table to confirm. Flag for `Docs/RE/names.yaml`.
 ### Identification
 
 - **Filename:** `bgtexture.lst` (binary) and `bgtexture.txt` (text mirror — see below)
-- **VFS path:** `data/map000/texture/bgtexture.lst`
+- **VFS paths (two catalogues):**
+  - `data/map000/texture/bgtexture.lst` — primary terrain/building texture catalogue (1222 records)
+  - `data/effect/texture/bgtexture.lst` — effect texture catalogue (1108 records); same 48-byte record
+    model; path stems resolve under `data/effect/texture/` instead of `data/map000/texture/`
 - **Magic / signature:** none — file begins immediately with a 4-byte count
 - **Endianness:** little-endian
 
@@ -753,7 +775,9 @@ table to confirm. Flag for `Docs/RE/names.yaml`.
 | `+0x04` | count × 48 | record[] | texture records | Packed immediately after count, no padding between records. | SAMPLE-VERIFIED |
 
 **File-size formula:** `total_bytes = 4 + count × 48`
-Verified: `4 + 1222 × 48 = 58,660 bytes` — matches the real-VFS sample file exactly.
+Verified:
+- `data/map000/texture/bgtexture.lst`: `4 + 1222 × 48 = 58,660 bytes` — matches real-VFS sample exactly.
+- `data/effect/texture/bgtexture.lst`: `4 + 1108 × 48 = 53,188 bytes` — matches real-VFS sample exactly.
 
 ### Per-record layout (48 bytes each)
 
@@ -795,18 +819,22 @@ analysis of the per-frame update functions.
 ### Path resolution rule
 
 Each record's `path_stem` is a relative sub-path without extension. The runtime constructs the
-full VFS path as:
+full VFS path by prepending the catalogue's directory prefix and appending `.dds`:
 
 ```
+# map000 catalogue (terrain/building textures):
 full_path = "data/map000/texture/" + path_stem + ".dds"
+
+# effect catalogue:
+full_path = "data/effect/texture/" + path_stem + ".dds"
 ```
 
-Example: a record with `path_stem = "terrain/a-b-1"` resolves to
+Example: a record with `path_stem = "terrain/a-b-1"` in the map000 catalogue resolves to
 `"data/map000/texture/terrain/a-b-1.dds"`.
 
-The prefix `data/map000/texture/` is hardcoded — there is no per-area path substitution.
-All terrain and building textures for every map area are stored globally under `map000/texture/`.
-This is an intentional shared-pool design, not an oversight.
+The `data/map000/texture/` prefix is hardcoded for the terrain catalogue — there is no per-area
+path substitution. All terrain and building textures for every map area are stored globally under
+`map000/texture/`. This is an intentional shared-pool design, not an oversight.
 
 ### `intTexId` — 1-based indexing into this catalogue
 
@@ -849,7 +877,8 @@ aid only.
 | DDS (DXT5) | SAMPLE-VERIFIED | 1 | Item/effect/general textures; byte-verified `data/item/effect/` 64² surface (formula exact) |
 | DDS (DXT2) | SAMPLE-VERIFIED | (front-end atlases) | Front-end UI atlases (BC2, premultiplied alpha) |
 | DDS (DXT3) | SAMPLE-VERIFIED | (front-end atlases) | Front-end UI atlases + HUD chrome (BC2, straight alpha) |
-| DDS (RAW BGRA8888) | SAMPLE-VERIFIED | ≥1 | Front-end surfaces **and** `data/effect/tex/` (uncompressed A8R8G8B8; needs BGRA→RGBA swap) |
+| DDS (RAW BGRA8888, 32bpp) | SAMPLE-VERIFIED | ≥1 | Front-end surfaces **and** `data/effect/tex/` (uncompressed A8R8G8B8, flags 0x41; needs BGRA→RGBA swap) |
+| DDS (RAW BGR, 24bpp) | SAMPLE-VERIFIED | ≥2 | `data/map000/texture/building/` (flags 0x40, no alpha; needs BGR→RGB swap) |
 | TGA (uncompressed 32bpp) | SAMPLE-VERIFIED | 3 UI + 1 effect | UI palette swatches (`data/ui/`) **and** `data/effect/texture/` (128² sample byte-verified) |
 | BMP (terrain tile 128×128) | SAMPLE-VERIFIED | 2 | `data/effect/map/` lightmap tiles |
 | BMP (toonramp LUT 256×1) | SAMPLE-VERIFIED | 1 | `data/shader/toonramp.bmp` — cel-shading LUT |
@@ -857,7 +886,8 @@ aid only.
 | PNG (char skin 256×256) | SAMPLE-VERIFIED | 3 | `data/char/tex256256/` character skin textures |
 | PNG (char skin 1024×1024) | SAMPLE-VERIFIED | 1 | `data/char/tex10241024/` (1024², color type 2, no alpha) |
 | PNG (other resolutions) | CONFIRMED-from-routine | 0 | tex256512 char bucket and item textures |
-| bgtexture.lst (binary catalogue) | SAMPLE-VERIFIED | 1 file (1222 records) | `data/map000/texture/bgtexture.lst` — global terrain/building texture index |
+| bgtexture.lst (map000 catalogue) | SAMPLE-VERIFIED | 1 file (1222 records) | `data/map000/texture/bgtexture.lst` — global terrain/building texture index |
+| bgtexture.lst (effect catalogue) | SAMPLE-VERIFIED | 1 file (1108 records) | `data/effect/texture/bgtexture.lst` — effect texture index; same 48-byte record model |
 
 ---
 
@@ -877,8 +907,10 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
   (FourCC `DXT5`, pf_flags 0x4, LINEARSIZE flag set, single-mip file-size formula exact). The DXT5
   DDS_PIXELFORMAT block and single-mip layout are now sample-verified. Per-category path assignment
   beyond `data/item/effect/` is still only partially sampled.
-- **DXT3 use outside UI:** The DXT3 BC2 layout is sample-verified from front-end UI atlases. A
-  non-UI asset category using DXT3 has not been individually sampled.
+- **DXT3 use outside UI:** RESOLVED — a terrain texture (`data/map000/texture/terrain/_d004_tree_01.dds`)
+  is DXT3 (FOURCC `DXT3`, SAMPLE-VERIFIED). DXT3 is used in both the front-end UI atlases and
+  terrain/building textures. DXT3 is the second-most-common variant in the `map000/texture/` pool
+  (117 of 1251 files).
 - **Per-directory DXT variant breakdown:** Sampled directories now include `data/ui/` (DXT1/DXT2/DXT3),
   `data/item/effect/` (DXT5), `data/char/tex10241024/` (DXT1 mipped + PNG), and `data/effect/tex/`
   (RAW BGRA). The exhaustive per-directory variant census across the whole VFS is still not complete.
@@ -926,11 +958,15 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 3. For DDS: parse the standard 128-byte header, read `DDS_PIXELFORMAT.dwFlags`/`dwFourCC` to
    determine the variant. If `dwFlags` has DDPF_FOURCC (0x4), it is block-compressed (DXT1/DXT2/
    DXT3/DXT5) — use the appropriate block size and the single-mip *or* mip-chain file-size formula
-   (read `dwMipMapCount`; large char textures carry full chains). If `dwFlags` has DDPF_RGB|
-   DDPF_ALPHAPIXELS (0x41) and `dwFourCC` is zero, it is **uncompressed BGRA8888 (A8R8G8B8)** —
-   apply a **BGRA→RGBA byte swap** on import. Treat DXT2 as premultiplied-alpha BC2 and DXT3 as
-   straight-alpha BC2 (one BC2 decoder + a per-file premultiplied flag). Report dimensions, variant,
-   mip count, and alpha convention to `Assets.Mapping`.
+   (read `dwMipMapCount`; large char textures carry full chains). For uncompressed RAW (`dwFourCC` =
+   zero), inspect `dwFlags` and `dwRGBBitCount`:
+   - flags 0x41 (DDPF_RGB|DDPF_ALPHAPIXELS), `dwRGBBitCount` = 32 → **BGRA8888 (A8R8G8B8)** —
+     apply a **BGRA→RGBA byte swap** on import; 4 bytes per pixel.
+   - flags 0x40 (DDPF_RGB only), `dwRGBBitCount` = 24 → **BGR (B8G8R8)** —
+     apply a **BGR→RGB byte swap** on import; 3 bytes per pixel, no alpha channel.
+   Treat DXT2 as premultiplied-alpha BC2 and DXT3 as straight-alpha BC2 (one BC2 decoder + a
+   per-file premultiplied flag). Report dimensions, variant, mip count, and alpha convention to
+   `Assets.Mapping`.
 4. For TGA: parse the 18-byte header, note `imageDescriptor` bit 5 = 0 (bottom-up row order;
    vertical flip is required for top-down output). `pixelDepth = 32` means BGRA channel order.
 5. For BMP: parse the 14-byte BITMAPFILEHEADER and 40-byte BITMAPINFOHEADER. Skip to
@@ -946,10 +982,13 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
    directory or a presumed extension.
 7. For bgtexture.lst: read `count` (u32-LE at offset 0); validate `1 ≤ count < 2000`. Then
    read `count` records of 48 bytes each. Each record: `kind` (u8 at `+0x00`) and `path_stem`
-   (null-terminated char[47] at `+0x01`). Construct the full DDS path as
-   `"data/map000/texture/" + path_stem + ".dds"`. Expose `kind` as a raw byte; treat kind=0 as
-   inactive. Index is 0-based internally; callers reference entries via 1-based `intTexId`
-   (subtract 1 to get the array index).
+   (null-terminated char[47] at `+0x01`). Two catalogue instances share the identical record model;
+   the path prefix differs by source:
+   - `data/map000/texture/bgtexture.lst` → prefix `"data/map000/texture/"` (terrain/building)
+   - `data/effect/texture/bgtexture.lst` → prefix `"data/effect/texture/"` (effects)
+   Construct the full DDS path as `<prefix> + path_stem + ".dds"`. Expose `kind` as a raw byte;
+   treat kind=0 as inactive. Index is 0-based internally; callers reference entries via 1-based
+   `intTexId` (subtract 1 to get the array index).
 8. Do NOT attempt JPEG decode for assets loaded from the VFS (JPEG import is not used by this
    client; only JPEG export for screenshots is present).
 9. Report the detected format, dimensions, and pixel data to `Assets.Mapping`. If an
@@ -1006,3 +1045,15 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 > the shared mounted-path source (its TOC stride and lowercased-path binary search remain documented
 > in `formats/pak.md`). Promoted as neutral prose; no addresses or decompiler output crossed the
 > firewall.
+
+> **Provenance — 2026-06-24 re-verification (static-only, ida_anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee):**
+> full re-confirmation; every prior offset, stride, count, formula, and caller census re-verified —
+> no structural corrections. Four additive refinements promoted from dirty notes: (A) second
+> `bgtexture.lst` at `data/effect/texture/bgtexture.lst` (count 1108, 4 + 1108 × 48 = 53,188 bytes
+> byte-exact, identical 48-byte record model); (B) 24bpp BGR RAW DDS variant (DDPF_RGB flags 0x40,
+> `dwRGBBitCount` 24, no alpha, BGR→RGB swap required) present in `data/map000/texture/building/`
+> alongside the previously documented 32bpp BGRA form; (C) DXT3 outside UI confirmed —
+> `data/map000/texture/terrain/_d004_tree_01.dds` is DXT3; known unknown closed; (D) per-pool DXT
+> census for `data/map000/texture/` added (1127 DXT1 / 117 DXT3 / 2 DXT2 / 4 RAW / 3 anomalous of
+> 1251 total); DXT5 absent from this pool. Promoted as neutral prose; no addresses or decompiler
+> output crossed the firewall.

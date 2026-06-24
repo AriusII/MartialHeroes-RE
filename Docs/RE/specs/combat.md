@@ -58,7 +58,7 @@ counterpart to the vitals spec and shares the same aggregation pipeline.
 | In-world combat loop: server-authoritative damage via a single battle controller (Sections 9–11) | HIGH (CODE-CONFIRMED static read on build 263bd994; CAPTURE-UNVERIFIED — see below) |
 | Two-tier target acquisition; basic melee = skill `2/52` slot `0xFF`, default-attack id `121100050` (Sections 9–10) | HIGH (CODE-CONFIRMED) |
 | Cadence constants: per-skill cadence = `100 ms × skill_cadence` (skill record `+1332`); post-cast motion lockout = `550 ms` fixed; `100 ms` auto-repeat throttle (Section 11) | HIGH — client constants CONFIRMED; whether the server re-paces them is CAPTURE/DEBUGGER-PENDING |
-| Controller field offsets re-pinned to build 263bd994 (picked target id/sort at `+36/+40`; throttle on the move-scheduler `+36`, not `controller+144`) (Section 9.1) | HIGH for the 263bd994 offsets; the prior-build `+136/+140/+144` discrepancy is STATIC-HYPOTHESIS / names.yaml re-pin pending |
+| Controller field offsets re-pinned to build 263bd994: last-send ts `+4`, now snapshot `+8`, picked target id/sort `+36/+40`, effective range (not range²) `+60`, target arrays `+436`/`+596`, target counts `+756`/`+760`; throttle on move-scheduler `+36`, not `controller+144` (Section 9.1) | HIGH for the 263bd994 offsets; the prior-build `+136/+140/+144` discrepancy is STATIC-HYPOTHESIS / names.yaml re-pin pending |
 | Attack-in-progress flag clear opcode is `4/13` on this build (was `4/2`) (Section 11) | CODE-CONFIRMED that `4/13` clears the flag; which push arms-vs-releases the swing window is CAPTURE/DEBUGGER-PENDING |
 | `4:99` + `4:100` are **NOT combat** — they are the **Cube-Gamble minigame** result/spin bank (Section 5) | HIGH (CYCLE 7 reclassification — ground-truth texture + 2/141 submit; see §5) |
 | Damage-kind → floating-number motion/colour selection; multi-hit split (Section 12) | HIGH (CODE-CONFIRMED) |
@@ -558,17 +558,21 @@ Where an offset is also given as a dword index, the byte offset is `4 × index`.
 | Controller field | Offset (build 263bd994) | Role |
 |---|---|---|
 | action mode | `+0` | `0` = basic-attack mode (the executor picks the per-class default attack skill, id `121100050`); non-zero = an explicit chosen skill. |
-| swing-ready timestamp (ms) | `+4` (dword idx 1) | The next-allowed-swing gate. The cooldown / can-act checks compare it against the millisecond clock (Section 11). On a successful swing the executor re-arms it from the "now" snapshot (`+4 = +8`). |
-| "now" / last-swing snapshot (ms) | `+8` (dword idx 2) | The millisecond clock value sampled at the cooldown check; the executor copies it into the swing-ready field to re-arm. |
+| last-send timestamp (ms) | `+4` (dword idx 1) | Timestamp of the last successful send. The cadence gate reads `now(+8) − last_send(+4) < 100 × cadence`; on a successful send the field is rebased to `+4 = +8`. (Earlier labels called this "swing-ready"; the correct role is last-send.) |
+| "now" snapshot (ms) | `+8` (dword idx 2) | The millisecond clock value sampled at the cooldown check; the rebase copies it into last-send (+4) on success. |
 | motion-lockout-end (ms) | `+12` (dword idx 3) | Stamped to `now + 550 ms` on a real cast; a fixed post-cast motion hold (Section 11). Zeroed on the `5:52` idle/cancel branch. |
-| aim origin / aim target XYZ + sort | from `+36` | The cast origin and aim point written by the executor for the request; the per-controller picked target {id, sort} sits here too (see below). |
-| effective skill range² | `+60` (dword idx 15, float) | The computed range² gate the executor tests target distance against; built per-skill from the skill record + bonuses. |
+| **picked target id** | `+36` | The target id resolved from the mouse-pick at click time (the *per-controller* target — Section 10), read by the executor. |
+| **picked target sort** | `+40` | The sort byte (and held flag) of that picked target. |
+| aim XYZ | `+44` / `+48` / `+52` | The cast aim point (X/Y/Z), written by the executor for the outbound request. |
+| effective skill range (float) | `+60` (dword idx 15) | The computed effective range (NOT range² — it is range; the distance test squares it inline: `distSqXZ > range × range`). Built per-skill from `base_range (+1312)` + caster body radius + buff bonus, floored to **1.0**. |
 | "needs to move to target" flag | `+68` | Set when the picked target is out of range (drives the approach loop, Section 10.4). |
 | combo-step counter / combo-active flag | `+69` / `+70` | The multi-hit combo bookkeeping for one action. |
 | attack-in-progress flag | `+80` | Raised by the send paths; the held-attack tick runs only while this is `1`; cleared by the server resync (see §11 and the §-banner conflict). |
-| **picked target id** | `+36` | The target id resolved from the mouse-pick at click time (the *per-controller* target — Section 10), read float-coerced by the executor. |
-| **picked target sort** | `+40` | The sort byte (and held flag) of that picked target. |
 | active-skill pointer | `+432` | The skill object currently being used (the default basic-attack skill, id `121100050`, in mode `0`). |
+| PC / ally target-id array | `+436` (length 0xA0 bytes) | The ally/PC target-id array handed to `CmsgUseSkill` as its first count-prefixed array; cleared to zero before each collect. |
+| enemy target-id array | `+596` | The enemy target-id array handed to `CmsgUseSkill` as its second count-prefixed array. |
+| PC-target count | `+756` (dword idx 189) | Count of entries placed into the PC/ally array. |
+| enemy-target count | `+760` (dword idx 190) | Count of entries placed into the enemy array. |
 
 **Re-pin note (build 263bd994).** The picked-target {id, sort} pair is at **controller+36 / +40** on
 this build — the prior-build `+136 / +140` layout **did not reproduce** here, and there is **no
@@ -727,8 +731,15 @@ The **cadence gate** rejects a queued action when
 
 On a successful send the timer is **rebased** (`last-send = now`), so the minimum inter-action interval
 is `100 ms × skill_cadence`. The basic-attack chain takes a fast path that fires immediately (no full
-cadence gate). These are the same `100 ms × skill_cadence` constant and swing-ready re-arm already in
+cadence gate). These are the same `100 ms × skill_cadence` constant and last-send re-arm already in
 the Section 11 table; this subsection records the **reason-code range (`1..21`)** and the rebase rule.
+
+> **Executor-direct string ids (two distinct layers).** The result codes 1..21 are mapped to localized
+> notices by a **UI wrapper** (see `specs/skills.md §2.3` for that table). The **executor itself**
+> additionally emits MessageDB string ids directly at the gate that fires: the observed set includes
+> 3001/3002/3003/3004/3005/3007/3009/3010/3011/3012/3030/2157/59006/74307/41001/41002/4050/2162/3006.
+> These are a separate layer; both exist. String ids 3011 and 3012 correspond to the HP cost (+1368)
+> and stamina cost (+1370) gates respectively.
 
 **Combo model.** A skill record carries a short combo chain; the combo length is the **count of
 non-zero combo entries** on the record and is capped at **≤ 5 steps**. A per-action combo-step counter
@@ -763,7 +774,8 @@ On `5:52` the client looks up the caster and branches on a cast-active flag:
     own animation / FX queue** (a per-actor anim+FX queue handle pair on the actor — described by role,
     object-relative fields `+1496` / `+1500`). This is the **per-target hit-animation / hit-FX driver**.
   - For the local player, **sum the visible damage** across records (the per-record visible-damage
-    field, record `+16`, accumulated into a 64-bit total) and **render a floating "damage dealt"
+    field, record `+0x10` (dword indices 4–5 as a 64-bit pair — see `structs/skill.md §E.4.2` for the
+    pending +0x0C vs +0x10 reconciliation), accumulated into a 64-bit total) and **render a floating "damage dealt"
     number** via the localized **damage-total notice, message-string id `2212`** (thousands-grouped,
     formatted, broadcast as a chat/notice) — gated on the per-target combat-damage HUD toggle. *(Note:
     the raw immediate `2212` also appears elsewhere in the combat panel as an object-relative **field

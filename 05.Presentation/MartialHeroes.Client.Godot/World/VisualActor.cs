@@ -1,4 +1,6 @@
 using Godot;
+using MartialHeroes.Assets.Parsers.Mesh;
+using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Godot.Composition;
@@ -33,6 +35,14 @@ public sealed partial class VisualActor : CharacterBody3D
     private Vector3 _prevPosition;
 
     private Node3D? _skinnedAvatar;
+
+    private SkinnedCharacterNode? _skinnedNode;
+
+    private RealClientAssets? _combatAssets;
+    private int _combatAppearanceKey;
+    private int _combatSkinClass;
+    private AnimationClip? _attackClipCache;
+    private bool _attackClipResolved;
 
 
     private double _tickDurationSec = 1.0 / GameEngineLoop.DefaultTickRateHz;
@@ -70,8 +80,87 @@ public sealed partial class VisualActor : CharacterBody3D
         skinnedRoot.Scale = Vector3.One * SkinnedAvatarScale;
         AddChild(skinnedRoot);
         _skinnedAvatar = skinnedRoot;
+        _skinnedNode = FindSkinnedNode(skinnedRoot);
 
         _isDead = false;
+    }
+
+    public void SetCombatClipSource(RealClientAssets assets, int appearanceKey, int skinClass)
+    {
+        _combatAssets = assets;
+        _combatAppearanceKey = appearanceKey;
+        _combatSkinClass = skinClass;
+        _attackClipResolved = false;
+        _attackClipCache = null;
+    }
+
+    public void PlayAttackMotion()
+    {
+        if (_skinnedNode is null || !IsInstanceValid(_skinnedNode))
+            return;
+
+        var clip = ResolveAttackClip();
+        if (clip is null)
+        {
+            GD.Print($"[VisualActor] PlayAttackMotion (actor '{ActorName}'): no attack clip resolved " +
+                     "(combat motion-kind→column not pinned in spec, or clip absent) — staying idle. " +
+                     "spec: skinning.md §10.5 / formats/animation.md §actormotion (attack column DBG-pending).");
+            return;
+        }
+
+        _skinnedNode.PlayActionClip(clip);
+    }
+
+    private AnimationClip? ResolveAttackClip()
+    {
+        if (_attackClipResolved) return _attackClipCache;
+        _attackClipResolved = true;
+
+        if (_combatAssets is null) return null;
+
+        var registry = CharVisualRegistry.GetOrBuild(_combatAssets);
+        if (registry is null) return null;
+
+        var entry = registry.GetByMotionKey(_combatAppearanceKey)
+                    ?? registry.ActorMotion.GetBySkinClass(_combatSkinClass);
+        if (entry is null) return null;
+
+        var motId = AttackMotionId(entry);
+        if (motId <= 0) return null;
+
+        var motPath = registry.ResolveMotPath(motId);
+        if (motPath is null || !_combatAssets.Contains(motPath)) return null;
+
+        try
+        {
+            var data = _combatAssets.GetRaw(motPath);
+            if (data.IsEmpty) return null;
+            _attackClipCache = AnimationParser.Parse(data);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[VisualActor] attack .mot load failed '{motPath}': {ex.Message}");
+            _attackClipCache = null;
+        }
+
+        return _attackClipCache;
+    }
+
+    private static int AttackMotionId(MartialHeroes.Assets.Parsers.Character.Models.ActormotionEntry entry)
+    {
+        return 0;
+    }
+
+    private static SkinnedCharacterNode? FindSkinnedNode(Node node)
+    {
+        if (node is SkinnedCharacterNode skinned) return skinned;
+        foreach (var child in node.GetChildren())
+        {
+            var found = FindSkinnedNode(child);
+            if (found is not null) return found;
+        }
+
+        return null;
     }
 
     public bool TryBuildBodyAvatar(RealClientAssets assets, ushort serverClass)
@@ -200,6 +289,17 @@ public sealed partial class VisualActor : CharacterBody3D
             GlobalPosition = _moveTarget;
             Velocity = Vector3.Zero;
             _hasTarget = false;
+            return;
+        }
+
+        var step = (float)(speed * delta);
+        var desired = step >= distance ? _moveTarget : current + direction.Normalized() * step;
+
+        if (IsLocalPlayer && _cellCollisionManager is not null &&
+            _cellCollisionManager.TryMoveSlide(current, desired, out var resolved))
+        {
+            GlobalPosition = resolved;
+            Velocity = Vector3.Zero;
         }
         else
         {

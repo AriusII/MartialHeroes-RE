@@ -485,6 +485,22 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendResultAsync(2, 35, payload, true, cancellationToken);
     }
 
+    public ValueTask MoveCharacterSlotAsync(int fromSlot, int toSlot, CancellationToken cancellationToken = default)
+    {
+        if (fromSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
+            throw new ArgumentOutOfRangeException(nameof(fromSlot), fromSlot, "Slot index must be 0..4.");
+        if (toSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
+            throw new ArgumentOutOfRangeException(nameof(toSlot), toSlot, "Slot index must be 0..4.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0x00] = (byte)toSlot;
+
+        _inFlightLatch?.Arm();
+        return SendAsync(1, 14, payload, cancellationToken);
+    }
+
     public ValueTask LogoutAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

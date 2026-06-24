@@ -1,53 +1,24 @@
-# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# RETIRED — this file is a superseded duplicate of opcode 2/19.
+# verification: idb-sha256-263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+#
+# AUDIT VERDICT (lane-02 packet audit): the binary stager packs four distinct single-byte
+# selector fields at body @0x04-0x07 (Slot/SubSel/FlagA/FlagB) plus u32 Quantity @0x08,
+# refuting the Field1 u32@4 / Field2 u32@8 model in this file.  Two committed YAMLs shared
+# opcode key 0x20013; only one is authoritative.  The canonical spec for opcode 2/19 is:
+#
+#   packets/2-19_npc_buy_or_acquire.yaml  (status: verified)
+#
+# This file (CmsgNpcInteract / 12-byte generic-interact model) is retired and must NOT be
+# loaded as an opcode spec.  It is kept only as a historical record of an earlier hypothesis.
+# The active 2/19 row in opcodes.md is CmsgNpcBuyOrAcquire.
 
-name: CmsgNpcInteract
-opcode: 0x20013           # major 2 (GameAction), minor 19 -> (2 << 16) | 19
+name: CmsgNpcInteract_RETIRED
+opcode: ~                 # opcode intentionally cleared — see 2-19_npc_buy_or_acquire.yaml
 direction: C2S
-size: 12                  # fixed 12-byte payload built by the generic NPC-interact sender
+status: retired
 spec: packets/2-19_npc_interact.yaml
-status: hypothesis
-capture_verified: false
-
-summary: Generic "interact with NPC / open service panel" request. This is the single send-site for opening a merchant menu, a gather NPC, and several other service panels. It is also the resolver for NPC-driven map travel — there is no dedicated teleport opcode; an area change is requested through this same interact and resolved entirely server-side.
-
-# Wire order, offset 0 = first payload byte. Pack=1; the field widths sum to size: 12.
-fields:
-  - { name: TargetId, type: u32 }        # 0x00  active-target field: the clicked NPC's actor/entity id
-  - { name: Field1,   type: u32 }        # 0x04  second 4-byte word — meaning not yet pinned
-  - { name: Field2,   type: u32 }        # 0x08  third 4-byte word — meaning not yet pinned
 
 notes: |
-  Static inference only; no capture available. The shared NPC-interact sender builds a fixed
-  12-byte body, so total payload = 12 bytes; frame = 8-byte header + 12 = 20 bytes on the wire.
-  Body length is CODE-CONFIRMED (the send-wrapper writes a fixed 12-byte body). The body is NOT
-  yet field-decoded against a capture; only the lead word is identified with confidence.
-
-    0x00 (4B) TargetId : the client copies its "active-target" field (the id of the NPC the player
-                         just clicked) into the first body word. This is CODE-CONFIRMED as the
-                         source of the first word; treating it as a u32 actor/entity id is the
-                         leading hypothesis.
-    0x04..0x0b (8B)    : two further 4-byte words. Their meaning is not yet pinned — candidates are
-                         a sub-action / menu selector and a service parameter, but neither is
-                         confirmed. Modelled as Field1/Field2 (u32 each) so an engineer can mask
-                         them once a capture pins them down.
-
-  SHARED SENDER: the same 2/19 sender is invoked by several service panels:
-    - the generic merchant / menu NPC panel (its "open shop" menu option),
-    - the gather NPC panel (its "open" menu option).
-  The opening of a shop window therefore rides this interact rather than a shop-specific opcode.
-
-  MAP TRAVEL: NPC-driven map/area travel routes through this generic interact. No client-side
-  teleport/warp opcode was isolated; the area change is decided and applied server-side off the
-  same 2/19 request. An implementer must NOT expect a separate teleport message.
-
-  GATE: before sending, the client runs a bag-count gate keyed on the NPC's service kind — opening
-  a merchant panel is refused client-side when the bag holds more than 30 items (the storage gate
-  is 50). This is a client-side pre-check only and does not change the wire body.
-
-  UNKNOWNS to resolve with a capture of (a) a shop-open click and (b) a map-travel NPC click:
-    - the meaning of the two trailing 4-byte words (Field1 / Field2);
-    - whether map-travel and shop-open differ in any body byte or are byte-identical and
-      distinguished purely server-side by the target NPC's descriptor.
-
-  UNBLOCKS: Client.Application NpcInteract / OpenShop use-case.
+  Retired by lane-02 packet audit. The earlier 12-byte Field1/Field2 model for opcode 2/19 is
+  refuted by the binary: the real layout has four single-byte selector fields at @0x04-0x07 and
+  a u32 Quantity at @0x08. See packets/2-19_npc_buy_or_acquire.yaml for the verified spec.

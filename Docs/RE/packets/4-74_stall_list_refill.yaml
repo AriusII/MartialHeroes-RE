@@ -12,22 +12,31 @@ capture_verified: false
 
 summary: Server refill of the personal-stall (player-vendor) market list. A leading flag (clear-vs-append) is followed by N fixed 36-byte stall records, where N is derived from the frame size. The handler rebuilds the StallListPanel's row list (clear, per-record append, finalize). Reply to C2S 2/74 CmsgStallListRequest.
 
-# VARIABLE-LENGTH packet. The fixed leading field below is the clear/append flag; the record array is
-# described in notes (the engineer hand-codes the loop). All offsets are payload-relative (frame +8).
+# VARIABLE-LENGTH packet. The fixed leading region is a 6-byte head before the record array;
+# the record array is described in notes (the engineer hand-codes the loop).
+# All offsets are payload-relative (frame +8).
+# verification: ida_anchor 263bd994 — Flag confirmed at payload +0x05 (not +0x00); handler reads
+#   reserved byte @+0x00, reserved dword @+0x01, then Flag u8 @+0x05. Records begin at +0x06.
 fields:
-  - { name: Flag, type: u8 }             # 0x00  leading flag: clear-and-replace vs append the list
+  - { name: Reserved0, type: u8 }        # 0x00  discarded byte (handler advances cursor +1 before the dword)
+  - { name: Reserved1, type: u32 }       # 0x01  discarded dword (handler advances cursor +4)
+  - { name: Flag,      type: u8 }        # 0x05  clear-and-replace vs append the list
 
 notes: |
-  CONTROL-FLOW CONFIRMED: a leading flag then N fixed 36-byte (0x24) records; CAPTURE-UNVERIFIED in
-  per-field VALUE meaning inside each record. VARIABLE-LENGTH packet.
+  CONTROL-FLOW CONFIRMED: a 6-byte leading payload region then N fixed 36-byte (0x24) records;
+  CAPTURE-UNVERIFIED in per-field VALUE meaning inside each record. VARIABLE-LENGTH packet.
+
+  LEADING REGION (6 bytes, payload offsets 0x00..0x05):
+    +0x00 (1B) Reserved0 : discarded byte read by the handler before the dword advance.
+    +0x01 (4B) Reserved1 : discarded dword read by the handler after the byte advance.
+    +0x05 (1B) Flag      : the clear-and-replace vs append flag; the handler reads THIS byte at
+                           cursor position +0x05 after consuming the preceding two fields.
+  Records begin at payload offset 0x06.
 
   RECORD COUNT: the handler derives the record count from the frame size as
     N = (frameSize - 14) / 36
   where frameSize is the total wire frame length (the 8-byte header + payload). The constant 14 = the
-  8-byte frame header + a 6-byte leading payload region (a clear/append flag plus a small reserved
-  head). The fixed leading Flag field is at payload offset 0; the record array begins after the 6-byte
-  leading payload region. The exact split of those leading 6 bytes beyond the flag is a static
-  inference -- model the flag as the first payload byte and reserve the rest as a head before the loop.
+  8-byte frame header + the 6-byte leading payload region. The record array begins at payload +0x06.
 
   PER-RECORD layout (36 bytes / 0x24, repeated N times):
     rec +0x00 (4B)  id   : per-row stall identifier (u32); = the id sent back by 2/56 when the row is
@@ -46,9 +55,8 @@ notes: |
   RELATIONSHIP: reply to C2S 2/74 CmsgStallListRequest (packets/2-74_stall_list_request.yaml). The
   enter/open action is C2S 2/56 CmsgStallEnter (packets/2-56_stall_enter.yaml).
 
-  UNKNOWNS to resolve with a stall-list capture (the 36-byte stride + count formula are settled; these
-  are VALUE questions):
-    - the exact split of the 6-byte leading payload region beyond the clear/append flag;
+  UNKNOWNS to resolve with a stall-list capture (the 36-byte stride + count formula + leading-region
+  layout are settled; these are VALUE questions):
     - the per-record availability flag's bit meaning (open / sold-out);
     - confirm the "name`ownerId" string encoding and the backtick delimiter on the wire.
 

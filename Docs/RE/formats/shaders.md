@@ -11,18 +11,23 @@
 > (`dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`) were extracted from the VFS and read,
 > upgrading their per-instruction content from UNVERIFIED to SAMPLE-VERIFIED; the `.psh` family CRLF
 > line-ending was re-confirmed by a raw byte-walk. The `c4`–`c10` cel constants (incl. the BT.601 `c9`)
-> carry forward from the prior bit-pattern confirmation (not re-decoded this pass).
-> **ida_reverified:** 2026-06-21
+> carry forward from the prior bit-pattern confirmation (not re-decoded this pass). A further re-verify
+> pass (build 263bd994) physically confirmed all six power-ladder taps on disk
+> (`power1`–`power2`–`power4`–`power8`–`power16`–`power32`), correcting the prior "1/2/4" summary and
+> adding size metrics for the three new taps; the Magic / grammar note is tightened to reflect that a
+> file may open with CP949 comment lines before the version declaration (confirmed in two cel `.psh`
+> samples).
+> **ida_reverified:** 2026-06-24
 > **ida_anchor:** 263bd994
 > **evidence:** [static-ida, vfs-sample]
-> **conflicts:** NONE structural. Two corrections vs the earlier text (both refinements, not reversals):
-> the encoding statement is loosened — shader *code tokens* are ASCII but *comments* may carry CP949 text
-> (two cel `.psh` samples open with a Korean comment line); and `power2dx8.psh` / `power4dx8.psh` are
-> marked not statically string-referenced in the `doida.exe` build (data-driven on disk only). The exact
-> `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
+> **conflicts:** NONE structural. Three refinements vs the earlier text (not reversals): encoding
+> statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh`
+> not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further
+> taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content
+> item (see Known Unknowns).
 >
-> **spec_status:** sample_verified (7 samples cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23)
+> **spec_status:** sample_verified (10 shader files cross-confirmed; all five runtime-assembled shaders read)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24)
 
 ---
 
@@ -30,7 +35,7 @@
 
 - **Extensions:** `.vsh` (vertex shader), `.psh` (pixel shader)
 - **Found in:** `.pak` archive; logical path pattern: `shader/*`
-- **Magic / signature:** None. There is no binary header or magic bytes. The file begins immediately with the version-declaration text line.
+- **Magic / signature:** None. There is no binary header or magic bytes. The version-declaration text line (`ps.1.1` / `vs.1.1`) is the first non-comment content, but it is NOT guaranteed to be byte 0: two confirmed `.psh` samples open with a leading CP949 `;`-comment line before the version declaration. A faithful reader must not assume the version line starts at offset 0.
 - **Encoding:** Shader **code tokens** (the version line, mnemonics, registers, `def` literals) are 7-bit ASCII. **Comment text** (everything after a `;`) is *not* guaranteed ASCII: two verified cel pixel-shader samples open with a CP949/EUC-KR Korean comment line (bytes above `0x7E`). Because the assembler ignores everything after `;`, this never affects the parse — but do not assert "no bytes above 0x7E"; a faithful reader must tolerate CP949 in comments.
 - **Line endings:** Windows CRLF (`0x0D 0x0A`) throughout all verified samples. No lone-LF endings observed.
 - **Endianness:** Not applicable (text format).
@@ -49,9 +54,10 @@ This format is identical to the standard Direct3D 9 SDK shader assembly text for
 ## File Grammar
 
 ```
-<file> ::= <version-line> CRLF
+<file> ::= { <comment-line> CRLF }   ; zero or more leading comment lines (may be CP949)
+           <version-line> CRLF
            { <statement-line> CRLF }
-           [ CRLF ]          ; optional trailing blank line
+           [ CRLF ]                  ; optional trailing blank line
 
 <version-line>    ::= <shader-type> "." <major> "." <minor>
 <shader-type>     ::= "vs"   ; vertex shader (.vsh)
@@ -76,7 +82,7 @@ The `+` prefix on an instruction denotes a **co-issue (paired) instruction**, va
 
 ## Version Declaration Line
 
-The first line of every shader file is the version declaration. It is mandatory and has no leading whitespace.
+The version declaration is the first non-comment line of every shader file. It is mandatory and has no leading whitespace. In files that open with leading CP949 `;`-comment lines (confirmed in two cel `.psh` samples), it follows those comment lines rather than appearing at byte offset 0.
 
 | Field            | .vsh value | .psh value | Verified |
 |------------------|-----------|-----------|----------|
@@ -164,10 +170,11 @@ Verified in: `power1dx8.psh`, `dotoonshading.psh`, `dotoonshading2.psh`, `finald
 
 ## Known Shader Files
 
-Seven shader filenames are known, all now sample-verified. The five that the `doida.exe` build statically
-references by string are the five runtime-assembled shaders; `power2dx8.psh` / `power4dx8.psh` are present
-on disk as a data-driven multi-tap chain but are **not** string-referenced by the executable on build
-263bd994 (the glow pixel-shader path is read from an editable filename slot, default `power1dx8.psh`).
+Ten shader filenames are known. The five that the `doida.exe` build statically references by string are the
+five runtime-assembled shaders; the remaining five power-ladder taps (`power2` through `power32`) are present
+on disk as data-driven options but are **not** string-referenced by the executable on build 263bd994 — the
+glow pixel-shader path is read from an editable filename slot whose constructor default is `power1dx8.psh`,
+and the active tap is selected by the `DISPLAY_POWER` key in `display.lua` (shipped value: 2 → `power2dx8.psh`).
 
 | Filename | Extension | Shader model | Role | Sample status |
 |----------|-----------|-------------|------|---------------|
@@ -176,10 +183,14 @@ on disk as a data-driven multi-tap chain but are **not** string-referenced by th
 | `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value | VERIFIED (string-referenced) |
 | `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — **stealth / 은신 (invisible)** render state: identical arithmetic to the normal shader except alpha is taken from `c1.w` (the per-state ADD's w drives the stealth fade) | VERIFIED (string-referenced) |
 | `finaldx8.psh`       | .psh | ps.1.1 | Final composite / post: `saturate(scene×2×c0 + glow×c1)`, alpha forced opaque from a literal `(1,1,1,1)` constant | VERIFIED (string-referenced) |
-| `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (squared sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
-| `power4dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (quartic sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power2dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (squared sample — one `mul r0,r0,r0` squares the sample) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power4dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (quartic — two squarings) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power8dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample (8th power — three squarings) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power16dx8.psh`     | .psh | ps.1.1 | Glow/bloom downsample (16th power — four squarings) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
+| `power32dx8.psh`     | .psh | ps.1.1 | Glow/bloom downsample (32nd power — five squarings) | VERIFIED (present on disk; not string-referenced in build 263bd994) |
 
-Whether additional shader files exist beyond these seven is unknown (see Known Unknowns).
+Whether additional shader files exist for other effects (character effects, weather, UI) has not been
+confirmed (see Known Unknowns).
 
 ---
 
@@ -247,15 +258,21 @@ These sizes are provided for parser sanity-checks and regression tests only. Do 
 
 | Filename | File size (bytes) | CRLF-terminated lines |
 |----------|------------------|-----------------------|
-| `dotoonshading.vsh` | 754 | 24 (including 1 trailing blank) |
-| `dotoonshading.psh` | 332 | (CRLF throughout; zero lone-LF — raw byte-walked) |
-| `power1dx8.psh`     | 116 | 7 |
-| `power2dx8.psh`     | 170 | 7 |
-| `power4dx8.psh`     | 226 | 10 |
+| `dotoonshading.vsh`  | 754 | 24 (including 1 trailing blank) |
+| `dotoonshading.psh`  | 332 | (CRLF throughout; zero lone-LF — raw byte-walked) |
+| `power1dx8.psh`      | 116 | 7 |
+| `power2dx8.psh`      | 170 | 7 |
+| `power4dx8.psh`      | 226 | 10 |
+| `power8dx8.psh`      | 276 | (CRLF; size-verified build 263bd994) |
+| `power16dx8.psh`     | 328 | (CRLF; size-verified build 263bd994) |
+| `power32dx8.psh`     | 378 | (CRLF; size-verified build 263bd994) |
 
 `dotoonshading.psh` was raw byte-walked on build 263bd994: 332 bytes, CRLF (`\r\n`) throughout with zero
 lone-LF endings — confirming the CRLF claim holds for the `.psh` family as well (the cel/composite pixel
-shaders were also read but their exact byte sizes are not pinned here).
+shaders were also read but their exact byte sizes are not pinned here). The power-ladder size progression
+(116 → 170 → 226 → 276 → 328 → 378 bytes for power1 through power32) reflects the one-additional-`mul`
+pattern per doubling step: each tap adds one `mul r0,r0,r0` instruction that squares the prior result,
+doubling the exponent.
 
 ---
 
@@ -263,7 +280,7 @@ shaders were also read but their exact byte sizes are not pinned here).
 
 1. **VFS encryption:** Whether `.psh`/`.vsh` files inside the `.pak` archive are subject to the same encryption or obfuscation pass as other asset types (mesh, texture) is unconfirmed. The load path reads them via the VFS layer, which may transparently decrypt. If shaders are stored raw (unencrypted) inside `.pak`, the parser needs no decryption step; if they are encrypted, the same key/scheme as other assets applies.
 2. **~~Unverified shader files~~ — RESOLVED (build 263bd994):** `dotoonshading.psh`, `dotoonshading2.psh`, and `finaldx8.psh` have now been extracted from the VFS and read; their per-instruction arithmetic is sample-verified and recorded in the Known Shader Files table and the Re-authoring Guidance (cel `base × toonRamp × 2 × c0 + c1` with normal/stealth alpha split; composite `saturate(scene×2×c0 + glow×c1)`). All five runtime-assembled shaders are now content-confirmed. The executable still carries only the load logic and file paths (never source or bytecode), so any *future* shader content is recovered only by reading the on-disk file.
-3. **Shader file completeness:** Only seven shader filenames are known. The executable string table references exactly six paths (`dotoonshading.vsh`, `dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`, `power1dx8.psh`, `toonramp.bmp`); `power2dx8.psh` / `power4dx8.psh` exist on disk but are **not** string-referenced in build 263bd994 (the glow path is the editable slot, default `power1dx8.psh` — so the multi-tap depth is data-driven). Whether additional shader files exist for other effects (character effects, weather, UI) has not been confirmed. The power progression is 1/2/4 — a `power3dx8.psh` is not referenced anywhere.
+3. **Shader file completeness:** Ten shader filenames are now known and physically verified (build 263bd994). The executable string table references exactly six paths (`dotoonshading.vsh`, `dotoonshading.psh`, `dotoonshading2.psh`, `finaldx8.psh`, `power1dx8.psh`, `toonramp.bmp`); the full power ladder `power2dx8.psh` through `power32dx8.psh` (five taps) exist on disk but are **not** string-referenced in build 263bd994 — the glow path is the editable slot selected by `DISPLAY_POWER` (shipped value 2, selecting `power2dx8.psh`). The confirmed power progression is **1 / 2 / 4 / 8 / 16 / 32** (six taps; no `power3dx8.psh` or other interstitial file is present). Whether additional shader files exist for other effects (character effects, weather, UI) has not been confirmed.
 4. **Other shader model versions:** Only version `1.1` has been observed. Whether any shader files use `vs.1.0`, `ps.1.4`, `vs.2.0`, or any other model is unknown.
 5. **D3DX flags:** All observed load sites use flags value `0`. Whether any code path uses `D3DXSHADER_DEBUG` or another flag in a debug build is unknown.
 

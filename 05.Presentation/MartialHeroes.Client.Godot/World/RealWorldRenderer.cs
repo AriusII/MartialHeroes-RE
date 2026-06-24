@@ -110,6 +110,12 @@ public sealed partial class RealWorldRenderer : Node3D
             _mapXEffectScheduler.TimeOfDayMs = (uint)Math.Round(_environmentNode.ClockMs);
     }
 
+    private static double WallClockSecondsOfDayMs()
+    {
+        var now = DateTime.UtcNow;
+        return (now.Hour * 3600.0 + now.Minute * 60.0 + now.Second + now.Millisecond / 1000.0) * 1000.0;
+    }
+
 
     public override void _ExitTree()
     {

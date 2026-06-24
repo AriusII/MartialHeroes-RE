@@ -1,8 +1,8 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-21
-ida_anchor: 263bd994
-evidence: [static-ida]
+ida_reverified: 2026-06-24
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+evidence: [static-ida, vfs-sample]
 conflicts: texture-load flag 0x35540004 semantics (value confirmed, meaning capture/debugger-pending); first-paint font slot index (capture/debugger-pending); .do class-stance stride 116B (0x74) — RESOLVED (CYCLE 1 A3-6): config_tables.md now CONFIRMS 116 too and REFUTES the 166B estimate; char-select corner close-button atlas — RESOLVED (CYCLE 1 A3-7): binds data/ui/tradekeepwindow.dds (1024×1024) at src (941,910,23,23) dst (971,610); blacksheet 512×512 overflow + loginwindow/mainwindow candidates REFUTED — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §2.8 — the `.do` stance-manifest SELECTION function and its class-index classStanceRef (Musa=1, Assassin=2, Wizard=3, Monk=4) with the {jung, sa, ma} file triplet per class, and the stanceType 0/1/2 + tier-sign selection rule; this resolves the *selection-by-class* half of §9 item #11b (the on-disk +0x0C discriminator enumeration for non-Musa files stays UNVERIFIED — two distinct quantities both loosely called "classStanceRef") — 2026-06-21 (IDB SHA 263bd994): added §2.9 — `data/script/emoticon.do`, the 40-byte (0x28) chat-emoticon picker sub-family (EOF-driven loader, dual id/index maps, full record layout incl. the +0x04 low-byte pageId padding caveat, the four-widget page builder joining UiTex id 27=emoticon.dds + id 3 chrome, and the +0x0C emoteCode click dispatch); establishes that `.do` is NOT one format but ≥3 distinct fixed-stride tables (40B emoticon / 108B errorinfo-msginfo / 116B stance) disambiguated by filename + loader, never by extension — 2026-06-21 SHARED-UI re-confirm (IDB SHA 263bd994): §1 UiTex.txt grammar + 37-entry DDS block RE-CONFIRMED with zero drift; front-end login/char-select chrome is loaded by LITERAL DDS path (login_slice1.dds / loginwindow.dds / loginwindow_02.dds / InventWindow.dds), NOT by UiTex integer id — only in-game windows bind chrome by UiTex id (§8.5/§8.6.1 of ui_system.md); UiTex id is atlas-selection only (carries no src-rect, no dst position — those are code-baked in each window's BuildScene)
 ---
 
@@ -126,6 +126,10 @@ UI_TEXTURE
 - The `DDS` sub-block contains the main texture entries (PARSER-CONFIRMED from string constant).
 - The `MSK` sub-block is reserved for mask textures; it is **empty** in the version analysed
   (PARSER-CONFIRMED from string constant; semantics PROPOSED — see §1.6).
+- **Sole-referencer confirmation (2026-06-24):** the dedicated parse routine is the **only** caller
+  that references the string constants `UI_TEXTURE`, `DDS`, and `MSK` — string cross-reference
+  analysis finds exactly one referencing function for each constant. This confirms there is no
+  secondary loader or alternate code path that reads these sub-block keywords. PARSER-CONFIRMED.
 - Comments use `#` to end of line. The comment-skip helper is called before every meaningful
   token read (PARSER-CONFIRMED).
 - Brace characters `{` and `}` are block delimiters; whitespace is insignificant.
@@ -311,6 +315,35 @@ other client config files. All functions below are PARSER-CONFIRMED from the bin
 
 The tokenizer is whitespace-delimited. `{` and `}` are ordinary tokens compared by string
 equality. `#` triggers line-comment skipping for the remainder of the line.
+
+**Boot-loader load context (PARSER-CONFIRMED — 2026-06-24).** The manifest path is not a
+string literal inside the parse routine itself — it is **passed in by the caller**. The caller
+is the boot data-table corpus loader (`Boot_LoadDataTableCorpus`), which runs on a worker thread
+at startup and sequentially loads the full client data-table set. It reads the manifest path
+from a config-pointer global and passes it into the uitex parse routine. This is why no `"uitex"`
+string literal appears in the binary — the filename is kept only in the config-pointer global
+and in the boot loader, not in the parse routine. Sibling loads in the same boot-loader call
+sequence include the `skillicon.txt` parse routine and the guild-crest list-and-load routine;
+see §2 and §3 respectively. PARSER-CONFIRMED.
+
+### 1.9 Per-texture construction mode constant (PARSER-CONFIRMED existence; semantics PROPOSED — 2026-06-24)
+
+During texture-object construction for each `(id, path)` entry parsed from the `DDS` and `MSK`
+sub-blocks, the parse routine selects one of three 32-bit mode constants based on a global
+display/quality selector. The selection rule is:
+
+| Global quality selector value | Mode constant passed to texture-create call | Confidence |
+|---|---|---|
+| selector − 1 == 0 | 894720068 | PARSER-CONFIRMED (branch + constant observed) |
+| selector − 1 == 1 | 861165636 | PARSER-CONFIRMED (branch + constant observed) |
+| all other values | 844388420 | PARSER-CONFIRMED (branch + constant observed) |
+
+The same triplet is applied on both the `DDS` and `MSK` construction paths. The **existence** of
+the three-way branch and the exact constant values are PARSER-CONFIRMED from the binary. The
+**graphic meaning** of these constants (texture filter quality tier, mip-map mode, format usage
+flag, or some combination) is **PROPOSED** — it has not been confirmed against the running
+loader or the D3D9 API call site. An engineer reproducing the texture-load behaviour may pass
+the same constants by value; the semantics require a live-debugger confirmation pass to resolve.
 
 ---
 
@@ -826,6 +859,14 @@ layout is not decoded here.
 Enumerates the set of per-guild player-uploaded crest images available in
 `data/ui/guildicon/pool/`. The file is consulted when rendering guild crests in the guild
 window and on the character list.
+
+> **Separate loader confirmation (PARSER-CONFIRMED — 2026-06-24).** `crestlist.txt` is loaded
+> by a dedicated guild-crest list-and-load routine (`GuildCrest_ParseListAndLoad`), **not** by
+> the braced-block tokenizer described in §1.8. This routine is called from the boot data-table
+> corpus loader alongside — but independently of — the uitex and skillicon parse routines.
+> The bare-line-list convention (one filename per line, no braces, no `#` header) is therefore
+> confirmed as a distinct format family from the `UI_TEXTURE` / `SKILL` braced-block family. A
+> parser must **not** pass `crestlist.txt` through the `§1.8` tokenizer.
 
 ### 3.2 File structure (SAMPLE-VERIFIED for filename pattern; column layout PARTIAL)
 
@@ -1414,6 +1455,12 @@ sole source for resolving an item's 2D icon texture from its `tex_id` field. It 
 the same generic line-per-file loader used by the character texture list files
 (`data/char/tex512512list.txt`, etc.), but it is not a braced block.
 
+> **Separate loader confirmation (PARSER-CONFIRMED — 2026-06-24).** `data/item/texturelist.txt`
+> uses the bare newline-delimited filename-list convention, loaded by its own line-per-file loader
+> — **not** by the braced-block tokenizer of §1.8. This is confirmed from the boot data-table
+> corpus loader call sequence, where the item texture list loader is a distinct call from the
+> uitex/skillicon braced-block calls.
+
 ### 10.2 File structure (CODE-CONFIRMED)
 
 The file contains **no block keyword, no braces, and no column headers**. It is a plain
@@ -1897,3 +1944,22 @@ gets the event. [confirmed]
 > `blacksheet.dds` overflows the atlas — `964 > 512`, `933 > 512` — so the correct atlas is a 1024²
 > sheet, **IDA-pending** the char-select construct witness). Promoted as neutral prose; no addresses,
 > no decompiler output, and no sample bytes crossed the firewall.
+
+> **Provenance — 2026-06-24 re-confirm pass (static-IDA, anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee):**
+> re-confirmed the entire spec against the current IDB with zero contradictions. Four additions
+> integrated as new or extended content:
+> (1) §1.2 **sole-referencer confirmation** — the dedicated uitex parse routine is the only function
+> referencing the `UI_TEXTURE`, `DDS`, and `MSK` string constants (string cross-reference confirms
+> exactly one referencing function each); no secondary loader or alternate parse path exists.
+> (2) §1.8 **boot-loader context + "no uitex literal" explanation** — the manifest path is supplied
+> by `Boot_LoadDataTableCorpus` from a config-pointer global and passed into the parse routine; the
+> filename is therefore not a string literal in the parse routine, explaining its binary absence.
+> Sibling boot-sequence loads (`SkillIcon_ParseManifest`, `GuildCrest_ParseListAndLoad`) also noted.
+> (3) §1.9 **per-texture construction mode constant** — a three-way branch on a global display/quality
+> selector selects one of three 32-bit mode constants (894720068 / 861165636 / 844388420) passed to the
+> texture-create call for each parsed entry; branch existence and constant values PARSER-CONFIRMED;
+> graphic semantics PROPOSED (live-debugger pass needed).
+> (4) §3.1 and §10.1 **sub-family-B separate-loader confirmation** — `crestlist.txt` and
+> `data/item/texturelist.txt` are confirmed as using their own dedicated loaders (not the §1.8
+> braced-block tokenizer), anchored via the boot-loader call sequence. Promoted as neutral prose;
+> no addresses, no decompiler output, and no sample bytes crossed the firewall.

@@ -110,6 +110,15 @@ public sealed partial class EnvironmentNode : Node3D
         GD.Print($"[Environment] SetTimeOfDay applied keyframe={keyframeIndex} freeze={freeze}");
     }
 
+    public void UpdateClockMs(double absoluteClockMs)
+    {
+        ClockMs = Math.Clamp(absoluteClockMs, 0.0, PeriodMs - 1.0);
+        var kf = (int)(ClockMs / KeyframeMs) % KeyframeCount;
+        var frac = (float)(ClockMs % KeyframeMs / KeyframeMs);
+        ApplyKeyframe(kf, frac);
+        _skyDome?.UpdateDomes(ClockMs, 0.0);
+    }
+
 
     public override void _Process(double delta)
     {

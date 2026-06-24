@@ -10,7 +10,9 @@
 > re-read from a consumer this pass), `skillneedset.scr`, and the runtime offsets carried from prior
 > analysis; **capture/debugger-pending** for the 5/52 per-target damage / HP / stamina **value
 > semantics** and any field-value meaning that needs a live wire capture.
-> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
+> spec-audit corrections applied 2026-06-24: +1368/+1370 renamed HpCost/StaminaCost (reversed CYCLE 7
+> timed-charge framing); §E.4.2 damage offset flagged for reconciliation at +0x10 vs +0x0C.
 > · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none for
 > the skill layouts; the 5/52 §E.4 stub is **superseded** by the statically-recovered 24-byte header
 > (see §E.4 and `packets/5-52_actor_skill_action.yaml`).
@@ -214,8 +216,8 @@ the prior sample walk.
 | +1356 | 0x54C | 4 | u32 | Reserved E (always 0) — within the weapon-req block walked in 12-byte steps (+1344 → +1368) | — | UNVERIFIED |
 | +1360 | 0x550 | 4 | u32 | Reserved F (always 0) | — | UNVERIFIED |
 | +1364 | 0x554 | 4 | u32 | Reserved G (always 0) | — | UNVERIFIED |
-| +1368 | 0x558 | 2 | i16 | **CastCostTimerThreshold** — a **timed-charge gate** compared against a running global clock (blocks when `>0`, the clock delta is negative, and the value `< 30000`); NOT a flat pool subtract on this path. Magnitude server-authored | 0 in all sample records | CONSUMER-CONFIRMED (structure); semantic CAPTURE-PENDING |
-| +1370 | 0x55A | 2 | u16 | **StaminaCostTimerThreshold** — a **timed-charge gate** compared against a separate running global clock (blocks when `>0` and the clock delta is negative); NOT a flat pool subtract on this path | movement/passive: 0; combat: 20–50, scaling per tier | CONSUMER-CONFIRMED (structure); semantic CAPTURE-PENDING |
+| +1368 | 0x558 | 2 | i16 | **HpCost** — flat HP cost. Cast gate blocks if current HP `< HpCost` (with a `< 30000` client guard, string id 3011). On 5/52 cast-confirm the value is subtracted from the player current-HP field (+176, 64-bit). The CYCLE 7 "timed-charge gate" framing was wrong and is reversed. Magnitude server-authored | 0 in all sample records | CONSUMER-CONFIRMED |
+| +1370 | 0x55A | 2 | u16 | **StaminaCost** — flat stamina cost (base). Cast gate blocks if current stamina `< StaminaCost` (string id 3012). On 5/52 cast-confirm the effective cost is `StaminaCost × target_count × buff_factor`, floored at the base value, subtracted from the player current-stamina field (+184). Magnitude server-authored | movement/passive: 0; combat: 20–50, scaling per tier | CONSUMER-CONFIRMED |
 
 #### A.2.6 Secondary timing / range block (+1372 .. +1495)
 
@@ -604,13 +606,20 @@ animation/FX queue and feeds a floating damage number. The per-field *value* sem
 | +0x00 | 1 | u8  | `target_sort` | Target actor sort (lookup key). |
 | +0x04 | 4 | u32 | `target_id` | Target actor id (lookup key). |
 | +0x08 | 4 | i32 | `anim_hit_state` | `1` = a hit landed; selects the hit animation. |
-| +0x0C | 4 | i32 | `visible_damage` | Number rendered as a floating damage figure. |
-| +0x10 | 4 | — | (reserved) | Reserved word. |
-| +0x14 | 8 | i64 | `remaining_hp` | Remaining HP after hit (signed; negative on overkill; feeds the HP bar). |
-| +0x1C | 4 | i32 | `max_hp` | Feeds the HP bar. |
+| +0x0C | 4 | i32 | (unknown / pad) | Purpose capture-pending. See damage-offset note below. |
+| +0x10 | 4 | i32 | `visible_damage` | **PENDING RECONCILIATION** — the 5/52 damage-total summation reads dword indices 4 and 5 of the record (+0x10 / +0x14) as a 64-bit pair, implying the summed visible-damage value sits here rather than at +0x0C. Reconcile against `packets/5-52_actor_skill_action.yaml` before implementing. |
+| +0x14 | 4 | — | (damage high / pair tail) | Upper half of the +0x10 i64 pair — see note above. |
+| +0x18 | 4 | i32 | `remaining_hp` (tentative) | Remaining HP after hit; feeds the HP bar. Offset may shift pending the +0x10 reconciliation. |
+| +0x1C | 4 | i32 | `max_hp` (tentative) | Feeds the HP bar. |
 | +0x20 | 4 | — | (reserved) | Tail / reserved. |
 
-On cast-confirm this handler also consumes the per-skill costs from the catalog entry (CastCost
+> **Damage-offset reconciliation needed.** The 5/52 handler sums the per-target visible-damage
+> figures by reading record dword indices 4 and 5 (record **+0x10 / +0x14**) as a 64-bit pair. This
+> suggests `visible_damage` sits at **+0x10**, not +0x0C as the previous spec listed. The +0x0C field
+> and the downstream offsets (+0x18 / +0x1C) may shift accordingly. Reconcile against
+> `packets/5-52_actor_skill_action.yaml` before binding these offsets. `CAPTURE-PENDING`.
+
+On cast-confirm this handler also consumes the per-skill costs from the catalog entry (HpCost
 +1368, StaminaCost +1370) and arms the runtime recast slot. When `action_code == 0xCC` the handler
 treats the first record as an AoE origin and procedurally fans out sub-actors (no extra wire fields);
 `0xC8..0xCB` are motion sub-ops (animation toggles, usually no damage records).
@@ -673,9 +682,10 @@ discriminator received on spawn — **not** a per-skill cooldown table. Exact se
 - EffectTypeCode semantics for codes ~1..42 — inferred from names only, provisional.
 - `30001` magnitude sentinel and LevelThreshold-as-signed-duration — inferred, not confirmed.
 - Reader code path for MovementCooldown (+1372) — not located this pass.
-- CastCost (+1368) / StaminaCost (+1370) — CYCLE 7 consumer pass: on the cast-gate path both are
-  **timed-charge gates** compared against running global clocks, NOT flat pool subtracts. The gate
-  magnitude is server-authored — CAPTURE-PENDING. (0 across the sample.)
+- HpCost (+1368) / StaminaCost (+1370) — **corrected (spec-audit 2026-06-24):** both are flat
+  resource costs (HP and stamina), not timed-charge gates. The CYCLE 7 "timed-charge" framing was
+  wrong. Cast gate blocks if current resource < cost; 5/52 confirm subtracts the cost from the
+  actor vitals. Magnitude is server-authored — CAPTURE-PENDING. (0 across the sample.)
 - Exact Name buffer length (24 vs 32 bytes) — byte at +32 is always 0 in valid records, boundary unpinned.
 - SkillSort value 17 (present in sample, 7 records) — behaviour UNVERIFIED.
 - The unused second int of each 8-byte hotbar slot pair — purpose UNVERIFIED.

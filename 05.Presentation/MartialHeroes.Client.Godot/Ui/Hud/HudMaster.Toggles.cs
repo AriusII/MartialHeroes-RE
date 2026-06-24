@@ -1,5 +1,3 @@
-using Godot;
-
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
 public sealed partial class HudMaster
@@ -154,8 +152,60 @@ public sealed partial class HudMaster
     {
         _friendWindow?.Toggle();
         _relationPanel?.Toggle();
-        GD.Print("[HudMaster] ToggleRelation → RelationPanel(193) toggled; " +
-                 "BuddyRelation(185) interim→FriendWindow (TODO world-campaign: HudBuddyRelation). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.28.5 CODE-CONFIRMED.");
+    }
+
+    public void ToggleMap()
+    {
+        _minimapPanel?.ToggleCollapse();
+    }
+
+    public void ToggleGuildN()
+    {
+        _guildWindow?.Toggle();
+    }
+
+    public void ToggleNpcDialog()
+    {
+    }
+
+    public void CloseAll()
+    {
+        if (_inventoryPanel?.Visible == true) _inventoryPanel.Toggle();
+        if (_skillPanel?.Visible == true) _skillPanel.Toggle();
+        if (_statsPanel?.Visible == true) _statsPanel.Toggle();
+        _optionsWindow?.Toggle(false);
+        _partyWindow?.Toggle(false);
+        _friendWindow?.Toggle(false);
+        _guildWindow?.Toggle(false);
+        _questWindow?.Toggle(false);
+        _productWindow?.Toggle(false);
+        _emoticonWindow?.Toggle(false);
+        _tenderWindow?.Toggle(false);
+        _mailWindow?.Toggle(false);
+        _deliveryWindow?.Toggle(false);
+        _helpOverlay?.Toggle(false);
+        if (_vendorWindow?.Visible == true) _vendorWindow.Toggle(false);
+        _stallListWindow?.Toggle(false);
+        _guildDiplomacyWindow?.Toggle(false);
+        _guildWarInfoWindow?.Toggle(false);
+        _relationPanel?.Toggle(false);
+    }
+
+    public void ToggleMiscW()
+    {
+    }
+
+    public void ToggleMiscZ()
+    {
+    }
+
+    public void OnSectorLoaded(int mapX, int mapZ)
+    {
+        _minimapPanel?.OnSectorLoaded(mapX, mapZ);
+    }
+
+    public void OnSectorUnloaded(int mapX, int mapZ)
+    {
+        _minimapPanel?.OnSectorUnloaded(mapX, mapZ);
     }
 }

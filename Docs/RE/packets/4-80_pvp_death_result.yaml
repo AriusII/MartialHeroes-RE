@@ -1,6 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CONFIRMED offsets/sizes (control-flow; copy-out widths are literal) for the header decode; the
-# 40-byte tail is opaque (boundary only). Field VALUE MEANINGS likely. capture_verified: false.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 80-byte (0x50) body -- the 8-byte
+#                 echo head, SelfGate@+0x08, ReasonCode@+0x09, Subtype@+0x0A (==6 runs a local death
+#                 effect), GapA[9]@+0x0B, TargetId u32@+0x14, OpaqueTail[56]@+0x18 -- are
+#                 control-flow-confirmed; the reason-code->string-id map is static-confirmed; value
+#                 meanings are capture/debugger-pending)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: size precision: catalog listed 'var'; confirmed fixed 80-byte read (0x50). No
+#              name/direction drift.
 # spec: Docs/RE/packets/4-80_pvp_death_result.yaml
 
 name: SmsgPvpDeathResult
@@ -39,9 +49,12 @@ notes: |
   a 24-byte decoded header (+0x00..+0x17) + a 56-byte opaque tail (+0x18..+0x4F).
 
   REASON-CODE -> NOTICE-STRING MAP (the +0x09 reason byte selects a localized message-string id;
-  ids are message-database keys, NOT addresses): 0, 1, 2, 3, 4, 5, 6, 13, 14, 15 each select a
-  distinct PvP death/kill notice string, with a default fallback for other values. The exact wording
-  is in the client message database; only the code -> id mapping is recovered.
+  ids are message-database keys, NOT addresses):
+    0  -> 49059    1  -> 49060    2  -> 49061    3  -> 49062
+    4  -> 49063    5  -> 49064    6  -> 49065   13  -> 49081
+   14  -> 74307   15  -> 49080   default -> 49066
+  The exact string wording is in the client message database; only the code->id mapping is
+  static-confirmed this pass.
 
   BRANCHES:
     +0x08 SelfGate == 1 -> the self-death local path (forwards the echo head, runs the local death

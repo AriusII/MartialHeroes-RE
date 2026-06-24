@@ -313,7 +313,10 @@ the effect-manager singleton; **it is NOT an effect-spawn list.**
 
 ### 5A.1 The enqueue primitive
 
-An enqueue routine builds a **24-byte event record** and inserts it into the manager's sorted tree:
+An enqueue routine allocates a **24-byte event record** (one heap allocation per record; the
+record is freed after it is drained) and inserts it into the manager's **unbounded** sorted tree.
+The tree is keyed by fire-time and holds one node per pending event with no upper capacity limit —
+it grows as long as events are enqueued faster than they are drained:
 
 | Offset | Size | Type | Field | Meaning |
 |-------:|-----:|------|-------|---------|

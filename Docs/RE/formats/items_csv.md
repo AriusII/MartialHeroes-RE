@@ -18,13 +18,24 @@ verification:   sample-verified   # delimiter/encoding/line-ending/headerlessnes
                                    # magnitudes are now COUNTED over the whole file; the runtime
                                    # non-loading is confirmed from the boot data-loader's callee set
                                    # (loader-control-flow only).
-ida_reverified: 2026-06-16
-ida_anchor:     263bd994
+                                   # re-verified against doida.exe IDB SHA
+                                   # 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+                                   # (2026-06-24, static-IDA): all load-bearing facts RE-CONFIRMED —
+                                   # zero .csv string references in the IDB, binary items loader
+                                   # callee set is offset-driven with no comma scan, record-0
+                                   # cross-check (scr item_uid @+0x034 = 201,155,514 == csv col1)
+                                   # upgrades the join-key claim from INFERRED to SAMPLE-VERIFIED.
+                                   # item_id range (col1) confirmed as purely 9-digit:
+                                   # 201011001..299010149. No corrections required.
+ida_reverified: 2026-06-24
+ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence:       [static-ida, vfs-sample-full]
 conflicts:      none open          # the prior "runtime role UNVERIFIED" is now resolved:
                                    #   items.csv is CONFIRMED not loaded by the shipping client
                                    #   (authoring/dev export only). No contradictions found on the
                                    #   full-file re-pass — only UNVERIFIED -> SAMPLE-VERIFIED upgrades.
+                                   # The join-key correspondence (csv col1 == scr item_uid @+0x034)
+                                   #   is upgraded from INFERRED to SAMPLE-VERIFIED (record-0 byte check).
 ```
 
 ---
@@ -37,6 +48,9 @@ items.csv:  CONFIRMED  # delimiter/encoding/line-ending/headerlessness SAMPLE-VE
                        # leading columns (0..6) role-inferred from observed value patterns;
                        # canonical column count = 139 SAMPLE-VERIFIED (full-file count, see §1);
                        # row count = 89,712 SAMPLE-VERIFIED (exact LF count);
+                       # item_id (col1) range 201011001..299010149, purely 9-digit, SAMPLE-VERIFIED;
+                       # join-key correspondence (col1 == items.scr item_uid @+0x034) SAMPLE-VERIFIED
+                       #   (record-0 byte+code two-witness; IDB SHA 263bd994, 2026-06-24);
                        # the TWO parser hazards below are SAMPLE-VERIFIED, MAGNITUDE-COUNTED, and load-bearing.
 ```
 
@@ -89,7 +103,7 @@ correctly resolved** — a naive split shifts every index after column 0.
 | col# | type   | role (inferred)                                              | confidence |
 |------|--------|-------------------------------------------------------------|------------|
 | 0    | string | `item_name` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type, SAMPLE-VERIFIED); HAZARD |
-| 1    | u32    | `item_id` — 9–12 digit numeric id                            | HIGH (SAMPLE-VERIFIED) |
+| 1    | u32    | `item_id` — 9-digit numeric id; range 201011001..299010149 (SAMPLE-VERIFIED, full-file) | HIGH (SAMPLE-VERIFIED) |
 | 2    | string | `item_description` — CP949; **MAY CONTAIN EMBEDDED COMMAS** (hazard) | HIGH (type, SAMPLE-VERIFIED); HAZARD |
 | 3    | u32    | small int (0 in all observed rows)                          | LOW        |
 | 4    | u32    | `base_item_id` / archetype id (9-digit)                     | HIGH       |
@@ -259,10 +273,12 @@ float column (the period is kept inside its value and parsed under invariant cul
 null-padded CP949 name/description + a numeric stats block — see `formats/items_scr.md`). This CSV
 appears to be a **flat text parallel** of the same item data, formatted for human editing/export:
 
-- **Join key:** the `item_id` in CSV col 1 corresponds to the item uid in the `items.scr` records
-  (the uid field in the binary header record — see `formats/items_scr.md`). The two are parallel views
-  of one dataset rather than independent sources. (Cross-key correspondence is **inferred, not
-  byte-joined** — UNVERIFIED.)
+- **Join key:** the `item_id` in CSV col 1 corresponds to `item_uid` at on-disk offset `+0x034` of
+  the `items.scr` binary record (see `formats/items_scr.md §1.4`). Record-0 cross-check: the `items.scr`
+  leading record carries `item_uid` = 201,155,514 at `+0x034`; the corresponding CSV row col1 holds
+  the same value. The two are parallel views of one dataset rather than independent sources.
+  (Cross-key correspondence is **SAMPLE-VERIFIED** on record 0 via a byte+code two-witness check;
+  field names col0/col1/col2 also match scr name/uid/desc at +0x000/+0x034/+0x038 on that same record.)
 - **Record-count cross-check:** the CSV holds **89,712 rows**; `items.scr` holds roughly **90,937
   records**. The counts are close but **not equal**, so the two are *parallel* views, not a
   byte-identical export — the CSV is most likely a subset or an older snapshot. (Counts compared, not

@@ -20,6 +20,11 @@ public sealed partial class RealWorldRenderer
         AddChild(envNode);
         envNode.Configure(Assets, TargetAreaId, sceneWorldEnv, sceneDirLight);
 
+        var wallClockMs = WallClockSecondsOfDayMs();
+        envNode.UpdateClockMs(wallClockMs);
+        GD.Print($"[RealWorldRenderer] Environment clock seeded from wall-clock seconds-of-day: " +
+                 $"{wallClockMs / 3600000.0:F2}h UTC. spec: Docs/RE/specs/environment.md §2.");
+
         _environmentNode = envNode;
 
         if (_mapXEffectScheduler is null)

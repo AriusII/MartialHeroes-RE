@@ -1,3 +1,14 @@
+# Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+#
+# VERIFICATION BANNER
+#   verification: confirmed  (opcode->handler routing and the fixed 16-byte (0x10) body -- Header[8]@0,
+#                 Gold i64 spanning +0x08..+0x0F passed as low/high dwords to the player gold setter --
+#                 are control-flow-confirmed)
+#   ida_reverified: 2026-06-24
+#   ida_anchor: 263bd994
+#   evidence: [static-ida]
+#   conflicts: none.
+
 name: SmsgPlayerGoldBalanceUpdate
 opcode: 0x4006c           # major 4, minor 108
 direction: S2C

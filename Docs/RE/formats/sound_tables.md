@@ -4,9 +4,33 @@
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
 > verification: sample-verified
-> ida_reverified: 2026-06-21
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-24
+> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
+> reverify_2026-06-24: STATIC-IDA re-run on build 263bd994 CONFIRMS this spec is complete and correct
+>            on every load-bearing point. No corrections required. Confirmed: file size 13312, record
+>            array 0x3000, stride 48, count 256, two loaders (global 5-file + per-scene 3-file
+>            loadTerrainSound), tod_enable = per-hour enable gate (hour = TOD/3600), +0x20 X /
+>            +0x28 Z / +0x2C radius EFF-only, +0x24 NOT read, weight 1.0 at +0x1C, trailer =
+>            u32[256] present-flag (BGM [1]=1 matches lone populated record; null files all-zero),
+>            category split: 0 bgm/bge / 6 eff, boundary 5, 2D vs 3D directory, sound_id →
+>            data/sound/{2d|3d}/{id}.ogg. All soft/open items already correctly flagged in the
+>            Known unknowns section remain open (wlk/run mud index source; +0x24 meaning; +0x1C
+>            weight semantic; trailer non-1 values; data/effect/obj path-string witness).
+> reverify_sound_audio_family_2026-06-24: STATIC-IDA + ON-DISK BYTES re-run (sound_audio family,
+>            build 263bd994) CONFIRMS Section 7 in full. No corrections. On-disk: OggS magic
+>            confirmed (sample 841100811.ogg, libVorbis I 2002-07-17, mono 22050 Hz); RIFF/WAVE
+>            magic confirmed (sample 850901075.wav, WAVE_FORMAT_PCM=1, mono 22050 Hz, 16-bit LE,
+>            fmt=16 bytes, no fact chunk, ~1.07 s). Engine path: the only audio filename format
+>            string in the binary is `%s%d.ogg` (two literal prefixes data/sound/2d/ and
+>            data/sound/3d/); there is NO `.wav`/RIFF/WAVE/fmt path-construction string anywhere in
+>            the binary — the audio path builder is `.ogg`-only. Decode path: libVorbis
+>            ov_open_callbacks + ov_read from VFS buffer confirmed (GSoundOGG class); DirectSound
+>            IDirectSound3DBuffer for 3D confirmed. Sound2D_CreateAndPlay confirmed as the principal
+>            2D UI/HUD sound entry point. One refinement applied: Known unknown #8 tightened from
+>            "UNVERIFIED" to PARTIALLY-RESOLVED — static analysis confirms no `.wav` path string
+>            exists; WAV load mechanism inferred as DirectSound-native buffer path (medium confidence;
+>            runtime confirmation out of scope for this session).
 > reverify_2026-06-21: STATIC-IDA + REAL-SAMPLE re-run CONFIRMS this spec on every load-bearing point
 >            (size 13312, stride 48, count 256, read 0x3000, two loaders, tod_enable hour gate with
 >            3600 divisor + +0x04 base, +0x20 X / +0x28 Z / +0x2C radius EFF-only, null sentinel,
@@ -467,6 +491,15 @@ the VFS buffer and decoded using Ogg Vorbis callbacks (`ov_open_callbacks`). Whe
 not mounted (editor / development mode), the engine falls back to direct filesystem `fopen`.
 3D sounds use DirectSound3D (`IDirectSound3DBuffer`) for spatialisation; 2D sounds do not.
 
+The audio filename format string (`%s%d.ogg`) is the **only** audio path builder in the binary;
+the two literal directory prefixes (`data/sound/2d/` and `data/sound/3d/`) are combined with a
+decimal integer resource id and the literal `.ogg` extension — confirmed STATIC IDA, build
+263bd994. The class `GSoundOGG` owns both stream variants (`changeStream` for BGM re-open,
+`updateStream` for the decode loop). The entry point `Sound2D_CreateAndPlay` is the principal
+caller for 2D UI and HUD sounds. There is no `.wav` / RIFF / WAVE / `fmt` path-construction
+string anywhere in the binary, and no custom RIFF parser; see Known unknown #8 for the
+implication for `.wav` file loading.
+
 A streaming playback path exists for long audio (BGM tracks), which re-opens the Ogg stream
 in place rather than fully decoding it. No streaming-specific file format differences apply;
 the `.ogg` container format is identical.
@@ -530,9 +563,18 @@ the `.ogg` container format is identical.
 7. **sound_entry_id integer encoding** — whether the 9-digit decimal values represent a direct
    catalog key, a CRC32, or a composite type+sequence integer is not established.
 
-8. **sound_entry_id → filename resolution for .wav** — the engine path-construction code uses a
-   `.ogg` format string unconditionally in the observed path. How `.wav` files are resolved is
-   UNVERIFIED.
+8. **sound_entry_id → filename resolution for .wav — PARTIALLY RESOLVED (static IDA, 2026-06-24,
+   build 263bd994):** STATIC IDA CONFIRMS there is no `.wav`, `RIFF`, `WAVE`, `fmt`, or `data`
+   chunk path-construction string anywhere in the binary. The audio filename format string
+   (`%s%d.ogg`) is the only audio path builder and it is unconditionally `.ogg`. There is also no
+   custom RIFF/WAVE parser in the engine (no RIFF/WAVE/fmt/data string consumers). Consequently,
+   `.wav` files in `data/sound/3d/` are NOT loaded through the `%s%d.ogg` path. The most consistent
+   interpretation is that WAV assets are consumed by a DirectSound-native buffer-creation path
+   (DirectSound accepts a RIFF/WAVE memory buffer directly, without requiring an application-level
+   string parser), or are legacy/editor-only files not reached by the runtime OGG id path.
+   Confidence on the absence of any `.wav` path string: CONFIRMED (static). Confidence on the
+   precise WAV load mechanism (DirectSound-native): INFERRED, MEDIUM. Runtime confirmation via the
+   debugger would settle this definitively.
 
 9. **Per-map .eff soundtable byte-level sample** — RESOLVED (2026-06-14): the area-001 `.eff`
    table was field-censused (256 records), confirming the read 3D-position axes plus radius.

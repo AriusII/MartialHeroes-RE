@@ -50,6 +50,8 @@ note: |
   panel at levels 12/24 with progression codes 100/101). CYCLE 12 (2026-06-22): refined per-stat
   ceiling as implicit (budget exhaustion), separated the two slot structures (@BLANK@ name@116 in
   actor/pointer object vs 880-byte server roster record), and documented both create latches.
+  2026-06-24: added cross-link in §5 noting Latch B (network-client create in-flight marker) is the
+  same physical byte as the keepalive-suppress flag cleared in load.md §5A.4 -- one byte, two roles.
 -->
 
 # Character Creation, Appearance & Class Evolution — Clean-Room Specification
@@ -270,6 +272,13 @@ dispatching the request). **Cleared when `3/7` SmsgCharManageResult is received*
 result handler (an 8-byte char delete/rename/select/create manage result; see `opcodes.md` / `packets/`)
 clears this marker, signalling that the create round-trip is complete. *([CONFIRMED]* the in-flight
 marker set inside the send and cleared by the 3/7 result.)*
+
+> **Cross-link (`scenes/load.md §5A.4`, keepalive-suppress flag).** Latch B is the **same physical byte**
+> as the "NetClient keepalive-suppress flag" cleared in Load's visual-init (`scenes/load.md §5A.4`).
+> The char-management/create/enter builders (including this `1/6` send) **set** the byte to 1;
+> Load's visual-init **clears** it to 0 on entering the load phase, re-enabling the keepalive timer.
+> The keepalive timer reads this byte and transmits only while it is 0. One byte, two roles — a faithful
+> port must model a single shared flag on the network-client object, not two independent booleans.
 
 The full ack sequence:
 

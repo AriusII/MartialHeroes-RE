@@ -1,6 +1,6 @@
 ---
-verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-17
+verification: confirmed (re-confirmed against IDB SHA 263bd994, actor-world audit (2026-06-24))
+ida_reverified: 2026-06-24
 ida_anchor: 263bd994
 evidence: [static-ida]
 conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis. 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected. 2026-06-20 CYCLE 7: display FRAMERATE config inertness RESOLVED — statically exhaustive (the only two references to the config field are both stores, no reader), so the 60 FPS cap is confirmed hardcoded/inert (§16); the Diamond base-object layout (§3.0) is added
@@ -321,9 +321,28 @@ Cross-reference: `structs/actor.md` for the entity layout; `names.yaml` (`g_Acto
 > the id-keyed lookup and the `(id, sort)` composite-key lookup. This pointer is the global
 > cross-reference that routes all entity accesses through the ActorManager singleton.
 >
-> **ActorHashMap.** A separate 4-byte pointer in the global data region holds the address of an
-> actor hash-map/tree used in the id-keyed lookup hot path. Its type (std::map or custom tree)
-> is not yet confirmed — see open question §7.7.
+> **ActorHashMap (id-keyed map global).** A separate 4-byte pointer in the global data region holds
+> the address of an actor hash-map/tree used in the id-keyed lookup hot path (`ActorManager_FindActorById`);
+> node payload (actor pointer) sits at node+16 (the 4th dword of each node). The `(id, sort)` MRU
+> cache is held in the first dword of `ActorManager +0x70`. The type (std::map or custom tree) is
+> not yet confirmed — see open question §7.7.
+>
+> **Cluster-adjacent data-segment globals (actor-world audit, CODE-CONFIRMED).** Four globals in the
+> same data-segment cluster back the container notes above and the mob/NPC loader specs:
+>
+> | Role | Notes |
+> |---|---|
+> | id-keyed actor map node root | pointed to by the ActorHashMap global above |
+> | boss-mob secondary index | populated by the `mobs.scr` loader for records with `mob_type == 11`; keyed by mob id |
+> | `npcs.scr` primary index | populated by the `npcs.scr` loader; primary u16 key @+0 |
+> | `npcs.scr` secondary (relationship) index | populated by the relationship table (@record+128); first dword of each 16-byte entry |
+>
+> These are dirty-room labels; the clean-room references are the container roles described above and in
+> `structs/npc.md §1A`.
+>
+> **Local buff-bar mirror.** A 360-byte global mirrors the local player's 30-slot buff-bar display state.
+> On actor death the death handler applies the same protected-range clear to this mirror as it does to
+> the actor's buff-slot table (see `structs/actor.md` death-state section).
 
 ### 3.8 SoundManager — ~640 bytes (CODE-CONFIRMED, size PLAUSIBLE)
 

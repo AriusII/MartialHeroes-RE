@@ -5,20 +5,15 @@
 > for these families. Every offset an engineer cites must reference this file or the cross-referenced
 > detail sections.
 
-<!--
-verification: sample-verified (census + .sod.pre / .ted.post layout against the real VFS); the
-              .fx<N>.pre vertex stride remains static-hypothesis (arithmetic ambiguity)
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
-evidence: [static-ida, vfs-sample]
-conflicts: none
--->
+## Re-verification banner (2026-06-24 — sidecar string / save-protocol pass)
 
-> **status: sample_verified** — census + `.sod.pre` polygon-list layout + `.ted.post` byte count
-> re-confirmed against the real VFS mount (43 347 entries) on build `263bd994`. The
-> `.fx<N>.pre` extended vertex stride is the only item still static-hypothesis (see §Known
-> unknowns). LIVE/DEAD verdicts unchanged: both families are authoring/editor-only and the runtime
-> never opens them.
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — census + `.sod.pre` polygon-list layout + `.ted.post` byte count re-confirmed against the real VFS mount (43 347 entries); `.bud.pre` vertex-reorder mechanism confirmed against a same-cell sample pair; `.ted.post` copy-then-patch save protocol confirmed (IDA static path trace); `.pre` confirmed absent from binary string table. |
+| `ida_reverified` | `2026-06-24` |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = IDA static string-table search (`.pre` = zero hits; `.ted.post` path-builder present as write-only export target, never a read path) + dev-tool exporter call chain (`Ted_ExportCell_Entry` → cell serialiser — full `.ted.post` write then in-place `.ted` grid-block patch at byte offset 30 087); witness 2 = same-cell on-disk sample pair (`.ted` / `.ted.post` `cmp` clean; `.bud` / `.bud.pre` differ by vertex order and one per-vertex tag byte; `.sod.pre` 40 B = exact size formula) |
+| `conflicts`      | None. Prior "Known unknown (`.post`)" — "the editor may copy then patch" — resolved: confirmed as full write to `.ted.post` followed by in-place grid-block patch to the live `.ted` at byte offset 30 087. No value in the layout tables changed. |
 
 ---
 
@@ -51,8 +46,14 @@ The decisive evidence (CONFIRMED, multi-source):
 2. **The VFS open router does no extension rewriting / fallback / base-pre-post selection.** It only
    chooses mounted-VFS-blob vs. raw-OS-file by access mode. There is no code path that prefers a
    `.pre` or `.post` over its base file.
-3. **The literal strings `.pre` and `.post` do not drive any runtime load path** (corroborated by
-   the loader analysis behind `terrain.md` §3.2).
+3. **`.pre` is entirely absent from the client binary.** A full string-table search of `doida.exe`
+   finds zero occurrences of the literal `.pre` (or `sod.pre`, `bud.pre`, `%s.pre`). The only
+   `"pre"` substring hits are unrelated English words. The extension is not produced or consumed by
+   any code path in the runtime — it is a pure external map-editor byproduct. **`.ted.post` does
+   appear as a path-builder string in the binary, but only as the output target of the dev-tool
+   terrain-cell exporter** (the function reached via `Ted_ExportCell_Entry`) — a write-only export
+   path, never a read or load path. The cell-list loader (`d%s.lst` path, per-area cell-key table)
+   does not reference `.ted.post` at all.
 
 Therefore: an engineer wiring `Assets.Parsers` resolves the base extension only and **ignores
 `.pre`/`.post` entirely**. When documenting why these extensions are skipped, cite
@@ -89,9 +90,14 @@ It is a pre-processed / source capture kept beside the shipped base file during 
 ### `*.bud.pre` — full `.bud`
 
 Same on-disk layout as the base `.bud` building-mesh blob (`u32 objectCount`, then packed
-mass-object records). A sampled `*.bud.pre` shares the base `.bud` header and first-record fields
-(same object count, type, texId, vertex count), differing only slightly in vertex float values — a
-**re-saved variant, not a patch**. Full block layout: see `terrain.md` §8. Confidence: HIGH.
+mass-object records). A sampled `*.bud.pre` shares the base `.bud` leading header bytes exactly
+(same packed flags, same per-record object count, type, texId, and vertex count), and the trailing
+triangle-index list length is identical. The difference is: the per-vertex records appear in a **different order** between the
+two files (the vertex sequence is reversed/re-sorted by the save step), and **one per-vertex tag
+byte** changes value between the pre-save and post-save versions. The triangle-index list is
+correspondingly re-mapped to the new vertex order. This is a **pre-save snapshot paired with the
+post-save shipped file** — not a patch, not a delta. Full block layout: see `terrain.md` §8.
+Confidence: HIGH (same-cell sample pair + prior census).
 
 ### `*.fx<N>.pre` — extended `.fx<N>` (24-byte record header + wider vertex stride)
 
@@ -186,10 +192,21 @@ This family is already documented in full; **see `terrain.md` §5.10 and §16.1,
 `terrain_layers.md` §5** for the block layout and census. It is reproduced here only as part of the
 sidecar index — no new layout facts.
 
-**Known unknown (`.post`):** whether any `.post` in this VFS snapshot ever diverges in content from
-its companion `.ted` is UNVERIFIED (the editor may copy then patch, or the snapshot predates any
-edit). This does not affect the format verdict — the layout is identical regardless, and the runtime
-ignores it either way.
+**Save protocol (CONFIRMED, IDA static).** The dev-tool terrain-cell exporter (reached via
+`Ted_ExportCell_Entry`) implements a copy-then-patch protocol:
+
+1. It re-packs the in-memory 65×65 texture/index grid into a working buffer (the 16 900-byte grid
+   block — 65 × 65 × 4 bytes).
+2. It writes a **full, fresh five-block `.ted` to the `.ted.post` path** (`"wb"` open — complete
+   file, not a patch).
+3. It then opens the **live `.ted` path in `"rb+"` mode, seeks to byte offset 30 087, and overwrites
+   only the grid block in place** — leaving the other four blocks untouched.
+
+When the same grid data is written to both targets (the typical committed-state scenario), the two
+files end byte-identical — which is exactly what the on-disk `cmp` of all sampled pairs confirms.
+This resolves the prior known unknown ("the editor may copy then patch"): it demonstrably does both.
+The fixed in-place patch offset of 30 087 is the grid-block start in the five-block layout (see
+`terrain.md` §5.3). The runtime never reads `.ted.post`; only the dev-tool export chain writes it.
 
 ---
 

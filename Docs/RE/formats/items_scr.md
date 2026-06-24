@@ -14,8 +14,13 @@ verification:   sample-verified   # framing, leading fields, stride and counts c
                                    # (two-witness). Field ROLES inside the fixed block and the full
                                    # discriminator enumeration remain debugger-pending.
                 # re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-ida_reverified: 2026-06-20
-ida_anchor:     263bd994
+                # re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee,
+                #   CYCLE 11 (2026-06-24): all load-bearing facts RE-CONFIRMED (two-witness: full-file
+                #   byte walk + loader/dispatch control flow). No corrections. Three consumer-touched
+                #   citems fields (+0x37, +0x40/+0x48 icon-id A/B, +0x418) promoted to CONSUMER-INFERRED
+                #   in §2.2.
+ida_reverified: 2026-06-24
+ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence:       [static-ida, vfs-sample]
 corrected:      CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): items.scr +0x80 = data/char/skin/g%d.skn
                 mesh selector, +0x84 = bind-pose pool id; citems.scr description paragraphs = 10 (capacity,
@@ -26,6 +31,10 @@ corrected:      CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): items.scr +
                 +0xCD..+0xD0. The earlier +0xD2 / "+0x18-shift / 0x18-ahead working buffer" model is
                 REFUTED by the binary. items.scr carries NO paragraph block (the paragraph model is
                 citems-only).
+                RE-CONFIRMED CYCLE 11 (ida_anchor 263bd994, 2026-06-24): all structural facts
+                re-confirmed with zero contradictions. Three additional citems consumer-touched fields
+                (+0x37 type byte, +0x40/+0x48 icon-id A/B selection, +0x418 branch flag) promoted from
+                zero-region to CONSUMER-INFERRED in §2.2.
 conflicts:      - items.scr discriminator offset: RESOLVED — on-disk +0xBA (186). The loader reads the
                     548-byte (0x224) block directly into the staging buffer (read base = record start),
                     so the discriminator local at staging-buffer +0xBA is the on-disk +0xBA — there is
@@ -380,11 +389,13 @@ All offsets are relative to the start of the record.
 | 0x04 | 48 | CP949[] | `item_name` | Fixed window 0x04..0x33 (48 bytes); CP949 text, NUL-terminated then zero-padded. (NOTE: the bytes at 0x04 are the start of this name string, not a separate id — see §2.5.) | SAMPLE-VERIFIED (512/512) |
 | 0x30 | 4 | bytes | `pad_30` | Zero (tail padding of the name window: 0x30..0x33). | CONFIRMED (512/512) |
 | 0x34 | 2 | bytes | `pad_34` | Zero. | CONFIRMED |
-| 0x36 | 2 | u16 | `unknown_36` | Non-zero; value varies per record; purpose unknown. | CONFIRMED present; role UNVERIFIED |
+| 0x36 | 1 | u8 | `unknown_36` | Non-zero; value varies per record; purpose unknown. | CONFIRMED present; role UNVERIFIED |
+| 0x37 | 1 | u8 | `item_category` | Type/category byte; the cash-shop info-panel consumer special-cases value `== 10` (distinct display path). Role of other values DBG-pending. | CONSUMER-INFERRED (branch offset confirmed; semantics partial) |
 | 0x38 | 4 | u32 | `cash_price_nx` | Cash-shop price in NX cash points (small values; sample record 0 = 950). | SAMPLE-VERIFIED (value); role INFERRED |
 | 0x3C | 4 | u32 | `slot_seq_2` | Increments per record; possibly a second slot or category index. | CONFIRMED present; role UNVERIFIED |
-| 0x40 | 8 | bytes | `pad_40` | Zero. | CONFIRMED |
-| 0x48 | 4 | u32 | `item_uid` | Per-record unique id (high-range values; sample record 0 = 17,883,710). Not a simple per-record increment. | SAMPLE-VERIFIED present; role INFERRED |
+| 0x40 | 4 | u32 | `icon_id_a` | Icon/texture id A. The cash-shop display consumer reads this field; if nonzero, uses it as the icon identifier. When zero, falls back to `icon_id_b` at +0x48. | CONSUMER-INFERRED (selection rule confirmed; exact texture chain UNVERIFIED) |
+| 0x44 | 4 | bytes | (pad / unknown) | Zero in observed records. | CONFIRMED (zero); role UNVERIFIED |
+| 0x48 | 4 | u32 | `icon_id_b` | Fallback icon/texture id used by the consumer when `icon_id_a` (+0x40) is zero. High-range values observed (sample record 0 = 17,883,710). | CONSUMER-INFERRED (fallback role); role INFERRED |
 | 0x4C | 4 | u32 | `flag_4C` | Value 1 in all observed records. | SAMPLE-VERIFIED |
 | 0x50 | … | bytes | (zero region) | Largely zero through the middle of the record, up to the description block at 0x0E4. | CONFIRMED (zero-heavy) |
 | 0x0E4 | 81 | CP949[] | `desc_para[0]` | Description paragraph 0. CP949, NUL-terminated within the 81-byte buffer, then zero-padded. | SAMPLE-VERIFIED (512/512) |
@@ -397,7 +408,9 @@ All offsets are relative to the start of the record.
 | 0x31B | 81 | CP949[] | `desc_para[7]` | Description paragraph 7 (structural capacity; rarely populated). | CONFIRMED (capacity) |
 | 0x36C | 81 | CP949[] | `desc_para[8]` | Description paragraph 8 (structural capacity; rarely populated). | CONFIRMED (capacity) |
 | 0x3BD | 81 | CP949[] | `desc_para[9]` | Description paragraph 9 (structural capacity; rarely populated). Block ends at 0x40E (`+0xE4 + 10·81 = 0x40E`). | CONFIRMED (capacity) |
-| 0x40E | 14 | bytes | (record tail) | The true non-paragraph tail, 0x40E..0x41B (14 bytes), after the 10-paragraph description block; content unmapped, likely duration / equip requirements / icon-graphic id. | UNVERIFIED |
+| 0x40E | 10 | bytes | (record tail — unmapped) | Bytes 0x40E..0x417 (10 bytes), after the 10-paragraph description block; content unmapped, likely duration / equip requirements / graphic id. | UNVERIFIED |
+| 0x418 | 1 | u8 | `tail_flag_418` | The cash-shop info-panel consumer reads this byte and gates a display branch on its value. Exact semantics DBG-pending. | CONSUMER-INFERRED (branch confirmed; semantics UNVERIFIED) |
+| 0x419 | 3 | bytes | (record tail — unmapped) | Bytes 0x419..0x41B; content unmapped. | UNVERIFIED |
 
 > **Billing filter (loader behaviour).** The loader filters cash-shop records by `item_id` against a
 > threshold: when billing is **inactive** it admits only `item_id < 100000` (regular cash items);
@@ -467,14 +480,25 @@ confirmed. An empty paragraph is all-zero.
   starting at 0x0E4 described in §2.4 — **ten paragraphs (capacity)**, runtime-terminated early by a
   `'#'` sentinel. The former 6-vs-10 count conflict is RESOLVED in favour of 10 (see §2.4); do not
   re-document a 6-paragraph block.
+- **`unknown_36` was formerly a u16 spanning +0x36..+0x37.** CYCLE 11 consumer analysis split it into
+  `unknown_36` (u8 at +0x36, role still unknown) and `item_category` (u8 at +0x37, consumer branches
+  `== 10`). The two-byte region is identical on disk; only the labelling is updated.
+- **`pad_40` (8-byte zero region) is now split.** CYCLE 11 consumer analysis revealed that +0x40 (4 B)
+  is read by the cash-shop display consumer as `icon_id_a` (icon selector A; nonzero → use it, else
+  fall back to +0x48). +0x44 (4 B) remains an unverified zero region. Do not treat +0x40 as padding.
+- **`item_uid` at +0x48 is renamed `icon_id_b`.** The field holds high-range ids used as the
+  fallback icon when `icon_id_a` is zero; its uid semantics are UNVERIFIED. Do not assume a monotonic
+  uid role.
 
 ### 2.6 citems.scr — Known Unknowns
 
-- `unknown_36` (u16 at +0x36) value and purpose.
+- `unknown_36` (u8 at +0x36) value and purpose.
+- `item_category` (u8 at +0x37): the consumer special-cases value `== 10`; meaning of other values is DBG-pending.
 - `slot_seq_2` (+0x3C) role relative to item categorisation.
-- `item_uid` (+0x48) generation rule (high-range, not a simple increment).
-- Record tail 0x40E..0x41B (the 14-byte non-paragraph remainder after the 10-paragraph block; likely
-  duration / equip requirements / icon-graphic id — see §2.4).
+- `icon_id_a` (+0x40) and `icon_id_b` (+0x48): confirmed as the consumer's icon-selection pair
+  (if +0x40 nonzero use it, else use +0x48); the exact texture-chain they feed is UNVERIFIED.
+- `tail_flag_418` (u8 at +0x418): consumer gates a display branch on this byte; semantics DBG-pending.
+- Unmapped tail bytes 0x40E..0x417 and 0x419..0x41B.
 
 ---
 
@@ -489,7 +513,7 @@ confirmed. An empty paragraph is all-zero.
 | File header | none | none |
 | Leading id field | — (name at +0x000) | `item_id` u32 at +0x000 (NOT a slot index) |
 | Name buffer | +0x000, 52 B fixed (CP949) | +0x004, 48 B fixed (CP949) |
-| Per-record unique id | `item_uid` u32 at +0x034 | `item_uid` u32 at +0x048 |
+| Per-record unique id | `item_uid` u32 at +0x034 | none mapped (high-range `icon_id_b` at +0x048 was formerly labelled `item_uid`; its uid role is UNVERIFIED) |
 | Description | CP949 from +0x038, bounded within the fixed block | 10 × 81-byte paragraphs from +0x0E4 (capacity; `'#'`-sentinel early-terminated; CONFIRMED, §2.4) |
 | Asset refs / discriminator | `model_ref_key` +0x080 → `data/char/skin/g<key>.skn`, `anim_ref_key` +0x084 → bind-pose pool id (both via the shared actor-visual catalogue, §1.4.2); discriminator on-disk +0x0BA `!= 14`; dispatch flags +0x0CD..+0x0D0 | — |
 | Price field | none confirmed (asset-ref keys at +0x080/+0x084; +0x0A4 opaque) | NX cash points at +0x038 |
@@ -523,13 +547,16 @@ numeric fields but organise them differently.
   DBG-pending** — read their bytes but assign no semantics until a live-debugger pass settles them.
   Do NOT read a field at +0x0B8 or +0x0D2 (both REFUTED).
 - **citems.scr** is safe to implement: iterate 512 records at 1052-byte stride; read `item_id`
-  (u32 at +0x00 — **not** a slot index), `item_name` (+0x04, 48 B CP949), `cash_price_nx` (+0x38),
-  `item_uid` (+0x48), and the description paragraphs (`0x0E4 + i*81`, 81 bytes each, CP949
-  NUL-terminated). **The description block holds 10 paragraphs (capacity)**; iterate `i` from 0 to 9
-  and **stop at the first `'#'`-sentinel paragraph** (first byte `'#'`), which is the runtime early
-  terminator (§2.4). Do not hard-code a count of 6 (it would silently drop later text). The 14-byte
-  tail at 0x40E..0x41B follows the paragraph block. If filtering billing/premium items, the threshold
-  is `item_id >= 100000` (see §2.2 billing-filter note).
+  (u32 at +0x00 — **not** a slot index), `item_name` (+0x04, 48 B CP949), `item_category` (u8 at
+  +0x37; consumer special-cases `== 10`), `cash_price_nx` (+0x38, u32), `icon_id_a` (+0x40, u32 —
+  nonzero means use this as icon id) / `icon_id_b` (+0x48, u32 — fallback when `icon_id_a == 0`),
+  and the description paragraphs (`0x0E4 + i*81`, 81 bytes each, CP949 NUL-terminated). **The
+  description block holds 10 paragraphs (capacity)**; iterate `i` from 0 to 9 and **stop at the
+  first `'#'`-sentinel paragraph** (first byte `'#'`), which is the runtime early terminator (§2.4).
+  Do not hard-code a count of 6 (it would silently drop later text). The tail at 0x40E..0x41B (14
+  bytes) follows; `tail_flag_418` (u8 at +0x418) is consumer-gated — read it but assign no semantics
+  until debugger-confirmed. If filtering billing/premium items, the threshold is
+  `item_id >= 100000` (see §2.2 billing-filter note).
 - `Assets.Parsers` stays rendering-free; any conversion or presentation belongs to `Assets.Mapping`.
 
 ---
@@ -546,7 +573,9 @@ numeric fields but organise them differently.
   block), `item_name`, `item_uid`, `item_desc`, `model_ref_key` (u32 at +0x080),
   `anim_ref_key` (u32 at +0x084), `record_discriminator` (u8 at on-disk +0x0BA, tested `!= 14`),
   `effect_count` (u8 at +0x220), `EffectEntry` (8-byte trailing record); for citems.scr —
-  `item_id` (u32 at +0x000, **not** `slot_index`), `cash_price_nx`, `slot_seq_2`,
+  `item_id` (u32 at +0x000, **not** `slot_index`), `item_category` (u8 at +0x037),
+  `cash_price_nx` (u32 at +0x038), `icon_id_a` (u32 at +0x040), `icon_id_b` (u32 at +0x048),
+  `tail_flag_418` (u8 at +0x418), `slot_seq_2`,
   `citems_stride = 1052`, `citems_desc_para_width = 81`, `citems_desc_para_base = 0x0E4`,
   `citems_desc_para_count = 10` (capacity; `'#'`-sentinel early-terminated).
   Candidate loader names from the dirty-room (orchestrator-owned): `ItemsScr_LoadFile`,

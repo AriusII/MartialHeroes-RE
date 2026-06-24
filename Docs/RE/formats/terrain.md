@@ -5,6 +5,18 @@
 
 ---
 
+## Re-verification banner (2026-06-24 — full independent re-confirmation, no corrections)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `sample-verified` — complete independent re-confirmation pass against two witnesses (on-disk sample bytes + located loader read-path); **zero contradictions** with the layout below |
+| `ida_reverified` | `2026-06-24` |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida, vfs-sample]` — witness 1 = the `.map` text parser (`Map_ParseDescriptor`) and the `.ted` five-read loader; witness 2 = byte-exact on-disk sample (`d000.lst` 12 B, `d000x10000z9990.map` 1440 B, `d000x10000z9990.ted` 46987 B) |
+| `conflicts`      | None. This pass is a full re-confirmation only. Every load-bearing fact below was independently re-verified: (1) `.lst` key formula `key = mapZ + 100000·mapX` (§1.2, byte-exact match on 12-byte sample); (2) `.map` grammar, all 12 section keywords, keyword→decoder routing, geometry-directives-not-consumed (§3.1–§3.4); (3) `.ted` five-block 46987-byte no-header layout with exact offsets/sizes (§5.3, loader read sizes confirmed); (4) block-2 normals `/127` Y-up (§5.5); (5) block-3 texidx stored RAW by loader, `idx−1` + `[1,count]` clamp in finalize routine only (§5.6); (6) block-4 S/T-flip bits + 0.25 UV step (§5.7); (7) block-5 RGBA, A=0 padding, 2×/0.5× diffuse scaling (§5.8); (8) steep-flag threshold >8.0 (§5.0); (9) vertex spacing 16.0 + `(map−10000)·1024` cell origin (§5.2). The §5.4a CYCLE 12 per-triangle plane interpolation correction (already committed) is independently confirmed — the height sampler resolves the triangle within the block-4–directed quad split and evaluates its plane equation; bilinear interpolation is NOT used. |
+
+---
+
 ## Re-verification banner (2026-06-21, CYCLE 7 — `.ted`/`.map`/`.lst` two-witness re-confirm)
 
 | Attribute        | Value |

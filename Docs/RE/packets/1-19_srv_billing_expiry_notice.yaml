@@ -1,11 +1,12 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # VERIFICATION:
-#   routing+size: confirmed (control-flow: the handler reads 1 byte then 20 bytes from the payload cursor)
+#   routing+size: confirmed (control-flow: the handler reads 1 byte dummy, 1 byte type, then a 20-byte body block; 1+1+20=22)
 #   offsets:
-#     notice_type @ 0x00: confirmed
-#     subscription_code @ 0x01: confirmed (the code-classifier compares the leading 2 chars against "DB"/"HB"/"TB")
-#     time_left @ 0x11 (17): confirmed (printed as %d in expired warning)
-#   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#     dummy        @ 0x00: confirmed (first byte read and discarded)
+#     notice_type  @ 0x01: confirmed (tested == 33 to select unit mode; else forces minutes)
+#     subscription_code @ 0x02: confirmed (the code-classifier compares the leading 2 chars against "DB"/"HB"/"TB")
+#     time_left    @ 0x12 (18): confirmed (dword at block+16 relative to subscription_code start; printed as %d in expired warning)
+#   ida_reverified: 2026-06-24   ida_anchor: 263bd994   evidence: [static-ida]
 #   capture_verified: false
 
 name: SmsgSrvBillingExpiryNotice

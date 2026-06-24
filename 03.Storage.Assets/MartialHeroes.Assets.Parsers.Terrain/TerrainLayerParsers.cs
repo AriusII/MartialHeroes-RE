@@ -667,6 +667,59 @@ public static class TerrainLayerParsers
     }
 
 
+    public static WindSeedPool ParseWindSeedPool(ReadOnlyMemory<byte> data)
+    {
+        return ParseWindSeedPool(data.Span);
+    }
+
+    private static WindSeedPool ParseWindSeedPool(ReadOnlySpan<byte> span)
+    {
+        if (span.Length < 8)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: buffer too short for 8-byte header (got {span.Length}). " +
+                "spec: Docs/RE/formats/environment_bins.md §12.1.");
+
+        var recordCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var sourceFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
+
+        var expectedSize = 8L + (long)recordCount * WindKeyframeStride;
+        if (span.Length < expectedSize)
+            throw new InvalidDataException(
+                $"wind*.bin parse error: expected {expectedSize} bytes for {recordCount} records, " +
+                $"got {span.Length}. spec: Docs/RE/formats/environment_bins.md §12.1.");
+
+        var records = new WindSeedRecord[(int)recordCount];
+        for (var i = 0; i < (int)recordCount; i++)
+        {
+            var recOffset = 8 + i * WindKeyframeStride;
+            var rec = span.Slice(recOffset, WindKeyframeStride);
+
+            var pad0 = BinaryPrimitives.ReadSingleLittleEndian(rec[0x00..]);
+            var speed = BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]);
+            var pad2 = BinaryPrimitives.ReadSingleLittleEndian(rec[0x08..]);
+            var coord = BinaryPrimitives.ReadSingleLittleEndian(rec[0x0C..]);
+            var scale = BinaryPrimitives.ReadSingleLittleEndian(rec[0x10..]);
+            var texId = BinaryPrimitives.ReadUInt32LittleEndian(rec[0x14..]);
+
+            records[i] = new WindSeedRecord
+            {
+                Pad0 = pad0,
+                Speed = speed,
+                Pad2 = pad2,
+                Coord = coord,
+                Scale = scale,
+                TexId = texId
+            };
+        }
+
+        return new WindSeedPool
+        {
+            RecordCount = recordCount,
+            SourceFlag = sourceFlag,
+            Records = records
+        };
+    }
+
     private static void EnsureFx(string ext, ReadOnlySpan<byte> span, int minSize)
     {
         if (span.Length < minSize)

@@ -13,8 +13,8 @@
 
 ```
 verification:   parser-verified (absence proof) + sample-verified (layout only)
-ida_reverified: 2026-06-21
-ida_anchor:     263bd994
+ida_reverified: 2026-06-24
+ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence:       [static-ida (absence proof), vfs-sample]
 conflicts:      none-open
 # Runtime-DEAD is parser-verified: an exhaustive string + raw-byte scan of the shipped client
@@ -22,6 +22,11 @@ conflicts:      none-open
 #   returns ZERO hits — no loader exists. The per-record field LAYOUT below is sample-verified
 #   structurally (one real `descript.ion` instance, 29 bytes) but the three NUMERIC field MEANINGS
 #   are UNVERIFIABLE — there is no runtime parser whose behavior could pin them down.
+#   CYCLE 2026-06-24: field_c = 17 exactly matches the name byte-length in the sole sample;
+#   promoted from "unknown flag" to "plausible: name byte-length" (MEDIUM — single sample).
+#   .mayaswatches sibling claim removed: a full listing of data/effect/texture/ (1 458 files)
+#   shows no .mayaswatches file; co-resident siblings are .tga sources, bgtexture.lst/txt,
+#   and descript.ion only.
 ```
 
 > **⚠️ HEADLINE — the shipped client does NOT load `.ion`.** `descript.ion` is a **per-directory
@@ -42,9 +47,11 @@ conflicts:      none-open
 - **Container:** plain text-with-binary-tail — an ASCII filename, a space, three little-endian
   numeric fields, terminated by a `CRLF` line. No magic, no header, no count prefix.
 - **Endianness:** little-endian (consistent with the 32-bit x86 client and with `bmplist.lst`).
-- **Companion in the same directory:** the `.tga` source textures it names, plus `.mayaswatches`
-  (a Maya swatch artifact). Their co-presence confirms `data/effect/texture/` is the **art-source**
-  directory, not a runtime pack.
+- **Companions in the same directory:** the `.tga` source textures it names, together with
+  `bgtexture.lst` and `bgtexture.txt` (the terrain-texture index family — a distinct format; see
+  `bgtexture_lst.md`). Their co-presence confirms `data/effect/texture/` is the **art-source**
+  directory, not a runtime pack. (An earlier note citing `.mayaswatches` was incorrect — no such
+  file is present in the shipped VFS extract.)
 
 ---
 
@@ -59,20 +66,23 @@ across siblings could not be confirmed because only one `.ion` exists on disk.
 | `sep`     | `u8` (`0x20`)           |     1 | space delimiter                                    |
 | `field_a` | `u32` LE                |     4 | UNVERIFIED (see note)                              |
 | `field_b` | `u32` LE                |     4 | UNVERIFIED (see note)                              |
-| `field_c` | `u8`                    |     1 | UNVERIFIED — small count/flag                      |
+| `field_c` | `u8`                    |     1 | plausible: byte-length of `name` (MEDIUM — one sample exact match; see note) |
 | `eol`     | `CRLF`                  |     2 | line terminator (`0x0D 0x0A`)                      |
 
 The numeric tail is fixed at **9 bytes** (`u32` + `u32` + `u8`) between the space and the `CRLF`; the
 `name` field is variable-length and ends at the first space.
 
-**Note on `field_a` / `field_b` / `field_c` (meaning UNVERIFIED, no ground truth):**
-- They are **not** the `.tga` file size (the witnessed values do not match the named texture's size).
-- Interpreting `field_b:field_a` as a 64-bit `FILETIME` decodes to an implausible far-future year, so
-  the pair is **not** a plain `FILETIME` either.
-- Plausible-but-unprovable readings: tool-internal tokens, a split 64-bit id, or editor metadata.
-- These cannot be confirmed against the client **because nothing in the client parses this file** —
-  there is no loader from which to read the field semantics. Treat all three numeric fields as
-  **structure-known, meaning-unknown**.
+**Note on `field_a` / `field_b` / `field_c` (meanings unverifiable — no runtime parser exists):**
+- `field_a` and `field_b` are **not** the `.tga` file size (witnessed values do not match the named
+  texture's on-disk size). Interpreting the pair as a 64-bit `FILETIME` (in either word order) yields
+  implausible timestamps (far future or post-shutdown year), so neither reading holds. Treat them as
+  **structure-known, meaning-unknown** — plausible candidates: tool-internal tokens, a split 64-bit
+  id, or editor metadata.
+- `field_c` **plausibly equals the byte-length of `name`**: in the sole sample, `field_c = 17` and the
+  ASCII name is exactly 17 bytes (`hit-ring05-01.tga`). This is a single-sample correlation (MEDIUM
+  confidence); it cannot be verified against the client because nothing in the client parses this file.
+- All three numeric fields remain **structure-known, meaning-unverified**: there is no runtime loader
+  from which to pin semantics.
 
 ---
 

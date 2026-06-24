@@ -15,7 +15,7 @@
 > - **capture/debugger-pending** — every *wire VALUE meaning*; the `level`/state bytes at +0x38/+0x39
 >   (written by the runtime-table-dispatched 5/53 vitals handler, null at static time); the
 >   `scenario_state` dword (+0x48); and the `mob_pair_partner_id` (+0x354), not re-witnessed.
-> - **ida_reverified:** 2026-06-22 (CYCLE 11 prefix/trailer sharpening); prior 2026-06-20  **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-24 (actor-world audit); prior 2026-06-22 (CYCLE 11 prefix/trailer sharpening)  **ida_anchor:** 263bd994  **evidence:** [static-ida]
 >   **layout/offsets:** confirmed · **value-semantics:** capture/debugger-pending.
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **CYCLE 9 Phase 3.1 (2026-06-21, IDB SHA 263bd994):** static re-confirmation of the two model-class

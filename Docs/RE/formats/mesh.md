@@ -5,13 +5,14 @@
 
 <!--
 verification: sample-verified
-ida_reverified: 2026-06-21
-ida_anchor: 263bd994
+ida_reverified: 2026-06-24
+ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 evidence: [static-ida, vfs-sample]
 conflicts: none
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-21` · `ida_anchor: 263bd994` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24` ·
+> `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the `.skn` / `.bnd` byte parsers in the loader chain) AND a real VFS sample: a rigid
 > item skin (`data/item/skin/*.skn`), a weighted character skin (`data/char/skin/*.skn`), a player
@@ -21,8 +22,13 @@ conflicts: none
 > reclassified into the +4-trailer group (52-byte payload in a 56-byte file); the per-bone disk order
 > is restated as the literal parser read order (self → parent → 12-byte translation → 16-byte
 > quaternion); and the former "multi-bone byte-level cross-check" Known Unknown is resolved on the
-> 84-bone `g1.bnd` rig. None contradicts a prior fact. Tier policy: a fact also matched against the
-> real VFS sample is `[sample-verified]`; a loader-control-flow-only fact is `[confirmed]`.
+> 84-bone `g1.bnd` rig. None contradicts a prior fact. Third-pass corroboration (2026-06-24): two
+> additional byte-level `.skn` samples — `gi201011001.skn` (2593 bytes; id_b=0, 46 faces / 25
+> vertices / 25 weights, rigid, single-bone weight 1.0, EOF residual 0) and `g200002620.skn` (84083
+> bytes; id_b=3045, 1432 faces / 786 vertices / 1136 weights, multi-bone, EOF residual 0) — walked
+> end-to-end against the loader; zero conflicts with any committed fact. Tier policy: a fact also
+> matched against the real VFS sample is `[sample-verified]`; a loader-control-flow-only fact is
+> `[confirmed]`.
 
 ## Overview
 
@@ -135,10 +141,13 @@ Normals are not carried into the in-memory vertex buffer. The 24-byte record lay
 
 ### Status
 
-- **sample_verified:** true · **ida_anchor:** `263bd994` · **ida_reverified:** 2026-06-16
+- **sample_verified:** true · **ida_anchor:** `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` · **ida_reverified:** 2026-06-24
 - **Samples analysed (byte-level):** 3 rigid item-skin files (`gi213050001.skn`, `gi213062382.skn`,
   `gi292020105.skn`) from `data/item/skin/`. All three exhausted exactly at the predicted end of the
   weight table (zero residual bytes). All are simple rigid prop meshes (single-bone, weight = 1.0).
+  Third-pass (2026-06-24): `gi201011001.skn` (2593 bytes; id_b=0, 46 faces / 25 vertices / 25
+  weights, EOF residual 0) and `g200002620.skn` (84083 bytes; id_b=3045, 1432 faces / 786 vertices /
+  1136 weights across 52 distinct bones, EOF residual 0) — both walked end-to-end, zero conflicts.
 - **Re-verified two-witness (build `263bd994`):** the byte parser was walked in the loader (header →
   face table → vertex table → weight table, each as a `count` u32 followed by `count × stride` raw
   bytes via the bulk slurp), AND re-checked against two fresh VFS samples — a **rigid item skin**

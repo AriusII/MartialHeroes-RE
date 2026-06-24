@@ -52,6 +52,8 @@ public sealed partial class CharSelectScene3D : Node3D
         ToGodotVec(662.0f, 130.0f, -9746.0f)
     ];
 
+    private static readonly Vector3 Kf0EyeGodot = ToGodotVec(515.549f, 260.0f, -9200.0f);
+
 
     private static readonly Vector3 XeffAnchorGodot = ToGodotVec(508.483f, 69.887f, -9758.569f);
     private readonly Node3D?[] _slotActors = new Node3D?[5];
@@ -212,24 +214,26 @@ public sealed partial class CharSelectScene3D : Node3D
         };
         AddChild(_camera);
 
-        _camera.GlobalPosition = StaticEyeGodot;
-
-        if (SlotFocusGodot.Length > 0)
-            _camera.LookAt(SlotFocusGodot[0], Vector3.Up);
-
         _cameraRig = new CharSelectCameraRig { Name = "CharSelectCameraRig" };
         AddChild(_cameraRig);
+
+        var kf0Look = SlotFocusGodot.Length > 0 ? SlotFocusGodot[0] : Vector3.Zero;
+        var kf1Look = SlotFocusGodot.Length > 0 ? SlotFocusGodot[0] : Vector3.Zero;
+
         _cameraRig.Configure(
             _camera,
             StaticEyeGodot,
             SlotLegacyX,
             SlotGodotZ,
-            i => (uint)i < (uint)_slotActors.Length ? _slotActors[i] : null);
+            i => (uint)i < (uint)_slotActors.Length ? _slotActors[i] : null,
+            Kf0EyeGodot,
+            kf0Look,
+            kf1Look);
 
         GD.Print(
-            $"[CharSelectScene3D] Camera STATIC: eye={StaticEyeGodot} " +
+            $"[CharSelectScene3D] Camera dolly KF0={Kf0EyeGodot} KF1={StaticEyeGodot} " +
             $"FOV={CameraFov}/near={CameraNear}/far={CameraFar}. " +
-            "spec: Docs/RE/scenes/charselect.md §6.1 §6.3");
+            "spec: charselect.md §6.1 (entry dolly KF0→KF1; KF0 Y/Z are approximate pending live confirm).");
     }
 
 

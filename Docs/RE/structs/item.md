@@ -22,6 +22,15 @@
 > (44 B) were pinned (§8, §11). A new item-actor field — +0x7C `event_id` (the events.scr join column)
 > — and the special-goods `item_subtype` value 1004 were added (§6e). Item-actor template offsets in
 > §6 remain static-hypothesis; wire-field value semantics remain capture/debugger-pending.
+>
+> **Spec-audit pass (2026-06-24), IDB SHA 263bd994.** Two corrections applied:
+> (1) `upgradeitems.scr` container is an **ordered-map/tree keyed on record +0x00** (the inserter
+> keys the map on the first dword, same pattern as products.scr); the +0x04/+0x08 are lookup-time
+> match keys applied by the recipe-query consumer, not the insertion key; the "doubly-linked list
+> keyed on +0x04/+0x08" wording in §8/§11 is corrected to match the binary (§8, §11).
+> (2) Upgrade-result display message-db ids added: success = **33007** (broadcast green), fail =
+> **33008** (broadcast orange), read by the 4/50 panel/result handler alongside cues 862100101/2
+> (§8, §11). The §6f durability/+184 control-flow path was re-confirmed this pass (unchanged).
 
 Neutral, offset-model of the item-related structures the legacy client used. Promoted from
 dirty-room notes; rewritten, no decompiler identifiers, no binary addresses. Design input for the
@@ -449,6 +458,11 @@ offsets the handler itself reads (RESULT +0x08, REASON +0x09, `slot_index` +0x0B
 
 Sound cues: success = **862100101**; fail / partial-progress = **862100102** (CONFIRMED constants).
 
+**Upgrade-result display messages (CP949, added 2026-06-24):** The 4/50 panel/result handler also reads two localized message-db ids alongside the sound cues:
+- **`result == 1` (success):** displays message-db id **33007**, broadcast in green.
+- **`result == 0` (not-success):** displays message-db id **33008**, broadcast in orange.
+These are display-only CP949 string codes; not wire values. `CONFIRMED`.
+
 > **REASON 4 semantic.** REASON 4 takes a different apply path from the generic REASON 1 fail and is
 > the candidate **item-break / downgrade** branch; the binary names neither failure path, so the exact
 > "break vs downgrade" gameplay distinction is **RUNTIME-ONLY** (capture-pending). Both REASON 1 and
@@ -462,11 +476,16 @@ Sound cues: success = **862100101**; fail / partial-progress = **862100102** (CO
   and the runtime weapon-glow grade 1..9 (§6g) remains UNVERIFIED.
 - **Upgrade process = 6 steps.** The upgrade-process panel state machine exits when its current-step
   counter reaches **≥ 6**, so the flow has 6 process steps.
-- **`upgradeitems.scr` recipe table — record stride = 44 bytes (0x2C).** Loaded into a **doubly-linked
-  list** (not a flat array), keyed on **record +0x04** (primary lookup key, likely the base item id)
-  and **record +0x08** (secondary key, likely a material / second item id); the recipe **result id** is
-  returned from **record +0x00**. The payload region **+0x0C..+0x2B** holds success-rate floats and
-  step parameters; the exact field-by-field layout is **UNVERIFIED**.
+- **`upgradeitems.scr` recipe table — record stride = 44 bytes (0x2C).** Loaded into an **ordered
+  map/tree** (not a flat array and not a doubly-linked list), keyed on **record +0x00** (the inserter
+  uses the first dword as the map insertion key, exactly as products.scr does). The recipe consumer
+  then matches on **+0x04** (primary lookup key, likely the base item id) and **+0x08** (secondary
+  key, likely a material / second item id) at query time — those are lookup-time match keys, not
+  the insertion key. The recipe **result id** is at **record +0x00** (also the insertion key; the
+  result resolves from the matched node). The payload region **+0x0C..+0x2B** holds success-rate
+  floats and step parameters; the exact field-by-field layout is **UNVERIFIED**. (Corrected
+  2026-06-24: prior text said "doubly-linked list keyed on +0x04/+0x08"; binary wins — the loader
+  inserts on +0x00, ordered-map/tree structure confirmed by the destructor walk.)
 - **Per-recipe success rates are RUNTIME-ONLY (server-authored).** The upgrade panel's animated
   "step gauge rate" is a **time-based UI fill** (elapsed time since the step started, against a cached
   duration), **not** the success probability — do not treat the animated gauge as the success rate.
@@ -541,9 +560,11 @@ the engineer understands the client's pending-upgrade state machine.
 | Special-goods subtype | 1004 | CONFIRMED | `item_subtype` gated by the cash-shop / goods info path (added CYCLE 7). |
 | Upgrade-level cap | 28 | CONFIRMED | 28 distinct per-level art assets (`weap_made01`…`weap_made28`); upgrade levels 1..28 (added CYCLE 7). |
 | Upgrade-process step count | 6 | CONFIRMED | Upgrade-process panel exits when current step ≥ 6 (added CYCLE 7). |
-| `upgradeitems.scr` record stride | 44 bytes (0x2C) | CONFIRMED | Recipe record; doubly-linked list keyed on +0x04 / +0x08, result id at +0x00; payload +0x0C..+0x2B = success-rate floats + step params (field-by-field UNVERIFIED) (added CYCLE 7). |
+| `upgradeitems.scr` record stride | 44 bytes (0x2C) | CONFIRMED | Recipe record; loaded into an ordered-map/tree keyed on record +0x00 (the inserter's map key); +0x04/+0x08 are lookup-time match keys (base item id / material id) applied by the recipe consumer, not the insertion key; payload +0x0C..+0x2B = success-rate floats + step params (field-by-field UNVERIFIED). (Corrected 2026-06-24 from "doubly-linked list keyed on +0x04/+0x08"; added CYCLE 7.) |
 | Upgrade success cue | 862100101 | CONFIRMED | 4/50 RESULT 1 sound id (added CYCLE 7). |
 | Upgrade fail / partial-progress cue | 862100102 | CONFIRMED | 4/50 RESULT 0 sound id (added CYCLE 7). |
+| Upgrade-result success display id | 33007 | CONFIRMED | CP949 message-db code broadcast in green on 4/50 RESULT 1; read by the panel/result handler alongside cue 862100101 (added 2026-06-24). |
+| Upgrade-result failure display id | 33008 | CONFIRMED | CP949 message-db code broadcast in orange on 4/50 RESULT 0; read by the panel/result handler alongside cue 862100102 (added 2026-06-24). |
 
 ---
 

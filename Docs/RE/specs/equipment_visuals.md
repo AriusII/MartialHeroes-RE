@@ -15,7 +15,7 @@ verification: confirmed (per-part rebuild model, GID formulas + the digit→lane
   opcode pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔
   static enchant level` mapping, the subtype 53-vs-55 meaning, the per-tier glow VISUAL and the tooltip
   loc-strings).
-ida_reverified: 2026-06-22   # CYCLE 11: skin-level threshold = 1000; non-weapon GID scale = 10000; categoryBase 47-entry array; hand bone-id stays debugger-pending
+ida_reverified: 2026-06-24   # spec-audit pass: asset-chain anchor strings (skin.txt, actormotion.txt, motlist.txt, bindlist.txt) confirmed present; upgrade/equip UI region confirmed; load-bearing in-memory visual-object offsets carried as CYCLE-11-confirmed (not re-located this pass); no drift found
 ida_anchor: 263bd994
 readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]

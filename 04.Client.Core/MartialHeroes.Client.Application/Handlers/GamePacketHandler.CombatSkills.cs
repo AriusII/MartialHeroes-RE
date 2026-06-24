@@ -92,6 +92,9 @@ public sealed partial class GamePacketHandler
         ref readonly var header = ref MemoryMarshal.AsRef<SmsgActorSkillAction>(payload);
         var skillId = header.SkillId;
 
+        var attackerKey = new ActorKey(header.CasterId, ToEntitySort(header.CasterSort));
+        _eventBus.Publish(new ActorSkillActionEvent(attackerKey, skillId));
+
         var records = payload[SmsgActorSkillAction.HeaderSize..];
 
         for (var t = 0; t < header.TargetCount; t++)

@@ -3,6 +3,8 @@ verification: routing/teardown-control-flow [confirmed] (the existence of TWO di
   opcodes built by TWO distinct teardown routines, the guard on the heavier path, the keepalive-disarm
   ordering, the shared exit tail, and the convergence on scene state 6 sub-state 8 are
   control-flow-confirmed on build 263bd994);
+  the deferred completion timed-event in the leave-world tail is id 10001 / 1500 ms (static-confirmed
+  on build 263bd994, 2026-06-24 audit -- distinct from the death-countdown event id 10003 of §7);
   the concrete in-game UI control that fires each opcode, whether the SERVER closes the socket on the
   lighter path, and which agent issues the real socket close are static-hypothesis / live-pending (6-D);
   the "4/137" server message is flagged NEEDS-REVIEW (its label is suspect).
@@ -12,7 +14,7 @@ verification: routing/teardown-control-flow [confirmed] (the existence of TWO di
   the concrete meaning of each respawn-choice value (0/1/2/3) and the server-decided respawn location +
   restored HP are RUNTIME-ONLY (server-authoritative / capture-debugger-pending).
 ida_anchor: 263bd994
-ida_reverified: 2026-06-20
+ida_reverified: 2026-06-24
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -92,8 +94,10 @@ opcode is sent: *([confirmed]* on each step of the tail.)*
 
 1. **Play an exit sound effect.**
 2. **Tear down the in-world UI / panels.**
-3. **Schedule a deferred completion event** — a timed event roughly **~1.5 s ahead** (a delayed
-   finish, not an immediate transition).
+3. **Schedule a deferred completion event** — timed event **id `10001`**, **1500 ms** ahead (a delayed
+   finish, not an immediate transition). This is the universal scene-bridge event id also used
+   elsewhere in the scene state machine; it is **distinct** from the death-countdown event id `10003`
+   of §7. *([confirmed]* event id 10001 / 1500 ms from `Scene_LeaveWorldToLogout`.)*
 4. **Converge on scene state 6, sub-state 8** — the **return-to-login** scene
    (`scenes/scene_state_machine.md`).
 

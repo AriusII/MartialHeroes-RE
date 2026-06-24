@@ -1,7 +1,14 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
-# CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# ROLE CORRECTION (lane-07 audit): the sole builder is Cmsg_PostureToggle_Send, NOT an exit-notify
+# path. The two f32 fields are casts from u8 arguments, not world coordinates. The primary
+# CmsgExitNotify / CoordX / CoordY reading is refuted by the builder. The posture/action reading
+# (secondary, below) is binary-accurate. Size 16 and direction C2S are confirmed.
+# Proposed rename: CmsgPostureToggle (opcode catalog correction pending Tier-1 reconciliation).
+# capture_verified: false.
+#
+# verification: sha256:263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
-name: CmsgExitNotify
+name: CmsgPostureToggle
 opcode: 0x20089           # major 2 (GameAction), minor 137 -> (2 << 16) | 137
 direction: C2S
 size: 16                  # fixed 16-byte payload
@@ -9,50 +16,55 @@ spec: packets/2-137_exit_notify.yaml
 status: confirmed
 capture_verified: false
 
-summary: Client exit/quit notification, sent when GameState==4. Carries the exit mode, coordinate pair (always zero), and padding.
+summary: >
+  In-game posture / action toggle sent when the player triggers a posture change while GameState==4.
+  Carries an action code, a sub-flag, two float values cast from u8 arguments (orientation/offset pair,
+  0.0 in the observed call site), a trailing flag, and padding. The prior reading of this packet as a
+  client exit notification (CmsgExitNotify with CoordX/CoordY world coordinates) is refuted: the sole
+  builder is the posture-toggle send path and the two f32 are u8->float casts, not coordinate floats.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 16.
+# Binary-accurate layout per Cmsg_PostureToggle_Send builder (lane-07 audit).
 fields:
-  - { name: Mode,     type: u8  }          # 0x00  exit mode (1=normal exit, 2=exit with flag)
-  - { name: Flag,     type: u8  }          # 0x01  always 0
-  - { name: Reserved, type: u16 }          # 0x02  reserved / alignment
-  - { name: CoordX,   type: f32 }          # 0x04  always 0.0
-  - { name: CoordY,   type: f32 }          # 0x08  always 0.0
-  - { name: Extra,    type: u8  }          # 0x0C  always 0
-  - { name: Padding,  type: "u8[3]" }     # 0x0D  padding to 16 bytes
+  - { name: ActionCode,  type: u8  }          # 0x00  posture/action code (2 when a window flag is set, else 1)
+  - { name: SubFlag,     type: u8  }          # 0x01  sub-flag [capture/debugger-pending]
+  - { name: Pad02,       type: u16 }          # 0x02  padding (only +0x00/+0x01 of the 4-byte slot are written)
+  - { name: FloatA,      type: f32 }          # 0x04  (float)(u8 arg) — 0.0 in observed call site; orientation/offset candidate
+  - { name: FloatB,      type: f32 }          # 0x08  (float)(u8 arg) — 0.0 in observed call site; orientation/offset candidate
+  - { name: TrailFlag,   type: u8  }          # 0x0C  trailing flag [capture/debugger-pending]
+  - { name: Pad0D,       type: "u8[3]" }      # 0x0D  padding to 16 bytes
 
 notes: |
-  Static inference only; no capture available. CODE-CONFIRMED layout (16 bytes),
-  CAPTURE-UNVERIFIED meaning.
+  CONTROL-FLOW CONFIRMED body size (16 bytes). Sole builder is Cmsg_PostureToggle_Send.
+  Role/field correction applied per lane-07 audit — the prior CmsgExitNotify reading is refuted.
 
-    0x00 (1B) Mode     : exit mode byte. 1 = normal exit, 2 = exit with flag (le u8).
-    0x01 (1B) Flag     : always zero in observed paths (le u8).
-    0x02 (2B) Reserved : reserved alignment padding (le u16).
-    0x04 (4B) CoordX   : floating-point X coordinate; always 0.0 (le f32).
-    0x08 (4B) CoordY   : floating-point Y coordinate; always 0.0 (le f32).
-    0x0C (1B) Extra    : extra byte; always 0 (le u8).
-    0x0D (3B) Padding  : padding to bring total to 16 bytes.
+    0x00 (1B) ActionCode : posture/action code. Builder passes 2 when a window flag is set, else 1.
+                           [confirmed from builder args]
+    0x01 (1B) SubFlag    : sub-flag. [capture/debugger-pending]
+    0x02 (2B) Pad02      : only the two leading bytes of a 4-byte slot are written; treated as
+                           u16 padding.
+    0x04 (4B) FloatA     : a (float)(u8 arg) value; 0.0 in the observed call site. Candidate for
+                           an orientation or offset pair, NOT a world coordinate. [capture-pending]
+    0x08 (4B) FloatB     : a (float)(u8 arg) value; 0.0 in the observed call site. Same class as
+                           FloatA. [capture-pending]
+    0x0C (1B) TrailFlag  : trailing flag. [capture/debugger-pending]
+    0x0D (3B) Pad0D      : zero padding to bring the total to 16 bytes.
 
-  CONTEXT: sent only when the client game state equals 4 (in-world). The coordinate
-  fields are populated but always zero in the observed exit path.
+  CONTEXT: fires while GameState==4 (in-world). The two f32 values are cast from u8 arguments at the
+  call site — they are bounded to [0.0, 255.0] and cannot carry true world coordinates (which span
+  tens of thousands of units). Their exact semantic role (orientation angle, offset, or a packed
+  two-value indicator) is capture/debugger-pending.
 
-  [UNVERIFIED] ROLE DIVERGENCE: a later in-game pass reads 2/137 as a posture / action toggle
-  rather than an exit notify — same 16-byte SHAPE, refined field reading:
-    0x00 (1B) ActionCode : posture/action code (caller passes 2 when a window flag is set, else 1).
-    0x01 (1B) SubFlag    : a sub-flag. [capture/debugger-pending]
-    0x02 (2B) pad        : only +0/+1 are written (the source is a 4-byte slot).
-    0x04 (4B) FloatA     : a (float)(u8) value — 0.0 in the observed call site (orientation/offset?).
-    0x08 (4B) FloatB     : a (float)(u8) value — 0.0 in the observed call site (orientation/offset?).
-    0x0c (1B) TrailFlag  : a trailing flag.
-    0x0d (3B) pad        : zero pad to 16 bytes.
-  Both readings agree the body is 16 bytes (two leading bytes, two f32, a trailing byte, pad) and that
-  it fires only when GameState==4; they differ on whether it is an exit notify or a posture/action
-  toggle. The two f32 being cast from small u8 args favours a posture/orientation pair over true world
-  coordinates. The role is capture/debugger-pending; the file keeps its existing name.
+  PRIOR READING (refuted): the file was originally named CmsgExitNotify and described CoordX/CoordY
+  world-coordinate f32 fields at 0x04/0x08. The builder attribution and the u8->float cast evidence
+  contradict that reading. The exit-notify interpretation is dropped.
+
+  PROPOSED RENAME: CmsgPostureToggle. Opcode catalog entry 0x20089 carries a name/role drift candidate;
+  see opcodesCatalogCorrections from lane-07 audit.
 
   UNKNOWNS to resolve with a capture:
-    - the role (exit notify vs posture/action toggle — see ROLE DIVERGENCE above);
-    - whether Mode/ActionCode values beyond 1 and 2 exist;
-    - whether the two f32 fields are ever non-zero (orientation/offset values).
+    - the SubFlag and TrailFlag values/semantics;
+    - whether FloatA/FloatB are ever non-zero (orientation/offset values);
+    - the server-side response opcode.
 
-  UNBLOCKS: Client.Application exit/disconnect notification (or in-game posture/action toggle) flow.
+  UNBLOCKS: Client.Application in-game posture/action toggle send path (16-byte fixed C2S).

@@ -30,7 +30,7 @@
 >   paths. 2026-06-22: §4.2 front-end blend reconciled — global ONE/ONE additive binary-won,
 >   opaque-panel SRCALPHA hypothesis refuted — see §4.2. CYCLE 11: front-end verdict DOWNGRADED to
 >   DEBUGGER-PENDING as noted above.)*
-> - **ida_reverified:** 2026-06-22    *(CYCLE 11 World block (263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. Prior: 2026-06-22 — §4.2 UI blend reconciled: front-end ONE/ONE global additive confirmed binary-won, opaque-panel SRCALPHA hypothesis refuted; contrast with in-game HUD per-class switching made explicit. §9 CharSelect 3D pipeline added (static-hypothesis, literal values promoted from dirty RE). ASSET-FIDELITY 2026-06-21 — UI render-state row split, glow `.psh` conflict resolved; CYCLE 7 2026-06-20 glow/toon post chain. IDB SHA 263bd994)*
+> - **ida_reverified:** 2026-06-24    *(CYCLE 12 audit (263bd994): world projection confirmed RH (D3DXMatrixPerspectiveOffCenterRH); UI ortho confirmed LH (D3DXMatrixOrthoOffCenterLH/OrthoLH) — RH/LH split per pass is a static fact; DisplayConfig_ParseFramerate identified as the display.lua loader (confirms §6.3/§9.4 shared display-config apply-path provenance). Prior: CYCLE 11 (2026-06-22, 263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. IDB SHA 263bd994)*
 > - **ida_anchor:** 263bd994
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida, sample-vfs]
@@ -250,8 +250,12 @@ the entire 18-slot render-state cache** so the device matches the cache exactly 
 > The per-item draw-stage internals (the indexed-vs-non-indexed branch and the force-commit) were
 > recovered in a prior pass but **not re-walked this lane** — treat them as re-confirm-pending along
 > with §4. The RTTI camera cast, the FOV/aspect read, the π/4 fallback, the view-matrix
-> build/invert, and the frustum construction were re-confirmed this lane. Matrix major-order and the
-> up-axis remain **capture/debugger-pending**.
+> build/invert, and the frustum construction were re-confirmed this lane. **World projection is
+> right-handed (`D3DXMatrixPerspectiveOffCenterRH`); the UI ortho path is left-handed
+> (`D3DXMatrixOrthoOffCenterLH` / `D3DXMatrixOrthoLH`) — RH/LH split per pass, static fact
+> (CONFIRMED).** Matrix major-order and the world up-axis remain **capture/debugger-pending** (the
+> RH/LH distinction narrows that item to the world transform handedness; the full up-axis and
+> row/column-major order still need a live read).
 
 ### 2.3 Offscreen path
 
@@ -741,6 +745,12 @@ own cel slot (see §6.1 / `formats/shaders.md`).
 > framerate keys this spec consumes; the world-brightness keys (`DISPLAY_BASE_BRIGHT_MULTI`,
 > `DISPLAY_LIGHT_RATIO`) are owned by `environment.md §9`; the per-state character-tint table is in
 > §6.7.
+>
+> **Loader canonical name (CONFIRMED, CYCLE 12 audit).** The `display.lua` config loader — the routine
+> that parses both `DISPLAY_BASE_BRIGHT_MULTI` and the framerate key in one pass — is
+> `DisplayConfig_ParseFramerate`. It is a shared display-config apply routine; this is the confirmed
+> "same display-config apply-path" provenance that §6.3 and `environment.md §9.4` both reference.
+> Per-stage shader-constant reads remain IDA-pending as before.
 
 | Key | Value | Role | Where consumed | Confidence (value) |
 |-----|------:|------|----------------|--------------------|

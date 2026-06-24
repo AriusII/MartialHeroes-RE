@@ -1,15 +1,16 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
+# verification: idb-sha256-263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 
 name: CmsgActorInteraction
 opcode: 0x20005           # major 2 (GameAction), minor 5 -> (2 << 16) | 5
 direction: C2S
-size: 28                  # fixed 28-byte payload
+size: 28                  # fixed 28-byte payload (4 + 4 + 20 = 28)
 spec: packets/2-5_actor_interaction.yaml
 status: confirmed
 capture_verified: false
 
-summary: NPC / actor service-menu interaction request (the generic "I selected this menu option on this actor/NPC"). Carries a select-mode byte, a sub-index, a class/flag byte, the target actor id, and (for name-keyed options) a 17-byte CP949 name. Used across the service-NPC menu and a context-menu dispatcher.
+summary: NPC / actor service-menu interaction request (the generic "I selected this menu option on this actor/NPC"). Carries a 4-byte small-byte header, the target actor id u32 at 0x04, and a 20-byte context block at 0x08 whose first 17 bytes hold a CP949 NUL-padded name when a name-keyed option is active. Used across the service-NPC menu and a context-menu dispatcher.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the widths sum to size: 28.
 fields:
@@ -18,22 +19,23 @@ fields:
   - { name: ClassOrFlag,   type: u8 }          # 0x02  local-player class/job byte (or battle-id flag for some actor kinds) [capture/debugger-pending]
   - { name: Reserved0,     type: u8 }          # 0x03  pad / flag (often 0/1) [capture/debugger-pending]
   - { name: TargetActorId, type: u32 }         # 0x04  resolved target/NPC actor id [capture/debugger-pending]
-  - { name: Flags,         type: "u8[3]" }     # 0x08  small status/index bytes set per actor kind [capture/debugger-pending]
-  - { name: Name,          type: "char[17]" }  # 0x0b  CP949 NUL-padded name for name-keyed ops [capture/debugger-pending]
+  - { name: Context,       type: "u8[20]" }    # 0x08..0x1B  20-byte type-specific context block; name occupies @0x08..0x18 (17 bytes, CP949 NUL-padded) when present [capture/debugger-pending]
 
 notes: |
-  CODE-CONFIRMED layout (28 bytes), CAPTURE-UNVERIFIED meaning. REFINED from a deeper service-menu
-  pass: the body is a small-byte header + a u32 actor id + a 17-byte CP949 name (not a generic
-  24-byte context block). The 17-byte name is the dominant CP949 short-name cell (16 usable + NUL).
+  CODE-CONFIRMED layout (28 bytes), CAPTURE-UNVERIFIED meaning. AUDIT-CORRECTED: the context
+  block at @0x08 is 20 bytes total (not split as Flags u8[3] + Name char[17]). The binary
+  strncpy writes the 17-byte CP949 name starting at body offset 0x08 (not 0x0b); the Flags/Name
+  split at 0x0b was off by 3. Total: 4 + 4 + 20 = 28 bytes.
 
     0x00 (1B)  SelectMode    : selection mode (1 = picked actor, 2 = current target).
     0x01 (1B)  SubIndex      : sub-selection / row index.
     0x02 (1B)  ClassOrFlag   : the local-player class/job byte (or a battle-id flag for some actor kinds).
     0x03 (1B)  Reserved0     : a pad/flag byte (often 0/1).
     0x04 (4B)  TargetActorId : the resolved target/NPC actor id.
-    0x08 (3B)  Flags         : small status/index bytes set per actor kind.
-    0x0b (17B) Name          : a fixed CP949 NUL-padded name field for name-keyed options (info /
-                               name lookup / escort-party actions); zeroed when no name is needed.
+    0x08 (20B) Context       : type-specific context block. When a name-keyed option is active,
+                               the 17-byte CP949 NUL-padded name occupies @0x08..0x18; the
+                               remaining 3 bytes @0x19..0x1B are reserved/zero. When no name
+                               is needed the full 20 bytes are zeroed.
 
   ACTOR-KEY ORDER NOTE: where this family carries an actor composite key, the dominant C2S wire order
   is sort-byte @+0 then id u32 @+4. (Here the key is carried as a flat resolved actor id at 0x04.)
