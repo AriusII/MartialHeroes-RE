@@ -20,12 +20,12 @@ public sealed partial class CharSelectCameraRig : Node
     private float _boomZ;
 
     private Camera3D? _camera;
-    private Vector3 _dollyKf0;
-    private Vector3 _dollyKf1;
-    private float _dollyT;
     private bool _dollyActive;
+    private Vector3 _dollyKf0;
     private Vector3 _dollyKf0Look;
+    private Vector3 _dollyKf1;
     private Vector3 _dollyKf1Look;
+    private float _dollyT;
     private Func<int, Node3D?>? _slotActorProvider;
     private float[] _slotGodotX = [];
     private float[] _slotGodotZ = [];

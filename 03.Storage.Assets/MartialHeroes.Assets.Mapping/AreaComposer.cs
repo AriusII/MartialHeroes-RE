@@ -2,7 +2,6 @@ using MartialHeroes.Assets.Parsers.Audio;
 using MartialHeroes.Assets.Parsers.Audio.Models;
 using MartialHeroes.Assets.Parsers.Terrain;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
-using MartialHeroes.Assets.Parsers.World;
 
 namespace MartialHeroes.Assets.Mapping;
 
@@ -386,29 +385,7 @@ public sealed class AreaComposer
 
     private static IReadOnlyList<SpawnDescriptor> BuildSpawns(IAreaAssemblySource source)
     {
-        var spawns = new List<SpawnDescriptor>();
-        var areaId = source.AreaId;
-
-        var npcArrPath = $"data/map{areaId:D3}/npc{areaId:D3}.arr";
-        if (source.TryGetCellFileByName(npcArrPath, out var npcBytes))
-        {
-            var npcArr = NpcSpawnParser.Parse(npcBytes);
-            foreach (var rec in npcArr.Records)
-            {
-                var yaw = MathF.PI / 2f - rec.Facing;
-
-                spawns.Add(new SpawnDescriptor
-                {
-                    WorldX = rec.WorldX,
-                    WorldZ = rec.WorldZ,
-                    Yaw = yaw,
-                    VisualId = rec.MobId,
-                    IsNpc = true
-                });
-            }
-        }
-
-        return spawns;
+        return Array.Empty<SpawnDescriptor>();
     }
 
 

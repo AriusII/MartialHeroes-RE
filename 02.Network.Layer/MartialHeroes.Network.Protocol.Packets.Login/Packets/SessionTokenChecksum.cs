@@ -36,6 +36,33 @@ public static class SessionTokenChecksum
         WriteHexLower(digest, destination33);
     }
 
+    public static bool TryWriteChecksumOf(string exePath, Span<byte> destination33)
+    {
+        if (destination33.Length != SessionTokenLength)
+            throw new ArgumentException(
+                $"destination33 must be exactly {SessionTokenLength} bytes (SessionToken field width).",
+                nameof(destination33));
+
+        destination33.Clear();
+
+        if (string.IsNullOrWhiteSpace(exePath))
+            return false;
+
+        byte[] digest;
+        try
+        {
+            var exeBytes = File.ReadAllBytes(exePath);
+            digest = MD5.HashData(exeBytes);
+        }
+        catch
+        {
+            return false;
+        }
+
+        WriteHexLower(digest, destination33);
+        return true;
+    }
+
     private static void WriteHexLower(ReadOnlySpan<byte> source, Span<byte> destination)
     {
         var hexTable =

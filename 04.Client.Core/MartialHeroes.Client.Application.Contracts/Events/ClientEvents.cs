@@ -163,7 +163,9 @@ public sealed record LocalPlayerSpawnedEvent(
 public sealed record InGameWorldBootstrappedEvent(
     ActorKey Key,
     Vector3Fixed Position,
-    int AreaId) : IClientEvent;
+    int AreaId,
+    byte ServerHour = 0,
+    byte ServerMinute = 0) : IClientEvent;
 
 public sealed record GroundItemSpawnedEvent(
     uint EntityKey,

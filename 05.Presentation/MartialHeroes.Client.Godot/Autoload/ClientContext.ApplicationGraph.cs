@@ -1,4 +1,3 @@
-using System.Text;
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Client.Application.Assets;
@@ -25,8 +24,8 @@ using MartialHeroes.Client.Presentation.Input;
 using MartialHeroes.Network.Abstractions.Protocol;
 using MartialHeroes.Network.Abstractions.Session;
 using MartialHeroes.Network.Crypto;
+using MartialHeroes.Network.Protocol.Packets.Login.Packets;
 using MartialHeroes.Network.Transport.Pipelines;
-using Environment = System.Environment;
 
 namespace MartialHeroes.Client.Godot.Autoload;
 
@@ -204,55 +203,28 @@ public sealed partial class ClientContext
         var lastServerStore = new RegistryLastServerStore();
 
 
-        string? sessionTokenStr = null;
-        string sessionTokenSource;
-
-        var envToken = Environment.GetEnvironmentVariable("MH_SESSION_TOKEN");
-        if (!string.IsNullOrWhiteSpace(envToken))
-        {
-            sessionTokenStr = envToken.Trim();
-            sessionTokenSource = "env:MH_SESSION_TOKEN";
-        }
-        else
-        {
-            var clientDirForToken = ClientPathResolver.ResolveClientDir();
-            if (clientDirForToken is not null)
-            {
-                var tokenFilePath = Path.Combine(clientDirForToken, "session_token.txt");
-                try
-                {
-                    if (File.Exists(tokenFilePath))
-                        foreach (var rawLine in File.ReadLines(tokenFilePath))
-                        {
-                            var trimmed = rawLine.Trim();
-                            if (trimmed.Length > 0)
-                            {
-                                sessionTokenStr = trimmed;
-                                break;
-                            }
-                        }
-                }
-                catch (Exception ex)
-                {
-                    GD.PrintErr($"[ClientContext] session_token.txt read failed: {ex.Message}");
-                }
-            }
-
-            sessionTokenSource = sessionTokenStr is not null ? "file:session_token.txt" : "absent";
-        }
-
         var sessionTokenBytes = new byte[ApplicationUseCases.SessionTokenLength];
-        if (sessionTokenStr is not null)
+        var integrityTokenSource = "absent";
+        var clientDirForToken = ClientPathResolver.ResolveClientDir();
+        if (clientDirForToken is not null)
         {
-            var encodedToken = Encoding.ASCII.GetBytes(sessionTokenStr);
-            var copyLen = Math.Min(encodedToken.Length, ApplicationUseCases.SessionTokenLength - 1);
-            encodedToken.AsSpan(0, copyLen).CopyTo(sessionTokenBytes);
+            var parentDir = Directory.GetParent(clientDirForToken)?.FullName;
+            var candidates = parentDir is null
+                ? new[] { Path.Combine(clientDirForToken, "doida.exe") }
+                : new[] { Path.Combine(clientDirForToken, "doida.exe"), Path.Combine(parentDir, "doida.exe") };
+            foreach (var candidate in candidates)
+                if (File.Exists(candidate) &&
+                    SessionTokenChecksum.TryWriteChecksumOf(candidate, sessionTokenBytes))
+                {
+                    integrityTokenSource = candidate;
+                    break;
+                }
         }
 
-        GD.Print(sessionTokenSource == "absent"
-            ? "[ClientContext] SessionToken wired (source=absent, zero-filled 33B — supply MH_SESSION_TOKEN or session_token.txt for a real token). " +
+        GD.Print(integrityTokenSource == "absent"
+            ? "[ClientContext] 1/9 build-integrity token: genuine doida.exe not found beside data.inf — 33B zero-filled. " +
               "spec: cmsg_char_enter.yaml; login_flow.md §3.3."
-            : $"[ClientContext] SessionToken wired (source={sessionTokenSource}, len={sessionTokenStr!.Length}, 33B). " +
+            : $"[ClientContext] 1/9 build-integrity token = lowercase-hex MD5 of '{integrityTokenSource}'. " +
               "spec: cmsg_char_enter.yaml; login_flow.md §3.3.");
 
         var gameVerVersionSource = GameVerClientVersionSource.Resolve(_uiAssets);

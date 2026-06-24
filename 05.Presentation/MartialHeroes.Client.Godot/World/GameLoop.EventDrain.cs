@@ -8,6 +8,7 @@ using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Client.Godot.World;
@@ -268,7 +269,8 @@ public sealed partial class GameLoop
                         localVisual.SetCollisionManager(collMgr);
                 }
 
-                TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass, localSpawn.InternalClass, localSpawn.AppearanceVariant, localSpawn.EquipGids);
+                TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass, localSpawn.InternalClass,
+                    localSpawn.AppearanceVariant, localSpawn.EquipGids);
 
                 GD.Print($"[GameLoop] LocalPlayerSpawnedEvent: name='{localSpawn.Name}' " +
                          $"level={localSpawn.Level} pos=({localSpawn.Position.RawX},{localSpawn.Position.RawZ}) " +
@@ -282,12 +284,18 @@ public sealed partial class GameLoop
 
             case InGameWorldBootstrappedEvent worldBoot:
                 GD.Print($"[GameLoop] InGameWorldBootstrappedEvent: server AreaId={worldBoot.AreaId} " +
-                         "(3-digit dir → <id>.lst). spec: world_entry.md §2.3/§3.1.");
+                         $"clock={worldBoot.ServerHour:D2}:{worldBoot.ServerMinute:D2}. " +
+                         "spec: world_entry.md §2.3/§3.1, packets/4-1_game_state_tick.yaml §fields.Hour/Minute.");
                 if (_realWorldRenderer is not null)
+                {
                     _realWorldRenderer.OnWorldEntered(worldBoot.AreaId, worldBoot.Position);
+                    _realWorldRenderer.UpdateEnvironmentClock(worldBoot.ServerHour, worldBoot.ServerMinute);
+                }
                 else
+                {
                     GD.Print("[GameLoop] InGameWorldBootstrappedEvent: RealWorldRenderer is null " +
                              "— server AreaId noted but no area re-target performed (VFS required).");
+                }
 
                 break;
 
@@ -325,7 +333,8 @@ public sealed partial class GameLoop
     }
 
 
-    private void TryAttachLocalPlayerAvatar(ActorKey key, ushort serverClass, ushort internalClass, byte appearanceVariant, ImmutableArray<uint> equipGids)
+    private void TryAttachLocalPlayerAvatar(ActorKey key, ushort serverClass, ushort internalClass,
+        byte appearanceVariant, ImmutableArray<uint> equipGids)
     {
         var assets = _realWorldRenderer?.Assets;
         if (assets is null)
@@ -361,7 +370,7 @@ public sealed partial class GameLoop
 
     private static void WireCombatClipSource(VisualActor visual, RealClientAssets assets, int skinClass)
     {
-        var appearanceKey = MartialHeroes.Client.Presentation.Screens.ClassAppearanceResolver
+        var appearanceKey = ClassAppearanceResolver
             .StarterBodyModelClassId(skinClass);
         visual.SetCombatClipSource(assets, appearanceKey, skinClass);
     }

@@ -28,6 +28,11 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private readonly List<WeaponAttachment> _weapons = new();
 
+    private AnimationClip? _actionClip;
+    private float _actionDuration;
+    private float _actionTime;
+    private AnimationTrack?[] _actionTrackByBoneIndex = [];
+
     private ArrayMesh? _arrayMesh;
     private int _baseId;
 
@@ -44,12 +49,6 @@ public sealed partial class SkinnedCharacterNode : Node3D
     private bool _hasClip;
 
     private AnimationClip? _idleClip;
-
-    private AnimationClip? _actionClip;
-    private float _actionDuration;
-    private bool _actionPlaying;
-    private float _actionTime;
-    private AnimationTrack?[] _actionTrackByBoneIndex = [];
 
     private int[] _idToIndex = [];
 
@@ -72,6 +71,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     internal static bool AnimAsDelta { get; set; } = true;
 
     public bool IsIdlePlaying { get; private set; }
+
+    public bool IsActionPlaying { get; private set; }
 
     public void Setup(
         SkinnedMesh mesh,
@@ -221,24 +222,22 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _actionClip = clip;
         _actionDuration = clip.FrameCount * SkinningMath.MotSecondsPerFrame;
         _actionTime = 0f;
-        _actionPlaying = _actionDuration > 0f;
+        IsActionPlaying = _actionDuration > 0f;
 
-        if (_actionPlaying)
+        if (IsActionPlaying)
             GD.Print($"[Skinning] Action clip engaged (id_b={clip.IdB}, one-shot, " +
                      $"duration={_actionDuration:F2}s) — reverts to idle on completion. " +
                      "spec: skinning.md §10.5 / §3.6.5 (per-actor motion-kind selects clip).");
 
-        return _actionPlaying;
+        return IsActionPlaying;
     }
 
     public void StopAction()
     {
-        _actionPlaying = false;
+        IsActionPlaying = false;
         _actionClip = null;
         _actionTime = 0f;
     }
-
-    public bool IsActionPlaying => _actionPlaying;
 
     private AnimationClip? SelectVisualStateClip(VisualState state)
     {
@@ -306,7 +305,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     {
         if (!_ready || _arrayMesh is null) return;
 
-        if (_actionPlaying && _actionDuration > 0f)
+        if (IsActionPlaying && _actionDuration > 0f)
         {
             _actionTime += dtSeconds;
             if (_actionTime >= _actionDuration)
@@ -538,7 +537,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
     {
         var tracks = restPose
             ? _noTracks
-            : _actionPlaying
+            : IsActionPlaying
                 ? _actionTrackByBoneIndex
                 : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(

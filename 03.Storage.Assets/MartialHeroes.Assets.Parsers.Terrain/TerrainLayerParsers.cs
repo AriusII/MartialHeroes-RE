@@ -694,7 +694,7 @@ public static class TerrainLayerParsers
             var recOffset = 8 + i * WindKeyframeStride;
             var rec = span.Slice(recOffset, WindKeyframeStride);
 
-            var pad0 = BinaryPrimitives.ReadSingleLittleEndian(rec[0x00..]);
+            var pad0 = BinaryPrimitives.ReadSingleLittleEndian(rec[..]);
             var speed = BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]);
             var pad2 = BinaryPrimitives.ReadSingleLittleEndian(rec[0x08..]);
             var coord = BinaryPrimitives.ReadSingleLittleEndian(rec[0x0C..]);

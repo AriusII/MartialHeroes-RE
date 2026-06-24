@@ -156,51 +156,8 @@ public sealed partial class RealWorldRenderer
         if (!_composeRender) return;
 
         GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: area={areaView.AreaId} " +
-                 $"cellCount={areaView.CellKeyCount} spawns={areaView.Spawns.Count}. " +
+                 $"cellCount={areaView.CellKeyCount}. " +
                  "spec: assembly_graph.md §1.");
-
-        if (_composerActorsAreaId == areaView.AreaId)
-        {
-            GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: area={areaView.AreaId} " +
-                     "actors already placed — skipping duplicate.");
-            return;
-        }
-
-        _composerActorsAreaId = areaView.AreaId;
-
-        if (Assets is null)
-        {
-            GD.Print("[RealWorldRenderer][ComposeRender] AreaAssembled: assets null — cannot place actors.");
-            return;
-        }
-
-        try
-        {
-            var npcRenderer = new NpcRenderer { Name = "NpcRendererComposer" };
-
-            npcRenderer.GroundYFunc = (lx, lz) => _terrainNode?.GetGroundHeight(lx, lz, 26f) ?? 26f;
-            if (_terrainNode is not null)
-            {
-                var terrainCapture = _terrainNode;
-                npcRenderer.TryGroundYFunc = (lx, lz, out hy) =>
-                    terrainCapture.TryGetGroundHeight(lx, lz, out hy);
-            }
-
-            AddChild(npcRenderer);
-
-            npcRenderer.PopulateFromSpawns(Assets, areaView.Spawns);
-
-            if (_terrainNode is not null)
-                _terrainNode.SectorBecameResident += npcRenderer.OnSectorBecameResident;
-
-            GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: NpcRendererComposer placed " +
-                     $"from {areaView.Spawns.Count} composer spawns for area={areaView.AreaId}. " +
-                     "spec: assembly_graph.md §1/§4.");
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[RealWorldRenderer][ComposeRender] AreaAssembled actor placement failed: {ex.Message}");
-        }
     }
 
     private static bool ReadComposeRenderFlag()

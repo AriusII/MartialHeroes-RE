@@ -21,18 +21,12 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private readonly CancellationTokenSource _lifetimeCts = new();
 
-    private bool _areaContentBuilt;
-
-
     private BgTextureCatalog? _bgTextures;
 
     private CameraController? _cameraController;
 
     private CellCollisionManager? _cellCollisionManager;
     private MapDescriptor? _cellMap;
-
-    private int _composerActorsAreaId = -1;
-
 
     private bool _composeRender;
 
@@ -110,12 +104,16 @@ public sealed partial class RealWorldRenderer : Node3D
             _mapXEffectScheduler.TimeOfDayMs = (uint)Math.Round(_environmentNode.ClockMs);
     }
 
-    private static double WallClockSecondsOfDayMs()
+    public void UpdateEnvironmentClock(byte serverHour, byte serverMinute)
     {
-        var now = DateTime.UtcNow;
-        return (now.Hour * 3600.0 + now.Minute * 60.0 + now.Second + now.Millisecond / 1000.0) * 1000.0;
+        if (_environmentNode is null || !IsInstanceValid(_environmentNode)) return;
+        var clockMs = (serverHour * 3600.0 + serverMinute * 60.0) * 1000.0;
+        _environmentNode.UpdateClockMs(clockMs);
+        _environmentNode.CycleEnabled = false;
+        GD.Print($"[RealWorldRenderer] Environment clock set from server 4/1: {serverHour:D2}:{serverMinute:D2} " +
+                 $"({clockMs / 3600000.0:F2}h) — local free-run disabled, server-authoritative. " +
+                 "spec: packets/4-1_game_state_tick.yaml §fields.Hour/Minute.");
     }
-
 
     public override void _ExitTree()
     {

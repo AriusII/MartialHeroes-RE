@@ -348,6 +348,29 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendChat27Async(channel, isWhisper ? recipientName : null, text, cancellationToken);
     }
 
+    public ValueTask MoveCharacterSlotAsync(int fromSlot, int toSlot, CancellationToken cancellationToken = default)
+    {
+        if (fromSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
+            throw new ArgumentOutOfRangeException(nameof(fromSlot), fromSlot, "Slot index must be 0..4.");
+        if (toSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
+            throw new ArgumentOutOfRangeException(nameof(toSlot), toSlot, "Slot index must be 0..4.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[1];
+        payload[0x00] = (byte)toSlot;
+
+        _inFlightLatch?.Arm();
+        return SendAsync(1, 14, payload, cancellationToken);
+    }
+
+    public ValueTask ConfirmTenderAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return SendAsync(2, 118, ReadOnlyMemory<byte>.Empty, cancellationToken);
+    }
+
     public ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -355,7 +378,8 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         Span<byte> payload = stackalloc byte[CmsgEnterGameRequest.WireSize];
         payload.Clear();
         payload[0x00] = slotIndex;
-        SessionTokenChecksum.WriteSelfChecksum(payload.Slice(0x01, SessionTokenChecksum.SessionTokenLength));
+        _sessionToken.AsSpan(0, SessionTokenChecksum.SessionTokenLength)
+            .CopyTo(payload.Slice(0x01, SessionTokenChecksum.SessionTokenLength));
         BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x24, sizeof(uint)), _versionToken);
 
         _inFlightLatch?.Arm();
@@ -483,29 +507,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x04, 4), targetActorId);
 
         return SendResultAsync(2, 35, payload, true, cancellationToken);
-    }
-
-    public ValueTask MoveCharacterSlotAsync(int fromSlot, int toSlot, CancellationToken cancellationToken = default)
-    {
-        if (fromSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
-            throw new ArgumentOutOfRangeException(nameof(fromSlot), fromSlot, "Slot index must be 0..4.");
-        if (toSlot is < 0 or > CharacterSelectionStore.MaxSlotIndex)
-            throw new ArgumentOutOfRangeException(nameof(toSlot), toSlot, "Slot index must be 0..4.");
-
-        cancellationToken.ThrowIfCancellationRequested();
-
-        Span<byte> payload = stackalloc byte[1];
-        payload[0x00] = (byte)toSlot;
-
-        _inFlightLatch?.Arm();
-        return SendAsync(1, 14, payload, cancellationToken);
-    }
-
-    public ValueTask ConfirmTenderAsync(CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-
-        return SendAsync(2, 118, ReadOnlyMemory<byte>.Empty, cancellationToken);
     }
 
     public ValueTask LogoutAsync(CancellationToken cancellationToken = default)

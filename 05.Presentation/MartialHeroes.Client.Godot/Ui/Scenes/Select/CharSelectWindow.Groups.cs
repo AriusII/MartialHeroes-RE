@@ -122,7 +122,8 @@ public sealed partial class CharSelectWindow
 
         _carrierPigeonPanel.Visible = false;
 
-        GD.Print("[CharSelectWindow] CarrierPigeonPanel built (action 65 = close). spec: charselect.md §4.3 action 65 / §5.2.");
+        GD.Print(
+            "[CharSelectWindow] CarrierPigeonPanel built (action 65 = close). spec: charselect.md §4.3 action 65 / §5.2.");
     }
 
 

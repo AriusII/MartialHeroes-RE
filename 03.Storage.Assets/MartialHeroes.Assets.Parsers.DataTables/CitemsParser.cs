@@ -60,7 +60,7 @@ public static class CitemsParser
             var recBase = i * RecordStride;
             var rec = span.Slice(recBase, RecordStride);
 
-            var itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[OffItemId..]);
+            var itemId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
 
             var nameBytes = rec.Slice(OffItemName, ItemNameLen);
             var nameNul = nameBytes.IndexOf((byte)0);

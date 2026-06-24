@@ -105,7 +105,8 @@ public sealed partial class CharSelectWindow
                 {
                     _pendingRelocateToSlot = FindNextEmptySlot(_selectedSlot);
                     if (_modalCreateClass is not null) _modalCreateClass.Visible = true;
-                    GD.Print($"[CharSelectWindow] action 61: relocate overlay opened (from={_selectedSlot} to={_pendingRelocateToSlot}). spec: charselect.md §4.3.");
+                    GD.Print(
+                        $"[CharSelectWindow] action 61: relocate overlay opened (from={_selectedSlot} to={_pendingRelocateToSlot}). spec: charselect.md §4.3.");
                 }
                 else
                 {
@@ -193,19 +194,23 @@ public sealed partial class CharSelectWindow
                     if (_selectedSlot >= 0 && _selectedSlot < MaxSlots && !_slots[_selectedSlot].IsEmpty &&
                         _pendingRelocateToSlot < MaxSlots && _pendingRelocateToSlot != _selectedSlot)
                     {
-                        GD.Print($"[CharSelectWindow] MoveCharacterSlotRequested: from={_selectedSlot} to={_pendingRelocateToSlot}. spec: charselect.md §4.3 action 62 / opcode 1/14.");
+                        GD.Print(
+                            $"[CharSelectWindow] MoveCharacterSlotRequested: from={_selectedSlot} to={_pendingRelocateToSlot}. spec: charselect.md §4.3 action 62 / opcode 1/14.");
                         EmitSignal(SignalName.MoveCharacterSlotRequested, _selectedSlot, _pendingRelocateToSlot);
                     }
                     else
                     {
-                        GD.Print($"[CharSelectWindow] action 62 relocate: no valid target slot (from={_selectedSlot} to={_pendingRelocateToSlot}); no send.");
+                        GD.Print(
+                            $"[CharSelectWindow] action 62 relocate: no valid target slot (from={_selectedSlot} to={_pendingRelocateToSlot}); no send.");
                     }
+
                     _pendingRelocateToSlot = -1;
                 }
                 else
                 {
                     ShowCreateNameModal();
                 }
+
                 break;
             case ActRelocateCancel:
                 HideModal(_modalCreateClass);
@@ -263,10 +268,8 @@ public sealed partial class CharSelectWindow
     private int FindNextEmptySlot(int excludeSlot)
     {
         for (var i = 0; i < MaxSlots; i++)
-        {
             if (i != excludeSlot && _slots[i].IsEmpty)
                 return i;
-        }
         return (excludeSlot + 1) % MaxSlots;
     }
 

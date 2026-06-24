@@ -1,4 +1,5 @@
 using Godot;
+using MartialHeroes.Assets.Parsers.Character.Models;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Application.Engine;
@@ -15,9 +16,15 @@ public sealed partial class VisualActor : CharacterBody3D
     private const float RunGlideSpeed = 10.0f;
 
     private const float SkinnedAvatarScale = 5.0f;
+    private AnimationClip? _attackClipCache;
+    private bool _attackClipResolved;
 
 
     private CellCollisionManager? _cellCollisionManager;
+    private int _combatAppearanceKey;
+
+    private RealClientAssets? _combatAssets;
+    private int _combatSkinClass;
 
     private Vector3 _currPosition;
 
@@ -37,12 +44,6 @@ public sealed partial class VisualActor : CharacterBody3D
     private Node3D? _skinnedAvatar;
 
     private SkinnedCharacterNode? _skinnedNode;
-
-    private RealClientAssets? _combatAssets;
-    private int _combatAppearanceKey;
-    private int _combatSkinClass;
-    private AnimationClip? _attackClipCache;
-    private bool _attackClipResolved;
 
 
     private double _tickDurationSec = 1.0 / GameEngineLoop.DefaultTickRateHz;
@@ -146,7 +147,7 @@ public sealed partial class VisualActor : CharacterBody3D
         return _attackClipCache;
     }
 
-    private static int AttackMotionId(MartialHeroes.Assets.Parsers.Character.Models.ActormotionEntry entry)
+    private static int AttackMotionId(ActormotionEntry entry)
     {
         return 0;
     }

@@ -38,11 +38,17 @@ public sealed partial class GamePacketHandler
 
         var position = Vector3Fixed.FromFloat(seed.SpawnX, 0f, seed.SpawnZ);
 
+        const int HourOffset = 22;
+        const int MinuteOffset = 23;
+        var serverHour = payload.Length > HourOffset ? payload[HourOffset] : (byte)0;
+        var serverMinute = payload.Length > MinuteOffset ? payload[MinuteOffset] : (byte)0;
+
         if (_world.LocalActor is { } existing)
         {
             existing.SnapTo(position);
             worldEntry?.Record(seed.AreaId, position);
-            _eventBus.Publish(new InGameWorldBootstrappedEvent(existing.Key, position, seed.AreaId));
+            _eventBus.Publish(new InGameWorldBootstrappedEvent(existing.Key, position, seed.AreaId, serverHour,
+                serverMinute));
             PublishInteriorSnapshot(payload);
             return;
         }
@@ -61,7 +67,8 @@ public sealed partial class GamePacketHandler
             localActor.MaxHp,
             serverClass, equipGids, internalClass, appearanceVariant));
         worldEntry?.Record(seed.AreaId, position);
-        _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.AreaId));
+        _eventBus.Publish(new InGameWorldBootstrappedEvent(localActor.Key, position, seed.AreaId, serverHour,
+            serverMinute));
         PublishInteriorSnapshot(payload);
     }
 

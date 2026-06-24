@@ -255,59 +255,9 @@ public sealed partial class EnvironmentNode
             return;
         }
 
-        var nowHour = DateTime.UtcNow.Hour;
-        var timeBlock = (int)(ClockMs / (KeyframeMs * 4.8)) % WeatherBin.RowCount;
-        var weatherType = weather.GetWeatherType(timeBlock, nowHour % WeatherBin.ColumnsPerRow);
-        var intensity = weather.GetIntensity(timeBlock, nowHour % WeatherBin.ColumnsPerRow);
-
-        if (weatherType == 0)
-        {
-            GD.Print("[Environment] weather bin present but current slot=clear — no particles.");
-            return;
-        }
-
-        var particles = new GpuParticles3D
-        {
-            Name = "WeatherParticles",
-            Amount = weatherType == 1 ? 2000 : 1200,
-            Lifetime = weatherType == 1 ? 2.0 : 4.0,
-            VisibilityAabb = new Aabb(new Vector3(-4000f, -100f, -4000f), new Vector3(8000f, 4000f, 8000f)),
-            Emitting = true
-        };
-
-        var pm = new ParticleProcessMaterial
-        {
-            EmissionShape = ParticleProcessMaterial.EmissionShapeEnum.Box,
-            EmissionBoxExtents = new Vector3(4000f, 100f, 4000f)
-        };
-
-        if (weatherType == 1)
-        {
-            pm.Gravity = new Vector3(0f, -980f * intensity, 0f);
-            pm.InitialVelocityMin = 200f * intensity;
-            pm.InitialVelocityMax = 400f * intensity;
-            pm.Color = new Color(0.7f, 0.85f, 1.0f, 0.7f);
-            pm.ScaleMin = 2f;
-            pm.ScaleMax = 6f;
-        }
-        else
-        {
-            pm.Gravity = new Vector3(0f, -120f * intensity, 0f);
-            pm.InitialVelocityMin = 30f * intensity;
-            pm.InitialVelocityMax = 80f * intensity;
-            pm.Color = new Color(1.0f, 1.0f, 1.0f, 0.85f);
-            pm.ScaleMin = 4f;
-            pm.ScaleMax = 10f;
-        }
-
-        particles.ProcessMaterial = pm;
-
-        AddChild(particles);
-        _weatherParticles = particles;
-
-        var typeName = weatherType == 1 ? "rain" : "snow";
-        GD.Print($"[Environment] weather: type={typeName} intensity={intensity:F2} " +
-                 $"timeBlock={timeBlock} hour={nowHour} — GpuParticles3D spawned.");
+        GD.Print(
+            "[Environment] weather bin present but no server field determines slot — leaving neutral (no particles). " +
+            "spec: packets/4-1_game_state_tick.yaml (no weather field yet).");
     }
 
     private void ResolveSunDirection()

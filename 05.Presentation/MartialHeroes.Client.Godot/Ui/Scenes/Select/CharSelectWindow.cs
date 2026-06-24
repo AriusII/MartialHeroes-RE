@@ -23,10 +23,10 @@ public sealed partial class CharSelectWindow : Control
     public delegate void EnterGameRequestedEventHandler(string characterName, int slotIndex);
 
     [Signal]
-    public delegate void RenameCharacterRequestedEventHandler(int slotIndex, string newName);
+    public delegate void MoveCharacterSlotRequestedEventHandler(int fromSlot, int toSlot);
 
     [Signal]
-    public delegate void MoveCharacterSlotRequestedEventHandler(int fromSlot, int toSlot);
+    public delegate void RenameCharacterRequestedEventHandler(int slotIndex, string newName);
 
 
     private const int MaxSlots = 5;
