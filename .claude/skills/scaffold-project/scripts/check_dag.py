@@ -99,6 +99,9 @@ LAYER: dict[str, int] = {
     "Tools.AssetProbe": 6,
     "Tools.PacketInspect": 6,
     "Tools.VfsExplorer": 6,
+    # Server/ (replica server; leaf CONSUMERS above the core -- reference down, referenced by none)
+    "Server.Core": 7,
+    "Server.Console": 7,
 }
 
 # Intra-layer sub-order: a project may only reference a peer with a STRICTLY
@@ -152,6 +155,9 @@ SUBORDER: dict[str, int] = {
     "Tools.AssetProbe": 0,
     "Tools.PacketInspect": 0,
     "Tools.VfsExplorer": 0,
+    # Server/
+    "Server.Core": 0,
+    "Server.Console": 1,
 }
 
 # Layer 05 (Godot) is not scanned as a source (its csproj is owned elsewhere and

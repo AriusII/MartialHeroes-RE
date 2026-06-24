@@ -44,4 +44,6 @@ public interface IApplicationUseCases
         string text,
         string? recipientName = null,
         CancellationToken cancellationToken = default);
+
+    ValueTask ConfirmTenderAsync(CancellationToken cancellationToken = default);
 }

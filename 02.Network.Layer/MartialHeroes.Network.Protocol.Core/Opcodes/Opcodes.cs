@@ -6,6 +6,10 @@ public static class Opcodes
 
     public const uint CmsgLogout = 0x10000;
 
+    public const uint CmsgLobbyPing = 0x10002;
+
+    public const uint CmsgAuthReply = 0x10004;
+
     public const uint CmsgCreateCharacter = 0x10006;
 
     public const uint CmsgSelectCharacterSlot = 0x10007;
@@ -26,15 +30,193 @@ public static class Opcodes
 
     public const uint CmsgLeaveWorld = 0x20000;
 
+    public const uint CmsgPortalTravel = 0x20002;
+
+    public const uint CmsgDialogResponse = 0x20003;
+
+    public const uint CmsgActorInteraction = 0x20005;
+
+    public const uint CmsgEmote = 0x20006;
+
     public const uint CmsgWhisper = 0x20007;
+
+    public const uint CmsgHotbarSync = 0x20008;
+
+    public const uint CmsgSelectTargetActor = 0x2000c;
 
     public const uint CmsgMoveRequest = 0x2000d;
 
+    public const uint CmsgDropItem = 0x2000e;
+
+    public const uint CmsgPickupItem = 0x2000f;
+
+    public const uint CmsgActorInteract = 0x20010;
+
+    public const uint CmsgServiceAction = 0x20011;
+
+    public const uint CmsgNpcBuyOrAcquire = 0x20013;
+
+    public const uint CmsgNpcSell = 0x20014;
+
+    public const uint CmsgListSelectAction = 0x20015;
+
+    public const uint CmsgServiceListAction = 0x20016;
+
+    public const uint CmsgTradeRequest = 0x20017;
+
+    public const uint CmsgTradeSlotAdd = 0x20018;
+
+    public const uint CmsgTradeConfirm = 0x20019;
+
+    public const uint CmsgQuestAction = 0x2001c;
+
+    public const uint CmsgStatAllocate = 0x2001d;
+
+    public const uint CmsgGuildOp = 0x2001e;
+
+    public const uint CmsgPartyInvite = 0x20023;
+
+    public const uint CmsgPartyLeaveKick = 0x20024;
+
+    public const uint CmsgPartyLeaderOp = 0x20025;
+
+    public const uint CmsgHudContextAction39 = 0x20027;
+
+    public const uint CmsgSubmitRecord40 = 0x20028;
+
+    public const uint CmsgHudSelect41 = 0x20029;
+
+    public const uint CmsgContextAction42 = 0x2002a;
+
+    public const uint CmsgItemQuickMove = 0x2002c;
+
+    public const uint CmsgHudFlagsAction45 = 0x2002d;
+
+    public const uint CmsgItemMove = 0x2002e;
+
+    public const uint CmsgHudCodeValue47 = 0x2002f;
+
+    public const uint CmsgHudSubmitId48 = 0x20030;
+
+    public const uint CmsgFriendAddRemove = 0x20031;
+
+    public const uint CmsgHudRecord50 = 0x20032;
+
     public const uint CmsgUseSkill = 0x20034;
+
+    public const uint CmsgFriendListRefresh = 0x20036;
+
+    public const uint CmsgHudRecord55 = 0x20037;
+
+    public const uint CmsgStallEnter = 0x20038;
+
+    public const uint CmsgStackDistribute57 = 0x20039;
+
+    public const uint CmsgHudPricedCommit58 = 0x2003a;
+
+    public const uint CmsgCcoupleRelationRequest = 0x2003c;
+
+    public const uint CmsgPartyRequest = 0x2003d;
+
+    public const uint CmsgRelationNamedRequest = 0x2003e;
+
+    public const uint CmsgRelationNamedAction = 0x2003f;
+
+    public const uint CmsgClassChangeRequest = 0x20040;
+
+    public const uint CmsgGuildContextAck = 0x20041;
+
+    public const uint CmsgRelationToggle = 0x20042;
+
+    public const uint CmsgCarrierPigeonSend = 0x20046;
+
+    public const uint CmsgDeliveryClaim = 0x20047;
+
+    public const uint CmsgGmCommand = 0x20048;
+
+    public const uint CmsgStallListRequest = 0x2004a;
+
+    public const uint CmsgRosterAssemble = 0x2004b;
+
+    public const uint CmsgFateInteraction = 0x2004c;
+
+    public const uint CmsgActorTargetRequest = 0x2004f;
+
+    public const uint CmsgGuildRequest = 0x20050;
+
+    public const uint CmsgGuildDiplomacyDeclare = 0x20051;
+
+    public const uint CmsgGiftPresent = 0x20052;
 
     public const uint CmsgChatContextual = 0x20053;
 
+    public const uint CmsgNpcMediatedNameRequest84 = 0x20054;
+
+    public const uint CmsgRevengeSummon = 0x2005c;
+
+    public const uint CmsgRevengeVote = 0x2005d;
+
+    public const uint CmsgTriggerAction95 = 0x2005f;
+
+    public const uint CmsgActionToggle99 = 0x20063;
+
+    public const uint CmsgNpcOpenReq = 0x20064;
+
+    public const uint CmsgTextFormSubmit4103 = 0x20067;
+
+    public const uint CmsgCreatureItemTick106 = 0x2006a;
+
+    public const uint CmsgAmountCommit107 = 0x2006b;
+
+    public const uint CmsgNpcLocateRequest108 = 0x2006c;
+
+    public const uint CmsgQuestNpcStep = 0x2006e;
+
     public const uint CmsgKeepaliveToggle = 0x20070;
+
+    public const uint CmsgRepairCommit = 0x20071;
+
+    public const uint CmsgGatedSelfAction114 = 0x20072;
+
+    public const uint CmsgShopBuy = 0x20073;
+
+    public const uint CmsgTenderConfirm = 0x20076;
+
+    public const uint CmsgEventItemListSubmit = 0x20078;
+
+    public const uint CmsgGiftCharSend = 0x2007a;
+
+    public const uint CmsgGiftCharReceiveConfirm = 0x2007b;
+
+    public const uint CmsgItemPanelFlag = 0x2007c;
+
+    public const uint CmsgConfirmDialogState = 0x2007e;
+
+    public const uint CmsgPanelIdSubmit = 0x20080;
+
+    public const uint CmsgNpcSearchById = 0x20086;
+
+    public const uint CmsgNpcSearchByName = 0x20087;
+
+    public const uint CmsgPostureToggle = 0x20089;
+
+    public const uint CmsgAutoInteract = 0x2008b;
+
+    public const uint CmsgCubeGambleSubmit = 0x2008d;
+
+    public const uint CmsgStorageOp = 0x2008e;
+
+    public const uint CmsgPlaytimeAction = 0x2008f;
+
+    public const uint CmsgSkillListSubmit = 0x20091;
+
+    public const uint CmsgServerAckEcho = 0x20092;
+
+    public const uint CmsgProductBuy = 0x20097;
+
+    public const uint CmsgQuestRowRequest = 0x20098;
+
+    public const uint CmsgProductConfirm = 0x20099;
 
     public const uint CmsgKeepalive = 0x22710;
 

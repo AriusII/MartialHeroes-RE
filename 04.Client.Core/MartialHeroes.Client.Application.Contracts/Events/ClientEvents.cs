@@ -222,3 +222,59 @@ public sealed record LocalPlayerStateSyncedEvent(
     Vector3Fixed Position,
     int Heading,
     byte Mode) : IClientEvent;
+
+public sealed record PlayerGoldBalanceUpdatedEvent(long Gold) : IClientEvent;
+
+public sealed record ItemShopPurchaseResultEvent(bool Success, byte ResultCode) : IClientEvent;
+
+public sealed record CashShopActionResultEvent(int ResultCode) : IClientEvent;
+
+public sealed record ItemShopBalanceUpdatedEvent(
+    bool Success,
+    byte FailCode,
+    long Gold,
+    uint Points) : IClientEvent;
+
+public sealed record EquipChangeResultEvent(
+    bool Success,
+    byte SlotKind,
+    byte SlotIndex) : IClientEvent;
+
+public sealed record ItemUseResultEvent(
+    ActorKey Key,
+    bool Success,
+    byte ResultCode,
+    byte Mode,
+    byte SlotIndex) : IClientEvent;
+
+public sealed record ItemUseEffectEvent(
+    ActorKey Key,
+    bool Success,
+    byte Kind) : IClientEvent;
+
+public sealed record UpgradeItemResultEvent(
+    bool Success,
+    byte Reason,
+    byte SlotIndex,
+    uint NewFlags,
+    uint NewActorId,
+    uint NewQuantity,
+    uint EnchantDelta) : IClientEvent;
+
+public sealed record PopupCodeEvent(uint PopupCode) : IClientEvent;
+
+public sealed record GroundItemSlotResultEvent(
+    bool Success,
+    byte Mode,
+    byte Slot,
+    int Count) : IClientEvent;
+
+public sealed record ItemWorldPickupResultEvent(
+    bool Success,
+    byte Subtype,
+    uint ItemId) : IClientEvent;
+
+public sealed record NpcSellItemResultEvent(
+    bool Success,
+    uint EntityKey,
+    byte SubFlag) : IClientEvent;

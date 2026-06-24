@@ -501,6 +501,13 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendAsync(1, 14, payload, cancellationToken);
     }
 
+    public ValueTask ConfirmTenderAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        return SendAsync(2, 118, ReadOnlyMemory<byte>.Empty, cancellationToken);
+    }
+
     public ValueTask LogoutAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
