@@ -1,3 +1,4 @@
+---
 verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994, full 2D-GUI
   cartography pass, static IDA). The COpeningWindow class chain
   (COpeningWindow : GUWindow : GUPanel : GUComponent + the Diamond::EventHandler MI base at +0xBC),
@@ -30,6 +31,19 @@ verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994,
   P (634,165), 110×32, action 100, persists [OPENNING] SKIP=1) all CONFIRMED. 2026-06-18 scene
   reconstruction — SKIP routing re-read from the application entry point; crawl never auto-finishes;
   skip is the sole exit. Outcome CONFIRMED.)
+scene: Opening (engine state 3)
+evidence: [static-ida]
+capture_verified: false
+sources:
+  - Docs/RE/specs/intro_sequence.md            # animation behaviour, crawl math, slideshow FSM, sound, teardown
+  - Docs/RE/specs/frontend_layout_tables.md    # numeric layout oracle §6 (geometry, alpha ceiling, crawl, SKIP)
+  - Docs/RE/specs/frontend_scenes.md           # boot scene state machine, state-3 placement
+  - Docs/RE/specs/client_runtime.md            # engine run-flag, scene loop, GameState enumeration
+  - Docs/RE/specs/ui_system.md                 # GU* widget toolkit, input dispatch, action routing
+  - Docs/RE/structs/gucomponent.md             # GUComponent/GUPanel layout + virtual interface
+  - Docs/RE/structs/guwindow.md                # GUWindow MI layout, EventHandler base, CmdHandler
+  - Docs/RE/specs/sound.md                     # sound id 910061000; category routing; SFX 910061000 vs 861010105/920100100
+---
 
 # Opening Scene Dossier — engine state 3 (post-login intro)
 

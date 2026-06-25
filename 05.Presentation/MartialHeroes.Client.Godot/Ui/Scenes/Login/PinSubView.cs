@@ -287,7 +287,7 @@ public sealed partial class PinSubView : Control
     {
         _scrambled = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-        var seed = (int)((long)Math.Floor(Time.GetUnixTimeFromSystem()) & 0x7FFF_FFFF);
+        var seed = (int)((long)Math.Floor(global::Godot.Time.GetUnixTimeFromSystem()) & 0x7FFF_FFFF);
         var rng = new Random(seed);
 
         for (var i = 1; i < 10; i++)

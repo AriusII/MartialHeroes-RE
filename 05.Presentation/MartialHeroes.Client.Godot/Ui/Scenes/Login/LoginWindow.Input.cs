@@ -63,15 +63,23 @@ public sealed partial class LoginWindow
                 break;
 
             case LoginLayout.ActionConfirm:
+                if (_flowSubState != 35
+                    && global::Godot.Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
+                {
+                    _lastServerFetchMs = global::Godot.Time.GetTicksMsec();
+                    RestartServerFetch();
+                }
+                break;
+
             case LoginLayout.ActionOptionTab2:
                 ShowExitConfirm();
                 break;
 
             case 105:
                 if (_flowSubState != 35
-                    && Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
+                    && global::Godot.Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
                 {
-                    _lastServerFetchMs = Time.GetTicksMsec();
+                    _lastServerFetchMs = global::Godot.Time.GetTicksMsec();
                     RestartServerFetch();
                 }
 
@@ -81,7 +89,11 @@ public sealed partial class LoginWindow
                 break;
 
             case LoginLayout.ActionOptionTab1:
-                RunState(5);
+                if (_flowSubState == 37 && _collectedServerId > 0)
+                {
+                    RunState(38);
+                    RunState(39);
+                }
                 break;
 
             case LoginLayout.ActionQuitConfirmYes1
@@ -220,7 +232,7 @@ public sealed partial class LoginWindow
 
         _errorN = 3;
         _errorBudgetMs = ErrorBudgetStartMs;
-        _errorLastDecrementMs = Time.GetTicksMsec();
+        _errorLastDecrementMs = global::Godot.Time.GetTicksMsec();
         RebuildErrorOkCaption();
 
         _errorPanel.Visible = true;
@@ -247,7 +259,7 @@ public sealed partial class LoginWindow
 
     private void TickErrorCountdown()
     {
-        var nowMs = Time.GetTicksMsec();
+        var nowMs = global::Godot.Time.GetTicksMsec();
         if (nowMs >= _errorLastDecrementMs + 1000u && _errorBudgetMs > 0)
         {
             _errorBudgetMs -= 1000.0;

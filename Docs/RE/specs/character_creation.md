@@ -52,6 +52,11 @@ note: |
   actor/pointer object vs 880-byte server roster record), and documented both create latches.
   2026-06-24: added cross-link in §5 noting Latch B (network-client create in-flight marker) is the
   same physical byte as the keepalive-suppress flag cleared in load.md §5A.4 -- one byte, two roles.
+  2026-06-24 debugger-session (live `?ext=dbg`, IDB SHA 263bd994): confirmed create is the SAME
+  SelectWindow scene entered by a visibility toggle + preview swap (NOT a rebuild); and recorded the
+  buttonIdx->classId->KeyedNode-key->create-BGM table (0->Monk/4/key1/910065000, 1->Musa/1/key2/
+  910062000, 2->Dosa/3/key4/910064000, 3->Salsu/2/key3/910063000), with create BGM = 910062000+
+  (class-1)*1000 on the category-0 slot (replace) and KeyedNode key = (class%4)+1. See §3.1.
 -->
 
 # Character Creation, Appearance & Class Evolution — Clean-Room Specification
@@ -215,6 +220,29 @@ Selecting a class button also drives three presentation effects, all keyed off t
   overlaying it. *(CONFIRMED immediates.)*
 - **Close-up preview actor** — the create form spawns a single close-up preview actor for the selected
   class (the lineup/preview machinery is owned by `frontend_scenes.md` / `rendering.md`).
+
+> **2026-06-24 debugger-session — create is a VISIBILITY TOGGLE, not a scene rebuild
+> (DEBUGGER-CONFIRMED).** A live `?ext=dbg` session confirmed that entering "create" is the **same
+> SelectWindow scene** entered by a **visibility toggle** (show/hide of the create children) **plus a
+> preview-actor swap** — the panel/button builders do **not** re-fire on entering create. For a
+> faithful port this means **one** select scene with two visual states gated by node visibility, never
+> a second scene constructed. The class-selection table observed at the apply-class-selection path
+> (button index 0..3), unifying §3's UI→internal remap with the KeyedNode key and the per-class
+> create BGM of this section:
+>
+> | UI button idx | → internal class id | class | KeyedNode key | create BGM |
+> |---|---|---|---|---|
+> | 0 | 4 | Monk  | 1 | 910065000 |
+> | 1 | 1 | Musa  | 2 | 910062000 |
+> | 2 | 3 | Dosa  | 4 | 910064000 |
+> | 3 | 2 | Salsu | 3 | 910063000 |
+>
+> Relations (DEBUGGER-CONFIRMED): **create BGM = `910062000 + (class − 1) × 1000`** on the category-0
+> music slot (it **replaces** the scene BGM, never overlays); **KeyedNode key = `(class % 4) + 1`**.
+> Each selection also highlights the four class buttons, rebuilds the per-class close-up 3D preview
+> actor, pulls three name/desc/stats strings from the KeyedNode map onto three labels, and loads the
+> appearance strings. The internal class id is the same field that feeds the stored slot class id
+> (§3). — confidence: DEBUGGER-CONFIRMED.
 
 The chosen class also determines the character's skill page; that class → skill-page relationship is
 owned by the sibling skill lane — see `skills.md` / `skill_trees.md`.

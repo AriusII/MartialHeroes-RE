@@ -37,7 +37,17 @@ public enum ServerStatusHint
     Caption
 }
 
+public enum ServerListOutcome
+{
+    Empty,
+
+    Failed,
+
+    Populated
+}
+
 public sealed record ServerListReceivedEvent(
+    ServerListOutcome Outcome,
     ImmutableArray<ServerListEntryView> Servers) : IClientEvent;
 
 public sealed record ChannelEndpointResolvedEvent(

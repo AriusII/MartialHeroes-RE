@@ -149,7 +149,7 @@ public sealed partial class LoginWindow
         {
             Name = "ServerListRoot",
             Position = Vector2.Zero,
-            Size = new Vector2(1024f, 398f),
+            Size = new Vector2(1024f, 768f),
             MouseFilter = MouseFilterEnum.Pass,
             Visible = false
         };

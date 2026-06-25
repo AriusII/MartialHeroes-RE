@@ -22,6 +22,11 @@ verification: independently re-derived 2026-06-18 directly from the doida.exe bi
   2026-06-24 audit (IDB SHA 263bd994): §3.2 extended with additional precision — the enter-game commit
   also writes an extra NetHandler flag byte to live-player globals post-send (semantic capture-pending;
   see charselect.md §7.4 for the authoritative detail). No structural drift.
+  2026-06-24 debugger-session (live `?ext=dbg`, IDB SHA 263bd994): the full state sequence 0→1→2→4
+  (Opening 3 SKIPped) →5 and the teardown 5→7→6→8 were debugger-confirmed end-to-end (previously
+  static-only); the Select(4)→Error(7) version-mismatch edge is now debugger-confirmed AT THE ENTER-GAME
+  STEP, server-driven (the server rejects the transmitted version token), in addition to the documented
+  client-local login gate. See §3.
 ---
 
 # Scene / Game State Machine — Cross-Cutting Dossier
@@ -215,6 +220,19 @@ Transition triggers, condensed (authoritative table: `client_workflow.md §4.3`)
 > S2C `3/100`** (`SmsgCharActionResult`), **not** the char-manage result `3/7` (which handles only
 > refresh / rename / delete subtypes and writes no scene state). Wire-byte *value* semantics for these
 > opcodes are capture/debugger-pending; the routing/targets above are static CODE-CONFIRMED.
+
+> **2026-06-24 debugger-session — enter-game version mismatch is server-driven (DEBUGGER-CONFIRMED).**
+> A live `?ext=dbg` session confirmed the **Select (4) → Error (7)** edge is also reached at the
+> **enter-game step** by a **server-side** version rejection (in addition to the documented
+> client-local login-gate path that lands at Login (1) → Quit (6) sub 2). When the player commits
+> enter-game, the transmitted version token is validated by the **server**; on mismatch an **inbound
+> net handler drives the scene machine 5 → 7 (Error)** and the client shows a CP949 "client version
+> does not match server" modal before teardown. (The version-token derivation and the dual
+> local/server checks are owned by `formats/game_ver.md`.) The same session also debugger-confirmed the
+> full live scene sequence **0 → 1 → 2 → 4 (Opening (3) SKIPped, SKIP ≠ 0) → 5** and the teardown
+> chain **5 → 7 → 6 → 8** (value 8 = terminal exit sub-state, into the switch default) — every
+> transition previously carried as static-only is now debugger-confirmed end-to-end. The 3-int record
+> layout `[state, sub-state, reason]` and the ctor-seeded sub-state 8 were likewise confirmed live.
 
 ### 3.1 Refinement — the Select (4) → In-game (5) bridge is DUAL (CYCLE 12)
 

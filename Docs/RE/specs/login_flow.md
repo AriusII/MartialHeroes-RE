@@ -785,6 +785,15 @@ concrete mechanism.
 > chars + NUL) — a single live read would byte-confirm it; it does not change the wire layout, which
 > §4.2 already pins.
 
+> **2026-06-24 debugger-session (DEBUGGER-CONFIRMED).** A live `?ext=dbg` session upgraded two of
+> these facts from static-CONFIRMED to debugger-confirmed: (1) the PIN keypad **re-scrambles on every
+> show** (the on-screen digit positions are reshuffled each time the modal opens; screen position ≠
+> digit value — anti-keylogger), observed directly across shows; and (2) the **server-roster
+> (server-list) fetch runs on a WORKER THREAD**, not the UI thread, observed live (paint + a "last
+> server" registry write follow). The wire layout (§4.2) and the scramble mechanism (time-seeded
+> shuffle, 4-digit cap, masking) are unchanged; this note only raises their confidence to
+> debugger-confirmed. The PIN-token storage slot width remains the one open detail.
+
 ### 4.3 Secure send
 
 The `1/4` auth reply is built from the session key state and sent inline in the same dispatch branch

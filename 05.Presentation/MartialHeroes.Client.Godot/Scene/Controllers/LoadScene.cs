@@ -35,7 +35,7 @@ public sealed partial class LoadScene : StubSceneController
             ProgressProvider = _ctx?.LoadOrchestrator is { } orch
                 ? () => Math.Clamp(orch.ProgressQuotient, 0, 100)
                 : null,
-            PlayOwnCue = _ctx?.LoadOrchestrator is null
+            PlayOwnCue = true
         };
         _loading.LoadingComplete += OnLoadingComplete;
         _screenHost.SetScreen(_loading);

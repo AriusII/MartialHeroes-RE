@@ -83,11 +83,6 @@ public sealed partial class OpeningWindow : Control
         Size = new Vector2(CanvasW, CanvasH);
         MouseFilter = MouseFilterEnum.Stop;
 
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add
-        };
-
         BuildUi();
 
         _scrollStartWait = ScrollStartDelayMs;
@@ -277,7 +272,7 @@ public sealed partial class OpeningWindow : Control
             TextureNormal = skipNormal,
             TexturePressed = skipPressed ?? skipNormal,
             TextureHover = skipNormal,
-            StretchMode = TextureButton.StretchModeEnum.KeepAspect
+            StretchMode = TextureButton.StretchModeEnum.Scale
         };
         skipBtn.Pressed += OnSkipPressed;
         AddChild(skipBtn);

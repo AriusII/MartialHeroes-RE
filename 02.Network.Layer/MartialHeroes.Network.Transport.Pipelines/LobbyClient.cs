@@ -44,7 +44,7 @@ public sealed class LobbyClient : ILobbyClient
     }
 
 
-    public Task<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(
+    public Task<LobbyServerListResult> FetchServerListAsync(
         CancellationToken cancellationToken = default)
     {
         var result = FetchServerListCore(cancellationToken);
@@ -60,15 +60,18 @@ public sealed class LobbyClient : ILobbyClient
     }
 
 
-    private IReadOnlyList<LobbyServerRecord> FetchServerListCore(CancellationToken cancellationToken)
+    private LobbyServerListResult FetchServerListCore(CancellationToken cancellationToken)
     {
         using var socket = ConnectBlocking(_lobbyHost, LobbyBasePort, cancellationToken);
-        if (!socket.Connected) return [];
+        if (!socket.Connected) return LobbyServerListResult.Failed;
 
         var (decompressed, _) = ReceiveAndDecompress(socket, out var countWord);
         int count = (short)countWord;
 
-        if (count <= 0 || decompressed.Length < count * LobbyServerRecordWire.WireSize) return [];
+        if (count < 0) return LobbyServerListResult.Failed;
+        if (count == 0) return LobbyServerListResult.Empty;
+        if (decompressed.Length < count * LobbyServerRecordWire.WireSize)
+            return LobbyServerListResult.Failed;
 
         var wire = MemoryMarshal.Cast<byte, LobbyServerRecordWire>(
             decompressed.Span[..(count * LobbyServerRecordWire.WireSize)]);
@@ -77,7 +80,7 @@ public sealed class LobbyClient : ILobbyClient
         for (var i = 0; i < count; i++)
             records[i] = wire[i].ToRecord();
 
-        return records;
+        return LobbyServerListResult.Populated(records);
     }
 
     private LobbyChannelEndpoint FetchChannelEndpointCore(

@@ -2,7 +2,7 @@ namespace MartialHeroes.Network.Abstractions.Lobby;
 
 public interface ILobbyClient
 {
-    Task<IReadOnlyList<LobbyServerRecord>> FetchServerListAsync(
+    Task<LobbyServerListResult> FetchServerListAsync(
         CancellationToken cancellationToken = default);
 
     Task<LobbyChannelEndpoint> FetchChannelEndpointAsync(

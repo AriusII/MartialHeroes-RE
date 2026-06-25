@@ -12,6 +12,40 @@ autonames, and no addresses-as-truth — only neutral provenance.
 
 ---
 
+## Promotion — Frontend debugger-session confirmations (2026-06-24)
+
+**Build under analysis:** `doida.exe`, IDB sha256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` (imagebase `0x400000`).
+**Method:** dirty→clean firewall promotion (re-promote Mode A) of a completed **live `?ext=dbg` debugger-session**
+validation note (`_dirty/validation/2026-06-24-frontend-debugger-session.md`) into the committed front-end
+specs. The note is debugger-authoritative; a static spot-check was unnecessary (facts confirmed live).
+**Firewall:** rewrite-not-copy; no addresses, no decompiler identifiers/pseudo-C, no raw sample bytes beyond
+neutral u32 version values; opcodes cited as (major,minor). Dirty source left intact.
+
+**Committed specs amended (5) — surgical dated `2026-06-24 debugger-session` notes added, no restructuring:**
+
+- `formats/game_ver.md` — added a "Server-side enter-game validation" section: a SECOND, server-side version
+  check at enter-game (the server validates the transmitted `10 × index5 + 9` token and rejects on mismatch
+  → inbound net handler → Error scene → CP949 "client version does not match server" modal → quit),
+  distinct from the client-local login gate (msg 2204); recorded a second concrete on-disk witness
+  (index5 = 2114 → token 21149). Five opaque field semantics still capture-pending.
+- `scenes/scene_state_machine.md` — §3: the Select(4)→Error(7) version-mismatch edge is now
+  debugger-confirmed AT THE ENTER-GAME STEP, server-driven, additional to the local login gate; the full
+  live sequence 0→1→2→4 (Opening 3 SKIPped) →5 and teardown 5→7→6→8 debugger-confirmed end-to-end.
+- `scenes/charselect.md` — §2.1: live `dbg_read` confirmed slot-record stride 880 with name@+568 (CP949),
+  occupancy@+614, class@+620 (1=Musa/2=Salsu/3=Dosa/4=Monk), default-equip ids ≈+656; a 3/5-occupied
+  sample; GAP recorded (the 3/1 CharacterList handler did not fire while slots were populated —
+  delivery-timing vs NetHandler-persistence follow-up).
+- `specs/character_creation.md` — §3.1: create is the SAME SelectWindow scene entered by a visibility
+  toggle + preview swap (NOT a rebuild); added the buttonIdx→classId→KeyedNode-key→create-BGM table
+  (BGM = 910062000+(class-1)*1000 on the category-0 slot, replacing scene BGM; KeyedNode key = (class%4)+1).
+- `specs/login_flow.md` — §4.2a: the PIN keypad re-scramble-on-show (screen position ≠ digit value) and
+  the worker-thread server-roster fetch are now debugger-confirmed (previously static CAMPAIGN-9).
+
+**Open follow-up carried:** exact `3/1` CharacterList delivery timing vs NetHandler persistence
+(charselect §2.1 GAP).
+
+---
+
 ## CYCLE 13 — Static cartography & corpus re-verification sweep (2026-06-24)
 
 **Build under analysis:** `doida.exe`, IDB sha256 `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`

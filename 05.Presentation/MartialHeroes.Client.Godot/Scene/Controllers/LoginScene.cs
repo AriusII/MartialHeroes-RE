@@ -157,6 +157,20 @@ public sealed partial class LoginScene : StubSceneController
 
     private void ApplyServerList(ServerListReceivedEvent serverList)
     {
+        if (serverList.Outcome == ServerListOutcome.Failed)
+        {
+            GD.PrintErr("[LoginScene] ServerListReceivedEvent Outcome=Failed → msg 4028.");
+            _login?.RaiseServerListError(true);
+            return;
+        }
+
+        if (serverList.Outcome == ServerListOutcome.Empty)
+        {
+            GD.PrintErr("[LoginScene] ServerListReceivedEvent Outcome=Empty → msg 4027.");
+            _login?.RaiseServerListError(false);
+            return;
+        }
+
         if (_serverSelect is null || !IsInstanceValid(_serverSelect)) return;
 
         _serverSelect.SetServers(serverList.Servers);

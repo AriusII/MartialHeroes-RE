@@ -22,7 +22,7 @@ public sealed partial class ServerSelectSubView : Control
 
     private const int TitleLocalX = 207;
     private const int TitleLocalY = 44;
-    private const int TitleSrcX = 0;
+    private const int TitleSrcX = 70;
     private const int TitleSrcY = 980;
 
 
@@ -33,17 +33,16 @@ public sealed partial class ServerSelectSubView : Control
     private const int PlateSelectOffX = -6;
     private const int PlateSelectW = 202;
     private const int PlateSelectH = 372;
-    private const int PlateNSrcX = 9;
-    private const int PlateNSrcY = 6;
-    private const int PlateHSrcX = 220;
-    private const int PlateHSrcY = 6;
+    private const int PlateBgSrcX0 = 24;
+    private const int PlateBgSrcX1 = 257;
+    private const int PlateBgSrcY = 97;
 
     private const int PlateFaceOffX = 47;
     private const int PlateFaceW = 100;
     private const int PlateFaceH = 372;
-    private const int PlateFaceSrcX0 = 448;
-    private const int PlateFaceSrcX1 = 572;
-    private const int PlateFaceSrcY = 6;
+    private const int PlateFaceSrcX0 = 77;
+    private const int PlateFaceSrcX1 = 310;
+    private const int PlateFaceSrcY = 97;
 
     private const int NameLabelLocalY = 390;
     private const int NameLabelW = 174;
@@ -91,8 +90,8 @@ public sealed partial class ServerSelectSubView : Control
     private const int Pager3HSrcY = 985;
 
 
-    private const int HighlightSrcX = 700;
-    private const int HighlightSrcY = 18;
+    private const int HighlightSrcX = 0;
+    private const int HighlightSrcY = 105;
     private const int HighlightW = 46;
     private const int HighlightH = 168;
 
@@ -278,6 +277,7 @@ public sealed partial class ServerSelectSubView : Control
 
         int[] plateX = [PlateBaseX0, PlateBaseX1];
         int[] faceSrcX = [PlateFaceSrcX0, PlateFaceSrcX1];
+        int[] plateBgSrcX = [PlateBgSrcX0, PlateBgSrcX1];
         int[] actions = [ActionPlate0, ActionPlate1];
 
         for (var slot = 0; slot < visibleCount; slot++)
@@ -287,7 +287,7 @@ public sealed partial class ServerSelectSubView : Control
             if (NewServerIndex >= 0 && _servers[idx].ServerId == NewServerIndex)
                 BuildSelectionHighlight(plateX[slot], PlateY);
 
-            BuildPlate(plateX[slot], PlateY, actions[slot], idx, faceSrcX[slot]);
+            BuildPlate(plateX[slot], PlateY, actions[slot], idx, faceSrcX[slot], plateBgSrcX[slot]);
 
             if (_servers[idx].ServerId == SpecialRowServerId)
                 AnchorStatusIndicators(plateX[slot], PlateY);
@@ -344,13 +344,13 @@ public sealed partial class ServerSelectSubView : Control
     }
 
 
-    private void BuildPlate(int x, int y, int actionId, int serverIndex, int faceSrcX)
+    private void BuildPlate(int x, int y, int actionId, int serverIndex, int faceSrcX, int plateBgSrcX)
     {
         var e = _servers[serverIndex];
 
 
-        var btnN = _atlas.SliceByPath(AtlasA4, PlateNSrcX, PlateNSrcY, PlateSelectW, PlateSelectH);
-        var btnH = _atlas.SliceByPath(AtlasA4, PlateHSrcX, PlateHSrcY, PlateSelectW, PlateSelectH);
+        var btnN = _atlas.SliceByPath(AtlasA4, plateBgSrcX, PlateBgSrcY, PlateSelectW, PlateSelectH);
+        var btnH = btnN;
         var btn = new TextureButton
         {
             Position = LocalToCanvas(x + PlateSelectOffX, y),
@@ -383,7 +383,9 @@ public sealed partial class ServerSelectSubView : Control
         var statusText = ResolveStatusCaption(e, out var statusColor);
         AddRowLabel(statusText, x, StatusLabelLocalY, StatusLabelW, StatusLabelH, statusColor, 4);
 
-        AddRowLabel(string.Empty, x, SpareLabelLocalY, StatusLabelW, StatusLabelH, Colors.White);
+        var loadColor = ResolveLoadGaugeColor(e);
+        var gaugeText = $"{e.Load,4} / {e.OpenTime,4}";
+        AddRowLabel(gaugeText, x, SpareLabelLocalY, StatusLabelW, StatusLabelH, loadColor, 4);
     }
 
 
@@ -438,6 +440,15 @@ public sealed partial class ServerSelectSubView : Control
         lbl.AddThemeColorOverride("font_color", color);
         HudFont.ApplyToLabel(lbl, fontSlot);
         AddChild(lbl);
+    }
+
+
+    private static Color ResolveLoadGaugeColor(ServerListEntryView e)
+    {
+        if (e.Load > PopThreshRed) return PopColorRed;
+        if (e.Load > PopThreshOrange) return PopColorOrange;
+        if (e.Load > PopThreshYellow) return PopColorYellow;
+        return PopColorGreen;
     }
 
 

@@ -105,17 +105,28 @@ public sealed class ApplicationUseCases : IApplicationUseCases
                     ?? throw new InvalidOperationException(
                         "No ILobbyClient was wired; FetchServerListAsync requires the lobby surface. spec: login_flow.md §2.");
 
-        var records =
+        var result =
             await lobby.FetchServerListAsync(cancellationToken).ConfigureAwait(false);
 
+        var records = result.Records;
         var builder = ImmutableArray.CreateBuilder<ServerListEntryView>(records.Count);
         foreach (var r in records)
             builder.Add(new ServerListEntryView(
                 r.ServerId, r.StatusCode, r.Load, r.OpenTime,
                 ClassifyLoad(r.Load), ClassifyStatus(r.StatusCode), string.Empty));
 
-        _eventBus?.Publish(new ServerListReceivedEvent(builder.ToImmutable()));
+        _eventBus?.Publish(new ServerListReceivedEvent(MapOutcome(result.Outcome), builder.ToImmutable()));
         return records;
+    }
+
+    private static ServerListOutcome MapOutcome(LobbyServerListOutcome outcome)
+    {
+        return outcome switch
+        {
+            LobbyServerListOutcome.Populated => ServerListOutcome.Populated,
+            LobbyServerListOutcome.Failed => ServerListOutcome.Failed,
+            _ => ServerListOutcome.Empty
+        };
     }
 
     public async ValueTask<LobbyChannelEndpoint> SelectServerAsync(

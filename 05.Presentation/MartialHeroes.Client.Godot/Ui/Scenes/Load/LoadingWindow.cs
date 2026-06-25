@@ -23,10 +23,10 @@ public sealed partial class LoadingWindow : Control
 
     private const float FillMaxPx = 223f;
 
-    private const float GaugeSrcULeft = 443f;
-    private const float GaugeSrcVTop = 768f;
-
-    private const float DdsHeight = 1024f;
+    private const float GaugeSrcX = 772f;
+    private const float GaugeSrcY = 443f;
+    private const float GaugeSrcW = 220f;
+    private const float GaugeSrcHFull = 549f;
 
     private const uint BgmSoundId = 920100100u;
 
@@ -60,12 +60,11 @@ public sealed partial class LoadingWindow : Control
 
     public override void _Ready()
     {
-        GD.Print("[LoadingWindow] _Ready — state-2 loading screen. spec: frontend_layout_tables.md §5.");
+        GD.Print("[LoadingWindow] _Ready — state-2 loading screen.");
 
         var bgIdx = (int)(GD.Randi() % 3u);
-        GD.Print($"[LoadingWindow] BG index={bgIdx} → {BgPaths[bgIdx]}.");
+        GD.Print($"[LoadingWindow] BG index={bgIdx} path={BgPaths[bgIdx]}.");
 
-        Size = new Vector2(RefWidth, RefHeight);
         MouseFilter = MouseFilterEnum.Stop;
 
         BuildLayout(bgIdx);
@@ -101,7 +100,7 @@ public sealed partial class LoadingWindow : Control
         _fillPx = FillMaxPx;
         UpdateFill();
 
-        GD.Print("[LoadingWindow] Worker done — starting 500 ms grace. spec §5.");
+        GD.Print("[LoadingWindow] Worker done — starting 500 ms grace.");
 
         var grace = GetTree().CreateTimer(GraceSeconds);
         grace.Timeout += OnGraceExpired;
@@ -112,7 +111,7 @@ public sealed partial class LoadingWindow : Control
         if (_gracePending) return;
         _gracePending = true;
 
-        GD.Print("[LoadingWindow] Grace expired → emitting LoadingComplete. spec §5.");
+        GD.Print("[LoadingWindow] Grace expired → emitting LoadingComplete.");
         EmitSignal(SignalName.LoadingComplete);
     }
 
@@ -175,7 +174,7 @@ public sealed partial class LoadingWindow : Control
         }
 
         _chosenTex = tex;
-        GD.Print($"[LoadingWindow] BG {BgPaths[bgIdx]} loaded ({tex.GetWidth()}×{tex.GetHeight()}).");
+        GD.Print($"[LoadingWindow] BG {BgPaths[bgIdx]} loaded ({tex.GetWidth()}x{tex.GetHeight()}).");
         _bgRect!.Texture = tex;
     }
 
@@ -183,9 +182,9 @@ public sealed partial class LoadingWindow : Control
     {
         if (_fillAtlas is null || _chosenTex is null) return;
 
-        var fillDssPx = _fillPx * (DdsHeight / RefHeight);
+        var gaugeH = _fillPx * (GaugeSrcHFull / FillMaxPx);
         _fillAtlas.Atlas = _chosenTex;
-        _fillAtlas.Region = new Rect2(GaugeSrcULeft, GaugeSrcVTop, TrackCanvasWidth, fillDssPx);
+        _fillAtlas.Region = new Rect2(GaugeSrcX, GaugeSrcY, GaugeSrcW, gaugeH);
     }
 
 

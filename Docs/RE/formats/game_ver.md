@@ -18,6 +18,11 @@
 >   while the system-info reader fetches index 3 and index 5 via fixed byte seeks (fseek 12 / fseek 20);
 >   the two paths yield the same values for the canonical 7-element file but would diverge on a
 >   non-canonical-length file. IDB anchor pinned to full SHA-256.
+>   2026-06-24 debugger-session: a live `?ext=dbg` session added a SECOND, server-side version check
+>   at enter-game (the server validates the transmitted version token and rejects on mismatch, driving
+>   the scene machine to Error → CP949 mismatch modal → quit), distinct from the documented
+>   client-local login gate; and recorded a second concrete on-disk witness (index5 = 2114 → token
+>   21149). Field-semantics caveats unchanged. See the new 'Server-side enter-game validation' section.
 > ida_reverified: 2026-06-24
 > ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > evidence: [static-ida, vfs-sample]
@@ -214,6 +219,37 @@ yields version `1` / `1`** for these two slots rather than an error. — confide
 (default-init and seek offsets); the runtime *meaning* of the two slots remains
 capture/debugger-pending.
 
+## Server-side enter-game validation (a SECOND, separate version check)
+
+Beyond the client-local login gate above, there is a **second, server-side version check at the
+enter-game step**, and it is the real enter-world blocker against the live Korean "D.O Online" server.
+The two checks are distinct and both must be satisfied:
+
+1. **Client-local login gate (this file, above).** Compares the client's own two `game.ver` copies at
+   list index 5; on mismatch shows message-box id **2204** and quits. This is purely local — it
+   never contacts the server.
+2. **Server-side enter-game validation (DEBUGGER-CONFIRMED, 2026-06-24).** On the char-select "enter
+   game" action the client computes the version token (`10 × index5 + 9`) and **transmits it in the
+   enter-game handshake**; the **server validates the transmitted token and rejects on mismatch.** When
+   the server rejects, an inbound net handler drives the scene state machine into the Error state, the
+   client raises a CP949 modal to the effect of *"client version does not match server; update or
+   reinstall"* with a confirm countdown, and the client then quits. So a client whose local copies
+   agree (and therefore passes gate 1, reaching char-select) can still be refused at enter-game by the
+   **server's** comparison against its own expected version. — confidence: DEBUGGER-CONFIRMED
+   (observed live on the `?ext=dbg` session against the live server, 2026-06-24); the server's expected
+   value and the wire framing of the rejection are owned by the protocol specs (see Cross-references).
+
+> **Concrete second on-disk sample (DEBUGGER-CONFIRMED witness, 2026-06-24).** A second real external
+> on-disk `game.ver` was read live: its 7-element u32LE list decodes to
+> `[0, 31, 35, 1028, 52, 2114, 0]`. Index 5 (`version_source`) = **2114**, so the derived enter-game
+> token is `10 × 2114 + 9 = ` **21149**. The live server expected a different version, which is exactly
+> why the enter-game step was rejected. This is the **second** concrete `game.ver` witness; it confirms
+> the layout (variable-length u32LE list, ≥ 7 elements) and the token formula once more with real
+> values. The single-sample caveat on the *other five fields'* semantics (indices 0/1/2/4/6) is
+> **unchanged** — both witnessed files happen to carry the same effective per-field shape, so there is
+> still no second *differing* value to disambiguate those fields; they remain
+> capture/debugger-pending. (This is still effectively one client build.)
+
 ## Cross-references
 
 - Related formats: `pak.md` (archive container / VFS index that holds `game.ver`).
@@ -255,3 +291,11 @@ capture/debugger-pending.
   non-canonical-length file. IDB anchor expanded to full SHA-256. Held capture/debugger-pending: the
   semantics of fields 0/1/2/4/6 and the meaning of field3. No addresses, decompiler output, or sample
   bytes crossed the firewall.
+- **2026-06-24 debugger-session (live `?ext=dbg`, IDB anchor 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee):**
+  confirmed a SECOND, server-side version check at the enter-game step (the server validates the
+  transmitted `10 × index5 + 9` token and rejects on mismatch — inbound net handler → Error scene
+  → CP949 'client version does not match server' modal → quit), distinct from and additional to the
+  client-local login gate; and recorded a second concrete on-disk witness `[0, 31, 35, 1028, 52, 2114, 0]`
+  (index5 = 2114 → token 21149). The five opaque field semantics (indices 0/1/2/4/6) remain
+  capture/debugger-pending (no second *differing* value). No addresses, decompiler output, or sample
+  bytes beyond the neutral u32 version values crossed the firewall.

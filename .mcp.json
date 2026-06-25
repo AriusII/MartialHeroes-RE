@@ -14,13 +14,6 @@
         "python",
         "godot_mcp_server.py"
       ]
-    },
-    "x32dbg": {
-      "type": "stdio",
-      "command": "python",
-      "args": [
-        "C:\\Users\\Arius\\Desktop\\xdbg\\release\\x32\\plugins\\x64dbg.py"
-      ]
     }
   }
 }

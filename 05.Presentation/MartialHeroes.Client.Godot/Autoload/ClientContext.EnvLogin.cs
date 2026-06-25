@@ -68,10 +68,11 @@ public sealed partial class ClientContext
             }
         }
 
-        if (IsAutoLoginOff(autoLoginFlag))
+        if (!IsAutoLoginOn(autoLoginFlag))
         {
-            GD.Print("[ClientContext/EnvLogin] Auto-login DISABLED (MH_AUTOLOGIN/AUTOLOGIN=0) — harness inert; " +
-                     "drive the login flow MANUALLY through the UI. spec: login_flow.md §1.");
+            GD.Print("[ClientContext/EnvLogin] Auto-login OFF (opt-in; default disabled) — harness inert; " +
+                     "drive the login flow MANUALLY through the UI. " +
+                     "Set MH_AUTOLOGIN=1 (env) or AUTOLOGIN=1 (login.creds) to re-enable. spec: login_flow.md §1.");
             return;
         }
 
@@ -110,14 +111,14 @@ public sealed partial class ClientContext
             TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
     }
 
-    private static bool IsAutoLoginOff(string? flag)
+    private static bool IsAutoLoginOn(string? flag)
     {
         if (string.IsNullOrWhiteSpace(flag)) return false;
         var t = flag.Trim();
-        return t == "0"
-               || t.Equals("false", StringComparison.OrdinalIgnoreCase)
-               || t.Equals("off", StringComparison.OrdinalIgnoreCase)
-               || t.Equals("no", StringComparison.OrdinalIgnoreCase);
+        return t == "1"
+               || t.Equals("true", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("on", StringComparison.OrdinalIgnoreCase)
+               || t.Equals("yes", StringComparison.OrdinalIgnoreCase);
     }
 
 

@@ -17,6 +17,11 @@ verification: written 2026-06-21 against the doida.exe binary (build 263bd994, f
   2026-06-24 audit: §7.4 enter-game copy sequence extended with the extra NetHandler flag byte (high
   byte of roster word 206 + boolean from field 1237) written post-send alongside descriptor/stats/level;
   semantic is capture-pending (§9 item 5). IDB SHA 263bd994 re-confirmed; no structural drift.
+  2026-06-24 debugger-session (live `?ext=dbg`, IDB SHA 263bd994): live `dbg_read` confirmed the
+  slot-record stride 880 with name@+568 (CP949), occupancy@+614, class@+620 (1=Musa/2=Salsu/3=Dosa/
+  4=Monk), default-equip ids ≈+656; observed a 3/5-occupied sample. GAP recorded: the 3/1
+  CharacterList handler did not fire while slots were populated (delivery-timing vs NetHandler-
+  persistence follow-up). See §2.1.
 scene: Character Select (engine state 4)
 evidence: [static-ida]
 capture_verified: false
@@ -111,6 +116,25 @@ character-preview sub-records based at `+0x238`** — proven by a 5-iteration in
 widget-pointer fields (zeros and `-1` "no-selection" indices). The non-array fields' widths come
 from memset lengths; their exact semantics (count vs handle vs sub-struct) want a live `dbg_read`
 of an instance to settle (§9). Proposed canonical name: `SelectWindow.char_slot_groups`.
+
+> **2026-06-24 debugger-session — live slot-record layout (DEBUGGER-CONFIRMED).** A live `?ext=dbg`
+> `dbg_read` of the SelectWindow slot array confirmed the per-slot record stride is **880 bytes
+> (0x370)** and read these in-record field positions: the **character name at +568 (CP949)**, an
+> **occupancy word at +614**, the **class word at +620** (with **1 = Musa, 2 = Salsu, 3 = Dosa,
+> 4 = Monk**), and **per-class default-equipment ids beginning ≈ +656**. Observed sample: an account
+> with **3 of 5 slots occupied** (slots 3 and 4 zeroed) — slot 0 class 1 (Musa), slot 1 class 1
+> (Musa), slot 2 class 3 (Dosa); the top-left info panel corroborated the slot-2 character's
+> power/level and saved world position. These offsets are now DEBUGGER-CONFIRMED for the live
+> SelectWindow instance (settling part of §9 item 4 for the named fields above). — confidence:
+> DEBUGGER-CONFIRMED.
+>
+> **GAP (delivery-timing follow-up).** In the same session the `3/1` CharacterList handler did **not**
+> fire a probe even though the slots were nonetheless populated — i.e. the visible slot data was
+> readable live regardless of the `3/1` path firing. This points to a
+> delivery-timing-vs-NetHandler-persistence question: confirm the exact `3/1` delivery timing relative
+> to NetHandler scratch persistence. (Consistent with §7.1: the authoritative per-slot data lives in
+> the NetHandler, and the SelectWindow slot records are readable live independent of the `3/1` handler
+> firing this run.) Flagged for follow-up.
 
 ### 2.2 Bound child-widget pointer fields
 
@@ -694,6 +718,10 @@ msg.xdb-sized captions). Hand to `re-validator` via the live `?ext=dbg` session 
    the children-visibility gate.
 4. **The non-array `SelectWindow` member semantics** (the init-only 0 / −1 fields outside the five
    `0x370` sub-records) — count vs handle vs sub-struct — want a `dbg_read` of a live instance (§2.1).
+   *(2026-06-24 debugger-session: the named slot-record fields — name@+568, occupancy@+614,
+   class@+620, default-equip ≈+656 — are now DEBUGGER-CONFIRMED at stride 880; the remaining init-only
+   non-array member semantics stay open. A new GAP was added: confirm `3/1` delivery timing vs
+   NetHandler persistence, since the slot records were readable live without the `3/1` handler firing.)*
 5. **The semantic of the extra enter-game flag byte** (§7.4) — the high byte of NetHandler roster word
    206 and the boolean from NetHandler field 1237, both written to live-player globals post-send.
    Likely a PvP/relation or appearance flag; the exact meaning is capture/debugger-pending.

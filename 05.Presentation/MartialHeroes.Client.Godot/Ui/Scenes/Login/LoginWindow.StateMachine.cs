@@ -31,7 +31,7 @@ public sealed partial class LoginWindow
         if (_curtainBot is not null) _curtainBot.Visible = true;
 
         if (_formGroup is not null)
-            _formGroup.Visible = state >= 2;
+            _formGroup.Visible = state is >= 2 and < 35;
 
         if (_credentialGroup is not null)
             _credentialGroup.Visible = state is >= 6 and <= 28;
@@ -40,11 +40,14 @@ public sealed partial class LoginWindow
             _noticePanel.Visible = false;
 
         if (_serverListRoot is not null)
+        {
             _serverListRoot.Visible = state >= 35;
+            if (state >= 35)
+                MoveChild(_serverListRoot, GetChildCount() - 1);
+        }
 
-        var serverListOpen = state >= 35;
-        if (_serverListStrip is not null) _serverListStrip.Visible = serverListOpen;
-        if (_serverListStripDeco is not null) _serverListStripDeco.Visible = serverListOpen;
+        if (_serverListStrip is not null) _serverListStrip.Visible = false;
+        if (_serverListStripDeco is not null) _serverListStripDeco.Visible = false;
 
         if (_pinYesNoPanel is not null)
             _pinYesNoPanel.Visible = false;
