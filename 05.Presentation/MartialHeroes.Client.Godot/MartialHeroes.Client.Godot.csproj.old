@@ -1,4 +1,4 @@
-<Project Sdk="Godot.NET.Sdk/4.7.0">
+<Project Sdk="Godot.NET.Sdk/4.6.3">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -21,15 +21,15 @@
       spec: PRESERVATION_AND_ARCHITECTURE.md §05.Presentation dependency rules; login_flow.md §2.
     -->
     <ItemGroup>
-        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj" />
-        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj" />
-        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj" />
+        <ProjectReference Include="..\..\01.Infrastructure.Shared\MartialHeroes.Shared.Kernel\MartialHeroes.Shared.Kernel.csproj"/>
+        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Application\MartialHeroes.Client.Application.csproj"/>
+        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Infrastructure\MartialHeroes.Client.Infrastructure.csproj"/>
         <!-- 05 -> 04.x downward: engine-free presentation lib (view-adapters, layout tables,
              coordinate/skinning math, server-record holders). NO using Godot; lives there. -->
-        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Presentation\MartialHeroes.Client.Presentation.csproj" />
-        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj" />
-        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Character\MartialHeroes.Assets.Parsers.Character.csproj" />
-        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Transport.Pipelines\MartialHeroes.Network.Transport.Pipelines.csproj" />
+        <ProjectReference Include="..\..\04.Client.Core\MartialHeroes.Client.Presentation\MartialHeroes.Client.Presentation.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Mapping\MartialHeroes.Assets.Mapping.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Character\MartialHeroes.Assets.Parsers.Character.csproj"/>
+        <ProjectReference Include="..\..\02.Network.Layer\MartialHeroes.Network.Transport.Pipelines\MartialHeroes.Network.Transport.Pipelines.csproj"/>
     </ItemGroup>
 
 </Project>
