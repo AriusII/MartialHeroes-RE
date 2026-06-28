@@ -1,9 +1,9 @@
 ---
 status: confirmed
 sample_verified: false
-verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24): upgradeitems.scr container corrected (ordered-map/tree keyed on +0x00; +0x04/+0x08 are lookup-time keys; binary wins); upgrade-result display message-db ids 33007/33008 added to §10
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+verification: confirmed (client-side routing/sizes/offsets confirmed by control flow; server-authored magnitudes and on-wire VALUE semantics capture/debugger-pending); re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); spec-audit pass (2026-06-24): upgradeitems.scr container corrected (ordered-map/tree keyed on +0x00; +0x04/+0x08 are lookup-time keys; binary wins); upgrade-result display message-db ids 33007/33008 added to §10; CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (equip/inventory/shop/upgrade handler set and slot-record model; SmsgEquipItemResult_Handler and SmsgUpgradeItemResult_Handler present and routed; ItemSlotRecord 16B, EquipTable 20×16)
+ida_reverified: 2026-06-24 (SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: resolved (4/23 two-level selector restored; 4/25 phase/count offsets re-pinned; upgradeitems.scr container key corrected this pass)
 ---

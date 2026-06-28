@@ -8,7 +8,9 @@
 > hypothesis to sample-verified this pass). Loader-control-flow facts (single auto-detecting create call,
 > separate shader-assembler path, separate surface-load path, two mounted-read mechanisms + one ad-hoc
 > overlay create site) are `confirmed` from the loader witness.
-> ida_reverified: 2026-06-24 · ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee · evidence: [static-ida, vfs-sample]
+> CYCLE 14 re-anchor (f61f66a9): 3 facts re-confirmed SAME (D3DXCreateTextureFromFileInMemoryEx 2-caller census; D3DXCreateTextureFromFileExA + non-Ex caller census; surface-load wrapper and screenshot-save caller census).
+> ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida, vfs-sample]
+> ida_reverified_prev: 2026-06-26 · ida_anchor_prev: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 > conflicts: C1 — the "200+ call sites" figure is the fan-in of the single texture **wrapper**
 > (217 distinct call sites on this build), NOT 200+ raw D3DX import calls (the D3DX import itself has
 > only 2 direct callers). Reworded below; no structural conflicts remain.
@@ -18,6 +20,7 @@
 > closed; (D) per-pool DXT census for `data/map000/texture/` added (1127 DXT1 / 117 DXT3 / 2 DXT2 /
 > 4 RAW / 3 anomalous out of 1251 files). No structural corrections; all prior offsets, strides, and
 > formulae re-confirmed.
+> refinements (2026-06-26): `kind` render-class dispatch by range confirmed (four-way: static-copy / solid-shadow / sway-small-medium / sway-large); material state for all static-object passes confirmed (alpha-blend ON, alpha-test OFF, SRCALPHA/INVSRCALPHA, two-sided for kind==2 and sway; no billboard; no alpha-to-coverage); the "kind==1=texture-animated at load / NOT mesh-swayed at render" two-axis independence confirmed. Known unknown for render dispatch RESOLVED.
 
 ## Identification
 
@@ -788,33 +791,48 @@ Verified:
 
 ### `kind` byte enumeration
 
-The `kind` byte drives two levels of dispatch. At load time, the loader uses it to select
-initialization options for the runtime texture object; separately, the `kind` value is stored
-in a parallel array for later use by the render/update loop.
+The `kind` byte drives **two independent dispatch axes** that must not be conflated:
 
-**Load-time dispatch (two-way):**
+1. **Load-time factory split** — selects which GHTex texture-object variant to initialise for the record.
+2. **Render-class split** — selects the per-frame draw bucket and mesh-sway behaviour for any `.bud` static object that references this texture record.
+
+The two axes are **independent**: kind==1 selects the texture-animated factory variant at load time but falls in the **static-copy** render class (no mesh sway). The "animated / static" labels in the load-time table below name the factory variant, not the render class.
+
+**Load-time dispatch — GHTex texture factory (two-way, CONFIRMED):**
 
 | `kind` value | Load-time behaviour | Confidence |
 |-------------:|---------------------|------------|
 | 0 | Record skipped — no texture object is initialized; entry is inactive. No kind=0 records observed in the real sample. | CODE-CONFIRMED (loader guard), SAMPLE: not present |
-| 1 | Texture initialized as **animated** (wind-sway capable). | CODE-CONFIRMED |
-| ≥ 2 | Texture initialized as **static**. | CODE-CONFIRMED |
+| 1 | Texture initialized via the **texture-animated** GHTex factory variant. | CODE-CONFIRMED |
+| ≠ 1 (including ≥ 2) | Texture initialized via the **non-animated** GHTex factory variant. | CODE-CONFIRMED |
 
-**Observed fine-grained `kind` values in the real sample (1222 records):**
+Note: "texture-animated" here means the GHTex factory path for kind==1; it describes initialization behaviour only. It does **not** imply mesh wind-sway at render time — kind==1 objects draw as static geometry (see render-class table below).
 
-| `kind` | Count in sample | Semantic category | Confidence |
-|-------:|----------------:|-------------------|------------|
-| 1 | 1100 | Animated — general ground cover, grass, and foliage | SAMPLE-VERIFIED |
-| 2 | 101 | Static — stone, moss, building surfaces, dense jungle textures | SAMPLE-VERIFIED |
-| 10 | 2 | Animated subtype — short grass (specific sway parameters) | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
-| 11 | 1 | Animated subtype — herbs / low-canopy foliage | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
-| 12 | 1 | Animated subtype — small tree | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
-| 20 | 17 | Animated subtype — large trees / heavy foliage (sway amplitude driven by XZ bounding box) | SAMPLE-VERIFIED (stored); render dispatch UNVERIFIED |
+**Render-class dispatch by `kind` range — CONFIRMED (four-way, draw-site static analysis):**
 
-Values 10, 11, 12, and 20 are stored in the per-entry kind array for use by the render/update
-loop but no render-path branch confirming their finer semantics was recovered from the loader
-function itself. Their enumeration and sway-parameter assignments are tentative pending
-analysis of the per-frame update functions.
+| `kind` range | Render class | Mesh sway | Culling in colour pass | Count in sample |
+|---:|---|---|---|---:|
+| 0x01 (1) | Static copy (else bucket) | None | D3DCULL_CW (one-sided) | 1100 |
+| 0x02 (2) | Solid/shadow bucket | None | D3DCULL_NONE (two-sided) | 101 |
+| 0x0A..0x0E (10–14) | Wind-sway small/medium | Per-vertex amplitude; vertex_count==9 path fully unrolled; sway divisor = 2 raised to (kind−10) | D3DCULL_NONE (two-sided) | 4 (shipped: 2+1+1 for kinds 10/11/12) |
+| 0x14..0x18 (20–24) | Wind-sway large | Amplitude = AABB XZ-diagonal × 0.01 × 0.5 clamped to 2.0, then divided by 2 raised to (kind−20) | D3DCULL_NONE (two-sided) | 17 (shipped: kind 20 only) |
+| all other values incl. 0x03..0x09, 0x0F..0x13, 0x19..0xFF | Static copy (else bucket) | None | D3DCULL_CW (one-sided) | 0 (range fall-through; unexercised in shipped data) |
+
+The kind==2 "solid/shadow bucket" draws in **both** the opaque colour pass and the projected-shadow pass; no sway deformation. Stone, moss, building surfaces, and dense-foliage textures fall here. Both sway ranges allocate a writable vertex deform scratch buffer; static and solid classes draw the original 32-byte vertex block directly.
+
+Shipped data exercises exactly four kind values: 1, 2, 10, 11, 12, and 20. The true client dispatch rule uses the ranges above; a hard-coded set {10,11,12,20} is correct for shipped data but incomplete as a general rule (the client accepts any kind 10–14 or 20–24 as sway).
+
+**Material and culling state — all static-object draw passes (CONFIRMED):**
+
+All static-object geometry (every kind value, every render class) draws through the same opaque world colour pass with these render states:
+
+- **ZENABLE = 1** (depth test on).
+- **ALPHATESTENABLE = 0** (alpha test **off**). There is no ALPHAREF or ALPHAFUNC on this path. Foliage cutout is achieved purely by alpha blending on the texture's own alpha channel, not by alpha testing.
+- **ALPHABLENDENABLE = 1** (alpha blend **on**); SRCBLEND = SRCALPHA (5); DESTBLEND = INVSRCALPHA (6). This is standard transparency — **not additive blend**.
+- Stage 0: colour = MODULATE2X(texture, diffuse); alpha = SELECTARG1(texture alpha). Stage 1 disabled.
+- No alpha-to-coverage. No billboard or camera-facing orientation — wind-sway deforms vertex positions in place (world-space pre-baked geometry); there is no per-object rotation matrix.
+- **FVF = 0x112** (XYZ | NORMAL | TEX1, 32-byte stride) confirmed for all static-object passes (consistent with `formats/terrain_scene.md §3.2.2`).
+- **Culling**: the static/else bucket draws one-sided (D3DCULL_CW — clockwise faces culled) under the inherited state. The FX-layer sub-draws, the kind==2 bucket, and both sway buckets (0x0A..0x0E and 0x14..0x18) draw **two-sided** (D3DCULL_NONE) in the colour pass. The projected-shadow pass uses D3DCULL_CW (one-sided) for the static and kind==2 draws.
 
 ### Path resolution rule
 
@@ -935,10 +953,7 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 - **bgtexture.lst `intFlag` field:** The first integer on each `TERRAIN/BUILDING TEXTURES` line
   is read by the scene-file parser but its purpose has not been established. It is not the
   bgtexture.lst record index.
-- **bgtexture.lst `kind` values 10/11/12/20 render dispatch:** These values are stored in the
-  per-entry kind array. The specific sway parameters or render-loop branches they trigger have
-  not been recovered from static analysis of the loader; they require analysis of the per-frame
-  terrain/building update functions.
+- **bgtexture.lst `kind` render-class dispatch:** RESOLVED (2026-06-26) — the four-way render-class dispatch by `kind` range is confirmed from draw-site static analysis; see the render-class table and material-state subsection in `§bgtexture.lst — kind byte enumeration`. Sway parameters (amplitude formula, divisor, deform scratch buffer) and culling are confirmed for all four render classes. No open item remains for shipped kind values {1, 2, 10, 11, 12, 20}.
 - **bgtexture.lst global pool vs per-area overrides:** The loader fills a single global pool
   with the hardcoded `data/map000/texture/` prefix. Whether any per-area override mechanism
   exists is unknown.

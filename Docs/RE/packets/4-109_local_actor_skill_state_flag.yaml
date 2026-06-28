@@ -7,7 +7,9 @@
 #                 flag's VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 3 fields re-confirmed SAME
+#        (Leading@0, ActorId@4 gated==local-player, Flag@8), 0 corrected.
 #   conflicts: none new. Runtime-offset hygiene applied: the live local-player destination field is NOT
 #              a wire field and is omitted; the only 4/109 wire field is the flag byte @+0x08.
 

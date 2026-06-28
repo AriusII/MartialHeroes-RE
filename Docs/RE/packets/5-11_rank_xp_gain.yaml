@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); body layout re-traced against the handler; 1 field re-confirmed SAME.
 # verification: idb sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 # CAPTURE-UNVERIFIED: routing is a static fact; the field layout is binary-confirmed. capture_verified: false.
 

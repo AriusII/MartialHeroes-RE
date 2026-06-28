@@ -8,6 +8,8 @@
 #                 is capture-pending)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: CORRECTED. The prior layout placed five contiguous u32 stats at 0x08..0x18 with CurrentXp
 #              i64 at 0x1C (and total stat+XP region 0x08..0x23). The binary refutes this: the CurrentXp

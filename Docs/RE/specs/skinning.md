@@ -68,9 +68,9 @@
 >   **SUPERSEDED by CYCLE 7**: the runtime stand slot is **column 16 (record +0x44, array A element 1)**,
 >   keyed by the **appearance key**, resolved via the **motlist.txt registry** (not `g{id}.mot`), and the
 >   slot question is RESOLVED static (col15 / element 0 is statically dead). See §8(e) and §10.
-> - **ida_reverified:** 2026-06-24 (audit pass — TWO distinct bone resolvers with different out-of-range behaviour; commit/accumulate denominator guard is a genuine `logf` call, not a decompiler mis-symbol; VB lock budget and bone-id read-width nuances recorded; all prior load-bearing facts re-confirmed with no drift)
+> - **ida_reverified:** 2026-06-26 (draw-site static re-walk — §3.6.4 per-part attach steps corrected: catalogue payload confirmed as (mesh_gid, tex_id); the attach-site pool lookup is the character/item TEXTURE registry, NOT a skeleton bind; skeleton binding occurs at .skn load time via the id_b verbatim key as documented in §4/§8(e); slot 11 head/hair confirmed as normal LBS deform overlay, NOT a rigid bone-pin attach; 2026-06-24 audit facts re-confirmed with no drift); 2026-06-27 CYCLE 14 re-anchor (f61f66a9): `coreskin.cpp` load-time assertions (total_weight!=0 @ line 294, ABS(total_weight)>DELTA @ line 306, major>=0 @ line 333) and inverse-bind bake form (conj(q_bind)·(v−t_bind) at bone+44/+56, result stored at +12/+16/+20 and +24/+28/+32) re-confirmed SAME; no corrections
 > - **spec_corrected:** 2026-06-21 (visual-oracle — `.skn` geometry height-axis = native X; +90°-Z importer remap)
-> - **ida_anchor:** 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **evidence:** [static-ida, vfs-sample, visual-oracle]
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
@@ -468,14 +468,22 @@ overlay path as every other part, not loaded as a distinct base mesh. `skin.txt`
 **build the catalogue**, not to scan a body row at draw time; at draw time the body is just slot 3 of
 the uniform overlay set.
 
-| Slot id | Outfit family | Meaning | Present on |
-|--------:|---------------|---------|-----------|
-| 3 | `202` ("b") | **BODY** (torso/legs) | every actor; sole slot in the reduced high-tier composition |
-| 4 | `203` ("p") | layer "p" | every actor |
-| 6 | `206` ("s") | layer "s" | every actor |
-| 2 | `209` ("a") | layer "a" | every actor |
-| 11 | (head / hair / face family) | head overlay | every actor |
-| 14 | (weapon) | WEAPON, hand-attached | **local player only** |
+| Slot id | Outfit family | Attach type | Meaning | Present on |
+|--------:|---------------|-------------|---------|-----------|
+| 3 | `202` ("b") | LBS deform | **BODY** (torso/legs) | every actor; sole slot in the reduced high-tier composition |
+| 4 | `203` ("p") | LBS deform | layer "p" | every actor |
+| 6 | `206` ("s") | LBS deform | layer "s" | every actor |
+| 2 | `209` ("a") | LBS deform | layer "a" | every actor |
+| 11 | (head / hair / face family) | **LBS deform** — identical code path to the body (slot 3), NOT a rigid bone-pin attach; deformed every frame by the shared pose | head / hair / face overlay | every actor |
+| 14 | (weapon) | **Rigid single-bone attach** via `ItemStaticSkin` (path family `data/item/skin/gi…`); separate bone-attach list; NOT in the deform skin list | WEAPON, hand-attached | **local player only** |
+
+Slot 11 is a normal LBS deform overlay, skinned onto the shared skeleton exactly like the body and
+other outfit layers. There is no head-bone or face-bone socket. The head/hair/face is built by the
+same per-part attach path (`ActorVisual_AttachSkinPart`, §3.6.4) and deforms every frame by the
+shared pose — see also `specs/equipment_visuals.md §4`.
+
+Slot 14 is a rigid (non-deforming) item skin placed in the bone-attach list (not the deform skin
+list), followed per frame by a resolved hand bone; see `specs/equipment_visuals.md §5`.
 
 Other actors omit slot 14 (weapon); above a per-character skin-level threshold read from the
 catalogue, the local-player path binds **only slot 3** (a reduced high-tier composition). All of a
@@ -560,6 +568,8 @@ count equals that skeleton's bone count (84/87/82/89 — exact), so the trio is 
 catalogue, ∈ `{1, 11, 16, 26, …}` for players), `[2]` catalogue slot, `[3]` a flag (0 on body rows),
 `[4]` **mesh gid** (`g{gid}.skn`), `[5]` **tex id**. The `group 0` body rows (catalogue slot 3) are
 exactly the four `202{1..}0001` meshes tabulated above (e.g. `0\t1\t3\t0\t202110001\t402110001`).
+
+> **col[3] semantic refinement (static-hypothesis — recovered 2026-06-26 from a session whose live IDB build differs from the pinned anchor; behaviors build-stable, exact offsets pending build reconciliation).** On the f61f66a9 build, column `[3]` was identified as the `gid_reduced` low-remainder term in the per-row catalogue key: `key = col3 + 1e9 × (col2 + 100 × model_class_id)`. On default body rows col3 = 0, consistent with the "mantissa zeroed" path and the existing "a flag (0 on body rows)" description. For non-default skin rows the column may carry a non-zero low-remainder value that distinguishes skin variants within the same slot-and-class group. This refines the semantic label without changing the zero-on-body-rows observation; confirm against the 263bd994 pinned build's skin.txt data before treating the low-remainder interpretation as verified.
 
 **Catalogue slot column ≠ engine equip-slot index.** The `skin.txt` catalogue-slot column (`[2]`)
 takes values `{0, 3, 4, 6, 11, 40}` in the data, with these family bindings (VFS-observed): slot 3 →
@@ -866,13 +876,21 @@ The lineup path then additionally runs `ActorVisual_RebuildLineupParts` as a sec
 
 For each deform part (slots other than the weapon), the per-part attach routine:
 
-1. Resolves the catalogue key to a `(skinId, poseId)` pair.
-2. Fetches the `.skn` from the skin cache (path `data/char/skin/g{skinId}.skn`), loading and
-   running the inverse-bind bake (§4) if not already cached.
+1. Resolves the catalogue key to a `(mesh_gid, tex_id)` pair — the two-field catalogue payload
+   from `skin.txt`: column 4 = `mesh_gid`, column 5 = `tex_id` (see §3.5.3).
+2. Fetches the `.skn` from the skin cache (path `data/char/skin/g{mesh_gid}.skn`). If not already
+   cached, the `.skn` is loaded and the inverse-bind bake (§4) is run immediately: the bake
+   resolves the skeleton by the `.skn` header's `id_b` used verbatim as the bind-pose pool key
+   (§8(e)). The skeleton binding is a **load-time** operation that happens here, inside the
+   skin cache miss, not at a separate attach step.
 3. Allocates a deform scratch vertex buffer (`32 · vertCount` bytes) and memcpys the 32-byte
    rest vertices into it.
-4. Binds the skin part to its pose skeleton by `poseId` via the bind-pose pool (`id_b` verbatim
-   key — §8(e)).
+4. Binds the texture to the skin by `tex_id` via the **character/item texture registry**
+   (`formats/texture.md §PNG — texture id registry`). The mandatory result — the resolved
+   texture object — is stored at the skin's texture slot; a null result (texture miss) causes the
+   just-built skin to be skipped before linking. Note: the registry singleton that this lookup
+   targets is distinct from the bind-pose pool; the attach-site call is a texture bind, not a
+   skeleton bind.
 5. Computes the per-mesh scale as `nodeScale · meshScale` (× optional gid-scale override if
    non-zero).
 6. Links the skin into the actor's skin list (see §3.5.4) and adds its vertex/index counts to
@@ -1692,6 +1710,10 @@ element 5 (record +0x54, column 20), and the alt-idle (motion-kind 1) is array A
 > debugger-pending" framing is superseded — the stand slot is pinned statically; whether the
 > *column-16 clip's data* animates is a separate per-asset matter, §10.2.)
 
+> **Transition and special motion-kind dispatches (static-hypothesis — recovered 2026-06-26 from a session whose live IDB build differs from the pinned anchor; behaviors build-stable, exact offsets pending build reconciliation).** Beyond the persistent-idle motion-kinds documented above (0 = stand/column 16, 1 = alt/combat/column 21, state-8 = column 20), the idle-apply routine also dispatches for transition and special motion-kind values. Motion-kinds 4, 19, and 45 — as well as the default catch-all — each draw a clip from **singleton-level tables** (indexed by the kind value combined with the actor's appearance field), NOT from the per-actor AnimCatalog record's direction array. After applying the transition clip the motion-kind byte is reset. These are transient states, not persistent idle categories; the three catalogue-record-addressed kinds (0, 1, state-8) cover all persistent idle cases that need per-class resolution. A port must guard that the transition kind-reset actually occurs, or the actor will stay locked in a transition state indefinitely.
+
+> **Avatar ground-Y resolution on idle-apply (static-hypothesis — recovered 2026-06-26 from the same session).** The idle-apply routine resolves the actor's vertical position against the terrain at the start of each idle transition, before applying any motion clip. This is the vertical counterpart to the horizontal heading placement: the heading rotation folds the actor's XZ offset into the pose root world translation (see §7, "World-PLACEMENT / HEADING convention"), while the vertical Y is sampled separately from the terrain height at the actor's XZ position (see `formats/terrain.md §5.4a`). Both steps execute when idle motion is (re-)applied, ensuring the avatar remains correctly grounded on map geometry whenever its motion state changes.
+
 ### 10.4 What is settled vs. open
 
 | Question | Verdict |
@@ -1733,3 +1755,253 @@ element 5 (record +0x54, column 20), and the alt-idle (motion-kind 1) is array A
 - **Canonical names:** see `Docs/RE/names.yaml` (`SkinFile`, `BindPoseFile`, `BndBone`, `MotionClip`,
   `BoneTrack`, `Keyframe`, `AnimationMixer`).
 - **Provenance:** see `Docs/RE/journal.md` (entry for this spec is appended separately).
+
+---
+
+## Addendum 2026-06-26 — skin-completeness (deep-dive confirmation)
+
+> **Provenance.** Promoted from a dirty-room static analysis pass (gitignored) that re-walked the
+> skin.txt catalogue loader, the in-world part factory, the per-part attach routine, and the character/item
+> texture registry boot path. No decompiler identifiers, no binary addresses appear here. The findings
+> below either confirm existing sections, correct them, or surface new confirmed facts. All corrections
+> are marked CORRECTION; all open items are explicitly bounded.
+
+### A.1 Confirmed facts
+
+**skin.txt catalogue population (confirms §3.5.3).** The skin.txt manifest loader reads a row count
+then, per row, six sequential integer fields. The payload filed in the catalogue map for each row is
+the `(col4, col5)` pair — that is, `(mesh_gid, tex_id)` — matching the §3.5.3 column assignments
+exactly. The catalogue key formula `catalog_key = gid_reduced + 1e9 * (slot + 100 * model_class_id)`
+is confirmed bilaterally: the skin.txt row builder computes it in the same form, and the per-part draw
+builder recomputes the identical key at attach time. The `model_class_id` term is
+`5 * (class + 4 * variant) - 24`, where `class` is a 16-bit field and `variant` is an 8-bit field on
+the actor — confirming the §3.5.2 formula as observed on the draw path.
+
+**reduced_gid reduction rules (confirms §3.5.4).** The non-weapon slot reduced_gid is formed by the
+base-100 composite `gid % 100 + 10000 * (gid / 10000)`. The weapon slot (14) uses a base-1000
+reduction instead (wider, involving a divisor of 1000 across several actor appearance bytes). Both
+reductions are deterministic from the slot's gid; the base-100 vs. base-1000 split is now confirmed
+at the draw-side per-part builder.
+
+**categoryBase[] aliases singleton header dwords — group 0 offset is 0 (CONFIRMS the formula for
+player rows).** The `categoryBase[]` table that feeds both the skin.txt row key and the per-part draw
+key is not a separately populated per-group offset array. The catalogue object's header dwords are:
+`[0]` unused, `[1]` = 0, `[2]` = 10000 (the gid-scale constant), `[3]` = 1000 (the high-tier
+collapse threshold). The skin.txt and actormotion loaders both index this header by `(group + 1)`.
+For the player appearance group (group 0), this reads header dword `[1]` = 0, so the
+`categoryBase` contribution to `model_class_id_term` is zero. Therefore, for all four player
+appearance rows, `model_class_id_term = col1` directly — which matches the observed values
+`{1, 11, 16, 26}` without any added offset. The "UNVERIFIED in-code table" framing of §3.5.3 and
+§3.5.5 is superseded by this finding; see CORRECTION A.2 below.
+
+**High-tier collapse threshold is a confirmed static value of 1000.** Both the in-world part factory
+driver and the lineup secondary driver gate their full part-set build on the actor's skin-level field
+(stored at a fixed byte offset on the actor object) exceeding the threshold held in the catalogue
+singleton header. That threshold is the static value 1000 (confirmed as the header dword `[3]` value
+set at singleton init). Default players have a skin-level value below 1000 and receive the full
+part set. Actors above the threshold receive only slot 3 (body).
+
+**Default per-class appearance variants (confirms the four model_class_id values).** Solving
+`model_class_id = 5 * (class + 4 * variant) - 24` for the four player values `{1, 26, 11, 16}`:
+
+| class (1..4) | default variant | model_class_id |
+|---:|---:|---:|
+| 1 (Musa) | 1 | 1 |
+| 2 (Salsu) | 2 | 26 |
+| 3 (Dosa) | 1 | 11 |
+| 4 (Monk) | 1 | 16 |
+
+`variant = 3` resolves to `model_class_id = 0`, the invisible-actor sentinel (no mesh rendered).
+This is confirmed by the char-select zoom synthesised descriptor, which sets the body-family byte to
+2 for class 2 only and to 1 for all other classes — consistent with class 2 requiring variant 2.
+
+**Per-part texture resolution and the shared texture registry.** After the per-part attach routine
+fetches the `.skn` from the skin cache, it resolves the catalogue payload's `tex_id` (col5) against
+the character/item texture registry singleton. That registry is populated at boot from five text
+tables: `data/char/tex10241024list.txt`, `data/char/tex512512list.txt`,
+`data/char/tex256512list.txt`, `data/char/tex256256list.txt`, and `data/item/texturelist.txt`. Each
+row in these tables registers a texture keyed by the numeric value of its filename (i.e.
+`atol(filename)`). Resolving `tex_id` against this registry returns the texture object, which is
+stored on the skin. Each part carries its own `tex_id` from its own `skin.txt` row; parts do not share
+a single texture.
+
+**A tex_id miss causes the part to be dropped, not rendered untextured.** If the texture registry
+lookup for a part's `tex_id` returns null, the per-part attach routine destroys the just-built skin
+object (via its release/destroy path) and returns without linking the skin into the actor's skin list.
+The part simply does not exist on the actor. This is the faithful client behaviour.
+
+**The complete in-world player deform set is eight parts, not six.** The factory in-world driver
+(`ActorVisual_RebindLocalPlayerParts`) builds the following sequence after the high-tier collapse
+check passes:
+
+| Build order | Slot | Catalogue key family | Identity |
+|---:|---:|---|---|
+| 1 | 3 | 202 ("b") | Body (torso/legs) |
+| 2 | 4 | 203 ("p") | Layer "p" |
+| 3 | 6 | 206 ("s") | Layer "s" |
+| 4 | 2 | 209 ("a") | Layer "a" |
+| 5 | 11 | (head/hair/face family) | Head / hair / face overlay |
+| 6 | 14 | (weapon, base-1000 reduction) | Weapon deform build (see §3.5.1 for the rigid weapon attach that follows) |
+| 7 | 0 | 210 (head/face family) | Head/face part — key seeded from equip-table entry 0 (equipped face item) or the family-210 default |
+| 8 | 40 | 218 (face/anim-class family) | Face/anim-class part — key seeded from the secondary 16-bit appearance field on the actor |
+
+The slot-0 and slot-40 builders are the two additional face-part builders mentioned in §3.6.2 as
+part of the in-world driver. Their catalogue keys are formed at the respective slot positions with
+their respective family bases. Each is conditional on a catalogue hit; a miss silently skips that part.
+The rigid hand-weapon-node builder runs after build #8 via `ActorVisual_AttachHandWeaponNodes`.
+
+**slot 40 / family 218 is a normal LBS deform part.** The slot-40 builder seeds its catalogue key
+from the secondary 16-bit appearance field on the actor and attaches the resolved part via the same
+`ActorVisual_AttachSkinPart` path as all other deform parts (§3.6.4). It is a full deform overlay,
+not a special case.
+
+**slot 0 / family 210 is a normal LBS deform part.** The slot-0 builder uses equip-table entry 0
+(the face slot) as its key seed when that entry carries a face item, otherwise it falls back to the
+family-210 default key. It attaches via `ActorVisual_AttachSkinPart` identically to the body.
+
+### A.2 Corrections
+
+**CORRECTION — §3.5.1 slot table is incomplete for the in-world driver.** The §3.5.1 table lists
+the in-world deform set as `{3, 4, 6, 2, 11, 14}`. This is the equip-driven body/outfit/head/weapon
+subset only. The complete in-world factory driver also builds slot 0 (family 210, head/face) and slot
+40 (family 218, face/anim-class) as full LBS deform parts beyond the six-slot set. The §3.5.1 table
+should be read as covering the equip-slot body/gear/head set; slot 0 and slot 40 are the two
+additional face-part builders confirmed in §3.6.2, and they are missing from the §3.5.1 summary row.
+The §3.6.2 in-world driver block already names these two extra face builders correctly; the §3.5.1
+summary is the gap. A port that implements only `{3, 4, 6, 2, 11, 14}` will be missing the head/face
+and face/anim-class parts — the most likely cause of a port avatar showing a headless or
+partially-missing appearance.
+
+**CORRECTION — §3.5.3 and §3.5.5 "categoryBase[] UNVERIFIED in-code table to recover".** The
+framing that `categoryBase[]` is an unrecovered per-group offset table is superseded. The index
+`this[group + 1]` reads the manifest-singleton header dwords directly: group 0 reads header
+dword `[1]` = 0. For all four player appearance rows (group 0), the base-offset contribution is 0.
+A port should treat the player/group-0 `categoryBase` contribution as 0 and not block on recovering
+a separate table. The "STILL a value-edge / do NOT invent" framing of the last paragraph of §3.5.5
+is superseded for the player group. The behaviour for groups >= 1 (which would alias the
+gid-scale constant 10000 and the collapse threshold 1000 respectively) remains open — see A.3.
+
+**CORRECTION / CLARIFICATION — §3.6.4 step 4 attachment description.** The §3.6.4 step 4
+description of the attach-site lookup as a bind calls the same routine that other sites use for
+skeleton binding. That reading is incorrect. The routine called at step 4 of the per-part attach is
+a **texture bind**: it fetches the character/item texture registry singleton and resolves by `tex_id`,
+storing the resulting texture object on the skin. The skeleton/bind-pose binding happens earlier, at
+`.skn` load (step 2), via the `id_b` verbatim key as already documented in §3.6.4 and §8(e). The
+two operations — texture bind (step 4) and skeleton bind (step 2) — use different singletons and
+different keys. A null result at step 4 causes the skin to be dropped before linking (see A.1 above);
+this is not a skeleton failure, it is a texture miss.
+
+### A.3 Still-open edges
+
+**Semantic meaning of the slot-0 and slot-40 key seeds.** The offsets and use of the slot-0
+equip-table entry 0 seed and the slot-40 secondary 16-bit appearance field seed are confirmed in the
+binary. Their gameplay semantics — what exactly "equip-table entry 0" represents as a face item
+class, and what the secondary appearance field encodes (face sub-mesh, hair variant, decoration, etc.)
+— are not confirmed. Do not invent; route to a live read or an AnimCatalog data dump.
+
+**categoryBase[] for appearance groups >= 1.** The group-0 base offset is confirmed as 0 (A.2
+above). For groups >= 1, the header aliasing means the index reads the gid-scale constant (10000)
+for group 1 and the collapse threshold (1000) for group 2. Whether any real player skin.txt rows
+use groups >= 1 is unknown; if they do, the aliased values would produce unexpected model_class_id
+terms. Verify against the actual skin.txt and actormotion.txt data before assuming player-only group 0.
+
+**Actor skin-level field semantics.** The high-tier collapse compares a byte-offset field on the actor
+against the threshold 1000. The threshold value is confirmed static (A.1 above). What drives an
+actor's skin-level field above 1000 — and what class of actors would trigger the body-only build — is
+not pinned. The effect (body-only) is confirmed; the source is not.
+
+**Slot-14 deform path vs. rigid weapon interaction.** The in-world driver runs build #6 (slot 14,
+base-1000 weapon reduction) through `ActorVisual_AttachSkinPart` and then separately runs
+`ActorVisual_AttachHandWeaponNodes`. Whether the deform slot-14 path ever resolves a catalogue entry
+and attaches a deform skin (versus always resolving as a catalogue miss), and how that interacts with
+the rigid weapon attach, is not fully separated from this analysis.
+
+**Live-debugger confirmation (non-blocking).** Breaking the per-part attach on a freshly-created
+default player and enumerating the final skin list would byte-confirm eight deform entries
+(slots 3, 4, 6, 2, 11, 14, 0, 40) plus the weapon, and confirm that a tex_id miss drops the
+corresponding part. This is a verification step only; the static evidence above is sufficient for a
+faithful port.
+
+### A.4 Port guidance — assembling a complete default player avatar
+
+To assemble a complete default in-world player avatar with no missing parts, reproduce the in-world
+factory driver in this order:
+
+1. **Compute model_class_id** as `5 * (class + 4 * variant) - 24`, using the per-class default
+   variant from the table in A.1 (class 1/3/4 use variant 1; class 2 uses variant 2). `variant = 3`
+   produces model_class_id = 0 (invisible sentinel — skip all part builds).
+
+2. **Check the high-tier collapse guard.** If the actor's skin-level field exceeds 1000, build only
+   slot 3 (body) and stop. Default players do not trigger this guard.
+
+3. **Build eight deform parts** in the order below. For each, compute the catalogue key, resolve the
+   `(mesh_gid, tex_id)` payload, load `data/char/skin/g{mesh_gid}.skn`, resolve `tex_id` from the
+   shared texture registry, and attach via the standard LBS deform path (§3.6.4):
+
+   | Build # | Slot | gid reduction | Key seed |
+   |---:|---:|---|---|
+   | 1–5 | 3, 4, 6, 2, 11 | base-100: `gid % 100 + 10000 * (gid / 10000)` | equip-table gid for the slot |
+   | 6 | 14 | base-1000 | actor appearance bytes via 1000-divisor composite |
+   | 7 | 0 | base-100 | equip-table entry 0 (face item) if present, else family-210 default |
+   | 8 | 40 | base-100 | secondary 16-bit appearance field on the actor |
+
+   For the player group (group 0), the `categoryBase` contribution is 0; the catalogue key formula
+   from §3.5.3 applies directly with no added offset.
+
+4. **For each part: if tex_id does not resolve in the texture registry, drop the part** — do not
+   render it untextured. This matches faithful client behaviour and prevents untextured mesh artifacts.
+
+5. **Attach the rigid weapon** via `ActorVisual_AttachHandWeaponNodes` after all deform parts (§3.6.4).
+
+6. **The missing slot-0 and slot-40 parts** are the most probable cause of a port avatar showing
+   missing or truncated appearance. Verifying that both resolve to a catalogue entry and a valid
+   tex_id (by consulting the actual skin.txt data for the class) is the first diagnostic step for a
+   headless or partially-missing avatar.
+
+7. **Texture registry boot.** Ensure the texture registry is populated from all five lists before any
+   per-part attach runs: `tex10241024list.txt`, `tex512512list.txt`, `tex256512list.txt`,
+   `tex256256list.txt` (each under `data/char/`) and `data/item/texturelist.txt`. Each row's numeric
+   filename value is the registry key; the texture object lives in the resolution-appropriate directory.
+
+### A.5 Proposed names.yaml additions
+
+The following canonical names are proposed for `Docs/RE/names.yaml`. They do not appear here as
+committed names; this is an escalation for the orchestrator/RE domain to record:
+
+- `Skin_BindTextureById` — the attach-site routine that fetches the character/item texture registry
+  and resolves a texture by its numeric id, storing the result on the skin. Previously described as a
+  bind-pose routine; the correct semantic is a texture bind.
+- `CharItemTextureRegistry_GetSingleton` — the singleton accessor for the character/item texture
+  registry (holds `GHTex` texture objects keyed by numeric filename id; distinct from the bind-pose
+  pool).
+- `ActorVisual_BuildHeadFacePart_Slot0` — the slot-0 / family-210 head/face builder; seeds the
+  catalogue key from equip-table entry 0 (or the family-210 default).
+- `ActorVisual_BuildFaceAnimPart_Slot40` — the slot-40 / family-218 face/anim-class builder; seeds
+  the catalogue key from the secondary 16-bit appearance field.
+
+### A.6 Spec update targets
+
+The corrections and confirmed facts in this addendum point to the following committed-spec update
+locations (to be applied when the respective section is next revised):
+
+- **§3.5.1 slot table** — add slot 0 (family 210, head/face, LBS deform) and slot 40 (family 218,
+  face/anim-class, LBS deform) to the complete visible set for the in-world driver; note they are
+  absent from the six-slot equip-slot subset and present in the full in-world factory driver.
+- **§3.5.3 and §3.5.5** — replace the "categoryBase[] UNVERIFIED in-code table to recover" framing
+  with the singleton header aliasing fact; clarify that group 0 contributes 0 and model_class_id_term
+  equals col1 directly for player rows.
+- **§3.6.2 in-world driver block** — reaffirm that the two additional face-part builders ARE part of
+  the complete in-world set (slot 0 / family 210 and slot 40 / family 218); these were already named
+  in the prior §3.6.2 text but should be reconciled with the corrected §3.5.1 table.
+- **§3.6.4 step 4** — reaffirm that the attach-site lookup is a texture bind (not a skeleton bind);
+  make explicit that a tex_id miss causes the part to be dropped via the skin release path, never drawn
+  untextured.
+- **`Docs/RE/formats/texture.md`** — add a section on the five-list character/item texture registry:
+  its boot population from the five lists, the numeric-filename keying convention, and the tex_id
+  resolution path used by `Skin_BindTextureById` (proposed name, A.5). This registry is currently
+  only referenced indirectly via §3.5.3's `formats/texture.md` citation.
+
+Hand-off note for `godot-character-specialist`: the complete-avatar assembler guidance in A.4 above
+is the authoritative input for bringing missing head/face parts into the Godot character render. The
+slot-0 and slot-40 deform parts are the expected gap; confirm each resolves to a catalogue entry and
+a valid tex_id in the actual skin.txt data before concluding the part is absent from the VFS.

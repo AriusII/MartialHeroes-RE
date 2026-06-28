@@ -10,6 +10,9 @@ verification: written 2026-06-25 against doida.exe binary (IDB SHA 263bd994). So
   Cross-referenced to: structs/gucomponent.md (GUComponent base layout), structs/guwindow.md
   (GUTextureList ownership), specs/ui_system.md (widget framework overview), scenes/login.md
   (login-scene atlas and label usage), scenes/charselect.md (charselect usage + 15-slot font summary).
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: shared — all frontend scenes (engine states 1, 2, 3, 4)
 evidence: [static-ida, debugger-confirmed-g2]
 capture_verified: false

@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 8 items re-confirmed SAME (apply-gate body[8]==1; 7 parallel 50-entry arrays: MemberIds, OnlineFlagsA, MemberNames, OnlineFlagsB, PointsContrib, DwordF, DwordG), 0 corrected.
 # CAPTURE-UNVERIFIED VALUE semantics; the 1812-byte block size and the header + parallel-array
 # layout are control-flow CONFIRMED from the full-sync apply routine's read order (a single literal
 # 50-trip loop with disasm-pinned per-array strides + two independent fixed 0x714 copies).

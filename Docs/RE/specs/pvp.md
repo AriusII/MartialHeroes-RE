@@ -9,8 +9,9 @@ verification: pvp/fame/public-peace/faction presence-and-absence findings [confi
   generic confirm-dialog category and never reads the stat directly) — recorded as an open question.
   RUNTIME-ONLY: the on-wire VALUE meanings (the public-peace zone semantics, the brood-war side
   contract values, the fame cost/charge) stay capture/debugger-pending.
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-20
+ida_reverified: 2026-06-27
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -18,6 +19,7 @@ note: |
   two-side-faction material from dirty-room analyst notes. The FATE bonded-relationship system itself
   is owned by social.md and only cross-referenced here (FATE rivalry is the relation-type that touches
   PvP). The raw fame currency offset is left explicitly OPEN/UNVERIFIED — not invented.
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: nicktofame.scr data-table string present and cleanly relocated, fame spend-side reputation subsystem intact. Raw fame currency offset remains OPEN/UNVERIFIED (unchanged). 1 re-confirmed SAME, 0 corrected.
 -->
 
 # PvP — Fame, Public-Peace, PK Mode & Two-Side Faction — Clean-Room Specification

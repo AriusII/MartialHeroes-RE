@@ -1,3 +1,7 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the handler (SmsgGmChatMessage); 4 layout facts re-confirmed SAME (ChatType u8 @0,
+# TextLength u32 @1, Text bytes @5, fixed channel-13 routing); 0 corrected. Value-semantics note:
+# ChatType is read but routes on fixed channel 13 in this build rather than using it as a tint selector.
 name: SmsgGmChatMessage
 opcode: 0x3c350           # major 3, minor 50000 -> (3 << 16) | 50000
 direction: S2C

@@ -15,8 +15,9 @@ verification: confirmed (per-part rebuild model, GID formulas + the digit→lane
   opcode pair, the on-wire framing of the slot-type / skip-visual bytes, the `weapon_effect_grade ↔
   static enchant level` mapping, the subtype 53-vs-55 meaning, the per-tier glow VISUAL and the tooltip
   loc-strings).
-ida_reverified: 2026-06-24   # spec-audit pass: asset-chain anchor strings (skin.txt, actormotion.txt, motlist.txt, bindlist.txt) confirmed present; upgrade/equip UI region confirmed; load-bearing in-memory visual-object offsets carried as CYCLE-11-confirmed (not re-located this pass); no drift found
-ida_anchor: 263bd994
+ida_reverified: 2026-06-26   # draw-site static re-walk: weapon rigid-attach hand-bone resolution mechanism confirmed (per-(actor-mode,hand) tables on ActorVisual singleton; ROW = (model_class_id-derived base + subtypeOffset) % 40; COLUMN from main/off-hand flag and alt-attack-mode; concrete bone id is data-driven, DBG-PENDING value unchanged); weapon attach local position offset confirmed FORCIBLY ZEROED (weapon origin = hand bone world origin); slot-14 character-skin weapon-family BuildPart confirmed distinct from held rigid item-skin; slot 11 confirmed as normal LBS deform (not bone-pin); no structural conflicts
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — userjoint.txt loader wired to CharManifest_LoadAll cleanly relocated; §3.4 hand-bone singleton table source identification confirmed present. 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]
 conflicts: none open. RECON#F4 RESOLVED the prior off-hand-flag inversion — the off-hand node carries
@@ -266,6 +267,8 @@ or by a runtime init path not yet reached — remains **DEBUGGER-PENDING**. This
 the main-hand node carries **node flag 2**; the off-hand node carries **node flag 1** (§5.1 —
 unchanged, included here for completeness).
 
+> **`data/char/userjoint.txt` identified as the singleton table source (static-hypothesis — recovered 2026-06-26 from a session whose live IDB build differs from the pinned anchor; behaviors build-stable, exact offsets pending build reconciliation).** The boot-time loader for the ActorVisual singleton's hand-bone columns was identified as a previously unnamed function (proposed canonical name `UserJointTable_LoadFromTxt` — flagged for `names.yaml` via orchestrator). It reads `data/char/userjoint.txt`: for each entry it reads a row index and stops when that index is 41 or greater, so at most 41 rows (indices 0..40). For each row it writes four integer bone-ids into the four column positions of the singleton: column 0 → singleton column `+902` (alt-attack main-hand); column 1 → `+903` (alt-attack off-hand); column 2 → `+904` (normal main-hand); column 3 → `+905` (normal off-hand). These map exactly to the four columns §5 reads per frame. The source file and table shape are therefore identified; the **concrete numeric bone-id values per row are data-pending** (resolved by reading the VFS `userjoint.txt` or reading the live singleton after boot). This resolves the "whether a non-zero id is supplied by the `.skn` attach metadata or a runtime init path not yet reached" uncertainty: the non-zero bone-ids come from `userjoint.txt` at boot, not from `.skn` attach metadata. The DBG-PENDING status for the concrete per-row values is unchanged.
+
 ---
 
 ## 4. Part attach and the one shared skeleton
@@ -307,7 +310,9 @@ skeleton obeys.
 ## 5. Weapon-in-hand: bone attach, dual / two-hand
 
 **Confidence: CODE-CONFIRMED for the structure, the node-flag discriminator, the bone-id attach
-mechanism, and the scalar scale; DBG-PENDING for the concrete hand bone-id value.**
+mechanism, the hand-bone table lookup formula, the zeroed local position offset, and the scalar
+scale; DBG-PENDING for the concrete hand bone-id numeric value (data-driven from the ActorVisual
+singleton tables).**
 
 The hand/weapon-attach builder (called by the local-player rebuild) is responsible for hanging the
 weapon model on the skeleton:
@@ -322,32 +327,60 @@ weapon model on the skeleton:
    | `1`, `4`, `10` | `+2` |
    | `2`, `5`, `8`, `11` | `+3` |
    | `3`, `6`, `9`, `12` | `+4` |
-   | `7` | `+2`, plus an attack-mode refresh and an **early build** branch (special-cased) |
-   | `45` | `+1` |
+   | `7` | `+2`, plus an attack-mode refresh and a joint-effect special-case |
+   | `45` | `+1` (alt-attack-mode gated) |
    | `> 45` | no shift |
 
-3. The weapon model is attached to a **single bone** by inserting the weapon node into the visual's
-   **bone-attach list** at `Visual+1376`. The bone is selected by a numeric **bone-id stored on the
-   attach-host node** — there is **no bone-name string** in the binary. Each frame the renderer
-   resolves that id to a bone record in the loaded `.bnd` pose by the `.bnd` id-offset convention
-   (bone records are an **88-byte** stride, addressed relative to the first bone's self-id — the same
-   convention `specs/skinning.md` documents for `.skn` weights and `.mot` tracks), then composes the
-   host's world from that bone as a **rigid follow**: host position = bone-rotation applied to the
-   host's local offset, plus the bone translation; host rotation = bone-rotation composed with the
-   host's local rotation. The per-weapon grip geometry then comes from the weapon `.skn`'s
-   **attach-set** (a set of records each placed relative to the host: position = host-rotation applied
-   to the record's local offset **scaled by `Visual+100`**, plus the host position). So `Visual+100`
-   is a single **scalar scale** (not a matrix, not identity) applied to the attach-set offsets, and
-   the grip placement is asset data from the `.skn`, not code.
+   This `item_subtype`-derived shift is the `subtypeOffset` in the hand-bone table lookup below.
 
-   > **DBG-PENDING (one runtime value).** The host node is constructed with the default bone-id `0`
-   > (the root/first bone) and no static write to that id is reachable on the build path, yet the
-   > per-frame compose unconditionally resolves a bone by it. So either the weapon genuinely hangs
-   > from the root and the grip is carried entirely by the `.skn` attach-set offsets, or the `.skn`
-   > attach metadata sets a hand-bone id at load. Distinguishing these — and naming the hand bone —
-   > needs a live read of the host node's bone-id with a weapon equipped. The same value (off-hand vs.
-   > main-hand bone-id) is the only DBG-PENDING item for the dual-weapon case below; both default to
-   > `0` statically.
+3. The weapon model is attached to a **single bone** by inserting the weapon node into the visual's
+   **bone-attach list** at `Visual+1376`. The bone is selected by a numeric **bone-id** that is
+   resolved from per-(actor-mode, hand) tables held on the global `ActorVisual` singleton and stamped
+   onto the host node. **Hand-bone table lookup mechanism (CODE-CONFIRMED):**
+   - `base` = `5 × (class + 4 × variant) − 24` (the standard `model_class_id` formula, §3.2 of
+     `specs/skinning.md §3.5.2`), derived from the visual's class and variant fields.
+   - `ROW` = `(base + subtypeOffset) mod 40`, where `subtypeOffset` is the `item_subtype`-derived
+     shift from step 2 above (0, 1, 2, 3, or 4).
+   - `COLUMN` = selected by the node's hand flag (node flag 2 = main-hand, node flag 1 = off-hand)
+     and the current alt-attack-mode state: alt-attack-mode active → singleton columns `+902`
+     (main-hand) / `+903` (off-hand); normal mode → singleton columns `+904` (main-hand) / `+905`
+     (off-hand). The stride is 4 bytes per ROW.
+   - The result — the numeric bone id at that table cell — is written onto the host node. The
+     singleton tables are populated at boot from `data/char/userjoint.txt` (≤41 rows, 4 int32
+     bone-ids per row — static-hypothesis, 2026-06-26; see §3.4 for the table structure and the
+     loader identification), so the **concrete numeric bone id per row is data-pending** (read
+     from the VFS file or from the live singleton after boot). There is **no bone-name string**
+     in the binary.
+
+   Each frame the renderer resolves that bone id to a bone record in the loaded `.bnd` pose via the
+   88-byte-stride `id − base_id` resolver (`specs/skinning.md §3.2`), then composes the host's
+   world as a **rigid follow**:
+   - **Orientation**: `host_world_quat = bone_world_quat ⊗ attach_local_quat`, where
+     `attach_local_quat` is a per-attach-point local rotation quaternion. The concrete value of
+     `attach_local_quat` is **OPEN** (assignment site not located in the attach builder; do not
+     assume identity without a live read or follow-up static trace).
+   - **Position**: **the attach local position offset is forcibly zeroed** in the weapon compose
+     path — `host_world_pos = bone_world_trans` (the hand bone's world origin, no positional
+     offset added). The grip geometry is then placed by the weapon `.skn`'s **attach-set** (a set
+     of records placed relative to the host: position = `host_world_quat` applied to the record's
+     local offset **scaled by `Visual+100`**, plus `host_world_pos`).
+   - `Visual+100` is a single **scalar scale** (not a matrix, not identity) applied to the
+     attach-set offsets; per-node scale = the actor import scale.
+
+   > **DBG-PENDING (concrete hand bone-id).** The hand bone id comes from the attack-mode/hand tables
+   > on the `ActorVisual` singleton (mechanism confirmed above). The concrete numeric id for each
+   > (class, weapon-subtype, hand, attack-mode) combination is data-driven from those tables and
+   > requires a live read to pin. A port must not hard-code bone id 0; use the table mechanism or
+   > obtain the concrete id via a live debug session.
+
+**Slot-14 character-skin weapon-family part (CONFIRMED, semantics OPEN).** In addition to the
+rigid item skin described above, the per-part builder also builds a catalogue entry keyed with the
+base-1000 weapon-family reduction (catalogue key = `1e9 × (14 + 100 × model_class_id)` with the
+gid term zeroed). This produces a **separate character-skin deform part** in the deform skin list,
+distinct from the held rigid item `StaticSkin`. It is most likely a holstered/back/sheath
+character-skin variant; the concrete semantics are **OPEN** — do not invent them. Player-kind
+gate: the weapon rigid-attach and this weapon-family deform part both run only when `visual+96==1`
+(player-kind).
 
 ### 5.1 Single vs. dual / two-hand weapons
 
@@ -546,7 +579,9 @@ These corroborate `structs/item.md`; offsets are within the item-actor object.
 
 | Item | Status | Impact |
 |---|---|---|
-| Which **named bone** the weapon hangs from | PLAUSIBLE — the bone index is a runtime value from the loaded `.bnd`; needs a sample skeleton + a trace to name the hand/weapon bone | Get it wrong and the weapon floats off the hand; resolve against a real `.bnd` before placing weapons |
+| Which **named bone** the weapon hangs from | Mechanism CODE-CONFIRMED; table source IDENTIFIED (static-hypothesis, 2026-06-26); concrete values DBG-PENDING. The hand-bone table lookup mechanism is confirmed (ROW = (model_class_id-base + subtypeOffset) mod 40; COLUMN by main/off-hand flag and alt-attack-mode; singleton columns +902/+903/+904/+905). The **table source** is `data/char/userjoint.txt` (≤41 rows, 4 int32 bone-ids per row — static-hypothesis; see §3.4); the **concrete numeric bone-id per row** is data-pending (read from the VFS file or the live singleton after boot). Do not hard-code bone id 0. | Get it wrong and the weapon floats off the hand; read `userjoint.txt` from the VFS or resolve via a live debug session |
+| `attachLocalQuat` (per-attach-point local rotation quaternion) | OPEN — assignment site not located in the attach builder; do not assume identity | May affect weapon grip orientation; needs a follow-up static trace or live read |
+| Slot-14 character-skin weapon-family deform part semantics | OPEN — confirmed as a separate character-skin deform part in the deform list (base-1000 catalogue key, player-kind gated); likely holster/sheath; semantics not confirmed | Non-blocking for held weapon rendering |
 | ~~Off-hand discriminator~~ | **RESOLVED on `263bd994` (RECON#F4)** — off-hand node flag = `1`; flag `2` selects the **main-hand** columns (§5.1). Was inverted in the prior doc. | Affects dual-wield; the correct flags are now in §5.1 |
 | Appearance digit → **lane** wiring (`+150 / +160 / +168`) | CODE-CONFIRMED — the digit→lane wiring is read straight off the single visual-part builder routine | The GID formulas + the exact 64-bit key packing (§3.2) + which appearance byte feeds which lane are exact |
 | Appearance digit → **human name** (`+150 / +160 / +162 / +168`) | PLAUSIBLE — inferred from the `5·(hair + 4·class) − 24` packing, not from a labelled table | Only the *naming* of each digit's role is uncertain; the wiring above is exact |

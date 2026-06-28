@@ -31,6 +31,10 @@ public static class ActormotionParser
 
     public static readonly uint[] CategoryBase = [0, 0, 10000, 1000];
 
+    static ActormotionParser()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
 
     public static ActormotionCatalogue Parse(ReadOnlyMemory<byte> fileBytes)
     {
@@ -53,7 +57,6 @@ public static class ActormotionParser
 
     public static ActormotionCatalogue Parse(ReadOnlySpan<byte> fileBytes, ReadOnlySpan<uint> baseTable)
     {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
         var cp949 = Encoding.GetEncoding(949);
 
         var text = cp949.GetString(fileBytes);

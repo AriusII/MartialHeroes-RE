@@ -1,4 +1,8 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): body layout re-traced against the handler; 9 fields
+# (HeaderPad0 bytes[4]@+0, ActorKey u32@+4, NameArrayA bytes[136]@+8, FlagsA bytes[8]@+144,
+# TitleString bytes[17]@+152, TitleFlag u8@+169, NameArrayB bytes[204]@+170, FlagsB bytes[12]@+374,
+# TailPending bytes[14]@+386) re-confirmed SAME, 0 corrected.
 # CONTROL-FLOW CONFIRMED: routing + fixed 400-byte (0x190) size + the consumer's wire walk (an actor
 # key, two CP949 record arrays of 8 and 12 entries with parallel flag vectors, a title string).
 # VALUE semantics of individual bytes PENDING. capture_verified: false.

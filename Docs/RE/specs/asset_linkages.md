@@ -9,8 +9,8 @@
 >               re-verification pass. Every individual link below is documented (and
 >               sample/parser-verified) in its source format spec; this file is the JOIN map that
 >               stitches them into the six working subsystems.
-> ida_reverified: 2026-06-21   # CYCLE 8: the six subsystem join-chains + the VFS-mount/boot-corpus assembly story re-confirmed coherent (no orphan format, no missing loader); world-entry replay closed in resource_pipeline.md
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — six asset-join subsystems / msg.xdb / bgtexture strings cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-21: CYCLE 8 six-chain coherence re-confirmed, world-entry replay closed in resource_pipeline.md
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample] (per-format), [cross-format-synthesis] (this doc)
 > conflicts: none unresolved. Where a hint in the synthesis brief disagreed with the binary (e.g.
 >            ".ion descriptor", ".sod.pre as a runtime input"), the binary wins and the correction

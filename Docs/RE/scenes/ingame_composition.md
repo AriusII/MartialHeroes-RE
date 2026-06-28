@@ -11,6 +11,9 @@ verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994,
   open-test is the +136 & +140 pair; type-6 HUD action-id group 0x270..0x275 with the wire-touching
   click). The generic per-frame render machinery is NOT re-derived here — it lives in
   specs/rendering.md (this dossier maps how the in-game scene USES it).
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: In-game / World (engine state 5)
 evidence: [static-ida]
 capture_verified: false

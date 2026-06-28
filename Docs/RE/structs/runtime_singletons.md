@@ -1,7 +1,10 @@
 ---
-verification: confirmed (re-confirmed against IDB SHA 263bd994, actor-world audit (2026-06-24))
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+verification: confirmed (re-confirmed against IDB SHA 263bd994, actor-world audit (2026-06-24));
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27, static IDA only): 2 facts re-confirmed SAME
+  (GameState Meyers-singleton 3-int record layout with debug_mode at +0x0C, and build-delta
+  globals confirmed at their uniformly shifted positions without behavioural change), 0 corrected
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: Renderer object (§4) and 16-slot render pointer-cache (§4.1) not re-walked this pass (static-hypothesis); NetClient inner field offsets (§3.3) and ActorManager inner fields (§3.7) carried from prior dirty note (static-hypothesis); keepalive interval UNIT (ms vs s) and several MainWindow service-slot identities (§3.10) static-hypothesis. 2026-06-17 Campaign-17 re-confront (263bd994): the MainWindow +0x500 write is now CODE-CONFIRMED, and its occupant is a distinct ~0xC8-byte state-5 command handler (NOT the 16-byte MainHandler hub) — §3.10 / §3.10a / §6 corrected. 2026-06-20 CYCLE 7: display FRAMERATE config inertness RESOLVED — statically exhaustive (the only two references to the config field are both stores, no reader), so the 60 FPS cap is confirmed hardcoded/inert (§16); the Diamond base-object layout (§3.0) is added
 status: code-confirmed

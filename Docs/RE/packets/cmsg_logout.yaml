@@ -6,6 +6,9 @@
 #   no-net-busy-latch:   confirmed   (unique among major-1: the +82364 latch store is absent)
 #   wire VALUE semantics: n/a        (header-only frame; no payload bytes carry meaning)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): builder re-traced; header-only body (0B payload),
+#        major=1/minor=0, no net-busy latch (unique among major-1) -- re-confirmed SAME, 0 corrected.
 #   conflicts: none (cmsg_logout.yaml re-confirmed ACCURATE)
 
 name: CmsgLogout

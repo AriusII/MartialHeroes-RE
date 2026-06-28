@@ -1,4 +1,7 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the handler (SmsgShopPageUpdate); 3 layout facts re-confirmed SAME (Money u32 @0x00,
+# single-u32 read, player-state store + panel repaint trigger); 0 corrected.
 # CAPTURE-UNVERIFIED on the wire; the single-u32 read + the repaint trigger are control-flow
 # CONFIRMED from the inbound handler. capture_verified: false.
 #

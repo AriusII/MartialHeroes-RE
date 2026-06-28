@@ -4,9 +4,10 @@ sample_verified: false
 build: 263bd994   # static-recovered on doida.exe build 263bd994 (Campaign 7 Wave B)
 subsystems: [receive_dispatch, handler_table_install, netclient_lifecycle, connection_state, pipeline_placement]
 networked: yes
-verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read")
+verification: routing/sizes [confirmed] (routing opcode->handler, frame-header layout, packet read sizes, struct field offsets, table bases, install counts, pipeline-stage placement are all control-flow-confirmed on anchor 263bd994) · evidence [static-ida] · value-semantics [capture/debugger-pending] (every packet field VALUE SEMANTICS, the connection-state code meanings 201/202/203/232, the keepalive on-wire cadence, the inbound-cipher-omission generalised across all inbound types) · static-hypothesis (the blanket "every installed handler opens with a bounded read") · CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 3 facts re-confirmed SAME (Net_DispatchInboundByMajorMinor, Response installer, Push installer); 1 corrected (NetHandler_GetSingleton mislabeled ActorManager_GetSingleton_0 in live IDB — confirmed by structural signature, rename pending)
 ida_reverified: 2026-06-24   # network-dispatch audit (263bd994): §1.4 (0,0) branch step-3 corrected — sets suppress latch at +0x141BC, not a distinct key-exchange-complete flag; §4.5a 5/146 system-message resolved to string id 51027 (was capture-pending); 2/146 reply local_counter sourced from 16-bit global counter/state; §4.4a recv buffer geometry added (buffer at conn+100, fill at dword[23], consumed at dword[24], 4 events at dwords 20512-20515, IO-thread handle at dword[20548]); §5.1 10001 timer two-interval fact confirmed (5000 ms / 10000 ms on state-2 non-clear branch, not a single ~5000 ms). Prior: CYCLE 8 2026-06-21
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): dispatch architecture facts re-confirmed SAME (Net_DispatchInboundByMajorMinor, Response+Push table installers, table bases, slot counts). 1 corrected: NetHandler_GetSingleton mislabeled ActorManager_GetSingleton_0 in live IDB due to cross-build collision; confirmed by sole-caller-of-NetHandler_ctor structural signature; rename pending (ida-toolsmith)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: RESOLVED this pass — (a) major-0 is a hardwired (0,0) handshake branch, NOT an inline switch (doc reworded); (b) install raw-store counts corrected to Response 102 / Push 65 (was 101/66; derived counts unchanged: 100 Response slots / 99 distinct handlers / 2 NULL slots 0,27 / one live default); (c) keepalive duality recorded — the ctor-armed (2,10000)@20s frame AND the runtime C2S 2/112 toggle are BOTH real, neither's on-wire cadence pinned (capture-pending). CYCLE 2 EXTENSION (2026-06-19): (d) THREE-thread model resolved; (e) 2/10000 body = 4 bytes; (f) Response/Push install slot maps folded in (§2a/§2b); (g) 5/146→C2S 2/146 ack-request handshake recorded; (h) {202/203/232} 3/100 codes prime GameState=2; (i) PHANTOM REFUTED — no 5000/10000/10001 string-id class. 2026-06-24 network-dispatch audit: (j) §1.4 step-3 corrected — (0,0) branch sets suppress latch +0x141BC, not a separate key-exchange-complete flag; (k) §4.5a 5/146 system-message string id resolved to 51027; (l) §5.1 10001 timer two-interval fact (5000 ms / 10000 ms); (m) §4.4a recv buffer geometry added
 ---
@@ -406,6 +407,16 @@ in-process layout facts with no wire effect.
 The handler object is reached through a **singleton accessor**: the first caller constructs the
 object (and registers its teardown for process exit), and every later caller receives the same
 instance. This is the conceptual pattern; no offsets-as-addresses are recorded.
+
+> **IDB label note (build f61f66a9, CYCLE 14 re-anchor).** The network-handler singleton accessor
+> function is confirmed on the new build by its structural signature: a first-call guard that, on
+> the initial invocation, constructs the network-handler object via its dedicated constructor and
+> registers the destructor for process exit, then on every call returns the cached instance. This
+> is the textbook first-call-guard singleton accessor pattern. In the live IDB for build f61f66a9
+> the function is **mislabeled** due to a cross-build naming collision in the names.yaml rebuild;
+> the correct canonical name is `NetHandler_GetSingleton`. A corrective rename is pending
+> (ida-toolsmith, CYCLE 14). *([confirmed] structure and identification; the mislabel is an IDB
+> artifact with no effect on the described behavior.)*
 
 ---
 

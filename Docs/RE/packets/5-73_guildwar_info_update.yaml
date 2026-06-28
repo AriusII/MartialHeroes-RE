@@ -1,4 +1,7 @@
 # SUPERSEDED / REDIRECT -- do NOT implement from this file.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; redirect confirmed intact --
+# no guild-war handler exists at 5/73; opcode routes to SmsgQuestComplete (5-73_quest_complete.yaml),
+# re-confirmed SAME, 0 corrected.
 #
 # BINARY-WINS CORRECTION (CYCLE 4 netcode-deep): opcode 5/73 was catalogued here as
 # SmsgGuildWarInfoUpdate. A fresh instruction-level reading of the 5/73 handler refutes that: the

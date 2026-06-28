@@ -14,7 +14,9 @@
 ```
 verification:   parser-verified (absence proof) + sample-verified (layout only)
 ida_reverified: 2026-06-24
-ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27
+# CYCLE 14 re-anchor (f61f66a9): confirmatory - descript.ion confirmed not loaded (zero .ion / descript.ion literals); bmplist.lst path present and cleanly relocated, 1 re-confirmed SAME, 0 corrected
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida (absence proof), vfs-sample]
 conflicts:      none-open
 # Runtime-DEAD is parser-verified: an exhaustive string + raw-byte scan of the shipped client

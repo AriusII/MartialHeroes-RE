@@ -12,7 +12,9 @@ verification: sample-verified (every documented format re-decoded against the re
               coherently); a handful of field semantics remain capture/debugger-pending;
               re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+cycle_14_note: CYCLE 14 re-anchor (f61f66a9): confirmatory - all documented .xdb/.sc variants present and cleanly relocated; msg.xdb scene-state-machine reference intact; mobinfo.mi dead status unchanged (zero hits in string store), 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: (RESOLVED, CYCLE 7) mobinfo.mi field6 (was portrait_res_3) — RESOLVED: mobinfo.mi is
            DEAD in build 263bd994 (confirmed not read — no loader, no path literal, not in the

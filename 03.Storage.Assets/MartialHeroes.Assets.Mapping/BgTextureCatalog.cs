@@ -13,9 +13,12 @@ public sealed class BgTextureCatalog
 
     private readonly string?[] _relPathBySlot;
 
-    private BgTextureCatalog(string?[] relPathBySlot)
+    private readonly byte[] _kindBySlot;
+
+    private BgTextureCatalog(string?[] relPathBySlot, byte[] kindBySlot)
     {
         _relPathBySlot = relPathBySlot;
+        _kindBySlot = kindBySlot;
     }
 
     public int SlotCount => _relPathBySlot.Length;
@@ -30,12 +33,16 @@ public sealed class BgTextureCatalog
         ArgumentNullException.ThrowIfNull(parsed);
 
         var slots = new string?[parsed.Count];
+        var kinds = new byte[parsed.Count];
         foreach (var record in parsed.Records)
+        {
             slots[record.Index] = record.RelPath.Length == 0
                 ? null
                 : record.RelPath;
+            kinds[record.Index] = record.KindRaw;
+        }
 
-        return new BgTextureCatalog(slots);
+        return new BgTextureCatalog(slots, kinds);
     }
 
     public string? ResolveRelativePath(int poolSlot)
@@ -48,5 +55,10 @@ public sealed class BgTextureCatalog
         ArgumentNullException.ThrowIfNull(textureDir);
         var rel = ResolveRelativePath(poolSlot);
         return rel is null ? null : textureDir + rel + DdsExtension;
+    }
+
+    public byte ResolveKind(int poolSlot)
+    {
+        return (uint)poolSlot < (uint)_kindBySlot.Length ? _kindBySlot[poolSlot] : (byte)1;
     }
 }

@@ -26,11 +26,11 @@
 > field meanings; `capture/debugger-pending` for server-authored magnitudes (skill damage, cooldown
 > wall-clock, skill-point/XP rates, HP/stamina scale) and the actual on-wire VALUE bytes of 5/33, 4/41,
 > 4/150, 5/52, 5/31.
-> **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
-> spec-audit corrections applied 2026-06-24 (reversed +1368/+1370 timed-charge framing; pinned boost
-> flag offset +1516; added AoE actor offsets +1828/+1832; noted executor-direct vs UI-wrapper string sets).
-> **ida_anchor:** 263bd994
+> **ida_reverified:** 2026-06-16 (SHA 263bd994, CYCLE 7); spec-audit 2026-06-24; CYCLE 14 re-anchor: 2026-06-27
+> (reversed +1368/+1370 timed-charge framing; pinned boost flag offset +1516; added AoE actor offsets +1828/+1832; noted executor-direct vs UI-wrapper string sets).
+> **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida]
+> **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (skill opcode→handler routings and combat-stat block consumers: cast gate reads HpCost +1368 / StaminaCost +1370, AoE resolver reads TargetShapeMode +1308 and AoeRadius +1316, 2/52 builder confirmed; inbound dispatcher routes the skill handler set).
 > **conflicts:** none — Campaign-10 Lane-F2 re-verification reproduced every framing constant
 > (1504 / +1500 / N×8 / 1508 / +0 SkillId / +4 GlobalCategory / 240 / 8-byte stride / i16 points /
 > slot<240) from the loader and handler code. Refinements only (the hotbar "two parallel arrays" are

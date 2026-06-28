@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the send-path builder, 4 fields re-confirmed SAME, 0 corrected.
 # CAPTURE-UNVERIFIED VALUE semantics; the 19-byte body size and the tag + name layout are
 # control-flow CONFIRMED from the friend-command send path. capture_verified: false.
 

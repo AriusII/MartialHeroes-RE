@@ -15,7 +15,8 @@
 ```
 verification: sample-verified            # stride, record count, file size, +0x000 id, +0x004 CP949 text, 0xEE padding all byte-exact against the real VFS sample
 ida_reverified: 2026-06-24
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 1 fact re-confirmed SAME; 0 corrected)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
 ```
@@ -27,7 +28,7 @@ conflicts: none
 | Magic / signature | **None** — there is no file header; the first record begins at byte 0 |
 | Version field | None |
 | Encoding | CP949 (code page 949) for the string payload |
-| Loaded from | The boot path opens `data/script/msg.xdb` directly during the main-window startup sequence (NOT via the shared boot data-table corpus loader that handles the five small `.xdb` tables). The loader follows the generic fixed-stride disk-file read pattern (open-by-name → size → read-virtual → close). CONFIRMED (loader control flow). |
+| Loaded from | The boot path opens `data/script/msg.xdb` directly during the main-window startup sequence (NOT via the shared boot data-table corpus loader that handles the five small `.xdb` tables). The loader follows the generic fixed-stride disk-file read pattern (open-by-name → size → read-virtual → close). CONFIRMED (loader control flow). The catalogue is fully populated before the login-window object is constructed — the load call and its indexed-map build complete at the scene-state-1 entry point, immediately before the login-window constructor is invoked. [static-hypothesis — 2026-06-26; session IDB build differs from pinned anchor; behavior is build-stable.] |
 
 ---
 
@@ -83,6 +84,13 @@ byte 0. There is no count prefix, no directory, and no footer.
   `0x00`; everything after is `0xEE` padding and is discarded.)
 - The four-byte key at +0x000 plus the 512-byte text buffer at +0x004 sum to the 516-byte stride
   exactly; there are no other fields and no inter-record padding.
+- **Loader performs no text decode [static-hypothesis — 2026-06-26].** The message-catalogue loader
+  stores the full 512-byte text field byte-for-byte in the flat record buffer without any decoding,
+  scanning, or transformation. CP949 decoding and `0x00`/`0xEE` handling are consumer-side operations:
+  a consumer resolves a caption ID via the ordered-map lookup, receives the record pointer, then
+  decodes the 512-byte payload as CP949 up to the first `0x00` and discards `0xEE` fill. A
+  re-implementation may store the raw field and decode lazily on lookup. (Recovered 2026-06-26 from a
+  session whose live IDB build differs from the pinned anchor 263bd994; behavior is build-stable.)
 
 ---
 
@@ -221,3 +229,12 @@ that texture, not from a caption lookup. CONFIRMED (absence).
 > WinMain state-1, not via the shared small-xdb boot corpus loader — and the unsigned ordered-map
 > lower-bound runtime model re-confirmed from the static loader read path. Known-unknowns section
 > updated to reflect the full-sample scan result. No addresses or decompiler output crossed the firewall.
+>
+> **Provenance — 2026-06-26 [static-hypothesis — session IDB build differs from pinned anchor
+> 263bd994; behaviors build-stable, exact offsets pending build reconciliation]:** message-catalogue
+> loader re-decompiled directly (not from prior IDB comments). No corrections to stride, record count,
+> layout, unsigned key ordering, or `0xEE` padding facts. Two additions integrated: (a) the catalogue
+> is fully populated immediately before the login-window constructor is invoked at the scene-state-1
+> entry point (sharpening the existing load-site note); (b) the loader performs no text decode — the
+> 512-byte text field is stored byte-for-byte and all CP949 decoding and `0x00`/`0xEE` handling are
+> consumer-side operations. No addresses or decompiler output crossed the firewall.

@@ -18,9 +18,12 @@ verification: re-pinned 2026-06-22 against doida.exe binary IDB SHA 263bd994 (re
   confirmed ground truth — the top curtain at −222 is the real animated half, not a port phantom.
   (Prior basis: 2026-06-21 full 2D-GUI cartography pass; 2026-06-19 element-level construction pass;
   2026-06-18 scene reconstruction campaign — all previously confirmed facts remain valid.)
+  CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected.
 scene: Login (engine state 1)
 evidence: [static-ida, debugger-confirmed-handshake, debugger-confirmed-g2]
 capture_verified: false
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27   # CYCLE 14 static-only re-anchor pass (f61f66a9): flowSubState ladder (states 6->29, 4->5, 37->38), action map (101 quit, 103 OK/game.ver gate, 105 server-list refetch with 10000 ms debounce, 115..124 pagers at state 37, 400/401 plate select), and CommonLoginWindow ctor name "Loginer" — 1 fact confirmed SAME against the new build.
 sources:
   - Docs/RE/specs/login_flow.md
   - Docs/RE/specs/frontend_scenes.md      # §1 login sub-state machine

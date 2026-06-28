@@ -27,6 +27,13 @@ verification: independently re-derived 2026-06-18 directly from the doida.exe bi
   static-only); the Select(4)→Error(7) version-mismatch edge is now debugger-confirmed AT THE ENTER-GAME
   STEP, server-driven (the server rejects the transmitted version token), in addition to the documented
   client-local login gate. See §3.
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27, static IDA only): 5 facts re-confirmed SAME (8-case
+  FSM structure, default flow 0→1→2→3/4→4→5, case-5 pre-arm to state 4, Login-case Error
+  sub-state attribution 1-vs-3, Scene_LeaveWorldToLogout identity disambiguated from a Diaphora
+  false match at a mid-body site inside SmsgItemUseResult_Handler), 0 corrected. Behaviour
+  unchanged across the build delta; no structural corrections required.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 ---
 
 # Scene / Game State Machine — Cross-Cutting Dossier

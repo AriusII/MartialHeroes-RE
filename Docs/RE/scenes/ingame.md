@@ -16,6 +16,9 @@ verification: written 2026-06-21 against the doida.exe binary (build 263bd994, f
   read at the slot / member-offset / RTTI / atlas-src-rect level and CONFIRMED against the same IDB.
   This dossier is the scene-level cartography of the in-game HUD; it REFERENCES specs/ui_system.md for
   the full 178-slot roster and the shared widget framework rather than re-listing every slot.
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: InGame HUD (engine state 5)
 evidence: [static-ida]
 capture_verified: false

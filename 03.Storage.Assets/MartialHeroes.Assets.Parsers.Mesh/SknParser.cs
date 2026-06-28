@@ -47,10 +47,10 @@ public static class SknParser
             offset += 4;
             var uvU = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
-            var uvV = 1.0f - BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
+            var uvV = BinaryPrimitives.ReadSingleLittleEndian(data[offset..]);
             offset += 4;
 
-            corners[f * 3 + c] = new SknCorner(vIdx, uvU, uvV);
+            corners[f * 3 + c] = new SknCorner(vIdx, uvU, 1.0f - uvV);
         }
 
         var vertexCount = ReadU32LE(data, ref offset, "vertex_count");

@@ -1,7 +1,7 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))            # the dominant tier for this doc's load-bearing facts (scene machine, frame loop, boot, login sub-states, world spawn re-derived from binary control-flow); wire-level opcode bytes are capture/debugger-pending
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — scene-machine / world-build / "charater scene" label cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]             # add 'vfs-sample' only where a real asset sample corroborated (UI dialog IDs via msg.xdb, area inventory); noted inline as SAMPLE-VERIFIED
 conflicts: login credential wire opcode (key-string secure context vs literal C2S 2/1 byte form); 4/1-form arrival ordering; whether the display FRAMERATE config is truly inert vs the hardcoded 60 FPS cap — all capture/debugger-pending
 status: confirmed

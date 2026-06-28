@@ -8,6 +8,10 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the handler; 4 fields
+#        (Head bytes[8]@0x00, Gate u32@0x08, Subtype u8@0x0C, Body bytes[331]@0x0D)
+#        re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: BINARY-WINS NAME CORRECTION. A fresh instruction-level reading of the 5/73 handler (CYCLE
 #              4 netcode-deep) shows it gates on a quest verdict, plays a quest-completion cue, and

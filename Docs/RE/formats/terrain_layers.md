@@ -6,6 +6,18 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 1 corrected. SAME: `.fx7` is a uniform group-array with a 48-byte (0x30) group header, `vertex_count@+0x28`, `index_count@+0x2C`, VF_32 vertices (32 B, no colour), u16 index block, two-vertex-copy memcpy; the 48-byte (not 52-byte) header reconfirmed (§1.10/§1.13). CORRECTED: `.fx6` is a clean uniform group-array — `u32 group_count` followed by that many group records each carrying a single 36-byte (0x24) header with `vertex_count@+0x1C` and `index_count@+0x20`, VF_32 vertices, u16 indices, and the standard two-vertex-copy memcpy. There is NO global-metadata prefix and NO 28-byte trailing subchunk. The prior §1.9 "worked layout" (global metadata + 8-byte per-group header + trailing block) is REFUTED by the actual `Fx6_DecodeGroups` decoder and has been reconciled to the uniform group-array model in §1.9 below. §1.4a/§1.13 were already correct and are unchanged. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — `Fx6_DecodeGroups` and `Fx7_DecodeGroups` re-confirmed at relocated addresses under build f61f66a9. Fx6: reads `u32 group_count`, then per group reads 36 bytes (0x24), extracts `vertex_count` at group-relative +0x1C and `index_count` at +0x20, reads `vertex_count × 32` VF_32 bytes and `index_count × 2` u16 bytes, with two operator-new vertex buffers + memcpy — no extra reads before or between groups. Decoder shape identical to `.fx7` except header width (36 B vs 48 B). |
+| `conflicts`      | §1.9 corrected (binary-won). The "global metadata" prefix at file offsets 0x04–0x1C, the "8-byte per-group header", and the "28-byte trailing block" documented in the prior §1.9 worked layout are all REFUTED. §1.12 FX6 summary row and §1.13 stride table updated to match. |
+
+---
+
 ## Re-verification banner (2026-06-24, ANALYZE re-walk)
 
 | Attribute        | Value |
@@ -467,65 +479,57 @@ purpose is unconfirmed; candidates include slope normal, LOD orientation, or ins
 
 ### 1.9 FX6 Format  (`.fx6`)
 
-**Status:** CONFIRMED — group-array model (§1.1a); multiple byte-identical samples.
-**Semantic:** Collection of 3D prop or object mesh groups. Each group is an independent small
-box-like mesh. Unlike FX1–FX5/FX7, FX6 vertices have no per-vertex colour field (VF_32) and use
-normals consistent with 45-degree box faces rather than terrain slopes.
+> **CORRECTED (2026-06-27, CYCLE 14 re-anchor, binary-won).** The prior "worked layout" for `.fx6`
+> (global metadata prefix at 0x04–0x1C + 8-byte per-group header + 28-byte trailing block on
+> non-final groups) is **REFUTED** by the actual `Fx6_DecodeGroups` decoder. That decoder is
+> branchless: it reads `u32 group_count`, then for each group reads **one 36-byte block** as the
+> group header (no global prefix, no inter-group trailing block). §1.4a and §1.13 (which already
+> stated 36 B group-hdr / vc@+0x1C / ic@+0x20) are correct and unchanged; only this §1.9 body
+> was inconsistent and is now reconciled.
+
+**Status:** CONFIRMED — uniform group-array model (§1.1a); decoder re-walked under build f61f66a9.
+**Semantic:** Collection of 3D prop or object mesh groups. Each group is an independent mesh.
+FX6 vertices have no per-vertex colour field (VF_32), distinguishing them from the colour-bearing
+FX1–FX5 channels.
 
 **File layout:**
 
 ```
-FX6_File = group_count (u32) + global metadata + group_count × [ group header (8 B) + VertexData + IndexData (+ optional trailing block) ]
+FX6_File = group_count (u32) + group_count × [ group header (36 B) + VertexData + IndexData ]
 ```
 
-FX6 places several global metadata words after the `group_count` word; each group then carries a
-short 8-byte header (vertex count + index count). The trailing block on non-final groups is a fixed
-extra block (see below). The group iteration is the same model as §1.1a; FX6 simply uses a compact
-per-group header.
+The decoder is branchless: the leading `u32` is the group count and the same 36-byte group-header
+read runs for every group. There is no file-level metadata block after `group_count` and no
+trailing block appended to any group.
 
-**File-level / global metadata:**
+**File-level header (4 bytes):**
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| 0x00 | 4 | u32 | `group_count` | group count (constant 40 across samples) | CONFIRMED |
-| 0x04 | 4 | u32 | _version_ | dominant 1 (one observed outlier 2) | CONFIRMED-variable (dominant 1) |
-| 0x08 | 4 | u32 | _unknown_1_ | 0 | UNVERIFIED (constant=0) |
-| 0x0C | 4 | u32 | _unknown_2_ | 0 | UNVERIFIED (constant=0) |
-| 0x10 | 4 | f32 | _unknown_3_ | 1.0 | UNVERIFIED (possibly global scale; constant=1.0) |
-| 0x14 | 4 | u32 | _unknown_4_ | 45 | UNVERIFIED (constant=45) |
-| 0x18 | 4 | u32 | _unknown_5_ | 60 | UNVERIFIED (constant=60) |
-| 0x1C | 4 | u32 | _unknown_6_ | 0 | UNVERIFIED (constant=0) |
+| Offset | Size | Type | Field | Confidence |
+|-------:|-----:|------|-------|------------|
+| 0x00 | 4 | u32 | `group_count` | CONFIRMED (decoder loops this many times) |
 
-**Per-group header (8 bytes):**
+**Per-group header (36 bytes / 0x24; offsets group-relative):**
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| +0x00 | 4 | u32 | `vertex_count` | 20 | CONFIRMED |
-| +0x04 | 4 | u32 | `index_count` | 30 | CONFIRMED |
+The 36-byte block is read as a single unit. The decoder extracts only `vertex_count` and
+`index_count`; all other bytes in the block are read into the group struct but not consumed for
+parsing. Semantics of the remaining words are UNVERIFIED.
 
-**VertexData (per group):** `vertex_count × 32` bytes (VF_32). Box/prop geometry with 45-degree normals.
+| Group-rel offset | Size | Type | Field | Confidence |
+|-----------------:|-----:|------|-------|------------|
+| +0x00 | 4 | u32 | `texture_index` | **1-based** index into this channel's per-channel texture register (§1.4b). CODE-CONFIRMED (§1.1a) |
+| +0x04 .. +0x18 | 20 | — | _inter-header words_ | Read into group struct; not consumed for layout. Semantics UNVERIFIED. |
+| +0x1C | 4 | u32 | `vertex_count` | Sizes the VF_32 vertex block (`vertex_count × 32`). CONFIRMED |
+| +0x20 | 4 | u32 | `index_count` | Sizes the u16 index block (`index_count × 2`). CONFIRMED |
 
-**IndexData (per group):** `index_count × 2` bytes (u16).
+**VertexData (per group):** `vertex_count × 32` bytes (VF_32 — position 12 B + normal 12 B + UV0 8 B; no per-vertex colour). CONFIRMED.
 
-**Trailing block (28 bytes, non-final groups only):**
+**IndexData (per group):** `index_count × 2` bytes (u16). CONFIRMED.
 
-| Offset | Size | Type | Field | Observed value | Confidence |
-|-------:|-----:|------|-------|----------------|------------|
-| +0x00 | 4 | u32 | _unknown_a_ | 1 | UNVERIFIED (constant=1) |
-| +0x04 | 4 | u32 | _unknown_b_ | 0 | UNVERIFIED (constant=0) |
-| +0x08 | 4 | u32 | _unknown_c_ | 0 | UNVERIFIED (constant=0) |
-| +0x0C | 4 | f32 | _unknown_d_ | 1.0 | UNVERIFIED (possibly per-group scale) |
-| +0x10 | 4 | u32 | _unknown_e_ | varies (10, 40, 45, 50, …) | UNVERIFIED |
-| +0x14 | 4 | u32 | _unknown_f_ | varies (30, 60; often 60) | UNVERIFIED |
-| +0x18 | 4 | u32 | _unknown_g_ | 0 | UNVERIFIED (constant=0) |
+**Two vertex copies per group.** The loader allocates two vertex buffers and copies the source into the working buffer at load time (same two-copy pattern as all other FX channels — §1.4d).
 
-The varying values at trailing-block offsets `+0x10` and `+0x14` differ per group and may encode LOD
-distances, texture tile indices, or rendering priority parameters.
+**File-size formula:** `4 + Σ over groups (36 + vertex_count × 32 + index_count × 2)`.
 
-**File-size formula:**
-`4 + 28 (remaining global metadata) + (group_count - 1) × 736 + 708`
-where each non-final group block is `8 + 20 × 32 + 30 × 2 + 28 = 736` and the final group block is
-`8 + 640 + 60 = 708`.
+**Group AABB.** After reading vertex and index blocks the loader calls the per-group AABB finalizer (also called by `.fx7` — the same shared finalize routine) to compute the spatial bounds of each group. This is in-memory only, not on disk.
 
 ### 1.10 FX7 Format  (`.fx7`)
 
@@ -642,7 +646,7 @@ a group count rather than a selector.
 | FX3   | true  | 44 B | VF_36 (36 B) | 1 | yes |
 | FX4   | CONFIRMED-from-loader (flat group array) | 48 B/group | VF_44 (44 B) | 2 | yes |
 | FX5   | true | 48 B/group | VF_36 (36 B) | 1 | yes |
-| FX6   | true  | global metadata + 8 B/group | VF_32 (32 B) | 1 | no |
+| FX6   | CONFIRMED (decoder re-walked, build f61f66a9) | 36 B/group | VF_32 (32 B) | 1 | no |
 | FX7   | CONFIRMED (decoder re-walked + zero-residual sample, 2026-06-24) | 48 B/group | VF_32 (32 B) | 1 | no |
 
 All seven share the universal group-array model (§1.1a): a `group_count` word, then that many group
@@ -662,7 +666,7 @@ channel) pins the following:
 | fx3  | 44 B group hdr | VF_36 (36 B) | 160 |
 | fx4  | 48 B tile hdr  | VF_44 (44 B) | 1 |
 | fx5  | 48 B tile hdr  | VF_36 (36 B) | 89 |
-| fx6  | 36 B group hdr (global metadata 28 B + 8 B per-group counts) | VF_32 (32 B) | 6 |
+| fx6  | 36 B group hdr (`vertex_count` @ +0x1C, `index_count` @ +0x20; no global metadata prefix) | VF_32 (32 B) | 6 |
 | fx7  | 48 B group hdr (`vertex_count` @ +0x28, `index_count` @ +0x2C) | VF_32 (32 B) | 2 |
 
 (The §§1.5–1.11 worked layouts are these same per-channel instances; the table above is the
@@ -1158,12 +1162,13 @@ these without further evidence.
 3. **FX3 extended group-header words (+0x0C–+0x20):** Several u32/f32 words ahead of the count pair.
    The float-decoding ones look like direction-vector components; the integer ones are unexplained.
 
-4. **FX6 global metadata at 0x14 (=45) and 0x18 (=60):** Constant across samples.
-   Candidates: grid dimension, group count, or rendering parameter. `version` (0x04) is dominant 1
-   with one observed outlier 2.
-
-5. **FX6 per-group trailing-block fields at +0x10 and +0x14:** Vary per group. Candidates: LOD
-   distances, texture tile indices, rendering priority.
+4. **FX6 per-group header inter-header words (+0x04–+0x18, 20 bytes):** The 36-byte per-group
+   header contains `texture_index` at +0x00, `vertex_count` at +0x1C, and `index_count` at +0x20;
+   the 20 bytes between them are read into the group struct but not consumed for layout. Observed
+   sample constants (45, 60, and the dominant-1 word) now fall inside this inter-header region.
+   Their semantics (grid dimension, LOD distance, rendering parameter) remain UNVERIFIED. The prior
+   framing as "global metadata prefix" and "per-group trailing block" is REFUTED — these words live
+   inside each group's 36-byte header, not in separate file-level or inter-group blocks.
 
 6. **FX7 group-header large floats (`unk_dist` and the two following floats):** PLAUSIBLE from two
    byte-identical samples; candidates are world-space bounding coordinates. The signed near-unit
@@ -1243,3 +1248,112 @@ these without further evidence.
   parser. For the sky/dat binaries (§§6–8) cite `// spec: Docs/RE/formats/environment_bins.md §9`,
   `§12`, or `§13` as appropriate — those sections are the authoritative specs.
   Conversion of vertex data to engine types is `Assets.Mapping`'s responsibility, not `Assets.Parsers`.
+
+---
+
+## 15. `.fx7` Terrain Effect Layer — Cycle 15
+
+> `ida_reverified: 2026-06-27` (CYCLE 15 — `.fx7` format mapped from loader analysis)
+
+### 15.1 Overview
+
+`.fx7` is the **terrain-cell effect layer 7** (terrain slot 8), paralleling `.fx6` (slot 7).
+Both formats are structurally identical and differ only in their terrain slot assignment.
+The format stores **groups of textured effect meshes** spatially indexed into a 16×16 cell
+tile grid at 64 world-unit resolution.
+
+Configuration string literals confirm the format name and purpose:
+- `"fx7"` — format identifier string
+- `"fx7 terrain settings"` — settings-block label string
+- `"fx7 texture index"` — texture-index error-string prefix
+
+### 15.2 File Layout
+
+```
+File:
+  [u32]   groupCount
+  [Group] × groupCount   (see §15.3 for per-group layout)
+```
+
+### 15.3 Group Header (48 bytes, read directly from disk)
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 12 | f32[3] | `origin` | Group world-space origin XYZ |
+| +0x0C | 12 | f32[3] | `extent` | Group bounding extent XYZ |
+| +0x18 | 4 | u32 | `group_type` | Group category / material category |
+| +0x1C | 4 | u32 | `group_flags` | Render flags |
+| +0x20 | 4 | u32 | `texture_id` | Source texture slot index |
+| +0x24 | 4 | u32 | `_pad` | Reserved / alignment |
+| +0x28 | 4 | u32 | `vertex_count` | Number of VF_32 vertices |
+| +0x2C | 4 | u32 | `index_count` | Number of u16 indices |
+
+> **Note:** The first 40 bytes (`+0x00..+0x27`) are read as a block but only `vertex_count`
+> and `index_count` (at `+0x28`/`+0x2C`) are explicitly dereferenced by `Fx7_DecodeGroups`.
+> The origin/extent/type/flags layout above is inferred from the 48-byte total and the
+> known AABB re-computation step that follows.
+
+After the header, vertex and index data follow immediately:
+```
+  [VF_32] × vertex_count    (32 bytes each — see §15.5)
+  [u16]   × index_count     (triangle indices)
+```
+
+### 15.4 In-Memory Group Record (112 bytes = 0x70)
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 48 | — | `file_header` | Direct copy of 48-byte disk header |
+| +0x30 | 4 | ptr | `vtx_buf_a` | Primary vertex heap buffer |
+| +0x34 | 4 | ptr | `idx_buf` | u16 index heap buffer |
+| +0x38 | 4 | ptr | `vtx_buf_b` | Secondary vertex buffer (double-buffered) |
+| +0x3C | 12 | f32[3] | `aabb_min` | Bounding box minimum XYZ (set by `Geometry_RecomputeAABB_AndBudget`) |
+| +0x48 | 12 | f32[3] | `aabb_max` | Bounding box maximum XYZ (set by `Geometry_RecomputeAABB_AndBudget`) |
+| +0x58 | 4 | u32 | `vtx_byte_size` | = 32 × vertex_count (cached) |
+| +0x68 | 4 | u32 | `lod_budget` | Budget tier in units (set by `Geometry_RecomputeAABB_AndBudget`) |
+
+**Double-buffering:** Both `vtx_buf_a` and `vtx_buf_b` are allocated with the same
+size (`32 × vertex_count + 4`) and `vtx_buf_b` is initialized as a `memcpy` of
+`vtx_buf_a`. This supports GPU double-buffer upload.
+
+### 15.5 Vertex Format — VF_32 (identical to `.bud` and `.fx6`)
+
+| Offset | Type | Field |
+|-------:|------|-------|
+| +0x00 | f32 | `pos_x` |
+| +0x04 | f32 | `pos_y` |
+| +0x08 | f32 | `pos_z` |
+| +0x0C | f32 | `norm_x` |
+| +0x10 | f32 | `norm_y` |
+| +0x14 | f32 | `norm_z` |
+| +0x18 | f32 | `tex_u` |
+| +0x1C | f32 | `tex_v` |
+
+Stride: **32 bytes** (`D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1`).
+
+### 15.6 Texture Registry (per terrain slot)
+
+Up to **32 texture IDs** can be registered per slot via `Fx7Section_AddTextureId`.
+
+Texture registry fields within the in-memory terrain-slot object:
+
+| Slot-relative offset | Size  | Field       | Notes                               |
+|---------------------:|------:|-------------|-------------------------------------|
+| +0x404 (1028)        | 128 B | `tex_ids`   | `u32[32]` — registered texture IDs |
+| +0x424 (1060)        | 4 B   | `tex_count` | `u32` — current count (max 32)     |
+
+Texture IDs from the file are validated at cell-build time: `1 ≤ texIdx ≤ tex_count`.
+Out-of-range IDs are clamped to `1` with an `ErrorLog_WriteFormatted` warning.
+
+### 15.7 Spatial Grid (16×16 × 64 world-unit tiles)
+
+`Map_BuildCellFxLayerFx7` bins each group into the 16×16 cell grid:
+- Grid tile size: **64 world units**
+- Grid dimensions: **16 × 16 = 256 tiles per cell**
+- AABB overlap test: group's min/max Y against tile's min/max Y accumulator
+
+Per-tile BSS accumulators:
+- `g_TileMaxY[256]` — per-tile max-Y (float), initialised to −∞ at grid reset
+- `g_TileMinY[256]` — per-tile min-Y (float), initialised to +∞ at grid reset
+
+

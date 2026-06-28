@@ -31,6 +31,9 @@ verification: re-pinned 2026-06-21 against the doida.exe binary (build 263bd994,
   P (634,165), 110×32, action 100, persists [OPENNING] SKIP=1) all CONFIRMED. 2026-06-18 scene
   reconstruction — SKIP routing re-read from the application entry point; crawl never auto-finishes;
   skip is the sole exit. Outcome CONFIRMED.)
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: Opening (engine state 3)
 evidence: [static-ida]
 capture_verified: false

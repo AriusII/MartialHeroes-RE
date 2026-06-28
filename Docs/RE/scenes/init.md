@@ -4,7 +4,9 @@ verification: independently re-confirmed 2026-06-18 directly from the doida.exe 
   re-read from the application entry point's dispatch loop. Outcome CONFIRMED; one prior GAP (Error
   reason 1 vs 3) RESOLVED statically this pass (see §9). (Prior basis: build 263bd994 re-confirmation
   campaign, synthesised from committed specs.)
-ida_anchor: 263bd994
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: Init (engine state 0)
 sources: [specs/client_runtime.md §0/§7, specs/client_architecture.md §2/§3, specs/resource_pipeline.md §1/§2]
 encoding_note: Korean config/UI text is CP949 (legacy MS-949 code page), not UTF-8.

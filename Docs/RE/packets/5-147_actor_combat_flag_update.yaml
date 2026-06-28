@@ -6,6 +6,10 @@
 #                 is a live-actor field, NOT a wire field; the wire-byte VALUE meaning is capture-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 re-anchor)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- confirmatory re-anchor: the opcode dispatch table is structurally intact on build f61f66a9
+#        (see specs/network_dispatch.md); packet body offsets are clean-relocation confirmatory
+#        (96% of functions shifted uniformly +0x80/+0x7e, behavior unchanged), not individually re-traced.
 #   evidence: [static-ida]
 #   conflicts: none new. Hygiene note: the live-actor combat-flag destination coincides numerically with
 #              a spawn-descriptor field shifted by the standard runtime rebasing; do NOT label that

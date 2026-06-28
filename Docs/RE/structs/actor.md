@@ -13,8 +13,9 @@
 >   the live HP/MP/yaw/move-target writes (driven by the runtime-table-dispatched 5/53 vitals and
 >   5/13 movement handlers, whose dispatch table is null at static time), and the role of the
 >   `partial`/`draft` auxiliary fields.
-> - **ida_reverified:** 2026-06-24; re-verified against doida.exe IDB SHA 263bd994 (actor-world audit)
->   **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-24 (actor-world audit, SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27
+>   **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963  **evidence:** [static-ida]
+> - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 4 facts re-confirmed SAME (actor object size 0x748, embedded SpawnDescriptor 0x370@+0x74, sort/model_class_id resolution from internal_class+appearance_variant, NPC interaction sub-object at +0x700, actor container model with id-only + composite-key lookups and local-player/buff-target globals). Canonical getter labels ActorManager_GetSingleton and GameState_GetSingleton are absent from the f61f66a9 IDB — no spec fact depends on these labels; re-labelling deferred to ida-toolsmith.
 > - **CYCLE 7 (2026-06-20):** added the 30-slot buff-slot array at Actor +0x208 (520), the
 >   buff-related actor state fields it drives (+1013, +1420 enrichment, +1764, +1828, +1832, +1836,
 >   +1837, +1838), and the death-state fields (+1424 alive semantics, +1420 value 8). `specs/buffs.md`

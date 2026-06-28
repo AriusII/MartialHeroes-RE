@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 re-anchor (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); opcode dispatch confirmed structurally intact (specs/network_dispatch.md); body fields clean-relocation confirmatory.
 # ROUTING: Push table-driven (major-5 / minor-127).
 # size: 12 bytes (0x0C) fixed-size block read via PacketBuffer_ReadField.
 

@@ -8,6 +8,10 @@
 #                        favouring slot-MOVE/location; delete is on 1/7. The canonical name is a Tier-1 call)
 #   wire VALUE semantics: capture/debugger-pending (the slot-move S2C reply; whether any token accompanies the slot byte)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the builder; 1 field
+#        (SlotIndex u8@0x00) re-confirmed SAME, 0 corrected. Two emit sites + 'is sending location'
+#        log strings support slot-move semantic; move-vs-delete canonical name remains a Tier-1 call.
 #   conflicts: none (cmsg_char_move.yaml re-confirmed; the 1-14_delete_character.yaml tombstone is correct)
 
 name: CmsgMoveCharacter

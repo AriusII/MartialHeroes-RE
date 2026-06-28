@@ -12,6 +12,10 @@
 #                 class/variant args of the preview model formula, HIGH confidence (four independent
 #                 read sites; the in-world spawn path feeds the same two offsets to the same factory).
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgCharacterList); 9 layout facts re-confirmed
+#        SAME (ServerId @0, ChannelId @1, SlotMask @2; per-slot sub-block sizes 880/96/1/4; 5-slot
+#        loop bound; post-loop GameState pair [0]=4/[1]=8); 0 corrected.
 #   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED the prior "loops ~8 slots" reading -> the handler loops EXACTLY 5 slots

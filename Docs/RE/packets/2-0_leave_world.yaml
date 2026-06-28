@@ -1,3 +1,4 @@
+# CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the send-path builder, 1 structural fact (header-only, size=0) re-confirmed SAME, 0 corrected.
 name: CmsgLeaveWorld
 opcode: 0x20000           # major 2, minor 0 -> (2 << 16) | 0
 direction: C2S

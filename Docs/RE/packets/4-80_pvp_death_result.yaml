@@ -3,14 +3,20 @@
 # VERIFICATION BANNER
 #   verification: confirmed  (opcode->handler routing and the fixed 80-byte (0x50) body -- the 8-byte
 #                 echo head, SelfGate@+0x08, ReasonCode@+0x09, Subtype@+0x0A (==6 runs a local death
-#                 effect), GapA[9]@+0x0B, TargetId u32@+0x14, OpaqueTail[56]@+0x18 -- are
-#                 control-flow-confirmed; the reason-code->string-id map is static-confirmed; value
-#                 meanings are capture/debugger-pending)
+#                 effect), GapA[1]@+0x0B, TargetId u32 @+0x0C, OpaqueTail[64]@+0x10 -- are
+#                 control-flow-confirmed (CYCLE 14 deep-verify corrected TargetId from +0x14 to +0x0C;
+#                 GapA 9B->1B; OpaqueTail 56B@+0x18->64B@+0x10); the reason-code->string-id map is
+#                 static-confirmed; value meanings are capture/debugger-pending)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
-#   conflicts: size precision: catalog listed 'var'; confirmed fixed 80-byte read (0x50). No
-#              name/direction drift.
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 5 fields re-confirmed SAME
+#        (EchoHead, SelfGate@+0x08, ReasonCode@+0x09, Subtype@+0x0A, reason-code->string map), 1 corrected
+#        (TargetId moves from +0x14 to +0x0C; GapA corrected 9B->1B; OpaqueTail corrected 56B@+0x18->64B@+0x10).
+#   conflicts: CORRECTED (CYCLE 14 deep-verify, f61f66a9). Prior: GapA bytes[9]@+0x0B, TargetId u32@+0x14,
+#              OpaqueTail bytes[56]@+0x18. Binary: GapA 1 byte @+0x0B, TargetId u32 @+0x0C, OpaqueTail 64B
+#              @+0x10. Decoded header is +0x00..+0x0F (16 bytes); opaque tail +0x10..+0x4F (64 bytes).
+#              Also size precision: catalog listed 'var'; confirmed fixed 80-byte read (0x50).
 # spec: Docs/RE/packets/4-80_pvp_death_result.yaml
 
 name: SmsgPvpDeathResult
@@ -24,9 +30,9 @@ capture_verified: false
 summary: >
   Server pushes a PvP death result. A fixed 80-byte block decoded inline: an 8-byte echo head, a
   self-vs-remote branch gate byte, a reason/notice code byte (selects a localized PvP death/kill
-  notice string), a subtype byte (a value of 6 runs a local death effect), then a target actor id;
-  the remaining 40-byte tail is opaque. On the self branch it runs a local death path; on the remote
-  branch it updates the slain actor and posts the notice string.
+  notice string), a subtype byte (a value of 6 runs a local death effect), a 1-byte gap, then a
+  target actor id at +0x0C; the remaining 64-byte opaque tail follows at +0x10. On the self branch it
+  runs a local death path; on the remote branch it updates the slain actor and posts the notice string.
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 80. Only the header through
 # the target id is decoded by the handler; the 40-byte tail is reserved opaque.
@@ -35,18 +41,20 @@ fields:
   - { name: SelfGate,    type: u8 }            # +0x08  branch gate: == 1 -> self-death local path; else remote path
   - { name: ReasonCode,  type: u8 }            # +0x09  reason / notice code; selects a localized PvP death/kill string (see map)
   - { name: Subtype,     type: u8 }            # +0x0A  subtype; == 6 -> run a local death effect on the local player
-  - { name: GapA,        type: "bytes[9]" }    # +0x0B  gap (not read) -- opaque
-  - { name: TargetId,    type: u32 }           # +0x14  target actor id (by-key actor lookup; also keys an effect deactivation)
-  - { name: OpaqueTail,  type: "bytes[56]" }   # +0x18  opaque tail (0x18..0x4F) not read by this handler -- opaque section boundary, inner shape PENDING
-  # widths: 8 + 1 + 1 + 1 + 9 + 4 + 56 = 80 (decoded header +0x00..+0x17 = 24 bytes; opaque tail
-  # +0x18..+0x4F = 56 bytes).
+  - { name: GapA,        type: "bytes[1]" }    # +0x0B  gap (1 byte, not read) -- opaque
+  - { name: TargetId,    type: u32 }           # +0x0C  target actor id (by-key actor lookup; also keys an effect deactivation)
+  - { name: OpaqueTail,  type: "bytes[64]" }   # +0x10  opaque tail (0x10..0x4F, 64 bytes) not read by this handler -- opaque section boundary, inner shape PENDING
+  # widths: 8 + 1 + 1 + 1 + 1 + 4 + 64 = 80 (decoded header +0x00..+0x0F = 16 bytes; opaque tail
+  # +0x10..+0x4F = 64 bytes). CYCLE 14 deep-verify: corrected from prior GapA=9B/TargetId@+0x14/OpaqueTail=56B.
 
 notes: |
   CONFIRMED routing + size (a fixed 0x50 = 80-byte read) + the decoded header region (the self gate,
   the reason code, the subtype, and the target id are confirmed reads). The remainder of the 80-byte
   block is OPAQUE (the handler does not sub-index it). Field VALUE meanings are LIKELY where named.
   [capture/debugger-pending] for value meanings. The field widths sum to exactly 80 (verified):
-  a 24-byte decoded header (+0x00..+0x17) + a 56-byte opaque tail (+0x18..+0x4F).
+  a 16-byte decoded header (+0x00..+0x0F) + a 64-byte opaque tail (+0x10..+0x4F).
+  CYCLE 14 deep-verify (f61f66a9): TargetId location corrected from +0x14 to +0x0C; GapA corrected
+  from 9 bytes to 1 byte; OpaqueTail corrected from 56B@+0x18 to 64B@+0x10.
 
   REASON-CODE -> NOTICE-STRING MAP (the +0x09 reason byte selects a localized message-string id;
   ids are message-database keys, NOT addresses):
@@ -62,14 +70,16 @@ notes: |
     +0x08 SelfGate != 1 -> the remote path: resolve the target actor and post the reason notice.
     +0x0A Subtype  == 6 -> additionally run a local death effect on the local player.
 
-  TARGET ID (+0x14): a u32 actor id resolved by the by-key actor lookup (with a fixed NPC sort);
-  also used to deactivate a death/finisher visual effect keyed on that actor.
+  TARGET ID (+0x0C): a u32 actor id resolved by the by-key actor lookup (with a fixed NPC sort);
+  also used to deactivate a death/finisher visual effect keyed on that actor. (Corrected from +0x14
+  by CYCLE 14 deep-verify on f61f66a9.)
 
-  OPAQUE TAIL (+0x18..+0x4F): reserved as one OPAQUE SECTION BOUNDARY -- not read by this handler. Do
-  NOT invent byte meanings inside it. Inner shape PENDING (capture/debugger).
+  OPAQUE TAIL (+0x10..+0x4F): reserved as one OPAQUE SECTION BOUNDARY -- not read by this handler. Do
+  NOT invent byte meanings inside it. Inner shape PENDING (capture/debugger). (Corrected from
+  +0x18..+0x4F/56B to +0x10..+0x4F/64B by CYCLE 14 deep-verify on f61f66a9.)
 
   RELATED: 5/80 SmsgPvpDeathFx spawns the death/finisher visual effects (a separate push). This 4/80
   result drives the notice string and the slain-actor update.
 
   UNBLOCKS: the Client.Application PvP death-result handler (4/80) -- the header decode is solid; the
-  56-byte opaque tail and the reason-string wording are capture-pending.
+  64-byte opaque tail (+0x10..+0x4F) and the reason-string wording are capture-pending.

@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); body layout re-traced against the handler; 1 field re-confirmed SAME.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 
 name: SmsgPartyRosterEvent
@@ -38,9 +39,17 @@ notes: |
   (packets/4-36_party_member_remove_result.yaml) and 4/76 (accept result). It is a sibling Push of
   5/38 (party member stats) and 5/76 (party member joined).
 
+  OPEN ITEM (CYCLE 14 deep-verify, f61f66a9): the handler and its applier route this push through
+  tracked-target and world-selection slot operations (message ids in the 2119-2122 range), which do
+  not obviously align with the canonical name SmsgPartyRosterEvent. The field offsets (Event@0x08 /
+  MemberSlot@0x09) are confirmed correct. The canonical name is NOT changed here -- it is flagged as
+  a potential misnomer pending resolution of the message-DB string ids to confirm the true label.
+  Do not rename until the string table is consulted.
+
   UNKNOWNS to resolve with a capture of a join / leave / disband sequence:
     - the contents of the 8-byte Pad0 region (whether it carries an actor id or a sub-header);
     - whether further event codes exist beyond 0..3;
-    - confirm the member-slot indexing against the on-actor party slot table.
+    - confirm the member-slot indexing against the on-actor party slot table;
+    - resolve message-DB string ids 2119-2122 to confirm or correct the SmsgPartyRosterEvent label.
 
   UNBLOCKS: Client.Application party roster-event handler (5/21).

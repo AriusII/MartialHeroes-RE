@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 4 fields re-confirmed SAME (Phase@8, SubKind@0xa==0xFF, Value@0xc, OpaqueTail@0x10[172]), 0 corrected.
 # CYCLE 7 RECLASSIFICATION (binary-won): this is the CUBE-GAMBLE reel-update push, NOT combat.
 #   The dev/IDB "SmsgCombatAttackUpdate" label was a mislabel — the owning subsystem loads
 #   cubegamble.dds, tracks a daily bet limit, and submits via C2S 2/141 (Block C evidence).

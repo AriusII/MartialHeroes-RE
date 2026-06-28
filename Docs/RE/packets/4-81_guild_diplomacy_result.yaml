@@ -7,7 +7,9 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 2 fields re-confirmed SAME
+#        (Status@8 with ==1 success-forward, Error@9 with case 0x15 reading seconds@0xa), 0 corrected.
 #   conflicts: BINARY-WINS NAME CORRECTION. Response slot 81 was catalogued here as
 #              SmsgGuildDiplomacyResult. The binary shows slot 81 is the CROSS-DOMAIN generic
 #              SmsgActionErrorResult (action-error / cooldown feedback), NOT a guild-diplomacy reply. The

@@ -5,6 +5,18 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected. Covered fact: `.exd` decoder (`Exd_DecodeTriangles`) is byte-identical to the `.up` decoder (`Up_DecodeTriangles`) — identical read sequence, same shared 40→72 expander, same element ctors; both use `u32 count + count × 40-byte` triangle records with the 72-byte runtime layout. Build-stable under the uniform +0x80 relocation. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — both decoders re-confirmed at their relocated addresses under build f61f66a9 and verified to share the same expander callee. |
+| `conflicts`      | None. |
+
+---
+
 ## Verification banner
 
 | Attribute | Value |

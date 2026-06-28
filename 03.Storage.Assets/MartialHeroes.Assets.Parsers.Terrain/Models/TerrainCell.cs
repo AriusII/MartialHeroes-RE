@@ -4,11 +4,74 @@ public sealed class TerrainCell
 {
     public const int GridSize = 65;
     public const int VertexCount = GridSize * GridSize;
+    public const int QuadCount = GridSize - 1;
+    public const float GridSpacing = 16.0f;
+    private const int PatchGridSize = 16;
+    private const int QuadsPerPatch = QuadCount / PatchGridSize;
+
     public required float[] Heights { get; init; }
     public required (float Nx, float Ny, float Nz)[] Normals { get; init; }
     public required byte[] TextureIndexGrid { get; init; }
     public required byte[] DirectionFlags { get; init; }
     public required (float R, float G, float B, float A)[] DiffuseColours { get; init; }
+
+    public float SampleGroundHeight(float localX, float localZ)
+    {
+        var maxWorld = QuadCount * GridSpacing;
+        var cx = localX < 0f ? 0f : localX > maxWorld ? maxWorld : localX;
+        var cz = localZ < 0f ? 0f : localZ > maxWorld ? maxWorld : localZ;
+
+        var fx = cx / GridSpacing;
+        var fz = cz / GridSpacing;
+
+        var col = (int)fx;
+        var row = (int)fz;
+        if (col >= QuadCount) col = QuadCount - 1;
+        if (row >= QuadCount) row = QuadCount - 1;
+
+        var fracX = fx - col;
+        var fracZ = fz - row;
+
+        var h00 = Heights[row * GridSize + col];
+        var h10 = Heights[row * GridSize + col + 1];
+        var h01 = Heights[(row + 1) * GridSize + col];
+        var h11 = Heights[(row + 1) * GridSize + col + 1];
+
+        var patchCol = col / QuadsPerPatch;
+        var patchRow = row / QuadsPerPatch;
+        var dirByte = DirectionFlags[patchRow * PatchGridSize + patchCol];
+
+        if ((dirByte & 1) == 0)
+        {
+            if (fracZ <= fracX)
+                return TriPlaneY(0f, 0f, h00, 1f, 0f, h10, 1f, 1f, h11, fracX, fracZ);
+            return TriPlaneY(0f, 0f, h00, 0f, 1f, h01, 1f, 1f, h11, fracX, fracZ);
+        }
+
+        if (fracX + fracZ < 1f)
+            return TriPlaneY(0f, 0f, h00, 1f, 0f, h10, 0f, 1f, h01, fracX, fracZ);
+        return TriPlaneY(1f, 0f, h10, 1f, 1f, h11, 0f, 1f, h01, fracX, fracZ);
+    }
+
+    private static float TriPlaneY(
+        float x0, float z0, float y0,
+        float x1, float z1, float y1,
+        float x2, float z2, float y2,
+        float px, float pz)
+    {
+        var ax = x1 - x0;
+        var ay = y1 - y0;
+        var az = z1 - z0;
+        var bx = x2 - x0;
+        var by = y2 - y0;
+        var bz = z2 - z0;
+        var ny = az * bx - ax * bz;
+        if (MathF.Abs(ny) < 1e-10f)
+            return y0;
+        var nx = ay * bz - az * by;
+        var nz = ax * by - ay * bx;
+        return y0 - (nx * (px - x0) + nz * (pz - z0)) / ny;
+    }
 }
 
 public readonly record struct LstCellEntry(uint Key, int MapX, int MapZ);

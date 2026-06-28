@@ -10,8 +10,9 @@ verification: pets/companions/summons subsystem [confirmed-absent] — static an
   Field-level interpretations of the attached-prop record (the three facing-frame offset pairs being
   int vs float, the unread word, the exact pickup-branch semantics) are UNVERIFIED (static-only,
   debugger-pending).
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-20
+ida_reverified: 2026-06-27
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -19,6 +20,7 @@ note: |
   gameplay subsystem. The doc reclassifies the three things that LOOK like a pet system (a "PetPanel"
   UI class, a "creature_item" data table, a "summon" effect-id range) to what they actually are, so no
   engineer builds a follower/summon feature that does not exist in the original.
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: creature_item.xdb global path string and boot-table registration present and cleanly relocated; PetPanel RTTI string present and cleanly relocated; confirmed-absent stance unchanged, cosmetic-prop reclassification still holds. 1 re-confirmed SAME, 0 corrected.
 -->
 
 # Pets / Companions / Summons — CONFIRMED-ABSENT — Clean-Room Specification

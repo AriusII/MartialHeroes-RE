@@ -1,4 +1,8 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the builder (CmsgChatChannel); 4 layout facts re-confirmed SAME (56-byte context header,
+# ChannelSelector u32 @0x04, length-prefixed text body len=strlen+1, selector%10==5 gate bypass);
+# 0 corrected.
 # CAPTURE-UNVERIFIED and HEADER-PARTLY-DECODED: see notes. capture_verified: false.
 
 name: CmsgChatChannel

@@ -6,8 +6,8 @@
 > NUL convention, and the (2:84) header-only-plus-30 s-cooldown shape; capture/debugger-pending for
 > the absolute on-wire byte-order/endianness of each length prefix, the inner field meanings of the
 > larger context/blob headers, and the on-wire VALUE meanings (mode/op/selector enumerations,
-> auto-accept event codes). ida_reverified: 2026-06-20 · ida_anchor: 263bd994 · evidence: [static-ida].
-> (Re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20).)
+> auto-accept event codes). ida_reverified: 2026-06-20 · ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida].
+> (Re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20).) (CYCLE 14 re-anchor (f61f66a9, 2026-06-27): confirmatory — FATE relation subsystem pinning markers, RelationPanel::setMemberOfRelation, FATE_TYPE_TRAINING strings, and party-vs-FATE boundary cleanly relocated. 1 re-confirmed SAME, 0 corrected.)
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL — `(3:21)`/`(2:83)`
 > INCLUDE it (per-opcode, not the prior uniform "verify the off-by-one"); (b) `(2:84)` carries NO
 > text in its builder and is 30-second rate-limited (corrected from the prior "19 + text" catalog

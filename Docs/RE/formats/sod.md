@@ -6,6 +6,18 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME, 0 corrected. Covered facts: (1) container layout — `u32 solidCount`, then a 108-byte `SolidRecord` array read in one pass, then per-solid (`u32 quadCount` + 48-byte `QuadRecord` array); file-size formula `4 + 108×solidCount + Σ(4 + 48×quadCount_i)` (§Container structure); (2) the loader copies each 48-byte `QuadRecord` opaquely at load time — field-reading of offsets +0x10 and above occurs at query time, not at parse time (§QuadRecord). Both facts build-stable under the ~+0x80 uniform relocation. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — loader read-path re-confirmed at relocated addresses under build f61f66a9. The runtime collision-query routine that consumes QuadRecord fields at +0x10+ was not re-located this pass (same gap as prior builds). |
+| `conflicts`      | None. |
+
+---
+
 ## Re-verification banner (2026-06-24 — QuadRecord full field table + multi-solid ordering confirmed)
 
 | Attribute        | Value |

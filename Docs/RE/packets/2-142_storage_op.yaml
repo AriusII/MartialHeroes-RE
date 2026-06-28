@@ -7,6 +7,9 @@
 #                        Amount i64 @0x08; sent only when Amount > 0)
 #   wire VALUE semantics: capture/debugger-pending (the Op enum: which value = deposit vs withdraw vs move)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify: body layout re-traced against Cmsg_StorageOp_Send; 4 fields
+#        re-confirmed SAME, 0 corrected. dispatch intact (specs/network_dispatch.md); ida_anchor f61f66a9.
 #   conflicts: none (2-142_storage_op.yaml re-confirmed; size 16 confirmed, field meanings remain static)
 
 name: CmsgStorageOp

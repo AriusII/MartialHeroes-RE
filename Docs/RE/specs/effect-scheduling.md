@@ -36,8 +36,8 @@ subsystems: [effects, combat, game_loop]
 >   DRAIN/dispatch consumer was not isolated this pass); *capture/debugger-pending* where a runtime
 >   witness is needed (the two death-FSM in-state clock reads' precise role; the per-kind particle
 >   colour/semantic labels).
-> - **ida_reverified:** 2026-06-22 (CYCLE 11: 10001 drain resolved — two-pass full-tree sweep; prior 2026-06-20 CYCLE 7)
-> - **ida_anchor:** 263bd994
+> - **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-22 CYCLE 11: 10001 drain resolved — two-pass full-tree sweep; prior 2026-06-20 CYCLE 7)
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the stated effect-list claims — the §3 "NOT a priority queue" model is

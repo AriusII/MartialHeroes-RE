@@ -7,7 +7,9 @@
 #                 result byte is forwarded opaquely; every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 1 field re-confirmed SAME
+#        (Result@8 selecting motion 8 vs 9; block forwarded to NPC panel updater), 0 corrected.
 #   conflicts: CORRECTED. A prior canonical-list entry tagged 4/40 "var / thin". The binary reads a fixed
 #              164-byte (0xA4) medium record. BINARY WINS.
 

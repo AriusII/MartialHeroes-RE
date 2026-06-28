@@ -11,8 +11,8 @@ verification: confirmed (the enter-world opcode ladder 1/9 -> 3/5 -> 4/1, the si
   movement value->animation mapping, the 4/4 overlay code semantics, the real-wire keepalive
   cadence, which UI control fires 1/0 vs 2/0 and where the socket closes, the per-area/per-dungeon
   cell counts that live in each VFS .lst, and the data-driven walk/run speeds).
-ida_anchor: 263bd994
-ida_reverified: 2026-06-24  # CYCLE 12 / Phase 3 -- 4/1 interior tables (roster A, scene-entity B, hotbar init) + 4/4 892B actor-record framing folded in (263bd994); 2026-06-24 audit: Cmsg_KeepaliveToggle_Send tri-valued arg convention documented (§2.5)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27  # CYCLE 14 re-anchor: confirmatory — 1 re-confirmed SAME; prior: 2026-06-24 (CYCLE 12 / Phase 3 -- 4/1 interior tables (roster A, scene-entity B, hotbar init) + 4/4 892B actor-record framing folded in (263bd994); 2026-06-24 audit: Cmsg_KeepaliveToggle_Send tri-valued arg convention documented (§2.5))
 evidence: [static-ida]
 sample_verified: false
 note: CYCLE 7 (2026-06-20) -- folded the world-entry-relevant region/zone-state resolution and the

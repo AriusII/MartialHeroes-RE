@@ -7,6 +7,10 @@
 #                        after: slot@0x00 + 17B name@0x01; sum 1+17 = 18)
 #   wire VALUE semantics: capture/debugger-pending (the exact CP949 length cap the server enforces in the 17-byte field)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the builder; 2 fields
+#        (SlotIndex u8@0x00, NewName CP949 C-string bytes[17]@0x01) re-confirmed SAME, 0 corrected.
+#        Slot written first then raw strcpy of new-name re-confirmed.
 #   conflicts: none (the refined cmsg_char_rename.yaml re-confirmed ACCURATE; the 18B name-only 1-13_rename_character.yaml
 #              tombstone is correct)
 

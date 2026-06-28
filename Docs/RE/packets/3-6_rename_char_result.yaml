@@ -8,6 +8,11 @@
 #     no name; it consumes two trailing 4-byte values as IEEE floats and forwards them to the
 #     char-select slot-record writer (placement values, not slot-index/unk integers).
 #   ida_reverified: 2026-06-21   ida_anchor: 263bd994   evidence: [static-ida]   cycle: 8
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgRenameCharResult); 6 layout facts
+#        re-confirmed SAME (Result u8 @0, ErrorCode u8 @1, Pad[2] @2, PlacementValue0 f32 @4,
+#        PlacementValue1 f32 @8, 4-bucket ErrorCode mapping {C8/C9, CC/CD/CF/D0/D1/D2, CE, D4});
+#        0 corrected.
 #   capture_verified: false
 
 name: SmsgRenameCharResult

@@ -12,6 +12,12 @@
 #     subject_string @ 0x39: confirmed
 #     body_text @ 0x4C: confirmed (variable length-prefixed string)
 #   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): handler re-traced; 11 fields (LetterId u32@0x00,
+#        Sender char[17]@0x04, Pad[3]@0x15, LetterType u32@0x18, AttachmentGold u32@0x1C,
+#        AttachmentItemId u32@0x20, StatusFlags u32@0x24, DateString char[17]@0x28,
+#        SubjectString char[17]@0x39, Reserved[2]@0x4A, BodyText@0x4C length-prefixed) + LetterType
+#        ==51 branch re-confirmed SAME, 0 corrected.
 #   capture_verified: false
 
 name: SmsgSrvLetterReceived

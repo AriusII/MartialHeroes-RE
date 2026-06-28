@@ -8,6 +8,10 @@
 #   send path:           confirmed   (the template is compressed ONCE and cached -- compress-only, NOT re-encrypted)
 #   on-wire cadence:     capture/debugger-pending (whether the server expects/answers it, and the real period under load)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 re-anchor)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- confirmatory re-anchor: the opcode dispatch table is structurally intact on build f61f66a9
+#        (see specs/network_dispatch.md); packet body offsets are clean-relocation confirmatory
+#        (96% of functions shifted uniformly +0x80/+0x7e, behavior unchanged), not individually re-traced.
 #   conflicts: none. NOTE: 2/10000 is ONE of TWO distinct keepalive C2S mechanisms -- the timer template here,
 #              and the on-demand 1-byte 2/112 toggle (packets/2-112_keepalive_toggle.yaml). Both are real.
 

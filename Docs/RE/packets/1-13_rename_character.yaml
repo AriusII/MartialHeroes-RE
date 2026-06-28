@@ -1,4 +1,5 @@
 # *** SUPERSEDED -> see packets/cmsg_char_rename.yaml ***
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; tombstone redirect to cmsg_char_rename.yaml re-confirmed against the builder; dispatch routing SAME, 0 corrected.
 # Refined rename layout corrects the body to slot-byte + 17B CP949 name (not an 18B name-only
 # buffer); see cmsg_char_rename.yaml. The opcodes.md 1/13 row points there. Provenance only.
 #

@@ -1,8 +1,9 @@
 ---
 status: confirmed
-verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader, playback-category mixer routing, SOUND_KIND value table, BGM-swap crossfade, trade-busy override (5/106) = control-flow-confirmed; +9 record flag + per-FE-widget click cue + name/param overlap + router category-5-vs-0..4 cap = capture/debugger-pending
+verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader, playback-category mixer routing, SOUND_KIND value table, BGM-swap crossfade, trade-busy override (5/106) = control-flow-confirmed; +9 record flag + per-FE-widget click cue + name/param overlap + router category-5-vs-0..4 cap = capture/debugger-pending; CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME; 0 corrected
 ida_reverified: 2026-06-20
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: resolved         # C1 coop-level NORMAL not PRIORITY; C2 primary caps 0x11 not 0x10011; C3 five tables loaded (3 read / 2 dead) not three; C4 per-area soundtable path; C5 ambient EFF = kind 6 via a separate helper
 sample_verified: partial   # VFS census SAMPLE-VERIFIED; runtime logic CODE-CONFIRMED from binary control-flow

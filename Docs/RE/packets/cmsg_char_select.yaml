@@ -15,6 +15,11 @@
 #                        Mode 2 literal: DEBUGGER-PENDING -- not witnessed live as of IDB 263bd994.)
 #   wire VALUE semantics: mode 0 and mode 1 CODE-CONFIRMED; mode 2 INFERRED/DEBUGGER-PENDING.
 #   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]   # CYCLE 12 Phase 2:
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the builder; 2 fields
+#        (SlotIndex u8@0x00, Mode u8@0x01) + mode literals 0 (slot-lock) and 1 (select-and-play)
+#        code-confirmed SAME, 0 corrected. Mode 2 (delete-confirm) remains inferred/debugger-pending,
+#        consistent with the spec.
 #                        mode roles pinned to UI actions -- mode 1 = select-and-play (play-confirm, drives
 #                        the enter ladder); mode 0 = slot-lock/pre-play. Mode 2 = delete-confirm (inferred).
 #   conflicts: SUPERSEDES the earlier "CmsgManageCharacter / delete-overload" reading of this file;

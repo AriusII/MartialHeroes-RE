@@ -12,6 +12,10 @@
 #                 control-flow-confirmed on IDB SHA 263bd994; record VALUE semantics are
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 10 items re-confirmed SAME
+#        (17B header: flag@0, viewerId@1, areaGridId@5, CenterZ@9, CenterX@13; tag sizes 1/2/3=892,
+#        4=24, 6=36, 9=24; zero-tag terminator), 0 corrected.
 #   readiness: IMPLEMENTATION-READY for the C# snapshot decoder (framing control-flow-confirmed);
 #              per-record value semantics are NON-blocking runtime residuals.
 #   conflicts: none (CYCLE 12 / Phase 3 -- authored to resolve the dangling cross-ref: the tag-4

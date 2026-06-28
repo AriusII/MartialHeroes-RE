@@ -15,7 +15,9 @@
 verification: sample-verified            # mobinfo.mi IS in the VFS at data/ui/mobinfo.mi; 592 B = 4 + 21 x 28 confirmed by stride arithmetic and the count-header byte
 ida_reverified: 2026-06-21
 re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + 2026-06-21 re-pass + 2026-06-24 re-pass   # no-loader verdict HARDENED to CONFIRMED not read (4-way exhaustive static search); record-field structure refined; +4/+8 Δ=+1 fact recorded; cross-group +16/+20 observation added; +12 always-populated noted
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27
+# CYCLE 14 re-anchor (f61f66a9): confirmatory - mobinfo.mi confirmed still not read (zero hits for mobinfo in full string store of new build), 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: D10-C2 RESOLVED — prior "ABSENT from VFS" verdict REVERTED; file is present. "No client loader" verdict UNCHANGED and HARDENED (CYCLE 7: confirmed not read in build 263bd994).
 file_presence: PRESENT at data/ui/mobinfo.mi  # 592 bytes; the prior "ABSENT" verdict is WITHDRAWN/REVERTED

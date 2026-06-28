@@ -7,6 +7,8 @@
 #                 u32-vs-u8+3pad, full Flags enum) are capture/debugger-pending.
 #   ida_reverified: 2026-06-16
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: none (re-confirmed against the 5/0 handler read site).
 

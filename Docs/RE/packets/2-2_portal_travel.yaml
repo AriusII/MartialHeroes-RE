@@ -1,4 +1,5 @@
 # spec: Docs/RE/packets/2-2_portal_travel.yaml
+# CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the send-path builder, 1 field re-confirmed SAME, 0 corrected.
 # Role: C2S portal / map-transition (teleport) travel request. Auto-emitted on arrival at a portal.
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 # CAPTURE-UNVERIFIED: routing + size are control-flow facts; the field MEANING is a static inference.

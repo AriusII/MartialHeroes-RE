@@ -22,6 +22,9 @@ verification: written 2026-06-21 against the doida.exe binary (build 263bd994, f
   4=Monk), default-equip ids ≈+656; observed a 3/5-occupied sample. GAP recorded: the 3/1
   CharacterList handler did not fire while slots were populated (delivery-timing vs NetHandler-
   persistence follow-up). See §2.1.
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: Character Select (engine state 4)
 evidence: [static-ida]
 capture_verified: false

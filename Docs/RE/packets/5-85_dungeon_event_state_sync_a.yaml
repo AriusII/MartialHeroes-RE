@@ -7,6 +7,10 @@
 #                 VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the handler; 4 fields
+#        (Header bytes[8]@0x00, StateA u32@0x08, StateB u32@0x0C, StateC u32@0x10)
+#        re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED. A prior reading marked 5/85 "var (20 hdr)"; the read is a fixed 20-byte block.
 #              Also: the scenario id (300/301) is read from the resident state object, not from the wire.

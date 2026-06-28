@@ -1,4 +1,5 @@
 # *** SUPERSEDED -> see packets/cmsg_char_select.yaml ***
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; tombstone redirect to cmsg_char_select.yaml re-confirmed against the builder; dispatch routing SAME, 0 corrected.
 # The authoritative 1/7 spec is packets/cmsg_char_select.yaml: CmsgSelectCharacterSlot, a 2-byte
 # [u8 slot][u8 mode] character-SELECT commit (mode 1 = select-and-play, 0 = slot-lock). The
 # opcodes.md 1/7 row points there. The old "StateFlag lock/relation" reading below AND the later

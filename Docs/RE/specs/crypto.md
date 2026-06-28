@@ -16,9 +16,10 @@
   the reply builder were each re-confronted to the binary by control flow + operands). **Open
   question #1 is RESOLVED statically** (see Section 5): the byte-cipher routine has **exactly one
   cross-reference — the outbound send gate** — so it is structurally unreachable on the receive path;
-  inbound is **LZ4-decompress only, then route**, with no inverse cipher.
+  inbound is **LZ4-decompress only, then route**, with no inverse cipher. **CYCLE 14 re-anchor (f61f66a9): 9 facts re-confirmed SAME, 0 wire facts changed (anchor re-pinned only; see §9.4).**
+- **ida_reverified: 2026-06-27** (CYCLE 14 re-anchor: all byte-cipher, LZ4, send-chain, keyless-stateless, direction-asymmetry, header-bypass, and login-packet-builder facts re-confirmed SAME on build f61f66a9; ida_anchor re-pinned from 263bd994; no wire-fact change. Prior: 2026-06-24)
 - **ida_reverified: 2026-06-24** (spec-audit re-confirmation: all byte-cipher, LZ4, handshake, and lifecycle facts re-confirmed; cipher control-flow obfuscation noted; SEED-128 non-wire cipher documented §7.2; staged-M width confirmed as static literal; `structs/secure_context.md` DRIFT-1/DRIFT-2 corrected. Prior: 2026-06-21)
-- **ida_anchor: 263bd994**
+- **ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963**
 - **evidence: [static-ida]** (this campaign carried no live capture).
 - **capture/debugger-pending (the only residuals):** the **concrete server modulus `n` and exponent
   `e`**, the individual **`L1`/`L2` split** (only the sum `L1 + L2 = 42` is a client constant), the
@@ -869,3 +870,127 @@ structure was contradicted.** The following refinements were integrated:
 6. **Inbound no-cipher path confirmed by positive control-flow**: the inbound dispatcher calls the LZ4
    decompress stage then routes to message handlers with **no cipher call between decompress and
    dispatch** — positive control-flow confirmation consistent with Section 5.
+
+### 9.4 CYCLE 14 re-anchor (build f61f66a9, static-only, 2026-06-27)
+
+A re-verification pass on the new canonical build (input SHA
+`f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`) confirmed every cluster
+fact previously anchored to build `263bd994`. **No wire constant, field offset, rotation amount,
+whitening constant, round count, or behavioral fact was changed.** The only committed change is
+the re-pin of `ida_anchor` in the verification banner. Nine facts re-confirmed SAME:
+
+1. **Round count R = 3** (outer loop seeded at 3, runs while counter ≠ 1 → 3 passes of the full
+   forward-then-backward sweep pair) — unchanged.
+2. **Sweep direction**: forward sweep (low→high) first, then backward sweep (high→low) within each
+   round — unchanged.
+3. **Forward sweep**: ROL 3, add remaining-length counter, XOR per-sweep feedback accumulator,
+   output = `71 − ROR(t,1)` (equivalently `0x48 + NOT8(ROR(t,1))`) — unchanged.
+4. **Backward sweep**: ROL 4, add remaining-length counter, XOR per-sweep feedback accumulator,
+   output = `ROR(t XOR 0x13, 3)` — unchanged.
+5. **Position counter as remaining-length countdown**: seeded from payload length, decremented per
+   byte, low 8 bits added; both sweeps restart their own countdown at the payload length — unchanged.
+6. **Keyless and stateless**: no key schedule, no per-connection seed, no rolling global; feedback
+   accumulator reset to 0 at the start of each sweep; pure function of `(payload bytes, length)` —
+   unchanged.
+7. **Single cross-reference** for the cipher routine (`Net_Cipher_OutboundXorRol3Round`): its
+   sole caller is the outbound encrypt gate (`Net_EncryptOutboundPacket`), confirming Section 5's
+   positive structural proof that the cipher is unreachable on the receive path — unchanged.
+8. **Header-bypass rule**: the 8-byte frame header is always plaintext; header-only frames (wire
+   size == 8) are returned without any ciphering; the cipher operates on `&frame[8]` with length
+   `wire_size − 8` — unchanged.
+9. **Login-packet builder** (`AuthSession_BuildLoginPacket2B`, formerly aliased
+   `AuthSession_BuildLoginPacket43` on the prior build): writes sub-opcode `0x2B` (43 decimal)
+   as the first payload byte, validates account and password each at ≥ 2 characters and below
+   their respective caps, handles an optional PIN, and stages the password into a zero-filled
+   credential buffer — unchanged.
+
+**Build delta note.** The new build carries an approximately 128-byte `.text` insertion and an
+approximately one-page data-section shift relative to the prior anchor. The crypto cluster
+functions relocated cleanly with a uniform offset and their control flow plus operands matched
+the prior reading; behavior is unchanged. Two canonical names (`Net_Cipher_OutboundXorRol3Round`
+and `AuthSession_BuildLoginPacket2B`) were among the 116 functions whose names did not carry
+automatically — both were re-confirmed by behavioral signal and are now named in the live IDB at
+their new addresses. This re-anchor is purely a provenance update; no implementation change is
+required.
+
+---
+
+## 10. SEED-128 Consumers — Cycle 15 Addendum
+
+**`ida_reverified: 2026-06-27` (CYCLE 15 — SEED-128 and RSA/CryptoAPI call-graph mapped)**
+
+### 10.1 SEED-128 Core: `SeedCipher_EncryptBlock`
+
+The SEED-128 block cipher core implements a **32-round Feistel** structure. It uses four
+256-entry × 32-bit MDS lookup tables in the read-only data segment. Output
+is endian-swapped per the SEED standard via `_rotl(x, 24) & 0xFF00FF00 | _rotl(x, 8) & 0x00FF00FF`.
+
+**Prototype:**
+```
+SeedCipher_EncryptBlock(subkey_array: u32[32], block_inout: u32[4]) → u32
+```
+
+### 10.2 Consumer 1 — Outbound Network Cipher Gate
+
+`Net_EncryptOutboundPacket` is the outbound encrypt gate called by `Net_SendPacket`. Header-only packets (`wire_size == 8`) bypass all transforms. Payloads are
+forwarded to `Net_Cipher_OutboundXorRol3Round` — **not** to `SeedCipher_EncryptBlock` directly.
+
+The actual in-game wire cipher is the **keyless stateless XOR-ROL-3-round** documented in
+Section 3. SEED-128 is NOT used for live gameplay traffic.
+
+### 10.3 Consumer 2 — Login RSA Credential Encryption
+
+`SeedCipher_EncryptBlock` is a dependency of the **credential-encryption chain** triggered at
+login/world-enter via `Secure_BuildSecureAuthReply`. The full RSA auth flow:
+
+| Step | Function | Action |
+|------|----------|--------|
+| 1 | `Secure_BuildSecureAuthReply` | Entry; calls `SecureCtx_UnprotectPageRW` |
+| 2 | `Secure_EncryptCredentialReply` | PKCS#1 v1.5 type-2 pad + RSA modexp |
+| 3 | `Rsa_PadAndModExp` | `c = m^e mod n` — big-integer arithmetic |
+| 4 | `Bignum_ToBytes_BigEndian` | Serialize ciphertext as big-endian digits |
+| 5 | `PacketBuf_WhitenPayloadDwords` | XOR whiten: key `0x29`, selector `0x40`, 41 DWORDs |
+| 6 | `SecureCtx_LockPageNoAccess` | Restores PAGE_NOACCESS |
+
+**Credential page protection:** The credential memory page is guarded with
+`VirtualProtect(PAGE_NOACCESS)` between uses. Only `SecureCtx_UnprotectPageRW` briefly opens
+it; `SecureCtx_LockPageNoAccess` closes it again immediately. This defeats naive memory-dump
+attacks timed outside the protected window.
+
+**Post-RSA whitening:** The first 41 DWORDs of the packet payload are XOR-whitened with
+per-dword key `0x29` using selector `0x40`. This is a secondary obfuscation layer on top of
+the RSA ciphertext before it is placed on the wire.
+
+### 10.4 Windows CryptoAPI Cluster — Server Signature Verification
+
+A set of ADVAPI32 wrappers (`CryptWrap_*`) implements
+**server-to-client packet authentication** using RSA + SHA-1 via the Windows CryptoAPI:
+
+| Wrapper | CryptoAPI call |
+|---------|---------------|
+| `CryptWrap_AcquireContext` | `CryptAcquireContextA` |
+| `CryptWrap_ImportKey` | `CryptImportKey` (server RSA public key blob) |
+| `CryptWrap_CreateHash` | `CryptCreateHash` (SHA-1 context) |
+| `CryptWrap_HashData` | `CryptHashData` (hash packet body) |
+| `CryptWrap_GetHashParam` | `CryptGetHashParam` (retrieve digest) |
+| `CryptWrap_VerifySignature` | `CryptVerifySignatureA` |
+| `CryptWrap_DeriveKey` | `CryptDeriveKey` |
+| `CryptWrap_Decrypt` | `CryptDecrypt` |
+| `CryptWrap_DestroyHash` | `CryptDestroyHash` |
+| `CryptWrap_DestroyKey` | `CryptDestroyKey` |
+| `CryptWrap_ReleaseContext` | `CryptReleaseContext` |
+
+This cluster is **out of scope for `Network.Crypto`** (as noted in Section 1's executive
+summary). It is documented here for completeness and cross-referencing with the anti-cheat
+and auth-session RE notes.
+
+### 10.5 RC4 — Not Confirmed
+
+The binary-wide scan for an RC4 S-box init loop (`cmp eax, 0x100` pattern within `.text`)
+produced no confirmed match. All `0x100` comparisons were attributed to UI, locale, or
+Lua subsystems. The world-enter file-hasher hypothesized in prior cycles is more likely the
+CryptoAPI SHA-1 path (`CryptHashData` cluster above) than a raw RC4 implementation.
+
+**Status: RC4 not present in the client binary as a standalone implementation.**
+
+

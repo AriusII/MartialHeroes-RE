@@ -21,8 +21,9 @@
 >               indices 0..5 and filenames `(0000)-plane.xobj` .. `(0005)-squarehorn.xobj`. The
 >               leading `(NNNN)` filename prefix == `xobj.lst` slot_index == body marker line is
 >               byte-confirmed across all 30 bodies and 32 lst records.
-> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > ida_reverified: 2026-06-24
+> ida_reverified: 2026-06-27 — CYCLE 14 re-anchor (f61f66a9): confirmatory - xobj.lst manifest and per-file ASCII .xobj loader cleanly relocated, 1 re-confirmed SAME, 0 corrected
 > evidence: [static-ida, vfs-sample]
 > conflicts: none. One remaining open item: the exact `.xeff` body field that stores the referenced
 >            xobj slot index (see Linkages → "xeff ↔ xobj join (OPEN)").

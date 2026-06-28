@@ -6,27 +6,15 @@
 
 ---
 
-## Re-verification banner (2026-06-24, corpus re-confirm — 1578-file census)
+## Re-verification banner (2026-06-27, Cycle 14 re-anchor)
 
 | Attribute        | Value |
 |------------------|-------|
-| `verification`   | `sample-verified` — full-corpus re-verification (1578 `.mud` files) plus static loader/indexer/consumer read-path re-walk. All layout claims and behavioral notes below RE-CONFIRMED with no drift. |
-| `ida_reverified` | `2026-06-24` |
-| `ida_anchor`     | `263bd994` |
-| `evidence`       | `[static-ida, vfs-sample]` — full-corpus census (1578 files, all exactly 0x8000 B) + static read-path (loader → tile indexer → sole ambient-sound consumer); per-byte value distribution corroborates the byte-map independently |
-| `conflicts`      | None. All claims re-confirmed. One label nuance noted and applied: the BGM override (byte 2 consumer, Runtime usage §3) is keyed on a player-state flag rather than strictly an interior/exterior flag — the label is adjusted from "indoor override" to "player-state override" throughout. This is a behavioral-wording refinement only; no layout fact changes. |
-
----
-
-## Re-verification banner (2026-06-21, refinement pass)
-
-| Attribute        | Value |
-|------------------|-------|
-| `verification`   | `sample-verified` — fixed 0x8000 size, grid geometry, world→tile indexer, and the byte-2/3-4/5-7 BGM/BGE/EFF consumer reads are all matched against a real VFS sample **and** the legacy loader/indexer/consumer read-path (two-witness). RE-CONFIRMED in full on this build with no drift. |
-| `ida_reverified` | `2026-06-21` |
-| `ida_anchor`     | `263bd994` |
-| `evidence`       | `[static-ida, vfs-sample]` — loader (raw 0x8000 single read), tile indexer, and the sole ambient-sound consumer (witness 1) + a real VFS cell sample (witness 2) |
-| `conflicts`      | None. Re-confirmed on this build: headerless fixed 32 768 B; 64 × 64 tiles, 8-byte stride, 16-unit tiles; the sole consumer reads **only bytes 2–7** (byte 2 = BGM, bytes 3–4 = BGE, bytes 5–7 = EFF, byte 7 `effId2` confirmed consumed); **bytes 0 and 1 are never read** (and were observed single-valued `0x00` across all 4096 tiles of the sample cell) — the walk/run footstep hypothesis stays REFUTED. Two enrichments sharpened (not conflicts): the missing-file (null-blob) fallback tile is specifically a fixed **all-zero** tile ⇒ total silence in every slot (§Runtime usage); and a **missing `.mud` is a soft outcome**, not a load failure — the loader reports success with a null blob, so the cell's `.gad`/`.map` still load (§Read algorithm / §Runtime usage). |
+| `verification`   | `sample-verified` — re-verified loader, indexer, and update loop logic statically against the live database (`f61f66a9`). Verified timed evaluation (10 min timer) and movement threshold gating. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida, vfs-sample]` — loader `Mud_ReadBlob`, indexer `Mud_TileAt`, and timer loop `SoundMgr_UpdateAmbientFromMudTile` verified. |
+| `conflicts`      | None. All structural and indexing claims confirmed. |
 
 ---
 
@@ -107,128 +95,60 @@ The `& 0x3F` masks clamp both axes to the 0..63 range; the `<< 6` is the 64-tile
 `* 8` is the per-tile byte stride. — confidence: CONFIRMED
 
 The cell-origin biasing convention `(mapX - 10000) * 1024` is shared with the terrain system —
-see `terrain.md` for the full cell coordinate model.
-
----
+see `terrain.md`
 
 ## Read algorithm
 
-There is **no parse step**. The file is read as one fixed-size raw blob; the grid is interpreted
-lazily by the audio consumer, tile-by-tile, on demand. The on-disk bytes ARE the runtime grid —
-no header, no transform, no decode, no validation of tile contents.
+The file loader allocates memory on demand and handles missing grids gracefully.
 
-1. Open the cell's `.mud` over the VFS by its logical path (the loader builds the cell base path,
-   then appends the `.mud` extension).
-2. **If the file is absent:** treat as a **soft / non-fatal** outcome — the loader reports success,
-   the per-cell grid pointer stays **null**, and the cell's companion `.gad`/`.map` continue to
-   load normally. (A missing `.mud` is NOT a load failure.) The later tile lookups then resolve to
-   the static default tile (see §Runtime usage). — confidence: CONFIRMED
-3. Allocate exactly **32768 bytes (0x8000)**. (Allocation failure is a hard error — the grid
-   pointer is left null and the load returns failure.) — confidence: CONFIRMED
-4. Read exactly **32768 bytes** in a **single** read into that buffer. (A read error on an opened
-   file is a hard error — the buffer is freed, the pointer nulled, and the load returns failure.)
-   — confidence: CONFIRMED
-5. Retain the buffer verbatim as the cell's per-cell audio grid. No byte-level parse, no decode, no
-   tile-content validation occurs at load time. — confidence: CONFIRMED
-
-This sharp split — only a *missing* file is soft, while an alloc failure or a read error on an
-*opened* file is hard — is what lets a cell with no ambient-sound grid stream in silently while a
-truncated/corrupt grid still surfaces as a load error.
+1. **Path Construction:** Constructed via `sprintf(buf, "%s.mud")` in the streaming call.
+2. **File Invocation:** Invoked via `Mud_LoadGrid` during cell streaming. The manager frees any previously allocated grid buffer before attempting to load.
+3. **Low-Level Read (`Mud_ReadBlob`):**
+   - Instantiates a local stack-based `DiskFile` object.
+   - If the file is **absent** (`DiskFile::IsValid()` returns false), the function cleans up, sets the return value `al` to `1` (`true` status), and returns. The grid pointer remains **null**. (Soft fallback prevents crashes and allows cell loading to proceed).
+   - If the file exists:
+     - Allocates exactly **32,768 bytes (0x8000)** via `operator new`.
+     - Performs a single bulk read `DiskFile::ReadVirtual` of `32,768` bytes into the buffer.
+     - On read error (hard failure), the buffer is deleted, the pointer is nulled, and the function returns `false` (`0`), which aborts cell loading.
 
 ---
 
 ## Tile layout (8 bytes)
 
-Each tile is a fixed 8-byte record. Per-byte usage was recovered from the sound-manager
-consumer's byte reads and cross-checked against the sample's value distribution. The sole consumer
-that walks this grid reads **only bytes 2–7**; bytes 0 and 1 are never read by it (see below).
+Each tile is a fixed 8-byte record:
 
-| Offset | Size | Type | Field          | Notes / meaning                                                   | Confidence |
-|-------:|-----:|------|----------------|------------------------------------------------------------------|------------|
-| 0      | 1    | u8   | unread0        | Not read by the located consumer. Meaning unknown; treat as opaque/ignored. Was previously hypothesised as a walk-footstep zone index — that reading is REFUTED (see below). Observed 0 in available samples. | REFUTED-hypothesis / unconsumed |
-| 1      | 1    | u8   | unread1        | Not read by the located consumer. Meaning unknown; treat as opaque/ignored. Was previously hypothesised as a run-footstep zone index — that reading is REFUTED (see below). Observed 0 in available samples. | REFUTED-hypothesis / unconsumed |
-| 2      | 1    | u8   | bgmZoneId      | Background-music zone index → `.bgm` table (per-zone music)       | CONFIRMED |
-| 3      | 1    | u8   | bgeAmbientId0  | Background-environment ambient index, layer 0 → `.bge` table      | CONFIRMED |
-| 4      | 1    | u8   | bgeAmbientId1  | Background-environment ambient index, layer 1 → `.bge` table      | CONFIRMED |
-| 5      | 1    | u8   | effId0         | 3D positional sound-effect index, slot 0 → `.eff` table           | CONFIRMED |
-| 6      | 1    | u8   | effId1         | 3D positional sound-effect index, slot 1 → `.eff` table           | CONFIRMED |
-| 7      | 1    | u8   | effId2         | 3D positional sound-effect index, slot 2 → `.eff` table. Confirmed consumed: read and used as a direct index into the per-area EFF sound table by the effect-sound-table loader. | CONFIRMED |
+| Offset | Size (Bytes) | Type | Field Name | Description |
+|:---:|:---:|:---|:---|:---|
+| `+0x00` | 1 | `u8` | `unread0` | Ignored by consumer. |
+| `+0x01` | 1 | `u8` | `unread1` | Ignored by consumer. |
+| `+0x02` | 1 | `u8` | `bgmZoneId` | BGM zone index mapping to the per-area `.bgm` table. |
+| `+0x03` | 1 | `u8` | `bgeAmbientId0` | Ambient sound layer 0 mapping to the `.bge` table. |
+| `+0x04` | 1 | `u8` | `bgeAmbientId1` | Ambient sound layer 1 mapping to the `.bge` table. |
+| `+0x05` | 1 | `u8` | `effId0` | 3D positional effect slot 0 mapping to the `.eff` table. |
+| `+0x06` | 1 | `u8` | `effId1` | 3D positional effect slot 1 mapping to the `.eff` table. |
+| `+0x07` | 1 | `u8` | `effId2` | 3D positional effect slot 2 mapping to the `.eff` table. |
 
-- **Record count source:** fixed by geometry — always 64 × 64 = 4096 tiles. Not stored in the
-  file; derived from the constant grid dimensions. — confidence: CONFIRMED
-- **Record stride:** 8 bytes. — confidence: CONFIRMED
-- **Sentinel value:** index value `0` in any audio field means "no sound / silence" for that slot;
-  the consumer stops the previously-playing entry when a tile's value transitions to 0. This rule
-  applies to bytes 2–7. — confidence: CONFIRMED
-
-### Bytes 0 and 1 — walk/run footstep hypothesis REFUTED
-
-An earlier hypothesis paired bytes 0 and 1 with the per-area `.wlk` (walk) and `.run` (run)
-footstep sound tables, on the arithmetic that exactly two tile bytes and exactly two unmapped
-sound-table families remained. **That hypothesis is REFUTED.** The sole consumer that walks this
-grid reads only bytes 2 through 7; bytes 0 and 1 are never read by it. There is therefore no
-evidence that these two bytes carry walk/run footstep zone indices, and this spec makes no such
-claim. Both bytes are left as **unconsumed by the located consumer** — meaning unknown, to be
-treated as opaque/ignored by a faithful port. Footstep audio, if it exists, is sourced elsewhere
-and is not driven by these `.mud` tile bytes.
+- **Sentinel Value:** `0` means silence. Transitions to `0` stop active playbacks.
 
 ---
 
-## Enumerations / flags
+## Runtime usage (behavioral)
 
-No bitflag fields. All consumed bytes are small integer indices into the per-area sound tables
-(`.bgm` / `.bge` / `.eff`), each entry of which is selected by the byte's value used directly as a
-0-based row index, with `0` reserved as the silence sentinel. The on-disk format of those tables
-and the full leaf-audio resolution chain are documented in `sound_tables.md`.
+### A. Coordinate Indexing (`Mud_TileAt` & `Mud_TileAtLocal`)
+To sample the grid, absolute player coordinates `(worldX, worldZ)` are biased by subtracting the cell's SW origins `(originX, originZ)`:
+- $\text{localX} = \text{worldX} - \text{originX}$
+- $\text{localZ} = \text{worldZ} - \text{originZ}$
+- $\text{col} = \lfloor \frac{\text{localX}}{16} \rfloor \ \& \ 0\text{x}3\text{F}$
+- $\text{row} = \lfloor \frac{\text{localZ}}{16} \rfloor \ \& \ 0\text{x}3\text{F}$
+- $\text{tile\_offset} = (\text{col} + (\text{row} \times 64)) \times 8$
 
----
+### B. Missing File Fallback
+If the grid pointer is **null** (due to missing `.mud` file), `Mud_TileAt` returns a pointer to a statically-allocated default tile in the BSS region of the binary. The OS loader zero-fills BSS, so the default tile is all-zero bytes, resulting in total silence for all slots.
 
-## Resolution chain (mud tile byte → sound table → leaf audio)
-
-Each consumed tile byte is used as a **direct 0-based row index** into the matching per-area sound
-table for the cell's area (`<AAA>` = zero-padded 3-digit area number from the `.mud` path, e.g.
-`map001`). The table record's `sound_entry_id` (u32 LE at record offset +0x00) names the leaf
-`.ogg`.
-
-```
-byte 2 (bgmZoneId)     → soundtable<AAA>.bgm[N] → sound_id → data/sound/2d/{sound_id}.ogg
-byte 3,4 (bgeAmbientId)→ soundtable<AAA>.bge[N] → sound_id → data/sound/2d/{sound_id}.ogg
-byte 5,6,7 (effId)     → soundtable<AAA>.eff[N] → sound_id → data/sound/3d/{sound_id}.ogg
-                          + 3D position (record +0x20 X / +0x24 Y / +0x28 Z) and radius (+0x2C)
-byte 0, byte 1         → NOT read by the located consumer (no resolution chain)
-```
-
-A mud byte of 0 selects record index 0 (the null sentinel) and plays nothing. The 0-based direct
-index rule is SAMPLE-VERIFIED for BGM / BGE / EFF across a full area-001 census and globally
-corroborated (cross-map census: max bgmZoneId = 10, max bgeAmbientId = 20, max effId = 154 — all
-well under the 256 records per table). Full table layout and chain detail: `sound_tables.md`.
-
----
-
-## Runtime usage (informative — behaviour, not file layout)
-
-1. `.mud` is loaded together with the cell's `.gad` and `.map` when a terrain cell is streamed in.
-2. The 32 KiB blob is retained as the terrain world's per-cell audio grid.
-3. Each frame the sound manager takes the local player's world `(X, Z)`, computes the current
-   tile via the indexing above, and compares the tile's indices against what is currently playing:
-   - **BGM (byte 2):** selects the music zone via the `.bgm` table. A player-state override substitutes
-     a fixed music cue when the player-state flag is set (keyed on a player-state field, not strictly
-     an interior/exterior test).
-   - **BGE (bytes 3, 4):** two ambient/environment sound layers via the `.bge` table, started and
-     stopped as the player crosses tiles.
-   - **EFF (bytes 5, 6, 7):** up to three 3D positional sound effects via the `.eff` table;
-     byte 7 (`effId2`) is confirmed read and used as an EFF-table index by the effect-sound-table
-     loader.
-   - **Bytes 0, 1:** not read by this consumer — no audio behaviour is driven by them.
-   - A periodic forced re-pick re-evaluates the current tile even without movement. The interval is
-     **600 000 ms (exactly 10 minutes)** — the consumer compares the elapsed time since the last
-     re-pick against this constant.
-4. **Missing `.mud` (null blob):** a missing file is a soft outcome (see §Read algorithm) — the
-   grid pointer stays null and the cell streams in regardless. When the grid pointer is null, the
-   indexer returns a single fixed **static default tile** rather than reading the grid. That default
-   tile is specifically an **all-zero** tile, so every audio slot resolves to the `0` silence
-   sentinel: a cell with no `.mud` plays **no BGM, no BGE, and no EFF** at all. — confidence:
-   CONFIRMED
+### C. Double-Gated Update Loop (`SoundMgr_UpdateAmbientFromMudTile`)
+The update loop evaluates player coordinates every frame but is double-gated to save cycles:
+- **Timer Gate:** Checks if `GetTickCount() - last_eval_time` exceeds `600,000 ms` (10 minutes). If true, updates the timer and forces a full coordinates sampling (allowing time-of-day changes to apply even if player is still).
+- **Movement Gate:** If the timer has not expired, a coordinates check runs only if the player has moved more than `2.0` world units since the last evaluation (computed via `Vector_DistanceCompare`). Otherwise, the loop exits immediately.
 
 Crossfade/stop timing and the indoor override id are behavioural details that belong to a
 sound-subsystem spec, not to this format doc.

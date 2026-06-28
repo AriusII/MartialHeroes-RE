@@ -7,6 +7,10 @@
 #                 is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 9 fields
+#        (Sort u8@+0x00, GapA bytes[3]@+0x01, Id u32@+0x04, Counter1..Counter6 u32@+0x08..+0x1C)
+#        re-confirmed SAME, 0 corrected. Counter5 >=150 tier toggle re-confirmed.
 #   evidence: [static-ida]
 #   conflicts: none. The deep struct pass confirmed 5/90 field-decodes its 32-byte block into the shared
 #              PvP-state object (8 fields) -- NOT opaque-forward. This file already reflects that.

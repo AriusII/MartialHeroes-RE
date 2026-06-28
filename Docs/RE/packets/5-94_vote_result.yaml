@@ -7,6 +7,10 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 8 fields
+#        (ActorSort u8@0x00, GapA bytes[3]@0x01, ActorId u32@0x04, VoteSide u8@0x08, ByteB u8@0x09,
+#        ByteC u8@0x0A, Pad0 bytes[1]@0x0B, VoteResult u32@0x0C) re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: REFINED. An earlier same-wave note marked 5/94 "opaque-forward"; a deeper struct pass
 #              shows the setter field-decodes the 16-byte block into the shared PvP-state object (the

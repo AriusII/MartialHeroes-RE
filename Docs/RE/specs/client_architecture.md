@@ -1,7 +1,7 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — Single Win32 window / VFS-mount / scene-machine cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
 ---

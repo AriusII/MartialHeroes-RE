@@ -30,7 +30,9 @@
 > the binary's structure and control flow** (no debugger, no captures this cycle). Spec-audit
 > corrections applied 2026-06-24: added §3.3 nuance distinguishing the gameplay state (+1420) from the
 > per-frame computed display-state (+1280 / dword idx 320).
-> **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963  **evidence:** [static-ida]
+> **ida_reverified:** 2026-06-20 (SHA 263bd994, CYCLE 7); spec-audit 2026-06-24; CYCLE 14 re-anchor: 2026-06-27
+> **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (30-slot × 12B actor buff table at actor +0x208, 360-byte local buff-bar mirror at g_LocalBuffBarMirror; protected-range clear on death preserving slots [80..130] ∪ {13} ∪ [132..134]).
 > **conflicts:** none.
 >
 > **RUNTIME-ONLY residue (do not treat as settled):**

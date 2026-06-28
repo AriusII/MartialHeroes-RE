@@ -15,8 +15,8 @@
 >   ownership on the drawable); *capture/debugger-pending* where a runtime witness is needed
 >   (billboard up-axis / handedness, matrix major-order, the on-screen diffuse colour given the
 >   B,G,R,A pack order).
-> - **ida_reverified:** 2026-06-22 (CYCLE 11: 10001 drain = two-pass full-tree sweep; scene-transition reset is a timed-event flush not a full reset; bone-source table statically absent; pool capacities debugger-pending; billboard-particle element stride 152 bytes with 4-vertex sub-array. Prior: 2026-06-21 ASSET-FIDELITY GPU-particle model; 2026-06-20 CYCLE 7 pool/trigger deep-dive)
-> - **ida_anchor:** 263bd994
+> - **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 2 re-confirmed SAME, 0 corrected. Prior: 2026-06-22 CYCLE 11: 10001 drain = two-pass full-tree sweep; scene-transition reset is a timed-event flush not a full reset; bone-source table statically absent; pool capacities debugger-pending; billboard-particle element stride 152 bytes with 4-vertex sub-array. Prior: 2026-06-21 ASSET-FIDELITY GPU-particle model; 2026-06-20 CYCLE 7 pool/trigger deep-dive)
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida]
 > - **conflicts:** none with the runtime claims here — every spot-checked runtime constant matches

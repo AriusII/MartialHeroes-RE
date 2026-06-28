@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9, 2026-06-27): body layout re-traced against Cmsg_ProductBuy_Send; 1 field re-confirmed SAME, 0 corrected. ida_anchor f61f66a9 (prior 263bd994); dispatch intact (specs/network_dispatch.md).
 # CONTROL-FLOW CONFIRMED: the ProductPanel's SOLE net send is 2/151 with a 1-byte selector body.
 # capture_verified: false (the selector VALUES beyond {0 open, 200 confirm} are capture-pending).
 #

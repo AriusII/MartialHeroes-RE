@@ -5,7 +5,8 @@
 >
 > **Verification:** **sample-verified** (the strongest tier — facts established by control-flow +
 > operand evidence AND matched byte-for-byte against a real VFS sample).
-> ida_reverified: 2026-06-24 · ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee · evidence: [static-ida, vfs-sample]
+> ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida, vfs-sample]
+> CYCLE 14 re-anchor (f61f66a9): 7 facts re-confirmed SAME, 0 corrected; build-delta data-page shift confirmed; all structural/behavioral claims unchanged.
 > Prior re-verifications: 2026-06-16 (CYCLE 7), 2026-06-20 (CYCLE 7 final), 2026-06-24 (CYCLE 11 spec-audit: open-flags 0x10000001 instruction-confirmed; all other structural claims re-confirmed); 2026-06-24 (CYCLE 11 pak-family pass: full 43,347-entry scan — zero gaps, zero overlaps, 100% contiguous coverage; de-dup statement updated below)
 > Conflicts: none vs the committed structural claims (the campaign-10 re-verification supplies a
 > real sample that *promotes* the previously-"unknown content" header/TOC-trailing fields — those

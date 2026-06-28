@@ -1,7 +1,7 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior: 2026-06-24
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: Ctrl-vs-Shift identity of modifier slots 1012/1013, and the exact call site that registers a text field's HWND into the IME focused-field slot, remain capture/debugger-pending. — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): added §3d behavioural note on the widget on-event dispatch (vtable slot 6) + hit-test slots (4 = vector/point-in, 5 = bool) and the click→action→click-cue path; struct vtable slot numbers are owned by `structs/gucomponent.md`. — 2026-06-24 (IDB SHA 263bd994): §4 widget table corrected — +0x0C = packed tint word (not "parent id"), +0x10 = action_id (not "UNVERIFIED"), +0x08 capability bits downgraded from [static-hypothesis] to CODE-CONFIRMED; all three now agree with `structs/gucomponent.md`.
 ---

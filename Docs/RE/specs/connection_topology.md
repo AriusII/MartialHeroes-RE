@@ -7,8 +7,9 @@ verification: confirmed (the socket-subsystem count, which opcode majors ride wh
   static-hypothesis (the scene-substate numbers attached to each connect/query step);
   capture/debugger-pending (the runtime host/port VALUES beyond the binary-literal fallbacks, and
   the connection-state code meanings 201/202/203/232).
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-20   # endpoints + 1/2 keepalive re-verified against doida.exe IDB SHA 263bd994, CYCLE 7
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
 evidence: [static-ida]
 sample_verified: false
 -->

@@ -7,7 +7,9 @@
 #                 meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 5 items re-confirmed SAME
+#        (route@8, sub-select@9; record array base+0xC stride28 count8; 12+8*28=236 exact), 0 corrected.
 #   conflicts: CORRECTED. A prior reading flagged an [UNVERIFIED] 12-byte overrun (records starting at
 #              body+24 -> 8*28 ending at +248). The binary refutes it: the consumer forwards block+12 to
 #              the record walker, the record base is +0x0C, stride 28, count 8, so the array spans

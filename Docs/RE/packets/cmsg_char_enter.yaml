@@ -12,6 +12,10 @@
 #                        launcher/login session token. CORRECTED CYCLE 12 Phase 2 — supersedes the prior 'launcher token' reading.)
 #   wire VALUE semantics: capture/debugger-pending (the 33-byte token's exact format/content; whether Pad ever carries a field)
 #   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]   # CYCLE 12 Phase 2
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the builder; 4 fields
+#        (SlotIndex u8@0x00, SessionToken bytes[33]@0x01, Pad bytes[2]@0x22, VersionToken u32@0x24)
+#        re-confirmed SAME, 0 corrected. VersionToken formula (10*(game.ver field 5)+9) re-confirmed.
 #   conflicts: SUPERSEDES the prior 'launcher command-line session token' reading of SessionToken — it is the
 #              lowercase-hex MD5 digest of the client executable itself (a self-checksum). The enter SEQUENCE is
 #              also corrected to a server round-trip (1/7 mode-1 -> 3/14 flag!=0 -> 1/9 from the 3/14 handler -> 3/5).

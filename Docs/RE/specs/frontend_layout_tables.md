@@ -2,9 +2,9 @@
 
 ```
 verification: confirmed
-ida_reverified: 2026-06-23
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior: 2026-06-23
 reconciled: 2026-06-22
-anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 serverlist_promoted: 2026-06-23 (server-list re-derive — IDB SHA 263bd994, static IDA: §2.1 "server-list root" row CORRECTED to TOP curtain member +0x274; §4.3.2 spare label sharpened to a throwaway scratch buffer at font slot 14; §4.3.6 two-painter/vtable + Lastserver-registry runtime selector sharpened; §4.3.10 construction-order + member-offset cross-reference added. No numeric/geometry disagreement with §4.3 was found — the binary corroborates §4.3 in full; these are clarifications/cross-references, not corrections to any rect/atlas/action/colour.)
 promoted: 2026-06-22 (LOGIN-LAYOUT lanes A/B/C promoted; GU coordinate system section added — IDB SHA 263bd994)
 evidence: [static-ida, debugger-confirmed-g2]

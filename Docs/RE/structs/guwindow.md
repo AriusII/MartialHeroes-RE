@@ -1,7 +1,8 @@
 ---
-verification: confirmed
+verification: confirmed — CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME (GUWindow MI shape; MainWindow panel-slot array)
 ida_reverified: 2026-06-21
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: none open. MainWindow size CODE-CONFIRMED at 0x5B8 = 1464 bytes (CYCLE 7, IDB SHA 263bd994) — the prior "not re-measured / capture-pending" item is RESOLVED. LoginWindow size CODE-CONFIRMED at 0x558 = 1368 bytes (scene-state-1 Login allocation).
 ---

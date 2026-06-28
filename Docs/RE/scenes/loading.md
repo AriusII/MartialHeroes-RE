@@ -8,6 +8,9 @@ verification: synthesised 2026-06-25 from Docs/RE/scenes/load.md (IDB SHA 263bd9
   confirmed against load.md §5A.3. All other geometry (design-space extents, scale factors, 223
   ref-unit span, SFX id) is CODE-CONFIRMED static (IDB SHA 263bd994). Debugger-pending items
   carried forward from load.md §9: vertex stride byte-exactness; second load-pass replay vs cached.
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: Load — render geometry (engine state 2)
 evidence: [static-ida, code-confirmed]
 capture_verified: false

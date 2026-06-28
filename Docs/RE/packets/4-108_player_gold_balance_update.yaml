@@ -6,7 +6,9 @@
 #                 are control-flow-confirmed)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 1 field re-confirmed SAME
+#        (Gold i64@8, low@8/high@0xc), 0 corrected.
 #   conflicts: none.
 
 name: SmsgPlayerGoldBalanceUpdate

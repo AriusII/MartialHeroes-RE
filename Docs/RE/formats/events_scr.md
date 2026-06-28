@@ -14,7 +14,8 @@
 >   ambiguous items (mode_flag's exact 0/1 semantics; the 5 anomalous records' @0x08 sub-block) stay
 >   capture/debugger-pending.
 > ida_reverified: 2026-06-24
-> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 1 fact re-confirmed SAME; 0 corrected)
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): events.scr runtime linkage = event_id→record
 >   exact-match map, consumed by item/shop/exchange UI only (NOT timer/zone/captcha; captcha =

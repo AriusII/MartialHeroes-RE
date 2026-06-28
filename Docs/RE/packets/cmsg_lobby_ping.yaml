@@ -2,6 +2,9 @@
 # VERIFICATION:
 #   routing+size: confirmed (control-flow: builder writes header 1/2, payload size 0)
 #   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): builder re-traced; header-only body (0B payload),
+#        major=1/minor=2, timeGetTime() timer latch on send -- re-confirmed SAME, 0 corrected.
 #   capture_verified: false
 
 name: CmsgLobbyPing

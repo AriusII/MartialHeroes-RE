@@ -16,6 +16,9 @@ verification: re-confirmed 2026-06-21 directly from the doida.exe binary (IDB SH
   2026-06-24 audit: added cross-link in §5A.4 noting NetClient +82364 is the same physical byte as
   character_creation.md §5 Latch B (network-client create in-flight marker); one byte, two roles.
   Validation checklist updated correspondingly. IDB SHA 263bd994; no structural drift.
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 
 # Scene Dossier — Load (engine state 2)
 

@@ -14,8 +14,8 @@ verification:   sample-verified   # 16-byte front header + width×height byte gr
                                    #   trailing-origin cross-match, the 0/1-only cell value, and
                                    #   the 64×-finer resolution vs region.bin — all matched against
                                    #   real VFS samples (map009/013/100) by byte-exact arithmetic.
-ida_reverified: 2026-06-24
-ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida (absence proof), vfs-sample]
 conflicts:      CORRECTED (2026-06-24) — two prior doc errors overturned by byte evidence:
                   (1) cell values: the doc previously asserted region-record index 0..31 and

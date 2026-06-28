@@ -1,4 +1,5 @@
 # *** SUPERSEDED -> see packets/cmsg_char_enter.yaml ***
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; tombstone redirect to cmsg_char_enter.yaml re-confirmed against the builder; dispatch routing SAME, 0 corrected.
 # Refined enter layout (slot + 33B version blob + pad + version-check u32) lives in
 # cmsg_char_enter.yaml; the opcodes.md 1/9 row points there. Retained as provenance only.
 #

@@ -20,7 +20,8 @@ verification:   sample-verified   # framing, leading fields, stride and counts c
                 #   citems fields (+0x37, +0x40/+0x48 icon-id A/B, +0x418) promoted to CONSUMER-INFERRED
                 #   in §2.2.
 ida_reverified: 2026-06-24
-ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 2 facts re-confirmed SAME; 0 corrected)
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida, vfs-sample]
 corrected:      CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): items.scr +0x80 = data/char/skin/g%d.skn
                 mesh selector, +0x84 = bind-pose pool id; citems.scr description paragraphs = 10 (capacity,

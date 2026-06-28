@@ -12,6 +12,11 @@
 #                                # select-mode code 23 confirmed RECOVERABLE (7/5 + string 1604), not fatal.
 #                                # prior ida_reverified: 2026-06-17
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgCharActionResult); Action u32 @0x00
+#        re-confirmed SAME; dual-mode code switch structure and full recovered code set
+#        {0,1-5,7,10,11,16,22,23,200-211,220-227} plus {202,203,232} re-confirmed; no case 32,
+#        no case 9; GameState 3-slot write targets re-confirmed; 0 corrected.
 #   conflicts: RESOLVES the prior 3/7-vs-3/100 mislabel -- the table-driven engine-state transition
 #              that earlier specs ascribed to 3/7 lives HERE at (3:100) SmsgCharActionResult; (3:7)
 #              SmsgCharManageResult is a Select-scene UI result that writes NO engine state.

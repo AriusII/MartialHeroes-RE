@@ -195,7 +195,7 @@ public static class SkinningMath
 
             if (bIdx < 0 || bIdx >= boneCount) continue;
 
-            raw[vi].Add((bIdx, wr.Weight));
+            (raw[vi] ??= []).Add((bIdx, wr.Weight));
         }
 
         var result = new VertexInfluences[vertexCount];

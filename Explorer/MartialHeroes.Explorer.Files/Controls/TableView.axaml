@@ -1,0 +1,27 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="MartialHeroes.Explorer.Files.Controls.TableView">
+    <DockPanel>
+        <Border x:Name="PagerBar" DockPanel.Dock="Bottom"
+                Background="#16181D" BorderBrush="#2C2F38" BorderThickness="0,1,0,0"
+                Padding="10,5" IsVisible="False">
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button x:Name="FirstButton" Content="« First" Padding="8,2" />
+                <Button x:Name="PrevButton" Content="‹ Prev" Padding="8,2" />
+                <TextBlock x:Name="PageInfo" VerticalAlignment="Center" Margin="10,0"
+                           Foreground="#AEB4C2" FontSize="12" />
+                <Button x:Name="NextButton" Content="Next ›" Padding="8,2" />
+                <Button x:Name="LastButton" Content="Last »" Padding="8,2" />
+            </StackPanel>
+        </Border>
+        <DataGrid x:Name="Grid"
+                  IsReadOnly="True"
+                  CanUserResizeColumns="True"
+                  CanUserSortColumns="False"
+                  GridLinesVisibility="All"
+                  HeadersVisibility="Column"
+                  SelectionMode="Extended"
+                  FontFamily="Cascadia Mono, Consolas, monospace"
+                  FontSize="12" />
+    </DockPanel>
+</UserControl>

@@ -7,6 +7,8 @@
 #                 a struct-cartographer task; VALUE semantics capture/debugger-pending)
 #   ida_reverified: 2026-06-22  (CYCLE 12 / Phase 3 -- 908-byte read + prefix/trailer/world-float offsets re-confirmed unchanged)
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 #   evidence: [static-ida]
 #   conflicts: RESOLVED the prior "+0x44/+0x48 vs +0x4c/+0x50" world-coordinate ambiguity. Within the

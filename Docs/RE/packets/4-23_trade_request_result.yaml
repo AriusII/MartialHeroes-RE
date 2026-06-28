@@ -7,7 +7,9 @@
 #                 meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 2 fields re-confirmed SAME
+#        (Selector@8, Reason@9), 0 corrected.
 #   conflicts: CORRECTED. The prior reading modelled a 3-value phase machine (Phase@+0x0A {0,2,3}) and an
 #              actor-id triplet at +0x04/+0x0C/+0x10. The binary refutes that: 4/23 reads ONLY a
 #              selector byte @+0x08 (0 = decline, 1 = accept) and a reason byte @+0x09 (decline path

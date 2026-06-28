@@ -3,6 +3,9 @@
 # the inbound 5/146 handler) are control-flow CONFIRMED. capture_verified: false.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify: body layout re-traced against Cmsg_PacketAckReply_Send; 2 fields
+#        re-confirmed SAME, 0 corrected. dispatch intact (specs/network_dispatch.md); ida_anchor f61f66a9.
 #   size (8) + 2x u32 echo shape + reactive origin: control-flow CONFIRMED
 #   value identity (which word is the echoed server req-token vs the local running state/ack counter):
 #   capture/debugger-pending.

@@ -1,3 +1,6 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the handler (SmsgCharManageResult); 5 layout facts re-confirmed SAME (Result u8 @0,
+# Subtype u8 @2, ReadyTime u32 @4, 3-branch Subtype logic {0/1/2}, no GameState write); 0 corrected.
 name: SmsgCharManageResult
 opcode: 0x30007           # major 3, minor 7 -> (3 << 16) | 7
 direction: S2C

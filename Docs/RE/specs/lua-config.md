@@ -1,8 +1,8 @@
 ---
 status: confirmed
 verification: confirmed   # the entire C++ consumption surface (VM, single binding, loader, reader family, table API, boot triad, script source path) is control-flow-confirmed on build 263bd994; nothing here is server-authored or on-wire, so no item is capture/debugger-pending
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior: 2026-06-16
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: true    # C++ consumption surface CODE-CONFIRMED; real config.lua / display.lua / uiconfig.lua samples inspected on disk (§9). NOTE: config.lua / tableString / CONFIG_* are NOT host-referenced by name in this build — they arrive only via cpp_load (see §2.3). DRIFT (build 263bd994): §4.2 DISPLAY_POWER / _COMBO_COOL_TIME / _GAME_CLASS_VIEW_TIME absent from binary; §4.3 DISPLAY_POWERSHADER is a plain string read, not host-derived (see conflicts).
 subsystems: [lua_vm, config_scripts, string_tables, boot_flags]

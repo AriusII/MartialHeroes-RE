@@ -13,8 +13,8 @@ verification: routing/teardown-control-flow [confirmed] (the existence of TWO di
   and the two respawn-response opcodes/sizes are static-confirmed on build 263bd994;
   the concrete meaning of each respawn-choice value (0/1/2/3) and the server-decided respawn location +
   restored HP are RUNTIME-ONLY (server-authoritative / capture-debugger-pending).
-ida_anchor: 263bd994
-ida_reverified: 2026-06-24
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27  # CYCLE 14 re-anchor: confirmatory — 1 re-confirmed SAME; prior: 2026-06-24
 evidence: [static-ida]
 sample_verified: false
 note: |

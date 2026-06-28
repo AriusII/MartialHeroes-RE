@@ -5,8 +5,8 @@ subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
 verification: confirmed   # control-flow-confirmed where noted; CYCLE 12 audit (2026-06-24): lower-level renderer camera object (near/far +36/+40, frustum L/R/B/T +152..+164, renderer ptr +180) confirmed alongside GPerspectiveCamera (§A.7.2); prior CYCLE 12 (2026-06-22): near/far slots CONFIRMED (§A.7.1); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27 # CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-24
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
 ---

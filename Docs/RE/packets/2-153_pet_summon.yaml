@@ -15,6 +15,10 @@
 # This file is retained only as a redirect; do not codegen from it.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida] · refutation control-flow CONFIRMED
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify: tombstone refutation re-confirmed; single 2/153 builder writes 4-byte body
+#        (4 distinct u8), called only from product-confirm path; pet/mount-summon reading remains disproven.
+#        dispatch intact (specs/network_dispatch.md); ida_anchor f61f66a9.
 #   (single builder / 4-byte item-process payload / 60s cooldown). capture_verified: false.
 
 name: CmsgProductConfirm

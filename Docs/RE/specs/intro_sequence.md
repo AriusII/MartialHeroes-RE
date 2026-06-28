@@ -1,7 +1,7 @@
 ---
 verification: confirmed                # animation/scene-state facts CODE-CONFIRMED (static); residual on-screen-rate/fade-duration/sound-extension are capture/debugger-pending
-ida_reverified: 2026-06-18            # scene re-confirmation campaign (build 263bd994)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27            # CYCLE 14 re-anchor (f61f66a9): confirmatory — openning_scenario.dds / openning_001..004 / OPENNING strings cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]     # texture sizes/paths SAMPLE-VERIFIED (VFS); behaviour STATIC-IDA
 conflicts: on-screen realized scroll rate (design→screen scale); visible fade duration (frame-gated, frame-rate dependent); sound 910061000 .ogg basename/extension; display FRAMERATE config inertness
 status: confirmed

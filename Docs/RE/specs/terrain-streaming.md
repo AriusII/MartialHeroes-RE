@@ -2,8 +2,8 @@
 status: code-confirmed
 sample_verified: false   # static comprehension; live debugger confirmation deferred (see §9)
 subsystems: [resource_pipeline, world_systems, game_loop]
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))   # control-flow-confirmed
                           # across the streaming spine; CYCLE 7 re-confirmed the per-frame caller chain
@@ -14,6 +14,8 @@ verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06
                           # CYCLE 12 (2026-06-22, IDB SHA 263bd994): §6.5 ground-height feed CORRECTED —
                           # the terrain-height sampler uses PER-TRIANGLE PLANE interpolation, NOT 4-corner
                           # bilinear lerp.  See §6.5 correction note.
+                          # CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem
+                          # cleanly relocated, 1 re-confirmed SAME. Prior reverified: 2026-06-16 / 2026-06-22.
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
 # CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
@@ -31,7 +33,7 @@ conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +1000
 > presentation (the streaming driver). Field offsets cited here live in
 > `structs/terrain-manager.md`. Citing engineers: `// spec: Docs/RE/specs/terrain-streaming.md`.
 >
-> **Re-verification banner.** `ida_reverified: 2026-06-16`, `ida_anchor: 263bd994`,
+> **Re-verification banner.** `ida_reverified: 2026-06-27` (prior: 2026-06-16; CYCLE 12: 2026-06-22), `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` (CYCLE 14 re-anchor: confirmatory — 1 re-confirmed SAME),
 > `evidence: [static-ida]`. Verification status: **confirmed** where the behaviour was recovered
 > from control flow and corroborated across multiple use sites (the synchronous-per-frame driver,
 > the dormant-worker proof, the cell-key gate, the ring shift load/cull, the cold-start fill, the

@@ -4,6 +4,9 @@
 # CAPTURE-UNVERIFIED: routing + size are control-flow facts; the interior layout is largely opaque.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the builder/handler, 3 fields re-confirmed SAME, 0 corrected;
+#        opcode dispatch confirmed (specs/network_dispatch.md).
 #   size + the +0x04 arm-flag write: control-flow CONFIRMED
 #   interior field split (beyond +0x05) + all VALUEs: capture/debugger-pending. capture_verified: false.
 #

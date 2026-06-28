@@ -4,8 +4,8 @@
 verification:          confirmed (client-side routing/sizes/offsets/timing constants are control-flow-confirmed
                        against the IDB); capture/debugger-pending (server-authored magnitudes — damage, cooldown
                        wall-clock, XP rates, HP scale — and on-wire VALUE meanings / exact field boundaries).
-ida_reverified:        2026-06-24
-ida_anchor:            263bd994
+ida_reverified:        2026-06-27
+ida_anchor:            f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 readiness:             IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:              [static-ida]
 this_pass:             IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the movement / targeting / pathfinding
@@ -17,6 +17,7 @@ this_pass:             IDB SHA 263bd994, CYCLE 7 (2026-06-20) — added the move
                        IDA; on-wire VALUE meanings and exact thresholds beyond those listed stay
                        capture/debugger-pending.
 CYCLE 11 World block (263bd994): §13.1 scene-state corrected — World is switch case-index 5 / writes value 4 on ENTRY, CharSelect is case-index 4 / writes value 5; layer-node count corrected 4→5 (id 2148 reused). Per-frame loop = 4 phases (input pump → per-view device step+present → round-robin scheduler → frame-rate limiter); the in-game scene-graph camera is FOV 65 / near 5 / far 15000 with 5 view-platforms (re-confirmed).
+CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem cleanly relocated, 1 re-confirmed SAME. Prior reverified: 2026-06-24.
 conflicts:             (1) 5/53 routing CONFIRMED at family-5 slot 1453; the recovered handler NAME is contested —
                            the IDB emphasises an actor-pair-relation role, this index emphasises absolute vitals
                            (HP/MP/stamina). Routing is settled; the canonical NAME + the body's full semantics are

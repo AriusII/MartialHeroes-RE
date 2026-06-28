@@ -22,9 +22,11 @@
 > - **capture/debugger-pending** — the literal integer values of the eligibility status states (they
 >   are runtime-resolved globals initialised once at startup), and the exact wire byte offsets of the
 >   completion reward list (the ≤10-entry reward record set the 5/73 completion verdict carries).
-> - **ida_anchor:** 263bd994 · **evidence:** [static-ida] · **conflicts:** none. The earlier
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · **evidence:** [static-ida] · **conflicts:** none. The earlier
 >   "3720-byte on-disk vs ~4960-byte runtime" stride split is **REFUTED** (see §1) — there is one
 >   stride, 4960.
+> - **ida_reverified:** 2026-06-20 (SHA 263bd994, CYCLE 7); spec-audit 2026-06-24; CYCLE 14 re-anchor: 2026-06-27
+> - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (quest record single stride 4960/0x1360, on-disk==runtime; objective sub-array @+0x68, 240B stride; dialogue handles +0x54/+0x58; eligibility gates +0x1329/+0x1348/+0x1350/+0x1352/+0x1354/+0x1359/+0x135A/+0x135B/+0x135C).
 
 Neutral, offset-model of the legacy client's **quest template record** — the fixed-size structure the
 quest catalogue (`quests.scr`) is composed of and the same object the runtime keys by `quest_id`.

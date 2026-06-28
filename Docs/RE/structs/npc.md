@@ -12,7 +12,7 @@
 > never reads); **capture/debugger-pending** for the in-game HP *scale factor* that converts the raw
 > `base_max_hp` template input to the displayed HP pool (distinct from the offset/mutation, which are
 > confirmed).
-> ida_reverified: 2026-06-24 · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none
+> ida_reverified: 2026-06-24 (SHA 263bd994, actor-world audit); CYCLE 14 re-anchor: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida] · CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME (mobs.scr 488B stride, mob_id u16@+0x00, HP u64@+0xF8 with load-time +=10, boss byte +0x144==11; npc.scr 404B, KIND u8@+0x22, JOB i16@+0x34; npcs.scr 1916B; npc.arr 28B, rotation_y@+0x0C applied as pi/2-stored). Conflicts: none
 > (the loader **confirms** §1.3's resolution of the prior `config_tables.md §2.9` +0xF4/+0xF8
 > "level/spawn-timer" mislabel — see §3.2).
 

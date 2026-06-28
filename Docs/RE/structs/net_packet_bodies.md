@@ -1,7 +1,8 @@
 ---
 verification: confirmed
 ida_reverified: 2026-06-20
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 layout: confirmed
 value_semantics: capture/debugger-pending

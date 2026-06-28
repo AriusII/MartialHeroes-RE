@@ -9,6 +9,8 @@
 #                        bytes @0x0e/0x0f undefined -- the prior "low byte = move-mode 1" reading is REFINED)
 #   wire VALUE semantics: capture/debugger-pending (Heading angular unit; exact @0x0c mode-byte semantics across callers)
 #   ida_reverified: 2026-06-22   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- deep-verify: body layout re-traced against the send-path builder; 6 fields re-confirmed SAME, 0 corrected; Heading/TargetX/TargetZ f32, ModeByte constant=3, RunFlag, and Reserved0E region all confirmed.
 #   conflicts: none (size + first 3 floats re-confirmed; ModeFlags sub-layout refined to the @0x0c=3 / @0x0d run-flag split)
 
 name: CmsgMoveRequest

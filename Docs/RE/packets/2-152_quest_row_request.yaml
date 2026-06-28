@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9, 2026-06-27): body layout re-traced against Cmsg_QuestRowRequest_Send; 2 fields re-confirmed SAME, 0 corrected. ida_anchor f61f66a9 (prior 263bd994); dispatch intact (specs/network_dispatch.md).
 # CAPTURE-UNVERIFIED VALUE semantics; routing (major 2 / minor 152) and the two-u32 arg shape are
 # control-flow CONFIRMED from the generic sender. capture_verified: false.
 #

@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the send-path builder, 4 fields re-confirmed SAME, 0 corrected.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 
 name: CmsgDropItem

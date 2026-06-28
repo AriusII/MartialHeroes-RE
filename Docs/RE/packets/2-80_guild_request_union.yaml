@@ -5,6 +5,9 @@
 # the amount VALUES are static inferences (capture/debugger-pending).
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the builder/handler, 11 fields re-confirmed SAME, 0 corrected;
+#        opcode dispatch confirmed (specs/network_dispatch.md).
 #   size + union shape + the per-selector overlay offsets (Selector@+0x00, ContextId@+0x04, NameCellA
 #   @+0x0E, SubSelector@+0x1C, NameCellB@+0x1D, AmountValue@+0x20, TailValueA/B@+0x28/+0x2C):
 #   control-flow CONFIRMED. Selector enum + amount VALUES: capture/debugger-pending. capture_verified: false.

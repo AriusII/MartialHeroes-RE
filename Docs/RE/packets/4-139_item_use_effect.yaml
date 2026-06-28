@@ -7,7 +7,9 @@
 #                 meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 7 fields re-confirmed SAME
+#        (Leading@0[4], ActorId@4, Result@8, FlagB@9, FlagC@0xa, Kind@0xb, Tail@0xc[12]), 0 corrected.
 #   conflicts: CORRECTED. A prior reading tagged 4/139 "var (24-byte header)". The whole wire read is a
 #              FIXED 24-byte block; the "var" tail is a 28-byte ECHO the handler BUILDS and forwards
 #              downstream, NOT a wire field it reads. BINARY WINS.

@@ -9,7 +9,9 @@
 #                 Size 12+16*Count byte-exact.)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 2 fields re-confirmed SAME
+#        (PlayerId@4, Action@8 with 0xFF=close/0=refresh; no Guard==1 check confirmed), 0 corrected.
 #   conflicts: none.
 
 name: SmsgItemPanelSlotRefresh

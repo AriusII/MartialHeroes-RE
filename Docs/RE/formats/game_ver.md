@@ -24,7 +24,8 @@
 >   client-local login gate; and recorded a second concrete on-disk witness (index5 = 2114 → token
 >   21149). Field-semantics caveats unchanged. See the new 'Server-side enter-game validation' section.
 > ida_reverified: 2026-06-24
-> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> ida_reverified: 2026-06-27 — CYCLE 14 re-anchor (f61f66a9): confirmatory - game.ver enter-game token derivation (SelectWindow_EnterGame) and login gate (LoginWindow_OnEvent) cleanly relocated, 1 re-confirmed SAME, 0 corrected
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > conflicts: none unresolved. The single-sample semantics of the five opaque fields
 >   (index 0/1/2/4/6) remain capture/debugger-pending — only one effective on-disk sample exists and

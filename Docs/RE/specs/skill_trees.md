@@ -6,8 +6,8 @@ verification: skill-tree STRUCTURE (the learn/prerequisite/tier graph, the train
   and are sample-pending — not statically countable from code;
   the inner field split of the 12-byte learn entry, any server-arbitrated learn cost, and the
   meaning of the unread `skills.scr` bytes are RUNTIME-ONLY (capture/debugger-pending).
-ida_anchor: 263bd994
-ida_reverified: 2026-06-20
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-20 (SHA 263bd994, CYCLE 7); CYCLE 14 re-anchor: 2026-06-27
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -17,6 +17,10 @@ note: |
   and the hotbar-bind opcode 2/41, the class→stance `.do`-page selection, and the confirmed ABSENCE
   of any skill-reset/respec subsystem in the client). The skill *execution / effects* spec is owned
   by `specs/skills.md` and is cross-referenced here, not duplicated.
+cycle14: |
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME (skillneedset.scr 4-byte
+  prerequisite->dependent edge DAG; skills.scr prerequisite array @+1280, 3-entry; on-disk sidecar
+  and record formats unaffected by the build delta).
 -->
 
 # Skill Trees — Learn Order, Prerequisites & the Trainer Gate — Clean-Room Specification

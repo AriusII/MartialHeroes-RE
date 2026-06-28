@@ -10,10 +10,9 @@
 > re-read from a consumer this pass), `skillneedset.scr`, and the runtime offsets carried from prior
 > analysis; **capture/debugger-pending** for the 5/52 per-target damage / HP / stamina **value
 > semantics** and any field-value meaning that needs a live wire capture.
-> ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20);
-> spec-audit corrections applied 2026-06-24: +1368/+1370 renamed HpCost/StaminaCost (reversed CYCLE 7
-> timed-charge framing); §E.4.2 damage offset flagged for reconciliation at +0x10 vs +0x0C.
-> · ida_anchor: 263bd994 · evidence: [static-ida] · conflicts: none for
+> ida_reverified: 2026-06-16 (SHA 263bd994, CYCLE 7); spec-audit corrections applied 2026-06-24; CYCLE 14 re-anchor: 2026-06-27
+> (+1368/+1370 renamed HpCost/StaminaCost (reversed CYCLE 7 timed-charge framing); §E.4.2 damage offset flagged for reconciliation at +0x10 vs +0x0C.)
+> · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida] · CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME (skills.scr 1504+N×8 framing, N@+1500, 1508B runtime object, +0/+4 keys, combat-stat block +1304..+1370 incl. HpCost +1368 and StaminaCost +1370, hotbar 240×8, skill wire body sizes 5/33=20B/4/41=24B/4/150≥16B/5/52 24B header+36B records). Conflicts: none for
 > the skill layouts; the 5/52 §E.4 stub is **superseded** by the statically-recovered 24-byte header
 > (see §E.4 and `packets/5-52_actor_skill_action.yaml`).
 >

@@ -11,7 +11,10 @@
 #                 capture/debugger-pending.
 #   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 9 fields re-confirmed SAME
+#        (Subtype@8; IdArray, StatusArray, ReservedGap1/2, NameCellRegion1/2, PairArray,
+#        SlotRecordArray; whole block to consumer), 0 corrected.
 #   capture_verified: false
 #
 # RECLASSIFICATION (CYCLE 2 lane W-C3): opcode 4/71 was previously lumped with the "thin UI-slot

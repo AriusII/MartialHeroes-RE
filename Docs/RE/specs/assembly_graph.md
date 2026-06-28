@@ -1,7 +1,7 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-21   # CYCLE 8: mount->boot-corpus->six-chain assembly graph re-confirmed; prior 2026-06-19
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — VFS+catalogue/char-table strings cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-21: CYCLE 8 mount->boot-corpus->six-chain re-confirmed; prior 2026-06-19
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 cycle: CYCLE 1 — Runtime Inter-Format Assembly Graph
 ---

@@ -1,3 +1,4 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 2 fields re-confirmed SAME (Result@8, ToSlot@0xc), 0 corrected.
 name: SmsgEquipItemResult
 opcode: 0x4000c           # major 4, minor 12
 direction: S2C

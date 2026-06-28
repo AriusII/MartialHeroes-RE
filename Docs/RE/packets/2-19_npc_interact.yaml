@@ -1,4 +1,5 @@
 # RETIRED — this file is a superseded duplicate of opcode 2/19.
+# CYCLE 14 re-anchor (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); opcode dispatch confirmed structurally intact (specs/network_dispatch.md); body fields clean-relocation confirmatory.
 # verification: idb-sha256-263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
 #
 # AUDIT VERDICT (lane-02 packet audit): the binary stager packs four distinct single-byte

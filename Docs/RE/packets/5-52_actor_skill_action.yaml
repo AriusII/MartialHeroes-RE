@@ -9,6 +9,8 @@
 #                 the @0x11..0x13 / @0x15..0x17 pad-vs-subfield split are capture/debugger-pending.
 #   ida_reverified: 2026-06-16
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: CORRECTED two real offset conflicts.
 #              (1) HEADER: ActionCode is payload @0x10 (NOT @0x14) and TargetCount is payload @0x14

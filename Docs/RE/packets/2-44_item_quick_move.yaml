@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the send-path builder, 7 fields re-confirmed SAME, 0 corrected.
 # CAPTURE-UNVERIFIED VALUE semantics; the fixed 12-byte body size and 5+3+4 field shape are
 # control-flow CONFIRMED from the item-model quick-move body packer.
 # verification: doida.exe sha256 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee

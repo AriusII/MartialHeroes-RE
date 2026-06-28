@@ -6,7 +6,9 @@
 #                 Points u32@+0x14 -- are control-flow-confirmed)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 4 fields re-confirmed SAME
+#        (Success@8, FailCode@9, Gold i64@0xc low/high, Points@0x14), 0 corrected.
 #   conflicts: none.
 
 name: SmsgItemShopBalanceUpdate

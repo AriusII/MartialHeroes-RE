@@ -3,9 +3,10 @@
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code.
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 >
-> verification: sample-verified
+> verification: sample-verified; CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME; 0 corrected.
 > ida_reverified: 2026-06-24
-> ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+> ida_reverified: 2026-06-27
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > reverify_2026-06-24: STATIC-IDA re-run on build 263bd994 CONFIRMS this spec is complete and correct
 >            on every load-bearing point. No corrections required. Confirmed: file size 13312, record

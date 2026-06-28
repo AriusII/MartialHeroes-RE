@@ -1,7 +1,8 @@
 ---
 verification: confirmed
 ida_reverified: 2026-06-19
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 evidence: [static-ida]
 conflicts: the 0x117C..0x1377 region between the 5×880-byte sub-struct array and the response table (contents not written by the visible ctor stores) and the +0x38 reserved slot are carried as UNVERIFIED gaps; the embedded Guest/Member sub-objects are confirmed present but minimal (vftable-only) and their runtime access path is via globals rather than a literal `this+0x28` reference

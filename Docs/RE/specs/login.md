@@ -16,7 +16,8 @@ verification: re-confirmed 2026-06-22 against doida.exe binary IDB SHA 263bd994 
   cascade, top-left Y-down origin, 1:1 source-rect contract) promoted to
   specs/frontend_layout_tables.md §0a; cross-reference added to §7 (IDB SHA 263bd994).
 ida_reverified: 2026-06-22
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: happy-path GameState=7 reachability (connect-watchdog vs connect-success race) is capture/debugger-pending; the credential wire opcode value is capture/debugger-pending; PIN scramble seed/permutation (clock-seeded, debugger-pending); 8-byte server-record field widths/signedness at roster breakpoint (debugger-pending); msg 4001..4022 semantic content (CP949 strings in data/script/msg.xdb — not statically recoverable)
 promoted_from: >

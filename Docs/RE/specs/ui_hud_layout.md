@@ -1,7 +1,7 @@
 ---
 verification: confirmed
-ida_reverified: 2026-06-22   # CYCLE 11: slot-35 MopGagePanel 226×54 rect resolved + retired from §5.4 demotion; dominant caption font slot 4 pinned; skill-hotbar container rect + overlay sub-widget breakdown confirmed; prior CYCLE 8 2026-06-21
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-22 CYCLE 11: slot-35 MopGagePanel 226×54 rect resolved + retired from §5.4 demotion; dominant caption font slot 4 pinned; skill-hotbar container rect + overlay sub-widget breakdown confirmed; prior CYCLE 8 2026-06-21
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence: [static-ida]
 conflicts: skill-hotbar overlay-rect VALUES (record layout recovered; only the authored rect values are data/debugger-pending); the unsited "226×54 top bar" (no build site found — demoted, debugger-pending); absolute pixel resolution of every screen-relative panel (needs a runtime screen-size read) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): the selected-target plate is now PINNED to the panel-slot roster — **target frame = slot 35 (MopGagePanel)**, **pet window = slot 52 (PetPanel)**; prior "MopGage = slot 177 / pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; full roster + verdicts in `ui_system.md §1.9`

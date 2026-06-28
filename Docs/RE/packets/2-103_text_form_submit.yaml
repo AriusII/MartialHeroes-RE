@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9, 2026-06-27): body layout re-traced against Cmsg_TextFormSubmit4_Send; 4 fields re-confirmed SAME, 0 corrected. ida_anchor f61f66a9 (prior 263bd994); dispatch intact (specs/network_dispatch.md).
 # Source spec: c2s_unknown_sweep_band4.md §2/103 (4-line CP949 text-form submit).
 # Role: a multi-line CP949 text-form submission -- four fixed-width text lines from a UI input panel.
 #

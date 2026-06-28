@@ -17,6 +17,11 @@
 #     status_value @ 0x19 (25): confirmed (updates character descriptor +206 high byte)
 #     level @ 0x1A (26): confirmed (updates player level descriptor +207 low byte / local player level)
 #   ida_reverified: 2026-06-21   ida_anchor: 263bd994   evidence: [static-ida]   cycle: 8
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgCharStatusBytesByName); 7 layout facts
+#        re-confirmed SAME (HasCustomText u8 @0, StatusCode u8 @1, Pad0[6] @2, CharacterName
+#        char[17] @0x08, StatusValue u8 @0x19, Level u8 @0x1A, pad @0x1B; slot stride 880 /
+#        name at slot+0x3C; 5-slot scan); 0 corrected.
 #   capture_verified: false
 
 name: SmsgCharStatusBytesByName

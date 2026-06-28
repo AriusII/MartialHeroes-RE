@@ -34,8 +34,8 @@ verification: character-creation-and-class-evolution [mixed-confidence];
   semantic order within the five-stat run, the server's actual reply sequence after a 1/6, the
   progression-panel option list shown for codes 100/101, and the 5/32 packed HP/MP / stat-dword value
   semantics.
-ida_anchor: 263bd994
-ida_reverified: 2026-06-22
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — @BLANK@ sentinel / npc.scr create-description strings cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-22: CYCLE 11/12 full 52-byte 1/6 body pinned, class remap confirmed, both latches documented (build 263bd994)
 evidence: [static-ida]
 sample_verified: false
 note: |

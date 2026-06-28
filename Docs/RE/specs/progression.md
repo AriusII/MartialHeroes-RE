@@ -25,9 +25,10 @@ actor/stat storage model.
 > use of the experience message's source-sort field) are **[capture/debugger-pending]** — the client
 > only reads those values; their meaning on the wire and their runtime magnitudes need a live witness.
 >
-> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
-> - **ida_anchor:** 263bd994
+> - **ida_reverified:** 2026-06-16 (SHA 263bd994, CYCLE 7); CYCLE 14 re-anchor: 2026-06-27
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **evidence:** [static-ida]
+> - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (stat-curve table family on-disk layouts: users/userlevel/userpoint/exp.scr strides; server-supplied base HP/MP; data-driven level cap; no client XP→level formula).
 > - **conflicts:** none open. This pass re-pinned the stat-editor delta-offset labels and the
 >   `+`/`-` action-id → stat ordering (both had drifted in the prior committed doc; the on-wire
 >   `2/29` commit order STR,INT,AGI,DEX,CON was already correct and is unchanged). CYCLE 7 added the

@@ -10,8 +10,8 @@
 
 ```
 verification:   sample-verified   # runtime region.bin layout, regiontable stride/size, .tol layout — all matched against a real VFS sample
-ida_reverified: 2026-06-24
-ida_anchor:     263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open         # the 5 campaign-10 conflicts (C1–C5) are RESOLVED into this revision (see below)
 # CYCLE 7 note: re-confirmed against the live region/area loader (IDB SHA 263bd994, CYCLE 7 (2026-06-20)) — the
@@ -22,6 +22,8 @@ conflicts:      none-open         # the 5 campaign-10 conflicts (C1–C5) are RE
 # split into char[32] (0x20) zoneName + f32 labelX@+0x20 + f32 labelZ@+0x24; zoneType@+0x28 and _tail@+0x2C
 # unchanged. Sample corpus (map001, map000) decode confirms float coordinate values fall within the map's world
 # extent; known-unknown #6 (exact name byte width) is thereby RESOLVED. All other facts re-confirmed.
+# CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem cleanly relocated,
+# 1 re-confirmed SAME. Prior reverified: 2026-06-24.
 ```
 
 Two-witness re-verification on build `263bd994` (the per-map area loader + a 60-map `region.bin`

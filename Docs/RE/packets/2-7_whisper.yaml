@@ -10,6 +10,8 @@
 #                        resolves the prior "prefix counts the NUL?" open item: NO, for 2/7; text strncpy-capped at 0x77=119)
 #   wire VALUE semantics: capture/debugger-pending (the integer channel->meaning table; the @0x01 selector's meaning)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- deep-verify: body layout re-traced against the send-path builder; 3 prefix fields + length-prefixed text body re-confirmed SAME, 0 corrected; uniform 19-byte prefix and text-length-EXCLUDES-NUL convention confirmed.
 #   conflicts: RESOLVED -- the old "broadcast (no name) vs whisper (+16B name)" variable split is REPLACED by a
 #              UNIFORM 19-byte prefix (the 17-byte name area is present in every chat send, zeroed for non-whisper).
 

@@ -3,6 +3,9 @@
 # CONFIRMED. capture_verified: false.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify: body layout re-traced against Cmsg_RepairCommit_Send; 2 fields
+#        re-confirmed SAME, 0 corrected. dispatch intact (specs/network_dispatch.md); ida_anchor f61f66a9.
 #   size: CORRECTED var -> FIXED 8 (the builder packs the two u32 args and blits exactly 8 bytes; nothing
 #   follows the two words). field VALUES: capture/debugger-pending.
 

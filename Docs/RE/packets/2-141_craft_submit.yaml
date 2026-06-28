@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (f61f66a9, 2026-06-27): body layout re-traced against Cmsg_CubeGambleSubmit_Send; 4 fields re-confirmed SAME, 0 corrected. ida_anchor f61f66a9 (prior 263bd994); dispatch intact (specs/network_dispatch.md).
 # ROLE CORRECTION (lane-07 audit): sole caller is CubeGamble_ClearAndSubmit (Cube-Gamble minigame
 # panel). Body layout is 56-byte block A (panel+2140) + 16-byte block B (panel+2196) + 1-byte
 # local-player flag + 3 pad. No material slots, no NPC actor index. Both prior readings

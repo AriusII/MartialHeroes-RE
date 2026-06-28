@@ -5,7 +5,7 @@
 > per-opcode text-length-prefix NUL convention; capture/debugger-pending for the absolute on-wire
 > byte-order/endianness of every length prefix, the (5:7) text-body framing, and the channel-code
 > VALUE meanings (which routing/colour a given code drives on the live wire).
-> ida_reverified: 2026-06-22 · ida_anchor: 263bd994 · evidence: [static-ida].
+> ida_reverified: 2026-06-27 (CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior: 2026-06-22) · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida].
 > readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > CYCLE 11 World block (263bd994): the (5:7) S2C body framing is RESOLVED to an explicit `[u32 len][len CP949 bytes]` prefix (§8.2) — superseding the "rest of frame" hypothesis; the S2C-only notice codes 8/10/16/17 were added; code 7 = pink `0xFFFF797C` (§3) re-confirmed against the binary (a dirty mis-read was caught and reverted).
 > conflicts resolved this pass: (a) the (2:7) text-length prefix EXCLUDES the NUL (the earlier

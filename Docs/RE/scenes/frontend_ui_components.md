@@ -18,6 +18,9 @@ verification: written 2026-06-21 against doida.exe binary IDB SHA 263bd994; upda
   the shared 2D-over-3D one-backbuffer composition, and the scene FSM ordering (0 INIT → 1 Login →
   2 Loading → 3 Opening → 4 CharSelect → 5 InGame) are all derived from those pinned sources. No new
   IDA read was performed for this index; nothing here is inferred beyond what the linked dossiers proved.
+  CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected.
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27
 scene: Cross-scene front-end + in-game 2D GUI index (engine states 1–5)
 evidence: [static-ida, debugger-confirmed-handshake]
 capture_verified: false

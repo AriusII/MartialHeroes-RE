@@ -7,6 +7,11 @@
 #     slot_mask @ 0x02: confirmed
 #     slot_record @ 0x03+: confirmed (880-byte SpawnDescriptor + 96-byte StatsBlock + 1-byte flag + 4-byte timing)
 #   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgSceneEntityUpdate); 8 layout facts
+#        re-confirmed SAME (ServerId @0, ChannelId @1, SlotMask @2; per-slot sub-block sizes
+#        880/96/1/4; 5-slot loop bound; ServerId==1 in-place / ServerId!=1 sub-handler branch);
+#        0 corrected.
 #   capture_verified: false
 
 name: SmsgSceneEntityUpdate

@@ -20,8 +20,8 @@
 | Attribute          | Value |
 |--------------------|-------|
 | `verification`     | `sample-verified` — census performed by direct VFS file enumeration and byte-confirmed cell counts against `.lst` binary records; the `d<NNN>.lst` loader control flow was independently re-confirmed in the IDB. The §1A area→cell fan-out / per-cell open order is `code-confirmed` from static IDA (`evidence: [static-ida]`). |
-| `ida_reverified`   | `2026-06-16`; §1A fan-out re-confirmed `2026-06-19` |
-| `ida_anchor`       | `263bd994` |
+| `ida_reverified`   | `2026-06-27` (CYCLE 14 re-anchor: confirmatory — 1 re-confirmed SAME); prior: `2026-06-16`; §1A fan-out re-confirmed `2026-06-19` |
+| `ida_anchor`       | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
 | `evidence`         | `[static-ida, vfs-sample]` — `d<NNN>.lst` loader (count + cell-key-array control flow) corroborated by static IDA; all per-area presence/absence and cell counts corroborated against the live VFS (60 `.lst` files, 43,347-entry archive); the §1A fan-out / open order from static IDA |
 | `conflicts`        | none unresolved — the former "63 registered areas" prose count is corrected to **60** (the range table, per-area census table, and VFS enumeration all agree on 60); total cells corrected from "~2,505" to the exact formula sum **2,503** |
 | `sample_verified`  | `true` — file counts cross-checked against live VFS; `.lst` cell counts independently verified via the formula `cells = (file_size - 4) / 4` (see `terrain.md §1.2`); 0 mismatches across all 60 files |

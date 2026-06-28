@@ -1,9 +1,9 @@
 ---
 status: confirmed
 sample_verified: false
-verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) — client-side routing/sizes/offsets/formulas control-flow-confirmed; capture/debugger-pending for server-authored magnitudes and on-wire VALUE meanings
-ida_reverified: 2026-06-20
-ida_anchor: 263bd994
+verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) — client-side routing/sizes/offsets/formulas control-flow-confirmed; capture/debugger-pending for server-authored magnitudes and on-wire VALUE meanings; CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (NPC click-interaction dispatcher keyed on npc.scr KIND u8@+0x22 and JOB i16@+0x34)
+ida_reverified: 2026-06-20 (SHA 263bd994, CYCLE 7); CYCLE 14 re-anchor: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: 2/151 / 2/152 / 2/153 reassigned away from ProductPanel (see §9.1); JOB band gate scoped to the skill-trainer default case KIND 27-29 + 34 (see §2.3); ProductPanel true buy opcode unmapped (see §5.2); CYCLE 7 re-pinned the KIND→panel-slot mapping and the storage target (see §2.2a)
 ---

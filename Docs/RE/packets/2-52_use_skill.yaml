@@ -12,6 +12,9 @@
 #   aim fields 0x04..0x13: static-hypothesis (caller-staged in the full form; only the count words are builder-visible)
 #   wire VALUE semantics: capture/debugger-pending (array A vs B meaning; AimMode enum; the @0x01 selector meaning)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the builder/handler, 9 fields re-confirmed SAME, 0 corrected;
+#        opcode dispatch confirmed (specs/network_dispatch.md).
 #   conflicts: RESOLVED -- the @0x01 byte is a DERIVED selector ((invokeKind!=1)-56), not a 0/1 enum; do not codegen a 0/1 field.
 
 name: CmsgUseSkill

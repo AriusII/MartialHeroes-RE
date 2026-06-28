@@ -1,8 +1,8 @@
 ---
 status: sample-verified
-verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 11 spec-audit (2026-06-24): §4 bgtexture kind polarity corrected to binary truth (kind==1 ⇒ static; other non-zero ⇒ non-static); all other claims re-confirmed
-ida_reverified: 2026-06-24   # CYCLE 11 spec-audit: bgtexture kind polarity drift corrected (§4); prior 2026-06-21 (CYCLE 8), 2026-06-16
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+verification: sample-verified   # control-flow+operand facts [confirmed]; structure also matched against the real 43,347-entry archive [sample-verified]; the +0x08 dword role is now parser-verified READ-AND-DISCARDED; only the unexercised raw-seek branch remains [static-hypothesis]. re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 11 spec-audit (2026-06-24): §4 bgtexture kind polarity corrected to binary truth (kind==1 ⇒ static; other non-zero ⇒ non-static); all other claims re-confirmed. CYCLE 14 re-anchor (f61f66a9): 3 facts re-confirmed SAME, 0 corrected
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9); prior 2026-06-24 (CYCLE 11 spec-audit), 2026-06-21 (CYCLE 8), 2026-06-16
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]   # real data.inf (6,241,992 B) + data/data.vfs (3,802,182,193 B) corroborate header, TOC stride/offsets, RAW 100%-tiling
 sample_verified: yes        # tree, counts and extension census come from a real archive enumeration (43,347 entries, 49 extensions)
 subsystems: [vfs_structure, vfs_io_subsystem, extension_census, manifest_linkage]
@@ -484,3 +484,4 @@ flagged. The `.mud`/`.pre`/`.post`/`.tol`/bulk-`.scr`/small-`.xdb` families are 
   (`VFS001`) / `entry_count` (+0x0C) / `data_size` (+0x10). Glossary is orchestrator-owned; flagged,
   not edited.
 - Provenance: see `Docs/RE/journal.md`.
+- **Format-coverage census** — `specs/binary_coverage_map.md §8` records the per-subsystem extension→loader→spec coverage table for every file-format read path in the loader dispatch, the three remaining PARTIAL gaps (`.bud` vertex tail, `.fx7` header, `dotoonshading.psh` naming), and the IDB build-mismatch reconciliation note (live f61f66a9 vs anchor 263bd994).

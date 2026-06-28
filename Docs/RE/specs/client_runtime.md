@@ -1,7 +1,7 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-22   # CYCLE 12 Phase 0 (263bd994): SECTION 7.5.2 network-driven transitions corrected -- 3/100 select-mode codes 22/23 are RECOVERABLE (7/5), not the fatal out-of-range 7/8 arm; table now cross-references handlers.md SECTION 23.1 as the canonical 3/100 code table. prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — VFS mount / boot config / Hangul font slots cleanly relocated, 2 re-confirmed SAME, 0 corrected; prior 2026-06-22: CYCLE 12 Phase 0 3/100 select-mode transition correction (build 263bd994); prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]   # sound tables, toonramp LUT, npc.arr, .sod/.ted byte-samples corroborate; the boot/loop/scene-machine/world-scene backbone is static-IDA CODE-CONFIRMED
 conflicts: frame-limiter target-FPS source RESOLVED (display FRAMERATE config is dead — two writers, zero readers — cap is hardcoded 60.0; CYCLE 7); data.inf entry-count header offset (+0x0C, VFS byte-witness pending in formats/pak.md); reserved 6th view-platform slot (not in the world builder); GameTime opcode-5/18 apply site; per-area sky-rate floats; 200 ms move heartbeat hard-cap — remaining items (capture/debugger-pending)
 status: confirmed

@@ -1,4 +1,5 @@
 # TOMBSTONE — misattributed duplicate. Do not use for implementation.
+# CYCLE 14 deep-verify (f61f66a9, 2026-06-27): tombstone refutation re-confirmed; 2/143 builder writes 4 distinct u8 bytes (not one u32); sole callers are PlaytimePanel__onEvent only. Quest-item-keep/KIND-0x23 reading remains disproven. ida_anchor f61f66a9 (prior 263bd994); dispatch intact (specs/network_dispatch.md).
 #
 # This file described opcode 2/143 as CmsgQuestItemKeep (a 4-byte u32 Word0 sent from a KIND-0x23
 # NPC path). That reading is refuted by lane-07 audit: the single builder for minor 143 writes

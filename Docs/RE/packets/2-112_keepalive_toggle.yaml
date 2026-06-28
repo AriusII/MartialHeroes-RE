@@ -9,6 +9,9 @@
 #   callers:             confirmed   (the leave-world-to-logout scene path, the world-state-tick handler, and WinMain)
 #   wire VALUE semantics: capture/debugger-pending (whether the byte is ever a value other than 1; the real on-wire cadence)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify: body layout re-traced against Cmsg_KeepaliveToggle_Send; 1 field
+#        re-confirmed SAME, 0 corrected. dispatch intact (specs/network_dispatch.md); ida_anchor f61f66a9.
 #   conflicts: none (NEW C2S opcode -- ADD a 2/112 row to opcodes.md; this is the SECOND keepalive-family C2S message
 #              alongside the 2/10000 timer template, packets/2-10000_keepalive.yaml).
 

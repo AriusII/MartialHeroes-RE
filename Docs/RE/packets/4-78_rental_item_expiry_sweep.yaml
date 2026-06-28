@@ -6,7 +6,9 @@
 #                 time value's units / epoch are capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 1 field re-confirmed SAME
+#        (ServerTime@8 fed to Inventory_SweepExpiredRentalItems), 0 corrected.
 #   conflicts: CORRECTED ROLE. A prior catalogue read this as a ServerTimeNotification (a clock / UI
 #              panel). The binary shows the u32 @+0x08 is a server time value fed into the inventory
 #              RENTAL-ITEM EXPIRY SWEEP -- not a clock display. Size 12 confirmed.

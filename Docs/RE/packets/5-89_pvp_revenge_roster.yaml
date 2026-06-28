@@ -8,6 +8,13 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 7 fields
+#        (RevengeSort u8@+0x00, RevengeTeam u8@+0x08, RevengeTeamGuild u8@+0x09,
+#        NameArray bytes[170]@+0x0A, DefaultPropertyMax bytes[2]@+0xB4,
+#        RandomPropertyMax bytes[4]@+0xB6, TailPad bytes[2]@+0xBA) re-confirmed SAME,
+#        2 corrected: GapA bytes[3] moved to @+0x01, RevengeId u32 moved to @+0x04
+#        (actor-key family convention: sort@+0x00, gap@+0x01, id@+0x04).
 #   evidence: [static-ida]
 #   conflicts: none. A deep struct pass confirmed the five PvP setters (5/89/90/91/92/94) field-decode
 #              their wire blocks into a shared PvP-state object -- they are NOT opaque-forward blits.
@@ -31,15 +38,15 @@ summary: >
 # modelled as a fixed bytes[N] blob (10 x 17-byte cells); the property bytes are modelled per byte.
 fields:
   - { name: RevengeSort,        type: u8 }            # +0x00  revenge actor sort (composite-key sub-key)
-  - { name: RevengeId,          type: u32 }           # +0x01  revenge actor id (u32; read at +1)
-  - { name: GapA,               type: "bytes[3]" }    # +0x05  gap (not copied) -- opaque
+  - { name: GapA,               type: "bytes[3]" }    # +0x01  gap (not copied) -- opaque
+  - { name: RevengeId,          type: u32 }           # +0x04  revenge actor id
   - { name: RevengeTeam,        type: u8 }            # +0x08  revenge team byte
   - { name: RevengeTeamGuild,   type: u8 }            # +0x09  revenge team-guild byte (also mirrored to local player)
   - { name: NameArray,          type: "bytes[170]" }  # +0x0A  10 x 17-byte CP949 name cell (17-byte stride)
   - { name: DefaultPropertyMax, type: "bytes[2]" }    # +0xB4  2 x u8 default-property-max values
   - { name: RandomPropertyMax,  type: "bytes[4]" }    # +0xB6  4 x u8 random-property-max values
   - { name: TailPad,            type: "bytes[2]" }    # +0xBA  trailing pad (not read) -- opaque, pad to 188
-  # widths: 1 + 4 + 3 + 1 + 1 + 170 + 2 + 4 + 2 = 188
+  # widths: 1 + 3 + 4 + 1 + 1 + 170 + 2 + 4 + 2 = 188
 
 notes: |
   CONFIRMED routing + size + section boundaries + the 10-entry x 17-byte name-array stride (the

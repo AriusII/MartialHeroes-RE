@@ -7,7 +7,9 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 4 fields re-confirmed SAME
+#        (Phase@8, Coin@0xc, OwnerId@0x14, Count@0x18; eviction cap 40; 16B record stride), 0 corrected.
 #   conflicts: CORRECTED. The prior reading placed Count @+0x09 and a single Subtype @+0x08 {4=apply},
 #              with no coin/owner fields. The binary shows a richer header: a PHASE byte @+0x08
 #              (0=cancel / 1=ready / 4=commit), a Coin i64 @+0x0C, an OwnerId @+0x14, and the record

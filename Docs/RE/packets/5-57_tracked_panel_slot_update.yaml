@@ -8,6 +8,8 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: REFINED. The handler forwards the 24-byte block verbatim; a deeper pass decoded the
 #              applier (the deferred sub-handler) -- the per-entry record is the 7 fields below, not an

@@ -15,6 +15,30 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, confirmatory)
+
+| Attribute        | Value |
+|------------------|-------|
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `verification`   | `confirmed` — CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. All prior verification findings from 2026-06-26 / 2026-06-24 / 2026-06-21 remain valid. |
+| `evidence`       | `[static-ida]` |
+| `conflicts`      | None. |
+
+---
+
+## Re-verification banner (2026-06-26 — render-class + world-placement confirmation)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | `confirmed` — static-object render-class dispatch by `kind` range (four-way: static-copy / solid-shadow / sway-small-medium / sway-large) confirmed from draw-site analysis; material state for all static-object passes (alpha-blend on, alpha-test off) confirmed; absolute world-coordinate placement (no per-asset recenter, no per-object instance transform, D3DTS_WORLD never set) confirmed. §5 rewritten with confirmed four-way classification; §7.1 extended with port placement rule. |
+| `ida_reverified` | `2026-06-26` |
+| `ida_anchor`     | `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` |
+| `evidence`       | `[static-ida]` — draw-site analysis confirming per-frame bucketing, material state, culling, and absolute world-coordinate placement |
+| `conflicts`      | None. The `type_byte`-vs-`kind` independence (confirmed in prior revision) is reinforced: render class is driven by the texture `kind` byte, not by the per-object `type_byte`. |
+
+---
+
 ## Re-verification banner (2026-06-24 — path-template confirmation, no layout corrections)
 
 | Attribute        | Value |
@@ -363,19 +387,46 @@ computed from the `BUILDING` `TEXTURES` pool entry referenced by `tex_id`, not b
 other words, whether an object is drawn as static geometry or animated with a wind-sway effect is
 keyed off the texture binding, not off `type_byte`.
 
-Observed behaviour of that per-texture classification (provided for context only — it is
-runtime state, not a field in the `.bud` file):
+The per-texture render-class is controlled by the `kind` byte in `bgtexture.lst` (see
+`formats/texture.md §bgtexture.lst`). At grid-build time the object's `.map` `tex_id` is
+resolved to its `bgtexture.lst` record; the `kind` byte of that record is stored in a
+parallel kind array keyed by the bgtexture.lst index and drives the per-frame draw-bucket
+and sway decision. The following is **runtime state, not a field in the `.bud` file** — it
+is recorded here because it directly determines how a faithfully parsed `.bud` must be
+rendered.
 
-- A "static" class copies vertices straight to the render buffer with no animation.
-- One sway class (lighter vegetation, e.g. trees / shrubs) applies a wind-sway deformation;
-  meshes with a small fixed vertex count use a fully unrolled path, larger ones a simplified
-  path.
-- A second sway class (larger vegetation) drives sway amplitude from the object's XZ
-  bounding-box size.
-- A shadow pass uses the same per-texture classification to decide which objects cast shadows.
+**Four-way render-class dispatch by `kind` range — CONFIRMED:**
 
-The per-texture classification is controlled by the `kind` byte in `bgtexture.lst` — see
-`formats/texture.md §bgtexture.lst`.
+| `kind` range | Render class | Sway behaviour | Notes |
+|---:|---|---|---|
+| 0x01 (1) | Static copy (else bucket) | None — vertices copied verbatim to the render buffer | ~1100 of 1222 bgtexture.lst records |
+| 0x02 (2) | Solid/shadow bucket | None — drawn in colour pass AND projected-shadow pass | ~101 records; stone/moss/building/dense-foliage; no sway |
+| 0x0A..0x0E (10–14) | Wind-sway small/medium | Per-vertex amplitude; vertex_count==9 path is fully unrolled; sway divisor = 2 raised to (kind−10); writable deform scratch buffer allocated | Shipped data: kinds 10, 11, 12 |
+| 0x14..0x18 (20–24) | Wind-sway large | Amplitude = AABB XZ-diagonal × 0.01 × 0.5, clamped to 2.0, then divided by 2 raised to (kind−20); writable deform scratch buffer allocated | Shipped data: kind 20 only |
+| all other values | Static copy (else bucket) | None — range fall-through; unexercised in shipped data | — |
+
+**Material state for all static-object passes — CONFIRMED:**
+
+Every render class (all kind values) draws through the same opaque world colour pass. The
+state is identical for all buckets:
+- **Alpha blend on** — ALPHABLENDENABLE=1, SRCBLEND=SRCALPHA, DESTBLEND=INVSRCALPHA. Foliage
+  cutout is achieved purely by alpha blending on the texture's own alpha channel.
+- **Alpha test off** — ALPHATESTENABLE=0; no ALPHAREF or ALPHAFUNC on this path.
+- ZENABLE=1. Stage 0: colour = MODULATE2X(texture, diffuse); alpha = texture alpha.
+- **No additive blend**, no alpha-to-coverage, no billboard or camera-facing orientation.
+  Wind sway deforms vertex positions in place (world-space pre-baked geometry); there is no
+  per-object rotation matrix.
+- FVF = 0x112 (XYZ | NORMAL | TEX1, 32-byte stride); confirmed per §3.2.2.
+- **Culling**: static/else bucket — D3DCULL_CW (one-sided, inherited state). Kind==2 bucket
+  and both sway buckets (0x0A..0x0E and 0x14..0x18) — D3DCULL_NONE (two-sided) in the
+  colour pass. Projected-shadow pass uses D3DCULL_CW (one-sided) for static and kind==2.
+
+A consumer of `.bud` geometry MUST NOT apply alpha testing for foliage cutout; the legacy
+path uses alpha blending on the texture alpha channel instead. The Viewer hard-coded set
+{10, 11, 12, 20} is correct for shipped data but incomplete as a general rule — the full
+ranges 0x0A..0x0E and 0x14..0x18 must be supported. Kind==2 is two-sided and alpha-blended
+in the colour pass (not a one-sided solid), which is load-bearing for dense-foliage kind==2
+textures.
 
 Because no read-site that branches on `type_byte` was found in the building render path, its
 value is now confirmed to vary but its *semantic role* remains open. The leading hypotheses are:
@@ -435,6 +486,30 @@ Consequences for an implementor:
 - The same cell coordinate can yield byte-identical `.bud` content across different area IDs
   (the three samples for cell `x10023z10035` under maps 026, 034, and 205 are identical),
   consistent with world-space coordinates baked at content-build time.
+
+**Port rule — shared world space, no per-asset bbox recenter (CONFIRMED).** `.bud` buildings
+and `.ted` terrain share one absolute world coordinate system with the same +Y up axis; the
+device world matrix (D3DTS_WORLD) is never set and remains identity. The per-map cell origin
+`(mapX−10000)×1024` / `(mapZ−10000)×1024` is baked into every vertex. A Viewer or port MUST
+place ALL assets in one shared absolute world space using the cell origin; it MUST NOT recenter
+any individual asset by its own bounding box. If floating-point precision requires a render
+origin offset, subtract ONE uniform offset applied identically to every asset AND the camera
+— never a per-asset recenter.
+
+**Y-datum cross-confirmation — tree/foliage base co-location ([static-hypothesis] 2026-06-26).**
+The `.ted` loader builds each terrain vertex Y directly from the raw height f32 read from the
+height block; no per-cell Y offset and no scale factor are applied. `.bud` vertex `pos_y` is
+equally an absolute f32 blitted verbatim at load time; the loader applies no transform at load
+(§3.3). Both assets therefore share one identical absolute Y datum — not merely the same up axis.
+A tree or foliage object (an ordinary `.bud` object — addendum A1.1) whose base vertices are
+authored to the terrain surface will co-locate with the terrain at the same XZ coordinates with
+no per-asset Y correction at runtime. Wind sway does not disturb this co-location: the per-frame
+deformation leaves `pos_y` unchanged and applies horizontal displacement only (addendum A1.4). The
+opaque-world draw path was additionally parser-traced: only VIEW and PROJECTION transforms are set
+within the terrain-and-building draw; no D3DTS_WORLD call was found for either terrain or building
+draws, reinforcing the identity-world-matrix claim by draw-site analysis rather than sample
+inference alone. [static-hypothesis] — recovered 2026-06-26 from a session whose live IDB build
+differs from the pinned anchor; behaviors build-stable, exact offsets pending build reconciliation.
 
 The runtime does compute, per object after load, an axis-aligned bounding box from the vertex
 positions and derives a distance-squared visibility-culling threshold from the object's
@@ -618,3 +693,242 @@ the loader was not isolated in the current RE pass (the path is constructed dyna
 direct static cross-reference), so the internal field semantics are LOW-confidence hypotheses
 only. A dedicated spec (e.g. `map_bin.md` or a section in a region-descriptor document) should be
 authored once the loader is recovered. Do not fold map-level `.bin` coverage into this document.
+
+---
+
+## Addendum 2026-06-26 — tree-foliage-render (deep-dive confirmation)
+
+This addendum records a deep-dive confirmation pass focused on the tree/foliage render path
+(`.bud` kind dispatch, colour-pass material state, and wind-sway vertex deformation). All claims
+below are derived from firewall-clean analysis; they must be read in conjunction with §5, which
+they extend and partially correct. Where this addendum contradicts §5, this addendum supersedes.
+
+### A1. Confirmed facts
+
+**A1.1 — Trees are ordinary `.bud` objects; no separate foliage object list exists.**
+
+The mass-object grid builder processes ALL `.bud` objects through a single shared 16×16
+placement grid. Foliage and trees are not loaded from a distinct list or a distinct file section.
+The only thing that distinguishes a tree or foliage object from a stone wall or prop object is its
+bound texture's `kind` byte, resolved at grid-build time from the `bgtexture.lst` record that
+`tex_id` maps to (through the per-cell `BUILDING TEXTURES` pool — see §6 and
+`Docs/RE/formats/texture.md`). The `kind` byte is looked up via the parallel `TerrainPool`
+kind-byte array keyed by the `bgtexture.lst` record index; values outside the array's populated
+range return the default value 1 (static). The resolved kind is stored in the runtime object
+record for use by the per-frame render-class dispatch. No content-side tagging (in the `.bud`
+file or the `.map` file) is needed to mark an object as foliage.
+
+The `tex_id` validation gate described in §6 (clamp-to-1 on out-of-range) applies here: an
+object whose `tex_id` is invalid is clamped to pool entry 1 before kind resolution, meaning it
+inherits the kind of whatever texture occupies pool slot 1.
+
+**A1.2 — Per-class object lists; deform scratch buffers allocated at classify time.**
+
+Objects are pre-sorted into separate per-class lists at grid-build time, giving the four-way
+render-class dispatch described in §5. The classification tests kind in the inclusive ranges
+0x0A..0x0E (sway small/medium) and 0x14..0x18 (sway large). For both sway buckets, a writable
+deform scratch buffer is allocated immediately on classification: it is a copy of the object's
+base vertex positions (32 bytes per vertex, matching the FVF = 0x112 stride from §3.2.2), and
+this per-object scratch buffer is what the per-frame sway deformation mutates in place.
+
+The colour pass (the opaque-world render pass) draws the solid/kind==2 list alongside the static
+and both sway lists. The projected-shadow pass independently redraws the solid/kind==2 list,
+confirming that kind==2 objects participate in both the colour pass and the shadow pass (consistent
+with §5's material state table, where kind==2 is listed as the "solid/shadow bucket").
+
+**A1.3 — MODULATE2X colour operation confirmed; complete colour-pass material state.**
+
+The colour-pass material state for the mass-object draw was confirmed directly from the
+draw-site render-state setup block. The full confirmed state is:
+
+| State | Value | D3D name |
+|---|---|---|
+| Stage 0 COLOROP | 5 | D3DTOP_MODULATE2X |
+| Stage 0 COLORARG1 | TEXTURE | — |
+| Stage 0 COLORARG2 | DIFFUSE | — |
+| Stage 0 ALPHAOP | SELECTARG1 | — |
+| Stage 0 ALPHAARG1 | TEXTURE | alpha = texture alpha |
+| Stage 1 | disabled | — |
+| ALPHABLENDENABLE | 1 (on) | — |
+| SRCBLEND | 5 | D3DBLEND_SRCALPHA |
+| DESTBLEND | 6 | D3DBLEND_INVSRCALPHA |
+| ALPHATESTENABLE | 0 (off) | — |
+| ZENABLE | 1 (on) | — |
+
+This state is consistent with §5's "Material state for all static-object passes" block and
+confirms it with greater precision. Specifically: the colour result is `texture × diffuseLit × 2`
+(the ×2 doubling of MODULATE2X vs. MODULATE), the alpha is sourced purely from the texture, and
+foliage cutout is achieved by alpha BLEND on that texture alpha — never by alpha test (ALPHATESTENABLE=0,
+confirmed). Depth testing is on; the depth-write state was not explicitly set in this pass and
+therefore inherits whatever the sub-pass sequence left it at — implementors should keep depth-test
+on and default depth-write on for opaque-canopy geometry (see §A4 port guidance).
+
+**A1.4 — Wind sway: per-vertex horizontal displacement driven by a global time accumulator.**
+
+The per-frame sway deformation operates as follows (confirmed):
+
+- A global environment time block records elapsed time per frame. The sway dispatcher reads a
+  per-frame time delta from this block, accumulates it, scales the accumulated value by 1e−6, and
+  gates each deform update to fire only once the accumulator reaches a threshold of 50 (in the
+  scaled unit). When the game-state is paused (state value 3), accumulation is skipped for that
+  frame.
+- A single global tick counter cycles over the values 0..4 and is shared by ALL sway objects in
+  the cell. Each object multiplies this counter by a per-object speed value to form a phase step,
+  then advances a per-object phase value using a bounded ping-pong oscillator (see A2.4).
+- Vertex displacement is horizontal only. Each displaced vertex receives:
+  `displaced.x = base.x + direction.x × phase`, `displaced.z = base.z + direction.z × phase`.
+  The Y (vertical) component is left unchanged in the main deformation path — sway is a pure
+  horizontal bending motion.
+- `direction` is a small per-object horizontal vector precomputed from the object's vertex normals,
+  scaled approximately 0.5.
+- The FVF for the sway draw is also 0x112, consistent with §3.2.2.
+- Two deformation variants exist: a high-detail variant that additionally queries the Wind subsystem
+  (see §A3 open edge) by the vertex's height to add an extra bend term, and a low-detail variant
+  that applies a simpler single-axis (Z) displacement only.
+
+**A1.5 — Per-object sway amplitude formula (both buckets).**
+
+See §A2.3 and §A2.5 for the corrections to the §5 formula. The now-confirmed formula is:
+
+- Large bucket (kind 0x14..0x18): `amplitude = 3D_corner_distance × 0.01 × 0.5`, clamped to a
+  maximum of 2.0, then divided by `2 << (kind − 20)` (i.e. kind 20 → ÷2, kind 21 → ÷4, …). The
+  distance is the full 3D Euclidean distance between two stored AABB corner points — see A2.2.
+- Small/medium bucket (kind 0x0A..0x0E): `amplitude` is derived from per-geometry vertex deltas
+  (differences between specific vertex positions, scaled × 0.1), with a dedicated sub-case for
+  `vertex_count == 9` and another for `vertex_count > 5`. It is NOT the distance-diagonal formula.
+  The final amplitude is divided by `2 << (kind − 10)` (kind 10 → ÷2, kind 11 → ÷4, kind 12 → ÷8).
+- If the computed amplitude is zero for any object, that object falls back to a plain non-deformed
+  vertex copy (no sway applied).
+
+### A2. Corrections to §5
+
+The following items in §5 are corrected by this addendum. §5 text should be understood subject
+to these corrections; a future revision of §5 should incorporate them inline.
+
+**A2.1 — CORRECTION: sway divisor formula (§5, "Wind-sway small/medium" and "Wind-sway large" rows).**
+
+§5 states the sway divisor is "2 raised to (kind−10)" for the small/medium bucket and "2 raised
+to (kind−20)" for the large bucket, yielding divide-by-1 for kind 10 and kind 20 respectively.
+The binary uses the expression `2 << (kind − base)`, which in integer arithmetic equals
+`2^(kind − base + 1)`, not `2^(kind − base)`. The correct divisors for shipped kinds are:
+
+| kind | base | divisor (corrected) | divisor (old, wrong) |
+|---|---|---|---|
+| 10 | 10 | 2 | 1 |
+| 11 | 10 | 4 | 2 |
+| 12 | 10 | 8 | 4 |
+| 20 | 20 | 2 | 1 |
+
+The §5 formula is off by a factor of 2 across the board. Use `2 << (kind − base)` (base 10 for
+small/medium, base 20 for large) as the divisor.
+
+**A2.2 — CORRECTION: large-bucket amplitude distance is 3D, not XZ-only (§5, "Wind-sway large" row).**
+
+§5 describes the large-bucket amplitude distance as "AABB XZ-diagonal". The distance helper
+used in the binary computes a full 3D Euclidean distance (it includes the Y component) between
+two stored AABB corner points. If those two corners are the AABB min and max, the result is the
+full 3D box diagonal, not an XZ-projected diagonal. The "XZ-diagonal" label is imprecise;
+replace it with "full 3D corner-to-corner distance".
+
+**A2.3 — CORRECTION/ADDITION: small/medium amplitude uses a different formula to large (§5, "Wind-sway small/medium" row).**
+
+§5 does not describe the small/medium amplitude formula distinctly from the large-bucket formula
+(the table entry is vague on this point). The small/medium bucket uses a completely different
+formula: per-geometry vertex deltas (selected vertex-position differences) scaled by 0.1, with
+separate unrolled sub-cases for `vertex_count == 9` and `vertex_count > 5`. The two buckets do
+not share an amplitude formula. The large-bucket distance × 0.01 × 0.5 formula applies only to
+the large bucket.
+
+**A2.4 — ADDITION: oscillator shape is bounded linear ping-pong, not sinusoidal.**
+
+§5 does not state the shape of the sway oscillator. The confirmed shape is a bounded linear
+ping-pong: the phase value advances by a per-object step each tick; when it reaches the reflect
+bound (proportional to amplitude × 0.1) the velocity flips sign between +100 and −100. This
+produces a triangle-wave motion, not a sinusoid. For a strict 1:1 recreation the oscillator must
+be a ping-pong; a sine approximation (with the corrected amplitude from A1.5) is visually
+acceptable but is not byte-identical.
+
+**A2.5 — REINFORCEMENT: amplitude clamp for large bucket.**
+
+The large bucket's amplitude is clamped to a maximum of 2.0 before applying the divisor. §5 does
+not state this clamp; add it to the record.
+
+### A3. Still-open edges
+
+1. **Per-bucket CULLMODE — not independently re-derived in this pass.** The colour-pass material
+   state in §5 assigns two-sided rendering (D3DCULL_NONE) to kind==2 and both sway buckets
+   (0x0A..0x0E, 0x14..0x18), and one-sided (D3DCULL_CW) to the static/else bucket. This pass did
+   not encounter an explicit CULLMODE render-state set in the colour-pass draw helpers or any
+   per-object draw function traced here. The cull assignment may be set in a device-init or
+   material-setup helper not traced in this pass, or inherited from a global state. Treat the §5
+   cull assignments as doc-claimed-not-byte-reconfirmed; verify via a live-debugger read of the
+   CULLMODE render-state at the mass-object draw site before treating per-bucket cull as
+   independently byte-confirmed.
+
+2. **Environment time delta units.** The per-frame elapsed-time value read from the global
+   environment time block is scaled by 1e−6 and accumulated to a gate of ≥50 before triggering
+   a deform update. The exact units of the raw delta value (milliseconds, microseconds, or a
+   game-tick count) and the physical meaning of the 1e−6 scaling constant and the 50 gate were
+   not pinned in this pass.
+
+3. **Exact per-vertex index mapping in the unrolled deform for small fixed vertex counts.** The
+   sway deformation has special-cased paths for small fixed vertex counts (including
+   `vertex_count == 8` and `vertex_count == 9`). The precise set of vertices that receive the
+   wind extra-bend term in the high-detail path vs. the standard displacement was not
+   exhaustively enumerated.
+
+4. **Wind-subsystem coupling (high-detail variant).** The high-detail sway variant queries the
+   Wind subsystem by the vertex's height to add an extra bend term. The exact Wind-subsystem
+   field sampled and the formula by which it modulates the amplitude were only partially read.
+   See also `Docs/RE/formats/terrain_layers.md` (the wind-blob entry) for the Wind subsystem's
+   asset side. A dedicated RE pass on the Wind subsystem coupling is needed before this can be
+   implemented faithfully.
+
+### A4. Port guidance
+
+**Foliage material — fixes the "too dark" render.** The original multiplies texture by
+vertex-diffuse (from fixed-function D3D lighting) then doubles the result (D3DTOP_MODULATE2X).
+In a modern linear-light / PBR material:
+
+- With dynamic lighting: `albedo_out = saturate(2.0 × texture.rgb × litDiffuse.rgb)`.
+- Unlit / albedo-only preview (Viewer): `albedo_out = saturate(texture.rgb × 2.0)` approximates
+  the original brightness at full diffuse.
+
+**Transparency.** Use alpha-BLEND (SrcAlpha / InvSrcAlpha) sourced from the texture's own alpha
+channel. Do NOT use alpha-scissor or alpha-test for foliage cutout — the original has
+ALPHATESTENABLE = 0 on this pass. Depth-test on; depth-write on for opaque-canopy geometry is
+a safe default (the legacy pass does not explicitly toggle depth-write here; sorting artifacts
+from blended foliage against itself may require disabling depth-write per-object if visible).
+
+**Two-sidedness.** Render kind==2 and both sway buckets (0x0A..0x0E and 0x14..0x18) two-sided
+(cull off); static/else bucket one-sided. This matches the §5 table, but treat the exact cull
+state as doc-claimed-not-byte-reconfirmed (see A3.1) and verify on a representative sample before
+finalising.
+
+**Sway shader — implement as a per-vertex horizontal displacement, not a billboard.**
+
+```
+displaced.x = base.x + dir.x × phase
+displaced.y = base.y                  // Y fixed — purely horizontal bending
+displaced.z = base.z + dir.z × phase
+```
+
+where:
+- `dir` is a small per-object horizontal vector (derive from the object's averaged vertex normal,
+  horizontal components only, scaled ~0.5).
+- `phase` oscillates over time driven by a single global clock shared by all foliage objects.
+  For a strict 1:1 match use a bounded linear ping-pong oscillator (velocity flips ±100 at reflect
+  bounds proportional to `amplitude × 0.1`). A sine approximation is visually acceptable:
+  `phase = amplitude × sin(globalTime × perObjectSpeed + perObjectPhaseOffset)`.
+- `amplitude` per object (use the corrected formulas from A1.5 and A2.1):
+  - Small/medium bucket (kind 0x0A..0x0E): vertex-extent-based — verticalDelta × 0.1, divided by
+    `2 << (kind − 10)` (kind 10 → ÷2, kind 11 → ÷4, kind 12 → ÷8).
+  - Large bucket (kind 0x14..0x18): 3D corner distance × 0.01 × 0.5, clamped to 2.0, divided by
+    `2 << (kind − 20)` (kind 20 → ÷2).
+  - If computed amplitude is zero, skip deformation entirely (plain vertex copy).
+
+**Classification.** Trees need no special path. Classify any `.bud` object by its bound texture's
+`kind` byte (resolved through `tex_id` → `BUILDING TEXTURES` pool → `bgtexture.lst` → kind, as
+described in §6 and `Docs/RE/formats/texture.md`) and route it to the matching render bucket.
+The Viewer's hard-coded sway set {10, 11, 12, 20} is correct for the current shipped asset set
+but must be generalised to the full ranges 0x0A..0x0E and 0x14..0x18 for spec-correctness.

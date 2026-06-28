@@ -29,9 +29,11 @@
 >   mechanism is re-confirmed, and the UI/HUD row split into in-game-HUD vs. front-end-overlay entry
 >   paths. 2026-06-22: §4.2 front-end blend reconciled — global ONE/ONE additive binary-won,
 >   opaque-panel SRCALPHA hypothesis refuted — see §4.2. CYCLE 11: front-end verdict DOWNGRADED to
->   DEBUGGER-PENDING as noted above.)*
-> - **ida_reverified:** 2026-06-24    *(CYCLE 12 audit (263bd994): world projection confirmed RH (D3DXMatrixPerspectiveOffCenterRH); UI ortho confirmed LH (D3DXMatrixOrthoOffCenterLH/OrthoLH) — RH/LH split per pass is a static fact; DisplayConfig_ParseFramerate identified as the display.lua loader (confirms §6.3/§9.4 shared display-config apply-path provenance). Prior: CYCLE 11 (2026-06-22, 263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. IDB SHA 263bd994)*
-> - **ida_anchor:** 263bd994
+>   DEBUGGER-PENDING as noted above.)* CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME
+>   (D3DXCreateRenderToSurface 4 sites / 2 systems / none-for-water); 1 corrected (offscreen-enable
+>   flag stored at >=2 sites in the device-creation context — see §6.1).
+> - **ida_reverified:** 2026-06-27 (CYCLE 14 re-anchor, f61f66a9): 1 fact re-confirmed SAME (D3DXCreateRenderToSurface 4 call sites in 2 systems; none for water); 1 corrected (offscreen-enable flag stored at >=2 sites, not exactly 1 — see §6.1 CYCLE 14 note and `formats/shaders.md §C5.6b`). Prior: 2026-06-24 *(CYCLE 12 audit (263bd994): world projection confirmed RH (D3DXMatrixPerspectiveOffCenterRH); UI ortho confirmed LH (D3DXMatrixOrthoOffCenterLH/OrthoLH) — RH/LH split per pass is a static fact; DisplayConfig_ParseFramerate identified as the display.lua loader (confirms §6.3/§9.4 shared display-config apply-path provenance). Prior: CYCLE 11 (2026-06-22, 263bd994): brightness = composite PS constants (NOT a gamma ramp), defaults 1.0 (the 0.5 was an FP-stack artifact); DISPLAY_LIGHT_RATIO confirmed parsed-but-dead; 9-state character tint apply-site pinned; UI/particle stride 24 (UI via D3DX sprite helper); §4.2 FRONT-END one/one additive verdict DOWNGRADED to debugger-pending (sprite Begin may override it) — in-game HUD per-quad opt-in unaffected. IDB SHA 263bd994)*
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **readiness:** IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 > - **evidence:** [static-ida, sample-vfs]
 > - **cycle7_additions:** glow blur uses a **fixed pass-loop count of 16** (single small 2×2 box blur,
@@ -39,7 +41,7 @@
 >   is (−1.0, 0.0, 0.0)** — §5.1a / §6.5; cel **edge/outline REFUTED** (no outline/edge-detect shader
 >   in the full shader set — only a ramp-shade pipeline) — §6.5 (reaffirmed HIGH); background/fallback
 >   **clear colour 0xFF505050** dark-grey ARGB — §2.0.1 (reaffirmed).
-> - **conflicts:** four corrections vs. the prior text, now applied — (C1) Present runs *inside*
+> - **conflicts:** CYCLE 14 (f61f66a9): (C6) offscreen-enable flag stored at >=2 sites (not exactly 1 as shaders.md §C5.6b previously stated) — corrected in §6.1. Prior: four corrections vs. the prior text, now applied — (C1) Present runs *inside*
 >   the per-iteration device-step, not an "outer frame driver" (§2.1); (C2) the "four scene
 >   callbacks" abstraction hides ≥6 real callback slots (§2); (C3) the cel vertex shader receives
 >   light/material/luma constants in registers 4..10 (incl. the BT.601 luma weights), **not** a
@@ -563,6 +565,15 @@ The toon ramp LUT (`data/shader/toonramp.bmp`) is loaded into a separate slot fo
 `formats/shaders.md`. A separate shadow-map render target (built from a shadow texture asset, sized
 to a tiered quality cap) is used by the ground/actor shadow buckets and is **not** part of the glow
 chain.
+
+> **CYCLE 14 correction (f61f66a9): offscreen-enable flag stored at >=2 sites.** The device-creation
+> context contains at least two distinct call sites that store the value 2 into the offscreen-RT /
+> post-process enable flag on the scene object — not at a single site as previously implied in
+> `formats/shaders.md §C5.6b` (CYCLE 11). The `D3DXCreateRenderToSurface` call is made from exactly
+> 4 sites across exactly 2 systems: the shadow-map initialiser (`ShadowManager_Init`, 1 target) and
+> the cel/glow initialiser (`Renderer_InitCelGlowShaders`, 3 targets — TEX0/TEX1/TEX2); no
+> render-to-surface call exists for a water renderer (none-for-water confirmed SAME). The gate-polarity
+> analysis and Godot fidelity implications live in `formats/shaders.md §C5.6b`.
 
 ### 6.2 Ordered pass list
 
@@ -1260,3 +1271,103 @@ loop, scale, and the clear-then-spawn sequence.)* The effect's on-disk filename 
 no in-binary filename string) — treat the asset filename as an external mapping, not a recovered string.
 
 > spec path: `// spec: Docs/RE/specs/rendering.md`
+
+---
+
+## 10. Shadow Projection and View Matrices
+
+**Confidence: CONFIRMED.**
+
+The ground and actor shadows are generated using a dedicated shadow mapping pipeline consisting of a projection matrix, a light-view look-at matrix, and a depth-bias mapping matrix.
+
+### 10.1 Shadow Perspective Projection Matrix
+The shadow projection matrix is constructed using left-handed perspective field-of-view mathematics:
+* **Vertical Field of View (FOV):** `0.39269909` radians (exactly $\pi / 8$ or 22.5 degrees).
+* **Aspect Ratio:** `1.0`.
+* **Near Plane:** `0.0`.
+* **Far Plane:** `10000.0`.
+
+### 10.2 Depth-Bias / Texture Coordinates Mapping
+To map the projected coordinates from standard clip space $[-1, 1]$ to texture UV coordinate space $[0, 1]$, a transformation matrix is built:
+* **Scale Vector:** `(0.5, -0.5, 1.0)`
+* **Translation Vector:** `(0.5, 0.5, 0.0)`
+* **Formula:** `DepthBiasMatrix = Scaling * Translation`
+
+### 10.3 Shadow Light-View look-at Matrix
+The light-view matrix is constructed using left-handed look-at mathematics:
+* **Target Position:** Centered directly on the local player character position coordinates.
+* **Up Vector:** Fixed as the vertical axis `(0.0, 1.0, 0.0)`.
+* **Eye Position:** Computed by offsetting the target position based on daylight cycle angles:
+  * $Eye.x = Target.x + \cos(Yaw) \times Multiplier \times 10.0$
+  * $Eye.y = Target.y + Multiplier \times 10.0$
+  * $Eye.z = Target.z + \sin(Yaw) \times Multiplier \times 10.0$
+* The final view-projection matrix is computed by multiplying the inverted camera matrix with the projection and depth-bias matrices.
+
+---
+
+## 11. Direct3D 9 Device Wrapper and Reset Lifecycle
+
+**Confidence: CONFIRMED.**
+
+The client does not employ a separate abstract class to wrap Direct3D 9 device calls; the main `Renderer` instance serves as the direct device holder.
+
+### 11.1 Wrapper Structure
+* **Device Cache:** The `IDirect3DDevice9` interface pointer is cached directly inside the `Renderer` structure at a dedicated offset (offset `0x2B728`).
+* **Default Texture:** The renderer initializes a default 2×2 solid grey texture (filled with values `120, 120, 120, 80`) in memory to act as a fallback when normal textures fail to bind.
+
+### 11.2 Creation & Recovery Lifecycle
+* **Device Initialization:** The renderer calls `Direct3DCreate9` and creates the active device via `IDirect3D9::CreateDevice` over the Win32 window handle, mapping present parameters to target resolutions (falling back to a 60 FPS presentation refresh rate in windowed modes).
+* **Cooperative Level Checks:** Checked per frame loop iteration:
+  * **Device Not Reset (`D3DERR_DEVICENOTRESET`):** Invokes the cooperative recovery sequence, issuing `Reset` with the updated parameters and rebuilding dynamic textures, shaders, and render targets.
+  * **Device Lost (`D3DERR_DEVICELOST`):** Pauses frame execution, sleeping for `1000` ms before issuing another status check.
+
+---
+
+## 12. Screenshot Capture Pipeline
+
+**Confidence: CONFIRMED.**
+
+The client provides two screenshot formats: standard BMP and compressed JPEG. Both pipelines search for a free file name sequentially to prevent overwriting existing captures.
+
+### 12.1 BMP Capture Pathway
+1. Loops through file indices (`Value` starting from 1) using `"screenshot/screen%d.bmp"`.
+2. Tests if the file exists using `CreateFileA`. If the file exists, the handle is closed and `Value` is incremented.
+3. Once a free file name is found (where `CreateFileA` returns an invalid handle), the backbuffer render target surface is acquired.
+4. Saves the raw surface directly to disk using `D3DXSaveSurfaceToFileA` with the BMP image format specifier.
+
+### 12.2 JPEG Capture Pathway (Intel JPEG Library Wrapper)
+1. Formats a file prefix using the system time: `"screenshot/DO%Y%m%d_%H%M_<index>.jpg"`, searching for a free file name similarly.
+2. Acquires the render surface in `D3DFMT_A8R8G8B8` (ARGB 32-bit format).
+3. Locks the surface, reads the pixels, and converts them to a raw 24-bit RGB packed buffer based on the source surface formats (handling 32-bit ARGB/XRGB, 24-bit RGB, 16-bit RGB 565, and 15-bit RGB 555 conversions).
+4. Configures the Intel JPEG Library (IJL) `JPEG_CORE_PROPERTIES` properties structure:
+   * Sets `DIBWidth` / `JPGWidth` and `DIBHeight` / `JPGHeight` to the surface dimensions.
+   * Sets `JPGQuality` to the desired compression level.
+   * Sets `DIBBytes` to point to the packed RGB buffer.
+   * Sets `DIBChannels` to `3` (RGB).
+   * Calculates `DIBPadBytes` stride padding as `((3 * width + 3) & ~3) - 3 * width`.
+   * Sets `JPGFile` to the output file path.
+5. Invokes `ijlInit`, `ijlWrite` (using `IJL_WRITE_WHOLEIMAGE`), and `ijlFree` to write the JPEG to disk.
+6. Frees temporary memory and unlocks the Direct3D surface.
+
+---
+
+## 13. DirectX Version Detection
+
+**Confidence: CONFIRMED.**
+
+The client verifies system DirectX features by reading version resources directly from Windows system libraries.
+* **Libraries Inspected:** `ddraw.dll`, `d3d9.dll`, `dinput.dll`, `dplayx.dll`, `d3drg8x.dll`, `mpg2splt.ax`, and `dpnet.dll`.
+* **API Used:** Reads the file version information resources using `GetSystemDirectoryA` followed by standard version query APIs.
+* **Logic:** Compares build numbers against hardcoded constants representing DirectX versions (e.g. checking for Direct3D 9 build signatures such as `0x10371` or `0xA280371` to verify DX9.0a/b/c presence). Assigns minor/major version integers to global compatibility flags to determine rendering pathways.
+
+---
+
+## 14. Cel / Toon Shader Loading (dotoonshading)
+
+**Confidence: CONFIRMED.**
+
+The characters' cel-shaded render passes utilize two distinct toon shading pixel shaders.
+* **Cel Pixel Shader #1 (`data/shader/dotoonshading.psh`):** Compiled and stored inside the renderer class structure. This handles the primary character toon lookup.
+* **Cel Pixel Shader #2 (`data/shader/dotoonshading2.psh`):** Compiled and stored inside the renderer class structure. This handles variant character toon highlight configurations.
+* **Assembly at Load Time:** Shaders are loaded by name from the virtual filesystem (VFS) if mounted, falling back to direct disk reads. They are compiled from source assembly files on initialization and reload requests. No extra shaders are loaded under these names; they map directly to the cel/toon character rendering stage.
+

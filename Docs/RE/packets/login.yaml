@@ -5,6 +5,12 @@
 # verification:
 #   ida_reverified: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): builder re-traced; 1/4 frame header (major 1/minor 4 as
+#        separate u16 words), RSA ciphertext framing ([u32 LE length][BE digit bytes]), and per-dword
+#        XOR whitening (key 0x29, selector 0x40, applied before send) re-confirmed SAME, 0 corrected.
+#        Plaintext pre-image writer (0x2B sub-opcode + length-prefixed account + optional PIN pair)
+#        carried forward as prior DEBUGGER-VERIFIED; not re-walked this static pass.
 #   evidence: [static-ida]   # the CYCLE 7 re-walk was STATIC control-flow over the login
 #                            #   join-builder; the prior debugger run (graded DEBUGGER-VERIFIED
 #                            #   below) is a separate, earlier observation, not re-run this pass.

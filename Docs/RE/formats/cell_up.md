@@ -22,6 +22,18 @@ source-format: derived from Docs/RE/_dirty/formats/cell_up.raw.md (dirty-room RE
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected. Covered fact: `.up` format is `u32 triangleCount` + `triangleCount × 40-byte` triangle records (3 × vec3 + trailing f32); decoder allocates 72-byte runtime triangles and expands 40→72 (XZ-AABB + vertices + plane + scalar); file-size formula `4 + 40×count`; the `.exd` decoder is byte-identical to the `.up` decoder (same shared expander, same element ctors). Build-stable under the uniform +0x80 relocation. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — triangle decoder and shared 40→72 expander re-confirmed at relocated addresses under build f61f66a9. |
+| `conflicts`      | None. |
+
+---
+
 ## Re-verification banner (CYCLE 11 — full-population census + parser confirmation)
 
 | Attribute        | Value |

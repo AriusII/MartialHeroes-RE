@@ -1,4 +1,5 @@
 # *** SUPERSEDED -> see packets/cmsg_char_move.yaml ***
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; tombstone redirect to cmsg_char_move.yaml re-confirmed against the builder; dispatch routing SAME, 0 corrected.
 # The workflow-spine analysis re-attributes 1/14 from delete to slot-MOVE (1-byte slot index);
 # see cmsg_char_move.yaml. The opcodes.md 1/14 row points there. move-vs-delete naming is a
 # Tier-1 reconciliation. Retained as historical provenance only.

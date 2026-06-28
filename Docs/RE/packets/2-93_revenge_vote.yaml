@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, f61f66a9): body layout re-traced against the builder/handler, 1 field re-confirmed SAME, 0 corrected; opcode and dispatch confirmed (specs/network_dispatch.md).
 # Source spec: c2s_unknown_sweep_band4.md §2/93 (revenge-vote yes/no response).
 # Role: the revenge / vengeance subsystem's voting-prompt yes/no response (a 1-byte selector).
 #

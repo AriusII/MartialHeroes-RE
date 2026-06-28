@@ -4,15 +4,15 @@
 > Consumed by Assets.Parsers. Every offset an engineer cites must reference this file.
 
 <!--
-verification: sample-verified
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+verification: sample-verified; CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME, 0 corrected
+ida_reverified: 2026-06-24; 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24` ·
-> `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24; 2026-06-27` ·
+> `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the `.skn` / `.bnd` byte parsers in the loader chain) AND a real VFS sample: a rigid
 > item skin (`data/item/skin/*.skn`), a weighted character skin (`data/char/skin/*.skn`), a player
@@ -28,7 +28,11 @@ conflicts: none
 > bytes; id_b=3045, 1432 faces / 786 vertices / 1136 weights, multi-bone, EOF residual 0) — walked
 > end-to-end against the loader; zero conflicts with any committed fact. Tier policy: a fact also
 > matched against the real VFS sample is `[sample-verified]`; a loader-control-flow-only fact is
-> `[confirmed]`.
+> `[confirmed]`. CYCLE 14 re-anchor (f61f66a9, 2026-06-27): `.skn` body strides (face 36 B, vertex
+> 24 B, weight 12 B), disk vertex NORMAL-first order, weight drop threshold (~0.01), per-vertex
+> normalize-to-1.0, render-vertex field copy order, `.bnd` `actor_id`/`bone_count`/36-byte bone
+> record layout, and hierarchy build pass all re-confirmed SAME against build `f61f66a9`
+> (static-ida); no corrections.
 
 ## Overview
 

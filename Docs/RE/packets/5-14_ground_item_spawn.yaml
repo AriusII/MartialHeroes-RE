@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); body layout re-traced against the handler; 1 field re-confirmed SAME, 1 corrected.
 # CAPTURE-UNVERIFIED: every offset below is a static inference. capture_verified: false.
 
 name: SmsgCombatEffectInstanceSpawn   # canonical name in names.yaml / opcodes.md. Ground-item spawn is its primary role (alias: SmsgGroundItemSpawn).
@@ -12,7 +13,7 @@ capture_verified: false
 summary: Server push that spawns a ground item in the world (monster drops, combat-effect drops, coin drops). The client resolves the item's per-template 3D model and places a first-class scene actor at the given world XZ. This opcode shares its 48-byte wire shape with combat-effect instance spawns (hence the canonical name SmsgCombatEffectInstanceSpawn), so several bytes are not consumed by the ground-item path.
 
 # Wire order, offset 0 = first payload byte. Pack=1; the named fields plus the two reserved holes
-# (Reserved0 at offset 0x10 and Reserved1 at 0x21..0x2B) sum to size: 48.
+# (Reserved0 at offset 0x10 and Reserved1 at 0x24..0x2B) sum to size: 48.
 fields:
   - { name: Sort,       type: u32 }          # 0x00  source/dropper sort key (low byte 2 == Mob dropper)
   - { name: SourceId,   type: u32 }          # 0x04  dropper / source actor id
@@ -24,9 +25,10 @@ fields:
   - { name: Param1,     type: i32 }          # 0x14  opaque (likely quantity or flags)
   - { name: Param2,     type: i32 }          # 0x18  the world entity key for this ground item
   - { name: PosX,       type: f32 }          # 0x1c  world X
-  - { name: PosZ,       type: f32 }          # 0x20  world Z
-  - { name: Reserved1,  type: "bytes[11]" }  # 0x21  hole: bytes 0x21..0x2b not read by this handler
+  - { name: PosZ,       type: f32 }          # 0x20  world Z (occupies 0x20..0x23)
+  - { name: Reserved1,  type: "bytes[8]" }   # 0x24  hole: bytes 0x24..0x2b not read by this handler (CORRECTED from bytes[11]@0x21 which overlapped PosZ)
   - { name: NoticeFlag, type: u8 }           # 0x2c  one-shot "rare drop" chat line when set
+  - { name: Pad1,       type: "bytes[3]" }   # 0x2d  trailing alignment pad to 48 bytes
 
 notes: |
   Static inference only; no capture available. Protocol facts are read directly from the client
@@ -39,7 +41,7 @@ notes: |
   shape) with combat-effect instance spawns, which is why its canonical name is
   SmsgCombatEffectInstanceSpawn even though its primary use is the live ground-item drop push. The
   ground-item path consumes only the named fields below; the two reserved regions (Reserved0 at
-  offset 0x10 and Reserved1 at 0x21..0x2b) are NOT read into any ground-item field. They are modelled
+  offset 0x10 and Reserved1 at 0x24..0x2b) are NOT read into any ground-item field. They are modelled
   here as fixed reserved buffers so the field widths sum to 48 and an engineer can lay out a Pack=1
   struct without guessing; their meaning (combat-effect payload, a second quantity/flags word, or
   genuine padding) is unknown and must be settled by a capture.
@@ -65,8 +67,14 @@ notes: |
                              1.0 unit above the terrain (a terrain-height query plus 1.0); stacked
                              drops at the same coordinate are fanned out in a small spiral so they do
                              not visually overlap.
-    0x21 (11B) Reserved1 : a hole spanning 0x21..0x2b; not read by this handler.
+    0x24 (8B) Reserved1  : a hole spanning 0x24..0x2b; not read by this handler. CORRECTED (CYCLE 14
+                             deep-verify, f61f66a9): the prior spec placed this at 0x21 with bytes[11],
+                             which overlapped PosZ@0x20..0x23. PosZ f32 occupies 0x20..0x23; Reserved1
+                             begins at 0x24 (8 bytes), NoticeFlag is at 0x2C, and a trailing pad[3]
+                             at 0x2D brings the total to 48. Field widths are unchanged at the consumed
+                             offsets; only the Reserved1 start/width and the trailing pad are corrected.
     0x2c (1B) NoticeFlag : when set, drives a one-shot "rare drop" chat line.
+    0x2d (3B) Pad1      : trailing alignment padding bringing the total to 48 bytes.
 
   AUDIO/VISUAL (client-local, not wire fields): certain template-id ranges trigger a spawn/pickup SFX;
   the coin form uses the coin template id 217000501. These are presentation cues for the engineer's

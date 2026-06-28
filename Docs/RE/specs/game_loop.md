@@ -1,7 +1,10 @@
 ---
-verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
+verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20)); CYCLE 14
+  re-anchor (f61f66a9, 2026-06-27, static IDA only): 3 facts re-confirmed SAME (bootstrap order
+  before dispatch loop, 4-phase per-frame loop with do-while run-flag, 15-slot font table), 0
+  corrected; behaviour unchanged across the build delta
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: none — the display FRAMERATE config (DISPLAY_FRAMERATE in display.lua) is RESOLVED as statically inert (parsed into a renderer field with two writers and zero readers; never reaches the limiter); the per-frame cap is a hardcoded 60.0 (CYCLE 7)
 status: confirmed

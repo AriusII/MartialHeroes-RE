@@ -5,6 +5,18 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, confirmatory)
+
+| Attribute        | Value |
+|------------------|-------|
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `verification`   | `sample-verified` — CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. All prior verification findings from 2026-06-24 remain valid. |
+| `evidence`       | `[static-ida]` |
+| `conflicts`      | None. |
+
+---
+
 ## Re-verification banner (2026-06-24 — independent byte-census re-confirmation, no layout corrections)
 
 | Attribute        | Value |
@@ -23,8 +35,8 @@
 verification:   sample-verified   # stride 28, +0 id / +4 x / +8 z / +12 facing / +16 spawn_type,
                                    #   facing math, +20/+24 inert, mob.arr 20-byte stride, map000 anomaly
                                    #   all matched against the real VFS sample (43,347 entries)
-ida_reverified: 2026-06-24        # re-confirmed in full on the doida.exe build (no layout corrections)
-ida_anchor:     263bd994          # primary anchor; also re-verified against the active doida.exe build
+ida_reverified: 2026-06-27        # CYCLE 14 re-anchor (f61f66a9): confirmatory, 1 SAME; prior: 2026-06-24
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida, vfs-sample, doida.exe-reverify]
 conflicts:      spawn_type enumeration is 0..11 (not {0,7}); field_02 frequently non-zero on disk
                 (loader-inert verdict unaffected) — see CONFLICTS below

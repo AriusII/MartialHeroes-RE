@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 4 fields re-confirmed SAME (4 x 49B CP949 cells @8/57/106/155), 0 corrected.
 # CONTROL-FLOW CONFIRMED: fixed 204-byte (0xCC) copy + four explicit fixed-offset CP949 string reads
 # that exactly fill the body. VALUE semantics of the text are the strings themselves. capture_verified: false.
 # spec: Docs/RE/packets/4-103_guild_panel_text_update.yaml

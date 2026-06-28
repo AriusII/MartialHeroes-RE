@@ -9,6 +9,12 @@
 #                 COUNT for value-word/name = 20; every byte's VALUE meaning is capture-pending)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the handler; 9 fields
+#        (LeadRegion bytes[8]@+0x00, MirrorFlagC u8@+0x08, PanelOpenGate u8@+0x09, MirrorFlagB u8@+0x0A,
+#        ByteAColumn bytes[10]@+0x0B, ByteBColumn bytes[10]@+0x15, Gap0 bytes[1]@+0x1F,
+#        ValueColumn bytes[80]@+0x20, NameColumn bytes[340]@+0x70) + asymmetric counts
+#        (ByteA/B=10, Value/Name=20) re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED (round 1). COUNT was wrong: value-word and name columns loop to dest 640 =
 #              20 iterations (not 10). So value-word column is 20 x u32 = 80 bytes (+0x20..+0x6F) and

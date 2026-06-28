@@ -5,14 +5,16 @@
 > reference this file.
 
 <!--
-verification: confirmed (loader-control-flow + sample-verified)
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+verification: confirmed (loader-control-flow + sample-verified); CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, sample-byte]
 conflicts: none
 -->
 
 > **Verification banner.** `confirmed (loader-control-flow + sample-verified)` ·
-> `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> `ida_reverified: 2026-06-27` ·
+> `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` ·
 > `evidence: [static-ida, sample-byte]` · `conflicts: none`. Re-verified against doida.exe IDB SHA
 > `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`, CYCLE 7 (2026-06-20),
 > re-walked + byte-verified against a rigid item-skin sample (2026-06-21), and re-confirmed against
@@ -49,6 +51,9 @@ conflicts: none
 > `name` = "s_200002620" 11 bytes ASCII, `Nface = 1432`, `Nvtx = 786`, `Nweight = 1136`,
 > multi-bone, EOF residual 0). Source-file provenance for the character skinning math: `coreskin.cpp`
 > (the load-time normalize / major-bone-select asserts at lines 294, 306, 333).
+> CYCLE 14 re-anchor (f61f66a9, 2026-06-27): header field layout (`id_a` at +4, `id_b` at +8, name
+> LenStr at +12) and verbatim skeleton resolution via `CharPosePool_LookupById` with `id_b` passed
+> SAME against build `f61f66a9` (static-ida); no corrections.
 
 ## Scope
 

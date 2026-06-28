@@ -17,7 +17,8 @@
   binary never holds (e.g. the exact `if`/`elseif` shape inside a script). **Nothing in this
   subsystem is server-authored or on-wire**, so no item is capture/debugger-pending.
 - `ida_reverified: 2026-06-16`
-- `ida_anchor: 263bd994`
+- `ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 1 fact re-confirmed SAME; 0 corrected)`
+- `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`
 - `evidence: [static-ida]`
 - `conflicts:` the prior **Section 6.2 "plain on-disk, NOT the VFS" claim is REFUTED** by this
   build — the script loader IS routed through the shared VFS-vs-disk open router (now corrected

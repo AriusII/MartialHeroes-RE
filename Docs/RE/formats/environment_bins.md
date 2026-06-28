@@ -32,10 +32,11 @@
 ## Status block
 
 ```
-verification:   sample-verified   # all 8 env-bin family sizes + fog start/end + ambient-floor chain matched against a real VFS sample
-ida_reverified: 2026-06-24         # CYCLE 11 archive pass (2026-06-24), IDB SHA 263bd994 — static re-walk confirmed all sky/dat sizes byte-exact; point_light header f32 type re-confirmed; map-region group confirmed as separate family (→ region_grid.md)
-ida_reverified_prev: 2026-06-20   # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
-ida_anchor:     263bd994
+verification:   sample-verified   # all 8 env-bin family sizes + fog start/end + ambient-floor chain matched against a real VFS sample. CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (OPTION_BRIGHT default-100 / ambient-floor-255 chain; no structural change).
+ida_reverified: 2026-06-27         # CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME
+ida_reverified_prev: 2026-06-24    # CYCLE 11 archive pass (2026-06-24), IDB SHA 263bd994 — static re-walk confirmed all sky/dat sizes byte-exact; point_light header f32 type re-confirmed; map-region group confirmed as separate family (→ region_grid.md)
+ida_reverified_prev2: 2026-06-20  # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
+ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open         # campaign-10 D6 + cycle-11 archive pass found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
 cycle7_additions:                  # CYCLE 7 static re-walk (all HIGH immediates unless noted)

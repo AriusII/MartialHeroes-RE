@@ -9,14 +9,16 @@ verification: routing/wire-layout [confirmed] (the delivery-inbox claim opcode a
   the attached-item array is static-only and partial (exact widths capture/debugger-pending);
   all on-wire VALUE meanings (the claim-index selection, the mode/op selector, the subAction codes,
   the per-item record contents) are RUNTIME-ONLY (server-authoritative / capture-debugger-pending).
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-20
+ida_reverified: 2026-06-27
 evidence: [static-ida]
 sample_verified: false
 note: |
   IDB SHA 263bd994, CYCLE 7 (2026-06-20) — new spec covering the delivery-inbox / attachment flow
   (claim 2/71, record 4/70) and the carrier-pigeon SEND (2/70), plus the NPC-kind-23 entry point.
   EXCLUDED by design: opcode 2/60 is the couple / marriage request, NOT mail — see §6.
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: CarrierPigeonPanal / CarrierPigeonReadPanel / CarrierPigeonSendPanel / DeliveryPanel RTTI and carrier-pigeon UI asset strings cleanly relocated, NPC-kind-23 subsystem intact. 1 re-confirmed SAME, 0 corrected.
 -->
 
 # Mail — Delivery Inbox & Carrier-Pigeon — Clean-Room Specification

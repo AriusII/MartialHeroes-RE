@@ -4,6 +4,9 @@
 > format — it is NOT reverse-engineered from the original `doida.exe`. No binary offsets or
 > magic constants from the legacy client appear here. The format is defined by this project
 > and is forward-compatible: new rule sections may be appended without breaking older files.
+>
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+> ida_reverified: 2026-06-27 — CYCLE 14 re-anchor review: project-owned format (.mhm); outside IDA ground-truth scope; no binary artifact exists to confirm or refute; unchanged by definition
 
 ---
 

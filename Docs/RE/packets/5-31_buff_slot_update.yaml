@@ -7,6 +7,8 @@
 #                 VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: none. WIRE-vs-RUNTIME width note: on the wire effect_code is a u16 @0x0C (with a 2-byte
 #              pad to 0x10); the stored runtime buff entry widens it to a full u32, giving a clean

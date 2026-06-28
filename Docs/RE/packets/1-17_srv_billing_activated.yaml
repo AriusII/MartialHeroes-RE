@@ -2,6 +2,9 @@
 # VERIFICATION:
 #   routing+size: confirmed (control-flow: the handler reads 0 bytes from the payload cursor, header-only)
 #   ida_reverified: 2026-06-19   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): handler re-traced; header-only (0 payload bytes), billing
+#        flag set and MessageDB string 45008 re-confirmed SAME, 0 corrected.
 #   capture_verified: false
 
 name: SmsgSrvBillingActivated

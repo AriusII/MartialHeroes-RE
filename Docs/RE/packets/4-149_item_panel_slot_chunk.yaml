@@ -8,7 +8,10 @@
 #                 Size 12+16*Count byte-exact.)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 6 fields re-confirmed SAME
+#        (Guard==1@0, PlayerId@4, ChunkType@8, StartIndex@9, Count@0xa, Records@0xc 16B stride; equip cap 20),
+#        0 corrected.
 #   conflicts: none.
 
 name: SmsgItemPanelSlotChunk

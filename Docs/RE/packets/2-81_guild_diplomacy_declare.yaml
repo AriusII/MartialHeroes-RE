@@ -3,6 +3,9 @@
 # are control-flow CONFIRMED from the guild-diplomacy send path. capture_verified: false.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the builder/handler, 2 fields re-confirmed SAME, 0 corrected;
+#        opcode dispatch confirmed (specs/network_dispatch.md).
 #   size (18) + action/name split: control-flow CONFIRMED
 #   reply attribution: CORRECTED (binary wins) — the substantive verdict is 4/61 SmsgGuildStateChangeResult
 #   (52-byte body), NOT 4/81. Response slot 81 holds a generic action-error result, not a diplomacy reply.

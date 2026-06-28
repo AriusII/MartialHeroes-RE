@@ -7,6 +7,10 @@
 #                 NameBlock, BillingFlag value enum, BlockTail content) are capture/debugger-pending.
 #   ida_reverified: 2026-06-16
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler (SmsgEnterGameAck); 5 layout facts re-confirmed
+#        SAME (NameBlock 28B @0x00, BillingFlag u32 @0x1C, BlockTail 8B @0x20, CharacterCount u32
+#        @0x28, GameState=LOADING side effect + run-flag clear); 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: none (re-confirmed against the 3/5 handler read site).
 

@@ -1,4 +1,5 @@
 # *** SUPERSEDED -> see packets/login.yaml ***
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; tombstone redirect to login.yaml re-confirmed against the builder; dispatch routing SAME, 0 corrected.
 # The login credential carrier is now packets/login.yaml (secure 1/4 frame: 0x2B plaintext
 # pre-image + RSA ciphertext, debugger-verified). The opcodes.md 1/4 row points at login.yaml.
 # This file is retained as historical provenance only -- do not implement from it.

@@ -8,6 +8,10 @@
 #                 object, NOT in the packet; every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-24
 #   ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the handler; 5 fields
+#        (Header bytes[8]@0x00, Mode u8@0x08, Pad1 bytes[3]@0x09, ValueA u32@0x0C, ValueB u32@0x10)
+#        re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: CORRECTED. A prior reading placed Mode u8@0x00, treated Header[7]@0x01..0x07, then
 #              ValueA u32@0x08 and ValueB u32@0x0C. The binary refutes this: the leading 8 bytes are an

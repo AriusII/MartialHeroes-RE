@@ -1,3 +1,6 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the handler (SmsgCharSpawnResponse); 6 layout facts re-confirmed SAME (Result u8 @0,
+# Subtype u8 @1, Pad[2] @2, ValA u32 @4, ValB u32 @8, ValC u32 @0xC); 0 corrected.
 name: SmsgCharSpawnResponse
 opcode: 0x3000e           # major 3, minor 14 -> (3 << 16) | 14
 direction: S2C

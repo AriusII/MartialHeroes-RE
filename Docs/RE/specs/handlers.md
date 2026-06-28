@@ -1,8 +1,9 @@
 ---
 status: routing-confirmed
-verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
+verification: routing/sizes [confirmed] (control-flow proven, anchor 263bd994); packet field VALUE semantics [capture/debugger-pending]; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20); CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 2 facts re-confirmed SAME (major-3 subtraction-chain ladder, SmsgGmChatMessage 3/50000 behavior)
 ida_reverified: 2026-06-24   # network-dispatch audit (263bd994): §1 Response install counts corrected — binary proves 102 raw stores / 100 occupied slots / 99 distinct handlers / 2 NULL (minors 0, 27); prior CYCLE 12 2026-06-22: 3/100 SmsgCharActionResult full dual-mode code table re-read; prior CYCLE 8 2026-06-21: major-4/5 154-slot dispatch tables (98 Response / 65 Push installed — now superseded by 102/100/99 figures) + 3/7 (8B) / 3/23 (28B) read sizes re-confirmed; prior CYCLE 7 2026-06-20
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): major-3 subtraction-chain ladder (all 11 wired minors incl. 3/50000) and SmsgGmChatMessage handler both re-confirmed SAME on build f61f66a9. SmsgGmChatMessage carries IDB dedup suffix _0 in this build (rename pending, ida-toolsmith); behavior and routing unchanged
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false
 struct_cross_ref_verified: true
@@ -940,6 +941,11 @@ note.** (3/4 `SmsgSceneEntityUpdate` is specced in §2, not here.)
 ### 3/50000 — `SmsgGmChatMessage`
 - **Variable: a channel/kind `u8`, then a length-prefixed text body.** Posts a GM / system chat
   line into the chat window (CP949 text). Shape HIGH; kind-byte semantics MED.
+- **IDB label note (build f61f66a9, CYCLE 14 re-anchor):** routing and behavior re-confirmed
+  unchanged. The handler function carries the IDB dedup suffix `_0` in the current build (live
+  IDB name: `SmsgGmChatMessage_0`); the un-suffixed canonical label was displaced by a naming
+  collision in the rebuild. The correct canonical name is `SmsgGmChatMessage`. A rename dropping
+  the `_0` suffix is pending (ida-toolsmith, CYCLE 14).
 
 ---
 

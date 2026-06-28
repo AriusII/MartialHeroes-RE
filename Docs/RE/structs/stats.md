@@ -14,8 +14,9 @@
 > - **capture/debugger-pending** — the two external inputs (`level_base`, `server_base`) are
 >   server-supplied and inherently capture-pending; the class-id → class-enum mapping; and the
 >   gear that populates the two extra HP/MP equip slots.
-> - **ida_reverified:** 2026-06-16; re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20)
->   **ida_anchor:** 263bd994  **evidence:** [static-ida]
+> - **ida_reverified:** 2026-06-16 (SHA 263bd994, CYCLE 7); CYCLE 14 re-anchor: 2026-06-27
+>   **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963  **evidence:** [static-ida]
+> - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (max-HP/MP three-stage formula, stat weights 2.2/2.5/2.4/1.5/1.6 for HP and 1.4/1.5/1.7/1.5/3.5 for MP, per-class HP table 0.3/0.2/0.15/0.1, slot-8 skip, stat-curve file strides userlevel 60/userpoint 32/exp 20/users 496).
 > - **conflicts:** none raised against this doc this pass. CYCLE 7 added the "Stat-curve table family"
 >   section below (on-disk record layouts for users/userlevel/userpoint/exp.scr + the in-memory scaling
 >   grid). It does not change the max-HP/MP formula above; it documents where the per-level scaling

@@ -1,3 +1,7 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced
+# against the handler (SmsgCharStatusUpdate); 4 layout facts re-confirmed SAME (Result u8 @0,
+# ErrorCode u8 @1, Name char[17] @2, 4-bucket ErrorCode mapping {C8/C9, CC/CD/CF/D0/D1/D2, CE, D4});
+# 0 corrected.
 name: SmsgCharStatusUpdate
 opcode: 0x3000d           # major 3, minor 13 -> (3 << 16) | 13
 direction: S2C

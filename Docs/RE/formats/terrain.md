@@ -5,6 +5,18 @@
 
 ---
 
+## Re-verification banner (2026-06-27 — CYCLE 14 re-anchor, build f61f66a9)
+
+| Attribute        | Value |
+|------------------|-------|
+| `verification`   | CYCLE 14 re-anchor (f61f66a9): 5 facts re-confirmed SAME, 0 corrected. Covered facts: (1) `.ted` five-block no-header 46,987-byte layout (§5.3); (2) block-2 normals `/127.0`, block-5 diffuse `×0.5`, steep-flag `>8.0`, spacing `16.0`, cell origin `(map−10000)×1024`, 16×16 patch grid, UV step `0.25` with `s_flip`/`t_flip` (§5.2–§5.8); (3) block-3 texture-index byte stored RAW by the loader, decrement/clamp in downstream finalize only (§5.6); (4) `.map` twelve-section whitespace token parser with keyword→decoder dispatch, geometry directives present on disk but not parser-consumed (§3.1–§3.4); (5) the two `.map` parsers (VFS-path + loose-disk twin) are byte-identical, relocation confirmed at new addresses — behavior unchanged. |
+| `ida_reverified` | `2026-06-27` |
+| `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
+| `evidence`       | `[static-ida]` — loader read-path re-confirmed at relocated addresses under build f61f66a9; ~96% of functions shifted by a uniform +0x80/+0x7e (behavior unchanged). Prior anchor `263bd994` retired as canonical; f61f66a9 is now the active IDB. |
+| `conflicts`      | None. Build delta (~128-byte `.text` insertion + ~0x1000 data-page shift) did not change any format behavior. The two `.map`-parser address labels were re-paired (VFS-path parser vs loose-disk twin), resolving a prior anomalous-shift note in the carry-verify worklist — this is a label re-pairing only, not a behavior change. |
+
+---
+
 ## Re-verification banner (2026-06-24 — full independent re-confirmation, no corrections)
 
 | Attribute        | Value |
@@ -582,6 +594,27 @@ block 3 (texture index) has no error string. No drift from this layout.
 > (3) solve the plane of that triangle's three vertices for Y.
 > Confidence: CODE-CONFIRMED (IDB SHA 263bd994). Cite: `// spec: Docs/RE/formats/terrain.md §5.4a`.
 
+> **[static-hypothesis] Triangle-selection refinement (2026-06-26 — live IDB build for this
+> session differs from the pinned anchor 263bd994; behaviors build-stable, offsets pending
+> reconciliation; re-validator confirmation at G2 recommended).**
+> The implementation note above (step 2: "split on the diagonal direction from block-4") requires
+> refinement. The **runtime height sampler** does NOT consult the block-4 direction byte to
+> choose a diagonal at query time. Instead it:
+> (a) iterates **all stored triangle face records** in the 16×16 patch that covers the query point;
+> (b) applies an **axis-aligned bounding-box reject** (face's XZ AABB vs query XZ), then a **2D
+> point-in-triangle containment test** (3-edge-sign test in the XZ plane) on each survivor; and
+> (c) keeps the **maximum Y** over all containing triangles as the height result.
+>
+> Block-4's role is **load-time mesh-build**: when the terrain loader populates each patch's face
+> list at cell-load time, it uses the block-4 direction byte to determine how each quad is split
+> into its two stored triangles. The runtime sampler then picks from those pre-built triangles by
+> geometric containment — it never re-reads block-4. A faithful port therefore requires two
+> independent correct behaviors: (1) **load-time triangulation** using block-4 to split each quad
+> into the correct pair of triangles, and (2) a **runtime sampler** that iterates the stored face
+> list and returns the maximum-Y containing triangle's plane Y. Whether the `.ted` loader actually
+> uses block-4 for this triangulation (vs. another criterion) was not confirmed in the session that
+> produced this note and remains open — see `Docs/RE/specs/entity_placement.md §7.2`.
+
 ### 5.5 Block 2 — Vertex normals
 
 - 4 225 packed RGB triples, one per vertex, same row-major order as block 1.
@@ -864,19 +897,20 @@ at whatever byte offset follows the preceding field.
 
 | Byte offset within vertex | Size | Type  | Field   | Notes                               | Confidence |
 |--------------------------:|-----:|-------|---------|-------------------------------------|------------|
-| 0                         | 4    | f32le | `X`     | World-space X coordinate            | CONFIRMED (values in expected cell range) |
-| 4                         | 4    | f32le | `Y`     | World-space Y (height)              | CONFIRMED  |
-| 8                         | 4    | f32le | `Z`     | World-space Z coordinate            | CONFIRMED  |
-| 12                        | 20   | —     | (5 × f32le, purpose unknown) | May be normals, UV, colour | UNVERIFIED |
+| 0                         | 4    | f32le | `pos_x` | World-space X coordinate            | CONFIRMED  |
+| 4                         | 4    | f32le | `pos_y` | World-space Y (height)              | CONFIRMED  |
+| 8                         | 4    | f32le | `pos_z` | World-space Z coordinate            | CONFIRMED  |
+| 12                        | 4    | f32le | `norm_x`| Surface normal X component          | CONFIRMED  |
+| 16                        | 4    | f32le | `norm_y`| Surface normal Y component          | CONFIRMED  |
+| 20                        | 4    | f32le | `norm_z`| Surface normal Z component          | CONFIRMED  |
+| 24                        | 4    | f32le | `uv_u`  | Texture U coordinate                | CONFIRMED  |
+| 28                        | 4    | f32le | `uv_v`  | Texture V coordinate                | CONFIRMED  |
 
-**Known unknowns for vertex bytes 12–31:** candidates are (Nx, Ny, Nz) packed normal plus (U, V)
-texture coordinates, but the packing and whether any byte encodes alpha or material data is not
-confirmed.
+The layout is determined by the Direct3D fixed-function vertex format (FVF) value **0x112** (`D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1`) used by the static-building draw pass.
 
 ### 8.4 Known unknowns
 
 - `type` field semantics: only value `0` observed; what other values exist and what they select.
-- Vertex bytes 12–31: the five remaining f32le fields per vertex.
 
 ---
 
@@ -1402,3 +1436,83 @@ consumes, or a backup of a prior version?) is not recoverable from the client bi
 is a content tool not present in it); `.fx<N>.pre` internal bytes were not dumped this pass
 (expected full base format); the `.sod.pre` lean-polygon layout vs. runtime `.sod` (whether source
 or older schema) is SAMPLE-only.
+
+---
+
+## 17. `.bud` MassObject Vertex Format — Cycle 15 Clarification
+
+> `ida_reverified: 2026-06-27` (CYCLE 15 — vertex layout bytes 12–31 resolved)
+
+### 17.1 Vertex Stride
+
+Each `.bud` group vertex is **32 bytes (0x20)**. The loader `Bud_LoadBuildingBlob`
+allocates `operator new(32 × vertex_count + 4)` and reads the raw block from disk into it.
+
+### 17.2 On-Disk Vertex Layout (VF_32)
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 4 | f32le | `pos_x` | World X position |
+| +0x04 | 4 | f32le | `pos_y` | World Y position |
+| +0x08 | 4 | f32le | `pos_z` | World Z position |
+| +0x0C | 4 | f32le | `norm_x` | Vertex normal X |
+| +0x10 | 4 | f32le | `norm_y` | Vertex normal Y |
+| +0x14 | 4 | f32le | `norm_z` | Vertex normal Z |
+| +0x18 | 4 | f32le | `tex_u` | Texture U coordinate |
+| +0x1C | 4 | f32le | `tex_v` | Texture V coordinate |
+
+This is the standard **D3DFVF_XYZ | D3DFVF_NORMAL | D3DFVF_TEX1** layout (32 bytes). The AABB
+computation in `BudObject_ComputeAABBAndBudget` only reads `[0]`/`[1]`/`[2]`
+(X, Y, Z); the remaining five floats are consumed by the D3D renderer's vertex pipeline.
+
+**Bytes 12–31 are NOT geometry-only slack** — they carry full normals and UVs required by
+the per-pixel lighting and texture-mapping shaders.
+
+### 17.3 Index Buffer
+
+Immediately following the vertex block: `index_count` (u32) then `index_count × 2` bytes
+of **u16 triangle indices** (triangle list, CCW winding assumed).
+
+### 17.4 Per-Object Header (in file)
+
+| Read order | Destination | Content |
+|-----------|-------------|---------|
+| 1st read (1 byte) | `obj.type_byte` | Mesh type / sub-category |
+| 2nd read (4 bytes) | `obj.tex_id` | Registered texture ID |
+| 3rd read (4 bytes) | `obj.vertex_count` | Vertex count (> 3072 = WARN, not error) |
+| — block read — | `obj.vtx_ptr` | `vertex_count × 32` bytes |
+| 4th read (4 bytes) | `obj.index_count` | Index count |
+| — block read — | `obj.idx_ptr` | `index_count × 2` bytes |
+
+### 17.5 In-Memory BudObject Layout (116 bytes stride)
+
+| Offset | Size | Type | Field | Notes |
+|-------:|-----:|------|-------|-------|
+| +0x00 | 4 | u32 | `tex_id` | D3D texture index |
+| +0x04 | 4 | ptr | `vtx_ptr` | Heap pointer to VF_32 vertex array |
+| +0x08 | 4 | u32 | `vertex_count` | |
+| +0x0C | 4 | ptr | `idx_ptr` | Heap pointer to u16 index array |
+| +0x10 | 4 | u32 | `index_count` | |
+| +0x14 | 12 | f32[3] | `aabb_min` | Set by `BudObject_ComputeAABBAndBudget` |
+| +0x20 | 12 | f32[3] | `aabb_max` | Set by `BudObject_ComputeAABBAndBudget` |
+| +0x30 | 4 | u32 | `vtx_bytes` | = 32 × vertex_count (cached size) |
+| +0x34 | 1 | u8 | `type_byte` | Mesh sub-type |
+| +0x40 | 4 | u32 | `lod_budget` | Budget tier in units (see §17.6) |
+| +0x46 | 1 | u8 | `texture_type` | Resolved by `TerrainManager` at build-time |
+| +0x5C | 4 | f32 | `anim_scale` | Animation scale factor (derived, not file) |
+| +0x68 | 12 | f32[3] | `anim_pivot` | Animation pivot world position (derived) |
+
+### 17.6 LOD Budget Tiers
+
+Budget is computed from the maximum of `(aabb_max.x - aabb_min.x) × 0.6` and
+`(aabb_max.y - aabb_min.y)`:
+
+| Max dimension | Budget value |
+|--------------|--------------|
+| < 8 | 90 000 |
+| 8–15 | 250 000 |
+| 16–31 | 1 000 000 |
+| 32–63 | 2 250 000 |
+| ≥ 64 | 3 240 000 |
+
+

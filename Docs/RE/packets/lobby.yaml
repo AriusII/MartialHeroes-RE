@@ -15,6 +15,10 @@
 #                                #   static-CONFIRMED (single-SPACE delimiter, 30=copy-cap not min, SINGLE
 #                                #   endpoint -- no trailing array). On-wire byte VALUES still capture-pending.
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): roster query (port 10000) and channel query (port
+#        server_id+10000) re-traced; 8-byte wrapper (total_size u32@+0, count u16@+4), LZ4-decompress,
+#        roster count x 8-byte records and single 30-byte endpoint token -- re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   capture_verified: false   # no .pcapng / list.dat sample present; on-wire byte VALUES and
 #                             #   the list.dat record gap remain capture/sample-pending. The

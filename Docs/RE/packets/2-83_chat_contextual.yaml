@@ -4,6 +4,9 @@
 # from the contextual-chat send path. capture_verified: false.
 #
 # VERIFICATION: ida_anchor 263bd994 · evidence [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the builder/handler, 1 field re-confirmed SAME, 0 corrected;
+#        opcode dispatch confirmed (specs/network_dispatch.md).
 #   prefix width (24) + text framing ([u32 len][text], len = strlen+1 INCLUDES NUL) + gate (0<strlen<200):
 #   control-flow CONFIRMED. The 24-byte prefix's internal layout + the driving UI action: capture/debugger-pending.
 #   NUL-rule contrast: 2/83 INCLUDES the NUL (len = strlen+1); 2/7 EXCLUDES it (the lone exclude-NUL outlier).

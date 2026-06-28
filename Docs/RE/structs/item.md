@@ -10,7 +10,7 @@
 > functions (these live in apply paths that were **not** re-located by control flow this pass — they
 > are carried from prior analysis, not re-confirmed); **capture/debugger-pending** for every wire
 > **field value semantic** (what a copied byte *means*) and any binding/tradeable bit inside the
-> 16-byte slot record. ida_reverified: 2026-06-16 · ida_anchor: 263bd994 · evidence: [static-ida] ·
+> 16-byte slot record. ida_reverified: 2026-06-16 (SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963 · evidence: [static-ida] ·
 > conflicts: one low-severity offset refinement — 4/12 `to_slot` is a single byte at **+0x0C**
 > (not the hedged +0x0B–0x0C); the "value 15 ⇒ visual rebuild" semantic is unchanged.
 >
@@ -31,6 +31,8 @@
 > (2) Upgrade-result display message-db ids added: success = **33007** (broadcast green), fail =
 > **33008** (broadcast orange), read by the 4/50 panel/result handler alongside cues 862100101/2
 > (§8, §11). The §6f durability/+184 control-flow path was re-confirmed this pass (unchanged).
+>
+> **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 1 fact re-confirmed SAME (item-wire handler routings/body sizes 4/12 16B, 4/22 36B, 4/50 32B, 4/19 56B, 4/149 header+record-run; upgrade constants level cap 28, process steps 6, recipe stride 44, success cue 862100101, fail cue 862100102).
 
 Neutral, offset-model of the item-related structures the legacy client used. Promoted from
 dirty-room notes; rewritten, no decompiler identifiers, no binary addresses. Design input for the

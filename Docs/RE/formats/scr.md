@@ -13,7 +13,8 @@
 >   intervals); the CYCLE-10/D9 "199 B / 28 records" reversal and its "796 B REFUTED" claim are OVERTURNED.
 >   userlevel.scr 60 B / 300 records RE-CONFIRMED unchanged. Family shape, no-magic, LE, CP949, count =
 >   size/stride, defensive short-read tail — all re-confirmed.
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 1 fact re-confirmed SAME; 0 corrected)
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > CORRECTED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): citems.scr description paragraph count
 >   RESOLVED = 10 (capacity, '#'-sentinel terminated; consumer accessor bounds index < 10).

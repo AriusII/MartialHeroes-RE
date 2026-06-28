@@ -17,6 +17,9 @@ summary: Server updates ONE slot of the player-to-player trade window. A single 
 # path does not consume. The handler reads a fixed 44-byte record, then routes by the category byte
 # and the owner-id side discriminator.
 # verification: ida_anchor 263bd994 — Result@+0x08 and Subtype@+0x09 confirmed; 8-byte head precedes.
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 6 fields re-confirmed SAME
+#        (Result@8, Subtype@9, Category@0xa, ItemId@0xc, SlotIndex@0x24, OwnerId@0x28), 0 corrected.
 fields:
   - { name: Head,      type: "bytes[8]" }   # 0x00  8-byte frame head (payload-cursor convention; consumed before the gate bytes)
   - { name: Result,    type: u8 }          # 0x08  result/ack byte: 0 = teardown / notice path, 1 = apply this slot

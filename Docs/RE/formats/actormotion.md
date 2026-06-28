@@ -5,21 +5,26 @@
 > reference this file.
 
 <!--
-verification: confirmed-by-use-site (slot roles, rate semantics, motion_ids_b consumer) + sample-verified (col2 / motion-id slots) + confirmed (read-order, offsets, key math, rate math)
+verification: confirmed-by-use-site (slot roles, rate semantics, motion_ids_b consumer) + sample-verified (col2 / motion-id slots) + confirmed (read-order, offsets, key math, rate math); CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME, 0 corrected
 ida_reverified: 2026-06-19; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 11 (static + vfs-sample; all prior claims CONFIRMED, no corrections; sibling manifest load order confirmed: bindlist → motlist → emoticon → skin → actormotion → userjoint → gmmapmove)
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27; re-verified against doida.exe IDB SHA f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963, CYCLE 14 (static-only; 136-byte record layout, 15.0-rate math, motion_ids_a[1]=+0x44 stand idle, motion_ids_b semantics, AnimCatalog appearance-key lookup all re-confirmed SAME, no corrections)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
 -->
 
-> **Verification banner.** `confirmed-by-use-site` · `sample-verified` · `ida_reverified: 2026-06-24`
+> **Verification banner.** `confirmed-by-use-site` · `sample-verified` · `ida_reverified: 2026-06-27`
 > (most-recent re-verification against doida.exe IDB SHA
-> `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`, CYCLE 11, 2026-06-24;
-> prior re-verification CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`, CYCLE 14, 2026-06-27;
+> prior re-verifications: CYCLE 11, 2026-06-24; CYCLE 7, 2026-06-20) ·
+> `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. All load-bearing claims (read-order,
 > offsets, key math, rate math, dual text/binary reader, slot roles, motion_ids_b semantics)
-> re-confirmed against build `263bd994` in CYCLE 11. No structural corrections.
+> re-confirmed against build `263bd994` in CYCLE 11. No structural corrections. CYCLE 14
+> (f61f66a9, 2026-06-27): 136-byte record layout, motion_ids_a[1] = +0x44 stand idle (COLUMN 16),
+> a[6] = +0x58 alt-idle, appearance-key AnimCatalog lookup, rate math (15.0 × src / divisor), and
+> ordered-map insertion all re-confirmed SAME against build `f61f66a9` (static-ida); no corrections.
 >
 > **CORRECTED CYCLE 7 (ida_anchor 263bd994, 2026-06-20):** B-array slot labelling de-shifted to the
 > loader's own indexing — **death effect/sound = b[4] = +0x74** (was mislabelled "b[5]"), dead trailing

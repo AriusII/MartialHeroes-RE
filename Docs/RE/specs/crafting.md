@@ -12,8 +12,9 @@ verification: confirmed (control-flow-confirmed) for the production subsystem on
   the 2/153 slot tuple, and the semantic labels of the produced-item dwords (id vs count vs grade).
   The unread record regions (between the key and the result field, and the tail after the NPC field)
   are UNVERIFIED — no on-disk sample row was available; the client never reads them.
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 ida_reverified: 2026-06-24
+ida_reverified: 2026-06-27
 evidence: [static-ida]
 sample_verified: false
 note: |
@@ -25,6 +26,7 @@ note: |
   (0xD4) verbatim record, operator-new per row, inserted into an ordered map keyed on record +0x00
   (confirms §2.1 stride/key/single-system claims; §2.3 column offsets and §3/§4 opcode flow carried
   from prior cycles, no drift found).
+  CYCLE 14 re-anchor (f61f66a9, 2026-06-27) — confirmatory pass: products.scr + productcollect.scr + productrandname.scr loaders present and registered in boot path-pointer table, cleanly relocated. 1 re-confirmed SAME, 0 corrected.
 -->
 
 # Crafting / Production — Recipe Table & Make-Item Flow — Clean-Room Specification

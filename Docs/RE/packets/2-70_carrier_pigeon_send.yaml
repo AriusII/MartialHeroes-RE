@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, f61f66a9): body layout re-traced against the builder/handler, 7 fields re-confirmed SAME, 0 corrected; opcode and dispatch confirmed (specs/network_dispatch.md).
 # Source spec: c2s_market_mail.md §3 (carrier-pigeon SEND, layout DERIVED from the compose-buffer
 # validator). Role: client carrier-pigeon (mail) SEND -- a fixed 132-byte compose body.
 #

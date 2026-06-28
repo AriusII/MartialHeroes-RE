@@ -1,7 +1,8 @@
 ---
-verification: confirmed
+verification: confirmed — CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (press/release click-synth FSM; single global click-capture pointer confirmed relocated, behavior unchanged)
 ida_reverified: 2026-06-21   # CYCLE 8: event-dispatch FSM (8 types, reverse-child topmost-first, single global click-capture, synthetic CLICK, action-id->active-child->window switch, ESC=27/Tab=9/Enter=10) re-confirmed CODE-CONFIRMED, zero conflicts
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 ---
 

@@ -10,9 +10,10 @@
 >   **Cube-Gamble minigame** result/spin panel (see §5 and the §5.2 redirect). The death-state field
 >   convention and on-death cleanup are added (new §14). Real combat is server-authoritative via C2S `2/52`
 >   (unchanged headline).
-> - **ida_reverified:** 2026-06-20
-> - **ida_anchor:** 263bd994
+> - **ida_reverified:** 2026-06-20 (SHA 263bd994, CYCLE 7); CYCLE 14 re-anchor: 2026-06-27
+> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **evidence:** [static-ida] (no live network capture corroborates the in-world loop yet)
+> - **CYCLE 14 re-anchor (f61f66a9, 2026-06-27):** 2 facts re-confirmed SAME (server-authoritative damage, basic melee = 2/52 slot 0xFF with per-class default-attack id 121100050, cadence 100ms*cadence, 550ms lockout, 100ms throttle, hit-cap 40; carry_verify SUSPECT NetHandler_GetSingleton confirmed correct at relocated address, not the Diaphora false-alarm address).
 > - **conflicts:** (1) attack-in-progress flag clear — this build shows it cleared/re-armed in
 >   `SmsgLocalPlayerStateSync` (**4/13**), not a `4/2` handler; which push *arms* vs *releases* the swing
 >   window is **capture/debugger-pending**. (2) The §9.1 picked-target offsets re-pinned for `263bd994`:

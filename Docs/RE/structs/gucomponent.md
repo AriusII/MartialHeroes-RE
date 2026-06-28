@@ -1,7 +1,8 @@
 ---
-verification: confirmed
+verification: confirmed — CYCLE 14 re-anchor (f61f66a9): 3 facts re-confirmed SAME, 1 NEW (RTTI for all panel classes intact; panel vtable-label recovery method documented)
 ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: +0x8D dual semantics — RESOLVED CYCLE 8 (IDB SHA 263bd994): +0x8D is the `remove_mark` deferred-child-removal flag (the panel child-removal sweep removes children whose ==1 and clears it on survivors); setVisible's co-write is an incidental mirror of +0x8C that the panel-build path explicitly zeroes — the "enable/clip vs pending-removal" ambiguity resolves to pending-removal (the static role is CODE-CONFIRMED, only frame-by-frame coexistence is a non-load-bearing debugger nicety); +0xB8 — RESOLVED CYCLE 7 (IDB SHA 263bd994): it is a 4-byte SIGNED INT used as the per-glyph pixel width step for text centering, NOT a pointer and NOT a panel_kind byte (the old "panel_kind / subclass byte" reading is superseded); +0x8B — RESOLVED (IDB SHA 263bd994): the focused/caret-active flag (GUTextbox draw gates caret blink on +0x8B==1; LoginWindow Tab toggles it between credential fields); the earlier "role unpinned" label is superseded
 ---
@@ -254,6 +255,17 @@ The base class exposes exactly **13 virtual slots** (indices 0..12) — re-confi
 GUPanel installs its own vtable and overrides several of these (notably the draw / update / child
 behaviour); its child-removal sweep (which reads +0x8D == 1 to remove a child and clears +0x8D on the
 survivors) lives in the GUPanel vtable. The full GUPanel vtable is out of this struct's scope.
+
+> **RTTI intact — CYCLE 14 re-anchor (f61f66a9).** The C++ runtime type-information records and
+> vtable data symbols for every class in the `GU*` panel family are fully present in the current IDB
+> build; the class-identification and RTTI descriptor chains survived the build delta cleanly. This
+> means that per-class virtual-function labels lost as synthetic names during the build transition are
+> mechanically recoverable: for each derived panel class the surviving RTTI-linked vtable symbol
+> enumerates the actual function pointer at every slot, so reading vtable slot N under that class's
+> vtable symbol yields the correct slot-to-function binding — vtable membership is the ground truth
+> for slot assignment. When recovering labels this way, **inherited-thunk slots** (slots where the
+> derived class vtable points at the shared `GUPanel` or `GUWindow` base implementation rather than
+> a per-class override) should be identified by comparison and not assigned redundant per-class names.
 
 ---
 

@@ -1,3 +1,4 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 1 field re-confirmed SAME (Success@8), 0 corrected.
 name: SmsgUpgradeItemResult
 opcode: 0x40032           # major 4, minor 50
 direction: S2C

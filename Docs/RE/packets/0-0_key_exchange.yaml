@@ -6,6 +6,11 @@
 #                 [2B hdrA][2B hdrB][u32 modulus-len][modulus][u32 exp-len][exponent] record and asserts
 #                 it consumed exactly 54 bytes)
 #   ida_reverified: 2026-06-20   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the handler; 3 fields
+#        (RsaKeyBlob bytes[54], ServerScalarA u32, ServerScalarB u32) + key-blob internal layout
+#        (2B hdrA, 2B hdrB, u32 modulus-len, modulus BE, u32 exp-len, exponent BE; 54B asserted)
+#        re-confirmed SAME, 0 corrected.
 #   capture_verified: false  # the two trailing scalars' VALUE meanings are capture/debugger-pending
 
 name: SmsgKeyExchange

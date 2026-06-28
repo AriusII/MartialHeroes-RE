@@ -8,6 +8,11 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 11 fields
+#        (ByteA u8@+0x00, GapA bytes[3]@+0x01, DwordB u32@+0x04, ByteC u8@+0x08, ByteD u8@+0x09,
+#        GapB bytes[2]@+0x0A, DwordE u32@+0x0C, DwordF u32@+0x10, NamePrimary bytes[17]@+0x14,
+#        NameArray bytes[85]@+0x25, TailPad bytes[2]@+0x7A) re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: none. A deep struct pass names the header scalars (sort/id/byte-A/byte-B/value-A/value-B)
 #              at the same offsets recorded here; the offsets are pinned, the numeric meanings stay

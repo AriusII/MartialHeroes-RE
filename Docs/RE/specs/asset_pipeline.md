@@ -2,8 +2,8 @@
 status: confirmed
 verification: confirmed (re-confirmed against IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)); CYCLE 11 spec-audit (2026-06-24): §3 chain B bgtexture kind polarity corrected to binary truth (kind==1 ⇒ static; other non-zero ⇒ non-static); all other confirmed claims re-confirmed
 sample_verified: partial   # loader-selection mechanism, cache model and table strides CODE-CONFIRMED; the progress-bar visual outcome is debugger-pending
-ida_reverified: 2026-06-24   # CYCLE 11 spec-audit: §3 chain B kind polarity drift corrected; prior 2026-06-16
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — boot bulk-loader progress denominator / global constant cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-24: CYCLE 11 spec-audit bgtexture kind polarity corrected; prior 2026-06-16
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 subsystems: [loader_dispatch, ghtex_cache, asset_linkage, bulk_loader]
 networked: false           # the asset pipeline is entirely client-side; no wire traffic
@@ -32,7 +32,7 @@ conflicts: progress-bar visual outcome (does the ~9 MB boot set ever visibly fil
 
 ## Verification banner
 
-- **verification: confirmed** — `ida_reverified: 2026-06-24` against `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
+- **verification: confirmed** — `ida_reverified: 2026-06-27` against `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`; CYCLE 14 re-anchor: confirmatory — boot bulk-loader progress denominator cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior `ida_reverified: 2026-06-24` against `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`;
   `evidence: [static-ida, vfs-sample]`. CYCLE 11 spec-audit: §3 chain B bgtexture kind polarity corrected (binary wins — kind==1 ⇒ static); prior reverification 2026-06-16.
 - Tiers used inline below:
   - **[confirmed]** — recovered directly from control-flow + operand facts (the dispatch verdict,

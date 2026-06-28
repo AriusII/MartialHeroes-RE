@@ -1,4 +1,5 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9 (prior 263bd994); body layout re-traced against the handler; 1 field re-confirmed SAME.
 # CONFIRMED offsets/sizes (control-flow; the consumer's stack-frame gives a 1:1 body-offset -> field
 # mapping). Field VALUE MEANINGS likely. capture_verified: false.
 # spec: Docs/RE/packets/5-38_party_member_stats.yaml

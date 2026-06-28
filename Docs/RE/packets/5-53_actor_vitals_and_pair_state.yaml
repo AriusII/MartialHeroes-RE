@@ -6,6 +6,8 @@
 #                 control-flow-confirmed; every wire-byte VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- body layout re-traced against the handler; 1 field re-confirmed SAME (CYCLE 14 deep-verify, f61f66a9).
 #   evidence: [static-ida]
 #   conflicts: CORRECTED a real layout conflict. The prior reading labelled +0x14 "CurrentMp" and
 #              treated +0x10/+0x14/+0x18 as three independent u32 vitals (HP / MP / stamina). The

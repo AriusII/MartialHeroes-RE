@@ -7,7 +7,9 @@
 #                 to a product-apply sub-handler; every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 2 fields re-confirmed SAME
+#        (Success@8, FailSub@9 with 102->decrement-char-count), 0 corrected.
 #   conflicts: REFINED from "opaque" to a gated 184-byte product-result panel. The fail_sub == 102 arm
 #              decrements the local player's character count (a cash product that consumes a character
 #              slot).

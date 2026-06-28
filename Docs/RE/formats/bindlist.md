@@ -5,10 +5,11 @@
 > reference this file.
 
 <!--
-verification: sample-verified
+verification: sample-verified; CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected
 ida_reverified: 2026-06-16; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 7 (2026-06-20)
 ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee, CYCLE 11 (static-only; all prior claims CONFIRMED, no corrections)
-ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee
+ida_reverified: 2026-06-27; re-verified against doida.exe IDB SHA f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963, CYCLE 14 (static-only; char manifest sibling load order, skeleton/motion explicit registry pattern, BindList_LoadAndRegister + MotList_LoadAndRegister call chain all re-confirmed SAME, no corrections)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
 note: PINNED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): preload-vs-lazy = EAGER boot preload (file opened+parsed in the boot loop); selection key = .skn id_b used verbatim (no g{N}.bnd formatting)
@@ -16,9 +17,10 @@ note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimC
 note: CYCLE 11 (2026-06-24): re-verification pass — all claims confirmed against build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee. Added: the "bindlist.txt" literal string is passed to the loader as a parameter (the caller assembles the full path); the loader does not hold a hard-coded full-path constant for it. No structural corrections.
 -->
 
-> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-24` (most-recent re-verification
-> against doida.exe IDB SHA `263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee`,
-> CYCLE 11, 2026-06-24; prior re-verification CYCLE 7, 2026-06-20) · `ida_anchor: 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee` ·
+> **Verification banner.** `sample-verified` · `ida_reverified: 2026-06-27` (most-recent re-verification
+> against doida.exe IDB SHA `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`,
+> CYCLE 14, 2026-06-27; prior re-verifications: CYCLE 11, 2026-06-24; CYCLE 7, 2026-06-20) ·
+> `ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` ·
 > `evidence: [static-ida, vfs-sample]` · `conflicts: none`. Re-verified two-witness against build
 > `263bd994` (the bindlist load-and-register loop and the per-skeleton register-by-`actor_id` path) AND
 > the real `data/char/bindlist.txt` VFS sample. The 349-entry count, the 348-CRLF-plus-final-line-
@@ -27,7 +29,10 @@ note: CYCLE 11 (2026-06-24): re-verification pass — all claims confirmed again
 > **lexicographically (byte-string) sorted ascending**, not numerically sorted — see §Naming convention.
 > CYCLE 11 adds: the loader receives the manifest filename as a **parameter** from its caller; it does
 > not hold a hard-coded full-path constant for `bindlist.txt` (the caller assembles the full path and
-> passes it in). No structural corrections.
+> passes it in). No structural corrections. CYCLE 14 (f61f66a9, 2026-06-27): char manifest sibling load
+> order (bindlist → motlist → emoticon → skin → actormotion → userjoint → gmmapmove), explicit
+> skeleton/motion registry pattern (no computed `g{N}.bnd` path rule), and verbatim `id_b` pose-pool
+> lookup all re-confirmed SAME against build `f61f66a9` (static-ida); no corrections.
 >
 > **Why this matters:** this file is the authoritative skeleton registry. It CONFIRMS the
 > correction recorded in `CLAUDE.md`: a skeleton is registered via this explicit catalogue (and via

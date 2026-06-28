@@ -1,4 +1,5 @@
 # Clean-room FAMILY spec. Promoted from neutral analyst notes; rewritten, not copied.
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 2 checkable read-length facts re-confirmed SAME (4/40=0xA4/164B, 4/75=0xB8/184B), 0 corrected.
 # This is a FAMILY notice, NOT a per-minor field spec. It documents the shared shape of the major-4
 # "thin UI-slot updater" S2C messages whose field layout is not yet specced, and records which minors
 # were RECLASSIFIED OUT of the family into their own structured specs. capture_verified: false.

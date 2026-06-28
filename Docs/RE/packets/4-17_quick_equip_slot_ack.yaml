@@ -1,3 +1,4 @@
+# CYCLE 14 deep-verify (2026-06-27, build f61f66a9): ida_anchor f61f66a9; body layout re-traced against handler, 2 fields re-confirmed SAME (Result@8, SlotIndex@0xb), 0 corrected.
 name: SmsgQuickEquipSlotAck
 opcode: 0x40011           # major 4, minor 17
 direction: S2C

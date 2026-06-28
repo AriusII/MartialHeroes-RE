@@ -8,7 +8,9 @@
 #                 every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 4 fields re-confirmed SAME
+#        (Subtype@8, ActorId@0xc, TransformArrayA 64x16@0x10, TransformArrayB 64x8@0x410), 0 corrected.
 #   conflicts: REFINED. (1) Name promoted from the neutral SmsgResponseSlot56 to SmsgSceneEnterSpawnSnapshot
 #              (the apply path is scene/spawn population). (2) Transform array B's base is now SOLID at
 #              +0x410 (= +260 dwords), resolving the prior dword-vs-byte ambiguity. 4/56 is a structured

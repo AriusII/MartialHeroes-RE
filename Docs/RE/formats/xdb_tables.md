@@ -9,7 +9,8 @@
 > ```
 > verification: sample-verified            # every stride/count below confirmed by exact divisibility of the real VFS file size; head records byte-decoded on build 263bd994; loaders/consumers re-read 2026-06-21; all facts re-confirmed 2026-06-24
 > ida_reverified: 2026-06-24
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 1 fact re-confirmed SAME; 0 corrected)
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > confidence: HIGH on all load-bearing facts (loader sequence, strides/counts, field types, actor_size never-loaded verdict) as of 2026-06-24 re-verification pass
 > conflicts: buff_icon_position origin spacing CORRECTED 27 -> 25 (sample shows step 25 on both axes); 21x21 draw-cell needs the sprite sheet to adjudicate
@@ -125,8 +126,10 @@ record layout (little-endian):
 3. **Reserve / clear** the destination record buffer and reset the per-table index map for `count`
    entries.
 4. **Bulk-read the whole file in one shot** into a flat record buffer (`stride * count` bytes). On a
-   read failure the loader logs an "error read file" diagnostic and bails; otherwise the buffer holds
-   `count` back-to-back fixed-stride records.
+   read failure the loader logs an "error read file" diagnostic and continues to the close and index
+   steps — it does not abort early. [static-hypothesis — 2026-06-26: re-derived from a session whose
+   IDB build differs from the pinned anchor 263bd994; the prior pinned-anchor text recorded "bails" —
+   pending build reconciliation.] On success the buffer holds `count` back-to-back fixed-stride records.
 5. **Close** the file.
 6. **Index by first dword:** loop `i = 0 .. count-1`, take `key = first u32 of record i` (the field
    at record offset `+0`), and insert `key -> &record[i]` into that table's per-table ordered map
@@ -148,6 +151,19 @@ So the only validation is is-good / read-ok; everything downstream keys on the r
 > from a campaign that assumed actor_size shared the small-table corpus loader; the 2026-06-21
 > loader-mechanism re-read shows the corpus thread calls only four named loaders directly —
 > effectscale / creature_item / vehicle / buff_icon_position — and actor_size is **not** among them.)
+>
+> **[static-hypothesis — 2026-06-26] Physical pointer-array slot ordering:** the data segment holds a
+> contiguous array of exactly five `char*` path pointers in this physical order — slot 1: effect-scale,
+> slot 2: creature-item, slot 3: vehicle, slot 4: actor-size, slot 5: buff-icon-position. The boot
+> data-table corpus loader calls slots 1, 2, 3, and then 5 in sequence, stepping over slot 4
+> (actor-size) entirely — it is never pushed and never passed to any open/load call. Independently,
+> the actor-size path string has exactly one reference in the whole image: that orphaned pointer-array
+> slot, and the slot itself has no code reference. This makes the "never loaded" verdict precise: the
+> slot is present between the vehicle and buff-icon-position slots (likely an authoring remnant) but
+> is deliberately skipped at the call site. (Recovered 2026-06-26 from a session whose IDB build
+> differs from the pinned anchor 263bd994; behaviors are build-stable, exact offsets pending build
+> reconciliation.)
+>
 > Net guidance for the port: actor scaling in this build is driven elsewhere, not by this file, and a
 > faithful 1:1 port need not load it at all. The layout below is documented for completeness and
 > archival fidelity.
@@ -405,6 +421,13 @@ So the only validation is is-good / read-ok; everything downstream keys on the r
 - `effectscale.xdb`: confirmation of the high16=type-tag / low16=index split of `effect_key`
   (NARROWED but the table holds only 2 records). The `scale_factor` purpose (per-effect overall
   size multiplier) is now CONFIRMED.
+- **Small-table key-comparison signedness** (all four small tables — `effectscale`,
+  `buff_icon_position`, `vehicle`, `creature_item`): the ordered-map **unsigned** key comparison was
+  confirmed in the 2026-06-26 static pass for `msg.xdb` only; the corresponding signedness of each
+  small-table ordered map was not individually re-checked in that pass. The small-table keys are
+  non-negative ids in practice, so the signed/unsigned distinction is unlikely to cause mis-ordering,
+  but it remains **UNVERIFIED** per the 2026-06-26 pass and is worth confirming if a port encounters
+  a key with the high bit set. [static-hypothesis — 2026-06-26]
 - `vehicle.xdb`: runtime use is now **STATIC-CONFIRMED** (CYCLE 1) — keyed by `vehicle_id`, consumed
   on the mount path (mount-visual spawn + per-facing seat-Y, the latter read from float indices 9..12
   = byte offsets +0x24/+0x28/+0x2C/+0x30 for facing 1..4). `tag_a` is **not read by either consumer**
@@ -479,3 +502,14 @@ So the only validation is is-good / read-ok; everything downstream keys on the r
   offset pairs `+8..+31` with the `+36` visual-scale) and per-tick (a flag/cadence gate on `+40`,
   `+43`, and the `+44` millisecond tick-interval). The earlier "drop / drop sub-probability /
   100%-probability" framing is withdrawn.
+  **2026-06-26 [static-hypothesis — session IDB build differs from pinned anchor 263bd994; behaviors
+  build-stable, exact offsets pending build reconciliation]:** all five live loaders re-decompiled
+  directly (not from prior IDB comments) — no corrections to strides, counts, field types, loader
+  call sequence, or actor_size never-loaded verdict. Two sharper additions integrated above: (a) the
+  physical pointer-array layout — five-slot contiguous array with actor_size occupying slot 4 between
+  vehicle and buff-icon-position, stepped over at the call site, path string carrying exactly one data
+  reference and no code reference; (b) the bulk-read error path continues to close/index rather than
+  aborting early (hypothesis correction to prior "bails" wording — pending pinned-anchor
+  reconciliation). New known unknown: the ordered-map key-comparison signedness of the four small
+  tables was not individually re-verified in this pass (msg.xdb unsigned ordering confirmed only). No
+  addresses or decompiler output crossed the firewall.

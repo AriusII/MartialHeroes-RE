@@ -7,6 +7,10 @@
 #                 capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 8 fields
+#        (Sort u8@+0x00, GapA bytes[3]@+0x01, ActorId u32@+0x04, DwordB u32@+0x08, DwordC u32@+0x0C,
+#        TargetId u32@+0x10, Name bytes[17]@+0x14, TailPad bytes[3]@+0x25) re-confirmed SAME, 0 corrected.
 #   evidence: [static-ida]
 #   conflicts: none. The deep struct pass confirmed 5/92 field-decodes its 40-byte block into the shared
 #              PvP-state object (the target id @0x10 is compared against the local player) -- NOT

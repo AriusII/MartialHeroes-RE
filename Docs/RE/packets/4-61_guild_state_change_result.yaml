@@ -7,7 +7,10 @@
 #                 every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 5 items re-confirmed SAME
+#        (Gate@8, Result@9, Action@0xa with 1->4 remap, GuildName force-NUL@0x1c, action5/result2
+#        cooldown-days-via-/1440), 0 corrected.
 #   conflicts: This is the guild state-change / diplomacy VERDICT (resolves net_contracts 2.9). The
 #              guild-diplomacy reply rides 4/61, NOT 4/81 (slot 81 = generic SmsgActionErrorResult). The
 #              C2S 2/81 CmsgGuildDiplomacyDeclare is answered HERE.

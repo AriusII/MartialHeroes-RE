@@ -1,7 +1,7 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 8 (2026-06-21))    # the boot/loading orchestration load-bearing facts are recovered from control-flow; CYCLE 8 closed the world-entry replay question statically (REPLAY — §2.6); only the exact INI string + second-pass timing remain capture/debugger-pending
-ida_reverified: 2026-06-18   # scene re-confirmation campaign (build 263bd994)
-ida_anchor: 263bd994
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory — LoadHandler / SimpleLoadHandler / progress denominator / loading DDS paths cleanly relocated, 1 re-confirmed SAME, 0 corrected; prior 2026-06-18: scene re-confirmation campaign (build 263bd994)
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]   # control-flow recovery + real-VFS file-coverage counts (§6) corroborated against the shipped archive
 conflicts: world-entry state-2 full-corpus replay vs cached short-circuit — RESOLVED CYCLE 8 (REPLAY: full corpus re-runs; loaders are idempotent rebuilders with no cache gate; msg.xdb is the only state-1-only non-reloaded table — §2.6, §8 item 5); the OPENNING/SKIP on-disk INI filename string (runtime-populated config field, §2.5, §8 item 3); display-config FRAMERATE consumer reaching the 60 FPS throttle (§5.1 note, §8 item 11)
 status: confirmed

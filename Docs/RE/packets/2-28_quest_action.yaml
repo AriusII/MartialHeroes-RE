@@ -10,6 +10,8 @@
 #   wire VALUE semantics: capture/debugger-pending (the full SubAction enum -- only give-up==4 is named; the
 #                        per-verb meaning of the two trailing ids)
 #   ida_reverified: 2026-06-16   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- deep-verify: body layout re-traced against the send-path builder; 3 fields (SubAction@0x00, QuestId@0x04, ParamA@0x08) re-confirmed SAME, 0 corrected; FIXED 12-byte body confirmed.
 #   conflicts: RESOLVED -- 2/28 size corrected from `var` to a FIXED 12 (also reconcile the opcodes.md 2/28 row).
 #   list-row path RESOLVED -- the QuestPanel's per-row request is 2/152, NOT 2/28 (see RELATED note below).
 

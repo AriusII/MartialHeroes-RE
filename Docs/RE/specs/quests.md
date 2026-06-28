@@ -1,9 +1,9 @@
 ---
 status: confirmed
 sample_verified: partial
-verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + spec-audit pass (2026-06-24); confirmed (client-side routing/sizes/offsets/control-flow); capture/debugger-pending (server-authored quest values + on-wire VALUE meanings)
-ida_reverified: 2026-06-24
-ida_anchor: 263bd994
+verification: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20) + spec-audit pass (2026-06-24); confirmed (client-side routing/sizes/offsets/control-flow); capture/debugger-pending (server-authored quest values + on-wire VALUE meanings); CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (quest opcode flow 2/28, 2/152, 5/68, 5/73; eligibility gate-chain order against quest-record fields)
+ida_reverified: 2026-06-24 (SHA 263bd994); CYCLE 14 re-anchor: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts:
   - "2/110 quest NPC step is unsupported by static evidence; the real second quest channel is 2/152 (capture/protocol-pending)."

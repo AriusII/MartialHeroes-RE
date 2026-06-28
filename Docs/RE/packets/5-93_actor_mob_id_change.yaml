@@ -1,15 +1,23 @@
 # Clean-room field spec. Promoted from a neutral analyst note; rewritten, not copied.
 #
 # VERIFICATION BANNER
-#   verification: confirmed  (opcode->handler routing and the fixed 16-byte body -- sort@0x00 /
-#                 actor_id@0x04 / old_mob_id@0x08 / new_mob_id@0x0C -- are control-flow-confirmed (field
-#                 names are read from the handler's own debug log); every VALUE meaning is
-#                 capture/debugger-pending)
+#   verification: confirmed  (opcode->handler routing and the fixed 16-byte body -- sort@0x00 (u8) /
+#                 gap@0x01..0x03 / actor_id@0x04 / old_mob_id@0x08 / new_mob_id@0x0C -- are
+#                 control-flow-confirmed (field names from the handler's own debug log; Sort is a u8,
+#                 actor-key family convention); every VALUE meaning is capture/debugger-pending)
 #   ida_reverified: 2026-06-20
 #   ida_anchor: 263bd994
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against the setter; 3 fields
+#        (ActorId u32@0x04, OldMobId u32@0x08, NewMobId u32@0x0C) re-confirmed SAME, 2 corrected:
+#        Sort narrowed from u32 to u8 at 0x00; GapA bytes[3] added at 0x01 (actor-key family
+#        convention). IDB decompile confirms Sort read as unsigned __int8; routing immediate and
+#        debug string confirm SmsgActorMobIdChange (stale handler label is a cosmetic symbol artifact).
 #   evidence: [static-ida]
 #   conflicts: REFINED from "var (16 hdr)" to a fixed-16 clean 4-field record. The size is fixed and the
 #              body is forwarded whole to the apply routine.
+#              CORRECTED (CYCLE 14 deep-verify): Sort narrowed from u32 to u8; GapA bytes[3] added at 0x01.
+#              Layout is now 5 fields (Sort u8 / GapA bytes[3] / ActorId u32 / OldMobId u32 / NewMobId u32).
 
 name: SmsgActorMobIdChange
 opcode: 0x5005d           # major 5 (Push), minor 93 -> (5 << 16) | 93
@@ -25,17 +33,23 @@ summary: >
 
 # Wire order, offset 0 = first payload byte. Pack=1; widths sum to size: 16.
 fields:
-  - { name: Sort,      type: u32 }   # 0x00  actor sort key
-  - { name: ActorId,   type: u32 }   # 0x04  actor id
-  - { name: OldMobId,  type: u32 }   # 0x08  previous mob template id
-  - { name: NewMobId,  type: u32 }   # 0x0c  new mob template id (selects the new mesh)
+  - { name: Sort,      type: u8 }              # 0x00  actor sort (u8; low byte -- actor-key family convention)
+  - { name: GapA,      type: "bytes[3]" }      # 0x01  gap (actor-key family convention; not field-read)
+  - { name: ActorId,   type: u32 }             # 0x04  actor id
+  - { name: OldMobId,  type: u32 }             # 0x08  previous mob template id
+  - { name: NewMobId,  type: u32 }             # 0x0c  new mob template id (selects the new mesh)
+  # widths: 1 + 3 + 4 + 4 + 4 = 16
 
 notes: |
-  CONTROL-FLOW CONFIRMED: the fixed 16-byte body and the four fields (the field names are taken from the
-  handler's own debug-log format string). CAPTURE-UNVERIFIED for the id VALUE space. The handler reads
-  the 16 bytes and forwards them whole to the mob-id-change apply routine.
+  CONTROL-FLOW CONFIRMED: the fixed 16-byte body and the five fields (field names from the handler's own
+  debug-log format string). CAPTURE-UNVERIFIED for the id VALUE space. The handler reads the 16 bytes
+  and forwards them whole to the mob-id-change apply routine.
 
-    0x00 (4B) Sort     : actor sort key.
+  SORT WIDTH CORRECTED (CYCLE 14 deep-verify): Sort is a u8 at 0x00 (low byte only, actor-key family
+  convention), not a u32. A 3-byte gap follows at 0x01..0x03.
+
+    0x00 (1B) Sort     : actor sort (u8; actor-key family convention).
+    0x01 (3B) GapA     : gap (actor-key family; not field-read by this handler).
     0x04 (4B) ActorId  : actor id.
     0x08 (4B) OldMobId : the previous mob template id.
     0x0c (4B) NewMobId : the new mob template id (resolves the new model/mesh).

@@ -284,3 +284,129 @@ can proceed. They are listed here as formal escalations from this coverage audit
 15. **DirectX version-detection probe** (absent from specs; startup-diagnostic only) — LOW
 16. **Quest eligibility gate** (possible gap in `specs/quests.md`) — LOW
 17. **Cube-gamble match evaluator** (absent from specs) — LOW
+18. **`.bud` per-vertex bytes 12–31 UNVERIFIED** — five f32 fields beyond the XYZ position triple are present in each vertex record but their roles are not decoded; normals and UVs are confirmed resolved in `formats/terrain_scene.md`; the remaining vertex-tail gap lives in `formats/terrain.md §8` — HIGH (`@re-asset-format-analyst`)
+19. **`.fx7` header and vertex format UNVERIFIED** — the header and per-vertex layout for the `.fx7` terrain-effect layer are structurally distinct from `.fx1`–`.fx6` and are not yet specced in `formats/terrain_layers.md` — HIGH (`@re-asset-format-analyst`)
+
+---
+
+## 8. File-format read-path census
+
+> **Provenance** — 2026-06-26, **reconciliation RESOLVED 2026-06-27 (CYCLE 14)**: this section was first
+> promoted from a static session whose loaded `doida.exe` build (SHA-256 prefix `f61f66a9`) differed from
+> the then-anchor `263bd994`. The maintainer has since designated **`f61f66a9` (3807 KB) as the canonical
+> target**; `names.yaml` is re-pinned to it (see `journal.md` CYCLE 14, and `_dirty/reverify-f61f66a9/`
+> for the measured build delta: a ~128-byte `.text` insertion + a ~0x1000 data-page shift, 96% of moved
+> functions cleanly relocated by +0x80/+0x7e). The loader-dispatch structure recorded here is build-stable
+> and holds against f61f66a9. Spec `verification:`/`ida_anchor:` banners are being re-stamped to
+> `f61f66a9` **per-spec** as each subsystem is re-verified in the CYCLE 14 lane waves (not in bulk).
+>
+> **Coverage legend:** WELL = dedicated `formats/*.md` or `specs/*.md`, sample-verified, no open byte
+> gaps; PARTIAL = covered but one or more named byte fields are UNVERIFIED; N/A = disabled stub or
+> confirmed absent from the shipping client; UTILITY = write-only export path (no read spec required).
+
+The headline finding of this census: the committed `Docs/RE/formats/` and `Docs/RE/specs/` corpus
+covers **every file-format read path present in the loader dispatch** of the loaded image. No extension
+lacks a spec. Residual work is narrow byte-field verification on two format families and one shader
+filename question; those are formally escalated in §7 items 6, 18, and 19.
+
+### Container and VFS
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.inf` + `.vfs` | `data.inf` TOC plus `data/data.vfs` blob; ReadFile-into-buffer archive with no compression or encryption | `formats/pak.md`, `specs/vfs_overview.md` | WELL |
+
+### Terrain and world cell
+
+Sub-assets in this group are opened from the DATAFILE and BUILDING token lists that the `.map`
+cell-master emits; all paths are path-template driven.
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.map` | Per-cell scene and section descriptor; emits DATAFILE/BUILDING tokens for sub-asset expansion | `formats/terrain.md`, `formats/terrain_scene.md`, `formats/cell_pre.md` | WELL |
+| `.mud` | Per-cell tile/sound master; fixed 32,768-byte body (64×64 grid at 8 bytes per slot) | `formats/mud.md` | WELL |
+| `.ted` | Terrain heightfield plus per-cell texture-index grid | `formats/terrain.md` | WELL |
+| `.ted.post` | Terrain authoring sidecar; write-only export target (same 46,987-byte stride as `.ted`) | `formats/cell_post.md`, `formats/authoring_sidecars.md` | WELL |
+| `.up` | Cell up-layer collision sidecar | `formats/cell_up.md` | WELL |
+| `.exd` | Cell extra-data sidecar; name-driven sibling path | `formats/cell_exd.md` | WELL |
+| `.sod` | 2D XZ collision wall segments | `formats/sod.md` | WELL |
+| `.bud` | Cell static building mesh: u32 objectCount followed by MassObject records | `formats/terrain.md §8`, `formats/terrain_scene.md` | PARTIAL — per-vertex bytes 12–31 (five f32 beyond XYZ) UNVERIFIED; normals and UVs are confirmed resolved in `formats/terrain_scene.md`; see §7 item 18 |
+| `.fx1`–`.fx7` | Per-cell terrain effect and decoration layer meshes | `formats/terrain_layers.md`, `specs/effects.md` | PARTIAL — `.fx1`–`.fx6` specced; `.fx7` header and vertex format UNVERIFIED; see §7 item 19 |
+| `.gad` | Cell open-order slot — no-op stub in this build; the call succeeds but never opens a file | `formats/area_inventory.md`, `formats/cell_exd.md` (noted) | N/A (disabled stub) |
+| `.lst` (cell key) | Per-area cell-key set driving the streaming filename rule | `formats/region_grid.md`, `formats/area_inventory.md` | WELL |
+
+### Region, spawn, and map data
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.bin` (region) | Region grid, region-table, and per-area map data blobs | `formats/region_grid.md` | WELL |
+| `.bin` (gather) | Gather-node table | `formats/region_grid.md`, `formats/tol.md` | WELL |
+| `.arr` (npc) | NPC spawn array; 28-byte records | `formats/npc_spawns.md` | WELL |
+| `.arr` (mob) | Mob spawn array; 20-byte records | `formats/npc_spawns.md` | WELL |
+
+### Character, mesh, and animation
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.skn` | Character and item skin mesh (rigid and weighted variants) | `formats/skn.md`, `formats/mesh.md` | WELL |
+| `.bnd` | Deform skeleton and bind pose | `formats/mesh.md`, `formats/animation.md`, `formats/bindlist.md` | WELL |
+| `.mot` | Motion and animation clips, keyed by header id | `formats/animation.md`, `formats/actormotion.md` | WELL |
+| character catalogue `.txt` | skin/skinlist/motlist/bindlist/actormotion/userjoint/tex-resolution-list/emoticon manifests | `formats/actormotion.md`, `formats/bindlist.md`, `formats/skn.md`, `formats/text_tables.md` | WELL |
+
+### Static mesh and FX objects
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.xobj` | ASCII whitespace-tokenized static triangle mesh | `formats/xobj.md`, `formats/mesh.md` | WELL |
+| `.ion` | Effect and scene object format | `formats/ion.md` | WELL |
+| `.tol` | Tool/region object-list format | `formats/tol.md` | WELL |
+| `.mi` | Misc index and instance table | `formats/mi.md` | WELL |
+| `.eff` (particle) | Particle emitter and effect definition | `formats/effects.md` | WELL |
+| effect `.lst`/`.txt` | xeffect.lst, xobj.lst, bmplist.lst, particle_list, equipment joint-effect and sword-light catalogues | `formats/effects.md` | WELL |
+
+### Script and table data
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.scr` | Binary game-logic tables (items, skills, mobs, npcs, quests, events, and others) | `formats/scr.md`, `formats/items_scr.md`, `formats/events_scr.md` | WELL |
+| `.do` | Sibling text and data tables (msginfo, errorinfo, emoticon, textcommand, items_extra, per-class skill stance) | `formats/config_tables.md`, `formats/text_tables.md`, `formats/scr.md` | WELL |
+| `.xdb` | Structured data tables: caption DB plus small fixed-record tables (actor_size, vehicle, effectscale, buff_icon_position, creature_item) | `formats/xdb_tables.md`, `formats/msg_xdb.md` | WELL |
+| `.lua` | Lua 5.1.2 config, UI, and tutorial scripts | `formats/lua.md`, `specs/lua_scripting.md`, `specs/lua-config.md` | WELL |
+| `.csv` | Flat comma-delimited item table — confirmed absent from the shipping client (zero references in the loaded image) | `formats/items_csv.md` | N/A (authoring artifact; not loaded at runtime) |
+| miscellaneous `.txt` | command/gmmapmove/ip/UiTex/skillicon/crestlist catalogues | `formats/macro_file.md`, `formats/ui_manifests.md`, `formats/text_tables.md` | WELL |
+
+### Sound
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| sound tables (`.eff`, `.bge`, `.bgm`, `.run`, `.wlk`) | Per-area sound-schedule tables (effect/ambient/music/run/walk variants) | `formats/sound_tables.md`, `specs/sound.md` | WELL |
+| `.ogg` | Streamed Vorbis audio (2D non-positional and 3D positional) | `formats/sound_tables.md`, `specs/sound.md` | WELL |
+
+### Texture and image
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| `.dds` | Primary texture container (world, item, UI, and effect) | `formats/texture.md` | WELL |
+| `.tga` | Effect and UI textures; the file header is authoritative and the extension is a hint only | `formats/texture.md` | WELL |
+| `.bmp` | Terrain lightmap tiles, bigmap tiles, and toon-shading LUT | `formats/texture.md`, `formats/shaders.md` | WELL |
+| `.png` | Character and item skin textures | `formats/texture.md` | WELL |
+| `.jpg`/`.jpeg` | Screenshot export only, via the ijl11 write path; not an asset-read format | `formats/texture.md` (one line) | UTILITY — write-only; no read spec required |
+
+### Sky, environment, shaders, and index
+
+| Extension | Role | Spec | Coverage |
+|---|---|---|---|
+| sky `.bin` | Sky, weather, fog, light, cloud, material, dome, and map_option data blobs | `formats/sky.md`, `formats/environment_bins.md` | WELL |
+| `bgtexture.lst` | Terrain texture index: u32 count followed by 48-byte kind-selected records | `formats/bgtexture_lst.md` | WELL |
+| `.psh`/`.vsh` | D3D9 cel and glow shader sources assembled at load | `formats/shaders.md` | PARTIAL — `dotoonshading.psh` and `dotoonshading2.psh` are loaded by an orphan loader whose filename is not reconciled against the five named cel shaders in `formats/shaders.md`; see §7 item 6 |
+
+### Census summary
+
+Every file-format read path surfaced by the loader dispatch maps to at least one committed spec.
+The three remaining format-level open items are:
+
+- **`.bud` vertex tail** — per-vertex bytes 12–31 beyond XYZ UNVERIFIED; formally escalated as §7 item 18.
+- **`.fx7` header and vertex format** — distinct from `.fx1`–`.fx6` and UNVERIFIED; formally escalated as §7 item 19.
+- **`dotoonshading.psh` naming** — orphan loader filename not reconciled with the named cel-shader set in `formats/shaders.md`; formally escalated as §7 item 6.
+
+Object-model struct gaps (GHTex layout, Diamond scene-graph node hierarchy) are format-independent
+runtime gaps already carried as §7 items 2 and 10.

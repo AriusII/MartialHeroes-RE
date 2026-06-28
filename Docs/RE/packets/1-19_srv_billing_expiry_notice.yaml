@@ -7,6 +7,10 @@
 #     subscription_code @ 0x02: confirmed (the code-classifier compares the leading 2 chars against "DB"/"HB"/"TB")
 #     time_left    @ 0x12 (18): confirmed (dword at block+16 relative to subscription_code start; printed as %d in expired warning)
 #   ida_reverified: 2026-06-24   ida_anchor: 263bd994   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): handler re-traced; 4 fields (Dummy u8@0x00, NoticeType u8@0x01,
+#        SubscriptionCode char[16]@0x02, TimeLeft u32@0x12) + NoticeType==33 branch re-confirmed
+#        SAME, 0 corrected.
 #   capture_verified: false
 
 name: SmsgSrvBillingExpiryNotice

@@ -8,7 +8,8 @@ verification: routing/sizes [confirmed] (opcode->handler ROUTING, the C2S send s
   value-semantics [capture/debugger-pending] (every wire VALUE semantic — what a reply byte MEANS,
   which result code is success vs fail — has no live capture this campaign).
 ida_reverified: 2026-06-22 (re-verified against doida.exe IDB SHA 263bd994, CYCLE 12 Phase 0; prior CYCLE 8 2026-06-21). CYCLE 12 Phase 0: §A.4 3/100 SmsgCharActionResult code set reconciled -> canonical set {0,1-5,7,10,11,16,22,23,200-211,220-227,202/203/232} (no case 9, no case 32); select-mode codes 22/23 RECOVERABLE (state 7/sub 5), not fatal; cross-ref handlers.md §23.1 as canonical 3/100 table. CYCLE 8 re-confirmed: NO 12-byte create-result opcode exists (1/6 create acked by 3/7 + 3/1 + 3/4, 3/23 = 28B status-bytes-by-name) — the C# port must retire any SmsgCharCreateResult; and the lobby/server-list connect (port 10000) uses inet_addr on a dotted-quad while the game socket uses gethostbyname (DNS).
-ida_anchor: 263bd994
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+ida_reverified: 2026-06-27   # CYCLE 14 re-anchor (f61f66a9): confirmatory - subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected
 evidence: [static-ida]
 capture_verified: false
 cycle7: re-verified against doida.exe IDB SHA 263bd994, CYCLE 7 (2026-06-20). Gameplay/dark-subsystem

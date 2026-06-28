@@ -11,7 +11,8 @@
 > ida_reverified: 2026-06-24; re-verified against doida.exe IDB SHA 263bd994 (CYCLE 7 2026-06-20;
 >   config_tables correction pass 2026-06-24: dashs.scr stride corrected 199→796, discript.sc and
 >   assasinjung.do strides re-confirmed, dashs.scr body layout and discript.sc field detail added)
-> ida_anchor: 263bd994
+> ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 2 facts re-confirmed SAME; 0 corrected)
+> ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > conflicts: RESOLVED — citems.scr description-paragraph count (6 vs 10) is settled in favour of **10**
 >   (§2.11; CYCLE 7, binary-won). The structural capacity is 10 fixed paragraphs (base +0xE4, width 81)
@@ -1531,6 +1532,20 @@ implementation depends on it. See the skill-use spec and `opcodes.md`.)
 - Whether the `.do` `instanceKey` equals the `skills.scr` skill id (+0x00) directly or via a transform.
 - The tail bytes ignored by the loader (`musama` 40, `assasinma` 60, `monkma` 12): authoring
   artefact or footer (cosmetic; UNRESOLVED).
+- **[static-hypothesis, 2026-06-26]** Whether `slotIndex` (+0x08) also functions as an action/command
+  binding identifier in the skill-book panel builder's per-tab record dispatch. A static-analysis
+  pass on build f61f66a9 read this field as a secondary "by-action-id" lookup key — distinct from a
+  plain sequential slot index — used when building the on-screen skill-book tab. This conflicts with
+  sample values (observed range 0, 1, 2, …) and is not corroborated by the pinned anchor; a debugger
+  witness on the skill-book panel builder is required to settle the dual-role question.
+
+**Cross-build structural confirmation [static-hypothesis] — 2026-06-26:** A static-analysis session
+on `doida.exe` build f61f66a9 (differing from the pinned anchor 263bd994) independently confirmed
+the §2.1 container pattern from five distinct `.do` loaders and re-derived all structural facts for
+the stance family: headerless file, 116-byte stride read to EOF, dual-map indexing (primary by +0x00,
+secondary by +0x08), `memcpy`-then-map-insert, no strings, no header/magic/count field. All structural
+claims in §3.5 are corroborated cross-build; behaviors are considered build-stable. Field-name
+alternatives proposed in that pass are superseded by the sample-verified canonical names above.
 
 ---
 

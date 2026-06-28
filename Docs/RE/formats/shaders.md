@@ -17,17 +17,14 @@
 > adding size metrics for the three new taps; the Magic / grammar note is tightened to reflect that a
 > file may open with CP949 comment lines before the version declaration (confirmed in two cel `.psh`
 > samples).
-> **ida_reverified:** 2026-06-24
-> **ida_anchor:** 263bd994
+> CYCLE 14 re-anchor (f61f66a9): 2 facts re-confirmed SAME (Renderer_InitCelGlowShaders 5-shader assemble order; D3DXAssembleShader caller census), 1 corrected (post-chain enable gate polarity: see §C5.6b — gate condition is option index 12 == 1, not == 0; gate PASSES on f61f66a9; bloom+cel structurally ON; old 263bd994 comparison or debugger confirm required to distinguish spec-misread from build flip).
+> **ida_reverified:** 2026-06-27 (CYCLE 14, f61f66a9); prior: 2026-06-24 (build 263bd994)
+> **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
-> **conflicts:** NONE structural. Three refinements vs the earlier text (not reversals): encoding
-> statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh`
-> not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further
-> taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content
-> item (see Known Unknowns).
+> **conflicts:** NONE structural for shader-file content. CYCLE 14 correction: §C5.6b post-chain enable-flag gate polarity corrected (see that section). Prior conflicts note: Three refinements vs the earlier text (not reversals): encoding statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh` not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
 >
 > **spec_status:** sample_verified (10 shader files cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27)
 
 ---
 
@@ -545,44 +542,61 @@ The format for all three is the device backbuffer adapter format. Pass order:
 
 Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. See §C5.6 step 4 and the Re-authoring Guidance.
 
-**Post-chain enable flag — CONFIRMED forced off in the shipped build (CYCLE 11, binary-won):**
+**Post-chain enable flag — CYCLE 14 CORRECTION: gate PASSES on build f61f66a9; bloom+cel structurally ON (debugger confirm pending):**
+
+> **CYCLE 14 correction (f61f66a9, 2026-06-27) — prior CYCLE 11 "permanently off" finding REFUTED
+> on this build.** The CYCLE 11 analysis (build 263bd994) concluded the enable flag was never set
+> because gate condition 2 was read as requiring option index 12 to equal 0. CYCLE 14 static
+> re-analysis of build f61f66a9 finds the gate condition is `option index 12 == 1` — and since the
+> options loader hardcodes that slot to 1 unconditionally, the gate **passes** on every run.
+> **Open question (HIGH-STAKES):** static analysis cannot determine whether (A) the CYCLE 11
+> gate-polarity reading was always a spec misread (bloom was always ON in the real client) or (B)
+> the f61f66a9 build introduced a genuine `== 0 → == 1` polarity flip as part of its ~128-byte
+> `.text` insertion delta. Resolve by comparing the 263bd994 IDB gate condition directly, or by a
+> `?ext=dbg` breakpoint at the device-creation gate and the per-frame fork flag-read. Until confirmed,
+> the CYCLE 14 static result takes precedence over the prior CYCLE 11 reading for this build.
 
 The per-frame fork that selects the offscreen RT path over the direct path reads an enable flag on
-the scene/post object (constructor default: 0 = off). The flag is set to 2 at exactly one site
-(the device-creation routine), gated by two conditions:
+the scene/post object (constructor default: 0 = off). The flag is stored to 2 at **at least two
+distinct call sites** within the device-creation context (see `specs/rendering.md §6.1` CYCLE 14
+note), gated by two conditions:
 
-1. The cel/glow shader initialiser must return success.
-2. The toon-shading option flag (a field of the options singleton, option index 12) must equal 0.
+1. The cel/glow shader initialiser (`Renderer_InitCelGlowShaders`) must return success.
+2. The toon-shading option flag (a field of the options singleton, option index 12) must equal **1**.
 
 In the options loader the toon-shading option (option index 12) is the **only** option that is
 **hardcoded to 1** (the value is written unconditionally in code and is never overwritten by an INI
 key — there is no INI read-site for this slot; the value is clamped to 1–2 and always exits as 1).
-Because condition 2 requires this field to equal 0, and the field is always 1, **the `mov flag,2`
-assignment at the device-creation site is never reached**. The enable flag stays at its constructor
-default of 0 for the lifetime of every run of `doida.exe`.
+Because condition 2 requires this field to equal 1, and the field is always 1, **the flag-store
+assignment in the device-creation context is reached whenever `Renderer_InitCelGlowShaders` succeeds**.
+The enable flag is set to 2, and `Renderer_DrawScene_Fork` takes the offscreen/post path when this
+flag is non-zero.
 
-Consequence: **`Renderer_DrawScene_Direct` (the direct path) is always taken.** The three render
-targets, all five shader objects, and the composite/glow machinery are all allocated and compiled at
-startup but **no frame ever passes through the offscreen/cel/bloom path in the shipped client.** The
-cel/toon look and the bloom post chain are both dead per-frame features — the cel shaders bind only
-if the post flag is on (§C5.6 step 5), so characters fall back to fixed-function shading.
+Consequence on build f61f66a9: **the offscreen/bloom/cel path is structurally enabled** whenever the
+cel/glow shader initialiser succeeds at startup. The three render targets, all five shader objects,
+and the composite/glow machinery are allocated, compiled, and the post flag is set so that
+`Renderer_DrawScene_Fork` routes frames through `Renderer_DrawScene_OffscreenRT_0` — the per-frame
+cel VS constant upload and the per-draw cel bind (ramp + VS + normal/stealth PS) both run.
 
-> **Debugger-pending confirm:** a breakpoint at the per-frame flag-read (inside the scene-draw fork)
-> should read 0; the device-creation site that conditionally sets the flag to 2 should never fire.
-> These are the two confirmation points for a live `?ext=dbg` session.
+> **Debugger-pending confirm (HIGH-STAKES):** a breakpoint at the per-frame flag-read (inside the
+> scene-draw fork) should read **2** (CYCLE 14 finding) — not 0. A second breakpoint at the
+> device-creation gate should fire and store 2 to the flag. These are the two live confirmation
+> points for a `?ext=dbg` session. Also confirm by re-reading the gate comparison in the 263bd994
+> IDB to resolve (A) spec-misread vs (B) build-flip.
 
-**Implication for Godot fidelity:**
+**Implication for Godot fidelity (pending debugger confirmation):**
 
-- The faithful default is **no bloom/glow post-process enabled** — the shipped client never runs
-  any bloom. Do not enable `WorldEnvironment` glow by default.
-- Characters in the original shipped client always render via **fixed-function (no cel shader, no
-  toon ramp)**, because the cel bind is gated on the post-process flag being on.
-- The cel/glow shaders are present in the VFS and fully specified here (§C5.1–§C5.4, Re-authoring
-  Guidance); a port may optionally implement them as a toggleable quality feature, but the
-  **faithful default state has the cel/post chain off**.
-- The Godot `CelShade` material (which attempts the per-character cel look) diverges from the
-  shipped client's actual behaviour when post is off; this is a known fidelity delta, not a bug in
-  the spec recovery. `// spec: Docs/RE/formats/shaders.md §C5.6b`
+- On build f61f66a9 the bloom/glow post-process path appears **enabled** when the shaders load
+  successfully — characters draw through the cel shader path and the bloom composite runs.
+- Whether this was always the case in the real client (prior spec was a gate-polarity misread) or
+  only in this build (a genuine flip) is the open question above; the answer changes the faithful
+  default.
+- Until the open question is resolved by debugger or 263bd994 IDB comparison: **do not change the
+  Godot fidelity default based on this static finding alone**; keep the prior CYCLE 11 default (cel/post
+  off) but flag it as pending review.
+- The cel/glow shaders are fully specified here (§C5.1–§C5.4, Re-authoring Guidance); the Cel bind
+  sub-paths (actor draw routines that test the same flag) also require confirmation that they test `!= 0`
+  rather than `== 1` before treating them as fully on. `// spec: Docs/RE/formats/shaders.md §C5.6b`
 
 ### C5.7 Campaign 5 / 5B known unknowns
 

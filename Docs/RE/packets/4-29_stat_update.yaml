@@ -8,7 +8,9 @@
 #                 capture/debugger-pending (no live capture this campaign).
 #   ida_reverified: 2026-06-16
 #   ida_anchor: 263bd994
-#   evidence: [static-ida]
+#   ida_reverified: 2026-06-27 (CYCLE 14 deep-verify)   ida_anchor: f61f66a9   evidence: [static-ida]
+#     -- CYCLE 14 deep-verify (f61f66a9): body layout re-traced against handler, 7 fields re-confirmed SAME
+#        (gate@8, Stat0..4@0xc..0x1c, RemainingStatPoints@0x20), 0 corrected.
 #   conflicts: none (re-confirmed against the 4/29 handler read site; the 36-byte size + six-store
 #              fan-out exactly match this model).
 

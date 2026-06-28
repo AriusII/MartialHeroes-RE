@@ -1,7 +1,8 @@
 ---
 verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06-20))   # control-flow + operand facts from static IDA (no debugger); CYCLE 7 re-confirmed the dormant-worker fields (+12 keep_running, +20/+24 queue head/count, +28 load Event, +32 pool=34) and that the worker apparatus is present-but-dormant
-ida_reverified: 2026-06-16
-ida_anchor: 263bd994
+                          # CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem cleanly relocated, 1 re-confirmed SAME. Prior reverified: 2026-06-16.
+ida_reverified: 2026-06-27
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]           # heap layout, not a file format → no vfs-sample tier applies here
 sample_verified: false           # object layout is runtime heap, not a packed-file format
 subsystems: [resource_pipeline, world_systems]
