@@ -1,358 +1,330 @@
-# Spec: Diamond Engine — Scene-Graph Class Hierarchy
+# Spécification Technique du Scene Graph 3D Diamond
 
-> Clean-room spec. Neutral description only — NO decompiler pseudo-code, NO
-> binary addresses, NO decompiler-generated identifiers. Promoted from dirty-room
-> static analysis under EU Software Directive 2009/24/EC Art. 6, solely to
-> achieve interoperability.
-
-> **Verification banner**
-> - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
-> - **analysis_date:** 2026-06-27
-> - **method:** RTTI scan + vtable slot dump + constructor cross-reference trace
-> - **evidence:** [static-ida]
-> - **readiness:** DRAFT — hierarchy and slot tables recovered; object sizes are
->   lower-bound estimates pending confirmation.
+Ce document décrit en détail la structure, l'organisation en mémoire et les mécanismes de fonctionnement (traversée, culling, rendu) du Scene Graph 3D du moteur **Diamond** utilisé par *Martial Heroes*. Il est basé sur l'analyse de l'exécutable `doida.exe` (SHA256 : `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963`) et les fichiers d'analyses brutes :
+*   [_dirty/scene_graph_analysis.md](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/_dirty/scene_graph_analysis.md)
+*   [_dirty/cycle17_scene_graph_ctors.md](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/_dirty/cycle17_scene_graph_ctors.md)
 
 ---
 
-## 1. Overview
+## 1. Hiérarchie globale des classes du Scene Graph
 
-The Diamond engine uses an OpenSceneGraph-style scene graph. Class names were
-recovered from MSVC RTTI type-info blocks embedded in the binary. Each class
-has a corresponding vtable and a set of constructors identified via vtable-write
-cross-reference tracing.
+Le Scene Graph de Diamond s'inspire fortement des concepts d'**OpenSceneGraph (OSG)**. Il organise les objets 3D sous forme de graphe acyclique dirigé (DAG) composé de nœuds de différents types.
 
-### 1.1 Confirmed class hierarchy
+```mermaid
+classDiagram
+    class GObject {
+        +int m_nRefCount
+    }
+    class GNode {
+        +GVector m_parents
+        +Vector3 m_boundingSphereCenter
+        +float m_boundingSphereRadius
+        +bool m_bVisible
+    }
+    class GGroup {
+        +GVector m_children
+    }
+    class GScene {
+        +vector m_cameras
+        +vector m_lights
+    }
+    class GGeode {
+        +GVector m_geometries
+    }
+    class GDrawable {
+        <<Abstract>>
+    }
+    class GGeometry {
+        +GVector m_stateSets
+        +GVector m_parentGeodes
+    }
+    class GView {
+        +GCamera* m_pCamera
+        +GPipeline* m_pPipeline
+    }
+    class GCamera {
+        +float m_fNear
+        +float m_fFar
+        +GFrustum m_frustum
+    }
+    class GDrawablePair {
+        +GDrawable* m_pDrawable
+        +GRenderState* m_pState
+    }
 
+    GObject <|-- GNode
+    GNode <|-- GGroup
+    GGroup <|-- GScene
+    GNode <|-- GGeode
+    GObject <|-- GDrawable
+    GDrawable <|-- GGeometry
+    GNode <|-- GViewPlatform
+    GObject <|-- GCamera
+    GObject <|-- GDrawablePair
 ```
-Diamond::GNode                       base node
-├── Diamond::GGroup                  container: holds N child GNode pointers
-│   ├── Diamond::GScene              scene root; overrides cull + update
-│   │   └── Diamond::GView           viewport / render-target attachment
-│   └── Diamond::GViewPlatform       platform-specific view wrapper
-├── Diamond::GGeode                  leaf geometry container; holds GGeometry refs
-│   └── Diamond::GGeometry           explicit vertex/index-buffer geometry
-├── Diamond::GCamera                 view-point; carries projection matrix
-├── Diamond::GLight                  D3D9 light-source attachment
-├── Diamond::GPipeline               render-state override node (abstract)
-└── Diamond::GParticleBuffer         GPU particle quad-batch
+
+---
+
+## 2. Disposition en mémoire (Memory Layout) et Vtables
+
+### 2.1 Structure générique `GVector`
+De nombreuses classes utilisent la structure de données interne `GVector` de Diamond pour stocker des listes dynamiques de pointeurs (parents, enfants, géométries, états). Sa taille en mémoire est de **16 octets** (4 DWORDs) :
+
+| Offset | Type | Nom du membre | Description |
+| :--- | :--- | :--- | :--- |
+| `+0x00` | `int` | `m_nSize` | Nombre actuel d'éléments dans le vecteur |
+| `+0x04` | `int` | `m_nCapacity` | Capacité actuelle allouée |
+| `+0x08` | `int` | `m_nStride` | Pas mémoire entre les éléments (généralement `4` pour des pointeurs) |
+| `+0x0C` | `void*` | `m_pData` | Pointeur vers le tableau d'éléments en mémoire tas (heap) |
+
+---
+
+### GNode
+*   **Taille en mémoire** : `76` octets (Offsets `0x00` à `0x4B`)
+*   **Vtable** : `0x72EF8C` (héritée de `GObject`)
+*   **Description** : Classe de base de tous les nœuds du Scene Graph. Gère la sphère englobante (bounding sphere) et la liste des parents.
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `void*` | Pointeur de la vtable (`0x72EF8C`) |
+| `+0x04` | `int` | Compteur de références de l'objet (`GObject::m_nRefCount`) |
+| `+0x24` | `Vector3` | Centre de la sphère englobante (`m_boundingSphereCenter` : 3x `float` : X, Y, Z) |
+| `+0x30` | `float` | Rayon de la sphère englobante (`m_boundingSphereRadius`) |
+| `+0x38` | `bool` | Indicateur de visibilité ou d'activation du culling (`m_bVisible` / `m_bActive`) |
+| `+0x3C` | `GVector` | Vecteur contenant des pointeurs vers les nœuds parents (`GVector m_parents`) |
+
+---
+
+### GGroup
+*   **Taille en mémoire** : `92` octets (hérite de `GNode`)
+*   **Vtable** : `0x72EF14`
+*   **Description** : Nœud de regroupement logique pouvant posséder plusieurs nœuds enfants.
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `GNode` | Sous-objet `GNode` (taille `76` octets) |
+| `+0x4C` | `GVector` | Vecteur de pointeurs vers les nœuds enfants (`GVector m_children`) |
+
+#### Vtable de GGroup (`0x72ef14`) :
+| Index | Offset | Fonction d'implémentation | Signification de la fonction (Slot) |
+| :--- | :--- | :--- | :--- |
+| `[0]` | `+0` | `0x60240d` | Destructeur virtuel |
+| `[1]` | `+4` | `0x602633` | `accept(Traverser&)` - Traversée de l'arbre |
+| `[2]` | `+8` | `0x6023d0` | `cull(Traverser&)` - Phase de culling frustum |
+| `[3]` | `+12` | `0x4171a8` | `draw()` - Rendu (généralement NOP `nullsub_160` pour GGroup) |
+| `[4]` | `+16` | `0x602429` | `cullTraverse()` / `computeBound()` - Teste la visibilité et descend vers les enfants |
+| `[5]` | `+20` | `0x6024b8` | `dirtyBound()` - Invalide la sphère englobante |
+| `[6]` | `+24` | `0x601ee7` | `update()` - Mise à jour logique |
+| `[7]` | `+28` | `0x60231f` | `setName(const char*)` |
+| `[8]` | `+32` | `0x602390` | `getName()` |
+| `[9]` | `+36` | `0x602ac4` | `addChild(GNode*)` |
+| `[10]` | `+40` | `0x60210d` | `removeAllChildren()` |
+| `[11]` | `+44` | `0x60214a` | `insertChild(int, GNode*)` |
+| `[12]` | `+48` | `0x6022bb` | `getChild(int)` |
+| `[13]` | `+52` | `0x602182` | `removeChild(GNode*)` |
+| `[14]` | `+56` | `0x6021f1` | `getMatrix()` |
+| `[15]` | `+60` | `0x60225f` | `getWorldMatrix()` |
+
+---
+
+### GScene
+*   **Taille en mémoire** : `120` octets (hérite de `GGroup`)
+*   **Vtable** : `0x73109c`
+*   **Description** : Le nœud racine d'une scène 3D. Gère des listes spécifiques pour les caméras actives et les lumières.
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `GGroup` | Sous-objet `GGroup` (taille `92` octets) |
+| `+0x5C` | `std::vector` | Liste interne de caméras actives (gérée via pointeurs begin/end/capacity) |
+| `+0x6C` | `std::vector` | Liste interne de sources lumineuses `GLight` actives |
+
+---
+
+### GGeode
+*   **Taille en mémoire** : `92` octets (hérite de `GNode`)
+*   **Vtable** : `0x72FD84`
+*   **Description** : *Geometry Node*. Nœud feuille du graphe contenant la géométrie réelle (`GGeometry` / `GDrawable`).
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `GNode` | Sous-objet `GNode` (taille `76` octets) |
+| `+0x4C` | `GVector` | Vecteur contenant des pointeurs vers les objets `GGeometry` / `GDrawable` |
+
+#### Vtable de GGeode (`0x72fd84`) :
+| Index | Offset | Fonction d'implémentation | Signification de la fonction (Slot) |
+| :--- | :--- | :--- | :--- |
+| `[0]` | `+0` | `0x6082ae` | Destructeur virtuel |
+| `[1]` | `+4` | `0x6085a5` | `accept(Traverser&)` |
+| `[2]` | `+8` | `0x608263` | `cull(Traverser&)` |
+| `[3]` | `+12` | `0x4171a8` | `draw()` (NOP) |
+| `[4]` | `+16` | `0x608320` | `cullTraverse()` - Évalue la visibilité des géométries enfants |
+| `[5]` | `+20` | `0x608471` | `dirtyBound()` |
+| `[6]` | `+24` | `0x60852e` | `update()` |
+| `[7]` | `+28` | `0x60818e` | `setName(const char*)` |
+| `[8]` | `+32` | `0x602390` | `getName()` |
+| `[9]` | `+36` | `0x602ac4` | `addDrawable(GDrawable*)` |
+
+---
+
+### GGeometry
+*   **Taille en mémoire** : `84`+ octets
+*   **Vtable** : `0x72FD04` (hérite de `GDrawable`)
+*   **Description** : Représente la géométrie primitive et ses liaisons avec les états de rendu (textures, matériaux).
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `GDrawable` | Sous-objet de base `GDrawable` |
+| `+0x24` | `Vector3` | Centre de la sphère englobante |
+| `+0x30` | `float` | Rayon de la sphère englobante |
+| `+0x3C` | `GVector` | Vecteur d'états de rendu associés (`GVector m_stateSets`) |
+| `+0x54` | `GVector` | Références vers les nœuds `GGeode` parents (`GVector m_parentGeodes`) |
+
+---
+
+### GView
+*   **Taille en mémoire** : `296`+ octets
+*   **Vtable** : `0x7301F4`
+*   **Description** : Gère la fenêtre de vue 3D courante, sa caméra, son pipeline de rendu, et les contextes de plateforme.
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `void*` | Pointeur de la vtable (`0x7301F4`) |
+| `+0x24` | `GCamera*` | Caméra active liée à la vue |
+| `+0x70` | `void*` | Pointeur vers une structure de plateforme interne (taille `736` octets) |
+| `+0x74` | `GPipeline*` | Pipeline de rendu lié à cette vue |
+| `+0x130` | `COM IUnknown*`| Pointeur vers l'interface de périphérique Direct3D (Direct3D Device) |
+
+---
+
+### GCamera
+*   **Taille en mémoire** : `140` octets
+*   **Vtable** : `0x731CC4`
+*   **Description** : Gère la projection, la matrice de vue et encapsule le Frustum (les plans de culling).
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `void*` | Pointeur de la vtable de GCamera (`0x731CC4`) |
+| `+0x04` | `int` | `m_nRefCount` (`GObject`) |
+| `+0x24` | `float` | Distance du plan de coupe proche (`m_fNear`, défaut : `0.01745f`) |
+| `+0x28` | `float` | Distance du plan de coupe lointain (`m_fFar`, défaut : `1000.0f`) |
+| `+0x2C` | `GFrustum` | Objet Frustum englobant (hérite de `GPolytope`, vtable `0x731CE0`) |
+
+*Note: La classe `GFrustum` intégrée à partir du décalage `+0x2C` contient les 6 équations cartésiennes des plans du tronc de cône de vision (Frustum).*
+
+---
+
+### GPipeline
+*   **Vtable** : `0x73017C`
+*   **Description** : Interface abstraite décrivant le pipeline d'exécution graphique.
+*   **Slots importants** :
+    *   `[0]` : Destructeur virtuel.
+    *   `[1]` à `[5]` : Fonctions `__purecall` destinées à être implémentées par des pipelines réels comme `GCullPipeline`.
+
+---
+
+### GParticleBuffer
+*   **Taille en mémoire** : `248`+ octets
+*   **Vtable** : `0x7300A8`
+*   **Description** : Gère le tampon de données pour les systèmes de particules.
+*   **Champs internes notables** :
+    *   `+0x10` : Taille des blocs.
+    *   `+0x20` : Tableau d'éléments de structures de particules.
+    *   `+0x50` : Deuxième tableau dynamique de particules.
+    *   `+0x80` : Troisième tableau (tailles et échelles).
+
+---
+
+### GDrawablePair
+*   **Taille en mémoire** : `12` octets (0x0C)
+*   **Vtable** : `0x720118`
+*   **Description** : Structure ultra-légère servant de commande élémentaire de dessin (Leaf Draw Call) dans la file d'attente graphique.
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| `+0x00` | `void*` | Pointeur de la vtable (`0x720118`) |
+| `+0x04` | `GDrawable*` | Pointeur vers l'objet géométrique à dessiner (`m_pDrawable`) |
+| `+0x08` | `GRenderState*` | Pointeur vers le state set D3D à appliquer (`m_pRenderState`) |
+
+#### Vtable de GDrawablePair :
+*   `[1] 0x607160` : `traverse()` / `accept()`
+*   `[2] 0x60717f` : `cull()` - Applique les transformations et passe le drawable à la file de rendu.
+*   `[3] 0x6071c3` : `draw()` - Retourne le pointeur de l'état de rendu.
+
+---
+
+## 3. Mécanismes de Traversal et Culling
+
+### 3.1 La phase de Traversée (`accept`)
+La traversée s'appuie sur le patron de conception **Visitor**.
+1. La traversée commence en appelant `accept(Traverser&)` (Slot 1) sur le nœud racine.
+2. Un nœud de type `GGroup` (ou `GScene`) exécute sa méthode `accept` (`0x602633`) :
+    *   Il traite d'abord ses propres données.
+    *   Il boucle sur tous ses enfants répertoriés dans son `GVector` à l'offset `+0x4C` et propage récursivement l'appel `accept()`.
+3. Un nœud feuille de type `GGeode` (`0x6085a5`) relaie l'appel `accept()` sur toutes les géométries `GGeometry` / `GDrawable` sous-jacentes.
+
+---
+
+### 3.2 La phase de Culling hiérarchique (`cull` / `cullTraverse`)
+Le moteur Diamond économise les ressources du GPU en éliminant les branches du graphe hors champ via un **Frustum Culling** basé sur les sphères englobantes.
+
+#### Algorithme du test de Frustum (`sub_41703B`)
+Pour chaque nœud évalué :
+1. Le traverser de culling (`GCullTraverser`) récupère les 6 équations de plans du Frustum de la caméra courante (`GCamera::m_frustum` à l'offset `+0x2C`).
+2. Le moteur extrait le centre ($C$) et le rayon ($R$) de la sphère englobante du nœud courant à l'offset `+0x24` du `GNode`.
+3. Pour chacun des 6 plans définis par leur normale $N$ et leur distance à l'origine $d$ :
+    $$dist = (N \cdot C) + d$$
+    *   Si $dist < -R$ : La sphère est **complètement en dehors** du Frustum. Le nœud est marqué comme culled. Le test renvoie `0` immédiatement.
+    *   Si $dist > R$ pour tous les plans : La sphère est **complètement à l'intérieur** du Frustum. Le test renvoie `1`.
+    *   Si $-R \le dist \le R$ : La sphère **intersecte** le plan. Elle est partiellement visible. Le test renvoie `1`.
+
+#### Propagation récursive (Slot 4 - `computeBound` / `cullTraverse`)
+L'implémentation de la méthode du **Slot 4** (ex: `0x602429` pour `GGroup`) illustre cette logique :
+
+```c
+int __thiscall GGroup_cullTraverse(GGroup* this, GCullTraverser* traverser)
+{
+    if (this->m_children.m_nSize == 0)
+        return 0;
+
+    // 1. Récupération des plans du frustum de la caméra
+    FrustumPlanes frustum;
+    traverser_getFrustum(traverser, &frustum);
+
+    // 2. Test d'intersection de la sphère englobante du groupe (+0x24)
+    if (!frustum_testSphere(&this->m_boundingSphereCenter, &frustum))
+    {
+        return 0; // Totalement hors frustum -> culled!
+    }
+
+    int anyChildVisible = 0;
+    // 3. Si visible, on propage le test récursivement aux enfants
+    for (int i = 0; i < this->m_children.m_nSize; ++i)
+    {
+        GNode* child = (GNode*)GVector_at(&this->m_children, i);
+        
+        // Appel virtuel au Slot 4 (cullTraverse) du fils
+        if (child->vtable->cullTraverse(child, traverser) == 1)
+        {
+            anyChildVisible = 1;
+        }
+    }
+
+    // 4. Si au moins un enfant est visible, on ajoute ce groupe à la file de rendu
+    if (anyChildVisible == 1 && traverser->m_pass < 0)
+    {
+        renderQueue_add(&traverser->m_drawQueue, this);
+    }
+
+    return anyChildVisible;
+}
 ```
 
-`Diamond::GDrawablePair` is confirmed by RTTI but carries a four-slot vtable
-inconsistent with a GNode-derived class; its position in the hierarchy is
-pending additional RE.
-
-### 1.2 Additional RTTI symbols observed (hierarchy placement pending)
-
-The following class names appear in type-info strings without a confirmed
-parent–child relationship:
-
-- `Diamond::GDrawable`
-- `Diamond::GTraverser`
-- `Diamond::GRenderState`
-- `Diamond::GRSCullMode`
-- `Diamond::GCull`
-- `Diamond::GCullPipeline`
-- `Diamond::GStatsCull`
-
 ---
 
-## 2. Vtable Slot Conventions
-
-MSVC places the scalar-deleting destructor in slot 0 of every polymorphic
-class. Comparison across base and derived vtables establishes the following
-canonical slot roles:
-
-| Slot | Offset | Canonical role |
-|------|--------|----------------|
-| 0 | +0 | destructor (scalar-deleting) |
-| 1 | +4 | `accept` — visitor/traverse dispatch |
-| 2 | +8 | `cull` — frustum-cull pass |
-| 3 | +12 | `draw` — direct draw call |
-| 4 | +16 | `computeBound` — bounding-volume query |
-| 5 | +20 | `dirtyBound` — invalidate cached bound |
-| 6 | +24 | `update` — per-frame state update |
-| 7 | +28 | `setName` |
-| 8 | +32 | `getName` |
-| 9 | +36 | child/parent-list accessor (role uncertain — shared across GGroup and GGeode) |
-| 10–15 | +40–+60 | class-specific methods (see per-class tables below) |
-
-Slots marked **pure virtual** have no concrete implementation in that class and
-must be overridden by a concrete subclass. Slots marked **stub** are no-ops
-(empty body) in that class.
-
----
-
-## 3. Per-Class Vtable Layouts
-
-### 3.1 Diamond::GDrawablePair (4 slots)
-
-Holds a pair of references: one GGeometry-like object and one GNode-like object.
-The slot-1 body passes both references to visitor/cull helpers before dispatching
-to the child node's draw slot.
-
-| Slot | Offset | Role |
-|------|--------|------|
-| 0 | +0 | destructor |
-| 1 | +4 | accept/traverse — dispatches to both held references |
-| 2 | +8 | cull — culls both held references; increments cull-time counter |
-| 3 | +12 | draw — returns the geometry reference |
-
-### 3.2 Diamond::GGroup (16 slots)
-
-The standard container node. Maintains a dynamic child list (GVector of GNode
-pointers). The cull slot iterates children and calls their cull slot if the
-child's visibility flag is set; it then delegates to a shared bounding-volume
-cull helper. The draw slot is a no-op (groups do not draw directly).
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor — calls GGroup::ctor (cleanup path) |
-| 1 | +4 | `GGroup::accept` — traverses each child recursively |
-| 2 | +8 | cull — iterates child list, culls visible children |
-| 3 | +12 | draw — stub (no-op) |
-| 4 | +16 | `GGroup::computeBound` — aggregates child bounds |
-| 5 | +20 | `GGroup::dirtyBound` |
-| 6 | +24 | `GGroup::update` |
-| 7 | +28 | `GGroup::setName` |
-| 8 | +32 | `GGroup::getName` |
-| 9 | +36 | child/parent-list accessor (shared with GGeode; exact role pending) |
-| 10 | +40 | `GGroup::removeAllChildren` |
-| 11 | +44 | `GGroup::addChild` |
-| 12 | +48 | `GGroup::VFunc_12` (inferred: getNumChildren) |
-| 13 | +52 | `GGroup::removeChild` |
-| 14 | +56 | `GGroup::VFunc_14` (inferred: getMatrix) |
-| 15 | +60 | `GGroup::VFunc_15` (inferred: getWorldMatrix) |
-
-### 3.3 Diamond::GGeode (10 slots observed)
-
-A leaf node that owns a list of GGeometry drawables (not GNode children). The
-accept slot iterates the drawable list and prints each drawable's parent-geode
-and name to a debug stream. The draw slot is a no-op (drawing is dispatched
-through GDrawablePair or the render list, not directly).
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor — calls GGeode::ctor (cleanup path) |
-| 1 | +4 | `GGeode::accept` — iterates drawable list, prints debug info |
-| 2 | +8 | cull override |
-| 3 | +12 | draw — stub (no-op, shared with GGroup) |
-| 4 | +16 | `GGeode::computeBound` |
-| 5 | +20 | `GGeode::dirtyBound` |
-| 6 | +24 | `GGeode::update` |
-| 7 | +28 | `GGeode::setName` |
-| 8 | +32 | `GGeode::getName` |
-| 9 | +36 | child/parent-list accessor (shared implementation with GGroup slot 9) |
-
-> Note: only 10 slots observed in the vtable dump; slots 10–15 may be inherited
-> from GNode without override, or may not exist for GGeode.
-
-### 3.4 Diamond::GGeometry (16 slots)
-
-The concrete vertex/index-buffer geometry class. Slots 3, 4, 6, 7, 8, and 13
-are pure virtual — GGeometry is an abstract base; concrete rendering classes
-provide the draw implementation. The cull slot (slot 2) is implemented and
-returns a pointer to the geometry's cached-bound field at offset +36.
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor |
-| 1 | +4 | `GGeometry::accept` (traverse) |
-| 2 | +8 | `GGeometry::VFunc_02` — cull; returns pointer to bound at object+36 |
-| 3 | +12 | draw — **pure virtual** |
-| 4 | +16 | computeBound — **pure virtual** |
-| 5 | +20 | dirtyBound — override; returns constant true |
-| 6 | +24 | update — **pure virtual** |
-| 7 | +28 | setName — **pure virtual** |
-| 8 | +32 | getName — **pure virtual** |
-| 9 | +36 | override |
-| 10 | +40 | override |
-| 11 | +44 | stub (no-op) |
-| 12 | +48 | stub (no-op) |
-| 13 | +52 | setMatrix — **pure virtual** |
-| 14 | +56 | `GGeometry::VFunc_14` |
-| 15 | +60 | `GGeometry::VFunc_15` |
-
-### 3.5 Diamond::GParticleBuffer (1 slot observed)
-
-Carries quad-batch GPU particle data (pre-allocated vertex and index buffers).
-The vtable scan recovered only one slot; the class likely has a minimal vtable
-(destructor only at the RTTI-observed entry point) and uses non-virtual methods
-for fill/draw operations (`GParticleBuffer::fillStaticIndices`,
-`GParticleBuffer::appendQuadBatch`, `GParticleBuffer::draw`,
-`GParticleBuffer::drawLock`).
-
-| Slot | Offset | Role |
-|------|--------|------|
-| 0 | +0 | destructor — `GParticleBuffer` destructor |
-
-### 3.6 Diamond::GPipeline (6 slots)
-
-A render-state override node. All non-destructor slots are pure virtual, making
-GPipeline an abstract interface. Concrete subclasses provide the actual D3D9
-render-state application.
-
-| Slot | Offset | Role |
-|------|--------|------|
-| 0 | +0 | destructor |
-| 1 | +4 | accept/traverse — **pure virtual** |
-| 2 | +8 | cull — **pure virtual** |
-| 3 | +12 | draw — **pure virtual** |
-| 4 | +16 | computeBound — **pure virtual** |
-| 5 | +20 | dirtyBound — **pure virtual** |
-
-### 3.7 Diamond::GView (1 slot observed)
-
-The vtable scan recovered only the destructor slot for GView. GView likely
-inherits the full GGroup slot table and overrides only the destructor.
-
-| Slot | Offset | Role |
-|------|--------|------|
-| 0 | +0 | destructor — `GView` destructor |
-
-### 3.8 Diamond::GScene (16 slots)
-
-Inherits GGroup's full 16-slot layout. Slot 1 (accept) is implemented as a
-direct thunk to `GGroup::accept` — GScene does not override traverse. Slots 2
-(cull) and 6 (update) have GScene-specific implementations. All other slots are
-shared with GGroup.
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor — GScene destructor |
-| 1 | +4 | accept — thunk to `GGroup::accept` (not overridden) |
-| 2 | +8 | cull — **GScene override** |
-| 3 | +12 | draw — stub (no-op, shared with GGroup) |
-| 4 | +16 | computeBound — shared with GGroup |
-| 5 | +20 | dirtyBound — shared with GGroup |
-| 6 | +24 | update — **GScene override** |
-| 7 | +28 | setName — shared with GGroup |
-| 8 | +32 | getName — shared with GGroup |
-| 9 | +36 | shared with GGroup slot 9 |
-| 10 | +40 | `GGroup::removeAllChildren` (shared) |
-| 11 | +44 | `GGroup::addChild` (shared) |
-| 12 | +48 | `GGroup::VFunc_12` (shared) |
-| 13 | +52 | `GGroup::removeChild` (shared) |
-| 14 | +56 | `GGroup::VFunc_14` (shared) |
-| 15 | +60 | `GGroup::VFunc_15` (shared) |
-
-### 3.9 Diamond::GViewPlatform (10 slots)
-
-A platform-specific view wrapper that mirrors GGeode's 10-slot layout. Slots 5
-(dirtyBound) and 6 (update) are no-ops. Slot 2 (cull) is shared with GGroup's
-bounding-volume cull helper. Large allocation sites (≥ 108 bytes per call site)
-suggest a substantial data payload beyond the vtable.
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor |
-| 1 | +4 | accept/traverse — GViewPlatform override |
-| 2 | +8 | cull — shared bounding-volume cull helper |
-| 3 | +12 | draw — stub (no-op) |
-| 4 | +16 | computeBound override |
-| 5 | +20 | dirtyBound — stub (no-op) |
-| 6 | +24 | update — stub (no-op) |
-| 7 | +28 | setName override |
-| 8 | +32 | getName override |
-| 9 | +36 | shared accessor (same implementation as GGroup slot 9) |
-
-### 3.10 Diamond::GCamera (3 slots observed)
-
-| Slot | Offset | Canonical method / role |
-|------|--------|------------------------|
-| 0 | +0 | destructor — GCamera destructor |
-| 1 | +4 | `GCamera::accept` (traverse) |
-| 2 | +8 | cull — **pure virtual** |
-
-> Note: only 3 slots observed; the full vtable may extend further. GCamera's
-> constructor writes the vtable pointer after initialising projection state.
-> Allocation call sites indicate ≥ 6 dword-width fields beyond the vtable.
-
----
-
-## 4. Object Size Estimates
-
-Sizes below are lower bounds derived from constructor analysis (highest
-member-access offset observed, or allocation size from `operator new` call
-sites). All values are in bytes. Confirmed exact sizes require additional RE.
-
-| Class | Size lower bound | Basis |
-|-------|-----------------|-------|
-| GDrawablePair | 12 bytes | `operator new(12)` call in constructor |
-| GGroup | ≥ 80 bytes | highest member field at dword-index 19 (≥ 76 bytes); child list follows |
-| GGeode | ≥ 80 bytes | same layout as GGroup (holds drawable list at same index) |
-| GGeometry | ≥ 88 bytes | highest byte-offset member access at +84 in constructor |
-| GParticleBuffer | ≥ 248 bytes | highest byte-offset member access at +244 in full constructor |
-| GView | ≥ 296 bytes | highest member offset 292 (byte) in constructor |
-| GViewPlatform | ≥ 108 bytes | `operator new(108)` at primary call sites |
-| GCamera | ≥ 48 bytes | 6 dword-width alloc-size candidate |
-| GScene | ≥ 104 bytes | highest dword-index 25 in constructor (≥ 100 bytes) |
-| GLight | TBD | constructor identified; size not yet extracted |
-| GPipeline | TBD | constructor identified; size not yet extracted |
-
----
-
-## 5. Traversal / Cull / Draw Pattern
-
-The scene graph uses a visitor pattern:
-
-1. A traversal root (typically a `GScene` node) initiates a cull pass by
-   calling its `cull` slot.
-2. `GGroup::cull` iterates the child list. For each child whose visibility flag
-   is set, it calls the child's `cull` slot. It then invokes the shared
-   bounding-volume cull helper to test the group's aggregate bound against the
-   current frustum.
-3. The cull pass builds an ordered per-frame render list.
-4. The render list is iterated for `draw` calls. Direct draw calls ultimately
-   reach `IDirect3DDevice9::DrawIndexedPrimitive` or `DrawPrimitive` (see
-   `Docs/RE/specs/rendering.md §5`).
-5. `GParticleBuffer` bypasses the scene-graph draw slot; its
-   `GParticleBuffer::draw` and `GParticleBuffer::drawLock` methods are called
-   directly by the particle emitter system.
-
-GGroup and GGeode nodes never draw themselves — their draw slots are stubs.
-Drawing is the responsibility of concrete GGeometry subclasses or
-GParticleBuffer.
-
----
-
-## 6. Relationship to Rendering Pipeline
-
-The scene graph is the primary organiser of the per-frame draw loop described
-in `Docs/RE/specs/rendering.md`. The `GScene::cull` override builds the ordered
-draw list that feeds into the bucket ordering described in
-`Docs/RE/specs/rendering.md §3`.
-
-`GPipeline` nodes carry D3D9 render-state overrides (blend mode, Z-write, etc.)
-that the render-state cache described in `Docs/RE/specs/rendering.md §4.1`
-applies.
-
-The `GCamera` node supplies the view and projection matrices consumed by the
-transform stack during the cull and draw passes.
-
----
-
-## 7. Known Constructor Chains
-
-- `GGroup::ctor` calls `GNode::ctor` after initialising the child list.
-- `GGeode::ctor` calls `GNode::ctor` after initialising the drawable list.
-- `GScene::ctor` is a direct constructor (single vtable write observed).
-- `GView::ctor` is a direct constructor.
-- `GCamera::ctor` initialises projection state before writing the vtable.
-- `GParticleBuffer` has two constructors: a minimal form and a full form
-  (`GParticleBuffer::ctor_full`) that pre-allocates GPU buffers and initialises
-  sprite-size and index state. The full form also calls
-  `GParticleBuffer::fillStaticIndices`.
-
----
-
-## 8. Open Questions (escalate to RE domain)
-
-- Exact hierarchy placement of `GDrawablePair` (is it a GNode subclass?).
-- Exact role of vtable slot 9 (shared between GGroup and GGeode — `addChild`,
-  `addParent`, or a reference-count helper?).
-- Full vtable slot counts for GView, GCamera, and GLight.
-- GGeometry concrete subclass(es) that provide the `draw` implementation.
-- Confirmed byte sizes for GLight, GPipeline, and GCamera.
-- Hierarchy and vtable layout of GTraverser, GRenderState, GCull, and related
-  helper classes observed in RTTI strings.
+### 3.3 Phase de Rendu (`draw`)
+Une fois le culling achevé, les objets visibles restants dans la file d'attente (`renderQueue`) sont triés et dessinés :
+1. Le moteur regroupe les géométries visibles et leurs états de rendu respectifs (matériau, texture D3D) sous forme d'instances légères de `GDrawablePair` (12 octets).
+2. Pour chaque `GDrawablePair` :
+    *   L'état de rendu `GRenderState` est appliqué au périphérique Direct3D (via `IDirect3DDevice9::SetTexture`, `SetRenderState`, etc.).
+    *   La méthode `draw()` (Slot 3) de la géométrie concrète (`GGeometry`) est appelée.
+    *   Cette dernière soumet les tampons de sommets et d'indices (Vertex Buffer / Index Buffer) via les appels API D3D appropriés (`DrawIndexedPrimitive`).

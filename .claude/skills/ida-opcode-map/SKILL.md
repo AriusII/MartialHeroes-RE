@@ -1,6 +1,6 @@
 ---
 name: ida-opcode-map
-description: Use when you need to locate the packet dispatch table in the legacy Martial Heroes client (doida.exe; Main.exe historical) and recover the raw opcode -> handler-address map. Finds the large switch/jump table the network reader dispatches on, resolves each case to its handler function, and writes opcode/handler pairs to Docs/RE/_dirty/opcodes.raw.md. This is dirty-room recon only; promotion to the clean Docs/RE/opcodes.md is a separate step owned by the opcode-catalog skill.
+description: Use when you need to locate the packet dispatch table in the legacy Martial Heroes client (doida.exe; Main.exe historical) and recover the raw opcode -> handler-address map. Leads with mcp__ida__recipe_dispatch_scan; handles MSVC two-level index tables. Finds the large switch/jump table the network reader dispatches on, resolves each case to its handler function, and writes opcode/handler pairs to Docs/RE/_dirty/opcodes.raw.md. This is dirty-room recon only; promotion to the clean Docs/RE/opcodes.md is a separate step owned by the opcode-catalog skill.
 allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
@@ -39,34 +39,35 @@ the debugger (the running client) wins. MCP down / wrong DB ⇒ STOP, never fabr
    every call errors, the server is down: stop and report the `claude mcp add` hint
    above. Do not fabricate results.
 
-2. **Pick the execution path.** Prefer a script-exec tool (its name varies by build —
-   look for something like `mcp__ida__execute_script`, `mcp__ida__run_python`, or
-   `mcp__ida__eval`). If only typed tools exist (decompile / list_functions / xrefs /
-   get_strings), fall back to step 5.
+2. **Lead with `recipe_dispatch_scan`.** Run `mcp__ida__recipe_dispatch_scan` first — it is the
+   purpose-built dispatch finder: it locates switch/jump tables and function-pointer handler arrays,
+   scores them by case count and recv-path reachability, and resolves each case to its handler. This
+   is the PRIMARY path; fall back to the manual set (step 3) or the bundled snippet (step 4) only when
+   the recipe returns nothing. Note `mcp__ida__microcode_calls` often resolves the computed dispatch
+   target cleaner than a switch reconstruction.
 
-3. **Run the bundled finder.** Read `${CLAUDE_SKILL_DIR}/scripts/find_dispatch.py`, then
-   paste its full source into the script-exec tool to run it inside IDA. The script:
-   - enumerates indirect-jump / switch constructs via `idaapi.get_switch_info`, plus a
-     fallback scan for dense jump-table arrays in `.rdata`/`.text`;
-   - scores each candidate by case count, density, and whether its dispatch function
-     is reachable from the socket-recv path (string/import heuristics for `recv`,
-     `WSARecv`, `ProcessPacket`-like names);
-   - resolves every case target to a function start and, where possible, a name;
-   - emits a Markdown table of `opcode | handler_ea | handler_name | confidence`.
+3. **Manual fallback set (typed).** If the recipe is thin, work it by hand:
+   `mcp__ida__list_indirect_calls` (every computed call/jump — the dispatch sites), `mcp__ida__insn_query`
+   (find the opcode-read + index-compute instructions), `mcp__ida__basic_blocks` (the dispatcher's CFG
+   around the jump), and `mcp__ida__find_xref_signatures` (a build-stable signature for the dispatcher
+   so the table survives a re-export / build mismatch).
+   - **MSVC two-level-switch caveat:** a large/sparse MSVC `switch` compiles to a u8 **index table**
+     that indexes the real jump table — read BOTH the index (value/lowcase) table and the jump table or
+     the opcodes mis-map. An if/else ladder or a function-pointer array returns **no** switch info at
+     all — walk it as data (the indirect-call sites + the `.rdata` pointer array), not as a `switch`.
 
-4. **Capture the output.** The script prints the report to IDA's output window AND, if
-   the IDA process can write files, saves it directly to
-   `Docs/RE/_dirty/opcodes.raw.md`. If file-write inside IDA is unavailable, copy the
-   printed Markdown and use the Write tool to save it yourself to that exact path.
-   Always preserve the header block the script emits (it records the candidate table EA,
-   the dispatcher EA, opcode width, and base value — the provenance the spec-author needs).
+4. **Bundled snippet (last resort).** Only when steps 2–3 come up empty, read
+   `${CLAUDE_SKILL_DIR}/scripts/find_dispatch.py` and run it via `mcp__ida__py_exec_file`. It
+   enumerates switch constructs (`ida_nalt.get_switch_info`) plus a fallback `.rdata`/`.text`
+   jump-table scan, scores candidates by recv-path reachability, resolves case targets, and emits the
+   `RESULT_JSON` line (harness contract — see `ida-python-lib`) with the `opcode | handler_ea |
+   handler_name | confidence` table.
 
-5. **Typed-tool fallback (no script exec).** Using only typed tools:
-   - find the recv path: search strings/imports for `recv`/`WSARecv`; walk xrefs to the
-     function that reads the opcode field;
-   - in that function, identify the jump/switch; list the case targets;
-   - decompile each handler just far enough to name it; record `opcode | handler_ea |
-     handler_name`. This is slower and lossier — prefer the script.
+5. **Capture the output.** The recipe/snippet report — if the IDA process can write files — saves
+   directly to `Docs/RE/_dirty/opcodes.raw.md`. If file-write inside IDA is unavailable, copy the
+   Markdown and use the Write tool to save it yourself to that exact path. Always preserve the header
+   block (it records the candidate table EA, the dispatcher EA, opcode width, and base value — the
+   provenance the spec-author needs).
 
 6. **Sanity-check before saving.** A real dispatch table for this client should have
    dozens of cases (chat, movement, combat, inventory, login...). If you found only a

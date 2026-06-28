@@ -1,6 +1,6 @@
 ---
 name: ida-py
-description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (doida.exe; Main.exe historical) and capture its result — the escape hatch for any one-off RE query the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-explore, ida-struct-recovery, ida-annotate) do not cover. Either fill the RESULT_JSON harness template for a freeform probe, or pick one of the bundled parameterized snippets ("who calls X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced") and set its CONFIG. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/.
+description: Use to run an ARBITRARY user-supplied IDAPython snippet against the live IDA Pro 9.3 database of the legacy Martial Heroes client (doida.exe; Main.exe historical) and capture its result — the escape hatch for any one-off RE query the fixed RE skills (ida-recon, ida-opcode-map, ida-crypto-hunt, ida-explore, ida-struct-recovery, ida-annotate) do not cover. Either fill the RESULT_JSON harness template for a freeform probe, or pick one of the bundled parameterized snippets ("who calls X", "what touches this global", "find crypto-shaped XOR/ROL/ROR loops", "find S-box-like constant tables", "where is this string referenced") and set its CONFIG. Wraps the snippet so it prints exactly one RESULT_JSON line and lands the result in Docs/RE/_dirty/queries/. For reusable probes, persist them in-DB via save_script/read_script/list_scripts; see ida-python-lib for the curated snippet catalogue and RESULT_JSON harness.
 allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: medium
@@ -32,12 +32,11 @@ Reach for `ida-py` only for the long tail those do not cover.
    `http://127.0.0.1:13337/mcp` with the Martial Heroes IDB open. If red, STOP and surface:
    `claude mcp add --transport http ida http://127.0.0.1:13337/mcp`. Never fabricate output from
    memory.
-2. **Discover the exec tool name at runtime.** The exact `mcp__ida__*` names depend on the running
-   build. List the available `mcp__ida__*` tools and pick the script-execution tool (commonly named
-   like `mcp__ida__py_exec_file`, `mcp__ida__execute_script`, `mcp__ida__run_python`, or
-   `mcp__ida__py_eval`). You will hand it the snippet's full source text. If only a tiny
-   eval-expression tool exists, keep the snippet to a single expression; otherwise use the file/exec
-   variant.
+2. **Pick the exec tool.** Use `mcp__ida__py_exec_file` for a multi-statement snippet/harness and
+   `mcp__ida__py_eval` for a single one-liner expression. To **persist** a reusable probe in the DB
+   rather than re-pasting it, use `mcp__ida__run_script` + `mcp__ida__save_script` /
+   `mcp__ida__read_script` / `mcp__ida__list_scripts`. (The older `eval`/`execute_script`/`run_python`
+   names do not exist on this build — do not call them.)
 
 ## Steps
 
@@ -52,7 +51,10 @@ Reach for `ida-py` only for the long tail those do not cover.
    `recv_buffer_size`, `font_atlas_loader`). Assign findings into the `result` dict — keep values
    JSON-serializable (numbers, hex-address strings, names, short string snippets you deliberately
    read). Do **not** dump whole functions of pseudo-C into `result`.
-3. **Run via the discovered MCP exec tool.** Paste the full filled-in source. Capture the single
+3. **Run via the MCP exec tool** (`mcp__ida__py_exec_file`, or `mcp__ida__py_eval` for a one-liner;
+   `mcp__ida__save_script`/`mcp__ida__run_script` to persist a reusable probe). Paste the full
+   filled-in source. The harness emits exactly one `RESULT_JSON` line per the contract in
+   `ida-python-lib` (the curated snippet catalogue). Capture the single
    line beginning `RESULT_JSON:` from the tool's return value and parse the JSON after the prefix.
    If the snippet raised, the harness prints `RESULT_JSON:{"ok": false, "error": "..."}` — read the
    error and fix the snippet rather than guessing.

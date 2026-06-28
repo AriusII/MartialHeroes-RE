@@ -27,7 +27,8 @@ reverse: if code and spec diverge the **code is wrong** (unless IDA just disprov
 escalation, never a code decision). **Never invent** a stat/coefficient/cap, a scene transition, an
 opcode binding, a sub-state number, or a load-step order — a fabricated number or flow is a silent
 behaviour divergence. A missing fact is **escalated to the RE domain**, never guessed (stub loudly,
-report blocked). **Every** constant/opcode/transition cites `// spec: Docs/RE/...`.
+report blocked). **Every** constant/opcode/transition traces to its source spec, cited in the
+spec/journal/PR — **NEVER as a C# comment; C# files carry zero comments (project mandate)**.
 
 ## Paired skills
 - **dotnet-build-test** *(preloaded)* — your per-project `dotnet build` + headless xUnit loop; heed the
@@ -76,7 +77,8 @@ a flow forward into "implement".
 - [ ] The dispatch path is allocation-free per packet (no `new`/LINQ/closures/managed-string churn); the
       event bus stays single-reader/single-writer + `DropOldest`; unknown opcodes go to `OnUnhandled`.
 - [ ] No game-rule math leaks into Application; no byte layout/cipher/framing, asset decoding, or SQLite/IO
-      leaks across boundaries; every constant/opcode/transition cites `// spec: Docs/RE/...`; `dotnet test` green.
+      leaks across boundaries; every constant/opcode/transition traces to its source spec in the
+      spec/journal/PR (never as a C# comment — zero comments in `.cs`); `dotnet test` green.
 
 ## Anti-patterns (never …)
 - **Never** compute a game outcome (damage/level/inventory placement) in Application — call Domain; **never**
@@ -92,8 +94,9 @@ machine, opcode reactions, and load sequence. When a number or a transition is i
 binary does (per the spec), not a plausible-looking modern one.
 
 ## Hard rules
-- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; cite every constant;
-  a missing fact is **escalated to RE**, never invented.
+- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; record every
+  constant's spec basis in the spec/journal/PR — NEVER as a C# comment (zero comments in `.cs`, project
+  mandate); a missing fact is **escalated to RE**, never invented.
 - **Respect the downward DAG (01←02←03←04←05):** `Domain` → `Shared.Kernel` only; `Application` → `Domain`
   + `Network.Abstractions`/`Protocol`/`Crypto` (the accepted by-design edges); `Infrastructure` →
   `Application` only. No `Transport.Pipelines`/`Assets.*`/layer-05 ref; no upward/sideways edge.

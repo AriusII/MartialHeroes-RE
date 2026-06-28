@@ -2,6 +2,9 @@
 name: ida-pro-re
 description: Use as background methodology whenever the work touches IDA Pro / the IDA MCP, reverse-engineering Main.exe or doida.exe, dirty-room analysis, the Docs/RE/_dirty pipeline, or the clean-room firewall — opcodes, packet/struct/format recovery, decompiler output, pseudo-C, or promoting RE findings to committed specs. Carries the dirty→spec→engineer conventions and the legal firewall; not a runnable procedure.
 user-invocable: false
+paths:
+  - Docs/RE/_dirty/**
+  - Docs/RE/**
 ---
 
 # ida-pro-re — RE methodology & clean-room firewall (conventions)
@@ -44,6 +47,19 @@ tiers/concurrency); `Docs/RE/README.md`.
 - Describe **behaviour and layout in neutral words**, then **re-implement fresh** from the spec.
 - This SKILL file is itself committed → it stays neutral: no pseudo-C, no raw addresses, no copyrighted
   bytes. Add no new RE fact beyond what the cited committed docs already state.
+
+## Modern high-level helpers (know these exist before hand-rolling IDAPython)
+The MCP exposes purpose-built helpers that beat hand-written IDAPython for the common shapes — reach
+for them first, drop to `ida-py` / `ida-python-lib` only for the long tail:
+- **One-shot census:** `survey_binary` (baseline in one call), the `domain_*` family
+  (`domain_segments`/`domain_imports`/`domain_strings`/`domain_functions`/`domain_types`/`domain_xrefs`/
+  `domain_type_layout`) for structured navigation.
+- **Recipes (autopilot):** `recipe_dispatch_scan` (opcode→handler tables), `recipe_crypto_candidates`
+  (cipher detection), `recipe_import_usage` / `recipe_string_to_code` (subsystem tagging),
+  `recipe_function_report`.
+- **Provenance / safety:** snapshots (`snapshot_save`/`snapshot_diff`/`snapshot_restore`) and journaling
+  (`journal_note`/`journal_history`) wrap every IDB-write wave.
+- **Build-mismatch cure:** the `make_signature*` family ports names across a re-anchored IDB.
 
 ## MCP usage
 - Prefer the **debugger-extended endpoint**: `http://127.0.0.1:13337/mcp?ext=dbg` (superset — static +

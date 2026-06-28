@@ -106,6 +106,14 @@ field's capacity**. The IME context holds the focus/edit state at fixed offsets
 (see the IME edit-field offset table in §4). The IME is pre-configured (font, cursor
 position for the candidate window) when the main window is created.
 
+### 1d. Cursor Position Singleton (Meyers Singleton)
+
+The client accesses the client-area relative mouse coordinates via a central global **Cursor Position Singleton** (Meyers singleton wrapper, implemented at `0x604B59` / `0x52DD53`). This coordinates manager avoids continuous Win32 polling overhead by exposing a single point structure updated on demand:
+1. **GetCursorPos:** Retrieves the absolute cursor position in screen coordinates.
+2. **ScreenToClient:** Converts the screen coordinates into client-area relative pixel coordinates based on the game's active main window handle (`dword_898C44` or `dword_84EB3C`).
+3. **Boundary Clamping:** Validates and clamps the calculated relative coordinates against the current viewport dimension bounds (Width at `+177860` / Height at `+177864` of the renderer/options context singleton `dword_8990C8`).
+4. **Member Layout:** Stores the resolved client-relative coordinates inside a point structure (`x` at offset `+44`, `y` at offset `+48`).
+
 ## 2. Normalised event records (two shapes, type byte at +0)
 
 WndProc / DirectInput handlers build a normalised event and push it into the
@@ -186,16 +194,12 @@ press or release.
 The modifier flags field is built identically in every emitter from the
 input-context key-state query:
 
-- **bit3 (`0x8`)** = key slot `1014` (internal VK `0x10E`) — confirmed **Alt**
-  (Alt+digit selects party quick-slots).
-- **bit2 (`0x4`)** = key slot `1012` (internal VK `0x10C`).
-- **bit1 (`0x2`)** = key slot `1013` (internal VK `0x10D`).
+- **bit3 (`0x8`)** = key slot `1014` (internal VK `0x10E`) — confirmed **Shift** (used to force-attack in place or modify UI actions).
+- **bit2 (`0x4`)** = key slot `1012` (internal VK `0x10C`) — confirmed **Control** (used as ground-special modifier).
+- **bit1 (`0x2`)** = key slot `1013` (internal VK `0x10D`) — confirmed **Alt** (used as entity-attack-pick modifier; Alt+digit selects party quick-slots).
 - **bit0 (`0x1`)** = keyboard auto-repeat flag (keyboard path only).
 
-The exact **Ctrl-vs-Shift identity** of slots `1012`/`1013` is not yet disambiguated
-(the world left-press chain uses slot `1013` as the entity-attack-pick modifier and
-slot `1012` as the ground-special modifier). The **bit positions are confirmed**; the
-Ctrl/Shift *labels* are capture/debugger-pending.
+The identities of these modifier slots are **fully resolved** by the virtual key remap table: `1012` is Control, `1013` is Alt, and `1014` is Shift.
 
 ### 2d. Keyboard VK→char translation
 
@@ -203,6 +207,22 @@ The keyboard emitter translates the virtual-key code to a character using CapsLo
 Shift / Ctrl / Alt state and a shift table, and zeroes the function keys (F1..F12)
 under the appropriate lock conditions before populating the translated-char field of
 the 16-byte record.
+
+### 2e. Virtual-Key (VK) Remap Table
+
+Keyboard scancodes received from the DirectInput8 keyboard thread are remapped to internal engine virtual-key codes via a fixed **256-entry translation table** (`unk_79B710` of 16-bit values). The table translates DirectInput scancodes (`DIK_*`) to ASCII values or internal engine virtual codes.
+
+This table resolves the control modifier slots as follows:
+- **Control Modifier (slot 1012 / `0x3f4`):** Both `DIK_LCONTROL` (0x1D) and `DIK_RCONTROL` (0x9D) remap to code **1012** (which maps to internal modifier bit slot `0x10C` after subtracting 744).
+- **Alt Modifier (slot 1013 / `0x3f5`):** Both `DIK_LALT` (0x38) and `DIK_RALT` (0xB8) remap to code **1013** (maps to internal modifier bit slot `0x10D` after subtracting 744).
+- **Shift Modifier (slot 1014 / `0x3f6`):** Both `DIK_LSHIFT` (0x2A) and `DIK_RSHIFT` (0x36) remap to code **1014** (maps to internal modifier bit slot `0x10E` after subtracting 744).
+
+Other significant mappings in the 256-entry table:
+- **Standard ASCII keys:** Letters, digits, ESC (27), Backspace (8), Enter (10), Space (32), Tab (9) are mapped directly to their standard ASCII equivalents.
+- **Arrow Keys:** UP (1000 / `0x3e8`), DOWN (1001 / `0x3e9`), LEFT (1002 / `0x3ea`), RIGHT (1003 / `0x3eb`).
+- **Navigation Keys:** PageUp (1004 / `0x3ec`), PageDown (1005 / `0x3ed`), Home (1006 / `0x3ee`), End (1007 / `0x3ef`), Insert (1008 / `0x3f0`), Delete (1009 / `0x3f1`).
+- **Function Keys (F1–F12):** F1 (1015 / `0x3f7`) through F10 (1024 / `0x400`), F11 (1025 / `0x401`), F12 (1026 / `0x402`).
+- **Numpad operators:** Add (1028 / `0x404`), Subtract (1029 / `0x405`), Multiply (1030 / `0x406`), Divide (1031 / `0x407`), Numpad Enter (10).
 
 ## 3. UI → World chain of responsibility
 
@@ -229,26 +249,32 @@ This is the chain-of-responsibility / **first-consumer-wins** rule, and it is wh
 makes "**UI is the gate**": the 3D world view's event handler runs only when no panel
 consumed the pointer event.
 
-### 3b. World view dispatch
+### 3b. World view dispatch & Move vs Attack Decision
 
-The in-game (world) view event handler switches on the type byte. For a **left
-press** it runs a strict gate-then-pick chain:
+The in-game (world) view event handler switches on the type byte. For a left pointer press (type 4) or synthesized click (type 6), it decides between moving the player or attacking/selecting a target based on the **Move vs Attack decision logic**:
 
-1. **Guard:** clear transient cursor-state flags, and confirm enough panels are
-   closed and the local player is alive / not in a special state, before *any* world
-   action.
-2. **(a) world entity pick** — ray-cast against the scene entity list using
-   bounding-sphere tests (with a pickable-mode mask); if an entity (player /
-   monster / NPC) is hit, run selection / interaction logic.
-3. **(b) ground action** — terrain ray pick for click-to-move (or target-cycle)
-   when no entity was picked.
+1. **Pre-condition Guards:**
+   - Clears transient cursor-state flags.
+   - Verifies that no blocking UI panels or modal windows are active (UI is the gate, §3a).
+   - Confirms that the local player is alive, not stunned, and not in an un-interruptible animation or casting state.
+   - Checks that the current view mode is active for gameplay (third-person or first-person).
 
-The **entity-vs-ground** choice within the world handler is **modifier-gated**: the
-attack/select modifier (key slot `1013`) selects the entity-pick branch versus the
-plain ground-move branch.
+2. **Entity Pick vs Ground Action Decision Tree:**
+   The handler evaluates modifier keys to determine target prioritization:
+   - **Case A: Attack/Select Modifier Held (Alt, key slot `1013` / internal VK `0x10D`):**
+     - Forces targeting/combat mode. The client performs a **World Entity Pick** by ray-casting from the screen cursor coordinates into the 3D scene, testing against the bounding spheres of active entities (monsters, players, NPCs).
+     - **If an entity is hit:** Initiates selection or combat/skill attack logic targeting that entity.
+     - **If no entity is hit:** The click event is discarded and **movement is suppressed**. The player does not move.
+   - **Case B: Modifier Keys Not Held:**
+     - The client first attempts a **World Entity Pick** (ray-cast vs bounding spheres).
+     - **If an entity is hit:** Targets the entity (attacks if it is an enemy, opens interaction dialog if it is an NPC).
+     - **If no entity is hit:** Falls back to the **Ground Action** branch. It performs a terrain ray pick to find the 3D intersection point on the heightmap.
+       - If a ground point is resolved, it triggers click-to-move pathfinding, sending a move packet (`Cmsg_MoveCharacter_Send`) and setting the player's path destination.
+   - **Case C: Ground-Special Modifier Held (Control, key slot `1012` / internal VK `0x10C`):**
+     - Performs a terrain ray pick to find the ground intersection.
+     - Triggers ground-targeted special skills or displays area-of-effect templates at the cursor intersection point without moving the player.
 
-On a **type-5 release**, the dispatcher clears the global drag-capture pointer (drag
-state is cancelled) — consistent with the type-6 click synthesis in §2b.
+On a **type-5 release**, the dispatcher clears the global drag-capture pointer (cancelling any active drag or camera rotation lock) — consistent with the type-6 click synthesis in §2b.
 
 The **observed overall priority** is therefore:
 
@@ -392,7 +418,11 @@ Offsets into the **IME context** object (the singleton fetched in §1):
 |---|---|
 | +0x1DC (`+476`) | IME-enabled byte (gate) |
 | +0x1E0 (`+480`) | active edit-field object pointer |
-| +0x284 (`+644`) | focused HWND (the focused text-field handle) |
+| +0x1E8 (`+488`) | active candidate-list popup flags (`2` = candidate popup list is active/displayed) |
+| +0x1EC (`+492`) | candidate-list status / count |
+| +0x1F4 (`+500`) | candidate-list slots array holding pointers to `tagCANDIDATELIST` (`void *m_apCandidateList[32]`) |
+| +0x27C (`+636`) | `HIMC` (Input Method Context handle) |
+| +0x284 (`+644`) | focused HWND (focused text window handle) |
 
 Offsets into the **active edit-field object** (the pointer at IME `+0x1E0`):
 
@@ -403,6 +433,56 @@ Offsets into the **active edit-field object** (the pointer at IME `+0x1E0`):
 
 Two helpers toggle IME enable/disable (one sets the enabled byte, one blurs the
 input field and disables the IME).
+
+### IME Candidate List Manager
+
+The client handles Windows IME candidate list windows natively by intercepting composition notifications, retrieving candidates, measuring candidate text width using the legacy text renderer, and displaying custom numbered popups.
+
+#### 1. Candidate List Memory Storage
+The IME context caches up to 32 candidate list buffers corresponding to the IME slots. These are located at offset `+500` (`0x1F4`) of the IME context.
+- **Candidate Array:** `void *m_apCandidateList[32]` at `this + 500`. Each element points to a heap-allocated Windows standard `tagCANDIDATELIST` structure containing candidate strings and their offsets.
+- **Active State Flags:** The dword at `this + 488` holds candidate-active flags. In particular, the bitwise-OR `this + 488 |= 2` indicates that candidate list popups are currently active/visible.
+
+#### 2. Candidate Manager Logic
+
+##### Candidate List Cleanup (`ImeInput_ClearCandidateLists` @ `0x603177`)
+Called on `WM_IME_NOTIFY` (specifically when composition elements or Candidate Lists change/close).
+1. Calls `ImeInput_AcquireContext` to establish the IME connection and retrieve the window handle (`HWND` at `+644`) and the input method context (`HIMC` at `+636`).
+2. Checks the IME state using `ImmGetOpenStatus` with the context `HIMC`.
+3. If the context is closed (e.g. user toggles IME off or finishes composition):
+   - Loops through the 32 candidate slots (`this + 500`).
+   - If a slot contains a non-null pointer, frees the allocated `tagCANDIDATELIST` buffer using `j__free` and sets the slot to `nullptr`.
+   - Clears the active flags at `this + 488` and counts at `this + 492` by setting both to `0`.
+4. Releases the IME context using `ImmReleaseContext`.
+
+##### Single Selection Retrieval (`ImeInput_OpenSelectedCandidateList` @ `0x603bea`)
+Forces retrieval and presentation of a single candidate list slot matching a bit mask.
+1. Calls `ImeInput_AcquireContext` to retrieve the context.
+2. Identifies the active slot index (0 to 31) from the provided mask parameter `dwBufLen`.
+3. Queries the required size of the Windows candidate list structure by calling `ImmGetCandidateListA` with a null buffer.
+4. If a valid size is returned:
+   - Frees any existing memory block in the target slot `this + 500 + 4 * index`.
+   - Allocates a new block using `operator new`.
+   - Retrieves the candidate list structure (`tagCANDIDATELIST`) by calling `ImmGetCandidateListA` again with the allocated buffer.
+5. If the candidate list contains items (`dwCount > 0`):
+   - Iterates through the list using offsets provided in `tagCANDIDATELIST::dwOffset`.
+   - Measures the string length in CP949 encoding using `Diamond_Text_MeasureCp949Width` to track the maximum width.
+6. Builds and displays the candidate list popup via `GUList_BuildNumberedPopup`, which draws a numbered CJK selection frame matching the measured candidate dimensions.
+7. Releases the IME context.
+
+##### Full List Display (`GUTextbox_ShowImeCandidateList` @ `0x603ad2`)
+Iterates all IME slots, queries active candidate listings, positions the UI popup at the text cursor/caret, and updates state.
+1. Calls `ImeInput_AcquireContext` to retrieve the context.
+2. Loops through all 32 candidate slots (indices 0 to 31).
+3. If the slot bit is enabled in the input mask:
+   - Calls `ImmGetCandidateListA` to query size, allocates memory, and reads the `tagCANDIDATELIST` structure into the corresponding slot at `this + 500 + 4 * index`.
+   - Queries the active text cursor position via `GetCaretPos` and translates it to screen pixels using `ClientToScreen` relative to the focused window (`HWND` at `+644`).
+   - Iterates over all candidate strings inside the `tagCANDIDATELIST` structure.
+   - Measures each candidate string width using `Diamond_Text_MeasureCp949Width` to determine the maximum boundary width.
+   - Invokes `GUList_BuildNumberedPopup` to build a numbered popup window positioned right under the translated caret coordinates.
+4. Sets the candidate-active flag: `*(_DWORD *)(this + 488) |= 2`.
+5. Releases the IME context.
+
 
 ### Main window / handler layout
 
@@ -480,8 +560,6 @@ is not pinned).
 These are genuinely runtime-dependent or not control-flow-pinnable from static
 analysis; everything else in this spec is control-flow confirmed against the IDB:
 
-- **Ctrl-vs-Shift identity** of modifier slots `1012`/`1013` (bit positions are
-  confirmed; only the Ctrl/Shift labels are pending).
 - The exact **call site that registers a text field's HWND** into the IME
   focused-field slot (the enable/disable helpers are known; the per-field register
   call is not pinned).

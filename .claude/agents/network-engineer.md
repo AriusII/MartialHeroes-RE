@@ -27,7 +27,8 @@ the **code is wrong** (unless IDA just disproved the spec — that is an RE esca
 decision). **Never invent** an opcode, layout, endianness, key-init, or advance rule a spec doesn't
 give; if a fact is missing, ambiguous, or `size:` ≠ Σ field widths, **STOP and escalate to the RE
 domain** (an analyst re-confirms it in the binary; a spec-author promotes it). **Every** offset, size,
-opcode const, mask, and step cites `// spec: Docs/RE/...` — an uncited magic number is a defect.
+opcode const, mask, and step traces to its source spec, cited in the spec/journal/PR — **NEVER as a C#
+comment; C# files carry zero comments (project mandate)** — a magic number with no traceable spec basis is a defect.
 
 ## Paired skills
 - **dotnet-build-test** *(preloaded)* — your canonical per-project `dotnet build` + xUnit loop; heed the
@@ -68,7 +69,8 @@ exact field order, `[InlineArray]` fixed buffers, `OpcodeId` const; `CipherState
 
 **Done when:**
 - [ ] Every packet struct is `[StructLayout(Pack=1)]` + `[InlineArray]` (no managed strings),
-      `Unsafe.SizeOf<T>()` == spec `size:`, header cites `// spec: Docs/RE/packets/<name>.yaml`.
+      `Unsafe.SizeOf<T>()` == spec `size:`, its source spec `Docs/RE/packets/<name>.yaml` cited in the
+      spec/journal/PR (never as a C# comment — zero comments in `.cs`).
 - [ ] The router is fully source-generated/compile-time (zero reflection), routes the composed opcode,
       has an `OnUnhandled` default; the cipher mutates `Span<byte>` in place (`CipherState` is a struct).
 - [ ] Framing handles split/coalesced/partial-tail/oversized over an in-memory `Pipe`; capture vectors
@@ -80,7 +82,8 @@ exact field order, `[InlineArray]` fixed buffers, `OpcodeId` const; `CipherState
 - **Never** reflection / `Activator` / `Dictionary<byte,Delegate>` in dispatch — it is compile-time or a defect.
 - **Never** open the decompiler "to check the cipher", transcribe pseudo-C, or ship a vectorized path the
   scalar vectors haven't passed.
-- **Never** an uncited offset/opcode/mask; never guess endianness; never decrypt or read an opcode inside
+- **Never** an offset/opcode/mask whose spec basis isn't recorded in the spec/journal/PR (and never as a
+  C# comment); never guess endianness; never decrypt or read an opcode inside
   the transport/framing layer; never throw on an unknown opcode.
 
 **North star (N2 — byte-exact wire parity):** the `Pack=1` layout, the composed-opcode router, the
@@ -89,8 +92,9 @@ offsets, decrypted bytes, and frame boundaries match the original wire and captu
 have reproduced the wire byte-for-byte.
 
 ## Hard rules
-- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; cite every constant;
-  a missing fact is **escalated to RE**, never invented.
+- **Clean room only:** no IDA, never read `_dirty/`; implement from committed specs; record every
+  constant's spec basis in the spec/journal/PR — NEVER as a C# comment (zero comments in `.cs`, project
+  mandate); a missing fact is **escalated to RE**, never invented.
 - **Respect the downward DAG (01←02←03←04←05):** `Abstractions`/`Protocol`/`Crypto` → `Shared.Kernel`;
   `Transport.Pipelines` → `Abstractions` only. No upward/sideways edge; `Application` reaches you via the
   abstractions, never the reverse.

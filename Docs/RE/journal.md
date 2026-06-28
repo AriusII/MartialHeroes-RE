@@ -12,6 +12,58 @@ autonames, and no addresses-as-truth — only neutral provenance.
 
 ---
 
+## CYCLE 19 — Subsystem Deep-Dive Specifications (2026-06-28)
+
+**Build under analysis:** `doida.exe`, sha256 `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` (imagebase `0x400000`).
+
+**Method:** IDA static only. Sequence of targeted queries to decompile network serialization, sound manager, terrain loading, and quadtree raycasting. 4 parallel subagents drafted the clean-room technical specifications.
+
+**Committed corpus change:**
+- Created `Docs/RE/specs/network_protocol.md` documenting `NetPacketHeader` format, NetMsgBuffer lifecycle, client-to-server (`Cmsg`) and server-to-client (`Smsg`) serializing, NetClient and NetHandler dispatching tables.
+- Created `Docs/RE/specs/sound_system.md` documenting `CSoundManager` voice arrays, category-based voice slot allocations (exclusive vs. sorted tree cache), OGG voice streaming from VFS, GSound volume, cross-fading, and DirectSound configuration.
+- Created `Docs/RE/specs/terrain_system.md` documenting `TerrainCell` structure (24,712 bytes), internal subtiles and visual layer allocations, active cell resolution (`3x3` window), terrain height sampling via plane equations, and map layout in VFS.
+- Created `Docs/RE/specs/physics_collision.md` documenting `TerrainCell` Quadtree raycasting algorithm, intersection math (Ray-AABB, Ray-Sphere, Ray-Triangle), and the `.sod` wall collision format.
+
+**Firewall status:** Clean-room firewall intact. No decompiler code blocks or proprietary symbol signatures committed; only neutral struct maps, logic flows, and function names were recorded in `Docs/RE/`.
+
+---
+
+## CYCLE 18 — 2D UI Graphics & GUI Framework Specs (2026-06-28)
+
+**Build under analysis:** `doida.exe`, sha256 `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` (imagebase `0x400000`).
+
+**Method:** IDA static only. Sequence of targeted queries to reconstruct the master stage engine, loop drivers, transition matrices, and polymorphic UI window drawing, followed by clean-room technical writing by 3 parallel subagents.
+
+**Committed corpus change:**
+- Created `Docs/RE/specs/ui_asset_loader.md` documenting VFS 2D asset loading, D3DX9 texture creation, and `GTextureManager` caching (`0x52f4d8`) of `GHTex` wrapped in reference-counted `GTexture` objects.
+- Created `Docs/RE/specs/gui_framework.md` mapping the Diamond C++ widget structures (`GUComponent` = 164B, `GUPanel` = 180B, `GUButton`, `GULabel`, `GUWindow`), member variables, vtable slots, hierarchical parent-child draw traversal (Composite pattern) via `GUPanel__onDraw` (`0x6148a4`), input event click-vs-drag click synthesis (`0x615048`), and CP949 text rendering.
+- Created `Docs/RE/specs/ui_scene_integration.md` detailing the master state machine `WinMain_SceneStateMachine` (`0x5fe316`) and its 9 states (0..8), the scene loop driver `Engine_RunSceneLoop` (`0x61beb1`) and its 4 phases (Pump, Device Step, Frame Tick, Frame Limit), the 3D-to-2D coordinates space transformation in `DrawOverlayPass` (`0x60df56`) using D3D9 World Identity matrix (`1.0f`), and the delegation to polymorphic draw callbacks.
+- Synchronized `names.yaml` with the newly analyzed UI and stage-manager methods.
+
+**Firewall status:** Clean-room firewall intact. No decompiler code blocks or proprietary symbol signatures committed; only neutral struct maps, logic flows, and function names were recorded in `Docs/RE/`.
+
+---
+
+## CYCLE 17 — Massive System RE Sweep & Spec Writing (2026-06-28)
+
+**Build under analysis:** `doida.exe`, sha256 `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` (imagebase `0x400000`).
+
+**Method:** IDA static only. Target RTTI scans, cross-reference mapping, and decompilation on the remaining target subsystems from the primary agent context, followed by clean-room technical writing by 6 parallel subagents reading from generated raw outputs under `_dirty/`. No debugger, no dynamic execution.
+
+**Committed corpus change:**
+- Created `Docs/RE/specs/anticheat_core.md` detailing the GGGProtect/GProtect/GXProtect class triad, correcting the UI panel destructors vtable confusion, detailing the 3555 ms periodic monitor thread, outlining hook detection (IAT snapshots for QPC, GetTickCount, timeGetTime, WSASend, send), debugger detection (BeingDebugged and ClientId PID leak), and fatal exit codes (500, 1581, 2225).
+- Created `Docs/RE/specs/xtrap_integration.md` detailing dynamic loading of `XTrapVa.dll`, resolution of export `XProc3`, key-based token/config decryption (`69CB2FD62997E31B`, `39345AEA0DEF4D79`), network socket setup to `211.115.86.66:2424` with `"XL_XF_V1"` magic V1 telemetry framing, PE image selfcheck mapping disk file, hook checking via LDE instruction decoder, and trailing signature comparisons at `FileSize - 992` and `FileSize - 384` with key `EB023C05F5E8CA6D`.
+- Created `Docs/RE/specs/scene_graph.md` mapping the Diamond 3D Scene Graph hierarchy (GNode, GGroup, GScene, GView, GCamera, GPipeline, GParticleBuffer, GDrawablePair), memory sizes and offsets, custom `GVector` data structure, and view frustum culling intersection logic.
+- Created `Docs/RE/specs/cal3d_runtime.md` mapping the Cal3D animation skeletal structures and RTTI (CoreActor, CoreAnimation, CorePose, CoreSkin, CoreTrack, CoreSkinManager, CorePoseManager), `.skn` material skin binary file format parser, pose evaluation keyframe interpolation (LERP/SLERP), and CPU skinning matrix deformation.
+- Created `Docs/RE/specs/cash_shop_browser.md` mapping the ActiveX IE web container `CWebContainer` and events `CWebEventSink`, window procedure `WndProc` (@ `0x510448`) handling WM_CREATE/WM_SIZE/WM_DESTROY messages, navigation method, and COM interfaces QueryInterface/AddRef/Release slots.
+- Created `Docs/RE/specs/bignum_flint.md` mapping the FLINT++ C++ LINT representation, arithmetic modular primitives (`Flint_Mul`, `Flint_DivRem`, `Flint_ModMul`, `Flint_ModSqr`, `Flint_ModExp2` Montgomery reduction), runtime error route, and exceptions taxonomy.
+- Updated `Docs/RE/specs/input_ui.md` with the 32-slot candidate array (`this+500`), CP949 Korean IME selection lists and caret popup positions, click-to-move-vs-attack modifiers (Alt/Ctrl/Shift), VK virtual key code remap table, and cursor position singleton.
+- Synchronized `names.yaml` with 4,819 sorted and quoted address-to-symbol mappings from the live IDB.
+
+**Firewall status:** Clean-room firewall intact. No decompiler code blocks or proprietary symbol signatures committed; only neutral struct maps, logic flows, and function names were recorded in `Docs/RE/`.
+
+---
+
 ## CYCLE 16 — VFS Master Manual, DiskFile Structure, and Format Loader Census (2026-06-27)
 
 **Build under analysis:** `doida.exe`, sha256 `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` (imagebase `0x400000`).

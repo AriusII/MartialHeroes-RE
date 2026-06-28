@@ -1,7 +1,7 @@
 ---
 name: ida-annotate
-description: Use to WRITE legibility annotations back into the live Martial Heroes IDA database (doida.exe / Main.exe) — the one IDB-write applier, four modes. NAMES-SYNC syncs Docs/RE/names.yaml ⇄ the IDB (apply canonical names, pull analyst renames back). RENAME-BATCH proposes canonical names for sub_xxxx/loc_xxxx autoname noise but applies ONLY glossary-approved names. ANNOTATE-MANIFEST applies a campaign glossary slice (rename + neutral comment + optional struct/enum type) per cluster. STRUCT-APPLY recovers a C++ object layout from this+offset access patterns and declares the struct type onto the IDB. Always dry-run → apply only on explicit confirmation, idempotent, SHA-256-pinned, never touches CRT/runtime symbols, never writes pseudo-C. Drives mcp__ida__rename / declare_type / type_apply + bundled IDAPython; the only repo file written is a dirty applied-report.
-allowed-tools: mcp__ida__* Read Write
+description: Use to WRITE legibility annotations back into the live Martial Heroes IDA database (doida.exe / Main.exe) — the one IDB-write applier, four modes. NAMES-SYNC syncs Docs/RE/names.yaml ⇄ the IDB (apply canonical names, pull analyst renames back). RENAME-BATCH proposes canonical names for sub_xxxx/loc_xxxx autoname noise but applies ONLY glossary-approved names. ANNOTATE-MANIFEST applies a campaign glossary slice (rename + neutral comment + optional struct/enum type) per cluster. STRUCT-APPLY recovers a C++ object layout from this+offset access patterns and declares the struct type onto the IDB. Always dry-run → apply only on explicit confirmation, idempotent, SHA-256-pinned, never touches CRT/runtime symbols, never writes pseudo-C. Snapshots before every batch (snapshot_save→apply→snapshot_diff→idb_save) and journals each write wave (journal_note). Drives mcp__ida__rename / declare_type / type_apply + bundled IDAPython; the only repo file written is a dirty applied-report.
+allowed-tools: mcp__ida__*, Read, Write
 model: sonnet
 effort: high
 ---
@@ -18,6 +18,39 @@ interop comments + recovered layouts, while **nothing tainted ever crosses the f
 | **RENAME-BATCH** | glossary-approved renames only | `names.yaml` (+ proposals out) | `rename_batch.py` | `_dirty/names-proposed-<sha8>.md` |
 | **ANNOTATE-MANIFEST** | rename + neutral comment + type, per cluster | gate-passed `_dirty/<campaign>/glossary.yaml` slice | `annotate_batch.py` (+ `campaign8_phase_d_apply.py`) | `_dirty/campaign2/applied/<cluster>.md` |
 | **STRUCT-APPLY** | a declared struct/enum type onto `this` | observed `this+offset` access patterns | `struct_probe.py` | `_dirty/structs/<struct>.offsets.md` |
+
+## Tools it drives (the IDB-write surface)
+
+This skill is the **sole IDB-write applier** and keeps the full `mcp__ida__*` allowlist. The write
+tools it uses, by role:
+
+- **Names / comments / locals:** `mcp__ida__rename`, `mcp__ida__set_comments` / `mcp__ida__append_comments`,
+  `mcp__ida__set_lvar`, `mcp__ida__rename_stack`, `mcp__ida__set_op_type`.
+- **Types / layouts:** `mcp__ida__set_type`, `mcp__ida__declare_type`, `mcp__ida__struct_member_edit`,
+  `mcp__ida__enum_upsert`, `mcp__ida__type_apply_batch`.
+- **Code/data definition:** `mcp__ida__make_data`, `mcp__ida__define_code`, `mcp__ida__define_func`,
+  `mcp__ida__undefine`.
+- **Snapshot / provenance / persist:** `mcp__ida__snapshot_save`, `mcp__ida__snapshot_diff` /
+  `mcp__ida__diff_before_after`, `mcp__ida__snapshot_restore`, `mcp__ida__idb_save`,
+  `mcp__ida__journal_note` / `mcp__ida__journal_history` / `mcp__ida__journal_config`.
+- **Bundled IDAPython** runs via `mcp__ida__py_exec_file` (multi-statement) / `mcp__ida__py_eval`
+  (one-liner), emitting the single `RESULT_JSON` line per the harness contract — see the
+  `ida-python-lib` skill for the harness + the idempotent `safe_rename`/`safe_cmt` pattern.
+
+## SNAPSHOT-GUARD discipline (every batch wraps in this)
+
+A write wave is **never** applied bare. Wrap every batch:
+
+1. **`mcp__ida__snapshot_save`** *before* the batch — names it for the cluster/wave (`pre-<cluster>-<sha8>`).
+2. **Apply** the dry-run-confirmed entries (the typed write tools above, unbridled/parallel).
+3. **`mcp__ida__snapshot_diff` / `mcp__ida__diff_before_after`** *after* — confirm only the intended
+   addresses changed; a stray edit outside the apply list means STOP and inspect.
+4. **`mcp__ida__idb_save`** to persist the wave to disk.
+5. **`mcp__ida__snapshot_restore`** rolls back a bad sweep wholesale rather than hand-unwinding it.
+6. **`mcp__ida__journal_note`** records the wave in-IDB (cluster, count, SHA-256, source-of-truth);
+   pair it with the committed `Docs/RE/journal.md` entry the maintainer/spec-author writes —
+   `journal_history` / `journal_config` read/configure the in-IDB log. (`journal.md` itself stays
+   orchestrator-owned; this skill only writes the in-IDB note + its dirty report.)
 
 ## The shared discipline (every mode obeys verbatim)
 

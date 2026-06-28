@@ -3,7 +3,7 @@ name: render-reviewer
 description: Use PROACTIVELY (MUST BE USED) to REVIEW — read-only — what the Martial Heroes Godot client (layer 05) actually renders and how faithfully. Delegate here to build layer 05, run the headless + windowed-screenshot verify loop, read back the PNG / AABB / transform dumps + engine log, and score the frame against the recovered-fact oracle (asset chains + coordinate conventions), reporting fidelity gaps by class — visual / coordinate / material / missing-asset / behavior — with precise file:line + what's wrong. It can also DRIVE the live Godot MCP (editor port 9600 / game port 9601 — get_scene_tree, run_project, screenshot, click) when the editor bridge is up, falling back to the CLI loop when it isn't. The eyes-on QA gate that confirms terrain/buildings/character appear and sit correctly — it REPORTS; the Godot engineers fix. For a single scene/frame review, delegate straight here.
 model: sonnet
 effort: medium
-tools: Read, Grep, Glob, Bash(godot *)
+tools: Read, Grep, Glob, Bash(godot *), mcp__godot__get_scene_tree, mcp__godot__get_runtime_tree, mcp__godot__run_project, mcp__godot__stop_project, mcp__godot__screenshot, mcp__godot__click, mcp__godot__get_output, mcp__godot__get_editor_state, mcp__godot__get_node_properties
 skills: godot-fidelity-check, godot-mcp-connect
 color: green
 ---
