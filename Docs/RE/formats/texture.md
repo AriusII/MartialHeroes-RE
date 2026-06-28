@@ -21,6 +21,7 @@
 > 4 RAW / 3 anomalous out of 1251 files). No structural corrections; all prior offsets, strides, and
 > formulae re-confirmed.
 > refinements (2026-06-26): `kind` render-class dispatch by range confirmed (four-way: static-copy / solid-shadow / sway-small-medium / sway-large); material state for all static-object passes confirmed (alpha-blend ON, alpha-test OFF, SRCALPHA/INVSRCALPHA, two-sided for kind==2 and sway; no billboard; no alpha-to-coverage); the "kind==1=texture-animated at load / NOT mesh-swayed at render" two-axis independence confirmed. Known unknown for render dispatch RESOLVED.
+> deep-3d-wave11 (2026-06-28, static-only, ida_anchor f61f66a9): 10 open items closed — main-path Format confirmed D3DFMT_UNKNOWN (0, render-type globals are read-only literal zero); UiTex quality→format table corrected (off-by-one; quality 1→DXT5, 2→DXT3, 0/≥3→DXT2; same selector for both DDS and MSK); guild-crest create dimensions corrected to caller-supplied (basic fallback 72×48 DXT2; prior "23×23" was in-game icon size); UiTex MSK semantic resolved (identical code path to DDS, same registry, same options block); FPS non-Ex mip asymmetry resolved (param-less API, not intentional policy); VRAM accumulator increment absent in static image (one-sided / vestigial); sampler ADDRESS+filter resolved for sky/background (samplers 0/1/2 WRAP+LINEAR) and character (sampler 0 skin WRAP+LINEAR, sampler 1 toon-ramp CLAMP) passes; toon-ramp stage binding confirmed at stage 1; terrain confirmed to use shared default-options block (not SetD3DXLoadOptions). Remaining [debugger-confirm]: terrain GHTex MipLevels/Pool, scheduler clock units, runtime vram_bytes at +0x44, ground-tile sampler ADDRESS.
 
 ## Identification
 
@@ -887,6 +888,186 @@ aid only.
 
 ---
 
+## Runtime texture subsystem
+
+The D3DX loading and caching layer sits between the VFS/disk read and the Direct3D texture object. This section documents the recovered runtime parameter values (resolving the spec's prior "D3DX9-delegated, params unknown" entries), the GHTex in-memory texture object, the streaming scheduler, the default/fallback texture, and the caching model.
+
+### D3DX texture-create parameters (CONFIRMED)
+
+#### D3DX API argument order
+
+Both D3DX9 texture-create functions used by the client share the same tail parameter order:
+
+`D3DXCreateTextureFromFileInMemoryEx(device, srcData, srcSize, Width, Height, MipLevels, Usage, Format, Pool, Filter, MipFilter, ColorKey, pSrcInfo, pPalette, ppTexture)`
+
+`D3DXCreateTextureFromFileExA` uses the identical tail order (replacing the in-memory `srcData`/`srcSize` pair with an on-disk path string). The central wrapper slurps the VFS entry into `{buffer, length}` and forwards every other parameter unchanged from the call site.
+
+#### SetD3DXLoadOptions — the options block
+
+The GHTex constructor delegates parameter setup to `SetD3DXLoadOptions`, which allocates a **40-byte (10-dword) options block** and stores its ten incoming arguments into it. The create call then reads these fields:
+
+| Argument position | Options-block dword | D3DX parameter |
+|---|---|---|
+| p1 | dword 0 | Width |
+| p2 | dword 1 | Height |
+| p3 | dword 2 | MipLevels |
+| p4 | dword 3 | Usage |
+| p5 | dword 4 | Pool |
+| p6 | dword 5 | Filter |
+| p7 | dword 6 | MipFilter |
+| p8 | dword 7 | ColorKey |
+| p9 | dword 8 | pSrcInfo |
+| p10 | dword 9 | pPalette |
+
+**Format is NOT taken from the options block** — it comes from the GHTex field `format_hint` (offset +0x3C; see GHTex layout below), which the constructor stores separately.
+
+#### Per-call-site parameter values (CONFIRMED)
+
+D3DX sentinels: `D3DX_DEFAULT = −1` (let D3DX choose); `D3DX_FROM_FILE = −3` (take dimension, mip count, or format from the file header); `D3DX_FILTER_NONE = 1` (no resampling).
+
+| Create site | Width | Height | MipLevels | Usage | Format | Pool | Filter | MipFilter | ColorKey |
+|---|---|---|---|---|---|---|---|---|---|
+| GTextureManager (named-texture cache) | caller-supplied | caller-supplied | **1** | 0 | caller-supplied (GHTex format_hint) | MANAGED | D3DX_DEFAULT | D3DX_DEFAULT | **0** |
+| UiTex manifest (DDS and MSK entries) | from file | from file | **1** | 0 | quality-selected (see below) | MANAGED | D3DX_DEFAULT | D3DX_DEFAULT | **0** |
+| Guild-crest loader (crest DDS; basic fallback 72×48) | caller-supplied | caller-supplied | **1** | 0 | DXT2 (forced) | MANAGED | D3DX_FILTER_NONE | D3DX_FILTER_NONE | **0** |
+| Atlas loader — VFS branch | square hint | square hint | **1** | 0 | caller-supplied | MANAGED | D3DX_DEFAULT | D3DX_DEFAULT | **0** |
+| Atlas loader — disk-fallback branch | square hint | square hint | D3DX_FROM_FILE | 0 | D3DFMT_FROM_FILE | MANAGED | D3DX_DEFAULT | D3DX_DEFAULT | **0** |
+| FPS-counter overlay — VFS branch (non-Ex variant) | — | — | from file | — | from file | MANAGED | (default) | (default) | none |
+| FPS-counter overlay — disk branch (Ex variant) | from file | from file | **1** | 0 | R8G8B8 (24bpp) | MANAGED | D3DX_DEFAULT | D3DX_DEFAULT | **0** |
+
+**Key findings for 1:1 re-implementation:**
+
+- **Pool = MANAGED everywhere.** Every texture is created with D3DPOOL_MANAGED, so Direct3D retains a system-memory copy and re-uploads automatically after a device reset. No special device-reset handling is required in a Godot port beyond what the engine already provides.
+- **ColorKey = 0 everywhere — RESOLVES prior known unknown.** No color-key transparency is used at any observed create site. All transparency comes from the image's own alpha channel, consistent with the draw-state finding (alpha blend ON, alpha test OFF).
+- **MipLevels = 1 on the main paths.** The GTextureManager, UiTex manifest, guild-crest, and atlas-VFS paths all force a single top-level mip, discarding any mip chain that the source file ships. Only the atlas-disk-fallback (`D3DX_FROM_FILE`) and the FPS-counter VFS overlay preserve the file's full mip chain. Implementors must not auto-generate mip levels on the main texture path.
+- **Filter = D3DX_DEFAULT (triangle+dither resize) everywhere except guild-crest**, which uses D3DX_FILTER_NONE — the crest source is accepted without resampling and D3DX recompresses to DXT2 at the caller-supplied dimensions (basic fallback 72×48).
+
+#### UI-manifest DDS variant — texture-quality selection (CONFIRMED)
+
+`UiTex_ParseManifest` selects the D3DX Format argument for each DDS entry from a global texture-quality level setting:
+
+| Quality level (stored config dword) | Forced D3DX Format | Alpha convention |
+|---|---|---|
+| 1 | DXT5 | BC3 — interpolated 8-bit alpha |
+| 2 | DXT3 | BC2 — straight (non-premultiplied) alpha |
+| 0 or ≥ 3 (default / catch-all) | DXT2 | BC2 — premultiplied alpha |
+
+D3DX recompresses the source image to the selected format at load time. The selector computes `t = quality − 1` and branches: t==0 → DXT5; t==1 → DXT3; else → DXT2. Quality value 0 (and any value ≥ 3) falls through to the DXT2 catch-all. The same selector and DXT2 default apply to both the DDS and MSK sub-blocks. **Correction to prior spec:** the earlier table ("0→DXT5, 1→DXT3, 2+→DXT2") was off by one; the values above are the corrected mapping. This is the runtime mechanism behind the DXT2/DXT3/DXT5 split documented in the UI-atlas container table — for UI-manifest atlases it is a runtime quality selection, not a per-file authoring choice.
+
+---
+
+### GHTex runtime texture object (76 bytes, CONFIRMED)
+
+`GHTex` is the engine's primary runtime texture object. Every bgtexture.lst pool entry, GTextureManager-cached texture, UiTex entry, and guild-crest load is backed by a GHTex instance. Size confirmed at 76 bytes.
+
+**Field layout:**
+
+| Offset | Size | Field | Description |
+|---:|---:|---|---|
+| +0x00 | 4 | vtable | GHTex virtual function table pointer |
+| +0x04 | 28 | path | MSVC std::string holding the texture's VFS path. SSO inline buffer used for paths ≤ 15 chars; heap pointer for longer paths; length at +0x18; capacity at +0x1C |
+| +0x20 | 1 | flag_options_ok | Byte flag; 1 = options block allocated and load path ready |
+| +0x21 | 1 | flag_present | Byte flag; 1 = Direct3D texture is currently resident |
+| +0x24 | 4 | idle_interval | Scheduler unload threshold in clock units; 180000 for cached textures; 0 if the object is not a scheduler subscriber |
+| +0x28 | 4 | last_use | Scheduler clock stamp; restamped on every access via `AcquireStaticHandle` or `GTextureManager_GetTexture`; compared against `idle_interval` to detect idle objects |
+| +0x2C | 4 | (reserved) | Observed zero |
+| +0x30 | 4 | (reserved) | Observed zero |
+| +0x34 | 4 | sched_slot | Scheduler ring slot index; −1 if no slot held; freed on destruction |
+| +0x38 | 4 | sched_sublist_slot | Effect-sublist slot index; −1 if unused |
+| +0x3C | 4 | format_hint | D3DFORMAT to pass as the Format argument to D3DX; set by the constructor; used in place of an options-block Format field. On the main world/char/terrain/sky paths this field holds 0 (D3DFMT_UNKNOWN) — the render-type globals that supply the constructor's format argument are read-only literal zero, so D3DX auto-detects the format from the file header. The terrain pool's kind==1 vs ≠1 branch selects between two such globals that are both zero — the distinction is a render-class tag, not a meaningful texture-format split. Only the UI-tex, guild-crest, FPS-overlay-disk, and default-texture paths supply a non-zero format. |
+| +0x40 | 4 | d3d_texture | `IDirect3DTexture9*` pointer (D3DX create result); null when not loaded; Released on unload and on destruction |
+| +0x44 | 4 | vram_bytes | Per-texture VRAM footprint in bytes; subtracted from the global VRAM-footprint accumulator on unload |
+| +0x48 | 4 | options_ptr | Pointer to the 40-byte `SetD3DXLoadOptions` block; initialised to a sentinel value drawn from the scheduler singleton until `SetD3DXLoadOptions` allocates the real block; the destructor and the load path both test for the sentinel before freeing |
+
+**GHTex vtable slots:**
+
+| Slot | Function |
+|---|---|
+| +0 | Destructor (scalar and vector; object stride 76 bytes) |
+| +4 | `GHTex_Load` — calls through the central texture-create wrapper; stores the result at `d3d_texture` (+0x40) |
+| +8 | Load trampoline — delegates to slot +4 |
+| +12 | `GHTex_Unload` — releases `d3d_texture`, clears `flag_present`, decrements the global live-texture count, and subtracts `vram_bytes` from the global VRAM-footprint accumulator |
+
+**Relationship to bgtexture.lst:** each 48-byte on-disk bgtexture.lst record is expanded at runtime into a 76-byte GHTex object (`TexturePoolEntry`). The on-disk record size (48) and the in-memory object size (76) are different; the "76-byte in-memory pool entry" in the bgtexture.lst section above refers to this GHTex. The `TexturePoolEntry` shares the same field layout at the offsets listed above.
+
+---
+
+### Texture streaming — lazy-load and idle-eviction (GHTexScheduler)
+
+The engine does not load all textures at startup. A lazy-load model backed by an idle-eviction scheduler (`GHTexScheduler`) — a 6000-slot ring — manages VRAM residency.
+
+**Registration:** each GHTex registers a scheduler slot on construction (stored in `sched_slot` at +0x34). Objects with a non-zero `idle_interval` also register in an effect-sublist.
+
+**Eager vs lazy load — per-bucket policy (CODE-CONFIRMED):** The char/item list driver passes a `load-now` flag per bucket to `GetTexture`. Only the `tex10241024` bucket passes `load-now = 1` (immediate upload at registration time); additionally, `m_dwTimeout` is zeroed after the eager load, pinning the texture as resident (timeout = 0 means the idle-eviction condition can never be satisfied). The remaining buckets (`tex512512`, `tex256512`, `tex256256`, and the item texture bucket) pass `load-now = 0`: upload is deferred until first use (`GHTex_Load` fires on first draw-time access), and the timeout remains the standard 180 000 ms, making those handles evictable.
+
+**Per-frame tick:** `FrameTickScheduler_TickAll` is called once per engine frame (phase 3 of the engine frame loop). It advances a round-robin cursor and processes approximately 1.1% of the total subscriber count per frame, sweeping the full texture set in roughly 90 frames.
+
+**Idle check:** for each subscriber, `FrameTickSubscriber_TickIfDue` tests: if the GHTex is resident and `(scheduler_clock − last_use) > idle_interval`, it fires `GHTex_Unload` (vtable slot +12). The standard `idle_interval` is **180000 clock units** — the same value the bgtexture.lst section records as the pool lifetime.
+
+**Unload effect:** `GHTex_Unload` releases the Direct3D texture, clears `flag_present`, decrements a global live-texture count, and subtracts `vram_bytes` from a global VRAM-footprint accumulator.
+
+**Access restamps:** `AcquireStaticHandle` and `GTextureManager_GetTexture` restamp `last_use` with the current scheduler clock on every access. Textures used every frame never become idle and remain resident.
+
+**Net model:** genuine idle-LRU VRAM streaming — textures not accessed within ~180000 clock units are evicted from VRAM; re-access triggers a lazy reload on next use. This is not a load-once-keep-forever model.
+
+---
+
+### Default / fallback texture (blackbmp)
+
+`Renderer_CreateDefaultTexture` is called once at device initialisation:
+
+- **Format:** A8R8G8B8 (32bpp BGRA); falls back to A4R4G4B4 if the primary allocation fails.
+- **Pool:** MANAGED.
+- **Dimensions:** 2 × 2 pixels.
+- **Fill value:** every texel is written with B = 0x78, G = 0x78, R = 0x78, A = 0x50 — a semi-transparent mid-gray.
+- **Storage:** the created `IDirect3DTexture9*` is stored at renderer object `+0x2B9D8`
+  (cross-reference: `Docs/RE/structs/renderer_device.md`). It is released during device-children
+  teardown.
+- **Binding:** `RenderDevice_SetStageTextureDefault` binds renderer `+0x2B9D8` to sampler **stage 0**
+  via the D3D9 device `SetTexture` call (public `IDirect3DDevice9` vtable slot `+0x104`) before any
+  draw that lacks a valid texture. `RenderDevice_SetStageTextureByNameOrDefault` and
+  `GDevice_SetStageTexture` also use this pointer as the stage-0 default. Any missing, unloaded, or
+  failed texture therefore renders as a small semi-transparent gray quad rather than a crash or
+  garbage output.
+
+This is the engine-level "missing texture" placeholder. A re-implementation should provide an
+equivalent 2×2 fallback bound on any null-texture draw call.
+
+---
+
+### Sampler states — world and character draw passes (CONFIRMED)
+
+The engine's resting sampler state is POINT filter / no-mip (MINFILTER = MAGFILTER = D3DTEXF_POINT = 1, MIPFILTER = D3DTEXF_NONE = 0). Active draw passes override this before their draws and restore it after. D3DSAMP codes: ADDRESSU = 1, ADDRESSV = 2, MAGFILTER = 5, MINFILTER = 6, MIPFILTER = 7. D3DTADDRESS: WRAP = 1, CLAMP = 3. D3DTEXF: NONE = 0, POINT = 1, LINEAR = 2.
+
+**Sky and background pass** (samplers 0, 1, and 2):
+- ADDRESSU = ADDRESSV = WRAP (1)
+- MAGFILTER = MINFILTER = MIPFILTER = LINEAR (2)
+
+**Character cel-shaded pass** (set before each draw; restored to resting state after):
+- Sampler 0 (skin texture): ADDRESSU = ADDRESSV = WRAP; MINFILTER = MAGFILTER = MIPFILTER = LINEAR
+- Sampler 1 (toon-ramp LUT): ADDRESSU = ADDRESSV = CLAMP (3); filter remains at resting POINT
+- Post-draw restore: samplers 0 and 1 are reset to MINFILTER = MAGFILTER = POINT (1), MIPFILTER = NONE (0)
+
+The toon-ramp LUT (`data/shader/toonramp.bmp`) binds to **stage 1** — closing the prior "toonramp shader sampler binding register" known unknown. The alpha-blend state for the character body is SRCALPHA (5) / INVSRCALPHA (6), identical to the world static-object blend.
+
+**Terrain / ground-tile pass:** `[debugger-confirm]` — the sky and character passes are resolved above; the dedicated ground-tile draw call was not analysed this pass. Static expectation is WRAP (terrain DDS tiles tile seamlessly across cells), but requires reading the ground-draw SetSamplerState calls or a debugger read of sampler 0 ADDRESSU/V during the terrain render.
+
+---
+
+### Texture caching and deduplication
+
+Each texture subsystem maintains its own cache to avoid redundant D3DX loads:
+
+**GTextureManager** deduplicates named textures by full VFS path string using an ordered map. On a cache hit it returns the existing GHTex pointer without a second D3DX load. On a miss it allocates a new 76-byte GHTex and wraps it in a **60-byte GTexture** reference-counted wrapper (refcount at GTexture offset +0x04), inserts both into the map, and returns the GHTex. A texture referenced under the same path by multiple systems is loaded exactly once and reference-counted.
+
+**UiTex registry** (populated by `UiTex_ParseManifest`) keys entries by integer `tex_id`. Each registry entry is a 12-byte struct holding {tex_id, GHTex pointer, running index}. The running entry count is tracked globally.
+
+**GuildCrest cache** keys entries by crest name string (one GHTex per crest file).
+
+**Terrain pool** (`TerrainPool_InitFromBgtextureLst`) builds a fixed GHTex / TexturePoolEntry array indexed directly by bgtexture.lst record number — no map deduplication is needed since record indices are stable.
+
+---
+
 ## Format status summary
 
 | Format | Status | Sample count | Confirmed use |
@@ -912,8 +1093,10 @@ aid only.
 ## Enumerations / flags
 
 No game-specific enumerations for the pixel-format assets. The client passes standard D3D9 API
-constants (`D3DFORMAT`, `D3DPOOL`, filter flags) as D3DX9 parameters. These are D3D9 SDK values
-outside the scope of this spec.
+constants (`D3DFORMAT`, `D3DPOOL`, filter flags) as D3DX9 parameters. The exact values
+used at each call site are now documented in the **Runtime texture subsystem** section above
+(per-call-site parameter table, D3DX_DEFAULT / D3DX_FROM_FILE sentinels, format constants
+A8R8G8B8 / A4R4G4B4 / R8G8B8, Pool = MANAGED, FourCC DXT2/DXT3/DXT5).
 
 For `bgtexture.lst`-specific enumerations see the `kind` byte table in the section above.
 
@@ -937,8 +1120,19 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
   dwFlags MIPMAPCOUNT|LINEARSIZE set, mip-chain file-size formula exact). UI swatches and the sampled
   DXT5 surface remain single-mip. Which specific categories ship mips is established (large char
   textures yes, small UI no); a full census is not done.
-- **D3DX9 color-key transparency:** Whether any non-zero color-key value is configured at
-  load time cannot be determined from file bytes alone.
+- **D3DX9 color-key transparency:** RESOLVED (deep-3d-2026 pass) — ColorKey = 0 at every
+  observed create site (GTextureManager, UiTex manifest, guild-crest, atlas VFS, atlas disk, FPS
+  overlay). No color-key transparency is used anywhere in the client; transparency is purely the
+  image's own alpha channel. See the Runtime texture subsystem section above.
+- **GHTexScheduler clock units:** The `idle_interval` of 180000 clock units is compared against
+  the scheduler's internal clock, which is also stamped to `last_use` by `AcquireStaticHandle`.
+  Whether this clock is milliseconds (making 180000 = 180 s) or a frame/tick count is not
+  confirmed from static analysis alone; a debugger read of the scheduler clock over time is needed.
+- **VRAM-footprint accumulator increment site — effectively resolved:** `GHTex_Unload` subtracts `vram_bytes` from the global VRAM-footprint accumulator and that is the only cross-reference to the accumulator in the entire image; no instruction writes to it additively. `GHTex.+0x44 (vram_bytes)` is zero-initialized by the constructor with no static writer found. The accumulator is therefore one-sided (decrement-only) in this build — VRAM accounting is vestigial in the shipped binary. Residual `[debugger-confirm]`: whether `+0x44` is ever non-zero at runtime (i.e. populated through an aliased write the static cross-reference view cannot resolve).
+- **Sampler ADDRESS mode — RESOLVED for world and character passes; terrain ground-tile `[debugger-confirm]`:** Sky/background pass (samplers 0/1/2): WRAP + LINEAR (MINFILTER = MAGFILTER = MIPFILTER = LINEAR, ADDRESSU = ADDRESSV = WRAP). Character cel-shaded pass: sampler 0 (skin) WRAP + LINEAR; sampler 1 (toon-ramp) CLAMP; post-draw both restored to POINT / NONE. The dedicated ground-tile draw was not read this pass — terrain is expected to use WRAP but requires a SetSamplerState read or debugger confirmation. See the Sampler states subsection in Runtime texture subsystem.
+- **Terrain GHTex MipLevels and Pool `[debugger-confirm]`:** Static bound tightened — `TexturePoolEntry_Init` does NOT call `SetD3DXLoadOptions`; terrain GHTex objects carry `options_ptr` initialised to the shared default-options block (scheduler-singleton base + fixed offset), which is BSS and all-zero in the static image. Terrain Format = D3DFMT_UNKNOWN (0, confirmed). Unlike GTextureManager / UiTex / guild-crest paths, terrain does NOT receive the explicit MipLevels=1 forcing. The default-options block's MipLevels (dword 2) and Pool (dword 4) must be confirmed by a debugger read when a `data/map000/texture/*.dds` tile first loads. If the block remains zero at runtime: MipLevels=0 and D3DX preserves the file's full mip chain; if initialized to 1, terrain matches the other cache paths.
+- **UiTex MSK sub-block semantic — RESOLVED:** The MSK sub-block is parsed byte-for-byte identically to DDS: same `<int tex_id> "<quoted path>"` two-field rows, same quote-strip, the same quality→format selector (DXT5/DXT3/DXT2), the same option block (Width=0, Height=0, MipLevels=1, Pool=MANAGED, ColorKey=0), and insertion into the same tex_id-keyed registry. At load time MSK rows receive no distinct treatment from DDS rows. The "mask" role is a naming / authoring convention only; a re-implementation loads MSK rows exactly as DDS rows. The application-level semantic (alpha companion, overlay mask) is not enforced by the loader.
+- **FPS-counter non-Ex mip asymmetry — RESOLVED:** The VFS branch calls the param-less `D3DXCreateTextureFromFileInMemory` (non-Ex variant), which accepts no Width / Height / MipLevels / Format / Pool / Filter / ColorKey arguments — D3DX applies its own defaults (full mip chain, format-from-file, MANAGED pool). The disk branch uses the Ex variant with explicit MipLevels=1 and Format=R8G8B8 (20). The asymmetry is the simpler API on the VFS path, not an intentional mip-preservation policy; it affects only `data/ui/counter.dds`.
 - **PNG alpha in higher-resolution buckets:** The tex256256 samples and the one tex10241024 sample both
   use color type 2 (RGB, no alpha). Whether any tex512512 or tex10241024 PNG uses RGBA (color type 6)
   is still UNVERIFIED — the 1024² sample inspected this pass has no alpha, but the bucket was not
@@ -948,8 +1142,7 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 - **Bigmap BMP tiles (`data/bigmap/d%sx%dz%d.bmp`):** Path template confirmed from binary
   string analysis; no bigmap tile has been sampled. Whether these match the 128×128 24bpp
   spec of `data/effect/map/` tiles is UNVERIFIED.
-- **Toonramp shader sampler binding register:** The vertex shader writes luminance to oT1.xyz,
-  implying texture stage 1; binding register in the pixel shader not confirmed.
+- **Toonramp shader sampler binding register — RESOLVED:** The toon-ramp LUT binds to **stage 1** — confirmed from the character cel-shaded pass SetSamplerState calls (sampler 1 is set to ADDRESSU=ADDRESSV=CLAMP before the draw, distinct from the skin texture at sampler 0). See the Sampler states subsection in Runtime texture subsystem.
 - **bgtexture.lst `intFlag` field:** The first integer on each `TERRAIN/BUILDING TEXTURES` line
   is read by the scene-file parser but its purpose has not been established. It is not the
   bgtexture.lst record index.
@@ -957,6 +1150,14 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 - **bgtexture.lst global pool vs per-area overrides:** The loader fills a single global pool
   with the hardcoded `data/map000/texture/` prefix. Whether any per-area override mechanism
   exists is unknown.
+- **Texture-quality config dword — dimension-shift formula RECOVERED; runtime default value `[debugger-confirm]`:**
+  The char-bucket dimension down-shift formula is statically recovered. The list-file loader reads
+  `q` from the config singleton at `dword[13]`. When `q − 1 ∈ {0,1,2,3,4}` (i.e. `q ∈ {1..5}`):
+  `W = bucketW >> ((q−1) >> 1)`, `H = bucketH >> (q >> 1)`. Outside that range, dimensions pass
+  through unchanged. The UiTex quality→format selector uses the same config dword (quality 1→DXT5,
+  2→DXT3, 0/≥3→DXT2). The runtime default value of `q` and how the in-game quality slider maps to
+  it remain `[debugger-confirm]`: read the config singleton field at a `BindPose_LoadListFromFile`
+  breakpoint to determine the actual bucket dimensions uploaded at default quality.
 
 ---
 
@@ -1009,6 +1210,16 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 9. Report the detected format, dimensions, and pixel data to `Assets.Mapping`. If an
    unrecognized format header is encountered, log the first eight bytes and report failure
    rather than attempting a blind decode.
+10. **Runtime texture create behavior (for `Assets.Mapping` and the Godot port).** The engine
+    creates all textures with D3DPOOL_MANAGED (no special device-reset handling required).
+    ColorKey = 0 everywhere — do not implement color-key keying; transparency comes solely from the
+    image's alpha channel. On the main texture paths (GTextureManager, UiTex manifest, guild-crest,
+    atlas VFS branch) MipLevels is forced to 1 — do not auto-generate mip chains for these paths.
+    Only the atlas disk-fallback and the FPS-counter VFS path preserve the file's full mip chain.
+    See the Runtime texture subsystem section for the full per-site parameter table.
+11. **Null-texture fallback.** A 2×2 BGRA (B=G=R=0x78, A=0x50) semi-transparent gray texture
+    should be bound in place of any null or unloaded texture pointer. See the Default / fallback
+    texture subsection in the Runtime texture subsystem section.
 
 ---
 
@@ -1072,3 +1283,35 @@ For `bgtexture.lst`-specific enumerations see the `kind` byte table in the secti
 > census for `data/map000/texture/` added (1127 DXT1 / 117 DXT3 / 2 DXT2 / 4 RAW / 3 anomalous of
 > 1251 total); DXT5 absent from this pool. Promoted as neutral prose; no addresses or decompiler
 > output crossed the firewall.
+
+> **Provenance — deep-3d-2026 pass (static analysis, ida_anchor f61f66a9):** promoted the
+> previously "D3DX9-delegated, params unknown" runtime layer into the new **Runtime texture
+> subsystem** section. Findings: (1) D3DX create parameter block fully recovered — Pool = MANAGED
+> and ColorKey = 0 at every observed site, resolving the prior "color-key cannot be determined"
+> known unknown; (2) MipLevels = 1 forced on all main texture paths (GTextureManager, UiTex,
+> guild-crest, atlas-VFS); only atlas-disk-fallback and the FPS-counter VFS overlay keep file mips;
+> (3) GHTex runtime object confirmed at 76 bytes with full field table (path string, present flag,
+> format_hint at +0x3C, `IDirect3DTexture9*` at +0x40, vram_bytes at +0x44, options_ptr at +0x48);
+> (4) lazy-load + idle-eviction streaming scheduler (6000-slot ring, ~1.1%/frame tick, idle threshold
+> 180000 clock units, access restamps last-use, global live-count and VRAM accumulator);
+> (5) default/fallback texture — 2×2 A8R8G8B8 (fallback A4R4G4B4) MANAGED, semi-transparent mid-gray
+> (B=G=R=0x78, A=0x50), auto-substituted for any null texture by the stage-bind wrapper;
+> (6) caching model — GTextureManager deduplicates by path with a 60-byte GTexture refcount wrapper;
+> UiTex by tex_id (12-byte entries); GuildCrest by name; (7) UI-manifest DXT variant is runtime
+> quality-driven (quality 0 → DXT5, 1 → DXT3, 2+ → DXT2). Reconciled: bgtexture.lst
+> `TexturePoolEntry` is a GHTex (same 76-byte layout, same field offsets), confirming the spec's
+> "76-byte in-memory pool entry" note and distinguishing it from the 48-byte on-disk record.
+> Promoted as neutral prose; no addresses, no decompiler output, and no copyrighted bytes crossed
+> the firewall. Open items added to Known unknowns: scheduler clock units, VRAM accumulator increment
+> site, sampler ADDRESS mode, terrain GHTex MipLevels, UiTex MSK semantic, FPS non-Ex mip
+> asymmetry. Proposed names.yaml additions: GHTex, GTexture, TexturePoolEntry,
+> Renderer_CreateDefaultTexture, GHTexScheduler.
+
+> **Provenance — deep-3d-cartography (static-only, ida_anchor f61f66a9, 2026-06-29):** dim-shift
+> formula statically recovered (W = bucketW >> ((q−1)>>1), H = bucketH >> (q>>1), q = config
+> singleton dword[13]; runtime default q value remains [debugger-confirm]); eager/lazy per-bucket
+> policy confirmed (tex10241024 = load-now=1 + timeout=0 pinned; others lazy + timeout 180000);
+> blackbmp storage at renderer +0x2B9D8 and stage-0 binding via SetTexture vtable +0x104 confirmed;
+> Known unknowns texture-quality dim-shift item tightened with recovered formula.
+
+> **Provenance — deep-3d-wave11 (static-only, ida_anchor f61f66a9, 2026-06-28):** 10 open items closed: (1) main-path Format confirmed D3DFMT_UNKNOWN (0) — render-type globals are read-only literal zero; (2) UiTex quality→format corrected (off-by-one: quality 1→DXT5, 2→DXT3, 0/≥3→DXT2; same selector for both DDS and MSK); (3) guild-crest dimensions corrected to caller-supplied (basic fallback 72×48 DXT2; prior "23×23" was the in-game crest icon size); (4) UiTex MSK semantic resolved (identical code path to DDS, same tex_id registry, same options block); (5) FPS non-Ex mip asymmetry resolved (param-less API choice, not intentional policy); (6) VRAM accumulator increment absent in static image (one-sided / vestigial; +0x44 runtime value remains debugger-only); (7–8) sampler ADDRESS and filter resolved for sky/background (samplers 0/1/2 WRAP+LINEAR) and character cel-shaded (sampler 0 skin WRAP+LINEAR, sampler 1 toon-ramp CLAMP) passes; (9) toon-ramp stage binding confirmed at stage 1; (10) terrain path confirmed to use shared default-options block (not SetD3DXLoadOptions), tightening the terrain MipLevels static bound. Added: Sampler states subsection; config-singleton quality dword range as a new known unknown. Remaining [debugger-confirm]: terrain GHTex MipLevels/Pool (BSS default-options block), scheduler clock units, runtime vram_bytes at +0x44, ground-tile sampler ADDRESS. No addresses, no decompiler output, no copyrighted bytes crossed the firewall.

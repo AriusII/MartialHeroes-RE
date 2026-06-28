@@ -10,6 +10,7 @@
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | CYCLE 14 re-anchor (f61f66a9): 5 facts re-confirmed SAME, 0 corrected. Covered facts: (1) `.ted` five-block no-header 46,987-byte layout (§5.3); (2) block-2 normals `/127.0`, block-5 diffuse `×0.5`, steep-flag `>8.0`, spacing `16.0`, cell origin `(map−10000)×1024`, 16×16 patch grid, UV step `0.25` with `s_flip`/`t_flip` (§5.2–§5.8); (3) block-3 texture-index byte stored RAW by the loader, decrement/clamp in downstream finalize only (§5.6); (4) `.map` twelve-section whitespace token parser with keyword→decoder dispatch, geometry directives present on disk but not parser-consumed (§3.1–§3.4); (5) the two `.map` parsers (VFS-path + loose-disk twin) are byte-identical, relocation confirmed at new addresses — behavior unchanged. |
+| `deep-cartography deepening` | 2026-06-29 (static-only, anchor f61f66a9) — `bgtexture.lst` on-disk stride corrected to 48 B (§4.1); sampler flat/steep paths confirmed, block-4 triangulation question resolved UV-only (§5.4a); `.sod` bulk-read file layout re-validated (§11.1); area loader file set/order/sizes re-validated (see `region_grid.md`). Open items D1–D7 tightened with new static bounds. |
 | `ida_reverified` | `2026-06-27` |
 | `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
 | `evidence`       | `[static-ida]` — loader read-path re-confirmed at relocated addresses under build f61f66a9; ~96% of functions shifted by a uniform +0x80/+0x7e (behavior unchanged). Prior anchor `263bd994` retired as canonical; f61f66a9 is now the active IDB. |
@@ -421,14 +422,30 @@ data/map000/texture/<name>.dds
 
 ### 4.1 Binary layout
 
-| Offset | Size              | Type      | Field        | Notes                                       | Confidence |
-|-------:|------------------:|-----------|--------------|---------------------------------------------|------------|
-| 0      | 4                 | u32le     | `texCount`   | Number of background texture entries; valid range 1–1999 | CONFIRMED |
-| 4      | `texCount × 1`    | u8[]      | `typeBytes`  | One type byte per entry; `1` = animated, `≥ 2` = static | UNVERIFIED (semantics) |
-| 4 + `texCount` | `texCount × 76` | record[] | `texRecords` | One 76-byte GHTex record per entry | UNVERIFIED |
+**CORRECTED (deep-cartography pass, 2026-06-29):** the on-disk record stride is **48 bytes**,
+not the prior "separate typeBytes block + 76-byte GHTex records". The loader issues exactly two
+reads: a `u32` count, then one bulk read of `48 × texCount` bytes. The 76-byte figure is the
+**in-memory `GHTex` object** (EH-vector ctor element size confirmed); it is the runtime
+heap-allocated representation and has no bearing on the on-disk format. There is no separate
+`typeBytes` block on disk — the type byte is byte +0 of each 48-byte record, copied by the
+loader into a per-entry side array at load time.
 
-**Known unknowns:** The internal layout of each 76-byte GHTex record is not yet documented.
-Only the stride (76 bytes) and the type-byte conditional are inferred from loader logic.
+| Offset | Size              | Type      | Field                  | Notes                                                              | Confidence |
+|-------:|------------------:|-----------|------------------------|--------------------------------------------------------------------|------------|
+| 0      | 4                 | u32le     | `texCount`             | Number of background texture entries; count rejected unless `1 ≤ texCount < 2000` (valid range 1–1999). | CONFIRMED |
+| 4      | `texCount × 48`   | record[]  | `BgTextureLstRecord[]` | One 48-byte record per entry; see record layout below.             | CONFIRMED  |
+
+**`BgTextureLstRecord` layout — 48 bytes per entry:**
+
+| Offset | Size | Type      | Field      | Notes                                                                                                                       | Confidence |
+|-------:|-----:|-----------|------------|-----------------------------------------------------------------------------------------------------------------------------|------------|
+| +0     | 1    | u8        | `typeFlag` | `1` = registered as animated/static render-object type; other values = non-static. Loader copies into a per-entry side array. | CONFIRMED |
+| +1     | 47   | char[47]  | `path`     | NUL-terminated CP949 relative path (max 46 usable chars + NUL). Runtime path: `data/map000/texture/<path>.dds`.            | CONFIRMED |
+
+File size formula (CONFIRMED): `4 + 48 × texCount`.
+
+**Known unknowns:** The in-memory `GHTex` object internal field layout (76 bytes, in-memory
+only — never read from disk) is not yet individually mapped. The on-disk format is fully confirmed.
 
 ### 4.2 Text companion — `bgtexture.txt`
 
@@ -451,16 +468,16 @@ shipped file and cross-checked: every resolved path exists in the VFS):
 | 2 | texture path **relative to** `data/map{area}/texture/`, **without** the `.dds` extension (e.g. `terrain/g3` → `data/map000/texture/terrain/g3.dds`; building textures use the `building/<name>` prefix) |
 
 The line count equals `texCount + 1` (header-less; index column is contiguous 0..texCount-1).
-This text companion is the preferred, robust source for the index→filename mapping (the binary
-GHTex record layout in §4.1 remains UNVERIFIED). Confidence: CONFIRMED (observed).
+This text companion is an authoring mirror of the binary `.lst` pool; the runtime load path
+uses `bgtexture.lst` (§4.1, on-disk layout now confirmed). Confidence: CONFIRMED (observed).
 
 **Full terrain texture resolution chain (CONFIRMED, observed on cell `d000x10000z9990`):**
 
 ```
 .ted TextureIndexGrid[patch]  (1-based byte, e.g. 1)
   -> .map  TERRAIN{} TEXTURES[byte-1].intTexId   (e.g. 116)
-  -> bgtexture.txt[intTexId]  relPath            (e.g. "terrain/g3")
-  -> data/map000/texture/<relPath>.dds           (exists)
+  -> bgtexture.lst[intTexId].path               (e.g. "terrain/g3")
+  -> data/map000/texture/<path>.dds             (exists)
 ```
 
 Building (`.bud`) object textures resolve identically but through the `.map` `BUILDING{}`
@@ -590,30 +607,34 @@ block 3 (texture index) has no error string. No drift from this layout.
 > grounding — those paths must use the triangle-plane method to match the original.
 >
 > **Implementation:** (1) convert world XZ to a fractional quad coordinate; (2) determine
-> which triangle (two sub-triangles per quad, split on the diagonal direction from block-4);
-> (3) solve the plane of that triangle's three vertices for Y.
-> Confidence: CODE-CONFIRMED (IDB SHA 263bd994). Cite: `// spec: Docs/RE/formats/terrain.md §5.4a`.
+> which triangle — for a flat patch, two fixed triangles from the 4 corner vertices (diagonal
+> fixed, NOT block-4-driven); for a steep patch, walk the shared static 16-bit index list over
+> all 25 patch vertices (see the RESOLVED note below for the precise split); (3) apply a downward
+> ray–triangle test (Möller–Trumbore) and evaluate Y at the nearest hit.
+> Confidence: CODE-CONFIRMED (IDB SHA 263bd994; flat/steep paths confirmed f61f66a9). Cite: `// spec: Docs/RE/formats/terrain.md §5.4a`.
 
-> **[static-hypothesis] Triangle-selection refinement (2026-06-26 — live IDB build for this
-> session differs from the pinned anchor 263bd994; behaviors build-stable, offsets pending
-> reconciliation; re-validator confirmation at G2 recommended).**
-> The implementation note above (step 2: "split on the diagonal direction from block-4") requires
-> refinement. The **runtime height sampler** does NOT consult the block-4 direction byte to
-> choose a diagonal at query time. Instead it:
-> (a) iterates **all stored triangle face records** in the 16×16 patch that covers the query point;
-> (b) applies an **axis-aligned bounding-box reject** (face's XZ AABB vs query XZ), then a **2D
-> point-in-triangle containment test** (3-edge-sign test in the XZ plane) on each survivor; and
-> (c) keeps the **maximum Y** over all containing triangles as the height result.
+> **RESOLVED (deep-cartography pass, 2026-06-29, anchor f61f66a9 — static-confirmed).**
+> The sampler paths are now precisely settled. The runtime sampler dispatches on the per-patch
+> `lod_split_flag` (see `structs/terrain_cell.md TerrainGroundSubtile +1132`):
 >
-> Block-4's role is **load-time mesh-build**: when the terrain loader populates each patch's face
-> list at cell-load time, it uses the block-4 direction byte to determine how each quad is split
-> into its two stored triangles. The runtime sampler then picks from those pre-built triangles by
-> geometric containment — it never re-reads block-4. A faithful port therefore requires two
-> independent correct behaviors: (1) **load-time triangulation** using block-4 to split each quad
-> into the correct pair of triangles, and (2) a **runtime sampler** that iterates the stored face
-> list and returns the maximum-Y containing triangle's plane Y. Whether the `.ted` loader actually
-> uses block-4 for this triangulation (vs. another criterion) was not confirmed in the session that
-> produced this note and remains open — see `Docs/RE/specs/entity_placement.md §7.2`.
+> - **Flat patch** (`lod_split_flag == 0`): tests exactly **two fixed triangles** formed from the
+>   four corner vertices of the 5×5 patch grid. The two triangles share the fixed diagonal:
+>   triangle A = (corner v0, corner v4, corner v20) and triangle B = (corner v20, corner v4,
+>   corner v24), where corner indices reference `TerrainGroundSubtile` vertex array positions at
+>   byte offsets +4, +180, +884, and +1060 within the subtile. The diagonal is **fixed** —
+>   independent of block-4.
+> - **Steep patch** (`lod_split_flag == 1`): walks a **single process-wide shared 16-bit index
+>   buffer** (3 indices per triangle, 6-byte stride per triangle, describing the 4×4×2 full
+>   topology over all 25 patch vertices). The buffer is constructed once per process and reused
+>   by every patch in every cell.
+> - **Both paths** apply a **downward ray–triangle test (Möller–Trumbore)**, keeping the nearest
+>   positive ray-parameter hit as the ground Y.
+>
+> **Block-4's role is load-time UV S/T flip ONLY** (§5.7 `s_flip`/`t_flip`). The runtime sampler
+> does **not** consult block-4 to choose a triangulation diagonal, and the flat-patch diagonal is
+> fixed regardless of block-4 bits. The earlier sub-note speculating "whether block-4 also
+> re-selects the triangulation diagonal" (prior `[static-hypothesis]`) is **REFUTED**. See also
+> §5.9 and §14 #3.
 
 ### 5.5 Block 2 — Vertex normals
 
@@ -742,9 +763,10 @@ block 3 (texture index) has no error string. No drift from this layout.
   (tile uses `texlist[byte − 1]`; a byte `< 1` or `> count` floors to slot 1; NOT a no-texture
   sentinel — that reading is REFUTED). The `− 1` is on the `.ted` byte ONLY; the `.map` `intTexId` is
   stored raw and the pool accessors apply no `− 1`. No open sub-question remains for the decrement site.
-- Block 4 flag mapping: RESOLVED for texture orientation — bit `0x01` mirrors S (U), bit `0x02`
-  mirrors T (V) (§5.7). Open (PARTIAL): whether a flip combination also re-selects the quad
-  triangulation diagonal rather than only re-orienting the texture.
+- Block 4 flag mapping: **FULLY RESOLVED** — UV S/T orientation only: bit `0x01` mirrors S (U),
+  bit `0x02` mirrors T (V) (§5.7). The runtime sampler does NOT use block-4 to select a
+  triangulation diagonal. Flat-patch diagonal is fixed (corner v0/v4/v20/v24); steep-patch
+  topology is the shared static index buffer. No remaining sub-question. See §5.4a.
 - Block 5 alpha: RESOLVED — the A byte is alignment padding, always 0, never read (§5.8). The 2×
   store / 0.5× load scaling is code-confirmed but stays sample-unverified until a tinted (non-white)
   tile is captured.
@@ -1107,12 +1129,13 @@ overwritten at runtime with a heap pointer.
 File size formula (all three samples verified with zero remainder):
 
 ```
-file_size = 4 + solidCount × (108 + 4 + quadCount × 48)
+file_size = 4 + solidCount × 108 + Σᵢ (4 + quadCount_i × 48)
 ```
 
-Worked sample sizes (zero remainder): a 1-solid / 4-quad cell is `4 + (108 + 4 + 4 × 48) = 308`
-bytes; a 1-solid / 3-quad cell is `4 + (108 + 4 + 3 × 48) = 260` bytes. Both match their samples
-exactly.
+where `quadCount_i` is the quad count of the i-th solid (read as a separate `u32` per solid after
+the bulk SolidRecord array). For a single solid with `n` quads: `4 + 108 + 4 + n×48`. Worked
+sample sizes: a 1-solid / 4-quad cell = `4 + 108 + (4 + 4×48) = 308` bytes; a 1-solid / 3-quad
+cell = `4 + 108 + (4 + 3×48) = 260` bytes. Both match their samples exactly.
 
 ### 11.2 SolidRecord — 108 bytes (0x6C)
 
@@ -1316,9 +1339,10 @@ The following items remain unverified and represent the highest-risk unknowns fo
    reading is REFUTED). The `− 1` is on the `.ted` byte ONLY; the `.map` `intTexId` is stored raw and
    the pool accessors apply no `− 1`. A faithful parser stores the raw byte and does NOT decrement/clamp.
 
-3. **`.ted` block 4 bit-to-geometry mapping:** RESOLVED for texture orientation — bit `0x01`
-   mirrors S (U), bit `0x02` mirrors T (V) (§5.7). Remaining sub-question (PARTIAL): whether a flip
-   combination also re-selects the quad triangulation diagonal versus only re-orienting the texture.
+3. **`.ted` block 4 bit-to-geometry mapping:** **FULLY RESOLVED** — UV orientation only (bit
+   `0x01` mirrors S, bit `0x02` mirrors T; §5.7). The runtime sampler does not consult block-4
+   for triangulation; flat-patch diagonal is fixed, steep-patch uses the shared static index
+   buffer. No open sub-question remains. See §5.4a.
 
 4. **`.ted` block 5 alpha and 2× encoding:** Alpha byte RESOLVED — it is 4-byte alignment padding,
    always 0, never read (§5.8). The 2× store / 0.5× load scaling is code-confirmed; it stays
@@ -1341,7 +1365,9 @@ The following items remain unverified and represent the highest-risk unknowns fo
 
 9. **`.gad` format:** Loader is a no-op stub; purpose and format entirely unknown.
 
-10. **`.bgtexture.lst` GHTex record layout (76 bytes):** Only the stride is confirmed.
+10. **`.bgtexture.lst` on-disk record layout:** **RESOLVED** — the on-disk record is **48 bytes**
+    (`{ u8 typeFlag; char[47] path }`, NUL-terminated CP949). File size: `4 + 48 × texCount`.
+    The 76-byte figure was the in-memory `GHTex` object, never an on-disk record. See §4.1.
 
 11. **`.mud` `pad0`/`pad1` purpose:** Always zero with no observed read in available samples.
 

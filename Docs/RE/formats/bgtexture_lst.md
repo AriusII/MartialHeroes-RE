@@ -218,12 +218,18 @@ static ground).
 | 0x0C |  12 | `KIND_TREE_BARK`  | Tree-bark / trunk patch                                          |
 | 0x14 |  20 | `KIND_FOLIAGE`    | Dense tree foliage, branches, canopy                            |
 
-- **Runtime pool dispatch (binary, CODE-CONFIRMED; CYCLE 1).** At load time the `kind` byte gates a
-  **single binary branch** that decides which of **two** engine-wide render-object descriptor types
-  each record's in-memory pool entry carries: **`kind == 0x01`** wires the **STATIC** render-object
-  type (a plain static ground-texture object — the default and majority); **any** `kind != 0x01`
-  wires the **NON-STATIC** render-object type (the scroll / animated material family). The loader's
-  branch only distinguishes "is it 1 or not".
+- **kind == 0 → record SKIPPED, no pool entry created (CODE-CONFIRMED, deep-3d-cartography pass).**
+  The loader's loop body is gated on `kind != 0`: any record whose `kind` byte is zero is skipped
+  entirely and contributes no in-memory pool entry. No kind=0 records are present in either shipped
+  instance. This gate fires before the static/non-static dispatch described below.
+- **Runtime pool dispatch (binary, CODE-CONFIRMED; CYCLE 1).** For records that pass the kind≠0
+  gate, a **single binary branch** decides which of **two** engine-wide render-object descriptor types
+  each pool entry carries: **`kind == 0x01`** wires the **STATIC** render-object type (a plain static
+  ground-texture object — the default and majority); **any** `kind != 0x01` wires the **NON-STATIC**
+  render-object type (the scroll / animated material family). Both descriptor types are zero-valued
+  globals in the shipped binary (the render-type global serving as the format argument is a read-only
+  literal zero for both paths); the distinction is meaningful only by symbol identity to downstream
+  renderer consumers. The loader's branch only distinguishes "is it 1 or not".
 - **The 6-value enum is DATA-ONLY and is never re-branched in the loader (CONFIRMED, CYCLE 1).** A
   full scan of the loader found **exactly one** comparison against the kind byte (the `==1` test);
   there is **no** per-value branch (nothing tests 2 / 0x0A / 0x0B / 0x0C / 0x14) and **no jump table**
@@ -304,3 +310,9 @@ static ground).
   family/per-kind spec (e.g. `manifests_lst.md`); they are out of scope for this `bgtexture`-only
   spec and are only referenced here for orientation. No addresses or decompiler output crossed the
   firewall.
+- **deep-3d-cartography (2026-06-29, static-only, ida_anchor f61f66a9):** kind==0 skip confirmed —
+  the loader loop body is gated on `kind != 0`; kind=0 records produce no pool entry (added to
+  §Enumerations dispatch bullet). Confirmed both render-type descriptor globals are zero-valued in
+  the shipped binary (read-only literal zero); the static/non-static dispatch is distinguishable
+  only by symbol identity downstream, not by value. No layout drift; all prior offsets, strides, and
+  formulae re-confirmed. No addresses or decompiler output crossed the firewall.

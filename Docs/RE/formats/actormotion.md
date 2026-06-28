@@ -12,6 +12,7 @@ ida_reverified: 2026-06-27; re-verified against doida.exe IDB SHA f61f66a9ae0ec1
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
+deep_cartography_deepening: 2026-06-29 — 33-col → 136B read order re-confirmed byte-for-operand on f61f66a9 (no drift); idle dispatch at read site re-confirmed: kind 0 → record+0x44 (a[1], col16), kind 1 → record+0x58 (a[6]); mixer embed offset actor+0x524 re-confirmed; categoryBase[] access shape pinned as member array indexed (u8)(col0+1) on the AnimCatalog singleton, literal values still unresolved (not in VFS tables); no layout corrections required.
 -->
 
 > **Verification banner.** `confirmed-by-use-site` · `sample-verified` · `ida_reverified: 2026-06-27`

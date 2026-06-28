@@ -18,16 +18,38 @@ verification:
     - device-ambient re-applied on slider move / per-frame byte-base change / end of light load
     - fog colour byte-domain lerp, ARGB alpha forced 0xFF, pushed via render-state token 34
     - fog data_load_flag==0 → synthesize 48 keyframes from sky-LUT via high·0.75 + low·0.25
-    - fog mode LINEAR: far = s·3.0, near-recip = 1/s, enabled when s>0 (per-keyframe section-C scalar)
+    - fog mode LINEAR: far = s·3.0, near-recip = 1/s, enabled when s>0 (per-keyframe section-C scalar) — these values are written to EnvironmentLightScene node fog fields (+156/+168); device FOGSTART/FOGEND are derived from fog.bin fractions × terrain stream radius by Fog_ApplyForViewDistance (see §3.6 and §6.2a)
     - device-ambient render-state token = 139; fog-colour render-state token = 34
     - OPTION_BRIGHT at options-struct offset +116 (field index 29); cached offset reused per frame
     - per-area env files keyed by the current-area-id global
+    - EnvironmentLightScene (hub) full struct layout recovered: ambient sub-obj +0 (184 B), directional +184 (184 B), five point-light sub-objects +368 (stride 184), keyframe tables at +1424/+3776/+6128/+6320/+6512, live output slots +6736/+6784, device-ambient BGRA cache +6832, OPTION_BRIGHT offset cache +6845 (see §3.3)
+    - fog enabled ONLY on terrain+buildings render pass; all other passes (sky, opaque-world, transparent, characters, actors, shadow, UI, actor-preview) call FOGENABLE=28→0 at pass head (see §6.2c)
+    - D3D render-state tokens added: FOGENABLE=28, LIGHTING=137, ZENABLE=7, ALPHATESTENABLE=15→0, ALPHABLENDENABLE=27→0 (supplements existing confirms of 34 / 139)
+    - IDirect3DDevice9 vtable offsets confirmed: SetTransform+176, GetTransform+180, SetMaterial+196, SetRenderState+228, SetTexture+260, SetTextureStageState+268, SetSamplerState+276 (see §6.7)
+    - point-light runtime: ≤5 dynamically selected per frame (nearest within 1024-unit radius), D3DLIGHT9 colour scaled by per-keyframe master-intensity scalar, toggled at 0.1 threshold, weather flicker ramp modulates range/attenuation (see §3.4)
+    - device-ambient per-frame channel = base_byte + offset_byte with byte truncation (not saturating min); with default base (0,0,0) equivalent to min(255) — sharpens §6.2a
+    - EnvironmentLightScene_ctor: ambient base byte table initialised to (0,0,0)/0xFF; BGRA cache (+6832–+6834) zeroed; alpha (+6835) = 0xFF; OPTION_BRIGHT offset cache (+6845) = 0; point-light index slots (+1380) = −1; directional enable flag = 0
+    - shared fog/range setter is a single routine (guard 0 < s < 1.02e38; far=s×3, near=1/s, density=0, LINEAR mode) reused by point-light attenuation and weather flicker ramp
+    - lighting-manager constructor zeroes the ambient base to (0,0,0) — CONFIRMED this pass (promoted from static-hypothesis)
+    - SkySystem_UpdatePerFrame is the env per-frame driver; the env update is interval-gated (not every raw frame): fires when elapsed time >= per-object-interval × time-scale; update order: clouds → sun billboard → moon billboard → stars → material → Light_PerFrameApply → Fog_ApplyAfterLoad → store last-update time
+    - GLight scene nodes are frustum-culled and enqueued into a per-view drawable list during cull traversal (GLight vtable slot 6 → enqueue helper); SetLight/LightEnable are pushed later in the per-view draw-traverse (Diamond_GCull__drawTraverse), draining the list — not inline during cull
+    - device vtable: SetLight = +204 (single site, Renderer_SetDeviceLight); LightEnable = +212 (enable glue TRUE / disable glue FALSE); device light index = drawable list position (not a fixed slot)
+    - FOGCOLOR(34) is pushed per env-interval frame inside Fog_ApplyAfterLoad (not only at scene-graph draw time); byte-lerps B/G/R from the fog colour table, alpha forced 0xFF; the result is also mirrored into the render-view descriptor
+    - two cached device-pointer paths exist in the client (both resolve to the same IDirect3DDevice9 at runtime): a renderer-composite path (AMBIENT/FOGENABLE/SetLight/LightEnable/terrain pass) and a direct device-pointer path (FOGCOLOR/characters/sky/shadow/UI/previews); a 1:1 port treats them as one device
+    - GCull_ApplyRenderStateSet is the 18-slot dispatcher for fog and lighting render-state commits; each slot node applies via vtable+8; GRSFog occupies one slot (GRenderState index 16) — its vtable+8 apply body commits FOGVERTEXMODE(140)=3(LINEAR), RANGEFOGENABLE(48)=1, FOGSTART(36), FOGEND(37), FOGCOLOR(34) on the LINEAR branch; FOGTABLEMODE(35) never written; type=4 default is no-op (see §3.6, §8 item 13 — CLOSED wave-11)
+    - directional and ambient direction globals are write-only (single writer, zero static readers — same inert pattern as K_ambient); the live directional reaching the device is the GLight node's own D3DLIGHT9 block via the collection/draw-traverse path
+    - shared fog/range setter confirmed: writes node attenuation fields only (no device call); marks node dirty via vtable+36; same fields reused for ambient-subobject fog range and point-light attenuation
+    - wave-11 atmosphere/fog deep-dive: FOGVERTEXMODE(token 140) = D3DFOG_LINEAR(3); RANGEFOGENABLE(token 48) = 1 (radial/range fog); FOGTABLEMODE(token 35) never written by any fog path — GRSFog apply, Fog_ApplyForViewDistance, or otherwise
+    - GRSFog node struct (GRenderState index 16): type +0x2C (i32, ctor default 4 = disabled/no-op sentinel; 0=disable, 3=LINEAR), colour +0x30 (4×u8 BGRA, ctor white opaque), start +0x34 (f32, ctor 0.0), end +0x38 (f32, ctor 9728.0), density +0x3C (f32, ctor 1.0), range-fog-enable +0x40 (u8, ctor 0); EXP(1)/EXP2(2) apply branches exist in the handler body but are unreachable: default type is 4 (inert) and no recovered writer sets it to 1 or 2
+    - Fog_ApplyForViewDistance is the dominant in-world device fog push: device FOGSTART(36) = start_frac × stream_radius × scale − start_bias; device FOGEND(37) = end_frac × stream_radius − end_bias; FOGVERTEXMODE(140) = 3; RANGEFOGENABLE(48) = 1; stream_radius is the terrain sight/streaming radius driven by Terrain_SetStreamRadius; start_bias and end_bias initialise to 0.0 with no observed writer
+    - fog%d.bin layout (wave-11 pinned): start_frac f32 +0x00; end_frac f32 +0x04; data_load_flag i32 +0x08; colour_table 48×4-byte BGRA +0x0C (192 B, only when data_load_flag≠0); total 204 B when colour present; loaded by Fog_InitFromBin called from SkySystem_Init
+    - height fog CLOSED NEGATIVE: no Y/altitude term exists in any fog path; RANGEFOGENABLE=1 makes fog a radial camera distance (eye-space position length), never a function of world Y; no height-fog render state, threshold, or second fog band exists
+    - fog-singleton struct (wave-11 recovered): computed far +0x00 (f32), computed near +0x04 (f32), start_bias +0x08 (f32, always 0), end_bias +0x0C (f32, always 0), BGRA colour table +0x10 (48×4 B), start_frac from fog.bin +0xD0 (f32), end_frac from fog.bin +0xD4 (f32), view distance +0xD8 (f32, default 1000.0), scale +0xDC (f32, default 1.0)
   sample-verified:         # read verbatim from a real VFS file (no IDA needed for the value)
     - display.lua DISPLAY_BASE_BRIGHT_MULTI = 1.05 (world/background geometry brightness, y=1.05·x+0)
     - display.lua DISPLAY_LIGHT_RATIO = 0.5 (CHARACTER light-colour correction only, range 0..1)
   static-hypothesis:       # single static inference, not yet control-flow-tight
     - exact fallback direction numerals (-7, 7, 20) — fallback dwords present, not byte-decoded this pass
-    - lighting-manager constructor zeroing the ambient base to (0,0,0) — carried, not re-read this pass
     - indoor suppression mechanism + indoor fog behaviour — outside this pass' anchor set
     - display.lua apply-path: which render stage / D3D state / shader constant each display.lua
       brightness scalar multiplies into — IDA-PENDING (the dirty IDA lane crashed before recovering
@@ -36,7 +58,8 @@ verification:
     - on-screen ambient pixel colour at default brightness (the math proves white; the pixel does not)
     - matrix major-order / up-axis / unit scale
     - whether a player's saved DoOption.ini carries a brightness below 100
-  ida_reverified: 2026-06-27    # CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-24 CYCLE 12 audit (2026-06-24, 263bd994): DisplayConfig_ParseFramerate confirmed as the display.lua loader (§9.1); OPTION_BRIGHT read/write confirmed (§6.2a). Prior CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
+  atm_deep_pass: 2026-06-29   # atmosphere deep-cartography deepening pass: g_EnvTimeBlock struct layout added (§2.5, 7 fields confirmed statically); time-scale seed remains [debugger-confirm]
+  ida_reverified: 2026-06-28    # wave-11 atmosphere/fog deep-dive (f61f66a9): §8 item 13 CLOSED — FOGVERTEXMODE(140)/D3DFOG_LINEAR(3)/RANGEFOGENABLE(48)=1 confirmed; FOGTABLEMODE(35) never written; GRSFog node struct + vtable+8 apply branches recovered; Fog_ApplyForViewDistance device fog formula (fog.bin fractions × stream radius) pinned; s×3.0/1/s are EnvironmentLightScene node fog fields only; height fog CLOSED NEGATIVE; EXP/EXP2 unreachable (GRSFog type-4 default, no writer); fog-singleton struct recovered; fog%d.bin layout pinned. Prior pass same date — lighting-apply closeout (f61f66a9): SkySystem_UpdatePerFrame interval gate + env update order confirmed; GLight cull-collect → draw-traverse device push chain recovered; SetLight +204 / LightEnable +212 vtable offsets pinned; Fog_ApplyAfterLoad per-frame FOGCOLOR push + render-view mirror confirmed; GCull_ApplyRenderStateSet 18-slot RS dispatcher identified (narrows §8 item 13); two device-handle paths documented; directional direction globals confirmed write-only. Prior same date: deep-3d pass (f61f66a9): EnvironmentLightScene full struct layout + point-light runtime system + per-pass fog enable map + D3D render-state/vtable tokens recovered; device-ambient byte-add mechanism confirmed; ctor zeroing confirmed. Prior: 2026-06-27 CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-24 CYCLE 12 audit (2026-06-24, 263bd994): DisplayConfig_ParseFramerate confirmed as the display.lua loader (§9.1); OPTION_BRIGHT read/write confirmed (§6.2a). Prior CYCLE 12 (2026-06-22, 263bd994): DISPLAY_BASE_BRIGHT_MULTI=pixel-shader c0; GLOW_BRIGHT_MULTI=c1; DISPLAY_LIGHT_RATIO confirmed DEAD on world-geometry path — see §9.2/§9.4. CYCLE 11 World block (263bd994): in-world fog config (range=s×3, near=1/s, LINEAR, enabled s>0) and the closed-form trig sun/moon orbit (seconds-of-day; not a stored track or log curve) folded in. Prior (2026-06-21): ASSET-FIDELITY re-confirmed water RESOLVED-NEGATIVE, ambient floor (OPTION_BRIGHT/100)*255 with K_ambient=0, device-ambient render-state token 139, quality-mode sky LIGHT-RATIO {mode1 0.25 / mode2 0.7 / else 2.0}; CYCLE 7 (2026-06-20) static re-walk of env/lighting constants
   ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
   readiness: IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
   evidence: [static-ida, sample-vfs]
@@ -45,7 +68,7 @@ verification:
     - per-area sky LIGHT-RATIO scalar is quality-mode-dependent {mode1→0.25, mode2→0.7, else→2.0} (§6.6) — distinct from display.lua DISPLAY_LIGHT_RATIO (default 1.0)
     - light synth fallback (missing light.bin): scale 80.0, ramp intensity = kf_idx × 0.04 (=1/25) clamped, colour = 1.0 − intensity, 48 day/night keyframes (§7)
     - material synth fallback (missing material.bin): ambient 0.30000001, diffuse 0.8, specular/emissive 0.0 (§7) — material colour table is a flat 9792-byte float blob
-    - char-select env builds area 0 at PINNED time ≈ 14:30 → fog keyframe 29; fog suppression for the preview row is OPEN/DBG-pending (§6.4a) — NOT statically settled
+    - char-select env builds area 0 at PINNED time ≈ 14:30 → fog keyframe 29; fog suppression for the preview row is OPEN/DBG-pending (§6.4a) — NOT statically settled (resolved by Addendum)
     - REFUTED (HIGH): the "ambient ×3 multiplier" is NOT a doida.exe constant — real floor = (OPTION_BRIGHT/100)×255 (§6.2a); the ×3 is port-side
     - the apparent "×0.5 chain" in the display char-brightness reader is a reused-FP-stack-slot decompiler artifact, NOT a real halving (§9.6)
 -->
@@ -223,6 +246,38 @@ mapping is consistent across all sampled areas:
 The stardome/clouddome 12-frame mapping divides the same 86 400 ms window into 12 × 7200 ms
 steps (one step ≈ 2 simulated hours).
 
+### 2.5 g_EnvTimeBlock — day/night clock runtime object
+
+`g_EnvTimeBlock` is the singleton that drives the day/night clock. It is a local wall-clock
+accumulator; no server writer exists. All keyframe interpolators in §2.2 read the
+seconds-of-day field to derive the current keyframe pair and fractional blend weight.
+
+**Layout (atmosphere deep-cartography pass 2026-06-29, 100% static):**
+
+| Field offset | Size | Type | Description |
+|:------------:|:----:|:----:|-------------|
+| +0x00 | 4 B | i32 | Day counter (increments when seconds-of-day wraps past 86 400) |
+| +0x04 | 4 B | f32 | Seconds-of-day (TOD accumulator, range 0–86 400) |
+| +0x08 | 4 B | f32 | Time-scale multiplier — `[debugger-confirm]` for the numeric seed value |
+| +0x0C | 4 B | f32 | Millisecond accumulator (residual below 1 ms boundary) |
+| +0x10 | 4 B | u32 | `timeGetTime` anchor (last captured wall-clock tick, ms) |
+| +0x14 | 4 B | i32 | Pause flag (non-zero = clock frozen; only the frame-delta is held back) |
+| +0x18 | 4 B | f32 | Last-frame delta (ms, stored even when paused, used to drain accumulator) |
+
+**Advance mechanism:** each env update tick calls `timeGetTime`, subtracts the anchor at
++0x10, scales by the time-scale multiplier at +0x08, and adds the result to the ms
+accumulator at +0x0C. Whole millisecond ticks drain the accumulator and are added to the
+seconds-of-day field at +0x04. When +0x04 reaches or exceeds 86 400 the day counter at
++0x00 is incremented and +0x04 wraps.
+
+**Static callers:** `EnvTime_Set` has exactly two static call-sites: area-load initialisation
+and the developer time-of-day dialog. No network-layer writer exists; the clock is entirely
+client-local.
+
+**Remaining open item:** the numeric seed written to the time-scale field (+0x08) by
+`EnvTime_Set` at area-load time — `[debugger-confirm]` required to read the live value; the
+static operand is a memory reference that was not byte-decoded in this pass.
+
 ---
 
 ## 3. Area environment assembly
@@ -253,7 +308,9 @@ environment files loaded outside the hub.)
 
 ### 3.2 Per-frame update
 
-Each game tick (or each rendered frame):
+The environment system entry point is `SkySystem_UpdatePerFrame`. The update runs on an **interval gate** — not every raw rendered frame: it fires only when elapsed time since the last update meets or exceeds a per-object interval factor scaled by the global time-scale. Sub-systems advance in a fixed order within each triggered update: cloud dome → sun billboard → moon billboard → stars → material colours → `Light_PerFrameApply` (keyframe sampling for directional, ambient, fog scalar, and device ambient) → `Fog_ApplyAfterLoad` (per-frame FOGCOLOR device push — see §6.2a) → store last-update timestamp.
+
+The per-update computation is:
 
 1. Advance `t_ms` by elapsed wall-clock time.
 2. Compute `kf_index`, `frac`, `kf_next` (§2.2).
@@ -278,6 +335,157 @@ Each game tick (or each rendered frame):
 > orbit angle 217.5°; the directional-light direction is the negated sun position. The moon is a flat
 > circle (no depth-axis component); only the sun carries a depth-axis term.
 > See `Docs/RE/formats/sky.md §D.2` for the full orbit spec.
+
+### 3.3 EnvironmentLightScene — hub object struct layout (CONFIRMED)
+
+The environment hub is a single object whose full struct layout is recovered. All offsets are in bytes from the hub's base pointer. Sub-objects occupy the low range; per-keyframe tables occupy the middle range; live output slots and caches occupy the high range.
+
+| Byte offset | Size | Field |
+|---|---|---|
+| +0 | 184 | Ambient light sub-object (base class). Software-enable flag at sub-object +76. |
+| +56 | 1 | Scene-graph dirty-bit (slot 9; propagates invalidation to parent nodes). |
+| +156 | 4 | Fog far distance (float32; written as `s × 3.0` by the shared range-setter). |
+| +160 | 4 | Range scale (float32; default 1.0). |
+| +164 | 4 | Constant 1.0 field. |
+| +168 | 4 | Fog near scale (float32; written as `1.0 / s`). |
+| +172 | 4 | Fog density (float32; always written as 0.0 on the LINEAR path). |
+| +184 | 184 | Directional light sub-object. Software-enable flag at hub+260. |
+| +368 | 5 × 184 | Five point-light sub-objects (slots at +368, +552, +736, +920, +1104). Each slot's software-enable flag is at slot+76. |
+| +1288 | — | Scene-node group (the light group attached to the scene graph). |
+| +1380 | 5 × 4 | Active point-light index array (value −1 = empty slot). |
+| +1400 | 4 | Point-light data base pointer (external array of 60-byte records; set at light-load time). |
+| +1404 | 4 | Point-light count (number of records at the base pointer). |
+| +1408 | 4 | Point-light selection radius; value **1024.0** (float32). |
+| +1412, +1416, +1420 | 4 each | Cached player position (X, middle axis, Z) for change-detection; initialised to −FLT_MAX. |
+| +1424 | 48 × 48 | Directional light colour keyframe table (three vec4 records per keyframe: diffuse / specular / ambient). |
+| +3728 | 48 × 1 | Directional per-keyframe enable bytes. |
+| +3776 | 48 × 48 | Ambient light colour keyframe table (three vec4 per keyframe). |
+| +6080 | 48 × 1 | Ambient per-keyframe enable bytes. |
+| +6128 | 48 × 4 | Fog scalar `s` keyframe table (each value drives `far = s × 3.0`, `near = 1.0 / s`). |
+| +6320 | 48 × 4 | Point-light master intensity keyframe table (toggle threshold 0.1). |
+| +6512 | 48 × 4 | Ambient base BGRA byte keyframe table; default `(0, 0, 0, 0xFF)` per slot. |
+| +6736 | 3 × 16 | Live directional colour output slots (diffuse / specular / ambient). |
+| +6784 | 3 × 16 | Live ambient colour output slots (interpolated × `K_ambient`). |
+| +6832–+6834 | 3 | Device-ambient BGRA byte cache (B, G, R). |
+| +6835 | 1 | Device-ambient alpha cache (0xFF). |
+| +6836 | 4 | Fog scalar change-detect cache (sentinel initialised to 5.0). |
+| +6840 | 4 | Point-light intensity change-detect cache. |
+| +6844 | 1 | Point-light dirty flag (set to 1 on selection rebuild). |
+| +6845 | 1 | Cached `OPTION_BRIGHT` additive offset (0–255; initialised to 0 at construction). |
+
+**Constructor initialisation (CONFIRMED).** The hub constructor sets: ambient base byte table (+6512 series) to `(0, 0, 0, 0xFF)` per slot; BGRA cache (+6832–+6834) to zero; alpha cache (+6835) to `0xFF`; fog scalar cache (+6836) to 5.0; point-light index slots (+1380) to −1; point-light dirty flag (+6844) to 0; `OPTION_BRIGHT` offset cache (+6845) to 0; directional software-enable (+260 relative to hub base) to 0.
+
+### 3.4 Point-light runtime system (CONFIRMED)
+
+The shipping client supports up to **five** simultaneously active point lights per area. This system was not previously documented in this spec.
+
+**Data source.** Point-light definitions are loaded from `point_light{id}.bin` as a sub-step of the per-area light loader (§3.1 step 8). The records are held at the pointer at hub+1400 with the count at hub+1404. If the file is absent or the count is zero, no point lights are active for that area.
+
+**Per-frame selection.** Each frame a selection routine picks up to five of the loaded point lights within a **1024-unit radius** (hub+1408) of the local player's current world position. Re-selection runs only when the player has moved past the cached-position threshold (hub+1412/+1416/+1420); when a rebuild occurs, the five-entry index array (hub+1380) is updated and the dirty flag (hub+6844) is set to 1.
+
+**Per-frame intensity scale.** The per-frame lighting driver (`Light_PerFrameApply`) samples a **point-light master intensity** scalar from the 48-keyframe table at hub+6320 using the standard `lerp(table[kf], table[kf_next], frac)` model. When the interpolated value differs from the cache at hub+6840:
+
+- Each selected point light's D3DLIGHT9 colour (diffuse / specular / ambient RGB channels × intensity, fourth component 1.0) is rebuilt.
+- If intensity ≥ **0.1**, the lights are enabled; if intensity < 0.1, they are disabled.
+
+**Weather flicker ramp.** A separate weather routine runs a bouncing scalar ramp using a 20-entry per-step speed table. For each active point light it calls the shared fog/range setter with `(light_value − ramp × 0.3)` — modulating point-light range/attenuation to produce a flicker effect. This is a point-light range flicker, not a fog visibility change.
+
+**Enable/disable mechanism.** The software-enable flag at each point-light slot+76 is toggled by the intensity gate. The actual D3D `LightEnable` device call occurs during the per-view draw-traverse (see §3.5), not in the per-frame intensity routines.
+
+**Debugger-confirm residual.** Whether any of the current sampled areas carries a non-zero point-light count at hub+1404 is not yet live-confirmed — count 0 is plausible for the demo areas.
+
+### 3.5 GLight collection and device push chain (CONFIRMED)
+
+The client uses a two-stage deferred approach for scene lights: **collect during cull, push during draw-traverse**.
+
+**Stage 1 — frustum-cull and collection.** During the scene-graph cull traversal each `GLight` scene node runs its render/collect vtable slot (slot 6). This routine tests the light sphere against the view frustum; if the light passes, it enqueues an entry into the per-view drawable list via a list-append helper. The entry records the node's world-to-camera matrix and a pointer to the light node. Lights that fail the frustum test are not enqueued and produce no device call that frame.
+
+**Stage 2 — draw-traverse device push.** After culling, the per-view draw loop (`Diamond_GCull__drawTraverse`) drains the collected light list. For each entry at list position `idx` (0, 1, 2, …) the loop calls `GCull_ApplyDrawableLight` to perform three device operations:
+
+1. `SetTransform(D3DTS_WORLD = 256, world_matrix)` — positions the light in world space (device vtable +176).
+2. If the node's lighting-enable flag (node field +76) is set: `Renderer_SetDeviceLight` pushes the node's resident D3DLIGHT9 block → `device.SetLight(idx, &light_block)` (device vtable +204).
+3. `LightEnable(idx, flag)` — enables or disables device light slot `idx` according to the same flag (device vtable +212).
+
+The **device light index equals the drawable's list position** (`idx` = 0, 1, 2, …), not a pre-assigned fixed slot. The maximum simultaneous lights equals the count of scene lights that pass frustum culling up to the hardware limit.
+
+**Render-state set apply.** After draining the light list, `GCull_ApplyRenderStateSet` applies the cull pipeline's accumulated 18-slot render-state set. Each slot node invokes its `vtable+8` apply handler. The `GRSFog` slot's `vtable+8` apply handler commits fog render-state tokens to the device. On the LINEAR branch (type = 3) it pushes: `FOGVERTEXMODE` (token 140) = `D3DFOG_LINEAR` (3); `RANGEFOGENABLE` (token 48) = 1; `FOGENABLE` (token 28) = 1; `FOGCOLOR` (token 34, from node colour field); `FOGSTART` (token 36, from node start field); `FOGEND` (token 37, from node end field). `FOGDENSITY` (token 38) is pushed only on the EXP/EXP2 branches (unreachable on the recovered config). `FOGTABLEMODE` (token 35, pixel fog) is never written by this handler. See §3.6 for the complete GRSFog node struct and branch table, and §8 item 13 (CLOSED).
+
+> **Debugger-confirm residual.** The D3DLIGHT9 block that `Renderer_SetDeviceLight` reads from the light node (at node field +80) and the D3DLIGHT9 block that the per-frame point-light builder writes (at a different field in the point-light sub-object) share the same device slot. Whether the node-field block aliases the builder block or is a separate copy is not yet confirmed statically. Confirm via a debugger read of both field offsets at a breakpoint inside the draw-traverse — never `dbg_start`.
+
+---
+
+### 3.6 GRSFog node struct, apply branch logic, and device fog distance formula (wave-11 deep-dive)
+
+This section records the wave-11 atmosphere/fog deep-dive results that close §8 item 13 and pin the full fog render-state model. All values below are statically confirmed against IDB SHA f61f66a9.
+
+#### GRSFog node struct fields (byte offsets from node base)
+
+`Diamond::GRSFog` is a `GRenderState` scene node, occupying **GRenderState index 16** in the 18-slot set that `GCull_ApplyRenderStateSet` drains. It is built into the default scene render-state set.
+
+| Byte offset | Type | Field | Constructor default |
+|---|---|---|---|
+| +0x2C (44) | i32 | **fog type** (D3DFOGMODE: 1=EXP, 2=EXP2, 3=LINEAR; 4=client-internal disabled sentinel) | **4 (disabled / no-op)** |
+| +0x30 (48) | 4×u8 BGRA | fog colour | white opaque (0xFF, 0xFF, 0xFF, 0xFF) |
+| +0x34 (52) | f32 | fog start (near device distance) | 0.0 |
+| +0x38 (56) | f32 | fog end (far device distance) | 9728.0 |
+| +0x3C (60) | f32 | fog density (EXP/EXP2 only) | 1.0 |
+| +0x40 (64) | u8 | range-fog-enable flag | 0 |
+
+#### GRSFog vtable+8 apply branch logic
+
+The handler reads `type = *(node+0x2C)` and branches:
+
+| type value | Action |
+|---|---|
+| **4** | Return immediately — **no device call** (the default; a freshly constructed GRSFog node is inert until something writes its type to 1/2/3) |
+| **0** | `RenderDevice_DisableFog` → `FOGENABLE`(28) = 0 |
+| **3 (LINEAR)** | Enable + vertex fog + colour + start + end + range: `FOGENABLE`(28)=1; `FOGVERTEXMODE`(140)=3; `FOGCOLOR`(34, packed ARGB from node+0x30); `FOGSTART`(36, node+0x34); `FOGEND`(37, node+0x38); `RANGEFOGENABLE`(48, node+0x40). Density is NOT pushed (correct — D3D LINEAR ignores density). |
+| **1 or 2 (EXP/EXP2)** | Enable + vertex fog + colour + density: `FOGENABLE`(28)=1; `FOGVERTEXMODE`(140)=type; `FOGCOLOR`(34, node+0x30); `FOGDENSITY`(38, node+0x3C). Start/end not pushed (EXP modes ignore them). **These branches are unreachable on the recovered configuration** — no writer sets the type field to 1 or 2. |
+
+In every non-disabled branch the mode is committed to **`FOGVERTEXMODE` (140)** — vertex fog. `FOGTABLEMODE` (token 35, pixel/table fog) is never written anywhere in the fog path.
+
+#### Fog_ApplyForViewDistance — device FOGSTART/FOGEND formula
+
+This is the dominant in-world device fog push, called from `Terrain_SetStreamRadius` and the post-load fog apply path. The argument is the live terrain sight/streaming radius `stream_radius`.
+
+The fog singleton (`Fog_GetSingleton`) holds these fields used by this routine:
+
+| Singleton offset | Type | Field | Init default |
+|---|---|---|---|
+| +0x00 | f32 | computed device far | 0.0 |
+| +0x04 | f32 | computed device near | 0.0 |
+| +0x08 | f32 | start_bias (subtracted from far) | 0.0 |
+| +0x0C | f32 | end_bias (subtracted from near) | 0.0 |
+| +0x10 | 48×4-byte BGRA | fog colour table | all zero |
+| +0xD0 (208) | f32 | start_frac (from fog.bin +0x00) | 0.0 |
+| +0xD4 (212) | f32 | end_frac (from fog.bin +0x04) | 1.0 |
+| +0xD8 (216) | f32 | current view distance | 1000.0 |
+| +0xDC (220) | f32 | scale | 1.0 |
+
+Device fog distance formula (applied each time `Fog_ApplyForViewDistance` is called with `stream_radius`):
+
+```
+// near-distance adjustment: if stream_radius < 1000 units, blend fractions toward 1.0
+if stream_radius >= 1000:
+    fs = start_frac;  fe = end_frac
+else:
+    k  = 1.0 - stream_radius / 1000.0
+    fs = start_frac + (1.0 - start_frac) * k
+    fe = end_frac   + (1.0 - end_frac)   * k
+clamp fs, fe to <= 1.0
+
+far  = fs * stream_radius * scale
+near = fe * stream_radius
+
+SetFogVertexMode(140, 3 = LINEAR)
+SetRangeFogEnable(48, 1)
+SetFogStart(36, far  - start_bias)   // start_bias = 0.0 at init; no observed writer
+SetFogEnd  (37, near - end_bias)     // end_bias   = 0.0 at init; no observed writer
+```
+
+**Reconciliation with `s × 3.0` / `1 / s` representation:** the `s × 3.0` (far) and `1 / s` (near) values written by the shared range-setter (§6.2a, §3.3 hub offsets +156/+168) are **EnvironmentLightScene node fog fields** — they mark the scene node dirty but do not call `SetRenderState`. The D3D device `FOGSTART`/`FOGEND` that actually reach the hardware are produced by the formula above. A 1:1 Godot port drives device fog from the `fog.bin fractions × stream_radius` formula; the node fog fields are an internal scene-state representation.
+
+> **Debugger-confirm residual [low priority].** Which of the two push paths fires at runtime in-world — the `GRSFog` node path (type-4 default → inert) or `Fog_ApplyForViewDistance` (terrain-stream driven) — is the only remaining fog question. By static evidence `Fog_ApplyForViewDistance` is dominant (GRSFog node type stays at the 4/inert default unless something writes it). Token set, fog mode, and start/end formula are all statically proven; the debugger settles only which path is hot, not any value. Never `dbg_start`.
 
 ---
 
@@ -388,8 +596,8 @@ spec; Godot parameters are chosen for best-fit equivalence.
 | Ambient light floor (brightness) | `OPTION_BRIGHT / 100` additive, **default 1.0** (§6.2a/§6.2b) | `WorldEnvironment → Environment.ambient_light_energy` |
 | World/background brightness multiplier | `display.lua` `DISPLAY_BASE_BRIGHT_MULTI` = **1.05** (§9.2; apply-path IDA-pending §9.4) | multiply on the world-geometry / background scene brightness |
 | Fog colour | `fog%d.bin` `fog_colors[kf]` (BGRA byte → RGB, `/255` port step) | `WorldEnvironment → Environment.fog_light_color` |
-| Fog distance (live) | `light%d.bin` §C scalar `s`: range = `s × 3.0` (§6.2a) | `WorldEnvironment → Environment.fog_depth_end` |
-| Fog distance (baseline) | `fog%d.bin` `start_dist` / `end_dist` × view_range (seeds, overwritten per frame) | `WorldEnvironment → Environment.fog_depth_begin/end` |
+| Fog distance (device, live) | `fog%d.bin` `start_frac` / `end_frac` × terrain stream radius (`Fog_ApplyForViewDistance` — see §3.6); updated when `Terrain_SetStreamRadius` fires | `WorldEnvironment → Environment.fog_depth_begin` / `fog_depth_end` |
+| Fog distance (scene-node representation) | `light%d.bin` §C scalar `s`: node far = `s × 3.0`, node near = `1 / s` (§6.2a); these are EnvironmentLightScene internal fog fields (+156/+168), NOT the D3D device values | (internal scene state only — see §3.6 reconciliation note) |
 | Sky colour (noon) | `material%d.bin` `ambient_sky_color` [29..32] (f32, raw) | `WorldEnvironment → Sky` background |
 
 > Water plane Y is **not** sourced from any environment file (`environment_bins.md §1.1`); any
@@ -432,11 +640,7 @@ light, ambient light, fog scalar — uses the same 48-keyframe / 1800 ms model o
 interpolation `lerp(table[kf], table[kf_next], frac)`. The star/cloud domes use the coarser 12-frame
 (7200 ms) cadence (§2.2). Fog/light samplers run from the per-frame map-time tick.
 
-**Fog colour — byte domain, applied directly (CONFIRMED).** The fog-colour sampler reads the byte
-R/G/B at `fog_colors[kf]` / `fog_colors[kf_next]` (`fog%d.bin`, or the synthesised table when
-`data_load_flag = 0` — §1.1), lerps each channel **in the byte domain** (result stays 0–255), packs
-`ARGB = (0xFF << 24) | (R << 16) | (G << 8) | B` (alpha forced opaque), and pushes it as the device
-fog colour via **D3D render-state token 34** (`D3DRS_FOGCOLOR`). No /255 in the original.
+**Fog colour — byte domain, applied directly (CONFIRMED).** The fog-colour push runs in `Fog_ApplyAfterLoad`, which executes on every env-interval tick — **not only at scene-graph draw time** (refines the earlier reading). The sampler reads the byte R/G/B at `fog_colors[kf]` / `fog_colors[kf_next]` (`fog%d.bin`, or the synthesised table when `data_load_flag = 0` — §1.1), lerps each channel **in the byte domain** (result stays 0–255), packs `ARGB = (0xFF << 24) | (R << 16) | (G << 8) | B` (alpha forced opaque), and pushes it to the device via **D3D render-state token 34** (`D3DRS_FOGCOLOR`). No /255 in the original. The packed colour is **also mirrored into the render-view descriptor** immediately after the device push.
 
 **Fog mode + distance — LINEAR from the section-C scalar (CODE-CONFIRMED).** The runtime fog struct
 holds `type` (1 = EXP, 2 = EXP2, 3 = LINEAR), a fog colour, `start`, `end`, and `density`. The
@@ -469,6 +673,18 @@ field, but no quality tier was observed switching to exponential density on this
 > the fog distance/mode come from the shared setter — fog **range = s × 3.0**, **near = 1 / s**,
 > density 0, **LINEAR** mode, **enabled when s > 0**. This in-world configuration is distinct from
 > the character-select scene, which forces fog OFF (see the Addendum).
+
+> **Node-vs-device fog distance reconciliation (wave-11, f61f66a9).** The `s × 3.0` (far) and
+> `1 / s` (near) values above are written by the shared range-setter to **EnvironmentLightScene node
+> fog fields** at hub offsets +156 and +168 — a scene-node attenuation representation with **no
+> device call** (the shared setter is confirmed to write node fields only). The D3D device
+> `FOGSTART` (token 36) and `FOGEND` (token 37) that actually reach hardware come from
+> `Fog_ApplyForViewDistance`: `FOGSTART = start_frac × stream_radius × scale − start_bias` and
+> `FOGEND = end_frac × stream_radius − end_bias`, where `start_frac`/`end_frac` are from
+> `fog%d.bin` and `stream_radius` is the live terrain sight radius. Start_bias and end_bias
+> initialise to 0.0 with no observed writer. Fog mode is **vertex fog, range-based, LINEAR** —
+> `FOGVERTEXMODE`(140) = 3, `RANGEFOGENABLE`(48) = 1. A 1:1 Godot port drives device fog from
+> this formula; see §3.6 for the full derivation.
 
 **Directional light — float, applied RAW (CONFIRMED).** The directional sampler interpolates the
 float32 `color_A` of `light%d.bin` section A and writes it to the render globals **without any
@@ -512,6 +728,8 @@ G = min(255, ambient_base_G + offset)
 B = min(255, ambient_base_B + offset)
 device_ambient = (0xFF << 24) | (R << 16) | (G << 8) | B
 ```
+
+> **Mechanism note (CONFIRMED, deep-3d pass).** The per-frame re-push computes each channel as `base_byte + offset_byte` with byte truncation (wraps at 256), not a saturating `min(255)`. Alpha is forced to `0xFF`. With the default ambient base `(0, 0, 0)` and offset in [0, 255] the byte never wraps, so the `min(255, ...)` formula above is equivalent in practice. The distinction matters only if the keyframe byte base is non-zero and `base + offset > 255`.
 
 This device ambient is the only ambient the device actually receives (the per-keyframe term above is
 zeroed by `K_ambient = 0`), and it is pushed via **D3D render-state token 139** (`D3DRS_AMBIENT`).
@@ -586,6 +804,26 @@ and not relying on the §B ambient keyframes — is the root-cause fix for the "
 > to `start = 0.75`, `end = 0.98` (§6.4), superseding the earlier `0.5 / 0.9` stand-ins. Read the
 > parsed file at runtime rather than hard-coding either pair.
 
+### 6.2c Per-render-pass fog enable map (CONFIRMED)
+
+Fog is **enabled only on the terrain-and-buildings render pass**. Every other render pass disables fog at its head by setting render-state token 28 (`D3DRS_FOGENABLE`) to 0. This is a load-bearing fact for a 1:1 port: fog is a ground-and-buildings effect only.
+
+| Render pass | Fog state set at pass head | Additional head states (terrain pass only) |
+|---|---|---|
+| **Terrain + buildings** | **ENABLE** (FOGENABLE = 28 → 1) | LIGHTING(137)→1, ZENABLE(7)→1, ALPHATESTENABLE(15)→0, ALPHABLENDENABLE(27)→0, SetMaterial, cull mode 2, multi-texture stage/sampler state block |
+| Sky / background | DISABLE (FOGENABLE = 28 → 0) | — |
+| Opaque-world (non-terrain) | DISABLE | — |
+| Transparent / particles | DISABLE | — |
+| Characters (skinned, cel-shaded) | DISABLE | — |
+| Actors (skinned, tinted) | DISABLE | — |
+| Shadow build | DISABLE | — |
+| UI draw | DISABLE | — |
+| Actor / item preview | DISABLE | — |
+
+The fog colour (render-state token 34) is pushed per env-interval frame inside `Fog_ApplyAfterLoad` — not at scene-graph draw time (see §6.2a). The LINEAR fog range render-state (token 35 or 140 — see §8 item 13) is committed at view draw time via the `GRSFog` slot in `GCull_ApplyRenderStateSet` (see §3.5).
+
+**Godot guidance.** Apply Godot's volumetric fog to the terrain and buildings render layers only. Disable fog on the sky environment background, character nodes (`CharacterBody3D` and skinned meshes), particle systems, and all HUD/UI `CanvasLayer` nodes. This reproduces the original's per-pass fog discipline.
+
 ### 6.3 Day/night cycle integration
 
 The Godot `EnvironmentNode` should maintain a running clock (`t_ms`) advanced by
@@ -596,7 +834,7 @@ The Godot `EnvironmentNode` should maintain a running clock (`t_ms`) advanced by
 3. Apply to `DirectionalLight3D` and `WorldEnvironment` via the apply paths in §6.2a — directional
    raw; the per-keyframe ambient is inert (`× K_ambient = 0`); the ambient energy is the
    `OPTION_BRIGHT` floor (default 1.0).
-4. Convert and apply fog colour (§6.2) and fog range (`s × 3.0`, §6.2a).
+4. Convert and apply fog colour (§6.2) and device fog distances from `fog%d.bin` fractions × terrain stream radius (§3.6, §6.2a reconciliation note).
 
 For the current demo (area 2) the time clock can be seeded at any value; a noon start
 (`t_ms = 24 × 1800 = 43 200`) gives the brightest directional lighting.
@@ -635,8 +873,10 @@ temporary stand-ins until area 2's file is parsed:
 The `EnvironmentNode` debt (D3 "too dark" in the Godot known-issues list) is:
 
 1. Wire `fog2.bin` (or `fog1.bin` as stand-in) into `WorldEnvironment.fog_*` properties at
-   startup, driven by `kf_index` each frame; drive the live fog range from the `light%d.bin`
-   section-C scalar as `s × 3.0` (§6.2a).
+   startup, driven by `kf_index` each frame; drive the live device fog distances from the
+   `fog%d.bin` fractions × terrain stream radius model (`Fog_ApplyForViewDistance` — §3.6,
+   §6.2a reconciliation note). The `light%d.bin` §C scalar `s × 3.0` / `1 / s` values are
+   EnvironmentLightScene node fog fields, not the device `FOGSTART`/`FOGEND` values.
 2. Wire `light2.bin` section A into `DirectionalLight3D.light_color` per frame (directional raw).
    Do **not** wire the section-B ambient keyframes as an ambient brightness source — they are gated
    by `K_ambient = 0` and contribute nothing in the original (§6.2a).
@@ -697,6 +937,49 @@ scene scalar applied by the sky/environment hub, while `DISPLAY_LIGHT_RATIO` is 
 correction. The exact render-stage this scalar multiplies into is the same display-config apply-path
 that is IDA-pending in §9.4; only the three immediate values and the quality-mode selection are
 statically settled here.
+
+### 6.7 D3D9 device interface offsets and render-state tokens (CONFIRMED)
+
+This section records the confirmed `IDirect3DDevice9` vtable offsets and the D3D render-state tokens used on the environment and lighting path. They are consumed by any C# wrapper that drives the D3D device directly and by render-state analysis for Godot fidelity.
+
+#### Device vtable offsets
+
+The following vtable entry offsets are confirmed for the `IDirect3DDevice9` interface as used on the terrain and lighting path. The device interface pointer is accessed via a known global device-holder singleton.
+
+| Vtable byte offset | D3D9 method |
+|---|---|
+| +176 | `SetTransform` (used with `D3DTS_WORLD` = 256 and `D3DTS_TEXTURE1` = 17) |
+| +180 | `GetTransform` |
+| +196 | `SetMaterial` (receives a `D3DMATERIAL9` pointer) |
+| +204 | **`SetLight`** (single confirmed call site: `Renderer_SetDeviceLight`; device light index = drawable list position) |
+| +212 | **`LightEnable`** (enable glue passes TRUE; disable glue passes FALSE; index matches `SetLight`) |
+| +228 | **`SetRenderState`** (the main render-state setter for all tokens below) |
+| +260 | `SetTexture` |
+| +268 | `SetTextureStageState` |
+| +276 | `SetSamplerState` |
+
+#### D3D render-state tokens (environment / lighting path)
+
+| Token value | `D3DRS_*` name | Set by | Value |
+|---|---|---|---|
+| 7 | `ZENABLE` | Terrain + buildings pass head | 1 |
+| 15 | `ALPHATESTENABLE` | Terrain + buildings pass head | 0 |
+| 27 | `ALPHABLENDENABLE` | Terrain + buildings pass head | 0 |
+| 28 | `FOGENABLE` | Terrain pass → 1; all other passes → 0 (see §6.2c) | 1 or 0 |
+| 34 | `FOGCOLOR` | Per env-interval frame in `Fog_ApplyAfterLoad` (§6.2a); result also mirrored to render-view descriptor | packed ARGB |
+| 137 | `LIGHTING` | Terrain + buildings pass head | 1 |
+| 139 | `AMBIENT` | Per-frame when byte-base changes (device ambient floor — §6.2a) | packed ARGB |
+| 36 | `FOGSTART` | `Fog_ApplyForViewDistance`; `GRSFog` vtable+8 apply (LINEAR branch) | float world-unit distance (`fog.bin start_frac × stream_radius`) |
+| 37 | `FOGEND` | `Fog_ApplyForViewDistance`; `GRSFog` vtable+8 apply (LINEAR branch) | float world-unit distance (`fog.bin end_frac × stream_radius`) |
+| 38 | `FOGDENSITY` | `GRSFog` vtable+8 apply (EXP/EXP2 branches only — unreachable on recovered config) | float density (not pushed on LINEAR path) |
+| 48 | `RANGEFOGENABLE` | `Fog_ApplyForViewDistance`; `GRSFog` vtable+8 apply (type 3) | 1 (range/radial fog on) |
+| 140 | `FOGVERTEXMODE` | `Fog_ApplyForViewDistance`; `GRSFog` vtable+8 apply | 3 = `D3DFOG_LINEAR` (vertex fog; `FOGTABLEMODE` token 35 is **never written**) |
+
+Tokens 34 and 139 were confirmed in earlier passes. Tokens 7, 15, 27, 28, and 137 were confirmed in the deep-3d pass. The lighting-apply closeout confirmed SetLight (+204) and LightEnable (+212) vtable offsets. The FOGCOLOR (34) push site is `Fog_ApplyAfterLoad` (per env-interval frame; also mirrors to the render-view descriptor). The wave-11 atmosphere/fog deep-dive (f61f66a9) closes §8 item 13: the fog-mode token is **`FOGVERTEXMODE` (140)** = `D3DFOG_LINEAR` (3) with `RANGEFOGENABLE` (48) = 1; `FOGTABLEMODE` (35) is never written. Tokens 36 (`FOGSTART`), 37 (`FOGEND`), 38 (`FOGDENSITY`), 48 (`RANGEFOGENABLE`), and 140 (`FOGVERTEXMODE`) are added in this table, all pushed via `SetRenderState` at device vtable +228.
+
+#### Device handle topology
+
+Two distinct device-pointer access paths exist in the client runtime; both resolve to the same `IDirect3DDevice9` instance. One path is the renderer-composite route (used for `SetRenderState(AMBIENT)`, `SetRenderState(FOGENABLE)`, `SetLight`, `LightEnable`, and the terrain render pass). The other is a direct device-pointer cache (used for `SetRenderState(FOGCOLOR)`, character rendering, sky, shadow, UI, and actor/item preview rendering). A 1:1 reimplementation in Godot or D3D12 has a single device handle; this split is an internal caching artifact of the original and requires no reproduction.
 
 ---
 
@@ -838,8 +1121,7 @@ config-driven; the apparent 0.5 is spurious). The per-state character-tint *tabl
    direction vector is stored per keyframe. The static fallback `(-7, 7, 20)` is the only direction
    the client uses; the day/night cycle does not rotate the sun (§6.2a,
    `formats/environment_bins.md §10.6`).
-5. **`light%d.bin` section D (secondary fog scalar):** Near-zero values in all sampled areas;
-   exact influence on rendered haze or fog not quantified.
+5. **`light%d.bin` section D (secondary fog scalar): RECLASSIFIED (wave-11).** Near-zero values in all sampled areas. The device fog distances are sourced from `fog%d.bin` fractions × terrain stream radius (`Fog_ApplyForViewDistance` — see §3.6), **not** from any `light%d.bin` section-D scalar. Section D values are most likely consumed by the EnvironmentLightScene node fog fields (+156/+168, the `s × 3.0` / `1 / s` representation) via the shared range-setter, or by the ambient-subobject fog range. Section D does not feed the D3D device fog tokens (`FOGSTART`/`FOGEND`).
 6. **`material%d.bin` unassigned indices:** See `environment_bins.md §3.3`.
 7. **`cloud_cycle%d.bin` cloud ID 101:** Possible "no cloud" sentinel; unconfirmed.
 8. **`weather%d.bin` full layout:** All-zero in sampled areas; needs a rain/snow area sample.
@@ -860,10 +1142,7 @@ config-driven; the apparent 0.5 is spurious). The per-state character-tint *tabl
       brightness after options-load settles it (expected i32, percent, default 100); layout-neutral.
     - **Fog fractions** — observed live area-1 `0.75 / 0.98` (corrected in §6.4) vs. the previous
       `0.5 / 0.9` stand-ins; read the parsed file at runtime.
-    - **EXP/EXP2 fog modes** — **confirmed NOT driven on the lighting tick** (the shared fog-distance
-      setter only ever writes the LINEAR shape — LINEAR mode + density 0.0). The modes exist in the
-      runtime struct layout, but no path was observed switching to exponential density on this tick;
-      whether any other quality-tier path does remains unverified.
+    - **EXP/EXP2 fog modes** — **CLOSED (wave-11).** Statically confirmed unreachable: the `GRSFog` node default type is 4 (inert/no-op sentinel) and no recovered writer sets it to 1 (EXP) or 2 (EXP2); the direct device push path (`Fog_ApplyForViewDistance`) hard-codes mode 3 (LINEAR). The `GRSFog` apply handler body contains EXP/EXP2 branches (type 1: `FOGVERTEXMODE`(140)=1 + `FOGDENSITY`; type 2: `FOGVERTEXMODE`(140)=2 + `FOGDENSITY`), but these are dead code on the recovered configuration (see §3.6).
 12. **`display.lua` brightness-scalar apply-path (§9.4): PARTIALLY RESOLVED (CYCLE 12).**
     `DISPLAY_BASE_BRIGHT_MULTI = 1.05` → **pixel-shader constant c0** (world/background geometry
     pass, CODE-CONFIRMED). `GLOW_BRIGHT_MULTI` → **pixel-shader constant c1** (same pass,
@@ -872,6 +1151,7 @@ config-driven; the apparent 0.5 is spurious). The per-state character-tint *tabl
     correction path (see `rendering.md`). The full character-tint / glow chain enumeration from the
     same `display.lua` remains open (see `rendering.md §6.7`). NOTE: the 1.05 multiplier is a
     ~neutral +5% uplift and is **not** the cause of the dark world (§9.5).
+13. **FOGTABLEMODE vs FOGVERTEXMODE — CLOSED (wave-11 deep-dive, f61f66a9).** The `GRSFog` `vtable+8` apply body was read in full. The client uses **`D3DRS_FOGVERTEXMODE` (token 140) = `D3DFOG_LINEAR` (3)** — vertex fog, radial range-based. `D3DRS_RANGEFOGENABLE` (token 48) = 1 makes the fog factor a function of eye-space camera distance, not z/w depth. `D3DRS_FOGTABLEMODE` (token 35, pixel/table fog) is **never written** — it remains at the device default `D3DFOG_NONE`. For the Godot port: implement as distance fog (linear, depth mode eye-space / radial, no height term). Thin residual [debugger-confirm, low priority]: which push path is hot in-world — `GRSFog` vtable+8 (type-4 default is inert, so by static evidence this path is not active unless something writes the type field) or `Fog_ApplyForViewDistance` (dominant by static evidence). Token set, fog mode, and start/end formula are fully statically proven; the debugger settles only the active path. Never `dbg_start`.
 
 ---
 

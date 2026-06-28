@@ -20,6 +20,12 @@
 > status: sample_verified
 > sample_verified: true (uiconfig.lua, display.lua, config.lua — confirmed plain Lua 5.1 source
 >   text, CP949)
+> deep-3d-cartography deepening (2026-06-29, static-only, IDB anchor f61f66a9): GetFloat internals
+>   RESOLVED (double-returning path, no truncation); accessor split CORRECTED — GetInt/GetFloat/
+>   CallGlobal are three distinct families, LUA_TFUNCTION==6 tested only in CallGlobal; cpp_load as
+>   the sole registered C function confirmed byte-exact (no luaL_Reg array); display.lua global-set
+>   and DISPLAY_FRAMERATE dead-store confirmed byte-exact; lua file open uses mode 1 (plain read,
+>   NOT the mode-9 text-tokenizing path).
 
 ---
 
@@ -114,17 +120,21 @@ The whole subsystem is a singleton "Lua config manager" wrapping **one** `lua_St
    shared and persistent, a later load can overwrite globals set by an earlier one, and a script can
    chain-load another via `cpp_load` (§5).
 
-3. **Reading a value back** (the public `GetInt` / `GetFloat` accessors):
-   - Push the global's name string, do a global-table lookup
-     (`lua_gettable` against the standard Lua 5.1 globals pseudo-index `LUA_GLOBALSINDEX = -10002`),
-     convert the top of stack to a number / float (or boolean), then pop.
-   - **Function-valued config:** if the looked-up global is a Lua **function** (Lua type tag
-     `LUA_TFUNCTION = 6`), the accessor instead pushes a single argument (an int or a string,
-     depending on the accessor) and `lua_pcall`s it with one argument and one result, then reads the
-     numeric result. If a non-function is encountered where a function call was requested, the
-     "attempt to call global … (not a function)" diagnostic is printed.
-   - A value read with the `!= 0` idiom is treated as a boolean (used for the `game.lua` mode flags
-     in §4).
+3. **Reading a value back** — three distinct accessor families (CONFIRMED, deep-3d-cartography pass):
+
+   | Accessor | Behaviour | Returns |
+   |---|---|---|
+   | `GetInt(key)` | push key → global-table lookup (`LUA_GLOBALSINDEX = -10002`) → read top as number → truncate to int → pop | int (truncated) |
+   | `GetFloat(key)` | push key → global-table lookup → read top as **double** (no truncation) → pop | float/double |
+   | `CallGlobal(key, arg)` ×4 variants | push error-handler → push key → global-table lookup → **if `lua_type(-1) == LUA_TFUNCTION (6)`**: push one arg → `lua_pcall(1, 1, errfunc)` → read numeric result; **else** print `"attempt to call global '%s' (not a function)"` and return | number from the called function |
+
+   `GetInt` and `GetFloat` do **not** type-check the returned value or call it as a function.
+   `LUA_TFUNCTION == 6` is tested **only** inside the `CallGlobal` family — the four `CallGlobal`
+   variants differ in argument/result type (string-key/string-arg and int-result/float-result
+   combinations); only the string-key/string-arg variant was fully traced (see Known unknowns).
+
+   A value read with the `!= 0` idiom is treated as a boolean (used for the `game.lua` mode flags
+   in §4).
 
 The standard Lua 5.1 constants are confirmed present at independent call sites — the globals
 pseudo-index `LUA_GLOBALSINDEX = -10002` appears at all three of the read-global / set-global /
@@ -146,7 +156,7 @@ the **one** singleton `lua_State`, so they are not independent of one another (l
 |---|---|---|
 | Scene / boot state machine (WinMain-side) | `game.lua` (loose, **pre-VFS-mount**) | `vfsmode`, `launcher`, `debugmode` (each read as `!= 0` → bool). `vfsmode` selects the VFS mount mode and then drives the VFS mount itself. The same consumer later reads `DISPLAY_GAME_ADDICTION_WARNING_CHECK_TIME` from the already-loaded display config. |
 | Login window scene builder | `data/script/uiconfig.lua` | `NEW_SERVER_INDEX` — selects which entry in the login server-list strip is the highlighted "new" server. Ties `uiconfig.lua` to the login server name-strip (captions are MessageDB ids 4001..4022). |
-| Display / framerate config parser | `data/script/display.lua` | `DISPLAY_GLOW_RANGE_X`, `DISPLAY_GLOW_RANGE_Y`, `DISPLAY_FRAMERATE` (dead store — frame rate hard-coded to 60), `DISPLAY_BASE_BRIGHT_MULTI`, `DISPLAY_GLOW_BRIGHT_MULTI`, `DISPLAY_LIGHT_RATIO` (floats), `DISPLAY_POWERSHADER` (string), plus the full 72-key `DISPLAY_CHAR_BRIGHT_{MULTI,ADD}_{R,G,B}_<STATE>` and `DISPLAY_CHAR_BRIGHT_ALPHA_<STATE>` float family for character brightness / glow tuning. The 9 state suffixes are: `DEFAULT`, `CHOICE`, `HIT`, `ALPHA`, `HIDDEN`, `POISON`, `TYPE`, `ANGER`, `AUTO`. |
+| Display / framerate config parser | `data/script/display.lua` | `DISPLAY_GLOW_RANGE_X` (GetInt), `DISPLAY_GLOW_RANGE_Y` (GetInt), `DISPLAY_FRAMERATE` (GetInt — **confirmed dead store**: the field is written but has no reader; the FPS cap is a hardcoded 60.0f constant in the engine scene-machine constructor, not this value), `DISPLAY_BASE_BRIGHT_MULTI`, `DISPLAY_GLOW_BRIGHT_MULTI`, `DISPLAY_LIGHT_RATIO` (all GetFloat), `DISPLAY_POWERSHADER` (GetFloat), plus the full `DISPLAY_CHAR_BRIGHT_{MULTI,ADD}_{R,G,B}_<STATE>` and `DISPLAY_CHAR_BRIGHT_ALPHA_<STATE>` family (all GetFloat; some values post-multiplied by a constant scale factor at store time). The 9 state suffixes are: `DEFAULT`, `CHOICE`, `HIT`, `ALPHA`, `HIDDEN`, `POISON`, `TYPE`, `ANGER`, `AUTO`. |
 | Debug / VFS mode config | `data/script/config.lua` | `CONFIG_NO_VFS` (bool, mirrors the `game.lua` `vfsmode` decision family — VFS vs loose-disk), `CONFIG_DEBUG_LEVEL` (integer, CP949 comments indicate range 0–3). Consumer read-back site not yet chased; keys are sample-observed (MEDIUM confidence). |
 | Game-addiction-warning panel | `data/script/tutor.lua` (resolved via a config global) | tutorial config — the specific global key set is **not yet captured** (no sample in the extract set). |
 
@@ -182,18 +192,23 @@ the **one** singleton `lua_State`, so they are not independent of one another (l
 
 ## Known unknowns
 
-- The exact internals of the **float accessor** (`GetFloat`) are assumed to be the same
-  global-lookup + `lua_tonumber`-as-float path as the integer accessor; safe to assume but not fully
-  dumped — marked UNVERIFIED.
+- The **`GetFloat` accessor** internals are now RESOLVED (deep-3d-cartography pass): it is the
+  double-returning analog of GetInt — push key → global-table lookup → `lua_tonumber` as double
+  (no truncation) → pop. It does NOT type-check or call the value. *(Previously marked UNVERIFIED.)*
+- The **exact arg/result typing of the four `CallGlobal` variants** is partially open. One variant
+  (string-key/string-arg/int-result) was fully traced; the other three differ in argument or result
+  type (string vs int). All four test `LUA_TFUNCTION == 6` in the same pattern. Needs a further
+  static trace or debugger witness for the remaining three variants.
+- Whether any **shipped** `.lua` actually exercises the `CallGlobal` (function-valued) path at
+  runtime. The four `CallGlobal` accessors exist and are confirmed; all three extracted samples
+  (`uiconfig.lua`, `display.lua`, `config.lua`) use plain literals only. A debugger witness is
+  needed to confirm whether any shipped global is actually function-valued.
 - The **`config.lua`** consumer read-back site (the C++ code that calls `GetInt`/`GetFloat` for
   `CONFIG_NO_VFS` and `CONFIG_DEBUG_LEVEL`) has not been chased in IDA; the key names are
   sample-observed only (MEDIUM confidence). The relationship between `CONFIG_NO_VFS` and
   `game.lua`'s `vfsmode` flag is inferred from key naming and CP949 comments, not confirmed at
   the binary consumer.
 - The **`tutor.lua`** global key set is not captured (no sample in the extract).
-- Whether any **shipped** `.lua` actually uses the **function-valued** config path. The client
-  supports it (the function-call accessors exist), but all three extracted samples (`uiconfig.lua`,
-  `display.lua`, `config.lua`) use plain literals only.
 - The **chunkname** passed to `luaL_loadbuffer` is confirmed: it is the literal string
   **`"lua_tinker::dobuffer()"`**, used for error-message context only. This is set inside the
   `dobuffer` runner and is identical for every config-script load.

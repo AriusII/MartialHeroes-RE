@@ -24,6 +24,11 @@ conflicts:      none-open         # the 5 campaign-10 conflicts (C1–C5) are RE
 # extent; known-unknown #6 (exact name byte width) is thereby RESOLVED. All other facts re-confirmed.
 # CYCLE 14 (2026-06-27, IDB SHA f61f66a9): confirmatory re-anchor — subsystem cleanly relocated,
 # 1 re-confirmed SAME. Prior reverified: 2026-06-24.
+# deep-cartography deepening (2026-06-29, static-only, anchor f61f66a9): area-loader file set/order/sizes
+# re-validated byte-exact (`Map_LoadAreaBinaries`); area-scoped free-prior model confirmed (`Area_FreeGeometryAndNpcArr`
+# called before reload); npc.arr slot-0 zeroing confirmed (records in slots 1..n; slot 0 zeroed); map.bin
+# fields +0x44/+0x48/+0x4C confirmed consumed by combat/movement gate code, not the area loader itself.
+# No prior fact contradicted.
 ```
 
 Two-witness re-verification on build `263bd994` (the per-map area loader + a 60-map `region.bin`
@@ -156,7 +161,13 @@ Same total size, same grid size, same cell semantic — **only the header arrang
 
 ## Runtime use
 
-The runtime region grid (`region<NNN>.bin`) is loaded once per active map area, kept in a heap buffer, and queried by world position `(X, Z)`:
+The runtime region grid (`region<NNN>.bin`) is loaded once per active map area via a **free-prior
+model**: `Map_LoadAreaBinaries` calls `Area_FreeGeometryAndNpcArr` first (frees the prior area's
+region grid and NPC array), then loads the four files in order: `map<NNN>.bin` (520 B),
+`regiontable<NNN>.bin` (reads exactly 1536 B = 32×48), `region<NNN>.bin` (Layout A), and
+`npc<NNN>.arr` (28-byte records; count = fileSize ÷ 28 + 1; records placed in slots 1..n with slot 0
+zeroed). This is area-scoped, not per-cell streamed. Once loaded, the region grid is queried by
+world position `(X, Z)`:
 
 1. Translate the world position by the stored origin (`X − originX`, `Z − originZ`), with the origins read as **signed** 32-bit integers.
 2. Divide each axis by the 256-unit cell stride.
@@ -260,12 +271,12 @@ re-traced in the build-`263bd994` two-witness pass, so they stand from the earli
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
 | +0x3C | 1 | u8 (enum) | `mode` | **Mode enum.** The loader branches on this byte by equality (`== 3` selects a distinct mode). Small enumerated value, **not padding**. The full value set beyond the tested member is not yet enumerated. | CONFIRMED (role); value set partial |
-| +0x44 | 4 | (opaque) | `_dbg44` | **Unread on this load path.** No reader observed; meaning undetermined. | DBG-pending |
-| +0x48 | 4 | (opaque) | `_dbg48` | **Unread on this load path.** No reader observed; meaning undetermined. | DBG-pending |
-| +0x4C | 4 | (opaque) | `_dbg4C` | **Unread on this load path.** No reader observed; meaning undetermined. | DBG-pending |
+| +0x44 | 4 | (opaque) | `_dbg44` | **Not read by the area loader** — the area loader slurps the full 520-byte record but reads none of these three fields itself. They ARE consumed by **combat/movement gate code** elsewhere (not on the area-load path). Semantics need a consumer trace or live attach on those gates. | DBG-pending |
+| +0x48 | 4 | (opaque) | `_dbg48` | Same as +0x44 — area loader does not read; consumed by combat/movement gate code. | DBG-pending |
+| +0x4C | 4 | (opaque) | `_dbg4C` | Same as +0x44 — area loader does not read; consumed by combat/movement gate code. | DBG-pending |
 | +0x50 | 1 | u8 (flag) | `nameMask` | **Name-mask flag.** The loader tests this byte by equality (`== 1` enables the masked-name behaviour). A flag, **not padding**. | CONFIRMED (role) |
 
-- **Record size:** fixed **520 bytes (`0x208`)** — read in one bounded slurp. SAMPLE-VERIFIED (the loader's fixed `0x208` read).
+- **Record size:** fixed **520 bytes (`0x208`)** — read in one bounded slurp. SAMPLE-VERIFIED (the loader's fixed `0x208` read). The full 520-byte record is slurped by the area loader; the fields at +0x44/+0x48/+0x4C are read by combat/movement gate code on a separate code path, not by the loader itself.
 - **`+0x3C` and `+0x50` reclassified.** Both were previously treated as padding. They are **not** padding: `+0x3C` is a byte **mode enum** the loader tests for equality (`== 3`), and `+0x50` is a byte **name-mask flag** the loader tests for equality (`== 1`). Reclassify them from padding to these roles.
 - **`+0x44 / +0x48 / +0x4C` are opaque (DBG-pending).** This load path does not read them. Their type/width above is provisional sizing only; their semantics need live-debugger confirmation and must not be guessed at during implementation.
 

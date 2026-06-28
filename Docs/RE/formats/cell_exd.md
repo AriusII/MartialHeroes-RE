@@ -10,6 +10,7 @@
 | Attribute        | Value |
 |------------------|-------|
 | `verification`   | CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected. Covered fact: `.exd` decoder (`Exd_DecodeTriangles`) is byte-identical to the `.up` decoder (`Up_DecodeTriangles`) — identical read sequence, same shared 40→72 expander, same element ctors; both use `u32 count + count × 40-byte` triangle records with the 72-byte runtime layout. Build-stable under the uniform +0x80 relocation. |
+| `deep-cartography deepening` | 2026-06-29 (static-only, anchor f61f66a9) — EXD confirmed as the supplementary ground surface queried after the `.ted` subtile test; located consumer (`BuildBasisVectorsFromTwoPoints`) reads only v0/v1/v2, NOT the precomputed plane@+52 nor scalar@+68; runtime layout order corrected (AABB → v0/v1/v2 → plane → scalar); `extra_h` open item tightened. |
 | `ida_reverified` | `2026-06-27` |
 | `ida_anchor`     | `f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963` |
 | `evidence`       | `[static-ida]` — both decoders re-confirmed at their relocated addresses under build f61f66a9 and verified to share the same expander callee. |
@@ -80,9 +81,11 @@ The EXD triangle decoder is present in the shipped client binary and is invoked 
    disk-file open router. No hardcoded `exd` extension is used — the path is taken verbatim from the
    `.map` text token.
 3. The opened file is handed to the EXD triangle decoder (see §5 for its behavior).
-4. The decoded triangle array is retained per-cell alongside the `.ted` heightfield and `.sod`
-   collision data. The presence of a runtime-derived XZ bounding box and normalized plane equation
-   per triangle confirms the decoded data is queried at runtime (ground-height / point-location use).
+4. The decoded triangle array is stored in the cell's embedded EXD layer (cell+16332). It is
+   **queried by the ground-height raycast leaf** immediately after the `.ted` subtile test: the
+   raycast consumer indexes the per-patch bucket, walks the triangle list, and applies a downward
+   ray–triangle test per triangle, keeping the nearest hit. The EXD layer is the supplementary
+   ground surface for geometry the `.ted` heightfield cannot express.
 
 **The `exd` extension string is absent from the binary** because the file is reached name-driven — not
 a deficiency in coverage but a design choice matching `.bud` / `.fx1`–`.fx7`. The earlier deduction
@@ -192,12 +195,20 @@ Confirmed behavior:
 
 ### In-memory 72-byte runtime object layout (derived at load; not on disk)
 
-| Slot | Type | Content |
-|-----:|------|---------|
-| floats 0–3 | f32 × 4 | XZ bbox `{minX, minZ, maxX, maxZ}` |
-| floats 4–7 | f32 × 4 | plane `{nx, ny, nz, d}` |
-| floats 8–16 | f32 × 9 | vertices `v0`, `v1`, `v2` (XYZ × 3) |
-| float 17 | f32 | `extra_h` scalar (copied verbatim) |
+CORRECTED (deep-cartography pass, 2026-06-29 — confirmed byte-exact via `UpExd_ExpandTriangle40to72`):
+
+| Byte offset | Size | Type      | Field                          | Source / Notes                                        |
+|------------:|-----:|-----------|--------------------------------|-------------------------------------------------------|
+| +0          | 16   | f32 × 4   | XZ AABB `{minX, minZ, maxX, maxZ}` | min/max of v0/v1/v2 over X and Z only (Y not bounded) |
+| +16         | 12   | f32 × 3   | `v0` (x, y, z)                 | Copied verbatim from disk +0x00                       |
+| +28         | 12   | f32 × 3   | `v1` (x, y, z)                 | Copied verbatim from disk +0x0C                       |
+| +40         | 12   | f32 × 3   | `v2` (x, y, z)                 | Copied verbatim from disk +0x18                       |
+| +52         | 16   | f32 × 4   | plane `{nx, ny, nz, d}`        | `Geom_PlaneFromTriangle`: `edge1=v0−v1`, `edge2=v2−v1`, `normal=normalize(cross(edge1,edge2))`, `d=−dot(normal,v1)`; degenerate → zeroed |
+| +68         | 4    | f32       | `extra_h` scalar               | Copied verbatim from disk +0x24. **The located ground consumer reads only v0/v1/v2 (+16/+28/+40) and does NOT read this field nor the precomputed plane@+52.** |
+
+The located EXD ground consumer (`BuildBasisVectorsFromTwoPoints`) recomputes its own edges
+from v0/v1/v2 rather than using the precomputed plane@+52. This is consistent with the plane
+being populated for a different (non-ground) consumer or being dead in this client build.
 
 This runtime layout is informational only — it is not stored on disk.
 
@@ -282,11 +293,14 @@ cell-streaming and ground-height / collision-or-navigation subsystem.
 
 ## 8. Open questions / verification debt
 
-1. **Meaning of `extra_h` (`+0x24`)** — alternate-layer reference height, cost/blend weight, water
-   level, or ceiling clearance? The decoder preserves it verbatim; the runtime consumer that reads it
-   has not been statically located. Working hypothesis: alternate-layer / multi-level surface reference
-   height with `0 = none`. Must be settled by locating and tracing the runtime query (live debugger,
-   or the consuming code path).
+1. **Meaning of `extra_h` (`+0x24`, runtime +68)** — STATIC BOUND TIGHTENED: the **located** EXD
+   ground consumer (`BuildBasisVectorsFromTwoPoints`) reads ONLY v0/v1/v2 and does NOT read this
+   field. No static reader of runtime +68 was found in any located terrain ground/query path. The
+   precomputed plane@+52 is also unread by this consumer. Working hypothesis: alternate-layer /
+   multi-level surface reference height (`0 = none`) for a non-ground consumer (navigation /
+   clearance / multi-layer height query). [debugger-confirm D1]: whether any non-terrain runtime
+   path reads +68; if a live attach shows it never loaded during ground/move/nav queries, it can
+   be declared authoring-only/dead.
 2. **Winding / front-face sense** — the plane normal is computed via `cross(v0 − v1, v2 − v1)`; the
    sign depends on the vertex winding in the file. Confirm which normal orientation is "up" before
    trusting normals for one-sided collision or backface culling.

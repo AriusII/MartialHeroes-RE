@@ -72,6 +72,12 @@
 > - **spec_corrected:** 2026-06-21 (visual-oracle — `.skn` geometry height-axis = native X; +90°-Z importer remap)
 > - **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > - **evidence:** [static-ida, vfs-sample, visual-oracle]
+> - **deep-cartography deepening (f61f66a9, 2026-06-29):** §2.1 dedup test corrected from
+>   "position epsilon" to logf(Δuv)<0.001 on UV floats (CONFIRMED); GPU upload parameters added
+>   to §1 (FVF 0x112, stride 32, usage 0x208, pool DEFAULT, DISCARD); SkinSet mode field +0x6E8
+>   and VB container fields +0x4F0/+0x4F8 added to §1; drop-weight exact f32 threshold and
+>   Math::DELTA = 0.001 pinned; deform Σwᵢ·Mᵢ·v CONFIRMED at instruction level (no spec change
+>   needed — math already correct); all confirmed against IDB SHA f61f66a9.
 > - **conflicts:** two resolved against the IDB this pass — (1) the out-of-range bone-id behaviour is a
 >   **clamp-to-last-bone** in the engine, NOT a skip (the spec previously implied the engine skips;
 >   "skip" is retained only as the *recommended importer hardening*, §8(e)); (2) the child-bone
@@ -140,7 +146,7 @@ documented in the container spec.
 | Bones addressed by **bone ID** in base-relative ID space (`bone_array[id − base_id]`), NOT an array slot / palette index / track index, by both `.skn` weights and `.mot` tracks | **CONFIRMED (static), CYCLE 1** (the explosion root cause — weight id-space == bind/`.mot` id-space) |
 | Skeleton selection: `.skn` header `id_b` passed VERBATIM as the pose-pool key (no `g{N}.bnd` formatting, no slot transform at the resolve site) | **CONFIRMED (static), CYCLE 1** (§8(e)) |
 | Runtime pose bone stride **88 bytes**; in-memory bind bone **72 bytes**; bone count is a single **u8** (≤ 255 bones) | HIGH (recovered CAMPAIGN 10 — see §3.4) |
-| Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.01 | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins) |
+| Major/minor influence split + per-vertex normalization to sum 1.0; drop weight < 0.0099999998f (exact f32; nearest to 0.01; `coreskin.cpp` line 294); denominator floor `Math::DELTA = 0.001` (`coreskin.cpp` line 306) | HIGH (code) + SAMPLE-VERIFIED (corpus: min weight 0.010, 1140 multi-weight skins); exact threshold confirmed deep-cartography f61f66a9 |
 | LBS deform equation (weighted sum of bone-local rest placed by animated bone world transform) | **CONFIRMED end-to-end at the per-vertex level (CYCLE 7)** — runtime two-pass deform read directly: major pass WRITES, minor pass ACCUMULATES; `vertex_world = Σ wᵢ·(boneWorldQuat·(restPos·scale)+boneWorldTrans)`, normals same without translation |
 | `.mot` sampling: `floor(t·10)` @ 10 fps, LERP translation, shortest-arc SLERP rotation, 28-byte keyframe | HIGH (re-confirmed) |
 | Per-frame clip time `t` advances (real `dt = ms × 0.001`; mixer ticked every frame; never pinned to 0) | HIGH (control-flow-confirmed — `formats/animation.md` §Per-frame clip-time advance) |
@@ -255,9 +261,23 @@ The deform loop has three variants selected by a per-actor blend-mode word:
   transformed once, then copied to merged duplicates).
 
 The per-actor mode word is read from a fixed field on the actor object each frame and dispatches to the
-matching deform routine. For a faithful modern re-implementation, **Mode 0 is the one to port**; Modes
-1 and 2 are optimizations of the single-influence case and produce the same result whenever every
-vertex has exactly one influence.
+matching deform routine. The mode selector lives at **SkinSet +0x6E8** (1768 bytes from the SkinSet
+base): value 0 → Mode 0 (full LBS), value 1 → Mode 1 (rigid major), value 2 → Mode 2 (rigid owned).
+For a faithful modern re-implementation, **Mode 0 is the one to port**; Modes 1 and 2 are optimizations
+of the single-influence case and produce the same result whenever every vertex has exactly one influence.
+
+> **GPU vertex buffer — confirmed (deep-cartography pass, f61f66a9).** The deformed CPU vertices are
+> uploaded each frame into a **per-actor dynamic D3D9 vertex buffer** with the following parameters:
+>
+> | Parameter | Value | D3D9 constant |
+> |-----------|-------|---------------|
+> | FVF | 0x112 | D3DFVF_XYZ (0x002) \| D3DFVF_NORMAL (0x010) \| D3DFVF_TEX1 (0x100) |
+> | Stride | 32 bytes | `vertcount × 32` bytes allocated; stride `<< 5` = ×32 |
+> | Usage | 0x208 | D3DUSAGE_DYNAMIC (0x200) \| D3DUSAGE_WRITEONLY (0x008) |
+> | Pool | 0 | D3DPOOL_DEFAULT (required for dynamic VBs) |
+> | Lock flags | 0x2000 | D3DLOCK_DISCARD (one lock per frame, entire buffer replaced) |
+>
+> The locked buffer is filled via `memcpy(VB + 32 × skinpart.baseVtxOffset, skinpart.deformBuffer, 32 × coreskin.renderVtxCount)` per skin part, then unlocked and drawn indexed. VB-pointer and vertex-count container fields reside at **SkinSet +0x4F0** (1264) and **SkinSet +0x4F8** (1272) respectively. The FVF order (XYZ → NORMAL → UV) matches the 32-byte render-vertex layout documented in §2.1. See `Docs/RE/structs/anim_runtime.md` for the `SkinSet` mode field.
 
 ---
 
@@ -277,9 +297,13 @@ This 32-byte render vertex is **derived** from the on-disk `.skn` 24-byte vertex
 see `formats/mesh.md` §Vertex table) plus the per-corner UVs from the face table. Concretely the
 loader writes the render position from the on-disk vertex's **last** three floats and the render
 normal from its **first** three floats (the disk record is normal-then-position), and stores
-`uv.v` as `1.0 − v`. Render vertices are **deduplicated by position** (an absolute-value epsilon of
-≈ 0.001 per axis) so shared triangle corners collapse to one skinned vertex; a corner→unique-vertex
-index map and a vertex→owner (rigid-merge) table are built at load.
+`uv.v` as `1.0 − v`. Render vertices are **deduplicated by vertex_index and UV**: the collapse test is vertex_index
+equality plus logf(Δuv_u) < 0.001 and logf(Δuv_v) < 0.001 on the two corner UV floats (genuine
+`logf` call, confirmed deep-cartography pass, f61f66a9). Two corners collapse to one render vertex
+iff they share the same on-disk `vertex_index` AND both UV differences test below 0.001 under the
+log. A corner→unique-vertex index map is built at load. A **separate** position weld (epsilon 0.2,
+`Vec3ApproxEqual`) then builds the rigid-owned ownership table consumed by deform mode 2 — it is
+a post-dedup step, not the dedup criterion.
 
 > **Epsilon-test note (partially resolved).** Three epsilon tests in this pipeline:
 >
@@ -293,10 +317,11 @@ index map and a vertex→owner (rigid-merge) table are built at load.
 >   divide-by-zero; the blending outcome is behaviorally equivalent to an epsilon clamp for typical
 >   weights. See §6.2.
 >
-> - The **per-axis vertex-dedup tolerance here** (this §2.1 test) still surfaces as a log-shaped
->   intrinsic compared against 0.001 and has **not** been re-checked this audit pass. Whether it is
->   also a genuine `logf` or a plain absolute-value compare remains `capture/debugger-pending`; treat
->   it as a 0.001 per-axis absolute-value tolerance until confirmed.
+> - The **vertex-dedup test** (this §2.1) is now **CONFIRMED (deep-cartography pass, f61f66a9)**:
+>   the log-shaped intrinsic IS a genuine `logf` call, applied to the **UV delta per component** (not
+>   to position). The collapse test is logf(Δuv_u) < 0.001 and logf(Δuv_v) < 0.001; the 0.001 floor
+>   is real. This replaces the earlier "per-axis absolute-value position epsilon" framing — the position
+>   weld (0.2) is a separate rigid-ownership post-dedup step, not the dedup criterion itself.
 
 ### 2.2 Runtime influence (weight) record
 

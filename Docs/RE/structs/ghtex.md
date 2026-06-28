@@ -6,6 +6,16 @@
 > ida_reverified: 2026-06-27 · ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > subsystems: [resource_handles, texture_caching, direct3d_integration]
 > C# implementation: `MartialHeroes.Assets.Vfs`
+> deep-3d-cartography (2026-06-29, static-only, ida_anchor f61f66a9): GHTex +0x30 gap row added —
+> 4-byte field between GHandle base (+0x00..+0x2F) and m_nSchedulerIndex (+0x34) is ctor-uninitialised
+> by both GHandle__ctor and GHTex__ctor; required for struct-size closure (GHandle 48 B + 4 B gap +
+> 6 dwords = 76 B total). Access scan needed to determine whether an out-of-ctor path writes it.
+> **Wave-3 reconciliation (2026-06-28):** §1.3 and §1.4 corrected per `Docs/RE/structs/texture_manager.md`
+> (wave-2; authoritative for the container/manager layout). Corrections: the dedup cache key is a 32-bit
+> numeric texture id, not a path pointer (`void*`); no refcount increment on a cache hit; `GTextureManager +0x00`
+> is an owner slot, not a vtable pointer; `FrameTickScheduler` is a single static-storage instance (eviction
+> trigger corrected in §3.B). Per-texture object layout (`GHandle`, `GHTex`) in this spec is unaffected.
+> Full `GTexture`, `GTextureManager`, and `FrameTickScheduler` layouts: `Docs/RE/structs/texture_manager.md`.
 
 ---
 
@@ -32,7 +42,8 @@
 
 | Offset | Size (Bytes) | Type | Field Name | Description |
 |:---:|:---:|:---|:---|:---|
-| `+0x00` | 48 | `—` | `GHandle` | Base class payload. |
+| `+0x00` | 48 | `—` | `GHandle` | Base class payload (fields +0x00..+0x2F). |
+| `+0x30` | 4 | `—` | *(ctor-uninitialised gap)* | Not written by `GHandle__ctor` or `GHTex__ctor`. Required for size closure (48 + 4 + 24 = 76 bytes). Reserved or populated by an out-of-ctor path. `[debugger-confirm: access scan for GHTex+0x30 reads/writes outside ctors]` |
 | `+0x34` | 4 | `int32_t` | `m_nSchedulerIndex` | Index of the scheduler slot, set to `-1` if inactive. |
 | `+0x38` | 4 | `int32_t` | `m_nUnknown` | Initialized to `-1`. |
 | `+0x3C` | 4 | `D3DFORMAT` | `m_dwFormat` | Direct3D texture format (e.g. `D3DFMT_A8R8G8B8`). |
@@ -49,7 +60,11 @@
 | `+0x00` | 4 | `void*` | `vptr` | Virtual table pointer for `GTexture`. |
 | `+0x04` | 4 | `uint32_t` | `m_dwRefCount` | Reference counter. |
 | `+0x34` | 4 | `Diamond::GHTex*` | `m_pGHTex` | Pointer to the underlying resource handle. |
-| `+0x38` | 4 | `void*` | `m_pKey` | Identifier key used for cache lookup (typically the pointer to the path). |
+| `+0x38` | 4 | `uint32_t` | `m_nCacheKey` | Copy of the numeric texture id used as the dedup map key. Derived by parsing the leading digits of the filename with `atol`; no path pointer is stored in the map. (Wave-1 read this as `void* m_pKey` "pointer to the path" — corrected by `Docs/RE/structs/texture_manager.md §3`.) |
+
+> **Refcount note (wave-3):** `m_dwRefCount` (`+0x04`) is incremented to `1` only at first cache insertion.
+> No refcount increment occurs on a cache hit; callers manage subsequent releases.
+> See `Docs/RE/structs/texture_manager.md §3` for the full `GTexture` layout including the fields omitted above.
 
 ### 1.4 `Diamond::GTextureManager`
 - **Size:** 16 bytes (`0x10`)
@@ -57,8 +72,8 @@
 
 | Offset | Size (Bytes) | Type | Field Name | Description |
 |:---:|:---:|:---|:---|:---|
-| `+0x00` | 4 | `void*` | `vptr` | Virtual table pointer for `GTextureManager`. |
-| `+0x04` | 12 | `std::map<void*, GTexture*>` | `m_mapTextures` | Red-black tree caching active textures by lookup keys. |
+| `+0x00` | 4 | `void*` | owner slot | Host-singleton header; read but not written by the cache methods. There is no class vtable on the cache path. (Wave-1 read this as `vptr` — corrected by `Docs/RE/structs/texture_manager.md §2`.) |
+| `+0x04` | 12 | `std::map<uint32_t, GTexture*>` | `m_mapTextures` | Red-black tree caching active textures by numeric texture id. The key is a `uint32_t` derived by parsing the leading digits of the filename. (Wave-1 read this as `std::map<void*, GTexture*>` — corrected by `Docs/RE/structs/texture_manager.md §2`.) |
 
 ---
 
@@ -93,6 +108,13 @@
    - Inserts `GTexture*` into `m_mapTextures`.
 
 ### B. Garbage Collection & Eviction
+
+> **Correction (wave-3):** The wave-1 eviction trigger below ("scan of `m_mapTextures`, refcount == 0") is
+> superseded. Per `Docs/RE/structs/texture_manager.md §4–§5` the authoritative model is: a single
+> static-storage `FrameTickScheduler` sweeps the effect ring per-frame at approximately 1.1% per frame.
+> Eviction fires on idle-interval expiry (`schedulerClock − lastAccessTime > idleInterval`), not on
+> `refcount == 0`. The `GHTex_Unload` behavior described below remains accurate.
+
 - A periodic scan sweeps `m_mapTextures`.
 - If a texture wrapper's reference count is 0 and the elapsed time since `m_dwLastAccessTime` exceeds `m_dwTimeout` (3 minutes), the manager triggers `GHTex_Unload`.
 - `GHTex_Unload` calls `Release()` on the D3D texture pointer, frees it, resets `m_bLoaded = 0`, and subtracts its footprint from the global VRAM byte counter (`g_vramBytesAllocated`).

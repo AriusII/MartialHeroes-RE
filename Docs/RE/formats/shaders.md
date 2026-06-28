@@ -21,10 +21,11 @@
 > **ida_reverified:** 2026-06-27 (CYCLE 14, f61f66a9); prior: 2026-06-24 (build 263bd994)
 > **ida_anchor:** f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > **evidence:** [static-ida, vfs-sample]
-> **conflicts:** NONE structural for shader-file content. CYCLE 14 correction: §C5.6b post-chain enable-flag gate polarity corrected (see that section). Prior conflicts note: Three refinements vs the earlier text (not reversals): encoding statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh` not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
+> **conflicts:** NONE structural for shader-file content. CYCLE 14 correction: §C5.6b post-chain enable-flag gate polarity corrected (see that section). Wave-11 correction: toon ramp renderer offset corrected from +0x2B9BC to +0x2B9DC (static-confirmed). Prior conflicts note: Three refinements vs the earlier text (not reversals): encoding statement loosened (code tokens ASCII, comments may carry CP949); `power2dx8.psh` / `power4dx8.psh` not statically string-referenced; power ladder extended from 1/2/4 to 1/2/4/8/16/32 (three further taps physically verified on disk). The exact `toonramp.bmp` band layout remains the only open content item (see Known Unknowns).
+> **wave-11 deep-dive (f61f66a9, 2026-06-28):** full shader-create API sequence resolved (exact D3DXAssembleShader arguments + PS-create idiom); VS-create ANOMALY discovered — the cel "vertex shader" handle is produced by calling `CreateVertexShader` with a D3DVERTEXELEMENT9 declaration array (not assembled `.vsh` bytecode), and the assembled `dotoonshading.vsh` token stream is released unused; glow/power PS handle (+0x2B6D4) and composite PS handle (+0x2B6D8) added to field map; all three RT texture/surface/RTS triples and glow divisors added; c4 light-direction source field offsets confirmed; composite PS-constant sources (+0x2BB48 / +0x2BB4C) and glow-path slot (+0x2BB54) added; per-pass D3DTSS/D3DSAMP/FVF cascades for bright-copy, glow-blur, composite, and present-blit passes fully decoded (see §C5.6c); §C5.6b gate-polarity open item subsumed by VS-create anomaly (see §C5.6b).
 >
 > **spec_status:** sample_verified (10 shader files cross-confirmed; all five runtime-assembled shaders read)
-> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27)
+> **date:** 2026-06-11 (re-verified 2026-06-21; CYCLE 11 addition 2026-06-23; re-verified 2026-06-24; CYCLE 14 correction 2026-06-27; Deep-3D 2026 fixed-function pipeline addition 2026-06-28; wave-11 deep-dive 2026-06-28)
 
 ---
 
@@ -175,7 +176,7 @@ and the active tap is selected by the `DISPLAY_POWER` key in `display.lua` (ship
 
 | Filename | Extension | Shader model | Role | Sample status |
 |----------|-----------|-------------|------|---------------|
-| `dotoonshading.vsh`  | .vsh | vs.1.1 | Cel-shading vertex shader: world-view-projection transform, two-light Lambert diffuse, emits luminance-based UV on output texcoord 1 for toon LUT lookup | VERIFIED |
+| `dotoonshading.vsh`  | .vsh | vs.1.1 | Cel-shading vertex shader: world-view-projection transform, two-light Lambert diffuse, emits luminance-based UV on output texcoord 1 for toon LUT lookup. **Wave-11 note:** the runtime assembles this file but its bytecode is discarded — `CreateVertexShader` is called with a D3DVERTEXELEMENT9 declaration array instead (see §C5.6b-ANOMALY). Whether this shader ever executes on the live client is `[debugger-confirm]`. | VERIFIED (source content); runtime execution status [debugger-confirm] |
 | `power1dx8.psh`      | .psh | ps.1.1 | Glow/bloom downsample pass 1: base texture sample, scale by `c0` | VERIFIED (string-referenced) |
 | `dotoonshading.psh`  | .psh | ps.1.1 | Cel tone pixel shader — **normal** render state: `base × toonRamp`, ×2, brightness-modulated by per-state MULTI (`c0`) and ADD (`c1`); alpha passes through the lit value | VERIFIED (string-referenced) |
 | `dotoonshading2.psh` | .psh | ps.1.1 | Cel tone pixel shader — **stealth / 은신 (invisible)** render state: identical arithmetic to the normal shader except alpha is taken from `c1.w` (the per-state ADD's w drives the stealth fade) | VERIFIED (string-referenced) |
@@ -207,6 +208,18 @@ The D3D9 assembler is called with flags value `0` at all observed call sites (no
 and passes them to the runtime "assemble from buffer" call; the disk fallback passes the bare relative
 path to the runtime "assemble from file" call. Both call sites pass the assembler flags argument as `0`.
 The text buffer is handed over verbatim — no game-side preprocessing precedes assembly.
+
+**Wave-11 static deep-dive — exact API arguments (build f61f66a9):**
+
+Each of the five shaders is assembled with flags = 0:
+- **VFS branch:** `D3DXAssembleShader(bufferPtr, length, pDefines=0, pInclude=0, Flags=0, ppShader=&outBuffer, ppErrorMsgs=0)`
+- **Disk fallback:** `D3DXAssembleShaderFromFileA(path, pDefines=0, pInclude=0, Flags=0, ppShader=&outBuffer, ppErrorMsgs=0)`
+
+The returned `outBuffer` is an `ID3DXBuffer`. Its vtable: `Release` at slot 2 (+0x08); `GetBufferPointer` at slot 3 (+0x0C).
+
+**Pixel-shader creation idiom (four PS, standard D3D9):** `bytecodePtr = ID3DXBuffer::GetBufferPointer(outBuffer)` → `hr = device->CreatePixelShader(bytecodePtr, &handleField)` (device vtable +0x1A8, slot 106) → `ID3DXBuffer::Release(outBuffer)` → `if (hr < 0) return 0`. This is the correct PS-create idiom.
+
+**Vertex-shader creation — ANOMALY (see §C5.6b-ANOMALY):** the cel "vertex shader" does NOT follow the PS idiom. The assembled `dotoonshading.vsh` token buffer is released unused. Instead, `device->CreateVertexShader` (device vtable +0x16C, slot 91) is called with a hand-built **D3DVERTEXELEMENT9 declaration array** as its first argument. The produced handle is stored at renderer `+0x2B890` and later bound via `SetVertexShader`. A conformant D3D9 runtime rejects a declaration array in place of a shader token stream (which must begin with the version token `0xFFFE0101`) — this is the static mechanism most consistent with `Renderer_InitCelGlowShaders` failing at the first shader-create step.
 
 ---
 
@@ -444,12 +457,12 @@ duplicate them.
    `specs/rendering.md` §6).
 2. It loads the toon ramp LUT (`data/shader/toonramp.bmp`) into its dedicated slot (1-D N·L ramp,
    bound to **texture stage 1**).
-3. It builds the inline cel vertex declaration (stream-0 stride 32: XYZ at 0, NORMAL at 12,
-   TEXCOORD0 at 24, plus the N·L luminance channel — see `specs/rendering.md` §5.2), then assembles
-   the five shaders in order: `dotoonshading.vsh` → `dotoonshading.psh` → `dotoonshading2.psh` →
-   `finaldx8.psh` → the editable-slot glow shader (default `power1dx8.psh`). Each is created as a
-   device vertex or pixel shader and stored on the renderer; the temporary assembly object is
-   released.
+3. It assembles the five shaders in order: `dotoonshading.vsh` → `dotoonshading.psh` → `dotoonshading2.psh` →
+   `finaldx8.psh` → the editable-slot glow shader (default `power1dx8.psh`). The four pixel shaders
+   use the standard idiom: assemble → `GetBufferPointer` → `CreatePixelShader` → release buffer.
+   The cel vertex shader follows an anomalous path: the assembled `.vsh` buffer is released unused,
+   and `CreateVertexShader` is instead called with a hand-built D3DVERTEXELEMENT9 declaration array
+   (see §C5.6b-ANOMALY). Each shader handle is stored on the renderer; see the renderer field map above.
 4. **Per-frame use:** the cel constants `c4`–`c10` (including the BT.601 luma vector `c9`) are
    uploaded each frame. Once per skinned-character draw, the cel bind site binds the toon ramp to
    **texture stage 1**, sets the cel vertex shader, then sets the **stealth** cel pixel shader
@@ -542,19 +555,32 @@ The format for all three is the device backbuffer adapter format. Pass order:
 
 Net composite arithmetic (SAMPLE-VERIFIED from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`. See §C5.6 step 4 and the Re-authoring Guidance.
 
-**Post-chain enable flag — CYCLE 14 CORRECTION: gate PASSES on build f61f66a9; bloom+cel structurally ON (debugger confirm pending):**
+**Post-chain enable flag — CYCLE 14 + wave-11 analysis:**
 
 > **CYCLE 14 correction (f61f66a9, 2026-06-27) — prior CYCLE 11 "permanently off" finding REFUTED
 > on this build.** The CYCLE 11 analysis (build 263bd994) concluded the enable flag was never set
 > because gate condition 2 was read as requiring option index 12 to equal 0. CYCLE 14 static
 > re-analysis of build f61f66a9 finds the gate condition is `option index 12 == 1` — and since the
 > options loader hardcodes that slot to 1 unconditionally, the gate **passes** on every run.
-> **Open question (HIGH-STAKES):** static analysis cannot determine whether (A) the CYCLE 11
-> gate-polarity reading was always a spec misread (bloom was always ON in the real client) or (B)
-> the f61f66a9 build introduced a genuine `== 0 → == 1` polarity flip as part of its ~128-byte
-> `.text` insertion delta. Resolve by comparing the 263bd994 IDB gate condition directly, or by a
-> `?ext=dbg` breakpoint at the device-creation gate and the per-frame fork flag-read. Until confirmed,
-> the CYCLE 14 static result takes precedence over the prior CYCLE 11 reading for this build.
+>
+> **Wave-11 deep-dive (2026-06-28) — VS-create ANOMALY subsumes the gate-polarity debate.** The
+> CYCLE 14 "gate passes" finding was conditioned on `Renderer_InitCelGlowShaders` returning success
+> (gate precondition 1). Wave-11 static analysis finds that this initialiser's first shader-create
+> step calls `CreateVertexShader` (device vtable +0x16C) with a D3DVERTEXELEMENT9 declaration array
+> as its token-stream argument. A conformant D3D9 runtime rejects a non-shader token stream (which
+> lacks the `0xFFFE0101` vs.1.1 version header) with `D3DERR_INVALIDCALL` — so the `if (hr < 0) return 0`
+> guard causes `Renderer_InitCelGlowShaders` to fail at this step on every run. Gate precondition 1
+> therefore fails before precondition 2 is ever tested, the enable flag stays 0, and the world and
+> all characters draw fixed-function. This is the static mechanism most consistent with the corpus
+> observation that the engine is primarily fixed-function — and it makes the §C5.6b gate-polarity
+> question (was it always == 1 or did the build flip it?) operationally moot: even if the gate
+> passes, the initialiser's VS-create step fails first.
+>
+> **[debugger-confirm] Tightened:** at the `CreateVertexShader` call inside `Renderer_InitCelGlowShaders`,
+> read the return value in EAX (expected < 0). Then read renderer field `+0x2D67C` (expected 0) and
+> `+0x2B890` (cel VS handle, expected null/zero). If EAX ≥ 0 and the enable flag becomes non-zero,
+> the cel/post path is genuinely live and the D3DVERTEXELEMENT9 anomaly (§C5.6b-ANOMALY) must be
+> re-examined. Either way, the live EAX of that `CreateVertexShader` call is the single decisive read.
 
 The per-frame fork that selects the offscreen RT path over the direct path reads an enable flag on
 the scene/post object (constructor default: 0 = off). The flag is stored to 2 at **at least two
@@ -598,6 +624,87 @@ cel VS constant upload and the per-draw cel bind (ramp + VS + normal/stealth PS)
   sub-paths (actor draw routines that test the same flag) also require confirmation that they test `!= 0`
   rather than `== 1` before treating them as fully on. `// spec: Docs/RE/formats/shaders.md §C5.6b`
 
+### C5.6b-ANOMALY Cel vertex-shader create anomaly — D3DVERTEXELEMENT9 declaration array (wave-11)
+
+The call to `CreateVertexShader` (device vtable +0x16C, slot 91) inside `Renderer_InitCelGlowShaders`
+is passed a hand-built **D3DVERTEXELEMENT9 array** as its function-token pointer, not the assembled
+`dotoonshading.vsh` bytecode. The array is built immediately before the call. The fully decoded
+stream-0 declaration (each record is an 8-byte D3DVERTEXELEMENT9: Stream/Offset as WORDs, then
+Type/Method/Usage/UsageIndex as BYTEs):
+
+| # | Stream | Offset | Type | Method | Usage | UsageIdx | Meaning |
+|--:|:------:|:------:|:----:|:------:|:-----:|:--------:|---------|
+| 0 | 0 | 0  | 2 (FLOAT3)   | 0 | 0 (POSITION) | 0 | position at byte 0 |
+| 1 | 0 | 12 | 4 (D3DCOLOR) | 0 | 10 (COLOR)   | 0 | diffuse colour at byte 12 |
+| 2 | 0 | 16 | 1 (FLOAT2)   | 0 | 5 (TEXCOORD) | 0 | UV at byte 16 |
+| 3 | 0 | 24 | 2 (FLOAT3)   | 0 | 0 (POSITION) | 1 | position1 at byte 24 |
+| — | 0xFF | 0 | 17 (UNUSED) | 0 | 0 | 0 | D3DDECL_END |
+
+The first dword of this array is `0x00000000` (Stream=0, Offset=0), not the `0xFFFE0101` version
+token that must begin any valid vs.1.1 token stream. A conformant D3D9 runtime therefore rejects
+this argument with `D3DERR_INVALIDCALL`, making `Renderer_InitCelGlowShaders` fail at the first
+shader step and the cel/post enable flag (`+0x2D67C`) stay 0.
+
+The assembled `dotoonshading.vsh` buffer is released immediately after this call — unused. The handle
+stored at renderer `+0x2B890` is the (likely null or error-state) output of the `CreateVertexShader`
+call, not a real compiled vertex shader. The cel-bind sub-routine binds this same handle via
+`SetVertexShader`. `[debugger-confirm]` the live return value of the `CreateVertexShader` call and
+the resulting handle value at `+0x2B890` — see §C5.6b.
+
+### C5.6c Per-pass D3DTSS/D3DSAMP/FVF cascades — cel/post chain (wave-11 static deep-dive)
+
+> Exact state tables for the four passes driven by `Renderer_DrawScene_OffscreenRT_0` when the
+> cel/post enable flag is non-zero. D3D enum legend: see the "D3D enum decode legend" table.
+> FVF 0x102 = XYZ|TEX1 (stride 20); FVF 0x202 = XYZ|TEX2 (stride 28).
+
+#### Bright copy pass (scene TEX0 → bright TEX1)
+
+- Clear(TARGET only, colour 0xFF000000, z=1.0). Z-test on, ZWrite off, lighting off, alpha-blend off.
+- Stage 0: COLORARG1=TEXTURE(2), COLOROP=SELECTARG1(2), ALPHAOP=DISABLE(1).
+- Stages 1/2: COLOROP=DISABLE(1), ALPHAOP=DISABLE(1).
+- Sampler 0: MIN=LINEAR(2), MAG=LINEAR(2), MIP=LINEAR(2).
+- FVF 0x102, stride 20; `DrawPrimitiveUP` (device vtable +332/slot 83), primCount 2.
+- **No pixel shader** — the bright pass is a plain fixed-function copy of the scene RT. No threshold.
+
+#### Glow blur pass (scene TEX0 → glow TEX2)
+
+- Source stage-0 texture = scene RT (`+0x2B9E0 / TEX0`) — not the bright RT.
+- Clear(TARGET, 0xFF000000, z=1.0). Z-test on, ZWrite off, lighting off, alpha-blend off.
+- Stage 0: COLORARG1=TEXTURE(2), COLORARG2=TEXTURE(2), COLOROP=SELECTARG1(2),
+  ALPHAARG1=TEXTURE(2), ALPHAOP=DISABLE(1).
+- Sampler 0: MIN/MAG/MIP=LINEAR(2). FVF 0x102, stride 20.
+- Binds glow/power pixel shader (`+0x2B6D4`) before draw; clears it (`SetPixelShader(0)`) after.
+- **No PS constant uploaded** — the power shader's scale is a `def`-baked literal inside the `.psh`,
+  not a runtime-uploaded constant. (See §C5.7: `power1dx8.psh` body = `tex t0; mul r0, t0, c0` where
+  `c0` is the `def` literal.)
+- Ortho dims = screenW÷glowDivX × screenH÷glowDivY (the downscale; divisors at `+0x2BA40`/`+0x2BA44`).
+
+#### Composite pass (bright TEX1 + glow TEX2 → scene TEX0)
+
+Renders back into the scene RT surface (`+0x2B9EC`) via its RTS helper. World/View = identity, ortho.
+Z-test on, ZWrite off, lighting off, alpha-blend off.
+
+Fixed-function fallback cascade (overridden when the finaldx8 PS is bound):
+- Stage 0: COLORARG1=TEXTURE(2), COLORARG2=TEXTURE(2), COLOROP=ADDSIGNED(8), ALPHAOP=DISABLE(1).
+- Stage 1: COLORARG1=TEXTURE(2), COLORARG2=CURRENT(1), COLOROP=ADDSMOOTH(11), ALPHAOP=DISABLE(1).
+- Stage 2: COLOROP=DISABLE(1), ALPHAOP=DISABLE(1).
+
+Samplers 0 & 1: MIN/MAG/MIP=LINEAR(2). FVF 0x202, stride 28.
+- Upload PS `c0` = renderer `+0x2BB48` broadcast ×4 (BASE_BRIGHT); PS `c1` = `+0x2BB4C` broadcast ×4 (GLOW_BRIGHT).
+- Bind finaldx8 PS (`+0x2B6D8`).
+- Stage-0 texture = bright RT (`+0x2B9E4 / TEX1`); stage-1 texture = glow RT (`+0x2B9E8 / TEX2`).
+- `DrawPrimitiveUP`, primCount 2.
+- Teardown: reset stage-0 to SELECTARG1, clear stage-0/1 textures, `SetPixelShader(0)`.
+- Net arithmetic (PS path, sample-verified from `finaldx8.psh`): `out.rgb = saturate(TEX1 × 2 × c0 + TEX2 × c1)`, `out.a = 1`.
+
+#### Present blit pass (scene TEX0 → backbuffer)
+
+- `BeginScene`; World/View=identity, ortho. Alpha-blend ON, SRCBLEND=ONE(2), DESTBLEND=ZERO(1) — opaque blit.
+- Stage 0: COLORARG1=TEXTURE(2), COLORARG2=TEXTURE(2), COLOROP=SELECTARG1(2), ALPHAOP=DISABLE(1).
+  Stage 1: COLOROP=DISABLE(1), ALPHAOP=DISABLE(1).
+- FVF 0x102, stride 20; stage-0 texture = scene RT (`+0x2B9E0 / TEX0`).
+- Overlay callback, optional FPS counter, `EndScene` (device vtable +168/slot 42).
+
 ### C5.7 Campaign 5 / 5B known unknowns
 
 - **The actual `.psh` / `.vsh` shader-assembly source text** — external VFS files; not in the
@@ -607,6 +714,12 @@ cel VS constant upload and the per-draw cel bind (ramp + VS + normal/stealth PS)
   with opaque alpha — see the Re-authoring Guidance. The `finaldx8.psh` arithmetic confirms (and refines
   the naming of) the earlier prior-lane `saturate(2·edge·c0 + bloom·c1)` summary. The cel vertex
   shader's exact N·L accumulation/ramp-lookup math still lives in `dotoonshading.vsh` (already read).
+  **Wave-11 clarification:** the `power*dx8.psh` glow shaders take **no runtime PS constant upload** —
+  the glow-blur pass does not call `SetPixelShaderConstantF` before drawing. The scale factor (`c0` in
+  `power1dx8.psh`: `mul r0, t0, c0`) is a `def`-baked literal inside the `.psh` file, not a runtime
+  constant. The exact `def c0` value for each power tap requires reading the on-disk `.psh` (VFS,
+  not the executable). The prior re-authoring note "scale by c0" remains accurate but should be read
+  as "scale by the `def`-baked `c0`", not a runtime-uploaded one.
 - **The numeric light-step threshold** — there is none in code; the quantisation lives in
   `toonramp.bmp` (the number of tone steps and the per-step luminance thresholds are in the ramp
   file's pixels, not in the executable).
@@ -624,6 +737,403 @@ cel VS constant upload and the per-draw cel bind (ramp + VS + normal/stealth PS)
 - **The shipped per-state character-brightness numbers** — the `DISPLAY_CHAR_BRIGHT_*` 9-state
   multiply/add table (§C5.5) defaults to white-multiply / zero-add in the binary; the actual shipped
   per-state tints live in the external display configuration file, not in the executable.
+
+---
+
+## Fixed-Function Render-State Pipeline (Deep-3D 2026)
+
+> Added from the Deep-3D 2026 static-analysis pass. This section records the fixed-function
+> (D3D9 SetRenderState / SetTextureStageState / SetSamplerState / SetMaterial / SetTransform)
+> render-state machine that draws the game world, and deepens §C5 with the precise device-call
+> sequence for the programmable cel path. All facts are static-confirmed from decoded D3D
+> literal constants unless tagged `[debugger-confirm]` or `[static-open]`.
+
+### Overview — the engine is primarily fixed-function
+
+Programmable `.psh`/`.vsh` shaders (§C5) are used for **one feature only**: the cel/toon character
+path, gated by the post/offscreen enable flag at renderer field `+0x2D67C` (dword index `[44687]`).
+When that flag is off, even characters draw through a fixed-function multitexture cascade.
+Terrain, buildings, sky, water, particles, sword-light, lens-flare, and all visual effects are
+**100% fixed-function** in all observed builds. This section resolves the recon's open items on
+stage/sampler enum values (+268/+276) and on which draw path fires for each geometry class.
+
+### Per-frame orchestration
+
+`Renderer_DrawScene_Direct` runs the following sequence each frame:
+
+1. Save viewport; set viewport.
+2. `GDevice_ClearTargetAndZ` — clear TARGET and ZBUFFER (combined flag = 3), z = 1.0, stencil = 0.
+   **No stencil-buffer clear.**
+3. `GDevice_BeginScene`.
+4. Install the default opaque texture-stage cascade (see §Default cascade below).
+5. Invoke registered render-pass callbacks in order:
+   - Sky / background pass.
+   - World terrain and buildings pass.
+   - Culled opaque scene (static meshes + characters) — inherits the default cascade.
+   - Opaque-world extras, water, and decals pass.
+   - Transparent and particles pass (chained inline here when the post flag is off; driven by
+     `Renderer_DrawScene_OffscreenRT_0` when on — see §C5.6b).
+   - Overlay / HUD callback, FPS, EndScene, Present.
+
+Passes do **not** save/restore a full device state block. Each pass overwrites its required states
+and relies on the subsequent pass to set what it needs.
+
+### Device IDirect3DDevice9 vtable offset map
+
+All render calls go through the device pointer at renderer field `+0x2B738` (dword index `[44494]`).
+Offsets decoded from literal call displacements; slot = offset ÷ 4.
+
+| Offset | Slot | D3D9 method |
+|---:|---:|---|
+| +32  | 8  | GetDisplayMode |
+| +68  | 17 | Present |
+| +104 | 26 | CreateVertexBuffer |
+| +108 | 27 | CreateIndexBuffer |
+| +164 | 41 | BeginScene |
+| +168 | 42 | EndScene |
+| +172 | 43 | Clear |
+| +176 | 44 | SetTransform |
+| +180 | 45 | GetTransform |
+| +188 | 47 | SetViewport |
+| +192 | 48 | GetViewport |
+| +196 | 49 | SetMaterial |
+| +228 | 57 | SetRenderState |
+| +260 | 65 | SetTexture |
+| +268 | 67 | SetTextureStageState |
+| +276 | 69 | SetSamplerState |
+| +328 | 82 | DrawIndexedPrimitive |
+| +332 | 83 | DrawPrimitiveUP |
+| +336 | 84 | DrawIndexedPrimitiveUP |
+| +356 | 89 | SetFVF |
+| +364 | 91 | CreateVertexShader |
+| +368 | 92 | SetVertexShader |
+| +376 | 94 | SetVertexShaderConstantF |
+| +400 | 100 | SetStreamSource |
+| +416 | 104 | SetIndices |
+| +424 | 106 | CreatePixelShader |
+| +428 | 107 | SetPixelShader |
+| +436 | 109 | SetPixelShaderConstantF |
+
+This corroborates the existing recon vtable key (Clear at +172, etc.) and resolves the prior open
+items: +268 = SetTextureStageState, +276 = SetSamplerState.
+
+### IDB state-thunk name polarity corrections
+
+Several IDB-assigned canonical names for render-state wrapper functions are **misleading about
+enable/disable polarity**. The true operation was decoded from the literal (state, value) bytes in
+each function body. Use the "True D3D call" column; disregard the name polarity.
+
+| Canonical name | True D3D call | Note |
+|---|---|---|
+| `GDevice_SetLightingEnable` | SetRenderState(LIGHTING=137, **0**) | Name implies enable; actually DISABLES |
+| `GDevice_SetRenderState137_On` | SetRenderState(LIGHTING=137, **1**) | Enables lighting |
+| `GDevice_SetZBufferEnable` | SetRenderState(ZENABLE=7, **0**) | Name implies enable; actually DISABLES |
+| `RenderDevice_SetRenderState7_On` | SetRenderState(ZENABLE=7, **1**) | Enables z-test |
+| `GDevice_DisableZWrite` | SetRenderState(ZWRITEENABLE=14, **0**) | Disables z-write |
+| *(z-write-on thunk — no canonical name assigned)* | SetRenderState(ZWRITEENABLE=14, **1**) | Enables z-write |
+| `GDevice_SetAlphaTestEnable` | SetRenderState(ALPHATESTENABLE=15, **0**) | Name implies enable; actually DISABLES |
+| `GDevice_EnableAlphaTest` | SetRenderState(ALPHATESTENABLE=15, **1**) | Enables alpha test |
+| `GDevice_SetAlphaBlendEnable` | SetRenderState(ALPHABLENDENABLE=27, **1**) | Enables blend |
+| `GDevice_DisableAlphaBlend` | SetRenderState(ALPHABLENDENABLE=27, **0**) | Disables blend |
+| `GDevice_SetSrcBlend` | SetRenderState(SRCBLEND=19, arg) | Arg-driven |
+| `GDevice_SetDestBlend` | SetRenderState(DESTBLEND=20, arg) | Arg-driven |
+| `GDevice_SetCullMode` | SetRenderState(CULLMODE=22, arg) | Arg-driven |
+| `GDevice_SetFillMode` | SetRenderState(FILLMODE=8, arg) | Arg-driven |
+| *(shade-mode thunk — no canonical name assigned)* | SetRenderState(SHADEMODE=9, arg) | Arg-driven |
+| `GDevice_EnableFog` | SetRenderState(FOGENABLE=28, 1) | Enables fog |
+| `RenderDevice_DisableFog` | SetRenderState(FOGENABLE=28, 0) | Disables fog |
+| `GDevice_SetDitherEnable` | SetRenderState(DITHERENABLE=26, **0**) | Name implies enable; actually DISABLES |
+
+**Transform-thunk corrections.** Transform wrapper functions carry incorrect names in the IDB:
+- `RenderDevice_GetWorldTransform` actually issues **SetTransform(WORLD = 256, matrix)**.
+- A "SetTransform_World0" thunk actually issues **SetTransform(PROJECTION = 3, matrix)**.
+- "SetTransform_View" thunks issue **SetTransform(VIEW = 2, matrix)** and set a dirty flag at
+  renderer field `+0x2B9A0`.
+- The terrain world matrix is the **identity** — terrain vertices are pre-baked in world space;
+  no per-frame world-space transform is applied on the GPU.
+
+### D3D enum decode legend
+
+Values in the pass state tables use the following D3D9 constant mappings, decoded from literal
+call bytes:
+
+- **D3DTOP (COLOROP/ALPHAOP):** 1=DISABLE 2=SELECTARG1 3=SELECTARG2 4=MODULATE 5=MODULATE2X
+  6=MODULATE4X 7=ADD 8=ADDSIGNED 11=ADDSMOOTH.
+- **D3DTA (texture argument):** 0=DIFFUSE 1=CURRENT 2=TEXTURE 3=TFACTOR 4=SPECULAR.
+- **D3DTSS index:** 1=COLOROP 2=COLORARG1 3=COLORARG2 4=ALPHAOP 5=ALPHAARG1 6=ALPHAARG2
+  11=TEXCOORDINDEX 24=TEXTURETRANSFORMFLAGS.
+- **D3DSAMP index:** 1=ADDRESSU 2=ADDRESSV 5=MAGFILTER 6=MINFILTER 7=MIPFILTER.
+- **D3DTEXF (filter):** 0=NONE 1=POINT 2=LINEAR 3=ANISOTROPIC.
+- **D3DTADDRESS (wrap mode):** 1=WRAP 2=MIRROR 3=CLAMP 4=BORDER.
+- **D3DBLEND:** 1=ZERO 2=ONE 3=SRCCOLOR 4=INVSRCCOLOR 5=SRCALPHA 6=INVSRCALPHA 7=DESTALPHA
+  8=INVDESTALPHA 9=DESTCOLOR 10=INVDESTCOLOR 11=SRCALPHASAT.
+- **D3DCULL:** 1=NONE 2=CW 3=CCW. **D3DFILL:** 1=POINT 2=WIREFRAME 3=SOLID. **D3DSHADE:** 1=FLAT 2=GOURAUD 3=PHONG.
+- **D3DTS (transform state):** 2=VIEW 3=PROJECTION 16=TEXTURE0 17=TEXTURE1 256=WORLD.
+- **D3DTTFF:** 0=DISABLE; COUNT1–COUNT4 = 1–4; PROJECTED = 256; combined 260 = PROJECTED|COUNT4
+  (used for the terrain dynamic shadow stage).
+- **D3DTSS_TCI mode bits:** 0=PASSTHRU; 0x10000=CAMERASPACENORMAL; 0x20000=CAMERASPACEPOSITION.
+
+### Default opaque texture-stage cascade
+
+Before the culled opaque scene is drawn, `Renderer_DrawScene_Direct` installs this base cascade —
+the engine's signature "MODULATE2X" output:
+
+| Stage | COLOROP | COLORARG1 | COLORARG2 | ALPHAOP |
+|---:|---|---|---|---|
+| 0 | MODULATE2X (5) | TEXTURE (2) | DIFFUSE (0) | DISABLE (1) |
+| 1 | DISABLE (1) | — | — | DISABLE (1) |
+| 2 | DISABLE (1) | — | — | DISABLE (1) |
+
+Net stage-0 color = `texture.rgb × vertex_diffuse.rgb × 2`; alpha from vertex diffuse.
+**Sampler 0:** MINFILTER=ANISOTROPIC (3), MAGFILTER=ANISOTROPIC (3), MIPFILTER=LINEAR (2).
+This resolves the prior recon open item on the "+268/+276 stage/sampler block" encoding.
+
+### Per-pass render-state recipes
+
+#### Sky / background pass (`RenderPass_SkyAndBackground`)
+
+Drawn first with no depth buffer, so sky fills the entire framebuffer before world geometry.
+
+- **Render states:** LIGHTING=0, FOGENABLE=0, ZWRITEENABLE=0, ZENABLE=0, ALPHABLENDENABLE=0,
+  ALPHATESTENABLE=0, FILLMODE=SOLID (3), CULLMODE=NONE (1), SHADEMODE=GOURAUD (2),
+  POINTSPRITEENABLE=0, POINTSCALEENABLE=0.
+- **Samplers 0/1/2:** MIN/MAG/MIP=LINEAR (2), ADDRESSU/V=WRAP (1).
+- **Sky model meshes:** stage-0 COLORARG1=TEXTURE, COLOROP=SELECTARG1 (2) — unlit, texture-only;
+  CULLMODE=CW (2) for the closed sky mesh faces.
+- **Stardome:** WORLD set to a sky-locked (camera-following) matrix; ALPHABLENDENABLE=1,
+  SRCBLEND=SRCALPHA (5), DESTBLEND=ONE (2) — **additive blending**.
+- **Weather and cloud billboards:** SRCBLEND=SRCALPHA (5), DESTBLEND=INVSRCALPHA (6) — alpha blend;
+  cloud dome uses the same blend.
+
+#### World terrain and buildings pass (`RenderPass_WorldTerrainAndBuildings`)
+
+- WORLD=identity; default MODULATE2X cascade active; sampler-0 MIN/MAG/MIP=LINEAR (2) — terrain
+  uses LINEAR, not anisotropic.
+- Per-frame `GDevice_SetMaterial` with the opaque D3DMATERIAL9 record (zero-initialized in static
+  data, values set at runtime — `[debugger-confirm]` for exact diffuse/ambient/specular).
+- LIGHTING=1, FOGENABLE=1, ZWRITEENABLE=1, ZENABLE=1, ALPHABLENDENABLE=0, ALPHATESTENABLE=0,
+  CULLMODE=CW (2).
+- **Near buildings:** sampler-0 ADDRESSU/V=WRAP (1).
+- **Far buildings:** sampler-0 ADDRESSU/V=MIRROR (2).
+
+**Terrain ground — two-stage multitexture with projected dynamic shadow:**
+
+- SetTexture(stage 1) = the runtime dynamic shadow texture. Stage-1 transform matrix = the dynamic
+  shadow projection matrix (saved around the draw; restored afterward).
+- Stage 1: TEXCOORDINDEX=CAMERASPACEPOSITION (0x20000); TEXTURETRANSFORMFLAGS=PROJECTED|COUNT4
+  (260); COLORARG1=TEXTURE (2), COLORARG2=CURRENT (1), COLOROP=MODULATE (4), ALPHAOP=DISABLE (1).
+- Sampler 1: MAGFILTER=NONE (0), MIPFILTER=NONE (0), ADDRESSU/V=CLAMP (3) — shadow does not tile.
+- Sampler-0 ADDRESSU/V=MIRROR (2) during the ground draw; restored to WRAP (1) afterward.
+- **Net terrain shading:** `(ground_texture × diffuse × 2) × projected_shadow_texture` — the
+  stage-0 MODULATE2X base multiplied by the camera-space-position-projected dynamic shadow on stage 1.
+- After the draw, stage-1 texture, transform, TEXCOORDINDEX, and TEXTURETRANSFORMFLAGS are cleared;
+  sampler 1 reverts to LINEAR.
+- Between-layer terrain texture blending (where different ground textures meet) is handled as a
+  separate alpha-blended overlay in `RenderPass_OpaqueWorld`, not in this pass.
+
+#### Opaque-world extras, water, and decals pass (`RenderPass_OpaqueWorld`)
+
+- LIGHTING=1; default MODULATE2X cascade; sampler-0 LINEAR + WRAP.
+- Per-frame `GDevice_SetMaterial` with the opaque D3DMATERIAL9 record. ZWRITEENABLE=0; ZENABLE=1;
+  ALPHATESTENABLE=0; ALPHABLENDENABLE=1; D3DRS_TEXTUREFACTOR (60) = 0x50505050 (ARGB 80,80,80,80).
+- **Alpha-blended terrain/building overlay sub-pass** (between-layer texture blend):
+  stage-0 ALPHAARG1=TEXTURE, ALPHAOP=MODULATE (4); SRCBLEND=SRCALPHA (5),
+  DESTBLEND=INVSRCALPHA (6); draws terrain-layer alpha overlay geometry.
+- CULLMODE=NONE (1). Per-frame `GDevice_SetMaterial` with the effects D3DMATERIAL9 record
+  (zero-initialized in static data, values set at runtime — `[debugger-confirm]`). A two-stage
+  animated/scrolling block: stage-0 COLOROP=MODULATE (4); stage-1 with its own
+  TEXTURETRANSFORMFLAGS and COLOROP=MODULATE2X (5), ALPHAOP=ADDSMOOTH (11); draws water, effects,
+  and sky-decal geometry.
+- **Final extras sub-pass:** ALPHATESTENABLE=1; textured screen quads drawn via the alpha-test path.
+  LIGHTING=0, FOGENABLE=0, sampler-0 MIPFILTER=NONE (0); `ActorShadow_DrawBlobQuads` (blob shadow
+  billboards).
+
+**Post-path coupling (within this pass):** when the post/offscreen enable flag (`+0x2D67C`, dword
+`[44687]`) is **off**, `RenderPass_TransparentAndParticles` is called inline at the end of this
+pass; when **on**, `Renderer_DrawScene_OffscreenRT_0` drives the transparent pass separately (§C5.6b).
+
+#### Transparent and particles pass (`RenderPass_TransparentAndParticles`)
+
+- Per-frame `GDevice_SetMaterial` with the opaque D3DMATERIAL9 record. CULLMODE=NONE (1),
+  ZWRITEENABLE=0, ZENABLE=1, ALPHATESTENABLE=0, LIGHTING=0, FOGENABLE=0, ALPHABLENDENABLE=1;
+  D3DRS_TEXTUREFACTOR (60) = 0xFF505050.
+- **First effect batch** (cross-effects and joint effects): SRCBLEND=ONE (2), DESTBLEND=INVSRCCOLOR (4).
+- Then SRCBLEND=SRCALPHA (5), DESTBLEND=INVSRCALPHA (6); SetFVF = 0x142 (XYZ|DIFFUSE|TEX1 = 24 B).
+- **Sword-light effects:** SRCBLEND=DESTCOLOR (9), DESTBLEND=SRCALPHA (5) — modulate-style glow.
+- **Sky / weather particles:** SRCBLEND=SRCALPHA (5), DESTBLEND=INVSRCALPHA (6).
+- **Particle effect list draw.**
+- **Lens-flare:** SRCBLEND=SRCALPHA (5), DESTBLEND=ONE (2) — **additive**.
+
+**Blend recipe summary by effect class:**
+
+| Effect class | SRCBLEND | DESTBLEND | Mode |
+|---|---|---|---|
+| Opaque / glass | SRCALPHA (5) | INVSRCALPHA (6) | Standard alpha blend |
+| Stardome / lens-flare / particles | SRCALPHA (5) | ONE (2) | Additive |
+| First xeffect batch | ONE (2) | INVSRCCOLOR (4) | Inverse-colour additive |
+| Sword-light | DESTCOLOR (9) | SRCALPHA (5) | Modulate-style glow |
+
+### Geometry submission and vertex formats (FVF)
+
+Most world geometry is drawn with `RenderDevice_DrawIndexedPrimitiveUP` (user-pointer streams, no
+managed vertex buffer) after setting FVF via `RenderDevice_SetFVF`. The programmable character path
+uses a managed vertex buffer and index buffer. All primitives are **TRIANGLELIST**,
+**INDEX16** (D3DFMT_INDEX16).
+
+| Geometry class | FVF value | Vertex layout | Stride | Draw call |
+|---|---|---|---:|---|
+| Terrain ground subtile | 0x252 (XYZ\|NORMAL\|DIFFUSE\|TEX2) | pos 12 B + normal 12 B + diffuse 4 B + 2 UV sets 16 B | 44 B | `RenderDevice_DrawIndexedPrimitiveUP` (`TerrainSection_DrawLayer`) |
+| Building / mass object | 0x112 (XYZ\|NORMAL\|TEX1) | pos 12 B + normal 12 B + UV 8 B | 32 B | `RenderDevice_DrawIndexedPrimitiveUP` (`BuildingTree_CullAndDraw`) |
+| Transparent / particles | 0x142 (XYZ\|DIFFUSE\|TEX1) | pos 12 B + diffuse 4 B + UV 8 B | 24 B | `RenderDevice_DrawIndexedPrimitiveUP` (transparent pass) |
+| Character (programmable cel) | vertex declaration (not FVF) | XYZ 12 B + normal 12 B + TEXCOORD0 8 B | 32 B | `RenderDevice_DrawIndexedPrimitive` (`Actor_DrawSkinnedCelWithTint`) |
+
+**Terrain ground subtile geometry (byte-verified):** each subtile is a 5×5 vertex grid — 25 vertices
+× 44 bytes = 1 100 bytes total. A shared index template holds 96 unsigned-16 indices forming
+32 triangles over the 4×4 quad grid of the 5×5 vertex patch; `GroundBlend_FillCellIndices` adds a
+per-subtile base offset to each index. The vertex data is assembled by `GroundBlend_CopyCellVertexBlock`
+(the copy length confirms 1 100 bytes). The second UV set (the trailing 16-byte slot in the 44-byte
+stride) feeds the stage-1 projected shadow texture coordinate.
+
+**Vertex and index buffer creation:** `CreateVertexBuffer` (vtable +104) and `CreateIndexBuffer`
+(vtable +108) wrapper functions each take (length, usage, FVF/format, pool, out-handle) and null
+the out-handle on failure. They are called from mesh, particle, and lens-flare initialization paths.
+
+### Fixed-function character path (`Character_DrawSkinnedCelShaded`)
+
+When the post/offscreen enable flag (`+0x2D67C`, dword `[44687]`) is **off** (or the cel initialiser
+failed), `Actor_DrawSkinnedCelWithTint` tail-calls `Character_DrawSkinnedCelShaded` — a CPU-skinned,
+fixed-function multitexture draw:
+
+1. Build pose (`AnimMixer_BuildPose`, `Actor_EvaluatePoseForRender`); CPU deform and upload
+   (`SkinSet_DeformAndUpload`).
+2. **Body (lit) pass — texture-stage cascade:**
+   - Stage 0: COLORARG1=TEXTURE (2), COLORARG2=DIFFUSE (0), COLOROP=SELECTARG1 (2),
+     ALPHAOP=DISABLE (1).
+   - Stage 1: COLORARG1=TEXTURE (2), COLOROP=SELECTARG1 (2) **if** a global second-texture-layer
+     flag is set (outfit / detail overlay; writer unknown — see §Open questions below), else
+     COLOROP=DISABLE (1); ALPHAOP=DISABLE (1).
+   - Stage 2: DISABLE / DISABLE.
+   - Sampler 0: MIN/MAG/MIP=LINEAR (2), ADDRESSU/V=WRAP (1). Sampler 1: ADDRESSU/V=CLAMP (3).
+   - Draw each character sub-mesh via its draw dispatch.
+3. **Overlay / blend pass:**
+   - ZENABLE=0, LIGHTING=0, FOGENABLE=0, DITHERENABLE=0, ALPHATESTENABLE=0,
+     ALPHABLENDENABLE=1, SRCBLEND=SRCALPHA (5), DESTBLEND=INVSRCALPHA (6).
+   - Stage 0: COLOROP=MODULATE (4), ALPHAARG1=TEXTURE, ALPHAARG2=DIFFUSE, ALPHAOP=MODULATE (4).
+   - Sampler 0: MIN/MAG=POINT (1), MIPFILTER=NONE (0).
+
+### Programmable cel bind — device-call sequence (deepens §C5.6)
+
+`Actor_DrawSkinnedCelWithTint` is the programmable character draw. It runs **only** when renderer
+field `+0x2D67C` (dword `[44687]`) is **non-zero**; otherwise it tail-calls
+`Character_DrawSkinnedCelShaded`. When the flag is non-zero, the following device calls execute:
+
+1. **MVP upload to VS constants c0–c3.** Read WORLD (D3DTS 256), VIEW (D3DTS 2), and PROJECTION
+   (D3DTS 3) via GetTransform (vtable +180); compute MVP = WORLD × VIEW × PROJECTION; transpose via
+   D3DXMatrixTranspose; upload to VS register 0, count 4, via SetVertexShaderConstantF (vtable +376).
+   The cel VS (`dotoonshading.vsh`) receives the transposed MVP in c0 for its `m4x4 oPos` transform.
+2. **State index.** Derive a 0–8 integer from the actor's one-hot state field (maps to the nine
+   brightness states of §C5.5).
+3. **PS constants.** Upload PS c0 = `(mulR, mulG, mulB, 1.0)` and PS c1 = `(addR, addG, addB, addW)`
+   via SetPixelShaderConstantF (vtable +436), count 1 each. Source arrays on the renderer:
+   mulR at dword `[44691]`, mulG at `[44700]`, mulB at `[44709]`, addR at `[44718]`,
+   addG at `[44727]`, addB at `[44736]`, addW at `[44745]` (nine entries each).
+   This provides the concrete memory layout for the per-state tint system described in §C5.5.
+4. **Blend states.** FOGENABLE=0; ALPHABLENDENABLE=1; SRCBLEND=SRCALPHA (5),
+   DESTBLEND=INVSRCALPHA (6).
+5. **Shader bind** (the cel-bind sub-routine, parameterised by a per-actor stealth flag):
+   - SetTexture(stage 1) = toon ramp LUT at renderer `+0x2B9DC`.
+   - SetVertexShader (vtable +368) = cel VS handle at renderer `+0x2B890`.
+   - SetPixelShader (vtable +428) = stealth PS (renderer `+0x2B898`) if stealth flag set, else
+     normal PS (renderer `+0x2B894`). Matches the two `.psh` variants of §C5.1.
+6. **Draw.** `RenderDevice_SetStreamSource` (stream 0, vertex buffer, stride 32);
+   `RenderDevice_SetIndices`; `RenderDevice_DrawIndexedPrimitive` (TRIANGLELIST).
+7. **Unbind** (the cel-unbind sub-routine): SetVertexShader(0), SetPixelShader(0),
+   SetTexture(stage 1, 0).
+
+**Renderer field map (cel/post-chain) — wave-11 expanded:**
+
+| Field | Renderer offset | Content |
+|---|---|---|
+| Screen width | `+0x2B6C4` | Backbuffer width (used for RT creation) |
+| Screen height | `+0x2B6C8` | Backbuffer height |
+| Glow/power PS handle | `+0x2B6D4` | Compiled glow shader (default `power1dx8.psh`); bound in glow-blur pass |
+| Composite PS handle | `+0x2B6D8` | Compiled `finaldx8.psh`; bound in composite pass |
+| RTS depth-stencil format | `+0x2B724` | D3DFORMAT value used as depth fmt for `D3DXCreateRenderToSurface` |
+| Device pointer | `+0x2B738` (dword [44494]) | IDirect3DDevice9* |
+| View-dirty flag | `+0x2B9A0` | Set by SetTransform(VIEW) wrapper |
+| Default / white texture | `+0x2B9B8` | Fallback white texture |
+| Cel VS / decl handle | `+0x2B890` | Handle produced by `CreateVertexShader` called with a D3DVERTEXELEMENT9 array (see §C5.6b-ANOMALY); bound via `SetVertexShader` in the cel-bind sub-routine |
+| Cel PS normal handle | `+0x2B894` | Compiled `dotoonshading.psh` device object |
+| Cel PS stealth handle | `+0x2B898` | Compiled `dotoonshading2.psh` device object |
+| Toon ramp texture | `+0x2B9DC` | `data/shader/toonramp.bmp` device texture (corrected from +0x2B9BC — wave-11 static-confirm) |
+| Scene RT texture (TEX0) | `+0x2B9E0` | Scene/cel capture; also composite destination and present source |
+| Bright RT texture (TEX1) | `+0x2B9E4` | Plain fixed-function copy of scene (bright-copy pass) |
+| Glow RT texture (TEX2) | `+0x2B9E8` | Downscaled glow-blur result |
+| Scene RT surface | `+0x2B9EC` | `GetSurfaceLevel(0)` of TEX0 |
+| Bright RT surface | `+0x2B9F0` | `GetSurfaceLevel(0)` of TEX1 |
+| Glow RT surface | `+0x2B9F4` | `GetSurfaceLevel(0)` of TEX2 |
+| Scene RTS helper | `+0x2B9F8` | `ID3DXRenderToSurface` for TEX0 |
+| Bright RTS helper | `+0x2B9FC` | `ID3DXRenderToSurface` for TEX1 |
+| Glow RTS helper | `+0x2BA00` | `ID3DXRenderToSurface` for TEX2 |
+| c4 light dir X | `+0x2BA04` | Live light-direction x → VS `c4.x` (constructor default −1) |
+| c4 light dir Y | `+0x2BA08` | → VS `c4.y` (default 0) |
+| c4 light dir Z | `+0x2BA0C` | → VS `c4.z` (default 0); `c4.w` is forced 0 at upload |
+| Glow divisor X | `+0x2BA40` | screenW ÷ this = glow RT pixel width |
+| Glow divisor Y | `+0x2BA44` | screenH ÷ this = glow RT pixel height |
+| Composite PS c0 source | `+0x2BB48` | BASE_BRIGHT scalar → finaldx8 PS `c0` broadcast ×4 (≈1.05 from display.lua) |
+| Composite PS c1 source | `+0x2BB4C` | GLOW_BRIGHT scalar → finaldx8 PS `c1` broadcast ×4 (≈0.3 from display.lua) |
+| Glow shader path slot | `+0x2BB54` | Editable filename string; constructor default `power1dx8.psh` |
+| Post / cel enable flag | `+0x2D67C` (dword [44687]) | 0 = FF path; non-zero = cel/post path (§C5.6b) |
+| PS tint mulR [0..8] | dword [44691] | Per-state MULTI R, 9 entries |
+| PS tint mulG [0..8] | dword [44700] | Per-state MULTI G, 9 entries |
+| PS tint mulB [0..8] | dword [44709] | Per-state MULTI B, 9 entries |
+| PS tint addR [0..8] | dword [44718] | Per-state ADD R, 9 entries |
+| PS tint addG [0..8] | dword [44727] | Per-state ADD G, 9 entries |
+| PS tint addB [0..8] | dword [44736] | Per-state ADD B, 9 entries |
+| PS tint addW [0..8] | dword [44745] | Per-state ADD W, 9 entries (drives stealth fade via `dotoonshading2.psh` `c1.w`) |
+
+### Render-math details for a faithful port
+
+- **Coordinate handedness.** D3D9 left-handed Y-up. VIEW = inverse-orthonormal of the camera world
+  matrix. WORLD, VIEW, and PROJECTION are separate FF transforms (D3DTS 256, 2, 3). Terrain
+  WORLD = identity.
+- **Default cull = CW.** Opaque world and terrain use D3DCULL_CW (2). Sky, transparent, and the
+  opaque-extras water/effects block use CULLMODE=NONE (1). For a CCW-front Godot port with negated
+  Z, the effective front face must match this CW convention — verify against the recovered geometry Z
+  and mesh X negation documented in `CLAUDE.md`.
+- **MODULATE2X is load-bearing.** The ×2 brightness factor lives in the fixed-function texture
+  stage, not in any shader. Omitting it renders the world at half brightness.
+- **No stencil clear.** Clear passes flags = TARGET|ZBUFFER (3), z = 1.0; stencil is never
+  explicitly cleared.
+- **No programmable terrain or world shaders.** Only the five hand-written ps.1.1/vs.1.1 assembly
+  files (§C5.1) exist, and they are used only on the cel/post character path.
+
+### Open questions (Deep-3D 2026)
+
+1. `[debugger-confirm]` Runtime return of `CreateVertexShader` (device vtable +0x16C) inside
+   `Renderer_InitCelGlowShaders` and the resulting value of renderer field `+0x2D67C` (post/cel
+   enable flag). Wave-11 static analysis predicts the call returns `D3DERR_INVALIDCALL` (< 0)
+   because the argument is a D3DVERTEXELEMENT9 declaration array, not a shader token stream —
+   causing the initialiser to return 0, the enable flag to stay 0, and the whole world to draw
+   fixed-function. Confirm by reading EAX after the call and reading `+0x2D67C` and `+0x2B890`
+   (cel VS/decl handle) live. If EAX ≥ 0 and the flag becomes non-zero, the VS anomaly (§C5.6b-ANOMALY)
+   must be re-examined. This is the single decisive read for the cel/post path status.
+2. `[debugger-confirm]` Live value of VS constant `c4` (light direction): source fields `+0x2BA04`/
+   `+0x2BA08`/`+0x2BA0C` (x/y/z). Constructor default is (−1, 0, 0, 0); gameplay or config may
+   overwrite the three scalar fields. The upload mechanism and source offsets are now static-confirmed;
+   only the live triple is unknown.
+3. `[debugger-confirm]` Runtime contents of the two D3DMATERIAL9 records (opaque and effects) used
+   by the LIGHTING=1 world passes — diffuse, ambient, and specular channels. Both are
+   zero-initialized in static data and written per-frame; read them live after the per-frame setter.
+4. `[static-open]` The global second-texture-layer flag in `Character_DrawSkinnedCelShaded` —
+   enables the stage-1 outfit/detail overlay for FF characters. Trace the writer to determine what
+   activates it (outfit slot change, LOD threshold, or config key).
+5. `[static-open]` Exact D3DTTFF count for the terrain shadow stage-1 TEXTURETRANSFORMFLAGS value
+   (decoded as PROJECTED|COUNT4 = 260). Confirm the literal immediate byte before relying on the
+   projected-coordinate count; PROJECTED|COUNT3 (259) is an alternative if the byte differs.
+6. `[static-open]` Whether the culled opaque static-mesh draw (cull-set node draw dispatch)
+   inherits the frame-body default cascade or sets its own FVF and material — trace
+   `StaticSkin_BuildRenderNode` and the cull-set node draw vtable call.
 
 ---
 

@@ -4,6 +4,24 @@ Ce document décrit en détail la structure, l'organisation en mémoire et les m
 *   [_dirty/scene_graph_analysis.md](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/_dirty/scene_graph_analysis.md)
 *   [_dirty/cycle17_scene_graph_ctors.md](file:///C:/Users/Arius/RiderProjects/MartialHeroes/Docs/RE/_dirty/cycle17_scene_graph_ctors.md)
 
+> **Note de réconciliation (CYCLE 14, 2026-06-28) :** Quatre interprétations de champs de la section
+> `GView` ci-dessous ont été corrigées d'après le spec de struct de référence
+> `Docs/RE/structs/gview.md` (§3 et §6.1), qui fait désormais autorité pour la disposition complète
+> de `Diamond::GView`. La taille de l'objet a également été mise à jour (~308 octets, non 296+).
+
+> **AUTHORITATIVE STRUCT REFERENCE — node layouts and vtable slot roles (CYCLE 14, 2026-06-28):**
+> [`Docs/RE/structs/scene_graph_nodes.md`](../structs/scene_graph_nodes.md) is now the
+> firewall-clean, authoritative record for all Diamond scene-graph node class layouts
+> (`GObject` / `GNode` / `GGroup` / `GScene` / `GTransform` / `GSwitch` / `GGeode` /
+> `GViewPlatform` / `GLight`) and for the `GNode` vtable slot-role map (slots 0–9) and
+> `GGroup` extension slots (10–15). That spec was derived from RTTI-walk, constructor/destructor
+> control-flow analysis, and vtable-content reading (IDB SHA `f61f66a9`). **It corrects several
+> slot labels carried in the vtable tables below** — in particular the roles assigned to
+> slots 1, 2, 4–9 of `GNode`/`GGroup`/`GGeode` differ materially from the content-derived reading
+> in `scene_graph_nodes.md §4`. On any conflict between this document and
+> `Docs/RE/structs/scene_graph_nodes.md`, the struct spec is authoritative.
+> Engineers citing node layouts: `// spec: Docs/RE/structs/scene_graph_nodes.md`.
+
 ---
 
 ## 1. Hiérarchie globale des classes du Scene Graph
@@ -39,8 +57,10 @@ classDiagram
         +GVector m_parentGeodes
     }
     class GView {
-        +GCamera* m_pCamera
-        +GPipeline* m_pPipeline
+        +GGroup* sceneRoot
+        +GViewPlatform* cameraHolder
+        +GCull* cull
+        +GCullPipeline* cullSecondary
     }
     class GCamera {
         +float m_fNear
@@ -182,17 +202,19 @@ De nombreuses classes utilisent la structure de données interne `GVector` de Di
 ---
 
 ### GView
-*   **Taille en mémoire** : `296`+ octets
+*   **Taille en mémoire** : ~`308` octets (le dernier champ couvre les octets +304..+307). ~~`296`+ octets~~ — **corrigé** ; voir `Docs/RE/structs/gview.md §3`.
 *   **Vtable** : `0x7301F4`
-*   **Description** : Gère la fenêtre de vue 3D courante, sa caméra, son pipeline de rendu, et les contextes de plateforme.
+*   **Description** : Objet de vue par caméra (`Diamond::GView`) que le frame driver parcourt chaque frame pour exécuter la configuration de la caméra, le frustum culling et la séquence de passes de rendu ordonnées. Pour la table de champs complète et vérifiée, voir `Docs/RE/structs/gview.md`.
 
 | Offset | Type | Description |
 | :--- | :--- | :--- |
 | `+0x00` | `void*` | Pointeur de la vtable (`0x7301F4`) |
-| `+0x24` | `GCamera*` | Caméra active liée à la vue |
-| `+0x70` | `void*` | Pointeur vers une structure de plateforme interne (taille `736` octets) |
-| `+0x74` | `GPipeline*` | Pipeline de rendu lié à cette vue |
-| `+0x130` | `COM IUnknown*`| Pointeur vers l'interface de périphérique Direct3D (Direct3D Device) |
+| `+0x24` | `GGroup*` (refcounted) | **Racine de la scène** (`GGroup*`/`GScene*` en jeu). Défini via un setter avec refcount ; libéré par `GObject::unref` à la destruction. ~~`GCamera*` Caméra active liée à la vue~~ — **corrigé** (voir `Docs/RE/structs/gview.md §3 et §6.1`). La caméra est accessible indirectement via le champ `cameraHolder` (+0x28). |
+| `+0x70` | `Diamond::GCull*` (owned) | **Pipeline de culling primaire** (736 octets, alloué sur le tas, propriété exclusive). Fournit la liste des éléments visibles à dessiner via son slot virtuel. ~~`void*` structure de plateforme interne (736 octets)~~ — **corrigé** (voir `Docs/RE/structs/gview.md §3 et §6.1`). |
+| `+0x74` | `GCullPipeline*` (owned, null par défaut) | **Pipeline de culling secondaire** (null par défaut, construit à la demande). ~~`GPipeline* m_pPipeline` Pipeline de rendu lié à cette vue~~ — **corrigé** (voir `Docs/RE/structs/gview.md §3 et §6.1`). |
+| `+0x130` | `IDirect3DTexture9*` (COM, owned) | **Texture de chiffres du compteur FPS**, chargée depuis `data/ui/counter.dds`. ~~`COM IUnknown*` périphérique Direct3D (Direct3D Device)~~ — **corrigé** ; le périphérique D3D est sur l'objet post global, accessible via GView +0x120 (voir `Docs/RE/structs/gview.md §3 et §6.1`). |
+
+> **Référence de l'autorité :** la table de champs complète de `Diamond::GView` (tous les offsets, types et notes de confiance) se trouve dans `Docs/RE/structs/gview.md §3`. Les quatre corrections de cette section sont documentées dans `gview.md §6.1`.
 
 ---
 

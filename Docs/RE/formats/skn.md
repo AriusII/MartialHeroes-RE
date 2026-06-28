@@ -5,7 +5,7 @@
 > reference this file.
 
 <!--
-verification: confirmed (loader-control-flow + sample-verified); CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected
+verification: confirmed (loader-control-flow + sample-verified); CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME, 0 corrected; deep-cartography deepening pass (f61f66a9, 2026-06-29): dedup collapse test corrected to logf(Δuv)<0.001 on UV floats (NOT position epsilon); drop threshold pinned to exact f32 0.0099999998; Math::DELTA = 0.001 confirmed; render-vertex GPU upload details added to specs/skinning.md
 ida_reverified: 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, sample-byte]
@@ -83,12 +83,12 @@ file, not the structures built from them.
 | Header `id_b` (u32, skeleton / skin-class key, used verbatim as the pose-pool lookup key) | Resolved | CONFIRMED (loader-control-flow) |
 | Header `name` (LenStr — 4-byte u32 LE length + body, no on-disk terminator; discarded for math) | Resolved | CONFIRMED (loader-control-flow; same LenStr as `.mot`/`.bnd`) |
 | Face section: `u32 Nface` + `36 × Nface` bytes (3 corners × {u32 vertex_index, f32 uv_u, f32 uv_v}) | Resolved | CONFIRMED (loader-control-flow + sample) |
-| Face corner first field = `u32` vertex index (NOT inline position floats); dedup collapse test = vertex_index equality + 0.001 position epsilon (net effect: unique by index and UV) | Resolved | CONFIRMED (sample-verified + loader-control-flow) |
+| Face corner first field = `u32` vertex index (NOT inline position floats); dedup collapse test = vertex_index equality + logf(Δuv_u)<0.001 + logf(Δuv_v)<0.001 on the two corner UV floats (genuine `logf`, deep-cartography f61f66a9; net effect: unique by index and UV) | Resolved | CONFIRMED (sample-verified + loader-control-flow; dedup epsilon corrected deep-cartography 2026-06-29) |
 | Vertex section: `u32 Nvtx` + `24 × Nvtx` bytes (2 × vec3 f32: disk order normal then position) | Resolved | CONFIRMED (loader-control-flow + sample) |
 | Influence section: `u32 Nweight` + `12 × Nweight` bytes (12-byte records) | Resolved | CONFIRMED (loader-control-flow) |
 | Influence record = {u32 vertex_index, u32 bone id, f32 weight} | Resolved | CONFIRMED (sample-verified) |
 | Influence first field = plain `u32` vertex index (NOT a position key / float-bit compare) | Resolved | CONFIRMED (sample-verified) |
-| Loader drops influences with `weight < 0.01`, normalizes each vertex's survivors to Σ = 1.0 (character path) | Resolved | CONFIRMED (loader-control-flow) |
+| Loader drops influences with `weight < 0.0099999998f` (nearest f32 to 0.01; `coreskin.cpp` line 294), normalizes each vertex's survivors to Σ = 1.0; denominator guard uses `Math::DELTA = 0.001` (`coreskin.cpp` line 306) — character path | Resolved | CONFIRMED (loader-control-flow; exact threshold pinned deep-cartography f61f66a9) |
 | Variable influences per vertex (no on-disk cap) | Resolved | CONFIRMED (loader-control-flow) |
 | Positions and normals stored VERBATIM (no per-component negate / swap / scale at parse) | Resolved | CONFIRMED (loader-control-flow) |
 | Rigid item path consumes only header + face + vertex (ignores the file's weight section) | Resolved | CONFIRMED (loader-control-flow + sample) |
@@ -181,12 +181,13 @@ Each face record is one triangle stored as three consecutive corner sub-records;
 `u32` **vertex index** (into the vertex section that follows) plus the per-corner texture coordinates.
 The face section is an **index / triangle soup** — vertex positions are stored once in the vertex
 section, not inlined per corner. The loader walks all `3 × Nface` corners and deduplicates to build
-the unique render-vertex list. The effective dedup key is **vertex_index equality plus a 0.001
-position epsilon** on the vertex position components; a separate coarser weld (~0.2 units) runs
-over major-bone groups. UV is stored per render vertex, so a single mesh vertex referenced from
-corners with different UVs becomes distinct render vertices. The shorthand `(vertex_index, uv_u,
-uv_v)` captures the net result (unique by index and UV); the underlying collapse test is the
-position-epsilon variant above.
+the unique render-vertex list. The effective dedup collapse test is **vertex_index equality plus
+logf(Δuv_u) < 0.001 and logf(Δuv_v) < 0.001** on the two corner UV floats (genuine `logf` call,
+confirmed deep-cartography pass, f61f66a9): two corners collapse to one render vertex iff they share
+the same `vertex_index` AND both UV differences test below 0.001 under the log. A single mesh vertex
+referenced from corners with different UVs becomes distinct render vertices. A **separate** post-dedup
+weld (0.2 units on render-vertex position, `Vec3ApproxEqual` with epsilon 0.2) builds the
+rigid-owned ownership table consumed by deform mode 2 — it does not affect the dedup step itself.
 
 | Sub-offset within corner | Size | Type | Field | Notes | Confidence |
 |---:|---|---|---|---|---|
@@ -199,11 +200,12 @@ position-epsilon variant above.
 > (9 floats)" deduplicated by position — the bytes disprove this: the first 4 bytes of each corner
 > are a small `u32` index (item sample face0 = `2, 3, 4`, valid indices into the 25-vertex section;
 > character sample face0 = `4, 5, 9`, valid into the 786-vertex section; read as `f32` those integers
-> would be denormals ≈ 2.8e-45). The effective collapse test is vertex_index equality **plus a 0.001
-> position epsilon** on the vertex position, with UV carried per render vertex; a separate coarser
-> ~0.2-unit weld runs over major-bone groups. The net result: render vertices are unique by index and
-> UV, with position proximity breaking ties. See `formats/mesh.md` §Face table for additional
-> sample-verified witnesses.
+> would be denormals ≈ 2.8e-45). **Deepening correction (deep-cartography pass, f61f66a9):** the
+> collapse test is **vertex_index equality plus logf(Δuv_u) < 0.001 and logf(Δuv_v) < 0.001** on the
+> two UV floats — a genuine `logf` call, not a position-epsilon compare. A **separate** 0.2-unit
+> position weld (`Vec3ApproxEqual`, epsilon 0.2) builds the rigid-owned ownership table for deform
+> mode 2; it is a distinct post-dedup step. The net result: render vertices are unique by index and UV.
+> See `formats/mesh.md` §Face table for additional sample-verified witnesses.
 
 ---
 
@@ -272,10 +274,12 @@ groups them by vertex.
 This packing is performed by the **character** byte parser. After reading all influence records, the
 loader, per vertex:
 
-1. **Drops** any influence with `weight < 0.01` (a near-`0.01` single-precision threshold; records at
-   or above `0.01` are kept).
+1. **Drops** any influence with `weight < 0.0099999998f` (the nearest single-precision float to 0.01;
+   the loader keeps influences where `weight >= 0.0099999998f` — confirmed deep-cartography pass,
+   f61f66a9, `coreskin.cpp` line 294).
 2. **Normalizes** the surviving influences so each vertex's weights sum to **1.0** (a zero total
-   weight is a fatal assertion in the original client — `coreskin.cpp`).
+   weight and a weight below `Math::DELTA = 0.001` are both fatal assertions — `coreskin.cpp` lines
+   294, 306; the denominator floor used in the normalizer guard is exactly 0.001).
 3. Partitions the result into a single dominant (MAJOR) influence per vertex plus the remaining
    (MINOR) influences — a derived split used by the deform path.
 

@@ -4,11 +4,11 @@ sample_verified: false
 subsystems: [camera_views, camera_constants, movement_collision]
 networked: partial   # camera is client-only; movement uses 2/13, 5/13, 4/13
 encoding_note: Korean in-game/config text is CP949 (legacy MS949 code page), not UTF-8.
-verification: confirmed   # control-flow-confirmed where noted; CYCLE 12 audit (2026-06-24): lower-level renderer camera object (near/far +36/+40, frustum L/R/B/T +152..+164, renderer ptr +180) confirmed alongside GPerspectiveCamera (§A.7.2); prior CYCLE 12 (2026-06-22): near/far slots CONFIRMED (§A.7.1); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; a few literal FOV/KF values + on-wire value meanings are capture/debugger-pending
-ida_reverified: 2026-06-27 # CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. Prior: 2026-06-24
+verification: confirmed   # control-flow-confirmed where noted; DEEP-3D 2026-06-28: GPerspectiveCamera §A.7.1/§A.7.2 unified (single 184-byte object); near/far corrected to +36/+40; +0xAC=fovx +0xB4=device ptr; frustum left/right corrected; world projection confirmed RH (PerspectiveOffCenterRH); shadow is LH-only; FOV/near/far (65°/50°, near 5, far 15000) confirmed as code immediates at build sites (§A.7 CYCLE 7 caveat superseded); §A.7.3 renderer-side pipeline + §A.7.4 shadow contrast added; CYCLE 12 audit (2026-06-24): lower-level renderer camera object confirmed (now identified as same GPerspectiveCamera); prior CYCLE 12 (2026-06-22): near/far at +0xAC/+0xB4 CORRECTED (those are fovx/device ptr; real near/far = +36/+40); terrain-height sampler PINNED as per-triangle plane method, NOT bilinear (§B.6); CYCLE 7 (2026-06-20) added the polymorphic class roster + struct/projection offset tables + per-mode inline constants; on-wire value meanings are capture/debugger-pending
+ida_reverified: 2026-06-28 # DEEP-3D pass: GPerspectiveCamera unified layout corrected; handedness confirmed RH; FOV/near/far code-immediates at build sites. Prior: 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
-conflicts: 2   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn, not "highlight texture manager" — both reconciled below
+conflicts: 5   # (1) FOV stored full-angle/aspect (NO /2); (2) click marker = UserXEffect spawn; (3) §A.7.1 near=+0xAC/far=+0xB4 WRONG (+0xAC=fovx, +0xB4=device ptr; real near=+36, far=+40) — CORRECTED; (4) §A.7.1 frustum left/right swapped — CORRECTED; (5) §A.7.2 treated as separate object — it IS GPerspectiveCamera — CORRECTED
 ---
 
 # Camera, Client Movement & Collision — Clean-Room Specification
@@ -605,12 +605,14 @@ implement for the gameplay camera. (CODE-CONFIRMED)
 > load-bearing for a Godot re-implementation — Godot's `Camera3D.Fov` takes a vertical
 > FOV in **degrees (65)** directly — but the internal-storage description is now correct.
 
-Two additional projection values also appear in the binary but belong to a **separate
-generic projection initializer** that is not the camera the in-world manipulators
-bind to: a seed of **60°** vertical FOV with a near-constant of **10000.0**, and a
-**π/8 (≈ 22.5°) half-angle constant** (consistent with a 45° vertical FOV). These
-three figures — 60° / 45° / 65° — are not competing in-world FOVs; the 60° and 45°
-belong to the generic path; **65° is the in-world gameplay camera.**
+The "60° / 45° / 65° puzzle" is resolved by the `GPerspectiveCamera` constructor
+defaults: **45°** (π/4) is the fovy ctor default at +0xA8, and **60°** (π/3) is the
+fovx ctor default at +0xAC (the derived horizontal FOV field). The in-world scene-build
+path overrides fovy with **65°** (char-select with **50°**) via
+`ParamObject_SetAngleAndRange`. A separate **π/8 (≈ 22.5°)** value belongs exclusively
+to the **shadow projector** (see §A.7.4) — it is not a gameplay camera value. None of
+these figures competes at runtime with the in-world 65°; **65° is the authoritative
+in-world gameplay FOV.** (CODE-CONFIRMED — DEEP-3D 2026-06-28)
 
 > **Prior open item D.2 in this spec is closed.** Implement the gameplay camera
 > at **65° vertical FOV, near 5, far 15000**. Live-feel still capture-unverified;
@@ -620,72 +622,175 @@ View-volume derivation (centered case): `top = near · tan(fovY/2)`, `bottom = �
 `right = top · aspect`, `left = −right`, then build the 6-plane frustum.
 An off-center mode re-derives field-of-view from explicit L/R/B/T. (CODE-CONFIRMED)
 
-> **CYCLE 7 caveat — the FOV/near/far *values* are not inline immediates.** The literal
-> ~65° (world) / ~50° (select) field-of-view, near ~5, and far ~15000 are **float constants
-> loaded from read-only data at scene-construction time**, not immediate operands in any
-> manipulator update or in the projection setter (CYCLE 7 immediate-operand searches for the
-> corresponding bit patterns returned no hits in the update/setter path). The CYCLE 7
-> contribution is the **field offsets** that carry these values on the projection object
-> (§A.7.1); the literal *values* stay where prior cycles hold them and are **DBG-confirmable**
-> by reading the fovy field (+0xA8) at runtime. Treat 65° / 50° / near 5 / far 15000 as the
-> carried-forward faithful values, not as freshly re-located immediates.
+> **DEEP-3D (2026-06-28) — FOV/near/far values CONFIRMED as code immediates.** The CYCLE 7
+> reading that the literal values were "float constants loaded from read-only data" is
+> superseded: the DEEP-3D pass confirmed that near **5.0**, far **15000.0**, and the FOV
+> degree values **65.0** (in-world) / **50.0** (char-select) are **inline operands at the
+> scene-construction sites** (`MainHandler_BuildInGameSceneGraph` and
+> `SelectWindow_BuildScene` respectively). The Part D item D.2 "DBG-pending values" flag
+> is downgraded to CONFIRMED — implement at 65°/50°/near 5/far 15000 with confidence; still
+> expose as config for live-feel tuning. One residue remains debugger-pending: confirm the
+> stored fovy value at +0xA8 with a live runtime read to verify the resulting perceived
+> vertical FOV is truly 65° (not 65°/aspect); see D.2.
 
-### A.7.1 Projection object (GPerspectiveCamera) — field offsets (separate from the manipulator)
+### A.7.1 Projection object (GPerspectiveCamera) — unified corrected layout (DEEP-3D 2026-06-28)
 
-The projection is owned by a **separate `GPerspectiveCamera` node**, *not* by the manipulator —
-the manipulator positions/orients it, but field-of-view / aspect / near / far / ortho parameters
-live on the projection object. Offsets (bytes from the projection object) are layout facts:
+The projection is owned by a **separate `GPerspectiveCamera` node** (not by the manipulator;
+the manipulator positions and orients it). Object size: **184 bytes**. The GCamera base
+contributes the near/far planes and an embedded 6-plane GFrustum; GPerspectiveCamera adds
+fovy/aspect/extent fields and the device pointer. Layout proven from the base describe-virtual
+(prints `"near/far = "` from +0x24/+0x28), the derived describe-virtual (prints fovy, aspect,
+right/left, bottom/top), and the `ParamObject_SetAngleAndRange` setter and projection builder.
 
-| Offset | Bytes | Role | Confidence |
+> **DEEP-3D correction (2026-06-28).** The prior §A.7.1 listed near at +0xAC and far at
+> +0xB4 — this was **wrong**. Real near/far are at **+0x24 / +0x28** in the GCamera base,
+> confirmed by the describe-virtual printing `"near/far = "`. +0xAC is the **derived
+> horizontal FOV (fovx)**, not near; +0xB4 is the **device/renderer pointer**, not far. The
+> prior listing also had +0x98 = right / +0x9C = left — this was **swapped**; the correct
+> assignment is +0x98 = left, +0x9C = right. See §A.7.2 for the reconciliation with the
+> CYCLE 12 "second object" reading.
+
+| Offset | Type | Role | Confidence |
 |---:|---|---|---|
-| **+0x94** | byte | ortho flag (1 = ortho left/right/bottom/top; 0 = perspective fovy/aspect) | CONFIRMED |
-| **+0x98** | float | ortho right | CONFIRMED |
-| **+0x9C** | float | ortho left | CONFIRMED |
-| **+0xA0** | float | ortho bottom | CONFIRMED |
-| **+0xA4** | float | ortho top | CONFIRMED |
-| **+0xA8** | float | **fovy** (perspective vertical field-of-view) | CONFIRMED |
-| **+0xB0** | float | aspect ratio | CONFIRMED |
-| **+0xAC** | float | **near plane** — CONFIRMED at this slot (CYCLE 12); lives in an early slot of the projection-object field block | CONFIRMED |
-| **+0xB4** | float | **far plane** — CONFIRMED at this slot (CYCLE 12); lives in an early slot of the projection-object field block | CONFIRMED |
+| **+0x24** (+36) | float | **near plane** (GCamera base field) | CONFIRMED |
+| **+0x28** (+40) | float | **far plane** (GCamera base field) | CONFIRMED |
+| **+0x2C** (+44) | GFrustum | **6-plane frustum** (GPolytope embedded in GCamera base), built by `UpdateProjection` | CONFIRMED |
+| **+0x94** (+148) | byte | off-center flag (1 = explicit L/R/B/T; 0 = fovy/aspect symmetric mode) | CONFIRMED |
+| **+0x98** (+152) | float | frustum **left** | CONFIRMED |
+| **+0x9C** (+156) | float | frustum **right** | CONFIRMED |
+| **+0xA0** (+160) | float | frustum **bottom** | CONFIRMED |
+| **+0xA4** (+164) | float | frustum **top** | CONFIRMED |
+| **+0xA8** (+168) | float | **fovy** (full vertical FOV ÷ aspect in radians — see §A.7 storage note) | CONFIRMED |
+| **+0xAC** (+172) | float | **fovx** (derived horizontal FOV, computed in `UpdateProjection`) | CONFIRMED |
+| **+0xB0** (+176) | float | **aspect** ratio = screenW / screenH (set in constructor from screen globals) | CONFIRMED |
+| **+0xB4** (+180) | ptr | **device/renderer pointer** (set in constructor) | CONFIRMED |
 
-> **CYCLE 12 (IDB SHA 263bd994, 2026-06-22).** The near/far plane slots at +0xAC/+0xB4 are now
-> CONFIRMED (upgraded from MEDIUM). Near and far **live in early slots** of the
-> `GPerspectiveCamera` field block, not as inline immediates in any manipulator update or
-> projection setter (consistent with the CYCLE 7 finding that the ~5/~15000 values are loaded
-> from read-only data at scene-construction, not as code immediates). The field-describe routine
-> confirms the layout. The literal FOV/near/far *values* (65° / 5.0 / 15000.0 for in-world;
-> 50° / 5.0 / 15000.0 for char-select) remain carried-forward from prior cycles and are
-> **DBG-confirmable by reading these fields at runtime**, not inline immediate operands.
-> `// spec: Docs/RE/specs/camera_movement.md §A.7.1`
+Constructor defaults before scene-build overrides: off-center flag = 0; fovy (+0xA8) = π/4
+(45°); fovx (+0xAC) = π/3 (60°); aspect (+0xB0) = 4/3, then reset to screenW/screenH.
+These explain the "45°/60°/65° puzzle" — see the updated paragraph in §A.7 above.
 
-### A.7.2 Lower-level renderer camera object — candidate struct note (CYCLE 12 audit — CONFIRMED offsets)
+### A.7.2 Reconciliation — the "lower-level object" is the same GPerspectiveCamera (DEEP-3D 2026-06-28)
 
-A **second, lower-level renderer camera object** sits in the projection chain alongside the
-`GPerspectiveCamera` node of §A.7.1. This is a **separate object** — the off-center perspective
-builder (`Camera_BuildAndApplyPerspectiveProjection`) reads its fields directly:
+The CYCLE 12 audit identified a "second, lower-level renderer camera object" with offsets +36/+40
+(near/far) and +152..+180 (frustum L/R/B/T, device ptr). The DEEP-3D pass confirms this is
+**the same `GPerspectiveCamera` object** — `Camera_BuildAndApplyPerspectiveProjection` is a vtable
+virtual of `GPerspectiveCamera` that reads its own fields. The CYCLE 12 offsets (+36/+40/+152..+180)
+were correct and are now reconciled into the unified §A.7.1 table. The error was in the prior
+§A.7.1's mislabelling of +0xAC/+0xB4 as near/far. A faithful port models this as a single camera
+object that owns fovy/aspect/near/far and derives L/R/B/T internally via `UpdateProjection`
+(see §A.7.3).
 
-| Offset | Role | Confidence |
-|---:|---|---|
-| **+36** | near plane | CONFIRMED (operand at the off-center builder call site) |
-| **+40** | far plane | CONFIRMED |
-| **+152** | frustum L (left) | CONFIRMED |
-| **+156** | frustum R (right) | CONFIRMED |
-| **+160** | frustum B (bottom) | CONFIRMED |
-| **+164** | frustum T (top) | CONFIRMED |
-| **+180** | renderer device pointer | CONFIRMED |
+### A.7.3 Renderer-side projection and view pipeline (DEEP-3D 2026-06-28)
 
-This object is consumed by the off-center builder to call `D3DXMatrixPerspectiveOffCenterRH(out, L, R,
-B, T, near, far)` and then `SetTransform`. It is NOT the `GPerspectiveCamera` node — that node holds
-fovy/aspect/near/far/ortho at the offsets in §A.7.1 and is further up the chain; the builder operates
-on already-derived frustum extents from this lower-level object.
+#### Per-frame camera setup (`Renderer_SetupCameraAndFrustum`)
 
-> **No contradiction between the two camera objects.** The `GPerspectiveCamera` (§A.7.1) owns the
-> high-level projection parameters (fovy, aspect, near, far); the projection chain derives the
-> explicit L/R/B/T extents from those and passes them to this lower-level object, which the off-center
-> builder then consumes. A faithful port may model this as a single camera that computes L/R/B/T from
-> fovy/aspect/near/far internally — the split is a legacy implementation detail, not a behavioural
-> requirement. (CONFIRMED offsets from the off-center builder call site; the exact struct name and
-> allocation site are dirty-room concerns.)
+Called once per render view on a per-view render descriptor; runs only when both the GView object
+and the camera scene-node are set:
+
+1. **Frame begin** — bumps the view's frame counter, timestamps it, and traverses child
+   scene-nodes for per-frame node updates when the view's enable byte is set.
+2. **Camera cast** — seeds fallback fov/aspect = π/4 for both, then performs an RTTI cast to
+   `GPerspectiveCamera`. On success reads fovy from **+0xA8** and fovx from **+0xAC**.
+3. **World transform** — computes the camera node's world 4×4 matrix into the view descriptor.
+4. **View matrix** — `viewMatrix = inverse-orthonormal(cameraWorldMatrix)` (rotation transposed;
+   translation = −Rᵀ·t). Applied via `Renderer_SetViewTransform` as **D3DTS_VIEW (state 2)**.
+   There is **no** `D3DXMatrixLookAt*` call on the world path.
+5. **Billboard cache** — stores the camera eye (view-matrix translation row) and rotation-only
+   basis into the renderer's billboard global for camera-facing sprite orientation.
+6. **Frustum copy** — copies the GFrustum at GPerspectiveCamera+0x2C into a stack frustum
+   for the cull pass.
+7. **Cull** — `GCull_CullScene(GView, cullSet, fovx, fovy, vpW, vpH, frustum, viewMatrix,
+   cullParams)`. The active cull set is selected by the view's frame-counter byte (one of two
+   per-view LOD lists).
+8. Optional post-cull callback, then timing accumulation.
+
+**Projection apply:** NOT in `Renderer_SetupCameraAndFrustum` (which handles view and cull only).
+The projection matrix is built and applied by the `GPerspectiveCamera` virtual
+`Camera_BuildAndApplyPerspectiveProjection` (vtable slot 3), called when the camera node renders.
+It calls `D3DXMatrixPerspectiveOffCenterRH(out, left, right, bottom, top, near, far)` using the
+§A.7.1 frustum extents, then passes the result through `Renderer_SetTransform_World0` — which
+despite its name calls device `SetTransform` with state **3 = D3DTS_PROJECTION**.
+
+**Handedness — world projection is right-handed (RH):** `D3DXMatrixPerspectiveOffCenterRH`
+produces a view space where the camera looks down **−Z**, matching Godot/OpenGL. The
+`D3DXMatrixPerspectiveFovLH` and `D3DXMatrixLookAtLH` calls in the binary belong **exclusively
+to the shadow projector** (§A.7.4) and must not be confused with the gameplay camera. The
+existing `WorldCoordinates.ToGodot` Z-negation on world geometry is consistent with this RH
+view space.
+
+#### Frustum derivation (`UpdateProjection`)
+
+Called by the constructor and by `ParamObject_SetAngleAndRange`. Two branches on the off-center
+flag (+0x94):
+
+**Perspective mode (flag = 0):** `top = near · tan(fovy/2)`, `bottom = −top`,
+`right = aspect · top`, `left = −right`; fovx = `atan2(near, right) − atan2(near, left)` →
+stored at +0xAC. This is the textbook centered-perspective derivation; a constant 0.5 (double)
+is the half-angle factor applied in `tan(fovy/2)`. (CODE-CONFIRMED)
+
+**Off-center mode (flag = 1):** `aspect = (right − left) / (top − bottom)`;
+`fovy = atan2(near, top) − atan2(near, bottom)`;
+`fovx = atan2(near, right) − atan2(near, left)`. (CODE-CONFIRMED)
+
+After either branch: `GPolytope_BuildSixPlanes(GCamera+0x2C, left, right, bottom, top, near, far)`
+builds 6 planes via per-face triangle normals and stores plane-count = 6 at frustum+4. Cull
+mask = `(1 << 6) − 1 = 63`. This is the GFrustum that `Renderer_SetupCameraAndFrustum` later
+copies for the cull pass. (CODE-CONFIRMED)
+
+#### Setter validation (`ParamObject_SetAngleAndRange`)
+
+Signature: `(camera, fovy, aspect, near, far)`.
+- **Rejects** (returns 0, no state change) unless `0 < fovy ≤ π` AND `aspect > 0` AND
+  `near > 0` AND `far > 0`.
+- Sets off-center flag (+0x94) = 0; writes fovy (+0xA8) = `arg.fovy`.
+- **near/far auto-sorted**: `near (+0x24) = min(arg.near, arg.far)`,
+  `far (+0x28) = max(arg.near, arg.far)`. With args (5.0, 15000.0) → near = 5, far = 15000.
+- The `aspect` argument is **ignored** — aspect (+0xB0) was set in the constructor from the
+  screen-width/screen-height globals and is never overridden by this setter.
+- Then calls `UpdateProjection`. (CODE-CONFIRMED)
+
+#### Detail-scale LOD metric (`GView_ComputeDetailScale`)
+
+`focalX = (vpW · 0.5) / tan(fovx · 0.5)`, `focalY = (vpH · 0.5) / tan(fovy · 0.5)`,
+`focal = max(focalX, focalY)`, `pickFov = fovx if focalX > focalY else fovy`,
+`detail = (512.0 / screenHeightRef / focal) · (pickFov / (π/4))`.
+
+A screen-space pixels-per-unit LOD metric; downstream node LOD selection keys off it.
+`screenHeightRef` is a screen-height reference value in read-only data (not an inline immediate).
+(CODE-CONFIRMED for the formula structure; `screenHeightRef` value is data-sourced.)
+
+#### Object allocation sizes (operator-new operands at build sites — CODE-CONFIRMED)
+
+| Class | Bytes |
+|---|---:|
+| `GPerspectiveCamera` | **184** |
+| `GViewPlatform` | **84** |
+| `GScene` | **120** |
+| Third / First / Static `CameraManipulator` | **376** |
+| `GambleCameraManipulator` | **396** |
+| `EventCameraManipulator` | **436** |
+| `SelectCameraManipulator` | **576** (explains why +0x238 dolly-timestamp fits within it) |
+
+### A.7.4 Shadow projector — LH-only contrast (DEEP-3D 2026-06-28)
+
+The binary contains `D3DXMatrixPerspectiveFovLH` and `D3DXMatrixLookAtLH` calls. These belong
+**exclusively to the shadow projector** (`Renderer_BuildShadowPerspectiveMatrix` and its companion
+shadow look-at builder). Do not conflate them with the gameplay camera.
+
+Shadow projector constants (CODE-CONFIRMED as inline operands at the shadow build site):
+
+| Parameter | Value |
+|---|---|
+| Handedness | **Left-handed (LH)** |
+| Vertical FOV | **π/8 ≈ 22.5°** |
+| Aspect | **1.0** |
+| Near | **0.0** |
+| Far | **10000.0** |
+| Shadow-map UV remap | Scale(0.5, −0.5, 1) · Translate(0.5, 0.5, 0) — maps to [0,1] range with V flipped |
+
+The shadow rig is a separate pipeline stage from the gameplay camera and shares no projection
+constants with it. The gameplay world projection is always **RH**; the shadow projector is
+always **LH**.
 
 ## A.8 Camera persistence (local config, not networked)
 
@@ -1025,6 +1130,10 @@ These are guidance, not faithful-copy mandates; deviate deliberately and documen
   view" (ESC) → Third. **No combat camera switch.** Gamble = minigame-only; Select =
   char-select scene only; Event = optional cinematic, can be deferred.
   - Use **65° vertical FOV, near 5, far 15000** (the CODE-CONFIRMED in-world values).
+  - The world projection is **right-handed (RH)** — view space looks down −Z, matching
+    Godot/OpenGL. The existing `WorldCoordinates.ToGodot` Z-negation on world geometry is
+    consistent with this. Use `Camera3D` with its default RH projection; no additional
+    handedness correction is needed at the camera level.
   - Fixed orbit radius ≈ 901 units. Default pitch −30°. Elevation clamp [−90°, −12°].
   - Yaw clamp [−π/2, +1.4137] for Third; symmetric ±π/2 for Gamble.
   - Right-mouse drag = orbit look; mouse wheel / other-button = elevation (not radius).
@@ -1061,13 +1170,13 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 
 1. **Camera action polarity** — which member of the pitch pair (1002/1003) and zoom
    pair (1000/1001) is up/in vs down/out. Implement as configurable ± axes. (INFERRED/configurable)
-2. **Authoritative runtime FOV — literal *values* DBG-pending (CYCLE 7).** The in-world
-   gameplay FOV is **65°** vertical, near **5**, far **15000** and select is **50°** — these
-   are the carried-forward faithful values and the field *offsets* that hold them are now
-   pinned (fovy at projection +0xA8, §A.7.1). But CYCLE 7 found the literal *values are NOT
-   inline immediates* — they load from read-only data at scene-construction, so the values
-   themselves stay **[DBG-pending]** (read +0xA8 at runtime to confirm). Implement at 65°/50°
-   but treat as config.
+2. ~~**Authoritative runtime FOV — literal values DBG-pending (CYCLE 7)**~~ — **RESOLVED
+   (DEEP-3D 2026-06-28, CODE-CONFIRMED).** The values 65° (in-world), 50° (char-select),
+   near 5.0, and far 15000.0 are confirmed as **inline operands at the scene-construction
+   sites** (`MainHandler_BuildInGameSceneGraph` / `SelectWindow_BuildScene`). Implement at
+   these values; expose as config for live-feel tuning. Residue: the stored fovy at +0xA8
+   is `π·deg/180 ÷ aspect`; confirm via a live debugger read at the real screen aspect that
+   the resulting perceived vertical FOV is truly ~65° (not 65°/aspect). [debugger-confirm]
 3. **`CAMERA_XZ` / `CAMERA_XYZ` semantics** — the exact 2-axis vs 3-axis follow toggle
    the saved option controls.
 4. **Gamble UI driver** — n/a per CYCLE 7: Gamble takes **no user input** (fixed-XZ framing,
@@ -1082,9 +1191,12 @@ Do **not** hard-code anything in this list without a capture or an analyst cross
 6. A constant mode-tag (value 2) is set in every camera constructor; its meaning is
    unknown (node/camera-type tag?). Cosmetic; not load-bearing. (Distinct from the Event
    sub-mode at +0x16C, which is a runtime field, not a constructor tag.)
-6a. **Projection near/far field offsets** — +0xAC (near) / +0xB4 (far) on the projection
-    object are **MEDIUM** (inferred by adjacency to fovy/aspect, not named by the
-    field-describe routine, §A.7.1). Confirm by reading them at runtime.
+6a. ~~**Projection near/far field offsets (MEDIUM)**~~ — **RESOLVED (DEEP-3D 2026-06-28).**
+    +0xAC is **fovx** (derived horizontal FOV), not near; +0xB4 is the **device/renderer
+    pointer**, not far. Real near/far are at **+0x24 (+36) / +0x28 (+40)** in the GCamera
+    base, confirmed by the describe-virtual printing `"near/far = "`. The corrected unified
+    layout is in §A.7.1. The CYCLE 12 §A.7.2 offsets (+36/+40/+180) were correct all along;
+    the former §A.7.1 was the error.
 6b. **Char-select keyframe literal coords (KF0, KF1 ≈ (512,87,−9652), path anchor
     (2048,0,−6144))** — **NOT inline immediates** in the Select update (CYCLE 7); they are
     data-driven keyframe slots (manipulator +0x178/+0x194) written at scene setup. The dolly
@@ -1182,6 +1294,24 @@ FOV (~65 world / ~50 select), near (~5), far (~15000), and the char-select keyfr
 (KF1 ≈ (512,87,−9652), path anchor (2048,0,−6144)) are **not inline immediates** — they load from
 read-only data at scene-construction; and the projection near/far offsets are MEDIUM. Proposed
 canonical update-method names for the IDB are staged for the names.yaml sync (orchestrator-owned).
+
+Extended **DEEP-3D (2026-06-28, IDB anchor `f61f66a9`, static-confirmed)**, rewritten (not copied)
+from the dirty-room deep-dive note (subsystem `camera`, key `deep-3d-2026/camera`). This pass:
+(1) **corrected** the §A.7.1 near/far offsets — real near = +0x24, far = +0x28 (GCamera base);
++0xAC is fovx; +0xB4 is the device pointer; prior §A.7.1 +0xAC/+0xB4 = near/far was wrong; left/right
+at +0x98/+0x9C were also swapped — corrected; (2) **unified** §A.7.1 and §A.7.2 into one object
+(GPerspectiveCamera, 184 bytes) — the CYCLE 12 "second lower-level object" is the same class, its
+offsets (+36/+40/+152..+180) were right; (3) **confirmed world projection is RH**
+(`PerspectiveOffCenterRH`; view looks down −Z; `LookAtLH`/`PerspectiveFovLH` are shadow-only);
+(4) added **§A.7.3** (per-frame pipeline: `Renderer_SetupCameraAndFrustum`, view matrix =
+inverse-orthonormal, D3DTS_VIEW; `Camera_BuildAndApplyPerspectiveProjection`, D3DTS_PROJECTION;
+`UpdateProjection` frustum math; `ParamObject_SetAngleAndRange` validation; detail-scale formula;
+object sizes); (5) added **§A.7.4** (shadow projector LH constants: π/8, aspect 1.0, near 0,
+far 10000, shadow-map UV remap); (6) **downgraded** FOV/near/far "DBG-pending" flag to
+CODE-CONFIRMED — 65°/50°/near 5/far 15000 are inline operands at scene-construction sites (CYCLE 7
+caveat superseded); (7) **resolved D.2 and D.6a** in Part D. Residue: fovy storage quirk
+(stored as π·deg/180 ÷ aspect) and the handedness vs port Z-negation confirmation remain
+[debugger-confirm] pending a live runtime read.
 
 Per the clean-room firewall, this spec carries **neutral RTTI class names** (e.g.
 `ThirdCameraManipulator`) and **struct field offsets** (layout facts) — both explicitly permitted —

@@ -7,6 +7,11 @@
 > ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
 > conflicts: none
+> deep-3d-cartography deepening (2026-06-29, static-only, IDB anchor f61f66a9): tokenizer
+>   "consecutive-separators collapse" rule CORRECTED (only CRLF→LF collapses; two adjacent TABs or
+>   LFs yield an empty token → 0); userjoint.txt joint_index bound < 41 and 16-byte/4-int runtime
+>   stride CONFIRMED; actormotion.txt motion_ids_a[0..8] (col15..col23) and motion_ids_b[0..8]
+>   (col24..col32) now labeled CONFIRMED; char-asset boot order interstitial loader identity open.
 > ```
 >
 > **RE-CONFIRMED (build 263bd994, 2026-06-24, two-witness: static IDA + VFS sample).** Tokenizer rules
@@ -77,16 +82,18 @@
 
 | Rule | Behaviour | Confidence |
 |------|-----------|------------|
-| **Field separators** | **TAB (`0x09`) and LF (`0x0A`) ONLY.** A run of separators collapses (consecutive TAB/LF do not emit empty tokens). | CONFIRMED |
+| **Field separators** | **TAB (`0x09`) and LF (`0x0A`) ONLY.** The token reader breaks on TAB or LF and emits exactly one token per terminator; two adjacent TABs or adjacent LFs yield an intervening empty token (`atol`/`atof` → 0). **No consecutive-separator collapse** beyond CRLF pairing (see CR normalization row). | CONFIRMED; "consecutive-collapse" rule CORRECTED 2026-06-29 |
 | **SPACE is NOT a separator** | A space (`0x20`) is an ordinary content byte **inside** a token. Korean/CP949 string fields may contain spaces; the tokenizer keeps them. **Never split a field on space.** | CONFIRMED |
-| **CR normalization** | A carriage return (`0x0D`) is normalized to LF before tokenizing, so CRLF files behave exactly like LF files (CR never appears in a token). | CONFIRMED |
+| **CR normalization** | A carriage return (`0x0D`) is translated to LF by the char translator, and a LF immediately following a CR is swallowed (the translator recurses), so each CR+LF pair collapses to exactly one LF. Isolated CR or isolated LF each produce one LF; the collapse is strictly CR+LF, not a general multi-separator collapse. | CONFIRMED (byte-exact, deep-3d-cartography pass) |
 | **High bytes pass through** | Bytes `>= 0x80` are passed through verbatim — the tokenizer is **codepage-agnostic**. String content is CP949; numeric/keyword fields are the ASCII subset. | CONFIRMED |
 
 **Consequences for a parser:**
-- Split on TAB and LF only; collapse consecutive separators; do not emit empty tokens for blank lines
-  (this is why count-prefixed tables can declare more rows than non-empty lines yield — blank lines
-  produce no tokens; see `actormotion.txt`'s 1084-declared vs 1080-parsed discrepancy in
-  `formats/animation.md`).
+- Split on TAB and LF only; each terminator ends exactly one token (two adjacent TABs/LFs yield an
+  empty token that parses to 0 via `atol`/`atof`). CRLF files behave identically to LF files because
+  the char translator collapses each CR+LF pair to a single LF — only that pairing collapses; no
+  general consecutive-separator collapse applies. The `actormotion.txt` 1084-declared vs 1080-parsed
+  discrepancy in `formats/animation.md` is explained by CRLF pairings reducing the effective LF
+  count (4 fewer record-terminating LFs from CRLF-paired lines), not by a blank-line token-collapse.
 - Treat space as data inside string fields (emote triggers, item names, zone names, etc.).
 - Decode string tokens as CP949; numeric tokens are ASCII decimal.
 - Count-prefixed tables (`skin.txt`, `actormotion.txt`, `emoticon.txt`, `userjoint.txt`,
@@ -164,13 +171,16 @@ knows the canonical source. **Do not re-document them in this file.**
 > is a **distinct field** from the `.skn` `id_b` skeleton pointer (`formats/mesh.md`).
 >
 > **actormotion.txt — 33 tokens per record, count-prefixed (CONFIRMED).** Header = a **u32 count
-> token**, then **33 TAB tokens per record** (per §1A; ~4 blank lines normalized → declared 1084 vs
-> 1080 parsed). `col0` = the **skin_class catalogue index**; `col1` = the **IdB offset** (the stored
-> actor id = `base[skin_class] + col1`); `col15` begins a 9-int motion-id block; `col31` is a real but
-> unlabeled field. The semantics of the integer blocks (cols 3–14 and the col31 field) are
-> **DBG-pending**. The full record/offset layout is the covering spec `formats/animation.md`
-> (§`actormotion.txt` layout) — do not re-document it here. CONFIRMED two-witness (parser-derived
-> record + black-box: 33 TAB tokens on 100% of rows).
+> token**, then **33 TAB tokens per record** (per §1A; CRLF pairings reduce effective LF count →
+> declared 1084 vs 1080 parsed). `col0` = the **skin_class catalogue index**; `col1` = the **IdB
+> offset** (the stored actor id = `base[skin_class] + col1`); `col15..col23` = **`motion_ids_a[0..8]`**
+> (col16 = `motion_ids_a[1]` = idle motion id, confirmed); `col24..col32` = **`motion_ids_b[0..8]`**
+> (col31 = `motion_ids_b[7]`, previously noted as "unlabeled" — now CONFIRMED labeled). The runtime
+> record is 136 bytes (34 dwords); col0+col1 fuse into one runtime field; +0x30/+0x34 are derived
+> `×15.0/divisor` fields (not directly read tokens). Semantics of cols 2–14 remain **DBG-pending**
+> (gameplay meaning of the unnamed int/float group). The full per-column offset/type layout is the
+> covering spec `formats/animation.md` (§`actormotion.txt` layout) — do not re-document it here.
+> CONFIRMED two-witness (parser-derived record + black-box: 33 TAB tokens on 100% of rows).
 >
 > **bindlist.txt — path and count (CONFIRMED).** Whole-line reader (not TAB-split), EOF-bounded;
 > the runtime path is **`data/char/bindlist.txt`** (NOT `data/char/bind/bindlist.txt`), with
@@ -675,23 +685,30 @@ all visible rows. IDA cross-check of cols 2/3 semantics pending.
 - **Delimiter:** TAB; CRLF; CP949 (content is pure ASCII / integers).
 - **Line 0 is a count integer** (the number of joint records) — not a column header. Data starts at
   line 1.
-- **Column count: 5, CONFIRMED** (a 1-based index column + 4 value columns).
+- **Column count: 5, CONFIRMED** (a joint-index column + 4 int-value columns).
+- **Joint index bound: < 41, CONFIRMED** (the per-record loader loop breaks when the index is ≥ 41;
+  at most 41 joint slots, indices 0..40 are valid). Col 0 is used directly as the zero-based array
+  index with no offset adjustment.
+- **Runtime stride: 16 bytes (4 int fields) per joint slot, CONFIRMED.**
 
-| col# | type | role                                                       | confidence |
-|------|------|------------------------------------------------------------|------------|
-| 0    | u32  | `joint_index` (1-based, sequential)                        | HIGH       |
-| 1    | u32  | primary value (small int; recurs in runs across joint groups; likely a bone index) | MEDIUM |
-| 2    | u32  | secondary value (small int; recurs alongside col 1)        | MEDIUM     |
-| 3    | u32  | tertiary value (sparse non-zero; likely a secondary attachment/rotation slot) | MEDIUM (sparse) |
-| 4    | u32  | quaternary value (usually 0; sometimes duplicates col 2)   | LOW        |
+| col# | type | role                                                         | confidence |
+|------|------|--------------------------------------------------------------|------------|
+| 0    | u32  | `joint_index` — zero-based array index; bound < 41          | CONFIRMED  |
+| 1    | u32  | `joint_value[0]` (small int; recurs in runs across groups; likely a bone index) | MEDIUM |
+| 2    | u32  | `joint_value[1]` (small int; recurs alongside col 1)        | MEDIUM     |
+| 3    | u32  | `joint_value[2]` (sparse non-zero; likely a secondary slot) | MEDIUM (sparse) |
+| 4    | u32  | `joint_value[3]` (usually 0; sometimes duplicates col 2)    | LOW        |
 
-**Pattern observation.** Consecutive joint records share the same (col 1, col 2) pair in runs, which
-reads like a (bone_index, attachment) pair carried per joint group; many records are all-zero in
-cols 1–4 (apparently unused joint slots). **Whether col 1 is a bone index or a pixel/coordinate
-offset — and the meaning of col 4 — remains UNVERIFIED and needs an IDA cross-check.**
+**Struct-size validation.** Per-joint runtime slot = 4 int values × 4 bytes = 16 bytes — matches the
+confirmed 16-byte stride. MATCH.
 
-**Proposed canonical name:** `user_joint_table`. **Verification:** single file; 5-column shape
-CONFIRMED; column 1–4 semantics UNVERIFIED.
+**Pattern observation.** Consecutive records share the same (`col1`, `col2`) pair in runs, consistent
+with a (bone_index, attachment) pair per joint group; many records are all-zero in cols 1–4.
+**The game meaning of the four int values** (what consumer reads them, how they index the skeleton)
+**remains DBG-pending** and needs a live debugger witness on the joint-array consumer.
+
+**Proposed canonical name:** `user_joint_table`. **Verification:** single file; 5-column shape and
+joint_index bound CONFIRMED (deep-3d-cartography pass); joint_value[0..3] game semantics UNVERIFIED.
 
 ### 5.3 `data/char/sameemoticon.txt` — emote alias table (CONFIRMED)
 
@@ -756,8 +773,11 @@ Columns 6/7 semantics UNVERIFIED — IDA cross-check pending.
 - **`emoticon.txt` state-machine semantics (cols 2/3)** — column count is now CONFIRMED at 12 and the
   state-machine role is HIGH-confidence, but the exact `enter_state`/`next_state` transition rules
   want an IDA cross-check. IMPACT: MEDIUM.
-- **`userjoint.txt` columns 1–4 semantics** — 5-column shape CONFIRMED; whether col 1 is a bone index
-  or an offset, and the meaning of col 4, are UNVERIFIED. IMPACT: LOW.
+- **`userjoint.txt` joint_value[0..3] game semantics** — structure now fully confirmed: 5
+  tokens/record, joint_index 0-based and bounded < 41, 16-byte/4-int runtime slot per joint.
+  The **game meaning** of the four stored int values (what consumer reads the joint array and how it
+  indexes the skeleton) remains DBG-pending; a live debugger witness on the joint-array consumer is
+  needed. IMPACT: LOW.
 - **`data/sky/map/map{N}.txt` outlier file** — one file is far larger than the others and does not
   match the small key-value schema; SAMPLE-UNVERIFIED. IMPACT: LOW (file is not loaded anyway — §4.1).
 - **Wide colour-grid companions** (`light`, `material`, `clouddome`, `stardome`) — exact column
@@ -774,6 +794,13 @@ Columns 6/7 semantics UNVERIFIED — IDA cross-check pending.
 > Resolved this sweep (no longer unknown): `emoticon.txt` column count (now 12), `userjoint.txt`
 > column count (now 5), `bmplist.txt` line model (alternating, even-line = sequential ordinal), and
 > `weather{N}_rain.txt` schema (identical to the base `weather{N}.txt`).
+>
+> Resolved by deep-3d-cartography pass (2026-06-29): tokenizer "consecutive-separators collapse" rule
+> CORRECTED (only CR+LF pairing collapses; empty tokens are emitted for adjacent TABs/LFs);
+> `userjoint.txt` joint_index bound (< 41) and runtime stride (16-byte/4-int) CONFIRMED;
+> `actormotion.txt` motion_ids_a[0..8] (col15..col23) and motion_ids_b[0..8] (col24..col32) labeled
+> CONFIRMED (col31 = motion_ids_b[7], no longer unlabeled); char-asset boot order interstitial loader
+> between bindlist and motlist identity remains open.
 >
 > Resolved by the sky-companion static-IDA pass: the whole `data/sky/` `.txt` family is **NOT loaded**
 > (authoring sidecars); `wind{N}.txt` is a keyword block (not the previously-documented tabular form),

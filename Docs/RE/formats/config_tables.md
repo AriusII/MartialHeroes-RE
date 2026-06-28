@@ -14,6 +14,10 @@
 > ida_reverified: 2026-06-27 (CYCLE 14 re-anchor: 2 facts re-confirmed SAME; 0 corrected)
 > ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 > evidence: [static-ida, vfs-sample]
+> deep-3d-cartography deepening (2026-06-29, static-only, IDB anchor f61f66a9): no new facts for
+>   the .scr/.do/.xdb domain this pass. Lua-config accessor split (GetInt/GetFloat/CallGlobal),
+>   cpp_load registration, vfsmode `!= 0` read confirmed → routed to formats/lua.md. Text-table
+>   tokenizer correction and userjoint/actormotion column layout → routed to formats/text_tables.md.
 > conflicts: RESOLVED — citems.scr description-paragraph count (6 vs 10) is settled in favour of **10**
 >   (§2.11; CYCLE 7, binary-won). The structural capacity is 10 fixed paragraphs (base +0xE4, width 81)
 >   and the runtime EARLY-TERMINATES at the first paragraph whose first byte is `#`; the consumer accessor

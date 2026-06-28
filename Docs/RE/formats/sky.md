@@ -3,11 +3,14 @@
 ```
 verification:   sample-verified   # .box absence + fog file size + cloud_cycle size matched against a real VFS sample; sun→screen→flare transform + lensflare.txt carried [confirmed] from CYCLE 7 static IDA; orbit/day-cycle math carried [confirmed] from prior IDA. CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME (SoundEvent_Free carry-verify cross-build mismatch resolution; no sky-format structural change).
 ida_reverified: 2026-06-27         # CYCLE 14 re-anchor (f61f66a9): 1 fact re-confirmed SAME
+ida_extended: 2026-06-28           # deep-3d-2026 static RE (IDB anchor f61f66a9): §E (render pass — D3D state block, fixed draw order, sub-component geometry); §F (cloud animation — UV scroll, texture ping-pong, day-tint); §A.4 vertex ambiguity resolved HIGH (runtime FVF XYZ|TEX1); §A.7 loader confirmation; §D.2.2 exact sun formula; §D.5.1 (billboard quad construction); §D.6 (moon draw location — transparent pass, not sky pass); KU #5 resolved; KU #10–12 added.
+atm_deep_pass: 2026-06-29          # atmosphere deep-cartography deepening pass: KU #2 CLOSED — fog source-band channel grouping CONFIRMED (high=[+3,+4,+5], low=[-1,+0,+1], stride 192B/slot, output B/G/R); §B.2 updated from MED to CONFIRMED.
 ida_reverified_prev: 2026-06-24    # IDB SHA 263bd994 — CYCLE 13 (2026-06-24): on-disk sample census (1005 dat/ files) byte-confirmed all .bin strides; IDA path-template table (printf format-string block) confirmed verbatim; cloud_cycle 7-column layout named HIGH (resolves KU #3); lensflare.txt on-disk text format confirmed + POSITION negative-value range witnessed (resolves KU #8); weather_rain.bin and light_map<n>.txt authoring mirrors documented. CYCLE 12 (2026-06-22): §D.2 thunk mechanism recorded — the "logf_1/logf_2" helpers are cosine/sine thunks (NOT natural-log); the orbit is closed-form trig, the moon is a flat circle (no Z term). ASSET-FIDELITY (2026-06-21) re-confirmed the .box skybox ABSENCE. CYCLE 7 (2026-06-20) added sun→screen→lens-flare transform + lensflare.txt.
 ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 readiness:      IMPLEMENTATION-READY for the C# rebuild (control-flow-confirmed against IDB SHA 263bd994); items explicitly tagged debugger-pending / capture-pending / RD-* are NON-blocking runtime residuals to confirm later.
 evidence:       [static-ida, vfs-sample]
 conflicts:      none-open  # CYCLE 13 (263bd994, 2026-06-24): on-disk census finds no conflicts against committed doc; KU #3 and KU #8 resolved. CYCLE 12 (263bd994, 2026-06-22): logf_1/logf_2 helper thunks confirmed as cosine/sine — NOT natural-log — the CYCLE-7 "natural-log curve" misidentification fully resolved. CYCLE 11 (263bd994, 2026-06-22): §D.2 sun/moon orbit CORRECTED — closed-form trig, MOON flat circle (no Z). Prior: campaign-10 C5 fog RESOLVED.
+reconciled:     2026-06-28 — wave-9 reconciliation: Docs/RE/specs/weather_render.md §8 overrides §E.5 step 3 precipitation-draw attribution. All active precipitation draws (RainStreaks_Draw, RainSplash_Draw, SnowFlakes_Draw) confirmed in RenderPass_TransparentAndParticles with SRCALPHA/INVSRCALPHA blend — NOT in this sky/background pass under additive blend. The WeatherParticle_Draw label in step 3 was a naming overlap with the snow flake draw function; corrected in place at §E.5 step 3 (see correction block and cross-reference to weather_render.md §8).
 ```
 
 > Two-witness re-verification on build `263bd994` (fog loader read-sequence + VFS sample scans)
@@ -23,6 +26,14 @@ conflicts:      none-open  # CYCLE 13 (263bd994, 2026-06-24): on-disk census fin
 > billboard texture/size** facts (§D.5), and a refinement of the **sun/moon orbit model** (§D.2) from
 > the earlier `sin`-based reading to the client's actual **natural-log-curve** form (the X-sign
 > opposition stands; the position vector also doubles, negated, as the directional-light direction).
+>
+> **Wave-3 struct reconciliation (2026-06-28, `Docs/RE/structs/skybox.md`).** The §E.3 sub-object
+> slot table was corrected: offset +0x00 holds the `SunBillboard_Struct` pointer (heap-allocated);
+> offset +0x04 is the embedded `MoonBillboard_Struct`. The wave-1 attribution ("weather/particle root"
+> at +0x00, "sun billboard particle buffer" at +0x04) is superseded by the recovered `EnvSky_Manager`
+> layout in `Docs/RE/structs/skybox.md`, which is the authoritative source for all sky runtime-object
+> layouts, sizes, and ownership (EnvSky_Manager 704 B, SkyBoxMesh_Object 644 B, Moon/Sun billboards,
+> StarDome, CloudDome with 48-slot day-colour tables, and sun-to-directional-light coupling).
 
 > Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
 > NO binary addresses. Consumed by `Assets.Parsers`. Every offset an engineer cites must
@@ -62,9 +73,11 @@ conflicts:      none-open  # CYCLE 13 (263bd994, 2026-06-24): on-disk census fin
 > client's parser source but **no skybox asset was ever authored** for any area: the read sequence
 > exists, the asset does not.
 >
-> **The hypothesized byte layout below (§A.1–§A.6) remains UNVERIFIED.** Because no `.box` sample
-> exists anywhere in the VFS, the layout can be neither confirmed nor denied by byte inspection; it
-> rests on the parser read-sequence alone. Engineers must NOT treat any field below as load-bearing.
+> **The hypothesized byte layout below (§A.1–§A.6) remains UNVERIFIED at the file level.** Because
+> no `.box` sample exists anywhere in the VFS, the layout can be neither confirmed nor denied by byte
+> inspection; it rests on the parser read-sequence and runtime draw evidence. The **vertex byte layout
+> (§A.4) is now runtime-confirmed HIGH** from the draw-call FVF (deep-3d-2026); all other field
+> boundaries remain UNVERIFIED.
 >
 > **Engineering guidance:** since no `.box` asset exists, do not implement a `.box` loader for
 > faithful reproduction. A **synthetic sky-dome** (procedurally generated dome geometry, tinted by
@@ -106,19 +119,23 @@ For each mesh, in order:
    `4 + 20 × vertex_count` bytes: a count prefix followed by the packed vertices).
 
 - **Record count source:** the per-mesh `vertex_count` u32 immediately preceding the array.
-- **Vertex stride:** 20 bytes — parser-derived, UNVERIFIED.
+- **Vertex stride:** 20 bytes — confirmed from runtime draw FVF and from the loader allocation
+  (see §A.4 and §A.7).
 
-### A.4 Vertex decode (20-byte stride) — UNVERIFIED
+### A.4 Vertex decode (20-byte stride) — **CONFIRMED HIGH** (deep-3d-2026)
 
-The 20-byte vertex most plausibly decodes as position + UV:
+The 20-byte vertex decodes as **position(12) + UV(8)** — confirmed from the runtime FVF. The
+sky-mesh draw code (`Sky_DrawModelMeshes`) sets FVF `D3DFVF_XYZ | D3DFVF_TEX1` with stride 20,
+which rules out the alternative position + colour + UV packing. See §E for the render-pass context.
 
 | Sub-offset | Size | Type | Field | Confidence |
 |-----------:|-----:|------|-------|------------|
-| 0x00 | 12 | f32[3] | `position` (x, y, z) | UNVERIFIED |
-| 0x0C | 8 | f32[2] | `uv` (u, v) | UNVERIFIED |
+| 0x00 | 12 | f32[3] | `position` (x, y, z) | **HIGH** (runtime FVF D3DFVF_XYZ confirmed; §E.5) |
+| 0x0C | 8 | f32[2] | `uv` (u, v) | **HIGH** (runtime FVF D3DFVF_TEX1, stride 20; no colour field; §E.5) |
 
-`12 + 8 = 20`. An alternative packing (12-byte position + 4-byte packed colour + 4-byte single UV
-pair) also fits 20 bytes; neither can be confirmed without a sample.
+`12 + 8 = 20`. The alternative packing (position + colour + UV) is ruled out by the draw-call FVF.
+The file-level field order remains unverifiable without a `.box` sample, but the vertex byte layout
+is no longer ambiguous.
 
 > Coordinate note: world geometry in this client negates Z when mapping to the target engine (see the
 > project coordinate conventions). The same Z handling would apply to `.box` positions; this is moot
@@ -131,7 +148,7 @@ For each mesh, in order:
 1. Read `u32 index_count`. **Cap: 900 (0x384)** — a larger value would be a load error.
 2. Read `index_count` indices, each **2 bytes (u16)** (the buffer would be `2 × index_count` bytes).
 
-- **Index width:** 16-bit (u16) — parser-derived, UNVERIFIED.
+- **Index width:** 16-bit (u16) — confirmed from loader allocation (§A.7).
 - **Record count source:** the per-mesh `index_count` u32 immediately preceding the array.
 
 ### A.6 Overall `.box` structure (hypothesized — UNVERIFIED)
@@ -151,6 +168,30 @@ The exact interleave of the vertex-array block vs. the index-array block (whethe
 precede all index arrays, or they alternate per mesh) was read in two passes over the mesh count in
 the parser; the order above (all vertex arrays, then all index arrays) is the parser read order.
 None of this is sample-confirmed.
+
+### A.7 Loader confirmation — `SkyBox_LoadFromFile` (HIGH — deep-3d-2026)
+
+The loader function `SkyBox_LoadFromFile` (canonical name) was traced and confirms the §A.1–§A.6
+layout at the code level. The asset remains absent from the production VFS, so this is
+loader-structural confirmation, not a file-sample:
+
+- **Path template:** `data/sky/dat/sky%d.box` (substituting the active area id), resolved via the
+  archive by-name lookup.
+- **Texture-name records:** reads `u32 texture_count`, then **47 bytes** per name record — each
+  name is expanded to a `.dds` path and a texture wrapper is allocated.
+- **Vertex cap confirmed:** per-mesh `vertex_count` is read as u32 and **capped at 300** (overflow
+  triggers a load error). The allocation is `4 + 20 × count` bytes, confirming **20-byte vertex
+  stride** at the loader level (matches the runtime draw FVF in §A.4).
+- **Index cap confirmed:** per-mesh `index_count` is read as u32 and **capped at 900** (overflow
+  triggers a load error). The allocation is `2 × count` bytes, confirming **16-bit (u16) indices**.
+- **In-memory layout — structure of arrays (SoA):** the mesh object stores five parallel 32-entry
+  arrays: texture handles (first N slots), vertex buffer pointers (slots starting at index 33),
+  vertex counts (slots starting at index 65), index buffer pointers (slots starting at index 97),
+  and index counts (slots starting at index 129); the total mesh count is stored at index 128.
+  This SoA layout is what `Sky_DrawModelMeshes` iterates at render time (see §E.5).
+
+Confidence: **HIGH** for the 47-byte texture-name stride, the caps (300 / 900), the 20-byte vertex
+allocation stride, the u16 index stride, and the SoA memory layout.
 
 ---
 
@@ -274,7 +315,15 @@ fog_channel = source_high * 0.75 + source_low * 0.25
 
 This confirms that the 48 × 192-byte sky-colour table is the **master per-time colour LUT** for the
 whole sky system, and that fog, when not given an explicit table, is a 3:1 weighted blend of it
-sampled per day slot. The structure is HIGH; the exact channel grouping of the source bands is MED.
+sampled per day slot. The structure is HIGH; the channel grouping of the source bands is
+**CONFIRMED** (atmosphere deep-cartography pass 2026-06-29):
+
+| Band | Byte offsets within the 192-byte slot (relative to slot start) | Output channel |
+|:----:|:--------------------------------------------------------------:|:--------------:|
+| High (×0.75) | +3, +4, +5 | B, G, R |
+| Low  (×0.25) | −1, +0, +1 (i.e. the three bytes immediately before the slot) | B, G, R |
+
+Stride between slots is 192 bytes. Alpha output is forced to 0xFF.
 
 > This resolves the `environment_bins.md §2.5` open question on the `data_load_flag = 0` colour
 > source: when the flag is 0 the fog colour is **derived** (the 0.75/0.25 blend above), not read from
@@ -421,6 +470,30 @@ orbit-driven direction and the per-area `light%d.bin` direction is **MED** — s
 > factors. The moon traces a flat circle (cosine only, no Z term). (CYCLE 11 correction — see the
 > blockquote above.)
 
+#### D.2.2 Exact sun orbit formula (confirmed HIGH — deep-3d-2026)
+
+`SkySun_UpdateBillboardOrbit` (canonical name) was traced in the deep-3d-2026 pass and the formula
+pinned to exact operands:
+
+```
+angle_deg = time_of_day_sec × 360 / 86400       # fraction-of-day → degrees (0..360)
+angle_rad = angle_deg × DEG2RAD                  # DEG2RAD ≈ 0.0174533 (pi/180)
+tiltCos   = cos(45° × DEG2RAD) ≈ 0.7071         # pre-computed once at init
+tiltSin   = sin(45° × DEG2RAD) ≈ 0.7071         # pre-computed once at init
+
+X = sin(angle_rad) × −3200
+Y = cos(angle_rad) × −3200 × tiltCos
+Z = Y × tiltSin
+```
+
+- `DEG2RAD ≈ 0.0174533` — the engine's stored constant (**HIGH**).
+- `tiltCos ≈ 0.7071` and `tiltSin ≈ 0.7071` — the 45° tilt factors are static, pre-computed once at
+  init (**HIGH**).
+- The orbit radius `−3200` is a static immediate (**HIGH**).
+- The resulting position at day-cycle index 29 (`≈ (1948, 1795, 1269)`) is consistent with prior
+  static analysis. After position computation, the vector is negated and stored as the directional-light
+  direction as described in §D.2.1.
+
 ### D.3 Moon phase — 30-day, 15-texture lunar cycle (HIGH)
 
 The moon billboard texture is selected from a **day counter** (a separate value from the time-of-day
@@ -565,29 +638,308 @@ The moon billboard texture is the phase-selected `data/sky/texture/moon<n>.dds` 
 sizes above are static immediates; a port may keep them or size the sprites to taste, but the texture
 paths are load-bearing.
 
+#### D.5.1 Billboard quad construction (confirmed HIGH — deep-3d-2026)
+
+The sun (and moon) billboards are CPU-built camera-facing quads managed through a shared particle
+buffer. Two operations handle this:
+
+**`GParticleBuffer_setBillboardSize(size)`** clamps `size` against the buffer's maximum, then
+pre-computes four corner offsets for a screen-facing quad of half-extent `h = size × 0.5`:
+
+| Corner | XYZ offset |
+|--------|-----------|
+| top-left | (−h, +h, 0) |
+| top-right | (+h, +h, 0) |
+| bottom-right | (+h, −h, 0) |
+| bottom-left | (−h, −h, 0) |
+
+These offsets are stored in the buffer header (Z = 0 — the quad faces the camera in billboard space).
+
+**`GParticleBuffer_appendQuadBatch(buf, centerArray, n)`** iterates `n` particles; for each, adds
+the centre position to the four corner offsets, producing 4 vertices in the textured-billboard format
+(20 bytes each), and memcpy-writes the batch into the locked dynamic VB.
+
+The **sun** uses a default billboard size set at init. The **moon** (drawn in the transparent pass —
+see §D.6) calls `setBillboardSize(0.5)` before its draw and restores `64.0` afterward. The sun's
+absolute size `2048.0` and buffer extents `4096.0 × 512.0` (§D.5) are buffer-level constants; the
+per-draw size scalar operates within those bounds.
+
+### D.6 Moon draw location — transparent pass, not the sky pass (HIGH — deep-3d-2026)
+
+The moon billboard is drawn from **`RenderPass_TransparentAndParticles`** (the transparent/particle
+render pass), **not** from `RenderPass_SkyAndBackground`. This means:
+
+- The **sun** billboard is drawn early, inside `RenderPass_SkyAndBackground` (before terrain; see §E).
+- The **moon** billboard is drawn later, after world geometry, compositing with the transparent and
+  particle layer.
+
+The moon draw function is `SkyParticle_DrawBillboard` (canonical name), called from the transparent
+pass. It calls `GParticleBuffer_setBillboardSize(0.5)` before the draw (see §D.5.1).
+
+**Porting guidance:** a faithful 1:1 port must split the sun and moon into their respective render
+passes — sun in the early sky/background pass, moon in the late transparent pass. Drawing both in the
+same pass would not match the original composite order.
+
+---
+
+## Section E — `RenderPass_SkyAndBackground` (frame render pass — HIGH — deep-3d-2026)
+
+> **Status: NEW (deep-3d-2026).** This section describes the per-frame sky render pass — the D3D
+> render state block, per-component draw order, blend modes, and geometry specifications. The loader
+> and file-format content is in §A–§D above; this section is the render-time complement.
+
+`RenderPass_SkyAndBackground` (canonical name) is the dedicated sky render pass. It is registered as
+the **first** scene-object draw slot and executes **before terrain, characters, and all other scene
+geometry** — ensuring the sky is always the background layer that subsequent passes paint over.
+
+### E.1 Feature-enable flags
+
+Each sky sub-component is gated by a runtime enable flag set from the per-area `map_option%d.bin`
+feature gates (see `environment_bins.md §1`):
+
+| Flag | Controls |
+|------|---------|
+| sky-ready master flag (byte on the environment object) | gates ALL sky draw and update paths |
+| sky-model-mesh enable | `Sky_DrawModelMeshes` (§A sky-dome meshes; absent in VFS) |
+| star-dome enable (`g_StardomeEnable`) | `Stardome_DrawIfEnabled` |
+| cloud-dome enable (`g_ClouddomeEnable`) | `Clouddome_DrawTwoLayers` via `Clouddome_DrawIfEnabled` |
+| sun billboard draw enable | sun billboard quad batch via `SkyBillboard_DrawQuadBatch` |
+| sun-orbit update enable | `SkySun_UpdateBillboardOrbit` per-tick |
+
+These flags correspond 1:1 to the `STARDOME`, `CLOUDDOME`, `SUN`, `MOON`, and `SKYBOX` fields in
+`map_option%d.bin`. The moon flag controls the moon orbit update; the moon draw is in the transparent
+pass (§D.6), not gated here.
+
+### E.2 Global D3D render state block (applied once at pass entry — HIGH)
+
+The following render states are set at the start of `RenderPass_SkyAndBackground` before any
+sub-component draw:
+
+| D3D render state | Value | Effect |
+|---|---|---|
+| `D3DRS_LIGHTING` | OFF | no per-vertex lighting |
+| `D3DRS_FOGENABLE` | OFF | no fog |
+| `D3DRS_ZWRITEENABLE` | OFF | depth-write disabled |
+| `D3DRS_ZENABLE` | OFF | depth-test disabled |
+| `D3DRS_ALPHABLENDENABLE` | OFF | alpha blend off (initial) |
+| `D3DRS_ALPHATESTENABLE` | OFF | alpha test off |
+| `D3DRS_FILLMODE` | SOLID | solid polygon fill |
+| `D3DRS_CULLMODE` | NONE | no face culling (initial) |
+| `D3DRS_SHADEMODE` | GOURAUD | smooth shading |
+| `D3DRS_POINTSPRITEENABLE` | OFF | point sprites off |
+| `D3DRS_POINTSCALEENABLE` | OFF | point scale off |
+
+Texture stages 0–3 are reset to disabled (COLOROP = DISABLE, ALPHAOP = DISABLE) at the top of the
+pass. Sampler stages 0–2 are then set to **trilinear filtering** (min/mag/mip = LINEAR) and **WRAP
+addressing** on both U and V axes (WRAP addressing is required for the scrolling cloud UVs — see §F.1).
+
+**Net effect:** the sky renders with no lighting, no fog, and depth fully disabled. Because depth is
+off and this pass runs first, the sky is the permanent background layer that all subsequent passes
+overdraw.
+
+### E.3 Sub-object layout on the environment object
+
+The sky pass accesses sub-components through pointer slots on the environment object:
+
+| Slot | Sub-object |
+|------|-----------|
+| `envobj + 0` | `SunBillboard_Struct*` — pointer to the heap sun-billboard struct (§D.5) |
+| `envobj + 4` | `MoonBillboard_Struct` — embedded moon-billboard struct (~28 B; §D.3) |
+| `envobj + 32` | star-dome object |
+| `envobj + 36` | cloud-dome object |
+| `envobj + 40` | sky model-mesh object (passed to `Sky_DrawModelMeshes`) |
+
+> **Corrected (wave-3 struct reconciliation — `Docs/RE/structs/skybox.md` §1).** The wave-1
+> readings "weather/particle root" (offset +0x00) and "sun billboard particle buffer" (offset +0x04)
+> are superseded. Per the recovered `EnvSky_Manager` layout: offset +0x00 is the heap
+> `SunBillboard_Struct` pointer; offset +0x04 is the embedded `MoonBillboard_Struct`. For the
+> complete field table, sub-object sizes, and full ownership model, see
+> `Docs/RE/structs/skybox.md`.
+
+### E.4 Per-frame world matrix — camera-follow (HIGH)
+
+Before drawing the star-dome (and sky-dome meshes), the pass sets the D3D world matrix to the
+**engine identity matrix with the translation term overridden to the camera eye XZ**:
+
+```
+world_matrix = engine_identity_matrix_template
+world_matrix.translation = (camera_eye_X, 0, camera_eye_Z)
+```
+
+The camera-eye X and Z coordinates are written into cached globals each frame by the frame-setup
+pass. This centres the sky domes on the camera so they read as infinitely distant regardless of
+world position.
+
+### E.5 Exact draw order and blend modes (HIGH)
+
+The sky pass executes sub-components in the following fixed sequence:
+
+**Step 1 — Sky model meshes** (`Sky_DrawModelMeshes`, gated by mesh count and mesh-enable flag)
+- State: `D3DRS_CULLMODE` = NONE
+- FVF: `D3DFVF_XYZ | D3DFVF_TEX1` (stride 20 B — position + UV; §A.4 confirmed)
+- Texture stage 0 COLOROP = SELECTARG1(TEXTURE) — pure unlit texture, no colour modulation
+- Draw: `DrawIndexedPrimitiveUP` with 16-bit indices, stride 20
+- Absent in shipping VFS (mesh count is 0 in all areas); this step is always skipped in practice
+  but the FVF confirms §A.4.
+
+**Step 2 — Star-dome** (`Stardome_DrawIfEnabled`, gated by `g_StardomeEnable`)
+- State: `D3DRS_CULLMODE` = CW; world matrix = identity + camera-eye XZ (§E.4)
+- Per-frame star brightness/tint pushed as `D3DRS_TEXTUREFACTOR` (a packed RGBA from the star-dome
+  object, driven by the throttled star-brightness interpolation from `stardome%d.bin`)
+- FVF: `D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1` (stride 24 B)
+- Geometry: **72 vertices / 132 triangles**, static VB + static IB
+- Texture stage 0 COLOROP = MODULATE(TEXTURE × D3DTA_TFACTOR) — star texture multiplied by the
+  per-frame TEXTUREFACTOR brightness/tint colour
+- Blend: OFF (opaque; modulate-by-TFACTOR achieves the night-sky fade-in/out)
+
+**Step 3 — Additive layer: sun billboard** *(precipitation draw attribution corrected — see note below)*
+- State: `D3DRS_ALPHABLENDENABLE` = ON; `D3DRS_SRCBLEND` = SRCALPHA; `D3DRS_DESTBLEND` = ONE
+  (additive blend); `D3DRS_CULLMODE` = NONE
+- Texture stage 0 COLOROP = SELECTARG1(TEXTURE); ALPHAOP = SELECTARG1(TEXTURE); stage 1 disabled
+- Sub-components in order:
+  1. `SkyBillboard_DrawQuadBatch` — **sun billboard** (gated by sun-draw enable; see §D.5 / §D.5.1)
+
+> **Correction (wave-9 reconciliation — `Docs/RE/specs/weather_render.md §8` is authoritative for
+> the weather draw pass):** The earlier step listed `WeatherParticle_Draw` (weather particles) as
+> the first sub-component of this additive sky pass. This attribution is **overridden**: no active
+> precipitation draw executes in `RenderPass_SkyAndBackground`. All confirmed precipitation draws —
+> `RainStreaks_Draw`, `RainSplash_Draw`, and `SnowFlakes_Draw` — run in
+> `RenderPass_TransparentAndParticles` (the same pass as the moon billboard; see §D.6) with
+> **standard alpha blend (SRCALPHA/INVSRCALPHA), Z-write off, alpha-test on, fog off, CW cull**.
+> The label `WeatherParticle_Draw` was a naming overlap with the snow flake draw function; that
+> function belongs to the transparent/particle pass, not this sky/background pass.
+> The only draw in this step is the **sun billboard** (`SkyBillboard_DrawQuadBatch`), as listed
+> above. See `Docs/RE/specs/weather_render.md §8` for the full weather render-state recipe and
+> draw order (`RainStreaks_Draw` → `RainSplash_Draw` → `SnowFlakes_Draw`).
+
+**Step 4 — Cloud-dome** (`Clouddome_DrawTwoLayers`, gated by `g_ClouddomeEnable`)
+- State: `D3DRS_SRCBLEND` = SRCALPHA; `D3DRS_DESTBLEND` = INVSRCALPHA (standard alpha blend)
+- FVF: `D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1` (stride 24 B)
+- Geometry: **2 layers × 60 vertices × 108 triangles**, dynamic VB (rebuilt CPU-side every frame
+  by the cloud animation system — §F)
+- Texture stage 0 COLOROP = MODULATE(TEXTURE × DIFFUSE); ALPHAOP = SELECTARG1(TEXTURE); stage 1
+  disabled — cloud texture multiplied by per-vertex diffuse colour (the day-tint; §F.3)
+- Layer A: vertex data from the cloud object at byte offset +8 (60 verts × 24 B), texture from
+  cloud object slot 0
+- Layer B: vertex data from the cloud object at byte offset +1448 (60 verts × 24 B), texture from
+  cloud object slot 1
+- Each layer: lock a dynamic VB, memcpy 1440 bytes (60 × 24 B), unlock, `DrawIndexedPrimitive`
+
+> **Moon is drawn LATER** in `RenderPass_TransparentAndParticles` — not in this pass. See §D.6.
+
+**Cull-mode toggle summary across the pass:** NONE → CW (star-dome) → NONE (additive + cloud).
+
+---
+
+## Section F — Cloud animation (per-frame CPU update — HIGH — deep-3d-2026)
+
+> **Status: NEW (deep-3d-2026).** This section documents the per-frame cloud-dome CPU animation:
+> UV scroll, texture ping-pong, and per-vertex day-tint. The colour-table data driving the tint
+> comes from `clouddome%d.bin` (see `environment_bins.md §5`) and `cloud_cycle%d.bin` (§B.3).
+
+Cloud animation runs every frame via `Sky_UpdateClouds` (canonical name), called from
+`SkySystem_UpdatePerFrame` (canonical name). The day-tint is separately throttled (runs on a
+per-object interval timer, not every frame). Together these produce UV scrolling, periodic texture
+swapping, and smooth colour transitions across the 48-slot day cycle.
+
+### F.1 UV scroll (HIGH)
+
+UV scroll offsets are computed from the current time-of-day and the area's cloud `Speed` byte (the
+`Speed` column — column 0 — of the `cloud_cycle%d.bin` 7-column table; see §B.3):
+
+```
+HALF_DAY    = 43200       # half of 86400 s (the day length from §C)
+QUARTER_DAY = 21600       # one quarter of 86400 s
+
+# Layer A
+off_A = (time_of_day mod HALF_DAY) × speed × 0.5 / HALF_DAY
+
+# Layer B (scrolls twice as fast)
+off_B = 2 × off_A
+if off_B >= 0.5: off_B -= 0.5     # wrap within [0.0, 0.5)
+```
+
+Layer B scrolls at **twice the rate** of layer A and wraps at 0.5 to avoid repeating the same half
+of the texture.
+
+The scroll offsets are applied per-vertex: each of the 60 cloud vertices has a stored **reference UV**
+(preserved in a separate buffer); the scroll offset is added to each reference UV and the result
+written into the CPU-side vertex position before the memcpy to the dynamic VB (§E.5, step 4). The
+scroll is therefore re-applied from scratch every frame on top of the static reference UVs and never
+accumulates numerical drift.
+
+### F.2 Texture ping-pong (HIGH — cloud_cycle table)
+
+Cloud textures (`data/sky/texture/cloud<n>.dds`) are periodically swapped in a ping-pong pattern
+driven by the `cloud_cycle%d.bin` table (§B.3). A frame index is computed for each layer:
+
+```
+frame_A = time_of_day / HALF_DAY × speed       # half-day period
+frame_B = time_of_day / QUARTER_DAY × speed    # quarter-day period — 2× faster than layer A
+```
+
+When the computed frame index changes between two consecutive updates, the texture for that layer is
+reloaded: the next `cloud<n>.dds` id is read from the appropriate column of the `cloud_cycle` row
+for the current day variant (`Cloud_1[*]` columns for layer A, `Cloud_2[*]` columns for layer B),
+the surface slot is ping-ponged (modulo 2 for layer A, modulo 4 for layer B), and
+`Sky_LoadCloudSurface` (canonical name) reloads the texture into the new slot.
+
+> Note on time units: the `HALF_DAY = 43200` and `QUARTER_DAY = 21600` constants indicate these
+> computations run in seconds-of-day, consistent with the 86400 s day length in §C and the
+> seconds-of-day orbit angle in §D.1. Confirmation against the live clock is a known-unknown
+> (see KU #12).
+
+### F.3 Per-vertex day-tint (HIGH — throttled)
+
+Cloud vertices carry a **per-vertex diffuse colour** that smoothly transitions over the 48-slot day
+cycle, sourced from the two-tier colour grid in `clouddome%d.bin`. The tint animator is
+**throttled** — it runs on a per-object interval timer, not every frame.
+
+Day-slot selection:
+
+```
+slot     = floor(time_of_day / 1800)          # 1800 s per slot, 48 slots per day (§C)
+fraction = (time_of_day mod 1800) / 1800.0    # lerp fraction within the slot
+```
+
+For each vertex (60 per layer, 2 layers): the animator reads the cloud colour at `slot` and
+`slot + 1` (wrapping at 48) from the two colour bands in `clouddome%d.bin` — band 0 (the first
+11520-byte half of the 23040-byte file) for layer A, band 1 (the second half) for layer B; see
+`environment_bins.md §5`. Colours are linearly interpolated channel-by-channel using `fraction`, and
+the result is written into the vertex diffuse field of the cloud object's CPU vertex buffer
+(the buffer that is then memcpy'd to the dynamic VB by `Clouddome_DrawTwoLayers`; §E.5, step 4).
+
+The `MODULATE` texture stage operation (§E.5, step 4) multiplies the cloud texture colour by this
+per-vertex diffuse, producing the time-of-day colour tint visible on clouds.
+
+> An alternate tint animator path (`CloudDome_AnimateVertexColours`, canonical name) may be selected
+> by a per-object flag. Both paths produce day-cycle colour tints from the same colour grid; only the
+> internal factoring differs. Which path the shipping data activates is a known-unknown (see KU #11).
+
 ---
 
 ## Known unknowns
 
-1. **`sky%d.box` does not exist in the production VFS (CONFIRMED-ABSENT).** The entire §A layout is
-   **UNVERIFIED** and unverifiable without a sample. Because the skybox feature was never shipped
-   (no `.box` asset in any of the 43,347 VFS entries; `SKYBOX` flag 0 in every area), the position(12)
-   + UV(8) vs. position(12) + colour(4) + UV(4) vertex ambiguity, the section interleave, and every
-   other §A field can be neither confirmed nor denied. A synthetic sky-dome is the correct
-   engineering path (see §A status block).
-2. **Fog source-band channel grouping** in the 0.75/0.25 blend (MED) — which bytes of the 192-byte
-   sky-colour-table slot are the "high" and "low" source bands.
+1. **`sky%d.box` does not exist in the production VFS (CONFIRMED-ABSENT).** The entire §A.1–§A.6
+   field layout is **UNVERIFIED** and unverifiable without a sample. The **vertex format (§A.4) is
+   now runtime-confirmed HIGH** (position + UV, stride 20 B; see §A.4 and §A.7); the section
+   interleave, field counts, and all other §A fields remain unconfirmed. A synthetic sky-dome is
+   the correct engineering path (see §A status block).
+2. ~~**Fog source-band channel grouping** in the 0.75/0.25 blend~~ — **CLOSED (atmosphere
+   deep-cartography pass 2026-06-29, CONFIRMED).** High band = slot bytes [+3, +4, +5];
+   low band = slot bytes [−1, +0, +1] (three bytes immediately before the slot boundary);
+   stride 192 B/slot; output order B/G/R; alpha forced 0xFF. See §B.2.
 3. ~~**Cloud `cloud_id_table` row count**~~ — **RESOLVED (CYCLE 13, HIGH).** 10 day rows × 7 columns;
    columns named: Speed, Cloud_1[0–12h], Cloud_1[12–24h], Cloud_2[0–6h], Cloud_2[6–12h],
    Cloud_2[12–18h], Cloud_2[18–24h]. See §B.3.
 4. **Star / cloud grid factoring** at the parser level (the BGRX-per-instance vs. keyframe grouping)
    — MED; defer to `environment_bins.md` sample-verified sizes.
-5. **Sun/moon billboard vertical-arc math (§D.2, CORRECTED CYCLE 11, binary-won)** — the orbit is
-   **closed-form trigonometry** (cosine and sine) of a seconds-of-day angle, scaled by **±3200.0**
-   with the sun/moon horizontal-sign opposition (HIGH). The sun vertical term is seeded with fixed
-   45°-tilt cosine/sine factors and carries a Z component; the moon vertical term is a plain cosine
-   with no Z (flat circle). The CYCLE 7 "natural-log curve" reading is superseded. The exact 45°-seed
-   scaling factors are HIGH; the precise per-frame formula is confirmed closed-form, not keyframe-driven.
+5. ~~**Sun/moon billboard vertical-arc math (§D.2)**~~ — **FULLY RESOLVED (deep-3d-2026, HIGH).** The
+   orbit is **closed-form trigonometry** (cosine and sine) of a seconds-of-day angle, scaled by
+   **±3200.0** with the sun/moon horizontal-sign opposition. The exact formula is pinned in §D.2.2:
+   `X = sin×−3200`, `Y = cos×−3200×cos45°`, `Z = Y×sin45°`; tilt factors pre-computed at init
+   (≈ 0.7071 each). The CYCLE 7 "natural-log curve" reading is superseded (binary-won, CYCLE 11);
+   the CYCLE 12 thunk-mechanism clarification is carried. No open sub-questions remain.
 6. **Sun-position ↔ directional-light precedence (§D.2.1)** — the negated sun orbit vector is stored
    both as the directional-light direction and the sun-direction global (coupling + negate are HIGH);
    whether the orbit-driven direction or a per-area `light%d.bin` direction wins when both are present
@@ -603,11 +955,27 @@ paths are load-bearing.
 9. **Moon-phase day-counter source (§D.3)** — confirmed a day index distinct from the time-of-day
    angle, and the `floor((day mod 30)/2)` 15-phase scheme is HIGH; the exact day-counter derivation
    is not fully pinned.
+10. **Cel/glow double-composite (§E — DBG-pending).** Whether an offscreen-RT cel/glow post pass
+    re-runs or alters the sky in the compositing phase is `[debugger-confirm]`. The sky render pass
+    itself is path-independent (a scene-object draw slot), but a debugger session should confirm the
+    sky is not double-composited.
+11. **Cloud colour animator branch (§F.3 — DBG-pending).** The day-tint animator selects between the
+    inline 48-slot lerp (§F.3) and the alternate `CloudDome_AnimateVertexColours` path based on a
+    per-object flag. Which path the shipping data activates is `[debugger-confirm]`.
+12. **Cloud time unit (§F.1–§F.2 — DBG-pending).** The `HALF_DAY = 43200` and `QUARTER_DAY = 21600`
+    constants indicate seconds-of-day usage (matching the 86400 s day length in §C). Confirmation
+    against the live clock is `[debugger-confirm]`.
 
 ## Cross-references
 
 - **Authoritative `.bin` byte tables:** `Docs/RE/formats/environment_bins.md`
   (`fog`, `material`, `stardome`, `clouddome`, `cloud_cycle`, `map_option`, weather).
+- **Runtime sky object graph** (EnvSky_Manager singleton 704 B, SkyBoxMesh_Object 644 B SoA,
+  MoonBillboard_Struct embedded at +0x04, SunBillboard_Struct heap pointer at +0x00, StarDome_Object,
+  CloudDome_Object with 48-slot day-colour tables, GParticleBuffer, sun-to-directional-light coupling):
+  `Docs/RE/structs/skybox.md` — authoritative for all sky runtime-object layouts, sizes, and
+  ownership. The on-disk format grammar and render-pass / orbit-math behaviour remain here (sky.md);
+  questions about runtime struct offsets, field types, and sub-object sizes belong in skybox.md.
 - **Runtime model:** `Docs/RE/specs/environment.md` (load order, day-cycle math, colour conversion,
   water = render-pass concern).
 - **Container:** `Docs/RE/formats/pak.md` (the `.box` open uses the archive by-name lookup).
@@ -617,7 +985,13 @@ paths are load-bearing.
   Section D adds the sun/moon billboard-orbit, moon-phase-load, and lens-flare-host subsystems.
   CYCLE 7 adds the sun-orbit update, the lens-flare project-and-draw host, the flare ghost-chain
   draw, the lens-flare config reader, and the negate-and-store light coupling — flag these canonical
-  names for the glossary, do not edit it here).
+  names for the glossary, do not edit it here.
+  deep-3d-2026 adds `RenderPass_SkyAndBackground`, `SkySystem_UpdatePerFrame`, `Sky_UpdateClouds`,
+  `Sky_LoadCloudSurface`, `Sky_DrawModelMeshes`, `Stardome_DrawIfEnabled`, `Clouddome_DrawTwoLayers`,
+  `Clouddome_DrawIfEnabled`, `WeatherParticle_Draw`, `SkyBillboard_DrawQuadBatch`,
+  `SkySun_UpdateBillboardOrbit`, `SkyBox_LoadFromFile`, `GParticleBuffer_setBillboardSize`,
+  `GParticleBuffer_appendQuadBatch`, `SkyParticle_DrawBillboard`, `CloudDome_AnimateVertexColours`
+  — flag all for the glossary, do not edit `names.yaml` here).
 - **Provenance:** see `Docs/RE/journal.md`. **CYCLE 13 (2026-06-24, IDB SHA `263bd994`)** — on-disk
   sample census (1005 `dat/` files): all `.bin` strides byte-confirmed against committed tables; IDA
   path-template table confirmed verbatim (§B.1a); `cloud_cycle` 7-column layout named HIGH (resolves
@@ -639,3 +1013,10 @@ paths are load-bearing.
   orbit (§D.2) to a "natural-log-curve" model (now superseded by the CYCLE 11 binary-won correction —
   the orbit is ordinary cosine/sine; see §D.2 correction block) with the negate-and-store
   directional-light coupling (§D.2.1).
+  **deep-3d-2026 (2026-06-28, IDB anchor f61f66a9)** added §E (full render pass — D3D state block,
+  exact draw order, blend modes, geometry specs), §F (cloud animation — UV scroll, texture ping-pong,
+  per-vertex day-tint), §A.7 (loader confirmation — caps, strides, SoA layout), §D.2.2 (exact sun
+  orbit formula with tilt operands), §D.5.1 (billboard quad construction), §D.6 (moon draw location
+  — transparent pass, not sky pass), resolved §A.4 vertex ambiguity HIGH (position+UV, runtime FVF),
+  fully resolved KU #5 (sun formula now exact; see §D.2.2), and added KU #10–12 (cel/glow composite,
+  cloud colour branch, cloud time unit).

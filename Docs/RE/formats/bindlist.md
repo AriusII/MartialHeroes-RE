@@ -12,6 +12,7 @@ ida_reverified: 2026-06-27; re-verified against doida.exe IDB SHA f61f66a9ae0ec1
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida, vfs-sample]
 conflicts: none
+deep_cartography_deepening: 2026-06-29 — CoreSkin_LoadFromFile confirmed passing .skn id_b VERBATIM to CharPosePool_LookupById (field CoreSkin+0x08); no layout changes to this spec.
 note: PINNED CYCLE 1 (ida_anchor 263bd994, 2026-06-19): preload-vs-lazy = EAGER boot preload (file opened+parsed in the boot loop); selection key = .skn id_b used verbatim (no g{N}.bnd formatting)
 note: CYCLE 7 (2026-06-20): sharpened the three-distinct-keys distinction (AnimCatalog map key vs skin_class skeleton selector vs .skn id_b pool key) and added the motlist.txt-registry parallel for .mot (no g{id}.mot rule)
 note: CYCLE 11 (2026-06-24): re-verification pass — all claims confirmed against build 263bd994c927c20a38624cf0ca452eaef365057fa9db1543d8f668c14a6fd8ee. Added: the "bindlist.txt" literal string is passed to the loader as a parameter (the caller assembles the full path); the loader does not hold a hard-coded full-path constant for it. No structural corrections.

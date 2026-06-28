@@ -38,7 +38,9 @@ ida_reverified_prev: 2026-06-24    # CYCLE 11 archive pass (2026-06-24), IDB SHA
 ida_reverified_prev2: 2026-06-20  # CYCLE 7 (2026-06-20), IDB SHA 263bd994 — static re-walk added the in-memory fog struct layout + the material/light synth-default immediates
 ida_anchor:     f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence:       [static-ida, vfs-sample]
-conflicts:      none-open         # campaign-10 D6 + cycle-11 archive pass found NO conflicts on the env-bin tables; all core numerics RE-CONFIRMED
+atm_deep_pass:  2026-06-29         # atmosphere-deep-cartography pass (f61f66a9): §2.4 fog synth channel grouping CONFIRMED (high=[+3,+4,+5], low=[-1,+0,+1] relative to slot base, stride 192 B/slot, output B/G/R); §2.5 MED item CLOSED; §4 star-dome corrected to 48 keyframes × 48 stars/keyframe (not 12 × 192); §9.1 section layout corrected to 8 consumer-validated sections (Gap A/B = enable bytes; D = point-intensity; E = device-ambient BGRA; fallback = 32-byte sun/key-light block at 0x14A0); §9.2 color_C corrected from UNREAD to CONFIRMED LERPED (all three groups committed Ambient/Diffuse/Specular); §9.4 sun/key-light block revised to 32 B starting at 0x14A0
+conflicts:      §7.5-resolved     # §7.5 quality-tier alpha scalars corrected (wave-9 reconciliation, 2026-06-28) per Docs/RE/specs/weather_render.md §7 (IDB anchor f61f66a9); all other env-bin numerics remain RE-CONFIRMED
+wave9_reconciliation: 2026-06-28  # §7.5 alpha scalars corrected to binary-won values (tier 1: 1.0/1.0/1.0, tier 2: 0.4/0.4/0.8, tier 3: 0.15/0.15/0.7); authority: Docs/RE/specs/weather_render.md §7
 cycle7_additions:                  # CYCLE 7 static re-walk (all HIGH immediates unless noted)
   - in-memory engine fog struct layout pinned: type@+44 (1=EXP/2=EXP2/3=LINEAR), colour@+48 (4-byte ARGB), start@+52 f32, end@+56 f32, density@+60 f32 (§10.3)
   - material SYNTH default (missing material.bin): ambient 0.30000001, diffuse 0.8, specular 0.0, emissive 0.0 (§3.4)
@@ -133,8 +135,12 @@ keyframe_index = (current_time_ms / 1800) mod 48
 frac           = (current_time_ms mod 1800) / 1800.0
 ```
 
-Values between adjacent keyframes are linearly interpolated at runtime. Star-dome and cloud-dome
-colour tables use a coarser 12-keyframe cycle (one keyframe = 7200 ms = four lighting keyframes).
+Values between adjacent keyframes are linearly interpolated at runtime. The **cloud-dome** colour
+table uses a coarser 12-keyframe cycle (one keyframe = 7200 s = four lighting keyframes). The
+**star-dome** colour table was previously described as 12-keyframe; the runtime interpolator
+(`StarDome_InterpolatePerStar`) has been confirmed to use a **48-keyframe cycle at 1800 s/keyframe**
+— the same cadence as the main lighting system (atmosphere deep-cartography pass 2026-06-29;
+see §4 for the corrected layout).
 
 **Path pattern for all files in this family:** `data/sky/dat/<name><area_id>.bin`
 (and `.txt` companions where noted).
@@ -354,14 +360,16 @@ synthesised) is the byte-D3DCOLOR path in §10.1. See also `specs/environment.md
 > production data**, not merely inferred. The synthesis branch (flag = 0) and the verbatim branch
 > (flag = 1) are both exercised by shipping areas.
 
-> The `0.75` / `0.25` blend weights are CONFIRMED as the blend ratio. The exact mapping of which two
-> sky-LUT source bands play the `high_band` / `low_band` roles per channel is MED confidence — see
-> §2.5 and `specs/environment.md §8`.
+> The `0.75` / `0.25` blend weights are CONFIRMED as the blend ratio. The exact source-band byte
+> mapping is now **CONFIRMED (atmosphere deep-cartography pass 2026-06-29)**: the fog-synth loop
+> walks the sky/material colour LUT at a stride of **192 B/slot**; within each slot the **high band**
+> draws from relative byte positions **[+3, +4, +5]** and the **low band** from positions
+> **[−1, +0, +1]**, with the blended result written as **B/G/R** into the synth fog colour entry.
+> See §2.5 (now CONFIRMED, not MED).
 
 ### 2.5 Known unknowns
 
-- **`data_load_flag = 0` blend source bands:** the 0.75/0.25 blend ratio is CONFIRMED (§2.4); the
-  exact pair of sky-LUT source bands feeding `high_band` / `low_band` per channel is MED.
+- ~~**`data_load_flag = 0` blend source bands:**~~ **CONFIRMED (atmosphere deep-cartography pass 2026-06-29).** The 0.75/0.25 blend ratio and source-band byte positions within each 192-byte sky/material LUT slot are fully pinned — see §2.4.
 - **Fog mode (EXP / EXP2 / LINEAR):** the D3D9 fog type (1 = EXP, 2 = EXP2, 3 = LINEAR) is stored in
   the runtime fog struct (with a colour, a start, an end, and a density field) but is **not** loaded
   from this file. The **observed apply path is LINEAR** (range derived from a per-keyframe scalar —
@@ -434,17 +442,23 @@ these floats directly (float [0,1] domain — §10.1).
 ## Section 4: `stardome%d.bin` — Star Colour Grid
 
 **Status:** CONFIRMED  
-**File size:** exactly **9216 bytes** (12 × 192 × 4 bytes, fixed)  
+**File size:** exactly **9216 bytes** (48 × 48 × 4 bytes, fixed)  
 **Gated by:** `map_option[stardome_enable]`
+
+> **Keyframe count CORRECTED (atmosphere deep-cartography pass 2026-06-29).** The runtime
+> interpolator (`StarDome_InterpolatePerStar`) uses divisor **1800 s/slot** and wraps at **48**, not
+> 7200 s/slot at 12. The earlier "12 keyframes × 192 stars" reading mis-grouped the 9216-byte block;
+> the consumer-proven factoring is 48 slots × 48 star instances × 4 B = 9216 B.
 
 ### 4.1 File layout
 
 | Offset | Size | Type | Field | Notes | Confidence |
 |-------:|-----:|------|-------|-------|------------|
-| 0x0000 | 9216 | u8[12][192][4] | `star_colors` | 12 keyframes × 192 star instances × 4 bytes BGRA each | CONFIRMED |
+| 0x0000 | 9216 | u8[48][48][4] | `star_colors` | **48 keyframes × 48 star instances × 4 bytes BGRA each** (192 B/keyframe; 1800 s/keyframe — same cadence as the 48-slot lighting cycle). Between adjacent keyframe slots the interpolator applies linear lerp per star. | CONFIRMED |
 
-The star-dome cycle uses **12 keyframes** at 7200 ms each (4 × 1800 ms lighting keyframes per
-star-dome step), covering one simulated day in 86 400 ms.
+The star-dome cycle uses **48 keyframes** at 1800 s each (the same cadence as the 48-slot
+lighting/fog cycle), covering one simulated day in 86 400 s. Each keyframe slot is 192 bytes
+(48 star instances × 4-byte BGRA).
 
 ### 4.2 BGRA colour encoding
 
@@ -452,15 +466,15 @@ Same byte order as fog colours (§2.2): Blue, Green, Red, Alpha. Alpha is always
 
 ### 4.3 Usage notes — tint is PER-STAR (CONFIRMED)
 
-**The star tint is per-star, NOT a single per-keyframe tint.** The consumer walks the 192 star
-instances of the active keyframe and **advances 4 bytes (one BGRA entry) per star**, reading a
-distinct colour for each star instance. Each of the 192 entries in a keyframe is therefore the tint
-of an individual star, and per-instance colour variation is fully supported by the format and by the
-consumer. **CONFIRMED** (two witnesses: the consumer's 4-byte-per-star advance + the per-instance
-array layout). This **refutes** the earlier "uniform tint across all stars per keyframe" reading
-(§4.3 previously inferred a single per-frame colour from samples in which the 192 entries happened to
-share a value — that uniformity is a property of those particular samples, not a constraint of the
-format or the consumer).
+**The star tint is per-star, NOT a single per-keyframe tint.** The consumer walks the **48 star
+instances** of the active keyframe slot and **advances 4 bytes (one BGRA entry) per star**, reading a
+distinct colour for each of the 48 primary dome vertices. Each of the 48 entries in a keyframe slot is
+the tint of an individual star, and per-instance colour variation is fully supported by the format and
+by the consumer. The remaining 24 dome vertices (of 72 total) are derived copies of the primary 48.
+**CONFIRMED** (consumer-proven: 4-byte-per-star advance across 48 primary verts; 2 × 12 derived-vertex
+copies = 24 derived + 48 primary = 72 total dome verts — atmosphere deep-cartography pass 2026-06-29).
+This **refutes** the earlier "uniform tint across all stars per keyframe" reading and the "192 entries"
+count (which was a misread of the slot-count vs. entry-count relationship).
 
 Stars are point-sprite particles textured from `data/sky/texture/star.dds`.
 
@@ -632,15 +646,22 @@ These paths are fixed in the loader — they are not read from `weather%d.bin`.
 
 ### 7.5 Quality-tier scalars — hardcoded, NOT file fields
 
-The weather initialiser applies three quality-tier scalars that dim rain/snow particle alpha and
-sky transparency at lower quality settings. These scalars are **hardcoded immediates** (not
-on-disk fields in `weather%d.bin`):
+The weather initialiser applies per-tier f32 scalars that dim rain particle alpha, snow particle
+alpha, and fog/sky transparency at lower quality settings. These scalars are **hardcoded immediates**
+(not on-disk fields in `weather%d.bin`).
 
-| Quality tier (`OPTION_WEATHER`) | Rain/snow alpha | Sky alpha |
-|:--------------------------------|:---------------:|:---------:|
-| Tier 1 (highest) | 1.0 | 1.0 |
-| Tier 2 | 0.7 (rain/snow) / 0.7 (alt) | 0.825 |
-| Tier 3 (lowest) | 0.65 (rain/snow) / 0.65 (alt) | 0.8125 |
+> **Corrected by `Docs/RE/specs/weather_render.md §7` (wave-9 reconciliation, IDB anchor
+> f61f66a9, 2026-06-28).** The earlier table listed tier-2 values of approximately 0.7/0.825 and
+> tier-3 values of approximately 0.65/0.8125. Those readings were from an earlier analysis pass on
+> a different build anchor. The binary-won decoded immediates on IDB anchor f61f66a9 are the values
+> in the table below. `Docs/RE/specs/weather_render.md §7` is the authoritative source for these
+> scalars; this table must match it.
+
+| Quality tier (`OPTION_WEATHER`) | Rain particle alpha | Snow particle alpha | Fog / sky alpha |
+|:--------------------------------|:-------------------:|:-------------------:|:---------------:|
+| Tier 1 (highest) | 1.0 | 1.0 | 1.0 |
+| Tier 2 | 0.4 | 0.4 | 0.8 |
+| Tier 3 (lowest) | 0.15 | 0.15 | 0.7 |
 
 ### 7.6 Known unknowns
 
@@ -721,21 +742,26 @@ parser-only entries in `terrain_layers.md §6`:
 
 ### 9.1 Revised section layout
 
-The 5312-byte file has six identified regions, not three as previously enumerated:
+> **Layout corrected to 8 consumer-validated sections (atmosphere deep-cartography pass 2026-06-29).**
+> The per-frame consumer (`Light_PerFrameApply`) was traced against hub offsets for every section.
+> Earlier sample-based readings that labelled hub+3728 / hub+6080 as "gap / all-zeros" and
+> hub+6320 / hub+6512 as "secondary fog scalar / reserved" are superseded by the consumer-proven
+> roles below. The sum 2304+48+2304+48+192+192+192+32 = **5312 B** ✓.
 
-| Byte range | Size | Region | Description | Confidence |
-|:----------:|-----:|--------|-------------|------------|
-| 0x0000–0x08FF | 2304 | A — Directional light | 48 keyframes × 48 bytes | CONFIRMED |
-| 0x0900–0x092F | 48   | Gap A | All zeros in sampled data; likely a 49th wrap-around interpolation slot or alignment pad | SAMPLE-VERIFIED (all zeros) |
-| 0x0930–0x122F | 2304 | B — Ambient light | 48 keyframes × 48 bytes | CONFIRMED |
-| 0x1230–0x125F | 48   | Gap B | All zeros; same interpretation as Gap A | SAMPLE-VERIFIED (all zeros) |
-| 0x1260–0x131F | 192  | C — Fog-distance scalar | 48 keyframes × 1 f32 | CONFIRMED |
-| 0x1320–0x13DF | 192  | D — Secondary fog scalar | 48 keyframes × 1 f32; values near 0.0 in all sampled areas (haze intensity) | SAMPLE-VERIFIED |
-| 0x13E0–0x14A7 | 200  | E — Reserved f32 array | All zeros in all sampled data | SAMPLE-VERIFIED (all zeros) |
-| 0x14A8–0x14AF | 8    | Padding | Four zero bytes | SAMPLE-VERIFIED (all zeros) |
-| 0x14B0–0x14BF | 16   | Fallback light | f32[4]: scale, dir_X, dir_Y, dir_Z | CONFIRMED |
+The 5312-byte file has **eight** identified sections, validated against the per-frame consumer:
 
-Total: 2304 + 48 + 2304 + 48 + 192 + 192 + 200 + 8 + 16 = 5312 bytes.
+| File offset | Size | Hub offset | Section | Confidence |
+|------------|-----:|-----------|---------|------------|
+| 0x0000 | 2304 | +1424 | **Directional colour keyframes** (48 × 48 B; three vec4 groups committed Ambient/Diffuse/Specular — see §9.2) | CONFIRMED |
+| 0x0900 | 48 | +3728 | **Directional per-keyframe enable bytes** (48 × 1 B; gate byte per keyframe; all zeros in sampled data) | CONFIRMED (consumer-proven) |
+| 0x0930 | 2304 | +3776 | **Ambient colour keyframes** (48 × 48 B; same three-group shape; channels ×`g_K_ambient` = 0.0 at apply → inert) | CONFIRMED |
+| 0x1230 | 48 | +6080 | **Ambient per-keyframe enable bytes** (48 × 1 B) | CONFIRMED (consumer-proven) |
+| 0x1260 | 192 | +6128 | **Fog scalar `s` keyframes** (48 × f32; drives `range = s × 3.0`, `near = 1/s`, enabled when `s > 0`) | CONFIRMED |
+| 0x1320 | 192 | +6320 | **Point-light master intensity keyframes** (48 × f32; enable/disable threshold 0.1) | CONFIRMED (consumer-proven) |
+| 0x13E0 | 192 | +6512 | **Device-ambient BGRA byte keyframes** (48 × 4 B; BGRA byte order; lerped and added to `OPTION_BRIGHT` floor before device push) | CONFIRMED (consumer-proven) |
+| 0x14A0 | 32 | +6704 | **Sun/key-light block** (2 × u32 override flags at +0/+4; sun direction vec3 at +8; key-light position vec3 at +20; defaults: flags = 0, both vecs = (−7, 7, 20)) | CONFIRMED |
+
+Total: 2304+48+2304+48+192+192+192+32 = **5312 bytes** ✓.
 
 ### 9.2 Keyframe structure (sections A and B) — revised
 
@@ -743,21 +769,29 @@ Each 48-byte keyframe consists of **three float4 colour groups** (not the sun/mo
 assignments listed in `terrain_layers.md §6.2`). The dirty-room analysis that produced those
 assignments used a narrower read-site scope; the sample-verified interpretation is:
 
+> **Commit order CORRECTED (atmosphere deep-cartography pass 2026-06-29; authoritative ref:
+> `Docs/RE/structs/environment_light_scene.md §Keyframe element layout`).** The per-frame consumer
+> commits group 1 (+0x00) → D3DLIGHT9.Ambient; group 2 (+0x10) → D3DLIGHT9.Diffuse; group 3 (+0x20)
+> → D3DLIGHT9.Specular. All three groups are lerped. An earlier IDB annotation claiming group 3 is
+> unread was stale and is refuted. The earlier "color_A = diffuse / color_C = unread" labels are
+> superseded below.
+
 | Slot offset | Size | Type | Field | Confidence |
 |:-----------:|-----:|------|-------|------------|
-| +0x00 | 16 | f32[4] | `color_A` (RGBA) | Primary colour — diffuse for section A, ambient for section B. RGBA, alpha always 0. Float in **[0,1]**, applied directly (no /255) — see §10.4. **CONSUMED** (read and applied by the time-update path). | CONFIRMED |
-| +0x10 | 16 | f32[4] | `color_B` (RGBA) | Secondary colour — specular for section A. **CONSUMED** (read by the time-update path). | CODE-CONFIRMED |
-| +0x20 | 16 | f32[4] | `color_C` (RGBA) | **Present-but-UNREAD.** Only `color_A` (the diffuse colour at +0x00) and `color_B` (the specular colour at +0x10) are read by the consumer; the third group at +0x20 has **no read-site** and is never consumed. All zeros in all sampled data. A faithful parser may surface the bytes but must NOT feed them to the lighting math (the original ignores them). | LOADER-RESOLVED (no read-site; unconsumed) |
+| +0x00 | 16 | f32[4] | Group 1 (RGBA) | Committed to **D3DLIGHT9.Ambient** by the consumer (commit order: Ambient→Diffuse→Specular). Alpha ignored. Float [0,1], applied directly (no /255). For section B, multiplied by `g_K_ambient` = 0.0 → inert at runtime. | CONFIRMED |
+| +0x10 | 16 | f32[4] | Group 2 (RGBA) | Committed to **D3DLIGHT9.Diffuse**. Alpha ignored. | CONFIRMED |
+| +0x20 | 16 | f32[4] | Group 3 (RGBA) | **CONFIRMED LERPED** — committed to **D3DLIGHT9.Specular**. The earlier "no read-site / unconsumed" label was a stale IDB annotation; all three groups are lerped by the per-frame consumer (atmosphere deep-cartography pass 2026-06-29). All zeros in all sampled data (specular is black by default). | CONFIRMED (atmosphere deepening pass) |
 
 The per-field sun/moon color assignments from `terrain_layers.md §6.2` (indices 0–2 as
 `sun_colour`, index 5 as `moon_colour[1]`, etc.) remain the best parser-side interpretation and
 are not contradicted by the sample bytes. They are retained in `terrain_layers.md` as
 CODE-CONFIRMED; the float4-group view above is a complementary, sample-verified structural view.
 
-> **color_C consumption — LOADER-RESOLVED.** Two witnesses settle that only the first two colour
-> groups are consumed: the loader/time-update read-sequence touches `color_A` (+0x00) and `color_B`
-> (+0x10) and stops — there is no read of the third group — and the sampled bytes for `color_C` are
-> uniformly zero. The third group is **present in the layout but unread**; treat it as reserved/dead.
+> **Group 3 consumption — CONFIRMED LERPED (atmosphere deep-cartography pass 2026-06-29).** The
+> per-frame consumer lerps all three groups into the live output slots. An earlier IDB annotation
+> claiming group 3 had no read-site was stale; the consumer traces prove it is committed to
+> D3DLIGHT9.Specular alongside groups 1 and 2. The earlier "color_C unread" note in this block is
+> superseded by the table above.
 
 ### 9.3 Section C fog scalar — revised interpretation
 
@@ -770,20 +804,26 @@ per-keyframe **world-unit fog scalar `s`** that drives the runtime LINEAR fog ra
 `specs/environment.md §6`. This per-frame derivation overwrites the static `fog%d.bin`
 `start_dist` / `end_dist` baseline each tick.
 
-### 9.4 Fallback directional light (bytes 0x14B0–0x14BF)
+### 9.4 Sun/key-light block (bytes 0x14A0–0x14BF)
 
-| Index | Field | Value | Confidence |
-|:-----:|-------|-------|------------|
-| [0] | `scale` | 1.0 | CONFIRMED |
-| [1] | `dir_X` | −7.0 | CONFIRMED |
-| [2] | `dir_Y` | 7.0 | CONFIRMED |
-| [3] | `dir_Z` | 20.0 | CONFIRMED |
+> **Corrected from earlier "bytes 0x14B0–0x14BF / 4-float fallback" reading (atmosphere
+> deep-cartography pass 2026-06-29).** The block starts at file offset **0x14A0** (hub+6704), not
+> 0x14B0. The earlier 4-float reading omitted the two u32 override flags at the block head. Full
+> layout per `Docs/RE/structs/environment_light_scene.md §light%d.bin`.
 
-This is the unnormalised world-space direction vector used when no runtime light is active. The
-Godot-side normalised vector is `normalize((-7, 7, 20))` ≈ `(-0.322, 0.322, 0.920)`. CONFIRMED that
-the day/night cycle does **not** rotate the sun — the keyframe tables (§A/§B) encode colour only;
-this static fallback is the only light direction the client uses (see §10.5 and
-`specs/environment.md §6`).
+| Offset within block | Hub offset | Size | Type | Field | Default | Confidence |
+|---|---|---:|---|---|---|---|
+| +0x00 | +6704 | 4 | u32 | Sun-direction override flag (0 = derive direction from vec3 below on each load; non-zero = locked) | 0 | CONFIRMED |
+| +0x04 | +6708 | 4 | u32 | Key-light-position override flag | 0 | CONFIRMED |
+| +0x08 | +6712 | 12 | vec3 f32 | Sun/world-light direction (unnormalised; default −7, 7, 20; normalised ≈ −0.322, 0.322, 0.920) | −7, 7, 20 | CONFIRMED |
+| +0x14 | +6724 | 12 | vec3 f32 | Key-light position source (default −7, 7, 20) | −7, 7, 20 | CONFIRMED |
+
+This block carries the **per-area** sun direction and key-light position loaded from `light%d.bin`.
+When the sky/sun subsystem is active, `SkySun_UpdateBillboardOrbit` overrides the directional-light
+direction each frame with the negated sun world position — the orbit-driven path supersedes this
+static block while the sun billboard orbits (see `Docs/RE/formats/sky.md §D.2.1` and
+`Docs/RE/specs/environment.md §3.2`). The two vec3 defaults (−7, 7, 20) apply when this file is
+absent (synth path) or for areas where the flags lock the direction.
 
 ### 9.5 Synth colour ramp + scale when `light%d.bin` is absent (CYCLE 7, CONFIRMED)
 
