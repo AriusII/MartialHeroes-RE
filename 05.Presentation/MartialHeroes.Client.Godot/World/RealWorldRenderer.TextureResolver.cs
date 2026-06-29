@@ -1,11 +1,14 @@
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Terrain;
+using MartialHeroes.Assets.Parsers.Terrain.Models;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
+    private readonly Dictionary<(int MapX, int MapZ), MapDescriptor?> _cellMapCache = new();
+
     private void LoadTextureResolutionInputs()
     {
         if (Assets is null) return;
@@ -77,28 +80,77 @@ public sealed partial class RealWorldRenderer
         return null;
     }
 
+    private MapDescriptor? GetOrLoadCellMap(int mapX, int mapZ)
+    {
+        if (Assets is null) return null;
+
+        var key = (mapX, mapZ);
+        if (_cellMapCache.TryGetValue(key, out var cached)) return cached;
+
+        MapDescriptor? map = null;
+        try
+        {
+            var tag = AreaTag(TargetAreaId);
+            var mapPath = $"data/map{tag}/dat/d{tag}x{mapX}z{mapZ}.map";
+            if (Assets.Contains(mapPath))
+                map = MapDescriptorParser.Parse(Assets.GetRaw(mapPath));
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[RealWorldRenderer] per-cell .map load failed for ({mapX},{mapZ}): {ex.Message}");
+        }
+
+        _cellMapCache[key] = map;
+        return map;
+    }
+
+    private ImageTexture? ResolveSectionTextureForCell(MapDescriptor cellMap, string sectionKeyword, int oneBasedIndex)
+    {
+        if (Assets is null || _bgTextures is null) return null;
+
+        (int Flag, int TexId)[]? list = null;
+        foreach (var section in cellMap.Sections)
+            if (string.Equals(section.Keyword, sectionKeyword, StringComparison.OrdinalIgnoreCase))
+            {
+                list = section.Textures;
+                break;
+            }
+
+        if (list is null || list.Length == 0) return null;
+
+        var b = oneBasedIndex < 1 || oneBasedIndex > list.Length ? 1 : oneBasedIndex;
+        var intTexId = list[b - 1].TexId;
+
+        var ddsPath = _bgTextures.ResolveTexturePath(intTexId);
+        if (ddsPath is null) return null;
+
+        return Assets.Contains(ddsPath) ? Assets.LoadTexture(ddsPath) : null;
+    }
+
     private void WireTerrainTextureResolver(TerrainNode terrainNode)
     {
         if (Assets is null) return;
 
-        var texCache = new Dictionary<int, ImageTexture?>();
+        var texCache = new Dictionary<(int, int, int), ImageTexture?>();
         var loggedOnce = false;
 
-        terrainNode.TextureResolver = texByte =>
+        terrainNode.TextureResolver = (texByte, mapX, mapZ) =>
         {
-            if (texCache.TryGetValue(texByte, out var cached)) return cached;
+            var key = (mapX, mapZ, texByte);
+            if (texCache.TryGetValue(key, out var cached)) return cached;
 
-            var tex = ResolveSectionTexture("TERRAIN", texByte);
+            var cellMap = GetOrLoadCellMap(mapX, mapZ);
+            var tex = cellMap is null ? null : ResolveSectionTextureForCell(cellMap, "TERRAIN", texByte);
             if (tex is not null && !loggedOnce)
             {
-                GD.Print($"[RealWorldRenderer] Terrain texture resolved for byte {texByte} (area {TargetAreaId}).");
+                GD.Print($"[RealWorldRenderer] Terrain texture resolved for byte {texByte} at cell ({mapX},{mapZ}) (area {TargetAreaId}).");
                 loggedOnce = true;
             }
 
-            texCache[texByte] = tex;
+            texCache[key] = tex;
             return tex;
         };
 
-        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired (2-hop bgtexture chain) for area {TargetAreaId}.");
+        GD.Print($"[RealWorldRenderer] Terrain TextureResolver wired (per-cell .map, 2-hop bgtexture chain) for area {TargetAreaId}.");
     }
 }

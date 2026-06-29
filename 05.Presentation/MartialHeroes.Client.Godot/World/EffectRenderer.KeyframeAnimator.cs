@@ -44,7 +44,10 @@ public sealed partial class EffectRenderer
             if (existing is null) continue;
 
             var texRow = live.Textures?[i];
-            RebuildSubEffectMesh(existing, se, anchorPos, elapsedMs, texRow, live.EffectiveScale);
+            var anchorQ = IsInstanceValid(live.Anchor)
+                ? live.Anchor.GlobalBasis.GetRotationQuaternion()
+                : Quaternion.Identity;
+            RebuildSubEffectMesh(existing, se, anchorPos, elapsedMs, texRow, live.EffectiveScale, anchorQ);
         }
 
         if (!live.AmbientAnchorOwned)
@@ -69,7 +72,8 @@ public sealed partial class EffectRenderer
         Vector3 origin,
         double elapsedMs,
         ImageTexture?[]? textures,
-        float scale)
+        float scale,
+        Quaternion instanceQ = default)
     {
         if (se.Keyframes.Length == 0) return;
 
@@ -117,9 +121,10 @@ public sealed partial class EffectRenderer
         var diffB = SampleCurveAt(se.DiffuseB, activeKf, nextKf, frac);
 
         var kfQ = SlerpKeyframeQuat(kA.Rotation, kB.Rotation, frac);
+        var instQ = instanceQ.LengthSquared() > 0.001f ? instanceQ.Normalized() : Quaternion.Identity;
 
         var vGodot = new Vector3(vx, vy, -vz);
-        var displace = kfQ * vGodot * scale;
+        var displace = instQ * vGodot * scale;
         var particlePos = origin + displace;
 
         var uOff = se.ScrollU ? (float)(elapsedMs % UvScrollPeriodMs / UvScrollPeriodMs) : 0f;
@@ -141,10 +146,10 @@ public sealed partial class EffectRenderer
                 break;
 
             case EmitterMesh:
-                mesh = BuildMeshParticle(se, sx, sy, sz, tint);
+                mesh = BuildMeshParticle(se, sx, sy, sz, tint, uOff, vOff);
                 if (mesh is not null)
                 {
-                    meshOrient = (preRot90Y * kfQ).Normalized();
+                    meshOrient = (instQ * preRot90Y * kfQ).Normalized();
                     billboardMat = false;
                 }
                 else
@@ -156,10 +161,10 @@ public sealed partial class EffectRenderer
                 break;
 
             case EmitterDirectional:
-                mesh = BuildMeshParticle(se, sx, sy, sz, tint);
+                mesh = BuildMeshParticle(se, sx, sy, sz, tint, uOff, vOff);
                 if (mesh is not null)
                 {
-                    meshOrient = kfQ;
+                    meshOrient = (instQ * kfQ).Normalized();
                     billboardMat = false;
                 }
                 else
@@ -178,9 +183,13 @@ public sealed partial class EffectRenderer
 
         if (mesh is null) return;
 
-        var blend = se.BlendModeKind == XeffBlendMode.Alpha
+        var isOpaque = se.BlendModeKind == XeffBlendMode.Opaque;
+        var blend = (se.BlendModeKind == XeffBlendMode.Alpha || isOpaque)
             ? BaseMaterial3D.BlendModeEnum.Mix
             : BaseMaterial3D.BlendModeEnum.Add;
+        var transparency = isOpaque
+            ? BaseMaterial3D.TransparencyEnum.Disabled
+            : BaseMaterial3D.TransparencyEnum.Alpha;
 
         mi.Mesh = mesh;
         mi.GlobalPosition = particlePos;
@@ -191,7 +200,7 @@ public sealed partial class EffectRenderer
             var texIdx = Math.Min(activeKf, textures.Length - 1);
             if (textures[texIdx] is { } tex)
             {
-                var mat = BuildEffectMaterial(tex, tint, blend, billboardMat);
+                var mat = BuildEffectMaterial(tex, tint, blend, billboardMat, transparency);
                 mi.SetSurfaceOverrideMaterial(0, mat);
             }
         }
@@ -201,7 +210,7 @@ public sealed partial class EffectRenderer
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 AlbedoColor = tint,
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                Transparency = transparency,
                 BlendMode = blend,
                 BillboardMode = billboardMat
                     ? BaseMaterial3D.BillboardModeEnum.Enabled

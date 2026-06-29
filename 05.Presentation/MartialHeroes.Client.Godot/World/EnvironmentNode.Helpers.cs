@@ -159,7 +159,7 @@ public sealed partial class EnvironmentNode
 
         GD.Print($"[Environment] area={_areaId} keyframe={kf} {skyGate} " +
                  $"material={_env?.Material is not null} cycle={CycleEnabled}@{CycleSpeed:F0}ms/s " +
-                 $"tonemap=Linear/1.0 glow=Additive(c1={_glowGlowWeight:F2},c0={_glowBaseWeight:F2}) | " +
+                 $"tonemap=Linear/1.0 glow=Additive(c1={_glowGlowWeight:F2},displayBaseBright={_displayBaseBrightMulti:F2}) | " +
                  $"fog: {fogStr} | light: {lightStr} | " +
                  $"pointLights: records={_plRecords?.Length ?? 0} active={_plActiveCount} master={_plMasterIntensity:F2} | " +
                  $"sunDirGodot={sunDir}");

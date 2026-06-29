@@ -113,39 +113,49 @@ public sealed partial class EffectRenderer
         var boneId = entry.BoneId;
         var effScale = ResolveBaseScale(entry.EffectId) * (entry.Scale != 0f ? entry.Scale : 1f);
 
-        var node = new JointBoundEffectNode(skinned, boneId, entry.RotSource, facing)
+        var subEffects = TryLoadXeff(entry.EffectId);
+        SubEffectDesc[] seArr = subEffects ?? [];
+
+        var meshInstances = new MeshInstance3D?[seArr.Length];
+        var simNodes = new GpuParticleSimNode?[seArr.Length];
+        var allTextures = new ImageTexture?[seArr.Length][];
+
+        for (var i = 0; i < seArr.Length; i++)
+        {
+            var se = seArr[i];
+            allTextures[i] = LoadSubEffectTextures(se) ?? System.Array.Empty<ImageTexture?>();
+
+            if (se.ResourceId >= XeffResourceParticleThreshold)
+            {
+                simNodes[i] = TryBuildParticleSimNode(se.ResourceId, Vector3.Zero);
+            }
+            else
+            {
+                meshInstances[i] = BuildSubEffectMesh(se, Vector3.Zero, allTextures[i], 0, effScale);
+            }
+        }
+
+        var node = new JointBoundEffectNode(skinned, boneId, entry.RotSource, facing, this,
+            seArr, meshInstances, simNodes, allTextures, effScale)
         {
             Name = $"JointEff_{entry.EffectId}_b{boneId}"
         };
 
-        var subEffects = TryLoadXeff(entry.EffectId);
-        if (subEffects is { Length: > 0 })
+        for (var i = 0; i < seArr.Length; i++)
         {
-            foreach (var se in subEffects)
+            if (meshInstances[i] is { } mi)
             {
-                var textures = LoadSubEffectTextures(se) ?? System.Array.Empty<ImageTexture?>();
-
-                if (se.ResourceId >= XeffResourceParticleThreshold)
-                {
-                    var sim = TryBuildParticleSimNode(se.ResourceId, Vector3.Zero);
-                    if (sim is not null) node.AddChild(sim);
-                }
-                else
-                {
-                    var mi = BuildSubEffectMesh(se, Vector3.Zero, textures, 0, effScale);
-                    if (mi is not null)
-                    {
-                        mi.Position = Vector3.Zero;
-                        node.AddChild(mi);
-                    }
-                }
+                mi.Position = Vector3.Zero;
+                node.AddChild(mi);
             }
+
+            if (simNodes[i] is { } sim)
+                node.AddChild(sim);
         }
-        else
-        {
+
+        if (seArr.Length == 0)
             GD.Print($"[EffectRenderer] SpawnJointEffects: effectId={entry.EffectId} .xeff unavailable — " +
                      "bone-bound node carries no visual (no-placeholder doctrine).");
-        }
 
         return node;
     }
@@ -169,13 +179,33 @@ public sealed partial class EffectRenderer
         private readonly int _boneId;
         private readonly byte _rotSource;
         private readonly SkinnedCharacterNode _skinned;
+        private readonly EffectRenderer _renderer;
+        private readonly SubEffectDesc[] _subEffects;
+        private readonly MeshInstance3D?[] _meshInstances;
+        private readonly GpuParticleSimNode?[] _simNodes;
+        private readonly ImageTexture?[][] _textures;
+        private readonly float _effScale;
+        private double _elapsedMs;
 
-        internal JointBoundEffectNode(SkinnedCharacterNode skinned, int boneId, byte rotSource, Node3D facing)
+        internal JointBoundEffectNode(
+            SkinnedCharacterNode skinned, int boneId, byte rotSource, Node3D facing,
+            EffectRenderer renderer,
+            SubEffectDesc[] subEffects,
+            MeshInstance3D?[] meshInstances,
+            GpuParticleSimNode?[] simNodes,
+            ImageTexture?[][] textures,
+            float effScale)
         {
             _skinned = skinned;
             _boneId = boneId;
             _rotSource = rotSource;
             _facing = facing;
+            _renderer = renderer;
+            _subEffects = subEffects;
+            _meshInstances = meshInstances;
+            _simNodes = simNodes;
+            _textures = textures;
+            _effScale = effScale;
         }
 
         public override void _Process(double delta)
@@ -193,6 +223,30 @@ public sealed partial class EffectRenderer
                 : boneWorld.Basis.Orthonormalized();
 
             GlobalTransform = new Transform3D(basis, boneWorld.Origin);
+
+            _elapsedMs += delta * 1000.0;
+            var origin = boneWorld.Origin;
+            var boneQ = boneWorld.Basis.GetRotationQuaternion();
+
+            for (var i = 0; i < _subEffects.Length; i++)
+            {
+                var se = _subEffects[i];
+                if (se.ResourceId >= XeffResourceParticleThreshold)
+                {
+                    var sim = i < _simNodes.Length ? _simNodes[i] : null;
+                    if (sim is not null && IsInstanceValid(sim))
+                        sim.Tick(delta);
+                }
+                else
+                {
+                    var mi = i < _meshInstances.Length ? _meshInstances[i] : null;
+                    if (mi is not null && IsInstanceValid(mi))
+                    {
+                        var texRow = i < _textures.Length ? _textures[i] : null;
+                        _renderer.RebuildSubEffectMesh(mi, se, origin, _elapsedMs, texRow, _effScale, boneQ);
+                    }
+                }
+            }
         }
     }
 }

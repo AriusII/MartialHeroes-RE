@@ -244,7 +244,7 @@ public sealed partial class EffectRenderer : Node3D
             _meshes = new MeshInstance3D[n];
 
             for (var i = 0; i < n; i++)
-                SpawnParticle(i);
+                SpawnParticle(i, true);
         }
 
         public override void _Ready()
@@ -263,14 +263,14 @@ public sealed partial class EffectRenderer : Node3D
             while (_accumSec >= SimStepSec)
             {
                 _accumSec -= SimStepSec;
-                StepAll((float)SimStepSec);
+                StepAll(1f);
             }
 
             UpdateMeshes();
         }
 
 
-        private void SpawnParticle(int i)
+        private void SpawnParticle(int i, bool initialSpawn)
         {
             var sr = _entry.SubRecords[i];
             _posX[i] = sr.SpawnPosX;
@@ -280,11 +280,11 @@ public sealed partial class EffectRenderer : Node3D
             _velY[i] = sr.VelocityY;
             _velZ[i] = -sr.VelocityZ;
             _size[i] = sr.SizeInit;
-            _colR[i] = sr.ColorR;
+            _colR[i] = sr.ColorB;
             _colG[i] = sr.ColorG;
-            _colB[i] = sr.ColorB;
+            _colB[i] = sr.ColorR;
             _colA[i] = sr.ColorA;
-            _lifeTick[i] = sr.Lifetime + sr.LifeBonus;
+            _lifeTick[i] = initialSpawn ? sr.Lifetime + sr.LifeBonus : sr.Lifetime;
             _delayTick[i] = sr.SpawnDelay;
         }
 
@@ -301,7 +301,7 @@ public sealed partial class EffectRenderer : Node3D
 
                 if (_lifeTick[i] <= 0)
                 {
-                    SpawnParticle(i);
+                    SpawnParticle(i, false);
                     continue;
                 }
 
@@ -354,8 +354,19 @@ public sealed partial class EffectRenderer : Node3D
 
                 mi.Position = new Vector3(_posX[i], _posY[i], _posZ[i]);
 
-                var qw = MathF.Max(_size[i], 0.01f);
-                var qh = MathF.Max(_size[i], 0.01f);
+                var rawSize = MathF.Max(_size[i], 0f);
+                float displaySize;
+                if (_entry.SpriteSizeX > 0f)
+                {
+                    var pmin = Math.Clamp(_entry.SpriteSizeY, 1f, _entry.SpriteSizeX);
+                    displaySize = Math.Clamp(rawSize, pmin, _entry.SpriteSizeX);
+                }
+                else
+                {
+                    displaySize = rawSize;
+                }
+                var qw = MathF.Max(displaySize, 0.01f);
+                var qh = MathF.Max(displaySize, 0.01f);
                 mi.Scale = new Vector3(qw, qh, 1f);
 
                 if (mi.GetSurfaceOverrideMaterial(0) is StandardMaterial3D mat)
@@ -394,9 +405,9 @@ public sealed partial class EffectRenderer : Node3D
             mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
             var initColor = new Color(
-                sr.ColorR / 255f,
-                sr.ColorG / 255f,
                 sr.ColorB / 255f,
+                sr.ColorG / 255f,
+                sr.ColorR / 255f,
                 sr.ColorA / 255f);
 
             var blendMode = _entry.BlendAdditiveFlag != 0

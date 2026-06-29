@@ -1,3 +1,4 @@
+using System.Text;
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
@@ -72,12 +73,11 @@ internal static class PlayerAvatarResolver
         var registry = CharVisualRegistry.GetOrBuild(assets);
 
         var appearanceKey = ClassAppearanceResolver.StarterBodyModelClassId(skinClass);
-        var poolKey = ClassAppearanceResolver.SkeletonIdBForModelClassId(appearanceKey);
-        if (poolKey == 0) poolKey = skinClass;
+        var poolKey = (int)mesh.IdB;
 
         var skeleton = TryLoadSkeleton(registry, poolKey);
 
-        var idleMotId = skeleton is not null ? ResolveIdleMotionId(registry, skinClass) : 0;
+        var idleMotId = skeleton is not null ? ResolveIdleMotionId(registry, appearanceKey) : 0;
         var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, registry, idleMotId)
             : null;
@@ -91,6 +91,7 @@ internal static class PlayerAvatarResolver
             var visualParts =
                 runsOverlay && equipParts.Count > 0
                     ? EquipmentPartResolver.Resolve(assets, equipParts, rebuildSlots,
+                        appearanceKey, LoadUserJointTable(assets),
                         $"local-player class={skinClass}")
                     : [];
 
@@ -185,12 +186,78 @@ internal static class PlayerAvatarResolver
         return skeleton;
     }
 
-    private static int ResolveIdleMotionId(CharVisualRegistry? registry, int skinClass)
+    private static int ResolveIdleMotionId(CharVisualRegistry? registry, int appearanceKey)
     {
         if (registry is null) return 0;
 
-        var entry = registry.ActorMotion.GetBySkinClass(skinClass);
+        var entry = registry.ActorMotion.GetByMotionKey((uint)appearanceKey);
         return entry?.IdleMotionId ?? 0;
+    }
+
+    private const string UserJointPath = "data/char/userjoint.txt";
+    private const int UserJointColumnBase = 902;
+    private const int UserJointRowStride = 4;
+    private const int UserJointMaxRows = 41;
+    private const int UserJointColumns = 4;
+
+    private static int[]? _userJointTable;
+    private static RealClientAssets? _userJointOwner;
+
+    private static IReadOnlyList<int>? LoadUserJointTable(RealClientAssets assets)
+    {
+        if (_userJointTable is not null && ReferenceEquals(_userJointOwner, assets))
+            return _userJointTable;
+
+        _userJointOwner = assets;
+        _userJointTable = null;
+
+        if (!assets.Contains(UserJointPath))
+        {
+            GD.Print($"[PlayerAvatar] '{UserJointPath}' absent — hand-bone resolution falls back to root bone. " +
+                     "spec: equipment_attach_render.md §6.2.");
+            return null;
+        }
+
+        try
+        {
+            var raw = assets.GetRaw(UserJointPath);
+            if (raw.IsEmpty) return null;
+
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            var text = Encoding.GetEncoding(949).GetString(raw.Span);
+            var lines = text.Split('\n');
+
+            var table = new int[UserJointColumnBase + UserJointRowStride * UserJointMaxRows];
+            var rows = 0;
+            for (var i = 1; i < lines.Length; i++)
+            {
+                var line = lines[i].TrimEnd('\r');
+                if (line.Length == 0) continue;
+
+                var cols = line.Split('\t');
+                if (cols.Length < 1 + UserJointColumns) continue;
+                if (!int.TryParse(cols[0].Trim(), out var rowIndex)) continue;
+                if (rowIndex < 0 || rowIndex >= UserJointMaxRows) continue;
+
+                for (var c = 0; c < UserJointColumns; c++)
+                {
+                    int.TryParse(cols[c + 1].Trim(), out var value);
+                    table[UserJointRowStride * rowIndex + UserJointColumnBase + c] = value;
+                }
+
+                rows++;
+            }
+
+            _userJointTable = table;
+            GD.Print($"[PlayerAvatar] userjoint.txt loaded: {rows} hand-bone joint rows. " +
+                     "spec: equipment_attach_render.md §6.1/§6.2 (columns 902/903/904/905).");
+            return table;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[PlayerAvatar] userjoint.txt parse failed: {ex.Message}");
+            return null;
+        }
     }
 
     private static AnimationClip? TryLoadAnimation(RealClientAssets assets, CharVisualRegistry? registry, int idleMotId)
@@ -223,6 +290,8 @@ internal static class EquipmentPartResolver
         RealClientAssets assets,
         IReadOnlyList<EquipmentPart> coreParts,
         ReadOnlySpan<int> rebuildSlots,
+        int appearanceKey,
+        IReadOnlyList<int>? userJointTable,
         string debugLabel)
     {
         var result = new List<SkinnedCharacterBuilder.EquipmentVisualPart>(coreParts.Count);
@@ -270,13 +339,17 @@ internal static class EquipmentPartResolver
                 scales.TryGetScale((uint)part.EquipmentGid, out var s))
                 visualScale = s;
 
+            var boneId = part.IsHandWeapon
+                ? SkinnedCharacterNode.ResolveHandBoneId(userJointTable, appearanceKey, part.IsOffHand, false)
+                : SkinnedCharacterNode.DefaultHandBoneId;
+
             result.Add(new SkinnedCharacterBuilder.EquipmentVisualPart(
                 part.Slot,
                 partMesh,
                 albedo,
                 part.IsHandWeapon,
                 part.IsOffHand,
-                SkinnedCharacterNode.DefaultHandBoneId,
+                boneId,
                 visualScale));
         }
 

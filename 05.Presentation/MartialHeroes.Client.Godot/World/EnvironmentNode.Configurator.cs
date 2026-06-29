@@ -136,13 +136,13 @@ public sealed partial class EnvironmentNode
         env.SetGlowLevel(3, 1.0f);
 
         env.GlowIntensity = _glowGlowWeight;
-        env.GlowStrength = _glowBaseWeight;
+        env.GlowStrength = 1.0f;
         env.GlowBloom = 0.0f;
 
         GD.Print(
             $"[Environment] glow ENABLED additive single-level: intensity(c1 DISPLAY_GLOW_BRIGHT_MULTI)={_glowGlowWeight:F3} " +
-            $"strength(c0 DISPLAY_BASE_BRIGHT_MULTI*0.5)={_glowBaseWeight:F3} hdrThreshold=0. " +
-            "spec: Docs/RE/specs/post_processing.md §8 / rendering.md §6.3.");
+            $"displayBaseBrightMulti(c0)={_displayBaseBrightMulti:F3} hdrThreshold=0. " +
+            "spec: Docs/RE/specs/post_processing.md §8 / environment.md §9.2.");
     }
 
     private void ApplyDirectional(int kf, int kfNext, float frac)
@@ -234,7 +234,7 @@ public sealed partial class EnvironmentNode
 
         _plCachedFocus = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
         GD.Print($"[Environment] point_light: {bin.Records.Length} records, proximityRadius={_plProximityRadius:F1}; " +
-                 "runtime 5-nearest model (colour +0x0C diffuse, range×3, skip +0x34, flicker type_flag==1). " +
+                 "runtime 5-nearest model (colour +0x0C diffuse, range verbatim, skip +0x34, flicker type_flag==1). " +
                  "spec: Docs/RE/formats/environment_bins.md §13 / §3.4.");
     }
 
@@ -303,7 +303,7 @@ public sealed partial class EnvironmentNode
 
             var s = rec.Range;
             if (rec.TypeFlag == 1) s -= _plFlickerRamp * 0.3f;
-            l.OmniRange = Math.Max(0.01f, s * 3.0f);
+            l.OmniRange = Math.Max(0.01f, s);
             l.Visible = true;
         }
     }
@@ -544,14 +544,14 @@ public sealed partial class EnvironmentNode
     private void ReadDisplayLuaScalars(RealClientAssets? assets)
     {
         _glowGlowWeight = 0.3f;
-        _glowBaseWeight = 1.05f * 0.5f;
+        _displayBaseBrightMulti = 1.05f;
 
         if (assets is null) return;
 
         const string LuaPath = "data/script/display.lua";
         if (!assets.Contains(LuaPath))
         {
-            GD.Print("[Environment] display.lua absent — glow weights default c1=0.300 c0=0.525 (recovered). " +
+            GD.Print("[Environment] display.lua absent — glow weight default c1=0.300 displayBaseBright=1.050. " +
                      "spec: Docs/RE/specs/post_processing.md §8.");
             return;
         }
@@ -565,10 +565,10 @@ public sealed partial class EnvironmentNode
             var glow = ParseLuaScalar(text, "DISPLAY_GLOW_BRIGHT_MULTI");
             var baseMul = ParseLuaScalar(text, "DISPLAY_BASE_BRIGHT_MULTI");
             if (glow is { } g) _glowGlowWeight = g;
-            if (baseMul is { } b) _glowBaseWeight = b * 0.5f;
+            if (baseMul is { } bm) _displayBaseBrightMulti = bm;
 
-            GD.Print($"[Environment] display.lua glow weights (CP949): c1(DISPLAY_GLOW_BRIGHT_MULTI)={_glowGlowWeight:F3} " +
-                     $"c0(DISPLAY_BASE_BRIGHT_MULTI*0.5)={_glowBaseWeight:F3}. spec: Docs/RE/specs/post_processing.md §8.");
+            GD.Print($"[Environment] display.lua scalars (CP949): c1(DISPLAY_GLOW_BRIGHT_MULTI)={_glowGlowWeight:F3} " +
+                     $"c0(DISPLAY_BASE_BRIGHT_MULTI)={_displayBaseBrightMulti:F3}. spec: Docs/RE/specs/post_processing.md §8.");
         }
         catch (Exception ex)
         {

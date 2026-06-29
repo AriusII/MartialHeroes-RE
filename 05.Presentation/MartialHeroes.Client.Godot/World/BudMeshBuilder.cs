@@ -94,15 +94,22 @@ public static class BudMeshBuilder
             if (p.Z > maxZ) maxZ = p.Z;
         }
 
+        var triCount = obj.Indices.Length / 3;
         var indices = new int[obj.Indices.Length];
-        for (var i = 0; i < obj.Indices.Length; i++)
-            indices[i] = obj.Indices[i];
+        for (var t = 0; t < triCount; t++)
+        {
+            var src = t * 3;
+            indices[src + 0] = obj.Indices[src + 0];
+            indices[src + 1] = obj.Indices[src + 2];
+            indices[src + 2] = obj.Indices[src + 1];
+        }
 
         var kind = kindResolver?.Invoke(obj.TexId) ?? (byte)1;
         var swaySmall = kind >= 0x0A && kind <= 0x0E;
         var swayLarge = kind >= 0x14 && kind <= 0x18;
         var solidShadow = kind == 0x02;
         var twoSided = solidShadow || swaySmall || swayLarge;
+        var isOpaque = !twoSided;
 
         Color[]? bendColors = null;
         var swayAmp = 0f;
@@ -145,6 +152,7 @@ public static class BudMeshBuilder
         var mat = new ShaderMaterial { Shader = SwayShader() };
         mat.SetShaderParameter("has_texture", hasTexture);
         mat.SetShaderParameter("one_sided", !twoSided);
+        mat.SetShaderParameter("is_opaque", isOpaque);
         mat.SetShaderParameter("sway_amp", swayAmp);
         mat.SetShaderParameter("sway_dir", swayDir);
         mat.SetShaderParameter("is_large", swayLarge);

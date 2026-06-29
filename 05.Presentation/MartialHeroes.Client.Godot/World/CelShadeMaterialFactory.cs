@@ -43,7 +43,7 @@ public static class CelShadeMaterialFactory
 
     private static readonly Vector3 DefaultLightDir = new(-1f, 0f, 0f);
 
-    public static bool CelEnabled { get; set; } = true;
+    public static bool CelEnabled { get; set; } = false;
 
     public static DisplayGlowConfig Glow { get; private set; } = DisplayGlowConfig.Recovered;
 
@@ -130,7 +130,7 @@ public static class CelShadeMaterialFactory
 
         Glow = new DisplayGlowConfig(
             Get(kv, "DISPLAY_GLOW_BRIGHT_MULTI", DisplayGlowConfig.Recovered.GlowBrightMulti),
-            Get(kv, "DISPLAY_BASE_BRIGHT_MULTI", DisplayGlowConfig.Recovered.BaseBrightMulti),
+            GetMulti(kv, "DISPLAY_BASE_BRIGHT_MULTI", DisplayGlowConfig.Recovered.BaseBrightMulti * 0.5f),
             Get(kv, "DISPLAY_GLOW_RANGE_X", DisplayGlowConfig.Recovered.GlowRangeX),
             Get(kv, "DISPLAY_GLOW_RANGE_Y", DisplayGlowConfig.Recovered.GlowRangeY),
             powerShader,
@@ -165,17 +165,16 @@ public static class CelShadeMaterialFactory
 
     private static (Vector3, Vector4)[] BuildShippedDefaults()
     {
-        const float h = 0.5f;
         var table = new (Vector3, Vector4)[9];
-        table[0] = (new Vector3(1.3f * h, 1.3f * h, 1.3f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
-        table[1] = (new Vector3(1.7f * h, 1.7f * h, 1.7f * h), new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
-        table[2] = (new Vector3(1.3f * h, 1.2f * h, 1.2f * h), new Vector4(0.1f, 0.0f, 0.0f, 0.9f));
-        table[3] = (new Vector3(1.2f * h, 1.2f * h, 1.2f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
-        table[4] = (new Vector3(1.5f * h, 1.5f * h, 1.5f * h), new Vector4(0.0f, 0.0f, 0.0f, 0.6f));
-        table[5] = (new Vector3(1.1f * h, 1.3f * h, 1.1f * h), new Vector4(0.0f, 0.1f, 0.02f, 1.0f));
-        table[6] = (new Vector3(1.2f * h, 1.2f * h, 1.4f * h), new Vector4(0.1f, 0.1f, 0.4f, 1.0f));
-        table[7] = (new Vector3(1.5f * h, 1.0f * h, 1.0f * h), new Vector4(0.15f, 0.0f, 0.0f, 1.0f));
-        table[8] = (new Vector3(0.3f * h, 0.3f * h, 0.3f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[0] = (new Vector3(0.525f, 0.525f, 0.525f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[1] = (new Vector3(0.5f, 0.5f, 0.5f), new Vector4(0.3f, 0.3f, 0.3f, 1.0f));
+        table[2] = (new Vector3(0.5f, 0.25f, 0.25f), new Vector4(0.3f, 0.0f, 0.0f, 1.0f));
+        table[3] = (new Vector3(0.5f, 0.5f, 0.5f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[4] = (new Vector3(0.5f, 0.5f, 0.5f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[5] = (new Vector3(0.25f, 0.5f, 0.25f), new Vector4(0.0f, 0.1f, 0.0f, 1.0f));
+        table[6] = (new Vector3(0.5f, 0.5f, 0.5f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[7] = (new Vector3(0.75f, 0.35f, 0.35f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[8] = (new Vector3(0.5f, 0.5f, 0.5f), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
         return table;
     }
 
@@ -200,7 +199,7 @@ public static class CelShadeMaterialFactory
         else
         {
             mat.SetShaderParameter("use_albedo_texture", false);
-            mat.SetShaderParameter("albedo_color", new Color(0.85f, 0.75f, 0.65f));
+            mat.SetShaderParameter("albedo_color", new Color(1f, 1f, 1f));
         }
 
         if (toonRamp is not null)

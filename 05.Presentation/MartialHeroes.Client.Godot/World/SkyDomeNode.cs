@@ -219,9 +219,9 @@ public sealed partial class SkyDomeNode : Node3D
         float brightness;
         if (curve is not null && curve.Length >= SlotCount)
         {
-            var a = curve[slot];
-            var b = curve[slotNext];
-            brightness = a + (b - a) * frac;
+            var ba = curve[slot];
+            var bb = curve[slotNext];
+            brightness = ba + (bb - ba) * frac;
         }
         else
         {
@@ -229,11 +229,20 @@ public sealed partial class SkyDomeNode : Node3D
         }
 
         var visible = brightness >= StarVisibilityCutoff;
-        var g = MathF.Round(brightness * 255f) / 255f;
-        var color = new Color(g, g, g, visible ? 1f : 0f);
+        var alpha = visible ? 1f : 0f;
+
+        var colorsA = _starDome.StarColors[Math.Clamp(slot, 0, _starDome.StarColors.Length - 1)];
+        var colorsB = _starDome.StarColors[Math.Clamp(slotNext, 0, _starDome.StarColors.Length - 1)];
 
         for (var i = 0; i < StarCount; i++)
-            _starMultiMesh.SetInstanceColor(i, color);
+        {
+            var ca = colorsA[Math.Clamp(i, 0, colorsA.Length - 1)];
+            var cb = colorsB[Math.Clamp(i, 0, colorsB.Length - 1)];
+            var r = ((ca.R + (cb.R - ca.R) * frac) / 255f) * brightness;
+            var gv = ((ca.G + (cb.G - ca.G) * frac) / 255f) * brightness;
+            var bv = ((ca.B + (cb.B - ca.B) * frac) / 255f) * brightness;
+            _starMultiMesh.SetInstanceColor(i, new Color(r, gv, bv, alpha));
+        }
     }
 
     private void UpdateCloudDomes(int slot, int slotNext, float frac, double clockMs)
@@ -243,7 +252,7 @@ public sealed partial class SkyDomeNode : Node3D
         var tod = clockMs;
         float speed = _activeCycleRow.Speed;
 
-        var offA = (float)(tod % CloudHalfDaySec * speed * 0.5 / CloudHalfDaySec);
+        var offA = (float)(tod * speed % CloudHalfDaySec * 0.5 / CloudHalfDaySec);
         var offB = offA * 2f;
         if (offB >= 0.5f) offB -= 0.5f;
 
@@ -567,7 +576,6 @@ public sealed partial class SkyDomeNode : Node3D
                 vec4 ta = texture(cloud_tex_a, uv);
                 vec4 tb = texture(cloud_tex_b, uv);
                 vec4 t = mix(ta, tb, clamp(cloud_blend, 0.0, 1.0));
-                // colorkey 0xFF000000: black -> transparent (smoothstep edge softening is aesthetic)
                 float key = smoothstep(0.0, 0.05, max(t.r, max(t.g, t.b)));
                 ALBEDO = t.rgb * tint_color.rgb;
                 ALPHA  = t.a * opacity * key;
@@ -619,6 +627,14 @@ public sealed partial class SkyDomeNode : Node3D
 
             uniform vec4 albedo_color : source_color = vec4(1.0, 0.95, 0.7, 1.0);
             uniform sampler2D albedo_tex : source_color, hint_default_white;
+
+            void vertex() {
+                MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
+                    INV_VIEW_MATRIX[0],
+                    INV_VIEW_MATRIX[1],
+                    INV_VIEW_MATRIX[2],
+                    MODEL_MATRIX[3]);
+            }
 
             void fragment() {
                 vec4 tex = texture(albedo_tex, UV);
@@ -685,6 +701,14 @@ public sealed partial class SkyDomeNode : Node3D
 
             uniform vec4 albedo_color : source_color = vec4(0.85, 0.9, 1.0, 1.0);
             uniform sampler2D albedo_tex : source_color, hint_default_white;
+
+            void vertex() {
+                MODELVIEW_MATRIX = VIEW_MATRIX * mat4(
+                    INV_VIEW_MATRIX[0],
+                    INV_VIEW_MATRIX[1],
+                    INV_VIEW_MATRIX[2],
+                    MODEL_MATRIX[3]);
+            }
 
             void fragment() {
                 vec4 tex = texture(albedo_tex, UV);

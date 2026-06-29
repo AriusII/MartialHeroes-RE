@@ -150,7 +150,7 @@ public sealed partial class RealWorldRenderer
 
         var assetsCapture = Assets;
 
-        _terrainNode.TextureResolver = texByte =>
+        _terrainNode.TextureResolver = (texByte, _, _) =>
         {
             if (_composerTexCache.TryGetValue($"tb:{texByte}", out var cached))
                 return cached;

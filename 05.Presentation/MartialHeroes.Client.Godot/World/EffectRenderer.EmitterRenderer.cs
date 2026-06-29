@@ -79,7 +79,8 @@ public sealed partial class EffectRenderer
     private ArrayMesh? BuildMeshParticle(
         SubEffectDesc se,
         float sx, float sy, float sz,
-        Color tint)
+        Color tint,
+        float uOff = 0f, float vOff = 0f)
     {
         if (se.ResourceId >= XeffResourceParticleThreshold)
             return null;
@@ -97,7 +98,7 @@ public sealed partial class EffectRenderer
         {
             var src = data.Vertices[v];
             positions[v] = new Vector3(src.PosX * sx, src.PosY * sy, src.PosZ * sz);
-            uvs[v] = new Vector2(src.TexU, src.TexV);
+            uvs[v] = new Vector2(src.TexU + uOff, src.TexV + vOff);
             colours[v] = tint;
         }
 
@@ -231,14 +232,15 @@ public sealed partial class EffectRenderer
 
 
     private static StandardMaterial3D BuildEffectMaterial(
-        ImageTexture texture, Color tint, BaseMaterial3D.BlendModeEnum blendMode, bool billboard)
+        ImageTexture texture, Color tint, BaseMaterial3D.BlendModeEnum blendMode, bool billboard,
+        BaseMaterial3D.TransparencyEnum transparency = BaseMaterial3D.TransparencyEnum.Alpha)
     {
         return new StandardMaterial3D
         {
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             AlbedoTexture = texture,
             AlbedoColor = tint,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            Transparency = transparency,
             BlendMode = blendMode,
             BillboardMode = billboard
                 ? BaseMaterial3D.BillboardModeEnum.Enabled

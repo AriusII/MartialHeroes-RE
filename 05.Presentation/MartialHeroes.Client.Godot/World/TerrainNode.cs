@@ -21,7 +21,7 @@ public sealed partial class TerrainNode : Node3D
     private readonly Dictionary<(int MapX, int MapZ), MeshInstance3D> _meshNodes = new();
 
 
-    public Func<int, ImageTexture?>? TextureResolver { get; set; }
+    public Func<int, int, int, ImageTexture?>? TextureResolver { get; set; }
 
 
     public event Action<int, int>? SectorBecameResident;
@@ -51,7 +51,7 @@ public sealed partial class TerrainNode : Node3D
 
         _cellCache[(evt.MapX, evt.MapZ)] = cell;
 
-        var mesh = TryBuildMultiSurfaceMesh(cell, TextureResolver);
+        var mesh = TryBuildMultiSurfaceMesh(cell, evt.MapX, evt.MapZ, TextureResolver);
         if (mesh is null) return;
 
         var legacyX = (evt.MapX - 10000) *
@@ -96,11 +96,13 @@ public sealed partial class TerrainNode : Node3D
 
     private static ArrayMesh? TryBuildMultiSurfaceMesh(
         TerrainCell cell,
-        Func<int, ImageTexture?>? textureResolver)
+        int mapX,
+        int mapZ,
+        Func<int, int, int, ImageTexture?>? textureResolver)
     {
         try
         {
-            return BuildMultiSurfaceMesh(cell, textureResolver);
+            return BuildMultiSurfaceMesh(cell, mapX, mapZ, textureResolver);
         }
         catch (Exception ex)
         {
@@ -111,7 +113,9 @@ public sealed partial class TerrainNode : Node3D
 
     private static ArrayMesh BuildMultiSurfaceMesh(
         TerrainCell cell,
-        Func<int, ImageTexture?>? textureResolver)
+        int mapX,
+        int mapZ,
+        Func<int, int, int, ImageTexture?>? textureResolver)
     {
         const int gridSize = TerrainCell.GridSize;
         const float spacing = 16.0f;
@@ -239,7 +243,7 @@ public sealed partial class TerrainNode : Node3D
             mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
             var surfaceIdx = mesh.GetSurfaceCount() - 1;
-            mesh.SurfaceSetMaterial(surfaceIdx, BuildSurfaceMaterial(texByte, textureResolver));
+            mesh.SurfaceSetMaterial(surfaceIdx, BuildSurfaceMaterial(texByte, mapX, mapZ, textureResolver));
         }
 
         return mesh;
@@ -256,7 +260,9 @@ public sealed partial class TerrainNode : Node3D
 
     private static ShaderMaterial BuildSurfaceMaterial(
         byte texByte,
-        Func<int, ImageTexture?>? textureResolver)
+        int mapX,
+        int mapZ,
+        Func<int, int, int, ImageTexture?>? textureResolver)
     {
         var mat = new ShaderMaterial();
         mat.Shader = GetTerrainShader();
@@ -267,7 +273,7 @@ public sealed partial class TerrainNode : Node3D
             var clampedByte = texByte < 1 ? 1 : texByte;
             try
             {
-                var tex = textureResolver(clampedByte);
+                var tex = textureResolver(mapX, mapZ, clampedByte);
                 if (tex is not null)
                 {
                     mat.SetShaderParameter("albedo_tex", tex);
@@ -277,7 +283,7 @@ public sealed partial class TerrainNode : Node3D
             catch (Exception ex)
             {
                 GD.PrintErr(
-                    $"[TerrainNode] TextureResolver failed for texByte={texByte} (clamped={clampedByte}): {ex.Message}");
+                    $"[TerrainNode] TextureResolver failed for ({mapX},{mapZ}) texByte={texByte} (clamped={clampedByte}): {ex.Message}");
             }
         }
 

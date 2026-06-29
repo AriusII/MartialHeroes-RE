@@ -11,13 +11,7 @@ public sealed partial class SkinnedCharacterNode : Node3D
 {
     public enum VisualState
     {
-        Standing = 0,
-
-        VisualState1 = 1,
-        VisualState2 = 2,
-        VisualState3 = 3,
-        VisualState4 = 4,
-        VisualState5 = 5
+        Standing = 0
     }
 
     private const bool RenormalizeAlpha = false;
@@ -288,13 +282,6 @@ public sealed partial class SkinnedCharacterNode : Node3D
         return state switch
         {
             VisualState.Standing => _idleClip,
-
-            VisualState.VisualState1 => _idleClip,
-            VisualState.VisualState2 => _idleClip,
-            VisualState.VisualState3 => _idleClip,
-            VisualState.VisualState4 => _idleClip,
-            VisualState.VisualState5 => _idleClip,
-
             _ => _idleClip
         };
     }

@@ -104,6 +104,8 @@ internal sealed class CharVisualRegistry
     private const string MotlistPath = "data/char/motlist.txt";
     private const string ActormotionPath = "data/char/actormotion.txt";
 
+    private static readonly uint[] PlayerGroupBaseTable = new uint[256];
+
     private static CharVisualRegistry? _cached;
     private static RealClientAssets? _cachedFor;
 
@@ -152,7 +154,7 @@ internal sealed class CharVisualRegistry
         try
         {
             if (assets.Contains(ActormotionPath))
-                actorMotion = ActormotionParser.Parse(assets.GetRaw(ActormotionPath));
+                actorMotion = ActormotionParser.Parse(assets.GetRaw(ActormotionPath), PlayerGroupBaseTable);
         }
         catch (Exception ex)
         {

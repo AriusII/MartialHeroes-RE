@@ -25,7 +25,7 @@ public sealed partial class EnvironmentNode : Node3D
 
     private const float WeatherSpawnHeight = 400f;
 
-    private const int WeatherMaxParticles = 2000;
+    private const int WeatherMaxParticles = 500;
 
 
     private readonly OmniLight3D?[] _plPool = new OmniLight3D?[PointLightSlots];
@@ -47,7 +47,7 @@ public sealed partial class EnvironmentNode : Node3D
 
     private bool _fallbackDirApplied;
 
-    private float _glowBaseWeight = 1.05f * 0.5f;
+    private float _displayBaseBrightMulti = 1.05f;
     private float _glowGlowWeight = 0.3f;
 
     private bool _hasSunDir;

@@ -660,12 +660,12 @@ public sealed partial class CharCreatePreview3D : Control
     }
 
 
-    private Func<int, ImageTexture?> BuildTerrainTextureResolver(RealClientAssets assets)
+    private Func<int, int, int, ImageTexture?> BuildTerrainTextureResolver(RealClientAssets assets)
     {
         var bgPool = TryLoadBgPool(assets);
         var cellMap = TryLoadCellMap(assets);
         var cache = new Dictionary<int, ImageTexture?>();
-        return texByte =>
+        return (texByte, _, _) =>
         {
             if (cache.TryGetValue(texByte, out var cached)) return cached;
             var tex = ResolveTexture(assets, bgPool, cellMap, "TERRAIN", texByte);
