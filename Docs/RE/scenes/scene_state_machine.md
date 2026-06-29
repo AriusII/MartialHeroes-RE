@@ -479,7 +479,7 @@ documented edge.
 
 Synthesised from the committed specs (read-only; no `_dirty/`, no IDA):
 
-- `Docs/RE/specs/client_architecture.md` — §3 (the GameState scene machine 0..7), §0, §2.
+- `Docs/RE/specs/client_workflow.md` — §3 (the GameState scene machine 0..7), §0, §2.
 - `Docs/RE/specs/client_workflow.md` — §1.1 (full process flow), §4 (scene state machine, state
   enumeration, transition table, scene-aware disconnect routing, timed-event bridge, error reason
   field).

@@ -9,11 +9,13 @@
 >
 > The frame-level draw-pass sequence and Z-test/Z-write conventions are in
 > `Docs/RE/specs/render_pipeline.md` §4/§5/§12. The scene-graph frustum cull is in
-> `Docs/RE/specs/scene_graph.md`. The struct layouts for the cull set are in
+> `Docs/RE/structs/scene_graph_nodes.md`. The struct layouts for the cull set are in
 > `Docs/RE/structs/cull_pipeline.md`. Terrain streaming, cell-ring sizing, and far-plane
 > coupling are in `Docs/RE/specs/terrain-streaming.md` and `Docs/RE/specs/whole_map_assembly.md`.
 > Mass-object grid construction and per-object distance budgets are in
 > `Docs/RE/specs/entity_placement.md` §8. This spec cross-links rather than duplicates those.
+>
+> **Companion spec:** `Docs/RE/specs/render_pipeline.md` is the authority for the frame draw-pass sequence and Z-test/Z-write conventions; when this spec and `render_pipeline.md` describe overlapping draw-pass or depth-state behaviour, `render_pipeline.md` prevails.
 >
 > Every C# visibility-budget constant must reference this file or the relevant cross-linked spec;
 > cite both as appropriate: `// spec: Docs/RE/specs/occlusion_culling.md`.
@@ -47,7 +49,7 @@
 >   Status table updated accordingly.
 > - **cross-links:**
 >   `Docs/RE/specs/render_pipeline.md` (frame draw-pass sequence, §4/§5/§12);
->   `Docs/RE/specs/scene_graph.md` (bounding-sphere hierarchy, GNode layout, frustum visitor);
+>   `Docs/RE/structs/scene_graph_nodes.md` (bounding-sphere hierarchy, GNode layout, frustum visitor);
 >   `Docs/RE/structs/cull_pipeline.md` (GCull set, GDrawablePair, GRangeObject layouts);
 >   `Docs/RE/specs/terrain-streaming.md` (cell ring, stream radius, far-plane coupling, §1/§5/§10/§11);
 >   `Docs/RE/specs/whole_map_assembly.md` (ring sizing by quality, §3/§5);
@@ -70,7 +72,7 @@
 | No software depth buffer / HOM / coverage buffer | CONFIRMED (bounding-sphere primitive decompile — CPU-only geometry math, no GPU read-back) |
 | No quadtree / octree / BSP / kd-tree in scene-graph or mass-object cull paths | CONFIRMED (string scan zero hits; no quadtree code in those paths) |
 | Terrain subtile AABB quadtree (frustum-cull accelerator for 16×16 subtile grid per cell) | CONFIRMED (code analysis — `Terrain_QuadtreeCullRecurse` / `TerrainCell_BuildSubtileQuadtreeBounds`) |
-| Frustum cull: bounding-sphere hierarchy, sphere-vs-6-plane scalar x87, mask 0x3F | CONFIRMED (scene_graph.md §3; frustum math confirmed static — no SIMD) |
+| Frustum cull: bounding-sphere hierarchy, sphere-vs-6-plane scalar x87, mask 0x3F | CONFIRMED (scene_graph_nodes.md §3; frustum math confirmed static — no SIMD) |
 | Terrain draw-set: player-centered 3×3 or 5×5 cell ring | CONFIRMED (terrain-streaming.md §1, whole_map_assembly.md §3) |
 | Terrain ground window: 7×7 subtile (±192 units, 64-unit step) | CONFIRMED (terrain-streaming.md §11.1/§11.2) |
 | Mass-object grid: 16×16 = 256 squares per cell, 64×64 units per square | CONFIRMED (entity_placement.md §8.3) |
@@ -161,11 +163,11 @@ All draw-set selection operates through three regimes. None is occlusion-based.
 ### Regime 1 — Scene-Graph Frustum Cull (Statics and Skinned Actors)
 
 Owner: `Diamond::GCull` (the cull-set at view offset `+112`/`+116`), driven by
-`GCull_CullScene` in the pipeline's Phase A pass. See `scene_graph.md §3` and
+`GCull_CullScene` in the pipeline's Phase A pass. See `scene_graph_nodes.md §3` and
 `structs/cull_pipeline.md`.
 
 A recursive `GTraverser` visit descends the scene-graph object tree. Each node carries a
-bounding sphere (centre and radius per `scene_graph.md §3` — `GNode` layout). At each node the
+bounding sphere (centre and radius per `scene_graph_nodes.md §3` — `GNode` layout). At each node the
 sphere is tested against the six frustum planes using **pure scalar x87 arithmetic** (no SSE /
 SIMD): `d = dot(plane.normal, sphere.center) + plane.D`; `d − r > 0` ⇒ inside (ret 2, subtree
 visible); `d + r < 0` ⇒ outside (ret 0, subtree culled); else straddle (ret 1, intersecting /

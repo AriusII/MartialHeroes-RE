@@ -122,7 +122,7 @@ object; the pointed-to type is named but its layout is in its own spec section o
 
 ### 3.0 Diamond base object — shared head of every engine class (CODE-CONFIRMED)
 
-Cross-reference: `specs/client_architecture.md §1A` for the object-model / RTTI-lifecycle behaviour.
+Cross-reference: `specs/client_workflow.md §1A` for the object-model / RTTI-lifecycle behaviour.
 
 The 3D layer is the **"Diamond" scene-graph engine** (an OpenSceneGraph-style Direct3D 9 scene
 graph; ~90 engine RTTI classes). A single abstract refcounted base, `GObject`, anchors the
@@ -164,7 +164,7 @@ share the same +0x00 / +0x04 / +0x08 head as above.
 > **Allocator note.** All Diamond and gameplay objects are allocated via plain CRT
 > `operator new → malloc → HeapAlloc` on the process heap — there is **no** custom game pool /
 > arena / free-list; placement-`new` appears only as STL in-place construction. (See
-> `specs/client_architecture.md §1A.6`.)
+> `specs/client_workflow.md §1A.6`.)
 
 ### 3.1 GameState — 16 bytes (CODE-CONFIRMED)
 

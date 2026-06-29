@@ -12,7 +12,7 @@
 >
 > Per-pass render-state behaviour, the glow/bloom chain, and the UI blend model are documented
 > in `Docs/RE/specs/rendering.md`. Shader details are in `Docs/RE/formats/shaders.md`. The
-> scene-graph class hierarchy and cull/draw mechanism are in `Docs/RE/specs/scene_graph.md`.
+> scene-graph class hierarchy and cull/draw mechanism are in `Docs/RE/structs/scene_graph_nodes.md`.
 > This spec cross-links rather than duplicates those.
 >
 > Every render-pipeline constant cited in C# must reference this file:
@@ -65,11 +65,17 @@
 >   (local-first, row-vector pre-multiplication); this closes the `GTransform`-internal portion
 >   of the matrix-order item. §13 item 3 updated accordingly: device-side `SetTransform` upload
 >   order and world up-axis remain the only open `[debugger-confirm]` in that item.
+> - **scene-graph-traversal consolidation (2026-06-29):** §2.2 step 3 updated — deferred
+>   `scene_graph.md §3` reference replaced with explicit citations to `occlusion_culling.md §3
+>   Regime 1` (sphere-vs-plane algorithm, confirmed) and `scene_graph_nodes.md §5` (DFS
+>   pre-order child-list traversal, confirmed); `occlusion_culling.md` added to cross-links.
 > - **cross-links:**
 >   `Docs/RE/specs/rendering.md` (per-pass render-state matrix, glow chain, cel-shader
 >   gating, FVF strides, UI blend modes);
->   `Docs/RE/specs/scene_graph.md` (GNode / GGroup / GScene / GView / GCamera / GFrustum
+>   `Docs/RE/structs/scene_graph_nodes.md` (GNode / GGroup / GScene / GView / GCamera / GFrustum
 >   class hierarchy and vtables);
+>   `Docs/RE/specs/occlusion_culling.md` (definitive no-occlusion verdict; sphere-vs-plane
+>   frustum algorithm, scalar x87, plane-index ordering, and three draw-set pruning regimes);
 >   `Docs/RE/specs/game_loop.md` (four-phase loop, FPS cap, scene-state machine);
 >   `Docs/RE/formats/shaders.md` (cel VS/PS, composite shader, glow shader set).
 
@@ -186,7 +192,7 @@ For each view-node, `Engine_DeviceStepAndPresent` calls two routines in sequence
 6. Cache the camera eye position and rotation into the render-globals block (§8). The eye
    position is also re-cached by the frame-setup pass (§3).
 7. Call `Diamond_GFrustum_ctor_copy` to copy the camera's embedded `GFrustum` (at camera
-   `+0x2C`, matching `scene_graph.md`'s GCamera layout) into a stack-local frustum.
+   `+0x2C`, matching `scene_graph_nodes.md`'s GCamera layout) into a stack-local frustum.
 8. **Cull** (§2.2): call `GCull_CullScene` with the GView sub-object, the selected cull-set
    (chosen by the selector byte at view `+108`), the FOV/aspect, viewport dimensions from
    view `+28` and `+32`, the stack frustum, the view matrix at view `+44`, and cull context
@@ -209,8 +215,14 @@ For each view-node, `Engine_DeviceStepAndPresent` calls two routines in sequence
 3. Dispatch the recursive cull traverse through the scene-root's vtable cull slot with an
    initial node visibility mask of `(1 << planeCount) - 1`, where `planeCount` is read from
    the stack frustum at offset `+4` (typically 6 planes → mask `0x3F`). The sphere-vs-plane
-   test and visitor-pattern descent are as documented in `scene_graph.md` §3; this section
-   adds only the entry wiring above it.
+   algorithm (`dist = (N·C) + d`; `dist < −R` for any plane → subtree culled; `dist ≥ −R`
+   for all planes → visible), scalar x87 implementation (no SIMD), plane-index ordering
+   (near=index 1 / far=index 3 by strong static inference), and negative-radius always-visible
+   sentinel are documented in `Docs/RE/specs/occlusion_culling.md` §3 Regime 1
+   (static-confirmed). Child lists are iterated depth-first pre-order, index 0 to count−1
+   across all GVector child lists (`Docs/RE/structs/scene_graph_nodes.md` §5, confirmed).
+   This section records only the entry wiring (mask seed, frustum source, cull-set dispatch)
+   surrounding that algorithm.
 4. Emitted visible draw-items accumulate inside the chosen cull-set object. The cull-set's
    vtable slot `+4` is the "draw the emitted visible items" call invoked during the draw
    phase.
@@ -533,7 +545,7 @@ Additional fields in the render-globals block written by the frame-setup pass an
 > **Reconciliation note.** This is the render-view object that `Renderer_SetupCameraAndFrustum`,
 > `Renderer_DrawScene_Direct`, `Renderer_DrawScene_OffscreenRT_0`, and the render-pass
 > installer operate on. It may be the same class as — or a sibling of — the `GView` described
-> in `scene_graph.md` (`+0x24` camera, `+0x70` platform, `+0x74` pipeline, `+0x130` device).
+> in `scene_graph_nodes.md` (`+0x24` camera, `+0x70` platform, `+0x74` pipeline, `+0x130` device).
 > Reconciliation of the two offset tables is flagged for `re-struct-analyst` (§13, item 5).
 
 | Offset (bytes) | Field |
@@ -579,7 +591,7 @@ Additional fields in the render-globals block written by the frame-setup pass an
 | `+296` | Computed FPS average (double-precision) |
 
 > **Full field table:** `Docs/RE/structs/gview.md` is the authoritative per-view struct spec
-> (complete 308-byte layout, vtable note, lifecycle, and reconciliation with `scene_graph.md`).
+> (complete 308-byte layout, vtable note, lifecycle, and reconciliation with `scene_graph_nodes.md`).
 > The table above covers the offsets exercised by the four spine routines and the installer;
 > `structs/gview.md` adds +4 (reserved), +16 (clearEnable byte), +120 (embedded GBlockDeque
 > cull-scratch), +164/+168 (extra callback pair), and +304 (FPS-counter digit texture).
@@ -769,6 +781,6 @@ are treated as implementation facts. All are NON-BLOCKING for most port work.
 | 2 | Bloom source scope — optional visual cross-check | RT-A/RT-B/RT-C identities and routing are statically confirmed (§5): bloom extracted from RT-A pass 1 (sky+terrain+extras only); cel actors and transparent/UI are added in RT-A pass 2 and the present pass after extraction. Remaining: optional visual capture of RT-A vs RT-C surfaces to confirm glow exclusion in practice. |
 | 3 | World-projection matrix order and up-axis | `GTransform` internal convention now **statically confirmed** (deep-3d-cartography pass): row-major matrix multiply; composition `localMatrix × parentModelView` (local-first, row-vector). Post/composite/present quads confirmed left-handed (`D3DXMatrixOrthoLH`); world path uses RH perspective (per `rendering.md` §2.2). **Remaining `[debugger-confirm]`:** read `SetTransform(WORLD/VIEW/PROJECTION)` live during a world frame to pin the device-side row-vs-column-major upload order and the exact world up-axis direction. |
 | 4 | Multi-view count at runtime | **Partially resolved.** `Docs/RE/structs/render_driver.md §1` confirms two instantiation contexts: a global singleton (used for opening, character-select, and in-world scenes) and private instances embedded in scene-window objects (confirmed for the login scene). The in-world node count and whether a character-preview inset adds a node or uses a separate driver remain `[debugger-pending]` — confirm via live `?ext=dbg` session; route to `re-validator`. |
-| 5 | GView struct reconciliation | **RESOLVED.** The render-view object in §7 IS `Diamond::GView` — same class, confirmed via RTTI (class name `Diamond::GView`). See `Docs/RE/structs/gview.md §1` and `§6.2`. The four field discrepancies in `scene_graph.md` (+0x24, +0x70, +0x74, +0x130) are corrected there. |
+| 5 | GView struct reconciliation | **RESOLVED.** The render-view object in §7 IS `Diamond::GView` — same class, confirmed via RTTI (class name `Diamond::GView`). See `Docs/RE/structs/gview.md §1` and `§6.2`. The four field discrepancies in `scene_graph_nodes.md` (+0x24, +0x70, +0x74, +0x130) are corrected there. |
 | 6 | JointEffectManager and scene helper roles | Two JointEffectManager instances and two unnamed scene helpers are cached in the render-globals block (§6.2, slots 7, 9, 10, 13). Resolve their specific rendering roles. Route to effects/sky analyst. |
 | 7 | Config-singleton `+0x30` key identity | The flag at scene `+178748` is gated on config-singleton field `+0x30` equalling 1 (§2.3). Which display/option key in `display.lua` (or the option system) drives this field is unknown. Route to the config/UI analyst. |

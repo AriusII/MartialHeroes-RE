@@ -413,7 +413,7 @@ Wave-11 deep-dive (2026-06-28) closed most previously-open items. The following 
   `structs/cull_pipeline.md`.
 - Render-pass frame sequence and `GRenderDevice` wrapper: `specs/render_pipeline.md`.
 - Scene-graph class hierarchy (`GGroup`, `GScene`, `GCamera`, `GCull`, `GGeode`):
-  `specs/scene_graph.md`.
+  `structs/scene_graph_nodes.md`.
 - Skinning matrix upload and `.bud`/`.skn` GPU mesh resource loading: `specs/skinning.md`.
 - Terrain rendering and cell streaming: `specs/terrain-streaming.md`.
 - Character skin texture chain: `specs/entity_placement.md`.

@@ -179,7 +179,7 @@ fetch re-reads from disk, per `formats/pak.md`). It caches GPU textures by **log
   | +0x44 | VRAM byte count | subtracted from the global VRAM total on unload |
   | +0x48 | texture-create option-block pointer | drives the D3DX *Ex* option list |
 
-  (Offset table only — a fuller `structs/ghtex.md` is flagged for the struct cartographer.)
+  (Offset table only — the full GHTex layout is in `structs/texture_manager.md`.)
 
 ### 2.2 Keying — name string, binary-searched
 
@@ -527,8 +527,7 @@ So that no future asset-loading lane mis-identifies the boot manifest, two seed 
 - `formats/effects.md` — the GHTex name pool is the `bmplist`-derived effect texture-name pool (§2.1);
   effect chain F.
 - `formats/sound_tables.md` — sound chain E.
-- `structs/ghtex.md` (flagged for the struct cartographer) — the recovered GHTex element offset table
-  (§2.1).
+- `structs/texture_manager.md` — the recovered GHTex element offset table (§2.1).
 - Canonical names: see `Docs/RE/names.yaml`.
 - Provenance: see `Docs/RE/journal.md`.
 

@@ -8,6 +8,7 @@ subsystems: [vfs_loader, disk_file, open_router]
 conflicts: none
 networked: false
 deep_cartography: 2026-06-29 — static re-verification at anchor f61f66a9; §4.1/§6 slurp descriptor field order corrected to {ptr@0, status/unused@+4, sizeLow@+8, sizeHigh@+12} (binary-won, matches §10); §9 struct-size validation added (144 bytes, zero residual gap); field_08 role permanently bounded; loose-file FILE_SHARE_READ confirmed; pak.md loose-table and field_08 entries corrected
+consolidation: 2026-06-29 — absorbed offline .pre/.post patching-pipeline detail from Docs/RE/vfs/io_subsystem.md (§7); source carried no IDB anchor, content folded as static-hypothesis/unverified at f61f66a9 into new §14
 ---
 
 # VFS Loader Dispatch — Clean-Room Specification
@@ -474,3 +475,26 @@ separate pass over the file set.
 - `formats/sound_tables.md` — sound asset family.
 - `specs/asset_pipeline.md`, `specs/asset_linkages.md` — loader-selection verdict and linkage
   chains.
+
+---
+
+# 14. Offline compile pipeline — `.pre` / `.post` tool artifacts — (STATIC-HYPOTHESIS, unverified at f61f66a9)
+
+The offline map-editor toolchain uses temporary draft and delta files during the compilation of
+final VFS packs. These files are not referenced by the client at runtime; the client engine
+contains no `.pre` or `.post` path literals.
+
+- **Heightfield modification (`.ted.post` → `.ted`):** The editor writes a complete terrain mesh
+  backup to `*.ted.post`, then patches baked diffuse colour values at byte offset `30 087` within
+  the live `.ted` file, preserving the raw height data.
+- **Collision compilation (`.sod.pre` → `.sod`):** Collision polygon outlines are compiled by
+  calculating axis-aligned bounding-box bounds (`SolidRecord` elements) and expanding polygon
+  edges into bidirectional edge quads (`QuadRecord` elements) to produce the runtime `.sod` file.
+- **Scene mesh optimisation (`.bud.pre` → `.bud`):** The editor welds vertices, optimises vertex
+  lists for GPU cache coherence, updates vertex tag flags at stride offset `+12`, and serialises
+  the optimised runtime `.bud` binary.
+
+`.ted` field layout is owned by `formats/terrain.md`. `.sod` and `.bud` runtime layouts are
+owned by their respective format specs. This section describes tool-side behavior; it is not
+IDA-verifiable against the runtime client and is carried here as a static hypothesis pending
+a tool-binary RE pass.

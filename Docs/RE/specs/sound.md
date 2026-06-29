@@ -1,6 +1,6 @@
 ---
 status: confirmed
-verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader, playback-category mixer routing, SOUND_KIND value table, BGM-swap crossfade, trade-busy override (5/106) = control-flow-confirmed; +9 record flag + per-FE-widget click cue + name/param overlap + router category-5-vs-0..4 cap = capture/debugger-pending; CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME; 0 corrected
+verification: confirmed     # device-init, curve, ambient driver, worker opcodes, table loader, playback-category mixer routing, SOUND_KIND value table, BGM-swap crossfade, trade-busy override (5/106) = control-flow-confirmed; +9 record flag + per-FE-widget click cue + name/param overlap + router category-5-vs-0..4 cap = capture/debugger-pending; CYCLE 14 re-anchor (f61f66a9, 2026-06-27): 1 fact re-confirmed SAME; 0 corrected; 2026-06-29 consolidation: category 2..4 re-hit behaviour (§2.1) + constructor init sequence (§11) folded as static-hypothesis/unverified at f61f66a9; contested +0x44 field noted in §11 pending RE adjudication
 ida_reverified: 2026-06-20
 ida_reverified: 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
@@ -13,6 +13,8 @@ encoding_note: audio file IDs are plain decimal integers; no text encoding conce
 ---
 
 # Sound subsystem (runtime audio engine)
+
+> **2026-06-29 consolidation (f61f66a9):** category 2..4 re-hit behaviour (§2.1) and constructor initialization sequence (§11) folded from a dirty-room precursor as static-hypothesis / unverified at f61f66a9; contested field +0x44 noted in §11 pending RE adjudication; no existing confirmed facts altered.
 
 > **Verification banner (re-verified 2026-06-20, IDB SHA 263bd994, CYCLE 7, evidence [static-ida]).**
 > CYCLE 7 (2026-06-20) added the **playback-category mixer routing** (the play-by-id primitive's
@@ -249,6 +251,19 @@ theme that must always play at full volume regardless of the music slider.
 > extension of the 0..4 space. Treat the actor-event router as a distinct entry point from
 > this play-by-id primitive. (The exact internal argument shape of the actor-event router
 > remains DBG-pending; the entry-point separation is static-confirmed.)
+
+> **Category 2..4 re-hit behaviour (static-hypothesis, unverified at f61f66a9).** When `play`
+> is called with category 2..4 and `sound_id` is already present in the sorted id-to-voice map
+> (a re-hit), the engine does **not** allocate a new voice. Instead it: (1) rewinds the
+> existing DirectSound buffer to the start (`SetCurrentPosition(0)`); (2) re-applies volume —
+> amplitude `1.0` if options index 27 is set and the id is one of the two music-exempt cues
+> (861010109 / 861010110), otherwise the standard terrain/ambient gain; (3) replays the
+> existing voice. This path runs synchronously in the play primitive itself and is distinct from
+> the async worker's RESET opcode (§7.2 opcode 8, which also calls `SetCurrentPosition(0)` but
+> on the background thread). **Error path corollary (static-hypothesis, unverified at
+> f61f66a9):** if a newly allocated SFX voice is created successfully but then fails to start
+> playback, the voice object is destroyed immediately — no dangling entry is inserted into the
+> map.
 
 ---
 
@@ -957,6 +972,24 @@ They are engine-internal C++ heap offsets — not wire offsets, not file offsets
 | +0x88 | 4 | u32 | Mixer channel count = **10** | Set at init |
 | +0x8C | 1 | u8 | SoundManager global-BGM toggle latch (cache byte) | A SoundManager-object cache byte, flipped on a BGM-toggle transition. **SEPARATE from** the per-local-player actor trade/exchange-busy flag that drives the §6.6 BGM override — do **not** conflate the two (the actor busy flag lives on the actor object, not here) |
 | +0x90 | 4 | u32 | Ambient-driver last-eval time (ms) | Throttle anchor for 600 000 ms cadence |
+
+> **Contested field — pending RE adjudication (static-hypothesis, unverified at f61f66a9).**
+> A dirty-room precursor places a sorted id-to-voice tree (the SFX slot map for categories
+> 2..4) at object offset **+0x44** (~24 bytes). This is NOT included in the confirmed table
+> above because it conflicts with the existing **+0x48** row (Char-sound linked list): the
+> ranges overlap, suggesting either a different description granularity or an earlier incorrect
+> offset read. Do not implement +0x44 until an RE pass compares the binary store at +0x44 vs
+> +0x48 and confirms which offset is the tree root.
+
+> **Constructor initialization sequence (static-hypothesis, unverified at f61f66a9).**
+> The `SoundManager` constructor operates in two phases: (1) the first 12 bytes of the object
+> (the player XYZ cache, +0x00..+0x0B) are zeroed directly by the constructor; (2) an internal
+> initialization helper is called, which sets the active-BGM pointer (+0x34) and the ambient
+> voice array (+0x38..+0x43) to null, then reads the initial gain values for all four volume
+> buses from the global options store (applying the §10.2 option-value → gain conversion). A
+> paired teardown helper mirrors this sequence in reverse. The null-at-startup invariants for
+> +0x34 and +0x38..+0x43 are consistent with the field table; the two-phase ordering and the
+> options-store initialization path are the novel details.
 
 ---
 

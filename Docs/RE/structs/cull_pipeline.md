@@ -4,7 +4,7 @@ ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false
 subsystems: [render_pipeline, scene_graph]
-cross_refs: [structs/gview.md, specs/render_pipeline.md, specs/scene_graph.md, specs/transparency_sort.md]
+cross_refs: [structs/gview.md, specs/render_pipeline.md, structs/scene_graph_nodes.md, specs/transparency_sort.md]
 wave9_reconciliation: "Table E GRangeObject +12 corrected to drawable pointer (not transform) and +4 flagged as dormant (written but never read by any comparator) per Docs/RE/specs/transparency_sort.md §5/§6 (2026-06-28)."
 deep_3d_cartography_deepening (2026-06-29): "GFrustum internal layout confirmed — header {+0 vtable, +4 count, +8 planes}, 16-byte plane stride {nx,ny,nz,D}, 6-plane total = 104 bytes; world-space GFrustum size at +144 corrected ~96→~104; GRangeObject +12 closed from [debugger-confirm] to confirmed; near/far plane-index ordering added as static-strong inference (near=index 1, far=index 3); 18-slot GRS* class enumeration and transform=slot-4 anchor documented; render-group-bitmask sort-key mechanism and GSeparatedPipeline +16 sub-bucket vector added; §6 open-items tightened."
 ---
@@ -446,7 +446,7 @@ computation detail.
 - Per-view render object owning this cull family: `structs/gview.md`.
 - Render-pass frame sequence and the D3D device wrapper: `specs/render_pipeline.md`.
 - Scene-graph class hierarchy (`GTraverser`, `GGeode`, `GGroup`, `GScene`, `GCamera`,
-  `GFrustum`, `GViewPlatform`): `specs/scene_graph.md`.
+  `GFrustum`, `GViewPlatform`): `structs/scene_graph_nodes.md`.
 - Terrain streaming and cell management: `specs/terrain-streaming.md`.
 - Runtime singletons (global scene/post object, frame driver): `structs/runtime_singletons.md`.
 - Glossary: `Docs/RE/names.yaml`.

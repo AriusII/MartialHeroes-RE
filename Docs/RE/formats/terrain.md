@@ -1097,9 +1097,10 @@ encodes per-cell 2D collision geometry in the XZ world-space plane. All multi-by
 little-endian. There is no file-level magic or version prefix.
 
 The format is **strictly 2D**: collision testing is performed in the XZ plane; there is no Y
-(height) component in the geometry. The runtime resolves containment purely from the explicit
-corner geometry via a ray-parity point-in-polygon test (with AABB broad-phase) — it never lifts
-any per-quad scalar into a 3D plane test (see §11.3 correction).
+(height) component in the geometry. The runtime intersects a movement vector against each wall
+segment using the precomputed slope-intercept (or constant-X for vertical walls) line form stored
+per `QuadRecord`, gated by a 16×16 spatial-grid acceleration structure and a per-solid AABB — see
+`formats/sod.md` for the full authoritative verdict on the collision algorithm and field layout.
 
 An authoring sidecar named `*.sod.pre` exists but is **never read by the runtime** and does **not**
 share this 108-byte/48-byte runtime layout — see §16 and `terrain_layers.md`.
@@ -1174,9 +1175,11 @@ cell = `4 + 108 + (4 + 3×48) = 260` bytes. Both match their samples exactly.
 > treatment applies to `edge_pad1` at +044.
 
 Each record stores one 2D collision quad in the XZ world-space plane as four corner points,
-followed by four unused authoring scalars. There is no Y (height) component — collision is
-evaluated in XZ at the solid's elevation. The runtime reconstructs all containment it needs from
-the four corner points (ray-parity point-in-polygon); the trailing scalars are disregarded.
+followed by four authoring-precomputed line-equation scalars. There is no Y (height) component —
+collision is evaluated in XZ at the solid's elevation. The runtime intersects movement vectors
+against each wall segment using the precomputed slope-intercept (or constant-X) line form in the
+trailing fields; those scalars are consumed by the runtime collision-query routine at query time
+— see `formats/sod.md` for the confirmed field layout and segment-intersection algorithm.
 
 | Offset | Size | Type  | Field            | Notes                                                                          | Confidence |
 |-------:|-----:|-------|------------------|--------------------------------------------------------------------------------|------------|

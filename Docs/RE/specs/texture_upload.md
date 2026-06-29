@@ -6,6 +6,7 @@ verification: static-confirmed for the upload call routing, parameter mapping, o
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 status: partial   # confirmed items are implementation-safe; debugger-pending items are flagged below
+consolidation: 2026-06-29 — ui_asset_loader.scrub.md reviewed; source content either already present, stale/superseded by wave-2/3 struct specs, or out-of-scope (C→render_pipeline.md; D/E/F→texture.md); cross-refs structs/ghtex.md → structs/texture_manager.md updated (ghtex.md absorbed)
 subsystems: [texture_upload, ghtex_runtime, d3d9_integration]
 networked: false
 ---
@@ -22,15 +23,15 @@ networked: false
 > fallback-absence contract, the per-caller parameter variants, device-pointer resolution, and the
 > VRAM / lifetime accounting interplay. It is the **build/upload companion** to the container byte
 > layout owned by `Docs/RE/formats/texture.md`. Runtime object layouts are owned by
-> `Docs/RE/structs/ghtex.md` and `Docs/RE/structs/texture_manager.md` — this spec cross-references
-> them without re-deriving field details.
+> `Docs/RE/structs/texture_manager.md` — this spec cross-references
+> it without re-deriving field details.
 >
 > **Out of scope.** On-disk `.dds`/`.tga`/`.bmp`/`.png` byte formats → `Docs/RE/formats/texture.md`.
 > VFS open / binary-search / heap-slurp mechanics → `Docs/RE/specs/resource_pipeline.md §1`. Terrain
 > texture pool, `bgtexture.lst`, and two-level refcount eviction →
 > `Docs/RE/specs/resource_pipeline.md §3B`. The runtime object field tables (GHTex 76-byte layout,
-> GTextureManager, FrameTickScheduler) → `Docs/RE/structs/ghtex.md` and
-> `Docs/RE/structs/texture_manager.md`. The renderer device layout that supplies the D3D9 device
+> GTextureManager, FrameTickScheduler) → `Docs/RE/structs/texture_manager.md`. The renderer device
+> layout that supplies the D3D9 device
 > pointer → `Docs/RE/structs/renderer_device.md`.
 
 ---
@@ -59,7 +60,7 @@ call, **`D3DXCreateTextureFromFileInMemoryEx`** (from `d3dx9_42.dll`), which aut
 container format from its leading magic bytes. A loose-file fallback path swaps in
 `D3DXCreateTextureFromFileExA` when the packed VFS is not mounted.
 
-The runtime texture handle is **`GHTex`** (76 bytes; full layout: `Docs/RE/structs/ghtex.md §1.2`).
+The runtime texture handle is **`GHTex`** (76 bytes; full layout: `Docs/RE/structs/texture_manager.md`).
 Named textures are deduplicated by numeric texture id in the **`GTextureManager`** red-black-tree
 cache (full layout: `Docs/RE/structs/texture_manager.md §2`).
 
@@ -342,8 +343,8 @@ specs; do not re-derive them here.
 | `m_dwTextureVramSize` | `+0x44` | VRAM footprint in bytes; subtracted from `g_VramFootprintAccumulator` on eviction. |
 | `m_pD3DXOptions` | `+0x48` | Pointer to the 40-byte options block (§4); allocated by `GHTex_SetD3DXLoadOptions`. |
 
-Full struct layout: `Docs/RE/structs/ghtex.md §1.2`. Cache container, refcount mechanics, and
-`FrameTickScheduler` ring: `Docs/RE/structs/texture_manager.md §2–§4`.
+Full struct layout, cache container, refcount mechanics, and `FrameTickScheduler` ring:
+`Docs/RE/structs/texture_manager.md`.
 
 ---
 

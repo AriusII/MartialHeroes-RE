@@ -1,10 +1,10 @@
 ---
-verification: confirmed (initial, IDB SHA f61f66a9, CYCLE 14 (2026-06-28)); deepened (wave-11 deep-3d static pass, IDB SHA f61f66a9, 2026-06-28) — bounding-sphere field order corrected (radius at +0x24, centre at +0x28), GNode +0x08 closed as std::string m_name, +0x34 renamed m_autoComputeBound (polarity confirmed), GTransform +0xDC polarity corrected (1=bypass), GTransform slot 3 closed, GScene +0x5C corrected to render-state set, GGeode slot-9 corrected, GLight +0x54/+0x84 sizes tightened; deepened (deep-3d-cartography static pass, IDB SHA f61f66a9, 2026-06-29) — GNode base vtable confirmed present (transiently installed by base-init, overwritten by every derived ctor; census null resolved); GLight +0x50..+0xB7 confirmed as exact 104-byte embedded D3DLIGHT9 (Type=3 DIRECTIONAL); full D3DLIGHT9 sub-field table added (Diffuse/Specular/Ambient/Position/Direction/Range/Falloff/Attenuation/Theta/Phi); GTransform modelview composition confirmed local-first row-major (localMatrix × parentModelView); slot-2 update-gate refinement (bit0 cleared even when autoComputeBound=0); setDirty conditional propagation confirmed; traversal order confirmed DFS pre-order child-index across all slots; GLight slot 6 and slot 7 body roles added
+verification: confirmed (initial, IDB SHA f61f66a9, CYCLE 14 (2026-06-28)); deepened (wave-11 deep-3d static pass, IDB SHA f61f66a9, 2026-06-28) — bounding-sphere field order corrected (radius at +0x24, centre at +0x28), GNode +0x08 closed as std::string m_name, +0x34 renamed m_autoComputeBound (polarity confirmed), GTransform +0xDC polarity corrected (1=bypass), GTransform slot 3 closed, GScene +0x5C corrected to render-state set, GGeode slot-9 corrected, GLight +0x54/+0x84 sizes tightened; deepened (deep-3d-cartography static pass, IDB SHA f61f66a9, 2026-06-29) — GNode base vtable confirmed present (transiently installed by base-init, overwritten by every derived ctor; census null resolved); GLight +0x50..+0xB7 confirmed as exact 104-byte embedded D3DLIGHT9 (Type=3 DIRECTIONAL); full D3DLIGHT9 sub-field table added (Diffuse/Specular/Ambient/Position/Direction/Range/Falloff/Attenuation/Theta/Phi); GTransform modelview composition confirmed local-first row-major (localMatrix × parentModelView); slot-2 update-gate refinement (bit0 cleared even when autoComputeBound=0); setDirty conditional propagation confirmed; traversal order confirmed DFS pre-order child-index across all slots; GLight slot 6 and slot 7 body roles added; consolidated (scene_graph.scrub.md, 2026-06-29) — sparse GCamera Table K and GGeometry Table L folded as static-hypothesis; GDrawablePair vtable slot roles (slots 0–3) added to Table J; specs/scene_graph.md absorbed into this spec and is no longer a live reconciliation target
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false
 subsystems: [scene_graph, render_pipeline]
-cross_refs: [structs/gview.md, structs/cull_pipeline.md, specs/scene_graph.md, specs/render_pipeline.md]
+cross_refs: [structs/gview.md, structs/cull_pipeline.md, specs/render_pipeline.md]
 ---
 
 # Structs: GObject / GNode / GGroup / GScene / GTransform / GSwitch / GGeode / GViewPlatform / GLight — Scene-Graph Node Classes
@@ -23,11 +23,11 @@ cross_refs: [structs/gview.md, structs/cull_pipeline.md, specs/scene_graph.md, s
 > `[open]` = exact value or layout not fully isolated this pass, flagged for resolution;
 > `[debugger-confirm]` = flagged for live `?ext=dbg` session confirmation (never `dbg_start`).
 >
-> **Reconciliation note:** the committed `specs/scene_graph.md` carries slot labels for GNode
-> slots 1, 2, 4–9 that diverge materially from the content recovered here. This spec carries the
-> corrected, content-derived reading. `specs/scene_graph.md` must be reconciled against this
-> record; on any conflict this struct spec (backed by constructor + vtable-content analysis) is
-> authoritative.
+> **Reconciliation note (absorbed):** the committed `specs/scene_graph.md` carried slot labels
+> for GNode slots 1, 2, 4–9 that diverged materially from the content recovered here. That file
+> has been absorbed into this spec and is superseded; this struct spec (backed by constructor +
+> vtable-content analysis) is the authoritative replacement. The conflicting labels from
+> `specs/scene_graph.md` are retracted.
 
 ---
 
@@ -107,7 +107,7 @@ own vtable and initialises its own extra fields.
 
 All child, parent, and geometry lists inside the node classes use the engine's `GVector`, a 16-byte
 dynamic-pointer-array struct. The layout below is confirmed by constructor and iterator control-flow
-and is consistent with `specs/scene_graph.md §2.1`.
+and is consistent with the GVector definition (content now absorbed here).
 
 | Offset | Size | Type | Field / Role | Confidence |
 |-------:|-----:|------|--------------|------------|
@@ -244,6 +244,64 @@ unconfirmed — see §6.
 | +0x04 | 4 | GDrawable* | Drawable pointer (the renderable object). | confirmed |
 | +0x08 | 4 | render-state-set* | Render-state-set pointer (18-slot set). | confirmed |
 
+**`GDrawablePair` vtable slot roles (static-hypothesis; unverified at f61f66a9):**
+`GDrawablePair` inherits from `GDrawItem` (not from the `GNode` family); its virtual interface is
+independent of the GNode 10-slot scheme. Slot indices are 0-based per the engine-wide convention
+in §4.
+
+| Slot | Role | Confidence |
+|-----:|------|------------|
+| 0 | Deleting destructor. | [static-hypothesis] [unverified at f61f66a9] |
+| 1 | `traverse` / `accept` — visitor dispatch. | [static-hypothesis] [unverified at f61f66a9] |
+| 2 | `cull` — applies any pending transforms and submits the `(GDrawable*, renderState*)` pair into the cull object's drawable vector (the collect step). | [static-hypothesis] [unverified at f61f66a9] |
+| 3 | `draw` — returns the render-state-set pointer; does not issue draw calls directly (drawing is data-driven from collected pairs — confirmed in §5.3). | [static-hypothesis] [unverified at f61f66a9] |
+
+### Table K — `Diamond::GCamera` (140 bytes total; `GObject` sibling branch)
+
+> **Provenance:** static-hypothesis, unverified at f61f66a9. Table is sparse — only fields
+> recoverable from clean analysis of the source precursor are listed. The +0x08..+0x23 region
+> (18 bytes) is uncharted. Escalate to RE domain for a dedicated `GCamera` / `GFrustum` /
+> `GPolytope` layout pass before treating as implementation-ready.
+
+`GCamera` is a direct `GObject` sub-class (not in the `GNode` family — see §1.1 hierarchy).
+
+| Offset | Size | Type | Field / Role | Confidence |
+|-------:|-----:|------|--------------|------------|
+| +0x00 | 4 | vtable ptr | Polymorphic dispatch pointer. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x04 | 4 | int | `m_refCount` (inherited from `GObject`). | [static-hypothesis] [unverified at f61f66a9] |
+| +0x24 | 4 | float | `m_fNear` — near clip plane distance. Default: `0.01745f`. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x28 | 4 | float | `m_fFar` — far clip plane distance. Default: `1000.0f`. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x2C | — | GFrustum | Embedded `GFrustum` sub-object (inherits `GPolytope`). Contains the six plane equations of the view frustum; copied to the per-frame cull frustum during `Renderer_SetupCameraAndFrustum` (see `specs/render_pipeline.md §2.1` step 7). Size of `GFrustum` and plane-equation storage format not yet isolated. | [static-hypothesis] [unverified at f61f66a9] |
+| +0xA8 | 4 | float | Field-of-view (read by `Renderer_SetupCameraAndFrustum`). | confirmed — see `specs/render_pipeline.md §2.1` |
+| +0xAC | 4 | float | Aspect ratio (read by `Renderer_SetupCameraAndFrustum`). | confirmed — see `specs/render_pipeline.md §2.1` |
+
+**Gaps to escalate:** the size of `GFrustum`, the plane-equation storage format within it (e.g.
+normal XYZ + D scalar × 6, or a packed polytope array), the +0x08..+0x23 uncharted region, and
+the `GCamera` slot-role map all require a dedicated RE pass.
+
+### Table L — `Diamond::GGeometry` (84+ bytes total; `GDrawable` sub-class)
+
+> **Provenance:** static-hypothesis, unverified at f61f66a9. Table is sparse. Bounding-sphere
+> field order is explicitly unverified for `GGeometry` (see caveat below). Escalate to RE domain
+> for a dedicated `GGeometry` / `GDrawable` layout pass before treating as implementation-ready.
+
+`GGeometry` inherits from `GDrawable`, which inherits from `GObject` (see §1.1 hierarchy). The
+size of the `GDrawable` base sub-object is not yet isolated.
+
+| Offset | Size | Type | Field / Role | Confidence |
+|-------:|-----:|------|--------------|------------|
+| +0x00 | — | GDrawable | Base `GDrawable` sub-object. Size not yet isolated. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x24 | 12 | float[3] | Bounding sphere — field order unverified (see caveat). Source precursor reports centre XYZ; may be radius-then-centre as in `GNode`. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x30 | 4 | float | Bounding sphere — field order unverified. Source precursor reports radius; may be a centre component if order is reversed. | [static-hypothesis] [unverified at f61f66a9] |
+| +0x3C | 16 | GVector | `m_stateSets` — associated render-state objects (textures, materials). | [static-hypothesis] [unverified at f61f66a9] |
+| +0x54 | 16 | GVector | `m_parentGeodes` — non-owning back-list of parent `GGeode` nodes. | [static-hypothesis] [unverified at f61f66a9] |
+
+**Bounding-sphere field-order caveat:** `GNode` Table B (wave-11, confirmed) places radius at
++0x24 and centre XYZ at +0x28/+0x2C/+0x30. `GGeometry` has its own embedded bounding sphere (it
+is not a `GNode` sub-class), so the field order may legitimately differ. The source precursor
+lists it as centre-at-+0x24, radius-at-+0x30, but this is unverified. **Do not assume either
+order for `GGeometry` without a dedicated RE confirmation pass.**
+
 ---
 
 ## 4. Vtable slot-role maps
@@ -268,8 +326,8 @@ Slot 0 in every vtable is the **deleting destructor** (unrefs, destroys, and fre
 **Reconciliation:** the committed `specs/scene_graph.md` assigns different roles to these slot
 indices (slot 1 = accept(Traverser); slot 2 = cull; slot 4 = cullTraverse/computeBound;
 slot 5 = dirtyBound; slot 6 = update; slot 7 = setName; slot 8 = getName; slot 9 = addChild).
-The content-derived reading above supersedes those labels. `specs/scene_graph.md` must be updated
-to match.
+The content-derived reading above supersedes those labels. `specs/scene_graph.md` has been
+absorbed into this spec; the old labels are retracted.
 
 ### 4.2 `GGroup` extension — slots 10–15 (child management)
 
@@ -456,7 +514,7 @@ UPDATE/CULL/DRAW loop.
 
 - Per-view render object (camera-carrier field at GViewPlatform +0x50; view cull objects): `structs/gview.md`.
 - Cull pipeline object layout and the DRAW-flush sequence: `structs/cull_pipeline.md`.
-- Scene-graph slot-label reconciliation target: `specs/scene_graph.md` (to be updated against this spec).
+- `specs/scene_graph.md` (absorbed — slot labels and node layouts superseded by §3 and §4; no longer a live reconciliation target).
 - Render-pass frame sequence and D3D device wrapper: `specs/render_pipeline.md`.
 - Terrain streaming and cell management: `specs/terrain-streaming.md`.
 - Runtime singletons (global scene root, frame driver): `structs/runtime_singletons.md`.

@@ -7,6 +7,8 @@
 > that implement these passes are documented in `formats/shaders.md`; this spec describes the
 > *pipeline that binds and orders them*. Every render-pipeline constant an engineer cites must
 > reference this file: `// spec: Docs/RE/specs/rendering.md`.
+>
+> **Companion spec:** `Docs/RE/specs/render_pipeline.md` is the authority for the per-pass sequence and frame draw-loop ordering; when this spec and `render_pipeline.md` describe the same pass behaviour or device-step ordering, `render_pipeline.md` prevails.
 
 > **Verification banner**
 > - **verification:** *confirmed* for the device-step / Present / device-lost routine, the
@@ -206,6 +208,8 @@ device-lost / device-restored callbacks (or rely on the engine's automatic resou
 ## 2. Per-frame scene draw loop
 
 **Confidence: CONFIRMED.**
+
+> **Authority deferral.** The authoritative per-pass sequence and device-step ordering are in `Docs/RE/specs/render_pipeline.md`; when this section and `render_pipeline.md` disagree on draw-loop order or pass details, `render_pipeline.md` prevails.
 
 The scene-draw fork (the routine the device-step calls per scene, §2.0) reads the offscreen-enable
 flag on the scene/post object. If set, it runs the **offscreen render-to-texture / post-process
@@ -672,6 +676,8 @@ contribution is accumulated entirely inside the composite pixel shader (pass 4) 
 be re-added at present time.
 
 ### 6.4 Bright-pass threshold and power-chain depth (CONFIRMED) — with `display.lua` CONFLICT
+
+> **Authority deferral (blur-loop and TEX2 allocation).** The authoritative account of blur-loop count and TEX2-allocation specifics (allocation base vs. render region) is `Docs/RE/specs/post_processing.md`; when this section and `post_processing.md` disagree on those items, `post_processing.md` prevails. The recovered values below are unchanged.
 
 **Bright-pass threshold: there is NONE (CONFIRMED).** The bright/edge-extract pass (pass 2) clears
 TEX1 to opaque black and performs a **plain fixed-function copy** of the scene RT into TEX1 at full

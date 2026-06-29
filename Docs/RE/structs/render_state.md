@@ -4,7 +4,7 @@ ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 sample_verified: false
 subsystems: [render_pipeline, scene_graph]
-cross_refs: [structs/cull_pipeline.md, structs/renderer_device.md, structs/gview.md, specs/rendering.md, specs/render_pipeline.md, specs/scene_graph.md]
+cross_refs: [structs/cull_pipeline.md, structs/renderer_device.md, structs/gview.md, specs/rendering.md, specs/render_pipeline.md, structs/scene_graph_nodes.md]
 ---
 
 # Structs: GRenderState family — render-state-set objects (18-slot OSG-style StateAttribute)
@@ -102,7 +102,7 @@ Slots 0–4 are shared across the entire family with the same ordinal role.
 | Offset | Size | Type | Field | Role | Confidence |
 |-------:|-----:|------|-------|------|------------|
 | +0x00 | 4 | vtable ptr | vtable | Class vtable pointer. | confirmed |
-| +0x04 | 32 | bytes | *(GNode/GObject base)* | Ref-count and scene-node base fields inherited from `GNode` / `GObject`; not enumerated here (see `specs/scene_graph.md`). | confirmed |
+| +0x04 | 32 | bytes | *(GNode/GObject base)* | Ref-count and scene-node base fields inherited from `GNode` / `GObject`; not enumerated here (see `structs/scene_graph_nodes.md`). | confirmed |
 | +0x24 | 4 | int32 | `compare_key` | The value the `equals` virtual (slot 4) diffs on. Simple toggle/mode states store their mode value here; complex states (Material, Fog) use −1 = "always apply". | confirmed |
 | +0x28 | 4 | int32 | `state_type_id` | 0–17; selects the cache slot. Set by the base constructor argument and never modified after construction. | confirmed |
 
@@ -451,6 +451,6 @@ base + fields + alignment; no residual gap.
 - Render-pass frame sequence, per-bucket z-write/blend matrix (§4.2), force-commit call site
   (§2.2, §4.1): `specs/rendering.md`.
 - Render pipeline overview: `specs/render_pipeline.md`.
-- Scene-graph class hierarchy (`GNode`, `GObject`, `GGeode`, `GTraverser`): `specs/scene_graph.md`.
+- Scene-graph class hierarchy (`GNode`, `GObject`, `GGeode`, `GTraverser`): `structs/scene_graph_nodes.md`.
 - Glossary: `Docs/RE/names.yaml`.
 - Provenance: `Docs/RE/journal.md`.

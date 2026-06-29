@@ -14,6 +14,7 @@
 | `verification`   | `sample-verified` — CYCLE 14 re-anchor (f61f66a9): confirmatory — subsystem cleanly relocated, 1 re-confirmed SAME, 0 corrected. All prior verification findings from 2026-06-24 remain valid. |
 | `evidence`       | `[static-ida]` |
 | `conflicts`      | None. |
+| `consolidation`  | `2026-06-29` — `cell_post.md` and `cell_pre.md` absorbed into master: Block-5 diffuse-RGBA characterisation, 2.0-on-export detail, `+12` bud.pre vertex-tag offset, and `Sod_CompileOutline` algorithm folded; no layout values altered; no prior cross-refs to those files existed in master. |
 
 ---
 
@@ -106,7 +107,8 @@ mass-object records). A sampled `*.bud.pre` shares the base `.bud` leading heade
 (same packed flags, same per-record object count, type, texId, and vertex count), and the trailing
 triangle-index list length is identical. The difference is: the per-vertex records appear in a **different order** between the
 two files (the vertex sequence is reversed/re-sorted by the save step), and **one per-vertex tag
-byte** changes value between the pre-save and post-save versions. The triangle-index list is
+byte** changes value between the pre-save and post-save versions (the tag byte resides at offset
+`+12` within the per-vertex stride). The triangle-index list is
 correspondingly re-mapped to the new vertex order. This is a **pre-save snapshot paired with the
 post-save shipped file** — not a patch, not a delta. Full block layout: see `terrain.md` §8.
 Confidence: HIGH (same-cell sample pair + prior census).
@@ -190,6 +192,26 @@ uniform (all-quads or all-tris), larger files mix shapes.
 **Polygon-shape semantics** (which corner count maps to which collision primitive) are UNVERIFIED;
 not needed for the sidecar verdict.
 
+### `.sod.pre` → `.sod` compilation algorithm (`Sod_CompileOutline`)
+
+The offline compiler function `Sod_CompileOutline` builds the runtime `.sod` from a `.sod.pre`
+source. Algorithm recovered from offline-tool output verification (not from the runtime `doida.exe`
+path); anchored at `f61f66a9` via sample-pair math confirmation.
+
+1. **Polygon read:** Reads `polyCount` and parses the variable list of XZ coordinate rings.
+2. **AABB computation:** For each polygon, derives the axis-aligned bounding box
+   (`aabbMinX` / `aabbMinZ` / `aabbMaxX` / `aabbMaxZ`) from the corner coordinates and stores it
+   in the `SolidRecord` fields at offsets `+0x00`–`+0x0F` of the 108-byte record
+   (see `terrain.md §11` for the full `SolidRecord` layout).
+3. **Double-sided wall generation:** For each edge from corner A to corner B in the polygon vertex
+   sequence, instantiates a `QuadRecord` (48-byte) with corners A, B, B, A — the pairing encodes a
+   bidirectional flat wall. Computes and stores two edge scalars:
+   - **`edgeScalar0`** (offset `+0x20`): a slope coefficient derived from the edge direction.
+   - **`edgeScalar1`** (offset `+0x28`): squared edge length
+     L² = (B_x − A_x)² + (B_z − A_z)².
+4. **Output:** Serialises the packed `SolidRecord` array followed by the `QuadRecord` arrays to the
+   runtime `.sod` file (see `terrain.md §11` for the 108-byte + 48-byte layouts).
+
 ---
 
 ## `.post` family — full drop-in `.ted` (editor workspace copy)
@@ -200,19 +222,22 @@ first heightmap float exactly as in a base `.ted`. The `.post` suffix marks a wo
 by the in-game terrain editor. 852 instances in the VFS, all exactly 46 987 bytes; every sampled
 pair is byte-for-byte identical to its companion `.ted`. The runtime never reads it.
 
-This family is already documented in full; **see `terrain.md` §5.10 and §16.1, and
-`terrain_layers.md` §5** for the block layout and census. It is reproduced here only as part of the
-sidecar index — no new layout facts.
+The block layout is documented in full in **`terrain.md` §5.10 and §16.1** and
+**`terrain_layers.md` §5**. It is reproduced here as part of the sidecar index; see the save
+protocol below for two additional details (Block 5 RGBA characterisation, 2.0-on-export multiplier)
+derived from offline-tool analysis at `f61f66a9`.
 
 **Save protocol (CONFIRMED, IDA static).** The dev-tool terrain-cell exporter (reached via
 `Ted_ExportCell_Entry`) implements a copy-then-patch protocol:
 
-1. It re-packs the in-memory 65×65 texture/index grid into a working buffer (the 16 900-byte grid
-   block — 65 × 65 × 4 bytes).
+1. It re-packs the 65×65 heightfield, normals, texture slots, orientation flags, and diffuse RGBA
+   lightmap values (multiplied by **2.0** on export) into a flat 46 987-byte working buffer
+   (the five-block `.ted` layout — see `terrain.md §5.10`).
 2. It writes a **full, fresh five-block `.ted` to the `.ted.post` path** (`"wb"` open — complete
    file, not a patch).
 3. It then opens the **live `.ted` path in `"rb+"` mode, seeks to byte offset 30 087, and overwrites
-   only the grid block in place** — leaving the other four blocks untouched.
+   only the diffuse RGBA block in place** (Block 5 — 65 × 65 × u8[4] = 16 900 bytes) — leaving the
+   other four blocks untouched.
 
 When the same grid data is written to both targets (the typical committed-state scenario), the two
 files end byte-identical — which is exactly what the on-disk `cmp` of all sampled pairs confirms.

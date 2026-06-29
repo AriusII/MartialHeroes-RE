@@ -15,6 +15,10 @@
 > conflicts: none unresolved. Where a hint in the synthesis brief disagreed with the binary (e.g.
 >            ".ion descriptor", ".sod.pre as a runtime input"), the binary wins and the correction
 >            is recorded inline.
+> consolidated: 2026-06-29   # absorbed Docs/RE/vfs/linkage_and_usage.md; all five index manifests
+>               (bgtexture.lst §5, skin.txt/actormotion.txt §2, xeffect.lst/bmplist.lst §3,
+>               uitex.txt §4.1, msg.xdb §4.2) confirmed present; unanchored consumer topology
+>               folded §10 as static-hypothesis/unverified at f61f66a9
 
 ---
 
@@ -89,8 +93,8 @@ plus the per-area cell manifest `data/map<NNN>/dat/d<NNN>.lst`, and the authorin
 `.ted.post / .sod.pre / .bud.pre / .fx<n>.pre`.
 
 **Source format specs:** `formats/terrain.md` (`.ted`/`.map`), `formats/terrain_scene.md` (`.bud`),
-`formats/cell_exd.md`, `formats/cell_up.md`, `formats/sod.md`, `formats/mud.md`, `formats/cell_post.md`,
-`formats/cell_pre.md`, `formats/bgtexture_lst.md`, `specs/terrain-streaming.md`,
+`formats/cell_exd.md`, `formats/cell_up.md`, `formats/sod.md`, `formats/mud.md`, `formats/authoring_sidecars.md`,
+`formats/bgtexture_lst.md`, `specs/terrain-streaming.md`,
 `specs/area_inventory.md` / `formats/area_inventory.md`.
 
 ### 1.1 The cell key — the join that ties every cell file together
@@ -190,7 +194,7 @@ separate (`.ted` bilinear, supplemented by `.up`/`.exd` plane-eval).
 
 > Binary-won corrections vs the synthesis brief: (a) `.sod` collision is line/segment intersection, NOT
 > classic ray-parity point-in-polygon; (b) **`.sod.pre` is NOT a runtime input** — it is an authoring
-> outline the client never opens. Rebuild collision from `.sod`. (See `formats/sod.md`, `formats/cell_pre.md`.)
+> outline the client never opens. Rebuild collision from `.sod`. (See `formats/sod.md`, `formats/authoring_sidecars.md`.)
 
 ### 1.8 Cell builder summary
 
@@ -559,10 +563,10 @@ record id space under `data/sound/3d/`. The join key throughout is the **`sound_
    descriptor is `bmplist.lst`. (§3, `formats/ion.md`.)
 2. **`.sod.pre` is not a runtime input.** Collision is rebuilt from `.sod` (the quadtree is built at
    load, not read from a sidecar); `.sod` collision is segment-line intersection, not ray-parity
-   point-in-polygon. (§1.7, `formats/sod.md`, `formats/cell_pre.md`.)
+   point-in-polygon. (§1.7, `formats/sod.md`, `formats/authoring_sidecars.md`.)
 3. **`.ted.post` / `.bud.pre` / `.fx<n>.pre` / `.tol` / `.mi` / `mob<NNN>.arr` are tool/authoring
-   output the client never opens** — no runtime parser. (§0, §1, §4.5, `formats/cell_post.md`,
-   `formats/cell_pre.md`, `formats/tol.md`, `formats/mi.md`, `formats/npc_spawns.md`.)
+   output the client never opens** — no runtime parser. (§0, §1, §4.5, `formats/authoring_sidecars.md`,
+   `formats/tol.md`, `formats/mi.md`, `formats/npc_spawns.md`.)
 4. **`.exd`/`.up`/`.bud`/`.fx<n>` are loaded name-driven via the `.map` `DATAFILE` token**, not by a
    hardcoded extension; `.up` and `.exd` share one format and one decoder. (§1.3, §1.4.)
 5. **Idle motion = `actormotion.txt` column 16 (`+0x44`)**, not column 15 (dead). (§2.6.)
@@ -576,8 +580,8 @@ record id space under `data/sound/3d/`. The join key throughout is the **`sound_
 ## 9. Cross-references (the source format specs this synthesis joins)
 
 - Terrain bundle: `formats/terrain.md`, `formats/terrain_scene.md`, `formats/cell_exd.md`,
-  `formats/cell_up.md`, `formats/sod.md`, `formats/mud.md`, `formats/cell_post.md`,
-  `formats/cell_pre.md`, `formats/bgtexture_lst.md`, `formats/area_inventory.md`,
+  `formats/cell_up.md`, `formats/sod.md`, `formats/mud.md`, `formats/authoring_sidecars.md`,
+  `formats/bgtexture_lst.md`, `formats/area_inventory.md`,
   `specs/terrain-streaming.md`.
 - Character chain: `formats/skn.md`, `formats/mesh.md`, `formats/animation.md`,
   `formats/actormotion.md`, `formats/bindlist.md`, `specs/skinning.md`, `specs/equipment_visuals.md`.
@@ -589,3 +593,26 @@ record id space under `data/sound/3d/`. The join key throughout is the **`sound_
 - Sound chain: `formats/sound_tables.md`, `formats/mud.md`, `specs/sound.md`.
 - Spawns: `formats/npc_spawns.md`. Manifests: `formats/manifests_lst.md` (the binary `.lst` family).
 - VFS container: `formats/pak.md`, `specs/vfs_overview.md`.
+
+---
+
+## 10. VFS subsystem consumers (runtime topology)
+
+> **Provenance:** static-hypothesis / unverified at f61f66a9. Folded from `Docs/RE/vfs/linkage_and_usage.md`
+> which carried no IDB anchor. Module-level names below are organizational approximations pending
+> debugger confirmation of the exact class/symbol names. The per-function canonical names used in
+> §1–§6 are the higher-confidence tier.
+
+The table below maps major runtime modules to the VFS file types they consume and their role in
+the asset graph. All reads pass through the common VFS find-and-read routine (binary-searched TOC;
+see `formats/pak.md`, `specs/vfs_overview.md`); the join-key chains in §1–§6 detail how each module
+resolves its asset paths from the five index manifests.
+
+| Runtime module | File types consumed | Role |
+|---|---|---|
+| Skeletal animator | `.bnd`, `.mot` | interpolates joint matrices and keyframe tracks |
+| Actor renderer | `.skn`, `.png` | skin-deform (CPU) and vertex buffer upload |
+| Terrain renderer | `.map`, `.ted`, `.sod`, `.exd`, `.up` | heightfield grid streaming, cell paging, collision quadtree population |
+| D3D device manager | `.psh`, `.vsh`, `.dds`, `.tga`, `.bmp` | shader source assembly, texture-to-sampler binding |
+| Audio engine | `.ogg`, sound tables (`.bgm`/`.bge`/`.eff`/`.run`/`.wlk`) | DirectSound buffer streaming, footstep type coordination |
+| Script / data host | `.lua`, `.scr`, `.xdb` | game option execution, item table loading, UI text translation |

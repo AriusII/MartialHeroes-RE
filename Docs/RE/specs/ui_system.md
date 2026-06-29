@@ -5,6 +5,7 @@ ida_reverified: 2026-06-27
 ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]
 conflicts: server-record +6 open-time wire packing (capture-unverified); PIN keypad runtime seed/permutation (debugger-pending — clock-seeded shuffle, mechanism confirmed); account/save flag gating entry into login sub-state 31 (debugger-pending); GUCanvas3D render-target wiring RESOLVED CYCLE 8 (the canvas carries NO render-target/viewport field of its own — it is a thin 2D hit-region + drag-orbit-delta widget; the live preview renders via the owner window's embedded GView at window +0xE8); in-game GUButton caption font-slot byte offset not pinned; skill-hotbar overlay-rect VALUES data-driven (debugger-pending — shape confirmed); GUTextbox charset/mask+IME field assignment RESOLVED (2026-06-24, IDB SHA 263bd994): §1.5a corrected — +0xA4 = charset/filter+mask byte (bit 0x80 = password mask, draw-path-confirmed), +0xD0 = IME conversion-mode word; the earlier labels `max_length` (+0xA4) and `mode_style_word` (+0xD0) are refuted; true max-length field location is an open item; GUTextbox true max-length field OPEN (not pinned this pass — neither +0xA4 nor +0xD0 carries the character cap) — 2026-06-20 CYCLE 7 (IDB SHA 263bd994): full 178-slot panel-slot→class roster landed (§1.9); SLOT REVERSALS — the real selected-target/MopGage frame is **slot 35 (MopGagePanel)** and the real pet window is **slot 52 (PetPanel)**; prior "MopGage = slot 177" and "pet = slot 110" are REFUTED (slot 177 = base GUComponent image, slot 110 = Gamble); slot 135 = UpgradeProcessPanel CONFIRMED; slot 178 (+0x500) = MainHandler — 2026-06-17 Campaign-17 in-game-HUD re-confront (263bd994): inventory bag = ItemPanel 8x5/40-cell grid CODE-CONFIRMED (closes campaign-12 inventory grid), §8.10 GatherSlotPanel role-relabel, §8.8 skill-pipe = 4 panels (not 50), §8.6.1 reconciled to uitex.txt VFS manifest, §8.7 StatusPanel cosmetic drifts corrected — 2026-06-21 ASSET-FIDELITY (IDB SHA 263bd994): FONT SYSTEM settled statically (§6 - CAPTURE/DBG-PENDING cleared): 15 slots via the D3DX font API with common LOGFONT params (charset 129, mip-levels 1, italic 0, output-precision 0, quality 0, pitch-and-family 1), monospace per-slot layout, no kerning table, the only OS text measurement is the IME composition underline; the prior 'every front-end label uses slot 0' is refined to 'slot 0 is the unset default' (some controls call the font-slot setter). AUTO-HIDE TIMER block re-walked: +0x95 = auto-hide enable, +0x98 = arm-start timestamp (was 'expiry'), +0x9C = timeout (default 3000), +0xA0 = on-timeout callback — 2026-06-21 CYCLE 8 (IDB SHA 263bd994): event-dispatch / single-shared-ID3DXSprite render path / 15-slot HANGUL font table / 178-slot HUD roster (slot 35 MopGagePanel, 52 PetPanel, 110 Gamble, 135 UpgradeProcessPanel, 178 MainHandler) all re-confirmed CODE-CONFIRMED with zero conflicts; GUCanvas3D render-target gap CLOSED (no own RT field; owner GView renders the preview); leaf-widget offset tables deepened (font-slot is per-leaf-class: Button +0xE8 / Label +0xE4 / Textbox +0xDC; GUShortLabel absent as a distinct class)
+consolidation: 2026-06-29 — folded static-hypothesis facts from ui_scene_integration.scrub.md: 4-step runner function names, state-0 Lua config keys, per-state class/teardown names (states 1–4), state-5 init/teardown/keepalive/ActorVisualGlobal registration, state-7 error formatter names + SW_MINIMIZE path, state-8 world-release function name; overlay-pass §3 excluded (conflict with render_pipeline.md §3.1/§4/§6.1).
 ---
 
 # UI System — Widget Toolkit, Screen Layouts, and Scene State Machine
@@ -3755,6 +3756,16 @@ main loop until done, then ended and destroyed before the next scene is created.
 > This is the literal "ticked by the engine's main loop until done" contract; an `Application`-layer
 > reimplementation should model the per-scene tick/exit-flag loop, not a single global frame pump.
 
+> **Per-scene runner — 4 named frame steps (static-hypothesis — unverified at f61f66a9).** The
+> runner's inner body is exactly four sequential calls per iteration:
+>
+> | Step | Canonical function | Responsibility |
+> |---|---|---|
+> | 1 — Pump | `Engine_PumpInputAndMessages` | Win32 message pump and DirectInput device-state refresh; a window-close event writes 0 to the run-flag, ending the loop at the current cycle boundary |
+> | 2 — Device step | `Engine_DeviceStepAndPresent` | Full render pipeline per frame (see `Docs/RE/specs/render_pipeline.md`); handles Direct3D device loss and recovery |
+> | 3 — Frame tick | `FrameTickScheduler_TickAll` | Per-frame logic and animation updates: camera movement, Cal3D animation advancement, elementary collision evaluation, and scheduled-action timer callbacks |
+> | 4 — Frame limiter | `Engine_FrameRateLimiter` | High-resolution timer comparison against the frame start; yields via `Sleep(1)` if elapsed is less than the target period; reference framerate **60.0** stored at byte offset **+48** of the runner struct |
+
 > **State-5 in-game build / three-object registration (CODE-CONFIRMED).** State 5 first sets the
 > *next* state to 4, allocates the in-game main handler (size 0xC8), then obtains two more objects: the
 > master window (via its singleton accessor) and a third **in-world "view"** object. All **three** are
@@ -3766,6 +3777,49 @@ main loop until done, then ended and destroyed before the next scene is created.
 > what turns the zero-initialised service-slot table into a populated HUD; the matching teardown re-zeros
 > the slot registry (§1.6) and releases the world refs. The identity of the third "view" object is
 > static-tentative (likely the in-game world / 3D view) and is the lone residual here.
+
+> **State-0 init — Lua configuration access (static-hypothesis — unverified at f61f66a9).** At
+> startup (state 0) the client reads configuration from `game.lua` via the singleton accessor
+> `Diamond_LuaConfig_GetInstance()`. The three keys consumed are: `vfsmode` (VFS / data-archive mode
+> selector), `launcher` (whether the client was launched from a launcher process), and `debugmode`
+> (debug-mode flag, also stored at state-array byte +12 per §11.1). Two additional state-0 function
+> names recovered: `Engine_GetDriverSingleton` (graphics driver singleton accessor initialised during
+> state 0) and `Engine_ResolveScreenHeightClamped` (resolves screen dimensions and enforces the
+> 1920-pixel maximum width, consistent with the "1920-clamped" entry in the §11.2 state-0 row).
+
+> **Per-state class names and teardown functions — states 1–4 (static-hypothesis — unverified at
+> f61f66a9).** The §11.2 table records allocation sizes; the corresponding C++ class names and
+> teardown functions are:
+>
+> | State | Class name (constructor) | Teardown function | Teardown behavior |
+> |---|---|---|---|
+> | 1 — Login | `Diamond::LoginWindow` (`Diamond_LoginWindow_ctor`) | `LoginScene_DispatchLeaveCmd` | Aborts in-progress login actions before the window is destroyed |
+> | 2 — Load gate | `LoadingScreen` (`LoadingScreen_ctor`) | `LoadingScene_Teardown` | Loading screen cleanup |
+> | 3 — Opening cinematic | `COpeningWindow` (`COpeningWindow_ctor`) | `OpeningScene_DispatchLeaveCmd` | Opening-video scene teardown |
+> | 4 — Character select | `SelectWindow` (`SelectWindow_ctor`) | `SelectWindow_LeaveScene` | Releases 3D character preview resources before destroying the window |
+
+> **State-5 named init/teardown and keepalive (static-hypothesis — unverified at f61f66a9).**
+> `MainWindow_SceneInit` is the HUD initialisation function that configures the main HUD, minimap,
+> and inventory windows on game-scene entry. `MainWindow_SceneTeardown` is the matching teardown
+> called on logout or return to character select. A keepalive enable packet
+> (`Cmsg_KeepaliveToggle_Send(1)`) is sent to the server immediately on entering the in-game scene
+> to maintain the server connection. Additionally, the main handler (`MainHandler`) is registered to
+> the `ActorVisualGlobal` singleton at struct offset **+320** during scene-entry setup (distinct from
+> the service-slot table's byte +0x500 index documented in the State-5 build note above).
+
+> **State-7 error — localized message formatters and window minimize (static-hypothesis — unverified
+> at f61f66a9).** Two functions provide the localized error message text (complementing the branchy
+> id-path note above): `ResultCode_FormatLocalizedMessage` formats an error string from a result-code
+> value; `MessageDB_GetSceneString` retrieves an error string from the message database by
+> scene/state. The fatal-error path also minimizes the main Win32 window via
+> `ShowWindow(SW_MINIMIZE)` before displaying the blocking error message box, so the dialog appears
+> without the game window behind it.
+
+> **State-8 exit — world release function and crash-reporter teardown (static-hypothesis — unverified
+> at f61f66a9).** State 8 calls `InGameScene_UnloadWorldReleaseManagers()` as its primary world and
+> manager release function before returning to the OS. During the state-8 shutdown sequence the
+> `CrashReporter` component is torn down and writes the literal string `"winmain end"` to its debug
+> log as its final entry.
 
 ### 11.3 Login window internal sub-state machine (CODE-CONFIRMED, corrected)
 

@@ -257,7 +257,7 @@ one-sided is unverified.
 |--------|------|--------------|
 | `terrain.md` | `data/map<area>/dat/*` | Cell coordinate model, `.map` descriptor grammar, and the §9 `.up`/`.exd` summary this spec details (and corrects on the +0x24 field) |
 | `sod.md` | `data/map<area>/dat/*.sod` | Sibling per-cell collision surface (2D-XZ walls); same cell base path and world-coordinate model |
-| `cell_pre.md` / `authoring_sidecars.md` | `*.pre` / `*.post` | The authoring-sidecar family; confirms `.up`/`.exd` carry NO `.pre`/`.post` and `DATAFILE` names base extensions only |
+| `authoring_sidecars.md` | `*.pre` / `*.post` | The authoring-sidecar family; confirms `.up`/`.exd` carry NO `.pre`/`.post` and `DATAFILE` names base extensions only |
 | `pak.md` | `data.inf` / `data/data.vfs` | VFS container that delivers `.up` / `.exd` files |
 
 - **Glossary:** see `Docs/RE/names.yaml`

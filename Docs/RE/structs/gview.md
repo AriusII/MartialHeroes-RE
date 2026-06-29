@@ -4,7 +4,7 @@ ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
 evidence: [static-ida]                 # in-memory C++ object layout; no packed-file format
 sample_verified: false                 # runtime heap layout — no VFS sample tier applies
 subsystems: [render_pipeline, scene_graph]
-conflicts: scene_graph.md GView section — four field interpretations corrected (§6); render_pipeline.md §13 item 5 resolved (§6)
+conflicts: the former scene_graph.md (absorbed into structs/scene_graph_nodes.md) GView section — four field interpretations corrected (§6); render_pipeline.md §13 item 5 resolved (§6)
 ---
 
 # Structs: GView — Per-View Render Object
@@ -113,13 +113,13 @@ All offsets are relative to the start of the embedded `Diamond::GView` sub-objec
 | +24  | 4  | int  | `viewportY` | Default 0. | confirmed |
 | +28  | 4  | int  | `viewportW` | Default screen width. Also the viewport-width input to `GView_ComputeDetailScale`. | confirmed |
 | +32  | 4  | int  | `viewportH` | Default screen height. Also the viewport-height input to `GView_ComputeDetailScale`. | confirmed |
-| +36  | 4  | `GGroup*` (refcounted) | `sceneRoot` | Renderable-list head; a `GGroup`-derived node (in-world: a `GScene`). Guard condition for `Diamond_GView_BeginRenderFrame` and the cull call. Set by a refcounted setter; released via `GObject::unref` in the destructor. **Corrects `scene_graph.md`, which labels this offset a `GCamera*`.** | confirmed |
+| +36  | 4  | `GGroup*` (refcounted) | `sceneRoot` | Renderable-list head; a `GGroup`-derived node (in-world: a `GScene`). Guard condition for `Diamond_GView_BeginRenderFrame` and the cull call. Set by a refcounted setter; released via `GObject::unref` in the destructor. **Corrects `scene_graph_nodes.md`, which labels this offset a `GCamera*`.** | confirmed |
 | +40  | 4  | `GViewPlatform*` (borrowed) | `cameraHolder` | The `GNode` whose world transform drives camera setup. `*(+40)` = the GNode used for `ComputeWorldTransform`; `*(+40)+80` = the `GCamera` (RTTI-cast to `GPerspectiveCamera` for FOV and aspect). Set by plain store (no refcount); not released in the destructor. | confirmed |
 | +44  | 64 | float[16] | `viewMatrix` | Orthonormal inverse of the camera-holder world transform. Written by `ComputeWorldTransform`; read by `SetViewTransform` each pass. | confirmed |
 | +108 | 1  | byte | `cullSelector` | 0 → use primary cull pipeline at +112; non-zero → use secondary at +116. | confirmed |
 | +109 | 3  | —   | padding | Alignment gap. | — |
-| +112 | 4  | `Diamond::GCull*` (owned) | `cull` | Primary cull pipeline. Heap-allocated in the constructor (736 bytes). Provides the visible draw-item list per frame via its draw-visible-items virtual slot. Deleted via virtual deleting destructor at teardown. **Corrects `scene_graph.md`, which labels this a "platform structure (736 bytes)".** | confirmed |
-| +116 | 4  | `GCullPipeline*` (owned) | `cullSecondary` | Secondary cull pipeline; default null, built on demand. Carries accumulated cull/draw time statistics at its own internal offset +736. Deleted via virtual deleting destructor at teardown if non-null. **Corrects `scene_graph.md`, which labels this `GPipeline* m_pPipeline`.** | confirmed |
+| +112 | 4  | `Diamond::GCull*` (owned) | `cull` | Primary cull pipeline. Heap-allocated in the constructor (736 bytes). Provides the visible draw-item list per frame via its draw-visible-items virtual slot. Deleted via virtual deleting destructor at teardown. **Corrects `scene_graph_nodes.md`, which labels this a "platform structure (736 bytes)".** | confirmed |
+| +116 | 4  | `GCullPipeline*` (owned) | `cullSecondary` | Secondary cull pipeline; default null, built on demand. Carries accumulated cull/draw time statistics at its own internal offset +736. Deleted via virtual deleting destructor at teardown if non-null. **Corrects `scene_graph_nodes.md`, which labels this `GPipeline* m_pPipeline`.** | confirmed |
 | +120 | ~20–24 | `GBlockDeque` (embedded) | `cullDeque` | Cull-scratch / block-deque, embedded in-place. Passed by address to `GCull_BeginView`. Destroyed via `GBlockDeque_Destroy` in the destructor. Spans approximately +120..+144; internal field layout not yet sub-fielded — defer to a dedicated cull-queue struct lane. | confirmed |
 | +140 | 4  | int  | (cull param) | Initialised to `-1` by the constructor. Read individually by the cull path; likely the trailing word of the deque region. | confirmed |
 | +144 | 4  | int  | (cull param) | Cull-traverse parameter read individually by the cull path. | confirmed |
@@ -151,7 +151,7 @@ All offsets are relative to the start of the embedded `Diamond::GView` sub-objec
 | +292 | 1  | bool/byte | `fpsEnable` | FPS-counter display enable flag. Initialised by the constructor. | confirmed |
 | +293 | 3  | —   | padding | Alignment gap. | — |
 | +296 | 8  | double | `fpsAverage` | Computed FPS average (frames per second). Updated on each stats-interval boundary. | confirmed |
-| +304 | 4  | `IDirect3DTexture9*` (COM, owned) | `fpsCounterTexture` | FPS-counter digit texture. Loaded lazily from `data/ui/counter.dds` on the first FPS draw frame. Released via COM `Release` in the destructor. **Corrects `scene_graph.md`, which labels +0x130 as "COM IUnknown* (Direct3D Device)".** | confirmed |
+| +304 | 4  | `IDirect3DTexture9*` (COM, owned) | `fpsCounterTexture` | FPS-counter digit texture. Loaded lazily from `data/ui/counter.dds` on the first FPS draw frame. Released via COM `Release` in the destructor. **Corrects `scene_graph_nodes.md`, which labels +0x130 as "COM IUnknown* (Direct3D Device)".** | confirmed |
 
 **Total size: approximately 308 bytes** (last field spans +304..+307; true boundary subject to alignment rounding). [confirmed]
 
@@ -215,12 +215,12 @@ character-select count and whether an inset preview camera adds a node or uses a
 
 ## 6. Reconciliation with existing specs
 
-### 6.1 scene_graph.md "GView" section
+### 6.1 The former scene_graph.md (absorbed into structs/scene_graph_nodes.md) — "GView" section
 
-The `scene_graph.md` GView entry describes the same class (vtable identity confirmed). Four of its
+The former `scene_graph.md` GView entry describes the same class (vtable identity confirmed). Four of its
 field interpretations are incorrect and the reported size is short:
 
-| scene_graph.md claim | Correct interpretation |
+| scene_graph_nodes.md (former scene_graph.md) claim | Correct interpretation |
 |---|---|
 | +0x24 = `GCamera* m_pCamera` | +0x24 (+36) is the **scene root** (`GGroup*`/`GScene*`), set by a refcounted setter. The `GCamera` is reached indirectly via the camera holder at +0x28 (+40), then `*(cameraHolder)+80`. |
 | +0x70 = "platform structure (736 bytes)" | +0x70 (+112) is the **primary `Diamond::GCull` cull pipeline** (736 bytes, heap-allocated, owned). Not a "platform" struct. |
@@ -241,7 +241,7 @@ yet recorded there:
 - +304: FPS-counter digit texture (`IDirect3DTexture9*`, lazily loaded, COM-owned).
 
 > **Resolved:** render_pipeline.md §13 item 5 asked whether the render-view object is the same
-> class as — or a sibling of — `scene_graph.md`'s GView. **It is the same class: `Diamond::GView`**,
+> class as — or a sibling of — `scene_graph_nodes.md`'s GView. **It is the same class: `Diamond::GView`**,
 > confirmed via RTTI. The register/activate helper is the operational-wiring step; the real
 > constructor precedes it and writes the vtable at +0.
 
@@ -277,7 +277,7 @@ session confirmation (never `dbg_start`):
 
 - Render-pass frame sequence, spine routines, and installer: `specs/render_pipeline.md`.
 - Scene graph class hierarchy (`GGroup`, `GScene`, `GViewPlatform`, `GCamera`, `GFrustum`,
-  `GCullPipeline`): `specs/scene_graph.md`.
+  `GCullPipeline`): `structs/scene_graph_nodes.md`.
 - Terrain streaming and cell management: `specs/terrain-streaming.md`.
 - Runtime singletons (global scene/post object, frame driver): `structs/runtime_singletons.md`.
 - FPS-counter digit asset (`data/ui/counter.dds`): `formats/texture.md`.

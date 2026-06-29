@@ -332,5 +332,5 @@ runs `TestCooperativeLevel` recovery and sleeps 1 000 ms. When the scene is inac
 | Frame-driver object layout | `Docs/RE/structs/render_driver.md` |
 | Runtime singleton table (all Meyers singletons; `Engine` at §3.11) | `Docs/RE/structs/runtime_singletons.md` |
 | Cel vertex-shader and composite/glow shader constants | `Docs/RE/formats/shaders.md` |
-| Scene-graph class hierarchy and cull/draw mechanism | `Docs/RE/specs/scene_graph.md` |
+| Scene-graph class hierarchy and cull/draw mechanism | `Docs/RE/structs/scene_graph_nodes.md` |
 | Skinning, deform skeleton, camera idle motion | `Docs/RE/specs/skinning.md` |

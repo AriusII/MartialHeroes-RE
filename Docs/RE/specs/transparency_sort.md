@@ -10,7 +10,7 @@
 >
 > The frame-level draw-pass sequence (sky → terrain → opaque scene-graph → transparent/particles)
 > is documented in `Docs/RE/specs/render_pipeline.md` §4/§6.1. The scene-graph cull and
-> collection mechanism is in `Docs/RE/specs/scene_graph.md`. Per-pass blend modes and the
+> collection mechanism is in `Docs/RE/structs/scene_graph_nodes.md`. Per-pass blend modes and the
 > glow chain are in `Docs/RE/specs/rendering.md`. The cull pipeline class hierarchy and struct
 > layouts are in `Docs/RE/structs/cull_pipeline.md`. This spec cross-links rather than
 > duplicates those.
@@ -42,7 +42,7 @@
 > - **cross-links:**
 >   `Docs/RE/specs/render_pipeline.md` (frame draw-pass sequence, §4/§6.1, §12);
 >   `Docs/RE/specs/rendering.md` (per-pass blend modes, glow chain, UI blend model);
->   `Docs/RE/specs/scene_graph.md` (GNode/GGroup/GScene hierarchy, frustum cull visitor);
+>   `Docs/RE/structs/scene_graph_nodes.md` (GNode/GGroup/GScene hierarchy, frustum cull visitor);
 >   `Docs/RE/structs/cull_pipeline.md` (GRangeObject, GDrawablePair, GRenderElement layouts).
 
 ---
@@ -219,7 +219,7 @@ transparency and blending:
 | 15 | `GRSTransparency` | Boolean: transparency master switch (+44) |
 
 Additional classes present in the full 18-slot table (roles documented in
-`Docs/RE/specs/rendering.md` and `Docs/RE/specs/scene_graph.md`): `GRSDepthTest`,
+`Docs/RE/specs/rendering.md` and `Docs/RE/structs/scene_graph_nodes.md`): `GRSDepthTest`,
 `GRSAlphaTest`, `GRSMaterial`, `GRSFog`, `GRSColorMask`, `GRSShadeModel`, `GRSFillMode`,
 `GRSLinePattern`, `GRSDithering`, `GRSHighlight`, `GRSTFactor`, `GRSTransform`.
 

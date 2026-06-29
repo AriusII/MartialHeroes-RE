@@ -88,6 +88,7 @@
 >   conflict was resolved against the **visual oracle** on 2026-06-21: the `.skn` geometry height-axis is
 >   **native X** (requiring a +90°-Z importer remap), correcting the CYCLE-7 "identity / Y-up import"
 >   reading of the asset geometry (the placement/heading Y-up convention is unaffected).
+> - **consolidation 2026-06-29:** §1.1–§1.2 added — Cal3D framework origin + wrapper class catalog and five-stage pipeline function names; sourced from dirty-room scan; marked `[static-hypothesis]`; no confirmed claim in the master is altered.
 
 Neutral, data-only model of how the legacy *Martial Heroes* client **deforms and animates** skinned
 characters: how the bind pose is built from a `.bnd` skeleton, how the inverse-bind transform is
@@ -278,6 +279,40 @@ of the single-influence case and produce the same result whenever every vertex h
 > | Lock flags | 0x2000 | D3DLOCK_DISCARD (one lock per frame, entire buffer replaced) |
 >
 > The locked buffer is filled via `memcpy(VB + 32 × skinpart.baseVtxOffset, skinpart.deformBuffer, 32 × coreskin.renderVtxCount)` per skin part, then unlocked and drawn indexed. VB-pointer and vertex-count container fields reside at **SkinSet +0x4F0** (1264) and **SkinSet +0x4F8** (1272) respectively. The FVF order (XYZ → NORMAL → UV) matches the 32-byte render-vertex layout documented in §2.1. See `Docs/RE/structs/anim_runtime.md` for the `SkinSet` mode field.
+
+### 1.1 Cal3D framework origin and class catalog
+
+The skeletal-animation runtime derives from the open-source **Cal3D** framework, compiled directly into
+the engine — not linked as a separate library. The standard Cal3D public API class names are not
+exposed; the game uses its own wrapper class names throughout. Recovered wrapper class names, their
+Cal3D analogues, and roles:
+
+| Wrapper class | Cal3D analogue | Role |
+|---|---|---|
+| `CoreActor` | `CalModel` | Top-level animated entity; owns the pose, the skin list, and the animation mixer |
+| `CoreAnimation` | `CalCoreAnimation` | One loaded skeletal animation clip (from a `.mot` file); contains all `CoreTrack` channels |
+| `CorePose` | `CalSkeleton` | Live runtime skeleton instance; holds the contiguous array of animated joints |
+| `CoreSkin` | `CalCoreMesh` | One deformable mesh (from a `.skn` file); holds face/vertex/influence tables |
+| `CoreTrack` | `CalCoreTrack` | Ordered keyframe sequence (translation + quaternion) for one bone within one clip |
+| `CoreSkinManager` | `CalCoreModel` (cache part) | Global cache for `CoreSkin` objects; prevents reloading shared skin assets |
+| `CorePoseManager` | — | Global cache for preloaded reference skeletons (the player `g1..g4.bnd` set) |
+| `SkinWeight` (`CoreSkin::SkinWeight`) | `CalInfluence` | Single per-vertex bone influence record, expanded at load to 36 bytes for CPU cache alignment |
+
+> `[static-hypothesis — class names recovered from a dirty-room scan; not cross-confirmed against the pinned IDB f61f66a9]`
+
+### 1.2 Five-stage pipeline function names
+
+Five canonical function names recovered for the five stages of the skeletal pipeline:
+
+| Stage | Canonical function name | Role |
+|---|---|---|
+| Skeleton load | `BindPose_ParseBndFile` | Parses `.bnd` binary into the in-memory bind skeleton; accumulates bind-world transforms (§3.1) |
+| Skin load + inverse-bind bake | `CoreSkin_LoadFromFile` | Reads `.skn` binary; resolves skeleton by `id_b`; bakes inverse-bind into each influence (§3, §4) |
+| Keyframe sampling | `Track_SampleAtTime` | LERP/SLERP interpolation within a `CoreTrack` at time `t`, 10 fps fixed grid (§6.1) |
+| Hierarchical world walk | `Pose_WorldWalk` | Propagates local animated transforms root-to-leaf to produce per-bone world translation + quaternion (§6.6) |
+| CPU deform | `Skin_DeformLBS` | Runs the Major/Minor LBS loop; writes deformed vertices to the dynamic vertex buffer (§5) |
+
+> `[static-hypothesis — function names recovered from a dirty-room scan; not yet recorded in names.yaml; unverified at f61f66a9]`
 
 ---
 

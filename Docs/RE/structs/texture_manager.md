@@ -1,4 +1,4 @@
-# Struct: GTextureManager / GTexture / FrameTickScheduler (Texture cache container system)
+# Struct: GTextureManager / GTexture / GHandle / GHTex / FrameTickScheduler (Texture cache system)
 
 > Clean-room struct layout specification. Derived-truth from static analysis of the client binary.
 >
@@ -11,24 +11,26 @@
 > tail corrected -0x10 throughout (code-constant anchors: effect count +0x11944, options sentinel
 > +0x11958); object-end corrected to +0x11984 (≈ 72 068 bytes — now internally consistent with the
 > declared size); VRAM accumulator increment resolved to absent-in-static-image (vestigial).
+> absorbed-ghtex (2026-06-29): GHandle base-class layout (§2), GHTex runtime-handle layout (§3), and
+> GHandle/GHTex vtable definitions (§4) folded in from Docs/RE/structs/ghtex.md (sample-verified,
+> ida_anchor f61f66a9, static-hypothesis); load-pipeline steps (§5.2) and manager shutdown (§5.3)
+> also absorbed; cross-references to ghtex.md removed. Wave-2 container/manager corrections remain
+> the canonical record here.
 
-**Scope.** This spec covers the two *container* objects — `GTextureManager` (the dedup map and its RB-tree
-node layout) and `FrameTickScheduler` (the streaming ring) — together with the complete `GTexture`
-cache-wrapper layout. For the per-texture runtime handle (`GHandle` / `GHTex`, 76 bytes) see
-`Docs/RE/structs/ghtex.md`. For the binary format of the texture list files that feed the loader see
+**Scope.** This spec covers the full texture resource system: the per-texture runtime handles (`GHandle`
+base class at §2, `GHTex` concrete handle at §3), both vtable definitions (§4), the two *container*
+objects — `GTextureManager` (the dedup map, its RB-tree node layout, and the load/shutdown lifecycle at
+§5) and `FrameTickScheduler` (the streaming ring at §7) — together with the complete `GTexture`
+cache-wrapper layout (§6). For the binary format of the texture list files that feed the loader see
 `Docs/RE/formats/texture.md`.
 
-**Wave-2 corrections to `ghtex.md` (wave-1).** The wave-1 findings in `ghtex.md §1.3` and `§1.4` should
-be read with the following corrections, which this spec supersedes:
+**Wave-2 container corrections (canonical).** The following corrections to the wave-1 reading are the
+authoritative record in this spec:
 
-- The dedup map is `std::map<uint32_t textureId, GTexture*>` — the key is a **32-bit numeric texture id**,
-  not a path string. `ghtex.md §1.3` (`m_pKey` "typically the pointer to the path") and `§1.4`
-  (`std::map<void*, GTexture*>`) reflect the wave-1 reading.
-- The refcount on `GTexture` increments only at first cache insert. There is no refcount bump on a cache
-  hit; callers manage subsequent releases.
-- The scheduler is a **single** static-storage object. The scheduler pointer global and the BSS object it
-  references are the same instance (the pointer is set once at static initialisation). All GHTex
-  subscribers and the per-frame tick share one clock and one ring.
+- The dedup map key is a **32-bit numeric texture id**, not a path string.
+- The refcount on `GTexture` increments only at first cache insert; no bump on a cache hit.
+- The scheduler is a **single** static-storage object; the pointer global and BSS instance are the same
+  singleton.
 
 ---
 
@@ -37,11 +39,11 @@ be read with the following corrections, which this spec supersedes:
 ```
 GTextureManager  (witnessed instance = id-registry singleton)
    std::map<uint32_t textureId, GTexture*>  (red-black tree; dedup + L1 refcount)
-     └── GTexture  (60 B cache wrapper; refcount L1; see §3)
-           └── GHTex  (76 B runtime handle; see Docs/RE/structs/ghtex.md)
+     └── GTexture  (60 B cache wrapper; refcount L1; see §6)
+           └── GHTex  (76 B runtime handle; see §3)
                  └── registers one slot in FrameTickScheduler
 
-FrameTickScheduler  (single static-storage instance, ~72 KB; see §4)
+FrameTickScheduler  (single static-storage instance, ~72 KB; see §7)
    primary ring   [up to 6000 slots] : every constructed GHTex handle
    back-index     [up to 6000 slots] : primary-slot to effect-slot mapping
    effect ring    [up to 6000 slots] : only handles with idle interval != 0 (streamable textures)
@@ -55,7 +57,72 @@ list-file format and the "numeric-id texture registry" section that describes th
 
 ---
 
-## 2. GTextureManager Container Layout (16 bytes, `0x10`)
+## 2. GHandle Base Class Layout (48 bytes, `0x30`)
+
+Abstract base class managing resource file paths, VRAM footprints, and loading flags. All `GHTex`
+instances inherit this header. Provenance: sample-verified static-hypothesis at ida_anchor f61f66a9.
+
+| Offset | Size (Bytes) | Type | Field | Description |
+|:---:|:---:|:---|:---|:---|
+| `+0x00` | 4 | `void*` | vtable | Virtual table pointer for `GHandle` (overridden by `GHTex`; see §4). |
+| `+0x04` | 28 | `std::string` | `m_strPath` | VFS virtual path of the resource. 4-byte header, 16-byte SSO buffer, length at internal `+0x18`, capacity at internal `+0x1C`. |
+| `+0x20` | 1 | `bool` | `m_bActive` | Status flag. Initialized to `1`. |
+| `+0x21` | 1 | `bool` | `m_bLoaded` | Set to `1` when the asset is loaded in VRAM; otherwise `0`. |
+| `+0x22` | 1 | `bool` | `m_bUnknown` | Initialized to `0`; purpose not confirmed. |
+| `+0x23` | 1 | — | padding | Alignment byte. |
+| `+0x24` | 4 | `uint32_t` | `m_dwTimeout` | Idle interval threshold in milliseconds. Initialized to `180 000` (3 minutes). Used by the `FrameTickScheduler` due-check. |
+| `+0x28` | 4 | `uint32_t` | `m_dwLastAccessTime` | System tick count (`GetTickCount`) of the last access. Restamped on every texture acquire. |
+| `+0x2C` | 4 | `uint32_t` | `m_dwVramSize` | Base-class VRAM footprint field. Relationship to `GHTex+0x44` (`m_dwTextureVramSize`) not confirmed. |
+
+---
+
+## 3. GHTex Runtime Handle Layout (76 bytes, `0x4C`)
+
+Concrete texture resource wrapper inheriting from `GHandle`. Contains the Direct3D texture interface and
+formatting options. Provenance: sample-verified static-hypothesis at ida_anchor f61f66a9; gap at +0x30
+confirmed as ctor-uninitialised by both `GHandle__ctor` and `GHTex__ctor`.
+
+| Offset | Size (Bytes) | Type | Field | Description |
+|:---:|:---:|:---|:---|:---|
+| `+0x00` | 48 | `—` | `GHandle` base | Base class payload (fields `+0x00..+0x2F`; see §2). |
+| `+0x30` | 4 | `—` | *(ctor-uninitialised gap)* | Not written by `GHandle__ctor` or `GHTex__ctor`. Required for size closure (48 + 4 + 24 = 76 bytes). Reserved or populated by an out-of-ctor path. `[debugger-confirm: access scan for GHTex+0x30 reads/writes outside ctors needed]` |
+| `+0x34` | 4 | `int32_t` | `m_nSchedulerIndex` | 1-based slot index in the `FrameTickScheduler` primary ring. Assigned on registration; `-1` if inactive. |
+| `+0x38` | 4 | `int32_t` | `m_nUnknown` | Initialized to `-1`. Purpose not resolved on the examined paths. |
+| `+0x3C` | 4 | `D3DFORMAT` | `m_dwFormat` | Direct3D texture format (e.g. `D3DFMT_A8R8G8B8`). |
+| `+0x40` | 4 | `LPDIRECT3DTEXTURE9` | `m_pD3DTexture` | Pointer to the active Direct3D texture interface. `NULL` if unloaded. |
+| `+0x44` | 4 | `uint32_t` | `m_dwTextureVramSize` | Specific VRAM allocation footprint in bytes. Zero-initialized by constructor; no additive writer found in static analysis (see §9, open question). |
+| `+0x48` | 4 | `D3DXOptions*` | `m_pD3DXOptions` | Pointer to texture loading configuration. Default points to the options sentinel at `FrameTickScheduler+0x11958`; a handle pointing there signals no dedicated options block. |
+
+---
+
+## 4. Virtual Table Definitions
+
+### 4.1 `GHandle` Virtual Table
+
+Shared base vtable; slots 1–3 are pure-virtual and overridden by each concrete subclass.
+
+| Slot | Byte Offset | Symbol |
+|:---:|:---:|:---|
+| 0 | `+0x00` | `Diamond_GHandle_deleting_dtor` |
+| 1 | `+0x04` | pure-virtual `Load` |
+| 2 | `+0x08` | pure-virtual `LoadWrapper` |
+| 3 | `+0x0C` | pure-virtual `Unload` |
+
+### 4.2 `GHTex` Virtual Table
+
+Overrides slots 1–3. Slot 3 (`GHTex_Unload`) is the entry point invoked by `FrameTickScheduler` on idle
+handles during the per-frame tick.
+
+| Slot | Byte Offset | Symbol |
+|:---:|:---:|:---|
+| 0 | `+0x00` | `Diamond_GHTex_scalar_deleting_dtor` |
+| 1 | `+0x04` | `GHTex_Load` |
+| 2 | `+0x08` | `Diamond_GHTex_LoadWrapper` |
+| 3 | `+0x0C` | `GHTex_Unload` |
+
+---
+
+## 5. GTextureManager Container Layout (16 bytes, `0x10`)
 
 The manager object is a thin host around an embedded MSVC 7.1 `std::map`. The cache methods receive `this`
 pointing at the start of the object. There is no class vtable on the cache path; `+0x00` is an
@@ -70,7 +137,7 @@ owner/header slot whose meaning depends on the host singleton that embeds the ma
 
 There is **no hash table and no bucket array**; the complete tree is a standard MSVC 7.1 balanced RB tree.
 
-### 2.1 Red-Black Tree Node (24 bytes, `0x18`)
+### 5.1 Red-Black Tree Node (24 bytes, `0x18`)
 
 Each node holds one `(textureId, GTexture*)` key-value pair.
 
@@ -97,9 +164,35 @@ incidental to the map. This is the runtime realisation of the "numeric-id textur
 **Cache hit.** Returns the node's `GTexture*` value directly. No refcount increment occurs on a hit; the
 refcount is incremented only at first insertion.
 
+### 5.2 Load Pipeline (`Diamond_GTextureManager_GetTexture`)
+
+The sole cache-fill entry point. Drives the sequence from cache-miss to a loaded and scheduler-registered
+handle.
+
+1. Performs an RB lower-bound walk in `m_mapTextures` by numeric `textureId`.
+2. **Cache hit:** returns the cached `GTexture*` wrapper directly; no refcount increment.
+3. **Cache miss:**
+   a. Allocates 76 bytes on the heap for a `GHTex` handle; constructs it (populates `m_strPath`; all flags
+      default via `GHandle__ctor`).
+   b. If loading immediately, calls `GHTex_Load`:
+      - If the VFS is mounted: loads via `D3DXCreateTextureFromFileInMemoryEx` from the in-memory VFS buffer.
+      - If the VFS is not mounted: loads from loose files via `D3DXCreateTextureFromFileExA`.
+      - On success: sets `m_bLoaded = 1` and writes `m_dwLastAccessTime = GetTickCount()`.
+   c. Allocates 60 bytes for a `GTexture` wrapper; sets refcount to `1` and writes `m_pGHTex`.
+   d. Inserts the `GTexture*` into `m_mapTextures` keyed by `textureId`.
+
+### 5.3 Manager Shutdown
+
+On manager destruction:
+- Traverses all live RB-tree nodes in `m_mapTextures`.
+- Invokes the deleting destructor for each `GHTex` handle, which calls `FrameTickScheduler_Free` and
+  releases the Direct3D texture interface.
+- Invokes the deleting destructor for each `GTexture` wrapper.
+- Deallocates the tree sentinel (nil/head) node.
+
 ---
 
-## 3. GTexture Cache Wrapper Layout (60 bytes, `0x3C`)
+## 6. GTexture Cache Wrapper Layout (60 bytes, `0x3C`)
 
 Class hierarchy: `GObject` → `GRenderState` → `GTexture`. The vtable is the `GTexture`-level render-state
 vtable. The `GObject` base embeds a 28-byte MSVC `std::string` name at `+0x08`.
@@ -113,12 +206,12 @@ vtable. The `GObject` base embeds a 28-byte MSVC `std::string` name at `+0x08`.
 | `+0x28` | 4 | `int32_t` | state-type tag | `GRenderState` state-type tag. Constructed with value **7** for `GTexture`. |
 | `+0x2C` | 4 | — | reserved | `GRenderState` field; not exercised on the cache path. |
 | `+0x30` | 4 | — | reserved | `GRenderState` field; not exercised on the cache path. |
-| `+0x34` | 4 | `GHTex*` | handle | Pointer to the 76-byte runtime texture object (see `Docs/RE/structs/ghtex.md`). |
+| `+0x34` | 4 | `GHTex*` | handle | Pointer to the 76-byte runtime texture object (see §3). |
 | `+0x38` | 4 | `uint32_t` | cache key copy | Copy of the numeric `textureId` used as the map key. Written on cache insert. |
 
 ---
 
-## 4. FrameTickScheduler Layout (~72 068 bytes)
+## 7. FrameTickScheduler Layout (~72 068 bytes)
 
 A **single** static-storage instance. A pointer global holds its address, assigned once at static
 initialisation. All GHTex subscribers share one clock and one ring through this object. The scheduler is a
@@ -132,7 +225,7 @@ Slot indices are 1-based in the primary and back-index arrays; the effect ring u
 | Offset | Size (Bytes) | Type | Field | Description |
 |:---:|:---:|:---|:---|:---|
 | `+0x00000` | 4 | `void*` | reserved header | Slot 0; not used by register, free, or tick paths. |
-| `+0x00004` | 23 996 | `GHTex*[5999]` | primary ring `[1..5999]` | Every `GHTex` handle constructed registers here. The assigned 1-based slot index is stored at `GHTex+0x34` (`m_nSchedulerIndex` in `ghtex.md`). |
+| `+0x00004` | 23 996 | `GHTex*[5999]` | primary ring `[1..5999]` | Every `GHTex` handle constructed registers here. The assigned 1-based slot index is stored at `GHTex+0x34` (`m_nSchedulerIndex`). |
 | `+0x05DC0` | 4 | `int32_t` | primary count | High-water mark of the primary ring; clamped to 5999 on register. |
 | `+0x05DC4` | 4 | — | reserved | Back-index array preamble slot; unused. |
 | `+0x05DC8` | 23 996 | `int32_t[5999]` | back-index `[1..5999]` | Maps each primary-ring slot to its paired effect-ring slot; used during slot teardown to locate and tombstone the effect-ring peer. |
@@ -156,14 +249,14 @@ Slot indices are 1-based in the primary and back-index arrays; the effect ring u
 
 **Object end: approximately `+0x11984` (≈ 72 068 bytes).**
 
-### 4.1 Ring Mechanics
+### 7.1 Ring Mechanics
 
 **Register** (`FrameTickScheduler_Register`). Increments the primary count (clamped below 6000) and stores
 the handle pointer in the primary ring; the assigned 1-based slot index is returned and stored at
-`GHTex+0x34`. If the handle's idle interval (`GHTex+0x24`, `m_dwTimeout` in `ghtex.md`) is non-zero, the
-method also increments the effect count, stores the handle in the effect ring, and writes the effect-ring
-index into `backindex[primarySlot]`. Handles with idle interval `0` are pinned-resident and do not enter
-the effect ring.
+`GHTex+0x34` (`m_nSchedulerIndex`). If the handle's idle interval (`GHTex+0x24`, `m_dwTimeout`) is
+non-zero, the method also increments the effect count, stores the handle in the effect ring, and writes the
+effect-ring index into `backindex[primarySlot]`. Handles with idle interval `0` are pinned-resident and do
+not enter the effect ring.
 
 **Per-frame tick** (`FrameTickScheduler_TickAll`, called from the engine logic-tick phase). Stamps the
 scheduler clock with `Time_GetMs()`. Computes or retrieves the batch size. Walks `batchSize` consecutive
@@ -186,7 +279,7 @@ entries, so tombstoned slots accumulate silently across the lifetime of the sche
 
 ---
 
-## 5. Two-Level Lifetime Model
+## 8. Two-Level Lifetime Model
 
 The system maintains two independent lifetime layers that together govern cache sharing and GPU residency.
 
@@ -197,8 +290,8 @@ The system maintains two independent lifetime layers that together govern cache 
 
 **Idle eviction** invokes `GHTex_Unload`, which calls `Release()` on the Direct3D texture pointer, zeros the
 pointer, clears the loaded flag, and subtracts the per-texture VRAM byte size (`GHTex+0x44`,
-`m_dwTextureVramSize` in `ghtex.md`) from the VRAM byte accumulator. The live-texture count is decremented
-at the same time. The map entry and `GTexture` wrapper survive; the next access triggers a fresh load.
+`m_dwTextureVramSize`) from the VRAM byte accumulator. The live-texture count is decremented at the same
+time. The map entry and `GTexture` wrapper survive; the next access triggers a fresh load.
 
 **Global device counters** are two distinct BSS-segment globals: a 32-bit live-texture count (incremented
 on a successful texture load, decremented on unload or eviction) and a 32-bit VRAM byte accumulator
@@ -208,7 +301,7 @@ pointer global (assigned once at static initialisation).
 
 ---
 
-## 6. Open Questions
+## 9. Open Questions
 
 - **VRAM accumulator increment absent in static image — vestigial.** The decrement path (on
   unload/eviction, subtracting `m_dwTextureVramSize`) is the sole cross-reference to the accumulator
@@ -227,3 +320,7 @@ pointer global (assigned once at static initialisation).
 - **Scheduler clock units.** The clock at `+0x11964` is `Time_GetMs()`, and the default idle interval
   (`GHTex+0x24`) is 180 000, giving a 3-minute idle timeout. This reading is well-supported by a single
   stamp source but has not been confirmed against a live debugger session reading the field over time.
+- **GHTex `+0x30` gap.** Ctor-uninitialised by both `GHandle__ctor` and `GHTex__ctor`; required for size
+  closure. Access scan needed to determine whether an out-of-ctor path writes it. `[debugger-confirm]`
+- **GHandle `m_dwVramSize` (`+0x2C`) vs `GHTex m_dwTextureVramSize` (`+0x44`).** Both fields exist; their
+  relationship (one a base-class placeholder, one the concrete footprint?) is not confirmed.

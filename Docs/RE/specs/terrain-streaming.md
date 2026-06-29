@@ -31,6 +31,12 @@ verification: confirmed (re-confirmed against IDB SHA 263bd994, CYCLE 7 (2026-06
                           # TEXTURETRANSFORMFLAGS corrected to PROJECTED|COUNT4 (0x104); per-triangle
                           # height sampler full algorithm documented (§6.5.1). §12 items 1–2 promoted
                           # from debugger-pending to RESOLVED (static); items 3–6 unchanged.
+                          # Consolidation (2026-06-29): terrain_system.scrub.md unique facts folded —
+                          # sound-table naming patterns (§7.1 step 5, static-hypothesis); .exd extra-
+                          # terrain file escalation added (§9/§10); struct-offset facts (TerrainCell
+                          # size/fields, sub-manager allocation sizes, TerrainManager ring-ptr byte
+                          # offsets) routed to structs/terrain-manager.md (static-hypothesis;
+                          # unverified at f61f66a9).
 conflicts: none-open      # the campaign-10 conflicts (pool 34 vs ring 25, +10000 index offset,
                           # per-frame load count, clamp threshold wording) are RESOLVED in-text
 # CORRECTED CYCLE 1 (ida_anchor 263bd994): §7 split into a two-phase bootstrap — Phase A (area load +
@@ -527,7 +533,10 @@ In order, the area orchestrator:
 3. Set area time-of-day and option/dome flags; load the map-option binary.
 4. **Open the 4 per-area binaries** — `map<NNN>.bin`, `regiontable<NNN>.bin`, `region<NNN>.bin`,
    `npc<NNN>.arr` (see `formats/area_inventory.md §1A.3`).
-5. Load the 5 sound tables for the area.
+5. Load the 5 sound tables for the area: `soundtable<NNN>.bgm` (background music),
+   `soundtable<NNN>.bge` (ambient), `soundtable<NNN>.eff` (sound effects),
+   `soundtable<NNN>.wlk` (walk footstep), `soundtable<NNN>.run` (run footstep).
+   [static-hypothesis; unverified at f61f66a9]
 6. Get the terrain manager and write its **map-option + region words**, then **PICK the stream
    radius** (the quality-mode default, or the per-area literal override — see §6.6), which selects
    the ring size.
@@ -652,6 +661,12 @@ object-placement grids driven by the cell `.map` descriptor.
   collision / building specs and `formats/area_inventory.md §1A`.
 - **The 9 sub-manager byte layouts and FX-attach wiring** — see `formats/terrain.md` (§8 names only
   the slot roles).
+- **`.exd` extra-terrain file** (`d<NNN>x<mapX>z<mapZ>.exd`) — additional per-cell terrain geometry
+  data found alongside `.map`/`.ted`/`.bud`/`.sod` in `data/map<NNN>/dat/`. Role uncharacterised;
+  whether it is consumed on the live cell-load path by `Map_LoadCellDescriptor` /
+  `Ted_LoadGeometryBlob` or a separate sub-loader is unconfirmed. [static-hypothesis; unverified at
+  f61f66a9] **Escalation:** the asset-format lane should confirm and document in
+  `formats/area_inventory.md`.
 
 ---
 
@@ -668,6 +683,7 @@ object-placement grids driven by the cell `.map` descriptor.
 - Building geometry layout: `formats/terrain_scene.md`.
 - Vertex diffuse channel order reconciliation: `formats/terrain.md §5.8`.
 - UV-direction / triangulation reconciliation: `formats/terrain.md §5.7`.
+- Extra-terrain file (`.exd`): uncharacterised per-cell asset — see §9 escalation and `formats/area_inventory.md`.
 - Glossary: `Docs/RE/names.yaml`.
 - Provenance: `Docs/RE/journal.md`.
 

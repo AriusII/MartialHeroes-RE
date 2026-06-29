@@ -1,10 +1,23 @@
+---
+verification: static-hypothesis, unverified at f61f66a9
+ida_anchor: f61f66a9ae0ec1e946105b2ecff76e8930cb1d1367df64e5688a5266f5ad9963
+status: unverified
+evidence: [static-ida]
+note: This spec predates the CYCLE 14 re-anchor campaign. All stated facts are static-hypothesis
+      only and have not been re-confirmed against the current IDB. Re-verification is pending.
+---
+
 # Cash Shop Browser (OLE Web Container)
+
+> Clean-room spec. Neutral description only — NO sample bytes, NO decompiler pseudo-code,
+> NO binary addresses. Consumed by `Client.Application` (cash-shop session state) and by
+> `05.Presentation/MartialHeroes.Client.Godot` (rendering the browser overlay).
 
 ## Overview
 The Cash Shop Browser is implemented as an embedded Internet Explorer (ActiveX) control within the client. It consists of:
 - `CWebContainer`: The main OLE container class implementing the client sites and interface sinks required for hosting an ActiveX control.
 - `CWebEventSink`: An event sink implementing `IDispatch` to receive events from the hosted WebBrowser control.
-- A custom window procedure (`WndProc` at `0x510448`) that handles basic window messages and manages the lifecycle of the container.
+- A custom window procedure that handles basic window messages and manages the lifecycle of the container.
 
 ---
 
@@ -18,80 +31,71 @@ Its layout in memory is:
 - **`+0x08`**: Vtable pointer for interface 2 (`IOleInPlaceFrame`)
 - **`+0x0C`**: Vtable pointer for interface 3 (`IDocHostShowUI`)
 - **`+0x10`**: Vtable pointer for interface 4 (`IDispatch`)
-- **`+0x14`**: Reserved / Padding (`0` initialized)
+- **`+0x14`**: Reserved / Padding (zero-initialized)
 - **`+0x18`**: Parent Window Handle (`HWND`) — passed during initialization
-- **`+0x1C`**: Reserved / Padding (`0` initialized)
-- **`+0x20`** (to **`+0x2F`**): `RECT` structure (left, top, right, bottom) storing the container's boundaries. (Note: in the decompiled code, this starts at offset `0x20` / `this + 2` where `this` is cast to `tagRECT*`, but is conceptually defined at `+0x14` in the overall window layout).
+- **`+0x1C`**: Reserved / Padding (zero-initialized)
+- **`+0x20`** (to **`+0x2F`**): `RECT` structure (left, top, right, bottom) storing the container's boundaries.
 - **`+0x30`**: Pointer to the `CWebEventSink` instance (`CWebEventSink*`).
 
 ### `CWebEventSink`
-The event sink is a standalone COM object allocated by `CWebContainer` to listen to DWebBrowserEvents2.
+The event sink is a standalone COM object allocated by `CWebContainer` to listen to `DWebBrowserEvents2`.
 Its layout is:
-- **`+0x00`**: Vtable pointer (`&CWebEventSink::vftable`) implementing `IDispatch`
+- **`+0x00`**: Vtable pointer implementing `IDispatch`
 - **`+0x04`**: Volatile reference count (`LONG`) updated via `InterlockedIncrement` / `InterlockedDecrement`.
 
 ---
 
-## 2. Window Procedure & Lifecycle (`WndProc` @ `0x510448`)
+## 2. Window Procedure and Lifecycle
 
-The Cash Shop browser window is managed by the window procedure `sub_510448`. It stores its state within a window wrapper structure:
+The Cash Shop browser window is managed by a dedicated window procedure. It stores its state within a window wrapper structure:
 - **`+0x00`**: Window Handle (`HWND` of the container window)
 - **`+0x0C`**: Stored window width (`cx`)
 - **`+0x10`**: Stored window height (`cy`)
-- **`+0x14`** (offset 20): Pointer to `CWebContainer` (`CWebContainer*`)
-- **`+0x18`** (offset 24): Pointer to the queried `IWebBrowser2` interface (`IWebBrowser2*`)
+- **`+0x14`**: Pointer to `CWebContainer` (`CWebContainer*`)
+- **`+0x18`**: Pointer to the queried `IWebBrowser2` interface (`IWebBrowser2*`)
 
-### Message Handling Switch
+### Message Handling
 
-#### `WM_CREATE` (`case 1u`)
+#### `WM_CREATE`
 When the window is created:
-1. Allocates `0x38` bytes of memory for `CWebContainer`.
-2. Calls the constructor `CWebContainer__ctor_1` to initialize the vtables and set up the empty bounding rectangle.
-3. Spawns `CWebEventSink` (allocated via `operator new(8u)`), sets its vtable and initializes reference count to 0.
-4. Stores the container pointer at `this + 0x14` and increments its reference count.
-5. Invokes helper `sub_510334` to:
-   - Call `CoCreateInstance` with `CLSID_WebBrowser` to create the ActiveX control.
-   - Set up OLE document hosting and client sites.
-   - Connect the `CWebEventSink` to the browser's event source.
-6. Calls `sub_50FEE9` to query the container for the `IWebBrowser2` interface (GUID `unk_734858`) and stores it at `this + 0x18`.
-7. Resolves the initial URL from `CREATESTRUCT::lpszName` (passed at `lParam + 36`).
-8. Calls the navigation helper `sub_50FF2A` with the resolved URL.
-9. Latches the width `cx` and height `cy` from `CREATESTRUCT` (offsets `20` and `16`) into `this + 0x0C` and `this + 0x10`.
+1. Allocates 0x38 bytes of memory for `CWebContainer`.
+2. Calls the `CWebContainer` constructor to initialize the vtables and set up the empty bounding rectangle.
+3. Allocates `CWebEventSink` (8 bytes), sets its vtable, and initializes the reference count to 0.
+4. Stores the container pointer at offset `+0x14` and increments its reference count.
+5. Calls `CoCreateInstance` with `CLSID_WebBrowser` to create the ActiveX control, sets up OLE document hosting and client sites, and connects `CWebEventSink` to the browser's event source.
+6. Queries the container for the `IWebBrowser2` interface and stores the result at offset `+0x18`.
+7. Resolves the initial URL from `CREATESTRUCT::lpszName` (passed via `lParam`).
+8. Navigates the browser to the resolved URL.
+9. Latches the width (`cx`) and height (`cy`) from `CREATESTRUCT` into offsets `+0x0C` and `+0x10`.
 
-#### `WM_DESTROY` (`case 2u`)
+#### `WM_DESTROY`
 When the window is destroyed:
-1. If the `IWebBrowser2` interface (`this + 0x18`) is valid, calls `Release()`.
-2. If the `CWebContainer` instance (`this + 0x14`) is valid, calls helper `sub_5103DA` to deactivate and close the embedded OLE object, then calls `Release()` on the container.
+1. If the `IWebBrowser2` interface (at offset `+0x18`) is valid, calls `Release()` on it.
+2. If the `CWebContainer` instance (at offset `+0x14`) is valid, deactivates and closes the embedded OLE object, then calls `Release()` on the container.
 
-#### `WM_SIZE` (`case 5u`)
+#### `WM_SIZE`
 Resizes the browser control:
-1. Invokes helper `sub_50FDC2` passing the `CWebContainer` pointer, `(0, 0)` for origin, and the latched width (`this + 0x0C`) and height (`this + 0x10`).
-2. Inside `sub_50FDC2`, updates the RECT at offset `0x20` of the container, retrieves the in-place site interface (GUID `unk_734508`), and calls its `SetObjectRects` method to resize the ActiveX window.
+1. Passes the `CWebContainer` pointer, origin `(0, 0)`, and the latched width and height to the resize helper.
+2. The resize helper updates the `RECT` at offset `+0x20` of the container, retrieves the `IOleInPlaceSite` interface, and calls `SetObjectRects` to resize the ActiveX window.
 
-#### `WM_SETTEXT` (`case 0x0C`)
+#### `WM_SETTEXT`
 Allows manual navigation by sending `WM_SETTEXT` to the window:
-1. Calls navigation function `sub_50FF2A` with `lParam` (the URL string).
+1. Calls the navigation function with `lParam` as the URL string.
 
-#### `WM_PARENTNOTIFY` (`case 0x210`)
-1. If the `IWebBrowser2*` is valid, queries current state or logs parameters.
+#### `WM_PARENTNOTIFY`
+1. If the `IWebBrowser2` pointer is valid, queries or logs the current state.
 
 ---
 
-## 3. Navigation Function (`sub_50FF2A`)
+## 3. Navigation Function
 
-The function `sub_50FF2A` performs browser navigation to a given ANSI URL string:
-```cpp
-LPCSTR __thiscall sub_50FF2A(_DWORD **this, LPCSTR lpString)
-```
-1. **Validation:** Checks if `lpString` is valid and not empty.
-2. **String Conversion:**
-   - Calculates the character length.
-   - Allocates wide-char buffer memory (`operator new`).
-   - Converts the URL from ANSI to UTF-16 using `MultiByteToWideChar` with code page `CP_ACP` (0).
-3. **BSTR Allocation:** Allocates a BSTR from the wide string via `SysAllocString`.
-4. **Variant Setup:** Initializes `VARIANTARG pvarg` as `VT_BSTR` (8) pointing to the BSTR.
-5. **Call Navigate:** Invokes `IWebBrowser2::Navigate` (vtable offset `208` / `0xD0`) on the WebBrowser interface stored at `this + 24` (or `*(this + 6)` which is `this + 24`), passing the URL Variant and four empty/null parameters.
-6. **Cleanup:** Frees the temporary wide-char buffer and calls `VariantClear(&pvarg)`.
+The navigation function performs browser navigation to a given ANSI URL string:
+1. **Validation:** Checks that the URL string is valid and non-empty.
+2. **String Conversion:** Calculates the character length; allocates a wide-character buffer; converts the URL from ANSI to UTF-16 using `MultiByteToWideChar` with code page `CP_ACP`.
+3. **BSTR Allocation:** Allocates a `BSTR` from the wide string via `SysAllocString`.
+4. **Variant Setup:** Initializes a `VARIANTARG` as `VT_BSTR` pointing to the `BSTR`.
+5. **Navigate:** Invokes `IWebBrowser2::Navigate` (public COM vtable slot 208 / `0xD0`) on the stored `IWebBrowser2` interface, passing the URL variant and four empty parameters.
+6. **Cleanup:** Frees the temporary wide-character buffer and calls `VariantClear` on the variant.
 
 ---
 
@@ -99,25 +103,25 @@ LPCSTR __thiscall sub_50FF2A(_DWORD **this, LPCSTR lpString)
 
 `CWebEventSink` implements the `IDispatch` interface to receive event callbacks.
 
-### `QueryInterface` (`CWebEventSink__VFunc_00` @ `0x510254`)
+### `QueryInterface`
 Queries the sink for supported interfaces:
-- Checks if the requested IID (`Buf1`) matches `IID_IUnknown` or `IID_IDispatch` (represented by `unk_7349F8` and `riid`).
-- On match: sets output pointer `*a3 = this`, calls `AddRef` via its vtable slot, and returns `S_OK` (0).
-- On mismatch: sets `*a3 = 0` and returns `E_NOINTERFACE` (`0x80004002` / `-2147467262`).
+- Checks if the requested IID matches `IID_IUnknown` or `IID_IDispatch`.
+- On match: sets the output pointer to `this`, calls `AddRef`, and returns `S_OK` (0).
+- On mismatch: sets the output pointer to null and returns `E_NOINTERFACE` (`0x80004002`).
 
-### `AddRef` (`CWebEventSink__VFunc_01` @ `0x5101fb`)
+### `AddRef`
 Increments the reference count:
-- Performs an atomic increment on the reference count field at `this + 0x04` using `InterlockedIncrement`.
+- Performs an atomic increment on the reference count field at `+0x04` using `InterlockedIncrement`.
 - Returns the new reference count.
 
-### `Release` (`CWebEventSink__VFunc_02` @ `0x51020c`)
+### `Release`
 Decrements the reference count:
-- Performs an atomic decrement on the reference count field at `this + 0x04` using `InterlockedDecrement`.
-- If the count reaches 0, frees the sink's memory using `j__free`.
+- Performs an atomic decrement on the reference count field at `+0x04` using `InterlockedDecrement`.
+- If the count reaches 0, frees the sink's memory.
 - Returns the remaining reference count.
 
 ### `IDispatch` Standard Slots (Stubs)
-- **`GetTypeInfoCount` (`VFunc_03` @ `0x510247`)**: Returns `E_NOTIMPL` (`0x80004001`).
-- **`GetTypeInfo` (`VFunc_04` @ `0x51023f`)**: Returns `E_NOTIMPL` (`0x80004001`).
-- **`GetIDsOfNames` (`VFunc_05` @ `0x510230`)**: Sets output argument to `-1` and returns `DISP_E_MEMBERNOTFOUND` (`0x80020006`).
-- **`Invoke` (`sub_51024F` @ `0x51024f`)**: Event notification receiver. Returns `S_OK` (0) to swallow or acknowledge browser events.
+- **`GetTypeInfoCount`**: Returns `E_NOTIMPL` (`0x80004001`).
+- **`GetTypeInfo`**: Returns `E_NOTIMPL` (`0x80004001`).
+- **`GetIDsOfNames`**: Sets the output argument to `-1` and returns `DISP_E_MEMBERNOTFOUND` (`0x80020006`).
+- **`Invoke`**: Event notification receiver. Returns `S_OK` (0) to acknowledge browser events.

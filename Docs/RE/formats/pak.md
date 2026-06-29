@@ -28,6 +28,8 @@
 > confirmed). The static-IDA read of the mount routine and the read primitive corroborates every
 > structural field independently. (An earlier draft noted "a small number of entries share/overlap a
 > payload offset"; the full 43,347-entry scan found zero such cases — that framing is withdrawn.)
+>
+> **Consolidation 2026-06-29:** `Docs/RE/vfs/archive_container.md` absorbed into this master; all structural content was already fully present here; ASCII layout diagram and explicit dedup callout folded as presentational additions only; no new facts, no verification-status change.
 
 ## Identification
 
@@ -51,6 +53,18 @@
 - **Encryption:** none on the data path — confirmed.
 
 ## Two-file scheme
+
+**Quick-reference layout:**
+
+```
+[ data.inf ]
+  ├── Header (24 bytes)
+  └── TOC Array (144 bytes × entry_count)
+
+[ data/data.vfs ]
+  ├── Header Echo (24 bytes, identical duplicate of data.inf header)
+  └── Payload Tiles (Contiguous data blocks starting at offset 24)
+```
 
 The archive is split across two physical files:
 
@@ -212,9 +226,12 @@ buffer is `malloc`/`free` — a load-bearing detail for matching free semantics.
 
 - **no decompression call** (no LZ, zlib, or custom expansion stage — no `*ompress*`/`*nflate*`/`*LZ*`
   import exists in the binary),
-- **no separate uncompressed-size field** distinct from `dataSize`, and
+- **no separate uncompressed-size field** distinct from `dataSize`,
 - **no per-entry codec or flag** that would select one (the only consumed entry fields are `name`@0,
-  `dataOffset`@104, `dataSize`@112 — nothing at +100 or +120 is read on the I/O path).
+  `dataOffset`@104, `dataSize`@112 — nothing at +100 or +120 is read on the I/O path), and
+- **no payload deduplication** — each virtual path maps to a unique `dataOffset`; the archive does
+  not alias multiple entries to the same payload range. The full 43,347-entry scan confirms zero
+  shared offsets — entries are stored 1:1 (sample-verified).
 
 This holds for **all three** read branches of the read primitive (see §The DiskFile read primitive):
 the loose-file read, the raw-seek streaming read, and the in-memory slurp are each a plain
