@@ -93,7 +93,10 @@ public sealed partial class GamePacketHandler
         var skillId = header.SkillId;
 
         var attackerKey = new ActorKey(header.CasterId, ToEntitySort(header.CasterSort));
-        _eventBus.Publish(new ActorSkillActionEvent(attackerKey, skillId));
+        _eventBus.Publish(new ActorSkillActionEvent(attackerKey, skillId, header.ActionCode));
+
+        if (header.CastFlag != 0 && localPlayer is not null && _world.LocalActorKey == attackerKey)
+            ConfirmLocalCast(new SkillId(skillId), header.TargetCount);
 
         var records = payload[SmsgActorSkillAction.HeaderSize..];
 
@@ -130,6 +133,18 @@ public sealed partial class GamePacketHandler
         }
 
         return true;
+    }
+
+    private void ConfirmLocalCast(SkillId skill, int targetCount)
+    {
+        if (localPlayer is null) return;
+
+        if (SkillDefinitionResolver?.Invoke(skill) is not { } definition) return;
+
+        localPlayer.ConsumeCastCost(definition.HpCost, definition.StaminaCost, targetCount, 0);
+
+        if (!definition.IsCooldownArmExempt)
+            localPlayer.Cooldowns.Arm(skill, localPlayer.ClockMs);
     }
 
     private static void AddBuffSlot(

@@ -9,6 +9,8 @@ namespace MartialHeroes.Explorer.Viewer;
 
 public sealed partial class ViewerSkinnedNode : Node3D
 {
+    public const int DefaultHandBoneId = 0;
+
     private ArrayMesh? _arrayMesh;
     private int _baseId;
     private Bone[] _bones = [];
@@ -46,6 +48,8 @@ public sealed partial class ViewerSkinnedNode : Node3D
     private AnimationTrack?[] _trackByBoneIndex = [];
     private Vector2[] _uvs = [];
     private SkinningMath.BoneTransform[] _world = [];
+
+    public static bool AnimAsDelta { get; set; }
 
     public int FrameCount { get; private set; }
 
@@ -159,7 +163,7 @@ public sealed partial class ViewerSkinnedNode : Node3D
         for (var i = 0; i < boneCount; i++) _nodeScale[i] = 1.0f;
 
         var vertexCount = mesh.Positions.Length;
-        _perVertex = CharacterAssetResolver.BuildInfluences(mesh.Weights, vertexCount, idToIndex, baseId, boneCount);
+        _perVertex = SkinningMath.BuildInfluences(mesh.Weights, vertexCount, idToIndex, baseId, boneCount);
         SkinningMath.BakeInverseBind(_perVertex, mesh.Positions, mesh.Normals, bindWorld);
 
         _storedAlbedo = albedo;
@@ -279,13 +283,17 @@ public sealed partial class ViewerSkinnedNode : Node3D
         DeformAndUpload(0f, true);
     }
 
-    public int ResolveHandBoneIndex(int idB, int weaponSubtypeOffset)
+    public int ResolveHandBoneIndex(int boneId = DefaultHandBoneId)
     {
         if (!_ready || _bones.Length == 0) return -1;
-        var handNode = ((idB + weaponSubtypeOffset) % 40 + 40) % 40;
-        var id = handNode & 0xFF;
-        if (id >= _idToIndex.Length) return -1;
-        var idx = _idToIndex[id];
+        var bid = boneId & 0xFF;
+        var idx = bid < _idToIndex.Length ? _idToIndex[bid] : -1;
+        if (idx < 0)
+        {
+            var off = boneId - _baseId;
+            idx = off >= 0 && off < _bones.Length ? off : -1;
+        }
+
         return idx >= 0 && idx < _bones.Length ? idx : -1;
     }
 
@@ -431,7 +439,7 @@ public sealed partial class ViewerSkinnedNode : Node3D
     {
         var tracks = restPose ? _noTracks : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(
-            _bones, _parentIndex, tracks, t, true, _world, true, _hasChild, _nodeScale);
+            _bones, _parentIndex, tracks, t, true, _world, AnimAsDelta, _hasChild, _nodeScale);
     }
 
     private AnimationTrack?[] BindClipTracks(

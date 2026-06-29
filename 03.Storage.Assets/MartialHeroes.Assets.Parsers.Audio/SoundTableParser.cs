@@ -1,46 +1,25 @@
-using System.Buffers.Binary;
+using System.Runtime.InteropServices;
 using MartialHeroes.Assets.Parsers.Audio.Models;
 
 namespace MartialHeroes.Assets.Parsers.Audio;
 
 public static class SoundTableParser
 {
-    private const int OffSoundEntryId = 0x00;
-
-    private const int OffTodEnable = 0x04;
-
-    private const int OffWeight = 0x1C;
-
-    private const int OffPosX = 0x20;
-
-    private const int OffUnlabeled24 = 0x24;
-
-    private const int OffPosZ = 0x28;
-
-    private const int OffRadius = 0x2C;
-
-
     public static SoundTableData Parse(ReadOnlyMemory<byte> data, SoundTableExtension extension)
     {
-        return Parse(data.Span, extension);
+        var entries = DecodeEntries(data.Span);
+
+        return new SoundTableData
+        {
+            Extension = extension,
+            Entries = entries,
+            PresentFlags = data.Slice(SoundTableData.ReadSize, SoundTableData.TrailerSize)
+        };
     }
 
     public static SoundTableData Parse(ReadOnlySpan<byte> span, SoundTableExtension extension)
     {
-        if (span.Length != SoundTableData.FixedFileSize)
-            throw new InvalidDataException(
-                $"Sound table parse error: buffer is {span.Length} bytes; " +
-                $"expected exactly {SoundTableData.FixedFileSize} (0x{SoundTableData.FixedFileSize:X4}) bytes " +
-                $"(= {SoundTableData.EntryCount} records × {SoundTableData.EntryStride} bytes + " +
-                $"{SoundTableData.TrailerSize} bytes unread trailer). " +
-                "spec: Docs/RE/formats/sound_tables.md §File layout.");
-
-        var entries = new SoundTableEntry[SoundTableData.EntryCount];
-        for (var i = 0; i < SoundTableData.EntryCount; i++)
-        {
-            var entryBase = i * SoundTableData.EntryStride;
-            entries[i] = DecodeEntry(span, entryBase);
-        }
+        var entries = DecodeEntries(span);
 
         return new SoundTableData
         {
@@ -50,41 +29,25 @@ public static class SoundTableParser
     }
 
 
-    private static SoundTableEntry DecodeEntry(ReadOnlySpan<byte> span, int entryBase)
+    private static SoundTableEntry[] DecodeEntries(ReadOnlySpan<byte> span)
     {
-        var soundEntryId = BinaryPrimitives.ReadUInt32LittleEndian(
-            span[(entryBase + OffSoundEntryId)..]);
+        if (span.Length != SoundTableData.FixedFileSize)
+            throw new InvalidDataException(
+                $"Sound table parse error: buffer is {span.Length} bytes; " +
+                $"expected exactly {SoundTableData.FixedFileSize} (0x{SoundTableData.FixedFileSize:X4}) bytes " +
+                $"(= {SoundTableData.EntryCount} records x {SoundTableData.EntryStride} bytes + " +
+                $"{SoundTableData.TrailerSize} bytes unread trailer).");
 
-        var todEnable = new HourSchedule24();
-        span.Slice(entryBase + OffTodEnable, SoundTableData.HoursPerDay)
-            .CopyTo(todEnable.AsSpan());
+        var records = MemoryMarshal.Cast<byte, SoundTableEntry>(span[..SoundTableData.ReadSize]);
+        if (records.Length != SoundTableData.EntryCount)
+            throw new InvalidDataException(
+                $"Sound table parse error: record region cast yielded {records.Length} records; " +
+                $"expected {SoundTableData.EntryCount}. " +
+                $"sizeof(SoundTableEntry) must equal {SoundTableData.EntryStride}.");
 
-        var weight = BinaryPrimitives.ReadSingleLittleEndian(
-            span[(entryBase + OffWeight)..]);
-
-        var posX = BinaryPrimitives.ReadSingleLittleEndian(
-            span[(entryBase + OffPosX)..]);
-
-        var unlabeled24 = BinaryPrimitives.ReadUInt32LittleEndian(
-            span[(entryBase + OffUnlabeled24)..]);
-
-        var posZ = BinaryPrimitives.ReadSingleLittleEndian(
-            span[(entryBase + OffPosZ)..]);
-
-        var radius = BinaryPrimitives.ReadSingleLittleEndian(
-            span[(entryBase + OffRadius)..]);
-
-
-        return new SoundTableEntry
-        {
-            SoundEntryId = soundEntryId,
-            HourSchedule = todEnable,
-            Weight = weight,
-            PosX = posX,
-            Unlabeled24 = unlabeled24,
-            PosZ = posZ,
-            Radius = radius
-        };
+        var entries = new SoundTableEntry[SoundTableData.EntryCount];
+        records.CopyTo(entries);
+        return entries;
     }
 
 
@@ -97,8 +60,7 @@ public static class SoundTableParser
         if (normalised.Contains("data/effect/obj/", StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException(
                 $"The path '{vfsPath}' points to a 3D geometry shape file (data/effect/obj/*.eff), " +
-                "which is NOT a sound table. Do not parse it with SoundTableParser. " +
-                "spec: Docs/RE/formats/sound_tables.md §CRITICAL DISAMBIGUATION.",
+                "which is NOT a sound table. Do not parse it with SoundTableParser.",
                 nameof(vfsPath));
 
         var ext = Path.GetExtension(vfsPath).ToLowerInvariant();
@@ -111,8 +73,7 @@ public static class SoundTableParser
             ".run" => SoundTableExtension.Run,
             _ => throw new ArgumentException(
                 $"The extension '{ext}' (from path '{vfsPath}') is not a known sound-table extension. " +
-                "Known extensions: .bgm, .bge, .eff (map path only), .wlk, .run. " +
-                "spec: Docs/RE/formats/sound_tables.md §Identification.",
+                "Known extensions: .bgm, .bge, .eff (map path only), .wlk, .run.",
                 nameof(vfsPath))
         };
     }

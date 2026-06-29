@@ -19,7 +19,6 @@ public static class XdbParser
     private const int VehicleTagAOffset = 8;
 
     private const int VehicleTagBOffset = 12;
-    private const uint VehicleTagBExpected = 0x1575A3E4u;
 
     private const int VehicleParam0Offset = 16;
     private const int VehicleParam1Offset = 20;
@@ -201,14 +200,14 @@ public static class XdbParser
 
             var scaleOrRadius = BinaryPrimitives.ReadSingleLittleEndian(rec[32..]);
 
-            var unknownU1 = BinaryPrimitives.ReadSingleLittleEndian(rec[36..]);
+            var visualScale = BinaryPrimitives.ReadSingleLittleEndian(rec[36..]);
 
             var flag0 = rec[40];
             var flag1 = rec[41];
             var flag2 = rec[42];
             var flag3 = rec[43];
 
-            var probability = BinaryPrimitives.ReadUInt32LittleEndian(rec[44..]);
+            var tickInterval = BinaryPrimitives.ReadUInt32LittleEndian(rec[44..]);
 
             results[i] = new CreatureItemXdbRecord
             {
@@ -221,12 +220,12 @@ public static class XdbParser
                 AttachF4 = f4,
                 AttachF5 = f5,
                 ScaleOrRadius = scaleOrRadius,
-                VisualScale = unknownU1,
+                VisualScale = visualScale,
                 Flag0 = flag0,
                 Flag1 = flag1,
                 Flag2 = flag2,
                 Flag3 = flag3,
-                Probability = probability
+                TickInterval = tickInterval
             };
         }
 

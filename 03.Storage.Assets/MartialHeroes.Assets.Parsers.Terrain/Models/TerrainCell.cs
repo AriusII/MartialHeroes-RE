@@ -8,6 +8,7 @@ public sealed class TerrainCell
     public const float GridSpacing = 16.0f;
     private const int PatchGridSize = 16;
     private const int QuadsPerPatch = QuadCount / PatchGridSize;
+    private const float SteepHeightSpan = 8.0f;
 
     public required float[] Heights { get; init; }
     public required (float Nx, float Ny, float Nz)[] Normals { get; init; }
@@ -29,28 +30,59 @@ public sealed class TerrainCell
         if (col >= QuadCount) col = QuadCount - 1;
         if (row >= QuadCount) row = QuadCount - 1;
 
-        var fracX = fx - col;
-        var fracZ = fz - row;
-
-        var h00 = Heights[row * GridSize + col];
-        var h10 = Heights[row * GridSize + col + 1];
-        var h01 = Heights[(row + 1) * GridSize + col];
-        var h11 = Heights[(row + 1) * GridSize + col + 1];
-
         var patchCol = col / QuadsPerPatch;
         var patchRow = row / QuadsPerPatch;
-        var dirByte = DirectionFlags[patchRow * PatchGridSize + patchCol];
 
-        if ((dirByte & 1) == 0)
+        if (IsPatchSteep(patchRow, patchCol))
         {
-            if (fracZ <= fracX)
-                return TriPlaneY(0f, 0f, h00, 1f, 0f, h10, 1f, 1f, h11, fracX, fracZ);
-            return TriPlaneY(0f, 0f, h00, 0f, 1f, h01, 1f, 1f, h11, fracX, fracZ);
+            var fracX = fx - col;
+            var fracZ = fz - row;
+
+            var h00 = Heights[row * GridSize + col];
+            var h10 = Heights[row * GridSize + col + 1];
+            var h01 = Heights[(row + 1) * GridSize + col];
+            var h11 = Heights[(row + 1) * GridSize + col + 1];
+
+            if (fracX + fracZ <= 1f)
+                return TriPlaneY(0f, 0f, h00, 1f, 0f, h10, 0f, 1f, h01, fracX, fracZ);
+            return TriPlaneY(1f, 0f, h10, 1f, 1f, h11, 0f, 1f, h01, fracX, fracZ);
         }
 
-        if (fracX + fracZ < 1f)
-            return TriPlaneY(0f, 0f, h00, 1f, 0f, h10, 0f, 1f, h01, fracX, fracZ);
-        return TriPlaneY(1f, 0f, h10, 1f, 1f, h11, 0f, 1f, h01, fracX, fracZ);
+        var originRow = patchRow * QuadsPerPatch;
+        var originCol = patchCol * QuadsPerPatch;
+
+        var c00 = Heights[originRow * GridSize + originCol];
+        var c10 = Heights[originRow * GridSize + originCol + QuadsPerPatch];
+        var c01 = Heights[(originRow + QuadsPerPatch) * GridSize + originCol];
+        var c11 = Heights[(originRow + QuadsPerPatch) * GridSize + originCol + QuadsPerPatch];
+
+        var patchWorld = QuadsPerPatch * GridSpacing;
+        var u = (cx - originCol * GridSpacing) / patchWorld;
+        var w = (cz - originRow * GridSpacing) / patchWorld;
+
+        if (u + w <= 1f)
+            return TriPlaneY(0f, 0f, c00, 1f, 0f, c10, 0f, 1f, c01, u, w);
+        return TriPlaneY(1f, 0f, c10, 1f, 1f, c11, 0f, 1f, c01, u, w);
+    }
+
+    private bool IsPatchSteep(int patchRow, int patchCol)
+    {
+        var originRow = patchRow * QuadsPerPatch;
+        var originCol = patchCol * QuadsPerPatch;
+        var min = float.MaxValue;
+        var max = float.MinValue;
+        for (var r = 0; r <= QuadsPerPatch; r++)
+        {
+            var rowBase = (originRow + r) * GridSize + originCol;
+            for (var c = 0; c <= QuadsPerPatch; c++)
+            {
+                var h = Heights[rowBase + c];
+                if (h < min) min = h;
+                if (h > max) max = h;
+            }
+        }
+
+        return max - min > SteepHeightSpan;
     }
 
     private static float TriPlaneY(
@@ -123,36 +155,29 @@ public sealed class SodBlob
 {
     public required uint SolidCount { get; init; }
     public required SodSolid[] Solids { get; init; }
-    public required ReadOnlyMemory<byte>[] RawSolidRecords { get; init; }
-    public required uint[] QuadCounts { get; init; }
-    public required ReadOnlyMemory<byte>[] RawQuadData { get; init; }
 }
 
-public sealed class SodSolid
-{
-    public required float AabbMinX { get; init; }
-    public required float AabbMinZ { get; init; }
-    public required float AabbMaxX { get; init; }
-    public required float AabbMaxZ { get; init; }
-    public required SodQuad[] Quads { get; init; }
-    public required ReadOnlyMemory<byte> RawRecord { get; init; }
-}
+public readonly record struct SodSolid(
+    float AabbMinX,
+    float AabbMinZ,
+    float AabbMaxX,
+    float AabbMaxZ,
+    SodQuad[] Quads,
+    ReadOnlyMemory<byte> RawRecord);
 
-public sealed class SodQuad
-{
-    public required float C0X { get; init; }
-    public required float C0Z { get; init; }
-    public required float C1X { get; init; }
-    public required float C1Z { get; init; }
-    public required float C2X { get; init; }
-    public required float C2Z { get; init; }
-    public required float C3X { get; init; }
-    public required float C3Z { get; init; }
-    public required float Opaque0 { get; init; }
-    public required float Opaque1 { get; init; }
-    public required float Opaque2 { get; init; }
-    public required float Opaque3 { get; init; }
-}
+public readonly record struct SodQuad(
+    float FootprintMinX,
+    float FootprintMinZ,
+    float FootprintMaxX,
+    float FootprintMaxZ,
+    float P0X,
+    float P0Z,
+    float P1X,
+    float P1Z,
+    float Slope,
+    float XConst,
+    float Intercept,
+    uint AxisFlag);
 
 public readonly record struct MudTile(
     byte BgmIdx,

@@ -12,8 +12,16 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
 
     public delegate void EncryptInPlaceDelegate(Span<byte> payload);
 
+    private const ushort KeepaliveMajor = 2;
+    private const ushort KeepaliveMinor = 10000;
+    private const int KeepaliveBodySize = 4;
+
     private readonly CompressPayloadDelegate _compress;
     private readonly EncryptInPlaceDelegate _encrypt;
+
+    private readonly object _keepaliveGate = new();
+
+    private byte[]? _keepaliveFrame;
 
 
     private readonly IConnectionSession _session;
@@ -39,6 +47,13 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
         ReadOnlyMemory<byte> payload,
         CancellationToken cancellationToken = default)
     {
+        if (majorOpcode == KeepaliveMajor && minorOpcode == KeepaliveMinor)
+        {
+            var keepalive = GetOrBuildKeepaliveFrame();
+            await _session.SendAsync(keepalive, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (payload.IsEmpty)
         {
             var headerOnly = ArrayPool<byte>.Shared.Rent(FramingConstants.HeaderSize);
@@ -96,6 +111,30 @@ public sealed class CryptoOutboundPacketSink : IOutboundPacketSink
         }
     }
 
+
+    private ReadOnlyMemory<byte> GetOrBuildKeepaliveFrame()
+    {
+        var existing = Volatile.Read(ref _keepaliveFrame);
+        if (existing is not null) return existing;
+
+        lock (_keepaliveGate)
+        {
+            if (_keepaliveFrame is not null) return _keepaliveFrame;
+
+            Span<byte> body = stackalloc byte[KeepaliveBodySize];
+            body.Clear();
+
+            using var compressed = _compress(body, out var compressedLength);
+
+            var totalSize = FramingConstants.HeaderSize + compressedLength;
+            var frame = new byte[totalSize];
+            WriteHeader(frame, (uint)totalSize, KeepaliveMajor, KeepaliveMinor);
+            compressed.Memory.Span[..compressedLength].CopyTo(frame.AsSpan(FramingConstants.HeaderSize));
+
+            Volatile.Write(ref _keepaliveFrame, frame);
+            return frame;
+        }
+    }
 
     private static void WriteHeader(Span<byte> destination, uint totalSize, ushort major, ushort minor)
     {

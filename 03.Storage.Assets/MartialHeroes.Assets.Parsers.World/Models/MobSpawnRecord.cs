@@ -1,16 +1,12 @@
 namespace MartialHeroes.Assets.Parsers.World.Models;
 
-public sealed class MobSpawnRecord
+public readonly record struct MobSpawnRecord
 {
-    public required ushort MobId { get; init; }
+    public required uint Field0 { get; init; }
 
-    public required ushort Pad { get; init; }
+    public required ReadOnlyMemory<byte> RawRemaining { get; init; }
 
-    public required float WorldX { get; init; }
+    public ushort SequentialId => (ushort)(Field0 & 0xFFFF);
 
-    public required float WorldZ { get; init; }
-
-    public required float FieldC { get; init; }
-
-    public required float Field10 { get; init; }
+    public ushort ZoneTag => (ushort)(Field0 >> 16);
 }

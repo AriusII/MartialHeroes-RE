@@ -5,8 +5,6 @@ namespace MartialHeroes.Assets.Parsers.Character;
 
 public static class BindlistParser
 {
-    private static readonly byte[] Crlf = [(byte)'\r', (byte)'\n'];
-
     static BindlistParser()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -17,12 +15,12 @@ public static class BindlistParser
         var cp949 = Encoding.GetEncoding(949);
         var raw = cp949.GetString(data.Span);
 
-        var lines = raw.Split("\r\n");
+        var lines = raw.Split('\n');
 
         var entries = new List<string>(lines.Length);
         for (var i = 0; i < lines.Length; i++)
         {
-            var line = lines[i];
+            var line = lines[i].Trim('\r');
             if (line.Length == 0)
                 continue;
 

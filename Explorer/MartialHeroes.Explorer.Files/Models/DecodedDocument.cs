@@ -12,8 +12,6 @@ public abstract class DecodedDocument
 public sealed class TextDocument : DecodedDocument
 {
     public required string Text { get; init; }
-
-    public bool Monospace { get; init; } = true;
 }
 
 public sealed class TableDocument : DecodedDocument

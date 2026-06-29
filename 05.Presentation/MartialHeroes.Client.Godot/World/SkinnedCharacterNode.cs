@@ -20,9 +20,14 @@ public sealed partial class SkinnedCharacterNode : Node3D
         VisualState5 = 5
     }
 
-    private const bool RenormalizeAlpha = true;
+    private const bool RenormalizeAlpha = false;
 
     public const int DefaultHandBoneId = 0;
+
+    public const int HandColumnAltMain = 902;
+    public const int HandColumnAltOff = 903;
+    public const int HandColumnNormalMain = 904;
+    public const int HandColumnNormalOff = 905;
 
     private readonly List<DeformPart> _overlayParts = new();
 
@@ -52,6 +57,11 @@ public sealed partial class SkinnedCharacterNode : Node3D
 
     private int[] _idToIndex = [];
 
+    private AnimationClip? _locomotionClip;
+    private float _locomotionDuration;
+    private float _locomotionTime;
+    private AnimationTrack?[] _locomotionTrackByBoneIndex = [];
+
     private Material? _material;
     private MeshInstance3D? _meshInstance;
     private float[] _nodeScale = [];
@@ -73,6 +83,8 @@ public sealed partial class SkinnedCharacterNode : Node3D
     public bool IsIdlePlaying { get; private set; }
 
     public bool IsActionPlaying { get; private set; }
+
+    public bool IsLocomotionPlaying { get; private set; }
 
     public void Setup(
         SkinnedMesh mesh,
@@ -239,6 +251,38 @@ public sealed partial class SkinnedCharacterNode : Node3D
         _actionTime = 0f;
     }
 
+    public bool SetLocomotionClip(AnimationClip? clip)
+    {
+        if (!_ready || clip is null || clip.FrameCount == 0)
+        {
+            StopLocomotion();
+            return false;
+        }
+
+        if (ReferenceEquals(clip, _locomotionClip) && IsLocomotionPlaying)
+            return true;
+
+        _locomotionTrackByBoneIndex =
+            BindClipTracks(clip, _idToIndex, _bones.Length, _baseId, $"locomotion:{clip.IdB}");
+        _locomotionClip = clip;
+        _locomotionDuration = clip.FrameCount * SkinningMath.MotSecondsPerFrame;
+        _locomotionTime = 0f;
+        IsLocomotionPlaying = _locomotionDuration > 0f;
+
+        if (IsLocomotionPlaying)
+            GD.Print($"[Skinning] Locomotion clip engaged (id_b={clip.IdB}, looping, " +
+                     $"duration={_locomotionDuration:F2}s). spec: skinning.md §10.5 (walk/run a[2]/a[3]).");
+
+        return IsLocomotionPlaying;
+    }
+
+    public void StopLocomotion()
+    {
+        IsLocomotionPlaying = false;
+        _locomotionClip = null;
+        _locomotionTime = 0f;
+    }
+
     private AnimationClip? SelectVisualStateClip(VisualState state)
     {
         return state switch
@@ -275,6 +319,33 @@ public sealed partial class SkinnedCharacterNode : Node3D
     public Aabb GetMeshAabb()
     {
         return _arrayMesh?.GetAabb() ?? new Aabb();
+    }
+
+    public bool TryGetBoneGlobalTransform(int boneId, out Transform3D world)
+    {
+        world = Transform3D.Identity;
+        if (!_ready || _world.Length == 0) return false;
+
+        var bid = boneId & 0xFF;
+        var idx = bid >= 0 && bid < _idToIndex.Length ? _idToIndex[bid] : -1;
+        if (idx < 0)
+        {
+            var off = boneId - _baseId;
+            idx = off >= 0 && off < _world.Length ? off : -1;
+        }
+
+        if ((uint)idx >= (uint)_world.Length) return false;
+
+        var bw = _world[idx];
+        var (qx, qy, qz, qw) = WorldCoordinates.SkinQuatToGodot(bw.Quat.X, bw.Quat.Y, bw.Quat.Z, bw.Quat.W);
+        var (tx, ty, tz) = WorldCoordinates.SkinToGodot(bw.Trans.X, bw.Trans.Y, bw.Trans.Z);
+
+        var local = new Transform3D(
+            new Basis(new Quaternion(qx, qy, qz, qw).Normalized()),
+            new Vector3(tx, ty, tz));
+
+        world = GlobalTransform * local;
+        return true;
     }
 
     public Aabb GetDisplayedFrame0Aabb()
@@ -317,6 +388,15 @@ public sealed partial class SkinnedCharacterNode : Node3D
                 DeformAndUpload(_actionTime, false);
                 return;
             }
+        }
+
+        if (IsLocomotionPlaying && _locomotionDuration > 0f)
+        {
+            _locomotionTime += dtSeconds;
+            if (_locomotionTime >= _locomotionDuration)
+                _locomotionTime %= _locomotionDuration;
+            DeformAndUpload(_locomotionTime, false);
+            return;
         }
 
         if (!_hasClip) return;
@@ -389,6 +469,26 @@ public sealed partial class SkinnedCharacterNode : Node3D
         UpdateWeaponAttachments();
     }
 
+
+    public static int ResolveHandBoneId(
+        IReadOnlyList<int>? userJointTable, int appearanceKey, bool offHand, bool altAttack)
+    {
+        if (userJointTable is null || userJointTable.Count == 0)
+            return DefaultHandBoneId;
+
+        var row = ((appearanceKey % 40) + 40) % 40;
+        var column = altAttack
+            ? offHand ? HandColumnAltOff : HandColumnAltMain
+            : offHand
+                ? HandColumnNormalOff
+                : HandColumnNormalMain;
+
+        var flatIndex = 4 * row + column;
+        if ((uint)flatIndex >= (uint)userJointTable.Count)
+            return DefaultHandBoneId;
+
+        return userJointTable[flatIndex];
+    }
 
     public void AttachHandWeapon(
         SkinnedMesh weaponMesh,
@@ -539,7 +639,9 @@ public sealed partial class SkinnedCharacterNode : Node3D
             ? _noTracks
             : IsActionPlaying
                 ? _actionTrackByBoneIndex
-                : _trackByBoneIndex;
+                : IsLocomotionPlaying
+                    ? _locomotionTrackByBoneIndex
+                    : _trackByBoneIndex;
         SkinningMath.ComputeAnimatedWorld(
             _bones, _parentIndex, tracks, t, RenormalizeAlpha, _world, AnimAsDelta,
             _hasChild, _nodeScale);

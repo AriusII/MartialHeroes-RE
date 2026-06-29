@@ -4,9 +4,12 @@ namespace MartialHeroes.Assets.Vfs;
 
 public sealed unsafe class MappedVfsArchive : IDisposable
 {
+    private const long MinDataOffset = 24;
+
     private readonly VfsDirectory _directory;
     private readonly MemoryMappedFile? _mappedFile;
     private readonly MemoryMappedViewAccessor? _viewAccessor;
+    private readonly long _viewLength;
 
     private volatile bool _disposed;
 
@@ -15,11 +18,13 @@ public sealed unsafe class MappedVfsArchive : IDisposable
     private MappedVfsArchive(
         VfsDirectory directory,
         MemoryMappedFile? mappedFile,
-        MemoryMappedViewAccessor? viewAccessor)
+        MemoryMappedViewAccessor? viewAccessor,
+        long viewLength)
     {
         _directory = directory;
         _mappedFile = mappedFile;
         _viewAccessor = viewAccessor;
+        _viewLength = viewLength;
 
         if (viewAccessor is not null)
             viewAccessor.SafeMemoryMappedViewHandle.AcquirePointer(ref _viewBasePointer);
@@ -71,7 +76,7 @@ public sealed unsafe class MappedVfsArchive : IDisposable
             throw new FileNotFoundException($"VFS data file not found: \"{vfsPath}\".", vfsPath);
 
         if (vfsInfo.Length == 0)
-            return new MappedVfsArchive(directory, null, null);
+            return new MappedVfsArchive(directory, null, null, 0);
 
         MemoryMappedFile? mmf = null;
         MemoryMappedViewAccessor? view;
@@ -102,7 +107,7 @@ public sealed unsafe class MappedVfsArchive : IDisposable
             throw;
         }
 
-        return new MappedVfsArchive(directory, mmf!, view!);
+        return new MappedVfsArchive(directory, mmf!, view!, vfsInfo.Length);
     }
 
     public bool Contains(string virtualPath)
@@ -123,6 +128,25 @@ public sealed unsafe class MappedVfsArchive : IDisposable
 
     public ReadOnlyMemory<byte> GetFileContent(string virtualPath)
     {
+        var resolved = Resolve(virtualPath);
+        if (resolved.Length == 0)
+            return ReadOnlyMemory<byte>.Empty;
+
+        var manager = new MappedMemoryManager(_viewBasePointer, resolved.Offset, resolved.Length);
+        return manager.Memory;
+    }
+
+    public ReadOnlySpan<byte> GetFileSpan(string virtualPath)
+    {
+        var resolved = Resolve(virtualPath);
+        if (resolved.Length == 0)
+            return ReadOnlySpan<byte>.Empty;
+
+        return new ReadOnlySpan<byte>(_viewBasePointer + resolved.Offset, resolved.Length);
+    }
+
+    private (long Offset, int Length) Resolve(string virtualPath)
+    {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(virtualPath);
 
@@ -140,17 +164,29 @@ public sealed unsafe class MappedVfsArchive : IDisposable
                 $"VFS entry \"{e.Name}\": dataSize high dword is non-zero " +
                 $"(value=0x{e.DataSize:X16}). Entry too large for this implementation.");
 
-        var length = (int)(e.DataSize & 0xFFFF_FFFF);
+        var low = e.DataSize & 0xFFFF_FFFF;
+        if (low > int.MaxValue)
+            throw new InvalidDataException(
+                $"VFS entry \"{e.Name}\": dataSize {low} exceeds 2 GiB; " +
+                $"not representable as a single ReadOnlyMemory<byte>.");
+
+        var length = (int)low;
 
         if (length == 0)
-            return ReadOnlyMemory<byte>.Empty;
+            return (e.DataOffset, 0);
 
         if (_viewBasePointer is null)
             throw new InvalidDataException(
                 $"VFS entry \"{e.Name}\" has dataSize={length} but data/data.vfs is empty.");
 
-        var manager = new MappedMemoryManager(_viewBasePointer, e.DataOffset, length);
-        return manager.Memory;
+        if (e.DataOffset < MinDataOffset
+            || e.DataOffset > _viewLength
+            || length > _viewLength - e.DataOffset)
+            throw new InvalidDataException(
+                $"VFS entry \"{e.Name}\" payload range [{e.DataOffset}, " +
+                $"{e.DataOffset + length}) lies outside the mapped data.vfs length {_viewLength}.");
+
+        return (e.DataOffset, length);
     }
 
     public ReadOnlySpan<VfsEntry> GetEntries()

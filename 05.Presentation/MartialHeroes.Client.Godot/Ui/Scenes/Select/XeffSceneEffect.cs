@@ -49,8 +49,8 @@ public sealed partial class XeffSceneEffect : Node3D
 
             var sizeX = kf0.SizeX;
             var sizeY = kf0.SizeY;
-            var quadW = sizeX * 2.0f;
-            var quadH = sizeY * 2.0f;
+            var quadW = sizeX;
+            var quadH = sizeY;
             if (quadW <= 0.0f || quadH <= 0.0f)
             {
                 skippedDegenerate++;
@@ -58,8 +58,8 @@ public sealed partial class XeffSceneEffect : Node3D
             }
 
             var opacity = 1.0f;
-            if (sub.AlphaKeys.Length > 0)
-                opacity = 1.0f - sub.AlphaKeys[0];
+            if (sub.Opacity.Length > 0)
+                opacity = sub.Opacity[0];
 
             opacity = Math.Clamp(opacity, 0.0f, 1.0f);
             if (opacity <= 0.0f)
@@ -93,11 +93,15 @@ public sealed partial class XeffSceneEffect : Node3D
             var diffB = sub.DiffuseB.Length > 0 ? Math.Clamp(sub.DiffuseB[0], 0f, 1f) : 1.0f;
             var tint = new Color(diffR, diffG, diffB);
 
+            var blendMode = sub.BlendModeKind == XeffBlendMode.Alpha
+                ? BaseMaterial3D.BlendModeEnum.Mix
+                : BaseMaterial3D.BlendModeEnum.Add;
+
             var mat = new StandardMaterial3D
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+                BlendMode = blendMode,
                 DepthDrawMode = BaseMaterial3D.DepthDrawModeEnum.Disabled,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 AlbedoTexture = albedo,
@@ -217,15 +221,30 @@ public sealed partial class XeffSceneEffect : Node3D
                 }
             }
 
+            var frameTextures = new ImageTexture?[sub.TextureNames.Length];
+            frameTextures[0] = albedo;
+            for (var t = 1; t < sub.TextureNames.Length; t++)
+            {
+                var frameName = sub.TextureNames[t];
+                if (frameName.Length == 0 || assets is null) continue;
+                var framePath = $"{XeffTexturePath}{frameName}.tga";
+                if (assets.Contains(framePath))
+                    try
+                    {
+                        frameTextures[t] = assets.LoadTexture(framePath);
+                    }
+                    catch
+                    {
+                    }
+            }
+
             animList.Add(new AnimEntry(
                 mi,
-                sub.AlphaKeys,
+                sub.Opacity,
                 sub.AnimStride,
                 (uint)sub.TextureNames.Length,
-                sub.TextureNames,
-                albedo,
-                mat,
-                assets));
+                frameTextures,
+                mat));
         }
 
         _animEntries = [.. animList];
@@ -252,34 +271,13 @@ public sealed partial class XeffSceneEffect : Node3D
             var frameIdx = (int)(elapsedMs / entry.AnimStride) % (int)entry.FrameCount;
 
             var opacity = 1.0f;
-            if (entry.AlphaKeys.Length > frameIdx)
-                opacity = Math.Clamp(1.0f - entry.AlphaKeys[frameIdx], 0.0f, 1.0f);
+            if (entry.Opacity.Length > frameIdx)
+                opacity = Math.Clamp(entry.Opacity[frameIdx], 0.0f, 1.0f);
 
             entry.Material.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, opacity);
 
-            if (frameIdx == 0)
-            {
-                if (entry.Tex0 is not null)
-                    entry.Material.AlbedoTexture = entry.Tex0;
-            }
-            else if (frameIdx < entry.TextureNames.Length && entry.Assets is not null)
-            {
-                var texName = entry.TextureNames[frameIdx];
-                if (texName.Length > 0)
-                {
-                    var tgaPath = $"{XeffTexturePath}{texName}.tga";
-                    if (entry.Assets.Contains(tgaPath))
-                        try
-                        {
-                            var tex = entry.Assets.LoadTexture(tgaPath);
-                            if (tex is not null)
-                                entry.Material.AlbedoTexture = tex;
-                        }
-                        catch
-                        {
-                        }
-                }
-            }
+            if (frameIdx < entry.FrameTextures.Length && entry.FrameTextures[frameIdx] is { } frameTex)
+                entry.Material.AlbedoTexture = frameTex;
         }
     }
 
@@ -338,11 +336,9 @@ public sealed partial class XeffSceneEffect : Node3D
 
     private readonly record struct AnimEntry(
         MeshInstance3D Node,
-        float[] AlphaKeys,
+        float[] Opacity,
         uint AnimStride,
         uint FrameCount,
-        string[] TextureNames,
-        ImageTexture? Tex0,
-        StandardMaterial3D Material,
-        RealClientAssets? Assets);
+        ImageTexture?[] FrameTextures,
+        StandardMaterial3D Material);
 }

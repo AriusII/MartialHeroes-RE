@@ -203,7 +203,8 @@ public sealed record SceneEntitySnapshotEvent(
 
 public sealed record ActorSkillActionEvent(
     ActorKey AttackerKey,
-    uint SkillId) : IClientEvent;
+    uint SkillId,
+    byte ActionCode) : IClientEvent;
 
 public readonly record struct HotbarSlotEntry(int SlotIndex, uint EntryKey, ushort Count);
 
@@ -280,3 +281,142 @@ public sealed record NpcSellItemResultEvent(
     bool Success,
     uint EntityKey,
     byte SubFlag) : IClientEvent;
+
+public sealed record GroundItemRemovedEvent(
+    uint EntityKey,
+    uint PickerId,
+    bool PlayPickupEffect) : IClientEvent;
+
+public sealed record RelationUpdatedEvent(
+    ActorKey Key,
+    byte RelationType,
+    byte PairState,
+    int PartnerId,
+    int Word1,
+    int Word2,
+    int Word3,
+    bool IsLocalSlot) : IClientEvent;
+
+public enum ActorStateKind : byte
+{
+    Combat = 0,
+    Timed = 1,
+    Generic = 2
+}
+
+public sealed record ActorStateChangedEvent(
+    ActorKey Key,
+    ActorStateKind Kind,
+    uint StateValue,
+    uint TimedValue,
+    uint SourceActorId) : IClientEvent;
+
+public sealed record ActorEquipVisualChangedEvent(
+    ActorKey Key,
+    byte SlotIndex,
+    uint ItemId,
+    uint ItemUpgrade,
+    bool Cleared) : IClientEvent;
+
+public sealed record ActorVisualFlagsChangedEvent(
+    ActorKey Key,
+    byte VisualFlags) : IClientEvent;
+
+public sealed record PartyRosterEvent(
+    byte EventCode,
+    byte MemberSlot) : IClientEvent;
+
+public sealed record PartyInviteStateEvent(
+    byte Gate,
+    byte Error,
+    byte State,
+    int PartyId,
+    ImmutableArray<uint> MemberIds,
+    uint TargetId) : IClientEvent;
+
+public sealed record PartyMemberRemovedEvent(
+    uint RequesterId,
+    byte Submode,
+    uint RemovedId,
+    ImmutableArray<uint> MemberIds) : IClientEvent;
+
+public sealed record PartyAcceptResultEvent(
+    bool Success,
+    byte RelationType) : IClientEvent;
+
+public sealed record PartyMemberJoinedEvent(
+    uint ActorId,
+    byte EventCode,
+    byte Sort,
+    byte RelationType,
+    string Name) : IClientEvent;
+
+public sealed record PartyMemberVitalsEvent(
+    uint MemberId,
+    string MemberName,
+    short StatA,
+    short StatBState,
+    uint StatC,
+    uint StatD,
+    uint StatE,
+    uint StatF,
+    uint StatG,
+    uint StatH,
+    uint StatI,
+    uint StatJ) : IClientEvent;
+
+public readonly record struct GuildMember(
+    uint ActorId,
+    string Name,
+    byte Rank,
+    byte Online,
+    int Points,
+    int Contribution,
+    int LastLogin);
+
+public sealed record GuildRosterEvent(
+    short GuildId,
+    string GuildName,
+    byte Gate,
+    ImmutableArray<GuildMember> Members) : IClientEvent;
+
+public sealed record GuildMemberPatchEvent(
+    ActorKey Key,
+    bool Present,
+    string Name,
+    byte Rank,
+    byte Grade) : IClientEvent;
+
+public enum InventoryTable : byte
+{
+    Equip = 0,
+    Bag = 1
+}
+
+public readonly record struct InventorySlotRecord(
+    uint Flags,
+    uint ItemActorId,
+    uint QtyOrExpiryLo,
+    uint ExpiryHi)
+{
+    public bool IsEmpty => ItemActorId == 0u;
+}
+
+public sealed record InventorySlotsChangedEvent(
+    InventoryTable Table,
+    int BaseIndex,
+    bool ClearAll,
+    ImmutableArray<InventorySlotRecord> Slots) : IClientEvent;
+
+public readonly record struct QuestLogEntry(uint QuestId, string Name);
+
+public sealed record QuestLogChangedEvent(
+    byte TrackingFlag,
+    byte PanelSelectorB,
+    byte PanelSelectorC,
+    ImmutableArray<QuestLogEntry> Entries) : IClientEvent;
+
+public sealed record QuestCompletedEvent(
+    bool Applied,
+    byte RewardState,
+    bool Granted) : IClientEvent;

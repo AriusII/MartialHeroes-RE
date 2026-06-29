@@ -8,13 +8,15 @@ public sealed class DelimitedTextDecoder : IFormatDecoder
 {
     private const int MaxRows = 100_000;
     private const double TextThreshold = 0.85;
-
-    private readonly SeparatorMode _mode;
     private readonly HexDumpDecoder _hex = new();
 
-    public DelimitedTextDecoder(SeparatorMode mode = SeparatorMode.Auto)
+    private readonly SeparatorMode _mode;
+    private readonly bool _recognizeComments;
+
+    public DelimitedTextDecoder(SeparatorMode mode = SeparatorMode.Auto, bool recognizeComments = false)
     {
         _mode = mode;
+        _recognizeComments = recognizeComments;
     }
 
     public DecodedDocument Decode(VfsFileNode node, ReadOnlyMemory<byte> bytes)
@@ -36,7 +38,6 @@ public sealed class DelimitedTextDecoder : IFormatDecoder
         if (separator == '\0')
             return AsText(node, text);
 
-        var collapse = separator == '\t';
         var recognizeMeta = _mode != SeparatorMode.Comma;
 
         var raw = new List<string[]>();
@@ -53,7 +54,7 @@ public sealed class DelimitedTextDecoder : IFormatDecoder
             var line = text.AsSpan(start, end - start);
             if (TableTokenizer.IsBlank(line)) continue;
 
-            if (recognizeMeta && TableTokenizer.IsComment(line))
+            if (_recognizeComments && TableTokenizer.IsComment(line))
             {
                 comments++;
                 continue;
@@ -71,7 +72,7 @@ public sealed class DelimitedTextDecoder : IFormatDecoder
 
             if (raw.Count >= MaxRows) continue;
 
-            TableTokenizer.SplitFields(line, separator, collapse, fields);
+            TableTokenizer.SplitFields(line, separator, false, fields);
             if (fields.Count > maxColumns) maxColumns = fields.Count;
             raw.Add(fields.ToArray());
         }

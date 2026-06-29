@@ -9,8 +9,6 @@ public static class AnimationParser
 {
     private const int KeyframeStride = 28;
 
-    private const int TrackPreambleStride = 8;
-
     private static ReadOnlySpan<byte> BaniMagic => "BANI"u8;
 
     public static bool IsBaniVariant(ReadOnlySpan<byte> data)
@@ -30,7 +28,6 @@ public static class AnimationParser
 
         var offset = 0;
 
-
         var idA = ReadU32LE(data, ref offset, "id_a");
 
         var idB = ReadU32LE(data, ref offset, "id_b");
@@ -39,16 +36,65 @@ public static class AnimationParser
 
         var frameCount = ReadU32LE(data, ref offset, "frame_count");
 
+        var trackCount = ReadU32LE(data, ref offset, "track_count");
+
+        var tracks = ReadTrackArray(data, ref offset, trackCount);
+
+        return new AnimationClip
+        {
+            IdA = idA,
+            IdB = idB,
+            Name = name,
+            FrameCount = frameCount,
+            Tracks = tracks
+        };
+    }
+
+    public static BaniClip? ParseBani(ReadOnlyMemory<byte> data)
+    {
+        return ParseBani(data.Span);
+    }
+
+    public static BaniClip? ParseBani(ReadOnlySpan<byte> data)
+    {
+        if (!IsBaniVariant(data))
+            return null;
+
+        var offset = 4;
+
+        var version = ReadU32LE(data, ref offset, "version");
+
+        var animId = ReadU32LE(data, ref offset, "anim_id");
+
+        var rigGroupId = ReadU32LE(data, ref offset, "rig_group_id");
+
+        var name = LenStrReader.Read(data, ref offset);
+
+        var frameCount = ReadU32LE(data, ref offset, "frame_count");
 
         var trackCount = ReadU32LE(data, ref offset, "track_count");
 
+        var tracks = ReadTrackArray(data, ref offset, trackCount);
+
+        return new BaniClip
+        {
+            Version = version,
+            AnimId = animId,
+            RigGroupId = rigGroupId,
+            Name = name,
+            FrameCount = frameCount,
+            Tracks = tracks
+        };
+    }
+
+    private static AnimationTrack[] ReadTrackArray(ReadOnlySpan<byte> data, ref int offset, uint trackCount)
+    {
         var tracks = new AnimationTrack[trackCount];
 
         for (var t = 0; t < (int)trackCount; t++)
         {
             var trackDescriptor = ReadU32LE(data, ref offset, $"track[{t}].track_descriptor");
             var boneId = (byte)(trackDescriptor & 0xFF);
-            var trackDescHigh24 = trackDescriptor >> 8;
 
             var keyCount = ReadU32LE(data, ref offset, $"track[{t}].key_count");
 
@@ -94,21 +140,12 @@ public static class AnimationParser
             tracks[t] = new AnimationTrack
             {
                 BoneId = boneId,
-                TrackDescriptorHigh24 = trackDescHigh24,
                 Keyframes = keyframes
             };
         }
 
-        return new AnimationClip
-        {
-            IdA = idA,
-            IdB = idB,
-            Name = name,
-            FrameCount = frameCount,
-            Tracks = tracks
-        };
+        return tracks;
     }
-
 
     private static uint ReadU32LE(ReadOnlySpan<byte> span, ref int offset, string fieldName)
     {

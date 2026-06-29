@@ -16,7 +16,8 @@ public sealed class LoadOrchestrator(
     SceneStateMachine scene,
     ILoadResourceSource resourceSource,
     IOpeningSkipReader openingSkipReader,
-    ILoadingSoundSink? soundSink = null)
+    ILoadingSoundSink? soundSink = null,
+    ICatalogueAssembler? catalogueAssembler = null)
 {
     private const int
         LoadingSoundCueId = 920100100;
@@ -36,8 +37,6 @@ public sealed class LoadOrchestrator(
     private bool _startedAsReload;
 
     public LoadOrchestratorState State { get; private set; } = LoadOrchestratorState.NotStarted;
-
-    public Exception? Fault { get; private set; }
 
     public Task Completion
     {
@@ -69,7 +68,6 @@ public sealed class LoadOrchestrator(
             if (_scene.Current.State != EngineSceneState.Load)
                 throw new InvalidOperationException("State-2 load can only start while SceneStateMachine is in Load.");
 
-            Fault = null;
             _cumulativeBytes = 0;
             _startedAsReload = _scene.LoadIsReload;
             _scene.SkipOpening = _openingSkipReader.ReadSkipOpening();
@@ -108,5 +106,6 @@ public sealed class LoadOrchestrator(
         cancellationToken.ThrowIfCancellationRequested();
         if (bytes > 0)
             Interlocked.Add(ref _cumulativeBytes, bytes);
+        catalogueAssembler?.TryAssemble(path);
     }
 }

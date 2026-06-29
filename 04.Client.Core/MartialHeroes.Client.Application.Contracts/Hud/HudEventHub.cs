@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using MartialHeroes.Client.Application.Contracts.Events;
 
 namespace MartialHeroes.Client.Application.Contracts.Hud;
 
@@ -19,7 +20,16 @@ public sealed class HudEventHub : IHudEventHub
 
     private readonly Channel<TargetChangedEvent> _targetChanges = CreateBounded<TargetChangedEvent>(LatestWinsCapacity);
     private readonly Channel<HudVitalsEvent> _vitals = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
+    private readonly Channel<HudVitalsEvent> _vitalsGauge = CreateBounded<HudVitalsEvent>(LatestWinsCapacity);
     private readonly Channel<ZoneChangedEvent> _zoneChanges = CreateBounded<ZoneChangedEvent>(LatestWinsCapacity);
+
+    private readonly Channel<InventorySlotsChangedEvent> _inventorySlots =
+        CreateBounded<InventorySlotsChangedEvent>(AppendCapacity);
+
+    private readonly Channel<QuestLogChangedEvent> _questLog = CreateBounded<QuestLogChangedEvent>(LatestWinsCapacity);
+
+    private readonly Channel<QuestCompletedEvent> _questCompleted =
+        CreateBounded<QuestCompletedEvent>(AppendCapacity);
 
     public ChannelReader<ExpLevelEvent> ExpLevels => _expLevels.Reader;
 
@@ -57,7 +67,9 @@ public sealed class HudEventHub : IHudEventHub
     public bool PublishVitals(HudVitalsEvent v)
     {
         ArgumentNullException.ThrowIfNull(v);
-        return _vitals.Writer.TryWrite(v);
+        var primary = _vitals.Writer.TryWrite(v);
+        var gauge = _vitalsGauge.Writer.TryWrite(v);
+        return primary && gauge;
     }
 
 
@@ -75,6 +87,32 @@ public sealed class HudEventHub : IHudEventHub
 
     public ChannelReader<HudVitalsEvent> Vitals => _vitals.Reader;
 
+    public ChannelReader<HudVitalsEvent> VitalsGauge => _vitalsGauge.Reader;
+
+    public ChannelReader<InventorySlotsChangedEvent> InventorySlots => _inventorySlots.Reader;
+
+    public ChannelReader<QuestLogChangedEvent> QuestLog => _questLog.Reader;
+
+    public ChannelReader<QuestCompletedEvent> QuestCompleted => _questCompleted.Reader;
+
+    public bool PublishInventorySlots(InventorySlotsChangedEvent slots)
+    {
+        ArgumentNullException.ThrowIfNull(slots);
+        return _inventorySlots.Writer.TryWrite(slots);
+    }
+
+    public bool PublishQuestLog(QuestLogChangedEvent log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        return _questLog.Writer.TryWrite(log);
+    }
+
+    public bool PublishQuestCompleted(QuestCompletedEvent completed)
+    {
+        ArgumentNullException.ThrowIfNull(completed);
+        return _questCompleted.Writer.TryWrite(completed);
+    }
+
     public void Complete()
     {
         _chatLines.Writer.TryComplete();
@@ -85,6 +123,10 @@ public sealed class HudEventHub : IHudEventHub
         _statAllocations.Writer.TryComplete();
         _zoneChanges.Writer.TryComplete();
         _vitals.Writer.TryComplete();
+        _vitalsGauge.Writer.TryComplete();
+        _inventorySlots.Writer.TryComplete();
+        _questLog.Writer.TryComplete();
+        _questCompleted.Writer.TryComplete();
     }
 
     public bool PublishTargetChanged(TargetChangedEvent target)

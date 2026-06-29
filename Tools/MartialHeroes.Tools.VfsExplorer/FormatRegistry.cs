@@ -125,7 +125,7 @@ internal static class FormatRegistry
         {
             case ConvertKind.GltfStaticMesh:
                 GltfConverter.WriteGlb(XobjParser.Parse(content), outStream);
-                return "xobj → GLB (static mesh)";
+                return "xobj -> GLB (static mesh)";
 
             case ConvertKind.GltfSkinnedMesh:
             {
@@ -134,25 +134,25 @@ internal static class FormatRegistry
                 var skel = mesh.IdB != 0 ? resolveBnd(mesh.IdB) : null;
                 GltfConverter.WriteGlb(mesh, skel, outStream);
                 return skel is null
-                    ? "skn → GLB (rigid; no skeleton)"
-                    : $"skn → GLB (skinned; bnd g{mesh.IdB}, {skel.Bones.Length} bones)";
+                    ? "skn -> GLB (rigid; no skeleton)"
+                    : $"skn -> GLB (skinned; bnd g{mesh.IdB}, {skel.Bones.Length} bones)";
             }
 
             case ConvertKind.GltfBudScene:
                 BudSceneGltfConverter.WriteGlb(TerrainSceneParser.Parse(content), outStream);
-                return "bud → GLB (object scene)";
+                return "bud -> GLB (object scene)";
 
             case ConvertKind.GltfTerrain:
                 TerrainGltfConverter.WriteGlb(TedTerrainParser.Parse(content), outStream);
-                return "ted → GLB (terrain cell)";
+                return "ted -> GLB (terrain cell)";
 
             case ConvertKind.GltfCollision:
                 CollisionLayerGltfConverter.WriteGlb(TerrainLayerParsers.ParseUpOrExd(content), outStream);
-                return "collision → GLB (triangle list)";
+                return "collision -> GLB (triangle list)";
 
             case ConvertKind.Png:
                 PngConverter.WritePng(TextureDetector.Detect(content), outStream);
-                return "dds → PNG (DXT decode)";
+                return "dds -> PNG (DXT decode)";
 
             case ConvertKind.ImagePassthrough:
             {
@@ -170,7 +170,7 @@ internal static class FormatRegistry
 
             case ConvertKind.XeffJson:
                 outStream.Write(XeffJsonConverter.WriteJsonBytes(XeffParser.ParseXeff(content)));
-                return "xeff → JSON";
+                return "xeff -> JSON";
 
             default:
                 return "(no converter)";
@@ -258,7 +258,7 @@ internal static class FormatRegistry
 
         Add(BinPointLightKey, "Per-area point-light array (point_light*.bin)", "Docs/RE/formats/terrain_layers.md",
             DecodeBinPointLight);
-        Add(BinWindKey, "Foliage-sway keyframes (wind*.bin)", "Docs/RE/formats/terrain_layers.md", DecodeBinWind);
+        Add(BinWindKey, "Foliage-sway seed pool (wind*.bin)", "Docs/RE/formats/terrain_layers.md", DecodeBinWind);
 
         Add(BinWeatherKey, "Weather parameters (weather*.bin) — PARTIAL", "Docs/RE/formats/environment_bins.md",
             DecodeBinWeather);
@@ -369,10 +369,12 @@ internal static class FormatRegistry
     private static IReadOnlyList<string> DecodeSod(string path, ReadOnlyMemory<byte> raw)
     {
         var b = SodBlobParser.Parse(raw);
+        long totalQuads = 0;
+        foreach (var s in b.Solids)
+            totalQuads += s.Quads.Length;
         return
         [
-            $"solid_count={b.SolidCount}  solids={b.Solids.Length:N0}  " +
-            $"quad_groups={b.QuadCounts.Length:N0}"
+            $"solid_count={b.SolidCount}  solids={b.Solids.Length:N0}  wall_quads={totalQuads:N0}"
         ];
     }
 
@@ -395,7 +397,24 @@ internal static class FormatRegistry
         if (name.StartsWith("mob", StringComparison.Ordinal))
         {
             var recs = MobSpawnParser.Parse(raw);
-            return [$"mob spawn array  records={recs.Length:N0}  (20B stride)"];
+            var lines = new List<string>
+            {
+                $"mob spawn array  records={recs.Length:N0}  (20B stride; field0 u32 + 16B unspecified, no client loader)"
+            };
+            var shown = 0;
+            foreach (var r in recs)
+            {
+                if (shown >= 8)
+                {
+                    lines.Add($"  … ({recs.Length - shown} more)");
+                    break;
+                }
+
+                lines.Add($"  [{shown}] field0=0x{r.Field0:X8}  seq_id={r.SequentialId}  zone_tag={r.ZoneTag}");
+                shown++;
+            }
+
+            return lines;
         }
 
         return [$"spawn array  {raw.Length:N0} bytes (name does not start with npc/mob — ambiguous stride)"];
@@ -543,8 +562,8 @@ internal static class FormatRegistry
         return
         [
             $"light  directional_keyframes={l.DirectionalKeyframes.Length}  ambient_keyframes={l.AmbientKeyframes.Length}",
-            $"fog_distance_scalars={l.FogDistanceScalars.Length}  secondary_fog_scalars={l.SecondaryFogScalars.Length}",
-            $"fallback_light scale={l.FallbackScale:F1} dir=({l.FallbackDirX:F1},{l.FallbackDirY:F1},{l.FallbackDirZ:F1})"
+            $"fog_distance_scalars={l.FogDistanceScalars.Length}  point_light_master_intensity={l.PointLightMasterIntensity.Length}",
+            $"sun_dir=({l.SunDirectionX:F1},{l.SunDirectionY:F1},{l.SunDirectionZ:F1}) keylight_pos=({l.KeyLightPositionX:F1},{l.KeyLightPositionY:F1},{l.KeyLightPositionZ:F1})"
         ];
     }
 
@@ -578,19 +597,25 @@ internal static class FormatRegistry
     private static IReadOnlyList<string> DecodeBinPointLight(string path, ReadOnlyMemory<byte> raw)
     {
         var p = TerrainLayerParsers.ParsePointLightBin(raw);
-        var enabled = 0;
+        var withRange = 0;
         foreach (var r in p.Records)
-            if (r.EnabledFlag == 0)
-                enabled++;
+            if (r.Range > 0f)
+                withRange++;
 
-        return [$"point_light  proximity_radius={p.ProximityRadius}  records={p.Records.Length}  enabled={enabled}"];
+        return
+        [
+            $"point_light  proximity_radius={p.ProximityRadius:F3}  records={p.Records.Length}  with_range={withRange}"
+        ];
     }
 
     private static IReadOnlyList<string> DecodeBinWind(string path, ReadOnlyMemory<byte> raw)
     {
-        var w = TerrainLayerParsers.ParseWindBin(raw);
+        var w = TerrainLayerParsers.ParseWindSeedPool(raw);
 
-        return [$"wind  count={w.Count}  flag2={w.Flag2}  (24-byte keyframe records; fields UNVERIFIED)"];
+        return
+        [
+            $"wind  seed_records={w.RecordCount}  source_flag={w.SourceFlag}  decoded={w.Records.Length:N0}  (24-byte WindSeedRecord)"
+        ];
     }
 
     private static IReadOnlyList<string> DecodeBinWeather(string path, ReadOnlyMemory<byte> raw)
@@ -616,9 +641,22 @@ internal static class FormatRegistry
 
     private static IReadOnlyList<string> DecodeBinRegionTable(string path, ReadOnlyMemory<byte> raw)
     {
-        var recs = RegionTableParser.Parse(raw);
+        var recs = RegionZonePropertiesParser.Parse(raw);
+        var named = 0;
+        foreach (var r in recs)
+            if (!string.IsNullOrEmpty(r.ZoneName))
+                named++;
 
-        return [$"regiontable  sub_zone_records={recs.Length}  (32B stride)"];
+        var lines = new List<string>
+        {
+            $"regiontable  zone_records={recs.Length}  named={named}  (48B stride)"
+        };
+        foreach (var r in recs)
+            if (!string.IsNullOrEmpty(r.ZoneName))
+                lines.Add(
+                    $"  region {r.RegionId}: \"{Safe(r.ZoneName)}\"  type={r.ZoneType}  label=({r.LabelX:F1},{r.LabelZ:F1})");
+
+        return lines;
     }
 
     private static IReadOnlyList<string> DecodeBinCompanion(string path, ReadOnlyMemory<byte> raw)

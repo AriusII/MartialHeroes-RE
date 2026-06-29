@@ -13,9 +13,17 @@ public static class MapDescriptorParser
         "SOLID"
     };
 
+    private static readonly Encoding Cp949;
+
+    static MapDescriptorParser()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Cp949 = Encoding.GetEncoding(949);
+    }
+
     public static MapDescriptor Parse(ReadOnlyMemory<byte> data)
     {
-        return ParseText(Encoding.ASCII.GetString(data.Span));
+        return ParseText(Cp949.GetString(data.Span));
     }
 
     public static MapDescriptor ParseText(string text)

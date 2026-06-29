@@ -29,8 +29,6 @@ public static class ActormotionParser
 
     private const float FpsBase = 15.0f;
 
-    public static readonly uint[] CategoryBase = [0, 0, 10000, 1000];
-
     static ActormotionParser()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -38,7 +36,7 @@ public static class ActormotionParser
 
     public static ActormotionCatalogue Parse(ReadOnlyMemory<byte> fileBytes)
     {
-        return Parse(fileBytes.Span, CategoryBase);
+        return Parse(fileBytes.Span, default);
     }
 
     public static Dictionary<int, ActormotionEntry> ParseAsLookup(ReadOnlyMemory<byte> fileBytes)
@@ -46,7 +44,7 @@ public static class ActormotionParser
         var catalogue = Parse(fileBytes);
         var dict = new Dictionary<int, ActormotionEntry>(catalogue.Count);
         foreach (var entry in catalogue.AllEntries)
-            dict.TryAdd(entry.ActorClassId, entry);
+            dict.TryAdd(entry.Col1RawOffset, entry);
         return dict;
     }
 
@@ -58,72 +56,60 @@ public static class ActormotionParser
     public static ActormotionCatalogue Parse(ReadOnlySpan<byte> fileBytes, ReadOnlySpan<uint> baseTable)
     {
         var cp949 = Encoding.GetEncoding(949);
-
         var text = cp949.GetString(fileBytes);
         return ParseText(text, baseTable);
     }
 
     public static ActormotionCatalogue ParseText(string text)
     {
-        return ParseText(text, CategoryBase);
+        return ParseText(text, default);
     }
 
     public static ActormotionCatalogue ParseText(string text, ReadOnlySpan<uint> baseTable)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         var lines = text.Split('\n');
 
         var capacity = lines.Length;
-        if (lines.Length > 0 && int.TryParse(lines[0].Trim('\r').Trim(), out var declaredCount))
+        if (lines.Length > 0 && int.TryParse(lines[0].Trim('\r').Trim(), NumberStyles.Integer,
+                CultureInfo.InvariantCulture, out var declaredCount) && declaredCount > 0)
             capacity = declaredCount;
 
-        var byKey = new Dictionary<uint, ActormotionEntry>(capacity);
+        var entries = new List<ActormotionEntry>(capacity);
+        var baseResolved = baseTable.Length > 0;
 
         for (var lineIdx = 1; lineIdx < lines.Length; lineIdx++)
         {
-            var raw = lines[lineIdx];
-            if (raw.Length == 0) continue;
-
-            var trimmed = raw.AsSpan().TrimEnd('\r');
+            var trimmed = lines[lineIdx].AsSpan().TrimEnd('\r');
             if (trimmed.IsEmpty) continue;
 
-            var cols = raw.TrimEnd('\r').Split('\t');
-
+            var cols = lines[lineIdx].TrimEnd('\r').Split('\t');
             if (cols.Length < TotalColumns) continue;
 
-            if (!int.TryParse(cols[ColCategory].Trim(), out var col0)) continue;
-            if (!int.TryParse(cols[ColIntraOffset].Trim(), out var col1)) continue;
+            var col0 = ParseInt(cols[ColCategory]);
+            var col1 = ParseInt(cols[ColIntraOffset]);
 
             uint baseContrib = 0;
-            int baseIdx =
-                (byte)(col0 + 1);
+            var baseIdx = (byte)(col0 + 1);
             if (baseIdx < baseTable.Length)
                 baseContrib = baseTable[baseIdx];
 
             var motionKey = (uint)(col1 + (int)baseContrib);
 
-
-            int.TryParse(cols[ColIntA].Trim(), out var intA);
-            float.TryParse(cols[ColRateSrcX].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var rateSrcX);
-            int.TryParse(cols[ColDivisorX].Trim(), out var divisorX);
-            float.TryParse(cols[ColRateSrcY].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var rateSrcY);
-            int.TryParse(cols[ColIntB].Trim(), out var intB);
-            float.TryParse(cols[ColFloatC].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatC);
-            float.TryParse(cols[ColFloatD].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatD);
-            float.TryParse(cols[ColFloatE].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatE);
-            float.TryParse(cols[ColFloatF].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatF);
-            float.TryParse(cols[ColFloatG].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatG);
-            float.TryParse(cols[ColFloatH].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatH);
-            float.TryParse(cols[ColFloatI].Trim(), NumberStyles.Float,
-                CultureInfo.InvariantCulture, out var floatI);
-            int.TryParse(cols[ColDivisorY].Trim(), out var divisorY);
+            var intA = ParseInt(cols[ColIntA]);
+            var rateSrcX = ParseFloat(cols[ColRateSrcX]);
+            var divisorX = ParseInt(cols[ColDivisorX]);
+            var rateSrcY = ParseFloat(cols[ColRateSrcY]);
+            var divisorY = ParseInt(cols[ColDivisorY]);
+            var intB = ParseInt(cols[ColIntB]);
+            var floatC = ParseFloat(cols[ColFloatC]);
+            var floatD = ParseFloat(cols[ColFloatD]);
+            var floatE = ParseFloat(cols[ColFloatE]);
+            var floatF = ParseFloat(cols[ColFloatF]);
+            var floatG = ParseFloat(cols[ColFloatG]);
+            var floatH = ParseFloat(cols[ColFloatH]);
+            var floatI = ParseFloat(cols[ColFloatI]);
 
             if (divisorX == 0) divisorX = 1;
             if (divisorY == 0) divisorY = 1;
@@ -131,15 +117,15 @@ public static class ActormotionParser
             var rateX = FpsBase * rateSrcX / divisorX;
             var rateY = FpsBase * rateSrcY / divisorY;
 
-            var dirArray1 = new int[MotionIdArrayCount];
-            var dirArray2 = new int[MotionIdArrayCount];
+            var motionIdsA = new int[MotionIdArrayCount];
+            var motionIdsB = new int[MotionIdArrayCount];
             for (var d = 0; d < MotionIdArrayCount; d++)
             {
-                int.TryParse(cols[ColMotionIdsAStart + d].Trim(), out dirArray1[d]);
-                int.TryParse(cols[ColMotionIdsBStart + d].Trim(), out dirArray2[d]);
+                motionIdsA[d] = ParseInt(cols[ColMotionIdsAStart + d]);
+                motionIdsB[d] = ParseInt(cols[ColMotionIdsBStart + d]);
             }
 
-            var entry = new ActormotionEntry
+            entries.Add(new ActormotionEntry
             {
                 MotionKey = motionKey,
                 Col0Category = col0,
@@ -159,13 +145,23 @@ public static class ActormotionParser
                 RateY = rateY,
                 FloatH = floatH,
                 FloatI = floatI,
-                DirArray1 = dirArray1,
-                DirArray2 = dirArray2
-            };
-
-            byKey.TryAdd(motionKey, entry);
+                MotionIdsA = motionIdsA,
+                MotionIdsB = motionIdsB
+            });
         }
 
-        return new ActormotionCatalogue(byKey);
+        return new ActormotionCatalogue(entries, baseResolved);
+    }
+
+    private static int ParseInt(string token)
+    {
+        int.TryParse(token.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value);
+        return value;
+    }
+
+    private static float ParseFloat(string token)
+    {
+        float.TryParse(token.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var value);
+        return value;
     }
 }

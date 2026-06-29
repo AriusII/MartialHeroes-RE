@@ -103,6 +103,33 @@ public sealed partial class CameraController : Camera3D
 
     private const float EventElevationRad = -Mathf.Pi / 6f;
 
+
+    private const float FirstYawSeed = Mathf.Pi;
+
+    private const float FirstEyeLift = 3.8f;
+
+    private const float FirstLookLift = 2.0f;
+
+    private const float FirstLookDistance = 200f;
+
+    private const float StaticEyeLift = 2.0f;
+
+
+    private const string ViewOptionConfigPath = "user://do_option.cfg";
+
+    private const string ViewOptionSection = "DO_OPTION";
+
+    private const string ViewOptionKey = "OPTION_VIEW_CHAR";
+
+    private const int ViewOptionMin = 1;
+
+    private const int ViewOptionMax = 3;
+
+    private float _playerFacingYaw;
+
+    private Vector3 _prevPlayerPos = Vector3.Zero;
+    private bool _hasPrevPlayerPos;
+
     private float _elevation = DefaultElevationRad;
 
     private float _elevationRate;
@@ -139,9 +166,14 @@ public sealed partial class CameraController : Camera3D
 
     public Vector3 PlayerGodotPosition { get; set; } = Vector3.Zero;
 
+    public ViewMode CurrentMode => _mode;
+
+    public bool IsGameplayView => _mode is ViewMode.Third or ViewMode.First or ViewMode.Static;
+
 
     public override void _Ready()
     {
+        KeepAspect = KeepAspectEnum.Width;
         Fov = GameFov;
         Near = GameNear;
         Far = GameFar;
@@ -149,15 +181,19 @@ public sealed partial class CameraController : Camera3D
         _elevation = DefaultElevationRad;
         _yaw = 0f;
 
-        ApplyThirdPersonTransform();
+        _mode = LoadPersistedView();
+
+        ApplyCurrentModeTransform();
 
         GD.Print(
-            "[Camera] mode=Third | FOV=65deg near=5 far=15000 | " +
+            "[Camera] mode=Third | FOV=65deg HORIZONTAL (KeepAspect=Width, spec: Docs/RE/structs/perspective_camera.md) near=5 far=15000 | " +
             $"eyeSeed=({EyeOffsetSeedLegacyX},{EyeOffsetSeedLegacyY},{EyeOffsetSeedGodotZ}) Godot | " +
             $"radius={OrbitRadius:F1}u | elev_default={Mathf.RadToDeg(DefaultElevationRad):F1}deg | " +
             $"elev_clamp=[{Mathf.RadToDeg(ElevationMinRad):F0}deg,{Mathf.RadToDeg(ElevationMaxRad):F0}deg] | " +
             $"yaw_clamp_third=[{Mathf.RadToDeg(YawMin):F1}deg,{Mathf.RadToDeg(YawMaxThird):F1}deg ({YawMaxThird:F4}rad)] | " +
-            "RMB=orbit wheel=elevation ESC=reset-to-Third F1=Third F2=First F3=Static Tab=devFreeFly");
+            $"mode={_mode} (OPTION_VIEW_CHAR persisted 1..3) | " +
+            "RMB=orbit wheel=elevation ESC=reset-to-Third SelectView()=view-menu Tab=devFreeFly. " +
+            "spec: Docs/RE/specs/camera_movement.md §A.2.2/§A.8.");
     }
 
     public override void _ExitTree()
@@ -201,7 +237,50 @@ public sealed partial class CameraController : Camera3D
 
             _mode = newMode;
             ApplyCurrentModeTransform();
+            PersistView(newMode);
             GD.Print($"[Camera] Switched to {newMode}.");
         }
+    }
+
+    public void SelectView(ViewMode mode)
+    {
+        if (mode is ViewMode.Third or ViewMode.First or ViewMode.Static)
+        {
+            SetViewMode(mode);
+            GD.Print($"[Camera] SelectView({mode}) via view-menu mechanism. " +
+                     "spec: Docs/RE/specs/camera_movement.md §A.2.2 (view menu / hotkey dispatcher).");
+            return;
+        }
+
+        GD.Print($"[Camera] SelectView({mode}) ignored — only Third/First/Static are user-selectable. " +
+                 "spec: Docs/RE/specs/camera_movement.md §A.2.1.");
+    }
+
+    private ViewMode LoadPersistedView()
+    {
+        var config = new ConfigFile();
+        var err = config.Load(ViewOptionConfigPath);
+        if (err != Error.Ok)
+            return ViewMode.Third;
+
+        var raw = (int)config.GetValue(ViewOptionSection, ViewOptionKey, ViewOptionMin).AsInt32();
+        var clamped = Math.Clamp(raw, ViewOptionMin, ViewOptionMax);
+        return (ViewMode)clamped;
+    }
+
+    private void PersistView(ViewMode mode)
+    {
+        if (mode is not (ViewMode.Third or ViewMode.First or ViewMode.Static))
+            return;
+
+        var value = Math.Clamp((int)mode, ViewOptionMin, ViewOptionMax);
+
+        var config = new ConfigFile();
+        config.Load(ViewOptionConfigPath);
+        config.SetValue(ViewOptionSection, ViewOptionKey, value);
+        var err = config.Save(ViewOptionConfigPath);
+        if (err != Error.Ok)
+            GD.PrintErr($"[Camera] OPTION_VIEW_CHAR persist failed (err={err}). " +
+                        "spec: Docs/RE/specs/camera_movement.md §A.8.");
     }
 }

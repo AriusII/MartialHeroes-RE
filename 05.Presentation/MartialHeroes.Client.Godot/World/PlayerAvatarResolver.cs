@@ -1,9 +1,9 @@
-using System.Text;
 using Godot;
 using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Infrastructure.Catalog;
 using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.World;
 
@@ -11,6 +11,12 @@ namespace MartialHeroes.Client.Godot.World;
 
 internal static class PlayerAvatarResolver
 {
+    private static Dictionary<int, string>? _idBToSknPath;
+    private static RealClientAssets? _idBCacheOwner;
+    public static CharacterVisualCatalogue? CharacterVisuals { get; set; }
+
+    public static ItemScaleCatalogue? ItemScales { get; set; }
+
     public static Node3D? TryBuild(RealClientAssets assets, ushort serverClass)
     {
         return TryBuild(assets, serverClass, []);
@@ -71,7 +77,7 @@ internal static class PlayerAvatarResolver
 
         var skeleton = TryLoadSkeleton(registry, poolKey);
 
-        var idleMotId = skeleton is not null ? ResolveIdleMotionId(registry, appearanceKey, skinClass) : 0;
+        var idleMotId = skeleton is not null ? ResolveIdleMotionId(registry, skinClass) : 0;
         var clip = skeleton is not null && idleMotId > 0
             ? TryLoadAnimation(assets, registry, idleMotId)
             : null;
@@ -123,41 +129,43 @@ internal static class PlayerAvatarResolver
 
     private static string? ResolveBodySknPath(RealClientAssets assets, int skinClass)
     {
-        const string listPath = "data/char/skinlist.txt";
-        if (!assets.Contains(listPath)) return null;
+        return EnsureSknIndex(assets).GetValueOrDefault(skinClass);
+    }
 
-        try
+    private static Dictionary<int, string> EnsureSknIndex(RealClientAssets assets)
+    {
+        if (_idBToSknPath is not null && ReferenceEquals(_idBCacheOwner, assets))
+            return _idBToSknPath;
+
+        var map = new Dictionary<int, string>();
+        const string skinDir = "data/char/skin/";
+        var filenames = CharacterVisuals?.CharSkinFilenames ?? [];
+
+        foreach (var rawName in filenames)
         {
-            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            var text = Encoding.GetEncoding(949).GetString(assets.GetRaw(listPath).Span);
+            var fname = rawName.Trim().ToLowerInvariant();
+            if (fname.Length == 0 || !fname.EndsWith(".skn", StringComparison.Ordinal)) continue;
 
-            const string skinDir = "data/char/skin/";
-            foreach (var rawLine in text.Split('\n'))
+            var sknPath = skinDir + fname;
+            if (!assets.Contains(sknPath)) continue;
+
+            try
             {
-                var fname = rawLine.Trim('\r', '\n', ' ').ToLowerInvariant();
-                if (fname.Length == 0 || !fname.EndsWith(".skn", StringComparison.Ordinal)) continue;
-
-                var sknPath = skinDir + fname;
-                if (!assets.Contains(sknPath)) continue;
-
-                try
-                {
-                    var sknData = assets.GetRaw(sknPath);
-                    if (sknData.IsEmpty) continue;
-                    var mesh = SknParser.Parse(sknData);
-                    if ((int)mesh.IdB == skinClass) return sknPath;
-                }
-                catch
-                {
-                }
+                var sknData = assets.GetRaw(sknPath);
+                if (sknData.IsEmpty) continue;
+                var mesh = SknParser.Parse(sknData);
+                map.TryAdd((int)mesh.IdB, sknPath);
+            }
+            catch
+            {
             }
         }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[PlayerAvatar] skinlist.txt scan failed: {ex.Message}");
-        }
 
-        return null;
+        _idBToSknPath = map;
+        _idBCacheOwner = assets;
+        GD.Print($"[PlayerAvatar] IdB→.skn index built from skinlist catalogue: {map.Count} skins " +
+                 $"({filenames.Count} skinlist entries). spec: formats/bindlist.md / skinlist manifest.");
+        return map;
     }
 
     private static Skeleton? TryLoadSkeleton(CharVisualRegistry? registry, int idB)
@@ -177,12 +185,11 @@ internal static class PlayerAvatarResolver
         return skeleton;
     }
 
-    private static int ResolveIdleMotionId(CharVisualRegistry? registry, int appearanceKey, int skinClass)
+    private static int ResolveIdleMotionId(CharVisualRegistry? registry, int skinClass)
     {
         if (registry is null) return 0;
 
-        var entry = registry.GetByMotionKey(appearanceKey)
-                    ?? registry.ActorMotion.GetBySkinClass(skinClass);
+        var entry = registry.ActorMotion.GetBySkinClass(skinClass);
         return entry?.IdleMotionId ?? 0;
     }
 
@@ -258,6 +265,11 @@ internal static class EquipmentPartResolver
                 GD.PrintErr($"[EquipPart] slot {part.Slot} texture resolve failed '{sknPath}': {ex.Message}");
             }
 
+            var visualScale = 1.0f;
+            if (PlayerAvatarResolver.ItemScales is { } scales && part.EquipmentGid > 0 &&
+                scales.TryGetScale((uint)part.EquipmentGid, out var s))
+                visualScale = s;
+
             result.Add(new SkinnedCharacterBuilder.EquipmentVisualPart(
                 part.Slot,
                 partMesh,
@@ -265,7 +277,7 @@ internal static class EquipmentPartResolver
                 part.IsHandWeapon,
                 part.IsOffHand,
                 SkinnedCharacterNode.DefaultHandBoneId,
-                1.0f));
+                visualScale));
         }
 
         return result;

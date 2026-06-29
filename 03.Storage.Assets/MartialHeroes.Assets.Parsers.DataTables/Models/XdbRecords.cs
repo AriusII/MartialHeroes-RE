@@ -84,6 +84,5 @@ public sealed class CreatureItemXdbRecord
 
     public required byte Flag3 { get; init; }
 
-    public required uint
-        Probability { get; init; }
+    public required uint TickInterval { get; init; }
 }

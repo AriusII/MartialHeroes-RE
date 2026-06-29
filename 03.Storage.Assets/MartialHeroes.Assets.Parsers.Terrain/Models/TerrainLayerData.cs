@@ -19,8 +19,8 @@ public sealed class CollisionTriangleList
 
 public sealed class SodPreCache
 {
-    public required uint SolidCount { get; init; }
-    public required uint QuadCount { get; init; }
+    public required uint Version { get; init; }
+    public required uint VertexCount { get; init; }
 
     public required (float WorldX, float WorldZ)[] Vertices { get; init; }
 }
@@ -190,33 +190,26 @@ public sealed class Fx6Layer
     public required Fx6Group[] Groups { get; init; }
 }
 
-public sealed class PointLightRecord
-{
-    public required float[] ColourGroup1 { get; init; }
-
-    public required float[] ColourGroup2 { get; init; }
-
-    public required float[] ColourGroup3 { get; init; }
-
-    public required ReadOnlyMemory<byte> RawRest { get; init; }
-
-    public required uint EnabledFlag { get; init; }
-
-    public required uint Unknown4 { get; init; }
-}
+public readonly record struct PointLightRecord(
+    float ColorDiffuseR,
+    float ColorDiffuseG,
+    float ColorDiffuseB,
+    float ColorBR,
+    float ColorBG,
+    float ColorBB,
+    float ColorCR,
+    float ColorCG,
+    float ColorCB,
+    float PositionX,
+    float PositionY,
+    float PositionZ,
+    float Range,
+    uint Unknown34,
+    int TypeFlag);
 
 public sealed class PointLightBinData
 {
-    public required uint ProximityRadius { get; init; }
+    public required float ProximityRadius { get; init; }
 
     public required PointLightRecord[] Records { get; init; }
-}
-
-public sealed class WindBinData
-{
-    public required uint Count { get; init; }
-
-    public required uint Flag2 { get; init; }
-
-    public required ReadOnlyMemory<byte>[] RawKeyframes { get; init; }
 }

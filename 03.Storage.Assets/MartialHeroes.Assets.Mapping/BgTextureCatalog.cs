@@ -11,9 +11,9 @@ public sealed class BgTextureCatalog
 
     private const string DdsExtension = ".dds";
 
-    private readonly string?[] _relPathBySlot;
-
     private readonly byte[] _kindBySlot;
+
+    private readonly string?[] _relPathBySlot;
 
     private BgTextureCatalog(string?[] relPathBySlot, byte[] kindBySlot)
     {

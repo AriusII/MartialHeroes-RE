@@ -10,7 +10,8 @@ public static class XeffJsonConverter
     {
         WriteIndented = false,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
     };
 
 
@@ -53,9 +54,12 @@ public static class XeffJsonConverter
             sub.EmitterType,
             sub.ResourceId,
             sub.AnimFlag,
+            sub.BlendMode,
+            sub.BlendModeKind,
+            sub.ElementDword2,
             sub.EntryCount,
             sub.TextureNames,
-            MapAlphaKeys(sub.AlphaKeys),
+            sub.Opacity,
             sub.DiffuseR,
             sub.DiffuseG,
             sub.DiffuseB,
@@ -87,19 +91,6 @@ public static class XeffJsonConverter
         return result;
     }
 
-    private static XeffJsonAlpha[] MapAlphaKeys(float[] keys)
-    {
-        var result = new XeffJsonAlpha[keys.Length];
-        for (var i = 0; i < keys.Length; i++)
-        {
-            var fileValue = keys[i];
-            result[i] = new XeffJsonAlpha(fileValue, 1f - fileValue);
-        }
-
-        return result;
-    }
-
-
     private sealed record XeffJsonRoot(
         uint EffectId,
         uint SubEffectCount,
@@ -109,9 +100,12 @@ public static class XeffJsonConverter
         uint EmitterType,
         uint ResourceId,
         uint AnimFlag,
+        uint BlendMode,
+        XeffBlendMode BlendModeKind,
+        uint ElementDword2,
         uint EntryCount,
         string[] TextureNames,
-        XeffJsonAlpha[] AlphaKeys,
+        float[] Opacity,
         float[] DiffuseR,
         float[] DiffuseG,
         float[] DiffuseB,
@@ -119,8 +113,6 @@ public static class XeffJsonConverter
         uint AnimStride,
         uint AnimBaseTime,
         XeffJsonKeyframe[] Keyframes);
-
-    private sealed record XeffJsonAlpha(float FileValue, float Opacity);
 
     private sealed record XeffJsonKeyframe(
         uint KfIndex,

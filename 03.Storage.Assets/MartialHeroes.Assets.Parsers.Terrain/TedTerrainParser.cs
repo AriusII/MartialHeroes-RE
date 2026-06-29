@@ -69,7 +69,7 @@ public static class TedTerrainParser
             var r = diffuseRaw[i * 4 + 0] * 0.5f;
             var g = diffuseRaw[i * 4 + 1] * 0.5f;
             var b = diffuseRaw[i * 4 + 2] * 0.5f;
-            var a = diffuseRaw[i * 4 + 3] * 0.5f;
+            var a = (float)diffuseRaw[i * 4 + 3];
             diffuseColours[i] = (r, g, b, a);
         }
 

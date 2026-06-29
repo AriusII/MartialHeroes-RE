@@ -22,6 +22,12 @@ public sealed class ApplicationUseCases : IApplicationUseCases
     public const int SessionTokenLength = 33;
     private const int EquipChangeWireSize = 12;
     private const int TradeRequestWireSize = 8;
+    private const int TradeSlotUpdateWireSize = 20;
+    private const int TradeConfirmMaxSlots = 40;
+    private const int SellItemWireSize = 12;
+    private const int DropItemWireSize = 8;
+    private const int PickupItemWireSize = 12;
+    private const int QuestActionWireSize = 12;
     private const int PartyInviteWireSize = 8;
     private const byte WhisperChannelCode = 9;
     private const int WhisperBodyByteCap = 119;
@@ -117,16 +123,6 @@ public sealed class ApplicationUseCases : IApplicationUseCases
 
         _eventBus?.Publish(new ServerListReceivedEvent(MapOutcome(result.Outcome), builder.ToImmutable()));
         return records;
-    }
-
-    private static ServerListOutcome MapOutcome(LobbyServerListOutcome outcome)
-    {
-        return outcome switch
-        {
-            LobbyServerListOutcome.Populated => ServerListOutcome.Populated,
-            LobbyServerListOutcome.Failed => ServerListOutcome.Failed,
-            _ => ServerListOutcome.Empty
-        };
     }
 
     public async ValueTask<LobbyChannelEndpoint> SelectServerAsync(
@@ -382,6 +378,16 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return SendAsync(2, 118, ReadOnlyMemory<byte>.Empty, cancellationToken);
     }
 
+    private static ServerListOutcome MapOutcome(LobbyServerListOutcome outcome)
+    {
+        return outcome switch
+        {
+            LobbyServerListOutcome.Populated => ServerListOutcome.Populated,
+            LobbyServerListOutcome.Failed => ServerListOutcome.Failed,
+            _ => ServerListOutcome.Empty
+        };
+    }
+
     public ValueTask EmitEnterWorldRequest(byte slotIndex, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -501,6 +507,141 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(0x04, 4), partnerActorId);
 
         return SendResultAsync(2, 23, payload, (next, true), cancellationToken);
+    }
+
+    public ValueTask TradeSlotUpdateAsync(
+        byte category,
+        byte slot,
+        int valueA,
+        int valueB,
+        int valueC,
+        byte flag0 = 0,
+        byte flag1 = 0,
+        byte flag2 = 0,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[TradeSlotUpdateWireSize];
+        payload.Clear();
+        payload[0x00] = category;
+        payload[0x01] = slot;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x04, 4), valueA);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x08, 4), valueB);
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x0C, 4), valueC);
+        payload[0x10] = flag0;
+        payload[0x11] = flag1;
+        payload[0x12] = flag2;
+
+        return SendAsync(2, 24, payload, cancellationToken);
+    }
+
+    public ValueTask TradeOfferMoneyAsync(
+        long amount, bool setTotal = false, CancellationToken cancellationToken = default)
+    {
+        const byte moneyCategory = 0;
+        const byte setMoneyCategory = 255;
+        var lo = unchecked((int)(amount & 0xFFFFFFFFL));
+        var hi = unchecked((int)((amount >> 32) & 0xFFFFFFFFL));
+
+        return TradeSlotUpdateAsync(
+            setTotal ? setMoneyCategory : moneyCategory, 0, lo, hi, 0, 0, 0, 0, cancellationToken);
+    }
+
+    public ValueTask TradeConfirmAsync(
+        byte mode,
+        byte flag,
+        ReadOnlyMemory<TradeConfirmSlot> ownSideSlots,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var slots = ownSideSlots.Span;
+        var count = slots.Length > TradeConfirmMaxSlots ? TradeConfirmMaxSlots : slots.Length;
+
+        var payload = new byte[2 + 4 * count];
+        Span<byte> p = payload;
+        p.Clear();
+        p[0x00] = mode;
+        p[0x01] = flag;
+        for (var i = 0; i < count; i++)
+        {
+            var rec = p.Slice(2 + i * 4, 4);
+            rec[0] = slots[i].SlotIndex;
+            rec[1] = slots[i].B0;
+            rec[2] = slots[i].B1;
+            rec[3] = slots[i].B2;
+        }
+
+        return SendAsync(2, 25, new ReadOnlyMemory<byte>(payload), cancellationToken);
+    }
+
+    public ValueTask SellItemAsync(
+        uint npcId,
+        byte sellFlag,
+        byte inventorySlot,
+        int quantity,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[SellItemWireSize];
+        payload.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(payload[..4], npcId);
+        payload[0x04] = sellFlag;
+        payload[0x05] = inventorySlot;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x08, 4), quantity);
+
+        return SendAsync(2, 20, payload, cancellationToken);
+    }
+
+    public ValueTask DropItemAsync(
+        byte mode, byte slot, int count, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[DropItemWireSize];
+        payload.Clear();
+        payload[0x00] = mode;
+        payload[0x01] = slot;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x04, 4), count);
+
+        return SendAsync(2, 14, payload, cancellationToken);
+    }
+
+    public ValueTask PickupItemAsync(
+        uint groundItemKey,
+        byte share0,
+        byte share1,
+        byte share2,
+        int amount,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[PickupItemWireSize];
+        payload.Clear();
+        BinaryPrimitives.WriteUInt32LittleEndian(payload[..4], groundItemKey);
+        payload[0x04] = share0;
+        payload[0x05] = share1;
+        payload[0x06] = share2;
+        BinaryPrimitives.WriteInt32LittleEndian(payload.Slice(0x08, 4), amount);
+
+        return SendAsync(2, 15, payload, cancellationToken);
+    }
+
+    public ValueTask QuestActionAsync(
+        byte subAction, byte npcKind, uint questId, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        Span<byte> payload = stackalloc byte[QuestActionWireSize];
+        payload.Clear();
+        payload[0x00] = subAction;
+        payload[0x01] = npcKind;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.Slice(0x02, 4), questId);
+
+        return SendAsync(2, 28, payload, cancellationToken);
     }
 
     public ValueTask<bool> PartyInviteAsync(
@@ -722,3 +863,5 @@ public sealed class ApplicationUseCases : IApplicationUseCases
         return result;
     }
 }
+
+public readonly record struct TradeConfirmSlot(byte SlotIndex, byte B0, byte B1, byte B2);

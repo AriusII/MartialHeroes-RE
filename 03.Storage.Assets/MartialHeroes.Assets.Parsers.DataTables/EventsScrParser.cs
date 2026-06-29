@@ -74,7 +74,7 @@ public static class EventsScrParser
             {
                 var v = BinaryPrimitives.ReadUInt32LittleEndian(
                     rec[(OffActorArray + k * 4)..]);
-                if (v == 0) break;
+                if ((int)v <= 0) break;
                 actorBuf[actorCount++] = v;
             }
 

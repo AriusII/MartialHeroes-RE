@@ -200,8 +200,7 @@ public static class SlotAppearanceResolver
 
         try
         {
-            var entry = registry.GetByMotionKey(modelClassId)
-                        ?? registry.ActorMotion.GetBySkinClass(skinClassId);
+            var entry = registry.ActorMotion.GetBySkinClass(skinClassId);
             if (entry is null)
             {
                 GD.Print(

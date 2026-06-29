@@ -16,9 +16,8 @@ public static class RegionGridParser
 
         if (span.Length < MinFileSize)
             throw new InvalidDataException(
-                $"region*.bin parse error: buffer length {span.Length} is too short " +
-                $"(minimum {MinFileSize} bytes — 2 dimension fields + 2 origin fields). " +
-                "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1.");
+                $"region.bin parse error: buffer length {span.Length} is too short " +
+                $"(minimum {MinFileSize} bytes for width, height and the two trailing origins).");
 
         var width = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
 
@@ -28,10 +27,9 @@ public static class RegionGridParser
         var expectedTotal = CellsOffset + cellCount + OriginSize + OriginSize;
         if (span.Length < expectedTotal)
             throw new InvalidDataException(
-                $"region*.bin parse error: buffer length {span.Length} is too short for a " +
-                $"{width}×{height} grid ({cellCount} cells) + origin fields " +
-                $"(expected {expectedTotal} bytes). " +
-                "spec: Docs/RE/specs/world_systems.md Ch. 16 §16.1.");
+                $"region.bin parse error: buffer length {span.Length} is too short for a " +
+                $"{width}x{height} grid ({cellCount} cells) plus the two trailing origins " +
+                $"(expected {expectedTotal} bytes).");
 
         var cells = data.Slice(CellsOffset, (int)cellCount);
 

@@ -89,18 +89,18 @@ public static class TerrainLayerParsers
                 ".sod.pre parse error: buffer too short for 8-byte header. " +
                 "spec: Docs/RE/formats/terrain_layers.md §4.1.");
 
-        var solidCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
-        var quadCount = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
+        var version = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
 
-        var expectedSize = 8 + (long)quadCount * 8;
+        var expectedSize = 8 + (long)vertexCount * 8;
         if (span.Length < expectedSize)
             throw new InvalidDataException(
-                $".sod.pre parse error: expected {expectedSize} bytes for {quadCount} vertices, " +
+                $".sod.pre parse error: expected {expectedSize} bytes for {vertexCount} vertices, " +
                 $"got {span.Length}. spec: Docs/RE/formats/terrain_layers.md §4.1.");
 
-        var vertices = new (float WorldX, float WorldZ)[(int)quadCount];
+        var vertices = new (float WorldX, float WorldZ)[(int)vertexCount];
         var offset = 8;
-        for (var i = 0; i < (int)quadCount; i++)
+        for (var i = 0; i < (int)vertexCount; i++)
         {
             var wx = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
             var wz = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
@@ -108,7 +108,7 @@ public static class TerrainLayerParsers
             offset += 8;
         }
 
-        return new SodPreCache { SolidCount = solidCount, QuadCount = quadCount, Vertices = vertices };
+        return new SodPreCache { Version = version, VertexCount = vertexCount, Vertices = vertices };
     }
 
 
@@ -581,89 +581,49 @@ public static class TerrainLayerParsers
 
     public static PointLightBinData ParsePointLightBin(ReadOnlyMemory<byte> data)
     {
-        return ParsePointLightBin(data.Span, data);
+        return ParsePointLightBin(data.Span);
     }
 
-    private static PointLightBinData ParsePointLightBin(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
+    private static PointLightBinData ParsePointLightBin(ReadOnlySpan<byte> span)
     {
         if (span.Length < 8)
             throw new InvalidDataException(
                 $"point_light*.bin parse error: buffer too short for 8-byte header (got {span.Length}). " +
-                "spec: Docs/RE/formats/terrain_layers.md §7.1.");
+                "spec: Docs/RE/formats/environment_bins.md §13.1.");
 
-        var intensityScale = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var proximityRadius = BinaryPrimitives.ReadSingleLittleEndian(span[..]);
         var count = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
         var expectedSize = 8 + (long)count * PointLightRecordStride;
         if (span.Length < expectedSize)
             throw new InvalidDataException(
                 $"point_light*.bin parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §7.1.");
+                "spec: Docs/RE/formats/environment_bins.md §13.2.");
 
         var records = new PointLightRecord[(int)count];
         for (var i = 0; i < (int)count; i++)
         {
             var recOffset = 8 + i * PointLightRecordStride;
             var rec = span.Slice(recOffset, PointLightRecordStride);
-            var cg1 = new float[3];
-            var cg2 = new float[3];
-            var cg3 = new float[3];
-            for (var c = 0; c < 3; c++)
-            {
-                cg1[c] = BinaryPrimitives.ReadSingleLittleEndian(rec[(c * 4)..]);
-                cg2[c] = BinaryPrimitives.ReadSingleLittleEndian(rec[(12 + c * 4)..]);
-                cg3[c] = BinaryPrimitives.ReadSingleLittleEndian(rec[(24 + c * 4)..]);
-            }
 
-            var rawRest = backing.IsEmpty
-                ? rec.Slice(36, 16).ToArray()
-                : backing.Slice(recOffset + 36, 16);
-            var enabledFlag = BinaryPrimitives.ReadUInt32LittleEndian(rec[52..]);
-            var unknown4 = BinaryPrimitives.ReadUInt32LittleEndian(rec[56..]);
-
-            records[i] = new PointLightRecord
-            {
-                ColourGroup1 = cg1,
-                ColourGroup2 = cg2,
-                ColourGroup3 = cg3,
-                RawRest = rawRest,
-                EnabledFlag = enabledFlag,
-                Unknown4 = unknown4
-            };
+            records[i] = new PointLightRecord(
+                BinaryPrimitives.ReadSingleLittleEndian(rec[..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x08..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x0C..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x10..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x14..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x18..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x1C..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x20..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x24..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x28..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x2C..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x30..]),
+                BinaryPrimitives.ReadUInt32LittleEndian(rec[0x34..]),
+                BinaryPrimitives.ReadInt32LittleEndian(rec[0x38..]));
         }
 
-        return new PointLightBinData { ProximityRadius = intensityScale, Records = records };
-    }
-
-    public static WindBinData ParseWindBin(ReadOnlyMemory<byte> data)
-    {
-        return ParseWindBin(data.Span, data);
-    }
-
-    private static WindBinData ParseWindBin(ReadOnlySpan<byte> span, ReadOnlyMemory<byte> backing)
-    {
-        if (span.Length < 8)
-            throw new InvalidDataException(
-                $"wind*.bin parse error: buffer too short for 8-byte header (got {span.Length}). " +
-                "spec: Docs/RE/formats/terrain_layers.md §8.1.");
-
-        var count = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
-        var flag2 = BinaryPrimitives.ReadUInt32LittleEndian(span[4..]);
-        var expectedSize = 8 + (long)count * WindKeyframeStride;
-        if (span.Length < expectedSize)
-            throw new InvalidDataException(
-                $"wind*.bin parse error: expected {expectedSize} bytes, got {span.Length}. " +
-                "spec: Docs/RE/formats/terrain_layers.md §8.1.");
-
-        var keyframes = new ReadOnlyMemory<byte>[(int)count];
-        for (var i = 0; i < (int)count; i++)
-        {
-            var kfOffset = 8 + i * WindKeyframeStride;
-            keyframes[i] = backing.IsEmpty
-                ? span.Slice(kfOffset, WindKeyframeStride).ToArray()
-                : backing.Slice(kfOffset, WindKeyframeStride);
-        }
-
-        return new WindBinData { Count = count, Flag2 = flag2, RawKeyframes = keyframes };
+        return new PointLightBinData { ProximityRadius = proximityRadius, Records = records };
     }
 
 
@@ -694,22 +654,13 @@ public static class TerrainLayerParsers
             var recOffset = 8 + i * WindKeyframeStride;
             var rec = span.Slice(recOffset, WindKeyframeStride);
 
-            var pad0 = BinaryPrimitives.ReadSingleLittleEndian(rec[..]);
-            var speed = BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]);
-            var pad2 = BinaryPrimitives.ReadSingleLittleEndian(rec[0x08..]);
-            var coord = BinaryPrimitives.ReadSingleLittleEndian(rec[0x0C..]);
-            var scale = BinaryPrimitives.ReadSingleLittleEndian(rec[0x10..]);
-            var texId = BinaryPrimitives.ReadUInt32LittleEndian(rec[0x14..]);
-
-            records[i] = new WindSeedRecord
-            {
-                Pad0 = pad0,
-                Speed = speed,
-                Pad2 = pad2,
-                Coord = coord,
-                Scale = scale,
-                TexId = texId
-            };
+            records[i] = new WindSeedRecord(
+                BinaryPrimitives.ReadSingleLittleEndian(rec[..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x04..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x08..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x0C..]),
+                BinaryPrimitives.ReadSingleLittleEndian(rec[0x10..]),
+                BinaryPrimitives.ReadUInt32LittleEndian(rec[0x14..]));
         }
 
         return new WindSeedPool

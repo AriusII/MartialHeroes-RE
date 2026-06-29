@@ -1,6 +1,16 @@
+using System.Runtime.InteropServices;
 using MartialHeroes.Assets.Parsers.Core.Models;
 
 namespace MartialHeroes.Assets.Parsers.Effects.Models;
+
+public enum XeffBlendMode
+{
+    Additive = 0,
+
+    Alpha = 1,
+
+    Opaque = 3
+}
 
 public sealed class XeffSubEffect
 {
@@ -10,7 +20,7 @@ public sealed class XeffSubEffect
 
     public required uint AnimFlag { get; init; }
 
-    public required uint FieldUnknownA { get; init; }
+    public required uint BlendMode { get; init; }
 
     public required uint ElementDword2 { get; init; }
 
@@ -20,7 +30,7 @@ public sealed class XeffSubEffect
     public required string[] TextureNames { get; init; }
 
 
-    public required float[] AlphaKeys { get; init; }
+    public required float[] Opacity { get; init; }
 
     public required float[] DiffuseR { get; init; }
 
@@ -37,35 +47,67 @@ public sealed class XeffSubEffect
 
 
     public required XeffKeyframe[] Keyframes { get; init; }
+
+    public XeffBlendMode BlendModeKind => BlendMode switch
+    {
+        1 => XeffBlendMode.Alpha,
+        3 => XeffBlendMode.Opaque,
+        _ => XeffBlendMode.Additive
+    };
 }
 
-public sealed class XeffKeyframe
+public readonly struct XeffKeyframe
 {
-    public required uint KfIndex { get; init; }
+    public XeffKeyframe(
+        uint kfIndex,
+        float velocityX,
+        float velocityY,
+        float velocityZ,
+        float sizeX,
+        float sizeY,
+        float sizeZ,
+        float rotXDeg,
+        float rotYDeg,
+        float rotZDeg)
+    {
+        KfIndex = kfIndex;
+        VelocityX = velocityX;
+        VelocityY = velocityY;
+        VelocityZ = velocityZ;
+        SizeX = sizeX;
+        SizeY = sizeY;
+        SizeZ = sizeZ;
+        RotXDeg = rotXDeg;
+        RotYDeg = rotYDeg;
+        RotZDeg = rotZDeg;
+        Rotation = ComputeQuat(rotXDeg, rotYDeg, rotZDeg);
+    }
 
-    public required float VelocityX { get; init; }
+    public uint KfIndex { get; }
 
-    public required float VelocityY { get; init; }
+    public float VelocityX { get; }
 
-    public required float VelocityZ { get; init; }
+    public float VelocityY { get; }
 
-    public required float SizeX { get; init; }
+    public float VelocityZ { get; }
 
-    public required float SizeY { get; init; }
+    public float SizeX { get; }
 
-    public required float SizeZ { get; init; }
+    public float SizeY { get; }
 
-    public required float RotXDeg { get; init; }
+    public float SizeZ { get; }
 
-    public required float RotYDeg { get; init; }
+    public float RotXDeg { get; }
 
-    public required float RotZDeg { get; init; }
+    public float RotYDeg { get; }
+
+    public float RotZDeg { get; }
+
+    public Quat Rotation { get; }
 
     public Vec3 Velocity => new(VelocityX, VelocityY, VelocityZ);
 
     public Vec3 Size => new(SizeX, SizeY, SizeZ);
-
-    public Quat Rotation => ComputeQuat(RotXDeg, RotYDeg, RotZDeg);
 
     internal static Quat ComputeQuat(float xDeg, float yDeg, float zDeg)
     {
@@ -111,51 +153,48 @@ public sealed class EffObjectShape
     public required EffVertex[] Vertices { get; init; }
 }
 
-public sealed class ParticleSubRecord
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public readonly struct ParticleSubRecord
 {
-    public required ushort LifeBonus { get; init; }
+    public readonly ushort LifeBonus;
 
-    public required ushort Lifetime { get; init; }
+    public readonly ushort SpawnDelay;
 
-    public required ushort SpawnDelay { get; init; }
+    public readonly ushort Lifetime;
 
-    public required ushort SizeInit { get; init; }
+    public readonly ushort SizeInit;
 
+    public readonly byte ColorR;
 
-    public required byte ColorR { get; init; }
+    public readonly byte ColorG;
 
-    public required byte ColorG { get; init; }
+    public readonly byte ColorB;
 
-    public required byte ColorB { get; init; }
+    public readonly byte ColorA;
 
-    public required byte ColorA { get; init; }
+    public readonly float SpawnPosX;
 
+    public readonly float SpawnPosY;
 
-    public required float SpawnPosX { get; init; }
+    public readonly float SpawnPosZ;
 
-    public required float SpawnPosY { get; init; }
+    public readonly float SizeRate;
 
-    public required float SpawnPosZ { get; init; }
+    public readonly short ColorBRate;
 
-    public required float SizeRate { get; init; }
+    public readonly short ColorGRate;
 
+    public readonly short ColorRRate;
 
-    public required short ColorRRate { get; init; }
+    public readonly short ColorARate;
 
-    public required short ColorGRate { get; init; }
+    public readonly float VelocityX;
 
-    public required short ColorBRate { get; init; }
+    public readonly float VelocityY;
 
-    public required short ColorARate { get; init; }
+    public readonly float VelocityZ;
 
-
-    public required float VelocityX { get; init; }
-
-    public required float VelocityY { get; init; }
-
-    public required float VelocityZ { get; init; }
-
-    public required float VelocityDamp { get; init; }
+    public readonly float VelocityDamp;
 }
 
 public sealed class ParticleEmitterEntry
@@ -168,7 +207,7 @@ public sealed class ParticleEmitterEntry
 
     public required float SpriteSizeY { get; init; }
 
-    public required uint MaxParticles { get; init; }
+    public required uint BlendAdditiveFlag { get; init; }
 
     public required uint RawTexHandleSlot { get; init; }
 

@@ -30,22 +30,6 @@ public sealed partial class CameraController
 
                 break;
 
-            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F1:
-                SetViewMode(ViewMode.Third);
-                GetViewport().SetInputAsHandled();
-                break;
-
-            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F2:
-                SetViewMode(ViewMode.First);
-                GetViewport().SetInputAsHandled();
-                break;
-
-            case InputEventKey { Pressed: true } vm when vm.Keycode is Key.F3:
-                SetViewMode(ViewMode.Static);
-                GetViewport().SetInputAsHandled();
-                break;
-
-
             case InputEventMouseButton mb when mb.ButtonIndex == MouseButton.Right:
                 _rightMouseHeld = mb.Pressed;
                 if (mb.Pressed && _mode == ViewMode.FreeFly)
@@ -104,8 +88,11 @@ public sealed partial class CameraController
 
         if (!_rightMouseHeld) return;
 
-        _yaw += rel.X * FlyMouseSensitivity;
-        ApplyYawClamp();
+        if (_mode != ViewMode.Static)
+        {
+            _yaw += rel.X * FlyMouseSensitivity;
+            ApplyYawClamp();
+        }
 
         var pitchDelta = -rel.Y * MouseDragPitchGain * PitchDragPolarity;
         _elevation = Mathf.Clamp(_elevation + pitchDelta, ElevationMinRad, ElevationMaxRad);

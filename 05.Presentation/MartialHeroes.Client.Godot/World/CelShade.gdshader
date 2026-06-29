@@ -33,12 +33,6 @@ uniform sampler2D albedo_texture : source_color, filter_linear_mipmap;
 uniform vec4 albedo_color : source_color = vec4(0.85, 0.75, 0.65, 1.0);
 uniform bool use_albedo_texture = false;
 
-// Ambient floor — D3DRS_AMBIENT full-white at OPTION_BRIGHT=100.
-// spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT default 100 → device_ambient = (255,255,255).
-// spec: Docs/RE/specs/environment.md §6.2b — ambient_light_energy = OPTION_BRIGHT/100 = 1.0.
-uniform float ambient_floor_energy = 1.0;
-uniform vec4 ambient_floor_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
-
 // Toon ramp LUT — 1-D ramp, sampled at (luminance, 0.5).
 // spec: Docs/RE/formats/shaders.md §C5.3 — toonramp.bmp, stage 1, 1-D N·L cel ramp.
 uniform sampler2D toon_ramp : filter_linear, repeat_disable;
@@ -55,7 +49,10 @@ uniform vec4 light_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
 // Per-state brightness MULTI and ADD (c0 and c1 in dotoonshading.psh).
 // spec: Docs/RE/formats/shaders.md §C5.5 — 9-state DISPLAY_CHAR_BRIGHT_* table from display.lua.
 // state_add.w is used as alpha in the stealth (dotoonshading2.psh) variant.
-uniform vec3 state_multi = vec3(1.3, 1.3, 1.3); // spec: display.lua DISPLAY_CHAR_BRIGHT_MULTI_*_DEFAULT
+// state_multi carries the HALVED c0 (display.lua MULTI × 0.5); the × 2.0 below is the
+// MODULATE2X that restores the spec net (DEFAULT 0.65 × 2 = 1.3). Halving is done in
+// CelShadeMaterialFactory so the shader matches the original dotoonshading.psh exactly.
+uniform vec3 state_multi = vec3(0.65, 0.65, 0.65); // spec: display.lua DISPLAY_CHAR_BRIGHT_MULTI_*_DEFAULT × 0.5
 uniform vec4 state_add   = vec4(0.0, 0.0, 0.0, 1.0); // spec: display.lua DISPLAY_CHAR_BRIGHT_ADD_*_DEFAULT + ALPHA
 
 // Stealth flag: selects dotoonshading2.psh alpha path (out.a = c1.w = state_add.w).
@@ -112,14 +109,14 @@ void fragment() {
     //   out.rgb = (base × toonRamp) × 2 × c0 + c1
     //   dotoonshading.psh:  out.a = lit.a  (base alpha passes through)
     //   dotoonshading2.psh: out.a = c1.w   (state_add.w drives stealth fade)
+    // spec: Docs/RE/formats/shaders.md §C5 — the original PS output is exactly
+    //   out.rgb = (base × toonRamp) × 2 × c0 + c1. There is NO additive ambient term; the
+    //   per-state c0 (state_multi, halved) + c1 (state_add) are the only brightness inputs.
+    //   The trailing clamp is the implicit D3D8 pixel-shader output saturation (not extra math).
     vec3 lit_rgb = (base.rgb * tone) * 2.0 * state_multi + state_add.rgb;
-
-    // ---- Ambient floor (additive, keeps shadowed surfaces from going pure black) ----
-    // spec: Docs/RE/specs/environment.md §6.2a — OPTION_BRIGHT=100 → device_ambient white.
-    vec3 ambient = base.rgb * ambient_floor_color.rgb * ambient_floor_energy;
 
     float lit_alpha = stealth ? state_add.w : base.a;
 
-    ALBEDO = clamp(cel_enabled ? lit_rgb + ambient : base.rgb + ambient, vec3(0.0), vec3(1.0));
+    ALBEDO = clamp(cel_enabled ? lit_rgb : base.rgb, vec3(0.0), vec3(1.0));
     ALPHA  = lit_alpha;
 }

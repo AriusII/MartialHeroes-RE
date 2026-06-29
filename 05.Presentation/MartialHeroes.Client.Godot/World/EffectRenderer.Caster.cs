@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
-using System.Text;
 using Godot;
+using MartialHeroes.Assets.Parsers.DataTables;
 using MartialHeroes.Assets.Parsers.Effects;
 using MartialHeroes.Assets.Parsers.Effects.Models;
 using MartialHeroes.Client.Domain.Actors.Actors;
@@ -10,6 +10,41 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EffectRenderer
 {
+    private const string EffectScaleXdbPath = "data/script/effectscale.xdb";
+
+    private EffectScaleTable? _effectScaleTable;
+
+    private bool _effectScaleAttempted;
+
+    private float ResolveBaseScale(uint effectId)
+    {
+        if (!_effectScaleAttempted)
+        {
+            _effectScaleAttempted = true;
+            if (_assets is not null)
+            {
+                var raw = _assets.GetRaw(EffectScaleXdbPath);
+                if (!raw.IsEmpty)
+                    try
+                    {
+                        _effectScaleTable = EffectScaleParser.Parse(raw);
+                        GD.Print($"[EffectRenderer] effectscale.xdb loaded: {_effectScaleTable.Records.Count} records. " +
+                                 "spec: Docs/RE/formats/effects.md §D (REPLACE descriptor scale_default at parse).");
+                    }
+                    catch (Exception ex)
+                    {
+                        GD.PrintErr($"[EffectRenderer] effectscale.xdb parse failed: {ex.Message}");
+                    }
+                else
+                    GD.Print("[EffectRenderer] effectscale.xdb absent — base scale defaults to 1.0. " +
+                             "spec: Docs/RE/formats/effects.md §D.");
+            }
+        }
+
+        var rec = _effectScaleTable?.TryGetByEffectKey(effectId);
+        return rec?.Scale ?? 1f;
+    }
+
     private Dictionary<uint, string>? BuildEffectRegistry(RealClientAssets assets)
     {
         if (_registryBuildAttempted) return _effectRegistry;
@@ -23,55 +58,30 @@ public sealed partial class EffectRenderer
             return null;
         }
 
-        var span = lstRaw.Span;
-        if (span.Length < 4)
+        EffectNameManifest manifest;
+        try
         {
-            GD.PrintErr($"[EffectRenderer] xeffect.lst too short ({span.Length} bytes) — skipping registry build.");
+            manifest = XeffectLstParser.Parse(lstRaw);
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[EffectRenderer] xeffect.lst parse failed: {ex.Message} — skipping registry build.");
             return null;
         }
 
-        var count = MemoryMarshal.Read<uint>(span[..4]);
-        var expectedLen = 4 + (int)count * XeffLstNameLen;
-        if (span.Length < expectedLen)
-        {
-            GD.PrintErr($"[EffectRenderer] xeffect.lst size mismatch: have {span.Length} bytes, " +
-                        $"need {expectedLen} for {count} records — truncated manifest.");
-            count = (uint)((span.Length - 4) / XeffLstNameLen);
-        }
-
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var cp949 = Encoding.GetEncoding(949);
-
-        var registry = new Dictionary<uint, string>((int)count);
+        var registry = new Dictionary<uint, string>(manifest.Count);
         var mapped = 0;
         var skipped = 0;
 
-        for (uint i = 0; i < count; i++)
+        foreach (var nameEntry in manifest.Entries)
         {
-            var offset = 4 + (int)i * XeffLstNameLen;
-            var nameBytes = span.Slice(offset, XeffLstNameLen);
-
-            var nullPos = nameBytes.IndexOf((byte)0);
-            if (nullPos == 0)
+            if (string.IsNullOrEmpty(nameEntry.Name))
             {
                 skipped++;
                 continue;
             }
 
-            var trimmed = nullPos > 0 ? nameBytes[..nullPos] : nameBytes;
-
-            string name;
-            try
-            {
-                name = cp949.GetString(trimmed);
-            }
-            catch
-            {
-                skipped++;
-                continue;
-            }
-
-            var vfsPath = $"data/effect/xeff/{name}";
+            var vfsPath = $"data/effect/xeff/{nameEntry.Name}";
 
             var xeffRaw = assets.GetRaw(vfsPath);
             if (xeffRaw.IsEmpty)
@@ -95,11 +105,8 @@ public sealed partial class EffectRenderer
                 continue;
             }
 
-            if (!registry.ContainsKey(effectId))
-            {
-                registry[effectId] = vfsPath;
+            if (registry.TryAdd(effectId, vfsPath))
                 mapped++;
-            }
         }
 
         _effectRegistry = registry;
@@ -111,14 +118,30 @@ public sealed partial class EffectRenderer
 
     public void PlayCast(Node3D actor, uint effectId)
     {
+        SpawnAnchoredEffect(actor, effectId, false);
+    }
+
+    public void PlayCastAura(Node3D actor, uint effectId)
+    {
+        SpawnAnchoredEffect(actor, effectId, true);
+    }
+
+    private void SpawnAnchoredEffect(Node3D actor, uint effectId, bool forceLoop)
+    {
         ArgumentNullException.ThrowIfNull(actor);
 
         var key = ResolveActorKey(actor);
         StopCast(actor);
 
-        var origin = actor.GlobalPosition + new Vector3(0f, EmitterHeightOffset, 0f);
+        var yOffset = 0f;
+        var effScale = ResolveBaseScale(effectId);
+        var origin = actor.GlobalPosition + new Vector3(0f, yOffset, 0f);
 
         var subEffects = TryLoadXeff(effectId);
+
+        if (forceLoop && subEffects is { Length: > 0 })
+            for (var i = 0; i < subEffects.Length; i++)
+                subEffects[i].AnimLoop = 1;
 
         LiveEffect live;
         if (subEffects is { Length: > 0 })
@@ -143,7 +166,7 @@ public sealed partial class EffectRenderer
                 }
                 else
                 {
-                    meshInstances[i] = BuildSubEffectMesh(se, origin, textures[i], 0);
+                    meshInstances[i] = BuildSubEffectMesh(se, origin, textures[i], 0, effScale);
                     if (meshInstances[i] is not null)
                         AddChild(meshInstances[i]!);
                 }
@@ -158,13 +181,19 @@ public sealed partial class EffectRenderer
                 MeshInstances = meshInstances,
                 SimNodes = simNodes,
                 Textures = textures,
+                EffectiveScale = effScale,
+                YOffset = yOffset,
                 ElapsedMs = 0
             };
 
-            var gpuCount = simNodes.Count(s => s is not null);
-            GD.Print($"[EffectRenderer] PlayCast: effectId={effectId} actor={key.RawId} " +
-                     $"— loaded real .xeff ({subEffects.Length} sub-effects, {gpuCount} GPU-particle sims) origin={origin}. " +
-                     "spec: Docs/RE/specs/effects.md §15.4 looping UserXEffect; CODE-CONFIRMED.");
+            var gpuCount = 0;
+            for (var s = 0; s < simNodes.Length; s++)
+                if (simNodes[s] is not null)
+                    gpuCount++;
+            GD.Print($"[EffectRenderer] SpawnAnchoredEffect: effectId={effectId} actor={key.RawId} " +
+                     $"loopForced={forceLoop} — loaded real .xeff ({subEffects.Length} sub-effects, " +
+                     $"{gpuCount} GPU-particle sims) origin={origin}. " +
+                     "spec: Docs/RE/specs/effects.md §15.4 looping actor-anchored UserXEffect (0xC8); CODE-CONFIRMED.");
         }
         else
         {
@@ -176,8 +205,9 @@ public sealed partial class EffectRenderer
                 ElapsedMs = 0
             };
 
-            GD.Print($"[EffectRenderer] PlayCast: effectId={effectId} actor={key.RawId} " +
-                     $"— .xeff unavailable or parse failed; rendering nothing (no-placeholder doctrine). origin={origin}.");
+            GD.Print($"[EffectRenderer] SpawnAnchoredEffect: effectId={effectId} actor={key.RawId} " +
+                     $"loopForced={forceLoop} — .xeff unavailable or parse failed; rendering nothing " +
+                     $"(no-placeholder doctrine). origin={origin}.");
         }
 
         _live[key] = live;
@@ -198,19 +228,46 @@ public sealed partial class EffectRenderer
                  "spec: Docs/RE/specs/effects.md §15.5 soft-stop; CODE-CONFIRMED.");
     }
 
+    public void StopCastAura(Node3D actor, uint effectId)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+
+        var key = ResolveActorKey(actor);
+        if (!_live.TryGetValue(key, out var live))
+            return;
+
+        if (live.EffectId != effectId || !ReferenceEquals(live.Anchor, actor))
+        {
+            GD.Print($"[EffectRenderer] StopCastAura: actor={key.RawId} effectId={effectId} " +
+                     $"no matching active cast aura (active effectId={live.EffectId}) — left alone. " +
+                     "spec: Docs/RE/specs/effects.md §15.5 matched soft-stop (0xC9/0xCB).");
+            return;
+        }
+
+        _live.Remove(key);
+        live.Active = false;
+        TeardownLiveEffect(live);
+
+        GD.Print($"[EffectRenderer] StopCastAura: actor={key.RawId} effectId={effectId} " +
+                 "matched looping cast aura soft-stopped (no fade). " +
+                 "spec: Docs/RE/specs/effects.md §15.5 matched soft-stop (0xC9/0xCB).");
+    }
+
 
     private static ActorKey AmbientKey(int descriptorIndex)
     {
         return new ActorKey((uint)descriptorIndex, EntitySort.None);
     }
 
-    public void PlayAmbient(int descriptorIndex, Vector3 godotPos, uint effectId)
+    public void PlayAmbient(int descriptorIndex, Vector3 godotPos, uint effectId, float ambientScale)
     {
         var key = AmbientKey(descriptorIndex);
         StopAmbient(descriptorIndex);
 
         var anchor = new Node3D { Name = $"MapAmbientAnchor{descriptorIndex}", GlobalPosition = godotPos };
         AddChild(anchor);
+
+        var effScale = ResolveBaseScale(effectId) * ambientScale;
 
         var subEffects = TryLoadXeff(effectId);
 
@@ -237,7 +294,7 @@ public sealed partial class EffectRenderer
                 }
                 else
                 {
-                    meshInstances[i] = BuildSubEffectMesh(se, godotPos, textures[i], 0);
+                    meshInstances[i] = BuildSubEffectMesh(se, godotPos, textures[i], 0, effScale);
                     if (meshInstances[i] is not null)
                         AddChild(meshInstances[i]!);
                 }
@@ -253,13 +310,17 @@ public sealed partial class EffectRenderer
                 MeshInstances = meshInstances,
                 SimNodes = simNodes,
                 Textures = textures,
+                EffectiveScale = effScale,
                 ElapsedMs = 0
             };
 
-            var gpuCount = simNodes.Count(s => s is not null);
-            GD.Print($"[EffectRenderer] PlayAmbient: idx={descriptorIndex} effectId={effectId} " +
+            var gpuCount = 0;
+            for (var s = 0; s < simNodes.Length; s++)
+                if (simNodes[s] is not null)
+                    gpuCount++;
+            GD.Print($"[EffectRenderer] PlayAmbient: idx={descriptorIndex} effectId={effectId} scale={effScale} " +
                      $"— loaded real .xeff ({subEffects.Length} sub-effects, {gpuCount} GPU-particle sims) pos={godotPos}. " +
-                     "spec: Docs/RE/specs/effect-scheduling.md (ambient spawn).");
+                     "spec: Docs/RE/specs/effect-scheduling.md (ambient spawn) + formats/text_tables.md §6 col5 scale.");
         }
         else
         {
@@ -393,10 +454,6 @@ public sealed partial class EffectRenderer
 
     private static SubEffectDesc MapSubEffect(XeffSubEffect se)
     {
-        var alphaKeys = new float[se.AlphaKeys.Length];
-        for (var i = 0; i < se.AlphaKeys.Length; i++)
-            alphaKeys[i] = 1f - se.AlphaKeys[i];
-
         var texCount = se.EntryCount;
 
         var totalTime = texCount * se.AnimStride + se.AnimBaseTime;
@@ -409,9 +466,11 @@ public sealed partial class EffectRenderer
             EmitterType = se.EmitterType,
             ResourceId = se.ResourceId,
             AnimFlag = se.AnimFlag,
+            BlendMode = se.BlendMode,
+            BlendModeKind = se.BlendModeKind,
             TexCount = texCount,
             TextureNames = se.TextureNames,
-            AlphaKeys = alphaKeys,
+            Opacity = se.Opacity,
             DiffuseR = se.DiffuseR,
             DiffuseG = se.DiffuseG,
             DiffuseB = se.DiffuseB,

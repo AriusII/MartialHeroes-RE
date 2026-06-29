@@ -17,15 +17,22 @@ public sealed partial class EffectRenderer : Node3D
 
     private const float UvScrollPeriodMs = 5000f;
 
-    private const float EmitterHeightOffset = 0.9f;
-
     private const string XeffectLstPath = "data/effect/xeffect.lst";
-
-    private const int XeffLstNameLen = 30;
 
     private const string ParticleEmitterEffPath = "data/effect/particle/particleemitter.eff";
 
     private readonly Dictionary<ActorKey, LiveEffect> _live = new();
+
+
+    public Vector3 LocalPlayerGodotPos { get; set; }
+
+    public bool HasLocalPlayer { get; set; }
+
+    public float CullRadius { get; set; } = TerrainRadiusCap * ProximityRadiusScale;
+
+    private const float TerrainRadiusCap = 1000f;
+
+    private const float ProximityRadiusScale = 0.8f;
 
 
     private RealClientAssets? _assets;
@@ -133,12 +140,14 @@ public sealed partial class EffectRenderer : Node3D
 
     internal sealed class SubEffectDesc
     {
-        public float[] AlphaKeys = [];
         public uint AnimBaseTime;
         public uint AnimFlag;
 
         public byte AnimLoop;
         public uint AnimStride;
+
+        public uint BlendMode;
+        public XeffBlendMode BlendModeKind;
         public float[] DiffuseB = [];
         public float[] DiffuseG = [];
 
@@ -147,6 +156,7 @@ public sealed partial class EffectRenderer : Node3D
         public uint EmitterType;
 
         public XeffKeyframe[] Keyframes = [];
+        public float[] Opacity = [];
         public uint ResourceId;
 
         public bool ScrollU;
@@ -170,9 +180,9 @@ public sealed partial class EffectRenderer : Node3D
         public uint EffectId;
         public double ElapsedMs;
 
-#pragma warning disable CS0649
-        public GpuParticles3D?[]? GpuParticles;
-#pragma warning restore CS0649
+        public float EffectiveScale = 1f;
+
+        public float YOffset;
 
         public MeshInstance3D?[]? MeshInstances;
 
@@ -189,6 +199,8 @@ public sealed partial class EffectRenderer : Node3D
         private const double SimStepSec = 0.067;
 
         private const float BrightnessAlphaFloor = 0.05f;
+
+        private const float BrightnessOptionDefault = 100f;
         private readonly float[] _colA;
         private readonly float[] _colB;
         private readonly float[] _colG;
@@ -263,10 +275,10 @@ public sealed partial class EffectRenderer : Node3D
             var sr = _entry.SubRecords[i];
             _posX[i] = sr.SpawnPosX;
             _posY[i] = sr.SpawnPosY;
-            _posZ[i] = sr.SpawnPosZ;
+            _posZ[i] = -sr.SpawnPosZ;
             _velX[i] = sr.VelocityX;
             _velY[i] = sr.VelocityY;
-            _velZ[i] = sr.VelocityZ;
+            _velZ[i] = -sr.VelocityZ;
             _size[i] = sr.SizeInit;
             _colR[i] = sr.ColorR;
             _colG[i] = sr.ColorG;
@@ -315,17 +327,22 @@ public sealed partial class EffectRenderer : Node3D
                 _colG[i] = Math.Clamp(_colG[i] + sr.ColorGRate * dt, 0f, 255f);
                 _colB[i] = Math.Clamp(_colB[i] + sr.ColorBRate * dt, 0f, 255f);
 
-                var alpha = _colA[i] + sr.ColorARate * dt;
-                var brightnessFactor =
-                    BrightnessAlphaFloor + (1f - BrightnessAlphaFloor) * 1.0f;
-                alpha *= brightnessFactor;
-                _colA[i] = Math.Clamp(alpha, 0f, 255f);
+                _colA[i] = Math.Clamp(_colA[i] + sr.ColorARate * dt, 0f, 255f);
             }
+        }
+
+        private static float BrightnessFactor()
+        {
+            var opt = BrightnessOptionDefault;
+            if (opt == 1f) return 0f;
+            return BrightnessAlphaFloor + (1f - BrightnessAlphaFloor) * (opt / 100f);
         }
 
 
         private void UpdateMeshes()
         {
+            var brightness = BrightnessFactor();
+
             for (var i = 0; i < _meshes.Length; i++)
             {
                 var mi = _meshes[i];
@@ -346,7 +363,7 @@ public sealed partial class EffectRenderer : Node3D
                         _colR[i] / 255f,
                         _colG[i] / 255f,
                         _colB[i] / 255f,
-                        _colA[i] / 255f);
+                        _colA[i] * brightness / 255f);
             }
         }
 
@@ -382,13 +399,17 @@ public sealed partial class EffectRenderer : Node3D
                 sr.ColorB / 255f,
                 sr.ColorA / 255f);
 
+            var blendMode = _entry.BlendAdditiveFlag != 0
+                ? BaseMaterial3D.BlendModeEnum.Add
+                : BaseMaterial3D.BlendModeEnum.Mix;
+
             var mat = new StandardMaterial3D
             {
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 AlbedoColor = initColor,
                 AlbedoTexture = _texture,
                 Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BlendMode = BaseMaterial3D.BlendModeEnum.Mix,
+                BlendMode = blendMode,
                 BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
@@ -396,7 +417,7 @@ public sealed partial class EffectRenderer : Node3D
             var mi = new MeshInstance3D();
             mi.Mesh = mesh;
             mi.SetSurfaceOverrideMaterial(0, mat);
-            mi.Position = new Vector3(sr.SpawnPosX, sr.SpawnPosY, sr.SpawnPosZ);
+            mi.Position = new Vector3(sr.SpawnPosX, sr.SpawnPosY, -sr.SpawnPosZ);
             mi.Visible = sr.SpawnDelay == 0;
             return mi;
         }

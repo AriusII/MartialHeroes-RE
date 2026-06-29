@@ -24,9 +24,15 @@ public readonly record struct CasterState
 
     public bool SelfCastEligible { get; init; }
 
-    public int AvailableMp { get; init; }
-
     public bool CastWindowOpen { get; init; }
 
     public bool HasTargets { get; init; }
+
+    public bool HasResourceState { get; init; }
+
+    public long CurrentHp { get; init; }
+
+    public int CurrentStamina { get; init; }
+
+    public long LastActionMs { get; init; }
 }

@@ -37,17 +37,34 @@ public static class SkillCastValidator
 
         if (!caster.SelfCastEligible) return SkillCastResult.SelfCastIneligible;
 
-        if (!skill.IsCastGateCooldownExempt && !cooldowns.CheckReady(skill.Id, now)) return SkillCastResult.OnCooldown;
+        if (!skill.IsCastGateCooldownExempt)
+        {
+            if (now - caster.LastActionMs < skill.CadenceWindowMs) return SkillCastResult.OnCooldown;
 
-        var mpRequired = (long)SkillDefinition.MpGateMultiplier * skill.MpCostFactor;
-        if (caster.AvailableMp < mpRequired) return SkillCastResult.NotEnoughMp;
+            if (!cooldowns.CheckReady(skill.Id, now)) return SkillCastResult.OnCooldown;
+        }
 
         var rangeResult = CheckRangeAndLineOfSight(in skill, targeting, in aimPoint);
         if (rangeResult != SkillCastResult.Ok) return rangeResult;
 
+        var affordability = CheckCastCostAffordability(in skill, in caster);
+        if (affordability != SkillCastResult.Ok) return affordability;
+
         if (!caster.CastWindowOpen) return SkillCastResult.CastWindowTiming;
 
         if (!caster.HasTargets && !IsImplicitlyTargeted(skill.TargetMode)) return SkillCastResult.NoTargets;
+
+        return SkillCastResult.Ok;
+    }
+
+    public static SkillCastResult CheckCastCostAffordability(in SkillDefinition skill, in CasterState caster)
+    {
+        if (!caster.HasResourceState) return SkillCastResult.Ok;
+
+        if (skill.HpCost < SkillDefinition.HpCostClientGuard && caster.CurrentHp < skill.HpCost)
+            return SkillCastResult.NotEnoughHp;
+
+        if (caster.CurrentStamina < skill.StaminaCost) return SkillCastResult.NotEnoughStamina;
 
         return SkillCastResult.Ok;
     }

@@ -30,6 +30,8 @@ public sealed class BgtextureLstRecord
 
     public required byte KindRaw { get; init; }
 
+    public bool IsSkipped => KindRaw == 0x00;
+
     public BgTextureRenderBucket RenderBucket =>
         KindRaw == 0x01
             ? BgTextureRenderBucket.Static

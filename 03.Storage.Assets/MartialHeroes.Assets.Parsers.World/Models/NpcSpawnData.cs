@@ -1,6 +1,6 @@
 namespace MartialHeroes.Assets.Parsers.World.Models;
 
-public sealed class NpcSpawnRecord
+public readonly record struct NpcSpawnRecord
 {
     public required ushort MobId { get; init; }
 
@@ -12,16 +12,16 @@ public sealed class NpcSpawnRecord
 
     public required float Facing { get; init; }
 
-    public float AppliedFacing => MathF.PI / 2f - Facing;
-
     public required uint SpawnType { get; init; }
 
     public required uint Field20Inert { get; init; }
 
     public required uint Field24Inert { get; init; }
+
+    public float AppliedFacing => MathF.PI / 2f - Facing;
 }
 
-public sealed class NpcSpawnArray
+public readonly record struct NpcSpawnArray
 {
     public required NpcSpawnRecord[] Records { get; init; }
 }

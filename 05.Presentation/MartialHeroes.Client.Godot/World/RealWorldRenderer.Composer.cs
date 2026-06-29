@@ -8,6 +8,31 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
+    private BudSwayClock? _bldSwayClock;
+
+    private byte ResolveBudKind(uint texId)
+    {
+        if (_bgTextures is null || _cellMap is null) return 1;
+
+        var list = GetSectionTextures("BUILDING");
+        if (list is null || list.Length == 0) return 1;
+
+        var b = texId < 1 || texId > (uint)list.Length ? 1 : (int)texId;
+        var intTexId = list[b - 1].TexId;
+        return _bgTextures.ResolveKind(intTexId);
+    }
+
+    private void EnsureBudSwayClock()
+    {
+        if (_bldSwayClock is not null && IsInstanceValid(_bldSwayClock)) return;
+
+        BudSwayClock.EnsureGlobalParam();
+        _bldSwayClock = new BudSwayClock();
+        AddChild(_bldSwayClock);
+        GD.Print("[RealWorldRenderer][ComposeRender] BudSwayClock attached — feeds the shared global sway phase " +
+                 "each frame. spec: terrain_scene.md §5 / Addendum A1.4 (global ping-pong wind clock).");
+    }
+
     public void OnCellAssembled(IAssembledCellView cellView)
     {
         var cellForCollision = (cellView as AssembledCellViewAdapter)?.ConcreteCell;
@@ -70,6 +95,8 @@ public sealed partial class RealWorldRenderer
                 {
                     _composedBuildingsSpawned.Add(cellKey);
 
+                    EnsureBudSwayClock();
+
                     var budTexCache = new Dictionary<uint, ImageTexture?>();
                     Func<uint, ImageTexture?> budTexResolver = texId =>
                     {
@@ -79,10 +106,20 @@ public sealed partial class RealWorldRenderer
                         return tex;
                     };
 
+                    var budKindCache = new Dictionary<uint, byte>();
+                    Func<uint, byte> budKindResolver = texId =>
+                    {
+                        if (budKindCache.TryGetValue(texId, out var cachedKind)) return cachedKind;
+                        var kind = ResolveBudKind(texId);
+                        budKindCache[texId] = kind;
+                        return kind;
+                    };
+
                     SlotRenderer.RenderSlot1Buildings(
                         this,
                         cell,
                         budTexResolver,
+                        budKindResolver,
                         (cellView.MapX, cellView.MapZ));
                 }
                 else
@@ -155,9 +192,28 @@ public sealed partial class RealWorldRenderer
     {
         if (!_composeRender) return;
 
+        var spawns = areaView.Spawns;
+        var npcCount = 0;
+        for (var i = 0; i < spawns.Count; i++)
+            if (spawns[i].IsNpc)
+                npcCount++;
+
         GD.Print($"[RealWorldRenderer][ComposeRender] AreaAssembled: area={areaView.AreaId} " +
-                 $"cellCount={areaView.CellKeyCount}. " +
+                 $"cellCount={areaView.CellKeyCount} spawns={spawns.Count} (npc={npcCount}). " +
                  "spec: assembly_graph.md §1.");
+
+        if (Assets is null) return;
+
+        if (_npcSpawner is null || !IsInstanceValid(_npcSpawner))
+        {
+            _npcSpawner = new WorldNpcSpawner { Name = "WorldNpcSpawner" };
+            AddChild(_npcSpawner);
+            _npcSpawner.Initialise(Assets, _terrainNode);
+            GD.Print("[RealWorldRenderer][ComposeRender] WorldNpcSpawner created and wired to TerrainNode " +
+                     "(deferred ground-snap via SectorBecameResident). spec: entity_placement.md §1/§8.");
+        }
+
+        _npcSpawner.SpawnArea(spawns);
     }
 
     private static bool ReadComposeRenderFlag()
@@ -165,28 +221,29 @@ public sealed partial class RealWorldRenderer
         var envVal = Environment.GetEnvironmentVariable("MH_COMPOSE_RENDER");
         if (envVal is "1" or "true" or "yes")
             return true;
+        if (envVal is "0" or "false" or "no")
+            return false;
 
         try
         {
             var absPath = ProjectSettings.GlobalizePath("res://client_dir.cfg");
-            if (!File.Exists(absPath)) return false;
-
-            foreach (var rawLine in File.ReadLines(absPath))
-            {
-                var line = rawLine.Trim();
-                if (line.Length == 0 || line.StartsWith('#')) continue;
-                var eq = line.IndexOf('=');
-                if (eq < 0) continue;
-                var k = line[..eq].Trim();
-                var v = line[(eq + 1)..].Trim();
-                if (k.Equals("compose_render", StringComparison.OrdinalIgnoreCase))
-                    return v is "1" or "true" or "yes";
-            }
+            if (File.Exists(absPath))
+                foreach (var rawLine in File.ReadLines(absPath))
+                {
+                    var line = rawLine.Trim();
+                    if (line.Length == 0 || line.StartsWith('#')) continue;
+                    var eq = line.IndexOf('=');
+                    if (eq < 0) continue;
+                    var k = line[..eq].Trim();
+                    var v = line[(eq + 1)..].Trim();
+                    if (k.Equals("compose_render", StringComparison.OrdinalIgnoreCase))
+                        return v is not ("0" or "false" or "no");
+                }
         }
         catch
         {
         }
 
-        return false;
+        return true;
     }
 }

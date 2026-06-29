@@ -204,7 +204,7 @@ public sealed partial class TerrainNode : Node3D
                         }
 
                         var d = cell.DiffuseColours[vi];
-                        colours[vBase + lr * vertsPerPatch + lc] = new Color(d.R, d.G, d.B, d.A);
+                        colours[vBase + lr * vertsPerPatch + lc] = new Color(d.B / 255f, d.G / 255f, d.R / 255f, 1f);
                     }
                 }
 
@@ -217,12 +217,12 @@ public sealed partial class TerrainNode : Node3D
                     var vi3 = vBase + (lr + 1) * vertsPerPatch + lc + 1;
 
                     indices[iBase++] = vi0;
-                    indices[iBase++] = vi1;
-                    indices[iBase++] = vi3;
-
-                    indices[iBase++] = vi0;
-                    indices[iBase++] = vi3;
                     indices[iBase++] = vi2;
+                    indices[iBase++] = vi1;
+
+                    indices[iBase++] = vi2;
+                    indices[iBase++] = vi3;
+                    indices[iBase++] = vi1;
                 }
 
                 vBase += patchVertCount;
@@ -245,15 +245,22 @@ public sealed partial class TerrainNode : Node3D
         return mesh;
     }
 
-    private static StandardMaterial3D BuildSurfaceMaterial(
+    private const string TerrainShaderPath = "res://World/Terrain.gdshader";
+
+    private static Shader? _terrainShader;
+
+    private static Shader GetTerrainShader()
+    {
+        return _terrainShader ??= GD.Load<Shader>(TerrainShaderPath);
+    }
+
+    private static ShaderMaterial BuildSurfaceMaterial(
         byte texByte,
         Func<int, ImageTexture?>? textureResolver)
     {
-        var mat = new StandardMaterial3D();
-        mat.VertexColorUseAsAlbedo = true;
-        mat.ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded;
-        mat.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
-        mat.TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps;
+        var mat = new ShaderMaterial();
+        mat.Shader = GetTerrainShader();
+        mat.SetShaderParameter("use_texture", false);
 
         if (textureResolver is not null)
         {
@@ -263,9 +270,8 @@ public sealed partial class TerrainNode : Node3D
                 var tex = textureResolver(clampedByte);
                 if (tex is not null)
                 {
-                    mat.AlbedoTexture = tex;
-                    mat.TextureRepeat = true;
-                    return mat;
+                    mat.SetShaderParameter("albedo_tex", tex);
+                    mat.SetShaderParameter("use_texture", true);
                 }
             }
             catch (Exception ex)
@@ -305,26 +311,10 @@ public sealed partial class TerrainNode : Node3D
             return false;
         }
 
-        const float spacing = 16.0f;
-        var lx = (worldX - (cellMapX - 10000) * 1024.0f) / spacing;
-        var lz = (worldZ - (cellMapZ - 10000) * 1024.0f) / spacing;
+        var localX = worldX - (cellMapX - 10000) * 1024.0f;
+        var localZ = worldZ - (cellMapZ - 10000) * 1024.0f;
 
-        var c0 = Math.Clamp((int)Math.Floor(lx), 0, TerrainCell.GridSize - 2);
-        var r0 = Math.Clamp((int)Math.Floor(lz), 0, TerrainCell.GridSize - 2);
-        var fx = lx - c0;
-        var fz = lz - r0;
-
-        const int gs = TerrainCell.GridSize;
-        var h = cell.Heights;
-        var h00 = h[r0 * gs + c0];
-        var h01 = h[r0 * gs + c0 + 1];
-        var h10 = h[(r0 + 1) * gs + c0];
-        var h11 = h[(r0 + 1) * gs + c0 + 1];
-
-        if (fz <= fx)
-            height = h00 + (h01 - h00) * fx + (h11 - h01) * fz;
-        else
-            height = h00 + (h10 - h00) * fz + (h11 - h10) * fx;
+        height = cell.SampleGroundHeight(localX, localZ);
 
         return true;
     }

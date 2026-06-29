@@ -17,29 +17,96 @@ public static class ShaderContainerParser
     {
         var text = Encoding.Latin1.GetString(span);
 
-        var remaining = text.AsSpan();
-        var lineEnd = FindLineEnd(remaining);
-        if (lineEnd < 0)
-            lineEnd = remaining.Length;
+        var cursor = text.AsSpan();
+        var versionLine = ReadOnlySpan<char>.Empty;
+        var found = false;
 
-        var firstLine = remaining[..lineEnd].TrimEnd('\r');
+        while (cursor.Length > 0)
+        {
+            var lineEnd = FindLineEnd(cursor);
+            ReadOnlySpan<char> line;
+            if (lineEnd < 0)
+            {
+                line = cursor;
+                cursor = ReadOnlySpan<char>.Empty;
+            }
+            else
+            {
+                line = cursor[..lineEnd];
+                cursor = cursor[lineEnd..];
+            }
+
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0)
+                continue;
+            if (trimmed[0] == ';')
+                continue;
+
+            versionLine = trimmed;
+            found = true;
+            break;
+        }
+
+        if (!found)
+            throw new InvalidDataException(
+                "Shader parse error: no version line found before end of file.");
 
         ShaderType shaderType;
-        if (firstLine.StartsWith(VertexToken.AsSpan(), StringComparison.OrdinalIgnoreCase))
+        if (versionLine.StartsWith(VertexToken.AsSpan(), StringComparison.OrdinalIgnoreCase))
             shaderType = ShaderType.Vertex;
-        else if (firstLine.StartsWith(PixelToken.AsSpan(), StringComparison.OrdinalIgnoreCase))
+        else if (versionLine.StartsWith(PixelToken.AsSpan(), StringComparison.OrdinalIgnoreCase))
             shaderType = ShaderType.Pixel;
         else
             throw new InvalidDataException(
-                $"Shader parse error: version line '{firstLine.ToString()}' does not begin with 'vs' or 'ps'. " +
-                "spec: Docs/RE/formats/shaders.md §Version Declaration Line.");
+                $"Shader parse error: version line '{versionLine.ToString()}' does not begin with 'vs' or 'ps'.");
+
+        var shaderModel = ParseVersion(versionLine);
 
         return new ShaderSource
         {
             ShaderType = shaderType,
+            ShaderModel = shaderModel,
             SourceText = text,
             RawBytes = rawBytes
         };
+    }
+
+    private static ShaderModelVersion ParseVersion(ReadOnlySpan<char> versionLine)
+    {
+        var i = VertexToken.Length;
+
+        if (i >= versionLine.Length || versionLine[i] != '.')
+            throw new InvalidDataException(
+                $"Shader parse error: version line '{versionLine.ToString()}' is missing the '.major.minor' suffix.");
+
+        i++;
+        var major = ReadDigits(versionLine, ref i);
+
+        if (i >= versionLine.Length || versionLine[i] != '.')
+            throw new InvalidDataException(
+                $"Shader parse error: version line '{versionLine.ToString()}' is missing the '.minor' field.");
+
+        i++;
+        var minor = ReadDigits(versionLine, ref i);
+
+        return new ShaderModelVersion(major, minor);
+    }
+
+    private static int ReadDigits(ReadOnlySpan<char> text, ref int i)
+    {
+        var start = i;
+        var value = 0;
+        while (i < text.Length && text[i] is >= '0' and <= '9')
+        {
+            value = value * 10 + (text[i] - '0');
+            i++;
+        }
+
+        if (i == start)
+            throw new InvalidDataException(
+                $"Shader parse error: version line '{text.ToString()}' has a non-numeric version component.");
+
+        return value;
     }
 
     private static int FindLineEnd(ReadOnlySpan<char> text)

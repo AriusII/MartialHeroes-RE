@@ -28,10 +28,7 @@ public sealed class CellCollisionManager
                 for (var q = 0; q < solid.Quads.Length; q++)
                 {
                     var quad = solid.Quads[q];
-                    cell.Insert(ToGodotSegment(quad.C0X, quad.C0Z, quad.C1X, quad.C1Z));
-                    cell.Insert(ToGodotSegment(quad.C1X, quad.C1Z, quad.C2X, quad.C2Z));
-                    cell.Insert(ToGodotSegment(quad.C2X, quad.C2Z, quad.C3X, quad.C3Z));
-                    cell.Insert(ToGodotSegment(quad.C3X, quad.C3Z, quad.C0X, quad.C0Z));
+                    cell.Insert(ToGodotSegment(quad.P0X, quad.P0Z, quad.P1X, quad.P1Z));
                 }
             }
 

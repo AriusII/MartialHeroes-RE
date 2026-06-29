@@ -17,8 +17,6 @@ public sealed class SectorStreamingService(
 
     private readonly ITerrainSectorSource _source = source ?? throw new ArgumentNullException(nameof(source));
 
-    private bool _hasCenter;
-
     public StreamQuality Quality { get; set; } = quality;
 
     public int ResidentCount => _resident.Count;
@@ -30,8 +28,6 @@ public sealed class SectorStreamingService(
         foreach (var sector in _resident) _eventBus.Publish(new SectorUnloadedEvent(sector.MapX, sector.MapZ));
 
         _resident.Clear();
-
-        _hasCenter = false;
     }
 
     public async ValueTask UpdateCenterAsync(
@@ -39,8 +35,6 @@ public sealed class SectorStreamingService(
         int centerMapZ,
         CancellationToken cancellationToken = default)
     {
-        _hasCenter = true;
-
         EvictOutOfRange(centerMapX, centerMapZ);
 
         var ringRadius = SectorGrid.RingRadiusFor(Quality);

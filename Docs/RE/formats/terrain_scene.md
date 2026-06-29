@@ -778,7 +778,8 @@ The per-frame sway deformation operates as follows (confirmed):
 - Vertex displacement is horizontal only. Each displaced vertex receives:
   `displaced.x = base.x + direction.x × phase`, `displaced.z = base.z + direction.z × phase`.
   The Y (vertical) component is left unchanged in the main deformation path — sway is a pure
-  horizontal bending motion.
+  horizontal bending motion. **This applies to the small/medium bucket (0x0A..0x0E) only**; the large
+  bucket (0x14..0x18) uses a separate deform that DOES displace Y — see §A5.
 - `direction` is a small per-object horizontal vector precomputed from the object's vertex normals,
   scaled approximately 0.5.
 - The FVF for the sway draw is also 0x112, consistent with §3.2.2.
@@ -932,3 +933,73 @@ where:
 described in §6 and `Docs/RE/formats/texture.md`) and route it to the matching render bucket.
 The Viewer's hard-coded sway set {10, 11, 12, 20} is correct for the current shipped asset set
 but must be generalised to the full ranges 0x0A..0x0E and 0x14..0x18 for spec-correctness.
+
+### A5. CORRECTION: the large bucket (0x14..0x18) uses a DIFFERENT deform — rigid 3-axis lean, Y displaced
+
+The §A1.4 / §A4 "purely horizontal, Y fixed" displacement and the shared per-vertex bent set describe
+the **small/medium bucket only**. The large bucket (kind 0x14..0x18) is a **separate render list** with
+its **own per-vertex deform**, byte-confirmed (static, deterministic immediates):
+
+- **Separate render list, high-detail only.** The grid bucketer sorts mass-object cells into four
+  singly-linked lists by their category byte; large-sway objects (category 0x14..0x18) go to their own
+  list, distinct from the small/medium-sway list (category 0x0A..0x0E). The sway driver dispatches the
+  large list to a dedicated routine: **in high-detail mode the large objects sway; in low-detail mode
+  they are drawn verbatim (NO sway)**. (Small/medium objects sway in both detail modes.) The shared
+  50-ms / time-accumulator throttle gate (§A1.4) applies to both lists.
+
+- **Amplitude (large) — byte-confirmed:**
+
+  ```
+  amplitude = min( bboxDiagonal × 0.005, 2.0 ) / 2^(kind − 19)
+  ```
+
+  where `bboxDiagonal` is the full 3D Euclidean distance between the object's two stored AABB corners
+  (§A2.2), the `× 0.005` is the two literals `0.01 × 0.5` folded, the clamp to 2.0 is applied **before**
+  the kind divisor, and the divisor `2 << (kind − 0x14)` equals `2^(kind − 19)` (kind 0x14 → ÷2,
+  0x15 → ÷4, 0x16 → ÷8, 0x17 → ÷16, 0x18 → ÷32). This is the same value as the §A1.5 / §A2.1 large-row
+  formula written as one expression; the AABB degenerate-axis guard adds 2.0 to any zero-extent axis so
+  the diagonal is never zero on a flat object.
+
+- **There is NO secondary-amplitude field for large objects.** The earlier tentative "secondary = 0.5"
+  reading is **WRONG**: the large setup branch never writes the secondary field, and the large deform
+  never reads it — it is dead for this bucket. The large object stores only `reflectLower = 0`,
+  `reflectUpper = 0`, and `amplitude`; the small/medium-only midpoint/secondary fields are left
+  uninitialised and unused.
+
+- **Per-vertex apply — uniform rigid 3-axis translation (Y IS displaced):** every vertex is translated
+  by the **same** phase-scaled vector taken from the object's **vertex-0 normal** (the artist bakes the
+  sway direction into vertex 0's normal slot), with fixed per-axis ratios:
+
+  ```
+  displaced.x = base.x + dir.x × phase × 1.0
+  displaced.y = base.y + dir.y × phase × 0.7      // Y IS displaced — NOT fixed (unlike small/medium)
+  displaced.z = base.z + dir.z × phase × 1.5
+  ```
+
+  There is no selective bent-set, no per-vertex index map, and no anchored root: the whole object sways
+  as one rigid body leaning along vertex 0's normal. The three constants **1.0 / 0.7 / 1.5** are the
+  only "secondary ratios" the large deform has (they are NOT a struct field).
+
+- **Phase / reflect (large):** the per-object phase advances by `tick × timeScale × velSign × amplitude ×
+  speed` each gated tick and ping-pongs within `±(tick × 0.05 × amplitude)` (velocity flips between +100
+  and −100 at the reflect bounds). The large tick counter wraps 0..5 (the small/medium one wraps 0..4).
+  As in §A2.4 the oscillator is a bounded linear ping-pong (triangle wave), not a sinusoid.
+
+- **Wind coupling (large):** the wind query modulates **speed only** — when wind is active and its
+  magnitude exceeds the current speed, speed is raised to that magnitude; otherwise speed decays by 0.1
+  per tick toward a floor of 2.0. Wind makes a large object sway **faster, not in a different
+  direction** — unlike the small/medium high-detail path, which injects an extra directional Z bend.
+
+- **Early-out:** if `amplitude == 0`, the large deform copies the source vertices verbatim (no sway),
+  matching the §A1.5 zero-amplitude fallback.
+
+**Confidence:** the large-bucket formula and per-vertex apply are byte-exact from explicit immediates
+and deterministic control flow — effectively static-confirmed, no runtime values needed. Remaining
+debugger-confirmable items are activation-only (whether high-detail large-sway is on by default; a
+sampled live amplitude for a known large object; that the wind magnitude feeds speed as read) — these
+gate WHETHER/HOW STRONGLY a large object visibly sways, not the arithmetic.
+
+> **Port note.** Route the large bucket to a deform distinct from the small/medium one: a rigid
+> whole-object translation along the vertex-0 normal with axis ratios 1.0/0.7/1.5 (Y included), the
+> amplitude formula above, the speed-only wind coupling, and high-detail-gated (verbatim in low detail).
+> Do **not** reuse the small/medium horizontal-only "Y fixed" shader for large objects.

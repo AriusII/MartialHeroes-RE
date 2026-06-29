@@ -42,6 +42,8 @@ public sealed partial class RealWorldRenderer : Node3D
 
     private MapXEffectScheduler? _mapXEffectScheduler;
 
+    private WorldNpcSpawner? _npcSpawner;
+
     private (int MapX, int MapZ) _streamAnchor;
 
     private CancellationTokenSource? _streamingCts;
@@ -101,17 +103,22 @@ public sealed partial class RealWorldRenderer : Node3D
             _mapXEffectScheduler.LocalPlayerGodotPos = _localPlayerNode!.GlobalPosition;
 
         if (_environmentNode is not null && IsInstanceValid(_environmentNode))
-            _mapXEffectScheduler.TimeOfDayMs = (uint)Math.Round(_environmentNode.ClockMs);
+        {
+            _mapXEffectScheduler.TimeOfDayMs = (uint)Math.Round(_environmentNode.ClockMs * 1000.0);
+
+            if (_mapXEffectScheduler.HasLocalPlayer)
+                _environmentNode.PointLightFocusGodot = _localPlayerNode!.GlobalPosition;
+        }
     }
 
     public void UpdateEnvironmentClock(byte serverHour, byte serverMinute)
     {
         if (_environmentNode is null || !IsInstanceValid(_environmentNode)) return;
-        var clockMs = (serverHour * 3600.0 + serverMinute * 60.0) * 1000.0;
+        var clockMs = serverHour * 3600.0 + serverMinute * 60.0;
         _environmentNode.UpdateClockMs(clockMs);
         _environmentNode.CycleEnabled = false;
         GD.Print($"[RealWorldRenderer] Environment clock set from server 4/1: {serverHour:D2}:{serverMinute:D2} " +
-                 $"({clockMs / 3600000.0:F2}h) — local free-run disabled, server-authoritative. " +
+                 $"({clockMs / 3600.0:F2}h) — local free-run disabled, server-authoritative. " +
                  "spec: packets/4-1_game_state_tick.yaml §fields.Hour/Minute.");
     }
 

@@ -13,20 +13,9 @@ public static class BudSceneBuilder
 {
     private static Shader? _swayShader;
 
-    public static Node3D Build(BudScene scene)
-    {
-        return BuildCore(scene, null, null, string.Empty, true).Root;
-    }
-
     public static Node3D Build(BudScene scene, MappedVfsArchive? archive, BgTextureCatalog? bgCatalog)
     {
         return BuildCore(scene, archive, bgCatalog, string.Empty, true).Root;
-    }
-
-    public static (Node3D Root, BudBuildInfo Info) Build(BudScene scene, MappedVfsArchive? archive,
-        BgTextureCatalog? bgCatalog, string budVfsPath)
-    {
-        return BuildCore(scene, archive, bgCatalog, budVfsPath, true);
     }
 
     public static Node3D BuildWorld(BudScene scene, MappedVfsArchive archive, BgTextureCatalog? bgCatalog,
@@ -53,9 +42,13 @@ public static class BudSceneBuilder
                 byte kind = 1;
                 if (archive is not null && bgCatalog is not null)
                 {
-                    var slot = buildingPool is not null && obj.TexId > 0 && obj.TexId <= (uint)buildingPool.Length
-                        ? buildingPool[(int)obj.TexId - 1]
-                        : (int)obj.TexId;
+                    int slot;
+                    if (buildingPool is not null && buildingPool.Length > 0)
+                        slot = obj.TexId > 0 && obj.TexId <= (uint)buildingPool.Length
+                            ? buildingPool[(int)obj.TexId - 1]
+                            : buildingPool[0];
+                    else
+                        slot = (int)obj.TexId;
                     var resolved = ViewerTextures.ResolveBgSlot(archive, bgCatalog, slot);
                     kind = bgCatalog.ResolveKind(slot);
 
@@ -301,8 +294,7 @@ public static class BudSceneBuilder
                 Roughness = 0.95f,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
             };
-            if (twoSided)
-                mat.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
+            mat.Transparency = BaseMaterial3D.TransparencyEnum.Alpha;
         }
         else
         {

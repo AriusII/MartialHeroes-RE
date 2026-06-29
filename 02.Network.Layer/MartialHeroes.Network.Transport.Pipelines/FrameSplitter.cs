@@ -34,7 +34,7 @@ internal static class FrameSplitter
             while (TryParseFrameLength(buffer, out var frameLength))
             {
                 if (frameLength < FramingConstants.HeaderSize
-                    || frameLength > FramingConstants.MaxFrameSize)
+                    || frameLength > FramingConstants.MaxInboundFrameSize)
                 {
                     framingError = true;
                     break;

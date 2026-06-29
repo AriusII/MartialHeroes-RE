@@ -1,6 +1,5 @@
 using Godot;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
-using MartialHeroes.Client.Godot.Adapters;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -32,24 +31,15 @@ public sealed partial class RealWorldRenderer
                      "spec: Docs/RE/specs/effect-scheduling.md (ambient scheduler; self-drives in _Process).");
         }
 
-        var env = VfsEnvironmentSource.Load(Assets, TargetAreaId);
-        var water = WaterPlacement.FromMapOption(env.MapOption);
+        GD.Print($"[Water] map_option*.bin carries no water data (water.md RESOLVED-NEGATIVE — no water renderer, geometry, or asset loader exists in doida.exe). " +
+                 $"Water placement is oracle-gated and OFF by default. " +
+                 $"Populate res://water_oracle.cfg with 'areaId,mapX,mapZ,Y' lines (one per cell) to enable water per maintainer visual review.");
 
-        if (!water.Enabled)
-            GD.Print($"[Water] area={TargetAreaId} no map_option-driven water plane — checking per-cell FX textures.");
+        var waterEntry = ReadWaterOracle(TargetAreaId, TargetMapX, TargetMapZ);
 
-        if (_cellMap is null || _bgTextures is null)
+        if (!waterEntry.Enabled)
         {
-            GD.Print($"[Water] area={TargetAreaId} cell .map or bgtexture catalog not loaded — no water plane.");
-            return;
-        }
-
-        var hasWater = WaterRenderer.CellHasWater(_cellMap, _bgTextures);
-        GD.Print($"[Water] area={TargetAreaId} per-cell FX detection: hasWater={hasWater}.");
-
-        if (!hasWater)
-        {
-            GD.Print($"[Water] area={TargetAreaId} cell has no water FX textures — no water plane.");
+            GD.Print($"[Water] area={TargetAreaId} cell=({TargetMapX},{TargetMapZ}) not in water_oracle.cfg — no water plane rendered (faithful default: area is dry).");
             return;
         }
 
@@ -59,15 +49,45 @@ public sealed partial class RealWorldRenderer
 
         var centreX = (TargetMapX - 10000) * 1024f + 512f;
         var centreZ = (TargetMapZ - 10000) * 1024f + 512f;
-        var waterY = WaterRenderer.WaterSurfaceY(_cellMap);
-        var centre = new Vector3(centreX, waterY, -centreZ);
+        var centre = new Vector3(centreX, waterEntry.WorldY, -centreZ);
 
         var waterNode = new WaterRenderer { Name = "WaterRenderer" };
         AddChild(waterNode);
-        waterNode.Configure(centre, size, waterY);
+        waterNode.Configure(centre, size, waterEntry.WorldY);
 
-        GD.Print($"[Water] cell has water → plane configured at Y={waterY:F1} " +
-                 $"area={TargetAreaId} size={size:F0}u centre=({centre.X:F0},{centre.Y:F1},{centre.Z:F0}).");
+        GD.Print($"[Water] oracle entry found → plane configured at Y={waterEntry.WorldY:F1} " +
+                 $"area={TargetAreaId} cell=({TargetMapX},{TargetMapZ}) size={size:F0}u centre=({centre.X:F0},{centre.Y:F1},{centre.Z:F0}).");
+    }
+
+    private static WaterPlacement ReadWaterOracle(int areaId, int mapX, int mapZ)
+    {
+        try
+        {
+            var absPath = ProjectSettings.GlobalizePath("res://water_oracle.cfg");
+            if (!File.Exists(absPath)) return new WaterPlacement(false, 0f);
+
+            foreach (var rawLine in File.ReadLines(absPath))
+            {
+                var line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith('#')) continue;
+                var parts = line.Split(',');
+                if (parts.Length < 4) continue;
+                if (!int.TryParse(parts[0].Trim(), out var oa)) continue;
+                if (!int.TryParse(parts[1].Trim(), out var ox)) continue;
+                if (!int.TryParse(parts[2].Trim(), out var oz)) continue;
+                if (!float.TryParse(parts[3].Trim(),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var oy)) continue;
+                if (oa == areaId && ox == mapX && oz == mapZ)
+                    return new WaterPlacement(true, oy);
+            }
+        }
+        catch
+        {
+        }
+
+        return new WaterPlacement(false, 0f);
     }
 
     private static T? FindDirectChildOfType<T>(Node parent) where T : Node
@@ -77,7 +97,6 @@ public sealed partial class RealWorldRenderer
                 return match;
         return null;
     }
-
 
     private void LoadAndSpawnBudScene()
     {
@@ -148,7 +167,6 @@ public sealed partial class RealWorldRenderer
         GD.Print(
             $"[RealWorldRenderer] BUD scene spawned: {scene.Objects.Length} objects (ArrayMesh, no GltfDocument).");
     }
-
 
     private void SpawnCamera()
     {

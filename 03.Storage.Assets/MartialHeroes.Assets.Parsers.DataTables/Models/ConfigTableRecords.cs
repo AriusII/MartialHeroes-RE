@@ -201,112 +201,11 @@ public sealed class ItemCsvRow
 
     public required string DescriptionCp949 { get; init; }
 
-    public required uint LinkedItemId { get; init; }
+    public required uint BaseItemId { get; init; }
 
-    public required uint BaseRefId { get; init; }
+    public required uint SecondaryTypeId { get; init; }
 
-    public required uint SecondaryRefId { get; init; }
-
-    public required uint ItemSubtype { get; init; }
-
-
-    public required byte BonusFlagA { get; init; }
-
-    public required byte BonusFlagB { get; init; }
-
-    public required byte EnhancementSize { get; init; }
-
-    public required uint SellPrice { get; init; }
-
-    public required byte NpcPurchaseable { get; init; }
-
-    public required byte Enabled { get; init; }
-
-
-    public required ushort MaxStack { get; init; }
-
-    public required ushort ItemTierRank { get; init; }
-
-    public required ushort MaxDurability { get; init; }
-
-
-    public required ushort ReqStr { get; init; }
-
-    public required ushort ReqCon { get; init; }
-
-    public required ushort ReqAgi { get; init; }
-
-    public required ushort ReqInt { get; init; }
-
-    public required ushort ReqChi { get; init; }
-
-
-    public required byte ClassYi { get; init; }
-
-    public required byte ClassYe { get; init; }
-
-    public required byte ClassIn { get; init; }
-
-    public required byte ClassJi { get; init; }
-
-
-    public required byte EnchantLevel { get; init; }
-
-    public required byte GemPower { get; init; }
-
-
-    public required uint BonusAtk { get; init; }
-
-    public required uint BonusHp { get; init; }
-
-    public required uint BonusExtAtk { get; init; }
-
-
-    public required float AttackSpeed { get; init; }
-
-    public required float DodgeRate { get; init; }
-
-
-    public required uint BonusChi { get; init; }
-
-    public required uint WeaponStatA { get; init; }
-
-    public required uint WeaponStatB { get; init; }
-
-    public required uint MinAttack { get; init; }
-
-    public required uint MaxAttack { get; init; }
-
-    public required uint BonusDefenseA { get; init; }
-
-    public required uint PhysDefense { get; init; }
-
-    public required uint ArmorDefense { get; init; }
-
-
-    public required uint DurationMinutes { get; init; }
-
-    public required byte ExpireMode { get; init; }
-
-    public required uint ConsumableValue { get; init; }
-
-    public required byte IsConsumable { get; init; }
-
-    public required byte GemCategory { get; init; }
-
-    public required byte EquippableFlag { get; init; }
-
-    public required byte HasEffect { get; init; }
-
-    public required byte EffectType { get; init; }
-
-    public required ushort EffectStrength { get; init; }
-
-
-    public required ushort ModelSetId { get; init; }
-
-    public required byte ModelType { get; init; }
-
+    public required uint Col6Flag { get; init; }
 
     public required string[] RawColumns { get; init; }
 }
@@ -315,13 +214,11 @@ public sealed class NpcScrRecord
 {
     public required uint Id { get; init; }
 
-    public required uint IdMirror { get; init; }
+    public required byte Kind { get; init; }
 
-    public required string Paragraph0 { get; init; }
+    public required short Job { get; init; }
 
-    public required string Paragraph1 { get; init; }
-
-    public required string Paragraph2 { get; init; }
+    public required string[] NameSlots { get; init; }
 
     public required ReadOnlyMemory<byte> Raw { get; init; }
 }
@@ -329,6 +226,8 @@ public sealed class NpcScrRecord
 public sealed class QuestScrRecord
 {
     public required ushort QuestId { get; init; }
+
+    public required byte Category { get; init; }
 
     public required string QuestName { get; init; }
 

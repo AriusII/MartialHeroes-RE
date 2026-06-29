@@ -13,4 +13,6 @@ public interface IAreaAssemblySource
     bool TryGetCellFile(int mapX, int mapZ, string extension, out ReadOnlyMemory<byte> bytes);
 
     bool TryGetCellFileByName(string vfsLogicalPath, out ReadOnlyMemory<byte> bytes);
+
+    bool TryGetAreaNpcSpawns(out ReadOnlyMemory<byte> npcSpawnBytes);
 }

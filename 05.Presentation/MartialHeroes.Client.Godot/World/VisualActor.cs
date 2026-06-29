@@ -16,11 +16,14 @@ public sealed partial class VisualActor : CharacterBody3D
     private const float RunGlideSpeed = 10.0f;
 
     private const float SkinnedAvatarScale = 5.0f;
-    private AnimationClip? _attackClipCache;
-    private bool _attackClipResolved;
+    private const float MovingEpsilon = 0.02f;
+    private const float FacingPlanarEpsilonSq = 0.0001f;
+
+    private readonly Dictionary<int, AnimationClip?> _clipByMotId = new();
 
 
     private CellCollisionManager? _cellCollisionManager;
+    private TerrainNode? _terrainNode;
     private int _combatAppearanceKey;
 
     private RealClientAssets? _combatAssets;
@@ -33,6 +36,7 @@ public sealed partial class VisualActor : CharacterBody3D
 
     private bool _isDead;
     private bool _isRunning;
+    private bool _locomotionResolved;
 
     private Vector3 _moveTarget;
 
@@ -40,6 +44,7 @@ public sealed partial class VisualActor : CharacterBody3D
     private MeshInstance3D? _placeholderMesh;
 
     private Vector3 _prevPosition;
+    private AnimationClip? _runClip;
 
     private Node3D? _skinnedAvatar;
 
@@ -49,6 +54,7 @@ public sealed partial class VisualActor : CharacterBody3D
     private double _tickDurationSec = 1.0 / GameEngineLoop.DefaultTickRateHz;
 
     private double _timeSinceSnapshot;
+    private AnimationClip? _walkClip;
 
     public bool IsLocalPlayer { get; set; }
 
@@ -59,6 +65,11 @@ public sealed partial class VisualActor : CharacterBody3D
     public void SetCollisionManager(CellCollisionManager mgr)
     {
         _cellCollisionManager = mgr;
+    }
+
+    public void SetTerrainNode(TerrainNode terrainNode)
+    {
+        _terrainNode = terrainNode;
     }
 
     public void AttachSkinnedAvatar(Node3D skinnedRoot)
@@ -91,8 +102,10 @@ public sealed partial class VisualActor : CharacterBody3D
         _combatAssets = assets;
         _combatAppearanceKey = appearanceKey;
         _combatSkinClass = skinClass;
-        _attackClipResolved = false;
-        _attackClipCache = null;
+        _clipByMotId.Clear();
+        _walkClip = null;
+        _runClip = null;
+        _locomotionResolved = false;
     }
 
     public void PlayAttackMotion()
@@ -114,42 +127,77 @@ public sealed partial class VisualActor : CharacterBody3D
 
     private AnimationClip? ResolveAttackClip()
     {
-        if (_attackClipResolved) return _attackClipCache;
-        _attackClipResolved = true;
+        return ResolveClipForMotion(static e => AttackMotionId(e));
+    }
 
+    private AnimationClip? ResolveClipForMotion(Func<ActormotionEntry, int> selector)
+    {
         if (_combatAssets is null) return null;
 
         var registry = CharVisualRegistry.GetOrBuild(_combatAssets);
         if (registry is null) return null;
 
-        var entry = registry.GetByMotionKey(_combatAppearanceKey)
-                    ?? registry.ActorMotion.GetBySkinClass(_combatSkinClass);
+        var entry = registry.ActorMotion.GetBySkinClass(_combatSkinClass);
         if (entry is null) return null;
 
-        var motId = AttackMotionId(entry);
+        var motId = selector(entry);
         if (motId <= 0) return null;
 
+        return ResolveClipById(registry, motId);
+    }
+
+    private AnimationClip? ResolveClipById(CharVisualRegistry registry, int motId)
+    {
+        if (_clipByMotId.TryGetValue(motId, out var cached)) return cached;
+
+        AnimationClip? clip = null;
         var motPath = registry.ResolveMotPath(motId);
-        if (motPath is null || !_combatAssets.Contains(motPath)) return null;
+        if (motPath is not null && _combatAssets!.Contains(motPath))
+            try
+            {
+                var data = _combatAssets.GetRaw(motPath);
+                if (!data.IsEmpty) clip = AnimationParser.Parse(data);
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[VisualActor] .mot load failed '{motPath}': {ex.Message}");
+                clip = null;
+            }
 
-        try
-        {
-            var data = _combatAssets.GetRaw(motPath);
-            if (data.IsEmpty) return null;
-            _attackClipCache = AnimationParser.Parse(data);
-        }
-        catch (Exception ex)
-        {
-            GD.PrintErr($"[VisualActor] attack .mot load failed '{motPath}': {ex.Message}");
-            _attackClipCache = null;
-        }
-
-        return _attackClipCache;
+        _clipByMotId[motId] = clip;
+        return clip;
     }
 
     private static int AttackMotionId(ActormotionEntry entry)
     {
         return 0;
+    }
+
+    private void EnsureLocomotionClips()
+    {
+        if (_locomotionResolved) return;
+        _locomotionResolved = true;
+
+        _walkClip = ResolveClipForMotion(static e => e.WalkMotionId);
+        _runClip = ResolveClipForMotion(static e => e.RunMotionId);
+    }
+
+    private void UpdateLocomotion(bool moving)
+    {
+        if (_skinnedNode is null || !IsInstanceValid(_skinnedNode)) return;
+        if (_isDead) return;
+
+        if (!moving)
+        {
+            if (_skinnedNode.IsLocomotionPlaying) _skinnedNode.StopLocomotion();
+            return;
+        }
+
+        EnsureLocomotionClips();
+
+        var clip = _isRunning ? _runClip ?? _walkClip : _walkClip ?? _runClip;
+        if (clip is not null) _skinnedNode.SetLocomotionClip(clip);
+        else if (_skinnedNode.IsLocomotionPlaying) _skinnedNode.StopLocomotion();
     }
 
     private static SkinnedCharacterNode? FindSkinnedNode(Node node)
@@ -182,6 +230,7 @@ public sealed partial class VisualActor : CharacterBody3D
         }
 
         AttachSkinnedAvatar(avatar);
+        SetCombatClipSource(assets, serverClass, serverClass);
         GD.Print($"[VisualActor] Body avatar attached (class={serverClass}, skinned+idle, body-only — " +
                  $"ActorSpawnedEvent carries no EquipGids, so equip overlay is deferred). " +
                  "spec: skinning.md §8(e) / §10.");
@@ -192,20 +241,28 @@ public sealed partial class VisualActor : CharacterBody3D
     {
         if (_isDead) return;
 
-        if (_skinnedAvatar is null || !IsInstanceValid(_skinnedAvatar))
+        if (_skinnedNode is null || !IsInstanceValid(_skinnedNode))
         {
-            GD.Print($"[VisualActor] PlayDeathMotion: no skinned avatar attached (actor '{ActorName}') — " +
+            GD.Print($"[VisualActor] PlayDeathMotion: no skinned node attached (actor '{ActorName}') — " +
                      "no death pose applied. spec: 5-10_combat_death.yaml.");
             return;
         }
 
         _isDead = true;
+        _skinnedNode.StopLocomotion();
 
-        _skinnedAvatar.RotationDegrees = new Vector3(-90f, _skinnedAvatar.RotationDegrees.Y, 0f);
+        var clip = ResolveClipForMotion(static e => e.DeathMotionId);
+        if (clip is null)
+        {
+            GD.Print($"[VisualActor] PlayDeathMotion (actor '{ActorName}'): DeathMotionId (a[4]/col19) did not " +
+                     "resolve to a registered .mot — no death clip played (no fabrication). " +
+                     "spec: formats/actormotion.md (a[4]=col19 death); 5-10_combat_death.yaml.");
+            return;
+        }
 
-        GD.Print($"[VisualActor] PlayDeathMotion (actor '{ActorName}'): death clip id pending — visual cue " +
-                 "only (avatar laid flat; idle still ticking). spec: 5-10_combat_death.yaml (death clip/" +
-                 "effect ids capture-pending); skinning.md §8(e)/§10 (only the standing idle is recovered).");
+        _skinnedNode.PlayActionClip(clip);
+        GD.Print($"[VisualActor] PlayDeathMotion (actor '{ActorName}'): death clip id_b={clip.IdB} played. " +
+                 "spec: formats/actormotion.md (a[4]=col19 death, HIGH); 5-10_combat_death.yaml.");
     }
 
 
@@ -227,6 +284,9 @@ public sealed partial class VisualActor : CharacterBody3D
 
     public override void _Process(double delta)
     {
+        var moving = false;
+        var faceDir = Vector3.Zero;
+
         if (_hasSnapshot)
         {
             _timeSinceSnapshot += delta;
@@ -242,11 +302,52 @@ public sealed partial class VisualActor : CharacterBody3D
                 GlobalPosition = resolved;
             else
                 GlobalPosition = interpolated;
+
+            faceDir = _currPosition - _prevPosition;
+            moving = _prevPosition.DistanceTo(_currPosition) > MovingEpsilon;
         }
         else if (_hasTarget)
         {
+            var before = GlobalPosition;
             LegacyGlide(delta);
+            faceDir = GlobalPosition - before;
+            moving = _hasTarget;
         }
+
+        if (_hasSnapshot || _hasTarget)
+            ApplyTerrainGroundY();
+
+        if (moving)
+            UpdateFacingYaw(faceDir);
+
+        UpdateLocomotion(moving);
+    }
+
+    private void ApplyTerrainGroundY()
+    {
+        if (_terrainNode is null)
+            return;
+
+        var pos = GlobalPosition;
+        if (_terrainNode.TryGetGroundHeight(pos.X, -pos.Z, out var groundY))
+        {
+            pos.Y = groundY;
+            GlobalPosition = pos;
+        }
+    }
+
+    private void UpdateFacingYaw(Vector3 godotDelta)
+    {
+        var planarSq = godotDelta.X * godotDelta.X + godotDelta.Z * godotDelta.Z;
+        if (planarSq < FacingPlanarEpsilonSq)
+            return;
+
+        var yaw = MathF.Atan2(godotDelta.X, godotDelta.Z);
+
+        if (_skinnedAvatar is not null && IsInstanceValid(_skinnedAvatar))
+            _skinnedAvatar.Rotation = new Vector3(0f, yaw, 0f);
+        else
+            Rotation = new Vector3(0f, yaw, 0f);
     }
 
 

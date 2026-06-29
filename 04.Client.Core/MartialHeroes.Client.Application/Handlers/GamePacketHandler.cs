@@ -10,6 +10,7 @@ using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Progression.Progression;
 using MartialHeroes.Client.Domain.Stats.Stats;
+using MartialHeroes.Network.Protocol.Core;
 using MartialHeroes.Network.Protocol.Core.Opcodes;
 using MartialHeroes.Network.Protocol.Packets.World.Packets;
 using MartialHeroes.Network.Protocol.Routing.Routing;
@@ -29,16 +30,37 @@ public sealed partial class GamePacketHandler(
     IHudEventHub? hudEventHub = null,
     InFlightLatch? inFlightLatch = null,
     WorldEntryState? worldEntry = null,
-    Func<byte, CancellationToken, ValueTask>? enterWorldEmitter = null)
+    Func<byte, CancellationToken, ValueTask>? enterWorldEmitter = null,
+    Func<uint, CancellationToken, ValueTask>? linkAckEmitter = null)
     : IPacketHandler
 {
     private readonly IClientEventBus _eventBus = eventBus ?? throw new ArgumentNullException(nameof(eventBus));
     private readonly IUnhandledOpcodeSink _unhandled = unhandled ?? throw new ArgumentNullException(nameof(unhandled));
     private readonly ClientWorld _world = world ?? throw new ArgumentNullException(nameof(world));
 
+    private byte[]? _activeFrame;
+
+    public void SetActiveFrame(byte[]? frame)
+    {
+        _activeFrame = frame;
+    }
+
+    private ReadOnlySpan<byte> ActivePayload
+    {
+        get
+        {
+            var frame = _activeFrame;
+            return frame is null || frame.Length < FrameHeader.Size
+                ? default
+                : frame.AsSpan(FrameHeader.Size);
+        }
+    }
+
     public Func<CombatStats, CombatStats>? CombatStatsRecompute { get; init; }
 
     public Func<SkillId, int>? CooldownDurationResolver { get; init; }
+
+    public Func<SkillId, MartialHeroes.Client.Domain.Skills.Skills.SkillDefinition?>? SkillDefinitionResolver { get; init; }
 
     public ProgressionState Progression { get; private set; }
 
@@ -123,6 +145,21 @@ public sealed partial class GamePacketHandler(
 
             case Opcodes.SmsgSceneEntityUpdate:
                 if (HandleSceneEntityUpdate(payload)) return;
+
+                break;
+
+            case Opcodes.SmsgPartyInviteState:
+                if (HandlePartyInviteState(payload)) return;
+
+                break;
+
+            case Opcodes.SmsgPartyAcceptResult:
+                if (HandlePartyAcceptResult(payload)) return;
+
+                break;
+
+            case Opcodes.SmsgPartyMemberJoined:
+                if (HandlePartyMemberJoined(payload)) return;
 
                 break;
         }

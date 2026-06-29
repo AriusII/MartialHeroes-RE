@@ -74,17 +74,37 @@ public sealed class LightBin
 
     public required float[] FogDistanceScalars { get; init; }
 
-    public required float[] SecondaryFogScalars { get; init; }
+    public required float[] PointLightMasterIntensity { get; init; }
+
+    public required float[] StarBrightnessCurve { get; init; }
+
+    public static float[] DefaultStarBrightnessCurve()
+    {
+        var curve = new float[KeyframeCount];
+        for (var i = 0; i < KeyframeCount; i++)
+            curve[i] = 1.0f - 0.04f * (i > 24 ? KeyframeCount - i : i);
+        return curve;
+    }
+
+    public required BgraColor[] DeviceAmbientKeyframes { get; init; }
 
     public required ReadOnlyMemory<byte> RawSectionE { get; init; }
 
-    public required float FallbackScale { get; init; }
+    public required uint SunDirectionOverrideFlag { get; init; }
 
-    public required float FallbackDirX { get; init; }
+    public required uint KeyLightPositionOverrideFlag { get; init; }
 
-    public required float FallbackDirY { get; init; }
+    public required float SunDirectionX { get; init; }
 
-    public required float FallbackDirZ { get; init; }
+    public required float SunDirectionY { get; init; }
+
+    public required float SunDirectionZ { get; init; }
+
+    public required float KeyLightPositionX { get; init; }
+
+    public required float KeyLightPositionY { get; init; }
+
+    public required float KeyLightPositionZ { get; init; }
 
     public required ReadOnlyMemory<byte> RawBytes { get; init; }
 }
@@ -93,9 +113,9 @@ public sealed class StarDomeBin
 {
     public const int FixedSize = 9216;
 
-    public const int KeyframeCount = 12;
+    public const int KeyframeCount = 48;
 
-    public const int StarsPerKeyframe = 192;
+    public const int StarsPerKeyframe = 48;
 
     public required BgraColor[][] StarColors { get; init; }
 }
@@ -104,9 +124,11 @@ public sealed class CloudDomeBin
 {
     public const int FixedSize = 23040;
 
-    public const int KeyframeCount = 12;
+    public const int LayerSize = 11520;
 
-    public const int VerticesPerKeyframe = 240;
+    public const int KeyframeCount = 48;
+
+    public const int VerticesPerKeyframe = 60;
 
     public required BgraColor[][] Layer1Colors { get; init; }
 

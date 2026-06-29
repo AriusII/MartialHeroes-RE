@@ -9,6 +9,7 @@ internal static class SlotRenderer
         Node3D parent,
         AssembledCell cell,
         Func<uint, ImageTexture?> budTexResolver,
+        Func<uint, byte> budKindResolver,
         (int MapX, int MapZ) cellMapXZ)
     {
         var budScene = cell.Slot1BuildingObjectGrid;
@@ -28,7 +29,7 @@ internal static class SlotRenderer
         Node3D budRoot;
         try
         {
-            budRoot = BudMeshBuilder.Build(budScene, id => budTexResolver(id));
+            budRoot = BudMeshBuilder.Build(budScene, id => budTexResolver(id), id => budKindResolver(id));
         }
         catch (Exception ex)
         {
@@ -95,5 +96,86 @@ internal static class SlotRenderer
         fxRoot.Name = $"ComposedFxSlot{slotIndex}_({cellMapXZ.MapX},{cellMapXZ.MapZ})";
         parent.AddChild(fxRoot);
         return 1;
+    }
+}
+
+internal sealed partial class BudSwayClock : Node
+{
+    private const string PhaseParam = "bud_sway_phase";
+
+    private const double TickMs = 50.0;
+
+    private const float StepPerTick = 0.25f;
+
+    private static readonly StringName PhaseParamName = PhaseParam;
+
+    private static bool _globalParamRegistered;
+
+    private double _accumMs;
+
+    private float _phase;
+
+    private float _velocity = 1f;
+
+    public static void EnsureGlobalParam()
+    {
+        if (_globalParamRegistered) return;
+
+        try
+        {
+            var present = false;
+            var existing = RenderingServer.GlobalShaderParameterGetList();
+            foreach (var name in existing)
+                if (name.ToString() == PhaseParam)
+                {
+                    present = true;
+                    break;
+                }
+
+            if (!present)
+                RenderingServer.GlobalShaderParameterAdd(
+                    PhaseParam, RenderingServer.GlobalShaderParameterType.Float, 0.0f);
+
+            _globalParamRegistered = true;
+            GD.Print("[BudSwayClock] Global sway clock 'bud_sway_phase' registered (shared ping-pong oscillator). " +
+                     "spec: terrain_scene.md Addendum A1.4 — single global clock shared by all foliage objects.");
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[BudSwayClock] EnsureGlobalParam failed: {ex.Message}");
+        }
+    }
+
+    public override void _Ready()
+    {
+        Name = "BudSwayClock";
+        EnsureGlobalParam();
+    }
+
+    public override void _Process(double delta)
+    {
+        _accumMs += delta * 1000.0;
+
+        var advanced = false;
+        while (_accumMs >= TickMs)
+        {
+            _accumMs -= TickMs;
+            _phase += _velocity * StepPerTick;
+            if (_phase >= 1f)
+            {
+                _phase = 1f;
+                _velocity = -_velocity;
+            }
+            else if (_phase <= -1f)
+            {
+                _phase = -1f;
+                _velocity = -_velocity;
+            }
+
+            advanced = true;
+        }
+
+        if (advanced)
+            RenderingServer.GlobalShaderParameterSet(PhaseParamName, _phase);
     }
 }

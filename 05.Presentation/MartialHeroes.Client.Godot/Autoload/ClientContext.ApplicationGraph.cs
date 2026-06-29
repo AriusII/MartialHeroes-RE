@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Client.Application.Assets;
@@ -13,10 +14,13 @@ using MartialHeroes.Client.Application.Login;
 using MartialHeroes.Client.Application.Net;
 using MartialHeroes.Client.Application.UseCases;
 using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Domain.Progression.Progression;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
+using MartialHeroes.Client.Domain.Stats.Stats;
 using MartialHeroes.Client.Godot.Adapters;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Godot.Ui.Assets;
+using MartialHeroes.Client.Godot.World;
 using MartialHeroes.Client.Infrastructure.Catalog;
 using MartialHeroes.Client.Infrastructure.Lobby;
 using MartialHeroes.Client.Presentation.Adapters;
@@ -31,18 +35,28 @@ namespace MartialHeroes.Client.Godot.Autoload;
 
 public sealed partial class ClientContext
 {
+    public ProgressionState LatestProgression { get; private set; }
+
+    public IdleFillerKeepalive IdleFiller { get; private set; } = null!;
+
     private void BuildApplicationGraph()
     {
         var bus = new ClientEventBus();
 
         var sceneMachine = new SceneStateMachine(bus);
 
+        _catalogueLoader = BuildCatalogueLoader();
+
+        var catalogueStore = new VfsCatalogueStore(_catalogueLoader);
+        CatalogueStore = catalogueStore;
+
         _loadVfsPipeline = MountLoadResourcePipeline();
         var loadOrchestrator = new LoadOrchestrator(
             sceneMachine,
             new VfsLoadResourceSource(_loadVfsPipeline),
             new OpeningSkipIniReader(ResolveOpeningSkipCfgPath()),
-            new GodotLoadingSoundSink());
+            new GodotLoadingSoundSink(),
+            catalogueStore);
 
         var world = new ClientWorld();
 
@@ -69,8 +83,6 @@ public sealed partial class ClientContext
         var worldRelay = new RelayInputHandler();
         var inputBus = new InputBus(hudHandler, worldRelay);
 
-        _catalogueLoader = BuildCatalogueLoader();
-
         var scrStatCatalogue = ScrStatCatalogue.FromLoader(_catalogueLoader);
         GD.Print(
             $"[ClientContext] ScrStatCatalogue loaded (HP curve entries={scrStatCatalogue.GetHpBaseCurve().Count}, " +
@@ -81,6 +93,15 @@ public sealed partial class ClientContext
         MobCatalogue = MobCatalogue.FromLoader(_catalogueLoader);
         GD.Print($"[ClientContext] Catalogues loaded: {ItemCatalogue.Count} items, " +
                  $"{SkillCatalogue.Count} skills, {MobCatalogue.Count} mobs.");
+
+        CharacterTextureResolver.Catalogue = catalogueStore.CharacterVisuals;
+        PlayerAvatarResolver.CharacterVisuals = catalogueStore.CharacterVisuals;
+        PlayerAvatarResolver.ItemScales = catalogueStore.ItemScales;
+        GD.Print($"[ClientContext] Boot catalogues wired through VfsCatalogueStore: " +
+                 $"npc={catalogueStore.Npc.Count}, itemScale={catalogueStore.ItemScales.Count}, " +
+                 $"itemEffect={catalogueStore.ItemEffects.Count}, charTex={catalogueStore.CharacterVisuals.TexCount}, " +
+                 $"charSkins={catalogueStore.CharacterVisuals.SkinCount}, emoticons={catalogueStore.Emoticons.Count}, " +
+                 $"crests={catalogueStore.Crests.Count}. spec: resource_pipeline.md §2.1a.");
 
         _uiAssets = RealClientAssets.TryOpen();
         UiCatalogs = new UiCatalogs(_uiAssets);
@@ -181,15 +202,43 @@ public sealed partial class ClientContext
                  "spec: login_flow.md §3.5 / §5.2.");
 
         var enterWorldRelay = new RelayEnterWorldEmitter();
+
+        const ushort linkAckMajor = 2;
+        const ushort linkAckMinor = 146;
+        Func<uint, CancellationToken, ValueTask> linkAckEmitter = (echoedReqId, ct) =>
+        {
+            var body = new byte[8];
+            BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(0, 4), echoedReqId);
+            BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(4, 4), 0u);
+            return relaySink.SendAsync(sessionId, linkAckMajor, linkAckMinor, body, ct);
+        };
+        GD.Print("[ClientContext] linkAckEmitter wired: inbound 5/146 → C2S 2/146 reply " +
+                 "[u32 echoed_req_id][u32 local_state]; local_state=0 (field-1 capture/debugger-pending R-30). " +
+                 "spec: network_dispatch.md §4.5a; net_contracts.md §2 (reactive 2/146).");
+
         var handler = new GamePacketHandler(world, bus, opcodeSink, loginDriver,
             characterSelection: characterSelection,
             accountCharacters: accountCharacters,
             sceneStateMachine: sceneMachine,
             inFlightLatch: inFlightLatch,
             worldEntry: worldEntry,
-            enterWorldEmitter: enterWorldRelay.Invoke)
+            enterWorldEmitter: enterWorldRelay.Invoke,
+            linkAckEmitter: linkAckEmitter)
         {
-            VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue)
+            VitalsResolver = CatalogueVitalsResolver.Create(scrStatCatalogue),
+            CombatStatsRecompute = combat =>
+            {
+                var primary = new PrimaryStats(combat.Str, combat.Dex, combat.Agil, combat.Vital, combat.Inte);
+                var attackRating = CombatFormula.AttackRating(new AttackRatingInputs { Stats = primary });
+                var hitRating = CombatFormula.HitRating(new HitRatingInputs { Stats = primary });
+                return combat with { AttackRating = attackRating, HitRating = hitRating };
+            },
+            CooldownDurationResolver = skill => SkillCatalogue.TryGet(skill, out var def) ? def.CooldownDurationMs : 0,
+            SkillDefinitionResolver = skill => SkillCatalogue.TryGet(skill, out var def) ? def : null,
+            ProgressionRefresh = state => LatestProgression = state,
+            LevelTableErrorSink = levelIndex => GD.PrintErr(
+                $"[ClientContext] Rank-XP leveltable error at level index {levelIndex} " +
+                "(divisor table absent or zero). spec: progression.md §4 (leveltable error diagnostic).")
         };
 
         var dispatcher = new InboundFrameDispatcher(handler);
@@ -244,6 +293,12 @@ public sealed partial class ClientContext
         Keepalive = new KeepaliveDriver(noopSink, sessionId, inFlightLatch);
         GD.Print("[ClientContext] KeepaliveDriver constructed (idle 2/10000 @20s + 2/112 world toggle). " +
                  "spec: world_entry.md §2.5/§3.2; net_contracts.md §2.15.");
+
+        IdleFiller = new IdleFillerKeepalive(noopSink, sessionId, () => inFlightLatch.IsArmed);
+        GD.Print("[ClientContext] IdleFillerKeepalive constructed (1/2 header-only idle filler; " +
+                 "isSendInFlight=InFlightLatch.IsArmed). Drive Tick + Enable/Disable on world enter/exit " +
+                 "from the keepalive poll loop alongside KeepaliveDriver. " +
+                 "spec: network_dispatch.md §4 (1/2 idle filler); net_contracts.md §2.15.");
 
         var engineLoop = new GameEngineLoop(world, bus, inputBus);
 

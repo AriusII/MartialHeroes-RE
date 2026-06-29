@@ -27,16 +27,6 @@ public static class SknSkinnedBuilder
         SkinnedMesh mesh,
         ImageTexture? albedo,
         out ViewerSkinnedNode? node,
-        out string[] motionPaths)
-    {
-        return Build(archive, mesh, albedo, out node, out motionPaths, out _);
-    }
-
-    public static Node3D Build(
-        MappedVfsArchive archive,
-        SkinnedMesh mesh,
-        ImageTexture? albedo,
-        out ViewerSkinnedNode? node,
         out string[] motionPaths,
         out SknBuildInfo info)
     {
@@ -45,7 +35,7 @@ public static class SknSkinnedBuilder
 
         var root = new Node3D { Name = $"SkinnedChar_{mesh.Name}" };
 
-        var pivot = new Node3D { Name = "Pivot" };
+        var pivot = new Node3D { Name = "Pivot", RotationDegrees = new Vector3(0f, 0f, 90f) };
         root.AddChild(pivot);
 
         var resolution = CharacterAssetResolver.ResolveSkeleton(archive, mesh);
@@ -105,7 +95,6 @@ public static class SknSkinnedBuilder
 
         try
         {
-            pivot.RotationDegrees = new Vector3(0f, 0f, 90f);
             var (inst, aabb) = BuildStaticPart(mesh, albedo);
             pivot.AddChild(inst);
             RecentreRoot(root, TransformAabb(pivot.Transform.Basis, aabb));

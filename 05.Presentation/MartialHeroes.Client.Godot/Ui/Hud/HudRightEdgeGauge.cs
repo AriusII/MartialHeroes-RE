@@ -134,7 +134,8 @@ public sealed partial class HudRightEdgeGauge : Control
     public void BindHub(IHudEventHub hub)
     {
         _hub = hub;
-        GD.Print("[HudRightEdgeGauge] BindHub: Vitals channel wired — HP/MP gauge will drain live data. " +
+        GD.Print("[HudRightEdgeGauge] BindHub: VitalsGauge channel wired (dedicated fan-out so the " +
+                 "PlayerStatusPanel Vitals reader no longer steals events — SingleReader bounded channels). " +
                  "spec: Docs/RE/packets/5-53_actor_vitals_and_pair_state.yaml.");
     }
 
@@ -143,7 +144,7 @@ public sealed partial class HudRightEdgeGauge : Control
         if (_hub is null) return;
 
         HudVitalsEvent? latest = null;
-        while (_hub.Vitals.TryRead(out var v))
+        while (_hub.VitalsGauge.TryRead(out var v))
             latest = v;
 
         if (latest is null) return;

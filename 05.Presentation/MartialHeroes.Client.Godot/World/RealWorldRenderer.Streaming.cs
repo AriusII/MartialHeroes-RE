@@ -1,11 +1,34 @@
 using Godot;
-using MartialHeroes.Client.Application.World;
+using MartialHeroes.Client.Domain.Simulation.Simulation;
 using MartialHeroes.Client.Godot.Autoload;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class RealWorldRenderer
 {
+    private const float B2StreamRadiusHigh = 1800f;
+
+    private const float B2StreamRadiusMedium = 1000f;
+
+    private const float B2StreamRadiusLow = 600f;
+
+    private const float B2StreamRadiusCeiling = 15_000f;
+
+    private const float B2StreamRadiusCeilingReset = 1000f;
+
+    private const float B2RingForwardThreshold = 1000f;
+
+    private static float B2SelectStreamRadius()
+    {
+        return B2StreamRadiusHigh;
+    }
+
+    private static float B2ClampStreamRadius(float radius)
+    {
+        if (radius < 0f) return 0f;
+        return radius >= B2StreamRadiusCeiling ? B2StreamRadiusCeilingReset : radius;
+    }
+
     private void TriggerTerrainStreaming(ClientContext ctx)
     {
         if (_streamingCts is not null)
@@ -52,12 +75,14 @@ public sealed partial class RealWorldRenderer
         GD.Print($"[RealWorldRenderer] CellCollisionManager ready for area {TargetAreaId} " +
                  "(single instance; geometry cleared on rebind). spec: Docs/RE/formats/sod.md.");
 
-        const float CameraFarPlaneWu = 15_000f;
-        var candidateStreamRadius = CameraFarPlaneWu;
-        var effectiveStreamRadius = WorldSceneContract.ClampStreamRadius(candidateStreamRadius);
+        var candidateStreamRadius = B2SelectStreamRadius();
+        var effectiveStreamRadius = B2ClampStreamRadius(candidateStreamRadius);
+        var ringQuality = effectiveStreamRadius > B2RingForwardThreshold ? StreamQuality.High : StreamQuality.Medium;
+        ctx.StreamingService.Quality = ringQuality;
         GD.Print($"[RealWorldRenderer] Stream radius: candidate={candidateStreamRadius:F0} wu, " +
-                 $"effective (clamped)={effectiveStreamRadius:F0} wu. " +
-                 "spec: Docs/RE/specs/world_systems.md §13.1 (WorldSceneContract.ClampStreamRadius).");
+                 $"effective={effectiveStreamRadius:F0} wu (clamp: >=15000 -> 1000), " +
+                 $"ring={(ringQuality == StreamQuality.High ? "5x5" : "3x3")}. " +
+                 "spec: Docs/RE/specs/terrain-streaming.md §6.6 (quality tier 1800/1000/600 + 15000->1000 clamp), §6.0/§6.2 (radius>1000 -> 5x5 ring).");
 
         _streamAnchor = (TargetMapX, TargetMapZ);
 

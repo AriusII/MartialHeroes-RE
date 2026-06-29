@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
 
@@ -7,8 +6,6 @@ namespace MartialHeroes.Assets.Parsers.Terrain;
 
 public static class TerrainSceneParser
 {
-    private const uint VertexCountWarnThreshold = 3072;
-
     private const int VertexStride = 32;
 
     public static BudScene Parse(ReadOnlyMemory<byte> data)
@@ -43,13 +40,6 @@ public static class TerrainSceneParser
 
             var vertexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
             offset += 4;
-
-            if (vertexCount > VertexCountWarnThreshold)
-                Debug.WriteLine(
-                    $"[TerrainSceneParser] .bud object[{i}] vertex_count {vertexCount} " +
-                    $"exceeds the legacy warn-threshold {VertexCountWarnThreshold} — continuing " +
-                    "(warn-only, not an error). " +
-                    "spec: Docs/RE/formats/terrain_scene.md §vertex_count warn-and-continue.");
 
             var vertexBytes = (long)vertexCount * VertexStride;
             EnsureBytes(span, offset, vertexBytes, $"object[{i}] vertex array");

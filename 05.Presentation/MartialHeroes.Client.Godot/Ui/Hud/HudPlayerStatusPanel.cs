@@ -51,6 +51,7 @@ public sealed partial class HudPlayerStatusPanel : Control
 
 
     private ChannelReader<HudVitalsEvent>? _vitals;
+    private ChannelReader<ExpLevelEvent>? _expLevels;
 
 
     public void Build(HudAtlasLibrary atlas)
@@ -147,19 +148,32 @@ public sealed partial class HudPlayerStatusPanel : Control
     public void BindHub(IHudEventHub hub)
     {
         _vitals = hub.Vitals;
-        GD.Print("[HudPlayerStatusPanel] BindHub: Vitals channel connected.");
+        _expLevels = hub.ExpLevels;
+        GD.Print("[HudPlayerStatusPanel] BindHub: Vitals + ExpLevels channels connected.");
     }
 
 
     public override void _Process(double delta)
     {
-        if (_vitals is null) return;
+        if (_vitals is not null)
+            while (_vitals.TryRead(out var ev))
+            {
+                if (ev is null) continue;
+                ApplyVitals(ev);
+            }
 
-        while (_vitals.TryRead(out var ev))
-        {
-            if (ev is null) continue;
-            ApplyVitals(ev);
-        }
+        if (_expLevels is not null)
+            while (_expLevels.TryRead(out var exp))
+            {
+                if (exp is null) continue;
+                ApplyExpLevel(exp);
+            }
+    }
+
+    private void ApplyExpLevel(ExpLevelEvent exp)
+    {
+        if (_levelLabel is null) return;
+        _levelLabel.Text = $"Lv.{exp.Level}";
     }
 
 

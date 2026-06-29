@@ -9,18 +9,19 @@ namespace MartialHeroes.Explorer.Files.Controls;
 
 public partial class TableView : UserControl
 {
+    private const int PageSize = 1000;
+
     public static readonly StyledProperty<TableDocument?> DocumentProperty =
         AvaloniaProperty.Register<TableView, TableDocument?>(nameof(Document));
 
-    private const int PageSize = 1000;
+    private readonly Button _first;
 
     private readonly DataGrid _grid;
-    private readonly Border _pager;
-    private readonly TextBlock _pageInfo;
-    private readonly Button _first;
-    private readonly Button _prev;
-    private readonly Button _next;
     private readonly Button _last;
+    private readonly Button _next;
+    private readonly TextBlock _pageInfo;
+    private readonly Border _pager;
+    private readonly Button _prev;
 
     private int _page;
     private int _pageCount = 1;

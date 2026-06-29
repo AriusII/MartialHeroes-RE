@@ -21,9 +21,9 @@ public sealed class ZoneCatalog
 
     private readonly RealClientAssets? _assets;
 
-    private readonly Dictionary<int, RegionGrid?> _gridCache = new();
+    private readonly Dictionary<int, RegionGridData?> _gridCache = new();
 
-    private readonly Dictionary<int, RegionTableRecord[]?> _regionCache = new();
+    private readonly Dictionary<int, RegionZoneProperties[]?> _regionCache = new();
 
     private MapZoneRecord[]? _zones;
     private bool _zonesAttempted;
@@ -83,7 +83,7 @@ public sealed class ZoneCatalog
 
             foreach (var r in recs)
                 if (r.RegionId == regionId)
-                    return r.ZoneName ?? string.Empty;
+                    return r.ZoneName;
 
             return string.Empty;
         }
@@ -91,7 +91,7 @@ public sealed class ZoneCatalog
         if (zoneRecord is not null)
             foreach (var r in recs)
                 if (r.RegionId == areaId)
-                    return r.ZoneName ?? string.Empty;
+                    return r.ZoneName;
 
         return string.Empty;
     }
@@ -131,7 +131,7 @@ public sealed class ZoneCatalog
         return _zones;
     }
 
-    private RegionTableRecord[]? EnsureRegionTable(int areaId)
+    private RegionZoneProperties[]? EnsureRegionTable(int areaId)
     {
         if (_regionCache.TryGetValue(areaId, out var cached)) return cached;
 
@@ -157,7 +157,7 @@ public sealed class ZoneCatalog
                 return null;
             }
 
-            var recs = RegionTableParser.Parse(raw);
+            var recs = RegionZonePropertiesParser.Parse(raw);
             _regionCache[areaId] = recs;
             GodotPrint($"[ZoneCatalog] regiontable{areaId:D3}.bin loaded: {recs.Length} records. " +
                        "spec: Docs/RE/formats/region_grid.md §regiontable CONFIRMED.");
@@ -177,7 +177,7 @@ public sealed class ZoneCatalog
         }
     }
 
-    private RegionGrid? EnsureRegionGrid(int areaId)
+    private RegionGridData? EnsureRegionGrid(int areaId)
     {
         if (_gridCache.TryGetValue(areaId, out var cached)) return cached;
 
@@ -197,7 +197,7 @@ public sealed class ZoneCatalog
                 return null;
             }
 
-            var grid = RegionBinParser.Parse(raw);
+            var grid = RegionGridParser.Parse(raw);
             _gridCache[areaId] = grid;
             GodotPrint($"[ZoneCatalog] region{areaId:D3}.bin grid loaded: {grid.Width}×{grid.Height}. " +
                        "spec: Docs/RE/formats/region_grid.md §Layout A.");

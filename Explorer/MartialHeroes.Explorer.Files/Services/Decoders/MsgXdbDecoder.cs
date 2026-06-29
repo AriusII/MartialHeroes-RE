@@ -20,7 +20,7 @@ public sealed class MsgXdbDecoder : IFormatDecoder
                 var record = catalog.Records[i];
                 rows.Add(new TableRow
                 {
-                    Cells = [(i + 1).ToString(), record.CaptionId.ToString(), record.Text]
+                    Cells = [(i + 1).ToString(), ((uint)record.CaptionId).ToString(), record.Text]
                 });
             }
 

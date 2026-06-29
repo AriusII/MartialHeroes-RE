@@ -16,8 +16,8 @@ public sealed partial class RealWorldRenderer
         _terrainNode = terrainNode;
 
         _composeRender = ReadComposeRenderFlag();
-        GD.Print($"[RealWorldRenderer] compose_render={_composeRender} " +
-                 "(set compose_render=1 in client_dir.cfg or MH_COMPOSE_RENDER=1 to enable composer path).");
+        GD.Print($"[RealWorldRenderer] compose_render={_composeRender} (default ON — the per-cell " +
+                 "building/FX + NPC-spawn path; set compose_render=0 in client_dir.cfg or MH_COMPOSE_RENDER=0 to disable).");
 
         GD.Print("[RealWorldRenderer] Initialise: opening VFS");
         try

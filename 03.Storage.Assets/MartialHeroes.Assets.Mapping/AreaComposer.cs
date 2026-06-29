@@ -2,6 +2,7 @@ using MartialHeroes.Assets.Parsers.Audio;
 using MartialHeroes.Assets.Parsers.Audio.Models;
 using MartialHeroes.Assets.Parsers.Terrain;
 using MartialHeroes.Assets.Parsers.Terrain.Models;
+using MartialHeroes.Assets.Parsers.World;
 
 namespace MartialHeroes.Assets.Mapping;
 
@@ -11,8 +12,12 @@ public sealed class AreaComposer
     public const int RingSize = 25;
     public const int RingEdge = 5;
     public const int CenterSlot = 12;
+
+    private const int NpcSpawnRecordStride = 28;
     private readonly PoolEntry[] _pool = CreatePool();
     private readonly int[] _ring = CreateRing();
+    private BgTextureCatalog? _cachedBgCatalog;
+    private int _cachedBgCatalogAreaId = int.MinValue;
     private int _centerMapX;
     private int _centerMapZ;
     private bool _ringInitialized;
@@ -180,7 +185,7 @@ public sealed class AreaComposer
             }
         }
 
-        var bgCatalog = BgTextureCatalog.FromLst(source.TerrainTextureCatalog);
+        var bgCatalog = GetOrBuildBgCatalog(source);
 
         string?[]? resolvedPaths = null;
         if (slot0Ted is not null && terrainTextures is not null && terrainTextures.Length > 0)
@@ -383,9 +388,41 @@ public sealed class AreaComposer
     }
 
 
+    private BgTextureCatalog GetOrBuildBgCatalog(IAreaAssemblySource source)
+    {
+        if (_cachedBgCatalog is not null && _cachedBgCatalogAreaId == source.AreaId)
+            return _cachedBgCatalog;
+
+        var catalog = BgTextureCatalog.FromLst(source.TerrainTextureCatalog);
+        _cachedBgCatalog = catalog;
+        _cachedBgCatalogAreaId = source.AreaId;
+        return catalog;
+    }
+
+
     private static IReadOnlyList<SpawnDescriptor> BuildSpawns(IAreaAssemblySource source)
     {
-        return Array.Empty<SpawnDescriptor>();
+        if (!source.TryGetAreaNpcSpawns(out var npcBytes) || npcBytes.Length < NpcSpawnRecordStride)
+            return Array.Empty<SpawnDescriptor>();
+
+        var spawnArray = NpcSpawnParser.Parse(npcBytes);
+        var records = spawnArray.Records;
+        var spawns = new SpawnDescriptor[records.Length];
+
+        for (var i = 0; i < records.Length; i++)
+        {
+            var rec = records[i];
+            spawns[i] = new SpawnDescriptor
+            {
+                WorldX = rec.WorldX,
+                WorldZ = rec.WorldZ,
+                Yaw = rec.AppliedFacing,
+                VisualId = rec.MobId,
+                IsNpc = true
+            };
+        }
+
+        return spawns;
     }
 
 

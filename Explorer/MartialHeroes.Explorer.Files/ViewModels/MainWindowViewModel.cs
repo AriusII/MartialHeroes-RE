@@ -76,9 +76,12 @@ public partial class MainWindowViewModel : ViewModelBase
             var session = await Task.Run(() => VfsSession.Open(dir));
             var tabs = BuildTabs(session.Files);
 
-            _session?.Dispose();
+            var previous = _session;
             _session = session;
             ClientDir = dir;
+
+            if (previous is not null)
+                _ = Task.Run(previous.Dispose);
 
             Tabs.Clear();
             foreach (var tab in tabs)
@@ -185,10 +188,7 @@ public partial class MainWindowViewModel : ViewModelBase
         try
         {
             var document = await Task.Run(() =>
-            {
-                var bytes = session.Read(node);
-                return _catalog.Decode(node, bytes);
-            });
+                session.Use(node, bytes => _catalog.Decode(node, bytes)));
 
             if (token != Volatile.Read(ref _decodeToken)) return;
 

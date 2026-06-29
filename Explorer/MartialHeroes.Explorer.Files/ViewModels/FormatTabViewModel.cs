@@ -16,6 +16,4 @@ public sealed class FormatTabViewModel
     public string Description => Family.Description;
 
     public int FileCount => Files.Count;
-
-    public string Header => $"{Glyph}  {Title}  ({FileCount:N0})";
 }

@@ -1,10 +1,10 @@
 namespace MartialHeroes.Assets.Parsers.Character.Models;
 
 public sealed record SkinTxtEntry(
-    int Category,
-    int HundredsGroup,
-    int MillionsGroup,
-    int LowRemainder,
+    int AppearanceGroup,
+    int ModelClassId,
+    int CatalogueSlot,
+    int GidReducedRemainder,
     int MeshGid,
     int TextureId);
 
@@ -12,10 +12,11 @@ public sealed class SkinTxtCatalog
 {
     private const int BodySlot = 3;
 
-    private const int BaseCategory = 0;
+    private const int BaseAppearanceGroup = 0;
     private const int NoRemainder = 0;
 
-    private readonly Dictionary<(int Category, int Slot, int ClassKey, int Remainder), SkinTxtEntry> _byBodyKey;
+    private readonly Dictionary<(int AppearanceGroup, int CatalogueSlot, int ModelClassId, int GidReducedRemainder),
+        SkinTxtEntry> _byBodyKey;
 
     private readonly Dictionary<int, SkinTxtEntry> _byMeshGid;
 
@@ -27,7 +28,9 @@ public sealed class SkinTxtCatalog
         foreach (var entry in entries)
         {
             _byMeshGid.TryAdd(entry.MeshGid, entry);
-            _byBodyKey.TryAdd((entry.Category, entry.MillionsGroup, entry.HundredsGroup, entry.LowRemainder), entry);
+            _byBodyKey.TryAdd(
+                (entry.AppearanceGroup, entry.CatalogueSlot, entry.ModelClassId, entry.GidReducedRemainder),
+                entry);
         }
     }
 
@@ -42,7 +45,7 @@ public sealed class SkinTxtCatalog
 
     public int? GetBodyMeshGid(int modelClassId)
     {
-        return _byBodyKey.TryGetValue((BaseCategory, BodySlot, modelClassId, NoRemainder), out var entry)
+        return _byBodyKey.TryGetValue((BaseAppearanceGroup, BodySlot, modelClassId, NoRemainder), out var entry)
                && entry.MeshGid > 0
             ? entry.MeshGid
             : null;

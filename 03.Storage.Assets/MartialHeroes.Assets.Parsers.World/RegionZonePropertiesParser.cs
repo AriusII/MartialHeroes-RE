@@ -32,9 +32,8 @@ public static class RegionZonePropertiesParser
     {
         if (span.Length < RecordBlockSize)
             throw new InvalidDataException(
-                $"regiontable*.bin parse error: buffer length {span.Length} is too short for " +
-                $"{RecordCount} x {RecordStride}-byte records (expected >= {RecordBlockSize} bytes). " +
-                "spec: Docs/RE/formats/region_grid.md §regiontable<NNN>.bin");
+                $"regiontable.bin parse error: buffer length {span.Length} is too short for " +
+                $"{RecordCount} x {RecordStride}-byte records (expected >= {RecordBlockSize} bytes).");
 
         var cp949 = Encoding.GetEncoding(949);
         var results = new RegionZoneProperties[RecordCount];

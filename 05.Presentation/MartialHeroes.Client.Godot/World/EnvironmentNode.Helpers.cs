@@ -6,9 +6,9 @@ namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class EnvironmentNode
 {
-    private static Color ColorAOf(LightingKeyframe kf)
+    private static Color ColorBOf(LightingKeyframe kf)
     {
-        var c = kf.ColorA;
+        var c = kf.ColorB;
         return ClampColor(new Color(SafeF(c, 0), SafeF(c, 1), SafeF(c, 2)));
     }
 
@@ -22,8 +22,15 @@ public sealed partial class EnvironmentNode
         return ClampColor(new Color(SafeF(row, 0), SafeF(row, 1), SafeF(row, 2)));
     }
 
-    private static Color LerpFogColor(FogBin fog, int kf, int kfNext, float frac)
+    private Color LerpFogColor(FogBin fog, int kf, int kfNext, float frac)
     {
+        if (_synthFogColors is not null)
+        {
+            var sa = _synthFogColors[Math.Clamp(kf, 0, _synthFogColors.Length - 1)];
+            var sb = _synthFogColors[Math.Clamp(kfNext, 0, _synthFogColors.Length - 1)];
+            return sa.Lerp(sb, frac);
+        }
+
         var a = BgraToColor(fog.FogColors[Math.Clamp(kf, 0, fog.FogColors.Length - 1)]);
         var b = BgraToColor(fog.FogColors[Math.Clamp(kfNext, 0, fog.FogColors.Length - 1)]);
         return a.Lerp(b, frac);
@@ -127,18 +134,17 @@ public sealed partial class EnvironmentNode
         var light = _env?.Light;
 
         var fogStr = fog is not null
-            ? $"start={fog.StartDist:F3}(×{ViewRange:F0}={fog.StartDist * ViewRange:F0}u) " +
-              $"end={fog.EndDist:F3}(={fog.EndDist * ViewRange:F0}u) " +
-              $"noonColor={BgraToColor(fog.FogColors[kf])}"
+            ? $"dataLoadFlag={fog.DataLoadFlag} start={fog.StartDist:F3}(×{_streamRadius:F0}={fog.StartDist * _streamRadius:F0}u) " +
+              $"end={fog.EndDist:F3}(={fog.EndDist * _streamRadius:F0}u) synth={_synthFogColors is not null}"
             : "none(disabled)";
 
         string lightStr;
         if (light is not null && light.DirectionalKeyframes.Length == KeyframeCount)
         {
-            var sun = ColorAOf(light.DirectionalKeyframes[kf]);
-            lightStr = $"sunColorA={sun} (energy=1.0 RAW) " +
-                       $"ambFloor(OPTION_BRIGHT/100)={OptionBrightFloor:F2} [§B keyframes inert, K_ambient=0] " +
-                       $"fallbackDir=({light.FallbackDirX:F0},{light.FallbackDirY:F0},{light.FallbackDirZ:F0})";
+            var sun = ColorBOf(light.DirectionalKeyframes[kf]);
+            lightStr = $"sunColorB(diffuse +0x10)={sun} (energy=1.0 RAW) " +
+                       $"ambFloor(OPTION_BRIGHT/100)={OptionBrightFloor:F2} " +
+                       $"sunDir=({light.SunDirectionX:F0},{light.SunDirectionY:F0},{light.SunDirectionZ:F0})";
         }
         else
         {
@@ -153,6 +159,9 @@ public sealed partial class EnvironmentNode
 
         GD.Print($"[Environment] area={_areaId} keyframe={kf} {skyGate} " +
                  $"material={_env?.Material is not null} cycle={CycleEnabled}@{CycleSpeed:F0}ms/s " +
-                 $"tonemap=Linear/1.0 glow=Screen | fog: {fogStr} | light: {lightStr} | sunDirGodot={sunDir}");
+                 $"tonemap=Linear/1.0 glow=Additive(c1={_glowGlowWeight:F2},c0={_glowBaseWeight:F2}) | " +
+                 $"fog: {fogStr} | light: {lightStr} | " +
+                 $"pointLights: records={_plRecords?.Length ?? 0} active={_plActiveCount} master={_plMasterIntensity:F2} | " +
+                 $"sunDirGodot={sunDir}");
     }
 }

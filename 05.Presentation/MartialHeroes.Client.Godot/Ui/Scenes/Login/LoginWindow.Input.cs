@@ -64,11 +64,12 @@ public sealed partial class LoginWindow
 
             case LoginLayout.ActionConfirm:
                 if (_flowSubState != 35
-                    && global::Godot.Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
+                    && Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
                 {
-                    _lastServerFetchMs = global::Godot.Time.GetTicksMsec();
+                    _lastServerFetchMs = Time.GetTicksMsec();
                     RestartServerFetch();
                 }
+
                 break;
 
             case LoginLayout.ActionOptionTab2:
@@ -77,9 +78,9 @@ public sealed partial class LoginWindow
 
             case 105:
                 if (_flowSubState != 35
-                    && global::Godot.Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
+                    && Time.GetTicksMsec() >= _lastServerFetchMs + ServerFetchThrottleMs)
                 {
-                    _lastServerFetchMs = global::Godot.Time.GetTicksMsec();
+                    _lastServerFetchMs = Time.GetTicksMsec();
                     RestartServerFetch();
                 }
 
@@ -94,6 +95,7 @@ public sealed partial class LoginWindow
                     RunState(38);
                     RunState(39);
                 }
+
                 break;
 
             case LoginLayout.ActionQuitConfirmYes1
@@ -232,7 +234,7 @@ public sealed partial class LoginWindow
 
         _errorN = 3;
         _errorBudgetMs = ErrorBudgetStartMs;
-        _errorLastDecrementMs = global::Godot.Time.GetTicksMsec();
+        _errorLastDecrementMs = Time.GetTicksMsec();
         RebuildErrorOkCaption();
 
         _errorPanel.Visible = true;
@@ -259,7 +261,7 @@ public sealed partial class LoginWindow
 
     private void TickErrorCountdown()
     {
-        var nowMs = global::Godot.Time.GetTicksMsec();
+        var nowMs = Time.GetTicksMsec();
         if (nowMs >= _errorLastDecrementMs + 1000u && _errorBudgetMs > 0)
         {
             _errorBudgetMs -= 1000.0;

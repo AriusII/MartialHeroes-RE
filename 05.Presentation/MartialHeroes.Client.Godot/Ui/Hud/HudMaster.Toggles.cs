@@ -208,4 +208,14 @@ public sealed partial class HudMaster
     {
         _minimapPanel?.OnSectorUnloaded(mapX, mapZ);
     }
+
+    public void OnWorldArea(int areaId)
+    {
+        _minimapPanel?.SetAreaId(areaId);
+    }
+
+    public void UpdateMinimapPlayerPosition(float worldX, float worldZ)
+    {
+        _minimapPanel?.UpdateLocalPlayerPosition(worldX, worldZ);
+    }
 }

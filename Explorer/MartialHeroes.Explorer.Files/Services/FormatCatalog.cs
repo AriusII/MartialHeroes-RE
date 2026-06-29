@@ -18,51 +18,57 @@ public sealed class FormatCatalog
         [
             new FormatFamily
             {
-                Id = "text", Title = "Text Tables", Glyph = "▦", Order = 0,
+                Id = "text", Title = "Text Tables", Glyph = "▦",
                 Description = "TAB-delimited CP949 data tables (skin, actormotion, bgtexture, …).",
                 Extensions = [".txt"], Decoder = tabDelimited
             },
             new FormatFamily
             {
-                Id = "messages", Title = "Messages (.xdb)", Glyph = "✉", Order = 1,
-                Description = "Localised message catalogues — 516-byte records.",
-                Extensions = [".xdb"], Decoder = new MsgXdbDecoder()
+                Id = "messages", Title = "Catalogues (.xdb)", Glyph = "✉",
+                Description = "Binary table catalogues — msg / effectscale / buff-icon / vehicle / creature.",
+                Extensions = [".xdb"], Decoder = new XdbDecoder()
             },
             new FormatFamily
             {
-                Id = "items", Title = "Items (.csv)", Glyph = "≣", Order = 2,
+                Id = "items", Title = "Items (.csv)", Glyph = "≣",
                 Description = "Comma-separated item / config rows (CP949).",
                 Extensions = [".csv"], Decoder = commaDelimited
             },
             new FormatFamily
             {
-                Id = "stances", Title = "Stances (.do)", Glyph = "⚐", Order = 3,
-                Description = "Per-class stance icon tables — 116-byte records.",
-                Extensions = [".do"], Decoder = new DoStanceDecoder()
+                Id = "stances", Title = "Tables (.do)", Glyph = "⚐",
+                Description = "Binary .do tables — 12 stance hotbars, textcommand, emoticon, msginfo, items_extra.",
+                Extensions = [".do"], Decoder = new DoTableDecoder()
             },
             new FormatFamily
             {
-                Id = "scripts", Title = "Scripts (.scr)", Glyph = "❯", Order = 4,
-                Description = "Script tables — TAB text where readable, hex otherwise.",
-                Extensions = [".scr"], Decoder = tabDelimited
+                Id = "scripts", Title = "Scripts (.scr)", Glyph = "❯",
+                Description = "Binary fixed-stride record tables — per-file parser, hex fallback.",
+                Extensions = [".scr"], Decoder = new ScrDecoder()
             },
             new FormatFamily
             {
-                Id = "shaders", Title = "Shaders", Glyph = "✦", Order = 5,
+                Id = "shaders", Title = "Shaders", Glyph = "✦",
                 Description = "D3D9 vertex / pixel shader source (ASCII).",
                 Extensions = [".vsh", ".psh"], Decoder = plainText
             },
             new FormatFamily
             {
-                Id = "config", Title = "Config & Lists", Glyph = "☰", Order = 6,
-                Description = "Configuration files and manifest lists.",
-                Extensions = [".ini", ".cfg", ".lst"], Decoder = universal
+                Id = "lists", Title = "Lists (.lst)", Glyph = "≡",
+                Description = "Manifest lists — binary bgtexture / xobj / bmplist / xeffect indexes, text otherwise.",
+                Extensions = [".lst"], Decoder = new LstDecoder()
+            },
+            new FormatFamily
+            {
+                Id = "config", Title = "Config", Glyph = "☰",
+                Description = "Configuration files (INI / CFG).",
+                Extensions = [".ini", ".cfg"], Decoder = universal
             }
         ];
 
         AllFiles = new FormatFamily
         {
-            Id = "all", Title = "All Files", Glyph = "✱", Order = 999,
+            Id = "all", Title = "All Files", Glyph = "✱",
             Description = "Every VFS entry — auto text/hex preview.",
             Extensions = [], ExtraMatch = static _ => true, Decoder = universal
         };

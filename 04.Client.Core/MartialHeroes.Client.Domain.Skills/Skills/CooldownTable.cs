@@ -24,6 +24,24 @@ public sealed class CooldownTable
         };
     }
 
+    public bool Arm(SkillId skill, long now)
+    {
+        for (var i = 0; i < _slots.Length; i++)
+        {
+            if (_slots[i].Skill != skill) continue;
+
+            _slots[i] = _slots[i] with
+            {
+                SetTimeMs = now,
+                RemainingMs = _slots[i].DurationMs,
+                Armed = _slots[i].DurationMs > 0
+            };
+            return _slots[i].DurationMs > 0;
+        }
+
+        return false;
+    }
+
     public void TickAll(long now)
     {
         for (var i = 0; i < _slots.Length; i++) _slots[i] = _slots[i].Tick(now);

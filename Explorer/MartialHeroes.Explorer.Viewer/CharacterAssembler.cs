@@ -78,7 +78,7 @@ public static class CharacterAssembler
             slotLines, 0, string.Empty, "none");
 
         var root = new Node3D { Name = $"Avatar_c{internalClass}_v{variant}" };
-        var pivot = new Node3D { Name = "Pivot" };
+        var pivot = new Node3D { Name = "Pivot", RotationDegrees = new Vector3(0f, 0f, 90f) };
         root.AddChild(pivot);
 
         if (modelClassId <= 0)
@@ -251,7 +251,7 @@ public static class CharacterAssembler
         body = parts.Count > 0 ? parts[0] : null;
 
         var weaponLine = TryAttachWeapon(
-            archive, catalog, modelClassId, pivot, meshCache, body, skeleton, (int)bodyMesh.IdB);
+            archive, catalog, modelClassId, pivot, meshCache, body, skeleton);
         slotLines.Add(weaponLine);
 
         info = info with { PartsResolved = resolvedCount, SkinnedParts = skinnedCount };
@@ -270,8 +270,7 @@ public static class CharacterAssembler
         Node3D pivot,
         Dictionary<int, SkinnedMesh?> meshCache,
         ViewerSkinnedNode? body,
-        Skeleton? skeleton,
-        int idB)
+        Skeleton? skeleton)
     {
         var entry = FindDefaultPart(catalog, WeaponSlot, modelClassId);
         if (entry is null || entry.MeshGid <= 0)
@@ -286,8 +285,7 @@ public static class CharacterAssembler
 
         if (body is not null && skeleton is not null)
         {
-            var subtypeOffset = WeaponSubtypeOffset(0);
-            var boneIndex = body.ResolveHandBoneIndex(idB, subtypeOffset);
+            var boneIndex = body.ResolveHandBoneIndex();
             if (boneIndex >= 0)
             {
                 inst.Name = "WeaponMesh";
@@ -295,27 +293,13 @@ public static class CharacterAssembler
                 attach.AddChild(inst);
                 pivot.AddChild(attach);
                 attach.Bind(body, boneIndex);
-                return $"slot 14 (weapon): g{entry.MeshGid}.skn rigid-attached to hand bone idx {boneIndex} " +
-                       "(hypothesis: userjoint hand-node table pending spec)";
+                return $"slot 14 (weapon): g{entry.MeshGid}.skn rigid-attached to default hand bone idx {boneIndex}";
             }
         }
 
         inst.Name = $"WeaponRigid_g{entry.MeshGid}";
         pivot.AddChild(inst);
         return $"slot 14 (weapon): g{entry.MeshGid}.skn rigid-attached (no hand bone resolved — static parent)";
-    }
-
-    private static int WeaponSubtypeOffset(int itemSubtype)
-    {
-        return itemSubtype switch
-        {
-            1 or 4 or 10 => 2,
-            2 or 5 or 8 or 11 => 3,
-            3 or 6 or 9 or 12 => 4,
-            7 => 2,
-            45 => 1,
-            _ => 0
-        };
     }
 
     private static ImageTexture? ResolvePartTexture(MappedVfsArchive archive, SkinTxtEntry entry, SkinnedMesh mesh)
@@ -372,14 +356,14 @@ public static class CharacterAssembler
 
         foreach (var e in catalog.Entries)
         {
-            if (e.MillionsGroup != catalogueSlot) continue;
-            if (e.HundredsGroup != modelClassId) continue;
+            if (e.CatalogueSlot != catalogueSlot) continue;
+            if (e.ModelClassId != modelClassId) continue;
             if (e.MeshGid <= 0) continue;
 
             if (anyMatch is null || e.MeshGid < anyMatch.MeshGid)
                 anyMatch = e;
 
-            if (e.LowRemainder == 0 && (remainderZero is null || e.MeshGid < remainderZero.MeshGid))
+            if (e.GidReducedRemainder == 0 && (remainderZero is null || e.MeshGid < remainderZero.MeshGid))
                 remainderZero = e;
         }
 

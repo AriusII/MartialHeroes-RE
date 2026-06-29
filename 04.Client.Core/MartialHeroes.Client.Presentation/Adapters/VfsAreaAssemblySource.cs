@@ -25,6 +25,13 @@ internal sealed class VfsAreaAssemblySource(MappedVfsArchive vfs, int areaId) : 
         return TryRead(vfsLogicalPath, out bytes);
     }
 
+    public bool TryGetAreaNpcSpawns(out ReadOnlyMemory<byte> npcSpawnBytes)
+    {
+        var tag = AreaTag(AreaId);
+        var path = $"data/map{tag}/npc{tag}.arr";
+        return TryRead(path, out npcSpawnBytes);
+    }
+
     private static string AreaTag(int areaId)
     {
         var d0 = areaId / 100;

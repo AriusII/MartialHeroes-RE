@@ -10,7 +10,7 @@ namespace MartialHeroes.Explorer.Viewer;
 public static class TedTerrainBuilder
 {
     private const int GridSize = TerrainCell.GridSize;
-    private const float Spacing = 16f;
+    private const float Spacing = TerrainCell.GridSpacing;
     private const float UvTiling = 4f;
 
     private static ImageTexture? _sharedWhiteTex;
@@ -245,9 +245,14 @@ public static class TedTerrainBuilder
 
         var whiteTex = GetOrCreateSharedWhiteTex();
 
-        for (var vi = 0; vi < GridSize * GridSize; vi++)
+        for (var row = 0; row < GridSize; row++)
+        for (var col = 0; col < GridSize; col++)
         {
-            var gridByte = vi < c.TextureIndexGrid.Length ? c.TextureIndexGrid[vi] : (byte)0;
+            var vi = row * GridSize + col;
+            var patchRow = Math.Min(row, GridSize - 2) / 4;
+            var patchCol = Math.Min(col, GridSize - 2) / 4;
+            var patchIndex = patchRow * 16 + patchCol;
+            var gridByte = patchIndex < c.TextureIndexGrid.Length ? c.TextureIndexGrid[patchIndex] : (byte)0;
             float w0 = 0f, w1 = 0f, w2 = 0f, w3 = 0f;
             for (var di = 0; di < distinctIndices.Count && di < 4; di++)
             {

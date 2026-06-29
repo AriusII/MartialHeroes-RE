@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using MartialHeroes.Network.Protocol.Core;
 
 namespace MartialHeroes.Network.Protocol.Routing.Routing;
@@ -20,17 +18,5 @@ public static partial class PacketRouter
         ArgumentNullException.ThrowIfNull(handler);
 
         return RouteGenerated(packedOpcode, payload, handler);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static ref readonly T Reinterpret<T>(ReadOnlySpan<byte> payload, int wireSize)
-        where T : struct
-    {
-        if (payload.Length < wireSize)
-            throw new ArgumentOutOfRangeException(
-                nameof(payload), payload.Length,
-                $"Payload too small for {typeof(T).Name}: need {wireSize} bytes.");
-
-        return ref MemoryMarshal.AsRef<T>(payload);
     }
 }

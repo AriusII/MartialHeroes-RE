@@ -17,6 +17,8 @@ public sealed partial class CameraController
 
         _focus = PlayerGodotPosition;
 
+        UpdatePlayerFacingYaw();
+
         if (_mode is ViewMode.Gamble or ViewMode.Event)
         {
             ApplyCurrentModeTransform();
@@ -27,13 +29,13 @@ public sealed partial class CameraController
         var anyKey = false;
         var friction = _mode == ViewMode.Static ? FrictionStatic : FrictionDefault;
 
-        if (global::Godot.Input.IsKeyPressed(Key.Q))
+        if (_mode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.Q))
         {
             _yawRate -= KeyboardGain;
             anyKey = true;
         }
 
-        if (global::Godot.Input.IsKeyPressed(Key.E))
+        if (_mode != ViewMode.Static && global::Godot.Input.IsKeyPressed(Key.E))
         {
             _yawRate += KeyboardGain;
             anyKey = true;
@@ -99,6 +101,26 @@ public sealed partial class CameraController
         }
     }
 
+    private void UpdatePlayerFacingYaw()
+    {
+        var pos = PlayerGodotPosition;
+
+        if (!_hasPrevPlayerPos)
+        {
+            _prevPlayerPos = pos;
+            _hasPrevPlayerPos = true;
+            return;
+        }
+
+        var dx = pos.X - _prevPlayerPos.X;
+        var dz = pos.Z - _prevPlayerPos.Z;
+        _prevPlayerPos = pos;
+
+        if (dx * dx + dz * dz < 1e-6f) return;
+
+        _playerFacingYaw = Mathf.Atan2(dx, dz);
+    }
+
     private void ApplyThirdPersonTransform()
     {
         var focusPoint = _focus + new Vector3(0f, 0f, -FocusZThird);
@@ -138,13 +160,37 @@ public sealed partial class CameraController
 
     private void ApplyFirstPersonTransform()
     {
-        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZFirst);
+        var eyePos = _focus;
+        eyePos.Y = SampleTerrainY(_focus, FirstEyeLift);
+
+        var yawTotal = FirstYawSeed + _playerFacingYaw + _yaw;
+        var yawBasis = Basis.Identity.Rotated(Vector3.Up, yawTotal);
+        var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
+
+        var forward = orbitBasis * Vector3.Forward;
+        var lookAt = eyePos + forward * FirstLookDistance;
+        lookAt.Y += FirstLookLift - FirstEyeLift;
+
+        if (!IsFiniteVector(eyePos) || !IsFiniteVector(lookAt)) return;
+        if ((eyePos - lookAt).LengthSquared() < 1e-6f) return;
+
+        Position = eyePos;
+        LookAt(lookAt, Vector3.Up);
+    }
+
+    private void ApplyStaticTransform()
+    {
+        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZStatic);
 
         var eyeOffsetSeed = new Vector3(EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ);
-        var yawBasis = Basis.Identity.Rotated(Vector3.Up, _yaw);
+        var yawBasis = Basis.Identity.Rotated(Vector3.Up, _playerFacingYaw);
         var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
         var eyeOffset = orbitBasis * eyeOffsetSeed;
+
         var eyePos = focusPoint + eyeOffset;
+
+        var minY = SampleTerrainY(eyePos, StaticEyeLift);
+        if (eyePos.Y < minY) eyePos.Y = minY;
 
         if (!IsFiniteVector(eyePos)) return;
         if ((eyePos - focusPoint).LengthSquared() < 1e-6f) return;
@@ -153,23 +199,20 @@ public sealed partial class CameraController
         LookAt(focusPoint, Vector3.Up);
     }
 
-    private void ApplyStaticTransform()
+    private float SampleTerrainY(Vector3 godotPos, float lift)
     {
-        var focusPoint = _focus + new Vector3(0f, 0f, -FocusZStatic);
+        if (GroundHeightFunc is null) return godotPos.Y;
 
-        const float FixedYaw = 0f;
-
-        var eyeOffsetSeed = new Vector3(EyeOffsetSeedLegacyX, EyeOffsetSeedLegacyY, EyeOffsetSeedGodotZ);
-        var yawBasis = Basis.Identity.Rotated(Vector3.Up, FixedYaw);
-        var orbitBasis = yawBasis.Rotated(yawBasis.X, _elevation);
-        var eyeOffset = orbitBasis * eyeOffsetSeed;
-
-        var eyePos = focusPoint + eyeOffset;
-        if (!IsFiniteVector(eyePos)) return;
-        if ((eyePos - focusPoint).LengthSquared() < 1e-6f) return;
-
-        Position = eyePos;
-        LookAt(focusPoint, Vector3.Up);
+        try
+        {
+            var terrainY = GroundHeightFunc(godotPos.X, -godotPos.Z);
+            return float.IsFinite(terrainY) ? terrainY + lift : godotPos.Y;
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[Camera] SampleTerrainY threw: {ex.Message}");
+            return godotPos.Y;
+        }
     }
 
     private void ApplyGambleTransform()

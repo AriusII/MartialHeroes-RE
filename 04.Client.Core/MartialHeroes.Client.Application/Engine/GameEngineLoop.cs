@@ -84,9 +84,11 @@ public sealed class GameEngineLoop
 
         _clockMs += deltaMs;
 
+        _localPlayer.ClockMs = _clockMs;
+
         _localPlayer.Cooldowns.TickAll(_clockMs);
 
-        _localPlayer.Buffs.Tick();
+        _localPlayer.Buffs.Tick(_clockMs);
 
         _localPlayer.CastState = _localPlayer.CastState.Tick(_clockMs);
     }

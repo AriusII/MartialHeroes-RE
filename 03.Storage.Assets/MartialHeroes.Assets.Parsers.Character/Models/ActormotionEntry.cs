@@ -4,11 +4,9 @@ public sealed class ActormotionEntry
 {
     public uint MotionKey { get; init; }
 
-
     public int Col0Category { get; init; }
 
     public int Col1RawOffset { get; init; }
-
 
     public int IntA { get; init; }
 
@@ -40,29 +38,33 @@ public sealed class ActormotionEntry
 
     public float FloatI { get; init; }
 
-    public int[] DirArray1 { get; init; } = [];
+    public IReadOnlyList<int> MotionIdsA { get; init; } = [];
 
-    public int[] DirArray2 { get; init; } = [];
+    public IReadOnlyList<int> MotionIdsB { get; init; } = [];
 
+    public IReadOnlyList<int> MotionClipIds => MotionIdsA;
 
-    public int[] MotionClipIds => DirArray1;
+    public IReadOnlyList<int> SfxEventIds => MotionIdsB;
 
     public int IdleMotionId =>
-        DirArray1.Length > 1
-            ? DirArray1[1]
+        MotionIdsA.Count > 1
+            ? MotionIdsA[1]
             : 0;
 
-    public int[] SfxEventIds => DirArray2;
+    public int WalkMotionId =>
+        MotionIdsA.Count > 2
+            ? MotionIdsA[2]
+            : 0;
 
-    public string BndVfsPath =>
-        $"data/char/bind/g{IntA}.bnd";
+    public int RunMotionId =>
+        MotionIdsA.Count > 3
+            ? MotionIdsA[3]
+            : 0;
 
-
-    public int ActorClassId => Col1RawOffset;
+    public int DeathMotionId =>
+        MotionIdsA.Count > 4
+            ? MotionIdsA[4]
+            : 0;
 
     public int SkinClassId => IntA;
-
-    public int[] MotionIds => DirArray1.Length >= 7
-        ? DirArray1[..7]
-        : DirArray1;
 }

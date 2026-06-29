@@ -26,6 +26,11 @@ public sealed class RebindableAreaAssemblySource(MappedVfsArchive vfs, int initi
         return _inner.TryGetCellFileByName(vfsLogicalPath, out bytes);
     }
 
+    public bool TryGetAreaNpcSpawns(out ReadOnlyMemory<byte> npcSpawnBytes)
+    {
+        return _inner.TryGetAreaNpcSpawns(out npcSpawnBytes);
+    }
+
 
     public void SetArea(int areaId)
     {

@@ -18,9 +18,9 @@ public sealed partial class InputRouter : Node
     private const int
         ClickDragTolerance = 2;
 
-    private const int ModShift = 0x4;
-    private const int ModCtrl = 0x2;
-    private const int ModAlt = 0x8;
+    private const int ModShift = 0x8;
+    private const int ModCtrl = 0x4;
+    private const int ModAlt = 0x2;
 
     private Camera3D? _camera;
     private ClientContext _clientContext = null!;
@@ -204,33 +204,6 @@ public sealed partial class InputRouter : Node
     }
 
 
-    private bool HandleClickToMove(int screenX, int screenY)
-    {
-        if (_camera is null || _clientContext is null) return false;
-
-        var world3D = _camera.GetWorld3D();
-        var spaceState = world3D.DirectSpaceState;
-
-        var screenPos = new Vector2(screenX, screenY);
-        var from = _camera.ProjectRayOrigin(screenPos);
-        var to = from + _camera.ProjectRayNormal(screenPos) * 1000f;
-
-        var query = PhysicsRayQueryParameters3D.Create(from, to);
-        query.CollideWithAreas = false;
-
-        var result = spaceState.IntersectRay(query);
-        if (result.Count == 0) return false;
-
-        var hitPoint = result["position"].AsVector3();
-
-        var (lx, ly, lz) = WorldCoordinates.ToLegacy(hitPoint.X, hitPoint.Y, hitPoint.Z);
-        var fixedTarget = Vector3Fixed.FromFloat(lx, ly, lz);
-
-        _ = _clientContext.UseCases.RequestMoveAsync(fixedTarget, false);
-        return true;
-    }
-
-
     private static int MapMouseButton(MouseButton button)
     {
         return button switch
@@ -266,9 +239,7 @@ public sealed partial class InputRouter : Node
 
         public bool TryHandle(in AppInputEvent e)
         {
-            if (!e.IsLeftButtonClick) return false;
-
-            return _router.HandleClickToMove(e.X, e.Y);
+            return _router.EnqueueWorldClick(in e);
         }
     }
 }

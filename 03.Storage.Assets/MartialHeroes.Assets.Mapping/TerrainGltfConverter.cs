@@ -43,6 +43,7 @@ public static class TerrainGltfConverter
         var binaryBuffer = BuildBinaryBuffer(
             cell, vertexCount, indexCount,
             out var posOffset, out var posLength,
+            out var nrmOffset, out var nrmLength,
             out var uvOffset, out var uvLength,
             out var colOffset, out var colLength,
             out var idxOffset, out var idxLength);
@@ -51,6 +52,7 @@ public static class TerrainGltfConverter
             cell, binaryBuffer.Length,
             vertexCount, indexCount, use32Bit,
             posOffset, posLength,
+            nrmOffset, nrmLength,
             uvOffset, uvLength,
             colOffset, colLength,
             idxOffset, idxLength);
@@ -63,17 +65,20 @@ public static class TerrainGltfConverter
         TerrainCell cell,
         int vertexCount, int indexCount,
         out int posOffset, out int posLength,
+        out int nrmOffset, out int nrmLength,
         out int uvOffset, out int uvLength,
         out int colOffset, out int colLength,
         out int idxOffset, out int idxLength)
     {
         posLength = vertexCount * 3 * sizeof(float);
+        nrmLength = vertexCount * 3 * sizeof(float);
         uvLength = vertexCount * 2 * sizeof(float);
         colLength = vertexCount * 4;
         idxLength = indexCount * sizeof(ushort);
 
         posOffset = 0;
-        uvOffset = Align4(posOffset + posLength);
+        nrmOffset = Align4(posOffset + posLength);
+        uvOffset = Align4(nrmOffset + nrmLength);
         colOffset = Align4(uvOffset + uvLength);
         idxOffset = Align4(colOffset + colLength);
         var bufSize = Align4(idxOffset + idxLength);
@@ -81,30 +86,30 @@ public static class TerrainGltfConverter
         var buf = new byte[bufSize];
 
         var cursor = posOffset;
-        float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
-        float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
-
         for (var r = 0; r < GridSize; r++)
         for (var c = 0; c < GridSize; c++)
         {
             var vi = r * GridSize + c;
-            var worldX = -(c * VertexSpacing);
+            var worldX = c * VertexSpacing;
             var worldY = cell.Heights[vi];
-            var worldZ = r * VertexSpacing;
+            var worldZ = -(r * VertexSpacing);
 
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), worldX);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), worldY);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), worldZ);
             cursor += 12;
-
-            if (worldX < minX) minX = worldX;
-            if (worldX > maxX) maxX = worldX;
-            if (worldY < minY) minY = worldY;
-            if (worldY > maxY) maxY = worldY;
-            if (worldZ < minZ) minZ = worldZ;
-            if (worldZ > maxZ) maxZ = worldZ;
         }
 
+        cursor = nrmOffset;
+        var normals = cell.Normals;
+        for (var vi = 0; vi < vertexCount; vi++)
+        {
+            var (nx, ny, nz) = normals[vi];
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), nx);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), ny);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -nz);
+            cursor += 12;
+        }
 
         cursor = uvOffset;
         for (var r = 0; r < GridSize; r++)
@@ -121,11 +126,11 @@ public static class TerrainGltfConverter
         var diffuse = cell.DiffuseColours;
         for (var vi = 0; vi < vertexCount; vi++)
         {
-            var (dr, dg, db, da) = diffuse[vi];
+            var (dr, dg, db, _) = diffuse[vi];
             buf[cursor + 0] = (byte)Math.Clamp((int)(dr * 255f + 0.5f), 0, 255);
             buf[cursor + 1] = (byte)Math.Clamp((int)(dg * 255f + 0.5f), 0, 255);
             buf[cursor + 2] = (byte)Math.Clamp((int)(db * 255f + 0.5f), 0, 255);
-            buf[cursor + 3] = (byte)Math.Clamp((int)(da * 255f + 0.5f), 0, 255);
+            buf[cursor + 3] = 255;
             cursor += 4;
         }
 
@@ -139,11 +144,11 @@ public static class TerrainGltfConverter
             var vi3 = (ushort)((r + 1) * GridSize + c + 1);
 
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
-            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi3);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi2);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi1);
             cursor += 6;
 
-            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi0);
+            BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor), vi1);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 2), vi2);
             BinaryPrimitives.WriteUInt16LittleEndian(buf.AsSpan(cursor + 4), vi3);
             cursor += 6;
@@ -158,14 +163,15 @@ public static class TerrainGltfConverter
         int bufferByteLength,
         int vertexCount, int indexCount, bool use32Bit,
         int posOffset, int posLength,
+        int nrmOffset, int nrmLength,
         int uvOffset, int uvLength,
         int colOffset, int colLength,
         int idxOffset, int idxLength)
     {
-        var minPosX = -((GridSize - 1) * VertexSpacing);
-        var maxPosX = 0f;
-        var minPosZ = 0f;
-        var maxPosZ = (GridSize - 1) * VertexSpacing;
+        var minPosX = 0f;
+        var maxPosX = (GridSize - 1) * VertexSpacing;
+        var minPosZ = -((GridSize - 1) * VertexSpacing);
+        var maxPosZ = 0f;
 
         var minPosY = float.MaxValue;
         var maxPosY = float.MinValue;
@@ -196,10 +202,11 @@ public static class TerrainGltfConverter
         sb.Append("\"meshes\":[{\"primitives\":[{");
         sb.Append("\"attributes\":{");
         sb.Append("\"POSITION\":0,");
-        sb.Append("\"TEXCOORD_0\":1,");
-        sb.Append("\"COLOR_0\":2");
+        sb.Append("\"NORMAL\":1,");
+        sb.Append("\"TEXCOORD_0\":2,");
+        sb.Append("\"COLOR_0\":3");
         sb.Append("},");
-        sb.Append("\"indices\":3");
+        sb.Append("\"indices\":4");
         sb.Append("}]}],");
 
         sb.Append("\"accessors\":[");
@@ -219,11 +226,19 @@ public static class TerrainGltfConverter
         sb.Append("\"byteOffset\":0,");
         sb.Append($"\"componentType\":{ComponentTypeFloat},");
         sb.Append($"\"count\":{vertexCount},");
-        sb.Append("\"type\":\"VEC2\"");
+        sb.Append("\"type\":\"VEC3\"");
         sb.Append("},");
 
         sb.Append('{');
         sb.Append("\"bufferView\":2,");
+        sb.Append("\"byteOffset\":0,");
+        sb.Append($"\"componentType\":{ComponentTypeFloat},");
+        sb.Append($"\"count\":{vertexCount},");
+        sb.Append("\"type\":\"VEC2\"");
+        sb.Append("},");
+
+        sb.Append('{');
+        sb.Append("\"bufferView\":3,");
         sb.Append("\"byteOffset\":0,");
         sb.Append($"\"componentType\":{ComponentTypeUnsignedByte},");
         sb.Append("\"normalized\":true,");
@@ -232,7 +247,7 @@ public static class TerrainGltfConverter
         sb.Append("},");
 
         sb.Append('{');
-        sb.Append("\"bufferView\":3,");
+        sb.Append("\"bufferView\":4,");
         sb.Append("\"byteOffset\":0,");
         sb.Append($"\"componentType\":{indexComponentType},");
         sb.Append($"\"count\":{indexCount},");
@@ -247,6 +262,13 @@ public static class TerrainGltfConverter
         sb.Append("\"buffer\":0,");
         sb.Append($"\"byteOffset\":{posOffset},");
         sb.Append($"\"byteLength\":{posLength},");
+        sb.Append($"\"target\":{TargetArrayBuffer}");
+        sb.Append("},");
+
+        sb.Append('{');
+        sb.Append("\"buffer\":0,");
+        sb.Append($"\"byteOffset\":{nrmOffset},");
+        sb.Append($"\"byteLength\":{nrmLength},");
         sb.Append($"\"target\":{TargetArrayBuffer}");
         sb.Append("},");
 

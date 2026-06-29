@@ -103,35 +103,6 @@ public partial class ViewerRoot
             _worldTexSnapshot.Clear();
             SnapshotWorldTextures(preview);
 
-            if (info.TerrainCells.Count > 0)
-            {
-                var cellOrigin = info.TerrainCells[0].CellOriginGodot;
-                var cellCentreRawX = cellOrigin.X + 512f;
-                var cellCentreRawZ = cellOrigin.Z - 512f;
-                var vpX = cellCentreRawX + info.RootOffset.X;
-                var vpZ = cellCentreRawZ + info.RootOffset.Z;
-                var rawH = MapAssembler.SampleRawGroundHeight(info.TerrainCells, info.RootOffset, vpX, vpZ);
-                if (rawH.HasValue)
-                    try
-                    {
-                        var avatarRoot = CharacterAssembler.Build(
-                            _browser.Archive, 1, CharacterAssembler.DefaultVariant(1),
-                            out _, out _, out _, out _);
-                        var ep = avatarRoot.Position;
-                        avatarRoot.Position = new Vector3(
-                            ep.X + cellCentreRawX,
-                            ep.Y + rawH.Value,
-                            ep.Z + cellCentreRawZ);
-                        preview.AddChild(avatarRoot);
-                        GD.Print(
-                            $"[Map] Ground-snap: cell0 rawH={rawH.Value:F1} viewport=({vpX:F1},{vpZ:F1}) feetY={rawH.Value + info.RootOffset.Y:F1}.");
-                    }
-                    catch (Exception ex)
-                    {
-                        GD.PrintErr($"[Map] Demo avatar skipped: {ex.Message}");
-                    }
-            }
-
             _currentLoadedPaths = ViewerTextures.EndSession();
             _currentIsHeavy = true;
             PreviewLifecycle.Register(preview, ref _currentPreview, this);

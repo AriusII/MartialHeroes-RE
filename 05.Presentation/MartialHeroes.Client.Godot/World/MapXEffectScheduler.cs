@@ -1,4 +1,5 @@
-using System.Buffers.Binary;
+using System.Globalization;
+using System.Text;
 using Godot;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.Helpers;
@@ -9,13 +10,13 @@ public sealed partial class MapXEffectScheduler : Node3D
 {
     private const string MapTxtPathFormat = "data/effect/map{0}.txt";
 
-    private const int DescriptorRecordSize = 0x20;
+    private const int FieldsPerRecord = 7;
 
     private const float TerrainRadiusCap = 1000f;
     private const float ProximityRadiusScale = 0.8f;
 
-    private const uint TodMsPerHour = 0xE10;
-    private const uint TodMsPerMinute = 0x3C;
+    private const uint TodMsPerHour = 3_600_000;
+    private const uint TodMsPerMinute = 60_000;
     private const int MinutesPerDay = 1440;
 
     private const float TodAlwaysOnThreshold = 0.5f;
@@ -71,7 +72,7 @@ public sealed partial class MapXEffectScheduler : Node3D
         var radiusSq = radius * radius;
 
         var hour = (int)(TimeOfDayMs / TodMsPerHour);
-        var minute = (int)(TimeOfDayMs % TodMsPerHour / TodMsPerMinute);
+        var minute = (int)(TimeOfDayMs / TodMsPerMinute % 60);
         var minutesOfDay = minute + 60 * hour;
 
         var playerXZ = LocalPlayerGodotPos;
@@ -91,7 +92,7 @@ public sealed partial class MapXEffectScheduler : Node3D
                 if (!d.Active)
                 {
                     d.Active = true;
-                    _renderer.PlayAmbient(i, d.GodotPos, d.EffectId);
+                    _renderer.PlayAmbient(i, d.GodotPos, d.EffectId, d.Scale);
                 }
             }
             else if (d.Active)
@@ -145,53 +146,93 @@ public sealed partial class MapXEffectScheduler : Node3D
             return;
         }
 
-        var span = raw.Span;
-        if (span.Length < 4)
+        var tokens = Tokenize(raw.Span);
+        if (tokens.Count == 0)
         {
-            GD.PrintErr($"[MapXEffectScheduler] {path} too short ({span.Length} bytes) — skipped.");
+            GD.PrintErr($"[MapXEffectScheduler] {path} produced no tokens — skipped.");
             return;
         }
 
-        var count = (int)BinaryPrimitives.ReadUInt32LittleEndian(span[..4]);
+        var idx = 0;
+        var count = ParseInt(tokens[idx++]);
         if (count < 0) count = 0;
 
-        var available = (span.Length - 4) / DescriptorRecordSize;
-        if (count > available)
-        {
-            GD.PrintErr($"[MapXEffectScheduler] {path} size mismatch: header says {count} records, " +
-                        $"only {available} fit ({span.Length} bytes) — reading {available}.");
-            count = available;
-        }
-
-        var list = new Descriptor[count];
+        var list = new List<Descriptor>(count);
+        var read = 0;
         for (var i = 0; i < count; i++)
         {
-            var o = 4 + i * DescriptorRecordSize;
-            var rec = span.Slice(o, DescriptorRecordSize);
+            if (idx + FieldsPerRecord > tokens.Count)
+            {
+                GD.PrintErr($"[MapXEffectScheduler] {path}: header says {count} records but tokens ran out " +
+                            $"after {read} — reading {read}.");
+                break;
+            }
 
-            var effectId = BinaryPrimitives.ReadUInt32LittleEndian(rec[..4]);
-            var posX = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(rec[4..8]));
-            var posY = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(rec[8..12]));
-            var posZ = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(rec[12..16]));
-            var todStart = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(rec[20..24]));
-            var todDur = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(rec[24..28]));
-
+            var effectId = (uint)ParseInt(tokens[idx++]);
+            var posX = ParseFloat(tokens[idx++]);
+            var posY = ParseFloat(tokens[idx++]);
+            var posZ = ParseFloat(tokens[idx++]);
+            var scale = ParseFloat(tokens[idx++]);
+            var todStart = ParseFloat(tokens[idx++]);
+            var todDur = ParseFloat(tokens[idx++]);
 
             var (gx, gy, gz) = WorldCoordinates.ToGodot(posX, posY, posZ);
 
-            list[i] = new Descriptor
+            list.Add(new Descriptor
             {
                 EffectId = effectId,
                 GodotPos = new Vector3(gx, gy, gz),
+                Scale = scale,
                 TodStartHours = todStart,
                 TodDurationHours = todDur,
                 Active = false
-            };
+            });
+            read++;
         }
 
-        _descriptors = list;
-        GD.Print($"[MapXEffectScheduler] Loaded {count} ambient descriptors for area {areaId} from {path}. " +
-                 "spec: Docs/RE/specs/effect-scheduling.md (u32 count + 32-byte records).");
+        _descriptors = [.. list];
+        GD.Print($"[MapXEffectScheduler] Loaded {read} ambient descriptors for area {areaId} from {path}. " +
+                 "spec: Docs/RE/formats/text_tables.md §6 (TAB CP949 text: line0=count, col1=effect_id, " +
+                 "col2/3/4=world XYZ, col5=scale, col6=TOD start hrs, col7=TOD duration hrs).");
+    }
+
+    private static List<string> Tokenize(ReadOnlySpan<byte> span)
+    {
+        var tokens = new List<string>(64);
+        var sb = new StringBuilder(32);
+
+        for (var i = 0; i < span.Length; i++)
+        {
+            var b = span[i];
+            if (b == 0x0D)
+            {
+                tokens.Add(sb.ToString());
+                sb.Clear();
+                if (i + 1 < span.Length && span[i + 1] == 0x0A) i++;
+            }
+            else if (b == 0x0A || b == 0x09)
+            {
+                tokens.Add(sb.ToString());
+                sb.Clear();
+            }
+            else
+            {
+                sb.Append((char)b);
+            }
+        }
+
+        if (sb.Length > 0) tokens.Add(sb.ToString());
+        return tokens;
+    }
+
+    private static int ParseInt(string s)
+    {
+        return int.TryParse(s.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v : 0;
+    }
+
+    private static float ParseFloat(string s)
+    {
+        return float.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0f;
     }
 
     private void DespawnAll()
@@ -210,6 +251,7 @@ public sealed partial class MapXEffectScheduler : Node3D
     {
         public uint EffectId;
         public Vector3 GodotPos;
+        public float Scale;
         public float TodStartHours;
         public float TodDurationHours;
         public bool Active;

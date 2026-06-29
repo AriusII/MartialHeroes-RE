@@ -8,6 +8,35 @@ internal static class FxMeshBuilder
 {
     public delegate ImageTexture? FxTextureResolver(int channel, uint texIndex1Based);
 
+    private enum FxBlend
+    {
+        Alpha,
+        Additive,
+        Multiply
+    }
+
+    private static bool _blendNoteLogged;
+
+    private static FxBlend BlendForChannel(int channel, bool isWater)
+    {
+        if (!_blendNoteLogged)
+        {
+            _blendNoteLogged = true;
+            GD.Print("[FxMeshBuilder] FX blend per channel: water (FX3/FX5)=Alpha [CONFIRMED rendering.md §3.3 #4 " +
+                     "+ terrain_layers.md §1.4c]; FX2=Multiply, FX1/FX4/FX6/FX7=Additive [spec-derived from " +
+                     "rendering.md §3.3 #1/#3 bucket names + channel roles; per-channel sub-bucket DEBUGGER-PENDING " +
+                     "per terrain_layers.md §1.4d — Godot Add approximates ONE/INVSRCCOLOR].");
+        }
+
+        if (isWater) return FxBlend.Alpha;
+
+        return channel switch
+        {
+            2 => FxBlend.Multiply,
+            _ => FxBlend.Additive
+        };
+    }
+
     public static Node3D BuildFx1(Fx1Layer layer, FxTextureResolver? resolver)
     {
         var root = new Node3D { Name = "FxLayer_fx1" };
@@ -199,27 +228,19 @@ internal static class FxMeshBuilder
             idx[src + 2] = indices[src + 1];
         }
 
-        var mesh = BuildArrayMesh(positions, normals, uvs, idx, tex, isWater);
+        var blend = BlendForChannel(channel, isWater);
+        var mesh = BuildArrayMesh(positions, normals, uvs, idx, tex, isWater, blend);
 
         root.AddChild(new MeshInstance3D
         {
             Mesh = mesh,
             Name = $"Fx{channel}_group{groupIndex}_tex{texIndex1Based}"
         });
-
-        if (isWater)
-        {
-            var workingMesh = BuildArrayMesh(positions, normals, uvs, idx, tex, isWater);
-            root.AddChild(new MeshInstance3D
-            {
-                Mesh = workingMesh,
-                Name = $"Fx{channel}_group{groupIndex}_tex{texIndex1Based}_working"
-            });
-        }
     }
 
     private static ArrayMesh BuildArrayMesh(
-        Vector3[] positions, Vector3[] normals, Vector2[] uvs, int[] indices, ImageTexture tex, bool isWater)
+        Vector3[] positions, Vector3[] normals, Vector2[] uvs, int[] indices, ImageTexture tex, bool isWater,
+        FxBlend blend)
     {
         var arrays = new Array();
         arrays.Resize((int)Mesh.ArrayType.Max);
@@ -231,11 +252,19 @@ internal static class FxMeshBuilder
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
 
+        var blendMode = blend switch
+        {
+            FxBlend.Additive => BaseMaterial3D.BlendModeEnum.Add,
+            FxBlend.Multiply => BaseMaterial3D.BlendModeEnum.Mul,
+            _ => BaseMaterial3D.BlendModeEnum.Mix
+        };
+
         var mat = new StandardMaterial3D
         {
             AlbedoTexture = tex,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.PerPixel,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            BlendMode = blendMode,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps
         };

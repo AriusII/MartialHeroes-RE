@@ -46,6 +46,7 @@ public sealed partial class ClientContext : Node
     private MappedVfsArchive? _terrainVfs;
 
     private RealClientAssets? _uiAssets;
+    public static ClientContext? Instance { get; private set; }
 
     public IClientEventBus EventBus { get; private set; } = null!;
 
@@ -67,6 +68,8 @@ public sealed partial class ClientContext : Node
     public SkillCatalogue SkillCatalogue { get; private set; } = null!;
 
     public MobCatalogue MobCatalogue { get; private set; } = null!;
+
+    public VfsCatalogueStore CatalogueStore { get; private set; } = null!;
 
     public SectorStreamingService StreamingService { get; private set; } = null!;
 
@@ -114,6 +117,8 @@ public sealed partial class ClientContext : Node
 
     public override void _Ready()
     {
+        Instance = this;
+
         BuildApplicationGraph();
 
         var audio = new AudioService { Name = "AudioService" };
@@ -154,6 +159,8 @@ public sealed partial class ClientContext : Node
 
     public override void _ExitTree()
     {
+        if (ReferenceEquals(Instance, this)) Instance = null;
+
         EventBus?.Complete();
 
         HudEventHub?.Complete();

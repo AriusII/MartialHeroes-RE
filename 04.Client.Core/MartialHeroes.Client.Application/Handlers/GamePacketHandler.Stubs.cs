@@ -19,6 +19,7 @@ public sealed partial class GamePacketHandler
 
     public void Handle(in SmsgAreaEntitySnapshot packet)
     {
+        HandleAreaEntitySnapshot(ActivePayload);
     }
 
     public void Handle(in SmsgNpcShopSlotClearAck packet)
@@ -38,10 +39,6 @@ public sealed partial class GamePacketHandler
     }
 
     public void Handle(in SmsgUserTradeFullResponse packet)
-    {
-    }
-
-    public void Handle(in SmsgPartyMemberRemoveResult packet)
     {
     }
 
@@ -66,10 +63,6 @@ public sealed partial class GamePacketHandler
     }
 
     public void Handle(in SmsgGuildStateChangeResult packet)
-    {
-    }
-
-    public void Handle(in SmsgGuildInfoFullSync packet)
     {
     }
 
@@ -107,78 +100,61 @@ public sealed partial class GamePacketHandler
 
     public void Handle(in SmsgItemPanelSlotChunk packet)
     {
+        HandleItemPanelSlotChunk(ActivePayload);
     }
 
     public void Handle(in SmsgSkillPointUpdateHeader packet)
     {
+        HandleSkillPointUpdate(in packet);
     }
 
     public void Handle(in SmsgItemPanelSlotRefresh packet)
     {
+        HandleItemPanelSlotRefresh(ActivePayload);
     }
 
     public void Handle(in SmsgSceneEnterSpawnSnapshot packet)
     {
     }
 
-    public void Handle(in SmsgActorStateEvent packet)
-    {
-    }
-
     public void Handle(in SmsgChatBroadcastHeader packet)
     {
+        HandleChatBroadcast(ActivePayload);
     }
 
     public void Handle(in SmsgExpGain packet)
     {
+        HandleExpGain(ActivePayload);
     }
 
     public void Handle(in SmsgRankXpGain packet)
     {
-    }
-
-    public void Handle(in SmsgActorVisualSlotSet packet)
-    {
-    }
-
-    public void Handle(in SmsgGroundItemSpawn packet)
-    {
-    }
-
-    public void Handle(in SmsgActorVisualSlotClear packet)
-    {
-    }
-
-    public void Handle(in SmsgPartyRosterEvent packet)
-    {
+        HandleRankXpGain(ActivePayload);
     }
 
     public void Handle(in SmsgBuffSlotUpdate packet)
     {
-    }
-
-    public void Handle(in SmsgPartyMemberStats packet)
-    {
+        HandleBuffSlotUpdate(ActivePayload);
     }
 
     public void Handle(in SmsgActorSkillAction packet)
     {
-    }
-
-    public void Handle(in SmsgGuildMemberRosterUpdate packet)
-    {
+        HandleActorSkillAction(ActivePayload);
     }
 
     public void Handle(in SmsgStatsUpdate packet)
     {
+        HandleStatsUpdate(ActivePayload);
     }
 
     public void Handle(in SmsgQuestList packet)
     {
+        HandleQuestList(ActivePayload);
     }
 
     public void Handle(in SmsgQuestComplete packet)
     {
+        HandleQuestComplete(ActivePayload);
     }
 
     public void Handle(in SmsgRankProgressPanelBulk packet)
@@ -221,10 +197,6 @@ public sealed partial class GamePacketHandler
     {
     }
 
-    public void Handle(in SmsgActorVisualFlagsSet packet)
-    {
-    }
-
     public void Handle(in SmsgActorStanceSet packet)
     {
     }
@@ -237,35 +209,29 @@ public sealed partial class GamePacketHandler
     {
     }
 
-    public void Handle(in SmsgActorTimedStateUpdate packet)
-    {
-    }
-
     public void Handle(in SmsgAckRequest packet)
     {
-    }
+        if (linkAckEmitter is null) return;
 
-    public void Handle(in SmsgActorCombatFlagUpdate packet)
-    {
+        _ = linkAckEmitter(packet.Token, CancellationToken.None);
     }
 
     public void Handle(in SmsgTrackedPanelSlotUpdate packet)
     {
     }
 
-    public void Handle(in SmsgGroundItemRemove packet)
-    {
-    }
-
     public void Handle(in SmsgCubeGambleReelUpdate packet)
     {
+        HandleCombatAttackUpdate(ActivePayload);
     }
 
     public void Handle(in SmsgCharacterListHeader packet)
     {
+        HandleCharacterList(ActivePayload);
     }
 
     public void Handle(in SmsgSceneEntityUpdate packet)
     {
+        HandleSceneEntityUpdate(ActivePayload);
     }
 }

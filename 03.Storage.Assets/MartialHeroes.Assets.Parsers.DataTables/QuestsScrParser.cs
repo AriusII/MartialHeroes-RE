@@ -6,10 +6,12 @@ namespace MartialHeroes.Assets.Parsers.DataTables;
 
 public static class QuestsScrParser
 {
-    private const int RecordStride = 3720;
+    private const int RecordStride = 0x1360;
 
-    private const int NameOffset = 0x002;
-    private const int NameWidth = 62;
+    private const int CategoryOffset = 0x002;
+
+    private const int NameOffset = 0x003;
+    private const int NameWidth = 0x3D;
 
     static QuestsScrParser()
     {
@@ -23,8 +25,7 @@ public static class QuestsScrParser
         if (span.Length % RecordStride != 0)
             throw new InvalidDataException(
                 $"quests.scr parse error: buffer length {span.Length} is not a multiple of " +
-                $"stride {RecordStride} (QUESTS_SCR_RECORD_BYTES). " +
-                "spec: Docs/RE/formats/config_tables.md §2.17.1.");
+                $"stride {RecordStride}.");
 
         var totalSlots = span.Length / RecordStride;
         var cp949 = Encoding.GetEncoding(949);
@@ -40,11 +41,14 @@ public static class QuestsScrParser
             if (questId == 0)
                 continue;
 
+            var category = rec[CategoryOffset];
+
             var questName = ReadNullTerminatedCp949(rec.Slice(NameOffset, NameWidth), cp949);
 
             results.Add(new QuestScrRecord
             {
                 QuestId = questId,
+                Category = category,
                 QuestName = questName,
                 Raw = data.Slice(recBase, RecordStride)
             });
@@ -58,8 +62,6 @@ public static class QuestsScrParser
     {
         var len = field.IndexOf((byte)0);
         if (len < 0) len = field.Length;
-        var ccPos = field[..len].IndexOf((byte)0xCC);
-        if (ccPos >= 0) len = ccPos;
         if (len == 0) return string.Empty;
         return cp949.GetString(field[..len]);
     }

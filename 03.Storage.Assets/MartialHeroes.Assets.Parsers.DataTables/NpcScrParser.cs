@@ -8,18 +8,12 @@ public static class NpcScrParser
 {
     private const int RecordStride = 404;
 
-    private const int Paragraph0Offset = 0x014;
-    private const int Paragraph0Width = 64;
+    private const int NameSlotCount = 6;
+    private const int NameSlotWidth = 64;
+    private const int NameSlot0Offset = 0x014;
 
-    private const int
-        Paragraph1Offset = 0x054;
-
-    private const int Paragraph1Width = 64;
-
-    private const int
-        Paragraph2Offset = 0x094;
-
-    private const int Paragraph2Width = 64;
+    private const int KindOffset = 0x022;
+    private const int JobOffset = 0x034;
 
     static NpcScrParser()
     {
@@ -33,8 +27,7 @@ public static class NpcScrParser
         if (span.Length % RecordStride != 0)
             throw new InvalidDataException(
                 $"npc.scr parse error: buffer length {span.Length} is not a multiple of " +
-                $"stride {RecordStride} (NPC_SCR_RECORD_BYTES). " +
-                "spec: Docs/RE/formats/config_tables.md §2.17.3.");
+                $"stride {RecordStride}.");
 
         var count = span.Length / RecordStride;
         var results = new NpcScrRecord[count];
@@ -47,22 +40,23 @@ public static class NpcScrParser
 
             var id = BinaryPrimitives.ReadUInt32LittleEndian(rec[..]);
 
-            var idMirror = BinaryPrimitives.ReadUInt32LittleEndian(rec[0x004..]);
+            var kind = rec[KindOffset];
 
+            var job = BinaryPrimitives.ReadInt16LittleEndian(rec[JobOffset..]);
 
-            var para0 = ReadNullTerminatedCp949(rec.Slice(Paragraph0Offset, Paragraph0Width), cp949);
-
-            var para1 = ReadNullTerminatedCp949(rec.Slice(Paragraph1Offset, Paragraph1Width), cp949);
-
-            var para2 = ReadNullTerminatedCp949(rec.Slice(Paragraph2Offset, Paragraph2Width), cp949);
+            var nameSlots = new string[NameSlotCount];
+            for (var s = 0; s < NameSlotCount; s++)
+            {
+                var slotBase = NameSlot0Offset + s * NameSlotWidth;
+                nameSlots[s] = ReadNameSlot(rec.Slice(slotBase, NameSlotWidth), cp949);
+            }
 
             results[i] = new NpcScrRecord
             {
                 Id = id,
-                IdMirror = idMirror,
-                Paragraph0 = para0,
-                Paragraph1 = para1,
-                Paragraph2 = para2,
+                Kind = kind,
+                Job = job,
+                NameSlots = nameSlots,
                 Raw = data.Slice(recBase, RecordStride)
             };
         }
@@ -71,12 +65,13 @@ public static class NpcScrParser
     }
 
 
-    private static string ReadNullTerminatedCp949(ReadOnlySpan<byte> field, Encoding cp949)
+    private static string ReadNameSlot(ReadOnlySpan<byte> field, Encoding cp949)
     {
+        if (field.Length > 0 && field[0] == (byte)'0')
+            return string.Empty;
+
         var len = field.IndexOf((byte)0);
         if (len < 0) len = field.Length;
-        var ccPos = field[..len].IndexOf((byte)0xCC);
-        if (ccPos >= 0) len = ccPos;
         if (len == 0) return string.Empty;
         return cp949.GetString(field[..len]);
     }

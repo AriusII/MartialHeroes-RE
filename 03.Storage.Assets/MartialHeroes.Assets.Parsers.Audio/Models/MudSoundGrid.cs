@@ -31,7 +31,9 @@ public sealed class MudSoundGrid
 
     public const int TileWorldSize = 16;
 
-    public const int FixedFileSize = Cols * Rows * 8;
+    public const int TileStride = 8;
+
+    public const int FixedFileSize = Cols * Rows * TileStride;
 
     public const int TileCount = Cols * Rows;
 

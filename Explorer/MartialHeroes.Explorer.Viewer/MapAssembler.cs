@@ -63,6 +63,8 @@ public static partial class MapAssembler
         var cellsBuilt = 0;
         var budScenes = 0;
         var budObjects = 0;
+        var fxLayers = 0;
+        var wallSegments = 0;
         var hasTerrainBox = false;
         var terrainBox = new Aabb();
         var terrainCells = new List<(Vector3 CellOriginGodot, TerrainCell Cell)>();
@@ -83,9 +85,10 @@ public static partial class MapAssembler
                 0f,
                 -((mapZ - CellOriginBias) * CellWorld));
 
+            TerrainCell cell;
             try
             {
-                var cell = TedTerrainParser.Parse(archive.GetFileContent(tedPath));
+                cell = TedTerrainParser.Parse(archive.GetFileContent(tedPath));
                 terrainCells.Add((originGodot, cell));
                 var terrainNode = TedTerrainBuilder.BuildWorld(cell, archive, bgCatalog, tedPath, originGodot);
                 root.AddChild(terrainNode);
@@ -112,6 +115,9 @@ public static partial class MapAssembler
                 continue;
             }
 
+            TryBuildOverlays(archive, bgCatalog, tedPath, cell, mapX, mapZ, root, notes,
+                ref fxLayers, ref wallSegments);
+
             var budPath = tedPath[..^4] + ".bud";
             if (!archive.Contains(budPath)) continue;
             try
@@ -128,6 +134,9 @@ public static partial class MapAssembler
                 notes.Add($"bud fail {Path.GetFileName(budPath)}: {ex.Message}");
             }
         }
+
+        if (fxLayers > 0 || wallSegments > 0)
+            notes.Add($"overlays: {fxLayers} FX layer(s), {wallSegments} collision wall segment(s)");
 
         var (frameBox, rootOffset) = GroundAndCentre(root, hasTerrainBox ? terrainBox : null);
         var extent = frameBox.Size;
@@ -157,6 +166,71 @@ public static partial class MapAssembler
         }
 
         return null;
+    }
+
+    private static void TryBuildOverlays(MappedVfsArchive archive, BgTextureCatalog? bgCatalog,
+        string tedPath, TerrainCell cell, int mapX, int mapZ, Node3D root, List<string> notes,
+        ref int fxLayers, ref int wallSegments)
+    {
+        var mapPath = FindSiblingMap(archive, tedPath);
+        if (mapPath is null) return;
+
+        MapDescriptor descriptor;
+        try
+        {
+            descriptor = MapDescriptorParser.Parse(archive.GetFileContent(mapPath));
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"overlay map fail {Path.GetFileName(mapPath)}: {ex.Message}");
+            return;
+        }
+
+        try
+        {
+            var fxNode = MapOverlayBuilder.BuildFxLayers(archive, bgCatalog, descriptor, out var built);
+            if (fxNode is not null)
+            {
+                fxNode.Name = $"Fx_x{mapX}z{mapZ}";
+                root.AddChild(fxNode);
+                fxLayers += built;
+            }
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"fx overlay fail x{mapX}z{mapZ}: {ex.Message}");
+        }
+
+        var minY = cell.Heights.Length > 0 ? cell.Heights[0] : 0f;
+        var maxY = minY;
+        foreach (var h in cell.Heights)
+        {
+            if (h < minY) minY = h;
+            if (h > maxY) maxY = h;
+        }
+
+        try
+        {
+            var wallNode = MapOverlayBuilder.BuildCollisionWalls(archive, descriptor, minY, maxY + 128f,
+                out var segments);
+            if (wallNode is not null)
+            {
+                wallNode.Name = $"Walls_x{mapX}z{mapZ}";
+                root.AddChild(wallNode);
+                wallSegments += segments;
+            }
+        }
+        catch (Exception ex)
+        {
+            notes.Add($"wall overlay fail x{mapX}z{mapZ}: {ex.Message}");
+        }
+    }
+
+    private static string? FindSiblingMap(MappedVfsArchive archive, string tedVfsPath)
+    {
+        var normalised = tedVfsPath.Replace('\\', '/');
+        var changeExt = Path.ChangeExtension(normalised, ".map").Replace('\\', '/');
+        return archive.Contains(changeExt) ? changeExt : null;
     }
 
     private static (Aabb FrameBox, Vector3 Offset) GroundAndCentre(Node3D root, Aabb? terrainBox)

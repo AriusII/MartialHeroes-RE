@@ -144,7 +144,7 @@ Text token table (CORRECTED Campaign 5B): `int count` then per-record **6 tokens
 
 **Step 8a: `data/effect/itemswordlight.txt` — item weapon-trail descriptors**
 
-Format: `u32 count` then per-record `(u32 item_id, f32 color_r, f32 color_g, f32 color_b, f32 offset_x, f32 offset_y, f32 offset_z, u8 enabled_flag, char[] texture_name)`. Texture name is resolved via the texture manager by name. Mapped keyed by `item_id`. See §12.
+Format (CORRECTED — see §12.2): `int count` then per-record a **28-byte descriptor** = `(int item_id key, int sub_type, f32 color_1, f32 color_2, f32 color_3, int hand_selector, int unknown, len-prefixed texture_name)` — 3 colour floats flanked by three ints, NO xyz-offset triple and NO enabled byte. Texture name is resolved via the texture manager by name. Mapped keyed by `item_id`. See §12.
 
 **Step 8b: `data/effect/mobswordlight.txt` — mob weapon-trail descriptors**
 
@@ -260,14 +260,21 @@ Note: the layout note in the dirty source observes that offset `+0x3C` is shared
 
 **Confidence: CODE-CONFIRMED.** See also §9 for the attachment resolution path.
 
+> **SUPERSEDED — use the `formats/effects.md §A.16.2` offsets.** An earlier revision read the
+> attachment region as `+0x59 bone_source_enum` / `+0x5C bone_id_or_hint` / `+0x60 quat_source_enum`.
+> The shared bone-attach setup routine actually writes: **`bone_actor_id` @+0x58 (i32)**, a byte
+> @+0x5C, **`bone_name_mode` @+0x5D (u8)**, **`bone_id` @+0x60 (i32)**, **`rot_source` @+0x64 (u8)**.
+> The corrected layout below is authoritative and matches `formats/effects.md §A.16.2`; the old
+> `+0x59/+0x5C/+0x60` reading is retired.
+
 | Offset | Type | Field | Notes |
 |---:|---|---|---|
-| +0x54 | u32 | `actor_sort_id` — sort-id of the target actor | |
-| +0x58 | u8 | `sub_id` — sub-actor identifier (e.g. distinguishes mount from rider) | |
-| +0x59 | u8 | `bone_source_enum` — how to locate the bone; see §9 | |
-| +0x5C | u32 | `bone_id_or_hint` — explicit bone index when `bone_source_enum` = 0 | |
-| +0x60 | u8 | `quat_source_enum` — which orientation quaternion to use; see §9 | |
-| +0x64 | u32 | Color / render parameter (`colorParam` setup arg) — semantics unresolved | |
+| +0x54 | u32 | `actor_sort_id` — sort-id of the target actor (base `UserXEffect` view) | |
+| +0x58 | i32 | `bone_actor_id` — actor whose skeleton owns the bone | |
+| +0x5C | u8 | `bone_actor_sub` — actor sub-id for the bone-owner lookup | |
+| +0x5D | u8 | `bone_name_mode` — `0` = explicit bone id at +0x60; `1` = AnimCatalog weapon-slot lookup (slots 902–905); see §9 | |
+| +0x60 | i32 | `bone_id` — explicit bone index (mode 0) or catalog hint (mode 1) | |
+| +0x64 | u8 | `rot_source` — orientation source: `1` = the bone's own world rotation; `2` = the actor's facing quaternion | |
 
 ### 6.4 `MapXEffect` — additional fields
 
@@ -493,7 +500,37 @@ On every tick, a `JointXEffect` executes:
 
 **Entry point A** — called from the visual cycle-end event path. Iterates a per-actor table of up to 8 equip-slot effect entries; spawns one `JointXEffect` per slot. Each in-memory table entry: `[effect_id u32][bone_id u32][scale f32][flag u8]`.
 
-**Entry point B** — called from equip and actor-spawn paths. Iterates the `itemjointeff.txt` / `mobjointeff.txt` binding list for the given actor id; spawns one `JointXEffect` per record. Each record in those files: `[actor_id u32][effect_id u32][bone_id u32][bone_source u32][scale f32][flag u8]`.
+**Entry point B** — called from equip and actor-spawn paths. Iterates the `itemjointeff.txt` / `mobjointeff.txt` binding list for the given actor id; spawns one `JointXEffect` per record. **CORRECTED — the two files have DIFFERENT layouts** (an earlier revision listed a single shared `[actor_id][effect_id][bone_id][bone_source][scale][flag]` record for both; that is wrong):
+
+- **`itemjointeff.txt` (player / item) — 6 columns, 20-byte (0x14) value record.** Column 1 is the
+  map **key** (actor-appearance / group key, not stored in the value record); a record is **skipped
+  when column 2 == 0**. Value-record fields, in order:
+
+  | Col | Token | Value off | Field | → runtime `JointXEffect` (via bone-attach setup) |
+  |---:|---|---:|---|---|
+  | 1 | int | (key) | actor-appearance / group key | spawn-lookup map key |
+  | 2 | int | +0x00 | `effect_id` (`.xeff` id; **0 ⇒ skip record**) | descriptor resolve |
+  | 3 | int | +0x04 | `bone_name_mode` | inst +0x5D — `0` = explicit bone id; `1` = AnimCatalog weapon-slot lookup (slots 902–905) |
+  | 4 | int | +0x08 | `bone_id` | inst +0x60 — explicit bone index (mode 0) or catalog hint (mode 1) |
+  | 5 | float | +0x0C | `scale` | multiplied into descriptor base scale → inst +0x48 `effect_scale` |
+  | 6 | int→byte | +0x10 | `rot_source` | inst +0x64 — `1` = bone world rotation; `2` = actor facing quaternion |
+
+  The field order is `[key][effect_id][bone_name_mode][bone_id][scale f][rot_source byte]` — i.e. the
+  **mode precedes the bone id**, and the trailing byte is `rot_source` (NOT a generic "flag"). The spawn
+  passes loop flag = 1, delay = 0, time_rate = 1.0, and an extra scale arg = 1.0.
+
+- **`mobjointeff.txt` (mob) — 6 columns, 16-byte (0x10) value record, different key resolution.** Read
+  by a separate (binary-token) parser. Column 1 is a bone-slot index that indexes the `ActorVisualGlobal`
+  bone-base table at `[(byte)(col1 + 1)]`; column 2 is a bone offset added to that base, giving the
+  composite bone **map key** (key not stored). Value-record fields: `effect_id` (+0x00), `bone_id`
+  (+0x04), `scale` float (+0x08), `rot_source` byte (+0x0C). The mob spawn **hardcodes
+  `bone_name_mode = 0`** (explicit) — so mob joint effects never use the catalog weapon-slot lookup;
+  their bone is the explicit value-record `bone_id`, and the key already pre-binds to a specific
+  skeleton bone slot via the `ActorVisualGlobal` table.
+
+The corrected field offsets the bone-attach setup writes on the runtime instance (+0x5D `bone_name_mode`,
++0x60 `bone_id`, +0x64 `rot_source`) are authoritative in `formats/effects.md §A.16.2`; the old §6.3
+`+0x59/+0x5C/+0x60` reading is superseded (see §6.3).
 
 ### 9.4 Two parallel JointXEffect managers + the on-object attach block (CYCLE 7)
 
@@ -648,21 +685,31 @@ The manager is initialised at the same time as the main effect manager (same boo
 
 ### 12.2 Descriptor record format
 
-Each record in both files (loaded as text, field-by-field):
+**CORRECTED — the record is 3 floats (colour) flanked by three ints, NOT 6 floats + an enabled byte.**
+An earlier revision read `(item_id, r, g, b, ox, oy, oz, u8 enabled, tex_name)` — six floats plus a u8
+enable flag. The binary reads only **three floats** (colour), bracketed by **three ints** (one leading
+unknown int, the hand-selector int, one trailing unknown int); there is **no xyz-offset triple and no
+u8 enabled byte**. Both files build the same **28-byte (0x1C)** descriptor. After the `int count`, each
+record is (loaded as text, field-by-field):
 
-| Field index | Type | Field | Notes |
-|---|---|---|---|
-| 1 | u32 | `item_id` or `mob_id` | Key for lookup |
-| 2 | f32 | `color_r` | Trail colour red channel (0.0–1.0) |
-| 3 | f32 | `color_g` | Trail colour green channel |
-| 4 | f32 | `color_b` | Trail colour blue channel |
-| 5 | f32 | `offset_x` | Offset from weapon-attachment bone, X |
-| 6 | f32 | `offset_y` | Offset from weapon-attachment bone, Y |
-| 7 | f32 | `offset_z` | Offset from weapon-attachment bone, Z |
-| 8 | u8 | `enabled_flag` | Non-zero enables the trail |
-| 9 | char[] | `texture_name` | ASCII name resolved via the texture manager |
+| Col | Type | Descriptor off | Field | Notes |
+|---:|---|---:|---|---|
+| 1 | int | (key) | `item_id` (item file → tree key) / `mob_id` (mob file → flat-array index) | key, not stored in the record |
+| 2 | int | +0x00 | `sub_type` (sub-type / pair id) | role NOT recovered |
+| 3 | f32 | +0x04 | `color_1` (likely R) | trail colour component 1 |
+| 4 | f32 | +0x08 | `color_2` (likely G) | trail colour component 2 |
+| 5 | f32 | +0x0C | `color_3` (likely B) | trail colour component 3 |
+| 6 | int | +0x10 | `hand_selector` | `1` = main-hand, `2` = off-hand, `3` = dual (one trail per hand) |
+| 7 | int | +0x14 | (unknown) | role NOT recovered |
+| 8 | length-prefixed string | → +0x18 | `texture_name` | basename after the last `\n`, prefixed `data/effect/texture/`, resolved to a texture handle stored at +0x18 |
 
-**Confidence: CODE-CONFIRMED** — field order traced from the loading function argument sequence.
+**Hand selector at descriptor +0x10 (16)** is independently cross-confirmed by
+`specs/equipment_attach_render.md §10.2` ("hand selector at descriptor+16", values 1/2/3 → bone-id
+columns 902/903). The **item** file keys descriptors into a tree by item id; the **mob** file writes
+into a flat array indexed directly by mob id (`base + 4*mob_id`).
+
+**Confidence: CODE-CONFIRMED** — record shape and field order traced from the two loader read-orders;
+the leading `sub_type` int (+0x00) and trailing int (+0x14) roles remain UNRESOLVED.
 
 ### 12.3 Runtime behaviour
 
@@ -684,8 +731,8 @@ All eight boot manifests reside in `data/effect/`. The read mechanism is a mixed
 | `totalmugong.txt` | `int count` + `count × 4 int tokens` (text-mode) | `field2 + AnimCatalog[field1 + 1]` (catalog-resolved) |
 | `itemjointeff.txt` | `int count` + `count × 6 tokens`: `group_key, effect_id, int, int, float, byte` (text-mode; `effect_id == 0` skips) → **item manager** | raw `group_key` (NOT catalog-resolved) |
 | `mobjointeff.txt` | `int count` + `count × 6 tokens`: `class, offset` key pair + inner `{int, int, float, byte}` (text-mode) → **mob manager** | `offset + AnimCatalog[(class + 1)]` (catalog-resolved) |
-| `itemswordlight.txt` | `u32 count` + per-record: `(u32 item_id, f32 r, f32 g, f32 b, f32 ox, f32 oy, f32 oz, u8 enabled, char[] tex_name)` | `item_id` |
-| `mobswordlight.txt` | Same schema as `itemswordlight.txt` | `mob_id` |
+| `itemswordlight.txt` | `int count` + per-record 28-byte descriptor: `(int item_id, int sub_type, f32 c1, f32 c2, f32 c3, int hand_selector, int unknown, len-pref tex_name)` — CORRECTED, 3 colour floats + 3 ints, NO xyz-offset/enabled byte (§12.2) | `item_id` (tree key) |
+| `mobswordlight.txt` | Same 28-byte schema as `itemswordlight.txt` | `mob_id` (flat-array index, `base + 4*mob_id`) |
 
 **Schema correction (Campaign 5B, CONFIRMED loader read-order).** These three are **text,
 whitespace/token-delimited** tables, NOT fixed binary — each field is parsed as an int or float token,

@@ -88,9 +88,9 @@ public static class BudSceneGltfConverter
         for (var v = 0; v < vertexCount; v++)
         {
             var vert = obj.Vertices[v];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.PosX);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), vert.PosX);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.PosY);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.PosZ);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -vert.PosZ);
             cursor += 12;
         }
 
@@ -98,9 +98,9 @@ public static class BudSceneGltfConverter
         for (var v = 0; v < vertexCount; v++)
         {
             var vert = obj.Vertices[v];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -vert.NormalX);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), vert.NormalX);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), vert.NormalY);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), vert.NormalZ);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -vert.NormalZ);
             cursor += 12;
         }
 
@@ -183,8 +183,8 @@ public static class BudSceneGltfConverter
             sb.Append($"\"componentType\":{ComponentTypeFloat},");
             sb.Append($"\"count\":{sec.VertexCount},");
             sb.Append("\"type\":\"VEC3\",");
-            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],");
-            sb.Append($"\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
+            sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],");
+            sb.Append($"\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
             sb.Append('}');
 
             sb.Append(',');

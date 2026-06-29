@@ -1,6 +1,7 @@
 using Godot;
 using MartialHeroes.Assets.Mapping;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
+using MartialHeroes.Assets.Parsers.Texture;
 using Array = Godot.Collections.Array;
 using Environment = System.Environment;
 
@@ -312,27 +313,35 @@ public partial class ViewerRoot : Node3D
         try
         {
             var bytes = _browser.Archive.GetFileContent(binPath);
-            var frame = LightBinReader.TryRead(bytes.Span, 24);
-            if (frame is null) return;
+            var light = EnvironmentBinParsers.ParseLight(bytes);
+            const int kf = 24;
+            if (light.DirectionalKeyframes.Length <= kf || light.DeviceAmbientKeyframes.Length <= kf)
+                return;
 
-            var dir = frame.Value.DirectionalColor;
+            var diffuse = light.DirectionalKeyframes[kf].ColorB;
+            var dir = new Color(diffuse[0], diffuse[1], diffuse[2]);
             var dirMax = Mathf.Max(dir.R, Mathf.Max(dir.G, dir.B));
-            if (!frame.Value.DirectionalEnabled || dirMax < 0.2f)
+
+            var sunRaw = new Vector3(light.SunDirectionX, light.SunDirectionY, -light.SunDirectionZ);
+            var sunDir = sunRaw.LengthSquared() > 1e-6f ? sunRaw.Normalized() : Vector3.Up;
+
+            if (dirMax < 0.2f)
             {
                 GD.Print(
-                    $"[Viewer] LightBin {binPath}: directional unusable (dir={dir}, enabled={frame.Value.DirectionalEnabled}) — keeping default lighting.");
+                    $"[Viewer] LightBin {binPath}: directional too dark (dir={dir}) — keeping default lighting.");
                 return;
             }
 
             _keyLight.LightColor = dir;
             _keyLight.LightEnergy = 1.35f;
-            _keyLight.GlobalPosition = frame.Value.SunDirectionGodot * 1000f;
-            var up = Mathf.Abs(frame.Value.SunDirectionGodot.Dot(Vector3.Up)) > 0.9f
+            _keyLight.GlobalPosition = sunDir * 1000f;
+            var up = Mathf.Abs(sunDir.Dot(Vector3.Up)) > 0.9f
                 ? Vector3.Forward
                 : Vector3.Up;
             _keyLight.LookAt(Vector3.Zero, up);
 
-            var amb = frame.Value.AmbientColor;
+            var ambBgra = light.DeviceAmbientKeyframes[kf];
+            var amb = new Color(ambBgra.R / 255f, ambBgra.G / 255f, ambBgra.B / 255f);
             var ambMax = Mathf.Max(amb.R, Mathf.Max(amb.G, amb.B));
             var godotEnv = _worldEnv?.Environment;
             if (godotEnv is not null && ambMax is >= 0.05f and <= 0.95f)
@@ -342,7 +351,7 @@ public partial class ViewerRoot : Node3D
                 godotEnv.AmbientLightEnergy = 1.15f;
             }
 
-            GD.Print($"[Viewer] LightBin {binPath}: applied dir={dir} amb={amb}");
+            GD.Print($"[Viewer] LightBin {binPath}: applied dir={dir} amb={amb} sun={sunDir}");
         }
         catch (Exception ex)
         {

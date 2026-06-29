@@ -258,7 +258,7 @@ table is the **file-family enumeration** that belongs to `formats/sky.md`.
 | `point_light<n>.bin` | point lights | 308 (typical; 8-byte header: f32 VIEW + u32 COUNT, then COUNT × 60-byte records) | `environment_bins.md §13` |
 | `cloud_cycle<n>.bin` | per-step cloud texture-id table | 70 | §B.3 / `environment_bins.md §6` |
 | `material<n>.bin` | sky/colour material table | 9792 | `environment_bins.md §3` |
-| `light<n>.bin` | directional/ambient light table | 5312 | `environment_bins.md §10` |
+| `light<n>.bin` | directional/ambient light table + star-brightness curve | 5312 | `light_bin.md` (flat image, full offset map) / `environment_bins.md §10` |
 | `fog<n>.bin` | fog near/far + colour table | 204 | §B.2 / `environment_bins.md §2` |
 | `clouddome<n>.bin` | two-tier cloud colour grid | 23040 | §B.3 / `environment_bins.md §5` |
 | `stardome<n>.bin` | star colour grid | 9216 | §B.4 / `environment_bins.md §4` |
@@ -347,12 +347,26 @@ Stride between slots is 192 bytes. Alpha output is forced to 0xFF.
 > separate routine (`wind%d.bin`) outside the sky-colour lane — see `environment_bins.md §9` /
 > `terrain_layers.md`.
 
+> **Per-frame cloud texture selection + cross-fade:** the rule that turns the `cloud_cycle%d.bin` row
+> + the in-game date and time-of-day into the two displayed `cloud%d.dds` textures, and the continuous
+> scroll cross-fade between consecutive frames, is specified in `Docs/RE/specs/cloud_render.md`. The
+> byte layout stays canonical here and in `environment_bins.md §6`.
+
 ### B.4 `stardome%d.bin` — parser view
 
 Read as a single **9216-byte (0x2400)** star colour grid into the star-dome object. After the read,
 a sentinel is cleared and a two-tier brightness-modulation pass (similar to the cloud grid) drives
 the night-sky star brightness. The canonical byte table (12 keyframes × 192 stars × 4 bytes BGRA) is
 in `environment_bins.md §4`. The exact grid factoring at the parser level is MED.
+
+> **Star-brightness day curve — global brightness tier.** The per-vertex amber tint above is only the
+> first of two brightness tiers. The second tier — the global grayscale brightness that modulates the
+> whole star dome and gates its visibility — is driven by a **48-entry f32 day curve loaded from
+> `light%d.bin` at file offset 0x1320**, sampled per frame, scaled `round(brightness × 255)` into the
+> star-dome `D3DRS_TEXTUREFACTOR`, with a hard **0.1 visibility cutoff**. That curve's on-disk source,
+> the per-frame lerp, the cutoff, and the missing-file triangle fallback are specified in
+> `Docs/RE/formats/light_bin.md §3`. (The earlier open item "the exact source FILE/offset that loads
+> the +6320 brightness table was not traced" is now CLOSED: it is `light%d.bin` 0x1320.)
 
 ---
 

@@ -7,14 +7,19 @@ using MartialHeroes.Client.Application.Engine;
 using MartialHeroes.Client.Application.World;
 using MartialHeroes.Client.Domain.Actors.Actors;
 using MartialHeroes.Client.Domain.Simulation.Simulation;
+using MartialHeroes.Client.Domain.Skills.Skills;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Presentation.Screens;
 using MartialHeroes.Client.Presentation.World;
+using MartialHeroes.Shared.Kernel.Ids;
 
 namespace MartialHeroes.Client.Godot.World;
 
 public sealed partial class GameLoop
 {
+    private VisualActor? _b4LocalPlayerVisual;
+    private ActorKey _localPlayerKey;
+
     public override void _Process(double delta)
     {
         if (_clientContext is null) return;
@@ -36,7 +41,14 @@ public sealed partial class GameLoop
             GD.PrintErr($"[GameLoop] _Process error: {ex.Message}");
         }
 
+        if (_effectRenderer is not null && _b4LocalPlayerVisual is not null && IsInstanceValid(_b4LocalPlayerVisual))
+        {
+            _effectRenderer.LocalPlayerGodotPos = _b4LocalPlayerVisual.GlobalPosition;
+            _effectRenderer.HasLocalPlayer = true;
+        }
+
         if (_hasLocalPlayer)
+        {
             try
             {
                 _clientContext.RegionService.UpdatePosition(_localPlayerLegacyX, _localPlayerLegacyZ);
@@ -45,6 +57,9 @@ public sealed partial class GameLoop
             {
                 GD.PrintErr($"[GameLoop] RegionService.UpdatePosition failed: {ex.Message}");
             }
+
+            _hudMaster?.UpdateMinimapPlayerPosition(_localPlayerLegacyX, _localPlayerLegacyZ);
+        }
 
         try
         {
@@ -103,6 +118,17 @@ public sealed partial class GameLoop
                 }
             }
 
+                TriggerSpawnEffect(spawned.Key);
+
+            {
+                var spawnedVisual = _actorRegistry.TryGetActor(spawned.Key);
+                if (_effectRenderer is not null && spawnedVisual is not null)
+                {
+                    _effectRenderer.SpawnJointEffects(spawned.Key, spawnedVisual);
+                    _effectRenderer.RefreshSwordLight(spawned.Key, spawnedVisual);
+                }
+            }
+
                 break;
 
             case ActorMovedEvent moved:
@@ -122,11 +148,20 @@ public sealed partial class GameLoop
 
             case ActorVisualRefreshedEvent refreshed:
                 _actorRegistry.OnActorVisualRefreshed(refreshed);
+            {
+                var refreshedVisual = _actorRegistry.TryGetActor(refreshed.Key);
+                if (_effectRenderer is not null && refreshedVisual is not null)
+                {
+                    _effectRenderer.RefreshSwordLight(refreshed.Key, refreshedVisual);
+                    _effectRenderer.SpawnJointEffects(refreshed.Key, refreshedVisual);
+                }
+            }
                 break;
 
             case ActorDiedEvent died:
                 _actorRegistry.OnActorDied(died);
                 _hudMaster?.OnActorDied(died);
+                TriggerDeathEffect(died);
                 break;
 
             case LocalPlayerStateSyncedEvent synced:
@@ -207,6 +242,7 @@ public sealed partial class GameLoop
                 _hudHub?.PublishVitals(new HudVitalsEvent(
                     _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
                 _hudHub?.PublishExpLevel(new ExpLevelEvent(0L, 0L, levelUp.NewLevel));
+                TriggerActorEffect(levelUp.Key, EffectIdLevelUp);
                 break;
 
             case ActorStatSyncEvent statSync:
@@ -220,11 +256,32 @@ public sealed partial class GameLoop
                 if (s.MaxEnergy > 0) _localMaxMp = (uint)s.MaxEnergy;
                 _hudHub?.PublishVitals(new HudVitalsEvent(
                     _localHp, _localMaxHp, _localMp, _localMaxMp, _localStam, _localMaxStam));
+
+                if (_localPlayerKey == default || combatStats.Key == _localPlayerKey)
+                    _hudHub?.PublishStatAllocation(new StatAllocationView(
+                        (uint)Math.Max(0, s.Str),
+                        (uint)Math.Max(0, s.Inte),
+                        (uint)Math.Max(0, s.Agil),
+                        (uint)Math.Max(0, s.Dex),
+                        (uint)Math.Max(0, s.Vital),
+                        0u, 0u, 0u, 0u, 0u));
                 break;
             }
 
             case BuffSlotChangedEvent buff:
                 PublishBuffSlotUpdate(buff);
+                break;
+
+            case InventorySlotsChangedEvent invSlots:
+                _hudHub?.PublishInventorySlots(invSlots);
+                break;
+
+            case QuestLogChangedEvent questLog:
+                _hudHub?.PublishQuestLog(questLog);
+                break;
+
+            case QuestCompletedEvent questDone:
+                _hudHub?.PublishQuestCompleted(questDone);
                 break;
 
             case SkillHotbarSlotSetEvent:
@@ -242,6 +299,7 @@ public sealed partial class GameLoop
                 _localPlayerLegacyX = spawnX;
                 _localPlayerLegacyZ = spawnZ;
                 _hasLocalPlayer = true;
+                _localPlayerKey = localSpawn.Key;
 
                 _localHp = localSpawn.CurrentHp;
                 _localMaxHp = localSpawn.MaxHp;
@@ -262,11 +320,16 @@ public sealed partial class GameLoop
                 if (localVisual is not null)
                 {
                     _realWorldRenderer?.SetLocalPlayer(localVisual);
+                    _b4LocalPlayerVisual = localVisual;
 
                     localVisual.IsLocalPlayer = true;
                     var collMgr = _realWorldRenderer?.GetCellCollisionManager();
                     if (collMgr is not null)
                         localVisual.SetCollisionManager(collMgr);
+
+                    _effectRenderer?.PlayCast(localVisual, EffectIdPcSpawn);
+                    _effectRenderer?.SpawnJointEffects(localSpawn.Key, localVisual);
+                    _effectRenderer?.RefreshSwordLight(localSpawn.Key, localVisual);
                 }
 
                 TryAttachLocalPlayerAvatar(localSpawn.Key, localSpawn.ServerClass, localSpawn.InternalClass,
@@ -286,6 +349,7 @@ public sealed partial class GameLoop
                 GD.Print($"[GameLoop] InGameWorldBootstrappedEvent: server AreaId={worldBoot.AreaId} " +
                          $"clock={worldBoot.ServerHour:D2}:{worldBoot.ServerMinute:D2}. " +
                          "spec: world_entry.md §2.3/§3.1, packets/4-1_game_state_tick.yaml §fields.Hour/Minute.");
+                _hudMaster?.OnWorldArea(worldBoot.AreaId);
                 if (_realWorldRenderer is not null)
                 {
                     _realWorldRenderer.OnWorldEntered(worldBoot.AreaId, worldBoot.Position);
@@ -301,6 +365,7 @@ public sealed partial class GameLoop
 
             case ActorSkillActionEvent skillAction:
                 _actorRegistry.PlayActorAttack(skillAction.AttackerKey);
+                HandleSkillCastAction(skillAction);
                 break;
 
             case EquipResultEvent:
@@ -314,6 +379,72 @@ public sealed partial class GameLoop
             case LoginHandshakeCompletedEvent:
                 break;
         }
+    }
+
+
+    private const byte SkillActionCastEnable = 0xC8;
+    private const byte SkillActionCastDisable = 0xC9;
+    private const byte SkillActionSecondaryDisable = 0xCB;
+
+    private void HandleSkillCastAction(ActorSkillActionEvent skillAction)
+    {
+        if (_effectRenderer is null) return;
+
+        var caster = _actorRegistry.TryGetActor(skillAction.AttackerKey);
+        if (caster is null) return;
+
+        switch (skillAction.ActionCode)
+        {
+            case SkillActionCastEnable:
+            {
+                var castEffectId = _clientContext.SkillCatalogue.GetCastEffectId(new SkillId(skillAction.SkillId));
+                if (castEffectId == 0) break;
+                _effectRenderer.PlayCastAura(caster, castEffectId);
+                GD.Print($"[GameLoop] ActorSkillActionEvent cast-enable (0xC8): attacker={skillAction.AttackerKey.RawId} " +
+                         $"skill={skillAction.SkillId} castEffectId={castEffectId} — looping actor-anchored cast aura. " +
+                         "spec: Docs/RE/specs/effects.md §15.4 (cast-enable 0xC8).");
+                break;
+            }
+
+            case SkillActionCastDisable:
+            case SkillActionSecondaryDisable:
+            {
+                var castEffectId = _clientContext.SkillCatalogue.GetCastEffectId(new SkillId(skillAction.SkillId));
+                if (castEffectId == 0) break;
+                _effectRenderer.StopCastAura(caster, castEffectId);
+                GD.Print($"[GameLoop] ActorSkillActionEvent cast-disable (0x{skillAction.ActionCode:X2}): " +
+                         $"attacker={skillAction.AttackerKey.RawId} skill={skillAction.SkillId} castEffectId={castEffectId} " +
+                         "— matched soft-stop. spec: Docs/RE/specs/effects.md §15.5 (cast-disable 0xC9 / secondary 0xCB).");
+                break;
+            }
+        }
+    }
+
+
+    private const uint EffectIdPcSpawn = 310000001;
+    private const uint EffectIdMobSpawn = 360000001;
+    private const uint EffectIdLevelUp = 310000002;
+    private const uint EffectIdDeathPvp = 350000010;
+    private const uint EffectIdDeathPve = 360000003;
+
+    private void TriggerSpawnEffect(ActorKey key)
+    {
+        var fxId = key.Sort == EntitySort.PlayerCharacter ? EffectIdPcSpawn : EffectIdMobSpawn;
+        TriggerActorEffect(key, fxId);
+    }
+
+    private void TriggerDeathEffect(ActorDiedEvent died)
+    {
+        var fxId = died.IsPkA || died.IsPkB ? EffectIdDeathPvp : EffectIdDeathPve;
+        TriggerActorEffect(died.VictimKey, fxId);
+    }
+
+    private void TriggerActorEffect(ActorKey key, uint effectId)
+    {
+        if (_effectRenderer is null) return;
+        var node = _actorRegistry.TryGetActor(key);
+        if (node is null) return;
+        _effectRenderer.PlayCast(node, effectId);
     }
 
 

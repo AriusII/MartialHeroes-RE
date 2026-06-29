@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Godot.Autoload;
 using MartialHeroes.Client.Godot.Composition;
 using MartialHeroes.Client.Godot.Ui.Assets;
 using MartialHeroes.Client.Godot.Ui.Widgets;
@@ -239,7 +240,7 @@ public sealed partial class CharSelectWindow : Control
             GD.PrintErr($"[CharSelectWindow] VFS open for 3D previews failed: {ex.Message}");
         }
 
-        _npcScrDesc = NpcScrDescriptions.Load(_realAssets);
+        _npcScrDesc = NpcScrDescriptions.Load(ClientContext.Instance?.CatalogueStore?.Npc);
 
         try
         {

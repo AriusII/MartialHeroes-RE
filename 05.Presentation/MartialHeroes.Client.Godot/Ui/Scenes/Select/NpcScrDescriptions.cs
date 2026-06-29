@@ -1,14 +1,10 @@
 using Godot;
-using MartialHeroes.Assets.Parsers.DataTables;
-using MartialHeroes.Assets.Parsers.DataTables.Models;
-using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Infrastructure.Catalog;
 
 namespace MartialHeroes.Client.Godot.Ui.Scenes.Select;
 
 internal sealed class NpcScrDescriptions
 {
-    private const string NpcScrVfsPath = "data/script/npc.scr";
-
     private static readonly uint[] UiIndexToNpcKey = [1u, 2u, 4u, 3u];
 
 
@@ -23,47 +19,33 @@ internal sealed class NpcScrDescriptions
 
     public bool LoadedFromVfs { get; private set; }
 
-    public static NpcScrDescriptions Load(RealClientAssets? realAssets)
+    public static NpcScrDescriptions Load(NpcCatalogue? catalogue)
     {
         var inst = new NpcScrDescriptions();
 
-        if (realAssets is null)
+        if (catalogue is null || catalogue.Count == 0)
         {
             GD.Print(
-                "[NpcScrDescriptions] No real-client VFS — class descriptions will be empty (faithfully offline).");
+                "[NpcScrDescriptions] No NpcCatalogue (real-client VFS absent / npc.scr empty) — " +
+                "class descriptions will be empty (faithfully offline). spec: config_tables.md §2.17.3.");
             return inst;
         }
 
         try
         {
-            var raw = realAssets.GetRaw(NpcScrVfsPath);
-
-            if (raw.IsEmpty)
-            {
-                GD.PrintErr("[NpcScrDescriptions] npc.scr not found in VFS — descriptions will be empty. " +
-                            "spec: config_tables.md §2.17.3.");
-                return inst;
-            }
-
-            var records = NpcScrParser.Parse(raw);
-
-            var byKey = new Dictionary<uint, NpcScrRecord>(records.Length);
-            foreach (var r in records)
-                byKey.TryAdd(r.Id, r);
-
             for (var uiIdx = 0; uiIdx < 4; uiIdx++)
             {
                 var key = UiIndexToNpcKey[uiIdx];
 
-                if (!byKey.TryGetValue(key, out var rec))
+                var rec = catalogue.GetById(key);
+                if (rec is null)
                 {
-                    GD.PrintErr($"[NpcScrDescriptions] npc.scr key {key} (UI slot {uiIdx}) not found in " +
-                                "parsed records — slot will be empty (faithfully offline). spec: config_tables.md §2.17.3.");
+                    GD.PrintErr($"[NpcScrDescriptions] npc.scr key {key} (UI slot {uiIdx}) not in NpcCatalogue — " +
+                                "slot will be empty (faithfully offline). spec: config_tables.md §2.17.3.");
                     continue;
                 }
 
-                string[] lines =
-                    [rec.Paragraph0 ?? string.Empty, rec.Paragraph1 ?? string.Empty, rec.Paragraph2 ?? string.Empty];
+                var lines = rec.NameSlots ?? Array.Empty<string>();
                 inst._resolvedLines[uiIdx] = lines;
                 var joined = string.Join("\n", lines.Where(l => !string.IsNullOrWhiteSpace(l)));
 
@@ -75,17 +57,18 @@ internal sealed class NpcScrDescriptions
                 }
 
                 inst._resolved[uiIdx] = joined;
-                GD.Print($"[NpcScrDescriptions] UI {uiIdx} (npc.scr key {key}): first line = '{lines[0]}'");
+                GD.Print(
+                    $"[NpcScrDescriptions] UI {uiIdx} (npc.scr key {key}): first line = '{(lines.Length > 0 ? lines[0] : string.Empty)}'");
             }
 
             inst.LoadedFromVfs = true;
-            GD.Print($"[NpcScrDescriptions] npc.scr loaded ({records.Length} records); " +
+            GD.Print($"[NpcScrDescriptions] NpcCatalogue consumed ({catalogue.Count} records); " +
                      $"class descriptions resolved: {inst._resolved.Count(s => s is not null)}/4. " +
                      "spec: config_tables.md §2.17.3 + frontend_scenes.md §4.1.1.");
         }
         catch (Exception ex)
         {
-            GD.PrintErr($"[NpcScrDescriptions] Failed to load/parse npc.scr: {ex.Message} — " +
+            GD.PrintErr($"[NpcScrDescriptions] Failed to resolve NpcCatalogue descriptions: {ex.Message} — " +
                         "descriptions will be empty (faithfully offline).");
         }
 

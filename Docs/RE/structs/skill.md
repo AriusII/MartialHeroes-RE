@@ -135,15 +135,15 @@ This block holds chain-link references and effect-scale floats. Most slots are s
 | Offset | Size | Type | Field | Evidence | Conf |
 |------:|-----:|------|-------|----------|------|
 | +1072 | 4 | u32 | **Reserved/marker** — value `0x00003000` (12288) in many records | NOT universal: several records carry CP949 text overflow here instead | LIKELY (presence); value NOT a reliable constant (downgraded from dirty note) |
-| +1116 | 4 | u32 | **ChainRef[0]** — composite skill-id reference | e.g. 141100041, 181002108 | CONFIRMED (presence); decode UNVERIFIED |
+| +1116 | 4 | u32 | **ChainRef[0]** / **`cast_motion_base`** — base id of the cast animation (combined with caster class + gender into a final animation id, played when the cast begins); parallel array indexed by the caster's visual-class byte (class 0 = this offset). See `specs/effects.md §15.2`. | e.g. 141100041, 181002108 | CONFIRMED (presence); role CODE-CONFIRMED (cast chain) |
 | +1120 | 4 | u32 | **ChainRef[1]** | composite id or 0 | CONFIRMED (presence) |
 | +1124 | 4 | u32 | **ChainRef[2]** | — | CONFIRMED (presence) |
 | +1128 | 4 | u32 | **ChainRef[3]** | — | CONFIRMED (presence) |
 | +1132 | 4 | u32 | **ChainRef[4]** | — | CONFIRMED (presence) |
-| +1136 | 4 | u32 | **ChainRef[5]** (`3xxxxxxx` prefix family) | e.g. 341100111 | CONFIRMED (presence) |
+| +1136 | 4 | u32 | **ChainRef[5]** / **`cast_effect_id`** (`3xxxxxxx` prefix family) — the cast-channel effect id; resolved through the CoreXEffect registry and spawned as a **looping, actor-anchored `UserXEffect`** (NOT bone-attached). Parallel array indexed by visual-class byte. See `specs/effects.md §15.1/§15.2/§15.4`. | e.g. 341100111 | CONFIRMED (presence); role CODE-CONFIRMED (cast chain) |
 | +1156 | 4 | u32 | **ChainRef[6]** (second `3xxxxxxx`) | e.g. 341100032 | CONFIRMED (presence) |
 | +1176 | 4 | f32 | **ScaleFactorA** — effect/AoE/damage multiplier | 1.0 (movement), 2.0, 1.2, 0.533 | CONFIRMED (presence); semantic UNVERIFIED |
-| +1180 | 4 | u32 | **ChainRef[7]** (`8xxxxxxx` prefix) | e.g. 841100111 | CONFIRMED (presence) |
+| +1180 | 4 | u32 | **ChainRef[7]** / **`cast_sfx_id`** (`8xxxxxxx` prefix) — the cast-start sound id, played once as a one-shot cue (sound kind 11) when the cast begins. See `specs/effects.md §15.2`. | e.g. 841100111 | CONFIRMED (presence); role CODE-CONFIRMED (cast chain) |
 | +1200 | 4 | u32 | **ChainRef[8]** (`88xxxxxxx` prefix) | e.g. 881307201 | CONFIRMED (presence) |
 | +1220 | 4 | f32 | **ScaleFactorB** — secondary multiplier | 1.2, 1.4, 0.533 | CONFIRMED (presence); semantic UNVERIFIED |
 | +1276 | 4 | u32 | **SlotCount / max tier** — small integer | 7 observed | UNVERIFIED |

@@ -1,4 +1,7 @@
+using System.Threading.Channels;
 using Godot;
+using MartialHeroes.Client.Application.Contracts.Events;
+using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
@@ -30,6 +33,13 @@ public sealed partial class HudQuestWindow : Control
     private const int TabAvailableSrcY = 44;
 
     private const int MsgActiveHeader = 18031;
+
+    private const byte SubActionAccept = 2;
+    private const byte SubActionProceed = 3;
+    private const byte SubActionGiveUp = 4;
+
+    private const int AcceptLevelGate = 26;
+
     private int _activeTab;
 
     private Control? _activeTabContent;
@@ -37,9 +47,25 @@ public sealed partial class HudQuestWindow : Control
     private Control? _completableTabContent;
     private Control? _detailTabContent;
 
+    private readonly Button[] _activeNameButtons = new Button[ActiveRows];
+    private readonly uint[] _activeRowQuestIds = new uint[ActiveRows];
+    private CheckBox? _trackingCheckbox;
+    private Label? _detailBody;
+
+    private ChannelReader<QuestLogChangedEvent>? _questLog;
+    private ChannelReader<QuestCompletedEvent>? _questCompleted;
+
+    private uint _selectedQuestId;
+    private byte _npcKind;
+    private int _playerLevel;
+    private bool _billingBypass;
+
 
     private bool _open;
     private bool _trackingEnabled;
+
+
+    public event Action<byte, byte, uint>? QuestActionRequested;
 
 
     public void Build(HudAtlasLibrary atlas, HudTextLibrary text)
@@ -142,6 +168,7 @@ public sealed partial class HudQuestWindow : Control
             GD.Print($"[HudQuestWindow] action 94 = tracking checkbox → {pressed} (CHAR_QUEST_TRACKING). " +
                      "spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.");
         };
+        _trackingCheckbox = trackingCb;
         AddChild(trackingCb);
 
         SelectTab(0);
@@ -149,9 +176,9 @@ public sealed partial class HudQuestWindow : Control
         GD.Print("[HudQuestWindow] Built — 318×732 right-anchored QuestPanel. " +
                  "Tabs: ACTIVE (6 rows), COMPLETABLE (6 rows), AVAILABLE (10 rows), DETAIL. " +
                  "Row stride 31px, base y=44. " +
-                 "Inbound: TODO(capture): quest list record bodies (5/68/5/73 opaque). " +
-                 "Outbound: TODO(world-campaign): C2S 2/28 (give-up) + 2/152 (row request). " +
-                 "spec: Docs/RE/specs/ui_system.md §8.16 CODE-CONFIRMED.");
+                 "Inbound: 5/68 QuestList → QuestLogChangedEvent; 5/73 QuestComplete → QuestCompletedEvent. " +
+                 "Outbound: C2S 2/28 (accept/proceed/give-up) via QuestActionRequested. " +
+                 "spec: Docs/RE/specs/quests.md §4/§6/§7 / ui_system.md §8.16 CODE-CONFIRMED.");
     }
 
     private void BuildTabButtons(HudAtlasLibrary atlas, HudTextLibrary text)
@@ -191,10 +218,11 @@ public sealed partial class HudQuestWindow : Control
         }
     }
 
-    private static Control BuildQuestRows(string tabName, int visibleRows, int rowActionBase, HudAtlasLibrary atlas)
+    private Control BuildQuestRows(string tabName, int visibleRows, int rowActionBase, HudAtlasLibrary atlas)
     {
         var container = new Control { Name = tabName };
         container.SetAnchorsAndOffsetsPreset(LayoutPreset.FullRect);
+        var isActiveTab = tabName == "ActiveTab";
 
         for (var r = 0; r < visibleRows; r++)
         {
@@ -213,8 +241,7 @@ public sealed partial class HudQuestWindow : Control
             leftBtn.Pressed += () =>
                 GD.Print(
                     $"[HudQuestWindow] {tabName} row {capturedR} left cell (action {rowActionBase + capturedR}). " +
-                    "TODO(capture): quest list record bodies. " +
-                    "spec: Docs/RE/specs/ui_system.md §8.16.");
+                    "spec: Docs/RE/specs/quests.md §6.");
             container.AddChild(leftBtn);
 
             var nameBtn = new Button
@@ -226,12 +253,11 @@ public sealed partial class HudQuestWindow : Control
                 Flat = true,
                 MouseFilter = MouseFilterEnum.Stop
             };
-            nameBtn.Pressed += () =>
-                GD.Print(
-                    $"[HudQuestWindow] {tabName} row {capturedR} name cell (action {rowActionBase + capturedR}). " +
-                    "TODO(capture): quest list record bodies. " +
-                    "spec: Docs/RE/specs/ui_system.md §8.16.");
+            nameBtn.Pressed += () => OnQuestRowSelected(isActiveTab, capturedR, rowActionBase + capturedR, tabName);
             container.AddChild(nameBtn);
+
+            if (isActiveTab)
+                _activeNameButtons[r] = nameBtn;
 
             var rightBtn = new Button
             {
@@ -248,6 +274,20 @@ public sealed partial class HudQuestWindow : Control
         return container;
     }
 
+    private void OnQuestRowSelected(bool isActiveTab, int row, int action, string tabName)
+    {
+        if (isActiveTab && row < ActiveRows && _activeRowQuestIds[row] != 0)
+        {
+            _selectedQuestId = _activeRowQuestIds[row];
+            GD.Print($"[HudQuestWindow] selected active quest id={_selectedQuestId} (row {row}, action {action}). " +
+                     "spec: Docs/RE/specs/quests.md §4.3 (quest_id from selection state).");
+            return;
+        }
+
+        GD.Print($"[HudQuestWindow] {tabName} row {row} name cell (action {action}). " +
+                 "spec: Docs/RE/specs/quests.md §6 / §4.4 (2/152 row request).");
+    }
+
     private Control BuildDetailPanel(HudTextLibrary text)
     {
         var panel = new Control { Name = "DetailTab" };
@@ -262,6 +302,7 @@ public sealed partial class HudQuestWindow : Control
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
             MouseFilter = MouseFilterEnum.Ignore
         };
+        _detailBody = detailBody;
         panel.AddChild(detailBody);
 
         var scrollUp = new Button
@@ -301,6 +342,71 @@ public sealed partial class HudQuestWindow : Control
     }
 
 
+    public void BindHub(IHudEventHub hub)
+    {
+        _questLog = hub.QuestLog;
+        _questCompleted = hub.QuestCompleted;
+        GD.Print("[HudQuestWindow] BindHub: QuestLog + QuestCompleted channels connected. " +
+                 "spec: Docs/RE/specs/quests.md §6/§7.");
+    }
+
+    public void SetAcceptGateInputs(int playerLevel, bool billingBypass)
+    {
+        _playerLevel = playerLevel;
+        _billingBypass = billingBypass;
+    }
+
+
+    public override void _Process(double delta)
+    {
+        if (_questLog is not null)
+            while (_questLog.TryRead(out var log))
+                if (log is not null)
+                    ApplyQuestLog(log);
+
+        if (_questCompleted is not null)
+            while (_questCompleted.TryRead(out var done))
+                if (done is not null)
+                    ApplyQuestCompleted(done);
+    }
+
+    private void ApplyQuestLog(QuestLogChangedEvent ev)
+    {
+        var row = 0;
+        foreach (var entry in ev.Entries)
+        {
+            if (entry.QuestId == 0) continue;
+            if (row >= ActiveRows) break;
+
+            _activeRowQuestIds[row] = entry.QuestId;
+            if (_activeNameButtons[row] is { } btn)
+                btn.Text = entry.Name;
+            row++;
+        }
+
+        for (; row < ActiveRows; row++)
+        {
+            _activeRowQuestIds[row] = 0;
+            if (_activeNameButtons[row] is { } btn)
+                btn.Text = string.Empty;
+        }
+
+        _trackingEnabled = ev.TrackingFlag != 0;
+        if (_trackingCheckbox is not null)
+            _trackingCheckbox.ButtonPressed = _trackingEnabled;
+
+        GD.Print($"[HudQuestWindow] QuestLogChangedEvent applied: {ev.Entries.Length} entries, tracking={ev.TrackingFlag}. " +
+                 "spec: Docs/RE/specs/quests.md §6.1 (20 ids+names, tracking flag).");
+    }
+
+    private void ApplyQuestCompleted(QuestCompletedEvent ev)
+    {
+        GD.Print($"[HudQuestWindow] QuestCompletedEvent: applied={ev.Applied} rewardState={ev.RewardState} " +
+                 $"granted={ev.Granted}. Reward-list render is capture-pending. " +
+                 "spec: Docs/RE/specs/quests.md §7.2/§7.3.");
+    }
+
+
     private void SelectTab(int tab)
     {
         _activeTab = tab;
@@ -314,20 +420,56 @@ public sealed partial class HudQuestWindow : Control
 
     private void OnAccept()
     {
-        GD.Print("[HudQuestWindow] action 85 = accept → TODO(world-campaign): C2S 2/28 CmsgQuestAction. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.16.");
+        if (_selectedQuestId == 0)
+        {
+            GD.Print("[HudQuestWindow] action 85 = accept ignored — no quest selected. " +
+                     "spec: Docs/RE/specs/quests.md §4.3.");
+            return;
+        }
+
+        var blocked = !_billingBypass && _playerLevel >= AcceptLevelGate;
+        if (blocked)
+        {
+            GD.Print($"[HudQuestWindow] action 85 = accept BLOCKED — billing-bypass clear AND level " +
+                     $"{_playerLevel} >= {AcceptLevelGate}; notice shown, no 2/28 send. " +
+                     "spec: Docs/RE/specs/quests.md §4.3 (gate threshold 26, polarity).");
+            return;
+        }
+
+        QuestActionRequested?.Invoke(SubActionAccept, _npcKind, _selectedQuestId);
+        GD.Print($"[HudQuestWindow] action 85 = accept → C2S 2/28 sub_action=2 npc_kind={_npcKind} " +
+                 $"quest_id={_selectedQuestId} (sent: bypass={_billingBypass} || level<{AcceptLevelGate}). " +
+                 "spec: Docs/RE/specs/quests.md §4.1/§4.2/§4.3.");
     }
 
     private void OnProceed()
     {
-        GD.Print("[HudQuestWindow] action 86 = proceed/track. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.16.");
+        if (_selectedQuestId == 0)
+        {
+            GD.Print("[HudQuestWindow] action 86 = proceed ignored — no quest selected. " +
+                     "spec: Docs/RE/specs/quests.md §4.3.");
+            return;
+        }
+
+        QuestActionRequested?.Invoke(SubActionProceed, _npcKind, _selectedQuestId);
+        GD.Print($"[HudQuestWindow] action 86 = proceed → C2S 2/28 sub_action=3 quest_id={_selectedQuestId}. " +
+                 "spec: Docs/RE/specs/quests.md §4.2 (proceed only when panel phase==2).");
     }
 
     private void OnGiveUp()
     {
-        GD.Print("[HudQuestWindow] action 91 = give-up → TODO(world-campaign): C2S 2/28 SubAction=4. " +
-                 "spec: Docs/RE/specs/ui_system.md §8.16.");
+        if (_selectedQuestId == 0)
+        {
+            GD.Print("[HudQuestWindow] action 91 = give-up ignored — no quest selected. " +
+                     "spec: Docs/RE/specs/quests.md §4.3.");
+            return;
+        }
+
+        QuestActionRequested?.Invoke(SubActionGiveUp, _npcKind, _selectedQuestId);
+        var abandoned = _selectedQuestId;
+        _selectedQuestId = 0;
+        GD.Print($"[HudQuestWindow] action 91 = give-up → C2S 2/28 sub_action=4 quest_id={abandoned}; " +
+                 "local active-quest marker cleared. spec: Docs/RE/specs/quests.md §4.2/§4.3.");
     }
 
 

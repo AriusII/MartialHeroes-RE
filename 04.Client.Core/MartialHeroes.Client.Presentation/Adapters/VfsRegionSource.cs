@@ -40,11 +40,20 @@ public sealed class VfsRegionSource(MappedVfsArchive? vfs) : IRegionSource
             if (tableBytes.IsEmpty)
                 return ValueTask.FromResult<RegionCatalog?>(null);
 
-            var records = RegionZoneTableParser.Parse(tableBytes);
+            var records = RegionZonePropertiesParser.Parse(tableBytes);
 
-            var rawZoneTypes = new uint[RegionZoneTableParser.RecordCount];
-            for (var i = 0; i < records.Length && i < rawZoneTypes.Length; i++)
-                rawZoneTypes[i] = records[i].ZoneTypeRaw;
+            var rawZoneTypes = new uint[RegionZonePropertiesParser.RecordCount];
+            var zoneNames = new string[RegionZonePropertiesParser.RecordCount];
+            for (var i = 0; i < rawZoneTypes.Length; i++)
+                if (i < records.Length)
+                {
+                    rawZoneTypes[i] = (uint)(int)records[i].ZoneType;
+                    zoneNames[i] = records[i].ZoneName ?? string.Empty;
+                }
+                else
+                {
+                    zoneNames[i] = string.Empty;
+                }
 
             var catalog = new RegionCatalog(
                 grid.Width,
@@ -52,7 +61,8 @@ public sealed class VfsRegionSource(MappedVfsArchive? vfs) : IRegionSource
                 grid.Cells.Span,
                 grid.OriginX,
                 grid.OriginZ,
-                rawZoneTypes);
+                rawZoneTypes,
+                zoneNames);
 
             return ValueTask.FromResult<RegionCatalog?>(catalog);
         }

@@ -11,6 +11,14 @@ public static class ChatFilterParser
 
     private const int ExpectedColumns = 2;
 
+    private static readonly Encoding Cp949;
+
+    static ChatFilterParser()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        Cp949 = Encoding.GetEncoding(949);
+    }
+
     public static ChatFilterEntry[] Parse(ReadOnlyMemory<byte> data)
     {
         return Parse(data.Span);
@@ -18,9 +26,7 @@ public static class ChatFilterParser
 
     public static ChatFilterEntry[] Parse(ReadOnlySpan<byte> span)
     {
-        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-        var cp949 = Encoding.GetEncoding(949);
-        var text = cp949.GetString(span);
+        var text = Cp949.GetString(span);
 
         return ParseText(text);
     }

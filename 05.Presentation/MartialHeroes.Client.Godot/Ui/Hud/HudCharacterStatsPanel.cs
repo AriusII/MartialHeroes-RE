@@ -28,6 +28,7 @@ public sealed partial class HudCharacterStatsPanel : Control
     private Label _charNameLabel = null!;
     private ClientContext? _ctx;
     private ChannelReader<StatAllocationView>? _statAllocations;
+    private ChannelReader<ExpLevelEvent>? _expLevels;
 
 
     private bool _visible;
@@ -201,20 +202,32 @@ public sealed partial class HudCharacterStatsPanel : Control
     public void BindHub(IHudEventHub hub)
     {
         _statAllocations = hub.StatAllocations;
-        GD.Print("[HudCharacterStatsPanel] BindHub: StatAllocations channel connected.");
+        _expLevels = hub.ExpLevels;
+        GD.Print("[HudCharacterStatsPanel] BindHub: StatAllocations + ExpLevels channels connected.");
     }
 
 
     public override void _Process(double delta)
     {
-        if (_statAllocations is null) return;
+        if (_statAllocations is not null)
+        {
+            StatAllocationView? latest = null;
+            while (_statAllocations.TryRead(out var ev))
+                latest = ev;
 
-        StatAllocationView? latest = null;
-        while (_statAllocations.TryRead(out var ev))
-            latest = ev;
+            if (latest is not null)
+                ApplyStatView(latest);
+        }
 
-        if (latest is null) return;
-        ApplyStatView(latest);
+        if (_expLevels is not null)
+        {
+            ExpLevelEvent? latestExp = null;
+            while (_expLevels.TryRead(out var exp))
+                latestExp = exp;
+
+            if (latestExp is not null && _charLevelLabel is not null)
+                _charLevelLabel.Text = $"Lv.{latestExp.Level}";
+        }
     }
 
     private void ApplyStatView(StatAllocationView view)

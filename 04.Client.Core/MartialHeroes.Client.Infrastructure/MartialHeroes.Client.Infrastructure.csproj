@@ -12,6 +12,9 @@
         <!-- Downstream references to layer-03 are acyclic: Assets.* never reference Client.*. -->
         <!-- spec: PRESERVATION_AND_ARCHITECTURE.md — dependency DAG: Infrastructure → Application → Domain; Assets.* ≤ layer-03 < layer-04. -->
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.DataTables\MartialHeroes.Assets.Parsers.DataTables.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Character\MartialHeroes.Assets.Parsers.Character.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Texture\MartialHeroes.Assets.Parsers.Texture.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Effects\MartialHeroes.Assets.Parsers.Effects.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
     </ItemGroup>
 

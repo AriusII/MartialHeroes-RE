@@ -15,9 +15,8 @@ public static class AreaCellListParser
 
         if (span.Length < MinFileSize)
             throw new InvalidDataException(
-                $"d<NNN>.lst parse error: buffer length {span.Length} is too short " +
-                $"(minimum {MinFileSize} bytes — leading cellCount u32 field). " +
-                "spec: Docs/RE/formats/region_grid.md §d<NNN>.lst");
+                $"cell-list parse error: buffer length {span.Length} is too short " +
+                $"(minimum {MinFileSize} bytes for the leading cellCount field).");
 
         var cellCount = BinaryPrimitives.ReadUInt32LittleEndian(span);
 
@@ -26,9 +25,8 @@ public static class AreaCellListParser
 
         if (span.Length < expectedTotal)
             throw new InvalidDataException(
-                $"d<NNN>.lst parse error: buffer length {span.Length} is too short for " +
-                $"{cellCount} cell-key entries (expected {expectedTotal} bytes). " +
-                "spec: Docs/RE/formats/region_grid.md §d<NNN>.lst");
+                $"cell-list parse error: buffer length {span.Length} is too short for " +
+                $"{cellCount} cell-key entries (expected {expectedTotal} bytes).");
 
         var keyCount = (int)cellCount;
         var keys = new uint[keyCount];

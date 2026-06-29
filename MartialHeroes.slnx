@@ -1,61 +1,79 @@
 <Solution>
     <Folder Name="/00.SourcesGenerators/">
-        <Project Path="00.SourcesGenerators/MartialHeroes.Network.Protocol.Generators/MartialHeroes.Network.Protocol.Generators.csproj" />
-        <Project Path="00.SourcesGenerators/MartialHeroes.Shared.Kernel.Generators/MartialHeroes.Shared.Kernel.Generators.csproj" />
+        <Project
+                Path="00.SourcesGenerators/MartialHeroes.Network.Protocol.Generators/MartialHeroes.Network.Protocol.Generators.csproj"/>
+        <Project
+                Path="00.SourcesGenerators/MartialHeroes.Shared.Kernel.Generators/MartialHeroes.Shared.Kernel.Generators.csproj"/>
     </Folder>
     <Folder Name="/01.Infrastructure.Shared/">
-        <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Diagnostics/MartialHeroes.Shared.Diagnostics.csproj" />
-        <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Kernel/MartialHeroes.Shared.Kernel.csproj" />
+        <Project
+                Path="01.Infrastructure.Shared/MartialHeroes.Shared.Diagnostics/MartialHeroes.Shared.Diagnostics.csproj"/>
+        <Project Path="01.Infrastructure.Shared/MartialHeroes.Shared.Kernel/MartialHeroes.Shared.Kernel.csproj"/>
     </Folder>
     <Folder Name="/02.Network.Layer/">
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Crypto/MartialHeroes.Network.Crypto.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol.Core/MartialHeroes.Network.Protocol.Core.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.Login/MartialHeroes.Network.Protocol.Packets.Login.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.Social/MartialHeroes.Network.Protocol.Packets.Social.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.World/MartialHeroes.Network.Protocol.Packets.World.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Protocol.Routing/MartialHeroes.Network.Protocol.Routing.csproj" />
-        <Project Path="02.Network.Layer/MartialHeroes.Network.Transport.Pipelines/MartialHeroes.Network.Transport.Pipelines.csproj" />
+        <Project Path="02.Network.Layer/MartialHeroes.Network.Abstractions/MartialHeroes.Network.Abstractions.csproj"/>
+        <Project Path="02.Network.Layer/MartialHeroes.Network.Crypto/MartialHeroes.Network.Crypto.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Protocol.Core/MartialHeroes.Network.Protocol.Core.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.Login/MartialHeroes.Network.Protocol.Packets.Login.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.Social/MartialHeroes.Network.Protocol.Packets.Social.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Protocol.Packets.World/MartialHeroes.Network.Protocol.Packets.World.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Protocol.Routing/MartialHeroes.Network.Protocol.Routing.csproj"/>
+        <Project
+                Path="02.Network.Layer/MartialHeroes.Network.Transport.Pipelines/MartialHeroes.Network.Transport.Pipelines.csproj"/>
     </Folder>
     <Folder Name="/03.Storage.Assets/">
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Mapping/MartialHeroes.Assets.Mapping.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Audio/MartialHeroes.Assets.Parsers.Audio.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Character/MartialHeroes.Assets.Parsers.Character.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Core/MartialHeroes.Assets.Parsers.Core.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.DataTables/MartialHeroes.Assets.Parsers.DataTables.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Effects/MartialHeroes.Assets.Parsers.Effects.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Mesh/MartialHeroes.Assets.Parsers.Mesh.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Terrain/MartialHeroes.Assets.Parsers.Terrain.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Texture/MartialHeroes.Assets.Parsers.Texture.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.World/MartialHeroes.Assets.Parsers.World.csproj" />
-        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Vfs/MartialHeroes.Assets.Vfs.csproj" />
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Mapping/MartialHeroes.Assets.Mapping.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Audio/MartialHeroes.Assets.Parsers.Audio.csproj"/>
+        <Project
+                Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Character/MartialHeroes.Assets.Parsers.Character.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Core/MartialHeroes.Assets.Parsers.Core.csproj"/>
+        <Project
+                Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.DataTables/MartialHeroes.Assets.Parsers.DataTables.csproj"/>
+        <Project
+                Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Effects/MartialHeroes.Assets.Parsers.Effects.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Mesh/MartialHeroes.Assets.Parsers.Mesh.csproj"/>
+        <Project
+                Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Terrain/MartialHeroes.Assets.Parsers.Terrain.csproj"/>
+        <Project
+                Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.Texture/MartialHeroes.Assets.Parsers.Texture.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Parsers.World/MartialHeroes.Assets.Parsers.World.csproj"/>
+        <Project Path="03.Storage.Assets/MartialHeroes.Assets.Vfs/MartialHeroes.Assets.Vfs.csproj"/>
     </Folder>
     <Folder Name="/04.Client.Core/">
-        <Project Path="04.Client.Core/MartialHeroes.Client.Application/MartialHeroes.Client.Application.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Application.Contracts/MartialHeroes.Client.Application.Contracts.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Actors/MartialHeroes.Client.Domain.Actors.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Inventory/MartialHeroes.Client.Domain.Inventory.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Progression/MartialHeroes.Client.Domain.Progression.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Quests/MartialHeroes.Client.Domain.Quests.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Simulation/MartialHeroes.Client.Domain.Simulation.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Skills/MartialHeroes.Client.Domain.Skills.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Social/MartialHeroes.Client.Domain.Social.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Stats/MartialHeroes.Client.Domain.Stats.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj" />
-        <Project Path="04.Client.Core/MartialHeroes.Client.Presentation/MartialHeroes.Client.Presentation.csproj" />
+        <Project Path="04.Client.Core/MartialHeroes.Client.Application/MartialHeroes.Client.Application.csproj"/>
+        <Project
+                Path="04.Client.Core/MartialHeroes.Client.Application.Contracts/MartialHeroes.Client.Application.Contracts.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Actors/MartialHeroes.Client.Domain.Actors.csproj"/>
+        <Project
+                Path="04.Client.Core/MartialHeroes.Client.Domain.Inventory/MartialHeroes.Client.Domain.Inventory.csproj"/>
+        <Project
+                Path="04.Client.Core/MartialHeroes.Client.Domain.Progression/MartialHeroes.Client.Domain.Progression.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Quests/MartialHeroes.Client.Domain.Quests.csproj"/>
+        <Project
+                Path="04.Client.Core/MartialHeroes.Client.Domain.Simulation/MartialHeroes.Client.Domain.Simulation.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Skills/MartialHeroes.Client.Domain.Skills.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Social/MartialHeroes.Client.Domain.Social.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Domain.Stats/MartialHeroes.Client.Domain.Stats.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Infrastructure/MartialHeroes.Client.Infrastructure.csproj"/>
+        <Project Path="04.Client.Core/MartialHeroes.Client.Presentation/MartialHeroes.Client.Presentation.csproj"/>
     </Folder>
     <Folder Name="/05.Presentation/">
-        <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj" />
+        <Project Path="05.Presentation/MartialHeroes.Client.Godot/MartialHeroes.Client.Godot.csproj"/>
     </Folder>
-    <Folder Name="/Docs/" />
+    <Folder Name="/Docs/"/>
     <Folder Name="/Explorer/">
-        <Project Path="Explorer/MartialHeroes.Explorer.Files/MartialHeroes.Explorer.Files.csproj" />
-        <Project Path="Explorer/MartialHeroes.Explorer.Viewer/MartialHeroes.Explorer.Viewer.csproj" />
+        <Project Path="Explorer/MartialHeroes.Explorer.Files/MartialHeroes.Explorer.Files.csproj"/>
+        <Project Path="Explorer/MartialHeroes.Explorer.Viewer/MartialHeroes.Explorer.Viewer.csproj"/>
     </Folder>
     <Folder Name="/Tools/">
-        <Project Path="Tools/MartialHeroes.Tools.AssetChainTrace/MartialHeroes.Tools.AssetChainTrace.csproj" />
-        <Project Path="Tools/MartialHeroes.Tools.AssetProbe/MartialHeroes.Tools.AssetProbe.csproj" />
-        <Project Path="Tools/MartialHeroes.Tools.PacketInspect/MartialHeroes.Tools.PacketInspect.csproj" />
-        <Project Path="Tools/MartialHeroes.Tools.VfsExplorer/MartialHeroes.Tools.VfsExplorer.csproj" />
+        <Project Path="Tools/MartialHeroes.Tools.AssetChainTrace/MartialHeroes.Tools.AssetChainTrace.csproj"/>
+        <Project Path="Tools/MartialHeroes.Tools.AssetProbe/MartialHeroes.Tools.AssetProbe.csproj"/>
+        <Project Path="Tools/MartialHeroes.Tools.PacketInspect/MartialHeroes.Tools.PacketInspect.csproj"/>
+        <Project Path="Tools/MartialHeroes.Tools.VfsExplorer/MartialHeroes.Tools.VfsExplorer.csproj"/>
     </Folder>
 </Solution>

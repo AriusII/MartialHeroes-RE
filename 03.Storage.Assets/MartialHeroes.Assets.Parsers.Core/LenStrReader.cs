@@ -7,6 +7,14 @@ public static class LenStrReader
 {
     private const int PrefixBytes = 4;
 
+    private static readonly Encoding NameEncoding;
+
+    static LenStrReader()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        NameEncoding = Encoding.GetEncoding(949);
+    }
+
     public static string Read(ReadOnlySpan<byte> span, ref int offset)
     {
         if (offset + PrefixBytes > span.Length)
@@ -29,7 +37,7 @@ public static class LenStrReader
                 $"LenStr data truncated: declared length {length} at offset {offset - PrefixBytes}, " +
                 $"but only {span.Length - offset} byte(s) remain in buffer.");
 
-        var value = Encoding.ASCII.GetString(span.Slice(offset, length));
+        var value = NameEncoding.GetString(span.Slice(offset, length));
         offset += length;
         return value;
     }

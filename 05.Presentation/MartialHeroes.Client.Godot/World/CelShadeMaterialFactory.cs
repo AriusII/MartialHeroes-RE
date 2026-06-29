@@ -18,6 +18,20 @@ public enum CelCharState
     Auto = 8
 }
 
+public readonly record struct DisplayGlowConfig(
+    float GlowBrightMulti,
+    float BaseBrightMulti,
+    float GlowRangeX,
+    float GlowRangeY,
+    string PowerShader,
+    float FrameRate)
+{
+    public static DisplayGlowConfig Recovered { get; } =
+        new(0.3f, 1.05f, 1.0f, 1.0f, "data/shader/power2dx8.psh", 0.0f);
+
+    public bool FpsCounterVisible => FrameRate != 0.0f;
+}
+
 public static class CelShadeMaterialFactory
 {
     private const string ToonRampVfsPath = "data/shader/toonramp.bmp";
@@ -31,7 +45,7 @@ public static class CelShadeMaterialFactory
 
     public static bool CelEnabled { get; set; } = true;
 
-    public static float AmbientFloorEnergy { get; set; } = 1.0f;
+    public static DisplayGlowConfig Glow { get; private set; } = DisplayGlowConfig.Recovered;
 
     public static void InitSession(RealClientAssets? assets)
     {
@@ -64,7 +78,11 @@ public static class CelShadeMaterialFactory
         try
         {
             ParseDisplayLua(raw.Span);
-            GD.Print("[CelShade] display.lua parsed — per-state DISPLAY_CHAR_BRIGHT_* table loaded.");
+            GD.Print("[CelShade] display.lua parsed — per-state DISPLAY_CHAR_BRIGHT_* table (×0.5 halved c0) loaded. " +
+                     "spec: Docs/RE/specs/rendering.md §6.7.");
+            GD.Print($"[CelShade] glow config (spec: Docs/RE/specs/rendering.md §6.6): glowMulti={Glow.GlowBrightMulti}, " +
+                     $"baseMulti={Glow.BaseBrightMulti}, range=({Glow.GlowRangeX},{Glow.GlowRangeY}), " +
+                     $"powerShader='{Glow.PowerShader}', framerate={Glow.FrameRate} (fpsVisible={Glow.FpsCounterVisible}).");
         }
         catch (Exception ex)
         {
@@ -78,6 +96,7 @@ public static class CelShadeMaterialFactory
         var text = Encoding.GetEncoding(949).GetString(raw);
 
         var kv = new Dictionary<string, float>(StringComparer.Ordinal);
+        var powerShader = Glow.PowerShader;
 
         foreach (var rawLine in text.Split('\n'))
         {
@@ -97,19 +116,34 @@ public static class CelShadeMaterialFactory
             var commentIdx = valRaw.IndexOf("--", StringComparison.Ordinal);
             if (commentIdx >= 0) valRaw = valRaw[..commentIdx].Trim();
 
+            if (key.Equals("DISPLAY_POWERSHADER", StringComparison.Ordinal))
+            {
+                var unquoted = valRaw.Trim('"', '\'', ' ');
+                if (unquoted.Length > 0) powerShader = unquoted;
+                continue;
+            }
+
             if (float.TryParse(valRaw, NumberStyles.Float,
                     CultureInfo.InvariantCulture, out var val))
                 kv[key] = val;
         }
+
+        Glow = new DisplayGlowConfig(
+            Get(kv, "DISPLAY_GLOW_BRIGHT_MULTI", DisplayGlowConfig.Recovered.GlowBrightMulti),
+            Get(kv, "DISPLAY_BASE_BRIGHT_MULTI", DisplayGlowConfig.Recovered.BaseBrightMulti),
+            Get(kv, "DISPLAY_GLOW_RANGE_X", DisplayGlowConfig.Recovered.GlowRangeX),
+            Get(kv, "DISPLAY_GLOW_RANGE_Y", DisplayGlowConfig.Recovered.GlowRangeY),
+            powerShader,
+            Get(kv, "DISPLAY_FRAMERATE", DisplayGlowConfig.Recovered.FrameRate));
 
         var stateNames = new[] { "DEFAULT", "CHOICE", "HIT", "ALPHA", "HIDDEN", "POISON", "TYPE", "ANGER", "AUTO" };
 
         for (var i = 0; i < stateNames.Length; i++)
         {
             var s = stateNames[i];
-            var mr = Get(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_R_{s}", _stateTable[i].Multi.X);
-            var mg = Get(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_G_{s}", _stateTable[i].Multi.Y);
-            var mb = Get(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_B_{s}", _stateTable[i].Multi.Z);
+            var mr = GetMulti(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_R_{s}", _stateTable[i].Multi.X);
+            var mg = GetMulti(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_G_{s}", _stateTable[i].Multi.Y);
+            var mb = GetMulti(kv, $"DISPLAY_CHAR_BRIGHT_MULTI_B_{s}", _stateTable[i].Multi.Z);
             var ar = Get(kv, $"DISPLAY_CHAR_BRIGHT_ADD_R_{s}", _stateTable[i].Add.X);
             var ag = Get(kv, $"DISPLAY_CHAR_BRIGHT_ADD_G_{s}", _stateTable[i].Add.Y);
             var ab = Get(kv, $"DISPLAY_CHAR_BRIGHT_ADD_B_{s}", _stateTable[i].Add.Z);
@@ -124,12 +158,24 @@ public static class CelShadeMaterialFactory
         return kv.TryGetValue(key, out var v) ? v : fallback;
     }
 
+    private static float GetMulti(Dictionary<string, float> kv, string key, float halvedFallback)
+    {
+        return kv.TryGetValue(key, out var v) ? v * 0.5f : halvedFallback;
+    }
+
     private static (Vector3, Vector4)[] BuildShippedDefaults()
     {
-        var one = new Vector3(1f, 1f, 1f);
-        var zero4 = new Vector4(0f, 0f, 0f, 1f);
+        const float h = 0.5f;
         var table = new (Vector3, Vector4)[9];
-        for (var i = 0; i < 9; i++) table[i] = (one, zero4);
+        table[0] = (new Vector3(1.3f * h, 1.3f * h, 1.3f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[1] = (new Vector3(1.7f * h, 1.7f * h, 1.7f * h), new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
+        table[2] = (new Vector3(1.3f * h, 1.2f * h, 1.2f * h), new Vector4(0.1f, 0.0f, 0.0f, 0.9f));
+        table[3] = (new Vector3(1.2f * h, 1.2f * h, 1.2f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+        table[4] = (new Vector3(1.5f * h, 1.5f * h, 1.5f * h), new Vector4(0.0f, 0.0f, 0.0f, 0.6f));
+        table[5] = (new Vector3(1.1f * h, 1.3f * h, 1.1f * h), new Vector4(0.0f, 0.1f, 0.02f, 1.0f));
+        table[6] = (new Vector3(1.2f * h, 1.2f * h, 1.4f * h), new Vector4(0.1f, 0.1f, 0.4f, 1.0f));
+        table[7] = (new Vector3(1.5f * h, 1.0f * h, 1.0f * h), new Vector4(0.15f, 0.0f, 0.0f, 1.0f));
+        table[8] = (new Vector3(0.3f * h, 0.3f * h, 0.3f * h), new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
         return table;
     }
 
@@ -168,8 +214,6 @@ public static class CelShadeMaterialFactory
         }
 
         mat.SetShaderParameter("cel_enabled", CelEnabled);
-        mat.SetShaderParameter("ambient_floor_energy", AmbientFloorEnergy);
-        mat.SetShaderParameter("ambient_floor_color", new Color(1f, 1f, 1f));
 
         mat.SetShaderParameter("light_dir", DefaultLightDir);
         mat.SetShaderParameter("light_color", new Color(1f, 1f, 1f));

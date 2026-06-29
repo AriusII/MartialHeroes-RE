@@ -13,8 +13,6 @@ public sealed class AnimationTrack
 {
     public required byte BoneId { get; init; }
 
-    public required uint TrackDescriptorHigh24 { get; init; }
-
     public required Keyframe[] Keyframes { get; init; }
 }
 

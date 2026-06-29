@@ -21,6 +21,54 @@ public static class ViewerTextures
     private static readonly HashSet<string> _sessionPaths = new();
     private static bool _trackingActive;
 
+    private static readonly string[] CharTexExtensions = [".png", ".dds"];
+    private static CharSkinTextureResolver? _charResolver;
+    private static MappedVfsArchive? _charResolverArchive;
+
+    private static CharSkinTextureResolver? GetCharResolver(MappedVfsArchive archive)
+    {
+        if (_charResolver is not null && ReferenceEquals(_charResolverArchive, archive))
+            return _charResolver;
+
+        var manifests = new Dictionary<string, CharFilenameManifest>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bucket in CharSkinTextureResolver.Buckets)
+        {
+            if (!archive.Contains(bucket.ManifestPath)) continue;
+            try
+            {
+                var manifest = TexListParser.Parse(archive.GetFileContent(bucket.ManifestPath));
+                manifests[bucket.Directory] = manifest;
+            }
+            catch (Exception ex)
+            {
+                GD.PrintErr($"[ViewerTextures] texlist {bucket.ManifestPath} parse failed: {ex.Message}");
+            }
+        }
+
+        _charResolver = manifests.Count > 0 ? new CharSkinTextureResolver(manifests) : null;
+        _charResolverArchive = archive;
+        if (_charResolver is not null)
+            GD.Print($"[ViewerTextures] CharSkinTextureResolver built: {_charResolver.Count} texIds indexed.");
+        return _charResolver;
+    }
+
+    private static string? ResolveCharTexPath(MappedVfsArchive archive, int texId)
+    {
+        var resolver = GetCharResolver(archive);
+        var indexed = resolver?.Resolve(texId);
+        if (indexed is not null && archive.Contains(indexed))
+            return indexed;
+
+        foreach (var bucket in CharSkinTextureResolver.Buckets)
+        foreach (var ext in CharTexExtensions)
+        {
+            var candidate = $"{bucket.Directory}{texId}{ext}";
+            if (archive.Contains(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
     private static ImageTexture? DecodeCached(MappedVfsArchive archive, string path)
     {
         if (_cache.TryGetValue(path, out var cached))
@@ -154,7 +202,7 @@ public static class ViewerTextures
         if (texId is null || texId.Value == 0)
             return new Resolved(null, null, $"no skin.txt row for IdA={mesh.IdA}");
 
-        var path = CharSkinTextureResolver.Resolve(texId.Value, archive.Contains);
+        var path = ResolveCharTexPath(archive, texId.Value);
         if (path is null)
             return new Resolved(null, null, $"texId {texId.Value} has no texture file");
 
@@ -167,7 +215,7 @@ public static class ViewerTextures
     public static ImageTexture? ResolveTexId(MappedVfsArchive archive, int texId)
     {
         if (texId <= 0) return null;
-        var path = CharSkinTextureResolver.Resolve(texId, archive.Contains);
+        var path = ResolveCharTexPath(archive, texId);
         if (path is null || !archive.Contains(path)) return null;
         return DecodeCached(archive, path);
     }

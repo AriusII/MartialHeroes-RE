@@ -1,5 +1,4 @@
 using System.Buffers.Binary;
-using System.Text;
 using MartialHeroes.Assets.Parsers.Effects.Models;
 
 namespace MartialHeroes.Assets.Parsers.Effects;
@@ -12,14 +11,21 @@ public static class XeffParser
 
     private const int ElementFixedHeadSize = 24;
 
+    private const int CurveCountBytes = 16;
+
     private const int TexNameLen = 64;
 
     private const int TrackHeaderSize = 9;
 
-    private const uint EmitterBillboard = 0;
-    private const uint EmitterMesh = 1;
+    private const int MinSubEffectBytes = ElementFixedHeadSize + CurveCountBytes + TrackHeaderSize;
+
     private const uint EmitterDirectional = 2;
 
+    private const int AnimatedKeyframeStride = 40;
+
+    private const int StaticStateBytes = 24;
+
+    private const int StaticStateRotationBytes = 36;
 
     private const int EffVertexStride = 32;
 
@@ -32,21 +38,26 @@ public static class XeffParser
     {
         if (span.Length < XeffHeaderSize)
             throw new InvalidDataException(
-                $".xeff parse error: buffer too short for {XeffHeaderSize}-byte header (got {span.Length}). " +
-                "spec: Docs/RE/formats/effects.md §A.2.");
+                $".xeff parse error: buffer too short for {XeffHeaderSize}-byte header (got {span.Length}).");
 
-        var effectId = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var effectId = BinaryPrimitives.ReadUInt32LittleEndian(span);
         if (effectId == XeffInvalidMagic)
             throw new InvalidDataException(
-                $".xeff parse error: effect_id == 0x{XeffInvalidMagic:X8} (anti-magic sentinel). " +
-                "File is corrupt. spec: Docs/RE/formats/effects.md §A.1.");
+                $".xeff parse error: effect_id == 0x{XeffInvalidMagic:X8} (corrupt-file sentinel).");
 
         var subEffectCount = BinaryPrimitives.ReadUInt32LittleEndian(span[0x04..]);
 
-        var offset = XeffHeaderSize;
-        var subEffects = new XeffSubEffect[(int)subEffectCount];
+        if (XeffHeaderSize + (long)subEffectCount * MinSubEffectBytes > span.Length)
+            throw new InvalidDataException(
+                $".xeff parse error: sub_effect_count={subEffectCount} cannot fit in a {span.Length}-byte buffer " +
+                $"(minimum {MinSubEffectBytes} bytes per sub-effect).");
 
-        for (var s = 0; s < (int)subEffectCount; s++) subEffects[s] = ReadSubEffect(span, ref offset, s);
+        var offset = XeffHeaderSize;
+        var count = (int)subEffectCount;
+        var subEffects = new XeffSubEffect[count];
+
+        for (var s = 0; s < count; s++)
+            subEffects[s] = ReadSubEffect(span, ref offset, s);
 
         return new XeffData
         {
@@ -62,15 +73,10 @@ public static class XeffParser
         EnsureBytes(span, offset, ElementFixedHeadSize, $"sub_effect[{subIndex}] element fixed head");
 
         var emitterType = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
-
         var resourceId = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 4)..]);
-
         var animFlag = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 8)..]);
-
-        var fieldUnknownA = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
-
+        var blendMode = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 12)..]);
         var elementDword2 = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 16)..]);
-
         var texCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 20)..]);
 
         offset += ElementFixedHeadSize;
@@ -78,59 +84,48 @@ public static class XeffParser
         var nameTableBytes = (long)texCount * TexNameLen;
         EnsureBytes(span, offset, nameTableBytes, $"sub_effect[{subIndex}] name table");
 
-        var texNames = new string[(int)texCount];
-        for (var t = 0; t < (int)texCount; t++)
+        var entryCount = (int)texCount;
+        var texNames = new string[entryCount];
+        for (var t = 0; t < entryCount; t++)
         {
             var nameBytes = span.Slice(offset + t * TexNameLen, TexNameLen);
             var nullIdx = nameBytes.IndexOf((byte)0);
-            texNames[t] = Encoding.ASCII.GetString(
+            texNames[t] = Cp949Encoding.Instance.GetString(
                 nullIdx >= 0 ? nameBytes[..nullIdx] : nameBytes);
         }
 
         offset += (int)nameTableBytes;
 
-
-        var alphaKeys = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] alpha curve");
-
+        var opacity = ReadOpacityCurve(span, ref offset, $"sub_effect[{subIndex}] alpha curve");
         var diffuseR = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass2 curve");
-
         var diffuseG = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass3 curve");
-
         var diffuseB = ReadFloatCurve(span, ref offset, $"sub_effect[{subIndex}] pass4 curve");
 
         EnsureBytes(span, offset, TrackHeaderSize, $"sub_effect[{subIndex}] track header");
 
         var animLoop = span[offset];
-
         var animStride = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 1)..]);
-
         var animBaseTime = BinaryPrimitives.ReadUInt32LittleEndian(span[(offset + 5)..]);
         offset += TrackHeaderSize;
 
         XeffKeyframe[] keyframes;
         if (animLoop != 0)
         {
-            keyframes = new XeffKeyframe[(int)texCount];
+            var totalKfBytes = (long)texCount * AnimatedKeyframeStride;
+            EnsureBytes(span, offset, totalKfBytes, $"sub_effect[{subIndex}] animated keyframes");
 
-            var totalKfBytes = (long)texCount * 40;
-            if (offset + totalKfBytes > span.Length)
-                throw new InvalidDataException(
-                    $".xeff parse error: sub_effect[{subIndex}] animated keyframe block truncated — " +
-                    $"need {texCount} × 40 = {totalKfBytes} bytes at offset {offset}, " +
-                    $"buffer length {span.Length}. spec: Docs/RE/formats/effects.md §A.4.4.");
-
-            for (var k = 0; k < (int)texCount; k++)
+            keyframes = new XeffKeyframe[entryCount];
+            for (var k = 0; k < entryCount; k++)
             {
                 var kfIndex = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
                 offset += 4;
-
-                keyframes[k] = ReadNineFloats(span, ref offset, kfIndex, subIndex, k);
+                keyframes[k] = ReadNineFloats(span, ref offset, kfIndex);
             }
         }
         else
         {
             var hasRotation = emitterType == EmitterDirectional;
-            var staticBytes = hasRotation ? 36 : 24;
+            var staticBytes = hasRotation ? StaticStateRotationBytes : StaticStateBytes;
             EnsureBytes(span, offset, staticBytes, $"sub_effect[{subIndex}] static-state entry");
 
             var vx = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
@@ -139,7 +134,7 @@ public static class XeffParser
             var sx = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 12)..]);
             var sy = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 16)..]);
             var sz = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 20)..]);
-            offset += 24;
+            offset += StaticStateBytes;
 
             float rxd = 0f, ryd = 0f, rzd = 0f;
             if (hasRotation)
@@ -150,22 +145,7 @@ public static class XeffParser
                 offset += 12;
             }
 
-            keyframes = new[]
-            {
-                new XeffKeyframe
-                {
-                    KfIndex = 0,
-                    VelocityX = vx,
-                    VelocityY = vy,
-                    VelocityZ = vz,
-                    SizeX = sx,
-                    SizeY = sy,
-                    SizeZ = sz,
-                    RotXDeg = rxd,
-                    RotYDeg = ryd,
-                    RotZDeg = rzd
-                }
-            };
+            keyframes = [new XeffKeyframe(0, vx, vy, vz, sx, sy, sz, rxd, ryd, rzd)];
         }
 
         return new XeffSubEffect
@@ -173,11 +153,11 @@ public static class XeffParser
             EmitterType = emitterType,
             ResourceId = resourceId,
             AnimFlag = animFlag,
-            FieldUnknownA = fieldUnknownA,
+            BlendMode = blendMode,
             ElementDword2 = elementDword2,
             EntryCount = texCount,
             TextureNames = texNames,
-            AlphaKeys = alphaKeys,
+            Opacity = opacity,
             DiffuseR = diffuseR,
             DiffuseG = diffuseG,
             DiffuseB = diffuseB,
@@ -188,8 +168,7 @@ public static class XeffParser
         };
     }
 
-    private static XeffKeyframe ReadNineFloats(
-        ReadOnlySpan<byte> span, ref int offset, uint kfIndex, int subIndex, int k)
+    private static XeffKeyframe ReadNineFloats(ReadOnlySpan<byte> span, ref int offset, uint kfIndex)
     {
         var vx = BinaryPrimitives.ReadSingleLittleEndian(span[offset..]);
         var vy = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 4)..]);
@@ -202,19 +181,20 @@ public static class XeffParser
         var rzd = BinaryPrimitives.ReadSingleLittleEndian(span[(offset + 32)..]);
         offset += 36;
 
-        return new XeffKeyframe
-        {
-            KfIndex = kfIndex,
-            VelocityX = vx,
-            VelocityY = vy,
-            VelocityZ = vz,
-            SizeX = sx,
-            SizeY = sy,
-            SizeZ = sz,
-            RotXDeg = rxd,
-            RotYDeg = ryd,
-            RotZDeg = rzd
-        };
+        return new XeffKeyframe(kfIndex, vx, vy, vz, sx, sy, sz, rxd, ryd, rzd);
+    }
+
+    private static float[] ReadOpacityCurve(ReadOnlySpan<byte> span, ref int offset, string fieldName)
+    {
+        EnsureBytes(span, offset, 4, $"{fieldName} count");
+        var count = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]);
+        offset += 4;
+        EnsureBytes(span, offset, (long)count * 4, $"{fieldName} values");
+        var arr = new float[(int)count];
+        for (var i = 0; i < (int)count; i++)
+            arr[i] = 1f - BinaryPrimitives.ReadSingleLittleEndian(span[(offset + i * 4)..]);
+        offset += (int)count * 4;
+        return arr;
     }
 
     private static float[] ReadFloatCurve(ReadOnlySpan<byte> span, ref int offset, string fieldName)
@@ -239,16 +219,14 @@ public static class XeffParser
     {
         if (span.Length < 4)
             throw new InvalidDataException(
-                $".eff parse error: buffer too short for 4-byte index_count (got {span.Length}). " +
-                "spec: Docs/RE/formats/effects.md §B.3.");
+                $".eff parse error: buffer too short for 4-byte index_count (got {span.Length}).");
 
-        var indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span[..]);
+        var indexCount = BinaryPrimitives.ReadUInt32LittleEndian(span);
         var indexBytes = (long)indexCount * 2;
 
         if (span.Length < 4 + indexBytes + 4)
             throw new InvalidDataException(
-                $".eff parse error: truncated at index array or vert_count (need {4 + indexBytes + 4}, got {span.Length}). " +
-                "spec: Docs/RE/formats/effects.md §B.3.");
+                $".eff parse error: truncated at index array or vert_count (need {4 + indexBytes + 4}, got {span.Length}).");
 
         var indices = new ushort[(int)indexCount];
         for (var i = 0; i < (int)indexCount; i++)
@@ -261,8 +239,7 @@ public static class XeffParser
         var expectedTotal = vertCountOffset + 4 + vertBytes;
         if (span.Length < expectedTotal)
             throw new InvalidDataException(
-                $".eff parse error: truncated at vertex array (need {expectedTotal}, got {span.Length}). " +
-                "spec: Docs/RE/formats/effects.md §B.4.");
+                $".eff parse error: truncated at vertex array (need {expectedTotal}, got {span.Length}).");
 
         var vertBase = vertCountOffset + 4;
         var vertices = new EffVertex[(int)vertCount];
@@ -289,7 +266,6 @@ public static class XeffParser
         if (offset + needed > span.Length)
             throw new InvalidDataException(
                 $".xeff parse error: truncated reading '{fieldName}' — " +
-                $"need {needed} bytes at offset {offset}, buffer length {span.Length}. " +
-                "spec: Docs/RE/formats/effects.md §A.4.");
+                $"need {needed} bytes at offset {offset}, buffer length {span.Length}.");
     }
 }

@@ -4,7 +4,6 @@ using MartialHeroes.Assets.Parsers.Mesh;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Assets.Vfs;
 using MartialHeroes.Client.Presentation.Screens;
-using MartialHeroes.Client.Presentation.World;
 
 namespace MartialHeroes.Explorer.Viewer;
 
@@ -63,40 +62,6 @@ public static class CharacterAssetResolver
                 hit.Skeleton.ActorId, CoverageOf(hit.Skeleton, mesh));
 
         return new SkeletonResolution(null, string.Empty, "none", 0, 0);
-    }
-
-    public static string? FindDefaultBodySknPath(MappedVfsArchive archive, IReadOnlyList<string> sknPaths)
-    {
-        string? fallback = null;
-
-        foreach (var path in sknPaths)
-            try
-            {
-                var raw = archive.GetFileContent(path);
-                if (raw.IsEmpty) continue;
-                var mesh = SknParser.Parse(raw);
-                var idB = (int)mesh.IdB;
-                if (idB is < 1 or > 4) continue;
-
-                fallback ??= path;
-
-                bool textured;
-                try
-                {
-                    textured = ViewerTextures.ResolveSkn(archive, mesh).Texture is not null;
-                }
-                catch (Exception)
-                {
-                    textured = false;
-                }
-
-                if (textured) return path;
-            }
-            catch (Exception)
-            {
-            }
-
-        return fallback;
     }
 
     private static Dictionary<int, (Skeleton Skeleton, string Path)> GetOrBuildBindPool(MappedVfsArchive archive)
@@ -176,8 +141,11 @@ public static class CharacterAssetResolver
 
         Add(idleId);
         foreach (var row in lookup.ActorRows)
-        foreach (var id in row.DirArray1)
-            Add(id);
+        {
+            var clips = row.MotionClipIds;
+            for (var ci = 1; ci < clips.Count; ci++)
+                Add(clips[ci]);
+        }
 
         if (ordered.Count == 0)
         {
@@ -237,59 +205,6 @@ public static class CharacterAssetResolver
         }
 
         return new MotRegistry(byIdB, byIdA);
-    }
-
-    public static SkinningMath.VertexInfluences[] BuildInfluences(
-        SknWeight[] weights, int vertexCount, int[] idToIndex, int baseId, int boneCount)
-    {
-        var raw = new List<(int Bone, float W)>[vertexCount];
-        for (var i = 0; i < vertexCount; i++) raw[i] = [];
-
-        foreach (var wr in weights)
-        {
-            if (wr.Weight < SkinningMath.WeightSkipThreshold) continue;
-
-            var vi = (int)wr.VertexIndex;
-            if ((uint)vi >= (uint)vertexCount) continue;
-
-            var bid = (int)(wr.BoneIndex & 0xFF);
-            var bIdx = bid is >= 0 and < 256 ? idToIndex[bid] : -1;
-            if (bIdx < 0)
-            {
-                var off = (int)wr.BoneIndex - baseId;
-                bIdx = off >= 0 && off < boneCount ? off : -1;
-            }
-
-            if (bIdx < 0 || bIdx >= boneCount) continue;
-
-            raw[vi].Add((bIdx, wr.Weight));
-        }
-
-        var result = new SkinningMath.VertexInfluences[vertexCount];
-        for (var v = 0; v < vertexCount; v++)
-        {
-            var list = raw[v];
-            if (list.Count == 0)
-            {
-                result[v] = new SkinningMath.VertexInfluences
-                {
-                    Items = [new SkinningMath.Influence { BoneIndex = 0, Weight = 1f }]
-                };
-                continue;
-            }
-
-            var total = 0f;
-            foreach (var it in list) total += it.W;
-            var inv = total > 1e-8f ? 1f / total : 1f;
-
-            var items = new SkinningMath.Influence[list.Count];
-            for (var k = 0; k < list.Count; k++)
-                items[k] = new SkinningMath.Influence { BoneIndex = list[k].Bone, Weight = list[k].W * inv };
-
-            result[v] = new SkinningMath.VertexInfluences { Items = items };
-        }
-
-        return result;
     }
 
     private static int CoverageOf(Skeleton skeleton, SkinnedMesh mesh)

@@ -44,5 +44,9 @@ public enum SkillCastResult
 
     ActionLocked = 20,
 
-    OnCooldown = 21
+    OnCooldown = 21,
+
+    NotEnoughHp = 22,
+
+    NotEnoughStamina = 23
 }

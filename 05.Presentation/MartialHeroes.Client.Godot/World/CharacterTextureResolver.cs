@@ -2,6 +2,7 @@ using Godot;
 using MartialHeroes.Assets.Parsers.Character;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
 using MartialHeroes.Client.Godot.Composition;
+using MartialHeroes.Client.Infrastructure.Catalog;
 
 namespace MartialHeroes.Client.Godot.World;
 
@@ -9,19 +10,11 @@ public static class CharacterTextureResolver
 {
     private const string SkinTxtPath = "data/char/skin.txt";
 
-    private static readonly string[] TexBuckets =
-    [
-        "data/char/tex10241024/",
-        "data/char/tex512512/",
-        "data/char/tex256512/",
-        "data/char/tex256256/"
-    ];
-
-    private static readonly string[] TexExtensions = [".png", ".dds"];
-
 
     private static Dictionary<uint, uint>? _cachedSkinToTex;
     private static RealClientAssets? _cacheOwner;
+
+    public static CharacterVisualCatalogue? Catalogue { get; set; }
 
     public static ImageTexture? Resolve(RealClientAssets assets, SkinnedMesh mesh)
     {
@@ -39,11 +32,10 @@ public static class CharacterTextureResolver
             _cachedSkinToTex.TryGetValue(skinIdA, out var fromTable))
             texId = fromTable;
 
-        if (texId == 0) texId = DeriveFallbackTexId(skinIdA);
-
         if (texId == 0)
         {
-            GD.Print($"[CharacterTextureResolver] No texId resolved for skinIdA={skinIdA}.");
+            GD.Print($"[CharacterTextureResolver] skin.txt miss for skinIdA={skinIdA} — no texId; " +
+                     "rendering neutral (no fabricated id). spec: skinning.md §8(e).");
             return null;
         }
 
@@ -52,22 +44,26 @@ public static class CharacterTextureResolver
 
     private static ImageTexture? FindTextureInVfs(RealClientAssets assets, uint texId, uint skinIdA)
     {
-        foreach (var bucket in TexBuckets)
-        foreach (var ext in TexExtensions)
+        var entry = Catalogue?.GetTexById((int)texId);
+        if (entry is null)
         {
-            var path = $"{bucket}{texId}{ext}";
-            if (!assets.Contains(path)) continue;
-
-            var tex = assets.LoadTexture(path);
-            if (tex is not null)
-            {
-                GD.Print($"[CharacterTextureResolver] Resolved skinIdA={skinIdA} → texId={texId} → {path}");
-                return tex;
-            }
+            GD.Print($"[CharacterTextureResolver] texId={texId} absent from tex{{N}}list manifests for " +
+                     $"skinIdA={skinIdA} — null (no probe, no fabrication). spec: skinning.md §8(e).");
+            return null;
         }
 
-        GD.Print($"[CharacterTextureResolver] texId={texId} not found in any bucket for skinIdA={skinIdA}.");
-        return null;
+        if (!assets.Contains(entry.VfsPath))
+        {
+            GD.Print($"[CharacterTextureResolver] texId={texId} → '{entry.VfsPath}' not present in VFS " +
+                     $"for skinIdA={skinIdA} — null.");
+            return null;
+        }
+
+        var tex = assets.LoadTexture(entry.VfsPath);
+        if (tex is not null)
+            GD.Print($"[CharacterTextureResolver] Resolved skinIdA={skinIdA} → texId={texId} → {entry.VfsPath} " +
+                     "(via tex{N}list catalogue).");
+        return tex;
     }
 
 
@@ -144,13 +140,5 @@ public static class CharacterTextureResolver
             GD.PrintErr($"[CharacterTextureResolver] Failed to parse skin.txt: {ex.Message}");
             _cachedSkinToTex = new Dictionary<uint, uint>(0);
         }
-    }
-
-
-    private static uint DeriveFallbackTexId(uint skinIdA)
-    {
-        var str = skinIdA.ToString();
-        if (str.Length == 0 || str[0] != '2') return 0;
-        return uint.TryParse("4" + str[1..], out var result) ? result : 0u;
     }
 }

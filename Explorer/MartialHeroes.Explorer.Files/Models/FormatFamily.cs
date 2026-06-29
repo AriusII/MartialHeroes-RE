@@ -19,15 +19,13 @@ public sealed class FormatFamily
 
     public Func<VfsFileNode, bool>? ExtraMatch { get; init; }
 
-    public int Order { get; init; }
-
     public bool Matches(VfsFileNode node)
     {
         if (ExtraMatch is not null)
             return ExtraMatch(node);
 
         foreach (var ext in Extensions)
-            if (string.Equals(ext, node.Extension, StringComparison.Ordinal))
+            if (string.Equals(ext, node.Extension, StringComparison.OrdinalIgnoreCase))
                 return true;
 
         return false;

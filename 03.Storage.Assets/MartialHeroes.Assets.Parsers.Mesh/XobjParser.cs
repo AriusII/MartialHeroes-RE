@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Buffers.Text;
 using System.Text;
 using MartialHeroes.Assets.Parsers.Core.Models;
 using MartialHeroes.Assets.Parsers.Mesh.Models;
@@ -7,6 +7,8 @@ namespace MartialHeroes.Assets.Parsers.Mesh;
 
 public static class XobjParser
 {
+    private const uint XobjVertexDefaultDiffuse = 0xFF000000u;
+
     public static StaticMesh Parse(ReadOnlyMemory<byte> data)
     {
         return Parse(data.Span);
@@ -14,55 +16,7 @@ public static class XobjParser
 
     public static StaticMesh Parse(ReadOnlySpan<byte> data)
     {
-        var text = Encoding.ASCII.GetString(data);
-
-        var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        var pos = 0;
-
-        _ = NextU32(tokens, ref pos, "marker");
-
-        var numTriangles = NextU32(tokens, ref pos, "tri_count");
-
-        var indexCount = checked((int)(numTriangles * 3));
-
-        if (pos + indexCount + 1 > tokens.Length)
-            throw new InvalidDataException(
-                $".xobj parse error: index block truncated — need {indexCount} index tokens + vert_count, " +
-                $"but only {tokens.Length - pos} tokens remain. " +
-                "spec: Docs/RE/formats/xobj.md §Read order step 3-4.");
-
-        var indices = new ushort[indexCount];
-        for (var i = 0; i < indexCount; i++)
-            indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
-
-        var numVertices = NextU32(tokens, ref pos, "vert_count");
-
-        var positions = new Vec3[numVertices];
-        var uvs = new Vec2[numVertices];
-
-        var tokensNeeded = pos + checked((int)numVertices * 8);
-        if (tokensNeeded > tokens.Length)
-            throw new InvalidDataException(
-                $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
-                $"({tokensNeeded} total), but only {tokens.Length} tokens available. " +
-                "spec: Docs/RE/formats/xobj.md §Per-vertex line.");
-
-        for (uint v = 0; v < numVertices; v++)
-        {
-            var posX = NextF32Unchecked(tokens, ref pos);
-            var posY = NextF32Unchecked(tokens, ref pos);
-            var posZ = NextF32Unchecked(tokens, ref pos);
-
-            _ = NextF32Unchecked(tokens, ref pos);
-            _ = NextF32Unchecked(tokens, ref pos);
-            _ = NextF32Unchecked(tokens, ref pos);
-
-            var texU = NextF32Unchecked(tokens, ref pos);
-            var texV = 1.0f - NextF32Unchecked(tokens, ref pos);
-
-            positions[v] = new Vec3(posX, posY, posZ);
-            uvs[v] = new Vec2(texU, texV);
-        }
+        ParseCore(data, out var positions, out var uvs, out var indices);
 
         return new StaticMesh
         {
@@ -72,7 +26,6 @@ public static class XobjParser
         };
     }
 
-
     public static XobjMeshData ParseAsMeshParticle(ReadOnlyMemory<byte> data)
     {
         return ParseAsMeshParticle(data.Span);
@@ -80,92 +33,112 @@ public static class XobjParser
 
     public static XobjMeshData ParseAsMeshParticle(ReadOnlySpan<byte> data)
     {
-        var text = Encoding.ASCII.GetString(data);
-        var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        var pos = 0;
+        ParseCore(data, out var positions, out var uvs, out var indices);
 
-        _ = NextU32(tokens, ref pos, "marker");
-
-        var numTriangles = NextU32(tokens, ref pos, "tri_count");
-
-        var indexCount = checked((int)(numTriangles * 3));
-
-        if (pos + indexCount + 1 > tokens.Length)
-            throw new InvalidDataException(
-                $".xobj parse error: index block truncated — need {indexCount} index tokens + vert_count, " +
-                $"but only {tokens.Length - pos} tokens remain. " +
-                "spec: Docs/RE/formats/xobj.md §Read order step 3-4.");
-
-        var indices = new ushort[indexCount];
-        for (var i = 0; i < indexCount; i++)
-            indices[i] = (ushort)(NextU32Unchecked(tokens, ref pos) & 0xFFFF);
-
-        var numVertices = NextU32(tokens, ref pos, "vert_count");
-
-        var vertices = new XobjVertex[numVertices];
-
-        var vertexTokensNeeded = pos + checked((int)numVertices * 8);
-        if (vertexTokensNeeded > tokens.Length)
-            throw new InvalidDataException(
-                $".xobj parse error: vertex block truncated — need {numVertices} vertices × 8 tokens " +
-                $"({vertexTokensNeeded} total), but only {tokens.Length} tokens available. " +
-                "spec: Docs/RE/formats/xobj.md §Per-vertex line.");
-
-        for (uint v = 0; v < numVertices; v++)
+        var vertices = new XobjVertex[positions.Length];
+        for (var v = 0; v < positions.Length; v++)
         {
-            var px = NextF32Unchecked(tokens, ref pos);
-            var py = NextF32Unchecked(tokens, ref pos);
-            var pz = NextF32Unchecked(tokens, ref pos);
-
-            _ = NextF32Unchecked(tokens, ref pos);
-            _ = NextF32Unchecked(tokens, ref pos);
-            _ = NextF32Unchecked(tokens, ref pos);
-
-            var tu = NextF32Unchecked(tokens, ref pos);
-            var tvMem = 1.0f - NextF32Unchecked(tokens, ref pos);
-
-            const uint diffuse = 0xFF000000u;
-
-            vertices[v] = new XobjVertex(px, py, pz, diffuse, tu, tvMem);
+            var p = positions[v];
+            var uv = uvs[v];
+            vertices[v] = new XobjVertex(p.X, p.Y, p.Z, XobjVertexDefaultDiffuse, uv.X, uv.Y);
         }
 
         return new XobjMeshData { Indices = indices, Vertices = vertices };
     }
 
-
-    private static uint NextU32(string[] tokens, ref int pos, string fieldName)
+    private static void ParseCore(
+        ReadOnlySpan<byte> data,
+        out Vec3[] positions,
+        out Vec2[] uvs,
+        out ushort[] indices)
     {
-        if (pos >= tokens.Length)
-            throw new InvalidDataException(
-                $".xobj parse error: token under-run reading '{fieldName}' " +
-                $"(expected token at position {pos}, file has {tokens.Length} tokens total).");
+        var bytePos = 0;
+        var tokenIndex = 0;
 
-        var token = tokens[pos++];
-        if (!uint.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+        _ = NextU32(data, ref bytePos, ref tokenIndex, "marker");
+
+        var numTriangles = NextU32(data, ref bytePos, ref tokenIndex, "tri_count");
+        var indexCount = checked((int)(numTriangles * 3));
+
+        indices = new ushort[indexCount];
+        for (var i = 0; i < indexCount; i++)
+            indices[i] = (ushort)(NextU32(data, ref bytePos, ref tokenIndex, "index") & 0xFFFF);
+
+        var numVertices = NextU32(data, ref bytePos, ref tokenIndex, "vert_count");
+        var vertexCount = checked((int)numVertices);
+
+        positions = new Vec3[vertexCount];
+        uvs = new Vec2[vertexCount];
+
+        for (var v = 0; v < vertexCount; v++)
+        {
+            var posX = NextF32(data, ref bytePos, ref tokenIndex, "vertex.position.x");
+            var posY = NextF32(data, ref bytePos, ref tokenIndex, "vertex.position.y");
+            var posZ = NextF32(data, ref bytePos, ref tokenIndex, "vertex.position.z");
+
+            _ = NextF32(data, ref bytePos, ref tokenIndex, "vertex.normal.x");
+            _ = NextF32(data, ref bytePos, ref tokenIndex, "vertex.normal.y");
+            _ = NextF32(data, ref bytePos, ref tokenIndex, "vertex.normal.z");
+
+            var texU = NextF32(data, ref bytePos, ref tokenIndex, "vertex.uv.u");
+            var texV = 1.0f - NextF32(data, ref bytePos, ref tokenIndex, "vertex.uv.v");
+
+            positions[v] = new Vec3(posX, posY, posZ);
+            uvs[v] = new Vec2(texU, texV);
+        }
+    }
+
+    private static bool IsWhitespace(byte b)
+    {
+        return b == 0x20 || (b >= 0x09 && b <= 0x0D);
+    }
+
+    private static bool TryNextToken(ReadOnlySpan<byte> data, ref int bytePos, out ReadOnlySpan<byte> token)
+    {
+        while (bytePos < data.Length && IsWhitespace(data[bytePos]))
+            bytePos++;
+
+        if (bytePos >= data.Length)
+        {
+            token = default;
+            return false;
+        }
+
+        var start = bytePos;
+        while (bytePos < data.Length && !IsWhitespace(data[bytePos]))
+            bytePos++;
+
+        token = data[start..bytePos];
+        return true;
+    }
+
+    private static uint NextU32(ReadOnlySpan<byte> data, ref int bytePos, ref int tokenIndex, string fieldName)
+    {
+        if (!TryNextToken(data, ref bytePos, out var token))
             throw new InvalidDataException(
-                $".xobj parse error: expected unsigned integer for '{fieldName}', " +
-                $"got \"{token}\" at token position {pos - 1}.");
+                $".xobj parse error: token under-run reading '{fieldName}' at token position {tokenIndex}.");
+
+        var position = tokenIndex++;
+        if (!Utf8Parser.TryParse(token, out uint value, out var consumed) || consumed != token.Length)
+            throw new InvalidDataException(
+                $".xobj parse error: expected unsigned integer for '{fieldName}', got " +
+                $"\"{Encoding.ASCII.GetString(token)}\" at token position {position}.");
 
         return value;
     }
 
-    private static uint NextU32Unchecked(string[] tokens, ref int pos)
+    private static float NextF32(ReadOnlySpan<byte> data, ref int bytePos, ref int tokenIndex, string fieldName)
     {
-        var token = tokens[pos++];
-        if (!uint.TryParse(token, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
+        if (!TryNextToken(data, ref bytePos, out var token))
             throw new InvalidDataException(
-                $".xobj parse error: expected unsigned integer, got \"{token}\" at token position {pos - 1}. " +
-                "spec: Docs/RE/formats/mesh.md §Index list.");
-        return value;
-    }
+                $".xobj parse error: token under-run reading '{fieldName}' at token position {tokenIndex}.");
 
-    private static float NextF32Unchecked(string[] tokens, ref int pos)
-    {
-        var token = tokens[pos++];
-        if (!float.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out var value))
+        var position = tokenIndex++;
+        if (!Utf8Parser.TryParse(token, out float value, out var consumed) || consumed != token.Length)
             throw new InvalidDataException(
-                $".xobj parse error: expected float, got \"{token}\" at token position {pos - 1}. " +
-                "spec: Docs/RE/formats/mesh.md §Vertex list.");
+                $".xobj parse error: expected float for '{fieldName}', got " +
+                $"\"{Encoding.ASCII.GetString(token)}\" at token position {position}.");
+
         return value;
     }
 }

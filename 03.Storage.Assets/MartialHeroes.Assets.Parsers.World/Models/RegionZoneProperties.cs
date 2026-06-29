@@ -7,7 +7,7 @@ public enum RegionZoneType
     Closed = 2
 }
 
-public sealed class RegionZoneProperties
+public readonly record struct RegionZoneProperties
 {
     public required int RegionId { get; init; }
     public required string ZoneName { get; init; }

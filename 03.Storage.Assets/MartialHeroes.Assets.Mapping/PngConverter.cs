@@ -86,13 +86,15 @@ public static class PngConverter
                 throw new NotSupportedException(
                     $"DDS FourCC 0x{fourCC:X8} is not supported. Only DXT1/DXT3/DXT5 are implemented.");
         }
-        else if ((pfFlags & DdpfRgb) != 0 && rgbBitCount == 32 && (pfFlags & DdpfAlphaPixels) != 0)
+        else if ((pfFlags & DdpfRgb) != 0 && (rgbBitCount == 32 || rgbBitCount == 24))
         {
             var rMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[16..]);
             var gMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[20..]);
             var bMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[24..]);
-            var aMask = BinaryPrimitives.ReadUInt32LittleEndian(pf[28..]);
-            rgba = DecodeUncompressedRgba32(pixels, width, height, rMask, gMask, bMask, aMask);
+            var aMask = (pfFlags & DdpfAlphaPixels) != 0
+                ? BinaryPrimitives.ReadUInt32LittleEndian(pf[28..])
+                : 0u;
+            rgba = DecodeUncompressedRgb(pixels, width, height, (int)(rgbBitCount / 8), rMask, gMask, bMask, aMask);
         }
         else
         {
@@ -285,8 +287,8 @@ public static class PngConverter
     }
 
 
-    private static byte[] DecodeUncompressedRgba32(
-        ReadOnlySpan<byte> data, int width, int height,
+    private static byte[] DecodeUncompressedRgb(
+        ReadOnlySpan<byte> data, int width, int height, int bytesPerPixel,
         uint rMask, uint gMask, uint bMask, uint aMask)
     {
         var rgba = new byte[width * height * 4];
@@ -294,7 +296,13 @@ public static class PngConverter
 
         for (var i = 0; i < texelCount; i++)
         {
-            var pixel = BinaryPrimitives.ReadUInt32LittleEndian(data[(i * 4)..]);
+            var src = i * bytesPerPixel;
+            uint pixel = data[src];
+            pixel |= (uint)data[src + 1] << 8;
+            pixel |= (uint)data[src + 2] << 16;
+            if (bytesPerPixel >= 4)
+                pixel |= (uint)data[src + 3] << 24;
+
             rgba[i * 4 + 0] = ExtractChannel(pixel, rMask);
             rgba[i * 4 + 1] = ExtractChannel(pixel, gMask);
             rgba[i * 4 + 2] = ExtractChannel(pixel, bMask);

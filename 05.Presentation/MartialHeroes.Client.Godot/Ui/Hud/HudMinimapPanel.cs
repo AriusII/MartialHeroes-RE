@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Godot;
 using MartialHeroes.Client.Application.Contracts.Hud;
 using MartialHeroes.Client.Godot.Ui.Assets;
+using MartialHeroes.Shared.Kernel.Enums;
 
 namespace MartialHeroes.Client.Godot.Ui.Hud;
 
@@ -37,6 +38,9 @@ public sealed partial class HudMinimapPanel : Control
 
     private float _playerWorldX;
     private float _playerWorldZ;
+    private int _lastBaseCellX = int.MinValue;
+    private int _lastBaseCellZ = int.MinValue;
+    private ZoneType _currentZone = ZoneType.Safe;
     private ChannelReader<ZoneChangedEvent>? _zoneChanges;
 
 
@@ -141,9 +145,69 @@ public sealed partial class HudMinimapPanel : Control
     {
         if (_zoneChanges is null) return;
 
+        var zoneChanged = false;
         while (_zoneChanges.TryRead(out var ev))
-            if (ev is null)
-                continue;
+        {
+            if (ev is null) continue;
+            _currentZone = ev.Zone;
+            zoneChanged = true;
+        }
+
+        if (zoneChanged)
+        {
+            LoadMosaic(_currentAreaId, _playerWorldX, _playerWorldZ);
+            GD.Print($"[HudMinimapPanel] ZoneChanged → zone={_currentZone} (footer-state colour 0=yellow/1=white/2=red). " +
+                     "spec: Docs/RE/specs/minimap.md §conflicts (radar footer colour order).");
+        }
+    }
+
+
+    public void SetAreaId(int areaId)
+    {
+        if (areaId == _currentAreaId) return;
+        _currentAreaId = areaId;
+        _lastBaseCellX = int.MinValue;
+        _lastBaseCellZ = int.MinValue;
+        LoadMosaic(_currentAreaId, _playerWorldX, _playerWorldZ);
+        GD.Print($"[HudMinimapPanel] SetAreaId → area={_currentAreaId} (tag {_currentAreaId:D3}). " +
+                 "spec: Docs/RE/specs/minimap.md §3.1 (area-tag tile prefix).");
+    }
+
+
+    public void UpdateLocalPlayerPosition(float worldX, float worldZ)
+    {
+        _playerWorldX = worldX;
+        _playerWorldZ = worldZ;
+
+        var baseCellX = (int)(worldX + CellBias) / CellSize + CellOrigin;
+        var baseCellZ = (int)(worldZ + CellBias) / CellSize + CellOrigin;
+
+        if (baseCellX != _lastBaseCellX || baseCellZ != _lastBaseCellZ)
+        {
+            _lastBaseCellX = baseCellX;
+            _lastBaseCellZ = baseCellZ;
+            LoadMosaic(_currentAreaId, worldX, worldZ);
+        }
+
+        UpdateBlip(worldX, worldZ);
+    }
+
+    private void UpdateBlip(float worldX, float worldZ)
+    {
+        if (_playerBlip is null) return;
+
+        var bodyInset = (MinimapW - BodyInnerSide) / 2f;
+        var scaledTile = BodyInnerSide / MosaicDim;
+
+        var fracX = ((worldX + CellBias) % CellSize) / CellSize;
+        var fracZ = ((worldZ + CellBias) % CellSize) / CellSize;
+        if (fracX < 0f) fracX += 1f;
+        if (fracZ < 0f) fracZ += 1f;
+
+        var bx = bodyInset + BodyInnerSide / 2f + (fracX - 0.5f) * scaledTile - 2.5f;
+        var by = bodyInset + BodyInnerSide / 2f + (fracZ - 0.5f) * scaledTile - 2.5f;
+
+        _playerBlip.Position = new Vector2(bx, by);
     }
 
 

@@ -7,7 +7,6 @@ namespace MartialHeroes.Assets.Parsers.Mesh;
 
 public static class SknParser
 {
-    private const int CornerStride = 12;
     private const int FaceStride = 36;
 
     private const int VertexStride = 24;

@@ -23,10 +23,6 @@ public sealed class ItemsScrRecord
 
     public required uint AnimRefKey { get; init; }
 
-    public string SknVfsPath => $"data/char/skin/g{ModelRefKey}.skn";
-
-    public uint BindPosePoolId => AnimRefKey;
-
     public required ReadOnlyMemory<byte> Opaque0A4 { get; init; }
 
     public required byte RecordDiscriminator { get; init; }

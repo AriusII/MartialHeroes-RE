@@ -8,6 +8,8 @@ public static class SkinTxtParser
 {
     private const int ColumnsPerRecord = 6;
 
+    private static readonly char[] Separators = ['\t', '\n'];
+
     static SkinTxtParser()
     {
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -28,36 +30,27 @@ public static class SkinTxtParser
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        var tokens = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        var tokens = normalized.Split(Separators);
         if (tokens.Length == 0)
             return new SkinTxtCatalog([]);
 
         var tokenIndex = 0;
-        var capacity = int.TryParse(tokens[tokenIndex++], out var declaredCount) && declaredCount > 0
+        var declaredCount = ParseAtol(tokens[tokenIndex++]);
+        var capacity = declaredCount > 0
             ? declaredCount
             : Math.Max(0, (tokens.Length - tokenIndex) / ColumnsPerRecord);
 
         var entries = new List<SkinTxtEntry>(capacity);
         while (tokenIndex + ColumnsPerRecord <= tokens.Length)
         {
-            if (!TryParseInt(tokens[tokenIndex + 0], out var col0)
-                || !TryParseInt(tokens[tokenIndex + 1], out var col1)
-                || !TryParseInt(tokens[tokenIndex + 2], out var col2)
-                || !TryParseInt(tokens[tokenIndex + 3], out var col3)
-                || !TryParseInt(tokens[tokenIndex + 4], out var col4)
-                || !TryParseInt(tokens[tokenIndex + 5], out var col5))
-            {
-                tokenIndex += ColumnsPerRecord;
-                continue;
-            }
-
             entries.Add(new SkinTxtEntry(
-                col0,
-                col1,
-                col2,
-                col3,
-                col4,
-                col5));
+                ParseAtol(tokens[tokenIndex + 0]),
+                ParseAtol(tokens[tokenIndex + 1]),
+                ParseAtol(tokens[tokenIndex + 2]),
+                ParseAtol(tokens[tokenIndex + 3]),
+                ParseAtol(tokens[tokenIndex + 4]),
+                ParseAtol(tokens[tokenIndex + 5])));
 
             tokenIndex += ColumnsPerRecord;
         }
@@ -65,9 +58,9 @@ public static class SkinTxtParser
         return new SkinTxtCatalog(entries);
     }
 
-    private static bool TryParseInt(string token, out int value)
+    private static int ParseAtol(string token)
     {
-        return int.TryParse(token, NumberStyles.Integer,
-            CultureInfo.InvariantCulture, out value);
+        int.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value);
+        return value;
     }
 }

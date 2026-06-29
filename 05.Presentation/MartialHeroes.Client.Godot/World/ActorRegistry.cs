@@ -31,8 +31,13 @@ public sealed partial class ActorRegistry : Node
     {
         _terrainNode = terrainNode;
         _terrainNode.SectorBecameResident += OnSectorBecameResident;
-        GD.Print("[ActorRegistry] TerrainNode wired — fallback-Y deferred snap enabled. " +
-                 "spec: Docs/RE/formats/terrain.md (bilinear ground height).");
+
+        foreach (var visual in _actors.Values)
+            if (IsInstanceValid(visual))
+                visual.SetTerrainNode(terrainNode);
+
+        GD.Print("[ActorRegistry] TerrainNode wired — fallback-Y deferred snap + per-frame ground re-sample enabled. " +
+                 "spec: Docs/RE/specs/entity_placement.md §1 fact 7 (Y re-sampled on position change).");
     }
 
 
@@ -67,6 +72,9 @@ public sealed partial class ActorRegistry : Node
 
         visual.ActorKey = evt.Key;
         visual.ActorName = evt.Name;
+
+        if (_terrainNode is not null)
+            visual.SetTerrainNode(_terrainNode);
 
         AddChild(visual);
 

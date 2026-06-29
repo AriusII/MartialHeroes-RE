@@ -33,7 +33,7 @@ public readonly struct VfsEntry : IComparable<VfsEntry>
         var nameSpan = raw[..NameCapacity];
         var nameLen = nameSpan.IndexOf((byte)0);
         if (nameLen < 0) nameLen = NameCapacity;
-        var name = Encoding.ASCII.GetString(nameSpan[..nameLen]);
+        var name = Encoding.Latin1.GetString(nameSpan[..nameLen]);
         name = name.ToLowerInvariant();
 
 

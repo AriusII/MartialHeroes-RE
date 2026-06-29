@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using MartialHeroes.Assets.Vfs;
 using MartialHeroes.Explorer.Files.Models;
 
@@ -9,6 +10,8 @@ namespace MartialHeroes.Explorer.Files.Services;
 public sealed class VfsSession : IDisposable
 {
     private readonly MappedVfsArchive _archive;
+    private readonly ReaderWriterLockSlim _gate = new();
+    private bool _disposed;
 
     private VfsSession(MappedVfsArchive archive, string clientDir, IReadOnlyList<VfsFileNode> files)
     {
@@ -23,7 +26,18 @@ public sealed class VfsSession : IDisposable
 
     public void Dispose()
     {
-        _archive.Dispose();
+        _gate.EnterWriteLock();
+        try
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            _archive.Dispose();
+        }
+        finally
+        {
+            _gate.ExitWriteLock();
+        }
     }
 
     public static VfsSession Open(string clientDir)
@@ -42,9 +56,19 @@ public sealed class VfsSession : IDisposable
         return new VfsSession(archive, clientDir, nodes);
     }
 
-    public ReadOnlyMemory<byte> Read(VfsFileNode node)
+    public T Use<T>(VfsFileNode node, Func<ReadOnlyMemory<byte>, T> consume)
     {
-        return _archive.GetFileContent(node.Path);
+        _gate.EnterReadLock();
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var bytes = _archive.GetFileContent(node.Path);
+            return consume(bytes);
+        }
+        finally
+        {
+            _gate.ExitReadLock();
+        }
     }
 
     private static VfsFileNode ToNode(VfsEntry entry)

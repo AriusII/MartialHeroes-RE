@@ -183,9 +183,4 @@ internal sealed class CharVisualRegistry
     {
         return Motlist.ResolvePath(idB);
     }
-
-    public ActormotionEntry? GetByMotionKey(int motionKey)
-    {
-        return motionKey < 0 ? null : ActorMotion.GetByMotionKey((uint)motionKey);
-    }
 }

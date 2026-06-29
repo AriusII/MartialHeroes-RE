@@ -22,11 +22,13 @@
             <IncludeAssets Condition="'$(Configuration)' != 'Debug'">None</IncludeAssets>
             <PrivateAssets Condition="'$(Configuration)' != 'Debug'">All</PrivateAssets>
         </PackageReference>
-        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1"/>
+        <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2"/>
     </ItemGroup>
 
     <ItemGroup>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Vfs\MartialHeroes.Assets.Vfs.csproj"/>
         <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.DataTables\MartialHeroes.Assets.Parsers.DataTables.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Texture\MartialHeroes.Assets.Parsers.Texture.csproj"/>
+        <ProjectReference Include="..\..\03.Storage.Assets\MartialHeroes.Assets.Parsers.Effects\MartialHeroes.Assets.Parsers.Effects.csproj"/>
     </ItemGroup>
 </Project>

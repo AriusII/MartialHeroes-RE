@@ -307,7 +307,7 @@ public static class GltfConverter
         AnimationClip[]? clips,
         Stream output)
     {
-        ExpandSkinnedVertices(mesh, out var positions, out var uvs,
+        ExpandSkinnedVertices(mesh, skeleton, out var positions, out var uvs,
             out var indices,
             out var jointIndices,
             out var weights);
@@ -376,22 +376,33 @@ public static class GltfConverter
 
     private static void ExpandSkinnedVertices(
         SkinnedMesh mesh,
+        Skeleton skeleton,
         out Vec3[] outPositions,
         out Vec2[] outUvs,
         out ushort[] outIndices,
         out ushort[,] outJointIndices,
         out float[,] outWeights)
     {
+        var boneCount = skeleton.Bones.Length;
+        var idToIndex = new Dictionary<byte, int>(boneCount);
+        for (var i = 0; i < boneCount; i++)
+            idToIndex[(byte)(skeleton.Bones[i].SelfId & 0xFF)] = i;
+
         var origVertexCount = mesh.Positions.Length;
-        var perVertexWeights = new List<(uint boneIndex, float weight)>[origVertexCount];
+        var perVertexWeights = new List<(int jointIndex, float weight)>[origVertexCount];
         for (var i = 0; i < origVertexCount; i++)
-            perVertexWeights[i] = new List<(uint, float)>(4);
+            perVertexWeights[i] = new List<(int, float)>(4);
 
         foreach (var w in mesh.Weights)
         {
             var vi = (int)w.VertexIndex;
-            if (vi < origVertexCount)
-                perVertexWeights[vi].Add((w.BoneIndex, w.Weight));
+            if (vi >= origVertexCount)
+                continue;
+            if (w.Weight < 0.0099999998f)
+                continue;
+            if (!idToIndex.TryGetValue((byte)(w.BoneIndex & 0xFF), out var jointIndex))
+                continue;
+            perVertexWeights[vi].Add((jointIndex, w.Weight));
         }
 
         var vertexMap = new Dictionary<(uint vi, float u, float v), ushort>(mesh.Corners.Length);
@@ -435,7 +446,7 @@ public static class GltfConverter
             for (var k = 0; k < 4; k++)
                 if (k < wList.Count)
                 {
-                    outJointIndices[ni, k] = (ushort)wList[k].boneIndex;
+                    outJointIndices[ni, k] = (ushort)wList[k].jointIndex;
                     outWeights[ni, k] = totalWeight > 0f ? wList[k].weight / totalWeight : 0f;
                 }
                 else
@@ -468,13 +479,13 @@ public static class GltfConverter
             var parentByte = (byte)(b.ParentId & 0xFF);
             var selfByte = (byte)(b.SelfId & 0xFF);
 
-            var tx = b.Translation.X;
+            var tx = -b.Translation.X;
             var ty = b.Translation.Y;
-            var tz = -b.Translation.Z;
+            var tz = b.Translation.Z;
 
-            var qx = -b.Rotation.X;
+            var qx = b.Rotation.X;
             var qy = -b.Rotation.Y;
-            var qz = b.Rotation.Z;
+            var qz = -b.Rotation.Z;
             var qw = b.Rotation.W;
 
             var qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
@@ -616,9 +627,9 @@ public static class GltfConverter
         for (var i = 0; i < vertexCount; i++)
         {
             var p = positions[i];
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), p.X);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -p.X);
             BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), p.Y);
-            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -p.Z);
+            BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), p.Z);
             cursor += 12;
         }
 
@@ -743,9 +754,9 @@ public static class GltfConverter
                 for (var k = 0; k < kc; k++)
                 {
                     var tr = track.Keyframes[k].Translation;
-                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), tr.X);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor), -tr.X);
                     BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 4), tr.Y);
-                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), -tr.Z);
+                    BinaryPrimitives.WriteSingleLittleEndian(buf.AsSpan(cursor + 8), tr.Z);
                     cursor += 12;
                 }
 
@@ -755,9 +766,9 @@ public static class GltfConverter
                 for (var k = 0; k < kc; k++)
                 {
                     var q = track.Keyframes[k].Rotation;
-                    var qx = -q.X;
+                    var qx = q.X;
                     var qy = -q.Y;
-                    var qz = q.Z;
+                    var qz = -q.Z;
                     var qw = q.W;
                     var qlen = MathF.Sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
                     if (qlen > 1e-6f)
@@ -886,13 +897,13 @@ public static class GltfConverter
                     children.Add(boneNodeIndex[j]);
             }
 
-            var bTx = b.Translation.X;
+            var bTx = -b.Translation.X;
             var bTy = b.Translation.Y;
-            var bTz = -b.Translation.Z;
+            var bTz = b.Translation.Z;
 
-            var bQx = -b.Rotation.X;
+            var bQx = b.Rotation.X;
             var bQy = -b.Rotation.Y;
-            var bQz = b.Rotation.Z;
+            var bQz = -b.Rotation.Z;
             var bQw = b.Rotation.W;
             var qlen = MathF.Sqrt(bQx * bQx + bQy * bQy + bQz * bQz + bQw * bQw);
             if (qlen > 1e-6f)
@@ -1061,7 +1072,7 @@ public static class GltfConverter
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
+            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
             sb.Append("},");
             sb.Append(
                 $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");
@@ -1097,7 +1108,7 @@ public static class GltfConverter
             sb.Append('{');
             sb.Append($"\"bufferView\":{bvPos},\"byteOffset\":0,");
             sb.Append($"\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC3\",");
-            sb.Append($"\"min\":[{F(minX)},{F(minY)},{F(-maxZ)}],\"max\":[{F(maxX)},{F(maxY)},{F(-minZ)}]");
+            sb.Append($"\"min\":[{F(-maxX)},{F(minY)},{F(minZ)}],\"max\":[{F(-minX)},{F(maxY)},{F(maxZ)}]");
             sb.Append("},");
             sb.Append(
                 $"{{\"bufferView\":{bvUv},\"byteOffset\":0,\"componentType\":{ComponentTypeFloat},\"count\":{vertexCount},\"type\":\"VEC2\"}},");

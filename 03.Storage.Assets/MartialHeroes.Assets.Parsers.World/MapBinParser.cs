@@ -22,9 +22,8 @@ public static class MapBinParser
     {
         if (span.Length < RecordSize)
             throw new InvalidDataException(
-                $"map*.bin parse error: buffer length {span.Length} is too short " +
-                $"(expected exactly {RecordSize} = 0x208 bytes). " +
-                "spec: Docs/RE/formats/region_grid.md §map<NNN>.bin");
+                $"map.bin parse error: buffer length {span.Length} is too short " +
+                $"(expected at least {RecordSize} bytes).");
 
         var mode = span[ModeOffset];
         var nameMask = span[NameMaskOffset];

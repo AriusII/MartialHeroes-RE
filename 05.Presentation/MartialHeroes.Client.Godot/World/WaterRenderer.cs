@@ -1,24 +1,14 @@
 using Godot;
-using MartialHeroes.Assets.Parsers.Terrain.Models;
-using MartialHeroes.Assets.Parsers.Texture.Models;
-using BgTextureCatalog = MartialHeroes.Assets.Mapping.BgTextureCatalog;
 
 namespace MartialHeroes.Client.Godot.World;
 
-internal readonly record struct WaterPlacement(bool Enabled, float WorldY)
-{
-    public static WaterPlacement FromMapOption(MapOptionBin? mapOption)
-    {
-        return new WaterPlacement(false, 0f);
-    }
-}
+internal readonly record struct WaterPlacement(bool Enabled, float WorldY);
 
 public sealed partial class WaterRenderer : Node3D
 {
-    public const float WaterOffsetAboveFloor = 2.0f;
-
     public const float FallbackWaterY = 0f;
 
+    private static readonly StringName TimeParam = "time";
 
     private const string WaterShaderSource = @"
 shader_type spatial;
@@ -62,71 +52,15 @@ void fragment() {
     private Vector3 _centre = Vector3.Zero;
     private bool _configured;
     private ShaderMaterial? _mat;
-
-
     private MeshInstance3D? _meshInst;
     private float _size = 3072f;
     private float _time;
     private float _waterHeightY = FallbackWaterY;
 
-
     public Color WaterColor { get; set; } = new(0.10f, 0.35f, 0.65f, 0.65f);
-
     public float ScrollSpeedU1 { get; set; } = 0.04f;
-
     public float ScrollSpeedU2 { get; set; } = 0.025f;
-
     public float FresnelExponent { get; set; } = 3.0f;
-
-
-    public static bool CellHasWater(MapDescriptor cellMap,
-        BgTextureCatalog bgTextures)
-    {
-        if (cellMap is null || bgTextures is null) return false;
-
-        foreach (var sec in cellMap.Sections)
-        {
-            if (!sec.Keyword.StartsWith("FX", StringComparison.OrdinalIgnoreCase)) continue;
-
-            foreach (var (_, texId) in sec.Textures)
-            {
-                var rel = bgTextures.ResolveRelativePath(texId);
-                if (rel is null) continue;
-
-                var lower = rel.ToLowerInvariant();
-                if (lower.Contains("_water") || lower.Contains("_sea") || lower.Contains("_wateredge"))
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-    public static bool CellHasWater(MapDescriptor cellMap)
-    {
-        if (cellMap is null) return false;
-
-        foreach (var sec in cellMap.Sections)
-        {
-            if (!sec.Keyword.StartsWith("FX", StringComparison.OrdinalIgnoreCase)) continue;
-            if (sec.Textures.Length > 0) return true;
-        }
-
-        return false;
-    }
-
-    public static float WaterSurfaceY(MapDescriptor cellMap)
-    {
-        if (cellMap is null) return FallbackWaterY;
-
-        foreach (var sec in cellMap.Sections)
-            if (sec.Keyword.Equals("TERRAIN", StringComparison.OrdinalIgnoreCase) &&
-                sec.MinHeightFiled.HasValue)
-                return sec.MinHeightFiled.Value + WaterOffsetAboveFloor;
-
-        return FallbackWaterY;
-    }
-
 
     public override void _Ready()
     {
@@ -139,9 +73,8 @@ void fragment() {
     {
         if (_mat is null) return;
         _time += (float)delta;
-        _mat.SetShaderParameter("time", _time);
+        _mat.SetShaderParameter(TimeParam, _time);
     }
-
 
     public void Configure(Vector3 centre, float size, float waterHeightY)
     {
@@ -153,7 +86,6 @@ void fragment() {
         if (IsInsideTree())
             ApplyPlacement();
     }
-
 
     private void BuildWaterPlane()
     {
@@ -181,7 +113,8 @@ void fragment() {
         };
         AddChild(_meshInst);
 
-        GD.Print($"[WaterRenderer] Water plane built (default size={_size:F0} units, 32×32 subdivisions).");
+        GD.Print($"[WaterRenderer] Water plane built (size={_size:F0} units, 32x32 subdivisions). " +
+                 "Node is oracle-gated: WireEnvironmentAndWater only spawns this node when water_oracle.cfg supplies an entry for the current area+cell.");
     }
 
     private void ApplyPlacement()

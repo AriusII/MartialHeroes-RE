@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -34,21 +35,22 @@ public struct HourSchedule24
     }
 }
 
-public sealed class SoundTableEntry
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public readonly struct SoundTableEntry
 {
-    public required uint SoundEntryId { get; init; }
+    public readonly uint SoundEntryId;
 
-    public required HourSchedule24 HourSchedule { get; init; }
+    public readonly HourSchedule24 HourSchedule;
 
-    public required float Weight { get; init; }
+    public readonly float Weight;
 
-    public required float PosX { get; init; }
+    public readonly float PosX;
 
-    public required uint Unlabeled24 { get; init; }
+    public readonly uint Unlabeled24;
 
-    public required float PosZ { get; init; }
+    public readonly float PosZ;
 
-    public required float Radius { get; init; }
+    public readonly float Radius;
 
     public bool IsAssigned => SoundEntryId != 0;
 }
@@ -67,16 +69,45 @@ public sealed class SoundTableData
 
     public const int HoursPerDay = 24;
 
+    public const byte SoundCat2dMax = 5;
+
+    public const byte SoundCatBgmBge = 0;
+
+    public const byte SoundCatEff = 6;
+
+    public const byte SoundType2d = 1;
+
+    public const byte SoundType3d = 3;
+
 
     public required SoundTableExtension Extension { get; init; }
 
     public required SoundTableEntry[] Entries { get; init; }
 
-    public string? AudioDirectory => Extension switch
+    public ReadOnlyMemory<byte> PresentFlags { get; init; }
+
+    public byte? Category => Extension switch
     {
-        SoundTableExtension.Bgm => "data/sound/2d/",
-        SoundTableExtension.Bge => "data/sound/2d/",
-        SoundTableExtension.Eff => "data/sound/3d/",
+        SoundTableExtension.Bgm => SoundCatBgmBge,
+        SoundTableExtension.Bge => SoundCatBgmBge,
+        SoundTableExtension.Eff => SoundCatEff,
         _ => null
     };
+
+    public byte? TypeCode => Category is { } category
+        ? category < SoundCat2dMax ? SoundType2d : SoundType3d
+        : null;
+
+    public string? AudioDirectory => Category is { } category
+        ? category < SoundCat2dMax ? "data/sound/2d/" : "data/sound/3d/"
+        : null;
+
+    public string? BuildOggPath(uint soundEntryId)
+    {
+        var directory = AudioDirectory;
+        if (directory is null)
+            return null;
+
+        return directory + soundEntryId.ToString(CultureInfo.InvariantCulture) + ".ogg";
+    }
 }

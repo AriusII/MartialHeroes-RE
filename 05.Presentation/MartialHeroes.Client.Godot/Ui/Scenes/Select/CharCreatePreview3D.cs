@@ -593,8 +593,7 @@ public sealed partial class CharCreatePreview3D : Control
 
         try
         {
-            var entry = registry.GetByMotionKey(appearanceKey)
-                        ?? registry.ActorMotion.GetBySkinClass(meshIdB);
+            var entry = registry.ActorMotion.GetBySkinClass(meshIdB);
             if (entry is null) return null;
 
             var idle = entry.IdleMotionId;

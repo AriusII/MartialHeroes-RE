@@ -13,6 +13,7 @@
     <ItemGroup>
         <ProjectReference Include="..\MartialHeroes.Assets.Parsers.Core\MartialHeroes.Assets.Parsers.Core.csproj"/>
         <ProjectReference Include="..\MartialHeroes.Assets.Parsers.Mesh\MartialHeroes.Assets.Parsers.Mesh.csproj"/>
+        <ProjectReference Include="..\MartialHeroes.Assets.Parsers.Character\MartialHeroes.Assets.Parsers.Character.csproj"/>
         <ProjectReference Include="..\MartialHeroes.Assets.Parsers.Terrain\MartialHeroes.Assets.Parsers.Terrain.csproj"/>
         <ProjectReference Include="..\MartialHeroes.Assets.Parsers.Effects\MartialHeroes.Assets.Parsers.Effects.csproj"/>
         <ProjectReference Include="..\MartialHeroes.Assets.Parsers.World\MartialHeroes.Assets.Parsers.World.csproj"/>

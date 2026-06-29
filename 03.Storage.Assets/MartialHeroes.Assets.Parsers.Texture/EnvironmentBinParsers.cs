@@ -12,8 +12,9 @@ public static class EnvironmentBinParsers
     private const int LightSectionDOffset = 0x1320;
     private const int LightSectionDCount = 48;
     private const int LightSectionEOffset = 0x13E0;
-    private const int LightSectionESize = 200;
-    private const int LightFallbackOffset = 0x14B0;
+    private const int LightSectionESize = 192;
+    private const int LightSectionECount = 48;
+    private const int LightSunBlockOffset = 0x14A0;
     private const int LightKeyframeStride = 48;
 
     public static MapOptionBin ParseMapOption(ReadOnlyMemory<byte> data)
@@ -133,8 +134,7 @@ public static class EnvironmentBinParsers
         if (span.Length != LightBin.FixedSize)
             throw new InvalidDataException(
                 $"light*.bin parse error: expected {LightBin.FixedSize} bytes, " +
-                $"got {span.Length}. " +
-                "spec: Docs/RE/formats/environment_bins.md §9.0.");
+                $"got {span.Length}.");
 
         var dirKf = ReadLightKeyframes(span, LightSectionAOffset, LightBin.KeyframeCount);
 
@@ -145,19 +145,39 @@ public static class EnvironmentBinParsers
             fogScalars[i] = BinaryPrimitives.ReadSingleLittleEndian(
                 span[(LightSectionCOffset + i * 4)..]);
 
-        var secScalars = new float[LightSectionDCount];
+        var pointLightIntensity = new float[LightSectionDCount];
         for (var i = 0; i < LightSectionDCount; i++)
-            secScalars[i] = BinaryPrimitives.ReadSingleLittleEndian(
+            pointLightIntensity[i] = BinaryPrimitives.ReadSingleLittleEndian(
                 span[(LightSectionDOffset + i * 4)..]);
+
+        var starBrightnessCurve = new float[LightSectionDCount];
+        for (var i = 0; i < LightSectionDCount; i++)
+            starBrightnessCurve[i] = BinaryPrimitives.ReadSingleLittleEndian(
+                span[(LightSectionDOffset + i * 4)..]);
+
+        var deviceAmbient = new BgraColor[LightSectionECount];
+        for (var i = 0; i < LightSectionECount; i++)
+        {
+            var off = LightSectionEOffset + i * 4;
+            deviceAmbient[i] = new BgraColor(
+                span[off],
+                span[off + 1],
+                span[off + 2],
+                span[off + 3]);
+        }
 
         var rawSectionE = backing.IsEmpty
             ? span.Slice(LightSectionEOffset, LightSectionESize).ToArray()
             : backing.Slice(LightSectionEOffset, LightSectionESize);
 
-        var fallbackScale = BinaryPrimitives.ReadSingleLittleEndian(span[LightFallbackOffset..]);
-        var fallbackDirX = BinaryPrimitives.ReadSingleLittleEndian(span[(LightFallbackOffset + 4)..]);
-        var fallbackDirY = BinaryPrimitives.ReadSingleLittleEndian(span[(LightFallbackOffset + 8)..]);
-        var fallbackDirZ = BinaryPrimitives.ReadSingleLittleEndian(span[(LightFallbackOffset + 12)..]);
+        var sunDirOverride = BinaryPrimitives.ReadUInt32LittleEndian(span[LightSunBlockOffset..]);
+        var keyLightPosOverride = BinaryPrimitives.ReadUInt32LittleEndian(span[(LightSunBlockOffset + 0x04)..]);
+        var sunDirX = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x08)..]);
+        var sunDirY = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x0C)..]);
+        var sunDirZ = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x10)..]);
+        var keyLightX = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x14)..]);
+        var keyLightY = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x18)..]);
+        var keyLightZ = BinaryPrimitives.ReadSingleLittleEndian(span[(LightSunBlockOffset + 0x1C)..]);
 
         var rawBytes = backing.IsEmpty
             ? span.ToArray()
@@ -168,12 +188,18 @@ public static class EnvironmentBinParsers
             DirectionalKeyframes = dirKf,
             AmbientKeyframes = ambKf,
             FogDistanceScalars = fogScalars,
-            SecondaryFogScalars = secScalars,
+            PointLightMasterIntensity = pointLightIntensity,
+            StarBrightnessCurve = starBrightnessCurve,
+            DeviceAmbientKeyframes = deviceAmbient,
             RawSectionE = rawSectionE,
-            FallbackScale = fallbackScale,
-            FallbackDirX = fallbackDirX,
-            FallbackDirY = fallbackDirY,
-            FallbackDirZ = fallbackDirZ,
+            SunDirectionOverrideFlag = sunDirOverride,
+            KeyLightPositionOverrideFlag = keyLightPosOverride,
+            SunDirectionX = sunDirX,
+            SunDirectionY = sunDirY,
+            SunDirectionZ = sunDirZ,
+            KeyLightPositionX = keyLightX,
+            KeyLightPositionY = keyLightY,
+            KeyLightPositionZ = keyLightZ,
             RawBytes = rawBytes
         };
     }
@@ -263,9 +289,9 @@ public static class EnvironmentBinParsers
                 $"got {span.Length}. " +
                 "spec: Docs/RE/formats/environment_bins.md §5.");
 
-        var layer1 = ReadCloudDomeLayer(span, 0x0000);
+        var layer1 = ReadCloudDomeLayer(span, 0);
 
-        var layer2 = ReadCloudDomeLayer(span, 0x2D00);
+        var layer2 = ReadCloudDomeLayer(span, CloudDomeBin.LayerSize);
 
         return new CloudDomeBin
         {
